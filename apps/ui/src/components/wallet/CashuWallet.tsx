@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import { decodeBolt11, parseLightningDestination, paymentUri, type PaymentReview as Review } from "@ghostly/core";
 import type { WalletPlatform, WalletState } from "../../lib/platform";
 import { useCountUp } from "../../hooks/useCountUp";
@@ -6,6 +6,7 @@ import { PaymentReview } from "../PaymentReview";
 import { ConfirmRealMoney } from "../ConfirmRealMoney";
 import { Actions, Address, Amount, Block, Button, Notice, Row, Section, input, type Action } from "./ui";
 import { LightningAddressPay } from "./LightningAddressPay";
+import { RemoveMintConfirm } from "./RemoveMint";
 import { useRun } from "./run";
 import { ButtonGroup, InputGroup, Truncate } from "../layout";
 import { SourcePicker } from "./providers/SourcePicker";
@@ -68,6 +69,8 @@ export function CashuWallet({ wallet, state, rail, onOpenCashu, focusAmount = fa
   const [confirming, setConfirming] = useState(false);
   const [notice, setNotice] = useState("");
   const [mintUrl, setMintUrl] = useState("");
+  /** The mint whose Remove was pressed: asked about below its row (the last one: the wallet's removal). */
+  const [removingMint, setRemovingMint] = useState<string | null>(null);
   const [review, setReview] = useState<Review | null>(null);
 
   // Test sats are worth nothing and must never be added to real ones. A Testnet Cashu wallet has only test
@@ -244,14 +247,16 @@ export function CashuWallet({ wallet, state, rail, onOpenCashu, focusAmount = fa
         <>
           <Section title={t("wallet.cashu.mints")} testId="wallet-mints">
             <Block><Notice>{t("wallet.cashu.mintsHint")}</Notice></Block>
-            {state.mints.map((mint, index) => (
-              <Row key={mint.url} testId="mint-row" label={<>{mint.name}{index === 0 && <span className="text-accent ms-2 text-[10px] uppercase tracking-wider">{t("wallet.cashu.primary")}</span>}</>}
+            {state.mints.map((mint, index) => <Fragment key={mint.url}>
+              <Row testId="mint-row" label={<>{mint.name}{index === 0 && <span className="text-accent ms-2 text-[10px] uppercase tracking-wider">{t("wallet.cashu.primary")}</span>}</>}
                 hint={<><span data-testid="mint-fees">{mint.info ? shortFee(t, mint.info.inputFeePpk) : t("wallet.cashu.unreachable")}</span><Truncate className="font-mono" title={mint.url}>{mint.url.replace(/^https?:\/\//, "")}</Truncate></>}
                 value={sats(mint.balance)}>
                 {index !== 0 && <Button onClick={() => void run(() => wallet.setPrimaryMint(mint.url))}>{t("wallet.cashu.makePrimary")}</Button>}
-                <Button variant="danger" onClick={() => void run(() => wallet.removeMint(mint.url))} aria-label={t("wallet.cashu.removeMint", { name: mint.name })}>{t("wallet.cashu.remove")}</Button>
+                <Button variant="danger" data-testid="mint-remove" aria-expanded={state.mints.length > 1 ? removingMint === mint.url : undefined} aria-haspopup={state.mints.length === 1 ? "dialog" : undefined}
+                  onClick={() => setRemovingMint(mint.url)} aria-label={t("wallet.cashu.removeMint", { name: mint.name })}>{t("wallet.cashu.remove")}</Button>
               </Row>
-            ))}
+              {removingMint === mint.url && <RemoveMintConfirm mint={mint} wallet={wallet} state={state} onClose={() => setRemovingMint(null)} />}
+            </Fragment>)}
             <Block>
               <InputGroup as="form" onSubmit={(e) => { e.preventDefault(); void run(async () => { await wallet.addMint(mintUrl); setMintUrl(""); }); }}>
                 <input data-testid="wallet-mint-url" className={`${input} font-mono text-xs`} placeholder={t("wallet.cashu.addMintPlaceholder")} value={mintUrl} onChange={(e) => setMintUrl(e.target.value)} />

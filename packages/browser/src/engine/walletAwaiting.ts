@@ -110,3 +110,17 @@ export function walletAwaiting({ network, mints, quotes, lightningOps, lightning
   }
   return out;
 }
+
+/**
+ * What one Cashu mint still waits for: its invoices not paid yet, paid ones whose ecash is not claimed, and requests
+ * of ours whose invoice is one of them. A request other mints or rails can still be paid through is not counted, nor
+ * ecash sent from it (adding the mint again takes that back).
+ */
+export function mintAwaiting(mint: string, sources: Pick<AwaitingSources, "network" | "quotes" | "payments" | "now">): WalletAwaitingView[] {
+  const key = (invoice: string) => invoice.trim().toLowerCase();
+  const invoices = new Set(sources.quotes.filter((q) => q.mint === mint).map((q) => key(q.invoice)));
+  const invoiceOf = new Map(sources.payments.map((p) => [p.id, p.invoice]));
+  const ours = (a: WalletAwaitingView) => a.kind !== "request" || (!!a.paymentId && invoices.has(key(invoiceOf.get(a.paymentId) ?? "")));
+  // No Lightning source is read: an invoice in no mint's journal is not this mint's.
+  return walletAwaiting({ ...sources, mints: [mint], lightningOps: [], lightningSource: "none" }).filter((a) => a.type === "cashu" && a.kind !== "sent" && ours(a));
+}
