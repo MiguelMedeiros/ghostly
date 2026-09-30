@@ -18,7 +18,7 @@ import type { LocalRelay } from "../support/relay";
 import { testSshKey } from "../support/ssh";
 import type { WebLNProvider } from "../../packages/browser/src/engine/paymentAdapters/providers/webln";
 import {
-  alternatives, cardAction, chatOption, chatPane, composerButton, containing, either, go, home, newWallet, newWalletDialog, nickname, openChat, paymentCard, reloaded, say, sees, setLanguage, wallet, type Actor,
+  alternatives, cardAction, chatOption, chatPane, composerButton, containing, either, filled, go, home, newWallet, newWalletDialog, nickname, openChat, paymentCard, reloaded, say, sees, setLanguage, wallet, type Actor,
 } from "./actors";
 import type { Combination } from "./dimensions";
 import { CARD, type Step } from "./plan";
@@ -548,7 +548,7 @@ async function lightningThroughMint({ a, b }: World): Promise<void> {
   await wallet(a, "lightning");
   await a.page.getByTestId("wallet-send").click();
   await a.page.getByTestId("wallet-pay-input").fill(strangerInvoice(25, "ghostly e2e", "lntb"));
-  await a.page.getByRole("button", { name: "Pay 25 sats" }).click();
+  await a.page.getByRole("button", { name: filled("Pay {{amount}} {{unit}}", { amount: "25", unit: alternatives("test sats") }) }).click();
   await a.page.getByRole("button", { name: either("Pay") }).click();
   await expect(a.page.getByTestId("wallet-notice")).toHaveText(either("Paid."), { timeout: 60_000 });
   // In, on B's side: an invoice of B's own wallet. The test mint reads it paid by itself, which is nobody paying:
