@@ -890,14 +890,37 @@ html[data-standalone="true"] {
  * bubble. No tail, round on every corner, the theme's surface with an edge and a lift, so it reads apart from the
  * messages around it in every theme.
  */
+/* A bot's card: a received bubble's colour (so it sits in every theme's palette), a hairline of the text's own colour
+   and a bubble's light shadow; no fill of its own. */
 .status-card-surface {
   position: relative;
-  border-radius: 12px;
-  border: 1px solid var(--color-border-bright);
-  background-color: var(--color-surface);
-  box-shadow: 0 1px 2px rgb(11 20 26 / 0.08), 0 3px 10px rgb(11 20 26 / 0.07);
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--color-text-primary) 10%, transparent);
+  background-color: var(--color-received-bg);
+  box-shadow: 0 1px 0.5px rgb(11 20 26 / 0.13);
 }
-:root:not([data-theme="light"]) .status-card-surface { box-shadow: 0 1px 2px rgb(0 0 0 / 0.45), 0 4px 14px rgb(0 0 0 / 0.3); }
+
+/* A bot's buttons under its message (chat/MessageButtons.tsx): the same surface as its card, a received bubble's colour
+   and a hairline. The primary one is marked by its accent edge and text over a light accent wash, never a solid fill; a
+   danger one by its danger text and edge. */
+.message-button {
+  border: 1px solid color-mix(in srgb, var(--color-text-primary) 10%, transparent);
+  background-color: var(--color-received-bg);
+  color: var(--color-text-primary);
+  box-shadow: 0 1px 0.5px rgb(11 20 26 / 0.13);
+}
+.message-button[data-style="primary"] {
+  border-color: color-mix(in srgb, var(--color-accent) 55%, transparent);
+  background-color: color-mix(in srgb, var(--color-accent) 12%, var(--color-received-bg));
+  color: var(--color-link);
+}
+.message-button[data-style="danger"] {
+  border-color: color-mix(in srgb, var(--color-danger) 45%, transparent);
+  color: var(--color-danger-ink);
+}
+.message-button[aria-disabled="true"]:not([data-chosen]) { opacity: 0.5; }
+.message-button:not([aria-disabled="true"]):hover { background-color: color-mix(in srgb, var(--color-text-primary) 6%, var(--color-received-bg)); }
+.message-button[data-style="primary"]:not([aria-disabled="true"]):hover { background-color: color-mix(in srgb, var(--color-accent) 20%, var(--color-received-bg)); }
 
 /* The user's choice in Settings, or the system's. */
 :root[data-reduce-motion="true"] *,

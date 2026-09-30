@@ -1,4 +1,12 @@
 {
+  "buttons": {
+    "answers": "Réponses",
+    "chosen": "Choisie",
+    "closed": "Fermée",
+    "failed": "Envoi impossible",
+    "jump": "Aller à la question",
+    "sending": "Envoi…"
+  },
   "panel": {
     "activeCount": "{{count}} actives",
     "allOk": "tout OK",
@@ -16,7 +24,7 @@
     "title": "Tâches"
   },
   "routine": {
-    "cron": "Cron :",
+    "cron": "Cron",
     "label": "Routine : {{name}}, {{state}}",
     "lastRun": "Dernière exécution : {{result}}",
     "next": "Prochaine {{when}}",
@@ -27,6 +35,7 @@
       "skipped": "Ignorée"
     },
     "runs": "Exécutions récentes",
+    "schedule": "Horaire",
     "state": {
       "active": "Active",
       "paused": "En pause"

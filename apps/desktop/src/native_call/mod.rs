@@ -524,10 +524,10 @@ pub fn native_call_camera(id: String, camera: Option<u32>) -> Result<(), String>
 }
 
 /// What went each way so far: frames and audio buffers sent and received, the ICE state, whether the
-/// microphone is muted, and the microphone, speaker and camera in use by name (null: the default, or none).
-/// Without an id, the call in progress (there is one at a time), or null.
+/// microphone is muted, and the microphone, speaker and camera in use by name (null: the default, or none);
+/// `rtp`, what the connection counted (`engine::Call::transport`). Without an id, the call in progress (there is one at a time), or null.
 #[tauri::command]
-pub fn native_call_stats(id: Option<String>) -> Result<serde_json::Value, String> {
+pub async fn native_call_stats(id: Option<String>) -> Result<serde_json::Value, String> {
     #[cfg(target_os = "linux")]
     {
         let (call, camera) = {
@@ -549,6 +549,7 @@ pub fn native_call_stats(id: Option<String>) -> Result<serde_json::Value, String
             Some(call) => {
                 let mut stats = serde_json::to_value(call.stats()).map_err(|e| e.to_string())?;
                 stats["camera"] = camera.into();
+                stats["rtp"] = call.transport().await;
                 Ok(stats)
             }
             None => Ok(serde_json::Value::Null),

@@ -740,6 +740,11 @@ export interface StoredMessage {
    * It belongs to the version it came with: an edit brings its own, or leaves the message a text.
    */
   card?: StatusCard;
+  /**
+   * A reply that presses a button of this side's own message (WISP 4xx · Message Buttons), as the author's engine took
+   * it: set only when the button was open for this person. What `button.pressed` reports.
+   */
+  press?: MessagePress;
 }
 
 /** A page of a chat's history, oldest first, and whether older messages remain (`messagePage`). */
@@ -790,6 +795,16 @@ export interface MessageVersion { at: number; text: string }
  * with the reply; the receiver keeps its own view of the original when it has it (`messageId`), and the line and the
  * author then come from there, not from the wire.
  */
+/** A button press on this side's message (WISP 4xx · Message Buttons). */
+export interface MessagePress {
+  /** The message with the buttons, its id here. */
+  messageId: string;
+  button: string;
+  label: string;
+  /** Named by its label or id in the text, not by the reply (the DHT floor, or an app without buttons). */
+  inferred?: true;
+}
+
 export interface MessageReply {
   /** The original's id in this chat as both sides know it: a paired chat's wire, file or payment id; a group message id. */
   id: string;
@@ -799,6 +814,8 @@ export interface MessageReply {
   from?: "me" | "peer";
   /** A group's original: its author's member key. */
   member?: string;
+  /** A button press (WISP 4xx · Message Buttons): the original's button this reply presses, its text the label. */
+  button?: string;
   /**
    * The original here, when it was found in this chat as the reply was kept (always, for a reply sent here). Without
    * it the line is only what the replier's app said: shown, but marked as not checked.

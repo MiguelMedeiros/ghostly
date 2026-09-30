@@ -1,4 +1,12 @@
 {
+  "buttons": {
+    "answers": "回答",
+    "chosen": "已选择",
+    "closed": "已关闭",
+    "failed": "发送失败",
+    "jump": "转到问题",
+    "sending": "正在发送…"
+  },
   "panel": {
     "activeCount": "{{count}} 个进行中",
     "allOk": "全部正常",
@@ -16,7 +24,7 @@
     "title": "任务"
   },
   "routine": {
-    "cron": "Cron：",
+    "cron": "Cron",
     "label": "例行任务：{{name}}，{{state}}",
     "lastRun": "上次运行：{{result}}",
     "next": "下次 {{when}}",
@@ -27,6 +35,7 @@
       "skipped": "已跳过"
     },
     "runs": "最近运行",
+    "schedule": "计划",
     "state": {
       "active": "已启用",
       "paused": "已暂停"

@@ -15,6 +15,7 @@ import { GroupShareDialog } from "../components/GroupLinkPanel";
 import { GroupConnection } from "../components/GroupConnection";
 import { TasksButton } from "../components/chat/TasksButton";
 import { RoutineStack } from "../components/chat/RoutineCard";
+import type { MemberFaceOf } from "../components/chat/SenderAvatar";
 import { routineStacks } from "../lib/statusCards";
 import { GroupPaymentComposer } from "../components/GroupPaymentComposer";
 import { GroupPaymentCaption, GroupPaymentNote } from "../components/GroupPaymentNote";
@@ -38,12 +39,14 @@ import { navOnly } from "../lib/navigation";
 import { mentionViews, type MentionCandidate } from "../lib/parse/mentions";
 import { COMMUNITY_LIMITS, GROUP_LIMITS, mayPin, replySnippet, type GroupMention, type RoutineCard } from "@ghostly/core";
 import { messageSnippet, quoteFor, replyIndex, replyTarget, type NameOf, type QuoteView } from "../lib/replies";
+import { buttonsViews, compactPresses } from "../lib/buttons";
 import { useForwarding } from "../hooks/useForwarding";
 import { useChatSearch } from "../hooks/useChatSearch";
 import { ChatSearchBar, SearchIcon } from "../components/chat/ChatSearch";
 import { PinnedBar } from "../components/chat/PinnedBar";
 import { canEditInGroup } from "@ghostly/browser/shared/edits";
 import { paymentWireId } from "@ghostly/browser/shared/paymentIds";
+import { replyRef } from "@ghostly/browser/shared/replies";
 
 const subscribe = (listener: () => void) => engine.subscribe(listener);
 const snapshot = () => engine.state;
@@ -211,6 +214,9 @@ export function GroupChat() {
   const [editing, setEditing] = useState<StoredMessage | null>(null);
   useEffect(() => { setReplyingTo(null); setEditing(null); }, [groupId]);
   const quoteIndex = useMemo(() => replyIndex(messages, true), [messages]);
+  // A bot's buttons (WISP 4xx · Message Buttons): which one was chosen, and whether I may still press, from my replies.
+  const buttonsOf = useMemo(() => buttonsViews(messages, m => replyRef(m, true)), [messages]);
+  const presses = useMemo(() => compactPresses(messages, m => replyRef(m, true)), [messages]);
   const [showMembers, setShowMembers] = useState(false);
   /** The member whose name or picture above a message opened the members, marked there. */
   const [focusMember, setFocusMember] = useState<string>();
@@ -327,6 +333,11 @@ export function GroupChat() {
   // A bot's routines folded into one row count as one message of the run (the rest are under it, drawn when it opens).
   const folded = stackHeads;
   const authors = authorsOf(messages.filter(m => !folded.has(m.id)), group, ownNotes, key => memberPhoto(group, { key, me: false }, state.links, faceOf));
+  /** A member's face in the Tasks panel, as their messages show it (`authorsOf`); none for my own cards ("me"). */
+  const memberFace = (key: string): MemberFaceOf | undefined => key === "me" ? undefined : {
+    key, name: group.members.find(x => x.key === key)?.nick || group.formerNames?.[key] || "",
+    picture: memberPhoto(group, { key, me: false }, state.links, faceOf),
+  };
   /** `inStack`: a message inside a folded row, as that row's writer, its picture beside the stack's last one. */
   const authorProps = (m: StoredMessage, inStack?: MessageAuthor) => {
     const author = inStack ?? authors.get(m.id);
@@ -346,6 +357,7 @@ export function GroupChat() {
     </div>
     : <MessageBubble key={m.id} message={shownOf(m)} peerAck={Number.MAX_SAFE_INTEGER} linkId={`group:${groupId}`} {...forwarding.rowProps(shownOf(m))} highlight={search.highlight(m.id)} {...authorProps(m, inStack)}
       onReply={replyTarget(m, true) ? () => { setEditing(null); setReplyingTo(m); } : undefined} quote={quoteOf(m)}
+      buttons={group.canSend ? buttonsOf.get(m.id) : undefined} compactPress={presses.has(m.id)}
       onEdit={canEditInGroup(m) && !m.card && group.canSend ? () => { setReplyingTo(null); setEditing(m); } : undefined}
       onReact={replyTarget(m, true) && group.canSend ? emoji => react(m.id, emoji) : undefined} reactionName={reactionName}
       onPin={canPin && replyTarget(m, true) ? () => pinMessage(m.id, replyTarget(m, true) === group.pin?.id) : undefined} pinned={!!group.pin && replyTarget(m, true) === group.pin.id} />;
@@ -411,7 +423,7 @@ export function GroupChat() {
         <div className="flex items-center gap-1">
           {group.status === "active" && <GroupConnection group={group} />}
           {/* Only while a bot's card is here (WISP 4xx · Status Cards). */}
-          <TasksButton rows={messages} nameOf={author => nameOf("peer", author) ?? `…${author.slice(-6)}`} />
+          <TasksButton rows={messages} nameOf={author => nameOf("peer", author) ?? `…${author.slice(-6)}`} faceOf={memberFace} />
           {canShare && <button onClick={() => void openShare()} data-testid="group-share" title={t("group.chat.shareHint")} aria-label={t("group.chat.shareLink")}
             className="inline-flex min-h-9 items-center gap-1.5 rounded-full bg-accent/15 px-3 text-sm font-semibold text-accent hover:bg-accent/25 max-md:min-h-11 max-md:px-2.5">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" /><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" /></svg>

@@ -138,6 +138,11 @@ describe("GroupChat: who wrote each message", () => {
     // Opened, the cards under it have their own places, the picture beside the last.
     const cards = [...first.querySelectorAll<HTMLElement>("[data-message-row]")];
     expect(cards.map(r => within(r).queryByTestId("sender-avatar") ? "avatar" : "spacer")).toEqual(["spacer", "spacer", "avatar"]);
+    // The last stack opened: its picture goes down beside its last card, not beside the folded row too.
+    fireEvent.click(within(last).getByTestId("routine-stack-toggle"));
+    expect(within(toggle(last)).queryByTestId("sender-avatar")).not.toBeInTheDocument();
+    expect(within(last).getAllByTestId("sender-avatar")).toHaveLength(1);
+    fireEvent.click(within(last).getByTestId("routine-stack-toggle"));
     fireEvent.click(within(toggle(last)).getByTestId("sender-avatar"));
     expect(within(await screen.findByTestId("group-members-dialog")).getAllByTestId("group-member").find(li => li.dataset.focused)?.dataset.key).toBe(BOT);
   });

@@ -154,6 +154,23 @@ describe("a card on its own, not a bubble", () => {
     expect(container.querySelector("[data-message-row]")!.className).toContain("justify-end");
   });
 
+  it("a routine's closed line has no time, only my marks; it has a status mark only when its last run failed or it is paused", () => {
+    const routine = (id: string, extra: Record<string, unknown>) => readStatusCard({ kind: "routine", id, name: id, schedule: "daily", state: "active", ...extra })!;
+    const { container } = renderApp(<>
+      <MessageBubble message={message(routine("ok", { lastRun: { at: NOW, result: "ok" } }), { id: "ok", sender: "me", delivery: "delivered" })} peerPubKey="peer" />
+      <MessageBubble message={message(routine("failed", { lastRun: { at: NOW, result: "failed" } }), { id: "failed" })} peerPubKey="peer" />
+      <MessageBubble message={message(routine("paused", { state: "paused" }), { id: "paused" })} peerPubKey="peer" />
+      <MessageBubble message={message(card({ status: "blocked" }), { id: "task" })} peerPubKey="peer" />
+    </>);
+    expect(screen.queryAllByTestId("status-card-time")).toHaveLength(1);
+    const cardOf = (id: string) => [...container.querySelectorAll<HTMLElement>("[data-message-card]")].find(c => c.querySelector(`[data-card-id="${id}"]`))!;
+    expect(within(cardOf("ok")).getByTestId("message-delivery")).toBeInTheDocument();
+    expect(within(cardOf("ok")).queryByTestId("status-card-edge")).not.toBeInTheDocument();
+    expect(within(cardOf("failed")).getByTestId("status-card-edge").className).toContain("bg-danger");
+    expect(within(cardOf("paused")).getByTestId("status-card-edge").className).toContain("bg-text-muted");
+    expect(within(cardOf("relay")).getByTestId("status-card-edge").className).toContain("bg-amber-500");
+  });
+
   it("keeps the message's menu, reactions and replies: React from the ⋮, chips under the card, a swipe or a long press", async () => {
     const reacted: string[] = [];
     const { user, container } = renderApp(<MessageBubble message={message(card(), { reactions: { peer: { e: "👍", n: 1, at: 1 } } })} peerPubKey="peer"
@@ -270,14 +287,14 @@ describe("how long a task has been at it", () => {
       <MessageBubble message={message(card({ id: "b", status: "cancelled", startedAt: NOW - 50 * 60_000 }), { id: "b" })} peerPubKey="peer" />
       <MessageBubble message={message(card({ id: "c" }), { id: "c" })} peerPubKey="peer" />
     </>);
-    expect(screen.getAllByTestId("status-card-elapsed").map(e => e.textContent)).toEqual(["took 42 min", "", ""]);
+    expect(screen.getAllByTestId("status-card-elapsed").map(e => e.textContent)).toEqual(["took 42 min"]);
   });
 });
 
 describe("a routine card in the chat", () => {
   const routine = (extra: Record<string, unknown> = {}) => readStatusCard({ kind: "routine", id: "nightly", name: "Nightly bug hunt", schedule: "every day 01:00", state: "active", ...extra })!;
 
-  it("is one line: its name, schedule, next run and the last run's mark; opened, the last run's result and when", async () => {
+  it("is its name, then its schedule, next run and last run's result; opened, the whole name, the last run's result, when and words", async () => {
     const c = routine({ lastRun: { at: NOW - 2 * 3_600_000, result: "failed", summary: "CI flaked" }, nextRunAt: NOW + 3 * 3_600_000 + 60_000 });
     const { user } = renderApp(<MessageBubble message={message(c)} peerPubKey="peer" />);
     const shown = screen.getByTestId("status-card");
@@ -285,12 +302,15 @@ describe("a routine card in the chat", () => {
     const line = within(shown).getByTestId("status-card-toggle");
     expect(within(line).getByTestId("status-card-title")).toHaveTextContent("Nightly bug hunt");
     expect(within(line).getByTestId("status-card-schedule")).toHaveTextContent("every day 01:00");
-    expect(within(line).getByTestId("status-card-next")).toHaveTextContent("· in 3 hr.");
+    expect(within(line).getByTestId("status-card-next")).toHaveTextContent("in 3 hr.");
+    // The name is cut to its line, and says itself whole on hover.
+    expect(within(line).getByTestId("status-card-title")).toHaveClass("truncate");
+    expect(within(line).getByTestId("status-card-title")).toHaveAttribute("title", "Nightly bug hunt");
     const last = within(line).getByTestId("status-card-last");
     expect(last).toHaveAttribute("data-result", "failed");
-    expect(last).toHaveTextContent("✕Last run: Failed");
+    expect(last).toHaveTextContent("FailedLast run: Failed");
     expect(last.className).toContain("text-danger-ink");
-    // One line: no second row, nothing else until it is opened.
+    // No block of its own inside (its facts go under the name only on a narrow card, by the stylesheet); nothing else until it is opened.
     expect(line.querySelectorAll("br, p, div")).toHaveLength(0);
     expect(screen.queryByTestId("status-card-details")).not.toBeInTheDocument();
     expect(screen.queryByTestId("message-text")).not.toBeInTheDocument();
@@ -298,7 +318,10 @@ describe("a routine card in the chat", () => {
     const run = screen.getByTestId("status-card-last-run");
     expect(run).toHaveTextContent(/Failed\s*2 h ago/);
     expect(run).toHaveTextContent("Next in 3 hr.");
-    expect(screen.getByTestId("status-card-details")).toHaveTextContent("CI flaked");
+    expect(screen.getByTestId("status-card-summary")).toHaveTextContent("CI flaked");
+    // Opened, the name wraps instead of being cut, and the card says when it last changed.
+    expect(within(line).getByTestId("status-card-title")).not.toHaveClass("truncate");
+    expect(screen.getByTestId("status-card-time").textContent).toMatch(/\d{1,2}:\d{2}/);
   });
 
   it("opens in place on its recent runs and cron line; a paused one shows no next run", async () => {
@@ -308,7 +331,8 @@ describe("a routine card in the chat", () => {
     expect(screen.queryByTestId("status-card-next")).not.toBeInTheDocument();
     await user.click(screen.getByTestId("status-card-toggle"));
     expect(screen.getAllByTestId("status-card-run").map(r => r.dataset.result)).toEqual(["ok", "skipped"]);
-    expect(screen.getByTestId("status-card-details")).toHaveTextContent("0 1 * * *");
+    expect(screen.getByTestId("status-card-details")).toHaveTextContent("Cron0 1 * * *");
+    expect(screen.getByTestId("status-card-details")).toHaveTextContent("Scheduleevery day 01:00");
   });
 
   it("says so when it has not run yet", () => {
@@ -388,11 +412,19 @@ describe("the Tasks button", () => {
       row("m4", card({ id: "bench", title: "Benchmarks", progress: 80 }), { member: hermes }),
       row("m5", undefined, { member: "p".repeat(52), sender: "me" }),
     ];
-    const { user } = renderApp(<TasksButton rows={rows} nameOf={author => names[author] ?? "?"} />);
+    const faces: Record<string, { key: string; name: string; picture?: string }> = {
+      [hermes]: { key: hermes, name: "Hermes One", picture: "data:image/png;base64,iVBORw0KGgo=" }, [coordinator]: { key: coordinator, name: "Coordinator" },
+    };
+    const { user } = renderApp(<TasksButton rows={rows} nameOf={author => names[author] ?? "?"} faceOf={author => faces[author]} />);
     expect(screen.getByTestId("chat-tasks-count")).toHaveTextContent("3");
     await user.click(screen.getByTestId("chat-tasks"));
     const sections = screen.getAllByTestId("chat-tasks-sender");
     expect(sections.map(s => within(s).getByTestId("chat-tasks-sender-name").textContent)).toEqual(["Coordinator", "Hermes One"]);
+    // Each bot's face before its name: its picture, else its initial in its colour.
+    const face = (s: HTMLElement) => within(s.querySelector("h3")!).getByTestId("member-face");
+    expect(face(sections[0])).toHaveTextContent("C");
+    expect(face(sections[0]).querySelector("span")!.className).toMatch(/text-member-/);
+    expect(face(sections[1]).querySelector("img")).toHaveAttribute("src", faces[hermes].picture);
     expect(sections.map(s => within(s).getByTestId("chat-tasks-sender-count").textContent)).toEqual(["2 active", "1 active"]);
     expect(within(sections[1]).getAllByTestId("chat-tasks-item").map(i => i.dataset.cardId)).toEqual(["bench"]);
     // A finished task goes to the folded section at the end, with its sender's name.
@@ -400,6 +432,7 @@ describe("the Tasks button", () => {
     const done = within(screen.getByTestId("chat-tasks-finished")).getByTestId("chat-tasks-item");
     expect(done).toHaveAttribute("data-card-id", "nightly");
     expect(done).toHaveTextContent("Hermes One");
+    expect(within(done).getByTestId("member-face")).toHaveAttribute("data-key", hermes);
   });
 
   it("shows no count once every task is finished", () => {
@@ -612,6 +645,19 @@ describe("routines in a row in the chat", () => {
     expect(jumpToMessage("m2")).toBe(true);
     expect(screen.getByTestId("routine-stack")).toHaveAttribute("data-open");
     expect(screen.getAllByTestId("status-card")).toHaveLength(4);
+  });
+
+  it("keep the sender's picture beside the folded row, and leave it to the last card once open (never both)", async () => {
+    const cards = [1, 2, 3].map(i => readStatusCard({ kind: "routine", id: `r${i}`, name: `R${i}`, schedule: "hourly", state: "active" }) as RoutineCard);
+    const author = { key: "z".repeat(52), name: "Hermes Zero", first: true, last: true };
+    const { user } = renderApp(<RoutineStack name="Hermes Zero" cards={cards} mine={false} author={author}>
+      {cards.map((c, i) => <MessageBubble key={c.id} message={message(c, { id: `m${i}` })} peerPubKey="peer" author={{ ...author, first: false, last: i === 2 }} />)}
+    </RoutineStack>);
+    const toggleRow = screen.getByTestId("routine-stack-toggle").closest(".message-row-x")!;
+    expect(within(toggleRow as HTMLElement).getByTestId("sender-avatar")).toBeInTheDocument();
+    await user.click(screen.getByTestId("routine-stack-toggle"));
+    expect(within(toggleRow as HTMLElement).queryByTestId("sender-avatar")).not.toBeInTheDocument();
+    expect(screen.getAllByTestId("sender-avatar")).toHaveLength(1);
   });
 });
 

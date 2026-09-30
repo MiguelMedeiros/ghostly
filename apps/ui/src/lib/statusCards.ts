@@ -12,7 +12,7 @@ export interface CardRow { id: string; card?: StatusCard; sender: string; member
 
 export interface CardEntry {
   messageId: string;
-  card: StatusCard;
+  card: ShownCard;
   /** Who sent it: `me`, `peer`, or a group member's key. */
   author: string;
   /** When it last changed: its last update, else when it was sent. */
@@ -31,7 +31,8 @@ export function isActiveCard(card: StatusCard): boolean {
 export function cardEntries(rows: readonly CardRow[]): CardEntry[] {
   const latest = new Map<string, CardEntry>();
   for (const row of rows) {
-    if (!row.card) continue;
+    // Only tasks and routines: a message's buttons are not a status the panel follows.
+    if (!showsCard(row.card)) continue;
     const key = `${author(row)}\n${row.card.kind}\n${row.card.id}`;
     latest.delete(key);
     latest.set(key, { messageId: row.id, card: row.card, author: author(row), at: row.edit?.at ?? row.timestamp, active: isActiveCard(row.card) });
@@ -160,8 +161,11 @@ export function untilIn(language: string): (at: number, now?: number) => string 
   };
 }
 
+/** A card a message shows as, instead of its text: a task or a routine. A message with buttons shows its text. */
+export type ShownCard = TaskCard | RoutineCard;
+
 /** Whether a message shows as its card: a kind this app draws. Anything else shows the message's text. */
-export function showsCard(card: StatusCard | undefined): card is StatusCard {
+export function showsCard(card: StatusCard | undefined): card is ShownCard {
   return card?.kind === "task" || card?.kind === "routine";
 }
 
@@ -207,7 +211,7 @@ export function taskElapsed(card: TaskCard, now: number, end?: number): TaskElap
 }
 
 /** What a screen reader says of a card as a whole: "Task: Fix relay rotation, Running, 67%", "Routine: Nightly, Paused". */
-export function cardLabel(t: Translate, card: StatusCard): string {
+export function cardLabel(t: Translate, card: ShownCard): string {
   if (card.kind === "routine") return t("cards.routine.label", { name: card.name, state: t(`cards.routine.state.${card.state}`) });
   const progress = taskProgress(card);
   const status = t(`cards.task.status.${card.status}`);
@@ -215,6 +219,6 @@ export function cardLabel(t: Translate, card: StatusCard): string {
 }
 
 /** A card's line where a message's text would be (a quote, the pinned bar, the chat list): its title, or ↻ and its name. */
-export function cardLine(card: StatusCard): string {
+export function cardLine(card: ShownCard): string {
   return card.kind === "task" ? card.title : `↻ ${card.name}`;
 }

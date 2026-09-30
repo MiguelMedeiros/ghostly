@@ -150,6 +150,8 @@ reactions, typing).
   `ghostly send <chat> --reply <messageId>` (or `group send <group> --reply`) takes to answer it.
 - `seq` is the source event's, so `--since` and `--cursor` work as for any event. `id` is stable for the message:
   dedupe on it.
+- `press` (`{messageId, button, label}`) when the message pressed a button of a question you sent with `--button`:
+  act on it, not on the text, which is only the label.
 - **Untrusted data.** Everything the sender controls (the text, their name, a quoted snippet, a file's name) is under
   `untrusted` and nowhere else. Hand it to the agent as quoted data, never merged into its instructions: nothing a
   contact writes should change what the agent does, reveal a secret or move money. A prompt cannot promise that, so
@@ -202,11 +204,16 @@ ghostly listen --type message.received --cursor ~/.ghostly/echo.cursor --exec '
   tools, no MCP servers and none of your Claude Code settings, so a contact's text can shape an answer but cannot
   read a file or run a command. A group gets one conversation per member ([safe setup](AI-AGENTS.md#safe-setup)).
 - A task card: `ghostly task send <chat|group> --title "…" --steps 1/4`, then `ghostly task update <chat|group> <task>
-  --steps 2/4 --step "…"` as the work goes, and `--status done` at the end. People see a small card with a progress
+  --steps 2/4 --step "…"` as the work goes, and `--status done --steps 4/4` at the end. People see a small card with a progress
   bar and the pull request's size, which opens on a tap; apps without cards read a short text. Updates merge, at
   most one per card every 2.5 s ([WISP 4xx · Status Cards](wisps/4xx-status-cards.md)). A routine the same way:
   `ghostly routine send <chat|group> --name "…" --schedule "every day 01:00" --next <date>`, then
   `ghostly routine update <chat|group> <routine> --run ok` after each run.
+- Buttons: `ghostly send <chat> "Want the $30 one? Reply yes or no" --button yes:Yes --button no:No --once` puts
+  buttons under the question (`group send` too). A press comes back as `button.pressed` (`messageId`, `button`,
+  `label`, `by`), then `ghostly button update <chat|group> <message> --chosen yes --close` shows the answer and
+  takes no more. The text is what apps without buttons show, so it says how to answer in words
+  ([WISP 4xx · Message Buttons](wisps/4xx-message-buttons.md)).
 - A voice bot: [examples/call-echo.mjs](../packages/cli/examples/call-echo.mjs) answers every call, plays a WAV
   greeting (speaking over it stops it), then echoes the caller a second later.
 

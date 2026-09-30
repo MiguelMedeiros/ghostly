@@ -52,16 +52,16 @@ export function replyTo(original: Pick<StoredMessage, "id" | "text" | "member"> 
  * sender's side). For a group, `f` is the author's member key, which the reply keeps.
  */
 export function pairedWireReply(reply: MessageReply, sender: "me" | "peer" = "me"): WireReply {
-  return { i: reply.id, s: reply.snippet, f: reply.from === sender ? "sender" : "recipient" };
+  return { i: reply.id, s: reply.snippet, f: reply.from === sender ? "sender" : "recipient", ...(reply.button && { b: reply.button }) };
 }
 
 /** A paired chat's reply as it arrived (`f` from the sender's side), as this side keeps it. */
 export function receivedPairedReply(reply: WireReply | { i: string }): MessageReply {
   if (!("f" in reply)) return { id: reply.i, snippet: "" };
-  return { id: reply.i, snippet: reply.s, from: reply.f === "sender" ? "peer" : "me" };
+  return { id: reply.i, snippet: reply.s, from: reply.f === "sender" ? "peer" : "me", ...(reply.b && { button: reply.b }) };
 }
 
 /** A group's reply as it arrived or was sent (`f` the author's member key), as this member keeps it. */
 export function groupReply(reply: WireReply, myKey: string): MessageReply {
-  return { id: reply.i, snippet: reply.s, from: reply.f === myKey ? "me" : "peer", member: reply.f };
+  return { id: reply.i, snippet: reply.s, from: reply.f === myKey ? "me" : "peer", member: reply.f, ...(reply.b && { button: reply.b }) };
 }
