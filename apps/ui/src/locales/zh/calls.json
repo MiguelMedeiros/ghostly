@@ -21,6 +21,8 @@
   "incoming": "来电",
   "incomingAudio": "语音来电...",
   "incomingVideo": "视频来电...",
+  "mediaDenied": "Ghostly 无法使用麦克风或摄像头。请在浏览器的网站设置中允许（桌面应用：系统设置 → 隐私与安全性），然后重试。",
+  "mediaUnavailable": "没有可用的麦克风或摄像头。请连接一个，或关闭正在使用它的应用，然后重试。",
   "missed": "未接来电",
   "mute": "静音",
   "needLive": "通话需要直连",

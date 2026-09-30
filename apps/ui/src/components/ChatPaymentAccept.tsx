@@ -1,6 +1,7 @@
 import { useRef, useState, type ReactNode } from "react";
 import { WALLET_NETWORKS, type PaymentMethodName } from "@ghostly/core";
 import { useI18n } from "../contexts/I18nContext";
+import { deckArrows } from "./deck/arrows";
 import { ALL_METHODS_ON, cardOn, type ChatAccepts, type ChatPaymentNetworks } from "../lib/chatPayments";
 import type { PeerLinkState, WalletNetwork } from "../lib/platform";
 import { CardDeck } from "./WalletDeck";
@@ -117,7 +118,7 @@ export function ChatPaymentAccept({ peer, contact, cards, network, empty, onSave
   const bare = !here.length && !!empty;
   return <>
     {bare ? empty : <>
-    <CardDeck<string> key={network} compact tagAll kind="checks" label={t("payments.accept.deck", { name: contact })} name="payment-accept-deck" cards={shown} selected={active}
+    <CardDeck<string> key={network} compact tagAll kind="checks" label={t("payments.accept.deck", { name: contact })} name="payment-accept-deck" arrows={deckArrows(t)} cards={shown} selected={active}
       onSelect={setActive} onChoose={toggle} checked={(c) => !!draft[c.id]} cardLabel={(c) => label(c as InstanceCard)} testId={acceptCardTestId} size={{ max: 250, share: .62 }}
       corner={(c) => <SwitchLook checked={!!draft[c.id]} className="wallet-deck-card-switch" testId={`payment-accept-switch-${c.id.replace(":", "-")}`} />} />
     <p className="composer-sheet-hint" data-testid="payment-accept-hint">{card && hint(card)}</p>

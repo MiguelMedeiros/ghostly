@@ -23,6 +23,7 @@ import { contactGhostlyCard, GHOSTLY, idCardTone, machineLine, receivedIdCard, t
 import { ProviderMark } from "./ProviderMark";
 import { PublicProfileDetails } from "./PublicProfileDetails";
 import "./contact-panel.css";
+import { deckArrows } from "../deck/arrows";
 
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 type Entry = { id: typeof GHOSTLY; ghostly: true; card: IdCardContent } | { id: string; ghostly?: false; r: ReceivedIdentityView; card: IdCardContent };
@@ -118,7 +119,7 @@ function TheirCards({ t, entries, link, links, name, nostr, initial }: { t: Tran
           : <TheirCardBack t={t} entry={showing} linkId={link.id} name={name} nostr={nostr.find(v => v.subject === showing.r.subject)} onCards={cards} />} />
       : <>
         <Deck<Entry> compact cards={entries} selected={entry.id} onSelect={setChosen} onChoose={id => { setChosen(id); turn(); }}
-          kind="radios" label={t("identities.contact.deckLabel", { name })} name="contact-identity-deck" className="id-deck" size={{ max: 300, share: .78 }}
+          kind="radios" label={t("identities.contact.deckLabel", { name })} name="contact-identity-deck" arrows={deckArrows(t)} className="id-deck" size={{ max: 300, share: .78 }}
           testId={e => (e.ghostly ? "chat-identity-ghostly" : "chat-identity-received")}
           face={(e, { after }) => <IdCardFace card={e.card} after={after} />}
           mark={e => <IdCardMark provider={e.card.provider} subject={e.card.bound} />}
