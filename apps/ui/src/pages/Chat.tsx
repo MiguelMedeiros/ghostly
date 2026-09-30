@@ -158,6 +158,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
         call_ended: hasVideo ? "Video call ended" : "Audio call ended",
         call_missed: hasVideo ? "Missed video call" : "Missed audio call",
         call_rejected: hasVideo ? "Video call declined" : "Audio call declined",
+        call_failed: hasVideo ? "Video call couldn't connect" : "Audio call couldn't connect",
       };
 
       const msg: ChatMessage = {
