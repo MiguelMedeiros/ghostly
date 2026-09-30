@@ -312,6 +312,19 @@ html[data-standalone="true"] {
   height: var(--app-height, 100dvh);
 }
 
+/* Two panes (768px and wider) on a touch screen: an iPad, a phone on its side. The on-screen keyboard leaves the
+   page its height there too, so the panes take what it leaves (`--app-height`) and the message field stays above
+   it; Safari scrolled the whole page instead, and left it scrolled with a blank band once the keyboard went. A
+   mouse's screen keeps the whole window (a pinch zoom there must not shrink the app). */
+.two-pane {
+  height: 100vh;
+}
+@media (pointer: coarse) {
+  .two-pane {
+    height: var(--app-height, 100dvh);
+  }
+}
+
 .pb-safe {
   padding-bottom: env(safe-area-inset-bottom);
 }
