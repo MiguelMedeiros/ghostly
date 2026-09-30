@@ -1,6 +1,6 @@
 import { databaseExists } from "@ghostly/browser/backup/database";
 import { dropFileSpace } from "@ghostly/browser/shared/fileBytes";
-import { activeProfileId, listProfiles, namespaceOf, prefixOf, settingsKeyFor, unregisterProfile } from "./profiles";
+import { activeProfileId, chosenProfileId, listProfiles, namespaceOf, prefixOf, settingsKeyFor, unregisterProfile } from "./profiles";
 import { unreadUnder } from "./storage";
 import { peekFresh } from "./profilePeek";
 import { verifyPassword } from "./settings";
@@ -166,7 +166,8 @@ async function lockHeld(ns: string): Promise<boolean> {
  */
 export async function deleteProfile(id: string, password?: string): Promise<void> {
   if (!id) throw new Error("The first profile cannot be deleted");
-  if (id === activeProfileId()) throw new Error("Switch to another profile first");
+  // Neither the one this page runs nor the one the registry has chosen (which another tab may run, or start as next).
+  if (id === activeProfileId() || id === chosenProfileId()) throw new Error("Switch to another profile first");
   await assertUnlocked(id, password);
   const ns = namespaceOf(id), dbName = `ghostly_${ns}`;
   if (await lockHeld(ns)) throw new Error("This profile is open in another window. Close it, then try again.");
