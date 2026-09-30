@@ -14,6 +14,9 @@ use tauri::ipc::{InvokeBody, Request, Response};
 /// The most one call moves: the page reads and writes 1 MiB at a time, this leaves room.
 pub const MAX_STEP: u64 = 16 * 1024 * 1024;
 
+/// A copy the page stages to save bytes it holds in memory through the save dialog: `save-<uuid>`.
+const STAGED_SAVE_PREFIX: &str = "save-";
+
 /// A profile space (the page's database name) is a plain name, never a path.
 pub fn check_space(space: &str) -> Result<(), String> {
     if space.is_empty()
@@ -47,6 +50,26 @@ impl FileStore {
             use std::os::unix::fs::PermissionsExt;
             if self.base.is_dir() {
                 let _ = fs::set_permissions(&self.base, fs::Permissions::from_mode(0o700));
+            }
+        }
+    }
+
+    /// Once at start, before anyone can press Save: copies staged for a save that never finished are removed from every
+    /// profile's folder. The page removes its copy once the save command answers (`saveStaged` in
+    /// packages/browser/src/platform/services.ts), but a save dialog that never answers (on Linux GTK's can open
+    /// out of sight, and waits with no timeout) keeps the command waiting, and closing the app or reloading the page
+    /// then leaves the copy behind. Nothing is being saved yet here. Best effort.
+    pub fn remove_staged_saves(&self) {
+        let Ok(spaces) = fs::read_dir(&self.base) else {
+            return;
+        };
+        for space in spaces.flatten() {
+            let name = space.file_name();
+            let Some(name) = name.to_str() else {
+                continue;
+            };
+            if check_space(name).is_ok() && space.path().is_dir() {
+                let _ = self.remove_where(name, STAGED_SAVE_PREFIX);
             }
         }
     }
@@ -586,6 +609,50 @@ mod tests {
     fn room_is_the_free_space_of_the_disk_even_before_the_folder_exists() {
         let (files, _dir) = store();
         assert!(files.room().unwrap() > 0);
+    }
+
+    #[test]
+    fn copies_staged_for_a_save_that_never_finished_are_gone_at_start() {
+        let (files, dir) = store();
+        // Left by a save whose dialog never answered before the app closed, in two profiles.
+        files
+            .append("ghostly", "save-1b4e28ba", 0, b"voice")
+            .unwrap();
+        files
+            .append("ghostly", "save-6ba7b810", 0, b"photo")
+            .unwrap();
+        files
+            .append("ghostly_p2", "save-0f0e0d0c", 0, b"mp3")
+            .unwrap();
+        // The chats' own files stay, even one whose name only starts alike.
+        files.append("ghostly", "chat-in-abc", 0, b"kept").unwrap();
+        files.append("ghostly", "saved-note", 0, b"kept").unwrap();
+        files
+            .append("ghostly_p2", "chat-out-xyz", 0, b"kept")
+            .unwrap();
+        // Not a profile's folder: left alone.
+        fs::write(dir.join("save-stray"), b"not a space").unwrap();
+        fs::create_dir_all(dir.join(".hidden")).unwrap();
+        fs::write(dir.join(".hidden").join("save-x"), b"not a space").unwrap();
+
+        files.remove_staged_saves();
+
+        assert_eq!(files.size("ghostly", "save-1b4e28ba").unwrap(), None);
+        assert_eq!(files.size("ghostly", "save-6ba7b810").unwrap(), None);
+        assert_eq!(files.size("ghostly_p2", "save-0f0e0d0c").unwrap(), None);
+        assert_eq!(files.size("ghostly", "chat-in-abc").unwrap(), Some(4));
+        assert_eq!(files.size("ghostly", "saved-note").unwrap(), Some(4));
+        assert_eq!(files.size("ghostly_p2", "chat-out-xyz").unwrap(), Some(4));
+        assert!(dir.join("save-stray").is_file());
+        assert!(dir.join(".hidden").join("save-x").is_file());
+        fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn with_no_files_folder_yet_there_is_nothing_to_remove() {
+        let (files, dir) = store();
+        files.remove_staged_saves();
+        assert!(!dir.exists());
     }
 
     #[test]
