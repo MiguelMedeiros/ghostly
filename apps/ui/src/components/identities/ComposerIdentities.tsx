@@ -116,18 +116,24 @@ export function IdentityPicker({ peerKey, contact, initial, onManage, onAdding, 
   /** What the back last did, said on it until the card turns face up again. */
   const [done, setDone] = useState<"shared" | "stopped" | "only" | null>(null);
   const { side, flipped, turn, turnBack } = useCardFlip();
+  /**
+   * The turned card is still (deck/Flip.tsx): until then its back's buttons wait, faded out, so that a click cannot
+   * land on a card still swinging round and reach nothing (as a payment card's Request could, #762).
+   */
+  const [atRest, setAtRest] = useState(false);
+  const turning = !atRest;
   const ref = useRef<HTMLDivElement>(null), actionRef = useRef<HTMLButtonElement>(null);
   useNewProof(state, setChosen);
   // On the cards, the keys start on the chosen one (as the sheet opens, after adding one, back from its back): the
-  // dialog replaces the sheet while it is open, since a phone's sheet sits above any dialog. Once a card has turned,
-  // on its action (not as the back mounts: a face-down back takes no focus).
+  // dialog replaces the sheet while it is open, since a phone's sheet sits above any dialog. Once a card has turned and
+  // is still, on its action (not before: a face-down back, and a button waiting for the turn, take no focus).
   const opened = useRef(false);
   useEffect(() => {
     if (adding) return;
     const first = !opened.current; opened.current = true;
     if (side === "cards") { if (!first || focusOnOpen) ref.current?.querySelector<HTMLElement>('[role=radio][tabindex="0"]')?.focus({ preventScroll: true }); }
-    else if (flipped) actionRef.current?.focus({ preventScroll: true });
-  }, [adding, side, flipped, focusOnOpen]);
+    else if (atRest) actionRef.current?.focus({ preventScroll: true });
+  }, [adding, side, atRest, focusOnOpen]);
   useEffect(() => {
     if (!done) return;
     const timer = setTimeout(turnBack, DONE_MS);
@@ -197,11 +203,11 @@ export function IdentityPicker({ peerKey, contact, initial, onManage, onAdding, 
   const blocked = why(entry);
   return (
     frame({ side: showing ? "back" : "cards", tone: tone(entry) }, <div ref={ref} className="identity-picker">
-      {showing ? <CardFlip className="composer-identity" flipped={flipped} tone={tone(showing)}
+      {showing ? <CardFlip className="composer-identity" flipped={flipped} onSettle={setAtRest} tone={tone(showing)}
         front={<IdCardFace card={showing.card} shared={showing.on} />}
         back={showing.ghostly
-          ? <GhostlyBack t={t} card={showing.card} contact={contact} others={others.length} busy={busy} done={done} error={error} actionRef={actionRef} onShareOnly={shareOnlyGhostly} onCards={backToCards} />
-          : <IdentityBack t={t} entry={showing} contact={contact} now={now} busy={busy} stopping={stopping} done={done} error={error} actionRef={actionRef}
+          ? <GhostlyBack t={t} card={showing.card} contact={contact} others={others.length} busy={busy} turning={turning} done={done} error={error} actionRef={actionRef} onShareOnly={shareOnlyGhostly} onCards={backToCards} />
+          : <IdentityBack t={t} entry={showing} contact={contact} now={now} busy={busy} turning={turning} stopping={stopping} done={done} error={error} actionRef={actionRef}
             status={ids?.shared.find(s => s.id === showing.id)} onShare={() => toggle(showing.proof, false)} onStop={() => toggle(showing.proof, true)} onCards={backToCards} />} />
       : <>
         {head && <ComposerSheetHead title={t("identities.mine.deckLabel")} who={t("identities.picker.shownTo", { contact })} />}
@@ -239,8 +245,10 @@ export function IdentityPicker({ peerKey, contact, initial, onManage, onAdding, 
  * The Ghostly card turned over: what the contact sees in any case (the name and picture, this chat's key in full,
  * to copy), whether they also see other identities, and "Share only this", which takes those back.
  */
-function GhostlyBack({ t, card, contact, others, busy, done, error, actionRef, onShareOnly, onCards }: {
-  t: Translate; card: IdCardContent; contact: string; others: number; busy: string; done: "shared" | "stopped" | "only" | null; error: string;
+function GhostlyBack({ t, card, contact, others, busy, turning, done, error, actionRef, onShareOnly, onCards }: {
+  t: Translate; card: IdCardContent; contact: string; others: number; busy: string;
+  /** The card is still turning: its buttons wait, out of sight. */
+  turning: boolean; done: "shared" | "stopped" | "only" | null; error: string;
   actionRef: RefObject<HTMLButtonElement | null>; onShareOnly: () => void; onCards: () => void;
 }) {
   const { copied, copy } = useCopyKey(card.subject);
@@ -267,13 +275,13 @@ function GhostlyBack({ t, card, contact, others, busy, done, error, actionRef, o
         {done ? <p role="status" className="id-card-back-done" data-testid="composer-identity-done">
           <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="m3.5 8.5 3 3 6-7" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" /></svg>
           {t("identities.ghostly.doneOnly")}
-        </p> : <div className="flex flex-wrap gap-2">
+        </p> : <div className="id-card-back-actions id-card-back-actions-row" data-turning={turning || undefined}>
           {/* While a call runs the button stays focusable (a disabled button would drop the keyboard's focus). */}
-          {others > 0 && <button ref={actionRef} type="button" data-testid="composer-identity-share" className="composer-sheet-action flex-1"
+          {others > 0 && <button ref={actionRef} type="button" data-testid="composer-identity-share" className="composer-sheet-action flex-1" disabled={turning}
             aria-disabled={!!busy || undefined} aria-busy={working || undefined} onClick={onShareOnly}>
             {working ? t("identities.ghostly.stopping") : <>{t("identities.ghostly.shareOnly")}<ForwardArrow /></>}
           </button>}
-          <button ref={others > 0 ? undefined : actionRef} type="button" data-testid="composer-identity-copy-key" data-variant="secondary" className="composer-sheet-action flex-1" onClick={copy}>
+          <button ref={others > 0 ? undefined : actionRef} type="button" data-testid="composer-identity-copy-key" data-variant="secondary" className="composer-sheet-action flex-1" disabled={turning} onClick={copy}>
             {copied ? t("identities.ghostly.copied") : t("identities.ghostly.copyKey")}
           </button>
         </div>}
@@ -288,8 +296,10 @@ function GhostlyBack({ t, card, contact, others, busy, done, error, actionRef, o
  * The chosen identity's card, turned over: what the contact sees (its mark, the identity, who stands behind it and
  * until when), where it stands in this chat, and Share or Stop sharing. Once done, a line saying so in its place.
  */
-function IdentityBack({ t, entry, contact, now, busy, stopping, done, error, status, actionRef, onShare, onStop, onCards }: {
-  t: Translate; entry: Proof; contact: string; now: number; busy: string; stopping: boolean; done: "shared" | "stopped" | "only" | null; error: string; status?: Shared;
+function IdentityBack({ t, entry, contact, now, busy, turning, stopping, done, error, status, actionRef, onShare, onStop, onCards }: {
+  t: Translate; entry: Proof; contact: string; now: number; busy: string;
+  /** The card is still turning: its buttons wait, out of sight. */
+  turning: boolean; stopping: boolean; done: "shared" | "stopped" | "only" | null; error: string; status?: Shared;
   actionRef: RefObject<HTMLButtonElement | null>; onShare: () => void; onStop: () => void; onCards: () => void;
 }) {
   const { proof: p, card, on } = entry;
@@ -328,15 +338,15 @@ function IdentityBack({ t, entry, contact, now, busy, stopping, done, error, sta
         {done ? <p role="status" className="id-card-back-done" data-testid="composer-identity-done">
           <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="m3.5 8.5 3 3 6-7" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" /></svg>
           {done === "shared" ? t("identities.ghostly.sharedWith", { contact }) : t("identities.picker.noLongerSees", { contact })}
-        </p> : <>
+        </p> : <div className="id-card-back-actions" data-turning={turning || undefined}>
           {/* While a call runs the button stays focusable (a disabled button would drop the keyboard's focus). */}
-          <button ref={actionRef} type="button" data-testid="composer-identity-share" data-variant={stops ? "secondary" : undefined} className="composer-sheet-action"
+          <button ref={actionRef} type="button" data-testid="composer-identity-share" data-variant={stops ? "secondary" : undefined} className="composer-sheet-action" disabled={turning}
             aria-disabled={!!busy || undefined} aria-busy={(working && stopping === stops) || undefined} onClick={stops ? onStop : onShare}>
             {working && stopping === stops ? (stops ? t("identities.ghostly.stopping") : t("identities.picker.sharing")) : stops ? t("identities.stopSharing") : retry ? <>{t("identities.picker.shareAgain")}<ForwardArrow /></> : <>{t("identities.picker.shareWith", { contact })}<ForwardArrow /></>}
           </button>
-          {retry ? <button type="button" data-testid="composer-identity-stop" className="composer-identities-manage" aria-disabled={!!busy || undefined} aria-busy={(working && stopping) || undefined} onClick={onStop}>{working && stopping ? t("identities.ghostly.stopping") : t("identities.stopSharing")}</button>
+          {retry ? <button type="button" data-testid="composer-identity-stop" className="composer-identities-manage" disabled={turning} aria-disabled={!!busy || undefined} aria-busy={(working && stopping) || undefined} onClick={onStop}>{working && stopping ? t("identities.ghostly.stopping") : t("identities.stopSharing")}</button>
             : on && <p className="id-card-back-note">{t("identities.picker.stopNote", { contact })}</p>}
-        </>}
+        </div>}
         {error && <p role="alert" className="m-0 text-xs text-danger" data-testid="composer-identities-error">{error}</p>}
       </div>
       <span className="id-card-mrz id-card-back-mrz" aria-hidden="true">{machineLine(card.label, card.subject)}</span>

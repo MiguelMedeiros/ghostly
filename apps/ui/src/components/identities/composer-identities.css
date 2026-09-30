@@ -24,6 +24,11 @@
 /* The front's machine line, without its place in the front's grid (a named area would open columns here). */
 .id-card-back-mrz{grid-area:auto;padding:0 14px 10px}
 .id-card-back .composer-sheet-action:focus-visible{outline-color:#fff}
+/* The back's buttons (Share, Stop sharing, Copy key): while the card turns they wait out of sight, disabled, then
+   fade in once it is still (ComposerIdentities.tsx). With reduced motion there is no turn, and no wait. */
+.id-card-back-actions{display:grid;grid-template-columns:minmax(0,1fr);gap:10px;transition:opacity .2s ease}
+.id-card-back-actions-row{display:flex;flex-wrap:wrap;gap:8px}
+.id-card-back-actions[data-turning]{opacity:0}
 
 /* Manage identities: a quiet link under the action, to the Identities page. */
 .composer-identities-manage{justify-self:center;min-height:32px;padding:0 8px;border:0;border-radius:6px;background:none;font-size:12px;color:var(--theme-text-muted);cursor:pointer}
