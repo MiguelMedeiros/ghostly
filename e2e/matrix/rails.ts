@@ -320,8 +320,10 @@ async function arkade(a: Actor, b: Actor): Promise<void> {
   // (under the server's dust limit). Those still count as the payee's, set apart (`ark-small`).
   for (const [p, expected] of [[a, 9_550], [b, 350]] as const) {
     await recovered(p);
-    await expect.poll(() => sats(p), { timeout: 60_000 }).toBeLessThanOrEqual(expected);
-    expect((await sats(p)) + (await smallExpiredArk(panel(p)))).toBeGreaterThanOrEqual(expected - 60 - fees.get(p)!);
+    // The last payment reaches the wallet's figures on its next poll (10 s): wait for it.
+    const held = async () => (await sats(p)) + (await smallExpiredArk(panel(p)));
+    await expect.poll(held, { timeout: 60_000, message: `${p.name}'s sats, the expired ones set apart included` }).toBeGreaterThanOrEqual(expected - 60 - fees.get(p)!);
+    expect(await held()).toBeLessThanOrEqual(expected);
   }
 }
 
