@@ -22,7 +22,8 @@ import { Menu, MenuItem, MenuSeparator } from "../components/Menu";
 import { MuteMenu, MuteMenuItem } from "../components/ChatMute";
 import { forgetChatMute, groupChat } from "../lib/chatMute";
 import { useI18n, type Translate } from "../contexts/I18nContext";
-import { authorName, groupStatusText, markGroupRead, memberName } from "../lib/groups";
+import { authorName, groupStatusText, markGroupRead, memberName, memberPhoto } from "../lib/groups";
+import { authorsOf, type MessageAuthor } from "../lib/senderRuns";
 import { chatsByPeer } from "../lib/identities";
 import { useContactFaces, withContactFaces } from "../components/identities/contactFace";
 import type { ChatMessage } from "../lib/types";
@@ -204,6 +205,8 @@ export function GroupChat() {
   useEffect(() => { setReplyingTo(null); setEditing(null); }, [groupId]);
   const quoteIndex = useMemo(() => replyIndex(messages, true), [messages]);
   const [showMembers, setShowMembers] = useState(false);
+  /** The member whose name or picture above a message opened the members, marked there. */
+  const [focusMember, setFocusMember] = useState<string>();
   /** The group's picture, large (AvatarViewer.tsx), and the header's avatar that opened it. */
   const [viewingPicture, setViewingPicture] = useState(false);
   const avatarButton = useRef<HTMLButtonElement>(null);
@@ -280,7 +283,7 @@ export function GroupChat() {
   const onTyping = useGroupTypingSender(rosterGroup?.profile === "mesh" && rosterGroup.status === "active" ? groupId : undefined);
   const typers = useMemo(() => (group?.typing ?? []).map(({ key, kind, status }): GroupTyper => {
     const member = group!.members.find(m => m.key === key);
-    return { name: member ? memberName(member, t) : t("group.member.unnamed", { key: key.slice(0, 8) }), ...(kind ? { kind } : {}), ...(status ? { status } : {}) };
+    return { key, name: member ? memberName(member, t) : t("group.member.unnamed", { key: key.slice(0, 8) }), ...(kind ? { kind } : {}), ...(status ? { status } : {}) };
   }), [group, t]);
 
   // "@everyone": a private group's admin only; a community has no everyone (WISP 9xx § Mentions).
@@ -307,17 +310,28 @@ export function GroupChat() {
   // A note is left out of the timeline only when one of these bubbles is about it: its own caption, or a payment answering it.
   const ownNotes = new Set(messages.filter(m => m.paymentId && !m.groupPay && (captionOf(state, notes, m, group.myKey) || state.payments[m.paymentId]?.requestId))
     .map(m => noteIdOf(state, m.paymentId!)));
+  // Who wrote each member's message (their colour, their picture once per run): see `authorsOf`.
+  // A bot's routines folded into one row count as one message of the run (the rest are under it, drawn when it opens).
+  const folded = new Set([...routineStacks(messages, m => m).values()].flatMap(run => run.slice(1).map(m => m.id)));
+  const authors = authorsOf(messages.filter(m => !folded.has(m.id)), group, ownNotes, key => memberPhoto(group, { key, me: false }, state.links, faceOf));
+  /** `inStack`: a message inside a folded row, as that row's writer, its picture beside the stack's last one. */
+  const authorProps = (m: StoredMessage, inStack?: MessageAuthor) => {
+    const author = inStack ?? authors.get(m.id);
+    if (!author) return {};
+    const inRoster = group.members.some(x => x.key === author.key);
+    return { author, ...(inRoster && { onOpenAuthor: () => { setFocusMember(author.key); setShowMembers(true); } }) };
+  };
   const peerOf = (paymentId: string) => { const linkId = state.payments[paymentId]?.linkId; return state.edges?.find(l => l.id === linkId)?.peerPubKeyZ32 ?? ""; };
   // A row of the timeline: an event, a payment's note, or a message.
-  const row = (m: StoredMessage) => m.event
+  const row = (m: StoredMessage, inStack?: MessageAuthor) => m.event
     ? <div key={m.id} data-testid="group-event" className="flex justify-center mb-3.5 px-6"><span className="rounded-lg bg-surface-alt/90 px-3 py-1.5 text-center text-[11px] text-text-muted">{eventText(m, group, t)}</span></div>
     // A note about a payment this device is part of is shown under its own bubble instead.
     : m.groupPay ? (ownNotes.has(m.groupPay.id) ? null : <GroupPaymentNote key={m.id} note={m.groupPay} group={group} />)
     : m.paymentId ? <div key={m.id} data-testid="group-payment">
-      <MessageBubble message={shownOf(m)} peerAck={Number.MAX_SAFE_INTEGER} peerPubKey={peerOf(m.paymentId)} linkId={`group:${groupId}`} {...forwarding.rowProps(shownOf(m))} />
+      <MessageBubble message={shownOf(m)} peerAck={Number.MAX_SAFE_INTEGER} peerPubKey={peerOf(m.paymentId)} linkId={`group:${groupId}`} {...forwarding.rowProps(shownOf(m))} {...authorProps(m, inStack)} />
       {(() => { const note = captionOf(state, notes, m, group.myKey); return note && <GroupPaymentCaption note={note} group={group} />; })()}
     </div>
-    : <MessageBubble key={m.id} message={shownOf(m)} peerAck={Number.MAX_SAFE_INTEGER} linkId={`group:${groupId}`} {...forwarding.rowProps(shownOf(m))} highlight={search.highlight(m.id)}
+    : <MessageBubble key={m.id} message={shownOf(m)} peerAck={Number.MAX_SAFE_INTEGER} linkId={`group:${groupId}`} {...forwarding.rowProps(shownOf(m))} highlight={search.highlight(m.id)} {...authorProps(m, inStack)}
       onReply={replyTarget(m, true) ? () => { setEditing(null); setReplyingTo(m); } : undefined} quote={quoteOf(m)}
       onEdit={canEditInGroup(m) && !m.card && group.canSend ? () => { setReplyingTo(null); setEditing(m); } : undefined}
       onReact={replyTarget(m, true) && group.canSend ? emoji => react(m.id, emoji) : undefined} reactionName={reactionName}
@@ -447,8 +461,11 @@ export function GroupChat() {
               if (stacked.has(m.id)) return null;
               const run = stacks.get(m.id);
               if (!run) return row(m);
+              // The folded row is one message of its sender's run: their colour, and their picture when it ends the run.
               return <RoutineStack key={`stack:${m.id}`} name={m.sender === "me" ? undefined : nameOf("peer", m.member) ?? undefined} mine={m.sender === "me"}
-                cards={run.map(r => r.card as RoutineCard)}>{run.map(row)}</RoutineStack>;
+                cards={run.map(r => r.card as RoutineCard)} {...authorProps(m)}>
+                {run.map((r, i) => { const head = authors.get(m.id); return row(r, head && { ...head, last: i === run.length - 1 }); })}
+              </RoutineStack>;
             });
           })()}
         </div>
@@ -461,7 +478,7 @@ export function GroupChat() {
       {!joiningByLink && !forwarding.selecting && <MessageInput draftId={`group:${groupId}`} key={groupId} onSend={send} disabled={!group.canSend} maxLength={16_384} recipient={group.name} mentions={mentions}
         onTyping={group.profile === "mesh" ? onTyping : undefined}
         reply={replyingTo ? { key: replyingTo.id, name: nameOf(replyingTo.sender === "me" ? "me" : "peer", replyingTo.member), snippet: replySnippet(replyingTo.text),
-          mine: replyingTo.sender === "me", onCancel: () => setReplyingTo(null) } : undefined}
+          mine: replyingTo.sender === "me", ...(replyingTo.sender === "peer" && replyingTo.member && { member: replyingTo.member }), onCancel: () => setReplyingTo(null) } : undefined}
         // Editing one of mine (WISP 9xx § Edits): the new text shows here at once and goes to the members; @ names more.
         edit={editing ? { key: editing.id, text: editing.text, snippet: replySnippet(editing.text), onClose: () => setEditing(null),
           onSave: async (text, extra) => (await engine.call("editMessage", { linkId: `group:${groupId}`, messageId: editing.id, text, ...(extra?.mentions?.length && { mentions: extra.mentions }) })
@@ -474,7 +491,7 @@ export function GroupChat() {
         paymentsUnavailable={others.length === 0 ? t("group.chat.nobodyElse") : undefined}
         paymentComposer={close => <GroupPaymentComposer group={group} onClose={close} />} />}
 
-      {showMembers && <GroupMembersDialog group={group} onClose={() => setShowMembers(false)} />}
+      {showMembers && <GroupMembersDialog group={group} focusKey={focusMember} onClose={() => { setShowMembers(false); setFocusMember(undefined); }} />}
       {viewingPicture && group.picture && <AvatarViewer src={group.picture} name={group.name || t("group.chat.unnamed")} returnFocus={avatarButton} onClose={() => setViewingPicture(false)} />}
       {sharing && group.entryLink && <GroupShareDialog group={group} created={sharing === "created"} onClose={() => setSharing("")} />}
       {confirmLeave && <LeaveGroupDialog group={group} onClose={() => setConfirmLeave(false)}

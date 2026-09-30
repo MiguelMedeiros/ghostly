@@ -5,7 +5,7 @@ import { engine } from "@ghostly/browser/platform/engine";
 import type { GroupMemberView, GroupView, LinkView } from "@ghostly/browser/shared/types";
 import { useBackdropDismiss } from "../hooks/useDismiss";
 import { contactTag, publicKeyLabel } from "../lib/publicKeyLabel";
-import { edgeDot, edgeLabel, groupStatusText, memberName } from "../lib/groups";
+import { edgeDot, edgeLabel, groupStatusText, memberName, memberPhoto } from "../lib/groups";
 import { agoIn } from "../lib/relativeTime";
 import { GroupLinkPanel } from "./GroupLinkPanel";
 import { RemoveMemberDialog } from "./RemoveMemberDialog";
@@ -25,7 +25,8 @@ const HUB_ROLES = ["auto", "pin", "exclude"] as const;
 
 
 /** Who is in a group, with what role; what the admin can do about it; whom to invite; and who can read what. */
-export function GroupMembersDialog({ group, onClose }: { group: GroupView; onClose(): void }) {
+/** `focusKey`: the member the chat opened this for (their name or picture above a message), shown and marked in the list. */
+export function GroupMembersDialog({ group, onClose, focusKey }: { group: GroupView; onClose(): void; focusKey?: string }) {
   const id = useId();
   const { t, language } = useI18n();
   const contactName = (link: LinkView) => link.label || link.peerNick || t("common.unnamedContact", { key: contactTag(link.peerPubKeyZ32) });
@@ -61,13 +62,12 @@ export function GroupMembersDialog({ group, onClose }: { group: GroupView; onClo
     return linkId ? state?.links.find(l => l.id === linkId) : undefined;
   };
   const contactKey = (key: string) => contactOf(key)?.peerPubKeyZ32;
-  // A member's picture, when this app has one: mine, or what a member who is also a contact sent in our chat (the
-  // identity they are shown as wins, as in the chat). Community members are not contacts: they have none here.
-  const photoOf = (m: GroupMemberView) => {
-    if (m.me) return state?.settings.avatar || undefined;
-    const link = contactOf(m.key);
-    return link ? faces(link.peerPubKeyZ32)?.photo ?? link.peerAvatar : undefined;
-  };
+  const photoOf = (m: GroupMemberView) => memberPhoto(live, m, state?.links, faces, state?.settings.avatar);
+  // The member whose name or picture was tapped in the chat: their row, in sight and marked.
+  const list = useRef<HTMLUListElement>(null);
+  useEffect(() => {
+    if (focusKey) list.current?.querySelector<HTMLElement>(`[data-key="${CSS.escape(focusKey)}"]`)?.scrollIntoView?.({ block: "nearest" });
+  }, [focusKey]);
   return createPortal(<dialog ref={dialog} {...backdrop} onCancel={e => { e.preventDefault(); onClose(); }} aria-labelledby={`${id}-title`} data-testid="group-members-dialog"
     className="m-auto w-[calc(100%_-_2rem)] max-w-md max-h-[90dvh] overflow-y-auto rounded-2xl border border-border bg-sidebar-bg p-5 text-text-primary shadow-2xl backdrop:bg-black/60">
     <div className="flex items-start justify-between gap-3">
@@ -106,8 +106,9 @@ export function GroupMembersDialog({ group, onClose }: { group: GroupView; onClo
       </button>
     </div>
     {live.status === "active" && (live.isAdmin || (live.profile === "community" && live.entryLink)) && <GroupLinkPanel group={live} />}
-    <ul className="mt-3 max-h-56 space-y-1 overflow-y-auto" data-testid="group-member-list">
-      {live.members.map(m => <li key={m.key} data-testid="group-member" data-key={m.key} data-role={m.role} className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg px-2 py-1.5 hover:bg-surface-hover">
+    <ul ref={list} className="mt-3 max-h-56 space-y-1 overflow-y-auto" data-testid="group-member-list">
+      {live.members.map(m => <li key={m.key} data-testid="group-member" data-key={m.key} data-role={m.role} data-focused={m.key === focusKey || undefined}
+        className={`flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg px-2 py-1.5 hover:bg-surface-hover ${m.key === focusKey ? "bg-surface-hover ring-1 ring-accent/60" : ""}`}>
         <span role="img" aria-label={m.online ? t("group.members.reachable") : t("group.members.notReachable")} className={`h-2 w-2 shrink-0 rounded-full ${m.edge || m.me ? edgeDot(m) : m.online ? "bg-accent" : "bg-text-muted"}`} />
         <MemberAvatar src={photoOf(m)} name={m.me ? state?.settings.nick || memberName(m, t) : memberName(m, t)} />
         {/* The name keeps room for about 16 characters: the badges and an admin's buttons go under it when the row is narrower (a phone, a long word in another language). */}
