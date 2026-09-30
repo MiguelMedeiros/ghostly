@@ -6,7 +6,7 @@ import { externalLinkProps } from "../../lib/externalLink";
 import { agoIn } from "../../lib/relativeTime";
 import { JUMP_EVENT } from "../../lib/replies";
 import { RESULT_TONE, routineSummary, untilIn } from "../../lib/statusCards";
-import { memberText } from "../../lib/memberColors";
+import { useMemberText } from "../../contexts/MemberColorsContext";
 import { SenderAvatar, type MessageAuthor } from "./SenderAvatar";
 
 /*
@@ -43,6 +43,7 @@ export function RoutineStack({ name, cards, mine, children, author, onOpenAuthor
   author?: MessageAuthor; onOpenAuthor?: () => void;
 }) {
   const [open, setOpen] = useState(false);
+  const memberText = useMemberText();
   const ref = useRef<HTMLDivElement>(null);
   const listId = useId();
   useEffect(() => {

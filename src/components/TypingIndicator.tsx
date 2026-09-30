@@ -1,7 +1,7 @@
 import type { TypingActivity, TypingKind } from "@ghostly/core";
 import { useI18n } from "../contexts/I18nContext";
 import { usePeerTypingActivity } from "../hooks/useTyping";
-import { memberText } from "../lib/memberColors";
+import { useMemberText } from "../contexts/MemberColorsContext";
 
 /** Three dots in a soft wave; still, and all shown, when motion is reduced (index.css `.typing-dots`). */
 export function TypingDots() {
@@ -39,8 +39,10 @@ const GROUP_LABELS = {
 export interface GroupTyper { name: string; key?: string; kind?: TypingKind; status?: string }
 
 /** A typer's name, isolated, in their colour (lib/memberColors.ts) when their key is known. */
-const TyperName = ({ typer }: { typer: GroupTyper }) =>
-  <bdi data-testid="group-typing-name" data-key={typer.key} className={typer.key ? `font-medium ${memberText(typer.key)}` : undefined}>{typer.name}</bdi>;
+function TyperName({ typer }: { typer: GroupTyper }) {
+  const memberText = useMemberText();
+  return <bdi data-testid="group-typing-name" data-key={typer.key} className={typer.key ? `font-medium ${memberText(typer.key)}` : undefined}>{typer.name}</bdi>;
+}
 
 /** Stand-ins for the names while the sentence is translated: the names go back in as elements of their own. */
 const NAME = "\u0001", OTHER = "\u0002";
