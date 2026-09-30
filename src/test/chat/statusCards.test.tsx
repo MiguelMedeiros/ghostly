@@ -97,6 +97,16 @@ describe("a task card in the chat", () => {
     expect(screen.getByTestId("status-card-status")).toHaveTextContent("متوقفة");
   });
 
+  it("says when it started and was updated as a label and a time in Japanese and Chinese, \"just now\" included", async () => {
+    const times = { startedAt: Date.now() - 3 * 60_000, updatedAt: Date.now() };
+    for (const [language, text] of [["ja", "開始：3 分前 · 更新：今"], ["zh", "开始：3分钟前 · 更新：现在"]] as const) {
+      const { user, unmount } = renderApp(<MessageBubble message={message(card(times))} peerPubKey="peer" />, { language });
+      await user.click(screen.getByTestId("status-card-toggle"));
+      expect(screen.getByTestId("status-card-details")).toHaveTextContent(text);
+      unmount();
+    }
+  });
+
   it("shows a message without a card as its text", () => {
     renderApp(<MessageBubble message={{ id: "m", text: "just words", sender: "peer", timestamp: 1 }} peerPubKey="peer" />);
     expect(screen.queryByTestId("status-card")).not.toBeInTheDocument();
