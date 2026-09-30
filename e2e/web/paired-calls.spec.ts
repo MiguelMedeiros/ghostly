@@ -102,3 +102,20 @@ test("calls need a live connection: on the DHT the buttons are off and say so", 
   await dhtOnly(bob, false);
   for (const p of [alice, bob]) await expect(p.page.getByTestId("call-audio")).toBeEnabled({ timeout: 120_000 });
 });
+
+test("the app reopened while a call rings rings again, with one incoming line", { tag: ["@feature:calls.paired", "@feature:calls.video"] }, async ({ peer }) => {
+  const [alice, bob] = await Promise.all([peer("reopen-alice"), peer("reopen-bob")]);
+  await pair(alice, bob);
+  await expect(alice.page.getByTestId("call-video")).toBeEnabled();
+  await alice.page.getByTestId("call-video").click();
+  await expect(bob.page.getByText("Incoming video call...")).toBeVisible();
+
+  // The caller's same offer reaches the reopened app: it rings again, and the chat keeps one line for the call.
+  await bob.page.reload();
+  await expect(bob.page.getByText("Incoming video call...")).toBeVisible({ timeout: 45_000 });
+  await expect(chat(bob).getByText("Incoming video call", { exact: true })).toHaveCount(1);
+
+  await alice.page.getByTitle("End call").click();
+  await expect(chat(bob).getByText("Missed video call")).toBeVisible();
+  await expect(chat(bob).getByText("Incoming video call", { exact: true })).toHaveCount(1);
+});
