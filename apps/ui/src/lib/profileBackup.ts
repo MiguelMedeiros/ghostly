@@ -42,7 +42,10 @@ async function withFileBytes(peer: DatabaseSnapshot | null, active: boolean): Pr
   if (pieces) { pieces.keys = []; pieces.values = []; }
 }
 
-const isArkRecord = (key: IDBValidKey) => key === "arkWallet" || (typeof key === "string" && (key.startsWith("arkWallet-retired-") || key.startsWith("arkWallet-mode-")));
+const isRecordOf = (rail: "arkWallet" | "barkWallet") => (key: IDBValidKey) => key === rail || (typeof key === "string" && (key.startsWith(`${rail}-retired-`) || key.startsWith(`${rail}-mode-`)));
+const isArkRecord = isRecordOf("arkWallet");
+/** A Bark wallet keeps its coins in a database of its own, named after its id (`ghostly-bark-<id>`), which no bundle carries. */
+const isBarkRecord = isRecordOf("barkWallet");
 
 /**
  * Everything of a profile — chats and keys, messages and files, wallets and their journal, services,
@@ -104,15 +107,18 @@ export async function restoreProfileBackup(text: string, passphrase: string): Pr
   if (payload?.format !== "ghostly-profile" || payload.version !== 1 || typeof payload.profile?.name !== "string" || !payload.storage || typeof payload.storage !== "object" || !payload.databases) throw new Error("This backup does not hold a profile");
   const id = newProfileId(), ns = namespaceOf(id);
 
-  // Every Ark wallet gets a new id, with or without a copy of its database: a restored profile must never
-  // share a database with the one it was copied from, which may still be on this device.
+  // Every Ark and Bark wallet gets a new id, with or without a copy of its database: a restored profile must never
+  // share a database with the one it was copied from, which may still be on this device. A Bark wallet's is never in
+  // the bundle: under its new id it starts empty and the server's recovery scan fills it from the phrase, as a
+  // restore of a Bark backup does.
   const walletIds = new Map<string, string>();
   const ark = payload.databases.ark ?? {};
   const peer = payload.databases.peer;
   const settings = peer?.stores.find((store) => store.name === "settings");
+  const hasOwnDatabase = (key: IDBValidKey) => isArkRecord(key) || isBarkRecord(key);
   for (const [i, value] of (settings?.values ?? []).entries()) {
     const walletId = (value as { config?: { walletId?: unknown } })?.config?.walletId;
-    if (isArkRecord(settings!.keys[i]) && typeof walletId === "string" && !walletIds.has(walletId)) walletIds.set(walletId, crypto.randomUUID());
+    if (hasOwnDatabase(settings!.keys[i]) && typeof walletId === "string" && !walletIds.has(walletId)) walletIds.set(walletId, crypto.randomUUID());
   }
   for (const [oldId, fresh] of walletIds) if (Object.prototype.hasOwnProperty.call(ark, oldId)) await restoreArkDatabase(fresh, ark[oldId]);
   // Fedimint client databases are files of this origin, not in the bundle: every federation gets a new file name,
@@ -129,7 +135,7 @@ export async function restoreProfileBackup(text: string, passphrase: string): Pr
           const record = value as { config?: { walletId?: string } };
           const moved = record?.config?.walletId && walletIds.get(record.config.walletId);
           if (typeof store.keys[i] === "string" && (store.keys[i] as string).startsWith("fedimint")) return freshFedimint(value);
-          return isArkRecord(store.keys[i]) && moved ? { ...record, config: { ...record.config, walletId: moved } } : value;
+          return hasOwnDatabase(store.keys[i]) && moved ? { ...record, config: { ...record.config, walletId: moved } } : value;
         });
       }
       if (store.name === "paymentIntents") {
