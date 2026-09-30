@@ -161,9 +161,17 @@ test("Ark: in, a Send from the wallet, a Send in the chat and a Request paid in 
   const sats = async () => Number((await balance(bob).innerText()).trim().match(/^[\d,]*/)![0].replace(/,/g, "") || NaN);
   const expired = () => panel(bob).locator("[data-testid=ark-sweeping], [data-testid=ark-recoverable], [data-testid=ark-small]");
   await expect.poll(async () => (await expired().count()) > 0 || (await sats()) === 400, { timeout: 60_000 }).toBe(true);
-  const back = await exclusive("regtest-chain", () => recoverExpiredArk(panel(bob), "bob", sats));
   // 500 in, 200 out, 100 in; a recovery goes through a batch, which costs the server's input fee (e2e/infra: 1%).
-  await expect.poll(async () => (await sats()) + (await smallExpiredArk(panel(bob))), { timeout: 60_000 }).toBeGreaterThanOrEqual(back ? 395 : 400);
+  // The coins may expire only after the 400 showed (their batch is Alice's funding, 180 s old at most): whenever
+  // expired ones show, they are recovered, until the 400 are held. A failed recovery fails the test, never retried.
+  let back = 0;
+  const held = async () => (await sats()) + (await smallExpiredArk(panel(bob)));
+  for (const until = Date.now() + 4 * 60_000; ;) {
+    back += await exclusive("regtest-chain", () => recoverExpiredArk(panel(bob), "bob", sats));
+    if ((await held()) >= (back ? 395 : 400) || Date.now() > until) break;
+    await bob.page.waitForTimeout(2_000);
+  }
+  expect(await held(), "Bob's 400 sats, the expired ones set apart included").toBeGreaterThanOrEqual(back ? 395 : 400);
   expect(await sats()).toBeLessThanOrEqual(400);
 });
 
