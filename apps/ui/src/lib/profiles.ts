@@ -25,6 +25,16 @@ export const PROFILE_THEMES: ColorTheme[] = ["cyan", "purple", "classic", "monoc
 /** The swatch each theme shows in the switcher and on the profile's avatar. */
 export const THEME_COLOR: Record<ColorTheme, string> = { cyan: "#22d3ee", purple: "#a78bfa", classic: "#00a884", monochrome: "#d4d4d8" };
 const DEFAULT_ENTRY: ProfileEntry = { id: "", name: "Personal", createdAt: 0 };
+/**
+ * The first profile's name until someone renames it, in the app's language: the registry keeps the built-in English
+ * one, so a change of language changes it too.
+ */
+let defaultName = DEFAULT_ENTRY.name;
+export function setDefaultProfileName(name: string): void {
+  defaultName = cleanName(name) || DEFAULT_ENTRY.name;
+}
+/** A profile as it is shown: the first one, never renamed, by the name of the app's language. */
+const shown = (entry: ProfileEntry): ProfileEntry => (entry.id === "" && entry.name === DEFAULT_ENTRY.name ? { ...entry, name: defaultName } : entry);
 
 
 function read(): Registry {
@@ -46,7 +56,7 @@ function write(registry: Registry, notify = true): void {
 }
 const cleanName = (name: string) => name.replace(/\s+/g, " ").trim().slice(0, 32);
 
-export function listProfiles(): ProfileEntry[] { return read().profiles; }
+export function listProfiles(): ProfileEntry[] { return read().profiles.map(shown); }
 
 /**
  * The profile this page runs as, fixed when it starts (see the entry points). The registry's choice can change under
@@ -61,7 +71,7 @@ export function chosenProfileId(): string { return read().active; }
 export function activeProfileId(): string { return running ?? chosenProfileId(); }
 export function currentProfile(): ProfileEntry {
   const id = activeProfileId();
-  return read().profiles.find((p) => p.id === id) ?? { id, name: id || DEFAULT_ENTRY.name, createdAt: 0 };
+  return shown(read().profiles.find((p) => p.id === id) ?? { id, name: id || DEFAULT_ENTRY.name, createdAt: 0 });
 }
 
 export const settingsKeyFor = (id: string) => (namespaceOf(id) ? `ghostly_${namespaceOf(id)}_app_settings` : "ghostly_app_settings");
@@ -181,7 +191,7 @@ export function switchProfile(id: string, options: { route?: string; avatar?: st
   // This page's own profile, not the registry's choice: another tab may have made that choice already.
   if (id === activeProfileId()) return;
   rememberRoute(activeProfileId());
-  const pending: PendingSwitch = { id, name: target.name, color: THEME_COLOR[themeOf(id)], avatar: options.avatar, at: Date.now() };
+  const pending: PendingSwitch = { id, name: shown(target).name, color: THEME_COLOR[themeOf(id)], avatar: options.avatar, at: Date.now() };
   try { sessionStorage.setItem(SWITCH_KEY, JSON.stringify(pending)); } catch { /* no overlay after the reload */ }
   window.dispatchEvent(new CustomEvent<PendingSwitch>("profile-switching", { detail: pending }));
   // A moment for the overlay to be painted: the browser keeps that frame until the new page draws. Until
