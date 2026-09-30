@@ -1,4 +1,4 @@
-// Builds Iroh for browsers (native-transports/iroh-web) into packages/iroh-web/pkg.
+// Builds Iroh for browsers (native/transports/iroh-web) into packages/iroh-web/pkg.
 // The output is committed, so the web app, the extension and their Docker/CI
 // builds need no Rust. Run it after changing the crate or bumping iroh:
 //
@@ -21,14 +21,14 @@ import { gzipSync } from 'node:zlib'
 import { irohWebSourceHash } from './iroh-web-source.mjs'
 
 const root = resolve(import.meta.dirname, '..')
-const crate = join(root, 'native-transports/iroh-web')
+const crate = join(root, 'native/transports/iroh-web')
 const pkg = join(root, 'packages/iroh-web/pkg')
 
 const manifest = readFileSync(join(crate, 'Cargo.toml'), 'utf8')
 const bindgen = /wasm-bindgen = "=([\d.]+)"/.exec(manifest)?.[1]
 const iroh = /iroh = \{ version = "=([\d.]+)"/.exec(manifest)?.[1]
-const desktopIroh = /iroh = "=([\d.]+)"/.exec(readFileSync(join(root, 'native-transports/Cargo.toml'), 'utf8'))?.[1]
-if (!bindgen || !iroh) throw new Error('Pin wasm-bindgen and iroh with "=" in native-transports/iroh-web/Cargo.toml')
+const desktopIroh = /iroh = "=([\d.]+)"/.exec(readFileSync(join(root, 'native/transports/Cargo.toml'), 'utf8'))?.[1]
+if (!bindgen || !iroh) throw new Error('Pin wasm-bindgen and iroh with "=" in native/transports/iroh-web/Cargo.toml')
 if (iroh !== desktopIroh) throw new Error(`Browser iroh ${iroh} differs from the Desktop's ${desktopIroh}: bump both together`)
 
 const run = (cmd, args, env = {}) => execFileSync(cmd, args, { stdio: ['ignore', 'pipe', 'inherit'], env: { ...process.env, ...env } }).toString().trim()

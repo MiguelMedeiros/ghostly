@@ -14,7 +14,7 @@ import { pathToFileURL } from "node:url";
  * The Rust job (Tauri Backend). Only a draft skips it without one of these: `ready_for_review` runs
  * everything again.
  */
-export const RUST = /^(src-tauri\/|native-transports\/|Cargo\.(toml|lock)$|\.github\/workflows\/ci\.yml$)/;
+export const RUST = /^(src-tauri\/|native\/transports\/|Cargo\.(toml|lock)$|\.github\/workflows\/ci\.yml$)/;
 
 /**
  * Everything the Website jobs (checks and browser checks) read: a directory ends in `/`. The site builds from

@@ -314,8 +314,8 @@ jobs:
 
       # The Iroh framing, limits and reconnects, on loopback: seconds, and the
       # dependencies are already built for src-tauri.
-      - name: Test (native-transports)
-        run: cargo test --manifest-path native-transports/Cargo.toml
+      - name: Test (native/transports)
+        run: cargo test --manifest-path native/transports/Cargo.toml
 
       - name: Leave Ghostly's own crates out of the saved Cargo cache
         id: prune

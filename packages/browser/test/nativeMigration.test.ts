@@ -9,8 +9,8 @@ import { nativePeer } from "./helpers/nativePeer";
 
 it.skipIf(process.env.TEST_NATIVE !== "1")("migrates real Iroh to real HyperDHT with stable participation, durable receipts and deduplication", async () => {
   // Local UDP discovery avoids making public relay uptime a test prerequisite.
-  const { default: testnet } = await import("../../../native-transports/hyperdht/node_modules/hyperdht/testnet.js");
-  const { createHyperEndpoint } = await import("../../../native-transports/hyperdht/endpoint.mjs");
+  const { default: testnet } = await import("../../../native/transports/hyperdht/node_modules/hyperdht/testnet.js");
+  const { createHyperEndpoint } = await import("../../../native/transports/hyperdht/endpoint.mjs");
   const net = await testnet(3);
   const hyper = await Promise.all([31,32].map(seed => createHyperEndpoint(Buffer.alloc(32,seed), { bootstrap: net.bootstrap, host: "127.0.0.1" }))) as NativeEndpoint[];
   const iroh = await Promise.all([31,32].map(seed => nativePeer(resolve("../../target/debug/examples/iroh-peer"), seed)));

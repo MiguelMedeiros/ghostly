@@ -19,7 +19,7 @@ HyperDHT is a native layer-1 candidate of the one chat ([400](400-chat.md), [100
 
 ## Browser profile: through a HyperDHT relay (revision 0.3)
 
-A browser has no UDP, so it cannot run HyperDHT itself. It can reach it through a **HyperDHT relay**: a server that runs the UDP half of HyperDHT and talks to the browser over one WebSocket (Holepunch's `@hyperswarm/dht-relay` protocol, [implementation](../../native-transports/hyperdht-relay/)). The chat session and its wire are the Desktop's: the same preface, the same length-prefixed frames, the same binding. A browser and a Desktop talk HyperDHT to each other.
+A browser has no UDP, so it cannot run HyperDHT itself. It can reach it through a **HyperDHT relay**: a server that runs the UDP half of HyperDHT and talks to the browser over one WebSocket (Holepunch's `@hyperswarm/dht-relay` protocol, [implementation](../../services/hyperdht-relay/)). The chat session and its wire are the Desktop's: the same preface, the same length-prefixed frames, the same binding. A browser and a Desktop talk HyperDHT to each other.
 
 **Non-custodial only.** dht-relay's client can hand its secret key to the relay, which then runs the handshake and the stream for it ("custodial", the library's default). A Ghostly client MUST NOT do that. In the non-custodial mode:
 
