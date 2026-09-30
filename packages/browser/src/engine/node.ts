@@ -1314,6 +1314,7 @@ export class GhostlyNode implements EngineImplementation {
       transport: {
         ...this.transport.describe(), ...(this.options.irohWeb ? { iroh: { relays: this.irohRelays, defaults: [...DEFAULT_IROH_RELAYS] } } : {}),
         ...(this.transport.configure && { direct: true }), ...(this.transport.discovery && { discovery: this.transport.discovery() }),
+        ...(typeof RTCPeerConnection === "undefined" && { webrtc: false as const }),
       },
       // Group edges are links the engine runs, not chats anyone sees.
       links: [...this.links.values()].filter((live) => !live.stored.group).map((live) => this.viewOf(live)).sort((a, b) => b.createdAt - a.createdAt),

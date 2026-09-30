@@ -1410,6 +1410,11 @@ export interface EngineState {
     direct?: boolean;
     /** How reads go and how each relay is doing, for the connection panel's Details. */
     discovery?: DiscoveryStatus;
+    /**
+     * False where this client has no WebRTC (Ghostly Desktop on Linux: WebKitGTK has none). Group links are WebRTC
+     * only (WISP 9xx), so no member of a group can be reached from it. Absent where it has.
+     */
+    webrtc?: false;
   };
   links: LinkView[];
   services: ServiceView[];

@@ -32,9 +32,12 @@ export function GroupConnection({ group }: { group: GroupView }) {
   const reachable = others.filter(m => m.edge?.state === "open").length;
   const failing = others.some(m => m.edge?.state === "error");
   const connecting = others.some(m => m.edge?.state === "connecting");
-  const kind: GroupKind = !online ? "offline" : others.length === 0 ? "waiting" : reachable === others.length ? "connected"
+  // Group links are WebRTC only: an app with none (Ghostly Desktop on Linux) reaches no member, however long it tries.
+  const noLinks = state?.transport.webrtc === false && others.length > 0;
+  const kind: GroupKind = !online ? "offline" : others.length === 0 ? "waiting" : noLinks ? "failure" : reachable === others.length ? "connected"
     : reachable > 0 ? "partial" : failing ? "failure" : "waiting";
   const label = !online ? t("group.connection.offline") : others.length === 0 ? t("group.connection.onlyYou")
+    : noLinks ? t("group.connection.noWebrtc")
     : reachable === 0 ? (connecting ? t("group.connection.connecting") : t("group.connection.nobody")) : t("group.connection.reachable", { reachable, total: others.length });
   const dot = kind === "partial" ? "bg-amber-500" : dots[kind];
   // Over what the reachable members are live: the icon takes the mark of the transport they share.
@@ -66,6 +69,7 @@ export function GroupConnection({ group }: { group: GroupView }) {
         </div>
         {carried && <p className="mt-0.5 text-[11px]" data-testid="group-connection-transports">{carried.line}</p>}
         {!online && <p className="mt-1 text-[11px]">{t("group.connection.offlineHint")}</p>}
+        {online && noLinks && <p className="mt-1 text-[11px]" data-testid="group-connection-no-webrtc">{t("group.connection.noWebrtcHint")}</p>}
         <ul className="mt-3 space-y-1" data-testid="group-connection-members">
           {others.map(m => {
             const down = m.edge && m.edge.state !== "open";
@@ -76,7 +80,7 @@ export function GroupConnection({ group }: { group: GroupView }) {
                   <span className="block truncate text-text-primary">{memberName(m, t)}</span>
                   <span className="block truncate text-[11px]" data-testid="group-connection-member-status">{edgeLabel(m, now, t, agoIn(language))}</span>
                 </span>
-                {down && online && <button disabled={busy !== ""} onClick={() => void reconnect(m.edge!.linkId)} data-testid="group-connection-reconnect"
+                {down && online && !noLinks && <button disabled={busy !== ""} onClick={() => void reconnect(m.edge!.linkId)} data-testid="group-connection-reconnect"
                   className={`min-h-8 shrink-0 rounded-md px-2 text-accent hover:bg-surface-alt disabled:opacity-40 ${focus}`}>{busy === m.edge!.linkId ? t("group.connection.trying") : t("group.connection.reconnect")}</button>}
               </div>
               {m.edge?.state === "error" && m.edge.error && <p className="mt-0.5 break-words text-[11px] text-danger">{m.edge.error}</p>}
