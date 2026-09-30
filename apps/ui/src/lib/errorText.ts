@@ -1,4 +1,6 @@
+import { parseEngineError, type EngineErrorCode } from "@ghostly/core";
 import type { Translate, TranslationKey } from "../contexts/I18nContext";
+import { formatAmount } from "./amount";
 import { english } from "./english";
 
 /*
@@ -137,6 +139,39 @@ const RULES: readonly Rule[] = [
 ];
 
 /**
+ * The engine's known errors (@ghostly/core ENGINE_ERRORS) that no rule above says: read back into their code and
+ * values, and said with `errors.engine.<code>`. A code a rule above already says is not here: the rule goes first.
+ */
+const ENGINE: Partial<Record<EngineErrorCode, TranslationKey>> = {
+  lnurlUnreachable: "errors.engine.lnurlUnreachable",
+  hostUnreachable: "errors.engine.hostUnreachable",
+  networkUnreachable: "errors.engine.networkUnreachable",
+  hostTimedOut: "errors.engine.hostTimedOut",
+  networkTimedOut: "errors.engine.networkTimedOut",
+  testMintOnMainnet: "errors.engine.testMintOnMainnet",
+  realMintOnTestnet: "errors.engine.realMintOnTestnet",
+  mintHoldsSats: "errors.engine.mintHoldsSats",
+  lastMint: "errors.engine.lastMint",
+  noSharedMint: "errors.engine.noSharedMint",
+  invoiceExpired: "errors.engine.invoiceExpired",
+  lnurlExactly: "errors.engine.lnurlExactly",
+  lnurlRange: "errors.engine.lnurlRange",
+  usdtRpcUnavailable: "errors.engine.usdtRpcUnavailable",
+  usdtNotEnoughTokens: "errors.engine.usdtNotEnoughTokens",
+  usdtNotEnoughGas: "errors.engine.usdtNotEnoughGas",
+  usdtGasAboveLimit: "errors.engine.usdtGasAboveLimit",
+  usdtNeedsSepoliaGas: "errors.engine.usdtNeedsSepoliaGas",
+  fedimintNotInvite: "errors.engine.fedimintNotInvite",
+  fedimintAlreadyJoined: "errors.engine.fedimintAlreadyJoined",
+  fedimintConnecting: "errors.engine.fedimintConnecting",
+  fedimintNotEnough: "errors.engine.fedimintNotEnough",
+  fedimintRealOnTestnet: "errors.engine.fedimintRealOnTestnet",
+  fedimintTestOnMainnet: "errors.engine.fedimintTestOnMainnet",
+};
+/** The values that are amounts: written again the app's way (the engine wrote them its own way). */
+const AMOUNTS = new Set(["amount", "fee", "min", "max"]);
+
+/**
  * The English of an error as it was thrown. `String(error)` on the way through the extension's messages adds
  * "Error: " in front ("Error: The Ghostly peer did not start…"): that goes.
  */
@@ -153,6 +188,12 @@ export function errorText(cause: unknown, t: Translate = english): string {
     if (!found) continue;
     const groups = { ...found.groups };
     return t(rule.key, rule.params ? rule.params(groups, t) : groups);
+  }
+  const known = parseEngineError(raw);
+  const key = known && ENGINE[known.code];
+  if (known && key) {
+    const amount = (value: string) => { const digits = value.replace(/\D/g, ""); return digits ? formatAmount(Number(digits), t.language ?? "en") : value; };
+    return t(key, Object.fromEntries(Object.entries(known.values).map(([name, value]) => [name, AMOUNTS.has(name) ? amount(value) : value])));
   }
   return raw;
 }

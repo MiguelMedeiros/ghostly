@@ -164,7 +164,7 @@ export function PaymentBubble({ paymentId, peerPubKey, fallbackText }: { payment
         data-testid="payment-state"
       >
         {payment.lightningPending && payment.state === "pending" ? t("payments.bubble.state.lightningPending") : payment.kind === "payment" && payment.state === "pending" && payment.target?.method === "bitcoin" ? t("payments.bubble.state.waitingConfirmation") : payment.closed ? t("payments.bubble.state.closed") : stateLabel}
-        {payment.error && payment.state !== "settled" ? ` · ${payment.error}` : ""}
+        {payment.error && payment.state !== "settled" ? ` · ${errorText(payment.error, t)}` : ""}
       </p>
 
       {isRequest && !outgoing && !payment.closed && paymentsOff && (payment.state === "pending" || payment.state === "failed") && (

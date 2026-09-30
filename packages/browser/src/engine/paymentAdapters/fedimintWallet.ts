@@ -1,6 +1,6 @@
 import { generateMnemonic, validateMnemonic } from "@scure/bip39";
 import { wordlist } from "@scure/bip39/wordlists/english.js";
-import { decodeBolt11, isFederationId, type BitcoinNetwork, type PaymentTarget, type WalletNetwork } from "@ghostly/core";
+import { decodeBolt11, engineError, engineText, isFederationId, type BitcoinNetwork, type PaymentTarget, type WalletNetwork } from "@ghostly/core";
 import { store, STORES, transact, wrap } from "../../shared/idb";
 import type { WalletMode } from "../../shared/mints";
 import { fedimintDatabase, loadFedimintSdk, type FederationInfo, type FedimintClient, type FedimintOperation, type FedimintSdk, type RedeemState, type SpendState } from "./fedimintSdk";
@@ -72,7 +72,7 @@ export function assertFedimintAmount(amount: number) {
 /** An invite code as the client takes it: bech32m with the prefix `fed1` (so `fed11…`), one line, bounded. */
 export function normalizeInvite(text: string): string {
   const invite = text.trim();
-  if (!/^fed11[02-9ac-hj-np-z]{20,2000}$/i.test(invite)) throw new Error("That is not a Fedimint invite code: it starts with fed1");
+  if (!/^fed11[02-9ac-hj-np-z]{20,2000}$/i.test(invite)) throw engineError("fedimintNotInvite");
   return invite.toLowerCase();
 }
 
@@ -228,7 +228,7 @@ export class FedimintWallet {
     if (!isFederationId(info.federationId)) throw new Error("The federation answered with an invalid id");
     if (!info.modules.includes("mint")) throw new Error("This federation has no ecash module this app can use (the v1 mint module)");
     if (!info.network) throw new Error("Could not tell which Bitcoin network this federation is on");
-    if (fedimintMode(info.network) !== this.network) throw new WrongNetworkError(fedimintMode(info.network), fedimintMode(info.network) === "mainnet" ? "This federation holds real bitcoin: it belongs in a Mainnet Fedimint wallet" : `This federation is on ${info.network}, a test network: it belongs in a Testnet Fedimint wallet`);
+    if (fedimintMode(info.network) !== this.network) throw new WrongNetworkError(fedimintMode(info.network), fedimintMode(info.network) === "mainnet" ? engineText("fedimintRealOnTestnet") : engineText("fedimintTestOnMainnet", { chain: info.network }));
   }
 
   /**
@@ -241,7 +241,7 @@ export class FedimintWallet {
     const info = await this.gate.within(sdk.preview(code));
     this.checkFederation(info);
     const saved = this.saved ?? await this.newSeed();
-    if (saved.federations.some((f) => f.id === info.federationId)) throw new Error("You already joined this federation");
+    if (saved.federations.some((f) => f.id === info.federationId)) throw engineError("fedimintAlreadyJoined");
     if (saved.federations.length >= MAX_FEDERATIONS) throw new Error(`At most ${MAX_FEDERATIONS} federations per wallet`);
     const database = fedimintDatabase(crypto.randomUUID());
     const mnemonic = await unsealSeed(saved.seed, saved.deviceKey);
@@ -348,7 +348,7 @@ export class FedimintWallet {
     const client = this.clients.get(federationId);
     if (client) return client;
     if (!this.saved?.federations.some((f) => f.id === federationId)) throw new Error(`You have not joined this federation in your ${this.network === "mainnet" ? "Mainnet" : "Testnet"} Fedimint wallet`);
-    throw new Error(this.problems.get(federationId) ?? "Wait for the federation to connect");
+    throw new Error(this.problems.get(federationId) ?? engineText("fedimintConnecting"));
   }
   federation(federationId: string): StoredFederation | undefined { return this.saved?.federations.find((f) => f.id === federationId); }
   /** Joined federations of this network that are open now, in the order they were joined. */
@@ -362,7 +362,7 @@ export class FedimintWallet {
   async spendNotes(federationId: string, amount: number, ghostly = `wallet-${crypto.randomUUID()}`): Promise<{ notes: string; operationId: string }> {
     assertFedimintAmount(amount);
     const client = this.client(federationId);
-    if (sats(await client.balance()) < amount) throw new Error("Not enough in this federation");
+    if (sats(await client.balance()) < amount) throw engineError("fedimintNotEnough");
     const spent = await client.spend(amount * 1000, { cancelAfterSecs: NOTES_REFUND_SECS, ghostly });
     void this.refresh();
     return spent;

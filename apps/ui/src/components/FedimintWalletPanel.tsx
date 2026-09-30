@@ -9,6 +9,7 @@ import { ConfirmRealMoney } from "./ConfirmRealMoney";
 import { useI18n, type Translate } from "../contexts/I18nContext";
 import { satsIn } from "./NetworkTag";
 import { formatAmount } from "../lib/amount";
+import { errorText } from "../lib/errorText";
 
 const short = (id: string) => `${id.slice(0, 8)}…${id.slice(-4)}`;
 /** A history row's kind, in the app's language (the engine's own word when it is a new one). */
@@ -111,7 +112,7 @@ export function FedimintWalletPanel({ wallet, state, backupNow = false }: { wall
       {current && <>
         <p className="text-text-primary" data-testid="fedimint-balance"><span className="text-4xl font-semibold tabular-nums">{formatAmount(current.balance, t.language)}</span><span className="text-text-muted text-sm ms-2">{unit}</span>
           <span className={`block text-xs mt-1 ${test ? "text-yellow-500" : "text-text-muted"}`}>{t(test ? "wallet.fedimint.lineTest" : "wallet.fedimint.line", { name: current.name ?? short(current.id), network: current.network ?? t("wallet.fedimint.unknownNetwork") })}</span></p>
-        {current.status !== "ready" && <Notice tone={current.status === "error" ? "warning" : "muted"} testId="fedimint-status">{current.status === "error" ? t("wallet.fedimint.notAnswering", { error: current.error ?? t("wallet.fedimint.unknownError") }) : t("wallet.fedimint.connecting")}</Notice>}
+        {current.status !== "ready" && <Notice tone={current.status === "error" ? "warning" : "muted"} testId="fedimint-status">{current.status === "error" ? t("wallet.fedimint.notAnswering", { error: current.error ? errorText(current.error, t) : t("wallet.fedimint.unknownError") }) : t("wallet.fedimint.connecting")}</Notice>}
         {federations.length > 1 && <Notice>{t("wallet.fedimint.across", { amount: formatAmount(fm!.balance, t.language), unit, count: federations.length })}</Notice>}
         <Actions value={action} onChange={(next) => { setAction(next); setError(""); }} actions={["receive", "send", "history"]} />
         {action === "receive" && <div className="bg-surface rounded-xl p-4 space-y-4 animate-fade-in">
