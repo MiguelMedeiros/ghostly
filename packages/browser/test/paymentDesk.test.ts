@@ -227,7 +227,12 @@ describe("requests we send", () => {
     link.isDataLinkOpen = false;
     host.waitingPaymentMethods.mockReturnValue([]);
     await expect(desk.request({ linkId: "l", amount: 21, timestamp: 5 })).rejects.toThrow("Your contact took no Cashu or Lightning last time. Try again once the chat is live");
+    // The contact took Cashu, and Cashu is off here: not the contact's word that says no.
+    host.waitingPaymentMethods.mockReturnValue(["cashu"]);
+    enabled.cashu = false;
+    await expect(desk.request({ linkId: "l", amount: 21, timestamp: 6 })).rejects.toThrow("Cashu and Lightning are off in this chat");
     // Off on this device: that is what it says.
+    host.waitingPaymentMethods.mockReturnValue([]);
     enabled.cashu = enabled.lightning = false;
     await expect(desk.request({ linkId: "l", amount: 21, timestamp: 6 })).rejects.toThrow("Cashu and Lightning are off in this chat");
     expect(rows("payments")).toEqual([]);

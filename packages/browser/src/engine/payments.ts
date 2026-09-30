@@ -330,7 +330,7 @@ export class PaymentDesk {
     const ecash = params.rail !== "lightning" && !offHere.cashu && (known ? known.includes("cashu") && link.paymentEnabled("cashu") : link.allowsPayment("cashu"));
     const lightning = params.rail !== "cashu" && !offHere.lightning && (known ? known.includes("lightning") && link.paymentEnabled("lightning") : link.allowsPayment("lightning"));
     // Waiting for live, with a way on here: the contact's word at the last session says no (off, or no wallet then).
-    const theirsOff = waiting && (link.paymentEnabled("cashu") || link.paymentEnabled("lightning"));
+    const theirsOff = !!waiting && !waiting.includes("cashu") && !waiting.includes("lightning") && (link.paymentEnabled("cashu") || link.paymentEnabled("lightning"));
     if (!ecash && !lightning) throw new Error(params.rail && offHere[params.rail] ? offHere[params.rail]! : params.rail ? `${params.rail === "cashu" ? "Cashu" : "Lightning"} is not allowed by both of you here` : held ? "Your contact allowed neither Cashu nor Lightning in this chat" : offHere.cashu && offHere.lightning ? offHere.cashu : theirsOff ? "Your contact took no Cashu or Lightning last time. Try again once the chat is live" : "Cashu and Lightning are off in this chat");
     const quote = lightning ? await this.lightning[network].createInvoice(params.amount, id, params.card) : undefined;
     // A request is in real sats or in test sats, never both: ecash from a test mint, worth nothing, must
