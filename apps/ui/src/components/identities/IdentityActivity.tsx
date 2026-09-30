@@ -13,6 +13,7 @@ import { ago } from "./contactBadges";
 import { contactFace, faceChoice, shownContactName } from "./contactFace";
 import { hostList, profileCounts } from "./profileWords";
 import { useI18n, type Translate } from "../../contexts/I18nContext";
+import { errorText } from "../../lib/errorText";
 import "./identity-activity.css";
 
 
@@ -133,7 +134,7 @@ function PostImage({ image, index, postId, provider, subject }: { image: { host?
     if (busy) return;
     setBusy(true); setError("");
     void engine.call("loadPublicPostImage", { provider, subject, postId, index })
-      .then(v => { setShown(v); if (!v.src) setError(v.miss ? t("identities.activity.notShownWhy", { reason: v.miss }) : t("identities.activity.notShown")); }, e => setError(e instanceof Error ? e.message : String(e)))
+      .then(v => { setShown(v); if (!v.src) setError(v.miss ? t("identities.activity.notShownWhy", { reason: v.miss }) : t("identities.activity.notShown")); }, e => setError(errorText(e, t)))
       .finally(() => setBusy(false));
   };
   return (

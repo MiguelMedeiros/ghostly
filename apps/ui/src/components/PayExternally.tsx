@@ -3,6 +3,7 @@ import { QRCodeSVG } from "qrcode.react";
 import { qrText } from "@ghostly/core";
 import { useServicesPlatform } from "../hooks/useServicesPlatform";
 import { useI18n } from "../contexts/I18nContext";
+import { errorText } from "../lib/errorText";
 
 /**
  * Paying, or being paid, with a wallet that is not Ghostly: the invoice or address as a QR code, as text
@@ -70,7 +71,7 @@ export function PayExternally({ uri, value, testId, note, onPaid, size = 144, ac
               if (!opened) return;
               event.preventDefault();
               setError("");
-              opened.catch((cause: unknown) => setError(t("payments.external.openError", { error: cause instanceof Error ? cause.message : String(cause) })));
+              opened.catch((cause: unknown) => setError(t("payments.external.openError", { error: errorText(cause, t) })));
             }}
           >
             {t("payments.external.open")}
@@ -79,7 +80,7 @@ export function PayExternally({ uri, value, testId, note, onPaid, size = 144, ac
           {onPaid && (
             <button type="button" className={`${button} bg-black/20 hover:bg-black/30`} data-testid={`${testId}-paid`} disabled={busy} title={t("payments.external.paidTitle")} onClick={() => {
               setBusy(true); setError("");
-              onPaid().then(() => setChecked(true), (cause: unknown) => setError(cause instanceof Error ? cause.message : String(cause))).finally(() => setBusy(false));
+              onPaid().then(() => setChecked(true), (cause: unknown) => setError(errorText(cause, t))).finally(() => setBusy(false));
             }}>
               {busy ? t("payments.external.asking") : checked ? t("payments.external.checking") : t("payments.external.paid")}
             </button>

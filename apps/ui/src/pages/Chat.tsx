@@ -84,6 +84,7 @@ import { RoutineStack } from "../components/chat/RoutineCard";
 import { routineStacks } from "../lib/statusCards";
 import { scrollIntoViewGently } from "../lib/motion";
 import { MessageAnnouncer } from "../components/chat/MessageAnnouncer";
+import { errorText } from "../lib/errorText";
 
 /** What a call captures from: the devices the profile chose, read when it asks. */
 const callDevicePreferences = () => ({ audio: preferredDevice("audioinput"), video: preferredDevice("videoinput") });
@@ -282,7 +283,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
         window.dispatchEvent(new Event("session-updated"));
         return null;
       } catch (e) {
-        return e instanceof Error ? e.message : String(e);
+        return errorText(e, t);
       }
     },
     [platform, peerKey, paired, addSystemMessage, replied, t],
@@ -317,10 +318,10 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
         window.dispatchEvent(new Event("session-updated"));
         return null;
       } catch (e) {
-        return e instanceof Error ? e.message : String(e);
+        return errorText(e, t);
       }
     },
-    [wallet, peerKey, addSystemMessage],
+    [wallet, peerKey, addSystemMessage, t],
   );
   const paySend = useCallback((amount: number, memo: string, network?: WalletNetwork, confirmedReal?: boolean) => pay("send", amount, memo, undefined, network, confirmedReal), [pay]);
   const payRequest = useCallback((amount: number, memo: string, method?: "cashu" | "arkade" | "usdt" | "bark" | "bitcoin" | "fedimint" | "spark", _rail?: unknown, network?: WalletNetwork, lightningCard?: string) => pay("request", amount, memo, method, network, undefined, lightningCard), [pay]);
@@ -818,9 +819,11 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
 
       {chatPeer?.hold && (chatPeer.hold.outstanding > 0 || chatPeer.hold.error) && (
         <div data-testid="hold-indicator" className="px-4 py-1 text-[11px] text-text-secondary bg-surface-alt/60 border-t border-border truncate" role="status">
-          {chatPeer.hold.outstanding > 0 && `${chatPeer.hold.outstanding} ${chatPeer.hold.outstanding === 1 ? "item" : "items"} held for ${shownName} · ${(chatPeer.hold.bytes / 1024 / 1024).toFixed(1)} MB of ${Math.round(chatPeer.hold.maxBytes / 1024 / 1024)} MB`}
+          {chatPeer.hold.outstanding > 0 && t(chatPeer.hold.outstanding === 1 ? "chat.hold.heldOne" : "chat.hold.heldMany", {
+            count: chatPeer.hold.outstanding, name: shownName,
+            used: (chatPeer.hold.bytes / 1024 / 1024).toFixed(1), max: Math.round(chatPeer.hold.maxBytes / 1024 / 1024) })}
           {chatPeer.hold.outstanding > 0 && chatPeer.hold.error && " · "}
-          {chatPeer.hold.error && <span className="text-danger">{chatPeer.hold.error}</span>}
+          {chatPeer.hold.error && <span className="text-danger">{errorText(chatPeer.hold.error, t)}</span>}
         </div>
       )}
 
@@ -843,7 +846,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
         // Editing one of mine (WISP 400 § Edits): the new text shows here at once and reaches the contact when it can.
         edit={editing && chatLink ? { key: editing.id, text: editing.text, snippet: replySnippet(editing.text), onClose: () => setEditing(null),
           onSave: async (text, extra) => (await engine.call("editMessage", { linkId: chatLink.id, messageId: editing.id, text, ...(extra?.preview && { preview: extra.preview }) })
-            .catch((e: unknown) => ({ error: e instanceof Error ? e.message : t("chat.editFailed") }))).error } : undefined}
+            .catch((e: unknown) => ({ error: e instanceof Error ? errorText(e, t) : t("chat.editFailed") }))).error } : undefined}
         onEditLast={paired && chatLink ? () => {
           const last = [...messages].reverse().find(editableText);
           if (last) { setReplyingTo(null); setEditing(last); }

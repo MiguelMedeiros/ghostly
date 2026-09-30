@@ -7,6 +7,7 @@ import { showJoinNotice } from "../lib/joinNotice";
 import { pasteShortcut, readClipboardText } from "../lib/clipboard";
 import { useI18n } from "../contexts/I18nContext";
 import type { SessionKeys } from "../lib/storage";
+import { errorText } from "../lib/errorText";
 
 /**
  * Scanned data is only parsed as an invite; never opened as a URL or executed. A group's link
@@ -64,7 +65,7 @@ export function JoinDialog({ onJoin, onOpenChat, onJoinGroup, onClose, autoScan 
       onJoinGroup(value.trim()).catch((cause: unknown) => {
         if (closed.current) return;
         joined.current = false; busyRef.current = false; setBusy(false);
-        setError(cause instanceof Error ? cause.message : t("join.invalid")); setManual(true);
+        setError(cause instanceof Error ? errorText(cause, t) : t("join.invalid")); setManual(true);
       });
       return;
     }

@@ -16,6 +16,7 @@ import { PaymentReview } from "./PaymentReview";
 import { OpenInWallet } from "./OpenInWallet";
 import { ONCHAIN_FEE_CAP } from "./walletCardData";
 import { decimalInput, formatAmount, formatTokenAmount } from "../lib/amount";
+import { errorText } from "../lib/errorText";
 
 const button =
   "px-3 py-1.5 max-md:min-h-11 bg-accent text-on-accent rounded-lg text-xs font-bold hover:bg-accent-hover transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed";
@@ -191,7 +192,7 @@ function PayStep({ wallet, fixedAmount, unit, defaultFee, feeUnit, parse, prepar
           onClick={async () => {
             setBusy(true); setError("");
             try { setReview(await prepare(value, Number(fee))); }
-            catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+            catch (e) { setError(errorText(e, t)); }
             finally { setBusy(false); }
           }}
         >

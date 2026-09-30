@@ -11,6 +11,7 @@ import { Highlight } from "./chat/ChatSearch";
 import { RoundRetry, WhyButton, WhyText } from "./chat/RoundRetry";
 import { useT } from "../contexts/I18nContext";
 import type { ChatFile } from "../lib/types";
+import { errorText } from "../lib/errorText";
 
 /** A press this long is the message's long press (`LONG_PRESS_MS` in MessageBubble.tsx), not a tap. */
 const HELD_MS = 500;
@@ -88,14 +89,14 @@ export function FileBubble({ file, peerName: named, highlight }: { file: ChatFil
 
   const act = (action: FileAction) => {
     setActionError("");
-    void platform?.fileAction?.(file.id, action).catch((error: Error) => setActionError(String(error.message ?? error)));
+    void platform?.fileAction?.(file.id, action).catch((error: Error) => setActionError(errorText(error, t)));
   };
   /** The same path as Download in the message's menu: the system's save dialog where there is one, else a download. */
   const save = () => {
     if (!platform) return;
     setActionError("");
     void downloadFile(platform, file, sanitizeFileName(file.name)).then((result) => { if (result === "missing") setMissing(true); })
-      .catch((error: Error) => setActionError(String(error.message ?? error)));
+      .catch((error: Error) => setActionError(errorText(error, t)));
   };
 
   // A picture's box is there before it is: from the size its sender said, else from what this device found, else
@@ -133,7 +134,7 @@ export function FileBubble({ file, peerName: named, highlight }: { file: ChatFil
     setActionError("");
     setBusy(true);
     // The ring turns until the transfer moves, or the request comes back without moving it.
-    void action().catch((error: Error) => setActionError(String(error.message ?? error))).finally(() => setBusy(false));
+    void action().catch((error: Error) => setActionError(errorText(error, t))).finally(() => setBusy(false));
   };
 
   return (

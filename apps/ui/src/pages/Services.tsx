@@ -7,6 +7,7 @@ import { Block, Button, Notice, Row, Section, Switch, input } from "../component
 import { ButtonGroup, FieldGrid, Page } from "../components/layout";
 import { externalLinkProps } from "../lib/externalLink";
 import { useI18n } from "../contexts/I18nContext";
+import { errorText } from "../lib/errorText";
 
 const GLOBE = <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" /></svg>;
 
@@ -40,7 +41,7 @@ export function Services() {
   const share = async () => {
     setError("");
     try { await platform.shareService(name, target); setName(""); setTarget(""); setAdding(false); }
-    catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+    catch (e) { setError(errorText(e, t)); }
   };
 
   return (
@@ -86,7 +87,7 @@ export function Services() {
                 <Button key={app.id} variant="primary" data-testid="contact-service-open" onClick={() => {
                   setOpenError("");
                   if (!platform.features.openServices) { setOpenError(t("services.openNeedsApp")); return; }
-                  platform.openService(contact.key, app.id).catch((e) => setOpenError(e instanceof Error ? e.message : String(e)));
+                  platform.openService(contact.key, app.id).catch((e) => setOpenError(errorText(e, t)));
                 }}>{t("services.open", { app: app.name ?? app.id })}</Button>
               ))}
             </Row>

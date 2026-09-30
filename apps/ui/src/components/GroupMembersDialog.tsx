@@ -16,6 +16,7 @@ import { avatarFromFile } from "../lib/avatarImage";
 import { ContactMarks } from "./identities/ContactMarks";
 import { Select } from "./ui/Select";
 import { useI18n } from "../contexts/I18nContext";
+import { errorText } from "../lib/errorText";
 
 const subscribe = (listener: () => void) => engine.subscribe(listener);
 const snapshot = () => engine.state;
@@ -44,7 +45,7 @@ export function GroupMembersDialog({ group, onClose, focusKey }: { group: GroupV
   const live = state?.groups.find(g => g.id === group.id) ?? group;
   const run = async (key: string, action: () => Promise<unknown>) => {
     setBusy(key); setError("");
-    try { await action(); } catch (e) { setError(e instanceof Error ? e.message : t("group.error.generic")); } finally { setBusy(null); }
+    try { await action(); } catch (e) { setError(e instanceof Error ? errorText(e, t) : t("group.error.generic")); } finally { setBusy(null); }
   };
   // The name being typed, while the admin renames the group; null otherwise. The engine cleans it and says what it refuses.
   const [naming, setNaming] = useState<string | null>(null);

@@ -7,6 +7,7 @@ import type { ProfileEntry } from "../lib/profiles";
 import { input } from "./wallet/ui";
 import { InputGroup } from "./layout";
 import { formatAmount } from "../lib/amount";
+import { errorText } from "../lib/errorText";
 
 /**
  * Deleting a profile removes its chats, keys and wallets for good. The dialog says what is inside, offers
@@ -32,7 +33,7 @@ export function DeleteProfileDialog({ entry, onClose }: { entry: ProfileEntry; o
     summary.usdt ? t("profile.delete.usdtWallet") : "",
     summary.services ? (summary.services === 1 ? t("profile.delete.serviceOne") : t("profile.delete.serviceCount", { count: summary.services })) : "",
   ].filter(Boolean) : [];
-  const run = async (work: () => Promise<void>) => { setBusy(true); setError(""); try { await work(); } catch (e) { setError(e instanceof Error ? e.message : String(e)); } finally { setBusy(false); } };
+  const run = async (work: () => Promise<void>) => { setBusy(true); setError(""); try { await work(); } catch (e) { setError(errorText(e, t)); } finally { setBusy(false); } };
   const button = "px-4 py-2 min-h-10 whitespace-nowrap rounded-lg text-sm cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed";
 
   return (

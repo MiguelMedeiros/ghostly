@@ -18,6 +18,7 @@ import { PAIRING_STEPS, SLOW_AFTER_MS, failureReason, formatElapsed } from "../l
 import { TransportOptions } from "./TransportOptions";
 import { ConnectionHistory } from "./TransportTimeline";
 import { DiscoveryHealth } from "./DiscoveryHealth";
+import { errorText } from "../lib/errorText";
 
 const subscribe = (listener: () => void) => engine.subscribe(listener);
 const snapshot = () => engine.state;
@@ -143,7 +144,7 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, pairing 
   useOutsideDismiss(root, menuOpen, close);
   async function run(action: () => Promise<unknown>) {
     setBusy(true); setError("");
-    try { await action(); } catch (e) { setError(e instanceof Error ? e.message : t("connection.panel.updateFailed")); }
+    try { await action(); } catch (e) { setError(e instanceof Error ? errorText(e, t) : t("connection.panel.updateFailed")); }
     finally { setBusy(false); }
   }
   // The header shows only the icon: the label is in its tooltip, its accessible name and the panel.

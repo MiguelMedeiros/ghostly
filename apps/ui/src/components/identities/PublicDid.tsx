@@ -7,6 +7,7 @@ import { useI18n } from "../../contexts/I18nContext";
 import { useCopyKey } from "../../hooks/useCopyKey";
 import { idCard } from "./idCard";
 import { ProviderMark, StatusPill } from "./ProviderMark";
+import { errorText } from "../../lib/errorText";
 
 /**
  * The profile's public DID (did:dht, WISP 3xx-did-dht), in the Ghostly card's details: the identifier with
@@ -30,7 +31,7 @@ export function PublicDid({ state }: { state: EngineState }) {
     : did.published ? t("identities.did.updating") : t("identities.did.publishing");
   const list = (id: string, listed: boolean) => {
     setBusy(id); setError("");
-    void engine.call("setDidListed", { id, listed }).catch(e => setError(e instanceof Error ? e.message : String(e))).finally(() => setBusy(""));
+    void engine.call("setDidListed", { id, listed }).catch(e => setError(errorText(e, t))).finally(() => setBusy(""));
   };
 
   return (

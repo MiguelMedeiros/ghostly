@@ -17,6 +17,7 @@ import { satsIn } from "../NetworkTag";
 import { lightningStateLabel } from "../paymentWords";
 import { formatAmount } from "../../lib/amount";
 import { formatAt } from "../../lib/time";
+import { errorText } from "../../lib/errorText";
 
 const TX_LABEL = {
   "lightning-in": "wallet.cashu.tx.lightningIn",
@@ -101,7 +102,7 @@ export function CashuWallet({ wallet, state, rail, onOpenCashu, focusAmount = fa
   /** A Lightning address or LNURL: resolved and paid step by step, through the same source. */
   const [destination, destinationError] = (() => {
     if (isToken || pasted) return [null, ""] as const;
-    try { return [parseLightningDestination(payInput)?.text ?? null, ""] as const; } catch (e) { return [null, e instanceof Error ? e.message : String(e)] as const; }
+    try { return [parseLightningDestination(payInput)?.text ?? null, ""] as const; } catch (e) { return [null, errorText(e, t)] as const; }
   })();
 
   const choose = (next: Action) => { setAction(next); setActionChosen(true); setError(""); setNotice(""); setInvoice(null); setQuote(null); setConfirming(false); };

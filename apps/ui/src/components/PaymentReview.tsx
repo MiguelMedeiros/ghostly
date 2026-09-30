@@ -7,6 +7,7 @@ import {NetworkTag,satsIn} from './NetworkTag';
 import {ConfirmRealMoney} from './ConfirmRealMoney';
 import { formatAmount, formatTokenAmount } from "../lib/amount";
 import { paymentStateLabel, railLine } from "./paymentWords";
+import { errorText } from "../lib/errorText";
 
 
 /**
@@ -23,7 +24,7 @@ export function PaymentReview({review:initial,wallet,onClose,onSent}:{review:Rev
  const token=review.method==='usdt';
  const network=walletNetworkOf(review.network),real=network==='mainnet',unit=token?review.asset:satsIn(t,network);
  const shown=token?formatTokenAmount(review.amount,review.decimals,t.language):formatAmount(review.amount, t.language);
- const run=async(action:()=>Promise<Review>):Promise<Review|null>=>{setBusy(true);setError('');try{const next=await action();setReview(next);return next;}catch(e){setError(e instanceof Error?e.message:t('payments.review.error.update'));return null;}finally{setBusy(false);}};
+ const run=async(action:()=>Promise<Review>):Promise<Review|null>=>{setBusy(true);setError('');try{const next=await action();setReview(next);return next;}catch(e){setError(e instanceof Error?errorText(e, t):t('payments.review.error.update'));return null;}finally{setBusy(false);}};
  // Only the real-money step says so: the engine refuses a Mainnet approval without it.
  const approve=()=>void run(()=>wallet.approvePayment(review.id,real)).then(next=>{setConfirming(false);if(next&&(next.state==='submitted'||next.state==='settled'))onSent?.();});
  const button='rounded-lg px-3 py-2 text-xs font-semibold bg-surface-hover text-text-primary focus-visible:outline-2 focus-visible:outline-accent disabled:opacity-40';

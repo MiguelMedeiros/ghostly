@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import type { IdentityProofProvider, IdentitySigner, SubjectPreview } from "@ghostly/browser/proofs/contract";
+import { errorText } from "../../lib/errorText";
+import { useT } from "../../contexts/I18nContext";
 
-const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 export type SubjectPreviewState =
   | { status: "idle" }
@@ -14,6 +15,7 @@ export type SubjectPreviewState =
  * keys and domain), looked up a moment after the person stops typing. Idle for other providers.
  */
 export function useSubjectPreview(provider: IdentityProofProvider | null, input: string, delayMs = 400): SubjectPreviewState {
+  const t = useT();
   const [state, setState] = useState<SubjectPreviewState>({ status: "idle" });
   useEffect(() => {
     const preview = provider?.subject.preview;
@@ -22,13 +24,13 @@ export function useSubjectPreview(provider: IdentityProofProvider | null, input:
     setState({ status: "loading" });
     const timer = setTimeout(() => {
       let subject: string;
-      try { subject = provider.subject.normalize(input); } catch (e) { setState({ status: "error", error: message(e) }); return; }
+      try { subject = provider.subject.normalize(input); } catch (e) { setState({ status: "error", error: errorText(e, t) }); return; }
       preview(subject, { signal: controller.signal }).then(
         result => { if (!controller.signal.aborted) setState({ status: "ok", subject, preview: result }); },
-        e => { if (!controller.signal.aborted) setState({ status: "error", error: message(e) }); });
+        e => { if (!controller.signal.aborted) setState({ status: "error", error: errorText(e, t) }); });
     }, delayMs);
     return () => { clearTimeout(timer); controller.abort(); };
-  }, [provider, input, delayMs]);
+  }, [provider, input, delayMs, t]);
   return state;
 }
 
