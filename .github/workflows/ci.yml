@@ -198,6 +198,9 @@ jobs:
   # from its own optional package), must start a daemon with WebRTC and calls on. Then the CLI's whole test suite, the
   # two-peer story included: pairing, messages, files and a voice call over libdatachannel, on arm64.
   # No Rust: the Iroh WebAssembly the CLI bundles is committed (packages/iroh-web/pkg).
+  # Not in CI Success yet: libdatachannel 0.24.5's answer race ("Got a remote candidate without ICE transport", see
+  # CallManager's `redial`) hit one arm64 run in six twice in a row, and callManager.test.ts failed. Add it to CI
+  # Success's `needs` (with `ok "$CLI_ARM64" "$PACKAGES"`) once calls get past that.
   cli-linux-arm64:
     name: CLI on Linux ARM64
     needs: changes
