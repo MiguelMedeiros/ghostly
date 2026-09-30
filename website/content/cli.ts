@@ -38,7 +38,7 @@ export const LINKS = {
   reference: `${DOCS}/packages/cli/README.md`,
   paymentBot: `${DOCS}/packages/cli/examples/payment-bot.mjs`,
   echoBot: `${DOCS}/packages/cli/examples/echo-bot.sh`,
-  legacy: `${DOCS}/cli/README.md`,
+  legacy: `${DOCS}/docs/wisps/402-legacy-chat.md`,
 } as const;
 
 /** What it covers, one level each (the site's levels; see lib/status.ts). */
@@ -118,8 +118,8 @@ export const cli = {
   },
   legacy: {
     title: "Looking for ghostly-cli?",
-    body: "The older Rust ghostly-cli is the compatibility client for v0.4 chats. It is not the npm package @ghostlytools/cli, reads only ghost:// invites and cannot pair with the app. From 1.0 it is no longer a release download: bots built on it build it from the repository.",
-    link: "ghostly-cli",
+    body: "The older Rust ghostly-cli, the client for v0.4 chats, was removed after 1.0. Bots on it move to ghostly, above. Its record format stays documented.",
+    link: "WISP 402",
   },
 };
 

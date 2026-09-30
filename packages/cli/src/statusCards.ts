@@ -18,8 +18,8 @@ export const CARD_UPDATE_GAP_MS = 2_500;
 type Kind = StatusCard["kind"];
 type Target = { id: string; linkId: string; group: boolean };
 
-/** Per card (its message): when its last update went, and what waits to go next. */
-interface Pace { last: number; next?: Record<string, unknown>; timer?: ReturnType<typeof setTimeout>; flushed?: Promise<void> }
+/** Per card (its message): when its last update went, what waits to go next, and how to send it now. */
+interface Pace { last: number; next?: Record<string, unknown>; timer?: ReturnType<typeof setTimeout>; flushed?: Promise<void>; flush?: () => void }
 const paces = new WeakMap<ApiContext, Map<string, Pace>>();
 
 function paceOf(ctx: ApiContext, key: string): Pace {
@@ -154,11 +154,14 @@ async function updateCard(ctx: ApiContext, params: Params, kind: Kind): Promise<
     pace.next = card as unknown as Record<string, unknown>;
     queued = true;
     if (!pace.timer) pace.flushed = new Promise<void>((resolve) => {
-      pace.timer = setTimeout(() => {
+      const send = () => {
         const next = pace.next;
-        pace.timer = undefined; pace.next = undefined; pace.last = Date.now();
+        clearTimeout(pace.timer);
+        pace.timer = undefined; pace.next = undefined; pace.flush = undefined; pace.last = Date.now();
         void (next ? editCard(ctx, target, message.id, next as unknown as StatusCard, text) : Promise.resolve()).catch(() => {}).finally(resolve);
-      }, due);
+      };
+      pace.flush = send;
+      pace.timer = setTimeout(send, due);
     });
     if (wait !== "none") await pace.flushed;
   } else {
@@ -171,8 +174,20 @@ async function updateCard(ctx: ApiContext, params: Params, kind: Kind): Promise<
   const edges = wait === "sent" && edited?.edit ? await waitForGroupFrame(ctx, target.id, message.id, edited.edit.seq, ms) : undefined;
   return answer(target, kind, id, message.id, {
     card, queued, edits: edited?.edit?.seq ?? 0,
-    ...(target.group ? { ...(edges !== undefined && { edges }) } : { confirmed: !!edited && !edited.edit?.pending }),
+    // An update still waiting for its time went nowhere yet: it is not confirmed, whatever the message's last edit says.
+    ...(target.group ? { ...(edges !== undefined && { edges }) } : { confirmed: (!queued || wait !== "none") && !!edited && !edited.edit?.pending }),
   });
+}
+
+/**
+ * Sends now every update still waiting for its time: the daemon is stopping, and the update it answered `queued` for
+ * (often a task's last one, done or failed) would otherwise go with it, leaving the card running for good. Called
+ * while the engine can still store the edit; it goes to the contact as any edit does, now or once they are back.
+ */
+export async function flushCardUpdates(ctx: ApiContext): Promise<void> {
+  const waiting = [...(paces.get(ctx)?.values() ?? [])].filter((pace) => pace.flush);
+  for (const pace of waiting) pace.flush!();
+  await Promise.all(waiting.map((pace) => pace.flushed));
 }
 
 export const STATUS_CARD_METHODS: Record<string, Method> = {

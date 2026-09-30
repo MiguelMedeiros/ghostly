@@ -66,7 +66,6 @@ ghostly/
 ├── native-transports/   # Iroh and HyperDHT for Desktop, the HyperDHT relay for browsers
 ├── extension/           # Ghostly Browser (Chromium extension, Manifest V3)
 ├── web/                 # Ghostly on the web (app.ghostly.tools)
-├── cli/                 # ghostly-cli, the older Rust CLI for v0.4 chats (no longer shipped; not the npm package)
 ├── e2e/                 # Playwright end-to-end suites and their Docker stack
 ├── examples/sdk-adapter # An adapter built outside the app on @ghostlytools/sdk
 ├── website/             # ghostly.tools (Next.js)
@@ -92,7 +91,7 @@ CI runs the full lint, typecheck, unit tests, builds and the Rust and Desktop ch
 
 ### Tests expected with a feature
 
-- **Unit tests** for the logic (Vitest; Rust `#[cfg(test)]` for `src-tauri` and `cli`).
+- **Unit tests** for the logic (Vitest; Rust `#[cfg(test)]` for `src-tauri`).
 - **An e2e test** for what a person does or sees (Playwright, `e2e/`).
 - **One line in `e2e/features.json`** for a new feature, in its alphabetical place by id (`npm run test:map -- --fix` sorts the file), and each test says what it covers: `{ tag: ["@feature:<id>"] }` in Playwright, `// covers: <id>` in Vitest and Rust. `npm run test:map` fails in CI on a feature with no test that is not on `e2e/allow-untested.json`.
 

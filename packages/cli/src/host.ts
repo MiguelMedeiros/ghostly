@@ -12,6 +12,7 @@ import { resumeHolds } from "./holds";
 import { ownFolder, privateFolder } from "./privateFolder";
 import { acquireLock, type ProfilePaths } from "./profiles";
 import { startRuntime, type RuntimeOptions } from "./runtime/engine";
+import { flushCardUpdates } from "./statusCards";
 
 /** The longest request line the daemon reads (WISP 11xx § Framing). */
 export const MAX_LINE = 16 * 1024 * 1024;
@@ -62,8 +63,8 @@ export async function openHost(paths: ProfilePaths, mode: ApiContext["mode"], ve
   return {
     ctx,
     close: () => (closing ??= (async () => {
-      // Every call is hung up while the engine can still tell the contact.
-      await calls.stopAll().catch(() => {});
+      // Every call is hung up, and every card update still waiting for its time sent, while the engine can still tell the contact.
+      await Promise.all([calls.stopAll(), flushCardUpdates(ctx)]).catch(() => {});
       runtime.server.detach(hub.sink);
       await runtime.close().catch(() => {});
       release();

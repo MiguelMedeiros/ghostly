@@ -5,7 +5,7 @@ import { callApi, type ApiContext } from "../src/api";
 import { parseArgs } from "../src/args";
 import { COMMANDS, idSlot, positionals } from "../src/commands";
 import { chatOnly } from "../src/main";
-import { CARD_UPDATE_GAP_MS, mergeCard } from "../src/statusCards";
+import { CARD_UPDATE_GAP_MS, flushCardUpdates, mergeCard } from "../src/statusCards";
 // covers: headless.status-cards
 
 /** `task send` and `task update` (WISP 4xx · Status Cards) against an engine that keeps what it is sent. */
@@ -124,6 +124,21 @@ describe("task update", () => {
     await vi.advanceTimersByTimeAsync(CARD_UPDATE_GAP_MS);
     expect(await callApi(ctx, "task.update", { chat: "Coordinator", task: "t1", card: { status: "done", progress: 100 } })).toMatchObject({ queued: false, edits: 2 });
     expect(rows("chat-one")[0]!.card).toMatchObject({ status: "done", progress: 100, step: "Engine" });
+  });
+
+  it("sends an update still waiting for its time when the daemon stops, and never calls it confirmed before it went", async () => {
+    const { ctx, node, rows } = fake("daemon");
+    vi.useFakeTimers();
+    await callApi(ctx, "task.send", { chat: "Coordinator", card: { id: "t1", title: "Nightly build", progress: 10 } });
+    const done = await callApi(ctx, "task.update", { chat: "Coordinator", task: "t1", card: { status: "done", progress: 100 } }) as Record<string, unknown>;
+    expect(done).toMatchObject({ queued: true, confirmed: false });
+    expect(node.editMessage).not.toHaveBeenCalled();
+    // The daemon stops before the gap is over: the task's last word still goes, once.
+    await flushCardUpdates(ctx);
+    expect(node.editMessage).toHaveBeenCalledTimes(1);
+    expect(rows("chat-one")[0]!.card).toMatchObject({ status: "done", progress: 100 });
+    await vi.advanceTimersByTimeAsync(CARD_UPDATE_GAP_MS);
+    expect(node.editMessage).toHaveBeenCalledTimes(1);
   });
 
   it("in a one-shot, waits the gap out itself and sends", async () => {
