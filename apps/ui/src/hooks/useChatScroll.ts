@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { reducedMotion } from "../lib/motion";
 import { JUMP_EVENT } from "../lib/replies";
 import type { RowWindow } from "./useRowWindow";
 
@@ -56,7 +57,6 @@ export function forgetChatScroll() {
 
 const rowsOf = (list: HTMLElement) => list.querySelectorAll<HTMLElement>("[data-message-id]");
 const rowById = (list: HTMLElement, id: string) => list.querySelector<HTMLElement>(`[data-message-id="${CSS.escape(id)}"]`);
-const reducedMotion = () => typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
 const editable = (target: EventTarget | null) =>
   target instanceof Element && !!target.closest("input, textarea, select, [contenteditable]:not([contenteditable='false']), [role='dialog'], [role='menu']");
 

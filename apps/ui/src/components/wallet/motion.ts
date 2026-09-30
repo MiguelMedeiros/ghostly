@@ -1,6 +1,6 @@
-/** The person asked for less motion: in the app's settings, or in the system's. */
-export const reducedMotion = () => typeof window !== "undefined"
-  && (document.documentElement.dataset.reduceMotion === "true" || window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+import { reducedMotion } from "../../lib/motion";
+
+export { reducedMotion };
 
 /**
  * A wallet just made comes into its deck like a card dealt onto the table: from a little above, settling where it

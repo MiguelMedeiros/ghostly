@@ -785,6 +785,7 @@
     "apps/ui/src/lib/memberColors.ts": ["groups.member-colors","groups.mentions","groups.replies","groups.typing"],
     "apps/ui/src/lib/messageDetails.ts": ["chat.paired.message-details"],
     "apps/ui/src/lib/money.ts": ["payments.*","chats.list.rows"],
+    "apps/ui/src/lib/motion.ts": ["app.reduce-motion","chat.paired.pairing-progress","chat.replies","chat.scroll","wallet.deck"],
     "apps/ui/src/lib/nostr.ts": ["nostr.*","proofs.nostr"],
     "apps/ui/src/lib/notifications.ts": ["app.attention.notifications"],
     "apps/ui/src/lib/pairedChat.ts": ["*"],
