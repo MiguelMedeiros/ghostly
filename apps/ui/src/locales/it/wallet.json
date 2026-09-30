@@ -14,6 +14,8 @@
     "recovering": "Recupero…",
     "renewalOpen": "Finché Ghostly è aperto",
     "renewalRegtest": "Disattivato su regtest",
+    "small": "{{amount}} {{unit}} sono scaduti, troppo pochi per recuperarli da soli. Vengono recuperati con le prossime monete che scadono.",
+    "smallInfo": "Un recupero crea una sola moneta nuova, e il server Ark non crea monete sotto la sua dimensione minima. Questi sats sono ancora tuoi: quando scadono altre monete, Recupera le prende tutte insieme.",
     "sweeping": "{{amount}} {{unit}} sono scaduti. Potrai recuperarli quando il server Ark avrà spazzato il loro lotto.",
     "sweepingInfo": "Le monete Ark stanno in un lotto che scade; Ghostly le rinnova prima, finché è aperto. Le monete scadute sono ancora tue, ma prima il server Ark riporta il loro lotto on-chain (uno sweep). Questo attende nuovi blocchi Bitcoin, spesso un'ora o più. Fino ad allora non si possono né spendere né recuperare; dopo, Recupera le sposta in un nuovo lotto.",
     "useProvider": "Usa questo provider"

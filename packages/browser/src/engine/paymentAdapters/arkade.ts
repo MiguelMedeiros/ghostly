@@ -54,28 +54,38 @@ export class ArkadeAdapter implements PaymentAdapter<ArkPrepared> {
   requestAddress() { return this.serial(async()=>(await this.wallet.getNewAddresses({types:["default"],forceNew:true}))[0].address); }
   async balance() { return (await this.wallet.getBalance()).available; }
   /**
-   * Sats whose batch expired before they were renewed, in two kinds. `recoverable`: the server has swept their batch,
-   * so a recovery can take them. `sweeping`: past their expiry, but not swept yet. The SDK (0.4.76) counts both as
-   * recoverable, but it settles an unswept coin without the forfeit the server still asks for (arkd wants one until
-   * the sweep): the batch fails ("missing forfeit transactions") and the server bans the coin for a while. The sweep
-   * waits for the chain's time to pass the expiry: on a real network an hour or more, on regtest the expiry's blocks.
+   * Sats whose batch expired before they were renewed, in three kinds, as a person can act on them:
+   * - `sweeping`: past their expiry, but the server has not swept their batch yet (with any swept ones: none can be
+   *   recovered meanwhile). The SDK (0.4.76) counts them as
+   *   recoverable already, but it settles an unswept coin without the forfeit the server still asks for (arkd wants
+   *   one until the sweep): the batch fails ("missing forfeit transactions") and the server bans the coin for a while.
+   *   The sweep waits for the chain's time to pass the expiry: an hour or more on a real network, the expiry's blocks
+   *   on regtest.
+   * - `recoverable`: swept, and a recovery takes them now.
+   * - `small`: swept, but together under the server's dust limit: a recovery makes one new coin and the server makes
+   *   none that small, so `recoverVtxos` answers "No recoverable VTXOs found". They wait for more coins to expire.
    */
   async expired() {
     const now={timestamp:new Date()};
-    let recoverable=0,sweeping=0;
+    let swept=0,sweeping=0;
     for(const vtxo of await this.wallet.getVtxos({withRecoverable:true,withUnrolled:false})) {
-      if(isRecoverable(vtxo))recoverable+=vtxo.value;
+      if(isRecoverable(vtxo))swept+=vtxo.value;
       else if(!vtxo.isSwept&&canRecoverOnchain(vtxo,now))sweeping+=vtxo.value;
     }
-    return {recoverable,sweeping};
+    // What a recovery would hand back, over the same coins it would take (only asked when none is still sweeping).
+    const takes=!sweeping&&swept>0&&(await (await this.wallet.getVtxoManager()).getRecoverableBalance()).recoverable>0n;
+    // While any waits for the sweep, none can be recovered: all of them wait.
+    return sweeping?{recoverable:0,sweeping:sweeping+swept,small:0}:{recoverable:takes?swept:0,sweeping:0,small:takes?0:swept};
   }
   /**
    * Moves swept outputs back into the balance, through the server's next batch. Refused while any expired coin is
-   * not swept yet: `recoverVtxos` would name it too, and that batch fails for all of them.
+   * not swept yet (`recoverVtxos` would name it too, and that batch fails for all of them), and when what is swept
+   * is too little for a batch.
    */
   recover() { return this.serial(async()=>{
-    const {recoverable,sweeping}=await this.expired();
+    const {recoverable,sweeping,small}=await this.expired();
     if(sweeping)throw new Error("Expired coins can be recovered once the Ark server has swept their batch. Try again later.");
+    if(small)throw new Error("Too few expired sats to recover on their own. They are recovered with the next coins that expire.");
     if(!recoverable)throw new Error("Nothing to recover");
     return (await this.wallet.getVtxoManager()).recoverVtxos();
   }); }

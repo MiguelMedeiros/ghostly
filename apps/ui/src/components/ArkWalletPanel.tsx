@@ -54,7 +54,11 @@ export function ArkWalletPanel({ wallet, state, backupNow = false }: { wallet: W
        can be neither spent nor recovered (a recovery then fails, and the server bans the coins for a while): say
        so plainly, and offer Recover only once every expired coin is swept. */}
    {!!ark.sweeping && <div className="rounded-xl bg-yellow-500/10" data-testid="ark-sweeping">
-    <Row label={<span className="text-xs text-yellow-500">{t("wallet.ark.sweeping", { amount: formatAmount(ark.sweeping + (ark.recoverable ?? 0), t.language), unit })}</span>} info={t("wallet.ark.sweepingInfo")} />
+    <Row label={<span className="text-xs text-yellow-500">{t("wallet.ark.sweeping", { amount: formatAmount(ark.sweeping, t.language), unit })}</span>} info={t("wallet.ark.sweepingInfo")} />
+   </div>}
+   {/* Swept, but too few together for the one coin a recovery makes: they wait for more to expire. */}
+   {!!ark.small && <div className="rounded-xl bg-yellow-500/10" data-testid="ark-small">
+    <Row label={<span className="text-xs text-yellow-500">{t("wallet.ark.small", { amount: formatAmount(ark.small, t.language), unit })}</span>} info={t("wallet.ark.smallInfo")} />
    </div>}
    {!!ark.recoverable && !ark.sweeping && <div className="flex flex-wrap items-center gap-3 rounded-xl bg-yellow-500/10 px-3 py-2" data-testid="ark-recoverable">
     <p className="flex-[1_1_12rem] min-w-0 text-xs text-yellow-500">{t("wallet.ark.expired", { amount: formatAmount(ark.recoverable, t.language), unit })}</p>

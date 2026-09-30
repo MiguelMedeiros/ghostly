@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { expect, type Locator } from "@playwright/test";
 import { Interface } from "ethers";
-import { recoverExpiredArk } from "../support/arkRecover";
+import { recoverExpiredArk, smallExpiredArk } from "../support/arkRecover";
 import { exclusive } from "../support/exclusive";
 import { chatPayments } from "../support/payments";
 import { choose } from "../support/select";
@@ -315,11 +315,13 @@ async function arkade(a: Actor, b: Actor): Promise<void> {
     if (back > 0) fees.set(p, fees.get(p)! + Math.ceil(back / 99) + 1);
   };
   await bothWays(a, b, "arkade", [500, 100, 200, 50], recovered);
-  // A: 9,900 − 500 − 100 + 200 + 50; B: 500 + 100 − 200 − 50, less what the recoveries cost.
+  // A: 9,900 − 500 − 100 + 200 + 50; B: 500 + 100 − 200 − 50, less what the recoveries cost. A payment made from
+  // coins about to expire reaches its payee already expired: swept, and when small, too few to recover on their own
+  // (under the server's dust limit). Those still count as the payee's, set apart (`ark-small`).
   for (const [p, expected] of [[a, 9_550], [b, 350]] as const) {
     await recovered(p);
     await expect.poll(() => sats(p), { timeout: 60_000 }).toBeLessThanOrEqual(expected);
-    expect(await sats(p)).toBeGreaterThanOrEqual(expected - 60 - fees.get(p)!);
+    expect((await sats(p)) + (await smallExpiredArk(panel(p)))).toBeGreaterThanOrEqual(expected - 60 - fees.get(p)!);
   }
 }
 

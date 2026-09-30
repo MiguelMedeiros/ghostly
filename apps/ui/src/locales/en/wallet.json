@@ -14,6 +14,8 @@
     "recovering": "Recovering…",
     "renewalOpen": "While Ghostly is open",
     "renewalRegtest": "Off on regtest",
+    "small": "{{amount}} {{unit}} expired, too few to recover on their own. They are recovered with the next coins that expire.",
+    "smallInfo": "A recovery makes one new coin, and the Ark server makes no coin below its minimum size. These sats are still yours: once more coins expire, Recover takes them all together.",
     "sweeping": "{{amount}} {{unit}} expired. You can recover them once the Ark server has swept their batch.",
     "sweepingInfo": "Ark coins live in a batch that expires; Ghostly renews them before that while it is open. Coins that expired are still yours, but first the Ark server takes their batch back on-chain (a sweep). That waits for new Bitcoin blocks, often an hour or more. Until then they cannot be spent or recovered; after it, Recover moves them into a new batch.",
     "useProvider": "Use this provider"

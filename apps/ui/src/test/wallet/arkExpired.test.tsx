@@ -34,10 +34,9 @@ describe("the Ark panel's expired coins", () => {
     expect(screen.queryByTestId("ark-sweeping")).not.toBeInTheDocument();
   });
 
-  it("some swept, some still waiting: no Recover yet (it would fail for all of them), and the total waits", () => {
-    panel({ balance: 0, recoverable: 300, sweeping: 700 });
-    expect(screen.getByTestId("ark-sweeping")).toHaveTextContent(/^1,000 test sats expired\./);
-    expect(screen.queryByTestId("ark-recoverable")).not.toBeInTheDocument();
+  it("swept but too few for a recovery of their own: said so, no Recover", () => {
+    panel({ balance: 9_300, small: 250 });
+    expect(screen.getByTestId("ark-small")).toHaveTextContent(/^250 test sats expired, too few to recover on their own\./);
     expect(screen.queryByTestId("ark-recover")).not.toBeInTheDocument();
   });
 });

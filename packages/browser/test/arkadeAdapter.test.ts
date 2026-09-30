@@ -111,7 +111,14 @@ const ark = vi.hoisted(() => {
     }
     async getContractManager() { return { getContracts: async () => server.contracts }; }
     async getVtxos() { return server.coins.map((c) => ({ ...c })); }
-    async getVtxoManager() { return { recoverVtxos: async () => { server.recoveries++; return "c".repeat(64); } }; }
+    async getVtxoManager() {
+      // As the SDK's: swept coins (and past-expiry ones: it cannot tell) together under the dust limit make no batch.
+      const taken = () => server.coins.filter((c) => c.isSwept || (!!c.expiresAt && c.expiresAt <= new Date())).reduce((sum, c) => sum + c.value, 0);
+      return {
+        getRecoverableBalance: async () => ({ recoverable: taken() >= 330 ? BigInt(Math.floor(taken() * 0.99)) : 0n }),
+        recoverVtxos: async () => { if (taken() < 330) throw new Error("No recoverable VTXOs found"); server.recoveries++; return "c".repeat(64); },
+      };
+    }
     async signerForDescriptor(descriptor: string) { return { sign: async (tx: Transaction, [index]: number[]) => (descriptor === "good" ? tx.signed(index) : tx) }; }
     async dispose() {}
   }
@@ -195,17 +202,32 @@ describe("expired coins", () => {
       { txid: "b".repeat(64), vout: 0, value: 300, isSwept: false, expiresAt: past },
       { txid: "c".repeat(64), vout: 0, value: 50, isSwept: true, expiresAt: past },
     ];
-    expect(await adapter.expired()).toEqual({ recoverable: 50, sweeping: 300 });
+    expect(await adapter.expired(), "while one waits for the sweep, all of them wait").toEqual({ recoverable: 0, sweeping: 350, small: 0 });
     // The SDK would name the unswept coin too, without its forfeit: that batch fails and the server bans the coin.
     await expect(adapter.recover()).rejects.toThrow("once the Ark server has swept");
     expect(server.recoveries).toBe(0);
     server.coins[1].isSwept = true;
-    expect(await adapter.expired()).toEqual({ recoverable: 350, sweeping: 0 });
+    expect(await adapter.expired()).toEqual({ recoverable: 350, sweeping: 0, small: 0 });
     await expect(adapter.recover()).resolves.toBe("c".repeat(64));
     expect(server.recoveries).toBe(1);
     server.coins = [server.coins[0]];
+    expect(await adapter.expired()).toEqual({ recoverable: 0, sweeping: 0, small: 0 });
     await expect(adapter.recover()).rejects.toThrow("Nothing to recover");
     expect(server.recoveries).toBe(1);
+  });
+  it("swept coins too few for a batch of their own are set apart, and no recovery is tried", async () => {
+    const adapter = await connect();
+    const past = new Date(Date.now() - 60_000);
+    server.coins = [
+      { txid: "a".repeat(64), vout: 0, value: 200, isSwept: true, expiresAt: past },
+      { txid: "b".repeat(64), vout: 0, value: 50, isSwept: true, expiresAt: past },
+    ];
+    expect(await adapter.expired()).toEqual({ recoverable: 0, sweeping: 0, small: 250 });
+    await expect(adapter.recover()).rejects.toThrow("Too few expired sats");
+    expect(server.recoveries).toBe(0);
+    // More coins expire: together they make a batch.
+    server.coins.push({ txid: "c".repeat(64), vout: 0, value: 400, isSwept: true, expiresAt: past });
+    expect(await adapter.expired()).toEqual({ recoverable: 650, sweeping: 0, small: 0 });
   });
 });
 

@@ -34,3 +34,13 @@ export async function recoverExpiredArk(panel: Locator, who: string, balance: ()
   await expect(sweeping).toHaveCount(0);
   return (await balance()) - before;
 }
+
+/**
+ * Expired sats swept but too few for a recovery of their own (`ark-small`): still the wallet's, recovered with the
+ * next coins that expire. A receiver gets these when a small payment was made from coins about to expire.
+ */
+export async function smallExpiredArk(panel: Locator): Promise<number> {
+  const row = panel.getByTestId("ark-small");
+  if (!(await row.isVisible())) return 0;
+  return Number(/\d[\d.,\s]*/.exec(await row.innerText())?.[0].replace(/[^\d]/g, "") ?? NaN);
+}

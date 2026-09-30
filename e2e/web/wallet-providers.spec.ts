@@ -3,7 +3,7 @@ import { Interface } from "ethers";
 import { USDT_LOCAL } from "../support/usdt-local.mjs";
 import { strangerInvoice } from "../support/bolt11";
 import { TEST_COINS, chat, connect, createWallet, expect, getTestCoins, link, openChat, openWallet, test, type Peer, type PeerOptions, type WalletKind } from "../support/fixtures";
-import { recoverExpiredArk } from "../support/arkRecover";
+import { recoverExpiredArk, smallExpiredArk } from "../support/arkRecover";
 import { composerRow } from "../support/composer";
 import { exclusive } from "../support/exclusive";
 import { chatPayments, paymentCard } from "../support/payments";
@@ -159,11 +159,11 @@ test("Ark: in, a Send from the wallet, a Send in the chat and a Request paid in 
   // On regtest a batch expires within minutes: what outlived its batch waits for the server's sweep, then is
   // recovered, never lost.
   const sats = async () => Number((await balance(bob).innerText()).trim().match(/^[\d,]*/)![0].replace(/,/g, "") || NaN);
-  const expired = () => panel(bob).locator("[data-testid=ark-sweeping], [data-testid=ark-recoverable]");
+  const expired = () => panel(bob).locator("[data-testid=ark-sweeping], [data-testid=ark-recoverable], [data-testid=ark-small]");
   await expect.poll(async () => (await expired().count()) > 0 || (await sats()) === 400, { timeout: 60_000 }).toBe(true);
   const back = await exclusive("regtest-chain", () => recoverExpiredArk(panel(bob), "bob", sats));
   // 500 in, 200 out, 100 in; a recovery goes through a batch, which costs the server's input fee (e2e/infra: 1%).
-  await expect.poll(sats, { timeout: 60_000 }).toBeGreaterThanOrEqual(back ? 395 : 400);
+  await expect.poll(async () => (await sats()) + (await smallExpiredArk(panel(bob))), { timeout: 60_000 }).toBeGreaterThanOrEqual(back ? 395 : 400);
   expect(await sats()).toBeLessThanOrEqual(400);
 });
 
