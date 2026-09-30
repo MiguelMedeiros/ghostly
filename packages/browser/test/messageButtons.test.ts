@@ -69,6 +69,9 @@ describe("a bot asks with buttons", () => {
     await vi.waitFor(() => expect(t.contactGot.at(-1)).toMatchObject({ text: QUESTION, card: readStatusCard(ask()) }));
     expect(await t.row(sent.messageId!)).toMatchObject({ text: QUESTION, card: { kind: "buttons" } });
     expect(await t.node.sendMessage({ linkId: t.id, text: QUESTION, card: ask({ buttons: [] }) })).toMatchObject({ refused: true });
+    // Two labels a typed answer could not tell apart: the engine refuses them too, whoever calls it.
+    expect(await t.node.sendMessage({ linkId: t.id, text: QUESTION, card: ask({ buttons: [{ id: "a", label: "Yes" }, { id: "b", label: " YES" }] }) }))
+      .toMatchObject({ refused: true, error: expect.stringMatching(/repeats buttons\[0\]\.label/) });
   });
 
   it("takes a press from the contact once per person, and none after closing", async () => {
@@ -184,6 +187,17 @@ describe("the buttons' state and a press, as pure rules", () => {
     expect(buttonPress(reply("Sure, go ahead", "yes"), original, [original])).toBeUndefined();
     // Case and spaces at the ends are not a different answer.
     expect(buttonPress(reply(" yes ", "yes"), original, [original])).toEqual({ messageId: "k:1:1", button: "yes", label: "Yes" });
+  });
+
+  it("reads a card from a sender that repeated a label without failing: a typed answer takes the first", () => {
+    const twins = readStatusCard({ kind: "buttons", id: "ask-2", buttons: [{ id: "a", label: "Yes" }, { id: "b", label: "yes" }, { id: "c", label: "a" }] })!;
+    const original: StoredMessage = { linkId: "l", id: "me_Q", wireId: WIRE("Q"), text: QUESTION, sender: "me", timestamp: 1, card: twins };
+    const typed = (text: string, button?: string): StoredMessage => ({ linkId: "l", id: "peer_1", text, sender: "peer", timestamp: 2, replyTo: { id: WIRE("Q"), snippet: "", messageId: "me_Q", ...(button && { button }) } });
+    expect(buttonPress(typed("YES"), original, [original])).toEqual({ messageId: "me_Q", button: "a", label: "Yes", inferred: true });
+    expect(buttonPress(typed("a"), original, [original])).toMatchObject({ button: "a" });
+    // A press naming the second twin still names it: its text is its label.
+    expect(buttonPress(typed("yes", "b"), original, [original])).toEqual({ messageId: "me_Q", button: "b", label: "yes" });
+    expect(buttonsState({ ...original, sender: "peer" }, WIRE("Q"), [{ ...typed("Yes"), sender: "me" }])).toMatchObject({ mine: "a" });
   });
 });
 

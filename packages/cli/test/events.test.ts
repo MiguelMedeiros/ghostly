@@ -175,6 +175,58 @@ describe("the event stream", () => {
     expect(events[0]).toMatchObject({ group: "g1", message: { member: "k1", mentioned: true, mentions: [{ key: "me", offset: 0, length: 3 }] } });
   });
 
+  it("reports a mention learned after its group.message once (a stripped copy completed), and not again after a restart", async () => {
+    const g1 = { id: "g1", name: "G", members: [], isAdmin: false, canSend: true, lastMessageAt: 0, profile: "mesh", invited: [], memberLinks: {}, createdAt: 1 };
+    const { h, events } = await hub("late-mention.jsonl");
+    h.baseline(state([], [g1]), new Map([["group:g1", []]]));
+    // Handed on without its author's whole signature: the text, no mentions.
+    const stripped = message("group:g1", "x", { member: "k1", text: "@me look" });
+    h.sink.post({ kind: "messages", linkId: "group:g1", messages: [stripped] });
+    // The author's whole copy completes it: the mention of me.
+    const whole = { ...stripped, mentioned: true as const, mentions: [{ k: "me", o: 0, l: 3 }] };
+    h.sink.post({ kind: "messages", linkId: "group:g1", messages: [whole] });
+    h.sink.post({ kind: "messages", linkId: "group:g1", messages: [whole] });
+    expect(events.map((e) => e.id)).toEqual(["group.message:g1:x", "group.mentioned:g1:x"]);
+    expect(events[1]).toMatchObject({ type: "group.mentioned", group: "g1", messageId: "x", message: { id: "x", member: "k1", mentioned: true } });
+    expect(toTurn(events[1]!)).toMatchObject({ id: "agent.turn:group.mentioned:g1:x", source: "group.mentioned", group: "g1", member: "k1", messageId: "x", untrusted: { text: "@me look" } });
+    // An edit that drops the mention and one that names me again: the edits, not the mention again.
+    h.sink.post({ kind: "messages", linkId: "group:g1", messages: [{ ...stripped, edit: { seq: 1, at: 2, history: [] } }] });
+    h.sink.post({ kind: "messages", linkId: "group:g1", messages: [{ ...whole, edit: { seq: 2, at: 3, history: [] } }] });
+    expect(events.map((e) => e.type)).toEqual(["group.message", "group.mentioned", "group.message.edited", "group.message.edited"]);
+    // A mention there from the start says so on its group.message only.
+    h.sink.post({ kind: "message-changes", linkId: "group:g1", messages: [message("group:g1", "y", { member: "k1", mentioned: true })], deleted: [] });
+    expect(events.at(-1)!.id).toBe("group.message:g1:y");
+    // Restarted: what was reported stays reported.
+    const again = await hub("late-mention.jsonl");
+    again.h.baseline(state([], [g1]), new Map([["group:g1", [{ ...whole, edit: { seq: 2, at: 3, history: [] } }, message("group:g1", "y", { member: "k1", mentioned: true })]]]));
+    expect(again.events).toEqual([]);
+  });
+
+  it("a seen set from before mentions were noted reports none of its old mentions again", async () => {
+    const g1 = { id: "g1", name: "G", members: [], isAdmin: false, canSend: true, lastMessageAt: 0, profile: "mesh", invited: [], memberLinks: {}, createdAt: 1 };
+    const { h } = await hub("old-set.jsonl");
+    h.baseline(state([], [g1]), new Map([["group:g1", []]]));
+    h.sink.post({ kind: "messages", linkId: "group:g1", messages: [message("group:g1", "x", { member: "k1" })] });
+    // As an older release left it: the message seen as `received`, and no note that the set tracks mentions.
+    await new Promise<void>((resolve, reject) => {
+      const request = indexedDB.open("old-set.jsonl");
+      request.onsuccess = () => {
+        const tx = request.result.transaction("seen", "readwrite");
+        tx.objectStore("seen").delete(["format:", "mentions"]);
+        tx.oncomplete = () => { request.result.close(); resolve(); };
+        tx.onerror = () => reject(tx.error);
+      };
+      request.onerror = () => reject(request.error);
+    });
+    const upgraded = await hub("old-set.jsonl");
+    upgraded.h.baseline(state([], [g1]), new Map([["group:g1", [message("group:g1", "x", { member: "k1", mentioned: true })]]]));
+    expect(upgraded.events).toEqual([]);
+    // From then on a late mention is reported.
+    upgraded.h.sink.post({ kind: "messages", linkId: "group:g1", messages: [message("group:g1", "x", { member: "k1", mentioned: true }), message("group:g1", "z", { member: "k1" })] });
+    upgraded.h.sink.post({ kind: "message-changes", linkId: "group:g1", messages: [message("group:g1", "z", { member: "k1", mentioned: true })], deleted: [] });
+    expect(upgraded.events.map((e) => e.id)).toEqual(["group.message:g1:z", "group.mentioned:g1:z"]);
+  });
+
   it("a group left (its history gone, sent empty) deletes nothing it reports, and a message there after a new join is new", async () => {
     const { h, events } = await hub("left.jsonl");
     h.baseline(state([], [{ id: "g1", members: [] }]), new Map([["group:g1", []]]));

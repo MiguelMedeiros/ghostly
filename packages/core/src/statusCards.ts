@@ -131,6 +131,30 @@ const ID = /^[A-Za-z0-9_.:][A-Za-z0-9_.:-]{0,63}$/;
 export const BUTTON_ID = /^[A-Za-z0-9_.:][A-Za-z0-9_.:-]{0,31}$/;
 const CRON = /^[0-9A-Za-z*,/?#\- ]{1,64}$/;
 
+/**
+ * Whether a typed answer is a button's label or id (WISP 4xx · Message Buttons): ignoring case and spaces at the ends.
+ * Not the device's locale's case: the presser's and the author's apps must agree ("I" is not "ı" anywhere).
+ */
+export const sameButtonText = (a: string, b: string): boolean => a.trim().toLowerCase() === b.trim().toLowerCase();
+
+/**
+ * Two buttons a typed answer could not tell apart, or none: a label that reads as an earlier label (`label`), or a
+ * label that reads as another button's id (`id`), both as `sameButtonText` compares them. The labels as a reader keeps
+ * them (one line, cleaned). `at` is the button that clashes, `with` the one it clashes with.
+ */
+export function buttonLabelClash(buttons: readonly unknown[]): { at: number; with: number; kind: "label" | "id" } | undefined {
+  const labels = buttons.map(button => (isObject(button) ? cardLine(button.label, Infinity) : undefined));
+  const ids = buttons.map(button => (isObject(button) && typeof button.id === "string" ? button.id : undefined));
+  for (const [at, label] of labels.entries()) {
+    if (!label) continue;
+    const twin = labels.findIndex((other, i) => i < at && !!other && sameButtonText(other, label));
+    if (twin !== -1) return { at, with: twin, kind: "label" };
+    const named = ids.findIndex((id, i) => i !== at && id !== undefined && sameButtonText(id, label));
+    if (named !== -1) return { at, with: named, kind: "id" };
+  }
+  return undefined;
+}
+
 const isObject = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
 
 /** One line of display text: runs of space (line breaks included) become one space, then the display rules for names. */
@@ -310,6 +334,9 @@ export function checkStatusCard(raw: unknown, now = Date.now()): { card: StatusC
         if (button.style !== undefined && !oneOf(BUTTON_STYLES, button.style)) errors.push(`buttons[${i}].style is one of ${BUTTON_STYLES.join(", ")}`);
         if (button.once !== undefined && button.once !== true) errors.push(`buttons[${i}].once is true or left out`);
       }
+      // A typed answer is matched by label or id: two buttons it could not tell apart are refused (a reader takes the first).
+      const clash = buttonLabelClash(raw.buttons);
+      if (clash) errors.push(`buttons[${clash.at}].label ${JSON.stringify(cardLine((raw.buttons[clash.at] as Record<string, unknown>).label, Infinity))} ${clash.kind === "label" ? `repeats buttons[${clash.with}].label` : `is buttons[${clash.with}].id`} (ignoring case and spaces at the ends)`);
       if (raw.chosen !== undefined && !(typeof raw.chosen === "string" && ids.has(raw.chosen))) errors.push("chosen names one of the buttons");
     }
     if (raw.closed !== undefined && raw.closed !== true) errors.push("closed is true or left out");

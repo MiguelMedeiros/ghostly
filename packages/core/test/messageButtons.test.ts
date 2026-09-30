@@ -6,7 +6,7 @@ import { GroupSession, type GroupEdgeFrame, type GroupIncomingMessage } from "..
 import { CommunitySession, type CommunityFrame, type CommunityIncomingMessage } from "../src/groupCommunity";
 import { BUTTONS_CAPABILITY, KNOWN_SESSION_CAPABILITIES } from "../src/pairedCapabilities";
 import { groupReplyAuthor, pairedReplyAuthor, readReply, wireReply } from "../src/replies";
-import { STATUS_CARD_LIMITS, checkStatusCard, readStatusCard, statusCardText, type ButtonsCard } from "../src/statusCards";
+import { STATUS_CARD_LIMITS, buttonLabelClash, checkStatusCard, readStatusCard, sameButtonText, statusCardText, type ButtonsCard } from "../src/statusCards";
 // covers: chat.buttons.wire
 
 /*
@@ -73,6 +73,26 @@ describe("buttons as a sender may send them", () => {
       [ask({ kind: "poll" }), /task, routine or buttons/],
     ];
     for (const [raw, error] of cases) expect(checkStatusCard(raw, NOW)).toEqual({ error: expect.stringMatching(error) });
+  });
+
+  it("refuses two buttons a typed answer could not tell apart, naming them", () => {
+    // The same label, however it is cased or spaced.
+    expect(checkStatusCard(ask({ buttons: [{ id: "yes", label: "Yes" }, { id: "no", label: "No" }, { id: "ok", label: " yes " }] }), NOW))
+      .toEqual({ error: expect.stringMatching(/buttons\[2\]\.label "yes" repeats buttons\[0\]\.label/) });
+    // A label that is another button's id: "no" typed would be the first button's label and the second's id.
+    expect(checkStatusCard(ask({ buttons: [{ id: "yes", label: "No" }, { id: "no", label: "Nope" }] }), NOW))
+      .toEqual({ error: expect.stringMatching(/buttons\[0\]\.label "No" is buttons\[1\]\.id/) });
+    expect(buttonLabelClash([{ id: "a", label: "Same" }, { id: "b", label: "SAME" }])).toEqual({ at: 1, with: 0, kind: "label" });
+    // A label that is its own id is what most buttons are; labels apart only past case and spaces are fine.
+    expect(checkStatusCard(ask({ buttons: [{ id: "yes", label: "Yes" }, { id: "no", label: "No" }, { id: "later", label: "Yes, later" }] }), NOW)).toHaveProperty("card");
+    expect(buttonLabelClash([{ id: "yes", label: "YES" }, { id: "no", label: "no" }])).toBeUndefined();
+  });
+
+  it("a reader keeps a card that repeats a label, and a typed answer takes the first", () => {
+    const card = readStatusCard(ask({ buttons: [{ id: "a", label: "Yes" }, { id: "b", label: "yes" }, { id: "c", label: "a" }] }), NOW) as ButtonsCard;
+    expect(card.buttons.map(b => b.id)).toEqual(["a", "b", "c"]);
+    expect(card.buttons.find(b => sameButtonText(b.label, " YES ") || sameButtonText(b.id, " YES "))?.id).toBe("a");
+    expect(card.buttons.find(b => sameButtonText(b.label, "a") || sameButtonText(b.id, "a"))?.id).toBe("a");
   });
 
   it("says the answers in words when the bot gave no text of its own", () => {
