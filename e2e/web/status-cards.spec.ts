@@ -437,6 +437,18 @@ test("the review pictures: a bot room's routines and tasks at every width, both 
       }
     }
 
+    // The folded routines opened: each one in its sender's run, their face beside the last, as bubbles have it.
+    const stack = room.getByTestId("routine-stack").last();
+    await stack.getByTestId("routine-stack-toggle").click();
+    for (const size of [widths[0], widths[2]]) {
+      await page.setViewportSize(size);
+      await theme(page, "dark");
+      await stack.getByTestId("status-card").last().scrollIntoViewIfNeeded();
+      expect.soft(await spills(room), `stack open, ${size.width} px`).toEqual([]);
+      await page.screenshot({ path: shot(`stack-open-${size.width}-dark`) });
+    }
+    await stack.getByTestId("routine-stack-toggle").click();
+
     // A row's actions on hover, beside the card, not on it.
     await page.setViewportSize(widths[0]);
     await theme(page, "dark");
@@ -468,7 +480,13 @@ test("the review pictures: a bot room's routines and tasks at every width, both 
       await page.setViewportSize(size);
       await page.getByTestId("chat-tasks").click();
       const panel = page.getByTestId("chat-tasks-panel");
+      // Each bot's face before its name, its initial in its colour (these bots have no picture); a finished task's row too.
+      for (const [name, initial] of [["Hermes Zero", "H"], ["Coordinator", "C"]]) {
+        await expect(panel.getByTestId("chat-tasks-sender").filter({ hasText: name }).locator("h3").getByTestId("member-face")).toHaveText(initial);
+      }
       await panel.getByTestId("chat-tasks-sender").filter({ hasText: "Hermes Zero" }).getByTestId("chat-tasks-routines-toggle").click();
+      await panel.getByTestId("chat-tasks-finished-toggle").click();
+      await expect(panel.getByTestId("chat-tasks-finished").getByTestId("member-face")).toHaveText("C");
       await page.waitForTimeout(400);
       await page.screenshot({ path: shot(`panel-${size.width}-dark`) });
       await page.keyboard.press("Escape");
@@ -484,6 +502,13 @@ test("the review pictures: a bot room's routines and tasks at every width, both 
       await room.getByTestId("routine-stack").last().scrollIntoViewIfNeeded();
       expect.soft(await spills(room), `${language}, ${size.width} px`).toEqual([]);
       await page.screenshot({ path: shot(`${language}-${size.width}-dark`) });
+      if (language === "ar") {
+        await page.getByTestId("chat-tasks").click();
+        await page.getByTestId("chat-tasks-sender").filter({ hasText: "Hermes Zero" }).getByTestId("chat-tasks-routines-toggle").click();
+        await page.waitForTimeout(400);
+        await page.screenshot({ path: shot(`panel-ar-${size.width}-dark`) });
+        await page.keyboard.press("Escape");
+      }
     }
   } finally {
     await Promise.all([coordinator.stop(), zero.stop()]);

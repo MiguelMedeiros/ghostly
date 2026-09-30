@@ -412,11 +412,19 @@ describe("the Tasks button", () => {
       row("m4", card({ id: "bench", title: "Benchmarks", progress: 80 }), { member: hermes }),
       row("m5", undefined, { member: "p".repeat(52), sender: "me" }),
     ];
-    const { user } = renderApp(<TasksButton rows={rows} nameOf={author => names[author] ?? "?"} />);
+    const faces: Record<string, { key: string; name: string; picture?: string }> = {
+      [hermes]: { key: hermes, name: "Hermes One", picture: "data:image/png;base64,iVBORw0KGgo=" }, [coordinator]: { key: coordinator, name: "Coordinator" },
+    };
+    const { user } = renderApp(<TasksButton rows={rows} nameOf={author => names[author] ?? "?"} faceOf={author => faces[author]} />);
     expect(screen.getByTestId("chat-tasks-count")).toHaveTextContent("3");
     await user.click(screen.getByTestId("chat-tasks"));
     const sections = screen.getAllByTestId("chat-tasks-sender");
     expect(sections.map(s => within(s).getByTestId("chat-tasks-sender-name").textContent)).toEqual(["Coordinator", "Hermes One"]);
+    // Each bot's face before its name: its picture, else its initial in its colour.
+    const face = (s: HTMLElement) => within(s.querySelector("h3")!).getByTestId("member-face");
+    expect(face(sections[0])).toHaveTextContent("C");
+    expect(face(sections[0]).querySelector("span")!.className).toMatch(/text-member-/);
+    expect(face(sections[1]).querySelector("img")).toHaveAttribute("src", faces[hermes].picture);
     expect(sections.map(s => within(s).getByTestId("chat-tasks-sender-count").textContent)).toEqual(["2 active", "1 active"]);
     expect(within(sections[1]).getAllByTestId("chat-tasks-item").map(i => i.dataset.cardId)).toEqual(["bench"]);
     // A finished task goes to the folded section at the end, with its sender's name.
@@ -424,6 +432,7 @@ describe("the Tasks button", () => {
     const done = within(screen.getByTestId("chat-tasks-finished")).getByTestId("chat-tasks-item");
     expect(done).toHaveAttribute("data-card-id", "nightly");
     expect(done).toHaveTextContent("Hermes One");
+    expect(within(done).getByTestId("member-face")).toHaveAttribute("data-key", hermes);
   });
 
   it("shows no count once every task is finished", () => {
@@ -636,6 +645,19 @@ describe("routines in a row in the chat", () => {
     expect(jumpToMessage("m2")).toBe(true);
     expect(screen.getByTestId("routine-stack")).toHaveAttribute("data-open");
     expect(screen.getAllByTestId("status-card")).toHaveLength(4);
+  });
+
+  it("keep the sender's picture beside the folded row, and leave it to the last card once open (never both)", async () => {
+    const cards = [1, 2, 3].map(i => readStatusCard({ kind: "routine", id: `r${i}`, name: `R${i}`, schedule: "hourly", state: "active" }) as RoutineCard);
+    const author = { key: "z".repeat(52), name: "Hermes Zero", first: true, last: true };
+    const { user } = renderApp(<RoutineStack name="Hermes Zero" cards={cards} mine={false} author={author}>
+      {cards.map((c, i) => <MessageBubble key={c.id} message={message(c, { id: `m${i}` })} peerPubKey="peer" author={{ ...author, first: false, last: i === 2 }} />)}
+    </RoutineStack>);
+    const toggleRow = screen.getByTestId("routine-stack-toggle").closest(".message-row-x")!;
+    expect(within(toggleRow as HTMLElement).getByTestId("sender-avatar")).toBeInTheDocument();
+    await user.click(screen.getByTestId("routine-stack-toggle"));
+    expect(within(toggleRow as HTMLElement).queryByTestId("sender-avatar")).not.toBeInTheDocument();
+    expect(screen.getAllByTestId("sender-avatar")).toHaveLength(1);
   });
 });
 

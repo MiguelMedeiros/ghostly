@@ -56,7 +56,8 @@ export function RoutineStack({ name, cards, mine, children, author, onOpenAuthor
   return (
     <div ref={ref} data-testid="routine-stack" data-count={cards.length} data-open={open ? "" : undefined}>
       <div className={`flex ${mine ? "justify-end" : "justify-start"} gap-1 mb-3.5 message-row-x`}>
-        {!mine && author && <SenderAvatar author={author} onOpen={onOpenAuthor} />}
+        {/* Open, the picture goes down beside the last of its cards (GroupChat passes them the run's end), not here too. */}
+        {!mine && author && <SenderAvatar author={open ? { ...author, last: false } : author} onOpen={onOpenAuthor} />}
         {/* A card's look, as the cards it folds (MessageBubble): the sender's name above it, as over their cards. */}
         <div className={`flex min-w-0 w-[min(420px,85%)] flex-col ${mine ? "items-end" : "items-start"}`}>
           {name && <bdi data-testid="routine-stack-name" data-key={author?.key} className={`mb-0.5 block max-w-full truncate px-1 text-[12.8px] font-medium leading-[20px] ${author ? memberText(author.key) : "text-accent-hover"}`}>~{name}</bdi>}
