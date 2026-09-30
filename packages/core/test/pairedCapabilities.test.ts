@@ -91,4 +91,32 @@ describe("paired-call frames", () => {
     expect(calls.pending()).toBeNull();
     expect(() => calls.set("x".repeat(MAX_PAIRED_CALL_SIGNAL + 1))).toThrow(/too large/);
   });
+
+  it("an app going away hangs up the call it placed or answered, however long ago, and nothing else", () => {
+    let now = 10_000;
+    const calls = new PairedCalls(() => now);
+    expect(calls.hangUp(), "no call").toBeNull();
+
+    calls.set(JSON.stringify({ t: "o", ts: 9_000 }));
+    now += 10 * CALL_SIGNAL_MAX_AGE_MS;
+    const frame = calls.hangUp();
+    expect(frame?.t).toBe(PAIRED_CALL_FRAME);
+    expect(JSON.parse(frame!.s)).toEqual({ t: "h", ts: now });
+    // Said once: it is now the latest signal, and not an offer to hang up again.
+    expect(calls.hangUp()).toBeNull();
+
+    // An answer, with its time ahead of this clock: the hang-up still comes after it.
+    calls.set(JSON.stringify({ t: "a", ts: now + 5 }));
+    expect(JSON.parse(calls.hangUp()!.s)).toEqual({ t: "h", ts: now + 6 });
+
+    // A picture changed mid-call: the call is on.
+    calls.set(JSON.stringify({ t: "v", ts: now + 10 }));
+    expect(JSON.parse(calls.hangUp()!.s)).toEqual({ t: "h", ts: now + 11 });
+
+    // Cleared after a hang-up, or something that is no signal: nothing to say.
+    calls.set(null);
+    expect(calls.hangUp()).toBeNull();
+    calls.set("not json");
+    expect(calls.hangUp()).toBeNull();
+  });
 });

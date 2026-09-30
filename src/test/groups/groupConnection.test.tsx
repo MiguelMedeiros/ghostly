@@ -75,6 +75,9 @@ describe("GroupConnection: the header sums up the mesh", () => {
     ["nobody reachable, nobody around", [me, alice({ state: "waiting" }), bob({ state: "waiting" })], {}, { kind: "waiting", label: "Nobody reachable", dot: "bg-text-muted" }],
     ["alone in the group", [me], {}, { kind: "waiting", label: "Only you so far", dot: "bg-text-muted" }],
     ["this device offline", [me, alice(), bob()], { settings: { online: false } }, { kind: "offline", label: "Offline", dot: null }],
+    // Ghostly Desktop on Linux: no WebRTC, and group links are WebRTC only. Not "Connecting…" forever.
+    ["an app with no WebRTC", [me, alice({ state: "connecting" }), bob({ state: "waiting" })], { transport: { protocol: "webrtc/1", relays: [], webrtc: false } }, { kind: "failure", label: "Groups can't connect from this app yet", dot: "bg-danger" }],
+    ["an app with no WebRTC, alone in the group", [me], { transport: { protocol: "webrtc/1", relays: [], webrtc: false } }, { kind: "waiting", label: "Only you so far", dot: "bg-text-muted" }],
   ])("%s", async (_, members, state, want) => {
     await open(active(members), state);
     expect(header()).toEqual({ kind: want.kind, name: want.label, popover: want.label, tooltip: want.label, dot: want.dot });
@@ -130,6 +133,12 @@ describe("GroupConnection: the popover lists every member's edge", () => {
     await user.click(screen.getByTestId("group-connection-reconnect"));
     expect(engine.callsTo("connect")).toEqual([{ linkId: "edge-b" }]);
     expect(await screen.findByRole("alert")).toHaveTextContent("Go online before reconnecting");
+  });
+
+  it("an app with no WebRTC says why no member is reachable, and offers no Reconnect that cannot help", async () => {
+    await open(active([me, alice({ state: "connecting" }), bob({ state: "waiting" })]), { transport: { protocol: "webrtc/1", relays: [], webrtc: false } });
+    expect(screen.getByTestId("group-connection-no-webrtc")).toHaveTextContent("Ghostly Desktop on Linux does not have yet");
+    expect(screen.queryByTestId("group-connection-reconnect")).not.toBeInTheDocument();
   });
 
   it("offers no Reconnect while this device is offline", async () => {

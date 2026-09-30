@@ -3,6 +3,7 @@
 // its two lines here; the other languages are found by src/locales/index.ts without a list.
 import app from "./app.json";
 import calls from "./calls.json";
+import cards from "./cards.json";
 import chat from "./chat.json";
 import common from "./common.json";
 import composer from "./composer.json";
@@ -33,6 +34,7 @@ import wallet from "./wallet.json";
 export default {
   app,
   calls,
+  cards,
   chat,
   common,
   composer,

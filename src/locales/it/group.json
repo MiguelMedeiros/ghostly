@@ -26,6 +26,8 @@
     "connecting": "Connessione ai membri…",
     "label": "Connessione del gruppo",
     "labelWith": "Connessione del gruppo: {{state}}",
+    "noWebrtc": "I gruppi non si connettono ancora da questa app",
+    "noWebrtcHint": "I collegamenti di gruppo usano WebRTC, che Ghostly Desktop su Linux non ha ancora, quindi da qui nessun membro è raggiungibile. Le chat 1:1 e le chiamate funzionano. Apri il gruppo nell'app web o su un altro dispositivo per partecipare.",
     "nobody": "Nessuno raggiungibile",
     "nobodyElse": "Nel gruppo non c'è ancora nessun altro.",
     "note": "Ogni membro è un collegamento diretto, cifrato end-to-end, dalla tua app alla sua. I collegamenti di gruppo usano WebRTC: Iroh, HyperDHT e la consegna solo DHT non sono ancora disponibili nei gruppi. Un membro non raggiungibile riceve ciò che ha perso da qualsiasi membro che lo abbia quando torna.",
