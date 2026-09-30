@@ -96,6 +96,20 @@ describe("the inviter's invite card, once the contact answers", () => {
     expect(card()).toBeNull();
   });
 
+  it("says the contact opened the invite once they did, even when it waited long for them", () => {
+    const { engine } = renderApp(<Inviter />);
+    // An invite shared three minutes ago; the contact joins and is pinned over the DHT: the engine stays at `waiting`.
+    const since = Date.now() - 180_000;
+    show(report("waiting", { since, startedAt: since }), engine);
+    expect(screen.getByTestId("pairing-stage-label")).toHaveTextContent("Waiting for your contact to open the invite");
+    expect(screen.getByTestId("pairing-slow")).toHaveTextContent("has not opened the invite yet");
+    show(report("waiting", { since, startedAt: since, peerSeen: true }), engine);
+    expect(stage()).toBe("waiting");
+    expect(screen.getByTestId("pairing-stage-label")).toHaveTextContent("Your contact opened the invite. Connecting…");
+    expect(screen.queryByTestId("pairing-slow")).toBeNull();
+    expect(screen.getByTestId("pairing-announcement")).not.toHaveTextContent("has not opened");
+  });
+
   it("comes back when the state goes back to nobody there", () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     const { engine } = renderApp(<Inviter />);

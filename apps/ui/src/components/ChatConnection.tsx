@@ -84,8 +84,8 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, pairing 
   const now = useNow(ticking);
   // `now` only ticks; a stage that began after its last tick still reads from the clock.
   const inStage = progress ? Math.max(0, Math.max(now, Date.now()) - progress.since) : 0;
-  const stageWords = progress ? words.stage(progress.stage, progress.role) : "";
-  const slow = ticking && inStage >= SLOW_AFTER_MS[stage!] ? words.slow(stage!) : "";
+  const stageWords = progress ? words.stage(progress.stage, progress.role, progress.peerSeen) : "";
+  const slow = ticking && inStage >= SLOW_AFTER_MS[stage!] ? words.slow(stage!, progress?.peerSeen) : "";
   const pairingReason = pairingFailed ? words.reason(failureReason(progress?.reason)) : "";
   const onDhtWhy = stage === "on-dht" ? words.onDht(progress?.reason) : "";
   const steps = progress ? PAIRING_STEPS[progress.role] : [];

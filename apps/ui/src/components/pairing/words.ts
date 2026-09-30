@@ -5,11 +5,14 @@ import type { FailureReason, PairingRole, PairingStage } from "../../lib/pairing
 export function usePairingWords() {
   const { t } = useI18n();
   return {
-    /** A sentence for where the pairing is. `answering` reads differently on each side. */
-    stage: (stage: PairingStage, role: PairingRole) => {
+    /**
+     * A sentence for where the pairing is. `answering` reads differently on each side. An inviter still `waiting`
+     * whose contact was seen (`peerSeen`: pinned over the DHT, or between attempts) has had the invite opened.
+     */
+    stage: (stage: PairingStage, role: PairingRole, peerSeen?: boolean) => {
       switch (stage) {
         case "publishing": return t("pairing.stage.publishing");
-        case "waiting": return t("pairing.stage.waiting");
+        case "waiting": return peerSeen ? t("pairing.stage.contactSeen") : t("pairing.stage.waiting");
         case "resolving": return t("pairing.stage.resolving");
         case "knocking": return t("pairing.stage.knocking");
         case "answering": return role === "inviter" ? t("pairing.stage.answeringInviter") : t("pairing.stage.answeringJoiner");
@@ -33,11 +36,14 @@ export function usePairingWords() {
         case "failed": return t("pairing.step.failed");
       }
     },
-    /** What is still going on, once a stage takes longer than it should. */
-    slow: (stage: PairingStage) => {
+    /**
+     * What is still going on, once a stage takes longer than it should; nothing for a wait whose contact was seen (its
+     * clock started with the invite, not with the contact).
+     */
+    slow: (stage: PairingStage, peerSeen?: boolean) => {
       switch (stage) {
         case "publishing": return t("pairing.slow.publishing");
-        case "waiting": return t("pairing.slow.waiting");
+        case "waiting": return peerSeen ? "" : t("pairing.slow.waiting");
         case "resolving": return t("pairing.slow.resolving");
         case "knocking": return t("pairing.slow.knocking");
         case "answering": return t("pairing.slow.answering");

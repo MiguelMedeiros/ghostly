@@ -6,7 +6,7 @@ import { expect, type Locator } from "@playwright/test";
 import { Interface } from "ethers";
 import { chatPayments } from "../support/payments";
 import { choose } from "../support/select";
-import { chatPane, either, newWallet, openChat, paymentCard, wallet, type Actor } from "./actors";
+import { alternatives, chatPane, containing, either, newWallet, openChat, paymentCard, template, wallet, type Actor } from "./actors";
 
 /**
  * The Testnet payment blocks of the rails that need e2e/infra (Lightning through LND, Core Lightning, NWC
@@ -33,7 +33,7 @@ export async function chatMethods(actor: Actor, off: string[]): Promise<void> {
 }
 
 /** A note of the scenario's own on a payment: the one thing in its bubble no clock or amount can match by accident. */
-export const memo = (actor: Actor, text: string) => actor.page.getByLabel("What for? (optional)").fill(text);
+export const memo = (actor: Actor, text: string) => actor.page.getByLabel(either("What for? (optional)")).fill(text);
 export const bubble = (actor: Actor, text: string) => chatPane(actor).getByTestId("payment-bubble").filter({ hasText: text }).last();
 export const approve = (scope: Locator) => scope.getByTestId("payment-review").getByRole("button", { name: either("Approve payment") }).click({ timeout: 60_000 });
 
@@ -113,7 +113,7 @@ async function requestInChat(payee: Actor, payer: Actor, p: ChatPayment, confirm
   await approve(request);
   await settles(bubble(payee, p.note), confirm);
   await settles(request, confirm);
-  if (!confirm && p.card !== "lightning") await expect(request.getByTestId("payment-review").getByTestId("review-status")).toHaveText(/settled|confirmed/, { timeout: 90_000 });
+  if (!confirm && p.card !== "lightning") await expect(request.getByTestId("payment-review").getByTestId("review-status")).toHaveText(new RegExp(`${alternatives("settled")}|${alternatives("confirmed")}`), { timeout: 90_000 });
 }
 
 /** Paid (or Received) — mining a block at a time while it waits, for a rail that settles on-chain. */
@@ -223,7 +223,7 @@ async function payInvoiceOfCard(from: Actor, to: Actor, sats: number): Promise<v
   await wallet(from, "lightning");
   await from.page.getByTestId("wallet-send").click();
   await from.page.getByTestId("wallet-pay-input").fill(invoice);
-  await from.page.getByRole("button", { name: `Pay ${sats.toLocaleString("en")} sats` }).click();
+  await from.page.getByRole("button", { name: new RegExp(`${alternatives("Pay")} ${sats.toLocaleString("en")} sats`) }).click();
   await from.page.getByRole("button", { name: either("Pay") }).click();
   await expect(from.page.getByTestId("wallet-notice")).toHaveText(either("Paid."), { timeout: 90_000 });
   await expect(to.page.getByTestId("wallet-paid")).toBeVisible({ timeout: 60_000 });
@@ -407,7 +407,7 @@ async function bdk(a: Actor, b: Actor): Promise<void> {
       await area.getByTestId("provider-save").click();
     } });
     await wallet(p, "bitcoin-testnet");
-    await expect(panel(p).getByTestId("onchain-source-status")).toContainText(/Connected/, { timeout: 60_000 });
+    await expect(panel(p).getByTestId("onchain-source-status")).toContainText(containing("Connected"), { timeout: 60_000 });
     await panel(p).getByTestId("bitcoin-new-address").click();
     address[p.name] = (await panel(p).getByTestId("bitcoin-address").innerText()).trim();
     expect(address[p.name]).toMatch(/^bcrt1q/);
@@ -431,7 +431,7 @@ async function bdk(a: Actor, b: Actor): Promise<void> {
   // B: 20,000 − 5,000 + 3,000 − 2,000 and its two fees; A: the rest, less its own two fees.
   const settledBalance = async (p: Actor) => {
     await wallet(p, "bitcoin");
-    await expect.poll(async () => { mine(); await refreshed(p); return balance(p).innerText(); }, { timeout: 90_000, intervals: [3_000] }).not.toContain("unconfirmed");
+    await expect.poll(async () => { mine(); await refreshed(p); return balance(p).innerText(); }, { timeout: 90_000, intervals: [3_000] }).not.toMatch(template("{{amount}} {{unit}} unconfirmed"));
     return refreshed(p);
   };
   const bFees = 16_000 - (await settledBalance(b));
@@ -476,7 +476,11 @@ async function usdt(a: Actor, b: Actor): Promise<void> {
   await rpc("evm_mine");
   await wallet(a, "usdt");
   await expect(tokens(a)).toHaveText(/^10 TEST-USDT/, { timeout: 30_000 });
-  await bothWays(a, b, "usdt", [3, 2, 1, 1]);
+  // The local chain mines a block per transaction, and a payment counts as done at 2 confirmations: until then the
+  // payer's wallet takes no other payment from the same account ("already submitted"). A block more before each one,
+  // and one pass of the engine's 10 s payment check to see it.
+  const confirmed = async (payer: Actor) => { await rpc("evm_mine"); await payer.page.waitForTimeout(11_000); };
+  await bothWays(a, b, "usdt", [3, 2, 1, 1], confirmed);
   await wallet(a, "usdt");
   await expect(tokens(a), "10 in, 3 out, 2 out, 1 in, 1 in").toHaveText(/^7 TEST-USDT/, { timeout: 30_000 });
   await wallet(b, "usdt");

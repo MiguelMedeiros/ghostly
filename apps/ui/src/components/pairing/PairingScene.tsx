@@ -83,7 +83,8 @@ export function PairingScene({ progress, contact, retry, retrying, retryError, i
   // `now` only ticks; a stage that began after its last tick still reads from the clock.
   const inStage = Math.max(0, Math.max(now, Date.now()) - progress.since);
   const slow = ticking && inStage >= SLOW_AFTER_MS[stage];
-  const label = words.stage(stage, role);
+  const label = words.stage(stage, role, progress.peerSeen);
+  const slowWords = slow ? words.slow(stage, progress.peerSeen) : "";
   const steps = PAIRING_STEPS[role];
   const current = stage === "failed" ? -1 : steps.indexOf(stage);
   const reason = stage === "failed" ? failureReason(progress.reason) : undefined;
@@ -92,7 +93,7 @@ export function PairingScene({ progress, contact, retry, retrying, retryError, i
   const arrow = `ps-arrow-${titleId.replace(/[^\w-]/g, "")}`;
   const [me, peer] = moods(stage);
   // The failure has its own alert; this region tells the stage and, once, that it is taking long.
-  const announcement = [label, slow ? words.slow(stage) : ""].filter(Boolean).join(" ");
+  const announcement = [label, slowWords].filter(Boolean).join(" ");
 
   return <section ref={root} id={id} className="ps" data-testid="pairing-scene" data-stage={stage} data-role={role} data-paused={paused || undefined} data-leaving={leaving || undefined} aria-labelledby={titleId}>
     <svg className="ps-svg" viewBox="0 0 320 150" aria-hidden="true" focusable="false">
@@ -142,7 +143,7 @@ export function PairingScene({ progress, contact, retry, retrying, retryError, i
     <div className="ps-caption">
       <p id={titleId} className="ps-label" data-testid="pairing-stage-label">{label}</p>
       {ticking && <p className="ps-time" data-testid="pairing-elapsed"><time dateTime={`PT${Math.floor(inStage / 1000)}S`} aria-label={t("pairing.elapsed", { time: formatElapsed(inStage) })}>{formatElapsed(inStage)}</time>{progress.attempt > 1 && <span> · {t("pairing.attempt", { n: progress.attempt })}</span>}</p>}
-      {slow && <p className="ps-slow" data-testid="pairing-slow">{words.slow(stage)}</p>}
+      {slowWords && <p className="ps-slow" data-testid="pairing-slow">{slowWords}</p>}
       {slow && progress.detail && <p className="ps-slow ps-detail" data-testid="pairing-detail">{progress.detail}</p>}
       {stage === "live" && <p className="ps-slow">{t("pairing.sayHello")}</p>}
       {reason && <div role="alert" className="ps-failure" data-testid="pairing-failure">
