@@ -13,6 +13,7 @@ import { USDT_CHAINS, type UsdtRequest } from "../lib/parse/money-usdt";
 import { useI18n } from "../contexts/I18nContext";
 import { moneyLabel, satsIn } from "./NetworkTag";
 import { PaymentReview } from "./PaymentReview";
+import { OpenInWallet } from "./OpenInWallet";
 import { ONCHAIN_FEE_CAP } from "./walletCardData";
 import { decimalInput, formatAmount, formatTokenAmount } from "../lib/amount";
 
@@ -244,7 +245,7 @@ function OnchainCard({ request, mine, off, lightning }: { request: OnchainReques
       >
         {status}
         <button className={quiet} onClick={copy}>{copied ? t("payments.invoice.copied") : t("payments.formats.copyAddress")}</button>
-        <a className={`${quiet} no-underline text-inherit`} href={request.uri ?? `bitcoin:${request.address}`} title={t("payments.formats.openBitcoinTitle")}>{t("payments.invoice.openWallet")}</a>
+        <OpenInWallet className={`${quiet} no-underline text-inherit`} uri={request.uri ?? `bitcoin:${request.address}`} title={t("payments.formats.openBitcoinTitle")} testId="onchain-open-wallet">{t("payments.invoice.openWallet")}</OpenInWallet>
       </Shell>
       {lightning && (
         <div className="mt-2" data-testid="onchain-lightning">
@@ -273,7 +274,7 @@ function Bolt12Card({ offer }: { offer: Bolt12Offer }) {
       detail={offer.offer} qr={offer.offer.toUpperCase()}
     >
       <button className={quiet} onClick={copy}>{copied ? t("payments.invoice.copied") : t("payments.formats.copyOffer")}</button>
-      <a className={`${quiet} no-underline text-inherit`} href={`lightning:${offer.offer}`} title={t("payments.invoice.openTitle")}>{t("payments.invoice.openWallet")}</a>
+      <OpenInWallet className={`${quiet} no-underline text-inherit`} uri={`lightning:${offer.offer}`} title={t("payments.invoice.openTitle")} testId="bolt12-open-wallet">{t("payments.invoice.openWallet")}</OpenInWallet>
     </Shell>
   );
 }
