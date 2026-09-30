@@ -9,6 +9,7 @@
     "connected": "Conectado · {{store}}",
     "download": "Descargar",
     "downloaded": "Descargado · {{size}}",
+    "emptyFile": "Este archivo está vacío. Elige un archivo de copia.",
     "fromFile": "Archivo",
     "keepOne": "¿Sigue aquí el original? Usa solo uno: comparten monederos.",
     "list": "Listar",

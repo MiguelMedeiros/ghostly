@@ -60,6 +60,8 @@ export function ProfileBackups({ canSwitch, openBackup = false }: { canSwitch: b
     // A copy of everything now: a wallet's backup reminder that asked for it is over.
     await wallet?.backupReminder({ event: "profile" }).catch(() => {});
   });
+  // An empty file would leave Restore off with nothing said: say why instead.
+  const pickFile = (text: string) => { const empty = !text.trim(); setFile(empty ? null : text); setDone(""); setError(empty ? t("profile.backups.emptyFile") : ""); };
   const restore = () => run(async () => {
     const text = from === "file" ? file : new TextDecoder().decode(await s3!.get(picked));
     if (!text) throw new Error(t("profile.backups.chooseFirst"));
@@ -90,7 +92,7 @@ export function ProfileBackups({ canSwitch, openBackup = false }: { canSwitch: b
         <Block>
           {s3 && <Segmented label={t("profile.backups.restoreFrom")} value={from} onChange={(next) => { setFrom(next); setError(""); }} options={[{ value: "file", label: t("profile.backups.fromFile") }, { value: "s3", label: "S3" }]} />}
           {from === "file" || !s3 ? (
-            <input data-testid="restore-file" type="file" accept=".ghostly-backup,application/json" className={input} onChange={(e) => { const f = e.target.files?.[0]; if (f) void f.text().then(setFile); }} />
+            <input data-testid="restore-file" type="file" accept=".ghostly-backup,application/json" className={input} onChange={(e) => { const f = e.target.files?.[0]; if (f) void f.text().then(pickFile); }} />
           ) : (
             <InputGroup>
               {listing?.length ? (

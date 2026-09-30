@@ -111,6 +111,15 @@ async function undoRestore(ns: string, databases: string[]): Promise<void> {
 }
 
 /**
+ * The file a profile's backup downloads as, named after the profile: its letters and digits in any script kept
+ * ("仕事", "Trabalho-é"), everything else (spaces, punctuation, direction marks) a dash. A name with none left is "profile".
+ */
+export function backupFileName(profileName: string): string {
+  const base = profileName.normalize("NFC").replace(/[^\p{L}\p{M}\p{N}_-]+/gu, "-").replace(/^-+|-+$/g, "").slice(0, 64);
+  return `${base || "profile"}.ghostly-backup`;
+}
+
+/**
  * Brings a bundle back as a new profile of this space, and returns it. Nothing existing is replaced.
  * Ark wallet databases move to fresh ids; unfinished payment attempts are kept as unknown.
  */

@@ -9,6 +9,7 @@
     "connected": "已连接 · {{store}}",
     "download": "下载",
     "downloaded": "已下载 · {{size}}",
+    "emptyFile": "此文件为空。请选择备份文件。",
     "fromFile": "文件",
     "keepOne": "原资料还在？只用其中一个：它们共用钱包。",
     "list": "列出",
