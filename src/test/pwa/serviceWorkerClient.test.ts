@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { applyUpdate, askForShare, forwardShare, listenForShares, openedForShare, prepareUpdate } from "../../../web/src/pwa/serviceWorker";
+import { applyUpdate, askForShare, forwardShare, listenForShares, openedForShare, prepareUpdate } from "../../../apps/web/src/pwa/serviceWorker";
 import { incomingShare, resetIncomingShare } from "../../lib/incomingShare";
 
 // covers: app.pwa.update, app.pwa.share-target

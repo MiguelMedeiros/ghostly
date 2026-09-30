@@ -1,12 +1,12 @@
 import "fake-indexeddb/auto";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { WAKE_NOTICE_GAP_MS, wakeNoticeDue } from "../../../web/src/sw/policy";
-import { resetWakeLimitMemory, takeWakeSlot } from "../../../web/src/sw/wakeLimit";
+import { WAKE_NOTICE_GAP_MS, wakeNoticeDue } from "../../../apps/web/src/sw/policy";
+import { resetWakeLimitMemory, takeWakeSlot } from "../../../apps/web/src/sw/wakeLimit";
 
 // covers: push.wake.notify, push.wake.call
 
 /**
- * The push worker's own limit on wake-ups (web/src/sw/sw.ts): a contact's app keeps to one wake-up per 5 minutes,
+ * The push worker's own limit on wake-ups (apps/web/src/sw/sw.ts): a contact's app keeps to one wake-up per 5 minutes,
  * but one that does not could fill the screen with "Incoming call" notices that stay until dismissed. Per token,
  * at most one call notice per 30 s and one message notice per 5 minutes; what was shown last survives the worker
  * being stopped between pushes.

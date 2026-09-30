@@ -3,10 +3,10 @@ import { join } from "node:path";
 import { expect, it } from "vitest";
 
 /**
- * app.ghostly.tools keeps no log of who visits. web/nginx.conf logs the time, the file and the response, never the
+ * app.ghostly.tools keeps no log of who visits. apps/web/nginx.conf logs the time, the file and the response, never the
  * visitor's address (nor the proxy headers that carry it behind Cloudflare), browser, referrer or query string.
  */
-const conf = readFileSync(join(import.meta.dirname, "../../web/nginx.conf"), "utf8")
+const conf = readFileSync(join(import.meta.dirname, "../../apps/web/nginx.conf"), "utf8")
   .split("\n")
   .map((line) => line.replace(/#.*/, ""))
   .join("\n");

@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { expect, test } from "../support/fixtures";
 import { choose } from "../support/select";
 
-const version = JSON.parse(readFileSync(join(import.meta.dirname, "..", "..", "web", "package.json"), "utf8")).version;
+const version = JSON.parse(readFileSync(join(import.meta.dirname, "..", "..", "apps", "web", "package.json"), "utf8")).version;
 
 test("shows the version being released", { tag: ["@feature:app.version"] }, async ({ peer }) => {
   test.skip(!!process.env.E2E_WEB_URL, "a deployed app may be on another version");

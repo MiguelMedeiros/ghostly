@@ -9,7 +9,7 @@ import { desktopPerson, type DesktopPerson } from "../matrix/people";
 
 /**
  * Two Desktop apps find each other on the Mainline DHT directly, with relay reads off, as the app starts by
- * default ("Also use Pkarr relays" off, src-tauri/src/pkarr_network.rs): the invite's first contact, the DHT
+ * default ("Also use Pkarr relays" off, apps/desktop/src/pkarr_network.rs): the invite's first contact, the DHT
  * text before the link is live, and the capability records that take the pair live on Iroh or HyperDHT are
  * all read off a DHT of their own (GHOSTLY_PKARR_DHT_BOOTSTRAP, e2e/support/mainlineTestnet.ts). The relay
  * is still written to, for contacts in a browser, which read only relays; the apps never read it.
@@ -27,7 +27,7 @@ const discovery = (p: DesktopPerson) => p.app.execute<{ path: string | null; rel
     relays: [...document.querySelectorAll('[data-testid="connection-relay"]')].map((r) => r.dataset.state),
   };`);
 
-/** Each app's own log (`ghostly.log`, src-tauri/src/diagnostics.rs): its link-trace lines say how the first text went. */
+/** Each app's own log (`ghostly.log`, apps/desktop/src/diagnostics.rs): its link-trace lines say how the first text went. */
 function attachLogs(name: string, home: string): void {
   const find = (dir: string): string[] => readdirSync(dir, { withFileTypes: true })
     .flatMap((e) => e.isDirectory() ? find(join(dir, e.name)) : e.name === "ghostly.log" ? [join(dir, e.name)] : []);

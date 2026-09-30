@@ -2,7 +2,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { desktopBinary, desktopHome, expect, homeEnv, openDesktop, privateBus, test } from "../support/desktop";
 
 /**
- * One Ghostly per profile (src-tauri/src/single_instance.rs). Started twice on one profile, two peers ran with the
+ * One Ghostly per profile (apps/desktop/src/single_instance.rs). Started twice on one profile, two peers ran with the
  * same keys: the contact held one instance's channel, refused the other's as crossed, and the chat stopped. Now the
  * second launch hands over to the running app (its window comes forward) and exits; another profile still runs.
  *

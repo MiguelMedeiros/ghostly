@@ -17,7 +17,7 @@ import { attachPubky, PubkyApprover, pubkyTestnet } from "../support/pubky";
  */
 
 const WEBP = readFileSync(new URL("../support/avatar-fixtures/avatar-lossy.webp", import.meta.url));
-const PNG = readFileSync(new URL("../../src-tauri/icons/32x32.png", import.meta.url));
+const PNG = readFileSync(new URL("../../apps/desktop/icons/32x32.png", import.meta.url));
 const CORS = { "access-control-allow-origin": "*" };
 const now = () => Math.floor(Date.now() / 1000);
 const json = (body: unknown, status = 200) => ({ status, contentType: "application/json", headers: CORS, body: JSON.stringify(body) });

@@ -6,7 +6,7 @@ import { DESKTOP_RELAY } from "@ghostly/browser/proofs/oidc/popup";
  * Sign-in for an identity proof in the system browser: providers refuse
  * embedded WebViews. The provider returns to the web app's static callback
  * page, registered once per provider, which forwards the fragment to Rust's
- * one-shot listener on 127.0.0.1 (src-tauri/src/oidc.rs). The state names that
+ * one-shot listener on 127.0.0.1 (apps/desktop/src/oidc.rs). The state names that
  * listener's port so the page knows where to send it.
  */
 export const desktopOidc: OidcHost = {

@@ -7,7 +7,7 @@ services:
     image: ghcr.io/miguelmedeiros/ghostly-web:${GHOSTLY_WEB_TAG:-latest}
     build:
       context: .
-      dockerfile: web/Dockerfile
+      dockerfile: apps/web/Dockerfile
       args:
         # Which commit this build serves, for `/version.json`. There is no git
         # in the image: pass it in, or open tabs cannot tell one deploy from the next.

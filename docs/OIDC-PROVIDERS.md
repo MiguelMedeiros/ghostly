@@ -47,7 +47,7 @@ Flow used: `response_type=id_token` against the `common` authority. The token's 
    - Primary App ID: the one above.
    - Domains and subdomains: `app.ghostly.tools`
    - Return URLs: `https://app.ghostly.tools/oidc-callback.html` (and the extension URI; if Apple refuses `chromiumapp.org`, leave it out and Apple is simply not offered in the extension: set only `apple.clientIds.web`).
-   - If Apple asks to verify the domain, it gives a file for `https://app.ghostly.tools/.well-known/apple-developer-domain-association.txt`; it goes in `web/public/.well-known/`.
+   - If Apple asks to verify the domain, it gives a file for `https://app.ghostly.tools/.well-known/apple-developer-domain-association.txt`; it goes in `apps/web/public/.well-known/`.
 3. The client ID is the **Services ID** (`tools.ghostly.signin`) → `apple.clientIds.web` (and `.extension` if accepted). Create no key: Ghostly never redeems Apple's code.
 
 Flow used: `response_type=code id_token`, `response_mode=fragment`, **no scope**. Apple only allows the fragment without scopes, so the token carries an Apple-assigned identifier and never an email. Asking for name or email requires `form_post`, which only a server can read: out of scope.

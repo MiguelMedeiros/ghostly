@@ -10,7 +10,7 @@ import { decodeInPage, loadFixtures, playInPage, rateInPage } from "../support/v
  * nginx serves app.ghostly.tools with. The Desktop side of the pair is e2e/desktop/voice.spec.ts and
  * `npm run check:wkwebview-media`.
  */
-const policy = /Content-Security-Policy "([^"]+)"/.exec(readFileSync(new URL("../../web/nginx-headers.conf", import.meta.url), "utf8"))![1]!;
+const policy = /Content-Security-Policy "([^"]+)"/.exec(readFileSync(new URL("../../apps/web/nginx-headers.conf", import.meta.url), "utf8"))![1]!;
 
 test("voice recordings from every Ghostly play in the web app, under its CSP", { tag: ["@feature:files.voice.play"] }, async ({ page, baseURL }) => {
   await page.route("**/voice-codecs", (route) =>

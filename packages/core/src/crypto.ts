@@ -10,7 +10,7 @@ export function generateEncryptionKey(): Uint8Array {
 
 /**
  * NaCl secretbox (XSalsa20-Poly1305). Wire format matches the Rust
- * implementation in `src-tauri/src/crypto.rs`: base64(nonce || box).
+ * implementation in `apps/desktop/src/crypto.rs`: base64(nonce || box).
  */
 export function encrypt(plaintext: string, key: Uint8Array): string {
   if (key.length !== KEY_LENGTH) throw new Error("Invalid key length: expected 32 bytes");
