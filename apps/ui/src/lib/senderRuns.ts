@@ -35,8 +35,8 @@ const otherDay = (a: number, b: number) => new Date(a).toDateString() !== new Da
  * member's messages one after the other: another member's message, one of mine, a line of the group (someone joined,
  * a new name), a payment note shown in the timeline, a pause of more than `RUN_GAP_MS` or a new day ends it. A note
  * shown under its own payment bubble instead (`hiddenNotes`) is not in the timeline, and does not. Over the whole
- * history, not only the rows drawn yet: a long group draws its older rows a moment later (useTailFirst), and a run
- * must not change where it starts or ends when they come.
+ * history, not only the rows in the page: a long group has a window of its rows there (useRowWindow), and a run
+ * must not change where it starts or ends as the window moves.
  */
 export function authorsOf(
   rows: readonly RunRow[], group: Pick<GroupView, "members" | "formerNames">, hiddenNotes: ReadonlySet<string>,

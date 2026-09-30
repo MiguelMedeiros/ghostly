@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { JUMP_EVENT } from "../lib/replies";
+import type { RowWindow } from "./useRowWindow";
 
 /** A message row of the timeline, in order: its id (the row's `data-message-id`) and whether I sent it. */
 export interface ScrollRow {
@@ -11,6 +12,8 @@ export interface ScrollRow {
 export const NEAR_BOTTOM_PX = 100;
 /** Further than this from the bottom, the ↓ button shows even with nothing new. */
 export const FAR_FROM_BOTTOM_PX = 400;
+/** The view this near an edge of the rows in the page (in heights of the view) takes a page more there (`useRowWindow`). */
+export const EDGE_VIEWS = 1.5;
 /** A hand's wheel, touch or key moves the list for this long after it (smooth scrolling, a trackpad's momentum). */
 export const HAND_MS = 1000;
 /** A jump to a message (a quote's, a search's) is on its way for at most this long, unless a hand takes over first. */
@@ -39,8 +42,12 @@ function remember(chat: string, state: Left) {
 }
 /** Whether the chat was left scrolled up, on a message: it opens on that message, so the message must be in the page. */
 export function leftScrolledUp(chat: string): boolean {
+  return !!leftOn(chat);
+}
+/** The message the chat was left scrolled up on, if it was: the rows in the page open around it (`useRowWindow`). */
+export function leftOn(chat: string): string | undefined {
   const was = left.get(chat);
-  return !!was && !was.atBottom && !!was.anchor;
+  return was && !was.atBottom ? was.anchor?.id : undefined;
 }
 /** Forgets where every chat was left (for tests). */
 export function forgetChatScroll() {
@@ -72,7 +79,7 @@ const editable = (target: EventTarget | null) =>
  * that message once the rows bring it, unless a hand scrolled first. `keys`: End or Ctrl/Cmd+↓ (outside a text field)
  * jumps to the bottom. A jump to a message (`jumpToMessage`: a quote's, a search's) lands on it, from the bottom too.
  */
-export function useChatScroll({ rows, chat, keys = true }: { rows: readonly ScrollRow[]; chat: string; keys?: boolean }) {
+export function useChatScroll({ rows, chat, keys = true, window: rowWindow }: { rows: readonly ScrollRow[]; chat: string; keys?: boolean; window?: RowWindow }) {
   // Elements, not refs: a list shown later (a group still joining) still gets its listeners.
   const [listEl, listRef] = useState<HTMLElement | null>(null);
   const [columnEl, columnRef] = useState<HTMLElement | null>(null);
@@ -106,6 +113,13 @@ export function useChatScroll({ rows, chat, keys = true }: { rows: readonly Scro
    * hand takes over, or after `JUMP_MS`.
    */
   const jumping = useRef(0);
+  /**
+   * The rows in the page, when they are a window of the timeline (`useRowWindow`). Detached, the page's end is not the
+   * chat's: the view is never at the bottom there, and going to the bottom brings the last rows back first.
+   */
+  const win = useRef(rowWindow);
+  win.current = rowWindow;
+  const detached = () => !!win.current?.detached;
 
   const distance = (el: HTMLElement) => el.scrollHeight - el.scrollTop - el.clientHeight;
   /** A list not on screen (a chat kept loaded for a call) has no size: nothing about it says where the view is. */
@@ -144,7 +158,7 @@ export function useChatScroll({ rows, chat, keys = true }: { rows: readonly Scro
       }
     }
     lastTop.current = el.scrollTop;
-    setFar(distance(el) > FAR_FROM_BOTTOM_PX);
+    setFar(detached() || distance(el) > FAR_FROM_BOTTOM_PX);
   }, []);
 
   const toBottom = useCallback(() => {
@@ -156,8 +170,11 @@ export function useChatScroll({ rows, chat, keys = true }: { rows: readonly Scro
     jumping.current = 0;
     anchor.current = null;
     clear();
+    // Up the history, the last rows come back first, in place of the ones in the page: at once, not a long glide.
+    const swapped = detached();
+    if (swapped) win.current!.attach(true);
     const top = el.scrollHeight;
-    if (reducedMotion() || typeof el.scrollTo !== "function") el.scrollTop = top;
+    if (swapped || reducedMotion() || typeof el.scrollTo !== "function") el.scrollTop = top;
     else el.scrollTo({ top, behavior: "smooth" });
     lastTop.current = el.scrollTop;
   }, [clear]);
@@ -166,7 +183,8 @@ export function useChatScroll({ rows, chat, keys = true }: { rows: readonly Scro
   const toNew = useCallback(() => {
     const el = list.current;
     const id = firstNew.current;
-    const row = el && id ? rowById(el, id) : undefined;
+    // Not in the page (the window is elsewhere): the rows around it come in first.
+    const row = el && id ? rowById(el, id) ?? (win.current?.reveal(id) ? rowById(el, id) : undefined) : undefined;
     if (!el || !row) { toBottom(); return; }
     const top = el.scrollTop + row.getBoundingClientRect().top - el.getBoundingClientRect().top - 8;
     if (top >= el.scrollHeight - el.clientHeight - NEAR_BOTTOM_PX) { toBottom(); return; }
@@ -220,6 +238,7 @@ export function useChatScroll({ rows, chat, keys = true }: { rows: readonly Scro
       const was = left.get(chat);
       const back = was && !was.atBottom && was.anchor ? was : null;
       if (back && rowById(el, back.anchor!.id)) { restore(back); return; }
+      win.current?.attach();
       atBottom.current = true;
       el.scrollTop = el.scrollHeight;
       lastTop.current = el.scrollTop;
@@ -239,11 +258,12 @@ export function useChatScroll({ rows, chat, keys = true }: { rows: readonly Scro
     for (const row of fresh) seen.current.add(row.id);
     const last = rows[rows.length - 1];
     if (last.mine && fresh.includes(last)) {
-      // What I send goes to the bottom, wherever I was.
+      // What I send goes to the bottom, wherever I was: up the history, the last rows come back (and this runs again).
       pending.current = null;
       atBottom.current = true;
       anchor.current = null;
       clear();
+      win.current?.attach();
     } else if (!atBottom.current) {
       const theirs = fresh.filter(row => !row.mine);
       if (theirs.length) {
@@ -289,15 +309,29 @@ export function useChatScroll({ rows, chat, keys = true }: { rows: readonly Scro
       // A hand moved it: where the chat was left no longer matters.
       pending.current = null;
       if (d <= NEAR_BOTTOM_PX) following.current = false;
-      atBottom.current = following.current || d <= NEAR_BOTTOM_PX;
-      setFar(d > FAR_FROM_BOTTOM_PX);
+      atBottom.current = !detached() && (following.current || d <= NEAR_BOTTOM_PX);
+      setFar(detached() || d > FAR_FROM_BOTTOM_PX);
       if (atBottom.current) { anchor.current = null; clear(); } else capture(el);
+      nearEdge(el);
+    };
+    /** Near an edge of the rows in the page, with more beyond it: a page more there (the view stays on its row). */
+    const nearEdge = (el: HTMLElement) => {
+      const w = win.current;
+      if (!w) return;
+      const edge = el.clientHeight * EDGE_VIEWS;
+      if (el.scrollTop < edge && w.more("up")) return;
+      if (w.detached && distance(el) < edge) w.more("down");
     };
     const takeOver = (e: Event) => {
       following.current = false;
       jumping.current = 0;
       handAt.current = performance.now();
       if (e.type === "pointerdown") pressed.current = true;
+      // A wheel against an end of the rows in the page scrolls nothing, so no scroll event says it: more there.
+      if (e.type === "wheel" && !hidden(el) && ((e as WheelEvent).deltaY < 0 ? el.scrollTop <= 0 : distance(el) <= 1)) {
+        if (atBottom.current === false) capture(el);
+        nearEdge(el);
+      }
     };
     const release = () => { pressed.current = false; };
     const onKey = (e: KeyboardEvent) => { if (SCROLL_KEYS.has(e.key) && !editable(e.target)) { handAt.current = performance.now(); jumping.current = 0; } };

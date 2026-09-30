@@ -33,8 +33,11 @@ export interface Open {
 /** A tiny JPEG, as a link preview's thumbnail carries one. */
 const THUMB = "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////wgALCAABAAEBAREA/8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPxA=";
 
-/** A chat's history, as the app keeps it in localStorage: `count` messages of every kind a chat shows. */
-export function history(count: number, start: number) {
+/**
+ * A chat's history, as the app keeps it in localStorage: `count` messages of every kind a chat shows. `lean` makes the
+ * long texts and previews shorter, so that 20,000 messages still fit in the page's storage.
+ */
+export function history(count: number, start: number, lean = false) {
   const words = ["ghost", "boo", "lantern", "attic", "whisper", "moonlight", "cobweb", "candle", "haunt", "echo"];
   const line = (i: number, n: number) => Array.from({ length: n }, (_, k) => words[(i * 7 + k * 3) % words.length]).join(" ");
   return Array.from({ length: count }, (_, i) => {
@@ -49,7 +52,7 @@ export function history(count: number, start: number) {
     if (kind === 0) text = `*${line(i, 2)}* and _${line(i + 1, 2)}_ with \`code ${i}\`\n- ${line(i, 3)}\n- ${line(i + 2, 4)}`;
     else if (kind === 1) {
       text = `Look at https://example.com/post/${i}?utm_source=x ${line(i, 4)}`;
-      base.preview = { u: `https://example.com/post/${i}`, t: `Post ${i}: ${line(i, 5)}`, d: line(i + 3, 14), s: "Example", ...(i % 20 === 1 && { i: THUMB }) };
+      base.preview = { u: `https://example.com/post/${i}`, t: `Post ${i}: ${line(i, 5)}`, d: line(i + 3, lean ? 3 : 14), s: "Example", ...(i % 20 === 1 && { i: THUMB }) };
     } else if (kind === 2) text = `https://web.archive.org/web/2009/http://geocities.com/ghost${i}.gif`;
     else if (kind === 3 && i % 30 === 3) {
       text = "";
@@ -57,8 +60,28 @@ export function history(count: number, start: number) {
     } else if (kind === 4 && i % 40 === 4) {
       text = "";
       base.file = { id: `video-${i}`, name: `ghosts-${i}.mp4`, size: 900_000, mime: "video/mp4", video: { duration: 6_000, width: 640, height: 360 } };
-    } else if (kind === 5) text = i % 20 === 5 ? `${line(i, 30)}\n${line(i + 1, 25)}\n${line(i + 2, 12)}` : line(i, 6);
-    else text = line(i, 3 + (i % 9));
+    } else if (kind === 3 && i % 30 === 13) {
+      text = "";
+      base.file = { id: `picture-${i}`, name: `moon-${i}.jpg`, size: 120_000, mime: "image/jpeg", image: { width: 800, height: 600 } };
+    } else if (kind === 5) text = i % 20 === 5 ? (lean ? `${line(i, 8)}\n${line(i + 1, 6)}` : `${line(i, 30)}\n${line(i + 1, 25)}\n${line(i + 2, 12)}`) : line(i, 6);
+    else if (i % 60 === 28) {
+      // A bot's task card (WISP 4xx · Status Cards), its text the fallback.
+      const status = (["running", "done", "failed", "blocked"] as const)[(i / 60 | 0) % 4];
+      base.card = {
+        kind: "task", id: `task-${i}`, title: `Task ${i}: ${line(i, 4)}`, status, progress: (i * 7) % 100, step: line(i + 1, 5),
+        pr: { url: `https://github.com/o/r/pull/${i}`, number: i, additions: i % 300, deletions: i % 70 },
+        items: Array.from({ length: 4 }, (_, k) => ({ text: line(i + k, 4), state: (["done", "running", "pending", "done"] as const)[k] })),
+        updatedAt: start + i * 45_000,
+      };
+      text = `Task ${i}: ${status}`;
+    } else if (i % 60 === 58 || i % 60 === 59) {
+      // A routine's report, and another right after it: a stack of routine cards.
+      base.card = {
+        kind: "routine", id: `routine-${i % 2}`, name: `Daily report ${i % 2}`, schedule: "every day 01:00", state: "active",
+        lastRun: { at: start + i * 45_000, result: i % 180 === 58 ? "failed" : "ok", summary: line(i, 6) }, nextRunAt: start + i * 45_000 + 86_400_000,
+      };
+      text = `Daily report ${i % 2}`;
+    } else text = line(i, 3 + (i % 9));
     base.text = text;
     // Replies to a message a little earlier, reactions, edits and forwards, spread over the kinds.
     if (i > 10 && i % 7 === 5) {
@@ -74,11 +97,11 @@ export function history(count: number, start: number) {
 }
 
 /** Stores the chats and returns their ids: the chat list shows them by their labels. */
-export async function seed(page: Page, chats: { label: string; count: number }[]): Promise<string[]> {
+export async function seed(page: Page, chats: { label: string; count: number; lean?: boolean }[]): Promise<string[]> {
   const start = Date.now() - 30 * 86_400_000;
-  const stored = chats.map(({ label, count }) => {
+  const stored = chats.map(({ label, count, lean }) => {
     const keys = createLink().mine;
-    return { label, keys, messages: history(count, start) };
+    return { label, keys, messages: history(count, start, lean) };
   });
   const ids = await page.evaluate(stored => stored.map(({ label, keys, messages }) => {
     const id = crypto.randomUUID().replaceAll("-", "");
@@ -126,7 +149,7 @@ export function openAndMeasure(label: string): Promise<Open> {
     let paint = 0, settled = 0, still = 0, last = "", atBottom = 0, offBottom = 0;
     let watcher: ResizeObserver | undefined;
     const list = () => [...document.querySelectorAll<HTMLElement>(".chat-wallpaper")].find(el => el !== previous) ?? null;
-    while (performance.now() - t0 < 30_000) {
+    while (performance.now() - t0 < 120_000) {
       const now = await afterPaint();
       const el = list();
       if (!paint && el?.querySelector("[data-message-row]")) paint = now - t0;

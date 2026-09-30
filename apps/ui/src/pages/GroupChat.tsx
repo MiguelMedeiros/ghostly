@@ -6,8 +6,8 @@ import type { EngineState, GroupJoinStage, GroupPayNote, GroupView, StoredMessag
 import { MessageBubble } from "../components/MessageBubble";
 import { MessageInput } from "../components/MessageInput";
 import { JumpToLatest } from "../components/chat/JumpToLatest";
-import { leftScrolledUp, useChatScroll } from "../hooks/useChatScroll";
-import { useTailFirst } from "../hooks/useTailFirst";
+import { leftOn, leftScrolledUp, useChatScroll } from "../hooks/useChatScroll";
+import { useRowWindow } from "../hooks/useRowWindow";
 import { GroupMembersDialog } from "../components/GroupMembersDialog";
 import { DeleteChatDialog } from "../components/DeleteChatDialog";
 import { LeaveGroupDialog } from "../components/LeaveGroupDialog";
@@ -248,7 +248,7 @@ export function GroupChat() {
     let whole = false;
     const show = (list: StoredMessage[]) => { if (current) { whole = true; setLoaded({ groupId, list }); } };
     // Its newest page first, straight from the store's index: a long group shows before its whole history is read, and
-    // the rest comes in above it (useTailFirst). Not when the engine already sent this group's history, nor when the
+    // the rest comes in above it, into the page as the view goes up (useRowWindow). Not when the engine already sent this group's history, nor when the
     // group opens on a message further up, which must be there when it opens.
     const linkId = `group:${groupId}`;
     if (!engine.messages.has(linkId) && !leftScrolledUp(groupId)) {
@@ -259,14 +259,17 @@ export function GroupChat() {
     // Its list stops following once this group is left: coming back, the engine's copy (with what came meanwhile) is shown.
     return () => { current = false; off(); setLoaded({ groupId: "", list: NO_MESSAGES }); };
   }, [groupId]);
-  // A long group draws its last rows first, and the older ones in the moment after (useTailFirst).
+  // A bot's routines in a row: one row, opened on a tap (WISP 4xx · Status Cards), whichever of its rows are in the page.
+  const stacks = useMemo(() => routineStacks(messages, m => m), [messages]);
+  const stackHeads = useMemo(() => new Map([...stacks.values()].flatMap(run => run.slice(1).map(m => [m.id, run[0].id] as const))), [stacks]);
+  // A long group has a window of its rows in the page, never the whole history (useRowWindow, see Chat.tsx).
   const rowIds = useMemo(() => messages.map(m => m.id), [messages]);
-  const firstRow = useTailFirst(rowIds, groupId ?? "", leftScrolledUp(groupId ?? ""));
+  const rowWindow = useRowWindow(rowIds, groupId ?? "", { opensOn: leftOn(groupId ?? ""), heads: stackHeads });
   // At the bottom a new message keeps the view there; scrolled up, nothing moves it and the ↓ pill counts the members'.
-  // Always every message, drawn yet or not; a new list when older rows come in above (see Chat.tsx).
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- firstRow: see above
-  const scrollRows = useMemo(() => messages.filter(m => !m.event && !m.groupPay).map(m => ({ id: m.id, mine: m.sender === "me" })), [messages, firstRow]);
-  const jump = useChatScroll({ rows: scrollRows, chat: groupId });
+  // Always every message, in the page or not; a new list when the window moves (see Chat.tsx).
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- the window's edges: see above
+  const scrollRows = useMemo(() => messages.filter(m => !m.event && !m.groupPay).map(m => ({ id: m.id, mine: m.sender === "me" })), [messages, rowWindow.from, rowWindow.to]);
+  const jump = useChatScroll({ rows: scrollRows, chat: groupId, window: rowWindow });
   const search = useChatSearch({ messages: shown, chat: groupId, active: !!group && !group.invitation?.viaLink });
   useEffect(() => { if (group) markGroupRead(group.id, Math.max(group.lastMessageAt, Date.now())); }, [group?.id, group?.lastMessageAt, group]);
 
@@ -313,7 +316,7 @@ export function GroupChat() {
     .map(m => noteIdOf(state, m.paymentId!)));
   // Who wrote each member's message (their colour, their picture once per run): see `authorsOf`.
   // A bot's routines folded into one row count as one message of the run (the rest are under it, drawn when it opens).
-  const folded = new Set([...routineStacks(messages, m => m).values()].flatMap(run => run.slice(1).map(m => m.id)));
+  const folded = stackHeads;
   const authors = authorsOf(messages.filter(m => !folded.has(m.id)), group, ownNotes, key => memberPhoto(group, { key, me: false }, state.links, faceOf));
   /** `inStack`: a message inside a folded row, as that row's writer, its picture beside the stack's last one. */
   const authorProps = (m: StoredMessage, inStack?: MessageAuthor) => {
@@ -460,12 +463,9 @@ export function GroupChat() {
         {/* A bubble arriving slides in from its side: clipped here, it never makes the list scroll sideways (a scrollbar, and a jump). */}
         <div ref={jump.columnRef} className="max-w-3xl mx-auto py-3 overflow-x-clip">
           {(() => {
-            const drawn = messages.slice(firstRow);
-            // A bot's routines in a row: one row, opened on a tap (WISP 4xx · Status Cards).
-            const stacks = routineStacks(drawn, m => m);
-            const stacked = new Set([...stacks.values()].flatMap(run => run.slice(1).map(m => m.id)));
+            const drawn = messages.slice(rowWindow.from, rowWindow.to);
             return drawn.map(m => {
-              if (stacked.has(m.id)) return null;
+              if (stackHeads.has(m.id)) return null;
               const run = stacks.get(m.id);
               if (!run) return row(m);
               // The folded row is one message of its sender's run: their colour, and their picture when it ends the run.

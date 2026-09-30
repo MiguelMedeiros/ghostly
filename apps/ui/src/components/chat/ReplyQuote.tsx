@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useI18n } from "../../contexts/I18nContext";
 import { jumpToMessage, type QuoteView } from "../../lib/replies";
-import { drawEveryRow } from "../../hooks/useTailFirst";
+import { revealMessage } from "../../hooks/useRowWindow";
 import { useMemberText } from "../../contexts/MemberColorsContext";
 
 /** How long "not in this chat" stays under a quote whose original cannot be shown. */
@@ -40,8 +40,8 @@ export function ReplyQuote({ quote }: { quote: QuoteView }) {
       onClick={(e) => {
         // The bubble's own double click opens its details: a tap on the quote is only the jump.
         e.stopPropagation();
-        // A long chat just opened may not have drawn it yet (useTailFirst): then every row first, and again.
-        const jumped = !!quote.targetId && (jumpToMessage(quote.targetId) || (drawEveryRow(), jumpToMessage(quote.targetId)));
+        // Not in the page (a long chat has a window of its rows, useRowWindow): the rows around it first, and again.
+        const jumped = !!quote.targetId && (jumpToMessage(quote.targetId) || (revealMessage(quote.targetId) && jumpToMessage(quote.targetId)));
         if (!jumped) setNotHere(true);
       }}
       onDoubleClick={(e) => e.stopPropagation()}

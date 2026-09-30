@@ -22,8 +22,8 @@ import { contactArrived } from "../lib/pairingProgress";
 import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { Navigate } from "react-router-dom";
 import { useChat } from "../hooks/useChat";
-import { leftScrolledUp, useChatScroll } from "../hooks/useChatScroll";
-import { useTailFirst } from "../hooks/useTailFirst";
+import { leftOn, useChatScroll } from "../hooks/useChatScroll";
+import { useRowWindow } from "../hooks/useRowWindow";
 import { JumpToLatest } from "../components/chat/JumpToLatest";
 import { useWebRTC } from "../hooks/useWebRTC";
 import { useCallDevices } from "../hooks/useCallDevices";
@@ -434,15 +434,20 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
   const closeMenu = () => setMenuOpen(false);
   const techBackdrop = useBackdropDismiss(() => setShowTechInfo(false));
 
-  // A long chat draws its last rows first, and the older ones in the moment after (useTailFirst).
+  // A bot's routines in a row: one row, opened on a tap (WISP 4xx · Status Cards). Found over the whole timeline, so a
+  // run is the same whichever of its rows are in the page.
+  const stacks = useMemo(() => routineStacks(timeline, r => r.kind === "message" ? r.message : undefined), [timeline]);
+  const stackHeads = useMemo(() => new Map([...stacks.values()].flatMap(run => run.slice(1).map(m => [m.id, run[0].id] as const))), [stacks]);
+  // A long chat has a window of its rows in the page, never the whole history (useRowWindow): its last ones, or those
+  // around the message it was left on, and more as the view goes up or down.
   const rowIds = useMemo(() => timeline.map(row => row.kind === "message" ? row.message.id : `${row.kind}:${row.entry.id}`), [timeline]);
-  const firstRow = useTailFirst(rowIds, sessionId, leftScrolledUp(sessionId));
+  const rowWindow = useRowWindow(rowIds, sessionId, { opensOn: leftOn(sessionId), heads: stackHeads });
   // At the bottom a new message keeps the view there; scrolled up, nothing moves it and the ↓ pill counts the contact's.
-  // A notice (joined, a call) is not a message to count. Always every message, drawn yet or not; a new list when older
-  // rows come in above, so the view is put back in the same commit, before a scroll can see the rows moved.
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- firstRow: see above
-  const scrollRows = useMemo(() => messages.filter(m => m.sender !== "system").map(m => ({ id: m.id, mine: m.sender === "me" })), [messages, firstRow]);
-  const jump = useChatScroll({ rows: scrollRows, chat: sessionId, keys: visible });
+  // A notice (joined, a call) is not a message to count. Always every message, in the page or not; a new list when the
+  // window moves, so the view is put back in the same commit, before a scroll can see the rows moved.
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- the window's edges: see above
+  const scrollRows = useMemo(() => messages.filter(m => m.sender !== "system").map(m => ({ id: m.id, mine: m.sender === "me" })), [messages, rowWindow.from, rowWindow.to]);
+  const jump = useChatScroll({ rows: scrollRows, chat: sessionId, keys: visible, window: rowWindow });
   const search = useChatSearch({ messages, chat: sessionId, active: visible });
 
   // A chat still pairing opens on its scene, not on the bottom of an empty history.
@@ -736,10 +741,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
             </div>
           )}
           {(() => {
-            const drawn = timeline.slice(firstRow);
-            // A bot's routines in a row: one row, opened on a tap (WISP 4xx · Status Cards).
-            const stacks = routineStacks(drawn, r => r.kind === "message" ? r.message : undefined);
-            const stacked = new Set([...stacks.values()].flatMap(run => run.slice(1).map(m => m.id)));
+            const drawn = timeline.slice(rowWindow.from, rowWindow.to);
             const draw = (row: (typeof drawn)[number]) => row.kind === "transport"
               ? <TransportLine key={`transport:${row.entry.id}`} entry={row.entry} earlier={row.earlier} contact={shownName} />
               : row.kind === "identity"
@@ -772,7 +774,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
             );
             return drawn.map(row => {
               if (row.kind !== "message") return draw(row);
-              if (stacked.has(row.message.id)) return null;
+              if (stackHeads.has(row.message.id)) return null;
               const run = stacks.get(row.message.id);
               if (!run) return draw(row);
               return <RoutineStack key={`stack:${row.message.id}`} mine={row.message.sender === "me"} cards={run.map(m => m.card as RoutineCard)}>

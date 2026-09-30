@@ -2,7 +2,7 @@ import { useId, useState } from "react";
 import { replySnippet } from "@ghostly/core";
 import type { PinView } from "@ghostly/browser/shared/types";
 import { useI18n } from "../../contexts/I18nContext";
-import { drawEveryRow } from "../../hooks/useTailFirst";
+import { revealMessage } from "../../hooks/useRowWindow";
 import { jumpToMessage, type ReplyIndex } from "../../lib/replies";
 import { PinIcon } from "../PinIcon";
 
@@ -20,7 +20,7 @@ export function PinnedBar({ pin, index, onUnpin }: { pin?: PinView; index: Reply
   const infoId = useId();
   if (!pin?.id) return null;
   const original = index.byRef.get(pin.id) ?? (pin.messageId ? index.byId.get(pin.messageId) : undefined);
-  const open = () => { if (original && !jumpToMessage(original.id)) { drawEveryRow(); jumpToMessage(original.id); } };
+  const open = () => { if (original && !jumpToMessage(original.id) && revealMessage(original.id)) jumpToMessage(original.id); };
   const more = t("common.moreInfo");
   return (
     <div data-testid="pinned-bar" className="shrink-0 border-b border-border bg-panel-header px-3 py-1 max-md:px-2">

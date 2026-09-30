@@ -2,14 +2,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { searchable, searchMessages } from "../lib/chatSearch";
 import { jumpToMessage } from "../lib/replies";
 import type { ChatMessage } from "../lib/types";
-import { drawEveryRow } from "./useTailFirst";
+import { revealMessage } from "./useRowWindow";
 
 /** How long typing rests before the chat is searched: a long chat is searched once per pause, not once per key. */
 export const SEARCH_DEBOUNCE_MS = 150;
 
-/** Scrolls to a message and marks it, as a quote's tap does, drawing every row first when it is not drawn yet. */
+/** Scrolls to a message and marks it, as a quote's tap does, bringing the rows around it in first when it is not in the page. */
 function jump(id: string) {
-  if (!jumpToMessage(id)) { drawEveryRow(); jumpToMessage(id); }
+  if (!jumpToMessage(id) && revealMessage(id)) jumpToMessage(id);
 }
 
 /**

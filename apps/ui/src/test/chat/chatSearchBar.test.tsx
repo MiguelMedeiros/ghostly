@@ -94,8 +94,9 @@ describe("search inside a chat", () => {
     expect(count()).toBe("1 of 11");
     await jumpedTo("m299");
     expect(row("m299")).toHaveAttribute("data-reply-flash");
-    // "Message 29" is among the older rows, drawn a step at a time after the newest (useTailFirst).
-    await vi.waitFor(() => expect(marked()).toHaveLength(11));
+    // "Message 29" is far up the history, not in the page (useRowWindow): the ten in it are marked, and it is once a jump
+    // brings it in.
+    await vi.waitFor(() => expect(marked()).toHaveLength(10));
     expect(marked().every(text => text === "Message 29")).toBe(true);
 
     fireEvent.keyDown(field(), { key: "Enter" });
@@ -106,6 +107,7 @@ describe("search inside a chat", () => {
     // Newer than the newest: round to the oldest.
     expect(count()).toBe("11 of 11");
     expect(last()).toBe("m29");
+    expect(row("m29")).toHaveAttribute("data-reply-flash");
     fireEvent.click(screen.getByTestId("chat-search-newer"));
     expect(last()).toBe("m290");
     fireEvent.click(screen.getByTestId("chat-search-older"));
@@ -150,6 +152,7 @@ describe("search inside a chat", () => {
     expect(scrolledTo).toEqual([]);
     await settle(SEARCH_DEBOUNCE_MS);
     expect(count()).toBe("1 of 11");
-    expect(draws.text).toBe(11);
+    // The matches in the page: "Message 29" is far up the history, out of it.
+    expect(draws.text).toBe(10);
   });
 });
