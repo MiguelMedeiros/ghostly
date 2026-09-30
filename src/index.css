@@ -21,6 +21,8 @@
   --color-accent-dim: var(--theme-accent-dim);
   --color-accent-hover: var(--theme-accent-hover);
   --color-danger: #ea4335;
+  /* Something finished well (a bot's task done), the same in every theme, as danger is. */
+  --color-success: #22a55a;
   /* Test money's colour, the same in every theme (Real money takes the accent). */
   --color-test-money: #e0a800;
   --color-text-primary: var(--theme-text-primary);

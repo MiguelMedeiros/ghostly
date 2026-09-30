@@ -1,6 +1,7 @@
 {
   "panel": {
     "active": "Ativas",
+    "activeCount": "{{count}} ativas",
     "button": "Tarefas",
     "buttonCount": "Tarefas, {{count}} ativas",
     "finished": "Concluídas",

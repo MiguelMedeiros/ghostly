@@ -3,7 +3,7 @@ import { cardLinkHost, taskProgress, type TaskCard, type ItemState, type StatusC
 import { useI18n } from "../../contexts/I18nContext";
 import { externalLinkProps } from "../../lib/externalLink";
 import { agoIn } from "../../lib/relativeTime";
-import { STATUS_TONE } from "../../lib/statusCards";
+import { STATUS_TONE, isFinished } from "../../lib/statusCards";
 
 /*
  * A bot's status card in the chat (WISP 4xx · Status Cards), shown instead of the message's text, which is only its
@@ -15,11 +15,11 @@ import { STATUS_TONE } from "../../lib/statusCards";
 
 const ITEM_MARK: Record<ItemState, string> = { pending: "○", running: "◐", done: "✓", failed: "✕", skipped: "–" };
 
-/** The bar a task shows: its percent (or its steps), a sliver while it goes without saying how far. */
+/** The bar a task shows: its percent, or its steps done of total, as the bot said them; empty when it said neither. */
 export function ProgressBar({ card, className = "" }: { card: TaskCard; className?: string }) {
   const { t } = useI18n();
   const progress = taskProgress(card);
-  const shown = progress ?? (card.status === "done" ? 100 : 0);
+  const shown = progress ?? 0;
   return (
     <div role="progressbar" aria-label={t("cards.task.progress")} aria-valuemin={0} aria-valuemax={100} {...(progress !== undefined && { "aria-valuenow": progress })}
       data-testid="status-card-progress" data-progress={progress ?? ""}
@@ -59,7 +59,9 @@ function TaskView({ card }: { card: TaskCard }) {
         <span className="flex items-center gap-2">
           <span aria-hidden="true" className={`h-2 w-2 shrink-0 rounded-full ${STATUS_TONE[card.status].dot}`} />
           <bdi data-testid="status-card-title" className="min-w-0 flex-1 truncate text-[13.5px] font-semibold text-text-primary">{card.title}</bdi>
-          <span data-testid="status-card-status" className="shrink-0 text-[11px] text-text-primary/65">{t(`cards.task.status.${card.status}`)}</span>
+          <span data-testid="status-card-status" className={`shrink-0 text-[11px] font-medium ${STATUS_TONE[card.status].label}`}>
+            {STATUS_TONE[card.status].mark && <span aria-hidden="true">{STATUS_TONE[card.status].mark} </span>}{t(`cards.task.status.${card.status}`)}
+          </span>
         </span>
         <ProgressBar card={card} className="mt-2" />
         <span className="mt-1.5 flex items-center justify-between gap-2 text-[11px] text-text-primary/65">
@@ -72,7 +74,7 @@ function TaskView({ card }: { card: TaskCard }) {
       </button>
       {open && (
         <div id={detailsId} data-testid="status-card-details" className="space-y-2 border-t border-text-primary/10 px-2.5 pb-2.5 pt-2 text-xs leading-snug text-text-primary/80">
-          {card.step && <p className="m-0"><span className="font-semibold">{t("cards.task.now")}</span> <bdi data-testid="status-card-step">{card.step}</bdi></p>}
+          {card.step && !isFinished(card.status) && <p className="m-0"><span className="font-semibold">{t("cards.task.now")}</span> <bdi data-testid="status-card-step">{card.step}</bdi></p>}
           {card.items && (
             <ol className="m-0 list-none space-y-1 p-0" data-testid="status-card-items">
               {card.items.map((item, i) => (

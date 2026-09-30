@@ -1,6 +1,7 @@
 {
   "panel": {
     "active": "In corso",
+    "activeCount": "{{count}} in corso",
     "button": "Attività",
     "buttonCount": "Attività, {{count}} in corso",
     "finished": "Concluse",

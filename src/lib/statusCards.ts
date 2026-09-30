@@ -38,20 +38,35 @@ export function cardEntries(rows: readonly CardRow[]): CardEntry[] {
   return [...latest.values()].sort((a, b) => rank(a) - rank(b) || b.at - a.at);
 }
 
+/** A group's cards, one list per sender: senders with more tasks going first, then the most recently changed. */
+export function cardsBySender(entries: readonly CardEntry[]): { author: string; active: number; entries: CardEntry[] }[] {
+  const by = new Map<string, CardEntry[]>();
+  for (const entry of entries) by.set(entry.author, [...(by.get(entry.author) ?? []), entry]);
+  const latest = (list: CardEntry[]) => Math.max(...list.map((e) => e.at));
+  return [...by].map(([author, list]) => ({ author, active: activeTaskCount(list), entries: list }))
+    .sort((a, b) => b.active - a.active || latest(b.entries) - latest(a.entries));
+}
+
 /** How many tasks are still going: the number on the Tasks button. */
 export function activeTaskCount(entries: readonly CardEntry[]): number {
   return entries.filter((e) => e.active).length;
 }
 
-/** A status's dot and bar: the accent while it goes or when it is done, amber when blocked, red when it failed. */
-export const STATUS_TONE: Record<TaskStatus, { dot: string; bar: string }> = {
-  queued: { dot: "bg-text-muted", bar: "bg-text-muted" },
-  running: { dot: "bg-accent", bar: "bg-accent" },
-  blocked: { dot: "bg-amber-500", bar: "bg-amber-500" },
-  done: { dot: "bg-accent", bar: "bg-accent" },
-  failed: { dot: "bg-danger", bar: "bg-danger" },
-  cancelled: { dot: "bg-text-muted", bar: "bg-text-muted" },
+/**
+ * A status's dot, bar and word: the accent while it runs, success with ✓ when done, red with ✕ when it failed, amber
+ * when blocked, muted while queued or once cancelled.
+ */
+export const STATUS_TONE: Record<TaskStatus, { dot: string; bar: string; label: string; mark?: string }> = {
+  queued: { dot: "bg-text-muted", bar: "bg-text-muted", label: "text-text-primary/65" },
+  running: { dot: "bg-accent", bar: "bg-accent", label: "text-accent" },
+  blocked: { dot: "bg-amber-500", bar: "bg-amber-500", label: "text-amber-500" },
+  done: { dot: "bg-success", bar: "bg-success", label: "text-success", mark: "✓" },
+  failed: { dot: "bg-danger", bar: "bg-danger", label: "text-danger-ink", mark: "✕" },
+  cancelled: { dot: "bg-text-muted", bar: "bg-text-muted", label: "text-text-primary/65" },
 };
+
+/** A task that is over: done, failed or cancelled. It no longer says what it is doing now. */
+export const isFinished = (status: TaskStatus) => status === "done" || status === "failed" || status === "cancelled";
 
 /** Whether a message shows as its card: a kind this app draws. Anything else shows the message's text. */
 export function showsCard(card: StatusCard | undefined): card is StatusCard {

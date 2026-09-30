@@ -1,6 +1,7 @@
 {
   "panel": {
     "active": "進行中",
+    "activeCount": "{{count}} 件進行中",
     "button": "タスク",
     "buttonCount": "タスク、{{count}} 件が進行中",
     "finished": "完了済み",

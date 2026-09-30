@@ -60,16 +60,62 @@ test("a bot's task card moves to done, and the Tasks button follows it", { tag: 
     await expect(panel.getByTestId("chat-tasks-finished").getByTestId("chat-tasks-item")).toHaveAttribute("data-card-id", "relay");
     await panel.getByTestId("chat-tasks-finished").getByTestId("chat-tasks-item").click();
     await expect(page.getByTestId("chat-tasks-panel")).toHaveCount(0);
-    await expect(room.locator("[data-message-row]").filter({ has: card })).toHaveAttribute("data-reply-flash", "");
+    await expect(room.locator("[data-message-row]").filter({ has: page.locator('[data-testid="status-card"][data-card-id="relay"]') })).toHaveAttribute("data-reply-flash", "");
     await expect(card).toBeInViewport();
 
     // A phone's width: the card fits, the panel is a sheet.
     await page.setViewportSize({ width: 375, height: 740 });
     const box = await card.boundingBox();
     expect(box!.width).toBeLessThanOrEqual(375);
+    await page.screenshot({ path: test.info().outputPath("phone-card.png") });
     await page.getByTestId("chat-tasks").click();
     await expect(page.getByTestId("chat-tasks-panel")).toBeVisible();
+    await page.screenshot({ path: test.info().outputPath("phone-panel.png") });
   } finally {
     await bot.stop();
+  }
+});
+
+test("in a group, each bot's tasks are listed under its name", { tag: ["@feature:chat.status-cards", "@feature:groups.send", "@feature:headless.status-cards"] }, async ({ peer, relay }) => {
+  test.setTimeout(8 * 60_000);
+  const url = await relay.listen();
+  const [coordinator, hermes] = [new HeadlessBot(), new HeadlessBot()];
+  try {
+    await Promise.all([coordinator.start(url, "Coordinator"), hermes.start(url, "Hermes One")]);
+    const person = await peer("cards-group-person");
+    const page = person.page;
+
+    // The coordinator makes a private group and its link; Hermes and the person come in through it.
+    const created = await coordinator.run("group", "create", "Sala de Máquinas", "--mesh");
+    const group = created.group as string;
+    const { link } = await coordinator.run("group", "link", group) as { link: string };
+    const code = link.includes("#/join/") ? link.slice(link.indexOf("#/join/") + "#/join/".length) : link;
+    await hermes.run("group", "join", code);
+    await page.goto(`/#/join/${code}`);
+    await expect(page.getByTestId("group-chat")).toHaveAttribute("data-status", "active", { timeout: 150_000 });
+    await expect.poll(async () => ((await hermes.run("group", "show", group)) as { status?: string }).status, { timeout: 150_000 }).toBe("active");
+
+    // Each bot posts: the coordinator two tasks, Hermes one, finished.
+    await coordinator.run("task", "send", group, "--id", "relay", "--title", "Fix relay rotation", "--progress", "30", "--wait", "sent", "--timeout", "120");
+    await coordinator.run("task", "send", group, "--id", "docs", "--title", "Write the WISP", "--status", "queued", "--wait", "sent", "--timeout", "120");
+    await hermes.run("task", "send", group, "--id", "nightly", "--title", "Nightly build", "--status", "done", "--progress", "100", "--wait", "sent", "--timeout", "120");
+    const room = page.locator(".chat-wallpaper");
+    await expect(room.getByTestId("status-card")).toHaveCount(3, { timeout: 120_000 });
+    await expect(page.getByTestId("chat-tasks-count")).toHaveText("2");
+
+    await page.getByTestId("chat-tasks").click();
+    const sections = page.getByTestId("chat-tasks-panel").getByTestId("chat-tasks-sender");
+    await expect(sections.getByTestId("chat-tasks-sender-name")).toHaveText(["Coordinator", "Hermes One"]);
+    await expect(sections.first().getByTestId("chat-tasks-sender-count")).toHaveText("2 active");
+    await expect(sections.nth(1).getByTestId("chat-tasks-item")).toHaveAttribute("data-card-id", "nightly");
+    await page.screenshot({ path: test.info().outputPath("group-panel.png") });
+
+    // The coordinator finishes its task: the badge goes down, and the card says Done.
+    await coordinator.run("task", "update", group, "relay", "--status", "done", "--progress", "100", "--wait", "sent", "--timeout", "120");
+    await page.keyboard.press("Escape");
+    await expect(room.locator('[data-testid="status-card"][data-card-id="relay"]')).toHaveAttribute("data-status", "done", { timeout: 60_000 });
+    await expect(page.getByTestId("chat-tasks-count")).toHaveText("1");
+  } finally {
+    await Promise.all([coordinator.stop(), hermes.stop()]);
   }
 });

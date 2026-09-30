@@ -3,7 +3,7 @@ import { taskProgress } from "@ghostly/core";
 import { useI18n } from "../../contexts/I18nContext";
 import { drawEveryRow } from "../../hooks/useTailFirst";
 import { jumpToMessage } from "../../lib/replies";
-import { STATUS_TONE, activeTaskCount, cardEntries, type CardEntry, type CardRow } from "../../lib/statusCards";
+import { STATUS_TONE, activeTaskCount, cardEntries, cardsBySender, type CardEntry, type CardRow } from "../../lib/statusCards";
 import { Menu, MenuSeparator } from "../Menu";
 import { PrLine, ProgressBar } from "./StatusCard";
 
@@ -34,7 +34,9 @@ function Row({ entry, onOpen }: { entry: CardEntry; onOpen: () => void }) {
       <span className="flex w-full min-w-0 items-center gap-2">
         <span aria-hidden="true" className={`h-2 w-2 shrink-0 rounded-full ${STATUS_TONE[card.status].dot}`} />
         <bdi className="min-w-0 flex-1 truncate text-sm text-text-primary">{card.title}</bdi>
-        <span className="shrink-0 text-xs text-text-muted">{progress !== undefined && entry.active ? `${progress}%` : t(`cards.task.status.${card.status}`)}</span>
+        <span className={`shrink-0 text-xs ${progress !== undefined && entry.active ? "text-text-muted" : STATUS_TONE[card.status].label}`}>
+          {progress !== undefined && entry.active ? `${progress}%` : `${STATUS_TONE[card.status].mark ? `${STATUS_TONE[card.status].mark} ` : ""}${t(`cards.task.status.${card.status}`)}`}
+        </span>
       </span>
       {entry.active && <ProgressBar card={card} />}
       {card.pr && <span className="text-xs text-text-muted"><PrLine card={card} /></span>}
@@ -42,7 +44,11 @@ function Row({ entry, onOpen }: { entry: CardEntry; onOpen: () => void }) {
   );
 }
 
-export function TasksButton({ rows }: { rows: readonly CardRow[] }) {
+/**
+ * `nameOf`: in a group, the name of each card's sender. The list is then one section per sender (a bot each, in a
+ * group like "Sala de Máquinas"), those with the most tasks going first, each saying how many it has going.
+ */
+export function TasksButton({ rows, nameOf }: { rows: readonly CardRow[]; nameOf?: (author: string) => string }) {
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const [info, setInfo] = useState(false);
@@ -56,6 +62,7 @@ export function TasksButton({ rows }: { rows: readonly CardRow[] }) {
     ["finished", tasks.filter((e) => !e.active)],
     ["routines", entries.filter((e) => e.card.kind === "routine")],
   ];
+  const senders = nameOf ? cardsBySender(entries) : [];
   const close = () => { setOpen(false); setInfo(false); };
   const go = (messageId: string) => {
     close();
@@ -82,7 +89,17 @@ export function TasksButton({ rows }: { rows: readonly CardRow[] }) {
           </button>
         </div>
         {info && <p data-testid="chat-tasks-info-text" className="m-0 px-3 pb-2 text-xs leading-relaxed text-text-secondary whitespace-normal">{t("cards.panel.info")}</p>}
-        {groups.filter(([, list]) => list.length).map(([name, list], i) => (
+        {nameOf && senders.map((sender, i) => (
+          <div key={sender.author} data-testid="chat-tasks-sender" data-author={sender.author}>
+            {i > 0 && <MenuSeparator />}
+            <p className="m-0 flex items-center gap-2 px-3 pt-1 text-[11px] text-text-muted">
+              <bdi data-testid="chat-tasks-sender-name" className="min-w-0 truncate font-semibold text-text-secondary">{nameOf(sender.author)}</bdi>
+              {sender.active > 0 && <span data-testid="chat-tasks-sender-count" className="shrink-0">{t("cards.panel.activeCount", { count: sender.active })}</span>}
+            </p>
+            {sender.entries.map((entry) => <Row key={`${entry.card.kind}\n${entry.card.id}`} entry={entry} onOpen={() => go(entry.messageId)} />)}
+          </div>
+        ))}
+        {!nameOf && groups.filter(([, list]) => list.length).map(([name, list], i) => (
           <div key={name} data-testid={`chat-tasks-${name}`}>
             {i > 0 && <MenuSeparator />}
             <p className="m-0 px-3 pt-1 text-[11px] text-text-muted">{t(`cards.panel.${name}`)}</p>

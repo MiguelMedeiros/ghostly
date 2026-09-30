@@ -1,6 +1,7 @@
 {
   "panel": {
     "active": "نشطة",
+    "activeCount": "{{count}} نشطة",
     "button": "المهام",
     "buttonCount": "المهام، {{count}} نشطة",
     "finished": "منتهية",

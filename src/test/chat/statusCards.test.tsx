@@ -58,11 +58,32 @@ describe("a task card in the chat", () => {
     expect(screen.getByTestId("status-card").querySelector("a, strong")).toBeNull();
   });
 
-  it("shows a done task's bar full and a failed one in red", () => {
-    renderApp(<><MessageBubble message={message(card({ status: "done" }), { id: "a" })} peerPubKey="peer" /><MessageBubble message={message(card({ status: "failed", progress: 30 }), { id: "b" })} peerPubKey="peer" /></>);
-    const [done, failed] = screen.getAllByTestId("status-card");
-    expect(done.querySelector("[role=progressbar] > div")).toHaveStyle({ width: "100%" });
-    expect(failed.querySelector("[role=progressbar] > div")!.className).toContain("bg-danger");
+  it("tells the statuses apart: running in the accent, done in green with ✓, failed in red with ✕, blocked in amber", () => {
+    renderApp(<>{(["running", "done", "failed", "blocked", "queued"] as const).map(status =>
+      <MessageBubble key={status} message={message(card({ status, progress: 30 }), { id: status })} peerPubKey="peer" />)}</>);
+    const tone = (status: string) => {
+      const shown = screen.getAllByTestId("status-card").find(c => c.dataset.status === status)!;
+      return { label: within(shown).getByTestId("status-card-status"), bar: shown.querySelector("[role=progressbar] > div")!.className };
+    };
+    expect(tone("running").label.className).toContain("text-accent");
+    expect(tone("done").label).toHaveTextContent("✓ Done");
+    expect(tone("done").bar).toContain("bg-success");
+    expect(tone("failed").label).toHaveTextContent("✕ Failed");
+    expect(tone("failed").bar).toContain("bg-danger");
+    expect(tone("blocked").label.className).toContain("text-amber-500");
+    expect(tone("queued").label.className).toContain("text-text-primary/65");
+  });
+
+  it("infers nothing: a done task without a percent keeps an empty bar, its steps as they are, and no current step", async () => {
+    const { user } = renderApp(<MessageBubble message={message(card({ status: "done", done: 3, total: 4, step: "CI" }))} peerPubKey="peer" />);
+    const shown = screen.getByTestId("status-card");
+    expect(within(shown).getByRole("progressbar")).toHaveAttribute("aria-valuenow", "75");
+    expect(shown).toHaveTextContent("3 of 4 steps");
+    await user.click(screen.getByTestId("status-card-toggle"));
+    expect(screen.queryByTestId("status-card-step")).not.toBeInTheDocument();
+    const bare = renderApp(<MessageBubble message={message(card({ status: "done" }), { id: "m2" })} peerPubKey="peer" />);
+    expect(bare.container.querySelector("[role=progressbar]")).not.toHaveAttribute("aria-valuenow");
+    expect(bare.container.querySelector("[role=progressbar] > div")).toHaveStyle({ width: "0%" });
   });
 
   it("reads right to left in Arabic", () => {
@@ -115,6 +136,26 @@ describe("the Tasks button", () => {
     await user.click(within(panel).getAllByTestId("chat-tasks-item").find(i => i.dataset.cardId === "b")!);
     expect(screen.queryByTestId("chat-tasks-panel")).not.toBeInTheDocument();
     expect(screen.getByText("card b").closest("[data-message-id]")).toHaveAttribute("data-reply-flash");
+  });
+
+  it("in a group of three, lists each bot's cards under its name, the one with more going first; the badge counts them all", async () => {
+    const hermes = "h".repeat(52), coordinator = "c".repeat(52);
+    const names: Record<string, string> = { [hermes]: "Hermes One", [coordinator]: "Coordinator" };
+    const rows = [
+      row("m1", card({ id: "nightly", title: "Nightly build", status: "done" }), { member: hermes }),
+      row("m2", card({ id: "relay", title: "Fix relay", progress: 30 }), { member: coordinator }),
+      row("m3", card({ id: "docs", title: "Write WISP", status: "queued" }), { member: coordinator }),
+      row("m4", card({ id: "bench", title: "Benchmarks", progress: 80 }), { member: hermes }),
+      row("m5", undefined, { member: "p".repeat(52), sender: "me" }),
+    ];
+    const { user } = renderApp(<TasksButton rows={rows} nameOf={author => names[author] ?? "?"} />);
+    expect(screen.getByTestId("chat-tasks-count")).toHaveTextContent("3");
+    await user.click(screen.getByTestId("chat-tasks"));
+    const sections = screen.getAllByTestId("chat-tasks-sender");
+    expect(sections.map(s => within(s).getByTestId("chat-tasks-sender-name").textContent)).toEqual(["Coordinator", "Hermes One"]);
+    expect(sections.map(s => within(s).getByTestId("chat-tasks-sender-count").textContent)).toEqual(["2 active", "1 active"]);
+    expect(within(sections[1]).getAllByTestId("chat-tasks-item").map(i => i.dataset.cardId)).toEqual(["bench", "nightly"]);
+    expect(screen.queryByTestId("chat-tasks-active")).not.toBeInTheDocument();
   });
 
   it("shows no count once every task is finished", () => {

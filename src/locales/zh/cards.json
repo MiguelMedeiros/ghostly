@@ -1,6 +1,7 @@
 {
   "panel": {
     "active": "进行中",
+    "activeCount": "{{count}} 个进行中",
     "button": "任务",
     "buttonCount": "任务，{{count}} 个进行中",
     "finished": "已结束",

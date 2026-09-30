@@ -1,6 +1,7 @@
 {
   "panel": {
     "active": "Actives",
+    "activeCount": "{{count}} actives",
     "button": "Tâches",
     "buttonCount": "Tâches, {{count}} actives",
     "finished": "Terminées",

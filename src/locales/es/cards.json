@@ -1,6 +1,7 @@
 {
   "panel": {
     "active": "Activas",
+    "activeCount": "{{count}} activas",
     "button": "Tareas",
     "buttonCount": "Tareas, {{count}} activas",
     "finished": "Terminadas",
