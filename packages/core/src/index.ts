@@ -28,6 +28,7 @@ export * from "./messageTime";
 export * from "./payments";
 export * from "./bolt11";
 export * from "./paymentUri";
+export * from "./engineErrors";
 export * from "./lnurl";
 export * from "./version";
 

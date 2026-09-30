@@ -96,23 +96,23 @@ test.describe("another wallet", () => {
       expect(server.requests, "nothing is fetched before the person asks").toHaveLength(0);
       await pay.getByTestId("lnurl-lookup").click();
       await expect(pay.getByTestId("lnurl-domain")).toContainText(`Answered by ${server.host}`);
-      await expect(pay.getByTestId("lnurl-domain")).toContainText("5 to 500 sats");
+      await expect(pay.getByTestId("lnurl-domain")).toContainText("5 to 500 test sats");
       await expect(pay).toContainText("Coffee at the shop");
       await pay.getByTestId("lnurl-amount").fill("21");
       await pay.getByTestId("lnurl-comment").fill("gm");
       await pay.getByTestId("lnurl-invoice").click();
-      await expect(pay.getByTestId("lnurl-review")).toContainText("Pay 21 sats to shop@");
+      await expect(pay.getByTestId("lnurl-review")).toContainText("Pay 21 test sats to shop@");
       await expect(pay.getByTestId("lnurl-review")).toContainText("through the Cashu mints");
       expect(server.invoices.at(-1)).toMatchObject({ name: "shop", amountSat: 21, comment: "gm" });
       await pay.getByTestId("lnurl-pay").click();
-      await expect(pay.getByTestId("lnurl-paid")).toContainText(`Paid 21 sats to ${server.address("shop")}`);
+      await expect(pay.getByTestId("lnurl-paid")).toContainText(`Paid 21 test sats to ${server.address("shop")}`);
       await expect(pay.getByTestId("lnurl-success")).toContainText('Thanks for "gm"');
       await expect.poll(() => server.paid("shop"), { timeout: 30_000 }).toBe(true);
 
       // An amount outside the limits never reaches the server.
       await alice.page.getByTestId("wallet-pay-input").fill(server.address("fixed"));
       await pay.getByTestId("lnurl-lookup").click();
-      await expect(pay.getByTestId("lnurl-domain")).toContainText("exactly 12 sats");
+      await expect(pay.getByTestId("lnurl-domain")).toContainText("exactly 12 test sats");
       await expect(pay.getByTestId("lnurl-amount")).toHaveValue("12");
       await expect(pay.getByTestId("lnurl-comment"), "no comment where none is taken").toHaveCount(0);
       const before = server.requests.length;
@@ -139,7 +139,7 @@ test.describe("another wallet", () => {
       await card.getByTestId("lnurl-amount").fill("5");
       await card.getByTestId("lnurl-invoice").click();
       await card.getByTestId("lnurl-pay").click();
-      await expect(card.getByTestId("lnurl-paid")).toContainText("Paid 5 sats");
+      await expect(card.getByTestId("lnurl-paid")).toContainText("Paid 5 test sats");
     } finally {
       server.close();
     }

@@ -1,5 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod app_window;
 mod bitcoind_rpc;
 mod clipboard;
 mod commands;
@@ -174,6 +175,10 @@ fn main() {
     #[cfg(target_os = "linux")]
     let builder = single_instance::register(builder, &context.config().identifier);
 
+    // On a Mac, the app menu with New Chat (Cmd+N) and Settings… (Cmd+,); Linux and Windows keep no menu bar.
+    #[cfg(target_os = "macos")]
+    let builder = builder.menu(app_window::menu);
+
     let pkarr = Pkarr::desktop().expect("Failed to create pkarr client");
 
     builder
@@ -254,10 +259,18 @@ fn main() {
                 responder.respond(viewer::handle(app, label, request).await);
             });
         })
-        .on_window_event(|window, event| {
-            if let tauri::WindowEvent::Destroyed = event {
-                viewer::forget_window(window.app_handle(), window.label());
+        .on_window_event(|window, event| match event {
+            tauri::WindowEvent::Destroyed => {
+                viewer::forget_window(window.app_handle(), window.label())
             }
+            // Closing the Ghostly window on a Mac hides it: the app runs on until Cmd+Q.
+            tauri::WindowEvent::CloseRequested { api, .. } => {
+                app_window::on_close_requested(window, api)
+            }
+            _ => {}
+        })
+        .on_menu_event(|app, event| {
+            app_window::on_menu_event(app, event.id().as_ref());
         })
         .invoke_handler(only_main(commands!()))
         .build(context)
@@ -272,7 +285,7 @@ const CLOSE_MS: u64 = 500;
 
 /// Leaving well: contacts hear this app go at once, and watch for it to come back (a restart is back
 /// in seconds), rather than noticing when their liveness gives up a minute later.
-/// - An exit the loop is asked for (the last window closed, `app.exit`): held for `DEPART_MS` while the
+/// - An exit the loop is asked for (the last window closed on Linux or Windows, `app.exit`): held for `DEPART_MS` while the
 ///   page says goodbye on every live session (`paired-bye`), then let through.
 /// - Every exit, that one or a quit that nothing can hold (Cmd+Q and `quit` on macOS end the process
 ///   from `applicationWillTerminate`): the native connections close, so each contact sees its close.
@@ -295,6 +308,9 @@ fn on_run_event(app: &tauri::AppHandle, event: tauri::RunEvent) {
                 app.exit(code.unwrap_or(0));
             });
         }
+        // The Dock icon clicked: the Ghostly window back, hidden by a close.
+        #[cfg(target_os = "macos")]
+        tauri::RunEvent::Reopen { .. } => app_window::show_main(app),
         tauri::RunEvent::Exit => {
             let transports = app
                 .state::<paired_transport::TransportState>()

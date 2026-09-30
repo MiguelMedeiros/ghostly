@@ -222,6 +222,7 @@
     {"id":"desktop.notifications","wisp":null,"kind":"feature","clients":["desktop"],"infra":[],"title":"Native private notifications"},
     {"id":"desktop.payment-links","wisp":"205","kind":"feature","clients":["desktop"],"infra":[],"title":"Desktop opens lightning:/bitcoin: links via Tauri"},
     {"id":"desktop.single-instance","wisp":null,"kind":"feature","clients":["desktop"],"infra":[],"title":"One app per profile on Linux: launched again on the same profile, Ghostly brings the running window forward and exits; another profile or home runs side by side"},
+    {"id":"desktop.window","wisp":null,"kind":"feature","clients":["desktop"],"infra":[],"title":"On a Mac, closing the window hides it and the app keeps running until Cmd+Q; the Dock icon brings it back. New Chat (Cmd+N) and Settings… (Cmd+,) in the app menu; Ctrl+N and Ctrl+, on Linux and Windows"},
     {"id":"did.dht.document","wisp":"310","kind":"protocol","clients":["web","extension","desktop"],"infra":["pkarr-relay"],"title":"did:dht documents: DNS records in the Pkarr packet of an Ed25519 key (the spec's vectors), strictly parsed, resolved through Pkarr relays"},
     {"id":"did.dht.interop","wisp":"310","kind":"protocol","clients":["web","extension","desktop"],"infra":["pkarr-relay"],"title":"did:dht interop: an independent implementation (@web5/dids) resolves the DID Ghostly publishes, and Ghostly resolves one it publishes"},
     {"id":"did.dht.profile","wisp":"310","kind":"feature","clients":["web","extension","desktop"],"infra":["pkarr-relay","mainline-dht"],"title":"Every profile has a did:dht of a key of its own (never a chat's): published while online, the same packet put again every hour, re-signed only when the document changes; the identity key alone unless the person lists identities"},
@@ -585,6 +586,7 @@
     {"id":"wallet.usdt.send","wisp":"200","kind":"feature","clients":["web","extension","desktop"],"infra":["usdt-local"],"title":"USDT: in, a Send from the wallet"}
   ],
   "paths": {
+    "apps/desktop/src/app_window.rs": ["desktop.window"],
     "apps/desktop/src/push_send.rs": [],
     "apps/extension/public/icons/**/*": ["extension.engine"],
     "apps/extension/public/manifest.json": ["*"],
@@ -734,6 +736,7 @@
     "apps/ui/src/desktop/noIrohWeb.ts": ["desktop.*"],
     "apps/ui/src/desktop/oidc.ts": ["proofs.oidc.callback.desktop"],
     "apps/ui/src/desktop/updates.ts": ["app.updates.desktop"],
+    "apps/ui/src/hooks/useAppCommands.ts": ["desktop.window"],
     "apps/ui/src/hooks/useAvatars.ts": ["*"],
     "apps/ui/src/hooks/useBackgroundPoller.ts": ["desktop.*"],
     "apps/ui/src/hooks/useBackupDue.ts": ["wallet.backup-reminder","wallet.badge"],
@@ -761,6 +764,7 @@
     "apps/ui/src/index.css": ["*"],
     "apps/ui/src/lib/amount.ts": ["app.i18n","wallet.*","payments.*","chats.list.rows"],
     "apps/ui/src/lib/appBadge.ts": ["app.attention.badge"],
+    "apps/ui/src/lib/appCommands.ts": ["desktop.window"],
     "apps/ui/src/lib/avatarImage.ts": ["profiles.picture","profiles.picture.sanitize","groups.picture.*"],
     "apps/ui/src/lib/brandMotion.ts": ["app.home"],
     "apps/ui/src/lib/chatList.ts": ["chats.*","groups.*","settings.chat-list-density","app.attention.unread"],

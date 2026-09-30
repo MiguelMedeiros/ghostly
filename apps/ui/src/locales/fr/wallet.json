@@ -341,7 +341,7 @@
     "asking": "Demande à {{source}}…",
     "askingInvoice": "Demande de la facture…",
     "askingSource": "Demande à la source…",
-    "asksExactly": "Il demande exactement {{amount}} sats.",
+    "asksExactly": "Il demande exactement {{amount}} {{unit}}.",
     "balance": "Solde",
     "balanceHint": "Lightning utilise votre solde Cashu : les factures sont payées vers vos mints Cashu et depuis eux.",
     "balanceSource": "{{unit}} · {{source}}",
@@ -380,7 +380,7 @@
       "sending": "envoi en cours",
       "unknown": "résultat inconnu"
     },
-    "paidTo": "{{amount}} sats payés à {{to}} ✓",
+    "paidTo": "{{amount}} {{unit}} payés à {{to}} ✓",
     "pastePlaceholder": "Collez une facture Lightning ou une adresse Lightning",
     "pay": "Payer",
     "payTo": "Payer {{amount}} à {{to}}{{fees}}",
@@ -390,7 +390,7 @@
     "recentIn": "Facture · {{amount}} {{unit}}",
     "recentOut": "Paiement · {{amount}} {{unit}}",
     "says": "{{domain}} dit : {{message}}",
-    "takesRange": "Il accepte de {{min}} à {{max}} sats.",
+    "takesRange": "Il accepte de {{min}} à {{max}} {{unit}}.",
     "theSource": "la source",
     "waiting": "En attente du paiement… N’importe quel portefeuille Lightning peut la payer ; elle est marquée payée ici dès que la source le voit."
   },

@@ -1,4 +1,4 @@
-import { WALLET_NETWORKS, decodeBolt11, walletNetworkOf, type PaymentMethodName, type PaymentNetworks, type WalletNetwork } from "@ghostly/core";
+import { WALLET_NETWORKS, decodeBolt11, engineText, walletNetworkOf, type PaymentMethodName, type PaymentNetworks, type WalletNetwork } from "@ghostly/core";
 import { mintNetwork } from "../../shared/mints";
 import { WALLET_TYPES, type NetworkWalletsView, type StoredPayment, type WalletInstanceView, type WalletType } from "../../shared/types";
 import { CASHU_MINT_SOURCE } from "./providers/cashuMint";
@@ -77,7 +77,8 @@ export function paymentNetwork(payment: Pick<StoredPayment, "network" | "target"
 
 /** The refusal when a card of one network would pay for the other: test coins and real money never meet. */
 export const crossNetwork = (card: WalletNetwork, asked: WalletNetwork) =>
-  `This is a ${networkLabel(asked)} payment (${asked === "mainnet" ? "real money" : "test coins"}): a ${networkLabel(card)} wallet never pays it. Use a ${networkLabel(asked)} wallet.`;
+  card === asked ? `This is a ${networkLabel(asked)} payment (${asked === "mainnet" ? "real money" : "test coins"}): a ${networkLabel(card)} wallet never pays it. Use a ${networkLabel(asked)} wallet.`
+  : engineText(asked === "mainnet" ? "mainnetPaymentOnTestnet" : "testnetPaymentOnMainnet");
 
 /**
  * Real money goes out only once the person confirmed it as real money ("Send real money"), whatever screen asked:
@@ -86,7 +87,7 @@ export const crossNetwork = (card: WalletNetwork, asked: WalletNetwork) =>
 export function assertConfirmedReal(network: WalletNetwork, confirmedReal: unknown): void {
   if (network === "mainnet" && confirmedReal !== true) throw new Error(REAL_MONEY_UNCONFIRMED);
 }
-export const REAL_MONEY_UNCONFIRMED = "This pays with real money: confirm it with Send real money first. Nothing was sent.";
+export const REAL_MONEY_UNCONFIRMED = engineText("realMoneyUnconfirmed");
 
 /** One clear message for a creation that failed: nothing was saved, and trying again is safe. */
 export function createFailure(label: string, error: unknown): string {
