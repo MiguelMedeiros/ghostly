@@ -404,6 +404,8 @@ export interface GhostLinkOptions {
   wakeSupport?: boolean;
   dht?: {
     state?: DhtDeliveryState; save(state: DhtDeliveryState): Promise<void>; pollMs?: number;
+    /** A chat already paired, started again: its first control envelope waits this long (`DhtDelivery`). */
+    firstControlAfterMs?: number;
     /** This side's capability-record revision, told in every envelope (WISP 03). */
     capsRev?(): number | undefined;
     /** An envelope from the contact named this revision of its capability record. */
@@ -615,7 +617,7 @@ export class GhostLink {
       }) : null;
     this.dht = options.params.profile && options.pairing && options.dht ? new DhtDelivery({
       params: options.params, mode: this.deliveryMode, state: options.dht.state, credentials: options.pairing.credentials, transport: options.transport,
-      save: options.dht.save, pollMs: options.dht.pollMs,
+      save: options.dht.save, pollMs: options.dht.pollMs, firstControlAfterMs: options.dht.firstControlAfterMs,
       capsRev: options.dht.capsRev, peerCapsRev: options.dht.peerCapsRev, peerAcceptsText: options.dht.peerAcceptsText,
       // Reactions ride on the envelopes off the live session (WISP 403 § Reactions).
       ...(options.reactionsSupport && {
