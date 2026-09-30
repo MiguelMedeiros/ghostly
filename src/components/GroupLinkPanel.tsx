@@ -82,7 +82,8 @@ export function GroupLinkPanel({ group, large = false }: { group: GroupView; lar
     <button disabled={busy} onClick={() => void run(() => engine.call("disableGroupLink", { groupId: group.id }))} data-testid="group-link-disable"
       title={t("group.link.disableHint")} className="rounded px-2 py-1 text-xs text-danger hover:bg-danger/10 disabled:opacity-40">{t("group.link.disable")}</button>
   </div>;
-  const qr = <div data-testid="group-link-qr" className={`mx-auto w-fit max-w-full rounded-2xl bg-white p-3 [&_svg]:h-auto [&_svg]:max-w-full ${large ? "" : "mt-2"}`}>
+  // Large, on a short screen it gives up some of its size (never under 140px) before the dialog has to scroll.
+  const qr = <div data-testid="group-link-qr" className={`mx-auto w-fit max-w-full rounded-2xl bg-white p-3 [&_svg]:h-auto [&_svg]:max-w-full ${large ? "[&_svg]:w-[clamp(140px,28dvh,248px)]" : "mt-2"}`}>
     <QRCodeSVG value={url} size={large ? 248 : 184} marginSize={1} title={t("group.link.qrTitle")} bgColor="#ffffff" fgColor="#0b0f1a" level="M" />
   </div>;
 
@@ -128,8 +129,11 @@ export function GroupShareDialog({ group, created = false, onClose }: { group: G
       <p className="mt-1 text-sm text-text-muted">{created ? t("group.share.createdHint") : t("group.share.hint")}</p>
     </div>
     <GroupLinkPanel group={group} large />
-    <button onClick={onClose} data-testid="group-share-done" className="mt-4 min-h-11 w-full rounded-lg px-4 text-sm text-text-secondary hover:bg-surface-hover focus-visible:ring-2 focus-visible:ring-accent">
-      {created ? t("group.share.open") : t("group.share.done")}
-    </button>
+    {/* The way out stays in view at the dialog's foot while the rest scrolls: on a phone it was under the fold. */}
+    <div className="sticky -bottom-5 -mx-5 -mb-5 mt-4 bg-sidebar-bg px-5 pb-5 pt-2">
+      <button onClick={onClose} data-testid="group-share-done" className="min-h-11 w-full rounded-lg px-4 text-sm text-text-secondary hover:bg-surface-hover focus-visible:ring-2 focus-visible:ring-accent">
+        {created ? t("group.share.open") : t("group.share.done")}
+      </button>
+    </div>
   </dialog>, document.body);
 }
