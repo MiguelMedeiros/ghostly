@@ -78,6 +78,11 @@ endpoint from there, never a literal port. Their names are stable: other suites 
 The last three are the suite's own servers: `e2e:full` sets them, and they are left out of `.env.e2e` so that
 another runner reading that file (the scenario matrix, 47300-47399) keeps its own defaults.
 
+On Linux these ports sit inside the ephemeral range (32768-60999), so an outgoing connection can hold one as its
+local port just when a server wants it ("Port 47300 is already in use"). The `E2E (full)` jobs reserve 47000-47399
+first (`sysctl net.ipv4.ip_local_reserved_ports`); do the same on a Linux host that runs the suites often. macOS
+hands out ports from 49152 up, clear of them.
+
 Every Bitcoin service shares the one chain, so Lightning nodes of different implementations can reach each other,
 but each suite has its own pair of nodes: the LND, WebLN and NWC tests assert exact channel balances while other
 files run in parallel. The Ark, Bark and USDT endpoints are also the web app's own Regtest options
