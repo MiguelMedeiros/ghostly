@@ -81,6 +81,27 @@ describe("the quick bar", () => {
     expect(container.querySelector("[data-details-open]")).not.toBeNull();
   });
 
+  it("a finger held on a text message offers Copy: its text is not selectable on a touch screen", async () => {
+    vi.useFakeTimers();
+    const writeText = vi.spyOn(navigator.clipboard, "writeText").mockResolvedValue();
+    const { container } = renderApp(<MessageBubble message={message()} peerPubKey="peer" onReact={() => {}} reactionName={names} />);
+    const row = container.querySelector<HTMLElement>("[data-message-row]")!;
+    fireEvent.pointerDown(row, { pointerType: "touch", button: 0, clientX: 20, clientY: 20, pointerId: 1 });
+    act(() => { vi.advanceTimersByTime(600); });
+    fireEvent.pointerUp(row, { pointerType: "touch", clientX: 20, clientY: 20, pointerId: 1 });
+    const rows = within(screen.getByTestId("reaction-bar")).getAllByRole("button").map(b => b.dataset.testid).filter(id => id?.startsWith("reaction-bar-"));
+    expect(rows).toEqual(["reaction-bar-copy", "reaction-bar-details"]);
+    fireEvent.click(screen.getByTestId("reaction-bar-copy"));
+    expect(writeText).toHaveBeenCalledWith("lunch at noon?");
+    expect(screen.queryByTestId("reaction-bar")).not.toBeInTheDocument();
+  });
+
+  it("the React button's bar (a pointer) has no Copy: the text is selectable there", async () => {
+    const { user } = renderApp(<MessageBubble message={message()} peerPubKey="peer" onReact={() => {}} reactionName={names} />);
+    await user.click(screen.getByTestId("message-react-action"));
+    expect(screen.queryByTestId("reaction-bar-copy")).not.toBeInTheDocument();
+  });
+
   it("without onReact (a compatibility chat, a notice) there is none of it", async () => {
     const { user } = renderApp(<MessageBubble message={message({ reactions: { peer: r("👍") } })} peerPubKey="peer" />);
     expect(screen.queryByTestId("message-react-action")).not.toBeInTheDocument();
