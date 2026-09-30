@@ -57,7 +57,7 @@ describe("the account bar's labels", () => {
     unmount();
 
     renderApp(<AccountBar />, { language: "pt" });
-    expect(labels()).toEqual(["Personal", "Carteiras", "Identidades", "Serviços", "Configurações"]);
+    expect(labels(), "the first profile too, never renamed").toEqual(["Pessoal", "Carteiras", "Identidades", "Serviços", "Configurações"]);
     expect(bar()).not.toHaveAttribute("data-compact");
   });
 
