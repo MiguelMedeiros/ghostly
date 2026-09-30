@@ -441,8 +441,10 @@ test("the review pictures: a bot room's routines and tasks at every width, both 
     await page.setViewportSize(widths[0]);
     await theme(page, "dark");
     const logRow = room.locator("[data-message-row]").filter({ has: page.locator('[data-card-id="zero-log"]') });
-    await logRow.evaluate((row) => row.scrollIntoView({ block: "center" }));
-    await logRow.hover();
+    await logRow.evaluate((row) => row.scrollIntoView({ block: "center", behavior: "instant" }));
+    await page.waitForTimeout(300);
+    await logRow.locator("[data-message-card]").hover();
+    await expect(logRow.getByTestId("message-reply-action")).toHaveCSS("opacity", "1");
     expect.soft(await spills(room), "hovered").toEqual([]);
     await page.screenshot({ path: shot("1280-dark-hover") });
 
