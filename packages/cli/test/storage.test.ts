@@ -68,6 +68,19 @@ describe("persistent IndexedDB", () => {
     expect(await read(second.transaction("messages").objectStore("messages").count())).toBe(0);
   });
 
+  it("lets go of a transaction once it ended: a daemon does not keep every transaction it ran", async () => {
+    const d = await db(await open(folder()));
+    for (let i = 0; i < 40; i++) await tx(d, ["messages"], (s) => { s.messages.put({ linkId: "a", id: String(i), text: "x".repeat(1000) }); });
+    for (let i = 0; i < 20; i++) await read(d.transaction("messages").objectStore("messages").count());
+    const aborted = d.transaction(["messages"], "readwrite");
+    aborted.objectStore("messages").put({ linkId: "a", id: "never", text: "never" });
+    await new Promise<void>((resolve) => { aborted.onabort = () => resolve(); aborted.abort(); });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    // fake-indexeddb's own list of the database's transactions: each one kept holds its requests and rollback log.
+    expect((d as unknown as { _rawDatabase: { transactions: unknown[] } })._rawDatabase.transactions).toHaveLength(0);
+    expect(await read(d.transaction("messages").objectStore("messages").count())).toBe(40);
+  });
+
   it("replays clears and range deletes, and keeps the key generator", async () => {
     const dir = folder();
     const first = await db(await open(dir));

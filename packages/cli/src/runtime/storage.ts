@@ -33,7 +33,8 @@ interface RawStore {
   deleteRecord(key: Key, rollbackLog?: unknown[]): void;
   clear(rollbackLog?: unknown[]): void;
 }
-interface RawDatabase { name: string; version: number; rawObjectStores: Map<string, RawStore> }
+interface RawDatabase { name: string; version: number; rawObjectStores: Map<string, RawStore>; transactions: unknown[] }
+type RawTransaction = IDBTransaction & { _rollbackLog: unknown[]; _state: string; db: { _rawDatabase: RawDatabase } };
 interface RawClasses {
   Database: new (name: string, version: number) => RawDatabase;
   ObjectStore: new (db: RawDatabase, name: string, keyPath: string | string[] | null, autoIncrement: boolean) => RawStore;
@@ -118,7 +119,7 @@ export async function openPersistentIndexedDb(dir: string): Promise<PersistentIn
   // The transaction's `complete` is where it becomes durable: written before the engine hears of it.
   const txProto = IDBTransaction.prototype as unknown as { dispatchEvent(event: Event): boolean };
   const dispatch = txProto.dispatchEvent;
-  txProto.dispatchEvent = function (this: IDBTransaction & { _rollbackLog: unknown[] }, event: Event) {
+  txProto.dispatchEvent = function (this: RawTransaction, event: Event) {
     if (event.type === "complete" && writing) {
       if (this.mode === "versionchange") schemaDirty = true;
       else {
@@ -128,7 +129,16 @@ export async function openPersistentIndexedDb(dir: string): Promise<PersistentIn
       pending.delete(this._rollbackLog);
       if (schemaDirty) void enqueue(writeSnapshot);
     } else if (event.type === "abort") pending.delete(this._rollbackLog);
-    return dispatch.call(this, event);
+    const dispatched = dispatch.call(this, event);
+    // fake-indexeddb keeps every transaction a database ever ran in its list (its scheduler only skips the finished
+    // ones), each with its requests, results and rollback log: a daemon's heap grew by about 100 KB a message, without
+    // end. Nothing looks for a finished one there again, so it goes once its last event is out.
+    if ((event.type === "complete" || event.type === "abort") && this._state === "finished") {
+      const list = this.db._rawDatabase.transactions;
+      const at = list.indexOf(this);
+      if (at >= 0) list.splice(at, 1);
+    }
+    return dispatched;
   };
   const deleteDatabase = factory.deleteDatabase.bind(factory);
   factory.deleteDatabase = (name: string) => {
