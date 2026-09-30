@@ -65,3 +65,19 @@ it("before a page starts, the profile in use is the one last chosen", () => {
   chosenElsewhere(work.id);
   expect(activeProfileId()).toBe(work.id);
 });
+
+it("deleting a profile another tab runs says it is open there, not to switch, though that tab made it the choice", async () => {
+  const work = createProfile("Work");
+  setRunningProfile("");
+  chosenElsewhere(work.id);
+  // The other tab holds Work's peer lock (see the entry points).
+  const before = Object.getOwnPropertyDescriptor(globalThis, "navigator");
+  Object.defineProperty(globalThis, "navigator", { value: { locks: { query: async () => ({ held: [{ name: `ghostly-peer-${work.id}` }] }) } }, configurable: true });
+  try {
+    await expect(deleteProfile(work.id)).rejects.toThrow("This profile is open in another window. Close it, then try again.");
+  } finally {
+    if (before) Object.defineProperty(globalThis, "navigator", before);
+    else Reflect.deleteProperty(globalThis, "navigator");
+  }
+  await expect(deleteProfile(work.id), "once it is closed there, it is still the choice of the next page").rejects.toThrow("Switch to another profile first");
+});

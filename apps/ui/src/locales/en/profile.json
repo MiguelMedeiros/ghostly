@@ -9,6 +9,7 @@
     "connected": "Connected · {{store}}",
     "download": "Download",
     "downloaded": "Downloaded · {{size}}",
+    "emptyFile": "This file is empty. Choose a backup file.",
     "fromFile": "File",
     "keepOne": "Original still here? Keep using just one: they share wallets.",
     "list": "List",

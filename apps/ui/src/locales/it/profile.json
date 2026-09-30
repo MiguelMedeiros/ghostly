@@ -9,6 +9,7 @@
     "connected": "Connesso · {{store}}",
     "download": "Scarica",
     "downloaded": "Scaricato · {{size}}",
+    "emptyFile": "Questo file è vuoto. Scegli un file di backup.",
     "fromFile": "File",
     "keepOne": "L'originale è ancora qui? Usane solo uno: condividono i portafogli.",
     "list": "Elenca",
