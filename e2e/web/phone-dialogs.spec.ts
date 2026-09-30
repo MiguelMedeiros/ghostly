@@ -71,3 +71,23 @@ for (const phone of [{ width: 402, height: 874, keyboard: 336 }, { width: 375, h
     await expect(page.getByText("Ghostly is locked")).toHaveCount(0);
   });
 }
+
+for (const screen of [{ name: "an iPad mini on its side", width: 1133, height: 744, keyboard: 360 }, { name: "an iPhone on its side", width: 874, height: 402, keyboard: 200 }]) {
+  test(`${screen.name}: two panes, and the message field stands above the keyboard`, { tag: ["@feature:app.mobile-layout", "@feature:app.responsive"] }, async ({ peer }) => {
+    // From 768px the app shows two panes, and they kept the screen's height with the keyboard up: the message field
+    // was under it. In the iOS Simulator (iPad mini on its side) Safari scrolled the whole page to reach the field,
+    // and left it scrolled, a blank band under the panes, once the keyboard went.
+    const { page } = await peer("tablet", { mobile: true, viewport: { width: screen.width, height: screen.height } });
+    await iosKeyboard(page);
+    await page.getByTitle("New Chat").first().click();
+    const input = page.getByPlaceholder("Message…");
+    await input.focus();
+    // Under 16px, iOS zooms into the field on focus and the page stays zoomed: the panes' fields are 16px on a touch screen.
+    expect(await input.evaluate((field) => parseFloat(getComputedStyle(field).fontSize))).toBeGreaterThanOrEqual(16);
+    await keyboard(page, screen.keyboard);
+    await within(input, screen.height - screen.keyboard);
+    await within(page.getByTestId("chat-options"), screen.height - screen.keyboard);
+    await keyboard(page, 0);
+    await expect.poll(async () => { const box = (await input.boundingBox())!; return box.y + box.height > screen.height - screen.keyboard; }).toBe(true);
+  });
+}
