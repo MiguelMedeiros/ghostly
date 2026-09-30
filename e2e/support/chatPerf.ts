@@ -89,6 +89,8 @@ export function history(count: number, start: number, lean = false) {
       const original = `r${String(to).padStart(6, "0")}ab`;
       base.replyTo = { id: original, snippet: line(to, 4), from: to % 3 === 0 ? "me" : "peer", messageId: to % 3 === 0 ? `me_${original}` : `peer_${original}` };
     }
+    // The last message quotes the first: a jump from the bottom to the top of the history.
+    if (i === count - 1 && count > 1) base.replyTo = { id: "r000000ab", snippet: line(0, 4), from: "me", messageId: "me_r000000ab" };
     if (i % 6 === 0) base.reactions = { peer: { e: "❤️", n: 1, at: start + i * 45_000 + 1_000 }, ...(i % 12 === 0 && { me: { e: "😂", n: 1, at: start + i * 45_000 + 2_000 } }) };
     if (mine && kind >= 5 && i % 15 === 6) base.edit = { seq: 1, at: start + i * 45_000 + 5_000, history: [{ at: start + i * 45_000, text: `${text} (first)` }] };
     if (!mine && kind >= 5 && i % 20 === 7) base.forwarded = i % 40 === 7 ? 5 : 1;

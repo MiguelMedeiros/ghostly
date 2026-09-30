@@ -1,20 +1,25 @@
 import { chat, expect, test } from "../support/fixtures";
 import { countCommits, openAndMeasure, seed, summary, type Open } from "../support/chatPerf";
+import type { Page } from "@playwright/test";
 
 /**
  * How long a long chat takes to open: from the click on its row in the chat list to its first message painted, and to
- * the list settled at its bottom, with the main thread's long tasks and React's commits on the way. A chat of 2,000
- * mixed messages (formatting, links with previews, pictures, voice notes, videos, replies, reactions, edits, forwards)
- * is compared with one of 50, opened in turn.
+ * the list settled at its bottom, with the main thread's long tasks and React's commits on the way. A chat of 5,000
+ * mixed messages (formatting, links with previews, pictures, voice notes, videos, a bot's status cards, replies,
+ * reactions, edits, forwards) is compared with one of 50, opened in turn.
  *
  *   PERF_RUNS=5 E2E_WEB_URL=http://localhost:<port> npx playwright test -c e2e/playwright.config.ts --project web chat-open-perf
  *
  * prints the median of each number. Absolute times depend on the machine and its load: compare builds run by run
- * (interleaved), not against a number from another day. By itself the test only holds a generous bound: a chat 40
+ * (interleaved), not against a number from another day. By itself the test only holds a generous bound: a chat 100
  * times longer may cost more to open, but not in proportion.
  */
 
 const RUNS = Number(process.env.PERF_RUNS) || 3;
+/** Most message rows a chat has in the page (apps/ui/src/hooks/useRowWindow.ts `MAX_ROWS`). */
+const MAX_ROWS = 300;
+/** Rows a chat opens with (`OPEN_ROWS`). */
+const OPEN_ROWS = 100;
 
 // A trace's DOM snapshots and a video would be measured with the app.
 test.use({ trace: "off", video: "off" });
@@ -23,7 +28,7 @@ test("a long chat opens without costing in proportion to its length", { tag: ["@
   test.setTimeout(5 * 60_000);
   const bob = await peer("perf-bob");
   await bob.context.addInitScript(countCommits);
-  await seed(bob.page, [{ label: "Long chat", count: 2_000 }, { label: "Short chat", count: 50 }]);
+  await seed(bob.page, [{ label: "Long chat", count: 5_000 }, { label: "Short chat", count: 50 }]);
   // Seeded after load: a reload hands the hook to React, and shows the chats.
   await bob.page.reload();
   await expect(bob.page.getByTestId("chat-row-name").filter({ hasText: "Long chat" })).toBeVisible();
@@ -48,15 +53,14 @@ test("a long chat opens without costing in proportion to its length", { tag: ["@
   console.log(`chat-open-perf (median of ${RUNS}): ${JSON.stringify({ long, short })}`);
   for (const [label, opens] of Object.entries(runs)) console.log(`  ${label}: ${opens.map(o => JSON.stringify(o)).join("\n    ")}`);
 
-  // Every message ends up in the page, and the view never left the bottom while the older ones came in above.
-  expect(long.rows).toBe(2_000);
+  // Its last rows are in the page, never the whole history, and the view never left the bottom.
+  expect(long.rows).toBe(OPEN_ROWS);
   expect(long.offBottom).toBe(0);
-  // Generous on purpose (a loaded CI runner): 40 times the messages may not cost 40 times the time.
-  expect(long.settled).toBeLessThan(Math.max(4_000, short.settled * 15));
-  // A long chat shows at once: its last rows first (before, all 2,000 rows were drawn and laid out first, ~500 ms here).
-  expect(long.paint).toBeLessThan(Math.max(250, short.paint * 5));
-  // Open and left alone, a long chat does no long work: each change of the page used to draw all 2,000 bubbles again
-  // (250 to 350 ms of long tasks every two seconds here before; none after).
+  // Generous on purpose (a loaded CI runner). Before the window of rows, 5,000 messages took 6.5 s to settle here (every
+  // row drawn above, 150 at a time), against ~100 ms after.
+  expect(long.settled).toBeLessThan(Math.max(1_500, short.settled * 5));
+  expect(long.paint).toBeLessThan(Math.max(400, short.paint * 5));
+  // Open and left alone, a long chat does no long work (each change of the page used to draw every bubble again).
   expect(long.idleLong).toBeLessThan(150);
 });
 
@@ -106,30 +110,103 @@ test("the message list is a layer of its own, but not while a video in it plays 
   await expect.poll(() => list.evaluate(el => getComputedStyle(el).willChange)).toBe("auto");
 });
 
-test("scrolled up while a long chat's older messages come in, the view stays on its message", { tag: ["@feature:chat.scroll"] }, async ({ peer }) => {
+/** The chat's rows in the page: how many, and the first and last ids. */
+const inPage = (page: Page) => chat({ page } as never).evaluate(el => {
+  const rows = [...el.querySelectorAll<HTMLElement>("[data-message-id]")];
+  return { rows: rows.length, first: rows[0]?.dataset.messageId, last: rows.at(-1)?.dataset.messageId };
+});
+
+test("scrolled up, a long chat's older messages come into the page above without moving the view, and never all of them", { tag: ["@feature:chat.scroll"] }, async ({ peer }) => {
+  test.setTimeout(3 * 60_000);
   const bob = await peer("perf-scroll-bob");
-  await seed(bob.page, [{ label: "Long chat", count: 2_000 }]);
+  await seed(bob.page, [{ label: "Long chat", count: 5_000 }]);
   await bob.page.reload();
-  // A slower processor, so the older rows are still coming in when the wheel turns, however fast the runner.
-  const cdp = await bob.context.newCDPSession(bob.page);
-  await cdp.send("Emulation.setCPUThrottlingRate", { rate: 4 });
   await bob.page.getByTestId("chat-row-name").filter({ hasText: "Long chat" }).click();
-  // At once, before the older rows are all in: a hand scrolls up a little, and a row in the view is marked.
+  await expect(chat(bob).locator("[data-message-row]").last()).toBeInViewport();
+  expect((await inPage(bob.page)).rows).toBe(OPEN_ROWS);
+
+  // A hand scrolls up a page at a time, as a wheel would, and each time older rows come in above: the row at the top of
+  // the view stays where it was, to the pixel.
   const box = (await chat(bob).boundingBox())!;
   await bob.page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-  await bob.page.mouse.wheel(0, -700);
-  const marked = await chat(bob).evaluate(async el => {
-    // Once the wheel's scroll has stopped.
-    let was = -1;
-    while (Math.abs(el.scrollTop - was) >= 1) { was = el.scrollTop; await new Promise(requestAnimationFrame); await new Promise(requestAnimationFrame); }
-    const top = el.getBoundingClientRect().top;
-    const row = [...el.querySelectorAll<HTMLElement>("[data-message-id]")].find(r => r.getBoundingClientRect().top > top + 40)!;
-    return { id: row.dataset.messageId!, y: row.getBoundingClientRect().top, rows: el.querySelectorAll("[data-message-row]").length };
-  });
-  expect(marked.rows).toBeLessThan(2_000);
-  await expect(chat(bob).locator("[data-message-row]")).toHaveCount(2_000);
-  await cdp.send("Emulation.setCPUThrottlingRate", { rate: 1 });
-  const row = chat(bob).locator(`[data-message-id="${marked.id}"]`);
-  await expect.poll(async () => Math.round((await row.boundingBox())!.y)).toBeCloseTo(marked.y, -1);
-  await expect(bob.page.getByTestId("jump-latest")).toHaveAttribute("data-count", "0");
+  let loads = 0, most = 0;
+  for (let step = 0; step < 600 && (await inPage(bob.page)).first !== "me_r000000ab"; step++) {
+    const moved = await chat(bob).evaluate(async el => {
+      const firstRow = () => el.querySelector<HTMLElement>("[data-message-id]")!.dataset.messageId;
+      const top = el.getBoundingClientRect().top;
+      el.scrollTop = Math.max(0, el.scrollTop - 2 * el.clientHeight);
+      const row = [...el.querySelectorAll<HTMLElement>("[data-message-id]")].find(r => r.getBoundingClientRect().bottom > top + 1)!;
+      const id = row.dataset.messageId!, y = row.getBoundingClientRect().top;
+      const before = firstRow();
+      const at = () => el.querySelector<HTMLElement>(`[data-message-id="${CSS.escape(id)}"]`)?.getBoundingClientRect().top ?? Infinity;
+      // Where the row is each time the list's content changes size, as it will be painted: this observer is made after the
+      // app's own, so it sees the view once the app has put it back (reading it in a frame callback would force a layout
+      // before the app has had its turn).
+      let drift = 0;
+      const watcher = new ResizeObserver(() => { drift = Math.max(drift, Math.abs(at() - y)); });
+      watcher.observe(el.firstElementChild!);
+      // The scroll event, the rows it brings, and what they load (pictures, previews).
+      for (let i = 0; i < 8; i++) await new Promise(requestAnimationFrame);
+      watcher.disconnect();
+      return { loaded: firstRow() !== before, drift: Math.max(drift, Math.abs(at() - y)), rows: el.querySelectorAll("[data-message-id]").length };
+    });
+    if (moved.loaded) {
+      loads++;
+      expect(moved.drift, `the view moved when older rows came in (load ${loads})`).toBeLessThan(1);
+    }
+    most = Math.max(most, moved.rows);
+  }
+  // Up to the very first message, a page at a time, never more than the window in the page.
+  expect((await inPage(bob.page)).first).toBe("me_r000000ab");
+  expect(loads).toBeGreaterThan(40);
+  expect(most).toBeLessThanOrEqual(MAX_ROWS);
+  // Up there, the ↓ takes the view back to the last message.
+  await bob.page.getByTestId("jump-latest").click();
+  await expect(chat(bob).locator("[data-message-id=peer_r004999ab]")).toBeInViewport();
+});
+
+test("a quote in a long chat goes to its original far up the history, not in the page", { tag: ["@feature:chat.scroll", "@feature:chat.replies"] }, async ({ peer }) => {
+  const bob = await peer("perf-quote-bob");
+  await seed(bob.page, [{ label: "Long chat", count: 5_000 }]);
+  await bob.page.reload();
+  await bob.page.getByTestId("chat-row-name").filter({ hasText: "Long chat" }).click();
+  // The last message quotes the first, 5,000 messages up.
+  const last = chat(bob).locator("[data-message-id=peer_r004999ab]");
+  await expect(last).toBeInViewport();
+  await expect(chat(bob).locator("[data-message-id=me_r000000ab]")).toHaveCount(0);
+  await last.getByTestId("message-quote").click();
+  const original = chat(bob).locator("[data-message-id=me_r000000ab]");
+  await expect(original).toHaveAttribute("data-reply-flash", "");
+  await expect(original).toBeInViewport();
+  expect((await inPage(bob.page)).rows).toBeLessThanOrEqual(MAX_ROWS);
+  await expect(bob.page.getByTestId("reply-quote-note")).toHaveCount(0);
+});
+
+test("a long chat follows new messages at its bottom, and counts them from up the history", { tag: ["@feature:chat.scroll"] }, async ({ peer }) => {
+  const bob = await peer("perf-follow-bob");
+  const [id] = await seed(bob.page, [{ label: "Long chat", count: 5_000 }]);
+  await bob.page.reload();
+  await bob.page.getByTestId("chat-row-name").filter({ hasText: "Long chat" }).click();
+  await expect(chat(bob).locator("[data-message-id=peer_r004999ab]")).toBeInViewport();
+  // The contact's new message, as the engine stores it.
+  const arrive = (n: number) => bob.page.evaluate(({ id, n }) => {
+    const key = `ghostly_${id}`;
+    const session = JSON.parse(localStorage.getItem(key)!);
+    session.messages.push({ id: `peer_new${n}`, ref: `new${n}`, sender: "peer", timestamp: Date.now(), text: `Fresh news ${n}` });
+    localStorage.setItem(key, JSON.stringify(session));
+    window.dispatchEvent(new Event("session-updated"));
+  }, { id, n });
+  await arrive(1);
+  await expect(chat(bob).locator("[data-message-id=peer_new1]")).toBeInViewport();
+  await expect(bob.page.getByTestId("jump-latest")).toHaveCount(0);
+
+  // Far up the history, the last rows are not in the page: a new one is counted, and the pill goes to it.
+  await chat(bob).locator("[data-message-id=peer_r004999ab]").getByTestId("message-quote").click();
+  await expect(chat(bob).locator("[data-message-id=me_r000000ab]")).toBeInViewport();
+  await arrive(2);
+  await expect(bob.page.getByTestId("jump-latest")).toHaveAttribute("data-count", "1");
+  await expect(chat(bob).locator("[data-message-id=peer_new2]")).toHaveCount(0);
+  await bob.page.getByTestId("jump-latest").click();
+  await expect(chat(bob).locator("[data-message-id=peer_new2]")).toBeInViewport();
+  expect((await inPage(bob.page)).rows).toBeLessThanOrEqual(MAX_ROWS);
 });
