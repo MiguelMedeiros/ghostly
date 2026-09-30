@@ -476,7 +476,11 @@ async function usdt(a: Actor, b: Actor): Promise<void> {
   await rpc("evm_mine");
   await wallet(a, "usdt");
   await expect(tokens(a)).toHaveText(/^10 TEST-USDT/, { timeout: 30_000 });
-  await bothWays(a, b, "usdt", [3, 2, 1, 1]);
+  // The local chain mines a block per transaction, and a payment counts as done at 2 confirmations: until then the
+  // payer's wallet takes no other payment from the same account ("already submitted"). A block more before each one,
+  // and one pass of the engine's 10 s payment check to see it.
+  const confirmed = async (payer: Actor) => { await rpc("evm_mine"); await payer.page.waitForTimeout(11_000); };
+  await bothWays(a, b, "usdt", [3, 2, 1, 1], confirmed);
   await wallet(a, "usdt");
   await expect(tokens(a), "10 in, 3 out, 2 out, 1 in, 1 in").toHaveText(/^7 TEST-USDT/, { timeout: 30_000 });
   await wallet(b, "usdt");
