@@ -1,0 +1,1 @@
+The presser's app reads its own replies to a question as the author's app does: a reply typed in words that is a button's label or id is that button's press. A `once` question answered by typing "yes" offers no button after it, where before the app still offered one that the author's app would not take.
