@@ -229,6 +229,8 @@ export function useWebRTC({
   const pictureBeforeShareRef = useRef<Picture | null>(null);
   /** A share is being started or stopped: the picker may be open. */
   const shareBusyRef = useRef(false);
+  /** Counts the picture changes asked for: one whose camera or screen opens after a later one was asked is dropped. */
+  const pictureRequestRef = useRef(0);
   const screenShareErrorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** The offer we answered and whether we answered with the camera. */
   const answeredRef = useRef<{ offer: CallSignal; withVideo: boolean } | null>(null);
@@ -457,6 +459,7 @@ export function useWebRTC({
       const sender = pc ? videoTransceiver(pc)?.sender : undefined;
       if (!pc || !localStreamRef.current || !sender) throw new Error("This call has no video to send on");
       const attempt = attemptRef.current;
+      const request = ++pictureRequestRef.current;
 
       let track: MediaStreamTrack | null = null;
       if (next === "camera") {
@@ -468,6 +471,11 @@ export function useWebRTC({
       }
       // The call ended while the prompt or the picker was open: what it gave is let go, and nobody is told.
       if (attemptRef.current !== attempt) {
+        track?.stop();
+        return;
+      }
+      // Something else was asked for while it opened (the camera turned off, another camera picked): that one wins.
+      if (pictureRequestRef.current !== request) {
         track?.stop();
         return;
       }
