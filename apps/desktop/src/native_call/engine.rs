@@ -265,14 +265,22 @@ impl Camera {
                 } else {
                     "v4l2src".to_string()
                 };
-                start_with(
+                // No camera chosen: the one GStreamer lists first (PipeWire's, libcamera's before a bare V4L2
+                // node, `devices::default_camera`), still called the default; `v4l2src` only when that one fails.
+                let listed = if wanted.is_none() && !fake {
+                    devices::default_camera()
+                } else {
+                    None
+                };
+                let (pipeline, device) = start_with(
                     "The camera",
                     &description,
                     Kind::Camera,
-                    wanted,
+                    wanted.or(listed.as_deref()),
                     &default,
                     ready,
-                )?
+                )?;
+                (pipeline, if wanted.is_some() { device } else { None })
             }
         };
         Ok(Camera {
@@ -1578,5 +1586,36 @@ mod tests {
         assert_eq!(a.stats().speaker, None, "{}", stats());
         a.close().await;
         b.close().await;
+    }
+
+    /// The machine's own camera, as a call opens it with none chosen, gives pictures. Needs a camera, so it runs
+    /// only by hand (`cargo test -- --ignored the_default_camera`); on an Intel IPU6 laptop it failed before the
+    /// default became the camera GStreamer lists (a bare `v4l2src` there: "not-negotiated", no picture).
+    #[test]
+    #[ignore = "needs a real camera"]
+    fn the_default_camera_gives_pictures() {
+        let pictures = Arc::new(AtomicU64::new(0));
+        let seen = pictures.clone();
+        let camera = Camera::open(
+            false,
+            None,
+            Arc::new(move |jpeg: Vec<u8>| {
+                if jpeg.starts_with(&[0xff, 0xd8]) {
+                    seen.fetch_add(1, Ordering::Relaxed);
+                }
+            }),
+        )
+        .unwrap();
+        let end = Instant::now() + Duration::from_secs(8);
+        while pictures.load(Ordering::Relaxed) < 5 && Instant::now() < end {
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        eprintln!("the default camera: {:?}", devices::default_camera());
+        assert!(
+            pictures.load(Ordering::Relaxed) >= 5,
+            "{} pictures",
+            pictures.load(Ordering::Relaxed)
+        );
+        drop(camera);
     }
 }

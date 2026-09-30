@@ -167,6 +167,35 @@ pub fn element(kind: Kind, name: &str) -> Option<gst::Element> {
     }
 }
 
+/// The camera a call uses when none was chosen: the first GStreamer lists, one that PipeWire or libcamera serves
+/// before the others. A bare `v4l2src` gets no picture from a camera only libcamera can drive (Intel IPU6 laptops:
+/// "not-negotiated", a black preview and nothing sent); PipeWire hands the same camera over through libcamera.
+/// None when GStreamer lists no camera: the caller falls back to `v4l2src`.
+pub fn default_camera() -> Option<String> {
+    let cameras = devices(Kind::Camera);
+    let providers: Vec<String> = cameras
+        .iter()
+        .map(|(_, d)| d.type_().name().to_string())
+        .collect();
+    Some(cameras[preferred_camera(&providers)?].0.clone())
+}
+
+/// Which of the cameras, listed by their GStreamer device type in the order the page lists them, a call uses
+/// when none was chosen: PipeWire's first, then libcamera's, then any other; the first of a kind.
+fn preferred_camera(providers: &[String]) -> Option<usize> {
+    let rank = |provider: &str| {
+        let provider = provider.to_ascii_lowercase();
+        if provider.contains("pipewire") {
+            0
+        } else if provider.contains("libcamera") {
+            1
+        } else {
+            2
+        }
+    };
+    (0..providers.len()).min_by_key(|&i| (rank(&providers[i]), i))
+}
+
 /// How long the bus stays quiet before a burst of changes is told.
 const SETTLE: gst::ClockTime = gst::ClockTime::from_mseconds(250);
 
@@ -235,6 +264,23 @@ mod tests {
                 ("Webcam (3)".to_string(), 4),
             ]
         );
+    }
+
+    #[test]
+    fn with_no_camera_chosen_a_call_uses_pipewires_camera_first_then_libcameras() {
+        let pick = |providers: &[&str]| {
+            preferred_camera(&providers.iter().map(|p| p.to_string()).collect::<Vec<_>>())
+        };
+        // An IPU6 laptop: V4L2 lists raw nodes v4l2src cannot negotiate; PipeWire serves the camera via libcamera.
+        assert_eq!(pick(&["GstV4l2Device", "GstPipeWireDevice"]), Some(1));
+        assert_eq!(
+            pick(&["GstV4l2Device", "GstLibcameraDevice", "GstPipeWireDevice"]),
+            Some(2)
+        );
+        assert_eq!(pick(&["GstV4l2Device", "GstLibcameraDevice"]), Some(1));
+        // Only V4L2 (a USB webcam without PipeWire): the first it lists.
+        assert_eq!(pick(&["GstV4l2Device", "GstV4l2Device"]), Some(0));
+        assert_eq!(pick(&[]), None);
     }
 
     #[test]
