@@ -54,7 +54,6 @@
   "colorLabel": "لون الملف الشخصي",
   "create": "إنشاء",
   "delete": {
-    "arkWallet": "محفظة Ark",
     "backupFirst": "نزّل نسخة احتياطية أولًا",
     "backupPassphrase": "عبارة مرور النسخة الاحتياطية",
     "cashuSats": "{{amount}} ساتوشي في Cashu",
@@ -68,7 +67,7 @@
     "serviceCount": "{{count}} تطبيقات",
     "serviceOne": "تطبيق واحد",
     "title": "حذف «{{name}}»؟",
-    "usdtWallet": "محفظة USDT",
+    "wallet": "محفظة {{name}}",
     "warning": "لا يمكن التراجع عن هذا. تُحذف محافظه معه."
   },
   "deleteNamed": "حذف {{name}}",

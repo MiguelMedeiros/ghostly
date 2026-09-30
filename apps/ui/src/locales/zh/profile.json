@@ -54,7 +54,6 @@
   "colorLabel": "资料颜色",
   "create": "创建",
   "delete": {
-    "arkWallet": "Ark 钱包",
     "backupFirst": "先下载一份备份",
     "backupPassphrase": "备份密码短语",
     "cashuSats": "Cashu 中 {{amount}} sats",
@@ -68,7 +67,7 @@
     "serviceCount": "{{count}} 个应用",
     "serviceOne": "1 个应用",
     "title": "删除“{{name}}”？",
-    "usdtWallet": "USDT 钱包",
+    "wallet": "{{name}} 钱包",
     "warning": "此操作无法撤销，其中的钱包也会一并删除。"
   },
   "deleteNamed": "删除 {{name}}",

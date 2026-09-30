@@ -54,7 +54,6 @@
   "colorLabel": "Color del perfil",
   "create": "Crear",
   "delete": {
-    "arkWallet": "Monedero Ark",
     "backupFirst": "Descarga antes una copia",
     "backupPassphrase": "Frase de contraseña de la copia",
     "cashuSats": "{{amount}} sats en Cashu",
@@ -68,7 +67,7 @@
     "serviceCount": "{{count}} apps",
     "serviceOne": "1 app",
     "title": "¿Eliminar «{{name}}»?",
-    "usdtWallet": "Monedero USDT",
+    "wallet": "Monedero {{name}}",
     "warning": "No se puede deshacer. Sus monederos se van con él."
   },
   "deleteNamed": "Eliminar {{name}}",
