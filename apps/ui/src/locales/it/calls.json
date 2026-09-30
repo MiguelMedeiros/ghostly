@@ -21,6 +21,8 @@
   "incoming": "Chiamata in arrivo",
   "incomingAudio": "Chiamata vocale in arrivo...",
   "incomingVideo": "Videochiamata in arrivo...",
+  "mediaDenied": "Ghostly non può usare il microfono o la fotocamera. Consentili nelle impostazioni del sito del browser (nell'app desktop: Impostazioni di Sistema → Privacy e sicurezza), poi riprova.",
+  "mediaUnavailable": "Nessun microfono o fotocamera disponibile. Collegane uno, o chiudi l'app che lo sta usando, poi riprova.",
   "missed": "Chiamata persa",
   "mute": "Disattiva audio",
   "needLive": "Le chiamate richiedono una connessione diretta",
