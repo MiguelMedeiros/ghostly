@@ -1,3 +1,4 @@
+import { formatVideoDuration, formatVoiceDuration } from "@ghostly/core";
 import { findMoney } from "./money";
 import { plainText } from "./parse";
 import { moreMoneyPreview } from "./parse/money-preview";
@@ -5,6 +6,17 @@ import { englishT, type Translate } from "../locales/translate";
 import { languageTag } from "./documentLanguage";
 import type { Language } from "./settings";
 import { formatAmount } from "./amount";
+import type { ChatFile } from "./types";
+
+/**
+ * A voice message's or a video's line in the person's language: the history keeps it in English (`fileMessageText`).
+ * Undefined for any other file, whose line is its name.
+ */
+export function filePreview(file: ChatFile | undefined, t: Translate): string | undefined {
+  if (file?.voice) return t("chat.preview.voice", { duration: formatVoiceDuration(file.voice.duration) });
+  if (file?.video) return t("chat.preview.video", { duration: formatVideoDuration(file.video.duration) });
+  return undefined;
+}
 
 /** Previews already worked out, by language and message text: the list draws each row again on every change anywhere. */
 const CACHES = new WeakMap<Translate, Map<string, string>>();

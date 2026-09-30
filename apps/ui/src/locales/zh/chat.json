@@ -263,7 +263,9 @@
     "sats": "{{amount}} sats",
     "testMoney": "测试资金",
     "testSats": "{{amount}} 测试 sats",
-    "usdtAddress": "USDT 地址"
+    "usdtAddress": "USDT 地址",
+    "video": "🎬 视频 ({{duration}})",
+    "voice": "🎤 语音消息 ({{duration}})"
   },
   "reactions": {
     "chipLabel": "{{emoji}}：{{names}}",

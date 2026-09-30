@@ -11,7 +11,7 @@ import { TypingText } from "./TypingIndicator";
 import { usePeerTypingActivity } from "../hooks/useTyping";
 import { BellIcon, MuteMenu } from "./ChatMute";
 import { useI18n } from "../contexts/I18nContext";
-import { formatListTime, previewText } from "../lib/chatList";
+import { filePreview, formatListTime, previewText } from "../lib/chatList";
 import { cardLine, showsCard } from "../lib/statusCards";
 import { deliveryShape, useDeliveryWords } from "../lib/delivery";
 import { groupChat, mentionsNotify, muteEndText, useChatMute } from "../lib/chatMute";
@@ -259,7 +259,7 @@ export function ChatRow(p: ChatRowProps) {
               {p.lastMessage.systemEvent?.type === "join" ? joinPreview(p, p.lastMessage.systemEvent.pubKey, t)
                 : p.lastMessage.callEvent ? callEventText(t, p.lastMessage.callEvent.type, p.lastMessage.callEvent.hasVideo) ?? p.lastMessage.text
                 : showsCard(p.lastMessage.card) ? cardLine(p.lastMessage.card)
-                : previewText(p.lastMessage.text, t)}
+                : filePreview(p.lastMessage.file, t) ?? previewText(p.lastMessage.text, t)}
             </span>
           : <span className="italic text-text-muted">{t("chat.noMessages")}</span>}
         status={(muted || p.pinned) && <>
