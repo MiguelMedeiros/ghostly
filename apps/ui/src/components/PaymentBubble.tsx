@@ -1,4 +1,4 @@
-import { decodeBolt11, formatPaymentAmount, parsePaymentAmount, paymentUri } from "@ghostly/core";
+import { decodeBolt11, parsePaymentAmount, paymentUri } from "@ghostly/core";
 import { PayExternally } from "./PayExternally";
 import type { PaymentReview as Review } from "@ghostly/core";
 import { PaymentReview } from "./PaymentReview";
@@ -12,6 +12,7 @@ import { Select } from "./ui/Select";
 import { NetworkTag, satsIn } from "./NetworkTag";
 import { useI18n } from "../contexts/I18nContext";
 import { ConfirmRealMoney } from "./ConfirmRealMoney";
+import { formatAmount, formatTokenAmount } from "../lib/amount";
 
 /** A payment or a payment request in the chat. The amounts are live: they follow what the wallet knows. */
 export function PaymentBubble({ paymentId, peerPubKey, fallbackText }: { paymentId: string; peerPubKey: string; fallbackText: string }) {
@@ -142,7 +143,7 @@ export function PaymentBubble({ paymentId, peerPubKey, fallbackText }: { payment
       <p className="m-0 leading-tight">
         <span className="text-[22px] font-semibold">
 
-          {tokenPayment?formatPaymentAmount(payment.amount,payment.target?.decimals):(celebrate ? amountShown : payment.amount).toLocaleString()}
+          {tokenPayment?formatTokenAmount(payment.amount,payment.target?.decimals,t.language):formatAmount(celebrate ? amountShown : payment.amount, t.language)}
         </span>
         {" "}<span className="text-xs ms-1 text-text-primary/75">{tokenPayment?payment.target?.asset:sats}</span>
       </p>
@@ -168,14 +169,14 @@ export function PaymentBubble({ paymentId, peerPubKey, fallbackText }: { payment
         <div className="flex flex-col gap-2 mt-2">
           {/* Paying from here needs a wallet of the request's network; another wallet can still be pointed at it. */}
           {!noWallet && <>
-          {!payment.target && !viaLightning && <label className="block space-y-1 text-xs">{t("payments.bubble.cashuMint")}<Select size="sm" aria-label={t("payments.bubble.cashuMint")} value={selectedMint ?? ""} onChange={setMint} disabled={!sharedMints.length} placeholder={t("payments.bubble.noSharedMint")} options={sharedMints.map(m => ({ value: m.url, label: m.url, description: t("payments.bubble.balance", { amount: m.balance.toLocaleString(), unit: sats }) }))} /></label>}
+          {!payment.target && !viaLightning && <label className="block space-y-1 text-xs">{t("payments.bubble.cashuMint")}<Select size="sm" aria-label={t("payments.bubble.cashuMint")} value={selectedMint ?? ""} onChange={setMint} disabled={!sharedMints.length} placeholder={t("payments.bubble.noSharedMint")} options={sharedMints.map(m => ({ value: m.url, label: m.url, description: t("payments.bubble.balance", { amount: formatAmount(m.balance, t.language), unit: sats }) }))} /></label>}
           {viaLightning && <LightningPayWith payer={lightningPayer} unit={sats} disabled={busy || !!lnReview} testId="payment-lightning-card" />}
           <label className="text-xs">{t(tokenPayment?"payments.bubble.maxGas":"payments.bubble.maxFee")}<input aria-label={t(tokenPayment?"payments.bubble.maxGas":"payments.bubble.maxFee")} className="block w-20 bg-input-bg rounded p-1" inputMode="numeric" value={feeInput} onChange={e=>setFeeCap(e.target.value.replace(tokenPayment?/[^0-9.]/g:/\D/g,""))}/></label>
           {lnReview && (
             <div data-testid="payment-review" className="rounded-lg bg-black/20 p-2 space-y-1 text-xs">
-              <p className="m-0 flex items-center gap-2">{t("payments.bubble.payOverLightning", { amount: payment.amount.toLocaleString(), unit: sats })}<NetworkTag network={network} testId="payment-lightning-network" /></p>
-              <p className="m-0 text-text-primary/75">{t("payments.bubble.through", { source: lnReview.source, fee: lnReview.fee.toLocaleString() })}</p>
-              {lnConfirming ? <ConfirmRealMoney what={t("payments.bubble.amountSats", { amount: payment.amount.toLocaleString() })} busy={busy} onSend={() => payLightning(true)} onBack={() => setLnConfirming(false)} /> : (
+              <p className="m-0 flex items-center gap-2">{t("payments.bubble.payOverLightning", { amount: formatAmount(payment.amount, t.language), unit: sats })}<NetworkTag network={network} testId="payment-lightning-network" /></p>
+              <p className="m-0 text-text-primary/75">{t("payments.bubble.through", { source: lnReview.source, fee: formatAmount(lnReview.fee, t.language) })}</p>
+              {lnConfirming ? <ConfirmRealMoney what={t("payments.bubble.amountSats", { amount: formatAmount(payment.amount, t.language) })} busy={busy} onSend={() => payLightning(true)} onBack={() => setLnConfirming(false)} /> : (
                 <div className="flex gap-2">
                   <button className={button} data-testid="payment-lightning-approve" disabled={busy} onClick={() => network === "mainnet" ? setLnConfirming(true) : payLightning(false)}>{t("payments.bubble.approve")}</button>
                   <button className={quiet} disabled={busy} onClick={() => setLnReview(null)}>{t("common.cancel")}</button>

@@ -8,6 +8,7 @@ import { Select } from "./ui/Select";
 import { ConfirmRealMoney } from "./ConfirmRealMoney";
 import { useI18n, type Translate } from "../contexts/I18nContext";
 import { satsIn } from "./NetworkTag";
+import { formatAmount } from "../lib/amount";
 
 const short = (id: string) => `${id.slice(0, 8)}…${id.slice(-4)}`;
 /** A history row's kind, in the app's language (the engine's own word when it is a new one). */
@@ -34,7 +35,7 @@ const stateOf = (t: Translate, state: string) => {
 
 /** A history row's amount, signed, and its fee when there is one. */
 const amountOf = (t: Translate, tx: { kind: string; amount?: number; fee?: number }) => {
-  const amount = tx.amount !== undefined ? `${tx.kind.endsWith("out") ? "−" : "+"}${tx.amount.toLocaleString()}` : "";
+  const amount = tx.amount !== undefined ? `${tx.kind.endsWith("out") ? "−" : "+"}${formatAmount(tx.amount, t.language)}` : "";
   return tx.fee ? t("wallet.fedimint.amountFee", { amount, fee: tx.fee }) : amount;
 };
 
@@ -106,12 +107,12 @@ export function FedimintWalletPanel({ wallet, state, backupNow = false }: { wall
     {!federations.length ? <div className="bg-surface rounded-xl p-6 text-center space-y-2" data-testid="fedimint-empty"><p className="text-text-primary">{t("wallet.fedimint.empty")}</p><Notice>{t("wallet.fedimint.emptyNote")}</Notice></div>
     : <div className="space-y-4">
       {federations.length > 1 && <Select aria-label={t("wallet.fedimint.federation")} value={current?.id ?? ""} onChange={(id) => { setSelected(id); setInvoice(""); setNotesOut(null); }}
-        options={federations.map((f) => ({ value: f.id, label: f.name ?? short(f.id), description: `${f.balance.toLocaleString()} ${unit}` }))} />}
+        options={federations.map((f) => ({ value: f.id, label: f.name ?? short(f.id), description: `${formatAmount(f.balance, t.language)} ${unit}` }))} />}
       {current && <>
-        <p className="text-text-primary" data-testid="fedimint-balance"><span className="text-4xl font-semibold tabular-nums">{current.balance.toLocaleString()}</span><span className="text-text-muted text-sm ms-2">{unit}</span>
+        <p className="text-text-primary" data-testid="fedimint-balance"><span className="text-4xl font-semibold tabular-nums">{formatAmount(current.balance, t.language)}</span><span className="text-text-muted text-sm ms-2">{unit}</span>
           <span className={`block text-xs mt-1 ${test ? "text-yellow-500" : "text-text-muted"}`}>{t(test ? "wallet.fedimint.lineTest" : "wallet.fedimint.line", { name: current.name ?? short(current.id), network: current.network ?? t("wallet.fedimint.unknownNetwork") })}</span></p>
         {current.status !== "ready" && <Notice tone={current.status === "error" ? "warning" : "muted"} testId="fedimint-status">{current.status === "error" ? t("wallet.fedimint.notAnswering", { error: current.error ?? t("wallet.fedimint.unknownError") }) : t("wallet.fedimint.connecting")}</Notice>}
-        {federations.length > 1 && <Notice>{t("wallet.fedimint.across", { amount: fm!.balance.toLocaleString(), unit, count: federations.length })}</Notice>}
+        {federations.length > 1 && <Notice>{t("wallet.fedimint.across", { amount: formatAmount(fm!.balance, t.language), unit, count: federations.length })}</Notice>}
         <Actions value={action} onChange={(next) => { setAction(next); setError(""); }} actions={["receive", "send", "history"]} />
         {action === "receive" && <div className="bg-surface rounded-xl p-4 space-y-4 animate-fade-in">
           {current.lightning && <>
@@ -123,14 +124,14 @@ export function FedimintWalletPanel({ wallet, state, backupNow = false }: { wall
           <div className="space-y-2">
             <p className="text-xs text-text-secondary">{t("wallet.fedimint.notesIn")}</p>
             <textarea aria-label={t("wallet.fedimint.notesInInput")} data-testid="fedimint-notes-in" rows={2} spellCheck={false} className={`${input} font-mono text-xs resize-none`} value={notesIn} onChange={(e) => { setNotesIn(e.target.value.trim()); setReceived(""); }} />
-            <Button data-testid="fedimint-redeem" disabled={busy || !notesIn} onClick={() => void run(async () => { const r = await wallet.fedimintReceiveNotes(notesIn); setNotesIn(""); setReceived(t("wallet.fedimint.redeemed", { amount: r.amount.toLocaleString(), unit })); })}>{t("wallet.fedimint.redeem")}</Button>
+            <Button data-testid="fedimint-redeem" disabled={busy || !notesIn} onClick={() => void run(async () => { const r = await wallet.fedimintReceiveNotes(notesIn); setNotesIn(""); setReceived(t("wallet.fedimint.redeemed", { amount: formatAmount(r.amount, t.language), unit })); })}>{t("wallet.fedimint.redeem")}</Button>
             {received && <Notice tone="success" testId="fedimint-redeemed">{received}</Notice>}
           </div>
         </div>}
         {action === "send" && <div className="bg-surface rounded-xl p-4 space-y-3 animate-fade-in">
           <p className="text-xs text-text-secondary">{t("wallet.fedimint.sendAbout")}</p>
           <Amount value={amount} onChange={(v) => { setAmount(v); setNotesOut(null); setConfirming(false); }} unit={unit} testId="fedimint-send-amount" />
-          {!notesOut ? (confirming ? <ConfirmRealMoney what={t("wallet.fedimint.asNotes", { amount: Number(amount).toLocaleString() })} busy={busy} onSend={() => spend(true)} onBack={() => setConfirming(false)} />
+          {!notesOut ? (confirming ? <ConfirmRealMoney what={t("wallet.fedimint.asNotes", { amount: formatAmount(Number(amount), t.language) })} busy={busy} onSend={() => spend(true)} onBack={() => setConfirming(false)} />
             // Notes of a Mainnet federation are real money: the second step first, as for every other spend.
             : <Button variant="primary" className="w-full" data-testid="fedimint-spend" disabled={busy || !ready || !Number(amount) || Number(amount) > current.balance} onClick={() => (real ? setConfirming(true) : spend(false))}>{Number(amount) > current.balance ? t("wallet.fedimint.tooMuch") : t("wallet.fedimint.createNotes")}</Button>)
             : <div className="space-y-2">

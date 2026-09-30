@@ -16,6 +16,7 @@ import { ProfileBadge } from "../components/ProfileBadge";
 import { setMyAvatar, setShareProfile, useMyAvatar, useShareProfile } from "../hooks/useAvatars";
 import { avatarFromFile } from "../lib/avatarImage";
 import { useAppNavigation } from "../hooks/useAppNavigation";
+import { formatAmount } from "../lib/amount";
 
 /** Profiles change outside React (another component, another tab); re-read them when they do. */
 function useProfiles() {
@@ -99,7 +100,7 @@ export function Profile() {
         <LinkRow testId="profile-identities-link" label={<span className="inline-flex items-center gap-2">{t("tabs.identities")}{identityAttention && <><span className="nav-dot-inline" aria-hidden="true" /><span className="sr-only">, {t("identities.attention")}</span></>}</span>}
           value={identities ? identities : undefined} onClick={() => nav.open("/identities")} />
         <LinkRow label={t("tabs.chats")} value={chats === 1 ? t("profile.chatOne") : t("profile.chatCount", { count: chats })} onClick={nav.home} />
-        <LinkRow label={t("tabs.wallets")} value={wallet ? t("profile.sats", { amount: wallet.balance.toLocaleString(language) }) : undefined} onClick={() => nav.open("/wallet")} />
+        <LinkRow label={t("tabs.wallets")} value={wallet ? t("profile.sats", { amount: formatAmount(wallet.balance, language) }) : undefined} onClick={() => nav.open("/wallet")} />
         <LinkRow label={t("tabs.services")} value={services.length ? services.length : undefined} onClick={() => nav.open("/services")} />
         <LinkRow label={t("settings.title")} onClick={() => nav.open("/settings")} />
       </Section>

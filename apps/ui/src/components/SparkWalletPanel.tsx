@@ -8,6 +8,7 @@ import { useRun } from "./wallet/run";
 import { useI18n } from "../contexts/I18nContext";
 import { satsIn } from "./NetworkTag";
 import { fillNodes } from "../lib/fillNodes";
+import { formatAmount } from "../lib/amount";
 
 /** Spark transfers cost nothing today; the cap only stops a surprise, and the review shows the real fee. */
 const feeCap = (amount: number) => Math.max(100, Math.ceil(amount / 100));
@@ -50,7 +51,7 @@ export function SparkWalletPanel({ wallet, state, backupNow = false }: { wallet:
  return <div className="space-y-6" data-testid="spark-wallet">
   {!ready ? <div className="bg-surface rounded-xl p-6 text-center space-y-2" data-testid="spark-connecting"><p className="text-text-primary">{t("wallet.panel.connecting", { wallet: "Spark" })}</p><Notice>{spark?.error ?? t("wallet.spark.connectingNote")}</Notice></div>
   : <div className="space-y-4">
-   <p className="text-text-primary" data-testid="spark-balance"><span className="text-4xl font-semibold tabular-nums">{spark.balance.toLocaleString()}</span><span className="text-text-muted text-sm ms-2">{unit}</span>
+   <p className="text-text-primary" data-testid="spark-balance"><span className="text-4xl font-semibold tabular-nums">{formatAmount(spark.balance, t.language)}</span><span className="text-text-muted text-sm ms-2">{unit}</span>
     {mainnet ? <span className="block text-xs text-danger mt-1" data-testid="spark-mainnet-label">{t("wallet.spark.mainnetLabel")}</span> : <span className="block text-xs text-yellow-500 mt-1">{t("wallet.spark.regtestLabel")}</span>}</p>
    <Actions value={action} onChange={setAction} />
    {action === "receive" && <div className="bg-surface rounded-xl p-4 space-y-4 animate-fade-in">
@@ -59,7 +60,7 @@ export function SparkWalletPanel({ wallet, state, backupNow = false }: { wallet:
    {action === "send" && <div className="bg-surface rounded-xl p-4 space-y-3 animate-fade-in">
     <input aria-label={t("wallet.spark.to")} placeholder={t("wallet.spark.toPlaceholder", { prefix: mainnet ? "spark1…" : "sparkrt1…" })} spellCheck={false} className={`${input} font-mono text-xs`} value={to} onChange={e => setTo(e.target.value.trim())} />
     {to && (!kind || invoice?.token) && <Notice tone="warning" testId="spark-address-invalid">{invoice?.token ? t("wallet.spark.tokenInvoice") : mainnet ? t("wallet.spark.notMainnet") : t("wallet.spark.notRegtest")}</Notice>}
-    {invoice && !invoice.token && invoice.amount !== undefined ? <p className="text-sm text-text-primary" data-testid="spark-invoice-summary">{fillNodes(invoice.memo ? t("wallet.spark.invoiceForMemo", { unit, memo: invoice.memo }) : t("wallet.spark.invoiceFor", { unit }), { amount: <span className="font-semibold tabular-nums">{invoice.amount.toLocaleString()}</span> })}</p>
+    {invoice && !invoice.token && invoice.amount !== undefined ? <p className="text-sm text-text-primary" data-testid="spark-invoice-summary">{fillNodes(invoice.memo ? t("wallet.spark.invoiceForMemo", { unit, memo: invoice.memo }) : t("wallet.spark.invoiceFor", { unit }), { amount: <span className="font-semibold tabular-nums">{formatAmount(invoice.amount, t.language)}</span> })}</p>
      : <Amount value={amount} onChange={setAmount} unit={unit} testId="spark-amount" />}
     <Button variant="primary" className="w-full" data-testid="spark-review" disabled={busy || !!review || !spark.balance || !kind || !!invoice?.token || !sats} onClick={() => void run(async () => {
      setReview(await wallet.preparePayment({ target: { method: "spark", network, provider: SPARK_PROVIDER, asset: "BTC", unit: "sat", address: to, expiresAt: Date.now() + 5 * 60 * 1000 }, amount: sats, feeCap: feeCap(sats), payee: to }));
@@ -67,11 +68,11 @@ export function SparkWalletPanel({ wallet, state, backupNow = false }: { wallet:
     <Notice>{t("wallet.spark.approve")}</Notice>
    </div>}
    {review && <PaymentReview key={review.id} review={review} wallet={wallet} onClose={() => { setReview(null); setTo(""); setAmount(""); }} />}
-   {intents.filter(i => i.id !== review?.id && i.state !== "settled").map(i => <Button key={i.id} className="block w-full text-start" onClick={() => setReview(i)}>{t("wallet.panel.intent", { amount: i.amount.toLocaleString(), unit, state: i.state })}</Button>)}
+   {intents.filter(i => i.id !== review?.id && i.state !== "settled").map(i => <Button key={i.id} className="block w-full text-start" onClick={() => setReview(i)}>{t("wallet.panel.intent", { amount: formatAmount(i.amount, t.language), unit, state: i.state })}</Button>)}
    {!!spark.history?.length && <Section title={t("wallet.spark.history")}>
     <ul className="divide-y divide-border" data-testid="spark-history">
      {spark.history.map(entry => <li key={entry.id} className="flex items-center gap-3 py-2 text-sm" data-testid="spark-history-row">
-      <span className={entry.direction === "in" ? "text-green-500" : "text-text-primary"}>{entry.direction === "in" ? "+" : "−"}{entry.amount.toLocaleString()} <span className="text-xs text-text-muted">{unit}</span></span>
+      <span className={entry.direction === "in" ? "text-green-500" : "text-text-primary"}>{entry.direction === "in" ? "+" : "−"}{formatAmount(entry.amount, t.language)} <span className="text-xs text-text-muted">{unit}</span></span>
       <span className="flex-1 min-w-0 truncate text-text-muted text-xs">{[entry.via === "spark" ? "Spark" : entry.via === "lightning" ? "Lightning" : entry.via === "onchain" ? t("wallet.spark.via.onchain") : t("wallet.spark.via.other"), entry.memo, entry.status !== "completed" ? entry.status : "", entry.fee ? t("wallet.spark.fee", { fee: entry.fee }) : ""].filter(Boolean).join(" · ")}</span>
       <span className="text-text-muted text-xs tabular-nums">{when(entry.at)}</span>
      </li>)}

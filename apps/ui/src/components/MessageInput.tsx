@@ -27,6 +27,7 @@ import { onShareChange, peekShareFor, shareText, takeShareFor } from "../lib/inc
 import { fitFieldHeight } from "./composer/fieldHeight";
 import "./composer/composer.css";
 import { touchOnly } from "../lib/touchOnly";
+import { formatAmount } from "../lib/amount";
 
 interface MessageInputProps {
   draftId?: string;
@@ -318,7 +319,7 @@ export function MessageInput({
     } else if (value.length - text.length > 1) {
       showToast(
         maxLength > DEFAULT_MAX
-          ? t("composer.tooLong", { count: value.length.toLocaleString(), max: maxLength.toLocaleString() })
+          ? t("composer.tooLong", { count: formatAmount(value.length, t.language), max: formatAmount(maxLength, t.language) })
           : t("composer.tooLongDht"),
       );
     }

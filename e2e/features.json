@@ -747,6 +747,7 @@
     "apps/ui/src/hooks/useWakeLock.ts": ["calls.wake-lock"],
     "apps/ui/src/hooks/useWebRTC.ts": ["calls.*"],
     "apps/ui/src/index.css": ["*"],
+    "apps/ui/src/lib/amount.ts": ["app.i18n","wallet.*","payments.*","chats.list.rows"],
     "apps/ui/src/lib/appBadge.ts": ["app.attention.badge"],
     "apps/ui/src/lib/avatarImage.ts": ["profiles.picture","profiles.picture.sanitize","groups.picture.*"],
     "apps/ui/src/lib/brandMotion.ts": ["app.home"],

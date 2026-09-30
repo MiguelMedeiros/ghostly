@@ -4,6 +4,7 @@ import { moreMoneyPreview } from "./parse/money-preview";
 import { englishT, type Translate } from "../locales/translate";
 import { languageTag } from "./documentLanguage";
 import type { Language } from "./settings";
+import { formatAmount } from "./amount";
 
 /** Previews already worked out, by language and message text: the list draws each row again on every change anywhere. */
 const CACHES = new WeakMap<Translate, Map<string, string>>();
@@ -30,7 +31,7 @@ function readPreview(text: string, t: Translate): string {
   if (money.type === "cashu") return t("chat.preview.ecash");
   if (money.type === "onchain" || money.type === "bolt12" || money.type === "ark" || money.type === "usdt") return moreMoneyPreview(money, t);
   if (money.type === "lnurl") return `⚡ ${money.destination.kind === "address" ? t("chat.preview.lightningAddress") : "LNURL"} · ${money.destination.text}`;
-  return money.invoice.amountSat === null ? t("chat.preview.invoice") : t("chat.preview.invoiceSats", { amount: money.invoice.amountSat.toLocaleString() });
+  return money.invoice.amountSat === null ? t("chat.preview.invoice") : t("chat.preview.invoiceSats", { amount: formatAmount(money.invoice.amountSat, t.language) });
 }
 
 /** How long ago, as short as a list's column allows ("now", "5m", "3h", "2d" in English), then the date. */

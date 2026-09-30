@@ -8,6 +8,7 @@ import { Block, Button, Notice, Row, Section } from "./ui";
 import { externalLinkProps } from "../../lib/externalLink";
 import { useI18n, type Translate } from "../../contexts/I18nContext";
 import { fillNodes } from "../../lib/fillNodes";
+import { formatAmount } from "../../lib/amount";
 
 /**
  * Where a Testnet wallet's test coins come from. `ask`: Ghostly asks the faucet itself, on one press (`coin`: what it
@@ -93,7 +94,9 @@ export function TestCoins({ rail, network, wallet, state }: { rail: WalletRail; 
     setAsking(true); setGot(null); setError(null);
     try {
       const result = await wallet.testCoins({ type: rail, network, ...(wallet.lightningCard ? { card: wallet.lightningCard } : {}) });
-      const words = { amount: result.amount.toLocaleString("en-US"), unit: result.unit };
+      // The engine names its unit in English; sats are said in the app's language, a token by its symbol.
+      const unit = result.unit === "test sats" ? t("wallet.sats.testnet") : result.unit === "sats" ? t("wallet.sats.mainnet") : result.unit;
+      const words = { amount: formatAmount(result.amount, t.language), unit };
       setGot(result.pending ? t("wallet.testCoins.gotPending", words) : t("wallet.testCoins.got", words));
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
