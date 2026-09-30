@@ -42,9 +42,30 @@ describe("the service worker keeps one peer", () => {
     fire(world.chrome.runtime.onStartup);
     await settle();
     expect(world.callsTo("offscreen.createDocument")).toHaveLength(1);
-    fire(world.chrome.runtime.onInstalled);
+    fire(world.chrome.runtime.onInstalled, { reason: "update", previousVersion: "1.0.0" });
     await settle();
     expect(world.callsTo("offscreen.createDocument")).toHaveLength(1);
+    // An update opens nothing: the person is somewhere else.
+    expect(world.callsTo("tabs.create")).toEqual([]);
+  });
+
+  it("opens the app in a tab on a first install, once the peer runs", async () => {
+    fire(world.chrome.runtime.onInstalled, { reason: "install" });
+    await settle();
+    expect(world.callsTo("offscreen.createDocument")).toHaveLength(1);
+    expect(world.callsTo("tabs.create")).toEqual([[world.chrome.runtime.getURL("app.html")]]);
+  });
+
+  it("opens the tab on a first install even when the peer does not start, so the page can say why", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout"] });
+    try {
+      world.onCreateDocument = async () => {};
+      fire(world.chrome.runtime.onInstalled, { reason: "install" });
+      await vi.advanceTimersByTimeAsync(100 * 50 + 1000);
+      expect(world.callsTo("tabs.create")).toEqual([[world.chrome.runtime.getURL("app.html")]]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("says so when the peer never answers", async () => {
