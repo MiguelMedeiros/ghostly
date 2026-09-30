@@ -53,6 +53,7 @@
   "color": "颜色",
   "colorLabel": "资料颜色",
   "create": "创建",
+  "defaultName": "个人",
   "delete": {
     "backupFirst": "先下载一份备份",
     "backupPassphrase": "备份密码短语",

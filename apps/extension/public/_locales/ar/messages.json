@@ -1,0 +1,14 @@
+{
+  "appDescription": {
+    "message": "خدماتك موجودة ما دمت متصلًا. دردشة مؤقتة من ند إلى ند معنونة بالهوية، وتطبيقات ويب محلية عبر WebRTC.",
+    "description": "The extension's description in the Chrome Web Store and on chrome://extensions (132 characters at most)."
+  },
+  "appName": {
+    "message": "Ghostly",
+    "description": "The extension's name: the product's name, the same in every language."
+  },
+  "appShortName": {
+    "message": "Ghostly",
+    "description": "The extension's short name (12 characters at most)."
+  }
+}

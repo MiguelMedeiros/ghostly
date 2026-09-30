@@ -49,7 +49,7 @@ export function PaymentReview({review:initial,wallet,onClose,onSent}:{review:Rev
   {review.method==='bitcoin'&&<p className="text-[11px] text-text-muted">{t('payments.review.note.bitcoin')}</p>}
   {review.method==='fedimint'&&<p className="text-[11px] text-text-muted">{t('payments.review.note.fedimint')}</p>}
   {review.method==='cashu'&&<p className="text-[11px] text-text-muted">{t('payments.review.note.cashu')}</p>}
-  {review.error&&<p className="text-xs text-danger">{review.error}</p>}{error&&<p role="alert" className="text-xs text-danger">{error}</p>}
+  {review.error&&<p className="text-xs text-danger">{errorText(review.error,t)}</p>}{error&&<p role="alert" className="text-xs text-danger">{error}</p>}
   {review.state==='pending'&&confirming&&<ConfirmRealMoney what={`${shown} ${unit}`} busy={busy} onSend={approve} onBack={()=>setConfirming(false)}/>}
   <div className="flex gap-2 flex-wrap">{review.state==='pending'?<>{!confirming&&<button className={`${button} !bg-accent !text-on-accent`} data-testid="review-approve" disabled={busy} onClick={()=>real?setConfirming(true):approve()}>{t('payments.review.approve')}</button>}<button className={button} disabled={busy} onClick={()=>void run(()=>wallet.cancelPayment(review.id))}>{t('common.cancel')}</button></>:<>{['submitted','unknown'].includes(review.state)&&<button className={button} disabled={busy} onClick={()=>void run(()=>wallet.reconcilePayment(review.id))}>{t('payments.review.check')}</button>}<button className={button} onClick={onClose}>{t('common.close')}</button></>}</div>
  </section>;

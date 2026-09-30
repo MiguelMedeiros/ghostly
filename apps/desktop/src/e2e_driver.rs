@@ -162,6 +162,29 @@ fn answer<R: Runtime>(app: &AppHandle<R>, request: &Request) -> (u16, String) {
                 Err(_) => (504, error("the script did not answer")),
             }
         }
+        // What a person does to the Ghostly window outside the page, through the app's own handlers
+        // (src/app_window.rs): its close button or Cmd+W (a close request, as `close` sends one), a click on the Dock
+        // icon, a menu item (its id as a JSON string). The app under test never takes the focus, so no key press or
+        // click from the system reaches it.
+        ("POST", "/close") => match app.get_webview_window("main") {
+            Some(window) => match window.close() {
+                Ok(()) => (200, "true".into()),
+                Err(e) => (400, error(&e.to_string())),
+            },
+            None => (404, error("no window main")),
+        },
+        ("POST", "/reopen") => {
+            crate::app_window::show_main(app);
+            (200, "true".into())
+        }
+        ("POST", "/menu") => {
+            let id: String = match serde_json::from_slice(&request.body) {
+                Ok(id) => id,
+                Err(e) => return (400, error(&e.to_string())),
+            };
+            let handled = crate::app_window::on_menu_event(app, &id);
+            (200, handled.to_string())
+        }
         _ => (404, error("no such route")),
     }
 }

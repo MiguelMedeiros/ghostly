@@ -116,6 +116,23 @@ export class MacDriver implements DesktopApp {
   }
 
   /**
+   * What the Ghostly window's close button (or Cmd+W), a click on the Dock icon and an app menu item do, through the
+   * app's own handlers (apps/desktop/src/app_window.rs): the app under test never takes the focus, so no real key
+   * press or click reaches it. `menu` answers whether the item was one of the page's commands.
+   */
+  async close(): Promise<void> {
+    await this.request("POST", "/close", {});
+  }
+
+  async reopen(): Promise<void> {
+    await this.request("POST", "/reopen", {});
+  }
+
+  async menu(id: string): Promise<boolean> {
+    return (await this.request("POST", "/menu", id)) as boolean;
+  }
+
+  /**
    * Every link the app handed to the system so far, in order, exactly as `open` would have received it. The app under
    * the driver writes them down instead of opening them (`launch` in apps/desktop/src/commands.rs), so no browser starts.
    */

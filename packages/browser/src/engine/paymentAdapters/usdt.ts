@@ -1,7 +1,7 @@
 import { mnemonicToSeedSync } from '@scure/bip39';
 import WalletManagerEvm, { type WalletAccountEvm } from '@tetherto/wdk-wallet-evm';
 import { Interface, Transaction, getAddress, keccak256 } from 'ethers';
-import { ETHEREUM_USDT, EVM_TEST_CHAINS, USDT_PUBLIC_RPC, SEPOLIA_TEST_USDT, SEPOLIA_TEST_USDT_FAUCET, TEST_USDT_FAUCET_AMOUNT, PaymentPreflightError, validatePaymentTarget, type PaymentAdapter, type PaymentExecution, type PaymentReview, type PaymentTarget } from '@ghostly/core';
+import { ETHEREUM_USDT, EVM_TEST_CHAINS, USDT_PUBLIC_RPC, SEPOLIA_TEST_USDT, SEPOLIA_TEST_USDT_FAUCET, TEST_USDT_FAUCET_AMOUNT, PaymentPreflightError, engineError, validatePaymentTarget, type PaymentAdapter, type PaymentExecution, type PaymentReview, type PaymentTarget } from '@ghostly/core';
 import { sealSeed, unsealSeed, type EncryptedSeed } from './persistence';
 import { networkReason, rpcHost } from './networkReason';
 
@@ -73,7 +73,7 @@ export class UsdtAdapter implements PaymentAdapter<UsdtPrepared> {
     // The browser's words for a request that got no answer ("Fetch is aborted") say nothing: the RPC's host does.
     try { response = await fetch(this.config.provider, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({jsonrpc:'2.0',id:++this.nextId,method,params}), signal:AbortSignal.timeout(15000)}); }
     catch (error) { const reason = networkReason(error, rpcHost(this.config.provider)); throw reason ? Object.assign(new Error(reason), {cause: error}) : error; }
-    if (!response.ok) throw new Error('USDT RPC unavailable');
+    if (!response.ok) throw engineError('usdtRpcUnavailable');
     const result = await response.json();
     if (result.error || !Object.prototype.hasOwnProperty.call(result, 'result')) throw new Error('USDT RPC rejected the operation');
     return result.result as T;
@@ -101,7 +101,7 @@ export class UsdtAdapter implements PaymentAdapter<UsdtPrepared> {
     if (!block.baseFeePerGas) throw new Error('This wallet requires an EIP-1559 chain');
     const priority = BigInt(await this.rpc<string>('eth_maxPriorityFeePerGas'));
     const maxFeePerGas = BigInt(block.baseFeePerGas) * 2n + priority, gasLimit = (estimate * 120n + 99n) / 100n;
-    if (BigInt((await this.balances()).gasBalance) < gasLimit * maxFeePerGas) throw new Error('This needs a little Sepolia ETH for gas first');
+    if (BigInt((await this.balances()).gasBalance) < gasLimit * maxFeePerGas) throw engineError('usdtNeedsSepoliaGas');
     const raw = await account.signTransaction({ type: 2, to: SEPOLIA_TEST_USDT_FAUCET, data, value: 0n, chainId: this.config.chainId, nonce, gasLimit, maxFeePerGas, maxPriorityFeePerGas: priority });
     await account.sendTransaction(raw);
     return Transaction.from(raw).hash!;
@@ -129,7 +129,7 @@ export class UsdtAdapter implements PaymentAdapter<UsdtPrepared> {
     const from = await this.address(), to = this.config.token;
     if (same(target.address, from) || same(target.address, to)) throw new Error('Choose a different recipient address');
     const {balance,gasBalance} = await this.balances();
-    if (BigInt(balance) < BigInt(amount)) throw new Error('Insufficient token balance');
+    if (BigInt(balance) < BigInt(amount)) throw engineError('usdtNotEnoughTokens');
     const data = erc20.encodeFunctionData('transfer', [getAddress(target.address),BigInt(amount)]);
     const nonce = Number(BigInt(await this.rpc<string>('eth_getTransactionCount',[from,'pending'])));
     if (!Number.isSafeInteger(nonce)) throw new Error('Invalid account nonce');
@@ -140,8 +140,8 @@ export class UsdtAdapter implements PaymentAdapter<UsdtPrepared> {
     const maxFee = BigInt(block.baseFeePerGas)*2n + priority;
     const gasLimit = (estimate*120n+99n)/100n;
     const maximum = gasLimit*maxFee;
-    if (maximum > BigInt(feeCap) || maximum > BigInt(Number.MAX_SAFE_INTEGER)) throw new Error('Estimated maximum gas exceeds your limit');
-    if (BigInt(gasBalance) < maximum) throw new Error('Insufficient ETH for gas');
+    if (maximum > BigInt(feeCap) || maximum > BigInt(Number.MAX_SAFE_INTEGER)) throw engineError('usdtGasAboveLimit');
+    if (BigInt(gasBalance) < maximum) throw engineError('usdtNotEnoughGas');
     const prepared:UsdtPrepared = {from,to,data,value:'0',chainId:this.config.chainId,nonce,gasLimit:gasLimit.toString(),maxFeePerGas:maxFee.toString(),maxPriorityFeePerGas:priority.toString()};
     return {fee:Number(maximum),prepared,evm:{from,nonce,gasLimit:prepared.gasLimit,maxFeePerGas:prepared.maxFeePerGas,maxPriorityFeePerGas:prepared.maxPriorityFeePerGas,confirmations:CONFIRMATIONS}};
   }); }

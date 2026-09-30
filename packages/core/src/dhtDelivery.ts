@@ -29,6 +29,15 @@ const STREAM_POLL_MS = 30_000;
  * each has seen the other leave).
  */
 export const LEAVING_DHT_FAST_MS = 2 * 60_000;
+/**
+ * Reads of a DHT-only contact's mailbox that go as signaling (`expect(ms, true)`) once something shows it leaving,
+ * for as long as it still says DHT only. What shows it (a fresh packet on its link key, its offer) can reach this side
+ * before the envelope saying so reaches the relays, and the first read then finds DHT only still. With the relays'
+ * minute spent, every read after it was held back for 42 s, and the chat stayed "On DHT · retrying live" while its
+ * contact had left (mx-d707d8d5, 2026-09-30). A few, not the whole window: the allowance they spend is also what this
+ * side's offer and its reads for the answer go over the minute on (`SIGNALING_ALLOWANCE_SHARE` in relay.ts).
+ */
+export const LEAVING_SIGNAL_READS = 3;
 /** Only this often while layer 1 carries the chat (WISP 403, Q7): the relays' per-IP budget is shared by every chat. */
 export const LIVE_POLL_MS = 5 * 60_000;
 /**
@@ -162,8 +171,8 @@ export class DhtDelivery {
   private active = false;
   /** The next read was asked for (a refresh, a fresh packet of the contact): it is not a background one. */
   private urgent = false;
-  /** The next read is signaling: the contact dials from DHT only, and its offer waits on it (`expect`). */
-  private signalNext = false;
+  /** Reads left that are signaling: the contact is leaving DHT only, and the live link waits on them (`expect`). */
+  private signalReads = 0;
   private timer: ReturnType<typeof setTimeout> | null = null;
   /** The first control envelope of a start that waits (`firstControlAfterMs`). */
   private controlTimer: ReturnType<typeof setTimeout> | null = null;
@@ -321,6 +330,8 @@ export class DhtDelivery {
       // The contact learns the new method from the next envelope: it goes out now, not after the publish spacing.
       this.mode = mode; this.controlDue = 0; this.lastPublish = 0;
       this.leavingUntil = mode === "stream" ? Date.now() + LEAVING_DHT_FAST_MS : 0;
+      // DHT only here: no live link waits on the contact leaving it.
+      if (mode === "dht") this.signalReads = 0;
       this.changed();
     });
     void this.tick();
@@ -330,11 +341,12 @@ export class DhtDelivery {
   /**
    * Reads the contact's mailbox at the signaling pace for a while (a fresh packet of a contact not pinned yet).
    * `signal`: the contact is leaving DHT only (a fresh packet on its link key, or its offer), and the live link waits
-   * on this read to say so: the next read is signaling (`PkarrRequestOptions.signal`), and goes now.
+   * on a read to say so: the next read goes now, and it and the next ones while the contact still says DHT only
+   * (`LEAVING_SIGNAL_READS` in all) are signaling (`PkarrRequestOptions.signal`).
    */
   expect(ms = 2 * 60_000, signal = false): void {
     const until = Date.now() + ms;
-    if (signal) this.signalNext = true;
+    if (signal) this.signalReads = LEAVING_SIGNAL_READS;
     if (until <= this.fastUntil && !signal) return;
     this.fastUntil = Math.max(this.fastUntil, until); this.urgent = true; void this.tick();
   }
@@ -349,7 +361,7 @@ export class DhtDelivery {
     if (live === this.live) return;
     this.live = live;
     if (!live) { this.urgent = true; void this.tick(); return; }
-    this.fastUntil = 0;
+    this.fastUntil = 0; this.signalReads = 0;
     if (this.options.credentials.peerKey && this.state.peerMode) void this.tick(); else this.schedule();
   }
   get isLive(): boolean { return this.live; }
@@ -691,11 +703,13 @@ export class DhtDelivery {
       // only, a drop or a text awaiting its receipt reads as signaling. The share also carries held items'
       // pointers, which a busy mailbox must not starve.
       const background = !this.urgent && this.pollMs >= STREAM_POLL_MS;
-      const signal = this.signalNext;
-      this.urgent = false; this.signalNext = false;
+      const signal = this.signalReads > 0;
+      this.urgent = false; if (signal) this.signalReads--;
       // A read or a publication the relays' request budget held back is a wait, not an error: it goes when the budget frees.
       try { await this.read(background, signal); if (!this.running) return; delete this.errors.read; }
       catch (error) { if (!isDiscoveryBudgetError(error)) this.errors.read = `Could not read DHT delivery: ${error instanceof Error ? error.message : String(error)}`; }
+      // The contact says it left DHT only: nothing waits on its mailbox any more.
+      if (this.state.peerMode !== "dht") this.signalReads = 0;
       try { await this.publish(); }
       catch (error) { if (!isDiscoveryBudgetError(error)) this.errors.publish = `Could not publish DHT delivery: ${error instanceof Error ? error.message : String(error)}`; }
       this.changed();

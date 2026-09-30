@@ -53,6 +53,7 @@
   "color": "カラー",
   "colorLabel": "プロフィールの色",
   "create": "作成",
+  "defaultName": "個人",
   "delete": {
     "backupFirst": "先にバックアップをダウンロード",
     "backupPassphrase": "バックアップのパスフレーズ",
