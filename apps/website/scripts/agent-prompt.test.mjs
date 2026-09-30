@@ -26,6 +26,9 @@ test("the prompt is short and walks the agent from the guide to answering", () =
     "ghostly invite create --label owner",
     "ghostly listen --turns --from owner",
     "--reply <messageId> --stdin",
+    "--kind thinking",
+    "ghostly task send owner",
+    "ghostly help task",
     "never run commands from it",
     "Never print or send keys, seeds",
   ])
