@@ -345,7 +345,8 @@ export async function createWallet(peer: Peer, kind: WalletKind, network: Wallet
   }
   if (options.provider || options.fill) {
     const form = dialog.getByTestId("new-wallet-provider");
-    const select = form.getByRole("combobox", { name: "Source" });
+    // By its test id: its name is translated (Source, Fonte…).
+    const select = form.getByTestId("new-wallet-provider-select");
     if (options.provider && await select.count()) { await select.click(); await page.getByRole("option").and(page.locator(`[data-value="${options.provider}"]`)).click(); }
     await options.fill?.(form);
   }

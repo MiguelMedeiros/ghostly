@@ -41,8 +41,20 @@ export async function ready() {
       await retry("opening Alice's channel", () => lncli("alice", "openchannel", "--node_key", bob, "--local_amt", "1000000", "--push_amt", "500000"), { before: bothSynced });
     }
     mine(6);
-    await until("the channel", () => lncli("alice", "listchannels").channels.some((c) => c.remote_pubkey === bob && c.active)
-      && lncli("bob", "listchannels").channels.some((c) => c.active));
+    // A funding transaction that reached the chain's mempool after those blocks confirms only with more of them: one
+    // every 5 s while the channel is not up (twice CI's seeding stalled here for 60 s, run 36669195336).
+    let polls = 0;
+    await until("the channel", () => {
+      const up = lncli("alice", "listchannels").channels.some((c) => c.remote_pubkey === bob && c.active)
+        && lncli("bob", "listchannels").channels.some((c) => c.active);
+      if (!up && ++polls % 5 === 0) mine(1);
+      return up;
+    }).catch((error) => {
+      // What the nodes saw, for the next time: channels pending, and whether each is synced.
+      const pending = lncli("alice", "pendingchannels").pending_open_channels.length;
+      const synced = ["alice", "bob"].map((node) => `${node} synced: ${lncli(node, "getinfo").synced_to_chain}`).join(", ");
+      throw new Error(`${error.message} (Alice has ${pending} pending, ${synced})`);
+    });
     // Both sides need to see the channel in their graph before they route over it.
     mine(1);
   }
