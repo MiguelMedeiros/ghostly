@@ -14,6 +14,8 @@ import { LeaveGroupDialog } from "../components/LeaveGroupDialog";
 import { GroupShareDialog } from "../components/GroupLinkPanel";
 import { GroupConnection } from "../components/GroupConnection";
 import { TasksButton } from "../components/chat/TasksButton";
+import { RoutineStack } from "../components/chat/RoutineCard";
+import { routineStacks } from "../lib/statusCards";
 import { GroupPaymentComposer } from "../components/GroupPaymentComposer";
 import { GroupPaymentCaption, GroupPaymentNote } from "../components/GroupPaymentNote";
 import { Menu, MenuItem, MenuSeparator } from "../components/Menu";
@@ -32,7 +34,7 @@ import { useGroupTypingSender } from "../hooks/useTyping";
 import { GroupTypingText, type GroupTyper } from "../components/TypingIndicator";
 import { navOnly } from "../lib/navigation";
 import { mentionViews, type MentionCandidate } from "../lib/parse/mentions";
-import { COMMUNITY_LIMITS, GROUP_LIMITS, mayPin, replySnippet, type GroupMention } from "@ghostly/core";
+import { COMMUNITY_LIMITS, GROUP_LIMITS, mayPin, replySnippet, type GroupMention, type RoutineCard } from "@ghostly/core";
 import { quoteFor, replyIndex, replyTarget, type NameOf, type QuoteView } from "../lib/replies";
 import { useForwarding } from "../hooks/useForwarding";
 import { useChatSearch } from "../hooks/useChatSearch";
@@ -306,6 +308,20 @@ export function GroupChat() {
   const ownNotes = new Set(messages.filter(m => m.paymentId && !m.groupPay && (captionOf(state, notes, m, group.myKey) || state.payments[m.paymentId]?.requestId))
     .map(m => noteIdOf(state, m.paymentId!)));
   const peerOf = (paymentId: string) => { const linkId = state.payments[paymentId]?.linkId; return state.edges?.find(l => l.id === linkId)?.peerPubKeyZ32 ?? ""; };
+  // A row of the timeline: an event, a payment's note, or a message.
+  const row = (m: StoredMessage) => m.event
+    ? <div key={m.id} data-testid="group-event" className="flex justify-center mb-3.5 px-6"><span className="rounded-lg bg-surface-alt/90 px-3 py-1.5 text-center text-[11px] text-text-muted">{eventText(m, group, t)}</span></div>
+    // A note about a payment this device is part of is shown under its own bubble instead.
+    : m.groupPay ? (ownNotes.has(m.groupPay.id) ? null : <GroupPaymentNote key={m.id} note={m.groupPay} group={group} />)
+    : m.paymentId ? <div key={m.id} data-testid="group-payment">
+      <MessageBubble message={shownOf(m)} peerAck={Number.MAX_SAFE_INTEGER} peerPubKey={peerOf(m.paymentId)} linkId={`group:${groupId}`} {...forwarding.rowProps(shownOf(m))} />
+      {(() => { const note = captionOf(state, notes, m, group.myKey); return note && <GroupPaymentCaption note={note} group={group} />; })()}
+    </div>
+    : <MessageBubble key={m.id} message={shownOf(m)} peerAck={Number.MAX_SAFE_INTEGER} linkId={`group:${groupId}`} {...forwarding.rowProps(shownOf(m))} highlight={search.highlight(m.id)}
+      onReply={replyTarget(m, true) ? () => { setEditing(null); setReplyingTo(m); } : undefined} quote={quoteOf(m)}
+      onEdit={canEditInGroup(m) && !m.card && group.canSend ? () => { setReplyingTo(null); setEditing(m); } : undefined}
+      onReact={replyTarget(m, true) && group.canSend ? emoji => react(m.id, emoji) : undefined} reactionName={reactionName}
+      onPin={canPin && replyTarget(m, true) ? () => pinMessage(m.id, replyTarget(m, true) === group.pin?.id) : undefined} pinned={!!group.pin && replyTarget(m, true) === group.pin.id} />;
   const joiningByLink = group.invitation?.viaLink;
   const stage: GroupJoinStage = group.invitation?.stage ?? (group.invitation?.admin ? "admitted" : "knocked");
   const joining = joiningText(stage, group.name, group.profile === "community", t);
@@ -422,19 +438,19 @@ export function GroupChat() {
       <div ref={jump.listRef} data-message-list className="flex-1 overflow-y-auto [overflow-anchor:none] chat-wallpaper">
         {/* A bubble arriving slides in from its side: clipped here, it never makes the list scroll sideways (a scrollbar, and a jump). */}
         <div ref={jump.columnRef} className="max-w-3xl mx-auto py-3 overflow-x-clip">
-          {messages.slice(firstRow).map(m => m.event
-            ? <div key={m.id} data-testid="group-event" className="flex justify-center mb-3.5 px-6"><span className="rounded-lg bg-surface-alt/90 px-3 py-1.5 text-center text-[11px] text-text-muted">{eventText(m, group, t)}</span></div>
-            // A note about a payment this device is part of is shown under its own bubble instead.
-            : m.groupPay ? (ownNotes.has(m.groupPay.id) ? null : <GroupPaymentNote key={m.id} note={m.groupPay} group={group} />)
-            : m.paymentId ? <div key={m.id} data-testid="group-payment">
-              <MessageBubble message={shownOf(m)} peerAck={Number.MAX_SAFE_INTEGER} peerPubKey={peerOf(m.paymentId)} linkId={`group:${groupId}`} {...forwarding.rowProps(shownOf(m))} />
-              {(() => { const note = captionOf(state, notes, m, group.myKey); return note && <GroupPaymentCaption note={note} group={group} />; })()}
-            </div>
-            : <MessageBubble key={m.id} message={shownOf(m)} peerAck={Number.MAX_SAFE_INTEGER} linkId={`group:${groupId}`} {...forwarding.rowProps(shownOf(m))} highlight={search.highlight(m.id)}
-              onReply={replyTarget(m, true) ? () => { setEditing(null); setReplyingTo(m); } : undefined} quote={quoteOf(m)}
-              onEdit={canEditInGroup(m) && !m.card && group.canSend ? () => { setReplyingTo(null); setEditing(m); } : undefined}
-              onReact={replyTarget(m, true) && group.canSend ? emoji => react(m.id, emoji) : undefined} reactionName={reactionName}
-              onPin={canPin && replyTarget(m, true) ? () => pinMessage(m.id, replyTarget(m, true) === group.pin?.id) : undefined} pinned={!!group.pin && replyTarget(m, true) === group.pin.id} />)}
+          {(() => {
+            const drawn = messages.slice(firstRow);
+            // A bot's routines in a row: one row, opened on a tap (WISP 4xx · Status Cards).
+            const stacks = routineStacks(drawn, m => m);
+            const stacked = new Set([...stacks.values()].flatMap(run => run.slice(1).map(m => m.id)));
+            return drawn.map(m => {
+              if (stacked.has(m.id)) return null;
+              const run = stacks.get(m.id);
+              if (!run) return row(m);
+              return <RoutineStack key={`stack:${m.id}`} name={m.sender === "me" ? undefined : nameOf("peer", m.member) ?? undefined} mine={m.sender === "me"}
+                cards={run.map(r => r.card as RoutineCard)}>{run.map(row)}</RoutineStack>;
+            });
+          })()}
         </div>
       </div>
       <JumpToLatest count={jump.count} far={jump.far} onJump={jump.toNew} />

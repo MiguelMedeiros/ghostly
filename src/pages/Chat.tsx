@@ -32,7 +32,7 @@ import { useSettings } from "../contexts/SettingsContext";
 import { MessageBubble } from "../components/MessageBubble";
 import { MessageInput } from "../components/MessageInput";
 import { quoteFor, replyIndex, replyTarget, sentReply, type NameOf } from "../lib/replies";
-import { replySnippet } from "@ghostly/core";
+import { replySnippet, type RoutineCard } from "@ghostly/core";
 import { composerServices } from "../components/composer/servicesRow";
 import { CallButtons } from "../components/CallButtons";
 import { CallOverlay } from "../components/CallOverlay";
@@ -77,6 +77,8 @@ import { useChatSearch } from "../hooks/useChatSearch";
 import { ChatSearchBar, SearchIcon } from "../components/chat/ChatSearch";
 import { PinnedBar } from "../components/chat/PinnedBar";
 import { TasksButton } from "../components/chat/TasksButton";
+import { RoutineStack } from "../components/chat/RoutineCard";
+import { routineStacks } from "../lib/statusCards";
 
 /** What a call captures from: the devices the profile chose, read when it asks. */
 const callDevicePreferences = () => ({ audio: preferredDevice("audioinput"), video: preferredDevice("videoinput") });
@@ -733,36 +735,51 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
               </div>
             </div>
           )}
-          {timeline.slice(firstRow).map((row) => row.kind === "transport"
-            ? <TransportLine key={`transport:${row.entry.id}`} entry={row.entry} earlier={row.earlier} contact={shownName} />
-            : row.kind === "identity"
-            ? <IdentityShareLine key={`identity:${row.entry.id}`} entry={row.entry} link={chatLink} contact={shownName}
-              onOpen={e => {
-                // Theirs: the contact's panel on that card. Mine: the composer's picker on it, where mine are shared.
-                if (e.side === "mine") { setShowIdentities(false); setMyIdentity({ id: e.proof, at: Date.now() }); return; }
-                setIdentityCard({ side: e.side, id: e.proof }); setShowIdentities(true);
-              }} />
-            : (
-            <MessageBubble
-              key={row.message.id}
-              message={row.message}
-              peerAck={peerAck}
-              peerPubKey={params.peerPubKeyB64}
-              peerNick={contactNick}
-              onDelete={() => forgetMessage(row.message.id)}
-              // Only a paired chat carries replies; a compatibility chat's contact would see the text alone.
-              onReply={paired && replyTarget(row.message) ? () => { setEditing(null); setReplyingTo(row.message); } : undefined}
-              onEdit={paired && chatLink && editableText(row.message) ? () => { setReplyingTo(null); setEditing(row.message); } : undefined}
-              quote={paired && row.message.replyTo ? quoteFor(row.message.replyTo, quoteIndex, nameOf) : undefined}
-              // The same: a compatibility chat has no room for a reaction.
-              onReact={paired && replyTarget(row.message) ? emoji => react(row.message.id, emoji) : undefined}
-              onPin={paired && replyTarget(row.message) ? () => pinMessage(row.message.id, replyTarget(row.message) === pin?.id) : undefined}
-              pinned={!!pin && replyTarget(row.message) === pin.id}
-              reactionName={reactionName}
-              highlight={search.highlight(row.message.id)}
-              {...forwarding.rowProps(row.message)}
-            />
-          ))}
+          {(() => {
+            const drawn = timeline.slice(firstRow);
+            // A bot's routines in a row: one row, opened on a tap (WISP 4xx · Status Cards).
+            const stacks = routineStacks(drawn, r => r.kind === "message" ? r.message : undefined);
+            const stacked = new Set([...stacks.values()].flatMap(run => run.slice(1).map(m => m.id)));
+            const draw = (row: (typeof drawn)[number]) => row.kind === "transport"
+              ? <TransportLine key={`transport:${row.entry.id}`} entry={row.entry} earlier={row.earlier} contact={shownName} />
+              : row.kind === "identity"
+              ? <IdentityShareLine key={`identity:${row.entry.id}`} entry={row.entry} link={chatLink} contact={shownName}
+                onOpen={e => {
+                  // Theirs: the contact's panel on that card. Mine: the composer's picker on it, where mine are shared.
+                  if (e.side === "mine") { setShowIdentities(false); setMyIdentity({ id: e.proof, at: Date.now() }); return; }
+                  setIdentityCard({ side: e.side, id: e.proof }); setShowIdentities(true);
+                }} />
+              : (
+              <MessageBubble
+                key={row.message.id}
+                message={row.message}
+                peerAck={peerAck}
+                peerPubKey={params.peerPubKeyB64}
+                peerNick={contactNick}
+                onDelete={() => forgetMessage(row.message.id)}
+                // Only a paired chat carries replies; a compatibility chat's contact would see the text alone.
+                onReply={paired && replyTarget(row.message) ? () => { setEditing(null); setReplyingTo(row.message); } : undefined}
+                onEdit={paired && chatLink && editableText(row.message) ? () => { setReplyingTo(null); setEditing(row.message); } : undefined}
+                quote={paired && row.message.replyTo ? quoteFor(row.message.replyTo, quoteIndex, nameOf) : undefined}
+                // The same: a compatibility chat has no room for a reaction.
+                onReact={paired && replyTarget(row.message) ? emoji => react(row.message.id, emoji) : undefined}
+                onPin={paired && replyTarget(row.message) ? () => pinMessage(row.message.id, replyTarget(row.message) === pin?.id) : undefined}
+                pinned={!!pin && replyTarget(row.message) === pin.id}
+                reactionName={reactionName}
+                highlight={search.highlight(row.message.id)}
+                {...forwarding.rowProps(row.message)}
+              />
+            );
+            return drawn.map(row => {
+              if (row.kind !== "message") return draw(row);
+              if (stacked.has(row.message.id)) return null;
+              const run = stacks.get(row.message.id);
+              if (!run) return draw(row);
+              return <RoutineStack key={`stack:${row.message.id}`} mine={row.message.sender === "me"} cards={run.map(m => m.card as RoutineCard)}>
+                {run.map(message => draw({ kind: "message", message }))}
+              </RoutineStack>;
+            });
+          })()}
         </div>
       </div>
       <JumpToLatest count={jump.count} far={jump.far} onJump={jump.toNew} />
