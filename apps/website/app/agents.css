@@ -152,6 +152,9 @@
   font-size: 14.5px;
   line-height: 1.5;
 }
+.ag-word {
+  white-space: nowrap;
+}
 .ag-show code {
   color: var(--cyan);
   font-size: 12.5px;

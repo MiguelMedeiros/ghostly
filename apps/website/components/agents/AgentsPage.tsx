@@ -7,6 +7,7 @@ import { NEXT_VERSION } from "@/lib/status";
 import { CopyPrompt, CopyPromptButton } from "./CopyPrompt";
 import { AgentDemo } from "./AgentDemo";
 import { AgentSteps } from "./AgentSteps";
+import { Cmd } from "./Cmd";
 import { agents, scope, CONNECT, LINKS, PROMPT, SHOWS, STEPS, TURN } from "@/content/agents";
 import "@/app/cli.css";
 import "@/app/agents.css";
@@ -69,7 +70,9 @@ export function AgentsPage() {
             <Reveal as="li" key={s.id} className="ag-show">
               <h3 className="ag-h3">{s.title}</h3>
               <p className="muted">{s.body}</p>
-              <code className="mono">{s.cmd}</code>
+              <code className="mono">
+                <Cmd text={s.cmd} />
+              </code>
             </Reveal>
           ))}
         </ul>
@@ -98,7 +101,9 @@ export function AgentsPage() {
                 {step.cmds.map((cmd) => (
                   <div key={cmd} className="cl-line">
                     <pre>
-                      <code>{cmd}</code>
+                      <code>
+                        <Cmd text={cmd} />
+                      </code>
                     </pre>
                     <CopyButton text={cmd} label={t.connect.copy} done={t.connect.copied} />
                   </div>
