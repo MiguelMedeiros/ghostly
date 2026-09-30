@@ -15,9 +15,9 @@ import { REAL_MINT, everyWallet, lightningSource, mint, reviewContext, usdtReady
  * card explains itself.
  */
 
-function open(wallet: Partial<WalletView>) {
+function open(wallet: Partial<WalletView>, sendUnavailable?: string) {
   fakeEngine.setState({ links: [linkView()], wallet });
-  return renderApp(<PaymentComposer balance={1_000} onSend={async () => null} onRequest={async () => null} onClose={() => {}} reviewContext={reviewContext()} contact="Alice" />);
+  return renderApp(<PaymentComposer balance={1_000} onSend={async () => null} onRequest={async () => null} onClose={() => {}} reviewContext={reviewContext()} contact="Alice" sendUnavailable={sendUnavailable} />);
 }
 
 /** A wallet the profile has, as the engine lists it, for one the flat fields would not make (nothing set up yet). */
@@ -49,9 +49,12 @@ describe("a Lightning card with its own source", () => {
     await user.type(screen.getByTestId("payment-amount"), "100");
     expect(screen.queryByText(/^More than/)).not.toBeInTheDocument();
     expect(screen.getByTestId("payment-request")).toBeEnabled();
+    // Lightning in a chat can only Request, and a request spends nothing: no amount is more than the card holds.
     await user.clear(screen.getByTestId("payment-amount"));
     await user.type(screen.getByTestId("payment-amount"), "6000");
-    expect(screen.getByText("More than the 5,000 sats on this card.")).toBeInTheDocument();
+    expect(screen.queryByText(/^More than/)).not.toBeInTheDocument();
+    expect(document.querySelector(".payment-back-hint")).not.toHaveTextContent(/More than/);
+    expect(screen.getByTestId("payment-request")).toBeEnabled();
   });
 
   // Ready, but its source has not said what it holds: no number to compare with. (One reconnecting or failing is not
@@ -62,6 +65,50 @@ describe("a Lightning card with its own source", () => {
     expect(screen.getByTestId("payment-back")).toHaveClass("wallet-card-lightning");
     await user.type(screen.getByTestId("payment-amount"), "100");
     expect(screen.queryByText(/^More than/)).not.toBeInTheDocument();
+    expect(screen.getByTestId("payment-request")).toBeEnabled();
+  });
+});
+
+// "More than the X on this card" is about Send, which spends from the card. A Request spends nothing, so it said
+// "More than the 1,000 sats" on a Lightning card (which can only Request in a chat) asked for 2,000. Every rail that
+// can Send warns and keeps Send off; Request stays on, and where Request is all there is, nothing warns.
+describe("the over-balance hint", () => {
+  const fed = { federations: [{ id: "ab".repeat(32), name: "Fed", guardians: [], consensusVersion: "2.1", network: "regtest" as const, modules: [], joinedAt: 1, invite: "fed11qq", balance: 2_000, status: "ready" as const, lightning: true }], balance: 2_000, history: [] };
+  const over = async (id: string, typed: string, wallet: Partial<WalletView> = {}, sendUnavailable?: string) => {
+    rememberRail("peer", id);
+    const { user } = open(everyWallet({ fedimint: fed, ...wallet }), sendUnavailable);
+    await user.click(screen.getByTestId("payment-use"));
+    expect(screen.getByTestId("payment-back")).toHaveClass(`wallet-card-${id.split(":")[0]}`);
+    await user.type(screen.getByTestId("payment-amount"), typed);
+  };
+
+  it.each([
+    ["cashu:mainnet", "1500", "More than the 1,000 sats on this card."],
+    ["arkade:testnet", "6000", "More than the 5,000 test sats on this card."],
+    ["bark:testnet", "4000", "More than the 3,000 test sats on this card."],
+    ["spark:testnet", "5000", "More than the 4,000 test sats on this card."],
+    ["bitcoin:mainnet", "20000", "More than the 10,000 sats on this card."],
+    ["fedimint:testnet", "3000", "More than the 2,000 test sats on this card."],
+    ["usdt:testnet", "6", "More than the 5 TEST-USDT on this card."],
+  ])("%s, which can Send, warns past its balance and keeps only Request on", async (id, typed, hint) => {
+    await over(id, typed);
+    expect(screen.getByText(hint)).toBeInTheDocument();
+    expect(screen.getByTestId("payment-amount").closest("label")).toHaveAttribute("data-over", "true");
+    expect(screen.getByTestId("payment-send")).toBeDisabled();
+    expect(screen.getByTestId("payment-request")).toBeEnabled();
+  });
+
+  it("says nothing of the balance on Lightning through the Cashu mints, which can only Request", async () => {
+    await over("lightning:mainnet", "2000");
+    expect(screen.queryByText(/^More than/)).not.toBeInTheDocument();
+    expect(screen.getByTestId("payment-amount").closest("label")).not.toHaveAttribute("data-over");
+    expect(screen.getByTestId("payment-request")).toBeEnabled();
+  });
+
+  it("says nothing of the balance on a request to a group, which has no Send", async () => {
+    await over("cashu:mainnet", "1500", {}, "A request to the group is paid by one member");
+    expect(screen.queryByText(/^More than/)).not.toBeInTheDocument();
+    expect(screen.getByTestId("payment-send")).toBeDisabled();
     expect(screen.getByTestId("payment-request")).toBeEnabled();
   });
 });
