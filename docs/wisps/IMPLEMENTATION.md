@@ -222,7 +222,7 @@ These are separate questions: **implemented** means a code path exists; **availa
 | CLI | Separate Rust text client | Not an extension capability | Invokable CLI | No implied WebRTC/media/file support from sharing record format |
 | Iroh/HyperDHT/proofs/groups | Proposed | Proposed | Proposed | Availability and interoperability unproven |
 
-Sources: [host contract](../../packages/browser/src/host.ts), [web host](../../web/src/host.ts), [desktop host](../../src/desktop/host.ts), [extension source](../../extension/src), [web constraints](../WEB.md), [CLI](../CLI.md). Older release-specific prose in BROWSER.md is not evidence that the current native checkout ignores services; inspect the injected current engine/host wiring.
+Sources: [host contract](../../packages/browser/src/host.ts), [web host](../../apps/web/src/host.ts), [desktop host](../../src/desktop/host.ts), [extension source](../../apps/extension/src), [web constraints](../WEB.md), [CLI](../CLI.md). Older release-specific prose in BROWSER.md is not evidence that the current native checkout ignores services; inspect the injected current engine/host wiring.
 
 ## Implementation sequence
 

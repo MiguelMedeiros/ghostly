@@ -4,7 +4,7 @@ import type { AtprotoHost } from "@ghostly/browser/proofs/atproto/oauth";
 /**
  * Signing in to an AT Protocol server from the desktop app, the native-client way: the server's page
  * opens in the system browser and redirects straight to a one-shot listener on 127.0.0.1 (the same
- * one OpenID Connect uses, src-tauri/src/oidc.rs). Loopback redirects are registered without a port,
+ * one OpenID Connect uses, apps/desktop/src/oidc.rs). Loopback redirects are registered without a port,
  * so any free port matches. The flow names the state it waits for (PAR keeps it off the address).
  * The DPoP key and tokens stay in this WebView and are never logged.
  */

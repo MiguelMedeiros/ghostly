@@ -114,7 +114,7 @@ A client MUST publish a profile's DID only under that profile's DID key, never u
 
 - The specification's official vectors 1 to 3 (`decentralized-identity/did-dht` commit `3fa9536`), both ways, plus strict-parsing refusals and resolution: `packages/core/test/didDht.test.ts`.
 - Interoperability with `@web5/dids` 1.2.0 both ways (Ghostly publishes and web5 resolves; web5 publishes and Ghostly resolves), through a relay in the test process and, with `GHOSTLY_PKARR_RELAY`, the `pkarr-relay` 2.0.2 binary: `packages/browser/test/didDhtInterop.test.ts`.
-- Desktop publishes a packet the TypeScript peer signed, byte for byte: `src-tauri/src/commands.rs`.
+- Desktop publishes a packet the TypeScript peer signed, byte for byte: `apps/desktop/src/commands.rs`.
 - Engine (key, publish, hourly refresh, listing, removal, expiry, offline, failure): `packages/browser/test/profileDid.test.ts`; UI: `src/test/identities/publicDid.test.tsx`; end to end, the web app publishes and `@web5/dids` resolves the key alone, then a listed Nostr identity, then without it: `e2e/web/did-dht.spec.ts`.
 
 ## Open decisions

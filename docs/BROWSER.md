@@ -12,7 +12,7 @@ npm run build:extension
 ```
 
 1. Open `chrome://extensions` and turn on **Developer mode**.
-2. **Load unpacked** and pick `extension/dist`.
+2. **Load unpacked** and pick `apps/extension/dist`.
 3. Click the Ghostly icon in the toolbar. Ghostly opens in a tab.
 
 `npm run dev -w @ghostly/extension` rebuilds on change; press reload on `chrome://extensions` afterwards.
@@ -112,11 +112,11 @@ The cost is Chrome's "Ghostly started debugging this browser" banner while such 
 
 Chrome grants `debugger` for every tab and does not allow it as an optional permission, so the manifest declares it. The extension keeps its own use of it to the viewer:
 
-- Only the service worker (`extension/src/background.ts`) calls `chrome.debugger`; a test fails if any other source file does.
+- Only the service worker (`apps/extension/src/background.ts`) calls `chrome.debugger`; a test fails if any other source file does.
 - A page asks for a contact's service (peer key and service id), never for a tab. The worker opens the tab itself, and attaches only to that tab.
 - Every command goes to a tab the worker opened for a service. A tab stops being one when it closes, leaves the virtual origin, or the person cancels Chrome's debugging bar. If an event comes from any other tab, the worker sends it no command and detaches from it.
 - Only `Fetch.enable`, `Page.enable`, `Fetch.fulfillRequest` and `Fetch.failRequest` are ever sent. Anything else is refused.
-- The worker and the offscreen document (the peer) only hear the extension's own pages: every message and every port is checked for the extension's id and origin (`extension/src/shared/sender.ts`), and anything else is dropped or disconnected.
+- The worker and the offscreen document (the peer) only hear the extension's own pages: every message and every port is checked for the extension's id and origin (`apps/extension/src/shared/sender.ts`), and anything else is dropped or disconnected.
 
 Chrome gives an API to every page of an extension, not to one part of it, so an extension page that ran foreign script could still call `chrome.debugger` itself. The CSP (`script-src 'self'`, no inline script) is what keeps foreign script out of those pages. The offscreen document only gets `chrome.runtime`.
 
@@ -155,7 +155,7 @@ Ghostly Desktop runs the same peer in its WebView as a third host (`src/desktop/
 
 | | Browser | Desktop |
 |---|---|---|
-| Pkarr | `RelayTransport` (HTTP relays) | The Mainline DHT directly, plus writes to the relays (`src-tauri/src/pkarr_network.rs`) |
+| Pkarr | `RelayTransport` (HTTP relays) | The Mainline DHT directly, plus writes to the relays (`apps/desktop/src/pkarr_network.rs`) |
 | Iroh, HyperDHT | Through relays | Native Iroh and a HyperDHT sidecar |
 | Local fetch | `fetch` with a host permission | `local_fetch` in Rust: loopback addresses the person allowed in a native dialog only (`local_access.rs`), never follows redirects, forwards cookies, no `Origin` header |
 | Viewer | `chrome.debugger` on a virtual origin | A window per app on a `ghostly-svc://<service>.<peer>` origin, with no access to Tauri commands |

@@ -6,7 +6,7 @@
  * npm run e2e:matrix -- --list            print the matrix, run nothing
  * npm run e2e:matrix -- --shard 2/4       one shard of it (the nightly workflow runs four)
  * npm run e2e:matrix -- --docs            after the run, write the summary into docs/TESTING.md
- * npm run e2e:matrix -- --no-build        use the extension already in extension/dist
+ * npm run e2e:matrix -- --no-build        use the extension already in apps/extension/dist
  *
  * Anything else is handed to Playwright (`--headed`, `--workers 1`, `-g …`).
  * `.env.e2e` (written by the ephemeral environment, `npm run e2e:infra:up`) is
@@ -74,7 +74,7 @@ if (reporterAt >= 0) {
 
 if (list) process.exit(run("npx", ["playwright", "test", "-c", "e2e/playwright.matrix.config.ts", "--list", ...args]));
 
-// Scenarios with an extension peer need extension/dist; the web build is the config's web server.
+// Scenarios with an extension peer need apps/extension/dist; the web build is the config's web server.
 if (!noBuild && !env.E2E_WEB_URL) {
   const status = run("npm", ["run", "build:extension"]);
   if (status !== 0) process.exit(status);

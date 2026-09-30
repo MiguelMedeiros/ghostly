@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { MAX_SHARED_FILES, MAX_SHARE_BYTES, SHARE_TARGET_PATH, classify, precacheList, pushScope, pushScopeProfile, readShare, readShareBody, wakeNotice } from "../../../web/src/sw/policy";
+import { MAX_SHARED_FILES, MAX_SHARE_BYTES, SHARE_TARGET_PATH, classify, precacheList, pushScope, pushScopeProfile, readShare, readShareBody, wakeNotice } from "../../../apps/web/src/sw/policy";
 
 // covers: app.pwa.offline, app.pwa.share-target, push.wake.notify, push.wake.mute, push.wake.group
 
 /**
  * What the web app's service worker answers, and what it keeps: the build's own files only. These are the rules
- * `web/src/sw/sw.ts` follows; e2e/web/pwa.spec.ts checks the worker itself.
+ * `apps/web/src/sw/sw.ts` follows; e2e/web/pwa.spec.ts checks the worker itself.
  */
 const ORIGIN = "https://app.ghostly.tools";
 const PRECACHED = new Set(["/", "/assets/main-abc.js", "/assets/main-abc.css", "/manifest.json", "/icon-192.png"]);

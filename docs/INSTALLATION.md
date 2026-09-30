@@ -88,8 +88,8 @@ npm run tauri dev        # Desktop, development
 npm run tauri build      # Desktop, release bundles in target/release/bundle/
 
 npm run dev -w @ghostly/web   # web app on http://localhost:5180
-npm run build:web             # web app, static files in web/dist
-npm run build:extension       # extension, load extension/dist unpacked
+npm run build:web             # web app, static files in apps/web/dist
+npm run build:extension       # extension, load apps/extension/dist unpacked
 ```
 
 The Desktop build bundles the Node runtime that runs it, for HyperDHT (`scripts/prepare-native-runtime.mjs` runs before `tauri build`). To run the web app in Docker instead, see [WEB.md](WEB.md#run-it).

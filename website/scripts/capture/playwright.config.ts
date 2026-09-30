@@ -12,7 +12,7 @@ if (existsSync(infraEnv)) process.loadEnvFile(infraEnv);
  * Marketing screenshots of the web client, taken by the three specs beside this file.
  * Serve the built app first, then point CAPTURE_URL at it (see README.md):
  *
- *   npm run build:web && npx vite preview web --port 4332 --strictPort
+ *   npm run build:web && npx vite preview apps/web --port 4332 --strictPort
  *   SHOTS=website/public/screenshots/current CAPTURE_URL=http://localhost:4332 \
  *     npx playwright test -c website/scripts/capture/playwright.config.ts
  */

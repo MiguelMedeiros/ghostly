@@ -49,7 +49,7 @@ if (build) {
 
 // 3. The web app.
 log(`serving the web app on http://localhost:${PORT}`);
-const server = spawn("npx", ["vite", "preview", "web", "--port", String(PORT), "--strictPort"], { cwd: REPO, stdio: ["ignore", "pipe", "inherit"], detached: true });
+const server = spawn("npx", ["vite", "preview", "apps/web", "--port", String(PORT), "--strictPort"], { cwd: REPO, stdio: ["ignore", "pipe", "inherit"], detached: true });
 const stop = () => { try { process.kill(-server.pid, "SIGTERM"); } catch { /* already gone */ } };
 process.on("exit", stop);
 for (const signal of ["SIGINT", "SIGTERM"]) process.on(signal, () => { stop(); process.exit(130); });

@@ -54,7 +54,7 @@ const transport = (p: DesktopPerson) => p.app.attribute('[data-testid="connectio
 
 const NATIVE = /^label:Connected · (Iroh|HyperDHT)/;
 
-/** Each app's own log (`ghostly.log`, src-tauri/src/diagnostics.rs): its link-trace lines say what it dialled and why. */
+/** Each app's own log (`ghostly.log`, apps/desktop/src/diagnostics.rs): its link-trace lines say what it dialled and why. */
 function attachLogs(name: string, home: string): void {
   const find = (dir: string): string[] => readdirSync(dir, { withFileTypes: true })
     .flatMap((e) => e.isDirectory() ? find(join(dir, e.name)) : e.name === "ghostly.log" ? [join(dir, e.name)] : []);

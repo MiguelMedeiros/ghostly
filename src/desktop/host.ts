@@ -207,7 +207,7 @@ export function macPeerBudget(agent = typeof navigator === "undefined" ? "" : na
   return /Macintosh|Mac OS X/.test(agent) && !/iPhone|iPad/.test(agent) ? { peerBudget: MAC_PEER_BUDGET } : {};
 }
 
-/** The bundle id of the Desktop builds the e2e tests drive (src-tauri/tauri.e2e.conf.json), and of their copies. */
+/** The bundle id of the Desktop builds the e2e tests drive (apps/desktop/tauri.e2e.conf.json), and of their copies. */
 const E2E_IDENTIFIER = "tools.ghostly.e2e";
 
 /**

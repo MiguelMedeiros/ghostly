@@ -25,7 +25,7 @@ const TARGETS = [
   { name: "sdk", dir: "packages/sdk", include: ["src/**/*.{ts,tsx}"] },
   // The UI (src/) and @ghostly/react share one config: vitest.ui.config.ts.
   { name: "ui", dir: ".", include: ["src/**/*.{ts,tsx}", "packages/react/src/**/*.{ts,tsx}"], exclude: ["src/test/**"], config: "vitest.ui.config.ts" },
-  { name: "extension", dir: "extension", include: ["src/**/*.{ts,tsx}"] },
+  { name: "extension", dir: "apps/extension", include: ["src/**/*.{ts,tsx}"] },
 ];
 
 const hasTests = (dir) => {

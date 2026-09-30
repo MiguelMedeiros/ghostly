@@ -17,7 +17,7 @@ import { attachPubky, PubkyApprover, pubkyTestnet } from "../support/pubky";
  * AppView are answered here.
  */
 
-const PNG = readFileSync(new URL("../../src-tauri/icons/32x32.png", import.meta.url));
+const PNG = readFileSync(new URL("../../apps/desktop/icons/32x32.png", import.meta.url));
 /** Real WebP files (e2e/support/avatar-fixtures): what the Pubky index serves (extended, VP8X) and a lossy one. */
 const WEBP = readFileSync(new URL("../support/avatar-fixtures/avatar-extended.webp", import.meta.url));
 const WEBP_LOSSY = readFileSync(new URL("../support/avatar-fixtures/avatar-lossy.webp", import.meta.url));

@@ -1,6 +1,6 @@
 # End-to-end tests
 
-Real Chromium against the shipped build: the web app (`web/dist`, served by `vite preview`) and the extension (`extension/dist`). Two or three people per test, each in a browser profile of their own, chatting, sending files, calling and paying each other. Desktop is [its own thing](#desktop): the bundled Tauri app, driven through WebDriver.
+Real Chromium against the shipped build: the web app (`apps/web/dist`, served by `vite preview`) and the extension (`apps/extension/dist`). Two or three people per test, each in a browser profile of their own, chatting, sending files, calling and paying each other. Desktop is [its own thing](#desktop): the bundled Tauri app, driven through WebDriver.
 
 ```bash
 npm run test:affected -- --port 50310   # only the tests tagged with the features your diff touches (docs/TESTING.md)
@@ -267,8 +267,8 @@ for a private network as much as for tests:
 
 | | |
 |---|---|
-| `GHOSTLY_PKARR_RELAYS` | comma-separated Pkarr relay URLs used instead of the Mainline DHT and the public relays, with no read budget (`src-tauri/src/pkarr_network.rs`). The matrix points it at the test's relay (`relay.listen()`), which the browsers reach by request interception |
-| `GHOSTLY_PKARR_DHT_BOOTSTRAP` | comma-separated `ip:port` nodes: join a Mainline DHT of one's own instead of the public one (`src-tauri/src/pkarr_network.rs`). `desktop/dht-direct.spec.ts` points it at `support/mainlineTestnet.ts` |
+| `GHOSTLY_PKARR_RELAYS` | comma-separated Pkarr relay URLs used instead of the Mainline DHT and the public relays, with no read budget (`apps/desktop/src/pkarr_network.rs`). The matrix points it at the test's relay (`relay.listen()`), which the browsers reach by request interception |
+| `GHOSTLY_PKARR_DHT_BOOTSTRAP` | comma-separated `ip:port` nodes: join a Mainline DHT of one's own instead of the public one (`apps/desktop/src/pkarr_network.rs`). `desktop/dht-direct.spec.ts` points it at `support/mainlineTestnet.ts` |
 | `GHOSTLY_DHT` | `0` keeps the headless CLI off the Mainline DHT (relays only); the e2e helpers and the CLI's own tests set it unless a test runs its own DHT testnet (`GHOSTLY_DHT_BOOTSTRAP`) |
 | `GHOSTLY_HYPERDHT_BOOTSTRAP` | `host:port,…` bootstrap nodes for the HyperDHT runtime instead of the public ones (`native/transports/hyperdht/sidecar.mjs`); the matrix starts `hyperdht/testnet` in the test process |
 
@@ -287,7 +287,7 @@ npm run test:e2e:desktop-macos     # about 15 s once built
 ```
 
 - **Driving without WebDriver.** `npm run desktop:macos:build` is `tauri build --debug --bundles app --features
-  e2e-driver --config src-tauri/tauri.e2e.conf.json`. The feature compiles in `src-tauri/src/e2e_driver.rs`: an HTTP
+  e2e-driver --config apps/desktop/tauri.e2e.conf.json`. The feature compiles in `apps/desktop/src/e2e_driver.rs`: an HTTP
   server on 127.0.0.1 (only when the app starts with `GHOSTLY_E2E_DRIVER=<port>`, and only for requests carrying
   `GHOSTLY_E2E_DRIVER_TOKEN`) that runs a script in a window (`eval_with_callback`) and answers with its value. A
   release build with the feature does not compile. The same build reads an empty clipboard, never the Mac's.
@@ -301,7 +301,7 @@ npm run test:e2e:desktop-macos     # about 15 s once built
   stored (`~/Library/WebKit/<id>` and the rest) when it stops, and before it starts in case a run stopped halfway.
   The log and the files folder go by the build's identifier and are shared (`forgetSharedData()`, before and after).
   Nobody has to be at the Mac; the windows do show on its screen.
-- **Network.** The Pkarr relay, a HyperDHT testnet and the shared app ("Atlas", `extension/test/atlas.mjs`) are in
+- **Network.** The Pkarr relay, a HyperDHT testnet and the shared app ("Atlas", `apps/extension/test/atlas.mjs`) are in
   the test process on 49701-49703, the drivers on 49710-49711. The call's STUN lookups and the wallets' providers
   go out as the apps always do.
 - **Camera and microphone.** None are used. WKWebView has no fake-device flags, so the test answers
@@ -384,7 +384,7 @@ E2E_WEB_PORT=50310 E2E_COMPAT_PORT=50311 npm run test:e2e:compat  # other ports 
 ```
 
 - **The old build.** The release attaches no web build, so `scripts/build-compat-web.mjs` exports the tag with
-  `git archive` (nothing is checked out here), runs its own `npm ci` and `build:web`, and keeps `web/dist` in
+  `git archive` (nothing is checked out here), runs its own `npm ci` and `build:web`, and keeps its `web/dist` in
   `~/.cache/ghostly/compat/v0.4.0` (`E2E_COMPAT_CACHE` moves it), shared by every worktree; later runs reuse it,
   `--force` rebuilds. `--serve <port>` serves it with a small static server: the export keeps no `node_modules`.
 - **The config.** `playwright.compat.config.ts` starts both servers (the current build and v0.4.0) and hands the old
@@ -479,7 +479,7 @@ prints a secret (macaroons, runes, URIs). See `packages/browser/src/engine/payme
 ### Bitcoin Core on regtest
 
 The Bitcoin Core source (`providers/bitcoind.ts`) is Desktop only: bitcoind's RPC answers no CORS, so the
-app reaches it through the `bitcoind_rpc` Tauri command (`src-tauri/src/bitcoind_rpc.rs`, which has Rust
+app reaches it through the `bitcoind_rpc` Tauri command (`apps/desktop/src/bitcoind_rpc.rs`, which has Rust
 tests for its method allowlist, URL and wallet-name checks, size limits and redirects). The Desktop e2e
 harness runs on Linux only, so the engine side is covered by a gated vitest against the environment's bitcoind
 instead, reaching it with `fetch` the way the command does (`GHOSTLY_BITCOIND_RPC_URL`, `_USER`, `_PASSWORD` point
@@ -606,7 +606,7 @@ build can be served on any port.
 ```bash
 npx playwright test -c e2e/playwright.config.ts --project=web e2e/web/wallet-lnd.spec.ts
 GHOSTLY_LND_REGTEST=1 npm test -w @ghostly/browser -- lndProvider     # the provider contract against Alice's node, Bob paying
-GHOSTLY_LND_REGTEST=1 cargo test --manifest-path src-tauri/Cargo.toml lnd   # the desktop command, the node's certificate pinned
+GHOSTLY_LND_REGTEST=1 cargo test --manifest-path apps/desktop/Cargo.toml lnd   # the desktop command, the node's certificate pinned
 ```
 
 Each app is given its own node's address, a macaroon baked with `info:read invoices:read invoices:write

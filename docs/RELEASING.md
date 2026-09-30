@@ -21,7 +21,7 @@ npm run tauri signer generate -- -w ~/.ghostly/updater.key
 
 Then, once:
 
-- put the **public** key in `src-tauri/tauri.conf.json` under `plugins.updater.pubkey` (it is built into every app, which is how an app knows an update is ours);
+- put the **public** key in `apps/desktop/tauri.conf.json` under `plugins.updater.pubkey` (it is built into every app, which is how an app knows an update is ours);
 - add the **private** key as the `TAURI_SIGNING_PRIVATE_KEY` repository secret (`gh secret set TAURI_SIGNING_PRIVATE_KEY < ~/.ghostly/updater.key`) and its password as `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`.
 
 Keep the private key. Losing it means no app already out there can ever be updated again: every future release would be signed by a key they do not trust, and everyone would have to download the app by hand. Rotating it has the same cost, so back it up where you keep your other keys.
