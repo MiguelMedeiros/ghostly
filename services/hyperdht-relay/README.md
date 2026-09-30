@@ -24,11 +24,14 @@ are in WISP 103, "Browser profile".
 
 ## Fixes over dht-relay 0.4.3
 
-0.4.3 is dht-relay's latest release (2023). `relay.mjs` fixes three bugs in it:
+0.4.3 is dht-relay's latest release (2023). `relay.mjs` fixes four bugs in it:
 
 1. Relayed listening could not sign announcements on hyperdht 6.x.
 2. One client closing an incoming stream with an error could stop the process.
 3. The relay waited forever for a signature from a browser that had left, and leaked the server.
+4. A dial to a key the relay had reached before hung. The handshake goes through several DHT nodes at once, each
+   brings back a reply, and dht-relay passed every reply to the browser, whose handshake then stopped. Only the
+   first reply goes on now.
 
 ## Limits (per relay, `DEFAULT_LIMITS` in relay.mjs)
 

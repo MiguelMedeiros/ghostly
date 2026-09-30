@@ -1,4 +1,6 @@
 import http from 'node:http'
+import { createRequire } from 'node:module'
+import { dirname, join } from 'node:path'
 import DHT from 'hyperdht'
 import { relay } from '@hyperswarm/dht-relay'
 import WsStream from '@hyperswarm/dht-relay/ws'
@@ -96,6 +98,26 @@ function guardProtocol(protocol, drop) {
   }
 }
 
+/**
+ * A dial sends its handshake through several DHT nodes at once (hyperdht's `findPeer` runs two in parallel, three
+ * when it remembers the nodes of an earlier connection to that key), and each one brings back the server's reply.
+ * hyperdht reads only the first, but its check comes after `recv`, and a browser's `recv` is a round trip: every
+ * reply reaches the browser. dht-relay 0.4.3 keeps one reply slot per handshake, and the browser's Noise state
+ * throws on a second message, so the dial hangs until the browser gives up. It happened on every dial after the
+ * first to the same key through one relay (a contact reached again, or after a reload). A dialling handshake now
+ * passes on its first reply only; the others get `null`, which hyperdht takes as "nothing to do".
+ */
+const require = createRequire(import.meta.url)
+// Not in the package's exports: loaded by path, the same module dht-relay itself uses (0.4.3 is pinned).
+const { HandshakeProxy } = require(join(dirname(require.resolve('@hyperswarm/dht-relay')), 'lib', 'handshake-proxy.js'))
+const recvHandshake = HandshakeProxy.prototype.recv
+HandshakeProxy.prototype.recv = function (payload) {
+  if (!this._isInitiator) return recvHandshake.call(this, payload)
+  if (this._received) return Promise.resolve(null)
+  this._received = true
+  return recvHandshake.call(this, payload)
+}
+
 /** The address a client connects from: the proxy's word for it only when the relay is told to trust one. */
 function addressOf(request, trustProxy) {
   if (trustProxy) {
@@ -124,7 +146,10 @@ export async function startRelay(options = {}) {
     bootstrap = testnet.bootstrap.map(node => `${node.host}:${node.port}`)
   }
   const loopback = bootstrap.length > 0 && bootstrap.every(node => /^(127\.0\.0\.1|localhost):\d+$/.test(String(node)))
-  const dht = options.dht ?? new DHT(bootstrap.length ? { bootstrap, ...(loopback ? { host: '127.0.0.1' } : {}) } : {})
+  // A new node counts itself firewalled until its first network check, about 20 minutes in (dht-rpc's STABLE_TICKS).
+  // Until then two browsers on this relay reach each other only by holepunching the relay's own socket, which on
+  // loopback often fails. On loopback nothing stands between the nodes, so the relay says so from the start.
+  const dht = options.dht ?? new DHT(bootstrap.length ? { bootstrap, ...(loopback ? { host: '127.0.0.1', firewalled: false } : {}) } : {})
   await dht.ready()
 
   const clients = new Set()
