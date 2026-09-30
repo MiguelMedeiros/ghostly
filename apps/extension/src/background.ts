@@ -63,7 +63,15 @@ async function waitForEngine(): Promise<EngineStatus> {
 }
 
 chrome.runtime.onStartup.addListener(() => void ensureEngine());
-chrome.runtime.onInstalled.addListener(() => void ensureEngine());
+/**
+ * A first install also opens the app in a tab: without it nothing showed, and a new user had to find the toolbar
+ * button. The tab opens even when the peer does not start, so the page can say why. An update opens nothing.
+ */
+chrome.runtime.onInstalled.addListener((details) => {
+  const started = ensureEngine();
+  if (details?.reason === "install") void started.catch(() => {}).then(showApp).catch(() => {});
+  else void started.catch(() => {});
+});
 
 /**
  * Chrome has a newer version but will not swap it in while Ghostly is running,
@@ -76,6 +84,11 @@ chrome.runtime.onUpdateAvailable.addListener((details) => {
 
 chrome.action.onClicked.addListener(async () => {
   await ensureEngine();
+  await showApp();
+});
+
+/** Brings the app's tab forward, or opens one. */
+async function showApp(): Promise<void> {
   const url = chrome.runtime.getURL("app.html");
   const existing = await openAppTab(url);
   if (existing) {
@@ -84,7 +97,7 @@ chrome.action.onClicked.addListener(async () => {
   } else {
     await chrome.tabs.create({ url });
   }
-});
+}
 
 /**
  * A tab that shows the app already, on any of its pages (`app.html#/chat/…`). Asked of the extension's own contexts:

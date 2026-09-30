@@ -239,13 +239,13 @@ export function ChatRow(p: ChatRowProps) {
         name={<bdi>{p.label}</bdi>}
         previewId={previewId}
         marks={<ContactMarks peerKey={p.peerPubKey} />}
-        nameClass={!p.named ? "text-text-muted/60 italic" : p.unread > 0 ? "text-text-primary font-semibold" : "text-text-primary"}
+        nameClass={!p.named ? "text-text-muted italic" : p.unread > 0 ? "text-text-primary font-semibold" : "text-text-primary"}
         time={p.time}
         timeClass={p.unread > 0 && !muted ? "text-accent font-medium" : "text-text-muted"}
         sub={<>
           {/* The key, for whoever needs it: its own line when comfortable, else read out with the name. */}
           {p.density === "comfortable"
-            ? <span data-testid="chat-row-key" className="block text-[11px] leading-4 text-text-muted/60 font-mono whitespace-nowrap">{p.keyLabel}</span>
+            ? <span data-testid="chat-row-key" className="block text-[11px] leading-4 text-text-muted font-mono whitespace-nowrap">{p.keyLabel}</span>
             : <span className="sr-only"> · {p.keyLabel}</span>}
         </>}
         // The contact writing now takes the last message's place, in the accent, until it stops or the message comes.

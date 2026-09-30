@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import { CallButtons } from "../../components/CallButtons";
 import { CallOverlay } from "../../components/CallOverlay";
 import { IncomingCallNotification } from "../../components/IncomingCallNotification";
+import { FakeMediaStream, FakeTrack } from "../../../../../packages/react/test/fakes";
 import { renderApp } from "../render";
 
 // covers: calls.screen-share, calls.audio, calls.video, calls.mini-window
@@ -191,5 +192,26 @@ describe("a call for a screen reader and the keys", () => {
     expect(screen.getByTestId("call-state-spoken")).toHaveAttribute("role", "status");
     expect(screen.getByTestId("call-state-spoken")).toHaveTextContent(/^Connected$/);
     expect(screen.getByTestId("call-status")).not.toHaveAttribute("role");
+  });
+});
+
+describe("your own camera in the corner", () => {
+  it("plays the camera's picture alone, never the microphone with it", () => {
+    // Linux's microphone is a silent stand-in track; in the self view's stream it kept WebKitGTK from loading the picture.
+    vi.stubGlobal("MediaStream", FakeMediaStream);
+    // happy-dom's srcObject takes its own MediaStream only: what the page gives it is kept here.
+    const given: unknown[] = [];
+    const srcObject = vi.spyOn(HTMLMediaElement.prototype, "srcObject", "set").mockImplementation((stream) => { given.push(stream); });
+    try {
+      const camera = new FakeTrack("video");
+      const microphone = new FakeTrack("audio");
+      overlay({ isVideoOff: false, localStream: new FakeMediaStream([camera, microphone]) as unknown as MediaStream });
+      expect(screen.getByTestId("call-self-view").querySelector("video")).not.toBeNull();
+      expect(given).toHaveLength(1);
+      expect((given[0] as FakeMediaStream).getTracks()).toEqual([camera]);
+    } finally {
+      srcObject.mockRestore();
+      vi.unstubAllGlobals();
+    }
   });
 });

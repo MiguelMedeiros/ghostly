@@ -146,8 +146,11 @@ export class CallManager {
       if (call) {
         // A hang-up while this side starts over (`redial`) is the contact's app ending a connection that failed. Once
         // a connection came up, the call was on: a start-over before it does not make the hang-up a failure.
-        const failed = call.state !== "connected" && (call.offering || (call.direction === "out" && call.redials > 0));
-        const reason: EndReason = call.state === "ringing" ? (call.direction === "in" ? "missed" : "rejected") : failed ? "failed" : "remote-hangup";
+        // A hang-up that says the contact's side could not connect (`r: "u"`, WISP 601): the call failed, not declined.
+        const unreachable = signal.r === "u" && call.state !== "connected";
+        const failed = unreachable || (call.state !== "connected" && (call.offering || (call.direction === "out" && call.redials > 0)));
+        const reason: EndReason = call.state === "ringing" && call.direction === "in" ? "missed"
+          : call.state === "ringing" && !unreachable ? "rejected" : failed ? "failed" : "remote-hangup";
         void this.end(call, reason, false);
       }
     }

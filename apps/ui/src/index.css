@@ -20,7 +20,8 @@
   --color-accent: var(--theme-accent);
   --color-accent-dim: var(--theme-accent-dim);
   --color-accent-hover: var(--theme-accent-hover);
-  --color-danger: #ea4335;
+  /* Danger's red: brighter on dark themes, darker on light ones, so its words read at 4.5:1 on either. */
+  --color-danger: var(--theme-danger);
   /* Something finished well (a bot's task done), the same in every theme, as danger is. */
   --color-success: #22a55a;
   /* Test money's colour, the same in every theme (Real money takes the accent). */
@@ -85,6 +86,7 @@
   /* Shared by every dark theme: at least 4.5:1 (link) and 3:1 (danger) on each one's bubbles. */
   --theme-link: #8ad3f6;
   --theme-danger-ink: #ff9a8f;
+  --theme-danger: #ea4335;
   --theme-on-accent: #111b21;
   /* Group members' names (lib/memberColors.ts), shared by every dark theme: at least 4.5:1 on each one's bubbles and header. */
   --theme-member-0: #f2b7b7;
@@ -128,6 +130,7 @@
   /* Shared by every light theme, as for dark. */
   --theme-link: #026aa0;
   --theme-danger-ink: #c5221f;
+  --theme-danger: #c5221f;
   --theme-on-accent: #111b21;
   /* Shared by every light theme, as for dark. */
   --theme-member-0: #c82020;
@@ -215,7 +218,8 @@
   --theme-border-bright: #264060;
   --theme-text-primary: #e0f4ff;
   --theme-text-secondary: #7eb8d8;
-  --theme-text-muted: #4a8ab0;
+  /* At least 4.5:1 on the list, the panels and a chosen row. */
+  --theme-text-muted: #5c96b8;
   --theme-received-bg: #0c1929;
   --theme-input-bg: #142840;
   --theme-search-bg: #0c1929;
@@ -247,10 +251,13 @@
   --theme-chat-pattern: #d5f5f8;
   --theme-scrollbar: #a5f3fc;
   --theme-scrollbar-hover: #67e8f9;
-  --theme-accent: #0891b2;
+  /* Words in the accent (links, section titles, a chosen tab) read at 4.5:1 on white, on the cyan panels and on the
+     accent's own tints (a pill at 10-20 %), and white words on it as well. */
+  --theme-accent: #0b6680;
   --theme-accent-dim: #cffafe;
-  --theme-accent-hover: #0e7490;
+  --theme-accent-hover: #155e75;
   --theme-sent-bg: #cffafe;
+  --theme-on-accent: #ffffff;
 }
 
 /* ============================================

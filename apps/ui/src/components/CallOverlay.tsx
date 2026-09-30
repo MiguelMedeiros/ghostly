@@ -123,7 +123,9 @@ export function CallOverlay({
 
   useEffect(() => {
     if (localVideoRef.current && localStream) {
-      localVideoRef.current.srcObject = localStream;
+      // The picture only: the self view is muted anyway. On Linux the microphone's track is a silent stand-in
+      // (the sound stays in Rust), and with it in the stream WebKitGTK never loaded the picture: paused, 0 frames.
+      localVideoRef.current.srcObject = new MediaStream(localStream.getVideoTracks());
     }
     // The element is recreated when the camera is turned back on, so it needs its stream again.
   }, [localStream, isVideoOff]);
