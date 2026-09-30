@@ -7,7 +7,7 @@ import { becomeThePeer } from "@ghostly/browser/inPageHost";
 import { webHost } from "./host";
 import { setDatabaseName } from "@ghostly/browser/shared/idb";
 import { setStorageProfile } from "../../ui/src/lib/storage";
-import { activeProfileId, namespaceOf } from "../../ui/src/lib/profiles";
+import { activeProfileId, namespaceOf, setRunningProfile } from "../../ui/src/lib/profiles";
 import { loadSettings } from "../../ui/src/lib/settings";
 import { applyDocumentLanguage } from "../../ui/src/lib/documentLanguage";
 import { watchInstallPrompt } from "../../ui/src/lib/installPrompt";
@@ -27,7 +27,10 @@ setPushPlatform({ supported: pushSupported, subscribe: subscribePush, current: c
 
 // The chosen local profile (WISP 04): its own chats, database, settings and single-peer lock. The
 // default profile keeps the original names, so nothing existing moves.
-const profile = namespaceOf(activeProfileId());
+const profileId = activeProfileId();
+const profile = namespaceOf(profileId);
+// This tab stays that profile, even when it waits below and another tab chooses another one meanwhile.
+setRunningProfile(profileId);
 if (profile) { setStorageProfile(profile); setDatabaseName(`ghostly_${profile}`); }
 // The profile's language on <html> before anything is painted (the I18nProvider keeps it in step from then on).
 applyDocumentLanguage(loadSettings().language);
