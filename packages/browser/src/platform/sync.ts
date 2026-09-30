@@ -124,44 +124,44 @@ function mirrorMessages(linkId: string, messages: StoredMessage[]): void {
   setEngineMessages(session.id, engineIds(messages));
   // Read without its older messages (this page just loaded): the ones the engine keeps come back below, all of them.
   const partial = !!session.older;
-  const byId = new Map(session.messages.map((m) => [m.id, m]));
+  const at = new Map(session.messages.map((m, i) => [m.id, i]));
   const added: ChatMessage[] = [];
   let dirty = false;
   for (const message of messages) {
-    const previous = byId.get(message.id);
+    const i = at.get(message.id);
+    const previous = i === undefined ? undefined : session.messages[i];
+    // A row that changes is a new object, never the old one changed: the old one may be what a bubble on screen was drawn
+    // from (a session read here hands out the same older rows again, storage.ts `withWhole`), and bubbles compare rows by
+    // content, so one changed in place would compare equal to itself and not be drawn again.
+    let next: ChatMessage | undefined;
+    const change = () => (next ??= { ...previous! });
     // Reactions change rows of any kind, mine included (WISP 400 § Reactions).
     const reacted = !!previous && (!!previous.reactions || !!message.reactions) && JSON.stringify(previous.reactions ?? null) !== JSON.stringify(message.reactions ?? null);
-    if (reacted) previous.reactions = message.reactions;
-    if (!mirrorable(message)) {
-      if (reacted) dirty = true;
-      continue;
-    }
+    if (reacted) change().reactions = message.reactions;
     const mapped = () => toChatMessage(message, link.peerPubKeyZ32, link.myPubKeyZ32, !!link.profile);
-    if (previous) {
-      let updated = reacted;
+    if (previous && mirrorable(message)) {
       if (message.delivery && (previous.delivery !== message.delivery || previous.deliveryError !== message.deliveryError)) {
-        previous.delivery = message.delivery;
-        previous.deliveryError = message.deliveryError;
-        updated = true;
+        change().delivery = message.delivery;
+        change().deliveryError = message.deliveryError;
       }
       // An edit (WISP 400 § Edits): the new text in place, never a new message, so nothing counts as unread.
       if (message.edit && (previous.edit?.seq !== message.edit.seq || !!previous.edit?.pending !== !!message.edit.pending)) {
-        previous.text = message.text;
-        previous.edit = message.edit;
-        if (message.preview) previous.preview = message.preview; else delete previous.preview;
+        const row = change();
+        row.text = message.text;
+        row.edit = message.edit;
+        if (message.preview) row.preview = message.preview; else delete row.preview;
         // A status card belongs to its version (WISP 4xx · Status Cards): the edit's, or none.
-        if (message.card) previous.card = message.card; else delete previous.card;
-        updated = true;
+        if (message.card) row.card = message.card; else delete row.card;
       }
       // Only a join announcement has one; the others are not mapped again.
       const systemEvent = JOIN_PATTERN.test(message.text) ? mapped().systemEvent : undefined;
-      if (systemEvent && previous.systemEvent?.pubKey !== systemEvent.pubKey) {
-        previous.systemEvent = systemEvent;
-        updated = true;
-      }
-      if (updated) dirty = true;
-      continue;
+      if (systemEvent && previous.systemEvent?.pubKey !== systemEvent.pubKey) change().systemEvent = systemEvent;
     }
+    if (next) {
+      session.messages[i!] = next;
+      dirty = true;
+    }
+    if (previous || !mirrorable(message)) continue;
     added.push(mapped());
   }
   let changed = dirty;

@@ -196,3 +196,103 @@ describe("a long chat past the page's storage", () => {
     expect(storage.loadSession(SESSION)!.messages).toHaveLength(4_003);
   });
 });
+
+describe("no message has the page's storage as its only copy", () => {
+  /** A small seeded generator: the same cases every run. */
+  const random = (seed: number) => () => { seed = (seed + 0x6d2b79f5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4_294_967_296; };
+  /** Every id the chat has: what the session held, what the engine holds, and what the page added since. */
+  let truth: Set<string>;
+  const engineRows = () => engine.messages.get(LINK) ?? [];
+  const storedIds = () => new Set(kept().messages.map(m => m.id));
+  /** Ids whose only copy is gone: in neither the stored session nor the engine's copy (the engine's are all kept). */
+  const lost = () => { const s = storedIds(), e = new Set(engineRows().map(m => m.id)); return [...truth].filter(id => !s.has(id) && !e.has(id)); };
+  /** Ids the chat does not show once its page has heard the engine. */
+  const unseen = () => { const shown = new Set(storage.loadSession(SESSION)!.messages.map(m => m.id)); return [...truth].filter(id => !shown.has(id)); };
+
+  /**
+   * A session from before (1.0.0, or older: from before the engine kept history), whole in localStorage, of every kind
+   * of row: the engine's that the mirror writes; mine the engine has but the mirror never writes (the chat put them in
+   * itself: a file I sent); rows the engine never had (a chat from before it kept history); page-only lines (calls);
+   * and the engine's rows the session never got.
+   */
+  function scenario(next: () => number, size: number) {
+    const engineList: StoredMessage[] = [];
+    const rows: ChatMessage[] = [];
+    for (let i = 0; i < size; i++) {
+      const kind = next();
+      if (kind < 0.55) { const m = stored(i); engineList.push(m); if (next() < 0.9) rows.push(row(m)); }
+      else if (kind < 0.7) {
+        const m: StoredMessage = { ...stored(i), id: `me_file${i}`, sender: "me", delivery: undefined, file: { id: `f${i}`, name: "a.pdf", size: 1, mime: "application/pdf" } } as StoredMessage;
+        engineList.push(m);
+        rows.push({ id: m.id, text: m.text, sender: "me", timestamp: m.timestamp });
+      } else if (kind < 0.85) rows.push({ id: `peer_${at(i)}`, text: `Old line ${i}`, sender: "peer", timestamp: at(i) });
+      else rows.push(callLine(i));
+    }
+    engine.messages = new Map([[LINK, engineList]]);
+    space.items.set(KEY, JSON.stringify(session(rows.sort((a, b) => a.timestamp - b.timestamp))));
+    space.quota = Infinity;
+    truth = new Set([...rows.map(m => m.id), ...engineList.map(m => m.id)]);
+  }
+
+  it("holds through long sessions of every kind, messages coming, the page's own lines, reloads and a second page", { timeout: 60_000 }, async () => {
+    for (let run = 0; run < 12; run++) {
+      const next = random(run + 1);
+      await page();
+      scenario(next, 150 + Math.floor(next() * 900));
+      for (let step = 0; step < 8; step++) {
+        const what = next();
+        if (what < 0.35) await engineSpeaks();
+        else if (what < 0.55) {
+          // Messages come: the engine has them (stored, then told), the page's mirror hears them.
+          const list = [...engineRows()];
+          const from = list.length + 10_000 + step * 50;
+          for (let k = 0; k < 1 + Math.floor(next() * 40); k++) { const m = stored(from + k); list.push(m); truth.add(m.id); }
+          engine.messages.set(LINK, list);
+          for (const listener of engine.messageListeners) listener(LINK, list);
+        } else if (what < 0.75) {
+          // A line only this page keeps (a call's), at any time, even among old messages.
+          const line = { ...callLine(Math.floor(next() * 12_000)), id: `call_new${run}_${step}` };
+          storage.addMessage(SESSION, line);
+          truth.add(line.id);
+        } else if (what < 0.9) await page();
+        else { await page(); await engineSpeaks(); await page(); }
+        expect(lost(), `run ${run}, step ${step}`).toEqual([]);
+      }
+      // Heard by a fresh page, the chat shows every one of them.
+      await page();
+      await engineSpeaks();
+      expect(unseen(), `run ${run}`).toEqual([]);
+      expect(lost(), `run ${run}`).toEqual([]);
+    }
+  });
+
+  it("a long session written whole by 1.0.0 is stored anew on the first open after the update, and loses nothing", async () => {
+    const next = random(42);
+    scenario(next, 5_000);
+    const before = storage.loadSession(SESSION)!.messages;
+    expect(before.length).toBeGreaterThan(4_000);
+    await engineSpeaks();
+    // Stored anew, small, with every row the engine does not bring back.
+    expect(kept().messages.length).toBeLessThan(before.length / 2);
+    expect(lost()).toEqual([]);
+    // After a reload, the chat has each row as it was, and the engine's that the session never got.
+    await page();
+    await engineSpeaks();
+    const after = new Map(storage.loadSession(SESSION)!.messages.map(m => [m.id, m]));
+    for (const m of before) expect(after.get(m.id)?.text, m.id).toBe(m.text);
+    expect(unseen()).toEqual([]);
+  });
+
+  it("a change to an older message is a new row, so its bubble is drawn again", async () => {
+    await engineSpeaks();
+    const older = stored(10);
+    const drawn = storage.loadSession(SESSION)!.messages.find(m => m.id === older.id)!;
+    const list = engine.messages.get(LINK)!.map(m => m.id === older.id ? { ...m, reactions: { peer: { e: "❤️", n: 1, at: 5 } } } : m);
+    engine.messages.set(LINK, list);
+    for (const listener of engine.messageListeners) listener(LINK, list);
+    const now = storage.loadSession(SESSION)!.messages.find(m => m.id === older.id)!;
+    expect(now.reactions).toEqual({ peer: { e: "❤️", n: 1, at: 5 } });
+    // The row the bubble was drawn from is as it was: comparing the two, the bubble sees the change.
+    expect(drawn.reactions).toBeUndefined();
+  });
+});
