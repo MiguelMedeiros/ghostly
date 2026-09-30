@@ -6,7 +6,7 @@ import { testBitcoinWallet } from "../../packages/browser/test/helpers/bitcoinSi
 import { FakeWebln, FakeWeblnLedger } from "../../packages/browser/test/helpers/fakeWebln";
 import { fingerprints, TestGpg } from "../../packages/browser/test/helpers/gpg";
 import { strangerInvoice } from "../support/bolt11";
-import { callTrace, watchCalls } from "../support/callTrace";
+import { callTrace, linkTrace, watchCalls, watchLink } from "../support/callTrace";
 import { setClipboard } from "../support/clipboard";
 import { startTestDomain, type TestDomain } from "../support/domain";
 import { delivered, GIF, type WalletKind } from "../support/fixtures";
@@ -186,7 +186,7 @@ async function bucket(): Promise<string> {
 
 export const delivery: Block = {
   id: "delivery",
-  run: async ({ a, b, combo }) => {
+  run: async ({ a, b, combo, info }) => {
     if (combo.delivery === "dht") {
       const back = await away(b);
       await say(a, "waiting in the DHT mailbox");
@@ -195,9 +195,22 @@ export const delivery: Block = {
       await sees(b, "waiting in the DHT mailbox");
       await expect(chatPane(a).locator('[data-testid="message-delivery"][data-delivery="delivered"]').first()).toBeVisible({ timeout: 90_000 });
       // The rest of the story needs a live link: files, payments, groups.
+      for (const p of [a, b]) await watchLink(p).catch(() => {});
+      const left: string[] = [];
       await dhtOnly(b, false);
+      left.push(`${new Date().toISOString()} ${b.name} left DHT only`);
       await dhtOnly(a, false);
-      for (const p of [a, b]) await connected(p, "WebRTC", LIVE_AGAIN_MS);
+      left.push(`${new Date().toISOString()} ${a.name} left DHT only`);
+      try {
+        for (const p of [a, b]) await connected(p, "WebRTC", LIVE_AGAIN_MS);
+      } catch (error) {
+        // "On DHT · retrying live" tells nothing of why: what each side's link did does.
+        for (const p of [a, b]) {
+          const trace = await linkTrace(p).catch((e) => `(no trace: ${e})`);
+          await info.attach(`${p.name}'s chat link`, { body: `${left.join("\n")}\n${trace}`, contentType: "text/plain" });
+        }
+        throw error;
+      }
       await say(b, "live again");
       await sees(a, "live again");
       return;
