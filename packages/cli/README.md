@@ -96,7 +96,7 @@ The rows are in alphabetical order of their first command, and every command of 
 | `chat transport <chat> <auto\|dht\|webrtc\|iroh\|hyperdht>` | What carries the chat |
 | `chat verify <chat> --code <code>` | Mark the contact verified after comparing the codes out of band |
 | `chat wait <chat> [--until live\|text\|paired] [--timeout s]` | Wait for a chat to go live, carry text, or see its contact |
-| `daemon [--detach]`, `daemon status`, `daemon stop`, `daemon restart` | Keep the profile online; `restart` stops it and starts this release's code in the background ([After an upgrade](#after-an-upgrade)). Ctrl-C, SIGTERM and the terminal closing (SIGHUP) stop it cleanly |
+| `daemon [--detach]`, `daemon status`, `daemon stop`, `daemon restart` | Keep the profile online; `status` names its version and its socket (`socket`, for the [socket API](#the-socket-api)); `restart` stops it and starts this release's code in the background ([After an upgrade](#after-an-upgrade)). Ctrl-C, SIGTERM and the terminal closing (SIGHUP) stop it cleanly |
 | `edit <chat> <message> [text… \| --text <text> \| --stdin] [--force] [--wait none\|confirmed] [--timeout s]` | Replace the text of a message you sent (1:1 chats, `group edit` for a group; `<message>` is the `messageId` `send` gave, or its wire id). The contact sees it in place, marked edited; `--wait confirmed` waits for its app to confirm (the default without a daemon). At most 100 edits a message, no time limit; an older contact app gets it once it shows edits |
 | `engine <method> [json \| -] [--confirm-real] [--show-secret]`, `engine --list` | Any call of the app's engine |
 | `events [--since seq]` | What the event journal holds, without following |
@@ -305,7 +305,8 @@ side that invited answers once.
 ## The socket API
 
 The daemon listens on a Unix socket in the profile's folder (`daemon.sock`, 0600; in `/tmp/ghostly-<hash>/`, a
-folder of the user's alone, when the folder's path is too long for a socket). One JSON object per line each way:
+folder of the user's alone, when the folder's path is too long for a socket). `ghostly daemon status` names it, as
+`socket`, whether the daemon runs or not. One JSON object per line each way:
 
 ```json
 {"id":1,"method":"chat.send","params":{"chat":"alice","text":"hi","wait":"sent"}}

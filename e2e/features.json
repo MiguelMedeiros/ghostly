@@ -650,6 +650,7 @@
     "apps/ui/src/components/MoneyFormatsBubble.tsx": ["payments.money.*","app.theme.bubbles"],
     "apps/ui/src/components/NetworkSettings.tsx": ["settings.network.*"],
     "apps/ui/src/components/NewGroupDialog.tsx": ["groups.*"],
+    "apps/ui/src/components/OpenInWallet.tsx": ["payments.uri","payments.lightning.invoice-card","payments.money.*"],
     "apps/ui/src/components/PayExternally.tsx": ["payments.external","payments.uri","payments.lnurl.card","wallet.lightning.*","wallet.onchain.*","wallet.cashu.receive-lightning"],
     "apps/ui/src/components/PaymentBubble.tsx": ["app.theme.bubbles","wallet.*","payments.*","groups.payments.*","groups.community.payments.*"],
     "apps/ui/src/components/PaymentReview.tsx": ["wallet.*","payments.*","groups.payments.*","groups.community.payments.*"],

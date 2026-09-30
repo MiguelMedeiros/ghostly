@@ -6,11 +6,14 @@
 // and it thanks you when a request of its own is settled.
 //
 // Before: ghostly wallet create cashu && ghostly wallet faucet cashu && ghostly daemon --detach
-// GHOSTLY_SOCKET is the daemon's socket (`ghostly daemon status` prints it).
+// GHOSTLY_SOCKET names the daemon's socket (`ghostly daemon status` prints it); left out, the bot asks.
+import { execFileSync } from "node:child_process";
 import { connect } from "node:net";
 import { createInterface } from "node:readline";
 
-const socket = connect(process.env.GHOSTLY_SOCKET ?? `${process.env.HOME}/.ghostly/profiles/default/daemon.sock`);
+// GHOSTLY_SOCKET, else the socket `ghostly daemon status` names: where it is depends on GHOSTLY_HOME, the profile
+// (--profile or GHOSTLY_PROFILE) and the path's length, so it is asked, never guessed.
+const socket = connect(process.env.GHOSTLY_SOCKET ?? JSON.parse(execFileSync("ghostly", ["daemon", "status"], { encoding: "utf8" })).socket);
 let nextId = 1;
 const waiting = new Map();
 function call(method, params) {
