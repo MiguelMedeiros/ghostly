@@ -23,8 +23,8 @@ $ ghostly listen
 /** packages/cli/examples/echo-bot.sh, without its comments. */
 export const ECHO_BOT = `ghostly listen --type message.received --cursor ~/.ghostly/echo.cursor --exec '
   event="$(cat)"
-  printf "echo: %s" "$(jq -r .message.text <<<"$event")" \\
-    | ghostly send "$(jq -r .chat <<<"$event")" --stdin'`;
+  printf "echo: %s" "$(printf "%s" "$event" | jq -r .message.text)" \\
+    | ghostly send "$(printf "%s" "$event" | jq -r .chat)" --stdin'`;
 
 export const COMMANDS = [
   "ghostly daemon --detach",
