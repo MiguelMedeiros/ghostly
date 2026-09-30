@@ -7,6 +7,7 @@
   "checking": "確認中...",
   "download": "ダウンロード",
   "downloading": "ダウンロード中... {{percent}}%",
+  "errorDetails": "アップデーターからの応答",
   "failed": "更新を確認できませんでした",
   "installing": "更新中...",
   "lastChecked": "最終確認 {{when}}",
@@ -15,5 +16,14 @@
   "reload": "再読み込み",
   "restart": "更新して再起動",
   "title": "更新",
-  "upToDate": "Ghostly は最新です"
+  "upToDate": "Ghostly は最新です",
+  "why": {
+    "noRelease": "更新サーバーがリリース情報を返しませんでした。後でもう一度お試しください。",
+    "notForThisSystem": "最新リリースにはまだこのシステム向けの更新がありません。",
+    "offline": "このデバイスはオフラインです。",
+    "signature": "更新の署名を確認できなかったため、使用しませんでした。",
+    "timeout": "更新サーバーの応答に時間がかかりすぎました。",
+    "unknown": "確認中に問題が発生しました。",
+    "unreachable": "更新サーバーに接続できませんでした。接続を確認してください。"
+  }
 }

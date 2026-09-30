@@ -28,8 +28,7 @@ export function DeleteProfileDialog({ entry, onClose }: { entry: ProfileEntry; o
   const parts = summary ? [
     summary.chats === 1 ? t("profile.chatOne") : t("profile.chatCount", { count: summary.chats }),
     summary.cashuSats ? t("profile.delete.cashuSats", { amount: formatAmount(summary.cashuSats, language) }) : "",
-    summary.ark ? t("profile.delete.arkWallet") : "",
-    summary.usdt ? t("profile.delete.usdtWallet") : "",
+    ...summary.wallets.map((name) => t("profile.delete.wallet", { name })),
     summary.services ? (summary.services === 1 ? t("profile.delete.serviceOne") : t("profile.delete.serviceCount", { count: summary.services })) : "",
   ].filter(Boolean) : [];
   const run = async (work: () => Promise<void>) => { setBusy(true); setError(""); try { await work(); } catch (e) { setError(e instanceof Error ? e.message : String(e)); } finally { setBusy(false); } };

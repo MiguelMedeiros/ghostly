@@ -6,8 +6,26 @@ import { peekFresh } from "./profilePeek";
 import { verifyPassword } from "./settings";
 import { pushPlatform } from "./wakePush";
 
-/** What deleting a profile would take away, read from its own storage without starting it. */
-export interface ProfileSummary { chats: number; cashuSats: number; ark: boolean; usdt: boolean; services: number }
+/**
+ * What deleting a profile would take away, read from its own storage without starting it. `wallets`: the kinds of
+ * wallet it keeps (Cashu aside, counted in sats), each named once however many networks it has one on.
+ */
+export interface ProfileSummary { chats: number; cashuSats: number; wallets: WalletName[]; services: number }
+export type WalletName = "Ark" | "USDT" | "Bark" | "Spark" | "Fedimint" | "Lightning" | "Bitcoin";
+
+/**
+ * The wallet a settings key holds, if it holds one in use. Each network's wallet is under `<rail>-mode-<network>`
+ * (an older app kept one under the bare `<rail>`); an archived one (`-retired-`) is not counted.
+ */
+const WALLET_KEYS: [RegExp, WalletName][] = [
+  [/^arkWallet(-mode-.+)?$/, "Ark"], [/^usdtWallet(-mode-.+)?$/, "USDT"], [/^barkWallet(-mode-.+)?$/, "Bark"], [/^sparkWallet(-mode-.+)?$/, "Spark"],
+  [/^fedimintWallet-(mainnet|testnet)$/, "Fedimint"], [/^lightningSource-/, "Lightning"], [/^onchainSource-/, "Bitcoin"],
+];
+export function walletsIn(keys: readonly IDBValidKey[]): WalletName[] {
+  const found = new Set<WalletName>();
+  for (const key of keys) for (const [pattern, name] of WALLET_KEYS) if (typeof key === "string" && pattern.test(key)) found.add(name);
+  return WALLET_KEYS.map(([, name]) => name).filter((name) => found.has(name));
+}
 
 const request = <T>(r: IDBRequest<T>) => new Promise<T>((resolve, reject) => { r.onsuccess = () => resolve(r.result); r.onerror = () => reject(r.error); });
 async function openExisting(name: string): Promise<IDBDatabase | null> {
@@ -24,14 +42,14 @@ function chatsOf(prefix: string): number {
 
 export async function profileSummary(id: string): Promise<ProfileSummary> {
   const ns = namespaceOf(id);
-  const summary: ProfileSummary = { chats: chatsOf(`ghostly_${ns}_`), cashuSats: 0, ark: false, usdt: false, services: 0 };
+  const summary: ProfileSummary = { chats: chatsOf(`ghostly_${ns}_`), cashuSats: 0, wallets: [], services: 0 };
   const db = await openExisting(`ghostly_${ns}`);
   if (!db) return summary;
   try {
     const has = (name: string) => db.objectStoreNames.contains(name);
     const tx = db.transaction(["proofs", "settings", "services"].filter(has), "readonly");
     if (has("proofs")) summary.cashuSats = (await request(tx.objectStore("proofs").getAll()) as { amount: number; reserved?: boolean }[]).reduce((sum, p) => sum + (p.reserved ? 0 : p.amount), 0);
-    if (has("settings")) { const keys = await request(tx.objectStore("settings").getAllKeys()); summary.ark = keys.includes("arkWallet"); summary.usdt = keys.includes("usdtWallet"); }
+    if (has("settings")) summary.wallets = walletsIn(await request(tx.objectStore("settings").getAllKeys()));
     if (has("services")) summary.services = (await request(tx.objectStore("services").count()));
   } finally { db.close(); }
   return summary;

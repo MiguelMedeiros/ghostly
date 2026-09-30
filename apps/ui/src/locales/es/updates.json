@@ -7,6 +7,7 @@
   "checking": "Buscando...",
   "download": "Descargar",
   "downloading": "Descargando... {{percent}}%",
+  "errorDetails": "Lo que dijo el actualizador",
   "failed": "No se pudo buscar actualizaciones",
   "installing": "Actualizando...",
   "lastChecked": "Última comprobación a las {{when}}",
@@ -15,5 +16,14 @@
   "reload": "Recargar",
   "restart": "Actualizar y reiniciar",
   "title": "Actualizaciones",
-  "upToDate": "Ghostly está actualizado"
+  "upToDate": "Ghostly está actualizado",
+  "why": {
+    "noRelease": "El servidor de actualizaciones no dio información de la versión. Inténtalo más tarde.",
+    "notForThisSystem": "La última versión aún no tiene una actualización para este sistema.",
+    "offline": "Este dispositivo no tiene conexión.",
+    "signature": "La firma de la actualización no era válida, así que no se usó.",
+    "timeout": "El servidor de actualizaciones tardó demasiado en responder.",
+    "unknown": "Algo salió mal al buscar.",
+    "unreachable": "No se pudo llegar al servidor de actualizaciones. Revisa tu conexión."
+  }
 }
