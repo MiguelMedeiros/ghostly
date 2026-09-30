@@ -1,4 +1,5 @@
 {
+  "account": "Account",
   "chats": "Chat",
   "copyInvite": "Copia codice invito",
   "deleteAllChats": "Elimina tutte le chat",
@@ -26,6 +27,7 @@
     "label": "Crea un gruppo o una chat"
   },
   "noChats": "Nessuna chat",
+  "noResults": "Nessun risultato",
   "pinned": "Fissata",
   "quiet": "C'è silenzio qui...",
   "quietHint": "È ora di infestare qualcuno! 👻",

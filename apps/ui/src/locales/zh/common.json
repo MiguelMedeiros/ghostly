@@ -7,10 +7,16 @@
   "confirm": "确认",
   "copied": "已复制！",
   "copy": "复制",
+  "deck": {
+    "next": "下一张卡片",
+    "previous": "上一张卡片",
+    "turnBack": "卡片"
+  },
   "delete": "删除",
   "deleteChatLocal": "这将删除此设备上的聊天及其记录，不会删除联系人的副本。",
   "deleteChatTitle": "删除聊天？",
   "error": "错误",
+  "goHome": "返回首页",
   "loading": "加载中...",
   "moreInfo": "更多信息",
   "save": "保存",

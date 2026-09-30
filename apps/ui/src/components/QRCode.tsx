@@ -57,7 +57,7 @@ export function QRCodeDisplay({ value, qr, label }: QRCodeDisplayProps) {
           value={qr ?? value}
           size={232}
           marginSize={2}
-          title="Invite QR code"
+          title={t("invite.qrTitle")}
           bgColor="#ffffff"
           fgColor="#0b0f1a"
           level="M"

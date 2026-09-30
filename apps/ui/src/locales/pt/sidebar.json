@@ -1,4 +1,5 @@
 {
+  "account": "Conta",
   "chats": "Conversas",
   "copyInvite": "Copiar código de convite",
   "deleteAllChats": "Excluir todas as conversas",
@@ -26,6 +27,7 @@
     "label": "Criar um grupo ou uma conversa"
   },
   "noChats": "Nenhuma conversa",
+  "noResults": "Nenhum resultado",
   "pinned": "Fixada",
   "quiet": "Está quieto por aqui...",
   "quietHint": "Hora de assombrar alguém! 👻",

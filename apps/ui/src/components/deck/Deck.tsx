@@ -1,6 +1,7 @@
 import {useCallback,useEffect,useLayoutEffect,useMemo,useRef,useState,type CSSProperties,type KeyboardEvent,type PointerEvent,type ReactNode} from 'react';
 import {stackLayout,stackStrips,stepCard,stripAt} from './stack';
 import {deckSwitchSound,playSwitch,switchDirection} from './motion';
+import {useOptionalI18n} from '../../contexts/I18nContext';
 import './deck.css';
 
 /**
@@ -81,6 +82,7 @@ export interface DeckProps<C extends DeckCard> {
 }
 
 export function Deck<C extends DeckCard>({cards,selected,onSelect,onChoose,kind,checked,cardLabel,panel,label,testId,face,mark,tone,blocked,size,name,className,compact}:DeckProps<C>) {
+ const i18n=useOptionalI18n();
  const part=(p:string)=>`deck-${p} ${className}-${p}`;
  const active=Math.max(0,cards.findIndex(card=>card.id===selected));
  const root=useRef<HTMLDivElement>(null),track=useRef<HTMLDivElement>(null),tabs=useRef<(HTMLButtonElement|null)[]>([]);
@@ -238,11 +240,11 @@ export function Deck<C extends DeckCard>({cards,selected,onSelect,onChoose,kind,
    })}
   </div>
   {cards.length>1&&<div className={part('nav')}>
-   <button type="button" className={part('arrow')} aria-label="Previous card" data-testid={`${name}-prev`} onClick={()=>select(stepCard(active,-1,cards.length))}>
+   <button type="button" className={part('arrow')} aria-label={i18n?.t('common.deck.previous')??'Previous card'} data-testid={`${name}-prev`} onClick={()=>select(stepCard(active,-1,cards.length))}>
     <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M10 3 5 8l5 5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
    </button>
    <div className={part('marks')} aria-hidden="true" style={{'--mark-i':active} as CSSProperties}>{cards.map((card,i)=><span key={card.id} className={tone(card)} data-on={i===active} data-checked={kind==='checks'?!!checked?.(card):undefined}>{mark(card)}</span>)}</div>
-   <button type="button" className={part('arrow')} aria-label="Next card" data-testid={`${name}-next`} onClick={()=>select(stepCard(active,1,cards.length))}>
+   <button type="button" className={part('arrow')} aria-label={i18n?.t('common.deck.next')??'Next card'} data-testid={`${name}-next`} onClick={()=>select(stepCard(active,1,cards.length))}>
     <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="m6 3 5 5-5 5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
    </button>
   </div>}

@@ -7,10 +7,16 @@
   "confirm": "Confirmar",
   "copied": "Copiado!",
   "copy": "Copiar",
+  "deck": {
+    "next": "Próximo cartão",
+    "previous": "Cartão anterior",
+    "turnBack": "Cartões"
+  },
   "delete": "Excluir",
   "deleteChatLocal": "Isso exclui a conversa e o histórico deste dispositivo. A cópia do seu contato não é excluída.",
   "deleteChatTitle": "Excluir conversa?",
   "error": "Erro",
+  "goHome": "Ir para o início",
   "loading": "Carregando...",
   "moreInfo": "Mais informações",
   "save": "Salvar",

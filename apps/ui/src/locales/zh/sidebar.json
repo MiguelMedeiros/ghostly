@@ -1,4 +1,5 @@
 {
+  "account": "账户",
   "chats": "聊天",
   "copyInvite": "复制邀请码",
   "deleteAllChats": "删除所有聊天",
@@ -26,6 +27,7 @@
     "label": "创建群组或聊天"
   },
   "noChats": "暂无聊天",
+  "noResults": "没有找到结果",
   "pinned": "已置顶",
   "quiet": "这里很安静...",
   "quietHint": "该去吓唬谁了！👻",
