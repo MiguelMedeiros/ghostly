@@ -16,7 +16,7 @@
     "title": "タスク"
   },
   "routine": {
-    "cron": "Cron:",
+    "cron": "Cron",
     "label": "ルーティン：{{name}}、{{state}}",
     "lastRun": "前回の実行: {{result}}",
     "next": "次回 {{when}}",
@@ -27,6 +27,7 @@
       "skipped": "スキップ"
     },
     "runs": "最近の実行",
+    "schedule": "スケジュール",
     "state": {
       "active": "有効",
       "paused": "一時停止中"

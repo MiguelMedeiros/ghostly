@@ -16,7 +16,7 @@
     "title": "Tareas"
   },
   "routine": {
-    "cron": "Cron:",
+    "cron": "Cron",
     "label": "Rutina: {{name}}, {{state}}",
     "lastRun": "Última ejecución: {{result}}",
     "next": "Próxima {{when}}",
@@ -27,6 +27,7 @@
       "skipped": "Omitida"
     },
     "runs": "Ejecuciones recientes",
+    "schedule": "Horario",
     "state": {
       "active": "Activa",
       "paused": "En pausa"
