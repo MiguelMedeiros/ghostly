@@ -4,7 +4,7 @@ import { taskProgress, type RoutineCard } from "@ghostly/core";
 import { useI18n } from "../../contexts/I18nContext";
 import { useOutsideDismiss, useTabTrap } from "../../hooks/useDismiss";
 import { useIsMobile } from "../../hooks/useIsMobile";
-import { drawEveryRow } from "../../hooks/useTailFirst";
+import { revealMessage } from "../../hooks/useRowWindow";
 import { jumpToMessage } from "../../lib/replies";
 import { RESULT_TONE, STATUS_TONE, activeTaskCount, cardEntries, panelModel, untilIn, type CardEntry, type CardRow } from "../../lib/statusCards";
 import { RoutineSummaryLine } from "./RoutineCard";
@@ -317,8 +317,8 @@ export function TasksButton({ rows, nameOf }: { rows: readonly CardRow[]; nameOf
       row?.querySelector<HTMLElement>("[data-testid=status-card-toggle]")?.focus({ preventScroll: true });
       return true;
     };
-    // Its row may not be drawn yet in a long chat: draw them all, then go.
-    if (!land()) { drawEveryRow(); requestAnimationFrame(land); }
+    // Its row may not be in the page in a long chat (useRowWindow): the rows around it first, then go.
+    if (!land() && revealMessage(messageId)) requestAnimationFrame(land);
   };
   const label = active ? t("cards.panel.buttonCount", { count: active }) : t("cards.panel.button");
   return (

@@ -6,6 +6,7 @@ import { sameValue } from "../../lib/sameValue";
 import type { ChatMessage } from "../../lib/types";
 import { linkView } from "../fakeEngine";
 import { renderApp } from "../render";
+import { OPEN_ROWS } from "../../hooks/useRowWindow";
 
 // covers: chat.scroll
 
@@ -29,6 +30,10 @@ vi.mock("../../lib/sounds", () => ({ playSound: vi.fn(() => () => {}), startRing
 const PEER = "peer".padEnd(52, "p");
 const COUNT = 300;
 const wire = (i: number) => `w${String(i).padStart(21, "0")}`;
+/** A message of mine among the last ones (in the page: useRowWindow), with the contact's ❤️. */
+const REACTED = COUNT - 6;
+/** A message of mine among the last ones, answering the contact's before it. */
+const REPLY = COUNT - 21;
 
 /** `COUNT` texts, every third mine, every tenth answering the one before it, every sixth with the contact's ❤️. */
 function history(): ChatMessage[] {
@@ -63,7 +68,9 @@ describe("a long chat", () => {
     const { engine } = openChat();
     await screen.findByText(`Message ${COUNT - 1}`);
     await settle();
-    expect(draws.text).toBeGreaterThanOrEqual(COUNT);
+    // The rows in the page: the last ones, not the whole history.
+    expect(draws.text).toBeGreaterThanOrEqual(OPEN_ROWS);
+    expect(draws.text).toBeLessThan(COUNT);
 
     draws.text = 0;
     // The engine's state moves on (a poll, a delivery elsewhere, the contact typing), and storage is read again.
@@ -83,7 +90,7 @@ describe("a long chat", () => {
     const { engine } = openChat(true, messages);
     await screen.findByText(`Message ${COUNT - 1}`);
     await settle();
-    expect(new Set(draws.files).size).toBe(COUNT / 30);
+    expect(new Set(draws.files).size).toBe(messages.slice(-OPEN_ROWS).filter(m => m.file).length);
 
     draws.files = [];
     for (let i = 0; i < 5; i++) act(() => engine.update({ links: [link()], transport: { ...engine.state.transport, relays: [`wss://relay-${i}.example`] } }));
@@ -134,14 +141,14 @@ describe("a long chat", () => {
     await settle();
     act(() => engine.update({ links: [link()] }));
     await settle();
-    const row = document.querySelector<HTMLElement>(`[data-message-id="me_${wire(0)}"]`)!;
+    const row = document.querySelector<HTMLElement>(`[data-message-id="me_${wire(REACTED)}"]`)!;
     act(() => within(row).getByTestId("reaction-chip").click());
     await settle();
-    expect(engine.callsTo("react")).toEqual([{ linkId: "link-1", messageId: `me_${wire(0)}`, emoji: "❤️" }]);
+    expect(engine.callsTo("react")).toEqual([{ linkId: "link-1", messageId: `me_${wire(REACTED)}`, emoji: "❤️" }]);
   });
 
-  it("a quote tapped before the older rows are drawn still goes to its original", () => {
-    // Timers held: the older rows stay undrawn until the tap asks for them.
+  it("a quote tapped whose original is not in the page still goes to it", () => {
+    // The original is the first message: far above the rows in the page, until the tap brings it in.
     vi.useRealTimers();
     vi.useFakeTimers();
     const messages = history();
@@ -161,7 +168,7 @@ describe("a long chat", () => {
     const { user } = openChat();
     await screen.findByText(`Message ${COUNT - 1}`);
     await settle();
-    const row = () => document.querySelector<HTMLElement>(`[data-message-id="me_${wire(0)}"]`)!;
+    const row = () => document.querySelector<HTMLElement>(`[data-message-id="me_${wire(REACTED)}"]`)!;
     expect(within(row()).getByTestId("reaction-chip")).toHaveAccessibleName("❤️: Ana");
     await user.click(screen.getByTestId("chat-name"));
     const input = screen.getByPlaceholderText("Set a name...");
@@ -169,8 +176,8 @@ describe("a long chat", () => {
     await user.type(input, "Bea{Enter}");
     await settle();
     expect(within(row()).getByTestId("reaction-chip")).toHaveAccessibleName("❤️: Bea");
-    // Message 9 answers Message 8, the contact's.
-    expect(within(document.querySelector<HTMLElement>(`[data-message-id="me_${wire(9)}"]`)!).getByTestId("message-quote")).toHaveTextContent("Bea");
+    // Message 279 answers Message 278, the contact's.
+    expect(within(document.querySelector<HTMLElement>(`[data-message-id="me_${wire(REPLY)}"]`)!).getByTestId("message-quote")).toHaveTextContent("Bea");
   });
 });
 

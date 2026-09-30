@@ -107,7 +107,7 @@ One mark beside the time, as in WhatsApp (#360, `apps/ui/src/components/chat/Del
 - A **↓ N new** pill counts the contact's new messages (reactions, edits and notices do not count) and goes to the first one. Older messages that arrive late, such as a group's catch-up after a reconnect, are not new (#506). With nothing new, a plain ↓ shows once you are far from the bottom. **End** or **Ctrl/Cmd+↓** jumps to the bottom.
 - A message you send always goes to the bottom. At the bottom, a composer that grows (a long draft, a saved one) keeps the last message in view (#524).
 - A chat opens at its last message. One you left scrolled up opens where you left it, while the app runs, also when you come to a group from another group (#468).
-- A long chat shows its last 60 messages first; the older ones come in above, 150 at a time, within about a second (#475, `apps/ui/src/hooks/useTailFirst.ts`). A long group reads its newest 50 from the store first (#494). A chat left scrolled up is drawn whole, so it can open on that message.
+- A long chat has a window of its messages in the page, never its whole history (`apps/ui/src/hooks/useRowWindow.ts`): it opens on its last 100, and as you scroll near the top 100 older ones come in above without moving the view. Past 300, the ones at the far end leave the page, so a chat of 20,000 messages opens and scrolls like a short one. A jump to a message not in the page (a quote, a search match, a Tasks row, the pinned message) brings in the messages around it first. A long group reads its newest 50 from the store first (#494). A chat left scrolled up opens around the message you left it on.
 - 1:1 chats, groups and communities alike.
 
 ## How messages render

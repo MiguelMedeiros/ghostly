@@ -1,7 +1,9 @@
 import { act, fireEvent, screen } from "@testing-library/react";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { JumpToLatest } from "../../components/chat/JumpToLatest";
-import { forgetChatScroll, useChatScroll, type ScrollRow } from "../../hooks/useChatScroll";
+import { useMemo } from "react";
+import { forgetChatScroll, leftOn, useChatScroll, type ScrollRow } from "../../hooks/useChatScroll";
+import { MAX_ROWS, OPEN_ROWS, PAGE_ROWS, revealMessage, useRowWindow } from "../../hooks/useRowWindow";
 import { jumpToMessage } from "../../lib/replies";
 import { renderApp } from "../render";
 
@@ -631,5 +633,115 @@ describe("a chat opened again before its rows are there", () => {
     rerender(<Timeline chat="g1" rows={[...one, ...theirs(20, 3)]} />);
     expect(list().scrollTop).toBe(23 * ROW - VIEW);
     expect(pill()).toBeNull();
+  });
+});
+
+/** A timeline with a window of its rows in the page (useRowWindow), as Chat.tsx and GroupChat.tsx draw one. */
+function WindowTimeline({ rows, chat = "chat-1" }: { rows: ScrollRow[]; chat?: string }) {
+  const ids = useMemo(() => rows.map(row => row.id), [rows]);
+  const win = useRowWindow(ids, chat, { opensOn: leftOn(chat) });
+  // A new list when the window moves, as the pages give it (see Chat.tsx).
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const all = useMemo(() => [...rows], [rows, win.from, win.to]);
+  const jump = useChatScroll({ rows: all, chat, window: win });
+  return (
+    <div>
+      <div ref={jump.listRef} data-testid="list">
+        <div ref={jump.columnRef}>{rows.slice(win.from, win.to).map(row => <div key={row.id} data-message-id={row.id}>{row.id}</div>)}</div>
+      </div>
+      <JumpToLatest count={jump.count} far={jump.far} onJump={jump.toNew} />
+    </div>
+  );
+}
+
+describe("a long timeline's window of rows", () => {
+  const long = theirs(0, 1_000);
+  const inPage = () => rowsIn(list()).length;
+  const lastInPage = () => rowsIn(list()).slice(-1)[0].dataset.messageId;
+  /** The row at the top of the view. */
+  const atTop = () => rowsIn(list()).find(row => row.getBoundingClientRect().bottom > 0)!.dataset.messageId!;
+  /** The user scrolls up near the top of the rows in the page, again and again. */
+  const upTimes = (n: number) => { for (let i = 0; i < n; i++) scrollTo(ROW); };
+
+  it("opens on its last rows at the bottom, and scrolled near the top takes older ones in above without moving the view", () => {
+    renderApp(<WindowTimeline rows={long} />);
+    expect(inPage()).toBe(OPEN_ROWS);
+    expect(list().scrollTop).toBe(OPEN_ROWS * ROW - VIEW);
+    scrollTo(4 * ROW);
+    const row = atTop();
+    const was = topOf(row);
+    // Older rows came in above; the row at the top of the view is where it was.
+    expect(inPage()).toBe(OPEN_ROWS + PAGE_ROWS);
+    expect(rowsIn(list())[0].dataset.messageId).toBe(`peer_${1_000 - OPEN_ROWS - PAGE_ROWS}`);
+    expect(topOf(row)).toBe(was);
+    expect(pill()).toHaveAttribute("data-count", "0");
+  });
+
+  it("never holds more than its most rows: far up, the last ones leave the page and new messages are counted, not drawn", () => {
+    const { rerender } = renderApp(<WindowTimeline rows={long} />);
+    upTimes(4);
+    expect(inPage()).toBe(MAX_ROWS);
+    const row = atTop();
+    const was = topOf(row);
+    rerender(<WindowTimeline rows={[...long, ...theirs(1_000, 2)]} />);
+    expect(topOf(row)).toBe(was);
+    expect(list().querySelector("[data-message-id=peer_1001]")).toBeNull();
+    expect(pill()).toHaveAttribute("data-count", "2");
+    // The pill: the first new one comes into the page with the last rows, and the view goes to it.
+    fireEvent.click(pill()!);
+    expect(list().querySelector("[data-message-id=peer_1000]")).not.toBeNull();
+    expect(inPage()).toBeLessThanOrEqual(MAX_ROWS);
+  });
+
+  it("going down from up the history takes newer rows in below and lets the top ones go, the view on its row", () => {
+    renderApp(<WindowTimeline rows={long} />);
+    upTimes(4);
+    const firstBefore = rowsIn(list())[0].dataset.messageId;
+    // Near the bottom of the rows in the page.
+    scrollTo(MAX_ROWS * ROW - VIEW - ROW);
+    const row = atTop();
+    const was = topOf(row);
+    expect(rowsIn(list())[0].dataset.messageId).not.toBe(firstBefore);
+    expect(inPage()).toBeLessThanOrEqual(MAX_ROWS);
+    expect(topOf(row)).toBe(was);
+  });
+
+  it("↓ from up the history brings the last rows back and lands at the bottom", () => {
+    renderApp(<WindowTimeline rows={long} />);
+    upTimes(4);
+    expect(pill()).not.toBeNull();
+    fireEvent.click(pill()!);
+    expect(lastInPage()).toBe("peer_999");
+    expect(inPage()).toBe(OPEN_ROWS);
+    expect(list().scrollTop).toBe(OPEN_ROWS * ROW - VIEW);
+  });
+
+  it("what I send from up the history brings the last rows back, at the bottom", () => {
+    const { rerender } = renderApp(<WindowTimeline rows={long} />);
+    upTimes(4);
+    rerender(<WindowTimeline rows={[...long, { id: "me_1", mine: true }]} />);
+    expect(lastInPage()).toBe("me_1");
+    expect(list().scrollTop).toBe(list().scrollHeight - VIEW);
+    expect(pill()).toBeNull();
+  });
+
+  it("a jump to a row not in the page brings the rows around it in and lands on it", () => {
+    renderApp(<WindowTimeline rows={long} />);
+    expect(list().querySelector("[data-message-id=peer_12]")).toBeNull();
+    act(() => { expect(jumpToMessage("peer_12") || (revealMessage("peer_12") && jumpToMessage("peer_12"))).toBe(true); });
+    expect(list().querySelector("[data-message-id=peer_12]")).toHaveAttribute("data-reply-flash");
+    expect(inPage()).toBeLessThanOrEqual(MAX_ROWS);
+    // Up the history now: the view is not at the bottom, and a ↓ takes it back there.
+    expect(pill()).not.toBeNull();
+  });
+
+  it("left scrolled up far in the history, it opens on that message again", () => {
+    const { unmount } = renderApp(<WindowTimeline rows={long} />);
+    upTimes(4);
+    const row = atTop();
+    const was = topOf(row);
+    unmount();
+    renderApp(<WindowTimeline rows={long} />);
+    expect(topOf(row)).toBe(was);
   });
 });

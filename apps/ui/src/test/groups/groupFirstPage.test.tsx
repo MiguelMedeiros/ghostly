@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { GroupMemberView, StoredMessage } from "@ghostly/browser/shared/types";
 import { GroupChat } from "../../pages/GroupChat";
 import { forgetChatScroll } from "../../hooks/useChatScroll";
-import { MORE_ROWS } from "../../hooks/useTailFirst";
+import { OPEN_ROWS, PAGE_ROWS, revealMessage } from "../../hooks/useRowWindow";
 import { fakeEngine, groupView } from "../fakeEngine";
 import { renderApp } from "../render";
 
@@ -12,7 +12,8 @@ import { renderApp } from "../render";
 
 /**
  * A long group opens on its newest page, read from the store's index (`messagePage`), and the rest of its history comes
- * in above once the engine has read it all: drawn by steps, not counted as new, the view kept where it is.
+ * in above once the engine has read it all: kept out of the page until the view goes up to it (useRowWindow), and not
+ * counted as new.
  */
 
 const ME = "me".padEnd(52, "y"), ALICE = "alice".padEnd(52, "y");
@@ -45,15 +46,19 @@ describe("a long group", () => {
     // the rest was still coming in, and saw the whole history there at once.
     vi.setTimerTickMode("manual");
     await act(async () => { whole(history); await vi.advanceTimersByTimeAsync(0); });
-    // The page's rows stay drawn; the older ones come in by steps, MORE_ROWS each, until every one is there.
-    const older = COUNT - PAGE;
+    // The page's rows stay in the page, with the older ones a chat opens with; the rest stay out, however long the clock
+    // runs.
+    const older = COUNT - OPEN_ROWS;
+    expect(row(COUNT - PAGE)).not.toBeNull();
     expect(row(older)).not.toBeNull();
     expect(row(older - 1)).toBeNull();
-    await act(() => vi.advanceTimersByTimeAsync(0));
-    expect(row(older - MORE_ROWS)).not.toBeNull();
-    expect(row(older - MORE_ROWS - 1)).toBeNull();
-    await act(() => vi.advanceTimersByTimeAsync(0));
+    await act(() => vi.advanceTimersByTimeAsync(1_000));
+    expect(row(older - 1)).toBeNull();
+    // Asked for (a quote's original), the oldest comes into the page with the rows after it.
+    act(() => { expect(revealMessage("g0000")).toBe(true); });
     expect(row(0)).not.toBeNull();
+    expect(row(PAGE_ROWS)).not.toBeNull();
+    expect(row(COUNT - 1)).toBeNull();
     expect(screen.queryByTestId("jump-latest")?.getAttribute("data-count") ?? "0").toBe("0");
   });
 });
