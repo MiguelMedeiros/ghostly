@@ -53,6 +53,7 @@
   "color": "Colore",
   "colorLabel": "Colore del profilo",
   "create": "Crea",
+  "defaultName": "Personale",
   "delete": {
     "backupFirst": "Scarica prima un backup",
     "backupPassphrase": "Passphrase del backup",

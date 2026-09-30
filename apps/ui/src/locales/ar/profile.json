@@ -53,6 +53,7 @@
   "color": "اللون",
   "colorLabel": "لون الملف الشخصي",
   "create": "إنشاء",
+  "defaultName": "شخصي",
   "delete": {
     "backupFirst": "نزّل نسخة احتياطية أولًا",
     "backupPassphrase": "عبارة مرور النسخة الاحتياطية",
