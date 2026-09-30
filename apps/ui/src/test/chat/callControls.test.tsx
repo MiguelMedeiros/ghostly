@@ -3,6 +3,7 @@ import type { ComponentProps } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { CallButtons } from "../../components/CallButtons";
 import { CallOverlay } from "../../components/CallOverlay";
+import { IncomingCallNotification } from "../../components/IncomingCallNotification";
 import { renderApp } from "../render";
 
 // covers: calls.screen-share, calls.audio, calls.video, calls.mini-window
@@ -146,5 +147,45 @@ describe("sharing the screen from inside a call", () => {
     overlay({ callState: "offering", canShareScreen: false, isScreenSharing: false });
     expect(screen.queryByTestId("share-screen")).toBeNull();
     expect(screen.queryByTestId("call-sharing")).toBeNull();
+  });
+});
+
+describe("a call for a screen reader and the keys", () => {
+  it("rings as a dialog named for the caller: the focus in it, not on Accept, the keys kept in it, back where it was after", async () => {
+    const before = document.createElement("textarea");
+    document.body.append(before);
+    before.focus();
+    const onAcceptAudio = vi.fn();
+    const { user, unmount } = renderApp(<IncomingCallNotification peerName="Ana" hasVideo onAcceptAudio={onAcceptAudio} onAcceptVideo={vi.fn()} onReject={vi.fn()} />);
+    const ring = screen.getByRole("alertdialog", { name: "Ana" });
+    expect(ring).toHaveAccessibleDescription("Incoming video call...");
+    expect(ring).toHaveAttribute("aria-modal", "true");
+    expect(ring).toHaveFocus();
+    // An Enter meant for the message does not answer.
+    await user.keyboard("{Enter}");
+    expect(onAcceptAudio).not.toHaveBeenCalled();
+    const buttons = within(ring).getAllByRole("button");
+    expect(buttons.map((b) => b.getAttribute("aria-label"))).toEqual(["Decline", "Accept audio call", "Accept video call"]);
+    await user.tab();
+    await user.tab();
+    await user.tab();
+    expect(buttons[2]).toHaveFocus();
+    await user.tab();
+    expect(buttons[0]).toHaveFocus();
+    unmount();
+    expect(before).toHaveFocus();
+    before.remove();
+  });
+
+  it("says the call's state in words as it moves on, never the running clock", () => {
+    const { rerender } = overlay({ callState: "offering" });
+    const spoken = screen.getByTestId("call-state-spoken");
+    expect(spoken).toHaveAttribute("role", "status");
+    expect(spoken).toHaveTextContent("Calling...");
+    const props = { localStream: null, remoteStream: null, isMuted: false, isVideoOff: true, canSendVideo: true, remoteHasVideo: false, callStartedAt: Date.now() - 65_000,
+      peerName: "Ana", onHangUp: vi.fn(), onToggleMute: vi.fn(), onToggleVideo: vi.fn() };
+    rerender(<CallOverlay callState="connected" {...props} />);
+    expect(screen.getByTestId("call-state-spoken")).toHaveTextContent(/^Connected$/);
+    expect(screen.getByTestId("call-status")).not.toHaveAttribute("role");
   });
 });

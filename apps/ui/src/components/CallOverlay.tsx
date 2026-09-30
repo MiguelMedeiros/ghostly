@@ -171,6 +171,17 @@ export function CallOverlay({
     ended: t("calls.ended"),
   }[callState];
 
+  // What a screen reader says as the call moves on: the state in words, never the clock, which changes every second.
+  const spokenState = {
+    offering: t("calls.outgoing"),
+    answering: t("calls.connecting"),
+    connecting: t("calls.connecting"),
+    connected: t("calls.connected"),
+    idle: "",
+    incoming: "",
+    ended: t("calls.ended"),
+  }[callState];
+
   const showRemoteVideo = remoteHasVideo && remoteStream && callState === "connected";
   // A screen in place of the camera leaves the camera off, and its button says so.
   const cameraOn = !isVideoOff && !isScreenSharing;
@@ -204,6 +215,8 @@ export function CallOverlay({
           {mini ? <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" /> : <path d="M4 14h6v6M20 10h-6V4M14 10l7-7M3 21l7-7" />}
         </svg>
       </button>
+
+      <p role="status" className="sr-only" data-testid="call-state-spoken">{spokenState}</p>
 
       {/* Remote audio (always present for audio playback) */}
       <audio ref={remoteAudioRef} autoPlay playsInline className="hidden" />

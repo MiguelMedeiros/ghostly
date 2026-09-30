@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { engine } from "@ghostly/browser/platform/engine";
 import type { GroupView } from "@ghostly/browser/shared/types";
 import { PeerAvatar } from "./Avatar";
@@ -117,8 +117,10 @@ function RowMute({ chat, mentions }: { chat: string; mentions?: boolean }) {
 }
 
 /** The two (or, comfortable, three) lines beside the avatar, shared by chats and groups. */
-function RowText({ name, nameClass, marks, status, time, timeClass = "text-text-muted", sub, preview, trailing, timeCover }: {
+function RowText({ name, nameClass, marks, status, time, timeClass = "text-text-muted", sub, preview, previewId, trailing, timeCover }: {
   name: ReactNode; nameClass: string;
+  /** The preview line's id: what the row's button is described by. */
+  previewId?: string;
   /** After the name: the contact's verified identities (identities/ContactMarks.tsx), which give way before the time does. */
   marks?: ReactNode;
   /** Before the time: what the chat is set to (StatusMark), muted, never at the time's expense. */
@@ -143,11 +145,21 @@ function RowText({ name, nameClass, marks, status, time, timeClass = "text-text-
       {sub}
       <div className="mt-0.5 flex items-center gap-2">
         {/* The last message in its own direction: an English one in the Arabic app, cut at its own end. */}
-        <p dir="auto" data-testid="chat-row-preview" className="flex-1 min-w-0 truncate m-0 text-[13px] leading-5">{preview}</p>
+        <p id={previewId} dir="auto" data-testid="chat-row-preview" className="flex-1 min-w-0 truncate m-0 text-[13px] leading-5">{preview}</p>
         {trailing && <div className="flex shrink-0 items-center gap-1.5">{trailing}</div>}
       </div>
     </div>
   );
+}
+
+/**
+ * What opens the row from the keyboard: a button over the whole row, first in it, so Tab reaches every chat and group
+ * and Enter or Space opens it (the click it makes is the row's own). The pointer goes through it to the row and to the
+ * buttons laid over it, as before; its ring is the row's edge.
+ */
+function RowOpen({ label, active, describedBy, testId }: { label: string; active: boolean; describedBy: string; testId: string }) {
+  return <button type="button" data-testid={testId} aria-label={label} aria-describedby={describedBy} aria-current={active ? "page" : undefined}
+    className="pointer-events-none absolute inset-0 rounded-sm focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent" />;
 }
 
 const rowClass = (active: boolean, density: ChatListDensity) =>
@@ -193,9 +205,11 @@ export function ChatRow(p: ChatRowProps) {
   const size = AVATAR[p.density];
   const pinLabel = p.pinned ? t("chat.menu.unpin") : t("chat.menu.pin");
   const typing = usePeerTypingActivity(p.peerPubKey);
+  const previewId = useId();
   useChosenProfile(p.peerPubKey);
   return (
     <div data-testid="chat-row" data-muted={muted || undefined} onClick={p.onOpen} title={`${p.label} · ${p.keyLabel}`} className={rowClass(p.active, p.density)}>
+      <RowOpen testId="chat-row-open" label={p.named ? p.label : `${p.label} · ${p.keyLabel}`} active={p.active} describedBy={previewId} />
       <div className={`relative shrink-0 rounded-full flex items-center justify-center ${p.active ? "bg-surface-alt" : "bg-surface-hover"}`} style={{ width: size, height: size }}>
         <PeerAvatar peerPubKey={p.peerPubKey} label={p.label} named={p.named} photo={p.face?.photo} testId="chat-row-avatar" />
         {p.face && <FaceCorner face={p.face} />}
@@ -223,6 +237,7 @@ export function ChatRow(p: ChatRowProps) {
       </div>
       <RowText
         name={<bdi>{p.label}</bdi>}
+        previewId={previewId}
         marks={<ContactMarks peerKey={p.peerPubKey} />}
         nameClass={!p.named ? "text-text-muted/60 italic" : p.unread > 0 ? "text-text-primary font-semibold" : "text-text-primary"}
         time={p.time}
@@ -308,15 +323,18 @@ export function GroupRow({ group, active, density, onOpen }: { group: GroupView;
   // The latest reaction, while nothing was said after it (WISP 400 § Reactions).
   const reacted = !invitation && group.status === "active" && group.lastReaction && group.lastReaction.at > group.lastMessageAt ? group.lastReaction : undefined;
   const note = reacted && reactionNoteText(reacted, authorName(group, reacted.by, t), t);
+  const previewId = useId();
   const size = AVATAR[density];
   return (
     <div data-testid="group-row" data-group={group.id} data-muted={muted || undefined} onClick={onOpen} title={group.name || t("group.chat.unnamed")} className={rowClass(active, density)}>
+      <RowOpen testId="group-row-open" label={group.name || t("group.chat.unnamed")} active={active} describedBy={previewId} />
       <div className="relative shrink-0">
         <GroupAvatar picture={group.picture} size={size} glyph={Math.round(size * 0.46)} testId="group-row-avatar" className={active ? "bg-surface-alt" : "bg-surface-hover"} />
       </div>
       <div className="flex-1 min-w-0">
         <RowText
           name={group.name || t("group.chat.unnamed")}
+          previewId={previewId}
           nameClass={unread ? "text-text-primary font-semibold" : "text-text-primary"}
           time={group.lastMessageAt > 0 ? formatListTime(group.lastMessageAt, undefined, language, t) : undefined}
           timeClass={unread && !muted ? "text-accent font-medium" : "text-text-muted"}
