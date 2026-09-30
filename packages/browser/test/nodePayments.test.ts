@@ -335,17 +335,27 @@ describe("the Cashu wallet and Lightning", () => {
     expect(node["settings"].mints).toEqual(["https://a.example", "https://b.example"]);
   });
 
-  it("refuses a mint of the other network from a network's Cashu wallet, before contacting it", async () => {
+  it("refuses a mint of the other network from a network's Cashu wallet: a test mint before contacting it, another once it answered as a mint", async () => {
     const { node } = track(engine());
     const check = vi.spyOn(node["wallet"], "checkMint").mockImplementation(async (url: string) => ({ url: url.replace(/\/$/, ""), name: url }));
     await expect(node.walletAddMint({ url: `${TEST_MINT}/`, network: "mainnet" })).rejects.toThrow("add it to a Testnet Cashu wallet");
-    await expect(node.walletAddMint({ url: "https://a.example", network: "testnet" })).rejects.toThrow("add it to a Mainnet Cashu wallet");
     expect(check).not.toHaveBeenCalled();
+    await expect(node.walletAddMint({ url: "https://a.example", network: "testnet" })).rejects.toThrow("add it to a Mainnet Cashu wallet");
+    expect(check).toHaveBeenCalledWith("https://a.example");
     expect(node["settings"].mints).not.toContain(TEST_MINT);
     expect(node["settings"].mints).not.toContain("https://a.example");
     await node.walletAddMint({ url: TEST_MINT, network: "testnet" });
     await node.walletAddMint({ url: "https://a.example", network: "mainnet" });
     expect(node["settings"].mints).toEqual(expect.arrayContaining([TEST_MINT, "https://a.example"]));
+  });
+
+  it("names an address from Testnet that does not answer as unreachable, not as a mint of real sats", async () => {
+    const { node } = track(engine());
+    vi.spyOn(node["wallet"], "wallet" as never).mockRejectedValue(new TypeError("Failed to fetch") as never);
+    const before = [...node["settings"].mints];
+    await expect(node.walletAddMint({ url: "https://mint.unreachable.invalid", network: "testnet" })).rejects.toThrow(/mint\.unreachable\.invalid/);
+    await expect(node.walletAddMint({ url: "https://mint.unreachable.invalid", network: "testnet" })).rejects.not.toThrow("real sats");
+    expect(node["settings"].mints).toEqual(before);
   });
 
   it("never removes a mint that still holds sats", async () => {
