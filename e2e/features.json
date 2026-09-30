@@ -819,6 +819,7 @@
     "apps/ui/src/lib/time.ts": ["groups.*","nostr.*"],
     "apps/ui/src/lib/transportEvents.ts": ["transport.timeline","transport.chat-switch","transport.wait"],
     "apps/ui/src/lib/types.ts": [],
+    "apps/ui/src/lib/updateFailure.ts": ["app.updates.*"],
     "apps/ui/src/lib/updates.ts": ["desktop.*","app.updates.*"],
     "apps/ui/src/lib/url.ts": ["*"],
     "apps/ui/src/lib/videoPlayer.ts": ["files.video.*","files.audio.*"],

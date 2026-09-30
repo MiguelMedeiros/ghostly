@@ -54,7 +54,6 @@
   "colorLabel": "Colore del profilo",
   "create": "Crea",
   "delete": {
-    "arkWallet": "Portafoglio Ark",
     "backupFirst": "Scarica prima un backup",
     "backupPassphrase": "Passphrase del backup",
     "cashuSats": "{{amount}} sats in Cashu",
@@ -68,7 +67,7 @@
     "serviceCount": "{{count}} app",
     "serviceOne": "1 app",
     "title": "Eliminare “{{name}}”?",
-    "usdtWallet": "Portafoglio USDT",
+    "wallet": "Portafoglio {{name}}",
     "warning": "Non si può annullare. I suoi portafogli se ne vanno con lui."
   },
   "deleteNamed": "Elimina {{name}}",

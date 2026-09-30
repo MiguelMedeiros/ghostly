@@ -7,6 +7,7 @@
   "checking": "Controllo...",
   "download": "Scarica",
   "downloading": "Download... {{percent}}%",
+  "errorDetails": "Cosa ha risposto il programma di aggiornamento",
   "failed": "Impossibile controllare gli aggiornamenti",
   "installing": "Aggiornamento...",
   "lastChecked": "Ultimo controllo alle {{when}}",
@@ -15,5 +16,14 @@
   "reload": "Ricarica",
   "restart": "Aggiorna e riavvia",
   "title": "Aggiornamenti",
-  "upToDate": "Ghostly è aggiornato"
+  "upToDate": "Ghostly è aggiornato",
+  "why": {
+    "noRelease": "Il server degli aggiornamenti non ha dato informazioni sulla versione. Riprova più tardi.",
+    "notForThisSystem": "L'ultima versione non ha ancora un aggiornamento per questo sistema.",
+    "offline": "Questo dispositivo è offline.",
+    "signature": "La firma dell'aggiornamento non era valida, quindi non è stato usato.",
+    "timeout": "Il server degli aggiornamenti ha impiegato troppo a rispondere.",
+    "unknown": "Qualcosa è andato storto durante il controllo.",
+    "unreachable": "Impossibile raggiungere il server degli aggiornamenti. Controlla la connessione."
+  }
 }

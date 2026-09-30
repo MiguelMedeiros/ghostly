@@ -3,6 +3,7 @@ import { useSettings } from "../contexts/SettingsContext";
 import { useI18n } from "../contexts/I18nContext";
 import { useLockScreen } from "../contexts/LockScreenContext";
 import { useUpdate } from "../contexts/UpdateContext";
+import { updateFailure } from "../lib/updateFailure";
 import { canInstall, startInstall, useInstallState } from "../lib/installPrompt";
 import { pushPlatform, setWake, useWakeOn } from "../lib/wakePush";
 import { noticePlace, noticeSettings, notificationPermission, openNoticeSettings, requestNotifications, type NoticePermission } from "../lib/notifications";
@@ -471,6 +472,12 @@ export function Settings() {
                     ? t("updates.upToDate")
                     : `${t("settings.version")} ${appVersion}`}
             </span>}
+            // Why it failed behind the ⓘ: the reason in words, then what the updater said, as it said it.
+            info={!update.update && update.error ? <>
+              <span className="block" data-testid="update-failure">{t(`updates.why.${updateFailure(update.error)}` as const)}</span>
+              <span className="block mt-1.5 text-text-muted">{t("updates.errorDetails")}</span>
+              <code className="block font-mono text-[11px] break-all" data-testid="update-error">{update.error}</code>
+            </> : undefined}
             hint={update.lastCheckedAt ? t("updates.lastChecked", { when: new Date(update.lastCheckedAt).toLocaleTimeString() }) : undefined}>
             {update.update && update.update.apply === "manual" ? (
               <a {...externalLinkProps(update.downloadUrl)} className="px-4 py-2 min-h-10 inline-flex items-center rounded-lg text-sm transition-colors bg-accent hover:bg-accent-hover text-on-accent font-semibold">

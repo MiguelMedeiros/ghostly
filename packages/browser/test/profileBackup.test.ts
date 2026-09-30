@@ -112,7 +112,7 @@ it("deletes another profile completely, after an optional backup of it, and neve
   (await wrap(request)).close();
   storage.setItem("ghostly_0123456789abcdef0123456789abcdef", JSON.stringify({ id: "y", mySeedB64: "s", peerPubKeyB64: "keep", encKeyB64: "e", messages: [] }));
 
-  expect(await profileSummary(work.id)).toEqual({ chats: 1, cashuSats: 64, ark: true, usdt: false, services: 1 });
+  expect(await profileSummary(work.id)).toEqual({ chats: 1, cashuSats: 64, wallets: ["Ark"], services: 1 });
   const bundle = await createProfileBackup("a long backup passphrase", work.id);
   expect(bundle).toContain("ghostly-backup");
 
@@ -129,7 +129,7 @@ it("deletes another profile completely, after an optional backup of it, and neve
   // And the backup made before deleting brings it all back.
   const back = await restoreProfileBackup(bundle, "a long backup passphrase");
   expect(back.name).toBe("Work (restored)");
-  expect(await profileSummary(back.id)).toMatchObject({ chats: 1, cashuSats: 64, ark: true, services: 1 });
+  expect(await profileSummary(back.id)).toMatchObject({ chats: 1, cashuSats: 64, wallets: ["Ark"], services: 1 });
 });
 
 it("a restored copy never shares an Ark database with its original, and deleting it leaves the original's alone", async () => {
