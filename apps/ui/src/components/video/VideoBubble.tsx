@@ -144,8 +144,12 @@ export function VideoBubble({ file, sender, peerName: named }: { file: ChatFile;
     setPhase("playing");
   }, [platform, phase, file.id, file.mime, ready]);
 
-  /** The player refused it: a stream is tried again from the file's bytes, once; anything else is unplayable here. */
+  /**
+   * The player refused it: a stream is tried again from the file's bytes, once; anything else is unplayable here. A
+   * failed source both fires `error` and rejects its pending play(): the second finds nothing loaded and is ignored.
+   */
   const refused = useCallback(() => {
+    if (!sourceRef.current) return;
     const retry = sourceRef.current?.streamed && !fellBack.current;
     const at = videoRef.current?.currentTime ?? 0;
     unload();

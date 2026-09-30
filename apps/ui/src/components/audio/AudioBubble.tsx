@@ -102,8 +102,12 @@ export function AudioBubble({ file, sender, peerName: named, highlight }: { file
     setSrc(source.url);
   }, [platform, state, file.id, file.mime, ready, setPlayState, setProblem]);
 
-  /** The player refused it: a stream is tried again from the file's bytes, once; anything else is unplayable here. */
+  /**
+   * The player refused it: a stream is tried again from the file's bytes, once; anything else is unplayable here. A
+   * failed source both fires `error` and rejects its pending play(): the second finds nothing loaded and is ignored.
+   */
   const refused = () => {
+    if (!sourceRef.current) return;
     const retry = sourceRef.current?.streamed && !fellBack.current;
     const at = audioRef.current?.currentTime ?? 0;
     unload();
