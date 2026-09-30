@@ -181,7 +181,7 @@
     "nothingElse": "{{name}} non ha ancora condiviso altro.",
     "onlyThis": "{{contact}} vede solo questa identità",
     "provider": "Ghostly",
-    "seenByDefault": "Ciò che i contatti vedono di default",
+    "seenByDefault": "Predefinita per i contatti",
     "shareOnly": "Condividi solo questa",
     "sharedWith": "Condivisa con {{contact}}",
     "since": "Dal {{date}}",

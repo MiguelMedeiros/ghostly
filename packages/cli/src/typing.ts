@@ -4,9 +4,12 @@ import { node, type ApiContext } from "./apiKit";
 /**
  * `typing --for` and `group typing --for`: a `start` holds 6 s on the other side (WISP 401 § Typing, WISP 9xx · Group
  * Mesh § Typing), so the daemon says it again until the time is up, a message goes to that chat or group, or a
- * `--stop`. The engine sends a `start` at most once per refresh: asking twice as often keeps one out before the timeout.
+ * `--stop`. The engine sends a `start` at most once per refresh, counted from when the last one went: asking every half
+ * refresh missed the tick at 3 s by a millisecond about half the time, so a start went every 4.5 s, 1.5 s inside the
+ * contact's 6 s, and a busy machine flickered the contact's indicator off and on. Asking every half second sends one
+ * at most 3.5 s after the last, and soon again when the send limit held one back.
  */
-const KEEP_EVERY_MS = TYPING_REFRESH_MS / 2;
+const KEEP_EVERY_MS = TYPING_REFRESH_MS / 6;
 const keepers = new WeakMap<ApiContext, Map<string, () => void>>();
 
 /** Where typing is said: a 1:1 chat, or a private group. */
