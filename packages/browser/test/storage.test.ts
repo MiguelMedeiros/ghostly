@@ -94,6 +94,26 @@ describe("the flag that says we already announced ourselves", () => {
   });
 });
 
+describe("what a chat remembers besides its messages", () => {
+  it("goes with it: the payment sheet's card and tab with the contact's last chat, the mentions setting with the chat", async () => {
+    const { rememberNetwork, rememberRail, rememberedRail } = await import("../../../apps/ui/src/lib/chatPayments");
+    const { setMentionsNotify } = await import("../../../apps/ui/src/lib/chatMute");
+    Object.defineProperty(globalThis, "window", { value: { dispatchEvent: () => true }, configurable: true });
+    const first = ensureSession(keys);
+    const second = ensureSession({ ...keys, seedB64: "c2Vjb25k" });
+    rememberRail(keys.peerPubKeyB64, "cashu:testnet");
+    rememberNetwork(keys.peerPubKeyB64, "testnet");
+    setMentionsNotify(first, false);
+
+    deleteSession(first);
+    expect(storage.keys().filter((key) => key.includes(first)), "the mentions setting").toEqual([]);
+    expect(rememberedRail(keys.peerPubKeyB64), "another chat with the same contact still uses it").toBe("cashu:testnet");
+
+    deleteSession(second);
+    expect(storage.keys().filter((key) => key.includes(keys.peerPubKeyB64))).toEqual([]);
+  });
+});
+
 describe("the name a peer goes by", () => {
   it("cannot reorder or pad what it is shown next to", () => {
     expect(peerDisplayName("\u202eCasper")).toBe("Casper");
