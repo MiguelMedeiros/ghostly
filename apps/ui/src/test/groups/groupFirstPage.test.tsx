@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { GroupMemberView, StoredMessage } from "@ghostly/browser/shared/types";
 import { GroupChat } from "../../pages/GroupChat";
 import { forgetChatScroll } from "../../hooks/useChatScroll";
-import { PAGE_ROWS, revealMessage } from "../../hooks/useRowWindow";
+import { OPEN_ROWS, PAGE_ROWS, revealMessage } from "../../hooks/useRowWindow";
 import { fakeEngine, groupView } from "../fakeEngine";
 import { renderApp } from "../render";
 
@@ -46,8 +46,10 @@ describe("a long group", () => {
     // the rest was still coming in, and saw the whole history there at once.
     vi.setTimerTickMode("manual");
     await act(async () => { whole(history); await vi.advanceTimersByTimeAsync(0); });
-    // The page's rows stay in the page; the older ones stay out of it, however long the clock runs.
-    const older = COUNT - PAGE;
+    // The page's rows stay in the page, with the older ones a chat opens with; the rest stay out, however long the clock
+    // runs.
+    const older = COUNT - OPEN_ROWS;
+    expect(row(COUNT - PAGE)).not.toBeNull();
     expect(row(older)).not.toBeNull();
     expect(row(older - 1)).toBeNull();
     await act(() => vi.advanceTimersByTimeAsync(1_000));

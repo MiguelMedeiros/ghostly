@@ -657,6 +657,7 @@ function WindowTimeline({ rows, chat = "chat-1" }: { rows: ScrollRow[]; chat?: s
 describe("a long timeline's window of rows", () => {
   const long = theirs(0, 1_000);
   const inPage = () => rowsIn(list()).length;
+  const lastInPage = () => rowsIn(list()).slice(-1)[0].dataset.messageId;
   /** The row at the top of the view. */
   const atTop = () => rowsIn(list()).find(row => row.getBoundingClientRect().bottom > 0)!.dataset.messageId!;
   /** The user scrolls up near the top of the rows in the page, again and again. */
@@ -710,7 +711,7 @@ describe("a long timeline's window of rows", () => {
     upTimes(4);
     expect(pill()).not.toBeNull();
     fireEvent.click(pill()!);
-    expect(rowsIn(list()).at(-1)!.dataset.messageId).toBe("peer_999");
+    expect(lastInPage()).toBe("peer_999");
     expect(inPage()).toBe(OPEN_ROWS);
     expect(list().scrollTop).toBe(OPEN_ROWS * ROW - VIEW);
   });
@@ -719,7 +720,7 @@ describe("a long timeline's window of rows", () => {
     const { rerender } = renderApp(<WindowTimeline rows={long} />);
     upTimes(4);
     rerender(<WindowTimeline rows={[...long, { id: "me_1", mine: true }]} />);
-    expect(rowsIn(list()).at(-1)!.dataset.messageId).toBe("me_1");
+    expect(lastInPage()).toBe("me_1");
     expect(list().scrollTop).toBe(list().scrollHeight - VIEW);
     expect(pill()).toBeNull();
   });

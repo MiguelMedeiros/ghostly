@@ -77,7 +77,8 @@ function around(key: string, ids: readonly string[], at: number): State {
  * the history is: a chat of 20,000 messages opens, scrolls and answers as one of 200 does.
  *
  * The window is held by its edge rows, not by positions: older history coming in above later (a group's newest page
- * first, then the rest) stays out of the page until the view goes up to it, and messages coming at the end are drawn
+ * first, then the rest) stays out of the page until the view goes up to it (past the `OPEN_ROWS` the end always has),
+ * and messages coming at the end are drawn
  * while the window reaches the end. `useChatScroll` keeps the view where it was when rows come or go above it.
  *
  * `ids` are the rows' keys in order and `key` the timeline (another one starts over). `heads` maps a row folded into a
@@ -94,6 +95,9 @@ export function useRowWindow(ids: readonly string[], key: string, { opensOn, hea
 
   let from = state.first === null ? 0 : place(ids, state.first, state.firstAt);
   const to = state.last === null ? ids.length : Math.max(from, place(ids, state.last, state.lastAt)) + 1;
+  // At the end, never fewer than a chat opens with: a first page shorter than that (a group's newest page, what the engine
+  // last sent) takes in the rows that come above it, up to `OPEN_ROWS`.
+  if (state.last === null && to - from < OPEN_ROWS) from = Math.max(0, to - OPEN_ROWS);
   // Never inside a run of stacked rows: from its first row, which draws the whole run.
   const head = heads?.get(ids[from]);
   if (head !== undefined) { const at = ids.lastIndexOf(head, from); if (at >= 0) from = at; }

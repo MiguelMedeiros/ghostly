@@ -91,21 +91,31 @@ describe("useRowWindow", () => {
     expect(range(gone.current)).toEqual([9_000 - OPEN_ROWS, 9_000]);
   });
 
-  it("keeps older history that comes in above out of the page (a group's newest page, then the rest)", () => {
+  it("keeps older history that comes in above out of the page, past what a chat opens with (a group's newest page, then the rest)", () => {
     const { result, rerender } = renderHook(({ ids }) => useRowWindow(ids, "group:g"), { initialProps: { ids: rows(2_000, 1_950) } });
     expect(range(result.current)).toEqual([0, 50]);
     rerender({ ids: rows(2_000) });
-    expect(range(result.current)).toEqual([1_950, 2_000]);
+    expect(range(result.current)).toEqual([2_000 - OPEN_ROWS, 2_000]);
     act(() => { result.current.more("up"); });
-    expect(range(result.current)).toEqual([1_950 - PAGE_ROWS, 2_000]);
+    expect(range(result.current)).toEqual([2_000 - OPEN_ROWS - PAGE_ROWS, 2_000]);
+  });
+
+  it("opened on a list shorter than a chat opens with, takes in the rows that come above it (the engine's last copy, then the list)", () => {
+    const { result, rerender } = renderHook(({ ids }) => useRowWindow(ids, "group:g"), { initialProps: { ids: rows(3, 2) } });
+    expect(range(result.current)).toEqual([0, 1]);
+    rerender({ ids: rows(3) });
+    expect(range(result.current)).toEqual([0, 3]);
   });
 
   it("holds its edges by row: a row deleted at the edge leaves the window where it was", () => {
     const ids = rows(1_000);
     const { result, rerender } = renderHook(({ ids }) => useRowWindow(ids, "chat-1"), { initialProps: { ids } });
-    const first = result.current.from;
+    for (let i = 0; i < 3; i++) act(() => { result.current.more("up"); });
+    const [first, to] = range(result.current);
+    expect(result.current.detached).toBe(true);
+    // Its first row goes: the next one is first. The rows after it moved up one, and so did its last.
     rerender({ ids: ids.filter(id => id !== `m${first}`) });
-    expect(range(result.current)).toEqual([first, 999]);
+    expect(range(result.current)).toEqual([first, to - 1]);
   });
 
   it("never starts inside a run of stacked rows", () => {
