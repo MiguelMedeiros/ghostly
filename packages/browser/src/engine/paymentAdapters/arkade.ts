@@ -72,8 +72,9 @@ export class ArkadeAdapter implements PaymentAdapter<ArkPrepared> {
       if(isRecoverable(vtxo))swept+=vtxo.value;
       else if(!vtxo.isSwept&&canRecoverOnchain(vtxo,now))sweeping+=vtxo.value;
     }
-    // What a recovery would hand back, over the same coins it would take (only asked when none is still sweeping).
-    const takes=!sweeping&&swept>0&&(await (await this.wallet.getVtxoManager()).getRecoverableBalance()).recoverable>0n;
+    // What a recovery would hand back, over the same coins it would take (only asked when none is still sweeping),
+    // net of the server's fees: `recoverVtxos` refuses under the dust limit, where this still answers above 0.
+    const takes=!sweeping&&swept>0&&(await (await this.wallet.getVtxoManager()).getRecoverableBalance()).recoverable>=this.wallet.dustAmount;
     // While any waits for the sweep, none can be recovered: all of them wait.
     return sweeping?{recoverable:0,sweeping:sweeping+swept,small:0}:{recoverable:takes?swept:0,sweeping:0,small:takes?0:swept};
   }

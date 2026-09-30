@@ -23,7 +23,10 @@ export async function recoverExpiredArk(panel: Locator, who: string, balance: ()
     mined += 40;
     await sweeping.waitFor({ state: "hidden", timeout: 15_000 }).catch(() => {});
   }
-  if (!(await recoverable.isVisible())) return 0;
+  if (!(await recoverable.isVisible())) {
+    if (mined) console.log(`Ark recovery evidence: ${who}'s batch swept after ${mined} blocks; too few to recover (${await smallExpiredArk(panel)} sats)`);
+    return 0;
+  }
   const before = await balance();
   // Once: a failed recovery is not retried (a batch that fails for the server's reasons bans the coins for a while).
   // While the batch runs the SDK leaves the coins out of every figure, so the row going away proves nothing: the
@@ -32,7 +35,9 @@ export async function recoverExpiredArk(panel: Locator, who: string, balance: ()
   await expect.poll(balance, { timeout: 120_000, message: `${who}'s recovered coins are back in the balance` }).toBeGreaterThan(before);
   await expect(recoverable).toHaveCount(0);
   await expect(sweeping).toHaveCount(0);
-  return (await balance()) - before;
+  const back = (await balance()) - before;
+  console.log(`Ark recovery evidence: ${who}'s batch swept after ${mined} blocks; Recover brought ${back} sats back (${before} before)`);
+  return back;
 }
 
 /**

@@ -110,13 +110,20 @@ const ark = vi.hoisted(() => {
       for (const [txid, pending] of server.pending) if (!server.recoveryTxid || server.recoveryTxid === txid) await this.options.arkProvider.finalizeTx(txid, pending.checkpoints);
     }
     async getContractManager() { return { getContracts: async () => server.contracts }; }
+    readonly dustAmount = 330n;
     async getVtxos() { return server.coins.map((c) => ({ ...c })); }
     async getVtxoManager() {
       // As the SDK's: swept coins (and past-expiry ones: it cannot tell) together under the dust limit make no batch.
       const taken = () => server.coins.filter((c) => c.isSwept || (!!c.expiresAt && c.expiresAt <= new Date())).reduce((sum, c) => sum + c.value, 0);
       return {
+        // Net of a 1% input fee; a recovery under the dust limit after fees is refused, while this still answers it.
         getRecoverableBalance: async () => ({ recoverable: taken() >= 330 ? BigInt(Math.floor(taken() * 0.99)) : 0n }),
-        recoverVtxos: async () => { if (taken() < 330) throw new Error("No recoverable VTXOs found"); server.recoveries++; return "c".repeat(64); },
+        recoverVtxos: async () => {
+          if (taken() < 330) throw new Error("No recoverable VTXOs found");
+          if (Math.floor(taken() * 0.99) < 330) throw new Error("Recoverable amount net of intent fees is below dust threshold 330");
+          server.recoveries++;
+          return "c".repeat(64);
+        },
       };
     }
     async signerForDescriptor(descriptor: string) { return { sign: async (tx: Transaction, [index]: number[]) => (descriptor === "good" ? tx.signed(index) : tx) }; }
@@ -225,9 +232,14 @@ describe("expired coins", () => {
     expect(await adapter.expired()).toEqual({ recoverable: 0, sweeping: 0, small: 250 });
     await expect(adapter.recover()).rejects.toThrow("Too few expired sats");
     expect(server.recoveries).toBe(0);
+    // Over the dust limit, but not once the fee is paid: still too few.
+    server.coins.push({ txid: "c".repeat(64), vout: 0, value: 81, isSwept: true, expiresAt: past });
+    expect(await adapter.expired()).toEqual({ recoverable: 0, sweeping: 0, small: 331 });
+    await expect(adapter.recover()).rejects.toThrow("Too few expired sats");
     // More coins expire: together they make a batch.
-    server.coins.push({ txid: "c".repeat(64), vout: 0, value: 400, isSwept: true, expiresAt: past });
-    expect(await adapter.expired()).toEqual({ recoverable: 650, sweeping: 0, small: 0 });
+    server.coins.push({ txid: "d".repeat(64), vout: 0, value: 400, isSwept: true, expiresAt: past });
+    expect(await adapter.expired()).toEqual({ recoverable: 731, sweeping: 0, small: 0 });
+    await expect(adapter.recover()).resolves.toBe("c".repeat(64));
   });
 });
 
