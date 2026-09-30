@@ -1,9 +1,11 @@
-import { useId, useState } from "react";
+import { useId, useRef, useState, type ReactNode } from "react";
 import { cardLinkHost, taskProgress, type TaskCard, type ItemState, type StatusCard } from "@ghostly/core";
 import { useI18n } from "../../contexts/I18nContext";
+import { useMinuteClock } from "../../hooks/useMinuteClock";
 import { externalLinkProps } from "../../lib/externalLink";
 import { agoIn } from "../../lib/relativeTime";
-import { STATUS_TONE, isFinished } from "../../lib/statusCards";
+import { clockTime } from "../../lib/time";
+import { STATUS_TONE, durationIn, isFinished, taskElapsed } from "../../lib/statusCards";
 import { RoutineView } from "./RoutineCard";
 
 /*
@@ -45,7 +47,7 @@ export function PrLine({ card }: { card: TaskCard }) {
   );
 }
 
-function TaskView({ card }: { card: TaskCard }) {
+function TaskView({ card, meta, end }: { card: TaskCard; meta?: ReactNode; end?: number }) {
   const { t, language } = useI18n();
   const [open, setOpen] = useState(false);
   const detailsId = useId();
@@ -54,9 +56,10 @@ function TaskView({ card }: { card: TaskCard }) {
   const links = [...(card.pr ? [{ url: card.pr.url, label: card.pr.number !== undefined ? t("cards.task.pr", { number: card.pr.number }) : t("cards.task.prNoNumber") }] : []), ...(card.links ?? [])];
   return (
     <div data-testid="status-card" data-kind="task" data-card-id={card.id} data-status={card.status} data-open={open ? "" : undefined}
-      className="my-0.5 w-[min(320px,72vw)] max-w-full rounded-lg border border-text-primary/10 bg-text-primary/5 text-start">
-      <button type="button" data-testid="status-card-toggle" aria-expanded={open} aria-controls={detailsId} onClick={() => setOpen(!open)}
-        className="block w-full cursor-pointer rounded-lg px-2.5 py-2 text-start focus-visible:outline-2 focus-visible:outline-accent">
+      className="w-full min-w-0 text-start">
+      {/* A long press or a swipe on it is the message's, as on a bubble (MessageBubble's gestures let this button through). */}
+      <button type="button" data-testid="status-card-toggle" data-press-through aria-expanded={open} aria-controls={detailsId} onClick={() => setOpen(!open)}
+        className="block w-full cursor-pointer rounded-t-[11px] px-3 pt-2.5 pb-1.5 text-start focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent">
         <span className="flex items-center gap-2">
           <span aria-hidden="true" className={`h-2 w-2 shrink-0 rounded-full ${STATUS_TONE[card.status].dot}`} />
           <bdi data-testid="status-card-title" className="min-w-0 flex-1 truncate text-[13.5px] font-semibold text-text-primary">{card.title}</bdi>
@@ -74,7 +77,7 @@ function TaskView({ card }: { card: TaskCard }) {
         </span>
       </button>
       {open && (
-        <div id={detailsId} data-testid="status-card-details" className="space-y-2 border-t border-text-primary/10 px-2.5 pb-2.5 pt-2 text-xs leading-snug text-text-primary/80">
+        <div id={detailsId} data-testid="status-card-details" className="mx-3 space-y-2 border-t border-text-primary/10 pb-1 pt-2 text-xs leading-snug text-text-primary/80">
           {card.step && !isFinished(card.status) && <p className="m-0"><span className="font-semibold">{t("cards.task.now")}</span> <bdi data-testid="status-card-step">{card.step}</bdi></p>}
           {card.items && (
             <ol className="m-0 list-none space-y-1 p-0" data-testid="status-card-items">
@@ -109,12 +112,53 @@ function TaskView({ card }: { card: TaskCard }) {
           )}
         </div>
       )}
+      {/* The card's foot: how long it has been at it, and the message's time and marks (`meta`) at the end. */}
+      <div className="flex min-w-0 items-center justify-between gap-2 px-3 pb-2 pt-0.5 text-[11px] leading-4 text-text-primary/65">
+        <TaskElapsedLine card={card} end={end} testId="status-card-elapsed" />
+        {meta && <span className="ms-auto flex shrink-0 items-center gap-[3px]">{meta}</span>}
+      </div>
     </div>
   );
 }
 
 
-/** A message's card, for a kind `showsCard` takes. */
-export function StatusCardView({ card }: { card: StatusCard }) {
-  return card.kind === "task" ? <TaskView card={card} /> : <RoutineView card={card} />;
+/**
+ * A message's card, for a kind `showsCard` takes. `meta` is the message's time and delivery marks, drawn in the card
+ * (a task's foot, the end of a routine's line); `end` the message's last change, for how long a finished task took.
+ */
+export function StatusCardView({ card, meta, end }: { card: StatusCard; meta?: ReactNode; end?: number }) {
+  return card.kind === "task" ? <TaskView card={card} meta={meta} end={end} /> : <RoutineView card={card} meta={meta} />;
+}
+
+/**
+ * "running for 12 min", "blocked for 5 min", "took 42 min": how long a task has been at it (`taskElapsed`), kept
+ * current once a minute by the page's one clock while it is on screen. Nothing when the card says no start.
+ */
+export function TaskElapsedLine({ card, end, testId, className = "" }: { card: TaskCard; end?: number; testId: string; className?: string }) {
+  const { t, language } = useI18n();
+  const ref = useRef<HTMLSpanElement>(null);
+  const now = useMinuteClock(ref);
+  const elapsed = taskElapsed(card, now, end);
+  return (
+    <span ref={ref} data-testid={testId} data-kind={elapsed?.kind} className={`min-w-0 truncate ${className}`}>
+      {elapsed && t(`cards.task.elapsed.${elapsed.kind}`, { duration: durationIn(language)(elapsed.ms) })}
+    </span>
+  );
+}
+
+/**
+ * A card message's time, where a bubble has its time and "edited": updates are a card's normal life, so a card that
+ * changed says when ("updated 2 min ago"), kept current like `TaskElapsedLine`; one that never did, the time it came.
+ * The exact time on hover.
+ */
+export function CardTime({ sent, changed }: { sent: number; changed?: number }) {
+  const { t, language } = useI18n();
+  const ref = useRef<HTMLSpanElement>(null);
+  const now = useMinuteClock(ref);
+  const at = changed ?? sent;
+  return (
+    <span ref={ref} data-testid="status-card-time" data-updated={changed !== undefined || undefined} title={clockTime(at, language)} className="shrink-0 whitespace-nowrap">
+      {changed !== undefined ? t("cards.task.updated", { ago: agoIn(language)(changed / 1000, Math.max(now, changed) / 1000) }) : clockTime(sent, language)}
+    </span>
+  );
 }

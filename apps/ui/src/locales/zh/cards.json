@@ -17,6 +17,7 @@
   },
   "routine": {
     "cron": "Cron：",
+    "label": "例行任务：{{name}}，{{state}}",
     "lastRun": "上次运行：{{result}}",
     "next": "下次 {{when}}",
     "noRuns": "尚未运行",
@@ -33,6 +34,12 @@
   },
   "task": {
     "branch": "分支：",
+    "elapsed": {
+      "blocked": "已受阻 {{duration}}",
+      "queued": "已排队 {{duration}}",
+      "running": "已运行 {{duration}}",
+      "took": "耗时 {{duration}}"
+    },
     "item": {
       "done": "完成",
       "failed": "失败",
@@ -40,6 +47,8 @@
       "running": "进行中",
       "skipped": "已跳过"
     },
+    "label": "任务：{{title}}，{{status}}",
+    "labelProgress": "任务：{{title}}，{{status}}，{{progress}}%",
     "now": "当前：",
     "pr": "PR #{{number}}",
     "prNoNumber": "拉取请求",

@@ -17,6 +17,7 @@
   },
   "routine": {
     "cron": "Cron:",
+    "label": "روتين: {{name}}، {{state}}",
     "lastRun": "آخر تشغيل: {{result}}",
     "next": "التالي {{when}}",
     "noRuns": "لم يعمل بعد",
@@ -33,6 +34,12 @@
   },
   "task": {
     "branch": "الفرع:",
+    "elapsed": {
+      "blocked": "متوقفة منذ {{duration}}",
+      "queued": "في الانتظار منذ {{duration}}",
+      "running": "قيد التنفيذ منذ {{duration}}",
+      "took": "استغرقت {{duration}}"
+    },
     "item": {
       "done": "تم",
       "failed": "فشل",
@@ -40,6 +47,8 @@
       "running": "قيد التنفيذ",
       "skipped": "تم التخطي"
     },
+    "label": "مهمة: {{title}}، {{status}}",
+    "labelProgress": "مهمة: {{title}}، {{status}}، {{progress}}%",
     "now": "الآن:",
     "pr": "PR #{{number}}",
     "prNoNumber": "طلب دمج",

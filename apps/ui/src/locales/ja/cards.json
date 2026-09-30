@@ -17,6 +17,7 @@
   },
   "routine": {
     "cron": "Cron:",
+    "label": "ルーティン：{{name}}、{{state}}",
     "lastRun": "前回の実行: {{result}}",
     "next": "次回 {{when}}",
     "noRuns": "まだ実行されていません",
@@ -33,6 +34,12 @@
   },
   "task": {
     "branch": "ブランチ:",
+    "elapsed": {
+      "blocked": "ブロック中：{{duration}}",
+      "queued": "待機中：{{duration}}",
+      "running": "実行中：{{duration}}",
+      "took": "所要時間：{{duration}}"
+    },
     "item": {
       "done": "完了",
       "failed": "失敗",
@@ -40,6 +47,8 @@
       "running": "進行中",
       "skipped": "スキップ"
     },
+    "label": "タスク：{{title}}、{{status}}",
+    "labelProgress": "タスク：{{title}}、{{status}}、{{progress}}%",
     "now": "現在:",
     "pr": "PR #{{number}}",
     "prNoNumber": "プルリクエスト",

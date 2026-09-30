@@ -17,8 +17,8 @@ import { PaymentBubble } from "./PaymentBubble";
 import { RichText } from "./rich/RichText";
 import { EntityCards } from "./chat/EntityCards";
 import { MessageLinkCards } from "./LinkPreviewBubble";
-import { StatusCardView } from "./chat/StatusCard";
-import { showsCard } from "../lib/statusCards";
+import { CardTime, StatusCardView } from "./chat/StatusCard";
+import { STATUS_TONE, cardLabel, showsCard } from "../lib/statusCards";
 import { engine } from "@ghostly/browser/platform/engine";
 import { playCue, useCueChat } from "../lib/cues";
 import { downloadFile, downloadName, downloadState, type DownloadFormat } from "../lib/fileDownload";
@@ -88,9 +88,18 @@ interface MessageBubbleProps {
 export const LONG_PRESS_MS = 500;
 
 /**
+ * A press on a control inside a message is the control's, not a gesture's: except on one that is most of the message
+ * and says so (`data-press-through`: a status card's line, which a tap opens).
+ */
+const onControl = (target: EventTarget) => {
+  const control = (target as HTMLElement).closest("button, a, input, audio, video");
+  return !!control && !control.hasAttribute("data-press-through");
+};
+
+/**
  * A long press on a touch screen (or a pen): the reactions' quick bar opens, with the details one tap under it; the
  * details at once where there is nothing to react with. A finger that moves on, or a press on a control inside the
- * message, is not one.
+ * message, is not one. The click a long press can end with is swallowed: it would open a card under the finger.
  */
 function useLongPress(fire: () => void) {
   const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
@@ -100,8 +109,8 @@ function useLongPress(fire: () => void) {
   useEffect(() => clear, []);
   return {
     onPointerDown: (e: ReactPointerEvent<HTMLElement>) => {
-      if (e.pointerType === "mouse" || e.button !== 0 || (e.target as HTMLElement).closest("button, a, input, audio, video")) return;
       fired.current = false;
+      if (e.pointerType === "mouse" || e.button !== 0 || onControl(e.target)) return;
       start.current = { x: e.clientX, y: e.clientY };
       clearTimeout(timer.current);
       timer.current = setTimeout(() => { timer.current = undefined; fired.current = true; fire(); }, LONG_PRESS_MS);
@@ -111,6 +120,7 @@ function useLongPress(fire: () => void) {
     onPointerCancel: clear,
     // The browser's own long-press menu would sit on top of the details.
     onContextMenu: (e: React.MouseEvent) => { if (fired.current || start.current) e.preventDefault(); },
+    onClickCapture: (e: React.MouseEvent) => { if (fired.current) { fired.current = false; e.preventDefault(); e.stopPropagation(); } },
   };
 }
 
@@ -137,7 +147,7 @@ function useSwipeReply(fire?: () => void) {
     offset: sign * dx,
     handlers: {
       onPointerDown: (e: ReactPointerEvent<HTMLElement>) => {
-        if (e.pointerType === "mouse" || e.button !== 0 || (e.target as HTMLElement).closest("button, a, input, audio, video")) return;
+        if (e.pointerType === "mouse" || e.button !== 0 || onControl(e.target)) return;
         const rtl = getComputedStyle(e.currentTarget).direction === "rtl" ? -1 : 1;
         start.current = { x: e.clientX, y: e.clientY, sign: rtl }; swiping.current = false; setSign(rtl);
       },
@@ -799,6 +809,77 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
     );
   }
 
+  const nick = (message.nick || peerNick) && !isMe && (!author || author.first) ? message.nick || peerNick : "";
+  const nickEl = nick ? (
+    // A group member's name takes their colour (lib/memberColors.ts), and a tap on it opens who they are.
+    <div data-testid="message-nick" data-key={author?.key} className={`${author ? memberText(author.key) : "text-accent-hover"} text-[12.8px] font-medium mb-[2px] leading-[22px]`}>
+      {author && onOpenAuthor && !choosing
+        ? <button type="button" data-testid="message-nick-open" onClick={onOpenAuthor} onDoubleClick={e => e.stopPropagation()} aria-haspopup="dialog" className="max-w-full cursor-pointer text-start hover:underline">~{nick}</button>
+        : <>~{nick}</>}
+    </div>
+  ) : null;
+  const menu = !choosing && (
+    <MessageMenu onDelete={onDelete} onDetails={openDetails} onReply={onReply} onEdit={isMe ? onEdit : undefined} onReact={onReact && (() => setBar("button"))} onPin={onPin} pinned={pinned}
+      onForward={onForward} onSelect={onSelect} align={isMe ? "left" : "right"} download={download} sender={isMe ? "me" : "peer"} {...(isMe ? sending : {})} />
+  );
+
+  if (showsCard(message.card)) {
+    // A bot's task or routine (WISP 4xx · Status Cards): not a bubble but a card of its own, standing for the text
+    // (its fallback). Updates are its normal life, so no "edited": when it last changed, in the card.
+    const card = message.card;
+    const meta = <>
+      <CardTime sent={message.timestamp} changed={message.edit?.at} />
+      {isMe && <DeliveryStatus delivery={shown} acked={isAcked} onRetry={retry} />}
+    </>;
+    return (
+      <div
+        {...rowProps}
+        data-message-row data-card-row
+        data-sender={isMe ? "me" : "peer"} data-member={isMe ? undefined : author?.key}
+        className={`group flex items-start gap-1 ${isMe ? "justify-end" : "justify-start"} mb-3.5 message-row-x ${onReply ? "touch-pan-y" : ""} ${swipe.dx > 0 ? "overflow-x-clip" : ""} ${choosing ? `cursor-pointer ${selection.selected ? "bg-accent/10" : ""}` : ""} ${enter}`}
+      >
+        {selectBox}
+        {choosing && isMe && <span className="flex-1" aria-hidden="true" />}
+        {swipe.dx > 0 && (
+          <span data-testid="swipe-reply-hint" aria-hidden="true" className="self-center shrink-0 text-text-muted" style={{ opacity: Math.min(1, swipe.dx / SWIPE_REPLY_PX) }}>
+            <ReplyGlyph />
+          </span>
+        )}
+        {isMe && onReact && <ReactAction anchorRef={reactRef} open={bar === "button"} onOpen={() => setBar(bar ? null : "button")} />}
+        {isMe && onReply && <ReplyAction onReply={onReply} />}
+        {isMe && menu}
+        {!isMe && author && <SenderAvatar author={author} onOpen={choosing ? undefined : onOpenAuthor} />}
+        {/* The name over the card, the card, its reactions under it: as wide as a wide bubble. */}
+        <div className={`flex flex-col min-w-0 w-[min(420px,85%)] ${isMe ? "items-end" : "items-start"}`}>
+          {/* A group member's name, over the first of a run of theirs; a 1:1 chat has one sender, and no name. */}
+          {author && nickEl && <div className="max-w-full px-1">{nickEl}</div>}
+          <ForwardedMark hops={message.forwarded} />
+          <div
+            ref={bubbleRef}
+            data-message-card
+            role="group"
+            aria-label={cardLabel(t, card)}
+            className={`status-card-surface w-full text-text-primary ${details ? "outline-2 outline-accent outline-offset-2" : ""}`}
+            style={swipe.dx > 0 ? { transform: `translateX(${swipe.offset}px)` } : undefined}
+          >
+            {/* The card's own colour at its start: its status's, as its dot and bar have it. */}
+            <span aria-hidden="true" data-testid="status-card-edge"
+              className={`absolute -inset-y-px -start-px w-1 rounded-s-[12px] ${card.kind === "task" ? STATUS_TONE[card.status].bar : card.state === "paused" ? "bg-text-muted" : "bg-accent"}`} />
+            {quote && <div className="px-2 pt-2"><ReplyQuote quote={quote} /></div>}
+            <StatusCardView card={card} meta={meta} end={message.edit?.at ?? message.timestamp} />
+          </div>
+          <ReactionChips chips={chips} onReact={onReact} align={isMe ? "end" : "start"} />
+        </div>
+        {!isMe && menu}
+        {!isMe && onReply && <ReplyAction onReply={onReply} />}
+        {!isMe && onReact && <ReactAction anchorRef={reactRef} open={bar === "button"} onOpen={() => setBar(bar ? null : "button")} />}
+        {onReact && <ReactionBar open={!!bar} onClose={() => setBar(null)} anchorRef={bubbleRef} current={myReaction(message.reactions)} onReact={onReact}
+          align={isMe ? "end" : "start"} onDetails={bar === "press" ? openDetails : undefined} onSelect={bar === "press" ? onSelect : undefined} />}
+        {detailsPanel}
+      </div>
+    );
+  }
+
   const bigEmoji = contentType === "text" && isOnlyEmojis(message.text);
 
   const timestampEl = (
@@ -857,16 +938,8 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
         }}
       >
         <TailSvg side={isMe ? "right" : "left"} />
-        {/* A paired message carries no name of its own: the contact has one name, known from the link. In a group, the name is over the first message of a run only. */}
-        {/* A paired message carries no name of its own: the contact has one name, known from the link. */}
-        {(message.nick || peerNick) && !isMe && (!author || author.first) && (
-          // A group member's name takes their colour (lib/memberColors.ts), and a tap on it opens who they are.
-          <div data-testid="message-nick" data-key={author?.key} className={`${author ? memberText(author.key) : "text-accent-hover"} text-[12.8px] font-medium mb-[2px] leading-[22px]`}>
-            {author && onOpenAuthor && !choosing
-              ? <button type="button" data-testid="message-nick-open" onClick={onOpenAuthor} onDoubleClick={e => e.stopPropagation()} aria-haspopup="dialog" className="max-w-full cursor-pointer text-start hover:underline">~{message.nick || peerNick}</button>
-              : <>~{message.nick || peerNick}</>}
-          </div>
-        )}
+        {/* In a group, the name is over the first message of a run only. */}
+        {nickEl}
 
         <ForwardedMark hops={message.forwarded} />
         {quote && <ReplyQuote quote={quote} />}
@@ -894,12 +967,6 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
         ) : message.file ? (
           <div className="clearfix">
             <FileBubble file={message.file} peerName={message.nick || peerNick || undefined} highlight={highlight} />
-            {timestampEl}
-          </div>
-        ) : showsCard(message.card) ? (
-          // A bot's task or routine (WISP 4xx · Status Cards): the card stands for the text, which is its fallback.
-          <div className="clearfix">
-            <StatusCardView card={message.card} />
             {timestampEl}
           </div>
         ) : money ? (

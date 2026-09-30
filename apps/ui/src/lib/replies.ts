@@ -1,6 +1,7 @@
-import { replySnippet } from "@ghostly/core";
+import { replySnippet, type StatusCard } from "@ghostly/core";
 import { replyRef, replyTo, type ReplyTarget } from "@ghostly/browser/shared/replies";
 import type { MessageReply } from "@ghostly/browser/shared/types";
+import { cardLine, showsCard } from "./statusCards";
 import type { ChatMessage } from "./types";
 
 /*
@@ -30,7 +31,12 @@ export interface QuoteView {
 }
 
 /** What a quote needs of a message: the UI's copy of a paired chat's, or a group's row as the engine keeps it. */
-export type Quotable = ReplyTarget & { sender: string; text: string; member?: string };
+export type Quotable = ReplyTarget & { sender: string; text: string; member?: string; card?: StatusCard };
+
+/** A message's line where it is quoted or pinned: its text's, or a bot's card's title (the text is only its fallback). */
+export function messageSnippet(message: { text: string; card?: StatusCard }): string {
+  return showsCard(message.card) ? replySnippet(cardLine(message.card)) : replySnippet(message.text);
+}
 
 /** A chat's messages by their id here and by the id a reply names (`replyRef`). */
 export interface ReplyIndex { byId: Map<string, Quotable>; byRef: Map<string, Quotable> }
@@ -69,7 +75,7 @@ export function quoteFor(reply: MessageReply, index: ReplyIndex, nameOf: NameOf)
   if (original) {
     const from = original.sender === "me" ? "me" : "peer";
     const member = from === "peer" ? original.member ?? reply.member : undefined;
-    return { state: "found", name: nameOf(from, original.member ?? reply.member), snippet: replySnippet(original.text), mine: from === "me", targetId: original.id, ...(member && { member }) };
+    return { state: "found", name: nameOf(from, original.member ?? reply.member), snippet: messageSnippet(original), mine: from === "me", targetId: original.id, ...(member && { member }) };
   }
   const name = reply.from ? nameOf(reply.from, reply.member) : undefined;
   const state: QuoteState = reply.messageId ? "deleted" : reply.snippet ? "unverified" : "missing";

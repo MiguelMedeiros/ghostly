@@ -1,9 +1,8 @@
 import { useId, useState } from "react";
-import { replySnippet } from "@ghostly/core";
 import type { PinView } from "@ghostly/browser/shared/types";
 import { useI18n } from "../../contexts/I18nContext";
 import { revealMessage } from "../../hooks/useRowWindow";
-import { jumpToMessage, type ReplyIndex } from "../../lib/replies";
+import { jumpToMessage, messageSnippet, type ReplyIndex } from "../../lib/replies";
 import { PinIcon } from "../PinIcon";
 
 const icon = { width: 15, height: 15, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": true } as const;
@@ -30,7 +29,7 @@ export function PinnedBar({ pin, index, onUnpin }: { pin?: PinView; index: Reply
           <span className="shrink-0 text-accent"><PinIcon active size={15} /></span>
           <span className="min-w-0 flex-1">
             <span className="block text-[11px] font-medium text-accent">{t("chat.pinned.bar")}</span>
-            <span data-testid="pinned-snippet" className="block truncate text-sm text-text-secondary">{original ? replySnippet(original.text) : t("chat.pinned.notHere")}</span>
+            <span data-testid="pinned-snippet" className="block truncate text-sm text-text-secondary">{original ? messageSnippet(original) : t("chat.pinned.notHere")}</span>
           </span>
         </button>
         <button type="button" data-testid="pinned-info" aria-expanded={info} aria-controls={infoId} aria-label={more} title={more} onClick={() => setInfo(!info)}

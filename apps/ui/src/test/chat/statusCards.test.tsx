@@ -1,11 +1,11 @@
-import { screen, within } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
-import { readStatusCard, statusCardText, type RoutineCard, type StatusCard } from "@ghostly/core";
+import { act, fireEvent, screen, within } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { readStatusCard, statusCardText, type RoutineCard, type StatusCard, type TaskCard } from "@ghostly/core";
 import { MessageBubble } from "../../components/MessageBubble";
 import { RoutineStack } from "../../components/chat/RoutineCard";
 import { TasksButton } from "../../components/chat/TasksButton";
-import { jumpToMessage } from "../../lib/replies";
-import { activeTaskCount, cardEntries, panelModel, routineStacks, routineSummary, type CardRow } from "../../lib/statusCards";
+import { jumpToMessage, messageSnippet, quoteFor, replyIndex } from "../../lib/replies";
+import { activeTaskCount, cardEntries, durationIn, panelModel, routineStacks, routineSummary, taskElapsed, type CardRow } from "../../lib/statusCards";
 import type { ChatMessage } from "../../lib/types";
 import { renderApp } from "../render";
 
@@ -15,6 +15,7 @@ import { renderApp } from "../render";
 
 const NOW = Date.now();
 const card = (extra: Record<string, unknown> = {}): StatusCard => readStatusCard({ kind: "task", id: "relay", title: "Fix relay rotation", status: "running", ...extra })!;
+const task = (extra: Record<string, unknown> = {}) => card(extra) as TaskCard;
 /** How wide the window is, as matchMedia and layout read it. */
 const viewport = (width: number, height = 800) => (window as unknown as { happyDOM: { setViewport(v: { width: number; height: number }): void } }).happyDOM.setViewport({ width, height });
 afterEach(() => viewport(1024, 768));
@@ -111,6 +112,160 @@ describe("a task card in the chat", () => {
     renderApp(<MessageBubble message={{ id: "m", text: "just words", sender: "peer", timestamp: 1 }} peerPubKey="peer" />);
     expect(screen.queryByTestId("status-card")).not.toBeInTheDocument();
     expect(screen.getByTestId("message-text")).toHaveTextContent("just words");
+  });
+});
+
+describe("a card on its own, not a bubble", () => {
+  const edited = { at: NOW - 3.5 * 60_000, versions: [] } as unknown as ChatMessage["edit"];
+
+  it("has no bubble, tail or \"edited\": the card is the surface, and says when it was last updated", () => {
+    const { container } = renderApp(<MessageBubble message={message(card({ progress: 67 }), { edit: edited })} peerPubKey="peer" />);
+    expect(container.querySelector("[data-message-bubble]")).toBeNull();
+    expect(container.querySelector(".fill-sent-bg, .fill-received-bg, .bg-sent-bg, .bg-received-bg")).toBeNull();
+    expect(screen.queryByTestId("message-edited")).not.toBeInTheDocument();
+    const surface = container.querySelector<HTMLElement>("[data-message-card]")!;
+    expect(surface).toHaveClass("status-card-surface");
+    expect(surface).toContainElement(screen.getByTestId("status-card"));
+    expect(within(surface).getByTestId("status-card-time")).toHaveTextContent("updated 3 min ago");
+    // On the sender's side: theirs at the start of the line.
+    expect(container.querySelector("[data-message-row]")!.className).toContain("justify-start");
+  });
+
+  it("is a group a screen reader names by its title, status and progress", () => {
+    renderApp(<>
+      <MessageBubble message={message(card({ progress: 67 }))} peerPubKey="peer" />
+      <MessageBubble message={message(readStatusCard({ kind: "routine", id: "n", name: "Nightly", schedule: "daily", state: "paused" })!, { id: "m2" })} peerPubKey="peer" />
+    </>);
+    expect(screen.getByRole("group", { name: "Task: Fix relay rotation, Running, 67%" })).toHaveAttribute("data-message-card");
+    expect(screen.getByRole("group", { name: "Routine: Nightly, Paused" })).toBeInTheDocument();
+  });
+
+  it("never updated, shows the time it came; mine carry their delivery marks, at my side of the line", () => {
+    const { container } = renderApp(<MessageBubble message={message(card(), { sender: "me", delivery: "delivered" })} peerPubKey="peer" />);
+    const time = screen.getByTestId("status-card-time");
+    expect(time).not.toHaveAttribute("data-updated");
+    expect(time.textContent).toMatch(/\d{1,2}:\d{2}/);
+    expect(within(container.querySelector("[data-message-card]")!).getByTestId("message-delivery")).toBeInTheDocument();
+    expect(container.querySelector("[data-message-row]")!.className).toContain("justify-end");
+  });
+
+  it("keeps the message's menu, reactions and replies: React from the ⋮, chips under the card, a swipe or a long press", async () => {
+    const reacted: string[] = [];
+    const { user, container } = renderApp(<MessageBubble message={message(card(), { reactions: { peer: { e: "👍", n: 1, at: 1 } } })} peerPubKey="peer"
+      onReply={() => {}} onReact={e => reacted.push(e)} reactionName={() => "Bot"} />);
+    const surface = container.querySelector<HTMLElement>("[data-message-card]")!;
+    // The chips sit under the card, not in it.
+    const chip = screen.getByTestId("reaction-chip");
+    expect(surface).not.toContainElement(chip);
+    expect(surface.compareDocumentPosition(chip) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    await user.click(screen.getByTestId("message-options"));
+    const rows = within(screen.getByTestId("message-menu")).getAllByRole("button").map(b => b.dataset.testid);
+    expect(rows).toEqual(expect.arrayContaining(["message-reply", "message-react", "message-details"]));
+    await user.click(screen.getByTestId("message-react"));
+    await user.click(within(screen.getByTestId("reaction-bar")).getAllByRole("button")[0]);
+    expect(reacted).toHaveLength(1);
+  });
+
+  it("a finger held on the card itself opens the quick bar, and does not open the card", async () => {
+    const { container } = renderApp(<MessageBubble message={message(card())} peerPubKey="peer" onReact={() => {}} reactionName={() => "Bot"} />);
+    const toggle = screen.getByTestId("status-card-toggle");
+    vi.useFakeTimers();
+    try {
+      fireEvent.pointerDown(toggle, { pointerType: "touch", button: 0, clientX: 20, clientY: 20, pointerId: 1 });
+      act(() => { vi.advanceTimersByTime(600); });
+      fireEvent.pointerUp(toggle, { pointerType: "touch", clientX: 20, clientY: 20, pointerId: 1 });
+      fireEvent.click(toggle);
+    } finally { vi.useRealTimers(); }
+    expect(screen.getByTestId("reaction-bar")).toBeInTheDocument();
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    // The next tap opens it, as ever.
+    fireEvent.pointerDown(toggle, { pointerType: "mouse", button: 0 });
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    expect(container.querySelector("[data-message-card]")).toBeInTheDocument();
+  });
+
+  it("in a 1:1 chat has no name over it", () => {
+    renderApp(<MessageBubble message={message(card(), { nick: "Coordinator" })} peerPubKey="peer" peerNick="Coordinator" />);
+    expect(screen.queryByTestId("message-nick")).not.toBeInTheDocument();
+  });
+
+  it("a quote of it, and the chat list, read its title, not its fallback text", () => {
+    const c = card({ progress: 40, step: "CI" });
+    const index = replyIndex([{ id: "m1", sender: "peer", text: statusCardText(c), card: c, timestamp: 1 } as never]);
+    expect(quoteFor({ id: "m1", messageId: "m1" } as never, index, () => "Bot").snippet).toBe("Fix relay rotation");
+    expect(messageSnippet({ text: statusCardText(c), card: c })).toBe("Fix relay rotation");
+  });
+
+  it("reads right to left in Arabic, the card at the start of the line", () => {
+    const { container } = renderApp(<MessageBubble message={message(card({ progress: 67 }))} peerPubKey="peer" />, { language: "ar" });
+    expect(screen.getByRole("group")).toHaveAccessibleName("مهمة: Fix relay rotation، قيد التنفيذ، 67%");
+    expect(container.querySelector("[data-message-row]")!.className).toContain("justify-start");
+  });
+});
+
+describe("how long a task has been at it", () => {
+  afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
+
+  it("reads in minutes, hours and days, in the interface's language", () => {
+    expect(durationIn("en")(10_000)).toBe("1 min");
+    expect(durationIn("en")(12 * 60_000)).toBe("12 min");
+    expect(durationIn("en")(80 * 60_000)).toBe("1 hr 20 min");
+    expect(durationIn("en")(2 * 3_600_000)).toBe("2 hr");
+    expect(durationIn("en")(51 * 3_600_000)).toMatch(/^2 days 3 hr$/);
+    expect(durationIn("pt")(80 * 60_000)).toMatch(/^1 h 20 min$/);
+  });
+
+  it("while running, blocked or queued is since it started; once done or failed, how long it took; nothing without a start", () => {
+    const start = NOW - 42 * 60_000;
+    expect(taskElapsed(task({ startedAt: start }), NOW)).toEqual({ kind: "running", ms: 42 * 60_000 });
+    expect(taskElapsed(task({ startedAt: start, status: "blocked" }), NOW)?.kind).toBe("blocked");
+    expect(taskElapsed(task({ startedAt: start, status: "done", updatedAt: start + 30 * 60_000 }), NOW)).toEqual({ kind: "took", ms: 30 * 60_000 });
+    // No update time on the card: the message's last change.
+    expect(taskElapsed(task({ startedAt: start, status: "failed" }), NOW, start + 5 * 60_000)).toEqual({ kind: "took", ms: 5 * 60_000 });
+    expect(taskElapsed(task({ startedAt: start, status: "cancelled" }), NOW)).toBeUndefined();
+    expect(taskElapsed(task(), NOW)).toBeUndefined();
+  });
+
+  it("shows on the card and in the Tasks panel, and moves once a minute while the card is on screen", async () => {
+    // Every card on screen.
+    vi.stubGlobal("IntersectionObserver", class {
+      constructor(private cb: IntersectionObserverCallback) {}
+      observe(el: Element) { this.cb([{ target: el, isIntersecting: true } as IntersectionObserverEntry], this as unknown as IntersectionObserver); }
+      unobserve() {} disconnect() {}
+    });
+    vi.useFakeTimers({ now: NOW, toFake: ["setInterval", "clearInterval", "setTimeout", "clearTimeout", "Date"] });
+    const c = card({ startedAt: NOW - 12.5 * 60_000 });
+    renderApp(<><MessageBubble message={message(c)} peerPubKey="peer" /><TasksButton rows={[row("m1", c)]} /></>);
+    expect(screen.getByTestId("status-card-elapsed")).toHaveTextContent("running for 12 min");
+    const before = screen.getByTestId("status-card-elapsed").textContent;
+    act(() => { vi.advanceTimersByTime(60_000); });
+    expect(screen.getByTestId("status-card-elapsed").textContent).not.toBe(before);
+    act(() => { screen.getByTestId("chat-tasks").click(); });
+    expect(screen.getByTestId("chat-tasks-item-elapsed")).toHaveTextContent("running for 13 min");
+  });
+
+  it("stands still off screen", () => {
+    vi.stubGlobal("IntersectionObserver", class {
+      constructor(private cb: IntersectionObserverCallback) {}
+      observe(el: Element) { this.cb([{ target: el, isIntersecting: false } as IntersectionObserverEntry], this as unknown as IntersectionObserver); }
+      unobserve() {} disconnect() {}
+    });
+    vi.useFakeTimers({ now: NOW, toFake: ["setInterval", "clearInterval", "setTimeout", "clearTimeout", "Date"] });
+    renderApp(<MessageBubble message={message(card({ startedAt: NOW - 12 * 60_000 }))} peerPubKey="peer" />);
+    const before = screen.getByTestId("status-card-elapsed").textContent;
+    expect(vi.getTimerCount()).toBe(0);
+    act(() => { vi.advanceTimersByTime(5 * 60_000); });
+    expect(screen.getByTestId("status-card-elapsed").textContent).toBe(before);
+  });
+
+  it("a finished one says how long it took; a cancelled one, or one with no start, says nothing", () => {
+    renderApp(<>
+      <MessageBubble message={message(card({ id: "a", status: "done", startedAt: NOW - 50 * 60_000, updatedAt: NOW - 8 * 60_000 }), { id: "a" })} peerPubKey="peer" />
+      <MessageBubble message={message(card({ id: "b", status: "cancelled", startedAt: NOW - 50 * 60_000 }), { id: "b" })} peerPubKey="peer" />
+      <MessageBubble message={message(card({ id: "c" }), { id: "c" })} peerPubKey="peer" />
+    </>);
+    expect(screen.getAllByTestId("status-card-elapsed").map(e => e.textContent)).toEqual(["took 42 min", "", ""]);
   });
 });
 
@@ -429,7 +584,11 @@ describe("routines in a row in the chat", () => {
   it("show as one row saying whose, how many, the next run and how the last runs went; a tap opens their cards", async () => {
     const { user } = renderApp(<Stack n={10} />);
     const toggle = screen.getByTestId("routine-stack-toggle");
-    expect(toggle).toHaveTextContent("~Hermes Zero↻10 routines· next in 2 min.· ✕ 1 failed");
+    // A card's row, not a bubble: the sender's name above it.
+    expect(screen.getByTestId("routine-stack-name")).toHaveTextContent("~Hermes Zero");
+    expect(toggle).toHaveTextContent("↻10 routines· next in 2 min.· ✕ 1 failed");
+    expect(toggle).toHaveClass("status-card-surface");
+    expect(toggle.className).not.toMatch(/\bbg-(sent|received)-bg\b/);
     expect(toggle).toHaveAttribute("aria-expanded", "false");
     // Folded, the cards stay in the page (a jump finds them) but hidden.
     const list = document.getElementById(toggle.getAttribute("aria-controls")!)!;
