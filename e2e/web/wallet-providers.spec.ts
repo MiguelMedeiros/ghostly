@@ -94,7 +94,7 @@ test.describe("Cashu and Lightning", () => {
     await openWallet(alice, "lightning-testnet");
     await alice.page.getByTestId("wallet-send").click();
     await alice.page.getByTestId("wallet-pay-input").fill(strangerInvoice(25));
-    await alice.page.getByRole("button", { name: "Pay 25 sats" }).click();
+    await alice.page.getByRole("button", { name: "Pay 25 test sats" }).click();
     await alice.page.getByRole("button", { name: "Pay", exact: true }).click();
     await expect(alice.page.getByTestId("wallet-notice")).toHaveText("Paid.", { timeout: 60_000 });
     await openWallet(alice, "cashu-testnet");

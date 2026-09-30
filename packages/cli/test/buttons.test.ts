@@ -203,6 +203,26 @@ describe("presses in the stream", () => {
     expect(events.filter((e) => e.type === "button.pressed")).toHaveLength(3);
   });
 
+  it("says button.pressed for a group reply whose press came after it (a stripped copy completed), once", async () => {
+    const { h, events } = await hub("late-presses");
+    h.baseline(state([], [group()]), new Map([["group:g1", []]]));
+    // Handed on without its reply box: only the text first.
+    h.sink.post({ kind: "messages", linkId: "group:g1", messages: [row("group:g1", "gr1", { text: "Go", member: "anakey" })] });
+    // The author's whole copy completes it: the reply, and the engine's press.
+    const whole = row("group:g1", "gr1", { text: "Go", member: "anakey", replyTo: { id: "gq", snippet: "Deploy?", from: "me", button: "go", messageId: "gq" }, press: { messageId: "gq", button: "go", label: "Go" } });
+    h.sink.post({ kind: "messages", linkId: "group:g1", messages: [whole] });
+    h.sink.post({ kind: "messages", linkId: "group:g1", messages: [whole] });
+    expect(events.map((e) => e.id)).toEqual(["group.message:g1:gr1", "button.pressed:g1:gr1"]);
+    expect(events[1]).toMatchObject({ group: "g1", messageId: "gq", button: "go", by: "anakey", replyId: "gr1" });
+    // An edit of it later says the edit, not the press again.
+    h.sink.post({ kind: "messages", linkId: "group:g1", messages: [{ ...whole, edit: { seq: 1, at: 2, history: [] } }] });
+    expect(events.map((e) => e.type)).toEqual(["group.message", "button.pressed", "group.message.edited"]);
+    // Restarted: what was reported stays reported.
+    const again = await hub("late-presses");
+    again.h.baseline(state([], [group()]), new Map([["group:g1", [{ ...whole, edit: { seq: 1, at: 2, history: [] } }]]]));
+    expect(again.events).toEqual([]);
+  });
+
   it("an agent turn carries the press beside the untrusted text, and a plain turn none", () => {
     const received = (message: StoredMessage) => ({ seq: 1, id: `message.received:c1:${message.id}`, type: "message.received", at: 1, chat: "c1", message: messageJson(message) });
     const pressed = toTurn(received(row("c1", "r1", { text: "Yes", press: { messageId: "me_1", button: "yes", label: "Yes" } })));

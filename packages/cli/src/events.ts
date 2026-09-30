@@ -339,7 +339,12 @@ export class EventHub {
           this.emit(type, `${type}:${chat}:${message.id}`, { chat, message: json, ...(notice ? { name: notice[1] ?? null } : {}) });
         }
         if (message.sender === "peer" && message.press) this.pressed(chat, group, message, json);
-      } else if (group) {
+        continue;
+      }
+      // A press the engine learned after the reply was first seen here: a group reply first held from a copy a member
+      // handed on without its reply box, which its author's whole copy completes (WISP 9xx · Group Mesh § Catch-up).
+      if (message.sender === "peer" && message.press && !pressedIn(before)) this.pressed(chat, group, message, json);
+      if (group) {
         // A new text in a group (WISP 9xx § Edits): mine as made here, a member's as it came. Once per edit number.
         const [, edits] = splitState(state), [, edited] = splitState(before);
         if (edits > edited) this.emit("group.message.edited", `group.message.edited:${group}:${message.id}:${edits}`, { group, messageId: message.id, edits, message: json });
@@ -413,10 +418,18 @@ function deliveryOf(message: StoredMessage): string {
   return message.sender === "peer" ? "received" : message.delivery ?? "sent";
 }
 
-/** What the seen set keeps of a message: its delivery, and its edit number once edited (`sent#e3`). */
+/** What a received button press adds to its delivery in the seen set (`received+p`): it is reported once. */
+const PRESSED = "+p";
+
+/**
+ * What the seen set keeps of a message: its delivery (`+p` once a press on a message of mine was reported), and its
+ * edit number once edited (`sent#e3`, `received+p#e2`).
+ */
 function stateOf(message: StoredMessage): string {
-  return message.edit ? `${deliveryOf(message)}#e${message.edit.seq}` : deliveryOf(message);
+  const delivery = deliveryOf(message) + (message.sender === "peer" && message.press ? PRESSED : "");
+  return message.edit ? `${delivery}#e${message.edit.seq}` : delivery;
 }
+const pressedIn = (state: string): boolean => splitState(state)[0].endsWith(PRESSED);
 function splitState(state: string): [string, number] {
   const at = state.lastIndexOf("#e");
   return at === -1 ? [state, 0] : [state.slice(0, at), Number(state.slice(at + 2)) || 0];

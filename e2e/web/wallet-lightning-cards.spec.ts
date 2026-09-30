@@ -40,7 +40,7 @@ async function addNwc(p: Peer, uri: string) {
 async function payFromCard(p: Peer, invoice: string, amount: number) {
   await p.page.getByTestId("wallet-send").click();
   await p.page.getByTestId("wallet-pay-input").fill(invoice);
-  await p.page.getByRole("button", { name: `Pay ${amount.toLocaleString()} sats` }).click();
+  await p.page.getByRole("button", { name: `Pay ${amount.toLocaleString()} test sats` }).click();
   await p.page.getByRole("button", { name: "Pay", exact: true }).click();
   await expect(p.page.getByTestId("wallet-notice")).toHaveText("Paid.", { timeout: 60_000 });
 }

@@ -48,7 +48,7 @@ async function payFromCard(p: Peer, request: string, sats: number) {
   await openWallet(p, "lightning-testnet");
   await p.page.getByTestId("wallet-send").click();
   await p.page.getByTestId("wallet-pay-input").fill(request);
-  await p.page.getByRole("button", { name: `Pay ${sats.toLocaleString()} sats` }).click();
+  await p.page.getByRole("button", { name: `Pay ${sats.toLocaleString()} test sats` }).click();
   await p.page.getByRole("button", { name: "Pay", exact: true }).click();
   await expect(p.page.getByTestId("wallet-notice")).toHaveText("Paid.", { timeout: 60_000 });
 }
@@ -74,7 +74,7 @@ test("LND: a node per person, invoices in and out through the card, a chat reque
     const aliceInvoice = (await alice.page.getByTestId("wallet-invoice").innerText()).trim();
     expect(aliceInvoice).toMatch(/^lnbcrt10u1/);
     await payFromCard(bob, aliceInvoice, 1000);
-    await expect(alice.page.getByTestId("wallet-paid")).toContainText("1,000 sats received", { timeout: 30_000 });
+    await expect(alice.page.getByTestId("wallet-paid")).toContainText("1,000 test sats received", { timeout: 30_000 });
     expect(await cardBalance(alice, "alice")).toBe(a + 1000);
     const bobAfter = await cardBalance(bob, "bob");
     expect(b - bobAfter, "1,000 out and a fee within the cap").toBeGreaterThanOrEqual(1000);
