@@ -170,6 +170,10 @@ npm run e2e:matrix -- --list                # print the matrix
 npm run e2e:matrix -- --docs                # and write the table below
 ```
 
+In CI, `gh workflow run e2e-full.yml --ref <branch> -f jobs=matrix` runs the four browser shards and the report only.
+A step that reads the app's words goes through `either`, `alternatives` or `containing` (e2e/matrix/actors.ts), or
+a test id: one person in a scenario may read the app in Portuguese.
+
 What the first full run found (2026-09-24, dev at `8fd41d4`, a local mint and MinIO, the regtest stacks down):
 
 - **Restoring a backup in the extension leads nowhere.** The extension has one profile only, and the restore adds a new profile it cannot switch to, so the restored chats are out of reach (on the web, Ghostly switches to the restored profile). This is all 20 failures: every scenario where B is the extension and restores. Fixed since: the extension keeps several profiles and switches to the restored one (#171, `e2e/extension/profiles.spec.ts`).

@@ -8,7 +8,7 @@ import { fingerprints, TestGpg } from "../../packages/browser/test/helpers/gpg";
 import { strangerInvoice } from "../support/bolt11";
 import { setClipboard } from "../support/clipboard";
 import { startTestDomain, type TestDomain } from "../support/domain";
-import { GIF, type WalletKind } from "../support/fixtures";
+import { delivered, GIF, type WalletKind } from "../support/fixtures";
 import { mockMainnetMints } from "../support/mint";
 import { closeIdentities, openIdentities, shareIdentity, theirCards, theirFace } from "../support/identities";
 import { injectNostrSigner } from "../support/nostrSigner";
@@ -17,7 +17,7 @@ import type { LocalRelay } from "../support/relay";
 import { testSshKey } from "../support/ssh";
 import type { WebLNProvider } from "../../packages/browser/src/engine/paymentAdapters/providers/webln";
 import {
-  chatOption, chatPane, composerButton, either, go, home, newWallet, newWalletDialog, nickname, openChat, paymentCard, reloaded, say, sees, setLanguage, wallet, type Actor,
+  alternatives, chatOption, chatPane, composerButton, containing, either, go, home, newWallet, newWalletDialog, nickname, openChat, paymentCard, reloaded, say, sees, setLanguage, wallet, type Actor,
 } from "./actors";
 import type { Combination } from "./dimensions";
 import { CARD, type Step } from "./plan";
@@ -76,7 +76,7 @@ async function joinWith(actor: Actor, text: string): Promise<void> {
 }
 
 const connected = (actor: Actor, transport = "WebRTC", timeout = 180_000) =>
-  expect(actor.page.getByTestId("connection-options")).toHaveAttribute("aria-label", new RegExp(`Connected · ${transport}`), { timeout });
+  expect(actor.page.getByTestId("connection-options")).toHaveAttribute("aria-label", new RegExp(`${alternatives("Connected")} · ${transport}`), { timeout });
 /**
  * Leaving DHT-only after the contact reloaded once took 70 s, and once more than 3 minutes, to find
  * WebRTC again. It takes seconds now (6–14 s from the first switch, measured by e2e/web/dht-back-timing.spec.ts):
@@ -98,7 +98,7 @@ export const pair: Block = {
     const invite = await copyInvite(a);
     await joinWith(b, invite);
     for (const p of [a, b]) {
-      await expect(p.page.getByPlaceholder("Message…")).toBeEnabled({ timeout: 90_000 });
+      await expect(p.page.getByPlaceholder(either("Message…"))).toBeEnabled({ timeout: 90_000 });
       p.chatHash = await hashOf(p);
     }
     expect(a.chatHash).toMatch(/^#\/chat\//);
@@ -158,9 +158,9 @@ async function setOnline(actor: Actor, online: boolean): Promise<void> {
 async function dhtOnly(actor: Actor, on: boolean): Promise<void> {
   const menu = actor.page.getByTestId("connection-menu");
   if ((await menu.getAttribute("open")) === null) await actor.page.getByTestId("connection-options").click();
-  const panel = actor.page.getByRole("dialog", { name: "Connection options" });
-  const choice = panel.getByRole("radio", { name: "DHT only", exact: true });
-  const back = panel.getByRole("radio", { name: "Automatic", exact: true }).or(panel.getByRole("radio", { name: "WebRTC", exact: true })).first();
+  const panel = actor.page.getByRole("dialog", { name: either("Connection options") });
+  const choice = panel.getByRole("radio", { name: either("DHT only") });
+  const back = panel.getByRole("radio", { name: either("Automatic") }).or(panel.getByRole("radio", { name: "WebRTC", exact: true })).first();
   if ((await choice.isChecked()) !== on) await (on ? choice : back).click();
   await expect.poll(() => choice.isChecked()).toBe(on);
   await actor.page.keyboard.press("Escape");
@@ -230,7 +230,8 @@ export const delivery: Block = {
       // Past the 256 bytes the DHT carries: a short text would take the DHT floor (WISP 403); a longer one is held.
       await say(a, `held in my S3 for you ${"and more words past what the DHT carries. ".repeat(7)}`);
       await a.page.getByTestId("file-input").setInputFiles({ name: "held.gif", mimeType: "image/gif", buffer: GIF });
-      await expect(chatPane(a).locator(".group").filter({ hasText: "held in my S3 for you" })).toContainText(/Held/, { timeout: 60_000 });
+      // The bubble says nothing of it (#360): its mark is the clock, held for B.
+      await expect(delivered(chatPane(a).locator(".group").filter({ hasText: "held in my S3 for you" }), "held")).toBeVisible({ timeout: 60_000 });
       await back();
       await sees(b, "held in my S3 for you");
       await expect(chatPane(b).getByTestId("file-bubble").filter({ hasText: "held.gif" })).toBeVisible({ timeout: 90_000 });
@@ -255,13 +256,13 @@ export const transport: Block = {
     for (const p of [a, b]) {
       await openChat(p);
       await p.page.getByTestId("connection-options").click();
-      const dialog = p.page.getByRole("dialog", { name: "Connection options" });
+      const dialog = p.page.getByRole("dialog", { name: either("Connection options") });
       // A browser has WebRTC only: the native transports are there, and refused.
       await expect(dialog.getByRole("radio", { name: "WebRTC", exact: true })).toBeEnabled();
       await expect(dialog.getByRole("radio", { name: "WebRTC", exact: true })).toBeChecked();
       for (const native of ["Iroh", "HyperDHT"]) await expect(dialog.getByRole("radio", { name: native, exact: true })).toBeDisabled();
       if (combo.transport === "webrtc-strict") {
-        const fallback = dialog.getByRole("switch", { name: "Fallback" });
+        const fallback = dialog.getByRole("switch", { name: either("Fallback") });
         await fallback.click();
         await expect(fallback).not.toBeChecked();
       }
@@ -285,7 +286,7 @@ export const calls: Block = {
       await expect(p.page.getByTestId("call-audio")).toBeEnabled({ timeout: LIVE_AGAIN_MS });
     }
     await a.page.getByTestId("call-audio").click();
-    await b.page.getByTitle("Accept audio call").click();
+    await b.page.getByTitle(either("Accept audio call")).click();
     for (const p of [a, b]) await expect(p.page.getByTestId("call-window").getByText(/^\d{1,2}:\d{2}$/)).toBeVisible();
     await a.page.getByTitle("End call").click();
     for (const p of [a, b]) await expect(p.page.getByTestId("call-window")).toHaveCount(0);
@@ -564,7 +565,7 @@ async function lightningThroughWebln(w: World): Promise<void> {
       await form.getByTestId("provider-form-webln").getByRole("button", { name: either("Connect browser wallet") }).click();
     } });
     await wallet(p, "lightning-testnet");
-    await expect(p.page.getByTestId("lightning-source").getByTestId("lightning-source-status")).toContainText("Connected");
+    await expect(p.page.getByTestId("lightning-source").getByTestId("lightning-source-status")).toContainText(containing("Connected"));
   }
   await openChat(b);
   await paymentCard(b, "lightning-testnet");
@@ -618,31 +619,28 @@ async function mainnetUi({ a, b, combo }: World): Promise<void> {
       await expect(p.page.getByTestId("wallet-card-cashu-mainnet").getByTestId("wallet-card-network")).toHaveCount(0);
       if (combo.rail === "ln-mint") {
         await wallet(p, "lightning-mainnet");
-        await expect(p.page.getByTestId("wallet-card-lightning-mainnet")).toContainText("Invoices via Cashu");
+        await expect(p.page.getByTestId("wallet-card-lightning-mainnet")).toContainText(containing("Invoices via Cashu"));
         await expect(p.page.getByTestId("lightning-source").getByTestId("lightning-source-current")).toContainText("Cashu mints");
       }
       made.add(p);
       continue;
     }
     const dialog = await newWalletDialog(p, "mainnet");
-    if (combo.rail === "cashu" || combo.rail === "ln-mint") await expect(offer(dialog, "cashu")).toHaveText("Create");
-    else if (combo.rail === "bark") {
-      await expect(offer(dialog, "bark")).toHaveText("Not yet");
-      await expect(dialog.getByTestId("new-wallet-type-bark")).toHaveAttribute("aria-disabled", "true");
-    } else if (card === "bitcoin") {
+    if (combo.rail === "cashu" || combo.rail === "ln-mint") await expect(offer(dialog, "cashu")).toHaveText(either("Create"));
+    else if (card === "bitcoin") {
       // No on-chain source runs in a browser on Mainnet (BDK is Testnet only; Bitcoin Core is Desktop only).
-      await expect(offer(dialog, "bitcoin")).toHaveText("Not yet");
+      await expect(offer(dialog, "bitcoin")).toHaveText(either("Not yet"));
     } else if (card === "lightning") {
       // Only the sources Mainnet allows are offered; the test sources never are.
-      await expect(offer(dialog, "lightning")).toHaveText("Connect…");
+      await expect(offer(dialog, "lightning")).toHaveText(either("Connect…"));
       await dialog.getByTestId("new-wallet-type-lightning").click();
       const select = dialog.getByTestId("new-wallet-provider-select");
       const options = (await select.count()) ? await (await optionsOf(select)).allTextContents() : [await dialog.getByTestId("new-wallet-provider").innerText()];
       if (await select.count()) await close(select);
       expect(options.join(" ")).not.toMatch(/fake|regtest|\(test\)/i);
     } else {
-      // Ark and USDT: one click on Mainnet, but that reaches the real server and chain, so it is not made here.
-      await expect(offer(dialog, card as WalletKind)).toHaveText("Create");
+      // Ark, Bark (#305) and USDT: one click on Mainnet, but that reaches the real server and chain, so it is not made here.
+      await expect(offer(dialog, card as WalletKind)).toHaveText(either("Create"));
     }
     await p.page.keyboard.press("Escape");
     await expect(dialog).toHaveCount(0);
@@ -713,7 +711,7 @@ export const group: Block = {
       await a.page.getByTitle(either("New Chat")).click();
       // The group's edges need a live link: a new chat is never DHT only unless someone chooses it.
       await joinWith(c, await copyInvite(a));
-      await expect(c.page.getByPlaceholder("Message…")).toBeEnabled({ timeout: 90_000 });
+      await expect(c.page.getByPlaceholder(either("Message…"))).toBeEnabled({ timeout: 90_000 });
       await go(a, "#/");
       await a.page.getByTestId("group-row").filter({ hasText: name }).click();
       for (const [who, nick] of [[b, "Bob"], [c, "Carol"]] as const) {

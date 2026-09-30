@@ -36,10 +36,18 @@ const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
  * Text the app does not translate (hard-coded) is simply matched as it is.
  */
 export function either(english: string): RegExp {
+  return new RegExp(`^${alternatives(english)}$`);
+}
+
+/** The English text or any Portuguese translation of it, as a regular expression group to build a pattern around. */
+export function alternatives(english: string): string {
   const translations = new Set([english]);
   for (const [key, value] of en) if (value === english && pt.get(key)) translations.add(pt.get(key)!);
-  return new RegExp(`^(?:${[...translations].map(escape).join("|")})$`);
+  return `(?:${[...translations].map(escape).join("|")})`;
 }
+
+/** Text that holds the English text or a Portuguese translation of it (a status line with more after it). */
+export const containing = (english: string): RegExp => new RegExp(alternatives(english));
 
 /** The open conversation, not the chat list. */
 export const chatPane = (actor: Peer) => actor.page.locator(".chat-wallpaper");
@@ -90,7 +98,7 @@ export async function nickname(actor: Actor, name: string): Promise<void> {
 export const composerButton = (actor: Actor, testId: string): Promise<Locator> => composerRow(actor.page, testId);
 
 export async function say(actor: Actor, text: string): Promise<void> {
-  const box = actor.page.getByPlaceholder("Message…");
+  const box = actor.page.getByPlaceholder(either("Message…"));
   await expect(box).toBeEnabled({ timeout: 60_000 });
   await box.fill(text);
   await box.press("Enter");
