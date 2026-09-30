@@ -997,10 +997,22 @@ button:disabled, button[aria-disabled="true"], input[type="checkbox"]:disabled, 
 @media (min-width: 768px) {
   :root { --conversation-footer-height: 60px; --conversation-control-height: 40px; }
   .account-actions { height: calc(var(--conversation-footer-height) - 1px); }
+  /* Two panes on a touch screen (an iPad, a phone on its side) have the home indicator under both bottom rows: the
+     composer and the account bar end above it, level with each other. The inset is 0 everywhere else. */
   .composer-safe {
-    min-height: var(--conversation-footer-height);
+    min-height: calc(var(--conversation-footer-height) + env(safe-area-inset-bottom));
     border-top: 1px solid var(--theme-border);
     padding-block: calc((var(--conversation-footer-height) - var(--conversation-control-height) - 1px) / 2);
+    padding-bottom: calc((var(--conversation-footer-height) - var(--conversation-control-height) - 1px) / 2 + env(safe-area-inset-bottom));
+  }
+  .account-footer { padding-bottom: env(safe-area-inset-bottom); }
+}
+
+/* With the keyboard up the home indicator is covered: the composer stands on the keyboard, as on a phone held upright. */
+@media (min-width: 768px) and (pointer: coarse) {
+  html[data-keyboard="true"] .composer-safe {
+    padding-bottom: calc((var(--conversation-footer-height) - var(--conversation-control-height) - 1px) / 2);
+    min-height: var(--conversation-footer-height);
   }
 }
 
