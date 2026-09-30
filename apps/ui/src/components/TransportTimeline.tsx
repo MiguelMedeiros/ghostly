@@ -16,7 +16,8 @@ export function TransportLine({ entry, contact, earlier = [] }: { entry: Transpo
   const { t, language } = useI18n();
   const warn = entry.kind === "failed" || entry.kind === "lost" || (entry.kind === "flapping" && !entry.live);
   return (
-    <div className="mb-3.5 flex flex-col items-center message-row-x" data-testid="transport-line" data-kind={entry.kind}>
+    // Not part of the conversation: a run of voice messages goes on past it (lib/voicePlayback.ts).
+    <div className="mb-3.5 flex flex-col items-center message-row-x" data-testid="transport-line" data-kind={entry.kind} data-voice-passes>
       <button type="button" aria-expanded={open} aria-controls={`${id}-details`} onClick={() => setOpen(!open)}
         className={`inline-flex max-w-full items-center gap-1.5 rounded-lg px-3 py-1.5 text-start text-xs transition-colors ${warn ? "bg-surface-alt/80 text-text-muted" : "bg-surface-alt/80 text-text-secondary"} hover:bg-surface-hover ${focus}`}>
         <TransportLineIcon entry={entry} />
