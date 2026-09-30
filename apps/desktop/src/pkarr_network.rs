@@ -667,7 +667,9 @@ impl Pkarr {
             }
             self.went(Path::Dht);
             source = "dht";
-        } else if background {
+        } else if background && self.inner.lookup.is_some() {
+            // (With no DHT, a private network's relays are all there is: a background read asks them too, or it
+            // would only ever hand back what is known, and a key watched in the background never changed.)
             if self.newest(key).is_none() {
                 if let Some(done) = lookup {
                     let _ = tokio::time::timeout(BACKGROUND_LOOKUP_WAIT, finished(done)).await;
@@ -1476,6 +1478,35 @@ mod tests {
             "1"
         );
         assert_eq!((gets(&fast), gets(&dht)), (0, 1));
+    }
+
+    #[tokio::test]
+    async fn a_background_read_on_a_private_network_asks_its_relays() {
+        // No DHT there: a background read (a key watched while nobody looks, a community's knocks) that asked no
+        // relay would only ever hand back what it already knew, and never see the key change.
+        let relay = pkarr_relay().await;
+        let private = Pkarr::private(&[relay.url.parse().unwrap()]).unwrap();
+        let keypair = Keypair::random();
+        put(&relay, &packet(&keypair, "1"));
+        assert_eq!(
+            value(
+                &private
+                    .resolve_with(&keypair.public_key(), true, false)
+                    .await
+                    .unwrap()
+            ),
+            "1"
+        );
+        put(&relay, &packet(&keypair, "2"));
+        assert_eq!(
+            value(
+                &private
+                    .resolve_with(&keypair.public_key(), true, false)
+                    .await
+                    .unwrap()
+            ),
+            "2"
+        );
     }
 
     #[tokio::test]
