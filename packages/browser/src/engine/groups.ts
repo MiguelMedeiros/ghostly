@@ -132,6 +132,11 @@ export const mentionAt = (map: Map<string, number>, groupId: string): { lastMent
   const at = map.get(groupId);
   return at ? { lastMentionAt: at } : {};
 };
+/** The view's `lastPeerMessageAt`, when there is one. */
+export const peerMessageAt = (map: Map<string, number>, groupId: string): { lastPeerMessageAt?: number } => {
+  const at = map.get(groupId);
+  return at ? { lastPeerMessageAt: at } : {};
+};
 
 /**
  * How often a group's link is looked at (`warmPollMs` for `warmMs` after it was handed out or someone
@@ -213,6 +218,8 @@ export class Groups {
   /** Each group's status and newest commit as its history last said them: a line per change of either, never one again. */
   private readonly lastTold = new Map<string, { status: GroupSession["status"]; top: GroupSession["top"] }>();
   private readonly lastMessageAt = new Map<string, number>();
+  /** The latest message from another member, per group: what makes it unread in the list. */
+  private readonly lastPeerMessageAt = new Map<string, number>();
   /** The latest message that names me, per group (the chat list's "@" while it is unread). */
   private readonly lastMentionAt = new Map<string, number>();
   private reconciling = Promise.resolve();
@@ -272,8 +279,11 @@ export class Groups {
     for (const group of all.filter(g => !g.community && !g.joining)) {
       this.stored.set(group.id, group);
       if (group.state) this.attach(group.state);
-      const history = await this.store.getMessages(MESSAGE_LINK(group.id)), last = history[history.length - 1];
+      // Messages only, as while the app runs: a membership line or a payment's note moves neither the list nor unread.
+      const history = await this.store.getMessages(MESSAGE_LINK(group.id)), said = history.filter(m => !m.event && !m.groupPay);
+      const last = said[said.length - 1], lastPeer = [...said].reverse().find(m => m.sender !== "me");
       if (last) this.lastMessageAt.set(group.id, last.timestamp);
+      if (lastPeer) this.lastPeerMessageAt.set(group.id, lastPeer.timestamp);
       const mention = [...history].reverse().find(m => m.mentioned);
       if (mention) this.lastMentionAt.set(group.id, mention.timestamp);
     }
@@ -312,7 +322,7 @@ export class Groups {
       const edges = this.host.edges(group.id);
       // A chat stays in `contacts` after its member is removed or leaves (the removal notice goes over it): only a member still in the roster counts.
       const contacts = Object.entries(group.contacts ?? {}).filter(([key]) => !session || rosterHas(session.roster, key));
-      const base = { id: group.id, profile: "mesh" as const, createdAt: group.createdAt, lastMessageAt: this.lastMessageAt.get(group.id) ?? 0, ...mentionAt(this.lastMentionAt, group.id), invited: [...(this.invited.get(group.id) ?? [])],
+      const base = { id: group.id, profile: "mesh" as const, createdAt: group.createdAt, lastMessageAt: this.lastMessageAt.get(group.id) ?? 0, ...peerMessageAt(this.lastPeerMessageAt, group.id), ...mentionAt(this.lastMentionAt, group.id), invited: [...(this.invited.get(group.id) ?? [])],
         memberLinks: Object.fromEntries(contacts.map(([key, linkId]) => [linkId, key])) };
       if (!session) {
         const invitation = group.invitation!;
@@ -508,6 +518,7 @@ export class Groups {
     this.invited.delete(groupId);
     this.pendingEntries.delete(groupId);
     this.lastMessageAt.delete(groupId);
+    this.lastPeerMessageAt.delete(groupId);
     this.lastMentionAt.delete(groupId);
     await this.store.deleteGroup(groupId);
     await this.store.putGroup(group);
@@ -1182,6 +1193,7 @@ export class Groups {
         // A copy handed on stripped came first: the whole one adds what it lacked (WISP 9xx · Group Mesh § Catch-up).
         await (m.completes && this.host.completeMessage ? this.host.completeMessage(message) : this.host.storeMessage(message));
         this.lastMessageAt.set(state.id, Math.max(this.lastMessageAt.get(state.id) ?? 0, timestamp));
+        if (m.sender !== session.myKey) this.lastPeerMessageAt.set(state.id, Math.max(this.lastPeerMessageAt.get(state.id) ?? 0, timestamp));
         // What the member was typing arrived: it is not typing any more.
         this.typings.messageFrom(state.id, m.sender);
       },

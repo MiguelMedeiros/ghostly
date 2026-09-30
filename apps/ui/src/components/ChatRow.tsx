@@ -15,7 +15,7 @@ import { formatListTime, previewText } from "../lib/chatList";
 import { cardLine, showsCard } from "../lib/statusCards";
 import { deliveryShape, useDeliveryWords } from "../lib/delivery";
 import { groupChat, mentionsNotify, muteEndText, useChatMute } from "../lib/chatMute";
-import { authorName, groupReadAt, groupStatusText } from "../lib/groups";
+import { authorName, groupReadAt, groupStatusText, groupUnreadAt } from "../lib/groups";
 import { reactionNoteText } from "../lib/reactions";
 import type { ChatListDensity } from "../lib/settings";
 import type { ChatMessage } from "../lib/types";
@@ -295,7 +295,7 @@ export function GroupRow({ group, active, density, onOpen }: { group: GroupView;
   const [busy, setBusy] = useState(false);
   const muted = useChatMute(groupChat(group.id)) !== undefined;
   const invitation = group.invitation;
-  const unread = !active && !invitation && group.lastMessageAt > groupReadAt(group.id);
+  const unread = !active && !invitation && groupUnreadAt(group) > groupReadAt(group.id);
   // An unread message that names me: "@" beside the dot, in the accent unless the mute keeps mentions quiet too.
   const mention = unread && (group.lastMentionAt ?? 0) > groupReadAt(group.id);
   const mentionQuiet = muted && !mentionsNotify(groupChat(group.id));

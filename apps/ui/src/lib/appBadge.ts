@@ -1,7 +1,7 @@
 import { useEffect, useSyncExternalStore } from "react";
 import { engine } from "@ghostly/browser/platform/engine";
 import { getUnreadCount, listSessions } from "./storage";
-import { groupReadAt } from "./groups";
+import { groupReadAt, groupUnreadAt } from "./groups";
 import { MUTE_EVENT, groupChat, mutedFor } from "./chatMute";
 import type { ChatSession } from "./types";
 
@@ -16,6 +16,7 @@ import type { ChatSession } from "./types";
 export interface BadgeGroup {
   id: string;
   lastMessageAt: number;
+  lastPeerMessageAt?: number;
   lastMentionAt?: number;
   invitation?: unknown;
 }
@@ -28,7 +29,7 @@ export function badgeCount(sessions: readonly ChatSession[], groups: readonly Ba
   }
   for (const group of groups) {
     const readAt = groupReadAt(group.id);
-    if (group.invitation || group.lastMessageAt <= readAt) continue;
+    if (group.invitation || groupUnreadAt(group) <= readAt) continue;
     const mention = (group.lastMentionAt ?? 0) > readAt;
     if (!mutedFor(groupChat(group.id), mention, now)) count += 1;
   }

@@ -234,6 +234,8 @@ export interface GroupView {
   /** Contact chats that are members, by chat id → member key. */
   memberLinks: Record<string, string>;
   lastMessageAt: number;
+  /** When the latest message from another member arrived (what makes the group unread; mine and membership lines do not); absent for none. */
+  lastPeerMessageAt?: number;
   /** When the latest message that names me arrived; absent for none. */
   lastMentionAt?: number;
   /** The latest reaction in the group, for the chat list. */

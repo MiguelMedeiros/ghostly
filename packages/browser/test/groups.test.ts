@@ -194,6 +194,35 @@ describe("group engine: admission over a contact chat, edges from the roster", (
     expect(again.views()[0]).toMatchObject({ id: groupId, status: "active", epoch: 1 });
     expect((await again.messages(groupId)).map(m => m.event)).toEqual(["joined"]);
   });
+  it("what makes a group unread: another member's message, never mine nor a membership line, also after a restart", async () => {
+    const world = new World();
+    const alice = world.add("alice"), bob = world.add("bob");
+    world.chats.set("chat-ab", ["alice", "bob"]);
+    await alice.load(); await bob.load();
+    const groupId = await alice.create("Ghosts", "mesh");
+    const keys = (globalThis as unknown as { __keys: Map<string, string> }).__keys;
+    const record = (g: Groups) => { for (const v of g.views()) if (v.myKey) keys.set((g as unknown as { sessions: Map<string, { state: GroupState }> }).sessions.get(v.id)!.state.seedB64, v.myKey); };
+    record(alice);
+    await alice.invite(groupId, "chat-ab"); await world.settle();
+    await bob.accept(groupId); await world.settle();
+    record(bob);
+    await world.settle();
+    await world.meet();
+    await alice.send(groupId, "hello", []);
+    await world.settle();
+    const sent = world.peers.get("alice")!.messages.find(m => !m.event)!;
+    // Mine moves the group in the list, and is not unread; on Bob's side it is.
+    expect(alice.views()[0].lastMessageAt).toBe(sent.timestamp);
+    expect(alice.views()[0].lastPeerMessageAt ?? 0).toBe(0);
+    expect(bob.views()[0].lastPeerMessageAt).toBe(world.peers.get("bob")!.messages.find(m => !m.event)!.timestamp);
+    // A membership line after it (never unread while the app runs) is not unread after a restart either.
+    world.peers.get("alice")!.messages.push({ linkId: `group:${groupId}`, id: "event:1:joined:later", text: "Carol joined", sender: "peer", event: "joined", timestamp: sent.timestamp + 60_000, via: "datalink" });
+    const again = new Groups({ ...(alice as unknown as { host: GroupsHost }).host, emit: vi.fn() }, world.peers.get("alice")!.store);
+    await again.load();
+    expect(again.views()[0].lastMessageAt).toBe(sent.timestamp);
+    expect(again.views()[0].lastPeerMessageAt ?? 0).toBe(0);
+  });
+
   it("mentions: kept with the message, flagged on the side they name, in the list's view and after a restart", async () => {
     const world = new World();
     const alice = world.add("alice"), bob = world.add("bob");
