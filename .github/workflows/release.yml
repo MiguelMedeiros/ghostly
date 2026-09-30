@@ -92,7 +92,7 @@ jobs:
       - name: Install dependencies (Ubuntu)
         if: matrix.platform == 'ubuntu-22.04'
         run: |
-          # GStreamer's headers (calls on Linux, src-tauri/src/native_call) need libunwind-dev, which the
+          # GStreamer's headers (calls on Linux, apps/desktop/src/native_call) need libunwind-dev, which the
           # runner image's libunwind-14-dev (LLVM's) blocks.
           sudo apt-get remove -y libunwind-14-dev || true
           sudo apt-get update
@@ -143,8 +143,8 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           # Updater bundles are made for releases only: an ordinary `tauri build`
-          # needs no signing key (src-tauri/tauri.release.conf.json).
-          args: ${{ matrix.args }} --config src-tauri/tauri.release.conf.json
+          # needs no signing key (apps/desktop/tauri.release.conf.json).
+          args: ${{ matrix.args }} --config apps/desktop/tauri.release.conf.json
 
       # Without this the AppImage shows a blank window on Wayland desktops (issue #1).
       - name: Drop bundled libwayland from AppImage
@@ -205,8 +205,8 @@ jobs:
 
       - name: Package
         run: |
-          VERSION=$(node -p "require('./extension/public/manifest.json').version")
-          cd extension/dist
+          VERSION=$(node -p "require('./apps/extension/public/manifest.json').version")
+          cd apps/extension/dist
           zip -r "../../ghostly-browser-extension-${VERSION}.zip" .
 
       - name: Upload artifact
@@ -251,7 +251,7 @@ jobs:
           DOCKER_BUILD_SUMMARY: false
         with:
           context: .
-          file: web/Dockerfile
+          file: apps/web/Dockerfile
           push: true
           build-args: |
             GHOSTLY_BUILD=${{ github.sha }}

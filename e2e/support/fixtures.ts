@@ -39,7 +39,7 @@ export interface PeerOptions {
    */
   irohRelay?: string;
   /**
-   * Lets the web app's service worker run (web/src/sw). The web project blocks it everywhere else: requests a worker
+   * Lets the web app's service worker run (apps/web/src/sw). The web project blocks it everywhere else: requests a worker
    * answers never reach `context.route`, which the stubs above rely on.
    */
   serviceWorkers?: "allow";

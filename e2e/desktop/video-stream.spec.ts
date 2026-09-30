@@ -7,7 +7,7 @@ import { freePort, fullscreenInPage, openDriven, windowFullscreenInPage, playFro
 
 /**
  * A video too large for the page (#381: over 64 MiB) plays and seeks in the Desktop WebView from the stored file,
- * read in ranges from what Rust serves it on (src-tauri/src/file_stream.rs) under the app's own policy. This harness
+ * read in ranges from what Rust serves it on (apps/desktop/src/file_stream.rs) under the app's own policy. This harness
  * runs Linux's WebKitGTK, which plays no custom scheme, so it gets HTTP on 127.0.0.1, and Windows' WebView2
  * (`http://ghostly-file.localhost/<token>`); the macOS
  * WKWebView has the same check in e2e/desktop-macos/video-stream.spec.ts. The video is 100 MB, fifty copies of the
@@ -71,7 +71,7 @@ test("a 100 MB video plays and seeks from the stored file, a range at a time", {
 });
 
 // A video's Full screen button fills the screen. WebView2 fills only the webview until the window follows it
-// (src-tauri/src/fullscreen.rs). WebKitGTK 2.50 aborts the app entering element full screen, so on Linux the API is off
+// (apps/desktop/src/fullscreen.rs). WebKitGTK 2.50 aborts the app entering element full screen, so on Linux the API is off
 // and the video's own button puts the window in full screen instead. The macOS WKWebView:
 // e2e/desktop-macos/video-stream.spec.ts.
 test("a video goes full screen, the window with it, and comes back", { tag: ["@feature:files.video.play"] }, async () => {

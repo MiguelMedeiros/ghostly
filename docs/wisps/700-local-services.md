@@ -38,7 +38,7 @@ Test path traversal, alternate URL/header injection, redirects, local credential
 
 ## References
 
-[HTTP core](../../packages/core/src/http.ts), [native local fetch](../../src-tauri/src/local_fetch.rs), [browser limitations](../BROWSER.md), [current HTTP protocol](../PROTOCOL.md).
+[HTTP core](../../packages/core/src/http.ts), [native local fetch](../../apps/desktop/src/local_fetch.rs), [browser limitations](../BROWSER.md), [current HTTP protocol](../PROTOCOL.md).
 
 ## Revision log
 

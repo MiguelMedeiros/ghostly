@@ -7,7 +7,7 @@ your change can break ([docs/TESTING.md](../../docs/TESTING.md#testing-only-what
 
 They render the UI as the **web app** builds it: `ghostlyPlatformModules()` swaps `src/lib/platform.ts` and
 the other platform modules for the browser peer's (`packages/browser/src/platform/`), exactly as
-`web/vite.config.ts` does. That peer's `engine` connects to `fakeEngine`, a `BrowserHost` the test scripts:
+`apps/web/vite.config.ts` does. That peer's `engine` connects to `fakeEngine`, a `BrowserHost` the test scripts:
 no engine, network, IndexedDB or Tauri is involved.
 
 | File | What it gives a test |

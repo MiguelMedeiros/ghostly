@@ -1,6 +1,6 @@
 import { writeFileSync } from "node:fs";
 import { expect, test } from "@playwright/test";
-import { BIG_SHA256, startAtlas } from "../../extension/test/atlas.mjs";
+import { BIG_SHA256, startAtlas } from "../../apps/extension/test/atlas.mjs";
 import { desktopPerson, type DesktopPerson } from "../matrix/people";
 import { HYPERDHT_TESTNET } from "../matrix/desktop";
 import { forgetSharedData, openMacDesktop, type MacDesktop } from "../support/desktopMac";

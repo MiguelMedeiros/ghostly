@@ -22,7 +22,7 @@ const inventory = {
     "packages/core/src/index.ts": ["*"],
     "src/components/CallOverlay.tsx": ["calls.video"],
     "{docs/**,**/*.md}": [],
-    "src-tauri/**": [],
+    "apps/desktop/**": [],
   },
 };
 
@@ -348,19 +348,19 @@ describe("e2e files", () => {
   });
 
   it("Desktop specs are never picked; a Desktop change leaves a note", () => {
-    const p = plan({ changed: changed("e2e/desktop/smoke.spec.ts", "src-tauri/src/main.rs"), inventory, e2eFiles });
+    const p = plan({ changed: changed("e2e/desktop/smoke.spec.ts", "apps/desktop/src/main.rs"), inventory, e2eFiles });
     expect(p.e2e.mode).toBe("skip");
-    expect(p.e2e.desktop).toEqual(["e2e/desktop/smoke.spec.ts", "src-tauri/src/main.rs"]);
+    expect(p.e2e.desktop).toEqual(["e2e/desktop/smoke.spec.ts", "apps/desktop/src/main.rs"]);
   });
 });
 
 describe("the rest", () => {
   it("Rust runs for the Desktop crates, and Cargo.lock runs it", () => {
     const r = (...files: string[]) => Object.fromEntries(plan({ changed: changed(...files), inventory, e2eFiles }).rust.map((x) => [x.name, x.mode]));
-    expect(r("src-tauri/src/lib.rs")).toEqual({ "src-tauri": "run" });
-    expect(r("native/transports/src/lib.rs")).toEqual({ "src-tauri": "run" });
-    expect(r("Cargo.lock")).toEqual({ "src-tauri": "run" });
-    expect(r("docs/README.md")).toEqual({ "src-tauri": "skip" });
+    expect(r("apps/desktop/src/lib.rs")).toEqual({ desktop: "run" });
+    expect(r("native/transports/src/lib.rs")).toEqual({ desktop: "run" });
+    expect(r("Cargo.lock")).toEqual({ desktop: "run" });
+    expect(r("docs/README.md")).toEqual({ desktop: "skip" });
   });
 
   it("docs run nothing", () => {

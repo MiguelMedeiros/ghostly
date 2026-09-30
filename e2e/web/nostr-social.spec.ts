@@ -48,7 +48,7 @@ test("a contact's profile, follows and notes load only on request from the perso
   relay.add({ kind: 3, tags: [["p", a.pubkey], ["p", other]], content: "", created_at: now() - 2500 }, b.secret);
   relay.add({ kind: 10000, tags: [["word", "casino"]], content: "", created_at: now() - 2400 }, b.secret);
   // Alice's picture, from a host Ghostly fetches pictures from.
-  const png = readFileSync(new URL("../../src-tauri/icons/32x32.png", import.meta.url));
+  const png = readFileSync(new URL("../../apps/desktop/icons/32x32.png", import.meta.url));
   let pictureFetches = 0;
   await bob.context.route("https://image.nostr.build/**", route => { pictureFetches++; return route.fulfill({ status: 200, contentType: "image/png", headers: { "access-control-allow-origin": "*" }, body: png }); });
 

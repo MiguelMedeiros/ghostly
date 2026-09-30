@@ -235,7 +235,7 @@ protocol library the apps and the CLI are built on. It follows the WISP drafts i
   reach nothing, to drive your tests without a network.
 - **Real networks**: gate on an environment variable (`GHOSTLY_<NAME>_REGTEST=1`), skip otherwise,
   never real funds, never a real account, never print a secret.
-- **In the app**: `GHOSTLY_PLUGINS=… npm run build:web`, then `npx vite preview web`; or add a spec
+- **In the app**: `GHOSTLY_PLUGINS=… npm run build:web`, then `npx vite preview apps/web`; or add a spec
   next to `e2e/web/sdk-plugin.spec.ts`, which drives the example through the pickers.
 
 ## Versioning and stability

@@ -1,4 +1,4 @@
-import { startAtlas } from "../../extension/test/atlas.mjs";
+import { startAtlas } from "../../apps/extension/test/atlas.mjs";
 import { composerRow } from "../support/composer";
 import { expect, test } from "../support/extension";
 import { chat } from "../support/fixtures";
