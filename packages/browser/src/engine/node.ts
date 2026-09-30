@@ -124,6 +124,7 @@ import type {
   StoredService,
   NetworkWalletsView,
   WalletAwaitingView,
+  MintView,
   WalletCreate,
   WalletRemove,
   WalletTestCoins,
@@ -145,8 +146,8 @@ import { pairedWireReply, receivedPairedReply, replyRef, replyTo as replyToOrigi
 import { buttonPress, buttonsState } from "../shared/buttons";
 import { canEdit, isJoinNotice, takesPeerEdit, withEdit } from "../shared/edits";
 import { CardEditPacer, EditBuffer, EditQueue } from "./edits";
-import { removalRisksFunds, walletRemoval } from "../shared/walletRemoval";
-import { walletAwaiting } from "./walletAwaiting";
+import { ENGLISH_REMOVAL, removalRisksFunds, walletRemoval } from "../shared/walletRemoval";
+import { mintAwaiting, walletAwaiting } from "./walletAwaiting";
 import type { WalletRemoval } from "../shared/walletRemoval";
 import { TEST_COINS_SATS, faucetError } from "./paymentAdapters/testCoins";
 import { composeDetails, fileWire, pathSnapshot, withSend, type PathSnapshot } from "./messageDetails";
@@ -1076,14 +1077,25 @@ export class GhostlyNode implements EngineImplementation {
    * What each network's wallets still wait for (see `walletAwaiting`): open requests and invoices, paid invoices not
    * claimed yet, ecash sent and not taken. Read from the Cashu quotes, the Lightning journals and the payments.
    */
-  private async readAwaiting(): Promise<Record<WalletNetwork, WalletAwaitingView[]>> {
+  /** What each network's wallets still wait for, and each mint on its own (`mints`, only the mints that wait for something). */
+  private async readAwaiting(): Promise<{ networks: Record<WalletNetwork, WalletAwaitingView[]>; mints: Map<string, WalletAwaitingView[]> }> {
     const quotes = await this.wallet.quotes(), payments = this.desk.records(), now = Date.now();
     const out = {} as Record<WalletNetwork, WalletAwaitingView[]>;
+    const mints = new Map<string, WalletAwaitingView[]>();
     for (const network of WALLET_NETWORKS) {
       const lightning = this.lightnings[network];
       out[network] = walletAwaiting({ network, mints: this.networkMints(network), quotes, lightningOps: await lightning.list(), lightningSource: lightning.view?.providerId, lightningCard: lightning.receivingId, lightningOwner: (op) => lightning.owner(op), payments, now });
+      for (const url of this.networkMints(network)) {
+        const waits = mintAwaiting(url, { network, quotes, payments, now });
+        if (waits.length) mints.set(url, waits);
+      }
     }
-    return out;
+    return { networks: out, mints };
+  }
+
+  /** A mint as the wallet page shows it, with what it still waits for when it does (asked about before it is removed). */
+  private withWaits(mints: readonly MintView[], waits: Map<string, WalletAwaitingView[]>): MintView[] {
+    return mints.map(({ awaiting: _, ...mint }) => (waits.has(mint.url) ? { ...mint, awaiting: waits.get(mint.url) } : mint));
   }
 
   private awaitingTimer?: ReturnType<typeof setTimeout>;
@@ -1094,7 +1106,7 @@ export class GhostlyNode implements EngineImplementation {
     this.awaitingTimer = setTimeout(() => void this.readAwaiting().then((awaiting) => {
       const networks = this.walletView.networks;
       if (this.shuttingDown || !networks) return;
-      for (const network of WALLET_NETWORKS) networks[network] = { ...networks[network], awaiting: awaiting[network] };
+      for (const network of WALLET_NETWORKS) networks[network] = { ...networks[network], mints: this.withWaits(networks[network].mints, awaiting.mints), awaiting: awaiting.networks[network] };
       this.walletView = { ...this.walletView, networks: { ...networks } };
       this.emitState();
     }).catch(() => {}), 250);
@@ -1109,9 +1121,9 @@ export class GhostlyNode implements EngineImplementation {
       everything = view.history;
       // A network's own story: test ecash is not mixed into the story of real money, nor the reverse.
       const history = view.history.filter((tx) => !tx.mint || mintNetwork(tx.mint) === network);
-      networks[network] = { mints: view.mints, balance: view.balance, history, feesPaid: history.reduce((sum, tx) => sum + tx.fee, 0),
+      networks[network] = { mints: this.withWaits(view.mints, awaiting.mints), balance: view.balance, history, feesPaid: history.reduce((sum, tx) => sum + tx.fee, 0),
         ark: this.arkWallets[network].view, bark: this.barkWallets[network].view, fedimint: this.fedimintWallets[network].view, spark: this.sparkWallets[network].view,
-        usdt: this.usdtWallets[network].view, lightning: this.lightnings[network].view, lightnings: this.lightnings[network].views(), bitcoin: this.bitcoins[network].view, awaiting: awaiting[network] };
+        usdt: this.usdtWallets[network].view, lightning: this.lightnings[network].view, lightnings: this.lightnings[network].views(), bitcoin: this.bitcoins[network].view, awaiting: awaiting.networks[network] };
     }
     const wallets = walletInstances(networks);
     // The flat fields are Mainnet's, for a caller from before wallets had their own network; `networks` has both.
@@ -3507,8 +3519,30 @@ export class GhostlyNode implements EngineImplementation {
     await this.refreshWallet();
   }
 
-  async walletRemoveMint({ url }: { url: string }): Promise<void> {
+  /**
+   * Removes one mint of a Cashu wallet. Never one that holds sats, nor a network's last mint (that removes the Cashu
+   * wallet: `walletRemove`). One that still waits for money (an invoice not paid yet, paid ecash not claimed) goes
+   * only with `acceptLoss`: what is paid to it afterwards is claimed, but shows only once the mint is added again.
+   */
+  async walletRemoveMint({ url, acceptLoss }: { url: string; acceptLoss?: boolean }): Promise<void> {
+    const network = mintNetwork(url);
+    const mints = this.networkMints(network);
+    if (mints.length === 1 && mints[0] === url) throw new Error(`This is the last mint of your ${networkLabel(network)} Cashu wallet: remove the wallet to remove it`);
     if ((await this.wallet.balanceAt(url)) > 0) throw new Error("Move your sats out of this mint before removing it");
+    const waits = async () => mintAwaiting(url, { network, quotes: await this.wallet.quotes(), payments: this.desk.records(), now: Date.now() });
+    if ((await waits()).length) {
+      // What was already paid to it is claimed first, even when the person agreed: sats that came in meanwhile are
+      // what it holds now, and it is never removed holding them.
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      await Promise.race([this.wallet.checkQuotes([url]).catch(() => {}), new Promise((resolve) => { timer = setTimeout(resolve, removalTiming.claimMs); })]);
+      clearTimeout(timer);
+      if ((await this.wallet.balanceAt(url)) > 0) { await this.refreshWallet(); throw new Error("Move your sats out of this mint before removing it"); }
+      const awaiting = await waits();
+      if (awaiting.length && acceptLoss !== true) {
+        const listed = awaiting.map((a) => { const text = ENGLISH_REMOVAL.item(a.kind, ENGLISH_REMOVAL.sats(a.amount, network)); return text.charAt(0).toLowerCase() + text.slice(1); }).join("; ");
+        throw new Error(`This mint still waits for money: ${listed}. Confirm that what is paid to it afterwards shows only once you add the mint again to remove it.`);
+      }
+    }
     await this.updateSettings({ settings: { mints: this.settings.mints.filter((m) => m !== url) } });
     await this.refreshWallet();
   }

@@ -406,7 +406,7 @@ describe("two headless peers", { timeout: 180_000 }, () => {
     const last = (ok(await as(bob, "chat", "history", "alice")).messages as { text: string; edits?: number; editedAt?: number }[]).at(-1)!;
     expect(last).toMatchObject({ text: "Done: 3 of 3", edits: 3 });
     expect(last.editedAt).toBeGreaterThan(0);
-    error(await as(alice, "edit", "bob", "nope", "anything"), "refused", 1);
+    error(await as(alice, "edit", "bob", "nope", "anything"), "not_found", 3);
     error(await as(alice, "edit", "bob", id), "usage", 2);
     await new Promise((r) => setTimeout(r, 500));
     expect(listen.lines).toHaveLength(3);

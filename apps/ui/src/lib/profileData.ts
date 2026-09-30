@@ -50,19 +50,41 @@ const databaseOf = (id: string) => (namespaceOf(id) ? `ghostly_${namespaceOf(id)
 /** A profile's peer database (WISP 04). */
 export const profileDatabase = databaseOf;
 
-/** The Ark wallets a profile's database names, current and retired. */
-async function arkWalletIds(dbName: string): Promise<string[]> {
+/**
+ * The storage outside its peer database that a profile's wallets name, current and retired: each Ark wallet's
+ * database (`ghostly-ark-<id>`), each Bark wallet's two (`ghostly-bark-<id>`, `…-onchain`), and each Fedimint
+ * federation's client database, a file of the origin-private file system.
+ */
+interface WalletStorage { databases: string[]; files: string[] }
+const FEDIMINT_FILE = /^ghostly-fedimint-[\w-]{1,80}\.db$/;
+async function walletStorage(dbName: string): Promise<WalletStorage> {
+  const found: WalletStorage = { databases: [], files: [] };
   const db = await openExisting(dbName);
-  if (!db) return [];
+  if (!db) return found;
   try {
-    if (!db.objectStoreNames.contains("settings")) return [];
+    if (!db.objectStoreNames.contains("settings")) return found;
     const store = db.transaction("settings", "readonly").objectStore("settings");
     const [keys, values] = await Promise.all([request(store.getAllKeys()), request(store.getAll())]);
-    return keys.flatMap((key, i) => {
-      const walletId = (values[i] as { config?: { walletId?: string } })?.config?.walletId;
-      return walletId && typeof key === "string" && key.startsWith("arkWallet") ? [walletId] : [];
+    keys.forEach((key, i) => {
+      if (typeof key !== "string") return;
+      const value = values[i] as { config?: { walletId?: unknown }; database?: unknown; federations?: { database?: unknown }[] } | null;
+      const walletId = value?.config?.walletId;
+      if (typeof walletId === "string" && walletId && key.startsWith("arkWallet")) found.databases.push(`ghostly-ark-${walletId}`);
+      if (typeof walletId === "string" && walletId && key.startsWith("barkWallet")) found.databases.push(`ghostly-bark-${walletId}`, `ghostly-bark-${walletId}-onchain`);
+      if (key.startsWith("fedimint")) {
+        const federations = Array.isArray(value?.federations) ? value.federations.map((f) => f?.database) : [];
+        for (const file of [value?.database, ...federations]) if (typeof file === "string" && FEDIMINT_FILE.test(file)) found.files.push(file);
+      }
     });
+    return found;
   } finally { db.close(); }
+}
+
+/** Removes a file of the origin-private file system, if there is one; a platform without it has none to remove. */
+async function dropFile(name: string): Promise<void> {
+  if (typeof navigator === "undefined") return;
+  const root = await navigator.storage?.getDirectory?.().catch(() => undefined);
+  await root?.removeEntry(name).catch((error: { name?: string }) => { if (error?.name !== "NotFoundError") throw error; });
 }
 
 /** The password hash of a profile's lock screen, when it has one turned on. */
@@ -120,9 +142,9 @@ async function lockHeld(ns: string): Promise<boolean> {
 }
 
 /**
- * Deletes a profile of this space for good: its local keys, its peer database and its Ark wallets'
- * databases, then its place on the list (WISP 04). Never the active one, never the first, never one
- * running in another tab, and never an Ark database another profile still uses.
+ * Deletes a profile of this space for good: its local keys, its peer database and its wallets' own storage
+ * (Ark and Bark databases, Fedimint client files), then its place on the list (WISP 04). Never the active one,
+ * never the first, never one running in another tab, and never a wallet's storage another profile still uses.
  */
 export async function deleteProfile(id: string, password?: string): Promise<void> {
   if (!id) throw new Error("The first profile cannot be deleted");
@@ -130,11 +152,13 @@ export async function deleteProfile(id: string, password?: string): Promise<void
   await assertUnlocked(id, password);
   const ns = namespaceOf(id), dbName = `ghostly_${ns}`;
   if (await lockHeld(ns)) throw new Error("This profile is open in another window. Close it, then try again.");
-  const others = new Set((await Promise.all(listProfiles().filter((p) => p.id !== id).map((p) => arkWalletIds(databaseOf(p.id))))).flat());
-  const arkIds = (await arkWalletIds(dbName)).filter((walletId) => !others.has(walletId));
+  const others = await Promise.all(listProfiles().filter((p) => p.id !== id).map((p) => walletStorage(databaseOf(p.id))));
+  const usedElsewhere = new Set(others.flatMap((o) => [...o.databases, ...o.files]));
+  const own = await walletStorage(dbName);
   if (await databaseExists(dbName)) await drop(dbName);
   await dropFileSpace(dbName).catch(() => {});
-  for (const walletId of arkIds) await drop(`ghostly-ark-${walletId}`);
+  for (const name of new Set(own.databases)) if (!usedElsewhere.has(name)) await drop(name);
+  for (const name of new Set(own.files)) if (!usedElsewhere.has(name)) await dropFile(name).catch(() => {});
   const prefix = `ghostly_${ns}_`;
   for (const key of Array.from({ length: localStorage.length }, (_, i) => localStorage.key(i)).filter((k): k is string => !!k?.startsWith(prefix))) localStorage.removeItem(key);
   // Its push subscription (WISP 401 § Wake-up push) ends with it: its worker goes, and contacts who kept it get 410.

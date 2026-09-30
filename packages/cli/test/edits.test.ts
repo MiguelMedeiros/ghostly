@@ -42,8 +42,12 @@ describe("ghostly edit", () => {
     const { ctx, node } = fake();
     expect(await callApi(ctx, "chat.edit", { chat: "Alice", message: "me_w", text: "Done" })).toEqual({ chat: "chat-one", messageId: "me_w", edits: 1, confirmed: true });
     expect(node.editMessage).toHaveBeenCalledWith({ linkId: "chat-one", messageId: "me_w", text: "Done" });
-    const refused = fake({ error: "Only your own text messages can be edited", refused: true });
+    const refused = fake({ error: "Only your own text messages can be edited", refused: true }, [row(), row({ id: "peer_x", sender: "peer" })]);
     await expect(callApi(refused.ctx, "chat.edit", { chat: "Alice", message: "peer_x", text: "x" })).rejects.toMatchObject({ code: "refused" });
+    // A message that is not in the chat at all: not found (exit 3), naming what to give, never "your own messages".
+    await expect(callApi(refused.ctx, "chat.edit", { chat: "Alice", message: "me_typo", text: "x" })).rejects.toMatchObject({ code: "not_found", message: 'No message "me_typo" in this chat: give the messageId send printed' });
+    // Its wire id names it too.
+    await expect(callApi(refused.ctx, "chat.edit", { chat: "Alice", message: "W".repeat(22), text: "x" })).rejects.toMatchObject({ code: "refused" });
     // The secret guard, as on send.
     await expect(callApi(ctx, "chat.edit", { chat: "Alice", message: "me_w", text: "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about" })).rejects.toMatchObject({ code: "confirm" });
   });
@@ -114,7 +118,9 @@ describe("ghostly group edit", () => {
     const paced = groupFake(undefined, [groupRow({ edit: { seq: 3, at: 5, history: [], pending: true } })]);
     paced.node.groupTaken.mockImplementation(() => 0);
     expect(await callApi(paced.ctx, "group.edit", { group: "Crew", message: "mekey:1:0", text: "x" })).toMatchObject({ edits: 3, sent: false, edges: 0 });
-    await expect(callApi(groupFake({ error: "Only your own text messages can be edited", refused: true }).ctx, "group.edit", { group: "Crew", message: "bobkey:1:0", text: "x" })).rejects.toMatchObject({ code: "refused" });
+    const theirs = groupFake({ error: "Only your own text messages can be edited", refused: true }, [groupRow(), groupRow({ id: "bobkey:1:0", sender: "peer", member: "bobkey" })]);
+    await expect(callApi(theirs.ctx, "group.edit", { group: "Crew", message: "bobkey:1:0", text: "x" })).rejects.toMatchObject({ code: "refused" });
+    await expect(callApi(theirs.ctx, "group.edit", { group: "Crew", message: "mekey:9:9", text: "x" })).rejects.toMatchObject({ code: "not_found", message: 'No message "mekey:9:9" in this group: give the messageId group send printed' });
     // --wait sent: until an edge took this edit number.
     const nobody = groupFake(undefined, [groupRow({ edit: { seq: 4, at: 5, history: [], pending: true } })]);
     nobody.node.groupTaken.mockImplementation(() => 0);

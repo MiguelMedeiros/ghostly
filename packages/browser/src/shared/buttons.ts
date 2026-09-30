@@ -14,13 +14,18 @@ export function messageButtons(message: Pick<StoredMessage, "card">): ButtonsCar
 
 type Row = Pick<StoredMessage, "sender" | "member" | "replyTo" | "press" | "id">;
 
-const sameLabel = (a: string, b: string) => a.trim().toLocaleLowerCase() === b.trim().toLocaleLowerCase();
+/**
+ * Whether a reply's text is a button's label (or id): ignoring case and spaces at the ends. Not the device's locale's
+ * case: the presser's and the author's apps must agree ("I" is not "ı" anywhere).
+ */
+export const sameLabel = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
 
 /**
  * What a reply presses on the author's side, or nothing: the original is this side's own message with buttons still
  * open, the button is one of them (named by `b`, or, for a reply that lost it on the way (the DHT floor carries a
  * reply's id alone) or came from an app without buttons, a text that is a button's label or id), and the presser has
- * not already answered with a `once` button. `history`: the chat's rows, the reply itself excluded or not.
+ * not already answered with a `once` button. A reply naming a button says its label: one whose text is something else
+ * ("No" naming `yes`) is only a reply, so what the chat shows and what the author takes never differ. `history`: the chat's rows, the reply itself excluded or not.
  */
 export function buttonPress(reply: Pick<StoredMessage, "sender" | "member" | "replyTo" | "text" | "id">, original: StoredMessage, history: readonly Row[]): MessagePress | undefined {
   if (reply.sender !== "peer" || original.sender !== "me" || !reply.replyTo) return undefined;
@@ -28,7 +33,7 @@ export function buttonPress(reply: Pick<StoredMessage, "sender" | "member" | "re
   if (!card || card.closed) return undefined;
   const named = reply.replyTo.button;
   let button: CardButton | undefined, inferred = false;
-  if (named) button = card.buttons.find(b => b.id === named);
+  if (named) button = card.buttons.find(b => b.id === named && sameLabel(b.label, reply.text));
   else {
     button = card.buttons.find(b => sameLabel(b.label, reply.text) || sameLabel(b.id, reply.text));
     inferred = !!button;

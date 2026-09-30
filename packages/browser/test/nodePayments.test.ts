@@ -359,6 +359,47 @@ describe("the Cashu wallet and Lightning", () => {
     expect((await db.getSettings()).mints).toEqual(["https://b.example"]);
   });
 
+  it("never removes a network's last mint: that is removing its Cashu wallet", async () => {
+    const { node } = track(engine());
+    node["settings"].mints = ["https://a.example", TEST_MINT];
+    vi.spyOn(node["wallet"], "balanceAt").mockResolvedValue(0);
+    await expect(node.walletRemoveMint({ url: TEST_MINT })).rejects.toThrow("This is the last mint of your Testnet Cashu wallet: remove the wallet to remove it");
+    await expect(node.walletRemoveMint({ url: "https://a.example", acceptLoss: true })).rejects.toThrow("last mint of your Mainnet Cashu wallet");
+    expect(node["settings"].mints).toEqual(["https://a.example", TEST_MINT]);
+  });
+
+  it("a mint that still waits for money is removed only once the person accepts it, and the wallet view says what it waits for", async () => {
+    const { node, view } = track(engine());
+    view.mockImplementation(async () => ({ mints: ["https://a.example", "https://b.example"].map((url) => ({ url, name: url, balance: 0, info: null })), balance: 0, history: [], feesPaid: 0 }));
+    node["settings"].mints = ["https://a.example", "https://b.example"];
+    vi.spyOn(node["wallet"], "balanceAt").mockResolvedValue(0);
+    const check = vi.spyOn(node["wallet"], "checkQuotes").mockResolvedValue(undefined as never);
+    const open = { quote: "q1", mint: "https://a.example", amount: 2_500, invoice: fakeInvoice(2_500, new Uint8Array(32).fill(7)), createdAt: Date.now(), expiresAt: Date.now() + 3_600_000 };
+    vi.spyOn(node["wallet"], "quotes").mockResolvedValue([open] as never);
+    await node["refreshWallet"]();
+    expect(node.getState().wallet.networks?.mainnet.mints.find((m) => m.url === "https://a.example")?.awaiting).toEqual([{ type: "cashu", kind: "invoice", amount: 2_500 }]);
+    expect(node.getState().wallet.networks?.mainnet.mints.find((m) => m.url === "https://b.example")).not.toHaveProperty("awaiting");
+
+    await expect(node.walletRemoveMint({ url: "https://a.example" })).rejects.toThrow("This mint still waits for money: an invoice for 2,500 sats, not paid yet. Confirm");
+    // What was already paid to it was asked for first.
+    expect(check).toHaveBeenCalledWith(["https://a.example"]);
+    expect(node["settings"].mints).toHaveLength(2);
+    await node.walletRemoveMint({ url: "https://a.example", acceptLoss: true });
+    expect((await db.getSettings()).mints).toEqual(["https://b.example"]);
+  });
+
+  it("a mint whose invoice was paid meanwhile is not removed, even once the person agreed: the sats are claimed first", async () => {
+    const { node } = track(engine());
+    node["settings"].mints = ["https://a.example", "https://b.example"];
+    const open = { quote: "q1", mint: "https://a.example", amount: 2_500, invoice: fakeInvoice(2_500, new Uint8Array(32).fill(8)), createdAt: Date.now(), expiresAt: Date.now() + 3_600_000 };
+    vi.spyOn(node["wallet"], "quotes").mockResolvedValue([open] as never);
+    const balance = vi.spyOn(node["wallet"], "balanceAt").mockResolvedValue(0);
+    // Asking the mint claims the paid invoice: the mint holds its sats now.
+    vi.spyOn(node["wallet"], "checkQuotes").mockImplementation(async () => { balance.mockResolvedValue(2_500); });
+    await expect(node.walletRemoveMint({ url: "https://a.example", acceptLoss: true })).rejects.toThrow("Move your sats out");
+    expect(node["settings"].mints).toHaveLength(2);
+  });
+
   it("an invoice made on Receive is at once among what the wallet waits for, so removing the wallet lists it", async () => {
     const { node } = track(engine());
     node["settings"].mints = [TEST_MINT];

@@ -9,7 +9,7 @@ import type { FedimintFederationView, FedimintWalletView } from "@ghostly/browse
 import type { FederationInfo } from "@ghostly/browser/engine/paymentAdapters/fedimintSdk";
 import type { SparkCreate, SparkWalletView } from "@ghostly/browser/engine/paymentAdapters/sparkWallet";
 import type { SparkNetwork, WalletNetwork } from "@ghostly/core";
-import type { NetworkWalletsView, TestCoinsResult, WalletCreate, WalletInstanceView, WalletOffer, WalletRemove, WalletSetupView, WalletTestCoins, WalletType } from "@ghostly/browser/shared/types";
+import type { NetworkWalletsView, TestCoinsResult, WalletCreate, WalletInstanceView, WalletOffer, WalletRemove, WalletSetupView, WalletAwaitingView, WalletTestCoins, WalletType } from "@ghostly/browser/shared/types";
 export type { NetworkWalletsView, TestCoinsResult, WalletCreate, WalletInstanceView, WalletOffer, WalletRemove, WalletSetupView, WalletTestCoins, WalletType, WalletNetwork };
 import type { LightningView } from "@ghostly/browser/engine/paymentAdapters/providers/lightningService";
 import type { LightningCardView } from "@ghostly/browser/engine/paymentAdapters/providers/lightningCards";
@@ -184,7 +184,8 @@ export interface WalletState {
   /** The on-chain Bitcoin source of this network, if one is set up. */
   bitcoin?: BitcoinView;
   intents?: PaymentReview[];
-  mints: { url: string; name: string; balance: number; info: MintInfo | null }[];
+  /** `awaiting`: what the mint still waits for, when it does (removing it asks about these first). */
+  mints: { url: string; name: string; balance: number; info: MintInfo | null; awaiting?: WalletAwaitingView[] }[];
   balance: number;
   /** Newest first. */
   history: WalletTransaction[];
@@ -329,7 +330,8 @@ export interface WalletPlatform {
   testMintUrls: readonly string[];
   getState(): WalletState | null;
   addMint(url: string): Promise<void>;
-  removeMint(url: string): Promise<void>;
+  /** `acceptLoss`: the person confirmed removing a mint that still waits for money (the engine refuses it otherwise). */
+  removeMint(url: string, acceptLoss?: boolean): Promise<void>;
   /** The primary mint (first in the list) is where Lightning invoices are created. */
   setPrimaryMint(url: string): Promise<void>;
   /** An invoice from the bound Lightning card (else the default for receiving); `via: "cashu"` asks the Cashu mints. */

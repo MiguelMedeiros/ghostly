@@ -106,7 +106,7 @@ const SPECIAL: [usage: string, summary: string, options?: Record<string, OptionS
   ["daemon status", "Whether a daemon runs the profile, its version, and its socket (for the socket API)"],
   ["daemon stop", "Stop the profile's daemon", { timeout: o("number", "Seconds to wait for it to stop (default 20)") }],
   ["daemon restart", "Stop the profile's daemon and start it again in the background (after an upgrade: the new code)", { timeout: o("number", "Seconds to wait for each step") }],
-  ["listen [--since seq] [--cursor file] [--type t]... [--turns] [--from <chat|key>]... [--group <group>]... [--exec cmd] [--webhook url]", "Stream events as JSON lines (starts the profile here if no daemon runs it)", {
+  ["listen [--since seq] [--cursor file] [--type t]... [--turns] [--from <chat|key>]... [--group <group>]... [--exec cmd] [--webhook url] [--print]", "Stream events as JSON lines (starts the profile here if no daemon runs it)", {
     since: o("number", "Replay events after this seq first"), cursor: o("string", "A file that keeps the last seq handled (read at start, written after each event)"),
     type: o("list", "Only events of this type, or starting with it (repeat for more)"),
     turns: o("boolean", "Only agent turns: each message received, and each group message that mentions you, as one agent.turn event"),
@@ -675,7 +675,19 @@ export async function main(input: string[]): Promise<number> {
   if (two && COMMANDS[two]) { await tableCommand(two, argv.slice(2)); return 0; }
   if (TEXT_COMMANDS[first]) { await textCommand(first, argv.slice(1)); return 0; }
   if (COMMANDS[first]) { await tableCommand(first, argv.slice(1)); return 0; }
-  throw new CliError("usage", `Unknown command: ${[first, second].filter(Boolean).join(" ")} (ghostly help)`);
+  throw unknownCommand(first, two ? second : undefined);
+}
+
+/**
+ * A command line that names no command. The first word of a group (`ghostly chat`, `ghostly wallet frob`) is answered
+ * with the group's commands, as `ghostly help chat` lists them; before, it was only "Unknown command: chat".
+ */
+export function unknownCommand(first: string | undefined, second?: string): CliError {
+  const asked = [first, second].filter(Boolean).join(" ");
+  const subs = [...new Set(helpRows().map((row) => commandWords(row.usage)).filter((words) => words[0] === first && words.length > 1).map((words) => words[1]))];
+  if (!subs.length) return new CliError("usage", `Unknown command: ${asked} (ghostly help)`);
+  const list = `${subs.slice(0, -1).join(", ")}${subs.length > 1 ? " or " : ""}${subs.at(-1)}`;
+  return new CliError("usage", second ? `Unknown command: ${asked}: ghostly ${first} takes ${list} (ghostly help ${first})` : `ghostly ${first} takes a command: ${list} (ghostly help ${first})`);
 }
 
 /** Leaves once what was printed reached stdout (a pipe drains asynchronously). */
