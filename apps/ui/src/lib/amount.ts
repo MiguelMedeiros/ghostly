@@ -37,3 +37,15 @@ export function formatTokenAmount(value: number | string, decimals: number | und
   const point = format.formatToParts(0.5).find((p) => p.type === "decimal")?.value ?? ".";
   return `${wholeText}${point}${fraction}`;
 }
+
+/**
+ * What a decimal amount field keeps of what was typed: digits and the decimal point, as "1.5". In a language that
+ * writes "1,5" (Portuguese, Spanish, French, Italian), a comma is the decimal point, and a phone's decimal key types
+ * one there: it becomes the point and the dots around it are grouping ("1.000,5" is 1000.5). Elsewhere a comma is
+ * grouping and goes. A second point is kept, for the amount's check to refuse.
+ */
+export function decimalInput(text: string, language: Language = "en"): string {
+  const point = numberFormat(language).formatToParts(0.5).find((p) => p.type === "decimal")?.value ?? ".";
+  const typed = point === "," && text.includes(",") ? text.replace(/\./g, "").replace(/,/g, ".") : text;
+  return typed.replace(/[^0-9.]/g, "");
+}

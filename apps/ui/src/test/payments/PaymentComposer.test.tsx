@@ -1,6 +1,7 @@
 import { act, screen, waitFor, within } from "@testing-library/react";
 import { useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { Language } from "../../lib/settings";
 import type { LinkView, WalletInstanceView, WalletView } from "@ghostly/browser/shared/types";
 import type { WalletNetwork } from "@ghostly/core";
 import { PaymentComposer } from "../../components/PaymentComposer";
@@ -27,6 +28,7 @@ interface Open {
   withWallet?: boolean;
   onSend?: (amount: number, memo: string, network?: WalletNetwork, confirmedReal?: boolean) => Promise<string | null>;
   onRequest?: (amount: number, memo: string, method?: string, rail?: string, network?: WalletNetwork) => Promise<string | null>;
+  language?: Language;
 }
 
 /** Where the app is: the composer navigates away to make a wallet. */
@@ -35,7 +37,7 @@ function Where() {
 }
 
 /** The composer in a chat with "peer", whose name the chat shows as Alice. */
-function open({ wallet = everyWallet(), link, balance = 1_000, withWallet = true, onSend, onRequest }: Open = {}) {
+function open({ wallet = everyWallet(), link, balance = 1_000, withWallet = true, onSend, onRequest, language }: Open = {}) {
   // The chat and the wallet are there before the composer opens, as they are in the app.
   fakeEngine.setState({ links: [linkView(link)], wallet });
   const handlers = {
@@ -45,6 +47,7 @@ function open({ wallet = everyWallet(), link, balance = 1_000, withWallet = true
   };
   const view = renderApp(
     <><PaymentComposer balance={balance} {...handlers} reviewContext={withWallet ? reviewContext() : undefined} contact="Alice" /><Where /></>,
+    { language },
   );
   return { ...view, ...handlers };
 }
@@ -80,6 +83,27 @@ describe("the amount", () => {
     await user.type(screen.getByRole("textbox", { name: "What for? (optional)" }), "coffee");
     await user.click(request());
     expect(onRequest).toHaveBeenCalledWith(1_500_000, "coffee", "usdt", "usdt", "testnet");
+  });
+
+  it("takes a comma as the decimal point where the language writes one (a phone's decimal key types it)", async () => {
+    rememberRail("peer", "usdt:testnet");
+    const { user, onRequest } = open({ language: "pt" });
+    await user.click(screen.getByTestId("payment-use"));
+    await user.type(amount(), "1.000,5");
+    expect(amount()).toHaveValue("1000.5");
+    await user.clear(amount());
+    await user.type(amount(), "1,5");
+    expect(amount()).toHaveValue("1.5");
+    await user.click(request());
+    expect(onRequest).toHaveBeenCalledWith(1_500_000, "", "usdt", "usdt", "testnet");
+  });
+
+  it("drops a comma as grouping in a language that writes the point", async () => {
+    rememberRail("peer", "usdt:testnet");
+    const { user } = open();
+    await user.click(screen.getByTestId("payment-use"));
+    await user.type(amount(), "1,000.5");
+    expect(amount()).toHaveValue("1000.5");
   });
 
   it("refuses more USDT decimals than the token has, without asking for anything", async () => {
