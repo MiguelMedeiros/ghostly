@@ -54,7 +54,6 @@
   "colorLabel": "Profile color",
   "create": "Create",
   "delete": {
-    "arkWallet": "Ark wallet",
     "backupFirst": "Download a backup first",
     "backupPassphrase": "Backup passphrase",
     "cashuSats": "{{amount}} sats in Cashu",
@@ -68,7 +67,7 @@
     "serviceCount": "{{count}} apps",
     "serviceOne": "1 app",
     "title": "Delete “{{name}}”?",
-    "usdtWallet": "USDT wallet",
+    "wallet": "{{name}} wallet",
     "warning": "This can’t be undone. Its wallets go with it."
   },
   "deleteNamed": "Delete {{name}}",
