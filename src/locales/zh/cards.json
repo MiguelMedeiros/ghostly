@@ -44,7 +44,7 @@
     "pr": "PR #{{number}}",
     "prNoNumber": "拉取请求",
     "progress": "进度",
-    "started": "开始于{{ago}}",
+    "started": "开始：{{ago}}",
     "status": {
       "blocked": "受阻",
       "cancelled": "已取消",
@@ -54,6 +54,6 @@
       "running": "进行中"
     },
     "steps": "{{done}}/{{total}} 步",
-    "updated": "更新于{{ago}}"
+    "updated": "更新：{{ago}}"
   }
 }

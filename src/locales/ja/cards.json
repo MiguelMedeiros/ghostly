@@ -44,7 +44,7 @@
     "pr": "PR #{{number}}",
     "prNoNumber": "プルリクエスト",
     "progress": "進捗",
-    "started": "{{ago}}に開始",
+    "started": "開始：{{ago}}",
     "status": {
       "blocked": "ブロック中",
       "cancelled": "キャンセル",
@@ -54,6 +54,6 @@
       "running": "実行中"
     },
     "steps": "{{total}} 件中 {{done}} 件",
-    "updated": "{{ago}}に更新"
+    "updated": "更新：{{ago}}"
   }
 }
