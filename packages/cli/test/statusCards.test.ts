@@ -63,6 +63,16 @@ describe("the task commands", () => {
     expect(() => params("task send", ["g1", "--json", "{nope"])).toThrow(/not valid JSON/);
   });
 
+  it("refuse an item whose state is no state, listing the states; text that names none stays pending as it is", () => {
+    const items = (...values: string[]) => (params("task send", ["g1", "--title", "Ship", ...values.flatMap((v) => ["--item", v])]).card as { items: unknown }).items;
+    expect(() => items("queued:Publishing")).toThrow(/"queued" is not a state: use pending, running, done, failed or skipped/);
+    expect(() => params("task update", ["g1", "t", "--item", "done:Codec", "--item", "fix: tests"])).toThrow(expect.objectContaining({ code: "usage" }));
+    expect(items("done: Codec", "Step 2: build", "Note: flaky", "https://ci.example/1", "Engine", "pending:fix: tests")).toEqual([
+      { state: "done", text: "Codec" }, { state: "pending", text: "Step 2: build" }, { state: "pending", text: "Note: flaky" },
+      { state: "pending", text: "https://ci.example/1" }, { state: "pending", text: "Engine" }, { state: "pending", text: "fix: tests" },
+    ]);
+  });
+
   it("start the groups' sessions even in a one-shot: the chat they name may be a group", () => {
     expect(chatOnly("task.send", { chat: "Sala" })).toBe(false);
     expect(chatOnly("chat.send", { chat: "Alice" })).toBe(true);
