@@ -2,8 +2,8 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { MEMBER_TEXT, memberColorIndex, memberText } from "../../lib/memberColors";
-import { authorsOf } from "../../lib/senderRuns";
+import { MEMBER_TEXT, memberColorIndex, memberText, rosterColors } from "../../lib/memberColors";
+import { RUN_GAP_MS, authorsOf } from "../../lib/senderRuns";
 
 // covers: groups.member-colors
 
@@ -49,6 +49,43 @@ describe("a member's colour, from their key", () => {
     const base = keyOf(3).slice(0, 51);
     const hues = new Set([...Z32].map(c => memberColorIndex(base + c)));
     expect(hues.size).toBeGreaterThanOrEqual(8);
+  });
+});
+
+describe("the members' colours in a group, given out over its roster", () => {
+  const roster = (n: number, from = 0) => Array.from({ length: n }, (_, i) => keyOf(from + i));
+  const shuffled = <T,>(list: readonly T[], seed: number) => [...list].sort((a, b) => memberColorIndex(`${seed}${a}`) - memberColorIndex(`${seed}${b}`) || (a < b ? -1 : 1));
+
+  it("never gives two members of a group of up to twelve the same colour", () => {
+    for (let n = 2; n <= 12; n++) for (let from = 0; from < 400; from += 20) {
+      const colors = rosterColors(roster(n, from));
+      expect(new Set(colors.values()).size).toBe(n);
+    }
+  });
+
+  it("is the same on every device: the same roster, in whatever order it comes, gives the same colours", () => {
+    const keys = roster(9, 50);
+    const here = rosterColors(keys);
+    for (const seed of [1, 2, 3]) expect(rosterColors(shuffled(keys, seed))).toEqual(here);
+    // As the page asks for it: by class.
+    for (const key of keys) expect(memberText(key, here)).toBe(MEMBER_TEXT[here.get(key)!]);
+  });
+
+  it("past twelve, comes round again: each twelve (in key order) distinct among themselves", () => {
+    const keys = roster(30, 7);
+    const colors = rosterColors(keys);
+    const sorted = [...keys].sort();
+    for (let i = 0; i < 24; i += 12) expect(new Set(sorted.slice(i, i + 12).map(k => colors.get(k))).size).toBe(12);
+    expect(new Set(sorted.slice(24).map(k => colors.get(k))).size).toBe(6);
+  });
+
+  it("a member keeps the hue their key points to unless someone before them in the roster took it", () => {
+    const keys = roster(5, 90);
+    const colors = rosterColors(keys);
+    const first = [...keys].sort()[0];
+    expect(colors.get(first)).toBe(memberColorIndex(first));
+    // Someone the roster no longer has goes by their key alone.
+    expect(memberText("gone".padEnd(52, "y"), colors)).toBe(MEMBER_TEXT[memberColorIndex("gone".padEnd(52, "y"))]);
   });
 });
 
@@ -114,30 +151,42 @@ describe("the members' hues (index.css)", () => {
 describe("runs of a member's messages (authorsOf)", () => {
   const A = "a".repeat(52), B = "b".repeat(52);
   const group = { members: [{ key: A, nick: "Ana", role: "member" as const, me: false, online: true, missing: 0 }, { key: B, role: "member" as const, me: false, online: true, missing: 0 }], formerNames: { ["c".repeat(52)]: "Cy" } };
-  const msg = (id: string, member?: string, extra: object = {}) => ({ id, sender: member ? "peer" : "me", ...(member && { member }), ...extra });
+  // Noon on a fixed day, a minute a message: well inside a run's pause.
+  const NOON = new Date(2026, 8, 29, 12, 0).getTime();
+  let clock = NOON;
+  const msg = (id: string, member?: string, extra: object = {}) => ({ id, sender: member ? "peer" : "me", timestamp: (clock += 60_000), ...(member && { member }), ...extra });
+  const marks = (authors: Map<string, { key: string; first: boolean; last: boolean }>) =>
+    [...authors].map(([id, a]) => `${id}:${a.key[0]}:${a.first ? "F" : "-"}${a.last ? "L" : "-"}`);
 
-  it("marks the last message of each run, and none of mine", () => {
-    const authors = authorsOf([msg("1", A), msg("2", A), msg("3", B), msg("4"), msg("5", B), msg("6", A)], group, new Set(), () => undefined);
-    expect([...authors].map(([id, a]) => `${id}:${a.key[0]}:${a.last}`)).toEqual(["1:a:false", "2:a:true", "3:b:true", "5:b:true", "6:a:true"]);
-    expect(authors.has("4")).toBe(false);
+  it("marks the first (the name) and the last (the picture) message of each run, and none of mine", () => {
+    clock = NOON;
+    const authors = authorsOf([msg("1", A), msg("2", A), msg("3", A), msg("4", B), msg("5"), msg("6", B), msg("7", A)], group, new Set(), () => undefined);
+    expect(marks(authors)).toEqual(["1:a:F-", "2:a:--", "3:a:-L", "4:b:FL", "6:b:FL", "7:a:FL"]);
+    expect(authors.has("5")).toBe(false);
   });
 
   it("ends a run at a line of the group or a payment note in the timeline, not at a note shown under its bubble", () => {
-    const rows = [msg("1", A), { id: "e", sender: "system", event: "joined" }, msg("2", A), { id: "n", sender: "peer", member: A, groupPay: { id: "hidden" } }, msg("3", A),
-      { id: "m", sender: "peer", member: A, groupPay: { id: "shown" } }, msg("4", A)];
+    clock = NOON;
+    const rows = [msg("1", A), { id: "e", sender: "system", event: "joined", timestamp: clock }, msg("2", A), { id: "n", sender: "peer", member: A, groupPay: { id: "hidden" }, timestamp: clock }, msg("3", A),
+      { id: "m", sender: "peer", member: A, groupPay: { id: "shown" }, timestamp: clock }, msg("4", A)];
     const authors = authorsOf(rows, group, new Set(["hidden"]), () => undefined);
-    expect(authors.get("1")!.last).toBe(true);
-    expect(authors.get("2")!.last).toBe(false);
-    expect(authors.get("3")!.last).toBe(true);
-    expect(authors.get("4")!.last).toBe(true);
+    expect(marks(authors)).toEqual(["1:a:FL", "2:a:F-", "3:a:-L", "4:a:FL"]);
     expect(authors.has("n")).toBe(false);
   });
 
+  it("ends a run at a pause of more than five minutes, and at midnight", () => {
+    const at = (id: string, time: number) => ({ id, sender: "peer", member: A, timestamp: time });
+    const late = new Date(2026, 8, 29, 23, 58).getTime();
+    const authors = authorsOf([at("1", NOON), at("2", NOON + RUN_GAP_MS), at("3", NOON + 2 * RUN_GAP_MS + 1), at("4", late), at("5", late + 3 * 60_000)], group, new Set(), () => undefined);
+    expect(marks(authors)).toEqual(["1:a:F-", "2:a:-L", "3:a:FL", "4:a:FL", "5:a:FL"]);
+  });
+
   it("names the member as the roster or the group's memory does, with their picture", () => {
+    clock = NOON;
     const C = "c".repeat(52);
     const authors = authorsOf([msg("1", A), msg("2", B), msg("3", C)], group, new Set(), key => key === A ? "data:image/png;base64,AA" : undefined);
-    expect(authors.get("1")).toEqual({ key: A, name: "Ana", picture: "data:image/png;base64,AA", last: true });
-    expect(authors.get("2")).toEqual({ key: B, name: "", last: true });
-    expect(authors.get("3")).toEqual({ key: C, name: "Cy", last: true });
+    expect(authors.get("1")).toEqual({ key: A, name: "Ana", picture: "data:image/png;base64,AA", first: true, last: true });
+    expect(authors.get("2")).toEqual({ key: B, name: "", first: true, last: true });
+    expect(authors.get("3")).toEqual({ key: C, name: "Cy", first: true, last: true });
   });
 });

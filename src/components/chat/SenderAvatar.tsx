@@ -1,5 +1,5 @@
 import { Identicon } from "../Avatar";
-import { memberText } from "../../lib/memberColors";
+import { useMemberText } from "../../contexts/MemberColorsContext";
 import type { MessageAuthor } from "../../lib/senderRuns";
 
 export type { MessageAuthor };
@@ -12,6 +12,7 @@ export type { MessageAuthor };
  * from them and out of the tab order. Gone in a very narrow chat (index.css `.sender-avatar`), where the name's colour alone tells who wrote.
  */
 export function SenderAvatar({ author, onOpen }: { author: MessageAuthor; onOpen?: () => void }) {
+  const memberText = useMemberText();
   if (!author.last) return <span aria-hidden="true" data-testid="sender-avatar-spacer" className="sender-avatar" />;
   // A button out of the tab order (and out of the long press and the swipe, which leave buttons alone).
   return (
