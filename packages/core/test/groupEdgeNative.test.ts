@@ -33,7 +33,7 @@ interface Member {
 
 let pkarr: MemoryPkarr, native: NativeWorld;
 
-function member(name: string, group: string, me: Identity, peer: Identity, options: { rtc: boolean; transports?: NativeTransport[] }): Member {
+function member(name: string, group: string, me: Identity, peer: Identity, options: { rtc: boolean; transports?: NativeTransport[]; entry?: "host" | "guest"; endpointAfterMs?: number }): Member {
   const states: PairingState[] = [], frames: unknown[] = [], heard: PairedTransport[][] = [];
   const transports = options.transports ?? ["iroh/1"];
   let started = false;
@@ -48,6 +48,8 @@ function member(name: string, group: string, me: Identity, peer: Identity, optio
     pairing: { credentials: { seedB64: me.seedB64, peerKey: peer.pubKeyZ32, requireSignedSignals: true, verifiedPeerKey: peer.pubKeyZ32 },
       pinPeer: async key => { if (key !== peer.pubKeyZ32) throw new Error("Not the member this edge belongs to"); }, trustOnFirstUse: false },
     native: { automatic: true },
+    // An entry session opens so (node.ts `startEdge`): one exchange, the member's side publishing after its first look.
+    ...(options.entry ? { oneShot: true, firstPublish: options.entry === "host" ? "after-first-poll" as const : "at-start" as const } : {}),
     packetTransports: true,
     transport: pkarr.transport(),
     pollIntervals: RELAY_POLL_INTERVALS,
@@ -63,13 +65,14 @@ function member(name: string, group: string, me: Identity, peer: Identity, optio
       onGroupFrame: frame => { frames.push(frame); },
       onPacketTransports: said => {
         heard.push(said);
-        if (!said.includes("webrtc/1")) startEndpoints();
+        if (!said.includes("webrtc/1")) setTimeout(startEndpoints, options.endpointAfterMs ?? 0);
       },
     },
   });
   const result: Member = { name, link, states, frames, heard };
   link.start();
-  if (!options.rtc) startEndpoints();
+  if (options.entry === "guest") link.expectPeer();
+  if (!options.rtc) { if (options.endpointAfterMs) setTimeout(startEndpoints, options.endpointAfterMs); else startEndpoints(); }
   return result;
 }
 
@@ -130,6 +133,25 @@ describe("a group's edge with a member whose app has no WebRTC", () => {
     await run(1_000);
     expect(web.frames).toContainEqual({ t: "group-msg", n: 1 });
     expect(linux.frames).toContainEqual({ t: "group-msg", n: 2 });
+  }, 120_000);
+
+  // A group link's entry session: the member's side (the host, the lower key by construction) dials, the joiner knocked.
+  // An endpoint up within the host's first-packet window (the host publishes after its first look, and by 2 s), or after.
+  for (const host of ["the app with no WebRTC", "the app with WebRTC"] as const) for (const endpointAfterMs of [1_000, 3_000]) it(`an entry session goes live over Iroh when ${host} lets the joiner in, endpoints up after ${endpointAfterMs / 1000} s`, async () => {
+    const group = `entry/${toBase64Url(randomBytes(16))}`;
+    let [one, two] = [createIdentity(), createIdentity()];
+    const edgeKey = (me: Identity, peer: Identity) => edgeParams(group, me.seed, me.pubKeyZ32, peer.pubKeyZ32).peerPubKeyZ32;
+    // `one` hosts: its link key is the lower.
+    if (edgeKey(two, one) > edgeKey(one, two)) [one, two] = [two, one];
+    const linuxHosts = host === "the app with no WebRTC";
+    // Endpoints take a moment to come up, as Iroh's do in a browser.
+    const guest = member("guest", group, two, one, { rtc: linuxHosts, entry: "guest", endpointAfterMs });
+    await run(2_000);
+    const hostSide = member("host", group, one, two, { rtc: !linuxHosts, entry: "host", endpointAfterMs });
+    const took = await untilLive(hostSide, guest, 3 * 60_000);
+    console.log(`GROUP_EDGE_NATIVE entry, ${host} hosts, endpoints after ${endpointAfterMs / 1000} s: live in ${took / 1000} s`);
+    expect(took).toBeLessThan(90_000);
+    expect(liveOn(hostSide)).toBe("iroh/1");
   }, 120_000);
 
   it("two apps with no WebRTC go live over a native transport too", async () => {

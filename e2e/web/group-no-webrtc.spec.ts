@@ -54,7 +54,15 @@ async function join(peer: Peer, url: string): Promise<void> {
   await expect(groupChat(peer)).toHaveAttribute("data-status", "active", { timeout: 180_000 });
 }
 
-const reachable = (peer: Peer, n: number, of: number) => expect(peer.page.getByTestId("group-members")).toContainText(`${n} of ${of} reachable`, { timeout: 180_000 });
+/** The group's connection control says it is connected (a community's members reach each other through hubs). */
+const connected = (peer: Peer) => expect(peer.page.getByTestId("group-connection-options")).toHaveAttribute("data-state", "connected", { timeout: 180_000 });
+
+/** `GROUP_TRACE=1`: every page's link and join trace lines, for a failure to say what each app dialled and why. */
+async function trace(peer: Peer): Promise<void> {
+  if (!process.env.GROUP_TRACE) return;
+  await peer.page.evaluate(() => { Object.assign(globalThis, { __ghostlyLinkTrace: true, __ghostlyJoinTrace: true }); });
+  peer.page.on("console", message => { if (/\[ghostly:(link|join)/.test(message.text())) console.log(`  [${peer.name}] ${message.text()}`); });
+}
 
 async function people(peer: (name: string, options?: PeerOptions) => Promise<Peer>): Promise<{ linux: Peer; bob: Peer; carol: Peer }> {
   const relay = endpoints.irohRelay;
@@ -66,6 +74,7 @@ async function people(peer: (name: string, options?: PeerOptions) => Promise<Pee
   // The page really has no WebRTC: the engine says so.
   expect(await linux.page.evaluate(() => typeof (window as unknown as { RTCPeerConnection?: unknown }).RTCPeerConnection)).toBe("undefined");
   await Promise.all([setName(linux, "Linux"), setName(bob, "Bob"), setName(carol, "Carol")]);
+  for (const p of [linux, bob, carol]) await trace(p);
   return { linux, bob, carol };
 }
 
@@ -86,8 +95,8 @@ test("a member with no WebRTC makes a community, lets two people in, and all thr
   await expect(bob.page.getByTestId("group-name")).toHaveText("Penguins");
   await join(carol, url);
   for (const p of [linux, bob, carol]) await expect(p.page.getByTestId("group-members")).toContainText("3 members", { timeout: 180_000 });
-  // Every member reaches every other: the Linux app over Iroh, Bob and Carol over WebRTC between them.
-  for (const p of [linux, bob, carol]) await reachable(p, 2, 2);
+  // Every member is connected: the Linux app over Iroh.
+  for (const p of [linux, bob, carol]) await connected(p);
   await expect(linux.page.getByTestId("group-connection-options")).toHaveAttribute("data-transport", "iroh/1");
   await everyoneReadsEveryone([linux, bob, carol]);
 });
@@ -104,6 +113,7 @@ test("a member with no WebRTC joins a community by its link, and all three read 
   await expect(groupChat(linux)).toBeVisible({ timeout: 30_000 });
   await expect(groupChat(linux)).toHaveAttribute("data-status", "active", { timeout: 180_000 });
   for (const p of [linux, bob, carol]) await expect(p.page.getByTestId("group-members")).toContainText("3 members", { timeout: 180_000 });
-  for (const p of [linux, bob, carol]) await reachable(p, 2, 2);
+  for (const p of [linux, bob, carol]) await connected(p);
+  await expect(linux.page.getByTestId("group-connection-options")).toHaveAttribute("data-transport", "iroh/1");
   await everyoneReadsEveryone([linux, bob, carol]);
 });

@@ -353,7 +353,10 @@ export class LinkSession {
   setTransports(value: string | null): void {
     if (this.transports === value) return;
     this.transports = value;
-    if (this.running && !this.firstPublishTimer) void this.publish().catch(() => {});
+    if (!this.running) return;
+    // A first packet still held back (`firstPublish`) carries it when it goes; one already out does not.
+    if (this.firstPublishTimer && !this.lastPublishedAt && !this.publishing) return;
+    void this.publish().catch(() => {});
   }
 
   async setRtcSignal(signal: string | null, reportFailure = false): Promise<void> {
