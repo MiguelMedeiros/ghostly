@@ -64,6 +64,26 @@ test("installed on a phone: the app fills the screen, and the composer rides the
   expect((await box(page, ".composer-row")).bottom).toBeLessThanOrEqual(PHONE.height);
 });
 
+test("installed on a phone: the document is the screen's height from its first frame, not only once the app runs", { tag: ["@feature:app.mobile-layout", "@feature:app.pwa.install"] }, async ({ peer }) => {
+  // `data-standalone` comes from the app once it runs, and behind the lock screen at start never; until then iOS 26
+  // laid the page out at the screen less the status bar (in the Simulator: 812 of 874pt, the document 0 tall). A rule
+  // on `display-mode: standalone` applies before any script. Chromium cannot emulate that media feature, so this
+  // checks the rule the stylesheet has; the Simulator showed it apply (874/874 from the first frame).
+  const { page } = await peer("alice", { mobile: true, viewport: PHONE });
+  const heights = await page.evaluate(() => {
+    const found: string[] = [];
+    const walk = (rules: CSSRuleList, standalone: boolean) => {
+      for (const rule of rules) {
+        if (rule instanceof CSSMediaRule) walk(rule.cssRules, standalone || /display-mode:\s*standalone/.test(rule.media.mediaText));
+        else if (standalone && rule instanceof CSSStyleRule && rule.selectorText === "html") found.push(rule.style.height);
+      }
+    };
+    for (const sheet of document.styleSheets) { try { walk(sheet.cssRules, false); } catch { /* another origin's */ } }
+    return found;
+  });
+  expect(heights).toContain("100vh");
+});
+
 test("on a phone: an emoji search shows its results above the keyboard", { tag: ["@feature:app.mobile-layout", "@feature:app.emoji-picker", "@feature:app.composer.expressions"] }, async ({ peer }) => {
   const { page } = await peer("alice", { mobile: true, viewport: PHONE });
   await page.getByTitle("New Chat").click();
