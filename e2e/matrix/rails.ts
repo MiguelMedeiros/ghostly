@@ -6,7 +6,7 @@ import { expect, type Locator } from "@playwright/test";
 import { Interface } from "ethers";
 import { chatPayments } from "../support/payments";
 import { choose } from "../support/select";
-import { alternatives, chatPane, containing, either, newWallet, openChat, paymentCard, template, wallet, type Actor } from "./actors";
+import { alternatives, cardAction, chatPane, containing, either, newWallet, openChat, paymentCard, template, wallet, type Actor } from "./actors";
 
 /**
  * The Testnet payment blocks of the rails that need e2e/infra (Lightning through LND, Core Lightning, NWC
@@ -88,7 +88,7 @@ async function sendInChat(from: Actor, to: Actor, p: ChatPayment, confirm?: () =
   await paymentCard(from, p.card);
   await from.page.getByTestId("payment-amount").fill(p.amount);
   await memo(from, p.note);
-  await from.page.getByTestId("payment-send").click();
+  await cardAction(from, "send");
   const composer = from.page.getByTestId("payment-composer");
   await approve(composer);
   // Gone out: the sheet closes, back to the chat, whose bubbles tell the rest.
@@ -105,7 +105,7 @@ async function requestInChat(payee: Actor, payer: Actor, p: ChatPayment, confirm
   await paymentCard(payee, p.card);
   await payee.page.getByTestId("payment-amount").fill(p.amount);
   await memo(payee, p.note);
-  await payee.page.getByTestId("payment-request").click();
+  await cardAction(payee, "request");
   await openChat(payer);
   const request = bubble(payer, p.note);
   if (p.maxFee) await request.getByLabel(either("Maximum fee (sats)")).fill(p.maxFee);
