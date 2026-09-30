@@ -222,7 +222,7 @@ const METHODS: Record<string, Method> = {
     }
     const wait = oneOf(params, "wait", ["none", "confirmed"] as const, "none");
     const result = await node(ctx).editMessage({ linkId: link.id, messageId, text });
-    if (result.error) throw new CliError(result.refused ? "refused" : "unavailable", result.error);
+    if (result.error) throw editRefused(await node(ctx).getMessages(link.id), messageId, "chat", result.error, result.refused);
     const id = result.messageId ?? messageId;
     let message = (await node(ctx).getMessages(link.id)).find((m) => m.id === id);
     if (wait === "confirmed" && message?.edit?.pending) message = await waitForEdit(ctx, link.id, id, num(params, "timeout", 30, { min: 1, max: 3600 }) * 1000);
@@ -444,7 +444,7 @@ const METHODS: Record<string, Method> = {
     const mentions = mentionsFor(text, list(params, "mentions"), group);
     const wait = oneOf(params, "wait", ["none", "sent"] as const, "none");
     const result = await node(ctx).editMessage({ linkId: `group:${group.id}`, messageId, text, ...(mentions.length ? { mentions } : {}) });
-    if (result.error) throw new CliError(result.refused ? "refused" : "unavailable", result.error);
+    if (result.error) throw editRefused(await node(ctx).groupMessages({ groupId: group.id }), messageId, "group", result.error, result.refused);
     const message = (await node(ctx).groupMessages({ groupId: group.id })).find((m) => m.id === messageId);
     const edits = message?.edit?.seq ?? 0;
     // An edit waiting for the pace is not said yet: `--wait sent` waits for that too, then for an edge to take it.
@@ -556,6 +556,17 @@ function typingWord(params: Params, typing: boolean): { kind: TypingKind; status
   const status = sanitizeTypingStatus(oneLine);
   if (!status) throw new CliError("bad_request", "status: plain text, with no link or markup");
   return { kind, status };
+}
+
+/**
+ * An edit the engine refused. A message that is not in the chat or group at all is `not_found` (exit 3), naming the id
+ * to give, as `button update` and `task update` do; before, a mistyped or lost id read "Only your own text messages
+ * can be edited" (`refused`, exit 1), as if the message were someone else's.
+ */
+function editRefused(messages: readonly StoredMessage[], ref: string, where: "chat" | "group", error: string, refused: boolean | undefined): CliError {
+  if (refused && !messages.some((m) => m.id === ref || m.wireId === ref))
+    return new CliError("not_found", `No message ${JSON.stringify(ref)} in this ${where}: give the messageId ${where === "group" ? "group send" : "send"} printed`);
+  return new CliError(refused ? "refused" : "unavailable", error);
 }
 
 /**
