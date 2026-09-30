@@ -1,0 +1,1 @@
+A chat or edge that resumes after a restart publishes its first packet after its first look at the contact, with its offer in it, rather than a presence packet and then the offer: one request a relay per link at start instead of two (with two groups and two chats, 14 requests a relay at start became 8). No wire change: the packet is the one the offer went in before.
