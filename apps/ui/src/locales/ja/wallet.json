@@ -181,7 +181,12 @@
       "movements": "{{count}} 件の取引",
       "movementsOne": "1 件の取引",
       "noFee": "手数料なし",
-      "none": "まだありません"
+      "none": "まだありません",
+      "note": {
+        "paymentFailed": "Lightning の支払いが失敗しました",
+        "requestPaid": "Lightning で支払われたリクエスト",
+        "testCoins": "テストミントからのテストコイン"
+      }
     },
     "intent": "{{amount}} {{unit}} · {{state}}",
     "invoiceFor": "{{amount}} のインボイス",

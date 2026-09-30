@@ -181,7 +181,12 @@
       "movements": "{{count}} 笔记录",
       "movementsOne": "1 笔记录",
       "noFee": "无手续费",
-      "none": "暂无记录"
+      "none": "暂无记录",
+      "note": {
+        "paymentFailed": "一笔闪电网络付款失败",
+        "requestPaid": "通过闪电网络支付的请求",
+        "testCoins": "来自测试铸币所的测试币"
+      }
     },
     "intent": "{{amount}} {{unit}} · {{state}}",
     "invoiceFor": "{{amount}} 的发票",
