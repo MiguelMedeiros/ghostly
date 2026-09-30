@@ -341,7 +341,7 @@
     "asking": "Asking {{source}}…",
     "askingInvoice": "Asking for the invoice…",
     "askingSource": "Asking the source…",
-    "asksExactly": "It asks for exactly {{amount}} sats.",
+    "asksExactly": "It asks for exactly {{amount}} {{unit}}.",
     "balance": "Balance",
     "balanceHint": "Lightning uses your Cashu balance: invoices are paid into, and paid from, your Cashu mints.",
     "balanceSource": "{{unit}} · {{source}}",
@@ -380,7 +380,7 @@
       "sending": "sending",
       "unknown": "outcome unknown"
     },
-    "paidTo": "Paid {{amount}} sats to {{to}} ✓",
+    "paidTo": "Paid {{amount}} {{unit}} to {{to}} ✓",
     "pastePlaceholder": "Paste a Lightning invoice or a Lightning address",
     "pay": "Pay",
     "payTo": "Pay {{amount}} to {{to}}{{fees}}",
@@ -390,7 +390,7 @@
     "recentIn": "Invoice · {{amount}} {{unit}}",
     "recentOut": "Payment · {{amount}} {{unit}}",
     "says": "{{domain}} says: {{message}}",
-    "takesRange": "It takes {{min}} to {{max}} sats.",
+    "takesRange": "It takes {{min}} to {{max}} {{unit}}.",
     "theSource": "the source",
     "waiting": "Waiting for the payment… Any Lightning wallet can pay it; it is marked paid here once the source sees it."
   },

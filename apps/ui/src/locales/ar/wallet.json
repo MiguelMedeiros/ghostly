@@ -341,7 +341,7 @@
     "asking": "جارٍ سؤال {{source}}…",
     "askingInvoice": "جارٍ طلب الفاتورة…",
     "askingSource": "جارٍ سؤال المصدر…",
-    "asksExactly": "يطلب {{amount}} sats بالضبط.",
+    "asksExactly": "يطلب {{amount}} {{unit}} بالضبط.",
     "balance": "الرصيد",
     "balanceHint": "يستخدم Lightning رصيدك في Cashu: تُدفع الفواتير إلى دور السك الخاصة بك في Cashu ومنها.",
     "balanceSource": "{{unit}} · {{source}}",
@@ -380,7 +380,7 @@
       "sending": "جارٍ الإرسال",
       "unknown": "النتيجة غير معروفة"
     },
-    "paidTo": "دُفع {{amount}} sats إلى {{to}} ✓",
+    "paidTo": "دُفع {{amount}} {{unit}} إلى {{to}} ✓",
     "pastePlaceholder": "الصق فاتورة Lightning أو عنوان Lightning",
     "pay": "ادفع",
     "payTo": "ادفع {{amount}} إلى {{to}}{{fees}}",
@@ -390,7 +390,7 @@
     "recentIn": "فاتورة · {{amount}} {{unit}}",
     "recentOut": "دفعة · {{amount}} {{unit}}",
     "says": "يقول {{domain}}: {{message}}",
-    "takesRange": "يقبل من {{min}} إلى {{max}} sats.",
+    "takesRange": "يقبل من {{min}} إلى {{max}} {{unit}}.",
     "theSource": "المصدر",
     "waiting": "بانتظار الدفع… يمكن لأي محفظة Lightning دفعها، وتظهر هنا مدفوعة بمجرد أن يراها المصدر."
   },
