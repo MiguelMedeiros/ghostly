@@ -129,7 +129,7 @@ export async function startRuntime(paths: ProfilePaths, options: RuntimeOptions 
   registerFileBytes("native", async () => new NodeFileBytes(paths.files), true);
   const [{ EngineServer }, { createHyperEndpoint }] = await Promise.all([
     import("@ghostly/browser/engine/server"),
-    import("../../../../native-transports/hyperdht/endpoint.mjs"),
+    import("../../../../native/transports/hyperdht/endpoint.mjs"),
   ]);
   const network = hyperdhtNetwork();
   const dht = mainlineNetwork();

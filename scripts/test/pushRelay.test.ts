@@ -1,7 +1,7 @@
 import { connect } from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
 import { PUSH_SERVICE_HOSTS } from "../../packages/core/src/webPush";
-import { DEFAULT_LIMITS, PUSH_HOSTS, clientAddress, rateKey, readRelayRequest, startRelay } from "../../native-transports/push-relay/relay.mjs";
+import { DEFAULT_LIMITS, PUSH_HOSTS, clientAddress, rateKey, readRelayRequest, startRelay } from "../../services/push-relay/relay.mjs";
 
 // covers: push.wake.send
 
@@ -10,7 +10,7 @@ const request = (patch: Record<string, unknown> = {}) => JSON.stringify({
   endpoint: "https://fcm.googleapis.com/fcm/send/x", headers: { Authorization: "vapid t=a.b.c, k=K", TTL: "3600", Cookie: "no", Urgency: "high\r\nX: 1" }, body, ...patch,
 });
 
-describe("the push relay (native-transports/push-relay)", () => {
+describe("the push relay (services/push-relay)", () => {
   it("forwards only to push services, only the Web Push headers, and the body as bytes", () => {
     const read = readRelayRequest(request());
     expect(read.endpoint).toBe("https://fcm.googleapis.com/fcm/send/x");

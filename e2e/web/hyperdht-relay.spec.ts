@@ -1,7 +1,7 @@
 import { chat, connect, expect, link, say, test, type Peer } from "../support/fixtures";
 
 // HyperDHT in the browser (WISP 103, browser profile): each app reaches the HyperDHT through a relay
-// (native-transports/hyperdht-relay, run by e2e/infra on a HyperDHT network of its own). The relay moves
+// (services/hyperdht-relay, run by e2e/infra on a HyperDHT network of its own). The relay moves
 // handshake messages and ciphertext; the keys, the Noise handshake and the encrypted stream stay in the page.
 // A first pairing still takes WebRTC (the contact's HyperDHT key travels inside an authenticated session), so the
 // two people pair, set the relay, and then lose WebRTC: their chat comes back live over HyperDHT, relayed.
