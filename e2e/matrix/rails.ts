@@ -1,9 +1,7 @@
 import { execFileSync } from "node:child_process";
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { expect, type Locator } from "@playwright/test";
 import { Interface } from "ethers";
+import { exclusive } from "../support/exclusive";
 import { chatPayments } from "../support/payments";
 import { choose } from "../support/select";
 import { alternatives, cardAction, chatPane, containing, either, newWallet, openChat, paymentCard, template, wallet, type Actor } from "./actors";
@@ -41,35 +39,6 @@ const SETTLED = new RegExp(`^(?:${[either("Paid").source, either("Received").sou
 
 /** The first number in a balance line, whatever the language groups its thousands with (integers only). */
 const amountIn = (text: string) => Number(/\d[\d.,\s]*/.exec(text)?.[0].replace(/[^\d]/g, "") ?? NaN);
-
-/**
- * Work on a shared node pair, one scenario at a time. The matrix runs several workers, and the Lightning
- * suites of e2e/infra have one pair of nodes each: two scenarios paying over the same channel at once would
- * each see the other's payments in the balances. A lock directory per rail, held by a live process.
- */
-async function exclusive<T>(name: string, work: () => Promise<T>): Promise<T> {
-  const dir = join(tmpdir(), "ghostly-matrix-locks", name);
-  mkdirSync(join(dir, ".."), { recursive: true });
-  for (;;) {
-    try {
-      mkdirSync(dir);
-      writeFileSync(join(dir, "pid"), String(process.pid));
-      break;
-    } catch {
-      let holder = NaN;
-      try { holder = Number(readFileSync(join(dir, "pid"), "utf8")); } catch { /* just made: its pid comes next */ }
-      let alive = true;
-      if (Number.isInteger(holder)) try { process.kill(holder, 0); } catch { alive = false; }
-      if (!alive) rmSync(dir, { recursive: true, force: true });
-      else await new Promise((resolve) => setTimeout(resolve, 1_000));
-    }
-  }
-  try {
-    return await work();
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-}
 
 interface ChatPayment {
   card: string;
