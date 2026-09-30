@@ -4814,6 +4814,7 @@ export class GhostlyNode implements EngineImplementation {
       peerProofs: EXTERNAL_IDENTITIES_ENABLED && stored.peerProofs ? { local: stored.peerProofs.local, remote: stored.peerProofs.remote } : undefined,
       proofError: EXTERNAL_IDENTITIES_ENABLED ? live.proofError : undefined,
       availableTransports: live.link?.availableTransports,
+      runnableTransports: live.link ? this.runnableTransports(live) : undefined,
       relayedTransports: live.link?.relayedTransports,
       deliveryMode: live.stored.deliveryMode ?? "stream",
       dhtDelivery: live.link?.dhtDelivery,

@@ -63,3 +63,32 @@ it.each([[false, "missing"], [false, "failed"], [false, "pending"], [true, "miss
     expect(rtc).not.toHaveBeenCalled(); expect(dial).not.toHaveBeenCalled();
   } finally { release(); await node.shutdown(); await db.deleteLink(row.id); vi.unstubAllGlobals(); }
 }, 3000);
+
+it("on an app with no WebRTC, DHT only releases the native transports, still names them, and Automatic brings them back", async () => {
+  const row: StoredLink = { id: "dht-only-way-back", profile: "paired-chat/1", createdAt: 1,
+    seedB64: createIdentity().seedB64, encKeyB64: createIdentity().seedB64,
+    participationSeed: createIdentity().seedB64, peerPubKeyZ32: createIdentity().pubKeyZ32, pairedPeerKey: createIdentity().pubKeyZ32 };
+  await db.putSettings({ online: true, nick: "", relays: [], iceServers: [], mints: [], mintsInitialized: true });
+  await db.putLink(row);
+  // The Linux Desktop: WebKitGTK has no WebRTC, only the host's native transports.
+  vi.stubGlobal("RTCPeerConnection", undefined);
+  const endpoint = (transport: NativeTransport): NativeEndpoint => ({ transport, descriptor: {}, connect: async () => { throw new Error("offline"); },
+    close: async () => {}, onConnection: null, onDescriptor: null });
+  const transport = { publish: vi.fn(async () => {}), resolve: vi.fn(async () => null), describe: () => ({ protocol: "local fixture", relays: [] }) };
+  const node = new GhostlyNode({ onState: vi.fn(), onMessages: vi.fn(), onCallSignal: vi.fn() },
+    { transport, automaticWallets: false, nativeTransports: { "iroh/1": async () => endpoint("iroh/1"), "hyperdht/1": async () => endpoint("hyperdht/1") } });
+  const current = () => node.getState().links.find(l => l.id === row.id)!;
+  try {
+    await node.start();
+    node.setActiveLink({ linkId: row.id });
+    await vi.waitFor(() => expect(current().availableTransports).toEqual(["iroh/1", "hyperdht/1"]));
+    await node.setChatTransport({ linkId: row.id, transport: "dht" });
+    expect(current().deliveryMode).toBe("dht");
+    await vi.waitFor(() => expect(current().availableTransports).toEqual([]));
+    // What the chat's menu offers to leave DHT only by.
+    expect(current().runnableTransports).toEqual(["iroh/1", "hyperdht/1"]);
+    await node.setChatTransport({ linkId: row.id, transport: "auto" });
+    expect(current().deliveryMode).toBe("stream");
+    await vi.waitFor(() => expect(current().availableTransports).toEqual(["iroh/1", "hyperdht/1"]));
+  } finally { await node.shutdown(); await db.deleteLink(row.id); vi.unstubAllGlobals(); }
+}, 5000);

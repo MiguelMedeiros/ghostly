@@ -145,12 +145,22 @@ function missing(transport: PairedTransport, tr: Translate): string {
   return tr("connection.option.needsDesktop", { transport: name(transport) });
 }
 
+type OwnTransports = Pick<LinkView, "availableTransports" | "runnableTransports" | "deliveryMode">;
+
+/**
+ * The transports this app has for the chat: those started, or on DHT only (which releases the native ones) every one
+ * it can start, so leaving DHT only is offered on an app with no WebRTC too.
+ */
+export function ownTransports(link: OwnTransports): PairedTransport[] {
+  return (link.deliveryMode === "dht" ? link.runnableTransports : undefined) ?? link.availableTransports ?? [];
+}
+
 /**
  * What the chat's Connection menu offers: transports this app runs and the contact's app supports on this link
  * (per its last word; unknown before a first session, then only this app's side is known). Never one this app lacks.
  */
-export function transportOptions(link: Pick<LinkView, "availableTransports" | "peerTransports" | "transportErrors" | "relayedTransports">, tr: Translate = englishT): TransportOption[] {
-  const mine = link.availableTransports ?? [], theirs = link.peerTransports;
+export function transportOptions(link: OwnTransports & Pick<LinkView, "peerTransports" | "transportErrors" | "relayedTransports">, tr: Translate = englishT): TransportOption[] {
+  const mine = ownTransports(link), theirs = link.peerTransports;
   return MENU_ORDER.map(transport => {
     const error = link.transportErrors?.[transport];
     if (!mine.includes(transport)) return { transport, available: false, reason: error ?? missing(transport, tr) };

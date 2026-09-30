@@ -1323,6 +1323,11 @@ export interface LinkView {
   /** While `peerTyping`: the contact's (a bot's) status line, sanitized: one line, at most 40 characters, no links. */
   peerTypingStatus?: string;
   availableTransports?: PairedTransport[];
+  /**
+   * Every transport this app runs for the chat, started or not: DHT only releases the native ones, and an app with no
+   * WebRTC (the Linux Desktop) then has none started, yet can still leave DHT only for any of these.
+   */
+  runnableTransports?: PairedTransport[];
   /** Transports a session with this contact would cross a relay on (a browser's HyperDHT or Iroh): a fallback, and shown as relayed. */
   relayedTransports?: PairedTransport[];
   deliveryMode?: DeliveryMode;
