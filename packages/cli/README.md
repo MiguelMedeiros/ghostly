@@ -278,7 +278,8 @@ commands, `group.created` events and `engine getState` print it as `<hidden>`; `
   `button.pressed`: `{chat | group, messageId, button, label, by, name, replyId, inferred?}`. `messageId` is the
   question's, `replyId` the press's, `by` the chat (or a group member's key) and `name` their name. `inferred`: the
   reply lost the button on the way (the DHT floor) or came from an app without buttons, and matched a label or id.
-  A press past `--once` or after `button update --close` is a plain reply, with no `button.pressed`.
+  A press past `--once` or after `button update --close`, or one whose text is not the label of the button it names,
+  is a plain reply, with no `button.pressed`.
 - Pins (WISP 400 § Pinned message): `chat.pinned` (with `chat`) and `group.pinned` (with `group`) when someone else pins
   or unpins: `{messageId, ref, by, removed}`, with `messageId` the message's id here (null when it is not here, or
   unpinned), `ref` the id both sides know it by, and `by` `peer` or a member key.
