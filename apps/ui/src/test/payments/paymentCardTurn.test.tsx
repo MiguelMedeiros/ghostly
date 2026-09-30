@@ -68,6 +68,8 @@ it("does not wait with motion reduced", async () => {
   const { user } = open();
   await user.click(screen.getByTestId("payment-use"));
   await user.type(screen.getByTestId("payment-amount"), "5");
+  // Flipped two frames after the click (useCardFlip.ts), so the fade starts from a painted face: enabled from then on.
+  await waitFor(() => expect(screen.getByTestId("payment-request").closest(".deck-flip")).toHaveAttribute("data-flipped", "true"));
   expect(screen.getByTestId("payment-request")).toBeEnabled();
   expect(screen.getByTestId("payment-request").parentElement).not.toHaveAttribute("data-turning");
 });
