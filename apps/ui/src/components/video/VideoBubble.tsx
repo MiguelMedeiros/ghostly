@@ -130,8 +130,9 @@ export function VideoBubble({ file, sender, peerName: named }: { file: ChatFile;
     setPhase("loading");
     claimPlayback(file.id);
     // Desktop streams its files from Rust, in ranges, as a video seeks; elsewhere the bytes come as a Blob. One on
-    // its way from here plays from what the page holds.
-    const source = await openStoredMedia(platform, file.id, file.mime, { bytes: !ready || fellBack.current });
+    // its way from here streams too once it has been copied (WebKitGTK stops a large one from a Blob partway), and
+    // plays from what the page holds where nothing streams it.
+    const source = await openStoredMedia(platform, file.id, file.mime, { bytes: fellBack.current || (!ready && sender !== "me") });
     if (!source) {
       releasePlayback(file.id);
       setPhase("poster");
@@ -144,7 +145,7 @@ export function VideoBubble({ file, sender, peerName: named }: { file: ChatFile;
     srcRef.current = source.url;
     setSrc(source.url);
     setPhase("playing");
-  }, [platform, phase, file.id, file.mime, ready]);
+  }, [platform, phase, file.id, file.mime, ready, sender]);
 
   /**
    * The player refused it: a stream is tried again from the file's bytes, once; anything else is unplayable here. A
