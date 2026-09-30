@@ -163,6 +163,16 @@ describe("the buttons' state and a press, as pure rules", () => {
     expect(buttonPress(press("b:1:2", "b", "no"), original, history)).toBeUndefined();
     expect(buttonPress(press("c:1:1", "c", "no"), original, history)).toEqual({ messageId: "k:1:1", button: "no", label: "No" });
   });
+
+  it("takes a press only when its text is the label of the button it names", () => {
+    const original: StoredMessage = { linkId: "group:g", id: "k:1:1", text: QUESTION, sender: "me", member: "k", timestamp: 1, card };
+    const reply = (text: string, button: string): StoredMessage => ({ linkId: "group:g", id: "b:1:1", text, sender: "peer", member: "b", timestamp: 2, replyTo: { id: "k:1:1", snippet: "", member: "k", button } });
+    // Everyone reads "No"; the author must not take it as Yes.
+    expect(buttonPress(reply("No", "yes"), original, [original])).toBeUndefined();
+    expect(buttonPress(reply("Sure, go ahead", "yes"), original, [original])).toBeUndefined();
+    // Case and spaces at the ends are not a different answer.
+    expect(buttonPress(reply(" yes ", "yes"), original, [original])).toEqual({ messageId: "k:1:1", button: "yes", label: "Yes" });
+  });
 });
 
 describe("a question changed after it was answered", () => {
