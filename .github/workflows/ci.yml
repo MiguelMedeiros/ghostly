@@ -360,11 +360,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      # The .deb files apt fetched for these packages on this runner image. apt-get update and the download took
-      # 10 s to 20 min (median ~1 min, 13.8 and 20 min on slow mirror days) and set the job's time; from the cache
-      # the packages install with no network. One entry per runner image (a new image has other versions already
-      # installed, so it needs another set) and package list, about 100 MB. Unlike the Cargo cache, any run saves it
-      # on a miss: that happens once per weekly image.
+      # The .deb files apt fetched for these packages on this runner image. apt-get update and the download from the
+      # mirror outlasted the Cargo restore by 19 s at the median, but by 4 to 20 minutes on one dev run in five, and
+      # set the job's time; from the cache the packages install with no network, inside the Cargo restore. One entry
+      # per runner image (a new image has other versions already installed, so it needs another set) and package
+      # list, about 80 MB. Unlike the Cargo cache, any run saves it on a miss: that happens once per weekly image.
       - name: Apt cache key
         id: apt-key
         run: echo "key=${ImageOS}-${ImageVersion}-apt-tauri-$(echo "$APT_PACKAGES" | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
