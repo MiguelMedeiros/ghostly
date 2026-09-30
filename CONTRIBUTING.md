@@ -63,7 +63,11 @@ ghostly/
 │   └── iroh-web/        # Iroh compiled for browsers (relay only)
 ├── src/                 # The shared React UI (Desktop, web app, extension)
 ├── src-tauri/           # Desktop's Rust backend
-├── native-transports/   # Iroh and HyperDHT for Desktop, the HyperDHT relay for browsers
+├── native/
+│   └── transports/      # Iroh (Rust) and the HyperDHT endpoint and sidecar (Node) for Desktop, Iroh for browsers
+├── services/
+│   ├── hyperdht-relay/  # The HyperDHT relay for browsers (dht-relay over WebSocket)
+│   └── push-relay/      # A reference push relay for browsers that cannot post a wake-up themselves
 ├── extension/           # Ghostly Browser (Chromium extension, Manifest V3)
 ├── web/                 # Ghostly on the web (app.ghostly.tools)
 ├── e2e/                 # Playwright end-to-end suites and their Docker stack

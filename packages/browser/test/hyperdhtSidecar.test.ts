@@ -8,7 +8,7 @@ import { afterAll, afterEach, expect, it, vi } from "vitest";
 
 // The desktop's HyperDHT sidecar, as the app runs it, over endpoints held in
 // memory instead of the DHT: one process for every endpoint, gone with its parent.
-const source = resolve(__dirname, "../../../native-transports/hyperdht");
+const source = resolve(__dirname, "../../../native/transports/hyperdht");
 const folder = mkdtempSync(join(tmpdir(), "ghostly-sidecar-"));
 copyFileSync(join(source, "sidecar.mjs"), join(folder, "sidecar.mjs"));
 copyFileSync(join(source, "test/fake-endpoint.mjs"), join(folder, "endpoint.mjs"));

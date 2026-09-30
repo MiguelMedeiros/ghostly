@@ -35,7 +35,7 @@ In scope:
 
 - the Ghost Protocol as described in [docs/PROTOCOL.md](docs/PROTOCOL.md) and the [WISPs](docs/wisps/README.md), and as implemented in `packages/core`
 - Ghostly Desktop (`src-tauri`, `src`), Ghostly Browser (`extension`), Ghostly on the web (`web`, its service worker included), the headless CLI (`packages/cli`), the Rust CLI (`cli`)
-- the native transports and the reference relays we ship (`native-transports`: Iroh, HyperDHT, the HyperDHT relay for browsers, the push relay)
+- the native transports and the reference relays we ship (`native/transports`: Iroh and HyperDHT; `services/`: the HyperDHT relay for browsers and the push relay)
 - the wallets and payments (`packages/browser/src/engine`), on Mainnet and on Testnet
 - identity proofs and public profiles (`packages/browser/src/proofs`)
 - the sites [ghostly.tools](https://ghostly.tools) and [app.ghostly.tools](https://app.ghostly.tools), and this repository's build and release pipeline

@@ -1,7 +1,7 @@
 import { cp, copyFile, mkdir, chmod, rm } from 'node:fs/promises'
 import { execFileSync } from 'node:child_process'
 import { resolve } from 'node:path'
-const source = resolve('native-transports/hyperdht')
+const source = resolve('native/transports/hyperdht')
 const target = resolve('src-tauri/native-runtime')
 // Reproducible dependency graph; runtime matches the architecture building the
 // desktop app. Cross compilation must provide a matching runtime separately.

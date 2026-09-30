@@ -11,7 +11,7 @@ e2e-driver = []
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-ghostly-transports = { path = "../native-transports" }
+ghostly-transports = { path = "../native/transports" }
 iroh = "=1.2.0"
 tauri = { version = "2", features = [] }
 tauri-plugin-updater = "2"

@@ -1,7 +1,7 @@
 //! A Mainline DHT of a few nodes on 127.0.0.1, for the Desktop end-to-end tests (`GHOSTLY_PKARR_DHT_BOOTSTRAP`):
 //! prints the bootstrap addresses as one comma-separated line, then runs until its standard input closes.
 //!
-//! `cargo run --manifest-path native-transports/Cargo.toml --example mainline_testnet -- [nodes]`
+//! `cargo run --manifest-path native/transports/Cargo.toml --example mainline_testnet -- [nodes]`
 
 use std::io::{Read, Write};
 
