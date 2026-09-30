@@ -164,6 +164,9 @@ describe("a question changed after it was answered", () => {
     // A `b` naming no button, or a message without buttons: a reply.
     expect(compactPresses([q, { ...reply, replyTo: { ...reply.replyTo!, button: "nope" } }], m => m.ref).size).toBe(0);
     expect(compactPresses([{ ...q, card: undefined }, reply], m => m.ref).size).toBe(0);
+    // A text that is not the label of the button it names ("No" naming yes): a reply, never "↩ No" for a Yes.
+    expect(compactPresses([q, { ...reply, text: "No" }], m => m.ref).size).toBe(0);
+    expect(compactPresses([q, { ...reply, text: " yes " }], m => m.ref)).toEqual(new Set(["p1"]));
     const quote = quoteFor(reply.replyTo!, replyIndex([reworded, reply]), () => "Bot");
     renderApp(<MessageBubble message={reply} peerPubKey="peer" linkId="link-a" quote={quote} compactPress={false} />);
     expect(screen.queryByTestId("button-press")).not.toBeInTheDocument();

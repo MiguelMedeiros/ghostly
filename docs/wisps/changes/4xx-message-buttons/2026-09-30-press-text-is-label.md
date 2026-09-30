@@ -1,0 +1,1 @@
+A press counts only when the reply's text is the label of the button its `b` names (ignoring case and spaces at the ends). A reply naming `yes` whose text is "No" is an ordinary reply, both for the author's app and in how every reader draws it, so the chat never shows one answer while the bot takes another.
