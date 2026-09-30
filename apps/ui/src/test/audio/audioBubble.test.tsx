@@ -246,6 +246,20 @@ describe("an audio file not here yet", () => {
     await waitFor(() => expect(last(fakeEngine.callsTo("fileAction"))?.action).toBe("cancel"));
   });
 
+  it("one sent from here whose bytes cannot be read yet says so, and plays once it has gone", async () => {
+    const file = song({ id: "chat1-out-song-early", size: 10 * MB });
+    getFile.mockResolvedValue(null);
+    const view = show(file, { state: "transferring", direction: "out", transferred: 4 * MB, size: file.size }, "me");
+    fireEvent.click(screen.getByTestId("audio-play"));
+    await flush();
+    expect(screen.getByTestId("audio-problem")).toHaveTextContent("It plays once it has been sent.");
+    expect(screen.getByTestId("audio-play")).toBeDisabled();
+    act(() => fakeEngine.update({ transfers: { [file.id]: { state: "done", direction: "out", transferred: file.size, size: file.size } } }));
+    view.rerender(<AudioBubble file={file} sender="me" peerName="Ana" />);
+    expect(screen.queryByTestId("audio-problem")).toBeNull();
+    expect(screen.getByTestId("audio-play")).toBeEnabled();
+  });
+
   it("one that did not go offers the round Send again, with the reason behind its ⓘ", () => {
     const retryFile = vi.spyOn(servicesPlatform!, "retryFile").mockResolvedValue();
     const file = song({ id: "chat1-out-song" });
