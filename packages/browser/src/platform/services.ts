@@ -56,7 +56,9 @@ function preparingChanged(force = false): void {
 /**
  * Saves bytes kept in memory (a small received file, a voice message made MP3 here) through the system's save
  * dialog where files are real files (Desktop): a copy staged next to them, saved, and removed only once the save
- * has finished (the command answers after the dialog and the copy). Null where there is no such dialog.
+ * has finished (the command answers after the dialog and the copy). Null where there is no such dialog. A dialog that
+ * never answers keeps the copy until the app next starts, which removes every `save-` copy
+ * (`remove_staged_saves` in apps/desktop/src/file_store.rs).
  */
 async function saveStaged(blob: Blob, name: string): Promise<boolean | null> {
   const native = await fileBytesOf("native");
