@@ -188,7 +188,9 @@ export function installAudioGestures(): () => void {
       // Only the first gesture starts it; later ones leave a let-go output alone until a sound needs it.
       if (!unlocked) {
         const ctx = context;
-        void ctx.resume().then(() => { if (ctx.state === "running") { unlocked = true; idleLater(); } }).catch(()=>{});
+        const started = () => { if (ctx.state === "running") { unlocked = true; idleLater(); } };
+        if (ctx.state === "running") started();
+        else void ctx.resume().then(started).catch(()=>{});
       }
       for (const name of Object.keys(SOUNDS) as SoundName[]) void load(name)?.catch(()=>{});
     } catch { /* no audio device */ }
