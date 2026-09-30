@@ -18,6 +18,7 @@ import { authorName, groupReadAt, groupStatusText } from "../lib/groups";
 import { reactionNoteText } from "../lib/reactions";
 import type { ChatListDensity } from "../lib/settings";
 import type { ChatMessage } from "../lib/types";
+import { callEventText } from "../lib/callLines";
 import type { Translate } from "../locales/translate";
 
 /*
@@ -239,7 +240,9 @@ export function ChatRow(p: ChatRowProps) {
           : p.lastMessage
           ? <span className={p.unread > 0 ? "text-text-secondary font-medium" : "text-text-muted"}>
               {p.lastMessage.sender === "me" && <DeliveryMark delivery={p.lastMessage.delivery} />}
-              {p.lastMessage.systemEvent?.type === "join" ? joinPreview(p, p.lastMessage.systemEvent.pubKey, t) : previewText(p.lastMessage.text, t)}
+              {p.lastMessage.systemEvent?.type === "join" ? joinPreview(p, p.lastMessage.systemEvent.pubKey, t)
+                : p.lastMessage.callEvent ? callEventText(t, p.lastMessage.callEvent.type, p.lastMessage.callEvent.hasVideo) ?? p.lastMessage.text
+                : previewText(p.lastMessage.text, t)}
             </span>
           : <span className="italic text-text-muted">{t("chat.noMessages")}</span>}
         status={(muted || p.pinned) && <>
