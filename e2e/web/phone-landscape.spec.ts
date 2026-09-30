@@ -1,3 +1,4 @@
+import type { Page } from "@playwright/test";
 import { fileURLToPath } from "node:url";
 import { chat, expect, say, test } from "../support/fixtures";
 import { pair } from "../support/paired";
@@ -60,4 +61,16 @@ test("a phone on its side: the chat beside the list uses its width, and a video 
   // 320 by 180: as wide as the chat lets it, as tall as that makes it.
   const box = (await frame.boundingBox())!;
   expect(box.width / box.height).toBeCloseTo(16 / 9, 1);
+});
+
+test("a phone on its side: a list pulled down at its top does not pull the page", { tag: ["@feature:app.mobile-layout", "@feature:app.responsive"] }, async ({ peer }) => {
+  // Two panes on a touch screen: the page must not take a list's overscroll. Chrome's pull-to-refresh reloaded the app
+  // when it did (an Android phone on its side, a tablet), dropping its chats and calls.
+  const [phone, desktop] = await Promise.all([peer("pull-phone", { mobile: true, viewport: LANDSCAPE }), peer("pull-desktop")]);
+  const overscroll = (page: Page) => page.evaluate(() => [document.documentElement, document.body].map((element) => getComputedStyle(element).overscrollBehaviorY));
+  await expect(phone.page.locator(".two-pane")).toBeVisible();
+  expect(await overscroll(phone.page)).toEqual(["none", "none"]);
+  // With a mouse, the browser keeps its own (a trackpad's bounce and swipe back).
+  await expect(desktop.page.locator(".two-pane")).toBeVisible();
+  expect(await overscroll(desktop.page)).toEqual(["auto", "auto"]);
 });
