@@ -54,7 +54,6 @@
   "colorLabel": "Couleur du profil",
   "create": "Créer",
   "delete": {
-    "arkWallet": "Portefeuille Ark",
     "backupFirst": "Téléchargez d’abord une sauvegarde",
     "backupPassphrase": "Phrase secrète de la sauvegarde",
     "cashuSats": "{{amount}} sats en Cashu",
@@ -68,7 +67,7 @@
     "serviceCount": "{{count}} apps",
     "serviceOne": "1 app",
     "title": "Supprimer « {{name}} » ?",
-    "usdtWallet": "Portefeuille USDT",
+    "wallet": "Portefeuille {{name}}",
     "warning": "C’est irréversible. Ses portefeuilles partent avec lui."
   },
   "deleteNamed": "Supprimer {{name}}",
