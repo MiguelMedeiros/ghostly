@@ -2,7 +2,7 @@ import { publicKeyLabel } from "../lib/publicKeyLabel";
 import React, { memo, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { sameValue } from "../lib/sameValue";
 import { clockTime } from "../lib/time";
-import { useI18n, type Translate } from "../contexts/I18nContext";
+import { useI18n } from "../contexts/I18nContext";
 import { FileBubble } from "./FileBubble";
 import { Menu, MenuItem } from "./Menu";
 import { MessageBoundary } from "./MessageBoundary";
@@ -24,7 +24,8 @@ import { playCue, useCueChat } from "../lib/cues";
 import { downloadFile, downloadName, downloadState, type DownloadFormat } from "../lib/fileDownload";
 import { canRetryFile } from "../lib/fileStatus";
 import { useServicesPlatform, useTransfer } from "../hooks/useServicesPlatform";
-import type { CallEventType, ChatFile, ChatMessage } from "../lib/types";
+import type { ChatFile, ChatMessage } from "../lib/types";
+import { callEventText } from "../lib/callLines";
 import type { QuoteView } from "../lib/replies";
 import { ReplyQuote } from "./chat/ReplyQuote";
 import { SmileIcon } from "./composer/icons";
@@ -300,20 +301,6 @@ function TailSvg({ side }: { side: "left" | "right" }) {
       </svg>
     </span>
   );
-}
-
-/** A call's line in the timeline, in the person's language: the history keeps it in English, with its kind beside it. */
-function callEventText(t: Translate, type: CallEventType, hasVideo?: boolean): string | undefined {
-  switch (type) {
-    case "call_started": return hasVideo ? t("calls.timeline.videoStarted") : t("calls.timeline.audioStarted");
-    case "call_received": return hasVideo ? t("calls.timeline.videoIncoming") : t("calls.timeline.audioIncoming");
-    case "call_connected": return hasVideo ? t("calls.timeline.videoConnected") : t("calls.timeline.audioConnected");
-    case "call_ended": return hasVideo ? t("calls.timeline.videoEnded") : t("calls.timeline.audioEnded");
-    case "call_missed": return hasVideo ? t("calls.timeline.videoMissed") : t("calls.timeline.audioMissed");
-    case "call_rejected": return hasVideo ? t("calls.timeline.videoDeclined") : t("calls.timeline.audioDeclined");
-    // A kind this version does not know: its stored line as written.
-    default: return undefined;
-  }
 }
 
 function CallEventIcon({ type, hasVideo }: { type: string; hasVideo?: boolean }) {
