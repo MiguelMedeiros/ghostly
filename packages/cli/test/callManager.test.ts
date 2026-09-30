@@ -254,6 +254,20 @@ describe("two call managers", { timeout: 60_000 }, () => {
     await expect(b.calls.start("chat-ba", {})).rejects.toMatchObject({ code: "unavailable" });
   });
 
+  it("an offer that arrives while the daemon stops rings nothing and throws nothing", async () => {
+    const { a, b } = pairOfManagers();
+    await b.calls.stopAll();
+    await a.calls.start("chat-ab", {});
+    // The chat session hands it over as the daemon stops: it was thrown out of the session's event ("The daemon is
+    // stopping"), an error nobody handled.
+    const offer = signalsOf(a, "o")[0]!;
+    expect(() => b.calls.onSignal("chat-ba", offer)).not.toThrow();
+    await new Promise((r) => setTimeout(r, 50));
+    expect(b.calls.list()).toEqual([]);
+    expect(b.events.filter((e) => e.type === "call.incoming")).toEqual([]);
+    await a.calls.stopAll();
+  });
+
   it("an answer refused as its connection closes: both sides start over once, on new connections and the same sockets", async () => {
     const { a, b } = pairOfManagers({ a: refusingStack(1) });
     b.calls.setAuto({ on: true, rate: 16000 });
