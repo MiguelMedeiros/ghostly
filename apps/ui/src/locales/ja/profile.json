@@ -83,6 +83,7 @@
   "oneOnly": "このアプリでは今のところプロフィールは 1 つだけです。",
   "profiles": "プロフィール",
   "removePicture": "写真を削除",
+  "restoredName": "{{name}}（復元）",
   "sats": "{{amount}} sats",
   "switch": "切り替え"
 }

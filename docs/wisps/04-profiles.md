@@ -46,6 +46,7 @@ The device keeps one registry, the only record shared by all profiles:
 
 - `id` is empty for the **default profile** or ten characters `[a-z0-9]`. The default profile keeps the storage names clients used before profiles existed, so upgrading moves no data.
 - `name` is 1 to 32 characters after collapsing whitespace. It is a local label, distinct from the nickname shown to contacts.
+- `restored: true` marks a profile brought back from a backup ([05](05-backups.md)) and not renamed since. The client shows its name with the word for "restored" in the app's language; the registry keeps only the name, and a backup of it carries only the name. Renaming drops the mark. An entry whose name ends in ` (restored)`, as clients wrote it before the mark, is read as marked.
 - A missing or corrupt registry is read as a single default profile. An unknown `active` falls back to the default profile.
 
 Each profile `p` maps to separate namespaces: storage prefix `ghostly_` (default) or `ghostly_<p>_`; peer database `ghostly` or `ghostly_<p>`; single-peer lock `ghostly-peer` or `ghostly-peer-<p>`; settings record `ghostly_app_settings` or `ghostly_<p>_app_settings`. Because the default prefix is also the start of every other profile's keys, a client MUST NOT treat a key of the form `ghostly_<10 characters>_…` as the default profile's.

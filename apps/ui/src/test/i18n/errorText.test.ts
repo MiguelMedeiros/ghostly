@@ -109,6 +109,7 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["This profile is open in another window. Close it, then try again.", "apps/ui/src/lib/profileData.ts"],
   ["Wrong lock password for that profile", "apps/ui/src/lib/profileData.ts"],
   ["This backup does not hold a profile", "apps/ui/src/lib/profileBackup.ts"],
+  ["This device has no room left for this backup. Free some space, then try again.", "apps/ui/src/lib/profileBackup.ts"],
   ["Could not read the Ark wallet for the backup: quota exceeded", "apps/ui/src/lib/profileBackup.ts", "Could not read the Ark wallet for the backup: "],
   ["This wallet has no recovery phrase to show", "apps/ui/src/components/wallet/walletPhrase.ts"],
   ["This wallet has no backup file", "apps/ui/src/components/wallet/walletPhrase.ts"],

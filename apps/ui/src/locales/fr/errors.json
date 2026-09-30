@@ -131,6 +131,7 @@
     "giveName": "Donnez un nom au profil",
     "noBackupFile": "Ce portefeuille n'a pas de fichier de sauvegarde",
     "noPhrase": "Ce portefeuille n'a pas de phrase de récupération à afficher",
+    "noRoom": "Cet appareil n’a plus de place pour cette sauvegarde. Libérez de l’espace, puis réessayez.",
     "notABackup": "Cette sauvegarde ne contient pas de profil",
     "openElsewhere": "Ce profil est ouvert dans une autre fenêtre. Fermez-la, puis réessayez.",
     "switchFirst": "Passez d'abord à un autre profil",

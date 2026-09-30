@@ -83,6 +83,7 @@
   "oneOnly": "One profile only in this client, for now.",
   "profiles": "Profiles",
   "removePicture": "Remove picture",
+  "restoredName": "{{name}} (restored)",
   "sats": "{{amount}} sats",
   "switch": "Switch"
 }

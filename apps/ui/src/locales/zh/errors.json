@@ -131,6 +131,7 @@
     "giveName": "请为资料命名",
     "noBackupFile": "此钱包没有备份文件",
     "noPhrase": "此钱包没有可显示的恢复短语",
+    "noRoom": "此设备已没有空间存放此备份。请释放一些空间后重试。",
     "notABackup": "此备份中没有资料",
     "openElsewhere": "此资料已在另一个窗口中打开。请关闭该窗口后再试。",
     "switchFirst": "请先切换到另一个资料",

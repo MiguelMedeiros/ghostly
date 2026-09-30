@@ -83,6 +83,7 @@
   "oneOnly": "目前此客户端只支持一个资料。",
   "profiles": "资料",
   "removePicture": "移除照片",
+  "restoredName": "{{name}}（已恢复）",
   "sats": "{{amount}} sats",
   "switch": "切换"
 }
