@@ -55,6 +55,8 @@ async-trait = "0.1"
 bytes = "1"
 # Element full screen off in WebKitGTK (src/fullscreen.rs): the version Tauri's wry uses.
 webkit2gtk = "2"
+# One app per profile (src/single_instance.rs): a second launch brings the running window forward.
+tauri-plugin-single-instance = "2"
 
 # The window follows WebView2 in and out of full screen (src/fullscreen.rs): the versions Tauri's wry uses.
 [target.'cfg(windows)'.dependencies]

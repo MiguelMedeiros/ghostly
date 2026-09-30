@@ -106,6 +106,23 @@ export function findGroup(groups: readonly GroupView[], ref: string): GroupView 
 }
 
 export const chatOf = (ctx: ApiContext, params: Params) => findChat(state(ctx).links, str(params, "chat", true));
+
+/**
+ * A chat or a group, as `forward` names them: `group:<id>` is a group; anything else a chat first (id, prefix or name),
+ * then a group. `linkId` is what the engine calls it.
+ */
+export function chatOrGroup(ctx: ApiContext, ref: string): { id: string; linkId: string; group: boolean } {
+  if (ref.startsWith("group:")) { const group = findGroup(state(ctx).groups, ref.slice("group:".length)); return { id: group.id, linkId: `group:${group.id}`, group: true }; }
+  try {
+    const link = findChat(state(ctx).links, ref);
+    return { id: link.id, linkId: link.id, group: false };
+  } catch (error) {
+    if (!(error instanceof CliError) || error.code !== "not_found") throw error;
+    const group = findGroup(state(ctx).groups, ref);
+    return { id: group.id, linkId: `group:${group.id}`, group: true };
+  }
+}
+
 export const groupOf = (ctx: ApiContext, params: Params) => findGroup(state(ctx).groups, str(params, "group", true));
 
 // ---------- waiting ----------

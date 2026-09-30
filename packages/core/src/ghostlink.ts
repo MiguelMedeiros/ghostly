@@ -11,6 +11,7 @@ import { sanitizeAvatar } from "./avatar";
 import { parseLinkPreview, type LinkPreview } from "./linkPreview";
 import { pairedReplyAuthor, readReply, wireReply, type WireReply } from "./replies";
 import { readForwarded } from "./forwards";
+import { readStatusCard, type StatusCard } from "./statusCards";
 import { randomBytes, toBase64Url, utf8Encode } from "./bytes";
 import { fitSignedPairedSignal, verifyPairedSignal } from "./pairedSignal";
 import { PairedSession, type PairingState, type PairingCredentials, type PaymentMethodName } from "./pairedSession";
@@ -40,12 +41,12 @@ import { EXPECT_PEER_MS, WATCH_PEER_MS, LinkSession, type LinkStatus, type PeerP
 import type { ResolvedLink } from "./records";
 import { servicesFromWire, servicesToWire, type ServiceAd } from "./services";
 import { PairedHttp } from "./pairedHttp";
-import { CALLS_CAPABILITY, FILES_CAPABILITY, KNOWN_SESSION_CAPABILITIES, SERVICES_CAPABILITY, SESSION_CAPABILITIES_FRAME, SessionCapabilities, TYPING_CAPABILITY, REACTIONS_CAPABILITY, EDIT_CAPABILITY, WAKE_SESSION_CAPABILITY, PIN_CAPABILITY, type SessionCapability } from "./pairedCapabilities";
+import { CALLS_CAPABILITY, FILES_CAPABILITY, KNOWN_SESSION_CAPABILITIES, SERVICES_CAPABILITY, SESSION_CAPABILITIES_FRAME, SessionCapabilities, TYPING_CAPABILITY, REACTIONS_CAPABILITY, EDIT_CAPABILITY, WAKE_SESSION_CAPABILITY, PIN_CAPABILITY, STATUS_CARD_CAPABILITY, type SessionCapability } from "./pairedCapabilities";
 import { WAKE_FRAME, parseWakeFrame, wakeFrame, type WakeTarget } from "./pairedWake";
 import { REACTED_FRAME, REACTION_FRAME, REACTION_LIMITS, ReactionWindow, parseReactedFrame, parseReactionFrame, reactedFrame, reactionFrame, type WireReaction } from "./reactions";
 import { PINNED_FRAME, PIN_FRAME, PIN_LIMITS, parsePinFrame, parsePinnedFrame, pinFrame, pinnedFrame, type WirePin } from "./pins";
 import { TYPING_FRAME, TypingReceiver, TypingSender, type TypingActivity } from "./pairedTyping";
-import { EDIT_FRAME, EDIT_RATE_WINDOW_MS, EDIT_RECEIVE_LIMIT, EDITED_FRAME, RateWindow, dhtEditId, editFrame, editedFrame, parseEditFrame, parseEditedFrame, validEditMessage, type WireEdit } from "./pairedEdits";
+import { EDIT_FRAME, EDIT_RATE_WINDOW_MS, EDIT_RECEIVE_LIMIT, EDITED_FRAME, RateWindow, dhtEditId, editFrame, editedFrame, parseEditFrame, parseEditedFrame, validEditMessage, validEditNumber, type WireEdit } from "./pairedEdits";
 import { FILE_FRAMES } from "./chatFiles";
 import { PAIRED_CALL_FRAME, PairedCalls, parsePairedCallFrame } from "./pairedCalls";
 import { traceLink } from "./linkTrace";
@@ -150,6 +151,8 @@ export interface IncomingMessage {
   reply?: WireReply | { i: string };
   /** How many times it has been forwarded (`fw`, WISP 401 § Forwards); absent for a message written in this chat. */
   forwarded?: number;
+  /** A status card (`sc`, WISP 4xx · Status Cards), already checked; the text is its fallback. Live session only. */
+  card?: StatusCard;
 }
 
 /** Largest `paired-message` frame sent with a preview: a session fails on a frame over 60 KiB (`PairedSession`). */
@@ -158,10 +161,11 @@ export const MAX_PAIRED_MESSAGE_FRAME = 56 * 1024;
 /**
  * A `paired-message` frame. The preview (`pv`) is left out when the frame would pass `MAX_PAIRED_MESSAGE_FRAME`
  * with it: the text matters, the card does not. A reply (`r`, WISP 401 § Replies) is a few hundred bytes at most
- * and always goes, and so does a forwarded message's hop count (`fw`, WISP 401 § Forwards).
+ * and always goes, and so does a forwarded message's hop count (`fw`, WISP 401 § Forwards) and a status card (`sc`,
+ * WISP 4xx · Status Cards), whose 8 KiB with the text's 16 stay well inside the frame.
  */
-export function pairedMessageFrame(id: string, ts: number, m: string, preview?: LinkPreview, reply?: WireReply, forwarded?: number): string {
-  const r = { ...(reply && { r: wireReply(reply) }), ...(readForwarded(forwarded) && { fw: forwarded }) };
+export function pairedMessageFrame(id: string, ts: number, m: string, preview?: LinkPreview, reply?: WireReply, forwarded?: number, card?: StatusCard): string {
+  const r = { ...(reply && { r: wireReply(reply) }), ...(readForwarded(forwarded) && { fw: forwarded }), ...(card && { sc: card }) };
   const plain = JSON.stringify({ t: "paired-message", id, ts, m, ...r });
   if (!preview) return plain;
   const withPreview = JSON.stringify({ t: "paired-message", id, ts, m, pv: preview, ...r });
@@ -394,6 +398,8 @@ export interface GhostLinkOptions {
   editSupport?: boolean;
   /** Offer `pin/1` on paired sessions: a pinned message (1:1 chats, not group edges). */
   pinSupport?: boolean;
+  /** Offer `status-card/1` on the paired session: this app shows status cards (WISP 4xx · Status Cards). */
+  statusCardSupport?: boolean;
   /** Offer `wake/1` on paired sessions: this app wakes a contact's closed web app with a push (1:1 chats, not group edges). */
   wakeSupport?: boolean;
   dht?: {
@@ -1726,9 +1732,10 @@ export class GhostLink {
    * only with a paired message on the live session, and only while the frame stays within what a session takes;
    * the DHT has no room for one, and the text goes without it. A `reply` (WISP 401 § Replies) goes whole on the
    * session; on the DHT only its id does, which the contact looks up in its own history. `forwarded`: the hop count
-   * of a forwarded message (WISP 401 § Forwards), on both paths (the DHT drops it when the packet has no room).
+   * of a forwarded message (WISP 401 § Forwards), on both paths (the DHT drops it when the packet has no room). `card`:
+   * a status card (WISP 4xx · Status Cards), on the live session only; on the DHT the text, its fallback, goes alone.
    */
-  async sendMessage(text: string, timestamp = Date.now(), stableId?: string, preview?: LinkPreview, reply?: WireReply, forwarded?: number): Promise<string | null> {
+  async sendMessage(text: string, timestamp = Date.now(), stableId?: string, preview?: LinkPreview, reply?: WireReply, forwarded?: number, card?: StatusCard): Promise<string | null> {
     const trimmed = text.trim();
     if (!trimmed) return null;
     if (this.textDelivery === "dht" && this.dht) return forwarded ? this.dht.send(trimmed, timestamp, stableId ?? toBase64Url(randomBytes(16)), reply?.i, undefined, forwarded)
@@ -1740,7 +1747,7 @@ export class GhostLink {
       const id = stableId ?? toBase64Url(randomBytes(16));
       if (!/^[A-Za-z0-9_-]{22}$/.test(id)) return "Invalid message ID";
       this.pairedPending.set(id, timestamp);
-      try { this.channel.send(pairedMessageFrame(id, timestamp, trimmed, preview, reply, forwarded)); return null; }
+      try { this.channel.send(pairedMessageFrame(id, timestamp, trimmed, preview, reply, forwarded, card)); return null; }
       catch { this.pairedPending.delete(id); return "The connection closed before sending. Reconnect and retry."; }
     }
     if (this.channel && trimmed.length <= LIMITS.maxChatMessageBytes / 4) {
@@ -2073,6 +2080,7 @@ export class GhostLink {
     if (this.options.editSupport) offered.push(EDIT_CAPABILITY);
     if (this.options.wakeSupport) offered.push(WAKE_SESSION_CAPABILITY);
     if (this.options.pinSupport) offered.push(PIN_CAPABILITY);
+    if (this.options.statusCardSupport) offered.push(STATUS_CARD_CAPABILITY);
     return offered;
   }
   /** Both sides offer `calls/1` on the open session: call signals can flow. Calls need a live session. */
@@ -2128,6 +2136,8 @@ export class GhostLink {
   }
   /** Both sides offer `edit/1` on the open session: edits can be said and confirmed. */
   get supportsEdits(): boolean { return this.isDataLinkOpen && this.sessionCapabilities.agreed(EDIT_CAPABILITY); }
+  /** Both sides offer `status-card/1` on the open session: the contact shows cards and takes a card's edits past 100. */
+  get supportsStatusCards(): boolean { return this.isDataLinkOpen && this.sessionCapabilities.agreed(STATUS_CARD_CAPABILITY); }
   /**
    * Says an edit of one of this side's messages (WISP 401 § Edits): on the live session once both sides offer `edit/1`;
    * while not live, on the DHT floor when `dht` says the contact's app takes edits there (WISP 403 § Edits). An error
@@ -2137,8 +2147,12 @@ export class GhostLink {
     if (!this.options.params.profile) return "Edits need a current chat";
     if (this.channel && this.isDataLinkOpen) {
       if (!this.supportsEdits) return "Your contact's app does not show edits yet";
+      // Past a text's edits only an app that shows cards takes one (WISP 4xx · Status Cards); an older one would drop it.
+      if (!validEditNumber(edit.e) && !(edit.sc && this.supportsStatusCards)) return "Your contact's app takes no more edits of this message";
       try { this.channel.send(editFrame(edit)); return null; } catch { return "The connection closed before sending"; }
     }
+    // A card's edit waits for the live session: on the floor the card would read as its text until the next one.
+    if (edit.sc) return "A card's update goes when you are live";
     if (dht && this.dht && this.textDelivery === "dht") return this.dht.send(edit.m, edit.ts, dhtEditId(edit.id, edit.e), undefined, [edit.id, edit.e]);
     return "Edits go when you are live";
   }
@@ -2720,7 +2734,9 @@ export class GhostLink {
             const reply = frame.r === undefined ? undefined : readReply(frame.r, pairedReplyAuthor);
             // A hop count that is not one is left out: the message arrives as written here (older apps ignore `fw`).
             const forwarded = readForwarded(frame.fw);
-            await this.options.events?.onMessage?.({ id: frame.id, text: frame.m, timestamp: frame.ts, via: "datalink", ...(preview && { preview }), ...(reply && { reply }), ...(forwarded && { forwarded }) });
+            // A card that does not hold is left out: the message shows its text, as an older app shows it.
+            const card = frame.sc === undefined ? undefined : readStatusCard(frame.sc);
+            await this.options.events?.onMessage?.({ id: frame.id, text: frame.m, timestamp: frame.ts, via: "datalink", ...(preview && { preview }), ...(reply && { reply }), ...(forwarded && { forwarded }), ...(card && { card }) });
             if (this.channel === channel && this.isDataLinkOpen)
               channel.send(JSON.stringify({ t: "paired-received", id: frame.id }));
           } else if (frame.t === "paired-received") {

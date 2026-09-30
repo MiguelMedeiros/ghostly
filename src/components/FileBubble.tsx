@@ -21,7 +21,7 @@ const linkButton = "text-xs px-2.5 py-0.5 rounded-full bg-black/20 hover:bg-blac
 export function FileBubble({ file, peerName: named, highlight }: { file: ChatFile; peerName?: string; highlight?: string }) {
   const t = useT();
   const peerName = named ?? t("pairing.contact");
-  const { platform, transfer } = useTransfer(file.id);
+  const { platform, transfer, restoring } = useTransfer(file.id);
   /** The preview's object URL, for this file id. Kept while the bubble shows it: never revoked under the <img>. */
   const [preview, setPreview] = useState<{ id: string; url: string } | null>(null);
   const picture = PREVIEWABLE_IMAGE.test(file.mime);
@@ -37,7 +37,8 @@ export function FileBubble({ file, peerName: named, highlight }: { file: ChatFil
   const [missing, setMissing] = useState(false);
   /** The file is kept, but too large for this app to hand out: it is saved through the system instead. */
   const [saveOnly, setSaveOnly] = useState(false);
-  const settled = transfer === null || transfer.state === "done";
+  // Right after a start the engine has not put its transfers back yet: a file still moving is not shown as finished.
+  const settled = (transfer === null && !restoring) || transfer?.state === "done";
   // A transfer seen in progress ends with a little pop; files from history just show up.
   const [watched, setWatched] = useState(false);
   /** The picture open large (a tap on it). */
@@ -117,7 +118,7 @@ export function FileBubble({ file, peerName: named, highlight }: { file: ChatFil
 
   /** The picture is drawn, so it can open large. */
   const drawn = !!blobUrl && loaded?.url === blobUrl && loaded.ok;
-  const status = fileStatus(file, transfer, named, missing, t);
+  const status = restoring ? t("chat.file.restoring", { size: formatFileSize(file.size) }) : fileStatus(file, transfer, named, missing, t);
   const moving = transfer?.state === "transferring";
   const controls = moving && !!transfer.direction && !!platform?.fileAction;
   const offered = controls && transfer.direction === "in" && transfer.stage === "asking";
@@ -136,7 +137,7 @@ export function FileBubble({ file, peerName: named, highlight }: { file: ChatFil
   };
 
   return (
-    <div className="min-w-[220px] max-md:min-w-[min(220px,68vw)] max-w-[min(330px,72vw)]" data-testid="file-bubble" data-stage={transfer?.stage ?? transfer?.state ?? "done"}>
+    <div className="min-w-[220px] max-md:min-w-[min(220px,68vw)] max-w-[min(330px,72vw)]" data-testid="file-bubble" data-stage={transfer?.stage ?? transfer?.state ?? (restoring ? "restoring" : "done")}>
       {box && (
         <div data-testid="file-picture" data-box={size ? "sized" : "placeholder"}
           className={`rounded-[4px] overflow-hidden mb-1 ${blobUrl && loaded?.url === blobUrl ? "" : "bg-black/10"}`}

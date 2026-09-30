@@ -1,4 +1,4 @@
-import { utf8Encode, type LinkPreview } from "@ghostly/core";
+import { utf8Encode, type LinkPreview, type StatusCard } from "@ghostly/core";
 import type { MessageEdit, StoredMessage } from "./types";
 
 /*
@@ -43,15 +43,17 @@ export function takesPeerEdit(message: Pick<StoredMessage, "sender" | "file" | "
 }
 
 /**
- * The message after edit `seq`, made at `at`: the new text (and the preview that came with it, or none), the version it
- * replaces kept in the history. A text that did not change adds no version.
+ * The message after edit `seq`, made at `at`: the new text (and the preview and the status card that came with it, or
+ * none: each belongs to its version), the version it replaces kept in the history. A text that did not change adds no
+ * version. A status card's update adds none either (WISP 4xx · Status Cards): it replaces the card in place, and its
+ * text is only the card's fallback, so a bot's thousands of updates keep one card and no trail of versions.
  */
-export function withEdit(message: StoredMessage, edit: { seq: number; at: number; text: string; preview?: LinkPreview; pending?: boolean }): StoredMessage {
+export function withEdit(message: StoredMessage, edit: { seq: number; at: number; text: string; preview?: LinkPreview; card?: StatusCard; pending?: boolean }): StoredMessage {
   const before = message.edit?.history ?? [];
-  const history = edit.text === message.text ? before : trimHistory([...before, { at: message.edit?.at ?? message.timestamp, text: message.text }]);
+  const history = edit.text === message.text || edit.card ? before : trimHistory([...before, { at: message.edit?.at ?? message.timestamp, text: message.text }]);
   const next: MessageEdit = { seq: edit.seq, at: edit.at, history, ...(edit.pending && { pending: true as const }) };
-  const { preview: _old, ...rest } = message;
-  return { ...rest, text: edit.text, edit: next, ...(edit.preview && { preview: edit.preview }) };
+  const { preview: _old, card: _card, ...rest } = message;
+  return { ...rest, text: edit.text, edit: next, ...(edit.preview && { preview: edit.preview }), ...(edit.card && { card: edit.card }) };
 }
 
 function trimHistory(history: MessageEdit["history"]): MessageEdit["history"] {

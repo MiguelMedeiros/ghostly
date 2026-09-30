@@ -1,5 +1,5 @@
 import type { UsdtCreate } from "../engine/paymentAdapters/usdtWallet";
-import type { GroupMention, LnurlSuccessAction, PaymentReview, PaymentTarget, TypingKind } from "@ghostly/core";
+import type { GroupMention, LnurlSuccessAction, PaymentReview, PaymentTarget, StatusCard, TypingKind } from "@ghostly/core";
 import type { LnurlView } from "../engine/paymentAdapters/providers/lightningService";
 import type { ArkConfig } from "../engine/paymentAdapters/arkade";
 import type { ArkCreate } from "../engine/paymentAdapters/arkWallet";
@@ -139,14 +139,14 @@ export interface EngineApi {
   /** `preview`: a link preview made by this app (WISP 401 § Link previews); checked against the text, dropped if off. */
   /** `messageId`: the message kept in the chat (absent when nothing was kept). */
   /** `replyTo`: the id of a message of this chat the text answers (WISP 400 § Replies). */
-  sendMessage(params: { linkId: string; text: string; timestamp?: number; preview?: LinkPreview; replyTo?: string }): { error: string | null; refused?: boolean; messageId?: string };
+  sendMessage(params: { linkId: string; text: string; timestamp?: number; preview?: LinkPreview; replyTo?: string; card?: StatusCard }): { error: string | null; refused?: boolean; messageId?: string };
   /**
    * Edits a text of mine (WISP 400 § Edits): the new text here at once, and to the contact once both sides offer edit/1
    * on a live session. `messageId`: the row's id, or its wire id. `refused`: not something to edit. In a group
    * (`group:<id>`, WISP 9xx § Edits) it goes to the members; `mentions`: members named by the new text beyond those the
    * message already named.
    */
-  editMessage(params: { linkId: string; messageId: string; text: string; preview?: LinkPreview; mentions?: GroupMention[] }): { error: string | null; refused?: boolean; messageId?: string };
+  editMessage(params: { linkId: string; messageId: string; text: string; preview?: LinkPreview; mentions?: GroupMention[]; card?: StatusCard }): { error: string | null; refused?: boolean; messageId?: string };
   retryMessage(params: { linkId: string; messageId: string }): void;
   /**
    * Reacts to a message (WISP 400 § Reactions): `linkId` a chat's link or `group:<id>`, `messageId` the message's id
@@ -308,7 +308,7 @@ export interface EngineApi {
   joinGroupByLink(params: { link: string }): { groupId: string };
   /** `mentions`: places of the text that name members (WISP 9xx § Mentions); the session keeps only what holds. */
   /** `replyTo`: the id of a message of this group the text answers (WISP 9xx § Replies). */
-  sendGroupMessage(params: { groupId: string; text: string; mentions?: GroupMention[]; replyTo?: string }): { error: string | null; messageId?: string };
+  sendGroupMessage(params: { groupId: string; text: string; mentions?: GroupMention[]; replyTo?: string; card?: StatusCard }): { error: string | null; messageId?: string };
   /** How many edges took my message `messageId` (or its edit number `edit`): members' edges in a private group, hubs' in a community. */
   groupTaken(params: { groupId: string; messageId: string; edit?: number }): number;
   groupMessages(params: { groupId: string }): StoredMessage[];

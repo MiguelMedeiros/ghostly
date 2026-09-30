@@ -1,0 +1,1 @@
+Status cards: a bot's task or routine as `sc` beside a message's text, its fallback, kept current by edits (WISP 4xx · Status Cards); on the live session, a private group and a community, the text alone on the DHT floor and in a hold; a card message takes 5,000 edits, and a card belongs to its version.
