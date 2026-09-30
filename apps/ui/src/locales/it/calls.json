@@ -36,6 +36,7 @@
   },
   "stopSharing": "Interrompi condivisione",
   "timeline": {
+    "audioCancelled": "Chiamata vocale annullata",
     "audioConnected": "Chiamata vocale connessa",
     "audioDeclined": "Chiamata vocale rifiutata",
     "audioEnded": "Chiamata vocale terminata",
@@ -44,6 +45,7 @@
     "audioMissed": "Chiamata vocale persa",
     "audioStarted": "Chiamata vocale avviata",
     "audioUnanswered": "Chiamata vocale senza risposta",
+    "videoCancelled": "Videochiamata annullata",
     "videoConnected": "Videochiamata connessa",
     "videoDeclined": "Videochiamata rifiutata",
     "videoEnded": "Videochiamata terminata",

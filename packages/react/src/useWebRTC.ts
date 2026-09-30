@@ -729,6 +729,9 @@ export function useWebRTC({
       }
 
       const wasConnected = callConnectedEventFiredRef.current;
+      // A call of ours that never connected keeps a line too: cancelled while it rang, or ended while it connected.
+      const ringingOut = callStateRef.current === "offering";
+      const wasCalling = callStateRef.current !== "idle" && callStateRef.current !== "incoming";
       const duration = callStartedAt ? Date.now() - callStartedAt : undefined;
 
       if (sendSignal) {
@@ -744,6 +747,8 @@ export function useWebRTC({
 
       if (addEndMessage && wasConnected) {
         addCallEventMessage?.("call_ended", callHadVideoRef.current, duration);
+      } else if (addEndMessage && wasCalling) {
+        addCallEventMessage?.(ringingOut && sendSignal ? "call_cancelled" : "call_ended", callHadVideoRef.current);
       }
 
       cleanupConnection();
@@ -902,7 +907,12 @@ export function useWebRTC({
       lastProcessedSignalRef.current = signal.ts;
       // The caller gave up (or its ring ran out) before we answered: a missed call, as when our own ring runs out.
       if (callStateRef.current === "incoming") addCallEventMessage?.("call_missed", callHadVideoRef.current, undefined, pendingOfferRef.current?.ts);
-      else if (signal.r === "u" && callStateRef.current !== "idle" && !callConnectedEventFiredRef.current) {
+      else if (callStateRef.current === "offering" && signal.r !== "u" && myOfferTimestampRef.current && signal.ts > myOfferTimestampRef.current) {
+        // Our call still rang there: the contact declined it (a side that rings sends nothing else).
+        addCallEventMessage?.("call_rejected", callHadVideoRef.current);
+        hangUp(false, false);
+        return;
+      } else if (signal.r === "u" && callStateRef.current !== "idle" && !callConnectedEventFiredRef.current) {
         // The contact's side could not connect (it found no candidate, or the call did not connect in time): this
         // side's call could not either, and says so the same way.
         addCallEventMessage?.("call_failed", callHadVideoRef.current);

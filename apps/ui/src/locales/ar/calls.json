@@ -36,6 +36,7 @@
   },
   "stopSharing": "إيقاف المشاركة",
   "timeline": {
+    "audioCancelled": "أُلغيت المكالمة الصوتية",
     "audioConnected": "تم توصيل المكالمة الصوتية",
     "audioDeclined": "تم رفض المكالمة الصوتية",
     "audioEnded": "انتهت المكالمة الصوتية",
@@ -44,6 +45,7 @@
     "audioMissed": "مكالمة صوتية فائتة",
     "audioStarted": "بدأت مكالمة صوتية",
     "audioUnanswered": "مكالمة صوتية بلا رد",
+    "videoCancelled": "أُلغيت مكالمة الفيديو",
     "videoConnected": "تم توصيل مكالمة الفيديو",
     "videoDeclined": "تم رفض مكالمة الفيديو",
     "videoEnded": "انتهت مكالمة الفيديو",

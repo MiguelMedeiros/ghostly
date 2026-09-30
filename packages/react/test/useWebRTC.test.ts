@@ -23,6 +23,9 @@ afterEach(() => {
 
 const denied = () => new DOMException("Permission denied", "NotAllowedError");
 
+/** The call lines the chat was given, in order. */
+const lines = (call: ReturnType<typeof renderCall>) => call.addCallEventMessage.mock.calls.map(([type]) => type);
+
 /** Places an audio call and gets it to the offer, with the microphone granted. */
 async function offered(call: ReturnType<typeof renderCall>) {
   act(() => { void call.result.current.startCall(false); });
@@ -164,6 +167,45 @@ describe("placing a call", () => {
     expect(call.result.current.noAnswer).toBe(false);
   });
 
+  it("a call cancelled while it rings keeps a cancelled line, with no length", async () => {
+    const call = renderCall();
+    await offered(call);
+    act(() => { vi.advanceTimersByTime(3000); });
+
+    act(() => call.result.current.hangUp());
+
+    expect(call.publishedKinds()).toEqual(["o", "h"]);
+    expect(lines(call)).toEqual(["call_started", "call_cancelled"]);
+    expect(call.addCallEventMessage).toHaveBeenLastCalledWith("call_cancelled", false);
+  });
+
+  it("the contact declining our ringing call ends it here with a declined line", async () => {
+    const call = renderCall();
+    const { pc } = await offered(call);
+
+    call.receive(remote.hangUp(Date.now() + 1));
+
+    expect(call.result.current.callState).toBe("idle");
+    expect(pc.close).toHaveBeenCalledOnce();
+    expect(devices.liveTracks()).toEqual([]);
+    // Nothing more to say: their hang-up is the last word.
+    expect(call.publishedKinds()).toEqual(["o", null]);
+    expect(lines(call)).toEqual(["call_started", "call_rejected"]);
+  });
+
+  it("an answered call hung up while it still connects keeps an end line, with no length", async () => {
+    const call = renderCall();
+    await offered(call);
+    call.receive(remote.answer(Date.now() + 1));
+    await settle();
+    expect(call.result.current.callState).toBe("connecting");
+
+    call.receive(remote.hangUp(Date.now() + 2));
+
+    expect(call.result.current.callState).toBe("idle");
+    expect(lines(call)).toEqual(["call_started", "call_ended"]);
+  });
+
   it("an answered call does not ring out", async () => {
     const call = renderCall();
     const { pc } = await offered(call);
@@ -240,7 +282,7 @@ describe("placing a call", () => {
     act(() => { window.dispatchEvent(new Event("ghostly-departing")); });
     expect(call.result.current.callState).toBe("idle");
     expect(call.publishedKinds()).toEqual(["o", "h"]);
-    expect(call.addCallEventMessage).not.toHaveBeenCalledWith("call_ended", expect.anything(), expect.anything());
+    expect(lines(call)).toEqual(["call_started", "call_cancelled"]);
   });
 
   it("a call that never connected and fails ends with no line", async () => {

@@ -227,6 +227,7 @@ describe("MessageBubble: system lines", () => {
     ["call_rejected", "Audio call declined", true],
     ["call_failed", "Audio call couldn't connect", true],
     ["call_unanswered", "Audio call, no answer", true],
+    ["call_cancelled", "Audio call cancelled", false],
     ["call_ended", "Audio call ended", false],
     ["call_received", "Incoming audio call", false],
   ] as const)("marks a %s event as missed or not", (type, text, missed) => {

@@ -36,6 +36,7 @@
   },
   "stopSharing": "Stop sharing",
   "timeline": {
+    "audioCancelled": "Audio call cancelled",
     "audioConnected": "Audio call connected",
     "audioDeclined": "Audio call declined",
     "audioEnded": "Audio call ended",
@@ -44,6 +45,7 @@
     "audioMissed": "Missed audio call",
     "audioStarted": "Audio call started",
     "audioUnanswered": "Audio call, no answer",
+    "videoCancelled": "Video call cancelled",
     "videoConnected": "Video call connected",
     "videoDeclined": "Video call declined",
     "videoEnded": "Video call ended",

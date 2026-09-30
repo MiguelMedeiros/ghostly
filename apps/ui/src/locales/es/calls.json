@@ -36,6 +36,7 @@
   },
   "stopSharing": "Dejar de compartir",
   "timeline": {
+    "audioCancelled": "Llamada de voz cancelada",
     "audioConnected": "Llamada de voz conectada",
     "audioDeclined": "Llamada de voz rechazada",
     "audioEnded": "Llamada de voz finalizada",
@@ -44,6 +45,7 @@
     "audioMissed": "Llamada de voz perdida",
     "audioStarted": "Llamada de voz iniciada",
     "audioUnanswered": "Llamada de voz sin respuesta",
+    "videoCancelled": "Videollamada cancelada",
     "videoConnected": "Videollamada conectada",
     "videoDeclined": "Videollamada rechazada",
     "videoEnded": "Videollamada finalizada",

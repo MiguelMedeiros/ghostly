@@ -36,6 +36,7 @@
   },
   "stopSharing": "Parar de compartilhar",
   "timeline": {
+    "audioCancelled": "Chamada de áudio cancelada",
     "audioConnected": "Chamada de áudio conectada",
     "audioDeclined": "Chamada de áudio recusada",
     "audioEnded": "Chamada de áudio encerrada",
@@ -44,6 +45,7 @@
     "audioMissed": "Chamada de áudio perdida",
     "audioStarted": "Chamada de áudio iniciada",
     "audioUnanswered": "Chamada de áudio sem resposta",
+    "videoCancelled": "Chamada de vídeo cancelada",
     "videoConnected": "Chamada de vídeo conectada",
     "videoDeclined": "Chamada de vídeo recusada",
     "videoEnded": "Chamada de vídeo encerrada",

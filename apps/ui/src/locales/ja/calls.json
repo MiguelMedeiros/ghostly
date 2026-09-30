@@ -36,6 +36,7 @@
   },
   "stopSharing": "共有を停止",
   "timeline": {
+    "audioCancelled": "音声通話をキャンセルしました",
     "audioConnected": "音声通話がつながりました",
     "audioDeclined": "音声通話を拒否しました",
     "audioEnded": "音声通話が終了しました",
@@ -44,6 +45,7 @@
     "audioMissed": "不在着信（音声）",
     "audioStarted": "音声通話を開始しました",
     "audioUnanswered": "応答なし（音声）",
+    "videoCancelled": "ビデオ通話をキャンセルしました",
     "videoConnected": "ビデオ通話がつながりました",
     "videoDeclined": "ビデオ通話を拒否しました",
     "videoEnded": "ビデオ通話が終了しました",
