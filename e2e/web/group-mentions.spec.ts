@@ -122,7 +122,9 @@ test("three members: A mentions B, B's muted group still notifies, C's stays qui
 
   await join(bob, url);
   await join(carol, url);
-  await expect(alice.page.getByTestId("group-members")).toContainText("3 members", { timeout: 120_000 });
+  // Bob too: Carol's admission starts the epoch she was given the secret of. What Bob says before he has it goes out
+  // under the epoch before, which Carol never reads (a newcomer reads only what comes after it).
+  for (const p of [alice, bob]) await expect(p.page.getByTestId("group-members")).toContainText("3 members", { timeout: 120_000 });
   // A community member's name travels with what they say: each says hello, so the others know them by name.
   await say(bob, "hi from Bob");
   await say(carol, "hi from Carol");
