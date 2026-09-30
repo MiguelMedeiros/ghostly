@@ -74,7 +74,7 @@
     "takeBackTitle": "إن لم تستلمه جهة اتصالك أبدًا، يبقى الـ ecash لك",
     "through": "عبر {{source}} · رسوم حتى {{fee}} sats",
     "title": {
-      "requests": "يطلب",
+      "requests": "طلب منك",
       "sentYou": "أرسل إليك",
       "youRequested": "طلبتَ",
       "youSent": "أرسلتَ"
