@@ -55,6 +55,8 @@ export interface ChatMessage {
   edit?: import("@ghostly/browser/shared/types").MessageEdit;
   /** A forwarded message (WISP 400 § Forwards): how many times it has been forwarded. */
   forwarded?: number;
+  /** A bot's task or routine (WISP 4xx · Status Cards), shown instead of `text`, its fallback. */
+  card?: import("@ghostly/core").StatusCard;
   systemEvent?: {
     type: SystemEventType;
     pubKey?: string;

@@ -1,4 +1,4 @@
-import type { DiscoveryStatus, GroupMention, ImageMeta, LinkPreview, PairingProgress, PaymentMethodName, TypingKind, VideoMeta, VoiceMeta, WirePin, WireReaction } from "@ghostly/core";
+import type { DiscoveryStatus, GroupMention, ImageMeta, LinkPreview, PairingProgress, PaymentMethodName, StatusCard, TypingKind, VideoMeta, VoiceMeta, WirePin, WireReaction } from "@ghostly/core";
 import type { UsdtWalletView } from "../engine/paymentAdapters/usdtWallet";
 import type { ArkWalletView } from "../engine/paymentAdapters/arkWallet";
 import type { BarkWalletView } from "../engine/paymentAdapters/barkWallet";
@@ -728,6 +728,11 @@ export interface StoredMessage {
    * count: never who wrote it first, nor where it came from.
    */
   forwarded?: number;
+  /**
+   * A bot's status card (WISP 4xx · Status Cards): a task or a routine shown instead of `text`, which is its fallback.
+   * It belongs to the version it came with: an edit brings its own, or leaves the message a text.
+   */
+  card?: StatusCard;
 }
 
 /** A page of a chat's history, oldest first, and whether older messages remain (`messagePage`). */

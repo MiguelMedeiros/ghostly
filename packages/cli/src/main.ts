@@ -62,6 +62,8 @@ async function warnVersion(client: DaemonClient): Promise<void> {
  * waited for the next minute (60 s and more instead of 3 to 5).
  */
 export function chatOnly(method: string, params: Record<string, unknown>): boolean {
+  // A status card's `chat` may name a group as well (WISP 4xx · Status Cards): its sessions must start.
+  if (method.startsWith("task.") || method.startsWith("routine.")) return false;
   return method.startsWith("chat.") || (params.chat !== undefined && params.group === undefined && !method.startsWith("group."));
 }
 

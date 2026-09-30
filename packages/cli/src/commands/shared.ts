@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import type { OptionSpec, Parsed } from "../args";
 import { CliError } from "../errors";
@@ -67,3 +68,83 @@ export function cursor(value: unknown): string | number | undefined {
   const text = String(value);
   return /^\d{10,}$/.test(text) ? Number(text) : text;
 }
+
+/**
+ * A status card's fields given as JSON (WISP 4xx · Status Cards): inline (`{...}`), `-` for stdin, or a file's path. The
+ * flags given beside it win over it.
+ */
+export function cardJson(value: unknown): Record<string, unknown> {
+  if (value === undefined) return {};
+  const text = String(value).trim();
+  let raw: string;
+  try { raw = text.startsWith("{") ? text : readFileSync(text === "-" ? 0 : resolve(text), "utf8"); }
+  catch (error) { throw new CliError("usage", `--json takes a card as JSON, - for stdin, or a file: ${error instanceof Error ? error.message : String(error)}`); }
+  let parsed: unknown;
+  try { parsed = JSON.parse(raw); } catch { throw new CliError("usage", "--json is not valid JSON"); }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new CliError("usage", "--json is a JSON object of the card's fields");
+  return parsed as Record<string, unknown>;
+}
+
+/** Options every status card command takes. */
+export const cardOptions: Record<string, OptionSpec> = {
+  json: { type: "string", description: "The card's fields as JSON: inline, - for stdin, or a file (flags win over it)" },
+  link: { type: "list", description: "A link on the card: https://… or label=https://… (up to 4)" },
+  text: { type: "string", description: "The text older apps show instead (default: written from the card)" },
+};
+
+/** `--link label=https://…` or a bare link, as a card's links. */
+export function cardLinks(values: unknown): { url: string; label?: string }[] | undefined {
+  if (!Array.isArray(values) || !values.length) return undefined;
+  return (values as string[]).map((value) => {
+    const eq = value.indexOf("=");
+    return eq > 0 && !value.slice(0, eq).includes(":") ? { label: value.slice(0, eq), url: value.slice(eq + 1) } : { url: value };
+  });
+}
+
+const ITEM_STATES = ["pending", "running", "done", "failed", "skipped"];
+
+/** A task's fields from its flags; what was not given is left out, so an update changes only what it names. */
+export function taskFields(options: Parsed["options"]): Record<string, unknown> {
+  const fields: Record<string, unknown> = { ...cardJson(options.json) };
+  const set = (key: string, value: unknown) => { if (value !== undefined) fields[key] = value; };
+  set("id", options.id);
+  set("title", options.title);
+  set("status", options.status);
+  set("progress", options.progress);
+  set("step", options.step);
+  set("branch", options.branch);
+  if (options.steps !== undefined) {
+    const match = /^(\d+)\s*\/\s*(\d+)$/.exec(String(options.steps));
+    if (!match) throw new CliError("usage", `--steps takes done/total, like 2/5, not ${JSON.stringify(options.steps)}`);
+    fields.done = Number(match[1]); fields.total = Number(match[2]);
+  }
+  const pr: Record<string, unknown> = {};
+  for (const [flag, key] of [["pr-url", "url"], ["pr-number", "number"], ["additions", "additions"], ["deletions", "deletions"], ["files", "files"]] as const)
+    if (options[flag] !== undefined) pr[key] = options[flag];
+  if (Object.keys(pr).length) fields.pr = { ...(fields.pr && typeof fields.pr === "object" ? fields.pr as object : {}), ...pr };
+  if (Array.isArray(options.item) && options.item.length) fields.items = options.item.map((item) => {
+    const colon = item.indexOf(":");
+    const state = colon > 0 ? item.slice(0, colon) : "";
+    return ITEM_STATES.includes(state) ? { state, text: item.slice(colon + 1).trim() } : { state: "pending", text: item };
+  });
+  const links = cardLinks(options.link);
+  if (links) fields.links = links;
+  return fields;
+}
+
+/** Options a task command takes, beside `cardOptions`. */
+export const taskOptions: Record<string, OptionSpec> = {
+  title: { type: "string", description: "What the task is (120 characters)" },
+  status: { type: "string", description: "queued, running (default on send), blocked, done, failed or cancelled" },
+  progress: { type: "number", description: "Percent done, 0 to 100" },
+  steps: { type: "string", description: "Steps done of total, like 2/5 (progress is worked out from them)" },
+  step: { type: "string", description: "What it is doing now (200 characters)" },
+  item: { type: "list", description: "A step or log line, state:text (pending, running, done, failed, skipped); the list replaces the card's (up to 20)" },
+  branch: { type: "string", description: "The branch it works on" },
+  "pr-url": { type: "string", description: "The pull request's https link" },
+  "pr-number": { type: "number", description: "The pull request's number" },
+  additions: { type: "number", description: "Lines the pull request adds" },
+  deletions: { type: "number", description: "Lines the pull request removes" },
+  files: { type: "number", description: "Files the pull request changes" },
+  ...cardOptions,
+};
