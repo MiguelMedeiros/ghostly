@@ -18,6 +18,23 @@ export function useBackdropDismiss(onClose: () => void) {
   };
 }
 
+/** How long a tap's click may trail its pointerup (a phone sends it right after touchend). */
+const TRAILING_CLICK_MS = 500;
+
+/**
+ * A tap on a sheet's backdrop closes the sheet on pointerup, and the backdrop goes with it; the click a touch
+ * screen sends after that lands on whatever was under the backdrop (a chat's Back button, a row of the list). That
+ * click is the backdrop's: it is dropped. One that does not come in time is not waited for. A mouse sends its click
+ * where it was pressed, the backdrop, which is gone: nothing to drop, and the next click is the person's own.
+ */
+function dropTrailingClick() {
+  const drop = (e: MouseEvent) => { e.preventDefault(); e.stopPropagation(); };
+  window.addEventListener("click", drop, { capture: true, once: true });
+  setTimeout(() => window.removeEventListener("click", drop, { capture: true }), TRAILING_CLICK_MS);
+}
+
+const onBackdrop = (e: PointerEvent) => e.composedPath().some((el) => el instanceof Element && el.classList.contains("sheet-backdrop"));
+
 export function useOutsideDismiss(ref: RefObject<HTMLElement | null>, open: boolean, onClose: () => void, anchorRef?: RefObject<HTMLElement | null>) {
   const callback = useRef(onClose); callback.current = onClose;
   useEffect(() => {
@@ -33,7 +50,13 @@ export function useOutsideDismiss(ref: RefObject<HTMLElement | null>, open: bool
     const outside = (e: PointerEvent) => { const path = e.composedPath(); return !!ref.current && !path.includes(ref.current) && !(anchorRef?.current && path.includes(anchorRef.current)); };
     const blocked = () => !topLayer() || !!document.querySelector("dialog[open]");
     const down = (e: PointerEvent) => { beganOutside = !blocked() && outside(e); };
-    const up = (e: PointerEvent) => { if (beganOutside && !blocked() && outside(e)) callback.current(); beganOutside = false; };
+    const up = (e: PointerEvent) => {
+      if (beganOutside && !blocked() && outside(e)) {
+        if ((e.pointerType === "touch" || e.pointerType === "pen") && onBackdrop(e)) dropTrailingClick();
+        callback.current();
+      }
+      beganOutside = false;
+    };
     const key = (e: KeyboardEvent) => { if (e.key === "Escape" && !blocked() && !e.defaultPrevented) callback.current(); };
     document.addEventListener("pointerdown", down); document.addEventListener("pointerup", up); document.addEventListener("keydown", key);
     return () => {const index=layers.indexOf(ref); if(index>=0) layers.splice(index,1);document.removeEventListener("pointerdown", down);document.removeEventListener("pointerup", up);document.removeEventListener("keydown", key);};
