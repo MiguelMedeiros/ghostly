@@ -2,9 +2,9 @@ import { act } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { deferred, FakePeerConnection, installWebRTCFakes, remote, type FakeMediaDevices } from "./fakes";
 import { renderCall, settle } from "./harness";
-import { NO_ANSWER_SHOWN_MS, RESTART_GRACE_MS, RING_MS } from "../src/useWebRTC";
+import { MEDIA_PROBLEM_SHOWN_MS, NO_ANSWER_SHOWN_MS, RESTART_GRACE_MS, RING_MS, mediaProblem } from "../src/useWebRTC";
 
-// covers: calls.audio, calls.video, calls.cancel, calls.decline, calls.screen-share, calls.upgrade
+// covers: calls.audio, calls.video, calls.cancel, calls.decline, calls.media-blocked, calls.screen-share, calls.upgrade
 
 let devices: FakeMediaDevices;
 let uninstall: () => void;
@@ -22,6 +22,9 @@ afterEach(() => {
 });
 
 const denied = () => new DOMException("Permission denied", "NotAllowedError");
+
+/** The call lines the chat was given, in order. */
+const lines = (call: ReturnType<typeof renderCall>) => call.addCallEventMessage.mock.calls.map(([type]) => type);
 
 /** Places an audio call and gets it to the offer, with the microphone granted. */
 async function offered(call: ReturnType<typeof renderCall>) {
@@ -157,9 +160,50 @@ describe("placing a call", () => {
     expect(pc.close).toHaveBeenCalledOnce();
     expect(stream.getTracks().every((t) => t.stop.mock.calls.length > 0)).toBe(true);
     expect(call.addCallEventMessage).not.toHaveBeenCalledWith("call_ended", expect.anything(), expect.anything());
+    // The caller's chat keeps a line for it, as the side it rang keeps "Missed call".
+    expect(call.addCallEventMessage).toHaveBeenLastCalledWith("call_unanswered", false);
 
     act(() => { vi.advanceTimersByTime(NO_ANSWER_SHOWN_MS); });
     expect(call.result.current.noAnswer).toBe(false);
+  });
+
+  it("a call cancelled while it rings keeps a cancelled line, with no length", async () => {
+    const call = renderCall();
+    await offered(call);
+    act(() => { vi.advanceTimersByTime(3000); });
+
+    act(() => call.result.current.hangUp());
+
+    expect(call.publishedKinds()).toEqual(["o", "h"]);
+    expect(lines(call)).toEqual(["call_started", "call_cancelled"]);
+    expect(call.addCallEventMessage).toHaveBeenLastCalledWith("call_cancelled", false);
+  });
+
+  it("the contact declining our ringing call ends it here with a declined line", async () => {
+    const call = renderCall();
+    const { pc } = await offered(call);
+
+    call.receive(remote.hangUp(Date.now() + 1));
+
+    expect(call.result.current.callState).toBe("idle");
+    expect(pc.close).toHaveBeenCalledOnce();
+    expect(devices.liveTracks()).toEqual([]);
+    // Nothing more to say: their hang-up is the last word.
+    expect(call.publishedKinds()).toEqual(["o", null]);
+    expect(lines(call)).toEqual(["call_started", "call_rejected"]);
+  });
+
+  it("an answered call hung up while it still connects keeps an end line, with no length", async () => {
+    const call = renderCall();
+    await offered(call);
+    call.receive(remote.answer(Date.now() + 1));
+    await settle();
+    expect(call.result.current.callState).toBe("connecting");
+
+    call.receive(remote.hangUp(Date.now() + 2));
+
+    expect(call.result.current.callState).toBe("idle");
+    expect(lines(call)).toEqual(["call_started", "call_ended"]);
   });
 
   it("an answered call does not ring out", async () => {
@@ -238,7 +282,7 @@ describe("placing a call", () => {
     act(() => { window.dispatchEvent(new Event("ghostly-departing")); });
     expect(call.result.current.callState).toBe("idle");
     expect(call.publishedKinds()).toEqual(["o", "h"]);
-    expect(call.addCallEventMessage).not.toHaveBeenCalledWith("call_ended", expect.anything(), expect.anything());
+    expect(lines(call)).toEqual(["call_started", "call_cancelled"]);
   });
 
   it("a call that never connected and fails ends with no line", async () => {
@@ -771,9 +815,57 @@ describe("when the prompt is refused or there is no device", () => {
     expect(FakePeerConnection.instances).toEqual([]);
     expect(call.published).toEqual([]);
     expect(call.fastPoll()).toBe(false);
+    // The person is told why, for a while, and the chat's "call started" line is not left without an end.
+    expect(call.result.current.mediaProblem).toBe("denied");
+    expect(call.addCallEventMessage.mock.calls.map(([type]) => type)).toEqual(["call_started", "call_failed"]);
+    act(() => { vi.advanceTimersByTime(MEDIA_PROBLEM_SHOWN_MS); });
+    expect(call.result.current.mediaProblem).toBeNull();
   });
 
-  it("no camera when answering with video reports the error and sends no answer", async () => {
+  it("a microphone refused while answering tells the caller at once, instead of leaving it ringing", async () => {
+    const call = renderCall();
+    call.receive(remote.offer(Date.now()));
+    act(() => { void call.result.current.acceptCall(false); });
+
+    devices.userMedia[0].deny(denied());
+    await settle();
+
+    expect(call.result.current.callState).toBe("idle");
+    expect(call.result.current.mediaProblem).toBe("denied");
+    expect(FakePeerConnection.instances).toEqual([]);
+    // A hang-up that says the call could not connect: the caller's chat says the same.
+    expect(call.published.map((s) => s && JSON.parse(s))).toEqual([expect.objectContaining({ t: "h", r: "u" })]);
+    expect(call.addCallEventMessage.mock.calls.map(([type]) => type)).toEqual(["call_received", "call_failed"]);
+    expect(call.fastPoll()).toBe(false);
+  });
+
+  it("a camera refused when turned on mid-call says why, and the call goes on", async () => {
+    const call = renderCall();
+    const { pc } = await offered(call);
+    call.receive(remote.answer(Date.now() + 1));
+    await settle();
+    act(() => pc.setIceState("connected"));
+
+    act(() => { void call.result.current.toggleVideo(); });
+    devices.userMedia[1].deny(denied());
+    await settle();
+
+    expect(call.result.current.callState).toBe("connected");
+    expect(call.result.current.mediaProblem).toBe("denied");
+  });
+
+  it.each([
+    ["NotAllowedError", "denied"],
+    ["SecurityError", "denied"],
+    ["NotFoundError", "unavailable"],
+    ["NotReadableError", "unavailable"],
+    ["OverconstrainedError", "unavailable"],
+    ["OperationError", null],
+  ] as const)("reads %s as %s", (name, problem) => {
+    expect(mediaProblem(new DOMException("", name))).toBe(problem);
+  });
+
+  it("no camera when answering with video reports the error and hangs up instead of answering", async () => {
     const call = renderCall();
     call.receive(remote.offer(Date.now(), true));
     act(() => { void call.result.current.acceptCall(true); });
@@ -785,7 +877,9 @@ describe("when the prompt is refused or there is no device", () => {
     expect(call.onError).toHaveBeenCalledExactlyOnceWith(error);
     expect(call.result.current.callState).toBe("idle");
     expect(FakePeerConnection.instances).toEqual([]);
-    expect(call.published).toEqual([]);
+    // No answer, but a hang-up: the caller stops ringing now.
+    expect(call.publishedKinds()).toEqual(["h"]);
+    expect(call.result.current.mediaProblem).toBe("unavailable");
   });
 
   it("an answer the connection refuses reports the error and closes everything", async () => {

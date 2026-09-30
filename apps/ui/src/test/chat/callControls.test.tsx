@@ -3,6 +3,8 @@ import type { ComponentProps } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { CallButtons } from "../../components/CallButtons";
 import { CallOverlay } from "../../components/CallOverlay";
+import { IncomingCallNotification } from "../../components/IncomingCallNotification";
+import { FakeMediaStream, FakeTrack } from "../../../../../packages/react/test/fakes";
 import { renderApp } from "../render";
 
 // covers: calls.screen-share, calls.audio, calls.video, calls.mini-window
@@ -146,5 +148,70 @@ describe("sharing the screen from inside a call", () => {
     overlay({ callState: "offering", canShareScreen: false, isScreenSharing: false });
     expect(screen.queryByTestId("share-screen")).toBeNull();
     expect(screen.queryByTestId("call-sharing")).toBeNull();
+  });
+});
+
+describe("a call for a screen reader and the keys", () => {
+  it("rings as a dialog named for the caller: the focus in it, not on Accept, the keys kept in it, back where it was after", async () => {
+    const before = document.createElement("textarea");
+    document.body.append(before);
+    before.focus();
+    const onAcceptAudio = vi.fn();
+    const { user, unmount } = renderApp(<IncomingCallNotification peerName="Ana" hasVideo onAcceptAudio={onAcceptAudio} onAcceptVideo={vi.fn()} onReject={vi.fn()} />);
+    const ring = screen.getByRole("alertdialog", { name: "Ana" });
+    expect(ring).toHaveAccessibleDescription("Incoming video call...");
+    expect(ring).toHaveAttribute("aria-modal", "true");
+    expect(ring).toHaveFocus();
+    // An Enter meant for the message does not answer.
+    await user.keyboard("{Enter}");
+    expect(onAcceptAudio).not.toHaveBeenCalled();
+    const buttons = within(ring).getAllByRole("button");
+    expect(buttons.map((b) => b.getAttribute("aria-label"))).toEqual(["Decline", "Accept audio call", "Accept video call"]);
+    await user.tab();
+    await user.tab();
+    await user.tab();
+    expect(buttons[2]).toHaveFocus();
+    await user.tab();
+    expect(buttons[0]).toHaveFocus();
+    unmount();
+    expect(before).toHaveFocus();
+    before.remove();
+  });
+
+  it("says the call's state in words as it moves on, never the running clock", () => {
+    const { rerender } = overlay({ callState: "offering" });
+    // Calling... is the state line itself, read out as it changes; nothing says it twice.
+    expect(screen.getByTestId("call-status")).toHaveAttribute("role", "status");
+    expect(screen.getByTestId("call-status")).toHaveTextContent("Calling...");
+    expect(screen.getAllByText("Calling...")).toHaveLength(1);
+    expect(screen.getByTestId("call-state-spoken")).toHaveTextContent(/^$/);
+    const props = { localStream: null, remoteStream: null, isMuted: false, isVideoOff: true, canSendVideo: true, remoteHasVideo: false, callStartedAt: Date.now() - 65_000,
+      peerName: "Ana", onHangUp: vi.fn(), onToggleMute: vi.fn(), onToggleVideo: vi.fn() };
+    rerender(<CallOverlay callState="connected" {...props} />);
+    // Connected: said once; the line becomes the clock and stops being read out.
+    expect(screen.getByTestId("call-state-spoken")).toHaveAttribute("role", "status");
+    expect(screen.getByTestId("call-state-spoken")).toHaveTextContent(/^Connected$/);
+    expect(screen.getByTestId("call-status")).not.toHaveAttribute("role");
+  });
+});
+
+describe("your own camera in the corner", () => {
+  it("plays the camera's picture alone, never the microphone with it", () => {
+    // Linux's microphone is a silent stand-in track; in the self view's stream it kept WebKitGTK from loading the picture.
+    vi.stubGlobal("MediaStream", FakeMediaStream);
+    // happy-dom's srcObject takes its own MediaStream only: what the page gives it is kept here.
+    const given: unknown[] = [];
+    const srcObject = vi.spyOn(HTMLMediaElement.prototype, "srcObject", "set").mockImplementation((stream) => { given.push(stream); });
+    try {
+      const camera = new FakeTrack("video");
+      const microphone = new FakeTrack("audio");
+      overlay({ isVideoOff: false, localStream: new FakeMediaStream([camera, microphone]) as unknown as MediaStream });
+      expect(screen.getByTestId("call-self-view").querySelector("video")).not.toBeNull();
+      expect(given).toHaveLength(1);
+      expect((given[0] as FakeMediaStream).getTracks()).toEqual([camera]);
+    } finally {
+      srcObject.mockRestore();
+      vi.unstubAllGlobals();
+    }
   });
 });

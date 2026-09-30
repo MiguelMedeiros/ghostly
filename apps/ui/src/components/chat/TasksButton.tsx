@@ -291,7 +291,7 @@ function TasksPanel({ entries, nameOf, faceOf, anchorRef, onClose, onJump }: {
   if (phone) return createPortal(<>
     <div aria-hidden="true" data-testid="chat-tasks-backdrop" className="fixed inset-0 z-50 bg-black/40 animate-fade-in" />
     <div {...common} data-layout="sheet"
-      className="fixed inset-x-0 bottom-0 z-50 flex max-h-[calc(100dvh-2.5rem)] flex-col rounded-t-2xl border-t border-border bg-surface-alt shadow-2xl outline-none animate-fade-in">
+      className="fixed inset-x-0 bottom-0 z-50 flex max-h-[calc(100dvh_-_2.5rem_-_env(safe-area-inset-top))] flex-col rounded-t-2xl border-t border-border bg-surface-alt shadow-2xl outline-none animate-fade-in">
       {body}
     </div>
   </>, document.body);

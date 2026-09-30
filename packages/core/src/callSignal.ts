@@ -46,6 +46,10 @@ export type CallEventType =
   | "call_connected"
   | "call_ended"
   | "call_missed"
+  /** Our call rang out (`RING_MS`) with nobody answering: the caller's line, as "Missed call" is the side it rang. */
+  | "call_unanswered"
+  /** We hung up our call while it still rang, before any answer. */
+  | "call_cancelled"
   | "call_rejected"
   /** The call ended without ever connecting: no way to reach the contact was found, or none worked in time. */
   | "call_failed";

@@ -8,6 +8,8 @@
   "copied": "已复制！",
   "copy": "复制",
   "deck": {
+    "next": "下一张卡片",
+    "previous": "上一张卡片",
     "turnBack": "卡片"
   },
   "delete": "删除",

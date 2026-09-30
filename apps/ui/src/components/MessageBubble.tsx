@@ -36,6 +36,7 @@ import { myReaction, reactionChips } from "../lib/reactions";
 import { DeliveryStatus } from "./chat/DeliveryStatus";
 import { forwardedLabel } from "../lib/forward";
 import { PinIcon } from "./PinIcon";
+import { copyText } from "../lib/shareLink";
 import { SenderAvatar, type MessageAuthor } from "./chat/SenderAvatar";
 import { useMemberText } from "../contexts/MemberColorsContext";
 
@@ -130,7 +131,8 @@ function useLongPress(fire: () => void) {
     onPointerMove: (e: ReactPointerEvent<HTMLElement>) => { if (start.current && Math.hypot(e.clientX - start.current.x, e.clientY - start.current.y) > 10) clear(); },
     onPointerUp: clear,
     onPointerCancel: clear,
-    // The browser's own long-press menu would sit on top of the details.
+    // The browser's own long-press menu would sit on top of the details. Android asks here; iOS never does, so a
+    // message's text is not selectable on a touch screen (index.css) and the bar has Copy.
     onContextMenu: (e: React.MouseEvent) => { if (fired.current || start.current) e.preventDefault(); },
     // Only on the control the press went through: the quick bar it opened takes its taps.
     onClickCapture: (e: React.MouseEvent) => {
@@ -331,7 +333,7 @@ function TailSvg({ side }: { side: "left" | "right" }) {
 
 function CallEventIcon({ type, hasVideo }: { type: string; hasVideo?: boolean }) {
   const isVideo = hasVideo;
-  const isMissed = type === "call_missed" || type === "call_rejected" || type === "call_failed";
+  const isMissed = type === "call_missed" || type === "call_rejected" || type === "call_failed" || type === "call_unanswered";
   const isIncoming = type === "call_received" || type === "call_missed";
   
   return (
@@ -697,6 +699,8 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
   const [details, setDetails] = useState(false);
   const rowRef = useRef<HTMLDivElement>(null);
   const openDetails = () => setDetails(true);
+  // What Copy under a long press copies: a message's own words, not a file's name, a payment's or a card's.
+  const copyable = message.file || message.paymentId || pressed || showsCard(message.card) ? "" : message.text.trim();
   // The reactions' quick bar: from the React button or the ⋮ (`button`), or a long press (`press`, with Details under it).
   const [bar, setBar] = useState<"button" | "press" | null>(null);
   const bubbleRef = useRef<HTMLDivElement>(null);
@@ -803,7 +807,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
 
   if (isSystem && message.callEvent) {
     const { type, hasVideo, duration } = message.callEvent;
-    const isMissed = type === "call_missed" || type === "call_rejected" || type === "call_failed";
+    const isMissed = type === "call_missed" || type === "call_rejected" || type === "call_failed" || type === "call_unanswered";
     
     return (
       <div {...rowProps} data-message-row data-sender="system" className={`group flex items-center justify-center gap-1 mb-3.5 message-row-x ${enter}`}>
@@ -1059,7 +1063,8 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
       {!isMe && onReply && <ReplyAction onReply={onReply} />}
       {!isMe && onReact && <ReactAction anchorRef={reactRef} open={bar === "button"} onOpen={() => setBar(bar ? null : "button")} />}
       {onReact && <ReactionBar open={!!bar} onClose={() => setBar(null)} anchorRef={bubbleRef} current={myReaction(message.reactions)} onReact={onReact}
-        align={isMe ? "end" : "start"} onDetails={bar === "press" ? openDetails : undefined} onSelect={bar === "press" ? onSelect : undefined} />}
+        align={isMe ? "end" : "start"} onDetails={bar === "press" ? openDetails : undefined} onSelect={bar === "press" ? onSelect : undefined}
+        onCopy={bar === "press" && copyable ? () => void copyText(copyable).catch(() => {}) : undefined} />}
       {detailsPanel}
     </div>
   );

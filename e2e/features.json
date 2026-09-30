@@ -39,6 +39,7 @@
     "webln-regtest": {"title":"Browser wallets in front of regtest LND nodes","env":"GHOSTLY_WEBLN_REGTEST","stack":"e2e/support/webln-regtest","fake":"e2e/support/webln.ts"}
   },
   "features": [
+    {"id":"app.accessibility","wisp":null,"kind":"feature","clients":["web","extension","desktop"],"infra":[],"title":"The main screens pass axe-core's WCAG 2.2 A and AA rules with no serious or critical finding (contrast, names, roles), light and dark, left to right and right to left"},
     {"id":"app.attention.badge","wisp":null,"kind":"feature","clients":["web"],"infra":[],"title":"The installed app's icon counts unread messages (Badging API), leaving muted chats out except a mention that gets through"},
     {"id":"app.attention.cues","wisp":null,"kind":"feature","clients":["web","extension","desktop"],"infra":[],"title":"Sound cues in five categories (payments, identities, connection, chat, interface), one switch each; chat mute, one sound per event, none new in the background"},
     {"id":"app.attention.notifications","wisp":null,"kind":"feature","clients":["web","extension","desktop"],"infra":[],"title":"System notifications: explicit permission, private text, no replay after reload"},
@@ -55,6 +56,7 @@
     {"id":"app.external-links","wisp":null,"kind":"feature","clients":["web","extension","desktop"],"infra":[],"title":"Links to other sites open outside the app: a new tab on the web, the system browser on Desktop (any letters in the address)"},
     {"id":"app.home","wisp":null,"kind":"feature","clients":["web","extension","desktop"],"infra":[],"title":"Home screen: New / Join actions, brand returns home"},
     {"id":"app.i18n","wisp":null,"kind":"feature","clients":["web","extension","desktop"],"infra":[],"title":"The interface language can be changed (en, pt, es, fr, it, ja, zh, ar)"},
+    {"id":"app.keyboard","wisp":null,"kind":"feature","clients":["web","extension","desktop"],"infra":[],"title":"With the keys alone: the first Tab offers Skip to content, every chat and group in the list is a stop Enter or Space opens, and a ringing call is a dialog that takes the focus (not the answer) and keeps Tab inside it"},
     {"id":"app.menus","wisp":null,"kind":"feature","clients":["web","extension","desktop"],"infra":[],"title":"Menus (chat ⋮, group ⋮, New) are as wide as their longest row: one line per row in every language, inside the window, a sheet on phones"},
     {"id":"app.mobile-layout","wisp":null,"kind":"feature","clients":["web"],"infra":[],"title":"Phone layout: tab bar, chat as its own screen, compact header"},
     {"id":"app.navigation","wisp":null,"kind":"feature","clients":["web","extension","desktop"],"infra":[],"title":"Wallet, Identities, Services, Profile and Settings are routes beside the list; old routes redirect (#/share → #/services)"},
@@ -95,6 +97,7 @@
     {"id":"calls.devices-linux","wisp":"601","kind":"feature","clients":["desktop"],"infra":["camera","pulseaudio"],"title":"The Linux Desktop's native calls use the microphone, camera and speaker chosen in Settings, found by name among GStreamer's devices (the default, logged, when one is gone), and switch them live from the call's device menu"},
     {"id":"calls.linux-native","wisp":"601","kind":"feature","clients":["desktop"],"infra":["camera"],"title":"The Linux Desktop calls with no WebRTC in its WebView: WebRTC in Rust (webrtc-rs), media in GStreamer, with browser and Desktop peers alike; missing GStreamer plugins are named on the call buttons"},
     {"id":"calls.lock","wisp":"601","kind":"feature","clients":["web","extension","desktop"],"infra":["camera"],"title":"The lock screen covers a call and keeps it going"},
+    {"id":"calls.media-blocked","wisp":"601","kind":"feature","clients":["web","extension","desktop"],"infra":["camera"],"title":"A microphone or camera refused (or missing) for a call says why and how to allow it; answering with it refused hangs up so the caller stops ringing, and both chats say the call couldn't connect"},
     {"id":"calls.mini-window","wisp":"601","kind":"feature","clients":["web","extension","desktop"],"infra":["camera"],"title":"A call in a small window leaves the chat usable, follows you out of the chat"},
     {"id":"calls.paired","wisp":"601","kind":"feature","clients":["web","extension","desktop"],"infra":["camera"],"title":"A paired chat (every new chat) calls over its live session: start, answer, end (calls/1)"},
     {"id":"calls.paired.live-only","wisp":"601","kind":"feature","clients":["web","extension","desktop"],"infra":[],"title":"A paired chat's call buttons are off with a reason when it is not live (on DHT, connecting) or the contact cannot take calls"},

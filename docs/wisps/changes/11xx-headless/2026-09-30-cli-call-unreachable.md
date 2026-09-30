@@ -1,0 +1,1 @@
+Calls: a hang-up that says the contact's app could not connect (`r: "u"`, WISP 601) now ends the CLI's call as `failed`, even while it rings, instead of `rejected`. An app whose answer cannot use the microphone sends one, and it shows "Call couldn't connect". No wire identifier or field changed.

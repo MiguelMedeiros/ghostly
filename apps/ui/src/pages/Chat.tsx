@@ -159,6 +159,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
         call_connected: hasVideo ? "Video call connected" : "Audio call connected",
         call_ended: hasVideo ? "Video call ended" : "Audio call ended",
         call_missed: hasVideo ? "Missed video call" : "Missed audio call",
+        call_unanswered: hasVideo ? "Video call, no answer" : "Audio call, no answer",
+        call_cancelled: hasVideo ? "Video call cancelled" : "Audio call cancelled",
         call_rejected: hasVideo ? "Video call declined" : "Audio call declined",
         call_failed: hasVideo ? "Video call couldn't connect" : "Audio call couldn't connect",
       };
@@ -535,6 +537,13 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
           {t("calls.noAnswer")}
         </div>
       )}
+      {/* A call could not use the microphone or camera (refused, or none there): it says why, and how to fix it. */}
+      {webrtc.mediaProblem && (
+        <div role="alert" data-testid="call-media-problem" data-problem={webrtc.mediaProblem}
+          className="fixed top-3 left-1/2 -translate-x-1/2 z-[60] w-max max-w-[calc(100%-2rem)] rounded-lg border border-border bg-panel-header px-4 py-2 text-center text-sm text-text-primary shadow-xl">
+          {t(webrtc.mediaProblem === "denied" ? "calls.mediaDenied" : "calls.mediaUnavailable")}
+        </div>
+      )}
       {/* Chat Header. On a phone every button can be there at once (the connection, a call, a video call, a bot's Tasks,
           ⋮): the back button, the avatar, the buttons' sides and the gaps are a little narrower there, so the name keeps
           eight characters on a 375px phone (it had a letter or two). The buttons stay as tall, and touch each other. */}
@@ -588,7 +597,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
               <div className="flex items-center gap-1.5 max-md:gap-1 min-w-0">
               <p
                 onClick={startEditLabel}
-                className={`text-[15px] font-normal m-0 leading-tight truncate cursor-pointer hover:text-accent transition-colors ${isAnonymous ? "text-text-muted/60 italic" : "text-text-primary"}`}
+                className={`text-[15px] font-normal m-0 leading-tight truncate cursor-pointer hover:text-accent transition-colors ${isAnonymous ? "text-text-muted italic" : "text-text-primary"}`}
                 title={t("chat.setNameHint")}
               >
                 <bdi data-testid="chat-name">{shownName}</bdi>

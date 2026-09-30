@@ -218,6 +218,18 @@ describe("two call managers", { timeout: 60_000 }, () => {
     expect(existsSync(placed.audio.socket)).toBe(false);
   });
 
+  it("a hang-up saying the contact could not connect (an app whose microphone was refused) ends a ringing call as failed", async () => {
+    const { a, b } = pairOfManagers();
+    await a.calls.start("chat-ab", {});
+    await until(() => b.events.find((e) => e.type === "call.incoming"));
+    // What an app sends when its answer could not use the microphone (useWebRTC, WISP 601 "Couldn't connect").
+    a.calls.onSignal("chat-ab", JSON.stringify({ t: "h", ts: Date.now() + 1, r: "u" }));
+    expect(await until(() => a.events.find((e) => e.type === "call.ended"))).toMatchObject({ reason: "failed" });
+    expect(a.calls.list()).toEqual([]);
+    await a.calls.stopAll();
+    await b.calls.stopAll();
+  });
+
   it("an unanswered call is missed on one side, declined on the other, and busy chats refuse a second", async () => {
     const { a, b } = pairOfManagers();
     await a.calls.start("chat-ab", {});
