@@ -82,6 +82,8 @@ for (const screen of [{ name: "an iPad mini on its side", width: 1133, height: 7
     await page.getByTitle("New Chat").first().click();
     const input = page.getByPlaceholder("Message…");
     await input.focus();
+    // Under 16px, iOS zooms into the field on focus and the page stays zoomed: the panes' fields are 16px on a touch screen.
+    expect(await input.evaluate((field) => parseFloat(getComputedStyle(field).fontSize))).toBeGreaterThanOrEqual(16);
     await keyboard(page, screen.keyboard);
     await within(input, screen.height - screen.keyboard);
     await within(page.getByTestId("chat-options"), screen.height - screen.keyboard);
