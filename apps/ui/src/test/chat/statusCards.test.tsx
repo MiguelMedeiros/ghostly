@@ -52,7 +52,8 @@ describe("a task card in the chat", () => {
     expect(links.map(a => a.getAttribute("href"))).toEqual(["https://github.com/o/r/pull/612", "https://ci.example/run/1"]);
     expect(details).toHaveTextContent("github.com");
     expect(details).toHaveTextContent("ci.example");
-    expect(details).toHaveTextContent(/updated 2 min/);
+    // When it was updated is the card's foot, not repeated here.
+    expect(details).not.toHaveTextContent(/updated/);
     // Enter closes it again.
     toggle.focus();
     await user.keyboard("{Enter}");
@@ -98,12 +99,16 @@ describe("a task card in the chat", () => {
     expect(screen.getByTestId("status-card-status")).toHaveTextContent("متوقفة");
   });
 
-  it("says when it started and was updated as a label and a time in Japanese and Chinese, \"just now\" included", async () => {
+  it("says when it started (opened) and was updated (its foot) as a label and a time in Japanese and Chinese, \"just now\" included", async () => {
     const times = { startedAt: Date.now() - 3 * 60_000, updatedAt: Date.now() };
-    for (const [language, text] of [["ja", "開始：3 分前 · 更新：今"], ["zh", "开始：3分钟前 · 更新：现在"]] as const) {
-      const { user, unmount } = renderApp(<MessageBubble message={message(card(times))} peerPubKey="peer" />, { language });
+    const edit = { at: Date.now(), versions: [] } as unknown as ChatMessage["edit"];
+    for (const [language, started, updated] of [["ja", "開始：3 分前", "更新：今"], ["zh", "开始：3分钟前", "更新：现在"]] as const) {
+      const { user, unmount } = renderApp(<MessageBubble message={message(card(times), { edit })} peerPubKey="peer" />, { language });
       await user.click(screen.getByTestId("status-card-toggle"));
-      expect(screen.getByTestId("status-card-details")).toHaveTextContent(text);
+      expect(screen.getByTestId("status-card-started")).toHaveTextContent(started);
+      expect(screen.getByTestId("status-card-time")).toHaveTextContent(updated);
+      // Said once: the opened card does not repeat the foot's "updated".
+      expect(screen.getByTestId("status-card-details")).not.toHaveTextContent(updated);
       unmount();
     }
   });

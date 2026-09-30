@@ -91,13 +91,8 @@ function TaskView({ card, meta, end }: { card: TaskCard; meta?: ReactNode; end?:
             </ol>
           )}
           {card.branch && <p className="m-0"><span className="font-semibold">{t("cards.task.branch")}</span> <bdi className="font-mono">{card.branch}</bdi></p>}
-          {(card.startedAt || card.updatedAt) && (
-            <p className="m-0 text-text-primary/65">
-              {card.startedAt && t("cards.task.started", { ago: ago(card.startedAt / 1000) })}
-              {card.startedAt && card.updatedAt && " · "}
-              {card.updatedAt && t("cards.task.updated", { ago: ago(card.updatedAt / 1000) })}
-            </p>
-          )}
+          {/* When it started; when it was last updated is the card's foot. */}
+          {card.startedAt && <p data-testid="status-card-started" className="m-0 text-text-primary/65">{t("cards.task.started", { ago: ago(card.startedAt / 1000) })}</p>}
           {links.length > 0 && (
             <ul className="m-0 list-none space-y-1 p-0">
               {links.map((link, i) => (
