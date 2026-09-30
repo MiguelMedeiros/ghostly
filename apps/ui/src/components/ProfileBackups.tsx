@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { S3Store, type S3Config } from "@ghostly/browser/backup/s3";
 import { backupName, newSpace, type StoredBackup } from "@ghostly/browser/backup/storage";
 import { useSettings } from "../contexts/SettingsContext";
+import { useI18n } from "../contexts/I18nContext";
 import { createProfileBackup, restoreProfileBackup } from "../lib/profileBackup";
 import { switchProfile } from "../lib/profiles";
 import { Block, Button, Notice, Row, Section, Segmented, input } from "./wallet/ui";
@@ -20,6 +21,7 @@ type Open = "none" | "backup" | "restore" | "s3";
  */
 export function ProfileBackups({ canSwitch, openBackup = false }: { canSwitch: boolean; openBackup?: boolean }) {
   const { settings, updateBackupStorage } = useSettings();
+  const { t, language } = useI18n();
   const { busy, error, setError, run } = useRun();
   const wallet = useServicesPlatform()?.wallet;
   // `openBackup`: the wallet's backup reminder led here. Back up is open, and its passphrase takes the focus.
@@ -47,12 +49,12 @@ export function ProfileBackups({ canSwitch, openBackup = false }: { canSwitch: b
   const backup = (to: "file" | "s3") => run(async () => {
     const bytes = new TextEncoder().encode(await createProfileBackup(passphrase));
     const name = backupName(space());
-    if (to === "s3" && s3) { await s3.put(name, bytes); setDone(`Saved to S3 · ${size(bytes.length)}`); }
+    if (to === "s3" && s3) { await s3.put(name, bytes); setDone(t("profile.backups.savedToS3", { size: size(bytes.length) })); }
     else {
       const url = URL.createObjectURL(new Blob([bytes], { type: "application/vnd.ghostly.backup+json" }));
       const link = document.createElement("a"); link.href = url; link.download = name.split("/").pop()!; link.click();
       setTimeout(() => URL.revokeObjectURL(url), 2000);
-      setDone(`Downloaded · ${size(bytes.length)}`);
+      setDone(t("profile.backups.downloaded", { size: size(bytes.length) }));
     }
     setPassphrase(""); setConfirm("");
     // A copy of everything now: a wallet's backup reminder that asked for it is over.
@@ -60,66 +62,66 @@ export function ProfileBackups({ canSwitch, openBackup = false }: { canSwitch: b
   });
   const restore = () => run(async () => {
     const text = from === "file" ? file : new TextDecoder().decode(await s3!.get(picked));
-    if (!text) throw new Error("Choose a backup first");
+    if (!text) throw new Error(t("profile.backups.chooseFirst"));
     const entry = await restoreProfileBackup(text, restorePass);
     setRestorePass("");
-    if (canSwitch) switchProfile(entry.id, { route: "/profile" }); else setDone(`Restored as “${entry.name}”.`);
+    if (canSwitch) switchProfile(entry.id, { route: "/profile" }); else setDone(t("profile.backups.restored", { name: entry.name }));
   });
 
   return (
-    <Section title="Backups" testId="profile-backups">
-      <Row label="Back up" hint="The whole profile, sealed with a passphrase"><Button data-testid="backup-open" onClick={() => toggle("backup")}>{open === "backup" ? "Close" : "Back up…"}</Button></Row>
+    <Section title={t("profile.backups.title")} testId="profile-backups">
+      <Row label={t("profile.backups.backUp")} hint={t("profile.backups.backUpHint")}><Button data-testid="backup-open" onClick={() => toggle("backup")}>{open === "backup" ? t("common.close") : t("profile.backups.backUpOpen")}</Button></Row>
       {open === "backup" && (
         <Block>
           <FieldGrid>
-            <input ref={first} data-testid="backup-passphrase" type="password" autoComplete="new-password" className={input} placeholder="Passphrase (12+)" value={passphrase} onChange={(e) => setPassphrase(e.target.value)} />
-            <input data-testid="backup-confirm" type="password" autoComplete="new-password" className={input} placeholder="Repeat" value={confirm} onChange={(e) => setConfirm(e.target.value)} />
+            <input ref={first} data-testid="backup-passphrase" type="password" autoComplete="new-password" className={input} placeholder={t("profile.backups.passphraseNew")} value={passphrase} onChange={(e) => setPassphrase(e.target.value)} />
+            <input data-testid="backup-confirm" type="password" autoComplete="new-password" className={input} placeholder={t("profile.backups.repeat")} value={confirm} onChange={(e) => setConfirm(e.target.value)} />
           </FieldGrid>
           <ButtonGroup>
-            <Button variant="primary" data-testid="backup-download" disabled={busy || !ready} onClick={() => void backup("file")}>{busy ? "Working…" : "Download"}</Button>
-            {s3 && <Button data-testid="backup-s3" disabled={busy || !ready} onClick={() => void backup("s3")}>Save to S3</Button>}
+            <Button variant="primary" data-testid="backup-download" disabled={busy || !ready} onClick={() => void backup("file")}>{busy ? t("profile.backups.working") : t("profile.backups.download")}</Button>
+            {s3 && <Button data-testid="backup-s3" disabled={busy || !ready} onClick={() => void backup("s3")}>{t("profile.backups.saveToS3")}</Button>}
           </ButtonGroup>
-          <Notice>Whoever has the file and the passphrase can spend its wallets.</Notice>
+          <Notice>{t("profile.backups.spendWarning")}</Notice>
         </Block>
       )}
 
-      <Row label="Restore" hint="Becomes a new profile"><Button data-testid="restore-open" onClick={() => toggle("restore")}>{open === "restore" ? "Close" : "Restore…"}</Button></Row>
+      <Row label={t("profile.backups.restore")} hint={t("profile.backups.restoreHint")}><Button data-testid="restore-open" onClick={() => toggle("restore")}>{open === "restore" ? t("common.close") : t("profile.backups.restoreOpen")}</Button></Row>
       {open === "restore" && (
         <Block>
-          {s3 && <Segmented label="Restore from" value={from} onChange={(next) => { setFrom(next); setError(""); }} options={[{ value: "file", label: "File" }, { value: "s3", label: "S3" }]} />}
+          {s3 && <Segmented label={t("profile.backups.restoreFrom")} value={from} onChange={(next) => { setFrom(next); setError(""); }} options={[{ value: "file", label: t("profile.backups.fromFile") }, { value: "s3", label: "S3" }]} />}
           {from === "file" || !s3 ? (
             <input data-testid="restore-file" type="file" accept=".ghostly-backup,application/json" className={input} onChange={(e) => { const f = e.target.files?.[0]; if (f) void f.text().then(setFile); }} />
           ) : (
             <InputGroup>
               {listing?.length ? (
-                <Select data-testid="restore-pick" aria-label="Backup to restore" value={picked} onChange={setPicked}
-                  options={listing.map((b) => ({ value: b.name, label: new Date(b.created || b.modified || 0).toLocaleString(), description: b.size ? size(b.size) : undefined }))} />
-              ) : listing ? <Notice>None yet.</Notice> : null}
-              <Button data-testid="restore-list" disabled={busy} onClick={() => void run(async () => { const all = (await s3.list(space())).filter((b) => b.name.endsWith(".ghostly-backup")).reverse(); setListing(all); setPicked(all[0]?.name ?? ""); })}>{listing ? "Refresh" : "List"}</Button>
+                <Select data-testid="restore-pick" aria-label={t("profile.backups.toRestore")} value={picked} onChange={setPicked}
+                  options={listing.map((b) => ({ value: b.name, label: new Date(b.created || b.modified || 0).toLocaleString(language), description: b.size ? size(b.size) : undefined }))} />
+              ) : listing ? <Notice>{t("profile.backups.noneYet")}</Notice> : null}
+              <Button data-testid="restore-list" disabled={busy} onClick={() => void run(async () => { const all = (await s3.list(space())).filter((b) => b.name.endsWith(".ghostly-backup")).reverse(); setListing(all); setPicked(all[0]?.name ?? ""); })}>{listing ? t("profile.backups.refresh") : t("profile.backups.list")}</Button>
             </InputGroup>
           )}
           <InputGroup>
-            <input data-testid="restore-passphrase" type="password" autoComplete="current-password" className={input} placeholder="Passphrase" value={restorePass} onChange={(e) => setRestorePass(e.target.value)} />
-            <Button variant="primary" data-testid="restore-go" disabled={busy || !restorePass || (from === "file" || !s3 ? !file : !picked)} onClick={() => void restore()}>{busy ? "Restoring…" : "Restore"}</Button>
+            <input data-testid="restore-passphrase" type="password" autoComplete="current-password" className={input} placeholder={t("profile.backups.passphrase")} value={restorePass} onChange={(e) => setRestorePass(e.target.value)} />
+            <Button variant="primary" data-testid="restore-go" disabled={busy || !restorePass || (from === "file" || !s3 ? !file : !picked)} onClick={() => void restore()}>{busy ? t("profile.backups.restoring") : t("profile.backups.restore")}</Button>
           </InputGroup>
-          <Notice>Original still here? Keep using just one: they share wallets.</Notice>
+          <Notice>{t("profile.backups.keepOne")}</Notice>
         </Block>
       )}
 
-      <Row label="S3 storage" hint={s3 ? <Truncate>{s3.description.replace(/^S3 · /, "")}</Truncate> : "Off"}><Button data-testid="s3-setup" onClick={() => toggle("s3")}>{open === "s3" ? "Close" : s3 ? "Edit" : "Set up"}</Button></Row>
+      <Row label={t("profile.backups.s3.title")} hint={s3 ? <Truncate>{s3.description.replace(/^S3 · /, "")}</Truncate> : t("profile.backups.off")}><Button data-testid="s3-setup" onClick={() => toggle("s3")}>{open === "s3" ? t("common.close") : s3 ? t("profile.backups.s3.edit") : t("profile.backups.setUp")}</Button></Row>
       {open === "s3" && (
         <Block>
           <FieldGrid>
-            {([["endpoint", "Endpoint (https://…)"], ["bucket", "Bucket"], ["accessKeyId", "Access key"], ["secretAccessKey", "Secret key"], ["region", "Region"], ["prefix", "Folder"]] as const).map(([key, label]) => (
+            {([["endpoint", t("profile.backups.s3.endpoint")], ["bucket", t("profile.backups.s3.bucket")], ["accessKeyId", t("profile.backups.s3.accessKey")], ["secretAccessKey", t("profile.backups.s3.secretKey")], ["region", t("profile.backups.s3.region")], ["prefix", t("profile.backups.s3.folder")]] as const).map(([key, label]) => (
               <input key={key} data-testid={`s3-${key}`} aria-label={label} placeholder={label} spellCheck={false} autoComplete="off" type={key === "secretAccessKey" ? "password" : "text"} className={input}
                 value={draft[key]} onChange={(e) => setDraft({ ...draft, [key]: e.target.value })} />
             ))}
           </FieldGrid>
           <ButtonGroup>
-            <Button variant="primary" data-testid="s3-save" disabled={busy} onClick={() => void run(async () => { const store = new S3Store(draft); await store.test(space()); updateBackupStorage({ backupS3: draft }); setOpen("none"); setDone(`Connected · ${store.description.replace(/^S3 · /, "")}`); })}>{busy ? "Testing…" : "Test and save"}</Button>
-            {s3 && <Button variant="danger" onClick={() => { updateBackupStorage({ backupS3: null }); setOpen("none"); }}>Remove</Button>}
+            <Button variant="primary" data-testid="s3-save" disabled={busy} onClick={() => void run(async () => { const store = new S3Store(draft); await store.test(space()); updateBackupStorage({ backupS3: draft }); setOpen("none"); setDone(t("profile.backups.connected", { store: store.description.replace(/^S3 · /, "") })); })}>{busy ? t("profile.backups.s3.testing") : t("profile.backups.s3.testAndSave")}</Button>
+            {s3 && <Button variant="danger" onClick={() => { updateBackupStorage({ backupS3: null }); setOpen("none"); }}>{t("profile.backups.s3.remove")}</Button>}
           </ButtonGroup>
-          <Notice>Keys stay on this device. The bucket must allow this app in its CORS rules.</Notice>
+          <Notice>{t("profile.backups.s3.note")}</Notice>
         </Block>
       )}
       {(done || error) && <Block>{done && <Notice tone="success" testId="backup-done">{done}</Notice>}{error && <Notice tone="error" testId="backup-error">{error}</Notice>}</Block>}

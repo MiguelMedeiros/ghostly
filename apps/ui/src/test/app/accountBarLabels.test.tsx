@@ -44,7 +44,8 @@ afterEach(() => {
   act(() => renameProfile(currentProfile().id, "Personal"));
 });
 
-const bar = () => screen.getByRole("navigation", { name: "Account" });
+// Named in the app's language: "Account", "Conta" in Portuguese.
+const bar = () => screen.getByRole("navigation", { name: /^(Account|Conta)$/ });
 const labels = () => [...bar().querySelectorAll(".account-label")].map((label) => label.textContent);
 
 /** The labels under the five places: shown whenever the places' names fit, all hidden when one would be cut. */

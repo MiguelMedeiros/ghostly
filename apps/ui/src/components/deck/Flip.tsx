@@ -1,4 +1,5 @@
 import {useLayoutEffect,useRef,useState,type CSSProperties,type ReactNode} from 'react';
+import {useOptionalI18n} from '../../contexts/I18nContext';
 import './flip.css';
 
 /**
@@ -35,8 +36,9 @@ export function CardFlip({flipped,front,back,className,tone=''}:{flipped:boolean
  * back button is looked for (Escape does the same, PaymentComposer.tsx). `label` says it in full.
  */
 export function FlipTurnButton({testId,label,onClick}:{testId:string;label:string;onClick:()=>void}) {
+ const cards=useOptionalI18n()?.t('common.deck.turnBack')??'Cards';
  return <button type="button" className="deck-flip-turn" data-testid={testId} aria-label={label} title={label} onClick={onClick}>
   <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M10 3 5 8l5 5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg>
-  <span>Cards</span>
+  <span>{cards}</span>
  </button>;
 }

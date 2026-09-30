@@ -1,6 +1,8 @@
 import {
   addMessages,
   saveSession,
+  setEngineMessages,
+  STORED_MESSAGES,
   ensureSession,
   findSession,
   forgetInviteCode,
@@ -85,6 +87,24 @@ export function toChatMessage(message: StoredMessage, peerPubKeyZ32: string, myP
   };
 }
 
+/**
+ * Whether the mirror writes this message of the engine's into the chat's session. Reviewed payments originate in the
+ * engine (including recovery), without the chat composer's optimistic message or text-delivery status; so do forwarded
+ * files (WISP 400 § Forwards). Other messages of mine the chat itself put in the session.
+ */
+const mirrorable = (message: StoredMessage) => message.sender === "peer" || !!message.delivery || !!message.paymentId || !!message.forwarded;
+
+/**
+ * The ids of a history's messages the mirror would bring back: those may leave a session's stored copy
+ * (`STORED_MESSAGES`), since the mirror puts them back from the engine's copy. By list: one list, one pass.
+ */
+const mirrorableIds = new WeakMap<StoredMessage[], ReadonlySet<string>>();
+function engineIds(messages: StoredMessage[]): ReadonlySet<string> {
+  let ids = mirrorableIds.get(messages);
+  if (!ids) mirrorableIds.set(messages, ids = new Set(messages.filter(mirrorable).map((m) => m.id)));
+  return ids;
+}
+
 /** What each link's messages were last mirrored from: the list, and its session as stored after. */
 const mirrored = new Map<string, { messages: StoredMessage[]; sessionId: string; stored: string | null }>();
 
@@ -101,53 +121,56 @@ function mirrorMessages(linkId: string, messages: StoredMessage[]): void {
 
   // Every state change mirrors every chat: a long one must cost a pass over its messages, not a search per message,
   // and the session is written once at most, whatever changed.
-  const byId = new Map(session.messages.map((m) => [m.id, m]));
+  setEngineMessages(session.id, engineIds(messages));
+  // Read without its older messages (this page just loaded): the ones the engine keeps come back below, all of them.
+  const partial = !!session.older;
+  const at = new Map(session.messages.map((m, i) => [m.id, i]));
   const added: ChatMessage[] = [];
   let dirty = false;
   for (const message of messages) {
-    const previous = byId.get(message.id);
+    const i = at.get(message.id);
+    const previous = i === undefined ? undefined : session.messages[i];
+    // A row that changes is a new object, never the old one changed: the old one may be what a bubble on screen was drawn
+    // from (a session read here hands out the same older rows again, storage.ts `withWhole`), and bubbles compare rows by
+    // content, so one changed in place would compare equal to itself and not be drawn again.
+    let next: ChatMessage | undefined;
+    const change = () => (next ??= { ...previous! });
     // Reactions change rows of any kind, mine included (WISP 400 § Reactions).
     const reacted = !!previous && (!!previous.reactions || !!message.reactions) && JSON.stringify(previous.reactions ?? null) !== JSON.stringify(message.reactions ?? null);
-    if (reacted) previous.reactions = message.reactions;
-    // Reviewed payments originate in the engine (including recovery), without
-    // the chat composer's optimistic message or text-delivery status; so do forwarded files (WISP 400 § Forwards).
-    if (message.sender !== "peer" && !message.delivery && !message.paymentId && !message.forwarded) {
-      if (reacted) dirty = true;
-      continue;
-    }
+    if (reacted) change().reactions = message.reactions;
     const mapped = () => toChatMessage(message, link.peerPubKeyZ32, link.myPubKeyZ32, !!link.profile);
-    if (previous) {
-      let updated = reacted;
+    if (previous && mirrorable(message)) {
       if (message.delivery && (previous.delivery !== message.delivery || previous.deliveryError !== message.deliveryError)) {
-        previous.delivery = message.delivery;
-        previous.deliveryError = message.deliveryError;
-        updated = true;
+        change().delivery = message.delivery;
+        change().deliveryError = message.deliveryError;
       }
       // An edit (WISP 400 § Edits): the new text in place, never a new message, so nothing counts as unread.
       if (message.edit && (previous.edit?.seq !== message.edit.seq || !!previous.edit?.pending !== !!message.edit.pending)) {
-        previous.text = message.text;
-        previous.edit = message.edit;
-        if (message.preview) previous.preview = message.preview; else delete previous.preview;
+        const row = change();
+        row.text = message.text;
+        row.edit = message.edit;
+        if (message.preview) row.preview = message.preview; else delete row.preview;
         // A status card belongs to its version (WISP 4xx · Status Cards): the edit's, or none.
-        if (message.card) previous.card = message.card; else delete previous.card;
-        updated = true;
+        if (message.card) row.card = message.card; else delete row.card;
       }
       // Only a join announcement has one; the others are not mapped again.
       const systemEvent = JOIN_PATTERN.test(message.text) ? mapped().systemEvent : undefined;
-      if (systemEvent && previous.systemEvent?.pubKey !== systemEvent.pubKey) {
-        previous.systemEvent = systemEvent;
-        updated = true;
-      }
-      if (updated) dirty = true;
-      continue;
+      if (systemEvent && previous.systemEvent?.pubKey !== systemEvent.pubKey) change().systemEvent = systemEvent;
     }
+    if (next) {
+      session.messages[i!] = next;
+      dirty = true;
+    }
+    if (previous || !mirrorable(message)) continue;
     added.push(mapped());
   }
   let changed = dirty;
-  if (dirty) saveSession(session);
+  // A long history stored whole (before its stored copy kept only its last messages) is stored anew: saving writes only
+  // what changed, so this writes once.
+  if (dirty || (!partial && !added.length && session.messages.length > STORED_MESSAGES)) saveSession(session);
   if (added.length) {
     const before = session.messages.length;
-    const updated = addMessages(session.id, added);
+    const updated = addMessages(session.id, added, partial);
     if (updated) session.messages = updated.messages;
     if (session.messages.length !== before) changed = true;
   }

@@ -248,11 +248,22 @@ describe("mirroring what the peer stores into the chat", () => {
 
     changes = 0;
     writes.mockClear();
-    const reacted = history.map((m) => (m.id === "peer_300" ? { ...m, reactions: { me: { e: "👍", n: 1, at: 5 } } } : m));
+    // An older message than the session stores (storage.ts `STORED_MESSAGES`): the engine keeps it, and so its change.
+    // Nothing to write; the chat has it.
+    const older = expected[100]!, newest = expected[599]!;
+    const reactedTo = (id: string, list: StoredMessage[]) => list.map((m) => (m.id === id ? { ...m, reactions: { me: { e: "👍", n: 1, at: 5 } } } : m));
+    let reacted = reactedTo(older, history);
+    engine.messageListeners[0]("link-1", reacted);
+    expect(sessionWrites()).toBe(0);
+    expect(changes).toBe(1);
+    expect(storage.loadSession("s1")!.messages.find((m) => m.id === older)?.reactions).toEqual({ me: { e: "👍", n: 1, at: 5 } });
+    // One of its last messages: one write.
+    changes = 0;
+    reacted = reactedTo(newest, reacted);
     engine.messageListeners[0]("link-1", reacted);
     expect(sessionWrites()).toBe(1);
     expect(changes).toBe(1);
-    expect(storage.loadSession("s1")!.messages.find((m) => m.id === "peer_300")?.reactions).toEqual({ me: { e: "👍", n: 1, at: 5 } });
+    expect(storage.loadSession("s1")!.messages.find((m) => m.id === newest)?.reactions).toEqual({ me: { e: "👍", n: 1, at: 5 } });
 
     // A message the user deleted and the peer still has: nothing to write, nothing to tell.
     changes = 0;

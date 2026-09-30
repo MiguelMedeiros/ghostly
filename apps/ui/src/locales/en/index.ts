@@ -20,10 +20,12 @@ import mute from "./mute.json";
 import network from "./network.json";
 import pairing from "./pairing.json";
 import payments from "./payments.json";
+import profile from "./profile.json";
 import profilePeek from "./profilePeek.json";
 import profileSwitcher from "./profileSwitcher.json";
 import pwa from "./pwa.json";
 import secretGuard from "./secretGuard.json";
+import services from "./services.json";
 import settings from "./settings.json";
 import share from "./share.json";
 import sidebar from "./sidebar.json";
@@ -51,10 +53,12 @@ export default {
   network,
   pairing,
   payments,
+  profile,
   profilePeek,
   profileSwitcher,
   pwa,
   secretGuard,
+  services,
   settings,
   share,
   sidebar,

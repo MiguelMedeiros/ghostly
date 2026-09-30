@@ -1,0 +1,32 @@
+{
+  "fromContacts": "De vos contacts",
+  "fromContactsEmpty": "Les apps que vos contacts partagent apparaissent ici.",
+  "goOffline": "Passer hors ligne : rien de ce que vous partagez ne reste accessible",
+  "goOnline": "Passer en ligne",
+  "letReach": "Autoriser {{contact}} à accéder à {{app}}",
+  "namePlaceholder": "Nom (Atlas)",
+  "needsApp": "Pour partager une app web locale, il faut l’extension Ghostly pour navigateur ou l’app de bureau.",
+  "noContacts": "Aucun contact pour l’instant.",
+  "nobodyYet": "Personne ne peut l’ouvrir tant que vous n’avez pas choisi qui.",
+  "nothingShared": "Rien de partagé pour l’instant.",
+  "offline": "Hors ligne",
+  "online": "En ligne",
+  "open": "Ouvrir {{app}}",
+  "openNeedsApp": "Pour ouvrir l’app web d’un contact, il faut l’extension Ghostly pour navigateur ou l’app de bureau.",
+  "people": "Personnes",
+  "peopleDone": "Terminé",
+  "remove": "Retirer",
+  "removeNamed": "Retirer {{app}}",
+  "requestCount": "· {{count}} requêtes",
+  "share": "Partager",
+  "shareLocal": "Partager un service local",
+  "shareNamed": "Partager {{app}}",
+  "status": {
+    "notShared": "Partagé avec personne pour l’instant",
+    "offline": "Inaccessible hors ligne",
+    "sharedCount": "Partagé avec {{count}} contacts",
+    "sharedOne": "Partagé avec 1 contact",
+    "stopped": "Arrêté"
+  },
+  "yourApps": "Vos apps"
+}

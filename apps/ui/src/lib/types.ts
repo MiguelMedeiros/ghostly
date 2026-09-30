@@ -80,6 +80,11 @@ export interface ChatSession {
   /** The joiner's copy of that public key, from the code: the only key that may answer first. */
   peerParticipationKeyB64?: string;
   messages: ChatMessage[];
+  /**
+   * How many older messages the stored copy leaves out, which the engine keeps (`STORED_MESSAGES` in storage.ts). A
+   * session read in a page that has them back has none.
+   */
+  older?: number;
   createdAt: number;
   lastSyncAt?: number;
   /**
