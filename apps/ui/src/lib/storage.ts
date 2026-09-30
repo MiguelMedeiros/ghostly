@@ -286,12 +286,14 @@ export function deleteSession(sessionId: string): void {
   whole.delete(sessionId);
   inEngine.delete(sessionId);
   for (const key of [
-    ...(lastOfPeer ? [`${getPrefix()}face_${peer}`] : []),
+    // So do the card and network tab the payment sheet last used with them (lib/chatPayments.ts), kept by their key.
+    ...(lastOfPeer ? [`${getPrefix()}face_${peer}`, `${getPrefix()}payment_rail_${peer}`, `${getPrefix()}payment_network_${peer}`] : []),
     getKey(sessionId),
     `${getPrefix()}read_${sessionId}`,
     `${getPrefix()}invite_${sessionId}`,
     `${getPrefix()}pin_${sessionId}`,
     `${getPrefix()}mute_${sessionId}`,
+    `${getPrefix()}mute_mentions_${sessionId}`,
     `${getPrefix()}draft_${sessionId}`,
     joinKey(sessionId),
     LEGACY_JOIN_PREFIX + sessionId,
