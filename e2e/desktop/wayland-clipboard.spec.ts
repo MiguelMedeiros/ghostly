@@ -1,5 +1,5 @@
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { attachDesktopLogs, desktopHome, expect, openDesktop, test } from "../support/desktop";
@@ -48,21 +48,26 @@ test("Join → Paste reads what a Wayland app copied", { tag: ["@feature:invite.
 async function headlessSway(): Promise<{ socket: string; copy: (text: string) => void; log: () => string; stop: () => void }> {
   const runtime = mkdtempSync(join(tmpdir(), "ghostly-wayland-"));
   const config = join(runtime, "sway.conf");
-  writeFileSync(config, "output HEADLESS-1 resolution 1280x800\n");
-  const display = "wayland-ghostly-e2e";
-  const env = {
-    ...process.env, XDG_RUNTIME_DIR: runtime, WAYLAND_DISPLAY: display,
+  // No X server in the runner (and none needed): without this Sway logs a failed Xwayland start.
+  writeFileSync(config, "output HEADLESS-1 resolution 1280x800\nxwayland disable\n");
+  const env: Record<string, string | undefined> = {
+    ...process.env, XDG_RUNTIME_DIR: runtime,
     WLR_BACKENDS: "headless", WLR_RENDERER: "pixman", WLR_LIBINPUT_NO_DEVICES: "1",
   };
-  delete (env as Record<string, string | undefined>).DISPLAY;
-  delete (env as Record<string, string | undefined>).SWAYSOCK;
+  for (const key of ["DISPLAY", "SWAYSOCK", "WAYLAND_DISPLAY"]) delete env[key];
   let out = "";
   const sway: ChildProcess = spawn("sway", ["--config", config], { env, stdio: ["ignore", "pipe", "pipe"] });
   for (const stream of [sway.stdout, sway.stderr]) stream?.on("data", (chunk: Buffer) => { out += chunk.toString(); });
-  const socket = join(runtime, display);
-  for (const end = Date.now() + 15_000; !existsSync(socket); await new Promise((done) => setTimeout(done, 100))) {
+  // Sway names its socket itself (wayland-1, the first free one): it does not take the name from WAYLAND_DISPLAY.
+  // The runtime folder is its own, so the one wayland-N socket in it is Sway's.
+  let display: string | undefined;
+  for (const end = Date.now() + 15_000; ; await new Promise((done) => setTimeout(done, 100))) {
+    display = readdirSync(runtime).find((name) => /^wayland-\d+$/.test(name));
+    if (display) break;
     if (sway.exitCode !== null || Date.now() > end) throw new Error(`headless sway did not start:\n${out}`);
   }
+  env.WAYLAND_DISPLAY = display;
+  const socket = join(runtime, display);
   // wl-copy serves the clipboard from a process of its own until something else is copied; `--foreground` would block.
   const copy = (text: string) => {
     const done = spawnSync("wl-copy", [], { input: text, env: { ...env }, stdio: ["pipe", "ignore", "ignore"], timeout: 10_000 });
