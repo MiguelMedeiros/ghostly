@@ -40,7 +40,7 @@
   },
   "features": [
     {"id":"app.accessibility","wisp":null,"kind":"feature","clients":["web","extension","desktop"],"infra":[],"title":"The main screens pass axe-core's WCAG 2.2 A and AA rules with no serious or critical finding (contrast, names, roles), light and dark, left to right and right to left"},
-    {"id":"app.attention.badge","wisp":null,"kind":"feature","clients":["web"],"infra":[],"title":"The installed app's icon counts unread messages (Badging API), leaving muted chats out except a mention that gets through"},
+    {"id":"app.attention.badge","wisp":null,"kind":"feature","clients":["web","desktop"],"infra":[],"title":"The installed app's icon (the Dock icon on Desktop) counts unread messages, leaving muted chats out except a mention that gets through"},
     {"id":"app.attention.cues","wisp":null,"kind":"feature","clients":["web","extension","desktop"],"infra":[],"title":"Sound cues in five categories (payments, identities, connection, chat, interface), one switch each; chat mute, one sound per event, none new in the background"},
     {"id":"app.attention.notifications","wisp":null,"kind":"feature","clients":["web","extension","desktop"],"infra":[],"title":"System notifications: explicit permission, private text, no replay after reload"},
     {"id":"app.attention.sounds","wisp":null,"kind":"feature","clients":["web","extension","desktop"],"infra":[],"title":"Notification sounds, a persistent preference independent of permission"},
@@ -727,6 +727,7 @@
     "apps/ui/src/contexts/UpdateContext.tsx": ["app.updates.*","app.version"],
     "apps/ui/src/desktop/**/*": ["desktop.*"],
     "apps/ui/src/desktop/atproto.ts": ["proofs.atproto.oauth"],
+    "apps/ui/src/desktop/dockBadge.ts": ["app.attention.badge"],
     "apps/ui/src/desktop/nativeCalls.ts": ["calls.*"],
     "apps/ui/src/desktop/nativeTransports.ts": ["transport.iroh","transport.hyperdht","transport.native-pool","transport.switch"],
     "apps/ui/src/desktop/noIrohWeb.ts": ["desktop.*"],

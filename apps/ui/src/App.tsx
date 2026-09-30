@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Outlet, useLocation } from "react-router-dom";
 import { Sidebar } from "./components/Sidebar";
 import { MobileTabBar } from "./components/MobileTabBar";
@@ -178,10 +178,12 @@ export function App() {
           {t("sidebar.skipToContent")}
         </button>
         <Sidebar />
-        <main ref={mainRef} tabIndex={-1} className="flex-1 flex min-w-0 focus:outline-none">
-          {chats("flex-1 flex flex-col min-w-0")}
+        {/* Keyed as on a phone: a phone turned on its side (or back) keeps the open chat and page mounted, and the
+            message field its focus and its keyboard. */}
+        <main key="main" ref={mainRef} tabIndex={-1} className="flex-1 flex min-w-0 focus:outline-none">
+          <Fragment key="chats">{chats("flex-1 flex flex-col min-w-0")}</Fragment>
           {!inChat && (
-            <div className="flex-1 flex flex-col min-w-0">
+            <div key="page" className="flex-1 flex flex-col min-w-0">
               <Outlet />
             </div>
           )}
@@ -196,13 +198,13 @@ export function App() {
   const onChatList = pathname === "/";
   return (
     <div className="app-shell w-full flex flex-col bg-app-bg">
-      <main className="flex-1 flex flex-col min-h-0 min-w-0">
+      <main key="main" className="flex-1 flex flex-col min-h-0 min-w-0">
         <div className={onChatList ? "flex-1 flex min-h-0" : "hidden"}>
           <Sidebar />
         </div>
-        {chats("flex-1 flex flex-col min-h-0 min-w-0")}
+        <Fragment key="chats">{chats("flex-1 flex flex-col min-h-0 min-w-0")}</Fragment>
         {!onChatList && !inChat && (
-          <div className="flex-1 flex flex-col min-h-0 min-w-0">
+          <div key="page" className="flex-1 flex flex-col min-h-0 min-w-0">
             <Outlet />
           </div>
         )}

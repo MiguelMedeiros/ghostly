@@ -1,17 +1,16 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { removalRisksFunds, walletRemoval, type RemovalWords, type WalletRemoval } from "@ghostly/browser/shared/walletRemoval";
+import { removalRisksFunds, walletRemoval, type WalletRemoval } from "@ghostly/browser/shared/walletRemoval";
 import type { WalletNetwork, WalletPlatform, WalletState, WalletType } from "../../lib/platform";
 import { useBackdropDismiss } from "../../hooks/useDismiss";
-import { useI18n, type Translate } from "../../contexts/I18nContext";
-import { formatAmount, formatTokenAmount } from "../../lib/amount";
-import { satsIn } from "../NetworkTag";
+import { useI18n } from "../../contexts/I18nContext";
 import { NetworkTag } from "../NetworkTag";
 import { networkState } from "../walletCardData";
 import { BackupRows } from "./BackupRows";
 import { exportBackup, reveal } from "./walletPhrase";
 import { NETWORK_NAME, WALLET_NAME, walletLabel } from "./names";
 import { useRun } from "./run";
+import { removalWords } from "./removalWords";
 import { Block, Button, Notice, Row, Section } from "./ui";
 
 /**
@@ -49,15 +48,6 @@ export function RemoveWalletSection({ type, network, card, wallet, state, onRemo
   );
 }
 
-/** What a removal holds and waits for, in the app's language: the amounts and the sentences around them. */
-const removalWords = (t: Translate): RemovalWords => ({
-  sats: (amount, network) => t("wallet.cards.amount", { amount: formatAmount(amount, t.language), unit: satsIn(t, network) }),
-  token: (units, decimals, network) => t("wallet.cards.amount", { amount: formatTokenAmount(units, decimals, t.language), unit: network === "testnet" ? "TEST-USDT" : "USDT" }),
-  gas: (wei, network) => t(network === "testnet" ? "wallet.remove.gas.testnet" : "wallet.remove.gas.mainnet", { amount: formatTokenAmount(wei, 18, t.language) }),
-  item: (kind, amount) => t(`wallet.remove.item.${kind}`, { amount }),
-  and: (first, second) => t("wallet.remove.and", { first, second }),
-});
-
 /** Where a Lightning or on-chain wallet keeps its money (the source's name), for "the money stays in …". */
 function sourceName(type: WalletType, network: WalletNetwork, state: WalletState, card?: string): string | undefined {
   const view = networkState(state, network, card), source = type === "lightning" ? view.lightning : type === "bitcoin" ? view.bitcoin : undefined;
@@ -69,8 +59,10 @@ function sourceName(type: WalletType, network: WalletNetwork, state: WalletState
  * confirmation in words when the money on this device goes with it. An empty test wallet is one plain confirm. The
  * engine checks the same again (walletRemove): nothing here is the only guard.
  */
-export function RemoveWalletDialog({ removal, wallet, source, onClose, onRemoved }: {
+export function RemoveWalletDialog({ removal, wallet, source, lead, onClose, onRemoved }: {
   removal: WalletRemoval;
+  /** Why this removal takes the whole wallet (its last mint was asked to go), said first. */
+  lead?: string;
   /** Bound to the wallet's network. */
   wallet: WalletPlatform;
   source?: string;
@@ -123,6 +115,7 @@ export function RemoveWalletDialog({ removal, wallet, source, onClose, onRemoved
       <div className="space-y-2">
         <NetworkTag network={network} testId="wallet-remove-network" />
         <h2 id={`${id}-title`} className="text-base font-semibold">{t("wallet.remove.question", { label })}</h2>
+        {lead && <p className="text-sm text-text-primary" data-testid="wallet-remove-lead">{lead}</p>}
         <p id={`${id}-body`} className="text-sm text-text-secondary" data-testid="wallet-remove-held">{what}</p>
       </div>
       {awaiting.length > 0 && (

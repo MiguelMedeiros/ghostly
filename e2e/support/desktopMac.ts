@@ -123,6 +123,14 @@ export class MacDriver implements DesktopApp {
     return (await this.request("GET", "/opened")) as string[];
   }
 
+  /**
+   * What the system shows of the Ghostly window (`GET /window` in apps/desktop/src/e2e_driver.rs): whether it is on screen,
+   * its title bar's appearance, and the label on the app's Dock icon (null when there is none).
+   */
+  async windowState(): Promise<{ visible: boolean | null; theme: "light" | "dark" | null; badge: string | null }> {
+    return (await this.request("GET", "/window")) as { visible: boolean | null; theme: "light" | "dark" | null; badge: string | null };
+  }
+
   private async request(method: string, path: string, body?: unknown): Promise<unknown> {
     const response = await fetch(`${this.endpoint}${path}`, {
       method,

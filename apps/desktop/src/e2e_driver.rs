@@ -10,6 +10,9 @@
 //! While it listens, a link the app would hand to the system (`commands::launch`) is written down instead of
 //! opened, and `GET /opened` answers with every one so far: a test sees what a click opened, and no browser
 //! starts on the machine running it.
+//!
+//! `GET /window` answers with what the system shows of the Ghostly window: whether it is visible, its title bar's
+//! appearance, and the badge on the Dock icon.
 
 #[cfg(all(feature = "e2e-driver", not(debug_assertions)))]
 compile_error!(
@@ -127,6 +130,10 @@ fn answer<R: Runtime>(app: &AppHandle<R>, request: &Request) -> (u16, String) {
             (200, serde_json::to_string(&labels).unwrap_or_default())
         }
         ("GET", "/opened") => (200, serde_json::to_string(&opened()).unwrap_or_default()),
+        ("GET", "/window") => match app.get_webview_window("main") {
+            Some(window) => (200, window_state(app, &window).to_string()),
+            None => (404, error("no window main")),
+        },
         ("POST", "/eval") => {
             let eval: Eval = match serde_json::from_slice(&request.body) {
                 Ok(eval) => eval,
@@ -157,6 +164,46 @@ fn answer<R: Runtime>(app: &AppHandle<R>, request: &Request) -> (u16, String) {
         }
         _ => (404, error("no such route")),
     }
+}
+
+/// What the system shows of the Ghostly window, as a person at the Mac would see it: whether it is on screen, the
+/// appearance its title bar has (`light` or `dark`), and the label on the app's Dock icon (`null` when none).
+fn window_state<R: Runtime>(
+    app: &AppHandle<R>,
+    window: &tauri::WebviewWindow<R>,
+) -> serde_json::Value {
+    let theme = match window.theme() {
+        Ok(tauri::Theme::Dark) => Some("dark"),
+        Ok(_) => Some("light"),
+        Err(_) => None,
+    };
+    serde_json::json!({
+        "visible": window.is_visible().ok(),
+        "theme": theme,
+        "badge": dock_badge(app),
+    })
+}
+
+/// The label on the Dock icon, read where AppKit wants it: on the main thread.
+#[cfg(target_os = "macos")]
+fn dock_badge<R: Runtime>(app: &AppHandle<R>) -> Option<String> {
+    let (tx, rx) = mpsc::channel();
+    app.run_on_main_thread(move || {
+        let label = objc2_foundation::MainThreadMarker::new().and_then(|mtm| {
+            objc2_app_kit::NSApplication::sharedApplication(mtm)
+                .dockTile()
+                .badgeLabel()
+                .map(|label| label.to_string())
+        });
+        let _ = tx.send(label);
+    })
+    .ok()?;
+    rx.recv_timeout(Duration::from_secs(5)).ok().flatten()
+}
+
+#[cfg(not(target_os = "macos"))]
+fn dock_badge<R: Runtime>(_app: &AppHandle<R>) -> Option<String> {
+    None
 }
 
 fn error(message: &str) -> String {

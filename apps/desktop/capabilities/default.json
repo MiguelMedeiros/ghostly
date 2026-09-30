@@ -6,6 +6,7 @@
   "permissions": [
     "core:default",
     "core:app:default",
+    "core:window:allow-set-badge-count",
     "core:window:allow-set-fullscreen",
     "updater:default",
     "process:allow-restart",
