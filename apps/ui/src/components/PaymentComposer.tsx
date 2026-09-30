@@ -20,7 +20,7 @@ import { ConfirmRealMoney } from "./ConfirmRealMoney";
 import { NetworkTabs } from "./wallet/NetworkTabs";
 import { NETWORK_NAME } from "./wallet/names";
 import "./payment-composer.css";
-import { formatAmount } from "../lib/amount";
+import { decimalInput, formatAmount } from "../lib/amount";
 
 interface PaymentComposerProps {
   balance: number;
@@ -313,7 +313,7 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, onDone = 
         {review && bound ? <PaymentReview key={review.id} review={review} wallet={bound} onClose={onClose} onSent={onDone} /> : <>
           <label className="payment-back-amount" data-over={tooMuch || undefined}>
             <input ref={amountRef} data-testid="payment-amount" inputMode={decimals ? "decimal" : "numeric"} placeholder="0" aria-label={t("payments.composer.amountIn", { unit })}
-              value={amount} onChange={(e) => setAmount(e.target.value.replace(decimals ? /[^0-9.]/g : /\D/g, ""))} />
+              value={amount} onChange={(e) => setAmount(decimals ? decimalInput(e.target.value, t.language) : e.target.value.replace(/\D/g, ""))} />
             <span>{unit}</span>
           </label>
           <input className="payment-back-memo" placeholder={t("payments.composer.memo")} aria-label={t("payments.composer.memo")} maxLength={140} value={memo} onChange={(e) => setMemo(e.target.value)} />
