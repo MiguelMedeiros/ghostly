@@ -54,6 +54,29 @@ describe.each(["pt", "ar"] as const)("in %s", (language) => {
     expect(container.textContent).not.toMatch(RAW_KEY);
   });
 
+  it("the membership lines of a member who has left are translated too, with the name the group last knew", async () => {
+    const BIA = "bia".padEnd(52, "y");
+    openGroup(language, groupView({
+      status: "active", formerNames: { [BIA]: "Bia" },
+      members: [member({ key: ME, me: true, online: true }), member({ key: ANA, nick: "Ana", online: true, role: "admin" })],
+    }), [
+      stored({ id: "e1", event: "joined", member: BIA, text: "Bia joined" }),
+      stored({ id: "e2", event: "admin", member: BIA, text: "Bia is now the admin" }),
+      stored({ id: "e3", event: "renamed", member: BIA, text: "Bia renamed the group to “Amigos”" }),
+      stored({ id: "e4", event: "picture", member: BIA, text: "Bia removed the group's picture" }),
+      stored({ id: "e5", event: "gone", member: BIA, text: "Bia is no longer a member" }),
+    ]);
+    const lines = (await screen.findAllByTestId("group-event")).map(e => e.textContent);
+    expect(lines).toEqual([
+      t(language, "group.event.joined", { name: "Bia" }),
+      t(language, "group.event.admin", { name: "Bia" }),
+      t(language, "group.event.renamed", { name: "Bia", group: "Amigos" }),
+      t(language, "group.event.pictureRemoved", { name: "Bia" }),
+      t(language, "group.event.gone", { name: "Bia" }),
+    ]);
+    expect(lines.join(" ")).not.toMatch(/joined|now the admin|renamed|picture|no longer/);
+  });
+
   it("joining through a link says each step in the interface's language", () => {
     const { container } = openGroup(language, groupView({ name: "Amigos", profile: "community", invitation: { viaLink: true, stage: "answered" } as GroupView["invitation"] }));
     const joining = screen.getByTestId("group-joining");

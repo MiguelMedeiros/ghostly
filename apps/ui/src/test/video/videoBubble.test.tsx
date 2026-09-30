@@ -369,6 +369,20 @@ describe("a video not here yet", () => {
     expect(screen.getByTestId("video-play")).toBeInTheDocument();
     expect(screen.getByTestId("video-status")).toHaveTextContent("40% of 35.0 MB");
   });
+
+  it("one sent from here whose bytes cannot be read yet says so, and plays once it has gone", async () => {
+    const file = video({ id: "chat1-out-video-early" });
+    getFile.mockResolvedValue(null);
+    const view = show(file, { state: "transferring", direction: "out", transferred: 14 * MB, size: file.size }, "me");
+    fireEvent.click(screen.getByTestId("video-play"));
+    await flush();
+    expect(screen.getByTestId("video-problem")).toHaveTextContent("It plays once it has been sent.");
+    expect(screen.queryByTestId("video-play")).toBeNull();
+    act(() => fakeEngine.update({ transfers: { [file.id]: { state: "done", direction: "out", transferred: file.size, size: file.size } } }));
+    view.rerender(<VideoBubble file={file} sender="me" peerName="Ana" />);
+    expect(screen.queryByTestId("video-problem")).toBeNull();
+    expect(screen.getByTestId("video-play")).toBeInTheDocument();
+  });
 });
 
 describe("a video that did not go", () => {
