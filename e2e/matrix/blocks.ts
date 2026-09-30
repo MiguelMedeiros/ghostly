@@ -228,12 +228,13 @@ export const delivery: Block = {
       const back = await away(b);
       await expect(a.page.getByTestId("connection-options")).toHaveAttribute("data-status", "Away · messages are held", { timeout: 60_000 });
       // Past the 256 bytes the DHT carries: a short text would take the DHT floor (WISP 403); a longer one is held.
-      await say(a, `held in my S3 for you ${"and more words past what the DHT carries. ".repeat(7)}`);
+      const held = `held in my S3 for you ${"and more words past what the DHT carries. ".repeat(7)}`;
+      await say(a, held);
       await a.page.getByTestId("file-input").setInputFiles({ name: "held.gif", mimeType: "image/gif", buffer: GIF });
       // The bubble says nothing of it (#360): its mark is the clock, held for B.
       await expect(delivered(chatPane(a).locator(".group").filter({ hasText: "held in my S3 for you" }), "held")).toBeVisible({ timeout: 60_000 });
       await back();
-      await sees(b, "held in my S3 for you");
+      await sees(b, held.trim());
       await expect(chatPane(b).getByTestId("file-bubble").filter({ hasText: "held.gif" })).toBeVisible({ timeout: 90_000 });
       await expect(a.page.getByTestId("hold-indicator")).toHaveCount(0, { timeout: 90_000 });
       return;
