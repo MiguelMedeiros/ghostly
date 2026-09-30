@@ -6,6 +6,7 @@ import { testBitcoinWallet } from "../../packages/browser/test/helpers/bitcoinSi
 import { FakeWebln, FakeWeblnLedger } from "../../packages/browser/test/helpers/fakeWebln";
 import { fingerprints, TestGpg } from "../../packages/browser/test/helpers/gpg";
 import { strangerInvoice } from "../support/bolt11";
+import { callTrace, watchCalls } from "../support/callTrace";
 import { setClipboard } from "../support/clipboard";
 import { startTestDomain, type TestDomain } from "../support/domain";
 import { delivered, GIF, type WalletKind } from "../support/fixtures";
@@ -281,14 +282,24 @@ export const transport: Block = {
 /** The chat calls over its live session (`calls/1`): A rings, B answers, the call connects, A hangs up. */
 export const calls: Block = {
   id: "calls",
-  run: async ({ a, b }) => {
+  run: async ({ a, b, info }) => {
     for (const p of [a, b]) {
       await openChat(p);
       await expect(p.page.getByTestId("call-audio")).toBeEnabled({ timeout: LIVE_AGAIN_MS });
     }
+    for (const p of [a, b]) await watchCalls(p.page);
     await a.page.getByTestId("call-audio").click();
     await b.page.getByTitle(either("Accept audio call")).click();
-    for (const p of [a, b]) await expect(p.page.getByTestId("call-window").getByText(/^\d{1,2}:\d{2}$/)).toBeVisible();
+    try {
+      for (const p of [a, b]) await expect(p.page.getByTestId("call-window").getByText(/^\d{1,2}:\d{2}$/)).toBeVisible();
+    } catch (error) {
+      // Two windows saying "Connecting..." tell nothing of why: what each side's connection did does.
+      for (const p of [a, b]) {
+        const trace = await callTrace(p.page).catch((e) => `(no trace: ${e})`);
+        await info.attach(`${p.name}'s call connections`, { body: trace, contentType: "text/plain" });
+      }
+      throw error;
+    }
     await a.page.getByTitle("End call").click();
     for (const p of [a, b]) await expect(p.page.getByTestId("call-window")).toHaveCount(0);
   },

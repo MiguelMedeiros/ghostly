@@ -4,6 +4,7 @@ import {
   extractParamsFromSdp,
   buildSdpFromSignal,
   parseCallSignal,
+  sdpHasCandidates,
   signalHasVideo,
   waitForIceGathering,
   type CallState,
@@ -70,6 +71,29 @@ export const RING_MS = 60_000;
 
 /** How long "No answer" stays on the caller's screen. */
 export const NO_ANSWER_SHOWN_MS = 6000;
+
+/**
+ * A new connection that has not found a single candidate by then has stalled: Chromium, rarely and under load, leaves
+ * one gathering with nothing to show for it, forever (the matrix's "Connecting..." calls, e2e-full 36677963444). Its
+ * offer or answer would reach nobody, and nobody would reach it, so neither side's ICE would ever fail either. A new
+ * connection is made in its place, up to `GATHER_ATTEMPTS` in all.
+ */
+export const GATHER_STALL_MS = 4000;
+export const GATHER_ATTEMPTS = 3;
+
+/**
+ * A call answered (or whose answer came) that has not connected by then ends, and says so: ICE normally connects in
+ * well under a second, or fails by itself within about 30 s; a call that does neither would say "Connecting..." forever.
+ */
+export const CONNECT_TIMEOUT_MS = 45_000;
+
+/** No connection found a way to reach anyone: the call is ended rather than left saying "Connecting...". */
+export class CallUnreachableError extends Error {
+  constructor(message = "The call could not reach the network") {
+    super(message);
+    this.name = "CallUnreachableError";
+  }
+}
 
 /**
  * What to tell the person when sharing the screen failed, or null when there is nothing to tell: closing the
@@ -204,6 +228,9 @@ export function useWebRTC({
    * sends nothing, instead of ringing someone for a call that no longer exists.
    */
   const attemptRef = useRef(0);
+
+  /** The latest `hangUp`, for what runs before it is defined or outlives a render. */
+  const hangUpRef = useRef<(sendSignal?: boolean, addEndMessage?: boolean) => void>(() => {});
 
   /** Our answered call's media never came up, and it has not started over yet: a caller's second offer restarts it. */
   const restartable = useCallback(
@@ -349,6 +376,24 @@ export function useWebRTC({
     return pc;
   }, [updateCallState, setFastPoll, cleanupConnection, publishCallSignal, addCallEventMessage, refreshVideoLane, clearRestartGrace, restartable]);
 
+  /**
+   * Makes the call's connection with `make` (its description set) and waits for its candidates. One that finds none
+   * (`GATHER_STALL_MS`) is closed and made again, up to `GATHER_ATTEMPTS` times; then the call cannot reach anyone
+   * (`CallUnreachableError`). Null when the attempt was cancelled meanwhile.
+   */
+  const gathered = useCallback(async (make: () => Promise<RTCPeerConnection>, cancelled: () => boolean): Promise<RTCPeerConnection | null> => {
+    for (let attempt = 1; ; attempt++) {
+      const pc = await make();
+      await waitForIceGathering(pc, undefined, { stallMs: GATHER_STALL_MS });
+      if (cancelled()) return null;
+      if (sdpHasCandidates(pc.localDescription?.sdp)) return pc;
+      // Its events are not ours any more: the next connection takes its place in pcRef.
+      pcRef.current = null;
+      pc.close();
+      if (attempt >= GATHER_ATTEMPTS) throw new CallUnreachableError();
+    }
+  }, []);
+
   const stopSharingRef = useRef<() => Promise<void>>(async () => {});
 
   /**
@@ -454,17 +499,19 @@ export function useWebRTC({
         setLocalStream(stream);
         setPicture(withVideo ? "camera" : null);
 
-        const pc = createPeerConnection();
-        stream.getAudioTracks().forEach((track) => pc.addTrack(track, stream));
-        stream.getVideoTracks().forEach((track) => pc.addTrack(track, stream));
-        // An audio call still offers a video section, so a camera or a screen can
-        // be turned on later without a second offer the peer cannot answer.
-        if (stream.getVideoTracks().length === 0) pc.addTransceiver("video", { direction: "sendrecv" });
+        const pc = await gathered(async () => {
+          const pc = createPeerConnection();
+          stream.getAudioTracks().forEach((track) => pc.addTrack(track, stream));
+          stream.getVideoTracks().forEach((track) => pc.addTrack(track, stream));
+          // An audio call still offers a video section, so a camera or a screen can
+          // be turned on later without a second offer the peer cannot answer.
+          if (stream.getVideoTracks().length === 0) pc.addTransceiver("video", { direction: "sendrecv" });
 
-        const offer = await pc.createOffer();
-        await pc.setLocalDescription(offer);
-        await waitForIceGathering(pc);
-        if (cancelled()) return;
+          const offer = await pc.createOffer();
+          await pc.setLocalDescription(offer);
+          return pc;
+        }, cancelled);
+        if (!pc) return;
 
         const sdp = pc.localDescription!.sdp;
         const params = extractParamsFromSdp(sdp, { maxCandidates: maxCandidatesRef.current });
@@ -494,6 +541,7 @@ export function useWebRTC({
     },
     [
       createPeerConnection,
+      gathered,
       captureFrom,
       setPicture,
       publishCallSignal,
@@ -507,21 +555,23 @@ export function useWebRTC({
   /** A new connection for the call, with its own stream, that answers `offer`: true once the answer is published. */
   const answerOffer = useCallback(
     async (offer: CallSignal, stream: MediaStream, withVideo: boolean, cancelled: () => boolean): Promise<boolean> => {
-      const pc = createPeerConnection();
-      stream.getAudioTracks().forEach((track) => pc.addTrack(track, stream));
-      stream.getVideoTracks().forEach((track) => pc.addTrack(track, stream));
+      const pc = await gathered(async () => {
+        const pc = createPeerConnection();
+        stream.getAudioTracks().forEach((track) => pc.addTrack(track, stream));
+        stream.getVideoTracks().forEach((track) => pc.addTrack(track, stream));
 
-      await pc.setRemoteDescription({ type: "offer", sdp: buildSdpFromSignal(offer) });
+        await pc.setRemoteDescription({ type: "offer", sdp: buildSdpFromSignal(offer) });
 
-      // Answering an offer with no camera of our own leaves the video section
-      // receive-only; opening it keeps our side of the lane free for later.
-      const video = videoTransceiver(pc);
-      if (video && video.direction !== "sendrecv") video.direction = "sendrecv";
+        // Answering an offer with no camera of our own leaves the video section
+        // receive-only; opening it keeps our side of the lane free for later.
+        const video = videoTransceiver(pc);
+        if (video && video.direction !== "sendrecv") video.direction = "sendrecv";
 
-      const answer = await pc.createAnswer();
-      await pc.setLocalDescription(answer);
-      await waitForIceGathering(pc);
-      if (cancelled()) return false;
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+        return pc;
+      }, cancelled);
+      if (!pc) return false;
 
       const params = extractParamsFromSdp(pc.localDescription!.sdp, { maxCandidates: maxCandidatesRef.current });
       const signal: CallSignal = { t: "a", ts: Date.now(), ...params, v: withVideo ? 1 : 0 };
@@ -530,7 +580,7 @@ export function useWebRTC({
       refreshVideoLane();
       return true;
     },
-    [createPeerConnection, publishCallSignal, refreshVideoLane],
+    [createPeerConnection, publishCallSignal, refreshVideoLane, gathered],
   );
 
   /**
@@ -602,6 +652,8 @@ export function useWebRTC({
       } catch (error) {
         if (cancelled()) return;
         onErrorRef.current?.(error);
+        // The caller is told at once, instead of ringing on until its own ring runs out.
+        if (error instanceof CallUnreachableError) { hangUpRef.current(true, false); return; }
         cleanupConnection();
         updateCallState("idle");
         setFastPoll(false);
@@ -836,7 +888,6 @@ export function useWebRTC({
 
   // An unanswered call does not ring forever (RING_MS). Ours hangs up and says "No answer". Theirs stops ringing here
   // with a missed call and sends nothing: the caller's own ring runs out too, and a hang-up would read as declined.
-  const hangUpRef = useRef(hangUp);
   hangUpRef.current = hangUp;
   const addCallEventMessageRef = useRef(addCallEventMessage);
   addCallEventMessageRef.current = addCallEventMessage;
@@ -871,6 +922,18 @@ export function useWebRTC({
       window.removeEventListener("ghostly-departing", leaving);
     };
   }, []);
+
+  // A call that neither connects nor fails (neither side's ICE ever found a pair) ends, instead of saying
+  // "Connecting..." forever; the other side is told with a hang-up.
+  useEffect(() => {
+    if (callState !== "connecting") return;
+    const timer = setTimeout(() => {
+      if (callStateRef.current !== "connecting") return;
+      onErrorRef.current?.(new CallUnreachableError("The call could not connect"));
+      hangUpRef.current(true, false);
+    }, CONNECT_TIMEOUT_MS);
+    return () => clearTimeout(timer);
+  }, [callState]);
 
   useEffect(() => {
     if (!noAnswer) return;
