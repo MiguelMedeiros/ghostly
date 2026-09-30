@@ -88,6 +88,7 @@ export class Outbox {
   async transmit(id: string, { manual = false }: { manual?: boolean } = {}): Promise<void> {
     if (this.stopped || this.busy.has(id) || this.receipts.has(id)) return;
     this.busy.add(id);
+    let again: boolean;
     try {
       let message = (await this.store.read()).find(m => m.id === id);
       if (!message?.wireId || !message.delivery || message.delivery === "delivered") return;
@@ -109,10 +110,10 @@ export class Outbox {
     } catch (error) {
       this.clear(id);
       await this.requeue(id, error instanceof Error ? error.message : "Sending failed");
-    } finally { this.busy.delete(id); }
+    } finally { this.busy.delete(id); again = this.reopenedWhileBusy.delete(id); }
     // The chat went live while this send was on its way (on the DHT, or on a link that just closed): a reader that
     // is live now may not look at the DHT for minutes, so it goes again on the new link, under the same id.
-    if (this.reopenedWhileBusy.delete(id)) {
+    if (again) {
       const message = (await this.store.read()).find(m => m.id === id);
       if (message) await this.again(message);
     }

@@ -555,7 +555,7 @@ describe("DHT delivery: sending and lifecycle", () => {
     const before = h.transport.resolve.mock.calls.length;
     h.bob.setLive(true); await vi.advanceTimersByTimeAsync(0);
     expect(h.transport.resolve.mock.calls.length - before, "one look as it goes live").toBe(1);
-    expect(h.transport.resolve.mock.lastCall?.[1], "yielding to links that signal").toEqual({ background: true });
+    expect((h.transport.resolve.mock.lastCall as unknown[] | undefined)?.[1], "yielding to links that signal").toEqual({ background: true });
     await vi.advanceTimersByTimeAsync(LIVE_POLL_MS - 1_000);
     expect(h.transport.resolve.mock.calls.length - before, "then none for 5 minutes").toBe(1);
     await h.bob.stop();
