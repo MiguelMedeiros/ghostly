@@ -3,6 +3,7 @@ import { useLockScreen } from "../contexts/LockScreenContext";
 import { useI18n } from "../contexts/I18nContext";
 import { currentProfile, listProfiles } from "../lib/profiles";
 import { ProfileBadge } from "./ProfileBadge";
+import { useViewportHeight } from "../hooks/useViewportHeight";
 
 export function LockScreen() {
   const { isLocked, unlock, retryAt } = useLockScreen();
@@ -59,12 +60,16 @@ export function LockScreen() {
   return (
     <div
       // Over everything the lock hides, the call window included.
-      className="fixed inset-0 z-[60] bg-app-bg flex items-center justify-center"
+      className="fixed inset-0 z-[60] bg-app-bg"
       role="dialog"
       aria-modal="true"
       aria-label={t("lockScreen.title")}
     >
-      <div className="w-full max-w-sm mx-4">
+      <LockViewport />
+      {/* Centred in what the keyboard leaves (`--app-height`), not in the whole screen: on a phone the field and
+          Unlock sat under the keyboard. */}
+      <div className="flex items-center justify-center overflow-y-auto" style={{ height: "var(--app-height, 100%)" }}>
+      <div className="w-full max-w-sm mx-4 py-4">
         <div className="text-center mb-8">
           <div className="w-20 h-20 mx-auto mb-4 rounded-full bg-surface flex items-center justify-center">
             <svg
@@ -158,6 +163,7 @@ export function LockScreen() {
           </button>
         </form>
       </div>
+      </div>
 
       <style>{`
         @keyframes shake {
@@ -171,4 +177,13 @@ export function LockScreen() {
       `}</style>
     </div>
   );
+}
+
+/**
+ * The visible height and whether a keyboard is up (`useViewportHeight`), kept while the lock is shown: at start, the
+ * app that keeps them is not there until the password has been entered.
+ */
+function LockViewport() {
+  useViewportHeight();
+  return null;
 }
