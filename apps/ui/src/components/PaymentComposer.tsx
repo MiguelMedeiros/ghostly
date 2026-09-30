@@ -1,4 +1,4 @@
-import { WALLET_NETWORKS, formatPaymentAmount, parsePaymentAmount } from "@ghostly/core";
+import { WALLET_NETWORKS, parsePaymentAmount } from "@ghostly/core";
 import { useOutsideDismiss } from "../hooks/useDismiss";
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type RefObject } from "react";
 import { useI18n } from "../contexts/I18nContext";
@@ -10,7 +10,7 @@ import { NetworkTag, satsIn } from "./NetworkTag";
 import { PaymentReview } from "./PaymentReview";
 import { WalletMark, type ChatRail } from "./WalletCards";
 import { CardDeck, WalletCardFace } from "./WalletDeck";
-import { ONCHAIN_FEE_CAP, byNetwork, cardNotSetUp, cardWallet, networkState, receivingFirst, walletCards, type InstanceCard } from "./walletCardData";
+import { ONCHAIN_FEE_CAP, byNetwork, cardNotSetUp, cardWallet, networkState, receivingFirst, spendable, walletCards, type InstanceCard } from "./walletCardData";
 import { useServicesPlatform } from "../hooks/useServicesPlatform";
 import { ComposerSheet, ComposerSheetHead, ForwardArrow } from "./ComposerSheet";
 import { CardFlip, FlipTurnButton } from "./deck/Flip";
@@ -279,9 +279,10 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, onDone = 
     finally { setBusy(null); }
   };
 
-  // USDT's balance is in the token's smallest units; the amount is typed in whole tokens.
-  const spendable = method === "cashu" ? (network ? here?.balance : balance) : method === "arkade" ? here?.ark?.balance : method === "bark" ? here?.bark?.balance : method === "spark" ? here?.spark?.balance : method === "bitcoin" ? here?.bitcoin?.balance : method === "fedimint" ? here?.fedimint?.balance : usdt ? Number(formatPaymentAmount(usdt.balance, decimals)) : undefined;
-  const tooMuch = spendable !== undefined && value > spendable;
+  // What this card holds, from its own wallet (Lightning's from its source, not the Cashu mints unless they are its
+  // source): none claimed where the card cannot say. Without a wallet platform, the chat's Cashu balance.
+  const holds = card && here ? spendable(card.rail, here) : method === "cashu" ? balance : undefined;
+  const tooMuch = holds !== undefined && value > holds;
   /** What Send and Request do on this card, with this contact. */
   const how = (id: ChatRail) => describe ? describe(id) : t(HOW[id], { name: who });
 
@@ -307,7 +308,7 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, onDone = 
             <span>{unit}</span>
           </label>
           <input className="payment-back-memo" placeholder={t("payments.composer.memo")} aria-label={t("payments.composer.memo")} maxLength={140} value={memo} onChange={(e) => setMemo(e.target.value)} />
-          <p className="payment-back-hint">{blocked ?? (tooMuch ? t("payments.composer.tooMuch", { amount: spendable!.toLocaleString(), unit }) : how(rail))}</p>
+          <p className="payment-back-hint">{blocked ?? (tooMuch ? t("payments.composer.tooMuch", { amount: holds!.toLocaleString(), unit }) : how(rail))}</p>
           {confirmSend ? <ConfirmRealMoney what={`${value.toLocaleString()} ${unit}`} busy={busy !== null} onSend={() => void send(true)} onBack={() => setConfirmSend(false)} /> : <div className="payment-back-actions">
             <button data-testid="payment-request" disabled={!value || busy !== null || !!asking || !!blocked} onClick={() => void request()} className="payment-back-secondary">
               {busy === "request" ? t("payments.composer.requesting") : t("payments.composer.request")}

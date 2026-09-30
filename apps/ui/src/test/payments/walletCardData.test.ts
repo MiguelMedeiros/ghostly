@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { NetworkWalletsView, WalletView } from "@ghostly/browser/shared/types";
-import { cardId, networkState, parseCardId, satsUnit, walletCard, walletCards, type WalletRail } from "../../components/walletCardData";
+import { cardId, networkState, parseCardId, satsUnit, spendable, walletCard, walletCards, type WalletRail } from "../../components/walletCardData";
 import { WALLET_RAILS } from "../../components/walletCardTypes";
 import type { WalletNetwork, WalletState } from "../../lib/platform";
 import { walletView } from "../fakeEngine";
@@ -260,5 +260,48 @@ describe("Fedimint", () => {
       .toMatchObject({ balance: "12 test sats", detail: "2 federations" });
     expect(cardOf("fedimint:testnet", { fedimint: { federations: [federation({ status: "connecting" })], balance: 0, history: [] } })).toMatchObject({ balance: "Connecting…", ready: false });
     expect(cardOf("fedimint:testnet", { fedimint: { federations: [federation({ status: "error" })], balance: 0, history: [] } })).toMatchObject({ balance: "Unavailable", ready: false });
+  });
+});
+
+// The chat's payment sheet checks an amount against what the chosen card holds: each card's own wallet, never the
+// Cashu balance for a card that does not spend it (a Lightning card on its own node said "More than the 0 test sats").
+describe("what a card can spend", () => {
+  const federation = { id: "ab".repeat(32), name: "Fed", guardians: [], consensusVersion: "2.1", network: "regtest" as const, modules: [], joinedAt: 1, invite: "fed11qq", balance: 700, status: "ready" as const, lightning: true };
+  /** One network's state, as the sheet reads it for a card of that network. */
+  const at = (network: WalletNetwork, patch: Partial<NetworkWalletsView>, card?: string) =>
+    networkState(walletView({ networks: { mainnet: on(), testnet: on(), [network]: on(patch) } }) as WalletState, network, card);
+
+  it("reads each card's own balance", () => {
+    const testnet = at("testnet", { mints: [mint(TEST_MINT, 0)], balance: 0, ark: arkReady(), bark: barkReady(), spark: sparkReady(), bitcoin: bitcoinSource({ mode: "testnet", balance: 9_000 }),
+      usdt: usdtReady({ balance: "2500000", decimals: 6 }), fedimint: { federations: [federation], balance: 700, history: [] }, lightning: lightningSource({ mode: "testnet", providerId: "lnd-1", balance: 1_234 }) });
+    expect(Object.fromEntries(WALLET_RAILS.map((rail) => [rail, spendable(rail, testnet)]))).toEqual({
+      cashu: 0, lightning: 1_234, arkade: 5_000, bark: 3_000, spark: 4_000, bitcoin: 9_000, usdt: 2.5, fedimint: 700,
+    });
+  });
+
+  it("gives Lightning through the Cashu mints the Cashu balance", () => {
+    expect(spendable("lightning", at("mainnet", { mints: [mint(REAL_MINT, 800)], balance: 800 }))).toBe(800);
+    expect(spendable("lightning", at("mainnet", { mints: [mint(REAL_MINT, 800)], balance: 800, lightning: lightningSource({ providerId: "cashu-mint" }) }))).toBe(800);
+  });
+
+  it("reads the chosen Lightning card's, one of several", () => {
+    const lnCard = (card: string, providerId: string, balance: number) => ({ ...lightningSource({ providerId, balance }), card, name: card, receive: card === "a" });
+    const lightnings = [lnCard("a", "lnd-1", 10), lnCard("b", "cln-1", 20)];
+    expect(spendable("lightning", at("mainnet", { lightning: lightnings[0], lightnings }, "b"))).toBe(20);
+  });
+
+  it("claims no number where the card cannot say", () => {
+    // A source that has not read a balance yet, one reconnecting (its last balance is not a fresh one), one failing.
+    expect(spendable("lightning", at("mainnet", { mints: [mint(REAL_MINT, 800)], balance: 800, lightning: lightningSource({ providerId: "lnd-1" }) }))).toBeUndefined();
+    expect(spendable("lightning", at("mainnet", { lightning: lightningSource({ providerId: "nwc-1", status: "connecting", balance: 50 }) }))).toBeUndefined();
+    expect(spendable("lightning", at("mainnet", { lightning: lightningSource({ providerId: "breez", status: "error", balance: 50 }) }))).toBeUndefined();
+    expect(spendable("cashu", at("mainnet", {}))).toBeUndefined();
+    expect(spendable("arkade", at("testnet", { ark: arkReady({ locked: true }) }))).toBeUndefined();
+    expect(spendable("bark", at("testnet", { bark: barkReady({ address: undefined }) }))).toBeUndefined();
+    expect(spendable("spark", at("testnet", {}))).toBeUndefined();
+    expect(spendable("bitcoin", at("mainnet", { bitcoin: bitcoinSource({ status: "connecting" }) }))).toBeUndefined();
+    expect(spendable("bitcoin", at("mainnet", { bitcoin: bitcoinSource({ balance: undefined }) }))).toBeUndefined();
+    expect(spendable("fedimint", at("testnet", { fedimint: { federations: [{ ...federation, status: "connecting" as const }], balance: 700, history: [] } }))).toBeUndefined();
+    expect(spendable("usdt", at("testnet", { usdt: usdtReady({ locked: true }) }))).toBeUndefined();
   });
 });
