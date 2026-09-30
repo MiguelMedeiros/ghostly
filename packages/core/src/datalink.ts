@@ -1,4 +1,4 @@
-import { waitForIceGathering } from "./callSignal";
+import { sdpHasCandidates, waitForIceGathering } from "./callSignal";
 import { wrapDataChannel, type FrameChannel } from "./frames";
 import { traceLink } from "./linkTrace";
 import {
@@ -45,6 +45,12 @@ export interface DataLinkOptions {
 
 export const CONNECT_TIMEOUT_MS = 90_000;
 const ICE_GATHERING_TIMEOUT_MS = 5_000;
+/**
+ * A connection with no candidate at all by then has stalled: Chromium, rarely and under load, gathers none, and an
+ * offer or answer without one can never connect. It is made again in its place, up to `GATHER_ATTEMPTS` in all.
+ */
+export const GATHER_STALL_MS = 3_000;
+export const GATHER_ATTEMPTS = 3;
 /** How long a connection may stay `disconnected` before it is given up. */
 const DISCONNECT_GRACE_MS = 12_000;
 
@@ -66,12 +72,8 @@ export class DataLink {
     this.setState("offering");
     this.options.setFastPoll(true, true);
     try {
-      const pc = this.createConnection();
-      await pc.setLocalDescription(await pc.createOffer());
-      const gathering = Date.now();
-      await waitForIceGathering(pc, ICE_GATHERING_TIMEOUT_MS);
-      if (this.pc !== pc) return;
-      traceLink(this.options.myPubKeyZ32, "ice-gathered", { ms: Date.now() - gathering, offer: true });
+      const pc = await this.gathered(true, async (pc) => { await pc.setLocalDescription(await pc.createOffer()); });
+      if (!pc) return;
 
       this.myOfferTs = Date.now();
       const signal: RtcSignal = { t: "o", ts: this.myOfferTs, ...extractRtcParams(pc.localDescription!.sdp) };
@@ -134,13 +136,11 @@ export class DataLink {
     this.setState("answering");
     this.options.setFastPoll(true);
     try {
-      const pc = this.createConnection();
-      await pc.setRemoteDescription({ type: "offer", sdp: buildDataSdp(offer) });
-      await pc.setLocalDescription(await pc.createAnswer());
-      const gathering = Date.now();
-      await waitForIceGathering(pc, ICE_GATHERING_TIMEOUT_MS);
-      if (this.pc !== pc) return;
-      traceLink(this.options.myPubKeyZ32, "ice-gathered", { ms: Date.now() - gathering, offer: false });
+      const pc = await this.gathered(false, async (pc) => {
+        await pc.setRemoteDescription({ type: "offer", sdp: buildDataSdp(offer) });
+        await pc.setLocalDescription(await pc.createAnswer());
+      });
+      if (!pc) return;
 
       const signal: RtcSignal = {
         t: "a",
@@ -152,6 +152,34 @@ export class DataLink {
       this.setState("connecting");
     } catch {
       this.reset();
+    }
+  }
+
+  /**
+   * Makes the connection (`describe` sets its description) and waits for its candidates. One that found none by
+   * `GATHER_STALL_MS` is replaced by a new one, up to `GATHER_ATTEMPTS` in all; when none finds any, the link goes back
+   * to idle at once rather than hold, for its whole timeout, an attempt that cannot connect. Null when the link moved
+   * on meanwhile (closed, or another signal took over) or gave up.
+   */
+  private async gathered(offer: boolean, describe: (pc: RTCPeerConnection) => Promise<void>): Promise<RTCPeerConnection | null> {
+    let stalled: RTCPeerConnection | null = null;
+    for (let attempt = 1; ; attempt++) {
+      // The new connection takes the old one's place first: closing that one then resets nothing.
+      const pc = this.createConnection();
+      stalled?.close();
+      await describe(pc);
+      if (this.pc !== pc) return null;
+      const gathering = Date.now();
+      await waitForIceGathering(pc, ICE_GATHERING_TIMEOUT_MS, { stallMs: GATHER_STALL_MS });
+      if (this.pc !== pc) return null;
+      const ms = Date.now() - gathering;
+      if (sdpHasCandidates(pc.localDescription?.sdp)) {
+        traceLink(this.options.myPubKeyZ32, "ice-gathered", { ms, offer, ...(attempt > 1 ? { attempt } : {}) });
+        return pc;
+      }
+      traceLink(this.options.myPubKeyZ32, "ice-stalled", { ms, offer, attempt });
+      if (attempt >= GATHER_ATTEMPTS) { this.reset(); return null; }
+      stalled = pc;
     }
   }
 

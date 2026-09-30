@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { DataLink, type DataLinkOptions, type DataLinkState } from "../src/datalink";
+import { DataLink, GATHER_ATTEMPTS, GATHER_STALL_MS, type DataLinkOptions, type DataLinkState } from "../src/datalink";
 import { DATA_CHANNEL_ID, DATA_CHANNEL_LABEL, RTC_SIGNAL_MAX_AGE_MS, parseRtcSignal, type RtcSignal } from "../src/signal";
 
 // covers: transport.webrtc, core.frames
@@ -16,7 +16,7 @@ afterEach(() => void vi.useRealTimers());
 
 let fingerprintSeed = 0;
 /** A local SDP that `extractRtcParams` understands, with a fingerprint unique to each connection. */
-function sdp(setup: string) {
+function sdp(setup: string, candidates = true) {
   const fingerprint = (++fingerprintSeed).toString(16).padStart(2, "0").repeat(32).match(/.{2}/g)!.join(":").toUpperCase();
   return [
     "v=0",
@@ -24,7 +24,7 @@ function sdp(setup: string) {
     "a=ice-pwd:passwordpasswordpassword",
     `a=fingerprint:sha-256 ${fingerprint}`,
     `a=setup:${setup}`,
-    "a=candidate:1 1 udp 2122260223 192.168.1.2 50000 typ host",
+    ...(candidates ? ["a=candidate:1 1 udp 2122260223 192.168.1.2 50000 typ host"] : []),
     "",
   ].join("\r\n");
 }
@@ -56,6 +56,8 @@ class FakePeerConnection extends EventTarget {
   channel!: FakeDataChannel;
   failRemote = false;
   failOffer = false;
+  /** Gathers nothing, ever: Chromium's rare stall under load. */
+  stalls = false;
   getConfiguration() {
     return { iceServers: [] };
   }
@@ -65,10 +67,10 @@ class FakePeerConnection extends EventTarget {
   }
   async createOffer() {
     if (this.failOffer) throw new Error("no offer");
-    return { type: "offer" as const, sdp: sdp("actpass") };
+    return { type: "offer" as const, sdp: sdp("actpass", !this.stalls) };
   }
   async createAnswer() {
-    return { type: "answer" as const, sdp: sdp("active") };
+    return { type: "answer" as const, sdp: sdp("active", !this.stalls) };
   }
   async setLocalDescription(description: RTCSessionDescriptionInit) {
     this.localDescription = description;
@@ -428,5 +430,104 @@ describe("DataLink failures and teardown", () => {
     await vi.advanceTimersByTimeAsync(5_000);
     await answering;
     expect(b.options.publishSignal.mock.calls.filter(([s]) => s !== null)).toEqual([]);
+  });
+});
+
+describe("DataLink connections that gather no candidate", () => {
+  /** The first `n` connections made gather nothing (and stay `gathering`); the ones after gather as usual. */
+  const stallingFirst = (n: number) => {
+    let made = 0;
+    return (pc: FakePeerConnection) => {
+      if (++made > n) return;
+      pc.stalls = true;
+      pc.iceGatheringState = "gathering";
+    };
+  };
+  const published = (side: ReturnType<typeof link>) => side.options.publishSignal.mock.calls.map(([s]) => s).filter((s): s is string => s !== null);
+
+  it("an offerer makes a new connection in place of one that found no candidate, and offers that one", async () => {
+    const a = link("aaaa", "bbbb", stallingFirst(1));
+    const connecting = a.dl.connect();
+    await vi.advanceTimersByTimeAsync(GATHER_STALL_MS - 1);
+    expect(a.pcs).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(1);
+    await connecting;
+    expect(a.pcs).toHaveLength(2);
+    expect(a.pcs[0].closed).toBe(true);
+    expect(a.pcs[1].closed).toBe(false);
+    const offers = published(a);
+    expect(offers).toHaveLength(1);
+    expect(parseRtcSignal(offers[0])).toMatchObject({ t: "o", c: ["h,192.168.1.2,50000"] });
+    // The old connection closing reset nothing: the link is still offering, and says nothing of it.
+    expect(a.states).toEqual(["offering"]);
+
+    const b = link("bbbb", "aaaa");
+    await b.dl.handleSignal(offers[0]);
+    await a.dl.handleSignal(b.lastSignal());
+    a.pc().channel.open();
+    expect(a.dl.state).toBe("open");
+    expect(a.pcs[1].remoteDescription?.type).toBe("answer");
+  });
+
+  it("an answerer makes a new connection for the same offer in place of one that found no candidate", async () => {
+    const b = link("bbbb", "aaaa", stallingFirst(2));
+    const answering = b.dl.handleSignal(JSON.stringify(offerFrom()));
+    await vi.advanceTimersByTimeAsync(2 * GATHER_STALL_MS);
+    await answering;
+    expect(b.pcs).toHaveLength(3);
+    expect(b.pcs.map((pc) => pc.closed)).toEqual([true, true, false]);
+    for (const pc of b.pcs) expect(pc.remoteDescription?.type).toBe("offer");
+    const answers = published(b);
+    expect(answers).toHaveLength(1);
+    expect(parseRtcSignal(answers[0])).toMatchObject({ t: "a", o: NOW, c: ["h,192.168.1.2,50000"] });
+    expect(b.states).toEqual(["answering", "connecting"]);
+  });
+
+  it("gives up at once when no connection finds a candidate, instead of holding the attempt for its whole timeout", async () => {
+    const a = link("aaaa", "bbbb", stallingFirst(GATHER_ATTEMPTS));
+    const connecting = a.dl.connect();
+    await vi.advanceTimersByTimeAsync(GATHER_ATTEMPTS * GATHER_STALL_MS);
+    await connecting;
+    expect(a.pcs).toHaveLength(GATHER_ATTEMPTS);
+    expect(a.pcs.every((pc) => pc.closed)).toBe(true);
+    expect(published(a)).toEqual([]);
+    expect(a.dl.state).toBe("idle");
+    expect(a.states).toEqual(["offering", "idle"]);
+    // Idle again, it can be dialled at once.
+    await a.dl.connect();
+    expect(a.pcs).toHaveLength(GATHER_ATTEMPTS + 1);
+    expect(published(a)).toHaveLength(1);
+  });
+
+  it("an answerer that finds no candidate answers nothing and is free for the next offer", async () => {
+    const b = link("bbbb", "aaaa", stallingFirst(GATHER_ATTEMPTS));
+    const answering = b.dl.handleSignal(JSON.stringify(offerFrom()));
+    await vi.advanceTimersByTimeAsync(GATHER_ATTEMPTS * GATHER_STALL_MS);
+    await answering;
+    expect(published(b)).toEqual([]);
+    expect(b.dl.state).toBe("idle");
+    await b.dl.handleSignal(JSON.stringify(offerFrom({ ts: NOW + 1 })));
+    expect(parseRtcSignal(b.lastSignal())).toMatchObject({ t: "a", o: NOW + 1 });
+  });
+
+  it("makes no new connection when closed while one is stalled", async () => {
+    const a = link("aaaa", "bbbb", stallingFirst(GATHER_ATTEMPTS));
+    const connecting = a.dl.connect();
+    await vi.advanceTimersByTimeAsync(GATHER_STALL_MS / 2);
+    a.dl.close();
+    await vi.advanceTimersByTimeAsync(GATHER_ATTEMPTS * GATHER_STALL_MS);
+    await connecting;
+    expect(a.pcs).toHaveLength(1);
+    expect(published(a)).toEqual([]);
+    expect(a.states).toEqual(["offering", "idle"]);
+  });
+
+  it("keeps a connection that found candidates, however long its gathering takes", async () => {
+    const a = link("aaaa", "bbbb", (pc) => (pc.iceGatheringState = "gathering"));
+    const connecting = a.dl.connect();
+    await vi.advanceTimersByTimeAsync(5_000);
+    await connecting;
+    expect(a.pcs).toHaveLength(1);
+    expect(published(a)).toHaveLength(1);
   });
 });
