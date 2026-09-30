@@ -1,4 +1,5 @@
 import { MEMBER_KEY } from "./groupCommits";
+import { BUTTON_ID } from "./statusCards";
 import { sanitizeDisplayText } from "./text";
 
 /*
@@ -11,8 +12,10 @@ import { sanitizeDisplayText } from "./text";
 /**
  * On the wire (`r`): `i` the original's id in this chat, `s` a line of it, `f` who wrote it. In a paired chat `f` is
  * `"sender"` (the reply's author wrote the original) or `"recipient"` (the reader did); in a group, a member key.
+ * `b`: a button press (WISP 4xx · Message Buttons), the id of the original's button this reply presses; its text is
+ * the button's label. An app from before buttons drops `b` and shows an ordinary reply.
  */
-export interface WireReply { i: string; s: string; f: string }
+export interface WireReply { i: string; s: string; f: string; b?: string }
 
 export const REPLY_LIMITS = {
   /** Code points of the line of the original, an ellipsis included when it was cut. */
@@ -50,11 +53,12 @@ export function replySnippet(text: string): string {
  */
 export function readReply(raw: unknown, author: (f: string) => boolean): WireReply | undefined {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
-  const { i, s, f } = raw as Record<string, unknown>;
+  const { i, s, f, b } = raw as Record<string, unknown>;
   if (typeof i !== "string" || !REPLY_ID.test(i)) return undefined;
   if (typeof s !== "string" || s.length > REPLY_LIMITS.raw) return undefined;
   if (typeof f !== "string" || !author(f)) return undefined;
-  return { i, s: replySnippet(s), f };
+  // A press that does not hold is only a reply.
+  return { i, s: replySnippet(s), f, ...(typeof b === "string" && BUTTON_ID.test(b) && { b }) };
 }
 
 /** Who may have written the original in a paired chat. */
@@ -63,4 +67,4 @@ export const pairedReplyAuthor = (f: string): boolean => (PAIRED_REPLY_AUTHORS a
 export const groupReplyAuthor = (f: string): boolean => MEMBER_KEY.test(f);
 
 /** Only the wire fields, in a fixed order, the line cleaned: what the sender puts on a frame. */
-export const wireReply = (reply: WireReply): WireReply => ({ i: reply.i, s: replySnippet(reply.s), f: reply.f });
+export const wireReply = (reply: WireReply): WireReply => ({ i: reply.i, s: replySnippet(reply.s), f: reply.f, ...(reply.b && { b: reply.b }) });

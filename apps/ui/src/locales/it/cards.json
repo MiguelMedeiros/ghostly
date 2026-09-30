@@ -1,4 +1,12 @@
 {
+  "buttons": {
+    "answers": "Risposte",
+    "chosen": "Scelta",
+    "closed": "Chiusa",
+    "failed": "Invio non riuscito",
+    "jump": "Vai alla domanda",
+    "sending": "Invio…"
+  },
   "panel": {
     "activeCount": "{{count}} in corso",
     "allOk": "tutto OK",

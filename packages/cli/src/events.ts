@@ -338,6 +338,7 @@ export class EventHub {
           const type = notice ? (message.sender === "peer" ? "chat.joined" : "chat.announced") : message.sender === "peer" ? "message.received" : "message.sent";
           this.emit(type, `${type}:${chat}:${message.id}`, { chat, message: json, ...(notice ? { name: notice[1] ?? null } : {}) });
         }
+        if (message.sender === "peer" && message.press) this.pressed(chat, group, message, json);
       } else if (group) {
         // A new text in a group (WISP 9xx § Edits): mine as made here, a member's as it came. Once per edit number.
         const [, edits] = splitState(state), [, edited] = splitState(before);
@@ -359,6 +360,21 @@ export class EventHub {
     if (changes.length) this.persist(chat, changes);
     // After the message's own event: what waited for it goes now.
     for (const [fileId, messageId] of files) this.flushFile(fileId, messageId);
+  }
+
+  /**
+   * A press on a button of a message of mine (WISP 4xx · Message Buttons), after the reply's own event: the question
+   * (`messageId`), the button, its label, who pressed (`by`: the chat, or a group member's key; `name` when known) and
+   * the reply (`replyId`). The engine marks a reply a press only while the buttons were open for that person.
+   */
+  private pressed(chat: string, group: string | null, message: StoredMessage, json: { nick: string | null }): void {
+    const press = message.press!;
+    const link = group ? undefined : this.state?.links.find((l) => l.id === chat);
+    const name = group ? json.nick : link ? chatJson(link).name : null;
+    this.emit("button.pressed", `button.pressed:${group ?? chat}:${message.id}`, {
+      ...(group ? { group } : { chat }), messageId: press.messageId, button: press.button, label: press.label,
+      by: group ? message.member ?? null : chat, name: name ?? null, replyId: message.id, ...(press.inferred ? { inferred: true } : {}),
+    });
   }
 
   /**

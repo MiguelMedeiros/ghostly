@@ -1,0 +1,1 @@
+Message buttons: `send` and `group send` take `--button`, `--style` and `--once`; `button.pressed` in the event stream; `button update` marks the answer or closes the question; message JSON carries `press` and `replyTo.button`.

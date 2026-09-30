@@ -102,7 +102,7 @@ export interface MessageJson {
    * The message this one answers (WISP 400 § Replies). `id`: the original's message id here when it is in this chat
    * (`found`), else the id the reply named. `from`: null when nothing says (only the id came, over the DHT).
    */
-  replyTo?: { id: string; snippet: string; from: "me" | "peer" | null; member?: string; found: boolean };
+  replyTo?: { id: string; snippet: string; from: "me" | "peer" | null; member?: string; found: boolean; button?: string };
   /** Reactions to it, one per person (WISP 400 § Reactions): `by` is `me`, `peer` or a member's key. */
   reactions?: { by: string; emoji: string; at: number }[];
   /** An edited text (WISP 400 § Edits): `text` is the latest version, `edits` its number, `editedAt` when it was made. */
@@ -112,8 +112,13 @@ export interface MessageJson {
   editPending?: boolean;
   /** A forwarded message (WISP 400 § Forwards): how many times it has been forwarded. Never who wrote it first. */
   forwarded?: number;
-  /** A bot's task or routine (WISP 4xx · Status Cards), as its version says it; `text` is its fallback. */
+  /** A bot's task or routine (WISP 4xx · Status Cards), as its version says it; `text` is its fallback. Or its buttons. */
   card?: StatusCard;
+  /**
+   * A reply that pressed a button of a message of mine (WISP 4xx · Message Buttons), as this side's engine took it:
+   * `messageId` the question here, `button` its id, `label`, `inferred` when only the text named it.
+   */
+  press?: { messageId: string; button: string; label: string; inferred?: true };
 }
 
 export function messageJson(message: StoredMessage): MessageJson {
@@ -135,11 +140,13 @@ export function messageJson(message: StoredMessage): MessageJson {
     ...(message.paymentId ? { paymentId: message.paymentId } : {}),
     ...(message.event ? { event: message.event } : {}),
     ...(message.replyTo ? { replyTo: { id: message.replyTo.messageId ?? message.replyTo.id, snippet: message.replyTo.snippet, from: message.replyTo.from ?? null,
-      ...(message.replyTo.member ? { member: message.replyTo.member } : {}), found: !!message.replyTo.messageId } } : {}),
+      ...(message.replyTo.member ? { member: message.replyTo.member } : {}), found: !!message.replyTo.messageId,
+      ...(message.replyTo.button ? { button: message.replyTo.button } : {}) } } : {}),
     ...(reactionsJson(message).length ? { reactions: reactionsJson(message) } : {}),
     ...(message.edit ? { edits: message.edit.seq, editedAt: message.edit.at, ...(message.edit.pending ? { editPending: true } : {}) } : {}),
     ...(message.forwarded ? { forwarded: message.forwarded } : {}),
     ...(message.card ? { card: message.card } : {}),
+    ...(message.press ? { press: { messageId: message.press.messageId, button: message.press.button, label: message.press.label, ...(message.press.inferred ? { inferred: true as const } : {}) } } : {}),
   };
 }
 

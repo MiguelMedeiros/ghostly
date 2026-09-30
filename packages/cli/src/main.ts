@@ -13,6 +13,7 @@ import { keepServing, openHost, serve, type Host } from "./host";
 import { allowlist, checkWebhook, eventHandler, readCursor } from "./listen";
 import { resolve } from "node:path";
 import { restoreProfile } from "./backup";
+import { buttonsOf } from "./buttons";
 import { secretsFromStdin } from "./secretInput";
 import {
   checkProfileName, createProfile, currentProfile, DEFAULT_PROFILE, ghostlyHome, listProfiles, lockOwner, profileExists, profilePaths, selectProfile,
@@ -63,7 +64,7 @@ async function warnVersion(client: DaemonClient): Promise<void> {
  */
 export function chatOnly(method: string, params: Record<string, unknown>): boolean {
   // A status card's `chat` may name a group as well (WISP 4xx · Status Cards): its sessions must start.
-  if (method.startsWith("task.") || method.startsWith("routine.")) return false;
+  if (method.startsWith("task.") || method.startsWith("routine.") || method.startsWith("button.")) return false;
   return method.startsWith("chat.") || (params.chat !== undefined && params.group === undefined && !method.startsWith("group."));
 }
 
@@ -526,6 +527,7 @@ async function textCommand(name: string, argv: string[]): Promise<void> {
   const params: Record<string, unknown> = { [spec.target]: target, text, force: parsed.options.force === true, ...(message !== undefined && { message }) };
   if (spec.target === "group") params.mentions = parsed.options.mention ?? [];
   if (parsed.options.reply !== undefined) params.reply = parsed.options.reply;
+  if (!spec.message) Object.assign(params, buttonsOf(parsed.options));
   print(await withSession(g, (s) => {
     if (spec.target === "chat") {
       // A one-shot leaves once its command is done: by default it stays until the message went out.
