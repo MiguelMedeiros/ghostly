@@ -67,8 +67,7 @@ function bump(root, next) {
 
   const crateVersion = (text) => text.replace(/^version = "[^"]+"/m, `version = "${next}"`);
   edit("src-tauri/Cargo.toml", crateVersion);
-  edit("cli/Cargo.toml", crateVersion);
-  edit("Cargo.lock", (text) => text.replace(/(name = "ghostly(?:-cli)?"\nversion = ")[^"]+(")/g, `$1${next}$2`));
+  edit("Cargo.lock", (text) => text.replace(/(name = "ghostly"\nversion = ")[^"]+(")/g, `$1${next}$2`));
 
   edit("website/lib/release.ts", (text) => text.replace(/(export const VERSION = ")[^"]+(")/, `$1${next}$2`));
   edit("docs/INSTALLATION.md", (text) =>

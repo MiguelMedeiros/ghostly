@@ -11,10 +11,10 @@ import { appendFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 
 /**
- * The Rust jobs (Tauri Backend, CLI). Only a draft skips them without one of these: `ready_for_review` runs
+ * The Rust job (Tauri Backend). Only a draft skips it without one of these: `ready_for_review` runs
  * everything again.
  */
-export const RUST = /^(src-tauri\/|cli\/|native-transports\/|Cargo\.(toml|lock)$|\.github\/workflows\/ci\.yml$)/;
+export const RUST = /^(src-tauri\/|native-transports\/|Cargo\.(toml|lock)$|\.github\/workflows\/ci\.yml$)/;
 
 /**
  * Everything the Website jobs (checks and browser checks) read: a directory ends in `/`. The site builds from
@@ -73,7 +73,7 @@ export const covers = (inputs, file) => inputs.some((p) => (p.endsWith("/") ? fi
 export function plan(files, { draft }) {
   const why = [];
   const rust = !draft || files.some((f) => RUST.test(f));
-  if (!rust) why.push("Draft without Rust changes: Tauri Backend and CLI skipped");
+  if (!rust) why.push("Draft without Rust changes: Tauri Backend skipped");
   const website = files.some((f) => covers(WEBSITE_INPUTS, f));
   if (!website) why.push("Nothing the website reads changed: Website skipped");
   const app = files.some((f) => !NOT_APP.test(f));
