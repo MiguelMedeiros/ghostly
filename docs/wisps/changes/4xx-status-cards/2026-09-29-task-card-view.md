@@ -1,0 +1,1 @@
+The task card in the chat (title, bar, status, a pull request's size; opened in place with the step, the steps, the times and the links by their host) and the Tasks button in a chat's or group's header, there only while a card is, counting the active tasks; a card message has no Edit in the app.

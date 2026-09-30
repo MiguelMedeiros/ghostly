@@ -1,0 +1,52 @@
+{
+  "panel": {
+    "active": "نشطة",
+    "activeCount": "{{count}} نشطة",
+    "button": "المهام",
+    "buttonCount": "المهام، {{count}} نشطة",
+    "finished": "منتهية",
+    "info": "تنشر الروبوتات هذه البطاقات وتحدّثها. اضغط على واحدة للانتقال إليها في المحادثة.",
+    "routines": "الروتينات",
+    "title": "المهام"
+  },
+  "routine": {
+    "cron": "Cron:",
+    "next": "التالي {{when}}",
+    "noRuns": "لم يعمل بعد",
+    "result": {
+      "failed": "فشل",
+      "ok": "نجح",
+      "skipped": "تم التخطي"
+    },
+    "runs": "آخر التشغيلات",
+    "state": {
+      "active": "نشط",
+      "paused": "متوقف مؤقتًا"
+    }
+  },
+  "task": {
+    "branch": "الفرع:",
+    "item": {
+      "done": "تم",
+      "failed": "فشل",
+      "pending": "للتنفيذ",
+      "running": "قيد التنفيذ",
+      "skipped": "تم التخطي"
+    },
+    "now": "الآن:",
+    "pr": "PR #{{number}}",
+    "prNoNumber": "طلب دمج",
+    "progress": "التقدم",
+    "started": "بدأت {{ago}}",
+    "status": {
+      "blocked": "متوقفة",
+      "cancelled": "ملغاة",
+      "done": "مكتملة",
+      "failed": "فشلت",
+      "queued": "في الانتظار",
+      "running": "قيد التنفيذ"
+    },
+    "steps": "{{done}} من {{total}} خطوات",
+    "updated": "حُدّثت {{ago}}"
+  }
+}

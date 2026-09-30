@@ -42,6 +42,20 @@ export class PairedCalls {
     return { t: PAIRED_CALL_FRAME, s: signal };
   }
 
+  /**
+   * This app is going away: a call it placed or answered is hung up, as its person would (its latest signal an
+   * offer, an answer, or a picture change, which only a call on sends). Returns the hang-up to send before the
+   * goodbye, or null when no call of ours is on. Read by its kind, not its age: a call outlasts its offer's freshness.
+   */
+  hangUp(): PairedCallFrame | null {
+    if (!this.latest) return null;
+    let said: { t?: unknown; ts?: unknown };
+    try { said = JSON.parse(this.latest.signal); } catch { return null; }
+    if (said.t !== "o" && said.t !== "a" && said.t !== "v") return null;
+    const ts = Math.max(this.now(), typeof said.ts === "number" ? said.ts + 1 : 0);
+    return this.set(JSON.stringify({ t: "h", ts }));
+  }
+
   /** On a new session that carries calls: the latest signal again, if it is still fresh enough to act on. */
   pending(): PairedCallFrame | null {
     if (!this.latest) return null;

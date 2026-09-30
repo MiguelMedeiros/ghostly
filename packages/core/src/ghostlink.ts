@@ -2874,6 +2874,10 @@ export class GhostLink {
     this.leaving = true;
     if (!this.channel || this.paired?.state.status !== "ready") return;
     traceLink(this.myPubKeyZ32, "depart", {});
+    // A call still on is hung up first: the goodbye ends the contact's session, so a hang-up after it never arrives,
+    // and the contact's call went on until its media gave up (half a minute).
+    const hangUp = this.supportsCalls ? this.pairedCalls.hangUp() : null;
+    if (hangUp) try { this.channel.send(JSON.stringify(hangUp)); } catch { /* closing already */ }
     try { this.channel.send(JSON.stringify({ t: "paired-bye" })); } catch { /* closing already: the contact's liveness finds out */ }
   }
 

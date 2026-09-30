@@ -169,7 +169,7 @@ export function App() {
 
   if (!isMobile) {
     return (
-      <div className="h-screen w-full flex bg-app-bg">
+      <div className="two-pane w-full flex bg-app-bg">
         <Sidebar />
         {chats("flex-1 flex flex-col min-w-0")}
         {!inChat && (

@@ -21,6 +21,8 @@
   --color-accent-dim: var(--theme-accent-dim);
   --color-accent-hover: var(--theme-accent-hover);
   --color-danger: #ea4335;
+  /* Something finished well (a bot's task done), the same in every theme, as danger is. */
+  --color-success: #22a55a;
   /* Test money's colour, the same in every theme (Real money takes the accent). */
   --color-test-money: #e0a800;
   --color-text-primary: var(--theme-text-primary);
@@ -308,6 +310,30 @@ html[data-standalone="true"] {
 .app-shell {
   height: 100vh;
   height: var(--app-height, 100dvh);
+}
+
+/* Two panes (768px and wider): the window's height, what the browser's own bars leave of it (iPad Safari's 100vh
+   reached under its toolbar and cut the tab bar). On a touch screen with the keyboard up (an iPad, a phone on its
+   side) iOS leaves the page its height, so the panes take what the keyboard leaves (`--app-height`) and the message
+   field stays above it; Safari scrolled the whole page instead, and left it scrolled with a blank band once the
+   keyboard went. Only while it is up: after a rotation the Simulator's installed iPhone app once reported a visible
+   height 68px short of the screen (stale or iOS's own), and the panes must not shrink to that. */
+.two-pane {
+  height: 100vh;
+  height: 100dvh;
+}
+@media (pointer: coarse) {
+  html[data-keyboard="true"] .two-pane {
+    height: var(--app-height, 100dvh);
+  }
+
+  /* As on a phone held upright (below): a field under 16px makes iOS zoom into it on focus, and the page stayed
+     zoomed and panned once the keyboard went, an iPhone on its side too (874px wide, two panes). */
+  input,
+  textarea,
+  select {
+    font-size: 16px !important;
+  }
 }
 
 .pb-safe {

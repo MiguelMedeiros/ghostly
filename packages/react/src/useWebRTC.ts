@@ -856,6 +856,22 @@ export function useWebRTC({
     return () => clearTimeout(timer);
   }, [callState]);
 
+  // The app or the tab closes mid-call (Ghostly Desktop's `ghostly-departing`, a page's `pagehide`): it hangs up as
+  // its person would, so the contact's call ends now and not when its connection gives up, and this chat keeps the
+  // call's end line. A call still ringing here is left to ring out on the caller's side: a hang-up would read as declined.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const leaving = () => {
+      if (callStateRef.current !== "idle" && callStateRef.current !== "incoming") hangUpRef.current(true, true);
+    };
+    window.addEventListener("pagehide", leaving);
+    window.addEventListener("ghostly-departing", leaving);
+    return () => {
+      window.removeEventListener("pagehide", leaving);
+      window.removeEventListener("ghostly-departing", leaving);
+    };
+  }, []);
+
   useEffect(() => {
     if (!noAnswer) return;
     const timer = setTimeout(() => setNoAnswer(false), NO_ANSWER_SHOWN_MS);
