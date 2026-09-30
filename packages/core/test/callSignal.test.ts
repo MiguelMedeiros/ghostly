@@ -215,6 +215,13 @@ describe("call signals", () => {
     expect(parseCallSignal(JSON.stringify({ t: "h", ts: NOW, u: "x\r\n" }), NOW)).toEqual({ t: "h", ts: NOW });
   });
 
+  it("keeps a hang-up's reason when it is one it knows: `u`, the call could not connect", () => {
+    expect(parseCallSignal(JSON.stringify({ t: "h", ts: NOW, r: "u" }), NOW)).toEqual({ t: "h", ts: NOW, r: "u" });
+    for (const r of ["x", 1, null, ["u"], "u\r\n"]) {
+      expect(parseCallSignal(JSON.stringify({ t: "h", ts: NOW, r }), NOW)).toEqual({ t: "h", ts: NOW });
+    }
+  });
+
   it("rejects values that could inject SDP lines", () => {
     const good = JSON.parse(signalFrom(CHROME_OFFER, "o")) as CallSignal;
     const bad = (patch: Record<string, unknown>) => parseCallSignal(JSON.stringify({ ...good, ...patch }), NOW);

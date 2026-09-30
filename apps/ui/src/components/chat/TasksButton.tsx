@@ -238,8 +238,11 @@ function TasksPanel({ entries, nameOf, anchorRef, onClose, onJump }: {
       </button>
     </div>
     {info && <p data-testid="chat-tasks-info-text" className="m-0 shrink-0 border-b border-border px-3 py-2 text-xs leading-relaxed text-text-secondary">{t("cards.panel.info")}</p>}
+    {/* `relative`: the rows' screen-reader words (sr-only, absolute) are placed and clipped in the list. Placed by the
+        panel instead, those far down the list made the panel itself taller than its box, and a row scrolled into view
+        (a click, a focus) scrolled the panel: its header went out of sight, a blank under the list. */}
     <div data-testid="chat-tasks-scroll"
-      className={`min-h-0 flex-1 snap-y snap-proximity overflow-y-auto overscroll-contain ${nameOf || finishedOpen ? UNDER_STICKY : ""} ${phone ? "pb-safe" : "pb-1"}`}>
+      className={`relative min-h-0 flex-1 snap-y snap-proximity overflow-y-auto overscroll-contain ${nameOf || finishedOpen ? UNDER_STICKY : ""} ${phone ? "pb-safe" : "pb-1"}`}>
       {!model.sections.length && <p data-testid="chat-tasks-empty" className="m-0 px-3 py-3 text-center text-xs text-text-muted">{t("cards.panel.empty")}</p>}
       {model.sections.map((section, i) => (
         <section key={section.author} data-testid={nameOf ? "chat-tasks-sender" : undefined} data-author={nameOf ? section.author : undefined}
