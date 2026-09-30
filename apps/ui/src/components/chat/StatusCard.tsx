@@ -149,16 +149,18 @@ export function TaskElapsedLine({ card, end, testId, className = "" }: { card: T
 /**
  * A card message's time, where a bubble has its time and "edited": updates are a card's normal life, so a card that
  * changed says when ("updated 2 min ago"), kept current like `TaskElapsedLine`; one that never did, the time it came.
- * The exact time on hover.
+ * The exact time on hover. `compact` (the end of a routine's one line): the time of its last change only, the words
+ * on hover.
  */
-export function CardTime({ sent, changed }: { sent: number; changed?: number }) {
+export function CardTime({ sent, changed, compact = false }: { sent: number; changed?: number; compact?: boolean }) {
   const { t, language } = useI18n();
   const ref = useRef<HTMLSpanElement>(null);
   const now = useMinuteClock(ref);
   const at = changed ?? sent;
+  const updated = changed !== undefined ? t("cards.task.updated", { ago: agoIn(language)(changed / 1000, Math.max(now, changed) / 1000) }) : undefined;
   return (
-    <span ref={ref} data-testid="status-card-time" data-updated={changed !== undefined || undefined} title={clockTime(at, language)} className="shrink-0 whitespace-nowrap">
-      {changed !== undefined ? t("cards.task.updated", { ago: agoIn(language)(changed / 1000, Math.max(now, changed) / 1000) }) : clockTime(sent, language)}
+    <span ref={ref} data-testid="status-card-time" data-updated={changed !== undefined || undefined} title={compact ? updated : clockTime(at, language)} className="shrink-0 whitespace-nowrap">
+      {updated && !compact ? updated : clockTime(at, language)}
     </span>
   );
 }

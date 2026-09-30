@@ -828,7 +828,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
     // (its fallback). Updates are its normal life, so no "edited": when it last changed, in the card.
     const card = message.card;
     const meta = <>
-      <CardTime sent={message.timestamp} changed={message.edit?.at} />
+      <CardTime sent={message.timestamp} changed={message.edit?.at} compact={card.kind === "routine"} />
       {isMe && <DeliveryStatus delivery={shown} acked={isAcked} onRetry={retry} />}
     </>;
     return (

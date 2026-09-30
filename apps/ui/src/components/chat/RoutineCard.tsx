@@ -113,7 +113,7 @@ export function RoutineView({ card, meta }: { card: RoutineCard; meta?: ReactNod
           <span className="sr-only">{card.lastRun ? t("cards.routine.lastRun", { result: t(`cards.routine.result.${card.lastRun.result}`) }) : t("cards.routine.noRuns")}</span>
         </span>
       </button>
-      {meta && <span className="flex shrink-0 items-center gap-[3px] pe-3 text-[11px] text-text-primary/65 @max-[17rem]:hidden">{meta}</span>}
+      {meta && <span className="flex shrink-0 items-center gap-[3px] ps-1.5 pe-3 text-[11px] text-text-primary/65 @max-[21rem]:hidden">{meta}</span>}
       </div>
       {open && (
         <div id={detailsId} data-testid="status-card-details" className="mx-3 space-y-2 border-t border-text-primary/10 pb-2.5 pt-2 text-xs leading-snug text-text-primary/80">
