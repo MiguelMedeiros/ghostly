@@ -22,5 +22,6 @@
   "save": "保存",
   "success": "成功",
   "unnamedContact": "联系人 · {{key}}",
+  "unnamedContactShort": "联系人",
   "viewPhoto": "查看 {{name}} 的照片"
 }

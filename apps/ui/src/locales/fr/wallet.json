@@ -181,7 +181,12 @@
       "movements": "{{count}} mouvements",
       "movementsOne": "1 mouvement",
       "noFee": "sans frais",
-      "none": "Rien pour l’instant"
+      "none": "Rien pour l’instant",
+      "note": {
+        "paymentFailed": "Un paiement Lightning a échoué",
+        "requestPaid": "Demande payée via Lightning",
+        "testCoins": "Pièces de test de la mint de test"
+      }
     },
     "intent": "{{amount}} {{unit}} · {{state}}",
     "invoiceFor": "Facture de {{amount}}",

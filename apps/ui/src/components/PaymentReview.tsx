@@ -2,6 +2,7 @@ import {useState} from 'react';
 import {walletNetworkOf,type PaymentReview as Review} from '@ghostly/core';
 import type {WalletPlatform} from '../lib/platform';
 import {useI18n} from '../contexts/I18nContext';
+import {formatAt} from '../lib/time';
 import {NetworkTag,satsIn} from './NetworkTag';
 import {ConfirmRealMoney} from './ConfirmRealMoney';
 import { formatAmount, formatTokenAmount } from "../lib/amount";
@@ -40,7 +41,7 @@ export function PaymentReview({review:initial,wallet,onClose,onSent}:{review:Rev
    {!token&&<div><dt className="text-text-muted">{t('payments.review.total')}</dt><dd>{formatAmount(review.amount+review.fee, t.language)} {unit}</dd></div>}
    <div><dt className="text-text-muted">{t('payments.review.status')}</dt><dd aria-live="polite" data-testid="review-status">{status in STATE_KEY?t(STATE_KEY[status as keyof typeof STATE_KEY]):status}</dd></div>
   </dl>
-  <details className="text-xs text-text-secondary"><summary className="cursor-pointer text-text-muted">{t('payments.review.details')}</summary><dl className="space-y-2 pt-2 break-all"><div><dt>{t('payments.review.payee')}</dt><dd>{review.payee}</dd></div><div><dt>{t('payments.review.provider')}</dt><dd>{review.provider}</dd></div><div><dt>{t('payments.review.expires')}</dt><dd>{new Date(review.expiresAt).toLocaleString()}</dd></div>{token&&<><div><dt>{t('payments.review.tokenChain')}</dt><dd>{t('payments.review.tokenChainValue',{token:review.token??'',chain:review.chainId??'',decimals:review.decimals??''})}</dd></div><div><dt>{t('payments.review.gasNonce')}</dt><dd>{review.evm?.gasLimit} / {review.evm?.nonce}</dd></div><div><dt>{t('payments.review.feePerGas')}</dt><dd>{review.evm?.maxFeePerGas} / {review.evm?.maxPriorityFeePerGas}</dd></div></>}{review.txid&&<div><dt>{t('payments.review.transaction')}</dt><dd>{review.txid}</dd></div>}</dl></details>
+  <details className="text-xs text-text-secondary"><summary className="cursor-pointer text-text-muted">{t('payments.review.details')}</summary><dl className="space-y-2 pt-2 break-all"><div><dt>{t('payments.review.payee')}</dt><dd>{review.payee}</dd></div><div><dt>{t('payments.review.provider')}</dt><dd>{review.provider}</dd></div><div><dt>{t('payments.review.expires')}</dt><dd>{formatAt(review.expiresAt, { dateStyle: "medium", timeStyle: "short" }, t.language)}</dd></div>{token&&<><div><dt>{t('payments.review.tokenChain')}</dt><dd>{t('payments.review.tokenChainValue',{token:review.token??'',chain:review.chainId??'',decimals:review.decimals??''})}</dd></div><div><dt>{t('payments.review.gasNonce')}</dt><dd>{review.evm?.gasLimit} / {review.evm?.nonce}</dd></div><div><dt>{t('payments.review.feePerGas')}</dt><dd>{review.evm?.maxFeePerGas} / {review.evm?.maxPriorityFeePerGas}</dd></div></>}{review.txid&&<div><dt>{t('payments.review.transaction')}</dt><dd>{review.txid}</dd></div>}</dl></details>
   {token&&<p className="text-[11px] text-text-muted">{review.asset==='TEST-USDT'?t('payments.review.note.usdtTest',{blocks}):t('payments.review.note.usdt',{blocks})}</p>}
   {review.method==='arkade'&&<p className="text-[11px] text-text-muted">{real?t('payments.review.note.arkReal'):t('payments.review.note.arkTest')}</p>}
   {review.method==='bark'&&<p className="text-[11px] text-text-muted">{t('payments.review.note.bark')}</p>}
