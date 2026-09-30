@@ -281,7 +281,7 @@ describe("Settings → System notifications", () => {
     expect(commands()).toContainEqual(["open_notification_settings"]);
   });
 
-  it("Desktop on Windows, denied: its own settings; on Linux the general line and no button", async () => {
+  it("Desktop on Windows, denied: its own settings; on Linux the system's settings and no button", async () => {
     desktop("Win32", { native_notification_permission: "denied" });
     const { unmount } = renderSettings();
     await waitFor(() => expect(row()).toHaveTextContent("Allow them in Windows Settings → Notifications"));
@@ -289,7 +289,8 @@ describe("Settings → System notifications", () => {
     unmount();
     desktop("Linux x86_64", { native_notification_permission: "denied" });
     renderSettings();
-    await waitFor(() => expect(row()).toHaveTextContent("Blocked. Allow them in device or browser settings."));
+    // No browser here: the line said "device or browser settings".
+    await waitFor(() => expect(row()).toHaveTextContent("Blocked. Allow them in system settings."));
     expect(screen.queryByTestId("settings-notification-settings")).toBeNull();
   });
 
@@ -302,6 +303,27 @@ describe("Settings → System notifications", () => {
     expect(toggle()).toHaveAttribute("aria-checked", "false");
     expect(loadSettings().notifications.systemEnabled).toBe(false);
     expect(screen.queryByTestId("settings-notification-settings")).toBeNull();
+  });
+
+  it("extension, declined: turning the switch on asks again, and the line says so, not a browser setting", async () => {
+    // "notifications" is an optional permission: Chrome asks each time it is requested, so a refusal is undone here.
+    const chrome = {
+      runtime: { id: "ext", getURL: (path: string) => `chrome-extension://ext/${path}` },
+      permissions: { contains: vi.fn(async () => false), request: vi.fn(async () => false) },
+    };
+    (globalThis as { chrome?: unknown }).chrome = chrome;
+    const { user } = renderSettings();
+    await waitFor(() => expect(row()).toHaveTextContent("While Ghostly is open"));
+    await user.click(toggle());
+    await waitFor(() => expect(row()).toHaveTextContent("Not allowed. Turn the switch on to ask again."));
+    expect(row()).not.toHaveTextContent(/browser settings/);
+    expect(screen.queryByTestId("settings-notification-settings")).toBeNull();
+    expect(toggle()).toHaveAttribute("aria-checked", "false");
+    chrome.permissions.request.mockResolvedValue(true);
+    chrome.permissions.contains.mockResolvedValue(true);
+    await user.click(toggle());
+    await waitFor(() => expect(toggle()).toHaveAttribute("aria-checked", "true"));
+    expect(chrome.permissions.request).toHaveBeenCalledTimes(2);
   });
 
   it("web: blocked in the browser has no button; no Notification API says so", async () => {
