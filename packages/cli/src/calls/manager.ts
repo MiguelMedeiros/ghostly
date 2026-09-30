@@ -48,6 +48,9 @@ export const CONNECT_MS = 30_000;
 export const MEDIA_GRACE_MS = 3_000;
 /** After a hang-up, the signal is cleared this much later (the apps' own delay). */
 export const CLEAR_MS = 5_000;
+/** How many times an outgoing call offers again after an answer was refused (`redial`), and the wait before each. */
+export const MAX_REDIALS = 3;
+export const REDIAL_BACKOFF_MS = [150, 300, 600] as const;
 
 interface Call {
   id: string;
@@ -61,8 +64,8 @@ interface Call {
   offerTs: number;
   /** This side's offer waits for its answer. */
   offering: boolean;
-  /** Whether this side offered again on a new connection, after its first answer was refused (`redial`). */
-  redialed: boolean;
+  /** How many times this side offered again on a new connection after an answer was refused (`redial`). */
+  redials: number;
   /** Counts the connections made for the call: one that comes back after a newer one was asked for is closed. */
   attempt: number;
   media: CallMedia | null;
@@ -131,8 +134,9 @@ export class CallManager {
     } else if (signal.t === "h") {
       this.lastSignal.set(chat, signal.ts);
       if (call) {
-        // A hang-up while a second offer waits (`redial`) is the contact's app ending a connection that failed.
-        const reason: EndReason = call.state === "ringing" ? (call.direction === "in" ? "missed" : "rejected") : call.offering ? "failed" : "remote-hangup";
+        // A hang-up while this side starts over (`redial`) is the contact's app ending a connection that failed.
+        const failed = call.offering || (call.direction === "out" && call.redials > 0);
+        const reason: EndReason = call.state === "ringing" ? (call.direction === "in" ? "missed" : "rejected") : failed ? "failed" : "remote-hangup";
         void this.end(call, reason, false);
       }
     }
@@ -169,7 +173,7 @@ export class CallManager {
       call.media!.applyAnswer(answer);
     } catch (error) {
       const why = error instanceof Error ? error.message : String(error);
-      if (!call.redialed) {
+      if (call.redials < MAX_REDIALS) {
         process.stderr.write(`ghostly: call ${call.id}: the answer was refused (${why}): offering again on a new connection\n`);
         void this.redial(call);
         return;
@@ -182,17 +186,26 @@ export class CallManager {
   }
 
   /**
-   * A second offer, once, on a new connection. libdatachannel (0.24.5) can refuse a good answer: when the contact's
+   * A new offer on a new connection, up to MAX_REDIALS times, each after a short wait. libdatachannel (0.24.5) can refuse a good answer: when the contact's
    * checks and its DTLS hello came before the answer (they do, the answer crosses the chat session), ICE connects
    * and the handshake ends inside setRemoteDescription, before the answer's fingerprint is recorded; the fingerprint
    * check fails, the connection closes its transports, and adding the answer's candidates throws "Got a remote
    * candidate without ICE transport". That connection is done for, and the contact's side saw the handshake fail
-   * too, so both start over: the contact's side answers the newer offer (`reanswer`). Fixed upstream in libdatachannel
-   * 0235225a, which no release has yet.
+   * too, so both start over: the contact's side answers the newer offer (`reanswer`). The race can hit the new
+   * connection as well (Linux arm64 saw it twice in a row), hence more than one. The contact's side ends a call whose
+   * connection failed after MEDIA_GRACE_MS: every wait stays well under it. Fixed upstream in libdatachannel 0235225a,
+   * which no release has yet.
    */
   private async redial(call: Call): Promise<void> {
-    call.redialed = true;
+    const wait = REDIAL_BACKOFF_MS[Math.min(call.redials, REDIAL_BACKOFF_MS.length - 1)];
+    call.redials++;
+    // The refused connection is dropped now: its closing must not arm its own timer over the one below while we wait.
+    call.attempt++;
+    call.media?.close();
+    call.media = null;
     this.arm(call, CONNECT_MS, "failed", true);
+    await new Promise((resolve) => setTimeout(resolve, wait));
+    if (call.ended) return;
     try {
       const stack = await this.stack();
       if (!(await this.connect(call, (media) => CallMedia.offer(stack, media)))) return;
@@ -205,7 +218,7 @@ export class CallManager {
     }
   }
 
-  /** The contact's second offer (its `redial`): answered on a new connection, on the call's socket. */
+  /** The contact's newer offer (its `redial`): answered on a new connection, on the call's socket. */
   private async reanswer(call: Call, offer: CallSignal): Promise<void> {
     process.stderr.write(`ghostly: call ${call.id}: the contact offered again: answering on a new connection\n`);
     call.offer = offer;
@@ -319,7 +332,7 @@ export class CallManager {
     if (clearing) { clearTimeout(clearing); this.clearing.delete(chat); }
     const call: Call = {
       id: randomBytes(6).toString("hex"), chat, direction, state: "ringing", rate, video: false, offer: null, offerTs: 0,
-      offering: false, redialed: false, attempt: 0, media: null, socket: null, queue: null, startedAt: this.now, connectedAt: null, timer: null, ended: false,
+      offering: false, redials: 0, attempt: 0, media: null, socket: null, queue: null, startedAt: this.now, connectedAt: null, timer: null, ended: false,
     };
     this.calls.set(call.id, call);
     return call;

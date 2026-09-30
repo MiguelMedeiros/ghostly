@@ -295,15 +295,40 @@ describe("two call managers", { timeout: 60_000 }, () => {
     expect(await until(() => b.events.find((e) => e.type === "call.ended"))).toMatchObject({ reason: "remote-hangup" });
   });
 
-  it("a second refused answer ends the call as failed, and the contact is told", async () => {
-    const { a, b } = pairOfManagers({ a: refusingStack(2) });
+  // Linux arm64 runners saw the race twice in a row (CI run 36667046330): one start-over was not enough.
+  for (const refused of [2, 3]) {
+    it(`an answer refused ${refused} times in a row: the call still connects, on the same sockets`, async () => {
+      const { a, b } = pairOfManagers({ a: refusingStack(refused) });
+      b.calls.setAuto({ on: true });
+      const placed = await a.calls.start("chat-ab", {}) as { call: string; audio: { socket: string } };
+      await Promise.all([
+        until(() => a.events.find((e) => e.type === "call.connected")),
+        until(() => b.events.find((e) => e.type === "call.connected")),
+      ]).catch(diagnose(a, b));
+      expect(signalsOf(a, "o")).toHaveLength(refused + 1);
+      expect(signalsOf(b, "a")).toHaveLength(refused + 1);
+      expect(signalsOf(a, "h")).toHaveLength(0);
+      expect(signalsOf(b, "h")).toHaveLength(0);
+      expect(a.events.map((e) => e.type)).toEqual(["call.outgoing", "call.connected"]);
+      expect(b.events.map((e) => e.type)).toEqual(["call.incoming", "call.connected"]);
+      expect(a.calls.list()).toMatchObject([{ call: placed.call, state: "connected", audio: { socket: placed.audio.socket } }]);
+      await a.calls.stopAll();
+      await b.calls.stopAll();
+    });
+  }
+
+  it("answers refused past the last start-over end the call as failed, and the contact is told", async () => {
+    // The first offer and three more (MAX_REDIALS), each answer refused.
+    const { a, b } = pairOfManagers({ a: refusingStack(4) });
     b.calls.setAuto({ on: true });
     await a.calls.start("chat-ab", {});
     expect(await until(() => a.events.find((e) => e.type === "call.ended"))).toMatchObject({ reason: "failed" });
     expect(await until(() => b.events.find((e) => e.type === "call.ended"))).toMatchObject({ reason: "remote-hangup" });
-    expect(signalsOf(a, "o")).toHaveLength(2);
-    expect(signalsOf(b, "a")).toHaveLength(2);
+    expect(signalsOf(a, "o")).toHaveLength(4);
+    expect(signalsOf(b, "a")).toHaveLength(4);
+    expect(signalsOf(a, "h")).toHaveLength(1);
     expect(a.events.find((e) => e.type === "call.connected")).toBeUndefined();
+    expect(a.calls.list()).toEqual([]);
     await a.calls.stopAll();
     await b.calls.stopAll();
   });
