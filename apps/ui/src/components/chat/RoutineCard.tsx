@@ -124,7 +124,7 @@ export function RoutineView({ card, time, marks }: { card: RoutineCard; time?: R
               {paused && <Sep />}
               {next && <><span data-testid="status-card-next" title={card.schedule} className="shrink-0 whitespace-nowrap">{next}</span><Sep /></>}
               <span data-testid="status-card-last" data-result={last?.result}
-                className={`inline-flex min-w-0 items-center gap-1 ${last ? `font-medium ${RESULT_TONE[last.result].label}` : ""}`}>
+                className={`inline-flex items-center gap-1 ${last ? `shrink-0 font-medium ${RESULT_TONE[last.result].label}` : "min-w-0"}`}>
                 {last ? <>
                   <span aria-hidden="true" className={`h-1.5 w-1.5 shrink-0 rounded-full ${RESULT_TONE[last.result].dot}`} />
                   <span aria-hidden="true" className="min-w-0 truncate">{t(`cards.routine.result.${last.result}`)}</span>
