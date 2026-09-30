@@ -214,7 +214,8 @@ ghostly listen --type message.received --cursor ~/.ghostly/echo.cursor --exec '
   buttons under the question (`group send` too). A press comes back as `button.pressed` (`messageId`, `button`,
   `label`, `by`), then `ghostly button update <chat|group> <message> --chosen yes --close` shows the answer and
   takes no more. The text is what apps without buttons show, so it says how to answer in words
-  ([WISP 4xx · Message Buttons](wisps/4xx-message-buttons.md)).
+  ([WISP 4xx · Message Buttons](wisps/4xx-message-buttons.md)). A typed answer is matched by label or id, ignoring
+  case, so two labels alike (`Yes` and `yes`) or a label that is another button's id are refused (exit 2).
 - A voice bot: [examples/call-echo.mjs](../packages/cli/examples/call-echo.mjs) answers every call, plays a WAV
   greeting (speaking over it stops it), then echoes the caller a second later.
 

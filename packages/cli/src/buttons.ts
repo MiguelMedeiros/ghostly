@@ -1,4 +1,4 @@
-import { BUTTONS_CAPABILITY, STATUS_CARD_LIMITS, checkStatusCard, randomBytes, toBase64Url, type ButtonsCard } from "@ghostly/core";
+import { BUTTONS_CAPABILITY, STATUS_CARD_LIMITS, buttonLabelClash, checkStatusCard, randomBytes, toBase64Url, type ButtonsCard } from "@ghostly/core";
 import type { LinkView, StoredMessage } from "@ghostly/browser/shared/types";
 import type { Parsed } from "./args";
 import { bool, chatOrGroup, node, num, oneOf, str, type Method, type Params } from "./apiKit";
@@ -16,7 +16,8 @@ import { waitForEdit, waitForGroupFrame } from "./waits";
 /**
  * `--button id:Label` (again for each, 1 to 6), `--style id=primary|neutral|danger`, `--once` and `--id`, as the
  * method's parameters: `buttons` and `buttonsId`. Nothing when no `--button` is given. The label may hold colons: the
- * id ends at the first one. Bounds (ids, labels, how many) are the card's, checked when it is sent.
+ * id ends at the first one. Two labels that read the same (ignoring case and spaces at the ends), or a label that is
+ * another button's id, are a usage error here; other bounds (ids, labels, how many) are the card's, checked when it is sent.
  */
 export function buttonsOf(options: Parsed["options"]): { buttons: Record<string, unknown>[]; buttonsId?: string } | undefined {
   const given = Array.isArray(options.button) ? options.button as string[] : [];
@@ -30,6 +31,14 @@ export function buttonsOf(options: Parsed["options"]): { buttons: Record<string,
     if (colon < 1 || colon === value.length - 1) throw new CliError("usage", `--button takes id:Label, like yes:Yes, not ${JSON.stringify(value)}`);
     return { id: value.slice(0, colon), label: value.slice(colon + 1).trim() };
   });
+  // Two buttons a typed answer could not tell apart: the same label, or a label that is another's id (ignoring case).
+  const clash = buttonLabelClash(buttons);
+  if (clash) {
+    const [at, other] = [JSON.stringify(given[clash.at]), JSON.stringify(given[clash.with])];
+    throw new CliError("usage", clash.kind === "label"
+      ? `--button ${at} repeats the label of --button ${other} (ignoring case and spaces): a typed answer could not tell them apart`
+      : `--button ${at} has a label that is the id of --button ${other}: a typed answer could not tell them apart`);
+  }
   for (const value of Array.isArray(options.style) ? options.style as string[] : []) {
     const eq = value.indexOf("=");
     const button = eq > 0 ? buttons.find((b) => b.id === value.slice(0, eq)) : undefined;

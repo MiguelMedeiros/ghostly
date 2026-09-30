@@ -9,6 +9,7 @@ import { parseArgs } from "../src/args";
 import { buttonsOf } from "../src/buttons";
 import { COMMANDS, idSlot, positionals, TEXT_COMMANDS } from "../src/commands";
 import { chatOnly } from "../src/main";
+import { EXIT, type CliError } from "../src/errors";
 import { EventHub, type GhostlyEvent } from "../src/events";
 import { toTurn } from "../src/listen";
 import { openPersistentIndexedDb } from "../src/runtime/storage";
@@ -76,6 +77,24 @@ describe("the button flags", () => {
     expect(() => flags("send", ["Alice", "x", "--button", "yes:"])).toThrow(expect.objectContaining({ code: "usage" }));
     expect(() => flags("send", ["Alice", "x", "--button", "yes:Yes", "--style", "maybe=primary"])).toThrow(expect.objectContaining({ code: "usage", message: expect.stringMatching(/--style takes id=/) }));
     expect(() => flags("send", ["Alice", "x", "--once"])).toThrow(expect.objectContaining({ code: "usage", message: expect.stringMatching(/--once goes with --button/) }));
+  });
+
+  it("refuse two buttons a typed answer could not tell apart, naming the duplicate (exit 2)", () => {
+    const refused = (argv: string[]) => { try { flags("send", argv); } catch (error) { return error as CliError; } throw new Error("not refused"); };
+    const same = refused(["Alice", "Ok?", "--button", "yes:Yes", "--button", "no:No", "--button", "sure: YES "]);
+    expect(same).toMatchObject({ code: "usage", message: expect.stringMatching(/--button "sure: YES " repeats the label of --button "yes:Yes"/) });
+    expect(EXIT[same.code]).toBe(2);
+    expect(refused(["Alice", "Ok?", "--button", "a:No", "--button", "no:Nope"])).toMatchObject({ code: "usage", message: expect.stringMatching(/--button "a:No" has a label that is the id of --button "no:Nope"/) });
+    expect(() => flags("group send", ["Sala", "Ship?", "--button", "a:Ship", "--button", "b:ship"])).toThrow(expect.objectContaining({ code: "usage" }));
+    // Labels apart past case and spaces, and a label that is its own id, go.
+    expect(flags("send", ["Alice", "Ok?", "--button", "yes:Yes", "--button", "later:Yes, later"])).toHaveProperty("buttons");
+  });
+
+  it("refuse the same over the API, where no flag was parsed (the card's rule)", async () => {
+    const { ctx, node } = fake();
+    await expect(callApi(ctx, "chat.send", { chat: "Alice", text: "Ok?", buttons: [{ id: "yes", label: "Yes" }, { id: "y", label: "yes" }] }))
+      .rejects.toMatchObject({ code: "bad_request", message: expect.stringMatching(/repeats buttons\[0\]\.label/) });
+    expect(node.sendMessage).not.toHaveBeenCalled();
   });
 
   it("button update takes chosen, close and text; its chat may be a group", () => {
