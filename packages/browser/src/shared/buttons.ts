@@ -31,16 +31,20 @@ export function buttonPress(reply: Pick<StoredMessage, "sender" | "member" | "re
   if (reply.sender !== "peer" || original.sender !== "me" || !reply.replyTo) return undefined;
   const card = messageButtons(original);
   if (!card || card.closed) return undefined;
-  const named = reply.replyTo.button;
-  let button: CardButton | undefined, inferred = false;
-  if (named) button = card.buttons.find(b => b.id === named && sameLabel(b.label, reply.text));
-  else {
-    button = card.buttons.find(b => sameLabel(b.label, reply.text) || sameLabel(b.id, reply.text));
-    inferred = !!button;
-  }
+  const { button, inferred } = repliedButton(card, reply.text, reply.replyTo.button);
   if (!button) return undefined;
   if (answered(card, original.id, history.filter(row => row.id !== reply.id && row.sender === "peer" && row.member === reply.member))) return undefined;
   return { messageId: original.id, button: button.id, label: button.label, ...(inferred && { inferred: true as const }) };
+}
+
+/**
+ * The button a reply to a question presses: the one `b` names when the text is its label, or, without `b`, the one
+ * whose label or id the text is (`inferred`). The author's rule and the presser's own view both read replies so.
+ */
+function repliedButton(card: ButtonsCard, text: string, named: string | undefined): { button?: CardButton; inferred?: true } {
+  if (named) return { button: card.buttons.find(b => b.id === named && sameLabel(b.label, text)) };
+  const button = card.buttons.find(b => sameLabel(b.label, text) || sameLabel(b.id, text));
+  return button ? { button, inferred: true } : {};
 }
 
 /** Whether these rows (one person's) already answered the question with a `once` button. */
@@ -51,16 +55,17 @@ function answered(card: ButtonsCard, messageId: string, rows: readonly Row[]): b
 /**
  * The buttons of a message as the reader's app shows them: which one this side pressed last (from its own replies),
  * and whether it may press again. Closed, or answered with a `once` button: no more presses. `chosen`: the bot's
- * answer when it said one, else this side's own last press.
+ * answer when it said one, else this side's own last press. A reply typed in words that is a button's label or id
+ * counts as its press, as the author's app takes it (`buttonPress`): "yes" answering a once question answers it here.
  */
-export function buttonsState(message: Pick<StoredMessage, "id" | "card" | "sender">, ref: string | undefined, history: readonly Pick<StoredMessage, "sender" | "replyTo" | "timestamp">[]): { card: ButtonsCard; mine?: string; chosen?: string; open: boolean } | undefined {
+export function buttonsState(message: Pick<StoredMessage, "id" | "card" | "sender">, ref: string | undefined, history: readonly Pick<StoredMessage, "sender" | "replyTo" | "timestamp" | "text">[]): { card: ButtonsCard; mine?: string; chosen?: string; open: boolean } | undefined {
   const card = messageButtons(message);
   if (!card) return undefined;
   let mine: string | undefined, last = -Infinity, locked = false;
   for (const row of history) {
-    if (row.sender !== "me" || !row.replyTo?.button) continue;
+    if (row.sender !== "me" || !row.replyTo) continue;
     if (row.replyTo.messageId !== message.id && (!ref || row.replyTo.id !== ref)) continue;
-    const button = card.buttons.find(b => b.id === row.replyTo!.button);
+    const { button } = repliedButton(card, row.text, row.replyTo.button);
     if (!button) continue;
     if (button.once) locked = true;
     if (row.timestamp >= last) { last = row.timestamp; mine = button.id; }
