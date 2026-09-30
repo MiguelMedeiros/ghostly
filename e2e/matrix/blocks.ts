@@ -661,8 +661,10 @@ async function mainnetUi({ a, b, combo }: World): Promise<void> {
     const shown = composer.getByTestId(`payment-card-${card}-mainnet`);
     await expect(shown).toBeVisible();
     await expect(composer.locator("[data-testid^=payment-card-][data-testid$=-testnet]")).toHaveCount(0);
-    if (made.has(b)) await expect(shown).not.toHaveAttribute("title", /Your contact has no Mainnet/, { timeout: 60_000 });
-    else await expect(shown).toHaveAttribute("title", /Your contact has no Mainnet/, { timeout: 60_000 });
+    // A contact with no wallet at all says so ("Your contact has no wallet yet"); one with wallets elsewhere, which network.
+    const noWallet = /Your contact has no (?:Mainnet|wallet yet)/;
+    if (made.has(b)) await expect(shown).not.toHaveAttribute("title", noWallet, { timeout: 60_000 });
+    else await expect(shown).toHaveAttribute("title", noWallet, { timeout: 60_000 });
   } else {
     // No wallet: no card, and the composer says how to make one.
     await expect(composer.getByTestId("payment-no-wallet")).toBeVisible();

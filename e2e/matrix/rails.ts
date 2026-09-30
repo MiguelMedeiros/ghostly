@@ -6,7 +6,7 @@ import { expect, type Locator } from "@playwright/test";
 import { Interface } from "ethers";
 import { chatPayments } from "../support/payments";
 import { choose } from "../support/select";
-import { alternatives, chatPane, containing, either, newWallet, openChat, paymentCard, wallet, type Actor } from "./actors";
+import { alternatives, chatPane, containing, either, newWallet, openChat, paymentCard, template, wallet, type Actor } from "./actors";
 
 /**
  * The Testnet payment blocks of the rails that need e2e/infra (Lightning through LND, Core Lightning, NWC
@@ -431,7 +431,7 @@ async function bdk(a: Actor, b: Actor): Promise<void> {
   // B: 20,000 − 5,000 + 3,000 − 2,000 and its two fees; A: the rest, less its own two fees.
   const settledBalance = async (p: Actor) => {
     await wallet(p, "bitcoin");
-    await expect.poll(async () => { mine(); await refreshed(p); return balance(p).innerText(); }, { timeout: 90_000, intervals: [3_000] }).not.toContain("unconfirmed");
+    await expect.poll(async () => { mine(); await refreshed(p); return balance(p).innerText(); }, { timeout: 90_000, intervals: [3_000] }).not.toMatch(template("{{amount}} {{unit}} unconfirmed"));
     return refreshed(p);
   };
   const bFees = 16_000 - (await settledBalance(b));

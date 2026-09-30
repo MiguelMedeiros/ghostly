@@ -49,6 +49,16 @@ export function alternatives(english: string): string {
 /** Text that holds the English text or a Portuguese translation of it (a status line with more after it). */
 export const containing = (english: string): RegExp => new RegExp(alternatives(english));
 
+/**
+ * Text written from a string with values in it (`{{amount}} {{unit}} unconfirmed`), in English or Portuguese, whatever
+ * the values: each `{{name}}` matches anything.
+ */
+export function template(english: string): RegExp {
+  const translations = new Set([english]);
+  for (const [key, value] of en) if (value === english && pt.get(key)) translations.add(pt.get(key)!);
+  return new RegExp([...translations].map((t) => t.split(/\{\{\w+\}\}/).map(escape).join(".*?")).join("|"));
+}
+
 /** The open conversation, not the chat list. */
 export const chatPane = (actor: Peer) => actor.page.locator(".chat-wallpaper");
 
