@@ -162,6 +162,8 @@ export class DhtDelivery {
   private active = false;
   /** The next read was asked for (a refresh, a fresh packet of the contact): it is not a background one. */
   private urgent = false;
+  /** The next read is signaling: the contact dials from DHT only, and its offer waits on it (`expect`). */
+  private signalNext = false;
   private timer: ReturnType<typeof setTimeout> | null = null;
   /** The first control envelope of a start that waits (`firstControlAfterMs`). */
   private controlTimer: ReturnType<typeof setTimeout> | null = null;
@@ -325,11 +327,16 @@ export class DhtDelivery {
   }
   /** Reads the contact's mailbox now: something says it may have changed its delivery method. */
   refresh(): void { this.urgent = true; void this.tick(); }
-  /** Reads the contact's mailbox at the signaling pace for a while (a fresh packet of a contact not pinned yet). */
-  expect(ms = 2 * 60_000): void {
+  /**
+   * Reads the contact's mailbox at the signaling pace for a while (a fresh packet of a contact not pinned yet).
+   * `signal`: the contact is leaving DHT only (a fresh packet on its link key, or its offer), and the live link waits
+   * on this read to say so: the next read is signaling (`PkarrRequestOptions.signal`), and goes now.
+   */
+  expect(ms = 2 * 60_000, signal = false): void {
     const until = Date.now() + ms;
-    if (until <= this.fastUntil) return;
-    this.fastUntil = until; this.urgent = true; void this.tick();
+    if (signal) this.signalNext = true;
+    if (until <= this.fastUntil && !signal) return;
+    this.fastUntil = Math.max(this.fastUntil, until); this.urgent = true; void this.tick();
   }
   /**
    * Layer 1 carries the chat, or no longer does. While it does, the mailbox is read every 5 minutes, after one
@@ -630,8 +637,8 @@ export class DhtDelivery {
    * copy of the invite overwrote this one), or when the contact just said it can use the pinned one. Once the contact's
    * envelope was seen in the pinned mailbox, the invite's is not read any more.
    */
-  private async read(background: boolean): Promise<void> {
-    const pinned = this.pinned(), options = background ? { background } : undefined;
+  private async read(background: boolean, signal = false): Promise<void> {
+    const pinned = this.pinned(), options = signal ? { signal } : background ? { background } : undefined;
     const before = this.state.peerPinned;
     const boxes: ("invite" | "pinned")[] = !pinned ? ["invite"] : before === "seen" ? ["pinned"] : before ? ["pinned", "invite"] : ["invite", "pinned"];
     let found: SignedPacket | null = null;
@@ -684,9 +691,10 @@ export class DhtDelivery {
       // only, a drop or a text awaiting its receipt reads as signaling. The share also carries held items'
       // pointers, which a busy mailbox must not starve.
       const background = !this.urgent && this.pollMs >= STREAM_POLL_MS;
-      this.urgent = false;
+      const signal = this.signalNext;
+      this.urgent = false; this.signalNext = false;
       // A read or a publication the relays' request budget held back is a wait, not an error: it goes when the budget frees.
-      try { await this.read(background); if (!this.running) return; delete this.errors.read; }
+      try { await this.read(background, signal); if (!this.running) return; delete this.errors.read; }
       catch (error) { if (!isDiscoveryBudgetError(error)) this.errors.read = `Could not read DHT delivery: ${error instanceof Error ? error.message : String(error)}`; }
       try { await this.publish(); }
       catch (error) { if (!isDiscoveryBudgetError(error)) this.errors.publish = `Could not publish DHT delivery: ${error instanceof Error ? error.message : String(error)}`; }

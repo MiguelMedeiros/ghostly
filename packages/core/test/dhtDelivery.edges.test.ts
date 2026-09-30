@@ -548,6 +548,21 @@ describe("DHT delivery: sending and lifecycle", () => {
     await h.bob.stop();
   });
 
+  it("reads at once, as signaling, when the contact leaves DHT only, even inside a window already looking fast; the reads after are not", async () => {
+    const h = setup({ pollMs: null, state: { ...emptyDhtDeliveryState(), peerMode: "dht" }, bobCredentials: pinned() }); await h.bob.start();
+    await vi.advanceTimersByTimeAsync(0);
+    h.bob.expect(30_000); await vi.advanceTimersByTimeAsync(0);
+    const options = () => (h.transport.resolve.mock.calls as unknown[][]).slice(before).map(([, o]) => (o as { signal?: boolean } | undefined)?.signal ?? false);
+    let before = h.transport.resolve.mock.calls.length;
+    // The contact's offer came while its mailbox still said DHT only: the read that says it left goes now, as signaling.
+    h.bob.expect(30_000, true); await vi.advanceTimersByTimeAsync(0);
+    expect(options()).toEqual([true]);
+    before = h.transport.resolve.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(4_000 + 10);
+    expect(options()).toEqual([false]);
+    await h.bob.stop();
+  });
+
   it("looks at a contact's mailbox once more as the chat goes live, in the background, then every 5 minutes", async () => {
     // A text the contact put on the DHT after this side's last read, in the second before both went live (Desktop, 2026-09-30).
     const h = setup({ pollMs: null, mode: "stream", state: { ...emptyDhtDeliveryState(), peerMode: "stream" }, bobCredentials: pinned() });

@@ -30,7 +30,8 @@ export type DiscoveryChange = "tripped" | "recovered";
  * knock would wait for them (2026-09-28).
  *
  * `signal`: a link's WebRTC signaling, what its contact waits for: the write of a new offer or answer, or a read for
- * the answer while this side's offer is out. A 1:1 chat's may go a little over the relay's minute
+ * the answer while this side's offer is out, or the read of a DHT-only contact's mailbox once it shows it is leaving (the
+ * live link waits on it). A 1:1 chat's may go a little over the relay's minute
  * (`SIGNALING_ALLOWANCE_SHARE` in relay.ts).
  */
 export interface PkarrRequestOptions { background?: boolean; urgent?: boolean; group?: boolean; door?: boolean; signal?: boolean }

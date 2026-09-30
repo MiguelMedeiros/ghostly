@@ -958,7 +958,7 @@ export class GhostLink {
     if (Date.now() - presence.lastPacketAt >= EXPECT_PEER_MS || presence.lastPacketAt === this.leftDhtSeenFor) return;
     this.leftDhtSeenFor = presence.lastPacketAt;
     traceLink(this.myPubKeyZ32, "peer-link-packet", { age: Date.now() - presence.lastPacketAt });
-    this.dht.expect(EXPECT_PEER_MS);
+    this.dht.expect(EXPECT_PEER_MS, true);
   }
 
   /**
@@ -974,7 +974,7 @@ export class GhostLink {
     if (!credentials?.peerKey) return false;
     if (signal !== undefined && !verifyPairedSignal(signal, this.options.params.peerPubKeyZ32, this.myPubKeyZ32, credentials.peerKey, true)) return false;
     traceLink(this.myPubKeyZ32, "peer-dials", { signal: signal !== undefined });
-    this.dht.expect(EXPECT_PEER_MS);
+    this.dht.expect(EXPECT_PEER_MS, true);
     return true;
   }
 

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { BACKGROUND_REQUESTS_PER_MINUTE, BACKGROUND_WHILE_SIGNALING, CHAT_RESERVE, SIGNALING_ALLOWANCE_SHARE, DiscoveryBudgetError, GROUP_BURST_MS, GROUP_BURST_ONE_LINK, FRESH_READ_MS, REQUESTS_PER_MINUTE, PKARR_FUTURE_SKEW_MS, RelayTransport, newerPacket, parseRelayPayload, SIGNALING_WINDOW_MS, WRITE_FIRST_MS, createIdentity, createRelayPayload, isDiscoveryBudgetError, withRequestOptions } from "../src";
-import type { PkarrTransport } from "../src/transport";
+import type { PkarrRequestOptions, PkarrTransport } from "../src/transport";
 // covers: core.relay-client
 
 describe("relay transport", () => {
@@ -845,7 +845,7 @@ describe("relay transport: a chat's offer or answer goes over a spent minute", (
     for (let i = 0; i < n; i++) await relay.resolve(id.pubKeyZ32);
   }
   const write = (relay: PkarrTransport, signal = true) => () => relay.publish(createIdentity(), [{ label: "_ts", value: "1" }], signal ? { signal } : undefined);
-  const read = (relay: RelayTransport, options = { urgent: true, signal: true }) => () => relay.resolve(id.pubKeyZ32, options);
+  const read = (relay: RelayTransport, options: PkarrRequestOptions = { urgent: true, signal: true }) => () => relay.resolve(id.pubKeyZ32, options);
 
   it("lets a chat's offer or answer go at once, up to its allowance, while everything else waits", async () => {
     const { relay, log, went } = counting();
@@ -873,7 +873,7 @@ describe("relay transport: a chat's offer or answer goes over a spent minute", (
     const { relay, went } = counting();
     await spendTheMinute(relay);
     expect(await went(write(withRequestOptions(relay, { group: true })))).toBe(false);
-    expect(await went(read(relay, { background: true, signal: true } as { urgent: boolean; signal: boolean }))).toBe(false);
+    expect(await went(read(relay, { background: true, signal: true }))).toBe(false);
   });
 
   it("is sized by each relay's own share: one more on relay.pkarr.org (5 of its 10), for a write only", async () => {

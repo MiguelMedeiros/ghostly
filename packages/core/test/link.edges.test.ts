@@ -315,7 +315,7 @@ describe("LinkSession presence and signals", () => {
     const { a } = pair({ getServices: () => [] });
     a.s.start();
     await settle();
-    const lastPublish = () => a.transport.publish.mock.lastCall?.[2];
+    const lastPublish = () => (a.transport.publish.mock.lastCall as unknown[] | undefined)?.[2];
     const lastRead = () => (a.transport.resolve.mock.lastCall as unknown[] | undefined)?.[1];
     expect(lastPublish()).toBeUndefined();
     expect(lastRead()).not.toHaveProperty("signal");
