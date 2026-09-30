@@ -2,13 +2,14 @@ import { useEffect, useState } from "react";
 import { useI18n } from "../../contexts/I18nContext";
 import { jumpToMessage, type QuoteView } from "../../lib/replies";
 import { drawEveryRow } from "../../hooks/useTailFirst";
-import { memberText } from "../../lib/memberColors";
+import { useMemberText } from "../../contexts/MemberColorsContext";
 
 /** How long "not in this chat" stays under a quote whose original cannot be shown. */
 const NOT_HERE_MS = 3000;
 
 /** The coloured bar, the name and the line: the same look above a bubble's text and above the composer. */
 function QuoteBody({ name, snippet, mine, member, note, italic }: { name?: string; snippet: string; mine: boolean; member?: string; note?: string; italic?: boolean }) {
+  const memberText = useMemberText();
   // A group member's original: their colour, on the bar and the name (lib/memberColors.ts).
   const colour = member && !mine ? memberText(member) : undefined;
   return (

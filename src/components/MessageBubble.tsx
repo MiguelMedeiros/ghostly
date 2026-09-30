@@ -34,7 +34,7 @@ import { DeliveryStatus } from "./chat/DeliveryStatus";
 import { forwardedLabel } from "../lib/forward";
 import { PinIcon } from "./PinIcon";
 import { SenderAvatar, type MessageAuthor } from "./chat/SenderAvatar";
-import { memberText } from "../lib/memberColors";
+import { useMemberText } from "../contexts/MemberColorsContext";
 
 interface MessageBubbleProps {
   message: ChatMessage;
@@ -668,6 +668,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
   const onDelete = choosing ? undefined : deleteIt, onReply = choosing ? undefined : replyIt, onEdit = choosing ? undefined : editIt;
   const onReact = choosing ? undefined : reactIt, onForward = choosing ? undefined : forwardIt, onSelect = choosing ? undefined : selectIt;
   const { t, language, dir } = useI18n();
+  const memberText = useMemberText();
   const chat = useCueChat();
   // Only what arrives while you watch moves; history is just there.
   const [enter] = useState(() =>
@@ -822,7 +823,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
     <div
       {...rowProps}
       data-message-row
-      data-sender={isMe ? "me" : "peer"}
+      data-sender={isMe ? "me" : "peer"} data-member={isMe ? undefined : author?.key}
       className={`group flex items-start gap-1 ${isMe ? "justify-end" : "justify-start"} mb-3.5 message-row-x ${onReply ? "touch-pan-y" : ""} ${swipe.dx > 0 ? "overflow-x-clip" : ""} ${choosing ? `cursor-pointer ${selection.selected ? "bg-accent/10" : ""}` : ""} ${enter}`}
     >
       {selectBox}
@@ -864,9 +865,9 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
         }}
       >
         <TailSvg side={isMe ? "right" : "left"} />
-
+        {/* A paired message carries no name of its own: the contact has one name, known from the link. In a group, the name is over the first message of a run only. */}
         {/* A paired message carries no name of its own: the contact has one name, known from the link. */}
-        {(message.nick || peerNick) && !isMe && (
+        {(message.nick || peerNick) && !isMe && (!author || author.first) && (
           // A group member's name takes their colour (lib/memberColors.ts), and a tap on it opens who they are.
           <div data-testid="message-nick" data-key={author?.key} className={`${author ? memberText(author.key) : "text-accent-hover"} text-[12.8px] font-medium mb-[2px] leading-[22px]`}>
             {author && onOpenAuthor && !choosing
