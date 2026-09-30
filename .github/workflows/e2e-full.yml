@@ -47,6 +47,15 @@ jobs:
           ref: ${{ github.event_name == 'schedule' && 'dev' || github.ref }}
           persist-credentials: false
 
+      # The test ports (47000-47399: the environment, the web build under test and the test process's own servers,
+      # the matrix's build and its test domain) sit inside Linux's ephemeral range (32768-60999), so an outgoing
+      # connection could hold one as its local port when a server starts there ("Port 47300 is already in use", run
+      # 36688192932). Reserved, they are never given to a connection, and a server still binds them.
+      - name: Keep the test ports out of the ephemeral range
+        run: |
+          sudo sysctl -w net.ipv4.ip_local_reserved_ports=47000-47399
+          echo "Ephemeral range: $(cat /proc/sys/net/ipv4/ip_local_port_range)"
+
       - name: Setup Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
@@ -107,6 +116,15 @@ jobs:
           ref: ${{ github.event_name == 'schedule' && 'dev' || github.ref }}
           persist-credentials: false
 
+      # The test ports (47000-47399: the environment, the web build under test and the test process's own servers,
+      # the matrix's build and its test domain) sit inside Linux's ephemeral range (32768-60999), so an outgoing
+      # connection could hold one as its local port when a server starts there ("Port 47300 is already in use", run
+      # 36688192932). Reserved, they are never given to a connection, and a server still binds them.
+      - name: Keep the test ports out of the ephemeral range
+        run: |
+          sudo sysctl -w net.ipv4.ip_local_reserved_ports=47000-47399
+          echo "Ephemeral range: $(cat /proc/sys/net/ipv4/ip_local_port_range)"
+
       - name: Setup Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
@@ -166,6 +184,15 @@ jobs:
         with:
           ref: ${{ github.event_name == 'schedule' && 'dev' || github.ref }}
           persist-credentials: false
+
+      # The test ports (47000-47399: the environment, the web build under test and the test process's own servers,
+      # the matrix's build and its test domain) sit inside Linux's ephemeral range (32768-60999), so an outgoing
+      # connection could hold one as its local port when a server starts there ("Port 47300 is already in use", run
+      # 36688192932). Reserved, they are never given to a connection, and a server still binds them.
+      - name: Keep the test ports out of the ephemeral range
+        run: |
+          sudo sysctl -w net.ipv4.ip_local_reserved_ports=47000-47399
+          echo "Ephemeral range: $(cat /proc/sys/net/ipv4/ip_local_port_range)"
 
       - name: Setup Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
