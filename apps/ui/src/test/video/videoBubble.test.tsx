@@ -413,6 +413,19 @@ describe("a video not here yet", () => {
     expect(screen.getByTestId("video-status")).toHaveTextContent("40% of 35.0 MB");
   });
 
+  // WebKitGTK (Desktop on Linux) stops a large video from a blob URL partway with a decode error; from the stream it plays.
+  it("one sent from here plays from the platform's stream while it goes, where there is one", async () => {
+    const file = video({ id: "chat1-out-video-streamed" });
+    const release = vi.fn();
+    const streamFile = vi.spyOn(servicesPlatform!, "streamFile").mockResolvedValue({ url: "http://127.0.0.1:40000/token-7", release });
+    show(file, { state: "transferring", direction: "out", transferred: 14 * MB, size: file.size }, "me");
+    fireEvent.click(screen.getByTestId("video-play"));
+    await flush();
+    expect(streamFile).toHaveBeenCalledWith(file.id);
+    expect(getFile).not.toHaveBeenCalled();
+    expect(screen.getByTestId("video-player").getAttribute("src")).toBe("http://127.0.0.1:40000/token-7");
+  });
+
   it("one sent from here whose bytes cannot be read yet says so, and plays once it has gone", async () => {
     const file = video({ id: "chat1-out-video-early" });
     getFile.mockResolvedValue(null);
