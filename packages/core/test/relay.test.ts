@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { BACKGROUND_REQUESTS_PER_MINUTE, BACKGROUND_WHILE_SIGNALING, CHAT_RESERVE, DiscoveryBudgetError, GROUP_BURST_MS, GROUP_BURST_ONE_LINK, FRESH_READ_MS, REQUESTS_PER_MINUTE, PKARR_FUTURE_SKEW_MS, RelayTransport, newerPacket, parseRelayPayload, SIGNALING_WINDOW_MS, WRITE_FIRST_MS, createIdentity, createRelayPayload, isDiscoveryBudgetError, withRequestOptions } from "../src";
+import { BACKGROUND_REQUESTS_PER_MINUTE, BACKGROUND_WHILE_SIGNALING, CHAT_RESERVE, SIGNALING_ALLOWANCE_SHARE, DiscoveryBudgetError, GROUP_BURST_MS, GROUP_BURST_ONE_LINK, FRESH_READ_MS, REQUESTS_PER_MINUTE, PKARR_FUTURE_SKEW_MS, RelayTransport, newerPacket, parseRelayPayload, SIGNALING_WINDOW_MS, WRITE_FIRST_MS, createIdentity, createRelayPayload, isDiscoveryBudgetError, withRequestOptions } from "../src";
+import type { PkarrTransport } from "../src/transport";
 // covers: core.relay-client
 
 describe("relay transport", () => {
@@ -821,5 +822,66 @@ describe("relay transport: a relay that held a packet back gets it later", () =>
       expect(there).toHaveLength(1);
       expect(there[0].body).toEqual(putsOf(log, "a.test")[1].body);
     } finally { vi.useRealTimers(); }
+  });
+});
+
+describe("relay transport: a chat's offer or answer goes over a spent minute", () => {
+  // mx-d707d8d5 (2026-09-30): the pairing and the texts over the DHT spent the extension's minute on the one relay, and
+  // leaving DHT only then held the chat's offer or answer (or its reads for the answer) 40 s, while the contact's
+  // attempt gave up: "On DHT · retrying live" 46 times in 120. Its signaling now has a small allowance past the limit.
+  const id = createIdentity();
+  const allowance = Math.floor(REQUESTS_PER_MINUTE * SIGNALING_ALLOWANCE_SHARE);
+  function counting(relays = ["https://a.test"]) {
+    const log: string[] = [];
+    const relay = new RelayTransport({ freshReadMs: 0, relays, fetch: (async (_: RequestInfo | URL, init?: RequestInit) => {
+      log.push(init?.method ?? "GET");
+      return init?.method === "PUT" ? new Response(null, { status: 204 }) : new Response(createRelayPayload(id, [{ label: "_ts", value: "1" }], 3n) as BodyInit);
+    }) as typeof fetch });
+    /** Whether the request reached the relay (a read the budget holds back answers from memory, with no request). */
+    const went = async (request: () => Promise<unknown>) => { const before = log.length; await request().catch(() => {}); return log.length > before; };
+    return { relay, log, went };
+  }
+  async function spendTheMinute(relay: RelayTransport, n = REQUESTS_PER_MINUTE) {
+    for (let i = 0; i < n; i++) await relay.resolve(id.pubKeyZ32);
+  }
+  const write = (relay: PkarrTransport, signal = true) => () => relay.publish(createIdentity(), [{ label: "_ts", value: "1" }], signal ? { signal } : undefined);
+  const read = (relay: RelayTransport, options = { urgent: true, signal: true }) => () => relay.resolve(id.pubKeyZ32, options);
+
+  it("lets a chat's offer or answer go at once, up to its allowance, while everything else waits", async () => {
+    const { relay, log, went } = counting();
+    await spendTheMinute(relay);
+    // Ordinary requests wait, as before…
+    expect(await went(read(relay, { urgent: true, signal: false }))).toBe(false);
+    expect(await went(write(relay, false))).toBe(false);
+    // …the signaling goes, a fifth of the minute more, and never beyond.
+    expect(allowance).toBe(6);
+    for (let i = 0; i < allowance; i++) expect(await went(write(relay))).toBe(true);
+    expect(await went(write(relay))).toBe(false);
+    expect(log).toHaveLength(REQUESTS_PER_MINUTE + allowance);
+  });
+
+  it("gives the reads for an answer all but the last of it, which a write still takes", async () => {
+    const { relay, log, went } = counting();
+    await spendTheMinute(relay);
+    for (let i = 0; i < allowance - 1; i++) expect(await went(read(relay))).toBe(true);
+    expect(await went(read(relay))).toBe(false);
+    expect(await went(write(relay))).toBe(true);
+    expect(log.slice(REQUESTS_PER_MINUTE)).toEqual([...Array(allowance - 1).fill("GET"), "PUT"]);
+  });
+
+  it("is a chat's alone: a group's edge or a background request that says signal waits like the rest", async () => {
+    const { relay, went } = counting();
+    await spendTheMinute(relay);
+    expect(await went(write(withRequestOptions(relay, { group: true })))).toBe(false);
+    expect(await went(read(relay, { background: true, signal: true } as { urgent: boolean; signal: boolean }))).toBe(false);
+  });
+
+  it("is sized by each relay's own share: one more on relay.pkarr.org (5 of its 10), for a write only", async () => {
+    const { relay, log, went } = counting(["https://relay.pkarr.org"]);
+    await spendTheMinute(relay, 5);
+    expect(await went(read(relay))).toBe(false);
+    expect(await went(write(relay))).toBe(true);
+    expect(await went(write(relay))).toBe(false);
+    expect(log).toHaveLength(6);
   });
 });
