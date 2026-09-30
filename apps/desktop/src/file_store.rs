@@ -796,7 +796,10 @@ mod tests {
         let partial = partial_path(Path::new("/home/me/Downloads/photo.jpg")).unwrap();
         assert_eq!(partial.parent(), Some(Path::new("/home/me/Downloads")));
         let name = partial.file_name().unwrap().to_string_lossy().into_owned();
-        assert!(name.starts_with(".photo.jpg.") && name.ends_with(".part"), "{name}");
+        assert!(
+            name.starts_with(".photo.jpg.") && name.ends_with(".part"),
+            "{name}"
+        );
         assert!(partial_path(Path::new("/")).is_err());
     }
 
