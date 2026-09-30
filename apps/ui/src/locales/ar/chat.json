@@ -1,4 +1,9 @@
 {
+  "announce": {
+    "message": "{{name}}: {{text}}",
+    "messages": "{{count}} رسائل جديدة",
+    "messagesFrom": "{{count}} رسائل جديدة من {{name}}"
+  },
   "audio": {
     "cantPlay": "لا يمكن لهذا الجهاز تشغيل هذا الصوت ({{format}}). نزّله للاستماع إليه.",
     "pause": "إيقاف الصوت مؤقتًا",
@@ -263,7 +268,9 @@
     "sats": "{{amount}} ساتس",
     "testMoney": "أموال تجريبية",
     "testSats": "{{amount}} ساتس تجريبية",
-    "usdtAddress": "عنوان USDT"
+    "usdtAddress": "عنوان USDT",
+    "video": "🎬 فيديو ({{duration}})",
+    "voice": "🎤 رسالة صوتية ({{duration}})"
   },
   "reactions": {
     "chipLabel": "{{emoji}}: {{names}}",

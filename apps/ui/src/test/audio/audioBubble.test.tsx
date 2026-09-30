@@ -203,6 +203,28 @@ describe("an audio file in the chat", () => {
     expect(screen.getByTestId("audio-problem")).toHaveTextContent("(MP3)");
   });
 
+  it("a refused stream fires error and rejects its play: it plays from its bytes, with no \"can't play\"", async () => {
+    const release = vi.fn();
+    vi.spyOn(servicesPlatform!, "streamFile").mockResolvedValue({ url: "ghostly-file://localhost/song-3", release });
+    let reject: (error: Error) => void = () => {};
+    // As a real element: "play" fires at once, and the promise waits for the source.
+    play.mockImplementationOnce(function (this: HTMLMediaElement) { this.dispatchEvent(new Event("play")); return new Promise<void>((_, no) => { reject = no; }); });
+    show(song());
+    fireEvent.click(screen.getByTestId("audio-play"));
+    await flush();
+    const streamed = screen.getByTestId("audio-element") as HTMLAudioElement;
+    expect(streamed.getAttribute("src")).toBe("ghostly-file://localhost/song-3");
+    // The element's source failed: it fires error, and its pending play() is rejected too.
+    fireEvent.error(streamed);
+    await act(async () => reject(new DOMException("unsupported source", "NotSupportedError")));
+    await flush();
+    await flush();
+    expect(release).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId("audio-element").getAttribute("src")).toMatch(/^blob:/);
+    expect(screen.queryByTestId("audio-problem")).toBeNull();
+    expect(screen.getByTestId("audio-play")).toBeEnabled();
+  });
+
   it("too large to hand out here, and nothing streams it: Download to listen", async () => {
     getFile.mockResolvedValue(null);
     vi.spyOn(servicesPlatform!, "streamFile").mockResolvedValue(null);

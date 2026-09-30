@@ -1,4 +1,9 @@
 {
+  "announce": {
+    "message": "{{name}} : {{text}}",
+    "messages": "{{count}} nouveaux messages",
+    "messagesFrom": "{{count}} nouveaux messages de {{name}}"
+  },
   "audio": {
     "cantPlay": "Cet appareil ne peut pas lire cet audio ({{format}}). Téléchargez-le pour l'écouter.",
     "pause": "Mettre l'audio en pause",
@@ -263,7 +268,9 @@
     "sats": "{{amount}} sats",
     "testMoney": "Argent de test",
     "testSats": "{{amount}} sats de test",
-    "usdtAddress": "Adresse USDT"
+    "usdtAddress": "Adresse USDT",
+    "video": "🎬 Vidéo ({{duration}})",
+    "voice": "🎤 Message vocal ({{duration}})"
   },
   "reactions": {
     "chipLabel": "{{emoji}} : {{names}}",

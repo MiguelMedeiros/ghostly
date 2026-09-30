@@ -39,6 +39,12 @@ describe("the number on the app's icon", () => {
     expect(badgeCount([], groups, NOW)).toBe(1);
   });
 
+  it("a group whose newest message is mine (a forward to several chats) has nothing new", () => {
+    markGroupRead("mine", NOW - 500);
+    expect(badgeCount([], [{ id: "mine", lastMessageAt: NOW - 100, lastPeerMessageAt: NOW - 1000 }], NOW)).toBe(0);
+    expect(badgeCount([], [{ id: "mine", lastMessageAt: NOW - 100, lastPeerMessageAt: NOW - 100 }], NOW)).toBe(1);
+  });
+
   it("a mention gets through a muted group's mute, unless the group keeps mentions quiet too", () => {
     setChatMute(groupChat("g"), "forever");
     const groups = [{ id: "g", lastMessageAt: NOW - 100, lastMentionAt: NOW - 100 }];

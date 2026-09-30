@@ -1,4 +1,9 @@
 {
+  "announce": {
+    "message": "{{name}}: {{text}}",
+    "messages": "{{count}} new messages",
+    "messagesFrom": "{{count}} new messages from {{name}}"
+  },
   "audio": {
     "cantPlay": "This device can't play this audio ({{format}}). Download it to listen.",
     "pause": "Pause audio",
@@ -263,7 +268,9 @@
     "sats": "{{amount}} sats",
     "testMoney": "Test money",
     "testSats": "{{amount}} test sats",
-    "usdtAddress": "USDT address"
+    "usdtAddress": "USDT address",
+    "video": "🎬 Video ({{duration}})",
+    "voice": "🎤 Voice message ({{duration}})"
   },
   "reactions": {
     "chipLabel": "{{emoji}}: {{names}}",

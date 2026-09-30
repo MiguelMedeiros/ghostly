@@ -97,6 +97,17 @@ describe("the chat list's rows (compact, the default)", () => {
     expect(pt("calls.timeline.videoMissed")).not.toBe("Missed video call");
   });
 
+  it("says a voice message or a video in the app's language, not the English the history keeps", () => {
+    const file = (over: object) => ({ id: "f", name: "clip", size: 1, mime: "audio/webm", ...over });
+    saveSession(chat("v", { nick: "Val", messages: [message({ text: "🎤 Voice message (0:07)", file: file({ voice: { duration: 7_000, peaks: [] } }) })] }));
+    saveSession(chat("w", { nick: "Wes", messages: [message({ text: "🎬 Video (1:05)", file: file({ mime: "video/mp4", video: { duration: 65_000 } }) })] }));
+    saveSession(chat("x", { nick: "Xan", messages: [message({ text: "📎 notes.pdf", file: file({ name: "notes.pdf", mime: "application/pdf" }) })] }));
+    renderApp(<UpdateProvider><Sidebar /></UpdateProvider>, { language: "pt" });
+    expect(within(rowOf("Val")).getByTestId("chat-row-preview")).toHaveTextContent(/^🎤 Mensagem de voz \(0:07\)$/);
+    expect(within(rowOf("Wes")).getByTestId("chat-row-preview")).toHaveTextContent(/^🎬 Vídeo \(1:05\)$/);
+    expect(within(rowOf("Xan")).getByTestId("chat-row-preview")).toHaveTextContent(/^📎 notes.pdf$/);
+  });
+
   it("says a join as the chat's line does, in the app's language, not the notice's English text", () => {
     saveSession(chat("j", { nick: "Jo", messages: [message({ text: "👋 Jo joined", sender: "system", systemEvent: { type: "join", pubKey: key("j") } })] }));
     saveSession(chat("k", { nick: "Kim", messages: [message({ text: "👋 Me joined", sender: "system", systemEvent: { type: "join", pubKey: key("z") } })] }));

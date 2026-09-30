@@ -261,6 +261,26 @@ describe("a video in the chat", () => {
     expect(screen.getByTestId("video-problem")).toHaveTextContent("This device can't play this video (MP4).");
   });
 
+  it("a refused stream fires error and rejects its play: it plays from its bytes, with no \"can't play\"", async () => {
+    const release = vi.fn();
+    vi.spyOn(servicesPlatform!, "streamFile").mockResolvedValue({ url: "ghostly-file://localhost/token-5", release });
+    let reject: (error: Error) => void = () => {};
+    play.mockImplementationOnce(() => new Promise<void>((_, no) => { reject = no; }));
+    show(video({ size: 20 * MB }));
+    fireEvent.click(screen.getByTestId("video-play"));
+    await flush();
+    const streamed = screen.getByTestId("video-player") as HTMLVideoElement;
+    expect(streamed.getAttribute("src")).toBe("ghostly-file://localhost/token-5");
+    // The element's source failed: it fires error, and its pending play() is rejected too.
+    fireEvent.error(streamed);
+    await act(async () => reject(new DOMException("unsupported source", "NotSupportedError")));
+    await flush();
+    await flush();
+    expect(release).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId("video-player").getAttribute("src")).toMatch(/^blob:/);
+    expect(screen.queryByTestId("video-problem")).toBeNull();
+  });
+
   // covers: files.video.play
   it("where the engine has no full screen (Desktop on Linux), its own button fills the window with it", async () => {
     const fullscreenWindow = vi.fn(async (_on: boolean) => {});

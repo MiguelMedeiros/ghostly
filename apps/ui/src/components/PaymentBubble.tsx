@@ -14,6 +14,12 @@ import { useI18n } from "../contexts/I18nContext";
 import { ConfirmRealMoney } from "./ConfirmRealMoney";
 import { decimalInput, formatAmount, formatTokenAmount } from "../lib/amount";
 
+/** A mint as a person knows it: its own name, else its host (the full URL says nothing more to them). */
+const mintLabel = (m: { url: string; name: string }) => {
+  if (m.name && m.name !== m.url) return m.name;
+  try { return new URL(m.url).host; } catch { return m.url; }
+};
+
 /** A payment or a payment request in the chat. The amounts are live: they follow what the wallet knows. */
 export function PaymentBubble({ paymentId, peerPubKey, fallbackText }: { paymentId: string; peerPubKey: string; fallbackText: string }) {
   const { t } = useI18n();
@@ -169,7 +175,7 @@ export function PaymentBubble({ paymentId, peerPubKey, fallbackText }: { payment
         <div className="flex flex-col gap-2 mt-2">
           {/* Paying from here needs a wallet of the request's network; another wallet can still be pointed at it. */}
           {!noWallet && <>
-          {!payment.target && !viaLightning && <label className="block space-y-1 text-xs">{t("payments.bubble.cashuMint")}<Select size="sm" aria-label={t("payments.bubble.cashuMint")} value={selectedMint ?? ""} onChange={setMint} disabled={!sharedMints.length} placeholder={t("payments.bubble.noSharedMint")} options={sharedMints.map(m => ({ value: m.url, label: m.url, description: t("payments.bubble.balance", { amount: formatAmount(m.balance, t.language), unit: sats }) }))} /></label>}
+          {!payment.target && !viaLightning && <label className="block space-y-1 text-xs">{t("payments.bubble.cashuMint")}<Select size="sm" aria-label={t("payments.bubble.cashuMint")} value={selectedMint ?? ""} onChange={setMint} disabled={!sharedMints.length} placeholder={t("payments.bubble.noSharedMint")} options={sharedMints.map(m => ({ value: m.url, label: mintLabel(m), description: t("payments.bubble.balance", { amount: formatAmount(m.balance, t.language), unit: sats }) }))} /></label>}
           {viaLightning && <LightningPayWith payer={lightningPayer} unit={sats} disabled={busy || !!lnReview} testId="payment-lightning-card" />}
           <label className="text-xs">{t(tokenPayment?"payments.bubble.maxGas":"payments.bubble.maxFee")}<input aria-label={t(tokenPayment?"payments.bubble.maxGas":"payments.bubble.maxFee")} className="block w-20 bg-input-bg rounded p-1" inputMode="numeric" value={feeInput} onChange={e=>setFeeCap(tokenPayment?decimalInput(e.target.value,t.language):e.target.value.replace(/\D/g,""))}/></label>
           {lnReview && (

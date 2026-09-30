@@ -1,4 +1,9 @@
 {
+  "announce": {
+    "message": "{{name}}：{{text}}",
+    "messages": "{{count}} 条新消息",
+    "messagesFrom": "来自 {{name}} 的 {{count}} 条新消息"
+  },
   "audio": {
     "cantPlay": "此设备无法播放此音频（{{format}}）。请下载后收听。",
     "pause": "暂停音频",
@@ -263,7 +268,9 @@
     "sats": "{{amount}} sats",
     "testMoney": "测试资金",
     "testSats": "{{amount}} 测试 sats",
-    "usdtAddress": "USDT 地址"
+    "usdtAddress": "USDT 地址",
+    "video": "🎬 视频 ({{duration}})",
+    "voice": "🎤 语音消息 ({{duration}})"
   },
   "reactions": {
     "chipLabel": "{{emoji}}：{{names}}",

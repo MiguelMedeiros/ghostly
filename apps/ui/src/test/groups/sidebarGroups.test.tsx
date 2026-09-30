@@ -6,6 +6,8 @@ import { REFUSAL_SHOWN_MS } from "../../components/ChatRow";
 import { Sidebar } from "../../components/Sidebar";
 import { UpdateProvider } from "../../contexts/UpdateContext";
 import { markGroupRead } from "../../lib/groups";
+import { saveSession } from "../../lib/storage";
+import type { ChatSession } from "../../lib/types";
 import { fakeEngine, groupView } from "../fakeEngine";
 import { renderApp } from "../render";
 
@@ -117,6 +119,42 @@ describe("Sidebar: groups in the chat list", () => {
     const { user } = sidebar([groupView({ id: "g-a", name: "Climbing", status: "active" }), groupView({ id: "g-b", name: "Chess", status: "active" })]);
     await user.type(screen.getByPlaceholderText("Search chats..."), "clim");
     expect(screen.getAllByTestId("group-row").map(r => r.dataset.group)).toEqual(["g-a"]);
+  });
+
+  it("finds a group without its accents, and says No results only when neither a group nor a chat matches", async () => {
+    const chat = (id: string, nick: string): ChatSession =>
+      ({ id, profile: "paired-chat/1", mySeedB64: `seed-${id}`, peerPubKeyB64: id.repeat(52), encKeyB64: "enc", messages: [], createdAt: 1, nick });
+    saveSession(chat("a", "José"));
+    saveSession(chat("b", "Ana"));
+    const { user } = sidebar([groupView({ id: "g-a", name: "Café da manhã", status: "active" }), groupView({ id: "g-b", name: "Chess", status: "active" })]);
+    const search = screen.getByPlaceholderText("Search chats...");
+    // A group matches, no chat does: the group, and no "No results" under it.
+    await user.type(search, "ches");
+    expect(screen.getAllByTestId("group-row").map(r => r.dataset.group)).toEqual(["g-b"]);
+    expect(screen.queryByText("No results found")).not.toBeInTheDocument();
+    // A group's name without its accents.
+    await user.clear(search);
+    await user.type(search, "cafe");
+    expect(screen.getAllByTestId("group-row").map(r => r.dataset.group)).toEqual(["g-a"]);
+    expect(screen.queryByText("No results found")).not.toBeInTheDocument();
+    // A contact's name without its accent.
+    await user.clear(search);
+    await user.type(search, "jose");
+    expect(screen.getByText("José")).toBeInTheDocument();
+    expect(screen.queryByText("Ana")).not.toBeInTheDocument();
+    expect(screen.queryByText("No results found")).not.toBeInTheDocument();
+    // Nothing matches.
+    await user.clear(search);
+    await user.type(search, "zzz");
+    expect(screen.queryAllByTestId("group-row")).toEqual([]);
+    expect(screen.getByText("No results found")).toBeInTheDocument();
+  });
+
+  it("says No results when no group matches and there are no chats", async () => {
+    const { user } = sidebar([groupView({ id: "g-a", name: "Climbing", status: "active" })]);
+    await user.type(screen.getByPlaceholderText("Search chats..."), "zzz");
+    expect(screen.queryAllByTestId("group-row")).toEqual([]);
+    expect(screen.getByText("No results found")).toBeInTheDocument();
   });
 
   it("creates a group from New, and opens it", async () => {

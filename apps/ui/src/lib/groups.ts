@@ -89,6 +89,11 @@ export function groupRouteId(pathname: string): string | null {
   return match ? decodeURIComponent(match[1]) : null;
 }
 
+/** When the group last had something unread come: another member's message (an engine without the field: any message). */
+export function groupUnreadAt(group: { lastMessageAt: number; lastPeerMessageAt?: number }): number {
+  return group.lastPeerMessageAt ?? group.lastMessageAt;
+}
+
 /** When this device last looked at the group: anything newer is unread. */
 export function groupReadAt(groupId: string): number {
   try { return Number(localStorage.getItem(`${getPrefix()}group_read_${groupId}`) ?? 0) || 0; } catch { return 0; }

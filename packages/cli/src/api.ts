@@ -19,7 +19,7 @@ import { SERVICE_METHODS } from "./services";
 import { BACKUP_METHODS } from "./backup";
 import { CALL_METHODS } from "./calls/api";
 import { WALLET_METHODS } from "./wallets";
-import { chatDetailsJson, chatJson, groupJson, groupMessageJson, messageJson, type MessageJson } from "./views";
+import { chatDetailsJson, chatJson, chatMessageJson, groupJson, groupMessageJson, messageJson, type MessageJson } from "./views";
 
 /**
  * A text past what a chat or a group carries (16 KiB of UTF-8, as the engine counts it: trimmed) is refused before the
@@ -185,7 +185,7 @@ const METHODS: Record<string, Method> = {
   },
   async "chat.history"(ctx, params) {
     const link = chatOf(ctx, params);
-    return historyOf(ctx, link.id, params);
+    return historyOf(ctx, link.id, params, (m) => chatMessageJson(m, link));
   },
   async "chat.send"(ctx, params) {
     const link = chatOf(ctx, params);

@@ -44,6 +44,7 @@ import { useForwarding } from "../hooks/useForwarding";
 import { useChatSearch } from "../hooks/useChatSearch";
 import { ChatSearchBar, SearchIcon } from "../components/chat/ChatSearch";
 import { PinnedBar } from "../components/chat/PinnedBar";
+import { MessageAnnouncer } from "../components/chat/MessageAnnouncer";
 import { canEditInGroup } from "@ghostly/browser/shared/edits";
 import { paymentWireId } from "@ghostly/browser/shared/paymentIds";
 import { replyRef } from "@ghostly/browser/shared/replies";
@@ -405,6 +406,8 @@ export function GroupChat() {
     {/* Each member's colour, given out over the roster: the same on every member's device (lib/memberColors.ts). */}
     <MemberColorsProvider keys={group.members.map(m => m.key)}>
     <div className="flex-1 flex flex-col h-full bg-chat-bg" data-testid="group-chat" data-status={group.status ?? "invitation"}>
+      {/* A member's message that comes while the group is open, read out once to a screen reader. */}
+      <MessageAnnouncer chat={groupId} messages={messages} nameOf={m => m.member ? authorName(group, m.member, t) : group.name || t("group.chat.unnamed")} />
       <div className="h-14 header-safe flex items-center justify-between px-4 max-md:pl-1 max-md:pr-1 bg-panel-header border-b border-border shrink-0">
         <div className="flex items-center gap-3 max-md:gap-1.5 min-w-0">
           <button onClick={nav.up} className="md:hidden w-11 h-11 flex items-center justify-center text-text-secondary rounded-full active:bg-surface-hover cursor-pointer shrink-0" title={t("common.back")} data-testid="chat-back">

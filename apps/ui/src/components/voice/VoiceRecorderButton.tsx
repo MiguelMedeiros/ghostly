@@ -107,6 +107,10 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
   const previewAudio = useRef<{ audio: HTMLAudioElement; url: string } | null>(null);
   const previewWave = useRef<HTMLDivElement>(null);
   const previewFrame = useRef(0);
+  /** The preview's player is being made: a second tap then waits for it instead of making another. */
+  const previewPending = useRef(false);
+  /** Moves on each stopPreview: a player made for an earlier preview is dropped when it comes. */
+  const previewTurn = useRef(0);
 
   const setModeBoth = (next: Mode) => { modeRef.current = next; setMode(next); };
   const setConfirmingBoth = (next: boolean) => { confirmingRef.current = next; setConfirming(next); };
@@ -121,6 +125,7 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
   }, []);
 
   const stopPreview = useCallback(() => {
+    previewTurn.current += 1;
     cancelAnimationFrame(previewFrame.current);
     const current = previewAudio.current;
     if (current) { current.audio.pause(); URL.revokeObjectURL(current.url); }
@@ -197,9 +202,10 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
     setPhase("recording");
   }, [disabled, unavailable, onError, reset, showHint, send, t]);
 
-  // A chat left mid-recording gives the microphone back.
+  // A chat left mid-recording gives the microphone back, and the contact stops seeing "recording audio…".
   useEffect(() => () => {
     recorderRef.current?.cancel();
+    if (modeRef.current !== "idle") activeChange.current?.(false);
     cancelAnimationFrame(previewFrame.current);
     if (previewAudio.current) URL.revokeObjectURL(previewAudio.current.url);
     if (hintTimer.current) clearTimeout(hintTimer.current);
@@ -357,7 +363,15 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
     if (current && !current.audio.paused) { current.audio.pause(); return; }
     let audio = current?.audio;
     if (!audio) {
-      const url = URL.createObjectURL(await recorder.preview());
+      if (previewPending.current) return;
+      previewPending.current = true;
+      const turn = previewTurn.current;
+      // Stopped (sent, resumed, discarded, the chat left) while the recording so far was being read: nothing plays.
+      const gone = () => turn !== previewTurn.current || recorderRef.current !== recorder || !recorder.paused;
+      let blob: Blob;
+      try { blob = await recorder.preview(); } finally { previewPending.current = false; }
+      if (gone()) return;
+      const url = URL.createObjectURL(blob);
       audio = new Audio(url);
       const total = recorder.elapsed() / 1000;
       const follow = () => {
@@ -369,6 +383,8 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
       audio.addEventListener("ended", () => { previewWave.current?.style.setProperty("--voice-progress", "0"); setPreview((p) => p && { ...p, playing: false }); });
       previewAudio.current = { audio, url };
       await toChosenSpeaker(audio);
+      // Stopped while it found the speaker: stopPreview has let this player go already.
+      if (gone()) return;
     }
     await audio.play().catch(() => onError(t("chat.voice.previewFailed")));
   };
