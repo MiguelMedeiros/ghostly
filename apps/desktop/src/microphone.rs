@@ -9,11 +9,13 @@
 //! Only the app's own page, and only a microphone: a camera or a screen stays refused, as calls capture those in Rust.
 
 /// Whether a user-media request is granted: a microphone alone, asked by the app's own page.
+#[cfg(any(target_os = "linux", test))]
 pub fn grants(audio: bool, video: bool, display: bool, page: Option<&str>) -> bool {
     audio && !video && !display && page.is_some_and(is_own_page)
 }
 
 /// The page Tauri serves the app from (`tauri://localhost`), or the dev server in a debug build.
+#[cfg(any(target_os = "linux", test))]
 fn is_own_page(uri: &str) -> bool {
     let origin_end = |prefix: &str| {
         uri.strip_prefix(prefix)
