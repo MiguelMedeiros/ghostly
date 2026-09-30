@@ -47,6 +47,11 @@ interface MessageBubbleProps {
   peerPubKey?: string;
   /** The contact's current name, for messages that do not carry one of their own. */
   peerNick?: string;
+  /**
+   * A 1:1 chat's name for the contact, as its header and the chat list show it ("" when they have none): the name over
+   * their messages, plain. Left out in a group, where a member's own name goes over theirs with a "~".
+   */
+  contactName?: string;
   /** Forgets this message on this device. Left out where a chat cannot be edited. */
   onDelete?: () => void;
   /** The engine's link for the message's details; found from `peerPubKey` when left out (groups name theirs). */
@@ -647,7 +652,7 @@ export function MessageBubble(props: MessageBubbleProps) {
   return (
     <SameBubble
       message={message} peerAck={acked ? message.timestamp : message.timestamp - 1}
-      peerPubKey={props.peerPubKey} peerNick={props.peerNick} linkId={props.linkId} quote={props.quote} names={names}
+      peerPubKey={props.peerPubKey} peerNick={props.peerNick} contactName={props.contactName} linkId={props.linkId} quote={props.quote} names={names}
       onDelete={props.onDelete && stable.onDelete} onReply={props.onReply && stable.onReply} onEdit={props.onEdit && stable.onEdit}
       onReact={props.onReact && stable.onReact} onForward={props.onForward && stable.onForward} onSelect={props.onSelect && stable.onSelect}
       onPin={props.onPin && stable.onPin} pinned={props.pinned} author={props.author} onOpenAuthor={props.onOpenAuthor && stable.onOpenAuthor}
@@ -661,7 +666,7 @@ const CALLBACKS = ["onDelete", "onReply", "onEdit", "onReact", "onForward", "onS
 
 /** The same bubble to draw: see `MessageBubble`. */
 function sameBubble(a: BubbleViewProps, b: BubbleViewProps): boolean {
-  return a.peerAck === b.peerAck && a.peerPubKey === b.peerPubKey && a.peerNick === b.peerNick && a.linkId === b.linkId && a.names === b.names && a.highlight === b.highlight && !a.pinned === !b.pinned && !a.compactPress === !b.compactPress
+  return a.peerAck === b.peerAck && a.peerPubKey === b.peerPubKey && a.peerNick === b.peerNick && a.contactName === b.contactName && a.linkId === b.linkId && a.names === b.names && a.highlight === b.highlight && !a.pinned === !b.pinned && !a.compactPress === !b.compactPress
     && CALLBACKS.every(name => !a[name] === !b[name])
     && !a.selection === !b.selection && a.selection?.selected === b.selection?.selected && !a.selection?.onToggle === !b.selection?.onToggle
     && sameValue(a.quote, b.quote) && sameValue(a.author, b.author) && sameValue(a.buttons, b.buttons) && sameValue(a.message, b.message);
@@ -676,7 +681,7 @@ const SameBubble = memo(function SameBubble(props: BubbleViewProps) {
   );
 }, sameBubble);
 
-function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "", onDelete: deleteIt, linkId, onReply: replyIt, quote, onEdit: editIt, onReact: reactIt, reactionName, onForward: forwardIt, onSelect: selectIt, onPin: pinIt, pinned, selection, names, highlight, author, onOpenAuthor, buttons, compactPress }: BubbleViewProps) {
+function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "", contactName, onDelete: deleteIt, linkId, onReply: replyIt, quote, onEdit: editIt, onReact: reactIt, reactionName, onForward: forwardIt, onSelect: selectIt, onPin: pinIt, pinned, selection, names, highlight, author, onOpenAuthor, buttons, compactPress }: BubbleViewProps) {
   // While the chat is choosing messages, a row is a checkbox: nothing else on it answers.
   const choosing = !!selection;
   const onPin = choosing ? undefined : pinIt;
@@ -831,13 +836,16 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
     );
   }
 
-  const nick = (message.nick || peerNick) && !isMe && (!author || author.first) ? message.nick || peerNick : "";
+  // A 1:1 chat names the contact over their messages as its header does, plain: it said "~Botty" under a header of
+  // "Botty". In a group the "~" marks the name a member gave themselves, which no contact name of yours replaces.
+  const own = contactName ?? (message.nick || peerNick);
+  const nick = own && !isMe && (!author || author.first) ? `${contactName === undefined ? "~" : ""}${own}` : "";
   const nickEl = nick ? (
     // A group member's name takes their colour (lib/memberColors.ts), and a tap on it opens who they are.
     <div data-testid="message-nick" data-key={author?.key} className={`${author ? memberText(author.key) : "text-accent-hover"} text-[12.8px] font-medium mb-[2px] leading-[22px]`}>
       {author && onOpenAuthor && !choosing
-        ? <button type="button" data-testid="message-nick-open" onClick={onOpenAuthor} onDoubleClick={e => e.stopPropagation()} aria-haspopup="dialog" className="max-w-full cursor-pointer text-start hover:underline">~{nick}</button>
-        : <>~{nick}</>}
+        ? <button type="button" data-testid="message-nick-open" onClick={onOpenAuthor} onDoubleClick={e => e.stopPropagation()} aria-haspopup="dialog" className="max-w-full cursor-pointer text-start hover:underline">{nick}</button>
+        : nick}
     </div>
   ) : null;
   const menu = !choosing && (

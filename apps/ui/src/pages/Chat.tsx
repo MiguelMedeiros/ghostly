@@ -776,6 +776,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
                 peerAck={peerAck}
                 peerPubKey={params.peerPubKeyB64}
                 peerNick={contactNick}
+                contactName={isAnonymous ? "" : shownName}
                 onDelete={() => forgetMessage(row.message.id)}
                 // Only a paired chat carries replies; a compatibility chat's contact would see the text alone.
                 onReply={paired && replyTarget(row.message) ? () => { setEditing(null); setReplyingTo(row.message); } : undefined}
