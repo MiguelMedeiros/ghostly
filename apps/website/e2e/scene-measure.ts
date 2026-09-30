@@ -102,8 +102,17 @@ export function measure(id: string): Shot {
  * springs have settled. Leaves out the ghosts' own idle bob and wobble, which
  * never settle: the act's actors by their spring transforms, the scene's
  * other shapes by their boxes to 2px.
+ *
+ * Read after the page has drawn two more frames. The actors' springs only move
+ * when a frame is drawn, so a runner too busy to draw for 100 ms after a scroll
+ * gave two samples that matched (the new chapter's layout, the actors not yet
+ * moving) and passed for settled: the check then measured the first frame of
+ * the glide, Casper still at the last chapter's size and cut by the screen edge
+ * ("dht step 1 at 0.5: casper (act) [1067,740 223×223]" at 1280×1707, Website
+ * browser checks (4/4), 2026-09-30).
  */
-export function settleKey(id: string): string {
+export async function settleKey(id: string): Promise<string> {
+  await new Promise<void>((done) => requestAnimationFrame(() => requestAnimationFrame(() => done())));
   const section = document.getElementById(id);
   if (!section) return "";
   const parts: string[] = [];
