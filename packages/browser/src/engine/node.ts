@@ -4103,7 +4103,7 @@ export class GhostlyNode implements EngineImplementation {
     const group = stored.group!, peer = stored.groupPeer!, entry = !!stored.groupEntry;
     const role = stored.groupEntry ?? "edge";
     let seen = false;
-    // Native where one side has no WebRTC (WISP 9xx § Transports): the transport it last went live on is its native one.
+    // Native where one side has no WebRTC (WISP 9xx § Transports): an edge back after a restart resumes on a native transport both run.
     const native = this.keepsGroupNative(stored);
     const resumeOn: PairedTransport | undefined = native
       ? TRANSPORTS.find(t => t !== "webrtc/1" && t in this.nativeFactories && !!stored.peerTransports?.includes(t)) : "webrtc/1";

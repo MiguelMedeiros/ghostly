@@ -1,1 +1,1 @@
-A group's edge that was live when the app quit resumes on the native transport it was live on where one side has no WebRTC (a Linux Desktop member, WISP 9xx Group Mesh § Transports), and on WebRTC otherwise, as before.
+A group's edge that was live when the app quit resumes on a native transport both apps run where one side has no WebRTC (a Linux Desktop member, WISP 9xx Group Mesh § Transports), and on WebRTC otherwise, as before.
