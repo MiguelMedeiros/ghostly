@@ -798,6 +798,7 @@ export class GhostLink {
       setFastPoll: (fast, offer) => this.session.setFastPoll(fast, !!offer && !!options.pairing?.credentials.peerKey),
       // An answer that did not connect is made again only while the contact's packet still carries that offer.
       offerStanding: ts => !this.leaving && !this.stopped && !this.streamBlocked && this.peerOfferTs() === ts,
+      onAnswerReplaced: () => this.redial(),
       onOpen: channel => {
         if (this.streamBlocked || this.keyStopped) { channel.close(); return; }
         const plan = this.switcher.pending;
@@ -2013,6 +2014,23 @@ export class GhostLink {
     const wait = this.dialWait();
     if (Date.now() - this.lastAutoConnectAt < wait) { traceLink(this.myPubKeyZ32, "dial-backoff", { failures: this.autoConnectFailures, left: wait - (Date.now() - this.lastAutoConnectAt) }); return; }
     traceLink(this.myPubKeyZ32, "dial", { failures: this.autoConnectFailures });
+    this.lastAutoConnectAt = Date.now();
+    this.autoConnectFailures++;
+    void this.dial().catch(error => {
+      this.tracker?.failed("transport", true);
+      this.dialFailed(error instanceof Error ? error.message : String(error));
+    });
+  }
+
+  /**
+   * The contact answered this side's offer again, and the data link gave the attempt up (`DataLink.onAnswerReplaced`):
+   * the contact is there, so this side dials again now. Its packet with that answer often has no room for its presence,
+   * and waiting for a packet that says it is online left the edge to the next look at the background pace (60 s, CLI
+   * bug hunt 2026-09-30).
+   */
+  private redial(): void {
+    if (this.stopped || this.leaving || this.streamBlocked || this.keyStopped || !this.options.autoConnect || this.channel || this.dialing || this.dataLink.state !== "idle") return;
+    traceLink(this.myPubKeyZ32, "dial", { failures: this.autoConnectFailures, again: true });
     this.lastAutoConnectAt = Date.now();
     this.autoConnectFailures++;
     void this.dial().catch(error => {

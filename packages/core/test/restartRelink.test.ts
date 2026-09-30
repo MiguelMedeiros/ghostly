@@ -141,7 +141,8 @@ function report(result: Result): void {
  * (node-datachannel), and the restarted app's native dials do not reach it, failing after `dialFailMs`.
  */
 async function restart(kind: Kind, restarted: "lower" | "higher", how: How, budgetHeldMs?: number, endpointAfterMs?: number,
-  cli?: { rtcFailsAfterMs: number; dialFailMs: number }, readsHeld?: { afterMs: number; forMs: number }): Promise<Result> {
+  cli?: { rtcFailsAfterMs: number; dialFailMs: number },
+  readsHeld?: { afterMs: number; forMs: number; restartedWrites?: { afterMs: number; forMs: number } }): Promise<Result> {
   const world = { pkarr: new MemoryPkarr(DESKTOP_NETWORK), native: new NativeWorld() };
   // The inviter has the lower link key here: it is the one that dials.
   const made = invitationWhere("inviter");
@@ -167,6 +168,8 @@ async function restart(kind: Kind, restarted: "lower" | "higher", how: How, budg
   const restartedAt = Date.now();
   if (budgetHeldMs) stays.heldUntil = restartedAt + budgetHeldMs;
   if (readsHeld) setTimeout(() => { stays.readsHeldUntil = Date.now() + readsHeld.forMs; }, readsHeld.afterMs);
+  const writes = readsHeld?.restartedWrites;
+  if (writes) setTimeout(() => { goes.heldUntil = Date.now() + writes.forMs; }, writes.afterMs);
   const liveAgainMs = await until(() => {
     watch();
     return goes.link.isDataLinkOpen && stays.link.isDataLinkOpen && channelOf(stays) !== before;
@@ -370,5 +373,14 @@ describe("a restart whose answer the staying side cannot read for its relays' bu
     // fast looks for the offerer's side.
     expect(result.liveAgainMs, "from the restart to live on both sides").toBeLessThanOrEqual(2_500 + HELD_MS + 10_000);
     expect(result.requestsPerMin).toBeLessThanOrEqual(20);
+  }, 240_000);
+
+  it("the answer made again waits for the restarted app's budget too: the staying side drops the stale answer it read for the new one", async () => {
+    // The staying side reads the restarted app's first answer at 47.5 s, long dead; the answer made again at 34 s goes
+    // out only at 55 s. Before: that dead answer was held to the end of its 90 s attempt, and the edge redialled then
+    // (107.1 s). After: 61.4 s, the stale answer dropped as the new one is read and the edge dialled again at once.
+    const result = await restart("webrtc", "higher", "graceful", undefined, undefined, undefined,
+      { afterMs: 2_500, forMs: 45_000, restartedWrites: { afterMs: 30_000, forMs: 25_000 } });
+    expect(result.liveAgainMs, "from the restart to live on both sides").toBeLessThanOrEqual(75_000);
   }, 240_000);
 });

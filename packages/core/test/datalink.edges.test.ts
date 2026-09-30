@@ -105,9 +105,8 @@ function link(me: string, peer: string, configure: (pc: FakePeerConnection) => v
     onOpen: vi.fn(),
     onClose: vi.fn(),
     onState: (state: DataLinkState) => void states.push(state),
-    ...extra,
   } satisfies DataLinkOptions;
-  const dl = new DataLink(options);
+  const dl = new DataLink({ ...options, ...extra });
   const lastSignal = () => {
     const published = options.publishSignal.mock.calls.map(([s]) => s).filter((s): s is string => s !== null);
     return published.at(-1)!;
@@ -623,6 +622,38 @@ describe("DataLink answers a standing offer again when its answer did not connec
     await vi.advanceTimersByTimeAsync(0);
     expect(a.dl.state).toBe("idle");
     expect(a.pcs).toHaveLength(1);
+  });
+
+  it("the offerer gives up at once on an answer the answerer made again, and never on one that connected", async () => {
+    const onAnswerReplaced = vi.fn();
+    const a = link("aaaa", "bbbb", () => {}, { onAnswerReplaced });
+    await a.dl.connect();
+    const offer = parseRtcSignal(a.lastSignal())!;
+    const answer = (ts: number) => JSON.stringify({ ...offerFrom({ t: "a", ts, s: "active" }), o: offer.ts });
+    // The first answer, read late: its connection on the answerer's side is already gone.
+    await a.dl.handleSignal(answer(NOW + 1_000));
+    expect(a.dl.state).toBe("connecting");
+    // The same answer again, or an older one: nothing changes.
+    await a.dl.handleSignal(answer(NOW + 1_000));
+    await a.dl.handleSignal(answer(NOW + 500));
+    expect(a.dl.state).toBe("connecting");
+    // The answerer's new answer: this connection can never come up. Given up now, not 90 s on.
+    await a.dl.handleSignal(answer(NOW + 32_000));
+    expect(a.dl.state).toBe("idle");
+    expect(a.pcs[0].closed).toBe(true);
+    expect(a.options.publishSignal).toHaveBeenLastCalledWith(null);
+    expect(a.options.onClose).not.toHaveBeenCalled();
+    // The answerer is there: the caller dials again now.
+    expect(onAnswerReplaced).toHaveBeenCalledOnce();
+
+    // Open, a later answer is nothing to it.
+    await a.dl.connect();
+    const second = parseRtcSignal(a.lastSignal())!;
+    await a.dl.handleSignal(JSON.stringify({ ...offerFrom({ t: "a", ts: NOW + 40_000, s: "active" }), o: second.ts }));
+    a.pc().channel.open();
+    await a.dl.handleSignal(JSON.stringify({ ...offerFrom({ t: "a", ts: NOW + 50_000, s: "active" }), o: second.ts }));
+    expect(a.dl.state).toBe("open");
+    expect(onAnswerReplaced).toHaveBeenCalledOnce();
   });
 
   it("takes a newer offer while it waits on an answer made again", async () => {

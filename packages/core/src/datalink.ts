@@ -46,6 +46,11 @@ export interface DataLinkOptions {
    * that did not connect is then made again (`REANSWERS`); without this, never.
    */
   offerStanding?: (offerTs: number) => boolean;
+  /**
+   * This side's attempt was given up because the answerer answered its offer again (its connection for the answer
+   * applied here is gone): the answerer is there, so the caller may dial again now rather than at its next look.
+   */
+  onAnswerReplaced?: () => void;
 }
 
 export const CONNECT_TIMEOUT_MS = 90_000;
@@ -121,6 +126,14 @@ export class DataLink {
       if (wasOpen) this.options.onClose();
       this.answered = { offer: signal, again: 0 };
       await this.answer(signal);
+    } else if (this.state === "connecting" && this.myOfferTs && signal.o === this.myOfferTs && this.pc) {
+      // A newer answer to the offer this side already took an answer for: the answerer made it again (`REANSWERS`),
+      // its connection for the one applied here is gone, and this one can never come up. It is given up now, rather
+      // than at the end of its attempt (a hub that read a member's first answer late held a dead one 40 s, 2026-09-30).
+      traceLink(this.options.myPubKeyZ32, "answer-replaced", { appliedMs: signal.ts - this.lastSignalTs });
+      this.lastSignalTs = signal.ts;
+      this.reset();
+      this.options.onAnswerReplaced?.();
     } else if (this.state === "offering" && signal.o === this.myOfferTs && this.pc) {
       this.lastSignalTs = signal.ts;
       const pc = this.pc;
