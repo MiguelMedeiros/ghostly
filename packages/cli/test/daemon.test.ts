@@ -54,13 +54,15 @@ describe("the daemon's version", { timeout: 120_000 }, () => {
 
   it("daemon restart stops the running one and starts this release; with none running it starts one", async () => {
     ok(await ghostly(["--home", dir, "settings", "set", "relays", JSON.stringify([relay.url])], { env }));
+    // The socket, running or not: the examples on the socket API are told to take it from here.
+    expect(ok(await ghostly(["--home", dir, "daemon", "status"], { env }))).toEqual({ running: false, profile: "default", socket: profilePaths(dir, "default").socket });
     const first = ok(await ghostly(["--home", dir, "daemon", "restart"], { env }));
     expect(first).toMatchObject({ restarted: true, stopped: null, before: null, version: packageJson.version, daemon: "started" });
     const second = await ghostly(["--home", dir, "daemon", "restart"], { env });
     expect(ok(second)).toMatchObject({ restarted: true, stopped: first.pid, before: packageJson.version, version: packageJson.version });
     expect(second.json.pid).not.toBe(first.pid);
     const status = await ghostly(["--home", dir, "daemon", "status"], { env });
-    expect(ok(status)).toMatchObject({ running: true, pid: second.json.pid, version: packageJson.version });
+    expect(ok(status)).toMatchObject({ running: true, pid: second.json.pid, version: packageJson.version, socket: second.json.socket });
     expect(status.stderr).not.toContain("the daemon runs");
     const listed = await ghostly(["--home", dir, "chat", "list"], { env });
     expect(ok(listed)).toEqual({ chats: [] });

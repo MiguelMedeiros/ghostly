@@ -103,7 +103,7 @@ const SPECIAL: [usage: string, summary: string, options?: Record<string, OptionS
   ["profile backup --out <file> [--passphrase-file f]", "An encrypted backup of the profile (passphrase from a file or GHOSTLY_BACKUP_PASSPHRASE)", { out: o("string", "The backup file to write"), "passphrase-file": o("string", "The passphrase, from this file (else GHOSTLY_BACKUP_PASSPHRASE)") }],
   ["profile restore <file> <new profile> [--passphrase-file f] [--use]", "A backup into a new profile", { "passphrase-file": o("string", "The passphrase, from this file (else GHOSTLY_BACKUP_PASSPHRASE)"), use: o("boolean", "Make it the current profile") }],
   ["daemon [--detach]", "Keep the profile online (foreground; --detach runs it in the background)", { detach: o("boolean", "Run in the background (log in the profile folder)"), timeout: o("number", "Seconds --detach waits for it to start (default 60)") }],
-  ["daemon status", "Whether a daemon runs the profile, and its version"],
+  ["daemon status", "Whether a daemon runs the profile, its version, and its socket (for the socket API)"],
   ["daemon stop", "Stop the profile's daemon", { timeout: o("number", "Seconds to wait for it to stop (default 20)") }],
   ["daemon restart", "Stop the profile's daemon and start it again in the background (after an upgrade: the new code)", { timeout: o("number", "Seconds to wait for each step") }],
   ["listen [--since seq] [--cursor file] [--type t]... [--turns] [--from <chat|key>]... [--group <group>]... [--exec cmd] [--webhook url]", "Stream events as JSON lines (starts the profile here if no daemon runs it)", {
@@ -320,8 +320,10 @@ async function daemonCommand(argv: string[]): Promise<void> {
   pretty = g.pretty;
   if (sub === "status") {
     const client = await connectDaemon(g.paths.socket);
-    if (!client) { print({ running: false, profile: g.profile }); return; }
-    try { print({ running: true, ...(await client.call("status") as object) }); } finally { client.close(); }
+    // The socket, running or not: a program on the socket API (examples/*.mjs) finds it here. It is in the profile's
+    // folder, or in /tmp/ghostly-<hash>/ when that path is too long for a socket, so a program cannot guess it.
+    if (!client) { print({ running: false, profile: g.profile, socket: g.paths.socket }); return; }
+    try { print({ running: true, ...(await client.call("status") as object), socket: g.paths.socket }); } finally { client.close(); }
     return;
   }
   if (sub === "stop") {
