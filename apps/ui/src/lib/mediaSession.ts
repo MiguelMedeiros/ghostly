@@ -34,7 +34,13 @@ function session(): Session | null {
   return found && typeof found.setActionHandler === "function" ? found : null;
 }
 
+/**
+ * The web app's icons. Only a page on http(s) has them to give: the browser takes artwork from http, https, data and
+ * blob URLs only, and the extension (`chrome-extension:`) and the Desktop app ship no such file, so there each voice
+ * message logged a warning and showed no picture anyway.
+ */
 function artwork(): { src: string; sizes: string; type: string }[] {
+  if (!/^https?:$/.test(location.protocol)) return [];
   return [{ src: "/icon-192.png", sizes: "192x192", type: "image/png" }, { src: "/icon-512.png", sizes: "512x512", type: "image/png" }];
 }
 
