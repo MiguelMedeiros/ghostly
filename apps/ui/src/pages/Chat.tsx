@@ -587,7 +587,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
               <div className="flex items-center gap-1.5 max-md:gap-1 min-w-0">
               <p
                 onClick={startEditLabel}
-                className={`text-[15px] font-normal m-0 leading-tight truncate cursor-pointer hover:text-accent transition-colors ${isAnonymous ? "text-text-muted/60 italic" : "text-text-primary"}`}
+                className={`text-[15px] font-normal m-0 leading-tight truncate cursor-pointer hover:text-accent transition-colors ${isAnonymous ? "text-text-muted italic" : "text-text-primary"}`}
                 title={t("chat.setNameHint")}
               >
                 <bdi data-testid="chat-name">{shownName}</bdi>

@@ -39,6 +39,7 @@
     "webln-regtest": {"title":"Browser wallets in front of regtest LND nodes","env":"GHOSTLY_WEBLN_REGTEST","stack":"e2e/support/webln-regtest","fake":"e2e/support/webln.ts"}
   },
   "features": [
+    {"id":"app.accessibility","wisp":null,"kind":"feature","clients":["web","extension","desktop"],"infra":[],"title":"The main screens pass axe-core's WCAG 2.2 A and AA rules with no serious or critical finding (contrast, names, roles), light and dark, left to right and right to left"},
     {"id":"app.attention.badge","wisp":null,"kind":"feature","clients":["web"],"infra":[],"title":"The installed app's icon counts unread messages (Badging API), leaving muted chats out except a mention that gets through"},
     {"id":"app.attention.cues","wisp":null,"kind":"feature","clients":["web","extension","desktop"],"infra":[],"title":"Sound cues in five categories (payments, identities, connection, chat, interface), one switch each; chat mute, one sound per event, none new in the background"},
     {"id":"app.attention.notifications","wisp":null,"kind":"feature","clients":["web","extension","desktop"],"infra":[],"title":"System notifications: explicit permission, private text, no replay after reload"},
