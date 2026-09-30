@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useServicesPlatform } from "../hooks/useServicesPlatform";
 import { useI18n } from "../contexts/I18nContext";
+import { errorText } from "../lib/errorText";
 
 /**
  * The chat's apps strip: what this contact lets you open, and how many of your apps you let them
@@ -33,7 +34,7 @@ export function PeerServices({ peerPubKey, showLink = true, onManage }: { peerPu
           onClick={() => {
             setError("");
             if (!platform.features.openServices) { setError(t("chat.services.openNeedsApp")); return; }
-            platform.openService(peerPubKey, service.id).catch((e) => setError(e instanceof Error ? e.message : String(e)));
+            platform.openService(peerPubKey, service.id).catch((e) => setError(errorText(e, t)));
           }}
           className="flex items-center gap-1.5 px-3 py-1 bg-accent text-on-accent rounded-full text-xs font-bold hover:bg-accent-hover transition-colors cursor-pointer shrink-0"
           title={t("chat.services.openTheirs", { service: service.name ?? service.id })}>

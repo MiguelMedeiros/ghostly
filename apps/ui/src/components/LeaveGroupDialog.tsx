@@ -4,6 +4,7 @@ import type { GroupView } from "@ghostly/browser/shared/types";
 import { useBackdropDismiss } from "../hooks/useDismiss";
 import { memberName } from "../lib/groups";
 import { useI18n } from "../contexts/I18nContext";
+import { errorText } from "../lib/errorText";
 
 /**
  * Leaving a group, said before it happens: it goes from this device with its history, and an admin
@@ -29,7 +30,7 @@ export function LeaveGroupDialog({ group, onClose, onConfirm }: { group: GroupVi
   const blocked = others.length > 0 && (community ? !group.community?.connected : group.isAdmin && !successor);
   const leave = async () => {
     setBusy(true); setError("");
-    try { await onConfirm(); } catch (e) { setError(e instanceof Error ? e.message : t("group.error.generic")); setBusy(false); }
+    try { await onConfirm(); } catch (e) { setError(e instanceof Error ? errorText(e, t) : t("group.error.generic")); setBusy(false); }
   };
   return createPortal(<dialog ref={dialog} {...backdrop} onCancel={e => { e.preventDefault(); onClose(); }} aria-labelledby={`${id}-title`} aria-describedby={`${id}-body`}
     data-testid="group-leave-dialog" className="m-auto w-[calc(100%_-_2rem)] max-w-sm rounded-2xl border border-border bg-sidebar-bg p-5 text-text-primary shadow-2xl backdrop:bg-black/60">

@@ -14,6 +14,7 @@ import { useI18n } from "../contexts/I18nContext";
 import { ConfirmRealMoney } from "./ConfirmRealMoney";
 import { railLine } from "./paymentWords";
 import { decimalInput, formatAmount, formatTokenAmount } from "../lib/amount";
+import { errorText } from "../lib/errorText";
 
 /** A mint as a person knows it: its own name, else its host (the full URL says nothing more to them). */
 const mintLabel = (m: { url: string; name: string }) => {
@@ -72,7 +73,7 @@ export function PaymentBubble({ paymentId, peerPubKey, fallbackText }: { payment
     try {
       await task();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorText(e, t));
     } finally {
       setBusy(false);
     }

@@ -18,13 +18,14 @@ import { UpdateProvider } from "./contexts/UpdateContext";
 import { LockScreen } from "./components/LockScreen";
 import { ProfileSwitchSplash } from "./components/ProfileSwitchSplash";
 import { ensureSession, loadSession } from "./lib/storage";
-import { useI18n } from "./contexts/I18nContext";
+import { useI18n, useT } from "./contexts/I18nContext";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { INVITE_REFUSAL_MESSAGE, chatPath, classifyInvite, inviteRouteCode, protocolLinkCode, readInvite } from "./lib/url";
 import { onJoinNotice, showJoinNotice, type JoinNoticeKey } from "./lib/joinNotice";
 import { groupPath } from "./lib/groups";
 import { engine } from "@ghostly/browser/platform/engine";
 import { useAnchorHome, useAppNavigation } from "./hooks/useAppNavigation";
+import { errorText } from "./lib/errorText";
 import "./index.css";
 
 /**
@@ -108,6 +109,7 @@ function GroupLinkIntake() {
   const { hasUnlocked } = useLockScreen();
   const [code, setCode] = useState("");
   const [problem, setProblem] = useState("");
+  const t = useT();
   useEffect(() => {
     const found = pathname.match(/^\/join\/(.+)$/)?.[1];
     if (!found) return;
@@ -119,7 +121,7 @@ function GroupLinkIntake() {
     setCode("");
     engine.call("joinGroupByLink", { link: code })
       .then(({ groupId }) => nav.conversation(groupPath(groupId)))
-      .catch((cause: unknown) => setProblem(cause instanceof Error ? cause.message : "This link to a group does not work"));
+      .catch((cause: unknown) => setProblem(cause instanceof Error ? errorText(cause, t) : t("group.link.broken")));
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `nav` changes with every location
   }, [code, hasUnlocked]);
   useEffect(() => {

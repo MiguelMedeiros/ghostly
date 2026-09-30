@@ -8,12 +8,12 @@ import { useI18n } from "../contexts/I18nContext";
 import { edgeDot, memberName } from "../lib/groups";
 import { PaymentComposer } from "./PaymentComposer";
 import type { ChatRail } from "./WalletCards";
+import { errorText } from "../lib/errorText";
 
 const subscribe = (listener: () => void) => engine.subscribe(listener);
 const snapshot = () => engine.state;
 const EVERYONE = "*";
 const GROUP_RAILS: readonly ChatRail[] = ["cashu", "lightning"];
-const message = (e: unknown) => e instanceof Error ? e.message : String(e);
 
 /**
  * ⚡ in a group (WISP 9xx § Payments): first whom — one member, or the whole group for a request anyone may pay
@@ -55,7 +55,7 @@ export function GroupPaymentComposer({ group, onClose }: { group: GroupView; onC
     onSend={async () => t("payments.group.chooseOne")}
     onRequest={async (amount, memo, _method, rail, network, card) => {
       try { await engine.call("requestGroupPayment", { groupId: group.id, amount, memo: memo || undefined, timestamp: Date.now(), rail: rail === "lightning" ? "lightning" : "cashu", ...(network ? { network } : {}), ...(card ? { card } : {}) }); return null; }
-      catch (e) { return message(e); }
+      catch (e) { return errorText(e, t); }
     }} />;
 
   const member = to ? others.find(m => m.key === to) : undefined;
@@ -64,13 +64,13 @@ export function GroupPaymentComposer({ group, onClose }: { group: GroupView; onC
   if (member && link) return <PaymentComposer balance={balance} contact={memberName(member, t)} onBack={() => setTo(null)} onClose={onClose}
     reviewContext={wallet ? { wallet, peer: link.peerPubKeyZ32, linkId: link.id } : undefined}
     onSend={async (amount, memo, network, confirmedReal) => {
-      try { await engine.call("sendPayment", { linkId: link.id, amount, memo: memo || undefined, timestamp: Date.now(), ...(network ? { network } : {}), ...(confirmedReal ? { confirmedReal: true as const } : {}) }); return null; } catch (e) { return message(e); }
+      try { await engine.call("sendPayment", { linkId: link.id, amount, memo: memo || undefined, timestamp: Date.now(), ...(network ? { network } : {}), ...(confirmedReal ? { confirmedReal: true as const } : {}) }); return null; } catch (e) { return errorText(e, t); }
     }}
     onRequest={async (amount, memo, method, rail, network, card) => {
       // One way of paying per request, the card's: a Cashu request carries no invoice, a Lightning one no ecash.
       const only = rail === "lightning" ? "lightning" : rail === "cashu" ? "cashu" : undefined;
       try { await engine.call("requestPayment", { linkId: link.id, amount, memo: memo || undefined, timestamp: Date.now(), method, ...(only ? { rail: only } : {}), ...(network ? { network } : {}), ...(card ? { card } : {}) }); return null; }
-      catch (e) { return message(e); }
+      catch (e) { return errorText(e, t); }
     }} />;
 
   return <>

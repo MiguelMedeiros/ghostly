@@ -8,8 +8,8 @@ import { ago } from "../../lib/nostr";
 import { ProviderMark } from "../identities/ProviderMark";
 import { EntityCardFrame, cardQuiet } from "./EntityCardFrame";
 import { useT } from "../../contexts/I18nContext";
+import { errorText } from "../../lib/errorText";
 
-const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 const shortCode = (code: string) => (code.length > 24 ? `${code.slice(0, 14)}…${code.slice(-6)}` : code);
 const keyOf = (p: NostrPointer) => (p.type === "profile" ? `p:${p.pubkey}` : `e:${p.id}`);
 
@@ -40,7 +40,7 @@ export function NostrEntityCard({ code, pointer }: { code: string; pointer: Nost
         : { type: "note", id: pointer.id, ...(pointer.author ? { author: pointer.author } : {}) });
       loaded.set(keyOf(pointer), found);
       setResult(found);
-    } catch (e) { setError(message(e)); } finally { setBusy(false); }
+    } catch (e) { setError(errorText(e, t)); } finally { setBusy(false); }
   };
 
   const p = result?.profile, note = result?.note;

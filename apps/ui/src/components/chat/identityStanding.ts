@@ -24,7 +24,8 @@ export function identityStanding(state: EngineState | null | undefined, provider
     const badge = r && badgeState(r);
     if (!badge) continue;
     const name = contactName(chats.get(link.peerPubKeyZ32));
-    const who = name ? `~${name}` : "a contact";
+    // "" for a contact with no name: the card says "a contact" in the app's language.
+    const who = name ? `~${name}` : "";
     if (isGood(badge)) return { kind: "contact", state: badge, who };
     best ??= { state: badge, who };
   }

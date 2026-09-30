@@ -15,6 +15,7 @@ import { claimMediaSession, mediaSessionPosition, mediaSessionState, releaseMedi
 import { Highlight } from "../chat/ChatSearch";
 import { ProgressRing, RoundRetry, WhyButton, WhyText } from "../chat/RoundRetry";
 import { SpeedPill } from "../voice/VoiceBubble";
+import { errorText } from "../../lib/errorText";
 
 type PlayState = "idle" | "loading" | "playing" | "paused";
 type Problem = "unsupported" | "too-large" | "missing" | "not-yet";
@@ -156,18 +157,18 @@ export function AudioBubble({ file, sender, peerName: named, highlight }: { file
 
   const act = (action: FileAction) => {
     setActionError("");
-    void platform?.fileAction?.(file.id, action).catch((error: Error) => setActionError(String(error.message ?? error)));
+    void platform?.fileAction?.(file.id, action).catch((error: Error) => setActionError(errorText(error, t)));
   };
   const save = () => {
     if (!platform) return;
     setActionError("");
     void downloadFile(platform, file, sanitizeFileName(file.name)).then((result) => { if (result === "missing") setProblem("missing"); })
-      .catch((error: Error) => setActionError(String(error.message ?? error)));
+      .catch((error: Error) => setActionError(errorText(error, t)));
   };
   const again = (action: () => Promise<unknown>) => {
     setActionError("");
     setBusy(true);
-    void action().catch((error: Error) => setActionError(String(error.message ?? error))).finally(() => setBusy(false));
+    void action().catch((error: Error) => setActionError(errorText(error, t))).finally(() => setBusy(false));
   };
 
   const moving = transfer?.state === "transferring";

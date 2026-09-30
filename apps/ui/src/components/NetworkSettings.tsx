@@ -6,6 +6,7 @@ import { useServicesPlatform } from "../hooks/useServicesPlatform";
 import { useI18n } from "../contexts/I18nContext";
 import { Block, Field, FieldGrid, Row, Section } from "./layout";
 import { Switch } from "./wallet/ui";
+import { errorText } from "../lib/errorText";
 
 /**
  * Settings section for how this client reaches Pkarr and its peers: the Pkarr relays, an optional TURN server,
@@ -58,7 +59,7 @@ export function NetworkSettings() {
       // The defaults are stored as "none chosen", so a later change of the defaults reaches this profile.
       const defaults = network.iroh && JSON.stringify(irohRelays) === JSON.stringify(network.iroh.defaultRelays);
       await platform.setNetwork({ relays: relays.split(/\s+/).filter(Boolean), turn: server, ...(network.iroh ? { irohRelays: defaults ? [] : irohRelays } : {}), hyperdhtRelay: relay, pushRelay: push });
-    } catch (e) { setError(e instanceof Error ? e.message : String(e)); return; }
+    } catch (e) { setError(errorText(e, t)); return; }
     setSavedAs(current);
   };
 
@@ -68,7 +69,7 @@ export function NetworkSettings() {
     setError("");
     setSwitching(true);
     try { await platform.setNetwork({ relays: network.relays, turn: network.turn, readRelays: on }); }
-    catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+    catch (e) { setError(errorText(e, t)); }
     finally { setSwitching(false); }
   };
 

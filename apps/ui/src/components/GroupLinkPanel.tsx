@@ -9,6 +9,7 @@ import { groupLinkUrl } from "../lib/groups";
 import { COMMUNITY_LIMITS, MAX_GROUP_MEMBERS } from "@ghostly/core";
 import { GroupAvatar } from "./GroupAvatar";
 import { useI18n } from "../contexts/I18nContext";
+import { errorText } from "../lib/errorText";
 
 function ShareIcon() {
   return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 16V3m0 0L7 8m5-5 5 5M5 13v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6" /></svg>;
@@ -42,7 +43,7 @@ export function GroupLinkPanel({ group, large = false }: { group: GroupView; lar
   };
   const run = async (action: () => Promise<unknown>) => {
     setBusy(true); setError("");
-    try { await action(); } catch (e) { setError(e instanceof Error ? e.message : t("group.error.generic")); } finally { setBusy(false); }
+    try { await action(); } catch (e) { setError(e instanceof Error ? errorText(e, t) : t("group.error.generic")); } finally { setBusy(false); }
   };
   const copy = async () => {
     setError("");

@@ -48,6 +48,7 @@ import { MessageAnnouncer } from "../components/chat/MessageAnnouncer";
 import { canEditInGroup } from "@ghostly/browser/shared/edits";
 import { paymentWireId } from "@ghostly/browser/shared/paymentIds";
 import { replyRef } from "@ghostly/browser/shared/replies";
+import { errorText } from "../lib/errorText";
 
 const subscribe = (listener: () => void) => engine.subscribe(listener);
 const snapshot = () => engine.state;
@@ -302,7 +303,7 @@ export function GroupChat() {
       }
       return error;
     }
-    catch (e) { return e instanceof Error ? e.message : t("group.chat.sendFailed"); }
+    catch (e) { return e instanceof Error ? errorText(e, t) : t("group.chat.sendFailed"); }
   }, [groupId, t]);
 
   // Typing (WISP 9xx · Group Mesh § Typing): private groups only; a community does not carry it yet.
@@ -393,12 +394,12 @@ export function GroupChat() {
     // The link may be off: sharing it turns it on. On or not, the engine hears it is being handed out
     // (whoever gets it opens it soon, so this app looks for knocks faster a while).
     try { await engine.call("enableGroupLink", { groupId }); }
-    catch (e) { if (!group.entryLink) { setError(e instanceof Error ? e.message : t("group.link.enableFailed")); return; } }
+    catch (e) { if (!group.entryLink) { setError(e instanceof Error ? errorText(e, t) : t("group.link.enableFailed")); return; } }
     setSharing("share");
   };
   const act = async (action: () => Promise<unknown>) => {
     setMenuOpen(false); setError("");
-    try { await action(); } catch (e) { setError(e instanceof Error ? e.message : t("group.error.generic")); }
+    try { await action(); } catch (e) { setError(e instanceof Error ? errorText(e, t) : t("group.error.generic")); }
   };
 
   return (
@@ -519,7 +520,7 @@ export function GroupChat() {
         // Editing one of mine (WISP 9xx § Edits): the new text shows here at once and goes to the members; @ names more.
         edit={editing ? { key: editing.id, text: editing.text, snippet: replySnippet(editing.text), onClose: () => setEditing(null),
           onSave: async (text, extra) => (await engine.call("editMessage", { linkId: `group:${groupId}`, messageId: editing.id, text, ...(extra?.mentions?.length && { mentions: extra.mentions }) })
-            .catch((e: unknown) => ({ error: e instanceof Error ? e.message : t("group.chat.editFailed") }))).error } : undefined}
+            .catch((e: unknown) => ({ error: e instanceof Error ? errorText(e, t) : t("group.chat.editFailed") }))).error } : undefined}
         onEditLast={group.canSend ? () => {
           const last = [...messages].reverse().find(m => canEditInGroup(m) && !m.card);
           if (last) { setReplyingTo(null); setEditing(last); }

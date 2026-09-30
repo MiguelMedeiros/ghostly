@@ -6,6 +6,7 @@ import { fillNodes } from "../../lib/fillNodes";
 import { WalletMark } from "../WalletCards";
 import { Button, Notice } from "./ui";
 import { WALLET_NAME as NAME } from "./names";
+import { errorText } from "../../lib/errorText";
 
 /** What the first setup makes: payments over Lightning (Cashu) and a dollar token, each ready in one click. */
 const FIRST: WalletType[] = ["cashu", "usdt"];
@@ -15,7 +16,6 @@ const FIRST: WalletType[] = ["cashu", "usdt"];
  */
 const firstKinds = (network: WalletNetwork, offers: WalletOffer[] = []): WalletType[] => network === "testnet" ? FIRST
   : DEFAULT_WALLETS.filter((type) => FIRST.includes(type) || offers.some((o) => o.type === type && o.network === network && o.available && !o.needs));
-const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 /**
  * A profile with no wallet yet: not a dead end. One choice, the network, and the first wallets are made: Cashu over
@@ -41,7 +41,7 @@ export function FirstWallet({ wallet, offers, onNew, onStart, onMade }: {
     // One after the other: each is whole or not there at all, and a failure says which.
     for (const type of types) {
       try { done.push((await wallet.create({ type, network })).id); }
-      catch (e) { problems.push({ type, network, text: message(e) }); }
+      catch (e) { problems.push({ type, network, text: errorText(e, t) }); }
     }
     setBusy(null); setMade((m) => [...m, ...done]); setFailed(problems);
     if (done.length && !problems.length) onMade(done[0]);
