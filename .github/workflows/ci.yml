@@ -349,6 +349,9 @@ jobs:
       # Line numbers in a panic's backtrace are all these tests need of debug info: the cache below is half the size
       # and restores in half the time (it was 3 GB and up to 105 s).
       CARGO_PROFILE_DEV_DEBUG: line-tables-only
+      APT_PACKAGES: >-
+        libwebkit2gtk-4.1-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev librsvg2-dev patchelf libssl-dev
+        libgtk-3-dev libayatana-appindicator3-dev
     defaults:
       run:
         working-directory: .
@@ -357,23 +360,50 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      # The .deb files apt fetched for these packages on this runner image. apt-get update and the download from the
+      # mirror outlasted the Cargo restore by 19 s at the median, but by 4 to 20 minutes on one dev run in five, and
+      # set the job's time; from the cache the packages install with no network, inside the Cargo restore. One entry
+      # per runner image (a new image has other versions already installed, so it needs another set) and package
+      # list, about 80 MB. Unlike the Cargo cache, any run saves it on a miss: that happens once per weekly image.
+      - name: Apt cache key
+        id: apt-key
+        run: echo "key=${ImageOS}-${ImageVersion}-apt-tauri-$(echo "$APT_PACKAGES" | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore the system packages
+        id: apt-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/apt-debs
+          key: ${{ steps.apt-key.outputs.key }}
+
       # In the background, while the cache below downloads; "Wait for the system dependencies" joins it.
+      # Both paths install the same way, from the .deb files, so a cached run and a fresh one test the same thing.
       - name: Install system dependencies
+        env:
+          CACHED: ${{ steps.apt-cache.outputs.cache-hit }}
         run: |
           {
+            debs="$RUNNER_TEMP/apt-debs"
+            # needrestart's scan, the man-db index and dpkg's fsyncs add time and nothing to a runner thrown away after.
+            apt_get() { sudo DEBIAN_FRONTEND=noninteractive NEEDRESTART_SUSPEND=1 apt-get -y "$@"; }
+            sudo rm -f /var/lib/man-db/auto-update
+            echo force-unsafe-io | sudo tee /etc/dpkg/dpkg.cfg.d/99-unsafe-io > /dev/null
+            echo "$(date +%T) remove libunwind-14-dev"
             # GStreamer's headers (calls on Linux, apps/desktop/src/native_call) need libunwind-dev, which the
             # runner image's libunwind-14-dev (LLVM's) blocks.
-            sudo apt-get remove -y libunwind-14-dev || true
-            sudo apt-get update
-            sudo apt-get install -y \
-              libwebkit2gtk-4.1-dev \
-              libgstreamer1.0-dev \
-              libgstreamer-plugins-base1.0-dev \
-              librsvg2-dev \
-              patchelf \
-              libssl-dev \
-              libgtk-3-dev \
-              libayatana-appindicator3-dev
+            apt_get remove libunwind-14-dev || true
+            if [[ "$CACHED" != "true" ]]; then
+              echo "$(date +%T) update"
+              apt_get update
+              echo "$(date +%T) download"
+              mkdir -p "$debs/partial"
+              # shellcheck disable=SC2086
+              apt_get install --download-only -o Dir::Cache::Archives="$debs" $APT_PACKAGES
+              sudo rm -rf "$debs/partial" "$debs/lock"
+            fi
+            echo "$(date +%T) install $(ls "$debs" | wc -l) packages, $(du -sh "$debs" | cut -f1)"
+            apt_get install "$debs"/*.deb
+            echo "$(date +%T) done"
           } > "$RUNNER_TEMP/apt.log" 2>&1 &
           echo $! > "$RUNNER_TEMP/apt.pid"
 
@@ -402,9 +432,18 @@ jobs:
         run: |
           pid=$(cat "$RUNNER_TEMP/apt.pid")
           while kill -0 "$pid" 2>/dev/null; do sleep 1; done
+          grep -E '^[0-9]{2}:[0-9]{2}:[0-9]{2} ' "$RUNNER_TEMP/apt.log" || true
           tail -n 5 "$RUNNER_TEMP/apt.log"
           # The exit status of a process that is not this shell's child is gone: check the result instead.
-          dpkg -s libwebkit2gtk-4.1-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev librsvg2-dev patchelf libssl-dev libgtk-3-dev libayatana-appindicator3-dev > /dev/null
+          # shellcheck disable=SC2086
+          dpkg -s $APT_PACKAGES > /dev/null
+
+      - name: Save the system packages
+        if: steps.apt-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/apt-debs
+          key: ${{ steps.apt-key.outputs.key }}
 
       # tauri-build wants every bundled resource to exist. `tauri build` fills this one
       # (scripts/prepare-native-runtime.mjs); plain cargo only needs the folder.
