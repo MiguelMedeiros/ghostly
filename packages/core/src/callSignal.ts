@@ -25,6 +25,11 @@ export interface CallSignal {
    */
   ap?: number;
   vp?: number;
+  /**
+   * On a hang-up, why when it was not the person's choice: `u`, the call could not connect (no connection found a
+   * candidate, or it did not connect in time). Older apps read it as a plain hang-up.
+   */
+  r?: "u";
 }
 
 /** What the rebuilt SDP gives Opus and VP8 unless the signal says otherwise. */
@@ -41,7 +46,9 @@ export type CallEventType =
   | "call_connected"
   | "call_ended"
   | "call_missed"
-  | "call_rejected";
+  | "call_rejected"
+  /** The call ended without ever connecting: no way to reach the contact was found, or none worked in time. */
+  | "call_failed";
 
 /**
  * Where a call's media comes from: the browser's own WebRTC and capture, or a stand-in with the same shape.
@@ -320,7 +327,7 @@ export function parseCallSignal(json: string, now = Date.now()): CallSignal | nu
   if (raw.t !== "o" && raw.t !== "a" && raw.t !== "h" && raw.t !== "v") return null;
   if (typeof raw.ts !== "number" || !Number.isFinite(raw.ts)) return null;
   if (Math.abs(now - raw.ts) > CALL_SIGNAL_MAX_AGE_MS) return null;
-  if (raw.t === "h") return { t: "h", ts: raw.ts };
+  if (raw.t === "h") return raw.r === "u" ? { t: "h", ts: raw.ts, r: "u" } : { t: "h", ts: raw.ts };
 
   const picture = parsePicture(raw);
   if (picture === null) return null;

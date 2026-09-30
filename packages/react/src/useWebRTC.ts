@@ -230,7 +230,18 @@ export function useWebRTC({
   const attemptRef = useRef(0);
 
   /** The latest `hangUp`, for what runs before it is defined or outlives a render. */
-  const hangUpRef = useRef<(sendSignal?: boolean, addEndMessage?: boolean) => void>(() => {});
+  const hangUpRef = useRef<(sendSignal?: boolean, addEndMessage?: boolean, unreachable?: boolean) => void>(() => {});
+  const addCallEventMessageRef = useRef(addCallEventMessage);
+  addCallEventMessageRef.current = addCallEventMessage;
+
+  /**
+   * The call could not connect: the chat says so ("call_failed") and the call ends. `tell` hangs up with the reason
+   * (`r: "u"`), so the contact's side ends with the same line instead of ringing or saying "Connecting..." on.
+   */
+  const couldNotConnect = useCallback((tell: boolean) => {
+    addCallEventMessageRef.current?.("call_failed", callHadVideoRef.current);
+    hangUpRef.current(tell, false, true);
+  }, []);
 
   /** Our answered call's media never came up, and it has not started over yet: a caller's second offer restarts it. */
   const restartable = useCallback(
@@ -323,11 +334,13 @@ export function useWebRTC({
 
     const giveUp = () => {
       // A connected call whose contact went away (a closed tab, a reload, a lost network) ends as a hang-up ends it:
-      // with its line and its length in the chat. One that never connected says nothing more.
+      // with its line and its length in the chat. One that never connected could not: the chat says so.
       if (callConnectedEventFiredRef.current) {
         const started = callStartedAtRef.current;
         addCallEventMessage?.("call_ended", callHadVideoRef.current, started ? Date.now() - started : undefined);
         callConnectedEventFiredRef.current = false;
+      } else {
+        addCallEventMessage?.("call_failed", callHadVideoRef.current);
       }
       cleanupConnection();
       updateCallState("idle");
@@ -534,6 +547,8 @@ export function useWebRTC({
         // A newer attempt (or none) owns the call now: its state is not ours to reset.
         if (cancelled()) return;
         onErrorRef.current?.(error);
+        // No connection found a way out: the chat says so. No offer went out, so the contact has nothing to hear.
+        if (error instanceof CallUnreachableError) addCallEventMessage?.("call_failed", withVideo);
         cleanupConnection();
         updateCallState("idle");
         setFastPoll(false);
@@ -608,13 +623,14 @@ export function useWebRTC({
       } catch (error) {
         if (cancelled()) return;
         onErrorRef.current?.(error);
+        if (error instanceof CallUnreachableError) { couldNotConnect(true); return; }
         cleanupConnection();
         updateCallState("idle");
         publishCallSignal(null);
         setFastPoll(false);
       }
     },
-    [answerOffer, applyRemotePicture, clearRestartGrace, cleanupConnection, updateCallState, publishCallSignal, setFastPoll],
+    [answerOffer, applyRemotePicture, clearRestartGrace, cleanupConnection, updateCallState, publishCallSignal, setFastPoll, couldNotConnect],
   );
 
   const acceptCall = useCallback(
@@ -653,7 +669,7 @@ export function useWebRTC({
         if (cancelled()) return;
         onErrorRef.current?.(error);
         // The caller is told at once, instead of ringing on until its own ring runs out.
-        if (error instanceof CallUnreachableError) { hangUpRef.current(true, false); return; }
+        if (error instanceof CallUnreachableError) { couldNotConnect(true); return; }
         cleanupConnection();
         updateCallState("idle");
         setFastPoll(false);
@@ -667,6 +683,7 @@ export function useWebRTC({
       updateCallState,
       cleanupConnection,
       setFastPoll,
+      couldNotConnect,
     ],
   );
 
@@ -700,7 +717,8 @@ export function useWebRTC({
   );
 
   const hangUp = useCallback(
-    (sendSignal = true, addEndMessage = true) => {
+    /** `unreachable`: the call could not connect, and the hang-up says so (`r: "u"`). */
+    (sendSignal = true, addEndMessage = true, unreachable = false) => {
       if (hangupTimerRef.current) {
         clearTimeout(hangupTimerRef.current);
         hangupTimerRef.current = null;
@@ -710,7 +728,7 @@ export function useWebRTC({
       const duration = callStartedAt ? Date.now() - callStartedAt : undefined;
 
       if (sendSignal) {
-        const signal: CallSignal = { t: "h", ts: Date.now() };
+        const signal: CallSignal = unreachable ? { t: "h", ts: Date.now(), r: "u" } : { t: "h", ts: Date.now() };
         publishCallSignal(JSON.stringify(signal));
         hangupTimerRef.current = setTimeout(() => {
           publishCallSignal(null);
@@ -880,6 +898,13 @@ export function useWebRTC({
       lastProcessedSignalRef.current = signal.ts;
       // The caller gave up (or its ring ran out) before we answered: a missed call, as when our own ring runs out.
       if (callStateRef.current === "incoming") addCallEventMessage?.("call_missed", callHadVideoRef.current);
+      else if (signal.r === "u" && callStateRef.current !== "idle" && !callConnectedEventFiredRef.current) {
+        // The contact's side could not connect (it found no candidate, or the call did not connect in time): this
+        // side's call could not either, and says so the same way.
+        addCallEventMessage?.("call_failed", callHadVideoRef.current);
+        hangUp(false, false);
+        return;
+      }
       if (callStateRef.current !== "idle") {
         hangUp(false);
       }
@@ -889,8 +914,6 @@ export function useWebRTC({
   // An unanswered call does not ring forever (RING_MS). Ours hangs up and says "No answer". Theirs stops ringing here
   // with a missed call and sends nothing: the caller's own ring runs out too, and a hang-up would read as declined.
   hangUpRef.current = hangUp;
-  const addCallEventMessageRef = useRef(addCallEventMessage);
-  addCallEventMessageRef.current = addCallEventMessage;
   useEffect(() => {
     if (callState !== "offering" && callState !== "incoming") return;
     const ringing = callState;
@@ -930,10 +953,10 @@ export function useWebRTC({
     const timer = setTimeout(() => {
       if (callStateRef.current !== "connecting") return;
       onErrorRef.current?.(new CallUnreachableError("The call could not connect"));
-      hangUpRef.current(true, false);
+      couldNotConnect(true);
     }, CONNECT_TIMEOUT_MS);
     return () => clearTimeout(timer);
-  }, [callState]);
+  }, [callState, couldNotConnect]);
 
   useEffect(() => {
     if (!noAnswer) return;

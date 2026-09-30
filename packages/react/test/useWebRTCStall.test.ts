@@ -101,6 +101,9 @@ describe("a connection that finds no candidate", () => {
     expect(call.onError).toHaveBeenCalledWith(expect.any(CallUnreachableError));
     expect(call.result.current.callState).toBe("idle");
     expect(call.publishedKinds()).toEqual(["h"]);
+    // The hang-up says why, so the caller's side says the same.
+    expect(JSON.parse(call.published[0]!)).toMatchObject({ t: "h", r: "u" });
+    expect(call.addCallEventMessage).toHaveBeenCalledWith("call_failed", false);
     expect(stream.getTracks().every((t) => t.stop.mock.calls.length > 0)).toBe(true);
   });
 
@@ -114,6 +117,7 @@ describe("a connection that finds no candidate", () => {
     expect(call.onError).toHaveBeenCalledWith(expect.any(CallUnreachableError));
     expect(call.result.current.callState).toBe("idle");
     expect(call.published).toEqual([]);
+    expect(call.addCallEventMessage.mock.calls.map(([type]) => type)).toEqual(["call_started", "call_failed"]);
   });
 
   it("a hang-up while a stalled connection gathers makes no new one", async () => {
@@ -143,8 +147,10 @@ describe("a call that neither connects nor fails", () => {
     expect(call.result.current.callState).toBe("idle");
     expect(call.onError).toHaveBeenCalledWith(expect.any(CallUnreachableError));
     expect(call.publishedKinds()).toEqual(["a", "h"]);
-    // It never connected: no "call ended" line with a length.
+    expect(JSON.parse(call.published[1]!)).toMatchObject({ t: "h", r: "u" });
+    // It never connected: no "call ended" line with a length, but one saying it could not connect.
     expect(call.addCallEventMessage).not.toHaveBeenCalledWith("call_ended", expect.anything(), expect.anything());
+    expect(call.addCallEventMessage).toHaveBeenLastCalledWith("call_failed", false);
   });
 
   it("the caller ends it too, once the answer came", async () => {
@@ -160,6 +166,7 @@ describe("a call that neither connects nor fails", () => {
     expect(pc.close).toHaveBeenCalled();
     expect(call.result.current.callState).toBe("idle");
     expect(call.publishedKinds()).toEqual(["o", "h"]);
+    expect(call.addCallEventMessage).toHaveBeenLastCalledWith("call_failed", false);
   });
 
   it("a call that connected in time is left alone", async () => {
@@ -174,5 +181,74 @@ describe("a call that neither connects nor fails", () => {
 
     expect(call.result.current.callState).toBe("connected");
     expect(call.onError).not.toHaveBeenCalled();
+  });
+});
+
+describe("a call that could not connect says so in the chat", () => {
+  const unreachable = (ts: number) => JSON.stringify({ t: "h", ts, r: "u" });
+  const lines = (call: ReturnType<typeof renderCall>) => call.addCallEventMessage.mock.calls.map(([type]) => type);
+
+  it("a caller whose contact could not connect ends with the same line, and sends nothing back", async () => {
+    const call = renderCall();
+    await calling(call);
+    call.receive(remote.answer(Date.now() + 1));
+    await settle();
+    expect(call.result.current.callState).toBe("connecting");
+
+    call.receive(unreachable(Date.now() + 2));
+    await settle();
+
+    expect(call.result.current.callState).toBe("idle");
+    expect(lines(call)).toEqual(["call_started", "call_failed"]);
+    expect(call.publishedKinds()).toEqual(["o", null]);
+  });
+
+  it("a caller still ringing whose contact found no candidate for its answer says so too", async () => {
+    const call = renderCall();
+    await calling(call);
+    expect(call.result.current.callState).toBe("offering");
+
+    call.receive(unreachable(Date.now() + 1));
+    await settle();
+
+    expect(call.result.current.callState).toBe("idle");
+    expect(lines(call)).toEqual(["call_started", "call_failed"]);
+  });
+
+  it("a plain hang-up before the call connected adds no such line", async () => {
+    const call = renderCall();
+    await answering(call);
+    call.receive(remote.hangUp(Date.now() + 1));
+    await settle();
+
+    expect(call.result.current.callState).toBe("idle");
+    expect(lines(call)).not.toContain("call_failed");
+  });
+
+  it("a call whose connection failed before it ever connected says it could not connect", async () => {
+    const call = renderCall();
+    await calling(call);
+    const pc = FakePeerConnection.instances[0];
+    call.receive(remote.answer(Date.now() + 1));
+    await settle();
+
+    act(() => pc.setIceState("failed"));
+
+    expect(call.result.current.callState).toBe("idle");
+    expect(lines(call)).toEqual(["call_started", "call_failed"]);
+  });
+
+  it("a connected call that drops ends as before, with its length and no failure line", async () => {
+    const call = renderCall();
+    await calling(call);
+    const pc = FakePeerConnection.instances[0];
+    call.receive(remote.answer(Date.now() + 1));
+    await settle();
+    act(() => pc.setIceState("connected"));
+    call.receive(unreachable(Date.now() + 2));
+    await settle();
+
+    expect(call.result.current.callState).toBe("idle");
+    expect(lines(call)).toEqual(["call_started", "call_connected", "call_ended"]);
   });
 });
