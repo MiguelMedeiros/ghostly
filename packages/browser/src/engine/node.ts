@@ -4485,9 +4485,9 @@ export class GhostlyNode implements EngineImplementation {
     });
     const link = live.link;
     link.start(); this.emitState();
-    // Unused invites need discovery, not two native listeners. Saved contacts
+    // Unused invites need discovery, not two native listeners (`keepsNativeEndpoints`). Saved contacts
     // retain background listeners within the real native capacity.
-    const nativeUp = stored.deliveryMode !== "dht" && (stored.pairedPeerKey || this.activeLinkId === linkId) ? this.ensureNativeEndpoints(linkId) : undefined;
+    const nativeUp = stored.deliveryMode !== "dht" && this.keepsNativeEndpoints(linkId, stored) ? this.ensureNativeEndpoints(linkId) : undefined;
     if (credentials && !stored.group) {
       const caps = live.caps = new CapsExchange({
         params: stored, credentials, transport: this.transport, state: stored.capsState,
@@ -4611,6 +4611,16 @@ export class GhostlyNode implements EngineImplementation {
   private get relaysHyperdht(): boolean { return !this.options.nativeTransports?.["hyperdht/1"]; }
 
   /**
+   * Whether a chat keeps native listeners: a contact's, the chat on screen, and one this side joined from a `ghostly1`
+   * invite that is still pairing. The joiner dials, and without an endpoint of its own an app with no WebRTC (the Linux
+   * Desktop) offered nothing the inviter could take: someone who went back to the chat list right after joining waited
+   * out the connect (90 s) before the chat went live. An invite of this side's that nobody used yet keeps none.
+   */
+  private keepsNativeEndpoints(linkId: string, stored: StoredLink): boolean {
+    return !!stored.pairedPeerKey || !!stored.peerParticipationKeyZ32 || this.activeLinkId === linkId;
+  }
+
+  /**
    * A relayed endpoint went away (the relay restarted, the network dropped): try again in a while, for every
    * chat that keeps native listeners, as opening a chat would.
    */
@@ -4621,7 +4631,7 @@ export class GhostlyNode implements EngineImplementation {
       this.relayRetry = null;
       for (const [linkId, live] of this.links) {
         if (live.link && live.stored.profile && !live.stored.group && live.stored.deliveryMode !== "dht" && !live.link.availableTransports.includes("hyperdht/1")
-          && (live.stored.pairedPeerKey || this.activeLinkId === linkId)) void this.ensureNativeEndpoints(linkId);
+          && this.keepsNativeEndpoints(linkId, live.stored)) void this.ensureNativeEndpoints(linkId);
       }
     }, RELAY_RETRY_MS);
   }
@@ -4632,7 +4642,7 @@ export class GhostlyNode implements EngineImplementation {
     for (const [linkId, live] of this.links) {
       const link = live.link;
       if (!link?.availableTransports.includes("hyperdht/1")) {
-        if (this.hyperdhtRelay && link && (live.stored.pairedPeerKey || this.activeLinkId === linkId)) void this.ensureNativeEndpoints(linkId);
+        if (this.hyperdhtRelay && link && this.keepsNativeEndpoints(linkId, live.stored)) void this.ensureNativeEndpoints(linkId);
         continue;
       }
       if (!link.canReleaseEndpoint("hyperdht/1")) continue;
