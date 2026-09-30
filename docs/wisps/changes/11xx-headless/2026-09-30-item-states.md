@@ -1,0 +1,1 @@
+Task items: `--item` reads a lowercase word before the first colon as the item's state and refuses one that is not pending, running, done, failed or skipped with a usage error that lists them (`pending:<text>` keeps such a colon in the text); any other text is a pending item as given.

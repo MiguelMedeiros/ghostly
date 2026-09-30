@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { ITEM_STATES, RUN_RESULTS } from "@ghostly/core";
 import type { OptionSpec, Parsed } from "../args";
 import { CliError } from "../errors";
 
@@ -101,7 +102,22 @@ export function cardLinks(values: unknown): { url: string; label?: string }[] | 
   });
 }
 
-const ITEM_STATES = ["pending", "running", "done", "failed", "skipped"];
+const listed = (words: readonly string[]) => `${words.slice(0, -1).join(", ")} or ${words.at(-1)}`;
+
+/**
+ * `--item state:text` as a task's item. The word before the first colon is the state when it is one lowercase word (and
+ * the colon does not start `://`): one of `ITEM_STATES`, or a usage error that lists them, so `queued:Publishing` is
+ * refused rather than shown as that text. Anything else (`Step 2: build`, `Note: x`, a link, no colon) is the whole
+ * text, pending; `pending:fix: tests` keeps a colon after a lowercase word.
+ */
+export function itemOf(value: string): { state: string; text: string } {
+  const colon = value.indexOf(":");
+  const word = colon > 0 ? value.slice(0, colon) : "";
+  if (!/^[a-z]+$/.test(word) || value.startsWith("//", colon + 1)) return { state: "pending", text: value };
+  if (!(ITEM_STATES as readonly string[]).includes(word))
+    throw new CliError("usage", `--item takes state:text, and ${JSON.stringify(word)} is not a state: use ${listed(ITEM_STATES)} (pending:<text> keeps a colon in the text), not ${JSON.stringify(value)}`);
+  return { state: word, text: value.slice(colon + 1).trim() };
+}
 
 /** A task's fields from its flags; what was not given is left out, so an update changes only what it names. */
 export function taskFields(options: Parsed["options"]): Record<string, unknown> {
@@ -122,11 +138,7 @@ export function taskFields(options: Parsed["options"]): Record<string, unknown> 
   for (const [flag, key] of [["pr-url", "url"], ["pr-number", "number"], ["additions", "additions"], ["deletions", "deletions"], ["files", "files"]] as const)
     if (options[flag] !== undefined) pr[key] = options[flag];
   if (Object.keys(pr).length) fields.pr = { ...(fields.pr && typeof fields.pr === "object" ? fields.pr as object : {}), ...pr };
-  if (Array.isArray(options.item) && options.item.length) fields.items = options.item.map((item) => {
-    const colon = item.indexOf(":");
-    const state = colon > 0 ? item.slice(0, colon) : "";
-    return ITEM_STATES.includes(state) ? { state, text: item.slice(colon + 1).trim() } : { state: "pending", text: item };
-  });
+  if (Array.isArray(options.item) && options.item.length) fields.items = (options.item as string[]).map(itemOf);
   const links = cardLinks(options.link);
   if (links) fields.links = links;
   return fields;
@@ -141,14 +153,12 @@ export function cardTime(value: unknown, flag: string): number | undefined {
   return ms;
 }
 
-const RUN_RESULTS = ["ok", "failed", "skipped"];
-
 /** `--run ok`, `--run failed:"CI flaked"`: a run of a routine, recorded as its last. */
 export function runOf(value: unknown): { result: string; summary?: string } | undefined {
   if (value === undefined) return undefined;
   const text = String(value), colon = text.indexOf(":");
   const result = colon === -1 ? text : text.slice(0, colon), summary = colon === -1 ? "" : text.slice(colon + 1).trim();
-  if (!RUN_RESULTS.includes(result)) throw new CliError("usage", `--run takes ok, failed or skipped, and :a summary after it if you like, not ${JSON.stringify(value)}`);
+  if (!(RUN_RESULTS as readonly string[]).includes(result)) throw new CliError("usage", `--run takes ok, failed or skipped, and :a summary after it if you like, not ${JSON.stringify(value)}`);
   return { result, ...(summary && { summary }) };
 }
 
@@ -181,7 +191,7 @@ export const taskOptions: Record<string, OptionSpec> = {
   progress: { type: "number", description: "Percent done, 0 to 100" },
   steps: { type: "string", description: "Steps done of total, like 2/5 (progress is worked out from them)" },
   step: { type: "string", description: "What it is doing now (200 characters)" },
-  item: { type: "list", description: "A step or log line, state:text (pending, running, done, failed, skipped); the list replaces the card's (up to 20)" },
+  item: { type: "list", description: "A step or log line, state:text with state pending, running, done, failed or skipped (text alone: pending). A lowercase word before the first colon must be one of them; pending:fix: x keeps the colon. The list replaces the card's (up to 20)" },
   branch: { type: "string", description: "The branch it works on" },
   "pr-url": { type: "string", description: "The pull request's https link" },
   "pr-number": { type: "number", description: "The pull request's number" },

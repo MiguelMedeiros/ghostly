@@ -146,7 +146,7 @@ Last run: ok, 2026-09-29 01:00 UTC · 12 issues checked
 Next run: 2026-09-30 01:00 UTC
 ```
 
-A task's first line starts with its status: ⏳ queued, 🔄 running, ⛔ blocked, ✅ done, ❌ failed, 🚫 cancelled. There is no drawn bar: characters that draw one read badly in right-to-left text and in a one-line preview. Times are in UTC, since the text does not know the reader's zone. An app that shows the card does not show this text.
+A task's first line starts with its status: ⏳ queued, 🔄 running, ⛔ blocked, ✅ done, ❌ failed, 🚫 cancelled. The `Now:` line is there only while the task is active: a done, failed or cancelled task's last step is not what it does now, and the card does not show it either. There is no drawn bar: characters that draw one read badly in right-to-left text and in a one-line preview. Times are in UTC, since the text does not know the reader's zone. An app that shows the card does not show this text.
 
 ## Updates are edits
 

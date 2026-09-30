@@ -134,6 +134,14 @@ describe("the fallback text", () => {
     expect(statusCardText(readStatusCard(task({ status: "done" }), NOW)!)).toBe("✅ Fix relay rotation\nDone");
   });
 
+  it("says what a task does now only while it is going, as the card shows it", () => {
+    const text = (status: string) => statusCardText(readStatusCard(task({ status, step: "Building", progress: 100 }), NOW)!);
+    expect(text("done")).toBe("✅ Fix relay rotation\nDone · 100%");
+    expect(text("failed")).toBe("❌ Fix relay rotation\nFailed · 100%");
+    expect(text("cancelled")).toBe("🚫 Fix relay rotation\nCancelled · 100%");
+    for (const status of ["queued", "running", "blocked"]) expect(text(status)).toMatch(/\nNow: Building$/);
+  });
+
   it("says a routine's schedule, its last run and its next", () => {
     const card = readStatusCard(routine({ lastRun: { at: Date.UTC(2026, 8, 29, 1, 0), result: "ok", summary: "12 issues checked" }, nextRunAt: Date.UTC(2026, 8, 30, 1, 0) }), NOW)!;
     expect(statusCardText(card)).toBe("🔁 Nightly bug hunt\nevery day 01:00 · active\nLast run: ok, 2026-09-29 01:00 UTC · 12 issues checked\nNext run: 2026-09-30 01:00 UTC");
