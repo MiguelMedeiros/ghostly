@@ -7,9 +7,9 @@ import { test as base } from "./fixtures";
 import { MAINNET_MINTS, mintStandIn, type MintStandIn } from "./mint";
 import { LocalRelay } from "./relay";
 
-const dist = join(import.meta.dirname, "..", "..", "extension", "dist");
+const dist = join(import.meta.dirname, "..", "..", "apps", "extension", "dist");
 
-/** Where the extension asks what the newest release is (extension/src/updates.ts). */
+/** Where the extension asks what the newest release is (apps/extension/src/updates.ts). */
 export const LATEST_URL = "https://ghostly.tools/latest.json";
 
 /**
@@ -17,7 +17,7 @@ export const LATEST_URL = "https://ghostly.tools/latest.json";
  * permission prompt cannot be clicked by automation. Everything else is the shipped code.
  */
 function prepareExtension(work: string): string {
-  if (!existsSync(join(dist, "manifest.json"))) throw new Error("extension/dist is missing: run `npm run build:extension` first (`npm run e2e` does)");
+  if (!existsSync(join(dist, "manifest.json"))) throw new Error("apps/extension/dist is missing: run `npm run build:extension` first (`npm run e2e` does)");
   const dir = join(work, "extension");
   cpSync(dist, dir, { recursive: true });
   const manifestPath = join(dir, "manifest.json");

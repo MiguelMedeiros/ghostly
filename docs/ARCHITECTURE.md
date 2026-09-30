@@ -30,9 +30,9 @@ The [WISP catalogue](wisps/README.md) and [composable map](wisps/MAP.md) describ
 | [`packages/cli`](../packages/cli) | `ghostly`, the engine on Node without a screen, for bots: a daemon, a local socket API and a JSON event stream. See [WISP 11xx](wisps/11xx-headless.md) |
 | [`packages/iroh-web`](../packages/iroh-web) | Iroh compiled to wasm (`@ghostly/iroh-web`), built from `native/transports/iroh-web` |
 | [`src`](../src) | The UI every app builds (React). `src/desktop` holds Desktop's host |
-| [`src-tauri`](../src-tauri) | Ghostly Desktop (Tauri 2): Rust for the Mainline DHT, native Iroh, the HyperDHT sidecar, local app fetches, viewer windows, notifications, stored media streamed to the player, web push posts, and on Linux the calls' media (webrtc-rs and GStreamer, as WebKitGTK has no WebRTC) |
-| [`web`](../web) | The web app: the peer in a tab, and its service worker (offline shell, share target, wake-up pushes). See [WEB.md](WEB.md) |
-| [`extension`](../extension) | Ghostly Browser (Chromium, Manifest V3): the peer in an offscreen document. See [BROWSER.md](BROWSER.md) |
+| [`apps/desktop`](../apps/desktop) | Ghostly Desktop (Tauri 2): Rust for the Mainline DHT, native Iroh, the HyperDHT sidecar, local app fetches, viewer windows, notifications, stored media streamed to the player, web push posts, and on Linux the calls' media (webrtc-rs and GStreamer, as WebKitGTK has no WebRTC) |
+| [`apps/web`](../apps/web) | The web app: the peer in a tab, and its service worker (offline shell, share target, wake-up pushes). See [WEB.md](WEB.md) |
+| [`apps/extension`](../apps/extension) | Ghostly Browser (Chromium, Manifest V3): the peer in an offscreen document. See [BROWSER.md](BROWSER.md) |
 | [`native/transports`](../native/transports) | Native Iroh (Rust), the HyperDHT endpoint and sidecar (Node) and the Iroh wasm crate |
 | [`services/hyperdht-relay`](../services/hyperdht-relay) | The HyperDHT relay for browsers (dht-relay over WebSocket) |
 | [`services/push-relay`](../services/push-relay) | A reference push relay for browsers that cannot post a wake-up themselves |

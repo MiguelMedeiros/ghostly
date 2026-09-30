@@ -39,7 +39,7 @@ describe("the website gate", () => {
 
 describe("the packages gate", () => {
   it("covers every site file the packages' tests and sources name, and they name no document", () => {
-    // What `npm run test:packages` runs: packages/* and extension/, their sources, tests and configs. A path into
+    // What `npm run test:packages` runs: packages/* and apps/extension/, their sources, tests and configs. A path into
     // website/ or docs/ is written relative ("../../../website/lib/invite") or from the root ("website/...").
     const code: string[] = [];
     const walk = (dir: string) => {
@@ -94,7 +94,7 @@ describe("plan", () => {
   it("only a draft skips the Rust jobs", () => {
     expect(plan(["src/App.tsx"], draft).rust).toBe(false);
     expect(plan(["src/App.tsx"], ready).rust).toBe(true);
-    expect(plan(["src-tauri/src/lib.rs"], draft).rust).toBe(true);
+    expect(plan(["apps/desktop/src/lib.rs"], draft).rust).toBe(true);
     expect(plan(["Cargo.lock"], draft).rust).toBe(true);
   });
 

@@ -4,7 +4,7 @@ import { EMPTY_DEVICES, loadDeviceChoices, type DeviceKind, type DeviceList, typ
 
 /**
  * Calls on Ghostly Desktop for Linux. WebKitGTK is built without WebRTC by Ubuntu, Debian and Fedora alike, so
- * the page has no RTCPeerConnection and no camera; Rust does the call instead (src-tauri/src/native_call):
+ * the page has no RTCPeerConnection and no camera; Rust does the call instead (apps/desktop/src/native_call):
  * webrtc-rs for WebRTC, GStreamer for the camera, the microphone and the codecs. This file gives the call hook (`useWebRTC`) what it expects: a peer connection
  * and capture with the browser's shape, backed by those commands. What the hook shows is real: the pictures
  * arrive as JPEG frames, drawn on canvases whose `captureStream()` tracks go in the call window's <video>s.
@@ -485,7 +485,7 @@ export function deviceList(listed: readonly { kind: string; label: string }[]): 
 const watchers = new Set<() => void>();
 let watching = false;
 
-/** The microphones, cameras and speakers of Ghostly Desktop on Linux, from Rust (src-tauri/src/native_call/devices.rs). */
+/** The microphones, cameras and speakers of Ghostly Desktop on Linux, from Rust (apps/desktop/src/native_call/devices.rs). */
 export const nativeDevices: DeviceSource = {
   async list() {
     try {

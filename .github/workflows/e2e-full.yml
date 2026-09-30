@@ -173,7 +173,7 @@ jobs:
 
       - name: Install system dependencies
         run: |
-          # GStreamer's headers (calls on Linux, src-tauri/src/native_call) need libunwind-dev, which the
+          # GStreamer's headers (calls on Linux, apps/desktop/src/native_call) need libunwind-dev, which the
           # runner image's libunwind-14-dev (LLVM's) blocks.
           sudo apt-get remove -y libunwind-14-dev || true
           sudo apt-get update

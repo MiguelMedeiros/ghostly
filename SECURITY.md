@@ -34,7 +34,7 @@ We ask that you give us up to 90 days before publishing details, and less when t
 In scope:
 
 - the Ghost Protocol as described in [docs/PROTOCOL.md](docs/PROTOCOL.md) and the [WISPs](docs/wisps/README.md), and as implemented in `packages/core`
-- Ghostly Desktop (`src-tauri`, `src`), Ghostly Browser (`extension`), Ghostly on the web (`web`, its service worker included), the headless CLI (`packages/cli`), the Rust CLI (`cli`)
+- Ghostly Desktop (`apps/desktop`, `src`), Ghostly Browser (`apps/extension`), Ghostly on the web (`apps/web`, its service worker included), the headless CLI (`packages/cli`)
 - the native transports and the reference relays we ship (`native/transports`: Iroh and HyperDHT; `services/`: the HyperDHT relay for browsers and the push relay)
 - the wallets and payments (`packages/browser/src/engine`), on Mainnet and on Testnet
 - identity proofs and public profiles (`packages/browser/src/proofs`)

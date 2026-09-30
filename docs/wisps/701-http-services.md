@@ -31,7 +31,7 @@ The web app offers nothing here: a tab can neither reach a local address nor ope
 
 ## Evidence
 
-[HTTP core](../../packages/core/src/http.ts), [paired HTTP](../../packages/core/src/pairedHttp.ts), [session capabilities](../../packages/core/src/pairedCapabilities.ts), [service authorization](../../packages/browser/src/engine/node.ts), [native fetch](../../src-tauri/src/local_fetch.rs), [browser boundaries](../BROWSER.md). Check traversal, header/URL injection, wrong audience, disabled sharing, redirect escape and resource cleanup; document platform differences.
+[HTTP core](../../packages/core/src/http.ts), [paired HTTP](../../packages/core/src/pairedHttp.ts), [session capabilities](../../packages/core/src/pairedCapabilities.ts), [service authorization](../../packages/browser/src/engine/node.ts), [native fetch](../../apps/desktop/src/local_fetch.rs), [browser boundaries](../BROWSER.md). Check traversal, header/URL injection, wrong audience, disabled sharing, redirect escape and resource cleanup; document platform differences.
 
 ## Revision log
 

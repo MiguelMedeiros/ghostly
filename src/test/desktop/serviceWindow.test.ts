@@ -4,7 +4,7 @@ import { answerServiceWindow, type ServiceRequest } from "../../desktop/host";
 // covers: services.desktop-viewer
 
 /**
- * What a Desktop viewer window (a contact's shared app, src-tauri/src/viewer.rs) is served for one request: the
+ * What a Desktop viewer window (a contact's shared app, apps/desktop/src/viewer.rs) is served for one request: the
  * main window asks the contact over the data link and hands the answer to Rust. The contact's app decides the
  * headers, so only real headers get through.
  */

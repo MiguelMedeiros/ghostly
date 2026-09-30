@@ -302,7 +302,7 @@ const sleep = (ms: number) => new Promise((done) => setTimeout(done, ms));
  * A D-Bus session bus for one app (a `dbus-daemon` of its own, ended by `stop`), or null where there is none to start
  * (not Linux, no `dbus-daemon`). On a Linux desktop an app under test otherwise joins the person's own session bus
  * while it draws on Xvfb, and each WebDriver session took about 30 s to open there (2.5 s on a bus of its own); it
- * also kept the app's names (one per profile, src-tauri/src/single_instance.rs) off the person's bus.
+ * also kept the app's names (one per profile, apps/desktop/src/single_instance.rs) off the person's bus.
  */
 export async function privateBus(): Promise<{ address: string; stop: () => void } | null> {
   if (process.platform !== "linux" || spawnSync("dbus-daemon", ["--version"]).status !== 0) return null;

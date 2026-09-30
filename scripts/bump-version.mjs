@@ -42,8 +42,8 @@ export function versionedJson(root = ROOT) {
   return [
     "package.json",
     ...workspaces(root).map((folder) => `${folder}/package.json`),
-    "extension/public/manifest.json",
-    "src-tauri/tauri.conf.json",
+    "apps/extension/public/manifest.json",
+    "apps/desktop/tauri.conf.json",
   ];
 }
 
@@ -66,7 +66,7 @@ function bump(root, next) {
   for (const file of versionedJson(root)) edit(file, jsonVersion);
 
   const crateVersion = (text) => text.replace(/^version = "[^"]+"/m, `version = "${next}"`);
-  edit("src-tauri/Cargo.toml", crateVersion);
+  edit("apps/desktop/Cargo.toml", crateVersion);
   edit("Cargo.lock", (text) => text.replace(/(name = "ghostly"\nversion = ")[^"]+(")/g, `$1${next}$2`));
 
   edit("website/lib/release.ts", (text) => text.replace(/(export const VERSION = ")[^"]+(")/, `$1${next}$2`));

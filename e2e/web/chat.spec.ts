@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
-import { BIG, BIG_SHA256 } from "../../extension/test/atlas.mjs";
+import { BIG, BIG_SHA256 } from "../../apps/extension/test/atlas.mjs";
 import type { Route } from "@playwright/test";
 import { chat, connect, expect, GIF, link, linkLegacy, say, test, type Peer } from "../support/fixtures";
 import { openExpressions } from "../support/composer";

@@ -1,4 +1,4 @@
-import { startAtlas } from "../../extension/test/atlas.mjs";
+import { startAtlas } from "../../apps/extension/test/atlas.mjs";
 import { expect, test } from "../support/extension";
 import { pair } from "../support/paired";
 

@@ -19,11 +19,11 @@ interface WindowConfig { label?: string; acceptFirstMouse?: boolean }
 
 describe("the Desktop window", () => {
   it("acts on the first click even when it is not the active window (macOS)", () => {
-    const windows = read("src-tauri/tauri.conf.json").app.windows as WindowConfig[];
+    const windows = read("apps/desktop/tauri.conf.json").app.windows as WindowConfig[];
     const main = windows.find((window) => (window.label ?? "main") === "main");
     expect(main?.acceptFirstMouse).toBe(true);
     // The other configurations merge over this one: none may turn it back off.
-    for (const config of ["src-tauri/tauri.release.conf.json", "src-tauri/tauri.e2e.conf.json"]) {
+    for (const config of ["apps/desktop/tauri.release.conf.json", "apps/desktop/tauri.e2e.conf.json"]) {
       expect(read(config).app?.windows, config).toBeUndefined();
     }
   });

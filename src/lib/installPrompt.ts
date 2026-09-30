@@ -5,7 +5,7 @@ import { useSyncExternalStore } from "react";
  * when the app can be installed (`beforeinstallprompt`) and install it on request; Safari has no such event, so
  * the app says where the browser keeps it: Share, then Add to Home Screen on iPhone and iPad, File, then Add to
  * Dock on a Mac (Safari 17 and later). Firefox has none. Only the web app watches for any of it
- * (`watchInstallPrompt` in web/src/main.tsx): the extension and Desktop are installed already, and see `none`.
+ * (`watchInstallPrompt` in apps/web/src/main.tsx): the extension and Desktop are installed already, and see `none`.
  *
  * Where it is offered: Settings, the account menu, and once the app has been used a little, a hint above the chat
  * list that "Not now" puts away for good (`installHintShown`).

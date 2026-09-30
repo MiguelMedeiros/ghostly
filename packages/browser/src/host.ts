@@ -61,7 +61,7 @@ export interface BrowserHost {
   openPaymentLink?(uri: string): Promise<void>;
   /**
    * Puts the app's window in or out of full screen. The desktop app on Linux has it: WebKitGTK's element full screen
-   * aborts the app there, so the page fills the window with the video instead (src-tauri/src/fullscreen.rs).
+   * aborts the app there, so the page fills the window with the video instead (apps/desktop/src/fullscreen.rs).
    */
   fullscreenWindow?(on: boolean): Promise<void>;
   /**

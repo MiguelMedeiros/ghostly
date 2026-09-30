@@ -41,7 +41,7 @@ async function boot() {
   setBrowserHost(host);
   startSessionSync();
   addEventListener("pagehide", () => host.announceDeparture());
-  // The app is exiting (src-tauri main.rs `on_run_event`): contacts hear it now, in the moment it waits for this.
+  // The app is exiting (apps/desktop's main.rs `on_run_event`): contacts hear it now, in the moment it waits for this.
   addEventListener("ghostly-departing", () => host.announceDeparture());
 
   root.render(

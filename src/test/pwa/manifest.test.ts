@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { SHARE_TARGET_PATH } from "../../../web/src/sw/policy";
+import { SHARE_TARGET_PATH } from "../../../apps/web/src/sw/policy";
 
 // covers: app.pwa.install, app.pwa.shortcuts, app.pwa.share-target, app.pwa.protocol
 
@@ -11,8 +11,8 @@ import { SHARE_TARGET_PATH } from "../../../web/src/sw/policy";
  */
 const ROOT = join(import.meta.dirname, "..", "..", "..");
 const read = (path: string) => readFileSync(join(ROOT, path), "utf8");
-const manifest = JSON.parse(read("web/public/manifest.json"));
-const html = read("web/index.html");
+const manifest = JSON.parse(read("apps/web/public/manifest.json"));
+const html = read("apps/web/index.html");
 const routes = read("src/Root.tsx");
 
 describe("installable", () => {
@@ -31,7 +31,7 @@ describe("installable", () => {
     const sizes = manifest.icons.map((icon: { sizes: string }) => icon.sizes);
     expect(sizes).toEqual(expect.arrayContaining(["192x192", "512x512"]));
     expect(manifest.icons.some((icon: { purpose?: string }) => icon.purpose === "maskable")).toBe(true);
-    for (const icon of manifest.icons) expect(() => read(`web/public${icon.src}`)).not.toThrow();
+    for (const icon of manifest.icons) expect(() => read(`apps/web/public${icon.src}`)).not.toThrow();
   });
 });
 
