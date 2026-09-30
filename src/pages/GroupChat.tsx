@@ -24,6 +24,7 @@ import { forgetChatMute, groupChat } from "../lib/chatMute";
 import { useI18n, type Translate } from "../contexts/I18nContext";
 import { authorName, groupStatusText, markGroupRead, memberName, memberPhoto } from "../lib/groups";
 import { authorsOf, type MessageAuthor } from "../lib/senderRuns";
+import { MemberColorsProvider } from "../contexts/MemberColorsContext";
 import { chatsByPeer } from "../lib/identities";
 import { useContactFaces, withContactFaces } from "../components/identities/contactFace";
 import type { ChatMessage } from "../lib/types";
@@ -367,6 +368,8 @@ export function GroupChat() {
 
   return (
     <CueChat.Provider value={groupChat(groupId)}>
+    {/* Each member's colour, given out over the roster: the same on every member's device (lib/memberColors.ts). */}
+    <MemberColorsProvider keys={group.members.map(m => m.key)}>
     <div className="flex-1 flex flex-col h-full bg-chat-bg" data-testid="group-chat" data-status={group.status ?? "invitation"}>
       <div className="h-14 header-safe flex items-center justify-between px-4 max-md:pl-1 max-md:pr-1 bg-panel-header border-b border-border shrink-0">
         <div className="flex items-center gap-3 max-md:gap-1.5 min-w-0">
@@ -462,9 +465,9 @@ export function GroupChat() {
               const run = stacks.get(m.id);
               if (!run) return row(m);
               // The folded row is one message of its sender's run: their colour, and their picture when it ends the run.
-              return <RoutineStack key={`stack:${m.id}`} name={m.sender === "me" ? undefined : nameOf("peer", m.member) ?? undefined} mine={m.sender === "me"}
+              return <RoutineStack key={`stack:${m.id}`} name={m.sender === "me" || authors.get(m.id)?.first === false ? undefined : nameOf("peer", m.member) ?? undefined} mine={m.sender === "me"}
                 cards={run.map(r => r.card as RoutineCard)} {...authorProps(m)}>
-                {run.map((r, i) => { const head = authors.get(m.id); return row(r, head && { ...head, last: i === run.length - 1 }); })}
+                {run.map((r, i) => { const head = authors.get(m.id); return row(r, head && { ...head, first: false, last: i === run.length - 1 }); })}
               </RoutineStack>;
             });
           })()}
@@ -499,6 +502,7 @@ export function GroupChat() {
       {confirmForget && <DeleteChatDialog name={group.name} onClose={() => setConfirmForget(false)}
         onConfirm={() => { setConfirmForget(false); forgetChatMute(groupChat(groupId)); void engine.call("forgetGroup", { groupId }).catch(() => {}); nav.home(); }} />}
     </div>
+    </MemberColorsProvider>
     </CueChat.Provider>
   );
 }

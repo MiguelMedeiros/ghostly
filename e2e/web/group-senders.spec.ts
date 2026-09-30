@@ -4,7 +4,8 @@ import type { Page } from "@playwright/test";
 import { expect, openProfilePage, say, test, type Peer } from "../support/fixtures";
 
 /**
- * Who wrote what in a group, at a glance: each member's name above their messages in a colour from their key, and
+ * Who wrote what in a group, at a glance: each member's name over the first message of each run of theirs, in a colour of
+ * their own among the group's (the same on every member's device), and
  * their picture (here their initial: they are not contacts) beside the last bubble of each run of theirs, an empty
  * place of the same width beside the others. Three browsers, one group; Alice reads it at 1280 px and on a 375 px
  * phone (smaller pictures, nothing wider than the screen), and in a 330 px chat, where only the colours stay.
@@ -42,11 +43,11 @@ async function noOverflow(page: Page) {
   expect(outside).toBe(0);
 }
 
-/** What Alice's timeline shows of each member's message: the name, its colour class, and the picture, its place or neither. */
+/** What Alice's timeline shows of each member's message: who, the name over it (if any) and its colour class, and the picture, its place or neither. */
 const rows = (page: Page) => list(page).locator("[data-message-row][data-sender=peer]").evaluateAll((rows) => rows.map((row) => {
   const nick = row.querySelector<HTMLElement>("[data-testid=message-nick]");
   const avatar = row.querySelector("[data-testid=sender-avatar]") ? "avatar" : row.querySelector("[data-testid=sender-avatar-spacer]") ? "spacer" : "-";
-  return { name: nick?.textContent ?? "", colour: nick?.className.match(/text-member-\d+/)?.[0] ?? "", avatar };
+  return { member: (row as HTMLElement).dataset.member, name: nick?.textContent ?? "", colour: nick?.className.match(/text-member-\d+/)?.[0] ?? "", avatar };
 }));
 
 test("a group's members each have a colour, and their picture beside the end of each run", { tag: ["@feature:groups.member-colors", "@feature:app.mobile-layout"] }, async ({ peer }) => {
@@ -88,16 +89,21 @@ test("a group's members each have a colour, and their picture beside the end of 
   await expect(list(alice.page).getByText("see you there")).toBeVisible({ timeout: 60_000 });
   await say(alice, "Count me in");
 
+  // The name over the first bubble of each run, the picture beside the last.
   const seen = await rows(alice.page);
-  expect(seen.map((r) => `${r.name}:${r.avatar}`)).toEqual(["~Bob:spacer", "~Bob:avatar", "~Carol:avatar", "~Bob:avatar", "~Carol:avatar"]);
-  const bobColour = seen[0].colour;
+  expect(seen.map((r) => `${r.name}:${r.avatar}`)).toEqual(["~Bob:spacer", ":avatar", "~Carol:avatar", "~Bob:avatar", "~Carol:avatar"]);
+  expect(new Set([seen[0].member, seen[1].member, seen[3].member]).size).toBe(1);
+  const bobColour = seen[0].colour, carolColour = seen[2].colour;
   await expect(list(alice.page).getByTestId("reply-quote-name")).toHaveClass(new RegExp(`\\b${bobColour}\\b`));
   await expect(list(alice.page).getByTestId("mention")).toHaveClass(new RegExp(`\\b${bobColour}\\b`));
-  // A colour of each member's own, the same on every message of theirs (and never the accent a 1:1 chat's name has).
-  const bobs = seen.filter((r) => r.name === "~Bob").map((r) => r.colour);
-  expect(new Set(bobs).size).toBe(1);
-  expect(bobs[0]).toMatch(/^text-member-\d+$/);
-  expect(seen.find((r) => r.name === "~Carol")!.colour).toMatch(/^text-member-\d+$/);
+  // A colour of each member's own, the same on every message of theirs, never another member's (the group has three).
+  expect(seen[3].colour).toBe(bobColour);
+  expect(seen[4].colour).toBe(carolColour);
+  expect(bobColour).toMatch(/^text-member-\d+$/);
+  expect(carolColour).toMatch(/^text-member-\d+$/);
+  expect(carolColour).not.toBe(bobColour);
+  // And the same on every member's device: Bob sees Carol in the colour Alice sees her in.
+  await expect(list(bob.page).getByTestId("message-nick").filter({ hasText: "~Carol" }).first()).toHaveClass(new RegExp(`\\b${carolColour}\\b`));
   const [bobInk, carolInk, textInk] = await Promise.all([
     list(alice.page).getByTestId("message-nick").filter({ hasText: "~Bob" }).first().evaluate((el) => getComputedStyle(el).color),
     list(alice.page).getByTestId("message-nick").filter({ hasText: "~Carol" }).first().evaluate((el) => getComputedStyle(el).color),

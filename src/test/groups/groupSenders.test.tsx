@@ -8,7 +8,8 @@ import { readStatusCard } from "@ghostly/core";
 import type { GroupMemberView, GroupView, StoredMessage } from "@ghostly/browser/shared/types";
 import { GroupChat } from "../../pages/GroupChat";
 import { MessageBubble } from "../../components/MessageBubble";
-import { memberText } from "../../lib/memberColors";
+import { memberText, rosterColors } from "../../lib/memberColors";
+import { RUN_GAP_MS } from "../../lib/senderRuns";
 import { fakeEngine, groupView, linkView } from "../fakeEngine";
 import { renderApp } from "../render";
 
@@ -28,34 +29,42 @@ function openGroup(group: GroupView, history: StoredMessage[]) {
   return renderApp(<Routes><Route path="/group/:groupId" element={<GroupChat />} /></Routes>, { route: "/group/group-1" });
 }
 
-/** Each drawn message row: whose it is, and whether it has the picture, its empty place, or neither. */
-const rows = () => [...document.querySelectorAll<HTMLElement>("[data-message-row]")].map(row => {
+/** The group's hues, as every member's app gives them out over its roster. */
+const HUES = rosterColors(members.map(m => m.key));
+const hue = (key: string) => memberText(key, HUES);
+const NAMES: Record<string, string> = { [ANA]: "Ana", [BO]: "Bo", [BOT]: "Builder" };
+
+/** Each drawn message row: whose it is, "+name" when their name is over it, and the picture, its empty place, or neither. */
+const rows = (scope: ParentNode = document) => [...scope.querySelectorAll<HTMLElement>("[data-message-row]")].map(row => {
   const nick = row.querySelector<HTMLElement>("[data-testid=message-nick]");
   const avatar = within(row).queryByTestId("sender-avatar") ? "avatar" : within(row).queryByTestId("sender-avatar-spacer") ? "spacer" : "-";
-  return `${row.dataset.sender === "me" ? "me" : nick?.textContent}:${avatar}`;
+  return `${row.dataset.sender === "me" ? "me" : NAMES[row.dataset.member!]}${nick ? "+name" : ""}:${avatar}`;
 });
 
 describe("GroupChat: who wrote each message", () => {
-  it("puts the picture beside the last bubble of each run, an empty place beside the others, none beside mine", async () => {
+  it("names a run once, over its first bubble, and puts the picture beside its last; mine have neither", async () => {
     openGroup(active(), [
       stored({ member: ANA, text: "one" }), stored({ member: ANA, text: "two" }), stored({ member: BO, text: "three" }),
       stored({ sender: "me", text: "four" }), stored({ member: BO, text: "five" }), stored({ member: BO, text: "six" }), stored({ member: ANA, text: "seven" }),
     ]);
     await screen.findByText("seven");
-    expect(rows()).toEqual(["~Ana:spacer", "~Ana:avatar", "~Bo:avatar", "me:-", "~Bo:spacer", "~Bo:avatar", "~Ana:avatar"]);
+    expect(rows()).toEqual(["Ana+name:spacer", "Ana:avatar", "Bo+name:avatar", "me:-", "Bo+name:spacer", "Bo:avatar", "Ana+name:avatar"]);
   });
 
-  it("a line of the group ends a run", async () => {
-    openGroup(active(), [stored({ member: ANA, text: "before" }), stored({ event: "joined", member: BO, text: "Bo joined" }), stored({ member: ANA, text: "after" })]);
-    await screen.findByText("after");
-    expect(rows()).toEqual(["~Ana:avatar", "~Ana:avatar"]);
+  it("a line of the group, or a pause of more than five minutes, starts a new run", async () => {
+    const at = 1_700_100_000_000;
+    openGroup(active(), [stored({ member: ANA, text: "before", timestamp: at }), stored({ event: "joined", member: BO, text: "Bo joined", timestamp: at + 1 }),
+      stored({ member: ANA, text: "after", timestamp: at + 2 }), stored({ member: ANA, text: "later", timestamp: at + 2 + RUN_GAP_MS + 1 })]);
+    await screen.findByText("later");
+    expect(rows()).toEqual(["Ana+name:avatar", "Ana+name:avatar", "Ana+name:avatar"]);
   });
 
-  it("gives each member's name their colour, the same on every message of theirs", async () => {
-    openGroup(active(), [stored({ member: ANA, text: "a" }), stored({ member: BO, text: "b" }), stored({ member: ANA, text: "c" })]);
-    await screen.findByText("c");
+  it("gives each member's name their colour, the same on every message of theirs, and no two members of the group the same", async () => {
+    openGroup(active(), [stored({ member: ANA, text: "a" }), stored({ member: BO, text: "b" }), stored({ member: BOT, text: "c" }), stored({ member: ANA, text: "d" })]);
+    await screen.findByText("d");
     const nicks = screen.getAllByTestId("message-nick");
-    expect(nicks.map(x => x.className.match(/text-member-\d+/)?.[0])).toEqual([memberText(ANA), memberText(BO), memberText(ANA)]);
+    expect(nicks.map(x => x.className.match(/text-member-\d+/)?.[0])).toEqual([hue(ANA), hue(BO), hue(BOT), hue(ANA)]);
+    expect(new Set([ME, ANA, BO, BOT].map(hue)).size).toBe(4);
     expect(nicks[0].className).not.toContain("text-accent-hover");
   });
 
@@ -68,7 +77,7 @@ describe("GroupChat: who wrote each message", () => {
     const [bo, ana, zed] = screen.getAllByTestId("sender-avatar");
     expect(bo.querySelector("img")).toHaveAttribute("src", PNG);
     expect(ana).toHaveTextContent("A");
-    expect(ana.querySelector("span")!.className).toContain(memberText(ANA));
+    expect(ana.querySelector("span")!.className).toContain(memberText(ANA, rosterColors([...members.map(m => m.key), unnamed])));
     expect(within(zed).getByTestId("identicon")).toBeInTheDocument();
   });
 
@@ -92,7 +101,7 @@ describe("GroupChat: who wrote each message", () => {
     const card = readStatusCard({ kind: "task", id: "t1", title: "Fix relay rotation", status: "running" })!;
     openGroup(active(), [stored({ member: BOT, text: "Fix relay rotation", card })]);
     await screen.findByTestId("message-nick");
-    expect(screen.getByTestId("message-nick").className).toContain(memberText(BOT));
+    expect(screen.getByTestId("message-nick").className).toContain(hue(BOT));
     expect(screen.getByTestId("sender-avatar")).toHaveAttribute("data-key", BOT);
   });
 
@@ -110,8 +119,10 @@ describe("GroupChat: who wrote each message", () => {
     expect(within(toggle(first)).getByTestId("sender-avatar-spacer")).toBeInTheDocument();
     expect(within(toggle(first)).queryByTestId("sender-avatar")).not.toBeInTheDocument();
     expect(within(toggle(last)).getByTestId("sender-avatar")).toHaveAttribute("data-key", BOT);
-    expect(within(first).getByTestId("routine-stack-name").className).toContain(memberText(BOT));
-    expect(rows()).toContain("~Builder:avatar");
+    expect(within(first).getByTestId("routine-stack-name").className).toContain(hue(BOT));
+    expect(rows()).toContain("Builder:avatar");
+    // The second stack comes after Ana: it names the bot again; the first is the start of the run, and names it too.
+    expect(screen.getAllByTestId("routine-stack-name")).toHaveLength(2);
     // Opened, the cards under it have their own places, the picture beside the last.
     const cards = [...first.querySelectorAll<HTMLElement>("[data-message-row]")];
     expect(cards.map(r => within(r).queryByTestId("sender-avatar") ? "avatar" : "spacer")).toEqual(["spacer", "spacer", "avatar"]);
@@ -127,16 +138,16 @@ describe("GroupChat: who wrote each message", () => {
     await screen.findByText("and me?");
     const [theirs, mine] = screen.getAllByTestId("reply-quote-name");
     expect(theirs).toHaveTextContent("Ana");
-    expect(theirs.className).toContain(memberText(ANA));
+    expect(theirs.className).toContain(hue(ANA));
     expect(mine.className).toContain("text-accent-hover");
-    expect(screen.getByTestId("mention").className).toContain(memberText(ANA));
+    expect(screen.getByTestId("mention").className).toContain(hue(ANA));
   });
 
   it("names who is typing in their colours", async () => {
     openGroup(active({ typing: [{ key: ANA }, { key: BO }] }), []);
     const names = await screen.findAllByTestId("group-typing-name");
     expect(screen.getByTestId("group-typing")).toHaveTextContent("Ana and Bo are typing…");
-    expect(names.map(x => [x.textContent, x.className.includes(memberText(x.dataset.key!))])).toEqual([["Ana", true], ["Bo", true]]);
+    expect(names.map(x => [x.textContent, x.className.includes(hue(x.dataset.key!))])).toEqual([["Ana", true], ["Bo", true]]);
   });
 });
 
