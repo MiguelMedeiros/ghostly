@@ -1,4 +1,4 @@
-/* Copied from src/components/deck/deck.css by website/scripts/sync-app-deck.mjs. Edit the app's file, then run npm run sync:app-deck. */
+/* Copied from apps/ui/src/components/deck/deck.css by website/scripts/sync-app-deck.mjs. Edit the app's file, then run npm run sync:app-deck. */
 /* A deck of cards (deck/Deck.tsx): the wallet's (wallet-deck.css) and the identities' (identities/id-deck.css). The
    deck wears the chosen card's colour class (it sets --card-rgb), so the glow behind it and the arrows' marks take
    that card's ink. On a page the deck takes the whole column (the page's container), wider than the panel below it;

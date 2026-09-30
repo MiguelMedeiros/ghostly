@@ -7,7 +7,7 @@
 import { test, expect, type Browser } from "@playwright/test";
 import { LocalRelay } from "../../../e2e/support/relay";
 import { copyInvite } from "../../../e2e/support/clipboard";
-import { TB1Q } from "../../../src/test/payments/moneyFormatFixtures";
+import { TB1Q } from "../../../apps/ui/src/test/payments/moneyFormatFixtures";
 import { CAST, chat, go, pair, person, say, sceneImage, shot, toBottom, type Peer } from "./helpers";
 
 /** `from` sends `text`; `to` shows `seen` (the text as drawn: marks and links turn into formatting and cards). */

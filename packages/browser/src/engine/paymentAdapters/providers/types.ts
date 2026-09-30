@@ -17,7 +17,7 @@ export const networkMode = (network: ProviderNetwork): WalletMode => (network ==
 
 /**
  * One field of a provider's configuration form. The wallet card renders these; a provider that needs
- * more registers its own form component instead (src/components/wallet/providers/forms.ts).
+ * more registers its own form component instead (apps/ui/src/components/wallet/providers/forms.ts).
  * `secret` fields (an NWC URI, a macaroon, a rune, an API key, a password) are sealed before they are
  * stored, never shown again, never put in the engine state, and never logged.
  */

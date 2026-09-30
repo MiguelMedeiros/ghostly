@@ -19,7 +19,7 @@ const SEEN = "seen";
 /** How long a `file.*` event waits for the message that carries its file. */
 export const FILE_MESSAGE_WAIT_MS = 2_000;
 
-/** The notice an app sends when a chat first goes live (src/hooks/useChat.ts): shown as a line, not a message. */
+/** The notice an app sends when a chat first goes live (apps/ui/src/hooks/useChat.ts): shown as a line, not a message. */
 export const JOIN_NOTICE = /^👋 (?:(.+) )?joined$/;
 
 type Listener = (event: GhostlyEvent) => void;

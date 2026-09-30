@@ -1,5 +1,5 @@
 import {afterEach,expect,it,vi} from "vitest";
-import {loadSettings,saveSettings} from "../../../src/lib/settings";
+import {loadSettings,saveSettings} from "../../../apps/ui/src/lib/settings";
 // covers: settings.nickname
 afterEach(()=>vi.unstubAllGlobals());
 it("starts anonymous, preserves existing names, and persists an explicitly cleared name",()=>{

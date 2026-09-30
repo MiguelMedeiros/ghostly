@@ -1,4 +1,4 @@
-/* Copied from src/components/wallet-cards.css by website/scripts/sync-app-deck.mjs. Edit the app's file, then run npm run sync:app-deck. */
+/* Copied from apps/ui/src/components/wallet-cards.css by website/scripts/sync-app-deck.mjs. Edit the app's file, then run npm run sync:app-deck. */
 /* Each wallet's ink, as a class any element can wear: the deck and its cards (wallet-deck.css), the chat's payment
    composer and a card's turned-over back (payment-composer.css). The nearest one wins, so a card's own ink shows
    inside a deck that wears the chosen card's. */

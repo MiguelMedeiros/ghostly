@@ -165,7 +165,7 @@ class Driver {
 export type DesktopApp = Pick<Driver, "text" | "click" | "title" | "attribute" | "type" | "execute" | "executeAsync">;
 
 /**
- * Chooses in a `Select` (src/components/ui/Select.tsx) by its test id, as a person does: opens it and clicks the
+ * Chooses in a `Select` (apps/ui/src/components/ui/Select.tsx) by its test id, as a person does: opens it and clicks the
  * option. It is a combobox with a listbox, not a native `<select>` — its options exist only while it is open, and
  * its value is in `data-value`. e2e/support/select.ts does the same for the browser projects.
  */
@@ -291,7 +291,7 @@ async function expectUnderTest(app: Driver): Promise<void> {
   await app.close().catch(() => {});
   throw new Error(
     "The Desktop app's WebView does not set navigator.webdriver under tauri-driver. The first-run Mainnet wallet guard " +
-      "(#682: packages/browser/src/platform/walletSetupSwitch.ts, src/desktop/host.ts desktopUnderTest) relies on it and " +
+      "(#682: packages/browser/src/platform/walletSetupSwitch.ts, apps/ui/src/desktop/host.ts desktopUnderTest) relies on it and " +
       "on GHOSTLY_E2E=1; no test runs until the WebView reports automation again.",
   );
 }

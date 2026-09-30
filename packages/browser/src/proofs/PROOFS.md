@@ -96,7 +96,7 @@ built-ins. See [docs/SDK.md](../../../../docs/SDK.md) and `packages/browser/src/
    ```
 
 2. Add it to `IDENTITY_PROVIDERS` in [registry.ts](registry.ts), the order is the picker's, and give it a
-   mark in `src/components/identities/ProviderIcons.tsx` (`identityProviderIcons.test.tsx` fails for a provider without one).
+   mark in `apps/ui/src/components/identities/ProviderIcons.tsx` (`identityProviderIcons.test.tsx` fails for a provider without one).
    Those are the only shared lines you touch.
 3. Tests: run `describeIdentityProof` from [contractSuite.ts](contractSuite.ts)
    (`test/helpers/identityProofContract.ts` re-exports it) against your provider (see
@@ -105,7 +105,7 @@ built-ins. See [docs/SDK.md](../../../../docs/SDK.md) and `packages/browser/src/
 4. Add a row to the table at the end of this file, and to WISP 300's implementation section.
 
 The UI renders every provider from its descriptor: the picker card (label, summary, category, its mark from
-`src/components/identities/ProviderIcons.tsx`), the details view (description, limits), the subject
+`apps/ui/src/components/identities/ProviderIcons.tsx`), the details view (description, limits), the subject
 field (`subject`), the validity choice (`validity`), the signer flow by `kind`, the badges (`short`,
 `category`, `source`, `attester`). No component to write.
 

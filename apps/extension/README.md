@@ -2,7 +2,7 @@
 
 The Ghostly peer as a Chromium extension (Manifest V3). The service worker (`src/background.ts`) opens an
 offscreen document (`src/offscreen.ts`) that runs the peer: it has WebRTC and lives as long as the browser
-runs the extension. The UI is the shared one (`src/` at the root), in `app.html`.
+runs the extension. The UI is the shared one (`apps/ui/src/`), in `app.html`.
 
 What it is for people, and how to install it: [docs/BROWSER.md](../../docs/BROWSER.md).
 

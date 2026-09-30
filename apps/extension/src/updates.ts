@@ -1,6 +1,6 @@
 import { checkVersionFeed } from "@ghostly/browser/updateFeed";
 import type { UpdateSource } from "@ghostly/browser/host";
-import { RELEASES_URL } from "../../../src/lib/settings";
+import { RELEASES_URL } from "../../ui/src/lib/settings";
 
 /**
  * Where the newest release is published. It is Ghostly's own site, not a third

@@ -3,11 +3,11 @@ import { createRoot } from "react-dom/client";
 import { setBrowserHost } from "@ghostly/browser/host";
 import { startSessionSync } from "@ghostly/browser/platform/sync";
 import { setDatabaseName } from "@ghostly/browser/shared/idb";
-import { Root } from "../../../../src/Root";
-import { setStorageProfile } from "../../../../src/lib/storage";
+import { Root } from "../../../ui/src/Root";
+import { setStorageProfile } from "../../../ui/src/lib/storage";
 import { extensionHost } from "../host";
-import { loadSettings } from "../../../../src/lib/settings";
-import { applyDocumentLanguage } from "../../../../src/lib/documentLanguage";
+import { loadSettings } from "../../../ui/src/lib/settings";
+import { applyDocumentLanguage } from "../../../ui/src/lib/documentLanguage";
 import { databaseFor, followProfileSwitch, openPageProfile } from "../profile";
 
 // Ghostly Browser renders the Desktop UI as is. What differs is below it: the

@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import { BDK_REGTEST } from "../support/bdk-regtest/regtest.mjs";
 import { chat, connect, createWallet, expect, link, openChat, openWallet, say, test, type Peer } from "../support/fixtures";
 import { choose } from "../support/select";
-import { BARK_TESTNET, arkadeAddress, bcrt1q, bolt12Offer } from "../../src/test/payments/moneyFormatFixtures";
+import { BARK_TESTNET, arkadeAddress, bcrt1q, bolt12Offer } from "../../apps/ui/src/test/payments/moneyFormatFixtures";
 
 /**
  * Money formats pasted into a chat (parser v2, card 4), test coins only:

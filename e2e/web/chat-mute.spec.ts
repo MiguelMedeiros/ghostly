@@ -2,7 +2,7 @@ import { chat, expect, say, test, type Peer } from "../support/fixtures";
 import { pair } from "../support/paired";
 
 /**
- * Muting one chat (src/lib/chatMute.ts): its messages still arrive and count as unread, without a sound or a
+ * Muting one chat (apps/ui/src/lib/chatMute.ts): its messages still arrive and count as unread, without a sound or a
  * system notification, until the mute ends by itself or is turned off. Calls still ring.
  *
  * What would be heard and shown is recorded, not played: a stand-in AudioContext notes every tone a sound starts
@@ -10,7 +10,7 @@ import { pair } from "../support/paired";
  * Notification keeps what it was asked to show. The muted side's clock is Playwright's, so a mute can run out.
  */
 
-/** A note only this sound plays (src/lib/sounds.ts). */
+/** A note only this sound plays (apps/ui/src/lib/sounds.ts). */
 const NOTE = { message: 880, ring: 988 } as const;
 
 /** Records this peer's sounds and notifications, puts its clock under the test's hand, and turns notifications on. */

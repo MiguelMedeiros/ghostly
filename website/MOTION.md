@@ -170,7 +170,7 @@ watches:
 ### The ghosts and the brand: the app's pairing look
 
 The site's pictures share one visual language with the app's pairing scene
-(`src/components/pairing/PairingScene.tsx` and `pairing-scene.css`, read,
+(`apps/ui/src/components/pairing/PairingScene.tsx` and `pairing-scene.css`, read,
 never changed from here). Each page tells its own story; what they share is
 the look:
 
@@ -194,7 +194,7 @@ the look:
   inside the step's beat and inside the chapter's picture (never across the
   copy).
 - The brand lockup in the nav and the footer is the app's
-  (`components/site/Brand.tsx`, from `src/components/AppBrand.tsx`): the app's
+  (`components/site/Brand.tsx`, from `apps/ui/src/components/AppBrand.tsx`): the app's
   ghost icon and GHOSTLY in the app's system font stack, 700, tracking-tight,
   both in the accent (cyan, about 11:1 on the page), the text 17/36 of the
   icon. It does not move: the app's opening motion stays the app's.

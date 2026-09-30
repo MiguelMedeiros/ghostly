@@ -17,5 +17,5 @@
     "noFallthroughCasesInSwitch": true,
     "forceConsistentCasingInFileNames": true
   },
-  "include": ["src", "packages/react/test", "vite-env.d.ts"]
+  "include": ["apps/ui/src", "packages/react/test", "apps/ui/vite-env.d.ts"]
 }

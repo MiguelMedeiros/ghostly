@@ -1,4 +1,4 @@
-// Copied from src/components/deck/stack.ts by website/scripts/sync-app-deck.mjs. Edit the app's file, then run npm run sync:app-deck.
+// Copied from apps/ui/src/components/deck/stack.ts by website/scripts/sync-app-deck.mjs. Edit the app's file, then run npm run sync:app-deck.
 /**
  * Where the cards of a deck's stack sit (Deck.tsx: the wallet's cards, the identities). Every card keeps its own
  * place in a row, overlapping the next like cards tucked in a wallet: choosing one lifts it to the top, and

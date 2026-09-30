@@ -1,5 +1,5 @@
-import type { UpdatePlatform } from "../../../../src/lib/updates";
-import { RELEASES_URL } from "../../../../src/lib/settings";
+import type { UpdatePlatform } from "../../../../apps/ui/src/lib/updates";
+import { RELEASES_URL } from "../../../../apps/ui/src/lib/settings";
 import { getBrowserHost } from "../host";
 
 /**

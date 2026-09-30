@@ -154,7 +154,7 @@ const plain = (a: Partial, dimension: string, value: string) => a[dimension] ===
 export const CONSTRAINTS: readonly Constraint[] = [
   {
     id: "native-transports-desktop-only",
-    why: "Iroh and HyperDHT exist only in Desktop (src/desktop/nativeTransports.ts); a browser pair can only speak WebRTC",
+    why: "Iroh and HyperDHT exist only in Desktop (apps/ui/src/desktop/nativeTransports.ts); a browser pair can only speak WebRTC",
     dims: ["client", "transport"],
     allows: (a) => a.client === undefined || a.transport === undefined || a.transport.startsWith("webrtc") || isDesktop(a),
   },
@@ -185,7 +185,7 @@ export const CONSTRAINTS: readonly Constraint[] = [
   },
   {
     // A proves the identity. NIP-07 is the page's own window.nostr: offered on the web and Desktop, never in
-    // the extension, whose pages do not get another extension's (src/lib/nostr.ts); NIP-46 needs a bunker.
+    // the extension, whose pages do not get another extension's (apps/ui/src/lib/nostr.ts); NIP-46 needs a bunker.
     id: "nip07-host-on-the-web",
     why: "the Nostr proof is signed by A through NIP-07, which the extension does not offer (another extension's window.nostr never reaches its pages)",
     dims: ["client", "identity"],

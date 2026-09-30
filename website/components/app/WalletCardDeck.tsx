@@ -1,4 +1,4 @@
-// Copied from src/components/WalletCardDeck.tsx by website/scripts/sync-app-deck.mjs. Edit the app's file, then run npm run sync:app-deck.
+// Copied from apps/ui/src/components/WalletCardDeck.tsx by website/scripts/sync-app-deck.mjs. Edit the app's file, then run npm run sync:app-deck.
 import type {ReactNode} from 'react';
 import {railOf,type WalletCard,type WalletRail} from './walletCardTypes';
 import {WalletMark} from './WalletCards';

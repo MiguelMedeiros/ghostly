@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { ChatSession } from "../../../src/lib/types";
+import type { ChatSession } from "../../../apps/ui/src/lib/types";
 import type { LinkView, StoredMessage } from "../src/shared/types";
 // covers: chats.created-marker, chat.paired.join-notice, chat.paired.delete-message, chat.paired.storage, chat.paired.nickname-sync, chat.edit
 
@@ -44,7 +44,7 @@ await import("../src/platform/sync");
 const engine = fake.engine;
 const recordCall = engine.call;
 let sync: typeof import("../src/platform/sync");
-let storage: typeof import("../../../src/lib/storage");
+let storage: typeof import("../../../apps/ui/src/lib/storage");
 let changes: number;
 
 beforeEach(async () => {
@@ -57,7 +57,7 @@ beforeEach(async () => {
   page.addEventListener("session-updated", () => changes++);
   Object.assign(engine, { state: null, messages: new Map(), calls: [], answers: {}, stateListeners: [], messageListeners: [], call: recordCall });
   sync = await import("../src/platform/sync");
-  storage = await import("../../../src/lib/storage");
+  storage = await import("../../../apps/ui/src/lib/storage");
 }, 60_000);
 afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
 

@@ -14,8 +14,8 @@ COPY apps/extension/package.json apps/extension/
 COPY apps/web/package.json apps/web/
 RUN npm ci --ignore-scripts
 
-COPY tsconfig.json vite-env.d.ts ./
-COPY src src
+COPY tsconfig.json ./
+COPY apps/ui apps/ui
 COPY packages packages
 COPY apps/web apps/web
 

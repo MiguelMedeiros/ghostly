@@ -2,7 +2,7 @@ import { composerRow } from "./composer";
 import { expect, type Peer } from "./fixtures";
 
 /**
- * A chat's identities, the way a person uses them. The contact's: the panel (src/components/identities/
+ * A chat's identities, the way a person uses them. The contact's: the panel (apps/ui/src/components/identities/
  * ContactIdentitiesPanel.tsx) opened from their marks in the chat's header, their ID cards (a click turns one over).
  * Mine: the composer's + → Identity (ComposerIdentities.tsx), a click on a card turns it over to Share or Stop sharing.
  */

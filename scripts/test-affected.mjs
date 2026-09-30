@@ -100,9 +100,9 @@ function sources(...dirs) {
 }
 const inventory = JSON.parse(readFileSync(join(ROOT, "e2e/features.json"), "utf8"));
 const e2eFiles = sources("e2e");
-// Tests import across workspaces by relative path (packages/browser/test → src/, e2e/matrix → packages/browser/),
+// Tests import across workspaces by relative path (packages/browser/test → apps/ui/src/, e2e/matrix → packages/browser/),
 // so the plan reads every workspace's imports.
-const codeFiles = { ...sources("packages", "src", "apps/extension", "apps/web/src", "scripts", "website", "examples"), ...e2eFiles };
+const codeFiles = { ...sources("packages", "apps/ui/src", "apps/extension", "apps/web/src", "scripts", "website", "examples"), ...e2eFiles };
 const p = makePlan({ changed, inventory, e2eFiles, codeFiles });
 
 // ---------- the plan, printed ----------

@@ -248,11 +248,11 @@ Two things to know:
 - Build with `tauri build`, not `cargo build`. A plain cargo debug build points the WebView at `devUrl`, and with no dev server running the window only says "Connection refused". `--debug --no-bundle` keeps the compile short and skips the installers; the test runs the binary from `target/`, newest of `debug` and `release`.
 - The app runs under `GHOSTLY_PROFILE=e2e`, so a test never opens your own chats.
 
-The test needs no network either. It asserts what only the Desktop wiring can produce: Settings → Advanced → Network names Mainline DHT (BEP44) over direct UDP (`data-testid="network-protocol"`: Rust reaching the DHT, where a browser names Pkarr relays over HTTP), and sharing a local web app is offered. If `ghostlyPlatformModules()` ever swaps `src/desktop/host.ts` for a browser stand-in, this goes red.
+The test needs no network either. It asserts what only the Desktop wiring can produce: Settings → Advanced → Network names Mainline DHT (BEP44) over direct UDP (`data-testid="network-protocol"`: Rust reaching the DHT, where a browser names Pkarr relays over HTTP), and sharing a local web app is offered. If `ghostlyPlatformModules()` ever swaps `apps/ui/src/desktop/host.ts` for a browser stand-in, this goes red.
 
 ### On macOS
 
-`npm run check:desktop-bundle` runs everywhere, in a second, and catches the same class of mistake from the other end: it reads what `src/desktop/` asks of Rust and fails if it is not in `dist/`, and it fails when a module is added to `PLATFORM_MODULES` without someone writing down why Desktop can live with the stand-in. It is a build assertion, not a test, but it is what stands between a Mac and a Desktop feature that silently does nothing. CI runs it on every pull request.
+`npm run check:desktop-bundle` runs everywhere, in a second, and catches the same class of mistake from the other end: it reads what `apps/ui/src/desktop/` asks of Rust and fails if it is not in `dist/`, and it fails when a module is added to `PLATFORM_MODULES` without someone writing down why Desktop can live with the stand-in. It is a build assertion, not a test, but it is what stands between a Mac and a Desktop feature that silently does nothing. CI runs it on every pull request.
 
 A Mac can still run the Linux harness inside a Linux container: `ubuntu:22.04` (arm64 works) with the packages of
 the `Desktop (Tauri)` job, Node 22, Rust, `cargo install tauri-driver` and `xvfb`, the repository copied in (not

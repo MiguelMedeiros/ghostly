@@ -107,7 +107,7 @@ Every client keeps one per relay (`packages/core/src/relayBreaker.ts`, and the s
 
 ### Discovery health in the connection panel
 
-The connection panel's **Details** (`src/components/DiscoveryHealth.tsx`) shows:
+The connection panel's **Details** (`apps/ui/src/components/DiscoveryHealth.tsx`) shows:
 
 - **Discovery:** the path the last read took: "DHT direct" or "Relay: <host>".
 - **Relays:** each relay's state: ok, throttled until hh:mm, or failing until hh:mm.

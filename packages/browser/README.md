@@ -2,7 +2,7 @@
 
 The Ghostly peer for JavaScript hosts: the engine (`GhostlyNode`, `src/engine/`), wallets and their
 providers (`src/engine/paymentAdapters/`), identity proofs, profiles, backups, IndexedDB and file storage,
-and the platform layer the shared UI (`src/`) is built with.
+and the platform layer the shared UI (`apps/ui/src/`) is built with.
 
 - `src/host.ts`: the small contract a host implements (web app, extension, Desktop). The headless CLI
   ([packages/cli](../cli/README.md)) runs the same engine on Node, with no UI.

@@ -1,7 +1,7 @@
 import { createInPageHost } from "@ghostly/browser/inPageHost";
 import { checkVersionFeed } from "@ghostly/browser/updateFeed";
 import { applyUpdate, prepareUpdate } from "./pwa/serviceWorker";
-import { RELEASES_URL } from "../../../src/lib/settings";
+import { RELEASES_URL } from "../../ui/src/lib/settings";
 import { popupWindow } from "@ghostly/browser/proofs/oidc/popup";
 import { atprotoPopupWindow } from "@ghostly/browser/proofs/atproto/popup";
 import { DHT_POLL_INTERVALS, RelayTransport } from "@ghostly/core";

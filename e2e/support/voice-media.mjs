@@ -165,7 +165,7 @@ export async function rateInPage(fixtures, rate = 2, { attempts = 3 } = {}) {
 }
 
 /**
- * In the page: decodes each fixture as Download as MP3 does (`src/lib/voiceDecode.ts` `decodeToMono`): Web Audio's
+ * In the page: decodes each fixture as Download as MP3 does (`apps/ui/src/lib/voiceDecode.ts` `decodeToMono`): Web Audio's
  * decoder, then one channel at `sampleRate` rendered offline. Reports `{ [name]: { duration, samples, peak, pcm, error? } }`:
  * the decoder's own duration in seconds, the samples made, their loudest value, and the samples as 16-bit PCM in
  * base64, for an encoder outside the page.

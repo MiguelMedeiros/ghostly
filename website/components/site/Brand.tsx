@@ -1,5 +1,5 @@
 /**
- * The brand lockup, as the app draws it at the top of its chat list (src/components/AppBrand.tsx,
+ * The brand lockup, as the app draws it at the top of its chat list (apps/ui/src/components/AppBrand.tsx,
  * `sidebar-wordmark`): the app's own ghost icon and GHOSTLY in the app's system font, bold, tracked tight, both in
  * the accent. The icon is the app's path, unchanged; site.css sizes the pair in the app's proportion (text 17/36 of
  * the icon). The app's short opening motion is not reproduced: the site's lockup stays still.

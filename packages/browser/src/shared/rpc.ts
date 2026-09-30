@@ -354,7 +354,7 @@ export interface RpcResponse {
 }
 
 /**
- * The finer sounds the engine can name (src/lib/cues.ts plays them, each in its category of Settings > Notifications
+ * The finer sounds the engine can name (apps/ui/src/lib/cues.ts plays them, each in its category of Settings > Notifications
  * and sounds). On a "cue" event, the only sound of that event; on another event, the sound played instead of the
  * event's own when its category is on (a mention instead of a message, test coins instead of a coin).
  */

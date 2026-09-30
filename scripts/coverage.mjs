@@ -23,8 +23,8 @@ const TARGETS = [
   { name: "core", dir: "packages/core", include: ["src/**/*.{ts,tsx}"] },
   { name: "browser", dir: "packages/browser", include: ["src/**/*.{ts,tsx}"] },
   { name: "sdk", dir: "packages/sdk", include: ["src/**/*.{ts,tsx}"] },
-  // The UI (src/) and @ghostly/react share one config: vitest.ui.config.ts.
-  { name: "ui", dir: ".", include: ["src/**/*.{ts,tsx}", "packages/react/src/**/*.{ts,tsx}"], exclude: ["src/test/**"], config: "vitest.ui.config.ts" },
+  // The UI (apps/ui/src/) and @ghostly/react share one config: apps/ui/vitest.ui.config.ts.
+  { name: "ui", dir: ".", include: ["apps/ui/src/**/*.{ts,tsx}", "packages/react/src/**/*.{ts,tsx}"], exclude: ["apps/ui/src/test/**"], config: "apps/ui/vitest.ui.config.ts" },
   { name: "extension", dir: "apps/extension", include: ["src/**/*.{ts,tsx}"] },
 ];
 
