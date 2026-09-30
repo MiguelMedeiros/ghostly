@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { ONCHAIN_PROVIDER, type PaymentTarget } from "@ghostly/core";
-import { walletAwaiting, type AwaitingSources } from "../src/engine/walletAwaiting";
+import { mintAwaiting, walletAwaiting, type AwaitingSources } from "../src/engine/walletAwaiting";
 import type { LightningOp } from "../src/engine/paymentAdapters/providers/lightningService";
 import type { StoredPayment, StoredQuote } from "../src/shared/types";
 import { removalRisksFunds, walletRemoval } from "../src/shared/walletRemoval";
@@ -122,5 +122,31 @@ describe("removing a wallet that still waits for money", () => {
     const lnd = walletRemoval("lightning", "mainnet", { awaiting, lightning: { providerId: "lnd", status: "ready", balance: 0 } as never });
     expect(lnd.awaiting.map((i) => i.paymentId)).toEqual(["l"]);
     expect(removalRisksFunds(lnd)).toBe(false);
+  });
+});
+
+describe("what one mint still waits for (before it is removed alone)", () => {
+  const at = (quotes: StoredQuote[], payments: StoredPayment[] = []) => mintAwaiting(REAL, { network: "mainnet", quotes, payments, now: NOW });
+
+  it("its own invoices, open, paid or issued; never another mint's, an expired one or test coins", () => {
+    expect(at([
+      quote({ quote: "open", amount: 30 }),
+      quote({ quote: "paid", paid: true, amount: 700 }),
+      quote({ quote: "issued", issuedUnclaimed: true, amount: 300 }),
+      quote({ quote: "expired", expiresAt: NOW - 120_000 }),
+      quote({ quote: "coins", testCoins: true }),
+      quote({ quote: "elsewhere", mint: OTHER }),
+    ])).toEqual([
+      { type: "cashu", kind: "paid", amount: 700 },
+      { type: "cashu", kind: "unclaimed", amount: 300 },
+      { type: "cashu", kind: "invoice", amount: 30 },
+    ]);
+  });
+
+  it("a request of ours whose invoice is its quote; not one only named for ecash, which another mint or a token still pays", () => {
+    const quotes = [quote({ quote: "q1", paymentId: "r1" })];
+    expect(at(quotes, [request({ id: "r1", invoice: "lnbc-q1", mints: [REAL] })])).toEqual([{ type: "cashu", kind: "request", amount: 50_000, paymentId: "r1" }]);
+    expect(at([], [request({ id: "r2", mints: [REAL, OTHER] })])).toEqual([]);
+    expect(at([], [request({ id: "r3", mints: [REAL] })])).toEqual([]);
   });
 });
