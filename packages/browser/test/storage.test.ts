@@ -142,6 +142,19 @@ describe("deleting one message", () => {
     expect(getUnreadCount(loadSession(id)!)).toBe(1);
   });
 
+  it("counts a missed call as unread, not the lines of a call I was on (its chat loaded off screen while it rang or ran)", () => {
+    const id = ensureSession(keys);
+    addMessage(id, peerMessage(1));
+    markSessionAsRead(id);
+    const line = (type: NonNullable<ChatMessage["callEvent"]>["type"], at: number): ChatMessage =>
+      ({ id: `system_call_${type}_${at}`, text: type, sender: "system", timestamp: at, callEvent: { type, hasVideo: false } });
+    for (const [n, type] of (["call_received", "call_connected", "call_ended"] as const).entries()) addMessage(id, line(type, 10_000 + n));
+    expect(getUnreadCount(loadSession(id)!)).toBe(0);
+    addMessage(id, line("call_received", 20_000));
+    addMessage(id, line("call_missed", 20_001));
+    expect(getUnreadCount(loadSession(id)!)).toBe(1);
+  });
+
   it("says nothing happened when there is no such message or chat", () => {
     const id = ensureSession(keys);
     addMessage(id, peerMessage(1));
