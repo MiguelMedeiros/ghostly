@@ -58,8 +58,8 @@ test.describe("another wallet", () => {
     await openWallet(alice, "cashu-testnet");
     await alice.page.getByTestId("wallet-send").click();
     await alice.page.getByTestId("wallet-pay-input").fill(invoice);
-    await expect(alice.page.getByTestId("wallet-pay-preview")).toContainText("10 sats");
-    await alice.page.getByRole("button", { name: "Pay 10 sats" }).click();
+    await expect(alice.page.getByTestId("wallet-pay-preview")).toContainText("10 test sats");
+    await alice.page.getByRole("button", { name: "Pay 10 test sats" }).click();
     await expect(alice.page.getByRole("button", { name: "Pay", exact: true })).toBeVisible();
     await alice.page.getByRole("button", { name: "Pay", exact: true }).click();
     // The test mint marks its own invoices paid, so it may refuse Alice's melt as already paid.

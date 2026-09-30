@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { badgeCount, canBadge, resetAppBadge, showAppBadge } from "../../lib/appBadge";
+import { badgeCount, canBadge, resetAppBadge, setAppBadgeTarget, showAppBadge } from "../../lib/appBadge";
+import { dockBadge } from "../../desktop/dockBadge";
 import { groupChat, setChatMute, setMentionsNotify } from "../../lib/chatMute";
 import { markGroupRead } from "../../lib/groups";
 import { getPrefix } from "../../lib/storage";
@@ -81,5 +82,36 @@ describe("showing it", () => {
     resetAppBadge();
     expect(() => showAppBadge(5, throwing)).not.toThrow();
     await Promise.resolve();
+  });
+});
+
+describe("on Desktop, the Dock icon", () => {
+  afterEach(() => setAppBadgeTarget(null));
+
+  it("takes the number the web app's icon would, through Tauri's window badge, and no count at 0", async () => {
+    const call = vi.fn((_command: string, _args: Record<string, unknown>) => Promise.resolve(null));
+    setAppBadgeTarget(dockBadge(call));
+    expect(canBadge()).toBe(true);
+    setChatMute("muted", "forever");
+    showAppBadge(badgeCount([session("a", 2), session("muted", 4)], [{ id: "desk", lastMessageAt: NOW - 100 }], NOW));
+    showAppBadge(3);
+    showAppBadge(0);
+    expect(call.mock.calls).toEqual([
+      ["plugin:window|set_badge_count", { label: "main", value: 3 }],
+      ["plugin:window|set_badge_count", { label: "main", value: null }],
+    ]);
+  });
+
+  it("a platform without a badge (Windows) refuses quietly", async () => {
+    const call = vi.fn(() => Promise.reject(new Error("unsupported")));
+    setAppBadgeTarget(dockBadge(call));
+    expect(() => showAppBadge(2)).not.toThrow();
+    await Promise.resolve();
+    expect(call).toHaveBeenCalledTimes(1);
+  });
+
+  it("without a target, the browser's own navigator is asked", () => {
+    setAppBadgeTarget(null);
+    expect(canBadge()).toBe(typeof (navigator as { setAppBadge?: unknown }).setAppBadge === "function");
   });
 });

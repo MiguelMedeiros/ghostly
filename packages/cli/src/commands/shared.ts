@@ -151,6 +151,17 @@ export function taskFields(options: Parsed["options"]): Record<string, unknown> 
   return fields;
 }
 
+/**
+ * The fields a new card cannot go without, given as a flag or in `--json`: a usage error (exit 2) that names the
+ * flags. Before, a missing `--title` reached the card's own check and failed as `bad_request` (exit 1) with
+ * "Status card: title is text".
+ */
+export function needs(card: Record<string, unknown>, fields: readonly (readonly [key: string, flag: string])[], usage: string): Record<string, unknown> {
+  const missing = fields.filter(([key]) => typeof card[key] !== "string" || !(card[key] as string).trim()).map(([, flag]) => `--${flag}`);
+  if (missing.length) throw new CliError("usage", `${missing.join(" and ")} ${missing.length > 1 ? "are" : "is"} needed: ghostly ${usage}`);
+  return card;
+}
+
 /** A time a command names: milliseconds, or a date the JavaScript Date reads (`2026-09-30T01:00:00Z`). */
 export function cardTime(value: unknown, flag: string): number | undefined {
   if (value === undefined) return undefined;

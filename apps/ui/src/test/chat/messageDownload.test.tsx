@@ -1,4 +1,4 @@
-import { screen, waitFor } from "@testing-library/react";
+import { act, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MessageBubble } from "../../components/MessageBubble";
 import { downloadName } from "../../lib/fileDownload";
@@ -102,6 +102,18 @@ describe("Download in a message's menu", () => {
     await menu(user);
     expect(screen.getByTestId("message-download")).toBeDisabled();
     expect(screen.getByTestId("message-download")).toHaveTextContent("Still being prepared");
+  });
+
+  it("waits right after a start, until the transfers are restored, for a received file", async () => {
+    fakeEngine.update({ links: [linkView({ id: "chat1" })], transfers: {}, transfersRestored: false });
+    const { user } = renderApp(<MessageBubble message={document_()} peerPubKey="peer" onDelete={() => {}} />);
+    await menu(user);
+    const item = screen.getByTestId("message-download");
+    expect(item).toBeDisabled();
+    expect(item).toHaveAttribute("data-download-state", "restoring");
+    act(() => fakeEngine.update({ transfersRestored: true }));
+    expect(screen.getByTestId("message-download")).toBeEnabled();
+    expect(screen.getByTestId("message-download")).toHaveAttribute("data-download-state", "ready");
   });
 
   it("downloads a voice message on the web under a readable name, and closes the menu", async () => {

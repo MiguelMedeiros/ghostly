@@ -330,7 +330,7 @@
       "confirmed": "مؤكد",
       "failed": "فشل",
       "pending": "قيد الانتظار",
-      "settled": "تمت التسوية",
+      "settled": "تم الدفع",
       "submitted": "أُرسل",
       "unknown": "غير معروف"
     },

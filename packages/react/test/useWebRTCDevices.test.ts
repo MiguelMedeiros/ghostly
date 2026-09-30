@@ -167,6 +167,38 @@ describe("switching the camera during a call", () => {
     expect(call.result.current.callState).toBe("connected");
   });
 
+  it("turned off while the other camera opens, it stays off and lets go of that camera", async () => {
+    const { call, video } = await connectedCall(true);
+
+    act(() => { void call.result.current.switchCamera("cam-usb"); });
+    await act(() => call.result.current.toggleVideo());
+    expect(call.result.current.isVideoOff).toBe(true);
+
+    const usb = devices.userMedia[1].grant().getVideoTracks()[0] as FakeTrack;
+    await settle();
+
+    expect(call.result.current.isVideoOff).toBe(true);
+    expect(video.track).toBeNull();
+    expect(usb.stop).toHaveBeenCalled();
+    expect(call.result.current.localStream?.getVideoTracks()).toEqual([]);
+    expect(devices.liveTracks().map((t) => t.kind)).toEqual(["audio"]);
+  });
+
+  it("switched twice quickly, the camera picked last is the one shown", async () => {
+    const { call, video } = await connectedCall(true);
+
+    act(() => { void call.result.current.switchCamera("cam-usb"); });
+    act(() => { void call.result.current.switchCamera("cam-builtin"); });
+    const builtin = devices.userMedia[2].grant().getVideoTracks()[0] as FakeTrack;
+    await settle();
+    const usb = devices.userMedia[1].grant().getVideoTracks()[0] as FakeTrack;
+    await settle();
+
+    expect(video.track).toBe(builtin);
+    expect(usb.stop).toHaveBeenCalled();
+    expect(call.result.current.localStream?.getVideoTracks()).toEqual([builtin]);
+  });
+
   it("with the camera off, or a screen shared, there is nothing to swap", async () => {
     const { call } = await connectedCall(false);
     await act(() => call.result.current.switchCamera("cam-usb"));

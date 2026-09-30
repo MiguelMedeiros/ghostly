@@ -2,7 +2,7 @@ import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { formatFileSize, formatVideoDuration, sanitizeFileName } from "@ghostly/core";
 import { useOptionalI18n, useT } from "../../contexts/I18nContext";
 import { useChosenSpeaker } from "../../hooks/useChosenSpeaker";
-import { useServicesPlatform } from "../../hooks/useServicesPlatform";
+import { useTransfer } from "../../hooks/useServicesPlatform";
 import { languageTag } from "../../lib/documentLanguage";
 import { downloadFile } from "../../lib/fileDownload";
 import { canRetryFile, fileStatus, stalledAction } from "../../lib/fileStatus";
@@ -31,10 +31,10 @@ const pill = "text-xs px-2.5 py-0.5 rounded-full bg-black/20 hover:bg-black/30 b
 export function AudioBubble({ file, sender, peerName: named, highlight }: { file: ChatFile; sender: "me" | "peer"; peerName?: string; highlight?: string }) {
   const t = useT();
   const peerName = named ?? t("pairing.contact");
-  const platform = useServicesPlatform();
+  const { platform, transfer, restoring } = useTransfer(file.id);
   const locale = languageTag(useOptionalI18n()?.language ?? "en");
-  const transfer = platform?.getTransfer(file.id) ?? null;
-  const ready = transfer === null || transfer.state === "done";
+  // No transfer is "finished" only once the engine has put its kept transfers back after a start.
+  const ready = (transfer === null && !restoring) || transfer?.state === "done";
   const [playable] = useState(() => canPlayAudio(file.mime));
   const [state, setPlayState] = useState<PlayState>("idle");
   const [problem, setProblem] = useState<Problem | null>(null);
@@ -194,7 +194,7 @@ export function AudioBubble({ file, sender, peerName: named, highlight }: { file
     : null;
 
   return (
-    <div className="w-[300px] max-w-full pt-1" data-testid="audio-bubble" data-state={state} data-playable={playable ? "true" : "false"} data-stage={transfer?.stage ?? transfer?.state ?? "done"}>
+    <div className="w-[300px] max-w-full pt-1" data-testid="audio-bubble" data-state={state} data-playable={playable ? "true" : "false"} data-stage={transfer?.stage ?? transfer?.state ?? (restoring ? "restoring" : "done")}>
       <div className="flex items-center gap-2">
         {canRetry ? (
           <RoundRetry danger busy={busy} testId="audio-retry" label={t("chat.message.retry")} hint={t("chat.file.notSentHint")} onClick={() => again(() => platform!.retryFile!(file.id))} />

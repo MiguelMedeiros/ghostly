@@ -330,7 +330,7 @@
       "confirmed": "已确认",
       "failed": "失败",
       "pending": "待处理",
-      "settled": "已结算",
+      "settled": "已支付",
       "submitted": "已提交",
       "unknown": "未知"
     },

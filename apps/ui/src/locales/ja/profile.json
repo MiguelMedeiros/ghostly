@@ -54,7 +54,6 @@
   "colorLabel": "プロフィールの色",
   "create": "作成",
   "delete": {
-    "arkWallet": "Ark ウォレット",
     "backupFirst": "先にバックアップをダウンロード",
     "backupPassphrase": "バックアップのパスフレーズ",
     "cashuSats": "Cashu に {{amount}} sats",
@@ -68,7 +67,7 @@
     "serviceCount": "{{count}} 個のアプリ",
     "serviceOne": "1 個のアプリ",
     "title": "「{{name}}」を削除しますか？",
-    "usdtWallet": "USDT ウォレット",
+    "wallet": "{{name}} ウォレット",
     "warning": "元に戻せません。ウォレットも一緒に削除されます。"
   },
   "deleteNamed": "{{name}} を削除",

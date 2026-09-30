@@ -150,7 +150,7 @@ test("Fedimint on regtest: join by invite, ecash in over the gateway, notes out 
   await openWallet(alice, "lightning-testnet");
   await alice.page.getByTestId("wallet-send").click();
   await alice.page.getByTestId("wallet-pay-input").fill(outside.payment_request);
-  await alice.page.getByRole("button", { name: "Pay 3,000 sats" }).click();
+  await alice.page.getByRole("button", { name: "Pay 3,000 test sats" }).click();
   await alice.page.getByRole("button", { name: "Pay", exact: true }).click();
   await expect(alice.page.getByTestId("wallet-notice")).toContainText(/Paid|pending/, { timeout: 90_000 });
   const hash = outside.r_hash;

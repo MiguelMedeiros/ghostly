@@ -383,6 +383,29 @@ describe("a video not here yet", () => {
     expect(screen.queryByTestId("video-progress")).toBeNull();
   });
 
+  it("right after a start, one whose transfer is not restored yet is not offered to play or save", () => {
+    const file = video();
+    fakeEngine.update({ links: [linkView({ id: "chat1" })], transfers: {}, transfersRestored: false });
+    renderApp(<VideoBubble file={file} sender="peer" peerName="Ana" />);
+    expect(screen.getByTestId("video-bubble")).toHaveAttribute("data-stage", "restoring");
+    expect(screen.queryByTestId("video-play")).toBeNull();
+    expect(screen.queryByTestId("video-save")).toBeNull();
+    // Restored: it is still arriving.
+    act(() => fakeEngine.update({ transfersRestored: true, transfers: { [file.id]: { state: "transferring", direction: "in", transferred: 14 * MB, size: file.size } } }));
+    expect(screen.getByTestId("video-progress")).toHaveTextContent("40%");
+    expect(screen.queryByTestId("video-play")).toBeNull();
+    expect(screen.queryByTestId("video-save")).toBeNull();
+  });
+
+  it("one from history plays once the transfers are restored with none for it", () => {
+    fakeEngine.update({ links: [linkView({ id: "chat1" })], transfers: {}, transfersRestored: false });
+    renderApp(<VideoBubble file={video()} sender="peer" peerName="Ana" />);
+    expect(screen.queryByTestId("video-play")).toBeNull();
+    act(() => fakeEngine.update({ transfersRestored: true }));
+    expect(screen.getByTestId("video-play")).toBeInTheDocument();
+    expect(screen.getByTestId("video-save")).toBeInTheDocument();
+  });
+
   it("one sent from here can be watched while it goes", () => {
     const file = video({ id: "chat1-out-video" });
     show(file, { state: "transferring", direction: "out", transferred: 14 * MB, size: file.size }, "me");

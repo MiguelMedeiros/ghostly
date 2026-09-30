@@ -63,6 +63,14 @@ describe("the task commands", () => {
     expect(() => params("task send", ["g1", "--json", "{nope"])).toThrow(/not valid JSON/);
   });
 
+  it("refuse a new card without its title as a usage error (exit 2) that names the flag; --json may give it", () => {
+    expect(() => params("task send", ["g1", "--steps", "1/4"])).toThrow(expect.objectContaining({ code: "usage", message: expect.stringMatching(/^--title is needed: ghostly task send/) }));
+    expect(() => params("task send", ["g1", "--title", " "])).toThrow(expect.objectContaining({ code: "usage" }));
+    expect(params("task send", ["g1", "--json", '{"title":"Ship"}'])).toMatchObject({ card: { title: "Ship" } });
+    // An update names only what changes.
+    expect(params("task update", ["g1", "t", "--status", "done"])).toMatchObject({ card: { status: "done" } });
+  });
+
   it("refuse an item whose state is no state, listing the states; text that names none stays pending as it is", () => {
     const items = (...values: string[]) => (params("task send", ["g1", "--title", "Ship", ...values.flatMap((v) => ["--item", v])]).card as { items: unknown }).items;
     expect(() => items("queued:Publishing")).toThrow(/"queued" is not a state: use pending, running, done, failed or skipped/);
@@ -195,6 +203,8 @@ describe("routines", () => {
     expect(params("routine update", ["g1", "nightly", "--run", "failed", "--state", "paused"])).toMatchObject({ routine: "nightly", run: { result: "failed" }, card: { state: "paused" } });
     expect(() => params("routine update", ["g1", "nightly", "--run", "maybe"])).toThrow(/--run takes ok, failed or skipped/);
     expect(() => params("routine update", ["g1", "nightly", "--next", "someday"])).toThrow(/--next takes a time/);
+    expect(() => params("routine send", ["g1"])).toThrow(expect.objectContaining({ code: "usage", message: expect.stringMatching(/^--name and --schedule are needed/) }));
+    expect(() => params("routine send", ["g1", "--name", "Nightly"])).toThrow(expect.objectContaining({ code: "usage", message: expect.stringMatching(/^--schedule is needed/) }));
   });
 
   it("send a routine active from now, and each run becomes the last and the newest of ten recent ones", async () => {

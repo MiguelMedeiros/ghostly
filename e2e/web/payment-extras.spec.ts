@@ -80,7 +80,7 @@ test("a request's memo shows on both sides, and test-mint payments say test sats
     await expect(sent.getByTestId("payment-state")).toHaveText(/Received/);
     await expect(sent).toContainText(/21\s*test sats/);
   }
-  await expect(bubble(alice, "You sent")).toContainText("Cashu · cashu-test");
+  await expect(bubble(alice, "You sent").getByTestId("payment-rail")).toHaveText("Cashu");
   await expect(bubble(alice, "You sent")).toHaveCount(1);
   await expect(bubble(bob, "Sent you")).toHaveCount(1);
 });

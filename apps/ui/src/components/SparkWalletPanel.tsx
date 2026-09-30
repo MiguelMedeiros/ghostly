@@ -2,6 +2,7 @@ import { useState } from "react";
 import { SPARK_PROVIDER, sparkAddressKind, sparkInvoiceDetails, type PaymentReview as Review } from "@ghostly/core";
 import type { WalletPlatform, WalletState } from "../lib/platform";
 import { PaymentReview } from "./PaymentReview";
+import { paymentStateLabel } from "./paymentWords";
 import { BackupRows } from "./wallet/BackupRows";
 import { Actions, Address, Amount, Block, Button, Notice, Row, Section, input, type Action } from "./wallet/ui";
 import { useRun } from "./wallet/run";
@@ -69,7 +70,7 @@ export function SparkWalletPanel({ wallet, state, backupNow = false }: { wallet:
     <Notice>{t("wallet.spark.approve")}</Notice>
    </div>}
    {review && <PaymentReview key={review.id} review={review} wallet={wallet} onClose={() => { setReview(null); setTo(""); setAmount(""); }} />}
-   {intents.filter(i => i.id !== review?.id && i.state !== "settled").map(i => <Button key={i.id} className="block w-full text-start" onClick={() => setReview(i)}>{t("wallet.panel.intent", { amount: formatAmount(i.amount, t.language), unit, state: i.state })}</Button>)}
+   {intents.filter(i => i.id !== review?.id && i.state !== "settled").map(i => <Button key={i.id} className="block w-full text-start" onClick={() => setReview(i)}>{t("wallet.panel.intent", { amount: formatAmount(i.amount, t.language), unit, state: paymentStateLabel(t, i.state) })}</Button>)}
    {!!spark.history?.length && <Section title={t("wallet.spark.history")}>
     <ul className="divide-y divide-border" data-testid="spark-history">
      {spark.history.map(entry => <li key={entry.id} className="flex items-center gap-3 py-2 text-sm" data-testid="spark-history-row">

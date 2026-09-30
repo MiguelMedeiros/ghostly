@@ -53,7 +53,7 @@ test("a Core Lightning node as the Lightning source: an invoice paid into it, an
   const bolt11 = (await page.getByTestId("wallet-invoice").innerText()).trim();
   expect(bolt11).toMatch(/^lnbcrt1500n/);
   pay("bob", bolt11);
-  await expect(page.getByTestId("wallet-paid")).toContainText("150 sats received", { timeout: 30_000 });
+  await expect(page.getByTestId("wallet-paid")).toContainText("150 test sats received", { timeout: 30_000 });
   await expect(page.getByTestId("lightning-recent").getByTestId("lightning-op").first()).toContainText("paid");
   await expect.poll(() => balance(alice), { timeout: 30_000 }).toBe(start + 150);
 
@@ -61,7 +61,7 @@ test("a Core Lightning node as the Lightning source: an invoice paid into it, an
   await openWallet(alice, "lightning-testnet");
   await page.getByTestId("wallet-send").click();
   await page.getByTestId("wallet-pay-input").fill(invoice("bob", 70, "from the e2e"));
-  await page.getByRole("button", { name: "Pay 70 sats" }).click();
+  await page.getByRole("button", { name: "Pay 70 test sats" }).click();
   await page.getByRole("button", { name: "Pay", exact: true }).click();
   await expect(page.getByTestId("wallet-notice")).toHaveText("Paid.", { timeout: 60_000 });
   // A direct channel: no routing fee.

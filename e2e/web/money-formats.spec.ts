@@ -84,7 +84,7 @@ test("BDK on regtest: a pasted bitcoin: link is paid from the regtest wallet aft
   await onchain.getByTestId("onchain-pay").click();
   await onchain.getByTestId("money-review").click();
   const review = onchain.getByTestId("payment-review");
-  await expect(review).toContainText("bitcoin · regtest", { timeout: 60_000 });
+  await expect(review).toContainText("Bitcoin on-chain · Regtest", { timeout: 60_000 });
   await expect(review).toContainText(payee);
   await review.getByRole("button", { name: "Approve payment" }).click();
   await expect(review.getByTestId("review-status")).toHaveText(/submitted|settled/, { timeout: 60_000 });

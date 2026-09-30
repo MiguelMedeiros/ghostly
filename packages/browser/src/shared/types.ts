@@ -478,6 +478,8 @@ export interface MintView {
   balance: number;
   /** Null until the mint answered once. */
   info: MintInfoView | null;
+  /** What it still waits for (see `mintAwaiting`), when it does: removing it asks about these first. */
+  awaiting?: WalletAwaitingView[];
 }
 
 /** What a mint says about itself and what it charges. */

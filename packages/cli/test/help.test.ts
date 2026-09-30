@@ -39,4 +39,18 @@ describe("help", () => {
     const whole = await ghostly(["help"]);
     expect(whole.stdout).toContain("Usage: ghostly <command>");
   });
+
+  it("a group's first word alone, or with a word it does not take, names the group's commands", async () => {
+    const alone = await ghostly(["chat"]);
+    expect(alone.code).toBe(2);
+    expect(alone.json).toMatchObject({ error: { code: "usage" } });
+    const message = (alone.json.error as { message: string }).message;
+    expect(message).toMatch(/^ghostly chat takes a command: .*\blist\b.*\bwait\b.* \(ghostly help chat\)$/);
+    expect(message).not.toMatch(/\bsend\b|\bgroup\b/);
+    const wrong = await ghostly(["wallet", "frob"]);
+    expect(wrong.code).toBe(2);
+    expect((wrong.json.error as { message: string }).message).toMatch(/^Unknown command: wallet frob: ghostly wallet takes .*\bfaucet\b.* \(ghostly help wallet\)$/);
+    expect((await ghostly(["frobnicate"])).json).toMatchObject({ error: { code: "usage", message: "Unknown command: frobnicate (ghostly help)" } });
+    expect((await ghostly(["help", "listen"])).stdout).toContain("[--print]");
+  });
 });

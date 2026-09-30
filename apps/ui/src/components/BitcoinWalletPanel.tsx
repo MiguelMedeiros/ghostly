@@ -2,6 +2,7 @@ import { useState } from "react";
 import type { PaymentReview as Review } from "@ghostly/core";
 import type { WalletPlatform, WalletState } from "../lib/platform";
 import { PaymentReview } from "./PaymentReview";
+import { paymentStateLabel } from "./paymentWords";
 import { Actions, Address, Amount, Button, Notice, Row, Section, input, type Action } from "./wallet/ui";
 import { useRun } from "./wallet/run";
 import { SourcePicker } from "./wallet/providers/SourcePicker";
@@ -98,7 +99,7 @@ export function BitcoinWalletPanel({ wallet, state }: { wallet: WalletPlatform; 
             </div>
           )}
           {review && <PaymentReview key={review.id} review={review} wallet={wallet} onClose={() => setReview(null)} />}
-          {intents.map((i) => <Button key={i.id} className="block w-full text-start" onClick={() => setReview(i)}>{t("wallet.panel.intent", { amount: formatAmount(i.amount, t.language), unit, state: i.state })}</Button>)}
+          {intents.map((i) => <Button key={i.id} className="block w-full text-start" onClick={() => setReview(i)}>{t("wallet.panel.intent", { amount: formatAmount(i.amount, t.language), unit, state: paymentStateLabel(t, i.state) })}</Button>)}
           {error && <Notice tone="error" testId="bitcoin-error">{error}</Notice>}
         </div>
       )}

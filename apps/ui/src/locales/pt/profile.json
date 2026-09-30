@@ -54,7 +54,6 @@
   "colorLabel": "Cor do perfil",
   "create": "Criar",
   "delete": {
-    "arkWallet": "Carteira Ark",
     "backupFirst": "Baixe um backup antes",
     "backupPassphrase": "Frase-senha do backup",
     "cashuSats": "{{amount}} sats em Cashu",
@@ -68,7 +67,7 @@
     "serviceCount": "{{count}} apps",
     "serviceOne": "1 app",
     "title": "Excluir “{{name}}”?",
-    "usdtWallet": "Carteira USDT",
+    "wallet": "Carteira {{name}}",
     "warning": "Não dá para desfazer. As carteiras vão junto."
   },
   "deleteNamed": "Excluir {{name}}",
