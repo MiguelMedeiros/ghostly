@@ -136,6 +136,14 @@ export const LIVENESS_PING_MS = 15_000;
  */
 export const SWITCH_RETIRE_MS = 3_000;
 export const LIVENESS_MISSED_PINGS = 3;
+/**
+ * A ping with nothing at all back this long after it went: the contact may have crashed and started again, with its new
+ * offer waiting on the relays, while this side still holds the old session and reads them at a live chat's pace (30 s).
+ * They are read now. Nothing more: the session is let go only by `LIVENESS_MISSED_PINGS`, or by the contact's offer
+ * (`DataLink.handleSignal`). A connection whose close this side does not hear (node-datachannel never says
+ * `disconnected`) otherwise went on until its consent checks gave up, 27 s after the crash (CI run 36741701666).
+ */
+export const PONG_WAIT_MS = 4_000;
 
 export interface IncomingMessage {
   id?: string;
@@ -586,6 +594,8 @@ export class GhostLink {
   /** The contact's transport policy as last seen on this session, to tell its explicit choices apart. */
   private peerPolicySeen: { intent: number } | null = null;
   private unansweredPings = 0;
+  /** The last ping's `PONG_WAIT_MS`: running until something comes back from the contact. */
+  private pongWait: ReturnType<typeof setTimeout> | null = null;
   private openWaiters: { resolve: () => void; reject: (e: Error) => void }[] = [];
   /** Set while a WebRTC attempt this side dialled is pending: the ranked transports to try if it fails. */
   private afterRtc?: { epoch: number; rest: PairedTransport[] };
@@ -1665,12 +1675,14 @@ export class GhostLink {
     const endpoint = this.endpoints.get(transport as NativeEndpoint["transport"]);
     const descriptor = this.peerDescriptors[transport as NativeEndpoint["transport"]];
     if (!endpoint || !descriptor) return new Error("Peer native address unavailable; reconnect WebRTC once to exchange endpoints");
+    const started = Date.now();
     try {
       const { channel, binding } = await endpoint.connect(descriptor);
       this.nativeFailures.delete(transport); this.demotedUntil.delete(transport);
       if (this.stopped || epoch !== this.connectionEpoch || this.channel) { channel.close(); return true; }
       this.attach(channel, binding); return true;
     } catch (error) {
+      traceLink(this.myPubKeyZ32, "dial-failed", { transport, error: error instanceof Error ? error.message : String(error), ms: Date.now() - started });
       if (epoch !== this.connectionEpoch) return true;
       this.attemptFailed(transport, error instanceof Error ? error.message : String(error));
       // Three failures in a row demote it for an hour (WISP 100).
@@ -2626,7 +2638,7 @@ export class GhostLink {
         onApplication: async data => {
           if (this.channel !== channel) return;
           // Anything from the peer shows the session is alive.
-          this.unansweredPings = 0;
+          this.unansweredPings = 0; this.heardFromPeer();
           if (typeof data !== "string" || data.length > 60 * 1024) return;
           let frame: Record<string, unknown>;
           try { frame = JSON.parse(data); } catch { return; }
@@ -2878,7 +2890,17 @@ export class GhostLink {
     this.stopLiveness();
     this.peerAnswersPings = peerAnswersPings;
     // One ping at the open, not counted as missed: the round trip is known at once, not 15 s later.
-    const ping = () => { this.pingSentAt = Date.now(); channel.send(JSON.stringify({ t: "paired-ping" })); };
+    const ping = () => {
+      this.pingSentAt = Date.now(); channel.send(JSON.stringify({ t: "paired-ping" }));
+      // An app that never answers pings (an older one) would cost a read of the relays at each.
+      if (!this.peerAnswersPings || this.pongWait) return;
+      this.pongWait = setTimeout(() => {
+        this.pongWait = null;
+        if (this.channel !== channel || this.stopped) return;
+        traceLink(this.myPubKeyZ32, "pong-late", { unanswered: this.unansweredPings });
+        this.session.pollNow();
+      }, PONG_WAIT_MS);
+    };
     if (peerAnswersPings) try { ping(); } catch { /* closing: the timer below finds out */ }
     this.livenessTimer = setInterval(() => {
       if (this.channel !== channel) { this.stopLiveness(); return; }
@@ -2890,10 +2912,16 @@ export class GhostLink {
   private stopLiveness(): void {
     if (this.livenessTimer) clearInterval(this.livenessTimer);
     this.livenessTimer = null;
+    this.heardFromPeer();
     this.unansweredPings = 0;
     this.peerAnswersPings = false;
     this.pingSentAt = 0;
     this.rtt = undefined;
+  }
+  /** Something came back on the session: the ping's wait is over. */
+  private heardFromPeer(): void {
+    if (this.pongWait) clearTimeout(this.pongWait);
+    this.pongWait = null;
   }
   private dropDeadSession(channel: FrameChannel): void {
     this.stopLiveness();
