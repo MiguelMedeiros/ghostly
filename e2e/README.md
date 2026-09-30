@@ -315,7 +315,7 @@ npm run test:e2e:desktop-macos     # about 15 s once built
   app's log.
 
 In CI it is a required check: `ci.yml` calls `desktop-macos.yml` (`macos-15`, about 4 minutes with the build) on
-every pull request and push (a pull request that changes only `website/` or `docs/` skips it), and CI Success needs
+every pull request and push (a pull request that changes only `apps/website/` or `docs/` skips it), and CI Success needs
 it. Pushes to `dev` save its compiled dependencies, which pull requests restore. It became one after 20 runs in a row passed on GitHub's
 runners. It also runs nightly on `dev`, and by hand with `repeat` (Actions → Desktop on macOS → Run workflow) to run
 the test that many times on one build, which is how to measure a suspected flake.

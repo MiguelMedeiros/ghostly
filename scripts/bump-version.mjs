@@ -11,7 +11,7 @@
  * - the download tables in docs/INSTALLATION.md
  * - CHANGELOG.md: the files in changes/ go into "## Unreleased" (and are deleted), which becomes "## <version>"
  *
- * A package with a version of its own (website/, native/transports/hyperdht, services/*, examples/*) is not a workspace.
+ * A package with a version of its own (apps/website/, native/transports/hyperdht, services/*, examples/*) is not a workspace.
  * See docs/RELEASING.md for the rest of a release.
  */
 import { execFileSync } from "node:child_process";
@@ -69,7 +69,7 @@ function bump(root, next) {
   edit("apps/desktop/Cargo.toml", crateVersion);
   edit("Cargo.lock", (text) => text.replace(/(name = "ghostly"\nversion = ")[^"]+(")/g, `$1${next}$2`));
 
-  edit("website/lib/release.ts", (text) => text.replace(/(export const VERSION = ")[^"]+(")/, `$1${next}$2`));
+  edit("apps/website/lib/release.ts", (text) => text.replace(/(export const VERSION = ")[^"]+(")/, `$1${next}$2`));
   edit("docs/INSTALLATION.md", (text) =>
     text
       .replace(/releases\/download\/v\d+\.\d+\.\d+\//g, `releases/download/v${next}/`)

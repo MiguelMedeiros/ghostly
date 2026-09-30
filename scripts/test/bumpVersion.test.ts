@@ -13,7 +13,7 @@ describe("bump-version", () => {
     expect(workspaces(root)).toEqual(expect.arrayContaining(["apps/extension", "apps/web", "packages/cli", "packages/core", "packages/iroh-web"]));
     for (const folder of workspaces(root)) expect(versionedJson(root), folder).toContain(`${folder}/package.json`);
     // Packages with a version of their own stay out.
-    for (const file of ["website/package.json", "examples/sdk-adapter/package.json", "native/transports/hyperdht/package.json"]) {
+    for (const file of ["apps/website/package.json", "examples/sdk-adapter/package.json", "native/transports/hyperdht/package.json"]) {
       expect(versionedJson(root)).not.toContain(file);
     }
   });
@@ -39,7 +39,7 @@ describe("bump-version", () => {
         "package-lock.json",
         "apps/desktop/Cargo.toml",
         "Cargo.lock",
-        "website/lib/release.ts",
+        "apps/website/lib/release.ts",
         "docs/INSTALLATION.md",
         "CHANGELOG.md",
         "scripts/bump-version.mjs",

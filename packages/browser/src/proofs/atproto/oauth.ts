@@ -15,7 +15,7 @@ import { resolveAtprotoDid, resolveAtprotoHandle, type AtprotoResolveOptions } f
  *
  * The client is identified by the URL of its metadata document (no registration with anyone):
  * https://ghostly.tools/oauth/client-metadata.json, which is ATPROTO_CLIENT_METADATA verbatim
- * (website/public/oauth/client-metadata.json; a unit test keeps the two equal). A web app served from
+ * (apps/website/public/oauth/client-metadata.json; a unit test keeps the two equal). A web app served from
  * a loopback address (development, the e2e suite) uses AT Protocol's `http://localhost` development
  * client instead, which needs no document.
  */

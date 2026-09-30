@@ -57,7 +57,7 @@ This repository is public, so anything written here or in an issue or pull reque
 | S12 | Med | CI | Actions on movable tags, no dependency scanning, broad default token | fixed: SHA pins, Security workflow, Dependabot, read-only default |
 | S13 | Med | Images | website on node 20 (EOL), web on nginx 1.27 | fixed: node 22, nginx 1.30 |
 | S14 | Med | Protocol | Plaintext `_ts`/`_ack` let relays/DHT pair a link's two keys and time messages | open (needs a protocol change) |
-| S15 | Low | Privacy | Google STUN always on, no relay-only mode; Google Analytics on the site | open for STUN. The site's analytics are gone (#535): no page calls another site or sets a cookie, checked by `website/e2e/launch-checklist.spec.ts` |
+| S15 | Low | Privacy | Google STUN always on, no relay-only mode; Google Analytics on the site | open for STUN. The site's analytics are gone (#535): no page calls another site or sets a cookie, checked by `apps/website/e2e/launch-checklist.spec.ts` |
 | S16 | Low | Invite | Invite is a long-lived bearer secret, creator keeps the peer's seed, no forward secrecy | open |
 | S17 | Low | CLI | `--seed`/`--key` on the command line (visible in `ps`, shell history) | resolved: no longer shipped from 1.0, and the Rust `ghostly-cli` was removed after 1.0. Bots use `ghostly` (`packages/cli`) |
 | S18 | Low | Storage | Seeds, messages and proofs are plaintext in localStorage/IndexedDB | open |
@@ -67,7 +67,7 @@ This repository is public, so anything written here or in an issue or pull reque
 
 ### Routine run 2026-09-19 (area 3: UI and local storage)
 
-Scanned: `package-lock.json`, `website/package-lock.json` and `Cargo.lock`. `scripts/security-scan.mjs` could not run here (this runner's egress policy answers 403 for `api.osv.dev`), so the same lock files were checked against `npm audit` (0 advisories in both trees) and against a clone of `rustsec/advisory-db` (8 advisories, all of them the ones already accepted in the allowlist, none expired). The scanner itself still runs in the Security workflow on every push, which is what the gate waits for.
+Scanned: `package-lock.json`, `apps/website/package-lock.json` and `Cargo.lock`. `scripts/security-scan.mjs` could not run here (this runner's egress policy answers 403 for `api.osv.dev`), so the same lock files were checked against `npm audit` (0 advisories in both trees) and against a clone of `rustsec/advisory-db` (8 advisories, all of them the ones already accepted in the allowlist, none expired). The scanner itself still runs in the Security workflow on every push, which is what the gate waits for.
 
 Reviewed: everything merged since the first review, which is all dependency work (#25, #26, #30, #34, #40, #42, #43, #44, #45, #46, #50, #51). Every workflow `uses:` is still pinned to a commit (invariant 6). Two of those bumps touch code that matters here and both hold up: the rand 0.10 migration replaces `OsRng.fill_bytes` with `SysRng.try_fill_bytes` for link keys and secretbox nonces, which is the same OS generator and now fails loudly instead of quietly, with no fallback to a seeded one; and the pkarr 8 migration replaces `resolve_most_recent` with `resolve(…, ResolvePolicy::NetworkOnly)`, which that crate documents as "guaranteed to return the newest valid signed packet", so a relay or DHT node still cannot make a stale packet look current.
 
@@ -176,7 +176,7 @@ Every fix is verified in the client it affects, not only in unit tests.
 | Web | `npm run test:e2e -- --project=web`; headers: `curl -sI https://app.ghostly.tools` |
 | Desktop | `cargo test --manifest-path apps/desktop/Cargo.toml` (IPC against the real capabilities); two apps: `npm run test:e2e:desktop` (Linux), `npm run test:e2e:desktop-macos`; attacks: `npm run tauri dev` + `node apps/extension/test/desktop-attacks.mjs` |
 | Headless CLI | `npm test -w @ghostlytools/cli` (builds it, then two bots pair over the network); against the web app: `e2e/web/headless-chat.spec.ts` |
-| Website | `cd website && npx next build`; after deploy, `curl -sI https://ghostly.tools` |
+| Website | `cd apps/website && npx next build`; after deploy, `curl -sI https://ghostly.tools` |
 | Dependencies | `node scripts/security-scan.mjs` |
 
 ## The security routine

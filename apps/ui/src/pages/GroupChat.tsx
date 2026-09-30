@@ -339,7 +339,11 @@ export function GroupChat() {
       onPin={canPin && replyTarget(m, true) ? () => pinMessage(m.id, replyTarget(m, true) === group.pin?.id) : undefined} pinned={!!group.pin && replyTarget(m, true) === group.pin.id} />;
   const joiningByLink = group.invitation?.viaLink;
   const stage: GroupJoinStage = group.invitation?.stage ?? (group.invitation?.admin ? "admitted" : "knocked");
-  const joining = joiningText(stage, group.name, group.profile === "community", t);
+  // Getting in takes a group link, and group links are WebRTC only: an app with none (Ghostly Desktop on Linux) is never
+  // let in, so it says so rather than "you are in in a moment" (as the group's connection does, GroupConnection).
+  const noLinks = state?.transport.webrtc === false;
+  const joining = noLinks ? { title: t("group.connection.noWebrtc"), body: t("group.connection.noWebrtcHint") }
+    : joiningText(stage, group.name, group.profile === "community", t);
   // Just in (my own "You joined" line is recent), and no member reached yet: the edges are being set up.
   const justJoined = messages.some(m => m.event === "joined" && !m.member && Date.now() - m.timestamp < JUST_JOINED_MS);
   const connecting = group.status === "active" && others.length > 0 && reachable === 0 && justJoined;
@@ -433,7 +437,7 @@ export function GroupChat() {
       {joiningByLink ? <div className="flex flex-1 items-center justify-center overflow-y-auto chat-wallpaper px-4">
         <div role="status" data-testid="group-joining" className="w-full max-w-sm rounded-2xl border border-border bg-sidebar-bg/95 p-6 text-center shadow-xl">
           <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-accent/15 text-accent">
-            <svg className="animate-spin" width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-6.22-8.56" /></svg>
+            <svg className={noLinks ? undefined : "animate-spin"} width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-6.22-8.56" /></svg>
           </div>
           <h2 className="mt-4 text-base font-semibold text-text-primary">{joining.title}</h2>
           <p className="mt-2 text-sm leading-relaxed text-text-muted">{joining.body}</p>

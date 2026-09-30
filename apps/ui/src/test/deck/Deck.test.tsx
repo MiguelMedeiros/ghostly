@@ -145,7 +145,7 @@ describe("the deck's switch motion", () => {
 
   // A screen-blended sheen crossing a card that swings (the face's rotate) was drawn by Chrome against a shifted copy
   // of the card: a second card edge, with square corners, on the side the light came in from. Only pixels show it
-  // (website/e2e/wallet-deck.spec.ts films a switch); this keeps the blend mode from coming back on any deck's sheen.
+  // (apps/website/e2e/wallet-deck.spec.ts films a switch); this keeps the blend mode from coming back on any deck's sheen.
   it("lights the new card with plain alpha: no stylesheet gives a sheen a blend mode", () => {
     const sheets = ["deck/deck.css", "wallet-deck.css", "identities/id-deck.css"];
     const sheenRules = sheets.flatMap(sheet => {

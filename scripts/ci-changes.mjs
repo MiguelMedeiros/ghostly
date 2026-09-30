@@ -18,12 +18,12 @@ export const RUST = /^(apps\/desktop\/|native\/transports\/|Cargo\.(toml|lock)$|
 
 /**
  * Everything the Website jobs (checks and browser checks) read: a directory ends in `/`. The site builds from
- * website/ and the files below (a subset of what website/Dockerfile.dockerignore lets in); the deck check also reads
+ * apps/website/ and the files below (a subset of what apps/website/Dockerfile.dockerignore lets in); the deck check also reads
  * the app's deck.
  */
 export const WEBSITE_INPUTS = [
-  "website/",
-  // Published under /reference by website/scripts/sync-references.mjs, and scanned by check-dashes.mjs.
+  "apps/website/",
+  // Published under /reference by apps/website/scripts/sync-references.mjs, and scanned by check-dashes.mjs.
   "docs/wisps/",
   "docs/PROTOCOL.md",
   "docs/SDK.md",
@@ -31,7 +31,7 @@ export const WEBSITE_INPUTS = [
   "docs/DHT-DELIVERY.md",
   "CONTRIBUTING.md",
   "SECURITY.md",
-  // Carried in /llms-full.txt by website/scripts/llms.mjs (KEY_DOCS).
+  // Carried in /llms-full.txt by apps/website/scripts/llms.mjs (KEY_DOCS).
   "docs/CLI.md",
   "docs/AI-AGENTS.md",
   "packages/cli/SKILL.md",
@@ -53,18 +53,18 @@ export const WEBSITE_INPUTS = [
  * The two Desktop jobs on a Mac build and run the app, which reads neither the site nor the docs: they skip a
  * pull request that changes nothing else.
  */
-export const NOT_APP = /^(website|docs)\//;
+export const NOT_APP = /^(apps\/website|docs)\//;
 
 /**
  * The packages' unit tests (the packages shards) read no document and, of the site, only what is below: they skip a
- * pull request whose every change is in docs/ or elsewhere in website/. scripts/test/ci-changes.test.ts holds this
+ * pull request whose every change is in docs/ or elsewhere in apps/website/. scripts/test/ci-changes.test.ts holds this
  * list to the paths the packages' tests and sources name.
  */
 export const PACKAGES_READ_FROM_SITE = [
   // packages/core's websiteInvite test: the join page's own copy of the invite rules.
-  "website/lib/invite.ts",
+  "apps/website/lib/invite.ts",
   // packages/browser's atprotoOAuth test: the client metadata the site serves.
-  "website/public/oauth/",
+  "apps/website/public/oauth/",
 ];
 
 export const covers = (inputs, file) => inputs.some((p) => (p.endsWith("/") ? file.startsWith(p) : file === p));
@@ -77,7 +77,7 @@ export function plan(files, { draft }) {
   const website = files.some((f) => covers(WEBSITE_INPUTS, f));
   if (!website) why.push("Nothing the website reads changed: Website skipped");
   const app = files.some((f) => !NOT_APP.test(f));
-  if (!app) why.push("Only website/ and docs/ changed: the Desktop jobs on macOS skipped");
+  if (!app) why.push("Only apps/website/ and docs/ changed: the Desktop jobs on macOS skipped");
   const packages = files.some((f) => !NOT_APP.test(f) || covers(PACKAGES_READ_FROM_SITE, f));
   if (!packages) why.push("Nothing the packages' tests read changed: the packages shards skipped");
   return { rust, website, app, packages, why };
