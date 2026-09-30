@@ -30,24 +30,35 @@ export function memberColorIndex(key: string): number {
 }
 
 /**
- * How far along the palette a member goes when their hue is taken: five of twelve, so the one they get is far from
- * the taken one (the palette's neighbours look alike), and every hue is reached (5 and 12 share no factor).
+ * How far along the palette a member looks when the hue their key points to will not do: five of twelve, so the next
+ * one tried is far from it, and every hue is tried (5 and 12 share no factor).
  */
 const STEP = 5;
 
+/** How many hues apart two members of a group this big are kept: the palette's neighbours look alike. */
+export const spacingFor = (members: number): number => members <= 4 ? 3 : members <= 6 ? 2 : 1;
+
+/** Steps between two hues around the palette. */
+const apart = (a: number, b: number) => { const d = Math.abs(a - b) % HUES; return Math.min(d, HUES - d); };
+
 /**
- * Each member's hue in a group: in the order of their keys, each takes the hue their key points to, or when it is
- * taken the next free one `STEP` along. Twelve given out, all are free again for the next twelve. The same roster
- * gives the same hues, in any order.
+ * Each member's hue in a group: in the order of their keys, each takes the hue their key points to if it is at least
+ * `spacingFor` hues from the ones given out already, else the first such one `STEP` at a time from there; with none
+ * that far left, the one farthest from the others. So no two members of up to twelve share a hue, and in a small
+ * group they are far apart. Twelve given out, all are free again for the next twelve. The same roster gives the same
+ * hues, in any order.
  */
 export function rosterColors(keys: readonly string[]): Map<string, number> {
+  const roster = [...new Set(keys)].sort();
+  const spacing = spacingFor(roster.length);
   const colors = new Map<string, number>();
-  let taken = new Set<number>();
-  for (const key of [...new Set(keys)].sort()) {
-    if (taken.size === HUES) taken = new Set();
-    let hue = memberColorIndex(key);
-    while (taken.has(hue)) hue = (hue + STEP) % HUES;
-    taken.add(hue);
+  let taken: number[] = [];
+  for (const key of roster) {
+    if (taken.length === HUES) taken = [];
+    const tries = Array.from({ length: HUES }, (_, i) => (memberColorIndex(key) + i * STEP) % HUES).filter(h => !taken.includes(h));
+    const room = (h: number) => taken.length ? Math.min(...taken.map(t => apart(h, t))) : HUES;
+    const hue = tries.find(h => room(h) >= spacing) ?? tries.reduce((best, h) => room(h) > room(best) ? h : best);
+    taken.push(hue);
     colors.set(key, hue);
   }
   return colors;

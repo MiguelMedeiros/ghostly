@@ -63,6 +63,14 @@ describe("the members' colours in a group, given out over its roster", () => {
     }
   });
 
+  it("keeps two or three members at least three hues apart, never next to each other", () => {
+    const apart = (a: number, b: number) => Math.min(Math.abs(a - b), 12 - Math.abs(a - b));
+    for (const n of [2, 3]) for (let from = 0; from < 2_000; from += n) {
+      const hues = [...rosterColors(roster(n, from)).values()];
+      for (let i = 0; i < n; i++) for (let k = i + 1; k < n; k++) expect(apart(hues[i], hues[k])).toBeGreaterThanOrEqual(3);
+    }
+  });
+
   it("is the same on every device: the same roster, in whatever order it comes, gives the same colours", () => {
     const keys = roster(9, 50);
     const here = rosterColors(keys);
@@ -84,6 +92,13 @@ describe("the members' colours in a group, given out over its roster", () => {
     const colors = rosterColors(keys);
     const first = [...keys].sort()[0];
     expect(colors.get(first)).toBe(memberColorIndex(first));
+    // Two keys pointing to neighbouring hues (which look alike): the second is moved far along the palette.
+    const a = keyOf(2000);
+    let j = 2001;
+    while (Math.abs(memberColorIndex(keyOf(j)) - memberColorIndex(a)) !== 1) j++;
+    const pair = rosterColors([a, keyOf(j)]);
+    const [p, q] = [...pair.values()];
+    expect(Math.min(Math.abs(p - q), 12 - Math.abs(p - q))).toBeGreaterThanOrEqual(3);
     // Two keys pointing to one hue: the second goes far along the palette, not to its look-alike neighbour.
     const x = keyOf(1000);
     let i = 1001;
