@@ -232,6 +232,42 @@ describe("hands-free (locked) recording", () => {
     expect(onSendFile).not.toHaveBeenCalled();
   });
 
+  it("keeps recording when an edit fills the field meanwhile, and the contact stops seeing \"recording\" once it is sent", async () => {
+    const onTyping = vi.fn();
+    const edit = { key: "m1", text: "fixed words", snippet: "fixed words", onSave: vi.fn(async () => null), onClose: vi.fn() };
+    const view = composer({ onTyping });
+    await press(mouse);
+    fireEvent.pointerUp(mic(), mouse);
+    fireEvent.click(screen.getByTestId("voice-send"));
+    await wait(2_000);
+    expect(onTyping).toHaveBeenLastCalledWith(true, "recording");
+
+    view.rerender(<MessageInput onSend={onSend} onSendFile={onSendFile} onTyping={onTyping} edit={edit} />);
+    await wait(0);
+    expect(screen.getByTestId("voice-bar")).toBeInTheDocument();
+    expect(media.released()).toBe(false);
+
+    fireEvent.click(screen.getByTestId("voice-send"));
+    await wait(0);
+    expect(onSendFile).toHaveBeenCalledOnce();
+    expect(onTyping).toHaveBeenLastCalledWith(false, "recording");
+    // The edit's words wait in the field, with its Send.
+    expect(screen.getByPlaceholderText("Message…")).toHaveValue("fixed words");
+  });
+
+  it("tells the contact the recording stopped when the composer goes away mid-recording", async () => {
+    const onTyping = vi.fn();
+    const view = composer({ onTyping });
+    await press(mouse);
+    fireEvent.pointerUp(mic(), mouse);
+    fireEvent.click(screen.getByTestId("voice-send"));
+    await wait(1_000);
+    expect(onTyping).toHaveBeenLastCalledWith(true, "recording");
+    view.unmount();
+    expect(media.released()).toBe(true);
+    expect(onTyping).toHaveBeenLastCalledWith(false, "recording");
+  });
+
   it("pauses without counting the pause, plays what is recorded so far, and resumes", async () => {
     await locked();
     await wait(2_000);

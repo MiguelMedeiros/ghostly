@@ -202,9 +202,10 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
     setPhase("recording");
   }, [disabled, unavailable, onError, reset, showHint, send, t]);
 
-  // A chat left mid-recording gives the microphone back.
+  // A chat left mid-recording gives the microphone back, and the contact stops seeing "recording audio…".
   useEffect(() => () => {
     recorderRef.current?.cancel();
+    if (modeRef.current !== "idle") activeChange.current?.(false);
     cancelAnimationFrame(previewFrame.current);
     if (previewAudio.current) URL.revokeObjectURL(previewAudio.current.url);
     if (hintTimer.current) clearTimeout(hintTimer.current);
