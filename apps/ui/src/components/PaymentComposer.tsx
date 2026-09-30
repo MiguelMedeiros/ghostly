@@ -22,6 +22,7 @@ import { NetworkTabs } from "./wallet/NetworkTabs";
 import { NETWORK_NAME } from "./wallet/names";
 import "./payment-composer.css";
 import { decimalInput, formatAmount } from "../lib/amount";
+import { errorText } from "../lib/errorText";
 
 interface PaymentComposerProps {
   balance: number;
@@ -249,7 +250,7 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, onDone = 
         const err = await onSend(value, memo, network, confirmedReal || undefined);
         if (err) setError(err); else onDone();
       }
-    } catch (e) { setError(e instanceof Error ? e.message : t("payments.composer.error.prepare")); }
+    } catch (e) { setError(e instanceof Error ? errorText(e, t) : t("payments.composer.error.prepare")); }
     finally { setBusy(null); }
   };
   // The contact's app answers an ask with a request: review it here, as Pay on that request would.
@@ -267,7 +268,7 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, onDone = 
         clearInterval(timer);
         const token = answer.target.method === "usdt";
         void bound.preparePayment({ target: answer.target, amount: answer.amount, feeCap: token ? parsePaymentAmount("0.001", 18) : answer.target.method === "bitcoin" ? ONCHAIN_FEE_CAP : CASHU_FEE_CAP, payee: context.peer, linkId: answer.linkId, requestId: answer.id })
-          .then(setReview, (e: unknown) => setError(e instanceof Error ? e.message : t("payments.composer.error.prepare")))
+          .then(setReview, (e: unknown) => setError(e instanceof Error ? errorText(e, t) : t("payments.composer.error.prepare")))
           .finally(() => setAsking(null));
       } else if (Date.now() - started > 45_000) {
         clearInterval(timer);
@@ -283,7 +284,7 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, onDone = 
     try {
       const err = await onRequest(method === "usdt" ? parsePaymentAmount(amount, decimals) : value, memo, method, rail, network, ...(card?.card ? [card.card] : []));
       if (err) setError(err); else onDone();
-    } catch (e) { setError(e instanceof Error ? e.message : t("payments.composer.error.request")); }
+    } catch (e) { setError(e instanceof Error ? errorText(e, t) : t("payments.composer.error.request")); }
     finally { setBusy(null); }
   };
 

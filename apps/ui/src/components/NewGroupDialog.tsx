@@ -4,6 +4,7 @@ import { COMMUNITY_LIMITS } from "@ghostly/core";
 import { useBackdropDismiss } from "../hooks/useDismiss";
 import { engine } from "@ghostly/browser/platform/engine";
 import { useI18n, type Translate } from "../contexts/I18nContext";
+import { errorText } from "../lib/errorText";
 
 const subscribe = (listener: () => void) => engine.subscribe(listener);
 const snapshot = () => engine.state;
@@ -40,7 +41,7 @@ export function NewGroupDialog({ onClose, onCreated }: { onClose(): void; onCrea
       await engine.call("enableGroupLink", { groupId }).catch(() => {});
       onCreated(groupId);
     }
-    catch (e) { setError(e instanceof Error ? e.message : t("group.create.failed")); setBusy(false); }
+    catch (e) { setError(e instanceof Error ? errorText(e, t) : t("group.create.failed")); setBusy(false); }
   };
   return createPortal(<dialog ref={dialog} {...backdrop} onCancel={e => { e.preventDefault(); onClose(); }} aria-labelledby={`${id}-title`} data-testid="new-group-dialog"
     className="m-auto w-[calc(100%_-_2rem)] max-w-sm rounded-2xl border border-border bg-sidebar-bg p-5 text-text-primary shadow-2xl backdrop:bg-black/60">

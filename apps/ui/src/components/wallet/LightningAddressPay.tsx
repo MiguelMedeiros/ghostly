@@ -7,6 +7,7 @@ import { useI18n } from "../../contexts/I18nContext";
 import { fillNodes } from "../../lib/fillNodes";
 import { formatAmount } from "../../lib/amount";
 import { useComposition } from "../../hooks/useComposition";
+import { errorText } from "../../lib/errorText";
 
 interface Quote { quote: string; mint: string; amount: number; feeReserve: number; source?: string }
 interface Invoice { invoice: string; note: string; successAction?: { tag: "message" | "url"; message?: string; description?: string; url?: string } }
@@ -36,7 +37,7 @@ export function LightningAddressPay({ wallet, text, via, onDone, dense }: { wall
 
   const run = async (task: () => Promise<void>) => {
     setError(""); setBusy(true);
-    try { await task(); } catch (e) { setError(e instanceof Error ? e.message : String(e)); } finally { setBusy(false); }
+    try { await task(); } catch (e) { setError(errorText(e, t)); } finally { setBusy(false); }
   };
   const primary = `${dense ? "px-3 py-1.5 text-xs" : "px-4 py-2 min-h-10 text-sm"} max-md:min-h-11 rounded-lg font-bold bg-accent text-on-accent hover:bg-accent-hover transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed`;
   const quiet = `${dense ? "px-3 py-1.5 text-xs" : "px-4 py-2 min-h-10 text-sm"} max-md:min-h-11 rounded-lg font-bold bg-black/20 hover:bg-black/30 transition-colors cursor-pointer disabled:opacity-40`;

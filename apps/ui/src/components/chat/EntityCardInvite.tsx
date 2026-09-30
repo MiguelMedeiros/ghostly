@@ -8,8 +8,8 @@ import { showJoinNotice } from "../../lib/joinNotice";
 import { ensureSession } from "../../lib/storage";
 import { INVITE_REFUSAL_MESSAGE, chatPath, classifyInvite, readInvite, type JoinOutcome } from "../../lib/url";
 import { CardIcon, EntityCardFrame, cardButton, cardQuiet } from "./EntityCardFrame";
+import { errorText } from "../../lib/errorText";
 
-const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 /** Who the card says handed the invite over: the contact who sent it (by name, when known), or you. */
 function fromLine(t: Translate, mine: boolean, from: string | undefined): string {
@@ -91,7 +91,7 @@ export function GroupEntityCard({ link, community, groupId, mine, from }: { link
     try {
       const { groupId: id } = await engine.call("joinGroupByLink", { link });
       nav.conversation(groupPath(id));
-    } catch (e) { setError(message(e)); } finally { setBusy(false); }
+    } catch (e) { setError(errorText(e, t)); } finally { setBusy(false); }
   };
   return (
     <EntityCardFrame testId="entity-group" data={{ "data-community": community ? "true" : undefined, "data-member": group ? "true" : undefined }}

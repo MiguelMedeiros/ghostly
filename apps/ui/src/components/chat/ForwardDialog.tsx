@@ -8,6 +8,7 @@ import type { ChatMessage } from "../../lib/types";
 import { SecretGuardDialog } from "../SecretGuardDialog";
 import { ChatTargetRow } from "./ChatTargets";
 import { useChatTargets, type ChatTarget } from "../../hooks/useChatTargets";
+import { errorText } from "../../lib/errorText";
 
 /**
  * "Forward to…" (WISP 400 § Forwards): the chats and groups to send messages on to, most recent first, found by name,
@@ -60,7 +61,7 @@ export function ForwardDialog({ from, messages, onClose, onSent }: {
     try {
       outcome = await forwardMessages(from, messages.map(m => m.id), chosen.map(c => c.target!));
     } catch (error) {
-      setProblems([{ name: "", error: error instanceof Error ? error.message : String(error) }]);
+      setProblems([{ name: "", error: errorText(error, t) }]);
       setBusy(false);
       return;
     }

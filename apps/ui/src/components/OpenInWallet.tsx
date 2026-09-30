@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from "react";
 import { useI18n } from "../contexts/I18nContext";
 import { useServicesPlatform } from "../hooks/useServicesPlatform";
+import { errorText } from "../lib/errorText";
 
 /**
  * A `lightning:` or `bitcoin:` link that opens a wallet on this device. A web page lets the browser follow it; the
@@ -18,7 +19,7 @@ export function OpenInWallet({ uri, className, title, testId, children }: { uri:
         if (!opened) return;
         event.preventDefault();
         setError("");
-        opened.catch((cause: unknown) => setError(t("payments.external.openError", { error: cause instanceof Error ? cause.message : String(cause) })));
+        opened.catch((cause: unknown) => setError(t("payments.external.openError", { error: errorText(cause, t) })));
       }}>
       {children}
     </a>

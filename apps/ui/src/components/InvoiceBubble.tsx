@@ -14,6 +14,7 @@ import { MoneyFormatsBubble } from "./MoneyFormatsBubble";
 import { moreMoneyMethod } from "../lib/parse/money-more";
 import { formatAmount } from "../lib/amount";
 import { OpenInWallet } from "./OpenInWallet";
+import { errorText, rawError } from "../lib/errorText";
 
 const SETTLED_KEY = "ghostly_settled_money";
 
@@ -145,7 +146,7 @@ function LightningCard({ invoice, mine, off }: { invoice: Bolt11Invoice; mine: b
     try {
       await task();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorText(e, t));
     } finally {
       setBusy(false);
     }
@@ -163,7 +164,7 @@ function LightningCard({ invoice, mine, off }: { invoice: Bolt11Invoice; mine: b
         }
       } catch (e) {
         // Someone else got there first. The mint refused, so it is not paid twice, and there is nothing left to pay.
-        if (!/already paid/i.test(e instanceof Error ? e.message : String(e))) throw e;
+        if (!/already paid/i.test(rawError(e))) throw e;
       }
       markSettled(id);
       setPaid(true);
@@ -308,7 +309,7 @@ function CashuCard({ value, mine, off }: { value: string; mine: boolean; off: bo
                 markSettled(id);
                 setRedeemed(true);
               } catch (e) {
-                setError(e instanceof Error ? e.message : String(e));
+                setError(errorText(e, t));
               } finally {
                 setBusy(false);
               }

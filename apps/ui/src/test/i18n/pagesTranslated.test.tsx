@@ -1,4 +1,4 @@
-import { cleanup, screen } from "@testing-library/react";
+import { cleanup, fireEvent, screen } from "@testing-library/react";
 import type { ReactElement } from "react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { DeleteProfileDialog } from "../../components/DeleteProfileDialog";
@@ -40,6 +40,11 @@ const chat = (id: string): ChatSession =>
 const SCREENS: Screen[] = [
   { name: "Profile, Back up open", render: () => <Profile />, open: async (user) => { await user.click(screen.getByTestId("backup-open")); } },
   { name: "Profile, Restore open", render: () => <Profile />, open: async (user) => { await user.click(screen.getByTestId("restore-open")); } },
+  // An error the app throws in English ("Choose a picture"), said in the page's language (lib/errorText.ts).
+  { name: "Profile, a file that is not a picture chosen for it", render: () => <Profile />, open: async () => {
+    fireEvent.change(screen.getByTestId("profile-avatar-input"), { target: { files: [new File(["x"], "notes.txt", { type: "text/plain" })] } });
+    await screen.findByRole("alert");
+  } },
   { name: "Profile, S3 storage open", render: () => <Profile />, open: async (user) => { await user.click(screen.getByTestId("s3-setup")); } },
   { name: "Profile on a host with profiles, a new one being named", render: () => <Profile />, open: async (user) => { await user.click(screen.getByTestId("profile-new")); } },
   { name: "Deleting a profile", render: () => <DeleteProfileDialog entry={{ id: "work", name: "Work", createdAt: 0 }} onClose={() => {}} /> },

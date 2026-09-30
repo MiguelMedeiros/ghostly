@@ -112,6 +112,7 @@
     "titleUnnamed": "¿Salir de este grupo?"
   },
   "link": {
+    "broken": "Este enlace a un grupo no funciona",
     "copied": "Copiado",
     "copyFailed": "No se pudo copiar. Selecciona el enlace y cópialo.",
     "disable": "Desactivar",
