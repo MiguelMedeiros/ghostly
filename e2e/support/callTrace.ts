@@ -129,6 +129,24 @@ function recordLinkTrace(): void {
     debug(...args);
   };
   w.__ghostlyLinkTrace = true;
+  // Every request to a Pkarr relay (`<relay>/<key>`), for where the relays' request budget went.
+  const f = globalThis as unknown as { fetch: typeof fetch };
+  const original = f.fetch.bind(globalThis);
+  f.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+    const key = /\/([a-z0-9]{52})(?:\?|$)/.exec(url)?.[1];
+    if (!key) return original(input, init);
+    const t = Date.now();
+    const method = init?.method ?? (typeof input === "object" && "method" in input ? input.method : "GET");
+    try {
+      const response = await original(input, init);
+      lines.push(JSON.stringify({ t, me: "fetch", step: "relay", m: method, k: key.slice(0, 6), s: response.status, ms: Date.now() - t }));
+      return response;
+    } catch (error) {
+      lines.push(JSON.stringify({ t, me: "fetch", step: "relay", m: method, k: key.slice(0, 6), s: String(error).slice(0, 40) }));
+      throw error;
+    }
+  };
 }
 
 async function readConnections(): Promise<string> {
