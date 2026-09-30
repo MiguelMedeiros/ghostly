@@ -248,14 +248,14 @@ commands, `group.created` events and `engine getState` print it as `<hidden>`; `
 `ghostly listen` prints one event per line:
 
 ```json
-{"seq":6,"id":"message.received:f3gg…:peer_jY7N…","type":"message.received","at":1790450767762,"chat":"f3gg…","message":{"id":"peer_jY7N…","chat":"f3gg…","from":"peer","text":"hello bob","timestamp":1790450767735,"delivery":null,"deliveryError":null,"via":"datalink","nick":null}}
+{"seq":6,"id":"message.received:f3gg…:peer_jY7N…","type":"message.received","at":1790450767762,"chat":"f3gg…","message":{"id":"peer_jY7N…","chat":"f3gg…","from":"peer","text":"hello bob","timestamp":1790450767735,"delivery":null,"deliveryError":null,"via":"datalink","nick":"Alice"}}
 ```
 
 - `seq` grows by one per event in the profile, across restarts; `id` is the same whenever the same fact is reported.
   Dedupe by `id`; resume with `--since <seq>`, or let `--cursor <file>` remember the last event handled.
 - Types: `daemon.started`, `chat.created`, `chat.removed`, `chat.renamed`, `chat.pairing` (`stage`: publishing,
   waiting, resolving, on-dht, live, …), `chat.connection` (`live`, `transport`), `typing.started` (with `kind` and, when given, `status`; again when either changes) and `typing.stopped` (the contact is writing, or stopped: a message, a stop, or 6 s of silence), `chat.joined` (the contact's app
-  announced itself; not a message), `chat.announced`, `message.received`, `message.sent`, `message.delivery`
+  announced itself; not a message), `chat.announced`, `message.received` (`message.nick`: the name the contact gave), `message.sent`, `message.delivery`
   (`delivery`: sending, queued, waiting, held, sent, delivered, failed), `message.edited` (a text changed in place, the
   contact's or mine: once per edit number, with `edits` and the message as it is now; `group.message.edited` in a group), `message.deleted`, `group.created`,
   `group.status`, `group.members` (`joined`, `left`), `group.typing.started` (`member`, `kind`, and `status` when given; again when either changes) and `group.typing.stopped` (`member`: a member of a private group is writing, or stopped), `group.message` (`message.member` is the author's key,

@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import type { EngineState, LinkView, StoredMessage } from "@ghostly/browser/shared/types";
 import { EventHub, type GhostlyEvent } from "../src/events";
+import { toTurn } from "../src/listen";
 import { openPersistentIndexedDb } from "../src/runtime/storage";
 // covers: headless.events, headless.typing, headless.files
 
@@ -66,6 +67,17 @@ describe("the event stream", () => {
     ]);
     expect(events[0]).toMatchObject({ type: "message.received", chat: "c1", message: { id: "new", from: "peer", text: "t new" } });
     expect(events[5]).toMatchObject({ live: true, transport: "hyperdht/1" });
+  });
+
+  it("names the contact on a 1:1 message, so an agent turn carries their name (the engine keeps it on the chat)", async () => {
+    const { h, events } = await hub("names.jsonl");
+    h.baseline(state([link("c1", { peerNick: "Alice", label: "owner" } as never)]), new Map([["c1", []]]));
+    h.sink.post({ kind: "messages", linkId: "c1", messages: [message("c1", "in"), message("c1", "me_1", { sender: "me", delivery: "sending" })] });
+    const [received, sent] = events;
+    expect(received).toMatchObject({ type: "message.received", message: { id: "in", nick: "Alice" } });
+    // The label is this side's own name for the chat: `untrusted.name` is only what the contact calls themselves.
+    expect(toTurn(received)).toMatchObject({ untrusted: { text: "t in", name: "Alice" } });
+    expect(sent).toMatchObject({ type: "message.sent", message: { id: "me_1", nick: null } });
   });
 
   it("reports the same events from only what changed as from the whole history, a deletion included", async () => {
