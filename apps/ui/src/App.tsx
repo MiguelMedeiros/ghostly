@@ -168,46 +168,38 @@ export function App() {
   // A group is a conversation too: on a phone it takes the whole screen, without the tab bar.
   const inGroup = pathname.startsWith("/group/");
 
-  if (!isMobile) {
-    return (
-      <div className="two-pane w-full flex bg-app-bg">
-        {/* The first stop of the keys: past the chat list to the open page, however long the list is. A button, not
-            a #fragment link: the router lives in the hash. */}
+  // One tree for both layouts, each part in the same place: a phone turned on its side (or a window made narrow) moves
+  // across the breakpoint, and a part React finds elsewhere is mounted anew. The open chat with it: its call, the video
+  // or voice message playing, a recording.
+  // On a phone, one screen at a time. The sidebar is the chat list and stays mounted: it is what keeps the sessions
+  // polling and the notifications coming.
+  const onChatList = pathname === "/";
+  return (
+    <div className={isMobile ? "app-shell w-full flex flex-col bg-app-bg" : "two-pane w-full flex bg-app-bg"}>
+      {/* The first stop of the keys: past the chat list to the open page, however long the list is. A button, not
+          a #fragment link: the router lives in the hash. */}
+      {!isMobile && (
         <button type="button" data-testid="skip-to-content" onClick={() => mainRef.current?.focus()}
           className="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:start-2 focus:z-[60] focus:rounded-lg focus:bg-accent focus:px-4 focus:py-2 focus:text-sm focus:font-semibold focus:text-on-accent focus:outline-2 focus:outline-offset-2 focus:outline-accent">
           {t("sidebar.skipToContent")}
         </button>
-        <Sidebar />
-        <main ref={mainRef} tabIndex={-1} className="flex-1 flex min-w-0 focus:outline-none">
-          {chats("flex-1 flex flex-col min-w-0")}
-          {!inChat && (
-            <div className="flex-1 flex flex-col min-w-0">
-              <Outlet />
-            </div>
-          )}
-        </main>
-        <InstallSteps />
-      </div>
-    );
-  }
-
-  // One screen at a time. The sidebar is the chat list and stays mounted: it is
-  // what keeps the sessions polling and the notifications coming.
-  const onChatList = pathname === "/";
-  return (
-    <div className="app-shell w-full flex flex-col bg-app-bg">
-      <main className="flex-1 flex flex-col min-h-0 min-w-0">
-        <div className={onChatList ? "flex-1 flex min-h-0" : "hidden"}>
-          <Sidebar />
-        </div>
-        {chats("flex-1 flex flex-col min-h-0 min-w-0")}
-        {!onChatList && !inChat && (
-          <div className="flex-1 flex flex-col min-h-0 min-w-0">
+      )}
+      {!isMobile && <Sidebar />}
+      <main ref={mainRef} tabIndex={isMobile ? undefined : -1}
+        className={isMobile ? "flex-1 flex flex-col min-h-0 min-w-0" : "flex-1 flex min-w-0 focus:outline-none"}>
+        {isMobile && (
+          <div className={onChatList ? "flex-1 flex min-h-0" : "hidden"}>
+            <Sidebar />
+          </div>
+        )}
+        {chats(isMobile ? "flex-1 flex flex-col min-h-0 min-w-0" : "flex-1 flex flex-col min-w-0")}
+        {(isMobile ? !onChatList && !inChat : !inChat) && (
+          <div className={isMobile ? "flex-1 flex flex-col min-h-0 min-w-0" : "flex-1 flex flex-col min-w-0"}>
             <Outlet />
           </div>
         )}
       </main>
-      {!inChat && !inGroup && <MobileTabBar />}
+      {isMobile && !inChat && !inGroup && <MobileTabBar />}
       <InstallSteps />
     </div>
   );
