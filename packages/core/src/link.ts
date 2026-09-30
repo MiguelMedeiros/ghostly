@@ -171,6 +171,8 @@ export class LinkSession {
   /** The `_rtc` signal the last packet that went out carried. */
   private rtcSignalOut: string | null = null;
   private lastRtcSignalIn: string | null = null;
+  /** The `_rtc` signal the peer's packet carried as last read (null: none), whether or not it was new. */
+  private peerRtcSignal: string | null = null;
   /** A group link's `_tr` value this side publishes (`setTransports`), and the last the peer's packet carried. */
   private transports: string | null = null;
   private lastTransportsIn: string | null = null;
@@ -224,6 +226,11 @@ export class LinkSession {
 
   get peerPresence(): PeerPresence {
     return this.presence;
+  }
+
+  /** The `_rtc` signal the peer's packet carries, as last read: null when it carries none. */
+  get peerSignal(): string | null {
+    return this.peerRtcSignal;
   }
 
   start(): void {
@@ -598,6 +605,7 @@ export class LinkSession {
           this.lastCallSignalIn = batch.callSignal;
           this.events.onCallSignal?.(batch.callSignal);
         }
+        this.peerRtcSignal = batch.rtcSignal;
         const newSignal = batch.rtcSignal !== null && batch.rtcSignal !== this.lastRtcSignalIn;
         // A slow read, the contact's first packet, or a signal: the steps of a pairing, timed. Every
         // read when a measurement asked for the whole trace.

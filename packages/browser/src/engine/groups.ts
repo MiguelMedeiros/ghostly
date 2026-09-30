@@ -1,7 +1,7 @@
 import {
   GroupSession, GROUP_EDIT_FRAME, GROUP_PIN_FRAME, GROUP_REACTION_FRAME, GROUP_REACTED_FRAME, GROUP_TYPING_FRAME, readReaction, groupMessageId, MAX_GROUP_CHAIN, GROUP_MEMBER_CAP, LEGACY_GROUP_MEMBERS, GROUP_VERSION_LARGE, GROUP_VERSION_HUBS, GROUP_READ_NOTE, KNOCK_TTL_MS, MEMBER_KEY, createIdentity, decodeGroupEntryLink, encodeGroupEntryLink, identityFromSeedB64,
-  groupName, knockIdentity, knockRecords, mentionsMember, pinIsNewer, receivedTimestamp, mergeKnocks, readKnocks, rosterHas, verifyCommitSignature, decodeCommunityLink,
-  type GhostRecord, type PollIntervals, type GroupEdit, type GroupIncomingEdit, type GroupMention, type WireReply, type StatusCard, type WireReaction, type WirePin, type GroupPinFrame, type GroupCommit, type GroupEdgeFrame, type GroupEntryLink, type GroupMetaChange, type GroupState, type Identity, type Roster, type TypingActivity,
+  EXPECT_PEER_MS, groupName, knockIdentity, knockRecords, mentionsMember, pinIsNewer, receivedTimestamp, mergeKnocks, readKnocks, rosterHas, verifyCommitSignature, decodeCommunityLink,
+  type GhostRecord, type PeerPresence, type PollIntervals, type GroupEdit, type GroupIncomingEdit, type GroupMention, type WireReply, type StatusCard, type WireReaction, type WirePin, type GroupPinFrame, type GroupCommit, type GroupEdgeFrame, type GroupEntryLink, type GroupMetaChange, type GroupState, type Identity, type Roster, type TypingActivity,
 } from "@ghostly/core";
 import type { GroupEvent, GroupJoinStage, GroupView, StoredGroup, StoredMessage, StoredPin } from "../shared/types";
 import { groupReply } from "../shared/replies";
@@ -13,6 +13,16 @@ import { MESH_HUB_TIMINGS, MeshHubs, type MeshHubTimings } from "./meshHubs";
 import { GroupTypings } from "./groupTyping";
 
 /** What the engine gives the groups: its links, its storage and its state emitter. */
+/**
+ * `GroupsHost.linkSeen`: a connection with the other end is under way, or its packet is at most `EXPECT_PEER_MS` old
+ * (its offer follows it). Its presence alone lasts `PRESENCE_WINDOW`, 10 minutes: a hub closes an entry session it gave
+ * up on without a last packet, and a joiner back after a restart took that packet for a member answering, stopped
+ * knocking, and stayed "invited" for 10 minutes (2026-09-30).
+ */
+export function otherEndSeen(presence: PeerPresence | undefined, dataLink: string | undefined, now = Date.now()): boolean {
+  return (!!dataLink && dataLink !== "idle") || (!!presence?.online && now - presence.lastPacketAt < EXPECT_PEER_MS);
+}
+
 export interface GroupsHost {
   /** Sends a frame on a paired link (a contact chat or an edge). Throws when it cannot. */
   sendOnLink(linkId: string, frame: object): void;
@@ -42,7 +52,7 @@ export interface GroupsHost {
    * link does (the joiner closes its side on the welcome), rather than dialing the joiner again.
    */
   entryDone?(linkId: string): void;
-  /** The other end of this link is here (its packet is fresh), or a connection with it is under way. */
+  /** The other end of this link is here (its packet is fresh), or a connection with it is under way (`otherEndSeen`). */
   linkSeen?(linkId: string): boolean;
   /** The other end of this link, up before, has published since it dropped: its app is back (a restart, say). */
   linkBack?(linkId: string): boolean;

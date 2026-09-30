@@ -796,6 +796,8 @@ export class GhostLink {
       // An offer to a saved contact: its answer may be a while (the contact may still hold this app's old session),
       // so the look for it slows after its first seconds (`OFFER_FAST_MS`). A first pairing looks fast throughout.
       setFastPoll: (fast, offer) => this.session.setFastPoll(fast, !!offer && !!options.pairing?.credentials.peerKey),
+      // An answer that did not connect is made again only while the contact's packet still carries that offer.
+      offerStanding: ts => !this.leaving && !this.stopped && !this.streamBlocked && this.peerOfferTs() === ts,
       onOpen: channel => {
         if (this.streamBlocked || this.keyStopped) { channel.close(); return; }
         const plan = this.switcher.pending;
@@ -929,6 +931,16 @@ export class GhostLink {
     traceLink(this.myPubKeyZ32, "stale-offer", { beforeMs: floor - offer.ts });
     this.maybeAutoConnect(this.presence);
     return true;
+  }
+
+  /** The time of the offer the contact's packet carries, as last read (verified as `handleRtcSignal` does); null for none. */
+  private peerOfferTs(): number | null {
+    const signal = this.session.peerSignal, credentials = this.options.pairing?.credentials;
+    if (!signal) return null;
+    const verified = this.options.params.profile ? verifyPairedSignal(signal, this.options.params.peerPubKeyZ32,
+      this.myPubKeyZ32, credentials?.peerKey, credentials?.requireSignedSignals) : signal;
+    const parsed = verified ? parseRtcSignal(verified) : null;
+    return parsed?.t === "o" ? parsed.ts : null;
   }
 
   private handleRtcSignal(signal: string): void {
