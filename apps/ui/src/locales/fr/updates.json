@@ -7,6 +7,7 @@
   "checking": "Recherche...",
   "download": "Télécharger",
   "downloading": "Téléchargement... {{percent}} %",
+  "errorDetails": "Ce qu'a répondu le programme de mise à jour",
   "failed": "Impossible de rechercher les mises à jour",
   "installing": "Mise à jour...",
   "lastChecked": "Dernière vérification à {{when}}",
@@ -15,5 +16,14 @@
   "reload": "Recharger",
   "restart": "Mettre à jour et redémarrer",
   "title": "Mises à jour",
-  "upToDate": "Ghostly est à jour"
+  "upToDate": "Ghostly est à jour",
+  "why": {
+    "noRelease": "Le serveur de mises à jour n'a donné aucune information de version. Réessayez plus tard.",
+    "notForThisSystem": "La dernière version n'a pas encore de mise à jour pour ce système.",
+    "offline": "Cet appareil est hors ligne.",
+    "signature": "La signature de la mise à jour n'était pas valide, elle n'a donc pas été utilisée.",
+    "timeout": "Le serveur de mises à jour a mis trop de temps à répondre.",
+    "unknown": "Un problème est survenu pendant la recherche.",
+    "unreachable": "Impossible de joindre le serveur de mises à jour. Vérifiez votre connexion."
+  }
 }
