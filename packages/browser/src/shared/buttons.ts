@@ -14,8 +14,11 @@ export function messageButtons(message: Pick<StoredMessage, "card">): ButtonsCar
 
 type Row = Pick<StoredMessage, "sender" | "member" | "replyTo" | "press" | "id">;
 
-/** Whether a reply's text is a button's label (or id): ignoring case and spaces at the ends. */
-export const sameLabel = (a: string, b: string) => a.trim().toLocaleLowerCase() === b.trim().toLocaleLowerCase();
+/**
+ * Whether a reply's text is a button's label (or id): ignoring case and spaces at the ends. Not the device's locale's
+ * case: the presser's and the author's apps must agree ("I" is not "ı" anywhere).
+ */
+export const sameLabel = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
 
 /**
  * What a reply presses on the author's side, or nothing: the original is this side's own message with buttons still
