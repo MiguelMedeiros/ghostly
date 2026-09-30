@@ -16,7 +16,7 @@
     "title": "المهام"
   },
   "routine": {
-    "cron": "Cron:",
+    "cron": "Cron",
     "label": "روتين: {{name}}، {{state}}",
     "lastRun": "آخر تشغيل: {{result}}",
     "next": "التالي {{when}}",
@@ -27,6 +27,7 @@
       "skipped": "تم التخطي"
     },
     "runs": "آخر التشغيلات",
+    "schedule": "الجدول",
     "state": {
       "active": "نشط",
       "paused": "متوقف مؤقتًا"

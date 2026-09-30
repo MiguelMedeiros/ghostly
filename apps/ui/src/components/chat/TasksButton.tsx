@@ -81,7 +81,7 @@ function TaskRow({ entry, from, onOpen }: { entry: CardEntry; from?: string; onO
       onClick={onOpen} className={rowClass}>
       <span className="flex w-full min-w-0 items-center gap-2">
         <span aria-hidden="true" className={`h-2 w-2 shrink-0 rounded-full ${tone.dot}`} />
-        <bdi className="min-w-0 flex-1 truncate text-sm text-text-primary">{card.title}</bdi>
+        <bdi title={card.title} className="min-w-0 flex-1 truncate text-sm text-text-primary">{card.title}</bdi>
         <span data-testid="chat-tasks-item-status" className={`shrink-0 text-xs font-medium ${tone.label}`}>
           {tone.mark && <span aria-hidden="true">{tone.mark} </span>}{t(`cards.task.status.${card.status}`)}
         </span>
@@ -116,7 +116,7 @@ function RoutineRow({ entry, onOpen }: { entry: CardEntry; onOpen: () => void })
   const paused = card.state === "paused";
   return (
     <button type="button" data-panel-row data-testid="chat-tasks-item" data-card-id={card.id} data-kind="routine" data-state={card.state} data-result={last?.result}
-      onClick={onOpen} title={card.schedule} className={rowClass}>
+      onClick={onOpen} title={`${card.name} · ${card.schedule}`} className={rowClass}>
       <span className="flex w-full min-w-0 items-center gap-2">
         <span aria-hidden="true" className={`w-2 shrink-0 text-center text-[13px] leading-none ${paused ? "text-text-muted" : "text-accent"}`}>↻</span>
         <bdi className="min-w-0 flex-1 truncate text-sm text-text-primary">{card.name}</bdi>

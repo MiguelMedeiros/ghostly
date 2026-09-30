@@ -16,7 +16,7 @@
     "title": "Attività"
   },
   "routine": {
-    "cron": "Cron:",
+    "cron": "Cron",
     "label": "Routine: {{name}}, {{state}}",
     "lastRun": "Ultima esecuzione: {{result}}",
     "next": "Prossima {{when}}",
@@ -27,6 +27,7 @@
       "skipped": "Saltata"
     },
     "runs": "Esecuzioni recenti",
+    "schedule": "Orario",
     "state": {
       "active": "Attiva",
       "paused": "In pausa"

@@ -831,10 +831,10 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
     // A bot's task or routine (WISP 4xx · Status Cards): not a bubble but a card of its own, standing for the text
     // (its fallback). Updates are its normal life, so no "edited": when it last changed, in the card.
     const card = message.card;
-    const meta = <>
-      <CardTime sent={message.timestamp} changed={message.edit?.at} compact={card.kind === "routine"} />
-      {isMe && <DeliveryStatus delivery={shown} acked={isAcked} onRetry={retry} />}
-    </>;
+    const time = <CardTime sent={message.timestamp} changed={message.edit?.at} />;
+    const marks = isMe ? <DeliveryStatus delivery={shown} acked={isAcked} onRetry={retry} /> : undefined;
+    const edge = card.kind === "task" ? STATUS_TONE[card.status].bar
+      : card.state === "paused" ? "bg-text-muted" : card.lastRun?.result === "failed" ? "bg-danger" : undefined;
     return (
       <div
         {...rowProps}
@@ -866,11 +866,11 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
             className={`status-card-surface w-full text-text-primary ${details ? "outline-2 outline-accent outline-offset-2" : ""}`}
             style={swipe.dx > 0 ? { transform: `translateX(${swipe.offset}px)` } : undefined}
           >
-            {/* The card's own colour at its start: its status's, as its dot and bar have it. */}
-            <span aria-hidden="true" data-testid="status-card-edge"
-              className={`absolute -inset-y-px -start-px w-1 rounded-s-[12px] ${card.kind === "task" ? STATUS_TONE[card.status].bar : card.state === "paused" ? "bg-text-muted" : "bg-accent"}`} />
+            {/* A thin mark of its status at its start, inside the edge: a task's status colour; a routine only when its
+                last run failed (red) or it is paused (muted), as ten routines going well need no colour each. */}
+            {edge && <span aria-hidden="true" data-testid="status-card-edge" className={`absolute inset-y-2 start-1 w-[3px] rounded-full opacity-80 ${edge}`} />}
             {quote && <div className="px-2 pt-2"><ReplyQuote quote={quote} /></div>}
-            <StatusCardView card={card} meta={meta} end={message.edit?.at ?? message.timestamp} />
+            <StatusCardView card={card} time={time} marks={marks} end={message.edit?.at ?? message.timestamp} />
           </div>
           <ReactionChips chips={chips} onReact={onReact} align={isMe ? "end" : "start"} />
         </div>

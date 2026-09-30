@@ -16,7 +16,7 @@
     "title": "任务"
   },
   "routine": {
-    "cron": "Cron：",
+    "cron": "Cron",
     "label": "例行任务：{{name}}，{{state}}",
     "lastRun": "上次运行：{{result}}",
     "next": "下次 {{when}}",
@@ -27,6 +27,7 @@
       "skipped": "已跳过"
     },
     "runs": "最近运行",
+    "schedule": "计划",
     "state": {
       "active": "已启用",
       "paused": "已暂停"

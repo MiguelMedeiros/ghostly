@@ -431,7 +431,7 @@ test("the review pictures: a bot room's routines and tasks at every width, both 
       await page.setViewportSize(size);
       for (const scheme of ["dark", "light"] as const) {
         await theme(page, scheme);
-        await room.locator("[data-message-row]").last().scrollIntoViewIfNeeded();
+        await room.getByTestId("routine-stack").last().scrollIntoViewIfNeeded();
         expect.soft(await spills(room), `${size.width} px, ${scheme}`).toEqual([]);
         await page.screenshot({ path: shot(`${size.width}-${scheme}`) });
       }
@@ -441,7 +441,7 @@ test("the review pictures: a bot room's routines and tasks at every width, both 
     await page.setViewportSize(widths[0]);
     await theme(page, "dark");
     const logRow = room.locator("[data-message-row]").filter({ has: page.locator('[data-card-id="zero-log"]') });
-    await logRow.scrollIntoViewIfNeeded();
+    await logRow.evaluate((row) => row.scrollIntoView({ block: "center" }));
     await logRow.hover();
     expect.soft(await spills(room), "hovered").toEqual([]);
     await page.screenshot({ path: shot("1280-dark-hover") });
@@ -479,7 +479,7 @@ test("the review pictures: a bot room's routines and tasks at every width, both 
       await useLanguage(page, language);
       await expect(room.getByTestId("status-card")).toHaveCount(11, { timeout: 60_000 });
       await theme(page, "dark");
-      await room.locator("[data-message-row]").last().scrollIntoViewIfNeeded();
+      await room.getByTestId("routine-stack").last().scrollIntoViewIfNeeded();
       expect.soft(await spills(room), `${language}, ${size.width} px`).toEqual([]);
       await page.screenshot({ path: shot(`${language}-${size.width}-dark`) });
     }
