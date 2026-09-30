@@ -1,3 +1,4 @@
+import { engineError } from "./engineErrors";
 import { bech32 } from "@scure/base";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { decodeBolt11, type Bolt11Invoice } from "./bolt11";
@@ -172,7 +173,7 @@ export async function fetchLnurlJson(url: string, options: LnurlFetchOptions = {
       response = await doFetch(target.href, { signal: controller.signal, headers: { accept: "application/json" }, credentials: "omit", referrerPolicy: "no-referrer", redirect: "follow" });
     } catch {
       if (controller.signal.aborted) throw controller.signal.reason instanceof Error ? controller.signal.reason : new Error("The request was cancelled");
-      throw new Error(`Could not reach ${target.host}. It may be down, or not allow web apps to read it (CORS).`);
+      throw engineError("lnurlUnreachable", { host: target.host });
     }
     // A redirect may not lead somewhere plain HTTP or with credentials.
     if (response.url) acceptUrl(response.url);
@@ -218,7 +219,7 @@ export function parsePayParams(body: unknown, destination: LightningDestination)
 /** Where to ask for the invoice of `amountSat` (and a comment, LUD-12). Throws when the amount or comment is not allowed. */
 export function invoiceCallbackUrl(params: LnurlPayParams, amountSat: number, comment?: string): string {
   if (!Number.isSafeInteger(amountSat) || amountSat <= 0) throw new Error("Enter a whole number of sats");
-  if (amountSat < params.minSat || amountSat > params.maxSat) throw new Error(params.minSat === params.maxSat ? `${params.destination.domain} asks for exactly ${params.minSat.toLocaleString()} sats` : `${params.destination.domain} takes between ${params.minSat.toLocaleString()} and ${params.maxSat.toLocaleString()} sats`);
+  if (amountSat < params.minSat || amountSat > params.maxSat) throw params.minSat === params.maxSat ? engineError("lnurlExactly", { domain: params.destination.domain, amount: params.minSat.toLocaleString() }) : engineError("lnurlRange", { domain: params.destination.domain, min: params.minSat.toLocaleString(), max: params.maxSat.toLocaleString() });
   const url = new URL(params.callback);
   url.searchParams.set("amount", String(amountSat * 1000));
   const text = comment?.trim();

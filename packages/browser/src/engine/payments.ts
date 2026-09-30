@@ -1,5 +1,5 @@
 import type { UsdtWallet } from "./paymentAdapters/usdtWallet";
-import { WALLET_NETWORKS, assertTokenUnits, decodeBolt11, formatPaymentAmount, sparkInvoiceDetails, validatePaymentTarget, walletNetworkOf, type SparkNetwork, type PaymentMethodName, type PaymentReview, type PaymentTarget, type WalletNetwork } from "@ghostly/core";
+import { WALLET_NETWORKS, assertTokenUnits, decodeBolt11, engineError, formatPaymentAmount, sparkInvoiceDetails, validatePaymentTarget, walletNetworkOf, type SparkNetwork, type PaymentMethodName, type PaymentReview, type PaymentTarget, type WalletNetwork } from "@ghostly/core";
 import { eachNetwork, perNetwork, type PerNetwork } from "./paymentAdapters/perNetwork";
 import { assertConfirmedReal, crossNetwork, paymentNetwork } from "./paymentAdapters/walletInstances";
 import { paymentAlias, paymentWireId } from "../shared/paymentIds";
@@ -492,7 +492,7 @@ export class PaymentDesk {
     if (quote.amount !== request.amount) throw new Error("The invoice does not match the requested amount");
     // Never above the ceiling the person approved, when they set one.
     const feeLimit = Math.min(Math.max(10, Math.ceil(request.amount * 0.03)), params.maxFee ?? Infinity);
-    if (quote.feeReserve > feeLimit) throw new Error(`The Lightning fee (${quote.feeReserve} sats) is too high`);
+    if (quote.feeReserve > feeLimit) throw engineError("lightningFeeTooHigh", { fee: quote.feeReserve });
     // Marked before the mint is asked to pay, so a pending payment is never paid a second time.
     await this.save({ ...this.current(request), lightningPending: true, paidHere: true, error: undefined });
     let paid: boolean;

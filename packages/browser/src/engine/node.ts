@@ -40,7 +40,7 @@ import { ModeChanged, networkLabel, WrongNetworkError } from "./paymentAdapters/
 import { assertConfirmedReal, createTiming, WALLET_NAMES, createFailure, crossNetwork, paymentNetwork, paymentNetworksOf, walletInstances } from "./paymentAdapters/walletInstances";
 import { migrateWalletNetworks } from "./paymentAdapters/walletNetworks";
 import { perNetwork, type PerNetwork } from "./paymentAdapters/perNetwork";
-import { COMMUNITY_EDIT_FRAME, INVITE_TAKEN, parseCommunityEdit } from "@ghostly/core";
+import { COMMUNITY_EDIT_FRAME, INVITE_TAKEN, engineError, parseCommunityEdit } from "@ghostly/core";
 import { GROUP_WAKE_FRAME, GROUP_WAKE_RECEIVE_LIMIT, GroupWakeLimiter, RateWindow, WAKE_CALL_INTERVAL_MS, WakeLimiter, groupWakeFrame, groupWakes, parseGroupWakeFrame, checkPushEndpoint, newWakeToken, relayRequest, vapidKeysMatch, wakeRequest, type PushRequest, type WakeKind, type WakeTarget } from "@ghostly/core";
 import { COMMUNITY_REACTION_FRAME, GROUP_REACTION_FRAME, REACTION_LIMITS, ReactionWindow, queueReaction, readReaction, validReactionNumber, wireReaction, type WireReaction } from "@ghostly/core";
 import { COMMUNITY_PIN_FRAME, PIN_LIMITS, mayPin, pinIsNewer, pinNumberHolds, readPin, type GroupPinFrame, type WirePin } from "@ghostly/core";
@@ -3254,7 +3254,7 @@ export class GhostlyNode implements EngineImplementation {
    */
   async walletAddMint({ url, primary, network }: { url: string; primary?: boolean; network?: WalletNetwork }): Promise<{ url: string; name: string }> {
     if (network && mintNetwork(normalizeMintUrl(url)) !== network) {
-      throw new Error(network === "mainnet" ? "This is a test mint, and its sats are worth nothing: add it to a Testnet Cashu wallet" : "This mint holds real sats: add it to a Mainnet Cashu wallet");
+      throw engineError(network === "mainnet" ? "testMintOnMainnet" : "realMintOnTestnet");
     }
     const mint = await this.wallet.checkMint(url);
     const others = this.settings.mints.filter((m) => m !== mint.url);
@@ -3527,8 +3527,8 @@ export class GhostlyNode implements EngineImplementation {
   async walletRemoveMint({ url, acceptLoss }: { url: string; acceptLoss?: boolean }): Promise<void> {
     const network = mintNetwork(url);
     const mints = this.networkMints(network);
-    if (mints.length === 1 && mints[0] === url) throw new Error(`This is the last mint of your ${networkLabel(network)} Cashu wallet: remove the wallet to remove it`);
-    if ((await this.wallet.balanceAt(url)) > 0) throw new Error("Move your sats out of this mint before removing it");
+    if (mints.length === 1 && mints[0] === url) throw engineError("lastMint", { network: networkLabel(network) });
+    if ((await this.wallet.balanceAt(url)) > 0) throw engineError("mintHoldsSats");
     const waits = async () => mintAwaiting(url, { network, quotes: await this.wallet.quotes(), payments: this.desk.records(), now: Date.now() });
     if ((await waits()).length) {
       // What was already paid to it is claimed first, even when the person agreed: sats that came in meanwhile are
@@ -3536,7 +3536,7 @@ export class GhostlyNode implements EngineImplementation {
       let timer: ReturnType<typeof setTimeout> | undefined;
       await Promise.race([this.wallet.checkQuotes([url]).catch(() => {}), new Promise((resolve) => { timer = setTimeout(resolve, removalTiming.claimMs); })]);
       clearTimeout(timer);
-      if ((await this.wallet.balanceAt(url)) > 0) { await this.refreshWallet(); throw new Error("Move your sats out of this mint before removing it"); }
+      if ((await this.wallet.balanceAt(url)) > 0) { await this.refreshWallet(); throw engineError("mintHoldsSats"); }
       const awaiting = await waits();
       if (awaiting.length && acceptLoss !== true) {
         const listed = awaiting.map((a) => { const text = ENGLISH_REMOVAL.item(a.kind, ENGLISH_REMOVAL.sats(a.amount, network)); return text.charAt(0).toLowerCase() + text.slice(1); }).join("; ");

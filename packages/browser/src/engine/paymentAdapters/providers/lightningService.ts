@@ -1,4 +1,4 @@
-import { decodeBolt11, requestLnurlInvoice, resolveLightningDestination, type LnurlPayParams, type LnurlSuccessAction } from "@ghostly/core";
+import { decodeBolt11, engineError, requestLnurlInvoice, resolveLightningDestination, type LnurlPayParams, type LnurlSuccessAction } from "@ghostly/core";
 import { STORES, store, transact, wrap } from "../../../shared/idb";
 import { BITCOIN_INVOICE_ON_TESTNET, type WalletMode } from "../../../shared/mints";
 import { CASHU_MINT_SOURCE, CashuMintLightning } from "./cashuMint";
@@ -207,7 +207,7 @@ export class LightningService {
     if (!decoded) throw new Error("That is not a Lightning invoice");
     if (decoded.amountSat === null) throw new Error("Invoices without an amount are not supported");
     if (!decoded.paymentHash) throw new Error("That invoice has no payment hash");
-    if (decoded.expiresAt * 1000 < Date.now()) throw new Error("That invoice has expired");
+    if (decoded.expiresAt * 1000 < Date.now()) throw engineError("invoiceExpired");
     this.checkNetwork(decoded.network);
     const { provider, descriptor } = await this.sources.use();
     // A Bitcoin invoice on Testnet: only the mints can tell test sats from real ones (`fakesLightning`, checked when

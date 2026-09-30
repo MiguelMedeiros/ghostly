@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { ENGINE_ERRORS, engineText, type EngineErrorCode } from "@ghostly/core";
 import { ERROR_RULES, errorText, rawError } from "../../lib/errorText";
 import { english } from "../../lib/english";
 import { translateWith } from "../../locales/translate";
@@ -19,6 +20,8 @@ const ROOT = join(fileURLToPath(import.meta.url), "../../../../../..");
 const source = (path: string) => readFileSync(join(ROOT, path), "utf8");
 
 const BROWSER = "packages/browser/src";
+/** The engine's known errors, written once with their codes (@ghostly/core ENGINE_ERRORS) and thrown from there. */
+const CODES = "packages/core/src/engineErrors.ts";
 /** [message as thrown, the file that throws it, the part of the message written there as it is]. */
 const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["The Ghostly peer did not start. Reopen the extension to retry.", "apps/extension/src/background.ts"],
@@ -45,12 +48,12 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["Not enough space on your contact's device for this file (2.0 MB free).", `${BROWSER}/platform/services.ts`, "Not enough space on your contact's device for this file ("],
   ["That file is too large for your contact's app (max 64 MB). Larger files need an updated Ghostly on their side.", `${BROWSER}/platform/services.ts`, ". Larger files need an updated Ghostly on their side."],
   ["That file is too large (max 64 MB).", `${BROWSER}/platform/services.ts`, "That file is too large (max "],
-  ["That is not a valid mint URL", `${BROWSER}/engine/wallet.ts`],
-  ["Mints must use https", `${BROWSER}/engine/wallet.ts`],
+  ["That is not a valid mint URL", CODES],
+  ["Mints must use https", CODES],
   ["Enter an amount in sats", `${BROWSER}/engine/wallet.ts`],
   ["Amounts above 1,000,000 sats are not supported", `${BROWSER}/engine/wallet.ts`, " sats are not supported"],
   ["mint.example did not answer", `${BROWSER}/engine/wallet.ts`, " did not answer"],
-  ["Could not reach mint.example. Check the address: it should be a Cashu mint.", `${BROWSER}/engine/wallet.ts`, ". Check the address: it should be a Cashu mint."],
+  ["Could not reach mint.example. Check the address: it should be a Cashu mint.", CODES, ". Check the address: it should be a Cashu mint."],
   ["No mint configured", `${BROWSER}/engine/wallet.ts`],
   ["No mint could create an invoice: mint.example did not answer", `${BROWSER}/engine/wallet.ts`, "No mint could create an invoice: "],
   ["This wallet has no test mint to ask for test coins", `${BROWSER}/engine/wallet.ts`],
@@ -59,7 +62,7 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["That is not a valid ecash token", `${BROWSER}/engine/wallet.ts`],
   ["Ecash from mint.example is not accepted", `${BROWSER}/engine/wallet.ts`, " is not accepted"],
   ["Add a mint in Settings first", `${BROWSER}/engine/wallet.ts`],
-  ["Not enough sats in your wallet", `${BROWSER}/engine/wallet.ts`],
+  ["Not enough sats in your wallet", CODES],
   ["The Lightning payment did not go through. The sats are back in your wallet.", `${BROWSER}/engine/wallet.ts`, "The sats are back in your wallet."],
   ["The Lightning payment did not go through. The sats are back in your wallet, less 2 sats the mint kept as its fee.", `${BROWSER}/engine/wallet.ts`, "The sats are back in your wallet, less "],
   // Never alone: the start of the two above, said on its own before what came back.
@@ -86,7 +89,7 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["This request cannot be paid over Lightning in this chat", `${BROWSER}/engine/payments.ts`],
   ["No way of paying this request is allowed in this chat", `${BROWSER}/engine/payments.ts`],
   ["The invoice does not match the requested amount", `${BROWSER}/engine/payments.ts`],
-  ["The Lightning fee (21 sats) is too high", `${BROWSER}/engine/payments.ts`, "The Lightning fee ("],
+  ["The Lightning fee (21 sats) is too high", CODES, "The Lightning fee ("],
   ["Nothing to take back", `${BROWSER}/engine/payments.ts`],
   ["The federation has not answered yet: try again in a moment", `${BROWSER}/engine/payments.ts`],
   ["Nothing to reclaim", `${BROWSER}/engine/payments.ts`],
@@ -95,7 +98,7 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["You are offline", `${BROWSER}/engine/payments.ts`],
   ["This is a Mainnet payment (real money): a Testnet wallet never pays it. Use a Mainnet wallet.", `${BROWSER}/engine/paymentAdapters/walletInstances.ts`, "payment (${"],
   ["This is a Testnet payment (test coins): a Mainnet wallet never pays it. Use a Testnet wallet.", `${BROWSER}/engine/paymentAdapters/walletInstances.ts`, "wallet never pays it. Use a "],
-  ["This pays with real money: confirm it with Send real money first. Nothing was sent.", `${BROWSER}/engine/paymentAdapters/walletInstances.ts`],
+  ["This pays with real money: confirm it with Send real money first. Nothing was sent.", CODES],
   ["Could not create the Spark wallet: the network is down. Nothing was saved; try again.", `${BROWSER}/engine/paymentAdapters/walletInstances.ts`, ". Nothing was saved; try again."],
   ["Give the profile a name", "apps/ui/src/lib/profiles.ts"],
   ["That profile already exists", "apps/ui/src/lib/profiles.ts"],
@@ -157,5 +160,24 @@ describe("errors in the app's language", () => {
     expect(errorText(new Error("Relay said: rate limited"), translators.pt)).toBe("Relay said: rate limited");
     expect(errorText("plain", translators.fr)).toBe("plain");
     expect(errorText(42, translators.fr)).toBe("42");
+  });
+});
+
+describe("the engine's known errors (@ghostly/core ENGINE_ERRORS)", () => {
+  const SAMPLE: Record<string, string> = { host: "mint.example.com", domain: "shop.example", chain: "mutinynet", network: "Testnet", amount: "1,000", fee: "1200", min: "5", max: "500" };
+  const texts = (Object.keys(ENGINE_ERRORS) as EngineErrorCode[]).map((code) => [code, engineText(code, Object.fromEntries([...ENGINE_ERRORS[code].matchAll(/\{(\w+)\}/g)].map(([, name]) => [name, SAMPLE[name]])))] as const);
+
+  it.each(LANGUAGES.filter((l) => l !== "en"))("every one reads in %s, by a rule or by its code", (language) => {
+    expect(texts.filter(([, text]) => errorText(text, translators[language]) === text).map(([code]) => code)).toEqual([]);
+  });
+
+  it("in English each is the engine's own text, word for word", () => {
+    for (const [, text] of texts) expect(errorText(text, english)).toBe(text);
+  });
+
+  it("the values stay, and amounts are written the app's way", () => {
+    expect(errorText("shop.example takes between 5 and 1,000,000 sats", translators.pt)).toBe("shop.example aceita de 5 a 1.000.000 sats");
+    expect(errorText("Could not reach rpc.example", translators.pt)).toBe("Não foi possível acessar rpc.example");
+    expect(errorText("This federation is on mutinynet, a test network: it belongs in a Testnet Fedimint wallet", translators.fr)).toContain("mutinynet");
   });
 });
