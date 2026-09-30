@@ -13,6 +13,8 @@ import { defineConfig } from "@playwright/test";
 export default defineConfig({
   testDir: "./desktop-macos",
   outputDir: "../test-results/desktop-macos",
+  // The headless CLI the bots run, built once before the workers start (support/headlessBuild.ts).
+  globalSetup: "./support/headlessBuild.ts",
   // Two apps and one relay per test, on fixed ports.
   workers: 1,
   forbidOnly: !!process.env.CI,
