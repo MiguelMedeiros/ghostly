@@ -162,6 +162,29 @@ describe("a long chat past the page's storage", () => {
     expect(storage.loadSession(SESSION)!.messages).toHaveLength(COUNT + 3);
   });
 
+  it("gives the chat list the same session while nothing changed (the sync's reconcile tells an unchanged list by them)", async () => {
+    await engineSpeaks();
+    const cache: import("../../../apps/ui/src/lib/storage").SessionCache = new Map();
+    const first = storage.listSessions(cache)[0];
+    expect(first.messages).toHaveLength(COUNT + 3);
+    expect(storage.listSessions(cache)[0]).toBe(first);
+  });
+
+  it("deleting a message of a session read without its older ones keeps the unread count right", async () => {
+    await engineSpeaks();
+    storage.markSessionAsRead(SESSION);
+    await page();
+    // Before the engine speaks: only its last messages here.
+    expect(storage.loadSession(SESSION)!.older).toBeGreaterThan(0);
+    storage.deleteMessage(SESSION, stored(COUNT - 2).id);
+    expect(storage.getUnreadCount(storage.listSessions()[0])).toBe(0);
+    await engineSpeaks();
+    const all = storage.loadSession(SESSION)!.messages;
+    expect(all).toHaveLength(COUNT + 2);
+    expect(all.some(m => m.id === stored(COUNT - 2).id)).toBe(false);
+    expect(storage.getUnreadCount(storage.listSessions()[0])).toBe(0);
+  });
+
   it("keeps a chat the engine does not keep (a compatibility chat before its link) whole", async () => {
     // No link for it: nothing says the engine has these, so none of them leaves the session.
     engine.messages = new Map();
