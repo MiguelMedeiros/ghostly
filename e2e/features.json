@@ -586,6 +586,7 @@
   ],
   "paths": {
     "apps/desktop/src/push_send.rs": [],
+    "apps/extension/public/_locales/**/*": ["extension.engine"],
     "apps/extension/public/icons/**/*": ["extension.engine"],
     "apps/extension/public/manifest.json": ["*"],
     "apps/extension/src/oidc.ts": ["proofs.oidc","proofs.oidc.callback.extension"],
