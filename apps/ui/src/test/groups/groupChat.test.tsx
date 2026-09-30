@@ -84,6 +84,17 @@ describe("GroupChat: joining through a link", () => {
     expect(screen.queryByTestId("group-joining-stale")).not.toBeInTheDocument();
   });
 
+  it("an app with no WebRTC says it cannot get in from here, not that it is in in a moment", () => {
+    fakeEngine.update({ transport: { protocol: "webrtc/1", relays: [], webrtc: false } });
+    openGroup({ ...groupView({ canSend: false, invitation: { linkId: "", contact: "", admin: "", members: 0, accepted: true, viaLink: true, stage: "answered" } }), profile: "community" });
+    const card = screen.getByTestId("group-joining");
+    expect(card).toHaveTextContent("Groups can't connect from this app yet");
+    expect(card).toHaveTextContent("Open the group on the web app or on another device to take part.");
+    expect(card).not.toHaveTextContent("You are in in a moment");
+    expect(card.querySelector(".animate-spin")).toBeNull();
+    expect(screen.getByTestId("group-joining-cancel")).toBeInTheDocument();
+  });
+
   it("says when the admin's app answered", () => {
     openGroup(viaLink(ALICE));
     expect(screen.getByTestId("group-members")).toHaveTextContent("Joining…");
