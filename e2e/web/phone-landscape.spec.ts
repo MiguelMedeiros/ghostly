@@ -9,11 +9,12 @@ import { pair } from "../support/paired";
  */
 const LANDSCAPE = { width: 874, height: 402 };
 const SIDE = 62;
+const HOME = 20;
 
-test("a phone on its side: nothing sits under the notch", { tag: ["@feature:app.mobile-layout", "@feature:app.responsive"] }, async ({ peer }) => {
+test("a phone on its side: nothing sits under the notch or the home indicator", { tag: ["@feature:app.mobile-layout", "@feature:app.responsive"] }, async ({ peer }) => {
   const { page } = await peer("alice", { mobile: true, viewport: LANDSCAPE });
   const cdp = await page.context().newCDPSession(page);
-  await cdp.send("Emulation.setSafeAreaInsetsOverride", { insets: { left: SIDE, right: SIDE, top: 0, bottom: 20 } });
+  await cdp.send("Emulation.setSafeAreaInsetsOverride", { insets: { left: SIDE, right: SIDE, top: 0, bottom: HOME } });
   await expect.poll(() => page.evaluate(() => {
     const probe = document.body.appendChild(document.createElement("div"));
     probe.style.paddingLeft = "env(safe-area-inset-left)";
@@ -37,6 +38,23 @@ test("a phone on its side: nothing sits under the notch", { tag: ["@feature:app.
     expect(box.x).toBeGreaterThanOrEqual(SIDE);
     expect(box.x + box.width).toBeLessThanOrEqual(LANDSCAPE.width - SIDE);
   }
+  // Two panes, both bottom rows above the home indicator: the message field and the account bar's places sat 7px into
+  // it (an installed iPad too, 20px under both).
+  const composer = (await page.locator(".composer-row").boundingBox())!;
+  expect(composer.y + composer.height).toBeLessThanOrEqual(LANDSCAPE.height - HOME);
+  for (const place of await page.getByTestId("account-bar").locator(".account-action").all()) {
+    const box = (await place.boundingBox())!;
+    expect(box.y + box.height).toBeLessThanOrEqual(LANDSCAPE.height - HOME);
+  }
+
+  // With the keyboard up the indicator is covered: the composer stands on the keyboard, no band for it in between.
+  const field = page.getByPlaceholder("Message…");
+  const composerPadding = () => page.locator("[data-composer]").evaluate((element) => parseFloat(getComputedStyle(element).paddingBottom));
+  const resting = await composerPadding();
+  await field.focus();
+  await page.setViewportSize({ width: LANDSCAPE.width, height: LANDSCAPE.height - 200 });
+  await expect(page.locator("html")).toHaveAttribute("data-keyboard", "true");
+  await expect.poll(composerPadding).toBe(resting - HOME);
 });
 
 test("a phone on its side: the chat beside the list uses its width, and a video keeps its shape", { tag: ["@feature:app.mobile-layout", "@feature:files.video.play"] }, async ({ peer }) => {

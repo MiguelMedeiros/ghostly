@@ -40,6 +40,7 @@ import { CallButtons } from "../components/CallButtons";
 import { CallOverlay } from "../components/CallOverlay";
 import { IncomingCallNotification } from "../components/IncomingCallNotification";
 import { contactStatus } from "../lib/contactStatus";
+import { callLineId } from "../lib/callLines";
 import { PeerServices } from "../components/PeerServices";
 import { formatFileSize } from "../lib/format";
 import { playSound, startRinging } from "../lib/sounds";
@@ -150,7 +151,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
   }, [sharedNick, setNick]);
 
   const addCallEventMessage = useCallback(
-    (type: CallEventType, hasVideo: boolean, duration?: number) => {
+    (type: CallEventType, hasVideo: boolean, duration?: number, call?: number) => {
       // Kept in English in the history: the call line is worded in the person's language where it is drawn (MessageBubble).
       const textMap: Record<CallEventType, string> = {
         call_started: hasVideo ? "Video call started" : "Audio call started",
@@ -163,7 +164,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
       };
 
       const msg: ChatMessage = {
-        id: `system_call_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+        id: callLineId(type, call),
         text: textMap[type],
         sender: "system",
         timestamp: Date.now(),

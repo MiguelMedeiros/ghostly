@@ -494,6 +494,7 @@
       "reaches": "Anything paid to them afterwards still reaches {{source}}; Ghostly just no longer sees it.",
       "reachesWallet": "Anything paid to them afterwards still reaches the wallet; Ghostly just no longer sees it."
     },
+    "and": "{{first}} and {{second}}",
     "ask": "Remove {{label}}…",
     "awaiting": "Still waiting for money",
     "backupFirst": "Back up first",
@@ -512,6 +513,10 @@
       "waitsReal": "I understand: anything paid to its open requests and invoices after it is removed is lost, and it is real money."
     },
     "copyTokens": "Copy ecash backup",
+    "gas": {
+      "mainnet": "{{amount}} ETH",
+      "testnet": "{{amount}} test ETH"
+    },
     "held": {
       "elsewhere": "Your money stays where it is: Ghostly only forgets how to reach it. You can connect it again later.",
       "elsewhereIn": "Your money stays in {{source}}: Ghostly only forgets how to reach it. You can connect it again later.",
@@ -522,6 +527,13 @@
     },
     "hintDevice": "Its keys and settings leave this device. Other wallets stay as they are.",
     "hintElsewhere": "Ghostly forgets how to reach it; the money stays where it is.",
+    "item": {
+      "invoice": "An invoice for {{amount}}, not paid yet",
+      "paid": "{{amount}} paid to an invoice, not claimed from the mint yet",
+      "request": "A request for {{amount}} in a chat, still open",
+      "sent": "{{amount}} in ecash you sent, not taken yet",
+      "unclaimed": "{{amount}} the mint says it issued for an invoice, never received here"
+    },
     "label": "Remove this wallet",
     "noBackup": "Ghostly cannot show this wallet's recovery phrase again: only the phrase you wrote down when you made it brings this money back.",
     "noTokens": "There is no ecash to copy.",
