@@ -30,6 +30,14 @@ for (const { name, use } of VIEWPORTS) {
   test.describe(() => {
     test.use(use);
     test(`${name}: a small scroll leaves the hero's buttons whole and tappable`, async ({ page }) => {
+      // Every element the hero's buttons were ever drawn in. The server draws the live act; this window gets the still
+      // one, and the act must keep its chapters mounted through that switch: a new element would drop the buttons out
+      // of sight and rise them again, maybe after they were measured here (CI, 2026-09-30: "button 0 moved at 50px").
+      await page.addInitScript(() => {
+        const seen = new Set<Element>();
+        (window as unknown as { heroActions: Set<Element> }).heroActions = seen;
+        new MutationObserver(() => document.querySelectorAll(".hero-actions").forEach((el) => seen.add(el))).observe(document, { childList: true, subtree: true });
+      });
       await page.goto("/", { waitUntil: "networkidle" });
       const actions = page.locator(".hero-actions");
       await actions.evaluate((el) => Promise.all(el.getAnimations().map((a) => a.finished)));
@@ -55,6 +63,7 @@ for (const { name, use } of VIEWPORTS) {
           await b.click({ trial: true });
         }
       }
+      expect(await page.evaluate(() => (window as unknown as { heroActions: Set<Element> }).heroActions.size), "the hero's buttons were mounted again").toBe(1);
     });
   });
 }

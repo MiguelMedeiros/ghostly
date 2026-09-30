@@ -48,22 +48,32 @@ export function Act({
 }) {
   const calm = useCalm();
   const cards = useCards();
-  if (calm || cards) {
-    return (
-      <div id={id} className="act act--static">
-        {children}
-      </div>
-    );
-  }
+  const still = calm || cards;
+  const ref = useRef<HTMLDivElement>(null);
+  const [live, setLive] = useState<LiveScene>({ chapter: chapters[0].chapter, inView: false });
+  // One element, its chapters in the same place, whichever way the act is drawn. The server draws the live act; with
+  // reduced motion or on a phone the first client frame draws the still one, and a different element there would
+  // mount the chapters again: the hero's copy and buttons would drop out of sight and rise a second time.
   return (
-    <LiveAct id={id} chapters={chapters} field={field} bubble={bubble} bubbleAvoid={bubbleAvoid}>
+    <div
+      id={id}
+      ref={ref}
+      className={still ? "act act--static" : "act"}
+      data-chapter={still ? undefined : live.chapter}
+      data-inview={still ? undefined : live.inView}
+      style={still ? undefined : { ["--chapter-bg" as string]: ROOMS[live.chapter] }}
+    >
+      {still ? null : <LiveStage id={id} actRef={ref} chapters={chapters} field={field} bubble={bubble} bubbleAvoid={bubbleAvoid} onScene={setLive} />}
       {children}
-    </LiveAct>
+    </div>
   );
 }
 
-function LiveAct({ id, chapters, field, bubble, bubbleAvoid, children }: { id: string; chapters: ActChapter[]; field: boolean; bubble?: string; bubbleAvoid?: string; children: React.ReactNode }) {
-  const ref = useRef<HTMLDivElement>(null);
+/** What the live act's element shows of its stage: the chapter on screen (its room colour) and whether it is in view. */
+type LiveScene = { chapter: Chapter; inView: boolean };
+
+/** The live act's backdrop, pinned behind its chapters: the room, the field, the stage with the two actors. */
+function LiveStage({ id, actRef: ref, chapters, field, bubble, bubbleAvoid, onScene }: { id: string; actRef: React.RefObject<HTMLDivElement | null>; chapters: ActChapter[]; field: boolean; bubble?: string; bubbleAvoid?: string; onScene: (scene: LiveScene) => void }) {
   const svgRef = useRef<SVGSVGElement>(null);
   const portrait = usePortrait();
   const orient = orientationOf(portrait);
@@ -105,7 +115,7 @@ function LiveAct({ id, chapters, field, bubble, bubbleAvoid, children }: { id: s
       ro.disconnect();
       window.removeEventListener("resize", measure);
     };
-  }, [chapters]);
+  }, [chapters, ref]);
 
   // The actors' own beats: the hero's walk into the story and every glide from one chapter's pose to the next (an
   // act's pair arriving as it pins is its first scene's fade-in beat). A flick still shows them; a stop never leaves
@@ -285,48 +295,46 @@ function LiveAct({ id, chapters, field, bubble, bubbleAvoid, children }: { id: s
     return out;
   }, [nodes, portrait]);
 
-  const room = ROOMS[scene.chapter];
+  // The act's element carries the chapter (its room colour) and whether it is in view, before the frame is painted.
+  useLayoutEffect(() => onScene({ chapter: scene.chapter, inView }), [onScene, scene.chapter, inView]);
 
   return (
-    <div id={id} ref={ref} className="act" data-chapter={scene.chapter} data-inview={inView} style={{ ["--chapter-bg" as string]: room }}>
-      <div className="act-backdrop" aria-hidden="true">
-        {/* The room's colour, then the field on its own layer (its parallax and drift are composited transforms on
-            HTML boxes, so the field never repaints the stage with the actors), then the stage. */}
-        <div className="act-room" />
-        {field && (
-          <motion.div className="act-field" style={{ y: fieldY }}>
-            <div className="act-field-drift">
-              <svg className="stage" viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="xMidYMid slice">
-                {/* The app's network look (pairing-scene.css): a dotted mesh in the mesh tone, loose dots on it. */}
-                {edges.map(([a, b]) => (
-                  <line key={`${a}-${b}`} x1={nodes[a].x} y1={nodes[a].y} x2={nodes[b].x} y2={nodes[b].y} stroke={PAIR.mesh} strokeOpacity="0.7" strokeWidth={PAIR.stroke.mesh} strokeDasharray={PAIR.meshDash} strokeLinecap="round" />
-                ))}
-                {nodes.map((n, i) => (
-                  <circle key={i} cx={n.x} cy={n.y} r={1.6 + n.t * 2} fill={PAIR.dot} opacity={0.55 + n.t * 0.45} />
-                ))}
-              </svg>
-            </div>
-          </motion.div>
-        )}
-        <svg ref={svgRef} className="stage" viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="xMidYMid slice">
-          <motion.g style={{ x: framingX, y: framingY, scale: framingK, ...VIEW_BOX_ORIGIN }}>
-            <motion.g style={{ x: camX, y: camY, scale, ...VIEW_BOX_ORIGIN }}>
-              <motion.g className="actor" style={{ x: cx, y: cy, scale: cs, opacity: ca, ...VIEW_BOX_ORIGIN }}>
-                <g className="stage-bob" style={{ animationDelay: "-1.37s" }}>
-                  <Ghost who="casper" size={100} mood={casperMood} look={casperLook} float={false} halo phase={1} />
-                </g>
-              </motion.g>
-              <motion.g className="actor" style={{ x: bx, y: by, scale: bs, opacity: ba, ...VIEW_BOX_ORIGIN }}>
-                <g className="stage-bob">
-                  <Ghost who="boo" size={100} mood={booMood} look={booLook} float={false} halo />
-                </g>
-              </motion.g>
-              {bubble && <Bubble text={bubble} x={bx} y={by} s={bs} fade={bubbleFade} orient={orient} rest={poseAt(blockingFor(orient, chapters[0].chapter, frame).boo, 0)} avoid={bubbleAvoid} />}
+    <div className="act-backdrop" aria-hidden="true">
+      {/* The room's colour, then the field on its own layer (its parallax and drift are composited transforms on
+          HTML boxes, so the field never repaints the stage with the actors), then the stage. */}
+      <div className="act-room" />
+      {field && (
+        <motion.div className="act-field" style={{ y: fieldY }}>
+          <div className="act-field-drift">
+            <svg className="stage" viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="xMidYMid slice">
+              {/* The app's network look (pairing-scene.css): a dotted mesh in the mesh tone, loose dots on it. */}
+              {edges.map(([a, b]) => (
+                <line key={`${a}-${b}`} x1={nodes[a].x} y1={nodes[a].y} x2={nodes[b].x} y2={nodes[b].y} stroke={PAIR.mesh} strokeOpacity="0.7" strokeWidth={PAIR.stroke.mesh} strokeDasharray={PAIR.meshDash} strokeLinecap="round" />
+              ))}
+              {nodes.map((n, i) => (
+                <circle key={i} cx={n.x} cy={n.y} r={1.6 + n.t * 2} fill={PAIR.dot} opacity={0.55 + n.t * 0.45} />
+              ))}
+            </svg>
+          </div>
+        </motion.div>
+      )}
+      <svg ref={svgRef} className="stage" viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="xMidYMid slice">
+        <motion.g style={{ x: framingX, y: framingY, scale: framingK, ...VIEW_BOX_ORIGIN }}>
+          <motion.g style={{ x: camX, y: camY, scale, ...VIEW_BOX_ORIGIN }}>
+            <motion.g className="actor" style={{ x: cx, y: cy, scale: cs, opacity: ca, ...VIEW_BOX_ORIGIN }}>
+              <g className="stage-bob" style={{ animationDelay: "-1.37s" }}>
+                <Ghost who="casper" size={100} mood={casperMood} look={casperLook} float={false} halo phase={1} />
+              </g>
             </motion.g>
+            <motion.g className="actor" style={{ x: bx, y: by, scale: bs, opacity: ba, ...VIEW_BOX_ORIGIN }}>
+              <g className="stage-bob">
+                <Ghost who="boo" size={100} mood={booMood} look={booLook} float={false} halo />
+              </g>
+            </motion.g>
+            {bubble && <Bubble text={bubble} x={bx} y={by} s={bs} fade={bubbleFade} orient={orient} rest={poseAt(blockingFor(orient, chapters[0].chapter, frame).boo, 0)} avoid={bubbleAvoid} />}
           </motion.g>
-        </svg>
-      </div>
-      {children}
+        </motion.g>
+      </svg>
     </div>
   );
 }
