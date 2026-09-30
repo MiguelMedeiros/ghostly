@@ -90,5 +90,6 @@ test("a contact shown as their Nostr profile in the chat list and header, and ba
   await closeIdentities(alice);
   await expect(name).toHaveText(ownName, { timeout: 60_000 });
   await expect(row.getByTestId("contact-face-corner")).toHaveCount(0);
-  await expect(bob.page.getByTestId("chat-name")).toHaveText(ownName);
+  // The header names an unnamed contact by the word alone, the start of the key on the line under it (#845).
+  await expect(bob.page.getByTestId("chat-name")).toHaveText(ownName.split(" · ")[0]);
 });
