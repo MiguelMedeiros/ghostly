@@ -57,17 +57,17 @@ export function RoutineStack({ name, cards, mine, children, author, onOpenAuthor
     <div ref={ref} data-testid="routine-stack" data-count={cards.length} data-open={open ? "" : undefined}>
       <div className={`flex ${mine ? "justify-end" : "justify-start"} gap-1 mb-3.5 message-row-x`}>
         {!mine && author && <SenderAvatar author={author} onOpen={onOpenAuthor} />}
-        {/* A bubble's look: the sender's name over the line, as on their messages. */}
-        <button type="button" data-testid="routine-stack-toggle" aria-expanded={open} aria-controls={listId} onClick={() => setOpen(!open)}
-          className={`block w-[min(340px,78vw)] min-w-0 max-w-[85%] cursor-pointer rounded-[7.5px] px-[9px] pt-[5px] pb-[7px] text-start text-[12px] text-text-primary shadow-[0_1px_0.5px_rgba(11,20,26,0.13)] focus-visible:outline-2 focus-visible:outline-accent ${mine ? "bg-sent-bg" : "bg-received-bg"}`}>
-          {name && <bdi data-testid="routine-stack-name" data-key={author?.key} className={`mb-0.5 block truncate text-[12.8px] font-medium leading-[20px] ${author ? memberText(author.key) : "text-accent-hover"}`}>~{name}</bdi>}
-          <span className="flex min-w-0 items-center gap-1.5">
+        {/* A card's look, as the cards it folds (MessageBubble): the sender's name above it, as over their cards. */}
+        <div className={`flex min-w-0 w-[min(420px,85%)] flex-col ${mine ? "items-end" : "items-start"}`}>
+          {name && <bdi data-testid="routine-stack-name" data-key={author?.key} className={`mb-0.5 block max-w-full truncate px-1 text-[12.8px] font-medium leading-[20px] ${author ? memberText(author.key) : "text-accent-hover"}`}>~{name}</bdi>}
+          <button type="button" data-testid="routine-stack-toggle" aria-expanded={open} aria-controls={listId} onClick={() => setOpen(!open)}
+            className="status-card-surface flex w-full min-w-0 cursor-pointer items-center gap-1.5 px-3 py-2 text-start text-[12px] text-text-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent">
             <span aria-hidden="true" className="shrink-0 text-[13px] text-accent">↻</span>
             <span className="min-w-0 flex-1"><RoutineSummaryLine cards={cards} /></span>
             <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
               className={`shrink-0 text-text-primary/65 transition-transform motion-reduce:transition-none ${open ? "rotate-90" : "rtl:-scale-x-100"}`}><path d="m9 6 6 6-6 6" /></svg>
-          </span>
-        </button>
+          </button>
+        </div>
       </div>
       <div id={listId} hidden={!open}>{children}</div>
     </div>
@@ -86,17 +86,20 @@ function RunLine({ result, at, summary }: { result: RunResult; at: number; summa
   );
 }
 
-export function RoutineView({ card }: { card: RoutineCard }) {
+/** A routine's card; `meta` (the message's time and marks) ends its line, and gives way first when the card is narrow. */
+export function RoutineView({ card, meta }: { card: RoutineCard; meta?: ReactNode }) {
   const { t, language } = useI18n();
   const [open, setOpen] = useState(false);
   const detailsId = useId();
   const paused = card.state === "paused";
   return (
     <div data-testid="status-card" data-kind="routine" data-card-id={card.id} data-state={card.state} data-open={open ? "" : undefined}
-      className="@container my-0.5 w-[min(320px,72vw)] max-w-full rounded-lg border border-text-primary/10 bg-text-primary/5 text-start">
-      {/* One line: ↻, the name, the schedule, the next run (or Paused), the last run's mark. */}
-      <button type="button" data-testid="status-card-toggle" aria-expanded={open} aria-controls={detailsId} onClick={() => setOpen(!open)}
-        className="flex w-full min-w-0 cursor-pointer items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-start text-[11px] text-text-primary/65 focus-visible:outline-2 focus-visible:outline-accent">
+      className="@container w-full min-w-0 text-start">
+      {/* One line: ↻, the name, the schedule, the next run (or Paused), the last run's mark. A long press or a swipe on
+          it is the message's, as on a bubble (MessageBubble's gestures let this button through). */}
+      <div className="flex min-w-0 items-center">
+      <button type="button" data-testid="status-card-toggle" data-press-through aria-expanded={open} aria-controls={detailsId} onClick={() => setOpen(!open)}
+        className="flex min-w-0 flex-1 cursor-pointer items-center gap-1.5 rounded-[11px] ps-3 pe-1.5 py-2 text-start text-[11px] text-text-primary/65 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent">
         <span aria-hidden="true" className={`shrink-0 text-[13px] ${paused ? "text-text-primary/50" : "text-accent"}`}>↻</span>
         {/* Narrow, the schedule gives way first: the name is what tells routines apart. */}
         <bdi data-testid="status-card-title" className="me-auto min-w-12 shrink-[0.1] truncate text-[13px] font-semibold text-text-primary">{card.name}</bdi>
@@ -110,8 +113,10 @@ export function RoutineView({ card }: { card: RoutineCard }) {
           <span className="sr-only">{card.lastRun ? t("cards.routine.lastRun", { result: t(`cards.routine.result.${card.lastRun.result}`) }) : t("cards.routine.noRuns")}</span>
         </span>
       </button>
+      {meta && <span className="flex shrink-0 items-center gap-[3px] ps-1.5 pe-3 text-[11px] text-text-primary/65 @max-[21rem]:hidden">{meta}</span>}
+      </div>
       {open && (
-        <div id={detailsId} data-testid="status-card-details" className="space-y-2 border-t border-text-primary/10 px-2.5 pb-2.5 pt-2 text-xs leading-snug text-text-primary/80">
+        <div id={detailsId} data-testid="status-card-details" className="mx-3 space-y-2 border-t border-text-primary/10 pb-2.5 pt-2 text-xs leading-snug text-text-primary/80">
           {/* The schedule, where the line above had no room for it. */}
           <p className="m-0 [overflow-wrap:anywhere] @min-[17rem]:hidden"><bdi>{card.schedule}</bdi></p>
           <p data-testid="status-card-last-run" className="m-0 flex flex-wrap items-center justify-between gap-x-2 gap-y-1">

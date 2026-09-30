@@ -17,6 +17,7 @@
   },
   "routine": {
     "cron": "Cron:",
+    "label": "Rutina: {{name}}, {{state}}",
     "lastRun": "Última ejecución: {{result}}",
     "next": "Próxima {{when}}",
     "noRuns": "Aún no se ha ejecutado",
@@ -33,6 +34,12 @@
   },
   "task": {
     "branch": "Rama:",
+    "elapsed": {
+      "blocked": "bloqueada desde hace {{duration}}",
+      "queued": "en cola desde hace {{duration}}",
+      "running": "en curso desde hace {{duration}}",
+      "took": "tardó {{duration}}"
+    },
     "item": {
       "done": "Hecho",
       "failed": "Falló",
@@ -40,6 +47,8 @@
       "running": "En curso",
       "skipped": "Omitido"
     },
+    "label": "Tarea: {{title}}, {{status}}",
+    "labelProgress": "Tarea: {{title}}, {{status}}, {{progress}}%",
     "now": "Ahora:",
     "pr": "PR #{{number}}",
     "prNoNumber": "Pull request",

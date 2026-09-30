@@ -8,7 +8,7 @@ import { revealMessage } from "../../hooks/useRowWindow";
 import { jumpToMessage } from "../../lib/replies";
 import { RESULT_TONE, STATUS_TONE, activeTaskCount, cardEntries, panelModel, untilIn, type CardEntry, type CardRow } from "../../lib/statusCards";
 import { RoutineSummaryLine } from "./RoutineCard";
-import { PrLine, ProgressBar } from "./StatusCard";
+import { PrLine, ProgressBar, TaskElapsedLine } from "./StatusCard";
 
 /*
  * The Tasks button of a chat or group header (WISP 4xx · Status Cards): there only while the chat has a bot's card,
@@ -74,6 +74,8 @@ function TaskRow({ entry, from, onOpen }: { entry: CardEntry; from?: string; onO
   const card = entry.card;
   const tone = STATUS_TONE[card.status];
   const progress = taskProgress(card);
+  // How long it has been at it, or took (`taskElapsed`): not for a cancelled one.
+  const timed = !!card.startedAt && card.status !== "cancelled";
   return (
     <button type="button" data-panel-row data-testid="chat-tasks-item" data-card-id={card.id} data-kind="task" data-status={card.status} data-active={entry.active ? "" : undefined}
       onClick={onOpen} className={rowClass}>
@@ -88,13 +90,16 @@ function TaskRow({ entry, from, onOpen }: { entry: CardEntry; from?: string; onO
         <span className="flex w-full min-w-0 items-center gap-2 ps-4 text-xs text-text-muted">
           <ProgressBar card={card} className="flex-1" />
           {progress !== undefined && <span className="shrink-0 tabular-nums">{progress}%</span>}
+          {timed && <TaskElapsedLine card={card} end={entry.at} testId="chat-tasks-item-elapsed" className="shrink-0" />}
           {card.pr && <PrLine card={card} />}
         </span>
       )}
-      {!entry.active && (from || card.pr) && (
+      {!entry.active && (from || card.pr || timed) && (
         <span className="flex w-full min-w-0 items-center gap-1.5 ps-4 text-xs text-text-muted">
           {from && <bdi className="min-w-0 truncate">{from}</bdi>}
-          {from && card.pr && <span aria-hidden="true">·</span>}
+          {from && (card.pr || timed) && <span aria-hidden="true">·</span>}
+          {timed && <TaskElapsedLine card={card} end={entry.at} testId="chat-tasks-item-elapsed" className="shrink-0" />}
+          {timed && card.pr && <span aria-hidden="true">·</span>}
           {card.pr && <PrLine card={card} />}
         </span>
       )}

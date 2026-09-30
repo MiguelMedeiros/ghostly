@@ -1,4 +1,5 @@
-import { ACTIVE_TASK_STATUSES, type RoutineCard, type RunResult, type StatusCard, type TaskStatus } from "@ghostly/core";
+import { ACTIVE_TASK_STATUSES, taskProgress, type RoutineCard, type RunResult, type StatusCard, type TaskCard, type TaskStatus } from "@ghostly/core";
+import type { Translate } from "../contexts/I18nContext";
 
 /*
  * The status cards of a chat or group, as its Tasks panel lists them (WISP 4xx · Status Cards): the newest message of
@@ -162,4 +163,58 @@ export function untilIn(language: string): (at: number, now?: number) => string 
 /** Whether a message shows as its card: a kind this app draws. Anything else shows the message's text. */
 export function showsCard(card: StatusCard | undefined): card is StatusCard {
   return card?.kind === "task" || card?.kind === "routine";
+}
+
+/**
+ * "1 hr 20 min", "12 min", "2 days 3 hr" in the interface's language: how long something took, to the minute (at least
+ * one), in at most two units. Intl's own unit words (`NumberFormat`), as not every engine has `Intl.DurationFormat`
+ * yet. The formats are made once per language.
+ */
+export function durationIn(language: string): (ms: number) => string {
+  let units = DURATION_UNITS.get(language);
+  if (!units) {
+    const make = (unit: "day" | "hour" | "minute") => new Intl.NumberFormat(language, { style: "unit", unit, unitDisplay: "short" });
+    units = { day: make("day"), hour: make("hour"), minute: make("minute") };
+    DURATION_UNITS.set(language, units);
+  }
+  const { day, hour, minute } = units;
+  const two = (a: string, b: string | false) => (b ? `${a} ${b}` : a);
+  return (ms) => {
+    const minutes = Math.max(1, Math.floor(ms / 60_000));
+    if (minutes < 60) return minute.format(minutes);
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) return two(hour.format(hours), minutes % 60 > 0 && minute.format(minutes % 60));
+    return two(day.format(Math.floor(hours / 24)), hours % 24 > 0 && hour.format(hours % 24));
+  };
+}
+const DURATION_UNITS = new Map<string, Record<"day" | "hour" | "minute", Intl.NumberFormat>>();
+
+/** How long a task has been at it (`taskElapsed`): waiting, running or blocked so far, or how long it took. */
+export interface TaskElapsed { kind: "queued" | "running" | "blocked" | "took"; ms: number }
+
+/**
+ * How long a task has been at it, from when the bot said it started: while it waits, runs or is blocked, until now
+ * (the card says nothing of when its status changed); once done or failed, until its last update (`end`, the
+ * message's last change, when the card gives none). Nothing without a start, or for a cancelled task.
+ */
+export function taskElapsed(card: TaskCard, now: number, end?: number): TaskElapsed | undefined {
+  if (!card.startedAt || card.status === "cancelled") return undefined;
+  if (card.status === "done" || card.status === "failed") {
+    const until = card.updatedAt ?? end;
+    return until !== undefined && until >= card.startedAt ? { kind: "took", ms: until - card.startedAt } : undefined;
+  }
+  return { kind: card.status, ms: Math.max(0, now - card.startedAt) };
+}
+
+/** What a screen reader says of a card as a whole: "Task: Fix relay rotation, Running, 67%", "Routine: Nightly, Paused". */
+export function cardLabel(t: Translate, card: StatusCard): string {
+  if (card.kind === "routine") return t("cards.routine.label", { name: card.name, state: t(`cards.routine.state.${card.state}`) });
+  const progress = taskProgress(card);
+  const status = t(`cards.task.status.${card.status}`);
+  return progress === undefined ? t("cards.task.label", { title: card.title, status }) : t("cards.task.labelProgress", { title: card.title, status, progress });
+}
+
+/** A card's line where a message's text would be (a quote, the pinned bar, the chat list): its title, or ↻ and its name. */
+export function cardLine(card: StatusCard): string {
+  return card.kind === "task" ? card.title : `↻ ${card.name}`;
 }

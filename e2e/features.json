@@ -992,7 +992,7 @@
     "{apps/ui/src/components/chat/ChatTargets.tsx,apps/ui/src/hooks/useChatTargets.tsx}": ["chat.forward","app.pwa.share-target"],
     "{apps/ui/src/components/chat/DeliveryStatus.tsx,apps/ui/src/lib/delivery.ts}": ["chat.waiting","chat.paired.receipts","chat.paired.offline-send","chat.dht.*","delivery.hold.*","app.theme.bubbles","app.menus"],
     "{apps/ui/src/components/chat/Reactions.tsx,apps/ui/src/lib/reactions.ts}": ["chat.reactions","groups.reactions"],
-    "{apps/ui/src/components/chat/StatusCard.tsx,apps/ui/src/components/chat/TasksButton.tsx,apps/ui/src/lib/statusCards.ts}": ["chat.status-cards"],
+    "{apps/ui/src/components/chat/RoutineCard.tsx,apps/ui/src/components/chat/StatusCard.tsx,apps/ui/src/components/chat/TasksButton.tsx,apps/ui/src/hooks/useMinuteClock.ts,apps/ui/src/lib/statusCards.ts}": ["chat.status-cards"],
     "{apps/ui/src/components/composer/LinkPreviewDraft.tsx,apps/ui/src/hooks/useLinkPreviewDraft.ts,apps/ui/src/lib/linkPreviewFetch.ts,apps/ui/src/lib/parse/linkPreview.ts}": ["chat.link-preview.compose"],
     "{apps/ui/src/hooks/useCallDevices.ts,apps/ui/src/hooks/useMediaDevices.ts,apps/ui/src/hooks/useChosenSpeaker.ts,apps/ui/src/lib/mediaDevices.ts}": ["calls.*","settings.media","files.voice.record"],
     "{apps/ui/src/hooks/useChatScroll.ts,apps/ui/src/hooks/useRowWindow.ts,apps/ui/src/components/chat/JumpToLatest.tsx}": ["chat.scroll"],

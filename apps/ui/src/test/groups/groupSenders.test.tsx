@@ -103,6 +103,18 @@ describe("GroupChat: who wrote each message", () => {
     await screen.findByTestId("message-nick");
     expect(screen.getByTestId("message-nick").className).toContain(hue(BOT));
     expect(screen.getByTestId("sender-avatar")).toHaveAttribute("data-key", BOT);
+    // A card of its own, not a bubble: the name above it, outside it.
+    const surface = document.querySelector<HTMLElement>("[data-message-card]")!;
+    expect(surface).not.toContainElement(screen.getByTestId("message-nick"));
+    expect(document.querySelector("[data-message-bubble]")).toBeNull();
+  });
+
+  it("a card is one message of its sender's run: the name over the run's first, the picture beside its last", async () => {
+    const task = (id: string) => readStatusCard({ kind: "task", id, title: `Task ${id}`, status: "running" })!;
+    openGroup(active(), [stored({ member: BOT, text: "starting" }), stored({ member: BOT, text: "t1", card: task("t1") }), stored({ member: BOT, text: "t2", card: task("t2") }),
+      stored({ member: ANA, text: "nice" }), stored({ member: BOT, text: "t3", card: task("t3") })]);
+    await screen.findByText("nice");
+    expect(rows()).toEqual(["Builder+name:spacer", "Builder:spacer", "Builder:avatar", "Ana+name:avatar", "Builder+name:avatar"]);
   });
 
   it("a bot's routines folded into one row: its colour, and one picture per run, counting the row as one message", async () => {
