@@ -33,16 +33,29 @@ export function useViewportHeight() {
 
     let width = viewport.width;
     let tallest = viewport.height;
+    // The shortcut bar seen while this field has had the focus, and whether the screen has turned since.
+    let bar = 0;
+    let turned = false;
+    let visible = viewport.height;
     const update = () => {
+      const typing = typedInto(document.activeElement);
+      if (!typing) { bar = 0; turned = false; }
       // A new width is a rotation (or a resized window): what was tallest before says nothing now.
       if (viewport.width !== width) {
         width = viewport.width;
         tallest = viewport.height;
+        if (bar) turned = true;
       }
       tallest = Math.max(tallest, viewport.height);
-      document.documentElement.style.setProperty("--app-height", `${viewport.height}px`);
-      const covered = Math.max(window.innerHeight - viewport.height, tallest - viewport.height);
-      const keyboard = covered > KEYBOARD || (covered > SHORTCUT_BAR && typedInto(document.activeElement));
+      const measured = Math.max(window.innerHeight - viewport.height, tallest - viewport.height);
+      let covered = measured;
+      if (typing && measured > SHORTCUT_BAR && measured <= KEYBOARD) bar = measured;
+      // Once the screen has turned with the bar up, iOS reports the whole height again a moment later and keeps it,
+      // while the bar stays over the message field until the field loses the focus (iOS 26 Simulator, iPhone).
+      else if (typing && turned && measured <= SHORTCUT_BAR) covered = bar;
+      visible = viewport.height - (covered - measured);
+      document.documentElement.style.setProperty("--app-height", `${visible}px`);
+      const keyboard = covered > KEYBOARD || (covered > SHORTCUT_BAR && typing);
       // With the keyboard up the home indicator is covered, so its inset must not pad the input.
       document.documentElement.dataset.keyboard = String(keyboard);
       // iOS scrolls the page to reveal the focused input; the shell already fits.
@@ -56,7 +69,7 @@ export function useViewportHeight() {
       const field = document.activeElement;
       if (!typedInto(field)) return;
       const box = field.getBoundingClientRect();
-      if (box.top < 0 || box.bottom > viewport.height) field.scrollIntoView({ block: "center" });
+      if (box.top < 0 || box.bottom > visible) field.scrollIntoView({ block: "center" });
     };
     update();
     viewport.addEventListener("resize", update);

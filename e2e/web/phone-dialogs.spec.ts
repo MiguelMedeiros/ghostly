@@ -101,3 +101,26 @@ for (const screen of [{ name: "an iPad mini on its side", width: 1133, height: 7
     await expect.poll(async () => { const box = (await input.boundingBox())!; return box.y + box.height > screen.height - screen.bar; }).toBe(true);
   });
 }
+
+test("an iPhone with a hardware keyboard: the message field stays above the shortcut bar when the phone turns", { tag: ["@feature:app.mobile-layout", "@feature:app.responsive"] }, async ({ peer }) => {
+  // Turned with the bar up, iOS reports the whole screen again a moment later and keeps it while the bar stays over
+  // the field (iOS 26 Simulator, installed app: 402 of 402 on its side with the bar showing; r6c saw "68px short").
+  const BAR = 68;
+  const { page } = await peer("turning", { mobile: true, viewport: { width: 402, height: 874 } });
+  await iosKeyboard(page);
+  await page.getByTitle("New Chat").first().click();
+  const input = page.getByPlaceholder("Message…");
+  await input.focus();
+  await keyboard(page, BAR);
+  await within(input, 874 - BAR);
+
+  await page.setViewportSize({ width: 874, height: 402 });
+  await keyboard(page, 0);
+  await within(input, 402 - BAR);
+  await page.setViewportSize({ width: 402, height: 874 });
+  await within(input, 874 - BAR);
+
+  // Done: the field loses the focus and the bar goes.
+  await input.blur();
+  await expect.poll(async () => { const box = (await input.boundingBox())!; return box.y + box.height > 874 - BAR; }).toBe(true);
+});
