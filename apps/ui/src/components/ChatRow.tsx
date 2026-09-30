@@ -18,6 +18,7 @@ import { authorName, groupReadAt, groupStatusText } from "../lib/groups";
 import { reactionNoteText } from "../lib/reactions";
 import type { ChatListDensity } from "../lib/settings";
 import type { ChatMessage } from "../lib/types";
+import type { Translate } from "../locales/translate";
 
 /*
  * The rows of the chat list, drawn the way messengers draw theirs: the name and the time on one line, the last
@@ -177,6 +178,12 @@ export interface ChatRowProps {
   deleteLabel: string;
 }
 
+/** A join notice as the chat's line says it (MessageBubble): mine, or the contact by the name the list shows. */
+function joinPreview(p: ChatRowProps, joiner: string | undefined, t: Translate): string {
+  if (joiner && joiner !== p.peerPubKey) return t("chat.youJoined");
+  return `${p.named ? p.label : p.keyLabel} ${t("chat.joined")}`;
+}
+
 /** A 1:1 chat in the list. */
 export function ChatRow(p: ChatRowProps) {
   const { t } = useI18n();
@@ -232,7 +239,7 @@ export function ChatRow(p: ChatRowProps) {
           : p.lastMessage
           ? <span className={p.unread > 0 ? "text-text-secondary font-medium" : "text-text-muted"}>
               {p.lastMessage.sender === "me" && <DeliveryMark delivery={p.lastMessage.delivery} />}
-              {previewText(p.lastMessage.text, t)}
+              {p.lastMessage.systemEvent?.type === "join" ? joinPreview(p, p.lastMessage.systemEvent.pubKey, t) : previewText(p.lastMessage.text, t)}
             </span>
           : <span className="italic text-text-muted">{t("chat.noMessages")}</span>}
         status={(muted || p.pinned) && <>

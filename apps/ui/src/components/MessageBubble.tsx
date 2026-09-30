@@ -748,13 +748,16 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
   );
 
   if (isSystem && message.systemEvent?.type === "join") {
-    const pubKeyShort = message.systemEvent.pubKey
-      ? publicKeyLabel(message.systemEvent.pubKey)
-      : "";
-    
+    const joiner = message.systemEvent.pubKey ?? "";
+    // Both sides announce themselves (useChat.ts), so a 1:1 chat has two lines: mine says so, the contact's names
+    // them as the chat does. Only a contact with no name yet is shown by a short key.
+    const mine = !!joiner && !!peerPubKey && joiner !== peerPubKey;
+    const name = mine ? "" : peerNick || message.nick || "";
+    const pubKeyShort = joiner ? publicKeyLabel(joiner) : "";
+
     return (
       <div {...rowProps} data-message-row data-sender="system" className={`group flex items-center justify-center gap-1 mb-3.5 message-row-x ${enter}`}>
-        <div className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs bg-blue-500/10 text-link ${details ? "outline-2 outline-accent outline-offset-2" : ""}`}>
+        <div data-testid="join-line" title={joiner || undefined} className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs bg-blue-500/10 text-link ${details ? "outline-2 outline-accent outline-offset-2" : ""}`}>
           <svg
             width="14"
             height="14"
@@ -769,10 +772,12 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
             <polyline points="10 17 15 12 10 7" />
             <line x1="15" y1="12" x2="3" y2="12" />
           </svg>
-          <span>
-            <span className="font-mono font-semibold">{pubKeyShort}</span>
-            {" "}{t("chat.joined")}
-          </span>
+          {mine ? <span>{t("chat.youJoined")}</span> : (
+            <span>
+              {name ? <span className="font-semibold" dir="auto">{name}</span> : <span className="font-mono font-semibold">{pubKeyShort}</span>}
+              {" "}{t("chat.joined")}
+            </span>
+          )}
           <span className="text-text-muted text-[10px]">{time}</span>
         </div>
         {!choosing && <MessageMenu onDelete={onDelete} onDetails={openDetails} align="right" />}

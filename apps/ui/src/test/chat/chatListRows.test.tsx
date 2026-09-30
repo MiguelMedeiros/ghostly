@@ -86,6 +86,14 @@ describe("the chat list's rows (compact, the default)", () => {
     expect(within(rowOf("Hal")).queryByTestId("chat-row-unread")).not.toBeInTheDocument();
   });
 
+  it("says a join as the chat's line does, in the app's language, not the notice's English text", () => {
+    saveSession(chat("j", { nick: "Jo", messages: [message({ text: "👋 Jo joined", sender: "system", systemEvent: { type: "join", pubKey: key("j") } })] }));
+    saveSession(chat("k", { nick: "Kim", messages: [message({ text: "👋 Me joined", sender: "system", systemEvent: { type: "join", pubKey: key("z") } })] }));
+    renderApp(<UpdateProvider><Sidebar /></UpdateProvider>, { language: "pt" });
+    expect(within(rowOf("Jo")).getByTestId("chat-row-preview")).toHaveTextContent(/^Jo entrou na conversa$/);
+    expect(within(rowOf("Kim")).getByTestId("chat-row-preview")).toHaveTextContent(/^Você entrou na conversa$/);
+  });
+
   it("caps the unread count at 99+", () => {
     saveSession(chat("f", { nick: "Fay", messages: Array.from({ length: 120 }, (_, i) => message({ id: `f${i}` })) }));
     list();
