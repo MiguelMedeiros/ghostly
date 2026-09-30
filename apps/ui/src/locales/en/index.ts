@@ -16,6 +16,7 @@ import invite from "./invite.json";
 import join from "./join.json";
 import lockScreen from "./lockScreen.json";
 import mentions from "./mentions.json";
+import messageDetails from "./messageDetails.json";
 import mute from "./mute.json";
 import network from "./network.json";
 import pairing from "./pairing.json";
@@ -49,6 +50,7 @@ export default {
   join,
   lockScreen,
   mentions,
+  messageDetails,
   mute,
   network,
   pairing,

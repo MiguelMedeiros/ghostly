@@ -47,7 +47,7 @@ export function MessageDetailsPanel({ message, linkId, picture, onClose, returnF
     return () => { back?.focus({ preventScroll: true }); };
   }, [returnFocus]);
 
-  const model = useMemo(() => buildDetails(message, view, { picture }), [message, view, picture]);
+  const model = useMemo(() => buildDetails(message, view, { picture, t }), [message, view, picture, t]);
   const mine = message.sender === "me";
   const excerpt = message.file ? message.file.name : message.text.length > 90 ? `${message.text.slice(0, 90)}…` : message.text;
 
@@ -77,8 +77,8 @@ export function MessageDetailsPanel({ message, linkId, picture, onClose, returnF
         </button>
       </div>
 
-      {/* Technical words, in English and left to right whatever the app's language, as code is. */}
-      <div dir="ltr" className="flex-1 overflow-y-auto px-4 py-3 text-start">
+      {/* In the app's language and its direction; a value that is data (an id, a cipher, an engine state) stays as it is. */}
+      <div className="flex-1 overflow-y-auto px-4 py-3 text-start">
         <p data-testid="message-details-summary" className="m-0 mb-3 text-[13px] leading-snug text-text-primary">{model.summary}</p>
         {model.sections.map(section => (
           <section key={section.id} data-testid="message-details-section" data-section={section.id} className="mb-3">
@@ -103,7 +103,8 @@ export function MessageDetailsPanel({ message, linkId, picture, onClose, returnF
 
 function Row({ row, copyHint, copied }: { row: DetailRow; copyHint: string; copied: string }) {
   const [done, setDone] = useState(false);
-  const value = <span className={`message-details-value ${row.mono ? "font-mono" : ""}`}>{done ? copied : row.value}</span>;
+  const data = !done && (row.mono || row.raw);
+  const value = <span className={`message-details-value ${row.mono ? "font-mono" : ""}`} translate={data ? "no" : undefined} dir={data ? row.mono ? "ltr" : "auto" : undefined}>{done ? copied : row.value}</span>;
   return <>
     <dt data-testid="message-details-label" className="text-text-muted">{row.label}</dt>
     <dd data-testid="message-details-row" data-label={row.label} data-value={row.copy ?? row.value} className="m-0 min-w-0 text-text-secondary text-start">
