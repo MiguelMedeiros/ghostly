@@ -494,6 +494,7 @@
       "reaches": "Ce qui leur est payé ensuite arrive toujours dans {{source}} ; Ghostly ne le voit simplement plus.",
       "reachesWallet": "Ce qui leur est payé ensuite arrive toujours dans le portefeuille ; Ghostly ne le voit simplement plus."
     },
+    "and": "{{first}} et {{second}}",
     "ask": "Supprimer {{label}}…",
     "awaiting": "Argent encore attendu",
     "backupFirst": "Sauvegardez d'abord",
@@ -512,6 +513,10 @@
       "waitsReal": "Je comprends : tout ce qui est payé à ses demandes et factures ouvertes après sa suppression est perdu, et c'est de l'argent réel."
     },
     "copyTokens": "Copier la sauvegarde de l'ecash",
+    "gas": {
+      "mainnet": "{{amount}} ETH",
+      "testnet": "{{amount}} ETH de test"
+    },
     "held": {
       "elsewhere": "Votre argent reste où il est : Ghostly oublie seulement comment le joindre. Vous pourrez le reconnecter plus tard.",
       "elsewhereIn": "Votre argent reste dans {{source}} : Ghostly oublie seulement comment le joindre. Vous pourrez le reconnecter plus tard.",
@@ -522,6 +527,13 @@
     },
     "hintDevice": "Ses clés et ses réglages quittent cet appareil. Les autres portefeuilles restent tels quels.",
     "hintElsewhere": "Ghostly oublie comment le joindre ; l'argent reste où il est.",
+    "item": {
+      "invoice": "Une facture de {{amount}}, pas encore payée",
+      "paid": "{{amount}} payés à une facture, pas encore récupérés auprès de la mint",
+      "request": "Une demande de {{amount}} dans une discussion, toujours ouverte",
+      "sent": "{{amount}} en ecash que vous avez envoyés, pas encore récupérés",
+      "unclaimed": "{{amount}} que la mint dit avoir émis pour une facture, jamais reçus ici"
+    },
     "label": "Supprimer ce portefeuille",
     "noBackup": "Ghostly ne peut plus afficher la phrase de récupération de ce portefeuille : seule la phrase notée à sa création permet de récupérer cet argent.",
     "noTokens": "Il n'y a pas d'ecash à copier.",

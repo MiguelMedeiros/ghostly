@@ -45,13 +45,23 @@ export interface RemovalItem {
 }
 
 const UNFINISHED = new Set(["pending", "submitted", "unknown"]);
-const sats = (n: number, network: WalletNetwork) => `${n.toLocaleString("en-US")} ${network === "testnet" ? "test sats" : "sats"}`;
-const known = (amount: number, network: WalletNetwork) => ({ empty: amount <= 0, text: sats(Math.max(0, amount), network) });
-/** A self-custodial source keeps its recovery phrase sealed with it (Breez, a BDK wallet): the money is on this device. */
-const phraseHeld = (secrets: string[] | undefined) => !!secrets?.includes("mnemonic");
 
-/** The parts of a network's view a removal reads. */
-export type RemovalView = Partial<Pick<NetworkWalletsView, "balance" | "lightning" | "lightnings" | "bitcoin" | "ark" | "bark" | "spark" | "fedimint" | "usdt" | "awaiting">>;
+/**
+ * How a removal writes what it holds and waits for: English by default, the app's language when the Wallet page
+ * passes its own (the dialog is where a person agrees to lose money, and reads it in their language).
+ */
+export interface RemovalWords {
+  /** "1,250 test sats". */
+  sats(amount: number, network: WalletNetwork): string;
+  /** A token amount in base units, with its unit: "12.5 USDT", "1 TEST-USDT". */
+  token(units: string, decimals: number, network: WalletNetwork): string;
+  /** Gas, in wei: "0.01 ETH", "0.01 test ETH". */
+  gas(wei: string, network: WalletNetwork): string;
+  /** One thing it waits for, around its amount in words: "An invoice for 50,000 sats, not paid yet". */
+  item(kind: WalletAwaitingView["kind"], amount: string): string;
+  /** Two amounts held together: "12.5 USDT and 0.01 ETH". */
+  and(first: string, second: string): string;
+}
 
 const ITEM: Record<WalletAwaitingView["kind"], (amount: string) => string> = {
   request: (a) => `A request for ${a} in a chat, still open`,
@@ -61,14 +71,26 @@ const ITEM: Record<WalletAwaitingView["kind"], (amount: string) => string> = {
   sent: (a) => `${a} in ecash you sent, not taken yet`,
 };
 
-function items(type: WalletType, network: WalletNetwork, view: RemovalView | undefined, card?: string) {
-  const amount = (n: number) => type === "usdt"
-    ? `${formatPaymentAmount(String(n), view?.usdt?.decimals ?? 6)} ${network === "testnet" ? "TEST-USDT" : "USDT"}`
-    : sats(n, network);
+export const ENGLISH_REMOVAL: RemovalWords = {
+  sats: (n, network) => `${n.toLocaleString("en-US")} ${network === "testnet" ? "test sats" : "sats"}`,
+  token: (units, decimals, network) => `${formatPaymentAmount(units, decimals)} ${network === "testnet" ? "TEST-USDT" : "USDT"}`,
+  gas: (wei, network) => `${formatPaymentAmount(wei, 18)} ${network === "testnet" ? "test ETH" : "ETH"}`,
+  item: (kind, amount) => ITEM[kind](amount),
+  and: (first, second) => `${first} and ${second}`,
+};
+const knownIn = (amount: number, network: WalletNetwork, words: RemovalWords) => ({ empty: amount <= 0, text: words.sats(Math.max(0, amount), network) });
+/** A self-custodial source keeps its recovery phrase sealed with it (Breez, a BDK wallet): the money is on this device. */
+const phraseHeld = (secrets: string[] | undefined) => !!secrets?.includes("mnemonic");
+
+/** The parts of a network's view a removal reads. */
+export type RemovalView = Partial<Pick<NetworkWalletsView, "balance" | "lightning" | "lightnings" | "bitcoin" | "ark" | "bark" | "spark" | "fedimint" | "usdt" | "awaiting">>;
+
+function items(type: WalletType, network: WalletNetwork, view: RemovalView | undefined, words: RemovalWords, card?: string) {
+  const amount = (n: number) => type === "usdt" ? words.token(String(n), view?.usdt?.decimals ?? 6, network) : words.sats(n, network);
   // Lightning through the mints is the Cashu wallet's: what it waits for is listed there.
   // A Lightning card's own: what went through it (one of several), or through none named.
   const mine = (view?.awaiting ?? []).filter((a) => a.type === type && (card === undefined || a.card === undefined || a.card === card));
-  const item = (a: WalletAwaitingView): RemovalItem => ({ kind: a.kind, text: ITEM[a.kind](amount(a.amount)), amount: amount(a.amount), ...(a.paymentId ? { paymentId: a.paymentId } : {}) });
+  const item = (a: WalletAwaitingView): RemovalItem => ({ kind: a.kind, text: words.item(a.kind, amount(a.amount)), amount: amount(a.amount), ...(a.paymentId ? { paymentId: a.paymentId } : {}) });
   // Cashu sent from a mint comes back once the mint is added again; Fedimint notes are taken back through the removed client only.
   const returns = (a: WalletAwaitingView) => a.kind === "sent" && type === "cashu";
   return { awaiting: mine.filter((a) => !returns(a)).map(item), returnable: mine.filter(returns).map(item) };
@@ -78,52 +100,50 @@ function items(type: WalletType, network: WalletNetwork, view: RemovalView | und
  * What removing the `type` wallet of `network` takes away. `intents`: the profile's payments (the wallet view's
  * `intents`). `card`: the Lightning card (absent: the network's default for receiving).
  */
-export function walletRemoval(type: WalletType, network: WalletNetwork, view: RemovalView | undefined, intents: readonly PaymentReview[] = [], card?: string): WalletRemoval {
+export function walletRemoval(type: WalletType, network: WalletNetwork, view: RemovalView | undefined, intents: readonly PaymentReview[] = [], card?: string, words: RemovalWords = ENGLISH_REMOVAL): WalletRemoval {
+  const known = (amount: number) => knownIn(amount, network, words);
   const lnCard = type === "lightning" ? view?.lightnings?.find((c) => (card === undefined ? c.receive : c.card === card)) : undefined;
-  const base = { type, network, ...items(type, network, view, lnCard?.card ?? card), ...(lnCard ? { card: lnCard.card } : card !== undefined ? { card } : {}) };
+  const base = { type, network, ...items(type, network, view, words, lnCard?.card ?? card), ...(lnCard ? { card: lnCard.card } : card !== undefined ? { card } : {}) };
   const pending = intents.filter((i) => i.method === type && UNFINISHED.has(i.state) && walletNetworkOf(i.network) === network).length;
   switch (type) {
-    case "cashu": return { ...base, custody: "device", held: known(view?.balance ?? 0, network), backup: "tokens", pending };
+    case "cashu": return { ...base, custody: "device", held: known(view?.balance ?? 0), backup: "tokens", pending };
     case "lightning": {
       const ln = lnCard ?? view?.lightning;
       // The mints' card holds nothing of its own (its ecash is the Cashu wallet's): it goes alone next to other cards.
       const others = (view?.lightnings ?? []).some((c) => c.card !== lnCard?.card);
-      if (!ln?.providerId || ln.providerId === "cashu-mint") return { ...base, custody: "elsewhere", held: known(0, network), backup: "none", pending: 0, ...(others ? {} : { comesWith: "cashu" as const }), awaiting: [], returnable: [] };
+      if (!ln?.providerId || ln.providerId === "cashu-mint") return { ...base, custody: "elsewhere", held: known(0), backup: "none", pending: 0, ...(others ? {} : { comesWith: "cashu" as const }), awaiting: [], returnable: [] };
       const device = phraseHeld(ln.secrets);
-      return { ...base, custody: device ? "device" : "elsewhere", held: ln.status === "ready" && ln.balance !== undefined ? known(ln.balance, network) : device ? "unknown" : known(0, network), backup: "none", pending };
+      return { ...base, custody: device ? "device" : "elsewhere", held: ln.status === "ready" && ln.balance !== undefined ? known(ln.balance) : device ? "unknown" : known(0), backup: "none", pending };
     }
     case "bitcoin": {
       const bt = view?.bitcoin, device = phraseHeld(bt?.secrets);
       const total = (bt?.balance ?? 0) + (bt?.unconfirmed ?? 0);
-      return { ...base, custody: device ? "device" : "elsewhere", held: bt?.status === "ready" ? known(total, network) : device ? "unknown" : known(0, network), backup: "none", pending };
+      return { ...base, custody: device ? "device" : "elsewhere", held: bt?.status === "ready" ? known(total) : device ? "unknown" : known(0), backup: "none", pending };
     }
     case "arkade": {
       const ark = view?.ark, open = !!ark?.configured && !ark.locked;
-      return { ...base, custody: "device", held: open ? known(ark!.balance + (ark!.recoverable ?? 0) + (ark!.sweeping ?? 0) + (ark!.small ?? 0) + (ark!.incoming ?? 0), network) : "unknown", backup: "phrase", pending };
+      return { ...base, custody: "device", held: open ? known(ark!.balance + (ark!.recoverable ?? 0) + (ark!.sweeping ?? 0) + (ark!.small ?? 0) + (ark!.incoming ?? 0)) : "unknown", backup: "phrase", pending };
     }
     case "bark": {
       const bark = view?.bark, open = !!bark?.configured && !bark.locked;
-      return { ...base, custody: "device", held: open ? known(bark!.balance, network) : "unknown", backup: "phrase", pending };
+      return { ...base, custody: "device", held: open ? known(bark!.balance) : "unknown", backup: "phrase", pending };
     }
     case "spark": {
       const spark = view?.spark, open = !!spark?.configured && !spark.locked;
-      return { ...base, custody: "device", held: open ? known(spark!.balance, network) : "unknown", backup: "phrase", pending };
+      return { ...base, custody: "device", held: open ? known(spark!.balance) : "unknown", backup: "phrase", pending };
     }
     case "fedimint": {
       const fm = view?.fedimint, federations = fm?.federations ?? [];
       const open = federations.every((f) => f.status === "ready");
-      return { ...base, custody: "device", held: open ? known(fm?.balance ?? 0, network) : "unknown", backup: "phrase", pending };
+      return { ...base, custody: "device", held: open ? known(fm?.balance ?? 0) : "unknown", backup: "phrase", pending };
     }
     case "usdt": {
       const usdt = view?.usdt;
       if (!usdt?.configured || usdt.locked) return { ...base, custody: "device", held: "unknown", backup: "phrase", pending };
       const token = BigInt(usdt.balance || "0"), gas = BigInt(usdt.gasBalance || "0");
-      const test = network === "testnet";
-      const parts = [
-        ...(token > 0n || gas === 0n ? [`${formatPaymentAmount(usdt.balance || "0", usdt.decimals ?? 6)} ${test ? "TEST-USDT" : "USDT"}`] : []),
-        ...(gas > 0n ? [`${formatPaymentAmount(usdt.gasBalance, 18)} ${test ? "test ETH" : "ETH"}`] : []),
-      ];
-      return { ...base, custody: "device", held: { empty: token === 0n && gas === 0n, text: parts.join(" and ") }, backup: "phrase", pending };
+      const held = token > 0n || gas === 0n ? words.token(usdt.balance || "0", usdt.decimals ?? 6, network) : undefined;
+      const fuel = gas > 0n ? words.gas(usdt.gasBalance, network) : undefined;
+      return { ...base, custody: "device", held: { empty: token === 0n && gas === 0n, text: held && fuel ? words.and(held, fuel) : (held ?? fuel)! }, backup: "phrase", pending };
     }
   }
 }
