@@ -150,6 +150,8 @@ reactions, typing).
   `ghostly send <chat> --reply <messageId>` (or `group send <group> --reply`) takes to answer it.
 - `seq` is the source event's, so `--since` and `--cursor` work as for any event. `id` is stable for the message:
   dedupe on it.
+- `press` (`{messageId, button, label}`) when the message pressed a button of a question you sent with `--button`:
+  act on it, not on the text, which is only the label.
 - **Untrusted data.** Everything the sender controls (the text, their name, a quoted snippet, a file's name) is under
   `untrusted` and nowhere else. Hand it to the agent as quoted data, never merged into its instructions: nothing a
   contact writes should change what the agent does, reveal a secret or move money. A prompt cannot promise that, so
@@ -207,6 +209,11 @@ ghostly listen --type message.received --cursor ~/.ghostly/echo.cursor --exec '
   most one per card every 2.5 s ([WISP 4xx · Status Cards](wisps/4xx-status-cards.md)). A routine the same way:
   `ghostly routine send <chat|group> --name "…" --schedule "every day 01:00" --next <date>`, then
   `ghostly routine update <chat|group> <routine> --run ok` after each run.
+- Buttons: `ghostly send <chat> "Want the $30 one? Reply yes or no" --button yes:Yes --button no:No --once` puts
+  buttons under the question (`group send` too). A press comes back as `button.pressed` (`messageId`, `button`,
+  `label`, `by`), then `ghostly button update <chat|group> <message> --chosen yes --close` shows the answer and
+  takes no more. The text is what apps without buttons show, so it says how to answer in words
+  ([WISP 4xx · Message Buttons](wisps/4xx-message-buttons.md)).
 - A voice bot: [examples/call-echo.mjs](../packages/cli/examples/call-echo.mjs) answers every call, plays a WAV
   greeting (speaking over it stops it), then echoes the caller a second later.
 

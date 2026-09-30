@@ -1,6 +1,6 @@
 # WISP numbering and compatibility
 
-All 54 specifications have the document status Draft; each says in its header what is implemented, and the [index](README.md) lists them all. Family numbering was approved on 2026-09-22. This migration is editorial: wire capability names, versions, storage keys and implemented protocol behavior are unchanged.
+All 55 specifications have the document status Draft; each says in its header what is implemented, and the [index](README.md) lists them all. Family numbering was approved on 2026-09-22. This migration is editorial: wire capability names, versions, storage keys and implemented protocol behavior are unchanged.
 
 ## Independent families
 
@@ -64,6 +64,7 @@ Generated from [numbering.json](numbering.json); edit that source instead of thi
 | 403 | [403](403-dht-text.md) |
 | none | [4xx · store-and-forward · number to be defined](4xx-store-and-forward.md) |
 | none | [4xx · status-cards · number to be defined](4xx-status-cards.md) |
+| none | [4xx · message-buttons · number to be defined](4xx-message-buttons.md) |
 | 14 | [500](500-files.md) |
 | 501 | [501](501-paired-files.md) |
 | 502 | [502](502-legacy-files.md) |

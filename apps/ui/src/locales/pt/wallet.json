@@ -494,6 +494,7 @@
       "reaches": "O que for pago a eles depois ainda chega a {{source}}; o Ghostly só deixa de ver.",
       "reachesWallet": "O que for pago a eles depois ainda chega à carteira; o Ghostly só deixa de ver."
     },
+    "and": "{{first}} e {{second}}",
     "ask": "Remover {{label}}…",
     "awaiting": "Ainda esperando dinheiro",
     "backupFirst": "Faça backup primeiro",
@@ -512,6 +513,10 @@
       "waitsReal": "Entendo: o que for pago aos pedidos e faturas abertos dela depois da remoção se perde, e é dinheiro real."
     },
     "copyTokens": "Copiar backup do ecash",
+    "gas": {
+      "mainnet": "{{amount}} ETH",
+      "testnet": "{{amount}} ETH de teste"
+    },
     "held": {
       "elsewhere": "Seu dinheiro fica onde está: o Ghostly só esquece como alcançá-lo. Você pode conectar de novo depois.",
       "elsewhereIn": "Seu dinheiro fica em {{source}}: o Ghostly só esquece como alcançá-lo. Você pode conectar de novo depois.",
@@ -522,6 +527,13 @@
     },
     "hintDevice": "As chaves e configurações dela saem deste dispositivo. As outras carteiras continuam como estão.",
     "hintElsewhere": "O Ghostly esquece como alcançá-la; o dinheiro fica onde está.",
+    "item": {
+      "invoice": "Uma fatura de {{amount}}, ainda não paga",
+      "paid": "{{amount}} pagos a uma fatura, ainda não resgatados do mint",
+      "request": "Um pedido de {{amount}} em uma conversa, ainda aberto",
+      "sent": "{{amount}} em ecash que você enviou, ainda não resgatados",
+      "unclaimed": "{{amount}} que o mint diz ter emitido para uma fatura, nunca recebidos aqui"
+    },
     "label": "Remover esta carteira",
     "noBackup": "O Ghostly não pode mostrar a frase de recuperação desta carteira de novo: só a frase que você anotou ao criá-la traz este dinheiro de volta.",
     "noTokens": "Não há ecash para copiar.",

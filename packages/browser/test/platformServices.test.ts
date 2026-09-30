@@ -272,6 +272,11 @@ describe("wallet and settings", () => {
     ]);
   });
 
+  it("adds a mint from a network's Cashu wallet with that network, for the engine to check", async () => {
+    await services.wallet.forNetwork("testnet").addMint("https://mint.example");
+    expect(engine.calls).toEqual([["walletAddMint", { url: "https://mint.example", primary: false, network: "testnet" }]]);
+  });
+
   it("unwraps the peer's answers to what the UI expects", async () => {
     engine.answers = { walletPayQuote: { paid: true }, walletReceiveToken: { amount: 42 }, walletInspectCashu: { inspection: { amount: 3 } } };
     expect(await services.wallet.payQuote("q", "m")).toBe(true);

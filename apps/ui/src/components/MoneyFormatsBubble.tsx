@@ -14,7 +14,7 @@ import { useI18n } from "../contexts/I18nContext";
 import { moneyLabel, satsIn } from "./NetworkTag";
 import { PaymentReview } from "./PaymentReview";
 import { ONCHAIN_FEE_CAP } from "./walletCardData";
-import { formatAmount, formatTokenAmount } from "../lib/amount";
+import { decimalInput, formatAmount, formatTokenAmount } from "../lib/amount";
 
 const button =
   "px-3 py-1.5 max-md:min-h-11 bg-accent text-on-accent rounded-lg text-xs font-bold hover:bg-accent-hover transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed";
@@ -176,11 +176,11 @@ function PayStep({ wallet, fixedAmount, unit, defaultFee, feeUnit, parse, prepar
     <div className="basis-full space-y-1.5" data-testid={`${testId}-pay-form`}>
       {fixedAmount === undefined && (
         <label className="block text-[12px]">{t("payments.formats.amount", { unit })}
-          <input aria-label={t("payments.formats.amountAria", { unit })} inputMode="decimal" className={field} value={amount} onChange={(e) => setAmount(e.target.value.replace(/[^0-9.]/g, ""))} data-testid="money-pay-amount" />
+          <input aria-label={t("payments.formats.amountAria", { unit })} inputMode="decimal" className={field} value={amount} onChange={(e) => setAmount(decimalInput(e.target.value, t.language))} data-testid="money-pay-amount" />
         </label>
       )}
       <label className="block text-[12px]">{t("payments.formats.maxFee", { unit: feeUnit })}
-        <input aria-label={t("payments.formats.maxFeeAria", { unit: feeUnit })} inputMode="decimal" className={field} value={fee} onChange={(e) => setFee(e.target.value.replace(/[^0-9.]/g, ""))} />
+        <input aria-label={t("payments.formats.maxFeeAria", { unit: feeUnit })} inputMode="decimal" className={field} value={fee} onChange={(e) => setFee(decimalInput(e.target.value, t.language))} />
       </label>
       <div className="flex flex-wrap gap-1.5">
         <button

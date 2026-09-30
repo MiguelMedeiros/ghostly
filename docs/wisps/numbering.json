@@ -333,6 +333,15 @@
     "numberAssignment": "unassigned"
   },
   {
+    "oldId": "none",
+    "id": "406",
+    "oldFile": "4xx-message-buttons.md",
+    "file": "4xx-message-buttons.md",
+    "kind": "Profile",
+    "displayNumber": "4xx",
+    "numberAssignment": "unassigned"
+  },
+  {
     "oldId": "14",
     "id": "500",
     "oldFile": "14-files.md",

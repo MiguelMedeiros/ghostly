@@ -1,0 +1,59 @@
+name: Playwright Chromium
+description: >-
+  Chromium and its headless shell for the e2e suites, from a cache per Playwright version, with apt only when ldd
+  finds a library the runner image lacks. Run after npm ci.
+
+# It used to be `playwright install --with-deps chromium`, whose apt-get update and install is the part that varies
+# (19 s to 3 minutes on the E2E (full) shards; 4 to 9 minutes on one website shard in ten, #803). The runner images
+# have Google Chrome, so they have the libraries Chromium loads; all --with-deps adds there is fonts (CJK, Thai,
+# unifont, X11 bitmaps), and no e2e spec compares screenshots.
+# Both builds, not the shell alone: the extension and the web push specs launch full Chromium (channel "chromium"),
+# the rest the headless shell.
+# Restore and save apart, not actions/cache: that one saves only when the job passes, and a failed e2e job would
+# leave every next run downloading again.
+runs:
+  using: composite
+  steps:
+    - name: Playwright version
+      id: version
+      shell: bash
+      run: echo "version=$(node -p "require('playwright-core/package.json').version")" >> "$GITHUB_OUTPUT"
+
+    - name: Restore Chromium
+      id: cache
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ~/.cache/ms-playwright
+        key: ${{ runner.os }}-${{ runner.arch }}-playwright-chromium-${{ steps.version.outputs.version }}
+
+    - name: Install Chromium
+      shell: bash
+      run: |
+        echo "$(date +%T) install (cached: ${{ steps.cache.outputs.cache-hit == 'true' }})"
+        status=0
+        npx playwright install chromium > "$RUNNER_TEMP/chromium.log" 2>&1 || status=$?
+        # The progress bars are one line per percent.
+        grep -v "■\|% of " "$RUNNER_TEMP/chromium.log" || true
+        [ "$status" = 0 ] || exit "$status"
+        echo "$(date +%T) installed"
+        browsers=~/.cache/ms-playwright
+        chrome=$(ls -d "$browsers"/chromium-*/chrome-linux*/chrome 2>/dev/null | tail -n 1)
+        shell=$(ls -d "$browsers"/chromium_headless_shell-*/chrome-headless-shell-linux*/chrome-headless-shell 2>/dev/null | tail -n 1)
+        echo "chrome: ${chrome:-missing}"
+        echo "headless shell: ${shell:-missing}"
+        missing=false
+        for binary in "$chrome" "$shell"; do
+          if [ ! -x "$binary" ]; then missing=true; elif ldd "$binary" | grep "not found"; then missing=true; fi
+        done
+        if [ "$missing" = true ]; then
+          echo "$(date +%T) libraries missing, apt-get"
+          npx playwright install-deps chromium
+        fi
+        echo "$(date +%T) done"
+
+    - name: Save Chromium
+      if: steps.cache.outputs.cache-hit != 'true'
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ~/.cache/ms-playwright
+        key: ${{ steps.cache.outputs.cache-primary-key }}

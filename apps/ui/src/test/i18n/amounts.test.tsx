@@ -1,9 +1,11 @@
 import { screen } from "@testing-library/react";
+import { useState } from "react";
 import { afterEach, describe, expect, it } from "vitest";
 import { Wallet } from "../../pages/Wallet";
 import { networkState, walletCard } from "../../components/walletCardData";
 import type { WalletState } from "../../lib/platform";
-import { formatAmount, formatTokenAmount } from "../../lib/amount";
+import { decimalInput, formatAmount, formatTokenAmount } from "../../lib/amount";
+import { Amount } from "../../components/wallet/ui";
 import { previewText } from "../../lib/chatList";
 import type { Language } from "../../lib/settings";
 import { englishT, translateWith } from "../../locales/translate";
@@ -86,5 +88,22 @@ describe("in Portuguese", () => {
     await user.click(await screen.findByTestId("wallet-network-testnet"));
     expect(await screen.findByTestId("wallet-card-cashu-testnet")).toHaveTextContent("10.000 sats de teste");
     expect(screen.getByTestId("wallet-card-cashu-testnet")).not.toHaveTextContent("10,000");
+  });
+
+  it("a wallet's decimal amount field takes the comma a phone's decimal key types", async () => {
+    const Field = () => { const [value, setValue] = useState(""); return <Amount value={value} onChange={setValue} unit="USDT" decimals={6} testId="amount" />; };
+    const { user } = renderApp(<Field />, { language: "pt" });
+    await user.type(screen.getByTestId("amount"), "2,75");
+    expect(screen.getByTestId("amount")).toHaveValue("2.75");
+  });
+});
+
+describe("a decimal amount typed", () => {
+  it.each(LANGUAGES)("in %s keeps the decimal point, and a comma only where the language writes it so", (language) => {
+    const comma = formatTokenAmount("15", 1, language) === "1,5";
+    expect(decimalInput("1.5", language)).toBe("1.5");
+    expect(decimalInput("1,5", language)).toBe(comma ? "1.5" : "15");
+    expect(decimalInput("1.000,5", language)).toBe(comma ? "1000.5" : "1.0005");
+    expect(decimalInput("12a", language)).toBe("12");
   });
 });

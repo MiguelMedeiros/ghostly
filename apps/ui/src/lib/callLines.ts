@@ -2,6 +2,16 @@ import type { Translate } from "../locales/translate";
 import type { CallEventType } from "./types";
 
 /**
+ * The id of a call's line in the history. With `call` (the time of the offer it rang with, for its ring and its miss),
+ * the same each time: the history keeps one message per id, so an offer heard again after the app reopened while it
+ * rang adds no second "Incoming video call".
+ */
+export function callLineId(type: CallEventType, call?: number): string {
+  if (call !== undefined) return `system_call_${type}_${call}`;
+  return `system_call_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+/**
  * A call's line, in the person's language: the history keeps it in English (Chat.tsx `addCallEventMessage`), with its
  * kind beside it. The timeline (MessageBubble) and the chat list's last line say it the same way.
  */

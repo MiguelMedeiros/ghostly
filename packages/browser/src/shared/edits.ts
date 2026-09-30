@@ -46,11 +46,13 @@ export function takesPeerEdit(message: Pick<StoredMessage, "sender" | "file" | "
  * The message after edit `seq`, made at `at`: the new text (and the preview and the status card that came with it, or
  * none: each belongs to its version), the version it replaces kept in the history. A text that did not change adds no
  * version. A status card's update adds none either (WISP 4xx · Status Cards): it replaces the card in place, and its
- * text is only the card's fallback, so a bot's thousands of updates keep one card and no trail of versions.
+ * text is only the card's fallback, so a bot's thousands of updates keep one card and no trail of versions. Buttons
+ * (WISP 4xx · Message Buttons) are the exception: their text is the question people answer, so a new one keeps the
+ * version it replaces, and only a change of the buttons alone (the answer marked, closed) adds none.
  */
 export function withEdit(message: StoredMessage, edit: { seq: number; at: number; text: string; preview?: LinkPreview; card?: StatusCard; pending?: boolean }): StoredMessage {
   const before = message.edit?.history ?? [];
-  const history = edit.text === message.text || edit.card ? before : trimHistory([...before, { at: message.edit?.at ?? message.timestamp, text: message.text }]);
+  const history = edit.text === message.text || (edit.card && edit.card.kind !== "buttons") ? before : trimHistory([...before, { at: message.edit?.at ?? message.timestamp, text: message.text }]);
   const next: MessageEdit = { seq: edit.seq, at: edit.at, history, ...(edit.pending && { pending: true as const }) };
   const { preview: _old, card: _card, ...rest } = message;
   return { ...rest, text: edit.text, edit: next, ...(edit.preview && { preview: edit.preview }), ...(edit.card && { card: edit.card }) };

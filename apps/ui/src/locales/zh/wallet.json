@@ -494,6 +494,7 @@
       "reaches": "之后支付给它们的款项仍会到达 {{source}}；只是 Ghostly 不再看到。",
       "reachesWallet": "之后支付给它们的款项仍会到达该钱包；只是 Ghostly 不再看到。"
     },
+    "and": "{{first}}和{{second}}",
     "ask": "移除 {{label}}…",
     "awaiting": "仍在等待收款",
     "backupFirst": "先备份",
@@ -512,6 +513,10 @@
       "waitsReal": "我明白：移除后支付到其未结请求和发票的款项都会丢失，而且是真实资金。"
     },
     "copyTokens": "复制 Ecash 备份",
+    "gas": {
+      "mainnet": "{{amount}} ETH",
+      "testnet": "{{amount}} 测试 ETH"
+    },
     "held": {
       "elsewhere": "你的资金仍留在原处：Ghostly 只是忘记如何连接它。你之后可以再次连接。",
       "elsewhereIn": "你的资金仍留在 {{source}}：Ghostly 只是忘记如何连接它。你之后可以再次连接。",
@@ -522,6 +527,13 @@
     },
     "hintDevice": "它的密钥和设置将离开此设备。其他钱包保持不变。",
     "hintElsewhere": "Ghostly 只是忘记如何连接它；资金仍留在原处。",
+    "item": {
+      "invoice": "一张 {{amount}} 的发票，尚未支付",
+      "paid": "已为发票支付 {{amount}}，尚未从铸币所领取",
+      "request": "聊天中一笔 {{amount}} 的请求，仍未完成",
+      "sent": "你发送的 {{amount}} ecash，尚未被领取",
+      "unclaimed": "铸币所称已为发票发行 {{amount}}，但这里从未收到"
+    },
     "label": "移除此钱包",
     "noBackup": "Ghostly 无法再次显示此钱包的恢复短语：只有你创建时写下的短语才能找回这笔资金。",
     "noTokens": "没有可复制的 Ecash。",

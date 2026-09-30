@@ -1,4 +1,12 @@
 {
+  "buttons": {
+    "answers": "Answers",
+    "chosen": "Chosen",
+    "closed": "Closed",
+    "failed": "Couldn't send",
+    "jump": "Go to the question",
+    "sending": "Sending…"
+  },
   "panel": {
     "activeCount": "{{count}} active",
     "allOk": "all OK",

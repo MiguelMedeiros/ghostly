@@ -1,4 +1,12 @@
 {
+  "buttons": {
+    "answers": "回答",
+    "chosen": "選択済み",
+    "closed": "締め切り",
+    "failed": "送信できませんでした",
+    "jump": "質問へ移動",
+    "sending": "送信中…"
+  },
   "panel": {
     "activeCount": "{{count}} 件進行中",
     "allOk": "すべて OK",

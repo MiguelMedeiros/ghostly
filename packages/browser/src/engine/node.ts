@@ -33,7 +33,7 @@ import { normalizeNostrRelays } from '../nostr/relay';
 import type { NostrDraft, NostrDraftRequest, NostrLookupRequest, NostrLookupResult, NostrPublishResult } from '../nostr/types';
 import { readPubkyProof } from '../proofs/storage';
 import { lookupPublicProfile, currentProfileProof, PROFILE_RETRY, PROFILE_TTL, type ProfileChoice } from '../profiles/public';
-import { EDIT_CAPABILITY, MAX_EDITS_PER_MESSAGE, STATUS_CARD_LIMITS, checkStatusCard, forwardedAgain, readForwarded, statusCardText, withRequestOptions, type StatusCard, type WireEdit } from "@ghostly/core";
+import { BUTTON_ID, EDIT_CAPABILITY, MAX_EDITS_PER_MESSAGE, STATUS_CARD_LIMITS, checkStatusCard, forwardedAgain, readForwarded, statusCardText, withRequestOptions, type StatusCard, type WireEdit } from "@ghostly/core";
 import { FORWARD_MESSAGES, FORWARD_TARGETS, copyForForward, forwardKind, type ForwardResult } from "./forwards";
 import { TEST_USDT_FAUCET_AMOUNT, receivedTimestamp, typingActivity, type TypingActivity, type TypingKind, WALLET_NETWORKS, walletNetworkOf, type GroupMention, type PaymentNetworks, type PaymentReview, type PaymentTarget, type WalletNetwork } from "@ghostly/core";
 import { ModeChanged, networkLabel, WrongNetworkError } from "./paymentAdapters/modeGate";
@@ -142,6 +142,7 @@ import type { WakeSubscription } from "../shared/types";
 import { forgetWallet, mainnetBalances, markBackedUp, observeBalances, putOff, type BackupReminders } from "../shared/backupReminder";
 import type { MessageChanges } from "../shared/messageChanges";
 import { pairedWireReply, receivedPairedReply, replyRef, replyTo as replyToOriginal } from "../shared/replies";
+import { buttonPress, buttonsState } from "../shared/buttons";
 import { canEdit, isJoinNotice, takesPeerEdit, withEdit } from "../shared/edits";
 import { CardEditPacer, EditBuffer, EditQueue } from "./edits";
 import { removalRisksFunds, walletRemoval } from "../shared/walletRemoval";
@@ -165,7 +166,7 @@ import { ProfilePeek, readPathOf, type PeekResult } from "./profilePeek";
 import { S3Store } from "../backup/s3";
 import type { HoldStore } from "../backup/storage";
 import { PaymentDesk } from "./payments";
-import { CashuWallet, TEST_COINS_NOTE } from "./wallet";
+import { CashuWallet, TEST_COINS_NOTE, normalizeMintUrl } from "./wallet";
 import { identityCues, knockCue, paymentCue, transportCue, transportMark, type Cue } from "./cues";
 import { messageAttention } from "./attention";
 import { DEFAULT_HYPERDHT_RELAY, hyperdhtRelayProblem } from "../shared/hyperdhtRelay";
@@ -199,6 +200,8 @@ const DEFAULT_SETTINGS: Settings = {
 const MAX_DELETED_IDS = 500;
 /** A reaction said on the live session and not confirmed is said again after this long. */
 const REACTION_RESEND_MS = 30_000;
+/** A second press of one message's buttons waits this long (WISP 4xx · Message Buttons). */
+export const BUTTON_PRESS_MS = 1_000;
 
 interface LiveLink {
   /** The chat's layer-0 capability record exchange (WISP 03); paired chats only. */
@@ -346,6 +349,11 @@ export interface NodeOptions {
    */
   staysOnline?: boolean;
   /**
+   * Tests only: group links behave as before they could go native (WISP 9xx § Transports): WebRTC alone, no `_tr` read
+   * or published, no native endpoint. A compatibility test runs this app as one from before against a current one.
+   */
+  webrtcGroupLinks?: boolean;
+  /**
    * The most WebRTC connections this app's groups and 1:1 chats hold at once (WISP 9xx · Group Mesh § Hubs, Budget):
    * within it, the app is a hub of a private group only while that fits, and a group opens only the edges that fit.
    * Default: none. The Desktop app on a Mac says 40: WKWebView opens about 46 in one page, and the rest stay for calls.
@@ -472,6 +480,8 @@ export class GhostlyNode implements EngineImplementation {
   private readonly editBuffer = new EditBuffer();
   /** Received status card updates, applied at most once a second per message (WISP 4xx · Status Cards). */
   private readonly cardEdits = new CardEditPacer();
+  /** When each message's buttons were last pressed here (`pressButton`). */
+  private readonly pressedAt = new Map<string, number>();
   /** At most one wake-up per contact per `WAKE_INTERVAL_MS` (WISP 401 § Wake-up push). */
   private readonly wakeLimiter = new WakeLimiter();
   /** Call wake-ups have their own, shorter limit: a call is rarer than a message and cannot wait five minutes. */
@@ -1952,7 +1962,7 @@ export class GhostlyNode implements EngineImplementation {
    * `card`: a bot's status card (WISP 4xx · Status Cards), checked here by the sender's rule; the text is its fallback,
    * written from the card when none is given. Only the headless runtime and SDKs send one: the app never offers it.
    */
-  async sendMessage(params: { linkId: string; text: string; timestamp?: number; preview?: LinkPreview; replyTo?: string; card?: unknown }): Promise<{ error: string | null; refused?: boolean; messageId?: string }> {
+  async sendMessage(params: { linkId: string; text: string; timestamp?: number; preview?: LinkPreview; replyTo?: string; card?: unknown; button?: string }): Promise<{ error: string | null; refused?: boolean; messageId?: string }> {
     const { linkId } = params;
     const card = params.card === undefined ? undefined : GhostlyNode.cardToSend(params.card);
     if (typeof card === "string") return { error: card, refused: true };
@@ -1973,8 +1983,11 @@ export class GhostlyNode implements EngineImplementation {
     if (live.stored.profile) live.link.setTyping(false);
     if (live.stored.profile) {
       // A reply names a message of this chat, as both sides know it (WISP 400 § Replies); anything else is refused.
-      const reply = params.replyTo === undefined ? undefined : await this.replyFor(linkId, params.replyTo);
-      if (typeof reply === "string") return { error: reply, refused: true };
+      const found = params.replyTo === undefined ? undefined : await this.replyFor(linkId, params.replyTo);
+      if (typeof found === "string") return { error: found, refused: true };
+      // A button press (`pressButton`, WISP 4xx · Message Buttons) is a reply naming the button, by an id that holds.
+      if (params.button !== undefined && !(typeof params.button === "string" && BUTTON_ID.test(params.button) && found)) return { error: "No such button", refused: true };
+      const reply = found && params.button !== undefined ? { ...found, button: params.button } : found;
       if (card) return this.sendChatText(live, trimmed, timestamp, undefined, reply, undefined, card);
       return this.sendChatText(live, trimmed, timestamp, params.preview === undefined ? undefined : parseLinkPreview(params.preview, trimmed), reply);
     }
@@ -2062,9 +2075,13 @@ export class GhostlyNode implements EngineImplementation {
   private async resolveReply(message: StoredMessage): Promise<StoredMessage> {
     const reply = message.replyTo;
     if (!reply || reply.messageId) return message;
-    const original = (await db.getMessages(message.linkId)).find(m => m.id !== message.id && replyRef(m) === reply.id);
+    const history = await db.getMessages(message.linkId);
+    const original = history.find(m => m.id !== message.id && replyRef(m) === reply.id);
     if (!original) return message;
-    return { ...message, replyTo: { ...replyToOriginal(original, reply.id), ...(reply.member && !original.member && { member: reply.member }) } };
+    const resolved: StoredMessage = { ...message, replyTo: { ...replyToOriginal(original, reply.id), ...(reply.member && !original.member && { member: reply.member }), ...(reply.button && { button: reply.button }) } };
+    // A press on one of my buttons (WISP 4xx · Message Buttons), when it is still open for this person.
+    const press = buttonPress(resolved, original, history);
+    return press ? { ...resolved, press } : resolved;
   }
 
   /** A paired row's reply as it goes on the wire again (a resend, a hold). */
@@ -2862,7 +2879,7 @@ export class GhostlyNode implements EngineImplementation {
     if (!this.settings.online) throw new Error("Go online to join a group");
     return { groupId: await this.groups.joinByLink(link) };
   }
-  async sendGroupMessage({ groupId, text: given, mentions, replyTo, card: raw }: { groupId: string; text: string; mentions?: GroupMention[]; replyTo?: string; card?: unknown }): Promise<{ error: string | null; messageId?: string }> {
+  async sendGroupMessage({ groupId, text: given, mentions, replyTo, card: raw, button }: { groupId: string; text: string; mentions?: GroupMention[]; replyTo?: string; card?: unknown; button?: string }): Promise<{ error: string | null; messageId?: string }> {
     // A bot's status card (WISP 4xx · Status Cards), its fallback text written from it unless one is given.
     const card = raw === undefined ? undefined : GhostlyNode.cardToSend(raw);
     if (typeof card === "string") return { error: card };
@@ -2872,13 +2889,40 @@ export class GhostlyNode implements EngineImplementation {
     const reply = replyTo === undefined ? undefined : await this.replyFor(`group:${groupId}`, replyTo);
     if (typeof reply === "string") return { error: reply };
     const named = Array.isArray(mentions) ? mentions : [];
-    const wireReply = reply && { i: reply.id, s: reply.snippet, f: reply.member! };
+    if (button !== undefined && !(typeof button === "string" && BUTTON_ID.test(button) && reply)) return { error: "No such button" };
+    const wireReply = reply && { i: reply.id, s: reply.snippet, f: reply.member!, ...(button !== undefined && { b: button }) };
     const sent = card ? await this.groups.send(groupId, text, named, wireReply, undefined, card) : await this.groups.send(groupId, text, named, wireReply);
     // Members it names whose apps are closed are woken (WISP 9xx · Group Mesh § Wake-up push).
     if (!sent.error) this.wakeMentioned(groupId, text, named);
     return sent;
   }
   groupMessages({ groupId }: { groupId: string }): Promise<StoredMessage[]> { return this.groups.messages(groupId); }
+
+  /**
+   * Presses a button of a message someone else sent to a chat or a group (`group:<id>`), WISP 4xx · Message Buttons:
+   * a reply to it whose text is the button's label and whose `r` names the button, so the author learns who pressed
+   * what, and an app without buttons reads an ordinary reply. Refused: my own message, a button it does not have,
+   * buttons the author closed, a question I already answered with a `once` button, a second press within a second.
+   */
+  async pressButton(params: { linkId: string; messageId: string; buttonId: string }): Promise<{ error: string | null; refused?: boolean; paced?: true; messageId?: string }> {
+    const { linkId, messageId, buttonId } = params ?? {};
+    if (typeof linkId !== "string" || typeof messageId !== "string" || typeof buttonId !== "string") return { error: "No button to press", refused: true };
+    const history = await db.getMessages(linkId);
+    const message = history.find(m => m.id === messageId);
+    if (!message) return { error: "That message is not in this chat", refused: true };
+    if (message.sender === "me") return { error: "Buttons on your own message do nothing", refused: true };
+    const state = buttonsState(message, replyRef(message), history);
+    const button = state?.card.buttons.find(b => b.id === buttonId);
+    if (!state || !button) return { error: "That message has no such button", refused: true };
+    if (!state.open) return { error: state.card.closed ? "These buttons are closed" : "You already answered", refused: true };
+    const key = `${linkId}\n${messageId}`, now = Date.now();
+    // `paced`: nothing is wrong, the tap came too soon after the last one; an app says nothing of it.
+    if (now - (this.pressedAt.get(key) ?? -Infinity) < BUTTON_PRESS_MS) return { error: "One press a second", refused: true, paced: true };
+    if (this.pressedAt.size > 500) this.pressedAt.clear();
+    this.pressedAt.set(key, now);
+    if (linkId.startsWith("group:")) return this.sendGroupMessage({ groupId: linkId.slice("group:".length), text: button.label, replyTo: messageId, button: button.id });
+    return this.sendMessage({ linkId, text: button.label, replyTo: messageId, button: button.id });
+  }
   /**
    * Forwards messages of a chat or a group (`group:<id>`) to up to `FORWARD_TARGETS` others (WISP 400 § Forwards): each
    * as a new message of mine, in the order they were written, carrying one more hop than it had and nothing of who wrote
@@ -3191,7 +3235,15 @@ export class GhostlyNode implements EngineImplementation {
 
   // -- wallet and payments --------------------------------------------------
 
-  async walletAddMint({ url, primary }: { url: string; primary?: boolean }): Promise<{ url: string; name: string }> {
+  /**
+   * `network`: the Cashu wallet it is added from. A mint's network is its own (a test mint is Testnet's, any other
+   * Mainnet's): one of the other network is refused before it is contacted, never filed into that network's wallet
+   * (which it would make, unseen from the wallet it was added from).
+   */
+  async walletAddMint({ url, primary, network }: { url: string; primary?: boolean; network?: WalletNetwork }): Promise<{ url: string; name: string }> {
+    if (network && mintNetwork(normalizeMintUrl(url)) !== network) {
+      throw new Error(network === "mainnet" ? "This is a test mint, and its sats are worth nothing: add it to a Testnet Cashu wallet" : "This mint holds real sats: add it to a Mainnet Cashu wallet");
+    }
     const mint = await this.wallet.checkMint(url);
     const others = this.settings.mints.filter((m) => m !== mint.url);
     const known = others.length !== this.settings.mints.length;
@@ -4143,7 +4195,7 @@ export class GhostlyNode implements EngineImplementation {
       resume: !entry && stored.edgeLive ? resumeOn : undefined,
       // How the member's app said to dial it, where one side has no WebRTC (`_tr`, `onPacketTransports`).
       native: { peerDescriptors: stored.peerDescriptors, peerTransports: stored.peerTransports, peerFallback: stored.peerFallback, automatic: true },
-      packetTransports: true,
+      packetTransports: !this.options.webrtcGroupLinks,
       // An offer from before that session began is not answered after a restart (a relay that missed its clearing).
       resumeFloor: !entry && stored.edgeLive ? stored.edgeLiveSince : undefined,
       // Pinned in advance to the member the roster names: there is nothing to trust on first use.
@@ -4237,6 +4289,7 @@ export class GhostlyNode implements EngineImplementation {
    * WebRTC it runs none, as before: a group of eight would otherwise hold seven listeners per transport for nothing.
    */
   private keepsGroupNative(stored: StoredLink): boolean {
+    if (this.options.webrtcGroupLinks) return false;
     return typeof RTCPeerConnection === "undefined" || (!!stored.peerTransports && !stored.peerTransports.includes("webrtc/1"));
   }
 
@@ -4278,6 +4331,7 @@ export class GhostlyNode implements EngineImplementation {
       pinSupport: true,
       // 1:1 chats only: a group's card rides in its own boxes, and its members' apps take a card's edits or drop them.
       statusCardSupport: true,
+      buttonsSupport: true,
       // 1:1 chats only, as typing: a wake-up names a chat, and a group edge is none.
       wakeSupport: true,
       servicesSupport: this.options.servicesSupport ?? (this.options.platform ?? "web") !== "web",
@@ -4783,7 +4837,7 @@ export class GhostlyNode implements EngineImplementation {
     if (!(await db.hasMessage(message.linkId, message.id))) return this.storeMessage(message);
     const whole = await this.resolveReply(message);
     const added: Partial<StoredMessage> = { ...(whole.mentions && { mentions: whole.mentions }), ...(whole.mentioned && { mentioned: true }),
-      ...(whole.replyTo && { replyTo: whole.replyTo }), ...(whole.forwarded && { forwarded: whole.forwarded }), ...(whole.card && { card: whole.card }) };
+      ...(whole.replyTo && { replyTo: whole.replyTo }), ...(whole.forwarded && { forwarded: whole.forwarded }), ...(whole.card && { card: whole.card }), ...(whole.press && { press: whole.press }) };
     if (!Object.keys(added).length) return;
     // A card belongs to its version: an edit taken meanwhile keeps its own.
     const patched = await db.patchMessage(message.linkId, message.id, stored => {

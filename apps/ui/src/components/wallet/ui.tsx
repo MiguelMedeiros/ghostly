@@ -2,6 +2,7 @@ import { useLayoutEffect, useRef, type ReactNode } from "react";
 import { PayExternally } from "../PayExternally";
 import { focusInPlace } from "../../lib/focus";
 import { useOptionalI18n } from "../../contexts/I18nContext";
+import { decimalInput } from "../../lib/amount";
 
 /** The same building blocks as Settings, so a wallet's options read like any other option. */
 export { Section, Row, Block } from "../layout/Section";
@@ -103,7 +104,7 @@ export function Amount({ value, onChange, unit, decimals = 0, testId, autoFocus 
     <label className="flex items-baseline gap-2 bg-surface-alt rounded-xl px-4 py-3 border border-border focus-within:ring-2 focus-within:ring-accent">
       <input ref={input} data-testid={testId} inputMode={decimals ? "decimal" : "numeric"} placeholder="0" aria-label={i18n ? i18n.t("wallet.ui.amountIn", { unit }) : `Amount in ${unit}`}
         className="min-w-0 flex-1 bg-transparent border-none outline-none text-3xl font-semibold text-text-primary placeholder-text-muted tabular-nums"
-        value={value} onChange={(e) => onChange(e.target.value.replace(decimals ? /[^0-9.]/g : /\D/g, ""))} />
+        value={value} onChange={(e) => onChange(decimals ? decimalInput(e.target.value, i18n?.t.language) : e.target.value.replace(/\D/g, ""))} />
       <span className="text-text-muted text-sm shrink-0">{unit}</span>
     </label>
   );

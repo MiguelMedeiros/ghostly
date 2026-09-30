@@ -44,7 +44,7 @@ jobs:
         run: npm ci
 
       - name: Install Chromium
-        run: npx playwright install --with-deps chromium
+        uses: ./.github/actions/playwright-chromium
 
       # The built v0.4.0 only: a tag's build never changes, so the key is the tag and the script that builds it.
       - name: Cache the v0.4.0 build

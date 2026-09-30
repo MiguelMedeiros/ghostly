@@ -28,6 +28,8 @@ import type { ChatFile, ChatMessage } from "../lib/types";
 import { callEventText } from "../lib/callLines";
 import type { QuoteView } from "../lib/replies";
 import { ReplyQuote } from "./chat/ReplyQuote";
+import { ButtonPress, MessageButtons } from "./chat/MessageButtons";
+import { isButtonPress, type ButtonsView } from "../lib/buttons";
 import { SmileIcon } from "./composer/icons";
 import { ReactAction, ReactionBar, ReactionChips } from "./chat/Reactions";
 import { myReaction, reactionChips } from "../lib/reactions";
@@ -82,6 +84,16 @@ interface MessageBubbleProps {
   author?: MessageAuthor;
   /** Opens what the chat knows of `author` (the group's members, theirs marked): a tap on their name or picture. */
   onOpenAuthor?: () => void;
+  /**
+   * A bot's buttons under the message (WISP 4xx · Message Buttons), as the chat's history has them (`buttonsViews`).
+   * Left out, a message with buttons shows them, and none of them answers.
+   */
+  buttons?: ButtonsView;
+  /**
+   * This reply is a press of a button the question still has, on the question as the presser saw it (`compactPresses`):
+   * it reads "↩ Yes". Otherwise it is drawn as any reply, with its quote.
+   */
+  compactPress?: boolean;
 }
 
 /** How long a finger holds a message before its quick bar (or, where it takes no reaction, its details) opens. */
@@ -637,7 +649,7 @@ export function MessageBubble(props: MessageBubbleProps) {
       onDelete={props.onDelete && stable.onDelete} onReply={props.onReply && stable.onReply} onEdit={props.onEdit && stable.onEdit}
       onReact={props.onReact && stable.onReact} onForward={props.onForward && stable.onForward} onSelect={props.onSelect && stable.onSelect}
       onPin={props.onPin && stable.onPin} pinned={props.pinned} author={props.author} onOpenAuthor={props.onOpenAuthor && stable.onOpenAuthor}
-      reactionName={stable.reactionName} highlight={props.highlight}
+      reactionName={stable.reactionName} highlight={props.highlight} buttons={props.buttons} compactPress={props.compactPress}
       selection={selection && { selected: selection.selected, ...(selection.onToggle && { onToggle: stable.onToggle }) }}
     />
   );
@@ -647,10 +659,10 @@ const CALLBACKS = ["onDelete", "onReply", "onEdit", "onReact", "onForward", "onS
 
 /** The same bubble to draw: see `MessageBubble`. */
 function sameBubble(a: BubbleViewProps, b: BubbleViewProps): boolean {
-  return a.peerAck === b.peerAck && a.peerPubKey === b.peerPubKey && a.peerNick === b.peerNick && a.linkId === b.linkId && a.names === b.names && a.highlight === b.highlight && !a.pinned === !b.pinned
+  return a.peerAck === b.peerAck && a.peerPubKey === b.peerPubKey && a.peerNick === b.peerNick && a.linkId === b.linkId && a.names === b.names && a.highlight === b.highlight && !a.pinned === !b.pinned && !a.compactPress === !b.compactPress
     && CALLBACKS.every(name => !a[name] === !b[name])
     && !a.selection === !b.selection && a.selection?.selected === b.selection?.selected && !a.selection?.onToggle === !b.selection?.onToggle
-    && sameValue(a.quote, b.quote) && sameValue(a.author, b.author) && sameValue(a.message, b.message);
+    && sameValue(a.quote, b.quote) && sameValue(a.author, b.author) && sameValue(a.buttons, b.buttons) && sameValue(a.message, b.message);
 }
 
 const SameBubble = memo(function SameBubble(props: BubbleViewProps) {
@@ -662,7 +674,7 @@ const SameBubble = memo(function SameBubble(props: BubbleViewProps) {
   );
 }, sameBubble);
 
-function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "", onDelete: deleteIt, linkId, onReply: replyIt, quote, onEdit: editIt, onReact: reactIt, reactionName, onForward: forwardIt, onSelect: selectIt, onPin: pinIt, pinned, selection, names, highlight, author, onOpenAuthor }: BubbleViewProps) {
+function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "", onDelete: deleteIt, linkId, onReply: replyIt, quote, onEdit: editIt, onReact: reactIt, reactionName, onForward: forwardIt, onSelect: selectIt, onPin: pinIt, pinned, selection, names, highlight, author, onOpenAuthor, buttons, compactPress }: BubbleViewProps) {
   // While the chat is choosing messages, a row is a checkbox: nothing else on it answers.
   const choosing = !!selection;
   const onPin = choosing ? undefined : pinIt;
@@ -679,7 +691,9 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
         : "animate-bubble-in-left"
       : "",
   );
-  const money = useMemo(() => (message.paymentId || message.file || showsCard(message.card) ? null : findMoney(message.text)), [message.paymentId, message.file, message.card, message.text]);
+  // A button press (WISP 4xx · Message Buttons) reads "↩ Yes": its label is never a sum, a picture or a quote.
+  const pressed = !!compactPress && isButtonPress(message);
+  const money = useMemo(() => (message.paymentId || message.file || pressed || showsCard(message.card) ? null : findMoney(message.text)), [message.paymentId, message.file, pressed, message.card, message.text]);
   const [details, setDetails] = useState(false);
   const rowRef = useRef<HTMLDivElement>(null);
   const openDetails = () => setDetails(true);
@@ -719,7 +733,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
   };
   const sending = isMe && message.delivery === "waiting" ? { onCancelSend: cancelSending } : isMe && shown === "failed" ? { onRetry: retry } : {};
   const time = clockTime(message.timestamp, language);
-  const contentType = imgError || message.file || message.paymentId ? "text" : detectContentType(message.text);
+  const contentType = imgError || message.file || message.paymentId || pressed ? "text" : detectContentType(message.text);
   const download = message.file && !isSystem
     ? {
       file: message.file, name: downloadName(message.file, message.timestamp), sender: isMe ? "me" as const : "peer" as const,
@@ -884,11 +898,14 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
     );
   }
 
-  const bigEmoji = contentType === "text" && isOnlyEmojis(message.text);
+  const bigEmoji = contentType === "text" && !pressed && isOnlyEmojis(message.text);
+  // A message with buttons and no view from the chat (a chat that takes no replies): shown, none of them answers.
+  const buttonsView = message.card?.kind === "buttons" ? buttons ?? { card: message.card, open: false } : undefined;
 
   const timestampEl = (
     <span dir={dir} className="msg-meta inline-flex items-center gap-[3px] float-end relative top-[4px] ms-[8px] select-none">
-      {message.edit && <EditedMark edit={message.edit} group={linkId?.startsWith("group:")} />}
+      {/* A question's buttons marked or closed by its bot is its normal life, not an edit to point out; a new text is. */}
+      {message.edit && (!buttonsView || !!message.edit.history?.length) && <EditedMark edit={message.edit} group={linkId?.startsWith("group:")} />}
       <span className="text-[11px] leading-none text-text-primary/65">
         {time}
       </span>
@@ -946,9 +963,14 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
         {nickEl}
 
         <ForwardedMark hops={message.forwarded} />
-        {quote && <ReplyQuote quote={quote} />}
+        {quote && !pressed && <ReplyQuote quote={quote} />}
 
-        {message.paymentId ? (
+        {pressed ? (
+          <div className="clearfix">
+            <ButtonPress label={message.text} targetId={quote?.targetId} />
+            {timestampEl}
+          </div>
+        ) : message.paymentId ? (
           <div className="clearfix">
             <PaymentBubble paymentId={message.paymentId} peerPubKey={peerPubKey} fallbackText={message.text} />
             {timestampEl}
@@ -1030,6 +1052,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
           </div>
         )}
       </div>
+      {buttonsView && <MessageButtons view={buttonsView} messageId={message.id} linkId={linkId ?? (peerPubKey ? engine.linkByPeer(peerPubKey)?.id : undefined)} />}
       <ReactionChips chips={chips} onReact={onReact} align={isMe ? "end" : "start"} />
       </div>
       {!isMe && !choosing && <MessageMenu onDelete={onDelete} onDetails={openDetails} onReply={onReply} onReact={onReact && (() => setBar("button"))} onPin={onPin} pinned={pinned} onForward={onForward} onSelect={onSelect} align="right" download={download} sender="peer" />}
