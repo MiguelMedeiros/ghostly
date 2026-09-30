@@ -6,14 +6,14 @@ import { describe, expect, it } from "vitest";
 // covers: headless.hooks
 
 /**
- * The echo bot the README, docs/CLI.md, examples/echo-bot.sh and the site's /cli page show is a `listen --exec`
- * script, and `--exec` runs through `/bin/sh` (listen.ts, `shell: true`): on Debian and Ubuntu that is dash, which has
- * no bash here-strings (`<<<`). Each copy runs here, under /bin/sh and under dash when this machine has it, with the event on stdin as
+ * The echo bot the README and examples/echo-bot.sh show is a `listen --exec` script, and `--exec` runs through
+ * `/bin/sh` (listen.ts, `shell: true`): on Debian and Ubuntu that is dash, which has no bash here-strings (`<<<`).
+ * The site's copies (/cli and docs/CLI.md) are held to the same by apps/website/scripts/echo-bot.test.mjs. Each copy runs here, under /bin/sh and under dash when this machine has it, with the event on stdin as
  * listen hands it over; `ghostly` is a fake on PATH that writes down what it was asked, jq the real one.
  */
 
-const ROOT = resolve(import.meta.dirname, "../../..");
-const SOURCES = ["packages/cli/README.md", "docs/CLI.md", "packages/cli/examples/echo-bot.sh", "apps/website/content/cli.ts"];
+const ROOT = resolve(import.meta.dirname, "..");
+const SOURCES = ["README.md", "examples/echo-bot.sh"];
 const SHELLS = ["/bin/sh", "/bin/dash"].filter((shell) => existsSync(shell));
 const hasJq = spawnSync("jq", ["--version"]).status === 0;   // skipped without jq here, never in CI
 
@@ -22,8 +22,7 @@ function echoScript(file: string): string {
   const text = readFileSync(join(ROOT, file), "utf8");
   const found = text.match(/listen --type message\.received --cursor \S+ --exec '([^']*)'/);
   if (!found) throw new Error(`no echo bot in ${file}`);
-  // The site's copy is a template literal: its `\\` is one backslash in the page.
-  return file.endsWith(".ts") ? found[1].replaceAll("\\\\", "\\") : found[1];
+  return found[1];
 }
 
 function run(shell: string, script: string, event: Record<string, unknown>) {
