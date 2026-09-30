@@ -13,7 +13,10 @@ export function useBackdropDismiss(onClose: () => void) {
   };
   return {
     onPointerDown: (e: ReactPointerEvent<HTMLElement>) => { beganOutside.current = outside(e); },
-    onPointerUp: (e: ReactPointerEvent<HTMLElement>) => { if (beganOutside.current && outside(e)) onClose(); beganOutside.current = false; },
+    onPointerUp: (e: ReactPointerEvent<HTMLElement>) => {
+      if (beganOutside.current && outside(e)) { tapDismissed(e.nativeEvent); onClose(); }
+      beganOutside.current = false;
+    },
     onPointerCancel: () => { beganOutside.current = false; },
   };
 }
@@ -22,18 +25,27 @@ export function useBackdropDismiss(onClose: () => void) {
 const TRAILING_CLICK_MS = 500;
 
 /**
- * A tap on a sheet's backdrop closes the sheet on pointerup, and the backdrop goes with it; the click a touch
- * screen sends after that lands on whatever was under the backdrop (a chat's Back button, a row of the list). That
- * click is the backdrop's: it is dropped. One that does not come in time is not waited for. A mouse sends its click
- * where it was pressed, the backdrop, which is gone: nothing to drop, and the next click is the person's own.
+ * Every dismissible surface (a sheet, a menu drawn as a sheet on a phone, a dialog) closes on pointerup, and what the
+ * pointer was on often goes with it: a sheet's or a menu's backdrop, a dialog's dimmed area. A touch screen sends its
+ * mouse events and click after that, where the tap was, so they land on whatever was under it: a chat's Back button,
+ * a tab, New Chat, a field that pops the keyboard up. They belong to the tap that dismissed: when their target is not
+ * inside what the tap was on (gone, or closed), they are dropped. A tap outside a popover straight onto a button keeps
+ * its click, as a mouse does. Only the first click is waited for, and not past TRAILING_CLICK_MS. A mouse sends its
+ * click where it was pressed: its events are left alone.
  */
-function dropTrailingClick() {
-  const drop = (e: MouseEvent) => { e.preventDefault(); e.stopPropagation(); };
-  window.addEventListener("click", drop, { capture: true, once: true });
-  setTimeout(() => window.removeEventListener("click", drop, { capture: true }), TRAILING_CLICK_MS);
+function tapDismissed(e: PointerEvent) {
+  if (e.pointerType !== "touch" && e.pointerType !== "pen") return;
+  const pressed = e.target instanceof Node ? e.target : null;
+  const types = ["mousedown", "mouseup", "click"];
+  const stop = () => { clearTimeout(timer); for (const type of types) window.removeEventListener(type, trailing, { capture: true }); };
+  const trailing = (event: Event) => {
+    if (event.type === "click") stop();
+    if (pressed?.isConnected && event.target instanceof Node && pressed.contains(event.target)) return;
+    event.preventDefault(); event.stopPropagation();
+  };
+  for (const type of types) window.addEventListener(type, trailing, { capture: true });
+  const timer = setTimeout(stop, TRAILING_CLICK_MS);
 }
-
-const onBackdrop = (e: PointerEvent) => e.composedPath().some((el) => el instanceof Element && el.classList.contains("sheet-backdrop"));
 
 export function useOutsideDismiss(ref: RefObject<HTMLElement | null>, open: boolean, onClose: () => void, anchorRef?: RefObject<HTMLElement | null>) {
   const callback = useRef(onClose); callback.current = onClose;
@@ -52,7 +64,7 @@ export function useOutsideDismiss(ref: RefObject<HTMLElement | null>, open: bool
     const down = (e: PointerEvent) => { beganOutside = !blocked() && outside(e); };
     const up = (e: PointerEvent) => {
       if (beganOutside && !blocked() && outside(e)) {
-        if ((e.pointerType === "touch" || e.pointerType === "pen") && onBackdrop(e)) dropTrailingClick();
+        tapDismissed(e);
         callback.current();
       }
       beganOutside = false;
