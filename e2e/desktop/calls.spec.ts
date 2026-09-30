@@ -47,7 +47,7 @@ const button = (p: DesktopPerson, selector: string) => p.app.execute<{ disabled:
   const button = document.querySelector(arguments[0]);
   return button ? { disabled: button.disabled, title: button.getAttribute("title") } : null;`, selector);
 
-test("two Linux Desktops call each other: decline, then sound and pictures both ways, mute, camera off, hang up", {
+test("two Linux Desktops call each other: decline, then sound and pictures both ways, mute, camera off, hang up, a video call answered with voice", {
   tag: ["@feature:calls.linux-native", "@feature:calls.paired", "@feature:calls.video", "@feature:calls.decline"],
 }, async () => {
   test.setTimeout(10 * 60_000);
@@ -140,6 +140,21 @@ test("two Linux Desktops call each other: decline, then sound and pictures both 
     for (const p of [a, b]) {
       await expect.poll(() => callWindows(p), { timeout: 60_000, message: `${p.name}'s call window closes` }).toBe(0);
       await expect.poll(() => stats(p), { message: `${p.name}'s media stopped` }).toBeNull();
+    }
+
+    // A video call answered with voice only, as the Linux interop of 2026-09-29 did: bia still sees ana, and once
+    // bia's camera comes on, ana sees bia, with no new offer.
+    await a.press("Video call");
+    await b.press("Accept audio call");
+    await expect.poll(() => connected(b), { timeout: 60_000, message: "bia's call connects" }).toBe(true);
+    await expect.poll(async () => (await stats(b))?.videoReceived ?? 0, { timeout: 60_000, message: "bia sees ana" }).toBeGreaterThan(10);
+    await expect.poll(async () => (await picture(b))?.width ?? 0, { timeout: 30_000, message: "bia's window shows ana" }).toBeGreaterThan(0);
+    await b.press("Turn camera on");
+    await expect.poll(async () => (await stats(a))?.videoReceived ?? 0, { timeout: 60_000, message: "ana sees bia" }).toBeGreaterThan(10);
+    await expect.poll(async () => (await picture(a))?.width ?? 0, { timeout: 30_000, message: "ana's window shows bia" }).toBeGreaterThan(0);
+    await a.press("End call");
+    for (const p of [a, b]) {
+      await expect.poll(() => callWindows(p), { timeout: 60_000, message: `${p.name}'s second call window closes` }).toBe(0);
     }
   } finally {
     for (const done of cleanup.reverse()) await done();

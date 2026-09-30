@@ -37,7 +37,8 @@ use webrtc::media_stream::MediaStreamTrack;
 use webrtc::peer_connection::{
     register_default_interceptors, MediaEngine, PeerConnection, PeerConnectionBuilder,
     PeerConnectionEventHandler, RTCConfigurationBuilder, RTCIceConnectionState,
-    RTCIceGatheringState, RTCIceServer, RTCPeerConnectionIceEvent, RTCSessionDescription, Registry,
+    RTCIceGatheringState, RTCIceServer, RTCPeerConnectionIceEvent, RTCSessionDescription,
+    RTCStatsReportEntry, Registry, StatsSelector,
 };
 
 /// The payload types the rebuilt SDP assumes (callSignal.ts), used unless an offer says otherwise.
@@ -174,6 +175,35 @@ fn stop(pipeline: gst::Pipeline) {
     let _ = pipeline.set_state(gst::State::Null);
 }
 
+/// How many of a pipeline's errors and warnings reach the log: the first ones say why, the rest repeat them.
+const SAID_AT_MOST: u64 = 8;
+
+/// Logs a playing pipeline's errors and warnings. Nothing else reads its bus once it plays, so a decoder that
+/// cannot negotiate or a camera that fails a moment later stopped without a word. Everything stays on the bus
+/// (`start` reads the error that kept a pipeline from starting).
+fn watch(pipeline: &gst::Pipeline, what: &'static str) {
+    let Some(bus) = pipeline.bus() else { return };
+    let said = AtomicU64::new(0);
+    bus.set_sync_handler(move |_, message| {
+        let (level, error, debug) = match message.view() {
+            gst::MessageView::Error(e) => ("error", e.error().to_string(), e.debug()),
+            gst::MessageView::Warning(w) => ("warning", w.error().to_string(), w.debug()),
+            _ => return gst::BusSyncReply::Pass,
+        };
+        if said.fetch_add(1, Ordering::Relaxed) < SAID_AT_MOST {
+            let from = message
+                .src()
+                .map(|s| s.name().to_string())
+                .unwrap_or_default();
+            crate::diagnostics::log(&format!(
+                "native call: {what} {level} from {from}: {error} ({})",
+                debug.as_deref().unwrap_or("")
+            ));
+        }
+        gst::BusSyncReply::Pass
+    });
+}
+
 /// `description` with the device named `name` where `{device}` is: GStreamer makes its element from the device
 /// (`pulsesrc device=…`, `v4l2src device=…`, `pipewiresrc path=…`), so it is linked in by hand, after a queue
 /// standing in its place.
@@ -296,6 +326,7 @@ impl Camera {
         target: &Arc<Mutex<Option<gst_app::AppSrc>>>,
         preview: &Sink,
     ) -> Result<(), String> {
+        watch(pipeline, "the camera");
         let to = target.clone();
         element::<gst_app::AppSink>(pipeline, "out")?.set_callbacks(
             gst_app::AppSinkCallbacks::builder()
@@ -562,6 +593,7 @@ async fn receive(shared: Arc<Shared>, track: Arc<dyn TrackRemote>) {
     let (keyframe_tx, keyframe_rx) = mpsc::unbounded_channel::<()>();
     let mut keyframe_rx = Some(keyframe_rx);
     let mut input: Option<gst_app::AppSrc> = None;
+    let mut first = true;
     while let Some(event) = track.poll().await {
         if shared.closed.load(Ordering::Relaxed) {
             break;
@@ -569,6 +601,16 @@ async fn receive(shared: Arc<Shared>, track: Arc<dyn TrackRemote>) {
         let TrackRemoteEvent::OnRtpPacket(packet) = event else {
             continue;
         };
+        if first {
+            // Whether the peer's media reaches us at all, apart from whether it decodes.
+            first = false;
+            crate::diagnostics::log(&format!(
+                "native call: the peer's {} arrives: ssrc {}, payload type {}",
+                if video { "video" } else { "sound" },
+                packet.header.ssrc,
+                packet.header.payload_type
+            ));
+        }
         if !video {
             // The sound's pipeline changes with the speaker: read each time.
             let rtp = match playing(&shared, packet.header.payload_type) {
@@ -703,6 +745,14 @@ fn receiving(
     decoded: &Arc<AtomicBool>,
     keyframes: &mpsc::UnboundedSender<()>,
 ) -> Result<(), String> {
+    watch(
+        pipeline,
+        if video {
+            "the peer's video"
+        } else {
+            "the peer's sound"
+        },
+    );
     let src: gst_app::AppSrc = element(pipeline, "rtp")?;
     let counting = shared.clone();
     let decoder: gst::Element = element(pipeline, "decoder")?;
@@ -717,7 +767,12 @@ fn receiving(
             } else {
                 &counts.audio_received
             };
-            count.fetch_add(1, Ordering::Relaxed);
+            if count.fetch_add(1, Ordering::Relaxed) == 0 {
+                crate::diagnostics::log(&format!(
+                    "native call: the peer's {} decodes",
+                    if video { "video" } else { "sound" }
+                ));
+            }
             decoded.store(true, Ordering::Relaxed);
             counting.media_arrived();
             gst::PadProbeReturn::Ok
@@ -1027,6 +1082,7 @@ impl Voice {
             wanted,
             default,
             |p| {
+                watch(p, "the microphone");
                 element::<gst::Element>(p, "mic")?.set_property("mute", muted);
                 let current = self.current.clone();
                 feed(
@@ -1146,6 +1202,7 @@ impl Call {
                 Duration::from_secs(1) / FPS,
                 || true,
             );
+            watch(&send, "the video encoder");
             start(&send, "The video")?;
             match voice.open(devices.microphone.as_deref()) {
                 Ok(microphone) => Ok((send, microphone)),
@@ -1345,8 +1402,69 @@ impl Call {
         }
     }
 
+    /// What the connection itself counted (webrtc-rs's getStats), by kind: the RTP it sent and received, what
+    /// the peer's RTCP reports say it lost of ours, and the bytes over the candidate pair in use. It tells
+    /// pictures that never left from pictures that never arrived and from pictures that did not decode.
+    pub async fn transport(&self) -> serde_json::Value {
+        let report = self.pc.get_stats(Instant::now(), StatsSelector::None).await;
+        let kind = |k: RtpCodecKind| {
+            if k == RtpCodecKind::Video {
+                "video"
+            } else {
+                "audio"
+            }
+        };
+        let mut out = serde_json::json!({});
+        for entry in report.iter() {
+            match entry {
+                RTCStatsReportEntry::OutboundRtp(s) => {
+                    let sent = &s.sent_rtp_stream_stats;
+                    out["sent"][kind(sent.rtp_stream_stats.kind)] = serde_json::json!({
+                        "ssrc": sent.rtp_stream_stats.ssrc,
+                        "packets": sent.packets_sent,
+                        "bytes": sent.bytes_sent,
+                    });
+                }
+                RTCStatsReportEntry::InboundRtp(s) => {
+                    let received = &s.received_rtp_stream_stats;
+                    out["received"][kind(received.rtp_stream_stats.kind)] = serde_json::json!({
+                        "ssrc": received.rtp_stream_stats.ssrc,
+                        "packets": received.packets_received,
+                        "bytes": s.bytes_received,
+                        "lost": received.packets_lost,
+                    });
+                }
+                RTCStatsReportEntry::RemoteInboundRtp(s) => {
+                    let received = &s.received_rtp_stream_stats;
+                    out["peerReports"][kind(received.rtp_stream_stats.kind)] = serde_json::json!({
+                        "lost": received.packets_lost,
+                        "fractionLost": s.fraction_lost,
+                        "reports": s.round_trip_time_measurements,
+                    });
+                }
+                RTCStatsReportEntry::IceCandidatePair(pair) if pair.nominated => {
+                    out["pair"] = serde_json::json!({
+                        "bytesSent": pair.bytes_sent,
+                        "bytesReceived": pair.bytes_received,
+                        "discardedOnSend": pair.packets_discarded_on_send,
+                    });
+                }
+                _ => {}
+            }
+        }
+        out
+    }
+
     /// Hangs up: the connection closed, every pipeline stopped.
     pub async fn close(&self) {
+        if !self.shared.closed.load(Ordering::Relaxed) {
+            // What went each way, for a call that showed no picture: in the log afterwards.
+            crate::diagnostics::log(&format!(
+                "native call: ended, {} {}",
+                serde_json::to_string(&self.stats()).unwrap_or_default(),
+                self.transport().await
+            ));
+        }
         self.shared.closed.store(true, Ordering::Relaxed);
         let _ = self.pc.close().await;
         let mut pipelines = std::mem::take(&mut *self.shared.receiving.lock().unwrap());
@@ -1538,6 +1656,14 @@ mod tests {
             matches!(b.stats().ice.as_str(), "connected" | "completed"),
             "{}",
             stats()
+        );
+        // What the connection counted agrees: the offerer's pictures left as RTP and arrived as RTP.
+        let (sent, received) = (a.transport().await, b.transport().await);
+        assert!(
+            sent["sent"]["video"]["packets"].as_u64() > Some(0)
+                && received["received"]["video"]["packets"].as_u64() > Some(0)
+                && received["received"]["video"]["ssrc"] == sent["sent"]["video"]["ssrc"],
+            "{sent} {received}"
         );
         // The answerer's camera comes on halfway, as it does in a voice call: no new offer.
         assert_eq!(a.stats().video_received, 0, "{}", stats());
