@@ -49,6 +49,8 @@ vi.mock("@ghostly/core", async (importOriginal) => {
     setTyping = vi.fn();
     confirmPair = vi.fn(async () => {});
     peerAllowsPayment = vi.fn((m: string) => m === "cashu");
+    // Its choice, wallets aside: Lightning too, which it has no wallet of (peerAllowsPayment leaves it out).
+    peerChoosesPayment = vi.fn((m: string) => m === "cashu" || m === "lightning");
     allowsPayment = vi.fn(() => true);
     constructor(readonly options: GhostLinkOptions) { links.push(this as never); }
   }
@@ -160,12 +162,12 @@ describe("a chat as the contact drives it", () => {
     expect(node.getState().links[0].pairing).toEqual({ status: "connecting" });
   });
 
-  it("a ready session remembers which ways of paying the contact allows, for requests held while it is away", async () => {
+  it("a ready session remembers which ways of paying the contact chose, wallets aside, for requests held while it is away", async () => {
     const chat = row();
     const { node, linkOf } = await started(chat);
     const remember = vi.spyOn(node["hold"], "rememberPeerMethods");
     linkOf(chat.id).options.events.onPairingState({ status: "ready" });
-    expect(remember).toHaveBeenCalledWith(chat.id, ["cashu"]);
+    expect(remember).toHaveBeenCalledWith(chat.id, ["cashu", "lightning"]);
   });
 
   it("status, polling, discovery and call signals are passed on", async () => {

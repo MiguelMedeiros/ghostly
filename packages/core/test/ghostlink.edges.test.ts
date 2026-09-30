@@ -632,6 +632,31 @@ describe("paired payments", () => {
     expect(t.b.peerWalletNetworks()).toEqual({ cashu: [] });
   });
 
+  it("remembers the contact's choice apart from its wallets: a way it has no wallet of is as its handshake said", async () => {
+    const t = linkedPair([{ events: payEvents(), paymentNetworks: {} }, { events: payEvents() }]);
+    await t.ready();
+    await t.settle("b");
+    // No wallet at all: nothing can be paid now, but the contact did not turn Cashu or Lightning off.
+    expect(t.b.peerAllowsPayment("cashu")).toBe(false);
+    expect(t.b.peerChoosesPayment("cashu")).toBe(true);
+    expect(t.b.peerChoosesPayment("lightning")).toBe(true);
+    expect(t.b.peerChoosesPayment("usdt"), "not in its handshake either").toBe(t.b.peerAllowsPayment("usdt"));
+    // A wallet made: in the list, chosen.
+    t.a.setPaymentNetworks({ cashu: ["mainnet"] });
+    await t.settle("b");
+    expect(t.b.peerChoosesPayment("cashu")).toBe(true);
+    // Turned off with a wallet: its networks name it, so the list leaving it out is its choice.
+    t.a.setPaymentMethods({ cashu: false });
+    await t.settle("b");
+    expect(t.b.peerChoosesPayment("cashu")).toBe(false);
+    expect(t.b.peerChoosesPayment("lightning"), "no wallet: as the handshake said").toBe(true);
+    // An older contact says no networks: its list is its choice.
+    t.toB({ t: "paired-payments", m: ["lightning"] });
+    await t.settle("b");
+    expect(t.b.peerChoosesPayment("cashu")).toBe(false);
+    expect(t.b.peerChoosesPayment("lightning")).toBe(true);
+  });
+
   it("an older contact that did not offer payments in its handshake is sent no payment frames", async () => {
     const onPaymentRequest = vi.fn();
     // An older app never says its payment list on the session, so only the handshake offer counts.

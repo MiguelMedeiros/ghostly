@@ -185,8 +185,12 @@ export class PaymentDesk {
   private defaultNetwork(): WalletNetwork { return this.host.defaultNetwork?.() ?? "mainnet"; }
   /** This chat takes the method on the network (its Accept side). */
   private accepts(linkId: string, method: PaymentMethodName, network: WalletNetwork): boolean { return this.host.acceptsNetwork?.(linkId, method, network) ?? true; }
-  /** The contact has a wallet of that network for the method, as it said; an older contact says nothing, and may. */
+  /**
+   * The contact has a wallet of that network for the method, as it said on the open session; an older contact says
+   * nothing, and may. With no session open its last word is old (it may have made a wallet since): it may too.
+   */
   private meets(link: PaymentLink, method: PaymentMethodName, network: WalletNetwork): boolean {
+    if (!link.isDataLinkOpen) return true;
     const theirs = (link as Partial<Pick<GhostLink, "peerPaymentNetworks">>).peerPaymentNetworks?.(method);
     return !theirs || theirs.includes(network);
   }
@@ -325,7 +329,9 @@ export class PaymentDesk {
     const offHere = { cashu: this.offNetwork(params.linkId, link, "cashu", network), lightning: this.offNetwork(params.linkId, link, "lightning", network) };
     const ecash = params.rail !== "lightning" && !offHere.cashu && (known ? known.includes("cashu") && link.paymentEnabled("cashu") : link.allowsPayment("cashu"));
     const lightning = params.rail !== "cashu" && !offHere.lightning && (known ? known.includes("lightning") && link.paymentEnabled("lightning") : link.allowsPayment("lightning"));
-    if (!ecash && !lightning) throw new Error(params.rail && offHere[params.rail] ? offHere[params.rail]! : params.rail ? `${params.rail === "cashu" ? "Cashu" : "Lightning"} is not allowed by both of you here` : held ? "Your contact allowed neither Cashu nor Lightning in this chat" : offHere.cashu && offHere.lightning ? offHere.cashu : "Cashu and Lightning are off in this chat");
+    // Waiting for live, with a way on here: the contact's word at the last session says no (off, or no wallet then).
+    const theirsOff = !!waiting && !waiting.includes("cashu") && !waiting.includes("lightning") && (link.paymentEnabled("cashu") || link.paymentEnabled("lightning"));
+    if (!ecash && !lightning) throw new Error(params.rail && offHere[params.rail] ? offHere[params.rail]! : params.rail ? `${params.rail === "cashu" ? "Cashu" : "Lightning"} is not allowed by both of you here` : held ? "Your contact allowed neither Cashu nor Lightning in this chat" : offHere.cashu && offHere.lightning ? offHere.cashu : theirsOff ? "Your contact took no Cashu or Lightning last time. Try again once the chat is live" : "Cashu and Lightning are off in this chat");
     const quote = lightning ? await this.lightning[network].createInvoice(params.amount, id, params.card) : undefined;
     // A request is in real sats or in test sats, never both: ecash from a test mint, worth nothing, must
     // never settle a request for real money. Only this network's mints are named.

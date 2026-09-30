@@ -2071,6 +2071,16 @@ export class GhostLink {
     if (!this.options.params.profile || !this.paired || this.paired.state.status !== "ready") return false;
     return this.peerPaymentMethods ? this.peerPaymentMethods.has(method) : this.paired.peerAllowsPayment(method);
   }
+  /**
+   * The contact's choice about a way of paying in this chat, whether or not it has a wallet for it. Its session list
+   * leaves out a way it has no wallet of (its networks name none): that one is as its handshake offer said. What is
+   * remembered for a later request, which goes when the chat is live: a wallet made meanwhile then counts.
+   */
+  peerChoosesPayment(method: PaymentMethodName): boolean {
+    if (!this.options.params.profile || !this.paired || this.paired.state.status !== "ready") return false;
+    if (!this.peerPaymentMethods || this.peerPaymentMethods.has(method)) return this.peerAllowsPayment(method);
+    return !!this.peerNetworks && this.peerNetworks[method] === undefined && this.paired.peerAllowsPayment(method);
+  }
   /** Takes effect at once; a connected contact is told on the open session, and the next handshake offers it. */
   setHoldSupport(on: boolean, top?: number): void { this.options.holdSupport = on; this.sendHoldState(top); }
   /** Older apps drop this frame (it carries no id) and keep using the handshake offer. */

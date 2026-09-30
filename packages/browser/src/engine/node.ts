@@ -4343,8 +4343,9 @@ export class GhostlyNode implements EngineImplementation {
         onPairingState: state => {
           live.pairing = state;
           if (state.status === "ready") this.identities.ready(linkId); else this.identities.closed(linkId);
-          // What the contact allows is remembered for requests held while it is away.
-          if (state.status === "ready" && live.link) void this.hold.rememberPeerMethods(linkId, PAYMENT_METHODS.filter(m => live.link!.peerAllowsPayment(m))).catch(() => {});
+          // What the contact allows is remembered for requests held while it is away, or waiting for live: its choice,
+          // not whether it had a wallet then (it may make one meanwhile), as its capability record says too.
+          if (state.status === "ready" && live.link) void this.hold.rememberPeerMethods(linkId, PAYMENT_METHODS.filter(m => live.link!.peerChoosesPayment(m))).catch(() => {});
           if (EXTERNAL_IDENTITIES_ENABLED && state.status === "ready") void this.proofsFor(linkId).then(p => p.resendWithdrawals()).catch(() => {});
           else live.proofs?.stop();
           this.observeTransport(linkId);
