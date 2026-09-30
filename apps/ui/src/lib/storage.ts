@@ -422,8 +422,11 @@ export function markSessionAsRead(sessionId: string): void {
 /**
  * What counts as unread: what came to me since the last read message. Never a message of mine (one forwarded here
  * from another chat lands while this one is not open) nor a join line, which the other side's app adds by itself.
+ * Of a call's lines, only a missed call: the others tell of a call I was on or made, written while its chat was
+ * loaded off screen (it rang, or I opened another chat during it).
  */
 function countsAsUnread(message: ChatMessage): boolean {
+  if (message.callEvent) return message.callEvent.type === "call_missed";
   return message.sender !== "me" && message.systemEvent?.type !== "join";
 }
 
