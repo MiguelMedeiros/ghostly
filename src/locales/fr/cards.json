@@ -1,0 +1,37 @@
+{
+  "panel": {
+    "active": "Actives",
+    "activeCount": "{{count}} actives",
+    "button": "Tâches",
+    "buttonCount": "Tâches, {{count}} actives",
+    "finished": "Terminées",
+    "info": "Des bots publient ces cartes et les tiennent à jour. Touchez-en une pour y aller dans la discussion.",
+    "routines": "Routines",
+    "title": "Tâches"
+  },
+  "task": {
+    "branch": "Branche :",
+    "item": {
+      "done": "Fait",
+      "failed": "Échoué",
+      "pending": "À faire",
+      "running": "En cours",
+      "skipped": "Ignoré"
+    },
+    "now": "Maintenant :",
+    "pr": "PR #{{number}}",
+    "prNoNumber": "Pull request",
+    "progress": "Progression",
+    "started": "Commencée {{ago}}",
+    "status": {
+      "blocked": "Bloquée",
+      "cancelled": "Annulée",
+      "done": "Terminée",
+      "failed": "Échouée",
+      "queued": "En attente",
+      "running": "En cours"
+    },
+    "steps": "{{done}} étapes sur {{total}}",
+    "updated": "mise à jour {{ago}}"
+  }
+}

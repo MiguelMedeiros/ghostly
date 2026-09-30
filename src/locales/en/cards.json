@@ -1,0 +1,37 @@
+{
+  "panel": {
+    "active": "Active",
+    "activeCount": "{{count}} active",
+    "button": "Tasks",
+    "buttonCount": "Tasks, {{count}} active",
+    "finished": "Finished",
+    "info": "Bots post these cards and keep them up to date. Tap one to go to it in the chat.",
+    "routines": "Routines",
+    "title": "Tasks"
+  },
+  "task": {
+    "branch": "Branch:",
+    "item": {
+      "done": "Done",
+      "failed": "Failed",
+      "pending": "To do",
+      "running": "In progress",
+      "skipped": "Skipped"
+    },
+    "now": "Now:",
+    "pr": "PR #{{number}}",
+    "prNoNumber": "Pull request",
+    "progress": "Progress",
+    "started": "Started {{ago}}",
+    "status": {
+      "blocked": "Blocked",
+      "cancelled": "Cancelled",
+      "done": "Done",
+      "failed": "Failed",
+      "queued": "Queued",
+      "running": "Running"
+    },
+    "steps": "{{done}} of {{total}} steps",
+    "updated": "updated {{ago}}"
+  }
+}

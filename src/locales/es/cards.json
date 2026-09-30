@@ -1,0 +1,37 @@
+{
+  "panel": {
+    "active": "Activas",
+    "activeCount": "{{count}} activas",
+    "button": "Tareas",
+    "buttonCount": "Tareas, {{count}} activas",
+    "finished": "Terminadas",
+    "info": "Los bots publican estas tarjetas y las mantienen al día. Toca una para ir a ella en el chat.",
+    "routines": "Rutinas",
+    "title": "Tareas"
+  },
+  "task": {
+    "branch": "Rama:",
+    "item": {
+      "done": "Hecho",
+      "failed": "Falló",
+      "pending": "Pendiente",
+      "running": "En curso",
+      "skipped": "Omitido"
+    },
+    "now": "Ahora:",
+    "pr": "PR #{{number}}",
+    "prNoNumber": "Pull request",
+    "progress": "Progreso",
+    "started": "Empezó {{ago}}",
+    "status": {
+      "blocked": "Bloqueada",
+      "cancelled": "Cancelada",
+      "done": "Hecha",
+      "failed": "Falló",
+      "queued": "En cola",
+      "running": "En curso"
+    },
+    "steps": "{{done}} de {{total}} pasos",
+    "updated": "actualizada {{ago}}"
+  }
+}

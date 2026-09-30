@@ -1,0 +1,37 @@
+{
+  "panel": {
+    "active": "进行中",
+    "activeCount": "{{count}} 个进行中",
+    "button": "任务",
+    "buttonCount": "任务，{{count}} 个进行中",
+    "finished": "已结束",
+    "info": "机器人发布这些卡片并保持更新。点按一张即可跳到聊天中的位置。",
+    "routines": "例行任务",
+    "title": "任务"
+  },
+  "task": {
+    "branch": "分支：",
+    "item": {
+      "done": "完成",
+      "failed": "失败",
+      "pending": "待办",
+      "running": "进行中",
+      "skipped": "已跳过"
+    },
+    "now": "当前：",
+    "pr": "PR #{{number}}",
+    "prNoNumber": "拉取请求",
+    "progress": "进度",
+    "started": "开始于{{ago}}",
+    "status": {
+      "blocked": "受阻",
+      "cancelled": "已取消",
+      "done": "已完成",
+      "failed": "失败",
+      "queued": "排队中",
+      "running": "进行中"
+    },
+    "steps": "{{done}}/{{total}} 步",
+    "updated": "更新于{{ago}}"
+  }
+}
