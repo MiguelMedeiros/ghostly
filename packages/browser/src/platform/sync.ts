@@ -74,6 +74,7 @@ export function toChatMessage(message: StoredMessage, peerPubKeyZ32: string, myP
     ...(message.reactions && { reactions: message.reactions }),
     ...(message.edit && { edit: message.edit }),
     ...(message.forwarded && { forwarded: message.forwarded }),
+    ...(message.card && { card: message.card }),
     meta: modern ? undefined : {
       dhtKey: peerPubKeyZ32,
       encryptedPayloadLength: 0,
@@ -127,6 +128,8 @@ function mirrorMessages(linkId: string, messages: StoredMessage[]): void {
         previous.text = message.text;
         previous.edit = message.edit;
         if (message.preview) previous.preview = message.preview; else delete previous.preview;
+        // A status card belongs to its version (WISP 4xx · Status Cards): the edit's, or none.
+        if (message.card) previous.card = message.card; else delete previous.card;
         updated = true;
       }
       // Only a join announcement has one; the others are not mapped again.

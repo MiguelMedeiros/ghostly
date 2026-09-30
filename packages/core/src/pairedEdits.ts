@@ -2,6 +2,7 @@ import { sha256 } from "@noble/hashes/sha2.js";
 import { toBase64Url, utf8Encode } from "./bytes";
 import { LIMITS } from "./frames";
 import { parseLinkPreview, type LinkPreview } from "./linkPreview";
+import { cardEditNumber, readStatusCard, type StatusCard } from "./statusCards";
 
 /**
  * Editing a sent text in a 1:1 chat (WISP 401 § Edits). The sender says the whole new text of one of its own
@@ -14,7 +15,9 @@ import { parseLinkPreview, type LinkPreview } from "./linkPreview";
  * side: the frame comes on the session authenticated with the pinned contact, and the receiver looks the id up among
  * that contact's messages only. The highest `e` wins, whatever order frames arrive in; an edit that is not newer is
  * confirmed and changes nothing. A preview (`pv`, WISP 401 § Link previews) may come with the new text, as with a
- * message. Older apps drop both frames: they have an id, but a `t` they do not know.
+ * message. A status card (`sc`, WISP 4xx · Status Cards) may come with it too; a card message takes up to
+ * `STATUS_CARD_LIMITS.edits` edits, a number past `MAX_EDITS_PER_MESSAGE` holding only with a card. Older apps drop
+ * both frames: they have an id, but a `t` they do not know.
  */
 
 export const EDIT_FRAME = "paired-edit";
@@ -46,16 +49,22 @@ export interface WireEdit {
   /** The whole new text. */
   m: string;
   pv?: LinkPreview;
+  /** The status card of this version (WISP 4xx · Status Cards): a message with a card takes an edit with one. */
+  sc?: StatusCard;
 }
 
 /** Largest edit frame sent with a preview: the preview is left out past it, as with a message. */
 const MAX_EDIT_FRAME = 56 * 1024;
 
-/** A `paired-edit` frame; the preview is left out when the frame would be too large with it. */
+/**
+ * A `paired-edit` frame; the preview is left out when the frame would be too large with it. A card (`sc`) always
+ * goes: it is bounded well under what the frame has room for, and it is what a card message is.
+ */
 export function editFrame(edit: WireEdit): string {
-  const plain = JSON.stringify({ t: EDIT_FRAME, id: edit.id, e: edit.e, ts: edit.ts, m: edit.m });
+  const base = { t: EDIT_FRAME, id: edit.id, e: edit.e, ts: edit.ts, m: edit.m, ...(edit.sc && { sc: edit.sc }) };
+  const plain = JSON.stringify(base);
   if (!edit.pv) return plain;
-  const withPreview = JSON.stringify({ t: EDIT_FRAME, id: edit.id, e: edit.e, ts: edit.ts, m: edit.m, pv: edit.pv });
+  const withPreview = JSON.stringify({ ...base, pv: edit.pv });
   return withPreview.length <= MAX_EDIT_FRAME ? withPreview : plain;
 }
 
@@ -76,22 +85,25 @@ export function validEditMessage(m: unknown): m is string {
 
 /**
  * The edit a `paired-edit` frame says, or null when it is malformed (then it says nothing and is not confirmed). A
- * preview that does not hold is dropped, never the edit.
+ * preview or a card that does not hold is dropped, never the edit; an edit numbered past `MAX_EDITS_PER_MESSAGE`
+ * holds only with a card.
  */
-export function parseEditFrame(frame: Record<string, unknown>): WireEdit | null {
+export function parseEditFrame(frame: Record<string, unknown>, now = Date.now()): WireEdit | null {
   if (frame?.t !== EDIT_FRAME) return null;
   const { id, e, ts, m } = frame;
-  if (typeof id !== "string" || !ID.test(id) || !validEditNumber(e)) return null;
+  if (typeof id !== "string" || !ID.test(id) || !cardEditNumber(e)) return null;
   if (typeof ts !== "number" || !Number.isSafeInteger(ts) || ts <= 0) return null;
   if (!validEditMessage(m)) return null;
+  const sc = frame.sc === undefined ? undefined : readStatusCard(frame.sc, now);
+  if (!validEditNumber(e) && !sc) return null;
   const pv = frame.pv === undefined ? undefined : parseLinkPreview(frame.pv, m);
-  return { id, e, ts, m, ...(pv && { pv }) };
+  return { id, e, ts, m, ...(pv && { pv }), ...(sc && { sc }) };
 }
 
 /** The confirmation a `paired-edited` frame says, or null when it is malformed. */
 export function parseEditedFrame(frame: Record<string, unknown>): { id: string; e: number } | null {
   if (frame?.t !== EDITED_FRAME) return null;
-  return typeof frame.id === "string" && ID.test(frame.id) && validEditNumber(frame.e) ? { id: frame.id, e: frame.e } : null;
+  return typeof frame.id === "string" && ID.test(frame.id) && cardEditNumber(frame.e) ? { id: frame.id, e: frame.e } : null;
 }
 
 /**

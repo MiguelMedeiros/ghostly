@@ -1,0 +1,1 @@
+Status cards: `sc` on `paired-message` and `paired-edit` (at most 8 KiB, always sent, `pv` left out first past 56 KiB); a card's edit numbered up to 5,000, past 100 only while both sides list `status-card/1`; a card's edit never on the DHT floor.

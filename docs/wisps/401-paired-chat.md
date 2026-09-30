@@ -79,6 +79,17 @@ A `paired-message` MAY carry `fw`, how many times it has been forwarded ([400](4
 
 A file forwarded carries the same `fw` on its announcement (`pf-offer`, `pf-start`, [501](501-paired-files.md)) and in a held item's `meta` ([4xx](4xx-store-and-forward.md#bundle)); a held text too. The reader drops a `fw` that is not such a number and keeps the message, which then reads as written there. It goes whole whatever else is left out: when the frame would pass 56 KiB, `pv` goes first. Over the DHT it is the fifteenth element ([403](403-dht-text.md#forwards)). A text sent again after a lost session keeps its `fw`. Older apps ignore the field.
 
+### Status cards
+
+A `paired-message` MAY carry `sc`, a bot's status card (revision 2026-09-29, [4xx · Status Cards](4xx-status-cards.md)), and so MAY a `paired-edit`, with the card of that version:
+
+```
+{ "t": "paired-message", "id", "ts", "m", "pv"?, "r"?, "fw"?, "sc"?: { "kind": "task" | "routine", "id", … } }
+{ "t": "paired-edit", "id", "e", "ts", "m", "pv"?, "sc"? }
+```
+
+`m` is the card's fallback text. A card is at most 8 KiB and always goes: when the frame would pass 56 KiB, `pv` goes first. A reader drops a card that does not hold ([4xx](4xx-status-cards.md#the-readers-rule)) and keeps the message as its text. A `paired-edit` with a card MAY be numbered up to **5,000**; one numbered past 100 without a card is malformed. Both sides list **`status-card/1`** in `paired-capabilities` when their app shows cards; an author sends an edit numbered past 100 only while both do, so an older app, which would drop it, keeps the last text it took. A card's edit waits for this session: it never goes on the DHT floor ([403](403-dht-text.md#what-never-enters-this-path)). Older apps ignore `sc`.
+
 ### Liveness and reconnection
 
 A connection can die without either side being told (a laptop asleep, an app suspended in the background, a network change). While a session is ready, each side sends `{"t":"paired-ping"}` every 15 seconds and answers each one with `{"t":"paired-pong"}`. Any frame from the peer counts as a sign of life. Three pings in a row with nothing back close the session and its connection, and the dialling side tries again. This counts from the open for a peer whose `pair-offer` lists `ping/1` in `extensions`, so a contact that freezes before the first ping (a laptop closed right after connecting) is noticed too; for a peer that does not say so, it counts once that peer has answered a ping, and a peer that never answers one (an older app) is never cut off for it. Missed pings are counted, not timed, so a throttled background tab is not mistaken for a dead peer.

@@ -75,6 +75,7 @@ export * from "./groupWake";
 export * from "./groupEdits";
 export * from "./replies";
 export * from "./forwards";
+export * from "./statusCards";
 export * from "./reactions";
 export * from "./pins";
 export * from "./groupEntry";
