@@ -1,5 +1,5 @@
-import { execFileSync, spawn, type ChildProcess } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { spawn, type ChildProcess } from "node:child_process";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { createInterface } from "node:readline";
@@ -8,17 +8,16 @@ import { createInterface } from "node:readline";
 const headlessEnv = (): NodeJS.ProcessEnv => ({ GHOSTLY_DHT: "0", ...process.env });
 
 /**
- * The headless Ghostly (`packages/cli`, WISP 11xx) in a test: built once per worker, one profile per bot in a folder of
- * its own, pointed at the test's Pkarr relay. Its commands answer JSON; `listen` streams events.
+ * The headless Ghostly (`packages/cli`, WISP 11xx) in a test: built once per run before the workers start
+ * (support/headlessBuild.ts, the configs' globalSetup), one profile per bot in a folder of its own, pointed at the
+ * test's Pkarr relay. Its commands answer JSON; `listen` streams events.
  */
 const ROOT = resolve(import.meta.dirname, "../..");
 const BIN = join(ROOT, "packages/cli/dist/ghostly.mjs");
-let built = false;
 
-export function buildHeadless(): void {
-  if (built) return;
-  execFileSync("npm", ["run", "build", "-w", "@ghostlytools/cli"], { cwd: ROOT, stdio: "ignore" });
-  built = true;
+/** A worker never builds: the build empties dist/ under the bots of the other workers. */
+function assertBuilt(): void {
+  if (!existsSync(BIN)) throw new Error(`${BIN} is missing: the Playwright config's globalSetup (support/headlessBuild.ts) builds it`);
 }
 
 export class HeadlessBot {
@@ -46,7 +45,7 @@ export class HeadlessBot {
 
   /** The profile's daemon, and a listener collecting its events. */
   async start(relay: string, name: string): Promise<void> {
-    buildHeadless();
+    assertBuilt();
     await this.run("settings", "set", "relays", JSON.stringify([relay]));
     await this.run("profile", "set", "--name", name);
     const daemon = this.spawn("daemon");
