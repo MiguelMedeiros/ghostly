@@ -197,6 +197,10 @@ ghostly listen --type message.received --cursor ~/.ghostly/echo.cursor --exec '
   without one), shows "thinking" while it works, and sends its answer with `send --reply`. Each turn runs with no
   tools, no MCP servers and none of your Claude Code settings, so a contact's text can shape an answer but cannot
   read a file or run a command. A group gets one conversation per member ([safe setup](AI-AGENTS.md#safe-setup)).
+- A task card: `ghostly task send <chat|group> --title "…" --steps 1/4`, then `ghostly task update <chat|group> <task>
+  --steps 2/4 --step "…"` as the work goes, and `--status done` at the end. People see a small card with a progress
+  bar and the pull request's size, which opens on a tap; apps without cards read a short text. Updates merge, at
+  most one per card every 2.5 s ([WISP 4xx · Status Cards](wisps/4xx-status-cards.md)).
 - A voice bot: [examples/call-echo.mjs](../packages/cli/examples/call-echo.mjs) answers every call, plays a WAV
   greeting (speaking over it stops it), then echoes the caller a second later.
 

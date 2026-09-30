@@ -1,4 +1,4 @@
-import { type Command, groupWait, cursor } from "./shared";
+import { type Command, groupWait, cursor, taskFields, taskOptions, wait } from "./shared";
 
 /** Invites, chats and messages: one entry per command, in alphabetical order (test/commands.test.ts checks). */
 export const commands: Record<string, Command> = {
@@ -65,6 +65,20 @@ export const commands: Record<string, Command> = {
     method: "chat.react", usage: "react <chat> <message> <emoji> [--remove]", summary: "React to a message with one emoji (it replaces yours); --remove takes yours back",
     args: ["chat", "message", "emoji..."], options: { remove: { type: "boolean", description: "Take your reaction back" } },
     params: ({ options }, a) => ({ chat: a.chat, message: a.message, emoji: a.emoji, remove: options.remove === true }),
+  },
+  "task send": {
+    method: "task.send", usage: "task send <chat|group> --title <title> [--status s] [--progress n | --steps a/b] [--step \"...\"] [--item state:text]... [--pr-url url --pr-number n --additions n --deletions n --files n] [--branch b] [--link url]... [--id id] [--json json|-|file] [--wait none|sent|delivered] [--timeout s]",
+    summary: "Send a task card (a bot's work: status, progress, its PR) to a chat or group; prints its id and message",
+    args: ["chat"],
+    options: { id: { type: "string", description: "The task's id, kept across updates (default: made up)" }, ...taskOptions, ...groupWait, wait: wait.wait },
+    params: ({ options }, { chat }) => ({ chat, card: taskFields(options), text: options.text, wait: options.wait, timeout: options.timeout }),
+  },
+  "task update": {
+    method: "task.update", usage: "task update <chat|group> <task> [--status s] [--progress n | --steps a/b] [--step \"...\"] [--item state:text]... [--pr-url ...] [--json json|-|file] [--wait none|confirmed|sent] [--timeout s]",
+    summary: "Update a task card you sent: the fields given, merged over it (at most one update per 2.5 s; sooner ones merge)",
+    args: ["chat", "task"],
+    options: { ...taskOptions, wait: { type: "string", description: "none (default), confirmed (a chat's contact took it) or sent (a group's edge took it)" }, timeout: groupWait.timeout },
+    params: ({ options }, a) => ({ chat: a.chat, task: a.task, card: taskFields(options), text: options.text, wait: options.wait, timeout: options.timeout }),
   },
   "typing": {
     method: "chat.typing", usage: "typing <chat> [--kind typing|recording|thinking] [--status \"<text>\"] [--for s] [--stop]",

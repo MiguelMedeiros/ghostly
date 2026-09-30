@@ -45,6 +45,26 @@ describe("GroupEdits on its own", () => {
     return { edits, sent, messages, tick: (ms: number) => { clock += ms; } };
   }
 
+  it("takes a member's card updates at most once a second, the highest of a burst last, and a card message past a text's hundred", async () => {
+    vi.useFakeTimers();
+    const card = (progress: number) => ({ kind: "task" as const, id: "t1", title: "Build", status: "running" as const, progress });
+    const { edits, messages, tick } = setup([{ ...bobs(0, "🔄 Build"), card: card(0) }]);
+    const id = bobs(0).id;
+    expect(await edits.receive("g1", bob, { id, e: 1, ts: 1, m: "🔄 Build 10%", sc: card(10) })).toBe("applied");
+    expect(messages[0]).toMatchObject({ card: { progress: 10 }, edit: { seq: 1, history: [] } });
+    for (const e of [2, 4, 3]) await edits.receive("g1", bob, { id, e, ts: e, m: `🔄 Build ${e}0%`, sc: card(e * 10) });
+    expect(messages[0].card).toMatchObject({ progress: 10 });
+    tick(1_000); await vi.advanceTimersByTimeAsync(1_000);
+    expect(messages[0]).toMatchObject({ card: { progress: 40 }, edit: { seq: 4 } });
+    tick(1_000);
+    await edits.receive("g1", bob, { id, e: 150, ts: 5, m: "🔄 Build", sc: card(99) });
+    expect(messages[0]).toMatchObject({ card: { progress: 99 }, edit: { seq: 150 } });
+    // A text edit leaves it a text: the card belongs to its version.
+    tick(1_000);
+    expect(await edits.receive("g1", bob, { id, e: 151, ts: 6, m: "plain" })).toBe("applied");
+    expect(messages[0].card).toBeUndefined();
+  });
+
   it("shows mine at once, says it to the group, and keeps what it replaces", async () => {
     const { edits, sent, messages } = setup([mine(0, "Working: 0 of 3")]);
     expect(await edits.edit("g1", mine(0).id, "  Working: 1 of 3 ")).toEqual({ error: null, messageId: mine(0).id });

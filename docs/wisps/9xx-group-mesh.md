@@ -163,6 +163,18 @@ A forwarded text ([400](400-chat.md#forwards), revision 0.12) carries `f`, its h
 
 Outside `sig`, which older apps check as it was; inside `xs`, after the boxes and only when present (`["ghostly-group/1 msg+", g, e, s, n, ts, nn, c, m.n, m.c, r.n, r.c, f]`), so what an older app signs and checks is unchanged. A member handing the frame on keeps `f` only with the author's `xs`, as the boxes; a frame handed on without it arrives without `f`. A receiver drops an `f` that is not such a number and takes the message. Older apps ignore it.
 
+## Status cards
+
+A bot's status card ([4xx · Status Cards](4xx-status-cards.md), revision 2026-09-29) rides in a sealed box of its own, `sc`, beside the text, which is its fallback: the card as JSON (at most 8 KiB), sealed under the message's epoch key with a nonce of its own, bound to the header (AAD `["ghostly-group/1 card", g, e, s, n, ts]`).
+
+```
+{ "t": "group-msg", …, "sig", "m"?, "r"?, "f"?, "sc"?: { "n", "c" }, "xs"? }
+```
+
+Outside `sig`; inside `xs` after everything else and only when present (`[…, r.n, r.c, f?, "sc", sc.n, sc.c]`), so what an older app signs and checks for other messages is unchanged. A member handing the frame on keeps the box only with the author's `xs`; a copy handed on without it arrives as text, and a whole copy completes it (unless an edit came meanwhile: a card belongs to its version). A box that does not open, or a card that does not hold, is no card: the text shows.
+
+A `group-edit`'s sealed body MAY carry the card of that version, `{ "text", "m"?, "sc"? }`, and with one its `v` may go up to **5,000**; a `v` past 100 without a card is dropped. An older member drops an edit numbered past 100 and keeps the last text it took.
+
 ## Reactions
 
 A member reacts to a group message ([400](400-chat.md#reactions), revision 0.7) with a frame of its own, sent by the member who reacts over each of its edges:

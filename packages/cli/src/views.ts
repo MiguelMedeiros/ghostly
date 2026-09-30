@@ -1,4 +1,5 @@
 import type { GroupView, LinkView, MessageFile, StoredMessage } from "@ghostly/browser/shared/types";
+import type { StatusCard } from "@ghostly/core";
 
 /**
  * The JSON shapes the CLI and the daemon answer with. They are the contract bots code against (WISP 11xx), kept
@@ -111,6 +112,8 @@ export interface MessageJson {
   editPending?: boolean;
   /** A forwarded message (WISP 400 § Forwards): how many times it has been forwarded. Never who wrote it first. */
   forwarded?: number;
+  /** A bot's task or routine (WISP 4xx · Status Cards), as its version says it; `text` is its fallback. */
+  card?: StatusCard;
 }
 
 export function messageJson(message: StoredMessage): MessageJson {
@@ -136,6 +139,7 @@ export function messageJson(message: StoredMessage): MessageJson {
     ...(reactionsJson(message).length ? { reactions: reactionsJson(message) } : {}),
     ...(message.edit ? { edits: message.edit.seq, editedAt: message.edit.at, ...(message.edit.pending ? { editPending: true } : {}) } : {}),
     ...(message.forwarded ? { forwarded: message.forwarded } : {}),
+    ...(message.card ? { card: message.card } : {}),
   };
 }
 
