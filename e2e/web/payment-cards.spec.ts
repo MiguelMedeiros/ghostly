@@ -87,6 +87,12 @@ test("the chat's payment cards: flip through them, turn one over, and back to th
   await card("cashu").focus();
   await page.keyboard.press("Enter");
   const back = page.getByTestId("payment-back");
+  // While it turns, Request and Send wait out of sight (a click then used to reach nothing); once it is still they
+  // fade in.
+  const actions = back.locator(".payment-back-actions");
+  await expect(actions).toHaveAttribute("data-turning", "true");
+  await expect(actions).not.toHaveAttribute("data-turning");
+  await expect(actions).toHaveCSS("opacity", "1");
   await expect(composer).toHaveAttribute("data-side", "back");
   await expect(back).toContainText("Cashu");
   await expect(back).toContainText(/· with \S/);
