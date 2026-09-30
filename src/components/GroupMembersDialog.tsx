@@ -107,10 +107,11 @@ export function GroupMembersDialog({ group, onClose }: { group: GroupView; onClo
     </div>
     {live.status === "active" && (live.isAdmin || (live.profile === "community" && live.entryLink)) && <GroupLinkPanel group={live} />}
     <ul className="mt-3 max-h-56 space-y-1 overflow-y-auto" data-testid="group-member-list">
-      {live.members.map(m => <li key={m.key} data-testid="group-member" data-key={m.key} data-role={m.role} className="flex items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-surface-hover">
+      {live.members.map(m => <li key={m.key} data-testid="group-member" data-key={m.key} data-role={m.role} className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg px-2 py-1.5 hover:bg-surface-hover">
         <span role="img" aria-label={m.online ? t("group.members.reachable") : t("group.members.notReachable")} className={`h-2 w-2 shrink-0 rounded-full ${m.edge || m.me ? edgeDot(m) : m.online ? "bg-accent" : "bg-text-muted"}`} />
         <MemberAvatar src={photoOf(m)} name={m.me ? state?.settings.nick || memberName(m, t) : memberName(m, t)} />
-        <span className="contact-row min-w-0 flex-1">
+        {/* The name keeps room for about 16 characters: the badges and an admin's buttons go under it when the row is narrower (a phone, a long word in another language). */}
+        <span className="contact-row min-w-[8.5rem] flex-1">
           <span className="flex min-w-0 items-center gap-1.5 text-sm"><span className="min-w-0 truncate">{memberName(m, t)}</span>{!m.me && <ContactMarks peerKey={contactKey(m.key)} testId="group-member-marks" />}{/* An unnamed member's name is its key already ("Member 3r69cg...d51a"): the key again was cut to one character on a phone. */}
             {(m.me || m.nick) && <span data-testid="group-member-key" className="min-w-0 shrink-[100] truncate font-mono text-[10px] text-text-muted/60">{publicKeyLabel(m.key)}</span>}</span>
           {!m.me && <span className="block truncate text-[11px] text-text-muted" data-testid="group-member-status">{edgeLabel(m, Date.now(), t, agoIn(language))}</span>}
@@ -118,7 +119,7 @@ export function GroupMembersDialog({ group, onClose }: { group: GroupView; onClo
         {m.role === "admin" && <span className="rounded-full bg-accent/15 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-accent">{t("group.members.admin")}</span>}
         {m.hub && <span data-testid="group-member-hub" title={t("group.hubs.badgeHint")} className="rounded-full bg-surface-alt px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-text-secondary">{t("group.hubs.badge")}</span>}
         {m.missing > 0 && <span title={t("group.members.missingHint")} className="text-[10px] text-amber-500">{t("group.members.missing", { count: m.missing })}</span>}
-        {live.isAdmin && !m.me && <>
+        {live.isAdmin && !m.me && <span data-testid="group-member-actions" className="ms-auto flex shrink-0 items-center gap-1">
           {live.profile === "mesh" && live.members.length > MESH_HUBS.threshold && <Select size="sm" fit aria-label={t("group.hubs.choice")} data-testid="group-member-hub-role" disabled={busy !== null}
             value={m.hubRole ?? "auto"} options={hubRoles}
             onChange={role => void run(m.key, () => engine.call("setGroupHub", { groupId: live.id, key: m.key, role: role === "auto" ? null : role }))} />}
@@ -126,7 +127,7 @@ export function GroupMembersDialog({ group, onClose }: { group: GroupView; onClo
             className="rounded px-2 py-1 text-xs text-text-secondary hover:bg-surface-alt hover:text-text-primary disabled:opacity-40">{t("group.members.makeAdmin")}</button>
           <button disabled={busy !== null} onClick={() => setRemoving(m)} data-testid="group-remove-member"
             className="rounded px-2 py-1 text-xs text-danger hover:bg-danger/10 disabled:opacity-40">{t("group.members.remove")}</button>
-        </>}
+        </span>}
       </li>)}
     </ul>
     {live.isAdmin && live.status === "active" && live.profile !== "community" && <div className="mt-4">
