@@ -284,6 +284,21 @@ describe("GroupChat: leaving", () => {
     expect(within(dialog).getByTestId("group-leave-confirm")).toBeEnabled();
   });
 
+  // The engine hands the role to the first member in roster order over a direct edge of mine (`successor()`): a member
+  // reached through a hub cannot take the role commit, so the dialog does not name one.
+  it("names the member the engine hands the role to: the first one over a direct edge, not one reached through a hub", async () => {
+    const { user } = openGroup(adminOf([member({ key: BOB, nick: "Bob", online: true, viaHub: true }), member({ key: ALICE, nick: "Alice", online: true })]));
+    const dialog = await leaveFromMenu(user);
+    expect(within(dialog).getByTestId("group-leave-successor")).toHaveTextContent("You are the admin: Alice becomes the admin when you leave.");
+  });
+
+  it("keeps the admin from leaving while the only members online are reached through a hub", async () => {
+    const { user } = openGroup(adminOf([member({ key: BOB, nick: "Bob", online: true, viaHub: true })]));
+    const dialog = await leaveFromMenu(user);
+    expect(within(dialog).queryByTestId("group-leave-successor")).not.toBeInTheDocument();
+    expect(within(dialog).getByTestId("group-leave-confirm")).toBeDisabled();
+  });
+
   it("keeps the admin from leaving while no member is online to take over", async () => {
     const { user } = openGroup(adminOf([member({ key: BOB, nick: "Bob" })]));
     const dialog = await leaveFromMenu(user);
