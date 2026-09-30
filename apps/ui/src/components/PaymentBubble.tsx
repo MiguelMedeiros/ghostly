@@ -12,6 +12,7 @@ import { Select } from "./ui/Select";
 import { NetworkTag, satsIn } from "./NetworkTag";
 import { useI18n } from "../contexts/I18nContext";
 import { ConfirmRealMoney } from "./ConfirmRealMoney";
+import { railLine } from "./paymentWords";
 import { decimalInput, formatAmount, formatTokenAmount } from "../lib/amount";
 
 /** A payment or a payment request in the chat. The amounts are live: they follow what the wallet knows. */
@@ -147,7 +148,7 @@ export function PaymentBubble({ paymentId, peerPubKey, fallbackText }: { payment
         </span>
         {" "}<span className="text-xs ms-1 text-text-primary/75">{tokenPayment?payment.target?.asset:sats}</span>
       </p>
-      {payment.target && <p className="text-xs text-text-primary/65">{payment.target.method==="usdt"?"USDT":payment.target.method==="arkade"?"Ark":payment.target.method==="bark"?"Bark":payment.target.method==="spark"?"Spark":payment.target.method==="bitcoin"?t("payments.bubble.bitcoinOnchain"):payment.target.method==="fedimint"?"Fedimint":"Cashu"} · {payment.target.network}</p>}
+      {payment.target && <p className="text-xs text-text-primary/65" data-testid="payment-rail">{railLine(t, payment.target.method, payment.target.network)}</p>}
       {!payment.target && fedimint && <p className="text-xs text-text-primary/65" data-testid="payment-fedimint">{isRequest && !outgoing && payment.state === "pending" ? t("payments.bubble.fedimintNoFederation") : "Fedimint"}</p>}
       {shownReview && <PaymentReview key={shownReview.id} review={shownReview} wallet={wallet} onClose={()=>{ setReview(null); if (!review && unfinished) setPutAway(`${unfinished.id}:${unfinished.state}`); }}/>}
       {payment.memo && <p className="text-[13px] m-0 mt-0.5 wrap-break-word">{payment.memo}</p>}

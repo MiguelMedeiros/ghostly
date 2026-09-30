@@ -139,6 +139,6 @@ test.describe("on Breez's regtest", { tag: "@network" }, () => {
     await expect.poll(() => sats(alice), { timeout: 60_000 }).toBeLessThanOrEqual(afterSend - 150);
     expect(await sats(alice)).toBeGreaterThanOrEqual(afterSend - 150 - 20);
     await expect(source(alice).getByTestId("lightning-source-current")).toContainText("Breez");
-    await expect(alice.page.getByTestId("lightning-recent").getByTestId("lightning-op").filter({ hasText: "Payment · 150 sats" })).toContainText("paid");
+    await expect(alice.page.getByTestId("lightning-recent").getByTestId("lightning-op").filter({ hasText: "Payment · 150 test sats" })).toContainText("paid");
   });
 });

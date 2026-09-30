@@ -330,7 +330,7 @@
       "confirmed": "confirmado",
       "failed": "falhou",
       "pending": "pendente",
-      "settled": "liquidado",
+      "settled": "pago",
       "submitted": "enviado",
       "unknown": "desconhecido"
     },

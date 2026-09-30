@@ -6,9 +6,8 @@ import {formatAt} from '../lib/time';
 import {NetworkTag,satsIn} from './NetworkTag';
 import {ConfirmRealMoney} from './ConfirmRealMoney';
 import { formatAmount, formatTokenAmount } from "../lib/amount";
+import { paymentStateLabel, railLine } from "./paymentWords";
 
-/** A payment's state as the review shows it, in the app's language (the English is the state itself). */
-const STATE_KEY={pending:'payments.review.states.pending',submitted:'payments.review.states.submitted',settled:'payments.review.states.settled',failed:'payments.review.states.failed',unknown:'payments.review.states.unknown',cancelled:'payments.review.states.cancelled',confirmed:'payments.review.states.confirmed'} as const;
 
 /**
  * A payment before it goes out, and its status after: the amount, the fee, the destination, and which money it is.
@@ -33,13 +32,13 @@ export function PaymentReview({review:initial,wallet,onClose,onSent}:{review:Rev
  return <section aria-label={t('payments.review.label')} className="rounded-xl border border-border p-3 space-y-3" data-testid="payment-review" data-network={network}>
   <h3 className="text-text-primary text-sm font-semibold flex items-center gap-2 flex-wrap">{review.state==='pending'?t('payments.review.title.pending'):t('payments.review.title.status')}<NetworkTag network={network} testId="review-network"/></h3>
   <p className="text-xl font-semibold text-text-primary">{shown} <span className="text-xs font-normal">{unit}</span></p>
-  <p className="text-xs text-text-secondary">{review.method} · {review.network} · {review.asset}</p>
+  <p className="text-xs text-text-secondary" data-testid="review-rail">{railLine(t,review.method,review.network)}</p>
   <p className="text-xs text-text-secondary" data-testid="review-money">{real?t('payments.review.money.mainnet'):t('payments.review.money.testnet')}</p>
   <dl className="text-xs text-text-secondary space-y-2 break-all">
    <div><dt className="text-text-muted">{t('payments.review.destination')}</dt><dd className="font-mono">{review.address}</dd></div>
    <div><dt className="text-text-muted">{token?t('payments.review.gasLimit'):t('payments.review.fee')}</dt><dd>{token?`${formatTokenAmount(review.fee,18,t.language)} / ${formatTokenAmount(review.feeCap,18,t.language)} ETH`:`${formatAmount(review.fee,t.language)} / ${formatAmount(review.feeCap,t.language)} ${unit}`}</dd></div>
    {!token&&<div><dt className="text-text-muted">{t('payments.review.total')}</dt><dd>{formatAmount(review.amount+review.fee, t.language)} {unit}</dd></div>}
-   <div><dt className="text-text-muted">{t('payments.review.status')}</dt><dd aria-live="polite" data-testid="review-status">{status in STATE_KEY?t(STATE_KEY[status as keyof typeof STATE_KEY]):status}</dd></div>
+   <div><dt className="text-text-muted">{t('payments.review.status')}</dt><dd aria-live="polite" data-testid="review-status">{paymentStateLabel(t,status)}</dd></div>
   </dl>
   <details className="text-xs text-text-secondary"><summary className="cursor-pointer text-text-muted">{t('payments.review.details')}</summary><dl className="space-y-2 pt-2 break-all"><div><dt>{t('payments.review.payee')}</dt><dd>{review.payee}</dd></div><div><dt>{t('payments.review.provider')}</dt><dd>{review.provider}</dd></div><div><dt>{t('payments.review.expires')}</dt><dd>{formatAt(review.expiresAt, { dateStyle: "medium", timeStyle: "short" }, t.language)}</dd></div>{token&&<><div><dt>{t('payments.review.tokenChain')}</dt><dd>{t('payments.review.tokenChainValue',{token:review.token??'',chain:review.chainId??'',decimals:review.decimals??''})}</dd></div><div><dt>{t('payments.review.gasNonce')}</dt><dd>{review.evm?.gasLimit} / {review.evm?.nonce}</dd></div><div><dt>{t('payments.review.feePerGas')}</dt><dd>{review.evm?.maxFeePerGas} / {review.evm?.maxPriorityFeePerGas}</dd></div></>}{review.txid&&<div><dt>{t('payments.review.transaction')}</dt><dd>{review.txid}</dd></div>}</dl></details>
   {token&&<p className="text-[11px] text-text-muted">{review.asset==='TEST-USDT'?t('payments.review.note.usdtTest',{blocks}):t('payments.review.note.usdt',{blocks})}</p>}

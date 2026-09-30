@@ -40,10 +40,10 @@ test("Ark request, explicit approval and receipt in the chat", { tag: ["@feature
   await bob.page.getByTestId("payment-amount").fill("1000");
   await bob.page.getByTestId("payment-request").click();
   const request = chat(alice).getByTestId("payment-bubble").filter({ hasText: "Requests" });
-  await expect(request).toContainText("Ark · regtest");
+  await expect(request).toContainText("Ark · Regtest");
   await request.getByTestId("payment-pay").click();
   const review = request.getByTestId("payment-review");
-  await expect(review).toContainText("arkade · regtest");
+  await expect(review).toContainText("Ark · Regtest");
   await expect(review).toContainText("pending");
   await review.getByRole("button", { name: "Approve payment" }).click();
   await expect(review).toContainText("settled");
@@ -65,7 +65,7 @@ test("Ark request, explicit approval and receipt in the chat", { tag: ["@feature
   await bob.page.getByTestId("payment-amount").fill("400");
   await bob.page.getByTestId("payment-send").click();
   const direct = bob.page.getByTestId("payment-composer").getByTestId("payment-review");
-  await expect(direct).toContainText("arkade · regtest", { timeout: 60000 });
+  await expect(direct).toContainText("Ark · Regtest", { timeout: 60000 });
   await direct.getByRole("button", { name: "Approve payment" }).click();
   // Gone out: the sheet closes, back to the chat, whose bubbles tell the rest.
   await expect(bob.page.getByTestId("payment-composer")).toHaveCount(0, { timeout: 60000 });

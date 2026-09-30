@@ -330,7 +330,7 @@
       "confirmed": "確認済み",
       "failed": "失敗",
       "pending": "保留中",
-      "settled": "決済済み",
+      "settled": "支払い済み",
       "submitted": "送信済み",
       "unknown": "不明"
     },
