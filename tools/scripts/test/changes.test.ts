@@ -2,7 +2,7 @@ import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { assembleChangelog, parseFragment, readFragments } from "../changes.mjs";
+import { assembleChangelog, parseFragment, readFragments, strayFragments } from "../changes.mjs";
 
 const CHANGELOG = `# Changelog
 
@@ -105,5 +105,14 @@ Ghostly next.
     writeFileSync(join(root, "docs/changelog/unreleased/b-second.md"), "---\nsection: Fixed\n---\n- B.\n");
     writeFileSync(join(root, "docs/changelog/unreleased/a-first.md"), "---\nsection: Fixed\n---\n- A.\n");
     expect(readFragments(root).map((f: { name: string }) => f.name)).toEqual(["docs/changelog/unreleased/a-first.md", "docs/changelog/unreleased/b-second.md"]);
+  });
+
+  it("finds entries left in the old changes/ folder", () => {
+    const root = mkdtempSync(join(tmpdir(), "changes-"));
+    expect(strayFragments(root)).toEqual([]);
+    mkdirSync(join(root, "changes"));
+    writeFileSync(join(root, "changes/README.md"), "# How\n");
+    writeFileSync(join(root, "changes/late.md"), "---\nsection: Fixed\n---\n- Late.\n");
+    expect(strayFragments(root)).toEqual(["changes/late.md"]);
   });
 });

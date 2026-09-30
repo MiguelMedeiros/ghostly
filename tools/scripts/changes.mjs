@@ -56,6 +56,20 @@ export function readFragments(root = ROOT) {
     .map((name) => ({ name: `${CHANGES}/${name}`, ...parseFragment(`${CHANGES}/${name}`, readFileSync(join(root, CHANGES, name), "utf8")) }));
 }
 
+/**
+ * Entries still written to the old folder, `changes/` at the root (before 2026-10): a branch made before the move
+ * brings its entry there, where no release would read it.
+ */
+export function strayFragments(root = ROOT) {
+  let names = [];
+  try {
+    names = readdirSync(join(root, "changes"));
+  } catch {
+    return [];
+  }
+  return names.filter((name) => name.endsWith(".md") && name !== "README.md").sort().map((name) => `changes/${name}`);
+}
+
 /** CHANGELOG.md with every fragment's items at the end of its section of "## Unreleased". */
 export function assembleChangelog(changelog, fragments) {
   const lines = changelog.split("\n");
@@ -102,6 +116,11 @@ export function assembleChangelog(changelog, fragments) {
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  const stray = strayFragments();
+  if (stray.length) {
+    console.error(`Changelog entries moved to ${CHANGES}/: move ${stray.join(", ")} there (git mv changes/*.md ${CHANGES}/).`);
+    process.exit(1);
+  }
   const fragments = readFragments();
   const problems = fragments.flatMap((f) => f.problems);
   if (problems.length) {
