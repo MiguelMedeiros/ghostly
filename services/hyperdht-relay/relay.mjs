@@ -146,7 +146,10 @@ export async function startRelay(options = {}) {
     bootstrap = testnet.bootstrap.map(node => `${node.host}:${node.port}`)
   }
   const loopback = bootstrap.length > 0 && bootstrap.every(node => /^(127\.0\.0\.1|localhost):\d+$/.test(String(node)))
-  const dht = options.dht ?? new DHT(bootstrap.length ? { bootstrap, ...(loopback ? { host: '127.0.0.1' } : {}) } : {})
+  // A new node counts itself firewalled until its first network check, about 20 minutes in (dht-rpc's STABLE_TICKS).
+  // Until then two browsers on this relay reach each other only by holepunching the relay's own socket, which on
+  // loopback often fails. On loopback nothing stands between the nodes, so the relay says so from the start.
+  const dht = options.dht ?? new DHT(bootstrap.length ? { bootstrap, ...(loopback ? { host: '127.0.0.1', firewalled: false } : {}) } : {})
   await dht.ready()
 
   const clients = new Set()

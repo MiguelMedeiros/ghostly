@@ -129,6 +129,8 @@ it("reaches the same contact again through one relay, and again after both pages
   // its handshake through several at once and gets several replies: dht-relay 0.4.3 hung the dial on the second.
   const { startRelay } = await import("../../../services/hyperdht-relay/relay.mjs");
   const own = await startRelay({ testnet: 3 });
+  // On its own loopback network the relay's node is reachable from the start, not after dht-rpc's 20 minute check.
+  expect(own.dht.firewalled).toBe(false);
   const seeds = [seed(), seed()];
   const open = () => Promise.all([createRelayedHyperEndpoint(seeds[0], own.url), createRelayedHyperEndpoint(seeds[1], own.url.replace("127.0.0.1", "localhost"))]);
   const dial = async (from: NativeEndpoint, to: NativeEndpoint) => {
