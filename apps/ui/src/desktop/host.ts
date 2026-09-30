@@ -26,6 +26,7 @@ import { createIrohEndpoint, createHyperEndpoint } from "./nativeTransports";
 import { desktopUpdates } from "./updates";
 import { desktopOidc } from "./oidc";
 import { desktopAtproto } from "./atproto";
+import { appCommandForKey, isAppCommand, sendAppCommand } from "../lib/appCommands";
 import { nativeCallOptions, nativeDevices, type NativeCallSupport } from "./nativeCalls";
 import { setDeviceSource } from "../lib/mediaDevices";
 import { setAppBadgeTarget } from "../lib/appBadge";
@@ -209,6 +210,22 @@ export function macPeerBudget(agent = typeof navigator === "undefined" ? "" : na
   return /Macintosh|Mac OS X/.test(agent) && !/iPhone|iPad/.test(agent) ? { peerBudget: MAC_PEER_BUDGET } : {};
 }
 
+/**
+ * New Chat and Settings from outside the page. On a Mac they are the app menu's items (Cmd+N, Cmd+,), which Rust
+ * sends as `app-command` (apps/desktop/src/app_window.rs). Linux and Windows have no menu bar: there the page takes
+ * Ctrl+N and Ctrl+, itself. The Mac leaves the keys to the menu, so a press runs once.
+ */
+export function listenForAppCommands(agent = typeof navigator === "undefined" ? "" : navigator.userAgent): void {
+  void listen<unknown>("app-command", ({ payload }) => { if (isAppCommand(payload)) sendAppCommand(payload); }).catch(() => {});
+  if (/Macintosh|Mac OS X/.test(agent)) return;
+  window.addEventListener("keydown", (event) => {
+    const command = appCommandForKey(event);
+    if (!command) return;
+    event.preventDefault();
+    sendAppCommand(command);
+  });
+}
+
 /** The bundle id of the Desktop builds the e2e tests drive (apps/desktop/tauri.e2e.conf.json), and of their copies. */
 const E2E_IDENTIFIER = "tools.ghostly.e2e";
 
@@ -230,6 +247,7 @@ export function createDesktopHost(version: string, calls: NativeCallSupport | nu
   // Every step of a link's way to a live connection goes to the app's log (see `diagnostic_log`), so a
   // pairing that took long can be read back afterwards, step by step.
   setLinkTraceSink((line) => void invoke("diagnostic_log", { line: `link ${line}` }).catch(() => {}));
+  listenForAppCommands();
   // Files sent and received are real files in the app's data folder, written and read through Rust.
   registerFileBytes("native", async () => new NativeFileBytes(invoke as NativeInvoke), true);
   // The unread count, as the web app's icon has it (muted chats left out), on the Dock icon.
