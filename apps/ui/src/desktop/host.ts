@@ -33,6 +33,7 @@ import { dockBadge } from "./dockBadge";
 import { engine } from "@ghostly/browser/platform/engine";
 import { fileSpace, registerFileBytes } from "@ghostly/browser/shared/fileBytes";
 import { NativeFileBytes, type NativeInvoke } from "@ghostly/browser/shared/fileBytesNative";
+import { setWindowThemeSink } from "../lib/windowTheme";
 
 /**
  * Ghostly Desktop runs the same peer as the browser clients, in its WebView,
@@ -227,6 +228,9 @@ export function createDesktopHost(version: string, calls: NativeCallSupport | nu
   const { node: callOptions, callMedia } = nativeCallOptions(calls);
   // Native calls capture and play in Rust: the microphones, cameras and speakers to choose from are GStreamer's.
   if (callMedia) setDeviceSource(nativeDevices);
+  // The title bar follows the app's Light / Dark choice (null: the system's). On a Mac this is the app's appearance, so
+  // the page's `prefers-color-scheme` follows it too, and comes back to the system's with System.
+  setWindowThemeSink((value) => void invoke("plugin:window|set_theme", { label: "main", value }).catch(() => {}));
   // Every step of a link's way to a live connection goes to the app's log (see `diagnostic_log`), so a
   // pairing that took long can be read back afterwards, step by step.
   setLinkTraceSink((line) => void invoke("diagnostic_log", { line: `link ${line}` }).catch(() => {}));
