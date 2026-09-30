@@ -43,13 +43,15 @@
     "audioIncoming": "音声通話の着信",
     "audioMissed": "不在着信（音声）",
     "audioStarted": "音声通話を開始しました",
+    "audioUnanswered": "応答なし（音声）",
     "videoConnected": "ビデオ通話がつながりました",
     "videoDeclined": "ビデオ通話を拒否しました",
     "videoEnded": "ビデオ通話が終了しました",
     "videoFailed": "ビデオ通話を接続できませんでした",
     "videoIncoming": "ビデオ通話の着信",
     "videoMissed": "不在着信（ビデオ）",
-    "videoStarted": "ビデオ通話を開始しました"
+    "videoStarted": "ビデオ通話を開始しました",
+    "videoUnanswered": "応答なし（ビデオ）"
   },
   "turnCameraOff": "カメラをオフ",
   "turnCameraOn": "カメラをオン",

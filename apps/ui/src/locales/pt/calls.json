@@ -43,13 +43,15 @@
     "audioIncoming": "Chamada de áudio recebida",
     "audioMissed": "Chamada de áudio perdida",
     "audioStarted": "Chamada de áudio iniciada",
+    "audioUnanswered": "Chamada de áudio sem resposta",
     "videoConnected": "Chamada de vídeo conectada",
     "videoDeclined": "Chamada de vídeo recusada",
     "videoEnded": "Chamada de vídeo encerrada",
     "videoFailed": "Chamada de vídeo não conectou",
     "videoIncoming": "Chamada de vídeo recebida",
     "videoMissed": "Chamada de vídeo perdida",
-    "videoStarted": "Chamada de vídeo iniciada"
+    "videoStarted": "Chamada de vídeo iniciada",
+    "videoUnanswered": "Chamada de vídeo sem resposta"
   },
   "turnCameraOff": "Desligar câmera",
   "turnCameraOn": "Ligar câmera",

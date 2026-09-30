@@ -22,6 +22,7 @@ export function callEventText(t: Translate, type: CallEventType, hasVideo?: bool
     case "call_connected": return hasVideo ? t("calls.timeline.videoConnected") : t("calls.timeline.audioConnected");
     case "call_ended": return hasVideo ? t("calls.timeline.videoEnded") : t("calls.timeline.audioEnded");
     case "call_missed": return hasVideo ? t("calls.timeline.videoMissed") : t("calls.timeline.audioMissed");
+    case "call_unanswered": return hasVideo ? t("calls.timeline.videoUnanswered") : t("calls.timeline.audioUnanswered");
     case "call_rejected": return hasVideo ? t("calls.timeline.videoDeclined") : t("calls.timeline.audioDeclined");
     case "call_failed": return hasVideo ? t("calls.timeline.videoFailed") : t("calls.timeline.audioFailed");
     // A kind this version does not know: its stored line as written.

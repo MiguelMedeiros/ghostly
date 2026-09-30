@@ -924,6 +924,7 @@ export function useWebRTC({
     const timer = setTimeout(() => {
       if (callStateRef.current !== ringing) return;
       if (ringing === "offering") {
+        addCallEventMessageRef.current?.("call_unanswered", callHadVideoRef.current);
         hangUpRef.current(true, false);
         setNoAnswer(true);
       } else {

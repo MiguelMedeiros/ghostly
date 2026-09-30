@@ -1,0 +1,1 @@
+Ringing: a caller whose call rang out unanswered now keeps a "Video call, no answer" (or audio) line in the chat, as the side it rang keeps "Missed call". A line in the local history only: no wire identifier or field changed.

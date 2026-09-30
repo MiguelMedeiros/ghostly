@@ -43,13 +43,15 @@
     "audioIncoming": "Incoming audio call",
     "audioMissed": "Missed audio call",
     "audioStarted": "Audio call started",
+    "audioUnanswered": "Audio call, no answer",
     "videoConnected": "Video call connected",
     "videoDeclined": "Video call declined",
     "videoEnded": "Video call ended",
     "videoFailed": "Video call couldn't connect",
     "videoIncoming": "Incoming video call",
     "videoMissed": "Missed video call",
-    "videoStarted": "Video call started"
+    "videoStarted": "Video call started",
+    "videoUnanswered": "Video call, no answer"
   },
   "turnCameraOff": "Turn camera off",
   "turnCameraOn": "Turn camera on",

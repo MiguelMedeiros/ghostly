@@ -157,6 +157,8 @@ describe("placing a call", () => {
     expect(pc.close).toHaveBeenCalledOnce();
     expect(stream.getTracks().every((t) => t.stop.mock.calls.length > 0)).toBe(true);
     expect(call.addCallEventMessage).not.toHaveBeenCalledWith("call_ended", expect.anything(), expect.anything());
+    // The caller's chat keeps a line for it, as the side it rang keeps "Missed call".
+    expect(call.addCallEventMessage).toHaveBeenLastCalledWith("call_unanswered", false);
 
     act(() => { vi.advanceTimersByTime(NO_ANSWER_SHOWN_MS); });
     expect(call.result.current.noAnswer).toBe(false);
