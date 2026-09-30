@@ -22,7 +22,7 @@ export interface Actor extends Peer {
 type Tree = { [key: string]: string | Tree };
 const flatten = (tree: Tree, prefix = ""): [string, string][] =>
   Object.entries(tree).flatMap(([k, v]) => (typeof v === "string" ? [[`${prefix}${k}`, v] as [string, string]] : flatten(v, `${prefix}${k}.`)));
-const locales = join(import.meta.dirname, "..", "..", "src", "locales");
+const locales = join(import.meta.dirname, "..", "..", "apps", "ui", "src", "locales");
 /** A language as `t()` sees it: apps/ui/src/locales/<language>/<area>.json, each area under its file's name. */
 const language = (name: string): Tree =>
   Object.fromEntries(readdirSync(join(locales, name)).filter((f) => f.endsWith(".json")).map((f) => [f.slice(0, -5), JSON.parse(readFileSync(join(locales, name, f), "utf8"))]));
