@@ -88,9 +88,79 @@ export function isSessionKey(key: string | null | undefined): key is string {
   return !!key?.startsWith(getPrefix()) && !key.slice(getPrefix().length).includes("_");
 }
 
+/**
+ * Messages a chat's session keeps in localStorage when the engine keeps its history too (a paired chat's, in IndexedDB):
+ * its last ones, for the chat list and a chat's first moment. The rest the page reads from the engine's copy. A chat of
+ * thousands of messages used to fill the page's storage (5 MB in WebKit, the Desktop app's) and its writes failed
+ * without a word, so it stopped showing what came; and every read parsed megabytes.
+ */
+export const STORED_MESSAGES = 200;
+
+/** Per chat: the ids of the messages the engine keeps and the mirror would bring back (`platform/sync.ts`). */
+const inEngine = new Map<string, ReadonlySet<string>>();
+
+/**
+ * The messages of this chat the engine keeps, as the mirror would write them into its session: those may leave the
+ * session's stored copy, older than its last `STORED_MESSAGES`. Any other (a call's line, a file of mine the chat added
+ * itself) stays there whatever its age: nothing else keeps it.
+ */
+export function setEngineMessages(sessionId: string, ids: ReadonlySet<string>): void {
+  inEngine.set(sessionId, ids);
+}
+
+/**
+ * Per chat: its whole history as this page last saved it, the messages its stored copy no longer holds included. A
+ * session read here gets them back (`withWhole`), so the chat has all of it without localStorage holding it.
+ */
+const whole = new Map<string, ChatMessage[]>();
+
+/**
+ * The session as it is stored: without the messages the engine keeps older than its last `STORED_MESSAGES`, and how
+ * many went (`older`), which the unread count needs.
+ */
+function stored(session: ChatSession): ChatSession {
+  const ids = inEngine.get(session.id);
+  const all = session.messages;
+  if (!ids || all.length <= STORED_MESSAGES) return session;
+  const from = all.length - STORED_MESSAGES;
+  const keep = all.filter((m, i) => i >= from || !ids.has(m.id));
+  if (keep.length === all.length) return session;
+  return { ...session, messages: keep, older: (session.older ?? 0) + all.length - keep.length };
+}
+
+/**
+ * A stored session with the messages its stored copy left out, as this page last saved them; one deleted since (here
+ * or in another page of this app) stays out. Without them in this page (just loaded, before the engine speaks), its last
+ * messages only, with `older` saying how many are not there.
+ */
+function withWhole(session: ChatSession, list = whole.get(session.id)): ChatSession {
+  if (!session.older || !list) return session;
+  const shown = new Set(session.messages.map((m) => m.id));
+  for (const id of session.deletedIds ?? []) shown.add(id);
+  const rest = list.filter((m) => !shown.has(m.id));
+  // Both in time order: one pass puts them together.
+  const messages: ChatMessage[] = [];
+  let i = 0, j = 0;
+  while (i < rest.length || j < session.messages.length) {
+    if (j >= session.messages.length || (i < rest.length && rest[i].timestamp <= session.messages[j].timestamp)) messages.push(rest[i++]);
+    else messages.push(session.messages[j++]);
+  }
+  const { older: _older, ...complete } = session;
+  return { ...complete, messages };
+}
+
 export function saveSession(session: ChatSession): void {
+  const kept = stored(session);
+  // A whole history (not one read without its older messages) is what this page reads back from now on.
+  if (!session.older) {
+    if (kept !== session) whole.set(session.id, session.messages.slice());
+    else whole.delete(session.id);
+  }
   try {
-    localStorage.setItem(getKey(session.id), JSON.stringify(session));
+    const raw = JSON.stringify(kept);
+    // Unchanged: no write, so another page of this app (the extension's) is not told to read it again.
+    if (localStorage.getItem(getKey(session.id)) === raw) return;
+    localStorage.setItem(getKey(session.id), raw);
   } catch {
     // storage full or unavailable
   }
@@ -105,7 +175,8 @@ export function storedSession(sessionId: string): string | null {
   }
 }
 
-export function loadSession(sessionId: string): ChatSession | null {
+/** The session as stored, its older messages left out (see `STORED_MESSAGES`). */
+function loadStored(sessionId: string): ChatSession | null {
   try {
     const raw = localStorage.getItem(getKey(sessionId));
     if (!raw) return null;
@@ -113,6 +184,12 @@ export function loadSession(sessionId: string): ChatSession | null {
   } catch {
     return null;
   }
+}
+
+/** A chat's session, with its whole history as this page knows it (see `withWhole`). */
+export function loadSession(sessionId: string): ChatSession | null {
+  const session = loadStored(sessionId);
+  return session && withWhole(session);
 }
 
 /**
@@ -135,9 +212,12 @@ export function addMessage(
 export function addMessages(
   sessionId: string,
   messages: readonly ChatMessage[],
+  /** These bring back every message its stored copy left out (the engine's whole history): the list is whole again. */
+  complete = false,
 ): ChatSession | null {
   const session = loadSession(sessionId);
   if (!session) return null;
+  if (complete) delete session.older;
 
   const known = new Set([...session.messages.map((m) => m.id), ...(session.deletedIds ?? [])]);
   const fresh = messages.filter((m) => !known.has(m.id) && known.add(m.id));
@@ -180,7 +260,8 @@ export function deleteMessage(
   // Unread is "messages since the last read one": a read message that goes
   // takes its place in that count with it, or every later one reads as unread.
   const lastRead = getLastReadCount(sessionId);
-  setReadCount(sessionId, Math.min(index < lastRead ? lastRead - 1 : lastRead, session.messages.length));
+  const older = session.older ?? 0;
+  setReadCount(sessionId, Math.min(older + index < lastRead ? lastRead - 1 : lastRead, older + session.messages.length));
   return session;
 }
 
@@ -199,6 +280,8 @@ export function deleteSession(sessionId: string): void {
   const peer = loadSession(sessionId)?.peerPubKeyB64;
   if (peer) deletedPeers.add(peer);
   const lastOfPeer = !!peer && !listSessions().some(s => s.id !== sessionId && s.peerPubKeyB64 === peer);
+  whole.delete(sessionId);
+  inEngine.delete(sessionId);
   for (const key of [
     ...(lastOfPeer ? [`${getPrefix()}face_${peer}`] : []),
     getKey(sessionId),
@@ -249,7 +332,7 @@ export function setSessionPinned(sessionId: string, pinned: boolean): void {
  * Sessions already parsed, by key, with the text each was parsed from (`listSessions`). Whoever keeps one owns its
  * sessions: one changed in place must be saved, or dropped from the cache.
  */
-export type SessionCache = Map<string, { raw: string; session: ChatSession }>;
+export type SessionCache = Map<string, { raw: string; session: ChatSession; whole?: { list: ChatMessage[]; session: ChatSession } }>;
 
 /** Every chat, pinned first, then the latest first. With a cache, only a session whose stored text changed is parsed. */
 export function listSessions(cache?: SessionCache): ChatSession[] {
@@ -262,8 +345,13 @@ export function listSessions(cache?: SessionCache): ChatSession[] {
       const raw = localStorage.getItem(key);
       if (!raw) continue;
       const hit = cache?.get(key);
-      const session = hit?.raw === raw ? hit.session : JSON.parse(raw) as ChatSession;
-      if (cache && hit?.session !== session) cache.set(key, { raw, session });
+      const parsed = hit?.raw === raw ? hit.session : JSON.parse(raw) as ChatSession;
+      // With its older messages, the same object while neither it nor its whole history changed (the sync's reconcile
+      // tells an unchanged list by its sessions' identity).
+      const list = parsed.older ? whole.get(parsed.id) : undefined;
+      const known = hit?.session === parsed && list && hit.whole?.list === list ? hit.whole : undefined;
+      const session = !list ? parsed : known?.session ?? withWhole(parsed, list);
+      if (cache && (hit?.session !== parsed || hit.whole?.session !== (list ? session : undefined))) cache.set(key, { raw, session: parsed, ...(list && { whole: { list, session } }) });
       seen.add(key);
       if (session.id && session.mySeedB64 && session.peerPubKeyB64 && session.encKeyB64) {
         sessions.push(session);
@@ -296,7 +384,7 @@ export function unreadUnder(prefix: string): number {
       const session = JSON.parse(localStorage.getItem(key) ?? "null") as ChatSession | null;
       if (!session?.id || !session.mySeedB64 || !session.peerPubKeyB64 || !session.encKeyB64 || !Array.isArray(session.messages)) continue;
       const read = parseInt(localStorage.getItem(`${prefix}read_${session.id}`) ?? "0", 10) || 0;
-      unread += unreadAfter(session.messages, read);
+      unread += unreadAfter(session.messages, read - (session.older ?? 0));
     } catch {
       continue;
     }
@@ -322,9 +410,10 @@ function setReadCount(sessionId: string, count: number): void {
 }
 
 export function markSessionAsRead(sessionId: string): void {
-  const session = loadSession(sessionId);
+  // As stored: how many there are, without putting the older ones back together.
+  const session = loadStored(sessionId);
   if (!session) return;
-  setReadCount(sessionId, session.messages.length);
+  setReadCount(sessionId, (session.older ?? 0) + session.messages.length);
 }
 
 /**
@@ -342,7 +431,8 @@ function unreadAfter(messages: readonly ChatMessage[], read: number): number {
 }
 
 export function getUnreadCount(session: ChatSession): number {
-  return unreadAfter(session.messages, getLastReadCount(session.id));
+  // A session read without its older messages counts from its first one kept.
+  return unreadAfter(session.messages, getLastReadCount(session.id) - (session.older ?? 0));
 }
 
 /**
