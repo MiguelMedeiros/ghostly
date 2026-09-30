@@ -86,6 +86,16 @@ describe("the chat list's rows (compact, the default)", () => {
     expect(within(rowOf("Hal")).queryByTestId("chat-row-unread")).not.toBeInTheDocument();
   });
 
+  it("says a call as the chat's line does, in the app's language, not the English the history keeps", () => {
+    saveSession(chat("m", { nick: "Mia", messages: [message({ text: "Missed video call", sender: "system", callEvent: { type: "call_missed", hasVideo: true } })] }));
+    saveSession(chat("n", { nick: "Ned", messages: [message({ text: "Audio call ended", sender: "system", callEvent: { type: "call_ended", duration: 65_000 } })] }));
+    renderApp(<UpdateProvider><Sidebar /></UpdateProvider>, { language: "pt" });
+    const pt = (key: string) => translateWith(translations.pt)(key as never);
+    expect(within(rowOf("Mia")).getByTestId("chat-row-preview")).toHaveTextContent(new RegExp(`^${pt("calls.timeline.videoMissed")}$`));
+    expect(within(rowOf("Ned")).getByTestId("chat-row-preview")).toHaveTextContent(new RegExp(`^${pt("calls.timeline.audioEnded")}$`));
+    expect(pt("calls.timeline.videoMissed")).not.toBe("Missed video call");
+  });
+
   it("says a join as the chat's line does, in the app's language, not the notice's English text", () => {
     saveSession(chat("j", { nick: "Jo", messages: [message({ text: "👋 Jo joined", sender: "system", systemEvent: { type: "join", pubKey: key("j") } })] }));
     saveSession(chat("k", { nick: "Kim", messages: [message({ text: "👋 Me joined", sender: "system", systemEvent: { type: "join", pubKey: key("z") } })] }));
