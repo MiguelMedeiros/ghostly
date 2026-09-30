@@ -41,7 +41,9 @@
 .payment-back-memo::placeholder{color:#6f685a}
 .payment-back-memo:focus-visible{box-shadow:0 0 0 2px rgb(var(--card-rgb,36,211,194))}
 .payment-back-hint{margin:0;font-size:11px;line-height:1.35;color:rgba(255,255,255,.62)}
-.payment-back-actions{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.payment-back-actions{display:grid;grid-template-columns:1fr 1fr;gap:8px;transition:opacity .2s ease}
+/* While the card turns, Request and Send wait out of sight, then fade in once it is still (PaymentComposer.tsx). */
+.payment-back-actions[data-turning]{opacity:0}
 .payment-back-actions button{padding:10px 12px;border-radius:12px;font-size:14px;font-weight:700;cursor:pointer;transition:filter .2s,opacity .2s}
 .payment-back-actions button:disabled{opacity:.4;cursor:not-allowed}
 .payment-back-actions button:focus-visible{outline:2px solid #fff;outline-offset:2px}
