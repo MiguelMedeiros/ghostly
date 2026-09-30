@@ -1,0 +1,14 @@
+{
+  "appDescription": {
+    "message": "你的服务只在你在线时存在。按身份寻址的临时点对点聊天，以及通过 WebRTC 共享的本地网页应用。",
+    "description": "The extension's description in the Chrome Web Store and on chrome://extensions (132 characters at most)."
+  },
+  "appName": {
+    "message": "Ghostly",
+    "description": "The extension's name: the product's name, the same in every language."
+  },
+  "appShortName": {
+    "message": "Ghostly",
+    "description": "The extension's short name (12 characters at most)."
+  }
+}
