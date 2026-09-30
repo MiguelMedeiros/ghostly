@@ -22,3 +22,22 @@ test("on a phone the group's member line stops before the header's buttons", { t
   const first = (await buttons.boundingBox())!;
   expect(text.x + text.width).toBeLessThanOrEqual(first.x);
 });
+
+for (const phone of [{ width: 390, height: 844 }, { width: 375, height: 667 }]) {
+  test(`a new group on a ${phone.width}×${phone.height} phone: "Go to the group" is in view without scrolling`, { tag: ["@feature:app.mobile-layout", "@feature:groups.community.create"] }, async ({ peer }) => {
+    // The group's ready dialog (QR, link, Share and Copy, the note, the admin's link controls) ran past the screen,
+    // and its only way on sat under the fold: in the iOS Simulator an iPhone 17 had to scroll the dialog to reach it.
+    const { page } = await peer("alice", { mobile: true, viewport: phone });
+    await page.getByTestId("sidebar-new-more").click();
+    await page.getByTestId("new-group").click();
+    await page.getByTestId("new-group-name").fill("Phone plaza");
+    await page.getByTestId("new-group-create").click();
+    const dialog = page.getByTestId("group-share-dialog");
+    const done = dialog.getByTestId("group-share-done");
+    await expect(done).toBeInViewport({ ratio: 1 });
+    // Still a QR a phone's camera reads from across a table.
+    expect((await dialog.getByTestId("group-link-qr").locator("svg").boundingBox())!.width).toBeGreaterThanOrEqual(140);
+    await done.click();
+    await expect(dialog).toHaveCount(0);
+  });
+}
