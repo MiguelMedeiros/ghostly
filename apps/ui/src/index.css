@@ -22,6 +22,8 @@
   --color-accent-hover: var(--theme-accent-hover);
   /* Danger's red: brighter on dark themes, darker on light ones, so its words read at 4.5:1 on either. */
   --color-danger: var(--theme-danger);
+  /* Danger as a fill under white words (Delete, hang up): dark enough for 4.5:1 with white in every theme. */
+  --color-danger-fill: var(--theme-danger-fill);
   /* Something finished well (a bot's task done), the same in every theme, as danger is. */
   --color-success: #22a55a;
   /* Test money's colour, the same in every theme (Real money takes the accent). */
@@ -87,6 +89,7 @@
   --theme-link: #8ad3f6;
   --theme-danger-ink: #ff9a8f;
   --theme-danger: #ea4335;
+  --theme-danger-fill: #d93025;
   --theme-on-accent: #111b21;
   /* Group members' names (lib/memberColors.ts), shared by every dark theme: at least 4.5:1 on each one's bubbles and header. */
   --theme-member-0: #f2b7b7;
@@ -131,6 +134,7 @@
   --theme-link: #026aa0;
   --theme-danger-ink: #c5221f;
   --theme-danger: #c5221f;
+  --theme-danger-fill: #c5221f;
   --theme-on-accent: #111b21;
   /* Shared by every light theme, as for dark. */
   --theme-member-0: #c82020;
