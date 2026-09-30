@@ -141,6 +141,7 @@
     "issue": "Connection issue · {{seen}}",
     "lastSeen": "last seen {{time}}",
     "noConnection": "No connection yet",
+    "noSlot": "Waiting for a free connection on this device",
     "notSeen": "not seen yet",
     "unnamed": "Member {{key}}",
     "unreachable": "Not reachable · {{seen}}",

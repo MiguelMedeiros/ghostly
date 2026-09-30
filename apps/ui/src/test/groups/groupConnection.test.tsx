@@ -138,6 +138,12 @@ describe("GroupConnection: the popover lists every member's edge", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("Go online before reconnecting");
   });
 
+  it("a member this device has no free native connection for says it waits for one", async () => {
+    // Ghostly Desktop on Linux: its group links go over Iroh or HyperDHT, a few listeners shared with 1:1 chats.
+    await open(active([me, alice({ transport: "iroh/1" }), bob({ state: "waiting", transport: undefined, noSlot: true })]), { transport: { protocol: "webrtc/1", relays: [], webrtc: false } });
+    expect(rows()[1]).toMatchObject({ key: BOB, status: "Waiting for a free connection on this device" });
+  });
+
   it("an app with no transport for group links says why no member is reachable, and offers no Reconnect that cannot help", async () => {
     await open(active([me, alice({ state: "connecting" }), bob({ state: "waiting" })]), { transport: { protocol: "webrtc/1", relays: [], webrtc: false, groupLinks: false } });
     expect(screen.getByTestId("group-connection-no-webrtc")).toHaveTextContent("this app has neither");

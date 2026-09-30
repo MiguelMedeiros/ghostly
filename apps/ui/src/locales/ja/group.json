@@ -141,6 +141,7 @@
     "issue": "接続の問題 · {{seen}}",
     "lastSeen": "最終確認 {{time}}",
     "noConnection": "まだ接続がありません",
+    "noSlot": "この端末の接続の空きを待っています",
     "notSeen": "まだ確認されていません",
     "unnamed": "メンバー {{key}}",
     "unreachable": "到達できません · {{seen}}",

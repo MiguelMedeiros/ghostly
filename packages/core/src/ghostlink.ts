@@ -66,6 +66,8 @@ import { PairingTracker, type PairingProgress, type PairingRole } from "./pairin
 /** Unanswered offers are repeated less and less often: 1.5, 3, 6, then every 12 minutes. */
 /** After a failed attempt: 20 s, then doubling up to 3 min. Someone opening the chat starts it over. */
 const AUTO_CONNECT_RETRY_MS = 20_000;
+/** A group link with nothing to dial looks fast for the member's `_tr` on this many attempts, then at its own pace. */
+const PACKET_TRANSPORTS_FAST_ATTEMPTS = 3;
 /** A native transport that fails this many attempts in a row is skipped for `DEMOTE_MS`, while another remains (WISP 100). */
 /** Pinned over the DHT with no stream up this long after, a first pairing shows as on the DHT (WISP 400). */
 export const DHT_PIN_GRACE_MS = 10_000;
@@ -1607,8 +1609,9 @@ export class GhostLink {
       const choices = chosen && ranked.includes(chosen) ? [chosen, ...ranked.filter(t => t !== chosen)] : ranked;
       if (!choices.length) {
         // A group link: the member's app may be starting a native endpoint for this one right now, and says how to dial
-        // it in its packet (`_tr`), which is looked for fast meanwhile rather than at the background pace.
-        if (this.options.packetTransports) this.session.expectPeer();
+        // it in its packet (`_tr`), which is looked for fast meanwhile rather than at the background pace. On the first
+        // few attempts only: a member whose app never says one (an older app, no transport in common) is not read fast forever.
+        if (this.options.packetTransports && this.autoConnectFailures <= PACKET_TRANSPORTS_FAST_ATTEMPTS) this.session.expectPeer();
         throw new Error("No transport both apps allow is available yet");
       }
       const fallback = this.fallback && this.peerFallback;

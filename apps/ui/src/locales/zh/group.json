@@ -141,6 +141,7 @@
     "issue": "连接问题 · {{seen}}",
     "lastSeen": "最后在线 {{time}}",
     "noConnection": "尚未连接",
+    "noSlot": "正在等待此设备上的空闲连接",
     "notSeen": "尚未上线",
     "unnamed": "成员 {{key}}",
     "unreachable": "无法连接 · {{seen}}",

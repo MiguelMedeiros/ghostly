@@ -194,8 +194,13 @@ export interface GroupEdgeView {
    * `waiting`: nothing heard from the member's app yet. `error`: the last attempt failed (`error` says why).
    */
   state: "open" | "connecting" | "waiting" | "error";
-  /** The transport carrying the edge while it is open. Edges only offer WebRTC today. */
+  /** The transport carrying the edge while it is open: WebRTC, or Iroh or HyperDHT where one side has none. */
   transport?: PairedTransport;
+  /**
+   * Waiting because this device has no free native slot for it (a member reached over Iroh or HyperDHT, and the
+   * device's native listeners held by chats and other group links): it is tried again as one frees up.
+   */
+  noSlot?: true;
   /** When this device last heard from the member on this edge, in ms (0: never). */
   lastSeenAt: number;
   error?: string;

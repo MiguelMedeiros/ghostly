@@ -141,6 +141,7 @@
     "issue": "Problème de connexion · {{seen}}",
     "lastSeen": "vu {{time}}",
     "noConnection": "Pas encore de connexion",
+    "noSlot": "En attente d'une connexion libre sur cet appareil",
     "notSeen": "pas encore vu",
     "unnamed": "Membre {{key}}",
     "unreachable": "Injoignable · {{seen}}",

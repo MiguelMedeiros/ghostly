@@ -141,6 +141,7 @@
     "issue": "Problema di connessione · {{seen}}",
     "lastSeen": "visto {{time}}",
     "noConnection": "Ancora nessuna connessione",
+    "noSlot": "In attesa di una connessione libera su questo dispositivo",
     "notSeen": "non ancora visto",
     "unnamed": "Membro {{key}}",
     "unreachable": "Non raggiungibile · {{seen}}",

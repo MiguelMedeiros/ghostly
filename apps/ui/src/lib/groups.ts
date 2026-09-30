@@ -51,6 +51,7 @@ export function edgeLabel(member: GroupMemberView, now = Date.now(), t: Translat
   // A group past 16 members that runs on hubs: most members are reached through one, not over an edge of mine.
   if (member.viaHub) return t("group.member.viaHub");
   if (!edge) return t("group.member.noConnection");
+  if (edge.noSlot) return t("group.member.noSlot");
   if (edge.state === "connecting") return t("group.member.connecting");
   const seen = edge.lastSeenAt ? t("group.member.lastSeen", { time: since(edge.lastSeenAt / 1000, now / 1000) }) : t("group.member.notSeen");
   return edge.state === "error" ? t("group.member.issue", { seen }) : t("group.member.unreachable", { seen });

@@ -141,6 +141,7 @@
     "issue": "مشكلة في الاتصال · {{seen}}",
     "lastSeen": "آخر ظهور {{time}}",
     "noConnection": "لا اتصال بعد",
+    "noSlot": "بانتظار اتصال متاح على هذا الجهاز",
     "notSeen": "لم يظهر بعد",
     "unnamed": "العضو {{key}}",
     "unreachable": "غير متاح · {{seen}}",
