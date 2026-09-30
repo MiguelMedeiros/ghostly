@@ -2,8 +2,10 @@ import { screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import { readStatusCard, statusCardText, type RoutineCard, type StatusCard } from "@ghostly/core";
 import { MessageBubble } from "../../components/MessageBubble";
+import { RoutineStack } from "../../components/chat/RoutineCard";
 import { TasksButton } from "../../components/chat/TasksButton";
-import { activeTaskCount, cardEntries, panelModel, routineSummary, type CardRow } from "../../lib/statusCards";
+import { jumpToMessage } from "../../lib/replies";
+import { activeTaskCount, cardEntries, panelModel, routineStacks, routineSummary, type CardRow } from "../../lib/statusCards";
 import type { ChatMessage } from "../../lib/types";
 import { renderApp } from "../render";
 
@@ -384,6 +386,55 @@ describe("the Tasks panel under a bot room's load", () => {
     await user.click(screen.getByTestId("chat-tasks"));
     expect(screen.getByTestId("chat-tasks-summary")).toHaveTextContent("3 نشطة · 14 روتينات");
     expect(screen.getByTestId("chat-tasks-close")).toHaveAccessibleName("إغلاق");
+  });
+});
+
+describe("routines in a row in the chat", () => {
+  const r = (id: string, extra: Record<string, unknown> = {}) => readStatusCard({ kind: "routine", id, name: `Zero · ${id}`, schedule: "every hour", state: "active", ...extra }) as RoutineCard;
+  const msg = (id: string, c: StatusCard | undefined, member = "z", sender: "me" | "peer" = "peer") => ({ id, card: c, member, sender });
+
+  it("fold from three in a row from one sender; another sender, a task or a text ends a run", () => {
+    const rows = [
+      msg("a1", r("1")), msg("a2", r("2")), msg("a3", r("3")),
+      msg("t", card()),
+      msg("b1", r("4")), msg("b2", r("5")),
+      msg("c1", r("6"), "o"), msg("c2", r("7"), "o"), msg("c3", r("8"), "o"), msg("c4", r("9"), "o"),
+      msg("x", undefined, "o"),
+      msg("d1", r("10"), "o"), msg("d2", r("11"), "o"), msg("d3", r("12"), "z"),
+    ];
+    const stacks = routineStacks(rows, m => m);
+    expect([...stacks].map(([first, run]) => [first, run.map(m => m.id)])).toEqual([["a1", ["a1", "a2", "a3"]], ["c1", ["c1", "c2", "c3", "c4"]]]);
+  });
+
+  const Stack = ({ n }: { n: number }) => {
+    const cards = Array.from({ length: n }, (_, i) => r(`r${i}`, { nextRunAt: NOW + (i + 2) * 60_000 + 20_000, lastRun: { at: NOW - 1000, result: i === 1 ? "failed" : "ok" } }));
+    return <RoutineStack name="Hermes Zero" mine={false} cards={cards}>
+      {cards.map((c, i) => <MessageBubble key={i} message={message(c, { id: `m${i}` })} peerPubKey="peer" />)}
+    </RoutineStack>;
+  };
+
+  it("show as one row saying whose, how many, the next run and how the last runs went; a tap opens their cards", async () => {
+    const { user } = renderApp(<Stack n={10} />);
+    const toggle = screen.getByTestId("routine-stack-toggle");
+    expect(toggle).toHaveTextContent("~Hermes Zero↻10 routines· next in 2 min.· ✕ 1 failed");
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    // Folded, the cards stay in the page (a jump finds them) but hidden.
+    const list = document.getElementById(toggle.getAttribute("aria-controls")!)!;
+    expect(list).toHaveAttribute("hidden");
+    expect(within(list).getAllByTestId("status-card")).toHaveLength(10);
+    expect(screen.queryAllByRole("button", { name: /Zero ·/ })).toHaveLength(0);
+    await user.click(toggle);
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    expect(list).not.toHaveAttribute("hidden");
+    expect(screen.getAllByRole("button", { name: /Zero ·/ })).toHaveLength(10);
+  });
+
+  it("open when something jumps to one of them", () => {
+    renderApp(<Stack n={4} />);
+    expect(screen.getByTestId("routine-stack")).not.toHaveAttribute("data-open");
+    expect(jumpToMessage("m2")).toBe(true);
+    expect(screen.getByTestId("routine-stack")).toHaveAttribute("data-open");
+    expect(screen.getAllByTestId("status-card")).toHaveLength(4);
   });
 });
 

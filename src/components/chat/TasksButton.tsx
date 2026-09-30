@@ -6,7 +6,8 @@ import { useOutsideDismiss, useTabTrap } from "../../hooks/useDismiss";
 import { useIsMobile } from "../../hooks/useIsMobile";
 import { drawEveryRow } from "../../hooks/useTailFirst";
 import { jumpToMessage } from "../../lib/replies";
-import { RESULT_TONE, STATUS_TONE, activeTaskCount, cardEntries, panelModel, routineSummary, untilIn, type CardEntry, type CardRow } from "../../lib/statusCards";
+import { RESULT_TONE, STATUS_TONE, activeTaskCount, cardEntries, panelModel, untilIn, type CardEntry, type CardRow } from "../../lib/statusCards";
+import { RoutineSummaryLine } from "./RoutineCard";
 import { PrLine, ProgressBar } from "./StatusCard";
 
 /*
@@ -89,23 +90,6 @@ function RoutineRow({ entry, onOpen }: { entry: CardEntry; onOpen: () => void })
         </span>
       </span>
     </button>
-  );
-}
-
-/** "10 routines · next in 4 min · ✓ all OK": what some routines come to, on one line. */
-export function RoutineSummaryLine({ cards }: { cards: readonly RoutineCard[] }) {
-  const { t, language } = useI18n();
-  const s = routineSummary(cards);
-  return (
-    <span className="flex min-w-0 items-center gap-1.5">
-      <span data-testid="routine-summary-count" className="shrink-0 font-medium text-text-primary">
-        {s.count === 1 ? t("cards.panel.routinesOne") : t("cards.panel.routinesMany", { count: s.count })}
-      </span>
-      {s.next && <span className="min-w-0 truncate text-text-muted">· {t("cards.panel.nextRun", { when: untilIn(language)(s.next) })}</span>}
-      {s.failed > 0
-        ? <span data-testid="routine-summary-result" data-result="failed" className={`shrink-0 font-medium ${RESULT_TONE.failed.label}`}>· {RESULT_TONE.failed.mark} {t("cards.panel.failedCount", { count: s.failed })}</span>
-        : s.ran > 0 && <span data-testid="routine-summary-result" data-result="ok" className={`shrink-0 font-medium ${RESULT_TONE.ok.label}`}>· {RESULT_TONE.ok.mark} {t("cards.panel.allOk")}</span>}
-    </span>
   );
 }
 

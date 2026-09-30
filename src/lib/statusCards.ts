@@ -98,6 +98,27 @@ export function routineSummary(cards: readonly RoutineCard[]): RoutineSummary {
   };
 }
 
+/** Routine cards in a row from one sender, from this many, fold into one row of the chat. */
+export const ROUTINE_STACK_MIN = 3;
+
+/**
+ * The chat's runs of routine cards from one sender, at least `ROUTINE_STACK_MIN` in a row, by the id of each run's first
+ * message: the chat draws a run as one row (`RoutineStack`). `messageOf` is a row's message, if it is one.
+ */
+export function routineStacks<R, M extends { id: string; card?: StatusCard; sender: string; member?: string }>(rows: readonly R[], messageOf: (row: R) => M | undefined): Map<string, M[]> {
+  const stacks = new Map<string, M[]>();
+  let run: M[] = [];
+  const end = () => { if (run.length >= ROUTINE_STACK_MIN) stacks.set(run[0].id, run); run = []; };
+  for (const row of rows) {
+    const m = messageOf(row);
+    if (m?.card?.kind !== "routine") { end(); continue; }
+    if (run.length && (run[0].member ?? run[0].sender) !== (m.member ?? m.sender)) end();
+    run.push(m);
+  }
+  end();
+  return stacks;
+}
+
 /** How many tasks are still going: the number on the Tasks button. */
 export function activeTaskCount(entries: readonly CardEntry[]): number {
   return entries.filter((e) => e.active).length;
