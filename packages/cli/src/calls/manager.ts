@@ -49,8 +49,8 @@ export const MEDIA_GRACE_MS = 3_000;
 /** After a hang-up, the signal is cleared this much later (the apps' own delay). */
 export const CLEAR_MS = 5_000;
 /** How many times an outgoing call offers again after an answer was refused (`redial`), and the wait before each. */
-export const MAX_REDIALS = 3;
-export const REDIAL_BACKOFF_MS = [150, 300, 600] as const;
+export const MAX_REDIALS = 4;
+export const REDIAL_BACKOFF_MS = [150, 300, 600, 600] as const;
 
 interface Call {
   id: string;
@@ -186,15 +186,15 @@ export class CallManager {
   }
 
   /**
-   * A new offer on a new connection, up to MAX_REDIALS times, each after a short wait. libdatachannel (0.24.5) can refuse a good answer: when the contact's
-   * checks and its DTLS hello came before the answer (they do, the answer crosses the chat session), ICE connects
-   * and the handshake ends inside setRemoteDescription, before the answer's fingerprint is recorded; the fingerprint
-   * check fails, the connection closes its transports, and adding the answer's candidates throws "Got a remote
-   * candidate without ICE transport". That connection is done for, and the contact's side saw the handshake fail
-   * too, so both start over: the contact's side answers the newer offer (`reanswer`). The race can hit the new
-   * connection as well (Linux arm64 saw it twice in a row), hence more than one. The contact's side ends a call whose
-   * connection failed after MEDIA_GRACE_MS: every wait stays well under it. Fixed upstream in libdatachannel 0235225a,
-   * which no release has yet.
+   * A new offer on a new connection, up to MAX_REDIALS times, each after a short wait. libdatachannel (0.24.5) can
+   * refuse a good answer: when the contact's checks and its DTLS hello came before the answer (they do, the answer
+   * crosses the chat session), ICE connects and the handshake ends inside setRemoteDescription, before the answer's
+   * fingerprint is recorded; the fingerprint check fails, the connection closes its transports, and adding the
+   * answer's candidates throws "Got a remote candidate without ICE transport". That connection is done for, and the
+   * contact's side saw the handshake fail too, so both start over: the contact's side answers the newer offer
+   * (`reanswer`). Each new connection runs the same race (CI runners lose about one in six, Linux arm64 twice in a
+   * row), hence several. The contact's side ends a call whose connection failed after MEDIA_GRACE_MS: every wait stays
+   * well under it. Fixed upstream in libdatachannel 0235225a, which no release has yet.
    */
   private async redial(call: Call): Promise<void> {
     const wait = REDIAL_BACKOFF_MS[Math.min(call.redials, REDIAL_BACKOFF_MS.length - 1)];
