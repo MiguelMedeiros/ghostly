@@ -112,7 +112,7 @@ test("the extension keeps several profiles: create, switch, restore a backup int
   await backups.getByTestId("restore-file").setInputFiles({ name: file.suggestedFilename(), mimeType: "application/json", buffer: bundle });
   await backups.getByTestId("restore-passphrase").fill(PASSPHRASE);
   await backups.getByTestId("restore-go").click();
-  await expect(profileName(page)).toHaveValue("Pessoal (restaurado)", { timeout: 60_000 });
+  await expect(profileName(page)).toHaveValue("Pessoal (restored)", { timeout: 60_000 });
   await expect(rows(page)).toHaveCount(3);
   await expect(page.getByTestId("profile-links")).toContainText("1 chat");
   await openChatAt(ext, chatHash);
@@ -131,12 +131,12 @@ test("the extension keeps several profiles: create, switch, restore a backup int
 
   // The account bar's switcher (a click on its Profile place) does the same in one tap, and the peer follows it too.
   await page.getByTestId("account-profile").click();
-  await page.getByTestId("profile-switcher").getByTestId("profile-switcher-item").filter({ hasText: "Pessoal (restaurado)" }).click();
-  await expect(page.getByTestId("account-profile")).toHaveAttribute("title", /: Pessoal \(restaurado\)$/, { timeout: 60_000 });
+  await page.getByTestId("profile-switcher").getByTestId("profile-switcher-item").filter({ hasText: "Pessoal (restored)" }).click();
+  await expect(page.getByTestId("account-profile")).toHaveAttribute("title", /: Pessoal \(restored\)$/, { timeout: 60_000 });
   await openChatAt(ext, chatHash);
   await reaches(web, ext, "switched in one tap");
   await page.getByTestId("account-profile").click();
-  await page.getByTestId("profile-switcher").getByTestId("profile-switcher-item").filter({ hasText: "Pessoal" }).filter({ hasNotText: "restaurado" }).click();
+  await page.getByTestId("profile-switcher").getByTestId("profile-switcher-item").filter({ hasText: "Pessoal" }).filter({ hasNotText: "restored" }).click();
   await expect(page.getByTestId("account-profile")).toHaveAttribute("title", /: Pessoal$/, { timeout: 60_000 });
 
   // Another tab of the extension follows a switch made in this one: one peer, one profile in use.
