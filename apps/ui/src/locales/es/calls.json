@@ -38,6 +38,7 @@
   },
   "stopSharing": "Dejar de compartir",
   "timeline": {
+    "audioCancelled": "Llamada de voz cancelada",
     "audioConnected": "Llamada de voz conectada",
     "audioDeclined": "Llamada de voz rechazada",
     "audioEnded": "Llamada de voz finalizada",
@@ -45,13 +46,16 @@
     "audioIncoming": "Llamada de voz entrante",
     "audioMissed": "Llamada de voz perdida",
     "audioStarted": "Llamada de voz iniciada",
+    "audioUnanswered": "Llamada de voz sin respuesta",
+    "videoCancelled": "Videollamada cancelada",
     "videoConnected": "Videollamada conectada",
     "videoDeclined": "Videollamada rechazada",
     "videoEnded": "Videollamada finalizada",
     "videoFailed": "No se pudo conectar la videollamada",
     "videoIncoming": "Videollamada entrante",
     "videoMissed": "Videollamada perdida",
-    "videoStarted": "Videollamada iniciada"
+    "videoStarted": "Videollamada iniciada",
+    "videoUnanswered": "Videollamada sin respuesta"
   },
   "turnCameraOff": "Apagar cámara",
   "turnCameraOn": "Encender cámara",

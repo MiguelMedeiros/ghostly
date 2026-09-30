@@ -38,6 +38,7 @@
   },
   "stopSharing": "Arrêter le partage",
   "timeline": {
+    "audioCancelled": "Appel audio annulé",
     "audioConnected": "Appel audio connecté",
     "audioDeclined": "Appel audio refusé",
     "audioEnded": "Appel audio terminé",
@@ -45,13 +46,16 @@
     "audioIncoming": "Appel audio entrant",
     "audioMissed": "Appel audio manqué",
     "audioStarted": "Appel audio lancé",
+    "audioUnanswered": "Appel audio sans réponse",
+    "videoCancelled": "Appel vidéo annulé",
     "videoConnected": "Appel vidéo connecté",
     "videoDeclined": "Appel vidéo refusé",
     "videoEnded": "Appel vidéo terminé",
     "videoFailed": "L'appel vidéo n'a pas pu se connecter",
     "videoIncoming": "Appel vidéo entrant",
     "videoMissed": "Appel vidéo manqué",
-    "videoStarted": "Appel vidéo lancé"
+    "videoStarted": "Appel vidéo lancé",
+    "videoUnanswered": "Appel vidéo sans réponse"
   },
   "turnCameraOff": "Couper la caméra",
   "turnCameraOn": "Activer la caméra",
