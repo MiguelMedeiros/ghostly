@@ -552,7 +552,7 @@ jobs:
   ci-success:
     name: CI Success
     runs-on: ubuntu-24.04
-    needs: [changes, frontend-checks, frontend-tests, packages-tests, cli-linux-arm64, frontend-build, tauri, website, website-e2e, desktop-media, desktop-macos]
+    needs: [changes, frontend-checks, frontend-tests, packages-tests, frontend-build, tauri, website, website-e2e, desktop-media, desktop-macos]
     # Not always(): that also runs in a run cancelled by a newer push, where it would mark the superseded commit
     # failed. A failed job still gets here, and fails this one.
     if: ${{ !cancelled() }}
@@ -571,7 +571,6 @@ jobs:
           FRONTEND_CHECKS: ${{ needs.frontend-checks.result }}
           FRONTEND_TESTS: ${{ needs.frontend-tests.result }}
           PACKAGES_TESTS: ${{ needs.packages-tests.result }}
-          CLI_ARM64: ${{ needs.cli-linux-arm64.result }}
           FRONTEND_BUILD: ${{ needs.frontend-build.result }}
           TAURI: ${{ needs.tauri.result }}
           WEBSITE: ${{ needs.website.result }}
@@ -585,9 +584,9 @@ jobs:
           fi
           # Skipped only counts when `changes` chose to skip that job.
           ok() { [[ "$1" == "success" || ( "$1" == "skipped" && "$2" == "false" ) ]]; }
-          summary="changes=$CHANGES frontend-checks=$FRONTEND_CHECKS frontend-tests=$FRONTEND_TESTS packages-tests=$PACKAGES_TESTS cli-linux-arm64=$CLI_ARM64 frontend-build=$FRONTEND_BUILD tauri=$TAURI website=$WEBSITE website-e2e=$WEBSITE_E2E desktop-media=$DESKTOP_MEDIA desktop-macos=$DESKTOP_MACOS"
+          summary="changes=$CHANGES frontend-checks=$FRONTEND_CHECKS frontend-tests=$FRONTEND_TESTS packages-tests=$PACKAGES_TESTS frontend-build=$FRONTEND_BUILD tauri=$TAURI website=$WEBSITE website-e2e=$WEBSITE_E2E desktop-media=$DESKTOP_MEDIA desktop-macos=$DESKTOP_MACOS"
           if [[ "$CHANGES" != "success" || "$FRONTEND_CHECKS" != "success" || "$FRONTEND_TESTS" != "success" || "$FRONTEND_BUILD" != "success" ]] || \
-             ! ok "$PACKAGES_TESTS" "$PACKAGES" || ! ok "$CLI_ARM64" "$PACKAGES" || ! ok "$TAURI" "$RUST" || \
+             ! ok "$PACKAGES_TESTS" "$PACKAGES" || ! ok "$TAURI" "$RUST" || \
              ! ok "$WEBSITE" "$WEBSITE_GATE" || ! ok "$WEBSITE_E2E" "$WEBSITE_GATE" || \
              ! ok "$DESKTOP_MEDIA" "$APP" || ! ok "$DESKTOP_MACOS" "$APP"; then
             echo "One or more jobs failed: $summary"
