@@ -419,7 +419,7 @@ export function CallOverlay({
         {/* Hang up */}
         <button
           onClick={onHangUp}
-          className="w-16 h-16 max-md:w-[72px] max-md:h-[72px] rounded-full bg-danger flex items-center justify-center text-white hover:bg-danger/80 transition-colors cursor-pointer"
+          className="w-16 h-16 max-md:w-[72px] max-md:h-[72px] rounded-full bg-danger-fill flex items-center justify-center text-white hover:bg-danger-fill/80 transition-colors cursor-pointer"
           data-testid="call-hang-up"
           title={t("calls.end")}
         >

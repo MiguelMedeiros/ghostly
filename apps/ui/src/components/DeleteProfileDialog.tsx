@@ -66,7 +66,7 @@ export function DeleteProfileDialog({ entry, onClose }: { entry: ProfileEntry; o
         <div className="flex flex-wrap justify-end gap-2">
           <button type="button" onClick={onClose} className={`${button} bg-surface-alt text-text-primary border border-border`}>{t("common.cancel")}</button>
           <button type="button" data-testid="delete-profile-go" disabled={busy || typed.trim() !== entry.name || (locked && !lockPassword)} onClick={() => void run(async () => { await deleteProfile(entry.id, lockPassword); onClose(); })}
-            className={`${button} bg-danger text-white font-semibold`}>{busy ? t("profile.delete.deleting") : t("common.delete")}</button>
+            className={`${button} bg-danger-fill text-white font-semibold`}>{busy ? t("profile.delete.deleting") : t("common.delete")}</button>
         </div>
       </div>
     </div>
