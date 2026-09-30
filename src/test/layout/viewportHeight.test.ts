@@ -69,6 +69,56 @@ describe("the app's height and the keyboard", () => {
     expect(keyboard()).toBe("false");
   });
 
+  it("a hardware keyboard's shortcut bar counts while a field has the focus", () => {
+    renderHook(() => useViewportHeight());
+    const field = document.body.appendChild(document.createElement("textarea"));
+    try {
+      // An iPhone on its side: the bar leaves 334 of 402px, less than a keyboard takes.
+      resize(402, 402, 874);
+      act(() => field.focus());
+      resize(334, 402, 874);
+      expect(appHeight()).toBe("334px");
+      expect(keyboard()).toBe("true");
+      // The field loses the focus and the bar goes.
+      act(() => field.blur());
+      resize(402, 402, 874);
+      expect(keyboard()).toBe("false");
+      // Without a field, a gap that small is a toolbar sliding away.
+      resize(334, 402, 874);
+      expect(keyboard()).toBe("false");
+    } finally {
+      field.remove();
+    }
+  });
+
+  it("keeps the shortcut bar once the phone turns, while iOS reports the whole height again", () => {
+    renderHook(() => useViewportHeight());
+    const field = document.body.appendChild(document.createElement("textarea"));
+    try {
+      act(() => field.focus());
+      resize(806);
+      expect(appHeight()).toBe("806px");
+      // On its side: iOS reports the whole screen, the bar still over the field.
+      resize(402, 402, 874);
+      expect(appHeight()).toBe("334px");
+      expect(keyboard()).toBe("true");
+      // And upright again.
+      resize(806, 874, 402);
+      resize(874, 874, 402);
+      expect(appHeight()).toBe("806px");
+      // Done: the field loses the focus, the bar goes, and nothing resizes.
+      act(() => field.blur());
+      expect(appHeight()).toBe("874px");
+      expect(keyboard()).toBe("false");
+      // A new focus with nothing covered and no turn is not a bar.
+      act(() => field.focus());
+      expect(appHeight()).toBe("874px");
+      expect(keyboard()).toBe("false");
+    } finally {
+      field.remove();
+    }
+  });
+
   it("starts over when the phone turns", () => {
     renderHook(() => useViewportHeight());
     // Landscape: a much shorter screen, with no keyboard.

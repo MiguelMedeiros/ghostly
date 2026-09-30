@@ -1,8 +1,9 @@
-import { ACTIVE_TASK_STATUSES, type RunResult, type StatusCard, type TaskStatus } from "@ghostly/core";
+import { ACTIVE_TASK_STATUSES, type RoutineCard, type RunResult, type StatusCard, type TaskStatus } from "@ghostly/core";
 
 /*
  * The status cards of a chat or group, as its Tasks panel lists them (WISP 4xx · Status Cards): the newest message of
- * each card (per author, kind and id) stands for it; active tasks first, then finished ones, then routines.
+ * each card (per author, kind and id) stands for it; per sender, its tasks still going, then its routines; the
+ * finished tasks last.
  */
 
 /** What the panel needs of a row: a 1:1 chat's and a group's messages both have it. */
@@ -47,6 +48,77 @@ export function cardsBySender(entries: readonly CardEntry[]): { author: string; 
     .sort((a, b) => b.active - a.active || latest(b.entries) - latest(a.entries));
 }
 
+/** A sender's part of the Tasks panel: its tasks still going, then its routines. */
+export interface PanelSection {
+  /** The sender; empty in a 1:1 chat, where the panel has one section and no names. */
+  author: string;
+  active: CardEntry[];
+  routines: CardEntry[];
+}
+
+/**
+ * The Tasks panel, top to bottom: one section per sender (in a group; one without a name in a 1:1 chat), each with its
+ * tasks still going and then its routines, the senders with more going first; the finished tasks of everyone after.
+ */
+export function panelModel(entries: readonly CardEntry[], grouped: boolean): { active: number; routines: number; sections: PanelSection[]; finished: CardEntry[] } {
+  const going = entries.filter((e) => e.card.kind !== "task" || e.active);
+  const senders = grouped ? cardsBySender(going) : going.length ? [{ author: "", entries: going }] : [];
+  return {
+    active: activeTaskCount(entries),
+    routines: entries.filter((e) => e.card.kind === "routine").length,
+    sections: senders.map(({ author, entries: list }) => ({
+      author,
+      active: list.filter((e) => e.active),
+      routines: sortRoutines(list.filter((e) => e.card.kind === "routine")),
+    })),
+    finished: entries.filter((e) => e.card.kind === "task" && !e.active),
+  };
+}
+
+/** Routines in the order the panel lists them: a failed last run first, then the next to run, the paused ones last. */
+export function sortRoutines(entries: readonly CardEntry[]): CardEntry[] {
+  const rank = (card: RoutineCard) => (card.state === "paused" ? 2 : card.lastRun?.result === "failed" ? 0 : 1);
+  const next = (card: RoutineCard) => (card.state === "active" && card.nextRunAt) || Number.MAX_SAFE_INTEGER;
+  return [...entries].sort((a, b) => {
+    const x = a.card as RoutineCard, y = b.card as RoutineCard;
+    return rank(x) - rank(y) || next(x) - next(y);
+  });
+}
+
+/** What some routines come to, on one line: how many, the soonest next run, and how their last runs went. */
+export interface RoutineSummary { count: number; next?: number; failed: number; ran: number }
+
+export function routineSummary(cards: readonly RoutineCard[]): RoutineSummary {
+  const nexts = cards.filter((c) => c.state === "active" && c.nextRunAt).map((c) => c.nextRunAt!);
+  return {
+    count: cards.length,
+    ...(nexts.length && { next: Math.min(...nexts) }),
+    failed: cards.filter((c) => c.lastRun?.result === "failed").length,
+    ran: cards.filter((c) => c.lastRun).length,
+  };
+}
+
+/** Routine cards in a row from one sender, from this many, fold into one row of the chat. */
+export const ROUTINE_STACK_MIN = 3;
+
+/**
+ * The chat's runs of routine cards from one sender, at least `ROUTINE_STACK_MIN` in a row, by the id of each run's first
+ * message: the chat draws a run as one row (`RoutineStack`). `messageOf` is a row's message, if it is one.
+ */
+export function routineStacks<R, M extends { id: string; card?: StatusCard; sender: string; member?: string }>(rows: readonly R[], messageOf: (row: R) => M | undefined): Map<string, M[]> {
+  const stacks = new Map<string, M[]>();
+  let run: M[] = [];
+  const end = () => { if (run.length >= ROUTINE_STACK_MIN) stacks.set(run[0].id, run); run = []; };
+  for (const row of rows) {
+    const m = messageOf(row);
+    if (m?.card?.kind !== "routine") { end(); continue; }
+    if (run.length && (run[0].member ?? run[0].sender) !== (m.member ?? m.sender)) end();
+    run.push(m);
+  }
+  end();
+  return stacks;
+}
+
 /** How many tasks are still going: the number on the Tasks button. */
 export function activeTaskCount(entries: readonly CardEntry[]): number {
   return entries.filter((e) => e.active).length;
@@ -68,11 +140,11 @@ export const STATUS_TONE: Record<TaskStatus, { dot: string; bar: string; label: 
 /** A task that is over: done, failed or cancelled. It no longer says what it is doing now. */
 export const isFinished = (status: TaskStatus) => status === "done" || status === "failed" || status === "cancelled";
 
-/** A routine run's dot and word: green when it went well, red when it failed, muted when it was skipped. */
-export const RESULT_TONE: Record<RunResult, { dot: string; label: string }> = {
-  ok: { dot: "bg-success", label: "text-success" },
-  failed: { dot: "bg-danger", label: "text-danger-ink" },
-  skipped: { dot: "bg-text-muted", label: "text-text-primary/65" },
+/** A routine run's dot, word and mark: green ✓ when it went well, red ✕ when it failed, muted – when it was skipped. */
+export const RESULT_TONE: Record<RunResult, { dot: string; label: string; mark: string }> = {
+  ok: { dot: "bg-success", label: "text-success", mark: "✓" },
+  failed: { dot: "bg-danger", label: "text-danger-ink", mark: "✕" },
+  skipped: { dot: "bg-text-muted", label: "text-text-primary/65", mark: "–" },
 };
 
 /** "in 3 h", "tomorrow" in the interface's language: a routine's next run from now. */

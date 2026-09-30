@@ -34,7 +34,6 @@ const VERSION_FILES = new Set([
   "packages/react/package.json",
   "src-tauri/tauri.conf.json",
   "src-tauri/Cargo.toml",
-  "cli/Cargo.toml",
   "website/lib/release.ts",
   "docs/INSTALLATION.md",
   "CHANGELOG.md",

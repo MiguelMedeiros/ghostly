@@ -1,16 +1,23 @@
 {
   "panel": {
-    "active": "Ativas",
     "activeCount": "{{count}} ativas",
+    "allOk": "tudo OK",
     "button": "Tarefas",
     "buttonCount": "Tarefas, {{count}} ativas",
-    "finished": "Concluídas",
+    "close": "Fechar",
+    "empty": "Nenhuma tarefa em andamento",
+    "failedCount": "{{count}} com falha",
+    "finishedCount": "Concluídas ({{count}})",
+    "idle": "Nada em andamento",
     "info": "Bots publicam estes cartões e os mantêm atualizados. Toque em um para ir até ele no chat.",
-    "routines": "Rotinas",
+    "nextRun": "próxima {{when}}",
+    "routinesMany": "{{count}} rotinas",
+    "routinesOne": "1 rotina",
     "title": "Tarefas"
   },
   "routine": {
     "cron": "Cron:",
+    "lastRun": "Última execução: {{result}}",
     "next": "Próxima {{when}}",
     "noRuns": "Nenhuma execução ainda",
     "result": {

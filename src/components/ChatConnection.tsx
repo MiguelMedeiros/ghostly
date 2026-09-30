@@ -157,7 +157,7 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, pairing 
       data-pairing={stage} data-status={status} data-busy={glyph || connecting || retrying || undefined} aria-label={t("connection.panel.titleWith", { label })} aria-describedby={`${id}-tip`}
       onPointerEnter={e => { if (e.pointerType !== "touch") setTip(true); }} onPointerLeave={() => setTip(false)}
       onFocus={e => { if (e.currentTarget.matches(":focus-visible")) setTip(true); }} onBlur={() => setTip(false)}
-      className={`relative flex cursor-pointer list-none items-center justify-center rounded-full p-2 transition-colors max-md:p-2.5 hover:bg-surface-hover [&::-webkit-details-marker]:hidden ${focus} ${kind === "failure" ? "text-danger" : kind === "offline" ? "text-text-muted hover:text-accent" : "text-text-secondary hover:text-accent"}`}>
+      className={`relative flex cursor-pointer list-none items-center justify-center rounded-full p-2 transition-colors max-md:px-2 max-md:py-2.5 hover:bg-surface-hover [&::-webkit-details-marker]:hidden ${focus} ${kind === "failure" ? "text-danger" : kind === "offline" ? "text-text-muted hover:text-accent" : "text-text-secondary hover:text-accent"}`}>
       {glyph ? <PairingGlyph stage={stage!} direction={direction} size={18} /> : <ConnectionIcon kind={iconKind} transport={liveOn} holding={holding} size={18} weight={2} />}
       {!glyph && (dots[kind] || retrying) && <span aria-hidden="true" data-testid="connection-dot" className={`pointer-events-none absolute end-1 top-1 h-2 w-2 rounded-full ring-2 ring-panel-header max-md:end-1.5 max-md:top-1.5 ${dots[kind] ?? "bg-text-muted"} ${connecting || retrying ? "motion-safe:animate-pulse" : ""}`} />}
     </summary>

@@ -260,10 +260,9 @@ members connect to it and it passes the group's messages on ([WISP 9xx · Group 
 - **A connector for agent frameworks.** Partly built: `listen --turns` with `--from` and `--group` wakes an agent
   (Claude Code has an example); the Hermes Agent plugin is open ([AI-AGENTS.md](AI-AGENTS.md#ghostly-as-a-channel-for-agents)).
 
-## The older `ghostly-cli`
+## The older `ghostly-cli` (removed)
 
-`ghostly-cli` (Rust, in [`cli/`](../cli)) came first. It is not the npm package `@ghostlytools/cli`. It is now the **compatibility client**: it speaks only the
-v0.4 record format ([WISP 402](wisps/402-legacy-chat.md)) with its own `ghost://` invites, and it cannot pair with the
-app. An app invite (`ghostly1…`) is refused with a message saying to open it in the Ghostly app. It stays, unchanged,
-for the bots already built on it. From 1.0 the release no longer ships its binaries: build it from [`cli/`](../cli).
-Removing it is a separate decision, to be announced first. New bots use `ghostly`. Its commands: [cli/README.md](../cli/README.md).
+`ghostly-cli`, a Rust client, came first. It spoke only the v0.4 record format ([WISP 402](wisps/402-legacy-chat.md))
+with its own `ghost://` invites and could not pair with the app. The release stopped shipping it at 1.0, and its source
+was removed after 1.0; it stays in the git history. `ghostly` (`packages/cli`) is the CLI: bots on `ghostly-cli` move
+to it.

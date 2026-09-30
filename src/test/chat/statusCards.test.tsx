@@ -1,9 +1,11 @@
 import { screen, within } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
-import { readStatusCard, statusCardText, type StatusCard } from "@ghostly/core";
+import { afterEach, describe, expect, it } from "vitest";
+import { readStatusCard, statusCardText, type RoutineCard, type StatusCard } from "@ghostly/core";
 import { MessageBubble } from "../../components/MessageBubble";
+import { RoutineStack } from "../../components/chat/RoutineCard";
 import { TasksButton } from "../../components/chat/TasksButton";
-import { activeTaskCount, cardEntries, type CardRow } from "../../lib/statusCards";
+import { jumpToMessage } from "../../lib/replies";
+import { activeTaskCount, cardEntries, panelModel, routineStacks, routineSummary, type CardRow } from "../../lib/statusCards";
 import type { ChatMessage } from "../../lib/types";
 import { renderApp } from "../render";
 
@@ -13,6 +15,10 @@ import { renderApp } from "../render";
 
 const NOW = Date.now();
 const card = (extra: Record<string, unknown> = {}): StatusCard => readStatusCard({ kind: "task", id: "relay", title: "Fix relay rotation", status: "running", ...extra })!;
+/** How wide the window is, as matchMedia and layout read it. */
+const viewport = (width: number, height = 800) => (window as unknown as { happyDOM: { setViewport(v: { width: number; height: number }): void } }).happyDOM.setViewport({ width, height });
+afterEach(() => viewport(1024, 768));
+
 const message = (c: StatusCard, patch: Partial<ChatMessage> = {}): ChatMessage => ({ id: "m1", text: statusCardText(c), sender: "peer", timestamp: 1_700_000_000_000, card: c, ...patch });
 
 describe("a task card in the chat", () => {
@@ -101,16 +107,28 @@ describe("a task card in the chat", () => {
 describe("a routine card in the chat", () => {
   const routine = (extra: Record<string, unknown> = {}) => readStatusCard({ kind: "routine", id: "nightly", name: "Nightly bug hunt", schedule: "every day 01:00", state: "active", ...extra })!;
 
-  it("shows its schedule, the last run's result and when, and the next run from now", () => {
+  it("is one line: its name, schedule, next run and the last run's mark; opened, the last run's result and when", async () => {
     const c = routine({ lastRun: { at: NOW - 2 * 3_600_000, result: "failed", summary: "CI flaked" }, nextRunAt: NOW + 3 * 3_600_000 + 60_000 });
-    renderApp(<MessageBubble message={message(c)} peerPubKey="peer" />);
+    const { user } = renderApp(<MessageBubble message={message(c)} peerPubKey="peer" />);
     const shown = screen.getByTestId("status-card");
     expect(shown).toHaveAttribute("data-kind", "routine");
-    expect(within(shown).getByTestId("status-card-title")).toHaveTextContent("Nightly bug hunt");
-    expect(within(shown).getByTestId("status-card-schedule")).toHaveTextContent("every day 01:00");
-    expect(within(shown).getByTestId("status-card-last")).toHaveTextContent(/Failed\s*2 h ago/);
-    expect(within(shown).getByTestId("status-card-next")).toHaveTextContent("Next in 3 hr.");
+    const line = within(shown).getByTestId("status-card-toggle");
+    expect(within(line).getByTestId("status-card-title")).toHaveTextContent("Nightly bug hunt");
+    expect(within(line).getByTestId("status-card-schedule")).toHaveTextContent("every day 01:00");
+    expect(within(line).getByTestId("status-card-next")).toHaveTextContent("· in 3 hr.");
+    const last = within(line).getByTestId("status-card-last");
+    expect(last).toHaveAttribute("data-result", "failed");
+    expect(last).toHaveTextContent("✕Last run: Failed");
+    expect(last.className).toContain("text-danger-ink");
+    // One line: no second row, nothing else until it is opened.
+    expect(line.querySelectorAll("br, p, div")).toHaveLength(0);
+    expect(screen.queryByTestId("status-card-details")).not.toBeInTheDocument();
     expect(screen.queryByTestId("message-text")).not.toBeInTheDocument();
+    await user.click(line);
+    const run = screen.getByTestId("status-card-last-run");
+    expect(run).toHaveTextContent(/Failed\s*2 h ago/);
+    expect(run).toHaveTextContent("Next in 3 hr.");
+    expect(screen.getByTestId("status-card-details")).toHaveTextContent("CI flaked");
   });
 
   it("opens in place on its recent runs and cron line; a paused one shows no next run", async () => {
@@ -126,15 +144,20 @@ describe("a routine card in the chat", () => {
   it("says so when it has not run yet", () => {
     renderApp(<MessageBubble message={message(routine())} peerPubKey="peer" />);
     expect(screen.getByTestId("status-card-last")).toHaveTextContent("No runs yet");
+    expect(screen.getByTestId("status-card-last")).not.toHaveAttribute("data-result");
   });
 
-  it("is listed under Routines in the Tasks panel, with its next run", async () => {
-    const { user } = renderApp(<TasksButton rows={[{ id: "m1", sender: "peer", timestamp: 1, card: routine({ nextRunAt: NOW + 2 * 3_600_000 }) }]} />);
+  it("is listed in the Tasks panel on one line, with its next run and last run's mark", async () => {
+    const { user } = renderApp(<TasksButton rows={[{ id: "m1", sender: "peer", timestamp: 1, card: routine({ nextRunAt: NOW + 2 * 3_600_000, lastRun: { at: NOW - 60_000, result: "ok" } }) }]} />);
     expect(screen.queryByTestId("chat-tasks-count")).not.toBeInTheDocument();
     await user.click(screen.getByTestId("chat-tasks"));
+    // One routine is its row, not a folded line.
+    expect(screen.queryByTestId("chat-tasks-routines-toggle")).not.toBeInTheDocument();
     const item = within(screen.getByTestId("chat-tasks-routines")).getByTestId("chat-tasks-item");
     expect(item).toHaveAttribute("data-kind", "routine");
-    expect(item).toHaveTextContent(/Next in 2 hr\./);
+    expect(within(item).getByTestId("chat-tasks-item-next")).toHaveTextContent("in 2 hr.");
+    expect(within(item).getByTestId("chat-tasks-item-last")).toHaveTextContent("✓Last run: OK");
+    expect(screen.getByTestId("chat-tasks-summary")).toHaveTextContent("Nothing running · 1 routine");
   });
 });
 
@@ -171,8 +194,15 @@ describe("the Tasks button", () => {
     await user.click(button);
     const panel = screen.getByTestId("chat-tasks-panel");
     expect(within(within(panel).getByTestId("chat-tasks-active")).getAllByTestId("chat-tasks-item").map(i => i.dataset.cardId)).toEqual(["c", "a"]);
-    expect(within(within(panel).getByTestId("chat-tasks-finished")).getAllByTestId("chat-tasks-item").map(i => i.dataset.cardId)).toEqual(["b"]);
     expect(within(panel).queryByTestId("chat-tasks-routines")).not.toBeInTheDocument();
+    // The finished ones are folded under one line.
+    const finished = within(panel).getByTestId("chat-tasks-finished");
+    const toggle = within(finished).getByTestId("chat-tasks-finished-toggle");
+    expect(toggle).toHaveTextContent("Finished (1)");
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(within(finished).queryByTestId("chat-tasks-item")).not.toBeInTheDocument();
+    await user.click(toggle);
+    expect(within(finished).getAllByTestId("chat-tasks-item").map(i => i.dataset.cardId)).toEqual(["b"]);
     await user.click(within(panel).getAllByTestId("chat-tasks-item").find(i => i.dataset.cardId === "b")!);
     expect(screen.queryByTestId("chat-tasks-panel")).not.toBeInTheDocument();
     expect(screen.getByText("card b").closest("[data-message-id]")).toHaveAttribute("data-reply-flash");
@@ -194,13 +224,240 @@ describe("the Tasks button", () => {
     const sections = screen.getAllByTestId("chat-tasks-sender");
     expect(sections.map(s => within(s).getByTestId("chat-tasks-sender-name").textContent)).toEqual(["Coordinator", "Hermes One"]);
     expect(sections.map(s => within(s).getByTestId("chat-tasks-sender-count").textContent)).toEqual(["2 active", "1 active"]);
-    expect(within(sections[1]).getAllByTestId("chat-tasks-item").map(i => i.dataset.cardId)).toEqual(["bench", "nightly"]);
-    expect(screen.queryByTestId("chat-tasks-active")).not.toBeInTheDocument();
+    expect(within(sections[1]).getAllByTestId("chat-tasks-item").map(i => i.dataset.cardId)).toEqual(["bench"]);
+    // A finished task goes to the folded section at the end, with its sender's name.
+    await user.click(screen.getByTestId("chat-tasks-finished-toggle"));
+    const done = within(screen.getByTestId("chat-tasks-finished")).getByTestId("chat-tasks-item");
+    expect(done).toHaveAttribute("data-card-id", "nightly");
+    expect(done).toHaveTextContent("Hermes One");
   });
 
   it("shows no count once every task is finished", () => {
     renderApp(<TasksButton rows={[row("m1", card({ status: "done" }))]} />);
     expect(screen.getByTestId("chat-tasks")).toBeInTheDocument();
     expect(screen.queryByTestId("chat-tasks-count")).not.toBeInTheDocument();
+  });
+});
+
+/** "Sala de Máquinas": a coordinator, Hermes Zero with ten routines, Hermes One with two tasks and two routines. */
+describe("the Tasks panel under a bot room's load", () => {
+  const coordinator = "c".repeat(52), zero = "z".repeat(52), one = "o".repeat(52);
+  const names: Record<string, string> = { [coordinator]: "Coordinator", [zero]: "Hermes Zero", [one]: "Hermes One" };
+  const nameOf = (author: string) => names[author] ?? "?";
+  const routineCard = (id: string, extra: Record<string, unknown> = {}) => readStatusCard({ kind: "routine", id, name: `Routine ${id}`, schedule: "every hour", state: "active", ...extra })!;
+  const load = (): CardRow[] => {
+    let n = 0;
+    const at = (c: StatusCard, member: string) => row(`m${++n}`, c, { member, timestamp: n });
+    return [
+      at(card({ id: "ux", title: "Status cards UX", progress: 40 }), coordinator),
+      at(card({ id: "relay", title: "Fix relay", status: "done", pr: { url: "https://github.com/o/r/pull/712", number: 712 } }), coordinator),
+      at(routineCard("bughunt", { nextRunAt: NOW + 5 * 3_600_000, lastRun: { at: NOW - 60_000, result: "ok" } }), coordinator),
+      at(routineCard("prqueue", { nextRunAt: NOW + 4 * 60_000 + 20_000, lastRun: { at: NOW - 60_000, result: "ok" } }), coordinator),
+      ...Array.from({ length: 10 }, (_, i) => at(routineCard(`zero-${i}`, {
+        nextRunAt: NOW + (i + 2) * 60_000 + 20_000, lastRun: { at: NOW - 60_000, result: i === 6 ? "failed" : "ok" }, ...(i === 9 && { state: "paused" }),
+      }), zero)),
+      at(card({ id: "e2e", title: "Run the e2e matrix", progress: 45 }), one),
+      at(card({ id: "bench", title: "Benchmarks", status: "blocked" }), one),
+      at(routineCard("one-a", { nextRunAt: NOW + 7 * 3_600_000 }), one),
+      at(routineCard("one-b", { nextRunAt: NOW + 2 * 3_600_000 }), one),
+    ];
+  };
+
+  it("says what is going in its header, and scrolls inside a box no taller than the window", async () => {
+    const { user } = renderApp(<TasksButton rows={load()} nameOf={nameOf} />);
+    await user.click(screen.getByTestId("chat-tasks"));
+    const panel = screen.getByTestId("chat-tasks-panel");
+    expect(panel).toHaveAttribute("role", "dialog");
+    expect(panel).toHaveAttribute("data-layout", "popover");
+    expect(panel).toHaveAccessibleName("Tasks");
+    expect(screen.getByTestId("chat-tasks-summary")).toHaveTextContent("3 active · 14 routines");
+    // At most min(70vh, 560px), inside the window; the rows scroll in their own box, the header stays.
+    const maxHeight = parseFloat(panel.style.maxHeight);
+    expect(maxHeight).toBeGreaterThan(0);
+    expect(maxHeight).toBeLessThanOrEqual(Math.min(window.innerHeight * 0.7, 560));
+    expect(parseFloat(panel.style.width)).toBeLessThanOrEqual(window.innerWidth - 16);
+    expect(panel.className).toContain("flex-col");
+    const scroll = within(panel).getByTestId("chat-tasks-scroll");
+    expect(scroll.className).toMatch(/\boverflow-y-auto\b/);
+    expect(scroll.className).toMatch(/\bmin-h-0\b/);
+    expect(scroll).not.toContainElement(screen.getByTestId("chat-tasks-summary"));
+  });
+
+  it("lists each bot's tasks first, then its routines folded on one line, with the finished tasks folded at the end", async () => {
+    const { user } = renderApp(<TasksButton rows={load()} nameOf={nameOf} />);
+    await user.click(screen.getByTestId("chat-tasks"));
+    const sections = screen.getAllByTestId("chat-tasks-sender");
+    // The one with more going first; Hermes Zero, with nothing going, last.
+    expect(sections.map(s => within(s).getByTestId("chat-tasks-sender-name").textContent)).toEqual(["Hermes One", "Coordinator", "Hermes Zero"]);
+    // Sticky names: a bot's name stays at the top while its rows scroll under it.
+    expect(within(sections[0]).getByTestId("chat-tasks-sender-name").parentElement!.className).toMatch(/\bsticky\b.*\btop-0\b.*\bh-8\b/);
+    // The list keeps that much room above a row it scrolls to, and snaps its rows there: none stops half under a name.
+    expect(screen.getByTestId("chat-tasks-scroll").className).toMatch(/\bsnap-y\b.*\bscroll-pt-8\b/);
+    expect(screen.getAllByTestId("chat-tasks-item").every(r => r.className.includes("snap-start"))).toBe(true);
+    // Tasks before routines, blocked and running both "active", in the card's words and colours.
+    const [hermesOne, coord, hermesZero] = sections;
+    expect(within(within(hermesOne).getByTestId("chat-tasks-active")).getAllByTestId("chat-tasks-item").map(i => i.dataset.cardId)).toEqual(["bench", "e2e"]);
+    expect(within(hermesOne).getAllByTestId("chat-tasks-item-status").map(s => s.textContent)).toEqual(["Blocked", "Running"]);
+    expect(within(hermesOne).getAllByTestId("chat-tasks-item-status")[0].className).toContain("text-amber-500");
+    const order = [...hermesOne.querySelectorAll("[data-testid=chat-tasks-active], [data-testid=chat-tasks-routines]")].map(el => el.getAttribute("data-testid"));
+    expect(order).toEqual(["chat-tasks-active", "chat-tasks-routines"]);
+    // Zero's ten routines: one line, folded.
+    const zeroToggle = within(hermesZero).getByTestId("chat-tasks-routines-toggle");
+    expect(zeroToggle).toHaveAttribute("aria-expanded", "false");
+    expect(zeroToggle).toHaveTextContent("10 routines· next in 2 min.· ✕ 1 failed");
+    expect(within(hermesZero).queryAllByTestId("chat-tasks-item")).toHaveLength(0);
+    expect(within(coord).getByTestId("chat-tasks-routines-toggle")).toHaveTextContent("2 routines· next in 4 min.· ✓ all OK");
+    // The finished task is not among the bots' rows; the section at the end holds it, folded.
+    expect(within(coord).queryAllByTestId("chat-tasks-item").map(i => i.dataset.cardId)).toEqual(["ux"]);
+    expect(screen.getByTestId("chat-tasks-finished-toggle")).toHaveTextContent("Finished (1)");
+    // Opened: one line per routine, a failed one first, a paused one last.
+    await user.click(zeroToggle);
+    expect(zeroToggle).toHaveAttribute("aria-expanded", "true");
+    const rows = within(hermesZero).getAllByTestId("chat-tasks-item");
+    expect(rows).toHaveLength(10);
+    expect(rows[0]).toHaveAttribute("data-card-id", "zero-6");
+    expect(rows[0]).toHaveAttribute("data-result", "failed");
+    expect(rows[9]).toHaveAttribute("data-card-id", "zero-9");
+    expect(within(rows[9]).getByTestId("chat-tasks-item-next")).toHaveTextContent("Paused");
+    expect(rows.every(r => r.tagName === "BUTTON")).toBe(true);
+  });
+
+  it("moves between its rows with the arrow keys, closes on Escape and gives the focus back to the button", async () => {
+    const { user } = renderApp(<TasksButton rows={load()} nameOf={nameOf} />);
+    const button = screen.getByTestId("chat-tasks");
+    await user.click(button);
+    const panel = screen.getByTestId("chat-tasks-panel");
+    expect(panel).toHaveFocus();
+    await user.keyboard("{ArrowDown}");
+    expect(document.activeElement).toHaveAttribute("data-card-id", "bench");
+    await user.keyboard("{End}");
+    expect(document.activeElement).toHaveAttribute("data-testid", "chat-tasks-finished-toggle");
+    await user.keyboard("{ArrowDown}");
+    expect(document.activeElement).toHaveAttribute("data-card-id", "bench");
+    await user.keyboard("{Escape}");
+    expect(screen.queryByTestId("chat-tasks-panel")).not.toBeInTheDocument();
+    expect(button).toHaveFocus();
+  });
+
+  it("keeps Tab inside it", async () => {
+    const { user } = renderApp(<><button>before</button><TasksButton rows={load()} nameOf={nameOf} /><button>after</button></>);
+    await user.click(screen.getByTestId("chat-tasks"));
+    const panel = screen.getByTestId("chat-tasks-panel");
+    for (let i = 0; i < 12; i++) {
+      await user.tab();
+      expect(panel).toContainElement(document.activeElement as HTMLElement);
+    }
+  });
+
+  it("takes a row to its card and puts the focus on it", async () => {
+    const rows = load();
+    const target = rows.find(r => r.card?.id === "e2e")!;
+    const { user } = renderApp(<><TasksButton rows={rows} nameOf={nameOf} /><div data-message-id={target.id}><button data-testid="status-card-toggle">card</button></div></>);
+    await user.click(screen.getByTestId("chat-tasks"));
+    await user.click(screen.getAllByTestId("chat-tasks-item").find(i => i.dataset.cardId === "e2e")!);
+    expect(screen.queryByTestId("chat-tasks-panel")).not.toBeInTheDocument();
+    expect(screen.getByText("card").closest("[data-message-id]")).toHaveAttribute("data-reply-flash");
+    expect(screen.getByText("card")).toHaveFocus();
+  });
+
+  it("is a sheet on a phone, with a close button", async () => {
+    viewport(375, 812);
+    const { user } = renderApp(<TasksButton rows={load()} nameOf={nameOf} />);
+    const button = screen.getByTestId("chat-tasks");
+    await user.click(button);
+    const panel = screen.getByTestId("chat-tasks-panel");
+    expect(panel).toHaveAttribute("data-layout", "sheet");
+    expect(panel.className).toContain("max-h-[calc(100dvh-2.5rem)]");
+    expect(within(panel).getByTestId("chat-tasks-scroll").className).toMatch(/\boverflow-y-auto\b/);
+    expect(screen.getByTestId("chat-tasks-backdrop")).toBeInTheDocument();
+    await user.click(within(panel).getByTestId("chat-tasks-close"));
+    expect(screen.queryByTestId("chat-tasks-panel")).not.toBeInTheDocument();
+    expect(button).toHaveFocus();
+  });
+
+  it("says so when nothing is going, with the finished tasks open", async () => {
+    const { user } = renderApp(<TasksButton rows={[row("m1", card({ id: "a", status: "done" })), row("m2", card({ id: "b", status: "cancelled" }))]} />);
+    await user.click(screen.getByTestId("chat-tasks"));
+    expect(screen.getByTestId("chat-tasks-summary")).toHaveTextContent("Nothing running");
+    expect(screen.getByTestId("chat-tasks-empty")).toHaveTextContent("No tasks running now");
+    expect(screen.getByTestId("chat-tasks-finished-toggle")).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getAllByTestId("chat-tasks-item").map(i => i.dataset.status)).toEqual(["cancelled", "done"]);
+  });
+
+  it("reads right to left in Arabic", async () => {
+    const { user } = renderApp(<TasksButton rows={load()} nameOf={nameOf} />, { language: "ar" });
+    await user.click(screen.getByTestId("chat-tasks"));
+    expect(screen.getByTestId("chat-tasks-summary")).toHaveTextContent("3 نشطة · 14 روتينات");
+    expect(screen.getByTestId("chat-tasks-close")).toHaveAccessibleName("إغلاق");
+  });
+});
+
+describe("routines in a row in the chat", () => {
+  const r = (id: string, extra: Record<string, unknown> = {}) => readStatusCard({ kind: "routine", id, name: `Zero · ${id}`, schedule: "every hour", state: "active", ...extra }) as RoutineCard;
+  const msg = (id: string, c: StatusCard | undefined, member = "z", sender: "me" | "peer" = "peer") => ({ id, card: c, member, sender });
+
+  it("fold from three in a row from one sender; another sender, a task or a text ends a run", () => {
+    const rows = [
+      msg("a1", r("1")), msg("a2", r("2")), msg("a3", r("3")),
+      msg("t", card()),
+      msg("b1", r("4")), msg("b2", r("5")),
+      msg("c1", r("6"), "o"), msg("c2", r("7"), "o"), msg("c3", r("8"), "o"), msg("c4", r("9"), "o"),
+      msg("x", undefined, "o"),
+      msg("d1", r("10"), "o"), msg("d2", r("11"), "o"), msg("d3", r("12"), "z"),
+    ];
+    const stacks = routineStacks(rows, m => m);
+    expect([...stacks].map(([first, run]) => [first, run.map(m => m.id)])).toEqual([["a1", ["a1", "a2", "a3"]], ["c1", ["c1", "c2", "c3", "c4"]]]);
+  });
+
+  const Stack = ({ n }: { n: number }) => {
+    const cards = Array.from({ length: n }, (_, i) => r(`r${i}`, { nextRunAt: NOW + (i + 2) * 60_000 + 20_000, lastRun: { at: NOW - 1000, result: i === 1 ? "failed" : "ok" } }));
+    return <RoutineStack name="Hermes Zero" mine={false} cards={cards}>
+      {cards.map((c, i) => <MessageBubble key={i} message={message(c, { id: `m${i}` })} peerPubKey="peer" />)}
+    </RoutineStack>;
+  };
+
+  it("show as one row saying whose, how many, the next run and how the last runs went; a tap opens their cards", async () => {
+    const { user } = renderApp(<Stack n={10} />);
+    const toggle = screen.getByTestId("routine-stack-toggle");
+    expect(toggle).toHaveTextContent("~Hermes Zero↻10 routines· next in 2 min.· ✕ 1 failed");
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    // Folded, the cards stay in the page (a jump finds them) but hidden.
+    const list = document.getElementById(toggle.getAttribute("aria-controls")!)!;
+    expect(list).toHaveAttribute("hidden");
+    expect(within(list).getAllByTestId("status-card")).toHaveLength(10);
+    expect(screen.queryAllByRole("button", { name: /Zero ·/ })).toHaveLength(0);
+    await user.click(toggle);
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    expect(list).not.toHaveAttribute("hidden");
+    expect(screen.getAllByRole("button", { name: /Zero ·/ })).toHaveLength(10);
+  });
+
+  it("open when something jumps to one of them", () => {
+    renderApp(<Stack n={4} />);
+    expect(screen.getByTestId("routine-stack")).not.toHaveAttribute("data-open");
+    expect(jumpToMessage("m2")).toBe(true);
+    expect(screen.getByTestId("routine-stack")).toHaveAttribute("data-open");
+    expect(screen.getAllByTestId("status-card")).toHaveLength(4);
+  });
+});
+
+describe("the panel's model", () => {
+  const r = (id: string, extra: Record<string, unknown>) => readStatusCard({ kind: "routine", id, name: id, schedule: "hourly", state: "active", ...extra }) as RoutineCard;
+
+  it("sums up routines: how many, the soonest next run of an active one, how many failed and ran", () => {
+    const cards = [r("a", { nextRunAt: NOW + 600_000, lastRun: { at: NOW - 1, result: "ok" } }), r("b", { nextRunAt: NOW + 60_000, state: "paused" }),
+      r("c", { nextRunAt: NOW + 120_000, lastRun: { at: NOW - 1, result: "failed" } }), r("d", {})];
+    expect(routineSummary(cards)).toEqual({ count: 4, next: NOW + 120_000, failed: 1, ran: 2 });
+    expect(routineSummary([])).toEqual({ count: 0, failed: 0, ran: 0 });
+  });
+
+  it("in a 1:1 chat is one section without a name, the finished tasks apart", () => {
+    const model = panelModel(cardEntries([row("m1", card({ id: "a" })), row("m2", card({ id: "b", status: "failed" })), row("m3", r("n", {}))]), false);
+    expect(model.sections).toHaveLength(1);
+    expect(model.sections[0].author).toBe("");
+    expect(model.sections[0].active.map(e => e.card.id)).toEqual(["a"]);
+    expect(model.sections[0].routines.map(e => e.card.id)).toEqual(["n"]);
+    expect(model.finished.map(e => e.card.id)).toEqual(["b"]);
+    expect([model.active, model.routines]).toEqual([1, 1]);
   });
 });

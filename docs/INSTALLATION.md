@@ -61,13 +61,7 @@ npm install && npm run build -w @ghostlytools/cli && npm pack -w @ghostlytools/c
 npm install -g ./ghostlytools-cli-*.tgz
 ```
 
-### The older Rust `ghostly-cli` (no longer shipped)
-
-The older Rust `ghostly-cli` is the compatibility client for bots and scripts built on v0.4 chats ([cli/README.md](../cli/README.md)). It talks to other CLIs over the v0.4 record format, not to `ghostly1` app chats. From 1.0 the release no longer ships its binaries, and it is not on crates.io. Build it from a clone:
-
-```bash
-cargo install --path cli
-```
+The older Rust `ghostly-cli` was removed after 1.0: `ghostly` is the CLI.
 
 ## Your first chat
 
@@ -96,8 +90,6 @@ npm run tauri build      # Desktop, release bundles in target/release/bundle/
 npm run dev -w @ghostly/web   # web app on http://localhost:5180
 npm run build:web             # web app, static files in web/dist
 npm run build:extension       # extension, load extension/dist unpacked
-
-cargo build --release -p ghostly-cli   # ghostly-cli, in target/release/
 ```
 
 The Desktop build bundles the Node runtime that runs it, for HyperDHT (`scripts/prepare-native-runtime.mjs` runs before `tauri build`). To run the web app in Docker instead, see [WEB.md](WEB.md#run-it).

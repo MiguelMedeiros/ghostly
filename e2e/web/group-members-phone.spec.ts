@@ -2,7 +2,8 @@ import { expect, say, test, type Peer } from "../support/fixtures";
 
 /**
  * On a phone the admin's members list names each member beside Make admin and Remove. The key label kept its width
- * and the name gave way, down to nothing: the admin saw a key fragment next to Remove, not who it removes.
+ * and the name gave way, down to nothing: the admin saw a key fragment next to Remove, not who it removes. Then the
+ * two buttons still left the name ~7 characters ("Beatriz A…"): they go under it when the row is too narrow.
  */
 async function setName(peer: Peer, name: string): Promise<void> {
   await peer.page.goto("/#/profile");
@@ -15,7 +16,7 @@ async function setName(peer: Peer, name: string): Promise<void> {
 test("on a phone the admin's members list shows each member's name", { tag: ["@feature:groups.remove-member", "@feature:app.mobile-layout"] }, async ({ peer }) => {
   test.setTimeout(5 * 60_000);
   const [admin, member] = await Promise.all([peer("names-admin", { mobile: true, viewport: { width: 375, height: 812 } }), peer("names-member")]);
-  await setName(member, "Beatriz");
+  await setName(member, "Beatriz Albuquerque");
   await admin.page.getByTestId("sidebar-new-more").click();
   await admin.page.getByTestId("new-group").click();
   await admin.page.getByTestId("new-group-name").fill("Book club");
@@ -29,8 +30,13 @@ test("on a phone the admin's members list shows each member's name", { tag: ["@f
   await expect(admin.page.getByTestId("group-chat").getByText("hi", { exact: true })).toBeVisible({ timeout: 120_000 });
 
   await admin.page.getByTestId("group-members").click();
-  const row = admin.page.getByTestId("group-member").filter({ hasText: "Beatriz" });
+  const row = admin.page.getByTestId("group-member").filter({ hasText: "Beatriz Albuquerque" });
   await expect(row.getByTestId("group-remove-member")).toBeVisible();
-  // The name itself has room: its box is wide enough for a few letters, not squeezed to nothing.
-  await expect.poll(() => row.getByText("Beatriz", { exact: true }).evaluate((name) => Math.round(name.getBoundingClientRect().width))).toBeGreaterThanOrEqual(40);
-});
+  await expect(row.getByTestId("group-make-admin")).toBeVisible();
+  // The whole name shows: it is not cut short to make room for the buttons.
+  const name = row.getByText("Beatriz Albuquerque", { exact: true });
+  await expect.poll(() => name.evaluate((el) => el.scrollWidth <= el.clientWidth + 1 && el.getBoundingClientRect().width >= 100)).toBe(true);
+  // The buttons are under it, inside the dialog, and still in reach.
+  const [nameBox, removeBox, dialogBox] = await Promise.all([name.boundingBox(), row.getByTestId("group-remove-member").boundingBox(), admin.page.getByTestId("group-members-dialog").boundingBox()]);
+  expect(removeBox!.y).toBeGreaterThanOrEqual(nameBox!.y + nameBox!.height - 1);
+  expect(removeBox!.x + removeBox!.width).toBeLessThanOrEqual(dialogBox!.x + dialogBox!.width);});

@@ -1,16 +1,23 @@
 {
   "panel": {
-    "active": "進行中",
     "activeCount": "{{count}} 件進行中",
+    "allOk": "すべて OK",
     "button": "タスク",
     "buttonCount": "タスク、{{count}} 件が進行中",
-    "finished": "完了済み",
+    "close": "閉じる",
+    "empty": "進行中のタスクはありません",
+    "failedCount": "{{count}} 件失敗",
+    "finishedCount": "完了済み ({{count}})",
+    "idle": "進行中なし",
     "info": "ボットがこのカードを投稿し、最新の状態に保ちます。タップするとチャット内のカードに移動します。",
-    "routines": "ルーティン",
+    "nextRun": "次回 {{when}}",
+    "routinesMany": "ルーティン {{count}} 件",
+    "routinesOne": "ルーティン 1 件",
     "title": "タスク"
   },
   "routine": {
     "cron": "Cron:",
+    "lastRun": "前回の実行: {{result}}",
     "next": "次回 {{when}}",
     "noRuns": "まだ実行されていません",
     "result": {

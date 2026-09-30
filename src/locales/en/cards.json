@@ -1,16 +1,23 @@
 {
   "panel": {
-    "active": "Active",
     "activeCount": "{{count}} active",
+    "allOk": "all OK",
     "button": "Tasks",
     "buttonCount": "Tasks, {{count}} active",
-    "finished": "Finished",
+    "close": "Close",
+    "empty": "No tasks running now",
+    "failedCount": "{{count}} failed",
+    "finishedCount": "Finished ({{count}})",
+    "idle": "Nothing running",
     "info": "Bots post these cards and keep them up to date. Tap one to go to it in the chat.",
-    "routines": "Routines",
+    "nextRun": "next {{when}}",
+    "routinesMany": "{{count}} routines",
+    "routinesOne": "1 routine",
     "title": "Tasks"
   },
   "routine": {
     "cron": "Cron:",
+    "lastRun": "Last run: {{result}}",
     "next": "Next {{when}}",
     "noRuns": "No runs yet",
     "result": {
