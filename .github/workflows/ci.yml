@@ -12,15 +12,22 @@ on:
     # `gh pr ready` a second apart start two runs, the later one cancels the other, and the survivor may be the push's
     # run, whose payload still says draft (#742, #737, #759).
     types: [opened, synchronize, reopened, ready_for_review]
+  # A merge queue on dev tests what dev would become (dev plus the pull requests ahead in the queue) on a temporary
+  # gh-readonly-queue/dev/... branch, and merges only when CI Success passes there. Inert until the dev ruleset has a
+  # merge_queue rule.
+  merge_group:
+    types: [checks_requested]
 
 permissions:
   contents: read
 
-# A new push to a pull request cancels the run it supersedes. Anything else (pushes to dev and main, which gate
-# merges and the security autorelease) gets a group of its own: sharing one by ref would still cancel a queued
-# run whenever a third arrives, even without cancel-in-progress.
+# A new push to a pull request cancels the run it supersedes. A merge queue entry groups by its ref
+# (gh-readonly-queue/dev/pr-<n>-<base sha>), which no other entry shares, so entries never cancel each other: a queue
+# that drops an entry builds the ones behind it again on new refs. Anything else (pushes to dev and main, which gate
+# merges and the security autorelease) gets a group of its own: sharing one by ref would still cancel a queued run
+# whenever a third arrives, even without cancel-in-progress.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.run_id }}
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.event_name == 'merge_group' && github.ref || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
@@ -41,6 +48,9 @@ jobs:
   #   tests read (the list is tested against what they name).
   # A skipped job still reports its check, and CI Success accepts it only when this job said so. Pushes (dev, main)
   # run everything. If the lookup fails, so does this job, and CI Success with it: nothing is skipped by accident.
+  # A merge queue entry plans from everything it would put on dev (its base against its head: every queued pull
+  # request up to it) and is never a draft. If that diff cannot be read it runs everything instead of failing, which
+  # would drop it and every pull request behind it from the queue.
   changes:
     name: Changed paths
     runs-on: ubuntu-24.04
@@ -55,7 +65,7 @@ jobs:
       draft: ${{ steps.plan.outputs.draft }}
     steps:
       - name: Checkout the gate
-        if: github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           sparse-checkout: scripts/ci-changes.mjs
@@ -71,7 +81,23 @@ jobs:
           PR_URL: repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}
           CHANGED: ${{ github.event.pull_request.changed_files }}
           FILES_URL: repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files
+          BASE_SHA: ${{ github.event.merge_group.base_sha }}
+          HEAD_SHA: ${{ github.event.merge_group.head_sha }}
         run: |
+          if [[ "$EVENT" == "merge_group" ]]; then
+            echo "draft=false" >> "$GITHUB_OUTPUT"
+            # The checkout holds the head (depth 1); the base is one more commit, trees only needed. --no-renames
+            # lists a renamed file by both names, as the pull request path does.
+            if git fetch --no-tags --depth=1 origin "$BASE_SHA" &&
+               files=$(git diff --name-only --no-renames "$BASE_SHA" "$HEAD_SHA") && [[ -n "$files" ]]; then
+              echo "$files"
+              node scripts/ci-changes.mjs --draft=false <<< "$files"
+            else
+              echo "::notice::Could not list what the merge group changes against $BASE_SHA: everything runs"
+              printf 'rust=true\nwebsite=true\napp=true\npackages=true\n' | tee -a "$GITHUB_OUTPUT"
+            fi
+            exit 0
+          fi
           if [[ "$EVENT" != "pull_request" ]]; then
             printf 'draft=false\nrust=true\nwebsite=true\napp=true\npackages=true\n' | tee -a "$GITHUB_OUTPUT"
             exit 0
@@ -477,7 +503,7 @@ jobs:
         run: npx tsc --noEmit
 
   # The site's browser checks, in four shards of about the same time (apps/website/e2e/shard.mjs), each on its own build:
-  # building takes less than passing one build around. One runner ran them all in about 11 minutes.
+  # building (about 25 s) takes less than passing one build around. One runner ran them all in about 11 minutes.
   website-e2e:
     name: Website browser checks (${{ matrix.shard }}/4)
     needs: changes
@@ -507,15 +533,42 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      # Chromium and its system libraries download while the site builds.
+      - name: Playwright version
+        id: playwright
+        run: echo "version=$(node -p "require('@playwright/test/package.json').version")" >> "$GITHUB_OUTPUT"
+
+      # The headless shell the checks run in, one copy per Playwright version.
+      - name: Cache Chromium
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-shell-${{ steps.playwright.outputs.version }}
+
+      # Chromium installs while the site builds. It used to be `install --with-deps`, whose apt-get took 4 to 9
+      # minutes on about one shard job in ten (normally 30 s) and so set the whole CI cycle. The runner image
+      # already has the libraries Chromium loads (Google Chrome is on it); apt runs only when ldd finds one missing.
+      # All --with-deps would add is fonts (CJK, Thai, unifont, X11 bitmaps; the image has Liberation and Noto Color
+      # Emoji), and the site's fonts are its own (next/font).
       - name: Build, and install Chromium meanwhile
         run: |
-          npx playwright install --with-deps chromium > "$RUNNER_TEMP/chromium.log" 2>&1 &
+          {
+            echo "$(date +%T) download"
+            npx playwright install --only-shell chromium
+            echo "$(date +%T) downloaded"
+            shell=$(ls -d ~/.cache/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-linux64/chrome-headless-shell | tail -n 1)
+            if [ ! -x "$shell" ] || ldd "$shell" | grep "not found"; then
+              echo "$(date +%T) libraries missing, apt-get"
+              npx playwright install-deps chromium
+            fi
+            echo "$(date +%T) done"
+          } > "$RUNNER_TEMP/chromium.log" 2>&1 &
           chromium=$!
+          echo "$(date +%T) build"
           npm run build
+          echo "$(date +%T) built"
           status=0
           wait "$chromium" || status=$?
-          tail -n 20 "$RUNNER_TEMP/chromium.log"
+          grep -v "■\|% of " "$RUNNER_TEMP/chromium.log"
           exit "$status"
 
       - name: Browser checks (shard ${{ matrix.shard }} of 4)
