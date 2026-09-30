@@ -59,7 +59,10 @@ test.skipIf(!enabled)('WDK signs locally, sends a real local ERC20 transaction a
    return rpc(method,params);
   });
   expect((await coordinator.approve(review.id)).state).toBe('unknown');
-  await expect(coordinator.approve(concurrent.id)).rejects.toThrow('already submitted');
+  // A distinct review prepared before the first went holds the same nonce: refused, never signed or sent (#757).
+  await expect(coordinator.approve(concurrent.id)).rejects.toThrow('A payment from this wallet was sent after this review was made. Create a new review');
+  expect(broadcasts).toBe(1);
+  expect((await intentRepository.get(concurrent.id))?.review.state).toBe('pending');
   await mine();await mine();
   const restored=await UsdtAdapter.connect(config,mnemonic);
   try {
