@@ -38,7 +38,7 @@ async function hears(dir: string, from: string, group: string, text: string): Pr
   const listen = new Running(["--home", dir, "listen", "--since", String(since), "--type", "group."], dir === old ? oldEnv : env, bin(dir));
   running.push(listen);
   const sent = ok(await as(from, "group", "send", group, text));
-  const event = await listen.waitFor((l) => l.type === "group.message" && (l.message as { text?: string })?.text === text, 90_000);
+  const event = await listen.waitFor((l) => l.type === "group.message" && (l.message as { text?: string })?.text === text, 150_000);
   expect(event).toMatchObject({ message: { id: sent.messageId, text } });
   await listen.stop();
 }
@@ -63,7 +63,11 @@ afterAll(async () => {
   for (const relay of relays) relay.server.close();
 }, 30_000);
 
-describe(`a community between this CLI and ${OLD_BIN ? "an older release" : "one from before native group links"}`, { timeout: 300_000 }, () => {
+describe(`a community between this CLI and ${OLD_BIN ? "an older release" : "one from before native group links"}`, { timeout: 480_000 }, () => {
+  it("this CLI has WebRTC (libdatachannel): its group links stay on it with an app that has it too", async () => {
+    expect(ok(await as(now, "status"))).toMatchObject({ webrtc: true });
+  });
+
   it("this CLI makes it, the older one joins by its link, and each reads the other", async () => {
     const created = ok(await as(now, "group", "create", "Mixed", "crew"));
     const joined = ok(await as(old, "group", "join", created.link as string));

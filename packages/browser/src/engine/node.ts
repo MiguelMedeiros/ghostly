@@ -349,6 +349,11 @@ export interface NodeOptions {
    */
   staysOnline?: boolean;
   /**
+   * Tests only: group links behave as before they could go native (WISP 9xx § Transports): WebRTC alone, no `_tr` read
+   * or published, no native endpoint. A compatibility test runs this app as one from before against a current one.
+   */
+  webrtcGroupLinks?: boolean;
+  /**
    * The most WebRTC connections this app's groups and 1:1 chats hold at once (WISP 9xx · Group Mesh § Hubs, Budget):
    * within it, the app is a hub of a private group only while that fits, and a group opens only the edges that fit.
    * Default: none. The Desktop app on a Mac says 40: WKWebView opens about 46 in one page, and the rest stay for calls.
@@ -4182,7 +4187,7 @@ export class GhostlyNode implements EngineImplementation {
       resume: !entry && stored.edgeLive ? resumeOn : undefined,
       // How the member's app said to dial it, where one side has no WebRTC (`_tr`, `onPacketTransports`).
       native: { peerDescriptors: stored.peerDescriptors, peerTransports: stored.peerTransports, peerFallback: stored.peerFallback, automatic: true },
-      packetTransports: true,
+      packetTransports: !this.options.webrtcGroupLinks,
       // An offer from before that session began is not answered after a restart (a relay that missed its clearing).
       resumeFloor: !entry && stored.edgeLive ? stored.edgeLiveSince : undefined,
       // Pinned in advance to the member the roster names: there is nothing to trust on first use.
@@ -4276,6 +4281,7 @@ export class GhostlyNode implements EngineImplementation {
    * WebRTC it runs none, as before: a group of eight would otherwise hold seven listeners per transport for nothing.
    */
   private keepsGroupNative(stored: StoredLink): boolean {
+    if (this.options.webrtcGroupLinks) return false;
     return typeof RTCPeerConnection === "undefined" || (!!stored.peerTransports && !stored.peerTransports.includes("webrtc/1"));
   }
 
