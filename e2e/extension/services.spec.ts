@@ -1,4 +1,4 @@
-import { BIG_SHA256, startAtlas } from "../../extension/test/atlas.mjs";
+import { BIG_SHA256, startAtlas } from "../../apps/extension/test/atlas.mjs";
 import { connect, linkLegacy } from "../support/fixtures";
 import { expect, test } from "../support/extension";
 

@@ -242,13 +242,13 @@ export async function openChatWith(p: Peer, name: string) {
 }
 
 /**
- * Ghostly Browser (the built extension, extension/dist) in a Chromium profile of its own, the way
+ * Ghostly Browser (the built extension, apps/extension/dist) in a Chromium profile of its own, the way
  * e2e/support/extension.ts opens it: the localhost permission granted up front (Chrome's prompt
  * cannot be clicked by automation) and the offscreen engine pointed at the test's relay.
  */
 export async function openExtension(relay: LocalRelay, name: string): Promise<Peer & { dispose: () => void }> {
-  const dist = join(REPO, "extension/dist");
-  if (!existsSync(join(dist, "manifest.json"))) throw new Error("extension/dist is missing: run `npm run build:extension` first (npm run capture does)");
+  const dist = join(REPO, "apps/extension/dist");
+  if (!existsSync(join(dist, "manifest.json"))) throw new Error("apps/extension/dist is missing: run `npm run build:extension` first (npm run capture does)");
   const work = mkdtempSync(join(tmpdir(), "ghostly-capture-ext-"));
   const dir = join(work, "extension");
   cpSync(dist, dir, { recursive: true });

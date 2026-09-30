@@ -226,10 +226,10 @@ jobs:
         run: npm run test:sdk-example
 
   # ============================================
-  # Tauri Backend (src-tauri) - Rust
+  # Tauri Backend (apps/desktop) - Rust
   # ============================================
   tauri:
-    name: Tauri Backend (src-tauri)
+    name: Tauri Backend (apps/desktop)
     needs: changes
     if: needs.changes.outputs.rust == 'true'
     runs-on: ubuntu-24.04
@@ -249,7 +249,7 @@ jobs:
       - name: Install system dependencies
         run: |
           {
-            # GStreamer's headers (calls on Linux, src-tauri/src/native_call) need libunwind-dev, which the
+            # GStreamer's headers (calls on Linux, apps/desktop/src/native_call) need libunwind-dev, which the
             # runner image's libunwind-14-dev (LLVM's) blocks.
             sudo apt-get remove -y libunwind-14-dev || true
             sudo apt-get update
@@ -297,23 +297,23 @@ jobs:
       # tauri-build wants every bundled resource to exist. `tauri build` fills this one
       # (scripts/prepare-native-runtime.mjs); plain cargo only needs the folder.
       - name: Native runtime folder
-        run: mkdir -p src-tauri/native-runtime
+        run: mkdir -p apps/desktop/native-runtime
 
-      - name: Check formatting (src-tauri)
-        run: cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
+      - name: Check formatting (apps/desktop)
+        run: cargo fmt --manifest-path apps/desktop/Cargo.toml -- --check
 
-      - name: Clippy (src-tauri)
-        run: cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings
+      - name: Clippy (apps/desktop)
+        run: cargo clippy --manifest-path apps/desktop/Cargo.toml -- -D warnings
 
-      - name: Build (src-tauri)
-        run: cargo build --manifest-path src-tauri/Cargo.toml
+      - name: Build (apps/desktop)
+        run: cargo build --manifest-path apps/desktop/Cargo.toml
 
-      - name: Test (src-tauri)
+      - name: Test (apps/desktop)
         id: test
-        run: cargo test --manifest-path src-tauri/Cargo.toml
+        run: cargo test --manifest-path apps/desktop/Cargo.toml
 
       # The Iroh framing, limits and reconnects, on loopback: seconds, and the
-      # dependencies are already built for src-tauri.
+      # dependencies are already built for apps/desktop.
       - name: Test (native/transports)
         run: cargo test --manifest-path native/transports/Cargo.toml
 

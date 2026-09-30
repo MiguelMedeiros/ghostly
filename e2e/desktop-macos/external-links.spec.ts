@@ -13,7 +13,7 @@ import { LocalRelay } from "../support/relay";
  * this proves it where a WebKit-only change would break it.
  *
  * The app under the test driver writes down what it would open instead of starting a browser (`launch` in
- * src-tauri/src/commands.rs), and `opened()` reads that list. The address has "ã" in it: the page sends it
+ * apps/desktop/src/commands.rs), and `opened()` reads that list. The address has "ã" in it: the page sends it
  * percent-encoded, since Rust takes plain ASCII only.
  *
  * The second link is Settings → About → GitHub. The update Download link is the same kind of link, but a Mac never

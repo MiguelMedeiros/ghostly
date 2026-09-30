@@ -8,7 +8,7 @@ import { NothingSpentError, networkMode, type ProviderHost, type ProviderNetwork
  * On-chain Bitcoin from a wallet of the person's own Bitcoin Core node, over its JSON-RPC.
  *
  * bitcoind answers no CORS preflight, so a page cannot call it: this runs on Desktop only, where the
- * `bitcoind_rpc` Tauri command (src-tauri/src/bitcoind_rpc.rs, reached through `ProviderHost.invoke`)
+ * `bitcoind_rpc` Tauri command (apps/desktop/src/bitcoind_rpc.rs, reached through `ProviderHost.invoke`)
  * makes the call. That command forwards only the methods below, to the URL configured here, and says
  * whether a failed call could have reached the node (`kind`), which is what lets `broadcast` tell
  * "nothing spent" from "unknown".

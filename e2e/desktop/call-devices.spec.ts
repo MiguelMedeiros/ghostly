@@ -11,7 +11,7 @@ import { desktopPerson, type DesktopPerson } from "../matrix/people";
 /**
  * The Linux Desktop's calls use the microphone, camera and speaker chosen in Settings, and switch them live.
  *
- * Its calls capture and play in GStreamer (src-tauri/src/native_call), which knows devices by name, not by the
+ * Its calls capture and play in GStreamer (apps/desktop/src/native_call), which knows devices by name, not by the
  * WebView's deviceId: Rust lists them (`native_call_devices`) and the page passes the chosen one's name. Here the
  * devices are PulseAudio's: null sources for microphones and null sinks for speakers, named, which GStreamer's
  * device monitor lists as it would a headset. The cameras are the test pictures GHOSTLY_FAKE_MEDIA names ("Test

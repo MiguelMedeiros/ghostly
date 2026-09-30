@@ -31,9 +31,9 @@ function allowed(policy: string, directive: string): string[] | "anything" {
 }
 
 const policies = {
-  desktop: () => (JSON.parse(read("src-tauri/tauri.conf.json")) as { app: { security: { csp: string } } }).app.security.csp,
-  web: () => /Content-Security-Policy "([^"]+)"/.exec(read("web/nginx-headers.conf"))![1]!,
-  extension: () => (JSON.parse(read("extension/public/manifest.json")) as { content_security_policy: { extension_pages: string } }).content_security_policy.extension_pages,
+  desktop: () => (JSON.parse(read("apps/desktop/tauri.conf.json")) as { app: { security: { csp: string } } }).app.security.csp,
+  web: () => /Content-Security-Policy "([^"]+)"/.exec(read("apps/web/nginx-headers.conf"))![1]!,
+  extension: () => (JSON.parse(read("apps/extension/public/manifest.json")) as { content_security_policy: { extension_pages: string } }).content_security_policy.extension_pages,
 };
 
 describe("the Content-Security-Policy of every shell", () => {
@@ -74,7 +74,7 @@ describe("the Content-Security-Policy of every shell", () => {
 
   // covers: files.video.stream
   it("names media-src on Desktop, rather than leaning on default-src: blobs and the stored-file scheme, nothing wider", () => {
-    // Rust serves a stored file in ranges (src-tauri/src/file_stream.rs): `ghostly-file://localhost/…` on macOS,
+    // Rust serves a stored file in ranges (apps/desktop/src/file_stream.rs): `ghostly-file://localhost/…` on macOS,
     // `http://ghostly-file.localhost/…` on Windows, where WebView2 takes no custom scheme, and HTTP on 127.0.0.1 on
     // Linux, whose WebKitGTK plays media from no custom scheme (connect-src already reaches 127.0.0.1).
     expect(directives(policies.desktop()).get("media-src")).toEqual(["'self'", "blob:", "ghostly-file:", "http://ghostly-file.localhost", "http://127.0.0.1:*"]);
@@ -99,7 +99,7 @@ describe("HTTPS only", () => {
   // Both sites are served over HTTPS by Cloudflare, which added no Strict-Transport-Security of its own, so a browser
   // given the bare name could try plain HTTP first. The servers say it themselves.
   it("the web app's server and the website send Strict-Transport-Security for a year", () => {
-    expect(read("web/nginx-headers.conf")).toMatch(/^add_header Strict-Transport-Security "max-age=31536000" always;$/m);
+    expect(read("apps/web/nginx-headers.conf")).toMatch(/^add_header Strict-Transport-Security "max-age=31536000" always;$/m);
     expect(read("website/next.config.ts")).toMatch(/key: "Strict-Transport-Security", value: "max-age=31536000"/);
   });
 });

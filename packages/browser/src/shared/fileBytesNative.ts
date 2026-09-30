@@ -8,7 +8,7 @@ export const NATIVE_BLOB_MAX = 64 * 1024 * 1024;
 
 /**
  * Files as real files in the app's data folder (`files/<space>/<id>`), written and read by the Rust
- * commands in `src-tauri/src/file_store.rs`. Bytes cross as raw IPC bodies, a step at a time.
+ * commands in `apps/desktop/src/file_store.rs`. Bytes cross as raw IPC bodies, a step at a time.
  */
 export class NativeFileBytes implements FileBytes {
   readonly kind = "native" as const;
@@ -66,7 +66,7 @@ export class NativeFileBytes implements FileBytes {
   }
 
   /**
-   * A URL Rust serves the file from in ranges (`src-tauri/src/file_stream.rs`): the `ghostly-file` scheme, or HTTP on
+   * A URL Rust serves the file from in ranges (`apps/desktop/src/file_stream.rs`): the `ghostly-file` scheme, or HTTP on
    * 127.0.0.1 on Linux, whose WebKitGTK plays no custom scheme. The WebView reads it as a video seeks.
    */
   async stream(id: string, type: string): Promise<FileStream | null> {

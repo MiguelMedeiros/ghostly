@@ -51,7 +51,7 @@ export default defineConfig({
   webServer: deployed
     ? undefined
     : {
-        command: `npm run build:web && npx vite preview web --port ${port} --strictPort`,
+        command: `npm run build:web && npx vite preview apps/web --port ${port} --strictPort`,
         cwd: "..",
         url: `http://localhost:${port}`,
         reuseExistingServer: !process.env.CI,

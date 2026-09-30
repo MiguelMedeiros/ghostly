@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 
 /**
  * The static page an OpenID Connect provider returns to after an identity-proof sign-in
- * (web/oidc-callback.html). It hands the answer, still in the fragment, to the Ghostly tab
+ * (apps/web/oidc-callback.html). It hands the answer, still in the fragment, to the Ghostly tab
  * that asked, or forwards it to the desktop app's one-shot listener on 127.0.0.1, and keeps
  * no copy in the address bar.
  */

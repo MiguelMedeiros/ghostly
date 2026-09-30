@@ -1,3 +1,3 @@
 [workspace]
-members = ["src-tauri", "native/transports"]
+members = ["apps/desktop", "native/transports"]
 resolver = "2"

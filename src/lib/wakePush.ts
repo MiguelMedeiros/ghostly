@@ -9,7 +9,7 @@ import { chatPath } from "./url";
 /*
  * Wake-up push, the receiving side (WISP 401 § Wake-up push): this profile's browser push subscription, which the
  * engine shares with paired contacts so their apps can wake this one while it is closed. Only the installed web
- * app can be woken this way; it registers how (`setPushPlatform`, web/src/main.tsx). The extension and Desktop
+ * app can be woken this way; it registers how (`setPushPlatform`, apps/web/src/main.tsx). The extension and Desktop
  * stay running on their own and have nothing to register, so the switch is not shown there.
  */
 
