@@ -7,6 +7,7 @@ import {
 } from "react";
 import { useSettings } from "./SettingsContext";
 import type { Theme, ColorScheme, ColorTheme } from "../lib/settings";
+import { applyWindowTheme } from "../lib/windowTheme";
 
 interface ThemeContextValue {
   effectiveScheme: "dark" | "light";
@@ -43,6 +44,9 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
 
   const effectiveScheme =
     settings.colorScheme === "system" ? systemTheme : settings.colorScheme;
+
+  // Desktop's title bar takes the app's Light or Dark, not the system's; System gives it back to the system.
+  useEffect(() => applyWindowTheme(settings.colorScheme), [settings.colorScheme]);
 
   useEffect(() => {
     const root = document.documentElement;
