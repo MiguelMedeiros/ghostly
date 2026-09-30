@@ -3,7 +3,9 @@ import { Interface } from "ethers";
 import { USDT_LOCAL } from "../support/usdt-local.mjs";
 import { strangerInvoice } from "../support/bolt11";
 import { TEST_COINS, chat, connect, createWallet, expect, getTestCoins, link, openChat, openWallet, test, type Peer, type PeerOptions, type WalletKind } from "../support/fixtures";
+import { recoverExpiredArk } from "../support/arkRecover";
 import { composerRow } from "../support/composer";
+import { exclusive } from "../support/exclusive";
 import { chatPayments, paymentCard } from "../support/payments";
 
 /**
@@ -107,7 +109,7 @@ test.describe("Cashu and Lightning", () => {
 
 test("Ark: in, a Send from the wallet, a Send in the chat and a Request paid in the chat", { tag: ["@network", "@gated", "@feature:wallet.ark.send", "@feature:payments.arkade.send", "@feature:payments.arkade.request"] }, async ({ peer }) => {
   test.skip(process.env.GHOSTLY_ARK_REGTEST !== "1", "Requires e2e/infra (npm run e2e:infra:up) and GHOSTLY_ARK_REGTEST=1");
-  test.setTimeout(6 * 60_000);
+  test.setTimeout(10 * 60_000);
   const mnemonic = execFileSync(process.execPath, ["--experimental-eventsource", "e2e/support/fund-ark.mjs"], { encoding: "utf8", stdio: "pipe" }).trim();
   const [alice, bob] = await twoInTestnet(peer, ["ark-p-alice", "ark-p-bob"], ["arkade"]);
   const panel = (p: Peer) => p.page.getByTestId("ark-wallet");
@@ -154,18 +156,14 @@ test("Ark: in, a Send from the wallet, a Send in the chat and a Request paid in 
   await request.getByTestId("payment-review").getByRole("button", { name: "Approve payment" }).click();
   await expect(request.getByTestId("payment-state")).toHaveText("Paid", { timeout: 60_000 });
   await openWallet(bob, "arkade-testnet");
-  // On regtest a batch expires within minutes: what outlived its batch is recovered, never lost.
-  const recoverable = panel(bob).getByTestId("ark-recoverable");
-  await expect.poll(async () => (await recoverable.isVisible()) || /^400/.test(await balance(bob).innerText()), { timeout: 60_000 }).toBe(true);
-  let recovered = false;
-  if (await recoverable.isVisible()) {
-    await panel(bob).getByTestId("ark-recover").click();
-    await expect(recoverable).toHaveCount(0, { timeout: 120_000 });
-    recovered = true;
-  }
-  // 500 in, 200 out, 100 in; a recovery goes through a batch, which costs a few sats.
+  // On regtest a batch expires within minutes: what outlived its batch waits for the server's sweep, then is
+  // recovered, never lost.
   const sats = async () => Number((await balance(bob).innerText()).trim().match(/^[\d,]*/)![0].replace(/,/g, "") || NaN);
-  await expect.poll(sats, { timeout: 60_000 }).toBeGreaterThanOrEqual(recovered ? 390 : 400);
+  const expired = () => panel(bob).locator("[data-testid=ark-sweeping], [data-testid=ark-recoverable]");
+  await expect.poll(async () => (await expired().count()) > 0 || (await sats()) === 400, { timeout: 60_000 }).toBe(true);
+  const back = await exclusive("regtest-chain", () => recoverExpiredArk(panel(bob), "bob", sats));
+  // 500 in, 200 out, 100 in; a recovery goes through a batch, which costs the server's input fee (e2e/infra: 1%).
+  await expect.poll(sats, { timeout: 60_000 }).toBeGreaterThanOrEqual(back ? 395 : 400);
   expect(await sats()).toBeLessThanOrEqual(400);
 });
 

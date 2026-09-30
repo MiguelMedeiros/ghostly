@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { expect, type Locator } from "@playwright/test";
 import { Interface } from "ethers";
+import { recoverExpiredArk } from "../support/arkRecover";
 import { exclusive } from "../support/exclusive";
 import { chatPayments } from "../support/payments";
 import { choose } from "../support/select";
@@ -303,29 +304,22 @@ async function arkade(a: Actor, b: Actor): Promise<void> {
     await expect(panel(p).getByTestId("ark-address")).toBeVisible({ timeout: 60_000 });
   }
   await expect.poll(() => sats(a), { timeout: 60_000 }).toBe(9_900);
-  // A regtest batch expires within minutes (e2e/infra: 180 s): coins that outlived theirs are recoverable, not
-  // spendable, until the wallet's Recover moves them into a new batch — which a person does when the wallet
-  // offers it. The server can recover only what it has swept, and its sweep waits for the chain's time to
-  // pass the expiry: an idle regtest chain has no blocks to move it, so the test mines while it recovers.
+  // A regtest batch expires within minutes (e2e/infra: 180): coins that outlived theirs wait for the server to sweep
+  // that batch, then Recover moves them into a new one, as a person does when the wallet offers it. The sweep comes
+  // with the chain's blocks, so the helper mines until it has (support/arkRecover.ts). Each recovery pays the
+  // server's input fee (e2e/infra: 1%), which the final balances allow for.
+  const fees = new Map<Actor, number>([[a, 0], [b, 0]]);
   const recovered = async (p: Actor) => {
     await wallet(p, "arkade");
-    const recoverable = panel(p).getByTestId("ark-recoverable");
-    if (!(await recoverable.isVisible())) return;
-    await expect(async () => {
-      bdkRegtest("mine", "3");
-      if (await recoverable.isVisible()) await panel(p).getByTestId("ark-recover").click();
-      await expect(recoverable).toHaveCount(0, { timeout: 20_000 });
-    }, `${p.name}'s expired coins are recovered`).toPass({ timeout: 180_000 });
-    // Recovered into the next batch: spendable again once that round is done.
-    await expect.poll(() => sats(p), { timeout: 120_000, message: `${p.name}'s recovered coins are back` }).toBeGreaterThan(0);
+    const back = await recoverExpiredArk(panel(p), p.name, () => sats(p));
+    if (back > 0) fees.set(p, fees.get(p)! + Math.ceil(back / 99) + 1);
   };
   await bothWays(a, b, "arkade", [500, 100, 200, 50], recovered);
-  // A: 9,900 − 500 − 100 + 200 + 50; B: 500 + 100 − 200 − 50, less what the recoveries cost (a few sats
-  // each, to the new batch).
+  // A: 9,900 − 500 − 100 + 200 + 50; B: 500 + 100 − 200 − 50, less what the recoveries cost.
   for (const [p, expected] of [[a, 9_550], [b, 350]] as const) {
     await recovered(p);
     await expect.poll(() => sats(p), { timeout: 60_000 }).toBeLessThanOrEqual(expected);
-    expect(await sats(p)).toBeGreaterThanOrEqual(expected - 60);
+    expect(await sats(p)).toBeGreaterThanOrEqual(expected - 60 - fees.get(p)!);
   }
 }
 

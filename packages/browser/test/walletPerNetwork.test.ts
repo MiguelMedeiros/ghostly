@@ -132,7 +132,7 @@ for (const kind of ["ark", "usdt"] as const) {
     await transact([STORES.settings], (s) => { s[STORES.settings].put(mainnet, `${kind}Wallet-mode-mainnet`); s[STORES.settings].put(testnet, `${kind}Wallet-mode-testnet`); });
     const slow = deferred<{ dispose: () => Promise<void> }>();
     const quick = kind === "ark"
-      ? { config: testnet.config, address: async () => "tark1me", boardingAddress: async () => "tb1pme", balance: async () => 0, incoming: async () => 0, recoverable: async () => 0, dispose: async () => {} }
+      ? { config: testnet.config, address: async () => "tark1me", boardingAddress: async () => "tb1pme", balance: async () => 0, incoming: async () => 0, expired: async () => ({ recoverable: 0, sweeping: 0 }), dispose: async () => {} }
       : { config: testnet.config, address: async () => "0xme", balances: async () => ({ balance: "0", gasBalance: "0" }), dispose: async () => {} };
     const connect = vi.spyOn(kind === "ark" ? ArkadeAdapter : UsdtAdapter, "connect")
       .mockImplementation(((config: { network: string }) => config.network === (kind === "ark" ? "bitcoin" : "ethereum") ? slow.promise : Promise.resolve(quick)) as never);
@@ -165,27 +165,31 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
-it("ark: coins of an expired batch show as recoverable, and Recover brings them back into the balance", async () => {
+it("ark: expired coins wait for the server's sweep, then show as recoverable, and Recover brings them back into the balance", async () => {
   vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
   try {
-    const state = { balance: 100, recoverable: 300 };
+    const state = { balance: 100, recoverable: 0, sweeping: 300 };
     const recover = vi.fn(async () => { state.balance += state.recoverable - 4; state.recoverable = 0; return "txid"; });
     const adapter = {
       config: { network: "regtest", provider: "http://127.0.0.1:43010" },
       address: async () => "tark1me", boardingAddress: async () => "bcrt1me", incoming: async () => 0,
-      balance: async () => state.balance, recoverable: async () => state.recoverable, recover, dispose: async () => {},
+      balance: async () => state.balance, expired: async () => ({ recoverable: state.recoverable, sweeping: state.sweeping }), recover, dispose: async () => {},
     };
     const wallet = new ArkWallet("testnet", vi.fn());
     wallet.adapter = adapter as never;
     await wallet.refresh();
-    expect(wallet.view).toMatchObject({ balance: 100, recoverable: 300 });
+    expect(wallet.view, "past expiry, not swept yet: neither spendable nor recoverable").toMatchObject({ balance: 100, recoverable: 0, sweeping: 300 });
+    // The server swept their batch.
+    Object.assign(state, { recoverable: 300, sweeping: 0 });
+    await wallet.refresh();
+    expect(wallet.view).toMatchObject({ balance: 100, recoverable: 300, sweeping: 0 });
     await expect(wallet.recover()).resolves.toBe("txid");
     expect(recover).toHaveBeenCalledOnce();
     expect(wallet.view, "the batch costs a few sats").toMatchObject({ balance: 396, recoverable: 0 });
     // A provider that cannot tell keeps the last value, and says the numbers may be stale.
-    adapter.recoverable = async () => { throw new Error("offline"); };
+    adapter.expired = async () => { throw new Error("offline"); };
     await wallet.refresh();
-    expect(wallet.view).toMatchObject({ recoverable: 0 });
+    expect(wallet.view).toMatchObject({ recoverable: 0, sweeping: 0 });
     expect(wallet.view.error).toContain("recoverable");
     await wallet.lock();
   } finally {

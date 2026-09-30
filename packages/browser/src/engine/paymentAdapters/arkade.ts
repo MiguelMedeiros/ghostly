@@ -2,7 +2,7 @@ import {
   Wallet, MnemonicIdentity, RestArkProvider, RestIndexerProvider, EsploraProvider,
   IndexedDBWalletRepository, IndexedDBContractRepository, ArkAddress, Transaction,
   assertSubmittedArkTxid, matchServerCheckpoints, assertAllowedSighashTypes, verifyTapscriptSignatures,
-  type StorageConfig,
+  isRecoverable, canRecoverOnchain, type StorageConfig,
 } from "@arkade-os/sdk";
 import { tapLeafHash } from "@scure/btc-signer/payment.js";
 import { assertWholeSats, validatePaymentTarget, type PaymentAdapter, type PaymentReview, type PaymentTarget } from "@ghostly/core";
@@ -53,10 +53,32 @@ export class ArkadeAdapter implements PaymentAdapter<ArkPrepared> {
   async address() { return this.wallet.getAddress(); }
   requestAddress() { return this.serial(async()=>(await this.wallet.getNewAddresses({types:["default"],forceNew:true}))[0].address); }
   async balance() { return (await this.wallet.getBalance()).available; }
-  /** Sats whose batch expired before they were renewed: still this wallet's, but only after a recovery. */
-  async recoverable() { return Number((await this.wallet.getBalance()).recoverable ?? 0); }
-  /** Moves expired (swept) outputs back into the balance, through the server's next batch. */
-  recover() { return this.serial(async()=>(await this.wallet.getVtxoManager()).recoverVtxos()); }
+  /**
+   * Sats whose batch expired before they were renewed, in two kinds. `recoverable`: the server has swept their batch,
+   * so a recovery can take them. `sweeping`: past their expiry, but not swept yet. The SDK (0.4.76) counts both as
+   * recoverable, but it settles an unswept coin without the forfeit the server still asks for (arkd wants one until
+   * the sweep): the batch fails ("missing forfeit transactions") and the server bans the coin for a while. The sweep
+   * waits for the chain's time to pass the expiry: on a real network an hour or more, on regtest the expiry's blocks.
+   */
+  async expired() {
+    const now={timestamp:new Date()};
+    let recoverable=0,sweeping=0;
+    for(const vtxo of await this.wallet.getVtxos({withRecoverable:true,withUnrolled:false})) {
+      if(isRecoverable(vtxo))recoverable+=vtxo.value;
+      else if(!vtxo.isSwept&&canRecoverOnchain(vtxo,now))sweeping+=vtxo.value;
+    }
+    return {recoverable,sweeping};
+  }
+  /**
+   * Moves swept outputs back into the balance, through the server's next batch. Refused while any expired coin is
+   * not swept yet: `recoverVtxos` would name it too, and that batch fails for all of them.
+   */
+  recover() { return this.serial(async()=>{
+    const {recoverable,sweeping}=await this.expired();
+    if(sweeping)throw new Error("Expired coins can be recovered once the Ark server has swept their batch. Try again later.");
+    if(!recoverable)throw new Error("Nothing to recover");
+    return (await this.wallet.getVtxoManager()).recoverVtxos();
+  }); }
   /** On-chain deposits land here; the SDK's settlement moves them into Ark once confirmed. */
   boardingAddress() { return this.wallet.getBoardingAddress(); }
   /** Sats sent on-chain to the boarding address that are not in Ark yet. */

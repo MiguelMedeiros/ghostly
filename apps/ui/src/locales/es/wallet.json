@@ -14,6 +14,8 @@
     "recovering": "Recuperando…",
     "renewalOpen": "Mientras Ghostly esté abierto",
     "renewalRegtest": "Desactivada en regtest",
+    "sweeping": "{{amount}} {{unit}} caducaron. Podrás recuperarlos cuando el servidor Ark haya barrido su lote.",
+    "sweepingInfo": "Las monedas Ark viven en un lote que caduca; Ghostly las renueva antes mientras está abierto. Las monedas caducadas siguen siendo tuyas, pero primero el servidor Ark devuelve su lote a la cadena (un barrido). Eso espera nuevos bloques de Bitcoin, a menudo una hora o más. Hasta entonces no se pueden gastar ni recuperar; después, Recuperar las mueve a un lote nuevo.",
     "useProvider": "Usar este proveedor"
   },
   "backup": {
