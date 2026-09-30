@@ -179,12 +179,16 @@ describe("a call for a screen reader and the keys", () => {
 
   it("says the call's state in words as it moves on, never the running clock", () => {
     const { rerender } = overlay({ callState: "offering" });
-    const spoken = screen.getByTestId("call-state-spoken");
-    expect(spoken).toHaveAttribute("role", "status");
-    expect(spoken).toHaveTextContent("Calling...");
+    // Calling... is the state line itself, read out as it changes; nothing says it twice.
+    expect(screen.getByTestId("call-status")).toHaveAttribute("role", "status");
+    expect(screen.getByTestId("call-status")).toHaveTextContent("Calling...");
+    expect(screen.getAllByText("Calling...")).toHaveLength(1);
+    expect(screen.getByTestId("call-state-spoken")).toHaveTextContent(/^$/);
     const props = { localStream: null, remoteStream: null, isMuted: false, isVideoOff: true, canSendVideo: true, remoteHasVideo: false, callStartedAt: Date.now() - 65_000,
       peerName: "Ana", onHangUp: vi.fn(), onToggleMute: vi.fn(), onToggleVideo: vi.fn() };
     rerender(<CallOverlay callState="connected" {...props} />);
+    // Connected: said once; the line becomes the clock and stops being read out.
+    expect(screen.getByTestId("call-state-spoken")).toHaveAttribute("role", "status");
     expect(screen.getByTestId("call-state-spoken")).toHaveTextContent(/^Connected$/);
     expect(screen.getByTestId("call-status")).not.toHaveAttribute("role");
   });

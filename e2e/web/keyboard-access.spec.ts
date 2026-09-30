@@ -68,7 +68,7 @@ test("with the keys alone: skip the list, open a chat and a group from it, answe
   // A call rings as a dialog named for the caller, with the focus in it; Enter there does not answer.
   await expect(bob.page.getByTestId("call-audio")).toBeEnabled();
   await bob.page.getByTestId("call-audio").click();
-  await expect(bob.page.getByTestId("call-state-spoken")).toHaveText("Calling...");
+  await expect(bob.page.getByRole("status").filter({ hasText: "Calling..." })).toHaveAttribute("data-testid", "call-status");
   await page.goto("/#/");
   const ring = page.getByRole("alertdialog");
   await expect(ring).toBeVisible();
