@@ -870,7 +870,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
           // A group member's name takes their colour (lib/memberColors.ts), and a tap on it opens who they are.
           <div data-testid="message-nick" data-key={author?.key} className={`${author ? memberText(author.key) : "text-accent-hover"} text-[12.8px] font-medium mb-[2px] leading-[22px]`}>
             {author && onOpenAuthor && !choosing
-              ? <button type="button" data-testid="message-nick-open" onClick={onOpenAuthor} aria-haspopup="dialog" className="max-w-full cursor-pointer text-start hover:underline">~{message.nick || peerNick}</button>
+              ? <button type="button" data-testid="message-nick-open" onClick={onOpenAuthor} onDoubleClick={e => e.stopPropagation()} aria-haspopup="dialog" className="max-w-full cursor-pointer text-start hover:underline">~{message.nick || peerNick}</button>
               : <>~{message.nick || peerNick}</>}
           </div>
         )}
