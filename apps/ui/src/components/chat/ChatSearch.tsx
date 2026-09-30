@@ -2,6 +2,7 @@ import { useId, useState, type ReactNode } from "react";
 import { useI18n } from "../../contexts/I18nContext";
 import type { ChatSearch } from "../../hooks/useChatSearch";
 import { matchRanges } from "../../lib/chatSearch";
+import { useComposition } from "../../hooks/useComposition";
 
 /** `text` with the places that hold `term` marked; the text itself when there is no term or no match. */
 export function Highlight({ text, term }: { text: string; term?: string }) {
@@ -34,6 +35,7 @@ export function ChatSearchBar({ search }: { search: ChatSearch }) {
   const { t } = useI18n();
   const [info, setInfo] = useState(false);
   const infoId = useId();
+  const composition = useComposition();
   if (!search.open) return null;
   const total = search.results.length;
   const searched = !!search.term.trim() && search.term === search.query;
@@ -49,7 +51,9 @@ export function ChatSearchBar({ search }: { search: ChatSearch }) {
           data-testid="chat-search-input"
           value={search.query}
           onChange={(e) => search.setQuery(e.target.value)}
+          {...composition.inputProps}
           onKeyDown={(e) => {
+            if (composition.composing(e)) return;
             if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); search.close(); }
             else if (e.key === "Enter") { e.preventDefault(); if (e.shiftKey) search.newer(); else search.older(); }
           }}

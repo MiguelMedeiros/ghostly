@@ -40,8 +40,8 @@ describe("typing on while a message goes (a 1:1 chat)", () => {
     // Still publishing: the field takes the next message.
     expect(field()).toBeEnabled();
     await user.keyboard("see you there{Enter}");
-    // The words on their way leave the field once they have gone; what was typed after them stays and goes next.
-    expect(field().value).toMatch(/see you there$/);
+    // Each Enter is a message of its own: the words leave the field at once and wait for the first to go.
+    expect(field()).toHaveValue("");
     expect(sentTexts(engine)).toEqual(["ok"]);
     await finish();
     await waitFor(() => expect(sentTexts(engine)).toEqual(["ok", "see you there"]));
