@@ -25,6 +25,7 @@ import { AttachmentSheet } from "./composer/AttachmentSheet";
 import { dragHasFiles, droppedFiles, pastedFiles, pasteShowsNothing, platformPastedFiles } from "../lib/pastedFiles";
 import { onShareChange, peekShareFor, shareText, takeShareFor } from "../lib/incomingShare";
 import { fitFieldHeight } from "./composer/fieldHeight";
+import { useComposition } from "../hooks/useComposition";
 import "./composer/composer.css";
 import { touchOnly } from "../lib/touchOnly";
 import { formatAmount } from "../lib/amount";
@@ -102,6 +103,9 @@ interface MessageInputProps {
   onEditLast?: () => void;
 }
 
+/** A message sent from the field, waiting for the one before it to go. */
+interface Outgoing { words: string; named: GroupMention[]; preview?: LinkPreview }
+
 const DEFAULT_MAX = 500;
 const TOAST_DURATION = 5_000;
 
@@ -162,12 +166,18 @@ export function MessageInput({
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const caretRef = useRef<number | null>(null);
   /**
-   * A send under way. Enter again meanwhile (a double press, or the next message typed fast) is not a second copy of
-   * the same words: it sends what the field holds once this one is out, which is nothing after a double press.
+   * Each Enter is a message of its own: its words leave the field at once and wait here, and they go one at a time, in
+   * the order they were sent. A double press finds the field empty and sends nothing more.
    */
+  const outbox = useRef<Outgoing[]>([]);
   const sending = useRef(false);
-  const again = useRef(false);
-  const [queued, setQueued] = useState(0);
+  /** An edit being saved: Enter again meanwhile saves nothing more. */
+  const saving = useRef(false);
+  const onSendRef = useRef(onSend); onSendRef.current = onSend;
+  const draftIdRef = useRef(draftId); draftIdRef.current = draftId;
+  const mounted = useRef(true);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+  const composition = useComposition();
   const [canRecord] = useState(canRecordVoice);
   const sharedIdentities = useSharedIdentityCount(identities?.peerKey);
   const hasCamera = useHasCamera();
@@ -209,7 +219,6 @@ export function MessageInput({
     textareaRef.current?.focus({ preventScroll: true });
   }, [editKey, editText]);
   const endEdit = () => {
-    again.current = false;
     const draft = draftAside.current ?? "";
     draftAside.current = null;
     setText(draft);
@@ -242,63 +251,88 @@ export function MessageInput({
     );
   }, []);
 
+  /**
+   * What could not go comes back to the field, before what is typed there now: the failed words, then those that waited
+   * behind them. Nothing is dropped. With the chat left meanwhile, it is its draft that gets them.
+   */
+  const giveBack = (words: string[]) => {
+    const back = (now: string) => [...words, now].filter((part) => part.trim()).join("\n");
+    if (mounted.current) { setText(back); return; }
+    const id = draftIdRef.current;
+    if (id) setSessionDraft(id, back(getSessionDraft(id)));
+  };
+
+  /**
+   * The messages waiting, one after the other. It goes on after the chat is left (the component is keyed by chat), so
+   * what was sent is not lost; `onSend` is the latest one given, since this loop outlives the render that started it.
+   * The first that fails stops the rest: they come back to the field with it, in order, rather than go out of order.
+   */
+  const drain = async () => {
+    if (sending.current) return;
+    sending.current = true;
+    try {
+      for (let next = outbox.current[0]; next; next = outbox.current[0]) {
+        let err: string | null;
+        try {
+          const send = onSendRef.current;
+          err = await (next.named.length ? send(next.words, next.named) : next.preview ? send(next.words, undefined, { preview: next.preview }) : send(next.words));
+        } catch (e) {
+          err = e instanceof Error ? e.message : String(e);
+        }
+        if (err) {
+          const failed = outbox.current.splice(0).map((o) => o.words);
+          if (mounted.current) showToast(err);
+          giveBack(failed);
+          return;
+        }
+        outbox.current.shift();
+      }
+    } finally {
+      sending.current = false;
+    }
+  };
+
   /** `confirmed` once the secret guard was answered Send; until then text that looks like a secret asks first. */
   const handleSubmit = async (confirmed = false) => {
     if (!text.trim() || disabled) return;
-    if (sending.current) { if (!edit) again.current = true; return; }
     const bytes = new TextEncoder().encode(text.trim()).length;
     if (maxBytes && bytes > maxBytes) { showToast(t("composer.dhtTooLong", { bytes, max: maxBytes })); return; }
     const found = confirmed ? null : findSecret(text);
     if (found) { setSecret({ finding: found }); return; }
-    sending.current = true;
-    let sent = false;
-    try {
-      if (edit) {
+    if (edit) {
+      if (saving.current) return;
+      saving.current = true;
+      try {
         // In a group, members named with @ while editing go with it; those the message named already stay by themselves.
         const named = picker.compose(text);
         const extra = { ...(linkPreview.preview && { preview: linkPreview.preview }), ...(named.length && { mentions: named }) };
         const err = await edit.onSave(text, Object.keys(extra).length ? extra : undefined);
         if (err) showToast(err); else { picker.reset(); linkPreview.reset(); endEdit(); }
-        return;
+      } finally {
+        saving.current = false;
       }
-      const words = text;
-      const named = picker.compose(words);
-      const err = await (named.length ? onSend(words, named) : linkPreview.preview ? onSend(words, undefined, { preview: linkPreview.preview }) : onSend(words));
-      if (err) {
-        showToast(err);
-      } else {
-        sent = true;
-        picker.reset();
-        linkPreview.reset();
-        // What was typed while it went stays in the field: only the words sent leave it.
-        const now = textareaRef.current?.value ?? "";
-        const left = now.startsWith(words) ? now.slice(words.length) : now;
-        const rest = left.trim() ? left : "";
-        onTyping?.(rest !== "");
-        setText(rest);
-        if (draftId && !rest) setSessionDraft(draftId, "");
-        if (textareaRef.current && !rest) {
-          textareaRef.current.style.height = "auto";
-        }
-      }
-    } finally {
-      sending.current = false;
-      if (again.current) { again.current = false; if (sent) setQueued((n) => n + 1); }
+      return;
     }
+    // The words leave the field now, with what goes with them (the members named, the preview), and wait their turn.
+    outbox.current.push({ words: text, named: picker.compose(text), preview: linkPreview.preview ?? undefined });
+    picker.reset();
+    linkPreview.reset();
+    setText("");
+    onTyping?.(false);
+    if (draftId) setSessionDraft(draftId, "");
+    if (textareaRef.current) textareaRef.current.style.height = "auto";
+    await drain();
   };
-  // Enter pressed while the last one went: sent now, with the field as it is after it.
-  useEffect(() => {
-    if (queued) void handleSubmit();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [queued]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
+    // Keys an input method is using (Enter confirming a candidate, the arrows, Escape) are its own, not the composer's.
+    if (composition.composing(e)) return;
     if (picker.onKeyDown(e)) return;
     // Whatever the composer has open over it closes first; then Escape lets go of the message being answered.
     const nothingOpen = !showPanel && !showMenu && !showPayment && !showIdentities;
     if (e.key === "Escape" && edit && nothingOpen) { e.preventDefault(); e.stopPropagation(); endEdit(); return; }
     if (e.key === "Escape" && reply && nothingOpen) { e.preventDefault(); e.stopPropagation(); reply.onCancel(); return; }
-    if (e.key === "ArrowUp" && onEditLast && !edit && !text && nothingOpen && !e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey && !e.nativeEvent.isComposing) {
+    if (e.key === "ArrowUp" && onEditLast && !edit && !text && nothingOpen && !e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey) {
       e.preventDefault();
       onEditLast();
       return;
@@ -602,6 +636,7 @@ export function MessageInput({
               onPaste={handlePaste}
               onSelect={picker.onCaret}
               {...picker.inputProps}
+              {...composition.inputProps}
               onFocus={() => { setShowMenu(false); setShowIdentities(false); if (phone) setShowPanel(false); }}
               placeholder={disabled ? disabledPlaceholder ?? t("composer.placeholder") : t("composer.placeholder")}
               disabled={disabled}

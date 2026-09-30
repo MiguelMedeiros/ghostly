@@ -5,6 +5,7 @@ import { useBackdropDismiss, useDialogFocus } from "../../hooks/useDismiss";
 import { formatFileSize } from "../../lib/format";
 import { pastedFiles } from "../../lib/pastedFiles";
 import { DocumentGlyph } from "./icons";
+import { useComposition } from "../../hooks/useComposition";
 
 /** A picture for each image among `files` (while the sheet is open), by position. */
 function usePictures(files: File[]): (string | undefined)[] {
@@ -38,6 +39,7 @@ export function AttachmentSheet({ files, onAdd, onRemove, onSend, onCancel }: {
   useDialogFocus(ref, onCancel);
   // After the dialog has noted what had the focus (the message field gets it back on close): typing goes to the caption.
   const captionRef = useRef<HTMLInputElement>(null);
+  const composition = useComposition();
   useEffect(() => captionRef.current?.focus(), []);
 
   const send = () => onSend(caption.trim());
@@ -87,7 +89,7 @@ export function AttachmentSheet({ files, onAdd, onRemove, onSend, onCancel }: {
         )}
         <div className="p-3 flex flex-col gap-3 shrink-0">
           <input ref={captionRef} type="text" value={caption} onChange={(e) => setCaption(e.target.value)} data-testid="attachment-caption"
-            onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); send(); } }}
+            {...composition.inputProps} onKeyDown={(e) => { if (composition.composing(e)) return; if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }}
             placeholder={t("composer.caption")} aria-label={t("composer.caption")} maxLength={4000}
             className="w-full min-h-10 px-3 rounded-lg bg-surface-alt border border-border text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent" />
           <div className="flex items-center justify-end gap-2">

@@ -728,6 +728,7 @@
     "apps/ui/src/hooks/useBackupDue.ts": ["wallet.backup-reminder","wallet.badge"],
     "apps/ui/src/hooks/useChat.ts": ["desktop.*"],
     "apps/ui/src/hooks/useChatLink.ts": ["transport.chat-switch"],
+    "apps/ui/src/hooks/useComposition.ts": ["chat.paired.send","chat.edit","chat.replies","groups.mentions","app.composer.attach"],
     "apps/ui/src/hooks/useCopyKey.ts": ["proofs.ghostly-card"],
     "apps/ui/src/hooks/useCountUp.ts": ["payments.chat.cards","wallet.cashu.*","wallet.history","app.reduce-motion"],
     "apps/ui/src/hooks/useDismiss.ts": ["*"],

@@ -1,4 +1,4 @@
-import { screen, within } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import { Route, Routes } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
 import type { GroupMemberView, GroupView, StoredMessage } from "@ghostly/browser/shared/types";
@@ -71,5 +71,26 @@ describe("replies in a group", () => {
     engine.on("sendGroupMessage", () => ({ error: null }));
     await user.type(screen.getByRole("textbox"), "{Enter}");
     expect(engine.callsTo("sendGroupMessage").slice(-1)[0]).toEqual({ groupId: "group-1", text: "ok" });
+  });
+
+  it("messages queued behind a reply during a slow send answer nothing: only the first carries it", async () => {
+    const { user, engine } = openGroup();
+    const pending: (() => void)[] = [];
+    engine.on("sendGroupMessage", () => new Promise((resolve) => { pending.push(() => resolve({ error: null })); }));
+    await screen.findByText("count me in");
+    await user.click(within(row(LUNCH)).getByTestId("message-reply-action"));
+    await user.type(screen.getByRole("textbox"), "a{Enter}b{Enter}c{Enter}");
+    expect(screen.getByRole("textbox")).toHaveValue("");
+    for (let sent = 1; sent <= 3; sent++) {
+      await waitFor(() => expect(pending).toHaveLength(1));
+      await act(async () => { pending.shift()!(); });
+    }
+    await waitFor(() => expect(engine.callsTo("sendGroupMessage")).toHaveLength(3));
+    expect(engine.callsTo("sendGroupMessage")).toEqual([
+      { groupId: "group-1", text: "a", replyTo: LUNCH },
+      { groupId: "group-1", text: "b" },
+      { groupId: "group-1", text: "c" },
+    ]);
+    expect(screen.queryByTestId("composer-reply")).not.toBeInTheDocument();
   });
 });

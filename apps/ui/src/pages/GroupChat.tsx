@@ -201,6 +201,12 @@ export function GroupChat() {
   const messages = loaded.groupId === groupId ? loaded.list : engine.messages.get(`group:${groupId}`) ?? NO_MESSAGES;
   /** The message the composer answers (WISP 9xx § Replies). */
   const [replyingTo, setReplyingTo] = useState<StoredMessage | null>(null);
+  /**
+   * The reply as it is when a message goes, not as a render's closure saw it: the composer sends what was queued one
+   * after the other, and only the first of them after Reply carries it.
+   */
+  const replyingRef = useRef(replyingTo);
+  replyingRef.current = replyingTo;
   /** The message of mine the composer edits (WISP 9xx § Edits). */
   const [editing, setEditing] = useState<StoredMessage | null>(null);
   useEffect(() => { setReplyingTo(null); setEditing(null); }, [groupId]);
@@ -274,14 +280,17 @@ export function GroupChat() {
   useEffect(() => { if (group) markGroupRead(group.id, Math.max(group.lastMessageAt, Date.now())); }, [group?.id, group?.lastMessageAt, group]);
 
   const send = useCallback(async (text: string, mentions?: GroupMention[]): Promise<string | null> => {
-    const answering = replyingTo;
+    const answering = replyingRef.current;
     try {
       const { error } = await engine.call("sendGroupMessage", { groupId, text, ...(mentions?.length && { mentions }), ...(answering && { replyTo: answering.id }) });
-      if (!error && answering) setReplyingTo(current => current === answering ? null : current);
+      if (!error && answering) {
+        if (replyingRef.current === answering) replyingRef.current = null;
+        setReplyingTo(current => current === answering ? null : current);
+      }
       return error;
     }
     catch (e) { return e instanceof Error ? e.message : t("group.chat.sendFailed"); }
-  }, [groupId, replyingTo, t]);
+  }, [groupId, t]);
 
   // Typing (WISP 9xx · Group Mesh § Typing): private groups only; a community does not carry it yet.
   const onTyping = useGroupTypingSender(rosterGroup?.profile === "mesh" && rosterGroup.status === "active" ? groupId : undefined);
