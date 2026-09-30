@@ -22,5 +22,6 @@
   "save": "حفظ",
   "success": "نجاح",
   "unnamedContact": "جهة اتصال · {{key}}",
+  "unnamedContactShort": "جهة اتصال",
   "viewPhoto": "عرض صورة {{name}}"
 }
