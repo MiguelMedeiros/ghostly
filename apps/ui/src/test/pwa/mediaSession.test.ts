@@ -68,6 +68,19 @@ describe("a voice message on the lock screen and the media keys", () => {
     expect(handlers.get("play")).toBeNull();
   });
 
+  it("names the web app's icons on http(s) only: the extension and the Desktop app have none there, and the browser refuses their schemes", () => {
+    claimMediaSession("a", player());
+    expect(session.metadata).toMatchObject({ init: { artwork: [expect.objectContaining({ src: "/icon-192.png" }), expect.objectContaining({ src: "/icon-512.png" })] } });
+    releaseMediaSession("a");
+    for (const protocol of ["chrome-extension:", "tauri:"]) {
+      vi.spyOn(window, "location", "get").mockReturnValue({ ...window.location, protocol } as Location);
+      claimMediaSession("a", player());
+      expect(session.metadata).toMatchObject({ init: { artwork: [] } });
+      releaseMediaSession("a");
+      vi.restoreAllMocks();
+    }
+  });
+
   it("does nothing where there is no Media Session", () => {
     Reflect.deleteProperty(navigator, "mediaSession");
     expect(() => { claimMediaSession("a", player()); mediaSessionPosition("a", 1, 2); releaseMediaSession("a"); }).not.toThrow();
