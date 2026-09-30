@@ -3,8 +3,8 @@ import type { WalletPlatform, WalletSetupView, WalletType } from "../../lib/plat
 import { useI18n } from "../../contexts/I18nContext";
 import { Button, Notice } from "./ui";
 import { failedBecause, walletLabel } from "./names";
+import { errorText } from "../../lib/errorText";
 
-const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 /**
  * A new profile's default Mainnet wallets, made in the background: while they are made, a line says so; a kind that
@@ -17,7 +17,7 @@ export function WalletSetupStatus({ wallet, setup, showProgress }: { wallet: Wal
   const [error, setError] = useState<string | null>(null);
   const act = async (type: WalletType, work: () => Promise<void>) => {
     setBusy(type); setError(null);
-    try { await work(); } catch (e) { setError(message(e)); } finally { setBusy(null); }
+    try { await work(); } catch (e) { setError(errorText(e, t)); } finally { setBusy(null); }
   };
   if (!setup.failed.length && !(showProgress && setup.running)) return null;
   return (

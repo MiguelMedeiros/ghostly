@@ -24,8 +24,8 @@ import { ProviderMark } from "./ProviderMark";
 import { PublicProfileDetails } from "./PublicProfileDetails";
 import "./contact-panel.css";
 import { deckArrows } from "../deck/arrows";
+import { errorText } from "../../lib/errorText";
 
-const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 type Entry = { id: typeof GHOSTLY; ghostly: true; card: IdCardContent } | { id: string; ghostly?: false; r: ReceivedIdentityView; card: IdCardContent };
 type Received = Extract<Entry, { r: ReceivedIdentityView }>;
 
@@ -181,7 +181,7 @@ function TheirCardBack({ t, entry, linkId, name, nostr, onCards }: { t: Translat
   const { r, card } = entry;
   const provider = providerOf(r.provider);
   const [busy, setBusy] = useState(""), [error, setError] = useState("");
-  const act = (key: string, work: () => Promise<unknown>) => { setBusy(key); setError(""); void work().catch(e => setError(message(e))).finally(() => setBusy("")); };
+  const act = (key: string, work: () => Promise<unknown>) => { setBusy(key); setError(""); void work().catch(e => setError(errorText(e, t))).finally(() => setBusy("")); };
   const ok = card.status === "verified" || card.status === "expiring";
   const canCheck = r.status !== "withdrawn" && r.status !== "revoked" && r.status !== "previous-key";
   return (

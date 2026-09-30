@@ -9,6 +9,8 @@ import {
 } from "react";
 import { useSettings } from "./SettingsContext";
 import { updatePlatform, type FoundUpdate } from "../lib/updates";
+import { errorText } from "../lib/errorText";
+import { useT } from "./I18nContext";
 
 /** How often a client that is allowed to ask does so on its own. */
 const CHECK_EVERY_MS = 4 * 60 * 60 * 1000;
@@ -56,6 +58,9 @@ function readDismissed(): string | null {
  */
 export function UpdateProvider({ children }: { children: ReactNode }) {
   const { settings } = useSettings();
+  // Read when an error comes, so a change of language does not make `check` new (it would check again).
+  const t = useT(), tRef = useRef(t);
+  tRef.current = t;
   const [update, setUpdate] = useState<FoundUpdate | null>(null);
   const [stage, setStage] = useState<"idle" | "checking" | "installing">("idle");
   const [progress, setProgress] = useState(0);
@@ -77,7 +82,7 @@ export function UpdateProvider({ children }: { children: ReactNode }) {
       lastCheckedRef.current = Date.now();
       setLastCheckedAt(lastCheckedRef.current);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorText(e, tRef.current));
     } finally {
       checking.current = false;
       setStage("idle");
@@ -93,7 +98,7 @@ export function UpdateProvider({ children }: { children: ReactNode }) {
       // On the way out: this either reloads the page or restarts the app.
       await updatePlatform.install(update, setProgress);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorText(e, tRef.current));
       setStage("idle");
     }
   }, [update]);

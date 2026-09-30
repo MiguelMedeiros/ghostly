@@ -7,6 +7,7 @@ import { dots, focus, type ConnectionKind } from "../lib/connection";
 import { ConnectionIcon } from "./ConnectionIcon";
 import { useI18n } from "../contexts/I18nContext";
 import { agoIn } from "../lib/relativeTime";
+import { errorText } from "../lib/errorText";
 
 const subscribe = (listener: () => void) => engine.subscribe(listener);
 const snapshot = () => engine.state;
@@ -49,7 +50,7 @@ export function GroupConnection({ group }: { group: GroupView }) {
   useOutsideDismiss(root, menuOpen, () => setMenuOpen(false));
   const reconnect = async (linkId: string) => {
     setBusy(linkId); setError("");
-    try { await engine.call("connect", { linkId }); } catch (e) { setError(e instanceof Error ? e.message : t("group.connection.reconnectFailed")); } finally { setBusy(""); }
+    try { await engine.call("connect", { linkId }); } catch (e) { setError(e instanceof Error ? errorText(e, t) : t("group.connection.reconnectFailed")); } finally { setBusy(""); }
   };
   const now = Date.now();
   return <div ref={root} className="relative shrink-0" data-testid="group-connection" data-open={menuOpen || undefined} onKeyDown={e => {

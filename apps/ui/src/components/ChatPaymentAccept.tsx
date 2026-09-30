@@ -7,6 +7,7 @@ import type { PeerLinkState, WalletNetwork } from "../lib/platform";
 import { CardDeck } from "./WalletDeck";
 import { SwitchLook } from "./wallet/ui";
 import type { InstanceCard } from "./walletCardData";
+import { errorText } from "../lib/errorText";
 
 /** A card's test id on the Accept side: its kind and its network (`payment-accept-cashu-testnet`). */
 export const acceptCardTestId = (id: string) => `payment-accept-${id.replace(/:/g, "-")}`;
@@ -111,7 +112,7 @@ export function ChatPaymentAccept({ peer, contact, cards, network, empty, onSave
       // Save goes grey once saved: the keyboard goes back to the cards rather than out of the sheet.
       const at = document.activeElement;
       if (!at || at === document.body || at === saveRef.current) saveRef.current?.closest(".composer-sheet")?.querySelector<HTMLElement>('[role=switch][tabindex="0"]')?.focus({ preventScroll: true });
-    }, (e: unknown) => { setError(e instanceof Error ? e.message : String(e)); setBusy(false); });
+    }, (e: unknown) => { setError(errorText(e, t)); setBusy(false); });
   };
 
   // A network with no card says so alone, unless the other network's switches wait to be saved.

@@ -12,6 +12,7 @@ import { canPlayVideo, videoBox, videoFormat as formatOf } from "../../lib/video
 import { localPoster, posterUrl } from "../../lib/videoPoster";
 import { RoundRetry, WhyButton, WhyText } from "../chat/RoundRetry";
 import { useT } from "../../contexts/I18nContext";
+import { errorText } from "../../lib/errorText";
 
 type Phase = "poster" | "loading" | "playing";
 type Problem = "unsupported" | "too-large" | "missing" | "not-yet";
@@ -200,13 +201,13 @@ export function VideoBubble({ file, sender, peerName: named }: { file: ChatFile;
 
   const act =(action: FileAction) => {
     setActionError("");
-    void platform?.fileAction?.(file.id, action).catch((error: Error) => setActionError(String(error.message ?? error)));
+    void platform?.fileAction?.(file.id, action).catch((error: Error) => setActionError(errorText(error, t)));
   };
   const save = () => {
     if (!platform) return;
     setActionError("");
     void downloadFile(platform, file, sanitizeFileName(file.name)).then((result) => { if (result === "missing") setProblem("missing"); })
-      .catch((error: Error) => setActionError(String(error.message ?? error)));
+      .catch((error: Error) => setActionError(errorText(error, t)));
   };
 
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
@@ -237,7 +238,7 @@ export function VideoBubble({ file, sender, peerName: named }: { file: ChatFile;
   const again = (action: () => Promise<unknown>) => {
     setActionError("");
     setBusy(true);
-    void action().catch((error: Error) => setActionError(String(error.message ?? error))).finally(() => setBusy(false));
+    void action().catch((error: Error) => setActionError(errorText(error, t))).finally(() => setBusy(false));
   };
   const percent = moving ? Math.floor((transfer.transferred / Math.max(1, transfer.size)) * 100) : 0;
   // A video sent from here can be watched while it goes, once it has been copied.

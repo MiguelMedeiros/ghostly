@@ -3,6 +3,7 @@ import { useBackdropDismiss, useDialogFocus } from "../hooks/useDismiss";
 import type { PeerLinkState } from "../lib/platform";
 import { Switch } from "./wallet/ui";
 import { useI18n } from "../contexts/I18nContext";
+import { errorText } from "../lib/errorText";
 
 const mb = (bytes: number) => `${(bytes / 1024 / 1024).toFixed(bytes < 1024 * 1024 ? 2 : 1)} MB`;
 
@@ -52,7 +53,7 @@ export function ChatHoldDialog({ peer, name, onSave, onClose }: { peer: PeerLink
         <div className="flex justify-end gap-2">
           <button type="button" onClick={onClose} className="px-4 py-2 rounded-lg text-sm bg-surface-alt text-text-primary border border-border hover:bg-surface-hover cursor-pointer">{t("common.cancel")}</button>
           <button type="button" data-testid="chat-hold-save" disabled={enabled === initial || busy}
-            onClick={() => { setBusy(true); setError(""); void onSave(enabled).then(onClose, (e) => { setError(e instanceof Error ? e.message : String(e)); setBusy(false); }); }}
+            onClick={() => { setBusy(true); setError(""); void onSave(enabled).then(onClose, (e) => { setError(errorText(e, t)); setBusy(false); }); }}
             className="px-4 py-2 rounded-lg text-sm font-semibold bg-accent text-on-accent hover:bg-accent-hover cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed">
             {busy ? t("chat.hold.saving") : t("common.save")}
           </button>

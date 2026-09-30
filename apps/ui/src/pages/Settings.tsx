@@ -44,6 +44,7 @@ import { deleteAllSessions, listSessions } from "../lib/storage";
 import { useAppNavigation } from "../hooks/useAppNavigation";
 import { peekEnabled, peekNotifies } from "../lib/profilePeek";
 import { externalLinkProps, isDesktopApp } from "../lib/externalLink";
+import { errorText } from "../lib/errorText";
 
 export function Settings() {
   const nav = useAppNavigation();
@@ -62,7 +63,7 @@ export function Settings() {
   const changeWake = async (on: boolean) => {
     setWakeBusy(true);
     setWakeError("");
-    try { await setWake(on); } catch (e) { setWakeError(e instanceof Error ? e.message : String(e)); } finally { setWakeBusy(false); }
+    try { await setWake(on); } catch (e) { setWakeError(errorText(e, t)); } finally { setWakeBusy(false); }
   };
   const isMobile = useIsMobile();
   const profile = currentProfile();
