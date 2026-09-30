@@ -159,8 +159,9 @@ export function useChatScroll({ rows, chat, keys = true, window: rowWindow }: { 
     if (atBottom.current) {
       el.scrollTop = el.scrollHeight;
     } else if (anchor.current) {
-      const grew = el.clientHeight - anchor.current.height;
-      if (grew) anchor.current = { ...anchor.current, offset: anchor.current.offset + grew, height: el.clientHeight };
+      // A height of 0: taken while the list was off screen, so not known yet.
+      const { offset, height } = anchor.current;
+      if (el.clientHeight !== height) anchor.current = { ...anchor.current, offset: height ? offset + el.clientHeight - height : offset, height: el.clientHeight };
       const row = rowById(el, anchor.current.id);
       if (row) {
         const moved = row.getBoundingClientRect().top - el.getBoundingClientRect().top - anchor.current.offset;
