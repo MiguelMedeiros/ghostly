@@ -68,7 +68,7 @@ The decrypted, decompressed payload is JSON:
 
 - A bundle is restored into a **new** profile. It never replaces, merges into or deletes an existing profile.
 - Every store and key is written before the profile is registered, so an interrupted restore leaves no half-made profile in the list.
-- Every Ark wallet record gets a fresh wallet id, with or without a database to copy, so a restored profile never shares an Ark database with the profile it came from. A backup of a wallet whose database exists but cannot be read fails instead of leaving it out.
+- Every Ark wallet record gets a fresh wallet id, with or without a database to copy, so a restored profile never shares an Ark database with the profile it came from. So does every Bark wallet record ([204](204-bark.md)), current or retired: its databases are never in the bundle, and under the new id the wallet starts an empty one that the server's recovery scan fills from the phrase. A backup of a wallet whose database exists but cannot be read fails instead of leaving it out.
 - Payment attempts that were `pending`, `submitted` or `unknown` in the bundle are marked `unknown`: an older backup cannot prove an attempt was never sent, and nothing restored may authorize a new send ([200](200-payments.md)).
 - After restore the client switches to the new profile ([04](04-profiles.md)).
 
