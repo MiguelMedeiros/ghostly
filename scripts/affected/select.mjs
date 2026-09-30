@@ -128,13 +128,13 @@ export const TYPECHECK_WHOLE = ["tsconfig.json", "packages/*/tsconfig*.json"];
 
 /** The Rust crates, as CI's Tauri job checks them. */
 export const RUST = [
-  { name: "src-tauri", sources: ["src-tauri/**", "native-transports/**", "Cargo.toml", "Cargo.lock"] },
+  { name: "src-tauri", sources: ["src-tauri/**", "native/transports/**", "Cargo.toml", "Cargo.lock"] },
 ];
 
 /** The Playwright config of the web and extension projects: a change there can change every spec. */
 export const E2E_WHOLE = ["e2e/playwright.config.ts", "e2e/tsconfig.json"];
 /** Desktop specs run through tauri-driver on Linux and Windows only (e2e/playwright.desktop.config.ts). */
-export const DESKTOP = ["e2e/desktop/**", "e2e/playwright.desktop.config.ts", "e2e/support/desktop.ts", "src-tauri/**", "src/desktop/**", "native-transports/**"];
+export const DESKTOP = ["e2e/desktop/**", "e2e/playwright.desktop.config.ts", "e2e/support/desktop.ts", "src-tauri/**", "src/desktop/**", "native/transports/**"];
 
 const isTest = (p) => /\.test\.[cm]?[jt]sx?$/.test(p);
 /** Prose: no test imports it and no compiler reads it. */

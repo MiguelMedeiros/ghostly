@@ -184,7 +184,7 @@ POST <relay>  {"endpoint":"<e>","headers":{"Authorization":"vapid …","TTL":"36
 → {"status":<the push service's status>}
 ```
 
-The request is already encrypted and signed; the relay forwards it as it is. `native-transports/push-relay` is a reference relay (no dependencies, the same push services only, a VAPID-signed request only, Web Push headers only, a rate limit per client address).
+The request is already encrypted and signed; the relay forwards it as it is. `services/push-relay` is a reference relay (no dependencies, the same push services only, a VAPID-signed request only, Web Push headers only, a rate limit per client address).
 
 **Showing.** The browser hands the decrypted body to the profile's push worker: the app's service worker script, registered once more at `/push/<profile>/`, so each local profile ([04](04-profiles.md)) has its own subscription and contacts of two profiles cannot tell they share a browser. The worker reads the token in a table the app keeps for it (IndexedDB: token, chat route, mute) and shows "New message", nothing else: no text and no name. It shows nothing for a token it no longer knows (a chat deleted, a subscription replaced), for a muted chat ([400](400-chat.md), the chat mute), or while the app is on screen. The worker also keeps its own limit, whatever the sender does: per token, at most one message notice every 5 minutes and one call notice every 30 seconds. A wake-up inside that gap shows nothing new and makes no sound; a notice of that token still on screen is shown again, silently.
 

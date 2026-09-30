@@ -4044,8 +4044,9 @@ export class GhostlyNode implements EngineImplementation {
   private noteEdgeLive(linkId: string, up: boolean): void {
     const live = this.links.get(linkId);
     if (!live || this.shuttingDown || !!live.stored.edgeLive === up) return;
-    live.stored = { ...live.stored, edgeLive: up || undefined };
-    void db.patchLink(linkId, { edgeLive: up || undefined }).catch(() => {});
+    const since = up ? Date.now() : undefined;
+    live.stored = { ...live.stored, edgeLive: up || undefined, edgeLiveSince: since };
+    void db.patchLink(linkId, { edgeLive: up || undefined, edgeLiveSince: since }).catch(() => {});
   }
 
   /** The edge of a group toward one member: a paired link pinned to that member's key, carrying group frames and nothing else. */
@@ -4113,6 +4114,8 @@ export class GhostlyNode implements EngineImplementation {
       // whichever end's turn it is, rather than left to its offer and a read at the background pace (WISP 100).
       // An edge is WebRTC only (no native endpoints, `ensureNativeEndpoints`).
       resume: !entry && stored.edgeLive ? "webrtc/1" : undefined,
+      // An offer from before that session began is not answered after a restart (a relay that missed its clearing).
+      resumeFloor: !entry && stored.edgeLive ? stored.edgeLiveSince : undefined,
       // Pinned in advance to the member the roster names: there is nothing to trust on first use.
       pairing: { credentials: { seedB64: stored.participationSeed!, peerKey: peer, requireSignedSignals: true, verifiedPeerKey: peer },
         pinPeer: async key => { if (key !== peer) throw new Error("Not the member this edge belongs to"); }, trustOnFirstUse: false },
@@ -4247,6 +4250,8 @@ export class GhostlyNode implements EngineImplementation {
         automatic: stored.preferredTransport === undefined },
       // Live when this app last ran: the contact may still hold that session, and is reached again at once (WISP 100).
       resume: stored.pairedPeerKey && stored.deliveryMode !== "dht" ? this.transportLogOf(live)?.liveAtLastRun : undefined,
+      // An offer from before that live stretch began is not answered after a restart (a relay that missed its clearing).
+      resumeFloor: stored.pairedPeerKey && stored.deliveryMode !== "dht" ? this.transportLogOf(live)?.liveSinceAtLastRun : undefined,
       pairing: credentials ? {
         credentials,
         verifyPeer: async key => {

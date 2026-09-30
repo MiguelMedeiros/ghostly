@@ -23,6 +23,10 @@ import { closeWorld, fakePeerConnection, invitationWhere, killRtc, rtc, useFakeW
 class MemoryRelays {
   packets = new Map<string, Uint8Array>();
   requests: { at: number; who: string; host: string; method: string; key: string }[] = [];
+  /** Every packet put, in order. */
+  puts: { at: number; key: string; body: Uint8Array }[] = [];
+  /** `host key` → an older packet that relay still serves: it missed the newer ones (its budget refused them). */
+  stale = new Map<string, Uint8Array>();
   constructor(readonly hosts: string[]) {}
   get urls() { return this.hosts.map(h => `https://${h}`); }
   fetchFor(who: string): typeof fetch {
@@ -30,8 +34,12 @@ class MemoryRelays {
       const url = new URL(String(input)), key = url.pathname.slice(1);
       this.requests.push({ at: Date.now(), who, host: url.host, method: init?.method ?? "GET", key });
       // Relays behind one name share what they store.
-      if (init?.method === "PUT") { this.packets.set(key, new Uint8Array(init.body as ArrayBuffer)); return new Response(null, { status: 204 }); }
-      const packet = this.packets.get(key);
+      if (init?.method === "PUT") {
+        const body = new Uint8Array(init.body as ArrayBuffer);
+        this.packets.set(key, body); this.puts.push({ at: Date.now(), key, body }); this.stale.delete(`${url.host} ${key}`);
+        return new Response(null, { status: 204 });
+      }
+      const packet = this.stale.get(`${url.host} ${key}`) ?? this.packets.get(key);
       return packet ? new Response(packet as BodyInit) : new Response(null, { status: 404 });
     }) as typeof fetch;
   }
@@ -46,7 +54,7 @@ class MemoryRelays {
     return counts;
   }
   /** A process's own budget over these relays. */
-  transport(who: string): RelayTransport { return new RelayTransport({ relays: this.urls, fetch: this.fetchFor(who), log: () => {} }); }
+  transport(who: string, relays = this.urls): RelayTransport { return new RelayTransport({ relays, fetch: this.fetchFor(who), log: () => {} }); }
 }
 
 const report = (row: Record<string, unknown>) => { const file = process.env.SHARES_REPORT; if (file) appendFileSync(file, JSON.stringify(row) + "\n"); };
@@ -54,13 +62,13 @@ const keyOf = (side: Side) => identityFromSeedB64(side.seedB64).pubKeyZ32;
 const links: GhostLink[] = [];
 
 /** One side of a saved contact (a chat, or a group's edge: pinned in advance), as node.ts `startLink` opens it. */
-function open(owner: string, transport: PkarrTransport, side: Side, peer: Side, options: { dht?: { state: DhtDeliveryState }; resume?: boolean; expectPeer?: boolean } = {}): GhostLink {
+function open(owner: string, transport: PkarrTransport, side: Side, peer: Side, options: { dht?: { state: DhtDeliveryState }; resume?: boolean; resumeFloor?: number; expectPeer?: boolean } = {}): GhostLink {
   const link = new GhostLink({
     params: side.params,
     pairing: { credentials: { seedB64: side.seedB64, peerKey: keyOf(peer) }, pinPeer: async () => {}, trustOnFirstUse: true },
     dht: options.dht ? { state: options.dht.state, save: async state => { options.dht!.state = state; } } : undefined,
     native: { peerTransports: ["webrtc/1"], peerFallback: true, automatic: true },
-    ...(options.resume ? { resume: "webrtc/1" as const } : {}),
+    ...(options.resume ? { resume: "webrtc/1" as const, resumeFloor: options.resumeFloor } : {}),
     transport,
     pollIntervals: RELAY_POLL_INTERVALS,
     autoConnect: true,
@@ -266,6 +274,44 @@ describe("a member of a private group killed and back, with a chat and an edge t
     expect(edgesMs, "every edge live again").toBeLessThanOrEqual(noticeMs + 12_000);
     if (noticeMs <= 5_000) expect(edgesMs, "noticed at once: live in the offers' first looks").toBeLessThanOrEqual(5_000);
   }, 600_000);
+});
+
+/**
+ * A contact's offer from before the last session, served after a restart by a relay that missed the packet clearing it
+ * (bug hunt r7a: a relay whose budget refused a packet the other relay took kept the older one). The app back answered
+ * it, never sent its own resume offer, and waited on it until ICE gave up; the contact, which answers only once it
+ * notices the old session went, was live with it a minute later. A contact that noticed during a long downtime and
+ * offered then is answered at once as before.
+ */
+describe("a contact's offer from before the last session, after a restart", () => {
+  beforeEach(() => { rtc.answerFailsAfterMs = 31_000; });
+  it.each([
+    { name: "old, on a relay that missed its clearing", stale: true, noticeMs: 20_000, downMs: 2_500 },
+    { name: "made during a long downtime", stale: false, noticeMs: 5_000, downMs: 20_000 },
+  ])("$name: live soon after the contact can answer", async ({ stale, noticeMs, downMs }) => {
+    const relays = new MemoryRelays(["a.test", "b.test"]);
+    // The contact has the lower key: it offered first, and after a restart the app back has to answer or be answered.
+    const made = invitationWhere("inviter"), contact = made.inviter, me = made.joiner;
+    const peer = open("p", relays.transport("p"), contact, me);
+    const mine = open("c", relays.transport("c"), me, contact);
+    expect(await until(() => peer.isDataLinkOpen && mine.isDataLinkOpen, 120_000), "live at first").toBeLessThan(Infinity);
+    const liveSince = Date.now();
+    const contactKey = me.params.peerPubKeyZ32, offer = relays.puts.filter(p => p.key === contactKey && p.at < liveSince - 300).pop()!;
+    await run(30_000);
+    // b.test missed what the contact put after its offer.
+    if (stale) relays.stale.set(`b.test ${contactKey}`, offer.body);
+    killRtc("c", noticeMs);
+    await mine.stop(false);
+    await run(downMs);
+    // Back, reading b.test first (a fresh process's first relay), with the start of its last session kept.
+    const back = open("c", relays.transport("c2", ["https://b.test", "https://a.test"]), me, contact, { resume: true, resumeFloor: liveSince });
+    const liveMs = await until(() => back.isDataLinkOpen && peer.isDataLinkOpen, 180_000);
+    report({ scenario: "offer-before-last-session", stale, noticeMs, downMs, liveMs });
+    // Dev (d31cdaad): the old offer answered, 32.1 s (its answer failed at 31 s; the contact noticed at 17.5 s); the
+    // downtime offer 1.6 s. Now: 18.6 and 1.6 s.
+    const canAnswerIn = Math.max(0, noticeMs - downMs);
+    expect(liveMs, "live soon after the contact can answer").toBeLessThanOrEqual(canAnswerIn + 5_000);
+  }, 300_000);
 });
 
 /**

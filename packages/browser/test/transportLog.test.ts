@@ -10,6 +10,23 @@ const events = (log: TransportLog) => log.history.map(e => e.kind);
 const MIN = 60_000;
 
 describe("transport log: the timeline says what matters", () => {
+  it("knows when the live stretch the app quit in began, through a switch, and none when it ended off live", () => {
+    // Bug hunt r7a: a contact's offer from before that moment is not answered after a restart (`resumeFloor`).
+    const log = new TransportLog();
+    expect(log.liveSinceAtLastRun).toBeUndefined();
+    log.observe(down(), 0);
+    log.observe(live("webrtc/1"), 1_000);
+    log.observe(live("iroh/1"), 5_000);
+    const again = new TransportLog(log.entries, log.history);
+    expect(again.liveAtLastRun).toBe("iroh/1");
+    expect(again.liveSinceAtLastRun).toBe(1_000);
+    // Down, then live again later in that run: the stretch the next start resumes began then.
+    again.observe(down(), 9 * MIN);
+    again.observe(live("iroh/1"), 12 * MIN);
+    const third = new TransportLog(again.entries, again.history);
+    expect(third.liveSinceAtLastRun).toBe(12 * MIN);
+  });
+
   it("says the first connection, and nothing while it stays on the same transport", () => {
     const log = new TransportLog();
     expect(log.observe(down(), 0)).toBe(false);

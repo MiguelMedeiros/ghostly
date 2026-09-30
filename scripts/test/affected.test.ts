@@ -358,7 +358,7 @@ describe("the rest", () => {
   it("Rust runs for the Desktop crates, and Cargo.lock runs it", () => {
     const r = (...files: string[]) => Object.fromEntries(plan({ changed: changed(...files), inventory, e2eFiles }).rust.map((x) => [x.name, x.mode]));
     expect(r("src-tauri/src/lib.rs")).toEqual({ "src-tauri": "run" });
-    expect(r("native-transports/src/lib.rs")).toEqual({ "src-tauri": "run" });
+    expect(r("native/transports/src/lib.rs")).toEqual({ "src-tauri": "run" });
     expect(r("Cargo.lock")).toEqual({ "src-tauri": "run" });
     expect(r("docs/README.md")).toEqual({ "src-tauri": "skip" });
   });

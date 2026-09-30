@@ -70,7 +70,7 @@ endpoint from there, never a literal port. Their names are stable: other suites 
 | 47086 / 47087 | AT Protocol PDS (`@atproto/pds`, as `https://pds.ghostly.test`) / PLC directory in memory (as `https://plc.ghostly.test`), `e2e/infra/atproto`; `support/atproto.ts` routes both names and the handles' DNS, and makes an account per test. The Bluesky spec opens the app at 127.0.0.1 (AT Protocol's development client returns only there) | `E2E_ATPROTO_PDS_URL` / `E2E_ATPROTO_PLC_URL` |
 | 47090 | Cashu test mint (`cashubtc/mintd`, fake Lightning) | `E2E_MINT_URL` |
 | 47095 / 47096 | Fedimint guardian API (websocket, as the invite code names it) / its gateway's API | `GHOSTLY_FEDIMINT_API_URL` / `_GATEWAY_URL` |
-| 47097 | HyperDHT relay for browsers (`native-transports/hyperdht-relay`, on a HyperDHT network of its own) | `GHOSTLY_HYPERDHT_RELAY_URL` (gate `GHOSTLY_HYPERDHT_RELAY`) |
+| 47097 | HyperDHT relay for browsers (`services/hyperdht-relay`, on a HyperDHT network of its own) | `GHOSTLY_HYPERDHT_RELAY_URL` (gate `GHOSTLY_HYPERDHT_RELAY`) |
 | 47100 | the web build under test (`vite preview`) | `E2E_WEB_PORT` |
 | 47110-47119 | Lightning address server, in the test process | `E2E_LNURL_PORT` |
 | 47120-47199 | domain-proof DoH + well-known servers, in the test process | `E2E_DOMAIN_PORT` |
@@ -270,7 +270,7 @@ for a private network as much as for tests:
 | `GHOSTLY_PKARR_RELAYS` | comma-separated Pkarr relay URLs used instead of the Mainline DHT and the public relays, with no read budget (`src-tauri/src/pkarr_network.rs`). The matrix points it at the test's relay (`relay.listen()`), which the browsers reach by request interception |
 | `GHOSTLY_PKARR_DHT_BOOTSTRAP` | comma-separated `ip:port` nodes: join a Mainline DHT of one's own instead of the public one (`src-tauri/src/pkarr_network.rs`). `desktop/dht-direct.spec.ts` points it at `support/mainlineTestnet.ts` |
 | `GHOSTLY_DHT` | `0` keeps the headless CLI off the Mainline DHT (relays only); the e2e helpers and the CLI's own tests set it unless a test runs its own DHT testnet (`GHOSTLY_DHT_BOOTSTRAP`) |
-| `GHOSTLY_HYPERDHT_BOOTSTRAP` | `host:port,…` bootstrap nodes for the HyperDHT runtime instead of the public ones (`native-transports/hyperdht/sidecar.mjs`); the matrix starts `hyperdht/testnet` in the test process |
+| `GHOSTLY_HYPERDHT_BOOTSTRAP` | `host:port,…` bootstrap nodes for the HyperDHT runtime instead of the public ones (`native/transports/hyperdht/sidecar.mjs`); the matrix starts `hyperdht/testnet` in the test process |
 
 `DesktopApp` clicks, types (`type`, with `\uE007` for Enter), reads text and attributes, and runs a script in the
 page (`execute`): enough for `matrix/people.ts` to drive a chat.
