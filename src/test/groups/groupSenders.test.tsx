@@ -96,6 +96,29 @@ describe("GroupChat: who wrote each message", () => {
     expect(screen.getByTestId("sender-avatar")).toHaveAttribute("data-key", BOT);
   });
 
+  it("a bot's routines folded into one row: its colour, and one picture per run, counting the row as one message", async () => {
+    const routine = (id: string) => readStatusCard({ kind: "routine", id, name: `Routine ${id}`, schedule: "every hour", state: "active" })!;
+    openGroup(active(), [
+      stored({ member: BOT, text: "r1", card: routine("r1") }), stored({ member: BOT, text: "r2", card: routine("r2") }), stored({ member: BOT, text: "r3", card: routine("r3") }),
+      stored({ member: BOT, text: "all set" }), stored({ member: ANA, text: "thanks" }),
+      stored({ member: BOT, text: "r4", card: routine("r4") }), stored({ member: BOT, text: "r5", card: routine("r5") }), stored({ member: BOT, text: "r6", card: routine("r6") }),
+    ]);
+    await screen.findByText("thanks");
+    const [first, last] = screen.getAllByTestId("routine-stack");
+    const toggle = (stack: HTMLElement) => stack.firstElementChild as HTMLElement;
+    // The first stack is followed by the bot's own text: an empty place; the last ends the timeline: the picture.
+    expect(within(toggle(first)).getByTestId("sender-avatar-spacer")).toBeInTheDocument();
+    expect(within(toggle(first)).queryByTestId("sender-avatar")).not.toBeInTheDocument();
+    expect(within(toggle(last)).getByTestId("sender-avatar")).toHaveAttribute("data-key", BOT);
+    expect(within(first).getByTestId("routine-stack-name").className).toContain(memberText(BOT));
+    expect(rows()).toContain("~Builder:avatar");
+    // Opened, the cards under it have their own places, the picture beside the last.
+    const cards = [...first.querySelectorAll<HTMLElement>("[data-message-row]")];
+    expect(cards.map(r => within(r).queryByTestId("sender-avatar") ? "avatar" : "spacer")).toEqual(["spacer", "spacer", "avatar"]);
+    fireEvent.click(within(toggle(last)).getByTestId("sender-avatar"));
+    expect(within(await screen.findByTestId("group-members-dialog")).getAllByTestId("group-member").find(li => li.dataset.focused)?.dataset.key).toBe(BOT);
+  });
+
   it("colours a quote of a member's message and a mention of them in theirs, and mine keeps its own", async () => {
     const original = stored({ id: "orig", member: ANA, text: "lunch?" });
     openGroup(active(), [original,

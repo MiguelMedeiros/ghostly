@@ -126,9 +126,14 @@ test("a group's members each have a colour, and their picture beside the end of 
   await expect(dialog).toHaveCount(0);
 
   // Bob writes: the header names him in his colour.
+  // (Bob just sent: his app says "typing" at most a few times in 10 s, so it may take a few keys.)
   const typingName = alice.page.getByTestId("group-typing-name");
-  await bob.page.getByPlaceholder("Message…").fill("On my");
-  await expect(typingName).toHaveText("Bob", { timeout: 15_000 });
+  const bobTypes = () => expect(async () => {
+    await bob.page.getByPlaceholder("Message…").pressSequentially(".");
+    await expect(typingName).toBeVisible({ timeout: 2_000 });
+  }).toPass({ timeout: 30_000 });
+  await bobTypes();
+  await expect(typingName).toHaveText("Bob");
   await expect(typingName).toHaveClass(new RegExp(`\\b${bobColour}\\b`));
 
   const shots = process.env.GROUP_SENDERS_SHOTS;
@@ -136,8 +141,7 @@ test("a group's members each have a colour, and their picture beside the end of 
     if (!shots) return;
     mkdirSync(shots, { recursive: true });
     // Bob keeps typing while the picture is taken.
-    await bob.page.getByPlaceholder("Message…").pressSequentially(" way");
-    await expect(typingName).toBeVisible({ timeout: 15_000 });
+    await bobTypes();
     await alice.page.screenshot({ path: join(shots, `${name}.png`) });
   };
   for (const scheme of ["light", "dark"] as const) { await theme(alice.page, scheme); await shoot(`desktop-${scheme}`); }
