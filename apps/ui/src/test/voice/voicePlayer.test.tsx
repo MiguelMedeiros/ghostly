@@ -1,6 +1,8 @@
 import { act, fireEvent, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MessageBubble } from "../../components/MessageBubble";
+import { TransportLine } from "../../components/TransportTimeline";
+import type { MessageAuthor } from "../../components/chat/SenderAvatar";
 import { servicesPlatform } from "../../lib/platform";
 import type { ChatMessage } from "../../lib/types";
 import { fakeEngine, linkView } from "../fakeEngine";
@@ -123,6 +125,58 @@ describe("a voice message in the chat", () => {
     endPlayback(audio.players[0]!);
     await flush();
     expect(last).toHaveAttribute("data-state", "idle");
+  });
+
+  it("in a group, goes on to the same member's next voice message, never to another member's", async () => {
+    const by = (key: string): MessageAuthor => ({ key, name: key, first: true, last: true });
+    const [ana, ana2, bob] = [voice(), voice(), voice()];
+    renderApp(<div>
+      <MessageBubble message={ana} author={by("ana")} />
+      <MessageBubble message={ana2} author={by("ana")} />
+      <MessageBubble message={bob} author={by("bob")} />
+    </div>);
+    const [first, second, third] = bubbles();
+    fireEvent.click(within(first!).getByTestId("voice-play"));
+    await flush();
+    endPlayback(audio.players[0]!);
+    await flush();
+    expect(second).toHaveAttribute("data-state", "playing");
+
+    endPlayback(audio.players[1]!);
+    await flush();
+    expect(third).toHaveAttribute("data-state", "idle");
+    expect(audio.players).toHaveLength(2);
+  });
+
+  it.each([
+    ["a group event", <div key="e" data-testid="group-event"><span>Ana joined</span></div>],
+    ["a group payment", <div key="p" data-testid="group-payment"><MessageBubble message={{ id: "t9", text: "paid", sender: "peer", timestamp: 1 }} /></div>],
+  ])("does not go on past %s", async (_, between) => {
+    renderApp(<div>
+      <MessageBubble message={voice()} />
+      {between}
+      <MessageBubble message={voice()} />
+    </div>);
+    const [first, last] = bubbles();
+    fireEvent.click(within(first!).getByTestId("voice-play"));
+    await flush();
+    endPlayback(audio.players[0]!);
+    await flush();
+    expect(last).toHaveAttribute("data-state", "idle");
+  });
+
+  it("goes on past a line about the connection: it is not part of the conversation", async () => {
+    renderApp(<div>
+      <MessageBubble message={voice()} peerPubKey="peer" />
+      <TransportLine entry={{ id: "l1", at: 1, kind: "switched", transport: "iroh/1", from: "webrtc/1" }} contact="Ana" />
+      <MessageBubble message={voice()} peerPubKey="peer" />
+    </div>);
+    const [first, last] = bubbles();
+    fireEvent.click(within(first!).getByTestId("voice-play"));
+    await flush();
+    endPlayback(audio.players[0]!);
+    await flush();
+    expect(last).toHaveAttribute("data-state", "playing");
   });
 
   it("changes speed for every voice message at once: 1×, 1.5×, 2×, and back", async () => {
