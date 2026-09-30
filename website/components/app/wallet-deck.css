@@ -1,4 +1,4 @@
-/* Copied from src/components/wallet-deck.css by website/scripts/sync-app-deck.mjs. Edit the app's file, then run npm run sync:app-deck. */
+/* Copied from apps/ui/src/components/wallet-deck.css by website/scripts/sync-app-deck.mjs. Edit the app's file, then run npm run sync:app-deck. */
 /* The wallet's cards (components/WalletDeck.tsx): the face of a payment card, on the wallet page, in the chat's deck
    and on the front of the chat's flipping card. The deck around them (stack, track, lift, glow, arrows) is
    deck/deck.css; wallet-cards.css sets each wallet's --card-rgb. */

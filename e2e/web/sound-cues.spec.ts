@@ -3,7 +3,7 @@ import { pair } from "../support/paired";
 import { INTERFACE_NOTES, NOTE, heard, listen } from "../support/sounds";
 
 /**
- * The sound categories (src/lib/cues.ts, Settings > Notifications and sounds). Here the Connection category's knock:
+ * The sound categories (apps/ui/src/lib/cues.ts, Settings > Notifications and sounds). Here the Connection category's knock:
  * the one who made the invite hears their contact arrive with it, once; the one who joined does not. The Interface
  * category is off by default: pairing, the chat list and Settings play none of its cues. A category's ▶ plays its
  * sound. What would be heard is recorded, not played (e2e/support/sounds.ts).

@@ -15,7 +15,7 @@ on:
       - "apps/desktop/src/file_store.rs"
       - "apps/desktop/tauri.conf.json"
       - "packages/browser/src/shared/fileBytesNative.ts"
-      - "src/components/video/**"
+      - "apps/ui/src/components/video/**"
       - "e2e/desktop/video-stream.spec.ts"
       - "e2e/support/{bigVideo,streamCheck,desktop}.ts"
       - ".github/workflows/desktop-media.yml"

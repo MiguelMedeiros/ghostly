@@ -76,7 +76,7 @@ export function transportCue(before: TransportMark, entries: readonly TransportE
 
 /**
  * The contact came with my invite: the first time the inviter's pairing shows them (their packet seen, or past the
- * wait), after it did not. The same test as the invite card's (src/lib/pairingProgress.ts `contactArrived`).
+ * wait), after it did not. The same test as the invite card's (apps/ui/src/lib/pairingProgress.ts `contactArrived`).
  */
 export function knockCue(before: PairingProgress | undefined, after: PairingProgress): boolean {
   const arrived = (p: PairingProgress | undefined) => !!p && (!!p.peerSeen || ["answering", "connecting", "live", "on-dht"].includes(p.stage));

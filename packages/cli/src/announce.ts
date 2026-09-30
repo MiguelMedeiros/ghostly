@@ -2,7 +2,7 @@ import type { GhostlyNode } from "@ghostly/browser/engine/node";
 import type { EventHub } from "./events";
 
 /**
- * What the app's chat screen does by itself, done here for a profile no screen shows (src/hooks/useChat.ts): the side
+ * What the app's chat screen does by itself, done here for a profile no screen shows (apps/ui/src/hooks/useChat.ts): the side
  * that joined says "👋 <name> joined" once the chat first goes live, and the side that invited answers once. Contacts
  * see the bot arrive as they see a person; each is said once per chat, across restarts.
  */

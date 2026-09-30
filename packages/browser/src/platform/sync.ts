@@ -16,8 +16,8 @@ import {
   updateSessionLabel,
   wasDeleted,
   type SessionCache,
-} from "../../../../src/lib/storage";
-import type { ChatMessage, ChatSession } from "../../../../src/lib/types";
+} from "../../../../apps/ui/src/lib/storage";
+import type { ChatMessage, ChatSession } from "../../../../apps/ui/src/lib/types";
 import type { EngineState, LinkView, StoredMessage } from "../shared/types";
 import { engine } from "./engine";
 import { replyRef } from "../shared/replies";

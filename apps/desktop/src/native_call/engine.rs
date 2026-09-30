@@ -9,7 +9,7 @@
 //! Not GStreamer's own `webrtcbin`: it needs libnice, which on Ubuntu 22.04 and Debian 12 links libsoup 2
 //! (through gupnp-igd), and loading libsoup 2 into a WebKitGTK 4.1 process (libsoup 3) aborts it.
 //!
-//! The page drives this through `src/desktop/nativeCalls.ts`, which looks like an `RTCPeerConnection` to the
+//! The page drives this through `apps/ui/src/desktop/nativeCalls.ts`, which looks like an `RTCPeerConnection` to the
 //! call hook. Which microphone, camera and speaker: [`devices`](super::devices), by name.
 
 use super::devices::{self, Kind, FAKE_CAMERAS};

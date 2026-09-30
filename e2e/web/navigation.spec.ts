@@ -4,7 +4,7 @@ import { expect, openProfilePage, test } from "../support/fixtures";
 /**
  * The page header's Back and the browser's: home (the chat list with New and Join) sits at the bottom of the
  * history, the places of the account bar and the tab bar replace each other on it, and a page opened from
- * inside another (a sub-page) goes up to that one (src/lib/navigation.ts).
+ * inside another (a sub-page) goes up to that one (apps/ui/src/lib/navigation.ts).
  */
 
 const home = async (page: Page) => {

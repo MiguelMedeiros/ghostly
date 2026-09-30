@@ -8,7 +8,7 @@ import type { HomeCopy } from "@/content/home";
 
 /**
  * The wallet's cards, as the app shows them: this is the app's own deck (components/app, copied from the app's
- * src/components by scripts/sync-app-deck.mjs), with its hover stack, its swipe track on a touch screen, its keys and
+ * apps/ui/src/components by scripts/sync-app-deck.mjs), with its hover stack, its swipe track on a touch screen, its keys and
  * its motion. What the site adds: the cards' words come from content/home.ts, the chosen card's details sit in the
  * panel under the deck, and the deck deals the next card by itself until the reader touches it.
  */

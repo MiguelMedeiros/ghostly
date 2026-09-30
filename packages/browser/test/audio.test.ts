@@ -1,6 +1,6 @@
 import {afterEach, expect, it, vi} from "vitest";
 // covers: app.attention.sounds
-vi.mock("../../../src/lib/settings",()=>({loadSettings:()=>({notifications:{soundEnabled:enabled}})}));
+vi.mock("../../../apps/ui/src/lib/settings",()=>({loadSettings:()=>({notifications:{soundEnabled:enabled}})}));
 let enabled=true;
 afterEach(()=>{vi.unstubAllGlobals();vi.useRealTimers();vi.resetModules();enabled=true;});
 it("requires a gesture, cancels an active ring and immediately honors mute",async()=>{
@@ -14,7 +14,7 @@ it("requires a gesture, cancels an active ring and immediately honors mute",asyn
     createBufferSource=()=>({buffer:null,connect:()=>({connect:vi.fn()}),start,stop});
     createGain=()=>({gain:{value:0}});
   });
-  const {installAudioGestures,playSound,startRinging}=await import("../../../src/lib/sounds");
+  const {installAudioGestures,playSound,startRinging}=await import("../../../apps/ui/src/lib/sounds");
   const cleanup=installAudioGestures();
   playSound("message");await vi.advanceTimersByTimeAsync(0);expect(start).not.toHaveBeenCalled();
   doc.dispatchEvent(new Event("pointerdown"));await vi.advanceTimersByTimeAsync(0);

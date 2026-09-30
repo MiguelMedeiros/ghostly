@@ -53,7 +53,7 @@ The headless CLI ([11xx](11xx-headless.md#calls)) calls and answers in the chat 
 
 ## Scope and evidence
 
-This covers the calls of compatibility chats ([402](402-legacy-chat.md)) and of the chat session ([401](401-paired-chat.md)), in browsers and in the Linux Desktop's native media (`apps/desktop/src/native_call`, `src/desktop/nativeCalls.ts`). It does not add group calls, an SFU or an end-to-end encrypted forwarding-service claim. See [React call hooks](../../packages/react), [paired calls](../../packages/core/src/pairedCalls.ts). Exercise accept/reject/hangup, stale signals, simultaneous calls, denied permissions and camera/screen transitions on supported platforms, and in the chat session the live-only rule and a contact without `calls/1`.
+This covers the calls of compatibility chats ([402](402-legacy-chat.md)) and of the chat session ([401](401-paired-chat.md)), in browsers and in the Linux Desktop's native media (`apps/desktop/src/native_call`, `apps/ui/src/desktop/nativeCalls.ts`). It does not add group calls, an SFU or an end-to-end encrypted forwarding-service claim. See [React call hooks](../../packages/react), [paired calls](../../packages/core/src/pairedCalls.ts). Exercise accept/reject/hangup, stale signals, simultaneous calls, denied permissions and camera/screen transitions on supported platforms, and in the chat session the live-only rule and a contact without `calls/1`.
 
 ## Revision log
 

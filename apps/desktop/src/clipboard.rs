@@ -41,7 +41,7 @@ impl ClipboardSource {
 /// clicked a second time; reading here takes one click. Only text, at most
 /// [`MAX_CLIPBOARD_BYTES`], and only for the main window: a `ghostly-svc://` window shows a
 /// contact's code, and the capabilities, `only_main` and this check each keep it out. Only the UI
-/// calls it, from a click (`src/lib/clipboard.ts` checks the page's user activation first); the
+/// calls it, from a click (`apps/ui/src/lib/clipboard.ts` checks the page's user activation first); the
 /// engine never reads the clipboard.
 #[tauri::command]
 pub async fn read_clipboard_text<R: tauri::Runtime>(

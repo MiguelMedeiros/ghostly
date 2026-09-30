@@ -1,4 +1,4 @@
-// Copied from src/components/walletCardTypes.ts by website/scripts/sync-app-deck.mjs. Edit the app's file, then run npm run sync:app-deck.
+// Copied from apps/ui/src/components/walletCardTypes.ts by website/scripts/sync-app-deck.mjs. Edit the app's file, then run npm run sync:app-deck.
 /**
  * A wallet card's shape, apart from how its contents are worked out (walletCardData.ts): the deck, the card's face and
  * its mark (WalletCardDeck.tsx, WalletCards.tsx) need only this, which is what lets the website show the app's own

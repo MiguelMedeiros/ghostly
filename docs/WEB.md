@@ -29,18 +29,18 @@ Its log names no one: each request is one line with the time, the method, the fi
 ## How it shares code
 
 ```
-src/                 the UI (Desktop's, unchanged)
+apps/ui              the UI (Desktop's, unchanged)
 packages/core        the protocol
 packages/react       hooks shared by every client
 packages/browser     the peer: engine, wallets, IndexedDB, and the stand-ins
                      for the six Desktop modules that touch the platform
 apps/extension       host: peer in an offscreen document, Chrome permissions, viewer tabs
 apps/web             host: peer in the page, one tab at a time
-src/desktop + apps/desktop
+apps/ui/src/desktop + apps/desktop
                      host: peer in the WebView, Rust for the DHT, native Iroh, the HyperDHT sidecar, local apps, viewer windows
 ```
 
-A host (`packages/browser/src/host.ts`) is the small part that differs: how a page reaches the peer, whether the user can grant access to local addresses, how a contact's web app is opened. All three build `src/` with the same Vite plugin (`packages/browser/vite-plugin.ts`).
+A host (`packages/browser/src/host.ts`) is the small part that differs: how a page reaches the peer, whether the user can grant access to local addresses, how a contact's web app is opened. All three build `apps/ui/src/` with the same Vite plugin (`packages/browser/vite-plugin.ts`).
 
 ## On a phone
 

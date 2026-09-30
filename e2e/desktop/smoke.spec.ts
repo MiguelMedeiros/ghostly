@@ -21,7 +21,7 @@ test("Desktop opens, with the peer Rust backs behind it", { tag: ["@feature:desk
   await app.click('[data-testid="settings-advanced"]');
   await expect.poll(() => app.text('[data-testid="settings-advanced-page"]'), { message: "Settings → Advanced opens" }).not.toBeNull();
 
-  // Only `src/desktop/host.ts` describes Pkarr this way. The browser stand-in
+  // Only `apps/ui/src/desktop/host.ts` describes Pkarr this way. The browser stand-in
   // would say "Pkarr relays (HTTP) → Mainline DHT (BEP44)": Rust is reaching
   // the DHT itself, which is the whole reason Desktop exists.
   await expect.poll(() => app.text('[data-testid="network-protocol"]')).toBe("Mainline DHT (BEP44) — Direct UDP");

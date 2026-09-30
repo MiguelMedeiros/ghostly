@@ -2,10 +2,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 /** The native read the desktop host offers, when a test gives one. */
 const platform = vi.hoisted(() => ({ readClipboardText: null as null | (() => Promise<string>) }));
-vi.mock('../../../src/lib/platform', () => ({
+vi.mock('../../../apps/ui/src/lib/platform', () => ({
   servicesPlatform: { readClipboardText: () => platform.readClipboardText ? platform.readClipboardText() : null },
 }));
-const { pasteShortcut, readClipboardText } = await import('../../../src/lib/clipboard');
+const { pasteShortcut, readClipboardText } = await import('../../../apps/ui/src/lib/clipboard');
 // covers: invite.clipboard
 
 /** A page whose Clipboard API answers `readText`, with or without a click's user activation. */
@@ -22,7 +22,7 @@ function page({ readText, active, platform: os = 'MacIntel', userAgentData }: { 
 }
 
 /**
- * Paste buttons (src/lib/clipboard.ts): the desktop host reads natively, so WKWebView's "Paste"
+ * Paste buttons (apps/ui/src/lib/clipboard.ts): the desktop host reads natively, so WKWebView's "Paste"
  * callout never needs a second click; web and extension use the Clipboard API; any refusal is
  * null, and the caller shows a field and the shortcut instead of a dead button.
  */

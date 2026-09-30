@@ -2,9 +2,9 @@ import { MemoryRouter } from "react-router-dom";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { expect, it, vi } from "vitest";
-import { ChatConnection } from "../../../src/components/ChatConnection";
-import { SettingsProvider } from "../../../src/contexts/SettingsContext";
-import { I18nProvider } from "../../../src/contexts/I18nContext";
+import { ChatConnection } from "../../../apps/ui/src/components/ChatConnection";
+import { SettingsProvider } from "../../../apps/ui/src/contexts/SettingsContext";
+import { I18nProvider } from "../../../apps/ui/src/contexts/I18nContext";
 // covers: chat.paired.status, chat.paired.verify, invite.discovery-errors
 
 /** The control as the app has it: under the router, the settings and the translations. */

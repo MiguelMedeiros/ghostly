@@ -2,10 +2,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 /** The share sheet the desktop host offers, when a test gives one. */
 const platform = vi.hoisted(() => ({ shareText: null as null | ((text: string, anchor?: unknown) => Promise<boolean> | null) }));
-vi.mock('../../../src/lib/platform', () => ({
+vi.mock('../../../apps/ui/src/lib/platform', () => ({
   servicesPlatform: { shareText: (text: string, anchor?: unknown) => platform.shareText ? platform.shareText(text, anchor) : null },
 }));
-const { shareLink } = await import('../../../src/lib/shareLink');
+const { shareLink } = await import('../../../apps/ui/src/lib/shareLink');
 // covers: groups.link.share
 
 const URL_ = 'https://app.ghostly.tools/#/join/group1/AAAAAAAAAAAAAAAAAAAAAA/ybndrfg8ejkmcpqxot1uwisza345h769ybndrfg8ejkmcpqxot1u';
@@ -17,7 +17,7 @@ function browser(share?: (data: ShareData) => Promise<void>) {
 }
 
 /**
- * Share on a group's link (src/lib/shareLink.ts): the system's sheet where the host has one
+ * Share on a group's link (apps/ui/src/lib/shareLink.ts): the system's sheet where the host has one
  * (desktop), the Web Share API where the page has it, and a copy otherwise.
  */
 describe('sharing a link', () => {

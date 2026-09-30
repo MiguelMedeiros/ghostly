@@ -40,7 +40,7 @@ Releases: [docs/RELEASING.md](docs/RELEASING.md).
 | `npm run typecheck` | TypeScript, every workspace |
 | `npm run test:affected` | before pushing: only what your change can break (unit, lint, typecheck, Rust; the e2e picked with `--port <n>`) |
 | `npm test` | every unit test: `test:packages` (core, browser, sdk, extension, cli) then `test:app` (UI components, matrix, scripts) |
-| `npm run test:ui` | only the UI's component tests ([src/test/README.md](src/test/README.md)) |
+| `npm run test:ui` | only the UI's component tests ([apps/ui/src/test/README.md](apps/ui/src/test/README.md)) |
 | `npm run test:map` | every feature in `e2e/features.json` has a test, and the file is sorted (`-- --fix` sorts it) |
 | `npm run locales:sort` | sorts the keys of every locale file |
 | `node scripts/changes.mjs` | checks the changelog entries in `changes/` (`--preview` prints the release notes they make) |
@@ -55,10 +55,10 @@ The website has its own commands in [website/README.md](website/README.md). The 
 ```
 ghostly/
 ├── apps/
+│   ├── ui/              # The shared React UI every app builds (src/, index.html, the Vite configs)
 │   ├── web/             # Ghostly on the web (app.ghostly.tools)
 │   ├── extension/       # Ghostly Browser (Chromium extension, Manifest V3)
 │   └── desktop/         # Ghostly Desktop: the Tauri app (Rust)
-├── src/                 # The shared React UI (Desktop, web app, extension)
 ├── packages/
 │   ├── core/            # The Ghost protocol, shared by every client (TypeScript)
 │   ├── browser/         # The Ghostly peer: engine, wallets, storage, the platform layer under the UI
@@ -109,7 +109,7 @@ Lists that every feature adds to are kept sorted, one entry per line, so two pul
 | What | Where it goes | Check |
 |---|---|---|
 | A feature | its line in `e2e/features.json`, at its place by id; its globs in `paths` by glob | `npm run test:map` (`-- --fix` sorts) |
-| A string | `src/locales/<language>/<area>.json`, below | `npm run locales:sort`, the i18n tests |
+| A string | `apps/ui/src/locales/<language>/<area>.json`, below | `npm run locales:sort`, the i18n tests |
 | A release note | a file in `changes/` | `node scripts/changes.mjs` |
 | A WISP change | a file in `docs/wisps/changes/<wisp>/` | `npm run sync:references` in `website/` |
 | A Desktop command | its alphabetical place in `apps/desktop/src/main.rs` (`commands!`), `apps/desktop/build.rs` (`COMMANDS`) and `apps/desktop/capabilities/default.json` (`allow-*`) | `cargo test` in `apps/desktop` |
@@ -119,7 +119,7 @@ Not committed, so regenerate them when you need them: `website/lib/*.json` (`npm
 
 ### Text in the app
 
-Every string the app shows goes through `t("area.key")`. Each language is a folder of one file per area of the app, `src/locales/<language>/<area>.json`: add a key to its area's file in all eight languages (English in `en/`, the source). A new area is a new file in every folder, plus its two lines in `src/locales/en/index.ts`, which gives `t()` its types. Keys are sorted in every file: `npm run locales:sort` puts them in order, and the i18n tests fail on a file out of order, on a key missing from a language, and on a placeholder a translation drops.
+Every string the app shows goes through `t("area.key")`. Each language is a folder of one file per area of the app, `apps/ui/src/locales/<language>/<area>.json`: add a key to its area's file in all eight languages (English in `en/`, the source). A new area is a new file in every folder, plus its two lines in `apps/ui/src/locales/en/index.ts`, which gives `t()` its types. Keys are sorted in every file: `npm run locales:sort` puts them in order, and the i18n tests fail on a file out of order, on a key missing from a language, and on a placeholder a translation drops.
 
 ### Writing docs and site copy
 

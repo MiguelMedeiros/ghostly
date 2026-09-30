@@ -9,7 +9,7 @@ import { desktopPerson, type DesktopPerson } from "../matrix/people";
  *
  * WebKitGTK has no WebRTC (Ubuntu, Debian and Fedora build it without), so the call media runs in Rust:
  * webrtc-rs for the connection, GStreamer for the camera, the microphone and the codecs
- * (apps/desktop/src/native_call). The page drives it through src/desktop/nativeCalls.ts, which has the
+ * (apps/desktop/src/native_call). The page drives it through apps/ui/src/desktop/nativeCalls.ts, which has the
  * RTCPeerConnection shape the call hook expects. Here both apps use it, with a test picture and a test tone
  * (GHOSTLY_FAKE_MEDIA, set by support/desktop.ts), and what they exchange is read back from Rust
  * (`native_call_stats`) and from the call window's own <video>.

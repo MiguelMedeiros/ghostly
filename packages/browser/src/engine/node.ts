@@ -422,7 +422,7 @@ export class GhostlyNode implements EngineImplementation {
   private readonly feedbackIds = new Set<string>();
   private walletFeedbackReady = false;
   private readonly walletFeedbackIds = new Set<string>();
-  /** `cue`: a finer sound the page plays instead of the event's own when its category is on (src/lib/cues.ts). */
+  /** `cue`: a finer sound the page plays instead of the event's own when its category is on (apps/ui/src/lib/cues.ts). */
   private feedback(type: AttentionEvent["type"], id: string, linkId?: string, mention = false, cue?: AttentionCue) {
     const key = type + ":" + id;
     if (this.feedbackIds.has(key)) return;

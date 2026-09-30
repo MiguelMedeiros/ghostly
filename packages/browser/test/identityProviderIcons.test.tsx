@@ -2,11 +2,11 @@ import { describe, expect, it } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { IDENTITY_PROVIDERS } from '../src/proofs/registry';
 import { OIDC_PROVIDERS } from '../src/proofs/oidc/providers';
-import { PROVIDER_ICONS } from '../../../src/components/identities/ProviderIcons';
+import { PROVIDER_ICONS } from '../../../apps/ui/src/components/identities/ProviderIcons';
 // covers: proofs.picker
 
 /**
- * Identities shows one mark per provider (src/components/identities/ProviderIcons.tsx).
+ * Identities shows one mark per provider (apps/ui/src/components/identities/ProviderIcons.tsx).
  * A provider without one would silently fall back to the generic key, so every registered
  * provider, and every OpenID Connect provider offered inside "Account at a provider", has its own.
  */

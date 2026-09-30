@@ -1,4 +1,4 @@
-// Copied from src/components/deck/Deck.tsx by website/scripts/sync-app-deck.mjs. Edit the app's file, then run npm run sync:app-deck.
+// Copied from apps/ui/src/components/deck/Deck.tsx by website/scripts/sync-app-deck.mjs. Edit the app's file, then run npm run sync:app-deck.
 import {useCallback,useEffect,useLayoutEffect,useMemo,useRef,useState,type CSSProperties,type KeyboardEvent,type PointerEvent,type ReactNode} from 'react';
 import {stackLayout,stackStrips,stepCard,stripAt} from './stack';
 import {deckSwitchSound,playSwitch,switchDirection} from './motion';

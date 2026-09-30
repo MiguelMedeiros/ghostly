@@ -1,7 +1,7 @@
 # Ghostly on the web
 
 The Ghostly peer and the shared UI in a browser tab, nothing to install: [app.ghostly.tools](https://app.ghostly.tools).
-`src/host.ts` is the web host; the UI is the shared one (`src/` at the root). What it can and cannot do
+`src/host.ts` is the web host; the UI is the shared one (`apps/ui/src/`). What it can and cannot do
 compared to the extension and Desktop: [docs/WEB.md](../../docs/WEB.md).
 
 ```bash
