@@ -2,6 +2,7 @@ import { useState } from "react";
 import { paymentUri, type PaymentReview as Review } from "@ghostly/core";
 import type { WalletPlatform, WalletState } from "../lib/platform";
 import { PaymentReview } from "./PaymentReview";
+import { paymentStateLabel } from "./paymentWords";
 import { BackupRows } from "./wallet/BackupRows";
 import { Actions, Address, Amount, Block, Button, Notice, Row, Section, Segmented, input, type Action } from "./wallet/ui";
 import { useRun } from "./wallet/run";
@@ -70,7 +71,7 @@ export function BarkWalletPanel({ wallet, state, backupNow = false }: { wallet: 
     <Notice>{t("wallet.bark.approve")}</Notice>
    </div>}
    {review && <PaymentReview key={review.id} review={review} wallet={wallet} onClose={() => setReview(null)} />}
-   {intents.filter(i => i.id !== review?.id).map(i => <Button key={i.id} className="block w-full text-start" onClick={() => setReview(i)}>{t("wallet.panel.intentSats", { amount: formatAmount(i.amount, t.language), state: i.state })}</Button>)}
+   {intents.filter(i => i.id !== review?.id).map(i => <Button key={i.id} className="block w-full text-start" onClick={() => setReview(i)}>{t("wallet.panel.intent", { amount: formatAmount(i.amount, t.language), unit, state: paymentStateLabel(t, i.state) })}</Button>)}
   </div>}
   {error && <Notice tone="error">{error}</Notice>}
   {bark?.error && ready && <Notice tone="warning">{bark.error}</Notice>}

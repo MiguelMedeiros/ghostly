@@ -1,4 +1,4 @@
-import { type Command, force, groupWait, cursor, routineFields, routineOptions, runOf, taskFields, taskOptions, wait } from "./shared";
+import { type Command, force, groupWait, cursor, needs, routineFields, routineOptions, runOf, taskFields, taskOptions, wait } from "./shared";
 
 /** Invites, chats and messages: one entry per command, in alphabetical order (test/commands.test.ts checks). */
 export const commands: Record<string, Command> = {
@@ -85,7 +85,7 @@ export const commands: Record<string, Command> = {
     summary: "Send a routine card (something a bot runs on a schedule: its last run and the next) to a chat or group",
     args: ["chat"],
     options: { id: { type: "string", description: "The routine's id, kept across updates (default: made up)" }, ...routineOptions, ...groupWait, wait: wait.wait },
-    params: ({ options }, { chat }) => ({ chat, card: routineFields(options), run: runOf(options.run), text: options.text, wait: options.wait, timeout: options.timeout }),
+    params: ({ options }, { chat }) => ({ chat, card: needs(routineFields(options), [["name", "name"], ["schedule", "schedule"]], "routine send <chat|group> --name <name> --schedule \"every day 01:00\""), run: runOf(options.run), text: options.text, wait: options.wait, timeout: options.timeout }),
   },
   "routine update": {
     method: "routine.update", usage: "routine update <chat|group> <routine> [--run ok|failed|skipped[:summary]] [--next <time>] [--state active|paused] [--schedule ...] [--json json|-|file] [--wait none|confirmed|sent] [--timeout s]",
@@ -99,7 +99,7 @@ export const commands: Record<string, Command> = {
     summary: "Send a task card (a bot's work: status, progress, its PR) to a chat or group; prints its id and message",
     args: ["chat"],
     options: { id: { type: "string", description: "The task's id, kept across updates (default: made up)" }, ...taskOptions, ...groupWait, wait: wait.wait },
-    params: ({ options }, { chat }) => ({ chat, card: taskFields(options), text: options.text, wait: options.wait, timeout: options.timeout }),
+    params: ({ options }, { chat }) => ({ chat, card: needs(taskFields(options), [["title", "title"]], "task send <chat|group> --title <title>"), text: options.text, wait: options.wait, timeout: options.timeout }),
   },
   "task update": {
     method: "task.update", usage: "task update <chat|group> <task> [--status s] [--progress n | --steps a/b] [--step \"...\"] [--item state:text]... [--pr-url ...] [--json json|-|file] [--wait none|confirmed|sent] [--timeout s]",

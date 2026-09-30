@@ -2,6 +2,7 @@ import {useState} from 'react';
 import {ETHEREUM_USDT,SEPOLIA_TEST_USDT,parsePaymentAmount,type PaymentReview as Review} from '@ghostly/core';
 import type {WalletPlatform,WalletState} from '../lib/platform';
 import {PaymentReview} from './PaymentReview';
+import {paymentStateLabel} from './paymentWords';
 import {BackupRows} from './wallet/BackupRows';
 import {Actions,Address,Amount,Block,Button,Notice,Row,Section,Segmented,input,type Action} from './wallet/ui';
 import {useRun} from './wallet/run';
@@ -53,7 +54,7 @@ export function UsdtWalletPanel({wallet,state,backupNow=false}:{wallet:WalletPla
     <Notice>{BigInt(usdt.gasBalance)===0n?t('wallet.usdt.needsGas'):t('wallet.usdt.approve')}</Notice>
    </div>}
    {review&&<PaymentReview key={review.id} review={review} wallet={wallet} onClose={()=>setReview(null)}/>}
-   {intents.filter(i=>i.id!==review?.id).map(i=><Button key={i.id} className="block w-full text-start" onClick={()=>setReview(i)}>{t('wallet.panel.intent',{amount:formatTokenAmount(i.amount,i.decimals,t.language),unit:i.asset,state:i.state==='settled'?t('wallet.usdt.confirmed'):i.state})}</Button>)}
+   {intents.filter(i=>i.id!==review?.id).map(i=><Button key={i.id} className="block w-full text-start" onClick={()=>setReview(i)}>{t('wallet.panel.intent',{amount:formatTokenAmount(i.amount,i.decimals,t.language),unit:i.asset,state:i.state==='settled'?t('wallet.usdt.confirmed'):paymentStateLabel(t,i.state)})}</Button>)}
   </div>}
   {error&&<Notice tone="error">{error}</Notice>}
   {usdt?.error&&ready&&<Notice tone="warning">{usdt.error}</Notice>}
