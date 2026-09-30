@@ -4,6 +4,26 @@ import type { MessageAuthor } from "../../lib/senderRuns";
 
 export type { MessageAuthor };
 
+/** Who a member is at a glance, as `SenderAvatar` draws them: their picture, else their initial in their colour, else a pattern of their key. */
+export type MemberFaceOf = Pick<MessageAuthor, "key" | "name" | "picture">;
+
+/**
+ * A member's face on its own, small (the Tasks panel's names, a folded row's sender): what `SenderAvatar` shows, for a
+ * sighted reader only, as the name beside it says who it is.
+ */
+export function MemberFace({ face, size = 18, className = "" }: { face: MemberFaceOf; size?: number; className?: string }) {
+  const memberText = useMemberText();
+  return (
+    <span aria-hidden="true" data-testid="member-face" data-key={face.key} style={{ width: size, height: size, fontSize: Math.round(size * 0.55) }}
+      className={`relative inline-flex shrink-0 items-center justify-center overflow-hidden rounded-full bg-surface-hover font-semibold leading-none select-none ${className}`}>
+      {face.picture
+        ? <img src={face.picture} alt="" draggable={false} className="absolute inset-0 h-full w-full object-cover" />
+        : face.name ? <span className={memberText(face.key)}>{face.name.charAt(0).toUpperCase()}</span>
+        : <Identicon seed={face.key} />}
+    </span>
+  );
+}
+
 /**
  * A member's picture beside their messages in a group, as WhatsApp and Telegram have it: once per run, on its last
  * bubble, with an empty place of the same width beside the others so the bubbles stay in line. Their picture; else

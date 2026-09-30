@@ -16,7 +16,7 @@
     "title": "Tasks"
   },
   "routine": {
-    "cron": "Cron:",
+    "cron": "Cron",
     "label": "Routine: {{name}}, {{state}}",
     "lastRun": "Last run: {{result}}",
     "next": "Next {{when}}",
@@ -27,6 +27,7 @@
       "skipped": "Skipped"
     },
     "runs": "Recent runs",
+    "schedule": "Schedule",
     "state": {
       "active": "Active",
       "paused": "Paused"

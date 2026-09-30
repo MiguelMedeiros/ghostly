@@ -8,6 +8,7 @@ import { revealMessage } from "../../hooks/useRowWindow";
 import { jumpToMessage } from "../../lib/replies";
 import { RESULT_TONE, STATUS_TONE, activeTaskCount, cardEntries, panelModel, untilIn, type CardEntry, type CardRow } from "../../lib/statusCards";
 import { RoutineSummaryLine } from "./RoutineCard";
+import { MemberFace, type MemberFaceOf } from "./SenderAvatar";
 import { PrLine, ProgressBar, TaskElapsedLine } from "./StatusCard";
 
 /*
@@ -68,7 +69,7 @@ function Chevron({ open }: { open: boolean }) {
   );
 }
 
-function TaskRow({ entry, from, onOpen }: { entry: CardEntry; from?: string; onOpen: () => void }) {
+function TaskRow({ entry, from, face, onOpen }: { entry: CardEntry; from?: string; face?: MemberFaceOf; onOpen: () => void }) {
   const { t } = useI18n();
   if (entry.card.kind !== "task") return null;
   const card = entry.card;
@@ -81,7 +82,7 @@ function TaskRow({ entry, from, onOpen }: { entry: CardEntry; from?: string; onO
       onClick={onOpen} className={rowClass}>
       <span className="flex w-full min-w-0 items-center gap-2">
         <span aria-hidden="true" className={`h-2 w-2 shrink-0 rounded-full ${tone.dot}`} />
-        <bdi className="min-w-0 flex-1 truncate text-sm text-text-primary">{card.title}</bdi>
+        <bdi title={card.title} className="min-w-0 flex-1 truncate text-sm text-text-primary">{card.title}</bdi>
         <span data-testid="chat-tasks-item-status" className={`shrink-0 text-xs font-medium ${tone.label}`}>
           {tone.mark && <span aria-hidden="true">{tone.mark} </span>}{t(`cards.task.status.${card.status}`)}
         </span>
@@ -96,6 +97,7 @@ function TaskRow({ entry, from, onOpen }: { entry: CardEntry; from?: string; onO
       )}
       {!entry.active && (from || card.pr || timed) && (
         <span className="flex w-full min-w-0 items-center gap-1.5 ps-4 text-xs text-text-muted">
+          {from && face && <MemberFace face={face} size={14} />}
           {from && <bdi className="min-w-0 truncate">{from}</bdi>}
           {from && (card.pr || timed) && <span aria-hidden="true">·</span>}
           {timed && <TaskElapsedLine card={card} end={entry.at} testId="chat-tasks-item-elapsed" className="shrink-0" />}
@@ -116,7 +118,7 @@ function RoutineRow({ entry, onOpen }: { entry: CardEntry; onOpen: () => void })
   const paused = card.state === "paused";
   return (
     <button type="button" data-panel-row data-testid="chat-tasks-item" data-card-id={card.id} data-kind="routine" data-state={card.state} data-result={last?.result}
-      onClick={onOpen} title={card.schedule} className={rowClass}>
+      onClick={onOpen} title={`${card.name} · ${card.schedule}`} className={rowClass}>
       <span className="flex w-full min-w-0 items-center gap-2">
         <span aria-hidden="true" className={`w-2 shrink-0 text-center text-[13px] leading-none ${paused ? "text-text-muted" : "text-accent"}`}>↻</span>
         <bdi className="min-w-0 flex-1 truncate text-sm text-text-primary">{card.name}</bdi>
@@ -181,9 +183,10 @@ function usePlace(phone: boolean, anchorRef: RefObject<HTMLElement | null>) {
   return place;
 }
 
-function TasksPanel({ entries, nameOf, anchorRef, onClose, onJump }: {
+function TasksPanel({ entries, nameOf, faceOf, anchorRef, onClose, onJump }: {
   entries: CardEntry[];
   nameOf?: (author: string) => string;
+  faceOf?: (author: string) => MemberFaceOf | undefined;
   anchorRef: RefObject<HTMLElement | null>;
   onClose: () => void;
   onJump: (entry: CardEntry) => void;
@@ -254,6 +257,7 @@ function TasksPanel({ entries, nameOf, anchorRef, onClose, onJump }: {
           aria-label={nameOf ? nameOf(section.author) : undefined} className={i > 0 ? "border-t border-border" : ""}>
           {nameOf && (
             <h3 className={`${STICKY} m-0 flex items-center gap-2 px-3 pt-1 text-[11px] font-normal text-text-muted`}>
+              {(() => { const face = faceOf?.(section.author); return face && <MemberFace face={face} size={18} />; })()}
               <bdi data-testid="chat-tasks-sender-name" className="min-w-0 truncate font-semibold text-text-secondary">{nameOf(section.author)}</bdi>
               {section.active.length > 0 && <span data-testid="chat-tasks-sender-count" className="shrink-0">{t("cards.panel.activeCount", { count: section.active.length })}</span>}
             </h3>
@@ -275,7 +279,7 @@ function TasksPanel({ entries, nameOf, anchorRef, onClose, onJump }: {
             <Chevron open={finishedOpen} />
           </button>
           {finishedOpen && model.finished.map((entry) => (
-            <TaskRow key={`${entry.author}\n${entry.card.kind}\n${entry.card.id}`} entry={entry} from={nameOf?.(entry.author)} onOpen={() => onJump(entry)} />
+            <TaskRow key={`${entry.author}\n${entry.card.kind}\n${entry.card.id}`} entry={entry} from={nameOf?.(entry.author)} face={faceOf?.(entry.author)} onOpen={() => onJump(entry)} />
           ))}
         </div>
       )}
@@ -300,10 +304,13 @@ function TasksPanel({ entries, nameOf, anchorRef, onClose, onJump }: {
 }
 
 /**
- * `nameOf`: in a group, the name of each card's sender. The panel is then one section per sender (a bot each, in a
+ * `nameOf`: in a group, the name of each card's sender, and `faceOf` their face (their picture, initial or pattern)
+ * beside it, so a bot is known at a glance. The panel is then one section per sender (a bot each, in a
  * group like "Sala de Máquinas"), those with the most tasks going first, each saying how many it has going.
  */
-export function TasksButton({ rows, nameOf }: { rows: readonly CardRow[]; nameOf?: (author: string) => string }) {
+export function TasksButton({ rows, nameOf, faceOf }: {
+  rows: readonly CardRow[]; nameOf?: (author: string) => string; faceOf?: (author: string) => MemberFaceOf | undefined;
+}) {
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -339,7 +346,7 @@ export function TasksButton({ rows, nameOf }: { rows: readonly CardRow[]; nameOf
             className="absolute top-0.5 end-0.5 min-w-4 h-4 px-1 rounded-full bg-accent text-on-accent text-[10px] font-bold leading-4 text-center">{active > 99 ? "99+" : active}</span>
         )}
       </button>
-      {open && <TasksPanel entries={entries} nameOf={nameOf} anchorRef={ref} onClose={close} onJump={jump} />}
+      {open && <TasksPanel entries={entries} nameOf={nameOf} faceOf={faceOf} anchorRef={ref} onClose={close} onJump={jump} />}
     </div>
   );
 }
