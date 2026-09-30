@@ -1,29 +1,14 @@
-import { spawn, spawnSync, type ChildProcess } from "node:child_process";
-import { desktopBinary, desktopHome, expect, homeEnv, openDesktop, test } from "../support/desktop";
+import { spawn, type ChildProcess } from "node:child_process";
+import { desktopBinary, desktopHome, expect, homeEnv, openDesktop, privateBus, test } from "../support/desktop";
 
 /**
  * One Ghostly per profile (src-tauri/src/single_instance.rs). Started twice on one profile, two peers ran with the
  * same keys: the contact held one instance's channel, refused the other's as crossed, and the chat stopped. Now the
  * second launch hands over to the running app (its window comes forward) and exits; another profile still runs.
  *
- * The apps get a session bus of their own (the plugin holds its name there): none on a CI runner, and never the
+ * The apps share one session bus of their own (the plugin holds its name there): none on a CI runner, and never the
  * person's own on a desktop.
  */
-
-/** A private session bus, or null where there is no `dbus-daemon`. */
-async function privateBus(): Promise<{ address: string; stop: () => void } | null> {
-  if (spawnSync("dbus-daemon", ["--version"]).status !== 0) return null;
-  const daemon = spawn("dbus-daemon", ["--session", "--nofork", "--print-address=1"], { stdio: ["ignore", "pipe", "ignore"] });
-  const address = await new Promise<string>((done, fail) => {
-    let out = "";
-    daemon.stdout!.on("data", (chunk: Buffer) => {
-      out += chunk.toString();
-      if (out.includes("\n")) done(out.trim());
-    });
-    daemon.once("exit", (code) => fail(new Error(`dbus-daemon exited (${code})`)));
-  });
-  return { address, stop: () => void daemon.kill("SIGTERM") };
-}
 
 /** Starts the app the way a person does, with no driver: the process, and whether (and how) it has exited. */
 function launch(env: Record<string, string>): { app: ChildProcess; exited: Promise<number | null> } {
