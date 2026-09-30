@@ -899,7 +899,8 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
 
   const timestampEl = (
     <span dir={dir} className="msg-meta inline-flex items-center gap-[3px] float-end relative top-[4px] ms-[8px] select-none">
-      {message.edit && <EditedMark edit={message.edit} group={linkId?.startsWith("group:")} />}
+      {/* A question's buttons marked or closed by its bot is its normal life, not an edit to point out. */}
+      {message.edit && !buttonsView && <EditedMark edit={message.edit} group={linkId?.startsWith("group:")} />}
       <span className="text-[11px] leading-none text-text-primary/65">
         {time}
       </span>

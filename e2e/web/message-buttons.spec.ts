@@ -16,7 +16,8 @@ async function theme(page: Page, scheme: "light" | "dark") {
     document.documentElement.setAttribute("data-theme", scheme);
     document.documentElement.style.colorScheme = scheme;
     await new Promise(requestAnimationFrame);
-    await Promise.all(document.getAnimations().filter((a) => a instanceof CSSTransition).map((a) => a.finished.catch(() => {})));
+    // Transitions settle, but never wait past a second for one (a transition restarted on every frame never ends).
+    await Promise.race([Promise.all(document.getAnimations().filter((a) => a instanceof CSSTransition).map((a) => a.finished.catch(() => {}))), new Promise((r) => setTimeout(r, 1_000))]);
   }, scheme);
 }
 
@@ -68,10 +69,12 @@ test("a bot asks with Yes and No, the person taps Yes, and the bot hears it and 
     await bot.run("send", chatId, "Great, the $30 one is yours.", "--reply", question, "--wait", "delivered");
     await bot.run("button", "update", chatId, question, "--chosen", "yes", "--close", "--wait", "confirmed", "--timeout", "60");
     await expect(room.getByText("Great, the $30 one is yours.")).toBeVisible();
-    await expect(buttons.getByTestId("message-buttons-closed")).toBeVisible({ timeout: 60_000 });
+    await expect(room.getByTestId("message-buttons-closed")).toBeVisible({ timeout: 60_000 });
     await expect(yes).toHaveAttribute("aria-disabled", "true");
     await expect(yes).toHaveAttribute("data-chosen", "true");
     await expect(yes).toHaveAttribute("aria-pressed", "true");
+    // Marked and closed by the bot: that is the question's life, not an edit to point out.
+    await expect(room.locator("[data-message-row]").filter({ has: buttons }).getByTestId("message-edited")).toHaveCount(0);
 
     for (const scheme of ["dark", "light"] as const) {
       await theme(page, scheme);
@@ -125,7 +128,7 @@ test("in a group, the bot learns which member pressed", { tag: ["@feature:chat.b
     expect(pressed).toMatchObject({ group, messageId: asked.messageId, button: "approve", label: "Approve" });
     expect(typeof pressed.by).toBe("string");
     await bot.run("button", "update", group, asked.messageId as string, "--chosen", "approve", "--close", "--wait", "sent", "--timeout", "120");
-    await expect(buttons.getByTestId("message-buttons-closed")).toBeVisible({ timeout: 120_000 });
+    await expect(room.getByTestId("message-buttons-closed")).toBeVisible({ timeout: 120_000 });
     await expect(buttons.locator('[data-testid="message-button"][data-button-id="approve"]')).toHaveAttribute("data-chosen", "true");
     await expect(room.getByTestId("button-press")).toContainText("Approve");
     await buttons.scrollIntoViewIfNeeded();
