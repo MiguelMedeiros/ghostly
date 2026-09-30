@@ -83,6 +83,7 @@ import { TasksButton } from "../components/chat/TasksButton";
 import { RoutineStack } from "../components/chat/RoutineCard";
 import { routineStacks } from "../lib/statusCards";
 import { scrollIntoViewGently } from "../lib/motion";
+import { MessageAnnouncer } from "../components/chat/MessageAnnouncer";
 
 /** What a call captures from: the devices the profile chose, read when it asks. */
 const callDevicePreferences = () => ({ audio: preferredDevice("audioinput"), video: preferredDevice("videoinput") });
@@ -522,6 +523,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
     // The chat's column, and beside it (over it when narrow) the contact's identities: the page is their container.
     <CueChat.Provider value={sessionId}>
     <div className="chat-pane flex-1 h-full">
+    {/* A message that comes while the chat is open, read out once to a screen reader. */}
+    <MessageAnnouncer chat={sessionId} messages={messages} nameOf={() => shownName} active={visible} />
     {/* Files dropped anywhere on the column go to the composer (`data-file-drop`). */}
     <div data-file-drop className="chat-column relative flex-1 flex flex-col h-full min-w-0 bg-chat-bg">
       {(wakeCall.waking || wakeCall.gaveUp) && (

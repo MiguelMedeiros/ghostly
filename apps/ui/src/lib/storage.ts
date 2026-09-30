@@ -223,9 +223,12 @@ export function addMessages(
   const fresh = messages.filter((m) => !known.has(m.id) && known.add(m.id));
   if (!fresh.length) return session;
 
+  // A history made whole again (after a reload) brings back older messages, not new ones: the chat keeps its place and
+  // time in the list unless one of them is newer than what it had.
+  const newest = session.messages[session.messages.length - 1]?.timestamp ?? 0;
   session.messages.push(...fresh);
   session.messages.sort((a, b) => a.timestamp - b.timestamp);
-  session.lastSyncAt = Date.now();
+  if (!complete || fresh.some((m) => m.timestamp > newest)) session.lastSyncAt = Date.now();
 
   for (const message of fresh) {
     if ((message.sender === "peer" || message.sender === "system") && message.id.startsWith("peer_")) {
@@ -419,8 +422,11 @@ export function markSessionAsRead(sessionId: string): void {
 /**
  * What counts as unread: what came to me since the last read message. Never a message of mine (one forwarded here
  * from another chat lands while this one is not open) nor a join line, which the other side's app adds by itself.
+ * Of a call's lines, only a missed call: the others tell of a call I was on or made, written while its chat was
+ * loaded off screen (it rang, or I opened another chat during it).
  */
 function countsAsUnread(message: ChatMessage): boolean {
+  if (message.callEvent) return message.callEvent.type === "call_missed";
   return message.sender !== "me" && message.systemEvent?.type !== "join";
 }
 

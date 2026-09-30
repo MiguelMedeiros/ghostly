@@ -1,4 +1,9 @@
 {
+  "announce": {
+    "message": "{{name}}: {{text}}",
+    "messages": "新着メッセージ {{count}} 件",
+    "messagesFrom": "{{name}} から新着メッセージ {{count}} 件"
+  },
   "audio": {
     "cantPlay": "この端末ではこの音声（{{format}}）を再生できません。ダウンロードして聴いてください。",
     "pause": "音声を一時停止",
@@ -263,7 +268,9 @@
     "sats": "{{amount}} sats",
     "testMoney": "テスト用のお金",
     "testSats": "{{amount}} テスト sats",
-    "usdtAddress": "USDT アドレス"
+    "usdtAddress": "USDT アドレス",
+    "video": "🎬 動画 ({{duration}})",
+    "voice": "🎤 ボイスメッセージ ({{duration}})"
   },
   "reactions": {
     "chipLabel": "{{emoji}}: {{names}}",

@@ -168,6 +168,18 @@ export function reactionsJson(message: StoredMessage): { by: string; emoji: stri
 }
 
 /**
+ * A 1:1 chat's message with its author named: the engine keeps a contact's message without a name (the name rides on
+ * the chat), so the name the contact gave fills `nick`, as a group's roster does. Mine keep null. Before, `nick` was
+ * always null in a 1:1 chat, and so was an agent turn's `untrusted.name`.
+ */
+export function chatMessageJson(message: StoredMessage, link: Pick<LinkView, "peerNick"> | undefined): MessageJson {
+  const json = messageJson(message);
+  if (json.nick || message.sender !== "peer") return json;
+  const nick = link?.peerNick?.trim();
+  return nick ? { ...json, nick } : json;
+}
+
+/**
  * A group's message with its author named: mesh and community messages are kept with the member's key only (the
  * name rides on the edge or the roster), so the roster fills `nick` when the message has none, and for an author no
  * longer in it (removed, or back with a new member key) the name the group knew them by.

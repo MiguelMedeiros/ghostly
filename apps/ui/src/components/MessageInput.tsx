@@ -179,6 +179,8 @@ export function MessageInput({
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   const composition = useComposition();
   const [canRecord] = useState(canRecordVoice);
+  /** A voice message being recorded: the mic stays (and its recording with it) even if an edit or a reply fills the field. */
+  const [recording, setRecording] = useState(false);
   const sharedIdentities = useSharedIdentityCount(identities?.peerKey);
   const hasCamera = useHasCamera();
   const picker = useMentionPicker({ mentions, text, setText, textareaRef, caretRef });
@@ -660,14 +662,14 @@ export function MessageInput({
         </div>
 
         {/* Send button; the mic while there is nothing to send, as in WhatsApp */}
-        {onSendFile && canRecord && !text.trim() ? (
+        {onSendFile && canRecord && (recording || !text.trim()) ? (
           <VoiceRecorderButton
             onSend={(file, voice) => onSendFile(file, voice)}
             unavailable={fileUnavailable}
             disabled={disabled}
             onError={showToast}
             // Recording: the composer's pickers close, and the contact sees "recording audio…" until it ends.
-            onActiveChange={(active) => { if (active) closeAll(); onTyping?.(active, "recording"); }}
+            onActiveChange={(active) => { setRecording(active); if (active) closeAll(); onTyping?.(active, "recording"); }}
           />
         ) : <button
           aria-label={t("composer.sendMessage")}

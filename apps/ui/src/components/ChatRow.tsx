@@ -11,11 +11,11 @@ import { TypingText } from "./TypingIndicator";
 import { usePeerTypingActivity } from "../hooks/useTyping";
 import { BellIcon, MuteMenu } from "./ChatMute";
 import { useI18n } from "../contexts/I18nContext";
-import { formatListTime, previewText } from "../lib/chatList";
+import { filePreview, formatListTime, previewText } from "../lib/chatList";
 import { cardLine, showsCard } from "../lib/statusCards";
 import { deliveryShape, useDeliveryWords } from "../lib/delivery";
 import { groupChat, mentionsNotify, muteEndText, useChatMute } from "../lib/chatMute";
-import { authorName, groupReadAt, groupStatusText } from "../lib/groups";
+import { authorName, groupReadAt, groupStatusText, groupUnreadAt } from "../lib/groups";
 import { reactionNoteText } from "../lib/reactions";
 import type { ChatListDensity } from "../lib/settings";
 import type { ChatMessage } from "../lib/types";
@@ -259,7 +259,7 @@ export function ChatRow(p: ChatRowProps) {
               {p.lastMessage.systemEvent?.type === "join" ? joinPreview(p, p.lastMessage.systemEvent.pubKey, t)
                 : p.lastMessage.callEvent ? callEventText(t, p.lastMessage.callEvent.type, p.lastMessage.callEvent.hasVideo) ?? p.lastMessage.text
                 : showsCard(p.lastMessage.card) ? cardLine(p.lastMessage.card)
-                : previewText(p.lastMessage.text, t)}
+                : filePreview(p.lastMessage.file, t) ?? previewText(p.lastMessage.text, t)}
             </span>
           : <span className="italic text-text-muted">{t("chat.noMessages")}</span>}
         status={(muted || p.pinned) && <>
@@ -295,7 +295,7 @@ export function GroupRow({ group, active, density, onOpen }: { group: GroupView;
   const [busy, setBusy] = useState(false);
   const muted = useChatMute(groupChat(group.id)) !== undefined;
   const invitation = group.invitation;
-  const unread = !active && !invitation && group.lastMessageAt > groupReadAt(group.id);
+  const unread = !active && !invitation && groupUnreadAt(group) > groupReadAt(group.id);
   // An unread message that names me: "@" beside the dot, in the accent unless the mute keeps mentions quiet too.
   const mention = unread && (group.lastMentionAt ?? 0) > groupReadAt(group.id);
   const mentionQuiet = muted && !mentionsNotify(groupChat(group.id));
