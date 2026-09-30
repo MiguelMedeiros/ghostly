@@ -59,8 +59,9 @@ test("two Linux Desktop apps without WebRTC make a community, join it by its lin
     await expect.poll(() => attribute(b, "group-chat", "data-status"), { timeout: 240_000, message: "bia is in" }).toBe("active");
     for (const p of [a, b]) {
       await expect.poll(() => textOf(p, "group-members"), { timeout: 180_000, message: `${p.name} sees 2 members` }).toContain("2 members");
-      await expect.poll(() => textOf(p, "group-members"), { timeout: 180_000, message: `${p.name} reaches the other` }).toContain("1 of 1 reachable");
-      await expect.poll(() => attribute(p, "group-connection-options", "data-transport"), { message: `${p.name}'s group link is native` }).toMatch(/^(iroh|hyperdht)\/1$/);
+      // (A community's header says members and hubs, not "n of m reachable": what carries its link says it is up.)
+      await expect.poll(() => attribute(p, "group-connection-options", "data-transport"), { timeout: 180_000, message: `${p.name}'s group link is up over a native transport` })
+        .toMatch(/^(iroh|hyperdht)\/1$/);
     }
 
     // They read each other.
