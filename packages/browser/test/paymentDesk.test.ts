@@ -208,6 +208,31 @@ describe("requests we send", () => {
     await expect(desk.request({ linkId: "l", amount: 5, timestamp: 8, method: "arkade" })).rejects.toThrow("dialled");
   });
 
+  it("a contact with no wallet at the last session may have made one since: a request waits for live instead of failing", async () => {
+    const { desk, link, host, state } = setup();
+    link.isDataLinkOpen = false;
+    // What the last session said (no Mainnet Cashu or Lightning wallet) is old: only an open session's word counts.
+    Object.assign(link, { peerPaymentNetworks: () => [] });
+    host.waitingPaymentMethods.mockReturnValue(["cashu", "lightning"]);
+    const { paymentId } = await desk.request({ linkId: "l", amount: 21, timestamp: 5, network: "mainnet" });
+    expect(state(paymentId)).toMatchObject({ state: "pending", invoice: INVOICE });
+    expect(host.storeMessage).toHaveBeenCalledWith(expect.objectContaining({ delivery: "waiting", paymentId }));
+    // Live, the contact's word is fresh: no wallet there is said as such.
+    link.isDataLinkOpen = true;
+    await expect(desk.request({ linkId: "l", amount: 21, timestamp: 6, network: "mainnet" })).rejects.toThrow("Your contact has no Mainnet Cashu wallet");
+  });
+
+  it("a request refused by the contact's word at the last session says so, not that the chat has them off", async () => {
+    const { desk, link, host, enabled } = setup();
+    link.isDataLinkOpen = false;
+    host.waitingPaymentMethods.mockReturnValue([]);
+    await expect(desk.request({ linkId: "l", amount: 21, timestamp: 5 })).rejects.toThrow("Your contact took no Cashu or Lightning last time. Try again once the chat is live");
+    // Off on this device: that is what it says.
+    enabled.cashu = enabled.lightning = false;
+    await expect(desk.request({ linkId: "l", amount: 21, timestamp: 6 })).rejects.toThrow("Cashu and Lightning are off in this chat");
+    expect(rows("payments")).toEqual([]);
+  });
+
   it("rebuilds only our own Cashu or Lightning requests", async () => {
     const { desk } = setup([record({ id: "in", invoice: INVOICE }), record({ id: "ark", direction: "out", target: ark() }), record({ id: "ln", direction: "out", invoice: INVOICE, mints: [] })]);
     await desk.start();
