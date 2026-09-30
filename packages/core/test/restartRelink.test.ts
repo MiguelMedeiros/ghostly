@@ -105,12 +105,12 @@ async function until(check: () => boolean, limit: number): Promise<number> {
  * - `crash`: nothing at all.
  */
 type How = "graceful" | "closed" | "crash";
-async function quit(world: { native: NativeWorld }, app: App, how: How): Promise<void> {
+async function quit(world: { native: NativeWorld }, app: App, how: How, rtcFailsAfterMs?: number): Promise<void> {
   if (how === "graceful") { app.link.depart(); await run(DEPART_FLUSH_MS); }
   // Its connections close (each contact hears it), and nothing else of it runs.
   if (how === "closed") { app.stopped = app.link.stop(false); await run(DEPART_FLUSH_MS); }
   world.native.kill(app.name);
-  killRtc(app.name);
+  killRtc(app.name, undefined, rtcFailsAfterMs);
   app.stopped ??= app.link.stop(false);
 }
 
@@ -128,8 +128,11 @@ function report(result: Result): void {
 /**
  * `budgetHeldMs`: from the restart, the relays' budget holds back every publish of the app that stayed for this long.
  * `endpointAfterMs`: the restarted app's native endpoint starts this long after it.
+ * `cli`: the staying side's WebRTC never says `disconnected` and goes `failed` `rtcFailsAfterMs` after the crash
+ * (node-datachannel), and the restarted app's native dials do not reach it, failing after `dialFailMs`.
  */
-async function restart(kind: Kind, restarted: "lower" | "higher", how: How, budgetHeldMs?: number, endpointAfterMs?: number): Promise<Result> {
+async function restart(kind: Kind, restarted: "lower" | "higher", how: How, budgetHeldMs?: number, endpointAfterMs?: number,
+  cli?: { rtcFailsAfterMs: number; dialFailMs: number }): Promise<Result> {
   const world = { pkarr: new MemoryPkarr(DESKTOP_NETWORK), native: new NativeWorld() };
   // The inviter has the lower link key here: it is the one that dials.
   const made = invitationWhere("inviter");
@@ -143,7 +146,8 @@ async function restart(kind: Kind, restarted: "lower" | "higher", how: How, budg
 
   const before = channelOf(stays);
   const quitAt = Date.now();
-  await quit(world, goes, how);
+  await quit(world, goes, how, cli?.rtcFailsAfterMs);
+  if (cli) { world.native.dialsLost.add("goes"); world.native.dialFailMs = cli.dialFailMs; }
   const failuresBefore = world.native.dialFailures;
   // When the staying side lets the old session go (it may only do so once the other app is back).
   let downSeenAt = 0;
@@ -274,6 +278,19 @@ describe("coming back after a restart, the edges", () => {
  * 90 s) before the HyperDHT ranked after it was dialled, live 0.1 s later. Measured from the restart; the budget holds
  * the staying app's publishes for 45 s of it.
  */
+describe("a CLI back after a kill, whose contact never hears its WebRTC connection go", () => {
+  it.each(["lower", "higher"] as const)("the app with the %s key restarts: the contact's unanswered ping reads its offer", async restarted => {
+    // CI run 36741701666 (twoPeers, 34.1 s): the staying daemon held the dead session and read the relays at a live
+    // chat's 30 s pace; its WebRTC went `failed` 27.1 s after the kill (node-datachannel never says `disconnected`), and
+    // only then did it read the restarted daemon's offer. The race's HyperDHT dial had not reached it, and the answer
+    // waited 7.5 s more for the restarted side's next look (its offer out over 10 s, looked for every 8 s).
+    const result = await restart("webrtc+hyperdht", restarted, "crash", undefined, undefined, { rtcFailsAfterMs: 27_100, dialFailMs: 20_000 });
+    expect(result.liveAgainMs, "from the restart to live on both sides").toBeLessThanOrEqual(22_000);
+    expect(result.transport).toBe("webrtc/1");
+    expect(result.requestsPerMin).toBeLessThanOrEqual(10);
+  }, 240_000);
+});
+
 describe("a restart whose WebRTC answer the relays' budget holds back", () => {
   const BUDGET_HELD_MS = 45_000;
   beforeEach(() => { rtc.answerFailsAfterMs = 31_000; });
