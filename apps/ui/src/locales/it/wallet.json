@@ -494,6 +494,7 @@
       "reaches": "Ciò che viene pagato dopo arriva comunque a {{source}}; Ghostly semplicemente non lo vede più.",
       "reachesWallet": "Ciò che viene pagato dopo arriva comunque al portafoglio; Ghostly semplicemente non lo vede più."
     },
+    "and": "{{first}} e {{second}}",
     "ask": "Rimuovi {{label}}…",
     "awaiting": "Denaro ancora in attesa",
     "backupFirst": "Prima fai il backup",
@@ -512,6 +513,10 @@
       "waitsReal": "Ho capito: ciò che viene pagato alle sue richieste e fatture aperte dopo la rimozione va perso, ed è denaro reale."
     },
     "copyTokens": "Copia il backup dell'ecash",
+    "gas": {
+      "mainnet": "{{amount}} ETH",
+      "testnet": "{{amount}} ETH di prova"
+    },
     "held": {
       "elsewhere": "Il tuo denaro resta dov'è: Ghostly dimentica solo come raggiungerlo. Puoi ricollegarlo più tardi.",
       "elsewhereIn": "Il tuo denaro resta in {{source}}: Ghostly dimentica solo come raggiungerlo. Puoi ricollegarlo più tardi.",
@@ -522,6 +527,13 @@
     },
     "hintDevice": "Le sue chiavi e impostazioni lasciano questo dispositivo. Gli altri portafogli restano come sono.",
     "hintElsewhere": "Ghostly dimentica come raggiungerlo; il denaro resta dov'è.",
+    "item": {
+      "invoice": "Una fattura di {{amount}}, non ancora pagata",
+      "paid": "{{amount}} pagati a una fattura, non ancora riscossi dal mint",
+      "request": "Una richiesta di {{amount}} in una chat, ancora aperta",
+      "sent": "{{amount}} in ecash che hai inviato, non ancora ritirati",
+      "unclaimed": "{{amount}} che il mint dice di aver emesso per una fattura, mai ricevuti qui"
+    },
     "label": "Rimuovi questo portafoglio",
     "noBackup": "Ghostly non può mostrare di nuovo la frase di recupero di questo portafoglio: solo la frase che hai annotato quando l'hai creato riporta indietro questo denaro.",
     "noTokens": "Non c'è ecash da copiare.",

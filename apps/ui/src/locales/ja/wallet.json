@@ -494,6 +494,7 @@
       "reaches": "その後に支払われたものも {{source}} に届きます。Ghostly に表示されなくなるだけです。",
       "reachesWallet": "その後に支払われたものもウォレットに届きます。Ghostly に表示されなくなるだけです。"
     },
+    "and": "{{first}} と {{second}}",
     "ask": "{{label}} を削除…",
     "awaiting": "まだ入金待ち",
     "backupFirst": "先にバックアップ",
@@ -512,6 +513,10 @@
       "waitsReal": "理解しました：削除後にその未払いの請求やインボイスに支払われたものは失われます。それは本物のお金です。"
     },
     "copyTokens": "Ecash のバックアップをコピー",
+    "gas": {
+      "mainnet": "{{amount}} ETH",
+      "testnet": "{{amount}} テスト ETH"
+    },
     "held": {
       "elsewhere": "お金はそのまま残ります。Ghostly は接続方法を忘れるだけです。あとでまた接続できます。",
       "elsewhereIn": "お金は {{source}} に残ります。Ghostly は接続方法を忘れるだけです。あとでまた接続できます。",
@@ -522,6 +527,13 @@
     },
     "hintDevice": "鍵と設定がこのデバイスから消えます。ほかのウォレットはそのままです。",
     "hintElsewhere": "Ghostly は接続方法を忘れるだけで、お金はそのまま残ります。",
+    "item": {
+      "invoice": "{{amount}} の請求書（未払い）",
+      "paid": "請求書に支払われた {{amount}}（ミントからまだ受け取っていません）",
+      "request": "チャットでの {{amount}} のリクエスト（未完了）",
+      "sent": "あなたが送った {{amount}} の ecash（まだ受け取られていません）",
+      "unclaimed": "ミントが請求書に対して発行したという {{amount}}（ここでは受け取っていません）"
+    },
     "label": "このウォレットを削除",
     "noBackup": "Ghostly はこのウォレットのリカバリーフレーズをもう表示できません。このお金を取り戻せるのは、作成時に書き留めたフレーズだけです。",
     "noTokens": "コピーする Ecash はありません。",

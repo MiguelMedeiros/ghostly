@@ -5,13 +5,14 @@ import type { WalletAwaitingView, WalletView } from "@ghostly/browser/shared/typ
 import { Wallet } from "../../pages/Wallet";
 import { walletView } from "../fakeEngine";
 import { renderApp } from "../render";
+import type { Language } from "../../lib/settings";
 import { arkReady, lightningSource, mint, REAL_MINT, TEST_MINT } from "../payments/fixtures";
 
 // covers: wallet.instances.remove
 
 /** Opens the Wallets page on one card, and its Remove dialog. */
-async function removing(wallet: WalletView, card: string) {
-  const app = renderApp(<Wallet />);
+async function removing(wallet: WalletView, card: string, language?: Language) {
+  const app = renderApp(<Wallet />, { language });
   app.engine.update({ wallet });
   await app.user.click(await screen.findByTestId(`wallet-card-${card}`));
   await app.user.click(await screen.findByTestId("wallet-remove"));
@@ -125,6 +126,19 @@ describe("Remove, in a wallet's details", () => {
     engine.on("walletRemove", () => undefined);
     await user.click(confirm);
     expect(engine.callsTo("walletRemove")).toEqual([{ type: "cashu", network: "mainnet", acceptLoss: true }]);
+  });
+
+  it("in Portuguese, what it holds and waits for is written in Portuguese, amounts too", async () => {
+    const wallet = awaitingOn(walletView({ mints: [mint(TEST_MINT, 10_000)], balance: 10_000 }), "testnet", [
+      { type: "cashu", kind: "invoice", amount: 2_500 },
+      { type: "cashu", kind: "sent", amount: 1_200, paymentId: "p1" },
+    ]);
+    const { dialog } = await removing(wallet, "cashu-testnet", "pt");
+    expect(within(dialog).getByTestId("wallet-remove-held")).toHaveTextContent("10.000 sats de teste");
+    expect(within(dialog).getAllByTestId("wallet-remove-awaiting-item").map((i) => i.textContent)).toEqual(["Uma fatura de 2.500 sats de teste, ainda não paga"]);
+    expect(within(dialog).getByTestId("wallet-remove-returnable")).toHaveTextContent("1.200 sats de teste");
+    expect(within(dialog).getByTestId("wallet-remove-consent")).toHaveTextContent("10.000 sats de teste");
+    expect(dialog).not.toHaveTextContent(/test sats|10,000|An invoice/);
   });
 
   it("a source whose money is elsewhere lists its open requests, which close, and asks nothing about funds", async () => {
