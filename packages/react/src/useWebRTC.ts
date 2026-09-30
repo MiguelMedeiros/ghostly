@@ -72,6 +72,31 @@ export const RING_MS = 60_000;
 /** How long "No answer" stays on the caller's screen. */
 export const NO_ANSWER_SHOWN_MS = 6000;
 
+/** How long the reason a microphone or camera could not be used stays on screen. */
+export const MEDIA_PROBLEM_SHOWN_MS = 8000;
+
+/** Why the microphone or camera could not be used: refused (by the person, the browser or the system), or none to use. */
+export type MediaProblem = "denied" | "unavailable";
+
+/** What a failed `getUserMedia` means for the person, or null when the failure was not the microphone's or camera's. */
+export function mediaProblem(error: unknown): MediaProblem | null {
+  const { name } = (error ?? {}) as { name?: unknown };
+  switch (name) {
+    case "NotAllowedError":
+    case "SecurityError":
+    case "PermissionDeniedError":
+      return "denied";
+    case "NotFoundError":
+    case "NotReadableError":
+    case "OverconstrainedError":
+    case "DevicesNotFoundError":
+    case "TrackStartError":
+      return "unavailable";
+    default:
+      return null;
+  }
+}
+
 /**
  * A new connection that has not found a single candidate by then has stalled: Chromium, rarely and under load, leaves
  * one gathering with nothing to show for it, forever (the matrix's "Connecting..." calls, e2e-full 36677963444). Its
@@ -175,6 +200,13 @@ export function useWebRTC({
   const [screenShareError, setScreenShareErrorState] = useState<string | null>(null);
   /** Our call rang out unanswered, for a few seconds (`NO_ANSWER_SHOWN_MS`). */
   const [noAnswer, setNoAnswer] = useState(false);
+  /** The microphone or camera a call asked for could not be used, and why, for a few seconds (`MEDIA_PROBLEM_SHOWN_MS`). */
+  const [mediaProblemShown, setMediaProblemShown] = useState<MediaProblem | null>(null);
+  /** Tells the person why a call could not use the microphone or camera, when that is what `error` was. */
+  const showMediaProblem = useCallback((error: unknown) => {
+    const problem = mediaProblem(error);
+    if (problem) setMediaProblemShown(problem);
+  }, []);
 
   const pcRef = useRef<RTCPeerConnection | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
@@ -547,8 +579,10 @@ export function useWebRTC({
         // A newer attempt (or none) owns the call now: its state is not ours to reset.
         if (cancelled()) return;
         onErrorRef.current?.(error);
-        // No connection found a way out: the chat says so. No offer went out, so the contact has nothing to hear.
-        if (error instanceof CallUnreachableError) addCallEventMessage?.("call_failed", withVideo);
+        showMediaProblem(error);
+        // The call ended before it rang anyone (no microphone, or no connection found a way out): the chat says so,
+        // after its "call started" line. No offer went out, so the contact has nothing to hear.
+        addCallEventMessage?.("call_failed", withVideo);
         cleanupConnection();
         updateCallState("idle");
         setFastPoll(false);
@@ -564,6 +598,7 @@ export function useWebRTC({
       updateCallState,
       cleanupConnection,
       addCallEventMessage,
+      showMediaProblem,
     ],
   );
 
@@ -668,11 +703,10 @@ export function useWebRTC({
       } catch (error) {
         if (cancelled()) return;
         onErrorRef.current?.(error);
-        // The caller is told at once, instead of ringing on until its own ring runs out.
-        if (error instanceof CallUnreachableError) { couldNotConnect(true); return; }
-        cleanupConnection();
-        updateCallState("idle");
-        setFastPoll(false);
+        showMediaProblem(error);
+        // Whatever stopped the answer (a microphone refused, no connection found), the caller is told at once
+        // instead of ringing on until its own ring runs out, and both chats say the call couldn't connect.
+        couldNotConnect(true);
       }
     },
     [
@@ -681,9 +715,8 @@ export function useWebRTC({
       applyRemotePicture,
       setPicture,
       updateCallState,
-      cleanupConnection,
-      setFastPoll,
       couldNotConnect,
+      showMediaProblem,
     ],
   );
 
@@ -773,8 +806,9 @@ export function useWebRTC({
       await showPicture(pictureRef.current === "camera" ? null : "camera");
     } catch (error) {
       onErrorRef.current?.(error);
+      showMediaProblem(error);
     }
-  }, [showPicture]);
+  }, [showPicture, showMediaProblem]);
 
   /** Shares the screen in place of whatever picture is on, or stops and goes back to it. */
   const toggleScreenShare = useCallback(async () => {
@@ -965,6 +999,12 @@ export function useWebRTC({
   }, [noAnswer]);
 
   useEffect(() => {
+    if (!mediaProblemShown) return;
+    const timer = setTimeout(() => setMediaProblemShown(null), MEDIA_PROBLEM_SHOWN_MS);
+    return () => clearTimeout(timer);
+  }, [mediaProblemShown]);
+
+  useEffect(() => {
     const attempts = attemptRef;
     return () => {
       // A start or an answer still waiting for the microphone or for ICE is cancelled, as a hang-up cancels it.
@@ -1020,6 +1060,7 @@ export function useWebRTC({
     screenShareError,
     /** Our last call rang out with no answer, for a few seconds. */
     noAnswer,
+    mediaProblem: mediaProblemShown,
     callStartedAt,
     startCall,
     acceptCall,
