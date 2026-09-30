@@ -14,6 +14,7 @@ import { CASHU_MINT_SOURCE } from "../walletCardData";
 import { useI18n, type Translate } from "../../contexts/I18nContext";
 import { fillNodes } from "../../lib/fillNodes";
 import { satsIn } from "../NetworkTag";
+import { lightningStateLabel } from "../paymentWords";
 import { formatAmount } from "../../lib/amount";
 import { formatAt } from "../../lib/time";
 
@@ -225,8 +226,8 @@ export function CashuWallet({ wallet, state, rail, onOpenCashu, focusAmount = fa
           {!viaMint && !!ln?.recent.length && (
             <Section title={t("wallet.lightning.recent")} testId="lightning-recent">
               {ln.recent.map((op) => (
-                <Row key={`${op.direction}-${op.paymentHash}`} testId="lightning-op" label={t(op.direction === "in" ? "wallet.lightning.recentIn" : "wallet.lightning.recentOut", { amount: formatAmount(op.amount, t.language) })}
-                  hint={`${formatAt(op.createdAt, MOVED_AT, t.language)} · ${op.state}${op.fee ? ` · ${t("wallet.cashu.history.fee", { amount: formatAmount(op.fee, t.language) })}` : ""}${op.error ? ` · ${op.error}` : ""}`} />
+                <Row key={`${op.direction}-${op.paymentHash}`} testId="lightning-op" label={t(op.direction === "in" ? "wallet.lightning.recentIn" : "wallet.lightning.recentOut", { amount: formatAmount(op.amount, t.language), unit })}
+                  hint={`${formatAt(op.createdAt, MOVED_AT, t.language)} · ${lightningStateLabel(t, op.state)}${op.fee ? ` · ${t("wallet.cashu.history.fee", { amount: formatAmount(op.fee, t.language) })}` : ""}${op.error ? ` · ${op.error}` : ""}`} />
               ))}
             </Section>
           )}

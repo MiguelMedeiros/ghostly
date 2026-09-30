@@ -209,7 +209,7 @@ test("BDK on regtest: funded, a Send from the wallet, a Send and a Request paid 
   await panel(alice).getByTestId("bitcoin-amount").fill("20000");
   await panel(alice).getByRole("button", { name: "Review payment" }).click();
   const review = panel(alice).getByTestId("payment-review");
-  await expect(review).toContainText("bitcoin · regtest");
+  await expect(review).toContainText("Bitcoin on-chain · Regtest");
   await review.getByRole("button", { name: "Approve payment" }).click();
   await expect(review.getByTestId("review-status")).toHaveText("submitted", { timeout: 60_000 });
   await review.getByText("Payment details").click();
@@ -233,7 +233,7 @@ test("BDK on regtest: funded, a Send from the wallet, a Send and a Request paid 
   await bob.page.getByTestId("payment-amount").fill("5000");
   await bob.page.getByTestId("payment-send").click();
   const direct = bob.page.getByTestId("payment-composer").getByTestId("payment-review");
-  await expect(direct).toContainText("bitcoin · regtest", { timeout: 60_000 });
+  await expect(direct).toContainText("Bitcoin on-chain · Regtest", { timeout: 60_000 });
   await direct.getByRole("button", { name: "Approve payment" }).click();
   // Gone out: the sheet closes, back to the chat. The transaction is in Bob's wallet history, going out.
   await expect(bob.page.getByTestId("payment-composer")).toHaveCount(0, { timeout: 60_000 });

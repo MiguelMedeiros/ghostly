@@ -84,7 +84,7 @@ describe("what the bubble says", () => {
   it("says an on-chain payment waits for a confirmation", () => {
     show({ kind: "payment", direction: "in", state: "pending", target: target({ method: "bitcoin", network: "bitcoin", provider: "onchain" }) });
     expect(status()).toHaveTextContent("Waiting for a confirmation…");
-    expect(screen.getByText("Bitcoin on-chain · bitcoin")).toBeInTheDocument();
+    expect(screen.getByTestId("payment-rail")).toHaveTextContent(/^Bitcoin on-chain$/);
   });
 
   it("adds why a payment failed", () => {
@@ -106,7 +106,7 @@ describe("what the bubble says", () => {
     show({ amount: 1_500_000, target: target({ method: "usdt", network: "sepolia", asset: "TEST-USDT", unit: "token-base", decimals: 6 }) });
     expect(screen.getByText("1.5")).toBeInTheDocument();
     expect(screen.getByText("TEST-USDT")).toBeInTheDocument();
-    expect(screen.getByText("USDT · sepolia")).toBeInTheDocument();
+    expect(screen.getByText("USDT · Sepolia")).toBeInTheDocument();
   });
 });
 

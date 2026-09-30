@@ -54,7 +54,8 @@ test.describe("wallet", () => {
     // The Cashu card turned over; the mint that holds the sats pays, so there is no mint to pick.
     await alice.page.getByTestId("payment-send").click();
     const directReview = alice.page.getByTestId("payment-composer").getByTestId("payment-review");
-    await expect(directReview).toContainText("cashu-test");
+    await expect(directReview.getByTestId("review-rail")).toHaveText("Cashu");
+    await expect(directReview).toHaveAttribute("data-network", "testnet");
     await showCashu(bob);
     await expect(bob.page.getByTestId("wallet-balance")).toHaveText(/^0\s*test sats/);
     await directReview.getByRole("button", { name: "Approve payment" }).click();
@@ -74,7 +75,8 @@ test.describe("wallet", () => {
     await bob.page.getByTestId("payment-request").click();
     await alice.page.getByTestId("payment-pay").click();
     const requestReview = chat(alice).getByTestId("payment-review");
-    await expect(requestReview).toContainText("cashu-test");
+    await expect(requestReview.getByTestId("review-rail")).toHaveText("Cashu");
+    await expect(requestReview).toHaveAttribute("data-network", "testnet");
     await requestReview.getByRole("button", { name: "Approve payment" }).click();
     for (const p of [alice, bob]) await expect(chat(p).getByTestId("payment-bubble").filter({ hasText: "equest" }).getByTestId("payment-state")).toHaveText(/Paid/);
     await showCashu(bob);
