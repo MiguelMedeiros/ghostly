@@ -17,6 +17,7 @@ import { CardFlip, FlipTurnButton } from "./deck/Flip";
 import { useCardFlip } from "./deck/useCardFlip";
 import { ChatPaymentAccept } from "./ChatPaymentAccept";
 import { ConfirmRealMoney } from "./ConfirmRealMoney";
+import { deckArrows } from "./deck/arrows";
 import { NetworkTabs } from "./wallet/NetworkTabs";
 import { NETWORK_NAME } from "./wallet/names";
 import "./payment-composer.css";
@@ -409,7 +410,7 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, onDone = 
             </button>
           </div>
           : <>
-            <CardDeck<string> key={net} compact tagAll kind="radios" label={t("payments.composer.payWith")} name="payment-deck" cards={shown} selected={selected} onSelect={(id) => { pick(id); setError(""); }} onChoose={use}
+            <CardDeck<string> key={net} compact tagAll kind="radios" label={t("payments.composer.payWith")} name="payment-deck" arrows={deckArrows(t)} cards={shown} selected={selected} onSelect={(id) => { pick(id); setError(""); }} onChoose={use}
               testId={paymentCardTestId} blocked={(c) => unavailable(c as InstanceCard)} size={{ max: 250, share: .62 }} />
             <p className="composer-sheet-hint" data-blocked={blocked ? true : undefined}>{blocked ?? how(rail)}</p>
             <button type="button" data-testid="payment-use" className="composer-sheet-action" disabled={!!blocked || !card} onClick={() => use(selected)}>
