@@ -68,7 +68,7 @@ export const UNIT_PROJECTS = [
     tests: ["packages/sdk/test/**"],
   },
   {
-    name: "extension", cwd: "extension", args: [],
+    name: "extension", cwd: "apps/extension", args: [],
     sources: ["packages/core/src/**", "packages/browser/src/**", "packages/react/src/**", "src/**", "apps/extension/**"],
     whole: ["apps/extension/package.json", "apps/extension/vitest.config.ts", "packages/browser/vite-plugin.ts", "packages/core/src/index.ts", "vitest.shared.ts"],
     tests: ["apps/extension/test/**"],

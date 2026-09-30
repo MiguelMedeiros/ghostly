@@ -51,7 +51,7 @@ describe("the packages gate", () => {
       }
     };
     for (const dir of readdirSync(join(root, "packages"))) walk(join(root, "packages", dir));
-    walk(join(root, "extension"));
+    walk(join(root, "apps", "extension"));
     const named = code.flatMap((file) =>
       [...readFileSync(file, "utf8").matchAll(/(?:\.\.\/)+((?:website|docs)\/[^"'`\s)]*)|["'`]((?:website|docs)\/[^"'`\s)]*)/g)].map((m) => ({ file, path: m[1] ?? m[2] })),
     );

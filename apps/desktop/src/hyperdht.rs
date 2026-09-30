@@ -683,8 +683,8 @@ mod runtime_tests {
         static PROGRAM: std::sync::OnceLock<(PathBuf, PathBuf)> = std::sync::OnceLock::new();
         PROGRAM
             .get_or_init(|| {
-                let source =
-                    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../native/transports/hyperdht");
+                let source = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                    .join("../../native/transports/hyperdht");
                 let folder =
                     std::env::temp_dir().join(format!("ghostly-hyperdht-{}", std::process::id()));
                 std::fs::create_dir_all(&folder).unwrap();
