@@ -14,6 +14,7 @@ import { readForwarded } from "./forwards";
 import { readStatusCard, type StatusCard } from "./statusCards";
 import { randomBytes, toBase64Url, utf8Encode } from "./bytes";
 import { fitSignedPairedSignal, verifyPairedSignal } from "./pairedSignal";
+import { parseRtcSignal } from "./signal";
 import { PairedSession, type PairingState, type PairingCredentials, type PaymentMethodName } from "./pairedSession";
 import { DataLink, type DataLinkState } from "./datalink";
 import {
@@ -437,6 +438,13 @@ export interface GhostLinkOptions {
    * dialled at once by either side, not only by the side whose turn it is (WISP 100, "Back after a restart").
    */
   resume?: PairedTransport;
+  /**
+   * When the session that was live when this app last ran began (ms). A contact's offer made before it is the one that
+   * set that session up, or an older one, read from a relay that never got the packet clearing it: it is not answered,
+   * and a resumed link dials instead. An offer made after it (the contact noticed the session go, during a long
+   * downtime) is answered as any. Unknown (never live, a log lost): every offer is taken as before (bug hunt r7a).
+   */
+  resumeFloor?: number;
   /**
    * Open the data link on its own whenever the peer is online, instead of on
    * first use. Chat and call signaling then travel peer to peer and Pkarr is
@@ -881,10 +889,26 @@ export class GhostLink {
   /** How far the first pairing got; absent for a chat that was paired before, or has no `pairingProgress`. */
   get pairingProgress(): PairingProgress | undefined { return this.tracker?.progress; }
 
+  /**
+   * A contact's offer from before the session that was live when this app last ran began (`resumeFloor`): answering
+   * it held the resumed link on a connection the contact no longer offers, until ICE gave up (about 30 s), and its
+   * resume dial never went (bug hunt r7a). Dropped; the resumed link dials when it sees the contact.
+   */
+  private predatesLastSession(verified: string): boolean {
+    const floor = this.options.resumeFloor;
+    if (floor === undefined) return false;
+    const offer = parseRtcSignal(verified);
+    if (offer?.t !== "o" || offer.ts >= floor) return false;
+    traceLink(this.myPubKeyZ32, "stale-offer", { beforeMs: floor - offer.ts });
+    this.maybeAutoConnect(this.presence);
+    return true;
+  }
+
   private handleRtcSignal(signal: string): void {
     const options = this.options, credentials = options.pairing?.credentials;
     const verified = options.params.profile ? verifyPairedSignal(signal, options.params.peerPubKeyZ32,
       this.myPubKeyZ32, credentials?.peerKey, credentials?.requireSignedSignals) : signal;
+    if (verified && this.predatesLastSession(verified)) return;
     if (verified) void this.dataLink.handleSignal(verified);
     else if (credentials?.peerKey) {
       // The link's records are published under keys derived from the invite: anyone holding a copy of it can put a

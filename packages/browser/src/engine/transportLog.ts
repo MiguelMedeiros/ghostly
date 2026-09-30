@@ -208,6 +208,19 @@ export class TransportLog {
   }
 
   /**
+   * When the live stretch `liveAtLastRun` names began: a contact's offer from before it set that session up (or an
+   * older one) and is not answered after a restart (`GhostLinkOptions.resumeFloor`). None when the history ends off live.
+   */
+  get liveSinceAtLastRun(): number | undefined {
+    for (let i = this.history.length - 1; i >= 0; i--) {
+      const e = this.history[i];
+      if (e.kind === "live") return e.at;
+      if (e.kind === "down" || e.kind === "dht-only") return undefined;
+    }
+    return undefined;
+  }
+
+  /**
    * The choice `by` last made, as the rows tell it: the transport of its latest choice (a `chose` row, or the switch
    * that choice became), `automatic` when that was going back to the app's rule or there is none.
    */

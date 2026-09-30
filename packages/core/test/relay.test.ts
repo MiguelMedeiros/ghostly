@@ -769,3 +769,57 @@ describe("relay transport: background requests yield to a link that signals", ()
     } finally { vi.useRealTimers(); }
   });
 });
+
+describe("relay transport: a relay that held a packet back gets it later", () => {
+  // Bug hunt r7a: a packet one relay took and the other's budget refused was never put there, so that relay kept the
+  // key's older packet; an app that restarted and read it first answered a contact's offer long answered.
+  const id = createIdentity(), other = createIdentity();
+  function twoRelays() {
+    const log: { host: string; method: string; key: string; body?: Uint8Array }[] = [];
+    const relay = new RelayTransport({ freshReadMs: 0, relays: ["https://a.test", "https://relay.pkarr.org"], fetch: (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(String(input));
+      log.push({ host: url.host, method: init?.method ?? "GET", key: url.pathname.slice(1), body: init?.body as Uint8Array | undefined });
+      return init?.method === "PUT" ? new Response(null, { status: 204 }) : new Response(null, { status: 404 });
+    }) as typeof fetch });
+    return { relay, log };
+  }
+  const putsOf = (log: ReturnType<typeof twoRelays>["log"], host: string) => log.filter(r => r.method === "PUT" && r.host === host && r.key === id.pubKeyZ32);
+  /** relay.pkarr.org takes 5 requests a minute: spent on reads of another key. */
+  async function spendSmallRelay(relay: RelayTransport) {
+    for (let i = 0; i < 12; i++) await relay.resolve(other.pubKeyZ32).catch(() => {});
+  }
+
+  it("puts the newest packet there once its budget frees, once", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+    try {
+      const { relay, log } = twoRelays();
+      await spendSmallRelay(relay);
+      await relay.publish(id, [{ label: "_ts", value: "1" }]);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(putsOf(log, "a.test")).toHaveLength(1);
+      expect(putsOf(log, "relay.pkarr.org"), "held back there").toHaveLength(0);
+      await vi.advanceTimersByTimeAsync(65_000);
+      const late = putsOf(log, "relay.pkarr.org");
+      expect(late, "put there once the minute freed a request").toHaveLength(1);
+      expect(late[0].body).toEqual(putsOf(log, "a.test")[0].body);
+      await vi.advanceTimersByTimeAsync(120_000);
+      expect(putsOf(log, "relay.pkarr.org"), "and only once").toHaveLength(1);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("drops it when a newer packet of the key goes out meanwhile", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+    try {
+      const { relay, log } = twoRelays();
+      await spendSmallRelay(relay);
+      await relay.publish(id, [{ label: "_ts", value: "1" }]);
+      await vi.advanceTimersByTimeAsync(5_000);
+      // Still held back there: the newer packet replaces the one waiting, and only it goes there once the minute frees.
+      await relay.publish(id, [{ label: "_ts", value: "2" }]);
+      await vi.advanceTimersByTimeAsync(120_000);
+      const there = putsOf(log, "relay.pkarr.org");
+      expect(there).toHaveLength(1);
+      expect(there[0].body).toEqual(putsOf(log, "a.test")[1].body);
+    } finally { vi.useRealTimers(); }
+  });
+});
