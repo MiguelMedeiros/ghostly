@@ -3,6 +3,7 @@ import { usePeerAvatar, usePeerNick, useShareProfile } from "../hooks/useAvatars
 import { PeerAvatar } from "../components/Avatar";
 import { AvatarOpener } from "../components/AvatarViewer";
 import { useBackdropDismiss } from "../hooks/useDismiss";
+import { useComposition } from "../hooks/useComposition";
 import { DeleteChatDialog } from "../components/DeleteChatDialog";
 import { createPortal } from "react-dom";
 import { ChatHoldDialog } from "../components/ChatHoldDialog";
@@ -328,6 +329,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
   const peerAvatar = usePeerAvatar(params?.peerPubKeyB64);
   useChosenProfile(params?.peerPubKeyB64);
   const [isEditingLabel, setIsEditingLabel] = useState(false);
+  const labelComposition = useComposition();
   const [labelDraft, setLabelDraft] = useState("");
   /** Ways of paying are chosen per chat; the ⚡ works while this device allows at least one. */
   const chatPeer = platform?.getPeer(params?.peerPubKeyB64 ?? "");
@@ -566,7 +568,9 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
                 type="text"
                 value={labelDraft}
                 onChange={(e) => setLabelDraft(e.target.value)}
+                {...labelComposition.inputProps}
                 onKeyDown={(e) => {
+                  if (labelComposition.composing(e)) return;
                   if (e.key === "Enter") saveLabel();
                   if (e.key === "Escape") setIsEditingLabel(false);
                 }}

@@ -17,6 +17,7 @@ import { setMyAvatar, setShareProfile, useMyAvatar, useShareProfile } from "../h
 import { avatarFromFile } from "../lib/avatarImage";
 import { useAppNavigation } from "../hooks/useAppNavigation";
 import { formatAmount } from "../lib/amount";
+import { useComposition } from "../hooks/useComposition";
 
 /** Profiles change outside React (another component, another tab); re-read them when they do. */
 function useProfiles() {
@@ -44,6 +45,7 @@ export function Profile() {
   const identities = useEngineState()?.identityProofs.length ?? 0;
   const identityAttention = useIdentityAttention();
   const [name, setName] = useState(current.name);
+  const nameComposition = useComposition();
   // "Add a profile" in the account switcher lands here with the form open.
   const asked = useLocation().state as { newProfile?: boolean; backupProfile?: boolean } | null;
   const wantsNew = !!asked?.newProfile;
@@ -75,7 +77,7 @@ export function Profile() {
           <input data-testid="profile-avatar-input" type="file" accept="image/*" aria-label={myAvatar ? t("profile.changePicture") : t("profile.addPicture")} className="sr-only"
             onChange={(e) => { const file = e.target.files?.[0]; e.target.value = ""; if (file) void avatarFromFile(file).then(setMyAvatar).then(() => setError(""), (err: unknown) => setError(err instanceof Error ? err.message : String(err))); }} />
         </label>
-        <input data-testid="profile-name" aria-label={t("profile.nameLabel")} value={name} maxLength={32} onChange={(e) => setName(e.target.value)} onBlur={saveName} onKeyDown={(e) => e.key === "Enter" && (e.currentTarget as HTMLInputElement).blur()}
+        <input data-testid="profile-name" aria-label={t("profile.nameLabel")} value={name} maxLength={32} onChange={(e) => setName(e.target.value)} onBlur={saveName} {...nameComposition.inputProps} onKeyDown={(e) => !nameComposition.composing(e) && e.key === "Enter" && (e.currentTarget as HTMLInputElement).blur()}
           className="min-w-0 flex-[1_1_8rem] bg-transparent text-xl font-semibold text-text-primary rounded-lg px-2 -mx-2 py-1 border border-transparent hover:border-border focus:border-accent focus:outline-none" />
         {myAvatar && <button type="button" data-testid="profile-avatar-remove" onClick={() => void setMyAvatar(null)} className="min-h-10 text-xs text-text-muted hover:text-danger cursor-pointer shrink-0 whitespace-nowrap">{t("profile.removePicture")}</button>}
       </div>

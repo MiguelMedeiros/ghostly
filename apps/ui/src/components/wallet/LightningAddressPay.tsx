@@ -6,6 +6,7 @@ import { externalLinkProps } from "../../lib/externalLink";
 import { useI18n } from "../../contexts/I18nContext";
 import { fillNodes } from "../../lib/fillNodes";
 import { formatAmount } from "../../lib/amount";
+import { useComposition } from "../../hooks/useComposition";
 
 interface Quote { quote: string; mint: string; amount: number; feeReserve: number; source?: string }
 interface Invoice { invoice: string; note: string; successAction?: { tag: "message" | "url"; message?: string; description?: string; url?: string } }
@@ -21,6 +22,7 @@ export function LightningAddressPay({ wallet, text, via, onDone, dense }: { wall
   const [info, setInfo] = useState<LightningAddressInfo | null>(null);
   const [amount, setAmount] = useState("");
   const [comment, setComment] = useState("");
+  const composition = useComposition();
   const [invoice, setInvoice] = useState<Invoice | null>(null);
   const [quote, setQuote] = useState<Quote | null>(null);
   const [outcome, setOutcome] = useState<"paid" | "pending" | null>(null);
@@ -97,7 +99,7 @@ export function LightningAddressPay({ wallet, text, via, onDone, dense }: { wall
     if (quoted.amount !== Number(amount)) throw new Error(t("wallet.lightning.mismatch"));
     setInvoice(got); setQuote(quoted);
   }); };
-  const onEnter = (e: React.KeyboardEvent) => { if (e.key === "Enter") { e.preventDefault(); e.stopPropagation(); getInvoice(); } };
+  const onEnter = (e: React.KeyboardEvent) => { if (e.key === "Enter" && !composition.composing(e)) { e.preventDefault(); e.stopPropagation(); getInvoice(); } };
   return (
     <div className="space-y-2" data-testid="lnurl-amount-form">
       <p className={`${dense ? "text-xs" : "text-sm"} m-0`}><b>{info.text}</b>{info.description ? ` · ${info.description}` : ""}</p>
@@ -111,7 +113,7 @@ export function LightningAddressPay({ wallet, text, via, onDone, dense }: { wall
           value={amount} onChange={(e) => setAmount(e.target.value.replace(/\D/g, ""))} onKeyDown={onEnter} />
         <span className="text-xs opacity-70 shrink-0">sats</span>
       </label>
-      {info.commentAllowed > 0 && <input data-testid="lnurl-comment" className={field} placeholder={t("wallet.lightning.commentFor", { to: info.text })} maxLength={info.commentAllowed} value={comment} onChange={(e) => setComment(e.target.value)} onKeyDown={onEnter} />}
+      {info.commentAllowed > 0 && <input data-testid="lnurl-comment" className={field} placeholder={t("wallet.lightning.commentFor", { to: info.text })} maxLength={info.commentAllowed} value={comment} onChange={(e) => setComment(e.target.value)} {...composition.inputProps} onKeyDown={onEnter} />}
       <div className="flex flex-wrap gap-2">
         <button type="button" className={primary} disabled={busy || !Number(amount)} data-testid="lnurl-invoice" onClick={getInvoice}>{busy ? t("wallet.lightning.askingInvoice") : t("wallet.lightning.getInvoice")}</button>
         <button type="button" className={quiet} disabled={busy} onClick={() => { setInfo(null); setAmount(""); setComment(""); }}>{t("common.back")}</button>
