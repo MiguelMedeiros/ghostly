@@ -22,8 +22,8 @@ const scanned = [
   "docs/USDT-INTEGRATION.md",
   "docs/DHT-DELIVERY.md",
   // On GitHub only, linked from the site's footer: the site's copy rules still apply.
-  "CONTRIBUTING.md",
-  "SECURITY.md",
+  ".github/CONTRIBUTING.md",
+  ".github/SECURITY.md",
   // Carried in /llms-full.txt by llms.mjs.
   "docs/CLI.md",
   "docs/AI-AGENTS.md",

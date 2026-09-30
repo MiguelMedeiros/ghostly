@@ -6,4 +6,4 @@
 | Using it | [Features](FEATURES.md) · [Chat](CHAT.md) · [Wallets](WALLETS.md) · [Identities](IDENTITIES.md) |
 | How it works | [Architecture](ARCHITECTURE.md) · [Transports](TRANSPORTS.md) · [DHT delivery](DHT-DELIVERY.md) · [Protocol](PROTOCOL.md) · [WISPs](wisps/README.md) |
 | Building on it | [SDK](SDK.md) · [AI agents and bots](AI-AGENTS.md) · [USDT integration](USDT-INTEGRATION.md) · [OpenID Connect providers](OIDC-PROVIDERS.md) |
-| Working on it | [Contributing](../CONTRIBUTING.md) · [Testing](TESTING.md) · [Releasing](RELEASING.md) · [Security review](SECURITY-REVIEW.md) · [Security policy](../SECURITY.md) |
+| Working on it | [Contributing](../.github/CONTRIBUTING.md) · [Testing](TESTING.md) · [Releasing](RELEASING.md) · [Security review](SECURITY-REVIEW.md) · [Security policy](../.github/SECURITY.md) |

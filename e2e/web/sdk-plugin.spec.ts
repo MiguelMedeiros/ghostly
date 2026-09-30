@@ -5,7 +5,7 @@ import { choose, optionsOf, close } from "../support/select";
 const hex = (b: Uint8Array) => Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
 
 /**
- * Adapters written outside the app, against @ghostlytools/sdk alone (examples/sdk-adapter), compiled into
+ * Adapters written outside the app, against @ghostlytools/sdk alone (packages/sdk/examples/adapter), compiled into
  * this build with GHOSTLY_PLUGINS (playwright.config.ts). The gate of docs/wisps/ADAPTER-ROADMAP.md:
  * an independently authored adapter, in the pickers, doing its job. Nothing here reaches a network.
  */

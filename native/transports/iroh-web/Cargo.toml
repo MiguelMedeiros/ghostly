@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 publish = false
 
-# Built for wasm32-unknown-unknown only (scripts/build-iroh-web.mjs). Kept out
+# Built for wasm32-unknown-unknown only (tools/scripts/build-iroh-web.mjs). Kept out
 # of the root workspace so native `cargo test` never compiles it.
 [workspace]
 

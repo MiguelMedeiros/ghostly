@@ -58,7 +58,7 @@ Check catalogue uniqueness, dependency links, compatibility with deployed record
 
 ## References
 
-[Contribution workflow](../../CONTRIBUTING.md), [security reporting](../../SECURITY.md), [interoperability criteria](INTEROP.md).
+[Contribution workflow](../../.github/CONTRIBUTING.md), [security reporting](../../.github/SECURITY.md), [interoperability criteria](INTEROP.md).
 
 ## Revision log
 

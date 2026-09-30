@@ -5,7 +5,7 @@ import { createRelayedHyperEndpoint, hyperKeyPair, relayUrlProblem } from "../sr
 // covers: transport.hyperdht-relay, transport.hyperdht, transport.relayed
 
 /**
- * A browser's HyperDHT through a real dht-relay (services/hyperdht-relay) on a HyperDHT network of
+ * A browser's HyperDHT through a real dht-relay (infra/services/hyperdht-relay) on a HyperDHT network of
  * its own, against the Desktop's own endpoint (native/transports/hyperdht/endpoint.mjs) and against another
  * browser. Node's WebSocket stands in for the browser's; the real browser build runs in e2e/web.
  */
@@ -50,7 +50,7 @@ const contains = (haystack: Uint8Array[], needle: Uint8Array) => {
 };
 
 beforeAll(async () => {
-  const { startRelay } = await import("../../../services/hyperdht-relay/relay.mjs");
+  const { startRelay } = await import("../../../infra/services/hyperdht-relay/relay.mjs");
   relay = await startRelay({ testnet: 3 });
 }, 60_000);
 afterAll(async () => {
@@ -127,7 +127,7 @@ it("connects two browsers through relays, on one relay connection each or shared
 it("reaches the same contact again through one relay, and again after both pages reload", async () => {
   // The relay's HyperDHT remembers the nodes that carried the first connection to a key, so every later dial sends
   // its handshake through several at once and gets several replies: dht-relay 0.4.3 hung the dial on the second.
-  const { startRelay } = await import("../../../services/hyperdht-relay/relay.mjs");
+  const { startRelay } = await import("../../../infra/services/hyperdht-relay/relay.mjs");
   const own = await startRelay({ testnet: 3 });
   // On its own loopback network the relay's node is reachable from the start, not after dht-rpc's 20 minute check.
   expect(own.dht.firewalled).toBe(false);
@@ -170,7 +170,7 @@ it("fails to start, and so is not offered, when the relay cannot be reached", as
 });
 
 it("says it is unavailable when the relay goes away", async () => {
-  const { startRelay } = await import("../../../services/hyperdht-relay/relay.mjs");
+  const { startRelay } = await import("../../../infra/services/hyperdht-relay/relay.mjs");
   const own = await startRelay({ testnet: 2 });
   const endpoint = await createRelayedHyperEndpoint(seed(), own.url);
   const gone = vi.fn();
@@ -181,7 +181,7 @@ it("says it is unavailable when the relay goes away", async () => {
 }, 60_000);
 
 it("drops a client past its listen budget and refuses topic queries, and keeps serving the others", async () => {
-  const { startRelay } = await import("../../../services/hyperdht-relay/relay.mjs");
+  const { startRelay } = await import("../../../infra/services/hyperdht-relay/relay.mjs");
   const own = await startRelay({ testnet: 2, limits: { listens: 2 } });
   const endpoints = [await createRelayedHyperEndpoint(seed(), own.url), await createRelayedHyperEndpoint(seed(), own.url)];
   const gone = vi.fn();

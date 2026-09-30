@@ -7,7 +7,7 @@ import { tagsFor } from "./plan";
  *
  * The table is written into the spec (`npm run e2e:matrix:table`) rather than computed when it loads,
  * so the scenarios are reviewable in a diff and their tags are string literals the test map
- * (scripts/test-map.mjs) can read without running anything. table.test.ts fails when it is stale.
+ * (tools/scripts/test-map.mjs) can read without running anything. table.test.ts fails when it is stale.
  */
 export interface Scenario {
   id: string;

@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
 import { ghostlyPlatformModules, tauriAliases } from "../../packages/browser/vite-plugin.ts";
-import { maxWorkers } from "../../vitest.shared.ts";
+import { maxWorkers } from "../../tools/vitest.shared.ts";
 
 /**
  * Component and hook tests for the shared UI (`apps/ui/src/`) and `@ghostly/react`. They render the UI as the web app

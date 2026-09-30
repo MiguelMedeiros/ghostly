@@ -1,5 +1,5 @@
 {
-  "$comment": "Every user-visible feature and protocol capability of Ghostly. Tests declare what they cover with @feature:<id> (Playwright tag) or // covers: <id> (vitest, Rust). scripts/test-map.mjs checks this file against the tags. Edit by hand: one entry per line, infra, features and paths each sorted by key (npm run test:map -- --fix sorts them; the check fails otherwise), so pull requests adding entries do not conflict. \"paths\" maps source globs to the features a change there can break (ids, area.* prefixes, \"*\" for everything, [] for no e2e): npm run test:affected runs the e2e tests tagged with them, and every spec when a changed file matches no glob.",
+  "$comment": "Every user-visible feature and protocol capability of Ghostly. Tests declare what they cover with @feature:<id> (Playwright tag) or // covers: <id> (vitest, Rust). tools/scripts/test-map.mjs checks this file against the tags. Edit by hand: one entry per line, infra, features and paths each sorted by key (npm run test:map -- --fix sorts them; the check fails otherwise), so pull requests adding entries do not conflict. \"paths\" maps source globs to the features a change there can break (ids, area.* prefixes, \"*\" for everything, [] for no e2e): npm run test:affected runs the e2e tests tagged with them, and every spec when a changed file matches no glob.",
   "clients": ["web", "extension", "desktop", "cli"],
   "infra": {
     "ark-regtest": {"title":"Arkade operator + Esplora on regtest","env":"GHOSTLY_ARK_REGTEST"},
@@ -30,7 +30,7 @@
     "pkarr-relay": {"title":"Pkarr relays over HTTP (peer discovery for browsers)","fake":"e2e/support/relay.ts"},
     "pubky-testnet": {"title":"Pubky's testnet: a homeserver, its Pkarr relay and an HTTP relay (auth requests), with a test approver standing in for Ring and Passport","env":"GHOSTLY_PUBKY_HOMESERVER_URL","stack":"e2e/infra (ghostly-e2e-pubky-testnet)"},
     "pulseaudio": {"title":"A PulseAudio server with named test microphones and speakers (null sources and sinks), for the Linux Desktop's GStreamer devices","fake":"e2e/desktop/call-devices.spec.ts"},
-    "release-v0.4": {"title":"The v0.4.0 web app, built from its tag","stack":"scripts/build-compat-web.mjs"},
+    "release-v0.4": {"title":"The v0.4.0 web app, built from its tag","stack":"tools/scripts/build-compat-web.mjs"},
     "s3": {"title":"An S3-compatible bucket (MinIO)","env":"GHOSTLY_S3_ENDPOINT, GHOSTLY_S3_KEY, GHOSTLY_S3_SECRET"},
     "spark-regtest": {"title":"Breez's hosted regtest, Spark to Spark, with a funded counterpart wallet","public":"Breez regtest","env":"GHOSTLY_SPARK_REGTEST, GHOSTLY_SPARK_COUNTERPART"},
     "turn": {"title":"A TURN server for WebRTC behind NAT"},
@@ -840,8 +840,8 @@
     "apps/web/vite.config.ts": ["*"],
     "apps/web/{oidc-callback.html,src/oidcCallback.ts}": ["proofs.oidc","proofs.oidc.callback.web","proofs.oidc.callback.desktop"],
     "apps/web/{pwa.ts,nginx.conf}": ["app.pwa.*"],
-    "examples/sdk-adapter/src/**/*": ["sdk.*"],
-    "examples/sdk-adapter/{package.json,package-lock.json,tsconfig.json,vitest.config.ts}": ["sdk.*"],
+    "packages/sdk/examples/adapter/src/**/*": ["sdk.*"],
+    "packages/sdk/examples/adapter/{package.json,package-lock.json,tsconfig.json,vitest.config.ts}": ["sdk.*"],
     "packages/browser/src/backup/**/*": ["backup.*"],
     "packages/browser/src/backup/database.ts": ["backup.database-snapshot","profiles.*"],
     "packages/browser/src/backup/{s3,storage}.ts": ["storage.*","delivery.hold.*"],
@@ -984,10 +984,10 @@
     "packages/react/src/**/*": ["calls.*"],
     "packages/sdk/src/**/*": ["sdk.*"],
     "packages/sdk/{scripts/**,vite.config.ts,tsconfig.build.json}": [],
-    "services/**/*": [],
+    "infra/services/**/*": [],
     "vite.config.ts": ["desktop.*"],
-    "{**/*.test.ts,**/*.test.tsx,packages/*/test/**,apps/extension/test/**,apps/ui/src/test/**,apps/web/test/**,examples/sdk-adapter/test/**}": [],
-    "{**/.gitignore,.dockerignore,.env.example,docker-compose.yml,apps/web/Dockerfile,apps/web/nginx*.conf}": [],
+    "{**/*.test.ts,**/*.test.tsx,packages/*/test/**,apps/extension/test/**,apps/ui/src/test/**,apps/web/test/**,packages/sdk/examples/adapter/test/**}": [],
+    "{**/.gitignore,.dockerignore,.env.example,infra/docker-compose.yml,apps/web/Dockerfile,apps/web/nginx*.conf}": [],
     "{.npmrc,packages/*/package.json,apps/extension/package.json,apps/web/package.json}": ["*"],
     "{apps/desktop/**,native/transports/**,Cargo.toml,Cargo.lock}": [],
     "{apps/ui/src/components/chat/ChatTargets.tsx,apps/ui/src/hooks/useChatTargets.tsx}": ["chat.forward","app.pwa.share-target"],
@@ -1003,7 +1003,7 @@
     "{apps/ui/src/lib/replies.ts,apps/ui/src/components/chat/ReplyQuote.tsx,packages/browser/src/shared/replies.ts}": ["chat.replies","groups.replies"],
     "{docs/**,**/*.md,LICENSE,preview-screenshots.png,screenshots/**}": [],
     "{packages/browser/src/engine/edits.ts,packages/browser/src/shared/edits.ts}": ["chat.edit","chat.edit.wire","groups.edit"],
-    "{scripts/**,.github/**,apps/website/**,integrations/**}": [],
-    "{tsconfig.json,apps/ui/vite-env.d.ts,**/tsconfig*.json,eslint.config.mjs,vitest.shared.ts,apps/ui/vitest.ui.config.ts,**/vitest.config.ts,apps/ui/vite.profile-fixture.config.ts}": []
+    "{tools/scripts/**,.github/**,apps/website/**,integrations/**}": [],
+    "{tsconfig.json,apps/ui/vite-env.d.ts,**/tsconfig*.json,eslint.config.mjs,tools/vitest.shared.ts,apps/ui/vitest.ui.config.ts,**/vitest.config.ts,apps/ui/vite.profile-fixture.config.ts}": []
   }
 }

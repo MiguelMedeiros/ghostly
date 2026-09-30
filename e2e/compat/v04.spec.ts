@@ -9,7 +9,7 @@ import { copyInvite, pasteInvite } from "../support/clipboard";
  * there without leaving anything behind.
  *
  * e2e/web/compat-chat.spec.ts covers the same chat with the 0.4 side played by a prefix-less session in the
- * current app; this one runs the old app itself, built from its tag (scripts/build-compat-web.mjs).
+ * current app; this one runs the old app itself, built from its tag (tools/scripts/build-compat-web.mjs).
  */
 
 /** v0.4.0, beside the current app (playwright.compat.config.ts serves it). */

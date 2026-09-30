@@ -85,7 +85,7 @@ paths.push(
   "docs/USDT-INTEGRATION.md",
   "docs/DHT-DELIVERY.md",
 );
-// SECURITY.md and CONTRIBUTING.md stay on GitHub only: the footer links there, and their old reader
+// .github/SECURITY.md and .github/CONTRIBUTING.md stay on GitHub only: the footer links there, and their old reader
 // addresses redirect there (next.config.ts).
 // Plain text of a Markdown fragment: links keep their label, code keeps its text.
 const plain = (text) =>

@@ -42,7 +42,7 @@ export const REQUIREMENTS: Record<string, { met: () => boolean; missing: string 
   desktop: {
     // support/desktop.ts drives the bundled app through tauri-driver, which has a WebDriver to hand it to on
     // Linux (WebKitWebDriver) and Windows, never on macOS. Its HyperDHT testnet comes from the runtime the
-    // Desktop build installs (scripts/prepare-native-runtime.mjs).
+    // Desktop build installs (tools/scripts/prepare-native-runtime.mjs).
     met: () =>
       (process.platform === "linux" || process.platform === "win32") && desktopBuilt() &&
       (process.env.TAURI_DRIVER ? existsSync(process.env.TAURI_DRIVER) : onPath(process.platform === "win32" ? "where" : "which", ["tauri-driver"])) &&

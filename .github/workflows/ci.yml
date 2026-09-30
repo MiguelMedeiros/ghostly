@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    # dev: where features land (main holds what is released; see CONTRIBUTING.md).
+    # dev: where features land (main holds what is released; see .github/CONTRIBUTING.md).
     # claude/security-auto-*: the security routine's fixes; see security-autorelease.yml.
     branches: [main, master, dev, "claude/security-auto-**"]
   pull_request:
@@ -31,7 +31,7 @@ jobs:
   # ============================================
   # Which of the path-gated jobs a pull request needs
   # ============================================
-  # scripts/ci-changes.mjs decides, from the files the pull request changes (a renamed file counts by both names):
+  # tools/scripts/ci-changes.mjs decides, from the files the pull request changes (a renamed file counts by both names):
   # - Tauri: drafts get pushed often and mostly touch TypeScript, so a draft skips it unless it changed
   #   something it builds. Leaving draft (ready_for_review) runs it again.
   # - Website: runs when the pull request changes something the site reads (apps/website/, docs/, the files its
@@ -58,7 +58,7 @@ jobs:
         if: github.event_name == 'pull_request'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          sparse-checkout: scripts/ci-changes.mjs
+          sparse-checkout: tools/scripts/ci-changes.mjs
           sparse-checkout-cone-mode: false
           persist-credentials: false
 
@@ -90,7 +90,7 @@ jobs:
           fi
           files=$(tr '\t' '\n' < "$RUNNER_TEMP/files.tsv" | grep -v '^$')
           echo "$files"
-          node scripts/ci-changes.mjs --draft="$draft" <<< "$files"
+          node tools/scripts/ci-changes.mjs --draft="$draft" <<< "$files"
 
   # ============================================
   # Frontend (src, packages, extension) - React + Vite + TypeScript
@@ -120,9 +120,10 @@ jobs:
       - name: TypeScript check
         run: npm run typecheck
 
-      # changes/<slug>.md: one file per changelog entry, put into CHANGELOG.md at release (scripts/changes.mjs).
+      # docs/changelog/unreleased/<slug>.md: one file per changelog entry, put into CHANGELOG.md at release
+      # (tools/scripts/changes.mjs).
       - name: Changelog entries are well formed
-        run: node scripts/changes.mjs
+        run: node tools/scripts/changes.mjs
 
       # Runs no test: reads e2e/features.json and what every test says it covers (docs/TESTING.md). The map goes to
       # the run's summary page: it is not committed.
@@ -143,7 +144,7 @@ jobs:
           cache: "npm"
 
       # `npm test` is test:packages (the shards below) then test:app (here). A test added beside the two would run
-      # nowhere; scripts/test-shards.mjs checks test:packages is a list of workspaces it knows how to split.
+      # nowhere; tools/scripts/test-shards.mjs checks test:packages is a list of workspaces it knows how to split.
       - name: The two halves are all of npm test
         run: |
           test="$(node -p 'require("./package.json").scripts.test')"
@@ -159,7 +160,7 @@ jobs:
         run: npm run test:app
 
   # The packages' unit tests (npm run test:packages) in four shards of about the same time, each on its own runner
-  # (scripts/test-shards.mjs, by scripts/test-durations.json). One runner took them in 6.5 minutes, package after
+  # (tools/scripts/test-shards.mjs, by tools/scripts/test-durations.json). One runner took them in 6.5 minutes, package after
   # package. The CLI's two-peer story (about 3 minutes of designed waits, one test after another) has a shard to
   # itself and sets the pace.
   packages-tests:
@@ -188,9 +189,9 @@ jobs:
         run: npm ci
 
       - name: Unit tests (shard ${{ matrix.shard }} of 4)
-        run: node scripts/test-shards.mjs ${{ matrix.shard }} 4 --report-dir "$RUNNER_TEMP/test-reports"
+        run: node tools/scripts/test-shards.mjs ${{ matrix.shard }} 4 --report-dir "$RUNNER_TEMP/test-reports"
 
-      # Each file's time, for `node scripts/test-shards.mjs --record` after a test file gets slower.
+      # Each file's time, for `node tools/scripts/test-shards.mjs --record` after a test file gets slower.
       - name: Keep the test times
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -296,7 +297,7 @@ jobs:
         run: npm run build
 
       # Seconds, and it is the one thing no other job would notice: see
-      # scripts/check-desktop-bundle.mjs. The real Desktop test is in e2e.yml.
+      # tools/scripts/check-desktop-bundle.mjs. The real Desktop test is in e2e.yml.
       - name: Desktop build carries its Desktop wiring
         run: npm run check:desktop-bundle
 
@@ -307,7 +308,7 @@ jobs:
         run: npm run build:web
 
       # The adapter SDK, the way an outside author gets it: packed into a tarball, installed into
-      # examples/sdk-adapter (not a workspace member), whose adapters must pass the contract suites.
+      # packages/sdk/examples/adapter (not a workspace member), whose adapters must pass the contract suites.
       - name: SDK tarball and the example built on it
         run: npm run test:sdk-example
 
@@ -381,7 +382,7 @@ jobs:
           dpkg -s libwebkit2gtk-4.1-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev librsvg2-dev patchelf libssl-dev libgtk-3-dev libayatana-appindicator3-dev > /dev/null
 
       # tauri-build wants every bundled resource to exist. `tauri build` fills this one
-      # (scripts/prepare-native-runtime.mjs); plain cargo only needs the folder.
+      # (tools/scripts/prepare-native-runtime.mjs); plain cargo only needs the folder.
       - name: Native runtime folder
         run: mkdir -p apps/desktop/native-runtime
 
@@ -543,7 +544,7 @@ jobs:
           node-version: "22"
 
       - name: Voice recordings play in WKWebView under Desktop's CSP
-        run: node scripts/voice-media/check-wkwebview.mjs
+        run: node tools/scripts/voice-media/check-wkwebview.mjs
 
   # ============================================
   # Two Desktop apps on a Mac call and share an app (system WKWebView, the test driver)

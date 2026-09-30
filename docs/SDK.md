@@ -27,7 +27,7 @@ npm pack --workspace @ghostlytools/sdk --pack-destination /tmp/ghostly-sdk    # 
 cd your-adapter && npm install /tmp/ghostly-sdk/ghostlytools-sdk-*.tgz
 ```
 
-[`examples/sdk-adapter`](../examples/sdk-adapter) is a complete project that does exactly this: a
+[`packages/sdk/examples/adapter`](../packages/sdk/examples/adapter) is a complete project that does exactly this: a
 Lightning source and an identity proof, their contract tests, and a plugin the app loads.
 `npm run test:sdk-example` at the repository root packs the SDK, installs the tarball into the example
 and runs its checks; CI runs it on every pull request.
@@ -240,7 +240,7 @@ protocol library the apps and the CLI are built on. It follows the WISP drafts i
 
 ## Versioning and stability
 
-- The SDK carries Ghostly's version (`packages/sdk/package.json`; `scripts/bump-version.mjs` bumps it with the rest).
+- The SDK carries Ghostly's version (`packages/sdk/package.json`; `tools/scripts/bump-version.mjs` bumps it with the rest).
   Before `1.0.0`, a **minor** may change a contract and says so in `CHANGELOG.md`; a **patch** never
   does. From `1.0.0`, semver applies to everything the entry points export.
 - `SDK_API` is the contract generation (`1`). A plugin declares the one it was written against and is

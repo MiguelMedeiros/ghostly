@@ -3,7 +3,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 // @ts-expect-error: a plain script, no types
-import { formatLocale } from "../../../../../scripts/locales-sort.mjs";
+import { formatLocale } from "../../../../../tools/scripts/locales-sort.mjs";
 import english from "../../locales/en";
 import { LANGUAGES, LOCALES, appSources, flatten, literalKeys, lookup } from "./locales";
 
