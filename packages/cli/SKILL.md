@@ -80,7 +80,7 @@ Every command takes `--profile <name>` (or `GHOSTLY_PROFILE`) to pick a profile 
 
 ```bash
 ghostly daemon --detach                 # runs the profile in the background
-ghostly daemon status                   # whether a daemon runs it, and its version
+ghostly daemon status                   # whether a daemon runs it, its version and its socket
 ghostly daemon restart                  # after upgrading the CLI: the daemon runs the new code
 ghostly daemon stop
 ```

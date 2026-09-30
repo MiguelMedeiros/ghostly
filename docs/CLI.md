@@ -75,8 +75,9 @@ it cleanly: it tells contacts it is going and removes its socket.
 While it runs, every command goes through its socket. With no daemon, a command runs the profile itself and leaves
 (a one-shot), so the contact sees it come and go. Bots should run the daemon.
 
-The daemon listens on a Unix socket, `daemon.sock` in the profile's folder, owner-only (0600), never on TCP. One JSON
-object per line each way:
+The daemon listens on a Unix socket, `daemon.sock` in the profile's folder (or in `/tmp/ghostly-<hash>/` when that
+path is too long for a socket), owner-only (0600), never on TCP. `ghostly daemon status` prints its path as `socket`.
+One JSON object per line each way:
 
 ```json
 {"id":1,"method":"chat.send","params":{"chat":"alice","text":"hi","wait":"sent"}}

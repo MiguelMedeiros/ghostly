@@ -5,8 +5,10 @@
 //   ghostly daemon --detach
 //   node call-echo.mjs [greeting.wav]
 //
-// GHOSTLY_SOCKET is the daemon's socket (`ghostly daemon status` prints it). The call's audio is raw PCM on a
-// socket of its own: s16le, mono, at the call's rate, 20 ms frames from the call, any amount to it (WISP 11xx § Calls).
+// GHOSTLY_SOCKET names the daemon's socket (`ghostly daemon status` prints it; left out, the bot asks). The call's
+// audio is raw PCM on a socket of its own: s16le, mono, at the call's rate, 20 ms frames from the call, any amount to
+// it (WISP 11xx § Calls).
+import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { connect } from "node:net";
 import { createInterface } from "node:readline";
@@ -15,7 +17,9 @@ const RATE = 48000;
 const ECHO_MS = 1000;
 const greeting = process.argv[2] ? wavToPcm(readFileSync(process.argv[2]), RATE) : null;
 
-const socket = connect(process.env.GHOSTLY_SOCKET ?? `${process.env.HOME}/.ghostly/profiles/default/daemon.sock`);
+// GHOSTLY_SOCKET, else the socket `ghostly daemon status` names: where it is depends on GHOSTLY_HOME, the profile
+// (--profile or GHOSTLY_PROFILE) and the path's length, so it is asked, never guessed.
+const socket = connect(process.env.GHOSTLY_SOCKET ?? JSON.parse(execFileSync("ghostly", ["daemon", "status"], { encoding: "utf8" })).socket);
 let nextId = 1;
 const waiting = new Map();
 function call(method, params) {
