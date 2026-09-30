@@ -181,7 +181,12 @@
       "movements": "{{count}} movimentações",
       "movementsOne": "1 movimentação",
       "noFee": "sem taxa",
-      "none": "Nada ainda"
+      "none": "Nada ainda",
+      "note": {
+        "paymentFailed": "Um pagamento Lightning falhou",
+        "requestPaid": "Pedido pago via Lightning",
+        "testCoins": "Moedas de teste do mint de teste"
+      }
     },
     "intent": "{{amount}} {{unit}} · {{state}}",
     "invoiceFor": "Fatura de {{amount}}",

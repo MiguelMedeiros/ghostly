@@ -598,10 +598,12 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
               <div className="flex items-center gap-1.5 max-md:gap-1 min-w-0">
               <p
                 onClick={startEditLabel}
-                className={`text-[15px] font-normal m-0 leading-tight truncate cursor-pointer hover:text-accent transition-colors ${isAnonymous ? "text-text-muted italic" : "text-text-primary"}`}
+                className={`group/name text-[15px] font-normal m-0 leading-tight truncate cursor-pointer hover:text-accent transition-colors ${isAnonymous ? "text-text-muted italic" : "text-text-primary"}`}
                 title={t("chat.setNameHint")}
               >
-                <bdi data-testid="chat-name">{shownName}</bdi>
+                {/* With no name, the word alone: the start of their key ("Contact · 1kwb54" elsewhere) is on the line
+                    right under it, and the whole of it was cut to "Contac…" on a 320px phone. */}
+                <bdi data-testid="chat-name">{isAnonymous ? t("common.unnamedContactShort") : shownName}</bdi>
                 {!chatLabel && (
                   <svg
                     width="12"
@@ -612,7 +614,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
                     strokeWidth="2"
                     strokeLinecap="round"
                     strokeLinejoin="round"
-                    className="inline ms-1.5 text-text-muted opacity-0 group-hover:opacity-100"
+                    className="inline ms-1.5 text-text-muted opacity-0 group-hover/name:opacity-100 max-md:hidden"
                   >
                     <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
                     <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />

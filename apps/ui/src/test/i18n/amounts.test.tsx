@@ -90,6 +90,22 @@ describe("in Portuguese", () => {
     expect(screen.getByTestId("wallet-card-cashu-testnet")).not.toHaveTextContent("10,000");
   });
 
+  it("the Cashu history dates a movement in Portuguese, and says what the test coins were in it", async () => {
+    const at = Date.UTC(2026, 8, 30, 15, 15);
+    const { engine, user } = renderApp(<Wallet />, { language: "pt" });
+    engine.update({ wallet: walletView({ mints: [mint(TEST_MINT, 10_000)], balance: 10_000, history: [
+      { id: "coins", timestamp: at, mint: TEST_MINT, kind: "lightning-in", amount: 10_000, fee: 0, note: "Test coins from the test mint" },
+    ] }) });
+    await user.click(await screen.findByTestId("wallet-network-testnet"));
+    await user.click(await screen.findByTestId("wallet-history"));
+    const row = await screen.findByTestId("wallet-tx");
+    const written = new Intl.DateTimeFormat("pt-BR", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }).format(at);
+    expect(row).toHaveTextContent(written);
+    expect(row).not.toHaveTextContent(new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }).format(at));
+    expect(row).toHaveTextContent("Moedas de teste do mint de teste");
+    expect(row).not.toHaveTextContent("Test coins from the test mint");
+  });
+
   it("a wallet's decimal amount field takes the comma a phone's decimal key types", async () => {
     const Field = () => { const [value, setValue] = useState(""); return <Amount value={value} onChange={setValue} unit="USDT" decimals={6} testId="amount" />; };
     const { user } = renderApp(<Field />, { language: "pt" });

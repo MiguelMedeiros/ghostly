@@ -25,6 +25,15 @@ export function noticeSettings():"macos"|"windows"|undefined{
   if(!native()) return undefined;
   return /Mac/i.test(platform())?"macos":/Win/i.test(platform())?"windows":undefined;
 }
+/**
+ * Where notifications that were refused are allowed again, which the Settings hint names: the Desktop app's system
+ * settings (a pane of their own on macOS and Windows), the extension's own switch (Chrome asks again for an optional
+ * permission it was refused), or the browser's or device's settings for a web page.
+ */
+export function noticePlace():"macos"|"windows"|"system"|"extension"|"web"{
+  if(native()) return noticeSettings()??"system";
+  return extension()?"extension":"web";
+}
 export async function openNoticeSettings():Promise<void>{
   try{await invoke("open_notification_settings");}catch{/* nothing to open here */}
 }
