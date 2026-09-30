@@ -154,6 +154,11 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, onDone = 
   // The cards, then the chosen one turned over (deck/Flip.tsx). Without a wallet platform, only the back; with one but
   // no wallet yet, the cards' side says how to make one.
   const { side, flipped, turn, turnBack } = useCardFlip(state && wallet ? "cards" : "back");
+  /**
+   * The turned card is still (deck/Flip.tsx): until then Request and Send wait, faded out, so that a click cannot land
+   * on a card still swinging round and reach nothing (#762). A back shown without a card to turn never waits.
+   */
+  const [atRest, setAtRest] = useState(false);
   const [review, setReview] = useState<Review | null>(null);
   const [amount, setAmount] = useState("");
   const [memo, setMemo] = useState("");
@@ -182,6 +187,7 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, onDone = 
   const canSend = rail !== "lightning" && !sendUnavailable;
   const [asking, setAsking] = useState<string | null>(null);
   const blocked = card ? unavailable(card) : undefined;
+  const turning = !!card && !atRest;
   // A card that cannot be used says so on its face, briefly; its title says why in full.
   const shown = netPayCards.map((c) => { const why = blockedBy(c); return !why || !c.ready ? c : { ...c, status: t(why.contact ? "payments.composer.cardStatus.notAccepted" : "payments.composer.cardStatus.offHere") }; });
 
@@ -309,11 +315,11 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, onDone = 
           </label>
           <input className="payment-back-memo" placeholder={t("payments.composer.memo")} aria-label={t("payments.composer.memo")} maxLength={140} value={memo} onChange={(e) => setMemo(e.target.value)} />
           <p className="payment-back-hint">{blocked ?? (tooMuch ? t("payments.composer.tooMuch", { amount: holds!.toLocaleString(), unit }) : how(rail))}</p>
-          {confirmSend ? <ConfirmRealMoney what={`${value.toLocaleString()} ${unit}`} busy={busy !== null} onSend={() => void send(true)} onBack={() => setConfirmSend(false)} /> : <div className="payment-back-actions">
-            <button data-testid="payment-request" disabled={!value || busy !== null || !!asking || !!blocked} onClick={() => void request()} className="payment-back-secondary">
+          {confirmSend ? <ConfirmRealMoney what={`${value.toLocaleString()} ${unit}`} busy={busy !== null} onSend={() => void send(true)} onBack={() => setConfirmSend(false)} /> : <div className="payment-back-actions" data-turning={turning || undefined}>
+            <button data-testid="payment-request" disabled={turning || !value || busy !== null || !!asking || !!blocked} onClick={() => void request()} className="payment-back-secondary">
               {busy === "request" ? t("payments.composer.requesting") : t("payments.composer.request")}
             </button>
-            <button data-testid="payment-send" disabled={!canSend || !!blocked || !value || busy !== null || !!asking || tooMuch} onClick={() => void send()}
+            <button data-testid="payment-send" disabled={turning || !canSend || !!blocked || !value || busy !== null || !!asking || tooMuch} onClick={() => void send()}
               title={canSend ? undefined : sendUnavailable ?? t("payments.composer.sendHint")} className="payment-back-primary">
               {asking ? t("payments.composer.asking") : busy === "send" ? t("payments.composer.preparing") : t("payments.composer.send")}
             </button>
@@ -410,7 +416,7 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, onDone = 
           </>}
           </div>
         </>}
-      </> : card ? <CardFlip className="payment" flipped={flipped} tone={`wallet-card-${card.rail}`} front={<WalletCardFace card={card} tagAll />} back={back} /> : back}
+      </> : card ? <CardFlip className="payment" flipped={flipped} onSettle={setAtRest} tone={`wallet-card-${card.rail}`} front={<WalletCardFace card={card} tagAll />} back={back} /> : back}
     </ComposerSheet>
   );
 }
