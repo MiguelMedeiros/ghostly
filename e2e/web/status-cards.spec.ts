@@ -70,6 +70,7 @@ test("a bot's task card moves to done, and the Tasks button follows it", { tag: 
     await page.screenshot({ path: test.info().outputPath("phone-card.png") });
     await page.getByTestId("chat-tasks").click();
     await expect(page.getByTestId("chat-tasks-panel")).toBeVisible();
+    await page.waitForTimeout(400); // the sheet fades in: the picture after it
     await page.screenshot({ path: test.info().outputPath("phone-panel.png") });
   } finally {
     await bot.stop();
@@ -93,7 +94,14 @@ test("in a group, each bot's tasks are listed under its name", { tag: ["@feature
     await hermes.run("group", "join", code);
     await page.goto(`/#/join/${code}`);
     await expect(page.getByTestId("group-chat")).toHaveAttribute("data-status", "active", { timeout: 150_000 });
-    await expect.poll(async () => ((await hermes.run("group", "show", group)) as { status?: string }).status, { timeout: 150_000 }).toBe("active");
+    // Each bot sees all three members and an open edge to both others before it posts: a frame goes over the edges up now.
+    type Shown = { status?: string; members?: { me: boolean; online: boolean }[] };
+    const ready = async (bot: HeadlessBot) => {
+      const shown = await bot.run("group", "show", group) as Shown;
+      return shown.status === "active" && shown.members?.length === 3 && shown.members.every(m => m.me || m.online);
+    };
+    await expect.poll(() => ready(coordinator), { timeout: 150_000, intervals: [2_000] }).toBe(true);
+    await expect.poll(() => ready(hermes), { timeout: 150_000, intervals: [2_000] }).toBe(true);
 
     // Each bot posts: the coordinator two tasks, Hermes one, finished.
     await coordinator.run("task", "send", group, "--id", "relay", "--title", "Fix relay rotation", "--progress", "30", "--wait", "sent", "--timeout", "120");
@@ -108,6 +116,7 @@ test("in a group, each bot's tasks are listed under its name", { tag: ["@feature
     await expect(sections.getByTestId("chat-tasks-sender-name")).toHaveText(["Coordinator", "Hermes One"]);
     await expect(sections.first().getByTestId("chat-tasks-sender-count")).toHaveText("2 active");
     await expect(sections.nth(1).getByTestId("chat-tasks-item")).toHaveAttribute("data-card-id", "nightly");
+    await page.waitForTimeout(400);
     await page.screenshot({ path: test.info().outputPath("group-panel.png") });
 
     // The coordinator finishes its task: the badge goes down, and the card says Done.
