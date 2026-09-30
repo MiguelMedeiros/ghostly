@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { expect, test } from "@playwright/test";
-import { encodeMp3, MP3_KBPS, MP3_SAMPLE_RATE } from "../../src/lib/mp3Encode";
-import { mp3Info } from "../../src/test/voice/mp3Info";
+import { encodeMp3, MP3_KBPS, MP3_SAMPLE_RATE } from "../../apps/ui/src/lib/mp3Encode";
+import { mp3Info } from "../../apps/ui/src/test/voice/mp3Info";
 import { decodeInPage, loadFixtures, playInPage, rateInPage } from "../support/voice-media.mjs";
 
 /**

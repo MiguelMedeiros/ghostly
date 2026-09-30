@@ -11,7 +11,7 @@ import { expect, openProfilePage, say, test, type Peer } from "../support/fixtur
  * stand-in Notification keeps what it was asked to show, and the clock is Playwright's.
  */
 
-/** Notes only the message sound, and only a mention's own sound, play (src/lib/sounds.ts). */
+/** Notes only the message sound, and only a mention's own sound, play (apps/ui/src/lib/sounds.ts). */
 const MESSAGE_NOTE = 880;
 const MENTION_NOTE = 1480;
 

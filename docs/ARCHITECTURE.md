@@ -29,7 +29,7 @@ The [WISP catalogue](wisps/README.md) and [composable map](wisps/MAP.md) describ
 | [`packages/sdk`](../packages/sdk) | `@ghostlytools/sdk`: adapter contracts, fakes, contract suites, the plugin registry and the protocol library. See [SDK.md](SDK.md) |
 | [`packages/cli`](../packages/cli) | `ghostly`, the engine on Node without a screen, for bots: a daemon, a local socket API and a JSON event stream. See [WISP 11xx](wisps/11xx-headless.md) |
 | [`packages/iroh-web`](../packages/iroh-web) | Iroh compiled to wasm (`@ghostly/iroh-web`), built from `native/transports/iroh-web` |
-| [`src`](../src) | The UI every app builds (React). `src/desktop` holds Desktop's host |
+| [`apps/ui`](../apps/ui) | The UI every app builds (React). `apps/ui/src/desktop` holds Desktop's host |
 | [`apps/desktop`](../apps/desktop) | Ghostly Desktop (Tauri 2): Rust for the Mainline DHT, native Iroh, the HyperDHT sidecar, local app fetches, viewer windows, notifications, stored media streamed to the player, web push posts, and on Linux the calls' media (webrtc-rs and GStreamer, as WebKitGTK has no WebRTC) |
 | [`apps/web`](../apps/web) | The web app: the peer in a tab, and its service worker (offline shell, share target, wake-up pushes). See [WEB.md](WEB.md) |
 | [`apps/extension`](../apps/extension) | Ghostly Browser (Chromium, Manifest V3): the peer in an offscreen document. See [BROWSER.md](BROWSER.md) |
@@ -40,7 +40,7 @@ The [WISP catalogue](wisps/README.md) and [composable map](wisps/MAP.md) describ
 | [`e2e`](../e2e) | End-to-end tests. See [TESTING.md](TESTING.md) |
 | [`examples/sdk-adapter`](../examples/sdk-adapter) | A complete SDK adapter project |
 
-One peer, three hosts: the web app, the extension and Desktop all build `src/` with the same Vite plugin (`packages/browser/vite-plugin.ts`), which swaps the platform modules for ones backed by the peer. A host (`packages/browser/src/host.ts`) is the small part that differs. The headless CLI (`packages/cli`) hosts the same peer on Node, with no UI.
+One peer, three hosts: the web app, the extension and Desktop all build `apps/ui/src/` with the same Vite plugin (`packages/browser/vite-plugin.ts`), which swaps the platform modules for ones backed by the peer. A host (`packages/browser/src/host.ts`) is the small part that differs. The headless CLI (`packages/cli`) hosts the same peer on Node, with no UI.
 
 ## Layers
 

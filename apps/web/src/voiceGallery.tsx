@@ -3,11 +3,11 @@
 // `window.sent` lists what was sent; `window.trace` the pointer, click and focus events.
 import { createRoot } from "react-dom/client";
 import { MemoryRouter } from "react-router-dom";
-import { SettingsProvider } from "../../../src/contexts/SettingsContext";
-import { ThemeProvider } from "../../../src/contexts/ThemeContext";
-import { I18nProvider } from "../../../src/contexts/I18nContext";
-import { MessageInput } from "../../../src/components/MessageInput";
-import "../../../src/index.css";
+import { SettingsProvider } from "../../ui/src/contexts/SettingsContext";
+import { ThemeProvider } from "../../ui/src/contexts/ThemeContext";
+import { I18nProvider } from "../../ui/src/contexts/I18nContext";
+import { MessageInput } from "../../ui/src/components/MessageInput";
+import "../../ui/src/index.css";
 
 const params = new URLSearchParams(location.search);
 const delay = Number(params.get("delay") ?? 0);

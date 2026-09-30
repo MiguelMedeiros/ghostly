@@ -140,7 +140,7 @@ export const ease = {
 } as const;
 
 /**
- * The look the site's pictures share with the app's pairing scene (src/components/pairing/pairing-scene.css):
+ * The look the site's pictures share with the app's pairing scene (apps/ui/src/components/pairing/pairing-scene.css):
  * the eyes' ink, the network's mesh and nodes, and the strokes. CSS mirrors them as --pair-* in app/site.css.
  */
 export const PAIR = {

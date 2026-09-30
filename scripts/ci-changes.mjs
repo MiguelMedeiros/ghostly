@@ -39,12 +39,12 @@ export const WEBSITE_INPUTS = [
   "packages/core/src/invite.ts",
   "packages/core/src/pairedTransports.ts",
   // The home's wallet deck: sync-app-deck.mjs's FILES, which `sync-app-deck.mjs --check` compares.
-  "src/components/deck/",
-  "src/components/WalletCardDeck.tsx",
-  "src/components/WalletCards.tsx",
-  "src/components/walletCardTypes.ts",
-  "src/components/wallet-deck.css",
-  "src/components/wallet-cards.css",
+  "apps/ui/src/components/deck/",
+  "apps/ui/src/components/WalletCardDeck.tsx",
+  "apps/ui/src/components/WalletCards.tsx",
+  "apps/ui/src/components/walletCardTypes.ts",
+  "apps/ui/src/components/wallet-deck.css",
+  "apps/ui/src/components/wallet-cards.css",
   // The jobs themselves.
   ".github/workflows/ci.yml",
 ];

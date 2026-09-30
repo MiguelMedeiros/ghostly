@@ -12,12 +12,12 @@ import {
   toBase64Url,
   randomBytes,
 } from "@ghostly/core";
-import type { ServicesPlatform, WalletPlatform } from "../../../../src/lib/platform";
+import type { ServicesPlatform, WalletPlatform } from "../../../../apps/ui/src/lib/platform";
 import type { WalletNetwork } from "@ghostly/core";
 import { fileStore } from "../shared/idb";
 import { SMALL_FILE_BYTES, blobDigest, fileBytes, fileBytesOf } from "../shared/fileBytes";
 import { storedBlob } from "../shared/storedFiles";
-import type { FileTransferState } from "../../../../src/lib/platform";
+import type { FileTransferState } from "../../../../apps/ui/src/lib/platform";
 import { DEFAULT_HYPERDHT_RELAY } from "../shared/hyperdhtRelay";
 import { TEST_MINT, TEST_MINTS } from "../shared/mints";
 import { getBrowserHost } from "../host";

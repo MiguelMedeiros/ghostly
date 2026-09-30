@@ -9,7 +9,7 @@ import {parseArgs} from "node:util";
  *   ... connected --out <dir> [--prompt "…"] [--duration 0.8]
  *                                                    a take to audition: the mp3 and a provenance.json that would
  *                                                    go with it land in <dir>; adopt it by copying both into
- *                                                    src/assets/sounds and its prompt into the list below
+ *                                                    apps/ui/src/assets/sounds and its prompt into the list below
  */
 const {values:options,positionals:names}=parseArgs({allowPositionals:true,options:{out:{type:"string"},prompt:{type:"string"},duration:{type:"string"}}});
 const family="Original minimal interface sound for a calm private messaging app. Soft rounded glass and airy felt mallet texture, warm, clean, understated, no harsh frequencies, no hiss, no voice, no music, no recognizable brand melody. Low-intensity intimate sound, clean silence around the effect.";
@@ -55,7 +55,7 @@ const long=chosen.filter(([,,prompt])=>family.length+1+prompt.length>450);
 if(long.length) throw new Error(`Too long for the API (450 characters with the family): ${long.map(([name])=>name).join(", ")}.`);
 const key = process.env.ELEVENLABS_API_KEY || (process.env.ELEVENLABS_KEY_FILE ? (await readFile(process.env.ELEVENLABS_KEY_FILE,"utf8")).trim() : "");
 if (!key) throw new Error("Set ELEVENLABS_API_KEY or ELEVENLABS_KEY_FILE for development generation.");
-const assets=new URL("../src/assets/sounds/",import.meta.url);
+const assets=new URL("../apps/ui/src/assets/sounds/",import.meta.url);
 const folder=options.out?pathToFileURL(resolve(options.out)+"/"):assets;
 await mkdir(folder,{recursive:true});
 const made=new Map();

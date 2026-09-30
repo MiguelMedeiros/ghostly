@@ -72,7 +72,7 @@ describe.skipIf(!process.env.GHOSTLY_BENCH && import.meta.env.MODE !== "bench")(
     const { GhostlyNode } = await import("../src/engine/node");
     const { applyMessageChanges } = await import("../src/shared/messageChanges");
     const sync = await import("../src/platform/sync");
-    const storage = await import("../../../src/lib/storage");
+    const storage = await import("../../../apps/ui/src/lib/storage");
     for (const [linkId, count] of Object.entries(CHATS)) for (let i = 0; i < count; i++) await db.putMessage(chatMessage(linkId, i));
     for (let i = 0; i < 2000; i++) await db.putMessage(groupMessage(i));
     for (const chat of Object.keys(CHATS)) {

@@ -1,4 +1,4 @@
-import type { FoundUpdate } from "../../../src/lib/updates";
+import type { FoundUpdate } from "../../../apps/ui/src/lib/updates";
 import type { EngineEvent, RpcRequest, RpcResponse } from "./shared/rpc";
 import type { OidcPlatform } from "./proofs/oidc/providers";
 import type { OidcWindow } from "./proofs/oidc/flow";

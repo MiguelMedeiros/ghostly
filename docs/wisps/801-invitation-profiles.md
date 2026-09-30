@@ -109,7 +109,7 @@ A refused code MUST NOT be retried as another format: a `ghostly1` string with a
 **Older apps reading a `ghostly1…` code** (checked against the v0.4.0 source):
 
 - The core decoder of 0.4 ([invite.ts at v0.4.0](https://github.com/MiguelMedeiros/ghostly/blob/v0.4.0/packages/core/src/invite.ts)) strips everything up to `#` and a leading `chat/`, then requires exactly three `/`-separated parts. A bech32m string has no `/`: one part, refused as invalid.
-- The app's own parser of 0.4 (`parseInvite` in `src/lib/url.ts`) only takes a link whose fragment starts with `/chat/`, or three `/`-separated parts. The bare string is one part; the link `https://ghostly.tools/#ghostly1…` splits into four. Both refused.
+- The app's own parser of 0.4 (`parseInvite` in `apps/ui/src/lib/url.ts`) only takes a link whose fragment starts with `/chat/`, or three `/`-separated parts. The bare string is one part; the link `https://ghostly.tools/#ghostly1…` splits into four. Both refused.
 - The 0.4 CLI reads only its own `ghost://` URLs and refuses anything else.
 
 So an old app shows its generic invalid-code message and creates nothing: no broken compatibility chat, no half-joined record. It cannot say "update"; only apps that implement the rules above can, which is why they are written now.

@@ -1,4 +1,4 @@
-import { activeProfileId, namespaceOf, registryKey } from "../../../src/lib/profiles";
+import { activeProfileId, namespaceOf, registryKey } from "../../ui/src/lib/profiles";
 
 /**
  * Local profiles in the extension (WISP 04). Every extension page and the offscreen document share one

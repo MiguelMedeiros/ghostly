@@ -7,7 +7,7 @@ import { expect, test } from "../support/fixtures";
  * the focus, which is what Android (resizes-content) and an installed iPhone web app do to the page.
  *
  * What only the iOS Simulator shows, and these cannot: iOS 26 giving an installed app the screen less the status
- * bar, with nothing drawn in the band left at the bottom. A document 100vh tall (src/index.css) is what fixes
+ * bar, with nothing drawn in the band left at the bottom. A document 100vh tall (apps/ui/src/index.css) is what fixes
  * it there; here, that the document is as tall as the screen.
  */
 const PHONE = { width: 390, height: 844 };

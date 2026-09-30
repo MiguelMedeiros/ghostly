@@ -1,4 +1,4 @@
-// Copied from src/components/deck/motion.ts by website/scripts/sync-app-deck.mjs. Edit the app's file, then run npm run sync:app-deck.
+// Copied from apps/ui/src/components/deck/motion.ts by website/scripts/sync-app-deck.mjs. Edit the app's file, then run npm run sync:app-deck.
 /**
  * The flourish when a deck's chosen card changes (Deck.tsx): the card that comes up swings forward with a small
  * overshoot, the one it replaces tucks back into the deck, a sheen in the new card's ink sweeps across it, its ghost
@@ -80,7 +80,7 @@ export function playSwitch({ glow, incoming, outgoing, dir }: { glow: HTMLElemen
 }
 
 /**
- * What plays as the person moves to another card (the app's Interface sounds, src/lib/cues.ts): set by the app, so the
+ * What plays as the person moves to another card (the app's Interface sounds, apps/ui/src/lib/cues.ts): set by the app, so the
  * deck imports nothing of it (the website's copy of the deck has no sounds).
  */
 let switchSound: (() => void) | undefined;

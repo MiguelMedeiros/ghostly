@@ -6,7 +6,7 @@ import { LocalNostrRelay } from "../support/nostrRelay";
 import { pair } from "../support/paired";
 
 /**
- * What a message's text names gets a card under it (src/lib/parse/entities.ts): an invite joins only on a tap, by the
+ * What a message's text names gets a card under it (apps/ui/src/lib/parse/entities.ts): an invite joins only on a tap, by the
  * Join dialog's rules; a Nostr key loads only on a tap, from the reader's own relays.
  */
 

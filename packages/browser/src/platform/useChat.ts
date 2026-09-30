@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
-import type * as Desktop from "../../../../src/hooks/useChat";
+import type * as Desktop from "../../../../apps/ui/src/hooks/useChat";
 import {
   addMessage,
   deleteMessage as deleteStoredMessage,
@@ -9,9 +9,9 @@ import {
   markJoinAnnounced,
   saveSession,
   sessionLinkParams,
-} from "../../../../src/lib/storage";
+} from "../../../../apps/ui/src/lib/storage";
 import type { LinkParams, LinkPreview } from "@ghostly/core";
-import type { ChatMessage, ChatTechInfo, ConnectionStatus } from "../../../../src/lib/types";
+import type { ChatMessage, ChatTechInfo, ConnectionStatus } from "../../../../apps/ui/src/lib/types";
 import { engine } from "./engine";
 import { notifySessionsChanged, startSessionSync } from "./sync";
 

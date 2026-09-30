@@ -8,7 +8,7 @@ import { LocalRelay } from "../support/relay";
 
 /**
  * A link to another site opens in the system browser from the Desktop app on a Mac, in the real WKWebView. The app's
- * WebView drops a `target="_blank"` click, so every such link calls Rust (`open_web_link`, src/lib/externalLink.ts),
+ * WebView drops a `target="_blank"` click, so every such link calls Rust (`open_web_link`, apps/ui/src/lib/externalLink.ts),
  * which hands it to `open` (#415 for links in messages, #421 for the rest). Unit tests prove that with Tauri mocked;
  * this proves it where a WebKit-only change would break it.
  *

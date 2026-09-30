@@ -1,5 +1,5 @@
-import { receiveShare, type IncomingShare } from "../../../../src/lib/incomingShare";
-import { activeProfileId, listProfiles, switchProfile } from "../../../../src/lib/profiles";
+import { receiveShare, type IncomingShare } from "../../../ui/src/lib/incomingShare";
+import { activeProfileId, listProfiles, switchProfile } from "../../../ui/src/lib/profiles";
 import type { FromWorker, ToWorker } from "../sw/messages";
 
 /*

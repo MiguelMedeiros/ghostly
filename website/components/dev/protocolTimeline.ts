@@ -8,7 +8,7 @@
  * reads `--t` through a few generic rules in app/dev-steps.css with its own
  * times as inline custom properties, so all the times live here.
  *
- * The stages are the app's pairing scene (src/components/pairing/PairingScene.tsx:
+ * The stages are the app's pairing scene (apps/ui/src/components/pairing/PairingScene.tsx:
  * two ghosts, the DHT mesh between them, the routes packets take) mapped onto
  * two boxes: landscape 800 × 362 and portrait 340 × 330. Labels are 14 units,
  * which stays at 12px or more wherever each stage is shown.

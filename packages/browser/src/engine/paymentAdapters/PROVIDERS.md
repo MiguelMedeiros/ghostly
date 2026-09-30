@@ -75,7 +75,7 @@ exports.
    That is the only shared line you touch; keep the list in the order the picker should show.
 
 3. Only if the declared `fields` cannot express the form (a "Connect" button that asks a browser wallet, a
-   QR scanner): register a component in `src/components/wallet/providers/forms.ts` under the provider id.
+   QR scanner): register a component in `apps/ui/src/components/wallet/providers/forms.ts` under the provider id.
    It receives `ProviderFormProps` and calls `onSubmit(values)`.
 
 4. Tests: run `describeLightningProvider` / `describeOnchainProvider` from
@@ -210,7 +210,7 @@ reaches `window.webln` on each platform:
 | desktop | the Tauri webview | no: a webview runs no browser extensions |
 
 So it is `platforms: ["web"]`. It has no fields and no secret (the wallet keeps its own keys): its form is
-`WeblnForm` in `src/components/wallet/providers/`, a "Connect browser wallet" button that says whether a
+`WeblnForm` in `apps/ui/src/components/wallet/providers/`, a "Connect browser wallet" button that says whether a
 wallet is in the page. Connecting calls `enable()` (the wallet's own approval prompt), then:
 
 - **What it can do** comes from `getInfo().methods` when the wallet lists them (Alby puts every method on the

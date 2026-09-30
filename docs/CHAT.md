@@ -15,21 +15,21 @@ What a chat is, what its header, menus and composer hold, and how messages rende
 
 - One code: `ghostly1…`, bech32m, 1023 characters at most (#210, `packages/core/src/invite.ts`, [WISP 800](wisps/800-invite-join.md), [WISP 801](wisps/801-invitation-profiles.md)).
 - It carries the seed, the inviter's rendezvous key, the invite secret and the inviter's participation key. The joiner pins that key: another key cannot take the chat over.
-- Shared as `https://ghostly.tools/#ghostly1…` (the code stays in the fragment, so no server sees it) or as a QR (`src/components/InviteCard.tsx`).
-- **Join** (`src/components/JoinDialog.tsx`): paste, scan a QR, open an image, or type. It also takes group links. Bad codes get one of four messages: typo, needs an update, not a Ghostly code, damaged.
+- Shared as `https://ghostly.tools/#ghostly1…` (the code stays in the fragment, so no server sees it) or as a QR (`apps/ui/src/components/InviteCard.tsx`).
+- **Join** (`apps/ui/src/components/JoinDialog.tsx`): paste, scan a QR, open an image, or type. It also takes group links. Bad codes get one of four messages: typo, needs an update, not a Ghostly code, damaged.
 - The ghostly.tools join page takes the code out of the address before anything else runs, and offers the web app, the desktop app or a download. The site loads no analytics.
 
 ## Header
 
-Left to right (`src/pages/Chat.tsx`): avatar (click to see the picture large, #447), name (click to rename), the contact's identity marks ([IDENTITIES.md](IDENTITIES.md)), then on the right the **connection icon**, the audio and video call buttons, and ⋮.
+Left to right (`apps/ui/src/pages/Chat.tsx`): avatar (click to see the picture large, #447), name (click to rename), the contact's identity marks ([IDENTITIES.md](IDENTITIES.md)), then on the right the **connection icon**, the audio and video call buttons, and ⋮.
 
-Under the name, the contact's key, or **typing…** with three dots while the contact writes (`src/components/TypingIndicator.tsx`); **recording audio…** while the contact records a voice note (from the moment the mic opens, held or hands-free, until it is sent or thrown away); **thinking…**, or a bot's own short status such as "Transcribing your audio…", shown as plain text. The chat list row shows the same in its preview line, in the accent. It is presence, not connection, so it never goes in the icon. In paired 1:1 chats over the live session (`typing/1`, [WISP 401](wisps/401-paired-chat.md#typing)), and in private groups (below): it goes with the message, a cleared composer, 5 seconds without a keystroke, or, if the stop is lost, 6 seconds after the contact's last word. Settings → Security → **Send typing indicator** (per profile, on by default) stops telling contacts and groups; theirs still shows.
+Under the name, the contact's key, or **typing…** with three dots while the contact writes (`apps/ui/src/components/TypingIndicator.tsx`); **recording audio…** while the contact records a voice note (from the moment the mic opens, held or hands-free, until it is sent or thrown away); **thinking…**, or a bot's own short status such as "Transcribing your audio…", shown as plain text. The chat list row shows the same in its preview line, in the accent. It is presence, not connection, so it never goes in the icon. In paired 1:1 chats over the live session (`typing/1`, [WISP 401](wisps/401-paired-chat.md#typing)), and in private groups (below): it goes with the message, a cleared composer, 5 seconds without a keystroke, or, if the stop is lost, 6 seconds after the contact's last word. Settings → Security → **Send typing indicator** (per profile, on by default) stops telling contacts and groups; theirs still shows.
 
 A private group's header says who is writing, recording or thinking, in place of its subtitle: "Ana is typing…", "Ana and Bo are typing…", "3 people are typing…" (#442, [WISP 9xx Group Mesh](wisps/9xx-group-mesh.md)). It is never stored, and a message ends it. Communities do not show it yet.
 
 ### Connection icon and panel
 
-The icon is the header's only connection element (#264, #287, `src/components/ChatConnection.tsx`, `src/components/ConnectionIcon.tsx`).
+The icon is the header's only connection element (#264, #287, `apps/ui/src/components/ChatConnection.tsx`, `apps/ui/src/components/ConnectionIcon.tsx`).
 
 - States: connected (the transport's own mark), on the DHT, waiting, failure, offline. A first pairing shows its progress in the icon.
 - The short panel: one state line (with round trip when live), the transport choice, a Fallback switch, **Reconnect** when not live, and one closed **Details**.
@@ -55,21 +55,21 @@ Connection, Payments, Services and Identities are no longer in the ⋮ (#264, #2
 
 - From the chat list: the row's bell in the hover actions (#262), or the ⋮ on a phone.
 - 15 minutes, 1 hour, 1 day, or until unmuted. Groups add "Still notify me when I'm mentioned".
-- Messages still arrive, and **calls still ring**. Only the message sound, the system notification and the connected sound are silenced (`src/lib/chatMute.ts`). Local to this device.
+- Messages still arrive, and **calls still ring**. Only the message sound, the system notification and the connected sound are silenced (`apps/ui/src/lib/chatMute.ts`). Local to this device.
 
 ## Composer
 
-- **+** (`src/components/MessageInput.tsx`, `src/components/composer/ComposerMenu.tsx`), each row when it applies:
+- **+** (`apps/ui/src/components/MessageInput.tsx`, `apps/ui/src/components/composer/ComposerMenu.tsx`), each row when it applies:
   - **Payment**: pay, request, or choose what the chat accepts ([WALLETS.md](WALLETS.md#payments-in-a-chat))
   - **Identity**: share an identity (paired 1:1 chats)
   - **Shared services** (#268): apps shared with this contact. Greyed on the web app: "Needs the Ghostly extension or desktop app".
   - **Document**, **Photos & videos**, **Camera** (when the device has one)
 - **Emoji and GIFs**: one panel with two tabs. GIFs come from GifCities (Internet Archive) and are sent as a link.
-- **Voice messages** (#214, #355, #363): the mic takes the Send button's place while the text is empty, as in WhatsApp (`src/components/voice/`).
+- **Voice messages** (#214, #355, #363): the mic takes the Send button's place while the text is empty, as in WhatsApp (`apps/ui/src/components/voice/`).
   - Hold to record and release to send. Slide sideways to cancel, slide up to lock.
   - A click (or the keyboard) records hands-free at once. Locked, the mic turns into **Send**: one press sends. The row holds Discard, the timer, the live waveform and **Pause**; paused, ▶ plays back what is recorded so far and the mic reads **Resume**.
   - **Enter** sends while locked. **Esc** discards under 3 s; longer, it pauses and asks "Discard voice message?" in the bar.
-  - Recorded as Opus when the browser can; a file that `<audio>` refuses plays through a WAV fallback (`packages/core/src/voice.ts`, `src/lib/voiceDecode.ts`).
+  - Recorded as Opus when the browser can; a file that `<audio>` refuses plays through a WAV fallback (`packages/core/src/voice.ts`, `apps/ui/src/lib/voiceDecode.ts`).
   - Playing, a pill in the mic's place sets the speed: 1×, 1.5×, 2×, pitch kept, remembered on the device (#345).
 - **Paste or drop** (#349): paste a picture or files into the composer, or drop files on the chat column. A sheet shows them with an optional caption, **Send** and **Cancel**; another paste adds to it. Plain text pastes as text. Not in groups, which take no files.
 - **Secret guard** (#283): asks before a seed, a private key or a Cashu token goes out as text ([WALLETS.md](WALLETS.md#secret-guard)).
@@ -82,7 +82,7 @@ Connection, Payments, Services and Identities are no longer in the ⋮ (#264, #2
 
 ## A message's ⋮
 
-In order, each row when it applies (`src/components/MessageBubble.tsx`):
+In order, each row when it applies (`apps/ui/src/components/MessageBubble.tsx`):
 
 1. **Reply** (#347)
 2. **Edit**, for a text you sent (#351; groups #378)
@@ -97,22 +97,22 @@ In order, each row when it applies (`src/components/MessageBubble.tsx`):
 
 ## Delivery marks
 
-One mark beside the time, as in WhatsApp (#360, `src/components/chat/DeliveryStatus.tsx`): 🕓 sending or waiting for the contact, ✓ sent, ✓✓ delivered, a red ! not sent. Hover, focus or tap the mark for one line on what happens next; the engine's reason is in ⋮ → Details. The red mark is a button that sends again. A voice message or file that did not go, or stopped moving, shows a round ↻ in place of play or its icon. Group messages keep the tick from receipts.
+One mark beside the time, as in WhatsApp (#360, `apps/ui/src/components/chat/DeliveryStatus.tsx`): 🕓 sending or waiting for the contact, ✓ sent, ✓✓ delivered, a red ! not sent. Hover, focus or tap the mark for one line on what happens next; the engine's reason is in ⋮ → Details. The red mark is a button that sends again. A voice message or file that did not go, or stopped moving, shows a round ↻ in place of play or its icon. Group messages keep the tick from receipts.
 
 ## Scrolling
 
-(#384, #410, `src/hooks/useChatScroll.ts`)
+(#384, #410, `apps/ui/src/hooks/useChatScroll.ts`)
 
 - At the bottom, a new message keeps the view there. Scrolled up, nothing moves the view: pictures and videos loading above or below keep the message you read in place.
 - A **↓ N new** pill counts the contact's new messages (reactions, edits and notices do not count) and goes to the first one. Older messages that arrive late, such as a group's catch-up after a reconnect, are not new (#506). With nothing new, a plain ↓ shows once you are far from the bottom. **End** or **Ctrl/Cmd+↓** jumps to the bottom.
 - A message you send always goes to the bottom. At the bottom, a composer that grows (a long draft, a saved one) keeps the last message in view (#524).
 - A chat opens at its last message. One you left scrolled up opens where you left it, while the app runs, also when you come to a group from another group (#468).
-- A long chat shows its last 60 messages first; the older ones come in above, 150 at a time, within about a second (#475, `src/hooks/useTailFirst.ts`). A long group reads its newest 50 from the store first (#494). A chat left scrolled up is drawn whole, so it can open on that message.
+- A long chat shows its last 60 messages first; the older ones come in above, 150 at a time, within about a second (#475, `apps/ui/src/hooks/useTailFirst.ts`). A long group reads its newest 50 from the store first (#494). A chat left scrolled up is drawn whole, so it can open on that message.
 - 1:1 chats, groups and communities alike.
 
 ## How messages render
 
-The text is sent as typed. Everything below happens on display, and nothing is rendered as HTML ([src/lib/parse/README.md](../src/lib/parse/README.md)).
+The text is sent as typed. Everything below happens on display, and nothing is rendered as HTML ([apps/ui/src/lib/parse/README.md](../apps/ui/src/lib/parse/README.md)).
 
 | Feature | What | PR |
 |---|---|---|
@@ -133,7 +133,7 @@ The text is sent as typed. Everything below happens on display, and nothing is r
 
 ## Message details
 
-Double click, or the message's ⋮ → **Details** (#240, `src/components/MessageDetailsPanel.tsx`). On a phone, a long press opens the reaction bar with Details under it (#354). Sections cover identity, path, timing, wire, crypto and delivery, plus file, voice, payment, DHT, group or call when they apply. "Copy all as JSON". Keys are never shown.
+Double click, or the message's ⋮ → **Details** (#240, `apps/ui/src/components/MessageDetailsPanel.tsx`). On a phone, a long press opens the reaction bar with Details under it (#354). Sections cover identity, path, timing, wire, crypto and delivery, plus file, voice, payment, DHT, group or call when they apply. "Copy all as JSON". Keys are never shown.
 
 ## Files
 
@@ -159,7 +159,7 @@ Double click, or the message's ⋮ → **Details** (#240, `src/components/Messag
 
 ## Sounds
 
-- Settings → Notifications: the **Sounds** switch, then one switch per cue category, each with ▶ to hear it (#252, #310, `src/lib/cues.ts`):
+- Settings → Notifications: the **Sounds** switch, then one switch per cue category, each with ▶ to hear it (#252, #310, `apps/ui/src/lib/cues.ts`):
 
 | Category | Cues | Default |
 |---|---|---|
@@ -182,7 +182,7 @@ Double click, or the message's ⋮ → **Details** (#240, `src/components/Messag
 | Link | `group1/…`, works while the admin's app is open | `group2/…`, works while the admin is away |
 | Spec | [WISP 9xx Group Mesh](wisps/9xx-group-mesh.md) | [WISP 9xx Group Community](wisps/9xx-group-community.md) |
 
-- New group offers Community (default) or Private (`src/components/NewGroupDialog.tsx`). Negotiation: [WISP 900](wisps/900-group-sessions.md).
+- New group offers Community (default) or Private (`apps/ui/src/components/NewGroupDialog.tsx`). Negotiation: [WISP 900](wisps/900-group-sessions.md).
 - The admin renames the group in Members… (Rename) or with `ghostly group rename` (#438); every member sees the new name, and apps from before keep the old one. The group link can be replaced or turned off by the admin. Leaving deletes the group and its history from the device; an admin hands the role on first.
 - Group ⋮: Members…, Mute, Rotate keys (admin), Leave group, Delete from this device.
 - Hubs (private groups past 16 members, #402): the Desktop app and the CLI, which stay online, pass messages on. The admin makes a member a hub, or keeps one from being one, in Members…. A Mac holds at most 40 group connections, and past that stops being a hub (#439). As a community's hub, a Mac takes only the members its 40 leave free beside its other groups and 1:1 chats, then says it is full (#503).

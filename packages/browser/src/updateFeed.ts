@@ -1,5 +1,5 @@
 import { isNewerVersion } from "@ghostly/core";
-import type { FoundUpdate } from "../../../src/lib/updates";
+import type { FoundUpdate } from "../../../apps/ui/src/lib/updates";
 
 /**
  * What a published version file says. Nothing here is trusted: it arrives from

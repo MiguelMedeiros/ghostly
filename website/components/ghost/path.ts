@@ -1,5 +1,5 @@
 /**
- * The app's ghost (GHOST_PATH in the app's src/components/pairing/PairingScene.tsx, the same 80×100 box): a round
+ * The app's ghost (GHOST_PATH in the app's apps/ui/src/components/pairing/PairingScene.tsx, the same 80×100 box): a round
  * head and a hem cut into points like the arcade ghosts' feet, five points (the corners and three between) and four
  * notches. Every ghost on the site draws it: the story's (Ghost.tsx), the boo transition, the GhostPet, the 404 and the
  * Developers explainer. A plain module, so server and client components can both import it.

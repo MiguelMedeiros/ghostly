@@ -15,12 +15,12 @@ const inventory = {
     { id: "calls.video" },
   ],
   paths: {
-    "src/components/PaymentComposer.tsx": ["payments.chat.*"],
-    "src/components/Group*.tsx": ["groups.*"],
-    "src/App.tsx": ["*"],
+    "apps/ui/src/components/PaymentComposer.tsx": ["payments.chat.*"],
+    "apps/ui/src/components/Group*.tsx": ["groups.*"],
+    "apps/ui/src/App.tsx": ["*"],
     "packages/core/src/sshsig.ts": ["proofs.ssh.*"],
     "packages/core/src/index.ts": ["*"],
-    "src/components/CallOverlay.tsx": ["calls.video"],
+    "apps/ui/src/components/CallOverlay.tsx": ["calls.video"],
     "{docs/**,**/*.md}": [],
     "apps/desktop/**": [],
   },
@@ -68,18 +68,18 @@ describe("globs", () => {
 });
 
 describe("a UI-only change", () => {
-  const p = plan({ changed: changed("src/components/PaymentComposer.tsx"), inventory, e2eFiles });
+  const p = plan({ changed: changed("apps/ui/src/components/PaymentComposer.tsx"), inventory, e2eFiles });
 
   it("runs vitest related where the UI is imported, and nowhere else", () => {
     const unit = byName(p.unit);
     expect(unit.ui.mode).toBe("related");
-    expect(unit.ui.files).toEqual(["src/components/PaymentComposer.tsx"]);
+    expect(unit.ui.files).toEqual(["apps/ui/src/components/PaymentComposer.tsx"]);
     expect(unit.extension.mode).toBe("related");
     for (const name of ["core", "browser", "sdk", "matrix", "scripts"]) expect(unit[name].mode).toBe("skip");
   });
 
-  it("lints the file and typechecks what compiles src/, not the packages under it", () => {
-    expect(p.lint).toMatchObject({ mode: "files", files: ["src/components/PaymentComposer.tsx"] });
+  it("lints the file and typechecks what compiles apps/ui/src/, not the packages under it", () => {
+    expect(p.lint).toMatchObject({ mode: "files", files: ["apps/ui/src/components/PaymentComposer.tsx"] });
     const tc = byName(p.typecheck);
     for (const name of ["ui (root tsconfig)", "extension", "extension tests", "web"]) expect(tc[name].mode).toBe("run");
     for (const name of ["core", "browser", "sdk", "e2e"]) expect(tc[name].mode).toBe("skip");
@@ -114,11 +114,12 @@ describe("a core change", () => {
     "packages/browser/test/paymentMock.test.ts": `const { X } = await import("@ghostly/core");`,
     "packages/browser/test/typesOnly.test.ts": `type C = typeof import("@ghostly/core");`,
     "packages/sdk/src/core.ts": `export * from "@ghostly/core";`,
-    "src/components/GroupMembersDialog.tsx": `import { GroupSession } from "@ghostly/core";`,
+    "apps/ui/src/components/GroupMembersDialog.tsx": `import { GroupSession } from "@ghostly/core";`,
   };
 
   it("follows the barrel to the importers of the changed module's names, and core modules importing it", () => {
     expect(throughCoreBarrel(["packages/core/src/sshsig.ts"], codeFiles)).toEqual([
+      "apps/ui/src/components/GroupMembersDialog.tsx",
       "packages/browser/src/engine/groups.ts", // GroupSession: groupSession.ts imports sshsig.ts
       "packages/browser/src/platform/crypto.ts", // import * as core
       "packages/browser/src/proofs/ssh.ts",
@@ -126,7 +127,6 @@ describe("a core change", () => {
       "packages/core/test/barrel.test.ts", // GroupSession through "../src"
       "packages/core/test/sshsig.test.ts",
       "packages/sdk/src/core.ts", // export *
-      "src/components/GroupMembersDialog.tsx",
     ]);
   });
 
@@ -143,7 +143,7 @@ describe("a core change", () => {
     const unit = byName(p.unit);
     expect(unit.core.files).toEqual(["packages/core/test/barrel.test.ts", "packages/core/test/sshsig.test.ts"]);
     expect(unit.browser.files).toEqual(["packages/browser/src/engine/groups.ts", "packages/browser/src/platform/crypto.ts", "packages/browser/src/proofs/ssh.ts", "packages/browser/test/paymentMock.test.ts"]);
-    expect(unit.ui.files).toContain("src/components/GroupMembersDialog.tsx");
+    expect(unit.ui.files).toContain("apps/ui/src/components/GroupMembersDialog.tsx");
     expect(unit.sdk.files).toContain("packages/sdk/src/core.ts");
     expect(Object.values(unit).flatMap((u) => u.files ?? [])).not.toContain("packages/core/src/sshsig.ts");
     // Every package that imports core is typechecked: an API change breaks the importers, not core.
@@ -158,38 +158,38 @@ describe("a core change", () => {
 });
 
 describe("tests that import across workspaces", () => {
-  // packages/browser/test/chatConnection.test.ts imports the app's component by relative path: src/ is not among
+  // packages/browser/test/chatConnection.test.ts imports the app's component by relative path: apps/ui/src/ is not among
   // the browser project's sources, so a change to it used to skip these tests (CI caught the break in #287).
   const codeFiles: Record<string, string> = {
-    "src/components/ChatConnection.tsx": `import { useI18n } from "../contexts/I18nContext";\nimport { icon } from "./icons/index.js";`,
-    "src/components/icons/index.ts": `export const icon = 1;`,
-    "src/contexts/I18nContext.tsx": `import en from "../i18n/en.json";`,
-    "src/components/Other.tsx": `export const other = 1;`,
-    "packages/browser/test/chatConnection.test.ts": `import { ChatConnection } from "../../../src/components/ChatConnection";\nimport { I18nProvider } from "../../../src/contexts/I18nContext";`,
-    "packages/browser/test/storage.test.ts": `import { save } from "../../../src/lib/storage";`,
+    "apps/ui/src/components/ChatConnection.tsx": `import { useI18n } from "../contexts/I18nContext";\nimport { icon } from "./icons/index.js";`,
+    "apps/ui/src/components/icons/index.ts": `export const icon = 1;`,
+    "apps/ui/src/contexts/I18nContext.tsx": `import en from "../i18n/en.json";`,
+    "apps/ui/src/components/Other.tsx": `export const other = 1;`,
+    "packages/browser/test/chatConnection.test.ts": `import { ChatConnection } from "../../../apps/ui/src/components/ChatConnection";\nimport { I18nProvider } from "../../../apps/ui/src/contexts/I18nContext";`,
+    "packages/browser/test/storage.test.ts": `import { save } from "../../../apps/ui/src/lib/storage";`,
     "packages/browser/test/helpers/fake.ts": `export const fake = 1;`,
     "e2e/matrix/blocks.ts": `import { fake } from "../../packages/browser/test/helpers/fake";`,
     "e2e/matrix/table.test.ts": `import { rows } from "./matrix";`,
     "e2e/matrix/rails.test.ts": `import { blocks } from "./blocks.ts";`,
   };
 
-  it("a change to src/components/ChatConnection.tsx runs packages/browser/test/chatConnection.test.ts", () => {
-    const p = plan({ changed: changed("src/components/ChatConnection.tsx"), inventory, e2eFiles, codeFiles });
+  it("a change to apps/ui/src/components/ChatConnection.tsx runs packages/browser/test/chatConnection.test.ts", () => {
+    const p = plan({ changed: changed("apps/ui/src/components/ChatConnection.tsx"), inventory, e2eFiles, codeFiles });
     const unit = byName(p.unit);
     expect(unit.browser).toMatchObject({ mode: "related", files: ["packages/browser/test/chatConnection.test.ts"] });
     expect(unit.browser.reason).toContain("1 test file(s) importing the change by relative path");
-    // Projects whose sources hold src/ still get the changed file itself.
-    expect(unit.ui.files).toEqual(["src/components/ChatConnection.tsx"]);
+    // Projects whose sources hold apps/ui/src/ still get the changed file itself.
+    expect(unit.ui.files).toEqual(["apps/ui/src/components/ChatConnection.tsx"]);
     expect(unit.core.mode).toBe("skip");
     expect(unit.matrix.mode).toBe("skip");
   });
 
   it("follows the imports through other files, index files, .js specifiers and non-code files", () => {
-    for (const file of ["src/contexts/I18nContext.tsx", "src/components/icons/index.ts", "src/i18n/en.json", "-src/components/icons/index.ts"]) {
+    for (const file of ["apps/ui/src/contexts/I18nContext.tsx", "apps/ui/src/components/icons/index.ts", "apps/ui/src/i18n/en.json", "-apps/ui/src/components/icons/index.ts"]) {
       const p = plan({ changed: changed(file), inventory, e2eFiles, codeFiles });
       expect(byName(p.unit).browser.files, file).toEqual(["packages/browser/test/chatConnection.test.ts"]);
     }
-    expect(byName(plan({ changed: changed("src/components/Other.tsx"), inventory, e2eFiles, codeFiles }).unit).browser.mode).toBe("skip");
+    expect(byName(plan({ changed: changed("apps/ui/src/components/Other.tsx"), inventory, e2eFiles, codeFiles }).unit).browser.mode).toBe("skip");
   });
 
   it("reaches another project's tests through its helpers", () => {
@@ -199,13 +199,13 @@ describe("tests that import across workspaces", () => {
 
   it("keeps to the test files the project runs", () => {
     expect(testsReaching(["packages/browser/test/helpers/fake.ts"], codeFiles, ["packages/browser/test/**"])).toEqual([]);
-    expect(testsReaching(["src/components/ChatConnection.tsx"], codeFiles, ["e2e/matrix/*"])).toEqual([]);
+    expect(testsReaching(["apps/ui/src/components/ChatConnection.tsx"], codeFiles, ["e2e/matrix/*"])).toEqual([]);
   });
 
   it("finds the real chatConnection test from the real component", () => {
     const root = join(import.meta.dirname, "..", "..");
-    const real = Object.fromEntries(["packages/browser/test/chatConnection.test.ts", "src/components/ChatConnection.tsx"].map((f) => [f, readFileSync(join(root, f), "utf8")]));
-    expect(testsReaching(["src/components/ChatConnection.tsx"], real, ["packages/browser/test/**"])).toEqual(["packages/browser/test/chatConnection.test.ts"]);
+    const real = Object.fromEntries(["packages/browser/test/chatConnection.test.ts", "apps/ui/src/components/ChatConnection.tsx"].map((f) => [f, readFileSync(join(root, f), "utf8")]));
+    expect(testsReaching(["apps/ui/src/components/ChatConnection.tsx"], real, ["packages/browser/test/**"])).toEqual(["packages/browser/test/chatConnection.test.ts"]);
   });
 });
 
@@ -254,7 +254,7 @@ describe("the CLI", () => {
     expect(cli(["packages/browser/src/engine/community.ts"]).reason).toContain("the built CLI");
     expect(cli(["packages/core/src/bytes.ts"]).files).toContain(RUNNER);
     expect(cli(["packages/browser/src/components/Picker.tsx"]).files).not.toContain(RUNNER);
-    expect(cli(["src/components/Other.tsx"]).mode).toBe("skip");
+    expect(cli(["apps/ui/src/components/Other.tsx"]).mode).toBe("skip");
   });
 
   it("without the sources, a change under what the binary can bundle runs its tests", () => {
@@ -309,18 +309,18 @@ describe("fallbacks", () => {
   });
 
   it("a file with no paths entry runs every spec, and says which file", () => {
-    const p = plan({ changed: changed("src/components/NewThing.tsx"), inventory, e2eFiles });
+    const p = plan({ changed: changed("apps/ui/src/components/NewThing.tsx"), inventory, e2eFiles });
     expect(p.e2e.mode).toBe("whole");
-    expect(p.e2e.reasons).toEqual([expect.stringContaining("src/components/NewThing.tsx has no entry")]);
+    expect(p.e2e.reasons).toEqual([expect.stringContaining("apps/ui/src/components/NewThing.tsx has no entry")]);
   });
 
   it('a file mapped to "*" runs every spec', () => {
-    expect(plan({ changed: changed("src/App.tsx"), inventory, e2eFiles }).e2e.mode).toBe("whole");
+    expect(plan({ changed: changed("apps/ui/src/App.tsx"), inventory, e2eFiles }).e2e.mode).toBe("whole");
   });
 
   it("a config no import graph sees runs its project whole", () => {
-    expect(byName(plan({ changed: changed("vitest.ui.config.ts"), inventory, e2eFiles }).unit).ui.mode).toBe("whole");
-    expect(byName(plan({ changed: changed("src/test/setup.ts"), inventory, e2eFiles }).unit).ui.mode).toBe("whole");
+    expect(byName(plan({ changed: changed("apps/ui/vitest.ui.config.ts"), inventory, e2eFiles }).unit).ui.mode).toBe("whole");
+    expect(byName(plan({ changed: changed("apps/ui/src/test/setup.ts"), inventory, e2eFiles }).unit).ui.mode).toBe("whole");
     expect(plan({ changed: changed("eslint.config.mjs"), inventory, e2eFiles }).lint.mode).toBe("whole");
     expect(plan({ changed: changed("tsconfig.json"), inventory, e2eFiles }).typecheck.every((t) => t.mode === "run")).toBe(true);
     expect(plan({ changed: changed("e2e/playwright.config.ts"), inventory, e2eFiles }).e2e.mode).toBe("whole");
@@ -341,7 +341,7 @@ describe("e2e files", () => {
   });
 
   it("the matrix's specs (a config of their own) are never picked", () => {
-    expect(plan({ changed: changed("src/components/PaymentComposer.tsx"), inventory, e2eFiles }).e2e.taggedSpecs).not.toContain("e2e/matrix/matrix.spec.ts");
+    expect(plan({ changed: changed("apps/ui/src/components/PaymentComposer.tsx"), inventory, e2eFiles }).e2e.taggedSpecs).not.toContain("e2e/matrix/matrix.spec.ts");
     expect(plan({ changed: changed("e2e/matrix/matrix.spec.ts"), inventory, e2eFiles }).e2e).toMatchObject({ mode: "skip", none: ["e2e/matrix/matrix.spec.ts"] });
     expect(specsImporting("e2e/support/paired.ts", e2eFiles)).toContain("e2e/matrix/matrix.spec.ts");
     expect(plan({ changed: changed("e2e/support/paired.ts"), inventory, e2eFiles }).e2e.wholeSpecs).toEqual(["e2e/web/chat-payments.spec.ts", "e2e/web/groups.spec.ts"]);

@@ -5,13 +5,13 @@
  * `vite.config.ts` applies `ghostlyPlatformModules()` to the Desktop build too,
  * so every module the plugin lists is replaced by a browser stand-in in the app
  * that ships — silently, with nothing at build time to say so. That is how the
- * Desktop updater once shipped dead: a Desktop-only module in `src/lib/` was on
- * the list, Desktop got the stand-in, and only a grep through `dist/` found it.
+ * Desktop updater once shipped dead: a Desktop-only module in `apps/ui/src/lib/` was on
+ * the list, Desktop got the stand-in, and only a grep through `apps/ui/dist/` found it.
  *
  * Two things are checked, both read from the source rather than kept by hand:
  *
- *  1. What Desktop's own modules ask of Rust is still in `dist/`. `src/main.tsx`
- *     and `src/desktop/` are never swapped, so anything they invoke has to be
+ *  1. What Desktop's own modules ask of Rust is still in `apps/ui/dist/`. `apps/ui/src/main.tsx`
+ *     and `apps/ui/src/desktop/` are never swapped, so anything they invoke has to be
  *     in the built app.
  *  2. Every module on the swap list is one someone decided Desktop can live
  *     without. Adding a module to `PLATFORM_MODULES` fails here until its
@@ -31,13 +31,13 @@ import { fileURLToPath } from "node:url";
 /**
  * Why Desktop is content with the browser stand-in for each swapped module.
  * A module that Desktop actually needs does not belong here: it belongs with
- * its host in `src/desktop/`, reached through `BrowserHost`.
+ * its host in `apps/ui/src/desktop/`, reached through `BrowserHost`.
  */
 const SWAPPED_ON_PURPOSE = {
-  "lib/pkarr.ts": "Desktop runs the shared peer, which reaches Pkarr through src/desktop/host.ts instead.",
+  "lib/pkarr.ts": "Desktop runs the shared peer, which reaches Pkarr through apps/ui/src/desktop/host.ts instead.",
   "lib/crypto.ts": "Desktop runs the shared peer: the same WebCrypto as the browsers, not the Rust commands.",
   "lib/platform.ts": "The services platform is the browser one on Desktop too, backed by the Desktop host.",
-  "lib/updates.ts": "Declarations only; Desktop's updater is src/desktop/updates.ts, reached through BrowserHost.",
+  "lib/updates.ts": "Declarations only; Desktop's updater is apps/ui/src/desktop/updates.ts, reached through BrowserHost.",
   "hooks/useChat.ts": "Chat belongs to the shared peer on every client, Desktop included.",
   "hooks/useBackgroundPoller.ts": "The shared peer polls for itself; Desktop has nothing to add.",
 };
@@ -64,18 +64,18 @@ if (swapped.length === 0) {
 for (const path of swapped) {
   if (path in SWAPPED_ON_PURPOSE) continue;
   problems.push(
-    `src/${path} is swapped for a browser stand-in, on Desktop as well.\n` +
+    `apps/ui/src/${path} is swapped for a browser stand-in, on Desktop as well.\n` +
       `      The Desktop app will run the stand-in, not this module. If that is fine, say why in\n` +
       `      SWAPPED_ON_PURPOSE in ${relative(root, fileURLToPath(import.meta.url))}. If it is not,\n` +
-      "      the module belongs with its host in src/desktop/, reached through BrowserHost.",
+      "      the module belongs with its host in apps/ui/src/desktop/, reached through BrowserHost.",
   );
 }
 for (const path of Object.keys(SWAPPED_ON_PURPOSE)) {
-  if (!swapped.includes(path)) problems.push(`src/${path} is no longer swapped — drop it from SWAPPED_ON_PURPOSE.`);
+  if (!swapped.includes(path)) problems.push(`apps/ui/src/${path} is no longer swapped — drop it from SWAPPED_ON_PURPOSE.`);
 }
 
 // 2. What Desktop's own modules ask of Rust survived into the built app.
-const own = [join(root, "src/main.tsx"), ...walk(join(root, "src/desktop"))].filter((path) => /\.tsx?$/.test(path));
+const own = [join(root, "apps/ui/src/main.tsx"), ...walk(join(root, "apps/ui/src/desktop"))].filter((path) => /\.tsx?$/.test(path));
 const wanted = new Map();
 for (const path of own) {
   const source = readFileSync(path, "utf8");
@@ -87,7 +87,7 @@ for (const path of own) {
 }
 if (wanted.size === 0) problems.push("Found nothing Desktop asks of Rust — has this check gone stale?");
 
-const dist = join(root, "dist");
+const dist = join(root, "apps/ui/dist");
 const bundle = existsSync(dist)
   ? walk(dist)
       .filter((path) => path.endsWith(".js"))
@@ -95,7 +95,7 @@ const bundle = existsSync(dist)
       .join("\n")
   : "";
 if (bundle.length === 0) {
-  problems.push("No JavaScript in dist/. Run `npm run build` first.");
+  problems.push("No JavaScript in apps/ui/dist/. Run `npm run build` first.");
 } else {
   for (const [needle, source] of wanted) {
     if (!bundle.includes(needle)) problems.push(`${JSON.stringify(needle)}, from ${source}, is not in the built app.`);

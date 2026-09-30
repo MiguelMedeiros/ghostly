@@ -43,7 +43,7 @@
   --stagger: 0.06s;
   --ease-burst: cubic-bezier(0.2, 0.8, 0.3, 1);
   --ease-hop: cubic-bezier(0.3, 1.6, 0.5, 1);
-  /* The app's pairing scene's look (src/components/pairing/pairing-scene.css), shared by the site's pictures:
+  /* The app's pairing scene's look (apps/ui/src/components/pairing/pairing-scene.css), shared by the site's pictures:
      mirror PAIR in lib/motion.ts. */
   --pair-eye: #0b141a;
   --pair-mesh: #2b3b52;

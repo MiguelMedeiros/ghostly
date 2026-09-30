@@ -8,19 +8,19 @@ const root = resolve(import.meta.dirname, "../..");
 
 describe("the website gate", () => {
   it("covers every app file the deck check compares", () => {
-    for (const file of DECK) expect(covers(WEBSITE_INPUTS, `src/components/${file}`), `src/components/${file}`).toBe(true);
+    for (const file of DECK) expect(covers(WEBSITE_INPUTS, `apps/ui/src/components/${file}`), `apps/ui/src/components/${file}`).toBe(true);
   });
 
   it("covers every repository file and folder the site's scripts name", () => {
     // The site's own scripts (not capture/, a manual tool) read the repository by root-relative literals:
     // sync-references.mjs's documents, folder and excerpts, check-dashes.mjs's list. Any that names an existing file
-    // or folder outside website/ is an input. The deck's folder, src/components, is read file by file (above).
+    // or folder outside website/ is an input. The deck's folder, apps/ui/src/components, is read file by file (above).
     const dir = join(root, "website/scripts");
     const named = readdirSync(dir)
       .filter((f) => f.endsWith(".mjs"))
       .flatMap((f) => [...readFileSync(join(dir, f), "utf8").matchAll(/["'`]([\w.-]+(?:\/[\w.-]+)*)["'`]/g)].map((m) => m[1]))
       .filter((p) => p.includes("/") || p.endsWith(".md"))
-      .filter((p) => !p.startsWith(".") && !p.startsWith("website/") && p !== "src/components");
+      .filter((p) => !p.startsWith(".") && !p.startsWith("website/") && p !== "apps/ui/src/components");
     const kind = (p: string) => {
       try {
         return statSync(join(root, p)).isDirectory() ? "folder" : "file";
@@ -70,7 +70,7 @@ describe("plan", () => {
   const draft = { draft: true };
 
   it("an app change skips the website and runs the Desktop jobs", () => {
-    expect(plan(["src/components/ChatRow.tsx", "packages/browser/src/engine.ts"], ready)).toMatchObject({ rust: true, website: false, app: true });
+    expect(plan(["apps/ui/src/components/ChatRow.tsx", "packages/browser/src/engine.ts"], ready)).toMatchObject({ rust: true, website: false, app: true });
   });
 
   it("a site change runs the website and skips the Desktop jobs", () => {
@@ -83,7 +83,7 @@ describe("plan", () => {
   });
 
   it("an app file the site copies or quotes runs both", () => {
-    expect(plan(["src/components/deck/Deck.tsx"], ready)).toMatchObject({ website: true, app: true });
+    expect(plan(["apps/ui/src/components/deck/Deck.tsx"], ready)).toMatchObject({ website: true, app: true });
     expect(plan(["packages/core/src/invite.ts"], ready)).toMatchObject({ website: true, app: true });
   });
 
@@ -92,8 +92,8 @@ describe("plan", () => {
   });
 
   it("only a draft skips the Rust jobs", () => {
-    expect(plan(["src/App.tsx"], draft).rust).toBe(false);
-    expect(plan(["src/App.tsx"], ready).rust).toBe(true);
+    expect(plan(["apps/ui/src/App.tsx"], draft).rust).toBe(false);
+    expect(plan(["apps/ui/src/App.tsx"], ready).rust).toBe(true);
     expect(plan(["apps/desktop/src/lib.rs"], draft).rust).toBe(true);
     expect(plan(["Cargo.lock"], draft).rust).toBe(true);
   });

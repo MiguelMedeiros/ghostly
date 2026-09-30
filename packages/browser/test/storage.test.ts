@@ -12,9 +12,9 @@ import {
   markJoinAnnounced,
   markSessionAsRead,
   peerDisplayName,
-} from "../../../src/lib/storage";
-import type { ChatMessage } from "../../../src/lib/types";
-import { clearAllData } from "../../../src/lib/settings";
+} from "../../../apps/ui/src/lib/storage";
+import type { ChatMessage } from "../../../apps/ui/src/lib/types";
+import { clearAllData } from "../../../apps/ui/src/lib/settings";
 // covers: chat.paired.delete-message, chats.list.delete, app.clear-data, core.text-limits
 
 /** Enough of the Web Storage API for the session store; node has none. */

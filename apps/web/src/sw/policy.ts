@@ -1,5 +1,5 @@
 /**
- * What the service worker does with a request. Pure, so it is tested without a worker (src/test/pwa/).
+ * What the service worker does with a request. Pure, so it is tested without a worker (apps/ui/src/test/pwa/).
  *
  * An allowlist: the worker answers from its cache only what the build made (the app shell and the hashed
  * files under `/assets/`), and the share target's POST. Everything else goes to the network as if there were

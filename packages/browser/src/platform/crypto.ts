@@ -1,7 +1,7 @@
 import * as core from "@ghostly/core";
-import type * as Desktop from "../../../../src/lib/crypto";
+import type * as Desktop from "../../../../apps/ui/src/lib/crypto";
 
-/** Stands in for Desktop's `src/lib/crypto.ts` (Rust) with the same secretbox in TypeScript. */
+/** Stands in for Desktop's `apps/ui/src/lib/crypto.ts` (Rust) with the same secretbox in TypeScript. */
 export const generateEncryptionKey: typeof Desktop.generateEncryptionKey = async () =>
   core.toBase64Url(core.generateEncryptionKey());
 

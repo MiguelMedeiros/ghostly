@@ -45,7 +45,7 @@ test("two people chat: relay discovery, then peer-to-peer messages", { tag: ["@f
   await expect(chat(alice).locator(".msg-meta svg").last().locator("path")).toHaveCount(2);
 
   // What the DHT cannot carry fits once the data link is up. Words, not one unbroken run: a run of 80+ key-like
-  // characters folds to one line with Show all (the blob in src/lib/parse/blob.ts), and its text is split there.
+  // characters folds to one line with Show all (the blob in apps/ui/src/lib/parse/blob.ts), and its text is split there.
   const long = `long ${"👻".repeat(20)} ${"boo ".repeat(375)}end`;
   await say(alice, long);
   await expect(chat(bob).getByText(long)).toBeVisible();

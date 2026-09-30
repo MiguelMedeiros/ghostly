@@ -82,7 +82,7 @@ This reduces forged ICE/DTLS signaling and timestamp poisoning by a copied-invit
 ## Source and validation
 
 - [Session state machine](../../packages/core/src/pairedSession.ts), [data-link binding](../../packages/core/src/datalink.ts), [application gate](../../packages/core/src/ghostlink.ts).
-- [Durable admission/message storage](../../packages/browser/src/engine/db.ts), [shared engine](../../packages/browser/src/engine/node.ts), [confirmation UI](../../src/components/ChatConnection.tsx) (the connection panel's Details; the banner went in #264).
+- [Durable admission/message storage](../../packages/browser/src/engine/db.ts), [shared engine](../../packages/browser/src/engine/node.ts), [confirmation UI](../../apps/ui/src/components/ChatConnection.tsx) (the connection panel's Details; the banner went in #264).
 - [Session tests](../../packages/core/test/pairedSession.test.ts), [invite tests](../../packages/core/test/pairedInvite.test.ts), [policy boundary test](../../packages/core/test/pairedLink.test.ts), [storage races/deduplication](../../packages/browser/test/pairedStorage.test.ts).
 
 Cross-platform clients share code and are not two independent implementations of this profile.

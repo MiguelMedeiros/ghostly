@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { stackLayout, stackStrips, stepCard, stripAt } from '../../../src/components/deck/stack';
+import { stackLayout, stackStrips, stepCard, stripAt } from '../../../apps/ui/src/components/deck/stack';
 // covers: wallet.deck, payments.chat.cards
 
 describe('the wallet stack', () => {

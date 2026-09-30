@@ -6,7 +6,7 @@
 | Status | Draft |
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [01](01-ghost-core.md), [02](02-peer-keys.md), [04](04-profiles.md), [05](05-backups.md), [300](300-peer-proofs.md) |
-| Implementation | Experimental, web, desktop and extension: `packages/core/src/didDht.ts`, `packages/browser/src/engine/did.ts`, `src/components/identities/PublicDid.tsx`, Desktop `publish_signed_packet` |
+| Implementation | Experimental, web, desktop and extension: `packages/core/src/didDht.ts`, `packages/browser/src/engine/did.ts`, `apps/ui/src/components/identities/PublicDid.tsx`, Desktop `publish_signed_packet` |
 | Summary | Every profile gets a public identifier of its own, a did:dht that any resolver reads from the DHT, with no Ghostly server. |
 | Availability | Available |
 | Notes | Experimental. Its own key, never a chat's; it lists an identity only when you switch it on. Web, desktop and extension. Number not yet assigned. |
@@ -115,7 +115,7 @@ A client MUST publish a profile's DID only under that profile's DID key, never u
 - The specification's official vectors 1 to 3 (`decentralized-identity/did-dht` commit `3fa9536`), both ways, plus strict-parsing refusals and resolution: `packages/core/test/didDht.test.ts`.
 - Interoperability with `@web5/dids` 1.2.0 both ways (Ghostly publishes and web5 resolves; web5 publishes and Ghostly resolves), through a relay in the test process and, with `GHOSTLY_PKARR_RELAY`, the `pkarr-relay` 2.0.2 binary: `packages/browser/test/didDhtInterop.test.ts`.
 - Desktop publishes a packet the TypeScript peer signed, byte for byte: `apps/desktop/src/commands.rs`.
-- Engine (key, publish, hourly refresh, listing, removal, expiry, offline, failure): `packages/browser/test/profileDid.test.ts`; UI: `src/test/identities/publicDid.test.tsx`; end to end, the web app publishes and `@web5/dids` resolves the key alone, then a listed Nostr identity, then without it: `e2e/web/did-dht.spec.ts`.
+- Engine (key, publish, hourly refresh, listing, removal, expiry, offline, failure): `packages/browser/test/profileDid.test.ts`; UI: `apps/ui/src/test/identities/publicDid.test.tsx`; end to end, the web app publishes and `@web5/dids` resolves the key alone, then a listed Nostr identity, then without it: `e2e/web/did-dht.spec.ts`.
 
 ## Open decisions
 

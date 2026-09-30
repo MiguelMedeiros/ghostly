@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 import type { Plugin, UserConfig } from "vite";
 
 const here = fileURLToPath(new URL(".", import.meta.url));
-const desktop = (path: string) => resolve(here, "../../src", path);
+const desktop = (path: string) => resolve(here, "../../apps/ui/src", path);
 const platform = (path: string) => resolve(here, "src/platform", path);
 const sdk = (path: string) => resolve(here, "../sdk/src", path);
 

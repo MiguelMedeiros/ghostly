@@ -537,7 +537,7 @@ mod project_link_tests {
     #[test]
     fn opens_non_ascii_links_only_as_the_app_encodes_them() {
         // covers: app.external-links
-        // The page sends `new URL(href).href` (src/lib/externalLink.ts): the path, query and fragment
+        // The page sends `new URL(href).href` (apps/ui/src/lib/externalLink.ts): the path, query and fragment
         // percent-encoded, the host in punycode. What `open` receives stays plain ASCII.
         for url in [
             "https://pt.wikipedia.org/wiki/São_Paulo",

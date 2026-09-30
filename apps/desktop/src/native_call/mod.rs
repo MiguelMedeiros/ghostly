@@ -1,6 +1,6 @@
 //! Calls where the WebView cannot make them: Linux, whose WebKitGTK is built without WebRTC by every major
 //! distribution (Ubuntu, Debian, Fedora). The media runs in GStreamer ([`engine`]); the page drives it through
-//! these commands and hears back on a channel per camera and per call (`src/desktop/nativeCalls.ts`).
+//! these commands and hears back on a channel per camera and per call (`apps/ui/src/desktop/nativeCalls.ts`).
 //!
 //! Which microphone, camera and speaker is the page's choice, passed here by name ([`devices`]): the list the
 //! page shows is this one (`native_call_devices`), and a call switches them live.

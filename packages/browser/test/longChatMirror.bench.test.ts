@@ -54,7 +54,7 @@ describe.skipIf(!process.env.GHOSTLY_BENCH && import.meta.env.MODE !== "bench")(
         fake.engine.stateListeners = [];
         fake.engine.messageListeners = [];
         const sync = await import("../src/platform/sync");
-        const storage = await import("../../../src/lib/storage");
+        const storage = await import("../../../apps/ui/src/lib/storage");
         storage.saveSession({ id: chat, mySeedB64: `seed-${chat}`, peerPubKeyB64: `peer-${chat}`, encKeyB64: "enc", messages: [], createdAt: 1, deliveryMode: "stream", profile: "paired-chat/1" });
         fake.engine.messages = new Map([[chat, Array.from({ length: SIZES[chat] }, (_, i) => message(chat, i))]]);
         fake.engine.state = { links: [link(chat)] };
