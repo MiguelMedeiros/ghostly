@@ -117,6 +117,35 @@ export async function seed(page: Page, chats: { label: string; count: number; le
   return ids;
 }
 
+/**
+ * Writes `count` messages (as `history` makes them, from the same start as `seed`) into the engine's own store for the
+ * chat labelled `label`, as if they had come over time: a history the engine keeps, which a reload brings to the page.
+ * The chat's link must come (the page asks the engine for it once the chat is stored): this waits for it.
+ */
+export async function engineHistory(page: Page, label: string, count: number): Promise<void> {
+  const rows = history(count, Date.now() - 30 * 86_400_000).map(({ ref: _ref, ...m }) => ({ ...m, via: "datalink" }));
+  await page.evaluate(async ({ label, rows }) => {
+    const session = Object.keys(localStorage).map(k => { try { return JSON.parse(localStorage.getItem(k)!); } catch { return null; } }).find(s => s?.label === label);
+    const open = () => new Promise<IDBDatabase>((ok, ko) => { const r = indexedDB.open("ghostly"); r.onsuccess = () => ok(r.result); r.onerror = () => ko(r.error); });
+    let linkId: string | undefined;
+    for (let i = 0; i < 300 && !linkId; i++) {
+      const db = await open();
+      const links = db.objectStoreNames.contains("links")
+        ? await new Promise<{ id: string; peerPubKeyZ32: string }[]>(ok => { const r = db.transaction("links").objectStore("links").getAll(); r.onsuccess = () => ok(r.result); })
+        : [];
+      db.close();
+      linkId = links.find(l => l.peerPubKeyZ32 === session?.peerPubKeyB64)?.id;
+      if (!linkId) await new Promise(r => setTimeout(r, 100));
+    }
+    if (!linkId) throw new Error(`no link for ${label}`);
+    const db = await open();
+    const tx = db.transaction("messages", "readwrite");
+    for (const row of rows) tx.objectStore("messages").put({ ...row, linkId });
+    await new Promise((ok, ko) => { tx.oncomplete = ok; tx.onerror = () => ko(tx.error); });
+    db.close();
+  }, { label, rows });
+}
+
 /** Counts React's commits: React calls the DevTools hook on each, in a production build too. */
 export function countCommits() {
   const w = window as unknown as { __REACT_DEVTOOLS_GLOBAL_HOOK__?: unknown; __ghostlyCommits: number };
