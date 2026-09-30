@@ -7,10 +7,14 @@
   "confirm": "Confirmer",
   "copied": "Copié !",
   "copy": "Copier",
+  "deck": {
+    "turnBack": "Cartes"
+  },
   "delete": "Supprimer",
   "deleteChatLocal": "La conversation et son historique seront supprimés de cet appareil, pas chez votre contact.",
   "deleteChatTitle": "Supprimer la conversation ?",
   "error": "Erreur",
+  "goHome": "Aller à l’accueil",
   "loading": "Chargement...",
   "moreInfo": "Plus d'infos",
   "save": "Enregistrer",

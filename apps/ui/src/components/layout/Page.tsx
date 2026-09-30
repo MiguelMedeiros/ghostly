@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { useOptionalI18n } from "../../contexts/I18nContext";
 import { useAppNavigation } from "../../hooks/useAppNavigation";
 
 const WIDTH = { md: "max-w-2xl", lg: "max-w-3xl" } as const;
@@ -36,10 +37,11 @@ export function Page({ title, trailing, width = "lg", testId, children }: {
  */
 export function PageHeader({ title, trailing }: { title: ReactNode; trailing?: ReactNode }) {
   const nav = useAppNavigation();
+  const back = useOptionalI18n()?.t("common.back") ?? "Back";
   return (
     <header className="page-header shrink-0 bg-panel-header border-b border-border flex flex-wrap items-center gap-x-3 gap-y-2 px-4">
       <div className="flex items-center gap-1 min-w-0 flex-[1_1_auto]">
-        <button type="button" onClick={nav.up} aria-label="Back" data-testid="page-back" data-goes={nav.hasParent ? "up" : "home"}
+        <button type="button" onClick={nav.up} aria-label={back} data-testid="page-back" data-goes={nav.hasParent ? "up" : "home"}
           className={`${nav.hasParent ? "" : "max-md:hidden "}-ml-2 grid place-items-center w-10 h-10 shrink-0 rounded-full hover:bg-surface-hover transition-colors cursor-pointer`}>
           <svg className="w-5 h-5 text-text-secondary" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
         </button>

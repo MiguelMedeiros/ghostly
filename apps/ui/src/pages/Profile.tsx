@@ -34,7 +34,7 @@ function useProfiles() {
  */
 export function Profile() {
   const nav = useAppNavigation();
-  const { t } = useI18n();
+  const { t, language } = useI18n();
   const { settings, updateColorScheme, updateDefaultNickname, randomizeNickname } = useSettings();
   const platform = useServicesPlatform();
   const { current, all } = useProfiles();
@@ -66,25 +66,25 @@ export function Profile() {
     <Page title={t("settings.profile")} width="md" testId="profile-page">
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
         {/* The picture goes to paired contacts with the name: a fresh 128×128 JPEG, nothing of the file. */}
-        <label className="relative shrink-0 cursor-pointer group rounded-full focus-within:ring-2 focus-within:ring-accent" title={myAvatar ? "Change picture · contacts see it" : "Add a picture · contacts see it"}>
+        <label className="relative shrink-0 cursor-pointer group rounded-full focus-within:ring-2 focus-within:ring-accent" title={myAvatar ? t("profile.changePictureHint") : t("profile.addPictureHint")}>
           <ProfileBadge entry={{ ...current, name: name || current.name }} size={52} avatar={myAvatar} />
           <span aria-hidden="true" className="absolute inset-0 rounded-full bg-black/45 grid place-items-center opacity-0 group-hover:opacity-100 transition-opacity">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" /><circle cx="12" cy="13" r="4" /></svg>
           </span>
-          <input data-testid="profile-avatar-input" type="file" accept="image/*" aria-label={myAvatar ? "Change picture" : "Add a picture"} className="sr-only"
+          <input data-testid="profile-avatar-input" type="file" accept="image/*" aria-label={myAvatar ? t("profile.changePicture") : t("profile.addPicture")} className="sr-only"
             onChange={(e) => { const file = e.target.files?.[0]; e.target.value = ""; if (file) void avatarFromFile(file).then(setMyAvatar).then(() => setError(""), (err: unknown) => setError(err instanceof Error ? err.message : String(err))); }} />
         </label>
-        <input data-testid="profile-name" aria-label="Profile name" value={name} maxLength={32} onChange={(e) => setName(e.target.value)} onBlur={saveName} onKeyDown={(e) => e.key === "Enter" && (e.currentTarget as HTMLInputElement).blur()}
+        <input data-testid="profile-name" aria-label={t("profile.nameLabel")} value={name} maxLength={32} onChange={(e) => setName(e.target.value)} onBlur={saveName} onKeyDown={(e) => e.key === "Enter" && (e.currentTarget as HTMLInputElement).blur()}
           className="min-w-0 flex-[1_1_8rem] bg-transparent text-xl font-semibold text-text-primary rounded-lg px-2 -mx-2 py-1 border border-transparent hover:border-border focus:border-accent focus:outline-none" />
-        {myAvatar && <button type="button" data-testid="profile-avatar-remove" onClick={() => void setMyAvatar(null)} className="min-h-10 text-xs text-text-muted hover:text-danger cursor-pointer shrink-0 whitespace-nowrap">Remove picture</button>}
+        {myAvatar && <button type="button" data-testid="profile-avatar-remove" onClick={() => void setMyAvatar(null)} className="min-h-10 text-xs text-text-muted hover:text-danger cursor-pointer shrink-0 whitespace-nowrap">{t("profile.removePicture")}</button>}
       </div>
       {error && <Notice tone="error">{error}</Notice>}
 
-      <Section title="Look">
-        <Row label="Color"><ColorSwatches label="Profile color" testIdPrefix="profile-theme" /></Row>
-        <Row label="Mode"><Segmented label="Mode" value={settings.colorScheme} options={schemes} onChange={updateColorScheme} /></Row>
-        <Row label="Name in chats">
-          <input data-testid="account-nickname" aria-label={t("settings.nicknamePlaceholder")} className={`${input} w-44 flex-1`} value={settings.defaultNickname} maxLength={20} placeholder="Anonymous" onChange={(e) => updateDefaultNickname(e.target.value)} />
+      <Section title={t("profile.look")}>
+        <Row label={t("profile.color")}><ColorSwatches label={t("profile.colorLabel")} testIdPrefix="profile-theme" /></Row>
+        <Row label={t("profile.mode")}><Segmented label={t("profile.mode")} value={settings.colorScheme} options={schemes} onChange={updateColorScheme} /></Row>
+        <Row label={t("profile.nameInChats")}>
+          <input data-testid="account-nickname" aria-label={t("settings.nicknamePlaceholder")} className={`${input} w-44 flex-1`} value={settings.defaultNickname} maxLength={20} placeholder={t("common.anonymous")} onChange={(e) => updateDefaultNickname(e.target.value)} />
           <button type="button" onClick={randomizeNickname} title={t("settings.randomizeName")} aria-label={t("settings.randomizeName")} className="grid place-items-center w-10 h-10 shrink-0 rounded-lg text-text-muted hover:text-text-primary hover:bg-surface-alt cursor-pointer">↻</button>
         </Row>
         {/* Per profile: contacts are told at once, or told there is nothing to show (WISP 401 § name and picture). */}
@@ -94,43 +94,43 @@ export function Profile() {
         </Row>
       </Section>
 
-      <Section title="In this profile" testId="profile-links">
+      <Section title={t("profile.inThisProfile")} testId="profile-links">
         {/* Identities have a page of their own; this row is the way there from what used to hold them. */}
         <LinkRow testId="profile-identities-link" label={<span className="inline-flex items-center gap-2">{t("tabs.identities")}{identityAttention && <><span className="nav-dot-inline" aria-hidden="true" /><span className="sr-only">, {t("identities.attention")}</span></>}</span>}
           value={identities ? identities : undefined} onClick={() => nav.open("/identities")} />
-        <LinkRow label="Chats" value={`${chats} ${chats === 1 ? "chat" : "chats"}`} onClick={nav.home} />
-        <LinkRow label="Wallets" value={wallet ? `${wallet.balance.toLocaleString()} sats` : undefined} onClick={() => nav.open("/wallet")} />
-        <LinkRow label="Services" value={services.length ? services.length : undefined} onClick={() => nav.open("/services")} />
-        <LinkRow label="Settings" onClick={() => nav.open("/settings")} />
+        <LinkRow label={t("tabs.chats")} value={chats === 1 ? t("profile.chatOne") : t("profile.chatCount", { count: chats })} onClick={nav.home} />
+        <LinkRow label={t("tabs.wallets")} value={wallet ? t("profile.sats", { amount: wallet.balance.toLocaleString(language) }) : undefined} onClick={() => nav.open("/wallet")} />
+        <LinkRow label={t("tabs.services")} value={services.length ? services.length : undefined} onClick={() => nav.open("/services")} />
+        <LinkRow label={t("settings.title")} onClick={() => nav.open("/settings")} />
       </Section>
 
       <ProfileBackups canSwitch={canSwitch} openBackup={wantsBackup} />
 
-      <Section title="Profiles" testId="profile-list">
+      <Section title={t("profile.profiles")} testId="profile-list">
         {all.map((entry) => (
           <div key={entry.id || "default"} className="flex items-center gap-3 px-4 py-2.5 min-h-14" data-testid="profile-row">
             <ProfileBadge entry={entry} size={30} avatar={entry.id === current.id ? myAvatar : undefined} />
             <p className="flex-1 min-w-0 text-sm text-text-primary truncate">{entry.name}</p>
-            {entry.id === current.id ? <span className="text-xs text-accent shrink-0">In use</span> : <>
-              <Button data-testid="profile-switch" disabled={!canSwitch} onClick={() => attempt(() => switchProfile(entry.id))}>Switch</Button>
+            {entry.id === current.id ? <span className="text-xs text-accent shrink-0">{t("profile.inUse")}</span> : <>
+              <Button data-testid="profile-switch" disabled={!canSwitch} onClick={() => attempt(() => switchProfile(entry.id))}>{t("profile.switch")}</Button>
               {entry.id && (
-                <button type="button" data-testid="profile-delete" aria-label={`Delete ${entry.name}`} title="Delete" onClick={() => setDeleting(entry)} className="grid place-items-center w-10 h-10 shrink-0 rounded-lg text-text-muted hover:text-danger hover:bg-surface-alt cursor-pointer">
+                <button type="button" data-testid="profile-delete" aria-label={t("profile.deleteNamed", { name: entry.name })} title={t("common.delete")} onClick={() => setDeleting(entry)} className="grid place-items-center w-10 h-10 shrink-0 rounded-lg text-text-muted hover:text-danger hover:bg-surface-alt cursor-pointer">
                   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M3 6h18M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" /></svg>
                 </button>
               )}
             </>}
           </div>
         ))}
-        {!canSwitch ? <Block><Notice>One profile only in this client, for now.</Notice></Block> : creating ? (
+        {!canSwitch ? <Block><Notice>{t("profile.oneOnly")}</Notice></Block> : creating ? (
           <Block>
             <InputGroup as="form" onSubmit={(e) => { e.preventDefault(); attempt(() => { const entry = createProfile(newName); switchProfile(entry.id, { route: "/profile" }); }); }}>
-              <input data-testid="profile-new-name" autoFocus className={input} placeholder="Name" maxLength={32} value={newName} onChange={(e) => setNewName(e.target.value)} />
-              <Button type="submit" variant="primary" data-testid="profile-create" disabled={!newName.trim()}>Create</Button>
-              <Button onClick={() => { setCreating(false); setNewName(""); }}>Cancel</Button>
+              <input data-testid="profile-new-name" autoFocus className={input} placeholder={t("profile.name")} maxLength={32} value={newName} onChange={(e) => setNewName(e.target.value)} />
+              <Button type="submit" variant="primary" data-testid="profile-create" disabled={!newName.trim()}>{t("profile.create")}</Button>
+              <Button onClick={() => { setCreating(false); setNewName(""); }}>{t("common.cancel")}</Button>
             </InputGroup>
           </Block>
         ) : (
-          <button data-testid="profile-new" onClick={() => setCreating(true)} className="w-full px-4 py-3 min-h-12 text-left text-sm text-text-secondary hover:text-accent hover:bg-surface-alt transition-colors cursor-pointer rounded-b-xl">+ New profile</button>
+          <button data-testid="profile-new" onClick={() => setCreating(true)} className="w-full px-4 py-3 min-h-12 text-left text-sm text-text-secondary hover:text-accent hover:bg-surface-alt transition-colors cursor-pointer rounded-b-xl">{t("profile.newProfile")}</button>
         )}
       </Section>
       {deleting && <DeleteProfileDialog entry={deleting} onClose={() => setDeleting(null)} />}

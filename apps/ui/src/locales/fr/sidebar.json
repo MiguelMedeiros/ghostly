@@ -1,4 +1,5 @@
 {
+  "account": "Compte",
   "chats": "Discussions",
   "copyInvite": "Copier le code d'invitation",
   "deleteAllChats": "Supprimer toutes les discussions",
@@ -26,6 +27,7 @@
     "label": "Créer un groupe ou une discussion"
   },
   "noChats": "Aucune discussion",
+  "noResults": "Aucun résultat",
   "pinned": "Épinglée",
   "quiet": "C'est calme ici...",
   "quietHint": "L'heure de hanter quelqu'un ! 👻",
