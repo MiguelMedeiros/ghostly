@@ -1,6 +1,7 @@
 import { replySnippet, type StatusCard } from "@ghostly/core";
 import { replyRef, replyTo, type ReplyTarget } from "@ghostly/browser/shared/replies";
 import type { MessageReply } from "@ghostly/browser/shared/types";
+import { revealMessage } from "../hooks/useRowWindow";
 import { cardLine, showsCard } from "./statusCards";
 import type { ChatMessage } from "./types";
 
@@ -75,7 +76,9 @@ export function quoteFor(reply: MessageReply, index: ReplyIndex, nameOf: NameOf)
   if (original) {
     const from = original.sender === "me" ? "me" : "peer";
     const member = from === "peer" ? original.member ?? reply.member : undefined;
-    return { state: "found", name: nameOf(from, original.member ?? reply.member), snippet: messageSnippet(original), mine: from === "me", targetId: original.id, ...(member && { member }) };
+    // A button press quotes the question as the presser answered it, even if its bot changed it after (WISP 4xx · Message Buttons).
+    const snippet = reply.button && reply.snippet ? reply.snippet : messageSnippet(original);
+    return { state: "found", name: nameOf(from, original.member ?? reply.member), snippet, mine: from === "me", targetId: original.id, ...(member && { member }) };
   }
   const name = reply.from ? nameOf(reply.from, reply.member) : undefined;
   const state: QuoteState = reply.messageId ? "deleted" : reply.snippet ? "unverified" : "missing";
@@ -109,4 +112,12 @@ export function jumpToMessage(id: string, root: ParentNode = document): boolean 
   if (timer) clearTimeout(timer);
   row.dataset.replyFlashTimer = String(setTimeout(() => { row.removeAttribute("data-reply-flash"); delete row.dataset.replyFlashTimer; }, REPLY_FLASH_MS));
   return true;
+}
+
+/**
+ * Goes to the message a reply answers. Not in the page (a long chat has a window of its rows, useRowWindow): the rows
+ * around it first, and again. False when it is not in this chat.
+ */
+export function jumpToQuoted(targetId: string | undefined): boolean {
+  return !!targetId && (jumpToMessage(targetId) || (revealMessage(targetId) && jumpToMessage(targetId)));
 }

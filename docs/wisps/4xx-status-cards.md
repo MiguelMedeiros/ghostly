@@ -23,7 +23,7 @@ A **status card** is a message a bot sends with a small structured payload besid
 - **task**: one piece of work with a status, progress, the step it is on, a short list of steps or log lines, and optionally the pull request it produced.
 - **routine**: something that runs on a schedule, with its state, its last run and result, the next run and a few recent runs.
 
-Cards are **display only**. Nothing on a card runs anything, on either side: no buttons that act, no links other than https ones the reader chooses to open.
+Cards are **display only**. Nothing on a card runs anything, on either side: no buttons that act, no links other than https ones the reader chooses to open. A third kind, `buttons`, puts answers under a bot's question; it is defined in [4xx · Message Buttons](4xx-message-buttons.md), and a press sends a reply, nothing else.
 
 ## Who sends them
 

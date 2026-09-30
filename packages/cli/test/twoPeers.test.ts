@@ -8,7 +8,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { RACE_DIRECT_MS, TYPING_REFRESH_MS } from "@ghostly/core";
 import { BIN, error, ghostly, home, hyperdhtTestnet, localRelay, ok, Running } from "./support/cli";
 import { dominantHz, tone, wavFile } from "./support/tone";
-// covers: chat.paired.reconnect, groups.edit, files.large.resend, files.large.request, headless.calls, headless.daemon, headless.chat, headless.events, headless.hooks, headless.groups, headless.one-shot, headless.cli, headless.files, headless.group-admin, headless.identities, headless.services, headless.typing, headless.reactions, headless.edit, headless.forward, chat.forward.files
+// covers: chat.paired.reconnect, headless.buttons, groups.edit, files.large.resend, files.large.request, headless.calls, headless.daemon, headless.chat, headless.events, headless.hooks, headless.groups, headless.one-shot, headless.cli, headless.files, headless.group-admin, headless.identities, headless.services, headless.typing, headless.reactions, headless.edit, headless.forward, chat.forward.files
 
 /**
  * Two bots, each a `ghostly` daemon on its own profile, as a person would run them: a chat from an invite, live over
@@ -410,6 +410,26 @@ describe("two headless peers", { timeout: 180_000 }, () => {
     error(await as(alice, "edit", "bob", id), "usage", 2);
     await new Promise((r) => setTimeout(r, 500));
     expect(listen.lines).toHaveLength(3);
+    await listen.stop();
+  });
+
+  it("ask with buttons: the contact presses one, the bot's stream says button.pressed, button update closes them", async () => {
+    const listen = await listenTo(alice, "--type", "button.pressed");
+    const sent = ok(await as(alice, "send", "bob", "Want the $30 one? Reply yes or no", "--button", "yes:Yes", "--button", "no:No", "--style", "yes=primary", "--once", "--wait", "delivered"));
+    expect(sent).toMatchObject({ chat: chatA, pressable: true, card: { kind: "buttons", buttons: [{ id: "yes", label: "Yes", style: "primary", once: true }, { id: "no", label: "No", once: true }] } });
+    const id = sent.messageId as string;
+    const theirs = (ok(await as(bob, "chat", "history", "alice")).messages as { id: string; card?: { id: string } }[]).find((m) => m.card?.id === sent.buttons)!;
+    expect(theirs).toBeDefined();
+    expect(ok(await as(bob, "engine", "pressButton", JSON.stringify({ linkId: chatB, messageId: theirs.id, buttonId: "yes" })))).toMatchObject({ error: null });
+    const event = await listen.waitFor((l) => l.type === "button.pressed");
+    expect(event).toMatchObject({ chat: chatA, messageId: id, button: "yes", label: "Yes", by: chatA, name: "bob" });
+    expect(event).not.toHaveProperty("inferred");
+    const reply = (ok(await as(alice, "chat", "history", "bob")).messages as { id: string }[]).find((m) => m.id === event.replyId);
+    expect(reply).toMatchObject({ text: "Yes", from: "peer", press: { messageId: id, button: "yes", label: "Yes" }, replyTo: { id, button: "yes", found: true } });
+    expect(ok(await as(alice, "button", "update", "bob", id, "--chosen", "yes", "--close", "--wait", "confirmed"))).toMatchObject({ chat: chatA, messageId: id, confirmed: true, card: { chosen: "yes", closed: true } });
+    await expect.poll(async () => (ok(await as(bob, "chat", "history", "alice")).messages as { id: string; card?: { closed?: boolean } }[]).find((m) => m.id === theirs.id)?.card?.closed, { timeout: 30_000 }).toBe(true);
+    // Answered, and closed: the contact's engine presses no more.
+    expect(ok(await as(bob, "engine", "pressButton", JSON.stringify({ linkId: chatB, messageId: theirs.id, buttonId: "no" })))).toMatchObject({ refused: true });
     await listen.stop();
   });
 

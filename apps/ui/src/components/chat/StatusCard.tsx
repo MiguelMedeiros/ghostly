@@ -1,11 +1,11 @@
 import { useId, useRef, useState, type ReactNode } from "react";
-import { cardLinkHost, taskProgress, type TaskCard, type ItemState, type StatusCard } from "@ghostly/core";
+import { cardLinkHost, taskProgress, type TaskCard, type ItemState } from "@ghostly/core";
 import { useI18n } from "../../contexts/I18nContext";
 import { useMinuteClock } from "../../hooks/useMinuteClock";
 import { externalLinkProps } from "../../lib/externalLink";
 import { agoIn } from "../../lib/relativeTime";
 import { clockTime } from "../../lib/time";
-import { STATUS_TONE, durationIn, isFinished, taskElapsed } from "../../lib/statusCards";
+import { STATUS_TONE, durationIn, isFinished, taskElapsed, type ShownCard } from "../../lib/statusCards";
 import { RoutineView } from "./RoutineCard";
 
 /*
@@ -134,7 +134,7 @@ function TaskView({ card, time, marks, end }: { card: TaskCard; time?: ReactNode
  * its delivery marks when it is mine: a task's foot has both, a routine's line its marks and its opened foot the time.
  * `end` the message's last change, for how long a finished task took.
  */
-export function StatusCardView({ card, time, marks, end }: { card: StatusCard; time?: ReactNode; marks?: ReactNode; end?: number }) {
+export function StatusCardView({ card, time, marks, end }: { card: ShownCard; time?: ReactNode; marks?: ReactNode; end?: number }) {
   return card.kind === "task" ? <TaskView card={card} time={time} marks={marks} end={end} /> : <RoutineView card={card} time={time} marks={marks} />;
 }
 
