@@ -200,13 +200,46 @@ impl FileStore {
     /// Copies a stored file to `target`, a step at a time, marked as downloaded (`mark_downloaded`).
     pub fn copy_to(&self, space: &str, id: &str, target: &Path) -> Result<(), String> {
         let mut from = File::open(self.path(space, id)?).map_err(|e| e.to_string())?;
-        let mut to = File::create(target).map_err(|e| e.to_string())?;
-        std::io::copy(&mut from, &mut to).map_err(|e| e.to_string())?;
-        to.sync_all().map_err(|e| e.to_string())?;
-        drop(to);
+        write_whole(target, |to| std::io::copy(&mut from, to).map(|_| ()))?;
         mark_downloaded(target);
         Ok(())
     }
+}
+
+/// Writes `target` whole or not at all. The bytes go to a hidden name in the same folder (so the
+/// rename stays on one disk) and take the chosen name only once all of them are on the disk. A copy
+/// that fails partway (a full disk, a removed drive) leaves no half file under the name the person
+/// chose, and does not truncate a file that was there before.
+fn write_whole(
+    target: &Path,
+    write: impl FnOnce(&mut File) -> std::io::Result<()>,
+) -> Result<(), String> {
+    let partial = partial_path(target)?;
+    let result = (|| {
+        let mut to = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&partial)?;
+        write(&mut to)?;
+        to.sync_all()?;
+        drop(to);
+        fs::rename(&partial, target)
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&partial);
+    }
+    result.map_err(|e| e.to_string())
+}
+
+/// `.<name>.<random>.part` beside `target`.
+fn partial_path(target: &Path) -> Result<PathBuf, String> {
+    let name = target
+        .file_name()
+        .ok_or_else(|| "The chosen place has no file name".to_string())?;
+    let mut partial = std::ffi::OsString::from(".");
+    partial.push(name);
+    partial.push(format!(".{:016x}.part", rand::random::<u64>()));
+    Ok(target.with_file_name(partial))
 }
 
 /// The system's "downloaded from the internet" mark on a saved copy: a contact sent it, so opening
@@ -705,6 +738,66 @@ mod tests {
         assert!(u64::from_str_radix(fields[1], 16).unwrap() > 0, "{value}");
         assert_eq!(fields[2], "Ghostly", "{value}");
         fs::remove_dir_all(dir).ok();
+    }
+
+    /// The names in a folder, sorted.
+    fn names(dir: &Path) -> Vec<String> {
+        let mut names: Vec<String> = fs::read_dir(dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        names
+    }
+
+    #[test]
+    fn a_saved_copy_takes_its_name_whole_and_leaves_nothing_else() {
+        let (files, dir) = store();
+        files.append("p", "f", 0, &step(1, 300_000)).unwrap();
+        let out = dir.join("out");
+        fs::create_dir_all(&out).unwrap();
+        let target = out.join("photo.jpg");
+        files.copy_to("p", "f", &target).unwrap();
+        assert_eq!(fs::read(&target).unwrap(), step(1, 300_000));
+        assert_eq!(names(&out), vec!["photo.jpg"]);
+        // Saved again over it (the dialog asked): replaced.
+        files.append("p", "g", 0, b"new").unwrap();
+        files.copy_to("p", "g", &target).unwrap();
+        assert_eq!(fs::read(&target).unwrap(), b"new");
+        assert_eq!(names(&out), vec!["photo.jpg"]);
+        fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn a_copy_that_fails_partway_leaves_no_file_and_keeps_the_one_that_was_there() {
+        let (_, dir) = store();
+        fs::create_dir_all(&dir).unwrap();
+        let target = dir.join("report.pdf");
+        let failed = write_whole(&target, |to| {
+            to.write_all(b"half of it")?;
+            Err(std::io::Error::other("disk full"))
+        });
+        assert_eq!(failed, Err("disk full".to_string()));
+        assert!(names(&dir).is_empty(), "{:?}", names(&dir));
+        // A file already under that name is not cut short by a failed copy over it.
+        fs::write(&target, b"the old report").unwrap();
+        let failed = write_whole(&target, |to| {
+            to.write_all(b"half")?;
+            Err(std::io::Error::other("drive removed"))
+        });
+        assert!(failed.is_err());
+        assert_eq!(fs::read(&target).unwrap(), b"the old report");
+        assert_eq!(names(&dir), vec!["report.pdf"]);
+        fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn the_partial_copy_is_hidden_beside_the_target() {
+        let partial = partial_path(Path::new("/home/me/Downloads/photo.jpg")).unwrap();
+        assert_eq!(partial.parent(), Some(Path::new("/home/me/Downloads")));
+        let name = partial.file_name().unwrap().to_string_lossy().into_owned();
+        assert!(name.starts_with(".photo.jpg.") && name.ends_with(".part"), "{name}");
+        assert!(partial_path(Path::new("/")).is_err());
     }
 
     #[cfg(windows)]
