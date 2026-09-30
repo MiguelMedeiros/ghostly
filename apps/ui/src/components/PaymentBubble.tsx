@@ -12,7 +12,7 @@ import { Select } from "./ui/Select";
 import { NetworkTag, satsIn } from "./NetworkTag";
 import { useI18n } from "../contexts/I18nContext";
 import { ConfirmRealMoney } from "./ConfirmRealMoney";
-import { formatAmount, formatTokenAmount } from "../lib/amount";
+import { decimalInput, formatAmount, formatTokenAmount } from "../lib/amount";
 
 /** A payment or a payment request in the chat. The amounts are live: they follow what the wallet knows. */
 export function PaymentBubble({ paymentId, peerPubKey, fallbackText }: { paymentId: string; peerPubKey: string; fallbackText: string }) {
@@ -171,7 +171,7 @@ export function PaymentBubble({ paymentId, peerPubKey, fallbackText }: { payment
           {!noWallet && <>
           {!payment.target && !viaLightning && <label className="block space-y-1 text-xs">{t("payments.bubble.cashuMint")}<Select size="sm" aria-label={t("payments.bubble.cashuMint")} value={selectedMint ?? ""} onChange={setMint} disabled={!sharedMints.length} placeholder={t("payments.bubble.noSharedMint")} options={sharedMints.map(m => ({ value: m.url, label: m.url, description: t("payments.bubble.balance", { amount: formatAmount(m.balance, t.language), unit: sats }) }))} /></label>}
           {viaLightning && <LightningPayWith payer={lightningPayer} unit={sats} disabled={busy || !!lnReview} testId="payment-lightning-card" />}
-          <label className="text-xs">{t(tokenPayment?"payments.bubble.maxGas":"payments.bubble.maxFee")}<input aria-label={t(tokenPayment?"payments.bubble.maxGas":"payments.bubble.maxFee")} className="block w-20 bg-input-bg rounded p-1" inputMode="numeric" value={feeInput} onChange={e=>setFeeCap(e.target.value.replace(tokenPayment?/[^0-9.]/g:/\D/g,""))}/></label>
+          <label className="text-xs">{t(tokenPayment?"payments.bubble.maxGas":"payments.bubble.maxFee")}<input aria-label={t(tokenPayment?"payments.bubble.maxGas":"payments.bubble.maxFee")} className="block w-20 bg-input-bg rounded p-1" inputMode="numeric" value={feeInput} onChange={e=>setFeeCap(tokenPayment?decimalInput(e.target.value,t.language):e.target.value.replace(/\D/g,""))}/></label>
           {lnReview && (
             <div data-testid="payment-review" className="rounded-lg bg-black/20 p-2 space-y-1 text-xs">
               <p className="m-0 flex items-center gap-2">{t("payments.bubble.payOverLightning", { amount: formatAmount(payment.amount, t.language), unit: sats })}<NetworkTag network={network} testId="payment-lightning-network" /></p>

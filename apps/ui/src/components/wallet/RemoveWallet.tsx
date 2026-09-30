@@ -1,9 +1,11 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { removalRisksFunds, walletRemoval, type WalletRemoval } from "@ghostly/browser/shared/walletRemoval";
+import { removalRisksFunds, walletRemoval, type RemovalWords, type WalletRemoval } from "@ghostly/browser/shared/walletRemoval";
 import type { WalletNetwork, WalletPlatform, WalletState, WalletType } from "../../lib/platform";
 import { useBackdropDismiss } from "../../hooks/useDismiss";
-import { useI18n } from "../../contexts/I18nContext";
+import { useI18n, type Translate } from "../../contexts/I18nContext";
+import { formatAmount, formatTokenAmount } from "../../lib/amount";
+import { satsIn } from "../NetworkTag";
 import { NetworkTag } from "../NetworkTag";
 import { networkState } from "../walletCardData";
 import { BackupRows } from "./BackupRows";
@@ -29,7 +31,7 @@ export function RemoveWalletSection({ type, network, card, wallet, state, onRemo
 }) {
   const { t } = useI18n();
   const [asking, setAsking] = useState(false);
-  const removal = walletRemoval(type, network, networkState(state, network), state.intents, card);
+  const removal = walletRemoval(type, network, networkState(state, network), state.intents, card, removalWords(t));
   const label = card ? networkState(state, network, card).lightning?.name || walletLabel(type, network) : walletLabel(type, network);
   return (
     <Section title={t("wallet.remove.title")} testId="wallet-remove-section">
@@ -46,6 +48,15 @@ export function RemoveWalletSection({ type, network, card, wallet, state, onRemo
     </Section>
   );
 }
+
+/** What a removal holds and waits for, in the app's language: the amounts and the sentences around them. */
+const removalWords = (t: Translate): RemovalWords => ({
+  sats: (amount, network) => t("wallet.cards.amount", { amount: formatAmount(amount, t.language), unit: satsIn(t, network) }),
+  token: (units, decimals, network) => t("wallet.cards.amount", { amount: formatTokenAmount(units, decimals, t.language), unit: network === "testnet" ? "TEST-USDT" : "USDT" }),
+  gas: (wei, network) => t(network === "testnet" ? "wallet.remove.gas.testnet" : "wallet.remove.gas.mainnet", { amount: formatTokenAmount(wei, 18, t.language) }),
+  item: (kind, amount) => t(`wallet.remove.item.${kind}`, { amount }),
+  and: (first, second) => t("wallet.remove.and", { first, second }),
+});
 
 /** Where a Lightning or on-chain wallet keeps its money (the source's name), for "the money stays in …". */
 function sourceName(type: WalletType, network: WalletNetwork, state: WalletState, card?: string): string | undefined {

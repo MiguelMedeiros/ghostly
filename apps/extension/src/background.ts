@@ -77,14 +77,24 @@ chrome.runtime.onUpdateAvailable.addListener((details) => {
 chrome.action.onClicked.addListener(async () => {
   await ensureEngine();
   const url = chrome.runtime.getURL("app.html");
-  const [existing] = await chrome.tabs.query({ url });
-  if (existing?.id !== undefined) {
-    await chrome.tabs.update(existing.id, { active: true });
-    if (existing.windowId !== undefined) await chrome.windows.update(existing.windowId, { focused: true });
+  const existing = await openAppTab(url);
+  if (existing) {
+    await chrome.tabs.update(existing.tabId, { active: true });
+    if (existing.windowId >= 0) await chrome.windows.update(existing.windowId, { focused: true });
   } else {
     await chrome.tabs.create({ url });
   }
 });
+
+/**
+ * A tab that shows the app already, on any of its pages (`app.html#/chat/…`). Asked of the extension's own contexts:
+ * `chrome.tabs.query({ url })` needs the `tabs` permission, which Ghostly does not have, and finds nothing without it.
+ */
+async function openAppTab(url: string): Promise<{ tabId: number; windowId: number } | null> {
+  const contexts = await chrome.runtime.getContexts({ contextTypes: [chrome.runtime.ContextType.TAB] });
+  const app = contexts.find((context) => context.tabId >= 0 && context.documentUrl?.split("#")[0] === url);
+  return app ? { tabId: app.tabId, windowId: app.windowId } : null;
+}
 
 // Only the extension's own pages are heard (`fromOwnPage`).
 chrome.runtime.onMessage.addListener((message: RuntimeMessage, sender, sendResponse) => {

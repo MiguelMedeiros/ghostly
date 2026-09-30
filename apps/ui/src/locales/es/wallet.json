@@ -494,6 +494,7 @@
       "reaches": "Lo que se les pague después sigue llegando a {{source}}; Ghostly simplemente deja de verlo.",
       "reachesWallet": "Lo que se les pague después sigue llegando a la billetera; Ghostly simplemente deja de verlo."
     },
+    "and": "{{first}} y {{second}}",
     "ask": "Eliminar {{label}}…",
     "awaiting": "Aún esperando dinero",
     "backupFirst": "Haz una copia primero",
@@ -512,6 +513,10 @@
       "waitsReal": "Entiendo: lo que se pague a sus solicitudes y facturas abiertas después de eliminarla se pierde, y es dinero real."
     },
     "copyTokens": "Copiar copia del ecash",
+    "gas": {
+      "mainnet": "{{amount}} ETH",
+      "testnet": "{{amount}} ETH de prueba"
+    },
     "held": {
       "elsewhere": "Tu dinero se queda donde está: Ghostly solo olvida cómo llegar a ella. Puedes volver a conectarla más tarde.",
       "elsewhereIn": "Tu dinero se queda en {{source}}: Ghostly solo olvida cómo llegar a ella. Puedes volver a conectarla más tarde.",
@@ -522,6 +527,13 @@
     },
     "hintDevice": "Sus claves y ajustes salen de este dispositivo. Las demás billeteras siguen como están.",
     "hintElsewhere": "Ghostly olvida cómo llegar a ella; el dinero se queda donde está.",
+    "item": {
+      "invoice": "Una factura de {{amount}}, aún sin pagar",
+      "paid": "{{amount}} pagados a una factura, aún sin reclamar al mint",
+      "request": "Una solicitud de {{amount}} en un chat, aún abierta",
+      "sent": "{{amount}} en ecash que enviaste, aún sin recoger",
+      "unclaimed": "{{amount}} que el mint dice haber emitido para una factura, nunca recibidos aquí"
+    },
     "label": "Eliminar esta billetera",
     "noBackup": "Ghostly no puede volver a mostrar la frase de recuperación de esta billetera: solo la frase que anotaste al crearla recupera este dinero.",
     "noTokens": "No hay ecash que copiar.",

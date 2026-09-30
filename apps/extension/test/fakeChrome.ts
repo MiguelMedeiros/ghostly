@@ -197,6 +197,15 @@ export function installFakeChrome(manifest: chrome.runtime.Manifest): FakeWorld 
         return world.updateCheck;
       },
       reload: () => record("runtime.reload"),
+      ContextType: { TAB: "TAB", OFFSCREEN_DOCUMENT: "OFFSCREEN_DOCUMENT" },
+      /** The extension's own pages, which it sees without the `tabs` permission: here, the tabs on one of its URLs. */
+      async getContexts({ contextTypes }: { contextTypes?: string[] }) {
+        if (contextTypes && !contextTypes.includes("TAB")) return [];
+        const own = chromeApi.runtime.getURL("");
+        return [...world.tabs.values()]
+          .filter((tab) => tab.url.startsWith(own))
+          .map((tab) => ({ contextType: "TAB", tabId: tab.id, windowId: tab.windowId, documentUrl: tab.url, frameId: 0 }));
+      },
     },
     offscreen: {
       Reason: { WEB_RTC: "WEB_RTC" },
@@ -241,8 +250,10 @@ export function installFakeChrome(manifest: chrome.runtime.Manifest): FakeWorld 
         Object.assign(tab, props);
         return { ...tab };
       },
+      /** Without the `tabs` permission (the manifest has none) Chrome hides every tab's URL: asking by URL finds nothing. */
       async query({ url }: { url?: string }) {
-        return [...world.tabs.values()].filter((tab) => url === undefined || tab.url === url).map((tab) => ({ ...tab }));
+        if (url !== undefined) return [];
+        return [...world.tabs.values()].map(({ url: _hidden, ...tab }) => ({ ...tab }));
       },
       async remove(tabId: number) {
         record("tabs.remove", tabId);

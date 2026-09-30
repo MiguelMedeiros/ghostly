@@ -267,7 +267,7 @@ describe("both calling at once", () => {
     expect(call.result.current.callState).toBe("incoming");
     expect(pc.close).toHaveBeenCalledOnce();
     expect(stream.getTracks().every((t) => t.stop.mock.calls.length > 0)).toBe(true);
-    expect(call.addCallEventMessage).toHaveBeenCalledWith("call_received", false);
+    expect(call.addCallEventMessage).toHaveBeenCalledWith("call_received", false, undefined, expect.any(Number));
     // A hang-up would end the winner's call on the other side.
     expect(call.publishedKinds()).toEqual(["o"]);
 
@@ -287,7 +287,7 @@ describe("both calling at once", () => {
 
     expect(call.result.current.callState).toBe("offering");
     expect(pc.close).not.toHaveBeenCalled();
-    expect(call.addCallEventMessage).not.toHaveBeenCalledWith("call_received", expect.anything());
+    expect(call.addCallEventMessage.mock.calls.filter(([type]) => type === "call_received")).toEqual([]);
     // Their answer to ours still connects the call.
     call.receive(remote.answer(mine.ts + 2));
     await settle();
@@ -330,7 +330,7 @@ describe("answering a call", () => {
     const call = renderCall();
     call.receive(remote.offer(Date.now()));
     expect(call.result.current.callState).toBe("incoming");
-    expect(call.addCallEventMessage).toHaveBeenCalledWith("call_received", false);
+    expect(call.addCallEventMessage).toHaveBeenCalledWith("call_received", false, undefined, expect.any(Number));
 
     act(() => { void call.result.current.acceptCall(false); });
     expect(call.result.current.callState).toBe("answering");
@@ -395,7 +395,22 @@ describe("answering a call", () => {
     expect(devices.getUserMedia).not.toHaveBeenCalled();
     // It never connected, so there is no "call ended" line in the chat: a missed call instead.
     expect(call.addCallEventMessage).not.toHaveBeenCalledWith("call_ended", expect.anything(), expect.anything());
-    expect(call.addCallEventMessage).toHaveBeenLastCalledWith("call_missed", false);
+    expect(call.addCallEventMessage).toHaveBeenLastCalledWith("call_missed", false, undefined, expect.any(Number));
+  });
+
+  it("an offer heard again after the app reopened rings with the same call: its lines are the same lines", () => {
+    const ts = Date.now();
+    const first = renderCall();
+    first.receive(remote.offer(ts));
+    first.unmount();
+    // The app reopened while it rang: the contact's record still holds the offer.
+    const again = renderCall();
+    again.receive(remote.offer(ts));
+    act(() => { vi.advanceTimersByTime(RING_MS); });
+
+    const received = [...first.addCallEventMessage.mock.calls, ...again.addCallEventMessage.mock.calls].filter(([type]) => type === "call_received");
+    expect(received).toEqual([["call_received", false, undefined, ts], ["call_received", false, undefined, ts]]);
+    expect(again.addCallEventMessage).toHaveBeenLastCalledWith("call_missed", false, undefined, ts);
   });
 
   it("stops ringing on its own after RING_MS, with a missed call and nothing sent", () => {
@@ -408,7 +423,7 @@ describe("answering a call", () => {
     act(() => { vi.advanceTimersByTime(1); });
 
     expect(call.result.current.callState).toBe("idle");
-    expect(call.addCallEventMessage).toHaveBeenLastCalledWith("call_missed", false);
+    expect(call.addCallEventMessage).toHaveBeenLastCalledWith("call_missed", false, undefined, expect.any(Number));
     expect(call.publishedKinds()).not.toContain("h");
     expect(call.fastPoll()).toBe(false);
     // The caller's hang-up, arriving later, adds no second line.
@@ -428,7 +443,7 @@ describe("answering a call", () => {
     act(() => { vi.advanceTimersByTime(RING_MS); });
 
     expect(call.result.current.callState).toBe("connected");
-    expect(call.addCallEventMessage).not.toHaveBeenCalledWith("call_missed", expect.anything());
+    expect(call.addCallEventMessage.mock.calls.filter(([type]) => type === "call_missed")).toEqual([]);
   });
 
   it("an accept clicked twice asks for the microphone once", async () => {

@@ -1,3 +1,4 @@
+import { parseCallSignal } from "@ghostly/core";
 import type { MessageChanges } from "../shared/messageChanges";
 import type { EngineEvent, RpcRequest, RpcResponse } from "../shared/rpc";
 import type { StoredMessage } from "../shared/types";
@@ -23,6 +24,11 @@ export class EngineServer {
   private readonly histories = new WeakMap<EngineClientSink, Set<string>>();
   /** Per chat or group, what is still being sent (a whole history being read): what comes next waits for it. */
   private readonly sending = new Map<string, Promise<void>>();
+  /**
+   * Per chat, the contact's call offer that nothing here has answered yet. A client that attaches while it rings hears
+   * it too: the extension's peer runs with no tab open, and a tab opened during the ring used to show no call.
+   */
+  private readonly offers = new Map<string, string>();
 
   constructor(options: NodeOptions = {}) {
     this.node = new GhostlyNode(
@@ -31,7 +37,11 @@ export class EngineServer {
         onState: (state) => this.broadcast({ kind: "state", state }),
         onMessages: (linkId, messages) => void this.inOrder(linkId, () => this.sendHistory(linkId, messages)).catch(() => {}),
         onMessageChanges: (linkId, changes) => void this.inOrder(linkId, () => this.sendChanges(linkId, changes)).catch(() => {}),
-        onCallSignal: (linkId, signal) => this.broadcast({ kind: "call-signal", linkId, signal }),
+        onCallSignal: (linkId, signal) => {
+          if (signalKind(signal) === "o") this.offers.set(linkId, signal);
+          else this.offers.delete(linkId);
+          this.broadcast({ kind: "call-signal", linkId, signal });
+        },
       },
       options,
     );
@@ -44,6 +54,11 @@ export class EngineServer {
     void this.ready.then(async () => {
       if (!this.clients.has(client)) return;
       client.post({ kind: "state", state: this.node.getState() });
+      // A call still ringing; one too old to answer is forgotten (the client would refuse it too).
+      for (const [linkId, signal] of this.offers) {
+        if (parseCallSignal(signal)?.t === "o") client.post({ kind: "call-signal", linkId, signal });
+        else this.offers.delete(linkId);
+      }
       for (const link of this.node.getState().links) {
         await this.inOrder(link.id, async () => {
           if (!this.clients.has(client)) return;
@@ -66,6 +81,8 @@ export class EngineServer {
   async handle(client: EngineClientSink, request: RpcRequest): Promise<void> {
     if (request?.kind !== "request") return;
     const response: RpcResponse = { kind: "response", id: request.id };
+    // This app answered, declined or called in that chat: the contact's offer is not one to ring for any more.
+    if (request.method === "setCallSignal") this.offers.delete((request.params as { linkId?: string } | undefined)?.linkId ?? "");
     try {
       await this.ready;
       const method = this.node[request.method] as (params: unknown) => unknown;
@@ -136,5 +153,14 @@ export class EngineServer {
 
   private broadcast(event: EngineEvent): void {
     for (const client of [...this.clients]) this.post(client, event);
+  }
+}
+
+/** A call signal's kind (`o` for an offer), read as the client reads it; checked in full before it is replayed. */
+function signalKind(signal: string): unknown {
+  try {
+    return (JSON.parse(signal) as { t?: unknown } | null)?.t;
+  } catch {
+    return undefined;
   }
 }

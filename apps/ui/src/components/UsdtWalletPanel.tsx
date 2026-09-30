@@ -7,7 +7,7 @@ import {Actions,Address,Amount,Block,Button,Notice,Row,Section,Segmented,input,t
 import {useRun} from './wallet/run';
 import {ButtonGroup,InputGroup,Truncate} from './layout';
 import {useI18n} from '../contexts/I18nContext';
-import { formatTokenAmount } from "../lib/amount";
+import { decimalInput, formatTokenAmount } from "../lib/amount";
 
 type Network='ethereum'|'sepolia'|'evm-local';
 const RPC:Record<Network,string>={ethereum:'https://ethereum.publicnode.com',sepolia:'https://ethereum-sepolia-rpc.publicnode.com','evm-local':'http://127.0.0.1:47070'};
@@ -48,7 +48,7 @@ export function UsdtWalletPanel({wallet,state,backupNow=false}:{wallet:WalletPla
    {action==='send'&&<div className="bg-surface rounded-xl p-4 space-y-3 animate-fade-in">
     <input aria-label={t('wallet.panel.recipient',{wallet:'USDT'})} placeholder={t('wallet.usdt.recipientPlaceholder')} spellCheck={false} className={`${input} font-mono text-xs`} value={recipient} onChange={e=>setRecipient(e.target.value.trim())}/>
     <Amount value={amount} onChange={setAmount} unit={label} decimals={usdt.decimals}/>
-    <label className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 text-sm text-text-secondary">{t('wallet.usdt.feeLimit')}<span className="flex items-center gap-2"><input aria-label={t('wallet.usdt.gasInput')} inputMode="decimal" className={`${input} w-28 text-end`} value={gas} onChange={e=>setGas(e.target.value.replace(/[^0-9.]/g,''))}/>ETH</span></label>
+    <label className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 text-sm text-text-secondary">{t('wallet.usdt.feeLimit')}<span className="flex items-center gap-2"><input aria-label={t('wallet.usdt.gasInput')} inputMode="decimal" className={`${input} w-28 text-end`} value={gas} onChange={e=>setGas(decimalInput(e.target.value,t.language))}/>ETH</span></label>
     <Button variant="primary" className="w-full" disabled={busy||!!review||!funded||!recipient||!Number(amount)} onClick={()=>void run(async()=>{const now=Date.now();setReview(await wallet.preparePayment({target:{method:'usdt',network:usdt.network!,provider:usdt.provider!,asset:usdt.chainId===1?'USDT':'TEST-USDT',unit:'token-base',address:recipient,token:usdt.token,decimals:usdt.decimals,chainId:usdt.chainId,issuedAt:now,expiresAt:now+15*60*1000},amount:parsePaymentAmount(amount,usdt.decimals!),feeCap:parsePaymentAmount(gas,18),payee:recipient}));})}>{funded?t('wallet.panel.review'):t('wallet.panel.noBalance')}</Button>
     <Notice>{BigInt(usdt.gasBalance)===0n?t('wallet.usdt.needsGas'):t('wallet.usdt.approve')}</Notice>
    </div>}
