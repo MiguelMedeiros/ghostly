@@ -43,13 +43,15 @@
     "audioIncoming": "Chiamata vocale in arrivo",
     "audioMissed": "Chiamata vocale persa",
     "audioStarted": "Chiamata vocale avviata",
+    "audioUnanswered": "Chiamata vocale senza risposta",
     "videoConnected": "Videochiamata connessa",
     "videoDeclined": "Videochiamata rifiutata",
     "videoEnded": "Videochiamata terminata",
     "videoFailed": "Impossibile connettere la videochiamata",
     "videoIncoming": "Videochiamata in arrivo",
     "videoMissed": "Videochiamata persa",
-    "videoStarted": "Videochiamata avviata"
+    "videoStarted": "Videochiamata avviata",
+    "videoUnanswered": "Videochiamata senza risposta"
   },
   "turnCameraOff": "Spegni fotocamera",
   "turnCameraOn": "Accendi fotocamera",

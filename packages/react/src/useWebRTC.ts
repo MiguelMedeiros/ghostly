@@ -725,6 +725,8 @@ export function useWebRTC({
       }
 
       const wasConnected = callConnectedEventFiredRef.current;
+      // A call cancelled while it rang, or ended while it was still connecting, keeps an end line too (no length).
+      const wasCalling = callStateRef.current !== "idle" && callStateRef.current !== "incoming";
       const duration = callStartedAt ? Date.now() - callStartedAt : undefined;
 
       if (sendSignal) {
@@ -740,6 +742,8 @@ export function useWebRTC({
 
       if (addEndMessage && wasConnected) {
         addCallEventMessage?.("call_ended", callHadVideoRef.current, duration);
+      } else if (addEndMessage && wasCalling) {
+        addCallEventMessage?.("call_ended", callHadVideoRef.current);
       }
 
       cleanupConnection();
@@ -898,7 +902,12 @@ export function useWebRTC({
       lastProcessedSignalRef.current = signal.ts;
       // The caller gave up (or its ring ran out) before we answered: a missed call, as when our own ring runs out.
       if (callStateRef.current === "incoming") addCallEventMessage?.("call_missed", callHadVideoRef.current);
-      else if (signal.r === "u" && callStateRef.current !== "idle" && !callConnectedEventFiredRef.current) {
+      else if (callStateRef.current === "offering" && signal.r !== "u" && myOfferTimestampRef.current && signal.ts > myOfferTimestampRef.current) {
+        // Our call still rang there: the contact declined it (a side that rings sends nothing else).
+        addCallEventMessage?.("call_rejected", callHadVideoRef.current);
+        hangUp(false, false);
+        return;
+      } else if (signal.r === "u" && callStateRef.current !== "idle" && !callConnectedEventFiredRef.current) {
         // The contact's side could not connect (it found no candidate, or the call did not connect in time): this
         // side's call could not either, and says so the same way.
         addCallEventMessage?.("call_failed", callHadVideoRef.current);
@@ -911,7 +920,7 @@ export function useWebRTC({
     }
   }, [incomingCallSignal, handleAnswer, hangUp, updateCallState, setFastPoll, addCallEventMessage, applyRemotePicture, restartAnswer, restartable, cleanupConnection]);
 
-  // An unanswered call does not ring forever (RING_MS). Ours hangs up and says "No answer". Theirs stops ringing here
+  // An unanswered call does not ring forever (RING_MS). Ours hangs up, says "No answer" and keeps that line. Theirs stops ringing here
   // with a missed call and sends nothing: the caller's own ring runs out too, and a hang-up would read as declined.
   hangUpRef.current = hangUp;
   useEffect(() => {
@@ -920,6 +929,7 @@ export function useWebRTC({
     const timer = setTimeout(() => {
       if (callStateRef.current !== ringing) return;
       if (ringing === "offering") {
+        addCallEventMessageRef.current?.("call_unanswered", callHadVideoRef.current);
         hangUpRef.current(true, false);
         setNoAnswer(true);
       } else {

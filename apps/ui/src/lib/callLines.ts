@@ -14,6 +14,7 @@ export function callEventText(t: Translate, type: CallEventType, hasVideo?: bool
     case "call_missed": return hasVideo ? t("calls.timeline.videoMissed") : t("calls.timeline.audioMissed");
     case "call_rejected": return hasVideo ? t("calls.timeline.videoDeclined") : t("calls.timeline.audioDeclined");
     case "call_failed": return hasVideo ? t("calls.timeline.videoFailed") : t("calls.timeline.audioFailed");
+    case "call_unanswered": return hasVideo ? t("calls.timeline.videoUnanswered") : t("calls.timeline.audioUnanswered");
     // A kind this version does not know: its stored line as written.
     default: return undefined;
   }

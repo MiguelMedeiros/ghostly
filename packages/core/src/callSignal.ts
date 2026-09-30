@@ -48,7 +48,9 @@ export type CallEventType =
   | "call_missed"
   | "call_rejected"
   /** The call ended without ever connecting: no way to reach the contact was found, or none worked in time. */
-  | "call_failed";
+  | "call_failed"
+  /** The call we placed rang out (RING_MS) with nobody answering. */
+  | "call_unanswered";
 
 /**
  * Where a call's media comes from: the browser's own WebRTC and capture, or a stand-in with the same shape.

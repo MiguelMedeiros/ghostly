@@ -43,13 +43,15 @@
     "audioIncoming": "مكالمة صوتية واردة",
     "audioMissed": "مكالمة صوتية فائتة",
     "audioStarted": "بدأت مكالمة صوتية",
+    "audioUnanswered": "مكالمة صوتية لم يُرد عليها",
     "videoConnected": "تم توصيل مكالمة الفيديو",
     "videoDeclined": "تم رفض مكالمة الفيديو",
     "videoEnded": "انتهت مكالمة الفيديو",
     "videoFailed": "تعذّر توصيل مكالمة الفيديو",
     "videoIncoming": "مكالمة فيديو واردة",
     "videoMissed": "مكالمة فيديو فائتة",
-    "videoStarted": "بدأت مكالمة فيديو"
+    "videoStarted": "بدأت مكالمة فيديو",
+    "videoUnanswered": "مكالمة فيديو لم يُرد عليها"
   },
   "turnCameraOff": "إيقاف الكاميرا",
   "turnCameraOn": "تشغيل الكاميرا",

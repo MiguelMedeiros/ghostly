@@ -48,6 +48,13 @@ describe("the chat's connection and call lines, in the app's language", () => {
     expect(screen.queryByText("Video call couldn't connect")).toBeNull();
   });
 
+  it.each(["pt", "ja"] as const)("says our video call was not answered in %s, whatever English the history kept", (language) => {
+    renderApp(<MessageBubble message={{ id: "c3", text: "Video call not answered", sender: "system", timestamp: 0, callEvent: { type: "call_unanswered", hasVideo: true } }} />,
+      { language });
+    expect(screen.getByText(lookup(language, "calls.timeline.videoUnanswered")!)).toBeInTheDocument();
+    expect(screen.queryByText("Video call not answered")).toBeNull();
+  });
+
   it("says what a pasted address is in the chat list, in the language it is handed, English kept apart", () => {
     const pt = translateWith(LOCALES.pt);
     expect(previewText(BC1Q, pt)).toBe(`${lookup("pt", "chat.preview.bitcoinAddress")} · ${lookup("pt", "chat.preview.realMoney")}`);

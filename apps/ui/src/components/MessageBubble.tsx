@@ -319,7 +319,7 @@ function TailSvg({ side }: { side: "left" | "right" }) {
 
 function CallEventIcon({ type, hasVideo }: { type: string; hasVideo?: boolean }) {
   const isVideo = hasVideo;
-  const isMissed = type === "call_missed" || type === "call_rejected" || type === "call_failed";
+  const isMissed = type === "call_missed" || type === "call_rejected" || type === "call_failed" || type === "call_unanswered";
   const isIncoming = type === "call_received" || type === "call_missed";
   
   return (
@@ -789,7 +789,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
 
   if (isSystem && message.callEvent) {
     const { type, hasVideo, duration } = message.callEvent;
-    const isMissed = type === "call_missed" || type === "call_rejected" || type === "call_failed";
+    const isMissed = type === "call_missed" || type === "call_rejected" || type === "call_failed" || type === "call_unanswered";
     
     return (
       <div {...rowProps} data-message-row data-sender="system" className={`group flex items-center justify-center gap-1 mb-3.5 message-row-x ${enter}`}>
