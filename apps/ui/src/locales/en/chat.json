@@ -407,5 +407,6 @@
     "tooShortHold": "Too short. Hold to record, release to send",
     "unplayed": "Voice message, not played yet"
   },
-  "yesterday": "Yesterday"
+  "yesterday": "Yesterday",
+  "youJoined": "You joined the chat"
 }

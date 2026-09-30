@@ -407,5 +407,6 @@
     "tooShortHold": "短すぎます。押し続けて録音、離して送信",
     "unplayed": "ボイスメッセージ（未再生）"
   },
-  "yesterday": "昨日"
+  "yesterday": "昨日",
+  "youJoined": "あなたがチャットに参加しました"
 }

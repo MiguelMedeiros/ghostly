@@ -199,11 +199,27 @@ describe("MessageBubble: text", () => {
 });
 
 describe("MessageBubble: system lines", () => {
-  it("says who joined the chat, by a short key", () => {
+  it("says a contact with no name joined the chat by a short key", () => {
     const key = "yb1q3k9mfahf0974jqwy0yyfrg7zxksgxk7ufcc0";
-    bubble({ sender: "system", text: "", systemEvent: { type: "join", pubKey: key } });
+    bubble({ sender: "system", text: "", systemEvent: { type: "join", pubKey: key } }, { peerPubKey: key });
     expect(screen.getByText(publicKeyLabel(key))).toBeInTheDocument();
     expect(screen.getByText(/joined the chat/)).toBeInTheDocument();
+  });
+
+  it("names the contact who joined as the chat names them, the key kept in the tooltip", () => {
+    const key = "yb1q3k9mfahf0974jqwy0yyfrg7zxksgxk7ufcc0";
+    bubble({ sender: "system", text: "👋 Ali joined", nick: "Ali", systemEvent: { type: "join", pubKey: key } }, { peerPubKey: key, peerNick: "Alice" });
+    const line = screen.getByTestId("join-line");
+    expect(line).toHaveTextContent(/^Alice joined the chat/);
+    expect(line).not.toHaveTextContent(publicKeyLabel(key));
+    expect(line).toHaveAttribute("title", key);
+  });
+
+  it("says my own join as mine, not as a stranger's key", () => {
+    const mine = "gdqtg9aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa6i5b6y";
+    bubble({ sender: "system", text: "👋 Bob joined", nick: "Bob", systemEvent: { type: "join", pubKey: mine } }, { peerPubKey: "yb1q3k9mfahf0974jqwy0yyfrg7zxksgxk7ufcc0", peerNick: "Alice" });
+    expect(screen.getByTestId("join-line")).toHaveTextContent(/^You joined the chat/);
+    expect(screen.queryByText(publicKeyLabel(mine))).not.toBeInTheDocument();
   });
 
   it.each([
