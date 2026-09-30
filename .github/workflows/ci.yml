@@ -477,7 +477,7 @@ jobs:
         run: npx tsc --noEmit
 
   # The site's browser checks, in four shards of about the same time (apps/website/e2e/shard.mjs), each on its own build:
-  # building takes less than passing one build around. One runner ran them all in about 11 minutes.
+  # building (about 25 s) takes less than passing one build around. One runner ran them all in about 11 minutes.
   website-e2e:
     name: Website browser checks (${{ matrix.shard }}/4)
     needs: changes
@@ -507,15 +507,42 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      # Chromium and its system libraries download while the site builds.
+      - name: Playwright version
+        id: playwright
+        run: echo "version=$(node -p "require('@playwright/test/package.json').version")" >> "$GITHUB_OUTPUT"
+
+      # The headless shell the checks run in, one copy per Playwright version.
+      - name: Cache Chromium
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-shell-${{ steps.playwright.outputs.version }}
+
+      # Chromium installs while the site builds. It used to be `install --with-deps`, whose apt-get took 4 to 9
+      # minutes on about one shard job in ten (normally 30 s) and so set the whole CI cycle. The runner image
+      # already has the libraries Chromium loads (Google Chrome is on it); apt runs only when ldd finds one missing.
+      # The site's fonts are its own (next/font), so the fonts --with-deps adds do not change what the checks see.
       - name: Build, and install Chromium meanwhile
         run: |
-          npx playwright install --with-deps chromium > "$RUNNER_TEMP/chromium.log" 2>&1 &
+          {
+            echo "$(date +%T) download"
+            npx playwright install --only-shell chromium
+            echo "$(date +%T) downloaded"
+            npx playwright install-deps --dry-run chromium || true
+            shell=$(ls -d ~/.cache/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-linux64/chrome-headless-shell | tail -n 1)
+            if [ ! -x "$shell" ] || ldd "$shell" | grep "not found"; then
+              echo "$(date +%T) libraries missing, apt-get"
+              npx playwright install-deps chromium
+            fi
+            echo "$(date +%T) done"
+          } > "$RUNNER_TEMP/chromium.log" 2>&1 &
           chromium=$!
+          echo "$(date +%T) build"
           npm run build
+          echo "$(date +%T) built"
           status=0
           wait "$chromium" || status=$?
-          tail -n 20 "$RUNNER_TEMP/chromium.log"
+          grep -v "■\|% of " "$RUNNER_TEMP/chromium.log"
           exit "$status"
 
       - name: Browser checks (shard ${{ matrix.shard }} of 4)
