@@ -33,7 +33,7 @@ import { normalizeNostrRelays } from '../nostr/relay';
 import type { NostrDraft, NostrDraftRequest, NostrLookupRequest, NostrLookupResult, NostrPublishResult } from '../nostr/types';
 import { readPubkyProof } from '../proofs/storage';
 import { lookupPublicProfile, currentProfileProof, PROFILE_RETRY, PROFILE_TTL, type ProfileChoice } from '../profiles/public';
-import { EDIT_CAPABILITY, MAX_EDITS_PER_MESSAGE, STATUS_CARD_LIMITS, checkStatusCard, forwardedAgain, readForwarded, statusCardText, withRequestOptions, type StatusCard, type WireEdit } from "@ghostly/core";
+import { BUTTON_ID, EDIT_CAPABILITY, MAX_EDITS_PER_MESSAGE, STATUS_CARD_LIMITS, checkStatusCard, forwardedAgain, readForwarded, statusCardText, withRequestOptions, type StatusCard, type WireEdit } from "@ghostly/core";
 import { FORWARD_MESSAGES, FORWARD_TARGETS, copyForForward, forwardKind, type ForwardResult } from "./forwards";
 import { TEST_USDT_FAUCET_AMOUNT, receivedTimestamp, typingActivity, type TypingActivity, type TypingKind, WALLET_NETWORKS, walletNetworkOf, type GroupMention, type PaymentNetworks, type PaymentReview, type PaymentTarget, type WalletNetwork } from "@ghostly/core";
 import { ModeChanged, networkLabel, WrongNetworkError } from "./paymentAdapters/modeGate";
@@ -1980,8 +1980,9 @@ export class GhostlyNode implements EngineImplementation {
       // A reply names a message of this chat, as both sides know it (WISP 400 § Replies); anything else is refused.
       const found = params.replyTo === undefined ? undefined : await this.replyFor(linkId, params.replyTo);
       if (typeof found === "string") return { error: found, refused: true };
-      // A button press (`pressButton`, WISP 4xx · Message Buttons) is a reply naming the button.
-      const reply = found && typeof params.button === "string" ? { ...found, button: params.button } : found;
+      // A button press (`pressButton`, WISP 4xx · Message Buttons) is a reply naming the button, by an id that holds.
+      if (params.button !== undefined && !(typeof params.button === "string" && BUTTON_ID.test(params.button) && found)) return { error: "No such button", refused: true };
+      const reply = found && params.button !== undefined ? { ...found, button: params.button } : found;
       if (card) return this.sendChatText(live, trimmed, timestamp, undefined, reply, undefined, card);
       return this.sendChatText(live, trimmed, timestamp, params.preview === undefined ? undefined : parseLinkPreview(params.preview, trimmed), reply);
     }
@@ -2883,7 +2884,8 @@ export class GhostlyNode implements EngineImplementation {
     const reply = replyTo === undefined ? undefined : await this.replyFor(`group:${groupId}`, replyTo);
     if (typeof reply === "string") return { error: reply };
     const named = Array.isArray(mentions) ? mentions : [];
-    const wireReply = reply && { i: reply.id, s: reply.snippet, f: reply.member!, ...(typeof button === "string" && { b: button }) };
+    if (button !== undefined && !(typeof button === "string" && BUTTON_ID.test(button) && reply)) return { error: "No such button" };
+    const wireReply = reply && { i: reply.id, s: reply.snippet, f: reply.member!, ...(button !== undefined && { b: button }) };
     const sent = card ? await this.groups.send(groupId, text, named, wireReply, undefined, card) : await this.groups.send(groupId, text, named, wireReply);
     // Members it names whose apps are closed are woken (WISP 9xx · Group Mesh § Wake-up push).
     if (!sent.error) this.wakeMentioned(groupId, text, named);
@@ -2897,7 +2899,7 @@ export class GhostlyNode implements EngineImplementation {
    * what, and an app without buttons reads an ordinary reply. Refused: my own message, a button it does not have,
    * buttons the author closed, a question I already answered with a `once` button, a second press within a second.
    */
-  async pressButton(params: { linkId: string; messageId: string; buttonId: string }): Promise<{ error: string | null; refused?: boolean; messageId?: string }> {
+  async pressButton(params: { linkId: string; messageId: string; buttonId: string }): Promise<{ error: string | null; refused?: boolean; paced?: true; messageId?: string }> {
     const { linkId, messageId, buttonId } = params ?? {};
     if (typeof linkId !== "string" || typeof messageId !== "string" || typeof buttonId !== "string") return { error: "No button to press", refused: true };
     const history = await db.getMessages(linkId);
@@ -2909,7 +2911,8 @@ export class GhostlyNode implements EngineImplementation {
     if (!state || !button) return { error: "That message has no such button", refused: true };
     if (!state.open) return { error: state.card.closed ? "These buttons are closed" : "You already answered", refused: true };
     const key = `${linkId}\n${messageId}`, now = Date.now();
-    if (now - (this.pressedAt.get(key) ?? -Infinity) < BUTTON_PRESS_MS) return { error: "One press a second", refused: true };
+    // `paced`: nothing is wrong, the tap came too soon after the last one; an app says nothing of it.
+    if (now - (this.pressedAt.get(key) ?? -Infinity) < BUTTON_PRESS_MS) return { error: "One press a second", refused: true, paced: true };
     if (this.pressedAt.size > 500) this.pressedAt.clear();
     this.pressedAt.set(key, now);
     if (linkId.startsWith("group:")) return this.sendGroupMessage({ groupId: linkId.slice("group:".length), text: button.label, replyTo: messageId, button: button.id });

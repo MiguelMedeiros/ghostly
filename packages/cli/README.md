@@ -81,7 +81,7 @@ The rows are in alphabetical order of their first command, and every command of 
 
 | Command | What it does |
 |---|---|
-| `button update <chat\|group> <message> [--chosen <button>] [--close] [--text <text>] [--wait none\|confirmed\|sent] [--timeout s]` | Answer a question you sent with `send --button` (WISP 4xx · Message Buttons): `--chosen` shows which button won, `--close` takes presses no more, `--text` changes the text; the buttons and, unless given, the text stay. `<message>` is the `messageId` send gave. Answers `{chat \| group, buttons, messageId, card, edits}` |
+| `button update <chat\|group> <message> [--chosen <button>] [--close] [--text <text>] [--force] [--wait none\|confirmed\|sent] [--timeout s]` | Answer a question you sent with `send --button` (WISP 4xx · Message Buttons): `--chosen` shows which button won, `--close` takes presses no more, `--text` changes the text (shown as edited; refused if it looks like a secret, unless `--force`); the buttons and, unless given, the text stay. `<message>` is the `messageId` send gave. Answers `{chat \| group, buttons, messageId, card, edits}` |
 | `call auto [on\|off] [--from <chat>]… [--rate n]` | Answer calls by themselves, from anyone or the chats named (kept in the profile) |
 | `call hangup [<chat\|call>]`, `call list`, `call flush [<chat\|call>]` | Hang up (or decline); calls on now; drop the audio queued and not played yet |
 | `call pipe [<chat\|call>]` | A call's audio on stdin and stdout, for shell pipelines (sox, ffmpeg) |

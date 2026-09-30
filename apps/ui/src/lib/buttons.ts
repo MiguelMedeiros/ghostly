@@ -1,4 +1,4 @@
-import type { StatusCard } from "@ghostly/core";
+import { replySnippet, type StatusCard } from "@ghostly/core";
 import { buttonsState } from "@ghostly/browser/shared/buttons";
 import type { MessageReply, StoredMessage } from "@ghostly/browser/shared/types";
 
@@ -25,6 +25,23 @@ export function buttonsViews<R extends ButtonsRow>(rows: readonly R[], refOf: (r
     if (view) views.set(row.id, view);
   }
   return views;
+}
+
+/**
+ * The replies of these rows drawn as a compact press ("↩ Yes", not a quote): each names a button its question (a message
+ * of these rows with buttons) has, and quotes the question as it reads now. A question whose text changed after the
+ * press, or a `b` naming no button of it, leaves the reply a reply, its quote shown.
+ */
+export function compactPresses<R extends ButtonsRow & { text: string; file?: unknown; paymentId?: string }>(rows: readonly R[], refOf: (row: R) => string | undefined): Set<string> {
+  const compact = new Set<string>();
+  for (const row of rows) {
+    const reply = row.replyTo;
+    if (!reply?.button || !isButtonPress(row)) continue;
+    const question = rows.find(r => r.id === reply.messageId) ?? rows.find(r => r !== row && refOf(r) === reply.id);
+    if (question?.card?.kind !== "buttons" || !question.card.buttons.some(b => b.id === reply.button)) continue;
+    if (replySnippet(question.text) === reply.snippet) compact.add(row.id);
+  }
+  return compact;
 }
 
 /** A reply that is a button press: it shows as "↩ Yes", linked to the question, not as a quote. */

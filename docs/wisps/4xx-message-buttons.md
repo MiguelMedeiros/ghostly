@@ -67,7 +67,9 @@ It goes on every path a reply goes: the live session, the DHT floor, a hold, a p
 
 ## Answering and closing
 
-The bot marks what it took, or closes the question, by **editing its message** with the card of that version ([4xx](4xx-status-cards.md#updates-are-edits)): `chosen` for the answer, `closed: true` so no more presses go. Every member sees the edit. An app shows a closed question's buttons disabled, the chosen one marked; it sends no press to a closed question, and the author's app would not take one. A bot SHOULD answer a press (an edit, a reply or both), so the person sees it landed.
+The bot marks what it took, or closes the question, by **editing its message** with the card of that version ([4xx](4xx-status-cards.md#updates-are-edits)): `chosen` for the answer, `closed: true` so no more presses go. Every member sees the edit.
+
+Unlike a task's card, the text of a question is what people answer, so an edit that changes it is an edit like any text's ([400](400-chat.md#edits)): the reader keeps the version it replaces and shows the message as edited. Only an edit that changes the buttons alone (the answer marked, the question closed) keeps no version and shows no mark. A press drawn compactly ("↩ Yes") stands for the question as the presser saw it: when the question's text is no longer the one the reply quotes, or the reply names no button the question has, the app draws it as any reply, its quote being the question as the presser answered it. An app shows a closed question's buttons disabled, the chosen one marked; it sends no press to a closed question, and the author's app would not take one. A bot SHOULD answer a press (an edit, a reply or both), so the person sees it landed.
 
 ## Capability
 
@@ -85,7 +87,7 @@ A 1:1 app that shows buttons lists **`buttons/1`** in `paired-capabilities` ([40
 
 ## Showing buttons
 
-Under the bot's bubble, a row of rounded buttons that wraps (two share a row; up to six wrap into rows of two or three at a phone's width), in theme colors, `primary` filled with the accent, `danger` in the danger tone. A tap shows the button as sending, then marks it chosen (✓). A closed question's buttons are disabled; the chosen one stays marked. A press shows in the chat as a compact line ("↩ Yes") on the presser's side, linked to the question. Buttons are real buttons: keyboard, focus ring, screen readers (a group of answers, the chosen one pressed), right-to-left text.
+Under the bot's bubble, a row of rounded buttons that wraps (two share a row; up to six wrap into rows of two or three at a phone's width), in theme colors, `primary` filled with the accent, `danger` in the danger tone. A tap shows the button as sending, then marks it chosen (✓); a second tap within a second of the last is not taken, and nothing is said of it. A closed question's buttons are disabled; the chosen one stays marked. A press shows in the chat as a compact line ("↩ Yes") on the presser's side, linked to the question. Buttons are real buttons: keyboard, focus ring, screen readers (a group of answers, the chosen one pressed), right-to-left text.
 
 ## Headless runtime
 
@@ -95,6 +97,8 @@ Under the bot's bubble, a row of rounded buttons that wraps (two share a row; up
 
 - A press is a reply: sealed and authenticated as any message on its path, from a member of the chat or the group. Nobody outside it can press.
 - A bot MUST treat a press as what that person said, no more: check it is allowed to act for them. A label is the bot's own text; a press names only an id the bot chose.
+- A bot MUST act on a press once: the runtime may report an event again (a restart, a replay with `listen --since`), so a bot dedupes by the event's `id`. The presser's `name` in the event is what that person or group roster says, not a proof of who they are; `by` (a chat, a member's key) is what identifies them.
+- A question's text cannot be changed after an answer without a trace: a new text keeps the old version and shows as edited, and a compact press on a changed question falls back to the reply with its quote.
 - Buttons run nothing in the app: a tap sends a reply, nothing else. There are no links, forms or scripts on a button.
 - A press reveals, to everyone who reads the chat or group, what the person answered, as a reply would.
 

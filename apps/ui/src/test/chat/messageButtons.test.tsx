@@ -5,7 +5,7 @@ import { readStatusCard, type ButtonsCard } from "@ghostly/core";
 import type { StoredMessage } from "@ghostly/browser/shared/types";
 import { MessageBubble } from "../../components/MessageBubble";
 import { TasksButton } from "../../components/chat/TasksButton";
-import { buttonsViews } from "../../lib/buttons";
+import { buttonsViews, compactPresses } from "../../lib/buttons";
 import { cardEntries } from "../../lib/statusCards";
 import { quoteFor, replyIndex } from "../../lib/replies";
 import type { ChatMessage } from "../../lib/types";
@@ -131,7 +131,7 @@ describe("a press in the chat", () => {
     const quote = quoteFor(reply.replyTo!, replyIndex([q, reply]), () => "Bot");
     const { user } = renderApp(<>
       {bubble(q, [q, reply])}
-      <MessageBubble message={reply} peerPubKey="peer" linkId="link-a" quote={quote} />
+      <MessageBubble message={reply} peerPubKey="peer" linkId="link-a" quote={quote} compactPress={compactPresses([q, reply], m => m.ref).has("p1")} />
     </>);
     const line = screen.getByTestId("button-press");
     expect(line).toHaveTextContent("↩ Yes");
@@ -142,11 +142,47 @@ describe("a press in the chat", () => {
   });
 
   it("a label that looks like a sum or a link stays a label", () => {
-    const reply: ChatMessage = { id: "p1", text: "https://example.com/a.png", sender: "peer", timestamp: 2e12, replyTo: { id: "q1", snippet: "", button: "img" } };
-    renderApp(<MessageBubble message={reply} peerPubKey="peer" />);
+    const reply: ChatMessage = { id: "p1", text: "https://example.com/a.png", sender: "peer", timestamp: 2e12, replyTo: { id: "q1", snippet: "Deploy to production?", button: "img" } };
+    renderApp(<MessageBubble message={reply} peerPubKey="peer" compactPress />);
     expect(screen.getByTestId("button-press")).toHaveTextContent("↩ https://example.com/a.png");
     expect(screen.queryByTestId("picture-link")).not.toBeInTheDocument();
     expect(screen.queryByTestId("image-reveal")).not.toBeInTheDocument();
+  });
+});
+
+describe("a question changed after it was answered", () => {
+  const reply: ChatMessage = { id: "p1", text: "Yes", sender: "me", timestamp: 2e12, replyTo: { id: "q1", snippet: "Deploy to production?", from: "peer", button: "yes", messageId: "paired-q1" } };
+
+  it("a press on the question as it reads now is compact; on a reworded one, or naming no button of it, it is a reply with its quote", () => {
+    const q = question();
+    expect(compactPresses([q, reply], m => m.ref)).toEqual(new Set(["p1"]));
+    // The bot reworded the question after the press: the reply keeps the words the person answered.
+    const reworded = question(buttons(), { text: "Deploy the database migration?", edit: { seq: 1, at: 3e12, history: [{ at: 1, text: "Deploy to production?" }] } });
+    expect(compactPresses([reworded, reply], m => m.ref).size).toBe(0);
+    // A `b` naming no button, or a message without buttons: a reply.
+    expect(compactPresses([q, { ...reply, replyTo: { ...reply.replyTo!, button: "nope" } }], m => m.ref).size).toBe(0);
+    expect(compactPresses([{ ...q, card: undefined }, reply], m => m.ref).size).toBe(0);
+    const quote = quoteFor(reply.replyTo!, replyIndex([reworded, reply]), () => "Bot");
+    renderApp(<MessageBubble message={reply} peerPubKey="peer" linkId="link-a" quote={quote} compactPress={false} />);
+    expect(screen.queryByTestId("button-press")).not.toBeInTheDocument();
+    expect(screen.getByTestId("message-quote")).toHaveTextContent("Deploy to production?");
+  });
+
+  it("a new text shows the question edited; the answer marked or closed alone does not", () => {
+    const marked = question(buttons({ chosen: "yes", closed: true }), { edit: { seq: 1, at: 3e12, history: [] } });
+    const { unmount } = renderApp(bubble(marked));
+    expect(screen.queryByTestId("message-edited")).not.toBeInTheDocument();
+    unmount();
+    renderApp(bubble(question(buttons(), { text: "Deploy the migration?", edit: { seq: 2, at: 3e12, history: [{ at: 1, text: "Deploy to production?" }] } })));
+    expect(screen.getByTestId("message-edited")).toBeInTheDocument();
+  });
+
+  it("a second tap within a second is not taken, and nothing is said", async () => {
+    fakeEngine.on("pressButton", () => ({ error: "One press a second", refused: true, paced: true }));
+    const { user } = renderApp(bubble(question()));
+    await user.click(byId("no"));
+    expect(fakeEngine.callsTo("pressButton")).toHaveLength(1);
+    expect(screen.queryByTestId("message-buttons-error")).not.toBeInTheDocument();
   });
 });
 

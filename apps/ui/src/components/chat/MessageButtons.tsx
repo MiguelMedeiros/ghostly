@@ -52,7 +52,8 @@ export function MessageButtons({ view, messageId, linkId }: { view: ButtonsView;
     setError(false);
     try {
       const result = await engine.call("pressButton", { linkId, messageId, buttonId: button.id });
-      if (result.error) setError(true);
+      // A second tap within a second of the last is simply not taken: nothing failed.
+      if (result.error) { if (!result.paced) setError(true); }
       else setLocal(button.id);
     } catch {
       setError(true);

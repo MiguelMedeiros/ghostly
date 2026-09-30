@@ -309,7 +309,9 @@ ghostly group send crew "Deploy now?" --button go:Go --button wait:Wait   # the 
   its app says.
 - A press is also a plain `message.received` whose text is the label: with `--turns`, its `agent.turn` carries
   `press` (`{messageId, button, label}`), so act on that, never on the text alone. A group press is not a turn
-  (it names nobody): run `listen --type button.pressed` for those. Do not answer the same press twice.
+  (it names nobody): run `listen --type button.pressed` for those. Do not answer the same press twice: keep the
+  event's `id` and skip one you already handled. `by` says who pressed; `name` is only what they call themselves.
+- `button update --text` shows the question as edited, and a press keeps quoting what the person answered.
 - `--once` takes one answer a person. `button update --close` ends the question for everyone; a press after it is
   just a reply.
 

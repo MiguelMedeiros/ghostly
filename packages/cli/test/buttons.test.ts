@@ -132,6 +132,17 @@ describe("button update", () => {
     expect(rows("chat-one")[0]).toMatchObject({ text: "Got it: yes", card: { closed: true } });
   });
 
+  it("guards a new text as edit does: a seed or a key needs --force", async () => {
+    const { ctx, node, rows } = fake();
+    await callApi(ctx, "chat.send", { chat: "Alice", text: "Want it?", buttons: [{ id: "yes", label: "Yes" }] });
+    const seed = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+    await expect(callApi(ctx, "button.update", { chat: "Alice", message: "me_1", text: seed })).rejects.toMatchObject({ code: "confirm" });
+    expect(node.editMessage).not.toHaveBeenCalled();
+    await callApi(ctx, "button.update", { chat: "Alice", message: "me_1", text: seed, force: true });
+    expect(rows("chat-one")[0]).toMatchObject({ text: seed });
+    expect(params("button update", ["Alice", "me_1", "--text", "x", "--force"])).toMatchObject({ text: "x", force: true });
+  });
+
   it("finds the message by the id both sides know too, and in a group", async () => {
     const { ctx, node } = fake();
     await callApi(ctx, "group.send", { group: "Sala", text: "Deploy?", mentions: [], buttons: [{ id: "go", label: "Go" }] });

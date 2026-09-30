@@ -39,7 +39,7 @@ import { navOnly } from "../lib/navigation";
 import { mentionViews, type MentionCandidate } from "../lib/parse/mentions";
 import { COMMUNITY_LIMITS, GROUP_LIMITS, mayPin, replySnippet, type GroupMention, type RoutineCard } from "@ghostly/core";
 import { messageSnippet, quoteFor, replyIndex, replyTarget, type NameOf, type QuoteView } from "../lib/replies";
-import { buttonsViews } from "../lib/buttons";
+import { buttonsViews, compactPresses } from "../lib/buttons";
 import { useForwarding } from "../hooks/useForwarding";
 import { useChatSearch } from "../hooks/useChatSearch";
 import { ChatSearchBar, SearchIcon } from "../components/chat/ChatSearch";
@@ -216,6 +216,7 @@ export function GroupChat() {
   const quoteIndex = useMemo(() => replyIndex(messages, true), [messages]);
   // A bot's buttons (WISP 4xx · Message Buttons): which one was chosen, and whether I may still press, from my replies.
   const buttonsOf = useMemo(() => buttonsViews(messages, m => replyRef(m, true)), [messages]);
+  const presses = useMemo(() => compactPresses(messages, m => replyRef(m, true)), [messages]);
   const [showMembers, setShowMembers] = useState(false);
   /** The member whose name or picture above a message opened the members, marked there. */
   const [focusMember, setFocusMember] = useState<string>();
@@ -356,7 +357,7 @@ export function GroupChat() {
     </div>
     : <MessageBubble key={m.id} message={shownOf(m)} peerAck={Number.MAX_SAFE_INTEGER} linkId={`group:${groupId}`} {...forwarding.rowProps(shownOf(m))} highlight={search.highlight(m.id)} {...authorProps(m, inStack)}
       onReply={replyTarget(m, true) ? () => { setEditing(null); setReplyingTo(m); } : undefined} quote={quoteOf(m)}
-      buttons={group.canSend ? buttonsOf.get(m.id) : undefined}
+      buttons={group.canSend ? buttonsOf.get(m.id) : undefined} compactPress={presses.has(m.id)}
       onEdit={canEditInGroup(m) && !m.card && group.canSend ? () => { setReplyingTo(null); setEditing(m); } : undefined}
       onReact={replyTarget(m, true) && group.canSend ? emoji => react(m.id, emoji) : undefined} reactionName={reactionName}
       onPin={canPin && replyTarget(m, true) ? () => pinMessage(m.id, replyTarget(m, true) === group.pin?.id) : undefined} pinned={!!group.pin && replyTarget(m, true) === group.pin.id} />;

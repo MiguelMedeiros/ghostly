@@ -33,7 +33,7 @@ import { useSettings } from "../contexts/SettingsContext";
 import { MessageBubble } from "../components/MessageBubble";
 import { MessageInput } from "../components/MessageInput";
 import { messageSnippet, quoteFor, replyIndex, replyTarget, sentReply, type NameOf } from "../lib/replies";
-import { buttonsViews } from "../lib/buttons";
+import { buttonsViews, compactPresses } from "../lib/buttons";
 import { replySnippet, type RoutineCard } from "@ghostly/core";
 import { composerServices } from "../components/composer/servicesRow";
 import { CallButtons } from "../components/CallButtons";
@@ -358,6 +358,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
   const quoteIndex = useMemo(() => replyIndex(messages), [messages]);
   // A bot's buttons (WISP 4xx · Message Buttons): which one was chosen, and whether I may still press, from my replies.
   const buttonsOf = useMemo(() => buttonsViews(messages, m => m.ref), [messages]);
+  const presses = useMemo(() => compactPresses(messages, m => m.ref), [messages]);
   const [menuOpen, setMenuOpen] = useState(false);
   const [showMute, setShowMute] = useState(false);
   const [showTechInfo, setShowTechInfo] = useState(false);
@@ -772,6 +773,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
                 quote={paired && row.message.replyTo ? quoteFor(row.message.replyTo, quoteIndex, nameOf) : undefined}
                 // A press is a reply: only a paired chat carries one.
                 buttons={paired ? buttonsOf.get(row.message.id) : undefined}
+                compactPress={paired && presses.has(row.message.id)}
                 linkId={paired ? chatLink?.id : undefined}
                 // The same: a compatibility chat has no room for a reaction.
                 onReact={paired && replyTarget(row.message) ? emoji => react(row.message.id, emoji) : undefined}

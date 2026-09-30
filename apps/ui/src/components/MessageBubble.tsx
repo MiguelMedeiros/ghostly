@@ -89,6 +89,11 @@ interface MessageBubbleProps {
    * Left out, a message with buttons shows them, and none of them answers.
    */
   buttons?: ButtonsView;
+  /**
+   * This reply is a press of a button the question still has, on the question as the presser saw it (`compactPresses`):
+   * it reads "↩ Yes". Otherwise it is drawn as any reply, with its quote.
+   */
+  compactPress?: boolean;
 }
 
 /** How long a finger holds a message before its quick bar (or, where it takes no reaction, its details) opens. */
@@ -644,7 +649,7 @@ export function MessageBubble(props: MessageBubbleProps) {
       onDelete={props.onDelete && stable.onDelete} onReply={props.onReply && stable.onReply} onEdit={props.onEdit && stable.onEdit}
       onReact={props.onReact && stable.onReact} onForward={props.onForward && stable.onForward} onSelect={props.onSelect && stable.onSelect}
       onPin={props.onPin && stable.onPin} pinned={props.pinned} author={props.author} onOpenAuthor={props.onOpenAuthor && stable.onOpenAuthor}
-      reactionName={stable.reactionName} highlight={props.highlight} buttons={props.buttons}
+      reactionName={stable.reactionName} highlight={props.highlight} buttons={props.buttons} compactPress={props.compactPress}
       selection={selection && { selected: selection.selected, ...(selection.onToggle && { onToggle: stable.onToggle }) }}
     />
   );
@@ -654,7 +659,7 @@ const CALLBACKS = ["onDelete", "onReply", "onEdit", "onReact", "onForward", "onS
 
 /** The same bubble to draw: see `MessageBubble`. */
 function sameBubble(a: BubbleViewProps, b: BubbleViewProps): boolean {
-  return a.peerAck === b.peerAck && a.peerPubKey === b.peerPubKey && a.peerNick === b.peerNick && a.linkId === b.linkId && a.names === b.names && a.highlight === b.highlight && !a.pinned === !b.pinned
+  return a.peerAck === b.peerAck && a.peerPubKey === b.peerPubKey && a.peerNick === b.peerNick && a.linkId === b.linkId && a.names === b.names && a.highlight === b.highlight && !a.pinned === !b.pinned && !a.compactPress === !b.compactPress
     && CALLBACKS.every(name => !a[name] === !b[name])
     && !a.selection === !b.selection && a.selection?.selected === b.selection?.selected && !a.selection?.onToggle === !b.selection?.onToggle
     && sameValue(a.quote, b.quote) && sameValue(a.author, b.author) && sameValue(a.buttons, b.buttons) && sameValue(a.message, b.message);
@@ -669,7 +674,7 @@ const SameBubble = memo(function SameBubble(props: BubbleViewProps) {
   );
 }, sameBubble);
 
-function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "", onDelete: deleteIt, linkId, onReply: replyIt, quote, onEdit: editIt, onReact: reactIt, reactionName, onForward: forwardIt, onSelect: selectIt, onPin: pinIt, pinned, selection, names, highlight, author, onOpenAuthor, buttons }: BubbleViewProps) {
+function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "", onDelete: deleteIt, linkId, onReply: replyIt, quote, onEdit: editIt, onReact: reactIt, reactionName, onForward: forwardIt, onSelect: selectIt, onPin: pinIt, pinned, selection, names, highlight, author, onOpenAuthor, buttons, compactPress }: BubbleViewProps) {
   // While the chat is choosing messages, a row is a checkbox: nothing else on it answers.
   const choosing = !!selection;
   const onPin = choosing ? undefined : pinIt;
@@ -687,7 +692,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
       : "",
   );
   // A button press (WISP 4xx · Message Buttons) reads "↩ Yes": its label is never a sum, a picture or a quote.
-  const pressed = isButtonPress(message);
+  const pressed = !!compactPress && isButtonPress(message);
   const money = useMemo(() => (message.paymentId || message.file || pressed || showsCard(message.card) ? null : findMoney(message.text)), [message.paymentId, message.file, pressed, message.card, message.text]);
   const [details, setDetails] = useState(false);
   const rowRef = useRef<HTMLDivElement>(null);
@@ -899,8 +904,8 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
 
   const timestampEl = (
     <span dir={dir} className="msg-meta inline-flex items-center gap-[3px] float-end relative top-[4px] ms-[8px] select-none">
-      {/* A question's buttons marked or closed by its bot is its normal life, not an edit to point out. */}
-      {message.edit && !buttonsView && <EditedMark edit={message.edit} group={linkId?.startsWith("group:")} />}
+      {/* A question's buttons marked or closed by its bot is its normal life, not an edit to point out; a new text is. */}
+      {message.edit && (!buttonsView || !!message.edit.history?.length) && <EditedMark edit={message.edit} group={linkId?.startsWith("group:")} />}
       <span className="text-[11px] leading-none text-text-primary/65">
         {time}
       </span>

@@ -4,6 +4,7 @@ import { BUTTONS_CAPABILITY, GhostLink, createIdentity, createLink, identityFrom
 import { GhostlyNode } from "../src/engine/node";
 import { db } from "../src/engine/db";
 import { buttonPress, buttonsState } from "../src/shared/buttons";
+import { withEdit } from "../src/shared/edits";
 import type { StoredMessage } from "../src/shared/types";
 import { FakeNativeNet } from "./helpers/fakeNative";
 // covers: chat.buttons.wire
@@ -161,5 +162,30 @@ describe("the buttons' state and a press, as pure rules", () => {
     const history = [original, { ...bob, press: bobPress }];
     expect(buttonPress(press("b:1:2", "b", "no"), original, history)).toBeUndefined();
     expect(buttonPress(press("c:1:1", "c", "no"), original, history)).toEqual({ messageId: "k:1:1", button: "no", label: "No" });
+  });
+});
+
+describe("a question changed after it was answered", () => {
+  const card = readStatusCard(ask())!;
+  const question: StoredMessage = { linkId: "l", id: "me_Q", text: QUESTION, sender: "me", timestamp: 1, card };
+
+  it("keeps the version a new text replaces; the buttons alone marked or closed keep none", () => {
+    const marked = withEdit(question, { seq: 1, at: 2, text: QUESTION, card: readStatusCard(ask({ chosen: "yes", closed: true }))! });
+    expect(marked.edit?.history).toEqual([]);
+    const reworded = withEdit(marked, { seq: 2, at: 3, text: "Want the $50 one?", card: marked.card });
+    expect(reworded).toMatchObject({ text: "Want the $50 one?", edit: { seq: 2, history: [{ at: 2, text: QUESTION }] } });
+    // A task's card keeps no trail, as before.
+    const task = { ...question, card: readStatusCard({ kind: "task", id: "t", title: "T", status: "running" })! };
+    expect(withEdit(task, { seq: 1, at: 2, text: "other", card: task.card }).edit?.history).toEqual([]);
+  });
+});
+
+describe("a press names a button that holds", () => {
+  it("is refused on the 1:1 path when the id does not hold or there is no reply", async () => {
+    const t = await setup();
+    expect(await t.contact.sendMessage(QUESTION, Date.now(), WIRE("Q"), undefined, undefined, undefined, readStatusCard(ask())!)).toBeNull();
+    const question = await t.peerRow(QUESTION);
+    expect(await t.node.sendMessage({ linkId: t.id, text: "Yes", replyTo: question.id, button: "no way" })).toMatchObject({ refused: true, error: "No such button" });
+    expect(await t.node.sendMessage({ linkId: t.id, text: "Yes", button: "yes" })).toMatchObject({ refused: true, error: "No such button" });
   });
 });
