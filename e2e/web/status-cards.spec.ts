@@ -195,6 +195,9 @@ test("a room of bots with many routines: the panel scrolls inside the window, th
       return shown.status === "active" && shown.members?.length === 4 && shown.members.some(m => !m.me && m.online);
     };
     for (const bot of [coordinator, zero, one]) await expect.poll(() => ready(bot), { timeout: 200_000, intervals: [2_000] }).toBe(true);
+    // The person knows all four too: a member it learns of later has its "joined" line where it learned it, which may be
+    // amid Hermes Zero's routines, and would part them into two rows.
+    await expect(page.getByTestId("group-members")).toContainText("4 members", { timeout: 200_000 });
 
     // Miguel's load: the coordinator's two tasks and two routines, Hermes Zero's ten routines, Hermes One's two tasks and two routines.
     const sent = ["--wait", "sent", "--timeout", "150"];
@@ -246,6 +249,9 @@ test("a room of bots with many routines: the panel scrolls inside the window, th
       await page.getByTestId("chat-tasks-finished-toggle").click();
       expect(await underStuck(panel)).toEqual([]);
       await inWindow(page, panel);
+      // Only the list scrolls: nothing in it makes the panel itself taller than its box, so a row scrolled into view
+      // (a click, a focus) never scrolls the header out of sight.
+      expect(await panel.evaluate((p) => ({ top: p.scrollTop, over: p.scrollHeight - p.clientHeight }))).toEqual({ top: 0, over: 0 });
       // Taller than the box: it scrolls, the header stays.
       const scroll = panel.getByTestId("chat-tasks-scroll");
       expect(await scroll.evaluate(el => el.scrollHeight > el.clientHeight + 20)).toBe(true);
