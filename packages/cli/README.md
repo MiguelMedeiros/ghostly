@@ -259,7 +259,9 @@ commands, `group.created` events and `engine getState` print it as `<hidden>`; `
   (`delivery`: sending, queued, waiting, held, sent, delivered, failed), `message.edited` (a text changed in place, the
   contact's or mine: once per edit number, with `edits` and the message as it is now; `group.message.edited` in a group), `message.deleted`, `group.created`,
   `group.status`, `group.members` (`joined`, `left`), `group.typing.started` (`member`, `kind`, and `status` when given; again when either changes) and `group.typing.stopped` (`member`: a member of a private group is writing, or stopped), `group.message` (`message.member` is the author's key,
-  `message.nick` their name from the roster; `message.mentioned` when it names this profile), `group.sent`, `group.event`, `file.offered` (a file over 25 MiB waits for `file accept`),
+  `message.nick` their name from the roster; `message.mentioned` when it names this profile), `group.mentioned`
+  (`{group, messageId, message}`: a mention of this profile learned after the message's `group.message`, which said
+  none: a copy another member handed on without it, completed by the author's, or an edit that names this profile; once), `group.sent`, `group.event`, `file.offered` (a file over 25 MiB waits for `file accept`),
   `file.stage`, `file.done`, `file.failed` (each with `chat`, `file`, `messageId`), `chat.held` and
   `chat.released` (`chat disconnect --hold`), `identity.received` and `identity.status` (what a contact
   showed, as checked here), `identity.approval` and `identity.progress` (a signer waits on a link or a code), `group.deleted`, `group.removed`, `payment.created` and
@@ -289,7 +291,8 @@ commands, `group.created` events and `engine getState` print it as `<hidden>`; `
   group's event stops before `--exec`, `--webhook` and stdout (the message stays in the chat; the cursor moves past
   it). The profile's own events (`daemon.started`, `events.gap`, `identity.approval`) pass. Names become ids once,
   at the start. A flag, not profile state: each listener (each agent) has its own ([docs/CLI.md](../../docs/CLI.md#allowlist)).
-- `--turns`: one `agent.turn` event per `message.received`, and per `group.message` that mentions this profile:
+- `--turns`: one `agent.turn` event per `message.received`, and per `group.message` that mentions this profile (or
+  `group.mentioned`, `source: "group.mentioned"`, for a mention learned later):
   `{seq, id: "agent.turn:<source id>", type, at, source, chat | group + member, messageId, timestamp, press?, untrusted:
   {text, name, replyTo?: {id, snippet}, file?: {id, name, size, mime, voice}}}`. `press` (`{messageId, button, label,
   inferred?}`): the message pressed a button of yours, as `button.pressed` says. `seq` is the source's (cursors

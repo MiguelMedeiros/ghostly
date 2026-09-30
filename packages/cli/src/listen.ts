@@ -71,7 +71,7 @@ export async function allowlist(from: readonly string[], groups: readonly string
  */
 export interface AgentTurn extends GhostlyEvent {
   type: "agent.turn";
-  source: "message.received" | "group.message";
+  source: "message.received" | "group.message" | "group.mentioned";
   chat?: string;
   group?: string;
   /** A group's author (their key). */
@@ -95,6 +95,8 @@ export function toTurn(event: GhostlyEvent): AgentTurn | null {
   if (!message || typeof message.text !== "string") return null;
   if (event.type === "message.received" && typeof event.chat === "string") return turn(event, "message.received", { chat: event.chat }, message);
   if (event.type === "group.message" && typeof event.group === "string" && message.mentioned) return turn(event, "group.message", { group: event.group, ...(message.member ? { member: message.member } : {}) }, message);
+  // A mention learned after its message was reported (its `group.message` named nobody): the turn it did not start then.
+  if (event.type === "group.mentioned" && typeof event.group === "string" && message.mentioned) return turn(event, "group.mentioned", { group: event.group, ...(message.member ? { member: message.member } : {}) }, message);
   return null;
 }
 
