@@ -31,6 +31,13 @@ describe("the wallet panels' unit", () => {
     expect(screen.queryByTestId("wallet-test-balance")).not.toBeInTheDocument();
   });
 
+  it("Cashu on a Testnet wallet: its mints and its amount field say test sats too", () => {
+    const state = onNetwork("testnet", { mints: [mint(TEST_MINT, 21)], balance: 21 });
+    renderApp(<CashuWallet wallet={wallet} state={state} rail="cashu" onOpenCashu={() => {}} />);
+    expect(screen.getByTestId("mint-row")).toHaveTextContent(/21\s*test sats/);
+    expect(screen.getByTestId("wallet-receive-amount")).toHaveAccessibleName("Amount in test sats");
+  });
+
   it("Cashu on a Mainnet wallet: plain sats", () => {
     const state = onNetwork("mainnet", { mints: [mint(REAL_MINT, 1_300)], balance: 1_300 });
     renderApp(<CashuWallet wallet={wallet} state={state} rail="cashu" onOpenCashu={() => {}} />);

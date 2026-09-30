@@ -67,7 +67,7 @@ describe("the Cashu card's Send: a pasted invoice", () => {
   const quoteIt = async (user: ReturnType<typeof show>["user"]) => {
     await user.click(screen.getByTestId("wallet-send"));
     await user.type(screen.getByTestId("wallet-pay-input"), invoice);
-    await user.click(screen.getByRole("button", { name: "Pay 2,100 sats" }));
+    await user.click(screen.getByRole("button", { name: /^Pay 2,100 (test )?sats$/ }));
     await user.click(await screen.findByTestId("wallet-pay-confirm"));
   };
 
