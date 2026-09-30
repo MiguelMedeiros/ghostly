@@ -74,7 +74,7 @@
     "takeBackTitle": "Si tu contacto nunca lo recoge, el ecash sigue siendo tuyo",
     "through": "Mediante {{source}} · comisión de hasta {{fee}} sats",
     "title": {
-      "requests": "Pide",
+      "requests": "Te pidió",
       "sentYou": "Te envió",
       "youRequested": "Pediste",
       "youSent": "Enviaste"

@@ -42,6 +42,18 @@ describe("what the bubble says", () => {
     expect(screen.getByText(title)).toBeInTheDocument();
   });
 
+  // A bare verb ("Pede") read like an order: the contact's request says who asks whom, like "Sent you" does.
+  it.each([
+    ["pt", "Pediu a você"],
+    ["es", "Te pidió"],
+    ["it", "Ti ha chiesto"],
+    ["ar", "طلب منك"],
+  ] as const)("titles a contact's request in %s “%s”", (language, title) => {
+    fakeEngine.setState({ links: [linkView()], wallet: { mints: [mint(REAL_MINT, 0)] }, payments: { "pay-1": paymentView(incomingRequest()) } });
+    renderApp(<PaymentBubble paymentId="pay-1" peerPubKey="peer" fallbackText="[a payment]" />, { language });
+    expect(screen.getByText(title)).toBeInTheDocument();
+  });
+
   it.each([
     ["payment", "pending", "Waiting for your contact…"],
     ["payment", "settled", "Received"],

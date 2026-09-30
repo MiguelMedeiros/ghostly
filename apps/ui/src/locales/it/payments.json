@@ -74,7 +74,7 @@
     "takeBackTitle": "Se il tuo contatto non lo ritira mai, l'ecash resta tuo",
     "through": "Tramite {{source}} · commissione fino a {{fee}} sats",
     "title": {
-      "requests": "Chiede",
+      "requests": "Ti ha chiesto",
       "sentYou": "Ti ha inviato",
       "youRequested": "Hai chiesto",
       "youSent": "Hai inviato"
