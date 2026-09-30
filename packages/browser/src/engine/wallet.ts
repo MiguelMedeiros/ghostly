@@ -19,7 +19,7 @@ import {
   type SwapPreview,
 } from "@cashu/cashu-ts";
 import { STORES, openDb, store, transact, wrap } from "../shared/idb";
-import { decodeBolt11, type PaymentReview, type WalletNetwork } from "@ghostly/core";
+import { decodeBolt11, engineError, type PaymentReview, type WalletNetwork } from "@ghostly/core";
 import { BITCOIN_INVOICE_ON_TESTNET, fakesLightning, isTestMint, mintNetwork, paysItsOwnInvoices } from "../shared/mints";
 import type {
   CashuInspection,
@@ -74,10 +74,10 @@ export function normalizeMintUrl(input: string): string {
   try {
     url = new URL(input.trim());
   } catch {
-    throw new Error("That is not a valid mint URL");
+    throw engineError("invalidMintUrl");
   }
   const local = url.hostname === "localhost" || url.hostname === "127.0.0.1";
-  if (url.protocol !== "https:" && !(local && url.protocol === "http:")) throw new Error("Mints must use https");
+  if (url.protocol !== "https:" && !(local && url.protocol === "http:")) throw engineError("mintNotHttps");
   return `${url.origin}${url.pathname.replace(/\/+$/, "")}`;
 }
 
@@ -199,7 +199,7 @@ export class CashuWallet {
     try { wallet = await this.wallet(normalized); }
     catch (error) {
       // "Failed to fetch" says nothing to a person: say which place did not answer, and what it should be.
-      throw Object.assign(new Error(`Could not reach ${new URL(normalized).host}. Check the address: it should be a Cashu mint.`), { cause: error });
+      throw Object.assign(engineError("mintUnreachable", { host: new URL(normalized).host }), { cause: error });
     }
     const info = wallet.getMintInfo();
     const name = info.name || new URL(normalized).hostname;
@@ -450,9 +450,7 @@ export class CashuWallet {
         return { token, mint };
       });
     }
-    throw new Error(
-      candidates.length === 0 && preferred ? "You share no mint with this contact" : "Not enough sats in your wallet",
-    );
+    throw engineError(candidates.length === 0 && preferred ? "noSharedMint" : "notEnoughSats");
   }
 
   async prepareReviewedCashu(mint:string,amount:number):Promise<{fee:number;prepared:CashuPrepared}> {
@@ -654,7 +652,7 @@ export class CashuWallet {
         const amount = quote.amount.toNumber();
         const feeReserve = quote.fee_reserve.toNumber();
         if ((await this.balanceAt(mint)) < amount + feeReserve) {
-          lastError = new Error("Not enough sats in your wallet");
+          lastError = engineError("notEnoughSats");
           continue;
         }
         return { quote: quote.quote, mint, amount, feeReserve };

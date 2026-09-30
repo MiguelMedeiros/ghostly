@@ -9,6 +9,7 @@ import {useRun} from './wallet/run';
 import {ButtonGroup,InputGroup,Truncate} from './layout';
 import {useI18n} from '../contexts/I18nContext';
 import { decimalInput, formatTokenAmount } from "../lib/amount";
+import { errorText } from "../lib/errorText";
 
 type Network='ethereum'|'sepolia'|'evm-local';
 const RPC:Record<Network,string>={ethereum:'https://ethereum.publicnode.com',sepolia:'https://ethereum-sepolia-rpc.publicnode.com','evm-local':'http://127.0.0.1:47070'};
@@ -36,7 +37,7 @@ export function UsdtWalletPanel({wallet,state,backupNow=false}:{wallet:WalletPla
  const choose=(next:Network)=>{setPending(null);if(next===network)return;if(next==='ethereum')void run(()=>use('ethereum'));else{setPending(next);setProvider(RPC[next]);setToken(TOKEN[next]);}};
 
  return <div className="space-y-6" data-testid="usdt-wallet" aria-label={t('wallet.usdt.wallet')}>
-  {!usdt?.configured||(usdt.locked&&usdt.automatic)?<div className="bg-surface rounded-xl p-6 text-center space-y-2" data-testid="usdt-connecting"><p className="text-text-primary">{t('wallet.panel.connecting',{wallet:'USDT'})}</p><Notice>{usdt?.error??t('wallet.panel.firstTime')}</Notice></div>
+  {!usdt?.configured||(usdt.locked&&usdt.automatic)?<div className="bg-surface rounded-xl p-6 text-center space-y-2" data-testid="usdt-connecting"><p className="text-text-primary">{t('wallet.panel.connecting',{wallet:'USDT'})}</p><Notice>{usdt?.error?errorText(usdt.error,t):t('wallet.panel.firstTime')}</Notice></div>
   :!ready?<Section title={t('wallet.panel.unlock.title')}><Row label={t('wallet.panel.unlock.withPassword')}/><Block><InputGroup><input aria-label={t('wallet.panel.unlock.password',{wallet:'USDT'})} type="password" autoComplete="current-password" className={input} value={password} onChange={e=>setPassword(e.target.value)}/><Button variant="primary" disabled={busy} onClick={()=>void run(async()=>{await wallet.usdtUnlock(password);setPassword('');})}>{t('wallet.panel.unlock.button',{wallet:'USDT'})}</Button></InputGroup></Block></Section>
   :<div className="space-y-4">
    <div>
@@ -57,7 +58,7 @@ export function UsdtWalletPanel({wallet,state,backupNow=false}:{wallet:WalletPla
    {intents.filter(i=>i.id!==review?.id).map(i=><Button key={i.id} className="block w-full text-start" onClick={()=>setReview(i)}>{t('wallet.panel.intent',{amount:formatTokenAmount(i.amount,i.decimals,t.language),unit:i.asset,state:i.state==='settled'?t('wallet.usdt.confirmed'):paymentStateLabel(t,i.state)})}</Button>)}
   </div>}
   {error&&<Notice tone="error">{error}</Notice>}
-  {usdt?.error&&ready&&<Notice tone="warning">{usdt.error}</Notice>}
+  {usdt?.error&&ready&&<Notice tone="warning">{errorText(usdt.error,t)}</Notice>}
   {/* Test USDT from Aave's Sepolia faucet: "Get test coins" above the panel (wallet/TestCoins.tsx). */}
 
   {(ready||stuck)&&<Section title={t('wallet.panel.settings')}>
