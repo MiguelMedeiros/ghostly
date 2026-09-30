@@ -1,4 +1,4 @@
-import { screen } from "@testing-library/react";
+import { screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { decodeBolt11 } from "@ghostly/core";
 import type { LinkView, PaymentView, WalletView } from "@ghostly/browser/shared/types";
@@ -6,7 +6,7 @@ import { PaymentBubble } from "../../components/PaymentBubble";
 import { fakeEngine, linkView, paymentView } from "../fakeEngine";
 import { renderApp } from "../render";
 import { lightningSource, MAINNET_INVOICE, mint, REAL_MINT, REGTEST_INVOICE, reviewOf, SIGNET_INVOICE, target, TEST_MINT, TESTNET_INVOICE } from "./fixtures";
-import { choose } from "../select";
+import { choose, listOf, readOption } from "../select";
 
 // covers: payments.chat.review, payments.chat.method-off, payments.cashu.request, payments.cashu.reclaim, payments.cashu.test-sats, payments.lightning.request, payments.bitcoin.send, payments.usdt.send, payments.external, payments.chat.networks
 
@@ -176,7 +176,9 @@ describe("paying a request with Cashu", () => {
     engine.on("preparePayment", reviewOf);
     const picker = screen.getByRole("combobox", { name: "Cashu mint" });
     expect(picker).toHaveAttribute("data-value", REAL_MINT);
-    expect(picker).toHaveTextContent(`${REAL_MINT} 900 sats`);
+    // A mint known by its URL alone reads as its host.
+    expect(picker).toHaveTextContent("mint.example.com 900 sats");
+    expect(picker).not.toHaveTextContent("https://");
     await user.click(payButton());
     expect(await screen.findByRole("region", { name: "Payment review" })).toBeInTheDocument();
     expect(engine.callsTo("preparePayment")).toEqual([{
@@ -185,6 +187,15 @@ describe("paying a request with Cashu", () => {
     }]);
     // One review at a time.
     expect(payButton()).toBeDisabled();
+  });
+
+  it("names each shared mint by its own name, and one without a name by its host, never by its URL", async () => {
+    const other = "https://other.example:3338";
+    const { user } = show(incomingRequest({ mints: [REAL_MINT, other] }), { wallet: { mints: [{ ...mint(REAL_MINT, 900), name: "Coinos Mint" }, { ...mint(other, 50), name: "" }] } });
+    const picker = screen.getByRole("combobox", { name: "Cashu mint" });
+    expect(picker).toHaveTextContent("Coinos Mint 900 sats");
+    await user.click(picker);
+    expect(within(listOf(picker)).getAllByRole("option").map((o) => readOption(o).label)).toEqual(["Coinos Mint", "other.example:3338"]);
   });
 
   it("pays from the test mint on the Cashu test network, through the Testnet wallet", async () => {
