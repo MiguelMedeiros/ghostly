@@ -111,7 +111,8 @@ call of the app's engine. `ghostly engine --list` and `ghostly engine <method> '
 
 Main types: `message.received`, `message.sent`, `message.delivery`, `message.edited`, `chat.pairing`, `chat.connection`, `chat.joined`,
 `typing.started` (with `kind` and `status`) and `typing.stopped` (`group.typing.started` and `group.typing.stopped` in a private group, with `member`), `message.reaction` and `group.reaction`, `group.message.edited`,
-`group.message` and `group.sent` (with `messageId`, `member`, `nick` from the roster, and `mentioned`), `group.members`,
+`group.message` and `group.sent` (with `messageId`, `member`, `nick` from the roster, and `mentioned`), `group.mentioned`
+(a mention of this profile learned after its `group.message`, once), `group.members`,
 `file.offered`, `file.done` and `file.failed` (with the file's `messageId`), `payment.created`, `payment.updated`,
 `identity.received`, `call.incoming`, `call.outgoing`, `call.connected`, `call.ended`. The full list is in the
 [package README](../packages/cli/README.md#events).
@@ -138,7 +139,8 @@ ghostly listen --from alice --from bob --group team --exec ./bot.sh
 ### Agent turns
 
 `--turns` is the event shape for an agent (Claude Code, a bot on a model): each `message.received`, and each
-`group.message` that mentions this profile, becomes one `agent.turn`. Nothing else is one (my own messages, edits,
+`group.message` that mentions this profile, becomes one `agent.turn`. A mention learned later (the message first
+came through another member without it) is a `group.mentioned`, and its turn then, with `source: "group.mentioned"`. Nothing else is one (my own messages, edits,
 reactions, typing).
 
 ```json
@@ -214,7 +216,8 @@ ghostly listen --type message.received --cursor ~/.ghostly/echo.cursor --exec '
   buttons under the question (`group send` too). A press comes back as `button.pressed` (`messageId`, `button`,
   `label`, `by`), then `ghostly button update <chat|group> <message> --chosen yes --close` shows the answer and
   takes no more. The text is what apps without buttons show, so it says how to answer in words
-  ([WISP 4xx · Message Buttons](wisps/4xx-message-buttons.md)).
+  ([WISP 4xx · Message Buttons](wisps/4xx-message-buttons.md)). A typed answer is matched by label or id, ignoring
+  case, so two labels alike (`Yes` and `yes`) or a label that is another button's id are refused (exit 2).
 - A voice bot: [examples/call-echo.mjs](../packages/cli/examples/call-echo.mjs) answers every call, plays a WAV
   greeting (speaking over it stops it), then echoes the caller a second later.
 

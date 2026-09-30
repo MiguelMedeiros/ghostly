@@ -31,7 +31,7 @@ export const COMMANDS: Record<string, Command> = {
 /** Commands that take text (argument or stdin), with the secret guard and delivery waits. */
 export const TEXT_COMMANDS: Record<string, { method: string; target: "chat" | "group"; message?: true; usage: string; summary: string; args: string[]; options: Record<string, OptionSpec> }> = {
   "send": {
-    method: "chat.send", target: "chat", args: ["chat", "text..."], usage: "send <chat> [text...] [--reply <message>] [--button id:Label]... [--style id=primary|neutral|danger]... [--once] [--id id] [--stdin] [--force] [--wait none|sent|delivered]", summary: "Send a message (text from arguments or stdin); --button puts buttons under it",
+    method: "chat.send", target: "chat", args: ["chat", "text..."], usage: "send <chat> [text...] [--reply <message>] [--button id:Label]... [--style id=primary|neutral|danger]... [--once] [--id id] [--stdin] [--force] [--wait none|sent|delivered]", summary: "Send a message (text from arguments or stdin); --button puts buttons under it, each label its own (case aside)",
     options: { stdin: { type: "boolean", description: "Read the text from stdin" }, force, reply, ...buttonOptions, ...wait },
   },
   "edit": {

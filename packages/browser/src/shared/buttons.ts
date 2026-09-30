@@ -1,4 +1,4 @@
-import type { ButtonsCard, CardButton } from "@ghostly/core";
+import { sameButtonText, type ButtonsCard, type CardButton } from "@ghostly/core";
 import type { MessagePress, StoredMessage } from "./types";
 
 /*
@@ -15,10 +15,10 @@ export function messageButtons(message: Pick<StoredMessage, "card">): ButtonsCar
 type Row = Pick<StoredMessage, "sender" | "member" | "replyTo" | "press" | "id">;
 
 /**
- * Whether a reply's text is a button's label (or id): ignoring case and spaces at the ends. Not the device's locale's
- * case: the presser's and the author's apps must agree ("I" is not "ı" anywhere).
+ * Whether a reply's text is a button's label (or id): ignoring case and spaces at the ends, as the sender's rule
+ * compares labels when it refuses two a typed answer could not tell apart (`buttonLabelClash`).
  */
-export const sameLabel = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
+export const sameLabel = sameButtonText;
 
 /**
  * What a reply presses on the author's side, or nothing: the original is this side's own message with buttons still
@@ -43,6 +43,7 @@ export function buttonPress(reply: Pick<StoredMessage, "sender" | "member" | "re
  */
 function repliedButton(card: ButtonsCard, text: string, named: string | undefined): { button?: CardButton; inferred?: true } {
   if (named) return { button: card.buttons.find(b => b.id === named && sameLabel(b.label, text)) };
+  // A sender's rule refuses two buttons a typed answer could not tell apart; from one that ignored it, the first wins.
   const button = card.buttons.find(b => sameLabel(b.label, text) || sameLabel(b.id, text));
   return button ? { button, inferred: true } : {};
 }
