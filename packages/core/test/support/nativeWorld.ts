@@ -29,6 +29,11 @@ export class NativeWorld {
   dialFailMs = 5_000;
   /** Descriptors name an endpoint by a 64-hex key, as the real adapters do (a capability record or `_tr` carries only those). */
   hexIds = false;
+  /**
+   * Apps whose dials never reach the endpoint they dial, which fail after `dialFailMs` (a CLI daemon back after a kill,
+   * whose HyperDHT dial did not reach its contact on the loopback testnet: CI run 36741701666).
+   */
+  dialsLost = new Set<string>();
   idleMs = 30_000;
   /** Every dial that reached an endpoint, and every one that did not. */
   dials = 0;
@@ -49,7 +54,7 @@ export class NativeWorld {
       connect: async (to: unknown): Promise<BoundChannel> => {
         const d = to as { id?: string; publicKey?: string };
         const remote = this.find(d.id ?? d.publicKey ?? "");
-        if (!remote || remote.closed || entry.closed || !remote.endpoint.onConnection) {
+        if (!remote || remote.closed || entry.closed || !remote.endpoint.onConnection || this.dialsLost.has(name)) {
           this.dialFailures++;
           await after(this.dialFailMs);
           throw new Error(`${transport}: the contact's endpoint did not answer`);
