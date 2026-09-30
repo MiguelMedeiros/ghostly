@@ -5,7 +5,7 @@ import { createServer, request as httpRequest, type Server } from "node:http";
 import { connect, type AddressInfo } from "node:net";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { RACE_DIRECT_MS } from "@ghostly/core";
+import { RACE_DIRECT_MS, TYPING_REFRESH_MS } from "@ghostly/core";
 import { BIN, error, ghostly, home, hyperdhtTestnet, localRelay, ok, Running } from "./support/cli";
 import { dominantHz, tone, wavFile } from "./support/tone";
 // covers: chat.paired.reconnect, groups.edit, files.large.resend, files.large.request, headless.calls, headless.daemon, headless.chat, headless.events, headless.hooks, headless.groups, headless.one-shot, headless.cli, headless.files, headless.group-admin, headless.identities, headless.services, headless.typing, headless.reactions, headless.edit, headless.forward, chat.forward.files
@@ -224,7 +224,8 @@ describe("two headless peers", { timeout: 180_000 }, () => {
   });
 
   it("show the contact a bot is thinking, with its status, and then recording", async () => {
-    const listen = await listenTo(bob, "--type", "typing.started", "--type", "typing.stopped");
+    // chat.connection too: a failure then says whether the session went down in the window.
+    const listen = await listenTo(bob, "--type", "typing.started", "--type", "typing.stopped", "--type", "chat.connection");
     expect(ok(await as(alice, "typing", "bob", "--kind", "thinking", "--status", "Transcribing your audio…")))
       .toMatchObject({ chat: chatA, typing: true, kind: "thinking", status: "Transcribing your audio…", live: true });
     expect(await listen.waitFor((l) => l.type === "typing.started" && l.kind === "thinking"))
@@ -247,8 +248,18 @@ describe("two headless peers", { timeout: 180_000 }, () => {
     const seen = Date.now();
     await new Promise((r) => setTimeout(r, asked + 13_000 - Date.now()));
     expect(Date.now() - seen, "the window outlasts the contact's 6 s timeout").toBeGreaterThan(6_000);
-    expect(listen.lines.slice(before).map((l) => [l.type, l.kind, l.status])).toEqual([["typing.started", "thinking", "Working"]]);
-    await listen.waitFor((l) => l.type === "typing.stopped" && listen.lines.indexOf(l) >= before);
+    const window = listen.lines.slice(before), shown = JSON.stringify(window.map((l) => [l.type, l.kind, l.status, l.at]));
+    const typing = window.filter((l) => l.type !== "chat.connection");
+    // Every start is thinking with its status, and it is still on now.
+    expect(typing.filter((l) => l.type === "typing.started").map((l) => [l.kind, l.status]), shown).toEqual(typing.filter((l) => l.type === "typing.started").map(() => ["thinking", "Working"]));
+    expect(typing.at(-1)?.type, shown).toBe("typing.started");
+    // It never went off for good: a runner stalled past the 6 s can take a refresh in just after the timeout ended
+    // it, so a stop is allowed once, then only with the next start within a refresh.
+    const stops = typing.flatMap((l, i) => l.type === "typing.stopped" ? [i] : []);
+    expect(stops.length, shown).toBeLessThanOrEqual(1);
+    for (const i of stops) expect((typing[i + 1].at as number) - (typing[i].at as number), shown).toBeLessThan(TYPING_REFRESH_MS);
+    const ended = listen.lines.length;
+    await listen.waitFor((l) => l.type === "typing.stopped" && listen.lines.indexOf(l) >= ended);
     // What the contact's app would not show is refused here.
     const refused = error(await as(alice, "typing", "bob", "--status", "see https://x.example"), "bad_request", 1);
     expect(refused.message).toContain("no link or markup");
