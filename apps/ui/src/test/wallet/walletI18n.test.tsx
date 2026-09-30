@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { Wallet } from "../../pages/Wallet";
 import { walletView } from "../fakeEngine";
 import { renderApp } from "../render";
+import { mint, TEST_MINT } from "../payments/fixtures";
 import { LANGUAGES, SECTIONS, lookup } from "../i18n/locales";
 
 // covers: app.i18n, wallet.instances.create
@@ -35,5 +36,15 @@ describe("the first wallet card speaks the app's language", () => {
     engine.update({ wallet: walletView({}) });
     expect(await screen.findByTestId("wallet-first")).toHaveTextContent(lookup(language, "wallet.first.title")!);
     expect(container.textContent).not.toMatch(RAW_KEY);
+  });
+});
+
+describe("the deck's arrows", () => {
+  it("are named in the app's language for a screen reader", async () => {
+    const { engine, user } = renderApp(<Wallet />, { language: "pt" });
+    engine.update({ wallet: walletView({ mints: [mint(TEST_MINT, 10_000)], balance: 10_000 }) });
+    await user.click(await screen.findByTestId("wallet-network-testnet"));
+    expect(await screen.findByTestId("wallet-deck-testnet-prev")).toHaveAccessibleName("Cartão anterior");
+    expect(screen.getByTestId("wallet-deck-testnet-next")).toHaveAccessibleName("Próximo cartão");
   });
 });
