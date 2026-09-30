@@ -1,5 +1,5 @@
 import "fake-indexeddb/auto";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { LIMITS, createIdentity, type FileSink, type GhostLinkOptions } from "@ghostly/core";
 import { GhostlyNode } from "../src/engine/node";
 import { db } from "../src/engine/db";
@@ -34,6 +34,7 @@ vi.mock("@ghostly/core", async (importOriginal) => {
     setChatActive = (active: boolean) => this.session.setActive(active);
     learnPeerTransports = vi.fn();
     learnPeerChoice = vi.fn();
+    registerEndpoint = vi.fn();
     nativeDescriptors = {};
     start = vi.fn();
     stop = vi.fn(async () => {});
@@ -650,6 +651,9 @@ describe("private groups through the engine", () => {
   });
 
   it("an edge live when the app quit is dialled at once when it starts again; one that dropped before is not", async () => {
+    // An app with WebRTC: the edge resumes on it.
+    vi.stubGlobal("RTCPeerConnection", class {});
+    onTestFinished(() => { vi.unstubAllGlobals(); });
     const { node } = await started();
     // A community: its edges are kept as the app starts (a private group's to keys not in its roster go at once).
     const { groupId } = await node.createGroup({ name: "Plaza" });
@@ -682,6 +686,66 @@ describe("private groups through the engine", () => {
     await started();
     expect(links.length).toBeGreaterThan(before);
     expect([keptId, droppedId].map(id => edge(id).options.resume)).toEqual(["webrtc/1", undefined]);
+  });
+
+  // covers: groups.native-links
+  describe("native transports on a group's links (WISP 9xx § Transports)", () => {
+    const endpoint = () => ({ transport: "iroh/1" as const, descriptor: { id: "ab".repeat(32), relay: "https://relay.test./", addresses: [] },
+      connect: vi.fn(), close: vi.fn(async () => {}), onConnection: null, onDescriptor: null });
+    /** An engine running Iroh as the Desktop does (the host's own adapter). */
+    async function nativeEngine() {
+      const iroh = vi.fn(async () => endpoint());
+      const events = { onState: vi.fn(), onMessages: vi.fn(), onCallSignal: vi.fn(), onAttention: vi.fn() };
+      const node = new GhostlyNode(events, { automaticWallets: false, transport: fixture, nativeTransports: { "iroh/1": iroh } });
+      nodes.push(node);
+      await node.start();
+      return { node, iroh };
+    }
+    const edgeOf = (id: string) => links.filter((l) => l.options.params.id === id).at(-1)!;
+
+    it("an app with WebRTC takes an endpoint on an edge only once the member's packet says it has none, and again after a restart", async () => {
+      vi.stubGlobal("RTCPeerConnection", class {});
+      onTestFinished(() => { vi.unstubAllGlobals(); });
+      const { node, iroh } = await nativeEngine();
+      expect(node.getState().transport.groupLinks).toBeUndefined();
+      const { groupId } = await node.createGroup({ name: "Plaza" });
+      const state = (await db.getGroups()).find((g) => g.id === groupId)!.community;
+      const edgeId = await node["openEdge"](state as never, createIdentity().pubKeyZ32);
+      expect(edgeOf(edgeId).options.packetTransports).toBe(true);
+      // Two apps with WebRTC: no endpoint, as before.
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(iroh).not.toHaveBeenCalled();
+      // The member's app has none (a Linux Desktop): this side starts Iroh for that edge, and keeps what it said.
+      const descriptors = { "iroh/1": { id: "cd".repeat(32), relay: null, addresses: [], relayed: true } };
+      edgeOf(edgeId).options.events.onPacketTransports(["iroh/1", "hyperdht/1"], descriptors);
+      await vi.waitFor(() => expect(edgeOf(edgeId).registerEndpoint).toHaveBeenCalledTimes(1));
+      expect(iroh).toHaveBeenCalledTimes(1);
+      await vi.waitFor(async () => expect((await saved(edgeId))?.peerTransports).toEqual(["iroh/1", "hyperdht/1"]));
+      // Started again, with the edge live when it quit: Iroh at once, the member dialled how it said, resumed on Iroh.
+      await db.patchLink(edgeId, { edgeLive: true, edgeLiveSince: Date.now() });
+      await node.shutdown();
+      nodes.splice(nodes.indexOf(node), 1);
+      const again = await nativeEngine();
+      await vi.waitFor(() => expect(again.iroh).toHaveBeenCalledTimes(1));
+      expect(edgeOf(edgeId).options.native).toMatchObject({ peerTransports: ["iroh/1", "hyperdht/1"], peerDescriptors: descriptors });
+      expect(edgeOf(edgeId).options.resume).toBe("iroh/1");
+    });
+
+    it("an app with no WebRTC takes an endpoint on every edge at once, and can make groups", async () => {
+      const { node, iroh } = await nativeEngine();
+      expect(node.getState().transport).toMatchObject({ webrtc: false });
+      expect(node.getState().transport.groupLinks).toBeUndefined();
+      const { groupId } = await node.createGroup({ name: "Penguins" });
+      const state = (await db.getGroups()).find((g) => g.id === groupId)!.community;
+      const edgeId = await node["openEdge"](state as never, createIdentity().pubKeyZ32);
+      await vi.waitFor(() => expect(edgeOf(edgeId).registerEndpoint).toHaveBeenCalledTimes(1));
+      expect(iroh).toHaveBeenCalled();
+    });
+
+    it("an app with neither WebRTC nor a native transport says its group links have none", async () => {
+      const { node } = await started();
+      expect(node.getState().transport).toMatchObject({ webrtc: false, groupLinks: false });
+    });
   });
 
   it("a member's name stays while their edge is down, and only the member removes it", async () => {
