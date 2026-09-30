@@ -821,7 +821,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
         <div data-testid="hold-indicator" className="px-4 py-1 text-[11px] text-text-secondary bg-surface-alt/60 border-t border-border truncate" role="status">
           {chatPeer.hold.outstanding > 0 && t(chatPeer.hold.outstanding === 1 ? "chat.hold.heldOne" : "chat.hold.heldMany", {
             count: chatPeer.hold.outstanding, name: shownName,
-            used: (chatPeer.hold.bytes / 1024 / 1024).toFixed(1), max: Math.round(chatPeer.hold.maxBytes / 1024 / 1024) })}
+            used: new Intl.NumberFormat(language, { minimumFractionDigits: 1, maximumFractionDigits: 1 }).format(chatPeer.hold.bytes / 1024 / 1024),
+            max: new Intl.NumberFormat(language).format(Math.round(chatPeer.hold.maxBytes / 1024 / 1024)) })}
           {chatPeer.hold.outstanding > 0 && chatPeer.hold.error && " · "}
           {chatPeer.hold.error && <span className="text-danger">{errorText(chatPeer.hold.error, t)}</span>}
         </div>
