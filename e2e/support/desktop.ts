@@ -1,5 +1,5 @@
 import { test as base, expect } from "@playwright/test";
-import { spawn, type ChildProcess } from "node:child_process";
+import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
@@ -222,6 +222,8 @@ export async function openDesktop(options: DesktopOptions = {}): Promise<{ app: 
   const application = desktopBinary();
   const port = await freePort();
   const nativePort = await freePort();
+  // A session bus of its own unless the test brings one: see `privateBus`.
+  const bus = options.env?.DBUS_SESSION_BUS_ADDRESS ? null : await privateBus();
   const driver: ChildProcess = spawn(
     process.env.TAURI_DRIVER ?? "tauri-driver",
     ["--port", String(port), "--native-port", String(nativePort)],
@@ -236,6 +238,7 @@ export async function openDesktop(options: DesktopOptions = {}): Promise<{ app: 
         GHOSTLY_FAKE_MEDIA: "1",
         GHOSTLY_PROFILE: options.profile ?? process.env.GHOSTLY_PROFILE ?? "e2e",
         ...(options.home ? homeEnv(options.home) : {}),
+        ...(bus ? { DBUS_SESSION_BUS_ADDRESS: bus.address } : {}),
         ...options.env,
       },
     },
@@ -256,7 +259,11 @@ export async function openDesktop(options: DesktopOptions = {}): Promise<{ app: 
   const end = async (started: Launched[]) => {
     driver.kill("SIGTERM");
     await Promise.race([exited, sleep(5_000)]);
-    await endAll(started);
+    try {
+      await endAll(started);
+    } finally {
+      bus?.stop();
+    }
   };
   try {
     // The driver needs a moment to bind, and the app a while longer to boot.
@@ -290,6 +297,26 @@ async function expectUnderTest(app: Driver): Promise<void> {
 }
 
 const sleep = (ms: number) => new Promise((done) => setTimeout(done, ms));
+
+/**
+ * A D-Bus session bus for one app (a `dbus-daemon` of its own, ended by `stop`), or null where there is none to start
+ * (not Linux, no `dbus-daemon`). On a Linux desktop an app under test otherwise joins the person's own session bus
+ * while it draws on Xvfb, and each WebDriver session took about 30 s to open there (2.5 s on a bus of its own); it
+ * also kept the app's names (one per profile, src-tauri/src/single_instance.rs) off the person's bus.
+ */
+export async function privateBus(): Promise<{ address: string; stop: () => void } | null> {
+  if (process.platform !== "linux" || spawnSync("dbus-daemon", ["--version"]).status !== 0) return null;
+  const daemon = spawn("dbus-daemon", ["--session", "--nofork", "--print-address=1"], { stdio: ["ignore", "pipe", "ignore"] });
+  const address = await new Promise<string>((done, fail) => {
+    let out = "";
+    daemon.stdout!.on("data", (chunk: Buffer) => {
+      out += chunk.toString();
+      if (out.includes("\n")) done(out.trim());
+    });
+    daemon.once("exit", (code) => fail(new Error(`dbus-daemon exited (${code})`)));
+  });
+  return { address, stop: () => void daemon.kill("SIGTERM") };
+}
 
 /** A process, with when it started: a PID the system hands out again later is not the same process. */
 interface Launched { pid: number; started: string }
