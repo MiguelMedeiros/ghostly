@@ -94,3 +94,16 @@ test("a proof in its last days puts a dot on Identities, in the bar and in the p
   await expect(page.getByTestId("identity-proof")).toHaveCount(0);
   await expect(page.getByTestId("identities-attention")).toHaveCount(0);
 });
+
+test("the Ghostly card's lines are whole in every language, none cut to an ellipsis", { tag: ["@feature:proofs.page", "@feature:app.i18n"] }, async ({ peer }) => {
+  const { page } = await peer("idpage-languages");
+  for (const language of ["en", "pt", "es", "fr", "it", "zh", "ja", "ar"]) {
+    await page.goto("/#/settings");
+    await choose(page.getByTestId("settings-language"), language);
+    await page.goto("/#/identities");
+    const fields = page.locator(".id-card-face").first().locator(".id-card-field");
+    await expect(fields.first()).toBeVisible();
+    const cut = await fields.evaluateAll((all) => all.filter((f) => f.scrollWidth > f.clientWidth + 1).map((f) => f.textContent));
+    expect(cut, `${language}: lines cut on the card`).toEqual([]);
+  }
+});
