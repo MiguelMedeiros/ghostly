@@ -268,7 +268,9 @@
     "sats": "{{amount}} sats",
     "testMoney": "Dinheiro de teste",
     "testSats": "{{amount}} sats de teste",
-    "usdtAddress": "Endereço USDT"
+    "usdtAddress": "Endereço USDT",
+    "video": "🎬 Vídeo ({{duration}})",
+    "voice": "🎤 Mensagem de voz ({{duration}})"
   },
   "reactions": {
     "chipLabel": "{{emoji}}: {{names}}",

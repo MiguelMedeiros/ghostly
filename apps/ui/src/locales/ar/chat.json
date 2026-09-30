@@ -268,7 +268,9 @@
     "sats": "{{amount}} ساتس",
     "testMoney": "أموال تجريبية",
     "testSats": "{{amount}} ساتس تجريبية",
-    "usdtAddress": "عنوان USDT"
+    "usdtAddress": "عنوان USDT",
+    "video": "🎬 فيديو ({{duration}})",
+    "voice": "🎤 رسالة صوتية ({{duration}})"
   },
   "reactions": {
     "chipLabel": "{{emoji}}: {{names}}",
