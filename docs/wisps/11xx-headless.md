@@ -223,7 +223,7 @@ No wallet is made by itself on Node (`automaticWallets` is off): a bot has only 
 
 ## The older Rust `ghostly-cli`
 
-It is not the npm package `@ghostlytools/cli`. It stays, unchanged, as the **compatibility client** ([402](402-legacy-chat.md)): older DHT records, no `ghostly1` codes, no chat sessions. Its commands and its SKILL.md keep working for the bots that use them. New bots use `ghostly`. From 1.0 the release no longer ships its binaries: bots on it build it from `cli/`. The docs call it the older Rust CLI; removing it is a separate decision, announced before it happens.
+It was not the npm package `@ghostlytools/cli`. It was the compatibility client for the older DHT records ([402](402-legacy-chat.md)): no `ghostly1` codes, no chat sessions. The release stopped shipping it at 1.0, and its source was removed after 1.0. `ghostly` is the CLI.
 
 ## Security considerations
 

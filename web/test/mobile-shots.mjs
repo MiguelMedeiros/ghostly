@@ -82,7 +82,7 @@ try {
   await desk.getByTestId("wallet-paid").waitFor({ timeout: 60_000 });
   await desk.getByRole("button", { name: "Done" }).click();
 
-  await desk.getByTestId("file-input").setInputFiles(join(here, "..", "..", "hero-banner.png"));
+  await desk.getByTestId("file-input").setInputFiles(join(here, "..", "..", "docs", "assets", "hero-banner.png"));
   await phone.getByTestId("file-save").first().waitFor({ timeout: 120_000 });
   await desk.getByTestId("composer-more").click();
   await desk.getByTestId("payment-button").click();

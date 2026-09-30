@@ -126,10 +126,9 @@ export const TYPECHECKS = [
 ];
 export const TYPECHECK_WHOLE = ["tsconfig.json", "packages/*/tsconfig*.json"];
 
-/** The Rust crates, as CI's Tauri and CLI jobs check them. */
+/** The Rust crates, as CI's Tauri job checks them. */
 export const RUST = [
   { name: "src-tauri", sources: ["src-tauri/**", "native-transports/**", "Cargo.toml", "Cargo.lock"] },
-  { name: "cli", sources: ["cli/**", "Cargo.toml", "Cargo.lock"] },
 ];
 
 /** The Playwright config of the web and extension projects: a change there can change every spec. */

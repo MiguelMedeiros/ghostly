@@ -228,10 +228,6 @@ for (const r of p.rust) {
     await run("rust src-tauri clippy", "cargo", ["clippy", "-j", cargoJobs, "--manifest-path", "src-tauri/Cargo.toml", "--", "-D", "warnings"]);
     await run("rust src-tauri test", "cargo", ["test", "-j", cargoJobs, "--manifest-path", "src-tauri/Cargo.toml", "--", `--test-threads=${JOBS}`]);
     await run("rust native-transports test", "cargo", ["test", "-j", cargoJobs, "--manifest-path", "native-transports/Cargo.toml", "--", `--test-threads=${JOBS}`]);
-  } else {
-    await run("rust cli fmt", "cargo", ["fmt", "--manifest-path", "cli/Cargo.toml", "--", "--check"]);
-    await run("rust cli clippy", "cargo", ["clippy", "-j", cargoJobs, "--manifest-path", "cli/Cargo.toml", "--", "-D", "warnings"]);
-    await run("rust cli test", "cargo", ["test", "-j", cargoJobs, "--manifest-path", "cli/Cargo.toml", "--", `--test-threads=${JOBS}`]);
   }
 }
 

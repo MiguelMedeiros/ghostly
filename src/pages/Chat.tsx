@@ -521,12 +521,14 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
           {t("calls.noAnswer")}
         </div>
       )}
-      {/* Chat Header */}
+      {/* Chat Header. On a phone every button can be there at once (the connection, a call, a video call, a bot's Tasks,
+          ⋮): the back button, the avatar, the buttons' sides and the gaps are a little narrower there, so the name keeps
+          eight characters on a 375px phone (it had a letter or two). The buttons stay as tall, and touch each other. */}
       <div className="h-14 header-safe flex items-center justify-between px-4 max-md:ps-1 max-md:pe-1 bg-panel-header border-b border-border shrink-0">
-        <div className="flex items-center gap-3 max-md:gap-1.5 min-w-0">
+        <div className="flex items-center gap-3 max-md:gap-1 min-w-0">
           <button
             onClick={nav.up}
-            className="md:hidden w-11 h-11 flex items-center justify-center text-text-secondary rounded-full active:bg-surface-hover cursor-pointer shrink-0"
+            className="md:hidden w-9 h-11 flex items-center justify-center text-text-secondary rounded-full active:bg-surface-hover cursor-pointer shrink-0"
             title={t("common.back")}
             data-testid="chat-back"
           >
@@ -536,7 +538,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
           </button>
           {/* With a picture, a click opens it large (AvatarViewer.tsx). */}
           <AvatarOpener src={face?.photo ?? peerAvatar} name={shownName} testId="chat-avatar-open"
-            className="relative w-10 h-10 rounded-full bg-surface-hover flex items-center justify-center shrink-0 [--ring:var(--theme-panel-header)]">
+            className="relative w-10 h-10 max-md:w-9 max-md:h-9 rounded-full bg-surface-hover flex items-center justify-center shrink-0 [--ring:var(--theme-panel-header)]">
             <PeerAvatar peerPubKey={params?.peerPubKeyB64} label={shownName} named={!isAnonymous} photo={face?.photo} testId="chat-avatar" />
             {face && <FaceCorner face={face} />}
             {inviteCode && !pairedReady && (
@@ -567,7 +569,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
                 maxLength={30}
               />
             ) : (
-              <div className="flex items-center gap-1.5 min-w-0">
+              <div className="flex items-center gap-1.5 max-md:gap-1 min-w-0">
               <p
                 onClick={startEditLabel}
                 className={`text-[15px] font-normal m-0 leading-tight truncate cursor-pointer hover:text-accent transition-colors ${isAnonymous ? "text-text-muted/60 italic" : "text-text-primary"}`}
@@ -602,7 +604,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
             <ChatSubtitle peerKey={paired ? params.peerPubKeyB64 : undefined} keyLabel={truncatedPeerKey} />
           </div>
         </div>
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-1 max-md:gap-0 shrink-0">
           {/* The chat's one connection control: its icon, and one panel with the choice and the rest under Details. */}
           <ChatConnection key={sessionId} peerKey={params.peerPubKeyB64} paired={paired} myKey={techInfo?.myPubKey} status={statusLabel}
             pairing={pairingShown && pairing.progress ? { progress: pairing.progress, onShow: pairing.scene
@@ -615,7 +617,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
           <div className="relative" ref={menuRef}>
             <button
               onClick={() => setMenuOpen(!menuOpen)}
-              className="p-2 max-md:p-2.5 text-text-secondary hover:text-accent rounded-full hover:bg-surface-hover transition-colors cursor-pointer"
+              className="p-2 max-md:px-1.5 max-md:py-2.5 text-text-secondary hover:text-accent rounded-full hover:bg-surface-hover transition-colors cursor-pointer"
               title={t("chat.options")}
               aria-haspopup="true"
               aria-expanded={menuOpen}

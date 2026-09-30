@@ -38,7 +38,6 @@ describe("bump-version", () => {
         ...versionedJson(root),
         "package-lock.json",
         "src-tauri/Cargo.toml",
-        "cli/Cargo.toml",
         "Cargo.lock",
         "website/lib/release.ts",
         "docs/INSTALLATION.md",

@@ -36,3 +36,6 @@ blob-report-matrix
 
 # npm run test:map:write (the whole test map; generated, see docs/TESTING.md)
 /docs/test-map.md
+
+# TypeScript build info (tsc -b): never committed
+*.tsbuildinfo

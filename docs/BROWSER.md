@@ -47,12 +47,6 @@ npm test                 # unit tests, including packets produced by the Rust im
 npm run test:e2e         # builds the extension, then the end-to-end suite
 ```
 
-```bash
-cargo build -p ghostly-cli && GHOSTLY_CLI=target/debug/ghostly-cli npm run test:interop
-```
-
-exchanges messages between the Rust CLI and the TypeScript core over the real network, both ways.
-
 The e2e suite ([e2e/README.md](../e2e/README.md)) launches Chromium profiles with the extension loaded: pairing, chat, files, calls with the web app, sharing and opening a local app (ES modules, CSS, images, JSON `POST`, large downloads, redirects, navigation), stop sharing, go offline. `HEADED=1` shows the windows. The test grants `localhost` in a copy of the manifest, because automation cannot click Chrome's permission prompt.
 
 ## How it is built

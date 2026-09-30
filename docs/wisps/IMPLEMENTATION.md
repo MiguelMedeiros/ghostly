@@ -42,7 +42,6 @@ What `dev` runs on each client today. This table and the evidence per WISP below
 | Identity proofs | Yes | Yes | Yes | [300](300-peer-proofs.md) |
 | Groups (mesh, community) | Yes | Yes | Yes | [900](900-group-sessions.md) |
 | Headless CLI (`ghostly`) | The app's engine on Node, for bots: `ghostly1` invites, one chat, groups, wallets (not Bark), files, identity proofs, shared apps; DHT through relays only | | | [11xx](11xx-headless.md), #323 to #327 |
-| Older Rust `ghostly-cli` (no longer shipped from 1.0) | Compatibility client only: older DHT records, no `ghostly1` codes, no chat sessions | | | [cli/README.md](../../cli/README.md) |
 
 
 ## Evidence per WISP (2026-09-28)

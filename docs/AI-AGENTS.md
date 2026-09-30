@@ -110,5 +110,5 @@ First adapters:
 
 ## The older skill
 
-[cli/SKILL.md](../cli/SKILL.md) teaches the older Rust `ghostly-cli`, no longer shipped from 1.0, a compatibility client that reads only `ghost://`
-invites and cannot pair with the app. Bots already built on it keep working; new agents use `ghostly`.
+The older Rust `ghostly-cli` and its skill were removed after 1.0. Agents use `ghostly` and
+[packages/cli/SKILL.md](../packages/cli/SKILL.md).
