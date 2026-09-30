@@ -1322,6 +1322,8 @@ export class GhostlyNode implements EngineImplementation {
         ...this.transport.describe(), ...(this.options.irohWeb ? { iroh: { relays: this.irohRelays, defaults: [...DEFAULT_IROH_RELAYS] } } : {}),
         ...(this.transport.configure && { direct: true }), ...(this.transport.discovery && { discovery: this.transport.discovery() }),
         ...(typeof RTCPeerConnection === "undefined" && { webrtc: false as const }),
+        // A group's link goes over WebRTC, or a native transport where one side has none (WISP 9xx § Transports).
+        ...(typeof RTCPeerConnection === "undefined" && !Object.keys(this.nativeFactories).length && { groupLinks: false as const }),
       },
       // Group edges are links the engine runs, not chats anyone sees.
       links: [...this.links.values()].filter((live) => !live.stored.group).map((live) => this.viewOf(live)).sort((a, b) => b.createdAt - a.createdAt),
@@ -4101,6 +4103,10 @@ export class GhostlyNode implements EngineImplementation {
     const group = stored.group!, peer = stored.groupPeer!, entry = !!stored.groupEntry;
     const role = stored.groupEntry ?? "edge";
     let seen = false;
+    // Native where one side has no WebRTC (WISP 9xx § Transports): the transport it last went live on is its native one.
+    const native = this.keepsGroupNative(stored);
+    const resumeOn: PairedTransport | undefined = native
+      ? TRANSPORTS.find(t => t !== "webrtc/1" && t in this.nativeFactories && !!stored.peerTransports?.includes(t)) : "webrtc/1";
     live.pairing = { status: "connecting" };
     live.link = new GhostLink({
       // An edge carries payments with its member (WISP 9xx § Payments), as a chat does; an entry session does not.
@@ -4112,8 +4118,11 @@ export class GhostlyNode implements EngineImplementation {
       rtcAvailable: typeof RTCPeerConnection !== "undefined",
       // Live when this app last ran: the member likely watches for this app to come back, and is dialled at once,
       // whichever end's turn it is, rather than left to its offer and a read at the background pace (WISP 100).
-      // An edge is WebRTC only (no native endpoints, `ensureNativeEndpoints`).
-      resume: !entry && stored.edgeLive ? "webrtc/1" : undefined,
+      // WebRTC, unless one side has none: then the native transport both run.
+      resume: !entry && stored.edgeLive ? resumeOn : undefined,
+      // How the member's app said to dial it, where one side has no WebRTC (`_tr`, `onPacketTransports`).
+      native: { peerDescriptors: stored.peerDescriptors, peerTransports: stored.peerTransports, peerFallback: stored.peerFallback, automatic: true },
+      packetTransports: true,
       // An offer from before that session began is not answered after a restart (a relay that missed its clearing).
       resumeFloor: !entry && stored.edgeLive ? stored.edgeLiveSince : undefined,
       // Pinned in advance to the member the roster names: there is nothing to trust on first use.
@@ -4154,6 +4163,14 @@ export class GhostlyNode implements EngineImplementation {
           }
           this.emitState();
         },
+        // The member's packet says what its app runs here: one with no WebRTC is reached over a native transport, and
+        // this side starts its endpoints for it (and says how to dial them in its own packet). Kept for the next start.
+        onPacketTransports: (peerTransports, peerDescriptors) => {
+          const patch = { peerTransports, peerDescriptors, peerFallback: true };
+          live.stored = { ...live.stored, ...patch };
+          void db.patchLink(linkId, patch).catch(() => {});
+          if (this.keepsGroupNative(live.stored)) void this.ensureNativeEndpoints(linkId);
+        },
         ...(entry ? {} : {
           onPaymentRequest: (request: PaymentRequest) => this.desk.onPaymentRequest(linkId, request),
           onPaymentAsk: (ask: PaymentAsk) => this.desk.onPaymentAsk(linkId, ask),
@@ -4190,6 +4207,16 @@ export class GhostlyNode implements EngineImplementation {
     });
     traceJoin(group, "link.start", { role });
     live.link.start();
+    if (native) void this.ensureNativeEndpoints(linkId);
+  }
+
+  /**
+   * Whether a group's link (an edge, an entry session) runs native endpoints (WISP 9xx § Transports): where this app has
+   * no WebRTC (the Linux Desktop), and where the member's has none, as its packet said. Between two apps that have
+   * WebRTC it runs none, as before: a group of eight would otherwise hold seven listeners per transport for nothing.
+   */
+  private keepsGroupNative(stored: StoredLink): boolean {
+    return typeof RTCPeerConnection === "undefined" || (!!stored.peerTransports && !stored.peerTransports.includes("webrtc/1"));
   }
 
   private startLink(linkId: string, messages: StoredMessage[]): void {
@@ -4631,7 +4658,7 @@ export class GhostlyNode implements EngineImplementation {
     this.relayRetry = setTimeout(() => {
       this.relayRetry = null;
       for (const [linkId, live] of this.links) {
-        if (live.link && live.stored.profile && !live.stored.group && live.stored.deliveryMode !== "dht" && !live.link.availableTransports.includes("hyperdht/1")
+        if (live.link && live.stored.profile && (!live.stored.group || this.keepsGroupNative(live.stored)) && live.stored.deliveryMode !== "dht" && !live.link.availableTransports.includes("hyperdht/1")
           && this.keepsNativeEndpoints(linkId, live.stored)) void this.ensureNativeEndpoints(linkId);
       }
     }, RELAY_RETRY_MS);
@@ -4658,7 +4685,9 @@ export class GhostlyNode implements EngineImplementation {
     const expected = this.links.get(linkId)?.link;
     const operation = this.nativeQueue.then(async () => {
       const live = this.links.get(linkId), link = live?.link;
-      if (this.shuttingDown || !live?.stored.profile || live.stored.group || live.stored.deliveryMode === "dht" || !link || link !== expected) return;
+      if (this.shuttingDown || !live?.stored.profile || live.stored.deliveryMode === "dht" || !link || link !== expected) return;
+      // A group's link runs them only where one side has no WebRTC (`keepsGroupNative`).
+      if (live.stored.group && !this.keepsGroupNative(live.stored)) return;
       for (const [transport, factory] of Object.entries(this.nativeFactories)) {
         const key = transport as NativeTransport;
         if (!factory || link.availableTransports.includes(key)) continue;

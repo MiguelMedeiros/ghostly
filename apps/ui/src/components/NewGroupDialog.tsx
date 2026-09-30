@@ -24,9 +24,9 @@ export function NewGroupDialog({ onClose, onCreated }: { onClose(): void; onCrea
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const backdrop = useBackdropDismiss(onClose);
-  // Group links are WebRTC only: an app with none (Ghostly Desktop on Linux) could make the group and show its link,
-  // but never let anyone in, nor reach a member (GroupConnection says the same once in). It says so here instead.
-  const noLinks = useSyncExternalStore(subscribe, snapshot)?.transport.webrtc === false;
+  // An app with no transport for a group's links (no WebRTC, no native transport) could make the group and show its
+  // link, but never let anyone in, nor reach a member (GroupConnection says the same once in). It says so here instead.
+  const noLinks = useSyncExternalStore(subscribe, snapshot)?.transport.groupLinks === false;
   useEffect(() => {
     const element = dialog.current!; element.showModal(); input.current?.focus();
     return () => element.close();

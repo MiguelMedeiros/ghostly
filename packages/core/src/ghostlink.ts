@@ -6,6 +6,7 @@ import { IDENTITY_MAX_FRAME, type IdentityScope } from "./identityProofs";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { identityFromSeedB64 } from "./identity";
 import { TRANSPORTS, rankTransports, relayedTransports, transportOrder, type NativeEndpoint, type NativeBinding, type NativeTransport, type PairedTransport, type TransportDescriptors } from "./pairedTransports";
+import { dialDescriptors, encodePacketTransports, parsePacketTransports } from "./capsRecord";
 import { sanitizeNick } from "./text";
 import { sanitizeAvatar } from "./avatar";
 import { parseLinkPreview, type LinkPreview } from "./linkPreview";
@@ -260,6 +261,11 @@ export interface GhostLinkEvents {
   /** Round trip of a liveness ping on the open session, in milliseconds. */
   onRtt?(ms: number): void;
   onTransportDiscovery?(descriptors: TransportDescriptors, transports: PairedTransport[], fallback: boolean): Promise<void>;
+  /**
+   * With `packetTransports`: the member's packet said which transports its app runs on this link and how to dial them.
+   * Without `webrtc/1` among them, it has none, and a session takes native endpoints on this side too.
+   */
+  onPacketTransports?(transports: PairedTransport[], descriptors: TransportDescriptors): void;
   onPairingState?(state: PairingState): void;
   /** How far a first pairing got (`pairingProgress` option): every change, up to `live`. */
   onPairingProgress?(progress: PairingProgress): void;
@@ -458,6 +464,12 @@ export interface GhostLinkOptions {
    * its offer or answer in its packet rather than publishing again to clear it.
    */
   oneShot?: boolean;
+  /**
+   * A group's link (an edge, an entry session), which has no capability record: once this side runs a native endpoint on
+   * it, its transports and how to dial them ride its own packet (`_tr`), and the member's are read from its packet
+   * (WISP 9xx § Transports). The owner starts endpoints only where one side has no WebRTC (`onPacketTransports`).
+   */
+  packetTransports?: boolean;
   createPeerConnection: () => RTCPeerConnection;
   localFetch: LocalFetch;
   /** Everything this peer currently offers on this link. */
@@ -725,6 +737,7 @@ export class GhostLink {
           if (this.streamBlocked) { this.heldSignal = signal; this.peerDialsFromDht(signal); return; }
           this.handleRtcSignal(signal);
         },
+        onPeerTransports: value => this.peerPacketTransports(value),
         onDiscoveryError: error => events.onDiscoveryError?.(error),
         onStatus: (status) => events.onStatus?.(status),
         onPoll: (poll) => events.onPoll?.(poll),
@@ -1419,6 +1432,31 @@ export class GhostLink {
     this.advertiseTransports();
     if (this.resuming === endpoint.transport) void this.knock(endpoint.transport);
     else this.joinRace(endpoint.transport);
+    // A group link whose member's packet already said how to dial this transport: something new to dial, now.
+    if (this.options.packetTransports && !this.channel && !this.dialing && this.dataLink.state === "idle" && this.canDial(endpoint.transport)
+      && this.peerTransports?.includes(endpoint.transport)) {
+      this.autoConnectFailures = 0; this.lastAutoConnectAt = 0;
+      this.maybeAutoConnect(this.presence);
+    }
+  }
+
+  /** A group link's `_tr` in its packet: what this side runs and how to dial it, once it runs a native endpoint there. */
+  private publishPacketTransports(): void {
+    if (!this.options.packetTransports) return;
+    this.session.setTransports(this.endpoints.size ? encodePacketTransports(this.availableTransports, this.localDescriptors()) : null);
+  }
+
+  /** The member's packet said which transports its app runs on this group link, and how to dial them. */
+  private peerPacketTransports(value: string): void {
+    if (!this.options.packetTransports || this.stopped) return;
+    const said = parsePacketTransports(value);
+    if (!said) return;
+    const transports = said.transports as PairedTransport[], descriptors = dialDescriptors(said.descriptors);
+    traceLink(this.myPubKeyZ32, "packet-transports", { transports });
+    // Its app has no WebRTC: an offer out to it is never answered, and would hold the data link for its whole attempt.
+    if (!transports.includes("webrtc/1") && !this.channel && this.dataLink.state === "offering") this.disconnect();
+    this.options.events?.onPacketTransports?.(transports, descriptors);
+    this.learnPeerTransports(transports, descriptors, true);
   }
 
   /** A connection the contact dialled on one of this side's native endpoints. */
@@ -1495,6 +1533,7 @@ export class GhostLink {
   }
 
   private advertiseTransports(): void {
+    this.publishPacketTransports();
     if (this.paired?.state.status !== "ready" || !this.options.params.profile) return;
     if (this.paired.peerTransportSwitchSupport) { this.switcher.changed(false); return; }
     const descriptors: TransportDescriptors = {};
@@ -1566,7 +1605,12 @@ export class GhostLink {
       const chosen = this.switcher.chosenTarget ?? this.choiceApart?.transport ?? this.resuming;
       if (chosen && chosen === this.resuming && ranked.includes(chosen)) this.resuming = undefined;
       const choices = chosen && ranked.includes(chosen) ? [chosen, ...ranked.filter(t => t !== chosen)] : ranked;
-      if (!choices.length) throw new Error("No transport both apps allow is available yet");
+      if (!choices.length) {
+        // A group link: the member's app may be starting a native endpoint for this one right now, and says how to dial
+        // it in its packet (`_tr`), which is looked for fast meanwhile rather than at the background pace.
+        if (this.options.packetTransports) this.session.expectPeer();
+        throw new Error("No transport both apps allow is available yet");
+      }
       const fallback = this.fallback && this.peerFallback;
       let lastError: unknown;
       // A transport that keeps failing is tried last for an hour, not first on every attempt.
