@@ -95,6 +95,18 @@ export async function createProfileBackup(passphrase: string, id?: string, lockP
   return seal(await encode(payload), passphrase);
 }
 
+const isQuotaError = (error: unknown) => (error as { name?: string })?.name === "QuotaExceededError";
+
+/** Takes away what a failed restore wrote: its databases and every local key of its namespace. */
+async function undoRestore(ns: string, databases: string[]): Promise<void> {
+  for (const name of databases) {
+    await new Promise<void>((resolve) => { try { const r = indexedDB.deleteDatabase(name); r.onsuccess = r.onerror = r.onblocked = () => resolve(); } catch { resolve(); } });
+  }
+  const prefix = `ghostly_${ns}_`;
+  const keys = Array.from({ length: localStorage.length }, (_, i) => localStorage.key(i)).filter((key): key is string => !!key?.startsWith(prefix));
+  for (const key of keys) { try { localStorage.removeItem(key); } catch { /* nothing more to do */ } }
+}
+
 /**
  * Brings a bundle back as a new profile of this space, and returns it. Nothing existing is replaced.
  * Ark wallet databases move to fresh ids; unfinished payment attempts are kept as unknown.
@@ -114,38 +126,51 @@ export async function restoreProfileBackup(text: string, passphrase: string): Pr
     const walletId = (value as { config?: { walletId?: unknown } })?.config?.walletId;
     if (isArkRecord(settings!.keys[i]) && typeof walletId === "string" && !walletIds.has(walletId)) walletIds.set(walletId, crypto.randomUUID());
   }
-  for (const [oldId, fresh] of walletIds) if (Object.prototype.hasOwnProperty.call(ark, oldId)) await restoreArkDatabase(fresh, ark[oldId]);
-  // Fedimint client databases are files of this origin, not in the bundle: every federation gets a new file name,
-  // which the wallet finds missing and fills by joining again with the mnemonic (the federation's recovery).
-  const freshFedimint = (value: unknown) => {
-    const record = value as { database?: unknown; federations?: { database?: unknown }[] };
-    const renamed = (f: { database?: unknown }) => typeof f?.database === "string" ? { ...f, database: `ghostly-fedimint-${crypto.randomUUID()}.db` } : f;
-    return Array.isArray(record?.federations) ? { ...record, federations: record.federations.map(renamed) } : typeof record?.database === "string" ? renamed(record) : value;
-  };
-  if (peer) {
-    for (const store of peer.stores) {
-      if (store.name === "settings") {
-        store.values = store.values.map((value, i) => {
-          const record = value as { config?: { walletId?: string } };
-          const moved = record?.config?.walletId && walletIds.get(record.config.walletId);
-          if (typeof store.keys[i] === "string" && (store.keys[i] as string).startsWith("fedimint")) return freshFedimint(value);
-          return isArkRecord(store.keys[i]) && moved ? { ...record, config: { ...record.config, walletId: moved } } : value;
-        });
-      }
-      if (store.name === "paymentIntents") {
-        // An older copy cannot prove an unfinished attempt was never sent; it may not authorize a new one.
-        store.values = store.values.map((value) => {
-          const intent = value as { review?: { state?: string } };
-          return intent?.review && ["pending", "submitted", "unknown"].includes(intent.review.state ?? "") ? { ...intent, review: { ...intent.review, state: "unknown" } } : value;
-        });
-      }
+  // What this restore has written so far: a restore that fails takes all of it away again, so a device short of
+  // room is not left holding an unlisted copy of the profile (its keys included) that nothing would ever delete.
+  const made: string[] = [];
+  try {
+    for (const [oldId, fresh] of walletIds) {
+      if (!Object.prototype.hasOwnProperty.call(ark, oldId)) continue;
+      await restoreArkDatabase(fresh, ark[oldId]);
+      made.push(`ghostly-ark-${fresh}`);
     }
-    await restoreDatabase(`ghostly_${ns}`, peer);
+    // Fedimint client databases are files of this origin, not in the bundle: every federation gets a new file name,
+    // which the wallet finds missing and fills by joining again with the mnemonic (the federation's recovery).
+    const freshFedimint = (value: unknown) => {
+      const record = value as { database?: unknown; federations?: { database?: unknown }[] };
+      const renamed = (f: { database?: unknown }) => typeof f?.database === "string" ? { ...f, database: `ghostly-fedimint-${crypto.randomUUID()}.db` } : f;
+      return Array.isArray(record?.federations) ? { ...record, federations: record.federations.map(renamed) } : typeof record?.database === "string" ? renamed(record) : value;
+    };
+    if (peer) {
+      for (const store of peer.stores) {
+        if (store.name === "settings") {
+          store.values = store.values.map((value, i) => {
+            const record = value as { config?: { walletId?: string } };
+            const moved = record?.config?.walletId && walletIds.get(record.config.walletId);
+            if (typeof store.keys[i] === "string" && (store.keys[i] as string).startsWith("fedimint")) return freshFedimint(value);
+            return isArkRecord(store.keys[i]) && moved ? { ...record, config: { ...record.config, walletId: moved } } : value;
+          });
+        }
+        if (store.name === "paymentIntents") {
+          // An older copy cannot prove an unfinished attempt was never sent; it may not authorize a new one.
+          store.values = store.values.map((value) => {
+            const intent = value as { review?: { state?: string } };
+            return intent?.review && ["pending", "submitted", "unknown"].includes(intent.review.state ?? "") ? { ...intent, review: { ...intent.review, state: "unknown" } } : value;
+          });
+        }
+      }
+      await restoreDatabase(`ghostly_${ns}`, peer);
+      made.push(`ghostly_${ns}`);
+    }
+    for (const [suffix, value] of Object.entries(payload.storage)) {
+      if (typeof value !== "string" || !/^[A-Za-z0-9_.-]{1,200}$/.test(suffix)) continue;
+      localStorage.setItem(`ghostly_${ns}_${suffix}`, value);
+    }
+    // Registered last: an interrupted restore leaves no half-made profile in the list.
+    return registerProfile(id, `${payload.profile.name} (restored)`.slice(0, 32));
+  } catch (error) {
+    await undoRestore(ns, made);
+    throw isQuotaError(error) ? Object.assign(new Error("This device has no room left for this backup. Free some space, then try again."), { cause: error }) : error;
   }
-  for (const [suffix, value] of Object.entries(payload.storage)) {
-    if (typeof value !== "string" || !/^[A-Za-z0-9_.-]{1,200}$/.test(suffix)) continue;
-    localStorage.setItem(`ghostly_${ns}_${suffix}`, value);
-  }
-  // Registered last: an interrupted restore leaves no half-made profile in the list.
-  return registerProfile(id, `${payload.profile.name} (restored)`.slice(0, 32));
 }
