@@ -5,6 +5,7 @@ import type { GroupJoinStage, GroupMemberView, GroupView, StoredMessage } from "
 import { GroupChat } from "../../pages/GroupChat";
 import { fakeEngine, groupView } from "../fakeEngine";
 import { renderApp } from "../render";
+import { groupChat, mutedUntil, setChatMute } from "../../lib/chatMute";
 
 // covers: groups.send, groups.leave, groups.forget, groups.rotate, groups.link.join
 
@@ -265,12 +266,25 @@ describe("GroupChat: leaving", () => {
     expect(await screen.findByText("Chat list")).toBeInTheDocument();
   });
 
+  it("forgets the group's mute with its history: rejoining by link reuses the group id, and it is not muted then", async () => {
+    setChatMute(groupChat("group-1"), "forever");
+    const { user, engine } = openGroup(active());
+    engine.on("leaveGroup", () => undefined);
+    const dialog = await leaveFromMenu(user);
+    await user.click(within(dialog).getByTestId("group-leave-confirm"));
+    expect(await screen.findByText("Chat list")).toBeInTheDocument();
+    expect(mutedUntil(groupChat("group-1"))).toBeUndefined();
+  });
+
   it("stays, and says why, when the engine refuses", async () => {
+    setChatMute(groupChat("group-1"), "forever");
     const { user, engine } = openGroup(active());
     engine.on("leaveGroup", () => { throw new Error("Nobody is online to take over"); });
     const dialog = await leaveFromMenu(user);
     await user.click(within(dialog).getByTestId("group-leave-confirm"));
     expect(await within(dialog).findByRole("alert")).toHaveTextContent("Nobody is online to take over");
+    // Still in the group: still muted.
+    expect(mutedUntil(groupChat("group-1"))).toBe("forever");
     expect(within(dialog).getByTestId("group-leave-confirm")).toBeEnabled();
     expect(screen.getByTestId("group-chat")).toBeInTheDocument();
   });
