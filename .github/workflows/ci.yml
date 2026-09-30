@@ -8,6 +8,9 @@ on:
   pull_request:
     branches: [main, master, dev]
     # ready_for_review: a draft may have skipped the Rust jobs (see `changes`); leaving draft runs everything.
+    # Whether the pull request is a draft is read from the API when `changes` runs, never from the event: a push and
+    # `gh pr ready` a second apart start two runs, the later one cancels the other, and the survivor may be the push's
+    # run, whose payload still says draft (#742, #737, #759).
     types: [opened, synchronize, reopened, ready_for_review]
 
 permissions:
@@ -49,6 +52,7 @@ jobs:
       website: ${{ steps.plan.outputs.website }}
       app: ${{ steps.plan.outputs.app }}
       packages: ${{ steps.plan.outputs.packages }}
+      draft: ${{ steps.plan.outputs.draft }}
     steps:
       - name: Checkout the gate
         if: github.event_name == 'pull_request'
@@ -63,14 +67,20 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           EVENT: ${{ github.event_name }}
-          DRAFT: ${{ github.event_name == 'pull_request' && github.event.pull_request.draft }}
+          PAYLOAD_DRAFT: ${{ github.event_name == 'pull_request' && github.event.pull_request.draft }}
+          PR_URL: repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}
           CHANGED: ${{ github.event.pull_request.changed_files }}
           FILES_URL: repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files
         run: |
           if [[ "$EVENT" != "pull_request" ]]; then
-            printf 'rust=true\nwebsite=true\napp=true\npackages=true\n' | tee -a "$GITHUB_OUTPUT"
+            printf 'draft=false\nrust=true\nwebsite=true\napp=true\npackages=true\n' | tee -a "$GITHUB_OUTPUT"
             exit 0
           fi
+          # The draft state now, not the event's: see `on.pull_request` above.
+          draft=$(gh api "$PR_URL" --jq .draft)
+          [[ "$draft" == "true" || "$draft" == "false" ]] || { echo "::error::Could not read the draft state: $draft"; exit 1; }
+          echo "Draft: $draft (the event said $PAYLOAD_DRAFT)"
+          echo "draft=$draft" >> "$GITHUB_OUTPUT"
           gh api --paginate "$FILES_URL" --jq '.[] | "\(.filename)\t\(.previous_filename // "")"' > "$RUNNER_TEMP/files.tsv"
           # The files API lists at most 3000 files: a longer pull request runs everything.
           if (( $(wc -l < "$RUNNER_TEMP/files.tsv") < CHANGED )); then
@@ -80,7 +90,7 @@ jobs:
           fi
           files=$(tr '\t' '\n' < "$RUNNER_TEMP/files.tsv" | grep -v '^$')
           echo "$files"
-          node scripts/ci-changes.mjs --draft="$DRAFT" <<< "$files"
+          node scripts/ci-changes.mjs --draft="$draft" <<< "$files"
 
   # ============================================
   # Frontend (src, packages, extension) - React + Vite + TypeScript
@@ -561,8 +571,9 @@ jobs:
         env:
           # A draft's run may skip jobs (see `changes`). Its CI Success must not count: the dev ruleset asks for a green
           # CI Success, so a green one from the draft run let `gh pr ready` + `gh pr merge --auto` merge at once, before
-          # the full run that leaving draft starts had finished (#590, 2026-09-29).
-          DRAFT: ${{ github.event_name == 'pull_request' && github.event.pull_request.draft }}
+          # the full run that leaving draft starts had finished (#590, 2026-09-29). `changes` read the draft state from
+          # the API when it planned this run, so a run that skipped jobs for a draft never passes here.
+          DRAFT: ${{ needs.changes.outputs.draft }}
           CHANGES: ${{ needs.changes.result }}
           RUST: ${{ needs.changes.outputs.rust }}
           WEBSITE_GATE: ${{ needs.changes.outputs.website }}
@@ -580,7 +591,7 @@ jobs:
           DESKTOP_MACOS: ${{ needs.desktop-macos.result }}
         run: |
           if [[ "$DRAFT" == "true" ]]; then
-            echo "::notice::Draft: the jobs this change needs ran, but CI Success only passes on the run that leaving draft starts."
+            echo "::notice::Draft: the jobs this change needs ran, but CI Success only passes on a run planned after the pull request left draft. Leaving draft starts one; otherwise push, or re-run all jobs (re-running only the failed ones keeps this plan)."
             exit 1
           fi
           # Skipped only counts when `changes` chose to skip that job.
