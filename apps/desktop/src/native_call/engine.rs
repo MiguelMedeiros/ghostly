@@ -1402,9 +1402,10 @@ impl Call {
         }
     }
 
-    /// What the connection itself counted (webrtc-rs's getStats), by kind: the RTP it sent and received, what
-    /// the peer's RTCP reports say it lost of ours, and the bytes over the candidate pair in use. It tells
-    /// pictures that never left from pictures that never arrived and from pictures that did not decode.
+    /// What the connection itself counted (webrtc-rs's getStats), by kind: the RTP it sent and received, and
+    /// the candidate pair in use with its bytes. It tells pictures that never left from pictures that never
+    /// arrived and from pictures that did not decode. (Not the peer's RTCP receiver reports: webrtc-rs 0.21
+    /// counted none of them here.)
     pub async fn transport(&self) -> serde_json::Value {
         let report = self.pc.get_stats(Instant::now(), StatsSelector::None).await;
         let kind = |k: RtpCodecKind| {
@@ -1434,25 +1435,35 @@ impl Call {
                         "lost": received.packets_lost,
                     });
                 }
-                RTCStatsReportEntry::RemoteInboundRtp(s) => {
-                    let received = &s.received_rtp_stream_stats;
-                    out["peerReports"][kind(received.rtp_stream_stats.kind)] = serde_json::json!({
-                        "lost": received.packets_lost,
-                        "fractionLost": s.fraction_lost,
-                        "reports": s.round_trip_time_measurements,
-                    });
-                }
                 RTCStatsReportEntry::IceCandidatePair(pair) if pair.nominated => {
-                    out["pair"] = serde_json::json!({
-                        "bytesSent": pair.bytes_sent,
-                        "bytesReceived": pair.bytes_received,
-                        "discardedOnSend": pair.packets_discarded_on_send,
-                    });
+                    out["pair"]["bytesSent"] = pair.bytes_sent.into();
+                    out["pair"]["bytesReceived"] = pair.bytes_received.into();
+                    out["pair"]["discardedOnSend"] = pair.packets_discarded_on_send.into();
                 }
                 _ => {}
             }
         }
+        // The path the call took (a LAN, a VPN's addresses, a NAT's): what decides the packet sizes that get through.
+        if let Some(pair) = self.selected_pair().await {
+            out["pair"]["local"] = pair.0.into();
+            out["pair"]["remote"] = pair.1.into();
+        }
         out
+    }
+
+    /// The candidate pair ICE chose, as `type address:port` on each side.
+    async fn selected_pair(&self) -> Option<(String, String)> {
+        let sender = self.pc.get_senders().await.into_iter().next()?;
+        let dtls = sender.transport().await.ok()??;
+        let pair = dtls
+            .ice_transport()
+            .get_selected_candidate_pair()
+            .await
+            .ok()??;
+        let side = |c: &rtc::peer_connection::transport::RTCIceCandidate| {
+            format!("{} {}:{}", c.typ, c.address, c.port)
+        };
+        Some((side(pair.local()), side(pair.remote())))
     }
 
     /// Hangs up: the connection closed, every pipeline stopped.
