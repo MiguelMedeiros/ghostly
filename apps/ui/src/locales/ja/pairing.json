@@ -39,6 +39,7 @@
     "answeringInviter": "相手がノックしました。応答しています…",
     "answeringJoiner": "相手が応答しています…",
     "connecting": "暗号化された直接接続を開いています…",
+    "contactSeen": "相手が招待を開きました。接続しています…",
     "failed": "接続できませんでした",
     "knocking": "相手のドアをノックしています…",
     "live": "接続しました",

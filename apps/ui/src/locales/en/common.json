@@ -7,10 +7,14 @@
   "confirm": "Confirm",
   "copied": "Copied!",
   "copy": "Copy",
+  "deck": {
+    "turnBack": "Cards"
+  },
   "delete": "Delete",
   "deleteChatLocal": "This deletes the chat and its history from this device. Your contact’s copy is not deleted.",
   "deleteChatTitle": "Delete chat?",
   "error": "Error",
+  "goHome": "Go home",
   "loading": "Loading...",
   "moreInfo": "More info",
   "save": "Save",

@@ -407,5 +407,6 @@
     "tooShortHold": "Demasiado corto. Mantén pulsado para grabar, suelta para enviar",
     "unplayed": "Mensaje de voz, aún sin escuchar"
   },
-  "yesterday": "Ayer"
+  "yesterday": "Ayer",
+  "youJoined": "Te uniste al chat"
 }
