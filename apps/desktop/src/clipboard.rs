@@ -356,6 +356,23 @@ mod tests {
         assert_eq!(read(main), Ok("ghostly://join#abc\n".into()));
     }
 
+    /// On a Wayland desktop the clipboard is Wayland's: arboard reads it only with its
+    /// `wayland-data-control` backend (wl-clipboard-rs). Without it every copy made in a Wayland
+    /// app read as empty ("Clipboard is empty", pasted pictures and files sent nothing). The
+    /// behaviour itself is covered by e2e/desktop/wayland-clipboard.spec.ts (headless Sway).
+    #[test]
+    fn the_wayland_clipboard_backend_is_built_in() {
+        let lock = include_str!("../../../Cargo.lock");
+        let arboard = lock
+            .split("\n[[package]]\n")
+            .find(|package| package.starts_with("name = \"arboard\"\n"))
+            .expect("arboard in Cargo.lock");
+        assert!(
+            arboard.contains("\"wl-clipboard-rs\""),
+            "arboard is built without wayland-data-control: a Wayland clipboard reads as empty"
+        );
+    }
+
     #[test]
     fn any_other_window_is_refused_before_the_clipboard_is_read() {
         let reads = Arc::new(AtomicUsize::new(0));
