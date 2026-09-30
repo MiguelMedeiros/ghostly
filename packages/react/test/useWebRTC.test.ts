@@ -216,6 +216,31 @@ describe("placing a call", () => {
     expect(call.addCallEventMessage.mock.calls.map(([type]) => type).filter((t) => t === "call_connected" || t === "call_ended")).toEqual(["call_connected", "call_ended", "call_connected", "call_ended"]);
   });
 
+  it.each(["ghostly-departing", "pagehide"])("the app closing mid-call (%s) hangs up, with the call's end line", async (event) => {
+    const call = renderCall();
+    const { stream, pc } = await offered(call);
+    call.receive(remote.answer(Date.now() + 1));
+    await settle();
+    act(() => pc.setIceState("connected"));
+    act(() => { vi.advanceTimersByTime(2000); });
+
+    act(() => { window.dispatchEvent(new Event(event)); });
+
+    expect(call.result.current.callState).toBe("idle");
+    expect(call.publishedKinds()).toEqual(["o", "h"]);
+    expect(stream.getTracks().every((t) => t.stop.mock.calls.length > 0)).toBe(true);
+    expect(call.addCallEventMessage).toHaveBeenCalledWith("call_ended", false, 2000);
+  });
+
+  it("the app closing while our call rings cancels it, as a hang-up does", async () => {
+    const call = renderCall();
+    await offered(call);
+    act(() => { window.dispatchEvent(new Event("ghostly-departing")); });
+    expect(call.result.current.callState).toBe("idle");
+    expect(call.publishedKinds()).toEqual(["o", "h"]);
+    expect(call.addCallEventMessage).not.toHaveBeenCalledWith("call_ended", expect.anything(), expect.anything());
+  });
+
   it("a call that never connected and fails ends with no line", async () => {
     const call = renderCall();
     const { pc } = await offered(call);
@@ -334,6 +359,14 @@ describe("answering a call", () => {
 
     expect(call.publishedKinds()).toEqual(["a"]);
     expect(call.result.current.callState).toBe("connected");
+  });
+
+  it("the app closing while a call rings here sends nothing: the caller's ring runs out", () => {
+    const call = renderCall();
+    call.receive(remote.offer(Date.now()));
+    act(() => { window.dispatchEvent(new Event("ghostly-departing")); });
+    expect(call.result.current.callState).toBe("incoming");
+    expect(call.publishedKinds()).toEqual([]);
   });
 
   it("declining publishes a hang-up and never asks for the microphone", () => {
