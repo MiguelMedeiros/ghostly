@@ -48,7 +48,7 @@ So one read of a mailbox does not tell whether its envelope carries a text, a re
 What such a reader can still learn:
 
 - That the mailbox exists and is in use, and whether the pin happened (the `_dmk` record appears).
-- When each envelope was published: the packet's timestamp is in the clear. With nothing to send, an envelope goes about every four minutes; a text goes at once and again after 4, 8, 16 and 32 s and then every 60 s until its receipt, and a receipt goes at once. Someone reading a mailbox every few seconds can tell activity from that pattern. Hiding it would take envelopes on a fixed schedule whatever happens, which the relays' request budget and the delivery latency do not allow today; it is an open item.
+- When each envelope was published: the packet's timestamp is in the clear. With nothing to send, an envelope goes about every four minutes (a paired chat started again sends its first one 15 s after the start, revision 2026-09-29); a text goes at once and again after 4, 8, 16 and 32 s and then every 60 s until its receipt, and a receipt goes at once. Someone reading a mailbox every few seconds can tell activity from that pattern. Hiding it would take envelopes on a fixed schedule whatever happens, which the relays' request budget and the delivery latency do not allow today; it is an open item.
 - The relays see the IP address of whoever publishes and reads.
 
 Before this revision a text's TTL was its remaining lifetime (at most 300 s, lower on every retry), a keep-alive's was 600 s, and a packet's size followed its content (in one run: keep-alives of 406 bytes before the pin and 576 after, texts of 474 to 969), so a single read told that a text was pending.

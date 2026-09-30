@@ -258,6 +258,13 @@ const SPARE_INVITE_WARM_EVERY_MS = 4 * 60_000;
  */
 export const SPARE_INVITE_WARM_AFTER_TAKE_MS = 30_000;
 export const SPARE_INVITE_MIN_AGE_MS = 6_000;
+/**
+ * At start (and back online), writes that can wait go this long after the chats' and groups' first packets: the spare
+ * invite's warm-up, a chat's first control envelope, its capability record (once the chat's native endpoints are up).
+ * A daemon back with two chats and two groups spent 25 of pkarr.pubky.org's 30 requests a minute on writes in its
+ * first 11 s, and read nothing more for the rest of the minute, the others' answers included (bug hunt r7a, 2026-09-29).
+ */
+export const STARTUP_QUIET_MS = 15_000;
 const SPARE_INVITE_MAX_AGE_MS = 15 * 60_000;
 
 /** How long a removal waits for a wallet's rail to claim what was already paid to it (tests shorten it). */
@@ -1218,7 +1225,7 @@ export class GhostlyNode implements EngineImplementation {
       if (!this.links.get(linkId)?.stored.group) void this.refreshPublicProfiles({ linkId }).catch(() => {});
     }
     this.emitState();
-    if (this.settings.online) { this.hold.start(); this.startGroupEntries(); this.prepareSpare(); }
+    if (this.settings.online) { this.hold.start(); this.startGroupEntries(); this.prepareSpare(STARTUP_QUIET_MS); }
     void this.pollPaymentStatus().catch(()=>{});
     // Federations joined before: opened (and the notes a contact sent that an interruption left unredeemed, redeemed).
     void Promise.all(WALLET_NETWORKS.map((n) => this.fedimintWallets[n].ensureReady())).then(() => this.desk.resumeFedimint());
@@ -3909,7 +3916,7 @@ export class GhostlyNode implements EngineImplementation {
       for (const live of this.links.values()) this.startLink(live.stored.id, await db.getMessages(live.stored.id));
       this.hold.start();
       this.startGroupEntries();
-      this.prepareSpare();
+      this.prepareSpare(STARTUP_QUIET_MS);
       void this.did.publishNow().catch(() => {});
     }
     if (wasOnline && !this.settings.online) this.stopGroupEntries();
@@ -4227,6 +4234,8 @@ export class GhostlyNode implements EngineImplementation {
         await db.patchLink(linkId, { dhtDeliveryState: state });
         live.stored = { ...live.stored, dhtDeliveryState: state };
       },
+        // Started again: the first control envelope goes after the links' first packets (a text or a receipt at once).
+        firstControlAfterMs: STARTUP_QUIET_MS,
         // The capability record's revision rides every envelope; a newer one from the contact is read (WISP 03).
         capsRev: () => live.caps?.rev, peerCapsRev: rev => live.caps?.peerRev(rev),
         // A contact whose record lacks dht-text/1 gets nothing on the DHT: what would go there waits for live.
@@ -4471,25 +4480,33 @@ export class GhostlyNode implements EngineImplementation {
     });
     const link = live.link;
     link.start(); this.emitState();
+    // Unused invites need discovery, not two native listeners. Saved contacts
+    // retain background listeners within the real native capacity.
+    const nativeUp = stored.deliveryMode !== "dht" && (stored.pairedPeerKey || this.activeLinkId === linkId) ? this.ensureNativeEndpoints(linkId) : undefined;
     if (credentials && !stored.group) {
-      live.caps = new CapsExchange({
+      const caps = live.caps = new CapsExchange({
         params: stored, credentials, transport: this.transport, state: stored.capsState,
         local: () => this.capsContent(linkId),
         save: async state => { await db.patchLink(linkId, { capsState: state }); live.stored = { ...live.stored, capsState: state }; },
         changed: record => this.peerCapsChanged(linkId, record),
         published: () => live.link?.announceCapsRevision(),
       });
-      live.caps.start();
+      // A saved contact's record goes once this chat's native endpoints are up, with what dials them (or after
+      // `STARTUP_QUIET_MS`): started at once, it went out without them and again as each came up, and so did an envelope
+      // naming each revision (bug hunt r7a). Mostly it is then the record already out, and nothing goes.
+      if (stored.pairedPeerKey && nativeUp) {
+        const late = setTimeout(() => caps.start(), STARTUP_QUIET_MS);
+        const go = () => { clearTimeout(late); caps.start(); };
+        void nativeUp.then(go, go);
+      } else caps.start();
       // The contact's record as last read: what its app runs, before any session says more (WISP 03).
-      const peer = live.caps.peer;
+      const peer = caps.peer;
       if (peer) {
         link.learnPeerTransports(peer.transports.filter((t): t is PairedTransport => (TRANSPORTS as readonly string[]).includes(t)), dialDescriptors(peer.descriptors));
         link.learnPeerChoice(peer.choice);
       }
     }
-    // Unused invites need discovery, not two native listeners. Saved contacts
-    // retain background listeners within the real native capacity.
-    if (stored.deliveryMode !== "dht" && (stored.pairedPeerKey || this.activeLinkId === linkId)) void this.ensureNativeEndpoints(linkId).then(() => {
+    void nativeUp?.then(() => {
       if (live.link === link && stored.peerTransports && stored.preferredTransport !== "webrtc/1" && live.myPubKeyZ32 < stored.peerPubKeyZ32)
         void link.connect().catch(() => {});
     });
