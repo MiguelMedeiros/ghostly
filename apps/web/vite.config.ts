@@ -52,6 +52,10 @@ export default defineConfig({
   envDir: repositoryRoot,
   resolve: { alias: tauriAliases },
   server: { port: 5180, strictPort: true },
+  // The e2e suites serve the build with `vite preview`. Left to "localhost", Node listens on the first address the
+  // name resolves to, ::1 on macOS and on GitHub's Ubuntu, and 127.0.0.1 is refused: the Bluesky specs must open the
+  // app there (AT Protocol's development client returns only to 127.0.0.1). http://localhost still reaches it.
+  preview: { host: "127.0.0.1" },
   build: {
     outDir: "dist",
     emptyOutDir: true,
