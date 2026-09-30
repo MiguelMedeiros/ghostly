@@ -30,8 +30,15 @@ export function memberColorIndex(key: string): number {
 }
 
 /**
- * Each member's hue in a group: in the order of their keys, each takes the hue their key points to, or the next one
- * free. Twelve given out, all are free again for the next twelve. The same roster gives the same hues, in any order.
+ * How far along the palette a member goes when their hue is taken: five of twelve, so the one they get is far from
+ * the taken one (the palette's neighbours look alike), and every hue is reached (5 and 12 share no factor).
+ */
+const STEP = 5;
+
+/**
+ * Each member's hue in a group: in the order of their keys, each takes the hue their key points to, or when it is
+ * taken the next free one `STEP` along. Twelve given out, all are free again for the next twelve. The same roster
+ * gives the same hues, in any order.
  */
 export function rosterColors(keys: readonly string[]): Map<string, number> {
   const colors = new Map<string, number>();
@@ -39,7 +46,7 @@ export function rosterColors(keys: readonly string[]): Map<string, number> {
   for (const key of [...new Set(keys)].sort()) {
     if (taken.size === HUES) taken = new Set();
     let hue = memberColorIndex(key);
-    while (taken.has(hue)) hue = (hue + 1) % HUES;
+    while (taken.has(hue)) hue = (hue + STEP) % HUES;
     taken.add(hue);
     colors.set(key, hue);
   }

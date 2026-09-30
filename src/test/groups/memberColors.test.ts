@@ -84,6 +84,15 @@ describe("the members' colours in a group, given out over its roster", () => {
     const colors = rosterColors(keys);
     const first = [...keys].sort()[0];
     expect(colors.get(first)).toBe(memberColorIndex(first));
+    // Two keys pointing to one hue: the second goes far along the palette, not to its look-alike neighbour.
+    const x = keyOf(1000);
+    let i = 1001;
+    while (memberColorIndex(keyOf(i)) !== memberColorIndex(x)) i++;
+    const y = keyOf(i);
+    const two = rosterColors([x, y]);
+    const [lo, hi] = [x, y].sort();
+    expect(two.get(lo)).toBe(memberColorIndex(lo));
+    expect(two.get(hi)).toBe((memberColorIndex(hi) + 5) % 12);
     // Someone the roster no longer has goes by their key alone.
     expect(memberText("gone".padEnd(52, "y"), colors)).toBe(MEMBER_TEXT[memberColorIndex("gone".padEnd(52, "y"))]);
   });
