@@ -17,6 +17,7 @@ import { ProviderMark } from "./ProviderMark";
 import { PublicProfileDetails } from "./PublicProfileDetails";
 import "./composer-identities.css";
 import { useAppNavigation } from "../../hooks/useAppNavigation";
+import { deckArrows } from "../deck/arrows";
 
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 type Shared = NonNullable<LinkView["identities"]>["shared"][number];
@@ -212,7 +213,7 @@ export function IdentityPicker({ peerKey, contact, initial, onManage, onAdding, 
       : <>
         {head && <ComposerSheetHead title={t("identities.mine.deckLabel")} who={t("identities.picker.shownTo", { contact })} />}
         <Deck<Entry> compact cards={entries} selected={entry.id} onSelect={select} onChoose={use}
-          kind="radios" label={t("identities.mine.deckLabel")} name="composer-identity-deck" className="id-deck" size={{ max: 250, share: .62 }}
+          kind="radios" label={t("identities.mine.deckLabel")} name="composer-identity-deck" arrows={deckArrows(t)} className="id-deck" size={{ max: 250, share: .62 }}
           testId={e => (e.add ? "composer-identity-add" : e.ghostly ? "composer-identity-ghostly" : "composer-identity")} blocked={why}
           face={(e, { after }) => (e.add ? <AddIdCardFace first={mine.length === 0} providers={providers} /> : <IdCardFace card={e.card} after={after} shared={e.on} />)}
           mark={e => <IdCardMark provider={e.add ? undefined : e.card.provider} subject={e.add ? undefined : e.card.bound} />}

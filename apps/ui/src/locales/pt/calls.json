@@ -21,6 +21,8 @@
   "incoming": "Chamada recebida",
   "incomingAudio": "Chamada de áudio recebida...",
   "incomingVideo": "Chamada de vídeo recebida...",
+  "mediaDenied": "O Ghostly não consegue usar o microfone ou a câmera. Permita nas configurações do site no navegador (no app de desktop: Ajustes do Sistema → Privacidade e Segurança) e tente de novo.",
+  "mediaUnavailable": "Nenhum microfone ou câmera disponível. Conecte um, ou feche o app que está usando, e tente de novo.",
   "missed": "Chamada perdida",
   "mute": "Silenciar",
   "needLive": "Chamadas precisam de uma conexão direta",

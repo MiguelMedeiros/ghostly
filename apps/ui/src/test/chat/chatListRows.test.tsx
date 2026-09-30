@@ -1,4 +1,5 @@
 import { act, screen, within } from "@testing-library/react";
+import { Route, Routes, useLocation } from "react-router-dom";
 import { describe, expect, it } from "vitest";
 import { Sidebar } from "../../components/Sidebar";
 import { LockScreenProvider } from "../../contexts/LockScreenContext";
@@ -162,6 +163,29 @@ describe("the chat list's rows (compact, the default)", () => {
     await user.keyboard(" ");
     expect(isSessionPinned("k")).toBe(false);
     expect(within(rowOf("Kim")).getByRole("button", { name: "Pin chat" })).toHaveAttribute("aria-pressed", "false");
+  });
+
+  it("opens from the keyboard: each row is a stop named for the chat and described by its last line, Enter or Space opens it", async () => {
+    saveSession(chat("n", { nick: "Nell", messages: [message({ text: "lunch?" })] }));
+    saveSession(chat("o"));
+    act(() => fakeEngine.update({ groups: [groupView({ id: "g1", name: "Climbing", status: "active", lastMessageAt: NOW })] }));
+    function Where() { return <p data-testid="where">{useLocation().pathname}</p>; }
+    const { user } = renderApp(<UpdateProvider><Sidebar /><Routes><Route path="*" element={<Where />} /></Routes></UpdateProvider>);
+    const open = within(rowOf("Nell")).getByTestId("chat-row-open");
+    expect(open).toHaveAccessibleName("Nell");
+    expect(open).toHaveAccessibleDescription("lunch?");
+    expect(open).not.toHaveAttribute("aria-current");
+    // A contact with no name is told apart by its key, as the tooltip does.
+    expect(within(rowOf("Contact · oooooo")).getByTestId("chat-row-open")).toHaveAccessibleName(`Contact · oooooo · ${publicKeyLabel(key("o"))}`);
+    open.focus();
+    await user.keyboard("{Enter}");
+    expect(screen.getByTestId("where")).toHaveTextContent("/chat/n");
+    const group = within(screen.getByTestId("group-row")).getByTestId("group-row-open");
+    expect(group).toHaveAccessibleName("Climbing");
+    group.focus();
+    await user.keyboard(" ");
+    expect(screen.getByTestId("where")).toHaveTextContent("/group/g1");
+    expect(within(screen.getByTestId("group-row")).getByTestId("group-row-open")).toHaveAttribute("aria-current", "page");
   });
 
   it("the pinned mark takes nothing from the time or the row: its own lane, shrinking never, the name giving way", () => {

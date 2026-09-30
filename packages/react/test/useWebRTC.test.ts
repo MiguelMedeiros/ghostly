@@ -2,9 +2,9 @@ import { act } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { deferred, FakePeerConnection, installWebRTCFakes, remote, type FakeMediaDevices } from "./fakes";
 import { renderCall, settle } from "./harness";
-import { NO_ANSWER_SHOWN_MS, RESTART_GRACE_MS, RING_MS } from "../src/useWebRTC";
+import { MEDIA_PROBLEM_SHOWN_MS, NO_ANSWER_SHOWN_MS, RESTART_GRACE_MS, RING_MS, mediaProblem } from "../src/useWebRTC";
 
-// covers: calls.audio, calls.video, calls.cancel, calls.decline, calls.screen-share, calls.upgrade
+// covers: calls.audio, calls.video, calls.cancel, calls.decline, calls.media-blocked, calls.screen-share, calls.upgrade
 
 let devices: FakeMediaDevices;
 let uninstall: () => void;
@@ -815,9 +815,57 @@ describe("when the prompt is refused or there is no device", () => {
     expect(FakePeerConnection.instances).toEqual([]);
     expect(call.published).toEqual([]);
     expect(call.fastPoll()).toBe(false);
+    // The person is told why, for a while, and the chat's "call started" line is not left without an end.
+    expect(call.result.current.mediaProblem).toBe("denied");
+    expect(call.addCallEventMessage.mock.calls.map(([type]) => type)).toEqual(["call_started", "call_failed"]);
+    act(() => { vi.advanceTimersByTime(MEDIA_PROBLEM_SHOWN_MS); });
+    expect(call.result.current.mediaProblem).toBeNull();
   });
 
-  it("no camera when answering with video reports the error and sends no answer", async () => {
+  it("a microphone refused while answering tells the caller at once, instead of leaving it ringing", async () => {
+    const call = renderCall();
+    call.receive(remote.offer(Date.now()));
+    act(() => { void call.result.current.acceptCall(false); });
+
+    devices.userMedia[0].deny(denied());
+    await settle();
+
+    expect(call.result.current.callState).toBe("idle");
+    expect(call.result.current.mediaProblem).toBe("denied");
+    expect(FakePeerConnection.instances).toEqual([]);
+    // A hang-up that says the call could not connect: the caller's chat says the same.
+    expect(call.published.map((s) => s && JSON.parse(s))).toEqual([expect.objectContaining({ t: "h", r: "u" })]);
+    expect(call.addCallEventMessage.mock.calls.map(([type]) => type)).toEqual(["call_received", "call_failed"]);
+    expect(call.fastPoll()).toBe(false);
+  });
+
+  it("a camera refused when turned on mid-call says why, and the call goes on", async () => {
+    const call = renderCall();
+    const { pc } = await offered(call);
+    call.receive(remote.answer(Date.now() + 1));
+    await settle();
+    act(() => pc.setIceState("connected"));
+
+    act(() => { void call.result.current.toggleVideo(); });
+    devices.userMedia[1].deny(denied());
+    await settle();
+
+    expect(call.result.current.callState).toBe("connected");
+    expect(call.result.current.mediaProblem).toBe("denied");
+  });
+
+  it.each([
+    ["NotAllowedError", "denied"],
+    ["SecurityError", "denied"],
+    ["NotFoundError", "unavailable"],
+    ["NotReadableError", "unavailable"],
+    ["OverconstrainedError", "unavailable"],
+    ["OperationError", null],
+  ] as const)("reads %s as %s", (name, problem) => {
+    expect(mediaProblem(new DOMException("", name))).toBe(problem);
+  });
+
+  it("no camera when answering with video reports the error and hangs up instead of answering", async () => {
     const call = renderCall();
     call.receive(remote.offer(Date.now(), true));
     act(() => { void call.result.current.acceptCall(true); });
@@ -829,7 +877,9 @@ describe("when the prompt is refused or there is no device", () => {
     expect(call.onError).toHaveBeenCalledExactlyOnceWith(error);
     expect(call.result.current.callState).toBe("idle");
     expect(FakePeerConnection.instances).toEqual([]);
-    expect(call.published).toEqual([]);
+    // No answer, but a hang-up: the caller stops ringing now.
+    expect(call.publishedKinds()).toEqual(["h"]);
+    expect(call.result.current.mediaProblem).toBe("unavailable");
   });
 
   it("an answer the connection refuses reports the error and closes everything", async () => {

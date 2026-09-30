@@ -284,7 +284,11 @@ test("a room of bots with many routines: the panel scrolls inside the window, th
     await stack.getByTestId("routine-stack-toggle").click();
     await expect(stack.getByTestId("status-card").first()).toBeHidden();
 
+    // The phone is an installed app on an iPhone: the status bar is 47px of the page's top.
+    const cdp = await page.context().newCDPSession(page);
     for (const size of [{ width: 1280, height: 800 }, { width: 375, height: 812 }]) {
+      const statusBar = size.width < 768 ? 47 : 0;
+      await cdp.send("Emulation.setSafeAreaInsetsOverride", { insets: { top: statusBar, bottom: statusBar ? 34 : 0, left: 0, right: 0 } });
       await page.setViewportSize(size);
       await page.getByTestId("chat-tasks").click();
       const panel = page.getByTestId("chat-tasks-panel");
@@ -302,6 +306,8 @@ test("a room of bots with many routines: the panel scrolls inside the window, th
       await page.getByTestId("chat-tasks-finished-toggle").click();
       expect(await underStuck(panel)).toEqual([]);
       await inWindow(page, panel);
+      // Its header clear of the status bar: the sheet reached 40px from the top, under it.
+      expect((await panel.boundingBox())!.y).toBeGreaterThanOrEqual(statusBar);
       // Only the list scrolls: nothing in it makes the panel itself taller than its box, so a row scrolled into view
       // (a click, a focus) never scrolls the header out of sight.
       // (It was 119 px over with Hermes Zero's routines open; a pixel of rounding is not that.)

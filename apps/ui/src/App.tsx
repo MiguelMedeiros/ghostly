@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Outlet, useLocation } from "react-router-dom";
 import { Sidebar } from "./components/Sidebar";
 import { MobileTabBar } from "./components/MobileTabBar";
@@ -162,6 +162,7 @@ export function App() {
   // What a wake-up shows, and which chats it may name (the installed web app; nothing elsewhere).
   useWakeTableSync({ title: "Ghostly", body: t("pwa.wakeNotice"), call: t("pwa.wakeCall") });
   const chats = useLoadedChats();
+  const mainRef = useRef<HTMLElement>(null);
 
   const inChat = pathname.startsWith("/chat");
   // A group is a conversation too: on a phone it takes the whole screen, without the tab bar.
@@ -170,13 +171,21 @@ export function App() {
   if (!isMobile) {
     return (
       <div className="two-pane w-full flex bg-app-bg">
+        {/* The first stop of the keys: past the chat list to the open page, however long the list is. A button, not
+            a #fragment link: the router lives in the hash. */}
+        <button type="button" data-testid="skip-to-content" onClick={() => mainRef.current?.focus()}
+          className="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:start-2 focus:z-[60] focus:rounded-lg focus:bg-accent focus:px-4 focus:py-2 focus:text-sm focus:font-semibold focus:text-on-accent focus:outline-2 focus:outline-offset-2 focus:outline-accent">
+          {t("sidebar.skipToContent")}
+        </button>
         <Sidebar />
-        {chats("flex-1 flex flex-col min-w-0")}
-        {!inChat && (
-          <div className="flex-1 flex flex-col min-w-0">
-            <Outlet />
-          </div>
-        )}
+        <main ref={mainRef} tabIndex={-1} className="flex-1 flex min-w-0 focus:outline-none">
+          {chats("flex-1 flex flex-col min-w-0")}
+          {!inChat && (
+            <div className="flex-1 flex flex-col min-w-0">
+              <Outlet />
+            </div>
+          )}
+        </main>
         <InstallSteps />
       </div>
     );
@@ -187,15 +196,17 @@ export function App() {
   const onChatList = pathname === "/";
   return (
     <div className="app-shell w-full flex flex-col bg-app-bg">
-      <div className={onChatList ? "flex-1 flex min-h-0" : "hidden"}>
-        <Sidebar />
-      </div>
-      {chats("flex-1 flex flex-col min-h-0 min-w-0")}
-      {!onChatList && !inChat && (
-        <div className="flex-1 flex flex-col min-h-0 min-w-0">
-          <Outlet />
+      <main className="flex-1 flex flex-col min-h-0 min-w-0">
+        <div className={onChatList ? "flex-1 flex min-h-0" : "hidden"}>
+          <Sidebar />
         </div>
-      )}
+        {chats("flex-1 flex flex-col min-h-0 min-w-0")}
+        {!onChatList && !inChat && (
+          <div className="flex-1 flex flex-col min-h-0 min-w-0">
+            <Outlet />
+          </div>
+        )}
+      </main>
       {!inChat && !inGroup && <MobileTabBar />}
       <InstallSteps />
     </div>

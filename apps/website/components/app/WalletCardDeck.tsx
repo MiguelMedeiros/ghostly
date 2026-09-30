@@ -55,6 +55,8 @@ export interface CardDeckProps<Id extends string=WalletRail> {
  compact?:boolean;
  /** Every card names its network, Mainnet too: a deck where both kinds sit together (the chat's). */
  tagAll?:boolean;
+ /** The arrows' accessible names (deck/Deck.tsx). */
+ arrows?:{previous:string;next:string};
 }
 
 const WALLET_PANEL={id:'wallet-panel',tabId:(rail:string)=>`wallet-tab-${rail}`};

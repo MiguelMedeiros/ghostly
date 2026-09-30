@@ -16,6 +16,7 @@ import { PublicDid } from "./PublicDid";
 import { ApprovalPanel } from "./ApprovalPanel";
 import { PublicProfileDetails } from "./PublicProfileDetails";
 import { useAppNavigation } from "../../hooks/useAppNavigation";
+import { deckArrows } from "../deck/arrows";
 
 type Entry =
   | { id: typeof GHOSTLY; ghostly: true; card: IdCardContent }
@@ -97,7 +98,7 @@ export function IdentityProofsSection({ onAdd }: { onAdd?: () => void }) {
     <section className="space-y-3" data-testid="identities-mine">
       <h2 className="text-sm font-semibold text-accent uppercase tracking-wide">{t("identities.mine.title")}</h2>
       <Deck<Entry> cards={entries} selected={entry.id} onSelect={select}
-        kind="tabs" panel={PANEL} label={t("identities.mine.deckLabel")} name="identity-deck" className="id-deck"
+        kind="tabs" panel={PANEL} label={t("identities.mine.deckLabel")} name="identity-deck" arrows={deckArrows(t)} className="id-deck"
         testId={e => (e.ghostly ? "identity-ghostly" : "identity-proof")}
         face={(e, { after }) => <IdCardFace card={e.card} after={after} />}
         mark={e => <IdCardMark provider={e.card.provider} subject={e.card.bound} />} tone={tone} />
