@@ -126,10 +126,11 @@ test("three members: A mentions B, B's muted group still notifies, C's stays qui
   // A community member's name travels with what they say: each says hello, so the others know them by name.
   await say(bob, "hi from Bob");
   await say(carol, "hi from Carol");
-  await expect(groupChat(alice).getByText("hi from Carol")).toBeVisible({ timeout: 120_000 });
-  await expect(groupChat(alice).getByText("hi from Bob")).toBeVisible({ timeout: 120_000 });
-  await expect(groupChat(bob).getByText("hi from Carol")).toBeVisible({ timeout: 120_000 });
-  await expect(groupChat(carol).getByText("hi from Bob")).toBeVisible({ timeout: 120_000 });
+  // Looked for in the timeline: for a second the screen reader's line beside it says the same words ("Bob: hi from Bob").
+  await expect(chat(alice).getByText("hi from Carol")).toBeVisible({ timeout: 120_000 });
+  await expect(chat(alice).getByText("hi from Bob")).toBeVisible({ timeout: 120_000 });
+  await expect(chat(bob).getByText("hi from Carol")).toBeVisible({ timeout: 120_000 });
+  await expect(chat(carol).getByText("hi from Bob")).toBeVisible({ timeout: 120_000 });
 
   // Bob and Carol mute the group and go back to the list.
   for (const p of [bob, carol]) {
