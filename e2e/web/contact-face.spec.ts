@@ -46,7 +46,8 @@ test("a contact shown as their Nostr profile in the chat list and header, and ba
   const name = row.getByTestId("chat-row-name");
   await expect(row.getByTestId("contact-mark")).toHaveAttribute("data-icon", "nostr", { timeout: 60_000 });
   const ownName = (await name.textContent())!;
-  expect(ownName).not.toBe("Alice Nostr");
+  // She set no name here: the list says "Contact · <start of her key>".
+  expect(ownName).toMatch(/^Contact · \S{6}$/);
 
   // Her identities: Show as offers her only profile with one tap; Bob picks it in the select instead.
   const panel = await openIdentities(bob);
@@ -91,5 +92,5 @@ test("a contact shown as their Nostr profile in the chat list and header, and ba
   await expect(name).toHaveText(ownName, { timeout: 60_000 });
   await expect(row.getByTestId("contact-face-corner")).toHaveCount(0);
   // The header names an unnamed contact by the word alone, the start of the key on the line under it (#845).
-  await expect(bob.page.getByTestId("chat-name")).toHaveText(ownName.split(" · ")[0]);
+  await expect(bob.page.getByTestId("chat-name")).toHaveText("Contact");
 });
