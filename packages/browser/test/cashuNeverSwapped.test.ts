@@ -32,7 +32,9 @@ const MINT = "https://mint.example";
 const KEYSET = "009a1f293253e41e";
 const C = `02${"ab".repeat(32)}`;
 const proof = (amount: number, secret: string): Proof => ({ id: KEYSET, amount: Amount.from(amount), secret, C }) as Proof;
-const target: PaymentTarget = { method: "cashu", network: "bitcoin", provider: MINT, asset: "BTC", unit: "sat", address: "creqA", expiresAt: Date.now() + 3_600_000 };
+/** The tests' clock: the request's expiry counts from it, not from the real one (a request more than a day away is refused). */
+const START = new Date("2026-09-29T12:00:00Z");
+const target: PaymentTarget = { method: "cashu", network: "bitcoin", provider: MINT, asset: "BTC", unit: "sat", address: "creqA", expiresAt: START.getTime() + 3_600_000 };
 const context = { payee: "alice", linkId: "chat-1", requestId: "req-1" };
 const all = async <T>(name: string) => wrap<T[]>((await store(name, "readonly")).getAll());
 /** A swap's longest life after its approval: past it, nothing of it can still reach the mint. */
@@ -70,7 +72,7 @@ async function approvedWhileMintDown(t: ReturnType<typeof setup>) {
 
 beforeEach(async () => {
   vi.resetAllMocks();
-  vi.useFakeTimers({ toFake: ["Date"], now: new Date("2026-09-29T12:00:00Z") });
+  vi.useFakeTimers({ toFake: ["Date"], now: START });
   await transact([STORES.proofs, STORES.payments, STORES.walletTx, STORES.intents], (s) => { s[STORES.proofs].clear(); s[STORES.payments].clear(); s[STORES.walletTx].clear(); s[STORES.intents].clear(); });
   await transact([STORES.proofs], (s) => s[STORES.proofs].put({ mint: MINT, id: KEYSET, amount: 64, secret: "in", C }));
   mintApi.restore.mockResolvedValue({ outputs: [], signatures: [] });
