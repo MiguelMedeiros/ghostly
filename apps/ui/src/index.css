@@ -373,6 +373,13 @@ html[data-standalone="true"] {
   select {
     font-size: 16px !important;
   }
+
+  /* As on a phone held upright too: a list pulled down at its top would pull the page with it, and the browser's
+     pull-to-refresh reloaded the app (Chrome on an Android phone on its side, a tablet), dropping its chats and calls. */
+  html,
+  body {
+    overscroll-behavior: none;
+  }
 }
 
 .pb-safe {
