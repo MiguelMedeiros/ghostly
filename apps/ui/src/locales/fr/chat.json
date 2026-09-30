@@ -407,5 +407,6 @@
     "tooShortHold": "Trop court. Maintenez pour enregistrer, relâchez pour envoyer",
     "unplayed": "Message vocal, pas encore écouté"
   },
-  "yesterday": "Hier"
+  "yesterday": "Hier",
+  "youJoined": "Vous avez rejoint la discussion"
 }
