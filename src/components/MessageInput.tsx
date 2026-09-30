@@ -91,7 +91,7 @@ interface MessageInputProps {
    * The message being answered (WISP 400 § Replies), shown above the field with ✕; Escape cancels too. The page keeps
    * it and sends it with the text. A new `key` (another message) brings the focus to the field.
    */
-  reply?: { key: string; name?: string; snippet: string; mine: boolean; onCancel: () => void };
+  reply?: { key: string; name?: string; snippet: string; mine: boolean; member?: string; onCancel: () => void };
   /**
    * A message of mine being edited (WISP 400 § Edits): its text fills the field, the draft waits and comes back after.
    * Enter saves through `onSave`; ✕ or Escape leaves it. Either way `onClose` ends it. A new `key` edits another one.
@@ -570,7 +570,7 @@ export function MessageInput({
         </div>
       )}
       {edit && <EditBar snippet={edit.snippet} onCancel={() => { endEdit(); textareaRef.current?.focus({ preventScroll: true }); }} />}
-      {reply && !edit && <ReplyBar name={reply.name} snippet={reply.snippet} mine={reply.mine} onCancel={() => { reply.onCancel(); textareaRef.current?.focus({ preventScroll: true }); }} />}
+      {reply && !edit && <ReplyBar name={reply.name} snippet={reply.snippet} mine={reply.mine} member={reply.member} onCancel={() => { reply.onCancel(); textareaRef.current?.focus({ preventScroll: true }); }} />}
       {linkPreview.draft && <LinkPreviewDraftCard draft={linkPreview.draft} onRemove={linkPreview.remove} />}
       <div className="composer-row flex items-end gap-2 relative">
         {/* One rounded field: the +, the emoji/GIF panel's smiley and the message. */}

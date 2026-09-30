@@ -34,6 +34,19 @@
   --color-link: var(--theme-link);
   --color-danger-ink: var(--theme-danger-ink);
   --color-on-accent: var(--theme-on-accent);
+  /* A group member's name, from their key (lib/memberColors.ts): twelve hues, each readable on every bubble and header. */
+  --color-member-0: var(--theme-member-0);
+  --color-member-1: var(--theme-member-1);
+  --color-member-2: var(--theme-member-2);
+  --color-member-3: var(--theme-member-3);
+  --color-member-4: var(--theme-member-4);
+  --color-member-5: var(--theme-member-5);
+  --color-member-6: var(--theme-member-6);
+  --color-member-7: var(--theme-member-7);
+  --color-member-8: var(--theme-member-8);
+  --color-member-9: var(--theme-member-9);
+  --color-member-10: var(--theme-member-10);
+  --color-member-11: var(--theme-member-11);
   --color-input-bg: var(--theme-input-bg);
   --color-search-bg: var(--theme-search-bg);
   --color-unread: var(--theme-accent);
@@ -73,6 +86,19 @@
   --theme-link: #8ad3f6;
   --theme-danger-ink: #ff9a8f;
   --theme-on-accent: #111b21;
+  /* Group members' names (lib/memberColors.ts), shared by every dark theme: at least 4.5:1 on each one's bubbles and header. */
+  --theme-member-0: #f2b7b7;
+  --theme-member-1: #eebaa0;
+  --theme-member-2: #e9be81;
+  --theme-member-3: #dec545;
+  --theme-member-4: #49df7b;
+  --theme-member-5: #38dcc0;
+  --theme-member-6: #83d0e9;
+  --theme-member-7: #aac7f0;
+  --theme-member-8: #c4c0f4;
+  --theme-member-9: #dbbaf3;
+  --theme-member-10: #f1b1ec;
+  --theme-member-11: #f2b3d2;
 }
 
 :root[data-theme="light"],
@@ -103,6 +129,19 @@
   --theme-link: #026aa0;
   --theme-danger-ink: #c5221f;
   --theme-on-accent: #111b21;
+  /* Shared by every light theme, as for dark. */
+  --theme-member-0: #c82020;
+  --theme-member-1: #a94b1b;
+  --theme-member-2: #8c5b17;
+  --theme-member-3: #766613;
+  --theme-member-4: #137634;
+  --theme-member-5: #137464;
+  --theme-member-6: #176f8c;
+  --theme-member-7: #2064c3;
+  --theme-member-8: #5c50e2;
+  --theme-member-9: #942fdd;
+  --theme-member-10: #b41da7;
+  --theme-member-11: #c11f70;
 }
 
 /* ============================================
@@ -701,6 +740,17 @@ html[data-standalone="true"] {
 .message-row-x { padding-inline: 63px; }
 @media (width < 48rem) { .message-row-x { padding-inline: 10px; } }
 @container message-list (width < 36rem) { .message-row-x { padding-inline: 10px; } }
+
+/*
+ * A group member's picture beside the last bubble of a run of theirs, or its empty place beside the others
+ * (chat/SenderAvatar.tsx): smaller on a phone, and gone in a very narrow chat (a 330px pane), where the bubbles need
+ * the room and the name's colour alone tells who wrote.
+ */
+.sender-avatar { width: 28px; height: 28px; flex-shrink: 0; align-self: flex-end; margin-inline-end: 2px; }
+@media (width < 48rem) { .sender-avatar { width: 24px; height: 24px; } }
+@container message-list (width < 36rem) { .sender-avatar { width: 24px; height: 24px; } }
+@media (width < 22rem) { .sender-avatar { display: none; } }
+@container message-list (width < 22rem) { .sender-avatar { display: none; } }
 
 /*
  * The list's size comes from the chat's column (it is a flex item that scrolls), never from its rows. Said so, a
