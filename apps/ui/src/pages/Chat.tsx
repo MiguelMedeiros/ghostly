@@ -82,6 +82,7 @@ import { PinnedBar } from "../components/chat/PinnedBar";
 import { TasksButton } from "../components/chat/TasksButton";
 import { RoutineStack } from "../components/chat/RoutineCard";
 import { routineStacks } from "../lib/statusCards";
+import { scrollIntoViewGently } from "../lib/motion";
 
 /** What a call captures from: the devices the profile chose, read when it asks. */
 const callDevicePreferences = () => ({ audio: preferredDevice("audioinput"), video: preferredDevice("videoinput") });
@@ -635,7 +636,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
           {/* The chat's one connection control: its icon, and one panel with the choice and the rest under Details. */}
           <ChatConnection key={sessionId} peerKey={params.peerPubKeyB64} paired={paired} myKey={techInfo?.myPubKey} status={statusLabel}
             pairing={pairingShown && pairing.progress ? { progress: pairing.progress, onShow: pairing.scene
-              ? () => document.getElementById(pairingSceneId)?.scrollIntoView({ block: "center", behavior: "smooth" }) : undefined } : undefined} />
+              ? () => scrollIntoViewGently(document.getElementById(pairingSceneId)) : undefined } : undefined} />
           <CallButtons blocked={canWakeForCall ? null : callsBlocked} busy={webrtc.callState !== "idle" || wakeCall.waking}
             onCall={(withVideo) => (callsBlocked && canWakeForCall ? void wakeCall.ring(withVideo) : webrtc.startCall(withVideo))} />
           {/* Only while a bot's card is here (WISP 4xx · Status Cards). */}

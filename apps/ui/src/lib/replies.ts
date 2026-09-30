@@ -2,6 +2,7 @@ import { replySnippet, type StatusCard } from "@ghostly/core";
 import { replyRef, replyTo, type ReplyTarget } from "@ghostly/browser/shared/replies";
 import type { MessageReply } from "@ghostly/browser/shared/types";
 import { revealMessage } from "../hooks/useRowWindow";
+import { reducedMotion } from "./motion";
 import { cardLine, showsCard } from "./statusCards";
 import type { ChatMessage } from "./types";
 
@@ -100,7 +101,7 @@ export function jumpToMessage(id: string, root: ParentNode = document): boolean 
   const row = [...root.querySelectorAll<HTMLElement>("[data-message-id]")].find(el => el.dataset.messageId === id);
   if (!row) return false;
   row.dispatchEvent(new Event(JUMP_EVENT, { bubbles: true }));
-  const reduce = typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const reduce = reducedMotion();
   // Far away (a search's match a thousand messages up), at once: a smooth scroll that long takes seconds.
   const far = Math.abs(row.getBoundingClientRect().top) > 3 * window.innerHeight;
   row.scrollIntoView?.({ block: "center", behavior: reduce || far ? "auto" : "smooth" });
