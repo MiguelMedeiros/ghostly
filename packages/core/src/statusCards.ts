@@ -324,7 +324,9 @@ export function statusCardText(card: StatusCard): string {
     const state = [STATUS_WORD[card.status], ...(progress !== undefined ? [`${progress}%`] : []), ...(card.done !== undefined && card.total ? [`${card.done} of ${card.total} steps`] : [])].join(" · ");
     const pr = card.pr && [`PR${card.pr.number !== undefined ? ` #${card.pr.number}` : ""}`,
       ...(card.pr.additions !== undefined || card.pr.deletions !== undefined ? [`+${card.pr.additions ?? 0} -${card.pr.deletions ?? 0}`] : [])].join(" ") + `: ${card.pr.url}`;
-    return [`${TASK_MARK[card.status]} ${card.title}`, state, ...(card.step ? [`Now: ${card.step}`] : []), ...(pr ? [pr] : [])].join("\n");
+    // "Now:" only while the task is going: a finished one's last step is not what it does now (the card hides it too).
+    const now = card.step && ACTIVE_TASK_STATUSES.includes(card.status) ? [`Now: ${card.step}`] : [];
+    return [`${TASK_MARK[card.status]} ${card.title}`, state, ...now, ...(pr ? [pr] : [])].join("\n");
   }
   const last = card.lastRun && `Last run: ${RESULT_WORD[card.lastRun.result]}, ${cardTimeUtc(card.lastRun.at)}${card.lastRun.summary ? ` · ${card.lastRun.summary}` : ""}`;
   return [`🔁 ${card.name}`, `${card.schedule} · ${card.state === "active" ? "active" : "paused"}`, ...(last ? [last] : []),
