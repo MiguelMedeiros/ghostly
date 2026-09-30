@@ -235,7 +235,7 @@ export const developers = {
         links: [
           { label: "packages/core", href: "https://github.com/MiguelMedeiros/ghostly/tree/dev/packages/core/src" },
           { label: "packages/sdk", href: "https://github.com/MiguelMedeiros/ghostly/tree/dev/packages/sdk" },
-          { label: "native-transports", href: "https://github.com/MiguelMedeiros/ghostly/tree/dev/native-transports" },
+          { label: "native/transports", href: "https://github.com/MiguelMedeiros/ghostly/tree/dev/native/transports" },
         ],
       },
       {

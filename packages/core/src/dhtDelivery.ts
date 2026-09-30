@@ -163,6 +163,8 @@ export class DhtDelivery {
   /** The next read was asked for (a refresh, a fresh packet of the contact): it is not a background one. */
   private urgent = false;
   private timer: ReturnType<typeof setTimeout> | null = null;
+  /** The first control envelope of a start that waits (`firstControlAfterMs`). */
+  private controlTimer: ReturnType<typeof setTimeout> | null = null;
   private chain = Promise.resolve();
   private lastPublish = 0;
   private controlDue = 0;
@@ -204,6 +206,11 @@ export class DhtDelivery {
     /** The contact took this side's reactions up to number `n`. */
     reactionsTaken?(n: number): Promise<void>;
     pollMs?: number;
+    /**
+     * A chat already paired, started again: its first control envelope goes this long after the start, not in the
+     * burst of an app coming back (bug hunt r7a). A text, a receipt, a new mode or a new capability revision still go at once.
+     */
+    firstControlAfterMs?: number;
   }) {
     // `peerRejected`, saved by apps before WISP 403 revision 0.3, stopped the chat for good on an envelope anyone
     // holding the invite could forge: it is dropped, not honoured.
@@ -288,12 +295,23 @@ export class DhtDelivery {
   }
   async start(): Promise<void> {
     if (this.running) return; this.running = true;
+    const quiet = this.options.credentials.peerKey ? this.options.firstControlAfterMs ?? 0 : 0;
+    if (quiet > 0) {
+      this.controlDue = Math.max(this.controlDue, Date.now() + quiet);
+      this.controlTimer = setTimeout(() => { this.controlTimer = null; void this.serialize(async () => { try { await this.publish(); } catch { /* the next tick */ } }); }, quiet);
+    }
     if (this.state.confirmed) await this.options.receipt(this.state.confirmed);
     // A chat with no pinned contact is read at the signaling pace only once the contact shows up (`expect`, from its
     // fresh presence packet): an invite nobody opened yet, or one warmed ahead of time, spends no relay budget.
     this.changed(); void this.tick();
   }
-  async stop(): Promise<void> { this.running = false; if (this.timer) clearTimeout(this.timer); this.timer = null; await this.chain; }
+  async stop(): Promise<void> {
+    this.running = false;
+    if (this.timer) clearTimeout(this.timer);
+    if (this.controlTimer) clearTimeout(this.controlTimer);
+    this.timer = this.controlTimer = null;
+    await this.chain;
+  }
   async setMode(mode: DeliveryMode): Promise<void> {
     await this.serialize(async () => {
       // Preserve accepted DHT intent, its stable ID and original expiry across mode changes.

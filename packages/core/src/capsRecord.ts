@@ -322,14 +322,17 @@ export class CapsExchange {
   private async persist(next: CapsState): Promise<void> { await this.options.save(structuredClone(next)); this.state = next; }
 
   start(): void {
-    if (this.running) return;
+    if (this.running || this.ended) return;
     this.running = true;
     void this.update().catch(() => {});
     // Paired, and the contact's record never read: once. After that, a newer revision named in an envelope,
-    // a drop or a new pin is what reads it again, not every start.
-    if (this.options.credentials.peerKey && !this.state.peer) this.refresh(true);
+    // a drop or a new pin is what reads it again, not every start. One named before a late start is read now.
+    if (this.options.credentials.peerKey && (!this.state.peer || this.named > this.state.peer.rev)) this.refresh(true);
   }
+  /** Stopped for good: a start still waiting (the engine starts it once the chat's endpoints are up) does nothing. */
+  private ended = false;
   async stop(): Promise<void> {
+    this.ended = true;
     this.running = false;
     if (this.timer) clearTimeout(this.timer);
     if (this.readTimer) clearTimeout(this.readTimer);

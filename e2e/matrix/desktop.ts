@@ -24,7 +24,7 @@ export interface DesktopWorld {
 }
 
 /** The HyperDHT testnet the Desktop runtime's own dependency graph ships (scripts/prepare-native-runtime.mjs installs it). */
-export const HYPERDHT_TESTNET = join(import.meta.dirname, "..", "..", "native-transports", "hyperdht", "node_modules", "hyperdht", "testnet.js");
+export const HYPERDHT_TESTNET = join(import.meta.dirname, "..", "..", "native", "transports", "hyperdht", "node_modules", "hyperdht", "testnet.js");
 
 /**
  * What a Desktop app of the scenario needs from the test process: the relay, and a HyperDHT network of its

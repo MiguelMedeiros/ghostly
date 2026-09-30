@@ -1,0 +1,1 @@
+Code paths follow the new repository layout: `native-transports/` is now `native/transports/`, and its two relays are `services/hyperdht-relay/` and `services/push-relay/`. Nothing in the contract changed.

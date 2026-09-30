@@ -668,7 +668,7 @@ mod tests {
 }
 
 /// The real sidecar.mjs, run by Node, over endpoints held in memory
-/// (`native-transports/hyperdht/test/fake-endpoint.mjs`): how many processes
+/// (`native/transports/hyperdht/test/fake-endpoint.mjs`): how many processes
 /// there are, and when they go.
 #[cfg(all(test, unix))]
 mod runtime_tests {
@@ -684,7 +684,7 @@ mod runtime_tests {
         PROGRAM
             .get_or_init(|| {
                 let source =
-                    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../native-transports/hyperdht");
+                    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../native/transports/hyperdht");
                 let folder =
                     std::env::temp_dir().join(format!("ghostly-hyperdht-{}", std::process::id()));
                 std::fs::create_dir_all(&folder).unwrap();

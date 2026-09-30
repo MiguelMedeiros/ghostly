@@ -11,7 +11,7 @@
  * - the download tables in docs/INSTALLATION.md
  * - CHANGELOG.md: the files in changes/ go into "## Unreleased" (and are deleted), which becomes "## <version>"
  *
- * A package with a version of its own (website/, native-transports/*, examples/*) is not a workspace.
+ * A package with a version of its own (website/, native/transports/hyperdht, services/*, examples/*) is not a workspace.
  * See docs/RELEASING.md for the rest of a release.
  */
 import { execFileSync } from "node:child_process";

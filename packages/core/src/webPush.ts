@@ -68,7 +68,7 @@ export function vapidKeysMatch(keys: VapidKeys): boolean {
 
 /**
  * The push services a browser subscribes with: Google (Chrome, Edge on Android, Brave, Opera), Apple (Safari), Mozilla
- * (Firefox), Microsoft (Edge on Windows). The same list as the push relay's (native-transports/push-relay/relay.mjs).
+ * (Firefox), Microsoft (Edge on Windows). The same list as the push relay's (services/push-relay/relay.mjs).
  */
 export const PUSH_SERVICE_HOSTS: readonly RegExp[] = [/^fcm\.googleapis\.com$/, /(^|\.)push\.apple\.com$/, /(^|\.)push\.services\.mozilla\.com$/, /(^|\.)notify\.windows\.com$/];
 

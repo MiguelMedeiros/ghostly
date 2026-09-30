@@ -13,7 +13,7 @@ export { hyperdhtRelayProblem as relayUrlProblem };
  * What the relay sees: this browser's address, the HyperDHT keys it listens on and dials, and when and how
  * much it sends. Not the frames, not the keys' secrets, not the handshake hash.
  *
- * The wire is the Desktop's (native-transports/hyperdht/endpoint.mjs): the same preface, u32 length-prefixed
+ * The wire is the Desktop's (native/transports/hyperdht/endpoint.mjs): the same preface, u32 length-prefixed
  * UTF-8 frames of at most 60 KiB, so a browser and a Desktop talk HyperDHT to each other.
  */
 
