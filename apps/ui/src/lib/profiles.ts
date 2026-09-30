@@ -47,8 +47,18 @@ function write(registry: Registry, notify = true): void {
 const cleanName = (name: string) => name.replace(/\s+/g, " ").trim().slice(0, 32);
 
 export function listProfiles(): ProfileEntry[] { return read().profiles; }
-/** The profile to start as: the one last chosen in this space. */
-export function activeProfileId(): string { return read().active; }
+
+/**
+ * The profile this page runs as, fixed when it starts (see the entry points). The registry's choice can change under
+ * a running page: a tab that waited for another to close takes over as the profile it opened with, while the other
+ * tab may have switched the choice to another profile meanwhile. Until a page starts, it is the registry's.
+ */
+let running: string | undefined;
+export function setRunningProfile(id: string | undefined): void { running = id; }
+/** The profile last chosen in this space: the one the next page starts as. */
+export function chosenProfileId(): string { return read().active; }
+/** The profile this page runs as; before it starts, the one to start as (the one last chosen in this space). */
+export function activeProfileId(): string { return running ?? chosenProfileId(); }
 export function currentProfile(): ProfileEntry {
   const id = activeProfileId();
   return read().profiles.find((p) => p.id === id) ?? { id, name: id || DEFAULT_ENTRY.name, createdAt: 0 };
@@ -168,8 +178,9 @@ export function switchProfile(id: string, options: { route?: string; avatar?: st
   const registry = read();
   const target = registry.profiles.find((p) => p.id === id);
   if (!target) throw new Error("Unknown profile");
-  if (id === registry.active) return;
-  rememberRoute(registry.active);
+  // This page's own profile, not the registry's choice: another tab may have made that choice already.
+  if (id === activeProfileId()) return;
+  rememberRoute(activeProfileId());
   const pending: PendingSwitch = { id, name: target.name, color: THEME_COLOR[themeOf(id)], avatar: options.avatar, at: Date.now() };
   try { sessionStorage.setItem(SWITCH_KEY, JSON.stringify(pending)); } catch { /* no overlay after the reload */ }
   window.dispatchEvent(new CustomEvent<PendingSwitch>("profile-switching", { detail: pending }));

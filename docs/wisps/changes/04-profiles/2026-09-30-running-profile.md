@@ -1,0 +1,1 @@
+Switch: `active` is what the next start opens, and a running client stays the profile it started as. A web tab that takes over after another tab switched profile keeps its own profile for its name, lock checks, wake-up push and switching.

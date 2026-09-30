@@ -62,3 +62,27 @@ test("profiles keep chats and settings apart, each in its own color", { tag: ["@
   expect(await page.evaluate(() => Object.keys(localStorage).filter((key) => /^ghostly_[a-z0-9]{10}_/.test(key))), "nothing of Work is left").toEqual([]);
   await expect(page.getByTestId("profile-links")).toContainText("1 chat");
 });
+
+// A tab that waited for another to close takes over as the profile it opened with. When the other tab switched to
+// another profile meanwhile, this one must still say which profile it runs, not the one the other tab chose.
+test("a tab that takes over after another switched profile shows its own profile", { tag: ["@feature:profiles.switch"] }, async ({ peer }) => {
+  const { page, context } = await peer("profiles-tabs");
+  await page.getByTitle("New Chat").click();
+  await expect(page.getByTestId("invite-card")).toBeVisible();
+  const waiting = await context.newPage();
+  await waiting.goto("/");
+  await expect(waiting.getByText("Ghostly is already open in another tab.")).toBeVisible();
+
+  // The first tab makes a new profile, which restarts it as that profile: the waiting tab gets the first one.
+  await openProfilePage(page);
+  await page.getByTestId("profile-new").click();
+  await page.getByTestId("profile-new-name").fill("Work");
+  await page.getByTestId("profile-create").click();
+  await expect(page.getByTestId("profile-name")).toHaveValue("Work", { timeout: 30000 });
+
+  await expect(waiting.getByTestId("account-profile")).toBeVisible({ timeout: 30000 });
+  await openProfilePage(waiting);
+  await expect(waiting.getByTestId("profile-links"), "the first profile's chat").toContainText("1 chat");
+  await expect(waiting.getByTestId("profile-name"), "and its name, not Work's").toHaveValue("Personal");
+  await expect(waiting.getByTestId("profile-row").filter({ hasText: "Work" }).getByTestId("profile-switch")).toBeVisible();
+});
