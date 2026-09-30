@@ -16,7 +16,7 @@
     "@ghostly/browser": "*",
     "@ghostly/core": "*",
     "@ghostly/react": "*",
-    "@tauri-apps/api": "^2.11.1",
+    "@tauri-apps/api": "^2.12.0",
     "qrcode.react": "^4.2.0",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
