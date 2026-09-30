@@ -131,6 +131,38 @@ const playing = new Set<() => void>();
 let listening = false;
 /** Stops the sounds following the speaker chosen in Settings (where the engine can send Web Audio to one). */
 let unfollowSpeaker: (() => void) | null = null;
+/** A person's gesture has started the context once: from then on it may be resumed for a sound without one. */
+let unlocked = false;
+/** Calls ringing (`startRinging`): the output stays open between their rings. */
+let ringing = 0;
+let idleTimer: ReturnType<typeof setTimeout> | undefined;
+
+/**
+ * How long the sounds' audio output stays open after the last sound. A running AudioContext keeps the system's output
+ * stream open with nothing in it (WebKitGTK: its Web Audio threads and a PipeWire stream, about 4% of a laptop's CPU),
+ * so it is suspended between sounds and resumed for the next one, which costs that sound a few milliseconds.
+ */
+export const SOUNDS_IDLE_MS = 5_000;
+
+/** Nothing plays and no call rings: the output is let go of after `SOUNDS_IDLE_MS`. */
+function idleLater(): void {
+  clearTimeout(idleTimer);
+  idleTimer = undefined;
+  if (!context || playing.size || ringing) return;
+  const ctx = context;
+  idleTimer = setTimeout(() => {
+    idleTimer = undefined;
+    if (ctx === context && !playing.size && !ringing && ctx.state === "running") void ctx.suspend?.().catch(() => {});
+  }, SOUNDS_IDLE_MS);
+}
+
+/** The context running for a sound: resumed if it was let go of; false where it cannot run (no gesture yet). */
+async function awake(ctx: AudioContext): Promise<boolean> {
+  clearTimeout(idleTimer);
+  idleTimer = undefined;
+  if (ctx.state !== "running") await ctx.resume().catch(() => {});
+  return ctx.state === "running";
+}
 
 function load(name: SoundName): Promise<AudioBuffer> | undefined {
   const url = assets[`../assets/sounds/${name}.mp3`];
@@ -153,7 +185,11 @@ export function installAudioGestures(): () => void {
     try {
       context ??= new AudioContext();
       unfollowSpeaker ??= followSpeaker(context).stop;
-      if (context.state === "suspended") void context.resume().catch(()=>{});
+      // Only the first gesture starts it; later ones leave a let-go output alone until a sound needs it.
+      if (!unlocked) {
+        const ctx = context;
+        void ctx.resume().then(() => { if (ctx.state === "running") { unlocked = true; idleLater(); } }).catch(()=>{});
+      }
       for (const name of Object.keys(SOUNDS) as SoundName[]) void load(name)?.catch(()=>{});
     } catch { /* no audio device */ }
   };
@@ -171,27 +207,31 @@ export function installAudioGestures(): () => void {
     window.removeEventListener("settings-updated",mute);
     window.removeEventListener("storage",mute);
     for (const stop of [...playing]) stop();
+    clearTimeout(idleTimer);
+    idleTimer = undefined;
   };
 }
 
 export function playSound(name: SoundName): () => void {
-  if (!loadSettings().notifications.soundEnabled || !context || context.state !== "running") return () => {};
+  if (!loadSettings().notifications.soundEnabled || !context || !unlocked) return () => {};
   const ctx=context, started=Date.now();
   let cancelled=false;
   const sources: (AudioBufferSourceNode | OscillatorNode)[]=[];
   let expiry: ReturnType<typeof setTimeout> | undefined;
-  const stop=()=>{cancelled=true;clearTimeout(expiry);for(const source of sources){try{source.stop();}catch{/* already ended */}}playing.delete(stop);};
+  const stop=()=>{cancelled=true;clearTimeout(expiry);for(const source of sources){try{source.stop();}catch{/* already ended */}}if(playing.delete(stop))idleLater();};
+  const ended=()=>{if(playing.delete(stop))idleLater();};
   playing.add(stop);
   void (async()=>{
     let buffer: AudioBuffer | undefined;
-    try { buffer=await load(name); } catch { /* local synthesized fallback */ }
-    if(cancelled || !loadSettings().notifications.soundEnabled || ctx.state!=="running" || Date.now()-started>1000){stop();return;}
+    // The output wakes while the sound's bytes are fetched and decoded (both are cached after the first time).
+    const [running] = await Promise.all([awake(ctx), load(name)?.then(b=>{buffer=b;},()=>{/* local synthesized fallback */})]);
+    if(cancelled || !running || !loadSettings().notifications.soundEnabled || ctx.state!=="running" || Date.now()-started>1000){stop();return;}
     const start=ctx.currentTime+0.01;
     if(buffer){
       const source=ctx.createBufferSource(),gain=ctx.createGain();
       source.buffer=buffer;gain.gain.value=0.2;
       source.connect(gain).connect(ctx.destination);sources.push(source);source.start(start);
-      expiry=setTimeout(()=>{playing.delete(stop);},buffer.duration*1000+100);
+      expiry=setTimeout(ended,buffer.duration*1000+100);
     }else{
       for(const note of SOUNDS[name] as Note[]){
         const oscillator=ctx.createOscillator(),gain=ctx.createGain();
@@ -202,14 +242,16 @@ export function playSound(name: SoundName): () => void {
         oscillator.connect(gain).connect(ctx.destination);sources.push(oscillator);
         oscillator.start(start+note.at);oscillator.stop(start+note.at+note.duration+0.02);
       }
-      expiry=setTimeout(()=>playing.delete(stop),2000);
+      expiry=setTimeout(ended,2000);
     }
   })();
   return stop;
 }
 
 export function startRinging(kind: "ring" | "ringback"): () => void {
+  ringing++;
   let stop=playSound(kind);
   const timer=setInterval(()=>{stop();stop=playSound(kind);},3500);
-  return ()=>{clearInterval(timer);stop();};
+  let done=false;
+  return ()=>{if(done)return;done=true;ringing--;clearInterval(timer);stop();idleLater();};
 }
