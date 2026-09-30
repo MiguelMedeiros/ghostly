@@ -41,7 +41,7 @@ The buttons are a status card of kind **`buttons`** in `sc`, beside the message'
 | `id` | The bot's id for the question, as a card's ([4xx](4xx-status-cards.md#fields-every-card-has)). |
 | `buttons` | 1 to **6** buttons, in the bot's order: `{id, label, style?, once?}`. |
 | `buttons[].id` | What a press names: 1 to **32** of `A-Z a-z 0-9 _ . : -`, not starting with `-`, unique in the list. |
-| `buttons[].label` | At most **40** characters, one line, cleaned as a card's strings are. |
+| `buttons[].label` | At most **40** characters, one line, cleaned as a card's strings are. Not the same as another button's label, nor another button's id, ignoring case and spaces at the ends (see below). |
 | `buttons[].style` | Optional: `primary` (highlighted), `neutral` (the default, left out), `danger`. |
 | `buttons[].once` | Optional, `true`: a press on it answers the question for that person, and their app offers none of the buttons again. A button without it may be pressed again (a "More" or "Refresh"). |
 | `chosen` | Optional: the id of the answer the bot took, marked for everyone. |
@@ -50,6 +50,8 @@ The buttons are a status card of kind **`buttons`** in `sc`, beside the message'
 Unlike a task or a routine, **the message's text shows with the buttons**: it is the question. It is also what an app without buttons shows, the DHT floor carries and the chat list previews, so a bot SHOULD say in it how to answer in words ("Want the $30 one? Reply yes or no"). The sender's engine writes "Reply: Yes / No" when the bot gives no text. Buttons take no `links`.
 
 The reader's rule is the card's ([4xx](4xx-status-cards.md#the-readers-rule)), with these for this kind: a button whose id does not hold, repeats one before it, or has no label is left out; the list is cut to 6; a card with no button left is no card, and the text shows; a `chosen` that names no button and a `closed` that is not `true` are left out; an unknown style reads as `neutral`. The sender's rule refuses all of these instead (`checkStatusCard`).
+
+A typed answer is matched by a button's label or id, ignoring case and spaces at the ends (see [A press](#a-press)), so the sender's rule also refuses two buttons such an answer could not tell apart: a label that repeats an earlier button's label ("Yes" and " yes"), and a label that is another button's id (a button `yes` labelled "No" beside a button `no`). A label that is its own button's id (`yes`, "Yes") is the common case and stays. A reader does not drop a card from a sender that ignored this: it keeps the buttons, and a typed answer takes the first that matches.
 
 ## A press
 
@@ -104,7 +106,7 @@ Under the bot's bubble, a row of rounded buttons that wraps (two share a row; up
 
 ## Conformance
 
-A buttons card with every field round-trips on the live session, a mesh group and a community, and on an edit; bad buttons are left out, a card with none left is dropped and the text shown; the sender refuses 0 or 7 buttons, a repeated id, a label past 40, an unknown style, a `chosen` naming no button; a press's `b` rides in `r` on every path, an invalid `b` leaves a plain reply, and an older reader keeps `{i, s, f}`; the author's app takes a press only for its own open buttons, once per person for a `once` button, and infers one from a reply's text; the presser's app refuses its own message, a closed question, an answered `once` question and a second press within a second. Tests: `packages/core/test/messageButtons.test.ts`, `packages/browser/test/messageButtons.test.ts`.
+A buttons card with every field round-trips on the live session, a mesh group and a community, and on an edit; bad buttons are left out, a card with none left is dropped and the text shown; the sender refuses 0 or 7 buttons, a repeated id, a label that repeats another's or is another button's id (ignoring case and spaces at the ends), a label past 40, an unknown style, a `chosen` naming no button; a press's `b` rides in `r` on every path, an invalid `b` leaves a plain reply, and an older reader keeps `{i, s, f}`; the author's app takes a press only for its own open buttons, once per person for a `once` button, and infers one from a reply's text; the presser's app refuses its own message, a closed question, an answered `once` question and a second press within a second. Tests: `packages/core/test/messageButtons.test.ts`, `packages/browser/test/messageButtons.test.ts`.
 
 ## Open decisions
 
