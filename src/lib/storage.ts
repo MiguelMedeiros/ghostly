@@ -296,7 +296,7 @@ export function unreadUnder(prefix: string): number {
       const session = JSON.parse(localStorage.getItem(key) ?? "null") as ChatSession | null;
       if (!session?.id || !session.mySeedB64 || !session.peerPubKeyB64 || !session.encKeyB64 || !Array.isArray(session.messages)) continue;
       const read = parseInt(localStorage.getItem(`${prefix}read_${session.id}`) ?? "0", 10) || 0;
-      unread += Math.max(0, session.messages.length - read);
+      unread += unreadAfter(session.messages, read);
     } catch {
       continue;
     }
@@ -327,9 +327,22 @@ export function markSessionAsRead(sessionId: string): void {
   setReadCount(sessionId, session.messages.length);
 }
 
+/**
+ * What counts as unread: what came to me since the last read message. Never a message of mine (one forwarded here
+ * from another chat lands while this one is not open) nor a join line, which the other side's app adds by itself.
+ */
+function countsAsUnread(message: ChatMessage): boolean {
+  return message.sender !== "me" && message.systemEvent?.type !== "join";
+}
+
+function unreadAfter(messages: readonly ChatMessage[], read: number): number {
+  let unread = 0;
+  for (let i = Math.max(0, read); i < messages.length; i++) if (countsAsUnread(messages[i]!)) unread++;
+  return unread;
+}
+
 export function getUnreadCount(session: ChatSession): number {
-  const lastRead = getLastReadCount(session.id);
-  return Math.max(0, session.messages.length - lastRead);
+  return unreadAfter(session.messages, getLastReadCount(session.id));
 }
 
 /**
