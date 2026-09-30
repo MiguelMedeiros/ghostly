@@ -234,6 +234,8 @@ ghostly group edit crew "$gid" --text "Deploy: done" --wait sent
 ghostly task send crew --id relay-fix --title "Fix relay rotation" --steps 1/4 --step "Writing the codec"   # a task card
 ghostly task update crew relay-fix --steps 3/4 --step "CI" --pr-url https://github.com/o/r/pull/612 --pr-number 612 --additions 123 --deletions 45
 ghostly task update crew relay-fix --status done --progress 100   # updates merge, at most one per 2.5 s per card
+ghostly routine send crew --id nightly --name "Nightly bug hunt" --schedule "every day 01:00" --next 2026-09-30T01:00:00Z
+ghostly routine update crew nightly --run "ok:12 issues checked" --next 2026-10-01T01:00:00Z   # a run recorded
 ghostly chat history alice --limit 20              # oldest first
 ghostly chat disconnect alice --hold 30            # off the direct link for 30 min; short texts still go over the DHT
 ghostly chat connect alice                         # back now

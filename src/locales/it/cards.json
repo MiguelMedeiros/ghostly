@@ -1,0 +1,52 @@
+{
+  "panel": {
+    "active": "In corso",
+    "activeCount": "{{count}} in corso",
+    "button": "Attività",
+    "buttonCount": "Attività, {{count}} in corso",
+    "finished": "Concluse",
+    "info": "I bot pubblicano queste schede e le tengono aggiornate. Tocca una scheda per andarci nella chat.",
+    "routines": "Routine",
+    "title": "Attività"
+  },
+  "routine": {
+    "cron": "Cron:",
+    "next": "Prossima {{when}}",
+    "noRuns": "Nessuna esecuzione ancora",
+    "result": {
+      "failed": "Non riuscita",
+      "ok": "OK",
+      "skipped": "Saltata"
+    },
+    "runs": "Esecuzioni recenti",
+    "state": {
+      "active": "Attiva",
+      "paused": "In pausa"
+    }
+  },
+  "task": {
+    "branch": "Branch:",
+    "item": {
+      "done": "Fatto",
+      "failed": "Non riuscito",
+      "pending": "Da fare",
+      "running": "In corso",
+      "skipped": "Saltato"
+    },
+    "now": "Ora:",
+    "pr": "PR #{{number}}",
+    "prNoNumber": "Pull request",
+    "progress": "Avanzamento",
+    "started": "Iniziata {{ago}}",
+    "status": {
+      "blocked": "Bloccata",
+      "cancelled": "Annullata",
+      "done": "Completata",
+      "failed": "Non riuscita",
+      "queued": "In coda",
+      "running": "In corso"
+    },
+    "steps": "{{done}} di {{total}} passi",
+    "updated": "aggiornata {{ago}}"
+  }
+}

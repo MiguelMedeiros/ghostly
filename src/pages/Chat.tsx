@@ -76,6 +76,7 @@ import { useForwarding } from "../hooks/useForwarding";
 import { useChatSearch } from "../hooks/useChatSearch";
 import { ChatSearchBar, SearchIcon } from "../components/chat/ChatSearch";
 import { PinnedBar } from "../components/chat/PinnedBar";
+import { TasksButton } from "../components/chat/TasksButton";
 
 /** What a call captures from: the devices the profile chose, read when it asks. */
 const callDevicePreferences = () => ({ audio: preferredDevice("audioinput"), video: preferredDevice("videoinput") });
@@ -91,9 +92,12 @@ interface ChatProps {
   callLayer: HTMLElement | null;
 }
 
-/** A text of mine this chat can edit (WISP 400 § Edits): one the engine sent under its wire id, not a file, a payment or a notice. */
+/**
+ * A text of mine this chat can edit (WISP 400 § Edits): one the engine sent under its wire id, not a file, a payment or a
+ * notice, nor a status card, which only its bot updates (WISP 4xx · Status Cards).
+ */
 function editableText(message: ChatMessage): boolean {
-  return message.sender === "me" && !!message.ref && message.id === `me_${message.ref}` && !message.file && !message.paymentId && !message.systemEvent && !message.callEvent;
+  return message.sender === "me" && !!message.ref && message.id === `me_${message.ref}` && !message.file && !message.paymentId && !message.systemEvent && !message.callEvent && !message.card;
 }
 
 export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps) {
@@ -605,6 +609,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
               ? () => document.getElementById(pairingSceneId)?.scrollIntoView({ block: "center", behavior: "smooth" }) : undefined } : undefined} />
           <CallButtons blocked={canWakeForCall ? null : callsBlocked} busy={webrtc.callState !== "idle" || wakeCall.waking}
             onCall={(withVideo) => (callsBlocked && canWakeForCall ? void wakeCall.ring(withVideo) : webrtc.startCall(withVideo))} />
+          {/* Only while a bot's card is here (WISP 4xx · Status Cards). */}
+          <TasksButton rows={messages} />
           {/* Options dropdown */}
           <div className="relative" ref={menuRef}>
             <button

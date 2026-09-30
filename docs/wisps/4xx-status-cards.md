@@ -7,9 +7,9 @@
 | Document kind | Profile |
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [400](400-chat.md), [401](401-paired-chat.md), [403](403-dht-text.md), [4xx store-and-forward](4xx-store-and-forward.md), [9xx group mesh](9xx-group-mesh.md), [9xx group community](9xx-group-community.md), [11xx](11xx-headless.md) |
-| Implementation | The `sc` field on every text wire of 400 (`packages/core/src/statusCards.ts`), the engine's messages and edits, `ghostly task send` and `task update` in the headless CLI; the app shows the fallback text until the card view lands |
+| Implementation | The `sc` field on every text wire of 400 (`packages/core/src/statusCards.ts`), the engine's messages and edits, `ghostly task send` and `task update` in the headless CLI (`task send|update`, `routine send|update`); the task and routine cards and the Tasks button in web, extension and desktop (`src/components/chat/StatusCard.tsx`, `RoutineCard.tsx`, `TasksButton.tsx`) |
 | Summary | A bot's task or routine shows as a small card with its progress, and stays current as the bot updates it. |
-| Availability | Planned |
+| Availability | Available |
 | Notes | Sent by bots through the headless CLI only; people never create them in the app. Every app, old or new, shows a readable text. |
 
 > This is a review draft. Candidate numbers and new wire formats are not registered standards. Normative language describes a candidate requirement, not a shipped guarantee. See the [catalogue](README.md).

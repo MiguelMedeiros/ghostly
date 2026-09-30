@@ -1,4 +1,4 @@
-import { type Command, groupWait, cursor, taskFields, taskOptions, wait } from "./shared";
+import { type Command, groupWait, cursor, routineFields, routineOptions, runOf, taskFields, taskOptions, wait } from "./shared";
 
 /** Invites, chats and messages: one entry per command, in alphabetical order (test/commands.test.ts checks). */
 export const commands: Record<string, Command> = {
@@ -65,6 +65,20 @@ export const commands: Record<string, Command> = {
     method: "chat.react", usage: "react <chat> <message> <emoji> [--remove]", summary: "React to a message with one emoji (it replaces yours); --remove takes yours back",
     args: ["chat", "message", "emoji..."], options: { remove: { type: "boolean", description: "Take your reaction back" } },
     params: ({ options }, a) => ({ chat: a.chat, message: a.message, emoji: a.emoji, remove: options.remove === true }),
+  },
+  "routine send": {
+    method: "routine.send", usage: "routine send <chat|group> --name <name> --schedule \"every day 01:00\" [--cron \"0 1 * * *\"] [--state active|paused] [--next <time>] [--run ok|failed|skipped[:summary]] [--link url]... [--id id] [--json json|-|file] [--wait none|sent|delivered] [--timeout s]",
+    summary: "Send a routine card (something a bot runs on a schedule: its last run and the next) to a chat or group",
+    args: ["chat"],
+    options: { id: { type: "string", description: "The routine's id, kept across updates (default: made up)" }, ...routineOptions, ...groupWait, wait: wait.wait },
+    params: ({ options }, { chat }) => ({ chat, card: routineFields(options), run: runOf(options.run), text: options.text, wait: options.wait, timeout: options.timeout }),
+  },
+  "routine update": {
+    method: "routine.update", usage: "routine update <chat|group> <routine> [--run ok|failed|skipped[:summary]] [--next <time>] [--state active|paused] [--schedule ...] [--json json|-|file] [--wait none|confirmed|sent] [--timeout s]",
+    summary: "Update a routine card you sent: record a run, the next one, a pause (at most one update per 2.5 s; sooner ones merge)",
+    args: ["chat", "routine"],
+    options: { ...routineOptions, wait: { type: "string", description: "none (default), confirmed (a chat's contact took it) or sent (a group's edge took it)" }, timeout: groupWait.timeout },
+    params: ({ options }, a) => ({ chat: a.chat, routine: a.routine, card: routineFields(options), run: runOf(options.run), text: options.text, wait: options.wait, timeout: options.timeout }),
   },
   "task send": {
     method: "task.send", usage: "task send <chat|group> --title <title> [--status s] [--progress n | --steps a/b] [--step \"...\"] [--item state:text]... [--pr-url url --pr-number n --additions n --deletions n --files n] [--branch b] [--link url]... [--id id] [--json json|-|file] [--wait none|sent|delivered] [--timeout s]",

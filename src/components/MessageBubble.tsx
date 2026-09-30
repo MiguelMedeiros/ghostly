@@ -17,6 +17,8 @@ import { PaymentBubble } from "./PaymentBubble";
 import { RichText } from "./rich/RichText";
 import { EntityCards } from "./chat/EntityCards";
 import { MessageLinkCards } from "./LinkPreviewBubble";
+import { StatusCardView } from "./chat/StatusCard";
+import { showsCard } from "../lib/statusCards";
 import { engine } from "@ghostly/browser/platform/engine";
 import { playCue, useCueChat } from "../lib/cues";
 import { downloadFile, downloadName, downloadState, type DownloadFormat } from "../lib/fileDownload";
@@ -665,7 +667,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
         : "animate-bubble-in-left"
       : "",
   );
-  const money = useMemo(() => (message.paymentId || message.file ? null : findMoney(message.text)), [message.paymentId, message.file, message.text]);
+  const money = useMemo(() => (message.paymentId || message.file || showsCard(message.card) ? null : findMoney(message.text)), [message.paymentId, message.file, message.card, message.text]);
   const [details, setDetails] = useState(false);
   const rowRef = useRef<HTMLDivElement>(null);
   const openDetails = () => setDetails(true);
@@ -884,6 +886,12 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
         ) : message.file ? (
           <div className="clearfix">
             <FileBubble file={message.file} peerName={message.nick || peerNick || undefined} highlight={highlight} />
+            {timestampEl}
+          </div>
+        ) : showsCard(message.card) ? (
+          // A bot's task or routine (WISP 4xx · Status Cards): the card stands for the text, which is its fallback.
+          <div className="clearfix">
+            <StatusCardView card={message.card} />
             {timestampEl}
           </div>
         ) : money ? (

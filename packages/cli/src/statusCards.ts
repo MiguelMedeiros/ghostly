@@ -5,7 +5,8 @@ import { CliError } from "./errors";
 import { waitForEdit, waitForGroupFrame, waitForMessage } from "./waits";
 
 /*
- * Status cards (WISP 4xx · Status Cards): a bot's task, sent as a message with a card and kept current by editing it.
+ * Status cards (WISP 4xx · Status Cards): a bot's task or routine, sent as a message with a card and kept current by
+ * editing it. A routine's run (`run`) becomes its last run and the newest of its recent runs.
  * The engine checks every card by the sender's rule and writes its fallback text; this is the bot's side of it: a card
  * built from flags or JSON, found again by its id, merged with an update, and paced, one update per card every
  * `CARD_UPDATE_GAP_MS`. An update that comes sooner is merged into the next one, which goes when the time is up.
@@ -58,6 +59,19 @@ export function mergeCard(base: Record<string, unknown>, patch: Record<string, u
   return out;
 }
 
+/**
+ * A routine's run from the command (`run: {result, summary?}`), as its last run and the first of its recent runs,
+ * `STATUS_CARD_LIMITS.runs` kept. Undefined when the command names none.
+ */
+export function withRun(fields: Record<string, unknown>, params: Params, now = Date.now()): Record<string, unknown> {
+  const run = params.run;
+  if (run === undefined) return fields;
+  if (!isObject(run) || typeof run.result !== "string") throw new CliError("bad_request", "run is {result: ok|failed|skipped, summary?}");
+  const lastRun = { at: now, result: run.result, ...(typeof run.summary === "string" && run.summary ? { summary: run.summary } : {}) };
+  const before = Array.isArray(fields.runs) ? fields.runs : [];
+  return { ...fields, lastRun, runs: [lastRun, ...before].slice(0, STATUS_CARD_LIMITS.runs) };
+}
+
 /** A card checked by the sender's rule, or a `bad_request` that says what is wrong. */
 function checked(card: Record<string, unknown>): StatusCard {
   const result = checkStatusCard(card);
@@ -85,10 +99,10 @@ async function sendCard(ctx: ApiContext, params: Params, kind: Kind): Promise<Re
   const fields = fieldsOf(params);
   const now = Date.now();
   const id = typeof fields.id === "string" && fields.id ? fields.id : `${kind}-${toBase64Url(randomBytes(6))}`;
-  const card = checked({
+  const card = checked(withRun({
     ...(kind === "task" ? { status: "running", startedAt: now, updatedAt: now } : { state: "active" }),
     ...fields, kind, id,
-  });
+  }, params, now));
   const text = str(params, "text") ?? "";
   const wait = oneOf(params, "wait", target.group ? ["none", "sent"] as const : ["none", "sent", "delivered"] as const, "none");
   const ms = num(params, "timeout", 30, { min: 1, max: 3600 }) * 1000;
@@ -127,7 +141,7 @@ async function updateCard(ctx: ApiContext, params: Params, kind: Kind): Promise<
     throw new CliError("refused", `This ${kind}'s message took ${STATUS_CARD_LIMITS.edits} updates, the most one takes: start a new card with ghostly ${kind} send (a new --id, or the same one: the newest card of an id stands for it)`, { messageId: message.id, edits: message.edit!.seq });
   const pace = paceOf(ctx, `${target.linkId}\n${message.id}`);
   const base = pace.next ?? (message.card as unknown as Record<string, unknown>);
-  const merged = mergeCard(base, { ...patch, ...(kind === "task" && { updatedAt: Date.now() }) });
+  const merged = withRun(mergeCard(base, { ...patch, ...(kind === "task" && { updatedAt: Date.now() }) }), params);
   const card = checked(merged);
   const text = str(params, "text") ?? "";
   const wait = oneOf(params, "wait", target.group ? ["none", "sent"] as const : ["none", "confirmed"] as const, "none");
@@ -166,4 +180,8 @@ export const STATUS_CARD_METHODS: Record<string, Method> = {
   "task.send": (ctx, params) => sendCard(ctx, params, "task"),
   /** A task's update: the fields given, merged over its latest state, paced one per `CARD_UPDATE_GAP_MS`. */
   "task.update": (ctx, params) => updateCard(ctx, params, "task"),
+  /** A routine card (its schedule, state, runs); `run` records one. */
+  "routine.send": (ctx, params) => sendCard(ctx, params, "routine"),
+  /** A routine's update, as a task's; `run` records a run as its last and the newest of its recent ones. */
+  "routine.update": (ctx, params) => updateCard(ctx, params, "routine"),
 };
