@@ -484,7 +484,8 @@ export class LinkSession {
     );
     const started = Date.now();
     try {
-      await this.transport.publish(this.identity, built.records);
+      // An offer or answer not out yet is what the contact waits for (`PkarrRequestOptions.signal`).
+      await this.transport.publish(this.identity, built.records, rtcSignal && rtcSignal !== this.rtcSignalOut ? { signal: true } : undefined);
     } catch (error) {
       const ms = Date.now() - started, waiting = isDiscoveryBudgetError(error);
       traceLink(this.identity.pubKeyZ32, "publish", { ms, rtc: !!rtcSignal, error: String(error), ...(waiting && { waiting, retryInMs: error.retryInMs }) });
@@ -531,7 +532,9 @@ export class LinkSession {
       // A look that can wait (nobody watching, nothing expected) says so: a transport with a request
       // budget spends only part of it on those, and keeps the rest for links that are signaling.
       const pace = this.pace();
-      const packet = await this.transport.resolve(this.peerPubKeyZ32, { background: pace === "background" || pace === "connected", urgent: pace === "fast" });
+      // This side's offer is out, and this read looks for its answer: signaling (`PkarrRequestOptions.signal`).
+      const signal = pace === "fast" && this.fastStepsAfter > 0 && this.rtcSignalOut !== null;
+      const packet = await this.transport.resolve(this.peerPubKeyZ32, { background: pace === "background" || pace === "connected", urgent: pace === "fast", ...(signal && { signal }) });
       if (!this.running) return;
       this.discoveryResult("read");
       const ms = Date.now() - started;

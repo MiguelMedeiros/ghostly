@@ -4,10 +4,13 @@ import { RelayBreaker, type DiscoveryStatus, type RelayBreakerOptions, type Rela
 import { DiscoveryBudgetError, isDiscoveryBudgetError, type DiscoveryChange, type PkarrRequestOptions, type PkarrTransport } from "./transport";
 
 /** Who asks, for the budget: a 1:1 chat's link comes before a group's, and both before background looks. */
-interface Asker { background: boolean; group: boolean; urgent: boolean; door: boolean; write: boolean }
-const asker = (options: PkarrRequestOptions, write: boolean): Asker => ({ background: !!options.background, group: !!options.group, urgent: !!options.urgent, door: !!options.door, write });
+interface Asker { background: boolean; group: boolean; urgent: boolean; door: boolean; write: boolean; signal: boolean }
+const asker = (options: PkarrRequestOptions, write: boolean): Asker =>
+  ({ background: !!options.background, group: !!options.group, urgent: !!options.urgent, door: !!options.door, write, signal: !!options.signal });
 /** A 1:1 chat's request: neither a group's nor a background one. */
 const isChat = (who: Asker): boolean => !who.background && !who.group;
+/** A 1:1 chat's offer or answer, or its read for the answer to its offer: it may use the allowance (`SIGNALING_ALLOWANCE_SHARE`). */
+const isChatSignal = (who: Asker): boolean => who.signal && isChat(who);
 /** A group's edge looking fast for a signal (`GROUP_BURST_MS`). */
 const isGroupUrgentRead = (who: Asker): boolean => who.group && who.urgent && !who.write && !who.background;
 /** A write that goes first once the budget frees a request (see `WRITE_FIRST_MS`): a chat's or a group's, never a background one. */
@@ -67,6 +70,15 @@ export const WRITE_FIRST_MS = 5_000;
  */
 export const CHAT_RESERVE = 10;
 /**
+ * A 1:1 chat's signaling (a new offer or answer, and its reads for the answer to its offer, `signal`) may go over a
+ * relay's minute by this fraction of it: 6 on a relay of 30, 12 on one of 60, 1 on relay.pkarr.org's 5 (it allows 10),
+ * and never more than that in any minute; its reads leave the last of those to a write. Everything else still stops at
+ * the limit. The minute before a chat leaves DHT only can be spent by then (the pairing, the texts over the DHT), and
+ * its offer or answer, the one thing the contact waits for, then waited 40 s for requests to age out while the
+ * contact's attempt gave up: the matrix's extension chat stayed "On DHT · retrying live" 46 times in 120 (2026-09-30).
+ */
+export const SIGNALING_ALLOWANCE_SHARE = 1 / 5;
+/**
  * Groups' urgent reads (their edges looking fast for a signal) take at most a quarter of a relay's minute in any this
  * long, so that they never spend it in a burst. An app back after a restart has every edge offering and looking fast at
  * once; the members at the other end answer only once they notice its old sessions went (about 20 s with
@@ -99,7 +111,7 @@ export const FRESH_READ_MS = 500;
 const CATCH_UP_MIN_MS = 1_000;
 const CATCH_UP_RETRY_MS = 5_000;
 /** A catch-up put waits behind every link's request: a background write. */
-const CATCH_UP_ASKER: Asker = { background: true, group: false, urgent: false, door: false, write: true };
+const CATCH_UP_ASKER: Asker = { background: true, group: false, urgent: false, door: false, write: true, signal: false };
 /** Keys whose last relay is remembered for their next read (`resolve`): a profile's links and lookups, with room. */
 const READ_TURNS_KEPT = 512;
 /** A relay that fails at the network level is left alone for this long. */
@@ -555,7 +567,8 @@ export class RelayTransport implements PkarrTransport {
    * a limit ages out, a chat's reserve lapses, or a waiting write has had its turn. Keeps the lists to the minute, oldest first.
    *
    * Who goes first: a chat's refused write holds back everything but chat writes; a group's refused write holds back
-   * group reads and background requests, never a chat's. Background requests yield to a link that signals.
+   * group reads and background requests, never a chat's. Background requests yield to a link that signals. A chat's
+   * signaling goes over the limit by its allowance (`SIGNALING_ALLOWANCE_SHARE`).
    */
   private heldFor(relay: string, who: Asker, now = Date.now()): number {
     const recent = (this.spent.get(relay) ?? []).filter((at) => now - at < 60_000);
@@ -565,7 +578,9 @@ export class RelayTransport implements PkarrTransport {
     // Until the `limit`-th newest request of the minute ages out; 0 while fewer than `limit` were made.
     const over = (list: number[], limit: number) => (list.length >= limit ? list[list.length - limit] + 60_000 - now : 0);
     const limit = this.limitOf(relay);
-    let wait = over(recent, limit);
+    // A chat's signaling may go over the minute by its allowance; its reads leave the last of it to a write.
+    const allowance = isChatSignal(who) ? Math.max(0, Math.floor(limit * SIGNALING_ALLOWANCE_SHARE) - (who.write ? 0 : 1)) : 0;
+    let wait = over(recent, limit + allowance);
     if (who.background) {
       wait = Math.max(wait, over(recentBackground, this.backgroundPerMinute));
       // A link signaling: background takes a smaller share until it stops, or until enough of its own age out. A
