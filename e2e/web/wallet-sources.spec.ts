@@ -85,7 +85,7 @@ test("Lightning cards: New adds one of its own beside the mints' card; invoices 
   await page.getByTestId("wallet-receive-amount").fill("12");
   await page.getByTestId("wallet-create-invoice").click();
   await expect(page.getByTestId("wallet-invoice")).toHaveText(/^\s*lnbcrt/);
-  await expect(page.getByTestId("wallet-paid")).toContainText("12 sats received", { timeout: 30_000 });
+  await expect(page.getByTestId("wallet-paid")).toContainText("12 test sats received", { timeout: 30_000 });
   await expect(page.getByTestId("lightning-recent").getByTestId("lightning-op").first()).toContainText("paid");
 
   // The Mainnet Lightning wallet has its own cards: still only the mints'.
