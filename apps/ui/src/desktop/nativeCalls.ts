@@ -64,6 +64,10 @@ class Picture {
   readonly track: MediaStreamTrack;
   private drawing = false;
   private waiting: Uint8Array | null = null;
+  /** A frame is on the canvas: until then the track films a blank one. */
+  drawn = false;
+  /** Called once, when the first frame is on the canvas. */
+  onFirstFrame: (() => void) | null = null;
 
   constructor() {
     this.canvas.width = 640;
@@ -86,6 +90,10 @@ class Picture {
         }
         this.canvas.getContext("2d")?.drawImage(bitmap, 0, 0);
         bitmap.close();
+        this.drawn = true;
+        const first = this.onFirstFrame;
+        this.onFirstFrame = null;
+        first?.();
       })
       .catch(() => {})
       .finally(() => {
@@ -356,7 +364,12 @@ export class NativePeerConnection extends EventTarget {
     this.negotiated();
   }
 
-  /** The lanes have ids once both sides have described them; the peer's picture arrives on the video one. */
+  /**
+   * The lanes have ids once both sides have described them; the peer's picture arrives on the video one. Its
+   * track is handed over with the first frame drawn, not before: the call window shows a picture in place of the
+   * peer's name as soon as it has a track, and a peer whose camera sends nothing (or who is answered with voice
+   * only) was a black screen with no name.
+   */
   private lanes(): void {
     if (this.audio.mid !== null) return;
     this.audio.mid = "0";
@@ -364,9 +377,11 @@ export class NativePeerConnection extends EventTarget {
     const event = Object.assign(new Event("track"), {
       track: this.remote.track, streams: [this.remoteStream], receiver: this.video.receiver, transceiver: this.video,
     }) as unknown as RTCTrackEvent;
-    queueMicrotask(() => {
+    const hand = () => {
       if (!this.closed) this.ontrack?.(event);
-    });
+    };
+    if (this.remote.drawn) queueMicrotask(hand);
+    else this.remote.onFirstFrame = hand;
   }
 
   private negotiated(): void {
