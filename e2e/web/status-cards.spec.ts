@@ -158,6 +158,21 @@ async function inWindow(page: Page, what: Locator) {
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 }
 
+/** Once the list settles, no row is half under the name (or Finished line) stuck at its top: the rows it cuts, if any. */
+async function underStuck(panel: Locator): Promise<string[]> {
+  await panel.page().waitForTimeout(600); // the scroll and its snap
+  return panel.getByTestId("chat-tasks-scroll").evaluate((list) => {
+    const top = list.getBoundingClientRect().top;
+    const stuck = [...list.querySelectorAll<HTMLElement>("h3, [data-testid=chat-tasks-finished-toggle]")]
+      .filter((el) => getComputedStyle(el).position === "sticky" && Math.abs(el.getBoundingClientRect().top - top) < 1);
+    const edge = Math.max(top, ...stuck.map((el) => el.getBoundingClientRect().bottom));
+    return [...list.querySelectorAll<HTMLElement>("[data-panel-row]")].filter((row) => !stuck.includes(row)).filter((row) => {
+      const r = row.getBoundingClientRect();
+      return r.top < edge - 1 && r.bottom > edge + 1;
+    }).map((row) => row.textContent ?? "");
+  });
+}
+
 test("a room of bots with many routines: the panel scrolls inside the window, the chat folds the routines", { tag: ["@feature:chat.status-cards", "@feature:groups.send", "@feature:headless.status-cards"] }, async ({ peer, relay }) => {
   test.setTimeout(10 * 60_000);
   const url = await relay.listen();
@@ -224,9 +239,12 @@ test("a room of bots with many routines: the panel scrolls inside the window, th
       const zeroRoutines = panel.getByTestId("chat-tasks-sender").filter({ hasText: "Hermes Zero" }).getByTestId("chat-tasks-routines-toggle");
       await expect(zeroRoutines).toContainText("10 routines");
       await expect(zeroRoutines).toContainText("1 failed");
+      // Open, the first row of each section sits whole under its name.
+      expect(await underStuck(panel)).toEqual([]);
       await zeroRoutines.click();
+      expect(await underStuck(panel)).toEqual([]);
       await page.getByTestId("chat-tasks-finished-toggle").click();
-      await page.waitForTimeout(300); // the fade-in: measured after it
+      expect(await underStuck(panel)).toEqual([]);
       await inWindow(page, panel);
       // Taller than the box: it scrolls, the header stays.
       const scroll = panel.getByTestId("chat-tasks-scroll");
@@ -238,6 +256,11 @@ test("a room of bots with many routines: the panel scrolls inside the window, th
       await expect(last).toHaveAttribute("data-card-id", "relay");
       await last.scrollIntoViewIfNeeded();
       await expect(panel.getByTestId("chat-tasks-summary")).toBeInViewport();
+      expect(await underStuck(panel)).toEqual([]);
+      // Scrolled by hand to anywhere, it settles with no row cut either.
+      await scroll.evaluate(el => el.scrollBy({ top: -77 }));
+      expect(await underStuck(panel)).toEqual([]);
+      await last.scrollIntoViewIfNeeded();
       await last.click();
       await expect(panel).toHaveCount(0);
       await expect(room.locator('[data-testid="status-card"][data-card-id="relay"]')).toBeInViewport();

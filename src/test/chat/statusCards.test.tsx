@@ -290,7 +290,10 @@ describe("the Tasks panel under a bot room's load", () => {
     // The one with more going first; Hermes Zero, with nothing going, last.
     expect(sections.map(s => within(s).getByTestId("chat-tasks-sender-name").textContent)).toEqual(["Hermes One", "Coordinator", "Hermes Zero"]);
     // Sticky names: a bot's name stays at the top while its rows scroll under it.
-    expect(within(sections[0]).getByTestId("chat-tasks-sender-name").parentElement!.className).toMatch(/\bsticky\b.*\btop-0\b/);
+    expect(within(sections[0]).getByTestId("chat-tasks-sender-name").parentElement!.className).toMatch(/\bsticky\b.*\btop-0\b.*\bh-8\b/);
+    // The list keeps that much room above a row it scrolls to, and snaps its rows there: none stops half under a name.
+    expect(screen.getByTestId("chat-tasks-scroll").className).toMatch(/\bsnap-y\b.*\bscroll-pt-8\b/);
+    expect(screen.getAllByTestId("chat-tasks-item").every(r => r.className.includes("snap-start"))).toBe(true);
     // Tasks before routines, blocked and running both "active", in the card's words and colours.
     const [hermesOne, coord, hermesZero] = sections;
     expect(within(within(hermesOne).getByTestId("chat-tasks-active")).getAllByTestId("chat-tasks-item").map(i => i.dataset.cardId)).toEqual(["bench", "e2e"]);
