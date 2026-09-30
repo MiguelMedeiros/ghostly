@@ -197,6 +197,8 @@ describe("where a notification goes, and what a click opens", () => {
       runtime: { id: "ext", getURL: (path: string) => `chrome-extension://ext/${path}` },
       permissions: { contains: vi.fn(async () => true), request: vi.fn(async () => true) },
       notifications: { create: vi.fn(async (id: string) => id), clear: vi.fn(async () => true), onClicked: { addListener: (listener: (id: string) => void) => { clicked = listener; } } },
+      tabs: { getCurrent: vi.fn(async () => ({ id: 7, windowId: 3 })), update: vi.fn(async () => ({})) },
+      windows: { update: vi.fn(async () => ({})) },
     };
     (globalThis as { chrome?: unknown }).chrome = chrome;
     const { showPrivateNotification, onNotificationOpen } = await lib();
@@ -205,13 +207,17 @@ describe("where a notification goes, and what a click opens", () => {
     vi.spyOn(window, "focus").mockImplementation(() => {});
     await showPrivateNotification("event-1", "New message", "chat-a");
     expect(chrome.notifications.create).toHaveBeenCalledWith("event-1", expect.objectContaining({ title: "Ghostly", message: "New message", silent: true }));
-    // Another page's notification: this page does nothing.
+    // Another page's notification: this page does nothing, and stays where it is.
     clicked!("event-other");
     expect(opened).not.toHaveBeenCalled();
     expect(chrome.notifications.clear).not.toHaveBeenCalled();
+    expect(chrome.tabs.update).not.toHaveBeenCalled();
     clicked!("event-1");
     expect(opened).toHaveBeenCalledWith("chat-a");
     expect(chrome.notifications.clear).toHaveBeenCalledWith("event-1");
+    // The app page is a tab: window.focus() cannot bring a background tab forward, so the tab and its window are.
+    await waitFor(() => expect(chrome.windows.update).toHaveBeenCalledWith(3, { focused: true }));
+    expect(chrome.tabs.update).toHaveBeenCalledWith(7, { active: true });
   });
   it("extension without the notifications permission: listening does not throw, and a grant later still opens chats", async () => {
     // "notifications" is an optional permission: until the user grants it, chrome.notifications is undefined.
