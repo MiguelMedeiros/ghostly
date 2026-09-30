@@ -146,12 +146,30 @@ jobs:
           # needs no signing key (apps/desktop/tauri.release.conf.json).
           args: ${{ matrix.args }} --config apps/desktop/tauri.release.conf.json
 
-      # Without this the AppImage shows a blank window on Wayland desktops (issue #1).
+      # Without this the AppImage shows a blank window on Wayland desktops (issue #1). Still needed with
+      # Tauri 2.12: linuxdeploy keeps bundling libwayland-cursor and libwayland-egl, and with those the
+      # WebView aborts on a Wayland session ("Could not create default EGL display: EGL_BAD_PARAMETER").
       - name: Drop bundled libwayland from AppImage
         if: matrix.platform == 'ubuntu-22.04'
         run: |
           sudo apt-get install -y squashfs-tools
           scripts/appimage-drop-wayland-libs.sh target/release/bundle/appimage/*.AppImage
+
+      # `tauri build` signed the AppImage before the repack above changed it, so that signature no longer
+      # matches and every installed Linux app would refuse the update (1.0.0 shipped that way). Sign the
+      # file that is published, bound to the app's version as `tauri build` does. The release job checks
+      # every signature again (scripts/verify-updater-signatures.mjs).
+      - name: Sign the repacked AppImage again
+        if: matrix.platform == 'ubuntu-22.04'
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          version=$(node -p "require('./apps/desktop/tauri.conf.json').version")
+          for appimage in target/release/bundle/appimage/*.AppImage; do
+            npx tauri signer sign --app-version "$version" "$appimage" > /dev/null
+            echo "signed again: $(basename "$appimage").sig"
+          done
 
       - name: Upload artifacts
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -308,6 +326,12 @@ jobs:
       # bundles it points at; nothing unsigned ends up in the manifest.
       - name: Build the updater manifest
         run: node scripts/updater-manifest.mjs artifacts release-assets "${RELEASE_TAG}"
+
+      # What each installed app checks before it takes an update, checked here first: every platform's
+      # bundle in latest.json against its signature and the updater's public key. A bundle changed after
+      # signing (the 1.0.0 AppImage) stops the release instead of reaching the apps.
+      - name: Verify the updater signatures
+        run: node scripts/verify-updater-signatures.mjs release-assets
 
       - name: Generate SHA256 checksums
         run: |
