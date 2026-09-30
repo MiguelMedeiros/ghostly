@@ -276,7 +276,7 @@ describe("hands-free (locked) recording", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Resume" }));
     expect(audio.players.every((player) => player.paused)).toBe(true);
-    expect(revoked).toHaveBeenCalledWith(created.mock.results.at(-1)!.value);
+    expect(revoked).toHaveBeenCalledWith(created.mock.results[created.mock.results.length - 1]!.value);
   });
 
   it("does not start the preview once Send was pressed while it was getting ready", async () => {
