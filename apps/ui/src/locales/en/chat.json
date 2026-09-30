@@ -1,4 +1,9 @@
 {
+  "announce": {
+    "message": "{{name}}: {{text}}",
+    "messages": "{{count}} new messages",
+    "messagesFrom": "{{count}} new messages from {{name}}"
+  },
   "audio": {
     "cantPlay": "This device can't play this audio ({{format}}). Download it to listen.",
     "pause": "Pause audio",
