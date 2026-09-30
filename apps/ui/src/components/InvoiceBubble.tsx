@@ -13,6 +13,7 @@ import type { MoneyInText } from "../lib/money";
 import { MoneyFormatsBubble } from "./MoneyFormatsBubble";
 import { moreMoneyMethod } from "../lib/parse/money-more";
 import { formatAmount } from "../lib/amount";
+import { OpenInWallet } from "./OpenInWallet";
 
 const SETTLED_KEY = "ghostly_settled_money";
 
@@ -201,9 +202,9 @@ function LightningCard({ invoice, mine, off }: { invoice: Bolt11Invoice; mine: b
           )}
           <button className={quiet} onClick={copy}>{copied ? t("payments.invoice.copied") : t("common.copy")}</button>
           {!expired && (
-            <a className={`${quiet} no-underline text-inherit`} href={`lightning:${invoice.invoice}`} title={t("payments.invoice.openTitle")}>
+            <OpenInWallet className={`${quiet} no-underline text-inherit`} uri={`lightning:${invoice.invoice}`} title={t("payments.invoice.openTitle")} testId="invoice-open-wallet">
               {t("payments.invoice.openWallet")}
-            </a>
+            </OpenInWallet>
           )}
         </>
       )}
