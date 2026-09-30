@@ -747,6 +747,7 @@
     "apps/ui/src/hooks/useCountUp.ts": ["payments.chat.cards","wallet.cashu.*","wallet.history","app.reduce-motion"],
     "apps/ui/src/hooks/useDismiss.ts": ["*"],
     "apps/ui/src/hooks/useFloatingBox.ts": ["calls.*"],
+    "apps/ui/src/hooks/useIncomingCallNotice.ts": ["calls.*","app.attention.notifications"],
     "apps/ui/src/hooks/useIsMobile.ts": ["*"],
     "apps/ui/src/hooks/usePairingProgress.ts": ["chat.paired.pairing-progress","chat.paired.pair"],
     "apps/ui/src/hooks/usePkarr.ts": ["invite.create"],
