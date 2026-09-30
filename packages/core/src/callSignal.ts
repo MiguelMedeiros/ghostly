@@ -489,6 +489,11 @@ export function buildSdpFromSignal(signal: CallSignal): string {
   return lines.join("\r\n") + "\r\n";
 }
 
+/** Whether a description carries any candidate: one without cannot be reached, nor reach anyone. */
+export function sdpHasCandidates(sdp: string | undefined | null): boolean {
+  return /^a=candidate:/m.test(sdp ?? "");
+}
+
 /** How long to keep collecting after the candidate we were waiting for showed up. */
 const ICE_SETTLE_MS = 400;
 
@@ -502,6 +507,11 @@ const ICE_SETTLE_MS = 400;
 export function waitForIceGathering(
   pc: RTCPeerConnection,
   timeoutMs = 10000,
+  /**
+   * Give up after this long when not a single candidate showed up. Host candidates come in a few milliseconds; a
+   * connection with none by then has stalled (Chromium, rarely, under load) and will not find any later.
+   */
+  { stallMs }: { stallMs?: number } = {},
 ): Promise<void> {
   return new Promise((resolve) => {
     if (pc.iceGatheringState === "complete") {
@@ -514,20 +524,26 @@ export function waitForIceGathering(
     );
     const wanted = usesTurn ? " typ relay" : " typ srflx";
     let settle: ReturnType<typeof setTimeout> | null = null;
+    let found = false;
 
     const finish = () => {
       clearTimeout(timeout);
+      if (stalled) clearTimeout(stalled);
       if (settle) clearTimeout(settle);
       pc.removeEventListener("icegatheringstatechange", onState);
       pc.removeEventListener("icecandidate", onCandidate);
       resolve();
     };
     const timeout = setTimeout(finish, timeoutMs);
+    const stalled = stallMs === undefined ? null : setTimeout(() => {
+      if (!found && !sdpHasCandidates(pc.localDescription?.sdp)) finish();
+    }, stallMs);
 
     const onState = () => {
       if (pc.iceGatheringState === "complete") finish();
     };
     const onCandidate = (event: RTCPeerConnectionIceEvent) => {
+      if (event.candidate) found = true;
       if (!settle && event.candidate?.candidate.includes(wanted)) settle = setTimeout(finish, ICE_SETTLE_MS);
     };
 

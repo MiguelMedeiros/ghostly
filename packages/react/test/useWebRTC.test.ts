@@ -422,10 +422,12 @@ describe("answering a call", () => {
     act(() => { void call.result.current.acceptCall(false); });
     devices.userMedia[0].grant();
     await settle();
+    expect(call.result.current.callState).toBe("connecting");
+    act(() => FakePeerConnection.instances[0].setIceState("connected"));
 
     act(() => { vi.advanceTimersByTime(RING_MS); });
 
-    expect(call.result.current.callState).toBe("connecting");
+    expect(call.result.current.callState).toBe("connected");
     expect(call.addCallEventMessage).not.toHaveBeenCalledWith("call_missed", expect.anything());
   });
 

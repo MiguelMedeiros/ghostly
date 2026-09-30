@@ -197,6 +197,9 @@ function fakeSdp(setup: string, kinds: string[]): string {
 export class FakePeerConnection extends EventTarget {
   static instances: FakePeerConnection[] = [];
   static holdGathering = false;
+  /** How many of the next connections stall: they gather for ever and find no candidate (Chromium, rarely). */
+  static stallGathering = 0;
+  private readonly stalls: boolean;
 
   closed = false;
   iceConnectionState: RTCIceConnectionState = "new";
@@ -221,6 +224,8 @@ export class FakePeerConnection extends EventTarget {
   constructor(readonly config: RTCConfiguration) {
     super();
     FakePeerConnection.instances.push(this);
+    this.stalls = FakePeerConnection.stallGathering > 0;
+    if (this.stalls) FakePeerConnection.stallGathering--;
   }
 
   getConfiguration() { return this.config; }
@@ -248,10 +253,10 @@ export class FakePeerConnection extends EventTarget {
 
   async setLocalDescription(description: RTCSessionDescriptionInit) {
     this.assertOpen();
-    this.localDescription = description;
+    this.localDescription = this.stalls ? { ...description, sdp: description.sdp?.replace(/^a=candidate:.*\r\n/gm, "") } : description;
     this.assignMids();
     if (description.type === "answer") this.settleDirections();
-    this.iceGatheringState = FakePeerConnection.holdGathering ? "gathering" : "complete";
+    this.iceGatheringState = FakePeerConnection.holdGathering || this.stalls ? "gathering" : "complete";
   }
 
   async setRemoteDescription(description: RTCSessionDescriptionInit) {
@@ -309,6 +314,7 @@ export function installWebRTCFakes() {
   const devices = new FakeMediaDevices();
   FakePeerConnection.instances = [];
   FakePeerConnection.holdGathering = false;
+  FakePeerConnection.stallGathering = 0;
   vi.stubGlobal("RTCPeerConnection", FakePeerConnection);
   vi.stubGlobal("MediaStream", FakeMediaStream);
   const previous = Object.getOwnPropertyDescriptor(navigator, "mediaDevices");
