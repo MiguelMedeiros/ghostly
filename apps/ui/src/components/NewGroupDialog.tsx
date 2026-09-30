@@ -1,9 +1,12 @@
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 import { COMMUNITY_LIMITS } from "@ghostly/core";
 import { useBackdropDismiss } from "../hooks/useDismiss";
 import { engine } from "@ghostly/browser/platform/engine";
 import { useI18n, type Translate } from "../contexts/I18nContext";
+
+const subscribe = (listener: () => void) => engine.subscribe(listener);
+const snapshot = () => engine.state;
 
 type Kind = "community" | "mesh";
 const kinds = (t: Translate): { kind: Kind; title: string; body: string }[] => [
@@ -21,12 +24,15 @@ export function NewGroupDialog({ onClose, onCreated }: { onClose(): void; onCrea
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const backdrop = useBackdropDismiss(onClose);
+  // Group links are WebRTC only: an app with none (Ghostly Desktop on Linux) could make the group and show its link,
+  // but never let anyone in, nor reach a member (GroupConnection says the same once in). It says so here instead.
+  const noLinks = useSyncExternalStore(subscribe, snapshot)?.transport.webrtc === false;
   useEffect(() => {
     const element = dialog.current!; element.showModal(); input.current?.focus();
     return () => element.close();
   }, []);
   const submit = async () => {
-    if (!name.trim() || busy) return;
+    if (!name.trim() || busy || noLinks) return;
     setBusy(true); setError("");
     try {
       const { groupId } = await engine.call("createGroup", { name: name.trim(), profile: kind });
@@ -50,10 +56,12 @@ export function NewGroupDialog({ onClose, onCreated }: { onClose(): void; onCrea
           <span><span className="block text-sm font-semibold">{k.title}</span><span className="block text-xs text-text-muted">{k.body}</span></span>
         </label>)}
       </div>
+      {noLinks && <p className="mt-3 rounded-lg border border-border px-3 py-2 text-xs text-text-muted" data-testid="new-group-no-webrtc">
+        <span className="block text-sm font-semibold text-text-primary">{t("group.connection.noWebrtc")}</span>{t("group.connection.noWebrtcHint")}</p>}
       {error && <p role="alert" className="mt-2 text-sm text-danger">{error}</p>}
       <div className="mt-5 flex justify-end gap-2">
         <button type="button" onClick={onClose} className="min-h-11 rounded-lg px-4 text-sm hover:bg-surface-hover focus-visible:ring-2 focus-visible:ring-accent">{t("common.cancel")}</button>
-        <button type="submit" disabled={!name.trim() || busy} data-testid="new-group-create"
+        <button type="submit" disabled={!name.trim() || busy || noLinks} data-testid="new-group-create"
           className="min-h-11 rounded-lg bg-accent px-4 text-sm font-semibold text-panel-header hover:bg-accent-hover disabled:opacity-40 focus-visible:ring-2 focus-visible:ring-accent">{t("group.create.create")}</button>
       </div>
     </form>

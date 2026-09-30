@@ -297,6 +297,19 @@ describe("NewGroupDialog", () => {
     expect(screen.getByTestId("new-group-create")).toBeEnabled();
   });
 
+  it("on an app with no WebRTC, says before creating that no member could be reached from here", async () => {
+    // Ghostly Desktop on Linux: group links are WebRTC only, so a group made here gets a link whose knocks
+    // this app sees but can never let in (the joiner waits at "A member is letting you in" for good).
+    const { user, engine, onCreated } = open();
+    act(() => engine.update({ transport: { protocol: "webrtc/1", relays: [], webrtc: false } }));
+    expect(screen.getByTestId("new-group-no-webrtc")).toHaveTextContent("Ghostly Desktop on Linux does not have yet");
+    await user.type(screen.getByTestId("new-group-name"), "Climbing");
+    expect(screen.getByTestId("new-group-create")).toBeDisabled();
+    await user.keyboard("{Enter}");
+    expect(engine.callsTo("createGroup")).toEqual([]);
+    expect(onCreated).not.toHaveBeenCalled();
+  });
+
   it("cancels", async () => {
     const { user, engine, onClose } = open();
     await user.click(screen.getByRole("button", { name: "Cancel" }));
