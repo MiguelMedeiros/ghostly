@@ -98,34 +98,36 @@ function useProfileNameSync() {
 
 function useLoadedChats() {
   const routeSession = chatRouteSession(useLocation().pathname);
-  const [callSession, setCallSession] = useState<string | null>(null);
+  // Every chat on a call or ringing: a second call ringing (or declined) while one is on must not unload the first.
+  const [callSessions, setCallSessions] = useState<readonly string[]>([]);
   // A call keeps the screen on (Screen Wake Lock, where there is one).
-  useWakeLock(!!callSession);
+  useWakeLock(callSessions.length > 0);
   // The call window hangs here instead of inside its chat, which may be off
   // screen. Still within `LockGate`, so the lock reaches it like the rest.
   const [callLayer, setCallLayer] = useState<HTMLElement | null>(null);
 
   // A call can come in for a chat that is not open: that chat is loaded, off screen, so it rings.
-  const [ringSession, setRingSession] = useState<string | null>(null);
+  const [ringSessions, setRingSessions] = useState<readonly string[]>([]);
   useEffect(() => engine.onCallSignal((linkId, signal) => {
     if (parseCallSignal(signal)?.t !== "o") return;
     const peer = engine.state?.links.find((link) => link.id === linkId)?.peerPubKeyZ32;
     const session = peer ? listSessions().find((s) => s.peerPubKeyB64 === peer) : undefined;
     if (!session) return;
-    setRingSession(session.id);
+    setRingSessions((current) => (current.includes(session.id) ? current : [...current, session.id]));
     // It holds itself once it rings (a call keeps its chat loaded); one that never does is let go.
-    setTimeout(() => setRingSession((current) => (current === session.id ? null : current)), 15_000);
+    setTimeout(() => setRingSessions((current) => current.filter((id) => id !== session.id)), 15_000);
   }), []);
 
   const onCallChange = useCallback((sessionId: string, onCall: boolean) => {
-    setCallSession((current) => (onCall ? sessionId : current === sessionId ? null : current));
-    if (onCall) setRingSession((current) => (current === sessionId ? null : current));
+    setCallSessions((current) =>
+      onCall ? (current.includes(sessionId) ? current : [...current, sessionId]) : current.includes(sessionId) ? current.filter((id) => id !== sessionId) : current);
+    if (onCall) setRingSessions((current) => (current.includes(sessionId) ? current.filter((id) => id !== sessionId) : current));
   }, []);
 
   // Keyed by session id, so a chat that changes places here keeps its call.
   const loaded = useMemo(
-    () => [...new Set([routeSession, callSession, ringSession].filter((id): id is string => !!id))],
-    [routeSession, callSession, ringSession],
+    () => [...new Set([routeSession, ...callSessions, ...ringSessions].filter((id): id is string => !!id))],
+    [routeSession, callSessions, ringSessions],
   );
 
   const render = (visibleClassName: string) => (
