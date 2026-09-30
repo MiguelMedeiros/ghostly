@@ -25,7 +25,7 @@ afterAll(() => {
 
 interface Side { calls: CallManager; events: { type: string; [k: string]: unknown }[]; signals: (string | null)[]; link: Partial<LinkView> }
 
-function pairOfManagers(stacks: { a?: () => Promise<CallStack | string>; now?: () => number; delay?: number } = {}): { a: Side; b: Side } {
+function pairOfManagers(stacks: { a?: () => Promise<CallStack | string>; now?: () => number; delay?: number; maxRedials?: number } = {}): { a: Side; b: Side } {
   const make = (chat: string): Side => {
     const side = { events: [], signals: [], link: { id: chat, profile: "paired-chat/1", callsUnavailable: null, label: `to ${chat}` } } as unknown as Side;
     return side;
@@ -39,17 +39,20 @@ function pairOfManagers(stacks: { a?: () => Promise<CallStack | string>; now?: (
       if (signal) setTimeout(() => other().calls.onSignal(other().link.id!, signal), stacks.delay ?? 5);
     },
   });
-  a.calls = new CallManager({ engine: engine(a, () => b), emit: (type, _id, fields) => a.events.push({ type, ...fields }), profileDir: tmp(), stack: stacks.a, now: stacks.now });
+  a.calls = new CallManager({ engine: engine(a, () => b), emit: (type, _id, fields) => a.events.push({ type, ...fields }), profileDir: tmp(), stack: stacks.a, now: stacks.now, maxRedials: stacks.maxRedials });
   b.calls = new CallManager({ engine: engine(b, () => a), emit: (type, _id, fields) => b.events.push({ type, ...fields }), profileDir: tmp(), now: stacks.now });
   return { a, b };
 }
 
 /**
- * The real media stack, but answers applied on it are refused as libdatachannel 0.24.5 refuses one in its race (see
- * CallManager's `redial`) until `refuse` have been: the connection closes, and adding the answer throws. The real race
- * counts too (CI runners hit it about one answer in six), and `refused()` says how many there were in all.
+ * The real media stack, but the first `refuse` answers applied on it are refused as libdatachannel 0.24.5 refuses one
+ * in its race (see CallManager's `redial`): the connection closes, and adding the answer throws. With `ending:
+ * "fails"`, the race's other ending: the answer goes in, and the connection fails at once. Ours are never applied, so
+ * the contact's side cannot connect on one. The real race, in either ending, comes on top of ours (CI runners lose
+ * about one answer in six): `refused()` counts them all, and a test that refuses answers raises the caller's
+ * `maxRedials` by as many, so the app's own tries stay whole for the real ones.
  */
-function refusingStack(refuse: number): (() => Promise<CallStack | string>) & { refused: () => number } {
+function refusingStack(refuse: number, ending: "throws" | "fails" = "throws"): (() => Promise<CallStack | string>) & { refused: () => number } {
   let refused = 0;
   const stack = async () => {
     const real = await loadCallStack();
@@ -58,21 +61,45 @@ function refusingStack(refuse: number): (() => Promise<CallStack | string>) & { 
     function PeerConnection(...args: ConstructorParameters<typeof Real>) {
       const pc = new Real(...args);
       const apply = pc.setRemoteDescription.bind(pc);
-      // The native method is read-only on its prototype: the connection gets its own.
+      const listen = pc.onStateChange.bind(pc);
+      // Whether this connection's answer went in, and whether its refusal was counted.
+      let answered = false, connected = false, counted = false;
+      // A connection failed here ("fails"): what the real one says after is not heard.
+      let deliver: ((state: string) => void) | null = null, faked = false;
+      const refuseIt = () => { if (!counted) { counted = true; refused++; } };
+      // The native methods are read-only on the prototype: the connection gets its own.
       Object.defineProperty(pc, "setRemoteDescription", {
         value: (sdp: string, type: Parameters<typeof apply>[1]) => {
           if (type !== "answer") return apply(sdp, type);
-          if (refused >= refuse) {
-            try {
-              return apply(sdp, type);
-            } catch (error) {
-              refused++;
-              throw error;
+          // Set first: the connection can fail while the answer goes in.
+          answered = true;
+          if (refused < refuse) {
+            refuseIt();
+            if (ending === "fails") {
+              faked = true;
+              pc.close();
+              setTimeout(() => deliver?.("failed"), 0);
+              return;
             }
+            pc.close();
+            throw new Error("libdatachannel error while adding remote description: Got a remote candidate without ICE transport");
           }
-          refused++;
-          pc.close();
-          throw new Error("libdatachannel error while adding remote description: Got a remote candidate without ICE transport");
+          try {
+            return apply(sdp, type);
+          } catch (error) {
+            refuseIt();
+            throw error;
+          }
+        },
+      });
+      Object.defineProperty(pc, "onStateChange", {
+        value: (cb: Parameters<typeof listen>[0]) => {
+          deliver = (state) => {
+            if (state === "connected") connected = true;
+            if (state === "failed" && answered && !connected) refuseIt();
+            cb(state as Parameters<typeof cb>[0]);
+          };
+          listen((state) => { if (!faked) deliver!(state); });
         },
       });
       return pc;
@@ -281,7 +308,7 @@ describe("two call managers", { timeout: 60_000 }, () => {
 
   it("an answer refused as its connection closes: both sides start over once, on new connections and the same sockets", async () => {
     const stack = refusingStack(1);
-    const { a, b } = pairOfManagers({ a: stack });
+    const { a, b } = pairOfManagers({ a: stack, maxRedials: 1 + MAX_REDIALS });
     b.calls.setAuto({ on: true, rate: 16000 });
     const placed = await a.calls.start("chat-ab", { rate: 48000 }) as { call: string; audio: { socket: string } };
     const alice = await program(placed.audio.socket);
@@ -311,7 +338,7 @@ describe("two call managers", { timeout: 60_000 }, () => {
   for (const refuse of [2, 3]) {
     it(`an answer refused ${refuse} times in a row: the call still connects, on the same sockets`, async () => {
       const stack = refusingStack(refuse);
-      const { a, b } = pairOfManagers({ a: stack });
+      const { a, b } = pairOfManagers({ a: stack, maxRedials: refuse + MAX_REDIALS });
       b.calls.setAuto({ on: true });
       const placed = await a.calls.start("chat-ab", {}) as { call: string; audio: { socket: string } };
       await Promise.all([
@@ -329,6 +356,27 @@ describe("two call managers", { timeout: 60_000 }, () => {
       await b.calls.stopAll();
     });
   }
+
+  it("an answer that goes in, its connection failing at once, 2 times in a row: the call still connects, on the same sockets", async () => {
+    // The race's other ending (CI run 36695348205): the caller ended the call 3 s later as a remote hang-up, untold.
+    const stack = refusingStack(2, "fails");
+    const { a, b } = pairOfManagers({ a: stack, maxRedials: 2 + MAX_REDIALS });
+    b.calls.setAuto({ on: true });
+    const placed = await a.calls.start("chat-ab", {}) as { call: string; audio: { socket: string } };
+    await Promise.all([
+      until(() => a.events.find((e) => e.type === "call.connected")),
+      until(() => b.events.find((e) => e.type === "call.connected")),
+    ]).catch(diagnose(a, b));
+    expect(stack.refused()).toBeGreaterThanOrEqual(2);
+    expect(signalsOf(a, "o")).toHaveLength(stack.refused() + 1);
+    expect(signalsOf(b, "a")).toHaveLength(stack.refused() + 1);
+    expect(signalsOf(a, "h")).toHaveLength(0);
+    expect(a.events.map((e) => e.type)).toEqual(["call.outgoing", "call.connected"]);
+    expect(b.events.map((e) => e.type)).toEqual(["call.incoming", "call.connected"]);
+    expect(a.calls.list()).toMatchObject([{ call: placed.call, state: "connected", audio: { socket: placed.audio.socket } }]);
+    await a.calls.stopAll();
+    await b.calls.stopAll();
+  });
 
   it("answers refused past the last start-over end the call as failed, and the contact is told", async () => {
     // The first offer and MAX_REDIALS more, each answer refused.

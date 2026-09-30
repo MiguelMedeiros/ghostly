@@ -35,6 +35,11 @@ export interface CallHost {
   /** The media stack (tests give their own). */
   stack?: () => Promise<CallStack | string>;
   now?: () => number;
+  /**
+   * How many times an outgoing call offers again (MAX_REDIALS): tests that refuse some answers themselves raise it by
+   * theirs, so the real race's own refusals, which can come on top, still find the app's budget whole.
+   */
+  maxRedials?: number;
 }
 
 /** The audio contract of one call, as commands and events report it. */
@@ -51,6 +56,8 @@ export const CLEAR_MS = 5_000;
 /** How many times an outgoing call offers again after an answer was refused (`redial`), and the wait before each. */
 export const MAX_REDIALS = 4;
 export const REDIAL_BACKOFF_MS = [150, 300, 600, 600] as const;
+/** A connection that fails this soon after its answer went in lost the race `redial` describes, and starts over. */
+export const RACE_FAIL_MS = 2_000;
 
 interface Call {
   id: string;
@@ -68,6 +75,9 @@ interface Call {
   redials: number;
   /** Counts the connections made for the call: one that comes back after a newer one was asked for is closed. */
   attempt: number;
+  /** The attempt whose connection has the contact's answer (0: none yet), and when it went in (Date.now()). */
+  answered: number;
+  answeredAt: number;
   media: CallMedia | null;
   socket: AudioSocket | null;
   /** What the program wrote and the call has not sent yet: kept from the moment the socket opens. */
@@ -169,21 +179,33 @@ export class CallManager {
   private accepted(call: Call, answer: CallSignal): void {
     call.offering = false;
     call.state = "connecting";
+    const attempt = (call.answered = call.attempt);
+    call.answeredAt = Date.now();
     try {
       call.media!.applyAnswer(answer);
     } catch (error) {
-      const why = error instanceof Error ? error.message : String(error);
-      if (call.redials < MAX_REDIALS) {
-        process.stderr.write(`ghostly: call ${call.id}: the answer was refused (${why}): offering again on a new connection\n`);
-        void this.redial(call);
-        return;
-      }
-      process.stderr.write(`ghostly: call ${call.id}: the answer was refused (${why})\n`);
-      void this.end(call, "failed", true);
+      // The connection may have failed first, while the answer was added: then it already started over.
+      if (attempt === call.attempt) this.refused(call, `the answer was refused (${error instanceof Error ? error.message : String(error)})`);
       return;
     }
-    this.arm(call, CONNECT_MS, "failed", true);
+    if (attempt === call.attempt) this.arm(call, CONNECT_MS, "failed", true);
   }
+
+  /**
+   * The contact's answer on this connection was refused, or the connection failed right after it (the same race,
+   * whose handshake can also fail once the answer is in): offering again (`redial`) while there are tries left.
+   */
+  private refused(call: Call, what: string): void {
+    if (call.redials < this.maxRedials) {
+      process.stderr.write(`ghostly: call ${call.id}: ${what}: offering again on a new connection\n`);
+      void this.redial(call);
+      return;
+    }
+    process.stderr.write(`ghostly: call ${call.id}: ${what}\n`);
+    void this.end(call, "failed", true);
+  }
+
+  private get maxRedials(): number { return this.host.maxRedials ?? MAX_REDIALS; }
 
   /**
    * A new offer on a new connection, up to MAX_REDIALS times, each after a short wait. libdatachannel (0.24.5) can
@@ -193,7 +215,8 @@ export class CallManager {
    * answer's candidates throws "Got a remote candidate without ICE transport". That connection is done for, and the
    * contact's side saw the handshake fail too, so both start over: the contact's side answers the newer offer
    * (`reanswer`). Each new connection runs the same race (CI runners lose about one in six, Linux arm64 twice in a
-   * row), hence several. The contact's side ends a call whose connection failed after MEDIA_GRACE_MS: every wait stays
+   * row), hence several. The race can also let the answer in and fail the handshake a moment later: a connection
+   * that fails after its answer, before it ever connected, starts over the same way. The contact's side ends a call whose connection failed after MEDIA_GRACE_MS: every wait stays
    * well under it. Fixed upstream in libdatachannel 0235225a, which no release has yet.
    */
   private async redial(call: Call): Promise<void> {
@@ -332,7 +355,7 @@ export class CallManager {
     if (clearing) { clearTimeout(clearing); this.clearing.delete(chat); }
     const call: Call = {
       id: randomBytes(6).toString("hex"), chat, direction, state: "ringing", rate, video: false, offer: null, offerTs: 0,
-      offering: false, redials: 0, attempt: 0, media: null, socket: null, queue: null, startedAt: this.now, connectedAt: null, timer: null, ended: false,
+      offering: false, redials: 0, attempt: 0, answered: 0, answeredAt: 0, media: null, socket: null, queue: null, startedAt: this.now, connectedAt: null, timer: null, ended: false,
     };
     this.calls.set(call.id, call);
     return call;
@@ -355,6 +378,7 @@ export class CallManager {
     const attempt = ++call.attempt;
     call.media?.close();
     call.media = null;
+    let failed = false;
     const media = await create({
       rate: call.rate,
       queue: call.queue ?? undefined,
@@ -364,6 +388,16 @@ export class CallManager {
       onState: (state) => {
         if (call.ended || attempt !== call.attempt) return;
         if (state === "connected") { this.connected(call); return; }
+        // A connection fails, then closes: it still failed.
+        if (state === "closed" && failed) return;
+        failed ||= state === "failed";
+        // The answer went in and the connection failed at once, before it ever connected: the race's other ending (a
+        // contact out of reach fails later, and ends the call as before).
+        if (state === "failed" && call.direction === "out" && call.answered === attempt && call.state !== "connected"
+          && Date.now() - call.answeredAt < RACE_FAIL_MS) {
+          this.refused(call, "the connection failed as the answer went in");
+          return;
+        }
         // The contact's app closes its connection as it hangs up, and that is often here before its hang-up signal
         // (which crosses the chat session): the signal gets a moment to say so. Without one, a connection the
         // contact closed was still a hang-up; one that failed ends the call as it does in the apps, with nothing to say.
