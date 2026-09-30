@@ -22,7 +22,7 @@ import { appendFileSync } from "node:fs";
 
 const MAX_LINES = 600;
 const MIN_HOURS = 20;
-const PROTECTED = [/^\.github\//, /^scripts\/(security-scan|autorelease-gate)\.mjs$/, /^SECURITY\.md$/];
+const PROTECTED = [/^\.github\//, /^tools\/scripts\/(security-scan|autorelease-gate)\.mjs$/];
 const LOCKFILES = new Set(["package-lock.json", "apps/website/package-lock.json", "Cargo.lock"]);
 const VERSION_FILES = new Set([
   "package.json",
