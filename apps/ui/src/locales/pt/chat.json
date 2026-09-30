@@ -1,4 +1,9 @@
 {
+  "announce": {
+    "message": "{{name}}: {{text}}",
+    "messages": "{{count}} mensagens novas",
+    "messagesFrom": "{{count}} mensagens novas de {{name}}"
+  },
   "audio": {
     "cantPlay": "Este aparelho não reproduz este áudio ({{format}}). Baixe para ouvir.",
     "pause": "Pausar áudio",

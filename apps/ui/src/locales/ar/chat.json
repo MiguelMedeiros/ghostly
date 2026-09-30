@@ -1,4 +1,9 @@
 {
+  "announce": {
+    "message": "{{name}}: {{text}}",
+    "messages": "{{count}} رسائل جديدة",
+    "messagesFrom": "{{count}} رسائل جديدة من {{name}}"
+  },
   "audio": {
     "cantPlay": "لا يمكن لهذا الجهاز تشغيل هذا الصوت ({{format}}). نزّله للاستماع إليه.",
     "pause": "إيقاف الصوت مؤقتًا",

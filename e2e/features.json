@@ -672,6 +672,7 @@
     "apps/ui/src/components/UsdtWalletPanel.tsx": ["wallet.usdt.*","payments.usdt.*","wallet.ready","wallet.mode"],
     "apps/ui/src/components/app-brand.css": ["app.home","wallet.mode"],
     "apps/ui/src/components/audio/**": ["app.theme.bubbles","files.audio.*"],
+    "apps/ui/src/components/chat/MessageAnnouncer.tsx": ["app.accessibility","chat.paired.send","groups.send"],
     "apps/ui/src/components/chat/PinnedBar.tsx": ["chat.pins","groups.pins"],
     "apps/ui/src/components/chat/RoundRetry.tsx": ["files.*","app.theme.bubbles"],
     "apps/ui/src/components/chat/SenderAvatar.tsx": ["groups.member-colors"],
