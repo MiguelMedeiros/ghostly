@@ -1,0 +1,14 @@
+{
+  "appDescription": {
+    "message": "Your services exist while you are online. Ephemeral, identity-addressed peer-to-peer chat and local web apps over WebRTC.",
+    "description": "The extension's description in the Chrome Web Store and on chrome://extensions (132 characters at most)."
+  },
+  "appName": {
+    "message": "Ghostly",
+    "description": "The extension's name: the product's name, the same in every language."
+  },
+  "appShortName": {
+    "message": "Ghostly",
+    "description": "The extension's short name (12 characters at most)."
+  }
+}

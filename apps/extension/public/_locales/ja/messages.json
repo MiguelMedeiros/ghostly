@@ -1,0 +1,14 @@
+{
+  "appDescription": {
+    "message": "あなたのサービスはオンラインの間だけ存在します。ID で宛先を決める一時的な P2P チャットと、WebRTC 経由のローカル Web アプリ。",
+    "description": "The extension's description in the Chrome Web Store and on chrome://extensions (132 characters at most)."
+  },
+  "appName": {
+    "message": "Ghostly",
+    "description": "The extension's name: the product's name, the same in every language."
+  },
+  "appShortName": {
+    "message": "Ghostly",
+    "description": "The extension's short name (12 characters at most)."
+  }
+}
