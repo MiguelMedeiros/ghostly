@@ -1,0 +1,32 @@
+{
+  "fromContacts": "連絡先から",
+  "fromContactsEmpty": "連絡先が共有したアプリがここに表示されます。",
+  "goOffline": "オフラインにする：共有中のものに届かなくなります",
+  "goOnline": "オンラインにする",
+  "letReach": "{{contact}} に {{app}} へのアクセスを許可",
+  "namePlaceholder": "名前（Atlas）",
+  "needsApp": "ローカルの Web アプリを共有するには、Ghostly のブラウザ拡張機能かデスクトップアプリが必要です。",
+  "noContacts": "連絡先はまだありません。",
+  "nobodyYet": "相手を選ぶまで誰も開けません。",
+  "nothingShared": "まだ何も共有していません。",
+  "offline": "オフライン",
+  "online": "オンライン",
+  "open": "{{app}} を開く",
+  "openNeedsApp": "連絡先の Web アプリを開くには、Ghostly のブラウザ拡張機能かデスクトップアプリが必要です。",
+  "people": "相手",
+  "peopleDone": "完了",
+  "remove": "削除",
+  "removeNamed": "{{app}} を削除",
+  "requestCount": "· {{count}} 件のリクエスト",
+  "share": "共有",
+  "shareLocal": "ローカルサービスを共有",
+  "shareNamed": "{{app}} を共有",
+  "status": {
+    "notShared": "まだ誰とも共有していません",
+    "offline": "オフラインの間は届きません",
+    "sharedCount": "{{count}} 人の連絡先と共有中",
+    "sharedOne": "1 人の連絡先と共有中",
+    "stopped": "停止中"
+  },
+  "yourApps": "自分のアプリ"
+}

@@ -100,7 +100,7 @@ export function AccountBar() {
 
   return (
     <div ref={panelRoot} className="account-footer relative border-t border-border bg-sidebar-bg" data-testid="account-bar">
-      <nav ref={navRef} aria-label="Account" className="account-actions" data-compact={labelsHidden || undefined}>
+      <nav ref={navRef} aria-label={t("sidebar.account")} className="account-actions" data-compact={labelsHidden || undefined}>
         <button
           data-testid="account-profile"
           onClick={canSwitch ? switcher.toggle : () => (onProfile ? nav.home() : nav.place("/profile"))}
