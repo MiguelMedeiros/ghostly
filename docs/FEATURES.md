@@ -50,6 +50,6 @@ More: [Calls and shared services](CHAT.md#calls-and-shared-services).
 ## Bots and scripts
 
 - `ghostly` runs the app's own engine without a screen, for bots: `ghostly1` invites, groups, files, wallets, typing, replies, edits, reactions, voice calls with the audio on a socket, and a JSON event stream ([packages/cli](../packages/cli/README.md)).
-- The older Rust `ghostly-cli` stays the compatibility client for bots built on v0.4 chats. From 1.0 it is no longer a release download: build it from [`cli/`](../cli).
+- The older Rust `ghostly-cli` was removed after 1.0: bots use `ghostly`.
 
 More: [CLI](CLI.md), [AI agents and bots](AI-AGENTS.md), [SDK](SDK.md).

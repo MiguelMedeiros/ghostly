@@ -28,7 +28,6 @@ A positive case exchanges data in both directions. A negative case records the e
 ## Existing useful coverage
 
 - [Protocol and fixtures](../../packages/core/test/protocol.test.ts), [fixtures](../../packages/core/test/fixtures.ts): current record/crypto behavior.
-- [Rust interoperability test](../../packages/core/test/interop-rust.test.ts): opt-in live text exchange, skipped without a configured CLI binary. Its existence is not a fresh successful run.
 - [File tests](../../packages/core/test/files.test.ts), [HTTP tests](../../packages/core/test/http.test.ts), [call signal tests](../../packages/core/test/callSignal.test.ts), [browser tests](../../packages/browser): current behavior/regressions.
 - [E2E guide](../../e2e/README.md): cross-client coverage and desktop platform constraints. Shared TypeScript core does not satisfy independent-implementation evidence for every feature.
 

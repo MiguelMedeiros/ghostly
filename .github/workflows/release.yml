@@ -299,7 +299,7 @@ jobs:
           # Browser extension (load unpacked, or upload to a store)
           cp artifacts/extension/*.zip release-assets/ 2>/dev/null || true
 
-          # No CLI binaries: the Rust ghostly-cli (cli/) is not shipped from 1.0
+          # No CLI binaries: the Rust ghostly-cli was removed after 1.0
           # (S17 in docs/SECURITY-REVIEW.md). The supported CLI, packages/cli, goes to npm.
 
           ls -la release-assets/
