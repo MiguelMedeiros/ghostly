@@ -3530,15 +3530,15 @@ export class GhostlyNode implements EngineImplementation {
     if (mints.length === 1 && mints[0] === url) throw new Error(`This is the last mint of your ${networkLabel(network)} Cashu wallet: remove the wallet to remove it`);
     if ((await this.wallet.balanceAt(url)) > 0) throw new Error("Move your sats out of this mint before removing it");
     const waits = async () => mintAwaiting(url, { network, quotes: await this.wallet.quotes(), payments: this.desk.records(), now: Date.now() });
-    let awaiting = await waits();
-    if (awaiting.length && acceptLoss !== true) {
-      // What was already paid to it is claimed first, and then counted in what it holds.
+    if ((await waits()).length) {
+      // What was already paid to it is claimed first, even when the person agreed: sats that came in meanwhile are
+      // what it holds now, and it is never removed holding them.
       let timer: ReturnType<typeof setTimeout> | undefined;
       await Promise.race([this.wallet.checkQuotes([url]).catch(() => {}), new Promise((resolve) => { timer = setTimeout(resolve, removalTiming.claimMs); })]);
       clearTimeout(timer);
       if ((await this.wallet.balanceAt(url)) > 0) { await this.refreshWallet(); throw new Error("Move your sats out of this mint before removing it"); }
-      awaiting = await waits();
-      if (awaiting.length) {
+      const awaiting = await waits();
+      if (awaiting.length && acceptLoss !== true) {
         const listed = awaiting.map((a) => { const text = ENGLISH_REMOVAL.item(a.kind, ENGLISH_REMOVAL.sats(a.amount, network)); return text.charAt(0).toLowerCase() + text.slice(1); }).join("; ");
         throw new Error(`This mint still waits for money: ${listed}. Confirm that what is paid to it afterwards shows only once you add the mint again to remove it.`);
       }

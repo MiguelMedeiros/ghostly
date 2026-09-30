@@ -388,6 +388,18 @@ describe("the Cashu wallet and Lightning", () => {
     expect((await db.getSettings()).mints).toEqual(["https://b.example"]);
   });
 
+  it("a mint whose invoice was paid meanwhile is not removed, even once the person agreed: the sats are claimed first", async () => {
+    const { node } = track(engine());
+    node["settings"].mints = ["https://a.example", "https://b.example"];
+    const open = { quote: "q1", mint: "https://a.example", amount: 2_500, invoice: fakeInvoice(2_500, new Uint8Array(32).fill(8)), createdAt: Date.now(), expiresAt: Date.now() + 3_600_000 };
+    vi.spyOn(node["wallet"], "quotes").mockResolvedValue([open] as never);
+    const balance = vi.spyOn(node["wallet"], "balanceAt").mockResolvedValue(0);
+    // Asking the mint claims the paid invoice: the mint holds its sats now.
+    vi.spyOn(node["wallet"], "checkQuotes").mockImplementation(async () => { balance.mockResolvedValue(2_500); });
+    await expect(node.walletRemoveMint({ url: "https://a.example", acceptLoss: true })).rejects.toThrow("Move your sats out");
+    expect(node["settings"].mints).toHaveLength(2);
+  });
+
   it("an invoice made on Receive is at once among what the wallet waits for, so removing the wallet lists it", async () => {
     const { node } = track(engine());
     node["settings"].mints = [TEST_MINT];
