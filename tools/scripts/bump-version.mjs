@@ -16,7 +16,7 @@
  */
 import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
-import { assembleChangelog, readFragments } from "./changes.mjs";
+import { CHANGES, assembleChangelog, readFragments } from "./changes.mjs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
