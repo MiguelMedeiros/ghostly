@@ -27,6 +27,13 @@ export class NativeWorld {
   latencyMs = 60;
   dialMs = 400;
   dialFailMs = 5_000;
+  /** Descriptors name an endpoint by a 64-hex key, as the real adapters do (a capability record or `_tr` carries only those). */
+  hexIds = false;
+  /**
+   * Apps whose dials never reach the endpoint they dial, which fail after `dialFailMs` (a CLI daemon back after a kill,
+   * whose HyperDHT dial did not reach its contact on the loopback testnet: CI run 36741701666).
+   */
+  dialsLost = new Set<string>();
   idleMs = 30_000;
   /** Every dial that reached an endpoint, and every one that did not. */
   dials = 0;
@@ -40,19 +47,20 @@ export class NativeWorld {
     const identity = this.identities.get(id) ?? hex(32);
     this.identities.set(id, identity);
     const entry: Entry = { name, identity, closed: false, ends: [], endpoint: null as unknown as NativeEndpoint };
-    const descriptor = transport === "hyperdht/1" ? { publicKey: id } : { id, relay: "https://relay.test./", addresses: [] };
+    const key = this.hexIds ? identity : id;
+    const descriptor = transport === "hyperdht/1" ? { publicKey: key } : { id: key, relay: "https://relay.test./", addresses: [] };
     entry.endpoint = {
       transport, descriptor, onConnection: null, onDescriptor: null,
       connect: async (to: unknown): Promise<BoundChannel> => {
         const d = to as { id?: string; publicKey?: string };
-        const remote = this.entries.get(d.id ?? d.publicKey ?? "");
-        if (!remote || remote.closed || entry.closed || !remote.endpoint.onConnection) {
+        const remote = this.find(d.id ?? d.publicKey ?? "");
+        if (!remote || remote.closed || entry.closed || !remote.endpoint.onConnection || this.dialsLost.has(name)) {
           this.dialFailures++;
           await after(this.dialFailMs);
           throw new Error(`${transport}: the contact's endpoint did not answer`);
         }
         await after(this.dialMs);
-        if (remote.closed || entry.closed || this.entries.get(d.id ?? d.publicKey ?? "") !== remote) { this.dialFailures++; throw new Error(`${transport}: the contact's endpoint went away`); }
+        if (remote.closed || entry.closed || this.find(d.id ?? d.publicKey ?? "") !== remote) { this.dialFailures++; throw new Error(`${transport}: the contact's endpoint went away`); }
         this.dials++;
         const [mine, theirs] = this.pair(entry, remote);
         const binding = { transport, context: hex(transport === "hyperdht/1" ? 64 : 32), identities: [entry.identity, remote.identity] as [string, string] };
@@ -63,6 +71,11 @@ export class NativeWorld {
     };
     this.entries.set(id, entry);
     return entry.endpoint;
+  }
+
+  /** The running endpoint a descriptor names: by its name, or by its hex key (`hexIds`). */
+  private find(key: string): Entry | undefined {
+    return this.entries.get(key) ?? [...this.entries.values()].find(entry => entry.identity === key);
   }
 
   /** The app named `name` ends with nothing said: no close reaches anyone, the far ends time out. */

@@ -115,6 +115,8 @@ export interface LinkSessionEvents {
   onPeerAck?(ackTimestamp: number): void;
   onCallSignal?(signal: string): void;
   onRtcSignal?(signal: string): void;
+  /** The peer's packet carries a new `_tr` value (a group link's transports, `parsePacketTransports`). */
+  onPeerTransports?(value: string): void;
   onStatus?(status: LinkStatus): void;
   /** A poll started, or finished with the next one due in `nextInMs`. */
   onPoll?(poll: { polling: boolean; nextInMs: number }): void;
@@ -169,6 +171,9 @@ export class LinkSession {
   /** The `_rtc` signal the last packet that went out carried. */
   private rtcSignalOut: string | null = null;
   private lastRtcSignalIn: string | null = null;
+  /** A group link's `_tr` value this side publishes (`setTransports`), and the last the peer's packet carried. */
+  private transports: string | null = null;
+  private lastTransportsIn: string | null = null;
 
   private running = false;
   /** Stopped without a last packet (`stop(false)`): nothing more goes out. */
@@ -336,9 +341,22 @@ export class LinkSession {
   fitsRtcSignal(signal: string): boolean {
     try {
       buildLinkRecords(this.identity.pubKeyZ32, { messages: this.sentBuffer, ackTimestamp: this.myAck,
-        nick: this.nick, callSignal: this.callSignal, rtcSignal: signal, services: this.getServices() }, this.encKey);
+        nick: this.nick, callSignal: this.callSignal, rtcSignal: signal, services: this.getServices(), transports: this.transports }, this.encKey);
       return true;
     } catch { return false; }
+  }
+
+  /**
+   * A group link's transports and how to dial them (`_tr`, `encodePacketTransports`): published with the next packet,
+   * now if it changed. `null` publishes none, which is what every link but a group's with an app lacking WebRTC does.
+   */
+  setTransports(value: string | null): void {
+    if (this.transports === value) return;
+    this.transports = value;
+    if (!this.running) return;
+    // A first packet still held back (`firstPublish`) carries it when it goes; one already out does not.
+    if (this.firstPublishTimer && !this.lastPublishedAt && !this.publishing) return;
+    void this.publish().catch(() => {});
   }
 
   async setRtcSignal(signal: string | null, reportFailure = false): Promise<void> {
@@ -479,6 +497,7 @@ export class LinkSession {
         callSignal: this.callSignal,
         rtcSignal,
         services: advertise ? this.getServices() : undefined,
+        transports: advertise ? this.transports : null,
       },
       this.encKey,
     );
@@ -568,6 +587,11 @@ export class LinkSession {
           nick: batch.nick,
           services: online ? batch.services : null,
         };
+        // Before presence: a dial that presence starts ranks with them.
+        if (batch.transports !== null && batch.transports !== this.lastTransportsIn) {
+          this.lastTransportsIn = batch.transports;
+          this.events.onPeerTransports?.(batch.transports);
+        }
         this.events.onPresence?.(this.presence);
 
         if (batch.callSignal !== null && batch.callSignal !== this.lastCallSignalIn) {

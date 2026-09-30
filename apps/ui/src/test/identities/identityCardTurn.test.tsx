@@ -85,11 +85,13 @@ it("waits again when the card is turned back and over once more", async () => {
 });
 
 // With motion reduced there is no turn (flip.css takes the card's transition away, the faces cross-fade where they
-// are): nothing to wait for.
+// are): nothing to wait for. The card is flipped two frames after the click (useCardFlip.ts), so the fade starts from
+// a painted face; its buttons take clicks from that moment, with no turn after it.
 it("does not wait with motion reduced", async () => {
   turn.textContent = `.deck-flip-card{transition-property:none;transition-duration:0s}`;
   const { user } = open({ links: [paired()], identityProofs: [proofView({ id: "a" })] }, true);
   await user.click(ghostly());
+  await waitFor(() => expect(copyKey().closest(".deck-flip")).toHaveAttribute("data-flipped", "true"));
   expect(copyKey()).toBeEnabled();
   expect(actions(copyKey())).not.toHaveAttribute("data-turning");
 });

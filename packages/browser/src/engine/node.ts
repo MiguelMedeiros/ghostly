@@ -176,6 +176,15 @@ import { DEFAULT_IROH_RELAYS, createIrohWebEndpoint, irohRelayProblem } from "..
 
 /** How long a chat waits before listening again after its HyperDHT relay went away. */
 const RELAY_RETRY_MS = 30_000;
+/** Native listeners an app may hold per transport (the Desktop's Rust Iroh allows eight, `paired_transport.rs`). */
+const NATIVE_SLOTS = 8;
+/**
+ * Of those, what a group's links (edges, entry sessions) may hold where one side has no WebRTC (WISP 9xx § Transports):
+ * half, so 1:1 chats keep room. It is also the group links' budget of connections on an app with no WebRTC (`peerRoom`).
+ */
+export const GROUP_NATIVE_SLOTS = 4;
+/** How often a group link that found no free native slot tries again. */
+const GROUP_NATIVE_RETRY_MS = 15_000;
 
 const DEFAULT_SETTINGS: Settings = {
   online: true,
@@ -889,8 +898,16 @@ export class GhostlyNode implements EngineImplementation {
     },
     linkReady: (linkId, version = 1) => !!this.links.get(linkId)?.link?.supportsGroupVersion(version),
     myNick: () => this.sharedNick,
-    staysOnline: () => this.options.staysOnline ?? this.options.platform === "desktop",
+    // An app with no WebRTC (the Linux Desktop) reaches members over native listeners, a few of them
+    // (`GROUP_NATIVE_SLOTS`): it does not offer to be a private group's hub, which keeps an edge with everyone.
+    staysOnline: () => this.options.staysOnline ?? (this.options.platform === "desktop" && typeof RTCPeerConnection !== "undefined"),
     peerRoom: groupId => {
+      // With no WebRTC, a group's links are native ones, and all the groups together hold `GROUP_NATIVE_SLOTS` at most.
+      if (typeof RTCPeerConnection === "undefined" && Object.keys(this.nativeFactories).length) {
+        let held = 0;
+        for (const live of this.links.values()) if (live.stored.group && live.stored.group !== groupId && live.link) held++;
+        return Math.max(0, GROUP_NATIVE_SLOTS - held);
+      }
       const budget = this.options.peerBudget;
       if (budget === undefined) return undefined;
       // Every other group's edges and entry sessions that run, one connection each, and the 1:1 chats' on WebRTC: a
@@ -1322,6 +1339,8 @@ export class GhostlyNode implements EngineImplementation {
         ...this.transport.describe(), ...(this.options.irohWeb ? { iroh: { relays: this.irohRelays, defaults: [...DEFAULT_IROH_RELAYS] } } : {}),
         ...(this.transport.configure && { direct: true }), ...(this.transport.discovery && { discovery: this.transport.discovery() }),
         ...(typeof RTCPeerConnection === "undefined" && { webrtc: false as const }),
+        // A group's link goes over WebRTC, or a native transport where one side has none (WISP 9xx § Transports).
+        ...(typeof RTCPeerConnection === "undefined" && !Object.keys(this.nativeFactories).length && { groupLinks: false as const }),
       },
       // Group edges are links the engine runs, not chats anyone sees.
       links: [...this.links.values()].filter((live) => !live.stored.group).map((live) => this.viewOf(live)).sort((a, b) => b.createdAt - a.createdAt),
@@ -1369,7 +1388,8 @@ export class GhostlyNode implements EngineImplementation {
 
   /** The edge of a group toward one member, as the group page shows it: what carries it and when the member was last heard. */
   private edgeView(groupId: string, member: string): GroupEdgeView | undefined {
-    for (const live of this.links.values()) if (live.stored.group === groupId && live.stored.groupPeer === member && !live.stored.groupEntry) return edgeView(live);
+    for (const live of this.links.values()) if (live.stored.group === groupId && live.stored.groupPeer === member && !live.stored.groupEntry)
+      return edgeView(live, Date.now(), this.groupNativeWaiting.has(live.stored.id));
     return undefined;
   }
 
@@ -4019,6 +4039,9 @@ export class GhostlyNode implements EngineImplementation {
     if (!live?.stored.group) return;
     this.links.delete(linkId);
     this.groupWakeReceived.delete(linkId);
+    // Its native slot, if it held one, is free: a group link waiting for one tries at the next tick.
+    this.groupNativeWaiting.delete(linkId);
+    this.groupNativeRetryAt = 0;
     // A member who held the subscription and is no longer in the group (removed, or I left): the app replaces it.
     // An edge a group on hubs no longer keeps is still a member's: nothing to replace.
     // An edge a group on hubs no longer keeps is still a member's: it is remembered as holding the subscription, which
@@ -4087,7 +4110,7 @@ export class GhostlyNode implements EngineImplementation {
 
   private startGroupEntries(): void {
     if (this.groupEntryTimer || this.shuttingDown || this.options.deferGroups) return;
-    this.groupEntryTimer = setInterval(() => void this.groups.tick().catch(() => {}), 1_000);
+    this.groupEntryTimer = setInterval(() => { void this.groups.tick().catch(() => {}); this.retryGroupNative(); }, 1_000);
   }
   private stopGroupEntries(): void {
     if (this.groupEntryTimer) clearInterval(this.groupEntryTimer);
@@ -4101,6 +4124,10 @@ export class GhostlyNode implements EngineImplementation {
     const group = stored.group!, peer = stored.groupPeer!, entry = !!stored.groupEntry;
     const role = stored.groupEntry ?? "edge";
     let seen = false;
+    // Native where one side has no WebRTC (WISP 9xx § Transports): an edge back after a restart resumes on a native transport both run.
+    const native = this.keepsGroupNative(stored);
+    const resumeOn: PairedTransport | undefined = native
+      ? TRANSPORTS.find(t => t !== "webrtc/1" && t in this.nativeFactories && !!stored.peerTransports?.includes(t)) : "webrtc/1";
     live.pairing = { status: "connecting" };
     live.link = new GhostLink({
       // An edge carries payments with its member (WISP 9xx § Payments), as a chat does; an entry session does not.
@@ -4112,8 +4139,11 @@ export class GhostlyNode implements EngineImplementation {
       rtcAvailable: typeof RTCPeerConnection !== "undefined",
       // Live when this app last ran: the member likely watches for this app to come back, and is dialled at once,
       // whichever end's turn it is, rather than left to its offer and a read at the background pace (WISP 100).
-      // An edge is WebRTC only (no native endpoints, `ensureNativeEndpoints`).
-      resume: !entry && stored.edgeLive ? "webrtc/1" : undefined,
+      // WebRTC, unless one side has none: then the native transport both run.
+      resume: !entry && stored.edgeLive ? resumeOn : undefined,
+      // How the member's app said to dial it, where one side has no WebRTC (`_tr`, `onPacketTransports`).
+      native: { peerDescriptors: stored.peerDescriptors, peerTransports: stored.peerTransports, peerFallback: stored.peerFallback, automatic: true },
+      packetTransports: true,
       // An offer from before that session began is not answered after a restart (a relay that missed its clearing).
       resumeFloor: !entry && stored.edgeLive ? stored.edgeLiveSince : undefined,
       // Pinned in advance to the member the roster names: there is nothing to trust on first use.
@@ -4154,6 +4184,14 @@ export class GhostlyNode implements EngineImplementation {
           }
           this.emitState();
         },
+        // The member's packet says what its app runs here: one with no WebRTC is reached over a native transport, and
+        // this side starts its endpoints for it (and says how to dial them in its own packet). Kept for the next start.
+        onPacketTransports: (peerTransports, peerDescriptors) => {
+          const patch = { peerTransports, peerDescriptors, peerFallback: true };
+          live.stored = { ...live.stored, ...patch };
+          void db.patchLink(linkId, patch).catch(() => {});
+          if (this.keepsGroupNative(live.stored)) void this.ensureNativeEndpoints(linkId);
+        },
         ...(entry ? {} : {
           onPaymentRequest: (request: PaymentRequest) => this.desk.onPaymentRequest(linkId, request),
           onPaymentAsk: (ask: PaymentAsk) => this.desk.onPaymentAsk(linkId, ask),
@@ -4190,6 +4228,16 @@ export class GhostlyNode implements EngineImplementation {
     });
     traceJoin(group, "link.start", { role });
     live.link.start();
+    if (native) void this.ensureNativeEndpoints(linkId);
+  }
+
+  /**
+   * Whether a group's link (an edge, an entry session) runs native endpoints (WISP 9xx § Transports): where this app has
+   * no WebRTC (the Linux Desktop), and where the member's has none, as its packet said. Between two apps that have
+   * WebRTC it runs none, as before: a group of eight would otherwise hold seven listeners per transport for nothing.
+   */
+  private keepsGroupNative(stored: StoredLink): boolean {
+    return typeof RTCPeerConnection === "undefined" || (!!stored.peerTransports && !stored.peerTransports.includes("webrtc/1"));
   }
 
   private startLink(linkId: string, messages: StoredMessage[]): void {
@@ -4631,7 +4679,7 @@ export class GhostlyNode implements EngineImplementation {
     this.relayRetry = setTimeout(() => {
       this.relayRetry = null;
       for (const [linkId, live] of this.links) {
-        if (live.link && live.stored.profile && !live.stored.group && live.stored.deliveryMode !== "dht" && !live.link.availableTransports.includes("hyperdht/1")
+        if (live.link && live.stored.profile && (!live.stored.group || this.keepsGroupNative(live.stored)) && live.stored.deliveryMode !== "dht" && !live.link.availableTransports.includes("hyperdht/1")
           && this.keepsNativeEndpoints(linkId, live.stored)) void this.ensureNativeEndpoints(linkId);
       }
     }, RELAY_RETRY_MS);
@@ -4658,7 +4706,11 @@ export class GhostlyNode implements EngineImplementation {
     const expected = this.links.get(linkId)?.link;
     const operation = this.nativeQueue.then(async () => {
       const live = this.links.get(linkId), link = live?.link;
-      if (this.shuttingDown || !live?.stored.profile || live.stored.group || live.stored.deliveryMode === "dht" || !link || link !== expected) return;
+      if (this.shuttingDown || !live?.stored.profile || live.stored.deliveryMode === "dht" || !link || link !== expected) return;
+      // A group's link runs them only where one side has no WebRTC (`keepsGroupNative`).
+      const group = !!live.stored.group;
+      if (group && !this.keepsGroupNative(live.stored)) return;
+      let full = false;
       for (const [transport, factory] of Object.entries(this.nativeFactories)) {
         const key = transport as NativeTransport;
         if (!factory || link.availableTransports.includes(key)) continue;
@@ -4667,14 +4719,21 @@ export class GhostlyNode implements EngineImplementation {
           // The native SDKs each allow eight listeners. Reclaim an idle listener
           // only for the selected chat, never an established native connection.
           const owners = [...this.links.values()].filter(other => other.link?.availableTransports.includes(key));
-          if (owners.length >= 8) {
-            const victim = this.activeLinkId === linkId ? owners
+          // A group's links take at most half of them, and never one a chat holds: 1:1 chats keep what they had
+          // before group links went native (WISP 9xx § Transports). One that finds none waits for a slot.
+          if (group && (owners.length >= NATIVE_SLOTS || owners.filter(other => other.stored.group).length >= GROUP_NATIVE_SLOTS)) { full = true; continue; }
+          if (owners.length >= NATIVE_SLOTS) {
+            // A chat takes a slot from a group's link first, one that carries no session: the link waits for another.
+            const groupVictim = owners.filter(other => other.stored.group && other.link?.canReleaseEndpoint(key))
+              .sort((a, b) => (a.link?.isDataLinkOpen ? 1 : 0) - (b.link?.isDataLinkOpen ? 1 : 0))[0];
+            const victim = groupVictim ?? (this.activeLinkId === linkId ? owners
               .filter(other => other !== live && other.stored.id !== this.activeLinkId && other.link?.canReleaseEndpoint(key))
-              .sort((a, b) => a.lastMessageAt - b.lastMessageAt)[0] : undefined;
+              .sort((a, b) => a.lastMessageAt - b.lastMessageAt)[0] : undefined);
             if (!victim) throw new Error("All eight native connection slots are in use. Disconnect a native connection in another chat, then reopen this chat or press Reconnect.");
             await victim.link!.releaseEndpoint(key);
             victim.transportErrors ??= {};
             victim.transportErrors[key] = "Listener released for another chat. Open this chat to restore it; your messages and transport identity are saved.";
+            if (victim.stored.group) this.groupNativeWaiting.add(victim.stored.id);
           }
           if (this.shuttingDown || live.link !== link) return;
           const seed = live.stored.transportSeeds?.[key] ?? createIdentity().seedB64;
@@ -4691,10 +4750,29 @@ export class GhostlyNode implements EngineImplementation {
           live.transportErrors[key] = error instanceof Error ? error.message : "Native adapter could not start. Reopen this chat to retry.";
         }
       }
+      // A group's link with no native endpoint because none was free: its member's row says so, and it is tried
+      // again as slots free up (`retryGroupNative`).
+      if (group) {
+        const waiting = full && !link.availableTransports.some(t => t !== "webrtc/1");
+        if (waiting) this.groupNativeWaiting.add(linkId); else this.groupNativeWaiting.delete(linkId);
+      }
       this.emitState();
     });
     this.nativeQueue = operation.catch(() => {});
     return operation;
+  }
+
+  /** Group links waiting for a free native slot (`ensureNativeEndpoints`), by link id. */
+  private readonly groupNativeWaiting = new Set<string>();
+  private groupNativeRetryAt = 0;
+  /** Now and then, the group links that found no free native slot try again: a chat or another group may have let one go. */
+  private retryGroupNative(): void {
+    if (!this.groupNativeWaiting.size || Date.now() < this.groupNativeRetryAt) return;
+    this.groupNativeRetryAt = Date.now() + GROUP_NATIVE_RETRY_MS;
+    for (const linkId of [...this.groupNativeWaiting]) {
+      if (!this.links.get(linkId)?.link) { this.groupNativeWaiting.delete(linkId); continue; }
+      void this.ensureNativeEndpoints(linkId);
+    }
   }
 
   /**

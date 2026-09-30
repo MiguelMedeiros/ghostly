@@ -32,8 +32,9 @@ export function GroupConnection({ group }: { group: GroupView }) {
   const reachable = others.filter(m => m.edge?.state === "open").length;
   const failing = others.some(m => m.edge?.state === "error");
   const connecting = others.some(m => m.edge?.state === "connecting");
-  // Group links are WebRTC only: an app with none (Ghostly Desktop on Linux) reaches no member, however long it tries.
-  const noLinks = state?.transport.webrtc === false && others.length > 0;
+  // Group links go over WebRTC, or a native transport where one side has none: an app with neither reaches no member,
+  // however long it tries. (Ghostly Desktop on Linux has no WebRTC, and runs Iroh and HyperDHT.)
+  const noLinks = state?.transport.groupLinks === false && others.length > 0;
   const kind: GroupKind = !online ? "offline" : others.length === 0 ? "waiting" : noLinks ? "failure" : reachable === others.length ? "connected"
     : reachable > 0 ? "partial" : failing ? "failure" : "waiting";
   const label = !online ? t("group.connection.offline") : others.length === 0 ? t("group.connection.onlyYou")

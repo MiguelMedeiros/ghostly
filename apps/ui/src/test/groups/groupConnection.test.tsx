@@ -75,9 +75,12 @@ describe("GroupConnection: the header sums up the mesh", () => {
     ["nobody reachable, nobody around", [me, alice({ state: "waiting" }), bob({ state: "waiting" })], {}, { kind: "waiting", label: "Nobody reachable", dot: "bg-text-muted" }],
     ["alone in the group", [me], {}, { kind: "waiting", label: "Only you so far", dot: "bg-text-muted" }],
     ["this device offline", [me, alice(), bob()], { settings: { online: false } }, { kind: "offline", label: "Offline", dot: null }],
-    // Ghostly Desktop on Linux: no WebRTC, and group links are WebRTC only. Not "Connecting…" forever.
-    ["an app with no WebRTC", [me, alice({ state: "connecting" }), bob({ state: "waiting" })], { transport: { protocol: "webrtc/1", relays: [], webrtc: false } }, { kind: "failure", label: "Groups can't connect from this app yet", dot: "bg-danger" }],
-    ["an app with no WebRTC, alone in the group", [me], { transport: { protocol: "webrtc/1", relays: [], webrtc: false } }, { kind: "waiting", label: "Only you so far", dot: "bg-text-muted" }],
+    // An app with no transport for a group's links (no WebRTC, no native transport). Not "Connecting…" forever.
+    ["an app with no transport for group links", [me, alice({ state: "connecting" }), bob({ state: "waiting" })], { transport: { protocol: "webrtc/1", relays: [], webrtc: false, groupLinks: false } }, { kind: "failure", label: "Groups can't connect from this app yet", dot: "bg-danger" }],
+    ["an app with no transport for group links, alone in the group", [me], { transport: { protocol: "webrtc/1", relays: [], webrtc: false, groupLinks: false } }, { kind: "waiting", label: "Only you so far", dot: "bg-text-muted" }],
+    // Ghostly Desktop on Linux: no WebRTC, but Iroh and HyperDHT carry its group links (WISP 9xx § Transports).
+    ["an app with no WebRTC but native transports", [me, alice({ state: "connecting" }), bob({ state: "waiting" })], { transport: { protocol: "webrtc/1", relays: [], webrtc: false } }, { kind: "waiting", label: "Connecting to members…", dot: "bg-text-muted" }],
+    ["an app with no WebRTC, a member live over Iroh", [me, alice({ transport: "iroh/1" }), bob({ transport: "iroh/1" })], { transport: { protocol: "webrtc/1", relays: [], webrtc: false } }, { kind: "connected", label: "2 of 2 reachable", dot: "bg-accent" }],
   ])("%s", async (_, members, state, want) => {
     await open(active(members), state);
     expect(header()).toEqual({ kind: want.kind, name: want.label, popover: want.label, tooltip: want.label, dot: want.dot });
@@ -97,8 +100,8 @@ describe("GroupConnection: the popover lists every member's edge", () => {
     ]);
     // A failure says why, where it happened.
     expect(within(screen.getAllByTestId("group-connection-member")[2]).getByText("The member's key did not match")).toBeInTheDocument();
-    // Honest about transports: edges are WebRTC only.
-    expect(screen.getByTestId("group-connection-note")).toHaveTextContent("Iroh, HyperDHT and DHT-only delivery are not offered in groups yet");
+    // Honest about transports: WebRTC, and Iroh or HyperDHT with a member that has no WebRTC; no DHT-only delivery.
+    expect(screen.getByTestId("group-connection-note")).toHaveTextContent("DHT-only delivery is not offered in groups yet");
   });
 
   it("follows the group it is handed: a member coming back turns reachable, one going away turns the header partial", async () => {
@@ -135,9 +138,15 @@ describe("GroupConnection: the popover lists every member's edge", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("Go online before reconnecting");
   });
 
-  it("an app with no WebRTC says why no member is reachable, and offers no Reconnect that cannot help", async () => {
-    await open(active([me, alice({ state: "connecting" }), bob({ state: "waiting" })]), { transport: { protocol: "webrtc/1", relays: [], webrtc: false } });
-    expect(screen.getByTestId("group-connection-no-webrtc")).toHaveTextContent("Ghostly Desktop on Linux does not have yet");
+  it("a member this device has no free native connection for says it waits for one", async () => {
+    // Ghostly Desktop on Linux: its group links go over Iroh or HyperDHT, a few listeners shared with 1:1 chats.
+    await open(active([me, alice({ transport: "iroh/1" }), bob({ state: "waiting", transport: undefined, noSlot: true })]), { transport: { protocol: "webrtc/1", relays: [], webrtc: false } });
+    expect(rows()[1]).toMatchObject({ key: BOB, status: "Waiting for a free connection on this device" });
+  });
+
+  it("an app with no transport for group links says why no member is reachable, and offers no Reconnect that cannot help", async () => {
+    await open(active([me, alice({ state: "connecting" }), bob({ state: "waiting" })]), { transport: { protocol: "webrtc/1", relays: [], webrtc: false, groupLinks: false } });
+    expect(screen.getByTestId("group-connection-no-webrtc")).toHaveTextContent("this app has neither");
     expect(screen.queryByTestId("group-connection-reconnect")).not.toBeInTheDocument();
   });
 

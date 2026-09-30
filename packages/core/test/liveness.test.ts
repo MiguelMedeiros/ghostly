@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from "vitest";
-import { GhostLink, LIVENESS_MISSED_PINGS, LIVENESS_PING_MS } from "../src/ghostlink";
+import { GhostLink, LIVENESS_MISSED_PINGS, LIVENESS_PING_MS, PONG_WAIT_MS } from "../src/ghostlink";
 import { LinkSession, RELAY_POLL_INTERVALS, AWAITING_PEER_MS } from "../src/link";
 import { createLink } from "../src/invite";
 import { createIdentity } from "../src/identity";
@@ -13,7 +13,7 @@ function pairedLink() {
     transport: { publish: vi.fn(async () => {}), resolve: async () => null, describe: () => ({ protocol: "test", relays: [] }) },
     createPeerConnection: () => { throw new Error("no dial in this test"); }, localFetch: vi.fn(), getServices: () => [], getHostedHttpService: () => undefined });
 }
-type Internals = { channel: unknown; startLiveness(c: unknown): void; peerAnswersPings: boolean; unansweredPings: number; disconnect(): void };
+type Internals = { channel: unknown; startLiveness(c: unknown, answers?: boolean): void; peerAnswersPings: boolean; unansweredPings: number; disconnect(): void; heardFromPeer(): void };
 
 it("a paired session that stops answering its pings is closed, so it can be dialled again", () => {
   vi.useFakeTimers();
@@ -48,6 +48,32 @@ it("anything back from the peer keeps it alive, and a peer that never answers pi
   old.startLiveness(oldChannel);
   vi.advanceTimersByTime(LIVENESS_PING_MS * 20);
   expect(oldDisconnect).not.toHaveBeenCalled();
+});
+
+it("a ping with nothing back reads the relays at once, for a restarted contact's offer; not for a peer that never answers pings", () => {
+  vi.useFakeTimers();
+  const link = pairedLink(), inner = link as unknown as Internals;
+  const poll = vi.spyOn(link.session, "pollNow").mockImplementation(() => {});
+  const channel = { send: vi.fn(), close: vi.fn() };
+  inner.channel = channel;
+  inner.startLiveness(channel, true);
+  // The ping at the open is answered: nothing to look for.
+  vi.advanceTimersByTime(PONG_WAIT_MS / 2);
+  inner.heardFromPeer();
+  vi.advanceTimersByTime(LIVENESS_PING_MS - PONG_WAIT_MS / 2 + PONG_WAIT_MS - 1);
+  expect(poll).not.toHaveBeenCalled();
+  // The next one is not (the contact crashed): the relays are read once, and the session is kept.
+  vi.advanceTimersByTime(1);
+  expect(poll).toHaveBeenCalledOnce();
+  expect(inner.channel).toBe(channel);
+
+  const old = pairedLink(), oldInner = old as unknown as Internals;
+  const oldPoll = vi.spyOn(old.session, "pollNow").mockImplementation(() => {});
+  const oldChannel = { send: vi.fn(), close: vi.fn() };
+  oldInner.channel = oldChannel;
+  oldInner.startLiveness(oldChannel);
+  vi.advanceTimersByTime(LIVENESS_PING_MS * 5);
+  expect(oldPoll).not.toHaveBeenCalled();
 });
 
 it("waking a chat looks now and starts the wait between attempts over", () => {

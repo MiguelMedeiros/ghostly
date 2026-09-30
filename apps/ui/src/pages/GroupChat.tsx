@@ -15,6 +15,7 @@ import { GroupShareDialog } from "../components/GroupLinkPanel";
 import { GroupConnection } from "../components/GroupConnection";
 import { TasksButton } from "../components/chat/TasksButton";
 import { RoutineStack } from "../components/chat/RoutineCard";
+import type { MemberFaceOf } from "../components/chat/SenderAvatar";
 import { routineStacks } from "../lib/statusCards";
 import { GroupPaymentComposer } from "../components/GroupPaymentComposer";
 import { GroupPaymentCaption, GroupPaymentNote } from "../components/GroupPaymentNote";
@@ -327,6 +328,11 @@ export function GroupChat() {
   // A bot's routines folded into one row count as one message of the run (the rest are under it, drawn when it opens).
   const folded = stackHeads;
   const authors = authorsOf(messages.filter(m => !folded.has(m.id)), group, ownNotes, key => memberPhoto(group, { key, me: false }, state.links, faceOf));
+  /** A member's face in the Tasks panel, as their messages show it (`authorsOf`); none for my own cards ("me"). */
+  const memberFace = (key: string): MemberFaceOf | undefined => key === "me" ? undefined : {
+    key, name: group.members.find(x => x.key === key)?.nick || group.formerNames?.[key] || "",
+    picture: memberPhoto(group, { key, me: false }, state.links, faceOf),
+  };
   /** `inStack`: a message inside a folded row, as that row's writer, its picture beside the stack's last one. */
   const authorProps = (m: StoredMessage, inStack?: MessageAuthor) => {
     const author = inStack ?? authors.get(m.id);
@@ -351,9 +357,9 @@ export function GroupChat() {
       onPin={canPin && replyTarget(m, true) ? () => pinMessage(m.id, replyTarget(m, true) === group.pin?.id) : undefined} pinned={!!group.pin && replyTarget(m, true) === group.pin.id} />;
   const joiningByLink = group.invitation?.viaLink;
   const stage: GroupJoinStage = group.invitation?.stage ?? (group.invitation?.admin ? "admitted" : "knocked");
-  // Getting in takes a group link, and group links are WebRTC only: an app with none (Ghostly Desktop on Linux) is never
-  // let in, so it says so rather than "you are in in a moment" (as the group's connection does, GroupConnection).
-  const noLinks = state?.transport.webrtc === false;
+  // Getting in takes a group link: an app with no transport for one (no WebRTC, no native transport) is never let in,
+  // so it says so rather than "you are in in a moment" (as the group's connection does, GroupConnection).
+  const noLinks = state?.transport.groupLinks === false;
   const joining = noLinks ? { title: t("group.connection.noWebrtc"), body: t("group.connection.noWebrtcHint") }
     : joiningText(stage, group.name, group.profile === "community", t);
   // Just in (my own "You joined" line is recent), and no member reached yet: the edges are being set up.
@@ -411,7 +417,7 @@ export function GroupChat() {
         <div className="flex items-center gap-1">
           {group.status === "active" && <GroupConnection group={group} />}
           {/* Only while a bot's card is here (WISP 4xx · Status Cards). */}
-          <TasksButton rows={messages} nameOf={author => nameOf("peer", author) ?? `…${author.slice(-6)}`} />
+          <TasksButton rows={messages} nameOf={author => nameOf("peer", author) ?? `…${author.slice(-6)}`} faceOf={memberFace} />
           {canShare && <button onClick={() => void openShare()} data-testid="group-share" title={t("group.chat.shareHint")} aria-label={t("group.chat.shareLink")}
             className="inline-flex min-h-9 items-center gap-1.5 rounded-full bg-accent/15 px-3 text-sm font-semibold text-accent hover:bg-accent/25 max-md:min-h-11 max-md:px-2.5">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" /><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" /></svg>

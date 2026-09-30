@@ -12,6 +12,9 @@ const ON_GITHUB = [
   ["numbering", `${GITHUB}/main/docs/wisps/NUMBERING.md`],
 ];
 
+/** React's development build needs eval() for its debugging; production never uses it, so only `next dev` allows it. */
+const SCRIPT_SRC = process.env.NODE_ENV === "production" ? "script-src 'self' 'unsafe-inline'" : "script-src 'self' 'unsafe-inline' 'unsafe-eval'";
+
 const nextConfig: NextConfig = {
   output: "standalone",
   turbopack: {
@@ -26,7 +29,7 @@ const nextConfig: NextConfig = {
       source: "/:path*",
       headers: [
         { key: "Strict-Transport-Security", value: "max-age=31536000" },
-        { key: "Content-Security-Policy", value: "script-src 'self' 'unsafe-inline'; object-src 'none'; base-uri 'self'" },
+        { key: "Content-Security-Policy", value: `${SCRIPT_SRC}; object-src 'none'; base-uri 'self'` },
       ],
     }];
   },
