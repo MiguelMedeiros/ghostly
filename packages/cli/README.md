@@ -81,6 +81,7 @@ The rows are in alphabetical order of their first command, and every command of 
 
 | Command | What it does |
 |---|---|
+| `button update <chat\|group> <message> [--chosen <button>] [--close] [--text <text>] [--wait none\|confirmed\|sent] [--timeout s]` | Answer a question you sent with `send --button` (WISP 4xx · Message Buttons): `--chosen` shows which button won, `--close` takes presses no more, `--text` changes the text; the buttons and, unless given, the text stay. `<message>` is the `messageId` send gave. Answers `{chat \| group, buttons, messageId, card, edits}` |
 | `call auto [on\|off] [--from <chat>]… [--rate n]` | Answer calls by themselves, from anyone or the chats named (kept in the profile) |
 | `call hangup [<chat\|call>]`, `call list`, `call flush [<chat\|call>]` | Hang up (or decline); calls on now; drop the audio queued and not played yet |
 | `call pipe [<chat\|call>]` | A call's audio on stdin and stdout, for shell pipelines (sox, ffmpeg) |
@@ -114,7 +115,7 @@ The rows are in alphabetical order of their first command, and every command of 
 | `group react <group> <message> <emoji> [--remove]` | React to a group's message |
 | `group rename <group> <name>` | A new name, for the admin (1 to 64 characters on one line); the picture stays. Members see it once it reaches them; until then, and on apps from before names, the group keeps the name it had when they got in |
 | `group rotate <group>`, `group link <group> [--off] [--reset]`, `group picture <group> <jpeg> \| --clear` | A fresh secret; the link (printed: asking for it is asking for the secret); the picture |
-| `group send <group> [text…] [--mention <member>]… [--reply <message>] [--wait none\|sent] [--timeout s]` | Send; each mentioned member is written as `@name` in the text. Answers `{group, messageId, sent, edges}`: the id `--reply`, `group react` and `group edit` take, and how many edges took it so far. A group has no receipts: `--wait sent` waits until at least one edge took it (a member's in a private group, one of your hubs' in a community), and exits 4 after `--timeout` (default 30 s) if none did; the message still goes when an edge opens, while the profile is online. Use it for a one-shot send with no daemon |
+| `group send <group> [text…] [--mention <member>]… [--reply <message>] [--button id:Label]… [--style id=primary\|neutral\|danger]… [--once] [--id id] [--wait none\|sent] [--timeout s]` | Send; each mentioned member is written as `@name` in the text. `--button` puts buttons under it, as `send --button`. Answers `{group, messageId, sent, edges}`: the id `--reply`, `group react` and `group edit` take, and how many edges took it so far. A group has no receipts: `--wait sent` waits until at least one edge took it (a member's in a private group, one of your hubs' in a community), and exits 4 after `--timeout` (default 30 s) if none did; the message still goes when an edge opens, while the profile is online. Use it for a one-shot send with no daemon |
 | `group typing <group> [--kind typing\|recording\|thinking] [--status "<text>"] [--for s] [--stop]` | `typing` in a private group: the members whose edge is open see "Ana is typing…" (or recording, thinking, or your status line), with the same rules, 6 s hold and `--for`. Answers `{group, typing, kind, status, reached, sendTyping}` (`reached`: members with an open edge). A community does not carry typing yet (exit 1, `unavailable`) |
 | `identity add <provider> [subject] [--signer id] [--field name=value]… [--days n]` | A proof: an in-app signer (NIP-46 and the like) finishes here; a tool or a published record answers with the statement |
 | `identity complete <draft> [--evidence-file f \| --stdin]`, `identity cancel <draft>` | Finish it with the tool's output (or nothing, for a published record); needs the daemon that began it. Cancel drops one not finished |
@@ -134,7 +135,7 @@ The rows are in alphabetical order of their first command, and every command of 
 | `profile show`, `profile set [--name <name>] [--share-profile \| --no-share-profile]` | The name contacts see |
 | `react <chat> <message> <emoji> [--remove]` | React to a message with one emoji; a new one replaces yours, `--remove` takes it back |
 | `routine send <chat\|group> --name <name> --schedule "every day 01:00" [--cron "0 1 * * *"] [--state active\|paused] [--next <time>] [--run ok\|failed\|skipped[:summary]] [--link url]… [--id id] [--json json\|-\|file]`, `routine update <chat\|group> <routine> [fields…]` | A routine card for something a bot runs on a schedule (WISP 4xx · Status Cards): its name, schedule (and cron line, shown only), state, last run and result, next run and up to 10 recent runs. `--run` records a run now as the last one; `--next` takes milliseconds or a date. Updates merge and are paced as `task update`'s. The app shows it, and runs nothing |
-| `send <chat> [text…] [--reply <message>] [--stdin] [--force] [--wait none\|sent\|delivered] [--timeout s]` | Send text (arguments, or stdin); `--reply` quotes a message of the chat |
+| `send <chat> [text…] [--reply <message>] [--button id:Label]… [--style id=primary\|neutral\|danger]… [--once] [--id id] [--stdin] [--force] [--wait none\|sent\|delivered] [--timeout s]` | Send text (arguments, or stdin); `--reply` quotes a message of the chat. `--button yes:Yes` (1 to 6; the id ends at the first colon) puts buttons under the text, which is the question and what older apps show, so say how to answer in words. `--once`: one answer a person. The answer adds `buttons` (the question's id, `ask-…` unless `--id`), `card`, and `pressable`: whether the contact's app shows buttons (null until it says). A press comes back as `button.pressed` ([Events](#events)) |
 | `service add <name> <http://127.0.0.1:port>`, `service share <service> <chat> [--off]`, `service list`, `service remove\|enable` | Share a web app on this machine, per contact |
 | `service peer <chat>`, `service open <chat> <service> [--port p]`, `service close <chat> <service>` | A contact's app on a loopback port here (daemon). `url` is a link for your browser, `http://<random>.localhost:<port>/.ghostly-open/<token>`: it sets the service's cookie and shows the app on a host name of its own; any other host name, or a request without that cookie, gets 404. Chrome, Edge and curl reach `*.localhost` names by themselves; Safari and Node's `fetch` on macOS may not (add the name to `/etc/hosts` for them) |
 | `settings get [--show-secret]`, `settings set <key> <json>` | Relays, Iroh relays, the HyperDHT relay, ICE servers, `sendTyping` (false: contacts are never told you type), … |
@@ -272,6 +273,12 @@ commands, `group.created` events and `engine getState` print it as `<hidden>`; `
 - Reactions (WISP 400 § Reactions): `message.reaction` (a chat) and `group.reaction` (a group) say each change once:
   `{messageId, by, emoji, removed, mine}`, with `by` `me`, `peer` or a member key, `emoji` "" when taken back, `mine`
   when the message is this profile's. `chat history` lists each message's `reactions`: `[{by, emoji, at}]`.
+- Buttons (WISP 4xx · Message Buttons): a press on a message you sent with `--button` is a reply whose text is the
+  button's label (its `message.received` or `group.message`, with `message.press` and `message.replyTo.button`), then
+  `button.pressed`: `{chat | group, messageId, button, label, by, name, replyId, inferred?}`. `messageId` is the
+  question's, `replyId` the press's, `by` the chat (or a group member's key) and `name` their name. `inferred`: the
+  reply lost the button on the way (the DHT floor) or came from an app without buttons, and matched a label or id.
+  A press past `--once` or after `button update --close` is a plain reply, with no `button.pressed`.
 - Pins (WISP 400 § Pinned message): `chat.pinned` (with `chat`) and `group.pinned` (with `group`) when someone else pins
   or unpins: `{messageId, ref, by, removed}`, with `messageId` the message's id here (null when it is not here, or
   unpinned), `ref` the id both sides know it by, and `by` `peer` or a member key.
@@ -282,8 +289,9 @@ commands, `group.created` events and `engine getState` print it as `<hidden>`; `
   it). The profile's own events (`daemon.started`, `events.gap`, `identity.approval`) pass. Names become ids once,
   at the start. A flag, not profile state: each listener (each agent) has its own ([docs/CLI.md](../../docs/CLI.md#allowlist)).
 - `--turns`: one `agent.turn` event per `message.received`, and per `group.message` that mentions this profile:
-  `{seq, id: "agent.turn:<source id>", type, at, source, chat | group + member, messageId, timestamp, untrusted:
-  {text, name, replyTo?: {id, snippet}, file?: {id, name, size, mime, voice}}}`. `seq` is the source's (cursors
+  `{seq, id: "agent.turn:<source id>", type, at, source, chat | group + member, messageId, timestamp, press?, untrusted:
+  {text, name, replyTo?: {id, snippet}, file?: {id, name, size, mime, voice}}}`. `press` (`{messageId, button, label,
+  inferred?}`): the message pressed a button of yours, as `button.pressed` says. `seq` is the source's (cursors
   work), `id` stable per message. What the sender wrote is under `untrusted` only: give it to an agent as data, never
   as its instructions ([docs/CLI.md](../../docs/CLI.md#agent-turns)). Takes the place of `--type`.
 - `--exec <cmd>` runs the command through the shell once per event, in order, with the event on stdin and

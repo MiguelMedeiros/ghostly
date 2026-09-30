@@ -1,4 +1,12 @@
 {
+  "buttons": {
+    "answers": "الإجابات",
+    "chosen": "مُختارة",
+    "closed": "مغلقة",
+    "failed": "تعذّر الإرسال",
+    "jump": "الانتقال إلى السؤال",
+    "sending": "جارٍ الإرسال…"
+  },
   "panel": {
     "activeCount": "{{count}} نشطة",
     "allOk": "كلها ناجحة",

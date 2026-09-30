@@ -46,7 +46,7 @@ test("a bot asks with Yes and No, the person taps Yes, and the bot hears it and 
     await expect(buttons.getByTestId("message-button")).toHaveText(["Yes", "No"]);
     await expect(buttons).toHaveAttribute("role", "group");
     const yes = buttons.locator('[data-testid="message-button"][data-button-id="yes"]');
-    await expect(yes).toBeEnabled();
+    await expect(yes).not.toHaveAttribute("aria-disabled", "true");
     await buttons.scrollIntoViewIfNeeded();
     for (const scheme of ["dark", "light"] as const) {
       await theme(page, scheme);
@@ -60,7 +60,7 @@ test("a bot asks with Yes and No, the person taps Yes, and the bot hears it and 
     expect(pressed.inferred).toBeUndefined();
     // On the person's side: Yes chosen, and no second answer.
     await expect(yes).toHaveAttribute("data-chosen", "true");
-    await expect(buttons.locator('[data-testid="message-button"][data-button-id="no"]')).toBeDisabled();
+    await expect(buttons.locator('[data-testid="message-button"][data-button-id="no"]')).toHaveAttribute("aria-disabled", "true");
     // The press shows as a compact line, not a quote.
     await expect(room.getByTestId("button-press")).toContainText("Yes");
 
@@ -68,7 +68,8 @@ test("a bot asks with Yes and No, the person taps Yes, and the bot hears it and 
     await bot.run("send", chatId, "Great, the $30 one is yours.", "--reply", question, "--wait", "delivered");
     await bot.run("button", "update", chatId, question, "--chosen", "yes", "--close", "--wait", "confirmed", "--timeout", "60");
     await expect(room.getByText("Great, the $30 one is yours.")).toBeVisible();
-    await expect(yes).toBeDisabled({ timeout: 60_000 });
+    await expect(buttons.getByTestId("message-buttons-closed")).toBeVisible({ timeout: 60_000 });
+    await expect(yes).toHaveAttribute("aria-disabled", "true");
     await expect(yes).toHaveAttribute("data-chosen", "true");
     await expect(yes).toHaveAttribute("aria-pressed", "true");
 
@@ -124,7 +125,8 @@ test("in a group, the bot learns which member pressed", { tag: ["@feature:chat.b
     expect(pressed).toMatchObject({ group, messageId: asked.messageId, button: "approve", label: "Approve" });
     expect(typeof pressed.by).toBe("string");
     await bot.run("button", "update", group, asked.messageId as string, "--chosen", "approve", "--close", "--wait", "sent", "--timeout", "120");
-    await expect(buttons.locator('[data-testid="message-button"][data-button-id="approve"]')).toBeDisabled({ timeout: 120_000 });
+    await expect(buttons.getByTestId("message-buttons-closed")).toBeVisible({ timeout: 120_000 });
+    await expect(buttons.locator('[data-testid="message-button"][data-button-id="approve"]')).toHaveAttribute("data-chosen", "true");
     await expect(room.getByTestId("button-press")).toContainText("Approve");
     await buttons.scrollIntoViewIfNeeded();
     await theme(page, "dark");

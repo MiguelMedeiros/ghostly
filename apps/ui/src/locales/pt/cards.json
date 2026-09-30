@@ -1,4 +1,12 @@
 {
+  "buttons": {
+    "answers": "Respostas",
+    "chosen": "Escolhida",
+    "closed": "Encerrada",
+    "failed": "Não foi enviada",
+    "jump": "Ir para a pergunta",
+    "sending": "Enviando…"
+  },
   "panel": {
     "activeCount": "{{count}} ativas",
     "allOk": "tudo OK",

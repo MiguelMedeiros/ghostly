@@ -1,6 +1,7 @@
 import { replySnippet, type StatusCard } from "@ghostly/core";
 import { replyRef, replyTo, type ReplyTarget } from "@ghostly/browser/shared/replies";
 import type { MessageReply } from "@ghostly/browser/shared/types";
+import { revealMessage } from "../hooks/useRowWindow";
 import { cardLine, showsCard } from "./statusCards";
 import type { ChatMessage } from "./types";
 
@@ -109,4 +110,12 @@ export function jumpToMessage(id: string, root: ParentNode = document): boolean 
   if (timer) clearTimeout(timer);
   row.dataset.replyFlashTimer = String(setTimeout(() => { row.removeAttribute("data-reply-flash"); delete row.dataset.replyFlashTimer; }, REPLY_FLASH_MS));
   return true;
+}
+
+/**
+ * Goes to the message a reply answers. Not in the page (a long chat has a window of its rows, useRowWindow): the rows
+ * around it first, and again. False when it is not in this chat.
+ */
+export function jumpToQuoted(targetId: string | undefined): boolean {
+  return !!targetId && (jumpToMessage(targetId) || (revealMessage(targetId) && jumpToMessage(targetId)));
 }

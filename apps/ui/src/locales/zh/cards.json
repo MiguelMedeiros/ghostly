@@ -1,4 +1,12 @@
 {
+  "buttons": {
+    "answers": "回答",
+    "chosen": "已选择",
+    "closed": "已关闭",
+    "failed": "发送失败",
+    "jump": "转到问题",
+    "sending": "正在发送…"
+  },
   "panel": {
     "activeCount": "{{count}} 个进行中",
     "allOk": "全部正常",

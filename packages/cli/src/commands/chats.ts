@@ -2,6 +2,19 @@ import { type Command, groupWait, cursor, routineFields, routineOptions, runOf, 
 
 /** Invites, chats and messages: one entry per command, in alphabetical order (test/commands.test.ts checks). */
 export const commands: Record<string, Command> = {
+  "button update": {
+    method: "button.update", usage: "button update <chat|group> <message> [--chosen <button>] [--close] [--text <text>] [--wait none|confirmed|sent] [--timeout s]",
+    summary: "Show the answer on a message's buttons (--chosen), close them, or change its text (the messageId send --button gave)",
+    args: ["chat", "message"],
+    options: {
+      chosen: { type: "string", description: "The button to show as the answer (its id)" },
+      close: { type: "boolean", description: "Close the buttons: no more presses" },
+      text: { type: "string", description: "A new text for the message (default: the one it has)" },
+      wait: { type: "string", description: "none (default), confirmed (a chat's contact took it) or sent (a group's edge took it)" },
+      timeout: groupWait.timeout,
+    },
+    params: ({ options }, a) => ({ chat: a.chat, message: a.message, chosen: options.chosen, close: options.close === true, text: options.text, wait: options.wait, timeout: options.timeout }),
+  },
   "chat connect": { method: "chat.connect", usage: "chat connect <chat>", summary: "Reconnect a chat now (ends a --hold)", args: ["chat"], params: (_, { chat }) => ({ chat }) },
   "chat disconnect": {
     method: "chat.disconnect", usage: "chat disconnect <chat> [--hold <minutes>]", summary: "Close a chat's live session (the contact may redial; --hold keeps it on the DHT that long, 0 ends it)", args: ["chat"],

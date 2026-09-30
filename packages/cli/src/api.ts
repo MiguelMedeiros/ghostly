@@ -10,6 +10,7 @@ import {
 import { FILE_METHODS } from "./files";
 import { waitForEdit, waitForGroupFrame, waitForMessage } from "./waits";
 import { STATUS_CARD_METHODS } from "./statusCards";
+import { BUTTON_METHODS, buttonsCard, pressable } from "./buttons";
 import { HOLD_MAX_MINUTES, holdChat, holdOf, releaseHold } from "./holds";
 import { endTyping, keepTyping, sayTyping } from "./typing";
 import { GROUP_ADMIN_METHODS } from "./groupAdmin";
@@ -94,6 +95,7 @@ const METHODS: Record<string, Method> = {
   ...WALLET_METHODS,
   ...FILE_METHODS,
   ...STATUS_CARD_METHODS,
+  ...BUTTON_METHODS,
   ...GROUP_ADMIN_METHODS,
   ...IDENTITY_METHODS,
   ...SERVICE_METHODS,
@@ -195,14 +197,16 @@ const METHODS: Record<string, Method> = {
     }
     const wait = oneOf(params, "wait", ["none", "sent", "delivered"] as const, "none");
     const replyTo = str(params, "reply");
+    // Buttons under the text (WISP 4xx · Message Buttons): the text is the question, and what older apps show.
+    const card = buttonsCard(params);
     // A kept `typing --for` ends with the message (the engine says stop with it).
     endTyping(ctx, { linkId: link.id }, false);
-    const result = await node(ctx).sendMessage({ linkId: link.id, text, ...(replyTo ? { replyTo } : {}) });
+    const result = await node(ctx).sendMessage({ linkId: link.id, text, ...(replyTo ? { replyTo } : {}), ...(card ? { card } : {}) });
     if (result.error) throw new CliError(result.refused ? "refused" : "unavailable", result.error);
     if (!result.messageId) throw new CliError("bad_request", "Nothing to send");
     let message = (await node(ctx).getMessages(link.id)).find((m) => m.id === result.messageId);
     if (wait !== "none") message = await waitForMessage(ctx, link.id, result.messageId, wait, num(params, "timeout", 30, { min: 1, max: 3600 }) * 1000);
-    return { chat: link.id, messageId: result.messageId, delivery: message?.delivery ?? null };
+    return { chat: link.id, messageId: result.messageId, delivery: message?.delivery ?? null, ...(card ? { buttons: card.id, card, pressable: pressable(link) } : {}) };
   },
   /**
    * WISP 400 § Edits: the whole new text of one of my texts in a 1:1 chat. It shows here at once and reaches the contact
@@ -414,14 +418,15 @@ const METHODS: Record<string, Method> = {
     const mentions = mentionsFor(text, list(params, "mentions"), group);
     const replyTo = str(params, "reply");
     const wait = oneOf(params, "wait", ["none", "sent"] as const, "none");
+    const card = buttonsCard(params);
     // A kept `group typing --for` ends with the message (the engine says stop with it).
     endTyping(ctx, { groupId: group.id }, false);
-    const result = await node(ctx).sendGroupMessage({ groupId: group.id, text, ...(mentions.length ? { mentions } : {}), ...(replyTo ? { replyTo } : {}) });
+    const result = await node(ctx).sendGroupMessage({ groupId: group.id, text, ...(mentions.length ? { mentions } : {}), ...(replyTo ? { replyTo } : {}), ...(card ? { card } : {}) });
     if (result.error) throw new CliError("unavailable", result.error);
     const messageId = result.messageId ?? null;
     // `edges`: how many took it so far (none yet is not an error: it goes when one opens).
     const edges = messageId ? (wait === "sent" ? await waitForGroupFrame(ctx, group.id, messageId, undefined, num(params, "timeout", 30, { min: 1, max: 3600 }) * 1000) : node(ctx).groupTaken({ groupId: group.id, messageId })) : 0;
-    return { group: group.id, messageId, sent: true, edges };
+    return { group: group.id, messageId, sent: true, edges, ...(card ? { buttons: card.id, card } : {}) };
   },
   /**
    * WISP 9xx § Edits: the whole new text of one of my messages in a group. It shows here at once and goes to the members
