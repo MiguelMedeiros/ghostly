@@ -1,6 +1,6 @@
 import { test as base, expect } from "@playwright/test";
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -304,15 +304,23 @@ const sleep = (ms: number) => new Promise((done) => setTimeout(done, ms));
  * while it draws on Xvfb, and each WebDriver session took about 30 s to open there (2.5 s on a bus of its own); it
  * also kept the app's names (one per profile, apps/desktop/src/single_instance.rs) off the person's bus.
  *
- * The bus activates nothing: its configuration is the session one without service directories. With the system's
- * (`--session`), the WebView's first call into xdg-desktop-portal started a whole set of portals on the person's live
- * Wayland session for each app, and xdg-desktop-portal-hyprland crashed as each bus went away.
+ * The bus activates only `BUS_SERVICES`. With the system's configuration (`--session`) it could start every service
+ * the machine installs: the WebView's first call into xdg-desktop-portal started a whole set of portals, backends and
+ * the document portal's mount among them, on the person's live Wayland session for each app, and
+ * xdg-desktop-portal-hyprland crashed as each bus went away.
  */
 export async function privateBus(): Promise<{ address: string; stop: () => void } | null> {
   if (process.platform !== "linux" || spawnSync("dbus-daemon", ["--version"]).status !== 0) return null;
   const dir = mkdtempSync(join(tmpdir(), "ghostly-bus-"));
   const config = join(dir, "session.conf");
-  writeFileSync(config, BUS_CONFIG.replace("@DIR@", dir));
+  // The two services the WebView needs from the bus, linked where the machine has them, and nothing else.
+  const services = join(dir, "services");
+  mkdirSync(services);
+  for (const name of BUS_SERVICES) {
+    const file = join(SYSTEM_SERVICES, `${name}.service`);
+    if (existsSync(file)) symlinkSync(file, join(services, `${name}.service`));
+  }
+  writeFileSync(config, BUS_CONFIG.replace("@DIR@", dir).replace("@SERVICES@", services));
   const daemon = spawn("dbus-daemon", [`--config-file=${config}`, "--nofork", "--print-address=1"], { stdio: ["ignore", "pipe", "ignore"] });
   daemon.once("exit", () => rmSync(dir, { recursive: true, force: true }));
   const address = await new Promise<string>((done, fail) => {
@@ -326,7 +334,16 @@ export async function privateBus(): Promise<{ address: string; stop: () => void 
   return { address, stop: () => void daemon.kill("SIGTERM") };
 }
 
-/** A session bus as dbus's own session.conf, less `<standard_session_servicedirs/>`: nothing is activated on demand. */
+const SYSTEM_SERVICES = "/usr/share/dbus-1/services";
+
+/**
+ * What the private bus may start. On a machine with xdg-desktop-portal, WebKitGTK's call window shows no picture of
+ * the other side unless the portal and its permission store answer (`desktop/calls.spec.ts`, Arch with WebKitGTK
+ * 2.52); neither needs a backend, so the portal starts none: `impl.portal.desktop.*` are left out on purpose.
+ */
+export const BUS_SERVICES = ["org.freedesktop.portal.Desktop", "org.freedesktop.impl.portal.PermissionStore"];
+
+/** A session bus as dbus's own session.conf, with a service folder of its own instead of the system's. */
 const BUS_CONFIG = `<!DOCTYPE busconfig PUBLIC "-//freedesktop//DTD D-Bus Bus Configuration 1.0//EN"
  "http://www.freedesktop.org/standards/dbus/1.0/busconfig.dtd">
 <busconfig>
@@ -339,6 +356,7 @@ const BUS_CONFIG = `<!DOCTYPE busconfig PUBLIC "-//freedesktop//DTD D-Bus Bus Co
     <allow eavesdrop="true"/>
     <allow own="*"/>
   </policy>
+  <servicedir>@SERVICES@</servicedir>
 </busconfig>
 `;
 
