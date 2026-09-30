@@ -123,4 +123,24 @@ describe("a Lightning address", () => {
     expect(await screen.findByTestId("lnurl-paid")).toBeInTheDocument();
     expect(engine.callsTo("walletPayQuote")).toEqual([{ quote: "melt-1", mint: REAL_MINT, note: "Paid alice@example.com" }]);
   });
+
+  it("on Testnet, every amount says test sats: the limits, the amount field, the review and the receipt", async () => {
+    const { user } = show("testnet");
+    await user.click(screen.getByTestId("lnurl-lookup"));
+    expect(await screen.findByTestId("lnurl-domain")).toHaveTextContent("It takes 1 to 100,000 test sats.");
+    expect(screen.getByTestId("lnurl-amount")).toHaveAccessibleName("Amount in test sats");
+    expect(screen.getByTestId("lnurl-amount-form")).toHaveTextContent(/test sats/);
+    await user.type(screen.getByTestId("lnurl-amount"), "2100");
+    await user.click(screen.getByTestId("lnurl-invoice"));
+    expect(await screen.findByTestId("lnurl-review")).toHaveTextContent("Pay 2,100 test sats to alice@example.com");
+    await user.click(screen.getByTestId("lnurl-pay"));
+    expect(await screen.findByTestId("lnurl-paid")).toHaveTextContent("Paid 2,100 test sats to alice@example.com");
+  });
+
+  it("on Mainnet, the amounts stay plain sats", async () => {
+    const { user } = show("mainnet");
+    await user.click(screen.getByTestId("lnurl-lookup"));
+    expect(await screen.findByTestId("lnurl-domain")).toHaveTextContent("It takes 1 to 100,000 sats.");
+    expect(screen.getByTestId("lnurl-amount")).toHaveAccessibleName("Amount in sats");
+  });
 });
