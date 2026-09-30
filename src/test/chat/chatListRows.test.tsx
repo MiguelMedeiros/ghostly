@@ -72,6 +72,20 @@ describe("the chat list's rows (compact, the default)", () => {
     expect(within(row).getByTestId("chat-row-time")).toHaveClass("text-accent");
   });
 
+  it("counts what came to me: never my own message (a forward from another chat) nor a join line", () => {
+    saveSession(chat("g", { nick: "Gus", messages: [
+      message({ text: "one" }),
+      message({ text: "passed on", sender: "me" }),
+      message({ text: "👋 Gus joined", sender: "system", systemEvent: { type: "join", pubKey: key("g") } }),
+      message({ text: "Missed audio call", sender: "system", callEvent: { type: "call_missed" } }),
+      message({ text: "two" }),
+    ] }));
+    saveSession(chat("h", { nick: "Hal", messages: [message({ text: "👋 Hal joined", sender: "system", systemEvent: { type: "join", pubKey: key("h") } }), message({ text: "passed on", sender: "me" })] }));
+    list();
+    expect(within(rowOf("Gus")).getByTestId("chat-row-unread")).toHaveTextContent("3");
+    expect(within(rowOf("Hal")).queryByTestId("chat-row-unread")).not.toBeInTheDocument();
+  });
+
   it("caps the unread count at 99+", () => {
     saveSession(chat("f", { nick: "Fay", messages: Array.from({ length: 120 }, (_, i) => message({ id: `f${i}` })) }));
     list();
