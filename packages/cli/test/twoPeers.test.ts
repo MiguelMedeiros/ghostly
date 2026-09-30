@@ -22,6 +22,8 @@ const running: Running[] = [];
 const alice = home("alice"), bob = home("bob");
 const sockets: Record<string, string> = {};
 let env: NodeJS.ProcessEnv;
+/** Both daemons' link traces (packages/core/src/linkTrace.ts), one JSON line a step: what a slow test prints. */
+let trace = "";
 const as = (dir: string, ...args: string[]) => ghostly(["--home", dir, ...args], { env });
 
 /**
@@ -54,7 +56,8 @@ beforeAll(async () => {
   relays = await Promise.all([localRelay(), localRelay()]);
   dht = await hyperdhtTestnet();
   // Calls bind their media to loopback: on some machines (a VPN on a Mac) UDP to the machine's own LAN address is dropped.
-  env = { GHOSTLY_HYPERDHT_BOOTSTRAP: dht.bootstrap, GHOSTLY_CALL_BIND: "127.0.0.1", ...(process.env.GHOSTLY_LINK_TRACE ? { GHOSTLY_LINK_TRACE: process.env.GHOSTLY_LINK_TRACE } : {}) };
+  trace = process.env.GHOSTLY_LINK_TRACE ?? join(home("trace"), "link.jsonl");
+  env = { GHOSTLY_HYPERDHT_BOOTSTRAP: dht.bootstrap, GHOSTLY_CALL_BIND: "127.0.0.1", GHOSTLY_LINK_TRACE: trace };
 }, 30_000);
 
 afterAll(async () => {
@@ -148,6 +151,7 @@ describe("two headless peers", { timeout: 180_000 }, () => {
     // Alice's held session: about a second, up to 14 s on a loaded machine. Before, the offer ran to its own attempt
     // timeout first (90 s, CONNECT_TIMEOUT_MS). Counted from Bob's daemon being up, when that offer starts.
     const killed = running.pop()!;
+    const killedAt = Date.now();
     await new Promise((r) => { killed.child.once("exit", r); killed.child.kill("SIGKILL"); });
     started = await restartBob();
     const dial = 20_000;
@@ -155,6 +159,18 @@ describe("two headless peers", { timeout: 180_000 }, () => {
     const afterKill = Date.now() - started;
     await bothWays("after a kill");
     console.log(`[restart] live again after a stop in ${afterStop} ms, after a kill in ${afterKill} ms`);
+    // Most runs are live in about 2 s (the offer answered) or 9 s (the race's native dial). Slower than that, the way
+    // there is printed: both sides' view of the chat and each step of both links since the kill (CI run 36699194267
+    // took 34 s and said nothing more).
+    if (afterKill > RACE_DIRECT_MS + 4_000) {
+      const steps = readFileSync(trace, "utf8").split("\n").filter((l) => l && (JSON.parse(l) as { t: number }).t >= killedAt);
+      const view = async (dir: string, chat: string) => {
+        const { peer, live, transport, progress, wait, lastAttempt, history } = ok(await as(dir, "chat", "show", chat));
+        return JSON.stringify({ peer, live, transport, progress, wait, lastAttempt, history });
+      };
+      console.log(`[restart] slow after a kill: killed at ${killedAt}, back at ${started}\nalice ${await view(alice, "bob")}\n`
+        + `bob ${await view(bob, "alice")}\nlink steps since the kill:\n${steps.join("\n")}`);
+    }
     expect(afterStop).toBeLessThan(10_000);
     expect(afterKill).toBeLessThan(RACE_DIRECT_MS + dial);
   }, 240_000);
