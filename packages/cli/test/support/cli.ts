@@ -16,9 +16,10 @@ const TEST_ENV: NodeJS.ProcessEnv = { GHOSTLY_DHT: "0" };
 export interface Result { code: number; stdout: string; stderr: string; json: Record<string, unknown> }
 
 /** Runs `ghostly` to its end (asynchronously: the relay these tests serve lives in this process). */
-export function ghostly(args: string[], options: { env?: NodeJS.ProcessEnv; input?: string } = {}): Promise<Result> {
+/** `bin`: another build of the CLI (an older release, for compatibility tests); this one by default. */
+export function ghostly(args: string[], options: { env?: NodeJS.ProcessEnv; input?: string; bin?: string } = {}): Promise<Result> {
   return new Promise((done) => {
-    const child = spawn(process.execPath, [BIN, ...args], { env: { ...TEST_ENV, ...process.env, ...options.env }, stdio: ["pipe", "pipe", "pipe"] });
+    const child = spawn(process.execPath, [options.bin ?? BIN, ...args], { env: { ...TEST_ENV, ...process.env, ...options.env }, stdio: ["pipe", "pipe", "pipe"] });
     let stdout = "", stderr = "";
     child.stdout.on("data", (d) => (stdout += d));
     child.stderr.on("data", (d) => (stderr += d));
@@ -50,8 +51,8 @@ export class Running {
   readonly lines: Record<string, unknown>[] = [];
   readonly child: ChildProcess;
   stderr = "";
-  constructor(args: string[], env: NodeJS.ProcessEnv = {}) {
-    this.child = spawn(process.execPath, [BIN, ...args], { env: { ...TEST_ENV, ...process.env, ...env }, stdio: ["ignore", "pipe", "pipe"] });
+  constructor(args: string[], env: NodeJS.ProcessEnv = {}, bin = BIN) {
+    this.child = spawn(process.execPath, [bin, ...args], { env: { ...TEST_ENV, ...process.env, ...env }, stdio: ["ignore", "pipe", "pipe"] });
     createInterface({ input: this.child.stdout! }).on("line", (line) => { try { this.lines.push(JSON.parse(line)); } catch { /* not JSON */ } });
     this.child.stderr!.on("data", (d) => (this.stderr += d));
   }
@@ -80,8 +81,10 @@ export class Running {
 }
 
 /** A Pkarr relay in this process (as e2e/support/relay.ts): the newest signed packet per key. */
-export async function localRelay(): Promise<{ url: string; server: Server }> {
+export async function localRelay(): Promise<{ url: string; server: Server; largest: Map<string, number> }> {
   const packets = new Map<string, Buffer>();
+  /** The largest packet each key published, in bytes (its signature and timestamp included). */
+  const largest = new Map<string, number>();
   const server = createServer((request, response) => {
     const chunks: Buffer[] = [];
     request.on("data", (c: Buffer) => chunks.push(c));
@@ -89,6 +92,7 @@ export async function localRelay(): Promise<{ url: string; server: Server }> {
       const key = new URL(request.url ?? "/", "http://relay").pathname.slice(1);
       if (request.method === "PUT") {
         const body = Buffer.concat(chunks), known = packets.get(key);
+        largest.set(key, Math.max(largest.get(key) ?? 0, body.length));
         if (body.length >= 72 && (!known || body.readBigUInt64BE(64) >= known.readBigUInt64BE(64))) packets.set(key, body);
         response.writeHead(body.length >= 72 ? 204 : 400).end();
         return;
@@ -98,7 +102,7 @@ export async function localRelay(): Promise<{ url: string; server: Server }> {
     });
   });
   await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
-  return { url: `http://127.0.0.1:${(server.address() as AddressInfo).port}`, server };
+  return { url: `http://127.0.0.1:${(server.address() as AddressInfo).port}`, server, largest };
 }
 
 /** A HyperDHT network on loopback: the value of GHOSTLY_HYPERDHT_BOOTSTRAP. */
