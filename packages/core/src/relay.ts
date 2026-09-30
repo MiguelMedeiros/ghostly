@@ -95,6 +95,11 @@ export const BACKGROUND_WHILE_SIGNALING = 5;
  * yet, and a pairing spent a sixth of its requests on those reads (2026-09-27). A publish under the key forgets it.
  */
 export const FRESH_READ_MS = 500;
+/** A relay that missed a key's newest packet gets it (`catchUpLater`) no sooner than this, and tries again this often. */
+const CATCH_UP_MIN_MS = 1_000;
+const CATCH_UP_RETRY_MS = 5_000;
+/** A catch-up put waits behind every link's request: a background write. */
+const CATCH_UP_ASKER: Asker = { background: true, group: false, urgent: false, door: false, write: true };
 /** Keys whose last relay is remembered for their next read (`resolve`): a profile's links and lookups, with room. */
 const READ_TURNS_KEPT = 512;
 /** A relay that fails at the network level is left alone for this long. */
@@ -169,6 +174,9 @@ export class RelayTransport implements PkarrTransport {
   private urgentAt = -Infinity;
   /** Timestamp of the last packet sent to each relay, per key: the compare-and-swap value for the next one. */
   private readonly lastPut = new Map<string, bigint>();
+  /** Per relay and key, the newest packet that relay held back for its budget while another relay took it (`catchUpLater`). */
+  private readonly catchUp = new Map<string, { relay: string; key: string; payload: Uint8Array; timestamp: bigint }>();
+  private catchUpTimer: ReturnType<typeof setTimeout> | null = null;
   /** When the relays last answered a read of each key, for `FRESH_READ_MS`. */
   private readonly readAt = new Map<string, number>();
   private readonly freshReadMs: number;
@@ -287,6 +295,8 @@ export class RelayTransport implements PkarrTransport {
   private putEverywhere(pubKeyZ32: string, payload: Uint8Array, timestamp: bigint, options: PkarrRequestOptions): Promise<void> {
     // A record read, changed and written back (a lobby, a knock record) is read from the relays the next time.
     this.readAt.delete(pubKeyZ32);
+    // A newer packet goes everywhere now: none waiting for a relay that refused an older one.
+    for (const relay of this.relays) this.catchUp.delete(`${relay} ${pubKeyZ32}`);
     const waitingBefore = new Map(this.writeWaiting);
     const writer = firstWriter(asker(options, true));
     // Out on one relay: the link will not try again, so a relay that refused it has no write to wait for.
@@ -328,7 +338,12 @@ export class RelayTransport implements PkarrTransport {
       }
       void settled.then((results) => {
         // A relay that finished after the first one took the packet may have been refused on its retry since.
-        if (accepted) { noWriteWaits(); return; }
+        if (accepted) {
+          noWriteWaits();
+          // Its budget (or its rate limit) held it back there: that relay gets it once it frees a request (`catchUp`).
+          results.forEach((r, i) => { if (r.status === "rejected" && isDiscoveryBudgetError(r.reason)) this.catchUpLater(this.relays[i], pubKeyZ32, payload, timestamp); });
+          return;
+        }
         // Every relay held it back for its budget (this client's, or the relay's rate limit): a wait for the first
         // of them to free a request, not a failure.
         const held = results.map((r) => (r.status === "rejected" && isDiscoveryBudgetError(r.reason) ? r.reason : null));
@@ -441,6 +456,45 @@ export class RelayTransport implements PkarrTransport {
     this.lastReadFrom.delete(pubKeyZ32);
     this.lastReadFrom.set(pubKeyZ32, relay);
     if (this.lastReadFrom.size > READ_TURNS_KEPT) this.lastReadFrom.delete(this.lastReadFrom.keys().next().value!);
+  }
+
+  /**
+   * A relay whose budget (this client's, or its own rate limit) held a packet back that another relay took: it gets
+   * that packet when it frees a request, as a background write. Only the newest per key and relay; a newer packet put
+   * everywhere drops it. Without this, that relay kept the key's older packet for good, and an app that restarted and
+   * read it first found a contact's offer long answered, answered it again, and waited on it (bug hunt r7a).
+   */
+  private catchUpLater(relay: string, key: string, payload: Uint8Array, timestamp: bigint): void {
+    const slot = `${relay} ${key}`;
+    // A newer packet went to that relay (or was tried) since.
+    if ((this.lastPut.get(slot) ?? 0n) > timestamp) return;
+    const pending = this.catchUp.get(slot);
+    if (pending && pending.timestamp >= timestamp) return;
+    this.catchUp.set(slot, { relay, key, payload, timestamp });
+    this.scheduleCatchUp(CATCH_UP_MIN_MS);
+  }
+
+  private scheduleCatchUp(inMs: number): void {
+    if (this.catchUpTimer || this.catchUp.size === 0) return;
+    this.catchUpTimer = setTimeout(() => { this.catchUpTimer = null; void this.runCatchUp(); }, inMs);
+  }
+
+  private async runCatchUp(): Promise<void> {
+    let next = Infinity;
+    for (const [slot, item] of [...this.catchUp]) {
+      if (this.catchUp.get(slot) !== item) continue;
+      const wait = Math.max(this.heldFor(item.relay, CATCH_UP_ASKER), this.rateLimitedFor(item.relay), this.breaker.blockedFor(item.relay));
+      if (wait > 0) { next = Math.min(next, wait); continue; }
+      this.catchUp.delete(slot);
+      try {
+        const response = await this.put(item.relay, item.key, item.payload, undefined, CATCH_UP_ASKER);
+        // The relay still putting an earlier packet (428) or rate limiting (429): again later, unless a newer one came.
+        if ((response.status === 428 || response.status === 429) && !this.catchUp.has(slot)) { this.catchUp.set(slot, item); next = Math.min(next, CATCH_UP_RETRY_MS); }
+      } catch (error) {
+        if (isDiscoveryBudgetError(error) && !this.catchUp.has(slot)) { this.catchUp.set(slot, item); next = Math.min(next, error.retryInMs); }
+      }
+    }
+    if (this.catchUp.size) this.scheduleCatchUp(Math.max(CATCH_UP_MIN_MS, next === Infinity ? CATCH_UP_RETRY_MS : next));
   }
 
   private async put(relay: string, pubKeyZ32: string, payload: Uint8Array, replaces: bigint | undefined, who: Asker, probe = false): Promise<Response> {

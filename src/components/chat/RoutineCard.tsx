@@ -6,6 +6,8 @@ import { externalLinkProps } from "../../lib/externalLink";
 import { agoIn } from "../../lib/relativeTime";
 import { JUMP_EVENT } from "../../lib/replies";
 import { RESULT_TONE, routineSummary, untilIn } from "../../lib/statusCards";
+import { memberText } from "../../lib/memberColors";
+import { SenderAvatar, type MessageAuthor } from "./SenderAvatar";
 
 /*
  * A bot's routine in the chat (WISP 4xx · Status Cards): something it runs on a schedule. One line, as a bot may post
@@ -35,7 +37,11 @@ export function RoutineSummaryLine({ cards }: { cards: readonly RoutineCard[] })
  * Routines in a row from one sender, folded into one row of the chat: "↻ Hermes Zero · 10 routines · next in 4 min"; a
  * tap opens it on their cards. A jump to one of them (a Tasks panel row, a quote, a search) opens it first.
  */
-export function RoutineStack({ name, cards, mine, children }: { name?: string; cards: readonly RoutineCard[]; mine: boolean; children: ReactNode }) {
+export function RoutineStack({ name, cards, mine, children, author, onOpenAuthor }: {
+  name?: string; cards: readonly RoutineCard[]; mine: boolean; children: ReactNode;
+  /** A group member's row: their colour on the name, their picture beside it when it ends a run of theirs (SenderAvatar). */
+  author?: MessageAuthor; onOpenAuthor?: () => void;
+}) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const listId = useId();
@@ -48,11 +54,12 @@ export function RoutineStack({ name, cards, mine, children }: { name?: string; c
   }, []);
   return (
     <div ref={ref} data-testid="routine-stack" data-count={cards.length} data-open={open ? "" : undefined}>
-      <div className={`flex ${mine ? "justify-end" : "justify-start"} mb-3.5 message-row-x`}>
+      <div className={`flex ${mine ? "justify-end" : "justify-start"} gap-1 mb-3.5 message-row-x`}>
+        {!mine && author && <SenderAvatar author={author} onOpen={onOpenAuthor} />}
         {/* A bubble's look: the sender's name over the line, as on their messages. */}
         <button type="button" data-testid="routine-stack-toggle" aria-expanded={open} aria-controls={listId} onClick={() => setOpen(!open)}
-          className={`block w-[min(340px,78vw)] max-w-[85%] cursor-pointer rounded-[7.5px] px-[9px] pt-[5px] pb-[7px] text-start text-[12px] text-text-primary shadow-[0_1px_0.5px_rgba(11,20,26,0.13)] focus-visible:outline-2 focus-visible:outline-accent ${mine ? "bg-sent-bg" : "bg-received-bg"}`}>
-          {name && <bdi data-testid="routine-stack-name" className="mb-0.5 block truncate text-[12.8px] font-medium leading-[20px] text-accent-hover">~{name}</bdi>}
+          className={`block w-[min(340px,78vw)] min-w-0 max-w-[85%] cursor-pointer rounded-[7.5px] px-[9px] pt-[5px] pb-[7px] text-start text-[12px] text-text-primary shadow-[0_1px_0.5px_rgba(11,20,26,0.13)] focus-visible:outline-2 focus-visible:outline-accent ${mine ? "bg-sent-bg" : "bg-received-bg"}`}>
+          {name && <bdi data-testid="routine-stack-name" data-key={author?.key} className={`mb-0.5 block truncate text-[12.8px] font-medium leading-[20px] ${author ? memberText(author.key) : "text-accent-hover"}`}>~{name}</bdi>}
           <span className="flex min-w-0 items-center gap-1.5">
             <span aria-hidden="true" className="shrink-0 text-[13px] text-accent">↻</span>
             <span className="min-w-0 flex-1"><RoutineSummaryLine cards={cards} /></span>

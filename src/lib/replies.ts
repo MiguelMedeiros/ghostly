@@ -23,6 +23,8 @@ export interface QuoteView {
   snippet: string;
   /** Mine: the quote takes my colour. */
   mine: boolean;
+  /** A group member's original, not mine: its author's key, whose colour the name takes (lib/memberColors.ts). */
+  member?: string;
   /** The original's row, to scroll to. */
   targetId?: string;
 }
@@ -66,11 +68,13 @@ export function quoteFor(reply: MessageReply, index: ReplyIndex, nameOf: NameOf)
   const original = (reply.messageId ? index.byId.get(reply.messageId) : undefined) ?? index.byRef.get(reply.id);
   if (original) {
     const from = original.sender === "me" ? "me" : "peer";
-    return { state: "found", name: nameOf(from, original.member ?? reply.member), snippet: replySnippet(original.text), mine: from === "me", targetId: original.id };
+    const member = from === "peer" ? original.member ?? reply.member : undefined;
+    return { state: "found", name: nameOf(from, original.member ?? reply.member), snippet: replySnippet(original.text), mine: from === "me", targetId: original.id, ...(member && { member }) };
   }
   const name = reply.from ? nameOf(reply.from, reply.member) : undefined;
   const state: QuoteState = reply.messageId ? "deleted" : reply.snippet ? "unverified" : "missing";
-  return { state, name, snippet: state === "unverified" ? reply.snippet : "", mine: reply.from === "me" };
+  const member = reply.from === "peer" ? reply.member : undefined;
+  return { state, name, snippet: state === "unverified" ? reply.snippet : "", mine: reply.from === "me", ...(member && { member }) };
 }
 
 /** How long a message a quote jumped to stays marked. */

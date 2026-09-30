@@ -106,6 +106,8 @@ export interface StoredLink {
    * Still set when the app starts, it was live when the app last ran, and is dialled at once (`resume`). Local only.
    */
   edgeLive?: boolean;
+  /** When that session opened: a member's offer from before it is not answered after a restart (`resumeFloor`). Local only. */
+  edgeLiveSince?: number;
 }
 
 /** What happened to a group's membership, as a line in its history. */

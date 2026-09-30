@@ -33,6 +33,8 @@ import { myReaction, reactionChips } from "../lib/reactions";
 import { DeliveryStatus } from "./chat/DeliveryStatus";
 import { forwardedLabel } from "../lib/forward";
 import { PinIcon } from "./PinIcon";
+import { SenderAvatar, type MessageAuthor } from "./chat/SenderAvatar";
+import { memberText } from "../lib/memberColors";
 
 interface MessageBubbleProps {
   message: ChatMessage;
@@ -72,6 +74,13 @@ interface MessageBubbleProps {
   selection?: { selected: boolean; onToggle?: () => void };
   /** A chat search's words, marked in the text or the file's name: given only to the messages that hold them. */
   highlight?: string;
+  /**
+   * Who wrote a group member's message: their name takes their colour, and their picture sits beside the last bubble
+   * of a run of theirs (`SenderAvatar`). Left out in a 1:1 chat and for my own messages.
+   */
+  author?: MessageAuthor;
+  /** Opens what the chat knows of `author` (the group's members, theirs marked): a tap on their name or picture. */
+  onOpenAuthor?: () => void;
 }
 
 /** How long a finger holds a message before its quick bar (or, where it takes no reaction, its details) opens. */
@@ -612,6 +621,7 @@ export function MessageBubble(props: MessageBubbleProps) {
     onForward: () => latest.current.onForward?.(),
     onPin: () => latest.current.onPin?.(),
     onSelect: () => latest.current.onSelect?.(),
+    onOpenAuthor: () => latest.current.onOpenAuthor?.(),
     onToggle: () => latest.current.selection?.onToggle?.(),
     reactionName: (by: string) => latest.current.reactionName?.(by) ?? by.slice(0, 8),
   }), []);
@@ -625,21 +635,21 @@ export function MessageBubble(props: MessageBubbleProps) {
       peerPubKey={props.peerPubKey} peerNick={props.peerNick} linkId={props.linkId} quote={props.quote} names={names}
       onDelete={props.onDelete && stable.onDelete} onReply={props.onReply && stable.onReply} onEdit={props.onEdit && stable.onEdit}
       onReact={props.onReact && stable.onReact} onForward={props.onForward && stable.onForward} onSelect={props.onSelect && stable.onSelect}
-      onPin={props.onPin && stable.onPin} pinned={props.pinned}
+      onPin={props.onPin && stable.onPin} pinned={props.pinned} author={props.author} onOpenAuthor={props.onOpenAuthor && stable.onOpenAuthor}
       reactionName={stable.reactionName} highlight={props.highlight}
       selection={selection && { selected: selection.selected, ...(selection.onToggle && { onToggle: stable.onToggle }) }}
     />
   );
 }
 
-const CALLBACKS = ["onDelete", "onReply", "onEdit", "onReact", "onForward", "onSelect", "onPin"] as const;
+const CALLBACKS = ["onDelete", "onReply", "onEdit", "onReact", "onForward", "onSelect", "onPin", "onOpenAuthor"] as const;
 
 /** The same bubble to draw: see `MessageBubble`. */
 function sameBubble(a: BubbleViewProps, b: BubbleViewProps): boolean {
   return a.peerAck === b.peerAck && a.peerPubKey === b.peerPubKey && a.peerNick === b.peerNick && a.linkId === b.linkId && a.names === b.names && a.highlight === b.highlight && !a.pinned === !b.pinned
     && CALLBACKS.every(name => !a[name] === !b[name])
     && !a.selection === !b.selection && a.selection?.selected === b.selection?.selected && !a.selection?.onToggle === !b.selection?.onToggle
-    && sameValue(a.quote, b.quote) && sameValue(a.message, b.message);
+    && sameValue(a.quote, b.quote) && sameValue(a.author, b.author) && sameValue(a.message, b.message);
 }
 
 const SameBubble = memo(function SameBubble(props: BubbleViewProps) {
@@ -651,7 +661,7 @@ const SameBubble = memo(function SameBubble(props: BubbleViewProps) {
   );
 }, sameBubble);
 
-function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "", onDelete: deleteIt, linkId, onReply: replyIt, quote, onEdit: editIt, onReact: reactIt, reactionName, onForward: forwardIt, onSelect: selectIt, onPin: pinIt, pinned, selection, names, highlight }: BubbleViewProps) {
+function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "", onDelete: deleteIt, linkId, onReply: replyIt, quote, onEdit: editIt, onReact: reactIt, reactionName, onForward: forwardIt, onSelect: selectIt, onPin: pinIt, pinned, selection, names, highlight, author, onOpenAuthor }: BubbleViewProps) {
   // While the chat is choosing messages, a row is a checkbox: nothing else on it answers.
   const choosing = !!selection;
   const onPin = choosing ? undefined : pinIt;
@@ -827,6 +837,8 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
       {isMe && onReact && <ReactAction anchorRef={reactRef} open={bar === "button"} onOpen={() => setBar(bar ? null : "button")} />}
       {isMe && onReply && <ReplyAction onReply={onReply} />}
       {isMe && !choosing && <MessageMenu onDelete={onDelete} onDetails={openDetails} onReply={onReply} onEdit={onEdit} onReact={onReact && (() => setBar("button"))} onPin={onPin} pinned={pinned} onForward={onForward} onSelect={onSelect} align="left" download={download} sender="me" {...sending} />}
+      {/* A group member's picture at the start of the line (the reading direction's), or its empty place. */}
+      {!isMe && author && <SenderAvatar author={author} onOpen={choosing ? undefined : onOpenAuthor} />}
       {/* The bubble, and its reactions under it. */}
       <div className={`flex flex-col min-w-0 max-w-[85%] ${isMe ? "items-end" : "items-start"}`}>
       {/* Bubbles take the theme's colours; what is inside reads on either one (see e2e/web/bubble-contrast.spec.ts). */}
@@ -855,8 +867,11 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
 
         {/* A paired message carries no name of its own: the contact has one name, known from the link. */}
         {(message.nick || peerNick) && !isMe && (
-          <div data-testid="message-nick" className="text-accent-hover text-[12.8px] font-medium mb-[2px] leading-[22px]">
-            ~{message.nick || peerNick}
+          // A group member's name takes their colour (lib/memberColors.ts), and a tap on it opens who they are.
+          <div data-testid="message-nick" data-key={author?.key} className={`${author ? memberText(author.key) : "text-accent-hover"} text-[12.8px] font-medium mb-[2px] leading-[22px]`}>
+            {author && onOpenAuthor && !choosing
+              ? <button type="button" data-testid="message-nick-open" onClick={onOpenAuthor} onDoubleClick={e => e.stopPropagation()} aria-haspopup="dialog" className="max-w-full cursor-pointer text-start hover:underline">~{message.nick || peerNick}</button>
+              : <>~{message.nick || peerNick}</>}
           </div>
         )}
 

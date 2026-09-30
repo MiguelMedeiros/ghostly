@@ -1,6 +1,6 @@
 import { decodeCommunityLink, decodeGroupEntryLink, groupEntryUrl, type PairedTransport } from "@ghostly/core";
 import { getPrefix } from "./storage";
-import type { GroupMemberView, GroupView } from "@ghostly/browser/shared/types";
+import type { GroupMemberView, GroupView, LinkView } from "@ghostly/browser/shared/types";
 import { publicKeyLabel } from "./publicKeyLabel";
 import { transportName } from "./connection";
 import { ago } from "./time";
@@ -19,6 +19,20 @@ export const authorName = (group: Pick<GroupView, "members" | "formerNames">, ke
   const member = group.members.find(m => m.key === key);
   return member ? memberName(member, t) : group.formerNames?.[key] || t("group.member.unnamed", { key: key.slice(0, 8) });
 };
+
+/**
+ * A member's picture, when this app has one: mine, or what a member who is also a contact sent in our chat (the
+ * identity they are shown as wins, as in the chat). Community members are not contacts: they have none here.
+ */
+export function memberPhoto(
+  group: Pick<GroupView, "memberLinks">, member: { key: string; me: boolean }, links: readonly LinkView[] | undefined,
+  faceOf: (peerKey: string | undefined) => { photo?: string } | undefined, myAvatar?: string,
+): string | undefined {
+  if (member.me) return myAvatar || undefined;
+  const linkId = Object.keys(group.memberLinks).find(id => group.memberLinks[id] === member.key);
+  const link = linkId ? links?.find(l => l.id === linkId) : undefined;
+  return link ? faceOf(link.peerPubKeyZ32)?.photo ?? link.peerAvatar : undefined;
+}
 
 /** A group's state in a word, where it is not active: the header's line under the name, the members panel. */
 export function groupStatusText(status: NonNullable<GroupView["status"]>, t: Translate = english): string {

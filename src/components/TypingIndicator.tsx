@@ -1,6 +1,7 @@
 import type { TypingActivity, TypingKind } from "@ghostly/core";
 import { useI18n } from "../contexts/I18nContext";
 import { usePeerTypingActivity } from "../hooks/useTyping";
+import { memberText } from "../lib/memberColors";
 
 /** Three dots in a soft wave; still, and all shown, when motion is reduced (index.css `.typing-dots`). */
 export function TypingDots() {
@@ -34,8 +35,21 @@ const GROUP_LABELS = {
   thinking: { one: "group.typing.thinkingOne", two: "group.typing.thinkingTwo", many: "group.typing.thinkingMany" },
 } as const;
 
-/** A member typing in a group, by the name the group shows them under. */
-export interface GroupTyper { name: string; kind?: TypingKind; status?: string }
+/** A member typing in a group, by the name the group shows them under; `key` gives their name their colour. */
+export interface GroupTyper { name: string; key?: string; kind?: TypingKind; status?: string }
+
+/** A typer's name, isolated, in their colour (lib/memberColors.ts) when their key is known. */
+const TyperName = ({ typer }: { typer: GroupTyper }) =>
+  <bdi data-testid="group-typing-name" data-key={typer.key} className={typer.key ? `font-medium ${memberText(typer.key)}` : undefined}>{typer.name}</bdi>;
+
+/** Stand-ins for the names while the sentence is translated: the names go back in as elements of their own. */
+const NAME = "\u0001", OTHER = "\u0002";
+
+/** A translated sentence with `{name}` (and `{other}`) as elements: the words around them as the language puts them. */
+function withNames(text: string, name: GroupTyper, other?: GroupTyper) {
+  return text.split(new RegExp(`(${NAME}|${OTHER})`)).map((part, i) =>
+    part === NAME ? <TyperName key={i} typer={name} /> : part === OTHER && other ? <TyperName key={i} typer={other} /> : part);
+}
 
 /**
  * Who is typing in a group (WISP 9xx · Group Mesh § Typing): "Ana is typing…", "Ana and Bo are typing…", "3 people are
@@ -47,14 +61,14 @@ export function GroupTypingText({ testId, typers }: { testId: string; typers: re
   const first = typers[0];
   const kind = typers.every(x => (x.kind ?? "typing") === (first?.kind ?? "typing")) ? first?.kind ?? "typing" : "typing";
   const labels = GROUP_LABELS[kind] ?? GROUP_LABELS.typing;
-  const text = typers.length === 1 ? t(labels.one, { name: first.name })
-    : typers.length === 2 ? t(labels.two, { name: first.name, other: typers[1].name })
+  const text = typers.length === 1 ? withNames(t(labels.one, { name: NAME }), first)
+    : typers.length === 2 ? withNames(t(labels.two, { name: NAME, other: OTHER }), first, typers[1])
       : t(labels.many, { count: typers.length });
   return (
     <span data-testid={testId} data-kind={kind} data-count={typers.length} className="inline-flex min-w-0 max-w-full items-center gap-1.5 text-accent">
       <TypingDots />
       {typers.length === 1 && first.status
-        ? <span className="truncate"><bdi>{first.name}</bdi>: <bdi data-testid={`${testId}-status`}>{first.status}</bdi></span>
+        ? <span className="truncate"><TyperName typer={first} />: <bdi data-testid={`${testId}-status`}>{first.status}</bdi></span>
         : <span className="truncate">{text}</span>}
     </span>
   );
