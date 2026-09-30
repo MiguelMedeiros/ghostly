@@ -523,7 +523,7 @@ export function GroupChat() {
       {viewingPicture && group.picture && <AvatarViewer src={group.picture} name={group.name || t("group.chat.unnamed")} returnFocus={avatarButton} onClose={() => setViewingPicture(false)} />}
       {sharing && group.entryLink && <GroupShareDialog group={group} created={sharing === "created"} onClose={() => setSharing("")} />}
       {confirmLeave && <LeaveGroupDialog group={group} onClose={() => setConfirmLeave(false)}
-        onConfirm={async () => { await engine.call("leaveGroup", { groupId }); setConfirmLeave(false); nav.home(); }} />}
+        onConfirm={async () => { await engine.call("leaveGroup", { groupId }); forgetChatMute(groupChat(groupId)); setConfirmLeave(false); nav.home(); }} />}
       {confirmForget && <DeleteChatDialog name={group.name} onClose={() => setConfirmForget(false)}
         onConfirm={() => { setConfirmForget(false); forgetChatMute(groupChat(groupId)); void engine.call("forgetGroup", { groupId }).catch(() => {}); nav.home(); }} />}
     </div>

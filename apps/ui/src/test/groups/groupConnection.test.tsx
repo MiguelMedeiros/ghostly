@@ -80,6 +80,9 @@ describe("GroupConnection: the header sums up the mesh", () => {
     ["an app with no transport for group links, alone in the group", [me], { transport: { protocol: "webrtc/1", relays: [], webrtc: false, groupLinks: false } }, { kind: "waiting", label: "Only you so far", dot: "bg-text-muted" }],
     // Ghostly Desktop on Linux: no WebRTC, but Iroh and HyperDHT carry its group links (WISP 9xx § Transports).
     ["an app with no WebRTC but native transports", [me, alice({ state: "connecting" }), bob({ state: "waiting" })], { transport: { protocol: "webrtc/1", relays: [], webrtc: false } }, { kind: "waiting", label: "Connecting to members…", dot: "bg-text-muted" }],
+    // A group past 16 members runs on hubs: a member reached through one is reachable, as the header line counts it.
+    ["a member reached through a hub", [me, alice(), member({ key: BOB, nick: "Bob", online: true, viaHub: true, edge: edge({ linkId: "edge-b", state: "waiting", lastSeenAt: 0 }) })], {}, { kind: "connected", label: "2 of 2 reachable", dot: "bg-accent" }],
+    ["only members reached through a hub", [me, member({ key: ALICE, online: true, viaHub: true }), member({ key: BOB, online: true, viaHub: true })], {}, { kind: "connected", label: "2 of 2 reachable", dot: "bg-accent" }],
     ["an app with no WebRTC, a member live over Iroh", [me, alice({ transport: "iroh/1" }), bob({ transport: "iroh/1" })], { transport: { protocol: "webrtc/1", relays: [], webrtc: false } }, { kind: "connected", label: "2 of 2 reachable", dot: "bg-accent" }],
   ])("%s", async (_, members, state, want) => {
     await open(active(members), state);
@@ -136,6 +139,14 @@ describe("GroupConnection: the popover lists every member's edge", () => {
     await user.click(screen.getByTestId("group-connection-reconnect"));
     expect(engine.callsTo("connect")).toEqual([{ linkId: "edge-b" }]);
     expect(await screen.findByRole("alert")).toHaveTextContent("Go online before reconnecting");
+  });
+
+  it("offers no Reconnect for a member reached through a hub", async () => {
+    await open(active([me, alice({ state: "waiting", lastSeenAt: 0 }), member({ key: BOB, nick: "Bob", online: true, viaHub: true, edge: edge({ linkId: "edge-b", state: "waiting", lastSeenAt: 0 }) })]));
+    expect(rows()[1]).toMatchObject({ key: BOB, status: "Through a hub" });
+    // Only Alice, who is really down, can be reconnected.
+    expect(screen.getAllByTestId("group-connection-reconnect")).toHaveLength(1);
+    expect(within(screen.getAllByTestId("group-connection-member")[0]).getByTestId("group-connection-reconnect")).toBeInTheDocument();
   });
 
   it("a member this device has no free native connection for says it waits for one", async () => {
