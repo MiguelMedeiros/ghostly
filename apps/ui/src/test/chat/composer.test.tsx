@@ -498,6 +498,23 @@ describe("the emoji/GIF panel", () => {
     expect(screen.queryByTestId("expression-panel")).not.toBeInTheDocument();
   });
 
+  it("on a phone, the click a tap on the backdrop leaves behind reaches nothing under it", async () => {
+    viewport(390, 844);
+    const { user } = composer();
+    await user.click(smiley());
+    const backdrop = document.querySelector(".sheet-backdrop")!;
+    const tap = { bubbles: true, pointerType: "touch" };
+    act(() => { backdrop.dispatchEvent(new PointerEvent("pointerdown", tap)); backdrop.dispatchEvent(new PointerEvent("pointerup", tap)); });
+    expect(screen.queryByTestId("expression-panel")).not.toBeInTheDocument();
+    // The screen's click comes after the backdrop is gone, where the tap was: here the + beside the field.
+    const more = screen.getByTestId("composer-more");
+    act(() => { more.click(); });
+    expect(screen.queryByTestId("composer-menu")).not.toBeInTheDocument();
+    // The next tap is the person's own.
+    act(() => { more.click(); });
+    expect(screen.getByTestId("composer-menu")).toBeInTheDocument();
+  });
+
   it("stays inside the chat's column", async () => {
     vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
       // A narrow chat column, 300px wide, starting 400px in; the composer 60px tall at the bottom.
