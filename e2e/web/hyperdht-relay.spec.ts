@@ -7,9 +7,12 @@ import { chat, connect, expect, link, say, test, type Peer } from "../support/fi
 // two people pair, set the relay, and then lose WebRTC: their chat comes back live over HyperDHT, relayed.
 const relay = process.env.GHOSTLY_HYPERDHT_RELAY_URL ?? "";
 
-/** Back to the one chat, from wherever the page is (a chat is not in the address). */
+/**
+ * Back to the one chat, from wherever the page is (a chat is not in the address). Home by its hash: the page stays
+ * loaded and the chat keeps its session (`goto("/")` from `/#/settings/…` would load the app again).
+ */
 async function openTheChat(peer: Peer): Promise<void> {
-  await peer.page.goto("/");
+  await peer.page.goto("/#/");
   await peer.page.getByTestId("sidebar").getByTestId("chat-row").first().click();
   await expect(chat(peer)).toBeVisible();
 }
@@ -50,6 +53,7 @@ test("with WebRTC gone, two browsers keep chatting over HyperDHT through a relay
   await expect(alice.page.getByTestId("network-error")).toHaveText("Use a wss:// relay address");
   await alice.page.getByTestId("network-hyperdht-relay").fill("");
 
+  // Set while the chat is live, with no reload in between.
   for (const p of [alice, bob]) await setRelay(p, relay);
   // Both apps now run HyperDHT too, through the relay: offered, marked relayed, and WebRTC stays in use (direct first).
   for (const p of [alice, bob]) {
