@@ -205,7 +205,7 @@ ghostly task send owner --id relay-fix --title "Fix relay rotation" --steps 1/4 
   --item done:Reproduce --item running:Codec --item pending:Tests --item pending:"Open the PR"
 ghostly task update owner relay-fix --steps 3/4 --step "Waiting for CI" \
   --item done:Reproduce --item done:Codec --item done:Tests --item running:"Open the PR"
-ghostly task update owner relay-fix --status done --progress 100 --pr-url https://github.com/o/r/pull/612 \
+ghostly task update owner relay-fix --status done --steps 4/4 --pr-url https://github.com/o/r/pull/612 \
   --pr-number 612 --additions 123 --deletions 45 --files 6
 ```
 
@@ -213,7 +213,8 @@ ghostly task update owner relay-fix --status done --progress 100 --pr-url https:
   or group. Without `--id`, `send` makes one up and prints it.
 - **Status:** `queued`, `running` (the default on send), `blocked`, `done`, `failed` or `cancelled`. The time shown
   counts from the send; once finished the card says how long it took.
-- **Progress:** `--progress 0..100`, or `--steps done/total` (the percent is worked out). `--step` is what it does now
+- **Progress:** `--progress 0..100`, or `--steps done/total` (the percent is worked out). Keep to one of them: a
+  card that started with `--steps` ends with `--steps 4/4`, or it reads "100% · 3 of 4 steps". `--step` is what it does now
   (200 characters); a finished card hides it.
 - **Items:** `--item state:text`, up to 20, state `pending`, `running`, `done`, `failed` or `skipped`. An update's
   `--item` list replaces the card's, so give all of them. A lowercase word before the first colon must be a state

@@ -3,8 +3,8 @@ import { resolve } from "node:path";
 import { expect, test } from "@playwright/test";
 
 /**
- * /developers/agents: the prompt to copy is at the top and its Copy button copies exactly the guide's prompt
- * (docs/AI-AGENTS.md, cut out by scripts/agent-prompt.mjs); the page never scrolls sideways; the Developers page
+ * /developers/agents: the hero's Copy the prompt button and the prompt's own Copy button copy exactly the guide's
+ * prompt (docs/AI-AGENTS.md, cut out by scripts/agent-prompt.mjs); the page never scrolls sideways; the Developers page
  * links to it; its description fits a search result (155 characters); /llms.txt and /llms-full.txt are served (scripts/llms.mjs) and point AI readers at it.
  */
 
@@ -25,7 +25,7 @@ test("/developers/agents has a description short enough for a search result", as
 });
 
 for (const size of SIZES) {
-  test(`/developers/agents at ${size.width}px: no sideways scroll, the prompt and its Copy button in the first screen`, async ({ page }) => {
+  test(`/developers/agents at ${size.width}px: no sideways scroll, the Copy the prompt button in the first screen`, async ({ page }) => {
     await page.setViewportSize(size);
     await page.goto("/developers/agents", { waitUntil: "networkidle" });
     const doc = await page.evaluate(() => ({ sw: document.documentElement.scrollWidth, cw: document.documentElement.clientWidth }));
@@ -37,18 +37,20 @@ for (const size of SIZES) {
   });
 }
 
-test("/developers/agents: the Copy button copies the guide's prompt", async ({ page, context }) => {
-  expect(PROMPT, "docs/AI-AGENTS.md holds the prompt").toContain("ghostly invite create");
-  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
-  await page.goto("/developers/agents", { waitUntil: "networkidle" });
-  await expect(page.getByTestId("agent-prompt")).toHaveText(PROMPT);
-  const copy = page.getByTestId("agent-prompt-copy");
-  await expect(copy).toHaveText("Copy");
-  await copy.click();
-  await expect(copy).toContainText("Copied");
-  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(PROMPT);
-  await expect(copy).toHaveText("Copy", { timeout: 5000 });
-});
+for (const [id, label] of [["agent-prompt-copy", "Copy the prompt"], ["agent-prompt-box-copy", "Copy"]] as const) {
+  test(`/developers/agents: ${label} (${id}) copies the guide's prompt`, async ({ page, context }) => {
+    expect(PROMPT, "docs/AI-AGENTS.md holds the prompt").toContain("ghostly invite create");
+    await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+    await page.goto("/developers/agents", { waitUntil: "networkidle" });
+    await expect(page.getByTestId("agent-prompt")).toHaveText(PROMPT);
+    const copy = page.getByTestId(id);
+    await expect(copy).toHaveText(label);
+    await copy.click();
+    await expect(copy).toContainText("Copied");
+    expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(PROMPT);
+    await expect(copy).toHaveText(label, { timeout: 5000 });
+  });
+}
 
 test("/developers/agents: without a clipboard, Copy selects the whole prompt", async ({ page }) => {
   await page.addInitScript(() => {
@@ -57,7 +59,7 @@ test("/developers/agents: without a clipboard, Copy selects the whole prompt", a
   await page.goto("/developers/agents", { waitUntil: "networkidle" });
   await page.getByTestId("agent-prompt-copy").click();
   await expect.poll(() => page.evaluate(() => window.getSelection()?.toString())).toBe(PROMPT);
-  await expect(page.getByTestId("agent-prompt-copy")).toHaveText("Copy");
+  await expect(page.getByTestId("agent-prompt-copy")).toHaveText("Copy the prompt");
 });
 
 test("/developers/agents: how it works, the safety rule and the steps are below the prompt", async ({ page }) => {
