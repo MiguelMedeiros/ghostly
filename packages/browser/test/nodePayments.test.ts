@@ -335,6 +335,19 @@ describe("the Cashu wallet and Lightning", () => {
     expect(node["settings"].mints).toEqual(["https://a.example", "https://b.example"]);
   });
 
+  it("refuses a mint of the other network from a network's Cashu wallet, before contacting it", async () => {
+    const { node } = track(engine());
+    const check = vi.spyOn(node["wallet"], "checkMint").mockImplementation(async (url: string) => ({ url: url.replace(/\/$/, ""), name: url }));
+    await expect(node.walletAddMint({ url: `${TEST_MINT}/`, network: "mainnet" })).rejects.toThrow("add it to a Testnet Cashu wallet");
+    await expect(node.walletAddMint({ url: "https://a.example", network: "testnet" })).rejects.toThrow("add it to a Mainnet Cashu wallet");
+    expect(check).not.toHaveBeenCalled();
+    expect(node["settings"].mints).not.toContain(TEST_MINT);
+    expect(node["settings"].mints).not.toContain("https://a.example");
+    await node.walletAddMint({ url: TEST_MINT, network: "testnet" });
+    await node.walletAddMint({ url: "https://a.example", network: "mainnet" });
+    expect(node["settings"].mints).toEqual(expect.arrayContaining([TEST_MINT, "https://a.example"]));
+  });
+
   it("never removes a mint that still holds sats", async () => {
     const { node } = track(engine());
     node["settings"].mints = ["https://a.example", "https://b.example"];

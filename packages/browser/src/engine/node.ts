@@ -165,7 +165,7 @@ import { ProfilePeek, readPathOf, type PeekResult } from "./profilePeek";
 import { S3Store } from "../backup/s3";
 import type { HoldStore } from "../backup/storage";
 import { PaymentDesk } from "./payments";
-import { CashuWallet, TEST_COINS_NOTE } from "./wallet";
+import { CashuWallet, TEST_COINS_NOTE, normalizeMintUrl } from "./wallet";
 import { identityCues, knockCue, paymentCue, transportCue, transportMark, type Cue } from "./cues";
 import { messageAttention } from "./attention";
 import { DEFAULT_HYPERDHT_RELAY, hyperdhtRelayProblem } from "../shared/hyperdhtRelay";
@@ -3191,7 +3191,15 @@ export class GhostlyNode implements EngineImplementation {
 
   // -- wallet and payments --------------------------------------------------
 
-  async walletAddMint({ url, primary }: { url: string; primary?: boolean }): Promise<{ url: string; name: string }> {
+  /**
+   * `network`: the Cashu wallet it is added from. A mint's network is its own (a test mint is Testnet's, any other
+   * Mainnet's): one of the other network is refused before it is contacted, never filed into that network's wallet
+   * (which it would make, unseen from the wallet it was added from).
+   */
+  async walletAddMint({ url, primary, network }: { url: string; primary?: boolean; network?: WalletNetwork }): Promise<{ url: string; name: string }> {
+    if (network && mintNetwork(normalizeMintUrl(url)) !== network) {
+      throw new Error(network === "mainnet" ? "This is a test mint, and its sats are worth nothing: add it to a Testnet Cashu wallet" : "This mint holds real sats: add it to a Mainnet Cashu wallet");
+    }
     const mint = await this.wallet.checkMint(url);
     const others = this.settings.mints.filter((m) => m !== mint.url);
     const known = others.length !== this.settings.mints.length;

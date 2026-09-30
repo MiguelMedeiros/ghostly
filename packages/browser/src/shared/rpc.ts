@@ -183,7 +183,7 @@ export interface EngineApi {
   /** Store-and-forward in one chat (WISP 4xx): accept held items from this contact, and hold items for it while it is away. */
   setChatHold(params: { linkId: string; enabled: boolean }): void;
   connect(params: { linkId: string }): void;
-  walletAddMint(params: { url: string; primary?: boolean }): { url: string; name: string };
+  walletAddMint(params: { url: string; primary?: boolean; network?: WalletNetwork }): { url: string; name: string };
   /** New → a type → a network: made in one click and checked before its card appears; nothing saved on failure. */
   walletCreate(params: WalletCreate): WalletInstanceView;
   /** Removes one wallet, its keys and config; refused while it holds money on this device and `acceptLoss` is not set. */
