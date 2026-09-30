@@ -83,7 +83,7 @@ export function GroupTypingText({ testId, typers }: { testId: string; typers: re
 export function ChatSubtitle({ peerKey, keyLabel }: { peerKey?: string; keyLabel: string }) {
   const activity = usePeerTypingActivity(peerKey);
   return (
-    <p className={`m-0 truncate text-xs max-md:text-[10px] whitespace-nowrap ${activity ? "" : "text-text-muted/60 font-mono"}`} data-testid="chat-subtitle"
+    <p className={`m-0 truncate text-xs max-md:text-[10px] whitespace-nowrap ${activity ? "" : "text-text-muted font-mono"}`} data-testid="chat-subtitle"
       role="status" aria-live="polite">
       {activity ? <TypingText testId="chat-typing" activity={activity} /> : keyLabel}
     </p>
