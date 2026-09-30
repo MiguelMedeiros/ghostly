@@ -78,7 +78,7 @@ beforeEach(() => { lib.instances.length = 0; lib.authorizeError = undefined; lib
 
 describe("the client Ghostly presents", () => {
   it("is the published metadata document, byte for byte in meaning", () => {
-    const published = JSON.parse(readFileSync(new URL("../../../website/public/oauth/client-metadata.json", import.meta.url), "utf8"));
+    const published = JSON.parse(readFileSync(new URL("../../../apps/website/public/oauth/client-metadata.json", import.meta.url), "utf8"));
     expect(published).toEqual(ATPROTO_CLIENT_METADATA);
     expect(ATPROTO_CLIENT_METADATA.client_id).toBe("https://ghostly.tools/oauth/client-metadata.json");
     expect(ATPROTO_CLIENT_METADATA.grant_types).toEqual(["authorization_code"]);

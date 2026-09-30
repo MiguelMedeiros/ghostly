@@ -37,7 +37,7 @@ describe("the cards", () => {
     } });
     expect(cards.map((c) => c.id)).toEqual(WALLET_RAILS.flatMap((rail) => [`${rail}:mainnet`, `${rail}:testnet`]));
     expect(cards.map((c) => [c.rail, c.network])).toEqual(WALLET_RAILS.flatMap((rail) => [[rail, "mainnet"], [rail, "testnet"]]));
-    // The website's deck puts its cards in this order (website/components/home/WalletDeck.tsx).
+    // The website's deck puts its cards in this order (apps/website/components/home/WalletDeck.tsx).
     expect([...new Set(cards.map((c) => c.rail))]).toEqual(WALLET_RAILS);
   });
 

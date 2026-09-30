@@ -1001,7 +1001,7 @@
     "{apps/ui/src/lib/replies.ts,apps/ui/src/components/chat/ReplyQuote.tsx,packages/browser/src/shared/replies.ts}": ["chat.replies","groups.replies"],
     "{docs/**,**/*.md,LICENSE,preview-screenshots.png,screenshots/**}": [],
     "{packages/browser/src/engine/edits.ts,packages/browser/src/shared/edits.ts}": ["chat.edit","chat.edit.wire","groups.edit"],
-    "{scripts/**,.github/**,website/**,integrations/**}": [],
+    "{scripts/**,.github/**,apps/website/**,integrations/**}": [],
     "{tsconfig.json,apps/ui/vite-env.d.ts,**/tsconfig*.json,eslint.config.mjs,vitest.shared.ts,apps/ui/vitest.ui.config.ts,**/vitest.config.ts,apps/ui/vite.profile-fixture.config.ts}": []
   }
 }

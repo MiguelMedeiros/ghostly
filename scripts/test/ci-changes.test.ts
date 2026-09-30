@@ -2,7 +2,7 @@ import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { PACKAGES_READ_FROM_SITE, WEBSITE_INPUTS, covers, plan } from "../ci-changes.mjs";
-import { FILES as DECK } from "../../website/scripts/sync-app-deck.mjs";
+import { FILES as DECK } from "../../apps/website/scripts/sync-app-deck.mjs";
 
 const root = resolve(import.meta.dirname, "../..");
 
@@ -14,13 +14,13 @@ describe("the website gate", () => {
   it("covers every repository file and folder the site's scripts name", () => {
     // The site's own scripts (not capture/, a manual tool) read the repository by root-relative literals:
     // sync-references.mjs's documents, folder and excerpts, check-dashes.mjs's list. Any that names an existing file
-    // or folder outside website/ is an input. The deck's folder, apps/ui/src/components, is read file by file (above).
-    const dir = join(root, "website/scripts");
+    // or folder outside apps/website/ is an input. The deck's folder, apps/ui/src/components, is read file by file (above).
+    const dir = join(root, "apps/website/scripts");
     const named = readdirSync(dir)
       .filter((f) => f.endsWith(".mjs"))
       .flatMap((f) => [...readFileSync(join(dir, f), "utf8").matchAll(/["'`]([\w.-]+(?:\/[\w.-]+)*)["'`]/g)].map((m) => m[1]))
       .filter((p) => p.includes("/") || p.endsWith(".md"))
-      .filter((p) => !p.startsWith(".") && !p.startsWith("website/") && p !== "apps/ui/src/components");
+      .filter((p) => !p.startsWith(".") && !p.startsWith("apps/website/") && p !== "apps/ui/src/components");
     const kind = (p: string) => {
       try {
         return statSync(join(root, p)).isDirectory() ? "folder" : "file";
@@ -40,7 +40,7 @@ describe("the website gate", () => {
 describe("the packages gate", () => {
   it("covers every site file the packages' tests and sources name, and they name no document", () => {
     // What `npm run test:packages` runs: packages/* and apps/extension/, their sources, tests and configs. A path into
-    // website/ or docs/ is written relative ("../../../website/lib/invite") or from the root ("website/...").
+    // apps/website/ or docs/ is written relative ("../../../apps/website/lib/invite") or from the root ("apps/website/...").
     const code: string[] = [];
     const walk = (dir: string) => {
       for (const entry of readdirSync(dir, { withFileTypes: true })) {
@@ -53,9 +53,9 @@ describe("the packages gate", () => {
     for (const dir of readdirSync(join(root, "packages"))) walk(join(root, "packages", dir));
     walk(join(root, "apps", "extension"));
     const named = code.flatMap((file) =>
-      [...readFileSync(file, "utf8").matchAll(/(?:\.\.\/)+((?:website|docs)\/[^"'`\s)]*)|["'`]((?:website|docs)\/[^"'`\s)]*)/g)].map((m) => ({ file, path: m[1] ?? m[2] })),
+      [...readFileSync(file, "utf8").matchAll(/(?:\.\.\/)+((?:apps\/website|docs)\/[^"'`\s)]*)|["'`]((?:apps\/website|docs)\/[^"'`\s)]*)/g)].map((m) => ({ file, path: m[1] ?? m[2] })),
     );
-    expect(named.map((n) => n.path)).toEqual(expect.arrayContaining(["website/lib/invite", "website/public/oauth/client-metadata.json"]));
+    expect(named.map((n) => n.path)).toEqual(expect.arrayContaining(["apps/website/lib/invite", "apps/website/public/oauth/client-metadata.json"]));
     for (const { file, path } of named) {
       // An import names a module without its extension.
       const real = [path, ...[".ts", ".tsx", ".mjs", ".js"].map((ext) => path + ext)].find((p) => { try { statSync(join(root, p)); return true; } catch { return false; } });
@@ -74,7 +74,7 @@ describe("plan", () => {
   });
 
   it("a site change runs the website and skips the Desktop jobs", () => {
-    expect(plan(["website/app/page.tsx", "website/e2e/bubbles.spec.ts"], ready)).toMatchObject({ website: true, app: false });
+    expect(plan(["apps/website/app/page.tsx", "apps/website/e2e/bubbles.spec.ts"], ready)).toMatchObject({ website: true, app: false });
     expect(plan(["docs/wisps/101-webrtc.md"], ready)).toMatchObject({ website: true, app: false });
   });
 
@@ -100,9 +100,9 @@ describe("plan", () => {
 
   it("only docs/ and the site's own files skip the packages' tests", () => {
     expect(plan(["docs/TESTING.md", "docs/wisps/101-webrtc.md"], ready).packages).toBe(false);
-    expect(plan(["website/app/page.tsx"], ready).packages).toBe(false);
-    expect(plan(["website/lib/invite.ts"], ready).packages).toBe(true);
-    expect(plan(["website/public/oauth/client-metadata.json"], ready).packages).toBe(true);
+    expect(plan(["apps/website/app/page.tsx"], ready).packages).toBe(false);
+    expect(plan(["apps/website/lib/invite.ts"], ready).packages).toBe(true);
+    expect(plan(["apps/website/public/oauth/client-metadata.json"], ready).packages).toBe(true);
     expect(plan(["docs/TESTING.md", "e2e/support/avatar-fixtures/avatar-extended.webp"], ready).packages).toBe(true);
     expect(plan(["README.md"], draft).packages).toBe(true);
   });

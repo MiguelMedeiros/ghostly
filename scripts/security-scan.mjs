@@ -4,7 +4,7 @@
  *
  *   node scripts/security-scan.mjs [--json]
  *
- * Reads package-lock.json, website/package-lock.json and Cargo.lock, asks
+ * Reads package-lock.json, apps/website/package-lock.json and Cargo.lock, asks
  * OSV (https://osv.dev: GitHub advisories, RustSec, npm) about each exact
  * version, and exits 1 if anything is affected that is not accepted in
  * .github/security-allowlist.json. Needs no dependencies and no npm audit
@@ -51,7 +51,7 @@ async function osv(url, body) {
 
 const packages = [
   ...npmPackages("package-lock.json"),
-  ...npmPackages("website/package-lock.json"),
+  ...npmPackages("apps/website/package-lock.json"),
   ...cargoPackages("Cargo.lock"),
 ];
 

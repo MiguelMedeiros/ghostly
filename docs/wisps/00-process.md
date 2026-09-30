@@ -32,7 +32,7 @@ Headers: number/assignment state, title, status, editors, dependencies and imple
 
 ### Header fields the site reads
 
-WISP content is written in this directory only. The website's catalogue, reader and maps are generated from the documents (`npm run sync:references` in `website/`) and hold no text of their own about a WISP, so a change is written once, here. The same sync writes the index table in [README.md](README.md) from each header's title, Status and Availability; commit it with the change, or CI fails. Besides the fields above, the header table of every WISP carries these rows, in plain text (no Markdown, no links, except where a link is the value):
+WISP content is written in this directory only. The website's catalogue, reader and maps are generated from the documents (`npm run sync:references` in `apps/website/`) and hold no text of their own about a WISP, so a change is written once, here. The same sync writes the index table in [README.md](README.md) from each header's title, Status and Availability; commit it with the change, or CI fails. Besides the fields above, the header table of every WISP carries these rows, in plain text (no Markdown, no links, except where a link is the value):
 
 | Row | Required | Value |
 |---|---|---|

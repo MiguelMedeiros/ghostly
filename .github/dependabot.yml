@@ -24,7 +24,7 @@ updates:
         patterns: ["*"]
         update-types: [minor, patch]
   - package-ecosystem: npm
-    directory: /website
+    directory: /apps/website
     schedule: { interval: weekly, day: monday }
     target-branch: dev
     # typescript-eslint does not support TypeScript 7 yet; drop once it does.

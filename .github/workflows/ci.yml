@@ -31,10 +31,10 @@ jobs:
   # scripts/ci-changes.mjs decides, from the files the pull request changes (a renamed file counts by both names):
   # - Tauri: drafts get pushed often and mostly touch TypeScript, so a draft skips it unless it changed
   #   something it builds. Leaving draft (ready_for_review) runs it again.
-  # - Website: runs when the pull request changes something the site reads (website/, docs/, the files its
+  # - Website: runs when the pull request changes something the site reads (apps/website/, docs/, the files its
   #   scripts copy or quote; the list is tested against those scripts).
-  # - The Desktop jobs on macOS: skipped only when every change is in website/ or docs/, which the app never reads.
-  # - The packages' unit tests: skipped when every change is in docs/ or in website/ outside the few site files their
+  # - The Desktop jobs on macOS: skipped only when every change is in apps/website/ or docs/, which the app never reads.
+  # - The packages' unit tests: skipped when every change is in docs/ or in apps/website/ outside the few site files their
   #   tests read (the list is tested against what they name).
   # A skipped job still reports its check, and CI Success accepts it only when this job said so. Pushes (dev, main)
   # run everything. If the lookup fails, so does this job, and CI Success with it: nothing is skipped by accident.
@@ -87,7 +87,7 @@ jobs:
   # ============================================
   # Jobs side by side instead of one in a row (6 minutes): lint and types, the app's unit tests, the packages' unit
   # tests in shards, and the builds. All but the packages shards run on every pull request: the app's tests read
-  # files from all over the repository, website/ too.
+  # files from all over the repository, apps/website/ too.
   frontend-checks:
     name: Frontend lint and types
     runs-on: ubuntu-24.04
@@ -427,7 +427,7 @@ jobs:
     runs-on: ubuntu-24.04
     defaults:
       run:
-        working-directory: website
+        working-directory: apps/website
 
     steps:
       - name: Checkout
@@ -438,7 +438,7 @@ jobs:
         with:
           node-version: "22"
           cache: "npm"
-          cache-dependency-path: website/package-lock.json
+          cache-dependency-path: apps/website/package-lock.json
 
       - name: Install dependencies
         run: npm ci
@@ -452,7 +452,7 @@ jobs:
       # The index table in docs/wisps/README.md is written by the sync above from the WISPs' headers
       # (scripts/wisp-index.mjs) and committed, so GitHub shows it: the sync must leave it as it was.
       - name: The WISP index is up to date
-        run: git diff --exit-code -- ../docs/wisps/README.md || { echo "::error file=docs/wisps/README.md::The WISP index is out of date. Run npm run sync:references in website/ and commit docs/wisps/README.md."; exit 1; }
+        run: git diff --exit-code -- ../../docs/wisps/README.md || { echo "::error file=docs/wisps/README.md::The WISP index is out of date. Run npm run sync:references in apps/website/ and commit docs/wisps/README.md."; exit 1; }
 
       # The home's wallet deck is the app's own code, copied (scripts/sync-app-deck.mjs).
       - name: App deck copies match the app
@@ -469,7 +469,7 @@ jobs:
       - name: TypeScript check
         run: npx tsc --noEmit
 
-  # The site's browser checks, in four shards of about the same time (website/e2e/shard.mjs), each on its own build:
+  # The site's browser checks, in four shards of about the same time (apps/website/e2e/shard.mjs), each on its own build:
   # building takes less than passing one build around. One runner ran them all in about 11 minutes.
   website-e2e:
     name: Website browser checks (${{ matrix.shard }}/4)
@@ -484,7 +484,7 @@ jobs:
         shard: [1, 2, 3, 4]
     defaults:
       run:
-        working-directory: website
+        working-directory: apps/website
 
     steps:
       - name: Checkout
@@ -495,7 +495,7 @@ jobs:
         with:
           node-version: "22"
           cache: "npm"
-          cache-dependency-path: website/package-lock.json
+          cache-dependency-path: apps/website/package-lock.json
 
       - name: Install dependencies
         run: npm ci

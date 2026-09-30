@@ -2,12 +2,12 @@ import { describe, expect, it } from "vitest";
 import fc from "fast-check";
 import { bech32, bech32m } from "@scure/base";
 import { createChatInvite, readInviteCode } from "../src/invite";
-import { checkInvite } from "../../../website/lib/invite";
+import { checkInvite } from "../../../apps/website/lib/invite";
 // covers: invite.code
 
 /**
  * The join page on ghostly.tools reads `ghostly1` codes with its own copy of the rules
- * (website/lib/invite.ts: the site cannot import the core). Both must give the same answer.
+ * (apps/website/lib/invite.ts: the site cannot import the core). Both must give the same answer.
  */
 const same = (input: string) => {
   const core = readInviteCode(input);

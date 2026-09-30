@@ -33,7 +33,7 @@ jobs:
         with:
           node-version: "22"
 
-      # package-lock.json, website/package-lock.json and Cargo.lock against osv.dev.
+      # package-lock.json, apps/website/package-lock.json and Cargo.lock against osv.dev.
       # Accepted advisories live in .github/security-allowlist.json, each with an expiry.
       - name: Scan lock files
         run: node scripts/security-scan.mjs

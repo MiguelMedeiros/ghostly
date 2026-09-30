@@ -100,6 +100,6 @@ describe("HTTPS only", () => {
   // given the bare name could try plain HTTP first. The servers say it themselves.
   it("the web app's server and the website send Strict-Transport-Security for a year", () => {
     expect(read("apps/web/nginx-headers.conf")).toMatch(/^add_header Strict-Transport-Security "max-age=31536000" always;$/m);
-    expect(read("website/next.config.ts")).toMatch(/key: "Strict-Transport-Security", value: "max-age=31536000"/);
+    expect(read("apps/website/next.config.ts")).toMatch(/key: "Strict-Transport-Security", value: "max-age=31536000"/);
   });
 });
