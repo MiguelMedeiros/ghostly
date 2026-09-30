@@ -7,6 +7,8 @@ import { useIsMobile } from "../hooks/useIsMobile";
 const MARGIN = 8;
 /** Space between a menu and its opener (mt-1 / mb-1). */
 const GAP = 4;
+/** A field the on-screen keyboard types into. */
+const TYPED = "input:not([type=checkbox], [type=radio], [type=range], [type=button], [type=submit], [type=file]), textarea, select, [contenteditable]:not([contenteditable=false])";
 
 /**
  * A dropdown of actions. Every row is one line in every language: the menu is as wide as its longest row
@@ -92,6 +94,15 @@ function OpenMenu({ open, onClose, anchorRef, testId, id, align = "end", prefer 
       window.removeEventListener("scroll", fit, true);
     };
   }, [open, phone, anchorRef, prefer, portal, align, within]);
+
+  // A sheet opened while typing (a long press on a message, the composer's +): the keyboard goes down, as in a native
+  // app. iOS keeps it up otherwise, over the sheet's bottom rows, and the keys went on into the field behind the sheet:
+  // it moves no focus to a button from a timer (the long press) nor from a tap.
+  useEffect(() => {
+    if (!open || !phone) return;
+    const at = document.activeElement;
+    if (at instanceof HTMLElement && !ref.current?.contains(at) && at.matches(TYPED)) at.blur();
+  }, [open, phone]);
 
   useEffect(() => {
     if (open && focusFirst) usable(ref.current)[0]?.focus({ preventScroll: true });
