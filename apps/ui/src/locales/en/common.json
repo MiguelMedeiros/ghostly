@@ -22,5 +22,6 @@
   "save": "Save",
   "success": "Success",
   "unnamedContact": "Contact · {{key}}",
+  "unnamedContactShort": "Contact",
   "viewPhoto": "View photo of {{name}}"
 }

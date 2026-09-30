@@ -33,12 +33,33 @@ async function member(dir: string, group: string, name: string): Promise<void> {
   expect.fail(`${group} on ${dir} never named ${name}: ${JSON.stringify(shown)}`);
 }
 
+/**
+ * Waits until `dir`'s side of the community has a group link up (`community.connected`). A member's name alone says
+ * nothing about it: names also come in the link's Pkarr packet, before its session opens. With the two relays' budget
+ * shared by both daemons' groups, that session took more than two minutes once on a CI runner.
+ */
+async function linked(dir: string, group: string): Promise<void> {
+  const until = Date.now() + 240_000;
+  let shown: Record<string, unknown> = {};
+  while (Date.now() < until) {
+    shown = ok(await as(dir, "group", "show", group));
+    if (((shown.community as { connected?: number } | null)?.connected ?? 0) > 0) return;
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+  expect.fail(`${group} on ${dir} never had a link up: ${JSON.stringify(shown)}`);
+}
+
 async function hears(dir: string, from: string, group: string, text: string): Promise<void> {
+  await Promise.all([linked(dir, group), linked(from, group)]);
   const since = (ok(await as(dir, "status")).events as { lastSeq: number }).lastSeq;
   const listen = new Running(["--home", dir, "listen", "--since", String(since), "--type", "group."], dir === old ? oldEnv : env, bin(dir));
   running.push(listen);
   const sent = ok(await as(from, "group", "send", group, text));
-  const event = await listen.waitFor((l) => l.type === "group.message" && (l.message as { text?: string })?.text === text, 150_000);
+  const event = await listen.waitFor((l) => l.type === "group.message" && (l.message as { text?: string })?.text === text, 90_000).catch(async (error: Error) => {
+    // What each side knew when it did not arrive: the send's answer, and each side's view of the group.
+    const views = await Promise.all([from, dir].map(async (d) => JSON.stringify((await as(d, "group", "show", group)).json)));
+    throw new Error(`${error.message}\nsent: ${JSON.stringify(sent)}\nsender: ${views[0]}\nreader: ${views[1]}`);
+  });
   expect(event).toMatchObject({ message: { id: sent.messageId, text } });
   await listen.stop();
 }
@@ -63,7 +84,7 @@ afterAll(async () => {
   for (const relay of relays) relay.server.close();
 }, 30_000);
 
-describe(`a community between this CLI and ${OLD_BIN ? "an older release" : "one from before native group links"}`, { timeout: 480_000 }, () => {
+describe(`a community between this CLI and ${OLD_BIN ? "an older release" : "one from before native group links"}`, { timeout: 900_000 }, () => {
   it("this CLI has WebRTC (libdatachannel): its group links stay on it with an app that has it too", async () => {
     expect(ok(await as(now, "status"))).toMatchObject({ webrtc: true });
   });
