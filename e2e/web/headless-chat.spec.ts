@@ -28,7 +28,9 @@ test("a person on the web chats with a headless bot, both ways", { tag: ["@featu
     expect(received).toMatchObject({ chat: invite.chat, message: { text: "hi bot", from: "peer" } });
     await bot.run("send", invite.chat as string, "hello from the bot", "--wait", "delivered");
     await expect(chat(person).getByText("hello from the bot")).toBeVisible();
-    await expect(chat(person).getByText("~Helper bot").first()).toBeVisible();
+    // Named over its messages as the header names it, plain (a "~" marks a member's own name in a group).
+    await expect(chat(person).getByTestId("message-nick").first()).toHaveText("Helper bot");
+    await expect(person.page.getByTestId("chat-name")).toHaveText("Helper bot");
     // The person's app announced itself; the bot saw a join, not a message, and answered it as the app would.
     expect(await bot.event((e) => e.type === "chat.joined")).toMatchObject({ chat: invite.chat });
     // The app shows each notice as a line: the person's own, and the bot's answer.

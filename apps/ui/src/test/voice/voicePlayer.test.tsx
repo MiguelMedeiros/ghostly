@@ -98,6 +98,44 @@ describe("a voice message in the chat", () => {
     expect(audio.players[0]!.paused).toBe(true);
   });
 
+  /** The bytes arrive when the test says: each read waits for `arrive()`, oldest first. */
+  function slowFiles() {
+    const waiting: Array<() => void> = [];
+    vi.mocked(servicesPlatform!.getFile).mockImplementation(() => new Promise((resolve) => {
+      waiting.push(() => resolve(new Blob(["opus"], { type: "audio/webm" })));
+    }));
+    return { arrive: async (index = 0) => { waiting.splice(index, 1)[0]!(); await flush(); await flush(); } };
+  }
+  const unpaused = () => audio.players.filter((player) => !player.paused);
+
+  it("does not start once its bubble is gone, when the bytes arrive after the chat was left", async () => {
+    const files = slowFiles();
+    const { unmount } = chat(voice());
+    fireEvent.click(screen.getByTestId("voice-play"));
+    await flush();
+    unmount();
+    await files.arrive();
+    expect(unpaused()).toHaveLength(0);
+  });
+
+  it("does not start behind another one tapped while it was still loading", async () => {
+    const files = slowFiles();
+    chat(voice(), voice({ text: "between" }));
+    const [first, second] = bubbles();
+    fireEvent.click(within(first!).getByTestId("voice-play"));
+    await flush();
+    fireEvent.click(within(second!).getByTestId("voice-play"));
+    await flush();
+    // The second one's bytes come first, then the first one's, late.
+    await files.arrive(1);
+    await files.arrive(0);
+    expect(unpaused()).toHaveLength(1);
+    expect(second).toHaveAttribute("data-state", "playing");
+    expect(first).toHaveAttribute("data-state", "idle");
+    // Its play button works again.
+    expect(within(first!).getByTestId("voice-play")).toBeEnabled();
+  });
+
   it("goes on to the next voice message from the same sender, and stops at anything else", async () => {
     chat(voice(), voice(), voice({ sender: "me", id: "me_x" }), voice());
     const [first, second, mine] = bubbles();

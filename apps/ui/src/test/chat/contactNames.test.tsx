@@ -5,11 +5,12 @@ import { Sidebar } from "../../components/Sidebar";
 import { UpdateProvider } from "../../contexts/UpdateContext";
 import { saveSession } from "../../lib/storage";
 import type { ChatSession } from "../../lib/types";
+import { Chat } from "../../pages/Chat";
 import { Profile } from "../../pages/Profile";
 import { engineState, fakeEngine, linkView } from "../fakeEngine";
 import { renderApp } from "../render";
 
-// covers: chats.list.unnamed-contact, chat.paired.nickname-sync, profiles.share
+// covers: chats.list.unnamed-contact, chat.paired.nickname-sync, profiles.share, chats.list.rename
 
 const JPEG = "data:image/jpeg;base64,/9j/4AAQ";
 const key = (c: string) => c.repeat(52);
@@ -49,6 +50,32 @@ describe("the chat list names every contact", () => {
     const pattern = (text: string) => within(rowOf(text)).getByTestId("identicon").outerHTML;
     expect(pattern("Contact · eeeeee")).not.toBe(pattern("Contact · ffffff"));
     expect(pattern("Contact · eeeeee")).toBe(pattern("Contact · eeeeee"));
+  });
+});
+
+describe("a 1:1 chat names the contact over their messages as its header does", () => {
+  const BOT = key("h");
+  function open(over: Partial<ChatSession>) {
+    saveSession(chat("h", {
+      nick: "Botty", nickSource: "profile", ...over,
+      messages: [{ id: "m1", ref: "r1", sender: "peer", timestamp: 1_700_000_000_000, text: "Task done", nick: "Botty" }],
+    }));
+    const utils = renderApp(<Chat sessionId="h" visible onCallChange={() => {}} callLayer={null} />);
+    utils.engine.on("ensureLink", () => ({ linkId: "link-h" })).on("setActiveLink", () => undefined);
+    act(() => utils.engine.update({ links: [linkView({ id: "link-h", peerPubKeyZ32: BOT, profile: "paired-chat/1", peerNick: "Botty" })] }));
+    return utils;
+  }
+
+  it("their own name, plain: the bubble said \"~Botty\" under a header of \"Botty\"", async () => {
+    open({});
+    expect(await screen.findByTestId("chat-name")).toHaveTextContent("Botty");
+    expect(await screen.findByTestId("message-nick")).toHaveTextContent(/^Botty$/);
+  });
+
+  it("the name given here, in the header and over their messages alike", async () => {
+    open({ label: "Build bot" });
+    expect(await screen.findByTestId("chat-name")).toHaveTextContent("Build bot");
+    expect(await screen.findByTestId("message-nick")).toHaveTextContent(/^Build bot$/);
   });
 });
 

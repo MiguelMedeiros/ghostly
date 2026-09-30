@@ -60,6 +60,8 @@ export function AudioBubble({ file, sender, peerName: named, highlight }: { file
   const mediaRef = useRef<MediaSessionPlayer | null>(null);
 
   useEffect(() => setBusy(false), [transfer?.state, transfer?.stalled]);
+  // Sent now: "It plays once it has been sent" is over, and the play button is back.
+  useEffect(() => { if (ready) setProblem((was) => (was === "not-yet" ? null : was)); }, [ready]);
   useEffect(() => onVoiceRate((next) => {
     setRate(next);
     if (audioRef.current) applyVoiceRate(audioRef.current, next);

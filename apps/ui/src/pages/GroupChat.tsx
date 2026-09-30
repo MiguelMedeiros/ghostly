@@ -103,6 +103,9 @@ const FIXED_EVENTS = new Map([
   ["The membership history forked", "forked"],
 ] as const);
 
+/** The lines that name their member, said again from their kind: those of a member who has left too. */
+const FORMER_EVENTS = new Set<StoredMessage["event"]>(["joined", "admin", "picture", "renamed"]);
+
 /**
  * A membership line, naming its member as the roster knows them now; what was stored, when they are gone. The engine
  * stores it in English: the line is said again in the interface's language from its kind, where the stored text has
@@ -111,7 +114,10 @@ const FIXED_EVENTS = new Map([
 function eventText(message: StoredMessage, group: GroupView, t: Translate): string {
   const member = message.member ? group.members.find(m => m.key === message.member) : undefined;
   const text = message.text;
-  if (!member) {
+  // A member who has left since: a private group still knows the name they had (`formerNames`), so their lines are
+  // said in the interface's language too. A community keeps no former names: its stored line stays as it is.
+  const former = !member && !!message.member && group.profile !== "community" && FORMER_EVENTS.has(message.event);
+  if (!member && !former) {
     if (message.event === "created" && text.startsWith("Group created. ")) return `${t("group.event.created")} ${readNote(group, t)}`;
     if (message.event === "joined" && !message.member && text.startsWith("You joined. ")) return `${t("group.event.youJoined")} ${readNote(group, t)}`;
     const gone = " is no longer a member";
@@ -119,19 +125,19 @@ function eventText(message: StoredMessage, group: GroupView, t: Translate): stri
     const fixed = (FIXED_EVENTS as Map<string, string>).get(text);
     return fixed === "rotated" ? t("group.event.rotated") : fixed === "removed" ? t("group.event.removed") : fixed === "forked" ? t("group.event.forked") : text;
   }
-  const name = memberName(member, t);
+  const name = member ? memberName(member, t) : authorName(group, message.member!, t);
   if (message.event === "joined") return t("group.event.joined", { name });
-  if (message.event === "admin") return member.me ? t("group.event.adminYou") : t("group.event.admin", { name });
+  if (message.event === "admin") return member?.me ? t("group.event.adminYou") : t("group.event.admin", { name });
   if (message.event === "picture") {
     const removed = text.endsWith("removed the group's picture");
-    if (member.me) return removed ? t("group.event.pictureRemovedYou") : t("group.event.pictureChangedYou");
+    if (member?.me) return removed ? t("group.event.pictureRemovedYou") : t("group.event.pictureChangedYou");
     return removed ? t("group.event.pictureRemoved", { name }) : t("group.event.pictureChanged", { name });
   }
   const marker = " renamed the group to “";
   const renamed = message.event === "renamed" ? text.indexOf(marker) : -1;
   if (renamed >= 0 && text.endsWith("”")) {
     const group = text.slice(renamed + marker.length, -1);
-    return member.me ? t("group.event.renamedYou", { group }) : t("group.event.renamed", { name, group });
+    return member?.me ? t("group.event.renamedYou", { group }) : t("group.event.renamed", { name, group });
   }
   return text;
 }
@@ -523,7 +529,7 @@ export function GroupChat() {
       {viewingPicture && group.picture && <AvatarViewer src={group.picture} name={group.name || t("group.chat.unnamed")} returnFocus={avatarButton} onClose={() => setViewingPicture(false)} />}
       {sharing && group.entryLink && <GroupShareDialog group={group} created={sharing === "created"} onClose={() => setSharing("")} />}
       {confirmLeave && <LeaveGroupDialog group={group} onClose={() => setConfirmLeave(false)}
-        onConfirm={async () => { await engine.call("leaveGroup", { groupId }); setConfirmLeave(false); nav.home(); }} />}
+        onConfirm={async () => { await engine.call("leaveGroup", { groupId }); forgetChatMute(groupChat(groupId)); setConfirmLeave(false); nav.home(); }} />}
       {confirmForget && <DeleteChatDialog name={group.name} onClose={() => setConfirmForget(false)}
         onConfirm={() => { setConfirmForget(false); forgetChatMute(groupChat(groupId)); void engine.call("forgetGroup", { groupId }).catch(() => {}); nav.home(); }} />}
     </div>

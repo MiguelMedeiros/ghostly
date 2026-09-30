@@ -190,8 +190,10 @@ export function VideoBubble({ file, sender, peerName: named }: { file: ChatFile;
   }, [file.id]);
 
   useEffect(() => setBusy(false), [transfer?.state, transfer?.stalled]);
+  // Sent now: "It plays once it has been sent" is over, and the play button is back.
+  useEffect(() => { if (ready) setProblem((was) => (was === "not-yet" ? null : was)); }, [ready]);
 
-  const act = (action: FileAction) => {
+  const act =(action: FileAction) => {
     setActionError("");
     void platform?.fileAction?.(file.id, action).catch((error: Error) => setActionError(String(error.message ?? error)));
   };
