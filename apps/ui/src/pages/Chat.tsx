@@ -130,7 +130,6 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
     messages,
     status,
     lastSync,
-    isSending,
     sendMessage,
     techInfo,
     peerAck,
@@ -820,8 +819,10 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
           const last = [...messages].reverse().find(editableText);
           if (last) { setReplyingTo(null); setEditing(last); }
         } : undefined}
-        // Ghostly offline, or a security stop: nothing can go. Otherwise what cannot go now waits.
-        disabled={isSending || (paired && (!!chatStop || engine.state?.settings.online === false))}
+        // Ghostly offline, or a security stop: nothing can go. Otherwise what cannot go now waits. Never closed while a
+        // message goes: off the live link that is the DHT publication, seconds, and what was typed then went nowhere.
+        // The composer sends one at a time itself, and an Enter pressed meanwhile goes next.
+        disabled={paired && (!!chatStop || engine.state?.settings.online === false)}
         disabledPlaceholder={t("chat.disabledPlaceholder")}
         // The DHT carries a few hundred characters; the direct link has room for long invoices and ecash tokens.
         softBytes={paired && !chatLive ? deliveryPeer?.dhtDelivery?.maxTextBytes ?? 256 : undefined}
