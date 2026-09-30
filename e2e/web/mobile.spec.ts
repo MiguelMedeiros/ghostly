@@ -93,6 +93,27 @@ test("on a phone: the tab bar goes behind the keyboard while typing, and comes b
   expect(bar.y + bar.height).toBe(phone.height);
 });
 
+test("on a 320px phone every tab's name fits whole, in every language", { tag: ["@feature:app.mobile-layout", "@feature:app.i18n"] }, async ({ peer }) => {
+  // 64px a tab: "Configurações", "Identidades", "Portefeuilles" and "Impostazioni" ended in "…".
+  const { page } = await peer("narrow-tabs", { mobile: true, viewport: { width: 320, height: 568 } });
+  const cut: string[] = [];
+  for (const language of ["en", "pt", "es", "fr", "it", "ar", "ja", "zh"]) {
+    await page.evaluate((language) => {
+      const settings = JSON.parse(localStorage.getItem("ghostly_app_settings") ?? "{}");
+      localStorage.setItem("ghostly_app_settings", JSON.stringify({ ...settings, language }));
+    }, language);
+    await page.reload();
+    await expect(page.locator("html")).toHaveAttribute("lang", new RegExp(`^${language}`));
+    const names = page.getByTestId("mobile-tabs").locator("button > span:last-child");
+    await expect(names).toHaveCount(5);
+    for (const name of await names.all()) {
+      const { text, over } = await name.evaluate((element) => ({ text: element.textContent, over: element.scrollWidth - element.clientWidth }));
+      if (over > 0) cut.push(`${language}: ${text}`);
+    }
+  }
+  expect(cut).toEqual([]);
+});
+
 test("on a wide screen the wallet and services are pages beside the list", { tag: ["@feature:app.navigation", "@feature:app.mobile-layout"] }, async ({ peer }) => {
   const { page } = await peer("alice");
   await expect(page.getByTestId("mobile-tabs")).toHaveCount(0);
