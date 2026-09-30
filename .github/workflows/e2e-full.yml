@@ -18,10 +18,10 @@ on:
         required: false
         type: string
       jobs:
-        description: "Which jobs: all of them, or desktop (the Desktop scenarios and specs, and the matrix report)"
+        description: "Which jobs: all of them, desktop (the Desktop scenarios and specs, and the matrix report), or matrix (the four browser shards and the report)"
         required: false
         type: choice
-        options: [all, desktop]
+        options: [all, desktop, matrix]
         default: all
 
 permissions:
@@ -34,8 +34,8 @@ concurrency:
 jobs:
   e2e-full:
     name: End-to-end, gated suites included
-    # Not when only the Desktop jobs were asked for (a scheduled run has no inputs: everything).
-    if: ${{ inputs.jobs != 'desktop' }}
+    # Not when only the Desktop jobs or the matrix were asked for (a scheduled run has no inputs: everything).
+    if: ${{ inputs.jobs != 'desktop' && inputs.jobs != 'matrix' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 150
 
@@ -155,6 +155,8 @@ jobs:
   # E2E workflow's Desktop job's (ubuntu-22.04, `tauri build --debug --no-bundle`).
   matrix-desktop:
     name: Combination matrix (Desktop)
+    # Not when only the browser matrix was asked for.
+    if: ${{ inputs.jobs != 'matrix' }}
     runs-on: ubuntu-22.04
     timeout-minutes: 90
 
