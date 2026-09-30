@@ -251,7 +251,10 @@ test("a room of bots with many routines: the panel scrolls inside the window, th
       await inWindow(page, panel);
       // Only the list scrolls: nothing in it makes the panel itself taller than its box, so a row scrolled into view
       // (a click, a focus) never scrolls the header out of sight.
-      expect(await panel.evaluate((p) => ({ top: p.scrollTop, over: p.scrollHeight - p.clientHeight }))).toEqual({ top: 0, over: 0 });
+      // (It was 119 px over with Hermes Zero's routines open; a pixel of rounding is not that.)
+      const own = await panel.evaluate((p) => ({ top: p.scrollTop, over: p.scrollHeight - p.clientHeight }));
+      expect(own.top).toBe(0);
+      expect(own.over).toBeLessThanOrEqual(1);
       // Taller than the box: it scrolls, the header stays.
       const scroll = panel.getByTestId("chat-tasks-scroll");
       expect(await scroll.evaluate(el => el.scrollHeight > el.clientHeight + 20)).toBe(true);
