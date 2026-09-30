@@ -1,16 +1,23 @@
 {
   "panel": {
-    "active": "进行中",
     "activeCount": "{{count}} 个进行中",
+    "allOk": "全部正常",
     "button": "任务",
     "buttonCount": "任务，{{count}} 个进行中",
-    "finished": "已结束",
+    "close": "关闭",
+    "empty": "当前没有进行中的任务",
+    "failedCount": "{{count}} 个失败",
+    "finishedCount": "已结束 ({{count}})",
+    "idle": "无进行中",
     "info": "机器人发布这些卡片并保持更新。点按一张即可跳到聊天中的位置。",
-    "routines": "例行任务",
+    "nextRun": "下次 {{when}}",
+    "routinesMany": "{{count}} 个例行任务",
+    "routinesOne": "1 个例行任务",
     "title": "任务"
   },
   "routine": {
     "cron": "Cron：",
+    "lastRun": "上次运行：{{result}}",
     "next": "下次 {{when}}",
     "noRuns": "尚未运行",
     "result": {

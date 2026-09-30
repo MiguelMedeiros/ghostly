@@ -1,16 +1,23 @@
 {
   "panel": {
-    "active": "نشطة",
     "activeCount": "{{count}} نشطة",
+    "allOk": "كلها ناجحة",
     "button": "المهام",
     "buttonCount": "المهام، {{count}} نشطة",
-    "finished": "منتهية",
+    "close": "إغلاق",
+    "empty": "لا توجد مهام جارية الآن",
+    "failedCount": "{{count}} فشلت",
+    "finishedCount": "منتهية ({{count}})",
+    "idle": "لا شيء جارٍ",
     "info": "تنشر الروبوتات هذه البطاقات وتحدّثها. اضغط على واحدة للانتقال إليها في المحادثة.",
-    "routines": "الروتينات",
+    "nextRun": "التالي {{when}}",
+    "routinesMany": "{{count}} روتينات",
+    "routinesOne": "روتين واحد",
     "title": "المهام"
   },
   "routine": {
     "cron": "Cron:",
+    "lastRun": "آخر تشغيل: {{result}}",
     "next": "التالي {{when}}",
     "noRuns": "لم يعمل بعد",
     "result": {

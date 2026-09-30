@@ -1,0 +1,1 @@
+Client policy, no wire change: a paired chat started again sends its first control envelope 15 s after the start, out of the burst of the links' first packets; a text, a receipt, a new mode or a new capability revision still go at once, and a chat not paired yet is not held back (bug hunt r7a).

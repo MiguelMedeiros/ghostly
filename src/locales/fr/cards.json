@@ -1,16 +1,23 @@
 {
   "panel": {
-    "active": "Actives",
     "activeCount": "{{count}} actives",
+    "allOk": "tout OK",
     "button": "Tâches",
     "buttonCount": "Tâches, {{count}} actives",
-    "finished": "Terminées",
+    "close": "Fermer",
+    "empty": "Aucune tâche en cours",
+    "failedCount": "{{count}} en échec",
+    "finishedCount": "Terminées ({{count}})",
+    "idle": "Rien en cours",
     "info": "Des bots publient ces cartes et les tiennent à jour. Touchez-en une pour y aller dans la discussion.",
-    "routines": "Routines",
+    "nextRun": "prochaine {{when}}",
+    "routinesMany": "{{count}} routines",
+    "routinesOne": "1 routine",
     "title": "Tâches"
   },
   "routine": {
     "cron": "Cron :",
+    "lastRun": "Dernière exécution : {{result}}",
     "next": "Prochaine {{when}}",
     "noRuns": "Pas encore lancée",
     "result": {
