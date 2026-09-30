@@ -296,6 +296,14 @@ html[data-standalone="true"] {
   height: 100vh;
 }
 
+/* The same from the first frame: `data-standalone` is set by the app once it runs (and not at all behind the lock
+   screen at start), and until then iOS laid the page out at the screen less the status bar. */
+@media (display-mode: standalone) {
+  html {
+    height: 100vh;
+  }
+}
+
 /* ── Phones: one screen at a time, sized to what is really visible ── */
 .app-shell {
   height: 100vh;
