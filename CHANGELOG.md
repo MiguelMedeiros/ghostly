@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-<!-- Notes for the next release. A new entry goes in changes/ (one file per change, see changes/README.md), not here: scripts/bump-version.mjs adds those files below at release and turns this heading into the version. Editing a line already here is fine. -->
+<!-- Notes for the next release. A new entry goes in docs/changelog/unreleased/ (one file per change, see docs/changelog/unreleased/README.md), not here: tools/scripts/bump-version.mjs adds those files below at release and turns this heading into the version. Editing a line already here is fine. -->
 
 ## 1.0.0
 
