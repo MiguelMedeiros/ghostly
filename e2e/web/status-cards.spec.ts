@@ -10,6 +10,23 @@ import { HeadlessBot } from "../support/headless";
  */
 test.describe.configure({ timeout: 5 * 60_000 });
 
+/** The app's light or dark look, as Settings sets it, once its colours have settled. */
+async function theme(page: Page, scheme: "light" | "dark") {
+  await page.evaluate(async (scheme) => {
+    document.documentElement.setAttribute("data-theme", scheme);
+    document.documentElement.style.colorScheme = scheme;
+    await new Promise(requestAnimationFrame);
+    await Promise.all(document.getAnimations().filter((a) => a instanceof CSSTransition).map((a) => a.finished.catch(() => {})));
+  }, scheme);
+}
+
+/** A card's row stands on its own: the card is the surface, with no bubble and no "edited". */
+async function standsAlone(row: Locator) {
+  await expect(row.locator("[data-message-card]")).toHaveCount(1);
+  await expect(row.locator("[data-message-bubble]")).toHaveCount(0);
+  await expect(row.getByTestId("message-edited")).toHaveCount(0);
+}
+
 test("a bot's task card moves to done, and the Tasks button follows it", { tag: ["@feature:chat.status-cards", "@feature:chat.status-cards.wire", "@feature:headless.status-cards"] }, async ({ peer, relay }) => {
   const url = await relay.listen();
   const bot = new HeadlessBot();
@@ -35,6 +52,12 @@ test("a bot's task card moves to done, and the Tasks button follows it", { tag: 
     await expect(card.getByTestId("status-card-progress")).toHaveAttribute("aria-valuenow", "25");
     // The card stands for its text: the fallback is not shown beside it.
     await expect(room.getByText("Now: Writing the codec")).toHaveCount(0);
+    // A card of its own, not a bubble, named for a screen reader; how long it has been running, from when it started.
+    const row = room.locator("[data-message-row]").filter({ has: page.locator(`[data-testid="status-card"][data-card-id="relay"]`) });
+    await standsAlone(row);
+    await expect(row.locator("[data-message-card]")).toHaveAttribute("role", "group");
+    await expect(row.locator("[data-message-card]")).toHaveAccessibleName("Task: Fix relay rotation, Running, 25%");
+    await expect(card.getByTestId("status-card-elapsed")).toHaveText(/^running for \d+ min$/);
     await expect(page.getByTestId("chat-tasks-count")).toHaveText("1");
 
     // A second task, then the first one's updates: at the end one card, Done, full, with its pull request.
@@ -47,6 +70,11 @@ test("a bot's task card moves to done, and the Tasks button follows it", { tag: 
     await expect(card.getByTestId("status-card-pr")).toHaveText("+123−45·PR #612");
     await expect(room.locator('[data-testid="status-card"][data-card-id="relay"]')).toHaveCount(1);
     await expect(page.getByTestId("chat-tasks-count")).toHaveText("1");
+    // Updated three times: still no "edited", but when it was updated, and how long it took.
+    await standsAlone(row);
+    await expect(row.getByTestId("status-card-time")).toHaveAttribute("data-updated", "true");
+    await expect(row.getByTestId("status-card-time")).toHaveText(/^updated /);
+    await expect(card.getByTestId("status-card-elapsed")).toHaveText(/^took \d+ min$/);
 
     // Opened in place: the steps and the pull request's link, by its host.
     await card.getByTestId("status-card-toggle").click();
@@ -78,10 +106,22 @@ test("a bot's task card moves to done, and the Tasks button follows it", { tag: 
     await expect(page.getByTestId("chat-tasks-routines").getByTestId("chat-tasks-item")).toHaveAttribute("data-card-id", "nightly");
     await page.keyboard.press("Escape");
 
+    // A task still running, started twelve minutes ago: the chat's pictures in both looks.
+    await bot.run("task", "send", invite.chat as string, "--id", "e2e", "--title", "Run the e2e matrix", "--progress", "67", "--step", "WebKit",
+      "--json", JSON.stringify({ startedAt: Date.now() - 12 * 60_000 }), "--wait", "delivered");
+    const running = room.locator('[data-testid="status-card"][data-card-id="e2e"]');
+    await expect(running.getByTestId("status-card-elapsed")).toHaveText("running for 12 min");
+    await running.scrollIntoViewIfNeeded();
+    for (const scheme of ["dark", "light"] as const) {
+      await theme(page, scheme);
+      await page.screenshot({ path: test.info().outputPath(`desktop-${scheme}.png`) });
+    }
+
     // A phone's width: the card fits, the panel is a sheet.
     await page.setViewportSize({ width: 375, height: 740 });
     const box = await card.boundingBox();
     expect(box!.width).toBeLessThanOrEqual(375);
+    await running.scrollIntoViewIfNeeded();
     await page.screenshot({ path: test.info().outputPath("phone-card.png") });
     await page.getByTestId("chat-tasks").click();
     await expect(page.getByTestId("chat-tasks-panel")).toBeVisible();
@@ -119,12 +159,25 @@ test("in a group, each bot's tasks are listed under its name", { tag: ["@feature
     await expect.poll(() => ready(hermes), { timeout: 150_000, intervals: [2_000] }).toBe(true);
 
     // Each bot posts: the coordinator two tasks, Hermes one, finished.
-    await coordinator.run("task", "send", group, "--id", "relay", "--title", "Fix relay rotation", "--progress", "30", "--wait", "sent", "--timeout", "120");
+    const started = (min: number) => ["--json", JSON.stringify({ startedAt: Date.now() - min * 60_000 })];
+    await coordinator.run("task", "send", group, "--id", "relay", "--title", "Fix relay rotation", "--progress", "30", ...started(12), "--wait", "sent", "--timeout", "120");
     await coordinator.run("task", "send", group, "--id", "docs", "--title", "Write the WISP", "--status", "queued", "--wait", "sent", "--timeout", "120");
     await hermes.run("task", "send", group, "--id", "nightly", "--title", "Nightly build", "--status", "done", "--progress", "100", "--wait", "sent", "--timeout", "120");
     const room = page.locator(".chat-wallpaper");
     await expect(room.getByTestId("status-card")).toHaveCount(3, { timeout: 120_000 });
     await expect(page.getByTestId("chat-tasks-count")).toHaveText("2");
+
+    // Each bot's cards under its coloured name, above the card, not in it: a card is one message of its sender's run.
+    const rows = room.locator("[data-message-row][data-card-row]");
+    await expect(rows).toHaveCount(3);
+    for (const row of await rows.all()) await standsAlone(row);
+    await expect(room.getByTestId("message-nick")).toHaveText(["~Coordinator", "~Hermes One"]);
+    await expect(room.locator("[data-message-card] [data-testid=message-nick]")).toHaveCount(0);
+    await expect(room.locator('[data-testid="status-card"][data-card-id="relay"]').getByTestId("status-card-elapsed")).toHaveText("running for 12 min");
+    for (const scheme of ["light", "dark"] as const) {
+      await theme(page, scheme);
+      await page.screenshot({ path: test.info().outputPath(`group-chat-${scheme}.png`) });
+    }
 
     await page.getByTestId("chat-tasks").click();
     const sections = page.getByTestId("chat-tasks-panel").getByTestId("chat-tasks-sender");
