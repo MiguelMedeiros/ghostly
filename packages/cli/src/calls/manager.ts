@@ -144,8 +144,9 @@ export class CallManager {
     } else if (signal.t === "h") {
       this.lastSignal.set(chat, signal.ts);
       if (call) {
-        // A hang-up while this side starts over (`redial`) is the contact's app ending a connection that failed.
-        const failed = call.offering || (call.direction === "out" && call.redials > 0);
+        // A hang-up while this side starts over (`redial`) is the contact's app ending a connection that failed. Once
+        // a connection came up, the call was on: a start-over before it does not make the hang-up a failure.
+        const failed = call.state !== "connected" && (call.offering || (call.direction === "out" && call.redials > 0));
         const reason: EndReason = call.state === "ringing" ? (call.direction === "in" ? "missed" : "rejected") : failed ? "failed" : "remote-hangup";
         void this.end(call, reason, false);
       }

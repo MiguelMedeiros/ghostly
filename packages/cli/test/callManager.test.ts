@@ -281,16 +281,22 @@ describe("two call managers", { timeout: 60_000 }, () => {
     await b.calls.stopAll();
   });
 
-  it("a daemon that stops hangs up its calls first", async () => {
-    const { a, b } = pairOfManagers();
-    b.calls.setAuto({ on: true });
-    await a.calls.start("chat-ab", {});
-    await until(() => a.events.find((e) => e.type === "call.connected")).catch(diagnose(a, b));
-    await b.calls.stopAll();
-    expect(b.events.find((e) => e.type === "call.ended")).toMatchObject({ reason: "stopped" });
-    expect(await until(() => a.events.find((e) => e.type === "call.ended"))).toMatchObject({ reason: "remote-hangup" });
-    await expect(b.calls.start("chat-ba", {})).rejects.toMatchObject({ code: "unavailable" });
-  });
+  // Once connected, the caller hears a hang-up as one even when it started over first (CI run 36697428485: the real
+  // race made it redial, and the stop ended its call as `failed`).
+  for (const refuse of [0, 1]) {
+    it(`a daemon that stops hangs up its calls first${refuse ? ", after the caller started over" : ""}`, async () => {
+      const stack = refusingStack(refuse);
+      const { a, b } = pairOfManagers({ a: stack, maxRedials: refuse + MAX_REDIALS });
+      b.calls.setAuto({ on: true });
+      await a.calls.start("chat-ab", {});
+      await until(() => a.events.find((e) => e.type === "call.connected")).catch(diagnose(a, b));
+      expect(signalsOf(a, "o")).toHaveLength(stack.refused() + 1);
+      await b.calls.stopAll();
+      expect(b.events.find((e) => e.type === "call.ended")).toMatchObject({ reason: "stopped" });
+      expect(await until(() => a.events.find((e) => e.type === "call.ended"))).toMatchObject({ reason: "remote-hangup" });
+      await expect(b.calls.start("chat-ba", {})).rejects.toMatchObject({ code: "unavailable" });
+    });
+  }
 
   it("an offer that arrives while the daemon stops rings nothing and throws nothing", async () => {
     const { a, b } = pairOfManagers();
