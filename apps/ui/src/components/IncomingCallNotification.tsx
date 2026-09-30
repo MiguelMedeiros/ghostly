@@ -52,7 +52,7 @@ export function IncomingCallNotification({
           {/* Reject */}
           <button
             onClick={onReject}
-            className="w-14 h-14 max-md:w-[72px] max-md:h-[72px] rounded-full bg-danger flex items-center justify-center text-white hover:bg-danger/80 transition-colors cursor-pointer"
+            className="w-14 h-14 max-md:w-[72px] max-md:h-[72px] rounded-full bg-danger-fill flex items-center justify-center text-white hover:bg-danger-fill/80 transition-colors cursor-pointer"
             title={t("calls.decline")}
             aria-label={t("calls.decline")}
           >
