@@ -9,6 +9,21 @@
     "routines": "الروتينات",
     "title": "المهام"
   },
+  "routine": {
+    "cron": "Cron:",
+    "next": "التالي {{when}}",
+    "noRuns": "لم يعمل بعد",
+    "result": {
+      "failed": "فشل",
+      "ok": "نجح",
+      "skipped": "تم التخطي"
+    },
+    "runs": "آخر التشغيلات",
+    "state": {
+      "active": "نشط",
+      "paused": "متوقف مؤقتًا"
+    }
+  },
   "task": {
     "branch": "الفرع:",
     "item": {

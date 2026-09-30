@@ -3,7 +3,7 @@ import { taskProgress } from "@ghostly/core";
 import { useI18n } from "../../contexts/I18nContext";
 import { drawEveryRow } from "../../hooks/useTailFirst";
 import { jumpToMessage } from "../../lib/replies";
-import { STATUS_TONE, activeTaskCount, cardEntries, cardsBySender, type CardEntry, type CardRow } from "../../lib/statusCards";
+import { RESULT_TONE, STATUS_TONE, activeTaskCount, cardEntries, cardsBySender, untilIn, type CardEntry, type CardRow } from "../../lib/statusCards";
 import { Menu, MenuSeparator } from "../Menu";
 import { PrLine, ProgressBar } from "./StatusCard";
 
@@ -16,14 +16,21 @@ import { PrLine, ProgressBar } from "./StatusCard";
 const icon = { width: 18, height: 18, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": true } as const;
 
 function Row({ entry, onOpen }: { entry: CardEntry; onOpen: () => void }) {
-  const { t } = useI18n();
+  const { t, language } = useI18n();
   const { card } = entry;
   const row = "flex w-full min-w-0 flex-col gap-1 px-3 py-2 text-start transition-colors hover:bg-surface-hover focus-visible:bg-surface-hover focus-visible:outline-none cursor-pointer max-md:rounded-lg";
   if (card.kind !== "task") {
+    const last = card.lastRun;
     return (
-      <button type="button" role="menuitem" data-menu-item data-testid="chat-tasks-item" data-card-id={card.id} data-kind={card.kind} onClick={onOpen} className={row}>
-        <bdi className="block truncate text-sm text-text-primary">{card.name}</bdi>
-        <bdi className="block truncate text-xs text-text-muted">{card.schedule}</bdi>
+      <button type="button" role="menuitem" data-menu-item data-testid="chat-tasks-item" data-card-id={card.id} data-kind={card.kind} data-state={card.state} onClick={onOpen} className={row}>
+        <span className="flex w-full min-w-0 items-center gap-2">
+          <span aria-hidden="true" className={`h-2 w-2 shrink-0 rounded-full ${last ? RESULT_TONE[last.result].dot : "bg-text-muted"}`} />
+          <bdi className="min-w-0 flex-1 truncate text-sm text-text-primary">{card.name}</bdi>
+          <span className="shrink-0 text-xs text-text-muted">
+            {card.state === "paused" ? t("cards.routine.state.paused") : card.nextRunAt ? t("cards.routine.next", { when: untilIn(language)(card.nextRunAt) }) : ""}
+          </span>
+        </span>
+        <bdi className="block truncate ps-4 text-xs text-text-muted">{card.schedule}</bdi>
       </button>
     );
   }

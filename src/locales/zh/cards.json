@@ -9,6 +9,21 @@
     "routines": "例行任务",
     "title": "任务"
   },
+  "routine": {
+    "cron": "Cron：",
+    "next": "下次 {{when}}",
+    "noRuns": "尚未运行",
+    "result": {
+      "failed": "失败",
+      "ok": "成功",
+      "skipped": "已跳过"
+    },
+    "runs": "最近运行",
+    "state": {
+      "active": "已启用",
+      "paused": "已暂停"
+    }
+  },
   "task": {
     "branch": "分支：",
     "item": {

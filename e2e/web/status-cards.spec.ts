@@ -63,6 +63,18 @@ test("a bot's task card moves to done, and the Tasks button follows it", { tag: 
     await expect(room.locator("[data-message-row]").filter({ has: page.locator('[data-testid="status-card"][data-card-id="relay"]') })).toHaveAttribute("data-reply-flash", "");
     await expect(card).toBeInViewport();
 
+    // A routine: its schedule, then a run recorded; the panel lists it under Routines.
+    await bot.run("routine", "send", invite.chat as string, "--id", "nightly", "--name", "Nightly bug hunt", "--schedule", "every day 01:00", "--cron", "0 1 * * *",
+      "--next", String(Date.now() + 3 * 3_600_000));
+    const routine = room.locator('[data-testid="status-card"][data-card-id="nightly"]');
+    await expect(routine.getByTestId("status-card-schedule")).toHaveText("every day 01:00");
+    await expect(routine.getByTestId("status-card-last")).toHaveText("No runs yet");
+    await bot.run("routine", "update", invite.chat as string, "nightly", "--run", "ok:12 issues checked", "--wait", "confirmed", "--timeout", "60");
+    await expect(routine.getByTestId("status-card-last")).toContainText("OK", { timeout: 60_000 });
+    await page.getByTestId("chat-tasks").click();
+    await expect(page.getByTestId("chat-tasks-routines").getByTestId("chat-tasks-item")).toHaveAttribute("data-card-id", "nightly");
+    await page.keyboard.press("Escape");
+
     // A phone's width: the card fits, the panel is a sheet.
     await page.setViewportSize({ width: 375, height: 740 });
     const box = await card.boundingBox();

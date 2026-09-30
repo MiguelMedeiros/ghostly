@@ -4,6 +4,7 @@ import { useI18n } from "../../contexts/I18nContext";
 import { externalLinkProps } from "../../lib/externalLink";
 import { agoIn } from "../../lib/relativeTime";
 import { STATUS_TONE, isFinished } from "../../lib/statusCards";
+import { RoutineView } from "./RoutineCard";
 
 /*
  * A bot's status card in the chat (WISP 4xx · Status Cards), shown instead of the message's text, which is only its
@@ -115,6 +116,5 @@ function TaskView({ card }: { card: TaskCard }) {
 
 /** A message's card, for a kind `showsCard` takes. */
 export function StatusCardView({ card }: { card: StatusCard }) {
-  if (card.kind === "task") return <TaskView card={card} />;
-  return null;
+  return card.kind === "task" ? <TaskView card={card} /> : <RoutineView card={card} />;
 }

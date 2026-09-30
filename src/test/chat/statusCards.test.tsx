@@ -91,10 +91,50 @@ describe("a task card in the chat", () => {
     expect(screen.getByTestId("status-card-status")).toHaveTextContent("متوقفة");
   });
 
-  it("shows a message without a card, or a kind it does not draw, as its text", () => {
-    renderApp(<MessageBubble message={{ id: "m", text: "🔁 Nightly", sender: "peer", timestamp: 1, card: readStatusCard({ kind: "routine", id: "r", name: "Nightly", schedule: "daily", state: "active" }) }} peerPubKey="peer" />);
+  it("shows a message without a card as its text", () => {
+    renderApp(<MessageBubble message={{ id: "m", text: "just words", sender: "peer", timestamp: 1 }} peerPubKey="peer" />);
     expect(screen.queryByTestId("status-card")).not.toBeInTheDocument();
-    expect(screen.getByTestId("message-text")).toHaveTextContent("🔁 Nightly");
+    expect(screen.getByTestId("message-text")).toHaveTextContent("just words");
+  });
+});
+
+describe("a routine card in the chat", () => {
+  const routine = (extra: Record<string, unknown> = {}) => readStatusCard({ kind: "routine", id: "nightly", name: "Nightly bug hunt", schedule: "every day 01:00", state: "active", ...extra })!;
+
+  it("shows its schedule, the last run's result and when, and the next run from now", () => {
+    const c = routine({ lastRun: { at: NOW - 2 * 3_600_000, result: "failed", summary: "CI flaked" }, nextRunAt: NOW + 3 * 3_600_000 + 60_000 });
+    renderApp(<MessageBubble message={message(c)} peerPubKey="peer" />);
+    const shown = screen.getByTestId("status-card");
+    expect(shown).toHaveAttribute("data-kind", "routine");
+    expect(within(shown).getByTestId("status-card-title")).toHaveTextContent("Nightly bug hunt");
+    expect(within(shown).getByTestId("status-card-schedule")).toHaveTextContent("every day 01:00");
+    expect(within(shown).getByTestId("status-card-last")).toHaveTextContent(/Failed\s*2 h ago/);
+    expect(within(shown).getByTestId("status-card-next")).toHaveTextContent("Next in 3 hr.");
+    expect(screen.queryByTestId("message-text")).not.toBeInTheDocument();
+  });
+
+  it("opens in place on its recent runs and cron line; a paused one shows no next run", async () => {
+    const runs = [{ at: NOW - 86_400_000, result: "ok", summary: "12 issues" }, { at: NOW - 2 * 86_400_000, result: "skipped" }];
+    const { user } = renderApp(<MessageBubble message={message(routine({ state: "paused", cron: "0 1 * * *", runs, lastRun: runs[0], nextRunAt: NOW + 60_000 }))} peerPubKey="peer" />);
+    expect(screen.getByTestId("status-card-status")).toHaveTextContent("Paused");
+    expect(screen.queryByTestId("status-card-next")).not.toBeInTheDocument();
+    await user.click(screen.getByTestId("status-card-toggle"));
+    expect(screen.getAllByTestId("status-card-run").map(r => r.dataset.result)).toEqual(["ok", "skipped"]);
+    expect(screen.getByTestId("status-card-details")).toHaveTextContent("0 1 * * *");
+  });
+
+  it("says so when it has not run yet", () => {
+    renderApp(<MessageBubble message={message(routine())} peerPubKey="peer" />);
+    expect(screen.getByTestId("status-card-last")).toHaveTextContent("No runs yet");
+  });
+
+  it("is listed under Routines in the Tasks panel, with its next run", async () => {
+    const { user } = renderApp(<TasksButton rows={[{ id: "m1", sender: "peer", timestamp: 1, card: routine({ nextRunAt: NOW + 2 * 3_600_000 }) }]} />);
+    expect(screen.queryByTestId("chat-tasks-count")).not.toBeInTheDocument();
+    await user.click(screen.getByTestId("chat-tasks"));
+    const item = within(screen.getByTestId("chat-tasks-routines")).getByTestId("chat-tasks-item");
+    expect(item).toHaveAttribute("data-kind", "routine");
+    expect(item).toHaveTextContent(/Next in 2 hr\./);
   });
 });
 

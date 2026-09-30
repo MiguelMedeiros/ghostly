@@ -132,6 +132,48 @@ export function taskFields(options: Parsed["options"]): Record<string, unknown> 
   return fields;
 }
 
+/** A time a command names: milliseconds, or a date the JavaScript Date reads (`2026-09-30T01:00:00Z`). */
+export function cardTime(value: unknown, flag: string): number | undefined {
+  if (value === undefined) return undefined;
+  const text = String(value).trim();
+  const ms = /^\d+$/.test(text) ? Number(text) : Date.parse(text);
+  if (!Number.isSafeInteger(ms) || ms <= 0) throw new CliError("usage", `--${flag} takes a time in milliseconds or a date like 2026-09-30T01:00:00Z, not ${JSON.stringify(value)}`);
+  return ms;
+}
+
+const RUN_RESULTS = ["ok", "failed", "skipped"];
+
+/** `--run ok`, `--run failed:"CI flaked"`: a run of a routine, recorded as its last. */
+export function runOf(value: unknown): { result: string; summary?: string } | undefined {
+  if (value === undefined) return undefined;
+  const text = String(value), colon = text.indexOf(":");
+  const result = colon === -1 ? text : text.slice(0, colon), summary = colon === -1 ? "" : text.slice(colon + 1).trim();
+  if (!RUN_RESULTS.includes(result)) throw new CliError("usage", `--run takes ok, failed or skipped, and :a summary after it if you like, not ${JSON.stringify(value)}`);
+  return { result, ...(summary && { summary }) };
+}
+
+/** A routine's fields from its flags; what was not given is left out. */
+export function routineFields(options: Parsed["options"]): Record<string, unknown> {
+  const fields: Record<string, unknown> = { ...cardJson(options.json) };
+  for (const key of ["id", "name", "schedule", "cron", "state"] as const) if (options[key] !== undefined) fields[key] = options[key];
+  const next = cardTime(options.next, "next");
+  if (next !== undefined) fields.nextRunAt = next;
+  const links = cardLinks(options.link);
+  if (links) fields.links = links;
+  return fields;
+}
+
+/** Options a routine command takes, beside `cardOptions`. */
+export const routineOptions: Record<string, OptionSpec> = {
+  name: { type: "string", description: "What the routine is (120 characters)" },
+  schedule: { type: "string", description: "When it runs, as people say it: \"every day 01:00\" (80 characters)" },
+  cron: { type: "string", description: "Its cron line, shown beside the schedule (never run)" },
+  state: { type: "string", description: "active (default on send) or paused" },
+  next: { type: "string", description: "Its next run: milliseconds or a date like 2026-09-30T01:00:00Z" },
+  run: { type: "string", description: "Record a run now: ok, failed or skipped, with :a summary if you like (it becomes the last run)" },
+  ...cardOptions,
+};
+
 /** Options a task command takes, beside `cardOptions`. */
 export const taskOptions: Record<string, OptionSpec> = {
   title: { type: "string", description: "What the task is (120 characters)" },
