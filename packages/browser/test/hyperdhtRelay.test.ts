@@ -124,6 +124,33 @@ it("connects two browsers through relays, on one relay connection each or shared
   dialled.channel.close(); second.channel.close();
 }, 60_000);
 
+it("reaches the same contact again through one relay, and again after both pages reload", async () => {
+  // The relay's HyperDHT remembers the nodes that carried the first connection to a key, so every later dial sends
+  // its handshake through several at once and gets several replies: dht-relay 0.4.3 hung the dial on the second.
+  const { startRelay } = await import("../../../services/hyperdht-relay/relay.mjs");
+  const own = await startRelay({ testnet: 3 });
+  const seeds = [seed(), seed()];
+  const open = () => Promise.all([createRelayedHyperEndpoint(seeds[0], own.url), createRelayedHyperEndpoint(seeds[1], own.url.replace("127.0.0.1", "localhost"))]);
+  const dial = async (from: NativeEndpoint, to: NativeEndpoint) => {
+    const accepted = incoming(to);
+    const dialled = await from.connect(to.descriptor);
+    expect((await accepted).binding).toEqual(dialled.binding);
+    dialled.channel.close();
+  };
+  let [a, b] = await open();
+  try {
+    for (let round = 0; round < 3; round++) await dial(b, a);
+    await dial(a, b);
+    // A reload: both pages' relay connections close, and the same chats listen again on new ones.
+    await Promise.all([a.close(), b.close()]);
+    [a, b] = await open();
+    await dial(b, a);
+  } finally {
+    await Promise.allSettled([a.close(), b.close()]);
+    await own.close();
+  }
+}, 60_000);
+
 it("refuses a malformed descriptor and oversized frames", async () => {
   const [a, b] = [await web(), await web()];
   await expect(a.connect({ publicKey: "zz" })).rejects.toThrow(/Invalid HyperDHT endpoint/);
