@@ -205,6 +205,10 @@ export function CallOverlay({
         </svg>
       </button>
 
+      {/* What a screen reader hears as the call moves on: the state line below says Calling... and Connecting... itself,
+          and once connected this says so, while the line turns into the clock, which is never read out as it runs. */}
+      <p role="status" className="sr-only" data-testid="call-state-spoken">{callState === "connected" ? t("calls.connected") : ""}</p>
+
       {/* Remote audio (always present for audio playback) */}
       <audio ref={remoteAudioRef} autoPlay playsInline className="hidden" />
       
@@ -232,7 +236,7 @@ export function CallOverlay({
 
       {/* Status */}
       <div className="call-top absolute top-8 left-0 right-0 text-center z-10">
-        <p className="text-text-muted text-sm" data-testid="call-status" data-state={callState}>
+        <p className="text-text-muted text-sm" data-testid="call-status" data-state={callState} role={callState === "connected" ? undefined : "status"}>
           {!remoteHasVideo && isVideoOff && callState === "connected" && (
             <span className="text-accent">{t("calls.audio")}</span>
           )}
