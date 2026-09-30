@@ -29,6 +29,8 @@ const port = Number(process.env.E2E_WEB_PORT || 4173);
 export default defineConfig({
   testDir: ".",
   outputDir: "../test-results/e2e",
+  // The headless CLI, built once before the workers start: a build in a worker empties its dist/ under the others' bots.
+  globalSetup: "./support/headlessBuild.ts",
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
