@@ -769,6 +769,21 @@ html[data-standalone="true"] {
   contain: size;
 }
 
+/* On a touch screen a long press on a message opens its quick bar (Copy is there). iOS fires no `contextmenu` to cancel,
+   so it also selected a word and put its own Copy, Look Up, Translate menu over the bar. Links keep their own callout. */
+@media (pointer: coarse) {
+  [data-message-row] {
+    -webkit-user-select: none;
+    user-select: none;
+  }
+
+  /* A field in a message (a card's) still takes its text: iOS would not type into one inside an unselectable box. */
+  [data-message-row] :is(input, textarea, [contenteditable]) {
+    -webkit-user-select: text;
+    user-select: text;
+  }
+}
+
 /* Inline timestamp float (WhatsApp-style) */
 .msg-meta {
   user-select: none;

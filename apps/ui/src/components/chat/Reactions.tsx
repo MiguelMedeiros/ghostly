@@ -99,11 +99,16 @@ type ReactionBarProps = {
   onReact: (emoji: string) => void;
   align: "start" | "end";
   onDetails?: () => void;
+  /**
+   * A Copy button above Details (a long press, on phones): a message's text is not selectable on a touch screen, where
+   * a long press opens this bar instead.
+   */
+  onCopy?: () => void;
   /** A Select button under Details: starts choosing messages with this one (to forward several, WISP 400 § Forwards). */
   onSelect?: () => void;
 };
 
-function OpenReactionBar({ open, onClose, anchorRef, current, onReact, align, onDetails, onSelect }: ReactionBarProps) {
+function OpenReactionBar({ open, onClose, anchorRef, current, onReact, align, onDetails, onCopy, onSelect }: ReactionBarProps) {
   const { t } = useI18n();
   const [more, setMore] = useState(false);
   useEffect(() => { if (!open) setMore(false); }, [open]);
@@ -136,9 +141,15 @@ function OpenReactionBar({ open, onClose, anchorRef, current, onReact, align, on
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
         </button>
       </div>
+      {onCopy && (
+        <button type="button" data-testid="reaction-bar-copy" onClick={() => { onClose(); onCopy(); }}
+          className="mt-1 w-full px-3 py-2 text-start text-sm text-text-secondary hover:bg-surface-hover cursor-pointer border-t border-border">
+          {t("common.copy")}
+        </button>
+      )}
       {onDetails && (
         <button type="button" data-testid="reaction-bar-details" onClick={() => { onClose(); onDetails(); }}
-          className="mt-1 w-full px-3 py-2 text-start text-sm text-text-secondary hover:bg-surface-hover cursor-pointer border-t border-border">
+          className={`${onCopy ? "" : "mt-1 "}w-full px-3 py-2 text-start text-sm text-text-secondary hover:bg-surface-hover cursor-pointer border-t border-border`}>
           {t("chat.message.details")}
         </button>
       )}
