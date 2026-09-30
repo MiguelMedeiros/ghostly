@@ -15,6 +15,7 @@ import { useI18n, type Translate } from "../../contexts/I18nContext";
 import { fillNodes } from "../../lib/fillNodes";
 import { satsIn } from "../NetworkTag";
 import { formatAmount } from "../../lib/amount";
+import { formatAt } from "../../lib/time";
 
 const TX_LABEL = {
   "lightning-in": "wallet.cashu.tx.lightningIn",
@@ -31,6 +32,14 @@ const TX_LABEL = {
  */
 /** The history note of test coins (engine/wallet.ts `testCoins`): not a payment of an invoice. */
 const TEST_COINS_NOTE = "Test coins from the test mint";
+/** The notes the engine writes itself (engine/wallet.ts), in English: shown in the app's language. A memo is shown as written. */
+const ENGINE_NOTES: Record<string, "wallet.cashu.history.note.testCoins" | "wallet.cashu.history.note.requestPaid" | "wallet.cashu.history.note.paymentFailed"> = {
+  [TEST_COINS_NOTE]: "wallet.cashu.history.note.testCoins",
+  "Request paid over Lightning": "wallet.cashu.history.note.requestPaid",
+  "A Lightning payment failed": "wallet.cashu.history.note.paymentFailed",
+};
+/** When a movement happened, as the history writes it ("Sep 30, 03:15 PM"; "30 de set., 15:15" in Portuguese). */
+const MOVED_AT: Intl.DateTimeFormatOptions = { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" };
 
 /** `input_fee_ppk` in a few words: a payment usually spends two to five proofs. */
 const shortFee = (t: Translate, ppk: number) => (ppk === 0 ? t("wallet.cashu.fee.none") : t("wallet.cashu.fee.perProof", { fee: ppk / 1000 }));
@@ -194,7 +203,7 @@ export function CashuWallet({ wallet, state, rail, onOpenCashu, focusAmount = fa
                       <span className={`font-semibold shrink-0 tabular-nums ${incoming ? "text-accent" : "text-text-primary"}`}>{incoming ? "+" : "−"}{formatAmount(tx.amount, t.language)} <span className="text-xs font-normal text-text-muted">{unit}</span></span>
                     </div>
                     <div className="flex items-baseline justify-between gap-2 text-xs text-text-muted">
-                      <span className="truncate">{new Date(tx.timestamp).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })} · {mint?.name ?? new URL(tx.mint).hostname}{tx.note ? ` · ${tx.note}` : ""}</span>
+                      <span className="truncate">{formatAt(tx.timestamp, MOVED_AT, t.language)} · {mint?.name ?? new URL(tx.mint).hostname}{tx.note ? ` · ${ENGINE_NOTES[tx.note] ? t(ENGINE_NOTES[tx.note]) : tx.note}` : ""}</span>
                       <span className={`shrink-0 ${tx.fee > 0 ? "text-yellow-500" : ""}`}>{tx.fee > 0 ? t("wallet.cashu.history.fee", { amount: formatAmount(tx.fee, t.language) }) : t("wallet.cashu.history.noFee")}</span>
                     </div>
                   </div>
@@ -206,7 +215,7 @@ export function CashuWallet({ wallet, state, rail, onOpenCashu, focusAmount = fa
         {notice && <Notice tone="success" testId="wallet-notice">{notice}</Notice>}
         {error && <Notice tone="error" testId="wallet-error">{error}</Notice>}
         {(state.intents ?? []).filter((i) => i.method === "cashu" && i.id !== review?.id).map((i) => (
-          <Button key={i.id} className="block w-full text-start" onClick={() => setReview(i)}>{t("wallet.cashu.intent", { amount: i.amount, unit, state: i.state })}</Button>
+          <Button key={i.id} className="block w-full text-start" onClick={() => setReview(i)}>{t("wallet.cashu.intent", { amount: formatAmount(i.amount, t.language), unit, state: i.state })}</Button>
         ))}
         {review && <PaymentReview key={review.id} review={review} wallet={wallet} onClose={() => setReview(null)} />}
       </div>
@@ -217,7 +226,7 @@ export function CashuWallet({ wallet, state, rail, onOpenCashu, focusAmount = fa
             <Section title={t("wallet.lightning.recent")} testId="lightning-recent">
               {ln.recent.map((op) => (
                 <Row key={`${op.direction}-${op.paymentHash}`} testId="lightning-op" label={t(op.direction === "in" ? "wallet.lightning.recentIn" : "wallet.lightning.recentOut", { amount: formatAmount(op.amount, t.language) })}
-                  hint={`${new Date(op.createdAt).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })} · ${op.state}${op.fee ? ` · ${t("wallet.cashu.history.fee", { amount: op.fee })}` : ""}${op.error ? ` · ${op.error}` : ""}`} />
+                  hint={`${formatAt(op.createdAt, MOVED_AT, t.language)} · ${op.state}${op.fee ? ` · ${t("wallet.cashu.history.fee", { amount: formatAmount(op.fee, t.language) })}` : ""}${op.error ? ` · ${op.error}` : ""}`} />
               ))}
             </Section>
           )}

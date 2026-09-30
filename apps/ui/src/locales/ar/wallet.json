@@ -181,7 +181,12 @@
       "movements": "{{count}} حركات",
       "movementsOne": "حركة واحدة",
       "noFee": "بلا رسوم",
-      "none": "لا شيء بعد"
+      "none": "لا شيء بعد",
+      "note": {
+        "paymentFailed": "فشلت دفعة Lightning",
+        "requestPaid": "طلب مدفوع عبر Lightning",
+        "testCoins": "عملات تجريبية من منفذ السكّ التجريبي"
+      }
     },
     "intent": "{{amount}} {{unit}} · {{state}}",
     "invoiceFor": "فاتورة بمبلغ {{amount}}",

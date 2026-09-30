@@ -7,6 +7,7 @@ import { useRun } from "./wallet/run";
 import { SourcePicker } from "./wallet/providers/SourcePicker";
 import { changeableFields } from "./wallet/providers/sourceStatus";
 import { useI18n } from "../contexts/I18nContext";
+import { formatAt } from "../lib/time";
 import { satsIn } from "./NetworkTag";
 import { fillNodes } from "../lib/fillNodes";
 import { formatAmount } from "../lib/amount";
@@ -45,7 +46,7 @@ export function BitcoinWalletPanel({ wallet, state }: { wallet: WalletPlatform; 
           <p className="text-text-primary">{bt.status === "error" ? (bt.label ? t("wallet.bitcoin.notConnected", { label: bt.label }) : t("wallet.bitcoin.notConnectedDefault")) : bt.label ? t("wallet.bitcoin.connectingTo", { label: bt.label }) : t("wallet.bitcoin.connectingDefault")}</p>
           {bt.balance !== undefined && (
             <p className="text-text-secondary text-sm" data-testid="bitcoin-last-balance">
-              {fillNodes(bt.balanceAt ? t("wallet.bitcoin.lastBalanceAt", { unit, date: new Date(bt.balanceAt).toLocaleString() }) : t("wallet.bitcoin.lastBalance", { unit }), { balance: <span className="tabular-nums">{formatAmount(bt.balance, t.language)}</span> })}
+              {fillNodes(bt.balanceAt ? t("wallet.bitcoin.lastBalanceAt", { unit, date: formatAt(bt.balanceAt, { dateStyle: "medium", timeStyle: "short" }, t.language) }) : t("wallet.bitcoin.lastBalance", { unit }), { balance: <span className="tabular-nums">{formatAmount(bt.balance, t.language)}</span> })}
             </p>
           )}
           {bt.error && <Notice tone={bt.status === "error" ? "error" : "warning"} testId="bitcoin-connect-error">{bt.status === "connecting" ? t("wallet.bitcoin.retrying", { error: bt.error }) : bt.error}</Notice>}
