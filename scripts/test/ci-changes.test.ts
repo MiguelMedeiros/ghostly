@@ -38,7 +38,7 @@ describe("the website gate", () => {
 });
 
 describe("the packages gate", () => {
-  it("covers every site file the packages' tests and sources name, and they name no document", () => {
+  it("covers every site file and document the packages' tests and sources name", () => {
     // What `npm run test:packages` runs: packages/* and apps/extension/, their sources, tests and configs. A path into
     // apps/website/ or docs/ is written relative ("../../../apps/website/lib/invite") or from the root ("apps/website/...").
     const code: string[] = [];
