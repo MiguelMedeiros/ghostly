@@ -334,15 +334,16 @@ export class DhtDelivery {
   /**
    * Layer 1 carries the chat, or no longer does. While it does, the mailbox is read every 5 minutes, after one
    * last look as it goes live: a text the contact put on the DHT in the seconds before (after this side's last
-   * read) would otherwise wait for the next look. The moment it is lost, at once (WISP 403, poll pace), and then
-   * at the chat's pace.
+   * read) would otherwise wait for the next look. That look is a background request, which yields to links that
+   * signal, and only for a contact that wrote in this mailbox already. The moment layer 1 is lost, at once
+   * (WISP 403, poll pace), and then at the chat's pace.
    */
   setLive(live: boolean): void {
     if (live === this.live) return;
     this.live = live;
-    if (live) this.fastUntil = 0;
-    this.urgent = true;
-    void this.tick();
+    if (!live) { this.urgent = true; void this.tick(); return; }
+    this.fastUntil = 0;
+    if (this.options.credentials.peerKey && this.state.peerMode) void this.tick(); else this.schedule();
   }
   get isLive(): boolean { return this.live; }
   /** The chat is open with the app in front: on the DHT, its mailbox is read at the signaling pace. */
