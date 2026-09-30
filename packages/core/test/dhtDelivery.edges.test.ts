@@ -548,6 +548,19 @@ describe("DHT delivery: sending and lifecycle", () => {
     await h.bob.stop();
   });
 
+  it("looks at a contact's mailbox once more as the chat goes live, in the background, then every 5 minutes", async () => {
+    // A text the contact put on the DHT after this side's last read, in the second before both went live (Desktop, 2026-09-30).
+    const h = setup({ pollMs: null, mode: "stream", state: { ...emptyDhtDeliveryState(), peerMode: "stream" }, bobCredentials: pinned() });
+    await h.bob.start(); await vi.advanceTimersByTimeAsync(0);
+    const before = h.transport.resolve.mock.calls.length;
+    h.bob.setLive(true); await vi.advanceTimersByTimeAsync(0);
+    expect(h.transport.resolve.mock.calls.length - before, "one look as it goes live").toBe(1);
+    expect((h.transport.resolve.mock.lastCall as unknown[] | undefined)?.[1], "yielding to links that signal").toEqual({ background: true });
+    await vi.advanceTimersByTimeAsync(LIVE_POLL_MS - 1_000);
+    expect(h.transport.resolve.mock.calls.length - before, "then none for 5 minutes").toBe(1);
+    await h.bob.stop();
+  });
+
   it("reads every 5 minutes while live, at once when layer 1 is lost; 10 s open, 30 s in the background", async () => {
     const h = setup({ pollMs: null, mode: "stream", bobCredentials: pinned() }); await h.bob.start(); await vi.advanceTimersByTimeAsync(0);
     h.bob.setLive(true);
