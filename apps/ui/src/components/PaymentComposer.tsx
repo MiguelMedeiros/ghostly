@@ -288,7 +288,9 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, onDone = 
   // What this card holds, from its own wallet (Lightning's from its source, not the Cashu mints unless they are its
   // source): none claimed where the card cannot say. Without a wallet platform, the chat's Cashu balance.
   const holds = card && here ? spendable(card.rail, here) : method === "cashu" ? balance : undefined;
-  const tooMuch = holds !== undefined && value > holds;
+  // Only Send spends from this card: a Request (all Lightning can do in a chat, all a request to a group is) asks for
+  // money, so no amount is too much for it.
+  const tooMuch = canSend && holds !== undefined && value > holds;
   /** What Send and Request do on this card, with this contact. */
   const how = (id: ChatRail) => describe ? describe(id) : t(HOW[id], { name: who });
 
