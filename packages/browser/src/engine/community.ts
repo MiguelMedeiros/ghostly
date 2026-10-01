@@ -189,6 +189,8 @@ interface Live {
   hubsAvoided: Map<string, number>;
   /** Hubs whose edge has been up: when it drops, the hub is gone. */
   hubsUp: Set<string>;
+  /** Hubs taken in place of one that left: all its members ask them at once, so each gets the longer wait. */
+  replacing?: Set<string>;
   /** Entry sessions kept open a little after the welcome went: link id → until. */
   lingering: Map<string, number>;
   lastRoster: Roster;
@@ -542,6 +544,9 @@ export class Communities {
     if (live.hub) {
       // Letting someone in: the budget goes to that session first, the lobby waits.
       const busy = this.admitting(groupId, live, now);
+      // Another hub is leaving (its signed request came on our edge before it went): the members it carried are about
+      // to ask the hubs left, so the lobby is looked at often a while, not every half minute.
+      if (s.state.pendingLeaves.some(r => r.s !== me && this.recentHub(live, r.s))) live.lobbyBusyUntil = Math.max(live.lobbyBusyUntil, now + this.timings.lobbyBusyMs);
       const lobbyEvery = now < live.lobbyBusyUntil && !busy ? this.timings.lobbyPollMs : this.timings.lobbyIdlePollMs;
       if (now - live.lastLobbyPoll >= lobbyEvery) { live.lastLobbyPoll = now; await this.pollLobby(groupId, live, now); }
       await this.answerKnocks(groupId, live, now, busy);
@@ -551,23 +556,31 @@ export class Communities {
       const edges = this.host.edges(groupId);
       const fresh = new Set(others.map(h => h.key));
       for (const [key, until] of live.hubsAvoided) if (until <= now) live.hubsAvoided.delete(key);
+      // A hub that left the group (its signed request came on its edge before it went, or the leave is committed) is
+      // not an app restarting: another hub now, not after the wait below (a minute and more with no edge, 2026-10-01).
+      // The hub taken in its place is expected at once: its side opens on reading my lobby, in seconds (see `lobbyBusyUntil`),
+      // and is waited for as long as one that is back: the leaver's other members ask it too, and its relays' budget
+      // may hold its reads back a while (all of them giving up after 20 s made each a hub, under the same budget).
+      const gone = live.myHubs.filter(key => s.wasRemoved(key) || s.state.pendingLeaves.some(r => r.s === key));
+      for (const key of gone) { live.hubsAvoided.set(key, now + HUB_GRACE_MS); live.hubWaits.delete(key); live.hubsUp.delete(key); }
       // A hub that has not taken me after a while is full, or gone: another one, or I become one. One whose edge was up
       // and dropped (its app closed, and usually starts again in seconds) gets the same while from the drop, and up to
       // three times that once it is back (a packet since): its edge stays open and looks for it, and comes up again in
       // the seconds its signaling takes on the relays. Dropped at once, the edge was opened again only when the hub was
       // picked again, a minute or more later (2026-09-29).
       for (const key of live.myHubs) {
+        if (gone.includes(key)) continue;
         const id = edges.get(key);
-        if (id && this.host.linkReady(id, 2)) { live.hubWaits.delete(key); live.hubsUp.add(key); continue; }
+        if (id && this.host.linkReady(id, 2)) { live.hubWaits.delete(key); live.hubsUp.add(key); live.replacing?.delete(key); continue; }
         const since = live.hubWaits.get(key) ?? now;
         live.hubWaits.set(key, since);
         const back = live.hubsUp.has(key) && !!id && !!this.host.linkBack?.(id);
-        if (now - since > (back ? 3 : 1) * this.timings.hubWaitMs) { live.hubsAvoided.set(key, now + 2 * this.timings.hubWaitMs); live.hubWaits.delete(key); live.hubsUp.delete(key); }
+        if (now - since > (back || live.replacing?.has(key) ? 3 : 1) * this.timings.hubWaitMs) { live.hubsAvoided.set(key, now + 2 * this.timings.hubWaitMs); live.hubWaits.delete(key); live.hubsUp.delete(key); live.replacing?.delete(key); }
       }
       let kept = live.myHubs.filter(key => (fresh.has(key) || this.recentHub(live, key)) && !live.hubsAvoided.has(key));
       kept = kept.slice(0, COMMUNITY_TOPOLOGY.hubsPerMember);
       const picked = pickHubs(me, others, now, new Set(live.hubsAvoided.keys()));
-      for (const key of picked) if (kept.length < Math.max(1, picked.length) && !kept.includes(key)) kept.push(key);
+      for (const key of picked) if (kept.length < Math.max(1, picked.length) && !kept.includes(key)) { kept.push(key); if (gone.length) { if (!edges.has(key)) live.expect.add(key); (live.replacing ??= new Set()).add(key); } }
       live.myHubs = kept;
       // Every hub I know is full or will not take me: I carry myself, if the beacon has room.
       live.forceHub = !kept.length && others.length < COMMUNITY_TOPOLOGY.maxHubs;
