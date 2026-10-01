@@ -215,3 +215,29 @@ describe("your own camera in the corner", () => {
     }
   });
 });
+
+describe("the contact's sound", () => {
+  it("plays from one element only, on the chosen speaker: the picture is muted", () => {
+    vi.stubGlobal("MediaStream", FakeMediaStream);
+    // happy-dom's srcObject takes its own MediaStream only: what the page gives each element is kept here.
+    const given = new Map<HTMLMediaElement, unknown>();
+    const srcObject = vi.spyOn(HTMLMediaElement.prototype, "srcObject", "set").mockImplementation(function (this: HTMLMediaElement, stream) { given.set(this, stream); });
+    const sinks: string[] = [];
+    Object.defineProperty(HTMLMediaElement.prototype, "setSinkId", { configurable: true, value: async function (this: HTMLMediaElement) { sinks.push(this.tagName); } });
+    try {
+      const remote = new FakeMediaStream([new FakeTrack("audio"), new FakeTrack("video")]);
+      const devices = { list: { audioinput: [], videoinput: [], audiooutput: [], defaults: {}, named: true }, current: { audioinput: "", videoinput: "", audiooutput: "spk" },
+        speaker: "spk", speakers: true, choose: vi.fn(), notice: null, dismiss: vi.fn(), switchBack: vi.fn() };
+      overlay({ remoteStream: remote as unknown as MediaStream, remoteHasVideo: true, devices });
+      const showing = [...document.querySelectorAll<HTMLMediaElement>("audio, video")].filter((element) => given.get(element) === remote);
+      // The <audio> and the picture both show the contact's stream; only one may sound, or the voice comes out twice.
+      expect(showing.map((element) => element.tagName)).toEqual(["AUDIO", "VIDEO"]);
+      expect(showing.filter((element) => !element.muted).map((element) => element.tagName)).toEqual(["AUDIO"]);
+      expect(sinks).toEqual(["AUDIO"]);
+    } finally {
+      srcObject.mockRestore();
+      delete (HTMLMediaElement.prototype as { setSinkId?: unknown }).setSinkId;
+      vi.unstubAllGlobals();
+    }
+  });
+});

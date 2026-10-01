@@ -146,10 +146,10 @@ export function CallOverlay({
     }
   }, [remoteStream]);
 
-  // Both elements play the peer's stream, so both go to the chosen speaker.
+  // The peer's sound plays from the <audio> alone (the picture is muted), on the chosen speaker.
   const speaker = devices?.speaker;
   useEffect(() => {
-    for (const element of [remoteAudioRef.current, remoteVideoRef.current]) void applySpeaker(element, speaker).catch(() => {});
+    void applySpeaker(remoteAudioRef.current, speaker).catch(() => {});
   }, [speaker, remoteStream]);
 
   useEffect(() => {
@@ -211,14 +211,16 @@ export function CallOverlay({
           and once connected this says so, while the line turns into the clock, which is never read out as it runs. */}
       <p role="status" className="sr-only" data-testid="call-state-spoken">{callState === "connected" ? t("calls.connected") : ""}</p>
 
-      {/* Remote audio (always present for audio playback) */}
-      <audio ref={remoteAudioRef} autoPlay playsInline className="hidden" />
-      
-      {/* Remote video (always rendered, visibility controlled) */}
+      {/* Remote audio: the only element that plays the peer's sound */}
+      <audio ref={remoteAudioRef} autoPlay playsInline className="hidden" data-testid="remote-audio" />
+
+      {/* Remote video (always rendered, visibility controlled). Muted: it shows the same stream as the <audio>, and
+          with both playing it the peer's voice came out twice. */}
       <video
         ref={remoteVideoRef}
         autoPlay
         playsInline
+        muted
         data-testid="remote-video"
         onResize={(e) => setRemoteIsWide(e.currentTarget.videoWidth >= 1000)}
         className={`absolute inset-0 w-full h-full bg-black ${remoteIsWide ? "object-contain" : "object-cover"} ${showRemoteVideo ? "" : "hidden"}`}

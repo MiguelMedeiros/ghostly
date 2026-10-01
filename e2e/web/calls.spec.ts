@@ -5,7 +5,7 @@ const clock = /^\d{1,2}:\d{2}$/;
 /** Size of the picture this peer receives from the other side. */
 const remoteSize = (peer: Peer) =>
   peer.page.evaluate(() => {
-    const video = [...document.querySelectorAll("video")].find((v) => !v.muted);
+    const video = document.querySelector<HTMLVideoElement>("[data-testid=remote-video]");
     return video ? `${video.videoWidth}x${video.videoHeight}` : "none";
   });
 
