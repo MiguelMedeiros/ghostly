@@ -50,3 +50,27 @@ describe('outcomes that must not turn into a second payment',()=>{
   expect(f.records.size).toBe(0);
  });
 });
+describe('reviews no Approve can send any more',()=>{
+ it('an abandoned review past its expiry is cancelled as Cancel does, and stays in the store; a fresh one is not',async()=>{
+  const f=fixture();const release=vi.fn(async()=>{});f.adapter.release=release;
+  const old=await f.coordinator.prepare(target(),100,2,{payee:'Bob'});
+  const fresh=await f.coordinator.prepare(target(),100,2,{payee:'Bob'});
+  f.records.get(old.id)!.review.expiresAt=Date.now()-1;
+  expect((await f.coordinator.dropStale()).map(r=>r.id)).toEqual([old.id]);
+  expect(f.records.get(old.id)?.review.state).toBe('cancelled');
+  expect(release).toHaveBeenCalledOnce();
+  expect(f.records.get(fresh.id)?.review.state).toBe('pending');
+  expect(f.adapter.execute).not.toHaveBeenCalled();
+ });
+ it('a review of a request paid some other way goes; one approved, on its way or of unknown outcome is never touched',async()=>{
+  const f=fixture();
+  const reviews=await Promise.all(['a','b','c','d'].map(requestId=>f.coordinator.prepare(target(),100,2,{payee:'Bob',requestId,linkId:'l'})));
+  f.records.get(reviews[1].id)!.review.state='submitted';
+  f.records.get(reviews[2].id)!.review.state='unknown';
+  f.records.get(reviews[3].id)!.review.state='settled';
+  for(const r of reviews.slice(1))f.records.get(r.id)!.review.expiresAt=Date.now()-1;
+  const dropped=await f.coordinator.dropStale(Date.now(),r=>r.requestId==='a'||r.requestId==='b');
+  expect(dropped.map(r=>r.requestId)).toEqual(['a']);
+  expect(['b','c','d'].map(id=>[...f.records.values()].find(v=>v.review.requestId===id)?.review.state)).toEqual(['submitted','unknown','settled']);
+ });
+});
