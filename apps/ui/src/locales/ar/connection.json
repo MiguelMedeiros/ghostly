@@ -51,6 +51,7 @@
     "lostFrom": "انقطع الاتصال المباشر ({{from}})",
     "messagesWait": "تنتظر الرسائل {{contact}}",
     "moved": "انتقل من {{from}} إلى {{transport}}",
+    "notBack": "لم يعد الاتصال المباشر بعد إعادة تشغيل هذا التطبيق ({{from}})",
     "offFrom": "خارج {{from}}",
     "setTo": "مضبوط على {{transport}}",
     "started": "بدأ هذا التطبيق",

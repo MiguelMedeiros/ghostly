@@ -51,6 +51,7 @@
     "lostFrom": "Connessione diretta persa ({{from}})",
     "messagesWait": "i messaggi aspettano {{contact}}",
     "moved": "Passato da {{from}} a {{transport}}",
+    "notBack": "Connessione diretta non tornata dopo il riavvio di questa app ({{from}})",
     "offFrom": "fuori da {{from}}",
     "setTo": "impostato su {{transport}}",
     "started": "questa app è stata avviata",

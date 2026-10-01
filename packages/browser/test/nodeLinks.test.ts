@@ -1,7 +1,7 @@
 import "fake-indexeddb/auto";
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { LIMITS, createIdentity, type FileSink, type GhostLinkOptions } from "@ghostly/core";
-import { GROUP_NATIVE_SLOTS, GhostlyNode } from "../src/engine/node";
+import { GROUP_NATIVE_SLOTS, GhostlyNode, RESUME_SPENT_MS } from "../src/engine/node";
 import { db } from "../src/engine/db";
 import { STORES, fileStore, transact } from "../src/shared/idb";
 import { storedBlob } from "../src/shared/storedFiles";
@@ -38,6 +38,7 @@ vi.mock("@ghostly/core", async (importOriginal) => {
     canReleaseEndpoint = vi.fn(() => true);
     releaseEndpoint = vi.fn(async (transport: string) => { this.availableTransports = this.availableTransports.filter((t) => t !== transport); });
     nativeDescriptors = {};
+    relayedTransports: string[] = [];
     start = vi.fn();
     stop = vi.fn(async () => {});
     wake = vi.fn();
@@ -218,6 +219,33 @@ describe("an app restarting (WISP 100, Back after a restart)", () => {
       .toEqual(["iroh/1", "hyperdht/1", undefined, undefined, undefined]);
   });
 
+  it("a chat not live again within the contact's liveness bound is not resumed at the next start; one live again is", async () => {
+    // #966 follow-up: a chat that never came back after its last live stretch said "live at last run" at every start,
+    // and knocked every time (all ten chats of the repro).
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"], shouldAdvanceTime: true });
+    onTestFinished(() => { vi.useRealTimers(); });
+    const paired = () => ({ pairedPeerKey: createIdentity().pubKeyZ32 });
+    const gone = row({ ...paired(), transportHistory: [{ at: 1, kind: "live", transport: "iroh/1" }] });
+    const back = row({ ...paired(), transportHistory: [{ at: 1, kind: "live", transport: "iroh/1" }] });
+    const first = await started(gone, back);
+    expect([gone, back].map((chat) => first.linkOf(chat.id).options.resume)).toEqual(["iroh/1", "iroh/1"]);
+    // One is live again in this run; the other's contact never comes back.
+    first.node["links"].get(back.id)!.pairing = { status: "ready", transport: "iroh/1" } as never;
+    first.node["links"].get(back.id)!.dataLink = "open";
+    first.node["observeTransport"](back.id);
+    // Not yet past the bound: a run this short says nothing (the contact may still hold the session).
+    await vi.advanceTimersByTimeAsync(RESUME_SPENT_MS - 1_000);
+    expect((await saved(gone.id))?.transportHistory).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(1_000);
+    await vi.waitFor(async () => expect((await saved(gone.id))?.transportHistory?.at(-1)).toMatchObject({ kind: "down", from: "iroh/1", restart: true }));
+    expect((await saved(back.id))?.transportHistory?.at(-1)).toMatchObject({ kind: "live", transport: "iroh/1" });
+    await first.node.shutdown();
+    nodes.splice(nodes.indexOf(first.node), 1);
+    links.length = 0;
+    const again = await started();
+    expect([gone, back].map((chat) => again.linkOf(chat.id).options.resume)).toEqual([undefined, "iroh/1"]);
+  });
+
   // covers: transport.native-pool
   describe("more paired chats than native slots (eight per transport)", () => {
     const paired = () => ({ pairedPeerKey: createIdentity().pubKeyZ32 });
@@ -264,6 +292,29 @@ describe("an app restarting (WISP 100, Back after a restart)", () => {
       const listening = rows.filter((r) => linkOf(r.id).registerEndpoint.mock.calls.length > 0).map((r) => r.id);
       expect(listening).toHaveLength(8);
       expect(listening).toContain("chat-y");
+    });
+
+    it("on an app with WebRTC, chats whose contact has none take them first, each class most recent first", async () => {
+      // #966 follow-up: a web app's listeners went to its most recent chats, contacts with WebRTC among them, and a
+      // Linux Desktop (or a CLI with WebRTC off), which can reach it only natively, was left with none.
+      vi.stubGlobal("RTCPeerConnection", class {});
+      onTestFinished(() => { vi.unstubAllGlobals(); });
+      const now = Date.now();
+      const record = (transports: string[]) => ({ rev: 1, issued: now, author: createIdentity().pubKeyZ32, versions: [1], transports,
+        capabilities: [], extensions: [], descriptors: {}, name: "" });
+      const liveAt = (at: number) => [{ at, kind: "live" as const, transport: "iroh/1" as const }];
+      const withRtc = Array.from({ length: 8 }, (_, i) => row({ ...paired(), id: `chat-w${i}`, transportHistory: liveAt(now - (i + 1) * 60_000),
+        capsState: { rev: 1, peer: record(["iroh/1", "hyperdht/1", "webrtc/1"]) } }));
+      const nativeOnly = [0, 1].map((i) => row({ ...paired(), id: `chat-n${i}`, transportHistory: liveAt(now - (i + 1) * 3_600_000),
+        capsState: { rev: 1, peer: record(["iroh/1"]) } }));
+      const rows = [...withRtc, ...nativeOnly];
+      const { linkOf } = await nativeStarted(...rows);
+      const listening = rows.filter((r) => linkOf(r.id).registerEndpoint.mock.calls.length > 0).map((r) => r.id);
+      expect(listening).toHaveLength(8);
+      expect(listening).toEqual(expect.arrayContaining(["chat-n0", "chat-n1"]));
+      // Among the contacts with WebRTC, #966's order: the two least recent are the ones left without.
+      expect(listening).not.toContain("chat-w6");
+      expect(listening).not.toContain("chat-w7");
     });
 
     it("the chat on screen gets one as soon as one is free, when every one was busy as it opened", async () => {
