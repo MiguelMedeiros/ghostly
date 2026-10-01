@@ -251,6 +251,11 @@ describe("MessageBubble: system lines", () => {
     expect(screen.getByText("Missed audio call").parentElement).not.toHaveTextContent("(");
   });
 
+  it("shows no length for a call ended within its first second, rather than (0 s)", () => {
+    bubble({ sender: "system", text: "Audio call ended", callEvent: { type: "call_ended", duration: 400 } });
+    expect(screen.getByText("Audio call ended").parentElement).not.toHaveTextContent("(");
+  });
+
   it("lets a system line be deleted too, from its menu", async () => {
     const { user } = bubble({ sender: "system", text: "Call ended", callEvent: { type: "call_ended" } }, { onDelete: () => {} });
     await user.click(screen.getByTestId("message-options"));

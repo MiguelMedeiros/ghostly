@@ -818,7 +818,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
         >
           <CallEventIcon type={type} hasVideo={hasVideo} />
           <span>{callEventText(t, type, hasVideo) ?? message.text}</span>
-          {duration !== undefined && duration > 0 && (
+          {duration !== undefined && duration >= 1000 && (
             <span className="text-text-muted">({formatCallLength(duration, t)})</span>
           )}
           <span className="text-text-muted text-[10px]">{time}</span>
