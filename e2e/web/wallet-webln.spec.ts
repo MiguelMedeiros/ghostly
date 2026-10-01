@@ -75,7 +75,7 @@ async function requestPaidInChat(alice: Peer, bob: Peer, sats: number, aliceSour
   // Reviewed in Ghostly (amount, source, fee ceiling) before Alice's wallet is asked.
   const review = request.getByTestId("payment-review");
   await expect(review).toContainText(`Pay ${sats} test sats over Lightning`);
-  await expect(review).toContainText(`Through ${aliceSource} · fee up to 10 sats`);
+  await expect(review).toContainText(`Through ${aliceSource} · fee up to 10 test sats`);
   await review.getByRole("button", { name: "Approve payment" }).click();
   await expect(request.getByTestId("payment-state")).toHaveText("Paid", { timeout: 60_000 });
   // Bob's app sees it paid from his own wallet's answer, not from Alice's word.

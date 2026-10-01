@@ -33,6 +33,13 @@ describe("the wallet's new-sats dot", () => {
     expect(screen.getByTestId("wallet-chip")).toHaveAccessibleName("Wallets, 21 new test sats");
   });
 
+  it("says it in the app's language and number format, test sats as test sats", () => {
+    renderApp(<AccountBar />, { language: "pt" });
+    arrive(1_500, "testnet");
+    expect(screen.getByTestId("wallet-chip")).toHaveAccessibleName(/, 1\.500 sats de teste novos$/);
+    expect(screen.getByTestId("wallet-chip")).not.toHaveAccessibleName(/new/);
+  });
+
   it("goes once the Wallets page opens, and nothing shows for sats that arrive there", async () => {
     const { user } = renderApp(<AccountBar />);
     arrive(500);

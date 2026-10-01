@@ -101,7 +101,7 @@
     "lastBalance": "Dernier solde connu : {{balance}} {{unit}}",
     "lastBalanceAt": "Dernier solde connu : {{balance}} {{unit}} · {{date}}",
     "maxFee": "Le maximum de frais que vous acceptez",
-    "maxFeeInput": "Frais maximum en sats",
+    "maxFeeInput": "Frais maximum en {{unit}}",
     "newAddress": "Nouvelle adresse",
     "notConnected": "{{label}} n'est pas connecté",
     "notConnectedDefault": "La source Bitcoin n'est pas connectée",
@@ -173,7 +173,8 @@
     "createInvoice": "Créer une facture Lightning",
     "fee": {
       "none": "Aucuns frais pour dépenser",
-      "perProof": "{{fee}} sat par preuve (environ 1 sat par paiement)"
+      "perProof": "{{fee}} sat par preuve (environ 1 sat par paiement)",
+      "perProofTest": "{{fee}} sat de test par preuve (environ 1 sat de test par paiement)"
     },
     "history": {
       "fee": "frais {{amount}}",
@@ -728,6 +729,10 @@
     "receive": "Recevoir",
     "receivingAddress": "Adresse de réception",
     "send": "Envoyer"
+  },
+  "unseen": {
+    "real": "{{place}}, {{amount}} nouveaux sats",
+    "test": "{{place}}, {{amount}} nouveaux sats de test"
   },
   "usdt": {
     "approve": "Rien n'est envoyé tant que vous n'avez pas approuvé la vérification.",

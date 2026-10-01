@@ -176,6 +176,14 @@ describe("the engine's known errors (@ghostly/core ENGINE_ERRORS)", () => {
     for (const [, text] of texts) expect(errorText(text, english)).toBe(text);
   });
 
+  it("a reviewed payment's refusals and outcomes are said in the language too", () => {
+    const pt = translators.pt;
+    expect(errorText("Cashu fee exceeds your limit", pt)).toBe("A taxa do Cashu passa do seu limite");
+    expect(errorText(new Error("The fee exceeds your limit"), pt)).toBe("A taxa passa do seu limite");
+    expect(errorText("Error: Unknown payment intent", pt)).toBe("Pagamento desconhecido");
+    expect(errorText("Outcome unknown. Check the existing payment; do not send another.", translators.fr)).toContain("Résultat inconnu");
+  });
+
   it("the values stay, and amounts are written the app's way", () => {
     expect(errorText("shop.example takes between 5 and 1,000,000 sats", translators.pt)).toBe("shop.example aceita de 5 a 1.000.000 sats");
     expect(errorText("Could not reach rpc.example", translators.pt)).toBe("Não foi possível acessar rpc.example");

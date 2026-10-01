@@ -80,7 +80,7 @@ export function BitcoinWalletPanel({ wallet, state }: { wallet: WalletPlatform; 
               <input aria-label={t("wallet.panel.recipient", { wallet: "Bitcoin" })} placeholder={t("wallet.panel.recipientPlaceholder", { wallet: "Bitcoin" })} spellCheck={false} className={`${input} font-mono text-xs`} value={address} onChange={(e) => setAddress(e.target.value.trim())} />
               <Amount value={amount} onChange={setAmount} unit={unit} testId="bitcoin-amount" />
               <label className="flex flex-wrap items-center gap-2 text-xs text-text-secondary"><span className="min-w-0">{t("wallet.bitcoin.maxFee")}</span>
-                <input aria-label={t("wallet.bitcoin.maxFeeInput")} inputMode="numeric" className={`${input} !w-28 shrink-0`} value={feeCap} onChange={(e) => setFeeCap(e.target.value.replace(/\D/g, ""))} /> sats
+                <input aria-label={t("wallet.bitcoin.maxFeeInput", { unit })} inputMode="numeric" className={`${input} !w-28 shrink-0`} value={feeCap} onChange={(e) => setFeeCap(e.target.value.replace(/\D/g, ""))} /> {unit}
               </label>
               <Button variant="primary" className="w-full" disabled={busy || !!review || !address || !Number(amount)} onClick={() => void run(async () => {
                 setReview(await wallet.preparePayment({ target: { method: "bitcoin", network: bt.network!, provider: "onchain", asset: "BTC", unit: "sat", address, expiresAt: Date.now() + 15 * 60 * 1000 }, amount: Number(amount), feeCap: Number(feeCap), payee: address }));

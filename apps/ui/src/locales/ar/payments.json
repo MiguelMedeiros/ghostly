@@ -32,7 +32,7 @@
     "cashuMints": "دور سك Cashu",
     "error": {
       "amountMismatch": "الفاتورة لا تطابق المبلغ المطلوب",
-      "feeAbove": "رسوم Lightning (حتى {{fee}} sats) تتجاوز الحد الأقصى لديك"
+      "feeAbove": "رسوم Lightning (حتى {{fee}} {{unit}}) تتجاوز الحد الأقصى لديك"
     },
     "externalNote": {
       "ark": "يُدفع من أي محفظة Ark. تعلّمه محفظة جهة اتصالك مدفوعًا حين ترى المال.",
@@ -42,7 +42,7 @@
     "externalTitle": "امسحه أو انسخه أو افتحه في محفظة غير Ghostly",
     "fedimintNoFederation": "Fedimint · لا يوجد اتحاد مشترك بينكما: Lightning",
     "hide": "إخفاء",
-    "maxFee": "الحد الأقصى للرسوم (sats)",
+    "maxFee": "الحد الأقصى للرسوم ({{unit}})",
     "maxGas": "الحد الأقصى للغاز (ETH)",
     "noSharedMint": "لا توجد دار سك مشتركة مُعدّة",
     "noWallet": {
@@ -72,7 +72,7 @@
     },
     "takeBack": "استعادته",
     "takeBackTitle": "إن لم تستلمه جهة اتصالك أبدًا، يبقى الـ ecash لك",
-    "through": "عبر {{source}} · رسوم حتى {{fee}} sats",
+    "through": "عبر {{source}} · رسوم حتى {{fee}} {{unit}}",
     "title": {
       "requests": "طلب منك",
       "sentYou": "أرسل إليك",

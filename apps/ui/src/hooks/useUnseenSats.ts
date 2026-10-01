@@ -1,6 +1,8 @@
 import { useEffect, useSyncExternalStore } from "react";
 import { useLocation } from "react-router-dom";
 import { useServicesPlatform } from "./useServicesPlatform";
+import type { Translate } from "../contexts/I18nContext";
+import { formatAmount } from "../lib/amount";
 
 /**
  * What arrived while the wallet was closed, real and test sats apart, until the Wallets page opens. The account bar
@@ -41,7 +43,12 @@ export function useUnseenSats(): Unseen {
   return useSyncExternalStore(subscribe, () => unseen);
 }
 
-/** The wallet place's name and tooltip: "Wallets, 109,100 new sats", "Wallets, 21 new test sats", or just "Wallets". */
-export function unseenSatsLabel(place: string, { real, test }: Unseen): string {
-  return real ? `${place}, ${real.toLocaleString()} new sats` : test ? `${place}, ${test.toLocaleString()} new test sats` : place;
+/**
+ * The wallet place's name and tooltip in the app's language: "Wallets, 109,100 new sats", "Wallets, 21 new test sats",
+ * or just "Wallets". The amount is written the app's way, not the device's.
+ */
+export function unseenSatsLabel(place: string, { real, test }: Unseen, t: Translate): string {
+  if (real) return t("wallet.unseen.real", { place, amount: formatAmount(real, t.language) });
+  if (test) return t("wallet.unseen.test", { place, amount: formatAmount(test, t.language) });
+  return place;
 }
