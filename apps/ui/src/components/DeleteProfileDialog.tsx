@@ -2,7 +2,7 @@ import { useEffect, useState, useRef } from "react";
 import { useI18n } from "../contexts/I18nContext";
 import { useBackdropDismiss, useDialogFocus } from "../hooks/useDismiss";
 import { deleteProfile, profileLock, profileSummary, type ProfileSummary } from "../lib/profileData";
-import { createProfileBackup } from "../lib/profileBackup";
+import { backupFileName, createProfileBackup } from "../lib/profileBackup";
 import type { ProfileEntry } from "../lib/profiles";
 import { input } from "./wallet/ui";
 import { InputGroup } from "./layout";
@@ -53,7 +53,7 @@ export function DeleteProfileDialog({ entry, onClose }: { entry: ProfileEntry; o
               onClick={() => void run(async () => {
                 const text = await createProfileBackup(passphrase, entry.id, lockPassword);
                 const url = URL.createObjectURL(new Blob([text], { type: "application/vnd.ghostly.backup+json" }));
-                const link = document.createElement("a"); link.href = url; link.download = `${entry.name.replace(/[^\w-]+/g, "-")}.ghostly-backup`; link.click();
+                const link = document.createElement("a"); link.href = url; link.download = backupFileName(entry.name); link.click();
                 setTimeout(() => URL.revokeObjectURL(url), 2000);
                 setSaved(true); setBackingUp(false); setPassphrase("");
               })}>{t("common.save")}</button>

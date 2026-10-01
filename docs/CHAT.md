@@ -104,6 +104,7 @@ One mark beside the time, as in WhatsApp (#360, `apps/ui/src/components/chat/Del
 (#384, #410, `apps/ui/src/hooks/useChatScroll.ts`)
 
 - At the bottom, a new message keeps the view there. Scrolled up, nothing moves the view: pictures and videos loading above or below keep the message you read in place.
+- The list itself getting taller or shorter (a phone turned on its side, the keyboard, a window resized) keeps what was at the bottom of the view in place, scrolled up as at the bottom: a video playing there stays in view.
 - A **↓ N new** pill counts the contact's new messages (reactions, edits and notices do not count) and goes to the first one. Older messages that arrive late, such as a group's catch-up after a reconnect, are not new (#506). With nothing new, a plain ↓ shows once you are far from the bottom. **End** or **Ctrl/Cmd+↓** jumps to the bottom.
 - A message you send always goes to the bottom. At the bottom, a composer that grows (a long draft, a saved one) keeps the last message in view (#524).
 - A chat opens at its last message. One you left scrolled up opens where you left it, while the app runs, also when you come to a group from another group (#468).
