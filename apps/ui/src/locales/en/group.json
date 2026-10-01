@@ -179,6 +179,7 @@
   "readNoteCommunity": "Anyone with the group's link can join, and any member can let people in. Everyone in the group can read everything sent while they are a member; someone removed cannot read what comes after, someone who joins later cannot read what came before. Members who were away get the last {{count}} messages from whoever is there when they return.",
   "remove": {
     "body": "They won't get the group's new messages.",
+    "linkHint": "They can still join again with the group's link: a new link keeps them out.",
     "title": "Remove {{name}}?"
   },
   "rename": {
