@@ -1,5 +1,5 @@
 import type { Page } from "@playwright/test";
-import { connect, expect, link, say, test, type Peer } from "../support/fixtures";
+import { chat, connect, expect, link, say, test, type Peer } from "../support/fixtures";
 
 /**
  * A pinned message (WISP 400 § Pinned message). In a 1:1 chat Alice pins Bob's message from its ⋮: the bar under the
@@ -72,7 +72,7 @@ test("a community's admin pins, the member sees it and jumps to it; only the adm
   await say(bob, "hi");
   await expect(groupChat(alice).getByText("hi", { exact: true })).toBeVisible({ timeout: 120_000 });
   await say(alice, "train at 9:40, platform 3");
-  await expect(groupChat(bob).getByText("train at 9:40, platform 3")).toBeVisible({ timeout: 120_000 });
+  await expect(chat(bob).getByText("train at 9:40, platform 3")).toBeVisible({ timeout: 120_000 });
 
   // Bob is a member of a community: his ⋮ has no Pin.
   await options(bob.page, "train at 9:40, platform 3");

@@ -81,7 +81,7 @@ test("a community group's new message for a profile that is not running shows as
   await bob.page.goto(url);
   await expect(bob.page.getByTestId("group-chat")).toHaveAttribute("data-status", "active", { timeout: 180_000 });
   await say(bob, "hi from bob");
-  await expect(page.getByTestId("group-chat").getByText("hi from bob")).toBeVisible({ timeout: 120_000 });
+  await expect(page.locator(".chat-wallpaper").getByText("hi from bob")).toBeVisible({ timeout: 120_000 });
 
   // Alice goes to Work: Personal is not running, and bob, alone, is the group's hub.
   await workWithPeek(page);
@@ -99,5 +99,5 @@ test("a community group's new message for a profile that is not running shows as
   await profileIs(page, "Personal");
   await expect(page.getByTestId("profile-switch-splash")).toHaveCount(0, { timeout: 15_000 });
   await page.getByText("Open plaza").first().click();
-  await expect(page.getByTestId("group-chat").getByText("while you were away")).toBeVisible({ timeout: 120_000 });
+  await expect(page.locator(".chat-wallpaper").getByText("while you were away")).toBeVisible({ timeout: 120_000 });
 });
