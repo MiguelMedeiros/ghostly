@@ -67,6 +67,11 @@ describe("group name", () => {
     expect(groupMetaChange(named, pictured)).toEqual({ name: null });
     expect(groupMetaChange(pictured, meta(encodeGroupMetaBody({}), 3))).toEqual({ picture: null });
     expect(groupMetaChange(named, meta(named.body, 4))).toBeNull();
+    // With the name the member got in with: only what it would see change. A joiner's welcome gave "Book club" already.
+    expect(groupMetaChange(undefined, named, "Book club")).toEqual({ picture: PIC });
+    expect(groupMetaChange(undefined, named, "Ghosts")).toEqual({ name: "Book club", picture: PIC });
+    expect(groupMetaChange(named, pictured, "Book club")).toBeNull();
+    expect(groupMetaChange(named, pictured, "Ghosts")).toEqual({ name: null });
   });
 });
 

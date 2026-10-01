@@ -1327,7 +1327,7 @@ export class CommunitySession {
     await this.persist();
     const frame = this.metaFrame();
     if (frame) this.hooks.broadcast(frame);
-    const change = groupMetaChange(before, meta);
+    const change = groupMetaChange(before, meta, this.state.name);
     if (change) this.hooks.metaChanged?.(this.myKey, change);
     this.hooks.changed();
   }
@@ -1371,7 +1371,9 @@ export class CommunitySession {
     const before = this.state.meta;
     this.state.meta = opened.meta;
     await this.persist();
-    const change = groupMetaChange(before, opened.meta);
+    // What the group looked like when I got in is no change: the first statement I take, signed under a commit before
+    // mine, makes no line, nor does a new admin's signing again the name the welcome gave me.
+    const change = !before && !rosterHas(this.rosterAt(s.h) ?? [], this.myKey) ? null : groupMetaChange(before, opened.meta, this.state.name);
     if (change) this.hooks.metaChanged?.(s.by, change);
     this.hooks.changed();
     return true;

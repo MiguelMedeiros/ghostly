@@ -343,6 +343,8 @@ describe("group engine: admission over a contact chat, edges from the roster", (
     record(carol);
     await world.settle(); await world.meet();
     expect(carol.views()[0]).toMatchObject({ status: "active", picture: pic(1) });
+    // The picture she got in with is no change made while she was a member: no line says Alice changed it.
+    expect(world.peers.get("carol")!.messages.filter(m => m.event === "picture")).toEqual([]);
 
     await alice.setPicture(groupId, null); await world.settle();
     expect([alice, bob, carol].map(g => g.views()[0].picture)).toEqual([undefined, undefined, undefined]);
