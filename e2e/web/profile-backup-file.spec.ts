@@ -59,7 +59,9 @@ test("a profile goes to a file and comes back as a new profile, only with its pa
   // With the right one: a new profile, and Ghostly switches to it, chat and nickname included.
   await backups.getByTestId("restore-passphrase").fill(PASSPHRASE);
   await backups.getByTestId("restore-go").click();
-  await expect(page.getByTestId("profile-name")).toHaveValue("Diary (restored)", { timeout: 60_000 });
+  // The name field holds the name alone; "Restored" is a tag beside it.
+  await expect(page.getByTestId("profile-restored-tag")).toHaveText("Restored", { timeout: 60_000 });
+  await expect(page.getByTestId("profile-name")).toHaveValue("Diary");
   await expect(page.getByTestId("profile-links")).toContainText("1 chat");
   await expect(page.getByTestId("account-nickname")).toHaveValue("Nick Kept Secret");
 
@@ -69,7 +71,8 @@ test("a profile goes to a file and comes back as a new profile, only with its pa
   const original = rows.filter({ has: page.getByText("Diary", { exact: true }) });
   await expect(original).toHaveCount(1);
   await original.getByTestId("profile-switch").click();
-  await expect(page.getByTestId("profile-name")).toHaveValue("Diary", { timeout: 30_000 });
+  await expect(page.getByTestId("profile-restored-tag")).toHaveCount(0, { timeout: 30_000 });
+  await expect(page.getByTestId("profile-name")).toHaveValue("Diary");
   await expect(page.getByTestId("profile-links")).toContainText("1 chat");
   await expect(page.getByTestId("account-nickname")).toHaveValue("Nick Kept Secret");
 });

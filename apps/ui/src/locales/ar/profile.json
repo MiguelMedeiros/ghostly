@@ -85,6 +85,9 @@
   "profiles": "الملفات الشخصية",
   "removePicture": "أزل الصورة",
   "restoredName": "{{name}} (مستعاد)",
+  "restoredRemove": "إزالة علامة مستعاد",
+  "restoredTag": "مستعاد",
+  "restoredTagHint": "أُعيد من نسخة احتياطية",
   "sats": "{{amount}} ساتوشي",
   "switch": "بدّل"
 }

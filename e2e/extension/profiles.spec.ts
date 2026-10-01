@@ -112,7 +112,9 @@ test("the extension keeps several profiles: create, switch, restore a backup int
   await backups.getByTestId("restore-file").setInputFiles({ name: file.suggestedFilename(), mimeType: "application/json", buffer: bundle });
   await backups.getByTestId("restore-passphrase").fill(PASSPHRASE);
   await backups.getByTestId("restore-go").click();
-  await expect(profileName(page)).toHaveValue("Pessoal (restored)", { timeout: 60_000 });
+  // Its name alone in the field, and "Restored" a tag beside it.
+  await expect(page.getByTestId("profile-restored-tag")).toHaveText("Restored", { timeout: 60_000 });
+  await expect(profileName(page)).toHaveValue("Pessoal");
   await expect(rows(page)).toHaveCount(3);
   await expect(page.getByTestId("profile-links")).toContainText("1 chat");
   await openChatAt(ext, chatHash);

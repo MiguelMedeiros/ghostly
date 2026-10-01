@@ -267,6 +267,7 @@
     "invoiceSats": "⚡ Fattura Lightning · {{amount}} sats",
     "lightningAddress": "Indirizzo Lightning",
     "lightningOffer": "⚡ Offerta Lightning",
+    "payment": "⚡ {{what}} {{amount}}",
     "realMoney": "Denaro reale",
     "sats": "{{amount}} sats",
     "testMoney": "Denaro di prova",

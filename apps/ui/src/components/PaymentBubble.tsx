@@ -1,18 +1,18 @@
-import { decodeBolt11, parsePaymentAmount, paymentUri } from "@ghostly/core";
+import { parsePaymentAmount, paymentUri } from "@ghostly/core";
 import { PayExternally } from "./PayExternally";
 import type { PaymentReview as Review } from "@ghostly/core";
 import { PaymentReview } from "./PaymentReview";
 import { useEffect, useRef, useState } from "react";
 import { useCountUp } from "../hooks/useCountUp";
 import { useServicesPlatform } from "../hooks/useServicesPlatform";
-import { isWorthlessMint, mintNetwork } from "@ghostly/browser/shared/mints";
+import { mintNetwork } from "@ghostly/browser/shared/mints";
 import { ONCHAIN_FEE_CAP } from "./walletCardData";
 import { LightningPayWith, lightningPayer as payerOf } from "./LightningPayWith";
 import { Select } from "./ui/Select";
 import { NetworkTag, satsIn } from "./NetworkTag";
 import { useI18n } from "../contexts/I18nContext";
 import { ConfirmRealMoney } from "./ConfirmRealMoney";
-import { railLine } from "./paymentWords";
+import { paymentIsTest, paymentTitle, railLine } from "./paymentWords";
 import { decimalInput, formatAmount, formatTokenAmount } from "../lib/amount";
 import { errorText } from "../lib/errorText";
 
@@ -88,22 +88,10 @@ export function PaymentBubble({ paymentId, peerPubKey, fallbackText }: { payment
   const tokenPayment=payment.target?.method==='usdt';
   const outgoing = payment.direction === "out";
   const isRequest = payment.kind === "request";
-  const title = t(isRequest ? (outgoing ? "payments.bubble.title.youRequested" : "payments.bubble.title.requests") : outgoing ? "payments.bubble.title.youSent" : "payments.bubble.title.sentYou");
-  // Test sats are worth nothing, and the bubble says so: a contact must not pass them off as money. The payment says
-  // its network; one from before networks carries it (a target's chain, a test mint, an invoice's chain).
-  // Fedimint: the network of the federation it names, when we joined it.
+  const title = paymentTitle(t, payment);
+  // Test sats are worth nothing, and the bubble says so (paymentIsTest).
   const fedimint = payment.federation ?? payment.federations?.[0];
-  const networks = wallet.getState()?.networks;
-  const federationNetwork = fedimint ? [...(networks?.mainnet.fedimint?.federations ?? []), ...(networks?.testnet.fedimint?.federations ?? []), ...(wallet.getState()?.fedimint?.federations ?? [])].find((f) => f.id === fedimint)?.network : undefined;
-  const testSats = payment.network ? payment.network === "testnet"
-    : payment.target?.method === "arkade" || payment.target?.method === "bark" || payment.target?.method === "bitcoin" || payment.target?.method === "fedimint" || payment.target?.method === "spark" ? payment.target.network !== "bitcoin"
-    : fedimint ? !!federationNetwork && federationNetwork !== "bitcoin"
-    : payment.target?.method === "cashu" ? payment.target.network === "cashu-test"
-    : payment.target?.method === "usdt" ? payment.target.network !== "ethereum"
-    : !tokenPayment && (payment.mint ? isWorthlessMint(payment.mint) : payment.mints?.length ? payment.mints.every(isWorthlessMint)
-      // A request with only an invoice: its chain says (test mints use lnbc, but they come with their mints).
-      : !!payment.invoice && (decodeBolt11(payment.invoice)?.network ?? "bitcoin") !== "bitcoin");
-  const network = testSats ? "testnet" : "mainnet";
+  const network = paymentIsTest(payment, wallet.getState()) ? "testnet" : "mainnet";
   const sats = satsIn(t, network);
   const stateLabel = payment.kind === "payment" ? t(`payments.bubble.state.payment.${payment.state}`) : payment.state === "reclaimed" ? "" : t(`payments.bubble.state.request.${payment.state}`);
   /** The wallets of the payment's own network: only they pay it, quote its invoice or show its mints. */

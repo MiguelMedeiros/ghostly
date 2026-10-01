@@ -10,7 +10,7 @@ export interface ProfileEntry {
   id: string;
   name: string;
   createdAt: number;
-  /** Brought back from a backup (WISP 05) and not renamed since: shown with the app's word for it after the name. */
+  /** Brought back from a backup (WISP 05), until the mark is taken off: shown with the app's word for it after the name. */
   restored?: true;
 }
 interface Registry { version: 1; active: string; profiles: ProfileEntry[] }
@@ -41,15 +41,36 @@ export function setRestoredProfileName(format: (name: string) => string): void {
   restoredName = format;
 }
 /**
- * A profile as it is shown: the first one, never renamed, by the name of the app's language; a restored one, never
- * renamed, with the app's word for restored.
+ * A profile as it is shown: the first one, never renamed, by the name of the app's language; a restored one with the
+ * app's word for restored.
  */
 const shown = (entry: ProfileEntry): ProfileEntry => {
   const name = entry.id === "" && entry.name === DEFAULT_ENTRY.name ? defaultName : entry.name;
   return entry.restored ? { ...entry, name: restoredName(name) } : name === entry.name ? entry : { ...entry, name };
 };
-/** A restored profile's name as the app wrote it before it had a word for each language: the English one, in the name. */
-const LEGACY_RESTORED = /^(.*\S) \(restored\)$/;
+/**
+ * The word each language puts after a restored profile's name (`profile.restoredName` in every locale, which a test
+ * checks against this list). The registry never keeps it in a name: an older app wrote the English one there, and a
+ * name typed or pasted from the field of another language could carry any of them.
+ */
+export const RESTORED_WORDS = ["restored", "restaurado", "restauré", "ripristinato", "مستعاد", "已恢复", "復元"];
+const RESTORED_SUFFIX = new RegExp(`^(.*\\S)\\s*[(（]\\s*(?:${RESTORED_WORDS.join("|")})\\s*[)）]$`, "iu");
+/** A name without the restored words at its end ("Work (restaurado) (restored)" is "Work"), and whether it had any. */
+function withoutRestoredWord(name: string): { name: string; marked: boolean } {
+  let rest = name, match: RegExpExecArray | null;
+  while ((match = RESTORED_SUFFIX.exec(rest))) rest = match[1].trimEnd();
+  return { name: rest, marked: rest !== name };
+}
+/** A cleaned name for profile `id`, the word for restored taken out of it, and whether that marks it restored. */
+function nameAndMark(id: string, raw: string): { name: string; marked: boolean } {
+  // The first profile is never a restored one: its name is left as it is. The word comes off before the name is cut to
+  // its 32 characters, which could cut the word in half.
+  if (!id) return { name: cleanName(raw), marked: false };
+  const collapsed = raw.replace(/\s+/g, " ").trim();
+  // Composed first, so "restauré" typed as e + accent is the word too.
+  const { name, marked } = withoutRestoredWord(collapsed.normalize("NFC"));
+  return { name: cleanName(marked ? name : collapsed), marked };
+}
 
 
 function read(): Registry {
@@ -58,10 +79,9 @@ function read(): Registry {
     const profiles = (Array.isArray(raw?.profiles) ? raw!.profiles : [])
       .filter((p): p is ProfileEntry => !!p && typeof p.id === "string" && (p.id === "" || ID.test(p.id)) && typeof p.name === "string")
       .map((p) => {
-        const name = cleanName(p.name) || (p.id ? "Profile" : DEFAULT_ENTRY.name);
-        const legacy = p.id && p.restored !== true ? LEGACY_RESTORED.exec(name) : null;
-        const entry: ProfileEntry = { id: p.id, name: legacy ? legacy[1] : name, createdAt: Number(p.createdAt) || 0 };
-        if (p.restored === true || legacy) entry.restored = true;
+        const { name, marked } = nameAndMark(p.id, p.name);
+        const entry: ProfileEntry = { id: p.id, name: name || (p.id ? "Profile" : DEFAULT_ENTRY.name), createdAt: Number(p.createdAt) || 0 };
+        if (p.restored === true || marked) entry.restored = true;
         return entry;
       });
     if (!profiles.some((p) => p.id === "")) profiles.unshift({ ...DEFAULT_ENTRY });
@@ -115,12 +135,12 @@ export function themeOf(id: string): ColorTheme {
  * once. It inherits language and light/dark mode from the current profile; nothing else is copied.
  */
 export function createProfile(name: string): ProfileEntry {
-  const clean = cleanName(name);
+  const id = newProfileId();
+  const { name: clean, marked } = nameAndMark(id, name);
   if (!clean) throw new Error("Give the profile a name");
   const registry = read();
   const used = registry.profiles.map((p) => themeOf(p.id));
   const theme = PROFILE_THEMES.find((t) => !used.includes(t)) ?? PROFILE_THEMES[registry.profiles.length % PROFILE_THEMES.length];
-  const id = newProfileId();
   let inherited: Record<string, unknown> = {};
   try {
     const current = JSON.parse(localStorage.getItem(settingsKeyFor(activeProfileId())) ?? "{}") as Record<string, unknown>;
@@ -128,9 +148,10 @@ export function createProfile(name: string): ProfileEntry {
     inherited = { language: current.language, colorScheme: current.colorScheme, theme: current.colorScheme, lockScreen: current.lockScreen };
   } catch { /* defaults */ }
   localStorage.setItem(settingsKeyFor(id), JSON.stringify({ ...inherited, colorTheme: theme }));
-  const entry = { id, name: clean, createdAt: Date.now() };
+  const entry: ProfileEntry = { id, name: clean, createdAt: Date.now() };
+  if (marked) entry.restored = true;
   write({ ...registry, profiles: [...registry.profiles, entry] });
-  return entry;
+  return shown(entry);
 }
 
 /** A fresh id no profile of this space uses yet. */
@@ -147,10 +168,11 @@ export function registerProfile(id: string, name: string, restored = false): Pro
   if (!ID.test(id)) throw new Error("Invalid profile id");
   const registry = read();
   if (registry.profiles.some((p) => p.id === id)) throw new Error("That profile already exists");
-  // A backup of a profile an older app restored carries "(restored)" in its name: the flag says it now.
-  const clean = cleanName(name);
-  const entry: ProfileEntry = { id, name: (restored && LEGACY_RESTORED.exec(clean)?.[1]) || clean || "Restored", createdAt: Date.now() };
-  if (restored) entry.restored = true;
+  // A backup of a profile an older app restored carries "(restored)", or the word of another language, in its name:
+  // the flag says it now.
+  const { name: clean, marked } = nameAndMark(id, name);
+  const entry: ProfileEntry = { id, name: clean || "Restored", createdAt: Date.now() };
+  if (restored || marked) entry.restored = true;
   write({ ...registry, profiles: [...registry.profiles, entry] });
   return shown(entry);
 }
@@ -163,12 +185,21 @@ export function unregisterProfile(id: string): void {
   write({ ...registry, profiles: registry.profiles.filter((p) => p.id !== id) });
 }
 
+/**
+ * Gives a profile a new name. A restored one stays marked restored (the Profile page's tag takes the mark off): the
+ * field edits the name only, and the word for restored typed or pasted into it is the mark, never part of the name.
+ */
 export function renameProfile(id: string, name: string): void {
-  const clean = cleanName(name);
+  const { name: clean, marked } = nameAndMark(id, name);
   if (!clean) throw new Error("Give the profile a name");
   const registry = read();
-  // A name someone gives it is shown as they wrote it, restored or not.
-  write({ ...registry, profiles: registry.profiles.map((p) => (p.id === id ? { id: p.id, name: clean, createdAt: p.createdAt } : p)) });
+  write({ ...registry, profiles: registry.profiles.map((p) => (p.id === id ? { ...p, name: clean, ...(marked ? { restored: true as const } : {}) } : p)) });
+}
+
+/** Takes the restored mark off a profile: from now on it is shown by its name alone. */
+export function clearRestoredMark(id: string): void {
+  const registry = read();
+  write({ ...registry, profiles: registry.profiles.map((p) => (p.id === id ? { id: p.id, name: p.name, createdAt: p.createdAt } : p)) });
 }
 
 /** Where a profile's own keys start in localStorage: `ghostly_<ns>_`, or `ghostly_` for the default one. */

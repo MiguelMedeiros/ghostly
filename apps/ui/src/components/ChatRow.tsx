@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useId, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { engine } from "@ghostly/browser/platform/engine";
 import type { GroupView } from "@ghostly/browser/shared/types";
 import { PeerAvatar } from "./Avatar";
@@ -19,6 +19,8 @@ import { authorName, groupReadAt, groupStatusText, groupUnreadAt } from "../lib/
 import { reactionNoteText } from "../lib/reactions";
 import type { ChatListDensity } from "../lib/settings";
 import type { ChatMessage } from "../lib/types";
+import { servicesPlatform } from "../lib/platform";
+import { paymentLine } from "./paymentWords";
 import { callEventText } from "../lib/callLines";
 import type { Translate } from "../locales/translate";
 
@@ -198,6 +200,19 @@ function joinPreview(p: ChatRowProps, joiner: string | undefined, t: Translate):
   return `${p.named ? p.label : p.keyLabel} ${t("chat.joined")}`;
 }
 
+/**
+ * A payment or a request as the list's line (paymentLine: what its bubble says, in the app's language, test sats as
+ * test sats), or undefined while the wallet does not know it. Only a change of that line draws the row again.
+ */
+function usePaymentLine(paymentId: string | undefined, t: Translate): string | undefined {
+  const subscribe = useCallback((listener: () => void) => (paymentId && servicesPlatform?.subscribe(listener)) || (() => {}), [paymentId]);
+  return useSyncExternalStore(subscribe, () => {
+    const wallet = paymentId ? servicesPlatform?.wallet : undefined;
+    const payment = wallet?.getPayment(paymentId!);
+    return payment ? paymentLine(t, payment, wallet!.getState()) : undefined;
+  });
+}
+
 /** A 1:1 chat in the list. */
 export function ChatRow(p: ChatRowProps) {
   const { t } = useI18n();
@@ -205,6 +220,7 @@ export function ChatRow(p: ChatRowProps) {
   const size = AVATAR[p.density];
   const pinLabel = p.pinned ? t("chat.menu.unpin") : t("chat.menu.pin");
   const typing = usePeerTypingActivity(p.peerPubKey);
+  const payment = usePaymentLine(p.lastMessage?.paymentId, t);
   const previewId = useId();
   useChosenProfile(p.peerPubKey);
   return (
@@ -259,7 +275,7 @@ export function ChatRow(p: ChatRowProps) {
               {p.lastMessage.systemEvent?.type === "join" ? joinPreview(p, p.lastMessage.systemEvent.pubKey, t)
                 : p.lastMessage.callEvent ? callEventText(t, p.lastMessage.callEvent.type, p.lastMessage.callEvent.hasVideo) ?? p.lastMessage.text
                 : showsCard(p.lastMessage.card) ? cardLine(p.lastMessage.card)
-                : filePreview(p.lastMessage.file, t) ?? previewText(p.lastMessage.text, t)}
+                : payment ?? filePreview(p.lastMessage.file, t) ?? previewText(p.lastMessage.text, t)}
             </span>
           : <span className="italic text-text-muted">{t("chat.noMessages")}</span>}
         status={(muted || p.pinned) && <>
