@@ -3849,13 +3849,15 @@ export class GhostlyNode implements EngineImplementation {
         const request = this.desk.payment(intent.review.requestId);
         if (!request || request.state !== "pending" || request.lightningPending) throw new Error("This request is no longer awaiting payment. Check its status before spending.");
       }
+      // Reach the contact first, as preparing does: until the chat is live again (after a restart, say), its ways of
+      // paying are not known, and Cashu would read as off.
+      await link.requirePaymentSupport();
       if(intent.review.method==="usdt" && !link.supportsUsdtPayments)throw new Error("Reconnect a peer supporting USDT before approving");
       if(intent.review.method==="bark" && !link.supportsBarkPayments)throw new Error("Reconnect a peer supporting Bark before approving");
       if(intent.review.method==="bitcoin" && !link.supportsBitcoinPayments)throw new Error("Reconnect a peer taking on-chain Bitcoin before approving");
       if(intent.review.method==="fedimint" && !link.supportsFedimintPayments)throw new Error("Reconnect a peer taking Fedimint before approving");
       if(intent.review.method==="spark" && !link.supportsSparkPayments)throw new Error("Reconnect a peer taking Spark before approving");
       if(intent.review.method==="cashu" && !link.allowsPayment("cashu"))throw new Error("Cashu is off in this chat");
-      await link.requirePaymentSupport();
     }
     const review=await this.paymentCoordinator.approve(params.id);
     await this.desk.confirmReviewedCashu(review);

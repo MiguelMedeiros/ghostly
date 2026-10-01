@@ -238,6 +238,20 @@ describe("a payment in a chat", () => {
     await expect(node.approvePayment({ id: closedRequest.id })).rejects.toThrow("no longer awaiting payment");
     expect(approve).not.toHaveBeenCalled();
   });
+
+  it("a review approved while the chat is still reconnecting (after a restart) waits for it, and is not told Cashu is off", async () => {
+    const { node } = track(engine());
+    const approve = vi.spyOn(node["paymentCoordinator"], "approve").mockRejectedValue(new Error("reached the approval"));
+    // The data link is not open yet: the contact's ways of paying are not known until it is.
+    const live = { open: false };
+    const link = stubLink({ allowsPayment: vi.fn(() => live.open), requirePaymentSupport: vi.fn(async () => { live.open = true; }) });
+    const chat = addChat(node, link);
+    const review = savedReview({ linkId: chat.id });
+    await intentRepository.put({ review, prepared: {} });
+    await expect(node.approvePayment({ id: review.id })).rejects.toThrow("reached the approval");
+    expect(link.requirePaymentSupport).toHaveBeenCalledBefore(link.allowsPayment);
+    expect(approve).toHaveBeenCalledOnce();
+  });
 });
 
 describe("a Cashu payment that never reached its mint, through the engine", () => {
