@@ -342,7 +342,9 @@ describe("two headless peers", { timeout: 180_000 }, () => {
     await listenB.stop();
   });
 
-  it("the call-echo example answers, greets with its WAV, and echoes the caller a second later", async () => {
+  // The README runs it beside `call auto on`: the daemon answers then, and the example takes the call once it connects.
+  it.each([["answers", false], ["takes an auto-answered call", true]])("the call-echo example %s, greets with its WAV, and echoes the caller a second later", async (_, auto) => {
+    if (auto) ok(await as(alice, "call", "auto", "on", "--from", "bob"));
     const wav = join(alice, "greeting.wav");
     writeFileSync(wav, wavFile(tone(300, 24000, 800), 24000));
     const example = spawn(process.execPath, [join(import.meta.dirname, "../examples/call-echo.mjs"), wav], { env: { ...process.env, GHOSTLY_SOCKET: sockets[alice] }, stdio: ["ignore", "pipe", "pipe"] });
@@ -368,9 +370,11 @@ describe("two headless peers", { timeout: 180_000 }, () => {
       expect(dominantHz(all.subarray(start + 1920 * 100, start + 1920 * 140), 48000)).toBeCloseTo(520, -1);
       ok(await as(bob, "call", "hangup"));
       await expect.poll(() => said, { timeout: 20_000 }).toContain("ended: remote-hangup");
+      expect(said).not.toContain("answer:");
       program.destroy();
     } finally {
       example.kill();
+      if (auto) ok(await as(alice, "call", "auto", "off"));
     }
   });
 
