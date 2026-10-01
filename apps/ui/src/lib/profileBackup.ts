@@ -7,7 +7,7 @@ import { storedBlob, storedSize } from "@ghostly/browser/shared/storedFiles";
 import { restoreArkDatabase, snapshotArkDatabase, type ArkDatabaseSnapshot } from "@ghostly/browser/engine/paymentAdapters/backup";
 import { getPrefix, getStorageProfile, ownsKey } from "./storage";
 import { assertUnlocked, identityKeysOf, profileIdentityKeys } from "./profileData";
-import { baseProfileName, currentProfile, listProfiles, namespaceOf, newProfileId, registerProfile, registryKey, type ProfileEntry } from "./profiles";
+import { currentProfile, listProfiles, namespaceOf, newProfileId, registerProfile, registryKey, storedProfileName, type ProfileEntry } from "./profiles";
 
 /** The decrypted content of a profile bundle (WISP 05). */
 interface ProfilePayload {
@@ -94,7 +94,7 @@ export async function createProfileBackup(passphrase: string, id?: string, lockP
     if (!(await databaseExists(`ghostly-ark-${walletId}`))) continue;
     ark[walletId] = await snapshotArkDatabase(walletId).catch((e: unknown) => Promise.reject(Object.assign(new Error(`Could not read the Ark wallet for the backup: ${e instanceof Error ? e.message : e}`), { cause: e })));
   }
-  const payload: ProfilePayload = { format: "ghostly-profile", version: 1, createdAt: Date.now(), profile: { name: baseProfileName(active ? currentProfile().id : id!) ?? "Profile" }, storage, databases: { peer, ark } };
+  const payload: ProfilePayload = { format: "ghostly-profile", version: 1, createdAt: Date.now(), profile: { name: storedProfileName(active ? currentProfile().id : id!) ?? "Profile" }, storage, databases: { peer, ark } };
   return seal(await encode(payload), passphrase);
 }
 
