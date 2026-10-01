@@ -188,7 +188,7 @@ export function PaymentBubble({ paymentId, peerPubKey, fallbackText }: { payment
           {lnReview && (
             <div data-testid="payment-review" className="rounded-lg bg-black/20 p-2 space-y-1 text-xs">
               <p className="m-0 flex items-center gap-2">{t("payments.bubble.payOverLightning", { amount: formatAmount(payment.amount, t.language), unit: sats })}<NetworkTag network={network} testId="payment-lightning-network" /></p>
-              <p className="m-0 text-text-primary/75">{t("payments.bubble.through", { source: lnReview.source, fee: formatAmount(lnReview.fee, t.language) })}</p>
+              <p className="m-0 text-text-primary/75">{t("payments.bubble.through", { source: lnReview.source, fee: formatAmount(lnReview.fee, t.language), unit: sats })}</p>
               {lnConfirming ? <ConfirmRealMoney what={t("payments.bubble.amountSats", { amount: formatAmount(payment.amount, t.language) })} busy={busy} onSend={() => payLightning(true)} onBack={() => setLnConfirming(false)} /> : (
                 <div className="flex gap-2">
                   <button className={button} data-testid="payment-lightning-approve" disabled={busy} onClick={() => network === "mainnet" ? setLnConfirming(true) : payLightning(false)}>{t("payments.bubble.approve")}</button>
@@ -202,7 +202,7 @@ export function PaymentBubble({ paymentId, peerPubKey, fallbackText }: { payment
               // What the Lightning source would spend, shown before anything is asked of it.
               const quote = await payer.quoteInvoice(payment.invoice!);
               if (quote.amount !== payment.amount) throw new Error(t("payments.bubble.error.amountMismatch"));
-              if (quote.feeReserve > Number(feeInput)) throw new Error(t("payments.bubble.error.feeAbove", { fee: quote.feeReserve }));
+              if (quote.feeReserve > Number(feeInput)) throw new Error(t("payments.bubble.error.feeAbove", { fee: formatAmount(quote.feeReserve, t.language), unit: sats }));
               const ln = payer.getState()?.lightning;
               setLnReview({ fee: quote.feeReserve, source: quote.source && quote.source === ln?.providerId ? (payerCard && ln.name) || ln.alias || ln.label || quote.source : quote.source ?? t("payments.bubble.cashuMints") });
               return;

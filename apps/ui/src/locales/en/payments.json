@@ -32,7 +32,7 @@
     "cashuMints": "the Cashu mints",
     "error": {
       "amountMismatch": "The invoice does not match the requested amount",
-      "feeAbove": "The Lightning fee (up to {{fee}} sats) is above your maximum"
+      "feeAbove": "The Lightning fee (up to {{fee}} {{unit}}) is above your maximum"
     },
     "externalNote": {
       "ark": "Paid from any Ark wallet. Your contact's wallet marks it paid once it sees the money.",
@@ -42,7 +42,7 @@
     "externalTitle": "Scan, copy or open it in a wallet that is not Ghostly",
     "fedimintNoFederation": "Fedimint · you share no federation: Lightning",
     "hide": "Hide",
-    "maxFee": "Maximum fee (sats)",
+    "maxFee": "Maximum fee ({{unit}})",
     "maxGas": "Maximum gas (ETH)",
     "noSharedMint": "No shared configured mint",
     "noWallet": {
@@ -72,7 +72,7 @@
     },
     "takeBack": "Take it back",
     "takeBackTitle": "If your contact never picks it up, the ecash is still yours",
-    "through": "Through {{source}} · fee up to {{fee}} sats",
+    "through": "Through {{source}} · fee up to {{fee}} {{unit}}",
     "title": {
       "requests": "Requests",
       "sentYou": "Sent you",

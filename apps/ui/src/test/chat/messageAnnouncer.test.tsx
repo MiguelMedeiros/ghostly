@@ -2,6 +2,8 @@ import { act, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ANNOUNCE_CLEAR_MS, ANNOUNCE_WINDOW_MS, MessageAnnouncer, type Announceable } from "../../components/chat/MessageAnnouncer";
 import { renderApp } from "../render";
+import { fakeEngine, paymentView } from "../fakeEngine";
+import { TEST_MINT } from "../payments/fixtures";
 
 // covers: app.accessibility, chat.paired.send, groups.send
 
@@ -95,6 +97,15 @@ describe("a new message, read out to a screen reader", () => {
     update([...first, peer("ok")]);
     wait(ANNOUNCE_WINDOW_MS);
     expect(region()).toHaveTextContent("Alice: ok");
+  });
+
+  it("a payment or a request reads as the chat list says it, in the app's language, not the engine's English line", () => {
+    fakeEngine.setState({ payments: { "pay-1": paymentView({ kind: "request", direction: "in", amount: 1_234, network: "testnet", mints: [TEST_MINT] }) } });
+    const view = renderApp(<MessageAnnouncer chat="c" messages={HISTORY} nameOf={nameOf} />, { language: "pt" });
+    view.rerender(<MessageAnnouncer chat="c" messages={[...HISTORY, peer("⚡ Requested 1,234 sats", { paymentId: "pay-1" })]} nameOf={nameOf} />);
+    wait(ANNOUNCE_WINDOW_MS);
+    expect(region()).toHaveTextContent(/^Alice: .*1\.234 sats de teste/);
+    expect(region()).not.toHaveTextContent("Requested");
   });
 
   it("older messages loaded above, an edit or a reaction are not news", () => {

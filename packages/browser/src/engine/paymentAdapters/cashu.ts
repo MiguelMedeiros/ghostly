@@ -1,4 +1,4 @@
-import type { PaymentAdapter, PaymentReview, PaymentTarget } from '@ghostly/core';
+import { engineError, type PaymentAdapter, type PaymentReview, type PaymentTarget } from '@ghostly/core';
 import { mintNetwork } from '../../shared/mints';
 import type { CashuWallet, CashuPrepared } from '../wallet';
 
@@ -26,7 +26,7 @@ export class CashuAdapter implements PaymentAdapter<CashuPrepared> {
   // A test mint (the public ones, or one on this machine) pays in test sats, named cashu-test; any other in sats.
   if(target.method!=='cashu' || target.network!==(mintNetwork(target.provider)==='testnet'?'cashu-test':'bitcoin'))throw new Error('Cashu mint/network mismatch');
   const result=await this.wallet.prepareReviewedCashu(target.provider,amount);
-  if(result.fee>feeCap)throw new Error('Cashu fee exceeds your limit');
+  if(result.fee>feeCap)throw engineError('cashuFeeAboveLimit');
   return result;
  }
  async execute(review:PaymentReview,prepared:CashuPrepared,persist?:()=>Promise<void>){
