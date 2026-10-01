@@ -112,6 +112,8 @@ test("the extension keeps several profiles: create, switch, restore a backup int
   await backups.getByTestId("restore-file").setInputFiles({ name: file.suggestedFilename(), mimeType: "application/json", buffer: bundle });
   await backups.getByTestId("restore-passphrase").fill(PASSPHRASE);
   await backups.getByTestId("restore-go").click();
+  // Pessoal is still here: the warning first, then a copy anyway (WISP 05 § Restoring on the same device).
+  await backups.getByTestId("restore-same-device").getByTestId("restore-copy").click();
   // Its name alone in the field, and "Restored" a tag beside it.
   await expect(page.getByTestId("profile-restored-tag")).toHaveText("Restored", { timeout: 60_000 });
   await expect(profileName(page)).toHaveValue("Pessoal");

@@ -72,6 +72,16 @@ The decrypted, decompressed payload is JSON:
 - Payment attempts that were `pending`, `submitted` or `unknown` in the bundle are marked `unknown`: an older backup cannot prove an attempt was never sent, and nothing restored may authorize a new send ([200](200-payments.md)).
 - After restore the client switches to the new profile ([04](04-profiles.md)).
 
+### Restoring on the same device
+
+A restored copy keeps the chat keys of the profile it was made from (and its DID key, [3xx](3xx-did-dht.md)). When that profile is still on the device, both would answer the same contacts as one person (see Two live copies). So before writing anything, the client opens the bundle and compares it with every profile of the device, locked ones included: a profile matches when it shares a chat's participation key (or, for a chat from before them, its chat key) or the DID key with the bundle. Only the matching profiles' names are shown. With a match, the client says both would act as the same person to contacts, suggests replacing the original or not running both, and offers:
+
+- **Replace the original**: the bundle is restored as a new profile and the client switches to it, then opens the original's removal ([04](04-profiles.md) § Remove) with its usual checks (what it holds, a backup first, its name, its lock password). The original is never removed without them: it may hold newer wallet state than the bundle. Not offered for the first profile, which cannot be removed; the client says to clear its data instead. Not offered where the client cannot switch profiles.
+- **Restore as a copy anyway**: restored as without a match.
+- **Cancel**: nothing is written.
+
+Without a match the bundle is restored at once.
+
 ## Security and operation
 
 - **Two live copies.** Restoring on a second device while the original still runs makes both answer for the same chats and hold the same keys. Contacts may see messages arrive at one copy only; wallets may race on the same funds. Treat a bundle as a move unless you know both copies will not run together.
@@ -80,7 +90,7 @@ The decrypted, decompressed payload is JSON:
 
 ## Implementation status
 
-The web, desktop and browser extension clients create bundles from the active profile (or another one, with its lock password), restore them into a new profile and switch to it; storage through the local file and S3-compatible adapters. Covered by unit tests (round trip of every store including file blobs and wallet records, tag-shaped data, Ark database relocation, rejected passphrase, tampered ciphertext and header) and end-to-end tests that back a profile up to a file and to an S3-compatible server and restore it (the extension: to a file).
+The web, desktop and browser extension clients create bundles from the active profile (or another one, with its lock password), restore them into a new profile and switch to it; storage through the local file and S3-compatible adapters. Covered by unit tests (round trip of every store including file blobs and wallet records, tag-shaped data, Ark database relocation, rejected passphrase, tampered ciphertext and header, a bundle matched to the profile it was made from by a chat key or the DID key and not to another), UI tests of the same-device warning and its three answers, and end-to-end tests that back a profile up to a file and to an S3-compatible server and restore it (the extension: to a file).
 
 ## Open decisions
 

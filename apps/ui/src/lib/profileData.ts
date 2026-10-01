@@ -1,3 +1,4 @@
+import { identityFromSeedB64 } from "@ghostly/core";
 import { databaseExists } from "@ghostly/browser/backup/database";
 import { dropFileSpace } from "@ghostly/browser/shared/fileBytes";
 import { activeProfileId, chosenProfileId, listProfiles, namespaceOf, prefixOf, settingsKeyFor, unregisterProfile } from "./profiles";
@@ -67,6 +68,40 @@ function drop(name: string): Promise<void> {
 const databaseOf = (id: string) => (namespaceOf(id) ? `ghostly_${namespaceOf(id)}` : "ghostly");
 /** A profile's peer database (WISP 04). */
 export const profileDatabase = databaseOf;
+
+/**
+ * The public keys a profile acts with toward others: each chat's participation key (or, for a chat from before them,
+ * its own chat key) and its DID's key. Two profiles sharing one of them answer as the same person, which is what a
+ * backup restored on the device it was made on would do (WISP 05). Read from the stored records, nothing started.
+ */
+export function identityKeysOf(links: readonly unknown[], did: unknown): Set<string> {
+  const keys = new Set<string>();
+  for (const link of links) {
+    const { participationSeed, seedB64 } = (link ?? {}) as { participationSeed?: unknown; seedB64?: unknown };
+    const seed = typeof participationSeed === "string" ? participationSeed : typeof seedB64 === "string" ? seedB64 : null;
+    if (!seed) continue;
+    try { keys.add(`chat:${identityFromSeedB64(seed).pubKeyZ32}`); } catch { /* not a seed: nothing to compare */ }
+  }
+  const didKey = (did as { publicKey?: unknown } | null | undefined)?.publicKey;
+  if (typeof didKey === "string" && didKey) keys.add(`did:${didKey}`);
+  return keys;
+}
+
+/** `identityKeysOf` a profile of this space, from its peer database (read only, closed at once). */
+export async function profileIdentityKeys(id: string): Promise<Set<string>> {
+  const db = await openExisting(databaseOf(id));
+  if (!db) return new Set();
+  try {
+    const names = ["links", "settings"].filter((name) => db.objectStoreNames.contains(name));
+    if (!names.length) return new Set();
+    const tx = db.transaction(names, "readonly");
+    const [links, did] = await Promise.all([
+      names.includes("links") ? request(tx.objectStore("links").getAll()) : Promise.resolve([]),
+      names.includes("settings") ? request(tx.objectStore("settings").get("profileDid")) : Promise.resolve(undefined),
+    ]);
+    return identityKeysOf(links, did);
+  } finally { db.close(); }
+}
 
 /**
  * The storage outside its peer database that a profile's wallets name, current and retired: each Ark wallet's

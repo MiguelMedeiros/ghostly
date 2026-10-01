@@ -6,8 +6,8 @@ import { SMALL_FILE_BYTES } from "@ghostly/browser/shared/fileBytes";
 import { storedBlob, storedSize } from "@ghostly/browser/shared/storedFiles";
 import { restoreArkDatabase, snapshotArkDatabase, type ArkDatabaseSnapshot } from "@ghostly/browser/engine/paymentAdapters/backup";
 import { getPrefix, getStorageProfile, ownsKey } from "./storage";
-import { assertUnlocked } from "./profileData";
-import { baseProfileName, currentProfile, namespaceOf, newProfileId, registerProfile, registryKey, type ProfileEntry } from "./profiles";
+import { assertUnlocked, identityKeysOf, profileIdentityKeys } from "./profileData";
+import { baseProfileName, currentProfile, listProfiles, namespaceOf, newProfileId, registerProfile, registryKey, type ProfileEntry } from "./profiles";
 
 /** The decrypted content of a profile bundle (WISP 05). */
 interface ProfilePayload {
@@ -119,13 +119,46 @@ export function backupFileName(profileName: string): string {
   return `${base || "profile"}.ghostly-backup`;
 }
 
+/** A bundle opened with its passphrase and checked, not restored yet. */
+export interface OpenedProfileBackup { readonly name: string; readonly payload: ProfilePayload }
+
+/** Opens a bundle with its passphrase, without writing anything. Throws when it is not a profile's. */
+export async function openProfileBackup(text: string, passphrase: string): Promise<OpenedProfileBackup> {
+  const payload = decode(await open(text, passphrase)) as ProfilePayload;
+  if (payload?.format !== "ghostly-profile" || payload.version !== 1 || typeof payload.profile?.name !== "string" || !payload.storage || typeof payload.storage !== "object" || !payload.databases) throw new Error("This backup does not hold a profile");
+  return { name: payload.profile.name, payload };
+}
+
+/**
+ * The profiles of this device that the bundle is a copy of: those sharing a chat key or the DID key with it (WISP 05
+ * § Restoring on the same device). A copy restored beside one of them would answer its contacts as the same person.
+ * Every profile is compared, a locked one too; only its name is shown.
+ */
+export async function sameIdentityProfiles(opened: OpenedProfileBackup): Promise<ProfileEntry[]> {
+  const peer = opened.payload.databases.peer;
+  const valuesOf = (name: string) => peer?.stores.find((store) => store.name === name);
+  const settings = valuesOf("settings");
+  const didAt = settings?.keys.findIndex((key) => key === "profileDid") ?? -1;
+  const theirs = identityKeysOf(valuesOf("links")?.values ?? [], didAt >= 0 ? settings!.values[didAt] : undefined);
+  if (!theirs.size) return [];
+  const found: ProfileEntry[] = [];
+  for (const entry of listProfiles()) {
+    const ours = await profileIdentityKeys(entry.id).catch(() => new Set<string>());
+    if ([...ours].some((key) => theirs.has(key))) found.push(entry);
+  }
+  return found;
+}
+
 /**
  * Brings a bundle back as a new profile of this space, and returns it. Nothing existing is replaced.
  * Ark wallet databases move to fresh ids; unfinished payment attempts are kept as unknown.
  */
 export async function restoreProfileBackup(text: string, passphrase: string): Promise<ProfileEntry> {
-  const payload = decode(await open(text, passphrase)) as ProfilePayload;
-  if (payload?.format !== "ghostly-profile" || payload.version !== 1 || typeof payload.profile?.name !== "string" || !payload.storage || typeof payload.storage !== "object" || !payload.databases) throw new Error("This backup does not hold a profile");
+  return restoreOpenedBackup(await openProfileBackup(text, passphrase));
+}
+
+/** `restoreProfileBackup` of a bundle already opened (after `sameIdentityProfiles` was asked, say). */
+export async function restoreOpenedBackup({ payload }: OpenedProfileBackup): Promise<ProfileEntry> {
   const id = newProfileId(), ns = namespaceOf(id);
 
   // Every Ark and Bark wallet gets a new id, with or without a copy of its database: a restored profile must never

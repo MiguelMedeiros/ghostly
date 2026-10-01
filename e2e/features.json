@@ -91,6 +91,7 @@
     {"id":"backup.passphrase-rules","wisp":"05","kind":"feature","clients":["web","extension","desktop"],"infra":[],"title":"Backup passphrase rules; a wrong passphrase restores nothing"},
     {"id":"backup.profile.file","wisp":"1001","kind":"feature","clients":["web","extension","desktop"],"infra":[],"title":"A whole profile backed up to a file and restored as a new profile with its passphrase"},
     {"id":"backup.profile.s3","wisp":"1002","kind":"feature","clients":["web","extension","desktop"],"infra":["s3"],"title":"A whole profile backed up to S3 and restored as a new profile"},
+    {"id":"backup.profile.same-device","wisp":"05","kind":"feature","clients":["web","extension","desktop"],"infra":[],"title":"Restoring a backup of a profile still on the device warns that both would act as the same person, and offers Replace, a copy, or Cancel"},
     {"id":"calls.audio","wisp":"601","kind":"feature","clients":["web","extension","desktop"],"infra":["camera"],"title":"Audio call"},
     {"id":"calls.cancel","wisp":"601","kind":"feature","clients":["web","extension","desktop"],"infra":["camera"],"title":"The caller hangs up while it rings / cancels an unanswered call, devices released"},
     {"id":"calls.decline","wisp":"601","kind":"feature","clients":["web","extension","desktop"],"infra":["camera"],"title":"Declining leaves neither side on a call"},
