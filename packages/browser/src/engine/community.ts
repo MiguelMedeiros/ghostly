@@ -842,8 +842,10 @@ export class Communities {
       // neither would get through; so each attempt belongs to one hub, in turns of `KNOCK_SLOT_MS`:
       // the door first, then the others in the order they rank for this joiner, round again. A hub
       // opens only early in its turn and gives up before it ends, so turns never overlap.
+      // A lone door has no turn to leave to another hub: it answers again as soon as its last attempt is over (a joiner
+      // away when it answered, back after the attempt was given up, waited up to two minutes for the next turn).
       const waited = now - first, order = [door, ...rankHubs(key, hubs.filter(k => k !== door))];
-      const turn = Math.floor(waited / KNOCK_SLOT_MS) % order.length, early = waited % KNOCK_SLOT_MS < KNOCK_SLOT_OPEN_MS;
+      const turn = Math.floor(waited / KNOCK_SLOT_MS) % order.length, early = order.length === 1 || waited % KNOCK_SLOT_MS < KNOCK_SLOT_OPEN_MS;
       if (order[turn] !== s.myKey || !early || (waited >= KNOCK_SLOT_MS && !stillKnocking)) continue;
       if (live.pendingEntries.size >= MAX_PENDING_ENTRIES) break;
       // A hub with no room for one more member (its budget of connections) lets the next hub in turn answer.
@@ -873,7 +875,9 @@ export class Communities {
     const joining = group.joining!;
     const first = !this.lastKnock.has(group.id);
     this.lastKnock.set(group.id, now);
-    if (!first && now - joining.since < this.timings.patienceMs) this.host.expectPeer?.(joining.linkId);
+    // The first knock of this run too: after a restart the entry session starts again at the background pace, and the
+    // door's side, opened on this knock, waited up to half a minute for its answer.
+    if (first || now - joining.since < this.timings.patienceMs) this.host.expectPeer?.(joining.linkId);
     const me = identityFromSeedB64(joining.seedB64).pubKeyZ32, link = { g: group.id, host: joining.host };
     const started = Date.now();
     const read = async (n: number) => { const record = knockRecord(link, n); return { record, knocks: readKnocks(record, (await this.host.resolve(knockIdentity(record).pubKeyZ32, !first)) ?? []) }; };
