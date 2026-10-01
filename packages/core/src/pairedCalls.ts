@@ -24,6 +24,10 @@ export function parsePairedCallFrame(frame: Record<string, unknown>, now = Date.
   return parseCallSignal(signal, now) ? signal : null;
 }
 
+function signalKind(signal: string): unknown {
+  try { return (JSON.parse(signal) as { t?: unknown }).t; } catch { return undefined; }
+}
+
 /**
  * This side's latest call signal. What could not go (the session dropped between two frames) goes on the
  * next session while it is still fresh, as the `_call` record of a compatibility chat is read on the next
@@ -31,15 +35,37 @@ export function parsePairedCallFrame(frame: Record<string, unknown>, now = Date.
  */
 export class PairedCalls {
   private latest: { signal: string; at: number } | null = null;
+  /** When this side last said anything about a call, a clear included. */
+  private saidAt = 0;
+  /** The contact's latest signal on a session: its kind, and when it came. */
+  private peer: { kind: unknown; at: number } | null = null;
 
   constructor(private readonly now: () => number = Date.now) {}
 
   /** A new signal to send (null clears it). Returns the frame to send now, if any. */
   set(signal: string | null): PairedCallFrame | null {
+    this.saidAt = this.now();
     if (signal === null) { this.latest = null; return null; }
     if (signal.length > MAX_PAIRED_CALL_SIGNAL) throw new Error("Call signal too large");
-    this.latest = { signal, at: this.now() };
+    this.latest = { signal, at: this.saidAt };
     return { t: PAIRED_CALL_FRAME, s: signal };
+  }
+
+  /** A signal the contact sent (one `parsePairedCallFrame` took). */
+  heard(signal: string): void {
+    this.peer = { kind: signalKind(signal), at: this.now() };
+  }
+
+  /**
+   * Whether a call is on, as the latest signal of either side says: an answer or a picture change, or an offer still
+   * fresh enough to ring. A hang-up, a clear, or an offer nobody answered in time ends it. Read by kind, as `hangUp` is:
+   * the media runs on a connection of its own, so an hour-long call shows nothing else on the session.
+   */
+  get on(): boolean {
+    const own = { kind: this.latest ? signalKind(this.latest.signal) : "h", at: this.saidAt };
+    const last = this.peer && this.peer.at > own.at ? this.peer : own;
+    if (last.kind === "a" || last.kind === "v") return true;
+    return last.kind === "o" && this.now() - last.at <= CALL_SIGNAL_MAX_AGE_MS;
   }
 
   /**
