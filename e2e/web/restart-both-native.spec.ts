@@ -31,18 +31,27 @@ test("a chat live before both apps restart is live again, with more chats betwee
   const [linux, web] = await Promise.all([peer("linux", { irohRelay: relay, beforeOpen: noWebRtc }), peer("web", { irohRelay: relay })]);
   expect(await linux.page.evaluate(() => typeof (window as unknown as { RTCPeerConnection?: unknown }).RTCPeerConnection)).toBe("undefined");
 
-  // The chats made before, each paired.
-  for (let i = 0; i < OTHER_CHATS; i++) {
-    await link(web, linux);
-    await say(linux, `chat ${i}`);
-    await expect(chat(web).getByText(`chat ${i}`)).toBeVisible({ timeout: 60_000 });
-  }
-  // The one they talk in now, live over Iroh on both sides.
+  // The one they talk in, live over Iroh on both sides. Made first: an app never takes a native listener from a chat
+  // whose session is live, so a chat made while eight others are live over Iroh stays on the DHT until one of them
+  // ends (the CI full runs on 2072fff1: chat ten, made last, never went live).
   await link(linux, web);
   await say(web, "hello over Iroh");
   await expect(chat(linux).getByText("hello over Iroh")).toBeVisible({ timeout: 60_000 });
   await Promise.all([onIroh(linux, 120_000), onIroh(web, 120_000)]);
   const urls = new Map([linux, web].map(p => [p, p.page.url()] as const));
+
+  // The other chats, each paired: they take the listeners left, and the last ones find none.
+  for (let i = 0; i < OTHER_CHATS; i++) {
+    await link(web, linux);
+    await say(linux, `chat ${i}`);
+    await expect(chat(web).getByText(`chat ${i}`)).toBeVisible({ timeout: 60_000 });
+  }
+  // Back to the chat they talk in, still live, and written in last.
+  for (const p of [linux, web]) await p.page.evaluate((hash) => { location.hash = hash; }, new URL(urls.get(p)!).hash);
+  await expect(chat(linux).getByText("hello over Iroh")).toBeVisible();
+  await Promise.all([onIroh(linux, 30_000), onIroh(web, 30_000)]);
+  await say(web, "still here");
+  await expect(chat(linux).getByText("still here")).toBeVisible({ timeout: 30_000 });
 
   for (const how of ["reload", "reopen"] as const) {
     const started = Date.now();
