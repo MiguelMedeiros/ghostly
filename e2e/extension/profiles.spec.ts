@@ -20,9 +20,14 @@ async function openProfile(page: Page): Promise<void> {
   await expect(page.getByTestId("profile-page")).toBeVisible();
 }
 
-/** Switches from the Profile page; the app starts again as that profile. */
+/**
+ * Switches from the Profile page; the app starts again as that profile. The page reloads for it: a restored copy's
+ * field holds the same name as its original (#969), so the field alone could say the name before the switch is done.
+ */
 async function switchTo(page: Page, name: string): Promise<void> {
+  const reloaded = page.waitForEvent("load", { timeout: 60_000 });
   await row(page, name).getByTestId("profile-switch").click();
+  await reloaded;
   await expect(profileName(page)).toHaveValue(name, { timeout: 60_000 });
 }
 
@@ -69,9 +74,11 @@ test("the extension keeps several profiles: create, switch, restore a backup int
   await expect(chat(web).getByText("hi from the extension")).toBeVisible({ timeout: 60_000 });
 
   await openProfile(page);
-  await profileName(page).fill("Pessoal");
+  // A name of the person's own: not the first profile's built-in name in any language ("Pessoal", "Personal"), which a
+  // restore reads as the built-in one (WISP 04, #985).
+  await profileName(page).fill("Casa");
   await profileName(page).press("Enter");
-  await expect(page.getByTestId("account-profile")).toHaveAttribute("title", /Pessoal/);
+  await expect(page.getByTestId("account-profile")).toHaveAttribute("title", /Casa/);
   await expect(page.getByTestId("profile-links")).toContainText("1 chat");
   await expect(page.getByText("One profile only in this client, for now.")).toHaveCount(0);
 
@@ -100,7 +107,7 @@ test("the extension keeps several profiles: create, switch, restore a backup int
   await openProfile(page);
 
   // Back to the first: its chat, and the peer that answers the contact is the first profile's again.
-  await switchTo(page, "Pessoal");
+  await switchTo(page, "Casa");
   await expect(page.getByTestId("profile-links")).toContainText("1 chat");
   await openChatAt(ext, chatHash);
   await expect(chat(ext).getByText("before the backup")).toBeVisible();
@@ -112,11 +119,11 @@ test("the extension keeps several profiles: create, switch, restore a backup int
   await backups.getByTestId("restore-file").setInputFiles({ name: file.suggestedFilename(), mimeType: "application/json", buffer: bundle });
   await backups.getByTestId("restore-passphrase").fill(PASSPHRASE);
   await backups.getByTestId("restore-go").click();
-  // Pessoal is still here: the warning first, then a copy anyway (WISP 05 § Restoring on the same device).
+  // Casa is still here: the warning first, then a copy anyway (WISP 05 § Restoring on the same device).
   await backups.getByTestId("restore-same-device").getByTestId("restore-copy").click();
   // Its name alone in the field, and "Restored" a tag beside it.
   await expect(page.getByTestId("profile-restored-tag")).toHaveText("Restored", { timeout: 60_000 });
-  await expect(profileName(page)).toHaveValue("Pessoal");
+  await expect(profileName(page)).toHaveValue("Casa");
   await expect(rows(page)).toHaveCount(3);
   await expect(page.getByTestId("profile-links")).toContainText("1 chat");
   await openChatAt(ext, chatHash);
@@ -128,34 +135,35 @@ test("the extension keeps several profiles: create, switch, restore a backup int
 
   // And back to the first profile, which still has its own.
   await openProfile(page);
-  await switchTo(page, "Pessoal");
+  await switchTo(page, "Casa");
+  await expect(page.getByTestId("profile-restored-tag")).toHaveCount(0);
   await expect(rows(page)).toHaveCount(3);
   await openChatAt(ext, chatHash);
   await expect(chat(ext).getByText("back home").first()).toBeVisible();
 
   // The account bar's switcher (a click on its Profile place) does the same in one tap, and the peer follows it too.
   await page.getByTestId("account-profile").click();
-  await page.getByTestId("profile-switcher").getByTestId("profile-switcher-item").filter({ hasText: "Pessoal (restored)" }).click();
-  await expect(page.getByTestId("account-profile")).toHaveAttribute("title", /: Pessoal \(restored\)$/, { timeout: 60_000 });
+  await page.getByTestId("profile-switcher").getByTestId("profile-switcher-item").filter({ hasText: "Casa (restored)" }).click();
+  await expect(page.getByTestId("account-profile")).toHaveAttribute("title", /: Casa \(restored\)$/, { timeout: 60_000 });
   await openChatAt(ext, chatHash);
   await reaches(web, ext, "switched in one tap");
   await page.getByTestId("account-profile").click();
-  await page.getByTestId("profile-switcher").getByTestId("profile-switcher-item").filter({ hasText: "Pessoal" }).filter({ hasNotText: "restored" }).click();
-  await expect(page.getByTestId("account-profile")).toHaveAttribute("title", /: Pessoal$/, { timeout: 60_000 });
+  await page.getByTestId("profile-switcher").getByTestId("profile-switcher-item").filter({ hasText: "Casa" }).filter({ hasNotText: "restored" }).click();
+  await expect(page.getByTestId("account-profile")).toHaveAttribute("title", /: Casa$/, { timeout: 60_000 });
 
   // Another tab of the extension follows a switch made in this one: one peer, one profile in use.
   const other = await ext.context.newPage();
   await openProfile(page);
   await other.goto(page.url().replace(/#.*$/, "#/profile"));
-  await expect(profileName(other)).toHaveValue("Pessoal");
+  await expect(profileName(other)).toHaveValue("Casa");
   await switchTo(page, "Work");
   await expect(profileName(other)).toHaveValue("Work", { timeout: 60_000 });
-  await switchTo(page, "Pessoal");
-  await expect(profileName(other)).toHaveValue("Pessoal", { timeout: 60_000 });
+  await switchTo(page, "Casa");
+  await expect(profileName(other)).toHaveValue("Casa", { timeout: 60_000 });
   await other.close();
 
   // Deleting a profile: never the one in use; the other one goes with its database.
-  await expect(row(page, "Pessoal").getByTestId("profile-delete")).toHaveCount(0);
+  await expect(row(page, "Casa").getByTestId("profile-delete")).toHaveCount(0);
   await row(page, "Work").getByTestId("profile-delete").click();
   const dialog = page.getByTestId("delete-profile");
   await dialog.getByTestId("delete-profile-confirm").fill("Work");
