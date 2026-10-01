@@ -214,6 +214,56 @@ describe.each(["iroh", "webrtc"] as const)("a paired chat over %s after one app 
   });
 });
 
+/**
+ * The Linux Desktop (no WebRTC, the lower key here) and the web app, a chat live over Iroh between them; both go, the web
+ * app is back first and knocks on the Desktop, which is not there yet. The Desktop is back 30 s later and knocks in turn:
+ * its connection is accepted, then nothing crosses it (a relay path that died with the handshake). The web app refused
+ * it after `UNPROVEN_AUTH_MS`, but the Desktop held it until QUIC's idle timeout, and dialled again only then: live
+ * 34.6 s after it started (Omarchy, 2026-10-01, web first).
+ */
+describe("the web app back first, the Desktop's knock on a path that dies", () => {
+  async function webFirst(record?: { afterMs: number }) {
+    const world = { pkarr: new MemoryPkarr(DESKTOP_NETWORK), native: new NativeWorld() };
+    // An Iroh dial to an endpoint that is not running gives up after 20 s.
+    world.native.dialFailMs = 20_000;
+    const made = invitationWhere("inviter");
+    let desktop = startApp(world, "desktop", made.inviter, { side: made.joiner, name: "web" }, "iroh", emptyDhtDeliveryState());
+    let web = startApp(world, "web", made.joiner, { side: made.inviter, name: "desktop" }, "iroh", emptyDhtDeliveryState());
+    expect(await until(() => desktop.link.isDataLinkOpen && web.link.isDataLinkOpen, 120_000)).toBeLessThan(Infinity);
+    await run(10_000);
+    await quit(world, web, "graceful");
+    await quit(world, desktop, "crash");
+    await run(5_000);
+    web = startApp(world, "web", made.joiner, { side: made.inviter, name: "desktop" }, "iroh", web.dhtState, true);
+    await run(30_000);
+    world.native.deadPaths.add("desktop");
+    desktop = startApp(world, "desktop", made.inviter, { side: made.joiner, name: "web" }, "iroh", desktop.dhtState, true);
+    // The web app's capability record, read a few seconds after the knock went out, says how to dial it now.
+    if (record) setTimeout(() => desktop.link.learnPeerTransports(["iroh/1"], { "iroh/1": { id: "web:iroh/1", relay: "https://relay2.test./", addresses: [] } }, true), record.afterMs);
+    let rejected = false;
+    const liveMs = await until(() => {
+      rejected ||= (desktop.link as unknown as { securityRejected: boolean }).securityRejected;
+      return desktop.link.isDataLinkOpen && web.link.isDataLinkOpen;
+    }, 120_000);
+    return { liveMs, rejected };
+  }
+
+  it("the Desktop gives the knock up as the web app does, and dials again at once", async () => {
+    const { liveMs, rejected } = await webFirst();
+    // Before: 31.4 s (the knock held until QUIC's idle timeout). After: 15.5 s.
+    expect(liveMs, "from the Desktop's start to live on both sides").toBeLessThanOrEqual(UNPROVEN_AUTH_MS + 2_000);
+    // A handshake that never finished is no rejection of the contact (which would stop the chat's DHT delivery too).
+    expect(rejected).toBe(false);
+  }, 240_000);
+
+  it("a newer way to dial the web app, read while the knock still waits, is dialled at once", async () => {
+    const { liveMs, rejected } = await webFirst({ afterMs: 9_000 });
+    // Before: 31.4 s. After: 9.6 s, dialled as the record is read.
+    expect(liveMs, "from the Desktop's start to live on both sides").toBeLessThanOrEqual(11_000);
+    expect(rejected).toBe(false);
+  }, 240_000);
+});
+
 describe("coming back after a restart, the edges", () => {
   it("two apps that restart together both knock, and settle on the lower key's connection", async () => {
     const world = { pkarr: new MemoryPkarr(DESKTOP_NETWORK), native: new NativeWorld() };
