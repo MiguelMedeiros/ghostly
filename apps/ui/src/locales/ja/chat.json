@@ -267,6 +267,7 @@
     "invoiceSats": "⚡ Lightning 請求書 · {{amount}} sats",
     "lightningAddress": "Lightning アドレス",
     "lightningOffer": "⚡ Lightning オファー",
+    "payment": "⚡ {{what}}：{{amount}}",
     "realMoney": "本物のお金",
     "sats": "{{amount}} sats",
     "testMoney": "テスト用のお金",

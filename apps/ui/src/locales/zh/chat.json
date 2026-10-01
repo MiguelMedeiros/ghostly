@@ -267,6 +267,7 @@
     "invoiceSats": "⚡ Lightning 发票 · {{amount}} sats",
     "lightningAddress": "Lightning 地址",
     "lightningOffer": "⚡ Lightning 报价",
+    "payment": "⚡ {{what}}：{{amount}}",
     "realMoney": "真实资金",
     "sats": "{{amount}} sats",
     "testMoney": "测试资金",

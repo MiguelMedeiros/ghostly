@@ -267,6 +267,7 @@
     "invoiceSats": "⚡ فاتورة Lightning · {{amount}} ساتس",
     "lightningAddress": "عنوان Lightning",
     "lightningOffer": "⚡ عرض Lightning",
+    "payment": "⚡ {{what}} {{amount}}",
     "realMoney": "أموال حقيقية",
     "sats": "{{amount}} ساتس",
     "testMoney": "أموال تجريبية",
