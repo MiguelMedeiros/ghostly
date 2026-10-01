@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
 import { useSettings } from "../../contexts/SettingsContext";
 import { DeleteProfileDialog } from "../../components/DeleteProfileDialog";
@@ -28,6 +28,8 @@ function Language({ to }: { to: Language }) {
 }
 
 describe("a restored profile's name field", () => {
+  afterEach(() => { vi.restoreAllMocks(); });
+
   it.each([
     ["pt", "Restaurado", "Work (restaurado)"],
     ["es", "Restaurado", "Work (restaurado)"],
@@ -94,6 +96,5 @@ describe("a restored profile's name field", () => {
     expect(screen.getByTestId("delete-profile-confirm").getAttribute("placeholder")).not.toContain("restaurado");
     await user.type(screen.getByTestId("delete-profile-confirm"), "Work");
     expect(screen.getByTestId("delete-profile-go")).toBeEnabled();
-    vi.restoreAllMocks();
   });
 });
