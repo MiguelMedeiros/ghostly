@@ -195,6 +195,13 @@ export const CLEAR_WITHDRAW_MS = 6_000;
  */
 const ACTIVE_SLOT_RETRY_MS = 3_000;
 /**
+ * Every native listener taken, each by a chat live over it: the chat in use (on screen, or a text going or coming in
+ * it) takes the one of the chat whose session has gone unused longest, once that is this long (no text, receipt,
+ * typing, reaction or file; never with a call on). It is also how long a listener taken that way is kept from going
+ * straight back: a session that just started has been unused for none of it, and one still dialling is not taken from.
+ */
+export const NATIVE_HOLD_MS = 2 * 60_000;
+/**
  * How long a chat live when the app last ran may take to be live again before that stretch counts as over
  * (`TransportLog.notBackAfterRestart`): past the contact's liveness bound (three pings missed), the session it held is
  * gone too. Shorter, an app started twice in quick succession would not knock the second time on a contact still
@@ -242,6 +249,8 @@ interface LiveLink {
   transportLog?: TransportLog;
   /** A group's entry session whose admission is done: it closes once its data link does (`GroupsHost.entryDone`). */
   entryDone?: boolean;
+  /** When this chat last took a native listener from an idle live session (`ensureNativeEndpoints`), by transport. */
+  nativeTakenAt?: Partial<Record<NativeTransport, number>>;
 }
 
 /** What one peer has sent us, so it can neither fill the disk nor reuse an id. */
@@ -2066,6 +2075,7 @@ export class GhostlyNode implements EngineImplementation {
   private async sendChatText(live: LiveLink, trimmed: string, timestamp: number, preview?: LinkPreview, reply?: MessageReply, forwarded?: number, card?: StatusCard): Promise<{ error: string | null; refused?: boolean; messageId?: string }> {
     const { link } = live, linkId = live.stored.id;
     if (!link) return { error: "You are offline" };
+    this.chatInUse(live);
     const bytes = new TextEncoder().encode(trimmed).length;
     if (bytes > LIMITS.maxChatMessageBytes) return { error: `Message exceeds ${LIMITS.maxChatMessageBytes} UTF-8 bytes.`, refused: true };
     const stop = this.chatStopped(live);
@@ -4680,6 +4690,8 @@ export class GhostlyNode implements EngineImplementation {
             live.stored = { ...live.stored, inviteCode: undefined };
             void db.patchLink(linkId, { inviteCode: undefined });
           }
+          // A text over the DHT: the chat is in use, and takes a listener to go live as the chat on screen would.
+          if (message.via !== "datalink") this.chatInUse(live);
           return this.storeMessage({
             linkId,
             id: `peer_${message.id ?? message.timestamp}`,
@@ -4909,7 +4921,19 @@ export class GhostlyNode implements EngineImplementation {
     this.emitState();
   }
 
-  private ensureNativeEndpoints(linkId: string): Promise<void> {
+  /**
+   * A text going or coming in a 1:1 chat with no live session: the chat is in use, and takes the native listeners it
+   * lacks as the chat on screen would (a bot answering its ninth contact has no chat on screen).
+   */
+  private chatInUse(live: LiveLink): void {
+    const link = live.link;
+    if (live.stored.group || !link || link.isDataLinkOpen || !this.keepsNativeEndpoints(live.stored.id, live.stored)) return;
+    if (Object.keys(this.nativeFactories).every(t => link.availableTransports.includes(t as NativeTransport))) return;
+    void this.ensureNativeEndpoints(live.stored.id, true);
+  }
+
+  /** `inUse`: a text is going or coming in the chat now, which counts as the chat on screen does for taking a listener. */
+  private ensureNativeEndpoints(linkId: string, inUse = false): Promise<void> {
     const expected = this.links.get(linkId)?.link;
     const operation = this.nativeQueue.then(async () => {
       const live = this.links.get(linkId), link = live?.link;
@@ -4930,22 +4954,39 @@ export class GhostlyNode implements EngineImplementation {
           // before group links went native (WISP 9xx § Transports). One that finds none waits for a slot.
           if (group && (owners.length >= NATIVE_SLOTS || owners.filter(other => other.stored.group).length >= GROUP_NATIVE_SLOTS)) { full = true; continue; }
           if (owners.length >= NATIVE_SLOTS) {
+            const now = Date.now();
+            const taking = !group && (this.activeLinkId === linkId || inUse);
             // A chat takes a slot from a group's link first, one that carries no session: the link waits for another.
             const groupVictim = owners.filter(other => other.stored.group && other.link?.canReleaseEndpoint(key))
               .sort((a, b) => (a.link?.isDataLinkOpen ? 1 : 0) - (b.link?.isDataLinkOpen ? 1 : 0))[0];
-            const victim = groupVictim ?? (this.activeLinkId === linkId ? owners
-              .filter(other => other !== live && other.stored.id !== this.activeLinkId && other.link?.canReleaseEndpoint(key))
+            // Then from a chat that carries none, unless that chat took it from an idle session moments ago (no ping-pong).
+            const victim = groupVictim ?? (taking ? owners
+              .filter(other => other !== live && other.stored.id !== this.activeLinkId && other.link?.canReleaseEndpoint(key)
+                && now - (other.nativeTakenAt?.[key] ?? 0) >= NATIVE_HOLD_MS)
               .sort((a, b) => a.lastMessageAt - b.lastMessageAt)[0] : undefined);
-            if (!victim) {
+            // Every one carrying a session: from the 1:1 chat whose session has gone unused longest, once that is
+            // NATIVE_HOLD_MS, and never one with a call on or a file moving. Group links keep theirs.
+            const idle = victim || !taking ? undefined : owners
+              .filter(other => other !== live && !other.stored.group && other.stored.id !== this.activeLinkId && !this.fileDesk.moving(other.stored.id)
+                && other.link?.canYieldEndpoint(key, NATIVE_HOLD_MS))
+              .sort((a, b) => a.link!.lastActivityAt - b.link!.lastActivityAt)[0];
+            const idleFor = idle ? now - idle.link!.lastActivityAt : 0;
+            if (idle && await idle.link!.yieldEndpoint(key, NATIVE_HOLD_MS)) {
+              traceLink(live.myPubKeyZ32, "native-take", { transport: key, idle: idleFor, active: this.activeLinkId === linkId });
+              live.nativeTakenAt = { ...live.nativeTakenAt, [key]: Date.now() };
+              idle.transportErrors ??= {};
+              idle.transportErrors[key] = "Listener given to a chat in use: this one was quiet. Open this chat to take one back; your messages and transport identity are saved.";
+            } else if (!victim) {
               traceLink(live.myPubKeyZ32, "native-no-slot", { transport: key, active: this.activeLinkId === linkId });
               // Each busy for now (dialling, switching, carrying a session): the chat on screen asks again in a moment.
               if (this.activeLinkId === linkId && !group) this.retryActiveSlot(linkId);
               throw new Error("All eight native connection slots are in use. Disconnect a native connection in another chat, then reopen this chat or press Reconnect.");
+            } else {
+              await victim.link!.releaseEndpoint(key);
+              victim.transportErrors ??= {};
+              victim.transportErrors[key] = "Listener released for another chat. Open this chat to restore it; your messages and transport identity are saved.";
+              if (victim.stored.group) this.groupNativeWaiting.add(victim.stored.id);
             }
-            await victim.link!.releaseEndpoint(key);
-            victim.transportErrors ??= {};
-            victim.transportErrors[key] = "Listener released for another chat. Open this chat to restore it; your messages and transport identity are saved.";
-            if (victim.stored.group) this.groupNativeWaiting.add(victim.stored.id);
           }
           if (this.shuttingDown || live.link !== link) return;
           const seed = live.stored.transportSeeds?.[key] ?? createIdentity().seedB64;

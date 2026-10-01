@@ -1,7 +1,7 @@
 import "fake-indexeddb/auto";
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { LIMITS, createIdentity, type FileSink, type GhostLinkOptions } from "@ghostly/core";
-import { GROUP_NATIVE_SLOTS, GhostlyNode, RESUME_SPENT_MS } from "../src/engine/node";
+import { GROUP_NATIVE_SLOTS, GhostlyNode, NATIVE_HOLD_MS, RESUME_SPENT_MS } from "../src/engine/node";
 import { db } from "../src/engine/db";
 import { STORES, fileStore, transact } from "../src/shared/idb";
 import { storedBlob } from "../src/shared/storedFiles";
@@ -37,6 +37,17 @@ vi.mock("@ghostly/core", async (importOriginal) => {
     registerEndpoint = vi.fn((endpoint: { transport: string }) => { this.availableTransports = [...this.availableTransports, endpoint.transport]; });
     canReleaseEndpoint = vi.fn(() => true);
     releaseEndpoint = vi.fn(async (transport: string) => { this.availableTransports = this.availableTransports.filter((t) => t !== transport); });
+    /** As the real one: live over the transport, and unused for `idleMs` (`lastActivityAt`); a call holds it (`callOn`). */
+    lastActivityAt = Date.now();
+    callOn = false;
+    canYieldEndpoint = vi.fn((transport: string, idleMs: number) => this.isDataLinkOpen && this.availableTransports.includes(transport)
+      && !this.callOn && Date.now() - this.lastActivityAt >= idleMs);
+    yieldEndpoint = vi.fn(async (transport: string, idleMs: number) => {
+      if (!this.canYieldEndpoint(transport, idleMs)) return false;
+      this.isDataLinkOpen = false;
+      this.availableTransports = this.availableTransports.filter((t) => t !== transport);
+      return true;
+    });
     nativeDescriptors = {};
     relayedTransports: string[] = [];
     start = vi.fn();
@@ -333,6 +344,87 @@ describe("an app restarting (WISP 100, Back after a restart)", () => {
       await vi.waitFor(() => expect(linkOf("chat-z").registerEndpoint).toHaveBeenCalled(), { timeout: 10_000 });
       expect(holders.filter((h) => h.releaseEndpoint.mock.calls.length > 0)).toEqual([holders[3]]);
     }, 15_000);
+
+    describe("every listener carrying a live session (a Linux Desktop or a CLI bot talking to more contacts than that)", () => {
+      type Holder = Recorded & { registerEndpoint: ReturnType<typeof vi.fn>; releaseEndpoint: ReturnType<typeof vi.fn>; canReleaseEndpoint: ReturnType<typeof vi.fn>;
+        yieldEndpoint: ReturnType<typeof vi.fn>; lastActivityAt: number; callOn: boolean };
+      /** Eight chats live over Iroh, each last used this many minutes ago, and a ninth with no listener. */
+      async function allLive(minutesAgo: number[]) {
+        const rows = [...older().slice(0, 8), row({ ...paired(), id: "chat-z" })];
+        const started = await nativeStarted(...rows);
+        const linkOf = (id: string) => started.linkOf(id) as unknown as Holder;
+        const holders = rows.slice(0, 8).map((r) => linkOf(r.id));
+        const now = Date.now();
+        holders.forEach((holder, i) => {
+          expect(holder.registerEndpoint).toHaveBeenCalled();
+          // Each carries a session: none can simply let its listener go.
+          holder.canReleaseEndpoint.mockReturnValue(false);
+          holder.lastActivityAt = now - minutesAgo[i] * 60_000;
+        });
+        const nine = linkOf("chat-z");
+        nine.isDataLinkOpen = false;
+        expect(nine.registerEndpoint).not.toHaveBeenCalled();
+        return { node: started.node, linkOf, holders, nine };
+      }
+      const yielded = (holders: Holder[]) => holders.filter((h) => h.yieldEndpoint.mock.results.some((r) => r.type === "return"
+        && !h.availableTransports.includes("iroh/1")));
+
+      it("the chat on screen takes the listener of the session unused longest, once that is two minutes", async () => {
+        // #1006: chat ten, made while eight others were live over Iroh, stayed "On DHT · retrying live" for as long as they did.
+        const { node, holders, nine } = await allLive([1, 5, 3, 9, 0, 2.5, 4, 1]);
+        node.setActiveLink({ linkId: "chat-z" });
+        await node["nativeQueue"];
+        expect(nine.registerEndpoint).toHaveBeenCalled();
+        expect(yielded(holders)).toEqual([holders[3]]);
+        expect(holders[3].yieldEndpoint).toHaveBeenCalledWith("iroh/1", NATIVE_HOLD_MS);
+        expect(node.getState().links.find((l) => l.id === "chat-z")?.transportErrors?.["iroh/1"]).toBeUndefined();
+        expect(node.getState().links.find((l) => l.id === holders[3].options.params.id)?.transportErrors?.["iroh/1"]).toMatch(/quiet/);
+      });
+
+      it("never one with a call on, nor one used in the last two minutes: the chat on screen waits until one goes quiet", async () => {
+        const { node, holders, nine } = await allLive([1, 1, 30, 1, 1, 1, 1, 1]);
+        // The quietest has a call on: its media runs elsewhere, the session itself says nothing for half an hour.
+        holders[2].callOn = true;
+        node.setActiveLink({ linkId: "chat-z" });
+        await node["nativeQueue"];
+        expect(nine.registerEndpoint).not.toHaveBeenCalled();
+        expect(yielded(holders)).toEqual([]);
+        expect(node.getState().links.find((l) => l.id === "chat-z")?.transportErrors?.["iroh/1"]).toMatch(/slots are in use/);
+        // One goes quiet: the chat on screen, asking again in a moment, takes its listener.
+        holders[5].lastActivityAt = Date.now() - 3 * 60_000;
+        await vi.waitFor(() => expect(nine.registerEndpoint).toHaveBeenCalled(), { timeout: 10_000 });
+        expect(yielded(holders)).toEqual([holders[5]]);
+      }, 15_000);
+
+      it("no ping-pong: the chat a listener was taken from does not take it straight back", async () => {
+        const { node, holders, nine } = await allLive([10, 1, 1, 1, 1, 1, 1, 1]);
+        node.setActiveLink({ linkId: "chat-z" });
+        await node["nativeQueue"];
+        expect(yielded(holders)).toEqual([holders[0]]);
+        // Back to the chat it was taken from, while the ninth still dials (no session: it could simply let go).
+        node.setActiveLink({ linkId: holders[0].options.params.id });
+        await node["nativeQueue"];
+        expect(nine.releaseEndpoint).not.toHaveBeenCalled();
+        expect(nine.availableTransports).toContain("iroh/1");
+        expect(holders[0].registerEndpoint).toHaveBeenCalledOnce();
+        // Live now, and just used: still not.
+        nine.isDataLinkOpen = true;
+        nine.lastActivityAt = Date.now();
+        node.setActiveLink({ linkId: holders[0].options.params.id });
+        await node["nativeQueue"];
+        expect(nine.availableTransports).toContain("iroh/1");
+        expect(holders[0].registerEndpoint).toHaveBeenCalledOnce();
+        node.setActiveLink({ linkId: null });
+      });
+
+      it("a text over the DHT in a chat not on screen takes one too: a bot has no chat on screen", async () => {
+        const { node, holders, nine } = await allLive([3, 4, 5, 6, 7, 8, 9, 10]);
+        await nine.options.events.onMessage({ id: "dht-1", text: "are you there?", timestamp: Date.now(), via: "pkarr" });
+        await node["nativeQueue"];
+        expect(nine.registerEndpoint).toHaveBeenCalled();
+        expect(yielded(holders)).toEqual([holders[7]]);
+      });
+    });
   });
 
   it("shutting down says goodbye on every link before anything else it waits for", async () => {

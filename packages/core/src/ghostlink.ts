@@ -137,6 +137,14 @@ export const LIVENESS_PING_MS = 15_000;
 export const SWITCH_RETIRE_MS = 3_000;
 export const LIVENESS_MISSED_PINGS = 3;
 /**
+ * Frames that keep a session going rather than say something of the two people's: what the contact sent last outside
+ * these is when the chat was last in use (`canYieldEndpoint`). Every other frame (a text, a receipt, typing, a
+ * reaction, an edit, a file, a call, a payment) is use; what this side sends is answered with one of them.
+ */
+const QUIET_FRAMES = new Set(["paired-ping", "paired-pong", "paired-bye", "paired-policy", "paired-switch-plan", "paired-switch-ready",
+  "paired-switch-failed", "paired-switch-keep", "paired-rtc", "paired-adapters", "paired-nick", "paired-avatar", "paired-capabilities",
+  "paired-wake", "paired-hold", "paired-payments", "paired-groups", "paired-services", "paired-reconnect", "paired-reconnect-ack"]);
+/**
  * A ping with nothing at all back this long after it went: the contact may have crashed and started again, with its new
  * offer waiting on the relays, while this side still holds the old session and reads them at a live chat's pace (30 s).
  * They are read now. Nothing more: the session is let go only by `LIVENESS_MISSED_PINGS`, or by the contact's offer
@@ -626,6 +634,8 @@ export class GhostLink {
   private peerSeenAt = 0;
   /** When the channel carrying the chat now was attached. */
   private channelSince = 0;
+  /** When the contact last sent something other than the session's upkeep (`QUIET_FRAMES`) on a session. */
+  private activityAt = 0;
   /**
    * The contact said goodbye on the live session (`paired-bye`): its app is going away, likely to restart. Its packet
    * then was `packet`; it is dialled again once a newer one shows it back, or after `until`.
@@ -1568,6 +1578,36 @@ export class GhostLink {
     if (!endpoint) return;
     this.endpoints.delete(transport); await endpoint.close(); this.advertiseTransports();
     this.options.events?.onTransportsChanged?.();
+  }
+
+  /** When the chat was last in use on its session: the contact's last frame of use, or the session's start. */
+  get lastActivityAt(): number { return Math.max(this.activityAt, this.channelSince); }
+
+  /**
+   * Whether the live session on this transport may end so another chat takes its listener (`yieldEndpoint`): open, and
+   * unused, for `idleMs` at least (a session that just started has been in use for none of it); no call on, no file
+   * moving, nothing being dialled or switched. `canReleaseEndpoint` never gives up a live session; this does, once idle.
+   */
+  canYieldEndpoint(transport: PairedTransport, idleMs: number): boolean {
+    if (this.activeBinding?.transport !== transport || !this.isDataLinkOpen || this.paired?.state.status !== "ready") return false;
+    if (this.candidate || this.dialing || this.switcher.pending || this.transitionTarget) return false;
+    if (this.pairedCalls.on || this.pairedFiles?.busy) return false;
+    return Date.now() - this.lastActivityAt >= idleMs;
+  }
+
+  /**
+   * Ends the idle live session on this transport and lets its listener go, for a chat in use that found every one
+   * taken. The contact hears a goodbye, as when an app quits, rather than finding out when its pings go unanswered; the
+   * record then lists the transport undescribed, so it stops dialling here. The chat goes on over the DHT (or WebRTC),
+   * and takes a listener again the same way once it is in use. False when the session may not end (see above).
+   */
+  async yieldEndpoint(transport: PairedTransport, idleMs: number): Promise<boolean> {
+    if (!this.canYieldEndpoint(transport, idleMs)) return false;
+    traceLink(this.myPubKeyZ32, "native-yield", { transport, idle: Date.now() - this.lastActivityAt });
+    try { this.channel?.send(JSON.stringify({ t: "paired-bye" })); } catch { /* closing already: its close says as much */ }
+    this.disconnect();
+    await this.releaseEndpoint(transport);
+    return !this.endpoints.has(transport);
   }
 
   private advertiseTransports(): void {
@@ -2686,6 +2726,8 @@ export class GhostLink {
           if (typeof data !== "string" || data.length > 60 * 1024) return;
           let frame: Record<string, unknown>;
           try { frame = JSON.parse(data); } catch { return; }
+          // What the two people do (texts, receipts, typing, files, calls, payments...), not the session's upkeep.
+          if (frame && typeof frame === "object" && !QUIET_FRAMES.has(String(frame.t))) this.activityAt = Date.now();
           if (frame?.t === "paired-ping") { try { channel.send(JSON.stringify({ t: "paired-pong" })); } catch { /* closing */ } return; }
           if (frame?.t === "paired-pong") {
             this.peerAnswersPings = true;
@@ -2807,6 +2849,7 @@ export class GhostLink {
           }
           if (frame?.t === PAIRED_CALL_FRAME) {
             const signal = this.supportsCalls ? parsePairedCallFrame(frame) : null;
+            if (signal) this.pairedCalls.heard(signal);
             if (signal) this.options.events?.onCallSignal?.(signal);
             return;
           }

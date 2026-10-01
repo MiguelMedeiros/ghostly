@@ -37,6 +37,9 @@ export class PairedFiles {
     onStored?(file: FileInfo): Promise<string | undefined>;
   }) {}
 
+  /** A file going either way on this session right now. */
+  get busy(): boolean { return this.incoming.size > 0 || this.outgoing.size > 0; }
+
   private sendFrame(frame: object): void {
     if (this.closed) throw new Error("Connection lost");
     this.channel.send(JSON.stringify(frame));
