@@ -131,6 +131,7 @@
     "giveName": "Ponle un nombre al perfil",
     "noBackupFile": "Esta billetera no tiene archivo de copia de seguridad",
     "noPhrase": "Esta billetera no tiene frase de recuperación que mostrar",
+    "noRoom": "Este dispositivo no tiene espacio para esta copia. Libera espacio y vuelve a intentarlo.",
     "notABackup": "Esta copia de seguridad no contiene un perfil",
     "openElsewhere": "Este perfil está abierto en otra ventana. Ciérrala e inténtalo de nuevo.",
     "switchFirst": "Cambia primero a otro perfil",
