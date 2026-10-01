@@ -647,7 +647,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
           <ChatConnection key={sessionId} peerKey={params.peerPubKeyB64} paired={paired} myKey={techInfo?.myPubKey} status={statusLabel}
             pairing={pairingShown && pairing.progress ? { progress: pairing.progress, onShow: pairing.scene
               ? () => scrollIntoViewGently(document.getElementById(pairingSceneId)) : undefined } : undefined} />
-          <CallButtons blocked={canWakeForCall ? null : callsBlocked} busy={webrtc.callState !== "idle" || wakeCall.waking}
+          <CallButtons blocked={webrtc.otherCallOn && webrtc.callState === "idle" ? t("calls.onAnother") : canWakeForCall ? null : callsBlocked} busy={webrtc.callState !== "idle" || wakeCall.waking}
             onCall={(withVideo) => (callsBlocked && canWakeForCall ? void wakeCall.ring(withVideo) : webrtc.startCall(withVideo))} />
           {/* Only while a bot's card is here (WISP 4xx · Status Cards). */}
           <TasksButton rows={messages} />
@@ -897,6 +897,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
           onAcceptAudio={() => { webrtc.acceptCall(false); if (!visible) nav.conversation(chatPath(sessionId)); }}
           onAcceptVideo={() => { webrtc.acceptCall(true); if (!visible) nav.conversation(chatPath(sessionId)); }}
           onReject={webrtc.rejectCall}
+          // On a call in another chat: End and answer ends it first (useWebRTC), or Decline. Never two calls at once.
+          onCall={webrtc.otherCallOn}
         />,
         callLayer ?? document.body,
       )}
