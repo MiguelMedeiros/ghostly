@@ -621,6 +621,8 @@ export class GhostLink {
   private offered?: { epoch: number; at: number };
   private lastAutoConnectAt = 0;
   private autoConnectFailures = 0;
+  /** Native transports a record just read listed with no way to dial them (`record-undescribed`), until one describes them again. */
+  private readonly undescribed = new Set<NativeTransport>();
   /** The peer's packet I last looked fast for its offer after (its timestamp): once per packet. */
   private offerAwaitedFor = 0;
   /** Whether the stream was blocked (DHT-only on either side) when last looked at. */
@@ -1264,7 +1266,7 @@ export class GhostLink {
     const listed = !!wanted && !!this.peerRecordTransports?.includes(wanted), dialable = !!wanted && !!this.peerDescriptors[wanted as NativeTransport];
     // The record lists every transport the contact's app runs, started or not (WISP 03): what it lacks, it lacks.
     this.peerRecordTransports = [...transports];
-    let changed = false, redescribed = false;
+    let changed = false, redescribed = false, again = false, news = false;
     const renamed = new Set<NativeTransport>();
     for (const t of ["iroh/1", "hyperdht/1"] as const) {
       const known = this.peerDescriptors[t], next = recordDescriptor(t, known, descriptors[t], fresh, transports.includes(t));
@@ -1275,18 +1277,22 @@ export class GhostLink {
         const { [t]: _gone, ...rest } = this.peerDescriptors;
         this.peerDescriptors = rest;
         traceLink(this.myPubKeyZ32, "record-undescribed", { transport: t });
+        this.undescribed.add(t);
         continue;
       }
       this.peerDescriptors = { ...this.peerDescriptors, [t]: next };
+      // Described again after a record said its endpoint was down: dialled at once, but the attempts that failed keep
+      // counting. A contact whose record keeps going down and up again must not undo the wait between attempts.
+      if (this.undescribed.delete(t)) again = true; else news = true;
       changed = true; redescribed ||= t === wanted; renamed.add(t);
       // A new way to dial it: the attempts that failed on the old one say nothing about this one.
       this.nativeFailures.delete(t); this.demotedUntil.delete(t);
     }
-    if (!this.peerTransports && transports.length) { this.peerTransports = transports; this.peerFallback = true; changed = true; }
+    if (!this.peerTransports && transports.length) { this.peerTransports = transports; this.peerFallback = true; changed = news = true; }
     else {
       // Its app runs more than a session said (an endpoint that started later): those go after the session's order.
       const added = transports.filter(t => !this.peerTransports?.includes(t));
-      if (added.length) { this.peerTransports = [...this.peerTransports!, ...added]; changed = true; }
+      if (added.length) { this.peerTransports = [...this.peerTransports!, ...added]; changed = news = true; }
     }
     // A transport the chat waits for, newly listed or dialable: tried again now, not at the next retry (WISP 100).
     if (wanted && ((!listed && transports.includes(wanted)) || (!dialable && !!this.peerDescriptors[wanted as NativeTransport]) || redescribed)) this.waitNews();
@@ -1305,9 +1311,23 @@ export class GhostLink {
     }
     // Something new to dial: the next attempt is now, not after the wait that attempts with nothing to try built up.
     if (this.channel || this.dialing) return;
-    this.autoConnectFailures = 0;
-    this.lastAutoConnectAt = 0;
+    if (news || !again) { this.autoConnectFailures = 0; this.lastAutoConnectAt = 0; }
+    else this.dialOnNews();
     this.maybeAutoConnect(this.presence);
+  }
+
+  /** When `dialOnNews` last let a dial go before its wait was over. */
+  private lastNewsDialAt = -Infinity;
+  /**
+   * A chat's listener came up, or the contact's record describes again an endpoint it said was down: the next dial goes
+   * now rather than after the wait between attempts, once per that wait. An endpoint registered again and again (a
+   * listener lost and started anew) or a record going down and up again would otherwise dial every time, each a native
+   * dial, Rust work on a Desktop (a Linux Desktop's idle CPU, 2026-10-01). The failures keep counting.
+   */
+  private dialOnNews(): void {
+    if (Date.now() - this.lastNewsDialAt < this.dialWait()) return;
+    this.lastNewsDialAt = Date.now();
+    this.lastAutoConnectAt = 0;
   }
 
   /**
@@ -1492,9 +1512,12 @@ export class GhostLink {
     else this.joinRace(endpoint.transport);
     // Something new to dial, now: a group link whose member's packet already said how to dial this transport, or a
     // chat that had no listener for it (every native slot was taken when the app started) and its contact is there.
+    // A chat's attempts that failed keep counting: an endpoint registered again and again (a listener lost and started
+    // anew, a slot taken back and given again) must not undo the wait between attempts, each of them a native dial.
     if (!this.channel && !this.dialing && this.dataLink.state === "idle" && this.canDial(endpoint.transport)
       && this.peerTransports?.includes(endpoint.transport)) {
-      this.autoConnectFailures = 0; this.lastAutoConnectAt = 0;
+      if (this.options.packetTransports) { this.autoConnectFailures = 0; this.lastAutoConnectAt = 0; }
+      else this.dialOnNews();
       this.maybeAutoConnect(this.presence);
     }
   }
