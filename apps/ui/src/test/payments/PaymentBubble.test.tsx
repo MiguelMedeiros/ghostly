@@ -319,7 +319,7 @@ describe("paying a request on other rails", () => {
     const { user, engine } = show(incomingRequest({ amount: 5_000, target: onchain }));
     engine.on("preparePayment", reviewOf);
     expect(screen.queryByRole("combobox", { name: "Cashu mint" })).not.toBeInTheDocument();
-    expect(screen.getByRole("textbox", { name: "Maximum fee (sats)" })).toHaveValue("2000");
+    expect(screen.getByRole("textbox", { name: "Maximum fee (test sats)" })).toHaveValue("2000");
     await user.click(payButton());
     await screen.findByRole("region", { name: "Payment review" });
     // A signet address: the Testnet wallet pays it.
@@ -418,6 +418,19 @@ describe("paying a request's invoice over Lightning", () => {
     await user.click(payButton());
     expect(await screen.findByTestId("payment-review")).toHaveTextContent("Pay 250,000 test sats over Lightning");
     expect(engine.callsTo("walletQuoteInvoice")).toEqual([{ invoice: REGTEST_INVOICE, via: undefined, network: "testnet" }]);
+  });
+
+  it("says test sats for every fee of a Testnet request: the ceiling, the fee line and a fee above it", async () => {
+    const { user, engine } = show(incomingRequest({ amount: 250_000, invoice: REGTEST_INVOICE }));
+    engine.on("walletQuoteInvoice", () => quote({ amount: 250_000 }));
+    const fee = screen.getByRole("textbox", { name: "Maximum fee (test sats)" });
+    await user.click(payButton());
+    expect(await screen.findByTestId("payment-review")).toHaveTextContent(/· fee up to 5 test sats/);
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    await user.clear(fee);
+    await user.type(fee, "2");
+    await user.click(payButton());
+    expect(await screen.findByText("The Lightning fee (up to 5 test sats) is above your maximum")).toBeInTheDocument();
   });
 
   it("shows the Testnet Lightning source for a Testnet request, not the Mainnet one", async () => {

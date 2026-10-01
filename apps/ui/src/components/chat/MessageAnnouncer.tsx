@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import type { StatusCard } from "@ghostly/core";
-import { useI18n } from "../../contexts/I18nContext";
+import { useI18n, type Translate } from "../../contexts/I18nContext";
 import { previewText } from "../../lib/chatList";
+import { servicesPlatform } from "../../lib/platform";
+import { paymentLine } from "../paymentWords";
 import { cardLine, showsCard } from "../../lib/statusCards";
 
 /** What the announcer reads of a message: a 1:1 chat's and a group's both have it. */
@@ -10,6 +12,8 @@ export interface Announceable {
   sender: string;
   text: string;
   card?: StatusCard;
+  /** A payment or a request: read out as the chat list says it, not as the English line the engine keeps. */
+  paymentId?: string;
   member?: string;
   systemEvent?: unknown;
   callEvent?: unknown;
@@ -22,6 +26,14 @@ export const ANNOUNCE_WINDOW_MS = 1_500;
 export const ANNOUNCE_CLEAR_MS = 1_000;
 /** A message is read out up to this many characters. */
 const PREVIEW_CHARS = 80;
+
+/** What a message says, read out: a status card's line, a payment's (paymentLine, as the chat list), else its text. */
+function spoken(message: Announceable, t: Translate): string {
+  if (showsCard(message.card)) return cardLine(message.card);
+  const wallet = message.paymentId ? servicesPlatform?.wallet : undefined;
+  const payment = wallet?.getPayment(message.paymentId!);
+  return payment ? paymentLine(t, payment, wallet!.getState()) : previewText(message.text, t);
+}
 
 const short = (text: string) => {
   const line = text.replace(/\s+/g, " ").trim();
@@ -76,7 +88,7 @@ export function MessageAnnouncer({ chat, messages, nameOf, active = true }: {
       if (!batch.length || !active) return;
       const names = new Set(batch.map(m => nameOf(m)));
       const line = batch.length === 1
-        ? t("chat.announce.message", { name: nameOf(batch[0]), text: short(showsCard(batch[0].card) ? cardLine(batch[0].card) : previewText(batch[0].text, t)) })
+        ? t("chat.announce.message", { name: nameOf(batch[0]), text: short(spoken(batch[0], t)) })
         : names.size === 1
         ? t("chat.announce.messagesFrom", { count: batch.length, name: [...names][0] })
         : t("chat.announce.messages", { count: batch.length });

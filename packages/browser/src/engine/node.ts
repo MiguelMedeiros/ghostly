@@ -3867,11 +3867,11 @@ export class GhostlyNode implements EngineImplementation {
     if(intent)assertConfirmedReal(intent.review.method==="cashu" ? mintNetwork(intent.review.provider) : walletNetworkOf(intent.review.network), params.confirmedReal);
     if(intent?.review.linkId) {
       const link=this.paymentLink(intent.review.linkId);
-      if(!link || (intent.review.method==="arkade" && !link.supportsArkPayments))throw new Error("Reconnect the data link before approving. Your review was saved.");
+      if(!link || (intent.review.method==="arkade" && !link.supportsArkPayments))throw engineError("reconnectBeforeApprove");
       // A request closed or paid meanwhile says so first: the contact may have turned that way of paying off because of it.
       if (intent.review.requestId) {
         const request = this.desk.payment(intent.review.requestId);
-        if (!request || request.state !== "pending" || request.lightningPending) throw new Error("This request is no longer awaiting payment. Check its status before spending.");
+        if (!request || request.state !== "pending" || request.lightningPending) throw engineError("requestNotAwaiting");
       }
       // Reach the contact first, as preparing does: until the chat is live again (after a restart, say), its ways of
       // paying are not known, and Cashu would read as off.

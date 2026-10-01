@@ -91,7 +91,7 @@ export function MobileTabBar() {
           const fresh = account && glances.othersFresh > 0;
           const others = account && (glances.othersUnread > 0 || fresh);
           const wallet = tab.path === "/wallet";
-          const label = wallet && (unseen.real || unseen.test || backupDue) ? `${unseenSatsLabel(t(tab.label), unseen)}${backupDue ? `, ${t("wallet.backupReminder.label")}` : ""}` : dot ? `${t(tab.label)}, ${t("identities.attention")}` : account ? `${t(tab.label)}, ${glances.current.name}${fresh ? `, ${t("profileSwitcher.othersNew")}` : others ? `, ${t("profileSwitcher.othersUnread")}` : ""}` : undefined;
+          const label = wallet && (unseen.real || unseen.test || backupDue) ? `${unseenSatsLabel(t(tab.label), unseen, t)}${backupDue ? `, ${t("wallet.backupReminder.label")}` : ""}` : dot ? `${t(tab.label)}, ${t("identities.attention")}` : account ? `${t(tab.label)}, ${glances.current.name}${fresh ? `, ${t("profileSwitcher.othersNew")}` : others ? `, ${t("profileSwitcher.othersUnread")}` : ""}` : undefined;
           return (
             <button
               key={tab.path}
