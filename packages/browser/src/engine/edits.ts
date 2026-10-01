@@ -48,7 +48,7 @@ export class EditQueue {
    * goes again at once, with a fresh count of attempts.
    */
   flush({ reopened = false }: { reopened?: boolean } = {}): Promise<void> {
-    if (reopened) this.sent.clear();
+    if (reopened) this.reopened();
     if (this.flushing) { this.again = true; return this.flushing; }
     this.flushing = (async () => {
       try {
@@ -56,6 +56,15 @@ export class EditQueue {
       } finally { this.flushing = null; }
     })();
     return this.flushing;
+  }
+
+  /**
+   * A new session: what the last one sent without a confirmation may go again at once, with a fresh count of attempts.
+   * Said once, as the session opens and before anything goes on it: said again later, it would send a second time what
+   * this session already sent (two flushes of one opening, each starting over, sent a restored question's edit twice).
+   */
+  reopened(): void {
+    this.sent.clear();
   }
 
   /** The contact confirmed edit `seq` of my message with this wire id. */
