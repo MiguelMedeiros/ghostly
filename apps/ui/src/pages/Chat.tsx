@@ -67,6 +67,7 @@ import { useAppNavigation } from "../hooks/useAppNavigation";
 import { MuteMenu, MuteMenuItem } from "../components/ChatMute";
 import { MUTE_SILENCES, callRings, useChatMute } from "../lib/chatMute";
 import { useWakeCall } from "../hooks/useWakeCall";
+import { useIncomingCallNotice } from "../hooks/useIncomingCallNotice";
 import { useChatLink } from "../hooks/useChatLink";
 import { useTypingSender } from "../hooks/useTyping";
 import { ChatSubtitle } from "../components/TypingIndicator";
@@ -210,6 +211,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
     if (callState === "offering") return startRinging("ringback");
     if (callState === "idle" && before !== "idle") playSound("hangup");
   }, [callState, sessionId]);
+  // Out of sight, a ringing call is a system notification too.
+  useIncomingCallNotice(callState === "incoming" && callRings(sessionId), sessionId, t("pwa.wakeCall"));
 
   // A chat on a call is kept loaded by `App` wherever the person goes next,
   // so the call itself — and the signaling that ends it — survives the trip.
