@@ -189,7 +189,8 @@ export function AgentDemo({ t }: { t: Copy }) {
           {/* Your tap, in the chat: a reply whose text is the label, and the bot's 👍 on it. */}
           <div className="agd-row agd-row--out agd-press-row" data-on={answered} data-testid="agent-demo-press">
             <p className="agd-bubble agd-bubble--out">
-              <span className="agd-press-mark">↩</span> {t.buttons[0].label}
+              {/* U+FE0E: the arrow as text, never the emoji. */}
+              <span className="agd-press-mark">{"↩︎"}</span> {t.buttons[0].label}
             </p>
             <span className="agd-react" data-on={ask === "closed"}>
               👍

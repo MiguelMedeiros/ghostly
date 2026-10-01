@@ -58,7 +58,7 @@ test.describe(() => {
     await expect(chosen.locator(".agd-check")).toBeVisible();
     await expect(demo(page).locator(".agd-closed")).toHaveAttribute("data-on", "true");
     await expect(page.getByTestId("agent-demo-press")).toHaveAttribute("data-on", "true");
-    await expect(page.getByTestId("agent-demo-press")).toContainText("↩ Merge");
+    await expect(page.getByTestId("agent-demo-press")).toContainText(/↩\uFE0E? Merge/);
     await expect(demo(page).locator(".agd-routine")).toHaveAttribute("data-on", "true");
     await expect(page.getByTestId("agent-demo-toggle")).toHaveCount(0);
     await page.waitForTimeout(2500);
