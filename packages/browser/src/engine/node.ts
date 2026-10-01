@@ -511,6 +511,7 @@ export class GhostlyNode implements EngineImplementation {
     storeMessage: (message) => this.storeMessage(message),
     transfers: this.transfers,
     changed: (delayMs) => this.emitState(delayMs),
+    flush: () => this.flushState(),
     settled: (linkId, fileId, record, seen) => {
       if (seen && record.direction === "in" && record.state === "done") this.cueFeedback({ cue: "downloaded", key: fileId }, this.chatOf(linkId));
       void this.noteFileEnd(linkId, fileId, record.state === "done" ? undefined : record.error ?? record.state);
