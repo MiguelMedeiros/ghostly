@@ -57,6 +57,22 @@ export class PaymentCoordinator {
     await this.adapters.find(a=>a.method===saved.review.method)?.release?.(saved.review,saved.prepared).catch(()=>{});
     this.changed(saved.review); return saved.review;
   }); }
+  /**
+   * Cancels the reviews no Approve can send any more, as Cancel does (what prepare reserved goes back, and each stays
+   * in the store as cancelled): one past its expiry (approve refuses it), and one whose request was paid some other
+   * way or closed (`unpayable`). Only pending reviews: a submitted or unknown one may hold or move money, and is only
+   * ever reconciled. Returns what it cancelled.
+   */
+  async dropStale(now: number = Date.now(), unpayable: (review: PaymentReview) => boolean = () => false): Promise<PaymentReview[]> {
+    const dropped: PaymentReview[] = [];
+    for (const { review } of await this.repository.list()) {
+      if (review.state !== "pending" || (review.expiresAt > now && !unpayable(review))) continue;
+      // Approved meanwhile, or cancelled elsewhere: the store refuses (or the approval under way answers), and that
+      // one is left as it is.
+      try { const cancelled = await this.cancel(review.id); if (cancelled.state === "cancelled") dropped.push(cancelled); } catch { /* not pending any more */ }
+    }
+    return dropped;
+  }
   private adapter(method: string) { const adapter=this.adapters.find(a=>a.method===method); if(!adapter)throw new Error("This payment method is unavailable"); return adapter; }
   private async require(id: string) { const saved=await this.repository.get(id); if(!saved)throw new Error("Unknown payment intent"); return saved; }
   private once(id:string,work:()=>Promise<PaymentReview>) { const existing=this.active.get(id);if(existing)return existing;const promise=work().finally(()=>this.active.delete(id));this.active.set(id,promise);return promise; }

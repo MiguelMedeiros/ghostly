@@ -219,8 +219,10 @@ export function CashuWallet({ wallet, state, rail, onOpenCashu, focusAmount = fa
         )}
         {notice && <Notice tone="success" testId="wallet-notice">{notice}</Notice>}
         {error && <Notice tone="error" testId="wallet-error">{error}</Notice>}
-        {(state.intents ?? []).filter((i) => i.method === "cashu" && i.id !== review?.id).map((i) => (
-          <Button key={i.id} className="block w-full text-start" onClick={() => setReview(i)}>{t("wallet.cashu.intent", { amount: formatAmount(i.amount, t.language), unit, state: paymentStateLabel(t, i.state) })}</Button>
+        {/* The reviewed payments with something left to do or read: a settled one is in the history, and a cancelled
+            one (by Cancel, or past its expiry) moved nothing. Pending, on its way, unknown or failed stay. */}
+        {(state.intents ?? []).filter((i) => i.method === "cashu" && i.id !== review?.id && i.state !== "settled" && i.state !== "cancelled").map((i) => (
+          <Button key={i.id} className="block w-full text-start" data-testid="wallet-intent" onClick={() => setReview(i)}>{t("wallet.cashu.intent", { amount: formatAmount(i.amount, t.language), unit, state: paymentStateLabel(t, i.state) })}</Button>
         ))}
         {review && <PaymentReview key={review.id} review={review} wallet={wallet} onClose={() => setReview(null)} />}
       </div>

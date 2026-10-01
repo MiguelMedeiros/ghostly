@@ -85,8 +85,11 @@ export class UsdtWallet {
     try {adapter=await this.gate.within(UsdtAdapter.connect(config,mnemonic),a=>a.dispose());await this.save(saved,replaced||undefined);}
     catch(error){await adapter?.dispose();if(replaced)void this.ensureReady();throw error;}
     this.saved=saved;
-    if(epoch!==this.epoch){await adapter!.dispose();this.view={configured:true,locked:true,automatic:!!deviceKey,...config,balance:'0',gasBalance:'0'};this.changed();return;}
-    this.adapter=adapter;await this.refresh();
+    // The new chain at once: until its first balance is read (a slow RPC can take a minute), the card must not go on
+    // showing the wallet it replaced, its chain or its address.
+    this.view={configured:true,locked:true,automatic:!!deviceKey,...config,balance:'0',gasBalance:'0'};
+    if(epoch!==this.epoch){await adapter!.dispose();this.changed();return;}
+    this.adapter=adapter;this.changed();await this.refresh();
   }
   async unlock(password?:string) {
     if(!this.saved)throw new Error('Create a USDT wallet first');

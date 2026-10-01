@@ -1,4 +1,4 @@
-import { screen, within } from "@testing-library/react";
+import { act, screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { decodeBolt11 } from "@ghostly/core";
 import type { LinkView, PaymentView, WalletView } from "@ghostly/browser/shared/types";
@@ -176,6 +176,29 @@ describe("a request with a payment already on its way", () => {
     engine.update({ wallet: { mints: [mint(REAL_MINT, 900)], intents: [{ ...pending, state: "cancelled" }] } });
     expect(await screen.findByRole("button", { name: "Review payment" })).toBeEnabled();
     expect(screen.queryByRole("region", { name: "Payment review" })).not.toBeInTheDocument();
+  });
+
+  it("a review not approved yet goes once the request is paid some other way, or closed: nothing left to approve", async () => {
+    const pending = { ...unfinished("unknown"), state: "pending" as const, error: undefined };
+    for (const request of [{ state: "settled" as const }, { state: "failed" as const, closed: true }]) {
+      const { unmount } = show(incomingRequest({ mints: [REAL_MINT], ...request }), { wallet: { mints: [mint(REAL_MINT, 900)], intents: [pending] } });
+      expect(screen.queryByRole("region", { name: "Payment review" })).not.toBeInTheDocument();
+      expect(screen.queryByTestId("review-approve")).not.toBeInTheDocument();
+      unmount();
+    }
+    // One made here, then paid elsewhere while it waits for Approve: it goes too.
+    const { user, engine } = show(incomingRequest({ mints: [REAL_MINT] }), { wallet: { mints: [mint(REAL_MINT, 900)] } });
+    engine.on("preparePayment", reviewOf);
+    await user.click(payButton());
+    await screen.findByRole("region", { name: "Payment review" });
+    act(() => engine.update({ payments: { "pay-1": paymentView(incomingRequest({ mints: [REAL_MINT], state: "settled" })) } }));
+    expect(screen.getByTestId("payment-state")).toHaveTextContent("Paid");
+    expect(screen.queryByRole("region", { name: "Payment review" })).not.toBeInTheDocument();
+  });
+
+  it("an approved payment of it stays, with Check, even once the request reads as paid", () => {
+    show(incomingRequest({ mints: [REAL_MINT], state: "settled" }), { wallet: { mints: [mint(REAL_MINT, 900)], intents: [unfinished("submitted")] } });
+    expect(screen.getByRole("region", { name: "Payment review" })).toBeInTheDocument();
   });
 
   it("a payment of it that failed leaves the request payable again", () => {

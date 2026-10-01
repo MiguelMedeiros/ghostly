@@ -82,10 +82,15 @@ export function PaymentBubble({ paymentId, peerPubKey, fallbackText }: { payment
   // A payment of this request not finished is shown again after the chat was left and opened again (or the app
   // restarted): one approved, with its state and Check (its outcome unknown, or on its way), and one reviewed but not
   // approved yet, with Approve and Cancel. The engine refuses a second review of the request while either is open.
+  // A review not approved yet only while the request can still be paid: one paid some other way (or closed) meanwhile
+  // has nothing left to approve, and the engine cancels that review (dropStaleReviews). One approved stays, with Check.
+  const payable = (payment.state === "pending" || payment.state === "failed") && !payment.closed;
+  const intents = wallet.getState()?.intents;
   const unfinished = payment.kind === "request" && payment.direction === "in"
-    ? wallet.getState()?.intents?.find((r) => r.requestId === payment.id && r.linkId === payment.linkId && (r.state === "pending" || r.state === "submitted" || r.state === "unknown"))
+    ? intents?.find((r) => r.requestId === payment.id && r.linkId === payment.linkId && ((r.state === "pending" && payable) || r.state === "submitted" || r.state === "unknown"))
     : undefined;
-  const shownReview = review ?? (unfinished && `${unfinished.id}:${unfinished.state}` !== putAway ? unfinished : null);
+  const ownReview = review && (payable || (intents?.find((i) => i.id === review.id) ?? review).state !== "pending") ? review : null;
+  const shownReview = ownReview ?? (unfinished && `${unfinished.id}:${unfinished.state}` !== putAway ? unfinished : null);
   const tokenPayment=payment.target?.method==='usdt';
   const outgoing = payment.direction === "out";
   const isRequest = payment.kind === "request";
