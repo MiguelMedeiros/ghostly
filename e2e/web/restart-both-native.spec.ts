@@ -67,3 +67,31 @@ test("a chat live before both apps restart is live again, with more chats betwee
     await expect(chat(web).getByText(`back after a ${how}`)).toBeVisible({ timeout: 30_000 });
   }
 });
+
+// Both close, the web app is back first and knocks on the other app, which is not there; that app is back 30 s later
+// and knocks in turn (Omarchy, 2026-10-01: live 34.6 s after the Desktop started, against 5-14 s the other ways round).
+const WEB_FIRST_LIVE_MS = 20_000;
+
+test("a chat live before both apps close is live again soon when the web app is back first", {
+  tag: ["@feature:chat.paired.reconnect", "@feature:transport.iroh-web"],
+}, async ({ peer }) => {
+  test.setTimeout(6 * 60_000);
+  const relay = endpoints.irohRelay;
+  const [linux, web] = await Promise.all([peer("linux", { irohRelay: relay, beforeOpen: noWebRtc }), peer("web", { irohRelay: relay })]);
+  await link(linux, web);
+  await say(web, "hello over Iroh");
+  await expect(chat(linux).getByText("hello over Iroh")).toBeVisible({ timeout: 60_000 });
+  await Promise.all([onIroh(linux, 120_000), onIroh(web, 120_000)]);
+  const urls = new Map([linux, web].map(p => [p, p.page.url()] as const));
+
+  await Promise.all([linux, web].map(p => p.page.close()));
+  const reopen = async (p: Peer) => { p.page = await p.context.newPage(); await p.page.goto(urls.get(p)!); };
+  await reopen(web);
+  await web.page.waitForTimeout(30_000);
+  const started = Date.now();
+  await reopen(linux);
+  await Promise.all([onIroh(linux, WEB_FIRST_LIVE_MS), onIroh(web, WEB_FIRST_LIVE_MS)]);
+  console.log(`[restart-both-native] web first: live again on both sides ${Date.now() - started} ms after the other app opened`);
+  await say(linux, "back, web first");
+  await expect(chat(web).getByText("back, web first")).toBeVisible({ timeout: 30_000 });
+});
