@@ -89,6 +89,15 @@ describe("GroupMembersDialog", () => {
     expect(engine.callsTo("removeGroupMember")).toEqual([]);
   });
 
+  it("says, while the group's link works, that whoever is removed can join again with it until a new link", async () => {
+    for (const profile of ["mesh", "community"] as const) {
+      const { user, unmount } = members_(groupView({ status: "active", isAdmin: true, profile, members, entryLink: "https://app.ghostly.tools/#/join/group2/g/k" }));
+      await user.click(within(row(BOB)).getByTestId("group-remove-member"));
+      expect(screen.getByTestId("group-remove-dialog"), profile).toHaveAccessibleDescription("They won't get the group's new messages. They can still join again with the group's link: a new link keeps them out.");
+      unmount();
+    }
+  });
+
   it("past 16 members with hubs, marks the hubs, says who is reached through one, and lets the admin choose", async () => {
     const many = Array.from({ length: 15 }, (_, i) => member({ key: `m${i}`.padEnd(52, "y"), viaHub: true, online: true }));
     const hub = member({ key: ALICE, nick: "Alice", online: true, hub: true, hubRole: "pin", edge: { linkId: "e1", state: "open", lastSeenAt: 1 } });

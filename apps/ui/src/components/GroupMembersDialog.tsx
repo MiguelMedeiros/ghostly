@@ -149,7 +149,7 @@ export function GroupMembersDialog({ group, onClose, focusKey }: { group: GroupV
       </ul>
     </div>}
     {error && <p role="alert" className="mt-3 text-sm text-danger">{error}</p>}
-    {removing && <RemoveMemberDialog name={memberName(removing, t)} onClose={() => setRemoving(null)}
+    {removing && <RemoveMemberDialog name={memberName(removing, t)} linkOn={!!live.entryLink} onClose={() => setRemoving(null)}
       onConfirm={() => { const key = removing.key; setRemoving(null); void run(key, () => engine.call("removeGroupMember", { groupId: live.id, key })); }} />}
     <p data-testid="group-read-note" className="mt-4 rounded-lg bg-surface-alt/80 p-3 text-xs leading-relaxed text-text-secondary">{live.profile === "community" ? t("group.readNoteCommunity", { count: COMMUNITY_LIMITS.store }) : t("group.readNote", { count: GROUP_LIMITS.relay })}</p>
   </dialog>, document.body);
