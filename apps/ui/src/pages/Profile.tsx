@@ -86,7 +86,9 @@ export function Profile() {
           <span data-testid="profile-restored-tag" title={t("profile.restoredTagHint")} className="inline-flex items-center gap-0.5 shrink-0 whitespace-nowrap rounded-full border border-border bg-surface-alt ps-2.5 pe-0.5 text-xs text-text-muted">
             {t("profile.restoredTag")}
             <button type="button" data-testid="profile-restored-remove" aria-label={t("profile.restoredRemove")} title={t("profile.restoredRemove")} onClick={() => attempt(() => clearRestoredMark(current.id))}
-              className="grid place-items-center w-7 h-7 rounded-full text-sm hover:text-text-primary hover:bg-surface-hover cursor-pointer">×</button>
+              className="grid place-items-center w-7 h-7 rounded-full hover:text-text-primary hover:bg-surface-hover cursor-pointer">
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
+            </button>
           </span>
         )}
         {myAvatar && <button type="button" data-testid="profile-avatar-remove" onClick={() => void setMyAvatar(null)} className="min-h-10 text-xs text-text-muted hover:text-danger cursor-pointer shrink-0 whitespace-nowrap">{t("profile.removePicture")}</button>}

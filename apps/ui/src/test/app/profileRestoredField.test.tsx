@@ -37,7 +37,7 @@ describe("a restored profile's name field", () => {
     const field = screen.getByTestId("profile-name");
     // The name, without the word: the word is the tag beside it.
     expect(field).toHaveValue("Work");
-    expect(screen.getByTestId("profile-restored-tag")).toHaveTextContent(tag);
+    expect(screen.getByTestId("profile-restored-tag").textContent).toBe(tag);
     expect(shownName()).toBe(shown);
 
     // Only the name edited, as Miguel's reproduction did: saved as written, still restored.
@@ -54,7 +54,7 @@ describe("a restored profile's name field", () => {
 
     // In English the word follows, once, and the field still holds the name only.
     await user.click(screen.getByRole("button", { name: "language en" }));
-    await waitFor(() => expect(screen.getByTestId("profile-restored-tag")).toHaveTextContent("Restored"));
+    await waitFor(() => expect(screen.getByTestId("profile-restored-tag").textContent).toBe("Restored"));
     expect(field).toHaveValue("Older work");
     expect(shownName()).toBe("Older work (restored)");
     expect(screen.getByTestId("profile-list")).toHaveTextContent("Older work (restored)");
