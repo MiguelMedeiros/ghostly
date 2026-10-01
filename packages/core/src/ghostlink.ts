@@ -90,9 +90,19 @@ export const INVITE_TAKEN = "Someone else joined with this invite first. Ask you
 export const BLOCKED_DIAL_WAIT_MS = 10_000;
 /**
  * A connection dialled in on a pinned chat must authenticate within this long, or it closes. Anyone who read the
- * endpoint from the record can dial it: until it proves the pinned key it holds no place a person waits on.
+ * endpoint from the record can dial it: until it proves the pinned key it holds no place a person waits on. A native
+ * connection this side dialled on a pinned chat has as long too: its path is up when it opens, and the handshake takes
+ * a few round trips, so one still unfinished by then carries nothing (a relay path that died with the handshake), and
+ * the chat dials again rather than hold it until QUIC's idle timeout (Omarchy, 2026-10-01: the web app had refused the
+ * Desktop's knock 15 s in, and the Desktop dialled again only 30 s in).
  */
 export const UNPROVEN_AUTH_MS = 15_000;
+/**
+ * A native connection this side dialled that has not authenticated this long after it opened, while the contact's
+ * record names a newer way to dial it: the dial went to an old address (the web app's Iroh homed on another relay after
+ * a restart), and the chat dials the new one at once. Sooner, it is a handshake still under way.
+ */
+export const REDESCRIBED_GRACE_MS = 3_000;
 /**
  * A WebRTC offer this side made that has no answer after this long: a direct native transport ranked after WebRTC is
  * dialled meanwhile, the offer still standing, and whichever goes live first carries the chat. The contact may not read
@@ -1255,6 +1265,7 @@ export class GhostLink {
     // The record lists every transport the contact's app runs, started or not (WISP 03): what it lacks, it lacks.
     this.peerRecordTransports = [...transports];
     let changed = false, redescribed = false;
+    const renamed = new Set<NativeTransport>();
     for (const t of ["iroh/1", "hyperdht/1"] as const) {
       const known = this.peerDescriptors[t], next = recordDescriptor(t, known, descriptors[t], fresh, transports.includes(t));
       if (next === known) continue;
@@ -1267,7 +1278,7 @@ export class GhostLink {
         continue;
       }
       this.peerDescriptors = { ...this.peerDescriptors, [t]: next };
-      changed = true; redescribed ||= t === wanted;
+      changed = true; redescribed ||= t === wanted; renamed.add(t);
       // A new way to dial it: the attempts that failed on the old one say nothing about this one.
       this.nativeFailures.delete(t); this.demotedUntil.delete(t);
     }
@@ -1282,6 +1293,16 @@ export class GhostLink {
     this.notifyWait();
     if (!changed) return;
     traceLink(this.myPubKeyZ32, "record-transports", { transports });
+    // A connection of this side's that has not authenticated, dialled where the contact's record no longer says it is:
+    // it went to the old address, and the new one is dialled now rather than when that connection gives up.
+    const held = this.channel, heldOn = this.activeBinding?.transport as NativeTransport | undefined;
+    if (held && heldOn && renamed.has(heldOn) && !this.dialedIn.has(held) && this.paired?.state.status !== "ready"
+      && Date.now() - this.channelSince >= REDESCRIBED_GRACE_MS) {
+      traceLink(this.myPubKeyZ32, "redescribed-redial", { transport: heldOn });
+      this.disconnect();
+      this.redial();
+      return;
+    }
     // Something new to dial: the next attempt is now, not after the wait that attempts with nothing to try built up.
     if (this.channel || this.dialing) return;
     this.autoConnectFailures = 0;
@@ -2562,6 +2583,9 @@ export class GhostLink {
           this.rejectWaiters(new Error("The peer closed this connection. Check that both transport preferences allow a common transport, then reconnect."));
           this.detach();
           if (wasLive) this.peerLost("closed");
+          // A native connection that never authenticated (the contact refused it, or its path died): the side whose turn
+          // it is dials again now, not when a later look at the contact's packet happens to ask.
+          else if (binding) this.maybeAutoConnect(this.presence);
         }
       };
       const unproven = this.unproven(channel);
@@ -2577,7 +2601,8 @@ export class GhostLink {
         fingerprints: fingerprints ?? undefined,
         binding, transports: migration?.plan?.choices ?? this.transportOffer(), allowFallback: migration?.plan?.local.fallback ?? this.fallback,
         transportSwitchSupport: true,
-        ...(unproven ? { authTimeoutMs: UNPROVEN_AUTH_MS } : {}),
+        // Dialled in, or dialled out on a native transport (its path was up when it opened): bounded either way on a pinned chat.
+        ...(unproven || (binding && this.options.pairing.credentials.peerKey) ? { authTimeoutMs: UNPROVEN_AUTH_MS } : {}),
         holdSupport: !!this.options.holdSupport,
         proofSupport: !!this.options.events?.onPeerProof,
         identitySupport: !!this.options.events?.onIdentityProof,
@@ -2591,11 +2616,14 @@ export class GhostLink {
         // A connection dialled in on a pinned chat says nothing until it authenticated: one refused leaves no trace in the state.
         onState: () => { if (this.channel === channel && (!this.unproven(channel) || paired.state.status === "ready")) this.emitPairingState(); },
         onFailure: () => {
-          if (this.unproven(channel)) {
+          // Dialled in and unproven, or a connection that carried nothing in time: neither says anything about the contact.
+          if (this.unproven(channel) || paired.authTimedOut) {
             if (paired.state.keyMismatch) this.dht?.foreignKeySeen("stream");
-            traceLink(this.myPubKeyZ32, "dialed-in-refused", { keyMismatch: !!paired.state.keyMismatch });
+            if (this.unproven(channel)) traceLink(this.myPubKeyZ32, "dialed-in-refused", { keyMismatch: !!paired.state.keyMismatch });
+            else traceLink(this.myPubKeyZ32, "auth-timeout", { transport: binding?.transport ?? "webrtc/1" });
             migration?.reject(new Error(paired.state.error ?? "Candidate authentication failed"));
             channel.close(); if (this.channel === channel) this.detach();
+            if (!this.channel && binding) this.maybeAutoConnect(this.presence);
             return;
           }
           this.securityRejected = true;
