@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useCallback, useSyncExternalStore } from "react";
 import {
   callRtcConfig,
   extractParamsFromSdp,
@@ -14,6 +14,7 @@ import {
   type CallMedia,
   type CallIceServer,
 } from "@ghostly/core";
+import { endOtherCalls, otherCallOn as anotherCallOn, setCallOn, subscribeCalls } from "./callRegistry";
 
 /** What a peer can put on the video lane of a call. */
 export type Picture = "camera" | "screen";
@@ -180,6 +181,9 @@ function traceCallEnd(why: string, detail: Record<string, unknown> = {}): void {
   traceLink("call", "call-end", { why, ...detail });
 }
 
+/** The states in which this chat's call is on (placed or answered), for the app's one call at a time. */
+const ON_A_CALL: ReadonlySet<CallState> = new Set<CallState>(["offering", "answering", "connecting", "connected"]);
+
 /** Capture from exactly this device, or from the default (null). */
 const exactly = (deviceId: string | null): MediaTrackConstraints | true => (deviceId ? { deviceId: { exact: deviceId } } : true);
 
@@ -213,6 +217,8 @@ export function useWebRTC({
   }, []);
 
   const [callState, setCallState] = useState<CallState>("idle");
+  /** This chat's key among the app's calls (`callRegistry`): a second call answered elsewhere ends this one. */
+  const [callKey] = useState(() => Symbol("call"));
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
   const [isMuted, setIsMuted] = useState(false);
@@ -284,10 +290,16 @@ export function useWebRTC({
     setPictureState(next);
   }, []);
 
+  /** The latest `hangUp`, for what runs before it is defined or outlives a render. */
+  const hangUpRef = useRef<(sendSignal?: boolean, addEndMessage?: boolean, unreachable?: boolean) => void>(() => {});
+
   const updateCallState = useCallback((state: CallState) => {
     callStateRef.current = state;
     setCallState(state);
-  }, []);
+    // One call at a time (WISP 601, "On a call already"): answering a call in another chat hangs this one up, as its
+    // person would, so the contact is told and both chats keep the end line.
+    setCallOn(callKey, ON_A_CALL.has(state) ? () => { traceCallEnd("answered-another", { state: callStateRef.current }); hangUpRef.current(true, true); } : null);
+  }, [callKey]);
 
   /**
    * Which call attempt is current. Hanging up (or any cleanup) moves it on, so a start or an answer
@@ -296,8 +308,6 @@ export function useWebRTC({
    */
   const attemptRef = useRef(0);
 
-  /** The latest `hangUp`, for what runs before it is defined or outlives a render. */
-  const hangUpRef = useRef<(sendSignal?: boolean, addEndMessage?: boolean, unreachable?: boolean) => void>(() => {});
   const addCallEventMessageRef = useRef(addCallEventMessage);
   addCallEventMessageRef.current = addCallEventMessage;
 
@@ -565,7 +575,8 @@ export function useWebRTC({
 
   const startCall = useCallback(
     async (withVideo: boolean) => {
-      if (callStateRef.current !== "idle") return;
+      // Never two calls at once: a call is placed once the one on in another chat has ended.
+      if (callStateRef.current !== "idle" || anotherCallOn(callKey)) return;
 
       // A hang-up schedules clearing `_call` a few seconds later; that must not
       // wipe the offer of a call placed in the meantime.
@@ -646,6 +657,7 @@ export function useWebRTC({
       cleanupConnection,
       addCallEventMessage,
       showMediaProblem,
+      callKey,
     ],
   );
 
@@ -719,6 +731,9 @@ export function useWebRTC({
     async (withVideo: boolean) => {
       const offer = pendingOfferRef.current;
       if (!offer || callStateRef.current !== "incoming") return;
+      // On a call in another chat: that call ends first ("End and answer"), with its hang-up and its end line, and its
+      // microphone and camera are let go before this call asks for its own. Never two calls at once.
+      endOtherCalls(callKey);
 
       if (hangupTimerRef.current) {
         clearTimeout(hangupTimerRef.current);
@@ -764,6 +779,7 @@ export function useWebRTC({
       updateCallState,
       couldNotConnect,
       showMediaProblem,
+      callKey,
     ],
   );
 
@@ -1082,6 +1098,8 @@ export function useWebRTC({
   useEffect(() => {
     const attempts = attemptRef;
     return () => {
+      // Not on a call any more as far as the other chats can tell.
+      setCallOn(callKey, null);
       // A start or an answer still waiting for the microphone or for ICE is cancelled, as a hang-up cancels it.
       attempts.current++;
       // The chat holding the call went away with it on: nothing is sent, and the contact's call ends when its media does.
@@ -1103,7 +1121,10 @@ export function useWebRTC({
         pcRef.current = null;
       }
     };
-  }, []);
+  }, [callKey]);
+
+  /** A call is on in another chat: answering the one that rings here ends it first ("End and answer"). */
+  const otherCallOn = useSyncExternalStore(subscribeCalls, () => anotherCallOn(callKey), () => false);
 
   const connected = callState === "connected";
   // Phones have no screen to capture (no getDisplayMedia): there the share button does not show at all.
@@ -1139,6 +1160,11 @@ export function useWebRTC({
     noAnswer,
     mediaProblem: mediaProblemShown,
     callStartedAt,
+    /**
+     * A call is on in another chat of this app. A call that rings here then offers "End and answer": `acceptCall` ends
+     * that call first, and `startCall` places nothing until it has ended.
+     */
+    otherCallOn,
     startCall,
     acceptCall,
     hangUp,

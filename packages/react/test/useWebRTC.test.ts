@@ -4,7 +4,7 @@ import { deferred, FakePeerConnection, installWebRTCFakes, remote, type FakeMedi
 import { renderCall, settle } from "./harness";
 import { MEDIA_PROBLEM_SHOWN_MS, NO_ANSWER_SHOWN_MS, RESTART_GRACE_MS, RING_MS, mediaProblem } from "../src/useWebRTC";
 
-// covers: calls.audio, calls.video, calls.cancel, calls.decline, calls.media-blocked, calls.screen-share, calls.upgrade
+// covers: calls.audio, calls.video, calls.cancel, calls.decline, calls.end-and-answer, calls.media-blocked, calls.screen-share, calls.upgrade
 
 let devices: FakeMediaDevices;
 let uninstall: () => void;
@@ -969,6 +969,147 @@ describe("a second call while the first is still getting its microphone", () => 
     devices.userMedia[1].grant();
     await settle();
     expect(call.publishedKinds()).toEqual(["h", "o"]);
+  });
+});
+
+describe("a call ringing in another chat while one is on (End and answer)", () => {
+  /** A call this chat placed, answered and connected for 3 s: its microphone, its connection. */
+  async function onACall() {
+    const call = renderCall();
+    const { stream, pc } = await offered(call);
+    call.receive(remote.answer(Date.now() + 1));
+    await settle();
+    act(() => pc.setIceState("connected"));
+    act(() => { vi.advanceTimersByTime(3000); });
+    expect(call.result.current.callState).toBe("connected");
+    return { call, stream, pc };
+  }
+
+  /** Another chat, its contact calling. */
+  function ringing(video = false) {
+    const call = renderCall();
+    call.receive(remote.offer(Date.now(), video));
+    expect(call.result.current.callState).toBe("incoming");
+    return call;
+  }
+
+  it("answering ends the call that is on first, with its hang-up and its end line, then answers: one microphone", async () => {
+    const { call: first, stream, pc } = await onACall();
+    const second = ringing();
+    expect(second.result.current.otherCallOn).toBe(true);
+    expect(first.result.current.otherCallOn).toBe(false);
+
+    act(() => { void second.result.current.acceptCall(false); });
+
+    // The first call ended as its person's hang-up ends it: the contact is told, the chat keeps its line and length.
+    expect(first.result.current.callState).toBe("idle");
+    expect(first.publishedKinds()).toEqual(["o", "h"]);
+    expect(first.addCallEventMessage).toHaveBeenCalledWith("call_ended", false, 3000);
+    expect(pc.close).toHaveBeenCalledOnce();
+    // Its microphone was let go before the second call asked for one.
+    expect(stream.getTracks().every((t) => t.readyState === "ended")).toBe(true);
+    expect(devices.userMedia).toHaveLength(2);
+
+    expect(second.result.current.callState).toBe("answering");
+    devices.userMedia[1].grant();
+    await settle();
+    expect(second.publishedKinds()).toEqual(["a"]);
+    expect(second.result.current.callState).toBe("connecting");
+    expect(second.result.current.otherCallOn).toBe(false);
+    expect(first.result.current.otherCallOn).toBe(true);
+  });
+
+  it("declining leaves the call that is on going, and the caller hears it declined", async () => {
+    const { call: first } = await onACall();
+    const second = ringing();
+
+    act(() => second.result.current.rejectCall());
+
+    expect(second.publishedKinds()).toEqual(["h"]);
+    expect(second.addCallEventMessage).toHaveBeenCalledWith("call_rejected", false);
+    expect(first.result.current.callState).toBe("connected");
+    expect(first.publishedKinds()).toEqual(["o"]);
+    expect(devices.userMedia).toHaveLength(1);
+  });
+
+  it("the second caller giving up stops the ring and leaves the call that is on alone", async () => {
+    const { call: first } = await onACall();
+    const second = ringing(true);
+
+    second.receive(remote.hangUp(Date.now() + 1));
+
+    expect(second.result.current.callState).toBe("idle");
+    expect(second.addCallEventMessage).toHaveBeenCalledWith("call_missed", true, undefined, expect.any(Number));
+    expect(first.result.current.callState).toBe("connected");
+    expect(first.publishedKinds()).toEqual(["o"]);
+  });
+
+  it("the call that is on ending by itself while the other rings brings back the plain Accept", async () => {
+    const { call: first } = await onACall();
+    const second = ringing();
+    expect(second.result.current.otherCallOn).toBe(true);
+
+    first.receive(remote.hangUp(Date.now() + 1));
+
+    expect(first.result.current.callState).toBe("idle");
+    expect(second.result.current.callState).toBe("incoming");
+    expect(second.result.current.otherCallOn).toBe(false);
+  });
+
+  it("a call ringing out counts as on: answering another cancels it", async () => {
+    const first = renderCall();
+    await offered(first);
+    const second = ringing();
+    expect(second.result.current.otherCallOn).toBe(true);
+
+    act(() => { void second.result.current.acceptCall(false); });
+
+    expect(first.result.current.callState).toBe("idle");
+    expect(first.publishedKinds()).toEqual(["o", "h"]);
+    expect(first.addCallEventMessage).toHaveBeenCalledWith("call_cancelled", false);
+  });
+
+  it("two calls ringing with none on: answering one makes the other an End and answer", () => {
+    const first = ringing();
+    const second = ringing();
+    expect(first.result.current.otherCallOn).toBe(false);
+    expect(second.result.current.otherCallOn).toBe(false);
+
+    act(() => { void first.result.current.acceptCall(false); });
+
+    expect(second.result.current.callState).toBe("incoming");
+    expect(second.result.current.otherCallOn).toBe(true);
+  });
+
+  it("no call is placed from another chat while one is on", async () => {
+    await onACall();
+    const other = renderCall();
+    expect(other.result.current.otherCallOn).toBe(true);
+
+    act(() => { void other.result.current.startCall(false); });
+
+    expect(other.result.current.callState).toBe("idle");
+    expect(devices.userMedia).toHaveLength(1);
+    expect(other.addCallEventMessage).not.toHaveBeenCalled();
+  });
+
+  it("the same contact offering again during the call is not a second call: it is ignored, as before", async () => {
+    const { call } = await onACall();
+
+    call.receive(remote.offer(Date.now() + 1));
+
+    expect(call.result.current.callState).toBe("connected");
+    expect(call.result.current.otherCallOn).toBe(false);
+    expect(call.addCallEventMessage).not.toHaveBeenCalledWith("call_received", expect.anything(), undefined, expect.anything());
+  });
+
+  it("a chat that goes away with its call on no longer counts as on", async () => {
+    const { call: first } = await onACall();
+    const second = ringing();
+
+    first.unmount();
+
+    expect(second.result.current.otherCallOn).toBe(false);
   });
 });
 
