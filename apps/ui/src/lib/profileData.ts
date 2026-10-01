@@ -166,11 +166,14 @@ async function lockHeld(ns: string): Promise<boolean> {
  */
 export async function deleteProfile(id: string, password?: string): Promise<void> {
   if (!id) throw new Error("The first profile cannot be deleted");
-  // Neither the one this page runs nor the one the registry has chosen (which another tab may run, or start as next).
-  if (id === activeProfileId() || id === chosenProfileId()) throw new Error("Switch to another profile first");
-  await assertUnlocked(id, password);
+  if (id === activeProfileId()) throw new Error("Switch to another profile first");
   const ns = namespaceOf(id), dbName = `ghostly_${ns}`;
+  // Another tab runs it (and has likely made it the registry's choice): that is what to say, since switching here
+  // would not close it.
   if (await lockHeld(ns)) throw new Error("This profile is open in another window. Close it, then try again.");
+  // Nor the one the registry has chosen, which the next page starts as.
+  if (id === chosenProfileId()) throw new Error("Switch to another profile first");
+  await assertUnlocked(id, password);
   const others = await Promise.all(listProfiles().filter((p) => p.id !== id).map((p) => walletStorage(databaseOf(p.id))));
   const usedElsewhere = new Set(others.flatMap((o) => [...o.databases, ...o.files]));
   const own = await walletStorage(dbName);
