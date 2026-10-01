@@ -511,6 +511,7 @@ export class GhostlyNode implements EngineImplementation {
     storeMessage: (message) => this.storeMessage(message),
     transfers: this.transfers,
     changed: (delayMs) => this.emitState(delayMs),
+    flush: () => this.flushState(),
     settled: (linkId, fileId, record, seen) => {
       if (seen && record.direction === "in" && record.state === "done") this.cueFeedback({ cue: "downloaded", key: fileId }, this.chatOf(linkId));
       void this.noteFileEnd(linkId, fileId, record.state === "done" ? undefined : record.error ?? record.state);
@@ -2706,6 +2707,9 @@ export class GhostlyNode implements EngineImplementation {
     let writing: Promise<void> = appender.then(() => {});
     const discard = () => appender.then((a) => a.bytes.remove(file.id)).catch(() => {});
     this.transfers.set(file.id, { state: "transferring", transferred: 0, size: file.size });
+    // The app has its transfer before its message: a file shown with no transfer and no bytes reads as gone, and one
+    // that arrived within the state's usual wait said "No longer available" until it was all here.
+    this.flushState();
     // files/2 names a file's message by the sender's time, as the sender's reactions, edits and deletes do. Another
     // file (or a message) already at that time keeps its place, and this one gets an id of its own: its bytes never
     // land without a message. The same file sent again after its transfer failed lands in the message it had.
@@ -5155,5 +5159,11 @@ export class GhostlyNode implements EngineImplementation {
       this.stateTimer = null;
       this.events.onState(this.getState());
     }, delayMs);
+  }
+
+  /** The state now, not after `emitState`'s wait: for what the app must have before what follows it. */
+  private flushState(): void {
+    if (this.stateTimer) { clearTimeout(this.stateTimer); this.stateTimer = null; }
+    this.events.onState(this.getState());
   }
 }
