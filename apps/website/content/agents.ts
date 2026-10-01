@@ -35,6 +35,7 @@ export const LINKS = {
   turns: `${DOCS}/docs/CLI.md#agent-turns`,
   claude: `${DOCS}/packages/cli/examples/claude-code-agent.sh`,
   cards: "/wisps/4xx-status-cards",
+  buttons: "/wisps/4xx-message-buttons",
 } as const;
 
 /** What works on dev, and what is planned (docs/wisps/ADAPTER-ROADMAP.md, "Agent connector"). */
@@ -43,6 +44,7 @@ const SCOPE: { level: Level; key: string }[] = [
   { level: "available", key: "turns" },
   { level: "available", key: "thinking" },
   { level: "available", key: "cards" },
+  { level: "available", key: "buttons" },
   { level: "available", key: "mentions" },
   { level: "available", key: "answers" },
   { level: "available", key: "calls" },
@@ -72,6 +74,12 @@ export const SHOWS = [
   { id: "thinking", title: "Thinking", body: "A status line while it works, for up to 10 minutes. Its next message ends it.", cmd: 'ghostly typing owner --kind thinking --status "Reading the logs" --for 600' },
   { id: "task", title: "Task cards", body: "Status, progress, the step it is on, how long it has run and its pull request. One card, kept current.", cmd: 'ghostly task update owner relay-fix --steps 3/4 --step "CI"' },
   { id: "routine", title: "Routine cards", body: "A job on a schedule: the last run, how it went, and the next.", cmd: 'ghostly routine update owner nightly --run "ok:12 issues checked"' },
+  {
+    id: "buttons",
+    title: "Buttons",
+    body: "Up to six under a question. A tap is a reply, and listen gets button.pressed: which button, and who. button update --chosen and --close answer it.",
+    cmd: 'ghostly send owner --button merge:Merge --button wait:Later --style merge=primary --once "Merge PR #612?"',
+  },
   { id: "groups", title: "Groups", body: "Woken only when someone writes @Casper. The Tasks panel lists each bot's cards.", cmd: 'ghostly group send crew "On it, @Ana" --mention Ana' },
   { id: "calls", title: "Voice calls", body: "It answers your calls; the audio reaches your program as raw PCM.", cmd: "ghostly call auto on --from owner" },
 ] as const;
@@ -80,12 +88,12 @@ export const agents = {
   meta: {
     title: "AI agents on Ghostly",
     description:
-      "Put Claude Code, Codex, Hermes or your own bot in your Ghostly chats. It answers, shows what it is thinking and keeps task cards up to date.",
+      "Put Claude Code, Codex, Hermes or your own bot in your Ghostly chats. It answers, shows its thinking, asks with buttons and keeps task cards current.",
   },
   hero: {
     eyebrow: "AI agents",
     title: "Your agents, in your chats.",
-    lead: "Claude Code, Codex, Hermes or a bot of your own joins Ghostly like a contact. It answers you, shows what it is thinking, and keeps a card of each task up to date.",
+    lead: "Claude Code, Codex, Hermes or a bot of your own joins Ghostly like a contact. It answers you, shows what it is thinking, asks with buttons, and keeps a card of each task up to date.",
     copy: "Copy the prompt",
     copied: "Copied",
     hint: "Paste it into your agent. It installs Ghostly and sends you a link.",
@@ -93,7 +101,8 @@ export const agents = {
   },
   /** The animated chat (components/agents/AgentDemo.tsx). The times are the story's, not a clock's. */
   demo: {
-    label: "An agent at work in a Ghostly chat: it thinks, posts a task card that runs to done, then a routine card.",
+    label:
+      "An agent at work in a Ghostly chat: it thinks, posts a task card that runs to done, asks to merge with two buttons, you tap Merge, it closes the question, then a routine card.",
     bot: "Casper",
     online: "online",
     thinking: "thinking",
@@ -108,11 +117,28 @@ export const agents = {
     doing: ["Writing the codec", "Running the tests", "Waiting for CI"],
     elapsed: { queued: "queued for {d}", running: "running for {d}", took: "took {d}" },
     pr: "PR #612",
+    /** The question, its buttons (`send --button merge:Merge --button wait:Later --style merge=primary --once`). */
+    question: "CI is green. Merge PR #612?",
+    buttons: [
+      { id: "merge", label: "Merge", style: "primary" },
+      { id: "wait", label: "Later", style: "neutral" },
+    ],
+    closed: "Closed",
     routine: "Nightly bug hunt",
     schedule: "every day 01:00",
     last: "Last run OK",
     next: "next in 9 h",
-    captions: ["You ask", "It thinks", "It takes the task", "It keeps it current", "Done, with its PR", "Its nightly routine"],
+    captions: [
+      "You ask",
+      "It thinks",
+      "It takes the task",
+      "It keeps it current",
+      "Done, with its PR",
+      "It asks with buttons",
+      "You tap Merge",
+      "It takes your answer",
+      "Its nightly routine",
+    ],
     still: "An agent at work",
     pause: "Pause",
     play: "Play",
@@ -134,8 +160,9 @@ export const agents = {
     toPrompt: "the prompt",
     copy: "Copy",
     copied: "Copied",
-    note: "Task and routine cards come with ghostly {n}. ghostly help task says whether yours has them.",
+    note: "Cards and buttons come with ghostly {n}. ghostly help task and ghostly help send say whether yours has them.",
     cards: "What a card holds: WISP 4xx · Status Cards",
+    buttons: "Buttons: WISP 4xx · Message Buttons",
   },
   prompt: {
     eyebrow: "The prompt",
@@ -191,6 +218,7 @@ export const agents = {
       turns: "agent.turn events, the contact's words under untrusted",
       thinking: "typing --kind thinking --status while the agent works",
       cards: "Task and routine cards, kept current with task update and routine update",
+      buttons: "Buttons under a question: send --button, --style and --once, the button.pressed event, and button update --chosen, --close or --text",
       mentions: "Groups: woken by an @mention, answered with group send --mention",
       answers: "Replies, voice notes, files and reactions to answer with",
       calls: "Voice calls, the audio as raw PCM for your program",
@@ -209,6 +237,7 @@ export const agents = {
     skill: "Agent skill (SKILL.md)",
     guide: "Agents guide",
     cards: "WISP 4xx · Status Cards",
+    buttons: "WISP 4xx · Message Buttons",
     cliGuide: "CLI guide",
     readme: "Every command (CLI README)",
     claude: "Claude Code example",
