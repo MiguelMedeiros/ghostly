@@ -192,13 +192,6 @@ export function MessageInput({
   useEffect(() => {
     if (!touchOnly()) textareaRef.current?.focus();
   }, []);
-  // Leaving with the focus here (a link, a key, the app's own navigation, not a click elsewhere): the field lets it go
-  // before it leaves the page. Taken out with the focus, it gets no focusout, and React's select-event plugin keeps it,
-  // and through it the whole chat that was closed, until another text field takes the focus.
-  useLayoutEffect(() => {
-    const input = textareaRef.current;
-    return () => { if (input && input.ownerDocument.activeElement === input) input.blur(); };
-  }, []);
 
   // Disabled for a moment under the caret (a 1:1 chat's send under way): the browser takes the focus from a disabled
   // field and never gives it back, so the next message went nowhere. It comes back unless something else took it.
