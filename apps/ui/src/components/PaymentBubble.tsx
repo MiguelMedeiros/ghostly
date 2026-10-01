@@ -179,7 +179,7 @@ export function PaymentBubble({ paymentId, peerPubKey, fallbackText }: { payment
           {!noWallet && <>
           {!payment.target && !viaLightning && <label className="block space-y-1 text-xs">{t("payments.bubble.cashuMint")}<Select size="sm" aria-label={t("payments.bubble.cashuMint")} value={selectedMint ?? ""} onChange={setMint} disabled={!sharedMints.length} placeholder={t("payments.bubble.noSharedMint")} options={sharedMints.map(m => ({ value: m.url, label: mintLabel(m), description: t("payments.bubble.balance", { amount: formatAmount(m.balance, t.language), unit: sats }) }))} /></label>}
           {viaLightning && <LightningPayWith payer={lightningPayer} unit={sats} disabled={busy || !!lnReview} testId="payment-lightning-card" />}
-          <label className="text-xs">{t(tokenPayment?"payments.bubble.maxGas":"payments.bubble.maxFee")}<FeeCapInput label={t(tokenPayment?"payments.bubble.maxGas":"payments.bubble.maxFee")} value={feeInput} onChange={setFeeCap} decimals={tokenPayment?18:0}/></label>
+          <label className="text-xs">{tokenPayment?t("payments.bubble.maxGas"):t("payments.bubble.maxFee",{unit:sats})}<FeeCapInput label={tokenPayment?t("payments.bubble.maxGas"):t("payments.bubble.maxFee",{unit:sats})} value={feeInput} onChange={setFeeCap} decimals={tokenPayment?18:0}/></label>
           {lnReview && (
             <div data-testid="payment-review" className="rounded-lg bg-black/20 p-2 space-y-1 text-xs">
               <p className="m-0 flex items-center gap-2">{t("payments.bubble.payOverLightning", { amount: formatAmount(payment.amount, t.language), unit: sats })}<NetworkTag network={network} testId="payment-lightning-network" /></p>
