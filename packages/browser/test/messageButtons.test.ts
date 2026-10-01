@@ -24,9 +24,12 @@ type Keys = { invitation: ReturnType<typeof createLink>; mine: string; theirs: s
 
 /**
  * A node and its contact, live. `keys`: the same chat again (a restart of both apps); `rows`: kept in the chat before the
- * node starts; `contactButtons`: false for a contact's app without buttons (1.0.0 has none).
+ * node starts; `contactButtons`: false for a contact's app without buttons (1.0.0 has none); `confirmEdits`: false for a
+ * contact that confirms no edit; `slowOutbox`: the node's outbox for the chat flushes only once this settles (a busy
+ * device, as on a slow CI runner).
  */
-async function setup({ keys, rows = [], contactButtons = true }: { keys?: Keys; rows?: StoredMessage[]; contactButtons?: boolean } = {}) {
+async function setup({ keys, rows = [], contactButtons = true, confirmEdits = true, slowOutbox }: { keys?: Keys; rows?: StoredMessage[]; contactButtons?: boolean; confirmEdits?: boolean;
+  slowOutbox?: Promise<void> } = {}) {
   const net = new FakeNativeNet();
   const invitation = keys?.invitation ?? createLink();
   const [mine, theirs] = keys ? [keys.mine, keys.theirs] : [createIdentity().seedB64, createIdentity().seedB64];
@@ -48,7 +51,7 @@ async function setup({ keys, rows = [], contactButtons = true }: { keys?: Keys; 
     native: { preferred: "iroh/1", fallback: true, peerTransports: ["iroh/1"], peerFallback: true, peerDescriptors: { "iroh/1": { id: "app:iroh/1" } } },
     transport, createPeerConnection: () => { throw new Error("No WebRTC here"); }, localFetch: vi.fn(), getServices: () => [], getHostedHttpService: () => undefined,
     editSupport: true, statusCardSupport: contactButtons, buttonsSupport: contactButtons,
-    events: { onPairingState: state => { contactState = state; }, onMessage: message => { contactGot.push(message); }, onMessageEdit: edit => { contactEdits.push(edit); return true; } },
+    events: { onPairingState: state => { contactState = state; }, onMessage: message => { contactGot.push(message); }, onMessageEdit: edit => { contactEdits.push(edit); return confirmEdits; } },
   });
   contact.registerEndpoint(net.endpoint("iroh/1", "contact"));
   let stopped = false;
@@ -57,6 +60,10 @@ async function setup({ keys, rows = [], contactButtons = true }: { keys?: Keys; 
   cleanup.push(async () => { await stop(); await db.deleteLink(id); });
   await node.start();
   node.setActiveLink({ linkId: id });
+  if (slowOutbox) {
+    const box = (node as unknown as { outboxFor(linkId: string): { flush(options?: object): Promise<void> } }).outboxFor(id), flush = box.flush.bind(box);
+    box.flush = async options => { await slowOutbox; return flush(options); };
+  }
   const view = () => node.getState().links.find(l => l.id === id)!;
   await vi.waitFor(() => expect(view().availableTransports).toHaveLength(1));
   void contact.connect(5_000).catch(() => {});
@@ -294,6 +301,21 @@ describe("buttons that went without their question (the DHT floor, a hold)", () 
     const t = await setup({ rows: [floored({ edit: { seq: 3, at: Date.now() - 30_000, history: [] }, card: readStatusCard(ask({ chosen: "no" }))! })] });
     await vi.waitFor(() => expect(t.contactEdits).toHaveLength(1), { timeout: 10_000 });
     expect(t.contactEdits[0]).toMatchObject({ e: 4, m: QUESTION, sc: expect.objectContaining({ chosen: "no" }) });
+  }, 30_000);
+
+  it("goes once on a session whose outbox is slow to resend: the edit queue starts over at the opening, not after it", async () => {
+    // The opening's resends (texts, then edits) end after edits are agreed and the buttons went: they once started the
+    // edit queue over then, and the edit, not confirmed yet, went a second time.
+    let release!: () => void;
+    const slowOutbox = new Promise<void>(resolve => { release = resolve; });
+    const t = await setup({ rows: [floored()], confirmEdits: false, slowOutbox });
+    cleanup.push(async () => release());
+    await vi.waitFor(() => expect(t.contactEdits).toHaveLength(1), { timeout: 10_000 });
+    release();
+    await new Promise(resolve => setTimeout(resolve, 1_000));
+    expect(t.contactEdits).toHaveLength(1);
+    // Still pending: it goes again by the queue's backoff, or on the next session.
+    expect(await t.row(`me_${WIRE("F")}`)).toMatchObject({ buttonsRestore: "sent", edit: { seq: 1, pending: true } });
   }, 30_000);
 
   it("a contact whose app shows no buttons gets no edit (an older app would mark it edited): the buttons stay due", async () => {

@@ -5,7 +5,7 @@ import { expect, openProfilePage, test } from "../support/fixtures";
 // Offline: no S3, no second peer.
 const PASSPHRASE = "a file backup passphrase";
 
-test("a profile goes to a file and comes back as a new profile, only with its passphrase", { tag: ["@feature:backup.profile.file", "@feature:backup.passphrase-rules", "@feature:backup.envelope", "@feature:profiles.switch"] }, async ({ peer }) => {
+test("a profile goes to a file and comes back as a new profile, only with its passphrase", { tag: ["@feature:backup.profile.file", "@feature:backup.profile.same-device", "@feature:backup.passphrase-rules", "@feature:backup.envelope", "@feature:profiles.switch"] }, async ({ peer }) => {
   const { page } = await peer("backup-file");
 
   // A profile worth keeping: a name of its own, a chat and a nickname.
@@ -56,9 +56,16 @@ test("a profile goes to a file and comes back as a new profile, only with its pa
   await expect(page.getByTestId("profile-row")).toHaveCount(1);
   await expect(page.getByTestId("profile-name")).toHaveValue("Diary");
 
-  // With the right one: a new profile, and Ghostly switches to it, chat and nickname included.
+  // With the right one: the backup is of Diary, still on this device, so Ghostly warns before restoring anything.
   await backups.getByTestId("restore-passphrase").fill(PASSPHRASE);
   await backups.getByTestId("restore-go").click();
+  const warning = backups.getByTestId("restore-same-device");
+  await expect(warning).toContainText("This backup is “Diary”, which is on this device");
+  await expect(warning).toContainText("Both would act as the same person to your contacts.");
+  await expect(warning.getByTestId("restore-replace"), "the first profile cannot be removed").toHaveCount(0);
+  await expect(page.getByTestId("profile-row")).toHaveCount(1);
+  // A copy anyway: a new profile, and Ghostly switches to it, chat and nickname included.
+  await warning.getByTestId("restore-copy").click();
   // The name field holds the name alone; "Restored" is a tag beside it.
   await expect(page.getByTestId("profile-restored-tag")).toHaveText("Restored", { timeout: 60_000 });
   await expect(page.getByTestId("profile-name")).toHaveValue("Diary");

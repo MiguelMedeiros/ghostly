@@ -81,6 +81,10 @@ test("both call at once: one side rings, and answering connects the call", { tag
   await caller.page.getByTitle("End call").click();
   for (const p of [alice, bob]) await expect(p.page.getByTitle("End call")).toHaveCount(0);
   for (const p of [alice, bob]) await expect(chat(p).getByText("Audio call ended")).toBeVisible();
+  // One call in both chats: the side whose offer lost keeps the incoming call's lines, not a "started" one of its own.
+  const lines = (p: Peer) => chat(p).getByText(/^(Audio call started|Incoming audio call)$/).allInnerTexts();
+  expect(await lines(caller)).toEqual(["Audio call started"]);
+  expect(await lines(callee)).toEqual(["Incoming audio call"]);
 });
 
 test("the contact's tab closes mid-call: the call ends here with its line", { tag: ["@feature:calls.paired", "@feature:calls.video"] }, async ({ peer }) => {

@@ -372,6 +372,22 @@ describe("files a contact sends", () => {
     expect(await events.onFileStored({ id: wire, name: "b.txt", size: 5, mime: "text/html", timestamp: 7 })).toBeUndefined();
   });
 
+  it("the app has a file's transfer before the message that shows it: a file still arriving never reads as gone", async () => {
+    const { node, chat, announce } = await incoming();
+    // The engine's own events (what the app hears), not the link's.
+    const events = node["events"] as unknown as { onState: ReturnType<typeof vi.fn>; onMessages: ReturnType<typeof vi.fn> };
+    // Whatever the start left to say has been said.
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    const order: string[] = [];
+    events.onState.mockImplementation((state: { transfers: Record<string, unknown> }) => {
+      if (Object.keys(state.transfers).some((id) => id.startsWith(`${chat.id}-in-`))) order.push("transfer");
+    });
+    events.onMessages.mockImplementation((_linkId: string, messages: { file?: unknown }[]) => { if (messages.some((m) => m.file)) order.push("message"); });
+    announce("w.first");
+    await vi.waitFor(() => expect(order).toContain("message"));
+    expect(order[0]).toBe("transfer");
+  });
+
   it("a wire id is used once, and a contact cannot announce more than the room it has here", async () => {
     const { node, chat, events, announce } = await incoming();
     expect(typeof announce("w1")).toBe("object");
