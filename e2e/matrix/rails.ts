@@ -325,12 +325,14 @@ async function arkade(a: Actor, b: Actor): Promise<void> {
     await wallet(p, "arkade");
     // The last payment reaches the wallet's figures on its next poll (10 s), and coins may expire only after a
     // recovery found none (their batch is A's funding, minutes old): whenever expired ones show, they are recovered,
-    // until the sats are held (4 min at most). A failed recovery fails the test, never retried.
+    // until the sats are held (4 min at most). A failed recovery fails the test, never retried. The payer's figure
+    // waits the same way: read right after its last payment settled, it still shows the sats that payment spent.
     const held = async () => (await sats(p)) + (await smallExpiredArk(panel(p)));
     const enough = () => expected - 60 - fees.get(p)!;
     for (const until = Date.now() + 4 * 60_000; ;) {
       await recover(p);
-      if ((await held()) >= enough() || Date.now() > until) break;
+      const now = await held();
+      if ((now >= enough() && now <= expected) || Date.now() > until) break;
       await p.page.waitForTimeout(2_000);
     }
     expect(await held(), `${p.name}'s sats, the expired ones set apart included`).toBeGreaterThanOrEqual(enough());
