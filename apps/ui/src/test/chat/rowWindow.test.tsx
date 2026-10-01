@@ -62,6 +62,25 @@ describe("useRowWindow", () => {
     expect(result.current.more("down")).toBe(false);
   });
 
+  it("at the end with more than its most rows (messages that came while open), trims to the last rows; otherwise leaves them", () => {
+    const { result, rerender } = renderHook(({ ids }) => useRowWindow(ids, "chat-1"), { initialProps: { ids: rows(50) } });
+    rerender({ ids: rows(50 + MAX_ROWS) });
+    expect(range(result.current)).toEqual([0, 50 + MAX_ROWS]);
+    let trimmed = false;
+    act(() => { trimmed = result.current.trim(); });
+    expect(trimmed).toBe(true);
+    expect(range(result.current)).toEqual([50 + MAX_ROWS - OPEN_ROWS, 50 + MAX_ROWS]);
+    expect(result.current.detached).toBe(false);
+    // As many as the most, or up the history: nothing goes.
+    act(() => { trimmed = result.current.trim(); });
+    expect(trimmed).toBe(false);
+    for (let i = 0; i < 4; i++) act(() => { result.current.more("up"); });
+    const held = range(result.current);
+    act(() => { trimmed = result.current.trim(); });
+    expect(trimmed).toBe(false);
+    expect(range(result.current)).toEqual(held);
+  });
+
   it("goes back to the last rows on attach", () => {
     const { result } = renderHook(() => useRowWindow(rows(2_000), "chat-1"));
     for (let i = 0; i < 6; i++) act(() => { result.current.more("up"); });
