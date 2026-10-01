@@ -20,9 +20,14 @@ async function openProfile(page: Page): Promise<void> {
   await expect(page.getByTestId("profile-page")).toBeVisible();
 }
 
-/** Switches from the Profile page; the app starts again as that profile. */
+/**
+ * Switches from the Profile page; the app starts again as that profile. The page reloads for it: a restored copy's
+ * field holds the same name as its original (#969), so the field alone could say the name before the switch is done.
+ */
 async function switchTo(page: Page, name: string): Promise<void> {
+  const reloaded = page.waitForEvent("load", { timeout: 60_000 });
   await row(page, name).getByTestId("profile-switch").click();
+  await reloaded;
   await expect(profileName(page)).toHaveValue(name, { timeout: 60_000 });
 }
 
@@ -131,6 +136,7 @@ test("the extension keeps several profiles: create, switch, restore a backup int
   // And back to the first profile, which still has its own.
   await openProfile(page);
   await switchTo(page, "Casa");
+  await expect(page.getByTestId("profile-restored-tag")).toHaveCount(0);
   await expect(rows(page)).toHaveCount(3);
   await openChatAt(ext, chatHash);
   await expect(chat(ext).getByText("back home").first()).toBeVisible();
