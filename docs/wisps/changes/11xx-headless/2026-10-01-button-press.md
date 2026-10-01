@@ -1,0 +1,1 @@
+`button press` presses a button of someone else's question, as the app's tap, so a bot or a test needs no `engine pressButton`. `button.pressed` now says what `name` is (the chat's name here, its label else the contact's own; a group member's roster name) and adds `untrusted.name`, the name the person gave themselves, as an agent turn carries it.

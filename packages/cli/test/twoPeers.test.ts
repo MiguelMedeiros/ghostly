@@ -424,16 +424,18 @@ describe("two headless peers", { timeout: 180_000 }, () => {
     const id = sent.messageId as string;
     const theirs = (ok(await as(bob, "chat", "history", "alice")).messages as { id: string; card?: { id: string } }[]).find((m) => m.card?.id === sent.buttons)!;
     expect(theirs).toBeDefined();
-    expect(ok(await as(bob, "engine", "pressButton", JSON.stringify({ linkId: chatB, messageId: theirs.id, buttonId: "yes" })))).toMatchObject({ error: null });
+    // The contact presses from its own CLI, as a tap in the app.
+    expect(ok(await as(bob, "button", "press", "alice", theirs.id, "yes"))).toMatchObject({ chat: chatB, messageId: theirs.id, button: "yes", label: "Yes" });
     const event = await listen.waitFor((l) => l.type === "button.pressed");
-    expect(event).toMatchObject({ chat: chatA, messageId: id, button: "yes", label: "Yes", by: chatA, name: "bob" });
+    // `name` is the chat's name here (the invite's label); the name Bob gave himself is under `untrusted`.
+    expect(event).toMatchObject({ chat: chatA, messageId: id, button: "yes", label: "Yes", by: chatA, name: "bob", untrusted: { name: "Bob" } });
     expect(event).not.toHaveProperty("inferred");
     const reply = (ok(await as(alice, "chat", "history", "bob")).messages as { id: string }[]).find((m) => m.id === event.replyId);
     expect(reply).toMatchObject({ text: "Yes", from: "peer", press: { messageId: id, button: "yes", label: "Yes" }, replyTo: { id, button: "yes", found: true } });
     expect(ok(await as(alice, "button", "update", "bob", id, "--chosen", "yes", "--close", "--wait", "confirmed"))).toMatchObject({ chat: chatA, messageId: id, confirmed: true, card: { chosen: "yes", closed: true } });
     await expect.poll(async () => (ok(await as(bob, "chat", "history", "alice")).messages as { id: string; card?: { closed?: boolean } }[]).find((m) => m.id === theirs.id)?.card?.closed, { timeout: 30_000 }).toBe(true);
     // Answered, and closed: the contact's engine presses no more.
-    expect(ok(await as(bob, "engine", "pressButton", JSON.stringify({ linkId: chatB, messageId: theirs.id, buttonId: "no" })))).toMatchObject({ refused: true });
+    error(await as(bob, "button", "press", "alice", theirs.id, "no"), "refused", 1);
     await listen.stop();
   });
 

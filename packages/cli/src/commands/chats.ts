@@ -2,6 +2,16 @@ import { type Command, force, groupWait, cursor, needs, routineFields, routineOp
 
 /** Invites, chats and messages: one entry per command, in alphabetical order (test/commands.test.ts checks). */
 export const commands: Record<string, Command> = {
+  "button press": {
+    method: "button.press", usage: "button press <chat|group> <message> <button> [--wait none|sent|delivered] [--timeout s]",
+    summary: "Press a button of someone else's message, as a tap in the app does (its id from the message's card)",
+    args: ["chat", "message", "button"],
+    options: {
+      wait: { type: "string", description: "none, sent (a one-shot's default in a chat) or delivered; a group takes none or sent" },
+      timeout: groupWait.timeout,
+    },
+    params: ({ options }, a) => ({ chat: a.chat, message: a.message, button: a.button, wait: options.wait, timeout: options.timeout }),
+  },
   "button update": {
     method: "button.update", usage: "button update <chat|group> <message> [--chosen <button>] [--close] [--text <text>] [--force] [--wait none|confirmed|sent] [--timeout s]",
     summary: "Show the answer on a message's buttons (--chosen), close them, or change its text (the messageId send --button gave)",

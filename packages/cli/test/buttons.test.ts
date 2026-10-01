@@ -45,9 +45,21 @@ function fake(links: LinkView[] = [link("chat-one", { label: "Alice", sessionOff
       return { error: null, messageId };
     }),
     groupTaken: vi.fn(() => 1),
+    // The engine's press: a reply whose text is the label (its own checks are packages/browser's messageButtons test).
+    pressButton: vi.fn(async ({ linkId, messageId, buttonId }: { linkId: string; messageId: string; buttonId: string }) => {
+      const question = of(linkId).find((m) => m.id === messageId);
+      const button = question?.card?.kind === "buttons" ? question.card.buttons.find((b) => b.id === buttonId) : undefined;
+      if (!button) return { error: "That message has no such button", refused: true };
+      if (question!.card?.kind === "buttons" && question!.card.closed) return { error: "These buttons are closed", refused: true };
+      return { error: null, messageId: store(linkId, button.label) };
+    }),
+  };
+  /** A message someone else sent, with buttons when `raw` is a card. */
+  const theirs = (linkId: string, id: string, text: string, raw?: unknown) => {
+    of(linkId).push({ linkId, id, wireId: `w-${id}`, text, sender: "peer", timestamp: Date.now(), via: "datalink", ...(linkId.startsWith("group:") && { member: "anakey" }), ...(raw !== undefined && { card: card(raw) }) });
   };
   const ctx = { runtime: { server: { node }, paths: { name: "default" } }, hub: { onEvent: () => () => {}, onState: () => () => {}, lastSeq: 0, replay: () => [] }, mode: "daemon", version: "test" } as unknown as ApiContext;
-  return { ctx, node, rows: of };
+  return { ctx, node, rows: of, theirs };
 }
 
 /** A text command's line as main.ts reads it: the buttons its flags give. */
@@ -181,6 +193,48 @@ describe("button update", () => {
   });
 });
 
+describe("button press", () => {
+  const ask = { kind: "buttons", id: "q", buttons: [{ id: "yes", label: "Yes" }, { id: "no", label: "No" }] };
+
+  it("presses a button of the contact's question, by its id here or the one both sides know", async () => {
+    const { ctx, node, rows, theirs } = fake();
+    theirs("chat-one", "peer_1", "Want it?", ask);
+    expect(await callApi(ctx, "button.press", { chat: "Alice", message: "peer_1", button: "yes" }))
+      .toEqual({ chat: "chat-one", messageId: "peer_1", button: "yes", label: "Yes", replyId: "me_1", delivery: "sent" });
+    expect(node.pressButton).toHaveBeenCalledWith({ linkId: "chat-one", messageId: "peer_1", buttonId: "yes" });
+    expect(rows("chat-one").at(-1)).toMatchObject({ id: "me_1", sender: "me", text: "Yes" });
+    expect(await callApi(ctx, "button.press", { chat: "Alice", message: "w-peer_1", button: "no", wait: "none" })).toMatchObject({ messageId: "peer_1", button: "no", label: "No" });
+  });
+
+  it("presses in a group, answering how many edges took it", async () => {
+    const { ctx, node, theirs } = fake();
+    theirs("group:g1", "gq", "Deploy?", { kind: "buttons", id: "d", buttons: [{ id: "go", label: "Go" }] });
+    expect(await callApi(ctx, "button.press", { chat: "Sala", message: "gq", button: "go" })).toEqual({ group: "g1", messageId: "gq", button: "go", label: "Go", replyId: "me_1", edges: 1 });
+    expect(node.pressButton).toHaveBeenCalledWith({ linkId: "group:g1", messageId: "gq", buttonId: "go" });
+  });
+
+  it("refuses my own message, one without buttons, a button it lacks, and what the engine refuses", async () => {
+    const { ctx, node, theirs } = fake();
+    await callApi(ctx, "chat.send", { chat: "Alice", text: "Mine?", buttons: [{ id: "yes", label: "Yes" }] });
+    theirs("chat-one", "peer_plain", "hello");
+    theirs("chat-one", "peer_closed", "Closed?", { ...ask, closed: true });
+    await expect(callApi(ctx, "button.press", { chat: "Alice", message: "me_1", button: "yes" })).rejects.toMatchObject({ code: "not_found", message: /from someone else/ });
+    await expect(callApi(ctx, "button.press", { chat: "Alice", message: "peer_plain", button: "yes" })).rejects.toMatchObject({ code: "bad_request", message: /no buttons/ });
+    await expect(callApi(ctx, "button.press", { chat: "Alice", message: "peer_closed", button: "maybe" })).rejects.toMatchObject({ code: "not_found", message: /its buttons: yes, no/ });
+    expect(node.pressButton).not.toHaveBeenCalled();
+    const refused = await callApi(ctx, "button.press", { chat: "Alice", message: "peer_closed", button: "yes" }).catch((error: CliError) => error);
+    expect(refused).toMatchObject({ code: "refused", message: "These buttons are closed" });
+    expect(EXIT[(refused as CliError).code]).toBe(1);
+  });
+
+  it("reads its line: chat, message and button, with --wait; its chat may be a group", () => {
+    expect(params("button press", ["Alice", "peer_1", "yes", "--wait", "delivered", "--timeout", "5"])).toMatchObject({ chat: "Alice", message: "peer_1", button: "yes", wait: "delivered", timeout: 5 });
+    // A message id that starts with a dash is an id, not a flag.
+    expect(params("button press", ["Alice", "-Ab3", "yes"])).toMatchObject({ message: "-Ab3" });
+    expect(chatOnly("button.press", { chat: "Sala" })).toBe(false);
+  });
+});
+
 describe("presses in the stream", () => {
   let dir: string;
   beforeAll(async () => {
@@ -199,7 +253,8 @@ describe("presses in the stream", () => {
 
   it("says button.pressed after the reply's own event, in a chat and in a group, and nothing for a plain reply", async () => {
     const { h, events } = await hub("presses");
-    h.baseline(state([link("c1", { label: "Alice" })], [group()]), new Map([["c1", []], ["group:g1", []]]));
+    // The chat named "Alice" here; the contact calls themselves "Alice Smith".
+    h.baseline(state([link("c1", { label: "Alice", peerNick: "Alice Smith" })], [group()]), new Map([["c1", []], ["group:g1", []]]));
     const question = row("c1", "me_1", { sender: "me", text: "Want it?", card: { kind: "buttons", id: "q", buttons: [{ id: "yes", label: "Yes" }] } });
     h.sink.post({ kind: "messages", linkId: "c1", messages: [question,
       row("c1", "r1", { text: "Yes", replyTo: { id: "w1", snippet: "Want it?", from: "me", button: "yes", messageId: "me_1" }, press: { messageId: "me_1", button: "yes", label: "Yes" } }),
@@ -211,10 +266,12 @@ describe("presses in the stream", () => {
       "group.message:g1:gr1", "button.pressed:g1:gr1",
     ]);
     const pressed = events.filter((e) => e.type === "button.pressed");
-    expect(pressed[0]).toMatchObject({ chat: "c1", messageId: "me_1", button: "yes", label: "Yes", by: "c1", name: "Alice", replyId: "r1" });
+    // `name` is the chat's name here; what the contact calls themselves is under `untrusted`.
+    expect(pressed[0]).toMatchObject({ chat: "c1", messageId: "me_1", button: "yes", label: "Yes", by: "c1", name: "Alice", replyId: "r1", untrusted: { name: "Alice Smith" } });
     expect(pressed[0]).not.toHaveProperty("inferred");
     expect(pressed[1]).toMatchObject({ replyId: "r3", inferred: true });
-    expect(pressed[2]).toMatchObject({ group: "g1", messageId: "gq", button: "go", label: "Go", by: "anakey", name: "Ana", replyId: "gr1" });
+    // In a group, both are the roster's name: the one the member chose.
+    expect(pressed[2]).toMatchObject({ group: "g1", messageId: "gq", button: "go", label: "Go", by: "anakey", name: "Ana", replyId: "gr1", untrusted: { name: "Ana" } });
     // The reply's own event carries the press, and its replyTo the button.
     expect((events[1]!.message as Record<string, unknown>)).toMatchObject({ press: { messageId: "me_1", button: "yes", label: "Yes" }, replyTo: { id: "me_1", button: "yes", found: true } });
     // Once each: the same rows again say nothing.
