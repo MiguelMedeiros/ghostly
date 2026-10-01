@@ -4718,7 +4718,11 @@ export class GhostlyNode implements EngineImplementation {
     });
     const link = live.link;
     link.start(); this.emitState();
-    if (stored.pairedPeerKey && stored.deliveryMode !== "dht" && this.transportLogOf(live)?.liveAtLastRun) this.watchResume(linkId, link);
+    const resumed = stored.pairedPeerKey && stored.deliveryMode !== "dht" ? this.transportLogOf(live)?.liveAtLastRun : undefined;
+    if (resumed) {
+      traceLink(live.myPubKeyZ32, "resume", { transport: resumed });
+      this.watchResume(linkId, link);
+    }
     // Unused invites need discovery, not two native listeners (`keepsNativeEndpoints`). Saved contacts
     // retain background listeners within the real native capacity.
     const nativeUp = stored.deliveryMode !== "dht" && this.keepsNativeEndpoints(linkId, stored) ? this.ensureNativeEndpoints(linkId) : undefined;
@@ -4994,7 +4998,9 @@ export class GhostlyNode implements EngineImplementation {
       this.resumeTimers.delete(linkId);
       const live = this.links.get(linkId), log = live && this.transportLogOf(live);
       if (this.shuttingDown || !live || !log || live.link !== link) return;
-      if (log.notBackAfterRestart(Date.now())) this.saveTransportLog(live, log);
+      if (!log.notBackAfterRestart(Date.now())) return;
+      traceLink(live.myPubKeyZ32, "resume-spent", {});
+      this.saveTransportLog(live, log);
     }, RESUME_SPENT_MS));
   }
 
