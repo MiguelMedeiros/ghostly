@@ -723,6 +723,8 @@
   },
   "ui": {
     "amountIn": "Importo in {{unit}}",
+    "amountUnclear": "Importo ambiguo: scrivilo come {{example}}",
+    "amountWhole": "Solo numeri interi, come {{example}}",
     "gettingAddress": "Recupero di un indirizzo… Compare qui appena il fornitore risponde.",
     "history": "Cronologia",
     "receive": "Ricevi",

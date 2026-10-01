@@ -38,14 +38,49 @@ export function formatTokenAmount(value: number | string, decimals: number | und
   return `${wholeText}${point}${fraction}`;
 }
 
+/** The decimal point `language` writes: "," in Portuguese, Spanish, French and Italian, "." elsewhere. */
+export function decimalPoint(language: Language = "en"): "." | "," {
+  return numberFormat(language).formatToParts(0.5).find((p) => p.type === "decimal")?.value === "," ? "," : ".";
+}
+
 /**
- * What a decimal amount field keeps of what was typed: digits and the decimal point, as "1.5". In a language that
- * writes "1,5" (Portuguese, Spanish, French, Italian), a comma is the decimal point, and a phone's decimal key types
- * one there: it becomes the point and the dots around it are grouping ("1.000,5" is 1000.5). Elsewhere a comma is
- * grouping and goes. A second point is kept, for the amount's check to refuse.
+ * What an amount field keeps of what was typed: digits, points, commas and spaces, as typed. The field shows the
+ * person's own writing ("1.000,5" in Portuguese); `readAmount` says what it means.
  */
-export function decimalInput(text: string, language: Language = "en"): string {
-  const point = numberFormat(language).formatToParts(0.5).find((p) => p.type === "decimal")?.value ?? ".";
-  const typed = point === "," && text.includes(",") ? text.replace(/\./g, "").replace(/,/g, ".") : text;
-  return typed.replace(/[^0-9.]/g, "");
+export function amountInput(text: string): string {
+  return text.replace(/[^0-9.,\s\u00a0\u202f]/g, "");
+}
+
+/** What an amount typed means, as "1000.5" (a point, no grouping; "" for nothing typed), or why it cannot be read. */
+export type AmountRead = { ok: true; value: string } | { ok: false; why: "unclear" | "whole" };
+
+/**
+ * An amount as a person writes it in `language`: the language's decimal point ("1,5" in Portuguese, "1.5" in
+ * English), and the other mark or a space only to group thousands ("1.000" is a thousand in Portuguese, "1,000" in
+ * English). A grouping mark anywhere else ("1.5" in Portuguese, "1,5" in English) could mean either, and is refused
+ * rather than guessed: the review must never show another amount than the one meant. A field of whole units
+ * (`decimals` 0, sats) refuses a decimal point.
+ */
+export function readAmount(text: string, language: Language = "en", decimals = 0): AmountRead {
+  const typed = text.trim();
+  if (!typed) return { ok: true, value: "" };
+  const point = decimalPoint(language);
+  const parts = typed.split(point);
+  if (parts.length > 2) return { ok: false, why: "unclear" };
+  const [whole, fraction] = parts;
+  if (fraction !== undefined && !/^\d*$/.test(fraction)) return { ok: false, why: "unclear" };
+  let digits = whole;
+  if (!/^\d*$/.test(whole)) {
+    const groups = whole.split(/[.,\s\u00a0\u202f]/);
+    if (!/^[1-9]\d{0,2}$/.test(groups[0]) || groups.slice(1).some((g) => !/^\d{3}$/.test(g))) return { ok: false, why: "unclear" };
+    digits = groups.join("");
+  }
+  if (fraction !== undefined && !decimals) return { ok: false, why: "whole" };
+  if (!digits && !fraction) return { ok: true, value: "" };
+  return { ok: true, value: fraction ? `${digits || "0"}.${fraction}` : digits };
+}
+
+/** An amount ("1000.5", as `readAmount` gives it) as its field writes it in `language`: "1000,5" in Portuguese. */
+export function amountText(value: string, language: Language = "en"): string {
+  return decimalPoint(language) === "," ? value.replace(".", ",") : value;
 }

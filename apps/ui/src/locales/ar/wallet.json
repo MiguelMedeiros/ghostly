@@ -723,6 +723,8 @@
   },
   "ui": {
     "amountIn": "المبلغ بـ {{unit}}",
+    "amountUnclear": "المبلغ غير واضح: اكتبه هكذا {{example}}",
+    "amountWhole": "أعداد صحيحة فقط، مثل {{example}}",
     "gettingAddress": "جارٍ الحصول على عنوان… يظهر هنا بمجرد أن يرد المزوّد.",
     "history": "السجل",
     "receive": "استلام",

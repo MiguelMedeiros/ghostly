@@ -12,6 +12,7 @@ import { formatAt } from "../lib/time";
 import { satsIn } from "./NetworkTag";
 import { fillNodes } from "../lib/fillNodes";
 import { formatAmount } from "../lib/amount";
+import { useAmountText } from "../hooks/useAmountText";
 
 /** The most the person accepts to pay in fees unless they change it; the review shows the real fee. */
 const DEFAULT_FEE_CAP = 2_000;
@@ -27,6 +28,8 @@ export function BitcoinWalletPanel({ wallet, state }: { wallet: WalletPlatform; 
   const [action, setAction] = useState<Action>("receive");
   const [address, setAddress] = useState(""), [amount, setAmount] = useState(""), [feeCap, setFeeCap] = useState(String(DEFAULT_FEE_CAP));
   const [review, setReview] = useState<Review | null>(null);
+  /** The fee limit typed the person's way; `feeCap` is what it means, or "" while unclear. */
+  const feeField = useAmountText(feeCap, setFeeCap, t.language ?? "en", 0, t);
   const [changing, setChanging] = useState(false);
   const ready = bt?.status === "ready";
   // On-chain Bitcoin goes through its network's source: a Testnet wallet's coins are test sats.
@@ -80,9 +83,10 @@ export function BitcoinWalletPanel({ wallet, state }: { wallet: WalletPlatform; 
               <input aria-label={t("wallet.panel.recipient", { wallet: "Bitcoin" })} placeholder={t("wallet.panel.recipientPlaceholder", { wallet: "Bitcoin" })} spellCheck={false} className={`${input} font-mono text-xs`} value={address} onChange={(e) => setAddress(e.target.value.trim())} />
               <Amount value={amount} onChange={setAmount} unit={unit} testId="bitcoin-amount" />
               <label className="flex flex-wrap items-center gap-2 text-xs text-text-secondary"><span className="min-w-0">{t("wallet.bitcoin.maxFee")}</span>
-                <input aria-label={t("wallet.bitcoin.maxFeeInput")} inputMode="numeric" className={`${input} !w-28 shrink-0`} value={feeCap} onChange={(e) => setFeeCap(e.target.value.replace(/\D/g, ""))} /> sats
+                <input aria-label={t("wallet.bitcoin.maxFeeInput", { unit })} inputMode="numeric" className={`${input} !w-28 shrink-0`} aria-invalid={feeField.hint ? true : undefined} value={feeField.text} onChange={(e) => feeField.change(e.target.value)} /> {unit}
               </label>
-              <Button variant="primary" className="w-full" disabled={busy || !!review || !address || !Number(amount)} onClick={() => void run(async () => {
+              {feeField.hint && <Notice tone="error" testId="amount-unclear">{feeField.hint}</Notice>}
+              <Button variant="primary" className="w-full" disabled={busy || !!review || !address || !Number(amount) || !feeCap} onClick={() => void run(async () => {
                 setReview(await wallet.preparePayment({ target: { method: "bitcoin", network: bt.network!, provider: "onchain", asset: "BTC", unit: "sat", address, expiresAt: Date.now() + 15 * 60 * 1000 }, amount: Number(amount), feeCap: Number(feeCap), payee: address }));
               })}>{t("wallet.panel.review")}</Button>
               <Notice>{t("wallet.bitcoin.reviewNote")}</Notice>
