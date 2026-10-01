@@ -314,12 +314,28 @@ describe("both calling at once", () => {
     expect(call.addCallEventMessage).toHaveBeenCalledWith("call_received", false, undefined, expect.any(Number));
     // A hang-up would end the winner's call on the other side.
     expect(call.publishedKinds()).toEqual(["o"]);
+    // Our attempt's "call started" goes: the chat keeps the winning call's lines only, as the contact's does.
+    const started = call.addCallEventMessage.mock.results[call.addCallEventMessage.mock.calls.findIndex(([type]) => type === "call_started")].value;
+    expect(call.removeCallEventMessage).toHaveBeenCalledExactlyOnceWith(started);
 
     act(() => { void call.result.current.acceptCall(false); });
     devices.userMedia[1].grant();
     await settle();
     expect(call.publishedKinds()).toEqual(["o", "a"]);
     expect(call.result.current.callState).toBe("connecting");
+  });
+
+  it("their offer while ours still waits for the microphone wins: our attempt leaves no line and no offer", async () => {
+    const call = renderCall();
+    act(() => { void call.result.current.startCall(false); });
+
+    call.receive(theirOffer(Date.now()));
+    devices.userMedia[0].grant();
+    await settle();
+
+    expect(call.result.current.callState).toBe("incoming");
+    expect(call.publishedKinds()).toEqual([]);
+    expect(call.removeCallEventMessage).toHaveBeenCalledExactlyOnceWith(call.addCallEventMessage.mock.results[0].value);
   });
 
   it("a later offer from the contact loses: ours keeps ringing them", async () => {
@@ -332,6 +348,7 @@ describe("both calling at once", () => {
     expect(call.result.current.callState).toBe("offering");
     expect(pc.close).not.toHaveBeenCalled();
     expect(call.addCallEventMessage.mock.calls.filter(([type]) => type === "call_received")).toEqual([]);
+    expect(call.removeCallEventMessage).not.toHaveBeenCalled();
     // Their answer to ours still connects the call.
     call.receive(remote.answer(mine.ts + 2));
     await settle();

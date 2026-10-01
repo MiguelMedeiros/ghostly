@@ -1,0 +1,1 @@
+Both call at once: the side whose offer lost now takes its own "Audio call started" (or video) line back out of the chat, so it keeps the incoming call's lines only, as the winner's chat keeps the winner's call only. Before, it kept a "call started" line with no ending after it. A line in the local history only: no wire identifier or field changed.

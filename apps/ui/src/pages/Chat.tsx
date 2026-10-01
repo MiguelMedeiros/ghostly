@@ -182,6 +182,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
       };
 
       addSystemMessage?.(msg);
+      return msg.id;
     },
     [addSystemMessage],
   );
@@ -192,6 +193,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
     publishCallSignal: setCallSignal,
     setFastPoll: setChatFastPoll,
     addCallEventMessage,
+    // Only a line of this side's own (a call that lost a glare): the contact never had it, so nothing goes out.
+    removeCallEventMessage: deleteMessage,
     media: platform?.callMedia?.(),
     // The profile's ICE servers (a TURN relay) serve calls too; a signal on the chat session carries every path.
     iceServers: engine.state?.settings.iceServers,
