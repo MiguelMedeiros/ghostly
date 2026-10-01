@@ -88,7 +88,8 @@ test("a chat muted for 15 minutes stays quiet but keeps counting, and is heard a
   await mute(guest, "15m");
   // Nothing by the name in the header: the one such button on the page is the list row's bell, which says until when.
   await expect(guest.page.getByRole("button", { name: /^Notifications muted/ })).toHaveCount(1);
-  await expect(bellOf(guest)).toHaveAccessibleName(/^Notifications muted until \d{1,2}:\d{2}/);
+  // Until a time today, or a day and a time when the mute ends after midnight ("Thu 12:05 AM").
+  await expect(bellOf(guest)).toHaveAccessibleName(/^Notifications muted until (\p{L}{3} )?\d{1,2}:\d{2}/u);
   await guest.page.screenshot({ path: testInfo.outputPath("muted-chat.png") });
 
   // Away from the chat, so its row counts what comes in.
