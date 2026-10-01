@@ -226,7 +226,7 @@ describe("the contact's sound", () => {
     Object.defineProperty(HTMLMediaElement.prototype, "setSinkId", { configurable: true, value: async function (this: HTMLMediaElement) { sinks.push(this.tagName); } });
     try {
       const remote = new FakeMediaStream([new FakeTrack("audio"), new FakeTrack("video")]);
-      const devices = { list: { audioinput: [], videoinput: [], audiooutput: [], named: true }, current: { audioinput: "", videoinput: "", audiooutput: "spk" },
+      const devices = { list: { audioinput: [], videoinput: [], audiooutput: [], defaults: {}, named: true }, current: { audioinput: "", videoinput: "", audiooutput: "spk" },
         speaker: "spk", speakers: true, choose: vi.fn(), notice: null, dismiss: vi.fn(), switchBack: vi.fn() };
       overlay({ remoteStream: remote as unknown as MediaStream, remoteHasVideo: true, devices });
       const showing = [...document.querySelectorAll<HTMLMediaElement>("audio, video")].filter((element) => given.get(element) === remote);
