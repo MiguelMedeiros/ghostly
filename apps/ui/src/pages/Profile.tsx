@@ -7,7 +7,7 @@ import { useServicesPlatform } from "../hooks/useServicesPlatform";
 import { listSessions } from "../lib/storage";
 import { type ColorScheme } from "../lib/settings";
 import { ColorSwatches } from "../components/ColorSwatches";
-import { createProfile, currentProfile, listProfiles, renameProfile, switchProfile, type ProfileEntry } from "../lib/profiles";
+import { baseProfileName, clearRestoredMark, createProfile, currentProfile, listProfiles, renameProfile, switchProfile, type ProfileEntry } from "../lib/profiles";
 import { Block, Button, Notice, Row, Section, Segmented, Switch, input } from "../components/wallet/ui";
 import { ProfileBackups } from "../components/ProfileBackups";
 import { useEngineState, useIdentityAttention } from "../lib/identities";
@@ -45,7 +45,9 @@ export function Profile() {
   const shareProfile = useShareProfile();
   const identities = useEngineState()?.identityProofs.length ?? 0;
   const identityAttention = useIdentityAttention();
-  const [name, setName] = useState(current.name);
+  // The field edits the name only: a restored profile's word for it is the tag beside the field, never text in it.
+  const plain = baseProfileName(current.id) ?? current.name;
+  const [name, setName] = useState(plain);
   const nameComposition = useComposition();
   // "Add a profile" in the account switcher lands here with the form open.
   const asked = useLocation().state as { newProfile?: boolean; backupProfile?: boolean } | null;
@@ -56,14 +58,14 @@ export function Profile() {
   useEffect(() => { if (wantsNew) { setCreating(true); document.querySelector("[data-testid='profile-list']")?.scrollIntoView({ block: "nearest" }); } }, [wantsNew]);
   const [deleting, setDeleting] = useState<ProfileEntry | null>(null);
   const [error, setError] = useState("");
-  useEffect(() => setName(current.name), [current.name]);
+  useEffect(() => setName(plain), [plain]);
 
   const canSwitch = !!platform?.features.profiles;
   const wallet = platform?.wallet?.getState();
   const services = platform?.features.shareLocalServices ? platform.getSharedServices() : [];
   const chats = listSessions().length;
   const attempt = (work: () => void) => { try { work(); setError(""); } catch (e) { setError(errorText(e, t)); } };
-  const saveName = () => { if (name.trim() && name.trim() !== current.name) attempt(() => renameProfile(current.id, name)); };
+  const saveName = () => { if (name.trim() && name.trim() !== plain) attempt(() => renameProfile(current.id, name)); };
   const schemes: { value: ColorScheme; label: string }[] = [{ value: "light", label: t("settings.colorSchemes.light") }, { value: "dark", label: t("settings.colorSchemes.dark") }, { value: "system", label: t("settings.colorSchemes.system") }];
 
   return (
@@ -71,7 +73,7 @@ export function Profile() {
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
         {/* The picture goes to paired contacts with the name: a fresh 128×128 JPEG, nothing of the file. */}
         <label className="relative shrink-0 cursor-pointer group rounded-full focus-within:ring-2 focus-within:ring-accent" title={myAvatar ? t("profile.changePictureHint") : t("profile.addPictureHint")}>
-          <ProfileBadge entry={{ ...current, name: name || current.name }} size={52} avatar={myAvatar} />
+          <ProfileBadge entry={{ ...current, name: name || plain }} size={52} avatar={myAvatar} />
           <span aria-hidden="true" className="absolute inset-0 rounded-full bg-black/45 grid place-items-center opacity-0 group-hover:opacity-100 transition-opacity">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" /><circle cx="12" cy="13" r="4" /></svg>
           </span>
@@ -80,6 +82,15 @@ export function Profile() {
         </label>
         <input data-testid="profile-name" aria-label={t("profile.nameLabel")} value={name} maxLength={32} onChange={(e) => setName(e.target.value)} onBlur={saveName} {...nameComposition.inputProps} onKeyDown={(e) => !nameComposition.composing(e) && e.key === "Enter" && (e.currentTarget as HTMLInputElement).blur()}
           className="min-w-0 flex-[1_1_8rem] bg-transparent text-xl font-semibold text-text-primary rounded-lg px-2 -mx-2 py-1 border border-transparent hover:border-border focus:border-accent focus:outline-none" />
+        {current.restored && (
+          <span data-testid="profile-restored-tag" title={t("profile.restoredTagHint")} className="inline-flex items-center gap-0.5 shrink-0 whitespace-nowrap rounded-full border border-border bg-surface-alt ps-2.5 pe-0.5 text-xs text-text-muted">
+            {t("profile.restoredTag")}
+            <button type="button" data-testid="profile-restored-remove" aria-label={t("profile.restoredRemove")} title={t("profile.restoredRemove")} onClick={() => attempt(() => clearRestoredMark(current.id))}
+              className="grid place-items-center w-7 h-7 rounded-full hover:text-text-primary hover:bg-surface-hover cursor-pointer">
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
+            </button>
+          </span>
+        )}
         {myAvatar && <button type="button" data-testid="profile-avatar-remove" onClick={() => void setMyAvatar(null)} className="min-h-10 text-xs text-text-muted hover:text-danger cursor-pointer shrink-0 whitespace-nowrap">{t("profile.removePicture")}</button>}
       </div>
       {error && <Notice tone="error">{error}</Notice>}

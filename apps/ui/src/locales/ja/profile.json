@@ -85,6 +85,9 @@
   "profiles": "プロフィール",
   "removePicture": "写真を削除",
   "restoredName": "{{name}}（復元）",
+  "restoredRemove": "復元の印を外す",
+  "restoredTag": "復元",
+  "restoredTagHint": "バックアップから復元しました",
   "sats": "{{amount}} sats",
   "switch": "切り替え"
 }

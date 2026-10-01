@@ -60,7 +60,8 @@ test("a whole profile goes to S3 and to a file, and each comes back as a new pro
   await expect(backups.getByTestId("backup-error")).toContainText("Wrong passphrase");
   await backups.getByTestId("restore-passphrase").fill("an e2e backup passphrase");
   await backups.getByTestId("restore-go").click();
-  await expect(page.getByTestId("profile-name")).toHaveValue("Personal (restored)", { timeout: 60000 });
+  await expect(page.getByTestId("profile-restored-tag")).toHaveText("Restored", { timeout: 60000 });
+  await expect(page.getByTestId("profile-name")).toHaveValue("Personal");
   await expect(page.getByTestId("profile-links")).toContainText("1 chat");
   await expect(page.getByTestId("account-nickname")).toHaveValue("Backed Up");
   await expect(page.getByTestId("profile-row")).toHaveCount(2);

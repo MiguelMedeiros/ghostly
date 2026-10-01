@@ -85,6 +85,9 @@
   "profiles": "资料",
   "removePicture": "移除照片",
   "restoredName": "{{name}}（已恢复）",
+  "restoredRemove": "去掉已恢复标记",
+  "restoredTag": "已恢复",
+  "restoredTagHint": "从备份恢复",
   "sats": "{{amount}} sats",
   "switch": "切换"
 }
