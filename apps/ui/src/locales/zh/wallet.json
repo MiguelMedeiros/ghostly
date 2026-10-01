@@ -101,7 +101,7 @@
     "lastBalance": "最后已知余额：{{balance}} {{unit}}",
     "lastBalanceAt": "最后已知余额：{{balance}} {{unit}} · {{date}}",
     "maxFee": "你接受的最高手续费",
-    "maxFeeInput": "最高手续费（sats）",
+    "maxFeeInput": "最高手续费（{{unit}}）",
     "newAddress": "新地址",
     "notConnected": "{{label}} 未连接",
     "notConnectedDefault": "Bitcoin 来源未连接",
@@ -173,7 +173,8 @@
     "createInvoice": "创建 Lightning 发票",
     "fee": {
       "none": "花费时无手续费",
-      "perProof": "每个证明 {{fee}} sat（每笔付款约 1 sat）"
+      "perProof": "每个证明 {{fee}} sat（每笔付款约 1 sat）",
+      "perProofTest": "每个证明 {{fee}} 测试 sat（每笔付款约 1 测试 sat）"
     },
     "history": {
       "fee": "手续费 {{amount}}",
@@ -723,11 +724,17 @@
   },
   "ui": {
     "amountIn": "以 {{unit}} 计的金额",
+    "amountUnclear": "金额不明确：请写成 {{example}} 这样",
+    "amountWhole": "只能输入整数，例如 {{example}}",
     "gettingAddress": "正在获取地址… 服务商响应后会显示在这里。",
     "history": "记录",
     "receive": "收款",
     "receivingAddress": "收款地址",
     "send": "发送"
+  },
+  "unseen": {
+    "real": "{{place}}，新到 {{amount}} sats",
+    "test": "{{place}}，新到 {{amount}} 测试 sats"
   },
   "usdt": {
     "approve": "在你批准检查之前，不会发送任何内容。",

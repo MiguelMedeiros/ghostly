@@ -101,7 +101,7 @@
     "lastBalance": "Último saldo conocido: {{balance}} {{unit}}",
     "lastBalanceAt": "Último saldo conocido: {{balance}} {{unit}} · {{date}}",
     "maxFee": "Lo máximo que aceptas en comisiones",
-    "maxFeeInput": "Comisión máxima en sats",
+    "maxFeeInput": "Comisión máxima en {{unit}}",
     "newAddress": "Nueva dirección",
     "notConnected": "{{label}} no está conectado",
     "notConnectedDefault": "La fuente Bitcoin no está conectada",
@@ -173,7 +173,8 @@
     "createInvoice": "Crear factura Lightning",
     "fee": {
       "none": "Sin comisión al gastar",
-      "perProof": "{{fee}} sat por prueba (cerca de 1 sat por pago)"
+      "perProof": "{{fee}} sat por prueba (cerca de 1 sat por pago)",
+      "perProofTest": "{{fee}} sat de prueba por prueba (cerca de 1 sat de prueba por pago)"
     },
     "history": {
       "fee": "comisión {{amount}}",
@@ -723,11 +724,17 @@
   },
   "ui": {
     "amountIn": "Cantidad en {{unit}}",
+    "amountUnclear": "Importe ambiguo: escríbelo como {{example}}",
+    "amountWhole": "Solo números enteros, como {{example}}",
     "gettingAddress": "Obteniendo una dirección… Aparece aquí en cuanto responda el proveedor.",
     "history": "Historial",
     "receive": "Recibir",
     "receivingAddress": "Dirección de cobro",
     "send": "Enviar"
+  },
+  "unseen": {
+    "real": "{{place}}, {{amount}} sats nuevos",
+    "test": "{{place}}, {{amount}} sats de prueba nuevos"
   },
   "usdt": {
     "approve": "No se envía nada hasta que apruebes la revisión.",

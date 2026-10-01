@@ -15,6 +15,7 @@ import { CASHU_MINT_SOURCE } from "../walletCardData";
 import { useI18n, type Translate } from "../../contexts/I18nContext";
 import { fillNodes } from "../../lib/fillNodes";
 import { satsIn } from "../NetworkTag";
+import { mintNetwork } from "@ghostly/browser/shared/mints";
 import { lightningStateLabel, paymentStateLabel } from "../paymentWords";
 import { formatAmount } from "../../lib/amount";
 import { formatAt } from "../../lib/time";
@@ -44,8 +45,8 @@ const ENGINE_NOTES: Record<string, "wallet.cashu.history.note.testCoins" | "wall
 /** When a movement happened, as the history writes it ("Sep 30, 03:15 PM"; "30 de set., 15:15" in Portuguese). */
 const MOVED_AT: Intl.DateTimeFormatOptions = { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" };
 
-/** `input_fee_ppk` in a few words: a payment usually spends two to five proofs. */
-const shortFee = (t: Translate, ppk: number) => (ppk === 0 ? t("wallet.cashu.fee.none") : t("wallet.cashu.fee.perProof", { fee: ppk / 1000 }));
+/** `input_fee_ppk` in a few words, test sats on Testnet: a payment usually spends two to five proofs. */
+const shortFee = (t: Translate, ppk: number, testnet: boolean) => (ppk === 0 ? t("wallet.cashu.fee.none") : t(testnet ? "wallet.cashu.fee.perProofTest" : "wallet.cashu.fee.perProof", { fee: ppk / 1000 }));
 
 /**
  * Cashu and Lightning share one balance while Lightning goes through the mints (the default source):
@@ -252,7 +253,7 @@ export function CashuWallet({ wallet, state, rail, onOpenCashu, focusAmount = fa
             <Block><Notice>{t("wallet.cashu.mintsHint")}</Notice></Block>
             {state.mints.map((mint, index) => <Fragment key={mint.url}>
               <Row testId="mint-row" label={<>{mint.name}{index === 0 && <span className="text-accent ms-2 text-[10px] uppercase tracking-wider">{t("wallet.cashu.primary")}</span>}</>}
-                hint={<><span data-testid="mint-fees">{mint.info ? shortFee(t, mint.info.inputFeePpk) : t("wallet.cashu.unreachable")}</span><Truncate className="font-mono" title={mint.url}>{mint.url.replace(/^https?:\/\//, "")}</Truncate></>}
+                hint={<><span data-testid="mint-fees">{mint.info ? shortFee(t, mint.info.inputFeePpk, mintNetwork(mint.url) === "testnet") : t("wallet.cashu.unreachable")}</span><Truncate className="font-mono" title={mint.url}>{mint.url.replace(/^https?:\/\//, "")}</Truncate></>}
                 value={sats(mint.balance)}>
                 {index !== 0 && <Button onClick={() => void run(() => wallet.setPrimaryMint(mint.url))}>{t("wallet.cashu.makePrimary")}</Button>}
                 <Button variant="danger" data-testid="mint-remove" aria-expanded={state.mints.length > 1 ? removingMint === mint.url : undefined} aria-haspopup={state.mints.length === 1 ? "dialog" : undefined}

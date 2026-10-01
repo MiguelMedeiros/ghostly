@@ -9,6 +9,7 @@ import { formatAmount } from "../../lib/amount";
 import { useComposition } from "../../hooks/useComposition";
 import { errorText } from "../../lib/errorText";
 import { satsIn } from "../NetworkTag";
+import { useAmountText } from "../../hooks/useAmountText";
 
 interface Quote { quote: string; mint: string; amount: number; feeReserve: number; source?: string }
 interface Invoice { invoice: string; note: string; successAction?: { tag: "message" | "url"; message?: string; description?: string; url?: string } }
@@ -32,6 +33,8 @@ export function LightningAddressPay({ wallet, text, via, onDone, dense }: { wall
   const [error, setError] = useState("");
   /** Real money: Pay opens the second step, and only it pays. A wallet naming no network is Mainnet's. */
   const [confirming, setConfirming] = useState(false);
+  /** The amount typed the person's way ("1.000" sats in Portuguese); `amount` is what it means, or "" while unclear. */
+  const amountField = useAmountText(amount, setAmount, t.language ?? "en", 0, t);
   const real = wallet.getState()?.mode !== "testnet";
   /** Test sats say so wherever an amount shows, as the Cashu panel does. */
   const unit = satsIn(t, real ? "mainnet" : "testnet");
@@ -114,9 +117,10 @@ export function LightningAddressPay({ wallet, text, via, onDone, dense }: { wall
       <label className="flex items-baseline gap-2 bg-black/20 rounded-lg px-3 py-2 focus-within:ring-1 focus-within:ring-accent">
         <input data-testid="lnurl-amount" inputMode="numeric" placeholder="0" aria-label={t("wallet.ui.amountIn", { unit })} autoFocus={!fixed} disabled={fixed}
           className={`min-w-0 flex-1 bg-transparent border-none outline-none ${dense ? "text-lg" : "text-2xl"} font-semibold tabular-nums`}
-          value={amount} onChange={(e) => setAmount(e.target.value.replace(/\D/g, ""))} onKeyDown={onEnter} />
+          aria-invalid={amountField.hint ? true : undefined} value={fixed ? amount : amountField.text} onChange={(e) => amountField.change(e.target.value)} onKeyDown={onEnter} />
         <span className="text-xs opacity-70 shrink-0">{unit}</span>
       </label>
+      {amountField.hint && <p role="alert" className="text-xs m-0 text-danger-ink" data-testid="amount-unclear">{amountField.hint}</p>}
       {info.commentAllowed > 0 && <input data-testid="lnurl-comment" className={field} placeholder={t("wallet.lightning.commentFor", { to: info.text })} maxLength={info.commentAllowed} value={comment} onChange={(e) => setComment(e.target.value)} {...composition.inputProps} onKeyDown={onEnter} />}
       <div className="flex flex-wrap gap-2">
         <button type="button" className={primary} disabled={busy || !Number(amount)} data-testid="lnurl-invoice" onClick={getInvoice}>{busy ? t("wallet.lightning.askingInvoice") : t("wallet.lightning.getInvoice")}</button>

@@ -1,3 +1,4 @@
+import { engineError, engineText } from "@ghostly/core";
 import { STORES, openDb, store, transact, wrap } from "../../shared/idb";
 import type { IntentRepository, SavedIntent } from "./coordinator";
 /**
@@ -20,7 +21,7 @@ export const intentRepository: IntentRepository = {
     const tx=(await openDb()).transaction(STORES.intents,"readwrite");
     return new Promise<SavedIntent>((resolve,reject)=>{
       let saved:SavedIntent;
-      let reason="This payment was already submitted or could not be saved";
+      let reason=engineText("alreadySubmitted");
       const request=tx.objectStore(STORES.intents).getAll();
       request.onsuccess=()=>{
         const intents:SavedIntent[]=request.result;
@@ -28,7 +29,7 @@ export const intentRepository: IntentRepository = {
         if(!saved || saved.review.state!=="pending") {tx.abort();return;}
         const duplicate=saved.review.requestId && intents.some(({review})=>review.id!==id && review.requestId===saved.review.requestId && review.linkId===saved.review.linkId && ["submitted","settled","unknown"].includes(review.state));
         if(duplicate){tx.abort();return;}
-        if(nonceTaken(saved.review,intents)){reason="A payment from this wallet was sent after this review was made. Create a new review";tx.abort();return;}
+        if(nonceTaken(saved.review,intents)){reason=engineText("sentAfterReview");tx.abort();return;}
         saved.review={...saved.review,state:"submitted",error:undefined,submittedAt:Date.now()};
         tx.objectStore(STORES.intents).put(saved);
       };
@@ -48,7 +49,7 @@ export const intentRepository: IntentRepository = {
         tx.objectStore(STORES.intents).put(saved);
       };
       tx.oncomplete=()=>resolve(saved);
-      tx.onabort=tx.onerror=()=>reject(new Error("A submitted payment cannot be cancelled; reconcile it instead"));
+      tx.onabort=tx.onerror=()=>reject(engineError("cannotCancelSubmitted"));
     });
   },
 };

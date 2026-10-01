@@ -21,7 +21,8 @@ import { deckArrows } from "./deck/arrows";
 import { NetworkTabs } from "./wallet/NetworkTabs";
 import { NETWORK_NAME } from "./wallet/names";
 import "./payment-composer.css";
-import { decimalInput, formatAmount } from "../lib/amount";
+import { formatAmount } from "../lib/amount";
+import { useAmountText } from "../hooks/useAmountText";
 import { errorText } from "../lib/errorText";
 
 interface PaymentComposerProps {
@@ -182,6 +183,8 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, onDone = 
   const usdt = here?.usdt;
   const unit = method === "usdt" ? (network === "testnet" || (usdt?.chainId && usdt.chainId !== 1) ? "TEST-USDT" : "USDT") : satsIn(t, network ?? "mainnet");
   const decimals = method === "usdt" ? usdt?.decimals ?? 6 : 0;
+  /** The amount typed the person's way ("1.000,5" in Portuguese); `amount` is what it means ("1000.5"), or "". */
+  const amountField = useAmountText(amount, setAmount, t.language ?? "en", decimals, t);
   const value = Number(amount);
   // What the second step names is what it sends: another amount or card asks again.
   useEffect(() => setConfirmSend(false), [amount, selected]);
@@ -315,11 +318,11 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, onDone = 
         {review && bound ? <PaymentReview key={review.id} review={review} wallet={bound} onClose={onClose} onSent={onDone} /> : <>
           <label className="payment-back-amount" data-over={tooMuch || undefined}>
             <input ref={amountRef} data-testid="payment-amount" inputMode={decimals ? "decimal" : "numeric"} placeholder="0" aria-label={t("payments.composer.amountIn", { unit })}
-              value={amount} onChange={(e) => setAmount(decimals ? decimalInput(e.target.value, t.language) : e.target.value.replace(/\D/g, ""))} />
+              aria-invalid={amountField.hint ? true : undefined} value={amountField.text} onChange={(e) => amountField.change(e.target.value)} />
             <span>{unit}</span>
           </label>
           <input className="payment-back-memo" placeholder={t("payments.composer.memo")} aria-label={t("payments.composer.memo")} maxLength={140} value={memo} onChange={(e) => setMemo(e.target.value)} />
-          <p className="payment-back-hint">{blocked ?? (tooMuch ? t("payments.composer.tooMuch", { amount: formatAmount(holds!, t.language), unit }) : how(rail))}</p>
+          <p className="payment-back-hint" data-testid={amountField.hint && !blocked ? "amount-unclear" : undefined}>{blocked ?? amountField.hint ?? (tooMuch ? t("payments.composer.tooMuch", { amount: formatAmount(holds!, t.language), unit }) : how(rail))}</p>
           {confirmSend ? <ConfirmRealMoney what={`${formatAmount(value, t.language)} ${unit}`} busy={busy !== null} onSend={() => void send(true)} onBack={() => setConfirmSend(false)} /> : <div className="payment-back-actions" data-turning={turning || undefined}>
             <button data-testid="payment-request" disabled={turning || !value || busy !== null || !!asking || !!blocked} onClick={() => void request()} className="payment-back-secondary">
               {busy === "request" ? t("payments.composer.requesting") : t("payments.composer.request")}

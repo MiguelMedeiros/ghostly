@@ -101,7 +101,7 @@
     "lastBalance": "最後に確認した残高：{{balance}} {{unit}}",
     "lastBalanceAt": "最後に確認した残高：{{balance}} {{unit}} · {{date}}",
     "maxFee": "許容する手数料の上限",
-    "maxFeeInput": "手数料の上限（sats）",
+    "maxFeeInput": "手数料の上限（{{unit}}）",
     "newAddress": "新しいアドレス",
     "notConnected": "{{label}} に接続されていません",
     "notConnectedDefault": "Bitcoin ソースに接続されていません",
@@ -173,7 +173,8 @@
     "createInvoice": "Lightning インボイスを作成",
     "fee": {
       "none": "使うときの手数料なし",
-      "perProof": "プルーフごとに {{fee}} sat（支払い 1 回あたり約 1 sat）"
+      "perProof": "プルーフごとに {{fee}} sat（支払い 1 回あたり約 1 sat）",
+      "perProofTest": "プルーフごとに {{fee}} テスト sat（支払い 1 回あたり約 1 テスト sat）"
     },
     "history": {
       "fee": "手数料 {{amount}}",
@@ -723,11 +724,17 @@
   },
   "ui": {
     "amountIn": "{{unit}} での金額",
+    "amountUnclear": "金額があいまいです。{{example}} のように入力してください",
+    "amountWhole": "整数のみ（例: {{example}}）",
     "gettingAddress": "アドレスを取得中… プロバイダーが応答するとここに表示されます。",
     "history": "履歴",
     "receive": "受け取る",
     "receivingAddress": "受け取りアドレス",
     "send": "送金"
+  },
+  "unseen": {
+    "real": "{{place}}、新着 {{amount}} sats",
+    "test": "{{place}}、新着 {{amount}} テスト sats"
   },
   "usdt": {
     "approve": "確認を承認するまで何も送られません。",
