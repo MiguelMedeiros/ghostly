@@ -163,6 +163,21 @@ describe("a request with a payment already on its way", () => {
     expect(await screen.findByRole("region", { name: "Payment review" })).toBeInTheDocument();
   });
 
+  it("a review made and not yet approved comes back after the chat was opened again: Approve or Cancel, no second Review", async () => {
+    const pending = { ...unfinished("unknown"), state: "pending" as const, error: undefined };
+    const { user, engine } = show(incomingRequest({ mints: [REAL_MINT] }), { wallet: { mints: [mint(REAL_MINT, 900)], intents: [pending] } });
+    const review = screen.getByRole("region", { name: "Payment review" });
+    expect(within(review).getByTestId("review-approve")).toBeEnabled();
+    expect(payButton(), "the engine refuses a second review of this request").toBeDisabled();
+    // Cancel gives the request back: its Review is offered again.
+    engine.on("cancelPayment", ({ id }) => ({ ...pending, id, state: "cancelled" }));
+    await user.click(within(review).getByRole("button", { name: "Cancel" }));
+    expect(engine.callsTo("cancelPayment")).toEqual([{ id: pending.id }]);
+    engine.update({ wallet: { mints: [mint(REAL_MINT, 900)], intents: [{ ...pending, state: "cancelled" }] } });
+    expect(await screen.findByRole("button", { name: "Review payment" })).toBeEnabled();
+    expect(screen.queryByRole("region", { name: "Payment review" })).not.toBeInTheDocument();
+  });
+
   it("a payment of it that failed leaves the request payable again", () => {
     show(incomingRequest({ mints: [REAL_MINT] }), { wallet: { mints: [mint(REAL_MINT, 900)], intents: [unfinished("failed")] } });
     expect(screen.queryByRole("region", { name: "Payment review" })).not.toBeInTheDocument();
