@@ -190,6 +190,9 @@ export function commandHelp(words: readonly string[]): string {
         lines.push("", "Options:");
         for (const [name, o] of options) lines.push(`  --${name}${o.type === "boolean" ? "" : ` <${o.type === "number" ? "n" : "value"}>`}`.padEnd(26) + o.description);
       }
+      // A text that starts with a dash goes after `--`, and so does everything else on the line.
+      if (Object.values(TEXT_COMMANDS).includes(row as (typeof TEXT_COMMANDS)[string]))
+        lines.push("", "  -- ends the options: everything after it is the text, options included (\"-- -1 --wait sent\" sends", "  all of it). Put options before --.");
       lines.push("");
     }
   } else {

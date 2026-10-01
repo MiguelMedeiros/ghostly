@@ -93,13 +93,16 @@ export class Mainline {
  * The relays first, as the web app reaches Pkarr (its contacts read only the relays), and the DHT beside them: every
  * packet also goes to the DHT, and a read goes there when every relay is failing or the read failed for anything but
  * this app's own request budget (that is a wait, not an outage).
+ *
+ * `pinned`: the relays given are the only ones (`GHOSTLY_PKARR_RELAYS`, a private network): the profile's `relays`
+ * setting does not replace them. With no DHT (`dht` null), the relays alone carry every packet.
  */
 export class RelaysAndDht implements PkarrTransport {
   readonly relays: RelayTransport;
   private readonly lastTimestamp = new Map<string, bigint>();
   private lastVia: "relay" | "dht" = "relay";
 
-  constructor(private readonly dht: Mainline, relays: RelayTransportOptions = {}) {
+  constructor(private readonly dht: Mainline | null, relays: RelayTransportOptions = {}, private readonly pinned = false) {
     this.relays = new RelayTransport(relays);
   }
 
@@ -112,6 +115,7 @@ export class RelaysAndDht implements PkarrTransport {
   }
 
   async publishPayload(pubKeyZ32: string, payload: Uint8Array, options: PkarrRequestOptions = {}): Promise<void> {
+    if (!this.dht) return this.relays.publishPayload(pubKeyZ32, payload, options);
     const onDht = this.dht.put(pubKeyZ32, payload);
     onDht.catch(() => {});
     try {
@@ -125,6 +129,7 @@ export class RelaysAndDht implements PkarrTransport {
   }
 
   async resolve(pubKeyZ32: string, options: PkarrRequestOptions = {}): Promise<SignedPacket | null> {
+    if (!this.dht) return this.relays.resolve(pubKeyZ32, options);
     let fromRelays: SignedPacket | null = null, failed: unknown = null;
     // Every relay left alone for failing: the relays answer from what they last saw, if anything; the DHT is asked.
     const down = () => this.relays.discovery().relays.every((relay) => relay.state === "failing");
@@ -146,12 +151,12 @@ export class RelaysAndDht implements PkarrTransport {
   }
 
   describe(): { protocol: string; relays: string[] } {
-    return { protocol: "Pkarr relays (HTTP), and the Mainline DHT (BEP44) directly", relays: this.relays.describe().relays };
+    return { protocol: this.dht ? "Pkarr relays (HTTP), and the Mainline DHT (BEP44) directly" : "Pkarr relays (HTTP)", relays: this.relays.describe().relays };
   }
   discovery(): DiscoveryStatus {
     const status = this.relays.discovery();
     return this.lastVia === "dht" ? { ...status, path: { via: "dht" } } : status;
   }
   subscribe(listener: Parameters<RelayTransport["subscribe"]>[0]): () => void { return this.relays.subscribe(listener); }
-  configure({ relays }: { relays: string[]; readRelays: boolean }): void { this.relays.setRelays(relays); }
+  configure({ relays }: { relays: string[]; readRelays: boolean }): void { if (!this.pinned) this.relays.setRelays(relays); }
 }

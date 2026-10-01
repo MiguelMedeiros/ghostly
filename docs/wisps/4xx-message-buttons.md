@@ -7,7 +7,7 @@
 | Document kind | Profile |
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [400](400-chat.md), [401](401-paired-chat.md), [403](403-dht-text.md), [4xx status cards](4xx-status-cards.md), [9xx group mesh](9xx-group-mesh.md), [9xx group community](9xx-group-community.md), [11xx](11xx-headless.md) |
-| Implementation | The `buttons` kind of `sc` and the press's `b` in a reply (`packages/core/src/statusCards.ts`, `replies.ts`), `buttons/1` in `paired-capabilities`, the engine's `pressButton` and press check (`packages/browser/src/shared/buttons.ts`), `ghostly send --button`, `group send --button`, `button update` and the `button.pressed` event in the headless CLI; the buttons and the press line in web, extension and desktop (`apps/ui/src/components/chat/MessageButtons.tsx`) |
+| Implementation | The `buttons` kind of `sc` and the press's `b` in a reply (`packages/core/src/statusCards.ts`, `replies.ts`), `buttons/1` in `paired-capabilities`, the engine's `pressButton` and press check (`packages/browser/src/shared/buttons.ts`), `ghostly send --button`, `group send --button`, `button press`, `button update` and the `button.pressed` event in the headless CLI; the buttons and the press line in web, extension and desktop (`apps/ui/src/components/chat/MessageButtons.tsx`) |
 | Summary | A bot asks with buttons under its message ("Yes", "No", "Approve"); a tap answers, and the bot learns who pressed which. |
 | Availability | Available |
 | Notes | Sent by bots through the headless CLI only; people never create them in the app. Every app, old or new, shows the question as text, and an answer as a reply. |
@@ -102,7 +102,7 @@ Under the bot's bubble, a row of rounded buttons that wraps (two share a row; up
 
 ## Headless runtime
 
-`ghostly send <chat> "Want the $30 one? Reply yes or no" --button yes:Yes --button no:No --style yes=primary --once`, and `ghostly group send` the same; `ghostly listen` reports `button.pressed` (chat or group, the question's `messageId`, `button`, `label`, who pressed, and `inferred` when so); `ghostly button update <chat|group> <message> --chosen yes --close` edits the question ([11xx](11xx-headless.md#message-buttons)).
+`ghostly send <chat> "Want the $30 one? Reply yes or no" --button yes:Yes --button no:No --style yes=primary --once`, and `ghostly group send` the same; `ghostly listen` reports `button.pressed` (chat or group, the question's `messageId`, `button`, `label`, who pressed, and `inferred` when so); `ghostly button press <chat|group> <message> <button>` presses a button of someone else's question, as a tap; `ghostly button update <chat|group> <message> --chosen yes --close` edits the question ([11xx](11xx-headless.md#message-buttons)).
 
 ## Security and privacy
 

@@ -39,6 +39,14 @@
       "testing": "Test en cours…",
       "title": "Stockage S3"
     },
+    "sameDevice": {
+      "copy": "Restaurer comme copie quand même",
+      "firstProfile": "Le premier profil ne peut pas être supprimé. Pour le remplacer, effacez ses données dans Réglages.",
+      "hint": "Les deux agiraient comme la même personne pour vos contacts. Remplacez l'original, ou n'utilisez pas les deux.",
+      "info": "Une copie restaurée garde les clés de discussion de l'original. Si les deux tournent, ils répondent aux mêmes contacts comme une seule personne et se disputent les mêmes connexions : les messages peuvent arriver dans l'un ou l'autre. Remplacer restaure la copie, bascule dessus, puis propose de supprimer l'original avec les vérifications habituelles : ce qu'il contient, une sauvegarde d'abord, et son nom pour confirmer.",
+      "replace": "Remplacer l'original",
+      "title": "Cette sauvegarde est {{names}}, qui est sur cet appareil"
+    },
     "saveToS3": "Enregistrer sur S3",
     "savedToS3": "Enregistré sur S3 · {{size}}",
     "setUp": "Configurer",

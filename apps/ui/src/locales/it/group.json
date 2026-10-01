@@ -179,6 +179,7 @@
   "readNoteCommunity": "Chiunque abbia il link del gruppo può entrare, e qualsiasi membro può far entrare altre persone. Tutti nel gruppo possono leggere tutto ciò che viene inviato mentre ne fanno parte; chi viene rimosso non può leggere ciò che segue, chi entra dopo non può leggere ciò che c'era prima. I membri che erano assenti ricevono gli ultimi {{count}} messaggi da chi c'è quando tornano.",
   "remove": {
     "body": "Non riceverà più i nuovi messaggi del gruppo.",
+    "linkHint": "Può ancora rientrare con il link del gruppo: un nuovo link lo impedisce.",
     "title": "Rimuovere {{name}}?"
   },
   "rename": {

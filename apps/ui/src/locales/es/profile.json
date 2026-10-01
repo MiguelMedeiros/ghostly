@@ -39,6 +39,14 @@
       "testing": "Probando…",
       "title": "Almacenamiento S3"
     },
+    "sameDevice": {
+      "copy": "Restaurar como copia de todos modos",
+      "firstProfile": "El primer perfil no se puede eliminar. Para reemplazarlo, borra sus datos en Ajustes.",
+      "hint": "Ambos actuarían como la misma persona para tus contactos. Reemplaza el original o no uses los dos.",
+      "info": "Una copia restaurada conserva las claves de chat del original. Con ambos en marcha, responden a los mismos contactos como una sola persona y compiten por las mismas conexiones, así que los mensajes pueden llegar a cualquiera. Reemplazar restaura la copia, cambia a ella y luego ofrece eliminar el original con las comprobaciones de siempre: lo que guarda, una copia de seguridad antes y su nombre para confirmar.",
+      "replace": "Reemplazar el original",
+      "title": "Esta copia es {{names}}, que está en este dispositivo"
+    },
     "saveToS3": "Guardar en S3",
     "savedToS3": "Guardado en S3 · {{size}}",
     "setUp": "Configurar",

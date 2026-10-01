@@ -60,6 +60,8 @@ test("a whole profile goes to S3 and to a file, and each comes back as a new pro
   await expect(backups.getByTestId("backup-error")).toContainText("Wrong passphrase");
   await backups.getByTestId("restore-passphrase").fill("an e2e backup passphrase");
   await backups.getByTestId("restore-go").click();
+  // Personal is still on this device: restored as a copy anyway (WISP 05 § Restoring on the same device).
+  await backups.getByTestId("restore-same-device").getByTestId("restore-copy").click();
   await expect(page.getByTestId("profile-restored-tag")).toHaveText("Restored", { timeout: 60000 });
   await expect(page.getByTestId("profile-name")).toHaveValue("Personal");
   await expect(page.getByTestId("profile-links")).toContainText("1 chat");
@@ -71,6 +73,7 @@ test("a whole profile goes to S3 and to a file, and each comes back as a new pro
   await page.getByTestId("profile-backups").getByTestId("restore-file").setInputFiles({ name: download.suggestedFilename(), mimeType: "application/json", buffer: Buffer.from(bundle) });
   await page.getByTestId("profile-backups").getByTestId("restore-passphrase").fill("an e2e backup passphrase");
   await page.getByTestId("profile-backups").getByTestId("restore-go").click();
+  await page.getByTestId("restore-same-device").getByTestId("restore-copy").click();
   await expect(page.getByTestId("profile-row")).toHaveCount(3, { timeout: 60000 });
   await expect(page.getByTestId("profile-links")).toContainText("1 chat");
 });

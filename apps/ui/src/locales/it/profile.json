@@ -39,6 +39,14 @@
       "testing": "Prova in corso…",
       "title": "Archivio S3"
     },
+    "sameDevice": {
+      "copy": "Ripristina comunque come copia",
+      "firstProfile": "Il primo profilo non si può eliminare. Per sostituirlo, cancella i suoi dati in Impostazioni.",
+      "hint": "Entrambi agirebbero come la stessa persona per i tuoi contatti. Sostituisci l'originale, o non usarli tutti e due.",
+      "info": "Una copia ripristinata mantiene le chiavi di chat dell'originale. Se sono attivi entrambi, rispondono agli stessi contatti come una sola persona e si contendono le stesse connessioni, quindi i messaggi possono arrivare all'uno o all'altro. Sostituisci ripristina la copia, passa a quella e poi propone di eliminare l'originale con i soliti controlli: cosa contiene, prima un backup e il suo nome per confermare.",
+      "replace": "Sostituisci l'originale",
+      "title": "Questo backup è {{names}}, che è su questo dispositivo"
+    },
     "saveToS3": "Salva su S3",
     "savedToS3": "Salvato su S3 · {{size}}",
     "setUp": "Configura",

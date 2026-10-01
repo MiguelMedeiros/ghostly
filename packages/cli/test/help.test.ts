@@ -29,6 +29,10 @@ describe("help", () => {
     expect(daemon.stdout).toContain("daemon restart");
     const send = await ghostly(["send", "bob", "hi", "--help"]);
     expect(send.stdout).toContain("Usage: ghostly send <chat>");
+    // Next to the text: what `--` does to the options after it.
+    expect(send.stdout).toContain("everything after it is the text, options included");
+    expect((await ghostly(["help", "group", "send"])).stdout).toContain("Put options before --.");
+    expect(daemon.stdout).not.toContain("Put options before --.");
   });
 
   it("an unknown command is a usage error; plain help is the whole list", async () => {

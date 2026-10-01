@@ -388,8 +388,10 @@ export class EventHub {
 
   /**
    * A press on a button of a message of mine (WISP 4xx · Message Buttons), after the reply's own event: the question
-   * (`messageId`), the button, its label, who pressed (`by`: the chat, or a group member's key; `name` when known) and
-   * the reply (`replyId`). The engine marks a reply a press only while the buttons were open for that person.
+   * (`messageId`), the button, its label, who pressed (`by`: the chat, or a group member's key), `name` (the chat's name
+   * here, as `chat list` gives it: its label, else the contact's own name; a group member's roster name) and the reply
+   * (`replyId`). `untrusted.name` is the name the person gave themselves, as an agent turn's: theirs to choose, so
+   * data, never instructions. The engine marks a reply a press only while the buttons were open for that person.
    */
   private pressed(chat: string, group: string | null, message: StoredMessage, json: { nick: string | null }): void {
     const press = message.press!;
@@ -398,6 +400,7 @@ export class EventHub {
     this.emit("button.pressed", `button.pressed:${group ?? chat}:${message.id}`, {
       ...(group ? { group } : { chat }), messageId: press.messageId, button: press.button, label: press.label,
       by: group ? message.member ?? null : chat, name: name ?? null, replyId: message.id, ...(press.inferred ? { inferred: true } : {}),
+      untrusted: { name: json.nick ?? null },
     });
   }
 

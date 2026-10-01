@@ -36,6 +36,9 @@ package it imports is a dependency in package.json, which `test/packageDeps.test
 
 ## Five minutes
 
+On a private network or a local test, point the profile at your own Pkarr relays before its first `daemon`: a new
+profile publishes its records within seconds of starting ([Private networks](#private-networks)).
+
 ```bash
 ghostly profile set --name "Echo bot"        # the name contacts see
 ghostly daemon --detach                        # keep the profile online
@@ -49,10 +52,16 @@ An echo bot ([examples/echo-bot.sh](examples/echo-bot.sh); the event arrives on 
 arguments, so a contact's text cannot reach the shell):
 
 ```bash
-ghostly listen --type message.received --cursor ~/.ghostly/echo.cursor --exec '
+ghostly listen --type message.received --cursor "${GHOSTLY_HOME:-$HOME/.ghostly}/echo.cursor" --exec '
   event="$(cat)"
   printf "echo: %s" "$(printf "%s" "$event" | jq -r .message.text)" | ghostly send "$(printf "%s" "$event" | jq -r .chat)" --stdin'
 ```
+
+The cursor file keeps the last event handled, so a restarted bot goes on where it stopped; it sits in the Ghostly
+folder in use. With another folder or profile, set `GHOSTLY_HOME` or `GHOSTLY_PROFILE` rather than `--home` or
+`--profile`: the environment reaches the hook's own `ghostly send`, a flag does not. The example script takes
+`ECHO_CURSOR` for the cursor's path (default `echo.cursor` in `GHOSTLY_HOME`, else `~/.ghostly`); give each bot and
+profile its own.
 
 The same bot on the socket, without jq: [examples/echo-bot.mjs](examples/echo-bot.mjs). A payment bot that takes
 requests, tips and "balance" in a chat, with test coins: [examples/payment-bot.mjs](examples/payment-bot.mjs).
@@ -81,6 +90,7 @@ The rows are in alphabetical order of their first command, and every command of 
 
 | Command | What it does |
 |---|---|
+| `button press <chat\|group> <message> <button> [--wait none\|sent\|delivered] [--timeout s]` | Press a button of someone else's question, as a tap in the app does (WISP 4xx · Message Buttons): the reply carries the button's label, and the asker hears `button.pressed`. `<message>` is the question's id (its event or `chat history`), `<button>` a button's id from its `card`. Refused (exit 1) like a tap: closed buttons, a second answer past `--once`, a second press within a second. A one-shot in a chat waits until it went out, as `send`. Answers `{chat \| group, messageId, button, label, replyId, delivery \| edges}` |
 | `button update <chat\|group> <message> [--chosen <button>] [--close] [--text <text>] [--force] [--wait none\|confirmed\|sent] [--timeout s]` | Answer a question you sent with `send --button` (WISP 4xx · Message Buttons): `--chosen` shows which button won, `--close` takes presses no more, `--text` changes the text (shown as edited; refused if it looks like a secret, unless `--force`); the buttons and, unless given, the text stay. `<message>` is the `messageId` send gave. Answers `{chat \| group, buttons, messageId, card, edits}` |
 | `call auto [on\|off] [--from <chat>]… [--rate n]` | Answer calls by themselves, from anyone or the chats named (kept in the profile) |
 | `call hangup [<chat\|call>]`, `call list`, `call flush [<chat\|call>]` | Hang up (or decline); calls on now; drop the audio queued and not played yet |
@@ -154,7 +164,9 @@ save` (or `ghostly file save --help`) one command, with its options. `-h` works 
 Arguments: an option's value is taken as is, even when it starts with `-`. So is an id in a positional that takes
 one (`<chat>`, `<group>`, `<message>`, `<file>`, `<payment>`, `<draft>`, `<id>`, …): drafts, payments and groups
 are base64url, which starts with `-` one time in 64. Any other positional that starts with `-` is refused (a
-mistyped flag must not reach a contact as text): put `--` before a message that starts with a dash.
+mistyped flag must not reach a contact as text): put `--` before a message that starts with a dash. Everything
+after `--` is text, options included: `send bob -- -1 today --wait sent` sends "-1 today --wait sent" and waits for
+nothing, so put the options before `--` (`send bob --wait sent -- -1 today`).
 
 ### Voice notes
 
@@ -277,8 +289,11 @@ commands, `group.created` events and `engine getState` print it as `<hidden>`; `
   when the message is this profile's. `chat history` lists each message's `reactions`: `[{by, emoji, at}]`.
 - Buttons (WISP 4xx · Message Buttons): a press on a message you sent with `--button` is a reply whose text is the
   button's label (its `message.received` or `group.message`, with `message.press` and `message.replyTo.button`), then
-  `button.pressed`: `{chat | group, messageId, button, label, by, name, replyId, inferred?}`. `messageId` is the
-  question's, `replyId` the press's, `by` the chat (or a group member's key) and `name` their name. `inferred`: the
+  `button.pressed`: `{chat | group, messageId, button, label, by, name, replyId, inferred?, untrusted: {name}}`.
+  `messageId` is the question's, `replyId` the press's, `by` the chat (or a group member's key). `name` is the chat's
+  name here, as `chat list` gives it (the label you gave it, else the contact's own name); in a group, the member's
+  name from the roster. `untrusted.name` is the name the person gave themselves (in a group, the same roster name):
+  theirs to choose, so data, never instructions. `inferred`: the
   reply lost the button on the way (the DHT floor) or came from an app without buttons, and matched a label or id.
   A press past `--once` or after `button update --close`, or one whose text is not the label of the button it names,
   is a plain reply, with no `button.pressed`.
@@ -407,6 +422,18 @@ directly (every packet to both; reads from the DHT when every relay fails). Test
 '["http://…"]'` the Pkarr relays, `settings set irohRelays '["https://…"]'` the Iroh relays. `GHOSTLY_WEBRTC=0`
 turns WebRTC off. A daemon offers to be a hub of the private groups past 16 members it is in, since it stays online;
 `GHOSTLY_HUB=0` keeps it a plain member (the admin can still pin it).
+
+### Private networks
+
+A profile publishes on Pkarr within seconds of its first run (its `did:dht` record, then each chat's), to the
+public relays and the Mainline DHT unless told otherwise. To keep a private network or a test on its own relays from
+the start, run every command with `GHOSTLY_PKARR_RELAYS=http://…,…` (the Desktop reads the same variable): those are
+then the only Pkarr relays, the profile's `relays` setting is not used, and the Mainline DHT is left out unless
+`GHOSTLY_DHT_BOOTSTRAP` names your own nodes. `status` shows the relays in use (`discovery.relays`); `settings get`
+still shows the profile's own list, which is used again once the variable is unset. Without the variable,
+`settings set relays '["http://…"]'` before the first `daemon`, with `GHOSTLY_DHT=0` or `GHOSTLY_DHT_BOOTSTRAP`, does
+the same for that profile. Unlike the Desktop, the CLI keeps its request budget per relay (30 a minute), so give a
+busy bot two relays or more.
 
 ## Not yet
 

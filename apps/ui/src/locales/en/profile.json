@@ -39,6 +39,14 @@
       "testing": "Testing…",
       "title": "S3 storage"
     },
+    "sameDevice": {
+      "copy": "Restore as a copy anyway",
+      "firstProfile": "The first profile can't be removed. To replace it, clear its data in Settings.",
+      "hint": "Both would act as the same person to your contacts. Replace the original, or don't run both.",
+      "info": "A restored copy keeps the original's chat keys. With both running, they answer the same contacts as one person and compete for the same connections, so messages can land in either. Replace restores the copy, switches to it, then offers to remove the original with the usual checks: what it holds, a backup first, and its name to confirm.",
+      "replace": "Replace the original",
+      "title": "This backup is {{names}}, which is on this device"
+    },
     "saveToS3": "Save to S3",
     "savedToS3": "Saved to S3 · {{size}}",
     "setUp": "Set up",
