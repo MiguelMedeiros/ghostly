@@ -130,6 +130,8 @@ export interface DeskSpark {
 class NoEcashError extends Error {}
 
 const arkSats=(network:string)=>network==="bitcoin"?"sats":"test sats";
+/** The English line kept with a payment message (the CLI and older apps show it): test sats say so. */
+const satsOn=(network:WalletNetwork)=>network==="testnet"?"test sats":"sats";
 type AskMethod = "arkade" | "usdt" | "bark" | "bitcoin" | "spark" | "fedimint";
 const ENDPOINT_OF: Record<Exclude<AskMethod, "usdt" | "fedimint">, string> = { arkade: ENDPOINT.arkade, bark: ENDPOINT.bark, bitcoin: ENDPOINT.bitcoin, spark: ENDPOINT.spark };
 /** A `pay` frame that carries no receipt, only "I paid this from another wallet: look now". */
@@ -399,7 +401,7 @@ export class PaymentDesk {
     if (params.rail === "cashu" && !mints.length) throw new Error(`You have no ${networkLabel(network)} Cashu wallet: create one in Wallet → New`);
     const linkId = `group:${params.groupId}`;
     await this.save({ id, linkId, group: params.groupId, kind: "request", direction: "out", amount: params.amount, unit: UNIT, memo, state: "pending", createdAt: params.timestamp, invoice: quote?.invoice, mints, network });
-    await this.host.storeMessage({ linkId, id: `me_${params.timestamp}`, text: `⚡ Requested ${params.amount.toLocaleString()} sats from the group`, sender: "me", timestamp: params.timestamp, via: "datalink", paymentId: id });
+    await this.host.storeMessage({ linkId, id: `me_${params.timestamp}`, text: `⚡ Requested ${params.amount.toLocaleString()} ${satsOn(network)} from the group`, sender: "me", timestamp: params.timestamp, via: "datalink", paymentId: id });
     // Members whose edge is down get it when it opens (replay).
     for (const edge of this.host.groupLinks?.(params.groupId) ?? []) await this.sendGroupRequest(edge, this.payments.get(id)!).catch(() => {});
     return { paymentId: id };
@@ -691,7 +693,7 @@ export class PaymentDesk {
     await this.host.storeMessage({
       linkId,
       id: `peer_${request.timestamp}`,
-      text: `⚡ Requested ${amount.toLocaleString()} sats`,
+      text: `⚡ Requested ${amount.toLocaleString()} ${satsOn(network)}`,
       sender: "peer",
       timestamp: request.timestamp,
       via: held ? "hold" : "datalink",
@@ -1015,7 +1017,7 @@ export class PaymentDesk {
     if(!existing || existing.linkId!==review.linkId || existing.requestId!==review.requestId)throw new Error("Cashu outbox does not match the reviewed payment");
     this.payments.set(existing.id,existing);
     this.host.onChange();
-    await this.host.storeMessage({linkId:review.linkId,id:`me_${review.createdAt}`,text:`${review.amount} sats via Cashu`,sender:"me",timestamp:review.createdAt,via:"datalink",paymentId:review.id});
+    await this.host.storeMessage({linkId:review.linkId,id:`me_${review.createdAt}`,text:`${review.amount} ${arkSats(review.network)} via Cashu`,sender:"me",timestamp:review.createdAt,via:"datalink",paymentId:review.id});
     await this.sendTo(link, {id:review.id,timestamp:review.createdAt,requestId:review.requestId,amount:{value:String(review.amount),asset:UNIT},memo:review.memo,endpoint:[ENDPOINT.cashu,token]});
   }
   async confirmReviewedCashu(review:PaymentReview):Promise<void> {
@@ -1366,11 +1368,13 @@ export class PaymentDesk {
       network: mintNetwork(mint),
     });
     let token: string;
+    let paidFrom: string;
     try {
       // Written down in the same transaction that takes the ecash out of the wallet: from here on the
       // token is the only copy of that money.
       const created = await this.wallet.createToken(params.amount, params.mints, memo, record, params.network);
       token = created.token;
+      paidFrom = created.mint;
       this.payments.set(id, record(created.token, created.mint));
     } catch (error) {
       throw new NoEcashError(error instanceof Error ? error.message : String(error));
@@ -1379,7 +1383,7 @@ export class PaymentDesk {
     await this.host.storeMessage({
       linkId: params.linkId,
       id: `me_${params.timestamp}`,
-      text: `⚡ ${params.amount.toLocaleString()} sats`,
+      text: `⚡ ${params.amount.toLocaleString()} ${satsOn(mintNetwork(paidFrom))}`,
       sender: "me",
       timestamp: params.timestamp,
       via: "datalink",
