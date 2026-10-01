@@ -25,8 +25,14 @@ interface UseWebRTCParams {
   /**
    * A line for the chat. `call`, on the lines a call has one of on this side (its ring, its miss): the time of the offer
    * it rang with, the same when that offer is heard again (the app reopened while it rang), so its line is not added twice.
+   * Returns the line's id, for `removeCallEventMessage`.
    */
-  addCallEventMessage?: (type: CallEventType, hasVideo: boolean, duration?: number, call?: number) => void;
+  addCallEventMessage?: (type: CallEventType, hasVideo: boolean, duration?: number, call?: number) => string | void;
+  /**
+   * Takes a line back out of the chat, by the id `addCallEventMessage` gave: our call's "call started" when the
+   * contact's offer won a glare, so this chat keeps the winning call's lines only, as the contact's does.
+   */
+  removeCallEventMessage?: (id: string) => void;
   /** Called when a call could not be placed or answered, e.g. the microphone was denied. */
   onError?: (error: unknown) => void;
   /** Where the media comes from, when not the browser's own WebRTC (Ghostly Desktop on Linux). */
@@ -182,6 +188,7 @@ export function useWebRTC({
   publishCallSignal,
   setFastPoll,
   addCallEventMessage,
+  removeCallEventMessage,
   onError,
   media,
   iceServers,
@@ -261,6 +268,8 @@ export function useWebRTC({
   const mediaUpRef = useRef(false);
   /** Whether this call already started over on a caller's second offer: a second failure is final. */
   const restartedRef = useRef(false);
+  /** The id of our call's "call started" line, while it rings: a glare it loses takes the line back out. */
+  const startedLineRef = useRef<string | null>(null);
   /** The wait for a second offer after the answered call's connection failed (`RESTART_GRACE_MS`). */
   const restartGraceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -573,7 +582,7 @@ export function useWebRTC({
         callHadVideoRef.current = withVideo;
         callConnectedEventFiredRef.current = false;
         updateCallState("offering");
-        addCallEventMessage?.("call_started", withVideo);
+        startedLineRef.current = addCallEventMessage?.("call_started", withVideo) || null;
 
         // A screen is shared from inside a call (`toggleScreenShare`), never as the way one starts.
         const stream = await mediaRef.current.getUserMedia({ audio: captureFrom("audio"), video: withVideo && captureFrom("video") });
@@ -960,6 +969,9 @@ export function useWebRTC({
       cleanupConnection();
       myOfferTimestampRef.current = 0;
       myOfferFingerprintRef.current = "";
+      // Our attempt is not a call of its own: the chat keeps the winner's lines only, as the contact's chat does.
+      if (startedLineRef.current) removeCallEventMessage?.(startedLineRef.current);
+      startedLineRef.current = null;
       yielded = true;
     }
 
@@ -1003,7 +1015,7 @@ export function useWebRTC({
         hangUp(false);
       }
     }
-  }, [incomingCallSignal, handleAnswer, hangUp, updateCallState, setFastPoll, addCallEventMessage, applyRemotePicture, restartAnswer, restartable, cleanupConnection]);
+  }, [incomingCallSignal, handleAnswer, hangUp, updateCallState, setFastPoll, addCallEventMessage, applyRemotePicture, restartAnswer, restartable, cleanupConnection, removeCallEventMessage]);
 
   // An unanswered call does not ring forever (RING_MS). Ours hangs up and says "No answer". Theirs stops ringing here
   // with a missed call and sends nothing: the caller's own ring runs out too, and a hang-up would read as declined.

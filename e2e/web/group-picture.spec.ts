@@ -106,6 +106,8 @@ test("three people: the admin sets the group's picture, a late joiner by link se
   // A new picture replaces it for everyone. Alice changes it once she has Carol's admission: a change sealed under the
   // epoch before it reaches Carol only on a later sync.
   await expect(alice.page.getByTestId("group-members")).toContainText("3 members", { timeout: 120_000 });
+  // The picture Carol got in with was set before her: no line tells her Alice just changed it.
+  await expect(carol.page.getByTestId("group-event").filter({ hasText: "changed the group's picture" })).toHaveCount(0);
   await openMembers(alice);
   await alice.page.getByTestId("group-picture-input").setInputFiles(await pictureFile(alice, "#2471a3"));
   await expect(alice.page.getByTestId("group-members-avatar").locator("img")).not.toHaveAttribute("src", first!);

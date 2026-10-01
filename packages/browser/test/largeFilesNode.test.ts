@@ -113,6 +113,19 @@ async function setup() {
   };
 }
 
+it("the app has an offered file's transfer before the message that shows it: a file on its way never reads as gone", async () => {
+  const t = await setup();
+  const events = t.node()["events"] as unknown as { onState: ReturnType<typeof vi.fn>; onMessages: ReturnType<typeof vi.fn> };
+  const order: string[] = [];
+  events.onState.mockImplementation((state: { transfers: Record<string, unknown> }) => {
+    if (Object.keys(state.transfers).some((id) => id.startsWith(`${t.id}-in-`))) order.push("transfer");
+  });
+  events.onMessages.mockImplementation((_linkId: string, messages: { file?: unknown }[]) => { if (messages.some((m) => m.file)) order.push("message"); });
+  t.offer("small-0001", 20_000);
+  await vi.waitFor(() => expect(order).toContain("message"));
+  expect(order[0]).toBe("transfer");
+});
+
 it("a large file waits for the person, shows the room here, and is stored whole once accepted", async () => {
   const t = await setup();
   const size = FILE_LIMITS.askAboveBytes + 1234;
