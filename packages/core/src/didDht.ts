@@ -287,6 +287,15 @@ export function encodeDidDhtPacket(document: DidDhtDocument, options: DidDhtPack
 }
 
 /**
+ * The packet that ends a DID: its root record alone, reading `deactivated`. Resolvers then answer with
+ * `deactivated: true` and a document holding the id alone, until the record leaves the DHT.
+ */
+export function encodeDidDhtDeactivated(publicKey: Uint8Array): Uint8Array {
+  const { z32 } = didDhtKey(didDhtFromPublicKey(publicKey));
+  return encodeTxtPacket([{ name: `_did.${z32}.`, value: "deactivated", ttl: DID_DHT_TTL }], { authoritative: true });
+}
+
+/**
  * The relay payload of a document: its packet, signed by the identity key. `seq` is the BEP44 sequence
  * number, which did:dht defines as the UNIX time in seconds (Ghostly's chat records use microseconds).
  */

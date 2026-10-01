@@ -25,12 +25,12 @@ import { setSendTyping, useSendTyping } from "../hooks/useTyping";
 import { Select } from "../components/ui/Select";
 import { CATEGORY_PREVIEW, categoryOn } from "../lib/cues";
 import { playSound } from "../lib/sounds";
+import { clearAllData } from "../lib/clearData";
 import {
   hashPassword,
   verifyPassword,
   getStorageUsage,
   formatBytes,
-  clearAllData,
   LANGUAGE_OPTIONS,
   COLOR_SCHEME_OPTIONS,
   APP_WEBSITE,
@@ -45,6 +45,9 @@ import { useAppNavigation } from "../hooks/useAppNavigation";
 import { peekEnabled, peekNotifies } from "../lib/profilePeek";
 import { externalLinkProps, isDesktopApp } from "../lib/externalLink";
 import { errorText } from "../lib/errorText";
+
+/** What "Clear all data" erases, as its confirmation lists it (lib/clearData.ts). */
+const CLEAR_ITEMS = ["chats", "groups", "apps", "profile", "identities", "settings", "storage"] as const;
 
 export function Settings() {
   const nav = useAppNavigation();
@@ -447,14 +450,25 @@ export function Settings() {
             <Button variant="danger" data-testid="delete-all-chats" disabled={chatCount === 0} onClick={() => setConfirmDeleteChats(true)}>{t("common.delete")}</Button>
           )}
         </Row>
-        <Row label={t("settings.clearAllData")} hint={confirmClearData ? t("settings.clearAllDataConfirm") : t("settings.clearAllDataDescription")} info={t("settings.clearAllDataInfo")}>
-          {confirmClearData ? <>
-            <Button variant="danger" data-testid="clear-all-data-confirm" onClick={() => void clearData()}>{t("common.confirm")}</Button>
-            <Button onClick={() => setConfirmClearData(false)}>{t("common.cancel")}</Button>
-          </> : (
-            <Button variant="danger" data-testid="clear-all-data" onClick={() => setConfirmClearData(true)}>{t("settings.clear")}</Button>
-          )}
+        <Row label={t("settings.clearAllData")} hint={t("settings.clearAllDataDescription")} info={t("settings.clearAllDataInfo")}>
+          {!confirmClearData && <Button variant="danger" data-testid="clear-all-data" onClick={() => setConfirmClearData(true)}>{t("settings.clear")}</Button>}
         </Row>
+        {confirmClearData && (
+          // What goes, in plain lines, and what stays; why and what the network keeps is behind the row's ⓘ.
+          <Block testId="clear-all-data-list">
+            <div className="space-y-2 text-sm" role="group" aria-label={t("settings.clearAllData")}>
+              <p className="font-semibold text-text-primary">{t("settings.clearAllDataConfirm")}</p>
+              <ul className="list-disc ps-5 space-y-0.5 text-text-secondary">
+                {CLEAR_ITEMS.map((item) => <li key={item} data-item={item}>{t(`settings.clearAllDataItems.${item}`)}</li>)}
+              </ul>
+              <p className="text-xs text-text-muted">{t("settings.clearAllDataKeeps")}</p>
+              <ButtonGroup>
+                <Button onClick={() => setConfirmClearData(false)}>{t("common.cancel")}</Button>
+                <Button variant="danger" data-testid="clear-all-data-confirm" onClick={() => void clearData()}>{t("settings.clearAllData")}</Button>
+              </ButtonGroup>
+            </div>
+          </Block>
+        )}
       </Section>
 
       {update.supported && (

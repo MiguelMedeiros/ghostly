@@ -11,9 +11,19 @@
   "chatListDensity": "チャット一覧",
   "clear": "消去",
   "clearAllData": "すべてのデータを消去",
-  "clearAllDataConfirm": "すべて消去しますか?元に戻せません。",
-  "clearAllDataDescription": "この端末のチャット、ファイル、設定。ウォレットは残ります。",
-  "clearAllDataInfo": "ウォレットは削除されません。それも消したい場合は、先にsatsを使うかバックアップしてください。",
+  "clearAllDataConfirm": "次のものを完全に消去します：",
+  "clearAllDataDescription": "このプロフィールのチャット、ID、設定。ウォレットは残ります。",
+  "clearAllDataInfo": "消去の前に、Ghostly は取り消せるものを取り消します：連絡先のために預けた項目、DID、ID証明、通知の購読。ほかのサイトに公開した証明はそこに残ります。ウォレットは削除されません。それも消したい場合は、先にsatsを使うかバックアップしてください。",
+  "clearAllDataItems": {
+    "apps": "共有アプリ",
+    "chats": "チャット、メッセージ、ファイル",
+    "groups": "グループ",
+    "identities": "ID証明、DID、Nostr のデータ",
+    "profile": "名前と写真",
+    "settings": "設定、ロック画面、ネットワーク",
+    "storage": "S3 ストレージの設定と閉じているときの通知"
+  },
+  "clearAllDataKeeps": "残るもの：ウォレット、バックアップ、ほかのプロフィール。",
   "colorScheme": "モード",
   "colorSchemes": {
     "dark": "ダーク",

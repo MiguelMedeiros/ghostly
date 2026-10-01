@@ -29,10 +29,23 @@ async function startEngine(): Promise<void> {
   if (status.profile === status.active) return;
   // A page made another profile the one in use. The running peer stops and its document closes before
   // the next one opens: never two peers, and never one peer over two profiles' data.
+  await replaceEngine();
+}
+
+async function replaceEngine(): Promise<void> {
   await chrome.runtime.sendMessage({ target: "engine", type: "stop" } satisfies RuntimeMessage).catch(() => {});
   await chrome.offscreen.closeDocument().catch(() => {});
   await createEngineDocument();
   await waitForEngine();
+}
+
+/** A new peer in place of the running one, which stopped for good ("Clear all data"); after any start in progress. */
+function restartEngine(): Promise<void> {
+  const previous = starting ?? Promise.resolve();
+  const next = previous.catch(() => {}).then(replaceEngine);
+  const tracked: Promise<void> = next.finally(() => { if (starting === tracked) starting = null; });
+  starting = tracked;
+  return next;
 }
 
 async function createEngineDocument(): Promise<void> {
@@ -114,6 +127,13 @@ chrome.runtime.onMessage.addListener((message: RuntimeMessage, sender, sendRespo
   if (message?.target !== "background" || !fromOwnPage(sender)) return false;
   if (message.type === "ensure-engine") {
     void ensureEngine().then(
+      () => sendResponse({ ok: true }),
+      (error) => sendResponse({ ok: false, error: String(error) }),
+    );
+    return true;
+  }
+  if (message.type === "restart-engine") {
+    void restartEngine().then(
       () => sendResponse({ ok: true }),
       (error) => sendResponse({ ok: false, error: String(error) }),
     );

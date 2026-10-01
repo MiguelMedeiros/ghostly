@@ -11,9 +11,19 @@
   "chatListDensity": "Liste des discussions",
   "clear": "Effacer",
   "clearAllData": "Effacer toutes les données",
-  "clearAllDataConfirm": "Tout effacer ? C'est irréversible.",
-  "clearAllDataDescription": "Discussions, fichiers et réglages de cet appareil. Les portefeuilles restent.",
-  "clearAllDataInfo": "Les portefeuilles ne sont pas supprimés : dépensez ou sauvegardez vos sats avant si vous voulez qu'ils partent aussi.",
+  "clearAllDataConfirm": "Ceci efface pour de bon :",
+  "clearAllDataDescription": "Discussions, identités et réglages de ce profil. Les portefeuilles restent.",
+  "clearAllDataInfo": "Avant d'effacer, Ghostly retire ce qu'il peut : éléments gardés pour vos contacts, votre DID, vos preuves d'identité et le réveil. Les preuves publiées sur d'autres sites y restent. Les portefeuilles ne sont pas supprimés : dépensez ou sauvegardez vos sats avant si vous voulez qu'ils partent aussi.",
+  "clearAllDataItems": {
+    "apps": "Apps partagées",
+    "chats": "Discussions, messages et fichiers",
+    "groups": "Groupes",
+    "identities": "Preuves d'identité, votre DID et données Nostr",
+    "profile": "Votre nom et votre photo",
+    "settings": "Réglages, écran de verrouillage et réseau",
+    "storage": "Réglages S3 et réveil, app fermée"
+  },
+  "clearAllDataKeeps": "Restent : vos portefeuilles, vos sauvegardes et les autres profils.",
   "colorScheme": "Mode",
   "colorSchemes": {
     "dark": "Sombre",

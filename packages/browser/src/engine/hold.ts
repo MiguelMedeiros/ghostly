@@ -268,6 +268,21 @@ export class HoldEngine {
       if (entry.state === "held") await this.publishPointer(linkId, true).catch(() => {});
     });
   }
+  /**
+   * "Clear all data": stops, then deletes every item held in storage for every contact, and each chat's manifest. A
+   * contact that still has the pointer finds nothing behind it. Nothing is written back to the chats: they go next.
+   */
+  async withdrawAll(): Promise<void> {
+    await this.stop();
+    const storage = this.host.storage();
+    if (!storage) return;
+    const names = this.host.linkIds().flatMap((linkId) => {
+      const hold = this.state(linkId);
+      return [...hold.outbox.map((entry) => entry.name), ...(hold.mailbox ? [manifestName(storage.space, hold.mailbox)] : [])];
+    });
+    await Promise.allSettled(names.map((name) => storage.store.remove(name)));
+  }
+
   forgetLink(linkId: string): void {
     this.keyCache.delete(linkId); this.lastPoll.delete(linkId); this.lastPublish.delete(linkId); this.expecting.delete(linkId); this.errors.delete(linkId); this.chains.delete(linkId);
     this.pointerDue.delete(linkId);

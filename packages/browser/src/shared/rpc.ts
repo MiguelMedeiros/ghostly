@@ -106,6 +106,11 @@ export interface EngineApi {
   loadPublicGraph(params: { provider: string; subject: string; force?: boolean }): PublicGraphView | null;
   /** One picture of a post already loaded, on the reader's tap. */
   loadPublicPostImage(params: { provider: string; subject: string; postId: string; index: number }): PublicPostImageView;
+  /**
+   * "Clear all data", the peer's part: takes back what it can from the network (held items, the DID, identity
+   * proofs), stops, and empties its database but for the wallets. The peer is stopped afterwards: the host starts a new one.
+   */
+  clearProfileData(): void;
   /** Lists one of the profile's identities in its public DID document (`alsoKnownAs`), or takes it out. */
   setDidListed(params: { id: string; listed: boolean }): void;
   /** Nostr social layer, per contact: their profile (kind 0), follows (kind 3) or notes (kind 1), from the person's relays. Refused without a verified Nostr proof from that contact. */

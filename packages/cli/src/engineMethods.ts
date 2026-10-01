@@ -14,7 +14,7 @@ export const ENGINE_METHODS: readonly string[] = [
   "choosePublicProfile", "preparePeerProof", "submitPeerProof", "withdrawPeerProof", "beginIdentityProof",
   "completeIdentityProof", "cancelIdentityProof", "removeIdentityProof", "shareIdentityProof",
   "withdrawIdentityProof", "recheckIdentityProof", "lookupIdentityDisplay", "loadPublicProfile", "loadPublicPosts",
-  "loadPublicGraph", "loadPublicPostImage", "setDidListed", "nostrLoadContact", "nostrForgetContact", "nostrLoadOwn",
+  "loadPublicGraph", "loadPublicPostImage", "clearProfileData", "setDidListed", "nostrLoadContact", "nostrForgetContact", "nostrLoadOwn",
   "nostrLookup", "nostrDraft", "nostrPublish", "createLink", "takeInvite", "joinLink", "ensureLink", "confirmPair",
   "pollNow", "removeLink", "renameLink", "setActiveLink", "sendMessage", "editMessage", "retryMessage", "react", "pinMessage", "messageDetails",
   "deleteMessage", "exportLinks", "sendFile", "forwardMessages", "fileAction", "setDeliveryMode", "setTransportPreference",

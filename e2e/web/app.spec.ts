@@ -181,7 +181,21 @@ test("clear all data leaves nothing behind", { tag: ["@feature:app.clear-data"] 
   await page.waitForTimeout(16_000);
   await page.goto("/#/settings");
   await page.getByTestId("clear-all-data").click();
-  await expect(page.getByText("Clear everything? This cannot be undone.")).toBeVisible();
+  // The confirmation lists what goes, and says the wallets stay.
+  const list = page.getByTestId("clear-all-data-list");
+  await expect(list.getByText("This erases for good:")).toBeVisible();
+  await expect(list.getByText("Identity proofs, your DID and Nostr data")).toBeVisible();
+  await expect(list.getByText("Stays: your wallets, your backups and other profiles.")).toBeVisible();
+  // The profile's DID key, as its peer keeps it: a cleared profile starts with a new one.
+  const didKey = () => page.evaluate(() => new Promise<string | null>((resolve) => {
+    const open = indexedDB.open("ghostly");
+    open.onsuccess = () => {
+      const get = open.result.transaction("settings").objectStore("settings").get("profileDid");
+      get.onsuccess = () => { resolve((get.result as { publicKey?: string } | undefined)?.publicKey ?? null); open.result.close(); };
+    };
+  }));
+  const didBefore = await didKey();
+  expect(didBefore, "the profile had a DID").toBeTruthy();
   await page.getByTestId("clear-all-data-confirm").click();
   // The app starts over at once (the running peer held what was deleted), so the short "All data
   // cleared" note may be gone before anyone reads it: the restart is what to wait for.
@@ -190,4 +204,5 @@ test("clear all data leaves nothing behind", { tag: ["@feature:app.clear-data"] 
   await page.goto("/#/");
   await page.waitForTimeout(12_000);
   expect(await storedChats(page)).toBe(0);
+  await expect.poll(didKey, { message: "the old DID went with the data" }).not.toBe(didBefore);
 });

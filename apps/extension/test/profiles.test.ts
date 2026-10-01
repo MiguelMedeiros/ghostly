@@ -3,7 +3,7 @@ import { settle, type FakeWorld } from "./fakeChrome";
 import { engineControl, resetEngine } from "./fakeEngine";
 import { bootExtension, restartServiceWorker, useProfile } from "./extension";
 
-// covers: extension.engine, profiles.switch
+// covers: extension.engine, profiles.switch, app.clear-data
 
 vi.mock("@ghostly/browser/engine/server", async () => (await import("./fakeEngine")).engineServerModule);
 // Mocked modules outlive `vi.resetModules()`: as the real one, but one instance the fake peer and every
@@ -57,6 +57,20 @@ describe("the peer runs the profile in use", () => {
     world.storage.set("ghostly_profiles", JSON.stringify({ version: 1, active: WORK, profiles: [] }));
     await ensure();
     expect(log()).toEqual(["start ghostly"]);
+  });
+});
+
+describe("clearing the profile's data", () => {
+  it("starts a new peer on the same profile: the stopped one's document closes first", async () => {
+    useProfile(world, WORK);
+    await ensure();
+    expect(await world.chrome.runtime.sendMessage({ target: "background", type: "restart-engine" })).toEqual({ ok: true });
+    expect(log()).toEqual([`start ghostly_${WORK}`, `stop ghostly_${WORK}`, `start ghostly_${WORK}`]);
+    expect(world.calls.map((c) => c.api).filter((api) => api.startsWith("offscreen."))).toEqual(["offscreen.createDocument", "offscreen.closeDocument", "offscreen.createDocument"]);
+    expect(world.locks).toEqual(new Map([[`ghostly-peer-${WORK}`, "offscreen"]]));
+    // The next page finds it running, as it is.
+    expect(await ensure()).toEqual({ ok: true });
+    expect(log()).toHaveLength(3);
   });
 });
 

@@ -11,9 +11,19 @@
   "chatListDensity": "Chat list",
   "clear": "Clear",
   "clearAllData": "Clear all data",
-  "clearAllDataConfirm": "Clear everything? This cannot be undone.",
-  "clearAllDataDescription": "Chats, files and settings on this device. Wallets stay.",
-  "clearAllDataInfo": "Wallets are not deleted: spend or back up your sats first if you want them gone too.",
+  "clearAllDataConfirm": "This erases for good:",
+  "clearAllDataDescription": "Chats, identities and settings of this profile. Wallets stay.",
+  "clearAllDataInfo": "Before erasing, Ghostly takes back what it can: items held for contacts, your DID, your identity proofs and wake-ups. Proofs you posted on other sites stay there. Wallets are not deleted: spend or back up your sats first if you want them gone too.",
+  "clearAllDataItems": {
+    "apps": "Shared apps",
+    "chats": "Chats, messages and files",
+    "groups": "Groups",
+    "identities": "Identity proofs, your DID and Nostr data",
+    "profile": "Your name and picture",
+    "settings": "Settings, lock screen and network",
+    "storage": "S3 storage settings and wake-ups"
+  },
+  "clearAllDataKeeps": "Stays: your wallets, your backups and other profiles.",
   "colorScheme": "Mode",
   "colorSchemes": {
     "dark": "Dark",

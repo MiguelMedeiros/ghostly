@@ -14,7 +14,7 @@ import {
   peerDisplayName,
 } from "../../../apps/ui/src/lib/storage";
 import type { ChatMessage } from "../../../apps/ui/src/lib/types";
-import { clearAllData } from "../../../apps/ui/src/lib/settings";
+import { clearAllData } from "../../../apps/ui/src/lib/clearData";
 // covers: chat.paired.delete-message, chats.list.delete, app.clear-data, core.text-limits
 
 /** Enough of the Web Storage API for the session store; node has none. */
