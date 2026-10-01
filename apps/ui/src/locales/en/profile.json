@@ -85,6 +85,9 @@
   "profiles": "Profiles",
   "removePicture": "Remove picture",
   "restoredName": "{{name}} (restored)",
+  "restoredRemove": "Remove the restored tag",
+  "restoredTag": "Restored",
+  "restoredTagHint": "Brought back from a backup",
   "sats": "{{amount}} sats",
   "switch": "Switch"
 }

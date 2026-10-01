@@ -85,6 +85,9 @@
   "profiles": "Perfis",
   "removePicture": "Remover a foto",
   "restoredName": "{{name}} (restaurado)",
+  "restoredRemove": "Tirar a marca de restaurado",
+  "restoredTag": "Restaurado",
+  "restoredTagHint": "Trazido de volta de um backup",
   "sats": "{{amount}} sats",
   "switch": "Trocar"
 }
