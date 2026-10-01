@@ -1011,10 +1011,10 @@ impl Pkarr {
             self.breaker(url, Some((Failure::Error, reason)));
             brief(&e.to_string())
         };
-        let mut response = send(previous).await.map_err(&failed)?;
+        let mut response = send(previous).await.map_err(failed)?;
         self.note_rate_limit(url, &response);
         if response.status().as_u16() == 412 && previous.is_some() {
-            response = send(None).await.map_err(&failed)?;
+            response = send(None).await.map_err(failed)?;
             self.note_rate_limit(url, &response);
         }
         // 428: the relay holds a packet someone else put there moments ago (the inviter warming this
@@ -1022,7 +1022,7 @@ impl Pkarr {
         if response.status().as_u16() == 428 && previous.is_none() {
             if let RelayAnswer::Packet(current) = self.relay_get(url, &key).await {
                 if current.timestamp() < packet.timestamp() {
-                    response = send(Some(current.timestamp())).await.map_err(&failed)?;
+                    response = send(Some(current.timestamp())).await.map_err(failed)?;
                     self.note_rate_limit(url, &response);
                 }
             }
@@ -1034,7 +1034,7 @@ impl Pkarr {
         {
             retries += 1;
             tokio::time::sleep(FIRST_PUT_RETRY_AFTER).await;
-            response = send(None).await.map_err(&failed)?;
+            response = send(None).await.map_err(failed)?;
             self.note_rate_limit(url, &response);
         }
         // 409, 412 and 428 are the relay working as it should; its rate limit and its own errors count against it.
