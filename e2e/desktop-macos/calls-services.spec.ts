@@ -130,7 +130,7 @@ type Received = { audio: number; video: number; frames: number; sent: number; st
 
 /** The size of the other side's picture, as this app's call shows it. */
 const REMOTE_PICTURE = `
-  const video = [...document.querySelectorAll("video")].find((v) => !v.muted);
+  const video = document.querySelector("[data-testid=remote-video]");
   return video ? video.videoWidth + "x" + video.videoHeight : "none";`;
 
 /**
