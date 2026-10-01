@@ -1,0 +1,1 @@
+The edit that restores a question's buttons once the chat is live is the sender's app's own, not the bot's: the bot's event stream no longer reports it as its question's `message.edited` with the text unchanged. Its edit number still counts, so a later edit of the bot's takes the next one and is reported as before.
