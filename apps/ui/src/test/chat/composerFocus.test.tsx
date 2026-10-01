@@ -57,3 +57,27 @@ describe("the composer's caret while a send disables it", () => {
     expect(field()).not.toHaveFocus();
   });
 });
+
+describe("the composer taken out of the page", () => {
+  it("with the focus, lets it go first: a field removed with the focus gets no focusout, and React would keep it (and the closed chat with it)", () => {
+    const { rerender } = renderApp(<>{composer(false)}</>);
+    expect(field()).toHaveFocus();
+    const left: EventTarget[] = [];
+    const onFocusOut = (e: FocusEvent) => left.push(e.target!);
+    document.addEventListener("focusout", onFocusOut);
+    try {
+      const input = field();
+      rerender(<></>);
+      expect(left).toContain(input);
+    } finally {
+      document.removeEventListener("focusout", onFocusOut);
+    }
+  });
+
+  it("without the focus, leaves it where it is", () => {
+    const { rerender } = renderApp(<>{composer(false)}<button type="button">elsewhere</button></>);
+    screen.getByRole("button", { name: "elsewhere" }).focus();
+    rerender(<>{null}<button type="button">elsewhere</button></>);
+    expect(screen.getByRole("button", { name: "elsewhere" })).toHaveFocus();
+  });
+});
