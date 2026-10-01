@@ -2262,7 +2262,8 @@ export class GhostlyNode implements EngineImplementation {
    * question goes again as an edit of its buttons alone: the same text, so no version and no edit mark. Once per
    * message (the row says so, across restarts); the edit queue carries it (a card's edit goes only live, and a later
    * edit of the bot's replaces it, the highest number winning). An app without `buttons/1` (1.0.0 would mark it edited)
-   * gets none: the row waits for one that shows buttons.
+   * gets none: the row waits for one that shows buttons. The edit is marked `restore`: the bot's own event stream says
+   * nothing of it, while its number counts, so a later edit of the bot's takes the next one.
    */
   private async restoreButtons(linkId: string): Promise<void> {
     const live = this.links.get(linkId), link = live?.link;
@@ -2277,7 +2278,7 @@ export class GhostlyNode implements EngineImplementation {
         // Its buttons gone since (an edit that left none), or no edit left to carry them: nothing to restore.
         if (current.card?.kind !== "buttons" || !current.wireId || seq > STATUS_CARD_LIMITS.edits) return { buttonsRestore: "sent" };
         const next = withEdit(current, { seq, at, text: current.text, preview: current.preview, card: current.card, pending: true });
-        return { edit: next.edit, buttonsRestore: "sent" };
+        return { edit: { ...next.edit!, restore: true }, buttonsRestore: "sent" };
       });
       if (patched?.edit?.pending) changed.push(message.id);
     }

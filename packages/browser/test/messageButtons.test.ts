@@ -290,7 +290,7 @@ describe("buttons that went without their question (the DHT floor, a hold)", () 
     expect(t.contactEdits[0]).toMatchObject({ id: WIRE("F"), e: 1, m: QUESTION, sc: readStatusCard(ask()) });
     // Here: the same text, no version kept (no edit mark), confirmed by the contact, and not due any more.
     await vi.waitFor(async () => expect((await t.row(`me_${WIRE("F")}`)).edit?.pending).toBeUndefined(), { timeout: 10_000 });
-    expect(await t.row(`me_${WIRE("F")}`)).toMatchObject({ text: QUESTION, buttonsRestore: "sent", edit: { seq: 1, history: [] } });
+    expect(await t.row(`me_${WIRE("F")}`)).toMatchObject({ text: QUESTION, buttonsRestore: "sent", edit: { seq: 1, history: [], restore: true } });
     // Both apps closed and open again: nothing goes a second time.
     const keys = t.keys;
     await t.stop();
@@ -301,6 +301,9 @@ describe("buttons that went without their question (the DHT floor, a hold)", () 
     // The bot's own update after it goes as the next number, and the contact takes the highest.
     expect(await again.node.editMessage({ linkId: again.id, messageId: `me_${WIRE("F")}`, text: QUESTION, card: ask({ chosen: "yes", closed: true }) })).toMatchObject({ error: null });
     await vi.waitFor(() => expect(again.contactEdits).toEqual([expect.objectContaining({ e: 2, sc: expect.objectContaining({ chosen: "yes", closed: true }) })]), { timeout: 10_000 });
+    // The restore mark stays with the restore: the bot's own edit is reported as any (the CLI's event stream).
+    expect((await again.row(`me_${WIRE("F")}`)).edit).toMatchObject({ seq: 2 });
+    expect((await again.row(`me_${WIRE("F")}`)).edit).not.toHaveProperty("restore");
   }, 60_000);
 
   it("a question the bot updated meanwhile goes as its latest version, one number above", async () => {
