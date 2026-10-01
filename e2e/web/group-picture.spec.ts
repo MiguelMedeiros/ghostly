@@ -98,6 +98,8 @@ test("three people: the admin sets the group's picture, a late joiner by link se
   // Carol joins later by the link and sees it; nobody had to set it again.
   await join(carol, url);
   await shows(carol, first);
+  // The picture she got in with was set before her: no line tells her Alice just changed it.
+  await expect(carol.page.getByTestId("group-event").filter({ hasText: "changed the group's picture" })).toHaveCount(0);
   // The share screen shows it too.
   await carol.page.getByTestId("group-share").click();
   await expect(carol.page.getByTestId("group-share-dialog").getByTestId("group-share-avatar").locator("img")).toHaveAttribute("src", first!);
