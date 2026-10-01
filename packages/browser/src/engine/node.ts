@@ -967,7 +967,7 @@ export class GhostlyNode implements EngineImplementation {
       else void this.closeGroupLink(linkId).catch(() => {});
     },
     edgeNick: linkId => this.links.get(linkId)?.presence.nick || undefined,
-    storeMessage: message => this.storeMessage(message),
+    storeMessage: message => this.storeNewMessage(message),
     completeMessage: message => this.completeGroupMessage(message),
     membersChanged: groupId => this.groupMembersChanged(groupId),
     historyGone: groupId => this.groupHistoryGone(groupId),
@@ -5088,7 +5088,10 @@ export class GhostlyNode implements EngineImplementation {
     onChanges.call(this.events, linkId, { messages: rows.filter((row): row is StoredMessage => !!row), deleted: unique.filter((_, i) => !rows[i]) });
   }
 
-  private async storeMessage(message: StoredMessage): Promise<void> {
+  private async storeMessage(message: StoredMessage): Promise<void> { await this.storeNewMessage(message); }
+
+  /** Stores a message; false when it was there already (or deleted here): nothing new came. */
+  private async storeNewMessage(message: StoredMessage): Promise<boolean> {
     // A peer says when it sent a message; a time far ahead of this clock would pin the chat to the top of the list
     // and may be past what a date holds, so it is taken as now at the latest.
     if (message.sender === "peer") message = { ...message, timestamp: receivedTimestamp(message.timestamp) };
@@ -5101,7 +5104,7 @@ export class GhostlyNode implements EngineImplementation {
     if (pay?.member) message = { ...message, linkId: `group:${pay.groupId}`, id: `${message.linkId}:${message.id}`, ...(message.sender === "peer" ? { member: pay.member } : {}) };
     const live = this.links.get(message.linkId);
     // The peer republishes what it sent for a few minutes: what was deleted here stays deleted.
-    if (live?.stored.deletedIds?.includes(message.id)) return;
+    if (live?.stored.deletedIds?.includes(message.id)) return false;
     // A reply's original, looked for in this chat only: one named from elsewhere is simply not found here.
     message = await this.resolveReply(message);
     // Its details begin here: the path a received message came over, or the one a payment goes over right now.
@@ -5110,7 +5113,7 @@ export class GhostlyNode implements EngineImplementation {
       const at = Date.now();
       message = { ...message, details: { ...withSend(message.details, { at, ...pathSnapshot(live, message.via), result: "sent" }), sentAt: at } };
     }
-    if (!(await db.addMessage(message))) return;
+    if (!(await db.addMessage(message))) return false;
     const newest = this.newestAt.get(message.linkId);
     if (!message.event) this.newestAt.set(message.linkId, Math.max(newest ?? 0, message.timestamp));
     if (message.sender === "peer") this.messageFeedback("message", message, newest);
@@ -5126,6 +5129,7 @@ export class GhostlyNode implements EngineImplementation {
     // Reactions that came before it are shown now, and a member's edit.
     await this.reactions.stored(message);
     await this.groupEdits.stored(message);
+    return true;
   }
 
   private servicesChanged(): void {

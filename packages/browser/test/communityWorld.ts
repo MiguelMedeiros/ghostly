@@ -190,7 +190,7 @@ export class CommunityWorld {
         if (!this.spend(peer, 1, background, false, `resolve${background ? " bg" : ""}`)) throw new Error("No Pkarr relay reachable");
         return peer.online ? structuredClone(this.pkarr.get(key) ?? null) : null;
       },
-      storeMessage: async message => { if (!messages.some(m => m.id === message.id)) messages.push(message); },
+      storeMessage: async message => { if (messages.some(m => m.id === message.id)) return false; messages.push(message); return true; },
       emit: () => {},
       myNick: () => peer.nick,
       staysOnline: () => !!peer.staysOnline,
