@@ -15,7 +15,7 @@ import { CASHU_MINT_SOURCE } from "../walletCardData";
 import { useI18n, type Translate } from "../../contexts/I18nContext";
 import { fillNodes } from "../../lib/fillNodes";
 import { satsIn } from "../NetworkTag";
-import { lightningStateLabel } from "../paymentWords";
+import { lightningStateLabel, paymentStateLabel } from "../paymentWords";
 import { formatAmount } from "../../lib/amount";
 import { formatAt } from "../../lib/time";
 import { errorText } from "../../lib/errorText";
@@ -220,7 +220,7 @@ export function CashuWallet({ wallet, state, rail, onOpenCashu, focusAmount = fa
         {notice && <Notice tone="success" testId="wallet-notice">{notice}</Notice>}
         {error && <Notice tone="error" testId="wallet-error">{error}</Notice>}
         {(state.intents ?? []).filter((i) => i.method === "cashu" && i.id !== review?.id).map((i) => (
-          <Button key={i.id} className="block w-full text-start" onClick={() => setReview(i)}>{t("wallet.cashu.intent", { amount: formatAmount(i.amount, t.language), unit, state: i.state })}</Button>
+          <Button key={i.id} className="block w-full text-start" onClick={() => setReview(i)}>{t("wallet.cashu.intent", { amount: formatAmount(i.amount, t.language), unit, state: paymentStateLabel(t, i.state) })}</Button>
         ))}
         {review && <PaymentReview key={review.id} review={review} wallet={wallet} onClose={() => setReview(null)} />}
       </div>
