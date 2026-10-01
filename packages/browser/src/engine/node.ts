@@ -40,7 +40,7 @@ import { ModeChanged, networkLabel, WrongNetworkError } from "./paymentAdapters/
 import { assertConfirmedReal, createTiming, WALLET_NAMES, createFailure, crossNetwork, paymentNetwork, paymentNetworksOf, walletInstances } from "./paymentAdapters/walletInstances";
 import { migrateWalletNetworks } from "./paymentAdapters/walletNetworks";
 import { perNetwork, type PerNetwork } from "./paymentAdapters/perNetwork";
-import { COMMUNITY_EDIT_FRAME, INVITE_TAKEN, engineError, parseCommunityEdit } from "@ghostly/core";
+import { COMMUNITY_EDIT_FRAME, INVITE_TAKEN, engineError, parseCommunityEdit, traceLink } from "@ghostly/core";
 import { GROUP_WAKE_FRAME, GROUP_WAKE_RECEIVE_LIMIT, GroupWakeLimiter, RateWindow, WAKE_CALL_INTERVAL_MS, WakeLimiter, groupWakeFrame, groupWakes, parseGroupWakeFrame, checkPushEndpoint, newWakeToken, relayRequest, vapidKeysMatch, wakeRequest, type PushRequest, type WakeKind, type WakeTarget } from "@ghostly/core";
 import { COMMUNITY_REACTION_FRAME, GROUP_REACTION_FRAME, REACTION_LIMITS, ReactionWindow, queueReaction, readReaction, validReactionNumber, wireReaction, type WireReaction } from "@ghostly/core";
 import { COMMUNITY_PIN_FRAME, PIN_LIMITS, mayPin, pinIsNewer, pinNumberHolds, readPin, type GroupPinFrame, type WirePin } from "@ghostly/core";
@@ -189,6 +189,11 @@ export const GROUP_NATIVE_SLOTS = 4;
 const GROUP_NATIVE_RETRY_MS = 15_000;
 /** "Clear all data": how long taking things back from the network may hold up the clear, in all. */
 export const CLEAR_WITHDRAW_MS = 6_000;
+/**
+ * How soon the chat on screen tries again for a native slot when every one was busy (each dialling, or carrying a
+ * session): a dial to a contact that is not there ends within its 20 s timeout, and leaves its slot free until the next.
+ */
+const ACTIVE_SLOT_RETRY_MS = 3_000;
 
 const DEFAULT_SETTINGS: Settings = {
   online: true,
@@ -1260,7 +1265,8 @@ export class GhostlyNode implements EngineImplementation {
     }
     // With the chats loaded, profiles of identities no longer verified can be told apart and dropped.
     this.publicProfiles.start();
-    if (this.settings.online) for (const [linkId, messages] of history) {
+    if (this.settings.online) for (const linkId of this.nativeStartOrder([...history.keys()])) {
+      const messages = history.get(linkId)!;
       if (!this.links.has(linkId)) continue;
       this.startLink(linkId, messages);
       if (!this.links.get(linkId)?.stored.group) void this.refreshPublicProfiles({ linkId }).catch(() => {});
@@ -1323,6 +1329,7 @@ export class GhostlyNode implements EngineImplementation {
     // First, before anything that waits: every live contact hears this app is going, and watches for it to come back.
     this.depart();
     if (this.relayRetry) clearTimeout(this.relayRetry);
+    if (this.activeSlotRetry) clearTimeout(this.activeSlotRetry);
     if(this.paymentTimer)clearTimeout(this.paymentTimer);
     clearTimeout(this.awaitingTimer);
     if (this.spareTimer) clearTimeout(this.spareTimer);
@@ -4880,7 +4887,12 @@ export class GhostlyNode implements EngineImplementation {
             const victim = groupVictim ?? (this.activeLinkId === linkId ? owners
               .filter(other => other !== live && other.stored.id !== this.activeLinkId && other.link?.canReleaseEndpoint(key))
               .sort((a, b) => a.lastMessageAt - b.lastMessageAt)[0] : undefined);
-            if (!victim) throw new Error("All eight native connection slots are in use. Disconnect a native connection in another chat, then reopen this chat or press Reconnect.");
+            if (!victim) {
+              traceLink(live.myPubKeyZ32, "native-no-slot", { transport: key, active: this.activeLinkId === linkId });
+              // Each busy for now (dialling, switching, carrying a session): the chat on screen asks again in a moment.
+              if (this.activeLinkId === linkId && !group) this.retryActiveSlot(linkId);
+              throw new Error("All eight native connection slots are in use. Disconnect a native connection in another chat, then reopen this chat or press Reconnect.");
+            }
             await victim.link!.releaseEndpoint(key);
             victim.transportErrors ??= {};
             victim.transportErrors[key] = "Listener released for another chat. Open this chat to restore it; your messages and transport identity are saved.";
@@ -4911,6 +4923,37 @@ export class GhostlyNode implements EngineImplementation {
     });
     this.nativeQueue = operation.catch(() => {});
     return operation;
+  }
+
+  /**
+   * The order saved chats start in, which is the order they take native listeners in (`NATIVE_SLOTS` per transport):
+   * the 1:1 chats written in, or live, most recently first; group links keep their places. In the order they were
+   * stored, an app with more paired chats than slots left a chat that was live a moment before with no listener, and a
+   * contact with no WebRTC (the Linux Desktop) never reached it again (Omarchy, 2026-09-30: "On DHT · retrying live" for
+   * minutes after both apps restarted). Not "live when this app last ran" first: a chat that heard its contact leave as
+   * both quit is not, and one that never came back since keeps saying it is, run after run.
+   */
+  private nativeStartOrder(linkIds: string[]): string[] {
+    const isChat = (id: string) => { const stored = this.links.get(id)?.stored; return !!stored && !stored.group; };
+    const rank = new Map(linkIds.filter(isChat).map(id => {
+      const live = this.links.get(id)!;
+      return [id, Math.max(live.lastMessageAt, this.transportLogOf(live)?.lastLiveAt ?? 0)] as const;
+    }));
+    const chats = [...rank.keys()].sort((a, b) => rank.get(b)! - rank.get(a)!);
+    chats.forEach((id, place) => traceLink(this.links.get(id)!.myPubKeyZ32, "native-order", { place, recent: rank.get(id) }));
+    let next = 0;
+    return linkIds.map(id => rank.has(id) ? chats[next++] : id);
+  }
+
+  /** The chat on screen found every native slot busy: it tries again in a moment, while it stays on screen. */
+  private activeSlotRetry: ReturnType<typeof setTimeout> | null = null;
+  private retryActiveSlot(linkId: string): void {
+    if (this.activeSlotRetry) clearTimeout(this.activeSlotRetry);
+    if (this.shuttingDown) return;
+    this.activeSlotRetry = setTimeout(() => {
+      this.activeSlotRetry = null;
+      if (this.activeLinkId === linkId && !this.shuttingDown) void this.ensureNativeEndpoints(linkId);
+    }, ACTIVE_SLOT_RETRY_MS);
   }
 
   /** Group links waiting for a free native slot (`ensureNativeEndpoints`), by link id. */
