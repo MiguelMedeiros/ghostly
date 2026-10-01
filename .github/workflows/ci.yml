@@ -107,6 +107,13 @@ jobs:
           [[ "$draft" == "true" || "$draft" == "false" ]] || { echo "::error::Could not read the draft state: $draft"; exit 1; }
           echo "Draft: $draft (the event said $PAYLOAD_DRAFT)"
           echo "draft=$draft" >> "$GITHUB_OUTPUT"
+          # A pull request that changes no file (main merged back into dev after a release) gives nothing to plan
+          # from: everything runs.
+          if (( CHANGED == 0 )); then
+            echo "::notice::This pull request changes no file: everything runs"
+            printf 'rust=true\nwebsite=true\napp=true\npackages=true\n' | tee -a "$GITHUB_OUTPUT"
+            exit 0
+          fi
           gh api --paginate "$FILES_URL" --jq '.[] | "\(.filename)\t\(.previous_filename // "")"' > "$RUNNER_TEMP/files.tsv"
           # The files API lists at most 3000 files: a longer pull request runs everything.
           if (( $(wc -l < "$RUNNER_TEMP/files.tsv") < CHANGED )); then
