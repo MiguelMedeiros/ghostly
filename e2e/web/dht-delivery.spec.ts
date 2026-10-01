@@ -1,6 +1,6 @@
 import { copyInvite } from "../support/clipboard";
 import { pasteInvite } from "../support/clipboard";
-import { test, expect, chat, chooseDhtOnly, delivered, say, setDhtOnly, type Peer } from "../support/fixtures";
+import { test, expect, chat, chooseDhtOnly, connect, delivered, link, say, setDhtOnly, type Peer } from "../support/fixtures";
 import { LocalRelay } from "../support/relay";
 import { DhtDelivery, createIdentity, createRelayPayload, decodeInviteCode } from "@ghostly/core";
 import { composerRow } from "../support/composer";
@@ -134,5 +134,24 @@ test("a copy of the invite, publishing in the joiner's DHT mailbox with a key of
   for(const p of [a,b]){
     await expect(p.page.getByTestId("connection-options")).not.toHaveAccessibleName(/Connection issue/);
     await expect(p.page.getByPlaceholder("Message…")).toBeEnabled();
+  }
+});
+
+test("DHT only chosen by one side: every text of a burst from the other side arrives, once", { tag: ["@feature:chat.dht.send", "@feature:chat.dht.delivery"] }, async ({ peer }) => {
+  test.setTimeout(5 * 60_000);
+  const [a, b] = await Promise.all([peer("a"), peer("b")]);
+  await link(a, b);
+  await connect(a, b);
+  // A chooses DHT only; B stays on Automatic and learns it from A's records.
+  await mode(a, true);
+  await expect(b.page.getByTestId("connection-options")).toHaveAccessibleName(/DHT only · chosen by your contact/, { timeout: 60_000 });
+  // The DHT carries one text at a time: the second and third wait their turn, on both sides.
+  for (const n of [1, 2, 3]) { await say(a, `from a ${n}`); await say(b, `from b ${n}`); }
+  for (const n of [1, 2, 3]) {
+    await expect(chat(b).getByText(`from a ${n}`, { exact: true })).toHaveCount(1, { timeout: 120_000 });
+    await expect(chat(a).getByText(`from b ${n}`, { exact: true })).toHaveCount(1, { timeout: 120_000 });
+  }
+  for (const [p, from] of [[a, "a"], [b, "b"]] as const) {
+    for (const n of [1, 2, 3]) await expect(delivered(chat(p).locator("[data-message-row]").filter({ hasText: `from ${from} ${n}` }))).toBeVisible({ timeout: 60_000 });
   }
 });

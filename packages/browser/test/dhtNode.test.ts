@@ -54,3 +54,30 @@ it("persists a new DHT-only conversation, rejects invalid drafts before history,
     expect(attention).toHaveBeenCalledTimes(2);
   } finally { await receiver.stop(); await node.shutdown(); if (linkId) await db.deleteLink(linkId); vi.unstubAllGlobals(); }
 }, 45000);
+
+it("a contact that chose DHT only gets every text of a burst from this side, which did not", async () => {
+  await db.putSettings({ online: true, nick: "", relays: [], iceServers: [], mints: [], mintsInitialized: true });
+  vi.stubGlobal("RTCPeerConnection", undefined);
+  const packets = new Map<string, SignedPacket>();
+  const transport = { publish: async (identity: Parameters<typeof createRelayPayload>[0], records: Parameters<typeof createRelayPayload>[1]) => {
+    packets.set(identity.pubKeyZ32, parseRelayPayload(identity.pubKeyZ32, createRelayPayload(identity, records)));
+  }, resolve: async (key: string) => packets.get(key) ?? null, describe: () => ({ protocol: "signed packet fixture", relays: [] }) };
+  const native = vi.fn();
+  const node = new GhostlyNode({ onState: vi.fn(), onMessages: vi.fn(), onCallSignal: vi.fn(), onAttention: vi.fn() }, { transport, automaticWallets: false, nativeTransports: { "iroh/1": native, "hyperdht/1": native } });
+  const invitation = createLink(); let linkId = "";
+  const received = vi.fn();
+  // The contact is on DHT only by its own choice; this side is on Automatic.
+  const contact = new DhtDelivery({ params: invitation.invite, mode: "dht", credentials: { seedB64: createIdentity().seedB64 }, transport,
+    save: async () => {}, pin: async () => {}, message: async m => { received(m); }, receipt: async () => {}, changed: () => {}, pollMs: 100 });
+  try {
+    await node.start();
+    ({ linkId } = await node.ensureLink({ ...invitation.mine, profile: "paired-chat/1" }));
+    node.setActiveLink({ linkId });
+    await contact.start();
+    await vi.waitFor(() => expect(node.getState().links.find(l => l.id === linkId)?.textDelivery).toBe("dht"), { timeout: 20000 });
+    const t = Date.now();
+    for (const [i, text] of ["one", "two", "three"].entries()) expect((await node.sendMessage({ linkId, text, timestamp: t + i })).error).toBeNull();
+    await vi.waitFor(() => expect([...new Set(received.mock.calls.map(([m]) => m.text))]).toEqual(["one", "two", "three"]), { timeout: 40000 });
+    await vi.waitFor(async () => expect((await db.getMessages(linkId)).filter(m => m.sender === "me").map(m => m.delivery)).toEqual(["delivered", "delivered", "delivered"]), { timeout: 12000 });
+  } finally { await contact.stop(); await node.shutdown(); if (linkId) await db.deleteLink(linkId); vi.unstubAllGlobals(); }
+}, 70000);

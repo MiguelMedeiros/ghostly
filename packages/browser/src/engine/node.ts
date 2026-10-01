@@ -2130,6 +2130,11 @@ export class GhostlyNode implements EngineImplementation {
     return message.replyTo && pairedWireReply(message.replyTo);
   }
 
+  /** The chat is on the DHT by choice: this side's DHT only, or the contact's (its records say so). It goes live for neither. */
+  private static dhtByChoice(live: LiveLink | undefined): boolean {
+    return live?.stored.deliveryMode === "dht" || live?.link?.dhtDelivery?.peerMode === "dht";
+  }
+
   /** A status card a caller asks to send, by the sender's rule (WISP 4xx · Status Cards), or why it cannot go. */
   private static cardToSend(raw: unknown): StatusCard | string {
     const checked = checkStatusCard(raw);
@@ -2365,13 +2370,14 @@ export class GhostlyNode implements EngineImplementation {
         return message.via === "pkarr" && pending && pending.message[0] === message.wireId ? pending.expires : undefined;
       }, { resender: {
         // Only while the chat can carry it: a live link, or the DHT path with nothing else awaiting a receipt.
-        // In a live chat, what already went through the DHT fallback waits for the live link.
+        // In a live chat, what already went through the DHT fallback waits for the live link. A chat on the DHT by
+        // choice, either side's, has no live link to wait for: there it goes on the DHT again.
         ready: message => {
           const live = this.links.get(linkId), link = live?.link;
-          if (message.via === "pkarr" && live?.stored.deliveryMode !== "dht" && link?.textDelivery !== "stream") return false;
+          if (message.via === "pkarr" && !GhostlyNode.dhtByChoice(live) && link?.textDelivery !== "stream") return false;
           return !!link?.canSendText && !!message.wireId && !link.validateText(message.text, message.timestamp, message.wireId, GhostlyNode.wireReply(message));
         },
-        requeueExpired: () => this.links.get(linkId)?.stored.deliveryMode !== "dht",
+        requeueExpired: () => !GhostlyNode.dhtByChoice(this.links.get(linkId)),
         via: message => {
           const delivery = this.links.get(linkId)?.link?.textDelivery;
           return delivery === "dht" ? "pkarr" : delivery === "stream" ? "datalink" : message.via;
