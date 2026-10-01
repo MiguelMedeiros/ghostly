@@ -1,0 +1,1 @@
+Registry: the built-in name `"Personal"` is shown in the app's language until the profile is renamed. A backup of the first profile, never renamed, carries it as written, so the copy restored from it follows the language too; a restored name that is the first profile's name in any language the client speaks is read as the built-in one.

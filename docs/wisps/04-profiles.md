@@ -46,6 +46,7 @@ The device keeps one registry, the only record shared by all profiles:
 
 - `id` is empty for the **default profile** or ten characters `[a-z0-9]`. The default profile keeps the storage names clients used before profiles existed, so upgrading moves no data.
 - `name` is 1 to 32 characters after collapsing whitespace. It is a local label, distinct from the nickname shown to contacts.
+- The default profile starts with the built-in name `"Personal"`, which the client shows in the app's language until the user renames it. A backup of it carries `"Personal"` as written, never the translated name, so the profile restored from it follows the language too. A restored name that is the default profile's name in any language the client speaks (`Pessoal`, `個人`, as clients wrote it in backups before) is read as `"Personal"`.
 - `restored: true` marks a profile brought back from a backup ([05](05-backups.md)). The client shows its name with the word for "restored" in the app's language; the registry keeps only the name, and a backup of it carries only the name. A client lets the user edit the name alone, never the word, and renaming keeps the mark; the user takes it off on purpose. A name ending in the word in parentheses in any language the client speaks (` (restored)`, as clients wrote it before the mark, ` (restaurado)`, `（復元）`) is read, renamed and restored as the name without it, marked.
 - A missing or corrupt registry is read as a single default profile. An unknown `active` falls back to the default profile.
 
