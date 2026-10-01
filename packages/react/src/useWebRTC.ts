@@ -6,6 +6,7 @@ import {
   parseCallSignal,
   sdpHasCandidates,
   signalHasVideo,
+  traceLink,
   waitForIceGathering,
   type CallState,
   type CallSignal,
@@ -162,6 +163,15 @@ function audioTransceiver(pc: RTCPeerConnection): RTCRtpTransceiver | undefined 
  */
 function yieldRequest(counter: { current: number }, request: number): void {
   if (counter.current === request) counter.current = request - 1;
+}
+
+/**
+ * Why a call ended, in the diagnostic log (`link {"me":"call","step":"call-end",…}`, the Desktop's log file, or the
+ * console where link traces are on): a hang-up here or from the contact, a connection that failed (its ICE and
+ * connection states), or the chat unloaded mid-call. A call that ends by itself is otherwise silent.
+ */
+function traceCallEnd(why: string, detail: Record<string, unknown> = {}): void {
+  traceLink("call", "call-end", { why, ...detail });
 }
 
 /** Capture from exactly this device, or from the default (null). */
@@ -381,6 +391,7 @@ export function useWebRTC({
     };
 
     const giveUp = () => {
+      traceCallEnd("connection", { ice: pc.iceConnectionState, connection: pc.connectionState, connected: callConnectedEventFiredRef.current });
       // A connected call whose contact went away (a closed tab, a reload, a lost network) ends as a hang-up ends it:
       // with its line and its length in the chat. One that never connected could not: the chat says so.
       if (callConnectedEventFiredRef.current) {
@@ -788,6 +799,9 @@ export function useWebRTC({
       // A call of ours that never connected keeps a line too: cancelled while it rang, or ended while it connected.
       const ringingOut = callStateRef.current === "offering";
       const wasCalling = callStateRef.current !== "idle" && callStateRef.current !== "incoming";
+      if (callStateRef.current !== "idle") {
+        traceCallEnd(sendSignal ? (unreachable ? "unreachable" : "hang-up") : "ended", { state: callStateRef.current, connected: wasConnected });
+      }
       const duration = callStartedAt ? Date.now() - callStartedAt : undefined;
 
       if (sendSignal) {
@@ -970,6 +984,7 @@ export function useWebRTC({
       if (callStateRef.current !== "idle") applyRemotePicture(signal);
     } else if (signal.t === "h") {
       lastProcessedSignalRef.current = signal.ts;
+      if (callStateRef.current !== "idle") traceCallEnd("contact-hang-up", { state: callStateRef.current, ...(signal.r && { r: signal.r }) });
       // The caller gave up (or its ring ran out) before we answered: a missed call, as when our own ring runs out.
       if (callStateRef.current === "incoming") addCallEventMessage?.("call_missed", callHadVideoRef.current, undefined, pendingOfferRef.current?.ts);
       else if (callStateRef.current === "offering" && signal.r !== "u" && myOfferTimestampRef.current && signal.ts > myOfferTimestampRef.current) {
@@ -1015,8 +1030,10 @@ export function useWebRTC({
   // call's end line. A call still ringing here is left to ring out on the caller's side: a hang-up would read as declined.
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const leaving = () => {
-      if (callStateRef.current !== "idle" && callStateRef.current !== "incoming") hangUpRef.current(true, true);
+    const leaving = (event: Event) => {
+      if (callStateRef.current === "idle" || callStateRef.current === "incoming") return;
+      traceCallEnd("app-leaving", { event: event.type });
+      hangUpRef.current(true, true);
     };
     window.addEventListener("pagehide", leaving);
     window.addEventListener("ghostly-departing", leaving);
@@ -1055,6 +1072,8 @@ export function useWebRTC({
     return () => {
       // A start or an answer still waiting for the microphone or for ICE is cancelled, as a hang-up cancels it.
       attempts.current++;
+      // The chat holding the call went away with it on: nothing is sent, and the contact's call ends when its media does.
+      if (callStateRef.current !== "idle") traceCallEnd("unloaded", { state: callStateRef.current });
       if (hangupTimerRef.current) clearTimeout(hangupTimerRef.current);
       if (screenShareErrorTimerRef.current) clearTimeout(screenShareErrorTimerRef.current);
       if (restartGraceRef.current) clearTimeout(restartGraceRef.current);
