@@ -1,0 +1,1 @@
+Registry: a restored profile is marked `restored: true` instead of having " (restored)" written into its name, so the client says "restored" in the app's language. Renaming drops the mark, and a name that ends in " (restored)" from an older client is read as marked.

@@ -7,7 +7,7 @@ import { storedBlob, storedSize } from "@ghostly/browser/shared/storedFiles";
 import { restoreArkDatabase, snapshotArkDatabase, type ArkDatabaseSnapshot } from "@ghostly/browser/engine/paymentAdapters/backup";
 import { getPrefix, getStorageProfile, ownsKey } from "./storage";
 import { assertUnlocked } from "./profileData";
-import { currentProfile, listProfiles, namespaceOf, newProfileId, registerProfile, registryKey, type ProfileEntry } from "./profiles";
+import { baseProfileName, currentProfile, namespaceOf, newProfileId, registerProfile, registryKey, type ProfileEntry } from "./profiles";
 
 /** The decrypted content of a profile bundle (WISP 05). */
 interface ProfilePayload {
@@ -94,7 +94,7 @@ export async function createProfileBackup(passphrase: string, id?: string, lockP
     if (!(await databaseExists(`ghostly-ark-${walletId}`))) continue;
     ark[walletId] = await snapshotArkDatabase(walletId).catch((e: unknown) => Promise.reject(Object.assign(new Error(`Could not read the Ark wallet for the backup: ${e instanceof Error ? e.message : e}`), { cause: e })));
   }
-  const payload: ProfilePayload = { format: "ghostly-profile", version: 1, createdAt: Date.now(), profile: { name: active ? currentProfile().name : listProfiles().find((p) => p.id === id)?.name ?? "Profile" }, storage, databases: { peer, ark } };
+  const payload: ProfilePayload = { format: "ghostly-profile", version: 1, createdAt: Date.now(), profile: { name: baseProfileName(active ? currentProfile().id : id!) ?? "Profile" }, storage, databases: { peer, ark } };
   return seal(await encode(payload), passphrase);
 }
 
@@ -182,8 +182,9 @@ export async function restoreProfileBackup(text: string, passphrase: string): Pr
       if (typeof value !== "string" || !/^[A-Za-z0-9_.-]{1,200}$/.test(suffix)) continue;
       localStorage.setItem(`ghostly_${ns}_${suffix}`, value);
     }
-    // Registered last: an interrupted restore leaves no half-made profile in the list.
-    return registerProfile(id, `${payload.profile.name} (restored)`.slice(0, 32));
+    // Registered last: an interrupted restore leaves no half-made profile in the list. Its name as it was, marked
+    // restored: the app says "(restored)" in its language, which a name written here would not follow.
+    return registerProfile(id, payload.profile.name, true);
   } catch (error) {
     await undoRestore(ns, made);
     throw isQuotaError(error) ? Object.assign(new Error("This device has no room left for this backup. Free some space, then try again."), { cause: error }) : error;

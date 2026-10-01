@@ -10,6 +10,8 @@ export interface ProfileEntry {
   id: string;
   name: string;
   createdAt: number;
+  /** Brought back from a backup (WISP 05) and not renamed since: shown with the app's word for it after the name. */
+  restored?: true;
 }
 interface Registry { version: 1; active: string; profiles: ProfileEntry[] }
 
@@ -33,8 +35,21 @@ let defaultName = DEFAULT_ENTRY.name;
 export function setDefaultProfileName(name: string): void {
   defaultName = cleanName(name) || DEFAULT_ENTRY.name;
 }
-/** A profile as it is shown: the first one, never renamed, by the name of the app's language. */
-const shown = (entry: ProfileEntry): ProfileEntry => (entry.id === "" && entry.name === DEFAULT_ENTRY.name ? { ...entry, name: defaultName } : entry);
+/** A restored profile's name as shown, "Work (restored)" in the app's language: the registry keeps only "Work". */
+let restoredName = (name: string) => `${name} (restored)`;
+export function setRestoredProfileName(format: (name: string) => string): void {
+  restoredName = format;
+}
+/**
+ * A profile as it is shown: the first one, never renamed, by the name of the app's language; a restored one, never
+ * renamed, with the app's word for restored.
+ */
+const shown = (entry: ProfileEntry): ProfileEntry => {
+  const name = entry.id === "" && entry.name === DEFAULT_ENTRY.name ? defaultName : entry.name;
+  return entry.restored ? { ...entry, name: restoredName(name) } : name === entry.name ? entry : { ...entry, name };
+};
+/** A restored profile's name as the app wrote it before it had a word for each language: the English one, in the name. */
+const LEGACY_RESTORED = /^(.*\S) \(restored\)$/;
 
 
 function read(): Registry {
@@ -42,7 +57,13 @@ function read(): Registry {
     const raw = JSON.parse(localStorage.getItem(registryKey()) ?? "null") as Partial<Registry> | null;
     const profiles = (Array.isArray(raw?.profiles) ? raw!.profiles : [])
       .filter((p): p is ProfileEntry => !!p && typeof p.id === "string" && (p.id === "" || ID.test(p.id)) && typeof p.name === "string")
-      .map((p) => ({ id: p.id, name: cleanName(p.name) || (p.id ? "Profile" : DEFAULT_ENTRY.name), createdAt: Number(p.createdAt) || 0 }));
+      .map((p) => {
+        const name = cleanName(p.name) || (p.id ? "Profile" : DEFAULT_ENTRY.name);
+        const legacy = p.id && p.restored !== true ? LEGACY_RESTORED.exec(name) : null;
+        const entry: ProfileEntry = { id: p.id, name: legacy ? legacy[1] : name, createdAt: Number(p.createdAt) || 0 };
+        if (p.restored === true || legacy) entry.restored = true;
+        return entry;
+      });
     if (!profiles.some((p) => p.id === "")) profiles.unshift({ ...DEFAULT_ENTRY });
     const active = typeof raw?.active === "string" && profiles.some((p) => p.id === raw.active) ? raw.active : "";
     return { version: 1, active, profiles };
@@ -57,6 +78,12 @@ function write(registry: Registry, notify = true): void {
 const cleanName = (name: string) => name.replace(/\s+/g, " ").trim().slice(0, 32);
 
 export function listProfiles(): ProfileEntry[] { return read().profiles.map(shown); }
+
+/** A profile's name as shown, without the word the app adds to a restored one: what a backup of it carries. */
+export function baseProfileName(id: string): string | undefined {
+  const entry = read().profiles.find((p) => p.id === id);
+  return entry && shown({ id: entry.id, name: entry.name, createdAt: entry.createdAt }).name;
+}
 
 /**
  * The profile this page runs as, fixed when it starts (see the entry points). The registry's choice can change under
@@ -115,14 +142,17 @@ export function newProfileId(): string {
   return id;
 }
 
-/** Adds a profile whose data is already in place (a restored backup, WISP 05). */
-export function registerProfile(id: string, name: string): ProfileEntry {
+/** Adds a profile whose data is already in place (a restored backup, WISP 05), and returns it as it is shown. */
+export function registerProfile(id: string, name: string, restored = false): ProfileEntry {
   if (!ID.test(id)) throw new Error("Invalid profile id");
   const registry = read();
   if (registry.profiles.some((p) => p.id === id)) throw new Error("That profile already exists");
-  const entry = { id, name: cleanName(name) || "Restored", createdAt: Date.now() };
+  // A backup of a profile an older app restored carries "(restored)" in its name: the flag says it now.
+  const clean = cleanName(name);
+  const entry: ProfileEntry = { id, name: (restored && LEGACY_RESTORED.exec(clean)?.[1]) || clean || "Restored", createdAt: Date.now() };
+  if (restored) entry.restored = true;
   write({ ...registry, profiles: [...registry.profiles, entry] });
-  return entry;
+  return shown(entry);
 }
 
 /** Takes a profile off the list. Its data must already be gone (see profileData). */
@@ -137,7 +167,8 @@ export function renameProfile(id: string, name: string): void {
   const clean = cleanName(name);
   if (!clean) throw new Error("Give the profile a name");
   const registry = read();
-  write({ ...registry, profiles: registry.profiles.map((p) => (p.id === id ? { ...p, name: clean } : p)) });
+  // A name someone gives it is shown as they wrote it, restored or not.
+  write({ ...registry, profiles: registry.profiles.map((p) => (p.id === id ? { id: p.id, name: clean, createdAt: p.createdAt } : p)) });
 }
 
 /** Where a profile's own keys start in localStorage: `ghostly_<ns>_`, or `ghostly_` for the default one. */

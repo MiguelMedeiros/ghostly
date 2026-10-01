@@ -84,6 +84,7 @@
   "oneOnly": "ملف شخصي واحد فقط في هذا التطبيق حاليًا.",
   "profiles": "الملفات الشخصية",
   "removePicture": "أزل الصورة",
+  "restoredName": "{{name}} (مستعاد)",
   "sats": "{{amount}} ساتوشي",
   "switch": "بدّل"
 }

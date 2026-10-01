@@ -84,6 +84,7 @@
   "oneOnly": "Un seul profil dans cette app, pour l’instant.",
   "profiles": "Profils",
   "removePicture": "Retirer la photo",
+  "restoredName": "{{name}} (restauré)",
   "sats": "{{amount}} sats",
   "switch": "Basculer"
 }
