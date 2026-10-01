@@ -254,7 +254,8 @@ test("BDK on regtest: funded, a Send from the wallet, a Send and a Request paid 
   await bob.page.getByTestId("payment-amount").fill("3000");
   await bob.page.getByTestId("payment-request").click();
   const request = chat(alice).getByTestId("payment-bubble").filter({ hasText: "Requests" }).last();
-  await expect(request).toContainText("Bitcoin on-chain · Regtest", { timeout: 60_000 });
+  // The chain's own name, as the rail line says it since #880.
+  await expect(request.getByTestId("payment-rail")).toHaveText("Bitcoin on-chain · Regtest", { timeout: 60_000 });
   await expect(request).toContainText("test sats");
   await request.getByTestId("payment-pay").click();
   await request.getByTestId("payment-review").getByRole("button", { name: "Approve payment" }).click();
