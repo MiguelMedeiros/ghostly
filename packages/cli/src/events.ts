@@ -369,8 +369,9 @@ export class EventHub {
         if (edits > edited) this.emit("group.message.edited", `group.message.edited:${group}:${message.id}:${edits}`, { group, messageId: message.id, edits, message: json });
       } else {
         const [delivery, edits] = splitState(state), [was, edited] = splitState(before);
-        // A new text (WISP 400 § Edits): mine as made here, the contact's as it came. Once per edit number.
-        if (edits > edited) this.emit("message.edited", `message.edited:${chat}:${message.id}:${edits}`, { chat, messageId: message.id, edits, message: json });
+        // A new text (WISP 400 § Edits): mine as made here, the contact's as it came. Once per edit number. The engine's
+        // own edit that sends a question's buttons again (WISP 4xx · Message Buttons) is none: same text, nobody's edit.
+        if (edits > edited && !(message.sender === "me" && message.edit?.restore)) this.emit("message.edited", `message.edited:${chat}:${message.id}:${edits}`, { chat, messageId: message.id, edits, message: json });
         if (message.sender === "me" && delivery !== was)
           this.emit("message.delivery", `message.delivery:${chat}:${message.id}:${delivery}`, { chat, messageId: message.id, delivery, ...(message.deliveryError ? { error: message.deliveryError } : {}) });
       }

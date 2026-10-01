@@ -795,6 +795,11 @@ export interface MessageEdit {
   history: MessageVersion[];
   /** Mine: the contact has not confirmed this edit yet. It goes by itself once the chat is live and both sides offer edit/1. */
   pending?: true;
+  /**
+   * Mine: the engine's own edit that sends a question's buttons again, the text unchanged (WISP 4xx · Message Buttons),
+   * never one a person or a bot made. The bot's event stream reports none for it; a later edit makes a new one without it.
+   */
+  restore?: true;
 }
 
 export interface MessageVersion { at: number; text: string }

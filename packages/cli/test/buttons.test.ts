@@ -279,6 +279,30 @@ describe("presses in the stream", () => {
     expect(events.filter((e) => e.type === "button.pressed")).toHaveLength(3);
   });
 
+  it("says nothing of the engine's own buttons restore, and a later update of the bot's as any edit", async () => {
+    const { h, events } = await hub("restore");
+    const card = { kind: "buttons" as const, id: "q", buttons: [{ id: "yes", label: "Yes" }, { id: "no", label: "No" }] };
+    // The question went on the DHT floor, its text alone, and the contact confirmed it.
+    const floored = row("c1", "me_1", { sender: "me", wireId: "w1", text: "Want it?", card, via: "pkarr", delivery: "delivered", buttonsRestore: "due" });
+    h.baseline(state([link("c1")]), new Map([["c1", [floored]]]));
+    // Live again: the engine sends the buttons as edit 1 (the same text), then the contact confirms it.
+    const restored = { ...floored, buttonsRestore: "sent" as const, edit: { seq: 1, at: 2, history: [], pending: true as const, restore: true as const } };
+    h.sink.post({ kind: "messages", linkId: "c1", messages: [restored] });
+    h.sink.post({ kind: "messages", linkId: "c1", messages: [{ ...restored, edit: { seq: 1, at: 2, history: [], restore: true as const } }] });
+    expect(events).toEqual([]);
+    // The bot marks the answer (`button update --chosen`): edit 2, a new edit of its own, reported once.
+    const chosen = { ...restored, card: { ...card, chosen: "yes" }, edit: { seq: 2, at: 3, history: [] } };
+    h.sink.post({ kind: "messages", linkId: "c1", messages: [chosen] });
+    h.sink.post({ kind: "messages", linkId: "c1", messages: [chosen] });
+    expect(events.map((e) => e.id)).toEqual(["message.edited:c1:me_1:2"]);
+    expect(events[0]).toMatchObject({ chat: "c1", messageId: "me_1", edits: 2, message: { text: "Want it?" } });
+    // Restarted with the restore only: still nothing.
+    const again = await hub("restore-restart");
+    again.h.baseline(state([link("c1")]), new Map([["c1", [floored]]]));
+    again.h.sink.post({ kind: "messages", linkId: "c1", messages: [restored] });
+    expect(again.events).toEqual([]);
+  });
+
   it("says button.pressed for a group reply whose press came after it (a stripped copy completed), once", async () => {
     const { h, events } = await hub("late-presses");
     h.baseline(state([], [group()]), new Map([["group:g1", []]]));
