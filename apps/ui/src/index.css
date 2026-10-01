@@ -504,7 +504,9 @@ html[data-standalone="true"] {
 /*
  * A narrow screen's row keeps its buttons round, with less room between them. A phone's video call has four
  * (microphone, camera, devices, hang up: 264 px), which the 32 px gaps pushed to 360 px, past a 320 px screen: the
- * room between them follows the width, 12 to 32 px. Five (Share screen too, in a narrow browser window) get 8 px.
+ * room between them follows the width, 12 to 32 px. Five (Share screen too, in a narrow browser window) were 328 px
+ * of buttons, wider than a 320 px window and edge to edge at 360: they are smaller (48 px, hang up 56 px: 248 px), and
+ * the room between them follows the width the same way, 8 to 32 px, so 16 px stay on each side down to 312 px.
  * The small call window has buttons and gaps of its own.
  */
 @media (max-width: 480px) {
@@ -513,7 +515,23 @@ html[data-standalone="true"] {
   }
 
   :not(.call-mini) > .call-controls:has(> :nth-child(5)) {
-    gap: 0.5rem;
+    gap: clamp(0.5rem, calc((100vw - 280px) / 4), 2rem);
+  }
+
+  :not(.call-mini) > .call-controls:has(> :nth-child(5)) > button,
+  :not(.call-mini) > .call-controls:has(> :nth-child(5)) > * > button {
+    width: 48px;
+    height: 48px;
+  }
+
+  :not(.call-mini) > .call-controls:has(> :nth-child(5)) > button:last-child {
+    width: 56px;
+    height: 56px;
+  }
+
+  :not(.call-mini) > .call-controls:has(> :nth-child(5)) svg {
+    width: 22px;
+    height: 22px;
   }
 }
 
