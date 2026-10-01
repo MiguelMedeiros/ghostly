@@ -1,8 +1,8 @@
 import { useLayoutEffect, useRef, type ReactNode } from "react";
 import { PayExternally } from "../PayExternally";
 import { focusInPlace } from "../../lib/focus";
-import { useOptionalI18n } from "../../contexts/I18nContext";
-import { decimalInput } from "../../lib/amount";
+import { useOptionalI18n, useT } from "../../contexts/I18nContext";
+import { useAmountText } from "../../hooks/useAmountText";
 
 /** The same building blocks as Settings, so a wallet's options read like any other option. */
 export { Section, Row, Block } from "../layout/Section";
@@ -98,15 +98,22 @@ export function Amount({ value, onChange, unit, decimals = 0, testId, autoFocus 
   // view. Only when `autoFocus` says so: the Wallets page asks for it when a person chose the wallet, never when its
   // card came up as the pointer passed over the deck or as the keys moved along it (pages/Wallet.tsx).
   const i18n = useOptionalI18n();
+  const t = useT();
+  // `value` is the amount ("1000.5"); the field shows it the person's way, and says when what was typed is unclear.
+  const field = useAmountText(value, onChange, t.language ?? "en", decimals, t);
   const input = useRef<HTMLInputElement>(null);
   useLayoutEffect(() => { if (autoFocus) focusInPlace(input.current); }, [autoFocus]);
   return (
-    <label className="flex items-baseline gap-2 bg-surface-alt rounded-xl px-4 py-3 border border-border focus-within:ring-2 focus-within:ring-accent">
-      <input ref={input} data-testid={testId} inputMode={decimals ? "decimal" : "numeric"} placeholder="0" aria-label={i18n ? i18n.t("wallet.ui.amountIn", { unit }) : `Amount in ${unit}`}
-        className="min-w-0 flex-1 bg-transparent border-none outline-none text-3xl font-semibold text-text-primary placeholder-text-muted tabular-nums"
-        value={value} onChange={(e) => onChange(decimals ? decimalInput(e.target.value, i18n?.t.language) : e.target.value.replace(/\D/g, ""))} />
-      <span className="text-text-muted text-sm shrink-0">{unit}</span>
-    </label>
+    <div className="space-y-1">
+      <label className="flex items-baseline gap-2 bg-surface-alt rounded-xl px-4 py-3 border border-border focus-within:ring-2 focus-within:ring-accent">
+        <input ref={input} data-testid={testId} inputMode={decimals ? "decimal" : "numeric"} placeholder="0" aria-label={i18n ? i18n.t("wallet.ui.amountIn", { unit }) : `Amount in ${unit}`}
+          aria-invalid={field.hint ? true : undefined}
+          className="min-w-0 flex-1 bg-transparent border-none outline-none text-3xl font-semibold text-text-primary placeholder-text-muted tabular-nums"
+          value={field.text} onChange={(e) => field.change(e.target.value)} />
+        <span className="text-text-muted text-sm shrink-0">{unit}</span>
+      </label>
+      {field.hint && <Notice tone="error" testId="amount-unclear">{field.hint}</Notice>}
+    </div>
   );
 }
 

@@ -723,6 +723,8 @@
   },
   "ui": {
     "amountIn": "Montant en {{unit}}",
+    "amountUnclear": "Montant ambigu : écrivez-le comme {{example}}",
+    "amountWhole": "Nombres entiers uniquement, comme {{example}}",
     "gettingAddress": "Obtention d’une adresse… Elle s’affiche ici dès que le fournisseur répond.",
     "history": "Historique",
     "receive": "Recevoir",

@@ -8,7 +8,8 @@ import {Actions,Address,Amount,Block,Button,Notice,Row,Section,Segmented,input,t
 import {useRun} from './wallet/run';
 import {ButtonGroup,InputGroup,Truncate} from './layout';
 import {useI18n} from '../contexts/I18nContext';
-import { decimalInput, formatTokenAmount } from "../lib/amount";
+import { formatTokenAmount } from "../lib/amount";
+import { useAmountText } from "../hooks/useAmountText";
 import { errorText } from "../lib/errorText";
 
 type Network='ethereum'|'sepolia'|'evm-local';
@@ -22,6 +23,8 @@ export function UsdtWalletPanel({wallet,state,backupNow=false}:{wallet:WalletPla
  const {busy,error,run}=useRun();
  const [action,setAction]=useState<Action>('receive');
  const [recipient,setRecipient]=useState(''),[amount,setAmount]=useState(''),[gas,setGas]=useState('0.001'),[review,setReview]=useState<Review|null>(null);
+ /** The gas ceiling in ETH ("0.001"), typed the person's way. */
+ const gasField=useAmountText(gas,setGas,t.language??'en',18,t);
  const [password,setPassword]=useState('');
  /** A network being set up that needs more than a click: a local chain has no well-known token. */
  const [pending,setPending]=useState<Network|null>(null),[provider,setProvider]=useState(''),[token,setToken]=useState('');
@@ -50,8 +53,9 @@ export function UsdtWalletPanel({wallet,state,backupNow=false}:{wallet:WalletPla
    {action==='send'&&<div className="bg-surface rounded-xl p-4 space-y-3 animate-fade-in">
     <input aria-label={t('wallet.panel.recipient',{wallet:'USDT'})} placeholder={t('wallet.usdt.recipientPlaceholder')} spellCheck={false} className={`${input} font-mono text-xs`} value={recipient} onChange={e=>setRecipient(e.target.value.trim())}/>
     <Amount value={amount} onChange={setAmount} unit={label} decimals={usdt.decimals}/>
-    <label className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 text-sm text-text-secondary">{t('wallet.usdt.feeLimit')}<span className="flex items-center gap-2"><input aria-label={t('wallet.usdt.gasInput')} inputMode="decimal" className={`${input} w-28 text-end`} value={gas} onChange={e=>setGas(decimalInput(e.target.value,t.language))}/>ETH</span></label>
-    <Button variant="primary" className="w-full" disabled={busy||!!review||!funded||!recipient||!Number(amount)} onClick={()=>void run(async()=>{const now=Date.now();setReview(await wallet.preparePayment({target:{method:'usdt',network:usdt.network!,provider:usdt.provider!,asset:usdt.chainId===1?'USDT':'TEST-USDT',unit:'token-base',address:recipient,token:usdt.token,decimals:usdt.decimals,chainId:usdt.chainId,issuedAt:now,expiresAt:now+15*60*1000},amount:parsePaymentAmount(amount,usdt.decimals!),feeCap:parsePaymentAmount(gas,18),payee:recipient}));})}>{funded?t('wallet.panel.review'):t('wallet.panel.noBalance')}</Button>
+    <label className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 text-sm text-text-secondary">{t('wallet.usdt.feeLimit')}<span className="flex items-center gap-2"><input aria-label={t('wallet.usdt.gasInput')} inputMode="decimal" className={`${input} w-28 text-end`} aria-invalid={gasField.hint?true:undefined} value={gasField.text} onChange={e=>gasField.change(e.target.value)}/>ETH</span></label>
+    {gasField.hint&&<Notice tone="error" testId="usdt-gas-unclear">{gasField.hint}</Notice>}
+    <Button variant="primary" className="w-full" disabled={busy||!!review||!funded||!recipient||!Number(amount)||!gas} onClick={()=>void run(async()=>{const now=Date.now();setReview(await wallet.preparePayment({target:{method:'usdt',network:usdt.network!,provider:usdt.provider!,asset:usdt.chainId===1?'USDT':'TEST-USDT',unit:'token-base',address:recipient,token:usdt.token,decimals:usdt.decimals,chainId:usdt.chainId,issuedAt:now,expiresAt:now+15*60*1000},amount:parsePaymentAmount(amount,usdt.decimals!),feeCap:parsePaymentAmount(gas,18),payee:recipient}));})}>{funded?t('wallet.panel.review'):t('wallet.panel.noBalance')}</Button>
     <Notice>{BigInt(usdt.gasBalance)===0n?t('wallet.usdt.needsGas'):t('wallet.usdt.approve')}</Notice>
    </div>}
    {review&&<PaymentReview key={review.id} review={review} wallet={wallet} onClose={()=>setReview(null)}/>}

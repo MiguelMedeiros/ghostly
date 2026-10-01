@@ -723,6 +723,8 @@
   },
   "ui": {
     "amountIn": "{{unit}} での金額",
+    "amountUnclear": "金額があいまいです。{{example}} のように入力してください",
+    "amountWhole": "整数のみ（例: {{example}}）",
     "gettingAddress": "アドレスを取得中… プロバイダーが応答するとここに表示されます。",
     "history": "履歴",
     "receive": "受け取る",
