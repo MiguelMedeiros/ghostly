@@ -39,6 +39,28 @@ for (const { width, share } of [{ width: 320, share: false }, { width: 375, shar
   });
 }
 
+/** The incoming call's Decline / Accept / Accept with video: squeezed out of round, or reaching the screen's edges. */
+const misshapenAnswer = (page: Page) => page.getByTitle("Decline").evaluate((decline) => {
+  const width = document.documentElement.clientWidth;
+  return [...decline.parentElement!.children].map((b) => b.getBoundingClientRect())
+    .filter((r) => r.width > 0 && (Math.abs(r.width - r.height) > 1 || r.left < 4 || r.right > width - 4))
+    .map((r) => `${Math.round(r.width)}x${Math.round(r.height)} at ${Math.round(r.left)}..${Math.round(r.right)} of ${width}`);
+});
+
+for (const width of [320, 375]) {
+  test(`a video call ringing on a ${width} px phone: its three buttons stay round`, { tag: ["@feature:calls.video", "@feature:app.mobile-layout"] }, async ({ peer }) => {
+    const alice = await peer("alice");
+    const bob: Peer = await peer("bob", { mobile: true, viewport: { width, height: 740 } });
+    await link(alice, bob);
+    await connect(alice, bob);
+    await alice.page.getByTestId("call-video").click();
+    await expect(bob.page.getByTitle("Accept video call")).toBeVisible();
+    // Three 72px buttons with 48px between them were wider than a 320px screen less its sides: ovals 53px wide.
+    await expect.poll(() => misshapenAnswer(bob.page)).toEqual([]);
+    await bob.page.getByTitle("Decline").click();
+  });
+}
+
 /** Plays an iPhone 17's safe area (Chromium's DevTools protocol): the status bar and Dynamic Island, the home indicator. */
 async function safeArea(page: Page, insets: { top: number; right: number; bottom: number; left: number }) {
   const cdp = await page.context().newCDPSession(page);

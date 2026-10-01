@@ -47,12 +47,13 @@ export function IncomingCallNotification({
           </div>
         </div>
 
-        {/* Actions */}
-        <div className="flex items-center justify-center gap-4 max-md:gap-12">
+        {/* Actions. On a phone the gap gives way first (the screen less its 2rem sides and three 72px buttons), so on a
+            320-375px phone the buttons stay round instead of being squeezed into ovals. */}
+        <div className="flex items-center justify-center gap-4 max-md:gap-[clamp(0.5rem,calc((100vw-4rem-216px)/2),3rem)]">
           {/* Reject */}
           <button
             onClick={onReject}
-            className="w-14 h-14 max-md:w-[72px] max-md:h-[72px] rounded-full bg-danger-fill flex items-center justify-center text-white hover:bg-danger-fill/80 transition-colors cursor-pointer"
+            className="w-14 h-14 max-md:w-[72px] max-md:h-[72px] shrink-0 rounded-full bg-danger-fill flex items-center justify-center text-white hover:bg-danger-fill/80 transition-colors cursor-pointer"
             title={t("calls.decline")}
             aria-label={t("calls.decline")}
           >
@@ -74,7 +75,7 @@ export function IncomingCallNotification({
           {/* Accept audio */}
           <button
             onClick={onAcceptAudio}
-            className="w-14 h-14 max-md:w-[72px] max-md:h-[72px] rounded-full bg-accent flex items-center justify-center text-on-accent hover:bg-accent-hover transition-colors cursor-pointer"
+            className="w-14 h-14 max-md:w-[72px] max-md:h-[72px] shrink-0 rounded-full bg-accent flex items-center justify-center text-on-accent hover:bg-accent-hover transition-colors cursor-pointer"
             title={t("calls.acceptAudio")} aria-label={t("calls.acceptAudio")}
           >
             <svg
@@ -95,7 +96,7 @@ export function IncomingCallNotification({
           {hasVideo && (
             <button
               onClick={onAcceptVideo}
-              className="w-14 h-14 max-md:w-[72px] max-md:h-[72px] rounded-full bg-accent flex items-center justify-center text-on-accent hover:bg-accent-hover transition-colors cursor-pointer"
+              className="w-14 h-14 max-md:w-[72px] max-md:h-[72px] shrink-0 rounded-full bg-accent flex items-center justify-center text-on-accent hover:bg-accent-hover transition-colors cursor-pointer"
               title={t("calls.acceptVideo")} aria-label={t("calls.acceptVideo")}
             >
               <svg
