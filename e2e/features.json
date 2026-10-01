@@ -772,6 +772,7 @@
     "apps/ui/src/lib/chatList.ts": ["chats.*","groups.*","settings.chat-list-density","app.attention.unread"],
     "apps/ui/src/lib/chatMute.ts": ["chats.mute","app.attention.*","calls.*"],
     "apps/ui/src/lib/chatPayments.ts": ["payments.chat.*"],
+    "apps/ui/src/lib/clearData.ts": ["app.clear-data"],
     "apps/ui/src/lib/clipboard.ts": ["invite.*"],
     "apps/ui/src/lib/connection.ts": ["*"],
     "apps/ui/src/lib/contactStatus.ts": ["chat.paired.status","chat.paired.reconnect","chat.dht.*","delivery.hold.*","app.offline-switch"],
