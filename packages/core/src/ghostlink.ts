@@ -2840,7 +2840,9 @@ export class GhostLink {
             // The contact's latest word on held items; an older app never sends it and keeps its handshake offer.
             if (typeof frame.on !== "boolean" || (frame.top !== undefined && !(Number.isSafeInteger(frame.top) && (frame.top as number) >= 0))) return;
             this.peerHoldOverride = frame.on;
-            await this.options.events?.onHold?.({ peerAllows: frame.on, peerTop: frame.top as number | undefined });
+            // Not awaited: the owner may be picking up held items (from the contact's storage, seconds or more), and
+            // every frame after this one would wait for it, the edits, texts and pings that keep this session alive too.
+            void Promise.resolve(this.options.events?.onHold?.({ peerAllows: frame.on, peerTop: frame.top as number | undefined })).catch(() => {});
             this.emitPairingState();
             return;
           }

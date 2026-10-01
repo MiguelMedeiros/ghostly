@@ -353,14 +353,19 @@ describe("buttons that went without their question (the DHT floor, a hold)", () 
     expect(buttonsState(restored, WIRE("Q"), [])).toMatchObject({ open: true });
   }, 30_000);
 
-  it("on the contact's side, a held question picked up after its buttons' edit takes them then, and only then confirms the edit", async () => {
-    // The bot's app held the question while this app was closed: sealed in its own storage, its text alone.
+  /**
+   * The bot's app held the question (sealed in its own storage, its text alone) and restores its buttons live; this app
+   * picks the question up from that storage, which answers only once the edit is here: the order a slow pickup gives.
+   * `heldBeforeOpen`: held while this app was closed, so the pickup is already under way when the chat goes live; else
+   * held after, and the contact's app says so on the live session (`paired-hold` with its top).
+   */
+  async function editBeforeHeldQuestion({ heldBeforeOpen }: { heldBeforeOpen: boolean }) {
     const relay = memoryRelay(), bucket = memoryBucket();
     const keys: Keys = { invitation: createLink(), mine: createIdentity().seedB64, theirs: createIdentity().seedB64, id: `buttons-${crypto.randomUUID()}` };
     const holder = botHold(keys, relay, bucket);
     cleanup.push(() => holder.stop());
-    expect(await holder.hold("bot-link", { kind: "text", id: WIRE("H"), messageId: "me_h", bytes: new TextEncoder().encode(QUESTION).length, timestamp: Date.now() - 60_000 })).toBeUndefined();
-    // This app opens and starts picking it up, but the storage answers only once the edit is here: the order a slow pickup gives.
+    const holdQuestion = () => holder.hold("bot-link", { kind: "text", id: WIRE("H"), messageId: "me_h", bytes: new TextEncoder().encode(QUESTION).length, timestamp: Date.now() - 60_000 });
+    if (heldBeforeOpen) await holdQuestion();
     let release!: () => void;
     const released = new Promise<void>(resolve => { release = resolve; });
     let reads = 0;
@@ -369,12 +374,16 @@ describe("buttons that went without their question (the DHT floor, a hold)", () 
     cleanup.push(async () => release());
     const mineLink = () => (t.node as unknown as { links: Map<string, { link?: GhostLink }> }).links.get(t.id)?.link;
     await vi.waitFor(() => expect([mineLink()?.supportsEdits, t.contact.supportsEdits]).toEqual([true, true]));
-    await vi.waitFor(() => expect(reads).toBeGreaterThan(0));
+    if (!heldBeforeOpen) {
+      await holdQuestion();
+      t.contact.setHoldSupport(true, 1);
+    }
+    await vi.waitFor(() => expect(reads).toBeGreaterThan(0), { timeout: 5_000 });
     // The bot's app restores the buttons live (`restoreButtons`): the edit comes before its message.
     expect(await t.contact.sendEdit({ id: WIRE("H"), e: 1, ts: Date.now(), m: QUESTION, sc: readStatusCard(ask())! })).toBeNull();
+    // Kept for its message, not confirmed: the bot's app keeps it pending and says it again.
     const buffer = (t.node as unknown as { editBuffer: { held: Map<string, Map<string, unknown>> } }).editBuffer;
     await vi.waitFor(() => expect(buffer.held.get(t.id)?.has(WIRE("H"))).toBe(true));
-    // Kept, not confirmed: the bot's app keeps it pending and says it again.
     await new Promise(resolve => setTimeout(resolve, 300));
     expect(t.contactReceipts).toEqual([]);
     expect(await db.getMessage(t.id, `peer_${WIRE("H")}`)).toBeUndefined();
@@ -384,6 +393,14 @@ describe("buttons that went without their question (the DHT floor, a hold)", () 
     const question = (await db.getMessage(t.id, `peer_${WIRE("H")}`))!;
     expect(question).toMatchObject({ text: QUESTION, via: "hold", card: readStatusCard(ask()), edit: { seq: 1, history: [] } });
     expect(buttonsState(question, WIRE("H"), [])).toMatchObject({ open: true });
+  }
+
+  it("on the contact's side, a held question picked up after its buttons' edit takes them then, and only then confirms the edit", async () => {
+    await editBeforeHeldQuestion({ heldBeforeOpen: false });
+  }, 30_000);
+
+  it("a pickup under way when the chat goes live holds back no frame of the session: the edit still comes first", async () => {
+    await editBeforeHeldQuestion({ heldBeforeOpen: true });
   }, 30_000);
 
   it("a question that went into a hold: its buttons' edit stays pending until the contact confirms it", async () => {
