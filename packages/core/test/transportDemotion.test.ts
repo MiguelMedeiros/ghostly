@@ -73,3 +73,38 @@ it("puts a demoted transport after the others", async () => {
   expect(calls).toEqual(["hyperdht/1", "iroh/1"]);
   await link.stop(false);
 });
+
+it("a newer record that lists a transport with no way to dial it: the endpoint known before is not dialled until a record describes it again", async () => {
+  // Omarchy (2026-09-30): both apps restarted, and the web app had no Iroh listener left for the chat (its eight slots
+  // taken by other chats). Its record said so, but the Desktop kept the endpoint it knew and dialled it, 20 s each
+  // timing out, until it demoted Iroh and nothing was left to try.
+  vi.useFakeTimers();
+  const { mine } = createLink();
+  const link = new GhostLink({
+    params: { ...mine, profile: "paired-chat/1" }, rtcAvailable: false,
+    pairing: { credentials: { seedB64: createIdentity().seedB64, peerKey: createIdentity().pubKeyZ32 }, pinPeer: async () => {} },
+    native: { preferred: "iroh/1", fallback: false, automatic: false },
+    transport: { publish: async () => {}, resolve: async () => null, describe: () => ({ protocol: "none", relays: [] }) },
+    createPeerConnection: () => { throw new Error("no WebRTC here"); },
+    localFetch: vi.fn(), getServices: () => [], getHostedHttpService: () => undefined,
+  });
+  const calls: string[] = [];
+  link.registerEndpoint(endpoint("iroh/1", calls));
+  const attempt = async () => { await link.connect(1_000).catch(() => {}); await vi.advanceTimersByTimeAsync(1_000); };
+  // As saved from the last session.
+  link.learnPeerTransports(["iroh/1"], { "iroh/1": { id: "a" } });
+  for (let i = 0; i < DEMOTE_AFTER_FAILURES; i++) await attempt();
+  expect(calls).toEqual(Array(DEMOTE_AFTER_FAILURES).fill("iroh/1"));
+  // The contact's record, read just now: Iroh listed, not started.
+  link.learnPeerTransports(["iroh/1"], {}, true);
+  expect(link.transportWait).toMatchObject({ transport: "iroh/1", reason: "starting" });
+  calls.length = 0;
+  await attempt();
+  expect(calls, "nothing to dial while its endpoint is down").toEqual([]);
+  // Its next record describes it: dialled again, the failures and the demotion of the old one forgotten.
+  link.learnPeerTransports(["iroh/1"], { "iroh/1": { id: "a" } }, true);
+  expect((link as unknown as { demotedUntil: Map<string, number> }).demotedUntil.has("iroh/1")).toBe(false);
+  await attempt();
+  expect(calls).toEqual(["iroh/1"]);
+  await link.stop(false);
+});

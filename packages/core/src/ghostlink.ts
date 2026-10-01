@@ -189,10 +189,12 @@ export function pairedMessageFrame(id: string, ts: number, m: string, preview?: 
  * The record carries only how to dial, never an address: the Iroh endpoint id and the relay it is homed on, the
  * HyperDHT key and the relay a browser's goes through. For the same endpoint, a known Iroh descriptor keeps its
  * addresses and takes the record's relay. `newer`: the record was just read, so what it says replaces what is known;
- * otherwise it only fills a relay the known one lacks. The known one itself when nothing changes.
+ * otherwise it only fills a relay the known one lacks. The known one itself when nothing changes. `listed`: the record
+ * names the transport. One just read that names it with no descriptor says its endpoint is not up (WISP 03: still
+ * starting, or no free listener there): the one known is not dialled meanwhile (none, `undefined`).
  */
-function recordDescriptor(transport: NativeTransport, known: unknown, record: unknown, newer: boolean): unknown {
-  if (!record) return known;
+function recordDescriptor(transport: NativeTransport, known: unknown, record: unknown, newer: boolean, listed: boolean): unknown {
+  if (!record) return newer && listed ? undefined : known;
   if (!known) return record;
   const k = known as { id?: unknown; publicKey?: unknown; relay?: unknown }, r = record as typeof k;
   if (transport === "iroh/1" ? k.id !== r.id : k.publicKey !== r.publicKey) return newer ? record : known;
@@ -1254,8 +1256,16 @@ export class GhostLink {
     this.peerRecordTransports = [...transports];
     let changed = false, redescribed = false;
     for (const t of ["iroh/1", "hyperdht/1"] as const) {
-      const known = this.peerDescriptors[t], next = recordDescriptor(t, known, descriptors[t], fresh);
+      const known = this.peerDescriptors[t], next = recordDescriptor(t, known, descriptors[t], fresh, transports.includes(t));
       if (next === known) continue;
+      if (next === undefined) {
+        // Its endpoint is down for now: dials to the old one only timed out (each 20 s, the chat "retrying live" for
+        // minutes after both apps restarted). The record that describes it again is news, and dialled at once.
+        const { [t]: _gone, ...rest } = this.peerDescriptors;
+        this.peerDescriptors = rest;
+        traceLink(this.myPubKeyZ32, "record-undescribed", { transport: t });
+        continue;
+      }
       this.peerDescriptors = { ...this.peerDescriptors, [t]: next };
       changed = true; redescribed ||= t === wanted;
       // A new way to dial it: the attempts that failed on the old one say nothing about this one.
@@ -1459,8 +1469,9 @@ export class GhostLink {
     this.advertiseTransports();
     if (this.resuming === endpoint.transport) void this.knock(endpoint.transport);
     else this.joinRace(endpoint.transport);
-    // A group link whose member's packet already said how to dial this transport: something new to dial, now.
-    if (this.options.packetTransports && !this.channel && !this.dialing && this.dataLink.state === "idle" && this.canDial(endpoint.transport)
+    // Something new to dial, now: a group link whose member's packet already said how to dial this transport, or a
+    // chat that had no listener for it (every native slot was taken when the app started) and its contact is there.
+    if (!this.channel && !this.dialing && this.dataLink.state === "idle" && this.canDial(endpoint.transport)
       && this.peerTransports?.includes(endpoint.transport)) {
       this.autoConnectFailures = 0; this.lastAutoConnectAt = 0;
       this.maybeAutoConnect(this.presence);

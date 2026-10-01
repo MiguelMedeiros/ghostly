@@ -86,4 +86,4 @@ export * from "./groupHubs";
 export * from "./groupMeta";
 export * from "./groupTyping";
 export * from "./pairingProgress";
-export { setLinkTraceSink } from "./linkTrace";
+export { setLinkTraceSink, traceLink } from "./linkTrace";

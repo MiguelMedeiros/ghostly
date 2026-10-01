@@ -218,6 +218,56 @@ describe("an app restarting (WISP 100, Back after a restart)", () => {
       .toEqual(["iroh/1", "hyperdht/1", undefined, undefined, undefined]);
   });
 
+  describe("more paired chats than native slots (eight per transport)", () => {
+    const paired = () => ({ pairedPeerKey: createIdentity().pubKeyZ32 });
+    const endpoint = () => ({ transport: "iroh/1" as const, descriptor: { id: "ab".repeat(32), relay: "https://relay.test./", addresses: [] },
+      connect: vi.fn(), close: vi.fn(async () => {}), onConnection: null, onDescriptor: null });
+    /** Started as a Linux Desktop is: Iroh native, no WebRTC to fall back on. */
+    async function nativeStarted(...rows: StoredLink[]) {
+      for (const r of rows) await db.putLink(r);
+      const events = { onState: vi.fn(), onMessages: vi.fn(), onCallSignal: vi.fn(), onAttention: vi.fn() };
+      const node = new GhostlyNode(events, { automaticWallets: false, transport: fixture, nativeTransports: { "iroh/1": vi.fn(async () => endpoint()) } });
+      nodes.push(node);
+      await node.start();
+      await node["nativeQueue"];
+      const linkOf = (id: string) => links.filter((l) => l.options.params.id === id).at(-1)! as unknown as Recorded & {
+        registerEndpoint: ReturnType<typeof vi.fn>; releaseEndpoint: ReturnType<typeof vi.fn>; canReleaseEndpoint: ReturnType<typeof vi.fn> };
+      return { node, linkOf };
+    }
+    // Stored first (the links store reads back in id order), each idle since long ago.
+    const older = () => Array.from({ length: 10 }, (_, i) => row({ ...paired(), id: `chat-a${i}` }));
+
+    it("the chats live when the app quit, then the ones live most recently, take them first", async () => {
+      // Omarchy (2026-09-30): both apps restarted, and the chat they had just been live in got no listener on one side:
+      // the chats stored before it took all eight. Its contact dialled it every 20 s for minutes, never answered.
+      const now = Date.now();
+      const wasLive = row({ ...paired(), id: "chat-z", transportHistory: [{ at: now - 60_000, kind: "live", transport: "iroh/1" }] });
+      const droppedLately = row({ ...paired(), id: "chat-y", transportHistory: [{ at: now - 60_000, kind: "live", transport: "iroh/1" }, { at: now - 5_000, kind: "down", from: "iroh/1" }] });
+      const rows = [...older(), droppedLately, wasLive];
+      const { linkOf } = await nativeStarted(...rows);
+      const listening = rows.filter((r) => linkOf(r.id).registerEndpoint.mock.calls.length > 0).map((r) => r.id);
+      expect(listening).toHaveLength(8);
+      expect(listening).toEqual(expect.arrayContaining(["chat-z", "chat-y"]));
+    });
+
+    it("the chat on screen gets one as soon as one is free, when every one was busy as it opened", async () => {
+      const rows = [...older().slice(0, 8), row({ ...paired(), id: "chat-z" })];
+      const { node, linkOf } = await nativeStarted(...rows);
+      const holders = rows.slice(0, 8).map((r) => linkOf(r.id));
+      for (const holder of holders) expect(holder.registerEndpoint).toHaveBeenCalled();
+      // Each one dialling its contact (an app back after a restart dials every chat at once): none can let go.
+      for (const holder of holders) holder.canReleaseEndpoint.mockReturnValue(false);
+      node.setActiveLink({ linkId: "chat-z" });
+      await node["nativeQueue"];
+      expect(linkOf("chat-z").registerEndpoint).not.toHaveBeenCalled();
+      expect(node.getState().links.find((l) => l.id === "chat-z")?.transportErrors?.["iroh/1"]).toMatch(/slots are in use/);
+      // A dial ends (it timed out): that chat can let its listener go, and the chat on screen takes it.
+      holders[3].canReleaseEndpoint.mockReturnValue(true);
+      await vi.waitFor(() => expect(linkOf("chat-z").registerEndpoint).toHaveBeenCalled(), { timeout: 10_000 });
+      expect(holders.filter((h) => h.releaseEndpoint.mock.calls.length > 0)).toEqual([holders[3]]);
+    }, 15_000);
+  });
+
   it("shutting down says goodbye on every link before anything else it waits for", async () => {
     const chat = row({ pairedPeerKey: createIdentity().pubKeyZ32 });
     const { node, linkOf } = await started(chat);
