@@ -133,3 +133,35 @@ it("a listener that starts late, with the contact there and its way known, is di
   expect(calls).toEqual(["iroh/1"]);
   await link.stop(false);
 });
+
+it("a listener registered again and again, and a record that keeps describing it again, dial no more often than the wait between attempts", async () => {
+  // Idle CPU (Linux Desktop, 2026-10-01): each registration and each record that described the endpoint again set the
+  // failed attempts back to none and dialled at once, so a chat whose contact never answered was dialled every time,
+  // each a native dial, instead of backing off to minutes.
+  vi.useFakeTimers();
+  let made = createLink();
+  while (identityFromSeedB64(made.mine.seedB64).pubKeyZ32 > made.mine.peerPubKeyZ32) made = createLink();
+  const link = new GhostLink({
+    params: { ...made.mine, profile: "paired-chat/1" }, rtcAvailable: false, autoConnect: true,
+    pairing: { credentials: { seedB64: createIdentity().seedB64, peerKey: createIdentity().pubKeyZ32 }, pinPeer: async () => {} },
+    native: { fallback: true, automatic: true },
+    transport: { publish: async () => {}, resolve: async () => null, describe: () => ({ protocol: "none", relays: [] }) },
+    createPeerConnection: () => { throw new Error("no WebRTC here"); },
+    localFetch: vi.fn(), getServices: () => [], getHostedHttpService: () => undefined,
+  });
+  const session = (link as unknown as { session: object }).session;
+  Object.defineProperty(session, "peerPresence", { get: () => ({ online: true, lastPacketAt: Date.now(), services: null }) });
+  link.learnPeerTransports(["iroh/1"], { "iroh/1": { id: "a" } });
+  const calls: string[] = [];
+  // Ten minutes: every 20 s the listener is lost and started anew, and every 30 s the record says it is down, then up.
+  for (let s = 0; s < 600; s += 10) {
+    if (s % 20 === 0) link.registerEndpoint(endpoint("iroh/1", calls));
+    if (s % 30 === 0) link.learnPeerTransports(["iroh/1"], {}, true);
+    if (s % 30 === 10) link.learnPeerTransports(["iroh/1"], { "iroh/1": { id: "a" } }, true);
+    await vi.advanceTimersByTimeAsync(10_000);
+  }
+  // The backoff alone (20 s doubling to 3 min) allows about six in ten minutes; dialling on every change made 40.
+  expect(calls.length).toBeGreaterThan(0);
+  expect(calls.length).toBeLessThanOrEqual(8);
+  await link.stop(false);
+});
