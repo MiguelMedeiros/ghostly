@@ -7,9 +7,9 @@ import { describe, expect, it } from "vitest";
 
 /**
  * A message that comes while the chat is open plays a short entry (`animate-bubble-in-*`). Kept in effect once it ended
- * (fill `both` or `forwards`), it held a transform on the row for as long as the row stayed in the page: each live
- * message cost a transform node in Chromium and a compositing layer of its own in WebKit (the Desktop app), and stayed in
- * `document.getAnimations()`. It ends with nothing left: `backwards` or `none`.
+ * (fill `both` or `forwards`), it stayed alive for as long as the row was in the page: one more entry in
+ * `document.getAnimations()` per live message in Chromium and WebKit, and a transform per row in Chromium. It ends with
+ * nothing left: `backwards` or `none`.
  */
 const CSS = readFileSync(join(fileURLToPath(import.meta.url), "../../../index.css"), "utf8");
 
