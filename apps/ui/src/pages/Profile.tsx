@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useLocation } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { InputGroup, LinkRow, Page } from "../components/layout";
 import { useSettings } from "../contexts/SettingsContext";
 import { useI18n } from "../contexts/I18nContext";
@@ -50,13 +50,26 @@ export function Profile() {
   const [name, setName] = useState(plain);
   const nameComposition = useComposition();
   // "Add a profile" in the account switcher lands here with the form open.
-  const asked = useLocation().state as { newProfile?: boolean; backupProfile?: boolean } | null;
+  const location = useLocation();
+  const navigate = useNavigate();
+  const asked = location.state as { newProfile?: boolean; backupProfile?: boolean } | null;
   const wantsNew = !!asked?.newProfile;
   // The wallet's backup reminder (Cashu has no phrase) lands here with the profile's Back up open.
   const wantsBackup = !!asked?.backupProfile;
   const [creating, setCreating] = useState(wantsNew), [newName, setNewName] = useState("");
   useEffect(() => { if (wantsNew) { setCreating(true); document.querySelector("[data-testid='profile-list']")?.scrollIntoView({ block: "nearest" }); } }, [wantsNew]);
   const [deleting, setDeleting] = useState<ProfileEntry | null>(null);
+  // A backup restored to replace the profile it was made from lands here, the copy running: the original's removal
+  // opens, with what it holds, a backup first and its name to confirm (WISP 05 § Restoring on the same device).
+  const replacing = new URLSearchParams(location.search).get("replace");
+  useEffect(() => {
+    if (!replacing) return;
+    const original = listProfiles().find((entry) => entry.id === replacing);
+    if (original && original.id && original.id !== currentProfile().id) setDeleting(original);
+    // Once: a reload, or Back, does not open it again.
+    navigate("/profile", { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once per arrival
+  }, [replacing]);
   const [error, setError] = useState("");
   useEffect(() => setName(plain), [plain]);
 
