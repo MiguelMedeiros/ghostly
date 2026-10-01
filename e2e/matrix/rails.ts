@@ -309,20 +309,31 @@ async function arkade(a: Actor, b: Actor): Promise<void> {
   // with the chain's blocks, so the helper mines until it has (support/arkRecover.ts). Each recovery pays the
   // server's input fee (e2e/infra: 1%), which the final balances allow for.
   const fees = new Map<Actor, number>([[a, 0], [b, 0]]);
-  const recovered = async (p: Actor) => {
-    await wallet(p, "arkade");
+  const recover = async (p: Actor) => {
     const back = await recoverExpiredArk(panel(p), p.name, () => sats(p));
     if (back > 0) fees.set(p, fees.get(p)! + Math.ceil(back / 99) + 1);
+  };
+  const recovered = async (p: Actor) => {
+    await wallet(p, "arkade");
+    await recover(p);
   };
   await bothWays(a, b, "arkade", [500, 100, 200, 50], recovered);
   // A: 9,900 − 500 − 100 + 200 + 50; B: 500 + 100 − 200 − 50, less what the recoveries cost. A payment made from
   // coins about to expire reaches its payee already expired: swept, and when small, too few to recover on their own
   // (under the server's dust limit). Those still count as the payee's, set apart (`ark-small`).
   for (const [p, expected] of [[a, 9_550], [b, 350]] as const) {
-    await recovered(p);
-    // The last payment reaches the wallet's figures on its next poll (10 s): wait for it.
+    await wallet(p, "arkade");
+    // The last payment reaches the wallet's figures on its next poll (10 s), and coins may expire only after a
+    // recovery found none (their batch is A's funding, minutes old): whenever expired ones show, they are recovered,
+    // until the sats are held (4 min at most). A failed recovery fails the test, never retried.
     const held = async () => (await sats(p)) + (await smallExpiredArk(panel(p)));
-    await expect.poll(held, { timeout: 60_000, message: `${p.name}'s sats, the expired ones set apart included` }).toBeGreaterThanOrEqual(expected - 60 - fees.get(p)!);
+    const enough = () => expected - 60 - fees.get(p)!;
+    for (const until = Date.now() + 4 * 60_000; ;) {
+      await recover(p);
+      if ((await held()) >= enough() || Date.now() > until) break;
+      await p.page.waitForTimeout(2_000);
+    }
+    expect(await held(), `${p.name}'s sats, the expired ones set apart included`).toBeGreaterThanOrEqual(enough());
     expect(await held()).toBeLessThanOrEqual(expected);
   }
 }
