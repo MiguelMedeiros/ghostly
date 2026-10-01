@@ -218,6 +218,7 @@ describe("an app restarting (WISP 100, Back after a restart)", () => {
       .toEqual(["iroh/1", "hyperdht/1", undefined, undefined, undefined]);
   });
 
+  // covers: transport.native-pool
   describe("more paired chats than native slots (eight per transport)", () => {
     const paired = () => ({ pairedPeerKey: createIdentity().pubKeyZ32 });
     const endpoint = () => ({ transport: "iroh/1" as const, descriptor: { id: "ab".repeat(32), relay: "https://relay.test./", addresses: [] },
