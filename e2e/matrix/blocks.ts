@@ -802,9 +802,11 @@ export const restore: Block = {
     await again.getByTestId("restore-go").click();
     // "A restore always becomes a new profile, then Ghostly switches to it" (ProfileBackups.tsx): the app
     // starts again on #/profile by itself. Navigating meanwhile would race that reload. The registry keeps the plain
-    // name and a restored flag; the app shows "(restored)" in its language (profile.restoredName), "Pessoal (restaurado)".
-    await expect(restored.page.getByTestId("profile-name"), "the restored profile is the one in use")
-      .toHaveValue(filled("{{name}} (restored)", { name: alternatives("Personal") }), { timeout: 60_000 });
+    // name and a restored flag: the name field holds the name alone, and a tag beside it says restored in the app's
+    // language (profile.restoredTag), "Restaurado".
+    await expect(restored.page.getByTestId("profile-restored-tag"), "the restored profile is the one in use")
+      .toHaveText(either("Restored"), { timeout: 60_000 });
+    await expect(restored.page.getByTestId("profile-name")).toHaveValue(either("Personal"));
     await expect(restored.page.getByTestId("profile-row")).toHaveCount(2);
     restored.chatHash = b.chatHash;
     w.b = restored;
