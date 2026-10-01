@@ -39,6 +39,7 @@ export const ENGINE_ERRORS = {
   unknownPaymentIntent: "Unknown payment intent",
   paymentExpired: "Payment request expired or has an invalid expiry",
   requestHasPayment: "This request already has a payment. Reconcile it before trying again.",
+  requestPaymentInFlight: "This request already has a payment; reconcile it instead",
   requestNotAwaiting: "This request is no longer awaiting payment. Check its status before spending.",
   reconnectBeforeApprove: "Reconnect the data link before approving. Your review was saved.",
   cannotSubmitAgain: "This payment cannot be submitted again. Reconcile its existing transaction.",

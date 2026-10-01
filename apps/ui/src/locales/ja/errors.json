@@ -66,6 +66,7 @@
     "reconnectBeforeApprove": "承認する前にチャットを再接続してください。確認内容は保存されています。",
     "requestHasPayment": "このリクエストにはすでに支払いがあります。もう一度試す前に確認してください。",
     "requestNotAwaiting": "このリクエストはもう支払いを待っていません。使う前に状態を確認してください。",
+    "requestPaymentInFlight": "このリクエストにはすでに処理中の支払いがあります。もう一度支払わず、確認してください",
     "reviewedSatsGone": "この支払いの確認に使った sats は別の支払いに使われました。何も送られていません。もう一度確認してください。",
     "sentAfterReview": "この確認の後に、このウォレットから支払いが送られました。新しく確認し直してください",
     "testMintOnMainnet": "これはテスト用ミントで、その sats に価値はありません。Testnet の Cashu ウォレットに追加してください",

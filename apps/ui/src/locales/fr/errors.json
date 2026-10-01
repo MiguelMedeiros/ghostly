@@ -66,6 +66,7 @@
     "reconnectBeforeApprove": "Reconnectez la conversation avant d’approuver. Votre vérification a été enregistrée.",
     "requestHasPayment": "Cette demande a déjà un paiement. Vérifiez-le avant de réessayer.",
     "requestNotAwaiting": "Cette demande n’attend plus de paiement. Vérifiez son état avant de dépenser.",
+    "requestPaymentInFlight": "Cette demande a déjà un paiement en cours ; vérifiez-le plutôt que de payer à nouveau",
     "reviewedSatsGone": "Les sats avec lesquels ce paiement a été vérifié sont partis dans un autre paiement. Rien n’a été envoyé : vérifiez-le à nouveau.",
     "sentAfterReview": "Un paiement de ce portefeuille a été envoyé après cette vérification. Faites-en une nouvelle",
     "testMintOnMainnet": "C’est un mint de test, ses sats ne valent rien : ajoutez-le à un portefeuille Cashu Testnet",

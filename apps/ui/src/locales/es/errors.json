@@ -66,6 +66,7 @@
     "reconnectBeforeApprove": "Vuelve a conectar el chat antes de aprobar. Tu revisión se guardó.",
     "requestHasPayment": "Esta solicitud ya tiene un pago. Compruébalo antes de volver a intentarlo.",
     "requestNotAwaiting": "Esta solicitud ya no espera un pago. Comprueba su estado antes de gastar.",
+    "requestPaymentInFlight": "Esta solicitud ya tiene un pago en curso; compruébalo en lugar de pagar de nuevo",
     "reviewedSatsGone": "Los sats con los que se revisó este pago se usaron en otro pago. No se envió nada: revísalo de nuevo.",
     "sentAfterReview": "Se envió un pago desde esta billetera después de esta revisión. Crea una nueva revisión",
     "testMintOnMainnet": "Este es un mint de prueba, y sus sats no valen nada: añádelo a una billetera Cashu de Testnet",

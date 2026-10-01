@@ -66,6 +66,7 @@
     "reconnectBeforeApprove": "Ricollega la chat prima di approvare. Il tuo controllo è stato salvato.",
     "requestHasPayment": "Questa richiesta ha già un pagamento. Controllalo prima di riprovare.",
     "requestNotAwaiting": "Questa richiesta non attende più un pagamento. Controlla il suo stato prima di spendere.",
+    "requestPaymentInFlight": "Questa richiesta ha già un pagamento in corso; controllalo invece di pagare di nuovo",
     "reviewedSatsGone": "I sats con cui è stato controllato questo pagamento sono andati in un altro pagamento. Non è stato inviato nulla: controllalo di nuovo.",
     "sentAfterReview": "Da questo wallet è partito un pagamento dopo questo controllo. Fanne uno nuovo",
     "testMintOnMainnet": "Questo è un mint di prova, e i suoi sats non valgono nulla: aggiungilo a un portafoglio Cashu Testnet",

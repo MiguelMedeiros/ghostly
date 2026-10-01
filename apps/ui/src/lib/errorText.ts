@@ -163,6 +163,7 @@ const ENGINE: Partial<Record<EngineErrorCode, TranslationKey>> = {
   unknownPaymentIntent: "errors.engine.unknownPaymentIntent",
   paymentExpired: "errors.engine.paymentExpired",
   requestHasPayment: "errors.engine.requestHasPayment",
+  requestPaymentInFlight: "errors.engine.requestPaymentInFlight",
   requestNotAwaiting: "errors.engine.requestNotAwaiting",
   reconnectBeforeApprove: "errors.engine.reconnectBeforeApprove",
   cannotSubmitAgain: "errors.engine.cannotSubmitAgain",
