@@ -138,8 +138,8 @@ test("a question asked while the person's app was closed shows its buttons once 
     await expect(room.getByText(QUESTION)).toBeVisible({ timeout: 120_000 });
     const buttons = room.getByTestId("message-buttons");
     await expect(buttons.getByTestId("message-button")).toHaveText(["Yes", "No"], { timeout: 120_000 });
-    const edited = await bot.event((e) => e.type === "message.edited" && e.chat === chatId && e.messageId === question, 120_000);
-    expect(edited).toMatchObject({ edits: 1, message: { text: QUESTION } });
+    // The restore is the engine's own edit: recorded (edit number 1), but the bot's stream says nothing of it (#1013).
+    await expect.poll(async () => (await history()).edits ?? 0, { timeout: 120_000 }).toBe(1);
     // The same text: no edit mark.
     await expect(room.locator("[data-message-row]").filter({ has: buttons }).getByTestId("message-edited")).toHaveCount(0);
 
@@ -155,7 +155,7 @@ test("a question asked while the person's app was closed shows its buttons once 
     await expect(buttons.locator('[data-testid="message-button"][data-button-id="yes"]')).toHaveAttribute("data-chosen", "true", { timeout: 120_000 });
     await expect(person.page.getByTestId("connection-options")).toHaveAccessibleName(/Connected · /, { timeout: 90_000 });
     expect((await history()).edits).toBe(1);
-    expect(bot.events.filter((e) => e.type === "message.edited" && e.messageId === question)).toHaveLength(1);
+    expect(bot.events.filter((e) => e.type === "message.edited" && e.messageId === question)).toHaveLength(0);
   } finally {
     await bot.stop();
   }
