@@ -95,7 +95,9 @@ test("three people: only the admin renames the group, everyone sees the new name
   await shows(carol, "Reading circle");
   await expect(headerPicture(carol)).toHaveAttribute("data-picture", "set", { timeout: 120_000 });
 
-  // The picture goes; the name stays.
+  // The picture goes; the name stays. Alice changes it once she has Carol's admission: a change sealed under the epoch
+  // before it reaches Carol only on a later sync.
+  await expect(alice.page.getByTestId("group-members")).toContainText("3 members", { timeout: 120_000 });
   await openMembers(alice);
   await alice.page.getByTestId("group-picture-remove").click();
   await expect(alice.page.getByTestId("group-members-avatar")).toHaveAttribute("data-picture", "none");
