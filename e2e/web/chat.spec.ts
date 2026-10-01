@@ -158,6 +158,13 @@ test("files, peer to peer, arrive intact", { tag: ["@feature:files.paired.send",
   // Pictures show themselves.
   await bob.page.getByTestId("file-input").setInputFiles({ name: "ghost.gif", mimeType: "image/gif", buffer: GIF });
   await expect(alice.page.getByTestId("file-bubble").filter({ hasText: "ghost.gif" }).getByRole("img", { name: "ghost.gif" })).toBeVisible();
+
+  // + → Document takes several files at once, and each goes as its own message.
+  await alice.page.getByTestId("file-input").setInputFiles([
+    { name: "attic map.txt", mimeType: "text/plain", buffer: Buffer.from("the attic, at midnight") },
+    { name: "cellar plan.csv", mimeType: "text/csv", buffer: Buffer.from("cellar,stairs\n") },
+  ]);
+  for (const name of ["attic map.txt", "cellar plan.csv"]) await expect(bob.page.getByTestId("file-bubble").filter({ hasText: name }).getByTestId("file-save")).toBeVisible();
 });
 
 /** How many files this peer still holds the bytes of, straight out of its IndexedDB. */

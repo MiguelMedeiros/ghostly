@@ -714,7 +714,7 @@ export function MessageInput({
       </div>
 
       {onSendFile && <>
-        <input ref={fileInputRef} type="file" className="hidden" data-testid="file-input" disabled={disabled || !!fileUnavailable}
+        <input ref={fileInputRef} type="file" multiple className="hidden" data-testid="file-input" disabled={disabled || !!fileUnavailable}
           onChange={(e) => void sendFiles(e.target.files, e.target)} />
         <input ref={mediaInputRef} type="file" accept="image/*,video/*" multiple className="hidden" data-testid="media-input" disabled={disabled || !!fileUnavailable}
           onChange={(e) => void sendFiles(e.target.files, e.target)} />

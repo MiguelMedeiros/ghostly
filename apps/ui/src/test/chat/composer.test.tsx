@@ -190,6 +190,10 @@ describe("the + menu", () => {
     const photos = [new File(["a"], "a.jpg", { type: "image/jpeg" }), new File(["b"], "b.mp4", { type: "video/mp4" })];
     await user.upload(media, photos);
     await waitFor(() => expect(onSendFile.mock.calls.map(([f]) => f.name)).toEqual(["a.jpg", "b.mp4"]));
+    // Several documents at once too, each its own message.
+    expect(files).toHaveAttribute("multiple");
+    await user.upload(files, [new File(["c"], "c.pdf", { type: "application/pdf" }), new File(["d"], "d.txt", { type: "text/plain" })]);
+    await waitFor(() => expect(onSendFile.mock.calls.map(([f]) => f.name)).toEqual(["a.jpg", "b.mp4", "c.pdf", "d.txt"]));
   });
 
   it("a file the chat refuses before it goes (the contact's app takes none, a stopped chat) says why, and the next waits", async () => {
