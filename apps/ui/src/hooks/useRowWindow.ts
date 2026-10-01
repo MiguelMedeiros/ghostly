@@ -35,6 +35,12 @@ export interface RowWindow {
   attach(sync?: boolean): void;
   /** The window around this row, in the page before this returns (see `revealMessage`). False when it is no row here. */
   reveal(id: string): boolean;
+  /**
+   * At the end with more than `MAX_ROWS` in the page (messages that came while the chat stayed open at its bottom):
+   * back to the last `OPEN_ROWS`. Only for a view at the bottom (`useChatScroll` calls it then): every row that goes is
+   * above it. False when there was nothing to let go.
+   */
+  trim(): boolean;
 }
 
 interface State {
@@ -78,8 +84,9 @@ function around(key: string, ids: readonly string[], at: number): State {
  *
  * The window is held by its edge rows, not by positions: older history coming in above later (a group's newest page
  * first, then the rest) stays out of the page until the view goes up to it (past the `OPEN_ROWS` the end always has),
- * and messages coming at the end are drawn
- * while the window reaches the end. `useChatScroll` keeps the view where it was when rows come or go above it.
+ * and messages coming at the end are drawn while the window reaches the end. A chat left open at its bottom while
+ * messages keep coming (a bot's reports all day) lets its oldest rows go past `MAX_ROWS` too (`trim`): the view at the
+ * bottom never shows them. `useChatScroll` keeps the view where it was when rows come or go above it.
  *
  * `ids` are the rows' keys in order and `key` the timeline (another one starts over). `heads` maps a row folded into a
  * run (a bot's stacked routines) to the run's first row: the window never starts inside a run.
@@ -106,7 +113,7 @@ export function useRowWindow(ids: readonly string[], key: string, { opensOn, hea
   now.current = { ids, from, to, key };
 
   // The ways to move it: made once, reading the latest rows.
-  const [moves] = useState((): Pick<RowWindow, "more" | "attach" | "reveal"> => ({
+  const [moves] = useState((): Pick<RowWindow, "more" | "attach" | "reveal" | "trim"> => ({
     more(edge) {
       const { ids, from, to, key } = now.current;
       if (edge === "up") {
@@ -132,6 +139,12 @@ export function useRowWindow(ids: readonly string[], key: string, { opensOn, hea
       if (at < 0) return false;
       if (at >= from && at < to) return true;
       flushSync(() => setHeld(around(key, ids, at)));
+      return true;
+    },
+    trim() {
+      const { ids, from, to, key } = now.current;
+      if (to < ids.length || to - from <= MAX_ROWS) return false;
+      setHeld(span(key, ids, ids.length - OPEN_ROWS, ids.length));
       return true;
     },
   }));

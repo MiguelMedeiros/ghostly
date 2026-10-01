@@ -765,6 +765,35 @@ describe("a long timeline's window of rows", () => {
     expect(pill()).not.toBeNull();
   });
 
+  it("open at its bottom while messages keep coming, the page never holds more than its most rows and the view stays at the bottom", () => {
+    let rows = theirs(0, 40);
+    const { rerender } = renderApp(<WindowTimeline rows={rows} />);
+    for (let i = 0; i < MAX_ROWS + 60; i++) {
+      rows = [...rows, ...theirs(40 + i, 1)];
+      rerender(<WindowTimeline rows={rows} />);
+      expect(inPage()).toBeLessThanOrEqual(MAX_ROWS);
+    }
+    expect(lastInPage()).toBe(`peer_${rows.length - 1}`);
+    expect(list().scrollTop).toBe(list().scrollHeight - VIEW);
+    expect(pill()).toBeNull();
+    // The rows that went are still there to scroll up to.
+    upTimes(3);
+    expect(rowsIn(list())[0].dataset.messageId).toBe("peer_0");
+  });
+
+  it("scrolled up, messages that keep coming never take away the rows being read", () => {
+    let rows = theirs(0, 40);
+    const { rerender } = renderApp(<WindowTimeline rows={rows} />);
+    scrollTo(0);
+    const was = topOf("peer_0");
+    for (let i = 0; i < MAX_ROWS + 60; i++) {
+      rows = [...rows, ...theirs(40 + i, 1)];
+      rerender(<WindowTimeline rows={rows} />);
+    }
+    expect(topOf("peer_0")).toBe(was);
+    expect(pill()).toHaveAttribute("data-count", String(MAX_ROWS + 60));
+  });
+
   it("left scrolled up far in the history, it opens on that message again", () => {
     const { unmount } = renderApp(<WindowTimeline rows={long} />);
     upTimes(4);

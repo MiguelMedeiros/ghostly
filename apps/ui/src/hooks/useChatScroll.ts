@@ -284,6 +284,9 @@ export function useChatScroll({ rows, chat, keys = true, window: rowWindow }: { 
       }
     }
     settle();
+    // Resting at the bottom, the rows that came while the chat stayed open would pile up in the page for as long as it
+    // stays open: past the most rows, the oldest go (all above the view, which stays at the bottom).
+    if (atBottom.current && !following.current && !jumping.current && !hidden(el) && distance(el) <= NEAR_BOTTOM_PX) win.current?.trim();
   }, [rows, listEl, chat, settle, clear]);
 
   useEffect(() => {
