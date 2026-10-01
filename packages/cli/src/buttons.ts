@@ -4,7 +4,7 @@ import type { Parsed } from "./args";
 import { bool, chatOrGroup, node, num, oneOf, str, type Method, type Params } from "./apiKit";
 import { CliError } from "./errors";
 import { findSecret } from "../../../apps/ui/src/lib/parse/secrets";
-import { waitForEdit, waitForGroupFrame } from "./waits";
+import { waitForEdit, waitForGroupFrame, waitForMessage } from "./waits";
 
 /*
  * Message buttons (WISP 4xx · Message Buttons), the bot's side: a message whose text is the question, with up to six
@@ -121,7 +121,44 @@ async function updateButtons(ctx: Parameters<Method>[0], params: Params): Promis
   };
 }
 
+/**
+ * `button press`: the other side of a question, as the app's tap: a press on a button of someone else's message, by
+ * its id here (or the id both sides know). The engine sends a reply whose text is the button's label, and refuses what
+ * an app would: a button the message does not have, closed buttons, a second answer past `once`, a second press
+ * within a second. A one-shot in a chat waits until the press went out, as `send` does.
+ */
+async function pressButton(ctx: Parameters<Method>[0], params: Params): Promise<Record<string, unknown>> {
+  const target = chatOrGroup(ctx, str(params, "chat", true));
+  const ref = str(params, "message", true);
+  const buttonId = str(params, "button", true);
+  const where = target.group ? "group" : "chat";
+  const messages = target.group ? await node(ctx).groupMessages({ groupId: target.id }) : await node(ctx).getMessages(target.linkId);
+  const theirs = messages.filter((m) => m.sender !== "me");
+  const message = theirs.find((m) => m.id === ref) ?? theirs.find((m) => m.wireId === ref);
+  if (!message) throw new CliError("not_found", `No message ${JSON.stringify(ref)} from someone else in this ${where}: the id its event or history gave`);
+  if (message.card?.kind !== "buttons") throw new CliError("bad_request", "That message has no buttons");
+  const button = message.card.buttons.find((b) => b.id === buttonId);
+  if (!button) throw new CliError("not_found", `That message has no button ${JSON.stringify(buttonId)}; its buttons: ${message.card.buttons.map((b) => b.id).join(", ")}`);
+  const wait = target.group
+    ? oneOf(params, "wait", ["none", "sent"] as const, "none")
+    : oneOf(params, "wait", ["none", "sent", "delivered"] as const, ctx.mode === "one-shot" ? "sent" : "none");
+  const ms = num(params, "timeout", 30, { min: 1, max: 3600 }) * 1000;
+  const result = await node(ctx).pressButton({ linkId: target.linkId, messageId: message.id, buttonId });
+  if (result.error) throw new CliError(result.refused ? "refused" : "unavailable", result.error, result.paced ? { paced: true } : undefined);
+  const replyId = result.messageId ?? null;
+  const answer = { [where]: target.id, messageId: message.id, button: button.id, label: button.label, replyId };
+  if (!replyId) return answer;
+  if (target.group) {
+    const edges = wait === "sent" ? await waitForGroupFrame(ctx, target.id, replyId, undefined, ms) : node(ctx).groupTaken({ groupId: target.id, messageId: replyId });
+    return { ...answer, edges };
+  }
+  const reply = wait === "none" ? (await node(ctx).getMessages(target.linkId)).find((m) => m.id === replyId) : await waitForMessage(ctx, target.linkId, replyId, wait, ms);
+  return { ...answer, delivery: reply?.delivery ?? null };
+}
+
 export const BUTTON_METHODS: Record<string, Method> = {
+  /** WISP 4xx · Message Buttons: a press on a button of someone else's message, as the app's tap. */
+  "button.press": pressButton,
   /** WISP 4xx · Message Buttons: the answer chosen on a question of mine, its buttons closed, or its text changed. */
   "button.update": updateButtons,
 };

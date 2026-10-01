@@ -179,6 +179,7 @@
   "readNoteCommunity": "Toute personne ayant le lien du groupe peut le rejoindre, et n'importe quel membre peut faire entrer quelqu'un. Chaque membre peut lire tout ce qui est envoyé tant qu'il en fait partie ; une personne retirée ne peut pas lire la suite, une personne arrivée plus tard ne peut pas lire ce qui précède. Les membres absents reçoivent les {{count}} derniers messages de ceux qui sont là à leur retour.",
   "remove": {
     "body": "Cette personne ne recevra plus les nouveaux messages du groupe.",
+    "linkHint": "Cette personne peut encore revenir avec le lien du groupe : un nouveau lien l'en empêche.",
     "title": "Retirer {{name}} ?"
   },
   "rename": {
