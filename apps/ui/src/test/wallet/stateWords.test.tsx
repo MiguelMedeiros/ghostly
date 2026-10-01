@@ -62,6 +62,13 @@ describe("a payment's state, in the app's language", () => {
     expect(screen.queryByRole("button", { name: /· (pending|unknown)$/ })).not.toBeInTheDocument();
   });
 
+  it("the Cashu wallet's list keeps what is left to do or read, not the settled or cancelled ones", () => {
+    const states = ["pending", "submitted", "unknown", "failed", "settled", "cancelled"] as const;
+    const intents = states.map((state, i) => review({ id: `r${i}`, state, amount: 10 + i }));
+    renderApp(<CashuWallet wallet={wallet} state={onNetwork("testnet", { mints: [mint(TEST_MINT, 0)], intents })} rail="cashu" onOpenCashu={() => {}} />);
+    expect(screen.getAllByTestId("wallet-intent").map((b) => b.textContent?.split(" ")[0])).toEqual(["10", "11", "12", "13"]);
+  });
+
   it("a Lightning card's recent invoices and payments say their state in words, and test sats on Testnet", () => {
     const ln = lightningSource({ mode: "testnet", recent: [
       { direction: "in", providerId: "cln-1", mode: "testnet", paymentHash: "h1", invoice: "lntb1", amount: 50, expiresAt: 0, createdAt: 0, state: "open" },

@@ -252,6 +252,19 @@ describe("a payment in a chat", () => {
     expect(link.requirePaymentSupport).toHaveBeenCalledBefore(link.allowsPayment);
     expect(approve).toHaveBeenCalledOnce();
   });
+
+  it("a review left pending is cancelled once its request is paid some other way or closed, or once it expired", async () => {
+    const { node } = track(engine());
+    const request = (id: string, patch: Partial<StoredPayment>): StoredPayment => ({ id, linkId: "chat", kind: "request", direction: "in", amount: 10, unit: "sat", state: "pending", createdAt: 1, ...patch });
+    for (const r of [request("paid", { state: "settled" }), request("closed", { state: "failed", closed: true }), request("open", {}), request("elsewhere", { state: "settled", linkId: "another chat" })]) node["desk"]["payments"].set(r.id, r);
+    const reviews = { paid: savedReview({ requestId: "paid" }), closed: savedReview({ requestId: "closed" }), open: savedReview({ requestId: "open" }),
+      elsewhere: savedReview({ requestId: "elsewhere" }), expired: savedReview({ expiresAt: Date.now() - 1 }), sent: savedReview({ requestId: "paid", state: "submitted" }) };
+    for (const review of Object.values(reviews)) await intentRepository.put({ review, prepared: {} });
+    const dropped = await node.dropStaleReviews();
+    expect(dropped.map((r) => r.id).sort()).toEqual([reviews.paid.id, reviews.closed.id, reviews.expired.id].sort());
+    const states = Object.fromEntries(await Promise.all(Object.entries(reviews).map(async ([name, r]) => [name, (await intentRepository.get(r.id))!.review.state])));
+    expect(states).toEqual({ paid: "cancelled", closed: "cancelled", open: "pending", elsewhere: "pending", expired: "cancelled", sent: "submitted" });
+  });
 });
 
 describe("a Cashu payment that never reached its mint, through the engine", () => {

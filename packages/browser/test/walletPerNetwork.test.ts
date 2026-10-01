@@ -159,6 +159,29 @@ for (const kind of ["ark", "usdt"] as const) {
   });
 }
 
+it("usdt: an empty Testnet wallet moved to the local chain shows that chain at once, even while its first balance fails", async () => {
+  const deviceKey = newDeviceKey();
+  const sepolia = { ...usdtRecord("sepolia"), seed: await sealSeed(generateMnemonic(wordlist), deviceKey), deviceKey };
+  await transact([STORES.settings], (s) => { s[STORES.settings].put(sepolia, "usdtWallet-mode-testnet"); });
+  const local = { network: "evm-local" as const, chainId: 31337 as const, provider: "http://127.0.0.1:8545", token: "0x1111111111111111111111111111111111111111", decimals: 6, codeHash: "0xabc" };
+  const old = { config: sepolia.config, address: async () => "0xold", balances: async () => ({ balance: "0", gasBalance: "0" }), dispose: async () => {} };
+  const fresh = { config: local, address: async () => "0xnew", balances: async () => { throw new Error("not yet"); }, dispose: async () => {} };
+  const connect = vi.spyOn(UsdtAdapter, "connect").mockImplementation(((config: { network: string }) => Promise.resolve(config.network === "sepolia" ? old : fresh)) as never);
+  const inspect = vi.spyOn(UsdtAdapter, "inspect").mockResolvedValue(local as never);
+  const wallet = new UsdtWallet("testnet", vi.fn());
+  try {
+    await wallet.start();
+    await wallet.ensureReady();
+    expect(wallet.view).toMatchObject({ network: "sepolia", address: "0xold" });
+    await wallet.create({ network: "evm-local", provider: local.provider, token: local.token });
+    expect(wallet.view, "the card names the local chain, not Sepolia").toMatchObject({ network: "evm-local", chainId: 31337 });
+    expect(wallet.view.address, "never the replaced wallet's address").not.toBe("0xold");
+  } finally {
+    connect.mockRestore(); inspect.mockRestore();
+    await wallet.stop();
+  }
+});
+
 function deferred<T>() {
   let resolve!: (value: T) => void;
   const promise = new Promise<T>((r) => { resolve = r; });

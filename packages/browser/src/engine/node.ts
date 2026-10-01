@@ -526,6 +526,8 @@ export class GhostlyNode implements EngineImplementation {
   });
   private stateTimer: ReturnType<typeof setTimeout> | null = null;
   private paymentTimer:ReturnType<typeof setTimeout>|null=null;
+  /** Every minute, the reviews no Approve can send any more are cancelled (dropStaleReviews). */
+  private staleReviewTimer?: ReturnType<typeof setInterval>;
   /** Group links: admins read knocks, joiners knock (WISP 9xx § Entry link). */
   private groupEntryTimer: ReturnType<typeof setInterval> | null = null;
   private walletView: WalletView = { mints: [], balance: 0, history: [], feesPaid: 0 };
@@ -1244,6 +1246,8 @@ export class GhostlyNode implements EngineImplementation {
     await this.desk.start();
     await this.refreshWallet();
     this.wallet.start();
+    void this.dropStaleReviews();
+    this.staleReviewTimer ??= setInterval(() => void this.dropStaleReviews(), 60_000);
     this.stopWatchingAdapters ??= onAdaptersChanged(() => { if (!this.shuttingDown) for (const network of WALLET_NETWORKS) { this.lightnings[network].refreshOffered(); this.bitcoins[network].refreshOffered(); } });
 
     const history = new Map<string, StoredMessage[]>();
@@ -1342,6 +1346,7 @@ export class GhostlyNode implements EngineImplementation {
     this.resumeTimers.clear();
     if(this.paymentTimer)clearTimeout(this.paymentTimer);
     clearTimeout(this.awaitingTimer);
+    clearInterval(this.staleReviewTimer);
     if (this.spareTimer) clearTimeout(this.spareTimer);
     for (const timer of this.reactionTimers.values()) clearTimeout(timer);
     this.reactionTimers.clear();
@@ -3898,6 +3903,19 @@ export class GhostlyNode implements EngineImplementation {
     await this.refreshNetwork(review);return review;
   }
   cancelPayment(params: {id:string}) { return this.paymentCoordinator.cancel(params.id); }
+  /**
+   * Reviews left pending that no Approve can send: past their expiry (a direct send reviewed and never approved, say),
+   * or for a request paid some other way or closed meanwhile. Cancelled as Cancel does, so nothing they reserved stays
+   * held and they leave the wallet's list of payments to finish; each stays in the store as cancelled. A review
+   * approved, submitted or of unknown outcome is never touched.
+   */
+  async dropStaleReviews(now = Date.now()): Promise<PaymentReview[]> {
+    if (this.shuttingDown) return [];
+    return this.paymentCoordinator.dropStale(now, (review) => {
+      const request = review.requestId ? this.desk.payment(review.requestId) : undefined;
+      return !!request && request.linkId === review.linkId && (request.state === "settled" || !!request.closed);
+    }).catch(() => []);
+  }
 
   /** `network`: the Cashu card of that network sends (its mints). `confirmedReal`: required on Mainnet. */
   sendPayment(params: { linkId: string; amount: number; memo?: string; timestamp: number; network?: WalletNetwork; confirmedReal?: boolean }) {
