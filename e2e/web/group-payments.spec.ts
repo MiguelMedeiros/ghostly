@@ -51,7 +51,8 @@ test.describe("group payments", () => {
     const bubble = timeline(peer).getByTestId("payment-bubble").filter({ hasText: memo });
     await bubble.getByTestId("payment-pay").click({ timeout: 90_000 });
     const review = timeline(peer).getByTestId("payment-review");
-    await expect(review).toContainText("cashu-test");
+    await expect(review.getByTestId("review-rail")).toHaveText("Cashu");
+    await expect(review).toHaveAttribute("data-network", "testnet");
     await review.getByRole("button", { name: "Approve payment" }).click();
   }
 
