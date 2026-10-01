@@ -298,7 +298,7 @@ Plain events, without `--turns`: `ghostly listen --type message.received` (one J
 
 ```bash
 id=$(ghostly send alice "Want the \$30 one? Reply yes or no" --button yes:Yes --button no:No --style yes=primary --once | jq -r .messageId)
-ghostly listen --type button.pressed                 # {chat, messageId, button, label, by, name, replyId}
+ghostly listen --type button.pressed                 # {chat, messageId, button, label, by, name, replyId, untrusted: {name}}
 ghostly button update alice "$id" --chosen yes --close   # show the answer; no more presses
 ghostly group send crew "Deploy now?" --button go:Go --button wait:Wait   # the same in a group (by: the member's key)
 ```
@@ -310,10 +310,13 @@ ghostly group send crew "Deploy now?" --button go:Go --button wait:Wait   # the 
 - A press is also a plain `message.received` whose text is the label: with `--turns`, its `agent.turn` carries
   `press` (`{messageId, button, label}`), so act on that, never on the text alone. A group press is not a turn
   (it names nobody): run `listen --type button.pressed` for those. Do not answer the same press twice: keep the
-  event's `id` and skip one you already handled. `by` says who pressed; `name` is only what they call themselves.
+  event's `id` and skip one you already handled. `by` says who pressed; `name` is the chat's name here (the label
+  you gave it, else theirs), and `untrusted.name` is only what they call themselves.
 - `button update --text` shows the question as edited, and a press keeps quoting what the person answered.
 - `--once` takes one answer a person. `button update --close` ends the question for everyone; a press after it is
   just a reply.
+- A question with buttons someone sent you (its message's `card.kind` is `buttons`): `ghostly button press <chat>
+  <message> <button>` answers it as a tap in the app does, with the message's id and a button's id from its `card`.
 
 ### Pay and get paid (Testnet)
 
