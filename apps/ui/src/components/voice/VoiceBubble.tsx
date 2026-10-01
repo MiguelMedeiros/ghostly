@@ -46,9 +46,10 @@ function describeFailure(what: string, error: unknown): string {
 export function VoiceBubble({ file, sender, peerName: named }: { file: ChatFile & { voice: VoiceMeta }; sender: "me" | "peer"; peerName?: string }) {
   const t = useT();
   const peerName = named ?? t("pairing.contact");
-  const { platform, transfer } = useTransfer(file.id);
+  const { platform, transfer, restoring } = useTransfer(file.id);
   const locale = languageTag(useOptionalI18n()?.language ?? "en");
-  const ready = transfer === null || transfer.state === "done";
+  // No transfer is "finished" only once the engine has put its kept transfers back after a start (as AudioBubble).
+  const ready = (transfer === null && !restoring) || transfer?.state === "done";
   const seconds = file.voice.duration / 1000;
 
   const [state, setState] = useState<PlayState>("idle");
