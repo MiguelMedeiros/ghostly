@@ -19,9 +19,17 @@ export function flatten(dict: unknown, prefix = ""): Map<string, unknown> {
   return out;
 }
 
+/**
+ * Each locale flattened once. `lookup` runs once per key per language (thousands of times in keys.test.ts), and
+ * flattening the whole locale on every call made those tests quadratic: 3-5 s each, past the 5 s timeout under load.
+ */
+const flattened = new Map<Language, Map<string, unknown>>();
+
 /** What `t()` would find for `key` in `language`: the string, or undefined where it would show the raw key. */
 export function lookup(language: Language, key: string): string | undefined {
-  const value = flatten(LOCALES[language]).get(key);
+  let map = flattened.get(language);
+  if (!map) flattened.set(language, (map = flatten(LOCALES[language])));
+  const value = map.get(key);
   return typeof value === "string" ? value : undefined;
 }
 

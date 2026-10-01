@@ -52,6 +52,7 @@
     "networkUnreachable": "Could not reach the network",
     "noSharedMint": "You share no mint with this contact",
     "realMintOnTestnet": "This mint holds real sats: add it to a Mainnet Cashu wallet",
+    "reviewedSatsGone": "The sats this payment was reviewed with went to another payment. Nothing was sent: review it again.",
     "testMintOnMainnet": "This is a test mint, and its sats are worth nothing: add it to a Testnet Cashu wallet",
     "usdtGasAboveLimit": "Estimated maximum gas exceeds your limit",
     "usdtNeedsSepoliaGas": "This needs a little Sepolia ETH for gas first",

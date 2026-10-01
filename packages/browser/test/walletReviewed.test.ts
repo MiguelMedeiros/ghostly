@@ -1,7 +1,7 @@
 import "fake-indexeddb/auto";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Amount, OutputData, getTokenMetadata, type Proof, type SwapPreview } from "@cashu/cashu-ts";
-import type { PaymentReview } from "@ghostly/core";
+import { PaymentPreflightError, engineText, type PaymentReview } from "@ghostly/core";
 import { CashuWallet, type CashuPrepared } from "../src/engine/wallet";
 import { STORES, store, transact, wrap } from "../src/shared/idb";
 import type { StoredPayment, StoredProof, WalletTx } from "../src/shared/types";
@@ -90,7 +90,7 @@ describe("executing it after approval", () => {
     const saved = await prepared();
     const { wallet } = setup();
     for (const changed of [{ amount: 41 }, { fee: 7 }, { provider: "https://other.example" }]) {
-      await expect(wallet.executeReviewedCashu(review(changed), saved), JSON.stringify(changed)).rejects.toThrow("Cashu preview does not match review");
+      await expect(wallet.executeReviewedCashu(review(changed), saved), JSON.stringify(changed)).rejects.toThrow(new PaymentPreflightError("Cashu preview does not match review"));
     }
     expect(mintApi.completeSwap).not.toHaveBeenCalled();
     expect((await all<StoredProof>(STORES.proofs)).find((p) => p.secret === "a")?.reserved).toBeUndefined();
@@ -100,12 +100,16 @@ describe("executing it after approval", () => {
     const saved = await prepared(preview({ inputs: [proof(64, "a"), proof(8, "b")], keepOutputs: [OutputData.createSingleRandomData(24, KEYSET)] }));
     await transact([STORES.proofs], (s) => s[STORES.proofs].put(stored(8, "b", { reserved: true })));
     const { wallet } = setup();
-    await expect(wallet.executeReviewedCashu(review(), saved)).rejects.toThrow("Prepared Cashu inputs are no longer available");
+    // Refused before the mint is asked: a preflight failure (the review fails, the request can be paid again), never
+    // an outcome to wait for, which no check could ever settle.
+    const refusal = wallet.executeReviewedCashu(review(), saved);
+    await expect(refusal).rejects.toBeInstanceOf(PaymentPreflightError);
+    await expect(refusal).rejects.toThrow(engineText("reviewedSatsGone"));
     expect(mintApi.completeSwap).not.toHaveBeenCalled();
     expect((await all<StoredProof>(STORES.proofs)).find((p) => p.secret === "a")?.reserved, "the transaction rolled back as a whole").toBeUndefined();
 
     await transact([STORES.proofs], (s) => { s[STORES.proofs].delete("b"); s[STORES.proofs].put(stored(64, "a", { C: `03${"cd".repeat(32)}` })); });
-    await expect(wallet.executeReviewedCashu(review(), saved)).rejects.toThrow("no longer available");
+    await expect(wallet.executeReviewedCashu(review(), saved)).rejects.toThrow("went to another payment");
     expect(mintApi.completeSwap).not.toHaveBeenCalled();
   });
 
@@ -135,7 +139,7 @@ describe("executing it after approval", () => {
     expect((await all<StoredProof>(STORES.proofs)).find((p) => p.secret === "a")?.reserved).toBe(true);
     expect(await all(STORES.payments)).toEqual([]);
     // Approving again does not swap the reserved inputs a second time.
-    await expect(wallet.executeReviewedCashu(review(), saved)).rejects.toThrow("no longer available");
+    await expect(wallet.executeReviewedCashu(review(), saved)).rejects.toThrow("went to another payment");
     expect(mintApi.completeSwap).toHaveBeenCalledOnce();
   });
 });
