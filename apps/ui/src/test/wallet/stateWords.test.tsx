@@ -53,6 +53,15 @@ describe("a payment's state, in the app's language", () => {
     expect(screen.getByRole("button", { name: "21 sats de teste · pago" })).toBeInTheDocument();
   });
 
+  it("the Cashu wallet's list of payments says each state in words too (Portuguese)", () => {
+    const pending = review({ id: "a", state: "pending" });
+    const unknown = review({ id: "b", state: "unknown" });
+    const state = onNetwork("testnet", { mints: [mint(TEST_MINT, 0)], intents: [pending, unknown] });
+    renderApp(<CashuWallet wallet={wallet} state={state} rail="cashu" onOpenCashu={() => {}} />, { language: "pt" });
+    expect(screen.getByRole("button", { name: "21 sats de teste · pendente" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /· (pending|unknown)$/ })).not.toBeInTheDocument();
+  });
+
   it("a Lightning card's recent invoices and payments say their state in words, and test sats on Testnet", () => {
     const ln = lightningSource({ mode: "testnet", recent: [
       { direction: "in", providerId: "cln-1", mode: "testnet", paymentHash: "h1", invoice: "lntb1", amount: 50, expiresAt: 0, createdAt: 0, state: "open" },
