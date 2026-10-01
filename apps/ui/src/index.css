@@ -873,8 +873,11 @@ html[data-standalone="true"] {
   from { opacity: 0; transform: translate(10px, 8px) scale(0.96); }
   to { opacity: 1; transform: none; }
 }
-.animate-bubble-in-left { animation: bubble-in-left 0.22s cubic-bezier(0.2, 0.8, 0.2, 1) both; transform-origin: bottom left; }
-.animate-bubble-in-right { animation: bubble-in-right 0.22s cubic-bezier(0.2, 0.8, 0.2, 1) both; transform-origin: bottom right; }
+/* `backwards`, never `both`: an entry kept in effect once it ends stays alive on every row that came while the chat was
+   open, for as long as the row is in the page (one more animation per message in Chromium and WebKit, a transform per
+   row in Chromium). Ended, the row is as any other. */
+.animate-bubble-in-left { animation: bubble-in-left 0.22s cubic-bezier(0.2, 0.8, 0.2, 1) backwards; transform-origin: bottom left; }
+.animate-bubble-in-right { animation: bubble-in-right 0.22s cubic-bezier(0.2, 0.8, 0.2, 1) backwards; transform-origin: bottom right; }
 
 /* A band of light crossing a payment that just settled. */
 @keyframes sats-shine {
