@@ -2,7 +2,8 @@ import { expect, test, type Page } from "@playwright/test";
 
 /**
  * /developers/agents: the chat that plays (components/agents/AgentDemo.tsx) goes through its frames by itself, holds
- * still on Pause, and never changes the page's layout while it plays; with reduced motion it is its finished frame.
+ * still on Pause, and never changes the page's layout while it plays; with reduced motion it is its finished frame,
+ * the question's buttons answered in it.
  * The app's screens load, and "Connect your agent" has its three steps, each command with a Copy button.
  */
 
@@ -45,12 +46,23 @@ test.describe(() => {
   test.use({ reducedMotion: "reduce" });
   test("reduced motion: the finished frame, still, with no Pause", async ({ page }) => {
     await page.goto("/developers/agents", { waitUntil: "networkidle" });
-    await expect(demo(page)).toHaveAttribute("data-frame", "7");
+    await expect(demo(page)).toHaveAttribute("data-frame", "10");
     await expect(demo(page).locator(".agd-card")).toHaveAttribute("data-status", "done");
+    // The question's buttons, answered: Merge chosen, Later off, Closed under them, and the tap's reply.
+    await expect(page.getByTestId("agent-demo-ask")).toHaveAttribute("data-on", "true");
+    await expect(demo(page).locator(".agd-button")).toContainText(["Merge", "Later"]);
+    const chosen = demo(page).locator(".agd-button[data-chosen]");
+    await expect(chosen).toHaveCount(1);
+    await expect(chosen).toContainText("Merge");
+    await expect(chosen).toHaveAttribute("data-style", "primary");
+    await expect(chosen.locator(".agd-check")).toBeVisible();
+    await expect(demo(page).locator(".agd-closed")).toHaveAttribute("data-on", "true");
+    await expect(page.getByTestId("agent-demo-press")).toHaveAttribute("data-on", "true");
+    await expect(page.getByTestId("agent-demo-press")).toContainText("↩ Merge");
     await expect(demo(page).locator(".agd-routine")).toHaveAttribute("data-on", "true");
     await expect(page.getByTestId("agent-demo-toggle")).toHaveCount(0);
     await page.waitForTimeout(2500);
-    await expect(demo(page)).toHaveAttribute("data-frame", "7");
+    await expect(demo(page)).toHaveAttribute("data-frame", "10");
     await expect(page.getByTestId("agent-demo-caption")).toHaveText("An agent at work");
   });
 });
@@ -68,4 +80,13 @@ test("the app's screens load, and Connect your agent has three steps with Copy o
   await expect(steps.nth(2)).toContainText("ghostly task send owner");
   expect(await page.getByTestId("agent-connect").locator(".cl-copy").count()).toBe(6);
   await expect(page.locator('a[href="/wisps/4xx-status-cards"]').first()).toBeAttached();
+  await expect(page.locator('a[href="/wisps/4xx-message-buttons"]').first()).toBeAttached();
+});
+
+test("What your agent can show has buttons, with the CLI's flags", async ({ page }) => {
+  await page.goto("/developers/agents", { waitUntil: "networkidle" });
+  const shows = page.locator(".ag-show");
+  const buttons = shows.filter({ has: page.getByRole("heading", { name: "Buttons" }) });
+  await expect(buttons).toContainText("button.pressed");
+  await expect(buttons).toContainText("ghostly send owner --button merge:Merge --button wait:Later --style merge=primary --once");
 });

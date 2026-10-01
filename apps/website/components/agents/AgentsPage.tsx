@@ -116,6 +116,9 @@ export function AgentsPage() {
           {t.connect.note.replace("{n}", NEXT_VERSION)}{" "}
           <Link className="link-arrow" href={LINKS.cards}>
             {t.connect.cards} →
+          </Link>{" "}
+          <Link className="link-arrow" href={LINKS.buttons}>
+            {t.connect.buttons} →
           </Link>
         </p>
       </section>
@@ -209,6 +212,11 @@ export function AgentsPage() {
           <li>
             <Link className="link-arrow" href={LINKS.cards}>
               {t.links.cards} →
+            </Link>
+          </li>
+          <li>
+            <Link className="link-arrow" href={LINKS.buttons}>
+              {t.links.buttons} →
             </Link>
           </li>
           <li>

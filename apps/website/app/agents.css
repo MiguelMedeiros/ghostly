@@ -540,6 +540,107 @@
   color: #f87171;
 }
 
+/* A question with buttons: the app's MessageButtons (apps/ui/src/components/chat/MessageButtons.tsx and .message-button
+   in its index.css), in its dark theme. Tiles under the bubble, two to a row; the primary one by its accent edge and
+   link-blue text over a light accent wash. Once answered, the chosen one has ✓ and the other is off. */
+.agd-ask {
+  display: grid;
+  justify-items: start;
+  gap: 4px;
+  width: fit-content;
+  min-width: 216px;
+  max-width: 82%;
+}
+.agd-ask .agd-bubble {
+  max-width: none;
+}
+.agd-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  width: 100%;
+}
+.agd-button {
+  display: inline-flex;
+  flex: 1 1 calc(50% - 3px);
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 0;
+  min-height: 38px;
+  padding: 6px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(233, 237, 239, 0.1);
+  background: #202c33;
+  color: #e9edef;
+  font-size: 13.5px;
+  font-weight: 500;
+  line-height: 1.2;
+  box-shadow: 0 1px 0.5px rgba(11, 20, 26, 0.13);
+  transition:
+    opacity var(--dur-base) var(--ease-enter),
+    background-color var(--dur-base) var(--ease-enter);
+}
+.agd-button[data-style="primary"] {
+  border-color: rgba(0, 168, 132, 0.55);
+  background: color-mix(in srgb, #00a884 12%, #202c33);
+  color: #8ad3f6;
+}
+.agd-button[data-chosen] {
+  font-weight: 600;
+}
+.agd-buttons[data-answered] .agd-button:not([data-chosen]) {
+  opacity: 0.5;
+}
+.agd-button[data-sending] {
+  opacity: 0.7;
+}
+.agd-spin,
+.agd-check {
+  display: none;
+}
+.agd-button[data-sending] .agd-spin {
+  display: block;
+  width: 12px;
+  height: 12px;
+  flex: none;
+  border-radius: 50%;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  animation: agd-spin 0.8s linear infinite;
+}
+.agd-button[data-chosen] .agd-check {
+  display: inline;
+}
+@keyframes agd-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.agd-closed {
+  padding: 0 4px;
+  color: rgba(233, 237, 239, 0.55);
+  font-size: 11.5px;
+  line-height: 16px;
+}
+/* Your tap, as the app draws a press: "↩ Merge" in your bubble, and the bot's 👍 under it. */
+.agd-press-row {
+  flex-direction: column;
+  align-items: flex-end;
+}
+.agd-press-mark {
+  color: rgba(233, 237, 239, 0.6);
+}
+.agd-react {
+  margin: -6px 10px 0 0;
+  padding: 1px 6px;
+  border-radius: 999px;
+  border: 2px solid #0b141a;
+  background: #202c33;
+  font-size: 12px;
+  line-height: 16px;
+}
+
 /* A routine: one line, as the app shows several in a row. */
 .agd-routine {
   display: flex;
