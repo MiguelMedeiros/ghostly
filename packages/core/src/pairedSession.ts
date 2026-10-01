@@ -119,6 +119,8 @@ const offerTuple = (o: Offer) => [o.key, o.nonce, o.versions, o.transports, o.ca
 
 export class PairedSession {
   state: PairingState = { status: "negotiating" };
+  /** The peer said nothing more within `authTimeoutMs`: the connection carried nothing, which proves nothing about the peer. */
+  authTimedOut = false;
   private readonly identity;
   private readonly offer: Offer;
   private readonly transport: PairedTransport;
@@ -193,7 +195,7 @@ export class PairedSession {
       }).catch(() => this.fail("Invalid session negotiation"))
         .finally(() => { this.pending--; });
     };
-    this.timer = setTimeout(() => this.fail("The peer did not finish authentication. Reconnect to try again."), this.options.authTimeoutMs ?? 180_000);
+    this.timer = setTimeout(() => { this.authTimedOut = true; this.fail("The peer did not finish authentication. Reconnect to try again."); }, this.options.authTimeoutMs ?? 180_000);
     this.update({ status: "negotiating" });
     this.send(this.offer);
   }

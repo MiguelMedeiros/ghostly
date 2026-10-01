@@ -90,9 +90,19 @@ export const INVITE_TAKEN = "Someone else joined with this invite first. Ask you
 export const BLOCKED_DIAL_WAIT_MS = 10_000;
 /**
  * A connection dialled in on a pinned chat must authenticate within this long, or it closes. Anyone who read the
- * endpoint from the record can dial it: until it proves the pinned key it holds no place a person waits on.
+ * endpoint from the record can dial it: until it proves the pinned key it holds no place a person waits on. A native
+ * connection this side dialled on a pinned chat has as long too: its path is up when it opens, and the handshake takes
+ * a few round trips, so one still unfinished by then carries nothing (a relay path that died with the handshake), and
+ * the chat dials again rather than hold it until QUIC's idle timeout (Omarchy, 2026-10-01: the web app had refused the
+ * Desktop's knock 15 s in, and the Desktop dialled again only 30 s in).
  */
 export const UNPROVEN_AUTH_MS = 15_000;
+/**
+ * A native connection this side dialled that has not authenticated this long after it opened, while the contact's
+ * record names a newer way to dial it: the dial went to an old address (the web app's Iroh homed on another relay after
+ * a restart), and the chat dials the new one at once. Sooner, it is a handshake still under way.
+ */
+export const REDESCRIBED_GRACE_MS = 3_000;
 /**
  * A WebRTC offer this side made that has no answer after this long: a direct native transport ranked after WebRTC is
  * dialled meanwhile, the offer still standing, and whichever goes live first carries the chat. The contact may not read
@@ -621,6 +631,8 @@ export class GhostLink {
   private offered?: { epoch: number; at: number };
   private lastAutoConnectAt = 0;
   private autoConnectFailures = 0;
+  /** Native transports a record just read listed with no way to dial them (`record-undescribed`), until one describes them again. */
+  private readonly undescribed = new Set<NativeTransport>();
   /** The peer's packet I last looked fast for its offer after (its timestamp): once per packet. */
   private offerAwaitedFor = 0;
   /** Whether the stream was blocked (DHT-only on either side) when last looked at. */
@@ -1268,7 +1280,8 @@ export class GhostLink {
     const listed = !!wanted && !!this.peerRecordTransports?.includes(wanted), dialable = !!wanted && !!this.peerDescriptors[wanted as NativeTransport];
     // The record lists every transport the contact's app runs, started or not (WISP 03): what it lacks, it lacks.
     this.peerRecordTransports = [...transports];
-    let changed = false, redescribed = false;
+    let changed = false, redescribed = false, again = false, news = false;
+    const renamed = new Set<NativeTransport>();
     for (const t of ["iroh/1", "hyperdht/1"] as const) {
       const known = this.peerDescriptors[t], next = recordDescriptor(t, known, descriptors[t], fresh, transports.includes(t));
       if (next === known) continue;
@@ -1278,29 +1291,57 @@ export class GhostLink {
         const { [t]: _gone, ...rest } = this.peerDescriptors;
         this.peerDescriptors = rest;
         traceLink(this.myPubKeyZ32, "record-undescribed", { transport: t });
+        this.undescribed.add(t);
         continue;
       }
       this.peerDescriptors = { ...this.peerDescriptors, [t]: next };
-      changed = true; redescribed ||= t === wanted;
+      // Described again after a record said its endpoint was down: dialled at once, but the attempts that failed keep
+      // counting. A contact whose record keeps going down and up again must not undo the wait between attempts.
+      if (this.undescribed.delete(t)) again = true; else news = true;
+      changed = true; redescribed ||= t === wanted; renamed.add(t);
       // A new way to dial it: the attempts that failed on the old one say nothing about this one.
       this.nativeFailures.delete(t); this.demotedUntil.delete(t);
     }
-    if (!this.peerTransports && transports.length) { this.peerTransports = transports; this.peerFallback = true; changed = true; }
+    if (!this.peerTransports && transports.length) { this.peerTransports = transports; this.peerFallback = true; changed = news = true; }
     else {
       // Its app runs more than a session said (an endpoint that started later): those go after the session's order.
       const added = transports.filter(t => !this.peerTransports?.includes(t));
-      if (added.length) { this.peerTransports = [...this.peerTransports!, ...added]; changed = true; }
+      if (added.length) { this.peerTransports = [...this.peerTransports!, ...added]; changed = news = true; }
     }
     // A transport the chat waits for, newly listed or dialable: tried again now, not at the next retry (WISP 100).
     if (wanted && ((!listed && transports.includes(wanted)) || (!dialable && !!this.peerDescriptors[wanted as NativeTransport]) || redescribed)) this.waitNews();
     this.notifyWait();
     if (!changed) return;
     traceLink(this.myPubKeyZ32, "record-transports", { transports });
+    // A connection of this side's that has not authenticated, dialled where the contact's record no longer says it is:
+    // it went to the old address, and the new one is dialled now rather than when that connection gives up.
+    const held = this.channel, heldOn = this.activeBinding?.transport as NativeTransport | undefined;
+    if (held && heldOn && renamed.has(heldOn) && !this.dialedIn.has(held) && this.paired?.state.status !== "ready"
+      && Date.now() - this.channelSince >= REDESCRIBED_GRACE_MS) {
+      traceLink(this.myPubKeyZ32, "redescribed-redial", { transport: heldOn });
+      this.disconnect();
+      this.redial();
+      return;
+    }
     // Something new to dial: the next attempt is now, not after the wait that attempts with nothing to try built up.
     if (this.channel || this.dialing) return;
-    this.autoConnectFailures = 0;
-    this.lastAutoConnectAt = 0;
+    if (news || !again) { this.autoConnectFailures = 0; this.lastAutoConnectAt = 0; }
+    else this.dialOnNews();
     this.maybeAutoConnect(this.presence);
+  }
+
+  /** When `dialOnNews` last let a dial go before its wait was over. */
+  private lastNewsDialAt = -Infinity;
+  /**
+   * A chat's listener came up, or the contact's record describes again an endpoint it said was down: the next dial goes
+   * now rather than after the wait between attempts, once per that wait. An endpoint registered again and again (a
+   * listener lost and started anew) or a record going down and up again would otherwise dial every time, each a native
+   * dial, Rust work on a Desktop (a Linux Desktop's idle CPU, 2026-10-01). The failures keep counting.
+   */
+  private dialOnNews(): void {
+    if (Date.now() - this.lastNewsDialAt < this.dialWait()) return;
+    this.lastNewsDialAt = Date.now();
+    this.lastAutoConnectAt = 0;
   }
 
   /**
@@ -1485,9 +1526,12 @@ export class GhostLink {
     else this.joinRace(endpoint.transport);
     // Something new to dial, now: a group link whose member's packet already said how to dial this transport, or a
     // chat that had no listener for it (every native slot was taken when the app started) and its contact is there.
+    // A chat's attempts that failed keep counting: an endpoint registered again and again (a listener lost and started
+    // anew, a slot taken back and given again) must not undo the wait between attempts, each of them a native dial.
     if (!this.channel && !this.dialing && this.dataLink.state === "idle" && this.canDial(endpoint.transport)
       && this.peerTransports?.includes(endpoint.transport)) {
-      this.autoConnectFailures = 0; this.lastAutoConnectAt = 0;
+      if (this.options.packetTransports) { this.autoConnectFailures = 0; this.lastAutoConnectAt = 0; }
+      else this.dialOnNews();
       this.maybeAutoConnect(this.presence);
     }
   }
@@ -2613,6 +2657,9 @@ export class GhostLink {
           this.rejectWaiters(new Error("The peer closed this connection. Check that both transport preferences allow a common transport, then reconnect."));
           this.detach();
           if (wasLive) this.peerLost("closed");
+          // A native connection that never authenticated (the contact refused it, or its path died): the side whose turn
+          // it is dials again now, not when a later look at the contact's packet happens to ask.
+          else if (binding) this.maybeAutoConnect(this.presence);
         }
       };
       const unproven = this.unproven(channel);
@@ -2628,7 +2675,8 @@ export class GhostLink {
         fingerprints: fingerprints ?? undefined,
         binding, transports: migration?.plan?.choices ?? this.transportOffer(), allowFallback: migration?.plan?.local.fallback ?? this.fallback,
         transportSwitchSupport: true,
-        ...(unproven ? { authTimeoutMs: UNPROVEN_AUTH_MS } : {}),
+        // Dialled in, or dialled out on a native transport (its path was up when it opened): bounded either way on a pinned chat.
+        ...(unproven || (binding && this.options.pairing.credentials.peerKey) ? { authTimeoutMs: UNPROVEN_AUTH_MS } : {}),
         holdSupport: !!this.options.holdSupport,
         proofSupport: !!this.options.events?.onPeerProof,
         identitySupport: !!this.options.events?.onIdentityProof,
@@ -2642,11 +2690,14 @@ export class GhostLink {
         // A connection dialled in on a pinned chat says nothing until it authenticated: one refused leaves no trace in the state.
         onState: () => { if (this.channel === channel && (!this.unproven(channel) || paired.state.status === "ready")) this.emitPairingState(); },
         onFailure: () => {
-          if (this.unproven(channel)) {
+          // Dialled in and unproven, or a connection that carried nothing in time: neither says anything about the contact.
+          if (this.unproven(channel) || paired.authTimedOut) {
             if (paired.state.keyMismatch) this.dht?.foreignKeySeen("stream");
-            traceLink(this.myPubKeyZ32, "dialed-in-refused", { keyMismatch: !!paired.state.keyMismatch });
+            if (this.unproven(channel)) traceLink(this.myPubKeyZ32, "dialed-in-refused", { keyMismatch: !!paired.state.keyMismatch });
+            else traceLink(this.myPubKeyZ32, "auth-timeout", { transport: binding?.transport ?? "webrtc/1" });
             migration?.reject(new Error(paired.state.error ?? "Candidate authentication failed"));
             channel.close(); if (this.channel === channel) this.detach();
+            if (!this.channel && binding) this.maybeAutoConnect(this.presence);
             return;
           }
           this.securityRejected = true;

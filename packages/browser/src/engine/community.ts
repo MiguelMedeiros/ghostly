@@ -6,7 +6,7 @@ import {
 } from "@ghostly/core";
 import type { GroupEvent, GroupJoinStage, GroupView, StoredGroup, StoredMessage } from "../shared/types";
 import { groupReply } from "../shared/replies";
-import { FramesTaken, editKey, mentionAt, mentionFields, peerMessageAt, type GroupStore, type GroupsHost } from "./groups";
+import { FramesTaken, cameAt, editKey, mentionAt, mentionFields, peerMessageAt, type GroupStore, type GroupsHost } from "./groups";
 import { traceJoin } from "./joinTrace";
 
 /** The line a change of a group's picture leaves in its history (both profiles). */
@@ -1092,11 +1092,12 @@ export class Communities {
         // The sender picks the time: one far ahead would pin the group to the top of the list.
         const timestamp = receivedTimestamp(m.timestamp);
         const mentioned = m.sender !== session.myKey && mentionsMember(m.mentions, session.myKey);
-        if (mentioned) this.lastMentionAt.set(id, Math.max(this.lastMentionAt.get(id) ?? 0, timestamp));
-        await this.host.storeMessage({ linkId: MESSAGE_LINK(id), id: m.id, text: m.text, sender: m.sender === session.myKey ? "me" : "peer", member: m.sender, timestamp, via: "datalink",
+        const stored = await this.host.storeMessage({ linkId: MESSAGE_LINK(id), id: m.id, text: m.text, sender: m.sender === session.myKey ? "me" : "peer", member: m.sender, timestamp, via: "datalink",
           ...mentionFields(m.mentions, mentioned), ...(m.reply && { replyTo: groupReply(m.reply, session.myKey) }), ...(m.forwarded && { forwarded: m.forwarded }), ...(m.card && { card: m.card }) });
         this.lastMessageAt.set(id, Math.max(this.lastMessageAt.get(id) ?? 0, timestamp));
-        if (m.sender !== session.myKey) this.lastPeerMessageAt.set(id, Math.max(this.lastPeerMessageAt.get(id) ?? 0, timestamp));
+        const came = cameAt(timestamp, stored, this.now());
+        if (mentioned) this.lastMentionAt.set(id, Math.max(this.lastMentionAt.get(id) ?? 0, came));
+        if (m.sender !== session.myKey) this.lastPeerMessageAt.set(id, Math.max(this.lastPeerMessageAt.get(id) ?? 0, came));
       },
       // Outside the session's queue, in order: what they carry (a payment) may send through the session again.
       app: m => this.deliver(id, () => this.host.communityApp?.(id, m.sender, m.frame)),

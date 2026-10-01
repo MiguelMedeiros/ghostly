@@ -65,7 +65,8 @@ export interface GroupsHost {
   resolve(pubKeyZ32: string, background?: boolean, door?: boolean): Promise<GhostRecord[] | null>;
   /** The other end of this link is due any moment: look fast for it a while (`LinkSession.expectPeer`). */
   expectPeer?(linkId: string): void;
-  storeMessage(message: StoredMessage): Promise<void>;
+  /** Resolves false when the message was there already: nothing new came (void: a host that does not say). */
+  storeMessage(message: StoredMessage): Promise<boolean | void>;
   /**
    * A message stored from a copy that was not whole, now whole: its mentions, reply and hop count join the stored one
    * (stored now if it is not there). Absent: `storeMessage`, which keeps the first.
@@ -142,6 +143,13 @@ export const mentionAt = (map: Map<string, number>, groupId: string): { lastMent
   const at = map.get(groupId);
   return at ? { lastMentionAt: at } : {};
 };
+/**
+ * When a member's message counts as having come, for unread and the "@": when it reached me, if that is later than
+ * when it was written (a catch-up from another member, a member back after a while). Written before I last looked at
+ * the group but handed to me since, it is news here; by its own time it sorted among what I had read, and the group
+ * never showed unread. A copy I had already (`stored` false) or one completed in place keeps its own time.
+ */
+export const cameAt = (timestamp: number, stored: boolean | void, now: number): number => stored === false ? timestamp : Math.max(timestamp, now);
 /** The view's `lastPeerMessageAt`, when there is one. */
 export const peerMessageAt = (map: Map<string, number>, groupId: string): { lastPeerMessageAt?: number } => {
   const at = map.get(groupId);
@@ -1197,13 +1205,14 @@ export class Groups {
         // The sender picks the time: one far ahead would pin the group to the top of the list.
         const timestamp = receivedTimestamp(m.timestamp);
         const mentioned = m.sender !== session.myKey && mentionsMember(m.mentions, session.myKey);
-        if (mentioned) this.lastMentionAt.set(state.id, Math.max(this.lastMentionAt.get(state.id) ?? 0, timestamp));
         const message: StoredMessage = { linkId: MESSAGE_LINK(state.id), id: m.id, text: m.text, sender: m.sender === session.myKey ? "me" : "peer", member: m.sender, timestamp, via: "datalink",
           ...mentionFields(m.mentions, mentioned), ...(m.reply && { replyTo: groupReply(m.reply, session.myKey) }), ...(m.forwarded && { forwarded: m.forwarded }), ...(m.card && { card: m.card }) };
         // A copy handed on stripped came first: the whole one adds what it lacked (WISP 9xx · Group Mesh § Catch-up).
-        await (m.completes && this.host.completeMessage ? this.host.completeMessage(message) : this.host.storeMessage(message));
+        const stored = m.completes && this.host.completeMessage ? (await this.host.completeMessage(message), false) : await this.host.storeMessage(message);
         this.lastMessageAt.set(state.id, Math.max(this.lastMessageAt.get(state.id) ?? 0, timestamp));
-        if (m.sender !== session.myKey) this.lastPeerMessageAt.set(state.id, Math.max(this.lastPeerMessageAt.get(state.id) ?? 0, timestamp));
+        const came = cameAt(timestamp, stored, this.now());
+        if (mentioned) this.lastMentionAt.set(state.id, Math.max(this.lastMentionAt.get(state.id) ?? 0, came));
+        if (m.sender !== session.myKey) this.lastPeerMessageAt.set(state.id, Math.max(this.lastPeerMessageAt.get(state.id) ?? 0, came));
         // What the member was typing arrived: it is not typing any more.
         this.typings.messageFrom(state.id, m.sender);
       },

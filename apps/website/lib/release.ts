@@ -3,7 +3,7 @@
  * published one (lib/latestRelease.ts). `scripts/bump-version.mjs` sets it, and
  * /latest.json answers with it.
  */
-export const VERSION = "1.0.0";
+export const VERSION = "1.0.1";
 
 const BASE = "https://github.com/MiguelMedeiros/ghostly/releases";
 

@@ -214,7 +214,9 @@ describe("group engine: admission over a contact chat, edges from the roster", (
     // Mine moves the group in the list, and is not unread; on Bob's side it is.
     expect(alice.views()[0].lastMessageAt).toBe(sent.timestamp);
     expect(alice.views()[0].lastPeerMessageAt ?? 0).toBe(0);
-    expect(bob.views()[0].lastPeerMessageAt).toBe(world.peers.get("bob")!.messages.find(m => !m.event)!.timestamp);
+    // While the app runs, from when it came (here, as it was sent); a restart reads its time back from the history.
+    expect(bob.views()[0].lastPeerMessageAt).toBeGreaterThanOrEqual(world.peers.get("bob")!.messages.find(m => !m.event)!.timestamp);
+    expect(bob.views()[0].lastPeerMessageAt).toBeLessThanOrEqual(Date.now());
     // A membership line after it (never unread while the app runs) is not unread after a restart either.
     world.peers.get("alice")!.messages.push({ linkId: `group:${groupId}`, id: "event:1:joined:later", text: "Carol joined", sender: "peer", event: "joined", timestamp: sent.timestamp + 60_000, via: "datalink" });
     const again = new Groups({ ...(alice as unknown as { host: GroupsHost }).host, emit: vi.fn() }, world.peers.get("alice")!.store);
@@ -247,7 +249,8 @@ describe("group engine: admission over a contact chat, edges from the roster", (
     // The sender keeps the mentions to draw them, and is not "mentioned" by its own message.
     const onAlice = world.peers.get("alice")!.messages.filter(m => !m.event);
     expect(onAlice.map(m => [m.mentions, m.mentioned])).toEqual([[mentions, undefined], [undefined, undefined]]);
-    expect(bob.views()[0].lastMentionAt).toBe(onBob[0].timestamp);
+    expect(bob.views()[0].lastMentionAt).toBeGreaterThanOrEqual(onBob[0].timestamp);
+    expect(bob.views()[0].lastMentionAt).toBeLessThanOrEqual(Date.now());
     expect(alice.views()[0].lastMentionAt).toBeUndefined();
     const again = new Groups({ ...(bob as unknown as { host: GroupsHost }).host, emit: vi.fn() }, world.peers.get("bob")!.store);
     await again.load();
