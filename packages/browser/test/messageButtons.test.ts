@@ -1,8 +1,11 @@
 import "fake-indexeddb/auto";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { BUTTONS_CAPABILITY, DhtDelivery, GhostLink, createIdentity, createLink, createRelayPayload, identityFromSeedB64, parseRelayPayload, readStatusCard, type IncomingMessage, type PairingState, type SignedPacket, type WireEdit } from "@ghostly/core";
+import { BUTTONS_CAPABILITY, DhtDelivery, GhostLink, createIdentity, createLink, createRelayPayload, identityFromSeedB64, parseRelayPayload, readStatusCard, type IncomingMessage, type PairingState, type PkarrTransport, type SignedPacket, type WireEdit } from "@ghostly/core";
 import { GhostlyNode } from "../src/engine/node";
 import { db } from "../src/engine/db";
+import { HoldEngine, emptyHoldState } from "../src/engine/hold";
+import { presignS3 } from "../src/backup/s3";
+import type { HoldStore } from "../src/backup/storage";
 import { buttonPress, buttonsState } from "../src/shared/buttons";
 import { withEdit } from "../src/shared/edits";
 import type { StoredMessage } from "../src/shared/types";
@@ -25,11 +28,12 @@ type Keys = { invitation: ReturnType<typeof createLink>; mine: string; theirs: s
 /**
  * A node and its contact, live. `keys`: the same chat again (a restart of both apps); `rows`: kept in the chat before the
  * node starts; `contactButtons`: false for a contact's app without buttons (1.0.0 has none); `confirmEdits`: false for a
- * contact that confirms no edit; `slowOutbox`: the node's outbox for the chat flushes only once this settles (a busy
- * device, as on a slow CI runner).
+ * contact that confirms no edit (its message is not there yet); `slowOutbox`: the node's outbox for the chat flushes only
+ * once this settles (a busy device, as on a slow CI runner); `hold`: both sides hold for each other (WISP 4xx · Store and
+ * Forward), the node reading the contact's pointer and storage through these.
  */
-async function setup({ keys, rows = [], contactButtons = true, confirmEdits = true, slowOutbox }: { keys?: Keys; rows?: StoredMessage[]; contactButtons?: boolean; confirmEdits?: boolean;
-  slowOutbox?: Promise<void> } = {}) {
+async function setup({ keys, rows = [], contactButtons = true, confirmEdits = true, slowOutbox, hold }: { keys?: Keys; rows?: StoredMessage[]; contactButtons?: boolean; confirmEdits?: boolean;
+  slowOutbox?: Promise<void>; hold?: { transport: PkarrTransport; fetch: typeof fetch } } = {}) {
   const net = new FakeNativeNet();
   const invitation = keys?.invitation ?? createLink();
   const [mine, theirs] = keys ? [keys.mine, keys.theirs] : [createIdentity().seedB64, createIdentity().seedB64];
@@ -38,20 +42,22 @@ async function setup({ keys, rows = [], contactButtons = true, confirmEdits = tr
   await db.putLink({ ...invitation.mine, id, profile: "paired-chat/1", participationSeed: mine, createdAt: 1,
     pairedPeerKey: identityFromSeedB64(theirs).pubKeyZ32, peerTrust: { version: 1 },
     peerTransports: ["iroh/1"], peerFallback: true, preferredTransport: "iroh/1", transportFallback: true,
-    peerDescriptors: { "iroh/1": { id: "contact:iroh/1" } } });
+    peerDescriptors: { "iroh/1": { id: "contact:iroh/1" } }, ...(hold && { hold: { ...emptyHoldState(), enabled: true, peerAllows: true } }) });
   for (const row of rows) await db.putMessage({ ...row, linkId: id });
   const transport = { publish: vi.fn(async () => {}), resolve: vi.fn(async () => null), describe: () => ({ protocol: "in-process", relays: [] }) };
   const node = new GhostlyNode({ onState: vi.fn(), onMessages: vi.fn(), onCallSignal: vi.fn(), onAttention: vi.fn() }, { transport, automaticWallets: false,
     nativeTransports: { "iroh/1": async () => net.endpoint("iroh/1", "app") } });
+  if (hold) Object.assign((node as unknown as { hold: { host: object } }).hold.host, hold);
   let contactState: PairingState = { status: "connecting" };
-  const contactGot: IncomingMessage[] = [], contactEdits: WireEdit[] = [];
+  const contactGot: IncomingMessage[] = [], contactEdits: WireEdit[] = [], contactReceipts: [string, number][] = [];
   const contact = new GhostLink({
     params: { ...invitation.invite, profile: "paired-chat/1" }, rtcAvailable: false,
     pairing: { credentials: { seedB64: theirs, peerKey: identityFromSeedB64(mine).pubKeyZ32 }, pinPeer: async () => {} },
     native: { preferred: "iroh/1", fallback: true, peerTransports: ["iroh/1"], peerFallback: true, peerDescriptors: { "iroh/1": { id: "app:iroh/1" } } },
     transport, createPeerConnection: () => { throw new Error("No WebRTC here"); }, localFetch: vi.fn(), getServices: () => [], getHostedHttpService: () => undefined,
-    editSupport: true, statusCardSupport: contactButtons, buttonsSupport: contactButtons,
-    events: { onPairingState: state => { contactState = state; }, onMessage: message => { contactGot.push(message); }, onMessageEdit: edit => { contactEdits.push(edit); return confirmEdits; } },
+    editSupport: true, statusCardSupport: contactButtons, buttonsSupport: contactButtons, holdSupport: !!hold,
+    events: { onPairingState: state => { contactState = state; }, onMessage: message => { contactGot.push(message); }, onMessageEdit: edit => { contactEdits.push(edit); return confirmEdits; },
+      onEditReceipt: (id, e) => { contactReceipts.push([id, e]); } },
   });
   contact.registerEndpoint(net.endpoint("iroh/1", "contact"));
   let stopped = false;
@@ -70,7 +76,7 @@ async function setup({ keys, rows = [], contactButtons = true, confirmEdits = tr
   await vi.waitFor(() => expect([view().pairing?.status, contactState.status]).toEqual(["ready", "ready"]));
   const row = async (messageId: string) => (await db.getMessages(id)).find(m => m.id === messageId)!;
   const peerRow = async (text: string) => { await vi.waitFor(async () => expect((await db.getMessages(id)).find(m => m.text === text && m.sender === "peer")).toBeDefined()); return (await db.getMessages(id)).filter(m => m.text === text && m.sender === "peer").at(-1)!; };
-  return { node, contact, id, contactGot, contactEdits, row, peerRow, view, stop, keys: { invitation, mine, theirs, id } as Keys };
+  return { node, contact, id, contactGot, contactEdits, contactReceipts, row, peerRow, view, stop, keys: { invitation, mine, theirs, id } as Keys };
 }
 
 const ask = (extra: Record<string, unknown> = {}) => ({ kind: "buttons", id: "ask-30", buttons: [{ id: "yes", label: "Yes", style: "primary", once: true }, { id: "no", label: "No", once: true }, { id: "more", label: "Tell me more" }], ...extra });
@@ -346,4 +352,107 @@ describe("buttons that went without their question (the DHT floor, a hold)", () 
     expect(restored.edit).toMatchObject({ seq: 1, history: [] });
     expect(buttonsState(restored, WIRE("Q"), [])).toMatchObject({ open: true });
   }, 30_000);
+
+  /**
+   * The bot's app held the question (sealed in its own storage, its text alone) and restores its buttons live; this app
+   * picks the question up from that storage, which answers only once the edit is here: the order a slow pickup gives.
+   * `heldBeforeOpen`: held while this app was closed, so the pickup is already under way when the chat goes live; else
+   * held after, and the contact's app says so on the live session (`paired-hold` with its top).
+   */
+  async function editBeforeHeldQuestion({ heldBeforeOpen }: { heldBeforeOpen: boolean }) {
+    const relay = memoryRelay(), bucket = memoryBucket();
+    const keys: Keys = { invitation: createLink(), mine: createIdentity().seedB64, theirs: createIdentity().seedB64, id: `buttons-${crypto.randomUUID()}` };
+    const holder = botHold(keys, relay, bucket);
+    cleanup.push(() => holder.stop());
+    const holdQuestion = () => holder.hold("bot-link", { kind: "text", id: WIRE("H"), messageId: "me_h", bytes: new TextEncoder().encode(QUESTION).length, timestamp: Date.now() - 60_000 });
+    if (heldBeforeOpen) await holdQuestion();
+    let release!: () => void;
+    const released = new Promise<void>(resolve => { release = resolve; });
+    let reads = 0;
+    const slowStorage = (async (input: RequestInfo | URL, init?: RequestInit) => { reads++; await released; return bucket.fetcher(input, init); }) as typeof fetch;
+    const t = await setup({ keys, hold: { transport: relay, fetch: slowStorage } });
+    cleanup.push(async () => release());
+    const mineLink = () => (t.node as unknown as { links: Map<string, { link?: GhostLink }> }).links.get(t.id)?.link;
+    await vi.waitFor(() => expect([mineLink()?.supportsEdits, t.contact.supportsEdits]).toEqual([true, true]));
+    if (!heldBeforeOpen) {
+      await holdQuestion();
+      t.contact.setHoldSupport(true, 1);
+    }
+    await vi.waitFor(() => expect(reads).toBeGreaterThan(0), { timeout: 5_000 });
+    // The bot's app restores the buttons live (`restoreButtons`): the edit comes before its message.
+    expect(await t.contact.sendEdit({ id: WIRE("H"), e: 1, ts: Date.now(), m: QUESTION, sc: readStatusCard(ask())! })).toBeNull();
+    // Kept for its message, not confirmed: the bot's app keeps it pending and says it again.
+    const buffer = (t.node as unknown as { editBuffer: { held: Map<string, Map<string, unknown>> } }).editBuffer;
+    await vi.waitFor(() => expect(buffer.held.get(t.id)?.has(WIRE("H"))).toBe(true));
+    await new Promise(resolve => setTimeout(resolve, 300));
+    expect(t.contactReceipts).toEqual([]);
+    expect(await db.getMessage(t.id, `peer_${WIRE("H")}`)).toBeUndefined();
+    // The held question arrives: it shows with its buttons, no edit mark, and the edit is confirmed now.
+    release();
+    await vi.waitFor(() => expect(t.contactReceipts).toEqual([[WIRE("H"), 1]]), { timeout: 10_000 });
+    const question = (await db.getMessage(t.id, `peer_${WIRE("H")}`))!;
+    expect(question).toMatchObject({ text: QUESTION, via: "hold", card: readStatusCard(ask()), edit: { seq: 1, history: [] } });
+    expect(buttonsState(question, WIRE("H"), [])).toMatchObject({ open: true });
+  }
+
+  it("on the contact's side, a held question picked up after its buttons' edit takes them then, and only then confirms the edit", async () => {
+    await editBeforeHeldQuestion({ heldBeforeOpen: false });
+  }, 30_000);
+
+  it("a pickup under way when the chat goes live holds back no frame of the session: the edit still comes first", async () => {
+    await editBeforeHeldQuestion({ heldBeforeOpen: true });
+  }, 30_000);
+
+  it("a question that went into a hold: its buttons' edit stays pending until the contact confirms it", async () => {
+    const t = await setup({ rows: [floored({ via: "hold" })], confirmEdits: false });
+    await vi.waitFor(() => expect(t.contactEdits).toHaveLength(1), { timeout: 10_000 });
+    expect(t.contactEdits[0]).toMatchObject({ id: WIRE("F"), e: 1, m: QUESTION, sc: readStatusCard(ask()) });
+    // Restored once ("sent"), but not settled: an edit unconfirmed goes again (the edit queue's resends, the next session).
+    await new Promise(resolve => setTimeout(resolve, 300));
+    expect(await t.row(`me_${WIRE("F")}`)).toMatchObject({ buttonsRestore: "sent", edit: { seq: 1, pending: true } });
+    // The contact's app has the question now and confirms it: settled.
+    t.contact.confirmEdit(WIRE("F"), 1);
+    await vi.waitFor(async () => expect((await t.row(`me_${WIRE("F")}`)).edit?.pending).toBeUndefined());
+  }, 30_000);
 });
+
+/** A bucket in memory that hands out presigned addresses as S3 does (`hold.test.ts`), and what reads them. */
+function memoryBucket() {
+  const objects = new Map<string, Uint8Array>();
+  const store: HoldStore = {
+    description: "S3 · test",
+    async put(name, bytes) { objects.set(name, bytes.slice()); },
+    async get(name) { const bytes = objects.get(name); if (!bytes) throw new Error("S3 refused (404 NoSuchKey)"); return bytes; },
+    async list() { return []; },
+    async listFolder(space, mailbox) { return [...objects.keys()].filter(k => k.startsWith(`${space}/hold/${mailbox}/`)).map(name => ({ name, created: 0 })); },
+    async remove(name) { objects.delete(name); },
+    presign: (name, seconds) => presignS3({ method: "GET", url: new URL(`https://s3.test/bucket/${name}`), expiresSeconds: seconds }, { region: "us-east-1", accessKeyId: "k", secretAccessKey: "s" }),
+  };
+  const fetcher = (async (input: RequestInfo | URL) => {
+    const bytes = objects.get(decodeURIComponent(new URL(String(input)).pathname.replace(/^\/bucket\//, "")));
+    return bytes ? new Response(bytes.slice() as BodyInit, { headers: { "content-length": String(bytes.length) } }) : new Response("nope", { status: 404 });
+  }) as unknown as typeof fetch;
+  return { store, fetcher };
+}
+
+/** A relay in memory, for the hold pointers. */
+function memoryRelay(): PkarrTransport {
+  const packets = new Map<string, SignedPacket>();
+  return {
+    async publish(identity, records) { packets.set(identity.pubKeyZ32, parseRelayPayload(identity.pubKeyZ32, createRelayPayload(identity, records))); },
+    async resolve(key) { return packets.get(key) ?? null; },
+    describe: () => ({ protocol: "memory", relays: [] }),
+  };
+}
+
+/** The bot's side of the chat holding for this app: its own store-and-forward engine, the question's text in it. */
+function botHold(keys: Keys, transport: PkarrTransport, bucket: ReturnType<typeof memoryBucket>): HoldEngine {
+  let stored = { id: "bot-link", ...keys.invitation.invite, profile: "paired-chat/1" as const, participationSeed: keys.theirs, pairedPeerKey: identityFromSeedB64(keys.mine).pubKeyZ32, createdAt: 0,
+    hold: { ...emptyHoldState(), enabled: true, peerAllows: true } };
+  return new HoldEngine({
+    transport, storage: () => ({ store: bucket.store, space: "abcdefghijklmnop" }), link: () => ({ stored, open: false }), linkIds: () => [stored.id],
+    saveHold: async (_id, hold) => { stored = { ...stored, hold: structuredClone(hold) }; }, delivery: async () => {},
+    text: async () => QUESTION, file: async () => null, paymentRequest: () => null,
+    receiveText: async () => {}, receiveFile: async () => null, receivePaymentRequest: async () => {}, changed: () => {}, fetch: bucket.fetcher,
+  });
+}
