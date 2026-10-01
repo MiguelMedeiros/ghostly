@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { chatPath, chatRouteSession } from "../../../src/lib/url";
+import { chatPath, chatRouteSession } from "../../../apps/ui/src/lib/url";
 // covers: calls.route-keep
 
 /**

@@ -1,0 +1,40 @@
+{
+  "account": "账户",
+  "chats": "聊天",
+  "copyInvite": "复制邀请码",
+  "deleteAllChats": "删除所有聊天",
+  "deleteChat": "删除聊天",
+  "group": {
+    "adminAnswered": "管理员的应用已回应…",
+    "answerFailed": "没有成功。请重试。",
+    "invitedBy": "由 {{contact}} 邀请 · {{members}}",
+    "invitedByUnknown": "由一位联系人邀请 · {{members}}",
+    "inviterAway": "{{contact}} 尚未连接。请稍后重试。",
+    "inviterAwayUnknown": "邀请你的联系人尚未连接。请稍后重试。",
+    "letting": "有成员正在让你加入…",
+    "waitingAdmin": "正在等待管理员的应用…",
+    "waitingIn": "等待被允许加入…"
+  },
+  "join": "加入",
+  "joinChat": "加入聊天",
+  "new": "新建",
+  "newChat": "新建聊天",
+  "newMenu": {
+    "chat": "聊天",
+    "chatHint": "一个人，通过邀请",
+    "group": "群组",
+    "groupHint": "任何人都能打开的链接",
+    "label": "创建群组或聊天"
+  },
+  "noChats": "暂无聊天",
+  "noResults": "没有找到结果",
+  "pinned": "已置顶",
+  "quiet": "这里很安静...",
+  "quietHint": "该去吓唬谁了！👻",
+  "searchPlaceholder": "搜索聊天...",
+  "settings": "设置",
+  "sharedIdentity": "分享了一个身份",
+  "skipToContent": "跳到内容",
+  "startChat": "新聊天",
+  "unread": "未读消息"
+}

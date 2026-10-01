@@ -11,12 +11,13 @@ How wallets are organised, which rails run on which network, and how money moves
 
 ## The Wallets page
 
-Route `/wallet` (`src/pages/Wallet.tsx`).
+Route `/wallet` (`apps/ui/src/pages/Wallet.tsx`).
 
-- **Mainnet | Testnet tabs** (#304, `src/components/wallet/NetworkTabs.tsx`). Each tab shows its network's deck. The tab only chooses what is shown; every card pays on its own network.
-- **The deck**: one card per wallet (`src/components/WalletDeck.tsx`, deck mechanics in `src/components/deck/`, shared with the identity cards). The chosen card's panel sits below it: receive, send, options, Remove.
+- **Mainnet | Testnet tabs** (#304, `apps/ui/src/components/wallet/NetworkTabs.tsx`). Each tab shows its network's deck. The tab only chooses what is shown; every card pays on its own network.
+- **The deck**: one card per wallet (`apps/ui/src/components/WalletDeck.tsx`, deck mechanics in `apps/ui/src/components/deck/`, shared with the identity cards). The chosen card's panel sits below it: receive, send, options, Remove.
 - **New** in the header (#277, #288) opens a picker: network first (Real money / Test money), then a kind. Each kind says what clicking does ("Create", "Create…" (Spark on Mainnet asks for a Breez API key first), "Connect…", "Add another…", "Join with invite…", "Added", "Not yet"). Once made, the dialog closes and the new card is dealt in, selected (#309). A new Mainnet Bark wallet opens on its backup rows first.
 - **Remove** (#288) sits in the chosen wallet's panel. See [Removal](#removal-protects-money-in-flight).
+- **Backup reminder** (#693, `packages/browser/src/shared/backupReminder.ts`, `apps/ui/src/components/wallet/BackupReminder.tsx`). The first time a Mainnet wallet holds money, a card above the deck and a dot on the wallet icon ask once for a copy: the recovery phrase for a phrase wallet (USDT, Ark, Bark, Spark, Fedimint), a profile backup for Cashu. A phrase shown, a wallet backup file, or a profile backup made after the money arrived ends it. Later puts it off until the next receive or three days, once. The engine keeps it per wallet in the profile's settings (`backupReminders`). Testnet never asks.
 
 ## Lightning cards
 
@@ -50,19 +51,19 @@ Files under `packages/browser/src/engine/paymentAdapters/`.
 
 Also:
 
-- **Lightning addresses and LNURL-pay** are paid through the active Lightning source; they are not a wallet ([WISP 205](wisps/205-lnurl.md), `src/components/wallet/LightningAddressPay.tsx`).
-- **Pay with another wallet**: a request can be paid from any external wallet by QR, copied text or a `lightning:`/`bitcoin:` link, then "I paid". The payee's own source decides whether it was paid (`src/components/PayExternally.tsx`).
+- **Lightning addresses and LNURL-pay** are paid through the active Lightning source; they are not a wallet ([WISP 205](wisps/205-lnurl.md), `apps/ui/src/components/wallet/LightningAddressPay.tsx`).
+- **Pay with another wallet**: a request can be paid from any external wallet by QR, copied text or a `lightning:`/`bitcoin:` link, then "I paid". The payee's own source decides whether it was paid (`apps/ui/src/components/PayExternally.tsx`).
 
 ## Testnet: Get test coins
 
-- A Testnet wallet's panel has **Get test coins** (#291, `src/components/wallet/TestCoins.tsx`). It never shows on Mainnet.
+- A Testnet wallet's panel has **Get test coins** (#291, `apps/ui/src/components/wallet/TestCoins.tsx`). It never shows on Mainnet.
 - Cashu (and Lightning through the mints): 10,000 test sats from the test mint. USDT: 1,000 test USDT from Aave's Sepolia faucet (needs a little Sepolia ETH for gas).
 - Faucets behind a login or CAPTCHA (Mutinynet, Second's signet, Lightspark regtest, signet, testnet4) get an "Open faucet" link. Ghostly never solves a CAPTCHA.
 - Receive never fills itself: an invoice on a test mint that pays its own invoices is held until a payer says "I paid".
 
 ## Mainnet: confirm real money
 
-- Every Mainnet spend asks a second step, **Send real money**, with Back focused (#298, `src/components/ConfirmRealMoney.tsx`). Testnet stays one step.
+- Every Mainnet spend asks a second step, **Send real money**, with Back focused (#298, `apps/ui/src/components/ConfirmRealMoney.tsx`). Testnet stays one step.
 - The engine enforces it too: `approvePayment`, `payRequest`, `walletPayQuote` and `sendPayment` refuse a Mainnet spend without `confirmedReal` (`assertConfirmedReal`).
 - Ecash for a request is spent only from mints of the request's network.
 
@@ -76,15 +77,15 @@ Removing a wallet checks what it still waits for, not only its balance (#303, `p
 
 ## Payments in a chat
 
-- **+ → Payment** opens the payment sheet, a deck of your cards with two modes: **Pay or request** and **Accept** (#263, `src/components/PaymentComposer.tsx`).
-- **Accept** (`src/components/ChatPaymentAccept.tsx`): each wallet on each network is a switch. A way of paying works only when both sides have it on. Lightning shows the network's default card.
-- **Mainnet | Testnet tabs** in the sheet (#307). The starting tab is per chat: last used, else the one network the contact takes, else Mainnet (`src/lib/chatPayments.ts`). The sheet closes after a payment or a request.
+- **+ → Payment** opens the payment sheet, a deck of your cards with two modes: **Pay or request** and **Accept** (#263, `apps/ui/src/components/PaymentComposer.tsx`).
+- **Accept** (`apps/ui/src/components/ChatPaymentAccept.tsx`): each wallet on each network is a switch. A way of paying works only when both sides have it on. Lightning shows the network's default card.
+- **Mainnet | Testnet tabs** in the sheet (#307). The starting tab is per chat: last used, else the one network the contact takes, else Mainnet (`apps/ui/src/lib/chatPayments.ts`). The sheet closes after a payment or a request.
 - "‹ Cards" or Escape steps back from a turned card (#296).
-- Groups: pay one member or everyone, with Cashu or Lightning (`src/components/GroupPaymentComposer.tsx`).
+- Groups: pay one member or everyone, with Cashu or Lightning (`apps/ui/src/components/GroupPaymentComposer.tsx`).
 
 ## Money in messages
 
-Payment strings in a message become cards (#284, `src/lib/money.ts`, `src/lib/parse/money-*.ts`, `src/components/MoneyFormatsBubble.tsx`):
+Payment strings in a message become cards (#284, `apps/ui/src/lib/money.ts`, `apps/ui/src/lib/parse/money-*.ts`, `apps/ui/src/components/MoneyFormatsBubble.tsx`):
 
 - BIP 21 `bitcoin:` links, bare Bitcoin addresses (checksum checked)
 - BOLT 11 invoices, BOLT 12 offers (copy or open only: no wallet here pays offers yet)
@@ -95,7 +96,7 @@ Payment strings in a message become cards (#284, `src/lib/money.ts`, `src/lib/pa
 
 ## Secret guard
 
-Before a message is sent, the composer asks when the text looks like a secret (#283, `src/lib/parse/secrets.ts`, `src/components/SecretGuardDialog.tsx`):
+Before a message is sent, the composer asks when the text looks like a secret (#283, `apps/ui/src/lib/parse/secrets.ts`, `apps/ui/src/components/SecretGuardDialog.tsx`):
 
 - a BIP 39 seed phrase (valid checksum), an `nsec`, an extended private key or WIF, a 64/128-character hex key next to a word like "seed" or "private key", a Cashu token (with its amount).
 - Cancel has the focus. The other button says "Send anyway", or "Send" for a Cashu token.

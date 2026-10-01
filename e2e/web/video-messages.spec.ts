@@ -95,3 +95,69 @@ test("a large video asks first: Download <size>, then it plays", { tag: ["@featu
   await received.getByTestId("video-play").click();
   await expect.poll(() => position(received), { timeout: 15_000 }).toBeGreaterThan(0.3);
 });
+
+test("a video out of view for a moment goes on playing; scrolled away for good, it stops", { tag: ["@feature:files.video.play", "@feature:app.mobile-layout"] }, async ({ peer }) => {
+  // A phone's chat, the video near its bottom. A phone turned on its side, or a glance up at the message before, takes
+  // it out of view for an instant: it stopped right then, back on its poster.
+  const [alice, bob] = await Promise.all([peer("video-glance-alice"), peer("video-glance-bob", { mobile: true, viewport: { width: 402, height: 874 } })]);
+  await pair(alice, bob);
+  const say = async (text: string) => {
+    await alice.page.getByPlaceholder("Message…").fill(text);
+    await alice.page.getByPlaceholder("Message…").press("Enter");
+    await expect(chat(bob).getByText(text, { exact: true })).toBeVisible({ timeout: 30_000 });
+  };
+  for (let i = 1; i <= 16; i++) await say(`before ${i}`);
+  await alice.page.getByTestId("media-input").setInputFiles(FIXTURE);
+  const received = videos(bob).last();
+  await expect(received.getByTestId("video-play")).toBeVisible({ timeout: 30_000 });
+  await say("after");
+
+  await received.getByTestId("video-play").click();
+  await expect(received).toHaveAttribute("data-phase", "playing");
+  // The fixture is two seconds long, and a video that ends goes back to its poster: this one goes round.
+  await received.getByTestId("video-player").evaluate((video: HTMLVideoElement) => { video.loop = true; });
+  await expect.poll(() => position(received), { timeout: 15_000 }).toBeGreaterThan(0.1);
+
+  // Up to the first message and straight back.
+  const player = received.getByTestId("video-player");
+  await chat(bob).evaluate((list) => { list.scrollTop = 0; });
+  await expect(player).not.toBeInViewport();
+  await bob.page.waitForTimeout(300);
+  await chat(bob).evaluate((list) => { list.scrollTop = list.scrollHeight; });
+  await expect(received).toBeInViewport();
+  await bob.page.waitForTimeout(2_000);
+  await expect(received).toHaveAttribute("data-phase", "playing");
+
+  // Up, and it stays there: the video stops and lets go of its bytes.
+  await chat(bob).evaluate((list) => { list.scrollTop = 0; });
+  await expect(received).toHaveAttribute("data-phase", "poster", { timeout: 5_000 });
+});
+
+test("a video playing on a phone goes on when the phone is turned on its side", { tag: ["@feature:files.video.play", "@feature:app.mobile-layout", "@feature:chat.scroll"] }, async ({ peer }) => {
+  // An iPhone 17 upright, then on its side, a chat at its bottom. The browser moved the list as it got shorter, and the
+  // chat took that for a hand's scroll: it stayed up in its history, the video below the view, stopped.
+  const [alice, bob] = await Promise.all([peer("video-turn-alice"), peer("video-turn-bob", { mobile: true, viewport: { width: 402, height: 874 } })]);
+  await pair(alice, bob);
+  const say = async (text: string) => {
+    await alice.page.getByPlaceholder("Message…").fill(text);
+    await alice.page.getByPlaceholder("Message…").press("Enter");
+    await expect(chat(bob).getByText(text, { exact: true })).toBeVisible({ timeout: 30_000 });
+  };
+  for (let i = 1; i <= 8; i++) await say(`before ${i}`);
+  await alice.page.getByTestId("media-input").setInputFiles(FIXTURE);
+  const received = videos(bob).last();
+  await expect(received.getByTestId("video-play")).toBeVisible({ timeout: 30_000 });
+  for (let i = 1; i <= 2; i++) await say(`after ${i}`);
+
+  await received.getByTestId("video-play").click();
+  await expect(received).toHaveAttribute("data-phase", "playing");
+  // The fixture is two seconds long, and a video that ends goes back to its poster: this one goes round.
+  await received.getByTestId("video-player").evaluate((video: HTMLVideoElement) => { video.loop = true; });
+  await expect.poll(() => position(received), { timeout: 15_000 }).toBeGreaterThan(0.1);
+
+  await bob.page.setViewportSize({ width: 874, height: 402 });
+  // Longer than a moment out of view is allowed (1.5 s): still playing, and in view.
+  await bob.page.waitForTimeout(2_500);
+  await expect(received).toHaveAttribute("data-phase", "playing");
+  await expect(received.getByTestId("video-player")).toBeInViewport();
+});

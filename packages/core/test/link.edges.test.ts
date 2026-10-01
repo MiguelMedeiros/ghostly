@@ -311,6 +311,33 @@ describe("LinkSession presence and signals", () => {
     await expect(a.s.setRtcSignal(null, true)).rejects.toThrow("relay down");
   });
 
+  it("marks as signaling the publish of a new offer or answer and the fast reads for the answer to its offer, nothing else", async () => {
+    const { a } = pair({ getServices: () => [] });
+    a.s.start();
+    await settle();
+    const lastPublish = () => (a.transport.publish.mock.lastCall as unknown[] | undefined)?.[2];
+    const lastRead = () => (a.transport.resolve.mock.lastCall as unknown[] | undefined)?.[1];
+    expect(lastPublish()).toBeUndefined();
+    expect(lastRead()).not.toHaveProperty("signal");
+    // An offer: its publish is signaling, and so are the fast reads for its answer once it is out.
+    a.s.setFastPoll(true, true);
+    await a.s.setRtcSignal('{"t":"o"}');
+    expect(lastPublish()).toEqual({ signal: true });
+    a.s.pollNow();
+    await settle();
+    expect(lastRead()).toMatchObject({ urgent: true, signal: true });
+    // The same signal again (a presence refresh) is not.
+    await a.s.refreshAdvertisement();
+    expect(lastPublish()).toBeUndefined();
+    // Fast reads that wait for no answer of ours (an answer sent, the peer expected) are not signaling.
+    a.s.setFastPoll(true);
+    a.s.pollNow();
+    await settle();
+    expect(lastRead()).toMatchObject({ urgent: true });
+    expect(lastRead()).not.toHaveProperty("signal");
+    await a.s.stop(false);
+  });
+
   it("does not publish the RTC signal or services in its departure packet", async () => {
     const { a, b } = pair({ getServices: () => [] });
     a.s.start();

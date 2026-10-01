@@ -19,8 +19,9 @@ test("Desktop opens, with the peer Rust backs behind it", { tag: ["@feature:desk
 
   await app.click('[title="Settings"]');
   await app.click('[data-testid="settings-advanced"]');
+  await expect.poll(() => app.text('[data-testid="settings-advanced-page"]'), { message: "Settings → Advanced opens" }).not.toBeNull();
 
-  // Only `src/desktop/host.ts` describes Pkarr this way. The browser stand-in
+  // Only `apps/ui/src/desktop/host.ts` describes Pkarr this way. The browser stand-in
   // would say "Pkarr relays (HTTP) → Mainline DHT (BEP44)": Rust is reaching
   // the DHT itself, which is the whole reason Desktop exists.
   await expect.poll(() => app.text('[data-testid="network-protocol"]')).toBe("Mainline DHT (BEP44) — Direct UDP");
@@ -29,6 +30,25 @@ test("Desktop opens, with the peer Rust backs behind it", { tag: ["@feature:desk
   // is offered, which no web page is allowed to do.
   await app.click('[data-testid="account-services"]');
   await expect.poll(() => app.text('[data-testid="add-service"]')).toContain("Share a local service");
+});
+
+test("Settings holds still as it opens: Advanced stays where it was when the devices arrive", { tag: ["@feature:settings.media"] }, async ({ app }) => {
+  await expect.poll(() => app.text('[title="New Chat"]')).not.toBeNull();
+  await app.click('[title="Settings"]');
+  // Where Advanced sits in the page (not on screen: a scroll is not a move), read at once and then for 2 s. The
+  // native device list arrives within that (GStreamer, 30 to 100 ms on a machine with speakers).
+  const place = () => app.execute<number | null>(`
+    const row = document.querySelector('[data-testid="settings-advanced"]');
+    if (!row) return null;
+    let scroller = row.parentElement;
+    while (scroller && !/(auto|scroll)/.test(getComputedStyle(scroller).overflowY)) scroller = scroller.parentElement;
+    const top = scroller ? scroller.getBoundingClientRect().top - scroller.scrollTop : 0;
+    return Math.round(row.getBoundingClientRect().top - top);`);
+  await expect.poll(place).not.toBeNull();
+  const first = await place();
+  const seen = new Set<number | null>([first]);
+  for (const end = Date.now() + 2_000; Date.now() < end; await new Promise((done) => setTimeout(done, 100))) seen.add(await place());
+  expect([...seen], "Advanced moved while Settings was open").toEqual([first]);
 });
 
 test("the webview's <html lang> and <html dir> follow the language", { tag: ["@feature:app.i18n"] }, async ({ app }) => {
@@ -41,7 +61,7 @@ test("the webview's <html lang> and <html dir> follow the language", { tag: ["@f
   await expect.poll(() => app.attribute("html", "lang")).toBe("ar");
   await expect.poll(() => app.attribute("html", "dir")).toBe("rtl");
 
-  // The profile outlives the test: leave it in English for the next one.
+  // And back: the choice is not stuck on the first language picked.
   await choose(app, "settings-language", "en");
   await expect.poll(() => app.attribute("html", "lang")).toBe("en");
   await expect.poll(() => app.attribute("html", "dir")).toBe("ltr");

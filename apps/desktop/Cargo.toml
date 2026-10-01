@@ -1,0 +1,74 @@
+[package]
+name = "ghostly"
+version = "1.0.1"
+edition = "2021"
+
+[features]
+# The macOS end-to-end tests' driver (src/e2e_driver.rs): debug builds only, never shipped.
+e2e-driver = []
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+ghostly-transports = { path = "../../native/transports" }
+iroh = "=1.2.0"
+tauri = { version = "2", features = [] }
+tauri-plugin-updater = "2"
+tauri-plugin-process = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+pkarr = "8"
+simple-dns = "0.12"
+rand = "0.10"
+base64 = "0.23"
+crypto_secretbox = "0.1"
+reqwest = { version = "0.13", default-features = false }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+url = "2"
+cookie = "0.18"
+futures-util = { version = "0.3", default-features = false }
+tokio = { version = "1", features = ["rt", "sync", "time", "process", "io-util", "macros"] }
+tauri-plugin-notification = "2"
+# `image-data`: a picture on the clipboard, for a paste of files (clipboard.rs); `png` writes it out.
+arboard = { version = "3.6.1", default-features = false, features = ["image-data", "wayland-data-control"] }
+png = "0.18"
+tauri-plugin-dialog = "2"
+sha2 = "0.11"
+fs4 = { version = "1.1", features = ["sync"] }
+
+[dev-dependencies]
+tauri = { version = "2", features = ["test"] }
+rcgen = { version = "0.14", default-features = false, features = ["ring", "crypto"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring"] }
+tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread", "net"] }
+# A Mainline DHT of a few nodes on this machine, for the DHT-direct tests.
+mainline = "8"
+
+# Calls on Linux (src/native_call), whose WebKitGTK is built without WebRTC: WebRTC in Rust, media in GStreamer.
+[target.'cfg(target_os = "linux")'.dependencies]
+gstreamer = "0.25"
+gstreamer-app = "0.25"
+webrtc = "0.21"
+rtc = "0.21"
+async-trait = "0.1"
+bytes = "1"
+# Element full screen off in WebKitGTK (src/fullscreen.rs): the version Tauri's wry uses.
+webkit2gtk = "2"
+# One app per profile (src/single_instance.rs): a second launch brings the running window forward.
+tauri-plugin-single-instance = "2"
+
+# The window follows WebView2 in and out of full screen (src/fullscreen.rs): the versions Tauri's wry uses.
+[target.'cfg(windows)'.dependencies]
+webview2-com = "0.39"
+windows-core = "0.62"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+# The quarantine mark on a file saved from a chat (src/file_store.rs): setxattr.
+libc = "0.2"
+objc2 = "0.6"
+objc2-foundation = "0.3"
+objc2-user-notifications = "0.3"
+# `NSApplication` and `NSDockTile`: the test driver reads the Dock icon's badge (src/e2e_driver.rs).
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSDockTile", "NSResponder", "NSView", "NSSharingService"] }
+block2 = "0.6"

@@ -1,0 +1,1 @@
+Status cards: `task send` and `task update` (task.send, task.update) for a chat or a group; the engine writes the fallback text; updates merge over the card and go at most once per 2.5 s per card; message JSON carries `card`.

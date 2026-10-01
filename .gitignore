@@ -3,7 +3,7 @@ dist
 *.local
 .DS_Store
 target
-src-tauri/target
+apps/desktop/target
 
 .cursor
 
@@ -20,7 +20,7 @@ playwright-report-compat
 dist-e2e
 
 # Generated native HyperDHT runtime
-/src-tauri/native-runtime/
+/apps/desktop/native-runtime/
 
 # The SDK example installs @ghostlytools/sdk from a tarball packed on the spot (scripts/sdk-example.mjs)
 /examples/*/vendor/
@@ -36,3 +36,6 @@ blob-report-matrix
 
 # npm run test:map:write (the whole test map; generated, see docs/TESTING.md)
 /docs/test-map.md
+
+# TypeScript build info (tsc -b): never committed
+*.tsbuildinfo

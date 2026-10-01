@@ -202,6 +202,29 @@ describe("capability record: publishing and reading", () => {
     await again.stop();
   });
 
+  it("started late (once the chat's endpoints are up), reads a revision named meanwhile; stopped first, never starts", async () => {
+    // Bug hunt r7a: the engine starts a saved contact's exchange once its native endpoints are up, not in the burst of a
+    // restart. An envelope may name a newer record of the contact's before that; a chat may stop before it.
+    vi.useFakeTimers();
+    const { link } = pair(), { transport } = exchange();
+    const credentials: PairingCredentials = { seedB64: createIdentity().seedB64, peerKey: createIdentity().pubKeyZ32 };
+    const theirs = new CapsExchange({ params: link.invite, credentials: { seedB64: createIdentity().seedB64 }, transport, local: () => content({ name: "Bo" }), save: async () => {} });
+    theirs.start(); await vi.advanceTimersByTimeAsync(0);
+    const mine = new CapsExchange({ params: link.mine, credentials, transport, local: () => content(), save: async () => {},
+      state: { ...emptyCapsState(), peer: { ...content(), rev: 0, issued: 0, author: "x", extensions: [] } } });
+    mine.peerRev(1);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(transport.resolve, "nothing while waiting to start").not.toHaveBeenCalled();
+    mine.start(); await vi.advanceTimersByTimeAsync(0);
+    expect(transport.resolve).toHaveBeenCalledTimes(1);
+    await mine.stop(); await theirs.stop();
+    const stopped = new CapsExchange({ params: link.mine, credentials, transport, local: () => content(), save: async () => {} });
+    await stopped.stop();
+    const before = transport.publish.mock.calls.length;
+    stopped.start(); await vi.advanceTimersByTimeAsync(CAPS_REFRESH_MS);
+    expect(transport.publish.mock.calls.length, "a start after its chat stopped does nothing").toBe(before);
+  });
+
   it("says when a new revision went out (an envelope names it), not when the same content is sealed again", async () => {
     vi.useFakeTimers();
     const { link } = pair(), { transport } = exchange();

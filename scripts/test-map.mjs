@@ -165,7 +165,7 @@ for (const file of files.filter((p) => isUnit(p) || isRust(p))) {
 // A bad pattern fails; a source file no glob matches only warns: test:affected runs every spec for it.
 for (const problem of checkPaths(inventory)) errors.push(`${FEATURES}: ${problem}`);
 const globs = Object.keys(inventory.paths ?? {}).map((g) => globToRegExp(g));
-const SOURCE = /^(?:src|packages\/[^/]+\/src|extension\/src|web\/src)\//;
+const SOURCE = /^(?:apps\/ui\/src|packages\/[^/]+\/src|apps\/extension\/src|apps\/web\/src)\//;
 const unmapped = files.filter((p) => SOURCE.test(p) && !isUnit(p) && !p.endsWith(".md") && !globs.some((re) => re.test(p)));
 for (const p of unmapped) warnings.push(`${p}: no glob in ${FEATURES} "paths" (npm run test:affected runs every e2e spec when it changes)`);
 

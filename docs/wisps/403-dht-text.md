@@ -48,7 +48,7 @@ So one read of a mailbox does not tell whether its envelope carries a text, a re
 What such a reader can still learn:
 
 - That the mailbox exists and is in use, and whether the pin happened (the `_dmk` record appears).
-- When each envelope was published: the packet's timestamp is in the clear. With nothing to send, an envelope goes about every four minutes; a text goes at once and again after 4, 8, 16 and 32 s and then every 60 s until its receipt, and a receipt goes at once. Someone reading a mailbox every few seconds can tell activity from that pattern. Hiding it would take envelopes on a fixed schedule whatever happens, which the relays' request budget and the delivery latency do not allow today; it is an open item.
+- When each envelope was published: the packet's timestamp is in the clear. With nothing to send, an envelope goes about every four minutes (a paired chat started again sends its first one 15 s after the start, revision 2026-09-29); a text goes at once and again after 4, 8, 16 and 32 s and then every 60 s until its receipt, and a receipt goes at once. Someone reading a mailbox every few seconds can tell activity from that pattern. Hiding it would take envelopes on a fixed schedule whatever happens, which the relays' request budget and the delivery latency do not allow today; it is an open item.
 - The relays see the IP address of whoever publishes and reads.
 
 Before this revision a text's TTL was its remaining lifetime (at most 300 s, lower on every retry), a keep-alive's was 600 s, and a packet's size followed its content (in one run: keep-alives of 406 bytes before the pin and 576 after, texts of 474 to 969), so a single read told that a text was pending.
@@ -129,7 +129,7 @@ What changes is where the choice is made: not in the invite, but in the chat's C
 | A text of ours awaits its receipt | 4 s |
 | `on-dht`, chat open and app in front | 10 s |
 | `on-dht`, in the background | 30 s |
-| `live` | 5 min, and at once when layer 1 is lost |
+| `live` | Once as layer 1 comes up, then 5 min, and at once when layer 1 is lost |
 
 `on-dht` with the chat open was 4 s in the proposal; 10 s leaves room in the relays' budget for presence reads and hold pointers while layer 1 is redialled.
 
@@ -137,7 +137,7 @@ With every chat running this profile, reads multiply by the number of chats. The
 
 ## What never enters this path
 
-Financial envelopes, files, pictures, calls and service bodies never enter this path; Cashu bearer tokens are refused as text. A short pasted Lightning invoice can fit as text, but publishing it starts no payment. A contact whose capability record lacks `dht-text/1` receives nothing on this path: the sender queues for layer 1 instead ([03](03-capabilities.md#layer-0-capability-record)).
+Financial envelopes, files, pictures, calls and service bodies never enter this path; Cashu bearer tokens are refused as text. A status card ([4xx · Status Cards](4xx-status-cards.md), revision 2026-09-29) never does either: a card's first message may go here as its fallback text when it fits, and its updates wait for the live session. A short pasted Lightning invoice can fit as text, but publishing it starts no payment. A contact whose capability record lacks `dht-text/1` receives nothing on this path: the sender queues for layer 1 instead ([03](03-capabilities.md#layer-0-capability-record)).
 
 ## Runtime and conformance
 

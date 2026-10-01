@@ -1,8 +1,8 @@
 **/node_modules
 **/dist
 target
-src-tauri/target
-website
+apps/desktop/target
+apps/website
 screenshots
 .git
 *.png

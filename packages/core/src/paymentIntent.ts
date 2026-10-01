@@ -1,4 +1,5 @@
 import { BITCOIN_NETWORKS, isBitcoinAddress, type BitcoinNetwork } from "./bitcoinAddress";
+import { engineError } from "./engineErrors";
 import { isFederationId } from "./payments";
 import { SPARK_NETWORKS, SPARK_PROVIDER, isSparkAddress, type SparkNetwork } from "./sparkAddress";
 
@@ -44,6 +45,8 @@ export interface PaymentReview extends PaymentTarget {
   fee: number;
   feeCap: number;
   createdAt: number;
+  /** When it was approved (claimed for spending): how old an attempt whose outcome is unknown is, across a reload. */
+  submittedAt?: number;
   state: IntentState;
   txid?: string;
   error?: string;
@@ -119,6 +122,6 @@ export function validatePaymentTarget(value: unknown, now = Date.now()): Payment
     const url = new URL(t.provider);
     if (url.username || url.password || url.search || url.hash || (url.protocol !== "https:" && !(url.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname)))) throw new Error("Use HTTPS or a local test provider");
   }
-  if (!Number.isSafeInteger(t.expiresAt) || t.expiresAt <= now || t.expiresAt > now + 24 * 60 * 60 * 1000) throw new Error("Payment request expired or has an invalid expiry");
+  if (!Number.isSafeInteger(t.expiresAt) || t.expiresAt <= now || t.expiresAt > now + 24 * 60 * 60 * 1000) throw engineError("paymentExpired");
   return { method:t.method,network:t.network,provider:t.provider,asset:t.asset,unit:t.unit,address:t.address,expiresAt:t.expiresAt, ...(evm ? {chainId:t.chainId,token:t.token,decimals:t.decimals,issuedAt:t.issuedAt} : {}) };
 }

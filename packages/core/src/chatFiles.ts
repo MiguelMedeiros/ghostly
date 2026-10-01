@@ -445,6 +445,14 @@ export class ChatFiles {
     return [...this.entries.values()].filter((e) => e !== except && e.record.direction === "in" && (e.record.state === "active" || e.record.state === "verifying")).length;
   }
 
+  /**
+   * Removes what this side stored of an incoming file that ends here. Through its target, opened now if need be: after
+   * a restart a transfer has none until bytes arrive again, and one cancelled before that kept its part on the disk.
+   */
+  private discardStored(entry: Entry): Promise<void> {
+    return entry.in ? this.target(entry).then((t) => t.discard()).catch(() => {}) : Promise.resolve();
+  }
+
   private target(entry: Entry): Promise<IncomingTarget> {
     const incoming = entry.in!;
     if (!incoming.target) {
@@ -708,7 +716,7 @@ export class ChatFiles {
     if (frame.t === "pf-sum") { if (incoming) await this.onSum(incoming, frame); return; }
     if (frame.t === "pf-abort") {
       if (incoming && !transferEnded(incoming.record)) {
-        await incoming.in?.target?.then((t) => t.discard()).catch(() => {});
+        await this.discardStored(incoming);
         incoming.record.abortedBySender = true;
         this.end(incoming, "cancelled", "Cancelled by the sender");
         this.startNext();
@@ -796,7 +804,7 @@ export class ChatFiles {
   decline(id: string): void {
     const entry = this.entry("in", id);
     if (transferEnded(entry.record)) return;
-    void entry.in?.target?.then((t) => t.discard()).catch(() => {});
+    void this.discardStored(entry);
     this.end(entry, "declined", "You declined it");
     this.send({ t: "pf-refuse", id, why: "declined" });
     this.startNext();
@@ -830,7 +838,7 @@ export class ChatFiles {
       this.send({ t: "pf-abort", id });
       this.end(entry, "cancelled", "You cancelled it");
     } else {
-      void entry.in?.target?.then((t) => t.discard()).catch(() => {});
+      void this.discardStored(entry);
       this.end(entry, "cancelled", "You cancelled it");
       this.send({ t: "pf-refuse", id, why: "cancelled" });
       this.startNext();

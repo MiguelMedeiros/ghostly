@@ -56,10 +56,13 @@ const ark = vi.hoisted(() => {
     recoveryTxid: undefined as string | undefined,
     contracts: [] as Array<{ script: string; type: string; metadata?: { signingDescriptor?: string }; params: { pubKey: string } }>,
     walletState: { settings: { hasPendingTx: false } } as { settings: Record<string, unknown> } | undefined,
+    /** This wallet's coins as `getVtxos({ withRecoverable: true })` lists them, and the recoveries asked for. */
+    coins: [] as Array<{ txid: string; vout: number; value: number; isSwept: boolean; expiresAt?: Date }>,
+    recoveries: 0,
     created: [] as Array<Record<string, unknown>>,
     identities: [] as Array<{ isMainnet: boolean }>,
     reset() {
-      Object.assign(server, { info: { network: "signet", signerPubkey: "02" + "a".repeat(64) }, balance: 100_000, fee: 3, submits: [], finalizes: [], vtxos: [], tamper: undefined, sendError: undefined, submitFails: false, finalizeFails: 0, recoveryTxid: undefined, respond: server.defaultRespond, created: [], identities: [], walletState: { settings: { hasPendingTx: false } } });
+      Object.assign(server, { info: { network: "signet", signerPubkey: "02" + "a".repeat(64) }, balance: 100_000, fee: 3, submits: [], finalizes: [], vtxos: [], tamper: undefined, sendError: undefined, submitFails: false, finalizeFails: 0, recoveryTxid: undefined, coins: [], recoveries: 0, respond: server.defaultRespond, created: [], identities: [], walletState: { settings: { hasPendingTx: false } } });
       server.pending.clear();
       server.contracts = [{ script: server.own, type: "default", params: { pubKey: "11".repeat(32) } }];
     },
@@ -107,6 +110,22 @@ const ark = vi.hoisted(() => {
       for (const [txid, pending] of server.pending) if (!server.recoveryTxid || server.recoveryTxid === txid) await this.options.arkProvider.finalizeTx(txid, pending.checkpoints);
     }
     async getContractManager() { return { getContracts: async () => server.contracts }; }
+    readonly dustAmount = 330n;
+    async getVtxos() { return server.coins.map((c) => ({ ...c })); }
+    async getVtxoManager() {
+      // As the SDK's: swept coins (and past-expiry ones: it cannot tell) together under the dust limit make no batch.
+      const taken = () => server.coins.filter((c) => c.isSwept || (!!c.expiresAt && c.expiresAt <= new Date())).reduce((sum, c) => sum + c.value, 0);
+      return {
+        // Net of a 1% input fee; a recovery under the dust limit after fees is refused, while this still answers it.
+        getRecoverableBalance: async () => ({ recoverable: taken() >= 330 ? BigInt(Math.floor(taken() * 0.99)) : 0n }),
+        recoverVtxos: async () => {
+          if (taken() < 330) throw new Error("No recoverable VTXOs found");
+          if (Math.floor(taken() * 0.99) < 330) throw new Error("Recoverable amount net of intent fees is below dust threshold 330");
+          server.recoveries++;
+          return "c".repeat(64);
+        },
+      };
+    }
     async signerForDescriptor(descriptor: string) { return { sign: async (tx: Transaction, [index]: number[]) => (descriptor === "good" ? tx.signed(index) : tx) }; }
     async dispose() {}
   }
@@ -136,6 +155,9 @@ const ark = vi.hoisted(() => {
       });
     },
     assertAllowedSighashTypes: () => {},
+    // As the SDK has them: swept is recoverable; past its expiry (by the clock) counts too, swept or not.
+    isRecoverable: (v: { isSwept: boolean }) => v.isSwept,
+    canRecoverOnchain: (v: { isSwept: boolean; expiresAt?: Date }, now: { timestamp: Date }) => v.isSwept || (!!v.expiresAt && v.expiresAt <= now.timestamp),
     verifyTapscriptSignatures: (tx: Transaction, _index: number, keys: string[]) => { if (tx.data.cosigned !== keys[0]) throw new Error("not signed by the pinned server key"); },
   };
   return { server, sdk, enc, Transaction };
@@ -175,6 +197,49 @@ describe("connecting an Ark wallet", () => {
     expect(server.identities).toEqual([{ isMainnet: false }, { isMainnet: true }, { isMainnet: false }]);
     expect(server.created.map((c) => c.settlementConfig)).toEqual([{ boardingUtxoSweep: true }, { boardingUtxoSweep: true }, false]);
     expect((server.created[2].storage as { walletRepository: { name: string } }).walletRepository.name, "each profile keeps its own Ark database").toBe("ghostly-ark-fresh");
+  });
+});
+
+describe("expired coins", () => {
+  it("tells coins waiting for the server's sweep from swept ones, and recovers only once none is waiting", async () => {
+    const adapter = await connect();
+    const past = new Date(Date.now() - 60_000), later = new Date(Date.now() + 60_000);
+    server.coins = [
+      { txid: "a".repeat(64), vout: 0, value: 700, isSwept: false, expiresAt: later },
+      { txid: "b".repeat(64), vout: 0, value: 300, isSwept: false, expiresAt: past },
+      { txid: "c".repeat(64), vout: 0, value: 50, isSwept: true, expiresAt: past },
+    ];
+    expect(await adapter.expired(), "while one waits for the sweep, all of them wait").toEqual({ recoverable: 0, sweeping: 350, small: 0 });
+    // The SDK would name the unswept coin too, without its forfeit: that batch fails and the server bans the coin.
+    await expect(adapter.recover()).rejects.toThrow("once the Ark server has swept");
+    expect(server.recoveries).toBe(0);
+    server.coins[1].isSwept = true;
+    expect(await adapter.expired()).toEqual({ recoverable: 350, sweeping: 0, small: 0 });
+    await expect(adapter.recover()).resolves.toBe("c".repeat(64));
+    expect(server.recoveries).toBe(1);
+    server.coins = [server.coins[0]];
+    expect(await adapter.expired()).toEqual({ recoverable: 0, sweeping: 0, small: 0 });
+    await expect(adapter.recover()).rejects.toThrow("Nothing to recover");
+    expect(server.recoveries).toBe(1);
+  });
+  it("swept coins too few for a batch of their own are set apart, and no recovery is tried", async () => {
+    const adapter = await connect();
+    const past = new Date(Date.now() - 60_000);
+    server.coins = [
+      { txid: "a".repeat(64), vout: 0, value: 200, isSwept: true, expiresAt: past },
+      { txid: "b".repeat(64), vout: 0, value: 50, isSwept: true, expiresAt: past },
+    ];
+    expect(await adapter.expired()).toEqual({ recoverable: 0, sweeping: 0, small: 250 });
+    await expect(adapter.recover()).rejects.toThrow("Too few expired sats");
+    expect(server.recoveries).toBe(0);
+    // Over the dust limit, but not once the fee is paid: still too few.
+    server.coins.push({ txid: "c".repeat(64), vout: 0, value: 81, isSwept: true, expiresAt: past });
+    expect(await adapter.expired()).toEqual({ recoverable: 0, sweeping: 0, small: 331 });
+    await expect(adapter.recover()).rejects.toThrow("Too few expired sats");
+    // More coins expire: together they make a batch.
+    server.coins.push({ txid: "d".repeat(64), vout: 0, value: 400, isSwept: true, expiresAt: past });
+    expect(await adapter.expired()).toEqual({ recoverable: 731, sweeping: 0, small: 0 });
+    await expect(adapter.recover()).resolves.toBe("c".repeat(64));
   });
 });
 

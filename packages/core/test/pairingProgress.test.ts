@@ -110,4 +110,19 @@ describe("PairingTracker", () => {
     t.failed("key-mismatch", false);
     expect(reported.at(-1)).toMatchObject({ stage: "failed", reason: "key-mismatch", retryable: false });
   });
+
+  it("an invite someone else took holds against the attempts that go on, and is taken back only by untaken", () => {
+    const { t, stages } = tracker("joiner");
+    t.sawPeer(); t.onDht("waiting");
+    t.failed("taken", false, "Someone else joined with this invite first.");
+    t.offerSent(); t.failed("transport", true); t.onDht("transport"); t.reset();
+    expect(t.progress).toMatchObject({ stage: "failed", reason: "taken", retryable: false, peerSeen: true });
+    expect(t.done).toBe(true);
+    // The inviter's envelope reads here again: the "taken" was forged by someone holding a copy of the invite.
+    t.untaken();
+    expect(t.progress).toMatchObject({ stage: "on-dht", reason: "waiting", retryable: true, peerSeen: true });
+    expect(t.done).toBe(false);
+    t.untaken();
+    expect(stages()).toEqual(["resolving", "on-dht", "failed", "on-dht"]);
+  });
 });

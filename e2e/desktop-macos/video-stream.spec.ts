@@ -8,7 +8,7 @@ import { fullscreenInPage, playFromStore, servePieces, servedRequests, storeInAp
 
 /**
  * A video too large for the page (#381: over 64 MiB, `NATIVE_BLOB_MAX`) plays and seeks in the Desktop app on a Mac,
- * from the stored file: WKWebView reads it in ranges from the `ghostly-file` scheme (src-tauri/src/file_stream.rs),
+ * from the stored file: WKWebView reads it in ranges from the `ghostly-file` scheme (apps/desktop/src/file_stream.rs),
  * under the app's own Content-Security-Policy. The video is 100 MB: fifty copies of the two-second fixture with
  * filler between them (support/bigVideo.ts), so a seek to 1:30 reads near the end of the file.
  *
@@ -82,7 +82,7 @@ test("a 100 MB video plays and seeks from the stored file, a range at a time", {
 });
 
 // A video's Full screen button did nothing on the Mac (Picture in Picture worked): WKWebView ships with element full
-// screen off. src-tauri/src/fullscreen.rs turns it on; WebKit shows the element in a full-screen window of its own.
+// screen off. apps/desktop/src/fullscreen.rs turns it on; WebKit shows the element in a full-screen window of its own.
 test("a video goes full screen and comes back", {
   tag: ["@client:desktop", "@feature:files.video.play"],
 }, async () => {

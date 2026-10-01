@@ -111,6 +111,18 @@ describe("adding a proof: drafts and limits", () => {
 });
 
 describe("removing a proof and its revocation", () => {
+  it("clearing the profile's data revokes every proof ever shared, once, and none that never left the device", async () => {
+    const { engines, pkarr, binding } = await shared();
+    const kept = await prove(engines.a);
+    pkarr.clear();
+    await engines.a.revokeAll();
+    expect([...pkarr.keys()], "the shared proof's key, not the other").toHaveLength(1);
+    const records = [...pkarr.values()][0];
+    expect(records[0].label).toBe("_ghostly-revoked");
+    expect(records[0].value).toContain(`id=${identityStatement(binding).id}`);
+    expect(records.some((r) => r.value.includes(kept.id))).toBe(false);
+  });
+
   it("a proof never shared is removed without publishing anything; an unknown id changes nothing", async () => {
     const { engines, pkarr } = pair();
     await clearStorage(); await engines.a.load();

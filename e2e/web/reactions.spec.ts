@@ -104,6 +104,18 @@ test("1:1 reactions: add, change, the same one from the contact, take back; who 
   await expect(row(bob.page, "see you there")).toBeVisible();
   await react(alice.page, mine, "🎉", "party");
   await expect(chip(row(bob.page, "see you there"), "🎉")).toBeVisible();
+
+  // Alice edits the message her reaction quotes: Bob's chat list line follows the new text.
+  const bobNote = bob.page.getByTestId("chat-row").first().getByTestId("chat-row-note");
+  await expect(bobNote).toHaveText('Alice reacted 🎉 to "see you there"', { timeout: 60_000 });
+  await mine.hover();
+  await mine.getByTestId("message-options").click();
+  await alice.page.getByTestId("message-edit").click();
+  const box = alice.page.getByPlaceholder("Message…");
+  await box.fill("see you at one");
+  await box.press("Enter");
+  await expect(row(bob.page, "see you at one")).toBeVisible({ timeout: 60_000 });
+  await expect(bobNote).toHaveText('Alice reacted 🎉 to "see you at one"', { timeout: 30_000 });
 });
 
 test("an app from before reactions gets nothing, and its contact's chip stays on their side", { tag: ["@feature:chat.reactions.wire"] }, async ({ peer }) => {
@@ -144,9 +156,9 @@ test("a reaction in a group reaches the other member, named", { tag: ["@feature:
   await expect(groupChat(bob)).toHaveAttribute("data-status", "active", { timeout: 180_000 });
   // A community member's name travels with what they say.
   await say(bob, "hi from Bob");
-  await expect(groupChat(alice).getByText("hi from Bob")).toBeVisible({ timeout: 120_000 });
+  await expect(chat(alice).getByText("hi from Bob")).toBeVisible({ timeout: 120_000 });
   await say(alice, "who is in for pizza?");
-  await expect(groupChat(bob).getByText("who is in for pizza?")).toBeVisible({ timeout: 120_000 });
+  await expect(chat(bob).getByText("who is in for pizza?")).toBeVisible({ timeout: 120_000 });
 
   // Bob reacts to Alice's message; she sees it, with his name.
   const question = row(bob.page, "who is in for pizza?");

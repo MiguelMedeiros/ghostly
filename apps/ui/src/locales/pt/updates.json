@@ -1,0 +1,29 @@
+{
+  "applyHint": "Atualizar encerra suas chamadas e conexões.",
+  "auto": "Verificar atualizações automaticamente",
+  "autoDescription": "Desligado: só quando você tocar em Verificar agora",
+  "available": "Ghostly {{version}} disponível",
+  "checkNow": "Verificar agora",
+  "checking": "Verificando...",
+  "download": "Baixar",
+  "downloading": "Baixando... {{percent}}%",
+  "errorDetails": "O que o atualizador disse",
+  "failed": "Não foi possível verificar atualizações",
+  "installing": "Atualizando...",
+  "lastChecked": "Última verificação às {{when}}",
+  "later": "Depois",
+  "manualHint": "Baixe e substitua esta instalação.",
+  "reload": "Recarregar",
+  "restart": "Atualizar e reiniciar",
+  "title": "Atualizações",
+  "upToDate": "O Ghostly está atualizado",
+  "why": {
+    "noRelease": "O servidor de atualizações não deu informações da versão. Tente de novo mais tarde.",
+    "notForThisSystem": "A versão mais recente ainda não tem atualização para este sistema.",
+    "offline": "Este dispositivo está sem conexão.",
+    "signature": "A assinatura da atualização não conferiu, então ela não foi usada.",
+    "timeout": "O servidor de atualizações demorou demais para responder.",
+    "unknown": "Algo deu errado ao verificar.",
+    "unreachable": "Não foi possível alcançar o servidor de atualizações. Verifique sua conexão."
+  }
+}

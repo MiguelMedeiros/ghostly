@@ -39,7 +39,7 @@ vi.mock("../src/engine/paymentAdapters/arkade", () => ({
   ArkadeAdapter: {
     connect: vi.fn(async (config: object, mnemonic: string) => {
       const read = <T>(what: string, value: T) => async () => { if (fx.arkFails.has(what)) throw new Error(`${what} unavailable`); return value; };
-      const adapter = { config, mnemonic, address: read("address", `ark1${mnemonic.split(" ")[0]}`), boardingAddress: read("boarding address", "bc1qboarding"), balance: async () => { if (fx.arkFails.has("balance")) throw new Error("balance unavailable"); return fx.funds.get(mnemonic) ?? 0; }, incoming: read("incoming", 0), recoverable: read("recoverable", 0), requestAddress: async () => "ark1request", recover: async () => "f".repeat(64), dispose: vi.fn() };
+      const adapter = { config, mnemonic, address: read("address", `ark1${mnemonic.split(" ")[0]}`), boardingAddress: read("boarding address", "bc1qboarding"), balance: async () => { if (fx.arkFails.has("balance")) throw new Error("balance unavailable"); return fx.funds.get(mnemonic) ?? 0; }, incoming: read("incoming", 0), expired: read("recoverable", { recoverable: 0, sweeping: 0 }), requestAddress: async () => "ark1request", recover: async () => "f".repeat(64), dispose: vi.fn() };
       fx.adapters.push(adapter);
       return adapter;
     }),

@@ -46,7 +46,7 @@ export const REQUIREMENTS: Record<string, { met: () => boolean; missing: string 
     met: () =>
       (process.platform === "linux" || process.platform === "win32") && desktopBuilt() &&
       (process.env.TAURI_DRIVER ? existsSync(process.env.TAURI_DRIVER) : onPath(process.platform === "win32" ? "where" : "which", ["tauri-driver"])) &&
-      existsSync(join(import.meta.dirname, "..", "..", "native-transports", "hyperdht", "node_modules", "hyperdht", "testnet.js")),
+      existsSync(join(import.meta.dirname, "..", "..", "native", "transports", "hyperdht", "node_modules", "hyperdht", "testnet.js")),
     missing: "a Desktop peer: Linux or Windows with tauri-driver and a built app (npm run tauri -- build --debug --no-bundle); macOS has no WebDriver for WKWebView, so the nightly Linux job runs these",
   },
   lnd: { met: () => env("GHOSTLY_LND_REGTEST") === "1", missing: "the LND regtest stack (GHOSTLY_LND_REGTEST=1)" },

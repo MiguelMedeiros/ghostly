@@ -1,12 +1,11 @@
 import { execFileSync } from "node:child_process";
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { expect, type Locator } from "@playwright/test";
 import { Interface } from "ethers";
+import { recoverExpiredArk, smallExpiredArk } from "../support/arkRecover";
+import { exclusive } from "../support/exclusive";
 import { chatPayments } from "../support/payments";
 import { choose } from "../support/select";
-import { chatPane, either, newWallet, openChat, paymentCard, wallet, type Actor } from "./actors";
+import { alternatives, cardAction, chatPane, containing, either, filled, newWallet, openChat, paymentCard, template, wallet, type Actor } from "./actors";
 
 /**
  * The Testnet payment blocks of the rails that need e2e/infra (Lightning through LND, Core Lightning, NWC
@@ -33,7 +32,7 @@ export async function chatMethods(actor: Actor, off: string[]): Promise<void> {
 }
 
 /** A note of the scenario's own on a payment: the one thing in its bubble no clock or amount can match by accident. */
-export const memo = (actor: Actor, text: string) => actor.page.getByLabel("What for? (optional)").fill(text);
+export const memo = (actor: Actor, text: string) => actor.page.getByLabel(either("What for? (optional)")).fill(text);
 export const bubble = (actor: Actor, text: string) => chatPane(actor).getByTestId("payment-bubble").filter({ hasText: text }).last();
 export const approve = (scope: Locator) => scope.getByTestId("payment-review").getByRole("button", { name: either("Approve payment") }).click({ timeout: 60_000 });
 
@@ -41,35 +40,6 @@ const SETTLED = new RegExp(`^(?:${[either("Paid").source, either("Received").sou
 
 /** The first number in a balance line, whatever the language groups its thousands with (integers only). */
 const amountIn = (text: string) => Number(/\d[\d.,\s]*/.exec(text)?.[0].replace(/[^\d]/g, "") ?? NaN);
-
-/**
- * Work on a shared node pair, one scenario at a time. The matrix runs several workers, and the Lightning
- * suites of e2e/infra have one pair of nodes each: two scenarios paying over the same channel at once would
- * each see the other's payments in the balances. A lock directory per rail, held by a live process.
- */
-async function exclusive<T>(name: string, work: () => Promise<T>): Promise<T> {
-  const dir = join(tmpdir(), "ghostly-matrix-locks", name);
-  mkdirSync(join(dir, ".."), { recursive: true });
-  for (;;) {
-    try {
-      mkdirSync(dir);
-      writeFileSync(join(dir, "pid"), String(process.pid));
-      break;
-    } catch {
-      let holder = NaN;
-      try { holder = Number(readFileSync(join(dir, "pid"), "utf8")); } catch { /* just made: its pid comes next */ }
-      let alive = true;
-      if (Number.isInteger(holder)) try { process.kill(holder, 0); } catch { alive = false; }
-      if (!alive) rmSync(dir, { recursive: true, force: true });
-      else await new Promise((resolve) => setTimeout(resolve, 1_000));
-    }
-  }
-  try {
-    return await work();
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-}
 
 interface ChatPayment {
   card: string;
@@ -88,7 +58,7 @@ async function sendInChat(from: Actor, to: Actor, p: ChatPayment, confirm?: () =
   await paymentCard(from, p.card);
   await from.page.getByTestId("payment-amount").fill(p.amount);
   await memo(from, p.note);
-  await from.page.getByTestId("payment-send").click();
+  await cardAction(from, "send");
   const composer = from.page.getByTestId("payment-composer");
   await approve(composer);
   // Gone out: the sheet closes, back to the chat, whose bubbles tell the rest.
@@ -105,15 +75,15 @@ async function requestInChat(payee: Actor, payer: Actor, p: ChatPayment, confirm
   await paymentCard(payee, p.card);
   await payee.page.getByTestId("payment-amount").fill(p.amount);
   await memo(payee, p.note);
-  await payee.page.getByTestId("payment-request").click();
+  await cardAction(payee, "request");
   await openChat(payer);
   const request = bubble(payer, p.note);
-  if (p.maxFee) await request.getByLabel(either("Maximum fee (sats)")).fill(p.maxFee);
+  if (p.maxFee) await request.getByLabel(filled("Maximum fee ({{unit}})", { unit: `${alternatives("test sats")}|${alternatives("sats")}` })).fill(p.maxFee);
   await request.getByTestId("payment-pay").click({ timeout: 60_000 });
   await approve(request);
   await settles(bubble(payee, p.note), confirm);
   await settles(request, confirm);
-  if (!confirm && p.card !== "lightning") await expect(request.getByTestId("payment-review").getByTestId("review-status")).toHaveText(/settled|confirmed/, { timeout: 90_000 });
+  if (!confirm && p.card !== "lightning") await expect(request.getByTestId("payment-review").getByTestId("review-status")).toHaveText(new RegExp(`${alternatives("settled")}|${alternatives("confirmed")}`), { timeout: 90_000 });
 }
 
 /** Paid (or Received) — mining a block at a time while it waits, for a rail that settles on-chain. */
@@ -223,7 +193,7 @@ async function payInvoiceOfCard(from: Actor, to: Actor, sats: number): Promise<v
   await wallet(from, "lightning");
   await from.page.getByTestId("wallet-send").click();
   await from.page.getByTestId("wallet-pay-input").fill(invoice);
-  await from.page.getByRole("button", { name: `Pay ${sats.toLocaleString("en")} sats` }).click();
+  await from.page.getByRole("button", { name: filled("Pay {{amount}} {{unit}}", { amount: String(sats), unit: alternatives("test sats") }) }).click();
   await from.page.getByRole("button", { name: either("Pay") }).click();
   await expect(from.page.getByTestId("wallet-notice")).toHaveText(either("Paid."), { timeout: 90_000 });
   await expect(to.page.getByTestId("wallet-paid")).toBeVisible({ timeout: 60_000 });
@@ -334,29 +304,37 @@ async function arkade(a: Actor, b: Actor): Promise<void> {
     await expect(panel(p).getByTestId("ark-address")).toBeVisible({ timeout: 60_000 });
   }
   await expect.poll(() => sats(a), { timeout: 60_000 }).toBe(9_900);
-  // A regtest batch expires within minutes (e2e/infra: 180 s): coins that outlived theirs are recoverable, not
-  // spendable, until the wallet's Recover moves them into a new batch — which a person does when the wallet
-  // offers it. The server can recover only what it has swept, and its sweep waits for the chain's time to
-  // pass the expiry: an idle regtest chain has no blocks to move it, so the test mines while it recovers.
+  // A regtest batch expires within minutes (e2e/infra: 180): coins that outlived theirs wait for the server to sweep
+  // that batch, then Recover moves them into a new one, as a person does when the wallet offers it. The sweep comes
+  // with the chain's blocks, so the helper mines until it has (support/arkRecover.ts). Each recovery pays the
+  // server's input fee (e2e/infra: 1%), which the final balances allow for.
+  const fees = new Map<Actor, number>([[a, 0], [b, 0]]);
+  const recover = async (p: Actor) => {
+    const back = await recoverExpiredArk(panel(p), p.name, () => sats(p));
+    if (back > 0) fees.set(p, fees.get(p)! + Math.ceil(back / 99) + 1);
+  };
   const recovered = async (p: Actor) => {
     await wallet(p, "arkade");
-    const recoverable = panel(p).getByTestId("ark-recoverable");
-    if (!(await recoverable.isVisible())) return;
-    await expect(async () => {
-      bdkRegtest("mine", "3");
-      if (await recoverable.isVisible()) await panel(p).getByTestId("ark-recover").click();
-      await expect(recoverable).toHaveCount(0, { timeout: 20_000 });
-    }, `${p.name}'s expired coins are recovered`).toPass({ timeout: 180_000 });
-    // Recovered into the next batch: spendable again once that round is done.
-    await expect.poll(() => sats(p), { timeout: 120_000, message: `${p.name}'s recovered coins are back` }).toBeGreaterThan(0);
+    await recover(p);
   };
   await bothWays(a, b, "arkade", [500, 100, 200, 50], recovered);
-  // A: 9,900 − 500 − 100 + 200 + 50; B: 500 + 100 − 200 − 50, less what the recoveries cost (a few sats
-  // each, to the new batch).
+  // A: 9,900 − 500 − 100 + 200 + 50; B: 500 + 100 − 200 − 50, less what the recoveries cost. A payment made from
+  // coins about to expire reaches its payee already expired: swept, and when small, too few to recover on their own
+  // (under the server's dust limit). Those still count as the payee's, set apart (`ark-small`).
   for (const [p, expected] of [[a, 9_550], [b, 350]] as const) {
-    await recovered(p);
-    await expect.poll(() => sats(p), { timeout: 60_000 }).toBeLessThanOrEqual(expected);
-    expect(await sats(p)).toBeGreaterThanOrEqual(expected - 60);
+    await wallet(p, "arkade");
+    // The last payment reaches the wallet's figures on its next poll (10 s), and coins may expire only after a
+    // recovery found none (their batch is A's funding, minutes old): whenever expired ones show, they are recovered,
+    // until the sats are held (4 min at most). A failed recovery fails the test, never retried.
+    const held = async () => (await sats(p)) + (await smallExpiredArk(panel(p)));
+    const enough = () => expected - 60 - fees.get(p)!;
+    for (const until = Date.now() + 4 * 60_000; ;) {
+      await recover(p);
+      if ((await held()) >= enough() || Date.now() > until) break;
+      await p.page.waitForTimeout(2_000);
+    }
+    expect(await held(), `${p.name}'s sats, the expired ones set apart included`).toBeGreaterThanOrEqual(enough());
+    expect(await held()).toBeLessThanOrEqual(expected);
   }
 }
 
@@ -407,7 +385,7 @@ async function bdk(a: Actor, b: Actor): Promise<void> {
       await area.getByTestId("provider-save").click();
     } });
     await wallet(p, "bitcoin-testnet");
-    await expect(panel(p).getByTestId("onchain-source-status")).toContainText(/Connected/, { timeout: 60_000 });
+    await expect(panel(p).getByTestId("onchain-source-status")).toContainText(containing("Connected"), { timeout: 60_000 });
     await panel(p).getByTestId("bitcoin-new-address").click();
     address[p.name] = (await panel(p).getByTestId("bitcoin-address").innerText()).trim();
     expect(address[p.name]).toMatch(/^bcrt1q/);
@@ -431,7 +409,7 @@ async function bdk(a: Actor, b: Actor): Promise<void> {
   // B: 20,000 − 5,000 + 3,000 − 2,000 and its two fees; A: the rest, less its own two fees.
   const settledBalance = async (p: Actor) => {
     await wallet(p, "bitcoin");
-    await expect.poll(async () => { mine(); await refreshed(p); return balance(p).innerText(); }, { timeout: 90_000, intervals: [3_000] }).not.toContain("unconfirmed");
+    await expect.poll(async () => { mine(); await refreshed(p); return balance(p).innerText(); }, { timeout: 90_000, intervals: [3_000] }).not.toMatch(template("{{amount}} {{unit}} unconfirmed"));
     return refreshed(p);
   };
   const bFees = 16_000 - (await settledBalance(b));
@@ -476,7 +454,11 @@ async function usdt(a: Actor, b: Actor): Promise<void> {
   await rpc("evm_mine");
   await wallet(a, "usdt");
   await expect(tokens(a)).toHaveText(/^10 TEST-USDT/, { timeout: 30_000 });
-  await bothWays(a, b, "usdt", [3, 2, 1, 1]);
+  // The local chain mines a block per transaction, and a payment counts as done at 2 confirmations: until then the
+  // payer's wallet takes no other payment from the same account ("already submitted"). A block more before each one,
+  // and one pass of the engine's 10 s payment check to see it.
+  const confirmed = async (payer: Actor) => { await rpc("evm_mine"); await payer.page.waitForTimeout(11_000); };
+  await bothWays(a, b, "usdt", [3, 2, 1, 1], confirmed);
   await wallet(a, "usdt");
   await expect(tokens(a), "10 in, 3 out, 2 out, 1 in, 1 in").toHaveText(/^7 TEST-USDT/, { timeout: 30_000 });
   await wallet(b, "usdt");

@@ -28,18 +28,19 @@ The [WISP catalogue](wisps/README.md) and [composable map](wisps/MAP.md) describ
 | [`packages/react`](../packages/react) | React hooks shared by the apps (`useWebRTC`) |
 | [`packages/sdk`](../packages/sdk) | `@ghostlytools/sdk`: adapter contracts, fakes, contract suites, the plugin registry and the protocol library. See [SDK.md](SDK.md) |
 | [`packages/cli`](../packages/cli) | `ghostly`, the engine on Node without a screen, for bots: a daemon, a local socket API and a JSON event stream. See [WISP 11xx](wisps/11xx-headless.md) |
-| [`packages/iroh-web`](../packages/iroh-web) | Iroh compiled to wasm (`@ghostly/iroh-web`), built from `native-transports/iroh-web` |
-| [`src`](../src) | The UI every app builds (React). `src/desktop` holds Desktop's host |
-| [`src-tauri`](../src-tauri) | Ghostly Desktop (Tauri 2): Rust for the Mainline DHT, native Iroh, the HyperDHT sidecar, local app fetches, viewer windows, notifications, stored media streamed to the player, web push posts, and on Linux the calls' media (webrtc-rs and GStreamer, as WebKitGTK has no WebRTC) |
-| [`web`](../web) | The web app: the peer in a tab, and its service worker (offline shell, share target, wake-up pushes). See [WEB.md](WEB.md) |
-| [`extension`](../extension) | Ghostly Browser (Chromium, Manifest V3): the peer in an offscreen document. See [BROWSER.md](BROWSER.md) |
-| [`cli`](../cli) | `ghostly-cli`, the older Rust compatibility client for v0.4 chats, no longer shipped from 1.0 (build it from source). Not the npm CLI, which is `packages/cli`. See [cli/README.md](../cli/README.md) |
-| [`native-transports`](../native-transports) | Native Iroh (Rust), the HyperDHT endpoint and sidecar (Node), the HyperDHT relay for browsers, the Iroh wasm crate, and a reference push relay for browsers that cannot post a wake-up themselves |
-| [`website`](../website) | ghostly.tools |
+| [`packages/iroh-web`](../packages/iroh-web) | Iroh compiled to wasm (`@ghostly/iroh-web`), built from `native/transports/iroh-web` |
+| [`apps/ui`](../apps/ui) | The UI every app builds (React). `apps/ui/src/desktop` holds Desktop's host |
+| [`apps/desktop`](../apps/desktop) | Ghostly Desktop (Tauri 2): Rust for the Mainline DHT, native Iroh, the HyperDHT sidecar, local app fetches, viewer windows, notifications, stored media streamed to the player, web push posts, and on Linux the calls' media (webrtc-rs and GStreamer, as WebKitGTK has no WebRTC) |
+| [`apps/web`](../apps/web) | The web app: the peer in a tab, and its service worker (offline shell, share target, wake-up pushes). See [WEB.md](WEB.md) |
+| [`apps/extension`](../apps/extension) | Ghostly Browser (Chromium, Manifest V3): the peer in an offscreen document. See [BROWSER.md](BROWSER.md) |
+| [`native/transports`](../native/transports) | Native Iroh (Rust), the HyperDHT endpoint and sidecar (Node) and the Iroh wasm crate |
+| [`services/hyperdht-relay`](../services/hyperdht-relay) | The HyperDHT relay for browsers (dht-relay over WebSocket) |
+| [`services/push-relay`](../services/push-relay) | A reference push relay for browsers that cannot post a wake-up themselves |
+| [`apps/website`](../apps/website) | ghostly.tools |
 | [`e2e`](../e2e) | End-to-end tests. See [TESTING.md](TESTING.md) |
 | [`examples/sdk-adapter`](../examples/sdk-adapter) | A complete SDK adapter project |
 
-One peer, three hosts: the web app, the extension and Desktop all build `src/` with the same Vite plugin (`packages/browser/vite-plugin.ts`), which swaps the platform modules for ones backed by the peer. A host (`packages/browser/src/host.ts`) is the small part that differs. The headless CLI (`packages/cli`) hosts the same peer on Node, with no UI.
+One peer, three hosts: the web app, the extension and Desktop all build `apps/ui/src/` with the same Vite plugin (`packages/browser/vite-plugin.ts`), which swaps the platform modules for ones backed by the peer. A host (`packages/browser/src/host.ts`) is the small part that differs. The headless CLI (`packages/cli`) hosts the same peer on Node, with no UI.
 
 ## Layers
 

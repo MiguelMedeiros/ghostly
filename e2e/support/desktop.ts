@@ -1,6 +1,6 @@
 import { test as base, expect } from "@playwright/test";
-import { spawn, type ChildProcess } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
+import { spawn, spawnSync, type ChildProcess } from "node:child_process";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -142,10 +142,14 @@ class Driver {
     return (await this.call("POST", "/execute/async", { script, args })) as T;
   }
 
+  /** What was clicked last, for the page a failed test attaches. */
+  lastClicked: string | null = null;
+
   /** Throws when nothing matches: a click is not something to be vague about. */
   async click(selector: string): Promise<void> {
     const element = await this.find(selector);
     if (element === null) throw new Error(`Nothing to click at ${selector}`);
+    this.lastClicked = selector;
     await this.call("POST", `/element/${element}/click`, {});
   }
 
@@ -161,7 +165,7 @@ class Driver {
 export type DesktopApp = Pick<Driver, "text" | "click" | "title" | "attribute" | "type" | "execute" | "executeAsync">;
 
 /**
- * Chooses in a `Select` (src/components/ui/Select.tsx) by its test id, as a person does: opens it and clicks the
+ * Chooses in a `Select` (apps/ui/src/components/ui/Select.tsx) by its test id, as a person does: opens it and clicks the
  * option. It is a combobox with a listbox, not a native `<select>` — its options exist only while it is open, and
  * its value is in `data-value`. e2e/support/select.ts does the same for the browser projects.
  */
@@ -205,7 +209,8 @@ export function attachDesktopLogs(name: string, home: string): void {
   for (const file of find(home)) void base.info().attach(`${name}'s ghostly.log`, { body: readFileSync(file), contentType: "text/plain" });
 }
 
-const homeEnv = (dir: string): Record<string, string> => {
+/** The environment that puts an app's storage under `dir` (`DesktopOptions.home`), for an app a test starts itself. */
+export const homeEnv = (dir: string): Record<string, string> => {
   const env = { HOME: dir, XDG_DATA_HOME: join(dir, "data"), XDG_CONFIG_HOME: join(dir, "config"), XDG_CACHE_HOME: join(dir, "cache") };
   for (const path of Object.values(env)) mkdirSync(path, { recursive: true });
   return env;
@@ -217,6 +222,8 @@ export async function openDesktop(options: DesktopOptions = {}): Promise<{ app: 
   const application = desktopBinary();
   const port = await freePort();
   const nativePort = await freePort();
+  // A session bus of its own unless the test brings one: see `privateBus`.
+  const bus = options.env?.DBUS_SESSION_BUS_ADDRESS ? null : await privateBus();
   const driver: ChildProcess = spawn(
     process.env.TAURI_DRIVER ?? "tauri-driver",
     ["--port", String(port), "--native-port", String(nativePort)],
@@ -224,11 +231,14 @@ export async function openDesktop(options: DesktopOptions = {}): Promise<{ app: 
       stdio: ["ignore", "pipe", "pipe"],
       // A test must never open the person's own chats: its own profile, its own storage. Nor the machine's camera
       // and microphone: a test picture and a test tone for calls on Linux (debug builds), as Chromium's fake devices.
+      // GHOSTLY_E2E: never a new profile's default Mainnet wallets (#682): this build has the real bundle id.
       env: {
         ...process.env,
+        GHOSTLY_E2E: "1",
         GHOSTLY_FAKE_MEDIA: "1",
         GHOSTLY_PROFILE: options.profile ?? process.env.GHOSTLY_PROFILE ?? "e2e",
         ...(options.home ? homeEnv(options.home) : {}),
+        ...(bus ? { DBUS_SESSION_BUS_ADDRESS: bus.address } : {}),
         ...options.env,
       },
     },
@@ -240,21 +250,173 @@ export async function openDesktop(options: DesktopOptions = {}): Promise<{ app: 
   );
 
   const endpoint = `http://127.0.0.1:${port}`;
-  const kill = () => void driver.kill("SIGTERM");
   const exited = new Promise<void>((done) => driver.once("exit", () => done()));
+  // Closing the session closes the window, and killing the driver ends what is left. Neither is sure to end the app:
+  // it was seen running on, window open, under the machine's subreaper, and the next open of the same home then ran
+  // a second app with the same keys next to it. So what the driver started (the app among it) is listed before
+  // anything closes, and waited for by its own PIDs until it is gone.
+  const launched = () => driver.pid === undefined ? [] : descendants(driver.pid);
+  const end = async (started: Launched[]) => {
+    driver.kill("SIGTERM");
+    await Promise.race([exited, sleep(5_000)]);
+    try {
+      await endAll(started);
+    } finally {
+      bus?.stop();
+    }
+  };
   try {
     // The driver needs a moment to bind, and the app a while longer to boot.
     const app = await Promise.race([died, withRetries(() => Driver.open(endpoint, application), 30_000)]);
-    // Closing the session closes the window; killing the driver ends what is left, waited for (5 s at most) so the
-    // app is done writing to its home before the test removes it.
+    await expectUnderTest(app);
     return { app, stop: async () => {
-      await app.close(); kill();
-      await Promise.race([exited, new Promise((done) => setTimeout(done, 5_000))]);
+      const started = launched();
+      await app.close();
+      await end(started);
     } };
   } catch (error) {
-    kill();
+    await end(launched());
     throw error;
   }
+}
+
+/**
+ * The app's WebView must say it is automated (`navigator.webdriver`), or a new profile would make its default Mainnet
+ * wallets by itself (#682): this build runs the real bundle id. GHOSTLY_E2E=1 guards that too, but a run where the
+ * WebView stops saying so fails here, loudly, before any test starts.
+ */
+async function expectUnderTest(app: Driver): Promise<void> {
+  const automated = await withRetries(() => app.execute<boolean>("return navigator.webdriver === true"), 10_000);
+  if (automated === true) return;
+  await app.close().catch(() => {});
+  throw new Error(
+    "The Desktop app's WebView does not set navigator.webdriver under tauri-driver. The first-run Mainnet wallet guard " +
+      "(#682: packages/browser/src/platform/walletSetupSwitch.ts, apps/ui/src/desktop/host.ts desktopUnderTest) relies on it and " +
+      "on GHOSTLY_E2E=1; no test runs until the WebView reports automation again.",
+  );
+}
+
+const sleep = (ms: number) => new Promise((done) => setTimeout(done, ms));
+
+/**
+ * A D-Bus session bus for one app (a `dbus-daemon` of its own, ended by `stop`), or null where there is none to start
+ * (not Linux, no `dbus-daemon`). On a Linux desktop an app under test otherwise joins the person's own session bus
+ * while it draws on Xvfb, and each WebDriver session took about 30 s to open there (2.5 s on a bus of its own); it
+ * also kept the app's names (one per profile, apps/desktop/src/single_instance.rs) off the person's bus.
+ *
+ * The bus activates only `BUS_SERVICES`. With the system's configuration (`--session`) it could start every service
+ * the machine installs: the WebView's first call into xdg-desktop-portal started a whole set of portals, backends and
+ * the document portal's mount among them, on the person's live Wayland session for each app, and
+ * xdg-desktop-portal-hyprland crashed as each bus went away.
+ */
+export async function privateBus(): Promise<{ address: string; stop: () => void } | null> {
+  if (process.platform !== "linux" || spawnSync("dbus-daemon", ["--version"]).status !== 0) return null;
+  const dir = mkdtempSync(join(tmpdir(), "ghostly-bus-"));
+  const config = join(dir, "session.conf");
+  // The two services the WebView needs from the bus, linked where the machine has them, and nothing else.
+  const services = join(dir, "services");
+  mkdirSync(services);
+  for (const name of BUS_SERVICES) {
+    const file = join(SYSTEM_SERVICES, `${name}.service`);
+    if (existsSync(file)) symlinkSync(file, join(services, `${name}.service`));
+  }
+  writeFileSync(config, BUS_CONFIG.replace("@DIR@", dir).replace("@SERVICES@", services));
+  const daemon = spawn("dbus-daemon", [`--config-file=${config}`, "--nofork", "--print-address=1"], { stdio: ["ignore", "pipe", "ignore"] });
+  daemon.once("exit", () => rmSync(dir, { recursive: true, force: true }));
+  const address = await new Promise<string>((done, fail) => {
+    let out = "";
+    daemon.stdout!.on("data", (chunk: Buffer) => {
+      out += chunk.toString();
+      if (out.includes("\n")) done(out.trim());
+    });
+    daemon.once("exit", (code) => fail(new Error(`dbus-daemon exited (${code})`)));
+  });
+  return { address, stop: () => void daemon.kill("SIGTERM") };
+}
+
+const SYSTEM_SERVICES = "/usr/share/dbus-1/services";
+
+/**
+ * What the private bus may start. On a machine with xdg-desktop-portal, WebKitGTK's call window shows no picture of
+ * the other side unless the portal and its permission store answer (`desktop/calls.spec.ts`, Arch with WebKitGTK
+ * 2.52); neither needs a backend, so the portal starts none: `impl.portal.desktop.*` are left out on purpose.
+ */
+export const BUS_SERVICES = ["org.freedesktop.portal.Desktop", "org.freedesktop.impl.portal.PermissionStore"];
+
+/** A session bus as dbus's own session.conf, with a service folder of its own instead of the system's. */
+const BUS_CONFIG = `<!DOCTYPE busconfig PUBLIC "-//freedesktop//DTD D-Bus Bus Configuration 1.0//EN"
+ "http://www.freedesktop.org/standards/dbus/1.0/busconfig.dtd">
+<busconfig>
+  <type>session</type>
+  <keep_umask/>
+  <listen>unix:tmpdir=@DIR@</listen>
+  <auth>EXTERNAL</auth>
+  <policy context="default">
+    <allow send_destination="*" eavesdrop="true"/>
+    <allow eavesdrop="true"/>
+    <allow own="*"/>
+  </policy>
+  <servicedir>@SERVICES@</servicedir>
+</busconfig>
+`;
+
+/** A process, with when it started: a PID the system hands out again later is not the same process. */
+interface Launched { pid: number; started: string }
+
+/** `/proc/<pid>/stat`'s fields after the command name: [0] is the state, [1] the parent, [19] the start time. */
+function stat(pid: number): string[] | null {
+  try {
+    const line = readFileSync(`/proc/${pid}/stat`, "utf8");
+    return line.slice(line.lastIndexOf(")") + 2).split(" ");
+  } catch {
+    return null;
+  }
+}
+
+/** Every process under `root` (children, theirs, and on), on Linux. Elsewhere none: there the driver's end is all. */
+function descendants(root: number): Launched[] {
+  if (process.platform !== "linux") return [];
+  const children = new Map<number, Launched[]>();
+  for (const entry of readdirSync("/proc")) {
+    if (!/^\d+$/.test(entry)) continue;
+    const fields = stat(Number(entry));
+    if (!fields) continue;
+    const parent = Number(fields[1]);
+    children.set(parent, [...(children.get(parent) ?? []), { pid: Number(entry), started: fields[19] }]);
+  }
+  const found: Launched[] = [];
+  for (const queue = [root]; queue.length > 0;) {
+    const next = children.get(queue.shift()!) ?? [];
+    found.push(...next);
+    queue.push(...next.map((child) => child.pid));
+  }
+  return found;
+}
+
+/** Still running: the same process (same start time), and not a zombie waiting for its parent to reap it. */
+function running({ pid, started }: Launched): boolean {
+  const fields = stat(pid);
+  return fields !== null && fields[19] === started && fields[0] !== "Z";
+}
+
+/**
+ * Waits for each process to end: 5 s on its own (the app is done writing to its home before the test removes it),
+ * then SIGTERM, then SIGKILL. Throws if one is still there after that, rather than let the next open run two apps.
+ */
+async function endAll(launched: Launched[]): Promise<void> {
+  const left = () => launched.filter(running);
+  const until = async (ms: number) => {
+    for (const deadline = Date.now() + ms; left().length > 0 && Date.now() < deadline;) await sleep(100);
+  };
+  await until(5_000);
+  for (const signal of ["SIGTERM", "SIGKILL"] as const) {
+    for (const { pid } of left()) {
+      try { process.kill(pid, signal); } catch { /* ended meanwhile */ }
+    }
+    await until(5_000);
+  }
+  const still = left();
+  if (still.length > 0) throw new Error(`The Desktop app's processes ${still.map(({ pid }) => pid).join(", ")} outlived SIGKILL`);
 }
 
 async function withRetries<T>(attempt: () => Promise<T>, budgetMs: number): Promise<T> {
@@ -269,10 +431,54 @@ async function withRetries<T>(attempt: () => Promise<T>, budgetMs: number): Prom
   }
 }
 
-export const test = base.extend<{ app: DesktopApp }>({
-  app: async ({}, use) => {
-    const { app, stop } = await openDesktop();
-    await use(app);
-    await stop();
+/**
+ * What the page showed when a test failed: where it was, its text, and where the last click went: the element's
+ * box, the window, and what a click at the box's center reaches now.
+ */
+async function attachPage(app: DesktopApp): Promise<void> {
+  const page = await app.execute<string>(`
+    const clicked = arguments[0] && document.querySelector(arguments[0]);
+    let hit = "";
+    if (clicked) {
+      const box = clicked.getBoundingClientRect();
+      const at = document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2);
+      const describe = (e) => e ? e.tagName + (e.dataset.testid ? "[" + e.dataset.testid + "]" : "") + " " + JSON.stringify((e.textContent || "").slice(0, 60)) : "nothing";
+      hit = "last click: " + arguments[0] + " at " + JSON.stringify(box) + " in " + innerWidth + "x" + innerHeight
+        + "; the center reaches " + describe(at) + (at && clicked.contains(at) ? " (inside it)" : " (NOT inside it)") + "\\n\\n";
+    }
+    return hit + location.href + "\\n\\n" + document.body.innerText.slice(0, 8000);`, (app as Partial<Driver>).lastClicked ?? null).catch((error) => `No page: ${(error as Error).message}`);
+  await base.info().attach("page.txt", { body: page, contentType: "text/plain" });
+}
+
+/**
+ * `app`: one Desktop app with a home of its own, on a network that never leaves the machine: a local Pkarr relay
+ * (GHOSTLY_PKARR_RELAYS), a HyperDHT testnet and a Mainline DHT testnet (GHOSTLY_PKARR_DHT_BOOTSTRAP). Without
+ * these the app reads and writes the public relays and joins the public Mainline DHT over UDP, and every test
+ * shared the machine's own HOME. A failed test gets the app's ghostly.log and what its page showed.
+ */
+export const test = base.extend<{ app: DesktopApp }, { network: Record<string, string> }>({
+  network: [async ({}, use) => {
+    const [{ desktopNetwork }, { LocalRelay }, { mainlineTestnet }] = await Promise.all([
+      import("../matrix/desktop"), import("./relay"), import("./mainlineTestnet"),
+    ]);
+    const relay = new LocalRelay();
+    // The first Mainline testnet of a run compiles its example (cargo): minutes, once per worker.
+    const [network, dht] = await Promise.all([desktopNetwork(relay), mainlineTestnet()]);
+    await use({ ...network.env, GHOSTLY_PKARR_DHT_BOOTSTRAP: dht.bootstrap });
+    dht.close();
+    await network.close();
+    relay.close();
+  }, { scope: "worker", timeout: 10 * 60_000 }],
+  app: async ({ network }, use, testInfo) => {
+    const home = desktopHome("app");
+    try {
+      const { app, stop } = await openDesktop({ home: home.dir, env: network });
+      await use(app);
+      if (testInfo.status !== testInfo.expectedStatus) await attachPage(app);
+      await stop();
+      attachDesktopLogs("app", home.dir);
+    } finally {
+      home.remove();
+    }
   },
 });

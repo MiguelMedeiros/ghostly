@@ -18,7 +18,7 @@ it("was built from the crate's current sources (run node scripts/build-iroh-web.
 });
 
 it("runs the iroh the Desktop runs, so both speak the same QUIC and TLS", () => {
-  const desktop = /iroh = "=([\d.]+)"/.exec(readFileSync(join(root, "native-transports/Cargo.toml"), "utf8"))?.[1];
+  const desktop = /iroh = "=([\d.]+)"/.exec(readFileSync(join(root, "native/transports/Cargo.toml"), "utf8"))?.[1];
   expect(build.iroh).toBe(desktop);
 });
 

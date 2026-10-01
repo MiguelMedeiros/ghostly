@@ -14,7 +14,7 @@ Please **do not** open a public issue, pull request or discussion for a vulnerab
 A useful report says:
 
 - what an attacker can do, and who the attacker is (a linked contact, a relay operator, someone on the network, a web page, someone with the device)
-- which client and version: Desktop, Ghostly Browser (extension), [app.ghostly.tools](https://app.ghostly.tools), the headless CLI (`ghostly`), the older Rust CLI (`ghostly-cli`, no longer shipped from 1.0), or [ghostly.tools](https://ghostly.tools)
+- which client and version: Desktop, Ghostly Browser (extension), [app.ghostly.tools](https://app.ghostly.tools), the headless CLI (`ghostly`), or [ghostly.tools](https://ghostly.tools)
 - steps to reproduce, or a proof of concept
 - your name or handle if you would like credit
 
@@ -34,8 +34,8 @@ We ask that you give us up to 90 days before publishing details, and less when t
 In scope:
 
 - the Ghost Protocol as described in [docs/PROTOCOL.md](docs/PROTOCOL.md) and the [WISPs](docs/wisps/README.md), and as implemented in `packages/core`
-- Ghostly Desktop (`src-tauri`, `src`), Ghostly Browser (`extension`), Ghostly on the web (`web`, its service worker included), the headless CLI (`packages/cli`), the Rust CLI (`cli`)
-- the native transports and the reference relays we ship (`native-transports`: Iroh, HyperDHT, the HyperDHT relay for browsers, the push relay)
+- Ghostly Desktop (`apps/desktop`, `src`), Ghostly Browser (`apps/extension`), Ghostly on the web (`apps/web`, its service worker included), the headless CLI (`packages/cli`)
+- the native transports and the reference relays we ship (`native/transports`: Iroh and HyperDHT; `services/`: the HyperDHT relay for browsers and the push relay)
 - the wallets and payments (`packages/browser/src/engine`), on Mainnet and on Testnet
 - identity proofs and public profiles (`packages/browser/src/proofs`)
 - the sites [ghostly.tools](https://ghostly.tools) and [app.ghostly.tools](https://app.ghostly.tools), and this repository's build and release pipeline

@@ -1,0 +1,40 @@
+{
+  "account": "アカウント",
+  "chats": "チャット",
+  "copyInvite": "招待コードをコピー",
+  "deleteAllChats": "すべてのチャットを削除",
+  "deleteChat": "チャットを削除",
+  "group": {
+    "adminAnswered": "管理者のアプリが応答しました…",
+    "answerFailed": "うまくいきませんでした。もう一度お試しください。",
+    "invitedBy": "{{contact}} からの招待 · {{members}}",
+    "invitedByUnknown": "連絡先からの招待 · {{members}}",
+    "inviterAway": "{{contact}} はまだ接続されていません。少し待ってからもう一度お試しください。",
+    "inviterAwayUnknown": "招待した連絡先はまだ接続されていません。少し待ってからもう一度お試しください。",
+    "letting": "メンバーが参加を受け入れています…",
+    "waitingAdmin": "管理者のアプリを待っています…",
+    "waitingIn": "参加の許可を待っています…"
+  },
+  "join": "参加",
+  "joinChat": "チャットに参加",
+  "new": "新規",
+  "newChat": "新規チャット",
+  "newMenu": {
+    "chat": "チャット",
+    "chatHint": "1人と、招待で",
+    "group": "グループ",
+    "groupHint": "誰でも開けるリンク",
+    "label": "グループまたはチャットを作成"
+  },
+  "noChats": "チャットがありません",
+  "noResults": "見つかりませんでした",
+  "pinned": "ピン留め済み",
+  "quiet": "ここは静かです...",
+  "quietHint": "誰かを驚かせよう！👻",
+  "searchPlaceholder": "チャットを検索...",
+  "settings": "設定",
+  "sharedIdentity": "IDを共有しました",
+  "skipToContent": "コンテンツへスキップ",
+  "startChat": "新しいチャット",
+  "unread": "未読メッセージ"
+}

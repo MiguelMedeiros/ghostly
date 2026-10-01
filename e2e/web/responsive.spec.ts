@@ -234,16 +234,21 @@ test("the account bar keeps its five places at the list's narrowest", { tag: ["@
   await choose(page.getByTestId("settings-language"), "pt");
   await expect(page.getByTestId("account-identities")).toHaveAccessibleName("Identidades");
   expect(await navProblems(page)).toEqual([]);
-  // "Configurações" does not fit in a fifth of 280px: the labels step aside together, the icons stay.
-  await expect(page.getByRole("navigation", { name: "Account" })).toHaveAttribute("data-compact", "true");
+  // "Configurações" does not fit in a fifth of 280px: the labels step aside together, the icons stay. The bar's own
+  // name is in Portuguese too.
+  await expect(accountNav(page)).toHaveAccessibleName("Conta");
+  await expect(accountNav(page)).toHaveAttribute("data-compact", "true");
 });
+
+/** The account bar's places, found by the bar and not by their name, which is in the app's language ("Conta"). */
+const accountNav = (page: Page) => page.getByTestId("account-bar").getByRole("navigation");
 
 /**
  * The account bar's labels as the page lays them out: whether they are hidden, each one's text width against its
  * place's width (fractions of a pixel, not the rounded scrollWidth), and the profile's name, which may end in "…".
  */
 async function accountLabels(page: Page) {
-  return page.getByRole("navigation", { name: "Account" }).evaluate((nav) => {
+  return accountNav(page).evaluate((nav) => {
     const range = document.createRange();
     const labels = [...nav.querySelectorAll<HTMLElement>(".account-label")].map((label) => {
       range.selectNodeContents(label);

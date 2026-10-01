@@ -1,0 +1,1 @@
+Liveness: a ping with nothing back within 4 seconds (from a peer that answers pings) reads the peer's link packet at once, so a restarted contact's offer ends a dead session this side never heard close.

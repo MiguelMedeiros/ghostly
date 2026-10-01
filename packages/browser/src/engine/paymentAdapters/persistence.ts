@@ -1,5 +1,18 @@
+import { engineError, engineText } from "@ghostly/core";
 import { STORES, openDb, store, transact, wrap } from "../../shared/idb";
 import type { IntentRepository, SavedIntent } from "./coordinator";
+/**
+ * A USDT payment is one transaction at one account nonce. Another payment from the same account and chain that is
+ * submitted or of unknown outcome holds its nonce until it confirms. A review made after it was sent took the next
+ * nonce and may go at once. One made before (or read from an RPC that had not seen it yet) has the same or a lower
+ * nonce: sent, it would replace the earlier transaction or be dropped, so it is refused. A row with no nonce refuses.
+ */
+function nonceTaken(review:SavedIntent["review"],intents:SavedIntent[]):boolean {
+  if(review.method!=="usdt")return false;
+  const from=review.evm?.from?.toLowerCase(), nonce=review.evm?.nonce;
+  return intents.some(({review:other})=>other.id!==review.id && other.method==="usdt" && other.chainId===review.chainId && other.evm?.from?.toLowerCase()===from && ["submitted","unknown"].includes(other.state)
+    && !(typeof nonce==="number" && typeof other.evm?.nonce==="number" && nonce>other.evm.nonce));
+}
 export const intentRepository: IntentRepository = {
   async get(id) { return wrap<SavedIntent | undefined>((await store(STORES.intents,"readonly")).get(id)); },
   async list() { return wrap<SavedIntent[]>((await store(STORES.intents,"readonly")).getAll()); },
@@ -8,19 +21,20 @@ export const intentRepository: IntentRepository = {
     const tx=(await openDb()).transaction(STORES.intents,"readwrite");
     return new Promise<SavedIntent>((resolve,reject)=>{
       let saved:SavedIntent;
+      let reason=engineText("alreadySubmitted");
       const request=tx.objectStore(STORES.intents).getAll();
       request.onsuccess=()=>{
         const intents:SavedIntent[]=request.result;
         saved=intents.find(item=>item.review.id===id)!;
         if(!saved || saved.review.state!=="pending") {tx.abort();return;}
         const duplicate=saved.review.requestId && intents.some(({review})=>review.id!==id && review.requestId===saved.review.requestId && review.linkId===saved.review.linkId && ["submitted","settled","unknown"].includes(review.state));
-        const pendingNonce = saved.review.method === "usdt" && intents.some(({review}) => review.id !== id && review.method === "usdt" && review.chainId === saved.review.chainId && review.evm?.from === saved.review.evm?.from && ["submitted","unknown"].includes(review.state));
-        if(duplicate || pendingNonce){tx.abort();return;}
-        saved.review={...saved.review,state:"submitted",error:undefined};
+        if(duplicate){tx.abort();return;}
+        if(nonceTaken(saved.review,intents)){reason=engineText("sentAfterReview");tx.abort();return;}
+        saved.review={...saved.review,state:"submitted",error:undefined,submittedAt:Date.now()};
         tx.objectStore(STORES.intents).put(saved);
       };
       tx.oncomplete=()=>resolve(saved);
-      tx.onabort=tx.onerror=()=>reject(new Error("This payment was already submitted or could not be saved"));
+      tx.onabort=tx.onerror=()=>reject(new Error(reason));
     });
   },
   async cancel(id) {
@@ -35,7 +49,7 @@ export const intentRepository: IntentRepository = {
         tx.objectStore(STORES.intents).put(saved);
       };
       tx.oncomplete=()=>resolve(saved);
-      tx.onabort=tx.onerror=()=>reject(new Error("A submitted payment cannot be cancelled; reconcile it instead"));
+      tx.onabort=tx.onerror=()=>reject(engineError("cannotCancelSubmitted"));
     });
   },
 };

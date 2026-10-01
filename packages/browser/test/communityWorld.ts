@@ -76,6 +76,8 @@ export interface Peer {
   /** The most connections its groups hold (a Mac's `peerBudget`), and how many groups not in this world hold now. */
   peerBudget?: number;
   heldElsewhere?: number;
+  /** What its engine runs on: kept for `restart`, which starts a new engine on it. */
+  host: GroupsHost;
 }
 
 function memoryStore(messages: StoredMessage[]): GroupStore {
@@ -137,7 +139,7 @@ export class CommunityWorld {
   add(name: string, extra?: (peer: Peer) => Partial<GroupsHost>, app: { staysOnline?: boolean; legacy?: boolean; unmetered?: boolean; peerBudget?: number; heldElsewhere?: number } = {}): Peer {
     const links = new Map<string, Edge>();
     const messages: StoredMessage[] = [];
-    const peer: Peer = { name, groups: null as unknown as Groups, store: memoryStore(messages), messages, links, online: true, nick: name, sent: { frames: 0, bytes: 0 }, spent: [], spentBackground: [], refused: 0, ...app };
+    const peer: Peer = { name, groups: null as unknown as Groups, store: memoryStore(messages), messages, links, online: true, nick: name, sent: { frames: 0, bytes: 0 }, spent: [], spentBackground: [], refused: 0, host: null as unknown as GroupsHost, ...app };
     const host: GroupsHost = {
       sendOnLink: (linkId, frame) => {
         const edge = links.get(linkId), there = edge && this.counterpart(edge);
@@ -153,6 +155,8 @@ export class CommunityWorld {
       // Version 4 (hubs) only between two apps that announce it.
       linkReady: (linkId, version = 1) => { const edge = links.get(linkId), there = edge && this.counterpart(edge); return !!there && this.up(peer, edge, there.peer) && (version < 4 || (!peer.legacy && !there.peer.legacy)); },
       linkSeen: linkId => { const edge = links.get(linkId); return !!edge && !!this.counterpart(edge) && (!this.network || edge.polls > 0); },
+      // Its other end's app runs again (a restart): its link published, whether or not it is up yet.
+      linkBack: linkId => { const edge = links.get(linkId), there = edge && this.counterpart(edge); return !!there && there.peer.online; },
       contactName: () => undefined,
       edges: g => new Map([...links].filter(([, e]) => e.g === g && e.kind === "edge").map(([id, e]) => [e.peer, id])),
       entries: g => new Map([...links].filter(([, e]) => e.g === g && e.kind !== "edge").map(([id, e]) => [e.peer, id])),
@@ -186,7 +190,7 @@ export class CommunityWorld {
         if (!this.spend(peer, 1, background, false, `resolve${background ? " bg" : ""}`)) throw new Error("No Pkarr relay reachable");
         return peer.online ? structuredClone(this.pkarr.get(key) ?? null) : null;
       },
-      storeMessage: async message => { if (!messages.some(m => m.id === message.id)) messages.push(message); },
+      storeMessage: async message => { if (messages.some(m => m.id === message.id)) return false; messages.push(message); return true; },
       emit: () => {},
       myNick: () => peer.nick,
       staysOnline: () => !!peer.staysOnline,
@@ -195,6 +199,7 @@ export class CommunityWorld {
       peerRoom: g => peer.peerBudget === undefined ? undefined : peer.peerBudget - (peer.heldElsewhere ?? 0) - [...links.values()].filter(e => e.g !== g).length,
       ...extra?.(peer),
     };
+    peer.host = host;
     peer.groups = new Groups(host, peer.store, undefined, this.timings, this.random);
     // On the world's clock from the start: what it does before its first tick (a knock) is timed like the rest.
     void peer.groups.tick(this.now);
@@ -306,6 +311,16 @@ export class CommunityWorld {
   reopen(peer: Peer): void {
     peer.online = true;
     for (const edge of peer.links.values()) Object.assign(edge, { openedAt: this.now, fastUntil: 0, lastPoll: -Infinity, polls: 0, published: false, sawPeer: false, signaled: false, upAt: undefined });
+  }
+
+  /**
+   * A peer's app starts again: a new engine on what it stored (its groups, messages and links), as an app's after a
+   * quit, with nothing of the last run's memory; its links start over as `reopen` says.
+   */
+  async restart(peer: Peer): Promise<void> {
+    peer.groups = new Groups(peer.host, peer.store, undefined, this.timings, this.random);
+    await peer.groups.load();
+    this.reopen(peer);
   }
 
   /** Time passes: every online peer runs its timers once per `stepMs`. */

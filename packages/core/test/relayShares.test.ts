@@ -7,7 +7,7 @@ import { RelayTransport } from "../src/relay";
 import { DiscoveryBudgetError, withRequestOptions, type PkarrTransport } from "../src/transport";
 import { emptyDhtDeliveryState, type DhtDeliveryState } from "../src/dhtDelivery";
 import { setLinkTraceSink } from "../src/linkTrace";
-import { closeWorld, fakePeerConnection, invitationWhere, killRtc, useFakeWorld, yieldToLoop, type Side } from "./support/pairingWorld";
+import { closeWorld, fakePeerConnection, invitationWhere, killRtc, rtc, useFakeWorld, yieldToLoop, type Side } from "./support/pairingWorld";
 
 // covers: core.relay-client, chat.paired.reconnect, groups.connection
 
@@ -23,6 +23,10 @@ import { closeWorld, fakePeerConnection, invitationWhere, killRtc, useFakeWorld,
 class MemoryRelays {
   packets = new Map<string, Uint8Array>();
   requests: { at: number; who: string; host: string; method: string; key: string }[] = [];
+  /** Every packet put, in order. */
+  puts: { at: number; key: string; body: Uint8Array }[] = [];
+  /** `host key` → an older packet that relay still serves: it missed the newer ones (its budget refused them). */
+  stale = new Map<string, Uint8Array>();
   constructor(readonly hosts: string[]) {}
   get urls() { return this.hosts.map(h => `https://${h}`); }
   fetchFor(who: string): typeof fetch {
@@ -30,8 +34,12 @@ class MemoryRelays {
       const url = new URL(String(input)), key = url.pathname.slice(1);
       this.requests.push({ at: Date.now(), who, host: url.host, method: init?.method ?? "GET", key });
       // Relays behind one name share what they store.
-      if (init?.method === "PUT") { this.packets.set(key, new Uint8Array(init.body as ArrayBuffer)); return new Response(null, { status: 204 }); }
-      const packet = this.packets.get(key);
+      if (init?.method === "PUT") {
+        const body = new Uint8Array(init.body as ArrayBuffer);
+        this.packets.set(key, body); this.puts.push({ at: Date.now(), key, body }); this.stale.delete(`${url.host} ${key}`);
+        return new Response(null, { status: 204 });
+      }
+      const packet = this.stale.get(`${url.host} ${key}`) ?? this.packets.get(key);
       return packet ? new Response(packet as BodyInit) : new Response(null, { status: 404 });
     }) as typeof fetch;
   }
@@ -46,7 +54,7 @@ class MemoryRelays {
     return counts;
   }
   /** A process's own budget over these relays. */
-  transport(who: string): RelayTransport { return new RelayTransport({ relays: this.urls, fetch: this.fetchFor(who), log: () => {} }); }
+  transport(who: string, relays = this.urls): RelayTransport { return new RelayTransport({ relays, fetch: this.fetchFor(who), log: () => {} }); }
 }
 
 const report = (row: Record<string, unknown>) => { const file = process.env.SHARES_REPORT; if (file) appendFileSync(file, JSON.stringify(row) + "\n"); };
@@ -54,13 +62,13 @@ const keyOf = (side: Side) => identityFromSeedB64(side.seedB64).pubKeyZ32;
 const links: GhostLink[] = [];
 
 /** One side of a saved contact (a chat, or a group's edge: pinned in advance), as node.ts `startLink` opens it. */
-function open(owner: string, transport: PkarrTransport, side: Side, peer: Side, options: { dht?: { state: DhtDeliveryState }; resume?: boolean; expectPeer?: boolean } = {}): GhostLink {
+function open(owner: string, transport: PkarrTransport, side: Side, peer: Side, options: { dht?: { state: DhtDeliveryState }; resume?: boolean; resumeFloor?: number; expectPeer?: boolean } = {}): GhostLink {
   const link = new GhostLink({
     params: side.params,
     pairing: { credentials: { seedB64: side.seedB64, peerKey: keyOf(peer) }, pinPeer: async () => {}, trustOnFirstUse: true },
     dht: options.dht ? { state: options.dht.state, save: async state => { options.dht!.state = state; } } : undefined,
     native: { peerTransports: ["webrtc/1"], peerFallback: true, automatic: true },
-    ...(options.resume ? { resume: "webrtc/1" as const } : {}),
+    ...(options.resume ? { resume: "webrtc/1" as const, resumeFloor: options.resumeFloor } : {}),
     transport,
     pollIntervals: RELAY_POLL_INTERVALS,
     autoConnect: true,
@@ -191,6 +199,149 @@ describe("a new group edge next to a community's background looks, on one relay"
     // 4.6 to 10.6 s, the looks 5.
     expect(Math.max(...results), "every edge live").toBeLessThanOrEqual(20_000);
   }, 400_000);
+});
+
+/**
+ * A member of a private group is killed and starts again (bug hunt r5a, 2026-09-29, three CLIs on the public relays): it
+ * has a chat and an edge (or two, in two groups) with each of the two others. Back, every link offers at once and looks
+ * for an answer, but the others hold the dead sessions until their connections go (`noticeMs` from the kill: about 20 s
+ * with node-datachannel, 45 s where liveness finds out). Case `order:groups:noticeMs`; `MESH_BACK_CASES` runs others.
+ * On the CLI (more publishes at start than here) one group was enough: edges live 75 to 110 s after the restart.
+ */
+describe("a member of a private group killed and back, with a chat and an edge to each other member", () => {
+  const cases = (process.env.MESH_BACK_CASES ?? "lower:2:20000,higher:2:20000,lower:2:25000,lower:1:40000,higher:1:40000,lower:2:30000,higher:2:30000,higher:2:40000,lower:2:3000").split(",").map(c => {
+    const [order, groups, noticeMs] = c.split(":");
+    return { order: order as "lower" | "higher", groups: Number(groups), noticeMs: Number(noticeMs) };
+  });
+  // An answer not taken fails as ICE gives up (31 s with node-datachannel, #408): a dialer that reads it later misses it.
+  beforeEach(() => { rtc.answerFailsAfterMs = 31_000; });
+  it.each(cases)("its key the $order on the edges, $groups group(s), its end noticed after $noticeMs ms: every edge live soon after", async ({ order, groups, noticeMs }) => {
+    // The default relays and their shares: 30 requests a minute on one, 60 on the other.
+    const relays = new MemoryRelays(["pkarr.pubky.org", "pkarr.pubky.app"]);
+    const groupsOf = (t: PkarrTransport) => withRequestOptions(t, { group: true });
+    // Per pair of members: their chat, and an edge per group. On the edges C dials when its key is the lower one (the
+    // "inviter" side dials in `invitationWhere`); C is always the first of a pair it is in.
+    const pair = () => ({ chat: invitationWhere("inviter"), edges: Array.from({ length: groups }, () => invitationWhere(order === "lower" ? "inviter" : "joiner")) });
+    const withA = pair(), withB = pair(), ab = pair();
+    const dhts = new Map<string, { state: DhtDeliveryState }>();
+    const dht = (side: Side) => { if (!dhts.has(side.seedB64)) dhts.set(side.seedB64, { state: emptyDhtDeliveryState() }); return dhts.get(side.seedB64)!; };
+    const ends = (made: { inviter: Side; joiner: Side }, first: boolean) => first ? [made.inviter, made.joiner] : [made.joiner, made.inviter];
+    const openAll = (owner: string, t: PkarrTransport, pairs: [ReturnType<typeof pair>, boolean][], resume = false) => pairs.flatMap(([p, first]) => {
+      const [me, peer] = ends(p.chat, first);
+      return [{ kind: "chat", peer: me.params.peerPubKeyZ32, link: open(owner, t, me, peer, { dht: dht(me), resume }) },
+        ...p.edges.map(e => ends(e, first)).map(([me, peer]) => ({ kind: "edge", peer: me.params.peerPubKeyZ32, link: open(owner, groupsOf(t), me, peer, { resume }) }))];
+    });
+    const startC = (t: PkarrTransport, resume: boolean) => openAll("c", t, [[withA, true], [withB, true]], resume);
+    let c = startC(relays.transport("c"), false);
+    const a = openAll("a", relays.transport("a"), [[withA, false], [ab, true]]);
+    const b = openAll("b", relays.transport("b"), [[withB, false], [ab, false]]);
+    const all = () => [...a, ...b, ...c].map(l => l.link);
+    expect(await until(() => all().every(l => l.isDataLinkOpen), 240_000), "all live at first").toBeLessThan(Infinity);
+    await run(70_000);
+
+    // Killed: nothing said. The others' connections to it notice once its consent checks go unanswered (about 20 s with
+    // node-datachannel; liveness gives up after 45 s where nothing says so).
+    killRtc("c", noticeMs);
+    await Promise.all(c.map(l => l.link.stop(false)));
+    await run(2_500);
+    // Back, a fresh process with its own budget: every link was live when it quit.
+    c = startC(relays.transport("c2"), true);
+    const startedAt = Date.now();
+    const chats = c.filter(l => l.kind === "chat");
+    let chatsMs = Infinity;
+    const edgesMs = await until(() => {
+      if (chatsMs === Infinity && chats.every(l => l.link.isDataLinkOpen)) chatsMs = Date.now() - startedAt;
+      return all().every(l => l.isDataLinkOpen);
+    }, 240_000);
+    const share = relays.share("c2", startedAt, 60_000, { edges: c.filter(l => l.kind === "edge").map(l => l.peer), chats: chats.map(l => l.peer) });
+    // …and on each relay: its writes and its reads in that minute, next to the relay's share (30 and 60).
+    const perRelay = Object.fromEntries(relays.hosts.map(host => {
+      const mine = relays.requests.filter(r => r.who === "c2" && r.host === host && r.at >= startedAt && r.at < startedAt + 60_000);
+      return [host, { put: mine.filter(r => r.method === "PUT").length, get: mine.filter(r => r.method === "GET").length }];
+    }));
+    report({ scenario: "mesh-member-back", order, groups, noticeMs, edgesMs, chatsMs, share, perRelay });
+    // Dev (eacaf6a6), from the restart: 62.6 s in every case (18.6 s with one group noticed after 20 s); the restarted
+    // app's edges had spent the groups' share of both relays before the answers came, and with 45 s of fast looks its
+    // chats too. Now: 18.6, 18.6, 26.6, 42.6 and 42.6 s, a few seconds after the others notice. With reads in turn per
+    // key (#689) the first case is 26.6 s: one edge's read fell one past the groups' burst at 18 s, and the chats' reserve,
+    // kept a minute after they were live, held it until the startup's requests aged out (66.6 s) until the reserve went
+    // per chat. Two groups noticed after 30 or 40 s (bug hunt r6a, r7a), an answer not taken failing after 31 s: on dev
+    // (9a94a7f4) lower:2:30000 92.6 s, higher:2:30000 42.6 s, higher:2:40000 66.6 s, the minute spent by 42 s with 14 puts
+    // on each relay at start (six links' presence, then their offers). With the offer in the first packet (8 puts): 34.6,
+    // 34.6 and 50.6 s. lower:2:40000 (not a default case) 66.6 → 58.6 s: six links looking every 2 s, then every 4 to 8 s,
+    // still spend the minute before the others notice. higher:2:20000 18.6 → 26.6 s (one edge's read one past the groups'
+    // burst at 18 s, as lower:2:20000 was already). Noticed at once (0.5 s after the restart, as after a goodbye): 2.6 s.
+    expect(edgesMs, "every edge live again").toBeLessThanOrEqual(noticeMs + 12_000);
+    if (noticeMs <= 5_000) expect(edgesMs, "noticed at once: live in the offers' first looks").toBeLessThanOrEqual(5_000);
+  }, 600_000);
+});
+
+/**
+ * A contact's offer from before the last session, served after a restart by a relay that missed the packet clearing it
+ * (bug hunt r7a: a relay whose budget refused a packet the other relay took kept the older one). The app back answered
+ * it, never sent its own resume offer, and waited on it until ICE gave up; the contact, which answers only once it
+ * notices the old session went, was live with it a minute later. A contact that noticed during a long downtime and
+ * offered then is answered at once as before.
+ */
+describe("a contact's offer from before the last session, after a restart", () => {
+  beforeEach(() => { rtc.answerFailsAfterMs = 31_000; });
+  it.each([
+    { name: "old, on a relay that missed its clearing", stale: true, noticeMs: 20_000, downMs: 2_500 },
+    { name: "made during a long downtime", stale: false, noticeMs: 5_000, downMs: 20_000 },
+  ])("$name: live soon after the contact can answer", async ({ stale, noticeMs, downMs }) => {
+    const relays = new MemoryRelays(["a.test", "b.test"]);
+    // The contact has the lower key: it offered first, and after a restart the app back has to answer or be answered.
+    const made = invitationWhere("inviter"), contact = made.inviter, me = made.joiner;
+    const peer = open("p", relays.transport("p"), contact, me);
+    const mine = open("c", relays.transport("c"), me, contact);
+    expect(await until(() => peer.isDataLinkOpen && mine.isDataLinkOpen, 120_000), "live at first").toBeLessThan(Infinity);
+    const liveSince = Date.now();
+    const contactKey = me.params.peerPubKeyZ32, offer = relays.puts.filter(p => p.key === contactKey && p.at < liveSince - 300).pop()!;
+    await run(30_000);
+    // b.test missed what the contact put after its offer.
+    if (stale) relays.stale.set(`b.test ${contactKey}`, offer.body);
+    killRtc("c", noticeMs);
+    await mine.stop(false);
+    await run(downMs);
+    // Back, reading b.test first (a fresh process's first relay), with the start of its last session kept.
+    const back = open("c", relays.transport("c2", ["https://b.test", "https://a.test"]), me, contact, { resume: true, resumeFloor: liveSince });
+    const liveMs = await until(() => back.isDataLinkOpen && peer.isDataLinkOpen, 180_000);
+    report({ scenario: "offer-before-last-session", stale, noticeMs, downMs, liveMs });
+    // Dev (d31cdaad): the old offer answered, 32.1 s (its answer failed at 31 s; the contact noticed at 17.5 s); the
+    // downtime offer 1.6 s. Now: 18.6 and 1.6 s.
+    const canAnswerIn = Math.max(0, noticeMs - downMs);
+    expect(liveMs, "live soon after the contact can answer").toBeLessThanOrEqual(canAnswerIn + 5_000);
+  }, 300_000);
+});
+
+/**
+ * What an edge whose member is gone for good costs: the member's app is killed and never comes back. The edge that
+ * stayed notices, offers again and again (each offer stands 90 s, then waits longer between tries), and reads the
+ * member's key meanwhile. Longer-standing offers (looked at every 4 to 8 s once 10 s old) must not cost more reads.
+ */
+describe("an edge whose member never comes back", () => {
+  it("reads no more a minute than before, while its offers stand longer", async () => {
+    const relays = new MemoryRelays(["pkarr.pubky.org", "pkarr.pubky.app"]);
+    const made = invitationWhere("inviter");
+    const stays = open("stays", withRequestOptions(relays.transport("stays"), { group: true }), made.inviter, made.joiner);
+    const goes = open("goes", withRequestOptions(relays.transport("goes"), { group: true }), made.joiner, made.inviter);
+    expect(await until(() => stays.isDataLinkOpen && goes.isDataLinkOpen, 120_000), "live at first").toBeLessThan(Infinity);
+    await run(70_000);
+    killRtc("goes", 20_000);
+    await goes.stop(false);
+    const killedAt = Date.now();
+    await run(20 * 60_000);
+    const perMinute = (fromMin: number, toMin: number) =>
+      relays.requests.filter(r => r.who === "stays" && r.method === "GET" && r.at >= killedAt + fromMin * 60_000 && r.at < killedAt + toMin * 60_000).length / (toMin - fromMin);
+    const reads = { first2: perMinute(0, 2), next3: perMinute(2, 5), next5: perMinute(5, 10), last10: perMinute(10, 20) };
+    report({ scenario: "dead-edge", reads });
+    // Dev (eacaf6a6), reads a minute in minutes 0-2, 2-5, 5-10 and 10-20: 17.5, 16.3, 6.4 and 2. Now: 8.5, 10.7, 4.6
+    // and 2 (each offer looks fast only its first 10 s).
+    expect(reads.first2).toBeLessThanOrEqual(12);
+    expect(reads.next3).toBeLessThanOrEqual(13);
+    expect(reads.next5).toBeLessThanOrEqual(6);
+    expect(reads.last10).toBeLessThanOrEqual(2);
+  }, 600_000);
 });
 
 /**

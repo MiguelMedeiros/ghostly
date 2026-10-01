@@ -12,12 +12,12 @@ import {
   toBase64Url,
   randomBytes,
 } from "@ghostly/core";
-import type { ServicesPlatform, WalletPlatform } from "../../../../src/lib/platform";
+import type { ServicesPlatform, WalletPlatform } from "../../../../apps/ui/src/lib/platform";
 import type { WalletNetwork } from "@ghostly/core";
 import { fileStore } from "../shared/idb";
 import { SMALL_FILE_BYTES, blobDigest, fileBytes, fileBytesOf } from "../shared/fileBytes";
 import { storedBlob } from "../shared/storedFiles";
-import type { FileTransferState } from "../../../../src/lib/platform";
+import type { FileTransferState } from "../../../../apps/ui/src/lib/platform";
 import { DEFAULT_HYPERDHT_RELAY } from "../shared/hyperdhtRelay";
 import { TEST_MINT, TEST_MINTS } from "../shared/mints";
 import { getBrowserHost } from "../host";
@@ -56,7 +56,9 @@ function preparingChanged(force = false): void {
 /**
  * Saves bytes kept in memory (a small received file, a voice message made MP3 here) through the system's save
  * dialog where files are real files (Desktop): a copy staged next to them, saved, and removed only once the save
- * has finished (the command answers after the dialog and the copy). Null where there is no such dialog.
+ * has finished (the command answers after the dialog and the copy). Null where there is no such dialog. A dialog that
+ * never answers keeps the copy until the app next starts, which removes every `save-` copy
+ * (`remove_staged_saves` in apps/desktop/src/file_store.rs).
  */
 async function saveStaged(blob: Blob, name: string): Promise<boolean | null> {
   const native = await fileBytesOf("native");
@@ -90,6 +92,8 @@ function walletPlatform(network?: WalletNetwork, card?: string): WalletPlatform 
     create: (params) => engine.call("walletCreate", params),
     remove: (params) => engine.call("walletRemove", params),
     testCoins: (params) => engine.call("walletTestCoins", params),
+    setupRetry: (type) => engine.call("walletSetupRetry", { type }),
+    setupDismiss: (type) => engine.call("walletSetupDismiss", { type }),
     usdtCreate:params=>engine.call("usdtCreate",params),
     usdtUnlock:password=>engine.call("usdtUnlock",{password,...(network?{network}:{})}),
     usdtReveal:password=>engine.call("usdtReveal",{password,...(network?{network}:{})}),
@@ -146,9 +150,9 @@ function walletPlatform(network?: WalletNetwork, card?: string): WalletPlatform 
       return { ...state, ...here, lightning, mode: network };
     },
     // The test mint is for trying things out right away, so it takes over as primary.
-    addMint: async (url) => void (await engine.call("walletAddMint", { url, primary: TEST_MINTS.includes(url) })),
+    addMint: async (url) => void (await engine.call("walletAddMint", { url, primary: TEST_MINTS.includes(url), ...on })),
     setPrimaryMint: (url) => engine.call("walletSetPrimaryMint", { url }),
-    removeMint: (url) => engine.call("walletRemoveMint", { url }),
+    removeMint: (url, acceptLoss) => engine.call("walletRemoveMint", { url, ...(acceptLoss ? { acceptLoss } : {}) }),
     receiveLightning: (amount, via) => engine.call("walletReceiveLightning", { amount, via, ...ln }),
     quoteInvoice: (invoice, via) => engine.call("walletQuoteInvoice", { invoice, via, ...ln }),
     lightningSetSource: (providerId, values) => engine.call("lightningSetSource", { providerId, values, ...ln }),
@@ -172,6 +176,7 @@ function walletPlatform(network?: WalletNetwork, card?: string): WalletPlatform 
     receiveToken: async (token) => (await engine.call("walletReceiveToken", { token })).amount,
     inspectCashu: async (text) => (await engine.call("walletInspectCashu", { text })).inspection,
     exportTokens: () => engine.call("walletExport", on),
+    backupReminder: (event) => engine.call("walletBackupReminder", event),
     async send(peerPubKeyZ32, amount, memo, confirmedReal) {
       const link = engine.linkByPeer(peerPubKeyZ32);
       if (!link) throw new Error("Ghostly is still starting. Try again in a moment.");
@@ -387,6 +392,7 @@ export const servicesPlatform: ServicesPlatform | null = {
     if (link) await engine.call("deleteMessage", { linkId: link.id, messageId });
   },
   getTransfer: (fileId) => preparing.get(fileId) ?? engine.state?.transfers[fileId] ?? null,
+  transfersRestored: () => engine.state?.transfersRestored ?? false,
   async fileAction(fileId, action) {
     // A file's local id starts with its chat's.
     const linkId = engine.state?.links.find((link) => fileId.startsWith(`${link.id}-in-`) || fileId.startsWith(`${link.id}-out-`))?.id

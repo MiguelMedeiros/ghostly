@@ -42,7 +42,6 @@ What `dev` runs on each client today. This table and the evidence per WISP below
 | Identity proofs | Yes | Yes | Yes | [300](300-peer-proofs.md) |
 | Groups (mesh, community) | Yes | Yes | Yes | [900](900-group-sessions.md) |
 | Headless CLI (`ghostly`) | The app's engine on Node, for bots: `ghostly1` invites, one chat, groups, wallets (not Bark), files, identity proofs, shared apps; DHT through relays only | | | [11xx](11xx-headless.md), #323 to #327 |
-| Older Rust `ghostly-cli` (no longer shipped from 1.0) | Compatibility client only: older DHT records, no `ghostly1` codes, no chat sessions | | | [cli/README.md](../../cli/README.md) |
 
 
 ## Evidence per WISP (2026-09-28)
@@ -189,7 +188,7 @@ The subsequent [paired-chat increment](PAIRED-CHAT-INCREMENT.md) adds an opt-in 
 |---|---|---|
 | Link identity/invite | [invite.ts](../../packages/core/src/invite.ts), [identity.ts](../../packages/core/src/identity.ts) | Two seeds plus shared symmetric key generated at creation. Creator initially knows both seeds. No cryptographic consumption/rotation in this legacy invite format. |
 | Browser admission | [node.ts](../../packages/browser/src/engine/node.ts) `joinLink`, `onMessage` | Local duplicate lookup by seed; saved invite removed from UI state after incoming message. Neither prevents reuse of a copied invite on another device. |
-| Persistence | [db.ts](../../packages/browser/src/engine/db.ts), [desktop host](../../src/desktop/host.ts) | Keys/messages persist locally; offline is not deletion. CLI callers supply their secrets explicitly. |
+| Persistence | [db.ts](../../packages/browser/src/engine/db.ts), [desktop host](../../apps/ui/src/desktop/host.ts) | Keys/messages persist locally; offline is not deletion. CLI callers supply their secrets explicitly. |
 | Records | [records.ts](../../packages/core/src/records.ts), [crypto.ts](../../packages/core/src/crypto.ts) | TTL 300; 1000-byte DNS budget; secretbox with random nonce; plaintext `_ts`/`_ack`. No ratchet/key erasure schedule provides forward secrecy for stored records. |
 | Messaging | [link.ts](../../packages/core/src/link.ts), [ghostlink.ts](../../packages/core/src/ghostlink.ts) | Small DHT fallback, live WebRTC, timestamp-based deduplication. Handing pending messages to a reliable channel is not remote durable acknowledgement. |
 | Data transport | [ghostlink.ts](../../packages/core/src/ghostlink.ts), [datalink.ts](../../packages/core/src/datalink.ts) | WebRTC directly composed today. `PkarrTransport` abstracts rendezvous, not interchangeable data adapters. |
@@ -223,7 +222,7 @@ These are separate questions: **implemented** means a code path exists; **availa
 | CLI | Separate Rust text client | Not an extension capability | Invokable CLI | No implied WebRTC/media/file support from sharing record format |
 | Iroh/HyperDHT/proofs/groups | Proposed | Proposed | Proposed | Availability and interoperability unproven |
 
-Sources: [host contract](../../packages/browser/src/host.ts), [web host](../../web/src/host.ts), [desktop host](../../src/desktop/host.ts), [extension source](../../extension/src), [web constraints](../WEB.md), [CLI](../CLI.md). Older release-specific prose in BROWSER.md is not evidence that the current native checkout ignores services; inspect the injected current engine/host wiring.
+Sources: [host contract](../../packages/browser/src/host.ts), [web host](../../apps/web/src/host.ts), [desktop host](../../apps/ui/src/desktop/host.ts), [extension source](../../apps/extension/src), [web constraints](../WEB.md), [CLI](../CLI.md). Older release-specific prose in BROWSER.md is not evidence that the current native checkout ignores services; inspect the injected current engine/host wiring.
 
 ## Implementation sequence
 

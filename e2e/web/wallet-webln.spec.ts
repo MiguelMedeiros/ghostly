@@ -53,7 +53,7 @@ async function receive(p: Peer, sats: number) {
 async function pay(p: Peer, invoice: string, sats: number) {
   await p.page.getByTestId("wallet-send").click();
   await p.page.getByTestId("wallet-pay-input").fill(invoice);
-  await p.page.getByRole("button", { name: `Pay ${sats} sats` }).click();
+  await p.page.getByRole("button", { name: `Pay ${sats} test sats` }).click();
   // Ghostly's own review comes first: the wallet is asked only once it is approved.
   await p.page.getByRole("button", { name: "Pay", exact: true }).click();
 }
@@ -75,7 +75,7 @@ async function requestPaidInChat(alice: Peer, bob: Peer, sats: number, aliceSour
   // Reviewed in Ghostly (amount, source, fee ceiling) before Alice's wallet is asked.
   const review = request.getByTestId("payment-review");
   await expect(review).toContainText(`Pay ${sats} test sats over Lightning`);
-  await expect(review).toContainText(`Through ${aliceSource} · fee up to 10 sats`);
+  await expect(review).toContainText(`Through ${aliceSource} · fee up to 10 test sats`);
   await review.getByRole("button", { name: "Approve payment" }).click();
   await expect(request.getByTestId("payment-state")).toHaveText("Paid", { timeout: 60_000 });
   // Bob's app sees it paid from his own wallet's answer, not from Alice's word.
@@ -118,7 +118,7 @@ test("a browser wallet as the Lightning source: invoices, payments reviewed firs
   // In: the wallet's own invoice, seen paid by asking the wallet.
   const invoice = await receive(alice, 12);
   wallet.receive(decodeBolt11(invoice)!.paymentHash!);
-  await expect(page.getByTestId("wallet-paid")).toContainText("12 sats received", { timeout: 30_000 });
+  await expect(page.getByTestId("wallet-paid")).toContainText("12 test sats received", { timeout: 30_000 });
 
   // Out: reviewed in Ghostly, then paid by the wallet.
   await pay(alice, (await stranger.makeInvoice({ amount: 30 })).paymentRequest, 30);
@@ -171,7 +171,7 @@ test.describe("on a regtest Lightning network", () => {
     // Alice receives: Bob's node pays her wallet's invoice, from outside any browser.
     const invoice = await receive(alice, 1_000);
     await bobNode.lnd.pay(invoice);
-    await expect(alice.page.getByTestId("wallet-paid")).toContainText("1,000 sats received", { timeout: 30_000 });
+    await expect(alice.page.getByTestId("wallet-paid")).toContainText("1,000 test sats received", { timeout: 30_000 });
 
     // Alice pays an invoice of Bob's node from the Lightning card.
     await pay(alice, await bobNode.lnd.invoice(400, "from the card"), 400);

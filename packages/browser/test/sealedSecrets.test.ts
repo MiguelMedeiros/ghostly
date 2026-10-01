@@ -1,10 +1,10 @@
 import "fake-indexeddb/auto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { PaymentReview } from "@ghostly/core";
+import { PaymentPreflightError, type PaymentAdapter, type PaymentReview, type PaymentTarget } from "@ghostly/core";
 import { mnemonicToEntropy, mnemonicToSeedSync, validateMnemonic } from "@scure/bip39";
 import { wordlist } from "@scure/bip39/wordlists/english.js";
 import { intentRepository, newDeviceKey, sealSeed, unsealSeed, type EncryptedSeed } from "../src/engine/paymentAdapters/persistence";
-import type { SavedIntent } from "../src/engine/paymentAdapters/coordinator";
+import { PaymentCoordinator, type SavedIntent } from "../src/engine/paymentAdapters/coordinator";
 import { redact } from "../src/engine/paymentAdapters/providers/types";
 import { STORES, transact } from "../src/shared/idb";
 import { phraseLeaks, TEST_PHRASE } from "./helpers/phraseLeaks";
@@ -83,6 +83,7 @@ describe("a payment is submitted once, or cancelled, never both", () => {
     return { review: { id: `i${++n}`, requestId: "ask-1", linkId: "alice", payee: "alice", method: "arkade", network: "regtest", provider: "http://127.0.0.1:43010", asset: "BTC", unit: "sat", address: "fixture", expiresAt: Date.now() + 60_000, createdAt: Date.now(), amount: 10, fee: 0, feeCap: 0, state: "pending", ...over } as PaymentReview, prepared: {} };
   }
   const usdt = (from: string, over: Partial<PaymentReview> = {}) => intent({ method: "usdt", network: "sepolia", chainId: 11155111, requestId: undefined, evm: { from, nonce: 0, gasLimit: "0", maxFeePerGas: "0", maxPriorityFeePerGas: "0", confirmations: 1 }, ...over } as Partial<PaymentReview>);
+  const evm = (from: string, nonce: number) => ({ from, nonce, gasLimit: "0", maxFeePerGas: "0", maxPriorityFeePerGas: "0", confirmations: 2 });
   const put = async (...intents: SavedIntent[]) => { for (const i of intents) await intentRepository.put(i); return intents; };
   const state = async (id: string) => (await intentRepository.get(id))?.review.state;
 
@@ -115,16 +116,44 @@ describe("a payment is submitted once, or cancelled, never both", () => {
     expect((await intentRepository.claim(other.review.id)).review.state).toBe("submitted");
   });
 
-  it("a USDT payment waits while another from the same address and chain may still take its nonce", async () => {
+  it("a USDT review made at a nonce another payment from the same address and chain still holds is refused", async () => {
     const from = "0x00000000000000000000000000000000000000aa";
     for (const earlier of ["submitted", "unknown"] as const) {
       await transact([STORES.intents], (s) => s[STORES.intents].clear());
-      const [, next] = await put(usdt(from, { state: earlier }), usdt(from));
-      await expect(intentRepository.claim(next.review.id), earlier).rejects.toThrow("already submitted");
+      const [, same, lower] = await put(usdt(from, { state: earlier, evm: evm(from, 4) }), usdt(from, { evm: evm(from, 4) }), usdt(from, { evm: evm(from, 3) }));
+      await expect(intentRepository.claim(same.review.id), earlier).rejects.toThrow("A payment from this wallet was sent after this review was made. Create a new review");
+      await expect(intentRepository.claim(lower.review.id), earlier).rejects.toThrow("Create a new review");
+      expect(await state(same.review.id)).toBe("pending");
     }
     await transact([STORES.intents], (s) => s[STORES.intents].clear());
     const [, , , free] = await put(usdt(from, { state: "settled" }), usdt("0x00000000000000000000000000000000000000bb", { state: "submitted" }), usdt(from, { state: "submitted", chainId: 1 } as Partial<PaymentReview>), usdt(from));
     expect((await intentRepository.claim(free.review.id)).review.state).toBe("submitted");
+  });
+
+  it("a second, distinct USDT payment made while the first confirms takes the next nonce and goes", async () => {
+    const from = "0x00000000000000000000000000000000000000Aa";
+    const [first, second, third] = await put(usdt(from, { state: "submitted", evm: evm(from, 7) }), usdt(from.toLowerCase(), { evm: evm(from.toLowerCase(), 8) }), usdt(from, { evm: evm(from, 9) }));
+    expect((await intentRepository.claim(second.review.id)).review.state).toBe("submitted");
+    expect((await intentRepository.claim(third.review.id)).review.state, "a third one after both").toBe("submitted");
+    expect(await state(first.review.id)).toBe("submitted");
+    await expect(intentRepository.claim(second.review.id), "the same payment again").rejects.toThrow("This payment was already submitted or could not be saved");
+  });
+
+  it("an app that stopped between sending and saving leaves the payment submitted: it is not sent again, and its nonce stays taken", async () => {
+    const from = "0x00000000000000000000000000000000000000aa";
+    const [crashed] = await put(usdt(from, { evm: evm(from, 2) }));
+    // claim() is the write before the broadcast; the app stops before the result is saved.
+    await intentRepository.claim(crashed.review.id);
+    const [before, after] = await put(usdt(from, { evm: evm(from, 2) }), usdt(from, { evm: evm(from, 3) }));
+    await expect(intentRepository.claim(crashed.review.id)).rejects.toThrow("already submitted");
+    await expect(intentRepository.claim(before.review.id)).rejects.toThrow("Create a new review");
+    expect((await intentRepository.claim(after.review.id)).review.state).toBe("submitted");
+  });
+
+  it("a USDT row with no nonce holds the account, and a review with none waits", async () => {
+    const from = "0x00000000000000000000000000000000000000aa";
+    const [, next] = await put(usdt(from, { state: "unknown", evm: { ...evm(from, 0), nonce: undefined } } as unknown as Partial<PaymentReview>), usdt(from, { evm: evm(from, 5) }));
+    await expect(intentRepository.claim(next.review.id)).rejects.toThrow("Create a new review");
   });
 
   it("only a pending payment can be cancelled; a submitted one is reconciled instead", async () => {
@@ -135,6 +164,63 @@ describe("a payment is submitted once, or cancelled, never both", () => {
     await expect(intentRepository.cancel(submitted.review.id)).rejects.toThrow("A submitted payment cannot be cancelled; reconcile it instead");
     await expect(intentRepository.cancel("never-saved")).rejects.toThrow("cannot be cancelled");
     expect(await state(submitted.review.id)).toBe("submitted");
+  });
+});
+
+describe("USDT payments back to back, through the coordinator and the saved intents", () => {
+  const from = "0x00000000000000000000000000000000000000aa";
+  const target = (): PaymentTarget => ({ method: "usdt", network: "evm-local", provider: "http://127.0.0.1:8545", asset: "TEST-USDT", unit: "token-base", address: "0x00000000000000000000000000000000000000bb", chainId: 31337, token: "0x00000000000000000000000000000000000000cc", decimals: 6, issuedAt: Date.now(), expiresAt: Date.now() + 60_000 });
+  /** A chain whose account nonce moves when a transaction is sent, and whose payments take a while to confirm. */
+  function chain() {
+    const node = { pending: 4, sent: [] as number[], stopAfterSend: false };
+    const adapter: PaymentAdapter<{ nonce: number }> = {
+      method: "usdt",
+      prepare: async () => ({ fee: 1, prepared: { nonce: node.pending }, evm: { from, nonce: node.pending, gasLimit: "1", maxFeePerGas: "1", maxPriorityFeePerGas: "0", confirmations: 2 } }),
+      execute: async (_review, prepared, persist) => {
+        if (prepared.nonce !== node.pending) throw new PaymentPreflightError("Account nonce changed. Create a new review");
+        await persist!();
+        node.sent.push(prepared.nonce); node.pending++;
+        if (node.stopAfterSend) throw new Error("the app stopped");
+        return { txid: `0x${prepared.nonce}`, settled: false, pending: true };
+      },
+      reconcile: async (_review, prepared) => ({ txid: `0x${prepared.nonce}`, settled: false, pending: true }),
+    };
+    return { node, coordinator: new PaymentCoordinator(intentRepository, [adapter]) };
+  }
+  const pay = (c: PaymentCoordinator, n: number) => c.prepare(target(), n, 10, { payee: "bob", linkId: "bob" });
+
+  beforeEach(async () => { await transact([STORES.intents], (s) => s[STORES.intents].clear()); });
+
+  it("a second payment made while the first is unconfirmed is sent at the next nonce", async () => {
+    const { node, coordinator } = chain();
+    const first = await coordinator.approve((await pay(coordinator, 1_000_000)).id);
+    expect(first.state).toBe("submitted");
+    const second = await coordinator.approve((await pay(coordinator, 2_000_000)).id);
+    expect(second.state).toBe("submitted");
+    expect(node.sent).toEqual([4, 5]);
+    await expect(coordinator.approve(first.id), "the first one again").rejects.toThrow("cannot be submitted again");
+    expect(node.sent).toEqual([4, 5]);
+  });
+
+  it("a review made before the first payment went is refused, nothing is sent, and a new review goes", async () => {
+    const { node, coordinator } = chain();
+    const [a, b] = [await pay(coordinator, 1), await pay(coordinator, 2)];
+    await coordinator.approve(a.id);
+    await expect(coordinator.approve(b.id)).rejects.toThrow("A payment from this wallet was sent after this review was made. Create a new review");
+    expect(node.sent).toEqual([4]);
+    expect((await coordinator.approve((await pay(coordinator, 2)).id)).state).toBe("submitted");
+    expect(node.sent).toEqual([4, 5]);
+  });
+
+  it("a payment whose outcome was not saved is never sent again, and the next payment still goes", async () => {
+    const { node, coordinator } = chain();
+    node.stopAfterSend = true;
+    const lost = await coordinator.approve((await pay(coordinator, 1)).id);
+    expect(lost.state).toBe("unknown");
+    node.stopAfterSend = false;
+    await expect(coordinator.approve(lost.id)).rejects.toThrow("cannot be submitted again");
+    expect((await coordinator.approve((await pay(coordinator, 2)).id)).state).toBe("submitted");
+    expect(node.sent).toEqual([4, 5]);
   });
 });
 

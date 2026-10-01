@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { MAX_KNOCKS, createIdentity, decodeCommunityLink, entryParams, identityFromSeedB64, knockIdentity, lobbyKeys, publicKeyFromZ32, readKnocks, type GroupEntryLink } from "@ghostly/core";
+import { DiscoveryBudgetError, EXPECT_PEER_MS, PRESENCE_WINDOW, MAX_KNOCKS, beaconKeys, createIdentity, decodeCommunityLink, entryParams, identityFromSeedB64, knockIdentity, lobbyKeys, publicKeyFromZ32, readBeacon, readKnocks, type GroupEntryLink } from "@ghostly/core";
 import { COMMUNITY_TIMINGS, KNOCK_SHARDS, dialedKey } from "../src/engine/community";
+import { otherEndSeen } from "../src/engine/groups";
 import { CommunityWorld, RELAY_NETWORK, type Peer } from "./communityWorld";
 // covers: groups.community.join, groups.protocol.community-topology
 
@@ -142,6 +143,33 @@ describe("a community's door", { timeout: 120_000 }, () => {
     expect(alice.groups.communities.isHub(id)).toBe(true);
   });
 
+  // Miguel's CLI (2026-09-30): a daemon that had just let people into two other communities created a third, and
+  // its door first answered a knock 43 to 65 s later. A hub is at the door once its beacon entry is listed, and that
+  // write is a background request: while a link signals (the last admission's edge, still looking fast), background
+  // requests get 5 a minute on each relay, which the other doors' bell reads (exempt from that share) took. Here the
+  // relays' budget holds the new hub's beacon writes back for a minute; everything else goes through.
+  it("a new group's first hub is its door at once, though the relays' budget holds its beacon entry back", async () => {
+    const world = new CommunityWorld(undefined, RELAY_NETWORK);
+    const alice = world.add("alice");
+    const { id, link } = await community(world, alice);
+    const beacon = beaconKeys(alice.groups.communities.session(id)!.state.rv, id);
+    const heldUntil = world.now + 60_000, publish = alice.host.publish;
+    let held = 0;
+    alice.host.publish = async (identity, records, background) => {
+      if (identity.pubKeyZ32 === beacon.identity.pubKeyZ32 && world.now < heldUntil) { held++; throw new DiscoveryBudgetError(heldUntil - world.now); }
+      return publish(identity, records, background);
+    };
+    const bob = world.add("bob");
+    await bob.groups.joinByLink(link);
+    const answered = await world.until(() => [...alice.links.values()].some(e => e.kind === "host" && e.g === id), 60_000, 500);
+    expect(held).toBeGreaterThan(0);
+    expect(answered).toBeLessThanOrEqual(5_000);
+    await world.until(() => world.member(bob, id), 60_000, 500);
+    // Once the budget lets it, its entry is listed, as any hub's.
+    await world.run(heldUntil - world.now + 10_000, 500);
+    expect(readBeacon(beacon, world.pkarr.get(beacon.identity.pubKeyZ32) ?? []).map(h => h.key)).toContain(alice.groups.communities.session(id)!.myKey);
+  });
+
   it("the member let in gets its edge from both sides at once, each looking fast, without the lobby; it is a hub only later", async () => {
     const world = new CommunityWorld();
     const alice = world.add("alice"), bob = world.add("bob");
@@ -166,5 +194,48 @@ describe("a community's door", { timeout: 120_000 }, () => {
     await world.run(COMMUNITY_TIMINGS.newcomerMs);
     expect(bob.groups.communities.isHub(id)).toBe(true);
     expect(identityFromSeedB64(bob.groups.communities.session(id)!.state.seedB64).pubKeyZ32).toBe(bobKey);
+  });
+});
+
+describe("a joiner away while the door let it in", { timeout: 120_000 }, () => {
+  // Miguel's CLI (2026-09-30): a daemon stopped just after joining through the link. The door answered the knock and
+  // gave its entry session up 90 s later, unanswered; the joiner, back later, knocked again and waited for the door's
+  // next turn, up to two minutes, though a lone door has no other hub to take turns with.
+  it.each([0, 20_000, 60_000])("back %i ms after the door gave up: a lone door lets it in within seconds", async after => {
+    const world = new CommunityWorld(undefined, RELAY_NETWORK);
+    const alice = world.add("alice");
+    const { id, link } = await community(world, alice);
+    await world.run(3 * 60_000);
+    const bob = world.add("bob");
+    await bob.groups.joinByLink(link);
+    await landed();
+    bob.online = false;
+    // The door sees the knock, opens its side of the entry session, and gives it up unanswered.
+    await world.until(() => [...alice.links.values()].some(e => e.kind === "host"), 60_000);
+    await world.until(() => ![...alice.links.values()].some(e => e.kind === "host"), 3 * 60_000);
+    await world.run(after);
+    await world.restart(bob);
+    const took = await world.until(() => world.member(bob, id), 5 * 60_000);
+    expect(took).toBeLessThanOrEqual(20_000);
+  });
+});
+
+describe("what counts as the member's side of an entry session answering (the engine's linkSeen)", () => {
+  const NOW = 1_800_000_000_000;
+  const presence = (age: number, online = true) => ({ online, lastPacketAt: NOW - age, services: online ? [] : null });
+
+  it("a connection under way, whatever its packet says", () => {
+    for (const state of ["offering", "answering", "connecting", "open"]) expect(otherEndSeen(undefined, state, NOW)).toBe(true);
+    expect(otherEndSeen(undefined, "idle", NOW)).toBe(false);
+  });
+
+  // The hub closes an entry it gave up on without a last packet: a joiner back after a restart read that packet, still
+  // "online" for PRESENCE_WINDOW, as a member answering, stopped knocking, and stayed "invited" 10 minutes (2026-09-30).
+  it("a packet only while it is fresh: a hub's side given up on is not answering, though its presence has not lapsed", () => {
+    expect(otherEndSeen(presence(1_000), "idle", NOW)).toBe(true);
+    expect(otherEndSeen(presence(EXPECT_PEER_MS - 1), "idle", NOW)).toBe(true);
+    expect(otherEndSeen(presence(EXPECT_PEER_MS), "idle", NOW)).toBe(false);
+    expect(otherEndSeen(presence(PRESENCE_WINDOW / 2), "idle", NOW)).toBe(false);
+    expect(otherEndSeen(presence(1_000, false), "idle", NOW)).toBe(false);
   });
 });

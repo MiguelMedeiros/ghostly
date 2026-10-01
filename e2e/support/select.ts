@@ -1,7 +1,7 @@
 import { expect, type Locator } from "@playwright/test";
 
 /**
- * The app's selects are `Select` (src/components/ui/Select.tsx), a combobox with a list of options, not a native
+ * The app's selects are `Select` (apps/ui/src/components/ui/Select.tsx), a combobox with a list of options, not a native
  * `<select>`: `locator.selectOption()` and `toHaveValue()` do not apply. Its value is in `data-value`, and its
  * options exist only while it is open.
  */

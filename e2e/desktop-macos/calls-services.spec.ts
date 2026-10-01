@@ -1,6 +1,6 @@
 import { writeFileSync } from "node:fs";
 import { expect, test } from "@playwright/test";
-import { BIG_SHA256, startAtlas } from "../../extension/test/atlas.mjs";
+import { BIG_SHA256, startAtlas } from "../../apps/extension/test/atlas.mjs";
 import { desktopPerson, type DesktopPerson } from "../matrix/people";
 import { HYPERDHT_TESTNET } from "../matrix/desktop";
 import { forgetSharedData, openMacDesktop, type MacDesktop } from "../support/desktopMac";
@@ -130,7 +130,7 @@ type Received = { audio: number; video: number; frames: number; sent: number; st
 
 /** The size of the other side's picture, as this app's call shows it. */
 const REMOTE_PICTURE = `
-  const video = [...document.querySelectorAll("video")].find((v) => !v.muted);
+  const video = document.querySelector("[data-testid=remote-video]");
   return video ? video.videoWidth + "x" + video.videoHeight : "none";`;
 
 /**

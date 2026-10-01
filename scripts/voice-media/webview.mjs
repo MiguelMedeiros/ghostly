@@ -32,7 +32,7 @@ export function inWebView(fn, args, { csp } = {}) {
   return parsed.value;
 }
 
-/** Ghostly Desktop's policy, as `src-tauri/tauri.conf.json` ships it. */
+/** Ghostly Desktop's policy, as `apps/desktop/tauri.conf.json` ships it. */
 export function desktopPolicy() {
-  return JSON.parse(readFileSync(join(here, "../../src-tauri/tauri.conf.json"), "utf8")).app.security.csp;
+  return JSON.parse(readFileSync(join(here, "../../apps/desktop/tauri.conf.json"), "utf8")).app.security.csp;
 }

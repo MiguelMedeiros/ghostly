@@ -28,12 +28,12 @@ test("Breez runs in the extension's offscreen document: in and out on regtest", 
     const invoice = (await page.getByTestId("wallet-invoice").innerText()).trim();
     expect(invoice).toMatch(/^lnbcrt3u1/);
     await other.pay(invoice);
-    await expect(page.getByTestId("wallet-paid")).toContainText("300 sats received", { timeout: 90_000 });
+    await expect(page.getByTestId("wallet-paid")).toContainText("300 test sats received", { timeout: 90_000 });
 
     const before = await other.balance();
     await page.getByTestId("wallet-send").click();
     await page.getByTestId("wallet-pay-input").fill(await other.invoice(100));
-    await page.getByRole("button", { name: "Pay 100 sats" }).click();
+    await page.getByRole("button", { name: "Pay 100 test sats" }).click();
     await page.getByRole("button", { name: "Pay", exact: true }).click();
     await expect(page.getByTestId("wallet-notice")).toHaveText("Paid.", { timeout: 90_000 });
     await expect.poll(() => other.balance(), { timeout: 60_000 }).toBe(before + 100);

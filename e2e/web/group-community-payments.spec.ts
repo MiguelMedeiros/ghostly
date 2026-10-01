@@ -9,7 +9,7 @@ import { paymentCard } from "../support/payments";
  * gets it from whoever is there and pays; Carol sees the request and then sees it paid. Then Alice asks the whole
  * group: Carol pays it, once, and everyone sees who did.
  */
-test.describe("community payments", { tag: "@network" }, () => {
+test.describe("community payments", () => {
   test.describe.configure({ retries: 1 });
 
   const groupChat = (peer: Peer) => peer.page.getByTestId("group-chat");
@@ -64,7 +64,8 @@ test.describe("community payments", { tag: "@network" }, () => {
     const bubble = timeline(peer).getByTestId("payment-bubble").filter({ hasText: memo });
     await bubble.getByTestId("payment-pay").click({ timeout: 180_000 });
     const review = timeline(peer).getByTestId("payment-review");
-    await expect(review).toContainText("cashu-test");
+    await expect(review.getByTestId("review-rail")).toHaveText("Cashu");
+    await expect(review).toHaveAttribute("data-network", "testnet");
     await review.getByRole("button", { name: "Approve payment" }).click();
   }
 

@@ -1,0 +1,123 @@
+import { useLayoutEffect, useRef, type ReactNode } from "react";
+import { PayExternally } from "../PayExternally";
+import { focusInPlace } from "../../lib/focus";
+import { useOptionalI18n, useT } from "../../contexts/I18nContext";
+import { useAmountText } from "../../hooks/useAmountText";
+
+/** The same building blocks as Settings, so a wallet's options read like any other option. */
+export { Section, Row, Block } from "../layout/Section";
+
+const switchTrack = (checked: boolean) => `relative w-12 h-6 rounded-full transition-colors shrink-0 ${checked ? "bg-accent" : "bg-border-bright"}`;
+const SwitchKnob = ({ checked }: { checked: boolean }) => <span className={`absolute top-1 left-1 w-4 h-4 rounded-full bg-white transition-transform ${checked ? "translate-x-6" : "translate-x-0"}`} />;
+
+export function Switch({ checked, onChange, label, disabled, testId }: { checked: boolean; onChange: (next: boolean) => void; label: string; disabled?: boolean; testId?: string }) {
+  return (
+    <button type="button" role="switch" data-testid={testId} aria-checked={checked} aria-label={label} disabled={disabled} onClick={() => onChange(!checked)}
+      className={`${switchTrack(checked)} cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed before:absolute before:-inset-2 before:content-['']`}>
+      <SwitchKnob checked={checked} />
+    </button>
+  );
+}
+
+/**
+ * The Switch's look alone, inside something that is itself the switch (a chat's Accept card, whose whole card is a
+ * `role=switch` button: a button cannot hold another).
+ */
+export function SwitchLook({ checked, className = "", testId }: { checked: boolean; className?: string; testId?: string }) {
+  return (
+    <span aria-hidden="true" data-on={checked} data-testid={testId} className={`${switchTrack(checked)} block ${className}`}>
+      <SwitchKnob checked={checked} />
+    </span>
+  );
+}
+
+/** One choice among a few. `compact`: the smaller one for a page header. Wraps when the options do not fit. */
+export function Segmented<T extends string>({ options, value, onChange, label, disabled, compact }: { options: { value: T; label: string }[]; value: T; onChange: (next: T) => void; label: string; disabled?: boolean; compact?: boolean }) {
+  return (
+    <div role="radiogroup" aria-label={label} className="flex flex-wrap gap-1 bg-surface-alt rounded-lg p-1 max-w-full">
+      {options.map((option) => (
+        <button key={option.value} type="button" role="radio" aria-checked={value === option.value} disabled={disabled && value !== option.value} onClick={() => { if (option.value !== value) onChange(option.value); }}
+          className={`${compact ? "px-2.5 min-h-8 text-[13px]" : "px-3 min-h-8 text-sm"} whitespace-nowrap rounded-md transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${value === option.value ? "bg-accent text-on-accent font-medium" : "text-text-secondary hover:text-text-primary"}`}>
+          {option.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+const BUTTON = {
+  primary: "bg-accent text-on-accent hover:bg-accent-hover font-semibold",
+  secondary: "bg-surface-alt text-text-primary hover:bg-surface-hover border border-border",
+  danger: "bg-transparent text-danger hover:bg-danger/10 border border-border",
+} as const;
+export function Button({ variant = "secondary", className = "", ...props }: React.ComponentPropsWithRef<"button"> & { variant?: keyof typeof BUTTON }) {
+  return <button type="button" {...props} className={`px-4 py-2 min-h-10 max-md:min-h-11 whitespace-nowrap rounded-lg text-sm transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${BUTTON[variant]} ${className}`} />;
+}
+
+export const input = "w-full min-w-0 bg-surface-alt text-text-primary px-3 py-2 max-md:min-h-11 rounded-lg border border-border text-sm placeholder-text-muted focus:outline-none focus:ring-2 focus:ring-accent";
+
+export type Action = "receive" | "send" | "history";
+const ACTION_ICON: Record<Action, ReactNode> = {
+  receive: <path d="M12 5v14M5 12l7 7 7-7" />,
+  send: <path d="M12 19V5M5 12l7-7 7 7" />,
+  history: <><circle cx="12" cy="12" r="9" /><polyline points="12 7 12 12 15 14" /></>,
+};
+/** In English where no language is given (a component rendered on its own). */
+const ACTION_LABEL: Record<Action, string> = { receive: "Receive", send: "Send", history: "History" };
+const ACTION_KEY = { receive: "wallet.ui.receive", send: "wallet.ui.send", history: "wallet.ui.history" } as const;
+/** The two (or three) things a wallet is for, as big equal buttons. */
+export function Actions({ value, onChange, actions = ["receive", "send"] }: { value: Action; onChange: (next: Action) => void; actions?: Action[] }) {
+  const i18n = useOptionalI18n();
+  return (
+    <div className="grid gap-2" style={{ gridTemplateColumns: `repeat(${actions.length}, minmax(0, 1fr))` }} role="tablist">
+      {actions.map((action) => (
+        <button key={action} type="button" role="tab" aria-selected={value === action} data-testid={`wallet-${action === "send" ? "send" : action}`} onClick={() => onChange(action)}
+          className={`flex items-center justify-center gap-2 min-w-0 px-2 py-2.5 min-h-10 max-md:min-h-11 rounded-xl text-sm font-semibold transition-colors cursor-pointer border ${value === action ? "bg-accent text-on-accent border-accent" : "bg-surface text-text-secondary border-border hover:text-text-primary hover:border-border-bright"}`}>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="shrink-0">{ACTION_ICON[action]}</svg>
+          <span className="truncate">{i18n ? i18n.t(ACTION_KEY[action]) : ACTION_LABEL[action]}</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * Where to be paid, the same on every card: a QR code, the text, Copy, and a link a wallet on this device
+ * opens (`uri`: `lightning:…`, `bitcoin:…`; `qr` when the code should show something else).
+ */
+export function Address({ value, qr, uri, testId, note, actions }: { value: string | undefined; qr?: string; uri?: string; testId: string; note?: ReactNode; actions?: ReactNode }) {
+  const i18n = useOptionalI18n();
+  // Never a QR code or a Copy button for an address that is not there yet: someone could share it.
+  if (!value) return <Notice testId={`${testId}-pending`}>{i18n ? i18n.t("wallet.ui.gettingAddress") : "Getting an address… It shows up here once the provider answers."}</Notice>;
+  return <PayExternally uri={uri ?? qr ?? value} value={value} testId={testId} note={note} actions={actions} label={i18n ? i18n.t("wallet.ui.receivingAddress") : "Receiving address"} />;
+}
+
+/** A large amount field: what matters most when paying is the number. */
+export function Amount({ value, onChange, unit, decimals = 0, testId, autoFocus }: { value: string; onChange: (next: string) => void; unit: string; decimals?: number; testId?: string; autoFocus?: boolean }) {
+  // Focused where it is, without scrolling to it (in WebKit too: focusInPlace), so the wallet's cards above it stay in
+  // view. Only when `autoFocus` says so: the Wallets page asks for it when a person chose the wallet, never when its
+  // card came up as the pointer passed over the deck or as the keys moved along it (pages/Wallet.tsx).
+  const i18n = useOptionalI18n();
+  const t = useT();
+  // `value` is the amount ("1000.5"); the field shows it the person's way, and says when what was typed is unclear.
+  const field = useAmountText(value, onChange, t.language ?? "en", decimals, t);
+  const input = useRef<HTMLInputElement>(null);
+  useLayoutEffect(() => { if (autoFocus) focusInPlace(input.current); }, [autoFocus]);
+  return (
+    <div className="space-y-1">
+      <label className="flex items-baseline gap-2 bg-surface-alt rounded-xl px-4 py-3 border border-border focus-within:ring-2 focus-within:ring-accent">
+        <input ref={input} data-testid={testId} inputMode={decimals ? "decimal" : "numeric"} placeholder="0" aria-label={i18n ? i18n.t("wallet.ui.amountIn", { unit }) : `Amount in ${unit}`}
+          aria-invalid={field.hint ? true : undefined}
+          className="min-w-0 flex-1 bg-transparent border-none outline-none text-3xl font-semibold text-text-primary placeholder-text-muted tabular-nums"
+          value={field.text} onChange={(e) => field.change(e.target.value)} />
+        <span className="text-text-muted text-sm shrink-0">{unit}</span>
+      </label>
+      {field.hint && <Notice tone="error" testId="amount-unclear">{field.hint}</Notice>}
+    </div>
+  );
+}
+
+export function Notice({ tone = "muted", children, testId }: { tone?: "muted" | "error" | "success" | "warning"; children: ReactNode; testId?: string }) {
+  const color = { muted: "text-text-muted", error: "text-danger", success: "text-accent", warning: "text-yellow-500" }[tone];
+  return <p role={tone === "error" ? "alert" : undefined} data-testid={testId} className={`text-xs ${color}`}>{children}</p>;
+}

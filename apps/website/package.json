@@ -1,0 +1,47 @@
+{
+  "name": "website",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "predev": "npm run sync:references",
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint && node scripts/check-dashes.mjs && node scripts/check-single-source.mjs",
+    "test": "node --test scripts/single-source.test.mjs scripts/wisp-changes.test.mjs scripts/wisp-index.test.mjs scripts/llms.test.mjs scripts/agent-prompt.test.mjs scripts/echo-bot.test.mjs",
+    "test:e2e": "playwright test -c e2e/playwright.config.ts",
+    "sync:references": "node scripts/sync-references.mjs",
+    "sync:app-deck": "node scripts/sync-app-deck.mjs",
+    "capture": "node scripts/capture/run.mjs",
+    "og-image": "node scripts/og-image.mjs",
+    "prebuild": "npm run sync:references",
+    "motion:perf": "node scripts/motion/perf.mjs",
+    "motion:record": "node scripts/motion/record.mjs",
+    "motion:speeds": "node scripts/motion/speeds.mjs"
+  },
+  "dependencies": {
+    "github-slugger": "^2.0.0",
+    "motion": "^13.4.4",
+    "next": "16.3.6",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.63.0",
+    "@tailwindcss/postcss": "^4",
+    "@types/node": "^26.6.3",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "^9",
+    "eslint-config-next": "16.3.6",
+    "puppeteer": "^25.12.0",
+    "tailwindcss": "^4",
+    "typescript": "^5"
+  },
+  "overrides": {
+    "sharp": "0.35.4",
+    "postcss": "8.5.24"
+  }
+}

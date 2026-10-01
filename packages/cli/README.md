@@ -9,8 +9,8 @@ is built this way, is [WISP 11xx](../../docs/wisps/11xx-headless.md). A guided t
 > admin tools and hubs, the event stream, hooks and agent turns, wallets and payments, files and voice notes, identity
 > proofs, shared web apps, voice calls, typing, replies, edits, reactions and forwards, Pkarr over the Mainline DHT;
 > the npm package `@ghostlytools/cli`, published since 1.0); every engine call is already
-> reachable through `ghostly engine <method>`. The older Rust `ghostly-cli` (the `cli/` folder) stays as the
-> compatibility client for v0.4 chats; it is not this package, and from 1.0 the release no longer ships it.
+> reachable through `ghostly engine <method>`. The older Rust `ghostly-cli`, the client for v0.4 chats, was
+> removed after 1.0.
 
 ## Install
 
@@ -19,7 +19,7 @@ Install: `npm install -g @ghostlytools/cli`, then `ghostly --version`. Or from t
 ```bash
 npm install
 npm run build -w @ghostlytools/cli
-npm pack -w @ghostlytools/cli              # ghostlytools-cli-<version>.tgz: the bundle, its WebAssembly, README and SKILL.md
+npm pack -w @ghostlytools/cli              # ghostlytools-cli-<version>.tgz: the bundle, its WebAssembly, examples/, README and SKILL.md
 npm install -g ./ghostlytools-cli-*.tgz    # the `ghostly` command, with its dependencies from npm
 ghostly --version
 ```
@@ -28,10 +28,16 @@ Node 22.12 or newer. WebRTC comes from `node-datachannel` (a native
 module with prebuilt binaries for Linux, macOS and Windows); without it the CLI still runs, over HyperDHT, Iroh and
 the DHT, and groups are unavailable.
 
+Tested in CI on Linux x64 and Linux arm64 (glibc); developed on macOS arm64. macOS x64 and Windows x64 get the same
+prebuilt modules but no CI run.
+
 The bundle holds the app's engine (`@ghostly/browser`, `@ghostly/core`, Iroh's and Breez's WebAssembly); every other
 package it imports is a dependency in package.json, which `test/packageDeps.test.ts` keeps true.
 
 ## Five minutes
+
+On a private network or a local test, point the profile at your own Pkarr relays before its first `daemon`: a new
+profile publishes its records within seconds of starting ([Private networks](#private-networks)).
 
 ```bash
 ghostly profile set --name "Echo bot"        # the name contacts see
@@ -46,10 +52,16 @@ An echo bot ([examples/echo-bot.sh](examples/echo-bot.sh); the event arrives on 
 arguments, so a contact's text cannot reach the shell):
 
 ```bash
-ghostly listen --type message.received --cursor ~/.ghostly/echo.cursor --exec '
+ghostly listen --type message.received --cursor "${GHOSTLY_HOME:-$HOME/.ghostly}/echo.cursor" --exec '
   event="$(cat)"
-  printf "echo: %s" "$(jq -r .message.text <<<"$event")" | ghostly send "$(jq -r .chat <<<"$event")" --stdin'
+  printf "echo: %s" "$(printf "%s" "$event" | jq -r .message.text)" | ghostly send "$(printf "%s" "$event" | jq -r .chat)" --stdin'
 ```
+
+The cursor file keeps the last event handled, so a restarted bot goes on where it stopped; it sits in the Ghostly
+folder in use. With another folder or profile, set `GHOSTLY_HOME` or `GHOSTLY_PROFILE` rather than `--home` or
+`--profile`: the environment reaches the hook's own `ghostly send`, a flag does not. The example script takes
+`ECHO_CURSOR` for the cursor's path (default `echo.cursor` in `GHOSTLY_HOME`, else `~/.ghostly`); give each bot and
+profile its own.
 
 The same bot on the socket, without jq: [examples/echo-bot.mjs](examples/echo-bot.mjs). A payment bot that takes
 requests, tips and "balance" in a chat, with test coins: [examples/payment-bot.mjs](examples/payment-bot.mjs).
@@ -78,6 +90,8 @@ The rows are in alphabetical order of their first command, and every command of 
 
 | Command | What it does |
 |---|---|
+| `button press <chat\|group> <message> <button> [--wait none\|sent\|delivered] [--timeout s]` | Press a button of someone else's question, as a tap in the app does (WISP 4xx · Message Buttons): the reply carries the button's label, and the asker hears `button.pressed`. `<message>` is the question's id (its event or `chat history`), `<button>` a button's id from its `card`. Refused (exit 1) like a tap: closed buttons, a second answer past `--once`, a second press within a second. A one-shot in a chat waits until it went out, as `send`. Answers `{chat \| group, messageId, button, label, replyId, delivery \| edges}` |
+| `button update <chat\|group> <message> [--chosen <button>] [--close] [--text <text>] [--force] [--wait none\|confirmed\|sent] [--timeout s]` | Answer a question you sent with `send --button` (WISP 4xx · Message Buttons): `--chosen` shows which button won, `--close` takes presses no more, `--text` changes the text (shown as edited; refused if it looks like a secret, unless `--force`); the buttons and, unless given, the text stay. `<message>` is the `messageId` send gave. Answers `{chat \| group, buttons, messageId, card, edits}` |
 | `call auto [on\|off] [--from <chat>]… [--rate n]` | Answer calls by themselves, from anyone or the chats named (kept in the profile) |
 | `call hangup [<chat\|call>]`, `call list`, `call flush [<chat\|call>]` | Hang up (or decline); calls on now; drop the audio queued and not played yet |
 | `call pipe [<chat\|call>]` | A call's audio on stdin and stdout, for shell pipelines (sox, ffmpeg) |
@@ -92,7 +106,7 @@ The rows are in alphabetical order of their first command, and every command of 
 | `chat transport <chat> <auto\|dht\|webrtc\|iroh\|hyperdht>` | What carries the chat |
 | `chat verify <chat> --code <code>` | Mark the contact verified after comparing the codes out of band |
 | `chat wait <chat> [--until live\|text\|paired] [--timeout s]` | Wait for a chat to go live, carry text, or see its contact |
-| `daemon [--detach]`, `daemon status`, `daemon stop`, `daemon restart` | Keep the profile online; `restart` stops it and starts this release's code in the background ([After an upgrade](#after-an-upgrade)). Ctrl-C, SIGTERM and the terminal closing (SIGHUP) stop it cleanly |
+| `daemon [--detach]`, `daemon status`, `daemon stop`, `daemon restart` | Keep the profile online; `status` names its version and its socket (`socket`, for the [socket API](#the-socket-api)); `restart` stops it and starts this release's code in the background ([After an upgrade](#after-an-upgrade)). Ctrl-C, SIGTERM and the terminal closing (SIGHUP) stop it cleanly |
 | `edit <chat> <message> [text… \| --text <text> \| --stdin] [--force] [--wait none\|confirmed] [--timeout s]` | Replace the text of a message you sent (1:1 chats, `group edit` for a group; `<message>` is the `messageId` `send` gave, or its wire id). The contact sees it in place, marked edited; `--wait confirmed` waits for its app to confirm (the default without a daemon). At most 100 edits a message, no time limit; an older contact app gets it once it shows edits |
 | `engine <method> [json \| -] [--confirm-real] [--show-secret]`, `engine --list` | Any call of the app's engine |
 | `events [--since seq]` | What the event journal holds, without following |
@@ -107,11 +121,11 @@ The rows are in alphabetical order of their first command, and every command of 
 | `group hub <group> <member> [--pin \| --exclude \| --auto]` | Past 16 members: pin a member as a hub, keep one from being a hub, or leave it to their app (a daemon offers itself) |
 | `group invite <group> <chat>`, `group remove <group> <member>`, `group admin <group> <member>` | Membership, for the admin (each prints the group; `--show-secret` for its link) |
 | `group leave <group>`, `group forget <group> --yes`, `group accept\|decline <group>` | Membership |
-| `group list [--show-secret]`, `group show <group> [--show-secret]`, `group history <group>` | Groups, members, history; a message names its author (`member` key, `nick` from the roster). The entry link prints as `<hidden>` without `--show-secret` |
+| `group list [--show-secret]`, `group show <group> [--show-secret]`, `group history <group>` | Groups, members, history; a message names its author (`member` key, `nick` from the roster, or the name an author no longer in it had). The entry link prints as `<hidden>` without `--show-secret` |
 | `group react <group> <message> <emoji> [--remove]` | React to a group's message |
 | `group rename <group> <name>` | A new name, for the admin (1 to 64 characters on one line); the picture stays. Members see it once it reaches them; until then, and on apps from before names, the group keeps the name it had when they got in |
 | `group rotate <group>`, `group link <group> [--off] [--reset]`, `group picture <group> <jpeg> \| --clear` | A fresh secret; the link (printed: asking for it is asking for the secret); the picture |
-| `group send <group> [text…] [--mention <member>]… [--reply <message>] [--wait none\|sent] [--timeout s]` | Send; each mentioned member is written as `@name` in the text. Answers `{group, messageId, sent, edges}`: the id `--reply`, `group react` and `group edit` take, and how many edges took it so far. A group has no receipts: `--wait sent` waits until at least one edge took it (a member's in a private group, one of your hubs' in a community), and exits 4 after `--timeout` (default 30 s) if none did; the message still goes when an edge opens, while the profile is online. Use it for a one-shot send with no daemon |
+| `group send <group> [text…] [--mention <member>]… [--reply <message>] [--button id:Label]… [--style id=primary\|neutral\|danger]… [--once] [--id id] [--wait none\|sent] [--timeout s]` | Send; each mentioned member is written as `@name` in the text. `--button` puts buttons under it, as `send --button`. Answers `{group, messageId, sent, edges}`: the id `--reply`, `group react` and `group edit` take, and how many edges took it so far. A group has no receipts: `--wait sent` waits until at least one edge took it (a member's in a private group, one of your hubs' in a community), and exits 4 after `--timeout` (default 30 s) if none did; the message still goes when an edge opens, while the profile is online. Use it for a one-shot send with no daemon |
 | `group typing <group> [--kind typing\|recording\|thinking] [--status "<text>"] [--for s] [--stop]` | `typing` in a private group: the members whose edge is open see "Ana is typing…" (or recording, thinking, or your status line), with the same rules, 6 s hold and `--for`. Answers `{group, typing, kind, status, reached, sendTyping}` (`reached`: members with an open edge). A community does not carry typing yet (exit 1, `unavailable`) |
 | `identity add <provider> [subject] [--signer id] [--field name=value]… [--days n]` | A proof: an in-app signer (NIP-46 and the like) finishes here; a tool or a published record answers with the statement |
 | `identity complete <draft> [--evidence-file f \| --stdin]`, `identity cancel <draft>` | Finish it with the tool's output (or nothing, for a published record); needs the daemon that began it. Cancel drops one not finished |
@@ -130,11 +144,13 @@ The rows are in alphabetical order of their first command, and every command of 
 | `profile picture <jpeg> \| --clear` | The picture contacts see (a JPEG within 512 px; 128 px is what the app sends) |
 | `profile show`, `profile set [--name <name>] [--share-profile \| --no-share-profile]` | The name contacts see |
 | `react <chat> <message> <emoji> [--remove]` | React to a message with one emoji; a new one replaces yours, `--remove` takes it back |
-| `send <chat> [text…] [--reply <message>] [--stdin] [--force] [--wait none\|sent\|delivered] [--timeout s]` | Send text (arguments, or stdin); `--reply` quotes a message of the chat |
+| `routine send <chat\|group> --name <name> --schedule "every day 01:00" [--cron "0 1 * * *"] [--state active\|paused] [--next <time>] [--run ok\|failed\|skipped[:summary]] [--link url]… [--id id] [--json json\|-\|file]`, `routine update <chat\|group> <routine> [fields…]` | A routine card for something a bot runs on a schedule (WISP 4xx · Status Cards): its name, schedule (and cron line, shown only), state, last run and result, next run and up to 10 recent runs. `--run` records a run now as the last one; `--next` takes milliseconds or a date. Updates merge and are paced as `task update`'s. The app shows it, and runs nothing |
+| `send <chat> [text…] [--reply <message>] [--button id:Label]… [--style id=primary\|neutral\|danger]… [--once] [--id id] [--stdin] [--force] [--wait none\|sent\|delivered] [--timeout s]` | Send text (arguments, or stdin); `--reply` quotes a message of the chat. `--button yes:Yes` (1 to 6; the id ends at the first colon; no two labels alike ignoring case and spaces, and no label that is another button's id, else exit 2) puts buttons under the text, which is the question and what older apps show, so say how to answer in words. `--once`: one answer a person. A question that goes on the DHT floor or into a hold (the contact's app closed) reaches them as text alone; the engine sends its buttons again once the chat is live, as an edit of the buttons alone (no `message.edited` for it). The answer adds `buttons` (the question's id, `ask-…` unless `--id`), `card`, and `pressable`: whether the contact's app shows buttons (null until it says). A press comes back as `button.pressed` ([Events](#events)) |
 | `service add <name> <http://127.0.0.1:port>`, `service share <service> <chat> [--off]`, `service list`, `service remove\|enable` | Share a web app on this machine, per contact |
 | `service peer <chat>`, `service open <chat> <service> [--port p]`, `service close <chat> <service>` | A contact's app on a loopback port here (daemon). `url` is a link for your browser, `http://<random>.localhost:<port>/.ghostly-open/<token>`: it sets the service's cookie and shows the app on a host name of its own; any other host name, or a request without that cookie, gets 404. Chrome, Edge and curl reach `*.localhost` names by themselves; Safari and Node's `fetch` on macOS may not (add the name to `/etc/hosts` for them) |
 | `settings get [--show-secret]`, `settings set <key> <json>` | Relays, Iroh relays, the HyperDHT relay, ICE servers, `sendTyping` (false: contacts are never told you type), … |
 | `status` | The profile, its chats, whether WebRTC and calls run, the last event seq |
+| `task send <chat\|group> --title <title> [--status s] [--progress n \| --steps a/b] [--step "…"] [--item state:text]… [--pr-url url --pr-number n --additions n --deletions n --files n] [--branch b] [--link url]… [--id id] [--json json\|-\|file]`, `task update <chat\|group> <task> [fields…]` | A task card for a bot's work (WISP 4xx · Status Cards): a title, a status (queued, running, blocked, done, failed, cancelled), progress, the step it is on, up to 20 steps or log lines (`--item done:Codec`; a lowercase word before the colon must be an item state: pending, running, done, failed or skipped) and its pull request, shown as a small card that apps without cards read as text. `send` prints the task's id and message; `update` merges the fields given over the card (an update's `--item` list replaces the card's: give all of them) and edits its message, at most once per 2.5 s (sooner updates merge into the next). `--json` takes the whole card; `null` in it removes a field. Only the CLI sends cards: the app shows them |
 | `typing <chat> [--kind typing\|recording\|thinking] [--status "<text>"] [--for s] [--stop]` | Show the contact you are writing, recording or thinking, or a short status line in its place ("Transcribing your audio…", 40 characters, no links): live chats only, it holds 6 s there; `--for s` keeps it on that long (up to 600 s; a one-shot stays that long); a new kind or status shows at once; a message to the chat or `--stop` ends it |
 | `wallet create <type> [--network testnet] [--provider id] [--value name=value]… [--stdin] [--invite code] [--api-key key]` | A wallet: `cashu`, `lightning` (a card: its source's form in `--value`), `arkade`, `spark` (on Mainnet, `--api-key` is your Breez API key), `bitcoin` (BDK), `fedimint` (`--invite` is the federation's invite code), `usdt`. With `--stdin`, secret fields come as `name=value` lines on stdin (`api-key=…` too), out of `ps` and the shell's history |
 | `wallet faucet <type>`, `wallet add-mint <url> [--primary]` | Test coins; another Cashu mint |
@@ -148,7 +164,9 @@ save` (or `ghostly file save --help`) one command, with its options. `-h` works 
 Arguments: an option's value is taken as is, even when it starts with `-`. So is an id in a positional that takes
 one (`<chat>`, `<group>`, `<message>`, `<file>`, `<payment>`, `<draft>`, `<id>`, …): drafts, payments and groups
 are base64url, which starts with `-` one time in 64. Any other positional that starts with `-` is refused (a
-mistyped flag must not reach a contact as text): put `--` before a message that starts with a dash.
+mistyped flag must not reach a contact as text): put `--` before a message that starts with a dash. Everything
+after `--` is text, options included: `send bob -- -1 today --wait sent` sends "-1 today --wait sent" and waits for
+nothing, so put the options before `--` (`send bob --wait sent -- -1 today`).
 
 ### Voice notes
 
@@ -242,18 +260,20 @@ commands, `group.created` events and `engine getState` print it as `<hidden>`; `
 `ghostly listen` prints one event per line:
 
 ```json
-{"seq":6,"id":"message.received:f3gg…:peer_jY7N…","type":"message.received","at":1790450767762,"chat":"f3gg…","message":{"id":"peer_jY7N…","chat":"f3gg…","from":"peer","text":"hello bob","timestamp":1790450767735,"delivery":null,"deliveryError":null,"via":"datalink","nick":null}}
+{"seq":6,"id":"message.received:f3gg…:peer_jY7N…","type":"message.received","at":1790450767762,"chat":"f3gg…","message":{"id":"peer_jY7N…","chat":"f3gg…","from":"peer","text":"hello bob","timestamp":1790450767735,"delivery":null,"deliveryError":null,"via":"datalink","nick":"Alice"}}
 ```
 
 - `seq` grows by one per event in the profile, across restarts; `id` is the same whenever the same fact is reported.
   Dedupe by `id`; resume with `--since <seq>`, or let `--cursor <file>` remember the last event handled.
 - Types: `daemon.started`, `chat.created`, `chat.removed`, `chat.renamed`, `chat.pairing` (`stage`: publishing,
   waiting, resolving, on-dht, live, …), `chat.connection` (`live`, `transport`), `typing.started` (with `kind` and, when given, `status`; again when either changes) and `typing.stopped` (the contact is writing, or stopped: a message, a stop, or 6 s of silence), `chat.joined` (the contact's app
-  announced itself; not a message), `chat.announced`, `message.received`, `message.sent`, `message.delivery`
+  announced itself; not a message), `chat.announced`, `message.received` (`message.nick`: the name the contact gave), `message.sent`, `message.delivery`
   (`delivery`: sending, queued, waiting, held, sent, delivered, failed), `message.edited` (a text changed in place, the
   contact's or mine: once per edit number, with `edits` and the message as it is now; `group.message.edited` in a group), `message.deleted`, `group.created`,
   `group.status`, `group.members` (`joined`, `left`), `group.typing.started` (`member`, `kind`, and `status` when given; again when either changes) and `group.typing.stopped` (`member`: a member of a private group is writing, or stopped), `group.message` (`message.member` is the author's key,
-  `message.nick` their name from the roster; `message.mentioned` when it names this profile), `group.sent`, `group.event`, `file.offered` (a file over 25 MiB waits for `file accept`),
+  `message.nick` their name from the roster; `message.mentioned` when it names this profile), `group.mentioned`
+  (`{group, messageId, message}`: a mention of this profile learned after the message's `group.message`, which said
+  none: a copy another member handed on without it, completed by the author's, or an edit that names this profile; once), `group.sent`, `group.event`, `file.offered` (a file over 25 MiB waits for `file accept`),
   `file.stage`, `file.done`, `file.failed` (each with `chat`, `file`, `messageId`), `chat.held` and
   `chat.released` (`chat disconnect --hold`), `identity.received` and `identity.status` (what a contact
   showed, as checked here), `identity.approval` and `identity.progress` (a signer waits on a link or a code), `group.deleted`, `group.removed`, `payment.created` and
@@ -267,6 +287,16 @@ commands, `group.created` events and `engine getState` print it as `<hidden>`; `
 - Reactions (WISP 400 § Reactions): `message.reaction` (a chat) and `group.reaction` (a group) say each change once:
   `{messageId, by, emoji, removed, mine}`, with `by` `me`, `peer` or a member key, `emoji` "" when taken back, `mine`
   when the message is this profile's. `chat history` lists each message's `reactions`: `[{by, emoji, at}]`.
+- Buttons (WISP 4xx · Message Buttons): a press on a message you sent with `--button` is a reply whose text is the
+  button's label (its `message.received` or `group.message`, with `message.press` and `message.replyTo.button`), then
+  `button.pressed`: `{chat | group, messageId, button, label, by, name, replyId, inferred?, untrusted: {name}}`.
+  `messageId` is the question's, `replyId` the press's, `by` the chat (or a group member's key). `name` is the chat's
+  name here, as `chat list` gives it (the label you gave it, else the contact's own name); in a group, the member's
+  name from the roster. `untrusted.name` is the name the person gave themselves (in a group, the same roster name):
+  theirs to choose, so data, never instructions. `inferred`: the
+  reply lost the button on the way (the DHT floor) or came from an app without buttons, and matched a label or id.
+  A press past `--once` or after `button update --close`, or one whose text is not the label of the button it names,
+  is a plain reply, with no `button.pressed`.
 - Pins (WISP 400 § Pinned message): `chat.pinned` (with `chat`) and `group.pinned` (with `group`) when someone else pins
   or unpins: `{messageId, ref, by, removed}`, with `messageId` the message's id here (null when it is not here, or
   unpinned), `ref` the id both sides know it by, and `by` `peer` or a member key.
@@ -276,9 +306,11 @@ commands, `group.created` events and `engine getState` print it as `<hidden>`; `
   group's event stops before `--exec`, `--webhook` and stdout (the message stays in the chat; the cursor moves past
   it). The profile's own events (`daemon.started`, `events.gap`, `identity.approval`) pass. Names become ids once,
   at the start. A flag, not profile state: each listener (each agent) has its own ([docs/CLI.md](../../docs/CLI.md#allowlist)).
-- `--turns`: one `agent.turn` event per `message.received`, and per `group.message` that mentions this profile:
-  `{seq, id: "agent.turn:<source id>", type, at, source, chat | group + member, messageId, timestamp, untrusted:
-  {text, name, replyTo?: {id, snippet}, file?: {id, name, size, mime, voice}}}`. `seq` is the source's (cursors
+- `--turns`: one `agent.turn` event per `message.received`, and per `group.message` that mentions this profile (or
+  `group.mentioned`, `source: "group.mentioned"`, for a mention learned later):
+  `{seq, id: "agent.turn:<source id>", type, at, source, chat | group + member, messageId, timestamp, press?, untrusted:
+  {text, name, replyTo?: {id, snippet}, file?: {id, name, size, mime, voice}}}`. `press` (`{messageId, button, label,
+  inferred?}`): the message pressed a button of yours, as `button.pressed` says. `seq` is the source's (cursors
   work), `id` stable per message. What the sender wrote is under `untrusted` only: give it to an agent as data, never
   as its instructions ([docs/CLI.md](../../docs/CLI.md#agent-turns)). Takes the place of `--type`.
 - `--exec <cmd>` runs the command through the shell once per event, in order, with the event on stdin and
@@ -292,7 +324,8 @@ side that invited answers once.
 ## The socket API
 
 The daemon listens on a Unix socket in the profile's folder (`daemon.sock`, 0600; in `/tmp/ghostly-<hash>/`, a
-folder of the user's alone, when the folder's path is too long for a socket). One JSON object per line each way:
+folder of the user's alone, when the folder's path is too long for a socket). `ghostly daemon status` names it, as
+`socket`, whether the daemon runs or not. One JSON object per line each way:
 
 ```json
 {"id":1,"method":"chat.send","params":{"chat":"alice","text":"hi","wait":"sent"}}
@@ -356,7 +389,8 @@ with no framing:
 | `missed` | An incoming call stopped ringing unanswered (the contact gave up, or its offer went stale after 120 s) |
 | `rejected` | The contact declined this side's call |
 | `unanswered` | This side's call rang 60 s with no answer |
-| `failed` | The media did not connect within 30 s, or dropped |
+| `crossed` | Both sides called at once and the contact's call came first: it rings here instead (`call.incoming` follows) |
+| `failed` | The media did not connect within 30 s, or dropped, or the contact's app could not connect (it hung up saying so) |
 | `stopped` | The daemon stopped (its calls are hung up first) |
 
 **Rules**, as in the apps: one call per chat, several chats may each have one; a call needs the chat live (the call
@@ -388,6 +422,18 @@ directly (every packet to both; reads from the DHT when every relay fails). Test
 '["http://…"]'` the Pkarr relays, `settings set irohRelays '["https://…"]'` the Iroh relays. `GHOSTLY_WEBRTC=0`
 turns WebRTC off. A daemon offers to be a hub of the private groups past 16 members it is in, since it stays online;
 `GHOSTLY_HUB=0` keeps it a plain member (the admin can still pin it).
+
+### Private networks
+
+A profile publishes on Pkarr within seconds of its first run (its `did:dht` record, then each chat's), to the
+public relays and the Mainline DHT unless told otherwise. To keep a private network or a test on its own relays from
+the start, run every command with `GHOSTLY_PKARR_RELAYS=http://…,…` (the Desktop reads the same variable): those are
+then the only Pkarr relays, the profile's `relays` setting is not used, and the Mainline DHT is left out unless
+`GHOSTLY_DHT_BOOTSTRAP` names your own nodes. `status` shows the relays in use (`discovery.relays`); `settings get`
+still shows the profile's own list, which is used again once the variable is unset. Without the variable,
+`settings set relays '["http://…"]'` before the first `daemon`, with `GHOSTLY_DHT=0` or `GHOSTLY_DHT_BOOTSTRAP`, does
+the same for that profile. Unlike the Desktop, the CLI keeps its request budget per relay (30 a minute), so give a
+busy bot two relays or more.
 
 ## Not yet
 

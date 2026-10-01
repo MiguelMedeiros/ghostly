@@ -6,9 +6,10 @@ import { testBitcoinWallet } from "../../packages/browser/test/helpers/bitcoinSi
 import { FakeWebln, FakeWeblnLedger } from "../../packages/browser/test/helpers/fakeWebln";
 import { fingerprints, TestGpg } from "../../packages/browser/test/helpers/gpg";
 import { strangerInvoice } from "../support/bolt11";
+import { callTrace, linkTrace, watchCalls, watchLink } from "../support/callTrace";
 import { setClipboard } from "../support/clipboard";
 import { startTestDomain, type TestDomain } from "../support/domain";
-import { GIF, type WalletKind } from "../support/fixtures";
+import { delivered, GIF, type WalletKind } from "../support/fixtures";
 import { mockMainnetMints } from "../support/mint";
 import { closeIdentities, openIdentities, shareIdentity, theirCards, theirFace } from "../support/identities";
 import { injectNostrSigner } from "../support/nostrSigner";
@@ -17,7 +18,7 @@ import type { LocalRelay } from "../support/relay";
 import { testSshKey } from "../support/ssh";
 import type { WebLNProvider } from "../../packages/browser/src/engine/paymentAdapters/providers/webln";
 import {
-  chatOption, chatPane, composerButton, either, go, home, newWallet, newWalletDialog, nickname, openChat, paymentCard, reloaded, say, sees, setLanguage, wallet, type Actor,
+  alternatives, cardAction, chatOption, chatPane, composerButton, containing, either, filled, go, home, newWallet, newWalletDialog, nickname, openChat, paymentCard, reloaded, say, sees, setLanguage, wallet, type Actor,
 } from "./actors";
 import type { Combination } from "./dimensions";
 import { CARD, type Step } from "./plan";
@@ -76,7 +77,7 @@ async function joinWith(actor: Actor, text: string): Promise<void> {
 }
 
 const connected = (actor: Actor, transport = "WebRTC", timeout = 180_000) =>
-  expect(actor.page.getByTestId("connection-options")).toHaveAttribute("aria-label", new RegExp(`Connected · ${transport}`), { timeout });
+  expect(actor.page.getByTestId("connection-options")).toHaveAttribute("aria-label", new RegExp(`${alternatives("Connected")} · ${transport}`), { timeout });
 /**
  * Leaving DHT-only after the contact reloaded once took 70 s, and once more than 3 minutes, to find
  * WebRTC again. It takes seconds now (6–14 s from the first switch, measured by e2e/web/dht-back-timing.spec.ts):
@@ -98,7 +99,7 @@ export const pair: Block = {
     const invite = await copyInvite(a);
     await joinWith(b, invite);
     for (const p of [a, b]) {
-      await expect(p.page.getByPlaceholder("Message…")).toBeEnabled({ timeout: 90_000 });
+      await expect(p.page.getByPlaceholder(either("Message…"))).toBeEnabled({ timeout: 90_000 });
       p.chatHash = await hashOf(p);
     }
     expect(a.chatHash).toMatch(/^#\/chat\//);
@@ -158,9 +159,9 @@ async function setOnline(actor: Actor, online: boolean): Promise<void> {
 async function dhtOnly(actor: Actor, on: boolean): Promise<void> {
   const menu = actor.page.getByTestId("connection-menu");
   if ((await menu.getAttribute("open")) === null) await actor.page.getByTestId("connection-options").click();
-  const panel = actor.page.getByRole("dialog", { name: "Connection options" });
-  const choice = panel.getByRole("radio", { name: "DHT only", exact: true });
-  const back = panel.getByRole("radio", { name: "Automatic", exact: true }).or(panel.getByRole("radio", { name: "WebRTC", exact: true })).first();
+  const panel = actor.page.getByRole("dialog", { name: either("Connection options") });
+  const choice = panel.getByRole("radio", { name: either("DHT only") });
+  const back = panel.getByRole("radio", { name: either("Automatic") }).or(panel.getByRole("radio", { name: "WebRTC", exact: true })).first();
   if ((await choice.isChecked()) !== on) await (on ? choice : back).click();
   await expect.poll(() => choice.isChecked()).toBe(on);
   await actor.page.keyboard.press("Escape");
@@ -185,18 +186,34 @@ async function bucket(): Promise<string> {
 
 export const delivery: Block = {
   id: "delivery",
-  run: async ({ a, b, combo }) => {
+  run: async ({ a, b, combo, info }) => {
     if (combo.delivery === "dht") {
+      // From here on, for the step back to live below: what each side's link and relay requests did.
+      for (const p of [a, b]) await watchLink(p).catch(() => {});
       const back = await away(b);
       await say(a, "waiting in the DHT mailbox");
       await expect(chatPane(a).locator('[data-testid="message-delivery"][data-delivery="sent"]').last()).toBeVisible();
       await back();
+      // A web page away was closed: its reopened page is watched from now.
+      await watchLink(b).catch(() => {});
       await sees(b, "waiting in the DHT mailbox");
       await expect(chatPane(a).locator('[data-testid="message-delivery"][data-delivery="delivered"]').first()).toBeVisible({ timeout: 90_000 });
       // The rest of the story needs a live link: files, payments, groups.
+      const left: string[] = [];
       await dhtOnly(b, false);
+      left.push(`${new Date().toISOString()} ${b.name} left DHT only`);
       await dhtOnly(a, false);
-      for (const p of [a, b]) await connected(p, "WebRTC", LIVE_AGAIN_MS);
+      left.push(`${new Date().toISOString()} ${a.name} left DHT only`);
+      try {
+        for (const p of [a, b]) await connected(p, "WebRTC", LIVE_AGAIN_MS);
+      } catch (error) {
+        // "On DHT · retrying live" tells nothing of why: what each side's link did does.
+        for (const p of [a, b]) {
+          const trace = await linkTrace(p).catch((e) => `(no trace: ${e})`);
+          await info.attach(`${p.name}'s chat link`, { body: `${left.join("\n")}\n${trace}`, contentType: "text/plain" });
+        }
+        throw error;
+      }
       await say(b, "live again");
       await sees(a, "live again");
       return;
@@ -228,11 +245,13 @@ export const delivery: Block = {
       const back = await away(b);
       await expect(a.page.getByTestId("connection-options")).toHaveAttribute("data-status", "Away · messages are held", { timeout: 60_000 });
       // Past the 256 bytes the DHT carries: a short text would take the DHT floor (WISP 403); a longer one is held.
-      await say(a, `held in my S3 for you ${"and more words past what the DHT carries. ".repeat(7)}`);
+      const held = `held in my S3 for you ${"and more words past what the DHT carries. ".repeat(7)}`;
+      await say(a, held);
       await a.page.getByTestId("file-input").setInputFiles({ name: "held.gif", mimeType: "image/gif", buffer: GIF });
-      await expect(chatPane(a).locator(".group").filter({ hasText: "held in my S3 for you" })).toContainText(/Held/, { timeout: 60_000 });
+      // The bubble says nothing of it (#360): its mark is the clock, held for B.
+      await expect(delivered(chatPane(a).locator(".group").filter({ hasText: "held in my S3 for you" }), "held")).toBeVisible({ timeout: 60_000 });
       await back();
-      await sees(b, "held in my S3 for you");
+      await sees(b, held.trim());
       await expect(chatPane(b).getByTestId("file-bubble").filter({ hasText: "held.gif" })).toBeVisible({ timeout: 90_000 });
       await expect(a.page.getByTestId("hold-indicator")).toHaveCount(0, { timeout: 90_000 });
       return;
@@ -255,13 +274,13 @@ export const transport: Block = {
     for (const p of [a, b]) {
       await openChat(p);
       await p.page.getByTestId("connection-options").click();
-      const dialog = p.page.getByRole("dialog", { name: "Connection options" });
+      const dialog = p.page.getByRole("dialog", { name: either("Connection options") });
       // A browser has WebRTC only: the native transports are there, and refused.
       await expect(dialog.getByRole("radio", { name: "WebRTC", exact: true })).toBeEnabled();
       await expect(dialog.getByRole("radio", { name: "WebRTC", exact: true })).toBeChecked();
       for (const native of ["Iroh", "HyperDHT"]) await expect(dialog.getByRole("radio", { name: native, exact: true })).toBeDisabled();
       if (combo.transport === "webrtc-strict") {
-        const fallback = dialog.getByRole("switch", { name: "Fallback" });
+        const fallback = dialog.getByRole("switch", { name: either("Fallback") });
         await fallback.click();
         await expect(fallback).not.toBeChecked();
       }
@@ -279,14 +298,24 @@ export const transport: Block = {
 /** The chat calls over its live session (`calls/1`): A rings, B answers, the call connects, A hangs up. */
 export const calls: Block = {
   id: "calls",
-  run: async ({ a, b }) => {
+  run: async ({ a, b, info }) => {
     for (const p of [a, b]) {
       await openChat(p);
       await expect(p.page.getByTestId("call-audio")).toBeEnabled({ timeout: LIVE_AGAIN_MS });
     }
+    for (const p of [a, b]) await watchCalls(p.page);
     await a.page.getByTestId("call-audio").click();
-    await b.page.getByTitle("Accept audio call").click();
-    for (const p of [a, b]) await expect(p.page.getByTestId("call-window").getByText(/^\d{1,2}:\d{2}$/)).toBeVisible();
+    await b.page.getByTitle(either("Accept audio call")).click();
+    try {
+      for (const p of [a, b]) await expect(p.page.getByTestId("call-window").getByText(/^\d{1,2}:\d{2}$/)).toBeVisible();
+    } catch (error) {
+      // Two windows saying "Connecting..." tell nothing of why: what each side's connection did does.
+      for (const p of [a, b]) {
+        const trace = await callTrace(p.page).catch((e) => `(no trace: ${e})`);
+        await info.attach(`${p.name}'s call connections`, { body: trace, contentType: "text/plain" });
+      }
+      throw error;
+    }
     await a.page.getByTitle("End call").click();
     for (const p of [a, b]) await expect(p.page.getByTestId("call-window")).toHaveCount(0);
   },
@@ -491,7 +520,7 @@ async function cashuInChat({ a, b }: World): Promise<void> {
   await paymentCard(a, "cashu");
   await a.page.getByTestId("payment-amount").fill("21");
   await memo(a, "matrix send");
-  await a.page.getByTestId("payment-send").click();
+  await cardAction(a, "send");
   await approve(a.page.getByTestId("payment-composer"));
   await openChat(b);
   await expect(bubble(b, "matrix send").getByTestId("payment-state")).toHaveText(either("Received"), { timeout: 90_000 });
@@ -502,7 +531,7 @@ async function cashuInChat({ a, b }: World): Promise<void> {
   await paymentCard(b, "cashu");
   await b.page.getByTestId("payment-amount").fill("10");
   await memo(b, "matrix request");
-  await b.page.getByTestId("payment-request").click();
+  await cardAction(b, "request");
   await openChat(a);
   const request = bubble(a, "matrix request");
   await request.getByTestId("payment-pay").click();
@@ -519,7 +548,7 @@ async function lightningThroughMint({ a, b }: World): Promise<void> {
   await wallet(a, "lightning");
   await a.page.getByTestId("wallet-send").click();
   await a.page.getByTestId("wallet-pay-input").fill(strangerInvoice(25, "ghostly e2e", "lntb"));
-  await a.page.getByRole("button", { name: "Pay 25 sats" }).click();
+  await a.page.getByRole("button", { name: filled("Pay {{amount}} {{unit}}", { amount: "25", unit: alternatives("test sats") }) }).click();
   await a.page.getByRole("button", { name: either("Pay") }).click();
   await expect(a.page.getByTestId("wallet-notice")).toHaveText(either("Paid."), { timeout: 60_000 });
   // In, on B's side: an invoice of B's own wallet. The test mint reads it paid by itself, which is nobody paying:
@@ -564,13 +593,16 @@ async function lightningThroughWebln(w: World): Promise<void> {
       await form.getByTestId("provider-form-webln").getByRole("button", { name: either("Connect browser wallet") }).click();
     } });
     await wallet(p, "lightning-testnet");
-    await expect(p.page.getByTestId("lightning-source").getByTestId("lightning-source-status")).toContainText("Connected");
+    await expect(p.page.getByTestId("lightning-source").getByTestId("lightning-source-status")).toContainText(containing("Connected"));
   }
+  // Both pages were reloaded for the browser wallet: the chat is live again before B asks. A request made before that
+  // goes by what A allowed at the last session, when A had no wallet yet ("Cashu and Lightning are off in this chat").
+  for (const p of [a, b]) { await openChat(p); await connected(p); }
   await openChat(b);
   await paymentCard(b, "lightning-testnet");
   await b.page.getByTestId("payment-amount").fill("40");
   await memo(b, "matrix lightning request");
-  await b.page.getByTestId("payment-request").click();
+  await cardAction(b, "request");
   await openChat(a);
   const request = bubble(a, "matrix lightning request");
   await request.getByTestId("payment-pay").click();
@@ -618,31 +650,28 @@ async function mainnetUi({ a, b, combo }: World): Promise<void> {
       await expect(p.page.getByTestId("wallet-card-cashu-mainnet").getByTestId("wallet-card-network")).toHaveCount(0);
       if (combo.rail === "ln-mint") {
         await wallet(p, "lightning-mainnet");
-        await expect(p.page.getByTestId("wallet-card-lightning-mainnet")).toContainText("Invoices via Cashu");
+        await expect(p.page.getByTestId("wallet-card-lightning-mainnet")).toContainText(containing("Invoices via Cashu"));
         await expect(p.page.getByTestId("lightning-source").getByTestId("lightning-source-current")).toContainText("Cashu mints");
       }
       made.add(p);
       continue;
     }
     const dialog = await newWalletDialog(p, "mainnet");
-    if (combo.rail === "cashu" || combo.rail === "ln-mint") await expect(offer(dialog, "cashu")).toHaveText("Create");
-    else if (combo.rail === "bark") {
-      await expect(offer(dialog, "bark")).toHaveText("Not yet");
-      await expect(dialog.getByTestId("new-wallet-type-bark")).toHaveAttribute("aria-disabled", "true");
-    } else if (card === "bitcoin") {
+    if (combo.rail === "cashu" || combo.rail === "ln-mint") await expect(offer(dialog, "cashu")).toHaveText(either("Create"));
+    else if (card === "bitcoin") {
       // No on-chain source runs in a browser on Mainnet (BDK is Testnet only; Bitcoin Core is Desktop only).
-      await expect(offer(dialog, "bitcoin")).toHaveText("Not yet");
+      await expect(offer(dialog, "bitcoin")).toHaveText(either("Not yet"));
     } else if (card === "lightning") {
       // Only the sources Mainnet allows are offered; the test sources never are.
-      await expect(offer(dialog, "lightning")).toHaveText("Connect…");
+      await expect(offer(dialog, "lightning")).toHaveText(either("Connect…"));
       await dialog.getByTestId("new-wallet-type-lightning").click();
       const select = dialog.getByTestId("new-wallet-provider-select");
       const options = (await select.count()) ? await (await optionsOf(select)).allTextContents() : [await dialog.getByTestId("new-wallet-provider").innerText()];
       if (await select.count()) await close(select);
       expect(options.join(" ")).not.toMatch(/fake|regtest|\(test\)/i);
     } else {
-      // Ark and USDT: one click on Mainnet, but that reaches the real server and chain, so it is not made here.
-      await expect(offer(dialog, card as WalletKind)).toHaveText("Create");
+      // Ark, Bark (#305) and USDT: one click on Mainnet, but that reaches the real server and chain, so it is not made here.
+      await expect(offer(dialog, card as WalletKind)).toHaveText(either("Create"));
     }
     await p.page.keyboard.press("Escape");
     await expect(dialog).toHaveCount(0);
@@ -659,8 +688,10 @@ async function mainnetUi({ a, b, combo }: World): Promise<void> {
     const shown = composer.getByTestId(`payment-card-${card}-mainnet`);
     await expect(shown).toBeVisible();
     await expect(composer.locator("[data-testid^=payment-card-][data-testid$=-testnet]")).toHaveCount(0);
-    if (made.has(b)) await expect(shown).not.toHaveAttribute("title", /Your contact has no Mainnet/, { timeout: 60_000 });
-    else await expect(shown).toHaveAttribute("title", /Your contact has no Mainnet/, { timeout: 60_000 });
+    // A contact with no wallet at all says so ("Your contact has no wallet yet"); one with wallets elsewhere, which network.
+    const noWallet = /Your contact has no (?:Mainnet|wallet yet)/;
+    if (made.has(b)) await expect(shown).not.toHaveAttribute("title", noWallet, { timeout: 60_000 });
+    else await expect(shown).toHaveAttribute("title", noWallet, { timeout: 60_000 });
   } else {
     // No wallet: no card, and the composer says how to make one.
     await expect(composer.getByTestId("payment-no-wallet")).toBeVisible();
@@ -673,8 +704,9 @@ export const payments: Block = {
   id: "payments",
   run: async (w) => {
     if (w.combo.wallet === "mainnet") return mainnetUi(w);
-    // Setting a source up, funding it and paying four times on a chain takes minutes of its own.
-    w.info.setTimeout(w.info.timeout + 10 * 60_000);
+    // Setting a source up, funding it and paying four times on a chain takes minutes of its own. Arkade's coins
+    // outlive their regtest batch on the way, and each recovery waits for the server's sweep (rails.ts).
+    w.info.setTimeout(w.info.timeout + (w.combo.rail === "ark-arkade" ? 20 : 10) * 60_000);
     // A new profile has no wallet: each person makes the rail's Testnet wallets with New.
     for (const p of [w.a, w.b]) for (const kind of TESTNET_WALLETS[w.combo.rail] ?? []) await newWallet(p, kind, "testnet");
     await TESTNET[w.combo.rail]!(w);
@@ -713,7 +745,7 @@ export const group: Block = {
       await a.page.getByTitle(either("New Chat")).click();
       // The group's edges need a live link: a new chat is never DHT only unless someone chooses it.
       await joinWith(c, await copyInvite(a));
-      await expect(c.page.getByPlaceholder("Message…")).toBeEnabled({ timeout: 90_000 });
+      await expect(c.page.getByPlaceholder(either("Message…"))).toBeEnabled({ timeout: 90_000 });
       await go(a, "#/");
       await a.page.getByTestId("group-row").filter({ hasText: name }).click();
       for (const [who, nick] of [[b, "Bob"], [c, "Carol"]] as const) {
@@ -769,8 +801,12 @@ export const restore: Block = {
     await again.getByTestId("restore-passphrase").fill(PASSPHRASE);
     await again.getByTestId("restore-go").click();
     // "A restore always becomes a new profile, then Ghostly switches to it" (ProfileBackups.tsx): the app
-    // starts again on #/profile by itself. Navigating meanwhile would race that reload.
-    await expect(restored.page.getByTestId("profile-name"), "the restored profile is the one in use").toHaveValue(/\(restored\)$/, { timeout: 60_000 });
+    // starts again on #/profile by itself. Navigating meanwhile would race that reload. The registry keeps the plain
+    // name and a restored flag: the name field holds the name alone, and a tag beside it says restored in the app's
+    // language (profile.restoredTag), "Restaurado".
+    await expect(restored.page.getByTestId("profile-restored-tag"), "the restored profile is the one in use")
+      .toHaveText(either("Restored"), { timeout: 60_000 });
+    await expect(restored.page.getByTestId("profile-name")).toHaveValue(either("Personal"));
     await expect(restored.page.getByTestId("profile-row")).toHaveCount(2);
     restored.chatHash = b.chatHash;
     w.b = restored;

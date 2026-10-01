@@ -1,7 +1,7 @@
 name: Desktop media streaming
 
 # A video too large for the page plays and seeks in the Desktop app from the stored file, read in ranges from the
-# `ghostly-file` scheme (src-tauri/src/file_stream.rs), in each engine's real WebView under the app's own policy:
+# `ghostly-file` scheme (apps/desktop/src/file_stream.rs), in each engine's real WebView under the app's own policy:
 # Linux's WebKitGTK (tauri-driver) and Windows' WebView2 (the app's own test driver), e2e/desktop/video-stream.spec.ts. Each engine
 # handles a custom scheme's ranges its own way, so each one is checked. The macOS WKWebView runs the same check in
 # the required "Desktop on macOS" job (e2e/desktop-macos/video-stream.spec.ts).
@@ -11,11 +11,11 @@ name: Desktop media streaming
 on:
   pull_request:
     paths:
-      - "src-tauri/src/file_stream.rs"
-      - "src-tauri/src/file_store.rs"
-      - "src-tauri/tauri.conf.json"
+      - "apps/desktop/src/file_stream.rs"
+      - "apps/desktop/src/file_store.rs"
+      - "apps/desktop/tauri.conf.json"
       - "packages/browser/src/shared/fileBytesNative.ts"
-      - "src/components/video/**"
+      - "apps/ui/src/components/video/**"
       - "e2e/desktop/video-stream.spec.ts"
       - "e2e/support/{bigVideo,streamCheck,desktop}.ts"
       - ".github/workflows/desktop-media.yml"
@@ -61,7 +61,7 @@ jobs:
       - name: Install system dependencies (Linux)
         if: runner.os == 'Linux'
         run: |
-          # GStreamer's headers (calls on Linux, src-tauri/src/native_call) need libunwind-dev, which the
+          # GStreamer's headers (calls on Linux, apps/desktop/src/native_call) need libunwind-dev, which the
           # runner image's libunwind-14-dev (LLVM's) blocks.
           sudo apt-get remove -y libunwind-14-dev || true
           sudo apt-get update

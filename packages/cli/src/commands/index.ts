@@ -7,7 +7,7 @@ import { commands as groups } from "./groups";
 import { commands as identities } from "./identities";
 import { commands as payments } from "./payments";
 import { commands as services } from "./services";
-import { type Command, wait, groupWait, force, reply } from "./shared";
+import { type Command, wait, groupWait, force, reply, buttonOptions } from "./shared";
 import type { OptionSpec } from "../args";
 
 export type { Command };
@@ -31,16 +31,16 @@ export const COMMANDS: Record<string, Command> = {
 /** Commands that take text (argument or stdin), with the secret guard and delivery waits. */
 export const TEXT_COMMANDS: Record<string, { method: string; target: "chat" | "group"; message?: true; usage: string; summary: string; args: string[]; options: Record<string, OptionSpec> }> = {
   "send": {
-    method: "chat.send", target: "chat", args: ["chat", "text..."], usage: "send <chat> [text...] [--reply <message>] [--stdin] [--force] [--wait none|sent|delivered]", summary: "Send a message (text from arguments or stdin)",
-    options: { stdin: { type: "boolean", description: "Read the text from stdin" }, force, reply, ...wait },
+    method: "chat.send", target: "chat", args: ["chat", "text..."], usage: "send <chat> [text...] [--reply <message>] [--button id:Label]... [--style id=primary|neutral|danger]... [--once] [--id id] [--stdin] [--force] [--wait none|sent|delivered]", summary: "Send a message (text from arguments or stdin); --button puts buttons under it, each label its own (case aside)",
+    options: { stdin: { type: "boolean", description: "Read the text from stdin" }, force, reply, ...buttonOptions, ...wait },
   },
   "edit": {
     method: "chat.edit", target: "chat", message: true, args: ["chat", "message", "text..."], usage: "edit <chat> <message> [text... | --text <text> | --stdin] [--force] [--wait none|confirmed]", summary: "Replace the text of a message you sent (the id send gave; in a group, group edit)",
     options: { stdin: { type: "boolean", description: "Read the new text from stdin" }, text: { type: "string", description: "The new text, as one argument" }, force, wait: { type: "string", description: "none or confirmed (default: none with a daemon, confirmed without)" }, timeout: wait.timeout },
   },
   "group send": {
-    method: "group.send", target: "group", args: ["group", "text..."], usage: "group send <group> [text...] [--mention <member>]... [--reply <message>] [--stdin] [--force] [--wait none|sent] [--timeout s]", summary: "Send to a group; mention members written as @name in the text",
-    options: { stdin: { type: "boolean", description: "Read the text from stdin" }, force, reply, mention: { type: "list", description: "A member (key, key prefix, name or everyone) named as @name in the text" }, ...groupWait },
+    method: "group.send", target: "group", args: ["group", "text..."], usage: "group send <group> [text...] [--mention <member>]... [--reply <message>] [--button id:Label]... [--style id=primary|neutral|danger]... [--once] [--id id] [--stdin] [--force] [--wait none|sent] [--timeout s]", summary: "Send to a group; mention members written as @name in the text; --button puts buttons under it",
+    options: { stdin: { type: "boolean", description: "Read the text from stdin" }, force, reply, mention: { type: "list", description: "A member (key, key prefix, name or everyone) named as @name in the text" }, ...buttonOptions, ...groupWait },
   },
   "group edit": {
     method: "group.edit", target: "group", message: true, args: ["group", "message", "text..."], usage: "group edit <group> <message> [text... | --text <text> | --stdin] [--mention <member>]... [--force] [--wait none|sent] [--timeout s]", summary: "Replace the text of a message you sent to a group (the id group send gave)",

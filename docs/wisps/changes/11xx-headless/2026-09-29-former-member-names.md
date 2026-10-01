@@ -1,0 +1,1 @@
+A group message whose author is no longer in the roster (removed, or removed and invited again with a new member key) still names them: `nick` is the name the group knew them by, where it used to be null.

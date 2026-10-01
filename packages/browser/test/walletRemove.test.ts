@@ -16,7 +16,7 @@ vi.mock("@arkade-os/sdk", async (original) => ({ ...await original<object>(), Re
 const arkBalance = { value: 0 };
 vi.mock("../src/engine/paymentAdapters/arkade", () => ({
   ARK_NETWORKS: ["bitcoin", "mutinynet", "signet", "regtest"],
-  ArkadeAdapter: { connect: vi.fn(async (config: { provider: string; network: string }) => ({ config, address: async () => config.network === "bitcoin" ? "ark1me" : "tark1me", balance: async () => arkBalance.value, boardingAddress: async () => "tb1qme", incoming: async () => 0, recoverable: async () => 0, dispose: vi.fn() })) },
+  ArkadeAdapter: { connect: vi.fn(async (config: { provider: string; network: string }) => ({ config, address: async () => config.network === "bitcoin" ? "ark1me" : "tark1me", balance: async () => arkBalance.value, boardingAddress: async () => "tb1qme", incoming: async () => 0, expired: async () => ({ recoverable: 0, sweeping: 0 }), dispose: vi.fn() })) },
 }));
 vi.mock("../src/engine/paymentAdapters/usdt", () => ({
   UsdtAdapter: {
@@ -239,6 +239,22 @@ describe("removing a wallet", () => {
     node["paymentLink"] = (() => ({ supportsPayments: true, supportsArkPayments: true, sendPaymentRequest, sendPayment: vi.fn(), sendPaymentResult: vi.fn() })) as never;
     await desk.replay("chat");
     expect(sendPaymentRequest.mock.calls.map((c) => (c as unknown as [{ id: string }])[0].id)).toEqual(["req-mainnet"]);
+  });
+
+  it("a Lightning card's open request closes naming the card, not \"the … card wallet\"", async () => {
+    const { node, started } = engine();
+    await started;
+    const card = await node.walletCreate({ type: "lightning", network: "testnet", providerId: "fake-lightning", values: { token: "a-secret-token" } });
+    const { invoice } = await node.walletReceiveLightning({ amount: 21, network: "testnet", card: card.card });
+    const desk = node["desk"] as unknown as { save(p: StoredPayment): Promise<void>; payment(id: string): StoredPayment | undefined };
+    await desk.save({ id: "req-ln", linkId: "chat", kind: "request", direction: "out", amount: 21, unit: "sat", state: "pending", createdAt: 1, invoice, network: "testnet" });
+    await node["refreshWallet"]();
+    const name = node.getState().wallet.networks?.testnet.lightnings?.find((c) => c.card === card.card)?.name;
+    expect(name).toBeTruthy();
+    expect(walletRemoval("lightning", "testnet", node.getState().wallet.networks?.testnet, [], card.card).awaiting.map((a) => a.paymentId)).toEqual(["req-ln"]);
+
+    await node.walletRemove({ type: "lightning", network: "testnet", card: card.card });
+    expect(desk.payment("req-ln")).toMatchObject({ state: "failed", closed: true, error: `you removed the Testnet Lightning card “${name}” it was paid to` });
   });
 
   it("Cashu with a Lightning payment still in flight at its mint waits for it", async () => {

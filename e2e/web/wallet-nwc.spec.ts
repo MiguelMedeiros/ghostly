@@ -2,6 +2,7 @@ import { FakeNwcWallet, TestRelay } from "../../packages/browser/test/helpers/fa
 import { chat, connect, createWallet, expect, link, openChat, openWallet, test, type Peer } from "../support/fixtures";
 import { choose } from "../support/select";
 import { composerRow } from "../support/composer";
+import { exclusive } from "../support/exclusive";
 import { paymentCard } from "../support/payments";
 
 /**
@@ -71,13 +72,13 @@ test.describe("NWC with a fake wallet service", () => {
       expect(invoice).toMatch(/^lnbcrt/);
       const hash = [...mine.incoming.values()].find((i) => i.invoice === invoice)!.paymentHash;
       mine.markPaid(hash);
-      await expect(page.getByTestId("wallet-paid")).toContainText("12 sats received", { timeout: 30_000 });
+      await expect(page.getByTestId("wallet-paid")).toContainText("12 test sats received", { timeout: 30_000 });
 
       // Out: someone else's invoice, paid by the wallet.
       const bill = other.makeInvoice(30, "fake bill");
       await page.getByTestId("wallet-send").click();
       await page.getByTestId("wallet-pay-input").fill(bill.invoice);
-      await page.getByRole("button", { name: "Pay 30 sats" }).click();
+      await page.getByRole("button", { name: "Pay 30 test sats" }).click();
       await page.getByRole("button", { name: "Pay", exact: true }).click();
       await expect(page.getByTestId("wallet-notice")).toHaveText("Paid.", { timeout: 30_000 });
       expect(other.balance).toBe(100_030);
@@ -109,46 +110,49 @@ test.describe("NWC with a fake wallet service", () => {
 
 test.describe("NWC on regtest Lightning", () => {
   test.skip(process.env.GHOSTLY_NWC_REGTEST !== "1", "Requires e2e/infra (npm run e2e:infra:up) and GHOSTLY_NWC_REGTEST=1");
-  test.describe.configure({ timeout: 180_000 });
+  test.describe.configure({ timeout: 360_000 });
 
   test("two people on their own NWC wallets: a request in the chat is paid over the channel", { tag: ["@gated", "@feature:wallet.lightning.nwc.connect", "@feature:wallet.lightning.nwc.pay", "@feature:payments.lightning.request"] }, async ({ peer }) => {
-    const regtest = await import("../support/nwc-regtest/regtest.mjs");
-    await regtest.ready();
-    const [aliceUri, bobUri] = [await regtest.nwcUri("alice", { fresh: true }), await regtest.nwcUri("bob", { fresh: true })];
+    // Exact channel balances: no other test pays through these hubs meanwhile (wallet-lightning-cards.spec.ts).
+    await exclusive("nwc", async () => {
+      const regtest = await import("../support/nwc-regtest/regtest.mjs");
+      await regtest.ready();
+      const [aliceUri, bobUri] = [await regtest.nwcUri("alice", { fresh: true }), await regtest.nwcUri("bob", { fresh: true })];
 
-    const [alice, bob] = await Promise.all([peer("nwc-alice"), peer("nwc-bob")]);
-    await link(alice, bob);
-    await connect(alice, bob);
-    for (const [p, uri] of [[alice, aliceUri], [bob, bobUri]] as const) await useNwc(p, uri);
-    const before = { alice: await lightningBalance(alice), bob: await lightningBalance(bob), channel: regtest.balances() };
+      const [alice, bob] = await Promise.all([peer("nwc-alice"), peer("nwc-bob")]);
+      await link(alice, bob);
+      await connect(alice, bob);
+      for (const [p, uri] of [[alice, aliceUri], [bob, bobUri]] as const) await useNwc(p, uri);
+      const before = { alice: await lightningBalance(alice), bob: await lightningBalance(bob), channel: regtest.balances() };
 
-    // Bob asks over Lightning only (his one wallet: no Cashu to fall back on): the invoice in the request is his own wallet's.
-    await openChat(bob);
-    await (await composerRow(bob.page, "payment-button")).click();
-    await paymentCard(bob.page, "lightning-testnet").click();
-    await bob.page.getByTestId("payment-amount").fill("2100");
-    await bob.page.getByTestId("payment-request").click();
+      // Bob asks over Lightning only (his one wallet: no Cashu to fall back on): the invoice in the request is his own wallet's.
+      await openChat(bob);
+      await (await composerRow(bob.page, "payment-button")).click();
+      await paymentCard(bob.page, "lightning-testnet").click();
+      await bob.page.getByTestId("payment-amount").fill("2100");
+      await bob.page.getByTestId("payment-request").click();
 
-    // Alice pays it from hers, after reviewing it.
-    await openChat(alice);
-    const request = chat(alice).getByTestId("payment-bubble").filter({ hasText: "Requests" }).last();
-    await expect(request).toContainText("2,100");
-    await request.getByTestId("payment-pay").click();
-    // Reviewed as a Lightning payment through her own NWC wallet, then approved.
-    const review = request.getByTestId("payment-review");
-    await expect(review).toContainText("Pay 2,100 test sats over Lightning");
-    const relay = new URL(regtest.NWC_REGTEST.relay).host.replace(/\./g, "\\.");
-    await expect(review).toContainText(new RegExp(`Through .* via ${relay}`));
-    await review.getByRole("button", { name: "Approve payment" }).click();
-    await expect(request.getByTestId("payment-state")).toHaveText("Paid", { timeout: 90_000 });
-    // Bob's app sees it paid through his own wallet, not on Alice's word.
-    await expect(chat(bob).getByTestId("payment-bubble").filter({ hasText: "You requested" }).last().getByTestId("payment-state")).toHaveText("Paid", { timeout: 90_000 });
+      // Alice pays it from hers, after reviewing it.
+      await openChat(alice);
+      const request = chat(alice).getByTestId("payment-bubble").filter({ hasText: "Requests" }).last();
+      await expect(request).toContainText("2,100");
+      await request.getByTestId("payment-pay").click();
+      // Reviewed as a Lightning payment through her own NWC wallet, then approved.
+      const review = request.getByTestId("payment-review");
+      await expect(review).toContainText("Pay 2,100 test sats over Lightning");
+      const relay = new URL(regtest.NWC_REGTEST.relay).host.replace(/\./g, "\\.");
+      await expect(review).toContainText(new RegExp(`Through .* via ${relay}`));
+      await review.getByRole("button", { name: "Approve payment" }).click();
+      await expect(request.getByTestId("payment-state")).toHaveText("Paid", { timeout: 90_000 });
+      // Bob's app sees it paid through his own wallet, not on Alice's word.
+      await expect(chat(bob).getByTestId("payment-bubble").filter({ hasText: "You requested" }).last().getByTestId("payment-state")).toHaveText("Paid", { timeout: 90_000 });
 
-    const after = regtest.balances();
-    expect(after.alice.local).toBe(before.channel.alice.local - 2_100);
-    expect(after.bob.local).toBe(before.channel.bob.local + 2_100);
-    await expect.poll(() => lightningBalance(alice), { timeout: 60_000 }).toBe(before.alice - 2_100);
-    await expect.poll(() => lightningBalance(bob), { timeout: 60_000 }).toBe(before.bob + 2_100);
-    console.log(`NWC regtest e2e: alice paid bob's 2100-sat chat request; app balances alice ${before.alice} → ${before.alice - 2_100}, bob ${before.bob} → ${before.bob + 2_100}; channel alice ${before.channel.alice.local} → ${after.alice.local}, bob ${before.channel.bob.local} → ${after.bob.local}`);
+      const after = regtest.balances();
+      expect(after.alice.local).toBe(before.channel.alice.local - 2_100);
+      expect(after.bob.local).toBe(before.channel.bob.local + 2_100);
+      await expect.poll(() => lightningBalance(alice), { timeout: 60_000 }).toBe(before.alice - 2_100);
+      await expect.poll(() => lightningBalance(bob), { timeout: 60_000 }).toBe(before.bob + 2_100);
+      console.log(`NWC regtest e2e: alice paid bob's 2100-sat chat request; app balances alice ${before.alice} → ${before.alice - 2_100}, bob ${before.bob} → ${before.bob + 2_100}; channel alice ${before.channel.alice.local} → ${after.alice.local}, bob ${before.channel.bob.local} → ${after.bob.local}`);
+    });
   });
 });

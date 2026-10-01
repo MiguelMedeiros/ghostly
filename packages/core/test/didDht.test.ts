@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { fromBase64Url, toZ32 } from "../src/bytes";
 import { decodeTxtPacket, encodeTxtPacket, type NsRecord, type TxtRecord } from "../src/dns";
 import {
-  DID_DHT_TTL, DidDhtError, decodeDidDhtPacket, didDhtDocument, didDhtFromPublicKey, didDhtKey, didDhtRecords, encodeDidDhtPacket,
+  DID_DHT_TTL, DidDhtError, decodeDidDhtPacket, didDhtDocument, didDhtFromPublicKey, didDhtKey, didDhtRecords, encodeDidDhtDeactivated, encodeDidDhtPacket,
   jwkThumbprint, openDidDhtPayload, resolveDidDht, signDidDhtPacket, type DidDhtDocument, type DidDhtFetch,
 } from "../src/didDht";
 import { createIdentity } from "../src/identity";
@@ -11,7 +11,7 @@ import { MAX_DNS_PACKET_BYTES, PacketTooLargeError } from "../src/pkarr";
 
 // covers: did.dht.document
 
-/** The official vectors (https://did-dht.com/#test-vectors), as the reference implementation keeps them. */
+/** The official vectors (https://github.com/decentralized-identity/did-dht/blob/main/spec/spec.md#test-vectors), as the reference implementation keeps them. */
 const vector = <T>(name: string): T => JSON.parse(readFileSync(new URL(`./fixtures/did-dht/${name}.json`, import.meta.url), "utf8")) as T;
 interface VectorRecord { name: string; type: "TXT" | "NS"; ttl: number; rdata: string[] }
 
@@ -243,6 +243,13 @@ describe("resolveDidDht", () => {
     const resolved = await resolveDidDht(did, { ...relays({ "https://a.test": deactivated }), relays: ["https://a.test"] });
     expect(resolved.metadata.deactivated).toBe(true);
     expect(resolved.document).toEqual({ id: did, verificationMethod: [] });
+  });
+
+  it("ends a DID with the packet encodeDidDhtDeactivated makes", async () => {
+    const ended = signDidDhtPacket(identity, encodeDidDhtDeactivated(identity.publicKey), seq + 1);
+    expect(openDidDhtPayload(did, ended)).toMatchObject({ deactivated: true, seq: BigInt(seq + 1) });
+    const resolved = await resolveDidDht(did, { ...relays({ "https://a.test": ended }), relays: ["https://a.test"] });
+    expect(resolved.metadata.deactivated).toBe(true);
   });
 
   it("reads a packet a Pkarr client stamped in microseconds", async () => {

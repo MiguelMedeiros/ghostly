@@ -37,6 +37,8 @@ export interface FileDeskDeps {
   storeMessage(message: StoredMessage): Promise<void>;
   transfers: Map<string, FileTransferView>;
   changed(delayMs?: number): void;
+  /** The state to the app now, not after `changed`'s wait: for a transfer the app must have before its message. */
+  flush?(): void;
   /** A transfer ended, either way: its local file id and how (for the message's details). */
   /** `seen`: this desk saw the transfer under way before it ended (not a finished one shown again on a restart). */
   settled?(linkId: string, fileId: string, record: FileTransferRecord, seen: boolean): void;
@@ -274,9 +276,12 @@ export class FileDesk {
     await chat.saving;
     const stored = await fileStore.get(id);
     const bytes = (stored?.bytes && await fileBytesOf(stored.bytes)) || await fileBytes();
-    const have = (await bytes.size(id)) ?? 0;
+    const size = await bytes.size(id), have = size ?? 0;
     const offset = Math.min(have, record.confirmed);
     if (have > offset) await bytes.truncate(id, offset);
+    // A file of no bytes gets no append: it is made here, so there is a file to check and to save. Every backend
+    // but IndexedDB reads a file never written as missing, and its check said "arrived damaged".
+    if (size === null && record.file.size === 0) await bytes.append(id, 0, new Uint8Array());
     if (stored && stored.bytes !== bytes.kind) await fileStore.patch(id, { bytes: bytes.kind });
     const appender = new FileAppender(bytes, id, offset);
     return {
@@ -320,7 +325,11 @@ export class FileDesk {
           details: { wire: fileWire("files/3", file.size) } });
       }).catch(() => {});
     }
+    const offered = record.direction === "in" && !this.deps.transfers.has(chat.local.get(record.id)!);
     this.show(linkId, chat, record, transferred, progress);
+    // The app has a new file's transfer before its message: a file shown with neither a transfer nor its bytes reads
+    // as gone, and one that arrived within `changed`'s wait (250 ms behind another's progress) said "No longer available".
+    if (offered) this.deps.flush?.();
     const id = record.direction === "out" ? outgoingFileId(linkId, record.id) : chat.local.get(record.id)!;
     const now = Date.now();
     if (!progress || now - (chat.lastSaved.get(id) ?? 0) >= SAVE_EVERY_MS) {

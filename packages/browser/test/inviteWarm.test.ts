@@ -1,7 +1,7 @@
 import "fake-indexeddb/auto";
 import { afterEach, expect, it, vi } from "vitest";
 import { createLink, createRelayPayload, decodeInviteCode, encodeInviteCode, identityFromSeedB64, isEmptyLinkPacket, parseLinkRecords, parseRelayPayload, fromBase64Url, type SignedPacket } from "@ghostly/core";
-import { GhostlyNode, SPARE_INVITE_MIN_AGE_MS, SPARE_INVITE_WARM_AFTER_TAKE_MS } from "../src/engine/node";
+import { GhostlyNode, SPARE_INVITE_MIN_AGE_MS, SPARE_INVITE_WARM_AFTER_TAKE_MS, STARTUP_QUIET_MS } from "../src/engine/node";
 import { db } from "../src/engine/db";
 
 // covers: chat.paired.pair-timing, chat.paired.progress
@@ -73,10 +73,16 @@ it("keeps a spare invite warmed, hands it out, and makes the next one", async ()
   await db.putSettings({ online: true, nick: "", relays: [], iceServers: [], mints: [], mintsInitialized: true });
   vi.stubGlobal("RTCPeerConnection", undefined);
   const node = make();
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"], shouldAdvanceTime: true });
   try {
     await node.start();
-    // Two keys warmed at start: the spare's own side and the contact's.
+    // Two keys warmed a while after the start (out of the links' first packets, bug hunt r7a): the spare's own side and
+    // the contact's.
+    await vi.advanceTimersByTimeAsync(STARTUP_QUIET_MS - 1_000);
+    expect(publishes, "nothing in the start's burst").toHaveLength(0);
+    await vi.advanceTimersByTimeAsync(1_000);
     await vi.waitFor(() => expect(publishes).toHaveLength(2));
+    vi.useRealTimers();
     // Taken too soon, the spare is left to settle and fresh keys go out instead; a moment later it is the one.
     const early = node.takeInvite();
     expect(publishes.slice(0, 2)).not.toContain(identityFromSeedB64(early.mine.seedB64).pubKeyZ32);

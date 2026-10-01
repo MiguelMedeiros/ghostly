@@ -1,4 +1,6 @@
 import { test, expect } from "@playwright/test";
+import { readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { desktopHome } from "../support/desktop";
 import { mainlineTestnet } from "../support/mainlineTestnet";
 import { LocalRelay } from "../support/relay";
@@ -7,7 +9,7 @@ import { desktopPerson, type DesktopPerson } from "../matrix/people";
 
 /**
  * Two Desktop apps find each other on the Mainline DHT directly, with relay reads off, as the app starts by
- * default ("Also use Pkarr relays" off, src-tauri/src/pkarr_network.rs): the invite's first contact, the DHT
+ * default ("Also use Pkarr relays" off, apps/desktop/src/pkarr_network.rs): the invite's first contact, the DHT
  * text before the link is live, and the capability records that take the pair live on Iroh or HyperDHT are
  * all read off a DHT of their own (GHOSTLY_PKARR_DHT_BOOTSTRAP, e2e/support/mainlineTestnet.ts). The relay
  * is still written to, for contacts in a browser, which read only relays; the apps never read it.
@@ -25,6 +27,13 @@ const discovery = (p: DesktopPerson) => p.app.execute<{ path: string | null; rel
     relays: [...document.querySelectorAll('[data-testid="connection-relay"]')].map((r) => r.dataset.state),
   };`);
 
+/** Each app's own log (`ghostly.log`, apps/desktop/src/diagnostics.rs): its link-trace lines say how the first text went. */
+function attachLogs(name: string, home: string): void {
+  const find = (dir: string): string[] => readdirSync(dir, { withFileTypes: true })
+    .flatMap((e) => e.isDirectory() ? find(join(dir, e.name)) : e.name === "ghostly.log" ? [join(dir, e.name)] : []);
+  for (const file of find(home)) void test.info().attach(`${name}'s ghostly.log`, { body: readFileSync(file), contentType: "text/plain" });
+}
+
 test("two Desktop apps pair and go live on the DHT directly, never reading a relay", {
   tag: ["@feature:settings.network.native-dht", "@feature:chat.paired.discovery-health", "@feature:core.dht-direct"],
 }, async () => {
@@ -37,7 +46,7 @@ test("two Desktop apps pair and go live on the DHT directly, never reading a rel
     const open = async (name: string): Promise<DesktopPerson> => {
       const home = desktopHome(name);
       const person = await desktopPerson(name, { home: home.dir, env });
-      cleanup.push(async () => { await person.stop(); home.remove(); });
+      cleanup.push(async () => { await person.stop(); attachLogs(name, home.dir); home.remove(); });
       return person;
     };
     const a = await open("ana");

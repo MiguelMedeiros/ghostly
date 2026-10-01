@@ -632,6 +632,31 @@ describe("paired payments", () => {
     expect(t.b.peerWalletNetworks()).toEqual({ cashu: [] });
   });
 
+  it("remembers the contact's choice apart from its wallets: a way it has no wallet of is as its handshake said", async () => {
+    const t = linkedPair([{ events: payEvents(), paymentNetworks: {} }, { events: payEvents() }]);
+    await t.ready();
+    await t.settle("b");
+    // No wallet at all: nothing can be paid now, but the contact did not turn Cashu or Lightning off.
+    expect(t.b.peerAllowsPayment("cashu")).toBe(false);
+    expect(t.b.peerChoosesPayment("cashu")).toBe(true);
+    expect(t.b.peerChoosesPayment("lightning")).toBe(true);
+    expect(t.b.peerChoosesPayment("usdt"), "not in its handshake either").toBe(t.b.peerAllowsPayment("usdt"));
+    // A wallet made: in the list, chosen.
+    t.a.setPaymentNetworks({ cashu: ["mainnet"] });
+    await t.settle("b");
+    expect(t.b.peerChoosesPayment("cashu")).toBe(true);
+    // Turned off with a wallet: its networks name it, so the list leaving it out is its choice.
+    t.a.setPaymentMethods({ cashu: false });
+    await t.settle("b");
+    expect(t.b.peerChoosesPayment("cashu")).toBe(false);
+    expect(t.b.peerChoosesPayment("lightning"), "no wallet: as the handshake said").toBe(true);
+    // An older contact says no networks: its list is its choice.
+    t.toB({ t: "paired-payments", m: ["lightning"] });
+    await t.settle("b");
+    expect(t.b.peerChoosesPayment("cashu")).toBe(false);
+    expect(t.b.peerChoosesPayment("lightning")).toBe(true);
+  });
+
   it("an older contact that did not offer payments in its handshake is sent no payment frames", async () => {
     const onPaymentRequest = vi.fn();
     // An older app never says its payment list on the session, so only the handshake offer counts.
@@ -1231,24 +1256,24 @@ describe("DHT-only delivery", () => {
     expect((credentials as { verifiedPeerKey?: string }).verifiedPeerKey).toBe(credentials.peerKey);
   });
 
-  it("a fresh link packet from a DHT-only contact is it leaving DHT-only: its mailbox is read at once, once per packet", async () => {
+  it("a fresh link packet from a DHT-only contact is it leaving DHT-only: its mailbox is read at once and at the DHT pace for a while, once per packet", async () => {
     const { link } = dhtLink(createIdentity().pubKeyZ32);
-    const inner = link as unknown as { dht: { refresh(): void; state: { peerMode?: string } }; peerMayHaveLeftDht(p: object): void };
-    const refresh = vi.spyOn(inner.dht, "refresh").mockImplementation(() => {});
+    const inner = link as unknown as { dht: { expect(ms?: number): void; state: { peerMode?: string } }; peerMayHaveLeftDht(p: object): void };
+    const read = vi.spyOn(inner.dht, "expect").mockImplementation(() => {});
     const packet = (age: number) => ({ online: true, lastPacketAt: Date.now() - age, services: [] });
     inner.peerMayHaveLeftDht(packet(0));
-    expect(refresh, "the contact is not known to be DHT-only").not.toHaveBeenCalled();
+    expect(read, "the contact is not known to be DHT-only").not.toHaveBeenCalled();
     inner.dht.state.peerMode = "dht";
     inner.peerMayHaveLeftDht(packet(5 * 60_000));
-    expect(refresh, "an old packet, from before it went DHT-only").not.toHaveBeenCalled();
+    expect(read, "an old packet, from before it went DHT-only").not.toHaveBeenCalled();
     inner.peerMayHaveLeftDht({ ...packet(0), online: false, services: null });
-    expect(refresh, "a packet that advertises nothing (a DHT-only app publishes one when it wakes)").not.toHaveBeenCalled();
+    expect(read, "a packet that advertises nothing (a DHT-only app publishes one when it wakes)").not.toHaveBeenCalled();
     const fresh = packet(1_000);
     inner.peerMayHaveLeftDht(fresh);
     inner.peerMayHaveLeftDht(fresh);
-    expect(refresh).toHaveBeenCalledOnce();
+    expect(read).toHaveBeenCalledOnce();
     await link.setDeliveryMode("dht");
     inner.peerMayHaveLeftDht(packet(0));
-    expect(refresh, "this side is DHT-only itself").toHaveBeenCalledOnce();
+    expect(read, "this side is DHT-only itself").toHaveBeenCalledOnce();
   });
 });

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { ONCHAIN_PROVIDER, type PaymentTarget } from "@ghostly/core";
-import { walletAwaiting, type AwaitingSources } from "../src/engine/walletAwaiting";
+import { mintAwaiting, walletAwaiting, type AwaitingSources } from "../src/engine/walletAwaiting";
 import type { LightningOp } from "../src/engine/paymentAdapters/providers/lightningService";
 import type { StoredPayment, StoredQuote } from "../src/shared/types";
 import { removalRisksFunds, walletRemoval } from "../src/shared/walletRemoval";
@@ -42,6 +42,18 @@ describe("what a wallet still waits for", () => {
     const unnamed = [quote({ quote: "q2" })];
     expect(read({ quotes: unnamed, payments: [request({ id: "r2", invoice: "lnbc-q2", mints: [REAL] })] })).toEqual([{ type: "cashu", kind: "request", amount: 50_000, paymentId: "r2" }]);
     expect(read({ quotes: [{ ...unnamed[0], paid: true }], payments: [request({ id: "r2", invoice: "lnbc-q2" })] })).toEqual([{ type: "cashu", kind: "paid", amount: 50_000, paymentId: "r2" }]);
+  });
+
+  it("a request of ours paid in ecash leaves its invoice open at the mint, and that invoice waits for nothing", () => {
+    const paidRequest = request({ id: "r1", invoice: "lnbc-q1", mints: [REAL], state: "settled" });
+    // Named on the quote, or tied by the invoice alone; on a Lightning card too. A Receive invoice still counts.
+    expect(read({ quotes: [quote({ quote: "q1", paymentId: "r1" }), quote({ quote: "receive", amount: 30 })], payments: [paidRequest] }))
+      .toEqual([{ type: "cashu", kind: "invoice", amount: 30 }]);
+    expect(read({ quotes: [quote({ quote: "q1" })], payments: [paidRequest] })).toEqual([]);
+    expect(read({ lightningSource: "lnd", lightningOps: [op({ paymentHash: "h1", paymentId: "r2" })], payments: [request({ id: "r2", invoice: "lnbc-h1", state: "settled" })] })).toEqual([]);
+    // A request closed unpaid keeps its invoice listed: someone may still pay it.
+    expect(read({ quotes: [quote({ quote: "q1", paymentId: "r1" })], payments: [{ ...paidRequest, state: "pending", closed: true }] }))
+      .toEqual([{ type: "cashu", kind: "invoice", amount: 50_000, paymentId: "r1" }]);
   });
 
   it("a request counts for the one wallet it can be paid through: an invoice of another Lightning source with Cashu mints is lost with neither", () => {
@@ -110,5 +122,31 @@ describe("removing a wallet that still waits for money", () => {
     const lnd = walletRemoval("lightning", "mainnet", { awaiting, lightning: { providerId: "lnd", status: "ready", balance: 0 } as never });
     expect(lnd.awaiting.map((i) => i.paymentId)).toEqual(["l"]);
     expect(removalRisksFunds(lnd)).toBe(false);
+  });
+});
+
+describe("what one mint still waits for (before it is removed alone)", () => {
+  const at = (quotes: StoredQuote[], payments: StoredPayment[] = []) => mintAwaiting(REAL, { network: "mainnet", quotes, payments, now: NOW });
+
+  it("its own invoices, open, paid or issued; never another mint's, an expired one or test coins", () => {
+    expect(at([
+      quote({ quote: "open", amount: 30 }),
+      quote({ quote: "paid", paid: true, amount: 700 }),
+      quote({ quote: "issued", issuedUnclaimed: true, amount: 300 }),
+      quote({ quote: "expired", expiresAt: NOW - 120_000 }),
+      quote({ quote: "coins", testCoins: true }),
+      quote({ quote: "elsewhere", mint: OTHER }),
+    ])).toEqual([
+      { type: "cashu", kind: "paid", amount: 700 },
+      { type: "cashu", kind: "unclaimed", amount: 300 },
+      { type: "cashu", kind: "invoice", amount: 30 },
+    ]);
+  });
+
+  it("a request of ours whose invoice is its quote; not one only named for ecash, which another mint or a token still pays", () => {
+    const quotes = [quote({ quote: "q1", paymentId: "r1" })];
+    expect(at(quotes, [request({ id: "r1", invoice: "lnbc-q1", mints: [REAL] })])).toEqual([{ type: "cashu", kind: "request", amount: 50_000, paymentId: "r1" }]);
+    expect(at([], [request({ id: "r2", mints: [REAL, OTHER] })])).toEqual([]);
+    expect(at([], [request({ id: "r3", mints: [REAL] })])).toEqual([]);
   });
 });

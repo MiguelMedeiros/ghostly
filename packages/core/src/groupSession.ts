@@ -16,6 +16,7 @@ import {
 import { MENTION_LIMITS, validMentions, wireMentions, type GroupMention } from "./groupMentions";
 import { groupReplyAuthor, readReply, REPLY_LIMITS, wireReply, type WireReply } from "./replies";
 import { readForwarded } from "./forwards";
+import { STATUS_CARD_LIMITS, cardEditNumber, readStatusCard, type StatusCard } from "./statusCards";
 import { GROUP_EDIT_FRAME, meshMessageRef, validEditText, type GroupIncomingEdit } from "./groupEdits";
 import { validEditNumber } from "./pairedEdits";
 import { MESH_HUBS, meshRendezvous, NO_HUB_POLICY, type MeshHubPolicy } from "./groupHubs";
@@ -88,11 +89,14 @@ export const GROUP_READ_NOTE = `Everyone in the group can read everything sent w
  * there is one. A frame handed on by another member keeps its boxes only with it: the edge it arrives on is not the
  * author's and vouches for nothing.
  * `f`: a forwarded text's hop count (WISP 9xx § Forwards), in the clear like the header: every member reads it anyway.
+ * `sc`: a status card (WISP 4xx · Status Cards) as JSON, sealed like the reply in a box of its own, so an older app
+ * reads the text, its fallback; `xs` covers it after the rest, only when there is one.
  */
-export interface GroupMessageFrame { t: "group-msg"; g: string; e: number; s: string; n: number; ts: number; nn: string; c: string; sig: string; m?: { n: string; c: string }; r?: { n: string; c: string }; f?: number; xs?: string }
+export interface GroupMessageFrame { t: "group-msg"; g: string; e: number; s: string; n: number; ts: number; nn: string; c: string; sig: string; m?: { n: string; c: string }; r?: { n: string; c: string }; f?: number; sc?: { n: string; c: string }; xs?: string }
 /**
  * An edit of message `<s>:<e>:<n>` by its author (WISP 9xx § Edits): edit number `v`, the new text (and its mentions)
- * as JSON `{ text, m? }` sealed under the key of the message's epoch `e`, signed by the author.
+ * as JSON `{ text, m?, sc? }` sealed under the key of the message's epoch `e`, signed by the author. `sc`: the status card
+ * of this version (WISP 4xx · Status Cards); with one, `v` may go up to `STATUS_CARD_LIMITS.edits`.
  */
 export interface GroupEditFrame { t: "group-edit"; g: string; e: number; s: string; n: number; v: number; ts: number; nn: string; c: string; sig: string }
 export interface GroupCommitFrame { t: "group-commit"; g: string; commit: GroupCommit; secret?: SealedSecret }
@@ -158,7 +162,7 @@ export interface GroupState {
  * `completes`: this message was delivered before from a copy another member handed on without its author's whole
  * signature (its text only); this is the whole one, with the mentions, reply and hop count its author put there.
  */
-export interface GroupIncomingMessage { id: string; sender: string; epoch: number; seq: number; timestamp: number; text: string; mentions?: GroupMention[]; reply?: WireReply; forwarded?: number; completes?: true }
+export interface GroupIncomingMessage { id: string; sender: string; epoch: number; seq: number; timestamp: number; text: string; mentions?: GroupMention[]; reply?: WireReply; forwarded?: number; card?: StatusCard; completes?: true }
 
 export interface GroupSessionHooks {
   save(state: GroupState): Promise<void>;
@@ -188,19 +192,25 @@ const isMentionsBox = isSealedBox(MAX_MENTIONS_BOX);
 const MAX_REPLY_BOX = Math.ceil((REPLY_LIMITS.id + REPLY_LIMITS.raw * 4 + 128) * 4 / 3) + 4;
 const replyAad = (f: Pick<GroupMessageFrame, "g" | "e" | "s" | "n" | "ts">) => JSON.stringify(["ghostly-group/1 reply", f.g, f.e, f.s, f.n, f.ts]);
 const isReplyBox = isSealedBox(MAX_REPLY_BOX);
+/** A status card as JSON (`STATUS_CARD_LIMITS.bytes` at most), sealed. */
+const MAX_CARD_BOX = Math.ceil((STATUS_CARD_LIMITS.bytes + 16) * 4 / 3) + 4;
+const cardAad = (f: Pick<GroupMessageFrame, "g" | "e" | "s" | "n" | "ts">) => JSON.stringify(["ghostly-group/1 card", f.g, f.e, f.s, f.n, f.ts]);
+const isCardBox = isSealedBox(MAX_CARD_BOX);
 const B64 = /^[A-Za-z0-9_-]*$/;
 const secretAad = (g: string, e: number, member: string) => JSON.stringify(["ghostly-group/1 secret", g, e, member]);
 const messageAad = (f: Pick<GroupMessageFrame, "g" | "e" | "s" | "n" | "ts">) => JSON.stringify([f.g, f.e, f.s, f.n, f.ts]);
 const messageSigned = (f: Omit<GroupMessageFrame, "sig" | "t">) => utf8Encode(JSON.stringify(["ghostly-group/1 msg", f.g, f.e, f.s, f.n, f.ts, f.nn, f.c]));
 /**
  * What `xs` covers: the frame and both boxes, so a member handing it on cannot swap or forge them; a hop count after
- * them, only when there is one, so what an app from before forwards signs and checks stays the same.
+ * them, only when there is one, so what an app from before forwards signs and checks stays the same; a card's box
+ * after that, marked, only when there is one.
  */
 const messageSignedWhole = (f: Omit<GroupMessageFrame, "sig" | "t" | "xs">) =>
-  utf8Encode(JSON.stringify(["ghostly-group/1 msg+", f.g, f.e, f.s, f.n, f.ts, f.nn, f.c, f.m?.n ?? "", f.m?.c ?? "", f.r?.n ?? "", f.r?.c ?? "", ...(f.f !== undefined ? [f.f] : [])]));
+  utf8Encode(JSON.stringify(["ghostly-group/1 msg+", f.g, f.e, f.s, f.n, f.ts, f.nn, f.c, f.m?.n ?? "", f.m?.c ?? "", f.r?.n ?? "", f.r?.c ?? "", ...(f.f !== undefined ? [f.f] : []),
+    ...(f.sc ? ["sc", f.sc.n, f.sc.c] : [])]));
 export const groupMessageId = (sender: string, epoch: number, seq: number) => `${sender}:${epoch}:${seq}`;
-/** An edit's box holds the text and its mentions as JSON: room for a text whose every character JSON escapes. */
-const MAX_EDIT_PLAIN = GROUP_LIMITS.textBytes * 2 + MENTION_LIMITS.count * 96 + 64;
+/** An edit's box holds the text, its mentions and its card as JSON: room for a text whose every character JSON escapes. */
+const MAX_EDIT_PLAIN = GROUP_LIMITS.textBytes * 2 + MENTION_LIMITS.count * 96 + STATUS_CARD_LIMITS.bytes + 64;
 const MAX_EDIT_BOX = Math.ceil((MAX_EDIT_PLAIN + 16) * 4 / 3) + 4;
 const editAad = (f: Pick<GroupEditFrame, "g" | "e" | "s" | "n" | "v" | "ts">) => JSON.stringify(["ghostly-group/1 edit", f.g, f.e, f.s, f.n, f.v, f.ts]);
 /** What a member signs of its reaction, so that a hub can pass it on (WISP 9xx · Group Mesh § Hubs). */
@@ -220,13 +230,13 @@ function isEditFrame(v: unknown): v is GroupEditFrame {
   if (!v || typeof v !== "object") return false;
   const f = v as Record<string, unknown>;
   return f.t === GROUP_EDIT_FRAME && typeof f.g === "string" && GROUP_ID.test(f.g) && Number.isSafeInteger(f.e) && (f.e as number) >= 0 &&
-    typeof f.s === "string" && MEMBER_KEY.test(f.s) && Number.isSafeInteger(f.n) && (f.n as number) >= 0 && validEditNumber(f.v) &&
+    typeof f.s === "string" && MEMBER_KEY.test(f.s) && Number.isSafeInteger(f.n) && (f.n as number) >= 0 && cardEditNumber(f.v) &&
     Number.isSafeInteger(f.ts) && (f.ts as number) > 0 && typeof f.nn === "string" && f.nn.length === 32 && B64.test(f.nn) &&
     typeof f.c === "string" && f.c.length <= MAX_EDIT_BOX && B64.test(f.c) && typeof f.sig === "string" && f.sig.length === 86 && B64.test(f.sig);
 }
 
 /** What a frame weighs in a log, roughly: its boxes plus the fixed fields around them. */
-const frameBytes = (f: GroupMessageFrame) => f.c.length + (f.m?.c.length ?? 0) + (f.r?.c.length ?? 0) + 400;
+const frameBytes = (f: GroupMessageFrame) => f.c.length + (f.m?.c.length ?? 0) + (f.r?.c.length ?? 0) + (f.sc?.c.length ?? 0) + 400;
 
 /** Only the fields an edit frame has, as `clean` does for a message. */
 const cleanEdit = (f: GroupEditFrame): GroupEditFrame => ({ t: GROUP_EDIT_FRAME, g: f.g, e: f.e, s: f.s, n: f.n, v: f.v, ts: f.ts, nn: f.nn, c: f.c, sig: f.sig });
@@ -235,7 +245,7 @@ const cleanEdit = (f: GroupEditFrame): GroupEditFrame => ({ t: GROUP_EDIT_FRAME,
 function clean(f: GroupMessageFrame): GroupMessageFrame {
   return { t: "group-msg", g: f.g, e: f.e, s: f.s, n: f.n, ts: f.ts, nn: f.nn, c: f.c, sig: f.sig,
     ...(isMentionsBox(f.m) ? { m: { n: f.m.n, c: f.m.c } } : {}), ...(isReplyBox(f.r) ? { r: { n: f.r.n, c: f.r.c } } : {}),
-    ...(readForwarded(f.f) ? { f: f.f } : {}),
+    ...(readForwarded(f.f) ? { f: f.f } : {}), ...(isCardBox(f.sc) ? { sc: { n: f.sc.n, c: f.sc.c } } : {}),
     ...(typeof f.xs === "string" && f.xs.length === 86 && B64.test(f.xs) ? { xs: f.xs } : {}) };
 }
 
@@ -548,9 +558,10 @@ export class GroupSession {
    * Encrypts and signs a text, keeps it for catch-up and sends it to every other member. `mentions`: places of the
    * text that name members (everyone: the admin only); what does not hold is left out. `reply`: the message it
    * answers, sealed apart from the text (`r`) like the mentions, so an older app still reads the text. `forwarded`: the
-   * hop count of a forwarded text (`f`, WISP 9xx § Forwards).
+   * hop count of a forwarded text (`f`, WISP 9xx § Forwards). `card`: a status card, checked by the caller, sealed in a
+   * box of its own (`sc`, WISP 4xx · Status Cards); the text is its fallback.
    */
-  sendText(text: string, now = Date.now(), mentions: readonly GroupMention[] = [], reply?: WireReply, forwarded?: number): Promise<{ id: string } | { error: string }> {
+  sendText(text: string, now = Date.now(), mentions: readonly GroupMention[] = [], reply?: WireReply, forwarded?: number, card?: StatusCard): Promise<{ id: string } | { error: string }> {
     return this.serialize(async () => {
       if (this.state.status !== "active") return { error: this.state.statusReason ?? "You are no longer in this group" };
       const trimmed = text.trim();
@@ -567,14 +578,15 @@ export class GroupSession {
       const named = validMentions(wireMentions(mentions), trimmed, this.isAdmin);
       const answers = reply && readReply(wireReply(reply), groupReplyAuthor);
       const boxes = { ...(named.length ? { m: encryptText(key, mentionsAad(header), JSON.stringify(named)) } : {}),
-        ...(answers ? { r: encryptText(key, replyAad(header), JSON.stringify(answers)) } : {}), ...(readForwarded(forwarded) ? { f: forwarded } : {}) };
+        ...(answers ? { r: encryptText(key, replyAad(header), JSON.stringify(answers)) } : {}), ...(readForwarded(forwarded) ? { f: forwarded } : {}),
+        ...(card ? { sc: encryptText(key, cardAad(header), JSON.stringify(card)) } : {}) };
       const frame: GroupMessageFrame = { t: "group-msg", ...unsigned, sig: toBase64Url(sign(messageSigned(unsigned), this.identity.seed)), ...boxes,
         xs: toBase64Url(sign(messageSignedWhole({ ...unsigned, ...boxes }), this.identity.seed)) };
       this.state.sent.push(frame);
       let bytes = this.state.sent.reduce((sum, f) => sum + f.c.length, 0);
       while (this.state.sent.length > GROUP_LIMITS.outlog || bytes > GROUP_LIMITS.outlogBytes) bytes -= this.state.sent.shift()!.c.length;
       const id = groupMessageId(this.myKey, epoch, n);
-      await this.hooks.message({ id, sender: this.myKey, epoch, seq: n, timestamp: now, text: trimmed, ...(named.length ? { mentions: named } : {}), ...(answers ? { reply: answers } : {}), ...(boxes.f ? { forwarded: boxes.f } : {}) });
+      await this.hooks.message({ id, sender: this.myKey, epoch, seq: n, timestamp: now, text: trimmed, ...(named.length ? { mentions: named } : {}), ...(answers ? { reply: answers } : {}), ...(boxes.f ? { forwarded: boxes.f } : {}), ...(card ? { card } : {}) });
       await this.persist();
       for (const key of this.others) this.hooks.send(key, frame);
       return { id };
@@ -587,19 +599,19 @@ export class GroupSession {
    * edge that just opened). Someone admitted after the message cannot open it and is not sent it. The message's
    * epoch key must still be here: past `GROUP_LIMITS.secrets` epochs a message cannot be edited.
    */
-  sendEdit(messageId: string, edit: { v: number; ts: number; text: string; mentions?: readonly GroupMention[] }, to?: string): Promise<{ sent: number } | { error: string }> {
+  sendEdit(messageId: string, edit: { v: number; ts: number; text: string; mentions?: readonly GroupMention[]; card?: StatusCard }, to?: string): Promise<{ sent: number } | { error: string }> {
     return this.serialize(async () => {
       if (this.state.status !== "active") return { error: this.state.statusReason ?? "You are no longer in this group" };
       const ref = meshMessageRef(messageId);
       const commit = ref && this.state.chain[ref.e];
       if (!ref || ref.s !== this.myKey || !commit || !rosterHas(commit.m, this.myKey)) return { error: "Only your own messages can be edited" };
-      if (!validEditNumber(edit.v)) return { error: "This message was edited too many times" };
+      if (!(edit.card ? cardEditNumber(edit.v) : validEditNumber(edit.v))) return { error: "This message was edited too many times" };
       const text = edit.text.trim();
       if (!validEditText(text)) return { error: text ? "Message exceeds 16 KiB" : "An edit cannot be empty" };
       const secret = this.secret(ref.e);
       if (!secret) return { error: "This message is too old to edit: its epoch's key is gone" };
       const named = validMentions(wireMentions(edit.mentions ?? []), text, rosterAdmin(commit.m) === this.myKey);
-      const plain = JSON.stringify({ text, ...(named.length ? { m: named } : {}) });
+      const plain = JSON.stringify({ text, ...(named.length ? { m: named } : {}), ...(edit.card ? { sc: edit.card } : {}) });
       if (utf8Encode(plain).length > MAX_EDIT_PLAIN) return { error: "Message exceeds 16 KiB" };
       const header = { g: this.id, e: ref.e, s: this.myKey, n: ref.n, v: edit.v, ts: edit.ts };
       const { n: nn, c } = encryptText(epochKeys(secret, this.id, ref.e).message, editAad(header), plain);
@@ -758,7 +770,7 @@ export class GroupSession {
     const whole = !relayed || this.wholeSigned(raw);
     if (!whole) {
       if (this.provisional.has(id)) return;
-      delete raw.m; delete raw.r; delete raw.f; delete raw.xs;
+      delete raw.m; delete raw.r; delete raw.f; delete raw.sc; delete raw.xs;
     }
     const secret = this.secret(raw.e);
     if (!secret) { this.park(from, raw); return; }
@@ -769,8 +781,9 @@ export class GroupSession {
     const mentions = this.openMentions(key, raw, text, rosterAdmin(commit.m) === raw.s);
     const reply = this.openReply(key, raw);
     const forwarded = readForwarded(raw.f);
+    const card = this.openCard(key, raw);
     const completes = whole && this.provisional.delete(id);
-    await this.hooks.message({ id, sender: raw.s, epoch: raw.e, seq: raw.n, timestamp: raw.ts, text, ...(mentions.length ? { mentions } : {}), ...(reply ? { reply } : {}), ...(forwarded ? { forwarded } : {}), ...(completes ? { completes: true as const } : {}) });
+    await this.hooks.message({ id, sender: raw.s, epoch: raw.e, seq: raw.n, timestamp: raw.ts, text, ...(mentions.length ? { mentions } : {}), ...(reply ? { reply } : {}), ...(forwarded ? { forwarded } : {}), ...(card ? { card } : {}), ...(completes ? { completes: true as const } : {}) });
     if (!whole) {
       this.provisional.add(id);
       if (this.provisional.size > GROUP_LIMITS.provisional) this.provisional.delete(this.provisional.values().next().value!);
@@ -802,11 +815,14 @@ export class GroupSession {
     if (!secret) { if (raw.e >= this.epoch - GROUP_LIMITS.secrets) this.parkEdit(from, raw); return; }
     const plain = decryptText(epochKeys(secret, this.id, raw.e).message, editAad(raw), raw.nn, raw.c);
     if (plain === null) return;
-    let body: { text?: unknown; m?: unknown };
+    let body: { text?: unknown; m?: unknown; sc?: unknown };
     try { body = JSON.parse(plain) as typeof body; } catch { return; }
     if (!body || typeof body !== "object" || !validEditText(body.text)) return;
     const k = validMentions(body.m, body.text, rosterAdmin(commit.m) === raw.s);
-    await this.hooks.edit?.({ id: groupMessageId(raw.s, raw.e, raw.n), sender: raw.s, e: raw.v, ts: raw.ts, m: body.text, ...(k.length ? { k } : {}) });
+    // A card that does not hold is left out; an edit numbered past a text's bound stands only with one.
+    const sc = body.sc === undefined ? undefined : readStatusCard(body.sc);
+    if (!validEditNumber(raw.v) && !sc) return;
+    await this.hooks.edit?.({ id: groupMessageId(raw.s, raw.e, raw.n), sender: raw.s, e: raw.v, ts: raw.ts, m: body.text, ...(k.length ? { k } : {}), ...(sc ? { sc } : {}) });
     if (this.keepEdit(raw)) { await this.persist(); this.took(cleanEdit(raw)); }
   }
 
@@ -827,6 +843,14 @@ export class GroupSession {
     const plain = decryptText(key, mentionsAad(raw), raw.m.n, raw.m.c);
     if (plain === null) return [];
     try { return validMentions(JSON.parse(plain), text, everyone); } catch { return []; }
+  }
+
+  /** A message's status card; a box that does not open, or a card that does not hold, is no card: the text shows. */
+  private openCard(key: Uint8Array, raw: GroupMessageFrame): StatusCard | undefined {
+    if (!isCardBox(raw.sc)) return undefined;
+    const plain = decryptText(key, cardAad(raw), raw.sc.n, raw.sc.c);
+    if (plain === null) return undefined;
+    try { return readStatusCard(JSON.parse(plain)); } catch { return undefined; }
   }
 
   /** The message a text answers; a box that does not open, or does not hold one, is no reply, not no message. */
@@ -1047,7 +1071,7 @@ export class GroupSession {
       const frame = wrapGroupMeta(meta, this.epoch, epochKeys(secret, this.id, this.epoch).message);
       for (const key of this.others) this.hooks.send(key, frame);
     }
-    const change = groupMetaChange(before, meta);
+    const change = groupMetaChange(before, meta, this.state.name);
     if (change) this.hooks.metaChanged?.(this.myKey, change);
     this.hooks.changed();
   }
@@ -1080,8 +1104,9 @@ export class GroupSession {
     const before = this.state.meta;
     this.state.meta = opened.meta;
     await this.persist();
-    // A change of hubs alone is no line in the history.
-    const change = groupMetaChange(before, opened.meta);
+    // A change of hubs alone is no line in the history, nor what the group looked like when I got in: the first
+    // statement I take, signed under a commit before mine, is no change made while I was a member.
+    const change = !before && !rosterHas(commit.m, this.myKey) ? null : groupMetaChange(before, opened.meta, this.state.name);
     if (change) this.hooks.metaChanged?.(s.by, change);
     this.hooks.changed();
     this.took({ t: "group-meta", ...s, k: frame.k as number, nn: frame.nn, c: frame.c });

@@ -35,8 +35,8 @@ Every transport runs the same authenticated chat session ([WISP 401](wisps/401-p
 
 ### Iroh
 
-- **Desktop:** native Iroh (`native-transports/`, `src-tauri/src/paired_transport.rs`) on n0's public relays.
-- **Web and extension** ([#225](https://github.com/MiguelMedeiros/ghostly/pull/225)): the same Iroh 1.2 built for browsers (`native-transports/iroh-web`, shipped as `packages/iroh-web`). A page cannot send UDP, so every packet goes through an Iroh relay. The QUIC/TLS session is still end to end.
+- **Desktop:** native Iroh (`native/transports/`, `apps/desktop/src/paired_transport.rs`) on n0's public relays.
+- **Web and extension** ([#225](https://github.com/MiguelMedeiros/ghostly/pull/225)): the same Iroh 1.2 built for browsers (`native/transports/iroh-web`, shipped as `packages/iroh-web`). A page cannot send UDP, so every packet goes through an Iroh relay. The QUIC/TLS session is still end to end.
 - Default Iroh relays (`DEFAULT_IROH_RELAYS` in `packages/browser/src/platform/irohWeb.ts`), editable in Settings, Advanced, Network (up to four):
   - `https://use1-1.relay.n0.iroh.link/`
   - `https://euc1-1.relay.n0.iroh.link/`
@@ -48,8 +48,8 @@ Every transport runs the same authenticated chat session ([WISP 401](wisps/401-p
 
 ### HyperDHT
 
-- **Desktop** ([#187](https://github.com/MiguelMedeiros/ghostly/pull/187)): `hyperdht` 6.34 runs in a Node sidecar (`src-tauri/native-runtime`, bundled with the app). One sidecar per app, started on first use, stopped with the last chat, and it exits with the app.
-- **Web and extension** ([#231](https://github.com/MiguelMedeiros/ghostly/pull/231)): through a HyperDHT relay (Holepunch's `@hyperswarm/dht-relay`, fixed in `native-transports/hyperdht-relay`). Always non-custodial: the browser keeps its keys and runs the Noise handshake and the encrypted stream. The relay forwards ciphertext and sees the browser's address, the per-chat keys and timing.
+- **Desktop** ([#187](https://github.com/MiguelMedeiros/ghostly/pull/187)): `hyperdht` 6.34 runs in a Node sidecar (`apps/desktop/native-runtime`, bundled with the app). One sidecar per app, started on first use, stopped with the last chat, and it exits with the app.
+- **Web and extension** ([#231](https://github.com/MiguelMedeiros/ghostly/pull/231)): through a HyperDHT relay (Holepunch's `@hyperswarm/dht-relay`, fixed in `services/hyperdht-relay`). Always non-custodial: the browser keeps its keys and runs the Noise handshake and the encrypted stream. The relay forwards ciphertext and sees the browser's address, the per-chat keys and timing.
 - **Off by default:** `DEFAULT_HYPERDHT_RELAY` is empty and no public Ghostly relay is run. Set a `wss://` relay in Settings, Advanced, Network to turn it on.
 
 ### Choosing a transport
@@ -70,7 +70,6 @@ A Pkarr record is a small DNS packet (at most 1,000 bytes), signed with Ed25519 
 | Web app, extension | Through the Pkarr relays: a page cannot send UDP | Every relay. The publish returns on the first relay that took the packet ([#293](https://github.com/MiguelMedeiros/ghostly/pull/293)) |
 | Desktop | The Mainline DHT directly ([#289](https://github.com/MiguelMedeiros/ghostly/pull/289)). Relay reads only with Settings, Advanced, Network, "Also use Pkarr relays" | The DHT and every relay |
 | Headless CLI (`ghostly`) | The relays first, the Mainline DHT when every relay fails ([#392](https://github.com/MiguelMedeiros/ghostly/pull/392), `RelaysAndDht` in `packages/cli/src/runtime/mainline.ts`). `GHOSTLY_DHT=0` leaves the DHT out ([CLI.md](CLI.md#pkarr-relays-and-the-mainline-dht)) | The DHT and every relay |
-| Older Rust CLI (`ghostly-cli`, no longer shipped from 1.0) | The DHT directly. Relay reads only with `--read-relays` | The DHT and pkarr's default relays |
 
 - Native apps still write to the relays because a browser contact can only read relays, and a relay keeps serving the copy it holds. Measured on 2026-09-25: after a newer packet went to the DHT alone, `pkarr.pubky.org` still served the older one 30 s later, even with a record TTL of 1 s.
 - A Desktop read of an unknown key waits for the lookup's first answer (about 0.7 s), not the whole lookup (about 3.4 s).
@@ -80,18 +79,21 @@ A Pkarr record is a small DNS packet (at most 1,000 bytes), signed with Ed25519 
 
 - A browser allows itself 30 requests a minute per relay (reads and publishes together, shared by every chat; `REQUESTS_PER_MINUTE` in `packages/core/src/relay.ts`), and 60 on `pkarr.pubky.app`, which allows 1000 an address (`RELAY_REQUESTS_PER_MINUTE`). Background reads have a share of 20 on each.
 - Who goes first when links want more than that ([#401](https://github.com/MiguelMedeiros/ghostly/pull/401), [#434](https://github.com/MiguelMedeiros/ghostly/pull/434)):
-  - A 1:1 chat that polls fast (a signal from its contact due any moment), or whose request the budget refused, keeps the last 10 requests of each relay's minute for itself. Group requests stop at 20, until a minute after the chat last needed them.
+  - A 1:1 chat that polls fast (a signal from its contact due any moment), or whose request the budget refused, keeps the last 10 requests of each relay's minute for itself. Group requests stop at 20, until a minute after the chat last needed them, or until the chat reads its contact at a slow pace again (it is live): each chat's part of the reserve is its own. Kept for the minute, a daemon back after a restart with its chats live in 18 s held a group's edge that had just missed a read for 48 s more (bug hunt r6a, 2026-09-29).
+  - A 1:1 chat's new WebRTC offer or answer, its fast reads for the answer to its own offer, and the reads of a DHT-only contact's mailbox once the contact shows it is leaving (a fresh link packet, or its offer), up to three while it still says DHT only (`signal` on the request, `LEAVING_SIGNAL_READS`), may go over a relay's minute by a fifth of it (`SIGNALING_ALLOWANCE_SHARE`: 6 on 30, 12 on 60, 1 on relay.pkarr.org's 5), and never beyond that in any minute; the reads leave the last of those to a write. A chat that left DHT only in the minute its pairing and texts over the DHT had spent held its offer or answer 40 s while the contact's attempt gave up: the matrix's extension chat stayed "On DHT · retrying live" in 46 of 120 runs (2026-09-30).
   - While any link polls fast, background reads (a community's lookups, slow mailbox checks) drop to 5 a relay per minute. A community door's reads of its knock bell do not: they stay within the background share of 20.
   - After a window that looked fast for a contact's offer, a link slows down step by step (4, 4, 8, 16 s on the relays), not straight to its background pace: an offer held back by the other side's budget can land just after the window.
   - A signal's fast window counts from when the signal went out, not from when it was made.
-- A publish goes to every relay and counts once one took it, and a read goes to a relay with requests left, so the larger share is room for signaling once `pkarr.pubky.org`'s 30 are spent. A web pairing costs about ten requests a relay: with 30 on both, three pairings in a minute were the whole minute, and a fourth waited for it to free (2026-09-28).
+  - Groups' fast reads (their edges looking for a signal) take at most a quarter of a relay's minute in any 15 s (`GROUP_BURST_MS`), so they never spend it in a burst and have requests left when the answers come.
+  - An offer to a saved contact (a chat, a group's edge) is looked at every 2 s for 10 s, then every 4 to 8 s for as long as the offer stands (90 s), not every 2 s for 45 s and then at the background pace (`OFFER_FAST_MS`, `OFFER_STEP_MAX` in `packages/core/src/link.ts`; on the DHT, where reads cost no relay budget, every 1.4 to 2.8 s). A contact that is there answers in seconds; one that still holds the session of an app that was killed answers only once that session goes (about 20 s with node-datachannel, 45 s where liveness finds out). A daemon back after a kill, with a chat and a private group's edge to each of two members, had its edges live again 75 to 110 s after the restart, on the default relays: its edges' fast reads spent the groups' share of the minute before the answers came (bug hunt r5a, 2026-09-29).
+- A publish goes to every relay and counts once one took it, and a read goes to a relay with requests left, for each key the one after the relay that answered its last read (a relay that lacks a key's newest packet, say one that rate limited its publish, answers it at most once in a row), so the larger share is room for signaling once `pkarr.pubky.org`'s 30 are spent. A web pairing costs about ten requests a relay: with 30 on both, three pairings in a minute were the whole minute, and a fourth waited for it to free (2026-09-28).
 - Fewer requests for the same answer ([#427](https://github.com/MiguelMedeiros/ghostly/pull/427)): a read of a key the relays answered under 500 ms ago is answered from that answer (`FRESH_READ_MS`); a publish under the key clears it. The spare invite that replaces a taken one is warmed 30 s later (`SPARE_INVITE_WARM_AFTER_TAKE_MS` in `packages/browser/src/engine/node.ts`), not in the second a new chat signals on the same budget.
 - A read this budget holds back answers the newer of the last packet read and the last one this client published under that key ([#501](https://github.com/MiguelMedeiros/ghostly/pull/501)): a community hub never takes its own beacon entry for an older one. A read that found a relay down answers only what it read, so an outage still shows as "Discovery unavailable" ([#538](https://github.com/MiguelMedeiros/ghostly/pull/538)).
 - A request this budget holds back, or a relay's 429, is a **wait** ([#271](https://github.com/MiguelMedeiros/ghostly/pull/271)). `RelayTransport` throws a typed `DiscoveryBudgetError` with the time until a request frees, and every publisher retries then. It never counts as a failed attempt and the UI shows no error.
 
 ### Circuit breaker per relay
 
-Every client keeps one per relay (`packages/core/src/relayBreaker.ts`, and the same rule in `src-tauri/src/pkarr_network.rs`, [#289](https://github.com/MiguelMedeiros/ghostly/pull/289)):
+Every client keeps one per relay (`packages/core/src/relayBreaker.ts`, and the same rule in `apps/desktop/src/pkarr_network.rs`, [#289](https://github.com/MiguelMedeiros/ghostly/pull/289)):
 
 - Three failures in a row (no answer, a server error, or the relay's 429) trip it.
 - The relay is then left alone for 1 minute, doubling on each trip up to 5 minutes. One probe goes out after the wait; an answer closes the breaker.
@@ -106,7 +108,7 @@ Every client keeps one per relay (`packages/core/src/relayBreaker.ts`, and the s
 
 ### Discovery health in the connection panel
 
-The connection panel's **Details** (`src/components/DiscoveryHealth.tsx`) shows:
+The connection panel's **Details** (`apps/ui/src/components/DiscoveryHealth.tsx`) shows:
 
 - **Discovery:** the path the last read took: "DHT direct" or "Relay: <host>".
 - **Relays:** each relay's state: ok, throttled until hh:mm, or failing until hh:mm.
@@ -149,7 +151,7 @@ No broader list of public relays exists: the pkarr repository's `relays.txt` nam
 - **One profile:** Settings, Advanced, Network, Pkarr relays, one URL per line.
 - **Everyone:** append the URL to `DEFAULT_RELAYS`, and put the old list into `PREVIOUS_DEFAULT_RELAYS` so profiles on the old defaults move with it. A relay that allows few requests gets a share in `RELAY_REQUESTS_PER_MINUTE`.
 - **Private network or tests (Desktop):** `GHOSTLY_PKARR_RELAYS` (comma-separated URLs) alone replaces the DHT. With `GHOSTLY_PKARR_DHT_BOOTSTRAP` (`ip:port`, comma-separated), those relays are written to and the DHT is reached through those nodes.
-- **Private network or tests (headless CLI):** `settings set relays '["http://…"]'` sets the relays, `GHOSTLY_DHT=0` leaves the Mainline DHT out, `GHOSTLY_DHT_BOOTSTRAP` (`host:port`, comma-separated) replaces its bootstrap routers, and `GHOSTLY_HYPERDHT_BOOTSTRAP` HyperDHT's ([CLI.md](CLI.md#pkarr-relays-and-the-mainline-dht)).
+- **Private network or tests (headless CLI):** `GHOSTLY_PKARR_RELAYS` (comma-separated URLs) as on the Desktop: the only relays from the first publish, the setting unused, and the Mainline DHT left out unless `GHOSTLY_DHT_BOOTSTRAP` is given. Otherwise `settings set relays '["http://…"]'` sets the relays, `GHOSTLY_DHT=0` leaves the Mainline DHT out, `GHOSTLY_DHT_BOOTSTRAP` (`host:port`, comma-separated) replaces its bootstrap routers, and `GHOSTLY_HYPERDHT_BOOTSTRAP` HyperDHT's ([CLI.md](CLI.md#pkarr-relays-and-the-mainline-dht)).
 
 ## What observers see
 

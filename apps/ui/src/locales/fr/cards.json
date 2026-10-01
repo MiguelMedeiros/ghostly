@@ -1,0 +1,77 @@
+{
+  "buttons": {
+    "answers": "Réponses",
+    "chosen": "Choisie",
+    "closed": "Fermée",
+    "failed": "Envoi impossible",
+    "jump": "Aller à la question",
+    "sending": "Envoi…"
+  },
+  "panel": {
+    "activeCount": "{{count}} actives",
+    "allOk": "tout OK",
+    "button": "Tâches",
+    "buttonCount": "Tâches, {{count}} actives",
+    "close": "Fermer",
+    "empty": "Aucune tâche en cours",
+    "failedCount": "{{count}} en échec",
+    "finishedCount": "Terminées ({{count}})",
+    "idle": "Rien en cours",
+    "info": "Des bots publient ces cartes et les tiennent à jour. Touchez-en une pour y aller dans la discussion.",
+    "nextRun": "prochaine {{when}}",
+    "routinesMany": "{{count}} routines",
+    "routinesOne": "1 routine",
+    "title": "Tâches"
+  },
+  "routine": {
+    "cron": "Cron",
+    "label": "Routine : {{name}}, {{state}}",
+    "lastRun": "Dernière exécution : {{result}}",
+    "next": "Prochaine {{when}}",
+    "noRuns": "Pas encore lancée",
+    "result": {
+      "failed": "Échec",
+      "ok": "OK",
+      "skipped": "Ignorée"
+    },
+    "runs": "Exécutions récentes",
+    "schedule": "Horaire",
+    "state": {
+      "active": "Active",
+      "paused": "En pause"
+    }
+  },
+  "task": {
+    "branch": "Branche :",
+    "elapsed": {
+      "blocked": "bloquée depuis {{duration}}",
+      "queued": "en attente depuis {{duration}}",
+      "running": "en cours depuis {{duration}}",
+      "took": "a pris {{duration}}"
+    },
+    "item": {
+      "done": "Fait",
+      "failed": "Échoué",
+      "pending": "À faire",
+      "running": "En cours",
+      "skipped": "Ignoré"
+    },
+    "label": "Tâche : {{title}}, {{status}}",
+    "labelProgress": "Tâche : {{title}}, {{status}}, {{progress}}%",
+    "now": "Maintenant :",
+    "pr": "PR #{{number}}",
+    "prNoNumber": "Pull request",
+    "progress": "Progression",
+    "started": "Commencée {{ago}}",
+    "status": {
+      "blocked": "Bloquée",
+      "cancelled": "Annulée",
+      "done": "Terminée",
+      "failed": "Échouée",
+      "queued": "En attente",
+      "running": "En cours"
+    },
+    "steps": "{{done}} étapes sur {{total}}",
+    "updated": "mise à jour {{ago}}"
+  }
+}

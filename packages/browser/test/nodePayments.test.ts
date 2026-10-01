@@ -10,6 +10,8 @@ import { cashuMint, CASHU_MINT_SOURCE } from "../src/engine/paymentAdapters/prov
 import { FakeLightningProvider, FakeOnchainProvider, fakeAddress, fakeInvoice, fakeLightning, fakeOnchain } from "../src/engine/paymentAdapters/providers/testing";
 import type { StoredLink, StoredPayment } from "../src/shared/types";
 import { REAL_MONEY_UNCONFIRMED } from "../src/engine/paymentAdapters/walletInstances";
+import { CASHU_REQUEST_TIMEOUT_MS, NEVER_REACHED_MINT, SWAP_SETTLED_MS } from "../src/engine/paymentAdapters/cashu";
+import type { CashuPrepared } from "../src/engine/wallet";
 // covers: payments.chat.review, payments.chat.method-off, payments.chat.reconcile, wallet.mode, wallet.onchain.sources, wallet.cashu.mint.manage, wallet.cashu.export
 
 /** A connected contact, as far as the engine's payment paths look at it. */
@@ -229,7 +231,60 @@ describe("a payment in a chat", () => {
     const unpaidRequest = savedReview({ linkId: chat.id, requestId: "gone" });
     await intentRepository.put({ review: unpaidRequest, prepared: {} });
     await expect(node.approvePayment({ id: unpaidRequest.id })).rejects.toThrow("no longer awaiting payment");
+    // Closed because the contact removed its wallet, which also turned Cashu off in the chat: the request is the reason.
+    const closedChat = addChat(node, stubLink({ allowsPayment: vi.fn(() => false) }));
+    const closedRequest = savedReview({ linkId: closedChat.id, requestId: "closed-by-removal" });
+    await intentRepository.put({ review: closedRequest, prepared: {} });
+    await expect(node.approvePayment({ id: closedRequest.id })).rejects.toThrow("no longer awaiting payment");
     expect(approve).not.toHaveBeenCalled();
+  });
+
+  it("a review approved while the chat is still reconnecting (after a restart) waits for it, and is not told Cashu is off", async () => {
+    const { node } = track(engine());
+    const approve = vi.spyOn(node["paymentCoordinator"], "approve").mockRejectedValue(new Error("reached the approval"));
+    // The data link is not open yet: the contact's ways of paying are not known until it is.
+    const live = { open: false };
+    const link = stubLink({ allowsPayment: vi.fn(() => live.open), requirePaymentSupport: vi.fn(async () => { live.open = true; }) });
+    const chat = addChat(node, link);
+    const review = savedReview({ linkId: chat.id });
+    await intentRepository.put({ review, prepared: {} });
+    await expect(node.approvePayment({ id: review.id })).rejects.toThrow("reached the approval");
+    expect(link.requirePaymentSupport).toHaveBeenCalledBefore(link.allowsPayment);
+    expect(approve).toHaveBeenCalledOnce();
+  });
+
+  it("a review left pending is cancelled once its request is paid some other way or closed, or once it expired", async () => {
+    const { node } = track(engine());
+    const request = (id: string, patch: Partial<StoredPayment>): StoredPayment => ({ id, linkId: "chat", kind: "request", direction: "in", amount: 10, unit: "sat", state: "pending", createdAt: 1, ...patch });
+    for (const r of [request("paid", { state: "settled" }), request("closed", { state: "failed", closed: true }), request("open", {}), request("elsewhere", { state: "settled", linkId: "another chat" })]) node["desk"]["payments"].set(r.id, r);
+    const reviews = { paid: savedReview({ requestId: "paid" }), closed: savedReview({ requestId: "closed" }), open: savedReview({ requestId: "open" }),
+      elsewhere: savedReview({ requestId: "elsewhere" }), expired: savedReview({ expiresAt: Date.now() - 1 }), sent: savedReview({ requestId: "paid", state: "submitted" }) };
+    for (const review of Object.values(reviews)) await intentRepository.put({ review, prepared: {} });
+    const dropped = await node.dropStaleReviews();
+    expect(dropped.map((r) => r.id).sort()).toEqual([reviews.paid.id, reviews.closed.id, reviews.expired.id].sort());
+    const states = Object.fromEntries(await Promise.all(Object.entries(reviews).map(async ([name, r]) => [name, (await intentRepository.get(r.id))!.review.state])));
+    expect(states).toEqual({ paid: "cancelled", closed: "cancelled", open: "pending", elsewhere: "pending", expired: "cancelled", sent: "submitted" });
+  });
+});
+
+describe("a Cashu payment that never reached its mint, through the engine", () => {
+  it("is saved as abandoned before its sats are released, then failed", async () => {
+    const { node } = track(engine());
+    const submittedAt = Date.now() - CASHU_REQUEST_TIMEOUT_MS - SWAP_SETTLED_MS - 1;
+    const review = savedReview({ state: "unknown", submittedAt, createdAt: submittedAt });
+    await intentRepository.put({ review, prepared: { mint: TEST_MINT, swap: {} } as unknown as CashuPrepared });
+    const wallet = node["wallet"];
+    vi.spyOn(wallet, "reviewedCashuSpent").mockResolvedValue(false);
+    vi.spyOn(wallet, "recoverReviewedCashu").mockResolvedValue(undefined);
+    vi.spyOn(wallet, "reviewedCashuNeverSwapped").mockResolvedValue(true);
+    const savedWhenReleased: (boolean | undefined)[] = [];
+    const release = vi.spyOn(wallet, "releaseReviewedCashu").mockImplementation(async () => {
+      savedWhenReleased.push(((await intentRepository.get(review.id))!.prepared as CashuPrepared).abandoned);
+    });
+    expect(await node.reconcilePayment({ id: review.id })).toMatchObject({ state: "failed", error: NEVER_REACHED_MINT });
+    expect(release).toHaveBeenCalledOnce();
+    expect(savedWhenReleased).toEqual([true]);
+    expect((await intentRepository.get(review.id))!.review.state).toBe("failed");
   });
 });
 
@@ -307,6 +362,29 @@ describe("the Cashu wallet and Lightning", () => {
     expect(node["settings"].mints).toEqual(["https://a.example", "https://b.example"]);
   });
 
+  it("refuses a mint of the other network from a network's Cashu wallet: a test mint before contacting it, another once it answered as a mint", async () => {
+    const { node } = track(engine());
+    const check = vi.spyOn(node["wallet"], "checkMint").mockImplementation(async (url: string) => ({ url: url.replace(/\/$/, ""), name: url }));
+    await expect(node.walletAddMint({ url: `${TEST_MINT}/`, network: "mainnet" })).rejects.toThrow("add it to a Testnet Cashu wallet");
+    expect(check).not.toHaveBeenCalled();
+    await expect(node.walletAddMint({ url: "https://a.example", network: "testnet" })).rejects.toThrow("add it to a Mainnet Cashu wallet");
+    expect(check).toHaveBeenCalledWith("https://a.example");
+    expect(node["settings"].mints).not.toContain(TEST_MINT);
+    expect(node["settings"].mints).not.toContain("https://a.example");
+    await node.walletAddMint({ url: TEST_MINT, network: "testnet" });
+    await node.walletAddMint({ url: "https://a.example", network: "mainnet" });
+    expect(node["settings"].mints).toEqual(expect.arrayContaining([TEST_MINT, "https://a.example"]));
+  });
+
+  it("names an address from Testnet that does not answer as unreachable, not as a mint of real sats", async () => {
+    const { node } = track(engine());
+    vi.spyOn(node["wallet"], "wallet" as never).mockRejectedValue(new TypeError("Failed to fetch") as never);
+    const before = [...node["settings"].mints];
+    await expect(node.walletAddMint({ url: "https://mint.unreachable.invalid", network: "testnet" })).rejects.toThrow(/mint\.unreachable\.invalid/);
+    await expect(node.walletAddMint({ url: "https://mint.unreachable.invalid", network: "testnet" })).rejects.not.toThrow("real sats");
+    expect(node["settings"].mints).toEqual(before);
+  });
+
   it("never removes a mint that still holds sats", async () => {
     const { node } = track(engine());
     node["settings"].mints = ["https://a.example", "https://b.example"];
@@ -316,6 +394,64 @@ describe("the Cashu wallet and Lightning", () => {
     balance.mockResolvedValue(0);
     await node.walletRemoveMint({ url: "https://a.example" });
     expect((await db.getSettings()).mints).toEqual(["https://b.example"]);
+  });
+
+  it("never removes a network's last mint: that is removing its Cashu wallet", async () => {
+    const { node } = track(engine());
+    node["settings"].mints = ["https://a.example", TEST_MINT];
+    vi.spyOn(node["wallet"], "balanceAt").mockResolvedValue(0);
+    await expect(node.walletRemoveMint({ url: TEST_MINT })).rejects.toThrow("This is the last mint of your Testnet Cashu wallet: remove the wallet to remove it");
+    await expect(node.walletRemoveMint({ url: "https://a.example", acceptLoss: true })).rejects.toThrow("last mint of your Mainnet Cashu wallet");
+    expect(node["settings"].mints).toEqual(["https://a.example", TEST_MINT]);
+  });
+
+  it("a mint that still waits for money is removed only once the person accepts it, and the wallet view says what it waits for", async () => {
+    const { node, view } = track(engine());
+    view.mockImplementation(async () => ({ mints: ["https://a.example", "https://b.example"].map((url) => ({ url, name: url, balance: 0, info: null })), balance: 0, history: [], feesPaid: 0 }));
+    node["settings"].mints = ["https://a.example", "https://b.example"];
+    vi.spyOn(node["wallet"], "balanceAt").mockResolvedValue(0);
+    const check = vi.spyOn(node["wallet"], "checkQuotes").mockResolvedValue(undefined as never);
+    const open = { quote: "q1", mint: "https://a.example", amount: 2_500, invoice: fakeInvoice(2_500, new Uint8Array(32).fill(7)), createdAt: Date.now(), expiresAt: Date.now() + 3_600_000 };
+    vi.spyOn(node["wallet"], "quotes").mockResolvedValue([open] as never);
+    await node["refreshWallet"]();
+    expect(node.getState().wallet.networks?.mainnet.mints.find((m) => m.url === "https://a.example")?.awaiting).toEqual([{ type: "cashu", kind: "invoice", amount: 2_500 }]);
+    expect(node.getState().wallet.networks?.mainnet.mints.find((m) => m.url === "https://b.example")).not.toHaveProperty("awaiting");
+
+    await expect(node.walletRemoveMint({ url: "https://a.example" })).rejects.toThrow("This mint still waits for money: an invoice for 2,500 sats, not paid yet. Confirm");
+    // What was already paid to it was asked for first.
+    expect(check).toHaveBeenCalledWith(["https://a.example"]);
+    expect(node["settings"].mints).toHaveLength(2);
+    await node.walletRemoveMint({ url: "https://a.example", acceptLoss: true });
+    expect((await db.getSettings()).mints).toEqual(["https://b.example"]);
+  });
+
+  it("a mint whose invoice was paid meanwhile is not removed, even once the person agreed: the sats are claimed first", async () => {
+    const { node } = track(engine());
+    node["settings"].mints = ["https://a.example", "https://b.example"];
+    const open = { quote: "q1", mint: "https://a.example", amount: 2_500, invoice: fakeInvoice(2_500, new Uint8Array(32).fill(8)), createdAt: Date.now(), expiresAt: Date.now() + 3_600_000 };
+    vi.spyOn(node["wallet"], "quotes").mockResolvedValue([open] as never);
+    const balance = vi.spyOn(node["wallet"], "balanceAt").mockResolvedValue(0);
+    // Asking the mint claims the paid invoice: the mint holds its sats now.
+    vi.spyOn(node["wallet"], "checkQuotes").mockImplementation(async () => { balance.mockResolvedValue(2_500); });
+    await expect(node.walletRemoveMint({ url: "https://a.example", acceptLoss: true })).rejects.toThrow("Move your sats out");
+    expect(node["settings"].mints).toHaveLength(2);
+  });
+
+  it("an invoice made on Receive is at once among what the wallet waits for, so removing the wallet lists it", async () => {
+    const { node } = track(engine());
+    node["settings"].mints = [TEST_MINT];
+    await node["refreshWallet"]();
+    expect(node["walletView"].networks?.testnet.awaiting).toEqual([]);
+    const quotes: unknown[] = [];
+    const invoice = fakeInvoice(30, new Uint8Array(32).fill(5));
+    vi.spyOn(node["wallet"], "quotes").mockImplementation(async () => quotes as never);
+    vi.spyOn(node["wallet"], "receiveLightning").mockImplementation(async () => {
+      const quote = { quote: "q30", mint: TEST_MINT, amount: 30, invoice, createdAt: Date.now(), expiresAt: Date.now() + 3_600_000 };
+      quotes.push(quote);
+      return quote as never;
+    });
+    await node.walletReceiveLightning({ amount: 30, via: "cashu", network: "testnet" });
+    await vi.waitFor(() => expect(node["walletView"].networks?.testnet.awaiting).toEqual([{ type: "cashu", kind: "invoice", amount: 30 }]));
   });
 
   it("the Cashu card goes to the mints; everything else to the Lightning source of its network", async () => {

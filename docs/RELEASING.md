@@ -21,7 +21,7 @@ npm run tauri signer generate -- -w ~/.ghostly/updater.key
 
 Then, once:
 
-- put the **public** key in `src-tauri/tauri.conf.json` under `plugins.updater.pubkey` (it is built into every app, which is how an app knows an update is ours);
+- put the **public** key in `apps/desktop/tauri.conf.json` under `plugins.updater.pubkey` (it is built into every app, which is how an app knows an update is ours);
 - add the **private** key as the `TAURI_SIGNING_PRIVATE_KEY` repository secret (`gh secret set TAURI_SIGNING_PRIVATE_KEY < ~/.ghostly/updater.key`) and its password as `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`.
 
 Keep the private key. Losing it means no app already out there can ever be updated again: every future release would be signed by a key they do not trust, and everyone would have to download the app by hand. Rotating it has the same cost, so back it up where you keep your other keys.
@@ -34,12 +34,12 @@ On a branch off `dev`:
 node scripts/bump-version.mjs 1.0.0
 ```
 
-That sets the version in the root `package.json` and every workspace's (the root `workspaces` field, so a new package under `packages/` moves too), the lock files, the extension manifest, the Tauri config, both crates, the website's fallback release (`website/lib/release.ts`) and the tables in `docs/INSTALLATION.md`, moves every entry of `changes/` into the changelog's `## Unreleased` (deleting the files), and turns that heading into `## 1.0.0`. `node scripts/changes.mjs --preview` shows the section beforehand.
+That sets the version in the root `package.json` and every workspace's (the root `workspaces` field, so a new package under `packages/` moves too), the lock files, the extension manifest, the Tauri config, both crates, the website's fallback release (`apps/website/lib/release.ts`) and the tables in `docs/INSTALLATION.md`, moves every entry of `changes/` into the changelog's `## Unreleased` (deleting the files), and turns that heading into `## 1.0.0`. `node scripts/changes.mjs --preview` shows the section beforehand.
 
 Then, by hand:
 
 - **CHANGELOG.md**: read the section as a user would. One line of context on top, the biggest news first, fixes apart.
-- **What else mentions features**: `README.md`, `docs/*.md`, and the website's copy in `website/content/` (home, roadmap, developers).
+- **What else mentions features**: `README.md`, `docs/*.md`, and the website's copy in `apps/website/content/` (home, roadmap, developers).
 - **Protocol changes** go in `docs/PROTOCOL.md` and the WISPs first. Additive only: older clients must keep working.
 
 Open a pull request into `dev` (`chore(release): 1.0.0`) and merge it once CI is green. CI does not run the app's e2e suites; to know early whether `dev` is ready, run the `E2E` workflow by hand from the Actions tab (or check the nightly `E2E (full)` run). Desktop's Linux harness cannot run on a Mac directly ([e2e/README.md](../e2e/README.md#desktop)); `npm run check:desktop-bundle` runs anywhere.
@@ -91,14 +91,14 @@ The workflow publishes with npm trusted publishing (OIDC), so no npm token is ke
 3. On npmjs.com, `@ghostlytools/cli` → Settings → Trusted Publisher → GitHub Actions: organization or user `MiguelMedeiros`, repository `ghostly`, workflow filename `npm-publish.yml`, no environment.
 4. In the same settings, choose "Require two-factor authentication and disallow tokens", then delete the `NPM_TOKEN` secret and revoke the token.
 
-The website's download panel asks GitHub for the latest published release (at most once an hour) and uses it once every installer it links to is attached; until then it keeps the version in `website/lib/release.ts`.
+The website's download panel asks GitHub for the latest published release (at most once an hour) and uses it once every installer it links to is attached; until then it keeps the version in `apps/website/lib/release.ts`.
 
 ## 5. Deploy
 
 Only after publishing.
 
 - **app.ghostly.tools** serves `main`. To move it to the release: `docker compose pull && docker compose up -d`, or build from the checkout with `GHOSTLY_BUILD=$(git rev-parse --short HEAD) docker compose up -d --build`. Without `GHOSTLY_BUILD` the image cannot say which commit it serves, and tabs already open are not told about the deploy.
-- **ghostly.tools**: rebuild the `website/` container. Its `/latest.json` answers with the version in `website/lib/release.ts`, which is how the extension learns about the release.
+- **ghostly.tools**: rebuild the `apps/website/` container. Its `/latest.json` answers with the version in `apps/website/lib/release.ts`, which is how the extension learns about the release.
 
 How each client picks it up:
 

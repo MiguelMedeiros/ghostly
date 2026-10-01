@@ -45,7 +45,7 @@ export const EVERYTHING = ["package.json", "package-lock.json", "patches/**"];
  * The unit test projects. `sources`: a change there can change what these tests import, so `vitest related` looks
  * at it. `whole`: a change there (config, setup, install) is not in any import graph, so the project runs whole.
  * `tests`: the project's test files (its vitest `include`). A test there may import a file outside `sources` by
- * relative path (packages/browser/test/chatConnection.test.ts imports src/components/ChatConnection.tsx), so a
+ * relative path (packages/browser/test/chatConnection.test.ts imports apps/ui/src/components/ChatConnection.tsx), so a
  * change outside `sources` still runs the tests whose relative imports reach it (testsReaching).
  */
 export const UNIT_PROJECTS = [
@@ -68,16 +68,16 @@ export const UNIT_PROJECTS = [
     tests: ["packages/sdk/test/**"],
   },
   {
-    name: "extension", cwd: "extension", args: [],
-    sources: ["packages/core/src/**", "packages/browser/src/**", "packages/react/src/**", "src/**", "extension/**"],
-    whole: ["extension/package.json", "extension/vitest.config.ts", "packages/browser/vite-plugin.ts", "packages/core/src/index.ts", "vitest.shared.ts"],
-    tests: ["extension/test/**"],
+    name: "extension", cwd: "apps/extension", args: [],
+    sources: ["packages/core/src/**", "packages/browser/src/**", "packages/react/src/**", "apps/ui/src/**", "apps/extension/**"],
+    whole: ["apps/extension/package.json", "apps/extension/vitest.config.ts", "packages/browser/vite-plugin.ts", "packages/core/src/index.ts", "vitest.shared.ts"],
+    tests: ["apps/extension/test/**"],
   },
   {
-    name: "ui", cwd: ".", args: ["-c", "vitest.ui.config.ts"],
-    sources: ["packages/core/src/**", "packages/browser/src/**", "packages/react/**", "src/**"],
-    whole: ["vitest.ui.config.ts", "src/test/setup.ts", "packages/browser/vite-plugin.ts", "packages/core/src/index.ts", "vitest.shared.ts"],
-    tests: ["src/**", "packages/react/test/**"],
+    name: "ui", cwd: ".", args: ["-c", "apps/ui/vitest.ui.config.ts"],
+    sources: ["packages/core/src/**", "packages/browser/src/**", "packages/react/**", "apps/ui/src/**"],
+    whole: ["apps/ui/vitest.ui.config.ts", "apps/ui/src/test/setup.ts", "packages/browser/vite-plugin.ts", "packages/core/src/index.ts", "vitest.shared.ts"],
+    tests: ["apps/ui/src/**", "packages/react/test/**"],
   },
   {
     name: "matrix", cwd: ".", args: ["-c", "e2e/matrix/vitest.config.ts"],
@@ -87,7 +87,7 @@ export const UNIT_PROJECTS = [
   },
   {
     name: "scripts", cwd: ".", args: ["-c", "scripts/vitest.config.ts"],
-    sources: ["scripts/**", "e2e/features.json", "web/nginx.conf"],
+    sources: ["scripts/**", "e2e/features.json", "apps/web/nginx.conf"],
     whole: ["scripts/vitest.config.ts", "vitest.shared.ts"],
     tests: ["scripts/test/**"],
   },
@@ -105,7 +105,7 @@ export const UNIT_PROJECTS = [
 
 /** `npm run lint`'s scope: what eslint is given, and what makes the whole lint run. */
 export const LINT = {
-  scope: ["src/**", "packages/**", "extension/src/**", "extension/test/*.ts", "web/src/**", "e2e/**", "examples/sdk-adapter/src/**", "examples/sdk-adapter/test/**"],
+  scope: ["apps/ui/src/**", "packages/**", "apps/extension/src/**", "apps/extension/test/*.ts", "apps/web/src/**", "e2e/**", "examples/sdk-adapter/src/**", "examples/sdk-adapter/test/**"],
   ext: /\.(?:[cm]?[jt]sx?)$/,
   whole: ["eslint.config.mjs"],
 };
@@ -118,24 +118,23 @@ export const TYPECHECKS = [
   { name: "core", cmd: ["npx", "tsc", "--noEmit", "-p", "packages/core/tsconfig.json"], sources: ["packages/core/**"] },
   { name: "browser", cmd: ["npx", "tsc", "--noEmit", "-p", "packages/browser/tsconfig.json"], sources: ["packages/core/src/**", "packages/browser/**"] },
   { name: "sdk", cmd: ["npx", "tsc", "--noEmit", "-p", "packages/sdk/tsconfig.json"], sources: ["packages/core/src/**", "packages/browser/src/**", "packages/sdk/**"] },
-  { name: "ui (root tsconfig)", cmd: ["npx", "tsc", "--noEmit"], sources: ["packages/core/src/**", "packages/browser/src/**", "packages/react/**", "src/**", "tsconfig.json", "vite-env.d.ts"] },
-  { name: "extension", cmd: ["npx", "tsc", "--noEmit", "-p", "extension/tsconfig.json"], sources: ["packages/core/src/**", "packages/browser/src/**", "packages/react/src/**", "src/**", "extension/src/**", "extension/tsconfig.json"] },
-  { name: "extension tests", cmd: ["npx", "tsc", "--noEmit", "-p", "extension/tsconfig.test.json"], sources: ["packages/core/src/**", "packages/browser/src/**", "src/**", "extension/**"] },
-  { name: "web", cmd: ["npx", "tsc", "--noEmit", "-p", "web/tsconfig.json"], sources: ["packages/core/src/**", "packages/browser/src/**", "packages/react/src/**", "src/**", "web/**"] },
+  { name: "ui (root tsconfig)", cmd: ["npx", "tsc", "--noEmit"], sources: ["packages/core/src/**", "packages/browser/src/**", "packages/react/**", "apps/ui/src/**", "tsconfig.json", "apps/ui/vite-env.d.ts"] },
+  { name: "extension", cmd: ["npx", "tsc", "--noEmit", "-p", "apps/extension/tsconfig.json"], sources: ["packages/core/src/**", "packages/browser/src/**", "packages/react/src/**", "apps/ui/src/**", "apps/extension/src/**", "apps/extension/tsconfig.json"] },
+  { name: "extension tests", cmd: ["npx", "tsc", "--noEmit", "-p", "apps/extension/tsconfig.test.json"], sources: ["packages/core/src/**", "packages/browser/src/**", "apps/ui/src/**", "apps/extension/**"] },
+  { name: "web", cmd: ["npx", "tsc", "--noEmit", "-p", "apps/web/tsconfig.json"], sources: ["packages/core/src/**", "packages/browser/src/**", "packages/react/src/**", "apps/ui/src/**", "apps/web/**"] },
   { name: "e2e", cmd: ["npx", "tsc", "--noEmit", "-p", "e2e"], sources: ["e2e/**", "packages/core/src/**"] },
 ];
 export const TYPECHECK_WHOLE = ["tsconfig.json", "packages/*/tsconfig*.json"];
 
-/** The Rust crates, as CI's Tauri and CLI jobs check them. */
+/** The Rust crates, as CI's Tauri job checks them. */
 export const RUST = [
-  { name: "src-tauri", sources: ["src-tauri/**", "native-transports/**", "Cargo.toml", "Cargo.lock"] },
-  { name: "cli", sources: ["cli/**", "Cargo.toml", "Cargo.lock"] },
+  { name: "desktop", sources: ["apps/desktop/**", "native/transports/**", "Cargo.toml", "Cargo.lock"] },
 ];
 
 /** The Playwright config of the web and extension projects: a change there can change every spec. */
 export const E2E_WHOLE = ["e2e/playwright.config.ts", "e2e/tsconfig.json"];
 /** Desktop specs run through tauri-driver on Linux and Windows only (e2e/playwright.desktop.config.ts). */
-export const DESKTOP = ["e2e/desktop/**", "e2e/playwright.desktop.config.ts", "e2e/support/desktop.ts", "src-tauri/**", "src/desktop/**", "native-transports/**"];
+export const DESKTOP = ["e2e/desktop/**", "e2e/playwright.desktop.config.ts", "e2e/support/desktop.ts", "apps/desktop/**", "apps/ui/src/desktop/**", "native/transports/**"];
 
 const isTest = (p) => /\.test\.[cm]?[jt]sx?$/.test(p);
 /** Prose: no test imports it and no compiler reads it. */

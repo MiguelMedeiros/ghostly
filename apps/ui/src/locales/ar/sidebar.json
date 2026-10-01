@@ -1,0 +1,40 @@
+{
+  "account": "الحساب",
+  "chats": "المحادثات",
+  "copyInvite": "نسخ رمز الدعوة",
+  "deleteAllChats": "حذف جميع المحادثات",
+  "deleteChat": "حذف المحادثة",
+  "group": {
+    "adminAnswered": "أجاب تطبيق المشرف…",
+    "answerFailed": "لم ينجح ذلك. حاول مرة أخرى.",
+    "invitedBy": "دعاك {{contact}} · {{members}}",
+    "invitedByUnknown": "دعتك جهة اتصال · {{members}}",
+    "inviterAway": "{{contact}} غير متصل بعد. حاول مرة أخرى بعد لحظة.",
+    "inviterAwayUnknown": "جهة الاتصال التي دعتك غير متصلة بعد. حاول مرة أخرى بعد لحظة.",
+    "letting": "أحد الأعضاء يسمح لك بالدخول…",
+    "waitingAdmin": "في انتظار تطبيق المشرف…",
+    "waitingIn": "في انتظار السماح لك بالدخول…"
+  },
+  "join": "انضمام",
+  "joinChat": "الانضمام إلى محادثة",
+  "new": "جديد",
+  "newChat": "محادثة جديدة",
+  "newMenu": {
+    "chat": "محادثة",
+    "chatHint": "شخص واحد، بدعوة",
+    "group": "مجموعة",
+    "groupHint": "رابط يمكن لأي شخص فتحه",
+    "label": "إنشاء مجموعة أو محادثة"
+  },
+  "noChats": "لا توجد محادثات",
+  "noResults": "لا توجد نتائج",
+  "pinned": "مثبّتة",
+  "quiet": "الهدوء يعم هنا...",
+  "quietHint": "حان وقت إخافة أحدهم! 👻",
+  "searchPlaceholder": "بحث في المحادثات...",
+  "settings": "الإعدادات",
+  "sharedIdentity": "شارك هوية",
+  "skipToContent": "انتقل إلى المحتوى",
+  "startChat": "محادثة جديدة",
+  "unread": "رسائل غير مقروءة"
+}

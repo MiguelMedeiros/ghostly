@@ -1,0 +1,77 @@
+{
+  "buttons": {
+    "answers": "الإجابات",
+    "chosen": "مُختارة",
+    "closed": "مغلقة",
+    "failed": "تعذّر الإرسال",
+    "jump": "الانتقال إلى السؤال",
+    "sending": "جارٍ الإرسال…"
+  },
+  "panel": {
+    "activeCount": "{{count}} نشطة",
+    "allOk": "كلها ناجحة",
+    "button": "المهام",
+    "buttonCount": "المهام، {{count}} نشطة",
+    "close": "إغلاق",
+    "empty": "لا توجد مهام جارية الآن",
+    "failedCount": "{{count}} فشلت",
+    "finishedCount": "منتهية ({{count}})",
+    "idle": "لا شيء جارٍ",
+    "info": "تنشر الروبوتات هذه البطاقات وتحدّثها. اضغط على واحدة للانتقال إليها في المحادثة.",
+    "nextRun": "التالي {{when}}",
+    "routinesMany": "{{count}} روتينات",
+    "routinesOne": "روتين واحد",
+    "title": "المهام"
+  },
+  "routine": {
+    "cron": "Cron",
+    "label": "روتين: {{name}}، {{state}}",
+    "lastRun": "آخر تشغيل: {{result}}",
+    "next": "التالي {{when}}",
+    "noRuns": "لم يعمل بعد",
+    "result": {
+      "failed": "فشل",
+      "ok": "نجح",
+      "skipped": "تم التخطي"
+    },
+    "runs": "آخر التشغيلات",
+    "schedule": "الجدول",
+    "state": {
+      "active": "نشط",
+      "paused": "متوقف مؤقتًا"
+    }
+  },
+  "task": {
+    "branch": "الفرع:",
+    "elapsed": {
+      "blocked": "متوقفة منذ {{duration}}",
+      "queued": "في الانتظار منذ {{duration}}",
+      "running": "قيد التنفيذ منذ {{duration}}",
+      "took": "استغرقت {{duration}}"
+    },
+    "item": {
+      "done": "تم",
+      "failed": "فشل",
+      "pending": "للتنفيذ",
+      "running": "قيد التنفيذ",
+      "skipped": "تم التخطي"
+    },
+    "label": "مهمة: {{title}}، {{status}}",
+    "labelProgress": "مهمة: {{title}}، {{status}}، {{progress}}%",
+    "now": "الآن:",
+    "pr": "PR #{{number}}",
+    "prNoNumber": "طلب دمج",
+    "progress": "التقدم",
+    "started": "بدأت {{ago}}",
+    "status": {
+      "blocked": "متوقفة",
+      "cancelled": "ملغاة",
+      "done": "مكتملة",
+      "failed": "فشلت",
+      "queued": "في الانتظار",
+      "running": "قيد التنفيذ"
+    },
+    "steps": "{{done}} من {{total}} خطوات",
+    "updated": "حُدّثت {{ago}}"
+  }
+}

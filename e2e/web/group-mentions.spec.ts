@@ -1,4 +1,4 @@
-import { expect, openProfilePage, say, test, type Peer } from "../support/fixtures";
+import { chat, expect, openProfilePage, say, test, type Peer } from "../support/fixtures";
 
 /**
  * Mentions in a group (WISP 9xx § Mentions) between three browsers that never pair. Alice picks Bob from the
@@ -11,7 +11,7 @@ import { expect, openProfilePage, say, test, type Peer } from "../support/fixtur
  * stand-in Notification keeps what it was asked to show, and the clock is Playwright's.
  */
 
-/** Notes only the message sound, and only a mention's own sound, play (src/lib/sounds.ts). */
+/** Notes only the message sound, and only a mention's own sound, play (apps/ui/src/lib/sounds.ts). */
 const MESSAGE_NOTE = 880;
 const MENTION_NOTE = 1480;
 
@@ -100,7 +100,10 @@ async function mentionBob(alice: Peer, text: string): Promise<void> {
   await expect(box).toHaveValue("@Bob ");
   await box.pressSequentially(text);
   await box.press("Enter");
-  await expect(groupChat(alice).getByText(text)).toBeVisible();
+  // In the timeline, and the composer empties. The composer is inside the group chat too, and for a moment after
+  // Enter it still holds the words while the message is already shown: a text search of the whole chat finds both.
+  await expect(chat(alice).getByText(text)).toBeVisible();
+  await expect(box).toHaveValue("");
 }
 
 test("three members: A mentions B, B's muted group still notifies, C's stays quiet", { tag: ["@feature:groups.mentions", "@feature:groups.mentions.notify", "@feature:groups.protocol.mentions", "@feature:app.attention.cues"] }, async ({ peer }) => {
@@ -119,14 +122,17 @@ test("three members: A mentions B, B's muted group still notifies, C's stays qui
 
   await join(bob, url);
   await join(carol, url);
-  await expect(alice.page.getByTestId("group-members")).toContainText("3 members", { timeout: 120_000 });
+  // Bob too: Carol's admission starts the epoch she was given the secret of. What Bob says before he has it goes out
+  // under the epoch before, which Carol never reads (a newcomer reads only what comes after it).
+  for (const p of [alice, bob]) await expect(p.page.getByTestId("group-members")).toContainText("3 members", { timeout: 120_000 });
   // A community member's name travels with what they say: each says hello, so the others know them by name.
   await say(bob, "hi from Bob");
   await say(carol, "hi from Carol");
-  await expect(groupChat(alice).getByText("hi from Carol")).toBeVisible({ timeout: 120_000 });
-  await expect(groupChat(alice).getByText("hi from Bob")).toBeVisible({ timeout: 120_000 });
-  await expect(groupChat(bob).getByText("hi from Carol")).toBeVisible({ timeout: 120_000 });
-  await expect(groupChat(carol).getByText("hi from Bob")).toBeVisible({ timeout: 120_000 });
+  // Looked for in the timeline: for a second the screen reader's line beside it says the same words ("Bob: hi from Bob").
+  await expect(chat(alice).getByText("hi from Carol")).toBeVisible({ timeout: 120_000 });
+  await expect(chat(alice).getByText("hi from Bob")).toBeVisible({ timeout: 120_000 });
+  await expect(chat(bob).getByText("hi from Carol")).toBeVisible({ timeout: 120_000 });
+  await expect(chat(carol).getByText("hi from Bob")).toBeVisible({ timeout: 120_000 });
 
   // Bob and Carol mute the group and go back to the list.
   for (const p of [bob, carol]) {

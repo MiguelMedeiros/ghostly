@@ -11,7 +11,7 @@ import { chatPayments, paymentCard } from "../support/payments";
  * these tests need the internet only when nobody gave them a mint.
  * A new profile has no wallet: each test makes the Testnet Cashu wallets it needs with New, before the two meet.
  */
-test.describe("wallet", { tag: "@network" }, () => {
+test.describe("wallet", () => {
   test.describe.configure({ retries: 2 });
 
   const balance = async (peer: Peer) => {
@@ -54,7 +54,8 @@ test.describe("wallet", { tag: "@network" }, () => {
     // The Cashu card turned over; the mint that holds the sats pays, so there is no mint to pick.
     await alice.page.getByTestId("payment-send").click();
     const directReview = alice.page.getByTestId("payment-composer").getByTestId("payment-review");
-    await expect(directReview).toContainText("cashu-test");
+    await expect(directReview.getByTestId("review-rail")).toHaveText("Cashu");
+    await expect(directReview).toHaveAttribute("data-network", "testnet");
     await showCashu(bob);
     await expect(bob.page.getByTestId("wallet-balance")).toHaveText(/^0\s*test sats/);
     await directReview.getByRole("button", { name: "Approve payment" }).click();
@@ -74,7 +75,8 @@ test.describe("wallet", { tag: "@network" }, () => {
     await bob.page.getByTestId("payment-request").click();
     await alice.page.getByTestId("payment-pay").click();
     const requestReview = chat(alice).getByTestId("payment-review");
-    await expect(requestReview).toContainText("cashu-test");
+    await expect(requestReview.getByTestId("review-rail")).toHaveText("Cashu");
+    await expect(requestReview).toHaveAttribute("data-network", "testnet");
     await requestReview.getByRole("button", { name: "Approve payment" }).click();
     for (const p of [alice, bob]) await expect(chat(p).getByTestId("payment-bubble").filter({ hasText: "equest" }).getByTestId("payment-state")).toHaveText(/Paid/);
     await showCashu(bob);
@@ -91,7 +93,7 @@ test.describe("wallet", { tag: "@network" }, () => {
     const fees = Number((await alice.page.getByTestId("wallet-fees-paid").textContent())!.match(/(\d+) (?:test )?sats/)![1]);
     await expect.poll(() => balance(alice), "balance = received - sent - fees, to the sat").toBe(TEST_COINS - 21 - 10 - fees);
     await alice.page.screenshot({ path: testInfo.outputPath("cashu-chat-history.png"), fullPage: true });
-    await expect(alice.page.getByTestId("mint-fees").filter({ hasText: "0.1 sat per proof" })).toBeVisible();
+    await expect(alice.page.getByTestId("mint-fees").filter({ hasText: "0.1 test sat per proof" })).toBeVisible();
   });
 
   test("test-mint ecash reaches the contact's Testnet wallet and never their Mainnet one", { tag: ["@feature:payments.cashu.test-sats", "@feature:payments.cashu.send", "@feature:wallet.instances.networks"] }, async ({ peer }) => {

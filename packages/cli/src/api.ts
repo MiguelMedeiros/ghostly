@@ -1,14 +1,16 @@
-import { inviteLink, MENTION_EVERYONE, sanitizeTypingStatus, TYPING_KINDS, TYPING_STATUS_MAX, type GroupMention, type PairedTransport, type TypingKind } from "@ghostly/core";
+import { inviteLink, LIMITS, MENTION_EVERYONE, sanitizeTypingStatus, TYPING_KINDS, TYPING_STATUS_MAX, type GroupMention, type PairedTransport, type TypingKind } from "@ghostly/core";
 import type { GroupView, Settings, StoredMessage } from "@ghostly/browser/shared/types";
-import { findSecret } from "../../../src/lib/parse/secrets";
+import { findSecret } from "../../../apps/ui/src/lib/parse/secrets";
 import { ENGINE_METHODS, ENGINE_READS } from "./engineMethods";
 import { CliError } from "./errors";
-import type { GhostlyEvent } from "./events";
 import {
-  bool, chatOf, findChat, findGroup, groupOf, list, node, num, oneOf, state, str, waitForState,
+  bool, chatOf, chatOrGroup, findChat, groupOf, list, node, num, oneOf, state, str, waitForState,
   type ApiContext, type Method, type Params,
 } from "./apiKit";
 import { FILE_METHODS } from "./files";
+import { waitForEdit, waitForGroupFrame, waitForMessage } from "./waits";
+import { STATUS_CARD_METHODS } from "./statusCards";
+import { BUTTON_METHODS, buttonsCard, pressable } from "./buttons";
 import { HOLD_MAX_MINUTES, holdChat, holdOf, releaseHold } from "./holds";
 import { endTyping, keepTyping, sayTyping } from "./typing";
 import { GROUP_ADMIN_METHODS } from "./groupAdmin";
@@ -17,68 +19,15 @@ import { SERVICE_METHODS } from "./services";
 import { BACKUP_METHODS } from "./backup";
 import { CALL_METHODS } from "./calls/api";
 import { WALLET_METHODS } from "./wallets";
-import { chatDetailsJson, chatJson, groupJson, groupMessageJson, messageJson, type MessageJson } from "./views";
-
-const DELIVERY_RANK: Record<string, number> = { sending: 0, waiting: 1, queued: 1, held: 2, sent: 2, delivered: 3 };
-
-/** Waits until the contact confirmed the latest edit of one of my messages (it is no longer pending). */
-async function waitForEdit(ctx: ApiContext, chat: string, messageId: string, ms: number): Promise<StoredMessage> {
-  const until = Date.now() + ms;
-  for (;;) {
-    const message = (await node(ctx).getMessages(chat)).find((m) => m.id === messageId);
-    if (!message) throw new CliError("not_found", `No message ${messageId} in this chat`);
-    if (!message.edit?.pending) return message;
-    if (Date.now() >= until) throw new CliError("timeout", `Timed out after ${Math.round(ms / 1000)} s: the contact has not confirmed the edit yet. It goes by itself once the chat is live and the contact's app shows edits, while this profile is online`, { messageId, edits: message.edit.seq });
-    await new Promise((resolve) => setTimeout(resolve, 250));
-  }
-}
+import { chatDetailsJson, chatJson, chatMessageJson, groupJson, groupMessageJson, messageJson, type MessageJson } from "./views";
 
 /**
- * Waits until an edge took my group message, or its edit number `edit` (WISP 9xx: a group has no receipts, so this is
- * as far as the author sees): a member's edge in a private group, an edge to one of my hubs in a community.
+ * A text past what a chat or a group carries (16 KiB of UTF-8, as the engine counts it: trimmed) is refused before the
+ * engine is asked, with a code that says it never goes as it is, not "unavailable", which reads as "try later".
  */
-async function waitForGroupFrame(ctx: ApiContext, groupId: string, messageId: string, edit: number | undefined, ms: number): Promise<number> {
-  const until = Date.now() + ms;
-  for (;;) {
-    const taken = node(ctx).groupTaken({ groupId, messageId, ...(edit ? { edit } : {}) });
-    if (taken > 0) return taken;
-    if (Date.now() >= until) throw new CliError("timeout", `Timed out after ${Math.round(ms / 1000)} s: no member's edge took it yet. It stays in the group and goes when one opens, while this profile is online`, { messageId, ...(edit ? { edits: edit } : {}) });
-    await new Promise((resolve) => setTimeout(resolve, 250));
-  }
-}
-
-/** Waits until a message of mine reached `target` (`sent`: on its way to the contact; `delivered`: acknowledged). */
-async function waitForMessage(ctx: ApiContext, chat: string, messageId: string, target: "sent" | "delivered", ms: number): Promise<StoredMessage> {
-  const want = DELIVERY_RANK[target];
-  const look = (message: StoredMessage | undefined) => {
-    if (!message) return undefined;
-    const delivery = message.delivery ?? "sent";
-    if (delivery === "failed") throw new CliError("engine", message.deliveryError ?? "The message could not be sent", { messageId, delivery });
-    return (DELIVERY_RANK[delivery] ?? 0) >= want ? message : undefined;
-  };
-  return new Promise<StoredMessage>((resolve, reject) => {
-    let settled = false;
-    const finish = (error: unknown, message?: StoredMessage) => {
-      if (settled) return;
-      settled = true; clearTimeout(timer); off();
-      if (error) reject(error); else resolve(message!);
-    };
-    const check = (last = false) => void node(ctx).getMessages(chat).then((messages) => {
-      const message = messages.find((m) => m.id === messageId);
-      try {
-        const done = look(message);
-        if (done) finish(null, done);
-        else if (last) finish(new CliError("timeout", `Timed out after ${Math.round(ms / 1000)} s: the message is ${message?.delivery ?? "not sent yet"} and still goes by itself while this profile is online`, { messageId, delivery: message?.delivery ?? null }));
-      } catch (error) { finish(error); }
-    }, finish);
-    const timer = setTimeout(() => check(true), ms);
-    // Any event naming the message: a message first seen already delivered comes as `message.sent`, never as
-    // `message.delivery`. Listening before the first read leaves no gap for a change to slip through.
-    const off = ctx.hub.onEvent((event: GhostlyEvent) => {
-      if (event.chat === chat && (event.messageId === messageId || (event.message as { id?: string } | undefined)?.id === messageId)) check();
-    });
-    check();
-  });
+function checkTextSize(text: string): void {
+  const bytes = new TextEncoder().encode(text.trim()).length;
+  if (bytes > LIMITS.maxChatMessageBytes) throw new CliError("bad_request", `Message exceeds ${LIMITS.maxChatMessageBytes} UTF-8 bytes (${bytes}): shorten it, or send it as a file`, { bytes, max: LIMITS.maxChatMessageBytes });
 }
 
 // ---------- settings ----------
@@ -145,6 +94,8 @@ export function mentionsFor(text: string, refs: readonly string[], group: GroupV
 const METHODS: Record<string, Method> = {
   ...WALLET_METHODS,
   ...FILE_METHODS,
+  ...STATUS_CARD_METHODS,
+  ...BUTTON_METHODS,
   ...GROUP_ADMIN_METHODS,
   ...IDENTITY_METHODS,
   ...SERVICE_METHODS,
@@ -234,25 +185,28 @@ const METHODS: Record<string, Method> = {
   },
   async "chat.history"(ctx, params) {
     const link = chatOf(ctx, params);
-    return historyOf(ctx, link.id, params);
+    return historyOf(ctx, link.id, params, (m) => chatMessageJson(m, link));
   },
   async "chat.send"(ctx, params) {
     const link = chatOf(ctx, params);
     const text = str(params, "text", true);
+    checkTextSize(text);
     if (!bool(params, "force")) {
       const secret = findSecret(text);
       if (secret) throw new CliError("confirm", `The text looks like ${secret.kind === "cashu" ? "a Cashu token (money anyone who reads it can take)" : "a secret (a seed or a private key)"}; send it with --force if you mean to`, { kind: secret.kind });
     }
     const wait = oneOf(params, "wait", ["none", "sent", "delivered"] as const, "none");
     const replyTo = str(params, "reply");
+    // Buttons under the text (WISP 4xx · Message Buttons): the text is the question, and what older apps show.
+    const card = buttonsCard(params);
     // A kept `typing --for` ends with the message (the engine says stop with it).
     endTyping(ctx, { linkId: link.id }, false);
-    const result = await node(ctx).sendMessage({ linkId: link.id, text, ...(replyTo ? { replyTo } : {}) });
+    const result = await node(ctx).sendMessage({ linkId: link.id, text, ...(replyTo ? { replyTo } : {}), ...(card ? { card } : {}) });
     if (result.error) throw new CliError(result.refused ? "refused" : "unavailable", result.error);
     if (!result.messageId) throw new CliError("bad_request", "Nothing to send");
     let message = (await node(ctx).getMessages(link.id)).find((m) => m.id === result.messageId);
     if (wait !== "none") message = await waitForMessage(ctx, link.id, result.messageId, wait, num(params, "timeout", 30, { min: 1, max: 3600 }) * 1000);
-    return { chat: link.id, messageId: result.messageId, delivery: message?.delivery ?? null };
+    return { chat: link.id, messageId: result.messageId, delivery: message?.delivery ?? null, ...(card ? { buttons: card.id, card, pressable: pressable(link) } : {}) };
   },
   /**
    * WISP 400 § Edits: the whole new text of one of my texts in a 1:1 chat. It shows here at once and reaches the contact
@@ -268,7 +222,7 @@ const METHODS: Record<string, Method> = {
     }
     const wait = oneOf(params, "wait", ["none", "confirmed"] as const, "none");
     const result = await node(ctx).editMessage({ linkId: link.id, messageId, text });
-    if (result.error) throw new CliError(result.refused ? "refused" : "unavailable", result.error);
+    if (result.error) throw editRefused(await node(ctx).getMessages(link.id), messageId, "chat", result.error, result.refused);
     const id = result.messageId ?? messageId;
     let message = (await node(ctx).getMessages(link.id)).find((m) => m.id === id);
     if (wait === "confirmed" && message?.edit?.pending) message = await waitForEdit(ctx, link.id, id, num(params, "timeout", 30, { min: 1, max: 3600 }) * 1000);
@@ -456,6 +410,7 @@ const METHODS: Record<string, Method> = {
   async "group.send"(ctx, params) {
     const group = groupOf(ctx, params);
     const text = str(params, "text", true);
+    checkTextSize(text);
     if (!bool(params, "force")) {
       const secret = findSecret(text);
       if (secret) throw new CliError("confirm", "The text looks like a secret or a Cashu token; send it with --force if you mean to", { kind: secret.kind });
@@ -463,14 +418,15 @@ const METHODS: Record<string, Method> = {
     const mentions = mentionsFor(text, list(params, "mentions"), group);
     const replyTo = str(params, "reply");
     const wait = oneOf(params, "wait", ["none", "sent"] as const, "none");
+    const card = buttonsCard(params);
     // A kept `group typing --for` ends with the message (the engine says stop with it).
     endTyping(ctx, { groupId: group.id }, false);
-    const result = await node(ctx).sendGroupMessage({ groupId: group.id, text, ...(mentions.length ? { mentions } : {}), ...(replyTo ? { replyTo } : {}) });
+    const result = await node(ctx).sendGroupMessage({ groupId: group.id, text, ...(mentions.length ? { mentions } : {}), ...(replyTo ? { replyTo } : {}), ...(card ? { card } : {}) });
     if (result.error) throw new CliError("unavailable", result.error);
     const messageId = result.messageId ?? null;
     // `edges`: how many took it so far (none yet is not an error: it goes when one opens).
     const edges = messageId ? (wait === "sent" ? await waitForGroupFrame(ctx, group.id, messageId, undefined, num(params, "timeout", 30, { min: 1, max: 3600 }) * 1000) : node(ctx).groupTaken({ groupId: group.id, messageId })) : 0;
-    return { group: group.id, messageId, sent: true, edges };
+    return { group: group.id, messageId, sent: true, edges, ...(card ? { buttons: card.id, card } : {}) };
   },
   /**
    * WISP 9xx § Edits: the whole new text of one of my messages in a group. It shows here at once and goes to the members
@@ -488,7 +444,7 @@ const METHODS: Record<string, Method> = {
     const mentions = mentionsFor(text, list(params, "mentions"), group);
     const wait = oneOf(params, "wait", ["none", "sent"] as const, "none");
     const result = await node(ctx).editMessage({ linkId: `group:${group.id}`, messageId, text, ...(mentions.length ? { mentions } : {}) });
-    if (result.error) throw new CliError(result.refused ? "refused" : "unavailable", result.error);
+    if (result.error) throw editRefused(await node(ctx).groupMessages({ groupId: group.id }), messageId, "group", result.error, result.refused);
     const message = (await node(ctx).groupMessages({ groupId: group.id })).find((m) => m.id === messageId);
     const edits = message?.edit?.seq ?? 0;
     // An edit waiting for the pace is not said yet: `--wait sent` waits for that too, then for an edge to take it.
@@ -576,22 +532,6 @@ const METHODS: Record<string, Method> = {
 };
 
 /** Reacts to a message of a chat or a group (`group:<id>`): `emoji`, or `remove` for "" (WISP 400 § Reactions). */
-/**
- * A chat or a group, as `forward` names them: `group:<id>` is a group; anything else a chat first (id, prefix or name),
- * then a group. `linkId` is what the engine calls it.
- */
-function chatOrGroup(ctx: ApiContext, ref: string): { id: string; linkId: string; group: boolean } {
-  if (ref.startsWith("group:")) { const group = findGroup(state(ctx).groups, ref.slice("group:".length)); return { id: group.id, linkId: `group:${group.id}`, group: true }; }
-  try {
-    const link = findChat(state(ctx).links, ref);
-    return { id: link.id, linkId: link.id, group: false };
-  } catch (error) {
-    if (!(error instanceof CliError) || error.code !== "not_found") throw error;
-    const group = findGroup(state(ctx).groups, ref);
-    return { id: group.id, linkId: `group:${group.id}`, group: true };
-  }
-}
-
 async function react(ctx: ApiContext, linkId: string, params: Params): Promise<{ messageId: string; emoji: string | null; removed: boolean }> {
   const messageId = str(params, "message", true);
   const removed = bool(params, "remove");
@@ -616,6 +556,17 @@ function typingWord(params: Params, typing: boolean): { kind: TypingKind; status
   const status = sanitizeTypingStatus(oneLine);
   if (!status) throw new CliError("bad_request", "status: plain text, with no link or markup");
   return { kind, status };
+}
+
+/**
+ * An edit the engine refused. A message that is not in the chat or group at all is `not_found` (exit 3), naming the id
+ * to give, as `button update` and `task update` do; before, a mistyped or lost id read "Only your own text messages
+ * can be edited" (`refused`, exit 1), as if the message were someone else's.
+ */
+function editRefused(messages: readonly StoredMessage[], ref: string, where: "chat" | "group", error: string, refused: boolean | undefined): CliError {
+  if (refused && !messages.some((m) => m.id === ref || m.wireId === ref))
+    return new CliError("not_found", `No message ${JSON.stringify(ref)} in this ${where}: give the messageId ${where === "group" ? "group send" : "send"} printed`);
+  return new CliError(refused ? "refused" : "unavailable", error);
 }
 
 /**

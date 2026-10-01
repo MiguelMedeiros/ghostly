@@ -96,7 +96,7 @@ built-ins. See [docs/SDK.md](../../../../docs/SDK.md) and `packages/browser/src/
    ```
 
 2. Add it to `IDENTITY_PROVIDERS` in [registry.ts](registry.ts), the order is the picker's, and give it a
-   mark in `src/components/identities/ProviderIcons.tsx` (`identityProviderIcons.test.tsx` fails for a provider without one).
+   mark in `apps/ui/src/components/identities/ProviderIcons.tsx` (`identityProviderIcons.test.tsx` fails for a provider without one).
    Those are the only shared lines you touch.
 3. Tests: run `describeIdentityProof` from [contractSuite.ts](contractSuite.ts)
    (`test/helpers/identityProofContract.ts` re-exports it) against your provider (see
@@ -105,7 +105,7 @@ built-ins. See [docs/SDK.md](../../../../docs/SDK.md) and `packages/browser/src/
 4. Add a row to the table at the end of this file, and to WISP 300's implementation section.
 
 The UI renders every provider from its descriptor: the picker card (label, summary, category, its mark from
-`src/components/identities/ProviderIcons.tsx`), the details view (description, limits), the subject
+`apps/ui/src/components/identities/ProviderIcons.tsx`), the details view (description, limits), the subject
 field (`subject`), the validity choice (`validity`), the signer flow by `kind`, the badges (`short`,
 `category`, `source`, `attester`). No component to write.
 
@@ -270,6 +270,6 @@ conversation"), from these same frames: nothing is added to the wire. UI: `Ident
 | `ssh` | self-custodied | `ssh-keygen -Y sign -n ghostly` (external tool) | nothing | experimental |
 | `ssh-github` | self-custodied | same | `api.github.com/users/<login>/keys`; re-checked after 10 min | experimental |
 | `ssh-gitlab` | self-custodied | same | `gitlab.com/api/v4/users?username=` then `/users/<id>/keys`; re-checked after 10 min | experimental |
-| `atproto` | self-custodied | in-app: the handle, then AT Protocol OAuth on the person's own server (PAR, PKCE, DPoP; scope `repo:tools.ghostly.proof` create/delete only, or full access on older servers), which writes one record keyed by the proof key; `unpublish` deletes it | the PLC directory or the did:web host (DID document), the account's PDS (`com.atproto.sync.getRecord`: CAR, commit signature, MST path), DoH or the handle's website (handle back-check); re-checked after an hour | experimental; real servers need the client metadata served at `ghostly.tools/oauth/client-metadata.json` (from `website/public/oauth/`) ([draft](../../../../docs/wisps/3xx-atproto.md), [lexicon](../../../../docs/lexicons/tools.ghostly.proof.json)). A web app on a loopback address uses AT Protocol's development client, which returns only to `127.0.0.1`: open the dev app there, not at `localhost` |
+| `atproto` | self-custodied | in-app: the handle, then AT Protocol OAuth on the person's own server (PAR, PKCE, DPoP; scope `repo:tools.ghostly.proof` create/delete only, or full access on older servers), which writes one record keyed by the proof key; `unpublish` deletes it | the PLC directory or the did:web host (DID document), the account's PDS (`com.atproto.sync.getRecord`: CAR, commit signature, MST path), DoH or the handle's website (handle back-check); re-checked after an hour | experimental; real servers need the client metadata served at `ghostly.tools/oauth/client-metadata.json` (from `apps/website/public/oauth/`) ([draft](../../../../docs/wisps/3xx-atproto.md), [lexicon](../../../../docs/lexicons/tools.ghostly.proof.json)). A web app on a loopback address uses AT Protocol's development client, which returns only to `127.0.0.1`: open the dev app there, not at `localhost` |
 | `oidc` | provider-attested | redirect: sign in with Google, Microsoft, Apple, GitLab, Twitch (account only / + email / + email and name) | the provider's JWKS (pinned URL) | built, not offered: every client ID in `oidc/providers.ts` is empty ([checklist](../../../../docs/OIDC-PROVIDERS.md), [draft](../../../../docs/wisps/3xx-oidc-proofs.md)) |
 | `did` | self-custodied | sign with a key of the DID document (JWS or raw signature, pasted back); did:web also: a file beside did.json, a service in it (publish). Listed under Advanced; `subject.preview` resolves the DID first | did:key/did:jwk: nothing; did:web: the DoH resolver and the domain's server; did:dht: a Pkarr relay; re-checked after a day | experimental, [draft 3xx](../../../../docs/wisps/3xx-did.md) |

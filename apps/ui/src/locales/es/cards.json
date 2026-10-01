@@ -1,0 +1,77 @@
+{
+  "buttons": {
+    "answers": "Respuestas",
+    "chosen": "Elegida",
+    "closed": "Cerrada",
+    "failed": "No se pudo enviar",
+    "jump": "Ir a la pregunta",
+    "sending": "Enviando…"
+  },
+  "panel": {
+    "activeCount": "{{count}} activas",
+    "allOk": "todo OK",
+    "button": "Tareas",
+    "buttonCount": "Tareas, {{count}} activas",
+    "close": "Cerrar",
+    "empty": "Ninguna tarea en curso",
+    "failedCount": "{{count}} con fallo",
+    "finishedCount": "Terminadas ({{count}})",
+    "idle": "Nada en curso",
+    "info": "Los bots publican estas tarjetas y las mantienen al día. Toca una para ir a ella en el chat.",
+    "nextRun": "próxima {{when}}",
+    "routinesMany": "{{count}} rutinas",
+    "routinesOne": "1 rutina",
+    "title": "Tareas"
+  },
+  "routine": {
+    "cron": "Cron",
+    "label": "Rutina: {{name}}, {{state}}",
+    "lastRun": "Última ejecución: {{result}}",
+    "next": "Próxima {{when}}",
+    "noRuns": "Aún no se ha ejecutado",
+    "result": {
+      "failed": "Falló",
+      "ok": "OK",
+      "skipped": "Omitida"
+    },
+    "runs": "Ejecuciones recientes",
+    "schedule": "Horario",
+    "state": {
+      "active": "Activa",
+      "paused": "En pausa"
+    }
+  },
+  "task": {
+    "branch": "Rama:",
+    "elapsed": {
+      "blocked": "bloqueada desde hace {{duration}}",
+      "queued": "en cola desde hace {{duration}}",
+      "running": "en curso desde hace {{duration}}",
+      "took": "tardó {{duration}}"
+    },
+    "item": {
+      "done": "Hecho",
+      "failed": "Falló",
+      "pending": "Pendiente",
+      "running": "En curso",
+      "skipped": "Omitido"
+    },
+    "label": "Tarea: {{title}}, {{status}}",
+    "labelProgress": "Tarea: {{title}}, {{status}}, {{progress}}%",
+    "now": "Ahora:",
+    "pr": "PR #{{number}}",
+    "prNoNumber": "Pull request",
+    "progress": "Progreso",
+    "started": "Empezó {{ago}}",
+    "status": {
+      "blocked": "Bloqueada",
+      "cancelled": "Cancelada",
+      "done": "Hecha",
+      "failed": "Falló",
+      "queued": "En cola",
+      "running": "En curso"
+    },
+    "steps": "{{done}} de {{total}} pasos",
+    "updated": "actualizada {{ago}}"
+  }
+}

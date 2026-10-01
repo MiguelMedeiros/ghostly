@@ -4,7 +4,7 @@ import WebKit
 // A manual probe, not a CI gate: real AppKit mouse events into a macOS WKWebView (Ghostly Desktop's engine),
 // which no WebDriver reaches and Playwright's WebKit does not model (it has no inactive window).
 //
-// It loads the voice recorder gallery (web/voice-gallery.html, which records a tone instead of the microphone),
+// It loads the voice recorder gallery (apps/web/voice-gallery.html, which records a tone instead of the microphone),
 // locks a recording with a click or a slide up, then clicks Send once and prints whether it was sent.
 //
 //   npx vite web --port 4731 &
@@ -15,7 +15,7 @@ import WebKit
 // Flags: `click` or `slide` (how it locks); `activate` shows the window and makes the app active (it takes
 // focus for a few seconds); `deactivate` makes the app inactive after the lock, as a microphone prompt or
 // another app does; `firstmouse` makes the view accept the first mouse, as `acceptFirstMouse` in
-// src-tauri/tauri.conf.json does for the app. Without `activate` the window sits off screen and is key
+// apps/desktop/tauri.conf.json does for the app. Without `activate` the window sits off screen and is key
 // only by chance, so clicks may never reach the page.
 
 class KeyWindow: NSWindow {

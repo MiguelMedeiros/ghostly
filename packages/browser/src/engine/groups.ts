@@ -1,7 +1,7 @@
 import {
   GroupSession, GROUP_EDIT_FRAME, GROUP_PIN_FRAME, GROUP_REACTION_FRAME, GROUP_REACTED_FRAME, GROUP_TYPING_FRAME, readReaction, groupMessageId, MAX_GROUP_CHAIN, GROUP_MEMBER_CAP, LEGACY_GROUP_MEMBERS, GROUP_VERSION_LARGE, GROUP_VERSION_HUBS, GROUP_READ_NOTE, KNOCK_TTL_MS, MEMBER_KEY, createIdentity, decodeGroupEntryLink, encodeGroupEntryLink, identityFromSeedB64,
-  groupName, knockIdentity, knockRecords, mentionsMember, pinIsNewer, receivedTimestamp, mergeKnocks, readKnocks, rosterHas, verifyCommitSignature, decodeCommunityLink,
-  type GhostRecord, type PollIntervals, type GroupEdit, type GroupIncomingEdit, type GroupMention, type WireReply, type WireReaction, type WirePin, type GroupPinFrame, type GroupCommit, type GroupEdgeFrame, type GroupEntryLink, type GroupMetaChange, type GroupState, type Identity, type Roster, type TypingActivity,
+  EXPECT_PEER_MS, groupName, knockIdentity, knockRecords, mentionsMember, pinIsNewer, receivedTimestamp, mergeKnocks, readKnocks, rosterHas, verifyCommitSignature, decodeCommunityLink,
+  type GhostRecord, type PeerPresence, type PollIntervals, type GroupEdit, type GroupIncomingEdit, type GroupMention, type WireReply, type StatusCard, type WireReaction, type WirePin, type GroupPinFrame, type GroupCommit, type GroupEdgeFrame, type GroupEntryLink, type GroupMetaChange, type GroupState, type Identity, type Roster, type TypingActivity,
 } from "@ghostly/core";
 import type { GroupEvent, GroupJoinStage, GroupView, StoredGroup, StoredMessage, StoredPin } from "../shared/types";
 import { groupReply } from "../shared/replies";
@@ -13,6 +13,16 @@ import { MESH_HUB_TIMINGS, MeshHubs, type MeshHubTimings } from "./meshHubs";
 import { GroupTypings } from "./groupTyping";
 
 /** What the engine gives the groups: its links, its storage and its state emitter. */
+/**
+ * `GroupsHost.linkSeen`: a connection with the other end is under way, or its packet is at most `EXPECT_PEER_MS` old
+ * (its offer follows it). Its presence alone lasts `PRESENCE_WINDOW`, 10 minutes: a hub closes an entry session it gave
+ * up on without a last packet, and a joiner back after a restart took that packet for a member answering, stopped
+ * knocking, and stayed "invited" for 10 minutes (2026-09-30).
+ */
+export function otherEndSeen(presence: PeerPresence | undefined, dataLink: string | undefined, now = Date.now()): boolean {
+  return (!!dataLink && dataLink !== "idle") || (!!presence?.online && now - presence.lastPacketAt < EXPECT_PEER_MS);
+}
+
 export interface GroupsHost {
   /** Sends a frame on a paired link (a contact chat or an edge). Throws when it cannot. */
   sendOnLink(linkId: string, frame: object): void;
@@ -42,8 +52,10 @@ export interface GroupsHost {
    * link does (the joiner closes its side on the welcome), rather than dialing the joiner again.
    */
   entryDone?(linkId: string): void;
-  /** The other end of this link is here (its packet is fresh), or a connection with it is under way. */
+  /** The other end of this link is here (its packet is fresh), or a connection with it is under way (`otherEndSeen`). */
   linkSeen?(linkId: string): boolean;
+  /** The other end of this link, up before, has published since it dropped: its app is back (a restart, say). */
+  linkBack?(linkId: string): boolean;
   /**
    * Pkarr, for the knocks under a link's knock identity (and a community's beacon and lobbies).
    * `background`: a periodic look that can wait, spending only part of the relays' budget. `door`: the community
@@ -53,7 +65,8 @@ export interface GroupsHost {
   resolve(pubKeyZ32: string, background?: boolean, door?: boolean): Promise<GhostRecord[] | null>;
   /** The other end of this link is due any moment: look fast for it a while (`LinkSession.expectPeer`). */
   expectPeer?(linkId: string): void;
-  storeMessage(message: StoredMessage): Promise<void>;
+  /** Resolves false when the message was there already: nothing new came (void: a host that does not say). */
+  storeMessage(message: StoredMessage): Promise<boolean | void>;
   /**
    * A message stored from a copy that was not whole, now whole: its mentions, reply and hop count join the stored one
    * (stored now if it is not there). Absent: `storeMessage`, which keeps the first.
@@ -61,6 +74,11 @@ export interface GroupsHost {
   completeMessage?(message: StoredMessage): Promise<void>;
   /** A private group's roster or my status in it changed, or I forgot it. */
   membersChanged?(groupId: string): void;
+  /**
+   * The group's history was deleted (I left or forgot it): the pages drop their copy too. They hear only what changes
+   * in a history they hold, so a group joined again showed the old one under what came after, until a reload.
+   */
+  historyGone?(groupId: string): void;
   emit(): void;
   /** My name, for community groups, where it travels (encrypted) with my messages. */
   myNick?(): string | undefined;
@@ -124,6 +142,18 @@ export const mentionFields = (mentions: GroupMention[] | undefined, mentioned: b
 export const mentionAt = (map: Map<string, number>, groupId: string): { lastMentionAt?: number } => {
   const at = map.get(groupId);
   return at ? { lastMentionAt: at } : {};
+};
+/**
+ * When a member's message counts as having come, for unread and the "@": when it reached me, if that is later than
+ * when it was written (a catch-up from another member, a member back after a while). Written before I last looked at
+ * the group but handed to me since, it is news here; by its own time it sorted among what I had read, and the group
+ * never showed unread. A copy I had already (`stored` false) or one completed in place keeps its own time.
+ */
+export const cameAt = (timestamp: number, stored: boolean | void, now: number): number => stored === false ? timestamp : Math.max(timestamp, now);
+/** The view's `lastPeerMessageAt`, when there is one. */
+export const peerMessageAt = (map: Map<string, number>, groupId: string): { lastPeerMessageAt?: number } => {
+  const at = map.get(groupId);
+  return at ? { lastPeerMessageAt: at } : {};
 };
 
 /**
@@ -206,6 +236,8 @@ export class Groups {
   /** Each group's status and newest commit as its history last said them: a line per change of either, never one again. */
   private readonly lastTold = new Map<string, { status: GroupSession["status"]; top: GroupSession["top"] }>();
   private readonly lastMessageAt = new Map<string, number>();
+  /** The latest message from another member, per group: what makes it unread in the list. */
+  private readonly lastPeerMessageAt = new Map<string, number>();
   /** The latest message that names me, per group (the chat list's "@" while it is unread). */
   private readonly lastMentionAt = new Map<string, number>();
   private reconciling = Promise.resolve();
@@ -265,8 +297,11 @@ export class Groups {
     for (const group of all.filter(g => !g.community && !g.joining)) {
       this.stored.set(group.id, group);
       if (group.state) this.attach(group.state);
-      const history = await this.store.getMessages(MESSAGE_LINK(group.id)), last = history[history.length - 1];
+      // Messages only, as while the app runs: a membership line or a payment's note moves neither the list nor unread.
+      const history = await this.store.getMessages(MESSAGE_LINK(group.id)), said = history.filter(m => !m.event && !m.groupPay);
+      const last = said[said.length - 1], lastPeer = [...said].reverse().find(m => m.sender !== "me");
       if (last) this.lastMessageAt.set(group.id, last.timestamp);
+      if (lastPeer) this.lastPeerMessageAt.set(group.id, lastPeer.timestamp);
       const mention = [...history].reverse().find(m => m.mentioned);
       if (mention) this.lastMentionAt.set(group.id, mention.timestamp);
     }
@@ -305,7 +340,7 @@ export class Groups {
       const edges = this.host.edges(group.id);
       // A chat stays in `contacts` after its member is removed or leaves (the removal notice goes over it): only a member still in the roster counts.
       const contacts = Object.entries(group.contacts ?? {}).filter(([key]) => !session || rosterHas(session.roster, key));
-      const base = { id: group.id, profile: "mesh" as const, createdAt: group.createdAt, lastMessageAt: this.lastMessageAt.get(group.id) ?? 0, ...mentionAt(this.lastMentionAt, group.id), invited: [...(this.invited.get(group.id) ?? [])],
+      const base = { id: group.id, profile: "mesh" as const, createdAt: group.createdAt, lastMessageAt: this.lastMessageAt.get(group.id) ?? 0, ...peerMessageAt(this.lastPeerMessageAt, group.id), ...mentionAt(this.lastMentionAt, group.id), invited: [...(this.invited.get(group.id) ?? [])],
         memberLinks: Object.fromEntries(contacts.map(([key, linkId]) => [linkId, key])) };
       if (!session) {
         const invitation = group.invitation!;
@@ -319,7 +354,9 @@ export class Groups {
       const hubKeys = new Set(onHubs ? this.hubs.hubs(group.id, session, now) : []), policy = session.hubPolicy;
       if (onHubs && this.hubs.isHub(group.id)) hubKeys.add(session.myKey);
       const typing = this.typings.view(session);
-      return { ...base, name: session.name, status: session.status, statusReason: session.state.statusReason, epoch: session.epoch, myKey: session.myKey, isAdmin: session.isAdmin,
+      // A name outlives its member's place in the roster: the messages stay, and are still theirs.
+      const former = Object.entries(nicks).filter(([key]) => !rosterHas(session.roster, key));
+      return { ...base, name: session.name, ...(former.length ? { formerNames: Object.fromEntries(former) } : {}), status: session.status, statusReason: session.state.statusReason, epoch: session.epoch, myKey: session.myKey, isAdmin: session.isAdmin,
         ...(entry ? { entryLink: encodeGroupEntryLink(entry.link) } : {}), ...(session.picture ? { picture: session.picture } : {}),
         canSend: session.status === "active" && session.readableEpochs.includes(session.epoch),
         ...(onHubs ? { hubs: { hub: this.hubs.isHub(group.id) } } : {}), ...(typing ? { typing } : {}),
@@ -374,7 +411,7 @@ export class Groups {
     if (this.isCommunity(groupId)) return this.communities.sendEdit(groupId, edit);
     const session = this.sessions.get(groupId);
     if (!session) return "You are not in this group";
-    const result = await session.sendEdit(edit.id, { v: edit.e, ts: edit.ts, text: edit.m, mentions: edit.k }, to);
+    const result = await session.sendEdit(edit.id, { v: edit.e, ts: edit.ts, text: edit.m, mentions: edit.k, ...(edit.sc && { card: edit.sc }) }, to);
     return "error" in result ? result.error : null;
   }
   /** Resolves once the community frames received so far were handed to the engine (tests). */
@@ -433,13 +470,13 @@ export class Groups {
 
   /**
    * Sends a text; `messageId` is the id it is kept under here (what history, replies and reactions name). `forwarded`:
-   * the hop count of a forwarded text (WISP 9xx § Forwards).
+   * the hop count of a forwarded text (WISP 9xx § Forwards). `card`: a checked status card, the text its fallback.
    */
-  async send(groupId: string, text: string, mentions: readonly GroupMention[] = [], reply?: WireReply, forwarded?: number): Promise<{ error: string | null; messageId?: string }> {
-    if (this.isCommunity(groupId)) return this.communities.send(groupId, text, mentions, reply, forwarded);
+  async send(groupId: string, text: string, mentions: readonly GroupMention[] = [], reply?: WireReply, forwarded?: number, card?: StatusCard): Promise<{ error: string | null; messageId?: string }> {
+    if (this.isCommunity(groupId)) return card ? this.communities.send(groupId, text, mentions, reply, forwarded, card) : this.communities.send(groupId, text, mentions, reply, forwarded);
     const session = this.sessions.get(groupId);
     if (!session) return { error: "You are not in this group yet" };
-    const result = await session.sendText(text, Date.now(), mentions, reply, forwarded);
+    const result = card ? await session.sendText(text, Date.now(), mentions, reply, forwarded, card) : await session.sendText(text, Date.now(), mentions, reply, forwarded);
     // Sent: whatever this side was typing is done (the members clear it on the message too).
     this.typings.say(session, false);
     return "error" in result ? { error: result.error } : { error: null, messageId: result.id };
@@ -499,9 +536,11 @@ export class Groups {
     this.invited.delete(groupId);
     this.pendingEntries.delete(groupId);
     this.lastMessageAt.delete(groupId);
+    this.lastPeerMessageAt.delete(groupId);
     this.lastMentionAt.delete(groupId);
     await this.store.deleteGroup(groupId);
     await this.store.putGroup(group);
+    this.host.historyGone?.(groupId);
     for (const linkId of this.host.entries(groupId).values()) await this.host.closeEdge(linkId);
     this.host.emit();
     await session.leave();
@@ -571,6 +610,7 @@ export class Groups {
     this.hereActed.delete(groupId);
     for (const linkId of [...this.host.edges(groupId).values(), ...this.host.entries(groupId).values()]) await this.host.closeEdge(linkId);
     await this.store.deleteGroup(groupId);
+    this.host.historyGone?.(groupId);
     this.host.membersChanged?.(groupId);
     this.host.emit();
   }
@@ -1165,12 +1205,14 @@ export class Groups {
         // The sender picks the time: one far ahead would pin the group to the top of the list.
         const timestamp = receivedTimestamp(m.timestamp);
         const mentioned = m.sender !== session.myKey && mentionsMember(m.mentions, session.myKey);
-        if (mentioned) this.lastMentionAt.set(state.id, Math.max(this.lastMentionAt.get(state.id) ?? 0, timestamp));
         const message: StoredMessage = { linkId: MESSAGE_LINK(state.id), id: m.id, text: m.text, sender: m.sender === session.myKey ? "me" : "peer", member: m.sender, timestamp, via: "datalink",
-          ...mentionFields(m.mentions, mentioned), ...(m.reply && { replyTo: groupReply(m.reply, session.myKey) }), ...(m.forwarded && { forwarded: m.forwarded }) };
+          ...mentionFields(m.mentions, mentioned), ...(m.reply && { replyTo: groupReply(m.reply, session.myKey) }), ...(m.forwarded && { forwarded: m.forwarded }), ...(m.card && { card: m.card }) };
         // A copy handed on stripped came first: the whole one adds what it lacked (WISP 9xx · Group Mesh § Catch-up).
-        await (m.completes && this.host.completeMessage ? this.host.completeMessage(message) : this.host.storeMessage(message));
+        const stored = m.completes && this.host.completeMessage ? (await this.host.completeMessage(message), false) : await this.host.storeMessage(message);
         this.lastMessageAt.set(state.id, Math.max(this.lastMessageAt.get(state.id) ?? 0, timestamp));
+        const came = cameAt(timestamp, stored, this.now());
+        if (mentioned) this.lastMentionAt.set(state.id, Math.max(this.lastMentionAt.get(state.id) ?? 0, came));
+        if (m.sender !== session.myKey) this.lastPeerMessageAt.set(state.id, Math.max(this.lastPeerMessageAt.get(state.id) ?? 0, came));
         // What the member was typing arrived: it is not typing any more.
         this.typings.messageFrom(state.id, m.sender);
       },

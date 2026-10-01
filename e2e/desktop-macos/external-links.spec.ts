@@ -8,16 +8,20 @@ import { LocalRelay } from "../support/relay";
 
 /**
  * A link to another site opens in the system browser from the Desktop app on a Mac, in the real WKWebView. The app's
- * WebView drops a `target="_blank"` click, so every such link calls Rust (`open_web_link`, src/lib/externalLink.ts),
+ * WebView drops a `target="_blank"` click, so every such link calls Rust (`open_web_link`, apps/ui/src/lib/externalLink.ts),
  * which hands it to `open` (#415 for links in messages, #421 for the rest). Unit tests prove that with Tauri mocked;
  * this proves it where a WebKit-only change would break it.
  *
  * The app under the test driver writes down what it would open instead of starting a browser (`launch` in
- * src-tauri/src/commands.rs), and `opened()` reads that list. The address has "ã" in it: the page sends it
+ * apps/desktop/src/commands.rs), and `opened()` reads that list. The address has "ã" in it: the page sends it
  * percent-encoded, since Rust takes plain ASCII only.
  *
  * The second link is Settings → About → GitHub. The update Download link is the same kind of link, but a Mac never
  * shows it: it appears only for an update this install cannot apply, which on Desktop is a Linux `.deb` or `.rpm`.
+ *
+ * With the app paired, the same test checks the Dock icon's badge: a message that comes while Settings is open puts
+ * "1" on it, the count the web app's icon would show, and opening the chat clears it. The driver reads the label
+ * AppKit holds for the icon (the copy under test stays out of the Dock, so nobody sees it there).
  *
  *   npm run desktop:macos:build
  *   npm run test:e2e:desktop-macos -- external-links
@@ -30,7 +34,7 @@ const ENCODED = "https://pt.wikipedia.org/wiki/S%C3%A3o_Paulo";
 const WEBSITE = "https://github.com/MiguelMedeiros/ghostly";
 
 test("a link in a message and one in Settings open in the system browser", {
-  tag: ["@client:desktop", "@feature:app.external-links", "@feature:chat.paired.links"],
+  tag: ["@client:desktop", "@feature:app.external-links", "@feature:chat.paired.links", "@feature:app.attention.badge"],
 }, async ({}, testInfo) => {
   test.skip(process.platform !== "darwin", "macOS only: the system WKWebView");
   const relay = new LocalRelay();
@@ -44,6 +48,8 @@ test("a link in a message and one in Settings open in the system browser", {
   const bot = new HeadlessBot();
   const apps: MacDesktop[] = [];
   let alice: DesktopPerson | undefined;
+  let botChat = "";
+  let chatHash = "";
   const keep = async (name: string, body: string) => {
     writeFileSync(testInfo.outputPath(name), body);
     await testInfo.attach(name, { path: testInfo.outputPath(name), contentType: "text/plain" });
@@ -68,6 +74,8 @@ test("a link in a message and one in Settings open in the system browser", {
       await expect.poll(() => alice!.canWrite(), { timeout: 120_000 }).toBe(true);
       await bot.run("chat", "wait", invite.chat as string, "--until", "live", "--timeout", "120");
       await bot.run("send", invite.chat as string, `São Paulo: ${LINK}`, "--wait", "delivered");
+      botChat = invite.chat as string;
+      chatHash = await alice!.hash();
     });
 
     await test.step("the link in the message opens, percent-encoded", async () => {
@@ -84,6 +92,14 @@ test("a link in a message and one in Settings open in the system browser", {
       await alice!.go("#/settings");
       await app.click(`a[href="${WEBSITE}"]`);
       await expect.poll(() => app.opened()).toEqual([ENCODED, WEBSITE]);
+    });
+
+    await test.step("a message that comes while Settings is open puts 1 on the Dock icon; opening the chat clears it", async () => {
+      expect((await app.windowState()).badge).toBeNull();
+      await bot.run("send", botChat, "Unread on the Dock", "--wait", "delivered");
+      await expect.poll(async () => (await app.windowState()).badge, { timeout: 30_000 }).toBe("1");
+      await alice!.go(chatHash);
+      await expect.poll(async () => (await app.windowState()).badge, { timeout: 30_000 }).toBeNull();
     });
   } catch (error) {
     if (alice) await keep("app-page.txt", await alice.snapshot().catch((e: unknown) => String(e)));

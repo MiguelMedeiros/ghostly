@@ -3,7 +3,7 @@ import type { Peer } from "./fixtures";
 /**
  * What a peer would hear, recorded instead of played (the recipe of chat-mute.spec.ts): a stand-in AudioContext
  * whose decoding fails, so the app plays each sound's synthesized fallback, and every note it starts is kept. A note
- * only one sound plays names that sound (src/lib/sounds.ts; the UI tests check each cue's notes are its own).
+ * only one sound plays names that sound (apps/ui/src/lib/sounds.ts; the UI tests check each cue's notes are its own).
  */
 export const NOTE = {
   message: 880,

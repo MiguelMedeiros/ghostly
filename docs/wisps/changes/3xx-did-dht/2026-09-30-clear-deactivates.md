@@ -1,0 +1,1 @@
+Clearing a profile's data now publishes, when the DID was ever published, a newer packet whose root record reads `deactivated` before the DID's key is deleted, so resolvers report it as deactivated instead of showing the old document until it expires. Best effort: a failed publish does not hold up the clear.

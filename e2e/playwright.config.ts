@@ -13,8 +13,9 @@ const { ATPROTO_TEST_PLC } = await import("./support/atproto");
 /**
  * End-to-end tests for Ghostly: real browsers, the shipped build, no servers.
  * Peers find each other through a Pkarr relay that lives in the test process
- * (see support/relay.ts), so nothing here needs the network except the tests
- * tagged @network (the public Cashu test mint, the public relays).
+ * (see support/relay.ts), and the wallets use a local mint when E2E_MINT_URL is
+ * set (support/mint.ts), so nothing here needs the network except the tests
+ * tagged @network (public chain servers, Breez's regtest; see README.md).
  *
  *   npm run e2e                       # everything, against a fresh build of the web app
  *   npm run e2e -- --grep-invert @network
@@ -28,6 +29,8 @@ const port = Number(process.env.E2E_WEB_PORT || 4173);
 export default defineConfig({
   testDir: ".",
   outputDir: "../test-results/e2e",
+  // The headless CLI, built once before the workers start: a build in a worker empties its dist/ under the others' bots.
+  globalSetup: "./support/headlessBuild.ts",
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
@@ -75,7 +78,7 @@ export default defineConfig({
   webServer: deployed
     ? undefined
     : {
-        command: `npm run build:web && npx vite preview web --port ${port} --strictPort`,
+        command: `npm run build:web && npx vite preview apps/web --port ${port} --strictPort`,
         cwd: "..",
         url: `http://localhost:${port}`,
         reuseExistingServer: !process.env.CI,

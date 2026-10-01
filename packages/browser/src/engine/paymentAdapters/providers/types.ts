@@ -17,7 +17,7 @@ export const networkMode = (network: ProviderNetwork): WalletMode => (network ==
 
 /**
  * One field of a provider's configuration form. The wallet card renders these; a provider that needs
- * more registers its own form component instead (src/components/wallet/providers/forms.ts).
+ * more registers its own form component instead (apps/ui/src/components/wallet/providers/forms.ts).
  * `secret` fields (an NWC URI, a macaroon, a rune, an API key, a password) are sealed before they are
  * stored, never shown again, never put in the engine state, and never logged.
  */
@@ -67,7 +67,7 @@ export interface ProviderHost {
   /** Ends when the source is replaced, the mode switches or the engine stops: abort long waits on it. */
   signal: AbortSignal;
   /**
-   * Desktop only: calls a command of the Tauri app (src-tauri), for what a WebView cannot do (a pinned
+   * Desktop only: calls a command of the Tauri app (apps/desktop), for what a WebView cannot do (a pinned
    * certificate, no CORS, a raw socket). Absent on the web and in the extension.
    */
   invoke?: <T>(command: string, args: Record<string, unknown>) => Promise<T>;

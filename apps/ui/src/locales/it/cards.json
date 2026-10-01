@@ -1,0 +1,77 @@
+{
+  "buttons": {
+    "answers": "Risposte",
+    "chosen": "Scelta",
+    "closed": "Chiusa",
+    "failed": "Invio non riuscito",
+    "jump": "Vai alla domanda",
+    "sending": "Invio…"
+  },
+  "panel": {
+    "activeCount": "{{count}} in corso",
+    "allOk": "tutto OK",
+    "button": "Attività",
+    "buttonCount": "Attività, {{count}} in corso",
+    "close": "Chiudi",
+    "empty": "Nessuna attività in corso",
+    "failedCount": "{{count}} non riuscite",
+    "finishedCount": "Concluse ({{count}})",
+    "idle": "Niente in corso",
+    "info": "I bot pubblicano queste schede e le tengono aggiornate. Tocca una scheda per andarci nella chat.",
+    "nextRun": "prossima {{when}}",
+    "routinesMany": "{{count}} routine",
+    "routinesOne": "1 routine",
+    "title": "Attività"
+  },
+  "routine": {
+    "cron": "Cron",
+    "label": "Routine: {{name}}, {{state}}",
+    "lastRun": "Ultima esecuzione: {{result}}",
+    "next": "Prossima {{when}}",
+    "noRuns": "Nessuna esecuzione ancora",
+    "result": {
+      "failed": "Non riuscita",
+      "ok": "OK",
+      "skipped": "Saltata"
+    },
+    "runs": "Esecuzioni recenti",
+    "schedule": "Orario",
+    "state": {
+      "active": "Attiva",
+      "paused": "In pausa"
+    }
+  },
+  "task": {
+    "branch": "Branch:",
+    "elapsed": {
+      "blocked": "bloccata da {{duration}}",
+      "queued": "in coda da {{duration}}",
+      "running": "in corso da {{duration}}",
+      "took": "ha richiesto {{duration}}"
+    },
+    "item": {
+      "done": "Fatto",
+      "failed": "Non riuscito",
+      "pending": "Da fare",
+      "running": "In corso",
+      "skipped": "Saltato"
+    },
+    "label": "Attività: {{title}}, {{status}}",
+    "labelProgress": "Attività: {{title}}, {{status}}, {{progress}}%",
+    "now": "Ora:",
+    "pr": "PR #{{number}}",
+    "prNoNumber": "Pull request",
+    "progress": "Avanzamento",
+    "started": "Iniziata {{ago}}",
+    "status": {
+      "blocked": "Bloccata",
+      "cancelled": "Annullata",
+      "done": "Completata",
+      "failed": "Non riuscita",
+      "queued": "In coda",
+      "running": "In corso"
+    },
+    "steps": "{{done}} di {{total}} passi",
+    "updated": "aggiornata {{ago}}"
+  }
+}

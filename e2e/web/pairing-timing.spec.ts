@@ -114,8 +114,9 @@ async function pairOnce(run: number, peer: (name: string, options?: { realRelays
     stagesOk: JSON.stringify(progress(K).filter(s => s !== "waiting" && s !== "resolving")) === JSON.stringify(["knocking", "connecting", "live"])
       && JSON.stringify(progress(A).filter(s => s !== "waiting" && s !== "resolving")) === JSON.stringify(["answering", "connecting", "live"]),
   };
-  // Requests still in flight through the bridge must not fail the run as the contexts go.
-  for (const p of [inviter, joiner]) await p.context.unrouteAll({ behavior: "ignoreErrors" });
+  // Requests still in flight through the bridge must not fail the run as the contexts go. Only then: without a bridge
+  // this would take the test's relay away too, and the pages would poll the public relays until they close.
+  if (BRIDGES) for (const p of [inviter, joiner]) await p.context.unrouteAll({ behavior: "ignoreErrors" });
   await Promise.all([inviter.context.close(), joiner.context.close()]);
   return { row, steps: steps.filter(s => s.t >= t0 - 5_000).map(s => ({ ...s, t: s.t - t0 })) };
 }

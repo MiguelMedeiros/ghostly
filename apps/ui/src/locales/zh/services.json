@@ -1,0 +1,32 @@
+{
+  "fromContacts": "来自联系人",
+  "fromContactsEmpty": "联系人共享的应用会显示在这里。",
+  "goOffline": "离线：你共享的内容都将无法访问",
+  "goOnline": "上线",
+  "letReach": "允许 {{contact}} 访问 {{app}}",
+  "namePlaceholder": "名称（Atlas）",
+  "needsApp": "共享本地网页应用需要 Ghostly 浏览器扩展或桌面应用。",
+  "noContacts": "还没有联系人。",
+  "nobodyYet": "在你选择谁可以访问之前，没人能打开它。",
+  "nothingShared": "还没有共享任何内容。",
+  "offline": "离线",
+  "online": "在线",
+  "open": "打开 {{app}}",
+  "openNeedsApp": "打开联系人的网页应用需要 Ghostly 浏览器扩展或桌面应用。",
+  "people": "联系人",
+  "peopleDone": "完成",
+  "remove": "移除",
+  "removeNamed": "移除 {{app}}",
+  "requestCount": "· {{count}} 次请求",
+  "share": "共享",
+  "shareLocal": "共享本地服务",
+  "shareNamed": "共享 {{app}}",
+  "status": {
+    "notShared": "尚未与任何人共享",
+    "offline": "离线时无法访问",
+    "sharedCount": "已与 {{count}} 位联系人共享",
+    "sharedOne": "已与 1 位联系人共享",
+    "stopped": "已停止"
+  },
+  "yourApps": "你的应用"
+}

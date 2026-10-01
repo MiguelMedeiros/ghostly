@@ -7,7 +7,7 @@ import { paymentCard } from "../support/payments";
  * see support/mint.ts). Alice asks Bob; Carol sees the request and then sees it paid, though the ecash went only
  * between the two. Then Alice asks the whole group: Carol pays it, once, and everyone sees who did.
  */
-test.describe("group payments", { tag: "@network" }, () => {
+test.describe("group payments", () => {
   test.describe.configure({ retries: 1 });
 
   const groupChat = (peer: Peer) => peer.page.getByTestId("group-chat");
@@ -51,7 +51,8 @@ test.describe("group payments", { tag: "@network" }, () => {
     const bubble = timeline(peer).getByTestId("payment-bubble").filter({ hasText: memo });
     await bubble.getByTestId("payment-pay").click({ timeout: 90_000 });
     const review = timeline(peer).getByTestId("payment-review");
-    await expect(review).toContainText("cashu-test");
+    await expect(review.getByTestId("review-rail")).toHaveText("Cashu");
+    await expect(review).toHaveAttribute("data-network", "testnet");
     await review.getByRole("button", { name: "Approve payment" }).click();
   }
 

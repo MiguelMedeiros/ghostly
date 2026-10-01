@@ -28,8 +28,13 @@ export type DiscoveryChange = "tripped" | "recovered";
  * `door`: a community door reading its knock bell. A background read, but not held to the small share while a link
  * signals (`BACKGROUND_WHILE_SIGNALING`): the door admitting one person opens links that signal, and the next person's
  * knock would wait for them (2026-09-28).
+ *
+ * `signal`: a link's WebRTC signaling, what its contact waits for: the write of a new offer or answer, or a read for
+ * the answer while this side's offer is out, or the reads of a DHT-only contact's mailbox once it shows it is leaving,
+ * up to three while it still says DHT only (the live link waits on them). A 1:1 chat's may go a little over the relay's minute
+ * (`SIGNALING_ALLOWANCE_SHARE` in relay.ts).
  */
-export interface PkarrRequestOptions { background?: boolean; urgent?: boolean; group?: boolean; door?: boolean }
+export interface PkarrRequestOptions { background?: boolean; urgent?: boolean; group?: boolean; door?: boolean; signal?: boolean }
 
 /**
  * `transport` with `extra` added to every request's options: a group's edges say `group` so. The optional methods

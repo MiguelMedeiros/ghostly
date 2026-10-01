@@ -13,7 +13,7 @@ import { desktopHome, openDesktop, type DesktopApp } from "../support/desktop";
  * (`extractParamsFromSdp`), checked on arrival (`parseCallSignal`) and rebuilt (`buildSdpFromSignal`). The
  * signal itself travels through this test instead of a chat, which calls.spec.ts covers.
  *
- * The Linux side is driven through its commands (`native_call_*`), the ones src/desktop/nativeCalls.ts uses,
+ * The Linux side is driven through its commands (`native_call_*`), the ones apps/ui/src/desktop/nativeCalls.ts uses,
  * with a test picture and tone (GHOSTLY_FAKE_MEDIA). Each side reads what it received: Rust's counters, and
  * Chromium's `getStats()`.
  */

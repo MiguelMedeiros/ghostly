@@ -9,7 +9,7 @@ import { desktopPerson, type DesktopPerson } from "../matrix/people";
  *
  * WebKitGTK has no WebRTC (Ubuntu, Debian and Fedora build it without), so the call media runs in Rust:
  * webrtc-rs for the connection, GStreamer for the camera, the microphone and the codecs
- * (src-tauri/src/native_call). The page drives it through src/desktop/nativeCalls.ts, which has the
+ * (apps/desktop/src/native_call). The page drives it through apps/ui/src/desktop/nativeCalls.ts, which has the
  * RTCPeerConnection shape the call hook expects. Here both apps use it, with a test picture and a test tone
  * (GHOSTLY_FAKE_MEDIA, set by support/desktop.ts), and what they exchange is read back from Rust
  * (`native_call_stats`) and from the call window's own <video>.
@@ -37,6 +37,18 @@ const picture = (p: DesktopPerson) => p.app.execute<{ width: number; time: numbe
   const video = document.querySelector('[data-testid="remote-video"]');
   return video ? { width: video.videoWidth, time: video.currentTime, shown: !video.classList.contains("hidden") } : null;`);
 
+/** The call window's own camera (the self view): its size, how far it has played, and whether it is paused. */
+const selfView = (p: DesktopPerson) => p.app.execute<{ width: number; time: number; paused: boolean; ready: number } | null>(`
+  const video = document.querySelector('[data-testid="call-self-view"] video');
+  return video ? { width: video.videoWidth, time: video.currentTime, paused: video.paused, ready: video.readyState } : null;`);
+
+/** The self view plays: it has a picture, and its clock moves. */
+async function selfViewPlays(p: DesktopPerson, when: string): Promise<void> {
+  await expect.poll(async () => (await selfView(p))?.width ?? 0, { timeout: 30_000, message: `${p.name} sees their own camera ${when}` }).toBeGreaterThan(0);
+  const before = (await selfView(p))!.time;
+  await expect.poll(async () => (await selfView(p))!.time, { timeout: 15_000, message: `${p.name}'s own camera plays ${when}` }).toBeGreaterThan(before + 0.5);
+}
+
 const callWindows = (p: DesktopPerson) => p.app.execute<number>(`return document.querySelectorAll('[data-testid="call-window"]').length;`);
 
 /** The call window's clock: the call is connected. No word boundary: WebKit's innerText runs the title into it. */
@@ -47,7 +59,7 @@ const button = (p: DesktopPerson, selector: string) => p.app.execute<{ disabled:
   const button = document.querySelector(arguments[0]);
   return button ? { disabled: button.disabled, title: button.getAttribute("title") } : null;`, selector);
 
-test("two Linux Desktops call each other: decline, then sound and pictures both ways, mute, camera off, hang up", {
+test("two Linux Desktops call each other: decline, then sound and pictures both ways, mute, camera off, hang up, a video call answered with voice", {
   tag: ["@feature:calls.linux-native", "@feature:calls.paired", "@feature:calls.video", "@feature:calls.decline"],
 }, async () => {
   test.setTimeout(10 * 60_000);
@@ -113,6 +125,8 @@ test("two Linux Desktops call each other: decline, then sound and pictures both 
       await expect.poll(async () => (await picture(p))?.width ?? 0, { timeout: 30_000, message: `${p.name}'s window shows a picture` }).toBeGreaterThan(0);
       const before = (await picture(p))!.time;
       await expect.poll(async () => (await picture(p))!.time, { message: `${p.name}'s picture plays` }).toBeGreaterThan(before);
+      // And the caller's own camera, in the corner, from the start: no need to turn it off and on.
+      await selfViewPlays(p, "from the start");
     }
 
     // Mute reaches the microphone in Rust, and back.
@@ -129,6 +143,7 @@ test("two Linux Desktops call each other: decline, then sound and pictures both 
     expect((await stats(a))!.videoSent - sent, "ana sends no pictures with the camera off").toBeLessThan(5);
     await a.press("Turn camera on");
     await expect.poll(async () => (await picture(b))?.shown, { timeout: 30_000, message: "bia shows ana's picture again" }).toBe(true);
+    await selfViewPlays(a, "with the camera back on");
 
     // No screen to share on Linux yet: the button is there, off, and says why.
     for (const p of [a, b]) {
@@ -140,6 +155,22 @@ test("two Linux Desktops call each other: decline, then sound and pictures both 
     for (const p of [a, b]) {
       await expect.poll(() => callWindows(p), { timeout: 60_000, message: `${p.name}'s call window closes` }).toBe(0);
       await expect.poll(() => stats(p), { message: `${p.name}'s media stopped` }).toBeNull();
+    }
+
+    // A video call answered with voice only, as the Linux interop of 2026-09-29 did: bia still sees ana, and once
+    // bia's camera comes on, ana sees bia, with no new offer.
+    await a.press("Video call");
+    await b.press("Accept audio call");
+    await expect.poll(() => connected(b), { timeout: 60_000, message: "bia's call connects" }).toBe(true);
+    await expect.poll(async () => (await stats(b))?.videoReceived ?? 0, { timeout: 60_000, message: "bia sees ana" }).toBeGreaterThan(10);
+    await expect.poll(async () => (await picture(b))?.width ?? 0, { timeout: 30_000, message: "bia's window shows ana" }).toBeGreaterThan(0);
+    await b.press("Turn camera on");
+    await expect.poll(async () => (await stats(a))?.videoReceived ?? 0, { timeout: 60_000, message: "ana sees bia" }).toBeGreaterThan(10);
+    await expect.poll(async () => (await picture(a))?.width ?? 0, { timeout: 30_000, message: "ana's window shows bia" }).toBeGreaterThan(0);
+    await selfViewPlays(b, "once the camera is turned on in a voice answer");
+    await a.press("End call");
+    for (const p of [a, b]) {
+      await expect.poll(() => callWindows(p), { timeout: 60_000, message: `${p.name}'s second call window closes` }).toBe(0);
     }
   } finally {
     for (const done of cleanup.reverse()) await done();

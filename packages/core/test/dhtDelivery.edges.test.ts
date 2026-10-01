@@ -548,6 +548,65 @@ describe("DHT delivery: sending and lifecycle", () => {
     await h.bob.stop();
   });
 
+  it("reads at once, as signaling, when the contact leaves DHT only, even inside a window already looking fast; three reads in all while it still says DHT only, then not", async () => {
+    const h = setup({ pollMs: null, state: { ...emptyDhtDeliveryState(), peerMode: "dht" }, bobCredentials: pinned() }); await h.bob.start();
+    await vi.advanceTimersByTimeAsync(0);
+    h.bob.expect(30_000); await vi.advanceTimersByTimeAsync(0);
+    const options = () => (h.transport.resolve.mock.calls as unknown[][]).slice(before).map(([, o]) => (o as { signal?: boolean } | undefined)?.signal ?? false);
+    let before = h.transport.resolve.mock.calls.length;
+    // The contact's offer came while its mailbox still said DHT only: the read that says it left goes now, as signaling.
+    h.bob.expect(30_000, true); await vi.advanceTimersByTimeAsync(0);
+    expect(options()).toEqual([true]);
+    // Its envelope saying so may land a moment after that read: the next reads are signaling too, a bounded few.
+    for (const signal of [true, true, false]) {
+      before = h.transport.resolve.mock.calls.length;
+      await vi.advanceTimersByTimeAsync(4_000 + 10);
+      expect(options()).toEqual([signal]);
+    }
+    await h.bob.stop();
+  });
+
+  it("keeps reading as signaling while a contact leaving DHT only still says DHT only, and stops once it says it left", async () => {
+    // mx-d707d8d5 (2026-09-30): the contact's first fresh link packet made this side read its mailbox as signaling, and
+    // it still said DHT only; the envelope saying it left landed 0.4 s later. The relays' minute was spent, so every
+    // read after was held back for 42 s, and the chat stayed "On DHT · retrying live".
+    const h = setup({ pollMs: null, mode: "stream" }); await h.bob.start(); await vi.advanceTimersByTimeAsync(0);
+    const control = (mode: "dht" | "stream", seq: number) => h.invitePacket(h.body({ 5: mode, 6: null }, seq));
+    const options = () => (h.transport.resolve.mock.calls as unknown[][]).slice(before).map(([, o]) => (o as { signal?: boolean } | undefined)?.signal ?? false);
+    await h.put(control("dht", 1));
+    let before = h.transport.resolve.mock.calls.length;
+    h.bob.expect(30_000, true); await vi.advanceTimersByTimeAsync(0);
+    expect(h.bob.peerMode).toBe("dht");
+    expect(options().length).toBeGreaterThan(0);
+    expect(options().every(Boolean)).toBe(true);
+    // The contact's envelope saying it left is there now: the next read, still signaling, finds it.
+    await h.put(control("stream", 2));
+    before = h.transport.resolve.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(4_000);
+    expect(h.bob.peerMode).toBe("stream");
+    expect(options().length).toBeGreaterThan(0);
+    expect(options().every(Boolean)).toBe(true);
+    // Nothing is waited for on that side any more: the reads after keep to the minute.
+    before = h.transport.resolve.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(options().length).toBeGreaterThan(0);
+    expect(options().some(Boolean)).toBe(false);
+    await h.bob.stop();
+  });
+
+  it("looks at a contact's mailbox once more as the chat goes live, in the background, then every 5 minutes", async () => {
+    // A text the contact put on the DHT after this side's last read, in the second before both went live (Desktop, 2026-09-30).
+    const h = setup({ pollMs: null, mode: "stream", state: { ...emptyDhtDeliveryState(), peerMode: "stream" }, bobCredentials: pinned() });
+    await h.bob.start(); await vi.advanceTimersByTimeAsync(0);
+    const before = h.transport.resolve.mock.calls.length;
+    h.bob.setLive(true); await vi.advanceTimersByTimeAsync(0);
+    expect(h.transport.resolve.mock.calls.length - before, "one look as it goes live").toBe(1);
+    expect((h.transport.resolve.mock.lastCall as unknown[] | undefined)?.[1], "yielding to links that signal").toEqual({ background: true });
+    await vi.advanceTimersByTimeAsync(LIVE_POLL_MS - 1_000);
+    expect(h.transport.resolve.mock.calls.length - before, "then none for 5 minutes").toBe(1);
+    await h.bob.stop();
+  });
+
   it("reads every 5 minutes while live, at once when layer 1 is lost; 10 s open, 30 s in the background", async () => {
     const h = setup({ pollMs: null, mode: "stream", bobCredentials: pinned() }); await h.bob.start(); await vi.advanceTimersByTimeAsync(0);
     h.bob.setLive(true);

@@ -8,7 +8,7 @@ import { MacDriver } from "./desktopMac";
 
 /**
  * The Desktop checks that a video too large for the page plays and seeks from the stored file (`ghostly-file`,
- * src-tauri/src/file_stream.rs), in the real WebView under the app's real policy: macOS (WKWebView, the #230
+ * apps/desktop/src/file_stream.rs), in the real WebView under the app's real policy: macOS (WKWebView, the #230
  * driver) and Linux/Windows (tauri-driver). The same page scripts for every engine.
  */
 
@@ -141,7 +141,7 @@ export function playFromStore(app: DesktopApp, place: { space: string; id: strin
 }
 
 /**
- * The Desktop binary started by hand and driven through its own test driver (`src-tauri/src/e2e_driver.rs`, a debug
+ * The Desktop binary started by hand and driven through its own test driver (`apps/desktop/src/e2e_driver.rs`, a debug
  * build with `--features e2e-driver`), as the macOS tests are. Windows uses it: tauri-driver's msedgedriver never
  * attached to the app's WebView2 on the GitHub runner ("DevToolsActivePort file doesn't exist"), while the app itself
  * ran fine there.
@@ -152,7 +152,9 @@ export async function openDriven(env: Record<string, string> = {}): Promise<{ ap
   const log: string[] = [];
   const child = spawn(desktopBinary(), [], {
     stdio: ["ignore", "pipe", "pipe"],
-    env: { ...process.env, GHOSTLY_PROFILE: "e2e-stream", GHOSTLY_E2E_DRIVER: String(port), GHOSTLY_E2E_DRIVER_TOKEN: token, ...env },
+    // GHOSTLY_E2E: never a new profile's default Mainnet wallets (#682). This driver sets no navigator.webdriver, and
+    // the build has the real bundle id.
+    env: { ...process.env, GHOSTLY_E2E: "1", GHOSTLY_PROFILE: "e2e-stream", GHOSTLY_E2E_DRIVER: String(port), GHOSTLY_E2E_DRIVER_TOKEN: token, ...env },
   });
   for (const stream of [child.stdout, child.stderr]) stream?.on("data", (chunk: Buffer) => log.push(chunk.toString()));
   let exited: number | null | undefined;
@@ -189,7 +191,7 @@ export function servedRequests(log: string): Served[] {
 }
 
 export interface FullscreenReport {
-  /** `document.fullscreenEnabled`: false where the engine has the API off (WKWebView before src-tauri/src/fullscreen.rs). */
+  /** `document.fullscreenEnabled`: false where the engine has the API off (WKWebView before apps/desktop/src/fullscreen.rs). */
   enabled: boolean;
   /** Where `requestFullscreen` got: the element full screen, or why not. */
   entered: boolean;

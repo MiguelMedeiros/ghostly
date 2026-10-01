@@ -55,7 +55,7 @@ describe.skipIf(!process.env.GHOSTLY_BENCH && import.meta.env.MODE !== "bench")(
     localStorage.setItem("gb-sessions-imported", "1");
     const { db } = await import("../src/engine/db");
     const sync = await import("../src/platform/sync");
-    const storage = await import("../../../src/lib/storage");
+    const storage = await import("../../../apps/ui/src/lib/storage");
     for (const [linkId, count] of [...Object.entries(CHATS), ["group:g", 2000]] as const) for (let i = 0; i < count; i++) await db.putMessage(message(linkId, i));
     for (const chat of Object.keys(CHATS)) {
       storage.saveSession({ id: chat, mySeedB64: `seed-${chat}`, peerPubKeyB64: `peer-${chat}`, encKeyB64: "enc", messages: [], createdAt: 1, deliveryMode: "stream", profile: "paired-chat/1" });

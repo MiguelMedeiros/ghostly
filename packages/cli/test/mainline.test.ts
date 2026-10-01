@@ -3,7 +3,8 @@ import { GhostLink, createIdentity, edgeParams, randomBytes, toBase64Url, type I
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { Mainline, RelaysAndDht } from "../src/runtime/mainline";
-import { ghostly, home, ok, Running } from "./support/cli";
+import { mainlineNetwork, pkarrRelays } from "../src/runtime/engine";
+import { error, ghostly, home, ok, Running } from "./support/cli";
 // covers: headless.daemon, headless.groups, core.relay-client
 
 /**
@@ -106,6 +107,44 @@ describe("Pkarr over the Mainline DHT, beside the relays", { timeout: 60_000 }, 
     } finally {
       await Promise.all([a.stop(false), b.stop(false)]);
     }
+  });
+});
+
+describe("a private network's relays (GHOSTLY_PKARR_RELAYS)", { timeout: 60_000 }, () => {
+  it("are read from the environment, and leave the public DHT out unless a bootstrap is given", () => {
+    expect(pkarrRelays({})).toBeNull();
+    expect(pkarrRelays({ GHOSTLY_PKARR_RELAYS: " http://127.0.0.1:49501 , https://relay.lan/ ," })).toEqual(["http://127.0.0.1:49501", "https://relay.lan/"]);
+    expect(() => pkarrRelays({ GHOSTLY_PKARR_RELAYS: "relay.lan" })).toThrow(expect.objectContaining({ code: "usage", message: expect.stringMatching(/http:\/\/ or https:\/\//) }));
+    expect(mainlineNetwork({ GHOSTLY_PKARR_RELAYS: "http://127.0.0.1:49501" })).toEqual({ off: true });
+    expect(mainlineNetwork({ GHOSTLY_PKARR_RELAYS: "http://127.0.0.1:49501", GHOSTLY_DHT_BOOTSTRAP: "127.0.0.1:49502" })).toEqual({ off: false, bootstrap: ["127.0.0.1:49502"], host: "127.0.0.1" });
+    expect(mainlineNetwork({})).toEqual({ off: false });
+  });
+
+  it("are the only relays: the profile's relays setting does not replace them, and without a DHT they carry everything", async () => {
+    const store = { down: false, packets: new Map<string, Uint8Array>() };
+    const a = new RelaysAndDht(null, { relays: RELAYS, fetch: relays(store), log: () => {} }, true);
+    a.configure({ relays: ["https://pkarr.example.org"], readRelays: false });
+    expect(a.describe()).toEqual({ protocol: "Pkarr relays (HTTP)", relays: RELAYS });
+    const me = createIdentity();
+    await a.publish(me, [{ label: "_hello", value: "private" }]);
+    expect(store.packets.size).toBe(1);
+    expect((await a.resolve(me.pubKeyZ32))?.records[0].value).toBe("private");
+    // Not pinned: the setting replaces them, as before.
+    const b = new RelaysAndDht(null, { relays: RELAYS, fetch: relays(store), log: () => {} });
+    b.configure({ relays: ["https://pkarr.example.org"], readRelays: false });
+    expect(b.describe().relays).toEqual(["https://pkarr.example.org"]);
+  });
+
+  it("are what a profile uses from its first run, whatever its setting says; a bad one is a usage error", async () => {
+    const dir = home("pinned-relays");
+    const url = "http://127.0.0.1:49503";
+    const as = (...args: string[]) => ghostly(["--home", dir, ...args], { env: { GHOSTLY_PKARR_RELAYS: url } });
+    expect(ok(await as("status")).discovery).toEqual({ protocol: "Pkarr relays (HTTP)", relays: [url] });
+    ok(await as("settings", "set", "relays", JSON.stringify(["http://127.0.0.1:49504"])));
+    expect(ok(await as("status")).discovery).toEqual({ protocol: "Pkarr relays (HTTP)", relays: [url] });
+    // Unset, the profile's own setting is back.
+    expect((ok(await ghostly(["--home", dir, "status"])).discovery as { relays: string[] }).relays).toEqual(["http://127.0.0.1:49504"]);
+    error(await ghostly(["--home", dir, "status"], { env: { GHOSTLY_PKARR_RELAYS: "relay.lan" } }), "usage", 2);
   });
 });
 

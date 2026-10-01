@@ -4,12 +4,12 @@ import { join } from "node:path";
 const ROOT = join(import.meta.dirname, "..", "..");
 
 /**
- * A Mainline DHT of a few nodes on 127.0.0.1 (cli/examples/mainline_testnet.rs, the same `mainline` crate the
+ * A Mainline DHT of a few nodes on 127.0.0.1 (native/transports/examples/mainline_testnet.rs, the same `mainline` crate the
  * Desktop runs), for Desktop apps started with GHOSTLY_PKARR_DHT_BOOTSTRAP: they read and publish on it as they
  * would on the real DHT, and nothing leaves the machine. The first run compiles the example (cargo).
  */
 export async function mainlineTestnet(nodes = 8): Promise<{ bootstrap: string; close: () => void }> {
-  const child = spawn("cargo", ["run", "--quiet", "--manifest-path", join(ROOT, "cli", "Cargo.toml"), "--example", "mainline_testnet", "--", String(nodes)], {
+  const child = spawn("cargo", ["run", "--quiet", "--manifest-path", join(ROOT, "native", "transports", "Cargo.toml"), "--example", "mainline_testnet", "--", String(nodes)], {
     cwd: ROOT,
     stdio: ["pipe", "pipe", "inherit"],
   });

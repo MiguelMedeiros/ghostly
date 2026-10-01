@@ -156,6 +156,37 @@ function parseDescriptors(value: unknown): CapsDescriptors | null {
   return out;
 }
 
+/**
+ * A group link's transports in its own packet (`_tr`, WISP 9xx § Transports): a group's edge or entry session has no
+ * capability record, so an app with no WebRTC (the Linux Desktop) says there which layer-1 transports it runs and how to
+ * dial its native ones, and a member's app that has WebRTC answers in kind. The same minimum a record carries: keys and
+ * relays, never an address. Sealed with the link key like every other label of the packet.
+ */
+export interface PacketTransports {
+  transports: PairedTransportName[];
+  descriptors: CapsDescriptors;
+}
+type PairedTransportName = "iroh/1" | "hyperdht/1" | "webrtc/1";
+const PACKET_TRANSPORTS: readonly string[] = ["iroh/1", "hyperdht/1", "webrtc/1"];
+
+/** The `_tr` value: `{"t": transports, "d": descriptors}`, versionless and additive (an unknown field is ignored). */
+export function encodePacketTransports(transports: readonly string[], descriptors: TransportDescriptors | undefined): string {
+  return JSON.stringify({ t: transports.filter(t => PACKET_TRANSPORTS.includes(t)), d: capsDescriptors(descriptors) });
+}
+
+/** A `_tr` value read from a packet; null when it is not one (a reader drops it, as a record it cannot read). */
+export function parsePacketTransports(json: string | null): PacketTransports | null {
+  if (!json || json.length > 1_000) return null;
+  try {
+    const value = JSON.parse(json) as { t?: unknown; d?: unknown };
+    if (!value || typeof value !== "object" || !Array.isArray(value.t) || value.t.length > CAPS_LIMITS.transports) return null;
+    const transports = value.t.filter((t): t is PairedTransportName => typeof t === "string" && PACKET_TRANSPORTS.includes(t));
+    const descriptors = parseDescriptors(value.d ?? {});
+    if (!descriptors) return null;
+    return { transports: [...new Set(transports)], descriptors };
+  } catch { return null; }
+}
+
 /** Keys of the capability record of one link: my record's key and seals, the contact's address. */
 export class CapsKeys {
   readonly from: string;
@@ -322,14 +353,17 @@ export class CapsExchange {
   private async persist(next: CapsState): Promise<void> { await this.options.save(structuredClone(next)); this.state = next; }
 
   start(): void {
-    if (this.running) return;
+    if (this.running || this.ended) return;
     this.running = true;
     void this.update().catch(() => {});
     // Paired, and the contact's record never read: once. After that, a newer revision named in an envelope,
-    // a drop or a new pin is what reads it again, not every start.
-    if (this.options.credentials.peerKey && !this.state.peer) this.refresh(true);
+    // a drop or a new pin is what reads it again, not every start. One named before a late start is read now.
+    if (this.options.credentials.peerKey && (!this.state.peer || this.named > this.state.peer.rev)) this.refresh(true);
   }
+  /** Stopped for good: a start still waiting (the engine starts it once the chat's endpoints are up) does nothing. */
+  private ended = false;
   async stop(): Promise<void> {
+    this.ended = true;
     this.running = false;
     if (this.timer) clearTimeout(this.timer);
     if (this.readTimer) clearTimeout(this.readTimer);

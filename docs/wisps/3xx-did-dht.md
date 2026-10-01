@@ -6,7 +6,7 @@
 | Status | Draft |
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [01](01-ghost-core.md), [02](02-peer-keys.md), [04](04-profiles.md), [05](05-backups.md), [300](300-peer-proofs.md) |
-| Implementation | Experimental, web, desktop and extension: `packages/core/src/didDht.ts`, `packages/browser/src/engine/did.ts`, `src/components/identities/PublicDid.tsx`, Desktop `publish_signed_packet` |
+| Implementation | Experimental, web, desktop and extension: `packages/core/src/didDht.ts`, `packages/browser/src/engine/did.ts`, `apps/ui/src/components/identities/PublicDid.tsx`, Desktop `publish_signed_packet` |
 | Summary | Every profile gets a public identifier of its own, a did:dht that any resolver reads from the DHT, with no Ghostly server. |
 | Availability | Available |
 | Notes | Experimental. Its own key, never a chat's; it lists an identity only when you switch it on. Web, desktop and extension. Number not yet assigned. |
@@ -15,7 +15,7 @@
 
 ## Purpose
 
-Every Ghostly profile has a W3C [Decentralized Identifier](https://www.w3.org/TR/did-core/) of the [did:dht](https://did-dht.com) method (DIF, specification version 0): a DID document written as DNS records into the Pkarr packet of an Ed25519 key and stored in the Mainline DHT as a BEP44 mutable item, the same mechanism Ghostly uses for chats ([01](01-ghost-core.md)). Any did:dht resolver reads it, with no Ghostly server involved.
+Every Ghostly profile has a W3C [Decentralized Identifier](https://www.w3.org/TR/did-core/) of the [did:dht](https://github.com/decentralized-identity/did-dht/blob/main/spec/spec.md) method (DIF, specification version 0): a DID document written as DNS records into the Pkarr packet of an Ed25519 key and stored in the Mainline DHT as a BEP44 mutable item, the same mechanism Ghostly uses for chats ([01](01-ghost-core.md)). Any did:dht resolver reads it, with no Ghostly server involved.
 
 The DID is one identifier a person can give out in public. Chats never use it. By default its document says nothing but its key; the person may list some of their identities in it, one switch at a time.
 
@@ -26,7 +26,7 @@ Ghostly has no profile-wide key pair: every chat has its own participation key (
 - an Ed25519 key made the first time the profile's peer starts, and never changed (did:dht identity keys cannot rotate);
 - kept in the profile's peer database (the settings record `profileDid`), its seed sealed with a device key the way proof-key seeds are ([300](300-peer-proofs.md));
 - used for nothing but this DID: never for a chat, a signal, a proof or a group;
-- carried by a profile backup ([05](05-backups.md)), so a restored profile keeps its DID; clearing the profile's data or removing the profile ends it (the next start makes a new DID, and the old document leaves the DHT within hours).
+- carried by a profile backup ([05](05-backups.md)), so a restored profile keeps its DID; clearing the profile's data or removing the profile ends it (the next start makes a new DID, and the old document leaves the DHT within hours). Clearing first publishes, when the DID was ever published, a newer packet whose root record reads `deactivated`, so resolvers report the DID as deactivated until that record expires too; best effort, and never in the way of the clear.
 
 A key has exactly one Pkarr packet: a second packet under the same key replaces the first. Nothing else publishes under the DID key today, so its packet holds the DID document alone. Records added under this key in the future MUST go into the same signed packet as the document, and the whole packet MUST fit 1000 bytes; the encoder takes such records and checks the combined size.
 
@@ -114,8 +114,8 @@ A client MUST publish a profile's DID only under that profile's DID key, never u
 
 - The specification's official vectors 1 to 3 (`decentralized-identity/did-dht` commit `3fa9536`), both ways, plus strict-parsing refusals and resolution: `packages/core/test/didDht.test.ts`.
 - Interoperability with `@web5/dids` 1.2.0 both ways (Ghostly publishes and web5 resolves; web5 publishes and Ghostly resolves), through a relay in the test process and, with `GHOSTLY_PKARR_RELAY`, the `pkarr-relay` 2.0.2 binary: `packages/browser/test/didDhtInterop.test.ts`.
-- Desktop publishes a packet the TypeScript peer signed, byte for byte: `src-tauri/src/commands.rs`.
-- Engine (key, publish, hourly refresh, listing, removal, expiry, offline, failure): `packages/browser/test/profileDid.test.ts`; UI: `src/test/identities/publicDid.test.tsx`; end to end, the web app publishes and `@web5/dids` resolves the key alone, then a listed Nostr identity, then without it: `e2e/web/did-dht.spec.ts`.
+- Desktop publishes a packet the TypeScript peer signed, byte for byte: `apps/desktop/src/commands.rs`.
+- Engine (key, publish, hourly refresh, listing, removal, expiry, offline, failure): `packages/browser/test/profileDid.test.ts`; UI: `apps/ui/src/test/identities/publicDid.test.tsx`; end to end, the web app publishes and `@web5/dids` resolves the key alone, then a listed Nostr identity, then without it: `e2e/web/did-dht.spec.ts`.
 
 ## Open decisions
 
@@ -126,7 +126,7 @@ A client MUST publish a profile's DID only under that profile's DID key, never u
 
 ## References
 
-- [did:dht Method Specification](https://did-dht.com) and its [registry](https://did-dht.com/registry/), Decentralized Identity Foundation.
+- [did:dht Method Specification](https://github.com/decentralized-identity/did-dht/blob/main/spec/spec.md) and its [registry](https://github.com/decentralized-identity/did-dht/blob/main/spec/registry/spec.md), Decentralized Identity Foundation.
 - [Decentralized Identifiers (DIDs) v1.0](https://www.w3.org/TR/did-core/), W3C.
 - [BEP 44](https://www.bittorrent.org/beps/bep_0044.html), storing arbitrary data in the DHT; [Pkarr](https://pkarr.org).
 - [RFC 1035](https://datatracker.ietf.org/doc/html/rfc1035), [RFC 7638](https://datatracker.ietf.org/doc/html/rfc7638).

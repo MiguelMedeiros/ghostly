@@ -4,8 +4,8 @@ How a Ghostly profile proves who it is to a contact, and how a contact's identit
 
 ## Profiles
 
-- A device holds several **local profiles** ([WISP 04](wisps/04-profiles.md), `src/lib/profiles.ts`). Each has its own chats, contacts, settings, wallets and lock. Nothing about profiles is sent to a contact.
-- Switch profiles from the account bar (Alt+Shift+P) or, on a phone, by holding the Settings tab (`src/components/ProfileSwitcher.tsx`).
+- A device holds several **local profiles** ([WISP 04](wisps/04-profiles.md), `apps/ui/src/lib/profiles.ts`). Each has its own chats, contacts, settings, wallets and lock. Nothing about profiles is sent to a contact.
+- Switch profiles from the account bar (Alt+Shift+P) or, on a phone, by holding the Settings tab (`apps/ui/src/components/ProfileSwitcher.tsx`).
 
 ### Profile DID (did:dht)
 
@@ -44,20 +44,20 @@ Notes:
 
 ## The Identities page
 
-- Route `/identities` (`src/pages/Identities.tsx`), in the account bar and the phone's tab bar (#144).
+- Route `/identities` (`apps/ui/src/pages/Identities.tsx`), in the account bar and the phone's tab bar (#144).
 - **New** in the page header opens the add dialog (#275).
 - Sections: **Yours** (the Ghostly card first, then each proof), **From your contacts**, and Nostr once there is a key.
-- Cards are an ID-card deck, the same deck as the wallets (`src/components/deck/`, faces in `src/components/identities/IdCardFace.tsx`).
+- Cards are an ID-card deck, the same deck as the wallets (`apps/ui/src/components/deck/`, faces in `apps/ui/src/components/identities/IdCardFace.tsx`).
 
 ## Sharing in a chat
 
 - **+ → Identity** in a paired 1:1 chat opens the picker, a deck of your ID cards (#164). Groups have no identity picker.
 - "Use …" turns the card over (#172). Its back offers **Share with {contact}**, **Stop sharing** or **Share again**. The picker closes after a share (#308).
-- Each share shows in the timeline as a small ID card ("You shared …" / "{contact} shared …") with its state: Checking, Verified, Not verified, Waiting, Not checked (`src/components/identities/IdentityShareLine.tsx`, #308). These lines are local: never sent, never unread.
+- Each share shows in the timeline as a small ID card ("You shared …" / "{contact} shared …") with its state: Checking, Verified, Not verified, Waiting, Not checked (`apps/ui/src/components/identities/IdentityShareLine.tsx`, #308). These lines are local: never sent, never unread.
 
 ## A contact's identities
 
-- **Marks** (`src/components/identities/ContactMarks.tsx`, #176): verified identities show as small marks in the chat list and group members (up to 2, then "+N").
+- **Marks** (`apps/ui/src/components/identities/ContactMarks.tsx`, #176): verified identities show as small marks in the chat list and group members (up to 2, then "+N").
 - **Chat header** (#267): the marks open the contact's identities panel ("Identities with {name}"). With nothing shared, a quiet Ghostly mark still opens it.
 - **Card on a mark** (#311): hover (300 ms), keyboard focus or a long press shows that identity's card.
 - **Show as** (#311): in the panel, pick one of the contact's verified identities to use its name and photo in the chat list, header and mentions. Only on this device, never sent. Name order: your nickname, the chosen identity, the contact's own name, "Contact · xxxxxx".
@@ -78,4 +78,4 @@ Notes:
 | Providers | `packages/browser/src/proofs/providers/` |
 | Profile DID | `packages/browser/src/engine/did.ts`, `packages/core/src/didDht.ts` |
 | Public profiles | `packages/browser/src/profiles/` |
-| UI | `src/pages/Identities.tsx`, `src/components/identities/` |
+| UI | `apps/ui/src/pages/Identities.tsx`, `apps/ui/src/components/identities/` |

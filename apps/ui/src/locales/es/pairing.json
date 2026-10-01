@@ -1,0 +1,65 @@
+{
+  "attempt": "intento {{n}}",
+  "contact": "Tu contacto",
+  "done": "hecho",
+  "elapsed": "{{time}} en este paso",
+  "indicator": "Emparejamiento · {{stage}}",
+  "newInvite": "Pide a tu contacto una invitación nueva.",
+  "onDht": {
+    "chosen": "Se eligió Solo DHT para este chat.",
+    "noCommonTransport": "Vuestras apps no comparten ningún transporte directo. Los textos cortos van por la DHT.",
+    "transport": "Aún no se abrió una conexión directa. Se sigue intentando en segundo plano.",
+    "waiting": "Se está intentando una conexión directa en segundo plano."
+  },
+  "reason": {
+    "expired": "Esta invitación ha caducado.",
+    "keyMismatch": "La clave de este contacto no coincide con la guardada. No se aceptó nada.",
+    "offline": "No tienes conexión. El emparejamiento sigue cuando vuelvas a estar en línea.",
+    "publish": "No se pudo publicar tu invitación en la red. Revisa tu conexión.",
+    "rejected": "La app de tu contacto rechazó la conexión.",
+    "resolve": "No se encontró la invitación en la red. Puede ser antigua o estar mal copiada.",
+    "taken": "Otra persona se unió antes con esta invitación. Pide una nueva a tu contacto.",
+    "timeout": "La app de tu contacto no respondió a tiempo.",
+    "transport": "No se pudo abrir un enlace directo entre tus dispositivos.",
+    "unknown": "Algo salió mal al conectar."
+  },
+  "retry": "Reintentar",
+  "retrying": "Reintentando…",
+  "sayHello": "Ya podéis chatear. ¡Saluda!",
+  "showProgress": "Mostrar el progreso del emparejamiento",
+  "slow": {
+    "answering": "Todavía intercambiando claves con tu contacto…",
+    "connecting": "Todavía abriendo un enlace directo. Las redes restrictivas pueden tardar más.",
+    "knocking": "La app de tu contacto aún no responde. Puede estar cerrada o sin conexión.",
+    "publishing": "Todavía publicando tu invitación. La red tarda en responder.",
+    "resolving": "Todavía buscando a tu contacto en la red…",
+    "waiting": "Tu contacto aún no ha abierto la invitación. Sigue siendo válida, así que puedes compartirla otra vez."
+  },
+  "stage": {
+    "answeringInviter": "Tu contacto llamó. Respondiendo…",
+    "answeringJoiner": "Tu contacto está respondiendo…",
+    "connecting": "Abriendo un enlace directo y cifrado…",
+    "contactSeen": "Tu contacto abrió la invitación. Conectando…",
+    "failed": "No se pudo conectar",
+    "knocking": "Llamando a la puerta de tu contacto…",
+    "live": "Conectado",
+    "onDht": "En la DHT. Ya puedes chatear; se está intentando una conexión directa",
+    "publishing": "Publicando tu invitación en la red…",
+    "resolving": "Buscando la invitación en la red…",
+    "waiting": "Esperando a que tu contacto abra la invitación"
+  },
+  "step": {
+    "answering": "Responder",
+    "connecting": "Conectar",
+    "failed": "Falló",
+    "knocking": "Llamar",
+    "live": "En vivo",
+    "onDht": "En la DHT · reintentando conexión directa",
+    "publishing": "Publicar",
+    "resolving": "Buscar",
+    "waiting": "Esperar"
+  },
+  "stepOf": "Paso {{n}} de {{total}}",
+  "steps": "Pasos del emparejamiento",
+  "you": "Tú"
+}

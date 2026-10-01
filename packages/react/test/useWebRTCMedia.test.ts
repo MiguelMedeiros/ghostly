@@ -8,7 +8,7 @@ import { renderCall, settle } from "./harness";
 
 /**
  * A call whose media is not the page's own WebRTC: Ghostly Desktop on Linux, whose WebKitGTK has none, brings a
- * stand-in with the same shape (src/desktop/nativeCalls.ts). The hook uses what it is given for the connection
+ * stand-in with the same shape (apps/ui/src/desktop/nativeCalls.ts). The hook uses what it is given for the connection
  * and the camera, and where the screen cannot be shared, the call window says why instead of hiding it.
  */
 

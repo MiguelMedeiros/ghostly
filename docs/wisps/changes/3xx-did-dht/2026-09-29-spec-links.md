@@ -1,0 +1,1 @@
+The links to the did:dht method specification and its registry now point at the specification's source on GitHub (decentralized-identity/did-dht, spec/spec.md and spec/registry/spec.md), because the did-dht.com domain no longer resolves. No requirement, record or wire identifier changed.

@@ -11,6 +11,7 @@ import { GROUP_ID, MEMBER_KEY, rosterAdmin, rosterHas, sortRoster, type GroupRol
 import { mentionsBytes, validMentions, wireMentions, type GroupMention } from "./groupMentions";
 import { groupReplyAuthor, readReply, wireReply, type WireReply } from "./replies";
 import { readForwarded } from "./forwards";
+import { cardEditNumber, readStatusCard, statusCardBytes, type StatusCard } from "./statusCards";
 import { communityEditFrame, communityMessageAuthor, validEditText } from "./groupEdits";
 import { RateWindow, validEditNumber } from "./pairedEdits";
 import {
@@ -288,7 +289,7 @@ export interface CommunityState {
   meta?: GroupMeta;
 }
 
-export interface CommunityIncomingMessage { id: string; sender: string; epoch: number; seq: number; timestamp: number; text: string; mentions?: GroupMention[]; reply?: WireReply; forwarded?: number }
+export interface CommunityIncomingMessage { id: string; sender: string; epoch: number; seq: number; timestamp: number; text: string; mentions?: GroupMention[]; reply?: WireReply; forwarded?: number; card?: StatusCard }
 /**
  * What an application sends through the group rather than as text: `frame` for everyone in the epoch (the group
  * reads it, as it reads text), or, in `pair`, a payload only `to` can open. Delivered once, like a message: the
@@ -945,9 +946,10 @@ export class CommunitySession {
   /**
    * `mentions`: places of the text that name members, sealed with it (`m`). Never everyone in a community. They
    * count against the text's 16 KiB, so the box stays within what older apps accept. `reply`: the message it
-   * answers (`r`), counted the same way. `forwarded`: a forwarded text's hop count (`fw`, WISP 9xx § Forwards).
+   * answers (`r`), counted the same way. `forwarded`: a forwarded text's hop count (`fw`, WISP 9xx § Forwards). `card`:
+   * a status card, checked by the caller (`sc`, WISP 4xx · Status Cards), counted the same way; the text is its fallback.
    */
-  sendText(text: string, nick?: string, now = Date.now(), mentions: readonly GroupMention[] = [], reply?: WireReply, forwarded?: number): Promise<{ id: string } | { error: string }> {
+  sendText(text: string, nick?: string, now = Date.now(), mentions: readonly GroupMention[] = [], reply?: WireReply, forwarded?: number, card?: StatusCard): Promise<{ id: string } | { error: string }> {
     return this.serialize(async () => {
       if (!this.isMember) return { error: this.state.statusReason ?? "You are not in this group" };
       const trimmed = text.trim();
@@ -956,10 +958,10 @@ export class CommunitySession {
       const answers = reply && readReply(wireReply(reply), groupReplyAuthor);
       const replyBytes = answers ? utf8Encode(JSON.stringify(answers)).length : 0;
       const hops = readForwarded(forwarded);
-      if (utf8Encode(trimmed).length + mentionsBytes(named) + replyBytes + (hops ? 16 : 0) > COMMUNITY_LIMITS.textBytes) return { error: "Message exceeds 16 KiB" };
-      const sent = await this.sendPayload(() => ({ text: trimmed, ...(named.length ? { m: named } : {}), ...(answers ? { r: answers } : {}), ...(hops ? { fw: hops } : {}) }), nick, now);
+      if (utf8Encode(trimmed).length + mentionsBytes(named) + replyBytes + (hops ? 16 : 0) + (card ? statusCardBytes(card) + 8 : 0) > COMMUNITY_LIMITS.textBytes) return { error: "Message exceeds 16 KiB" };
+      const sent = await this.sendPayload(() => ({ text: trimmed, ...(named.length ? { m: named } : {}), ...(answers ? { r: answers } : {}), ...(hops ? { fw: hops } : {}), ...(card ? { sc: card } : {}) }), nick, now);
       if ("error" in sent) return sent;
-      await this.hooks.message({ id: sent.id, sender: this.myKey, epoch: sent.frame.e, seq: sent.frame.n, timestamp: now, text: trimmed, ...(named.length ? { mentions: named } : {}), ...(answers ? { reply: answers } : {}), ...(hops ? { forwarded: hops } : {}) });
+      await this.hooks.message({ id: sent.id, sender: this.myKey, epoch: sent.frame.e, seq: sent.frame.n, timestamp: now, text: trimmed, ...(named.length ? { mentions: named } : {}), ...(answers ? { reply: answers } : {}), ...(hops ? { forwarded: hops } : {}), ...(card ? { card } : {}) });
       await this.persist();
       this.hooks.broadcast(sent.frame);
       return { id: sent.id };
@@ -988,15 +990,15 @@ export class CommunitySession {
    * to the current epoch, but with a text's room rather than an application frame's, since it carries a whole text.
    * The nick is left out when the text leaves no room for it.
    */
-  sendEdit(edit: { id: string; v: number; ts: number; text: string; mentions?: readonly GroupMention[] }, nick?: string, now = Date.now()): Promise<{ id: string } | { error: string }> {
+  sendEdit(edit: { id: string; v: number; ts: number; text: string; mentions?: readonly GroupMention[]; card?: StatusCard }, nick?: string, now = Date.now()): Promise<{ id: string } | { error: string }> {
     return this.serialize(async () => {
       if (!this.isMember) return { error: this.state.statusReason ?? "You are not in this group" };
       if (communityMessageAuthor(edit.id) !== this.myKey) return { error: "Only your own messages can be edited" };
-      if (!validEditNumber(edit.v)) return { error: "This message was edited too many times" };
+      if (!(edit.card ? cardEditNumber(edit.v) : validEditNumber(edit.v))) return { error: "This message was edited too many times" };
       const text = edit.text.trim();
       if (!validEditText(text)) return { error: text ? "Message exceeds 16 KiB" : "An edit cannot be empty" };
       const named = validMentions(wireMentions(edit.mentions ?? []), text, false);
-      const frame = communityEditFrame({ id: edit.id, e: edit.v, ts: edit.ts, m: text, k: named });
+      const frame = communityEditFrame({ id: edit.id, e: edit.v, ts: edit.ts, m: text, k: named, ...(edit.card && { sc: edit.card }) });
       // What a message's box holds (`isMessageFrame`): the text's bound and a little more.
       const room = COMMUNITY_LIMITS.textBytes + 256, clean = sanitizeNick(nick);
       const size = (withNick: boolean) => utf8Encode(JSON.stringify(withNick && clean ? { x: frame, nick: clean } : { x: frame })).length;
@@ -1134,7 +1136,7 @@ export class CommunitySession {
     if (!secret) { this.park(from, raw); return true; }
     const payload = decryptText(epochKeys(fromBase64Url(secret), this.id, raw.e).message, messageAad(raw), raw.nn, raw.c);
     if (payload === null) return false;
-    let parsed: { text?: unknown; nick?: unknown; x?: unknown; p?: unknown; m?: unknown; r?: unknown; fw?: unknown };
+    let parsed: { text?: unknown; nick?: unknown; x?: unknown; p?: unknown; m?: unknown; r?: unknown; fw?: unknown; sc?: unknown };
     try { parsed = JSON.parse(payload) as typeof parsed; } catch { return false; }
     if (!isObject(parsed)) return false;
     const text = typeof parsed.text === "string" ? parsed.text.slice(0, COMMUNITY_LIMITS.textBytes) : undefined;
@@ -1148,7 +1150,9 @@ export class CommunitySession {
       // A reply that does not hold is left out, never the text.
       const reply = parsed.r === undefined ? undefined : readReply(parsed.r, groupReplyAuthor);
       const forwarded = readForwarded(parsed.fw);
-      await this.hooks.message({ id, sender: raw.s, epoch: raw.e, seq: raw.n, timestamp: raw.ts, text, ...(mentions.length ? { mentions } : {}), ...(reply ? { reply } : {}), ...(forwarded ? { forwarded } : {}) });
+      // A card that does not hold is left out: the text, its fallback, shows.
+      const card = parsed.sc === undefined ? undefined : readStatusCard(parsed.sc);
+      await this.hooks.message({ id, sender: raw.s, epoch: raw.e, seq: raw.n, timestamp: raw.ts, text, ...(mentions.length ? { mentions } : {}), ...(reply ? { reply } : {}), ...(forwarded ? { forwarded } : {}), ...(card ? { card } : {}) });
     }
     else if (isObject(parsed.x)) await this.hooks.app?.({ id, sender: raw.s, epoch: raw.e, timestamp: raw.ts, frame: parsed.x });
     else {
@@ -1323,7 +1327,7 @@ export class CommunitySession {
     await this.persist();
     const frame = this.metaFrame();
     if (frame) this.hooks.broadcast(frame);
-    const change = groupMetaChange(before, meta);
+    const change = groupMetaChange(before, meta, this.state.name);
     if (change) this.hooks.metaChanged?.(this.myKey, change);
     this.hooks.changed();
   }
@@ -1367,7 +1371,9 @@ export class CommunitySession {
     const before = this.state.meta;
     this.state.meta = opened.meta;
     await this.persist();
-    const change = groupMetaChange(before, opened.meta);
+    // What the group looked like when I got in is no change: the first statement I take, signed under a commit before
+    // mine, makes no line, nor does a new admin's signing again the name the welcome gave me.
+    const change = !before && !rosterHas(this.rosterAt(s.h) ?? [], this.myKey) ? null : groupMetaChange(before, opened.meta, this.state.name);
     if (change) this.hooks.metaChanged?.(s.by, change);
     this.hooks.changed();
     return true;

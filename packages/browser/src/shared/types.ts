@@ -1,4 +1,4 @@
-import type { DiscoveryStatus, GroupMention, ImageMeta, LinkPreview, PairingProgress, PaymentMethodName, TypingKind, VideoMeta, VoiceMeta, WirePin, WireReaction } from "@ghostly/core";
+import type { DiscoveryStatus, GroupMention, ImageMeta, LinkPreview, PairingProgress, PaymentMethodName, StatusCard, TypingKind, VideoMeta, VoiceMeta, WirePin, WireReaction } from "@ghostly/core";
 import type { UsdtWalletView } from "../engine/paymentAdapters/usdtWallet";
 import type { ArkWalletView } from "../engine/paymentAdapters/arkWallet";
 import type { BarkWalletView } from "../engine/paymentAdapters/barkWallet";
@@ -11,6 +11,7 @@ import type { PaymentReview, PaymentTarget, VapidKeys, WakeTarget, WalletNetwork
 import type { ProviderDescriptorView } from "../engine/paymentAdapters/providers/types";
 import type { CapsState, DeliveryMode, DhtDeliveryState, DhtDeliveryView, HoldKind } from "@ghostly/core";
 import type { S3Config } from "../backup/s3";
+import type { BackupReminders } from "./backupReminder";
 import type { TransportCause, TransportEntry, TransportEvent } from "../engine/transportLog";
 import type { PublicProfile, ProfileChoice } from '../profiles/public';
 import type { NostrContactCache, NostrContactView, NostrSocialSettings, NostrSocialState } from "../nostr/types";
@@ -100,6 +101,13 @@ export interface StoredLink {
    * side, toward a joiner's member key; `guest` on the joiner's, toward the link's entry key.
    */
   groupEntry?: "host" | "guest";
+  /**
+   * An edge whose session is up: set when it opens, cleared when it drops while this app runs (not when the app quits).
+   * Still set when the app starts, it was live when the app last ran, and is dialled at once (`resume`). Local only.
+   */
+  edgeLive?: boolean;
+  /** When that session opened: a member's offer from before it is not answered after a restart (`resumeFloor`). Local only. */
+  edgeLiveSince?: number;
 }
 
 /** What happened to a group's membership, as a line in its history. */
@@ -186,8 +194,13 @@ export interface GroupEdgeView {
    * `waiting`: nothing heard from the member's app yet. `error`: the last attempt failed (`error` says why).
    */
   state: "open" | "connecting" | "waiting" | "error";
-  /** The transport carrying the edge while it is open. Edges only offer WebRTC today. */
+  /** The transport carrying the edge while it is open: WebRTC, or Iroh or HyperDHT where one side has none. */
   transport?: PairedTransport;
+  /**
+   * Waiting because this device has no free native slot for it (a member reached over Iroh or HyperDHT, and the
+   * device's native listeners held by chats and other group links): it is tried again as one frees up.
+   */
+  noSlot?: true;
   /** When this device last heard from the member on this edge, in ms (0: never). */
   lastSeenAt: number;
   error?: string;
@@ -221,6 +234,8 @@ export interface GroupView {
   /** Contact chats that are members, by chat id → member key. */
   memberLinks: Record<string, string>;
   lastMessageAt: number;
+  /** When the latest message from another member arrived (what makes the group unread; mine and membership lines do not); absent for none. */
+  lastPeerMessageAt?: number;
   /** When the latest message that names me arrived; absent for none. */
   lastMentionAt?: number;
   /** The latest reaction in the group, for the chat list. */
@@ -243,6 +258,11 @@ export interface GroupView {
   wakeTokens?: string[];
   /** Private groups: its members were told not to wake this side while the group is muted (`setWakeMuted`). */
   wakeMuted?: boolean;
+  /**
+   * Private groups: the names of authors no longer in the roster (removed, left, or back with a new member key), by
+   * member key, so their earlier messages still say who wrote them. Absent when there are none.
+   */
+  formerNames?: Record<string, string>;
 }
 
 /** A member typing in a group: `kind` when it is not plain typing, and a bot's status line, sanitized as in a 1:1 chat. */
@@ -458,6 +478,8 @@ export interface MintView {
   balance: number;
   /** Null until the mint answered once. */
   info: MintInfoView | null;
+  /** What it still waits for (see `mintAwaiting`), when it does: removing it asks about these first. */
+  awaiting?: WalletAwaitingView[];
 }
 
 /** What a mint says about itself and what it charges. */
@@ -485,7 +507,8 @@ export type WalletTxKind =
   | "lightning-out"
   | "ecash-in" // from a contact, or a pasted token
   | "ecash-out"
-  | "reclaimed";
+  | "reclaimed"
+  | "fee"; // a Lightning payment failed, and the mint kept its fee for preparing it (`amount` 0)
 
 /** One movement of the wallet. `fee` is exact: what left the balance beyond `amount`, or what a redeem cost. */
 export interface WalletTx {
@@ -617,7 +640,26 @@ export interface TestCoinsResult {
   pending?: boolean;
 }
 
+/**
+ * The first-run wallet setup of a new profile: the Mainnet kinds still to make, and why the last try at each failed.
+ * Kept in the settings. Absent on a profile from before it, which is never set up by itself.
+ */
+export interface WalletSetupRecord {
+  /** Kinds not made yet, tried again at each start. A kind with no Mainnet wallet here yet (on-chain) waits quietly. */
+  left: WalletType[];
+  /** Why the last try failed, per kind still left. */
+  failed?: Partial<Record<WalletType, string>>;
+}
+
+/** What the Wallet page shows of the first-run setup: whether it runs now, and each kind it could not make. */
+export interface WalletSetupView {
+  running: boolean;
+  failed: { type: WalletType; network: WalletNetwork; reason: string }[];
+}
+
 export interface WalletView {
+  /** The first-run setup, while it runs or has a kind it could not make; absent otherwise. */
+  setup?: WalletSetupView;
   /** Both networks' wallets, open side by side. The flat fields below are Mainnet's, for a caller naming no network. */
   networks?: Record<WalletNetwork, NetworkWalletsView>;
   /** The wallets this profile has, in the deck's order. */
@@ -643,6 +685,8 @@ export interface WalletView {
   /** Newest first. */
   history: WalletTx[];
   feesPaid: number;
+  /** Each Mainnet wallet's backup reminder, by wallet id: the page works out which asks now (`backupDue`). */
+  backupReminders?: BackupReminders;
 }
 
 export interface StoredMessage {
@@ -695,6 +739,21 @@ export interface StoredMessage {
    * count: never who wrote it first, nor where it came from.
    */
   forwarded?: number;
+  /**
+   * A bot's status card (WISP 4xx · Status Cards): a task or a routine shown instead of `text`, which is its fallback.
+   * It belongs to the version it came with: an edit brings its own, or leaves the message a text.
+   */
+  card?: StatusCard;
+  /**
+   * A reply that presses a button of this side's own message (WISP 4xx · Message Buttons), as the author's engine took
+   * it: set only when the button was open for this person. What `button.pressed` reports.
+   */
+  press?: MessagePress;
+  /**
+   * A question of mine with buttons whose text went on the DHT floor or into a hold, which carry text alone (WISP 4xx ·
+   * Message Buttons): `due` until its buttons go again live, as an edit of the buttons alone; `sent` once they did.
+   */
+  buttonsRestore?: "due" | "sent";
 }
 
 /** A page of a chat's history, oldest first, and whether older messages remain (`messagePage`). */
@@ -723,6 +782,8 @@ export interface ReactionNote {
   snippet: string;
   /** The message was mine. */
   mine: boolean;
+  /** The message's id here: an edit of it changes `snippet`. */
+  message?: string;
 }
 
 /** How a message was edited (WISP 400 § Edits). */
@@ -734,6 +795,11 @@ export interface MessageEdit {
   history: MessageVersion[];
   /** Mine: the contact has not confirmed this edit yet. It goes by itself once the chat is live and both sides offer edit/1. */
   pending?: true;
+  /**
+   * Mine: the engine's own edit that sends a question's buttons again, the text unchanged (WISP 4xx · Message Buttons),
+   * never one a person or a bot made. The bot's event stream reports none for it; a later edit makes a new one without it.
+   */
+  restore?: true;
 }
 
 export interface MessageVersion { at: number; text: string }
@@ -743,6 +809,16 @@ export interface MessageVersion { at: number; text: string }
  * with the reply; the receiver keeps its own view of the original when it has it (`messageId`), and the line and the
  * author then come from there, not from the wire.
  */
+/** A button press on this side's message (WISP 4xx · Message Buttons). */
+export interface MessagePress {
+  /** The message with the buttons, its id here. */
+  messageId: string;
+  button: string;
+  label: string;
+  /** Named by its label or id in the text, not by the reply (the DHT floor, or an app without buttons). */
+  inferred?: true;
+}
+
 export interface MessageReply {
   /** The original's id in this chat as both sides know it: a paired chat's wire, file or payment id; a group message id. */
   id: string;
@@ -752,6 +828,8 @@ export interface MessageReply {
   from?: "me" | "peer";
   /** A group's original: its author's member key. */
   member?: string;
+  /** A button press (WISP 4xx · Message Buttons): the original's button this reply presses, its text the label. */
+  button?: string;
   /**
    * The original here, when it was found in this chat as the reply was kept (always, for a reply sent here). Without
    * it the line is only what the replier's app said: shown, but marked as not checked.
@@ -1000,6 +1078,8 @@ export interface Settings {
    * page; never copied into a backup.
    */
   holdStorage?: { s3: S3Config; space: string } | null;
+  /** The first-run wallet setup (see `WalletSetupRecord`). Only the engine writes it: a settings patch cannot. */
+  walletSetup?: WalletSetupRecord;
   /**
    * This profile's push subscription (the installed web app, WISP 401 § Wake-up push): shared with each paired
    * contact whose app offers `wake/1`, so it can wake this app while it is closed. Absent: not woken.
@@ -1027,6 +1107,8 @@ export interface Settings {
    * itself (a browser page: the services answer without CORS). Empty or absent: none; nobody runs one by default.
    */
   pushRelay?: string;
+  /** The backup reminder of each Mainnet wallet (see `shared/backupReminder`). Only the engine writes it: a settings patch cannot. */
+  backupReminders?: BackupReminders;
 }
 
 /** A browser push subscription and the VAPID key pair it was made with. */
@@ -1277,6 +1359,11 @@ export interface LinkView {
   /** While `peerTyping`: the contact's (a bot's) status line, sanitized: one line, at most 40 characters, no links. */
   peerTypingStatus?: string;
   availableTransports?: PairedTransport[];
+  /**
+   * Every transport this app runs for the chat, started or not: DHT only releases the native ones, and an app with no
+   * WebRTC (the Linux Desktop) then has none started, yet can still leave DHT only for any of these.
+   */
+  runnableTransports?: PairedTransport[];
   /** Transports a session with this contact would cross a relay on (a browser's HyperDHT or Iroh): a fallback, and shown as relayed. */
   relayedTransports?: PairedTransport[];
   deliveryMode?: DeliveryMode;
@@ -1366,11 +1453,24 @@ export interface EngineState {
     direct?: boolean;
     /** How reads go and how each relay is doing, for the connection panel's Details. */
     discovery?: DiscoveryStatus;
+    /** False where this client has no WebRTC (Ghostly Desktop on Linux: WebKitGTK has none). Absent where it has. */
+    webrtc?: false;
+    /**
+     * False where a group's links have no transport at all here: no WebRTC and no native transport (WISP 9xx §
+     * Transports), so no member of a group can be reached from it. Absent where they have one (the Linux Desktop runs
+     * Iroh and HyperDHT).
+     */
+    groupLinks?: false;
   };
   links: LinkView[];
   services: ServiceView[];
   /** Transfers since the peer started, by file id. */
   transfers: Record<string, FileTransferView>;
+  /**
+   * The kept transfers are back in `transfers`. False for the first moments after a start: a file with no transfer
+   * yet may still be moving, not finished.
+   */
+  transfersRestored?: boolean;
   wallet: WalletView;
   payments: Record<string, PaymentView>;
   /** This profile's identity proofs. */

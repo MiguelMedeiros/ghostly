@@ -19,7 +19,7 @@ import {
   type SwapPreview,
 } from "@cashu/cashu-ts";
 import { STORES, openDb, store, transact, wrap } from "../shared/idb";
-import { decodeBolt11, type PaymentReview, type WalletNetwork } from "@ghostly/core";
+import { PaymentPreflightError, decodeBolt11, engineError, engineText, type PaymentReview, type WalletNetwork } from "@ghostly/core";
 import { BITCOIN_INVOICE_ON_TESTNET, fakesLightning, isTestMint, mintNetwork, paysItsOwnInvoices } from "../shared/mints";
 import type {
   CashuInspection,
@@ -51,7 +51,12 @@ const MAX_AMOUNT = 1_000_000;
 /** How long "Get test coins" waits for the test mint to mark its invoice paid before saying the coins come later. */
 const TEST_COINS_WAIT_MS = 30_000;
 const HISTORY_SHOWN = 100;
-export interface CashuPrepared {mint:string;swap:SerializedSwapPreview;token?:string}
+/** `abandoned`: the mint proved the swap never happened (`reviewedCashuNeverSwapped`); it is never sent again. */
+/**
+ * `attemptEndedAt`: when the approval's swap failed with no answer. `abandoned`: the mint proved the swap never
+ * happened (`reviewedCashuNeverSwapped`); it is never sent again.
+ */
+export interface CashuPrepared {mint:string;swap:SerializedSwapPreview;token?:string;attemptEndedAt?:number;abandoned?:boolean}
 
 // SDK 4.x preview.fees covers input swap fees, despite its declaration saying
 // it includes the recipient fee. includeFees(true) also tops up send outputs.
@@ -69,10 +74,10 @@ export function normalizeMintUrl(input: string): string {
   try {
     url = new URL(input.trim());
   } catch {
-    throw new Error("That is not a valid mint URL");
+    throw engineError("invalidMintUrl");
   }
   const local = url.hostname === "localhost" || url.hostname === "127.0.0.1";
-  if (url.protocol !== "https:" && !(local && url.protocol === "http:")) throw new Error("Mints must use https");
+  if (url.protocol !== "https:" && !(local && url.protocol === "http:")) throw engineError("mintNotHttps");
   return `${url.origin}${url.pathname.replace(/\/+$/, "")}`;
 }
 
@@ -113,6 +118,11 @@ const walletTx = (mint: string, kind: WalletTxKind, amount: number, fee: number,
 /** Where a Lightning payment stands, once the mint has been asked. */
 type MeltOutcome = "paid" | "pending" | "unpaid";
 
+/** What a failed payment left in the wallet, said to the person: all of it, or all but the fee the mint kept. */
+const backInWallet = (lost: number) => lost > 0
+  ? `The sats are back in your wallet, less ${lost} sat${lost === 1 ? "" : "s"} the mint kept as its fee.`
+  : "The sats are back in your wallet.";
+
 export interface WalletEvents {
   onChange(): void;
   /** Ecash arrived from the public test mint, which this wallet did not have yet. */
@@ -142,6 +152,8 @@ export class CashuWallet {
   private readonly locks = new Map<string, Promise<unknown>>();
   private quoteTimer: ReturnType<typeof setTimeout> | null = null;
   private meltTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Per melt quote that ended unpaid: the sats the mint kept all the same (the fee of the split before the melt). */
+  private readonly failedFees = new Map<string, number>();
 
   /**
    * `getMints`: the mints of one network (the engine's default when none is named), primary first: balances,
@@ -187,7 +199,7 @@ export class CashuWallet {
     try { wallet = await this.wallet(normalized); }
     catch (error) {
       // "Failed to fetch" says nothing to a person: say which place did not answer, and what it should be.
-      throw Object.assign(new Error(`Could not reach ${new URL(normalized).host}. Check the address: it should be a Cashu mint.`), { cause: error });
+      throw Object.assign(engineError("mintUnreachable", { host: new URL(normalized).host }), { cause: error });
     }
     const info = wallet.getMintInfo();
     const name = info.name || new URL(normalized).hostname;
@@ -438,9 +450,7 @@ export class CashuWallet {
         return { token, mint };
       });
     }
-    throw new Error(
-      candidates.length === 0 && preferred ? "You share no mint with this contact" : "Not enough sats in your wallet",
-    );
+    throw engineError(candidates.length === 0 && preferred ? "noSharedMint" : "notEnoughSats");
   }
 
   async prepareReviewedCashu(mint:string,amount:number):Promise<{fee:number;prepared:CashuPrepared}> {
@@ -457,7 +467,8 @@ export class CashuWallet {
   async executeReviewedCashu(review:PaymentReview,prepared:CashuPrepared):Promise<string> {
     return this.locked(prepared.mint,async()=>{
       const preview=deserializeSwapPreview(prepared.swap);
-      if(prepared.mint!==review.provider || preview.amount.toNumber()!==review.amount || reviewedCashuFee(preview)!==review.fee)throw new Error("Cashu preview does not match review");
+      // Refused before the mint is asked: nothing was sent, and the review fails for good (the request can be paid again).
+      if(prepared.mint!==review.provider || preview.amount.toNumber()!==review.amount || reviewedCashuFee(preview)!==review.fee)throw new PaymentPreflightError("Cashu preview does not match review");
       const tx=(await openDb()).transaction(STORES.proofs,"readwrite");
       await new Promise<void>((resolve,reject)=>{
         const proofs=tx.objectStore(STORES.proofs);
@@ -469,7 +480,7 @@ export class CashuWallet {
             proofs.put({...proof,reserved:true});
           };
         }
-        tx.oncomplete=()=>resolve();tx.onabort=tx.onerror=()=>reject(new Error("Prepared Cashu inputs are no longer available"));
+        tx.oncomplete=()=>resolve();tx.onabort=tx.onerror=()=>reject(new PaymentPreflightError(engineText("reviewedSatsGone")));
       });
       const wallet=await this.wallet(prepared.mint);
       const {keep,send}=await wallet.completeSwap(preview);
@@ -509,6 +520,41 @@ export class CashuWallet {
       stores[STORES.walletTx].put({...walletTx(prepared.mint,"ecash-out",review.amount,review.fee),id:review.id});
     });
     prepared.token=token;this.events.onChange();return token;
+  }
+
+  /**
+   * Proof from the mint that a reviewed swap never happened: every input it would spend reads UNSPENT (not PENDING,
+   * not SPENT), and the mint signed none of its outputs. Read-only: it asks, and never sends the swap.
+   */
+  async reviewedCashuNeverSwapped(prepared:CashuPrepared):Promise<boolean> {
+    const preview=deserializeSwapPreview(prepared.swap);
+    if(!preview.inputs.length)return false;
+    const wallet=await this.wallet(prepared.mint);
+    const states=await wallet.checkProofsStates(preview.inputs.map(p=>({secret:p.secret,id:p.id})));
+    if(states.length!==preview.inputs.length || !states.every(s=>s.state==="UNSPENT"))return false;
+    const outputs=[...(prepared.swap.keepOutputs??[]),...(prepared.swap.sendOutputs??[])].map(OutputData.deserialize);
+    const restored=await wallet.mint.restore({outputs:outputs.map(o=>o.blindedMessage)});
+    return restored.signatures.length===0 && restored.outputs.length===0;
+  }
+
+  /** Gives back the inputs a reviewed swap reserved, once the mint proved it never happened. Idempotent. */
+  async releaseReviewedCashu(prepared:CashuPrepared):Promise<void> {
+    const preview=deserializeSwapPreview(prepared.swap);
+    await this.locked(prepared.mint,async()=>{
+      await transact([STORES.proofs],stores=>{
+        const proofs=stores[STORES.proofs];
+        for(const input of preview.inputs){
+          const request=proofs.get(input.secret);
+          request.onsuccess=()=>{
+            const proof:StoredProof|undefined=request.result;
+            if(!proof || !proof.reserved || proof.mint!==prepared.mint || proof.C!==input.C)return;
+            const {reserved:_released,...free}=proof;
+            proofs.put(free);
+          };
+        }
+      });
+    });
+    this.events.onChange();
   }
 
   async reviewedCashuSpent(prepared:CashuPrepared):Promise<boolean> {
@@ -607,7 +653,7 @@ export class CashuWallet {
         const amount = quote.amount.toNumber();
         const feeReserve = quote.fee_reserve.toNumber();
         if ((await this.balanceAt(mint)) < amount + feeReserve) {
-          lastError = new Error("Not enough sats in your wallet");
+          lastError = engineError("notEnoughSats");
           continue;
         }
         return { quote: quote.quote, mint, amount, feeReserve };
@@ -626,7 +672,7 @@ export class CashuWallet {
   async payQuote(quoteId: string, mint: string, note?: string, paymentId?: string): Promise<boolean> {
     try {
       const outcome = await this.locked(mint, () => this.melt(quoteId, mint, note, paymentId));
-      if (outcome === "unpaid") throw new Error("The Lightning payment did not go through. The sats are back in your wallet.");
+      if (outcome === "unpaid") throw new Error(`The Lightning payment did not go through. ${backInWallet(this.takeFailedFee(quoteId))}`);
       if (outcome === "pending") void this.pollMelts();
       return outcome === "paid";
     } finally {
@@ -678,7 +724,12 @@ export class CashuWallet {
       if (!isMintOperationError(error) && !(error instanceof MeltChangeError)) return "pending";
       // The mint answered (a refusal), or took the proofs and only the change failed: its word decides.
       const outcome = await this.settleMelt(melt).catch((): MeltOutcome => "pending");
-      if (outcome === "unpaid") throw error;
+      if (outcome === "unpaid") {
+        // The mint's refusal ("Invoice already paid") stays what the person reads, with what it cost them.
+        const lost = this.takeFailedFee(melt.quote);
+        if (lost > 0) throw Object.assign(new Error(`${error instanceof Error ? error.message : String(error)} ${backInWallet(lost)}`), { cause: error });
+        throw error;
+      }
       return outcome;
     }
     if (result.quote.state === "PAID") {
@@ -702,6 +753,7 @@ export class CashuWallet {
           return current ? this.settleMelt(current) : null;
         });
         if (outcome === "paid" || outcome === "unpaid") {
+          this.takeFailedFee(melt.quote);
           this.events.onMeltResolved(melt, outcome === "paid");
           this.events.onChange();
         }
@@ -749,14 +801,26 @@ export class CashuWallet {
     if (states.some((s) => s.state === "PENDING")) return "pending";
     const spent = new Set(inputs.filter((_, i) => states[i]?.state === "SPENT").map((p) => p.secret));
     if (spent.size > 0) console.warn(`[wallet] melt ${melt.quote} is unpaid, yet ${spent.size} of its proofs are spent`);
-    await transact([STORES.proofs, STORES.melts], (stores) => {
+    // What left the balance for this payment and does not come back: the fee of the split that made its exact proofs
+    // (the mint keeps it whether the payment goes or not), and any proof it spent anyway. In the history, never silent.
+    const lost = melt.outlay - inputs.filter((p) => !spent.has(p.secret)).reduce((sum, p) => sum + p.amount, 0);
+    await transact([STORES.proofs, STORES.melts, ...(lost > 0 ? [STORES.walletTx] : [])], (stores) => {
       for (const p of inputs) {
         if (spent.has(p.secret)) stores[STORES.proofs].delete(p.secret);
         else stores[STORES.proofs].put({ ...p, reserved: false } satisfies StoredProof);
       }
       stores[STORES.melts].delete(melt.quote);
+      if (lost > 0) stores[STORES.walletTx].put(walletTx(melt.mint, "fee", 0, lost, melt.note ? `Payment failed: ${melt.note}` : "A Lightning payment failed"));
     });
+    if (lost > 0) this.failedFees.set(melt.quote, lost);
     return "unpaid";
+  }
+
+  /** The fee a failed melt cost, once: for the words that say it failed. */
+  private takeFailedFee(quote: string): number {
+    const lost = this.failedFees.get(quote) ?? 0;
+    this.failedFees.delete(quote);
+    return lost;
   }
 
   /** The invoice is paid: the reserved proofs are spent, the change is ours, and the payment goes in the history. */

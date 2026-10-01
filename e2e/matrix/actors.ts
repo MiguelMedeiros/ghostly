@@ -1,6 +1,6 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import type { Locator } from "@playwright/test";
+import { test, type Locator } from "@playwright/test";
 import { createWallet, expect, showNetwork, type CreateWallet, type Peer, type WalletKind, type WalletNetwork } from "../support/fixtures";
 import { choose } from "../support/select";
 import { composerRow } from "../support/composer";
@@ -22,8 +22,8 @@ export interface Actor extends Peer {
 type Tree = { [key: string]: string | Tree };
 const flatten = (tree: Tree, prefix = ""): [string, string][] =>
   Object.entries(tree).flatMap(([k, v]) => (typeof v === "string" ? [[`${prefix}${k}`, v] as [string, string]] : flatten(v, `${prefix}${k}.`)));
-const locales = join(import.meta.dirname, "..", "..", "src", "locales");
-/** A language as `t()` sees it: src/locales/<language>/<area>.json, each area under its file's name. */
+const locales = join(import.meta.dirname, "..", "..", "apps", "ui", "src", "locales");
+/** A language as `t()` sees it: apps/ui/src/locales/<language>/<area>.json, each area under its file's name. */
 const language = (name: string): Tree =>
   Object.fromEntries(readdirSync(join(locales, name)).filter((f) => f.endsWith(".json")).map((f) => [f.slice(0, -5), JSON.parse(readFileSync(join(locales, name, f), "utf8"))]));
 const en = new Map(flatten(language("en")));
@@ -36,9 +36,43 @@ const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
  * Text the app does not translate (hard-coded) is simply matched as it is.
  */
 export function either(english: string): RegExp {
+  return new RegExp(`^${alternatives(english)}$`);
+}
+
+/** The English text or any Portuguese translation of it, as a regular expression group to build a pattern around. */
+export function alternatives(english: string): string {
   const translations = new Set([english]);
   for (const [key, value] of en) if (value === english && pt.get(key)) translations.add(pt.get(key)!);
-  return new RegExp(`^(?:${[...translations].map(escape).join("|")})$`);
+  return `(?:${[...translations].map(escape).join("|")})`;
+}
+
+/** Text that holds the English text or a Portuguese translation of it (a status line with more after it). */
+export const containing = (english: string): RegExp => new RegExp(alternatives(english));
+
+/**
+ * Text written from a string with values in it (`{{amount}} {{unit}} unconfirmed`), in English or Portuguese, whatever
+ * the values: each `{{name}}` matches anything.
+ */
+export function template(english: string): RegExp {
+  const translations = new Set([english]);
+  for (const [key, value] of en) if (value === english && pt.get(key)) translations.add(pt.get(key)!);
+  return new RegExp([...translations].map((t) => t.split(/\{\{\w+\}\}/).map(escape).join(".*?")).join("|"));
+}
+
+/**
+ * Text written from a string with values in it, exactly, in English or Portuguese: each `{{name}}` matches
+ * `values[name]`, a regular expression source (`alternatives("test sats")` for a unit that is translated too).
+ */
+export function filled(english: string, values: Record<string, string>): RegExp {
+  const translations = new Set([english]);
+  for (const [key, value] of en) if (value === english && pt.get(key)) translations.add(pt.get(key)!);
+  const fill = (t: string) => t.split(/(\{\{\w+\}\})/).map((part) => {
+    const name = /^\{\{(\w+)\}\}$/.exec(part)?.[1];
+    if (name === undefined) return escape(part);
+    if (!(name in values)) throw new Error(`filled: no value for {{${name}}} in "${english}"`);
+    return `(?:${values[name]})`;
+  }).join("");
+  return new RegExp(`^(?:${[...translations].map(fill).join("|")})$`);
 }
 
 /** The open conversation, not the chat list. */
@@ -90,7 +124,7 @@ export async function nickname(actor: Actor, name: string): Promise<void> {
 export const composerButton = (actor: Actor, testId: string): Promise<Locator> => composerRow(actor.page, testId);
 
 export async function say(actor: Actor, text: string): Promise<void> {
-  const box = actor.page.getByPlaceholder("Message…");
+  const box = actor.page.getByPlaceholder(either("Message…"));
   await expect(box).toBeEnabled({ timeout: 60_000 });
   await box.fill(text);
   await box.press("Enter");
@@ -122,6 +156,56 @@ export async function paymentCard(actor: Actor, name: string): Promise<void> {
     await target.click();
   }
   await expect(actor.page.getByTestId("payment-amount")).toBeVisible();
+}
+
+/**
+ * The turned card at rest: it turns and grows for half a second (deck/useCardFlip.ts FLIP_MS), and grows again when
+ * the amount changes the line under it. Running transitions are waited on until none is left (a retargeted one
+ * cancels the one before it).
+ */
+async function cardAtRest(actor: Actor): Promise<void> {
+  const flip = actor.page.getByTestId("payment-composer").locator(".deck-flip");
+  if (!(await flip.count())) return;
+  await flip.evaluate(async (el) => {
+    for (let i = 0; i < 20; i++) {
+      const running = el.getAnimations({ subtree: true }).filter((a) => a.playState === "running");
+      if (!running.length) return;
+      await Promise.allSettled(running.map((a) => a.finished));
+    }
+  });
+}
+
+/**
+ * Request or Send on the turned card (after `paymentCard`, the amount and the note), and it went: a request closes the
+ * sheet; a send is under review (or already out). Twice on a slow runner (runs 36683342965 and 36675234574) a Request
+ * clicked while the card was still turning did nothing at all: the sheet stayed with its amount and note, the button
+ * never said Requesting…, no error, nothing sent, and the scenario failed a minute later on the payer's side, waiting
+ * for a request that was never made. Why the click was lost is not known (a local loop clicking mid-turn never lost
+ * one). So the card is at rest first, and a click that left the button as it was (still enabled, no error, sheet still
+ * open) is made again, noted in the test's annotations. A click that took is never repeated: the button is disabled
+ * while it works, and gone once it has worked. An error fails here, with its text.
+ */
+export async function cardAction(actor: Actor, action: "request" | "send"): Promise<void> {
+  const sheet = actor.page.getByTestId("payment-composer");
+  const button = actor.page.getByTestId(`payment-${action}`);
+  const done = action === "request" ? sheet : sheet.getByTestId("payment-review");
+  await cardAtRest(actor);
+  await button.click();
+  let again = 0, failed = "";
+  await expect(async () => {
+    if (action === "request" ? !(await sheet.count()) : await done.count()) return;
+    const error = sheet.getByRole("alert");
+    if (await error.count()) { failed = await error.innerText(); return; }
+    if (await button.isEnabled()) {
+      again++;
+      await cardAtRest(actor);
+      await button.click();
+    }
+    if (action === "request") await expect(sheet).toHaveCount(0, { timeout: 5_000 });
+    else await expect(done).toBeVisible({ timeout: 5_000 });
+  }, `${actor.name}'s ${action} goes out`).toPass({ timeout: 90_000, intervals: [1_000] });
+  if (failed) throw new Error(`${actor.name}'s ${action} failed: ${failed}`);
+  if (again) test.info().annotations.push({ type: "card-action-again", description: `${actor.name}: ${action} clicked ${again} more time(s)` });
 }
 
 /** The wallet page, with one wallet's card in front (see `card` for its name). */

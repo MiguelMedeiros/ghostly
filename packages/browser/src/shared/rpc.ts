@@ -1,5 +1,5 @@
 import type { UsdtCreate } from "../engine/paymentAdapters/usdtWallet";
-import type { GroupMention, LnurlSuccessAction, PaymentReview, PaymentTarget, TypingKind } from "@ghostly/core";
+import type { GroupMention, LnurlSuccessAction, PaymentReview, PaymentTarget, StatusCard, TypingKind } from "@ghostly/core";
 import type { LnurlView } from "../engine/paymentAdapters/providers/lightningService";
 import type { ArkConfig } from "../engine/paymentAdapters/arkade";
 import type { ArkCreate } from "../engine/paymentAdapters/arkWallet";
@@ -12,7 +12,7 @@ import type { SparkNetwork, WalletNetwork } from "@ghostly/core";
 import type { ProfileChoice } from '../profiles/public';
 import type { ProofChallenge, ProofEvidence, ProofAdapter } from "@ghostly/core";
 import type { LinkParams, LinkPreview, PairedTransport, DeliveryMode } from "@ghostly/core";
-import type { CashuInspection, EngineState, MessageDetailsView, MessageFile, MessagePage, PublicGraphView, PublicPostImageView, PublicPostsView, SettingsPatch, StoredMessage, WalletCreate, WalletInstanceView, WalletRemove, WalletTestCoins, TestCoinsResult, WakeSubscription } from "./types";
+import type { CashuInspection, EngineState, MessageDetailsView, MessageFile, MessagePage, PublicGraphView, PublicPostImageView, PublicPostsView, SettingsPatch, StoredMessage, WalletCreate, WalletInstanceView, WalletRemove, WalletTestCoins, WalletType, TestCoinsResult, WakeSubscription } from "./types";
 import type { NostrDraft, NostrDraftRequest, NostrLookupRequest, NostrLookupResult, NostrPublishResult } from "../nostr/types";
 import type { MessageChanges } from "./messageChanges";
 
@@ -106,6 +106,11 @@ export interface EngineApi {
   loadPublicGraph(params: { provider: string; subject: string; force?: boolean }): PublicGraphView | null;
   /** One picture of a post already loaded, on the reader's tap. */
   loadPublicPostImage(params: { provider: string; subject: string; postId: string; index: number }): PublicPostImageView;
+  /**
+   * "Clear all data", the peer's part: takes back what it can from the network (held items, the DID, identity
+   * proofs), stops, and empties its database but for the wallets. The peer is stopped afterwards: the host starts a new one.
+   */
+  clearProfileData(): void;
   /** Lists one of the profile's identities in its public DID document (`alsoKnownAs`), or takes it out. */
   setDidListed(params: { id: string; listed: boolean }): void;
   /** Nostr social layer, per contact: their profile (kind 0), follows (kind 3) or notes (kind 1), from the person's relays. Refused without a verified Nostr proof from that contact. */
@@ -139,14 +144,14 @@ export interface EngineApi {
   /** `preview`: a link preview made by this app (WISP 401 § Link previews); checked against the text, dropped if off. */
   /** `messageId`: the message kept in the chat (absent when nothing was kept). */
   /** `replyTo`: the id of a message of this chat the text answers (WISP 400 § Replies). */
-  sendMessage(params: { linkId: string; text: string; timestamp?: number; preview?: LinkPreview; replyTo?: string }): { error: string | null; refused?: boolean; messageId?: string };
+  sendMessage(params: { linkId: string; text: string; timestamp?: number; preview?: LinkPreview; replyTo?: string; card?: StatusCard }): { error: string | null; refused?: boolean; messageId?: string };
   /**
    * Edits a text of mine (WISP 400 § Edits): the new text here at once, and to the contact once both sides offer edit/1
    * on a live session. `messageId`: the row's id, or its wire id. `refused`: not something to edit. In a group
    * (`group:<id>`, WISP 9xx § Edits) it goes to the members; `mentions`: members named by the new text beyond those the
    * message already named.
    */
-  editMessage(params: { linkId: string; messageId: string; text: string; preview?: LinkPreview; mentions?: GroupMention[] }): { error: string | null; refused?: boolean; messageId?: string };
+  editMessage(params: { linkId: string; messageId: string; text: string; preview?: LinkPreview; mentions?: GroupMention[]; card?: StatusCard }): { error: string | null; refused?: boolean; messageId?: string };
   retryMessage(params: { linkId: string; messageId: string }): void;
   /**
    * Reacts to a message (WISP 400 § Reactions): `linkId` a chat's link or `group:<id>`, `messageId` the message's id
@@ -183,13 +188,17 @@ export interface EngineApi {
   /** Store-and-forward in one chat (WISP 4xx): accept held items from this contact, and hold items for it while it is away. */
   setChatHold(params: { linkId: string; enabled: boolean }): void;
   connect(params: { linkId: string }): void;
-  walletAddMint(params: { url: string; primary?: boolean }): { url: string; name: string };
+  walletAddMint(params: { url: string; primary?: boolean; network?: WalletNetwork }): { url: string; name: string };
   /** New → a type → a network: made in one click and checked before its card appears; nothing saved on failure. */
   walletCreate(params: WalletCreate): WalletInstanceView;
   /** Removes one wallet, its keys and config; refused while it holds money on this device and `acceptLoss` is not set. */
   walletRemove(params: WalletRemove): void;
   /** Testnet only: a small fixed amount from the wallet's own test faucet (the test mint, Sepolia's USDT faucet). */
   walletTestCoins(params: WalletTestCoins): TestCoinsResult;
+  /** The first-run setup tries again to make this default Mainnet wallet (one it could not make). */
+  walletSetupRetry(params: { type: WalletType }): void;
+  /** The first-run setup leaves this default Mainnet wallet unmade from now on. */
+  walletSetupDismiss(params: { type: WalletType }): void;
   /**
    * The app is in front again: chats look now, and dropped ones reconnect at once. `network`: the device is back
    * online (another network, a VPN): what discovery learnt about failing relays on the old one is forgotten too.
@@ -199,7 +208,8 @@ export interface EngineApi {
   peekProfile(params: { profile: string; dbName: string }): import("../engine/profilePeek").PeekResult;
   /** The primary mint is where Lightning invoices are created. */
   walletSetPrimaryMint(params: { url: string }): void;
-  walletRemoveMint(params: { url: string }): void;
+  /** Never a mint that holds sats, nor a network's last one; one that still waits for money only with `acceptLoss`. */
+  walletRemoveMint(params: { url: string; acceptLoss?: boolean }): void;
   /** A Lightning invoice from the active source (`via: "cashu"`: from the mints, landing as ecash). */
   walletReceiveLightning(params: { amount: number; via?: "cashu"; network?:WalletNetwork; card?: string }): { quote: string; invoice: string; expiresAt: number | null; paymentHash?: string; source: string };
   walletQuoteInvoice(params: { invoice: string; via?: "cashu"; network?:WalletNetwork; card?: string }): { quote: string; mint: string; amount: number; feeReserve: number; source?: string };
@@ -236,6 +246,11 @@ export interface EngineApi {
   walletInspectCashu(params: { text: string }): { inspection: CashuInspection | null };
   /** Everything held, as tokens: the only backup there is for now. */
   walletExport(params?: { network?: WalletNetwork }): { mint: string; token: string; amount: number }[];
+  /**
+   * The backup reminder (shared/backupReminder): `later` puts one Mainnet wallet's off (`wallet`: its id); `profile`
+   * says a profile backup of this profile was just made. A phrase shown or a backup file made is seen by the engine.
+   */
+  walletBackupReminder(params: { event: "later"; wallet: string } | { event: "profile" }): void;
   /** `confirmedReal`: required on Mainnet (real money), refused without it. */
   sendPayment(params: { linkId: string; amount: number; memo?: string; timestamp: number; network?:WalletNetwork; confirmedReal?: true }): { paymentId: string };
   requestPayment(params: { linkId: string; amount: number; memo?: string; timestamp: number; method?: "cashu" | "arkade" | "usdt" | "bark" | "bitcoin" | "fedimint" | "spark"; rail?: "cashu" | "lightning"; network?:WalletNetwork; card?: string }): { paymentId: string };
@@ -299,7 +314,9 @@ export interface EngineApi {
   joinGroupByLink(params: { link: string }): { groupId: string };
   /** `mentions`: places of the text that name members (WISP 9xx § Mentions); the session keeps only what holds. */
   /** `replyTo`: the id of a message of this group the text answers (WISP 9xx § Replies). */
-  sendGroupMessage(params: { groupId: string; text: string; mentions?: GroupMention[]; replyTo?: string }): { error: string | null; messageId?: string };
+  sendGroupMessage(params: { groupId: string; text: string; mentions?: GroupMention[]; replyTo?: string; card?: StatusCard }): { error: string | null; messageId?: string };
+  /** A press on a button of someone else's message in a chat or a group (`group:<id>`), WISP 4xx · Message Buttons. */
+  pressButton(params: { linkId: string; messageId: string; buttonId: string }): { error: string | null; refused?: boolean; paced?: true; messageId?: string };
   /** How many edges took my message `messageId` (or its edit number `edit`): members' edges in a private group, hubs' in a community. */
   groupTaken(params: { groupId: string; messageId: string; edit?: number }): number;
   groupMessages(params: { groupId: string }): StoredMessage[];
@@ -345,7 +362,7 @@ export interface RpcResponse {
 }
 
 /**
- * The finer sounds the engine can name (src/lib/cues.ts plays them, each in its category of Settings > Notifications
+ * The finer sounds the engine can name (apps/ui/src/lib/cues.ts plays them, each in its category of Settings > Notifications
  * and sounds). On a "cue" event, the only sound of that event; on another event, the sound played instead of the
  * event's own when its category is on (a mention instead of a message, test coins instead of a coin).
  */

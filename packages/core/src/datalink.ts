@@ -1,4 +1,4 @@
-import { waitForIceGathering } from "./callSignal";
+import { sdpHasCandidates, waitForIceGathering } from "./callSignal";
 import { wrapDataChannel, type FrameChannel } from "./frames";
 import { traceLink } from "./linkTrace";
 import {
@@ -25,7 +25,8 @@ export interface DataLinkOptions {
   createPeerConnection: () => RTCPeerConnection;
   /** Publishes (or clears, with null) my `_rtc` record. */
   publishSignal: (signal: string | null) => void;
-  setFastPoll: (fast: boolean) => void;
+  /** Signaling in progress (or over): look fast for the peer's signal. `offer`: for the answer to this side's offer. */
+  setFastPoll: (fast: boolean, offer?: boolean) => void;
   onOpen: (channel: FrameChannel) => void;
   onClose: () => void;
   onState?: (state: DataLinkState) => void;
@@ -40,35 +41,62 @@ export interface DataLinkOptions {
    * restarted; the connection is given `DISCONNECT_GRACE_MS`), or came back from it (false).
    */
   onDisconnected?: (disconnected: boolean) => void;
+  /**
+   * Whether the peer's packet, as last read, still carries its offer of that time (`RtcSignal.ts`). An answer to it
+   * that did not connect is then made again (`REANSWERS`); without this, never.
+   */
+  offerStanding?: (offerTs: number) => boolean;
+  /**
+   * This side's attempt was given up because the answerer answered its offer again (its connection for the answer
+   * applied here is gone): the answerer is there, so the caller may dial again now rather than at its next look.
+   */
+  onAnswerReplaced?: () => void;
 }
 
 export const CONNECT_TIMEOUT_MS = 90_000;
 const ICE_GATHERING_TIMEOUT_MS = 5_000;
+/**
+ * A connection with no candidate at all by then has stalled: Chromium, rarely and under load, gathers none, and an
+ * offer or answer without one can never connect. It is made again in its place, up to `GATHER_ATTEMPTS` in all.
+ */
+export const GATHER_STALL_MS = 3_000;
+export const GATHER_ATTEMPTS = 3;
 /** How long a connection may stay `disconnected` before it is given up. */
 const DISCONNECT_GRACE_MS = 12_000;
+/**
+ * An answer whose connection failed, while the peer still offers (`offerStanding`), is made again for the same offer,
+ * up to this many times. The offerer's connection waits for an answer for its whole attempt (`CONNECT_TIMEOUT_MS`), and
+ * its read of the answer may be held back by its relays' budget; the answerer's ICE gives up after about 30 s of no
+ * reply. Going idle then left the link with an offer this side had answered once and would not answer again, until the
+ * offerer's attempt ran out: a community's edge was live again 110 s after a member restarted (2026-09-30).
+ */
+export const REANSWERS = 2;
+/** An offer this close to the end of the offerer's attempt is not answered again: the new answer would come too late. */
+const REANSWER_MARGIN_MS = 15_000;
 
 export class DataLink {
   state: DataLinkState = "idle";
   private pc: RTCPeerConnection | null = null;
   private myOfferTs = 0;
   private lastSignalTs = 0;
+  /** The peer's description as this connection was given it: Chrome shows it as `remoteDescription` only once applied. */
+  private remoteSdp: string | null = null;
   private connectTimer: ReturnType<typeof setTimeout> | null = null;
   private disconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  /** The offer this side answered in the current attempt, and how many times it answered it again. */
+  private answered: { offer: RtcSignal; again: number } | null = null;
 
   constructor(private readonly options: DataLinkOptions) {}
 
   /** Offers a connection to the peer. Resolves once the offer is published. */
   async connect(): Promise<void> {
     if (this.state !== "idle") return;
+    this.answered = null;
     this.setState("offering");
-    this.options.setFastPoll(true);
+    this.options.setFastPoll(true, true);
     try {
-      const pc = this.createConnection();
-      await pc.setLocalDescription(await pc.createOffer());
-      const gathering = Date.now();
-      await waitForIceGathering(pc, ICE_GATHERING_TIMEOUT_MS);
-      if (this.pc !== pc) return;
-      traceLink(this.options.myPubKeyZ32, "ice-gathered", { ms: Date.now() - gathering, offer: true });
+      const pc = await this.gathered(true, async (pc) => { await pc.setLocalDescription(await pc.createOffer()); });
+      if (!pc) return;
 
       this.myOfferTs = Date.now();
       const signal: RtcSignal = { t: "o", ts: this.myOfferTs, ...extractRtcParams(pc.localDescription!.sdp) };
@@ -96,12 +124,22 @@ export class DataLink {
       const wasOpen = this.state === "open";
       this.teardown();
       if (wasOpen) this.options.onClose();
+      this.answered = { offer: signal, again: 0 };
       await this.answer(signal);
+    } else if (this.state === "connecting" && this.myOfferTs && signal.o === this.myOfferTs && this.pc) {
+      // A newer answer to the offer this side already took an answer for: the answerer made it again (`REANSWERS`),
+      // its connection for the one applied here is gone, and this one can never come up. It is given up now, rather
+      // than at the end of its attempt (a hub that read a member's first answer late held a dead one 40 s, 2026-09-30).
+      traceLink(this.options.myPubKeyZ32, "answer-replaced", { appliedMs: signal.ts - this.lastSignalTs });
+      this.lastSignalTs = signal.ts;
+      this.reset();
+      this.options.onAnswerReplaced?.();
     } else if (this.state === "offering" && signal.o === this.myOfferTs && this.pc) {
       this.lastSignalTs = signal.ts;
       const pc = this.pc;
       try {
-        await pc.setRemoteDescription({ type: "answer", sdp: buildDataSdp(signal) });
+        this.remoteSdp = buildDataSdp(signal);
+        await pc.setRemoteDescription({ type: "answer", sdp: this.remoteSdp });
         // On a quick path the channel is open before this resolves: never step back from open.
         if (this.pc === pc && this.state === "offering") this.setState("connecting");
       } catch {
@@ -110,15 +148,38 @@ export class DataLink {
     }
   }
 
+  /**
+   * On a quick path the channel opens before setRemoteDescription resolves (see `handleSignal`), when the connection
+   * does not show the answer yet: the one it was given counts, as DTLS already checked the peer against it.
+   */
   get fingerprints(): [string, string] | null {
     const local = this.pc?.localDescription?.sdp;
-    const remote = this.pc?.remoteDescription?.sdp;
+    const remote = this.pc?.remoteDescription?.sdp ?? (this.pc ? this.remoteSdp : null);
     if (!local || !remote) return null;
     try { return [extractRtcParams(local).f.toLowerCase(), extractRtcParams(remote).f.toLowerCase()]; }
     catch { return null; }
   }
 
   close(): void {
+    this.answered = null;
+    this.reset();
+  }
+
+  /**
+   * The attempt on this connection failed (it timed out, ICE failed or closed, its channel closed). An answer the
+   * offerer may not have read yet is made again for the same offer while it still stands (`REANSWERS`); anything
+   * else goes back to idle.
+   */
+  private failed(): void {
+    const answered = this.state === "connecting" ? this.answered : null;
+    const left = answered ? CONNECT_TIMEOUT_MS - (Date.now() - answered.offer.ts) : 0;
+    if (answered && answered.again < REANSWERS && left > REANSWER_MARGIN_MS && this.options.offerStanding?.(answered.offer.ts)) {
+      answered.again++;
+      traceLink(this.options.myPubKeyZ32, "reanswer", { again: answered.again, leftMs: left });
+      this.teardown();
+      void this.answer(answered.offer);
+      return;
+    }
     this.reset();
   }
 
@@ -126,13 +187,11 @@ export class DataLink {
     this.setState("answering");
     this.options.setFastPoll(true);
     try {
-      const pc = this.createConnection();
-      await pc.setRemoteDescription({ type: "offer", sdp: buildDataSdp(offer) });
-      await pc.setLocalDescription(await pc.createAnswer());
-      const gathering = Date.now();
-      await waitForIceGathering(pc, ICE_GATHERING_TIMEOUT_MS);
-      if (this.pc !== pc) return;
-      traceLink(this.options.myPubKeyZ32, "ice-gathered", { ms: Date.now() - gathering, offer: false });
+      const pc = await this.gathered(false, async (pc) => {
+        await pc.setRemoteDescription({ type: "offer", sdp: buildDataSdp(offer) });
+        await pc.setLocalDescription(await pc.createAnswer());
+      });
+      if (!pc) return;
 
       const signal: RtcSignal = {
         t: "a",
@@ -147,6 +206,34 @@ export class DataLink {
     }
   }
 
+  /**
+   * Makes the connection (`describe` sets its description) and waits for its candidates. One that found none by
+   * `GATHER_STALL_MS` is replaced by a new one, up to `GATHER_ATTEMPTS` in all; when none finds any, the link goes back
+   * to idle at once rather than hold, for its whole timeout, an attempt that cannot connect. Null when the link moved
+   * on meanwhile (closed, or another signal took over) or gave up.
+   */
+  private async gathered(offer: boolean, describe: (pc: RTCPeerConnection) => Promise<void>): Promise<RTCPeerConnection | null> {
+    let stalled: RTCPeerConnection | null = null;
+    for (let attempt = 1; ; attempt++) {
+      // The new connection takes the old one's place first: closing that one then resets nothing.
+      const pc = this.createConnection();
+      stalled?.close();
+      await describe(pc);
+      if (this.pc !== pc) return null;
+      const gathering = Date.now();
+      await waitForIceGathering(pc, ICE_GATHERING_TIMEOUT_MS, { stallMs: GATHER_STALL_MS });
+      if (this.pc !== pc) return null;
+      const ms = Date.now() - gathering;
+      if (sdpHasCandidates(pc.localDescription?.sdp)) {
+        traceLink(this.options.myPubKeyZ32, "ice-gathered", { ms, offer, ...(attempt > 1 ? { attempt } : {}) });
+        return pc;
+      }
+      traceLink(this.options.myPubKeyZ32, "ice-stalled", { ms, offer, attempt });
+      if (attempt >= GATHER_ATTEMPTS) { this.reset(); return null; }
+      stalled = pc;
+    }
+  }
+
   private createConnection(): RTCPeerConnection {
     const pc = this.options.createPeerConnection();
     this.pc = pc;
@@ -156,35 +243,50 @@ export class DataLink {
     dc.addEventListener("open", () => {
       if (this.pc !== pc) return;
       this.clearTimers();
+      this.answered = null;
       this.setState("open");
       this.options.setFastPoll(false);
       this.options.publishSignal(null);
       this.options.onOpen(wrapDataChannel(dc));
     });
     dc.addEventListener("close", () => {
-      if (this.pc === pc) this.reset();
+      if (this.pc === pc) this.failed();
     });
 
     pc.addEventListener("connectionstatechange", () => {
       if (this.pc !== pc) return;
       if (this.disconnectTimer) { clearTimeout(this.disconnectTimer); if (pc.connectionState === "connected") this.options.onDisconnected?.(false); }
       this.disconnectTimer = null;
-      if (pc.connectionState === "failed" || pc.connectionState === "closed") this.reset();
+      if (pc.connectionState === "failed" || pc.connectionState === "closed") this.failed();
       else if (pc.connectionState === "disconnected") {
         if (this.state === "open") this.options.onDisconnected?.(true);
         this.disconnectTimer = setTimeout(() => {
-          if (this.pc === pc) this.reset();
+          if (this.pc === pc) this.failed();
         }, DISCONNECT_GRACE_MS);
       }
     });
 
+    this.startAttemptTimer(pc);
+    return pc;
+  }
+
+  /** The attempt on `pc` gives up this long from now (`CONNECT_TIMEOUT_MS`) unless it opens. */
+  private startAttemptTimer(pc: RTCPeerConnection): void {
+    if (this.connectTimer) clearTimeout(this.connectTimer);
     this.connectTimer = setTimeout(() => {
       if (this.pc === pc && this.state !== "open") {
         traceLink(this.options.myPubKeyZ32, "attempt-timeout", { state: this.state });
-        this.reset();
+        this.failed();
       }
     }, this.options.attemptTimeoutMs?.() ?? CONNECT_TIMEOUT_MS);
-    return pc;
+  }
+
+  /**
+   * This side's offer or answer reached the relays only now (their budget, or an outage, held it back): the attempt
+   * counts from here, so the other side has as long to read it as if it had gone out at once.
+   */
+  signalWentOut(): void {
+    if (this.pc && this.connectTimer && this.state !== "open" && this.state !== "idle") this.startAttemptTimer(this.pc);
   }
 
   private clearTimers(): void {
@@ -198,6 +300,7 @@ export class DataLink {
     const pc = this.pc;
     this.pc = null;
     this.myOfferTs = 0;
+    this.remoteSdp = null;
     if (!pc) return false;
     pc.close();
     return true;

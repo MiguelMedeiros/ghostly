@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { randomBytes, toBase64Url } from "../src/bytes";
 import { createIdentity } from "../src/identity";
 import { RELAY_POLL_INTERVALS } from "../src/link";
+import { INVITE_TAKEN } from "../src/ghostlink";
 import { DESKTOP_NETWORK, MemoryPkarr, closeWorld, invitation, invitationWhere, open, rtc, useFakeWorld, yieldToLoop, type Opened } from "./support/pairingWorld";
 
 // covers: chat.one-chat, chat.dht.fallback, chat.paired.reconnect, core.peer-keys
@@ -153,6 +154,30 @@ describe("one chat: DHT rendezvous, peer-to-peer upgrade, DHT fallback", () => {
     expect(onDht).toHaveBeenCalledTimes(1);
   }, 120_000);
 
+  it("a text the contact put on the DHT just before the pair went live is read as it goes live, not 5 minutes later", async () => {
+    // The Desktop pair of the 2026-09-30 nightly: the joiner's text went on the DHT 0.6 s before both went live, after
+    // the inviter's last read of its mailbox. Live, the inviter read the DHT every 5 minutes: nothing showed for 3.
+    rtc.blocked = true;
+    const pkarr = new MemoryPkarr(DESKTOP_NETWORK), made = invitation();
+    const inviter = open(made.inviter, pkarr, { dht: true, onDataLinkState: state => { if (state === "open") pkarr.unseen.clear(); } });
+    await run(2_000);
+    const joiner = open(made.joiner, pkarr, { dht: true });
+    expect(await until(() => !!inviter.credentials.peerKey && !!joiner.credentials.peerKey
+      && inviter.link.textDelivery === "dht" && joiner.link.textDelivery === "dht", 60_000)).toBeLessThan(Infinity);
+    // From here the inviter's reads come just before the joiner's envelopes do, until it is live.
+    const dht = (inviter.link as unknown as { dht: { peerAddress: string; pinned(): { peerAddress: string } | undefined } }).dht;
+    for (const key of [dht.peerAddress, dht.pinned()?.peerAddress]) if (key) pkarr.unseen.add(key);
+    let sent: string | null | undefined;
+    void joiner.link.sendMessage("boo from bob", Date.now(), id()).then(result => { sent = result; });
+    expect(await until(() => sent !== undefined, 30_000)).toBeLessThan(Infinity);
+    expect(sent).toBeNull();
+    expect(texts(inviter)).toEqual([]);
+    rtc.blocked = false;
+    expect(await until(() => inviter.link.isDataLinkOpen && joiner.link.isDataLinkOpen, 4 * 60_000)).toBeLessThan(Infinity);
+    expect(await until(() => texts(inviter).includes("boo from bob"), 60_000), "read as the chat goes live").toBeLessThan(5_000);
+    expect(texts(inviter)).toEqual(["boo from bob"]);
+  }, 120_000);
+
   it("live, then a drop: back on the DHT at once, text still goes, and live again when the contact is back", async () => {
     const pkarr = new MemoryPkarr(DESKTOP_NETWORK), made = invitation();
     const inviter = open(made.inviter, pkarr, { dht: true });
@@ -207,6 +232,31 @@ describe("one chat: first contact on two paths, one key", () => {
     expect(inviter.received, "nothing from the other key").toEqual([]);
     expect(inviter.dhtView?.error).toBeUndefined();
   }, 120_000);
+
+  for (const live of [true, false]) {
+    it(`a second joiner of an invite someone used first is told so, and its texts are refused · the first pair ${live ? "live" : "on the DHT"}`, async () => {
+      rtc.blocked = !live;
+      const pkarr = new MemoryPkarr(DESKTOP_NETWORK), made = invitation();
+      const inviter = open(made.inviter, pkarr, { dht: true });
+      await run(2_000);
+      const first = open({ ...made.joiner, seedB64: createIdentity().seedB64 }, pkarr, { dht: true });
+      expect(await until(() => !!inviter.credentials.peerKey && (!live || (inviter.link.isDataLinkOpen && first.link.isDataLinkOpen)), 120_000)).toBeLessThan(Infinity);
+      await run(10_000);
+      // The joiner the invite was sent to comes later, with the inviter's key from the invite (as a ghostly1 join does).
+      const second = open(made.joiner, pkarr, { dht: true, credentials: { seedB64: made.joiner.seedB64, expectedPeerKey: createIdentityKey(made.inviter.seedB64) } });
+      // It reads the inviter's envelope sealed to the first joiner once the inviter publishes one (its control
+      // envelope, every 4 minutes): about 4 to 5 minutes, instead of "on the DHT, retrying" and "sent" forever.
+      const took = await until(() => !!second.dhtView?.inviteTaken, 8 * 60_000);
+      expect(took, "the second joiner learns the invite was taken").toBeLessThan(6 * 60_000);
+      expect(second.link.pairingProgress).toMatchObject({ stage: "failed", reason: "taken", retryable: false, detail: INVITE_TAKEN });
+      expect(second.link.validateText("hello?", Date.now(), "AAAAAAAAAAAAAAAAAAAAAA"), "nothing is sent that nobody reads").toBe(INVITE_TAKEN);
+      await run(60_000);
+      expect(second.link.pairingProgress?.reason, "it stays said").toBe("taken");
+      // The pair that used it first never hears of it.
+      for (const side of [inviter, first]) expect(side.dhtView?.inviteTaken).toBeFalsy();
+      if (live) for (const side of [inviter, first]) expect(side.link.isDataLinkOpen).toBe(true);
+    }, 180_000);
+  }
 
   it("a live chat, then a copy of the invite publishing in the joiner's mailbox with a key of its own: the chat goes on", async () => {
     const pkarr = new MemoryPkarr(DESKTOP_NETWORK), made = invitation();

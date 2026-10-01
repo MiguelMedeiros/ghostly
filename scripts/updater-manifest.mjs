@@ -51,6 +51,25 @@ function bundleFor(dir) {
   return signed[0] ?? null;
 }
 
+/**
+ * The version a signature was made for. Since Tauri CLI 2.12 `tauri build`
+ * writes it into the signature's trusted comment (`...\tversion:1.2.3`), which
+ * the signature covers, and the updater (plugin 2.13) refuses an update whose
+ * `latest.json` announces another version. A `.sig` file is the minisign text,
+ * base64-encoded. Null when the signature records none (older CLI, or signed by
+ * hand without `--app-version`).
+ */
+function signedVersion(signatureFile) {
+  const text = Buffer.from(readFileSync(signatureFile, "utf8").trim(), "base64").toString("utf8");
+  const comment = text.split("\n").find((line) => line.startsWith("trusted comment: "));
+  if (!comment) return null;
+  const field = comment
+    .slice("trusted comment: ".length)
+    .split("\t")
+    .find((part) => part.startsWith("version:"));
+  return field ? field.slice("version:".length).trim() : null;
+}
+
 const [artifactsDir, outDir, tag, notesFile] = process.argv.slice(2);
 if (!artifactsDir || !outDir || !tag) {
   console.error("usage: updater-manifest.mjs <artifacts-dir> <out-dir> <tag> [notes-file]");
@@ -61,6 +80,7 @@ mkdirSync(outDir, { recursive: true });
 const version = tag.replace(/^v/, "");
 const platforms = {};
 const missing = [];
+const mismatched = [];
 
 for (const [artifact, platform] of Object.entries(PLATFORMS)) {
   const dir = join(artifactsDir, artifact);
@@ -72,6 +92,15 @@ for (const [artifact, platform] of Object.entries(PLATFORMS)) {
   }
   if (!found) {
     missing.push(platform);
+    continue;
+  }
+
+  // Every installed app would refuse this bundle: the tag and the app's own
+  // version (tauri.conf.json, set by bump-version) disagree.
+  const signed = signedVersion(found.signature);
+  if (signed === null) console.error(`${platform}: the signature records no version; the updater takes it as it is`);
+  else if (signed.replace(/^v/, "") !== version) {
+    mismatched.push(`${platform} was built as ${signed}`);
     continue;
   }
 
@@ -90,6 +119,10 @@ for (const [artifact, platform] of Object.entries(PLATFORMS)) {
 
 if (missing.length) {
   console.error(`No signed bundle for: ${missing.join(", ")}. Is TAURI_SIGNING_PRIVATE_KEY set?`);
+  process.exit(1);
+}
+if (mismatched.length) {
+  console.error(`The tag is ${version}, but ${mismatched.join(", ")}. Was the version bumped (scripts/bump-version.mjs) before tagging?`);
   process.exit(1);
 }
 

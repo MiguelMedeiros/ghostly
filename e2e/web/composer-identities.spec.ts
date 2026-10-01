@@ -57,6 +57,11 @@ test("an identity is added, shared and withdrawn from the chat's composer, and b
 
   // Use turns it over, like a payment card: the back is what Bob sees, and Share with him.
   await use.click();
+  // While it turns, Share waits out of sight (a click then could reach nothing); once the card is still it fades in.
+  const actions = picker.locator(".id-card-back-actions");
+  await expect(actions).toHaveAttribute("data-turning", "true");
+  await expect(actions).not.toHaveAttribute("data-turning");
+  await expect(actions).toHaveCSS("opacity", "1");
   await expect(picker).toHaveAttribute("data-side", "back");
   await expect(picker.locator(".composer-identity-flip")).toHaveAttribute("data-flipped", "true");
   const back = picker.getByTestId("composer-identity-back");

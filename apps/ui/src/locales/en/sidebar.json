@@ -1,0 +1,40 @@
+{
+  "account": "Account",
+  "chats": "Chats",
+  "copyInvite": "Copy invite code",
+  "deleteAllChats": "Delete all chats",
+  "deleteChat": "Delete chat",
+  "group": {
+    "adminAnswered": "The admin's app answered…",
+    "answerFailed": "That did not go through. Try again.",
+    "invitedBy": "Invited by {{contact}} · {{members}}",
+    "invitedByUnknown": "Invited by a contact · {{members}}",
+    "inviterAway": "{{contact}} is not connected yet. Try again in a moment.",
+    "inviterAwayUnknown": "The contact who invited you is not connected yet. Try again in a moment.",
+    "letting": "A member is letting you in…",
+    "waitingAdmin": "Waiting for the admin's app…",
+    "waitingIn": "Waiting to be let in…"
+  },
+  "join": "Join",
+  "joinChat": "Join chat",
+  "new": "New",
+  "newChat": "New Chat",
+  "newMenu": {
+    "chat": "Chat",
+    "chatHint": "One person, with an invite",
+    "group": "Group",
+    "groupHint": "A link anyone can open",
+    "label": "Create a group or a chat"
+  },
+  "noChats": "No chats yet",
+  "noResults": "No results found",
+  "pinned": "Pinned",
+  "quiet": "It's quiet here...",
+  "quietHint": "Time to haunt someone! 👻",
+  "searchPlaceholder": "Search chats...",
+  "settings": "Settings",
+  "sharedIdentity": "Shared an identity",
+  "skipToContent": "Skip to content",
+  "startChat": "New chat",
+  "unread": "Unread messages"
+}

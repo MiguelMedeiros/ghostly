@@ -34,13 +34,13 @@ Releases: [docs/RELEASING.md](docs/RELEASING.md).
 | `npm run dev` | the shared UI in Vite, no Tauri |
 | `npm run tauri dev` | the Desktop app (Tauri + Vite) |
 | `npm run tauri build` | a Desktop build for production |
-| `npm run build:web` | the web app → `web/dist` |
-| `npm run build:extension` | the extension → `extension/dist` (load it unpacked in `chrome://extensions`) |
+| `npm run build:web` | the web app → `apps/web/dist` |
+| `npm run build:extension` | the extension → `apps/extension/dist` (load it unpacked in `chrome://extensions`) |
 | `npm run lint` / `npm run lint:fix` | ESLint |
 | `npm run typecheck` | TypeScript, every workspace |
 | `npm run test:affected` | before pushing: only what your change can break (unit, lint, typecheck, Rust; the e2e picked with `--port <n>`) |
 | `npm test` | every unit test: `test:packages` (core, browser, sdk, extension, cli) then `test:app` (UI components, matrix, scripts) |
-| `npm run test:ui` | only the UI's component tests ([src/test/README.md](src/test/README.md)) |
+| `npm run test:ui` | only the UI's component tests ([apps/ui/src/test/README.md](apps/ui/src/test/README.md)) |
 | `npm run test:map` | every feature in `e2e/features.json` has a test, and the file is sorted (`-- --fix` sorts it) |
 | `npm run locales:sort` | sorts the keys of every locale file |
 | `node scripts/changes.mjs` | checks the changelog entries in `changes/` (`--preview` prints the release notes they make) |
@@ -48,12 +48,18 @@ Releases: [docs/RELEASING.md](docs/RELEASING.md).
 | `npm run e2e:full` | end-to-end with the gated suites, on a local Docker stack of regtest services |
 | `npm run build && npm run check:desktop-bundle` | Desktop got its Desktop wiring, not a browser stand-in (seconds, runs anywhere) |
 
-The website has its own commands in [website/README.md](website/README.md). The testing guide is [docs/TESTING.md](docs/TESTING.md).
+The website has its own commands in [apps/website/README.md](apps/website/README.md). The testing guide is [docs/TESTING.md](docs/TESTING.md).
 
 ## Project structure
 
 ```
 ghostly/
+├── apps/
+│   ├── ui/              # The shared React UI every app builds (src/, index.html, the Vite configs)
+│   ├── web/             # Ghostly on the web (app.ghostly.tools)
+│   ├── extension/       # Ghostly Browser (Chromium extension, Manifest V3)
+│   ├── desktop/         # Ghostly Desktop: the Tauri app (Rust)
+│   └── website/         # ghostly.tools (Next.js)
 ├── packages/
 │   ├── core/            # The Ghost protocol, shared by every client (TypeScript)
 │   ├── browser/         # The Ghostly peer: engine, wallets, storage, the platform layer under the UI
@@ -61,15 +67,13 @@ ghostly/
 │   ├── sdk/             # @ghostlytools/sdk: adapter contracts for outside authors
 │   ├── cli/             # ghostly (@ghostlytools/cli): the engine on Node for bots (daemon, socket API, events)
 │   └── iroh-web/        # Iroh compiled for browsers (relay only)
-├── src/                 # The shared React UI (Desktop, web app, extension)
-├── src-tauri/           # Desktop's Rust backend
-├── native-transports/   # Iroh and HyperDHT for Desktop, the HyperDHT relay for browsers
-├── extension/           # Ghostly Browser (Chromium extension, Manifest V3)
-├── web/                 # Ghostly on the web (app.ghostly.tools)
-├── cli/                 # ghostly-cli, the older Rust CLI for v0.4 chats (no longer shipped; not the npm package)
+├── native/
+│   └── transports/      # Iroh (Rust) and the HyperDHT endpoint and sidecar (Node) for Desktop, Iroh for browsers
+├── services/
+│   ├── hyperdht-relay/  # The HyperDHT relay for browsers (dht-relay over WebSocket)
+│   └── push-relay/      # A reference push relay for browsers that cannot post a wake-up themselves
 ├── e2e/                 # Playwright end-to-end suites and their Docker stack
 ├── examples/sdk-adapter # An adapter built outside the app on @ghostlytools/sdk
-├── website/             # ghostly.tools (Next.js)
 └── docs/                # Protocol, WISPs, guides
 ```
 
@@ -92,7 +96,7 @@ CI runs the full lint, typecheck, unit tests, builds and the Rust and Desktop ch
 
 ### Tests expected with a feature
 
-- **Unit tests** for the logic (Vitest; Rust `#[cfg(test)]` for `src-tauri` and `cli`).
+- **Unit tests** for the logic (Vitest; Rust `#[cfg(test)]` for `apps/desktop`).
 - **An e2e test** for what a person does or sees (Playwright, `e2e/`).
 - **One line in `e2e/features.json`** for a new feature, in its alphabetical place by id (`npm run test:map -- --fix` sorts the file), and each test says what it covers: `{ tag: ["@feature:<id>"] }` in Playwright, `// covers: <id>` in Vitest and Rust. `npm run test:map` fails in CI on a feature with no test that is not on `e2e/allow-untested.json`.
 
@@ -105,23 +109,23 @@ Lists that every feature adds to are kept sorted, one entry per line, so two pul
 | What | Where it goes | Check |
 |---|---|---|
 | A feature | its line in `e2e/features.json`, at its place by id; its globs in `paths` by glob | `npm run test:map` (`-- --fix` sorts) |
-| A string | `src/locales/<language>/<area>.json`, below | `npm run locales:sort`, the i18n tests |
+| A string | `apps/ui/src/locales/<language>/<area>.json`, below | `npm run locales:sort`, the i18n tests |
 | A release note | a file in `changes/` | `node scripts/changes.mjs` |
-| A WISP change | a file in `docs/wisps/changes/<wisp>/` | `npm run sync:references` in `website/` |
-| A Desktop command | its alphabetical place in `src-tauri/src/main.rs` (`commands!`), `src-tauri/build.rs` (`COMMANDS`) and `src-tauri/capabilities/default.json` (`allow-*`) | `cargo test` in `src-tauri` |
+| A WISP change | a file in `docs/wisps/changes/<wisp>/` | `npm run sync:references` in `apps/website/` |
+| A Desktop command | its alphabetical place in `apps/desktop/src/main.rs` (`commands!`), `apps/desktop/build.rs` (`COMMANDS`) and `apps/desktop/capabilities/default.json` (`allow-*`) | `cargo test` in `apps/desktop` |
 | A CLI command | its alphabetical place in `packages/cli/src/commands/<area>.ts`, and its row in the command table of `packages/cli/README.md` | the CLI's `commands` and `readme` tests |
 
-Not committed, so regenerate them when you need them: `website/lib/*.json` (`npm run sync:references` in `website/`, once after a checkout; its `dev` and `build` do it themselves), `src-tauri/gen/schemas/` (any Desktop build), and the test map (`npm run test:map:write` writes `docs/test-map.md`).
+Not committed, so regenerate them when you need them: `apps/website/lib/*.json` (`npm run sync:references` in `apps/website/`, once after a checkout; its `dev` and `build` do it themselves), `apps/desktop/gen/schemas/` (any Desktop build), and the test map (`npm run test:map:write` writes `docs/test-map.md`).
 
 ### Text in the app
 
-Every string the app shows goes through `t("area.key")`. Each language is a folder of one file per area of the app, `src/locales/<language>/<area>.json`: add a key to its area's file in all eight languages (English in `en/`, the source). A new area is a new file in every folder, plus its two lines in `src/locales/en/index.ts`, which gives `t()` its types. Keys are sorted in every file: `npm run locales:sort` puts them in order, and the i18n tests fail on a file out of order, on a key missing from a language, and on a placeholder a translation drops.
+Every string the app shows goes through `t("area.key")`. Each language is a folder of one file per area of the app, `apps/ui/src/locales/<language>/<area>.json`: add a key to its area's file in all eight languages (English in `en/`, the source). A new area is a new file in every folder, plus its two lines in `apps/ui/src/locales/en/index.ts`, which gives `t()` its types. Keys are sorted in every file: `npm run locales:sort` puts them in order, and the i18n tests fail on a file out of order, on a key missing from a language, and on a placeholder a translation drops.
 
 ### Writing docs and site copy
 
 - A change to a WISP (`docs/wisps/`) adds one file to its folder in `docs/wisps/changes/` saying what changed; do not edit a Revision row or a log line. See [WISP 00](docs/wisps/00-process.md#revisions).
 - Keep the README short; details go in `docs/`. A new topic gets its own page there and one link from the README.
-- No em dashes or en dashes (U+2014, U+2013) in `docs/`, `website/`, this file or `SECURITY.md`: use a period, a comma, a colon or parentheses, and a hyphen or "to" in a range. `npm run lint` in `website/` checks the files the site renders (`scripts/check-dashes.mjs`).
+- No em dashes or en dashes (U+2014, U+2013) in `docs/`, `apps/website/`, this file or `SECURITY.md`: use a period, a comma, a colon or parentheses, and a hyphen or "to" in a range. `npm run lint` in `apps/website/` checks the files the site renders (`scripts/check-dashes.mjs`).
 - Short sentences, plain words. Prefer a table or a list to a long paragraph.
 
 ## Security

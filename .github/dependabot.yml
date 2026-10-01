@@ -24,7 +24,7 @@ updates:
         patterns: ["*"]
         update-types: [minor, patch]
   - package-ecosystem: npm
-    directory: /website
+    directory: /apps/website
     schedule: { interval: weekly, day: monday }
     target-branch: dev
     # typescript-eslint does not support TypeScript 7 yet; drop once it does.
@@ -43,7 +43,7 @@ updates:
     directory: /
     schedule: { interval: weekly, day: monday }
     target-branch: dev
-    # src-tauri pins the versions Tauri's wry uses (src/fullscreen.rs takes wry's WebView2
+    # apps/desktop pins the versions Tauri's wry uses (src/fullscreen.rs takes wry's WebView2
     # controller). They move with a Tauri update, never on their own: a bump alone breaks
     # the Windows build.
     ignore:

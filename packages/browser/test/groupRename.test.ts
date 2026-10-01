@@ -38,6 +38,9 @@ describe("group name on headless community engines", { timeout: 120_000 }, () =>
     await erin.groups.joinByLink(`https://app.ghostly.tools/#/join/${link}`);
     await world.until(() => world.member(erin, id), 10 * 60_000);
     await world.until(() => world.view(erin, id)?.name === "Town square" && world.view(erin, id)?.picture === PIC, 3 * 60_000);
+    // Renamed and pictured before she got in: no line tells her the admin just did it.
+    await world.run(15_000);
+    expect(erin.messages.filter(m => m.linkId === `group:${id}` && (m.event === "renamed" || m.event === "picture"))).toEqual([]);
 
     // Back, the admin removes the picture: the name stays, and a restart keeps it.
     alice.online = true;

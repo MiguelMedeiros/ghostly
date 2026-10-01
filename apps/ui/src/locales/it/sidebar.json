@@ -1,0 +1,40 @@
+{
+  "account": "Account",
+  "chats": "Chat",
+  "copyInvite": "Copia codice invito",
+  "deleteAllChats": "Elimina tutte le chat",
+  "deleteChat": "Elimina chat",
+  "group": {
+    "adminAnswered": "L'app dell'admin ha risposto…",
+    "answerFailed": "Non è andato a buon fine. Riprova.",
+    "invitedBy": "Invitato da {{contact}} · {{members}}",
+    "invitedByUnknown": "Invitato da un contatto · {{members}}",
+    "inviterAway": "{{contact}} non è ancora connesso. Riprova tra un momento.",
+    "inviterAwayUnknown": "Il contatto che ti ha invitato non è ancora connesso. Riprova tra un momento.",
+    "letting": "Un membro ti sta facendo entrare…",
+    "waitingAdmin": "In attesa dell'app dell'admin…",
+    "waitingIn": "In attesa di essere ammesso…"
+  },
+  "join": "Entra",
+  "joinChat": "Entra in una chat",
+  "new": "Nuova",
+  "newChat": "Nuova Chat",
+  "newMenu": {
+    "chat": "Chat",
+    "chatHint": "Una persona, con un invito",
+    "group": "Gruppo",
+    "groupHint": "Un link che chiunque può aprire",
+    "label": "Crea un gruppo o una chat"
+  },
+  "noChats": "Nessuna chat",
+  "noResults": "Nessun risultato",
+  "pinned": "Fissata",
+  "quiet": "C'è silenzio qui...",
+  "quietHint": "È ora di infestare qualcuno! 👻",
+  "searchPlaceholder": "Cerca chat...",
+  "settings": "Impostazioni",
+  "sharedIdentity": "Ha condiviso un'identità",
+  "skipToContent": "Vai al contenuto",
+  "startChat": "Nuova chat",
+  "unread": "Messaggi non letti"
+}

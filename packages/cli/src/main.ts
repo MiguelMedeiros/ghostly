@@ -13,6 +13,7 @@ import { keepServing, openHost, serve, type Host } from "./host";
 import { allowlist, checkWebhook, eventHandler, readCursor } from "./listen";
 import { resolve } from "node:path";
 import { restoreProfile } from "./backup";
+import { buttonsOf } from "./buttons";
 import { secretsFromStdin } from "./secretInput";
 import {
   checkProfileName, createProfile, currentProfile, DEFAULT_PROFILE, ghostlyHome, listProfiles, lockOwner, profileExists, profilePaths, selectProfile,
@@ -62,6 +63,8 @@ async function warnVersion(client: DaemonClient): Promise<void> {
  * waited for the next minute (60 s and more instead of 3 to 5).
  */
 export function chatOnly(method: string, params: Record<string, unknown>): boolean {
+  // A status card's `chat` may name a group as well (WISP 4xx · Status Cards): its sessions must start.
+  if (method.startsWith("task.") || method.startsWith("routine.") || method.startsWith("button.")) return false;
   return method.startsWith("chat.") || (params.chat !== undefined && params.group === undefined && !method.startsWith("group."));
 }
 
@@ -100,10 +103,10 @@ const SPECIAL: [usage: string, summary: string, options?: Record<string, OptionS
   ["profile backup --out <file> [--passphrase-file f]", "An encrypted backup of the profile (passphrase from a file or GHOSTLY_BACKUP_PASSPHRASE)", { out: o("string", "The backup file to write"), "passphrase-file": o("string", "The passphrase, from this file (else GHOSTLY_BACKUP_PASSPHRASE)") }],
   ["profile restore <file> <new profile> [--passphrase-file f] [--use]", "A backup into a new profile", { "passphrase-file": o("string", "The passphrase, from this file (else GHOSTLY_BACKUP_PASSPHRASE)"), use: o("boolean", "Make it the current profile") }],
   ["daemon [--detach]", "Keep the profile online (foreground; --detach runs it in the background)", { detach: o("boolean", "Run in the background (log in the profile folder)"), timeout: o("number", "Seconds --detach waits for it to start (default 60)") }],
-  ["daemon status", "Whether a daemon runs the profile, and its version"],
+  ["daemon status", "Whether a daemon runs the profile, its version, and its socket (for the socket API)"],
   ["daemon stop", "Stop the profile's daemon", { timeout: o("number", "Seconds to wait for it to stop (default 20)") }],
   ["daemon restart", "Stop the profile's daemon and start it again in the background (after an upgrade: the new code)", { timeout: o("number", "Seconds to wait for each step") }],
-  ["listen [--since seq] [--cursor file] [--type t]... [--turns] [--from <chat|key>]... [--group <group>]... [--exec cmd] [--webhook url]", "Stream events as JSON lines (starts the profile here if no daemon runs it)", {
+  ["listen [--since seq] [--cursor file] [--type t]... [--turns] [--from <chat|key>]... [--group <group>]... [--exec cmd] [--webhook url] [--print]", "Stream events as JSON lines (starts the profile here if no daemon runs it)", {
     since: o("number", "Replay events after this seq first"), cursor: o("string", "A file that keeps the last seq handled (read at start, written after each event)"),
     type: o("list", "Only events of this type, or starting with it (repeat for more)"),
     turns: o("boolean", "Only agent turns: each message received, and each group message that mentions you, as one agent.turn event"),
@@ -187,6 +190,9 @@ export function commandHelp(words: readonly string[]): string {
         lines.push("", "Options:");
         for (const [name, o] of options) lines.push(`  --${name}${o.type === "boolean" ? "" : ` <${o.type === "number" ? "n" : "value"}>`}`.padEnd(26) + o.description);
       }
+      // A text that starts with a dash goes after `--`, and so does everything else on the line.
+      if (Object.values(TEXT_COMMANDS).includes(row as (typeof TEXT_COMMANDS)[string]))
+        lines.push("", "  -- ends the options: everything after it is the text, options included (\"-- -1 --wait sent\" sends", "  all of it). Put options before --.");
       lines.push("");
     }
   } else {
@@ -317,8 +323,10 @@ async function daemonCommand(argv: string[]): Promise<void> {
   pretty = g.pretty;
   if (sub === "status") {
     const client = await connectDaemon(g.paths.socket);
-    if (!client) { print({ running: false, profile: g.profile }); return; }
-    try { print({ running: true, ...(await client.call("status") as object) }); } finally { client.close(); }
+    // The socket, running or not: a program on the socket API (examples/*.mjs) finds it here. It is in the profile's
+    // folder, or in /tmp/ghostly-<hash>/ when that path is too long for a socket, so a program cannot guess it.
+    if (!client) { print({ running: false, profile: g.profile, socket: g.paths.socket }); return; }
+    try { print({ running: true, ...(await client.call("status") as object), socket: g.paths.socket }); } finally { client.close(); }
     return;
   }
   if (sub === "stop") {
@@ -355,6 +363,12 @@ async function stopDaemon(g: Globals, client: DaemonClient, seconds: number): Pr
   return pid;
 }
 
+/** Throws busy, with its pid, when a process other than `except` holds the profile. */
+function heldBy(g: Globals, except?: number): void {
+  const owner = lockOwner(g.paths);
+  if (owner !== null && owner !== except) throw new CliError("busy", `Profile ${g.profile} is in use by process ${owner}`, { pid: owner });
+}
+
 function processAlive(pid: number): boolean {
   try { process.kill(pid, 0); return true; } catch (error) { return (error as NodeJS.ErrnoException).code === "EPERM"; }
 }
@@ -363,6 +377,8 @@ function processAlive(pid: number): boolean {
 async function startDetached(g: Globals, seconds: number) {
   requireProfile(g);
   if (await connectDaemon(g.paths.socket)) throw new CliError("busy", `A daemon already runs profile ${g.profile}`);
+  // A one-shot command (or a listen) that opened the profile in process holds it: the child would only log that.
+  heldBy(g);
   const log = openSync(g.paths.log, "a", 0o600);
   const child = spawn(process.execPath, [...process.execArgv, process.argv[1], "daemon", "--home", g.home, "--profile", g.profile], { detached: true, stdio: ["ignore", log, log] });
   child.unref();
@@ -373,7 +389,10 @@ async function startDetached(g: Globals, seconds: number) {
     await new Promise((resolve) => setTimeout(resolve, 200));
     client = await connectDaemon(g.paths.socket, 500);
   }
-  if (!client) throw new CliError("engine", `The daemon did not start; see ${g.paths.log}`);
+  if (!client) {
+    heldBy(g, child.pid); // another process took the profile between the check and the child's start
+    throw new CliError("engine", `The daemon did not start; see ${g.paths.log}`);
+  }
   client.close();
   return { daemon: "started", profile: g.profile, pid: child.pid, socket: g.paths.socket, log: g.paths.log };
 }
@@ -513,6 +532,7 @@ async function textCommand(name: string, argv: string[]): Promise<void> {
   const params: Record<string, unknown> = { [spec.target]: target, text, force: parsed.options.force === true, ...(message !== undefined && { message }) };
   if (spec.target === "group") params.mentions = parsed.options.mention ?? [];
   if (parsed.options.reply !== undefined) params.reply = parsed.options.reply;
+  if (!spec.message) Object.assign(params, buttonsOf(parsed.options));
   print(await withSession(g, (s) => {
     if (spec.target === "chat") {
       // A one-shot leaves once its command is done: by default it stays until the message went out.
@@ -620,7 +640,9 @@ async function callPipeCommand(argv: string[]): Promise<void> {
   const socket = connect(audio.socket);
   await new Promise<void>((resolve, reject) => { socket.once("connect", resolve); socket.once("error", reject); });
   process.stderr.write(`ghostly: call ${call.call}: s16le mono ${audio.rate} Hz on stdin/stdout\n`);
-  process.stdin.pipe(socket);
+  // A clip that ends (`ffmpeg -t 3 … | ghostly call pipe`) is queued and played, and the contact's audio goes on
+  // coming: the end of stdin never closes the socket, whose daemon side would close the call's audio with it.
+  process.stdin.pipe(socket, { end: false });
   socket.pipe(process.stdout);
   socket.on("close", () => exit(0));
   socket.on("error", () => exit(1));
@@ -656,7 +678,19 @@ export async function main(input: string[]): Promise<number> {
   if (two && COMMANDS[two]) { await tableCommand(two, argv.slice(2)); return 0; }
   if (TEXT_COMMANDS[first]) { await textCommand(first, argv.slice(1)); return 0; }
   if (COMMANDS[first]) { await tableCommand(first, argv.slice(1)); return 0; }
-  throw new CliError("usage", `Unknown command: ${[first, second].filter(Boolean).join(" ")} (ghostly help)`);
+  throw unknownCommand(first, two ? second : undefined);
+}
+
+/**
+ * A command line that names no command. The first word of a group (`ghostly chat`, `ghostly wallet frob`) is answered
+ * with the group's commands, as `ghostly help chat` lists them; before, it was only "Unknown command: chat".
+ */
+export function unknownCommand(first: string | undefined, second?: string): CliError {
+  const asked = [first, second].filter(Boolean).join(" ");
+  const subs = [...new Set(helpRows().map((row) => commandWords(row.usage)).filter((words) => words[0] === first && words.length > 1).map((words) => words[1]))];
+  if (!subs.length) return new CliError("usage", `Unknown command: ${asked} (ghostly help)`);
+  const list = `${subs.slice(0, -1).join(", ")}${subs.length > 1 ? " or " : ""}${subs.at(-1)}`;
+  return new CliError("usage", second ? `Unknown command: ${asked}: ghostly ${first} takes ${list} (ghostly help ${first})` : `ghostly ${first} takes a command: ${list} (ghostly help ${first})`);
 }
 
 /** Leaves once what was printed reached stdout (a pipe drains asynchronously). */

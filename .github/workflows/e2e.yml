@@ -2,8 +2,10 @@ name: E2E
 
 # Real browsers against the shipped build of the web app and the extension, and
 # the real Desktop app driven through WebDriver.
-# Peers meet through a relay inside the test process, so nothing here depends
-# on outside services except the tests tagged @network (the public Cashu test mint).
+# Peers meet through a relay inside the test process and the wallets use a mint
+# started below, so nothing here depends on outside services. The tests that do
+# (tagged @network: public chain servers, Breez's regtest) are left out here and
+# run nightly in E2E (full).
 # Too slow to hold up every pull request: it runs before each release (release.yml
 # calls it and ships nothing unless it passes), and by hand from the Actions tab.
 on:
@@ -47,7 +49,7 @@ jobs:
         run: npm ci
 
       - name: Install Chromium
-        run: npx playwright install --with-deps chromium
+        uses: ./.github/actions/playwright-chromium
 
       # The wallet tests need a mint whose sats are worthless and whose invoices
       # settle themselves. The public one (testnut.cashu.space) is a single
@@ -76,7 +78,8 @@ jobs:
           E2E_MINT_URL: http://127.0.0.1:3338
         # @release-skip: specs that have not passed on a GitHub runner yet and do not gate a release until they
         # do (the nightly E2E (full) still runs them). See the follow-up issue before adding one.
-        run: npm run test:e2e -- --grep-invert @release-skip
+        # @network: the tests that need a service on the Internet; a release never waits on one.
+        run: npm run test:e2e -- --grep-invert "@release-skip|@network"
 
       - name: Run end-to-end tests against ${{ inputs.web_url }}
         if: ${{ inputs.web_url }}
@@ -105,6 +108,14 @@ jobs:
     timeout-minutes: 45
     # The deployed-web-app run has no Desktop app to speak of.
     if: ${{ !inputs.web_url }}
+    env:
+      # gstreamer1.0-plugins-good: WebKitGTK's VP9 decoder, for the large-video check (e2e/desktop/video-stream.spec.ts).
+      # PulseAudio: the named test microphones and speakers of e2e/desktop/call-devices.spec.ts.
+      # Sway and wl-clipboard: a headless Wayland clipboard for e2e/desktop/wayland-clipboard.spec.ts.
+      APT_PACKAGES: >-
+        libwebkit2gtk-4.1-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev gstreamer1.0-plugins-good
+        librsvg2-dev patchelf libssl-dev libgtk-3-dev libayatana-appindicator3-dev webkit2gtk-driver xvfb pulseaudio
+        gstreamer1.0-pulseaudio sway wl-clipboard
 
     steps:
       - name: Checkout
@@ -119,28 +130,51 @@ jobs:
           node-version: "22"
           cache: "npm"
 
+      # The .deb files apt fetched for APT_PACKAGES on this runner image, as the Tauri job does in ci.yml (#808): apt-get
+      # update and the download from the mirror are the slow and variable part (28 to 101 s here). One entry per runner
+      # image (a new image has other versions already installed, so it needs another set) and package list, shared with
+      # the other Desktop e2e job that has the same list. Saved on a miss, whatever the tests do after.
+      - name: Apt cache key
+        id: apt-key
+        run: echo "key=${ImageOS}-${ImageVersion}-apt-desktop-e2e-$(echo "$APT_PACKAGES" | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore the system packages
+        id: apt-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/apt-debs
+          key: ${{ steps.apt-key.outputs.key }}
+
+      # In the background, while Rust, the Cargo cache and npm ci come in; "Wait for the system dependencies" joins it.
+      # Both paths install the same way, from the .deb files, so a cached run and a fresh one test the same thing.
       - name: Install system dependencies
+        env:
+          CACHED: ${{ steps.apt-cache.outputs.cache-hit }}
         run: |
-          # GStreamer's headers (calls on Linux, src-tauri/src/native_call) need libunwind-dev, which the
-          # runner image's libunwind-14-dev (LLVM's) blocks.
-          sudo apt-get remove -y libunwind-14-dev || true
-          sudo apt-get update
-          # gstreamer1.0-plugins-good: WebKitGTK's VP9 decoder, for the large-video check (e2e/desktop/video-stream.spec.ts).
-          # PulseAudio: the named test microphones and speakers of e2e/desktop/call-devices.spec.ts.
-          sudo apt-get install -y \
-            libwebkit2gtk-4.1-dev \
-            libgstreamer1.0-dev \
-            libgstreamer-plugins-base1.0-dev \
-            gstreamer1.0-plugins-good \
-            librsvg2-dev \
-            patchelf \
-            libssl-dev \
-            libgtk-3-dev \
-            libayatana-appindicator3-dev \
-            webkit2gtk-driver \
-            xvfb \
-            pulseaudio \
-            gstreamer1.0-pulseaudio
+          {
+            debs="$RUNNER_TEMP/apt-debs"
+            # needrestart's scan, the man-db index and dpkg's fsyncs add time and nothing to a runner thrown away after.
+            apt_get() { sudo DEBIAN_FRONTEND=noninteractive NEEDRESTART_SUSPEND=1 apt-get -y "$@"; }
+            sudo rm -f /var/lib/man-db/auto-update
+            echo force-unsafe-io | sudo tee /etc/dpkg/dpkg.cfg.d/99-unsafe-io > /dev/null
+            echo "$(date +%T) remove libunwind-14-dev"
+            # GStreamer's headers (calls on Linux, apps/desktop/src/native_call) need libunwind-dev, which the
+            # runner image's libunwind-14-dev (LLVM's) blocks.
+            apt_get remove libunwind-14-dev || true
+            if [[ "$CACHED" != "true" ]]; then
+              echo "$(date +%T) update"
+              apt_get update
+              echo "$(date +%T) download"
+              mkdir -p "$debs/partial"
+              # shellcheck disable=SC2086
+              apt_get install --download-only -o Dir::Cache::Archives="$debs" $APT_PACKAGES
+              sudo rm -rf "$debs/partial" "$debs/lock"
+            fi
+            echo "$(date +%T) install $(ls "$debs" | wc -l) packages, $(du -sh "$debs" | cut -f1)"
+            apt_get install "$debs"/*.deb
+            echo "$(date +%T) done"
+          } > "$RUNNER_TEMP/apt.log" 2>&1 &
+          echo $! > "$RUNNER_TEMP/apt.pid"
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
@@ -166,9 +200,27 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Wait for the system dependencies
+        run: |
+          pid=$(cat "$RUNNER_TEMP/apt.pid")
+          while kill -0 "$pid" 2>/dev/null; do sleep 1; done
+          grep -E '^[0-9]{2}:[0-9]{2}:[0-9]{2} ' "$RUNNER_TEMP/apt.log" || true
+          tail -n 5 "$RUNNER_TEMP/apt.log"
+          # The exit status of a process that is not this shell's child is gone: check the result instead.
+          # shellcheck disable=SC2086
+          dpkg -s $APT_PACKAGES > /dev/null
+
+      - name: Save the system packages
+        if: steps.apt-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/apt-debs
+          key: ${{ steps.apt-key.outputs.key }}
+
+      # After the wait: were a library missing, its apt-get would race the one above for dpkg's lock.
       # e2e/desktop/calls-interop.spec.ts calls the Linux Desktop from a Chromium page.
       - name: Install Chromium
-        run: npx playwright install --with-deps chromium
+        uses: ./.github/actions/playwright-chromium
 
       - name: Install tauri-driver
         run: command -v tauri-driver || cargo install tauri-driver --locked

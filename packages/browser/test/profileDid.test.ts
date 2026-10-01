@@ -76,6 +76,25 @@ describe("the profile's did:dht", () => {
     expect(did.view()).toMatchObject({ id: did.id, listed: [], alsoKnownAs: [], upToDate: true, published: { versionId: String(seq) } });
   });
 
+  it("ends with a newer packet reading deactivated when the profile's data is cleared, and only if it was ever published", async () => {
+    const { make, state } = world();
+    const never = make();
+    await never.load();
+    await never.deactivate();
+    expect(state.puts, "nothing to take back").toHaveLength(0);
+
+    const did = make();
+    await did.load();
+    await did.publishNow();
+    const before = opened(did, state.puts[0].payload).seq;
+    await did.deactivate();
+    expect(state.puts).toHaveLength(2);
+    expect(state.puts[1].key).toBe(didDhtKey(did.id).z32);
+    const ended = opened(did, state.puts[1].payload);
+    expect(ended.deactivated).toBe(true);
+    expect(ended.seq > before).toBe(true);
+  });
+
   it("puts the same signed packet again while the document is unchanged, across a restart too", async () => {
     const { make, state } = world();
     const did = make();

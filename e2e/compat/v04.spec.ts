@@ -1,6 +1,7 @@
-import type { Page } from "@playwright/test";
+import type { BrowserContext, Page } from "@playwright/test";
 import { chat, expect, openPeer, say, test, type Peer } from "../support/fixtures";
 import { copyInvite, pasteInvite } from "../support/clipboard";
+import { MAINNET_MINTS } from "../support/mint";
 
 /**
  * The current app and a real v0.4.0 (WISP 402, "Compatibility Chat"). 0.5 never creates a legacy chat, but a
@@ -12,10 +13,22 @@ import { copyInvite, pasteInvite } from "../support/clipboard";
  * current app; this one runs the old app itself, built from its tag (scripts/build-compat-web.mjs).
  */
 
+/**
+ * v0.4.0 adds the default Mainnet mints to a new profile and loads them as it starts (its engine's `start`), and it
+ * predates the test switch the current app honours. A released build cannot change, so its peer refuses them, as
+ * mints that are down; `mainnetGuard` still fails the test on anything else that reaches a real Mainnet server.
+ */
+async function refuseOldMints(context: BrowserContext): Promise<void> {
+  for (const mint of MAINNET_MINTS) {
+    const origin = new URL(mint).origin;
+    await context.route((url) => url.origin === origin, (route) => route.abort("connectionrefused"));
+  }
+}
+
 /** v0.4.0, beside the current app (playwright.compat.config.ts serves it). */
 async function oldPeer(browser: Parameters<typeof openPeer>[0], relay: Parameters<typeof openPeer>[1], name: string): Promise<Peer> {
   const url = test.info().config.metadata.compatURL as string;
-  const peer = await openPeer(browser, relay, url, name);
+  const peer = await openPeer(browser, relay, url, name, { beforeOpen: refuseOldMints });
   // The old app is the one we think it is.
   expect(await peer.page.evaluate(async () => (await (await fetch("/version.json")).json()) as { version: string })).toMatchObject({ version: "0.4.0" });
   return peer;

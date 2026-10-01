@@ -25,6 +25,11 @@ export interface CallSignal {
    */
   ap?: number;
   vp?: number;
+  /**
+   * On a hang-up, why when it was not the person's choice: `u`, the call could not connect (no connection found a
+   * candidate, or it did not connect in time). Older apps read it as a plain hang-up.
+   */
+  r?: "u";
 }
 
 /** What the rebuilt SDP gives Opus and VP8 unless the signal says otherwise. */
@@ -41,7 +46,13 @@ export type CallEventType =
   | "call_connected"
   | "call_ended"
   | "call_missed"
-  | "call_rejected";
+  /** Our call rang out (`RING_MS`) with nobody answering: the caller's line, as "Missed call" is the side it rang. */
+  | "call_unanswered"
+  /** We hung up our call while it still rang, before any answer. */
+  | "call_cancelled"
+  | "call_rejected"
+  /** The call ended without ever connecting: no way to reach the contact was found, or none worked in time. */
+  | "call_failed";
 
 /**
  * Where a call's media comes from: the browser's own WebRTC and capture, or a stand-in with the same shape.
@@ -320,7 +331,7 @@ export function parseCallSignal(json: string, now = Date.now()): CallSignal | nu
   if (raw.t !== "o" && raw.t !== "a" && raw.t !== "h" && raw.t !== "v") return null;
   if (typeof raw.ts !== "number" || !Number.isFinite(raw.ts)) return null;
   if (Math.abs(now - raw.ts) > CALL_SIGNAL_MAX_AGE_MS) return null;
-  if (raw.t === "h") return { t: "h", ts: raw.ts };
+  if (raw.t === "h") return raw.r === "u" ? { t: "h", ts: raw.ts, r: "u" } : { t: "h", ts: raw.ts };
 
   const picture = parsePicture(raw);
   if (picture === null) return null;
@@ -489,6 +500,11 @@ export function buildSdpFromSignal(signal: CallSignal): string {
   return lines.join("\r\n") + "\r\n";
 }
 
+/** Whether a description carries any candidate: one without cannot be reached, nor reach anyone. */
+export function sdpHasCandidates(sdp: string | undefined | null): boolean {
+  return /^a=candidate:/m.test(sdp ?? "");
+}
+
 /** How long to keep collecting after the candidate we were waiting for showed up. */
 const ICE_SETTLE_MS = 400;
 
@@ -502,6 +518,11 @@ const ICE_SETTLE_MS = 400;
 export function waitForIceGathering(
   pc: RTCPeerConnection,
   timeoutMs = 10000,
+  /**
+   * Give up after this long when not a single candidate showed up. Host candidates come in a few milliseconds; a
+   * connection with none by then has stalled (Chromium, rarely, under load) and will not find any later.
+   */
+  { stallMs }: { stallMs?: number } = {},
 ): Promise<void> {
   return new Promise((resolve) => {
     if (pc.iceGatheringState === "complete") {
@@ -514,20 +535,26 @@ export function waitForIceGathering(
     );
     const wanted = usesTurn ? " typ relay" : " typ srflx";
     let settle: ReturnType<typeof setTimeout> | null = null;
+    let found = false;
 
     const finish = () => {
       clearTimeout(timeout);
+      if (stalled) clearTimeout(stalled);
       if (settle) clearTimeout(settle);
       pc.removeEventListener("icegatheringstatechange", onState);
       pc.removeEventListener("icecandidate", onCandidate);
       resolve();
     };
     const timeout = setTimeout(finish, timeoutMs);
+    const stalled = stallMs === undefined ? null : setTimeout(() => {
+      if (!found && !sdpHasCandidates(pc.localDescription?.sdp)) finish();
+    }, stallMs);
 
     const onState = () => {
       if (pc.iceGatheringState === "complete") finish();
     };
     const onCandidate = (event: RTCPeerConnectionIceEvent) => {
+      if (event.candidate) found = true;
       if (!settle && event.candidate?.candidate.includes(wanted)) settle = setTimeout(finish, ICE_SETTLE_MS);
     };
 

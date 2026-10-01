@@ -208,6 +208,36 @@ describe("requests we send", () => {
     await expect(desk.request({ linkId: "l", amount: 5, timestamp: 8, method: "arkade" })).rejects.toThrow("dialled");
   });
 
+  it("a contact with no wallet at the last session may have made one since: a request waits for live instead of failing", async () => {
+    const { desk, link, host, state } = setup();
+    link.isDataLinkOpen = false;
+    // What the last session said (no Mainnet Cashu or Lightning wallet) is old: only an open session's word counts.
+    Object.assign(link, { peerPaymentNetworks: () => [] });
+    host.waitingPaymentMethods.mockReturnValue(["cashu", "lightning"]);
+    const { paymentId } = await desk.request({ linkId: "l", amount: 21, timestamp: 5, network: "mainnet" });
+    expect(state(paymentId)).toMatchObject({ state: "pending", invoice: INVOICE });
+    expect(host.storeMessage).toHaveBeenCalledWith(expect.objectContaining({ delivery: "waiting", paymentId }));
+    // Live, the contact's word is fresh: no wallet there is said as such.
+    link.isDataLinkOpen = true;
+    await expect(desk.request({ linkId: "l", amount: 21, timestamp: 6, network: "mainnet" })).rejects.toThrow("Your contact has no Mainnet Cashu wallet");
+  });
+
+  it("a request refused by the contact's word at the last session says so, not that the chat has them off", async () => {
+    const { desk, link, host, enabled } = setup();
+    link.isDataLinkOpen = false;
+    host.waitingPaymentMethods.mockReturnValue([]);
+    await expect(desk.request({ linkId: "l", amount: 21, timestamp: 5 })).rejects.toThrow("Your contact took no Cashu or Lightning last time. Try again once the chat is live");
+    // The contact took Cashu, and Cashu is off here: not the contact's word that says no.
+    host.waitingPaymentMethods.mockReturnValue(["cashu"]);
+    enabled.cashu = false;
+    await expect(desk.request({ linkId: "l", amount: 21, timestamp: 6 })).rejects.toThrow("Cashu and Lightning are off in this chat");
+    // Off on this device: that is what it says.
+    host.waitingPaymentMethods.mockReturnValue([]);
+    enabled.cashu = enabled.lightning = false;
+    await expect(desk.request({ linkId: "l", amount: 21, timestamp: 6 })).rejects.toThrow("Cashu and Lightning are off in this chat");
+    expect(rows("payments")).toEqual([]);
+  });
+
   it("rebuilds only our own Cashu or Lightning requests", async () => {
     const { desk } = setup([record({ id: "in", invoice: INVOICE }), record({ id: "ark", direction: "out", target: ark() }), record({ id: "ln", direction: "out", invoice: INVOICE, mints: [] })]);
     await desk.start();
@@ -699,6 +729,9 @@ describe("the reviewed Cashu adapter", () => {
       executeReviewedCashu: vi.fn(async () => "cashuBfresh"),
       reviewedCashuSpent: vi.fn(async () => false),
       recoverReviewedCashu: vi.fn(async (): Promise<string | undefined> => "cashuBrecovered"),
+      // The mint has not proved the swap never happened: reconcile keeps waiting.
+      reviewedCashuNeverSwapped: vi.fn(async () => false),
+      releaseReviewedCashu: vi.fn(async () => {}),
     };
     const order: string[] = [];
     const publish = vi.fn(async (_review: PaymentReview, token: string) => { order.push(`publish ${token}`); });
@@ -730,14 +763,15 @@ describe("the reviewed Cashu adapter", () => {
 
   it("reconciling repeats the very same token, never a new one, and nothing once it was taken", async () => {
     const { cashu, wallet, publish } = adapter();
-    expect(await cashu.reconcile(review(cashuTarget()), { ...prepared, token: "cashuBkept" })).toEqual({ settled: false });
+    const persist = vi.fn(async () => {});
+    expect(await cashu.reconcile(review(cashuTarget()), { ...prepared, token: "cashuBkept" }, persist)).toEqual({ settled: false });
     expect(publish).toHaveBeenLastCalledWith(expect.anything(), "cashuBkept");
-    await cashu.reconcile(review(cashuTarget()), prepared);
+    await cashu.reconcile(review(cashuTarget()), prepared, persist);
     expect(publish).toHaveBeenLastCalledWith(expect.anything(), "cashuBrecovered");
     wallet.recoverReviewedCashu.mockResolvedValueOnce(undefined);
-    await cashu.reconcile(review(cashuTarget()), prepared);
+    await cashu.reconcile(review(cashuTarget()), prepared, persist);
     wallet.reviewedCashuSpent.mockResolvedValue(true);
-    expect(await cashu.reconcile(review(cashuTarget()), { ...prepared, token: "cashuBkept" })).toEqual({ settled: true });
+    expect(await cashu.reconcile(review(cashuTarget()), { ...prepared, token: "cashuBkept" }, persist)).toEqual({ settled: true });
     expect(publish).toHaveBeenCalledTimes(2);
     expect(wallet.executeReviewedCashu).not.toHaveBeenCalled();
   });
@@ -913,5 +947,31 @@ describe("a request closed because its wallet was removed", () => {
     expect(state("ours")?.state, "a contact never closes a request of ours").toBe("pending");
     expect(state("other-chat")?.state).toBe("pending");
     await expect(desk.payRequest({ linkId: "l", paymentId: "open", via: "lightning" })).rejects.toThrow("no longer open");
+  });
+});
+
+describe("the line kept with a payment message (the CLI and older apps show it)", () => {
+  const TEST_MINT = "https://testnut.cashu.space";
+
+  it("a contact's Testnet request says test sats, and a Mainnet one sats", async () => {
+    const { desk, texts } = setup();
+    await desk.onPaymentRequest("l", { id: "rt", timestamp: 3, amount: { value: "1234", asset: "sat" }, endpoints: [[ENDPOINT.cashu, cashuRequestPayload([TEST_MINT])]], network: "testnet" });
+    await desk.onPaymentRequest("l", { id: "rm", timestamp: 4, amount: { value: "50", asset: "sat" }, endpoints: [[ENDPOINT.cashu, cashuRequestPayload([MINT])]], network: "mainnet" });
+    expect(texts()).toEqual(["⚡ Requested 1,234 test sats", "⚡ Requested 50 sats"]);
+  });
+
+  it("ecash sent from a test mint says test sats", async () => {
+    const { desk, wallet, texts } = setup();
+    wallet.createToken.mockImplementationOnce(async (_amount, _mints, _memo, outbox) => { outbox("cashuBtest", TEST_MINT); return { token: "cashuBtest", mint: TEST_MINT }; });
+    await desk.send({ linkId: "l", amount: 21, timestamp: 3, network: "testnet" });
+    await desk.send({ linkId: "l", amount: 5, timestamp: 4, confirmedReal: true });
+    expect(texts()).toEqual(["⚡ 21 test sats", "⚡ 5 sats"]);
+  });
+
+  it("a reviewed Cashu payment of test sats says so", async () => {
+    const testTarget = { ...cashuTarget(), network: "cashu-test", provider: TEST_MINT } as PaymentTarget;
+    const { desk, texts } = setup([record({ id: "rv", kind: "payment", direction: "out", token: "cashuBrv", requestId: "r", target: testTarget })]);
+    await desk.recordCashu(review(testTarget, { requestId: "r" }), "cashuBrv");
+    expect(texts()).toEqual(["100 test sats via Cashu"]);
   });
 });

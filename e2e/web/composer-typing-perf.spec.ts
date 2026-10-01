@@ -95,7 +95,8 @@ test("a keystroke in a long chat does not paint its message list again", { tag: 
   // Still: the connection icon of a chat never paired is an animation, painted every frame.
   await bob.page.emulateMedia({ reducedMotion: "reduce" });
   await bob.page.getByTestId("chat-row-name").filter({ hasText: "Long chat" }).click();
-  await expect(chat(bob).locator("[data-message-row]")).toHaveCount(600);
+  // Its last 100 rows are in the page (apps/ui/src/hooks/useRowWindow.ts), never all 600.
+  await expect(chat(bob).locator("[data-message-row]")).toHaveCount(100);
   const box = bob.page.getByPlaceholder("Message…");
   await box.click();
   await bob.page.waitForTimeout(500);

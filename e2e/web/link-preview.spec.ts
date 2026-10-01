@@ -16,7 +16,7 @@ import { pair } from "../support/paired";
  */
 
 const HOST = "og.ghostly.test";
-const PICTURE = readFileSync(fileURLToPath(new URL("../../src-tauri/icons/Square142x142Logo.png", import.meta.url)));
+const PICTURE = readFileSync(fileURLToPath(new URL("../../apps/desktop/icons/Square142x142Logo.png", import.meta.url)));
 
 test.use({
   launchOptions: {

@@ -59,7 +59,7 @@ export function parseVoiceMeta(value: unknown, mime?: string): VoiceMeta | undef
 }
 
 /**
- * How the level is metered while recording (src/lib/voiceRecorder.ts): every `intervalMs`, the RMS of the last
+ * How the level is metered while recording (apps/ui/src/lib/voiceRecorder.ts): every `intervalMs`, the RMS of the last
  * `window` samples an AnalyserNode holds (at a 48 kHz context, about 21 ms of sound).
  */
 export const VOICE_METER = { intervalMs: 50, window: 1024, windowRate: 48_000 } as const;

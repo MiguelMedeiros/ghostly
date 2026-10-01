@@ -79,9 +79,24 @@ A `paired-message` MAY carry `fw`, how many times it has been forwarded ([400](4
 
 A file forwarded carries the same `fw` on its announcement (`pf-offer`, `pf-start`, [501](501-paired-files.md)) and in a held item's `meta` ([4xx](4xx-store-and-forward.md#bundle)); a held text too. The reader drops a `fw` that is not such a number and keeps the message, which then reads as written there. It goes whole whatever else is left out: when the frame would pass 56 KiB, `pv` goes first. Over the DHT it is the fifteenth element ([403](403-dht-text.md#forwards)). A text sent again after a lost session keeps its `fw`. Older apps ignore the field.
 
+### Status cards
+
+A `paired-message` MAY carry `sc`, a bot's status card (revision 2026-09-29, [4xx · Status Cards](4xx-status-cards.md)), and so MAY a `paired-edit`, with the card of that version:
+
+```
+{ "t": "paired-message", "id", "ts", "m", "pv"?, "r"?, "fw"?, "sc"?: { "kind": "task" | "routine", "id", … } }
+{ "t": "paired-edit", "id", "e", "ts", "m", "pv"?, "sc"? }
+```
+
+`m` is the card's fallback text. A card is at most 8 KiB and always goes: when the frame would pass 56 KiB, `pv` goes first. A reader drops a card that does not hold ([4xx](4xx-status-cards.md#the-readers-rule)) and keeps the message as its text. A `paired-edit` with a card MAY be numbered up to **5,000**; one numbered past 100 without a card is malformed. Both sides list **`status-card/1`** in `paired-capabilities` when their app shows cards; an author sends an edit numbered past 100 only while both do, so an older app, which would drop it, keeps the last text it took. A card's edit waits for this session: it never goes on the DHT floor ([403](403-dht-text.md#what-never-enters-this-path)). Older apps ignore `sc`.
+
+### Message buttons
+
+Buttons under a bot's message (revision 2026-09-30, [4xx · Message Buttons](4xx-message-buttons.md)) are a card of kind `buttons` in `sc`, and a press is a `paired-message` whose `r` carries `b`, the button's id: `{ "t": "paired-message", "id", "ts", "m": "Yes", "r": { "i", "s", "f", "b": "yes" } }`. A reader drops a `b` that does not hold and keeps the reply. An app that shows and presses buttons lists **`buttons/1`** in `paired-capabilities`; nothing is gated on it (older apps show the text and read a press as a reply), and it tells a bot whether its contact can press. Over the DHT floor a reply goes as its id alone ([403](403-dht-text.md)), so a press arrives without `b`, and the author's app infers the button from the text.
+
 ### Liveness and reconnection
 
-A connection can die without either side being told (a laptop asleep, an app suspended in the background, a network change). While a session is ready, each side sends `{"t":"paired-ping"}` every 15 seconds and answers each one with `{"t":"paired-pong"}`. Any frame from the peer counts as a sign of life. Three pings in a row with nothing back close the session and its connection, and the dialling side tries again. This counts from the open for a peer whose `pair-offer` lists `ping/1` in `extensions`, so a contact that freezes before the first ping (a laptop closed right after connecting) is noticed too; for a peer that does not say so, it counts once that peer has answered a ping, and a peer that never answers one (an older app) is never cut off for it. Missed pings are counted, not timed, so a throttled background tab is not mistaken for a dead peer.
+A connection can die without either side being told (a laptop asleep, an app suspended in the background, a network change). While a session is ready, each side sends `{"t":"paired-ping"}` every 15 seconds and answers each one with `{"t":"paired-pong"}`. Any frame from the peer counts as a sign of life. Three pings in a row with nothing back close the session and its connection, and the dialling side tries again. This counts from the open for a peer whose `pair-offer` lists `ping/1` in `extensions`, so a contact that freezes before the first ping (a laptop closed right after connecting) is noticed too; for a peer that does not say so, it counts once that peer has answered a ping, and a peer that never answers one (an older app) is never cut off for it. Missed pings are counted, not timed, so a throttled background tab is not mistaken for a dead peer. A ping from a peer that answers pings with nothing back within 4 seconds only makes this side read the peer's link packet at once: an app that crashed and started again has a new offer there, and answering it ends the dead session, where a connection whose close this side never hears would otherwise hold it for as long as its consent checks take.
 
 An app going away (it quits, its page closes) first sends `{"t":"paired-bye"}` on every ready session. The contact closes the session at once instead of waiting for its liveness, and watches for the app to come back ([100](100-transports.md#back-after-a-restart-revision-06)). The frame carries no id, so older apps drop it. Only on a ready session: before it, the contact's handshake would fail on it anyway.
 
@@ -173,7 +188,7 @@ POST <relay>  {"endpoint":"<e>","headers":{"Authorization":"vapid …","TTL":"36
 → {"status":<the push service's status>}
 ```
 
-The request is already encrypted and signed; the relay forwards it as it is. `native-transports/push-relay` is a reference relay (no dependencies, the same push services only, a VAPID-signed request only, Web Push headers only, a rate limit per client address).
+The request is already encrypted and signed; the relay forwards it as it is. `services/push-relay` is a reference relay (no dependencies, the same push services only, a VAPID-signed request only, Web Push headers only, a rate limit per client address).
 
 **Showing.** The browser hands the decrypted body to the profile's push worker: the app's service worker script, registered once more at `/push/<profile>/`, so each local profile ([04](04-profiles.md)) has its own subscription and contacts of two profiles cannot tell they share a browser. The worker reads the token in a table the app keeps for it (IndexedDB: token, chat route, mute) and shows "New message", nothing else: no text and no name. It shows nothing for a token it no longer knows (a chat deleted, a subscription replaced), for a muted chat ([400](400-chat.md), the chat mute), or while the app is on screen. The worker also keeps its own limit, whatever the sender does: per token, at most one message notice every 5 minutes and one call notice every 30 seconds. A wake-up inside that gap shows nothing new and makes no sound; a notice of that token still on screen is shown again, silently.
 

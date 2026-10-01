@@ -159,6 +159,19 @@ describe("checking the token and RPC before a wallet is used", () => {
     vi.stubGlobal("fetch", async () => Response.json({ jsonrpc: "2.0", id: 1 }));
     await expect(adapter.rpc("eth_blockNumber")).rejects.toThrow("rejected the operation");
   });
+  it("an RPC that does not answer in time, or cannot be reached, is named by its host, not by the browser's words", async () => {
+    const adapter = (await wallet()).adapter;
+    const host = new URL(adapter.config.provider).host;
+    // Safari's words for the timeout's abort, then Chromium's, then a request that never left.
+    for (const [error, said] of [
+      [Object.assign(new Error("Fetch is aborted"), { name: "AbortError" }), `${host} did not answer in time`],
+      [Object.assign(new Error("signal timed out"), { name: "TimeoutError" }), `${host} did not answer in time`],
+      [new TypeError("Load failed"), `Could not reach ${host}`],
+    ] as const) {
+      vi.stubGlobal("fetch", async () => { throw error; });
+      await expect(adapter.rpc("eth_blockNumber")).rejects.toThrow(said);
+    }
+  });
   it("will not open a wallet whose saved token metadata no longer matches the chain", async () => {
     chain.code = "0x6001";
     await expect(UsdtAdapter.connect(config(), MNEMONIC)).rejects.toThrow("Token metadata changed");

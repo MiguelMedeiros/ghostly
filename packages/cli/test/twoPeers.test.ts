@@ -5,10 +5,10 @@ import { createServer, request as httpRequest, type Server } from "node:http";
 import { connect, type AddressInfo } from "node:net";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { RACE_DIRECT_MS } from "@ghostly/core";
+import { RACE_DIRECT_MS, TYPING_REFRESH_MS } from "@ghostly/core";
 import { BIN, error, ghostly, home, hyperdhtTestnet, localRelay, ok, Running } from "./support/cli";
 import { dominantHz, tone, wavFile } from "./support/tone";
-// covers: chat.paired.reconnect, groups.edit, files.large.resend, files.large.request, headless.calls, headless.daemon, headless.chat, headless.events, headless.hooks, headless.groups, headless.one-shot, headless.cli, headless.files, headless.group-admin, headless.identities, headless.services, headless.typing, headless.reactions, headless.edit, headless.forward, chat.forward.files
+// covers: chat.paired.reconnect, headless.buttons, groups.edit, files.large.resend, files.large.request, headless.calls, headless.daemon, headless.chat, headless.events, headless.hooks, headless.groups, headless.one-shot, headless.cli, headless.files, headless.group-admin, headless.identities, headless.services, headless.typing, headless.reactions, headless.edit, headless.forward, chat.forward.files
 
 /**
  * Two bots, each a `ghostly` daemon on its own profile, as a person would run them: a chat from an invite, live over
@@ -22,6 +22,8 @@ const running: Running[] = [];
 const alice = home("alice"), bob = home("bob");
 const sockets: Record<string, string> = {};
 let env: NodeJS.ProcessEnv;
+/** Both daemons' link traces (packages/core/src/linkTrace.ts), one JSON line a step: what a slow test prints. */
+let trace = "";
 const as = (dir: string, ...args: string[]) => ghostly(["--home", dir, ...args], { env });
 
 /**
@@ -54,7 +56,8 @@ beforeAll(async () => {
   relays = await Promise.all([localRelay(), localRelay()]);
   dht = await hyperdhtTestnet();
   // Calls bind their media to loopback: on some machines (a VPN on a Mac) UDP to the machine's own LAN address is dropped.
-  env = { GHOSTLY_HYPERDHT_BOOTSTRAP: dht.bootstrap, GHOSTLY_CALL_BIND: "127.0.0.1", ...(process.env.GHOSTLY_LINK_TRACE ? { GHOSTLY_LINK_TRACE: process.env.GHOSTLY_LINK_TRACE } : {}) };
+  trace = process.env.GHOSTLY_LINK_TRACE ?? join(home("trace"), "link.jsonl");
+  env = { GHOSTLY_HYPERDHT_BOOTSTRAP: dht.bootstrap, GHOSTLY_CALL_BIND: "127.0.0.1", GHOSTLY_LINK_TRACE: trace };
 }, 30_000);
 
 afterAll(async () => {
@@ -148,6 +151,7 @@ describe("two headless peers", { timeout: 180_000 }, () => {
     // Alice's held session: about a second, up to 14 s on a loaded machine. Before, the offer ran to its own attempt
     // timeout first (90 s, CONNECT_TIMEOUT_MS). Counted from Bob's daemon being up, when that offer starts.
     const killed = running.pop()!;
+    const killedAt = Date.now();
     await new Promise((r) => { killed.child.once("exit", r); killed.child.kill("SIGKILL"); });
     started = await restartBob();
     const dial = 20_000;
@@ -155,6 +159,18 @@ describe("two headless peers", { timeout: 180_000 }, () => {
     const afterKill = Date.now() - started;
     await bothWays("after a kill");
     console.log(`[restart] live again after a stop in ${afterStop} ms, after a kill in ${afterKill} ms`);
+    // Most runs are live in about 2 s (the offer answered) or 9 s (the race's native dial). Slower than that, the way
+    // there is printed: both sides' view of the chat and each step of both links since the kill (CI run 36699194267
+    // took 34 s and said nothing more).
+    if (afterKill > RACE_DIRECT_MS + 4_000) {
+      const steps = readFileSync(trace, "utf8").split("\n").filter((l) => l && (JSON.parse(l) as { t: number }).t >= killedAt);
+      const view = async (dir: string, chat: string) => {
+        const { peer, live, transport, progress, wait, lastAttempt, history } = ok(await as(dir, "chat", "show", chat));
+        return JSON.stringify({ peer, live, transport, progress, wait, lastAttempt, history });
+      };
+      console.log(`[restart] slow after a kill: killed at ${killedAt}, back at ${started}\nalice ${await view(alice, "bob")}\n`
+        + `bob ${await view(bob, "alice")}\nlink steps since the kill:\n${steps.join("\n")}`);
+    }
     expect(afterStop).toBeLessThan(10_000);
     expect(afterKill).toBeLessThan(RACE_DIRECT_MS + dial);
   }, 240_000);
@@ -224,7 +240,8 @@ describe("two headless peers", { timeout: 180_000 }, () => {
   });
 
   it("show the contact a bot is thinking, with its status, and then recording", async () => {
-    const listen = await listenTo(bob, "--type", "typing.started", "--type", "typing.stopped");
+    // chat.connection too: a failure then says whether the session went down in the window.
+    const listen = await listenTo(bob, "--type", "typing.started", "--type", "typing.stopped", "--type", "chat.connection");
     expect(ok(await as(alice, "typing", "bob", "--kind", "thinking", "--status", "Transcribing your audio…")))
       .toMatchObject({ chat: chatA, typing: true, kind: "thinking", status: "Transcribing your audio…", live: true });
     expect(await listen.waitFor((l) => l.type === "typing.started" && l.kind === "thinking"))
@@ -247,8 +264,18 @@ describe("two headless peers", { timeout: 180_000 }, () => {
     const seen = Date.now();
     await new Promise((r) => setTimeout(r, asked + 13_000 - Date.now()));
     expect(Date.now() - seen, "the window outlasts the contact's 6 s timeout").toBeGreaterThan(6_000);
-    expect(listen.lines.slice(before).map((l) => [l.type, l.kind, l.status])).toEqual([["typing.started", "thinking", "Working"]]);
-    await listen.waitFor((l) => l.type === "typing.stopped" && listen.lines.indexOf(l) >= before);
+    const window = listen.lines.slice(before), shown = JSON.stringify(window.map((l) => [l.type, l.kind, l.status, l.at]));
+    const typing = window.filter((l) => l.type !== "chat.connection");
+    // Every start is thinking with its status, and it is still on now.
+    expect(typing.filter((l) => l.type === "typing.started").map((l) => [l.kind, l.status]), shown).toEqual(typing.filter((l) => l.type === "typing.started").map(() => ["thinking", "Working"]));
+    expect(typing.at(-1)?.type, shown).toBe("typing.started");
+    // It never went off for good: a runner stalled past the 6 s can take a refresh in just after the timeout ended
+    // it, so a stop is allowed once, then only with the next start within a refresh.
+    const stops = typing.flatMap((l, i) => l.type === "typing.stopped" ? [i] : []);
+    expect(stops.length, shown).toBeLessThanOrEqual(1);
+    for (const i of stops) expect((typing[i + 1].at as number) - (typing[i].at as number), shown).toBeLessThan(TYPING_REFRESH_MS);
+    const ended = listen.lines.length;
+    await listen.waitFor((l) => l.type === "typing.stopped" && listen.lines.indexOf(l) >= ended);
     // What the contact's app would not show is refused here.
     const refused = error(await as(alice, "typing", "bob", "--status", "see https://x.example"), "bad_request", 1);
     expect(refused.message).toContain("no link or markup");
@@ -292,7 +319,9 @@ describe("two headless peers", { timeout: 180_000 }, () => {
     pipe.stdout.on("data", (d: Buffer) => aliceHeard.push(d));
     await new Promise((r) => setTimeout(r, 500));
     program.write(tone(440, 48000, 2000));
-    pipe.stdin.write(tone(660, 16000, 2000));
+    // A finite clip, as `ffmpeg -t 2 … | ghostly call pipe` gives it: the end of stdin must not end the pipe, which
+    // goes on writing what Alice hears until the call ends.
+    pipe.stdin.end(tone(660, 16000, 2000));
     await expect.poll(() => Buffer.concat(aliceHeard).length, { timeout: 20_000 }).toBeGreaterThan(640 * 80);
     await expect.poll(() => Buffer.concat(bobHeard).length, { timeout: 20_000 }).toBeGreaterThan(1920 * 80);
     const heardByAlice = Buffer.concat(aliceHeard), heardByBob = Buffer.concat(bobHeard);
@@ -313,7 +342,9 @@ describe("two headless peers", { timeout: 180_000 }, () => {
     await listenB.stop();
   });
 
-  it("the call-echo example answers, greets with its WAV, and echoes the caller a second later", async () => {
+  // The README runs it beside `call auto on`: the daemon answers then, and the example takes the call once it connects.
+  it.each([["answers", false], ["takes an auto-answered call", true]])("the call-echo example %s, greets with its WAV, and echoes the caller a second later", async (_, auto) => {
+    if (auto) ok(await as(alice, "call", "auto", "on", "--from", "bob"));
     const wav = join(alice, "greeting.wav");
     writeFileSync(wav, wavFile(tone(300, 24000, 800), 24000));
     const example = spawn(process.execPath, [join(import.meta.dirname, "../examples/call-echo.mjs"), wav], { env: { ...process.env, GHOSTLY_SOCKET: sockets[alice] }, stdio: ["ignore", "pipe", "pipe"] });
@@ -339,9 +370,11 @@ describe("two headless peers", { timeout: 180_000 }, () => {
       expect(dominantHz(all.subarray(start + 1920 * 100, start + 1920 * 140), 48000)).toBeCloseTo(520, -1);
       ok(await as(bob, "call", "hangup"));
       await expect.poll(() => said, { timeout: 20_000 }).toContain("ended: remote-hangup");
+      expect(said).not.toContain("answer:");
       program.destroy();
     } finally {
       example.kill();
+      if (auto) ok(await as(alice, "call", "auto", "off"));
     }
   });
 
@@ -377,10 +410,32 @@ describe("two headless peers", { timeout: 180_000 }, () => {
     const last = (ok(await as(bob, "chat", "history", "alice")).messages as { text: string; edits?: number; editedAt?: number }[]).at(-1)!;
     expect(last).toMatchObject({ text: "Done: 3 of 3", edits: 3 });
     expect(last.editedAt).toBeGreaterThan(0);
-    error(await as(alice, "edit", "bob", "nope", "anything"), "refused", 1);
+    error(await as(alice, "edit", "bob", "nope", "anything"), "not_found", 3);
     error(await as(alice, "edit", "bob", id), "usage", 2);
     await new Promise((r) => setTimeout(r, 500));
     expect(listen.lines).toHaveLength(3);
+    await listen.stop();
+  });
+
+  it("ask with buttons: the contact presses one, the bot's stream says button.pressed, button update closes them", async () => {
+    const listen = await listenTo(alice, "--type", "button.pressed");
+    const sent = ok(await as(alice, "send", "bob", "Want the $30 one? Reply yes or no", "--button", "yes:Yes", "--button", "no:No", "--style", "yes=primary", "--once", "--wait", "delivered"));
+    expect(sent).toMatchObject({ chat: chatA, pressable: true, card: { kind: "buttons", buttons: [{ id: "yes", label: "Yes", style: "primary", once: true }, { id: "no", label: "No", once: true }] } });
+    const id = sent.messageId as string;
+    const theirs = (ok(await as(bob, "chat", "history", "alice")).messages as { id: string; card?: { id: string } }[]).find((m) => m.card?.id === sent.buttons)!;
+    expect(theirs).toBeDefined();
+    // The contact presses from its own CLI, as a tap in the app.
+    expect(ok(await as(bob, "button", "press", "alice", theirs.id, "yes"))).toMatchObject({ chat: chatB, messageId: theirs.id, button: "yes", label: "Yes" });
+    const event = await listen.waitFor((l) => l.type === "button.pressed");
+    // `name` is the chat's name here (the invite's label); the name Bob gave himself is under `untrusted`.
+    expect(event).toMatchObject({ chat: chatA, messageId: id, button: "yes", label: "Yes", by: chatA, name: "bob", untrusted: { name: "Bob" } });
+    expect(event).not.toHaveProperty("inferred");
+    const reply = (ok(await as(alice, "chat", "history", "bob")).messages as { id: string }[]).find((m) => m.id === event.replyId);
+    expect(reply).toMatchObject({ text: "Yes", from: "peer", press: { messageId: id, button: "yes", label: "Yes" }, replyTo: { id, button: "yes", found: true } });
+    expect(ok(await as(alice, "button", "update", "bob", id, "--chosen", "yes", "--close", "--wait", "confirmed"))).toMatchObject({ chat: chatA, messageId: id, confirmed: true, card: { chosen: "yes", closed: true } });
+    await expect.poll(async () => (ok(await as(bob, "chat", "history", "alice")).messages as { id: string; card?: { closed?: boolean } }[]).find((m) => m.id === theirs.id)?.card?.closed, { timeout: 30_000 }).toBe(true);
+    // Answered, and closed: the contact's engine presses no more.
+    error(await as(bob, "button", "press", "alice", theirs.id, "no"), "refused", 1);
     await listen.stop();
   });
 

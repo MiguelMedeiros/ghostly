@@ -23,19 +23,18 @@ import { appendFileSync } from "node:fs";
 const MAX_LINES = 600;
 const MIN_HOURS = 20;
 const PROTECTED = [/^\.github\//, /^scripts\/(security-scan|autorelease-gate)\.mjs$/, /^SECURITY\.md$/];
-const LOCKFILES = new Set(["package-lock.json", "website/package-lock.json", "Cargo.lock"]);
+const LOCKFILES = new Set(["package-lock.json", "apps/website/package-lock.json", "Cargo.lock"]);
 const VERSION_FILES = new Set([
   "package.json",
-  "web/package.json",
-  "extension/package.json",
-  "extension/public/manifest.json",
+  "apps/web/package.json",
+  "apps/extension/package.json",
+  "apps/extension/public/manifest.json",
   "packages/core/package.json",
   "packages/browser/package.json",
   "packages/react/package.json",
-  "src-tauri/tauri.conf.json",
-  "src-tauri/Cargo.toml",
-  "cli/Cargo.toml",
-  "website/lib/release.ts",
+  "apps/desktop/tauri.conf.json",
+  "apps/desktop/Cargo.toml",
+  "apps/website/lib/release.ts",
   "docs/INSTALLATION.md",
   "CHANGELOG.md",
 ]);

@@ -11,7 +11,7 @@ import { composerRow } from "../support/composer";
  * request settles through its own source, with nobody pressing Pay in the chat. The Lightning address is
  * served by a server of this test's own (support/lnurl.ts).
  */
-test.describe("another wallet", { tag: "@network" }, () => {
+test.describe("another wallet", () => {
   test.describe.configure({ retries: 2 });
 
   test("a request is paid with another wallet, and the bubble turns Paid by itself on both sides", { tag: ["@feature:payments.external", "@feature:wallet.lightning.cashu-mint.receive"] }, async ({ peer }) => {
@@ -58,8 +58,8 @@ test.describe("another wallet", { tag: "@network" }, () => {
     await openWallet(alice, "cashu-testnet");
     await alice.page.getByTestId("wallet-send").click();
     await alice.page.getByTestId("wallet-pay-input").fill(invoice);
-    await expect(alice.page.getByTestId("wallet-pay-preview")).toContainText("10 sats");
-    await alice.page.getByRole("button", { name: "Pay 10 sats" }).click();
+    await expect(alice.page.getByTestId("wallet-pay-preview")).toContainText("10 test sats");
+    await alice.page.getByRole("button", { name: "Pay 10 test sats" }).click();
     await expect(alice.page.getByRole("button", { name: "Pay", exact: true })).toBeVisible();
     await alice.page.getByRole("button", { name: "Pay", exact: true }).click();
     // The test mint marks its own invoices paid, so it may refuse Alice's melt as already paid.
@@ -96,23 +96,23 @@ test.describe("another wallet", { tag: "@network" }, () => {
       expect(server.requests, "nothing is fetched before the person asks").toHaveLength(0);
       await pay.getByTestId("lnurl-lookup").click();
       await expect(pay.getByTestId("lnurl-domain")).toContainText(`Answered by ${server.host}`);
-      await expect(pay.getByTestId("lnurl-domain")).toContainText("5 to 500 sats");
+      await expect(pay.getByTestId("lnurl-domain")).toContainText("5 to 500 test sats");
       await expect(pay).toContainText("Coffee at the shop");
       await pay.getByTestId("lnurl-amount").fill("21");
       await pay.getByTestId("lnurl-comment").fill("gm");
       await pay.getByTestId("lnurl-invoice").click();
-      await expect(pay.getByTestId("lnurl-review")).toContainText("Pay 21 sats to shop@");
+      await expect(pay.getByTestId("lnurl-review")).toContainText("Pay 21 test sats to shop@");
       await expect(pay.getByTestId("lnurl-review")).toContainText("through the Cashu mints");
       expect(server.invoices.at(-1)).toMatchObject({ name: "shop", amountSat: 21, comment: "gm" });
       await pay.getByTestId("lnurl-pay").click();
-      await expect(pay.getByTestId("lnurl-paid")).toContainText(`Paid 21 sats to ${server.address("shop")}`);
+      await expect(pay.getByTestId("lnurl-paid")).toContainText(`Paid 21 test sats to ${server.address("shop")}`);
       await expect(pay.getByTestId("lnurl-success")).toContainText('Thanks for "gm"');
       await expect.poll(() => server.paid("shop"), { timeout: 30_000 }).toBe(true);
 
       // An amount outside the limits never reaches the server.
       await alice.page.getByTestId("wallet-pay-input").fill(server.address("fixed"));
       await pay.getByTestId("lnurl-lookup").click();
-      await expect(pay.getByTestId("lnurl-domain")).toContainText("exactly 12 sats");
+      await expect(pay.getByTestId("lnurl-domain")).toContainText("exactly 12 test sats");
       await expect(pay.getByTestId("lnurl-amount")).toHaveValue("12");
       await expect(pay.getByTestId("lnurl-comment"), "no comment where none is taken").toHaveCount(0);
       const before = server.requests.length;
@@ -139,7 +139,7 @@ test.describe("another wallet", { tag: "@network" }, () => {
       await card.getByTestId("lnurl-amount").fill("5");
       await card.getByTestId("lnurl-invoice").click();
       await card.getByTestId("lnurl-pay").click();
-      await expect(card.getByTestId("lnurl-paid")).toContainText("Paid 5 sats");
+      await expect(card.getByTestId("lnurl-paid")).toContainText("Paid 5 test sats");
     } finally {
       server.close();
     }

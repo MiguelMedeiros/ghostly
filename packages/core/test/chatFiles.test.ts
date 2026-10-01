@@ -342,6 +342,30 @@ describe("files/3 between two chats", { timeout: 30_000 }, () => {
     expect(state(w.b, "in", "pause-01")).toBe("done");
   });
 
+  it("after the receiver's restart, its cancel or the sender's drops what it had, though nothing arrived since", async () => {
+    const w = wire();
+    w.attach();
+    send(w, file("restart-c", 4 * 1024 * 1024));
+    await until(() => (w.b.transferred.get("in:restart-c") ?? 0) > 100_000);
+    w.drop();
+    w.restart("b");
+    w.b.files.cancel("in", "restart-c");
+    expect(state(w.b, "in", "restart-c")).toBe("cancelled");
+    await until(() => w.b.disks.get("restart-c")!.discarded);
+
+    w.attach();
+    send(w, file("restart-a", 4 * 1024 * 1024));
+    await until(() => (w.b.transferred.get("in:restart-a") ?? 0) > 100_000);
+    w.drop();
+    w.restart("b");
+    // The sender cancels while the receiver's app is closed; back, the receiver asks again and is told.
+    w.a.files.cancel("out", "restart-a");
+    w.attach();
+    expect(w.b.files.request("restart-a")).toBe(true);
+    await until(() => state(w.b, "in", "restart-a") === "cancelled");
+    await until(() => w.b.disks.get("restart-a")!.discarded);
+  });
+
   it("the sender cancels: the receiver drops what it had; the receiver cancels: the sender stops", async () => {
     const w = wire();
     w.attach();

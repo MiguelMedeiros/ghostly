@@ -1,0 +1,1 @@
+Status cards: a sealed `sc` box on `group-msg` (AAD `ghostly-group/1 card`), covered by `xs` after everything else only when present, kept by a member handing the frame on only with `xs`; the card of a version in the `group-edit` body, whose `v` may then reach 5,000.

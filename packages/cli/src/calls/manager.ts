@@ -13,12 +13,12 @@ import { DEFAULT_RATE, FRAME_MS, isCallRate, PlaybackQueue, type CallRate } from
  * Voice calls on the headless Ghostly (WISP 11xx § Calls): the calls/1 signals of the chat session (WISP 601), the
  * media on a WebRTC connection of the CLI's own, and the audio handed to an outside program over a Unix socket per
  * call. The rules are the apps' (packages/react/src/useWebRTC.ts): a call per chat; an offer rings while this side
- * is idle; an answer counts only after this side's offer; a hang-up ends whatever is on; a signal older than the
+ * is idle, or when it wins a glare with this side's own offer; an answer counts only after this side's offer; a hang-up ends whatever is on; a signal older than the
  * last one handled is ignored; after a hang-up the signal is cleared 5 s later.
  */
 
 export type CallState = "ringing" | "connecting" | "connected";
-export type EndReason = "hangup" | "remote-hangup" | "missed" | "rejected" | "unanswered" | "failed" | "stopped";
+export type EndReason = "hangup" | "remote-hangup" | "missed" | "rejected" | "unanswered" | "crossed" | "failed" | "stopped";
 
 /** What the engine gives the calls: its state, and a way to send this side's signal. */
 export interface CallEngine {
@@ -35,6 +35,11 @@ export interface CallHost {
   /** The media stack (tests give their own). */
   stack?: () => Promise<CallStack | string>;
   now?: () => number;
+  /**
+   * How many times an outgoing call offers again (MAX_REDIALS): tests that refuse some answers themselves raise it by
+   * theirs, so the real race's own refusals, which can come on top, still find the app's budget whole.
+   */
+  maxRedials?: number;
 }
 
 /** The audio contract of one call, as commands and events report it. */
@@ -48,6 +53,11 @@ export const CONNECT_MS = 30_000;
 export const MEDIA_GRACE_MS = 3_000;
 /** After a hang-up, the signal is cleared this much later (the apps' own delay). */
 export const CLEAR_MS = 5_000;
+/** How many times an outgoing call offers again after an answer was refused (`redial`), and the wait before each. */
+export const MAX_REDIALS = 4;
+export const REDIAL_BACKOFF_MS = [150, 300, 600, 600] as const;
+/** A connection that fails this soon after its answer went in lost the race `redial` describes, and starts over. */
+export const RACE_FAIL_MS = 2_000;
 
 interface Call {
   id: string;
@@ -61,10 +71,13 @@ interface Call {
   offerTs: number;
   /** This side's offer waits for its answer. */
   offering: boolean;
-  /** Whether this side offered again on a new connection, after its first answer was refused (`redial`). */
-  redialed: boolean;
+  /** How many times this side offered again on a new connection after an answer was refused (`redial`). */
+  redials: number;
   /** Counts the connections made for the call: one that comes back after a newer one was asked for is closed. */
   attempt: number;
+  /** The attempt whose connection has the contact's answer (0: none yet), and when it went in (Date.now()). */
+  answered: number;
+  answeredAt: number;
   media: CallMedia | null;
   socket: AudioSocket | null;
   /** What the program wrote and the call has not sent yet: kept from the moment the socket opens. */
@@ -73,6 +86,8 @@ interface Call {
   connectedAt: number | null;
   timer: ReturnType<typeof setTimeout> | null;
   ended: boolean;
+  /** Why it ended, once it has. */
+  reason?: EndReason;
 }
 
 /** Auto-answer, kept in the profile's `calls.json`: every chat, or the listed ones, at a rate. */
@@ -99,6 +114,8 @@ export class CallManager {
 
   /** A signal the contact's app sent in a chat (the engine's `call-signal`). */
   onSignal(chat: string, json: string): void {
+    // A stopping daemon takes no call, and its own have been hung up (`stopAll`): nothing here is heard any more.
+    if (this.stopping) return;
     const signal = parseCallSignal(json, this.now);
     if (!signal) return;
     if (signal.ts <= (this.lastSignal.get(chat) ?? 0)) return;
@@ -111,6 +128,13 @@ export class CallManager {
     } else if (signal.t === "a" && call?.direction === "out" && call.offering && signal.ts > call.offerTs) {
       this.lastSignal.set(chat, signal.ts);
       this.accepted(call, signal);
+    } else if (signal.t === "o" && call?.direction === "out" && call.state === "ringing") {
+      // Both called at once (WISP 601, "Both call at once"): the earlier offer wins on both sides, at the same
+      // millisecond the lower DTLS fingerprint; ours still being made counts as later. The loser rings.
+      this.lastSignal.set(chat, signal.ts);
+      const mine = call.offering ? call.offerTs : 0;
+      const theirsFirst = !mine || signal.ts < mine || (signal.ts === mine && (signal.f ?? "") < (call.media?.local.f ?? ""));
+      if (theirsFirst) void this.yieldTo(call, signal);
     } else if (signal.t === "o" && call?.direction === "in" && call.state === "connecting" && call.media && signal.ts > (call.offer?.ts ?? 0)) {
       // The contact's side offered again on a new connection (see `redial`): the answered call starts over on one.
       this.lastSignal.set(chat, signal.ts);
@@ -120,11 +144,27 @@ export class CallManager {
     } else if (signal.t === "h") {
       this.lastSignal.set(chat, signal.ts);
       if (call) {
-        // A hang-up while a second offer waits (`redial`) is the contact's app ending a connection that failed.
-        const reason: EndReason = call.state === "ringing" ? (call.direction === "in" ? "missed" : "rejected") : call.offering ? "failed" : "remote-hangup";
+        // A hang-up while this side starts over (`redial`) is the contact's app ending a connection that failed. Once
+        // a connection came up, the call was on: a start-over before it does not make the hang-up a failure.
+        // A hang-up that says the contact's side could not connect (`r: "u"`, WISP 601): the call failed, not declined.
+        const unreachable = signal.r === "u" && call.state !== "connected";
+        const failed = unreachable || (call.state !== "connected" && (call.offering || (call.direction === "out" && call.redials > 0)));
+        const reason: EndReason = call.state === "ringing" && call.direction === "in" ? "missed"
+          : call.state === "ringing" && !unreachable ? "rejected" : failed ? "failed" : "remote-hangup";
         void this.end(call, reason, false);
       }
     }
+  }
+
+  /**
+   * The contact's offer won a glare: our call ends as `crossed`, sending nothing (a hang-up would end the contact's
+   * call, and clearing our signal could drop an answer we are about to give), and the contact's call rings here.
+   */
+  private async yieldTo(call: Call, offer: CallSignal): Promise<void> {
+    await this.end(call, "crossed", false);
+    // Something newer (the contact's hang-up) came while ours ended, or another call started: nothing rings.
+    if (this.lastSignal.get(call.chat) !== offer.ts || this.byChat(call.chat) || this.stopping) return;
+    this.incoming(call.chat, offer);
   }
 
   private incoming(chat: string, offer: CallSignal): void {
@@ -143,34 +183,56 @@ export class CallManager {
   private accepted(call: Call, answer: CallSignal): void {
     call.offering = false;
     call.state = "connecting";
+    const attempt = (call.answered = call.attempt);
+    call.answeredAt = Date.now();
     try {
       call.media!.applyAnswer(answer);
     } catch (error) {
-      const why = error instanceof Error ? error.message : String(error);
-      if (!call.redialed) {
-        process.stderr.write(`ghostly: call ${call.id}: the answer was refused (${why}): offering again on a new connection\n`);
-        void this.redial(call);
-        return;
-      }
-      process.stderr.write(`ghostly: call ${call.id}: the answer was refused (${why})\n`);
-      void this.end(call, "failed", true);
+      // The connection may have failed first, while the answer was added: then it already started over.
+      if (attempt === call.attempt) this.refused(call, `the answer was refused (${error instanceof Error ? error.message : String(error)})`);
       return;
     }
-    this.arm(call, CONNECT_MS, "failed", true);
+    if (attempt === call.attempt) this.arm(call, CONNECT_MS, "failed", true);
   }
 
   /**
-   * A second offer, once, on a new connection. libdatachannel (0.24.5) can refuse a good answer: when the contact's
-   * checks and its DTLS hello came before the answer (they do, the answer crosses the chat session), ICE connects
-   * and the handshake ends inside setRemoteDescription, before the answer's fingerprint is recorded; the fingerprint
-   * check fails, the connection closes its transports, and adding the answer's candidates throws "Got a remote
-   * candidate without ICE transport". That connection is done for, and the contact's side saw the handshake fail
-   * too, so both start over: the contact's side answers the newer offer (`reanswer`). Fixed upstream in libdatachannel
-   * 0235225a, which no release has yet.
+   * The contact's answer on this connection was refused, or the connection failed right after it (the same race,
+   * whose handshake can also fail once the answer is in): offering again (`redial`) while there are tries left.
+   */
+  private refused(call: Call, what: string): void {
+    if (call.redials < this.maxRedials) {
+      process.stderr.write(`ghostly: call ${call.id}: ${what}: offering again on a new connection\n`);
+      void this.redial(call);
+      return;
+    }
+    process.stderr.write(`ghostly: call ${call.id}: ${what}\n`);
+    void this.end(call, "failed", true);
+  }
+
+  private get maxRedials(): number { return this.host.maxRedials ?? MAX_REDIALS; }
+
+  /**
+   * A new offer on a new connection, up to MAX_REDIALS times, each after a short wait. libdatachannel (0.24.5) can
+   * refuse a good answer: when the contact's checks and its DTLS hello came before the answer (they do, the answer
+   * crosses the chat session), ICE connects and the handshake ends inside setRemoteDescription, before the answer's
+   * fingerprint is recorded; the fingerprint check fails, the connection closes its transports, and adding the
+   * answer's candidates throws "Got a remote candidate without ICE transport". That connection is done for, and the
+   * contact's side saw the handshake fail too, so both start over: the contact's side answers the newer offer
+   * (`reanswer`). Each new connection runs the same race (CI runners lose about one in six, Linux arm64 twice in a
+   * row), hence several. The race can also let the answer in and fail the handshake a moment later: a connection
+   * that fails after its answer, before it ever connected, starts over the same way. The contact's side ends a call whose connection failed after MEDIA_GRACE_MS: every wait stays
+   * well under it. Fixed upstream in libdatachannel 0235225a, which no release has yet.
    */
   private async redial(call: Call): Promise<void> {
-    call.redialed = true;
+    const wait = REDIAL_BACKOFF_MS[Math.min(call.redials, REDIAL_BACKOFF_MS.length - 1)];
+    call.redials++;
+    // The refused connection is dropped now: its closing must not arm its own timer over the one below while we wait.
+    call.attempt++;
+    call.media?.close();
+    call.media = null;
     this.arm(call, CONNECT_MS, "failed", true);
+    await new Promise((resolve) => setTimeout(resolve, wait));
+    if (call.ended) return;
     try {
       const stack = await this.stack();
       if (!(await this.connect(call, (media) => CallMedia.offer(stack, media)))) return;
@@ -183,7 +245,7 @@ export class CallManager {
     }
   }
 
-  /** The contact's second offer (its `redial`): answered on a new connection, on the call's socket. */
+  /** The contact's newer offer (its `redial`): answered on a new connection, on the call's socket. */
   private async reanswer(call: Call, offer: CallSignal): Promise<void> {
     process.stderr.write(`ghostly: call ${call.id}: the contact offered again: answering on a new connection\n`);
     call.offer = offer;
@@ -206,9 +268,12 @@ export class CallManager {
     if (this.byChat(link.id)) throw new CliError("busy", "A call is already on in this chat");
     const rate = rateOf(options.rate, this.auto.rate);
     const stack = await this.stack();
+    // The contact's call may have come in while the stack loaded.
+    if (this.byChat(link.id)) throw new CliError("busy", "A call is already on in this chat");
     const call = this.add(link.id, "out", rate);
     try {
       await this.attach(call, (media) => CallMedia.offer(stack, media));
+      if (call.reason === "crossed") throw new CliError("busy", "The contact called at the same time: their call rings here");
       if (call.ended) throw new CliError("unavailable", "The call ended before it was placed");
       call.offerTs = this.now;
       call.offering = true;
@@ -294,7 +359,7 @@ export class CallManager {
     if (clearing) { clearTimeout(clearing); this.clearing.delete(chat); }
     const call: Call = {
       id: randomBytes(6).toString("hex"), chat, direction, state: "ringing", rate, video: false, offer: null, offerTs: 0,
-      offering: false, redialed: false, attempt: 0, media: null, socket: null, queue: null, startedAt: this.now, connectedAt: null, timer: null, ended: false,
+      offering: false, redials: 0, attempt: 0, answered: 0, answeredAt: 0, media: null, socket: null, queue: null, startedAt: this.now, connectedAt: null, timer: null, ended: false,
     };
     this.calls.set(call.id, call);
     return call;
@@ -317,6 +382,7 @@ export class CallManager {
     const attempt = ++call.attempt;
     call.media?.close();
     call.media = null;
+    let failed = false;
     const media = await create({
       rate: call.rate,
       queue: call.queue ?? undefined,
@@ -326,6 +392,16 @@ export class CallManager {
       onState: (state) => {
         if (call.ended || attempt !== call.attempt) return;
         if (state === "connected") { this.connected(call); return; }
+        // A connection fails, then closes: it still failed.
+        if (state === "closed" && failed) return;
+        failed ||= state === "failed";
+        // The answer went in and the connection failed at once, before it ever connected: the race's other ending (a
+        // contact out of reach fails later, and ends the call as before).
+        if (state === "failed" && call.direction === "out" && call.answered === attempt && call.state !== "connected"
+          && Date.now() - call.answeredAt < RACE_FAIL_MS) {
+          this.refused(call, "the connection failed as the answer went in");
+          return;
+        }
         // The contact's app closes its connection as it hangs up, and that is often here before its hang-up signal
         // (which crosses the chat session): the signal gets a moment to say so. Without one, a connection the
         // contact closed was still a hang-up; one that failed ends the call as it does in the apps, with nothing to say.
@@ -351,6 +427,7 @@ export class CallManager {
   private async end(call: Call, reason: EndReason, tell: boolean, report = true): Promise<void> {
     if (call.ended) return;
     call.ended = true;
+    call.reason = reason;
     this.disarm(call);
     this.calls.delete(call.id);
     if (report) process.stderr.write(`ghostly: call ${call.id}: ended (${reason})${call.media ? `, ice ${call.media.ice.state}` : ""}\n`);
@@ -366,7 +443,7 @@ export class CallManager {
         timer.unref?.();
         this.clearing.set(call.chat, timer);
       }
-    } else {
+    } else if (reason !== "crossed") {
       // Nothing left to say: a signal still waiting for the next session is dropped.
       await this.sendRaw(call.chat, null).catch(() => {});
     }

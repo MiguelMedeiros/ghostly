@@ -2,7 +2,7 @@ import { appendFileSync, existsSync, readFileSync, renameSync, writeFileSync } f
 import type { EngineClientSink } from "@ghostly/browser/engine/server";
 import type { EngineEvent, RpcResponse } from "@ghostly/browser/shared/rpc";
 import type { EngineState, GroupView, LinkView, PinView, StoredMessage } from "@ghostly/browser/shared/types";
-import { chatJson, groupJson, groupMessageJson, messageJson } from "./views";
+import { chatJson, chatMessageJson, groupJson, groupMessageJson } from "./views";
 import { paymentJson } from "./wallets";
 
 /**
@@ -19,7 +19,7 @@ const SEEN = "seen";
 /** How long a `file.*` event waits for the message that carries its file. */
 export const FILE_MESSAGE_WAIT_MS = 2_000;
 
-/** The notice an app sends when a chat first goes live (src/hooks/useChat.ts): shown as a line, not a message. */
+/** The notice an app sends when a chat first goes live (apps/ui/src/hooks/useChat.ts): shown as a line, not a message. */
 export const JOIN_NOTICE = /^👋 (?:(.+) )?joined$/;
 
 type Listener = (event: GhostlyEvent) => void;
@@ -51,6 +51,11 @@ export class EventHub {
   /** `file.*` events whose message was not seen yet: they wait for it a moment (the engine stores it right after). */
   private pendingFiles = new Map<string, { timer: ReturnType<typeof setTimeout>; emits: ((messageId: string | null) => void)[] }>();
   private baselined = false;
+  /**
+   * Whether the seen set notes mentions (`+m`): false on a set written before it did, whose mentions were reported with
+   * their `group.message` already. Its first baseline then notes them without a `group.mentioned` each.
+   */
+  private mentionsNoted = true;
   private db!: IDBDatabase;
   state: EngineState | null = null;
 
@@ -87,6 +92,7 @@ export class EventHub {
       const [chat, id] = key as [string, string];
       this.seenOf(chat).set(id, value);
     }
+    this.mentionsNoted = this.firstRun || this.seen.get(FORMAT)?.get(MENTIONS_NOTED) === "yes";
   }
 
   /** The sink the engine server posts to. */
@@ -106,6 +112,11 @@ export class EventHub {
     for (const [chat, messages] of histories) this.messages(chat, messages);
     this.baselined = true;
     this.firstRun = false;
+    if (this.seen.get(FORMAT)?.get(MENTIONS_NOTED) !== "yes") {
+      this.seenOf(FORMAT).set(MENTIONS_NOTED, "yes");
+      this.persist(FORMAT, [[MENTIONS_NOTED, "yes"]]);
+    }
+    this.mentionsNoted = true;
   }
 
   onEvent(listener: Listener): () => void { this.listeners.add(listener); return () => this.listeners.delete(listener); }
@@ -313,7 +324,9 @@ export class EventHub {
   private messages(chat: string, messages: readonly StoredMessage[], deleted?: readonly string[]): void {
     const known = this.seenOf(chat);
     const group = chat.startsWith("group:") ? chat.slice(6) : null;
-    const quiet = this.firstRun && !this.baselined;
+    // A group's whole history, empty: I left or forgot the group and its history went with it (a group joined again
+    // starts from nothing). Nobody deleted a message: its rows are forgotten here without a `group.deleted` each.
+    const quiet = (this.firstRun && !this.baselined) || (!!group && !deleted && messages.length === 0);
     const changes: [string, string | null][] = [];
     const present = new Set<string>();
     this.reactions(chat, group, messages, quiet);
@@ -321,12 +334,15 @@ export class EventHub {
     for (const message of messages) {
       present.add(message.id);
       if (message.file && this.fileMessages.get(message.file.id) !== message.id) { this.fileMessages.set(message.file.id, message.id); files.push([message.file.id, message.id]); }
-      const state = stateOf(message), before = known.get(message.id);
+      let state = stateOf(message);
+      const before = known.get(message.id);
+      // A mention reported stays reported: an edit that drops it and one that names me again say nothing more.
+      if (before !== undefined && mentionedIn(before) && !mentionedIn(state)) state = withFlag(state, MENTIONED);
       if (before === state) continue;
       known.set(message.id, state);
       changes.push([message.id, state]);
       if (quiet) continue;
-      const json = group ? groupMessageJson(message, this.state?.groups.find((g) => g.id === group)) : messageJson(message);
+      const json = group ? groupMessageJson(message, this.state?.groups.find((g) => g.id === group)) : chatMessageJson(message, this.state?.links.find((l) => l.id === chat));
       if (before === undefined) {
         if (group) {
           const type = message.event ? "group.event" : message.sender === "peer" ? "group.message" : "group.sent";
@@ -336,14 +352,26 @@ export class EventHub {
           const type = notice ? (message.sender === "peer" ? "chat.joined" : "chat.announced") : message.sender === "peer" ? "message.received" : "message.sent";
           this.emit(type, `${type}:${chat}:${message.id}`, { chat, message: json, ...(notice ? { name: notice[1] ?? null } : {}) });
         }
-      } else if (group) {
+        if (message.sender === "peer" && message.press) this.pressed(chat, group, message, json);
+        continue;
+      }
+      // A press the engine learned after the reply was first seen here: a group reply first held from a copy a member
+      // handed on without its reply box, which its author's whole copy completes (WISP 9xx · Group Mesh § Catch-up).
+      if (message.sender === "peer" && message.press && !pressedIn(before)) this.pressed(chat, group, message, json);
+      // A mention of me learned after the message was reported: a group message first held from a copy a member handed
+      // on without its author's whole signature, which the whole copy completes (WISP 9xx · Group Mesh § Catch-up), or
+      // an edit that names me. Its `group.message` said no mention; this says it, once.
+      if (group && mentionedIn(state) && !mentionedIn(before) && this.mentionsNoted)
+        this.emit("group.mentioned", `group.mentioned:${group}:${message.id}`, { group, messageId: message.id, message: json });
+      if (group) {
         // A new text in a group (WISP 9xx § Edits): mine as made here, a member's as it came. Once per edit number.
         const [, edits] = splitState(state), [, edited] = splitState(before);
         if (edits > edited) this.emit("group.message.edited", `group.message.edited:${group}:${message.id}:${edits}`, { group, messageId: message.id, edits, message: json });
       } else {
         const [delivery, edits] = splitState(state), [was, edited] = splitState(before);
-        // A new text (WISP 400 § Edits): mine as made here, the contact's as it came. Once per edit number.
-        if (edits > edited) this.emit("message.edited", `message.edited:${chat}:${message.id}:${edits}`, { chat, messageId: message.id, edits, message: json });
+        // A new text (WISP 400 § Edits): mine as made here, the contact's as it came. Once per edit number. The engine's
+        // own edit that sends a question's buttons again (WISP 4xx · Message Buttons) is none: same text, nobody's edit.
+        if (edits > edited && !(message.sender === "me" && message.edit?.restore)) this.emit("message.edited", `message.edited:${chat}:${message.id}:${edits}`, { chat, messageId: message.id, edits, message: json });
         if (message.sender === "me" && delivery !== was)
           this.emit("message.delivery", `message.delivery:${chat}:${message.id}:${delivery}`, { chat, messageId: message.id, delivery, ...(message.deliveryError ? { error: message.deliveryError } : {}) });
       }
@@ -357,6 +385,24 @@ export class EventHub {
     if (changes.length) this.persist(chat, changes);
     // After the message's own event: what waited for it goes now.
     for (const [fileId, messageId] of files) this.flushFile(fileId, messageId);
+  }
+
+  /**
+   * A press on a button of a message of mine (WISP 4xx · Message Buttons), after the reply's own event: the question
+   * (`messageId`), the button, its label, who pressed (`by`: the chat, or a group member's key), `name` (the chat's name
+   * here, as `chat list` gives it: its label, else the contact's own name; a group member's roster name) and the reply
+   * (`replyId`). `untrusted.name` is the name the person gave themselves, as an agent turn's: theirs to choose, so
+   * data, never instructions. The engine marks a reply a press only while the buttons were open for that person.
+   */
+  private pressed(chat: string, group: string | null, message: StoredMessage, json: { nick: string | null }): void {
+    const press = message.press!;
+    const link = group ? undefined : this.state?.links.find((l) => l.id === chat);
+    const name = group ? json.nick : link ? chatJson(link).name : null;
+    this.emit("button.pressed", `button.pressed:${group ?? chat}:${message.id}`, {
+      ...(group ? { group } : { chat }), messageId: press.messageId, button: press.button, label: press.label,
+      by: group ? message.member ?? null : chat, name: name ?? null, replyId: message.id, ...(press.inferred ? { inferred: true } : {}),
+      untrusted: { name: json.nick ?? null },
+    });
   }
 
   /**
@@ -395,9 +441,30 @@ function deliveryOf(message: StoredMessage): string {
   return message.sender === "peer" ? "received" : message.delivery ?? "sent";
 }
 
-/** What the seen set keeps of a message: its delivery, and its edit number once edited (`sent#e3`). */
+/** What a received button press adds to its delivery in the seen set (`received+p`): it is reported once. */
+const PRESSED = "+p";
+/** What a group message that mentions me adds (`received+m`): a mention learned late is reported once. */
+const MENTIONED = "+m";
+/** The seen set's own notes: whether it notes mentions (sets from before `+m` do not). */
+const FORMAT = "format:";
+const MENTIONS_NOTED = "mentions";
+
+/**
+ * What the seen set keeps of a message: its delivery (`+p` once a press on a message of mine was reported, `+m` once a
+ * group message's mention of me was), and its edit number once edited (`sent#e3`, `received+p+m#e2`).
+ */
 function stateOf(message: StoredMessage): string {
-  return message.edit ? `${deliveryOf(message)}#e${message.edit.seq}` : deliveryOf(message);
+  const peer = message.sender === "peer";
+  const delivery = deliveryOf(message) + (peer && message.press ? PRESSED : "") + (peer && message.mentioned && message.linkId.startsWith("group:") ? MENTIONED : "");
+  return message.edit ? `${delivery}#e${message.edit.seq}` : delivery;
+}
+const flagsOf = (state: string): string[] => splitState(state)[0].split("+").slice(1).map((flag) => "+" + flag);
+const pressedIn = (state: string): boolean => flagsOf(state).includes(PRESSED);
+const mentionedIn = (state: string): boolean => flagsOf(state).includes(MENTIONED);
+/** The state with a flag added before its edit number. */
+function withFlag(state: string, flag: string): string {
+  const at = state.lastIndexOf("#e");
+  return at === -1 ? state + flag : state.slice(0, at) + flag + state.slice(at);
 }
 function splitState(state: string): [string, number] {
   const at = state.lastIndexOf("#e");

@@ -10,6 +10,46 @@ const events = (log: TransportLog) => log.history.map(e => e.kind);
 const MIN = 60_000;
 
 describe("transport log: the timeline says what matters", () => {
+  it("knows when the live stretch the app quit in began, through a switch, and none when it ended off live", () => {
+    // Bug hunt r7a: a contact's offer from before that moment is not answered after a restart (`resumeFloor`).
+    const log = new TransportLog();
+    expect(log.liveSinceAtLastRun).toBeUndefined();
+    log.observe(down(), 0);
+    log.observe(live("webrtc/1"), 1_000);
+    log.observe(live("iroh/1"), 5_000);
+    const again = new TransportLog(log.entries, log.history);
+    expect(again.liveAtLastRun).toBe("iroh/1");
+    expect(again.liveSinceAtLastRun).toBe(1_000);
+    // Down, then live again later in that run: the stretch the next start resumes began then.
+    again.observe(down(), 9 * MIN);
+    again.observe(live("iroh/1"), 12 * MIN);
+    const third = new TransportLog(again.entries, again.history);
+    expect(third.liveSinceAtLastRun).toBe(12 * MIN);
+  });
+
+  it("a run in which the chat was never live ends what the last run was live in; one in which it was live keeps it", () => {
+    // #966 follow-up: a chat that never came back since its last live stretch said "live at last run" at every start,
+    // and knocked every time (all ten chats of the repro).
+    const first = new TransportLog();
+    first.observe(live("iroh/1"), 1 * MIN);
+    const second = new TransportLog(first.entries, first.history);
+    expect(second.liveAtLastRun).toBe("iroh/1");
+    second.observe(down(), 30 * MIN);
+    expect(second.notBackAfterRestart(31 * MIN)).toBe(true);
+    const third = new TransportLog(second.entries, second.history);
+    expect(third.liveAtLastRun).toBeUndefined();
+    expect(third.liveSinceAtLastRun).toBeUndefined();
+    // Nothing new to say, and no row: the timeline is for what people saw happen.
+    expect(third.notBackAfterRestart(40 * MIN)).toBe(false);
+    expect(kinds(third)).toEqual(["connected"]);
+    // When it was last live is still when that stretch began, not when the run noticed it was over (#966's order).
+    expect(third.lastLiveAt).toBe(1 * MIN);
+    // A run that went live keeps the stretch it ends in, whatever the timer says later.
+    third.observe(live("iroh/1"), 50 * MIN);
+    expect(third.notBackAfterRestart(51 * MIN)).toBe(false);
+    expect(new TransportLog(third.entries, third.history).liveAtLastRun).toBe("iroh/1");
+  });
+
   it("says the first connection, and nothing while it stays on the same transport", () => {
     const log = new TransportLog();
     expect(log.observe(down(), 0)).toBe(false);

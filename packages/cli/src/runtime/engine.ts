@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { fromBase64Url, setLinkTraceSink } from "@ghostly/core";
 import type { EngineServer } from "@ghostly/browser/engine/server";
 import { loadCallStack } from "../calls/media";
+import { CliError } from "../errors";
 import { nodeLocalFetch } from "../services";
 import { nodeFedimintSdk } from "./fedimint";
 import { installFileFetch } from "./fileFetch";
@@ -37,12 +38,28 @@ export function hyperdhtNetwork(env = process.env.GHOSTLY_HYPERDHT_BOOTSTRAP): {
 }
 
 /**
+ * The Pkarr relays of a private network or a test, `GHOSTLY_PKARR_RELAYS` ("http://…,…"), the Desktop's name for it:
+ * the only relays this process uses, whatever the profile's `relays` setting says, from its very first publish. Null
+ * when unset.
+ */
+export function pkarrRelays(env = process.env): string[] | null {
+  const relays = (env.GHOSTLY_PKARR_RELAYS ?? "").split(",").map((url) => url.trim()).filter(Boolean);
+  if (!relays.length) return null;
+  const bad = relays.find((url) => !/^https?:\/\/[^/\s]/i.test(url));
+  if (bad) throw new CliError("usage", `GHOSTLY_PKARR_RELAYS takes http:// or https:// URLs, comma-separated, not ${JSON.stringify(bad)}`);
+  return relays;
+}
+
+/**
  * The Mainline DHT, for Pkarr beside the relays (`RelaysAndDht`): `GHOSTLY_DHT=0` leaves it out (relays only, as the web
  * app), `GHOSTLY_DHT_BOOTSTRAP` ("host:port,…") replaces the public routers (a testnet; one all on loopback binds there).
+ * `GHOSTLY_PKARR_RELAYS` without a bootstrap leaves it out too, as on the Desktop: a private network stays off the
+ * public DHT.
  */
 export function mainlineNetwork(env = process.env): { off: true } | { off: false; bootstrap?: string[]; host?: string } {
   if (env.GHOSTLY_DHT === "0") return { off: true };
   const bootstrap = (env.GHOSTLY_DHT_BOOTSTRAP ?? "").split(",").map((node) => node.trim()).filter(Boolean);
+  if (!bootstrap.length && pkarrRelays(env)) return { off: true };
   if (!bootstrap.length) return { off: false };
   const loopback = bootstrap.every((node) => /^(127\.0\.0\.1|localhost):\d+$/.test(node));
   return { off: false, bootstrap, ...(loopback ? { host: "127.0.0.1" } : {}) };
@@ -107,6 +124,8 @@ export interface RuntimeOptions { deferGroups?: boolean }
 export async function startRuntime(paths: ProfilePaths, options: RuntimeOptions = {}): Promise<Runtime> {
   // `GHOSTLY_LINK_TRACE=<file>`: each step of each chat's way to live, one JSON line (packages/core/src/linkTrace.ts),
   // as the Desktop writes to its log. For measuring, not needed to run.
+  // Read first: a mistyped one stops here, before anything opens.
+  const pinned = pkarrRelays();
   const trace = process.env.GHOSTLY_LINK_TRACE;
   if (trace) setLinkTraceSink(line => appendFileSync(trace, line + "\n", { mode: 0o600 }));
   const store = await openPersistentIndexedDb(paths.db);
@@ -129,12 +148,13 @@ export async function startRuntime(paths: ProfilePaths, options: RuntimeOptions 
   registerFileBytes("native", async () => new NodeFileBytes(paths.files), true);
   const [{ EngineServer }, { createHyperEndpoint }] = await Promise.all([
     import("@ghostly/browser/engine/server"),
-    import("../../../../native-transports/hyperdht/endpoint.mjs"),
+    import("../../../../native/transports/hyperdht/endpoint.mjs"),
   ]);
   const network = hyperdhtNetwork();
   const dht = mainlineNetwork();
   const mainline = dht.off ? null : new (await import("./mainline")).Mainline({ bootstrap: dht.bootstrap, host: dht.host });
-  const transport = mainline && new (await import("./mainline")).RelaysAndDht(mainline);
+  // `GHOSTLY_PKARR_RELAYS`: those relays only, in place before the engine publishes anything (the setting is not read).
+  const transport = (mainline || pinned) ? new (await import("./mainline")).RelaysAndDht(mainline, pinned ? { relays: pinned } : {}, !!pinned) : null;
   const server = new EngineServer({
     ...(transport ? { transport } : {}),
     irohWeb: true,
@@ -153,6 +173,8 @@ export async function startRuntime(paths: ProfilePaths, options: RuntimeOptions 
     callsSupport: callsUnavailable === null,
     ...(callsUnavailable ? { callsUnavailable } : {}),
     ...(options.deferGroups ? { deferGroups: true } : {}),
+    // Tests only: group links as an app from before native ones (test/groupCompat.test.ts).
+    ...(process.env.GHOSTLY_TEST_WEBRTC_GROUP_LINKS === "1" ? { webrtcGroupLinks: true } : {}),
   });
   try {
     await server.ready;

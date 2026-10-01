@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import type { Download, Locator, Page } from "@playwright/test";
-import { mp3Info } from "../../src/test/voice/mp3Info";
+import { mp3Info } from "../../apps/ui/src/test/voice/mp3Info";
 import { chat, expect, say, test, type Peer } from "../support/fixtures";
 import { pair } from "../support/paired";
 import { decodeInPage } from "../support/voice-media.mjs";

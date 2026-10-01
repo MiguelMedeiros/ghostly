@@ -96,14 +96,14 @@ test.describe("on Breez's regtest", { tag: "@network" }, () => {
     const invoice = (await alice.page.getByTestId("wallet-invoice").innerText()).trim();
     expect(invoice).toMatch(/^lnbcrt10u1/);
     await other.pay(invoice);
-    await expect(alice.page.getByTestId("wallet-paid")).toContainText("1,000 sats received", { timeout: 90_000 });
+    await expect(alice.page.getByTestId("wallet-paid")).toContainText("1,000 test sats received", { timeout: 90_000 });
     await expect(balance(alice)).toHaveText(/^1,000\s*sats/, { timeout: 60_000 });
 
     // Out: Alice pays one of the counterpart's invoices from Send.
     const before = await other.balance();
     await alice.page.getByTestId("wallet-send").click();
     await alice.page.getByTestId("wallet-pay-input").fill(await other.invoice(200));
-    await alice.page.getByRole("button", { name: "Pay 200 sats" }).click();
+    await alice.page.getByRole("button", { name: "Pay 200 test sats" }).click();
     await alice.page.getByRole("button", { name: "Pay", exact: true }).click();
     await expect(alice.page.getByTestId("wallet-notice")).toHaveText("Paid.", { timeout: 90_000 });
     await expect.poll(() => other.balance(), { timeout: 60_000 }).toBe(before + 200);
@@ -127,7 +127,7 @@ test.describe("on Breez's regtest", { tag: "@network" }, () => {
     await openWallet(alice, "lightning-testnet");
     await alice.page.getByTestId("wallet-send").click();
     await alice.page.getByTestId("wallet-pay-input").fill(requested);
-    await alice.page.getByRole("button", { name: "Pay 150 sats" }).click();
+    await alice.page.getByRole("button", { name: "Pay 150 test sats" }).click();
     await alice.page.getByRole("button", { name: "Pay", exact: true }).click();
     await expect(alice.page.getByTestId("wallet-notice")).toHaveText("Paid.", { timeout: 90_000 });
     await expect(chat(bob).getByTestId("payment-bubble").filter({ hasText: "You requested" }).getByTestId("payment-state")).toHaveText("Paid", { timeout: 120_000 });
@@ -139,6 +139,6 @@ test.describe("on Breez's regtest", { tag: "@network" }, () => {
     await expect.poll(() => sats(alice), { timeout: 60_000 }).toBeLessThanOrEqual(afterSend - 150);
     expect(await sats(alice)).toBeGreaterThanOrEqual(afterSend - 150 - 20);
     await expect(source(alice).getByTestId("lightning-source-current")).toContainText("Breez");
-    await expect(alice.page.getByTestId("lightning-recent").getByTestId("lightning-op").filter({ hasText: "Payment · 150 sats" })).toContainText("paid");
+    await expect(alice.page.getByTestId("lightning-recent").getByTestId("lightning-op").filter({ hasText: "Payment · 150 test sats" })).toContainText("paid");
   });
 });

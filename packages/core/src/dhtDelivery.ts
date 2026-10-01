@@ -29,6 +29,15 @@ const STREAM_POLL_MS = 30_000;
  * each has seen the other leave).
  */
 export const LEAVING_DHT_FAST_MS = 2 * 60_000;
+/**
+ * Reads of a DHT-only contact's mailbox that go as signaling (`expect(ms, true)`) once something shows it leaving,
+ * for as long as it still says DHT only. What shows it (a fresh packet on its link key, its offer) can reach this side
+ * before the envelope saying so reaches the relays, and the first read then finds DHT only still. With the relays'
+ * minute spent, every read after it was held back for 42 s, and the chat stayed "On DHT · retrying live" while its
+ * contact had left (mx-d707d8d5, 2026-09-30). A few, not the whole window: the allowance they spend is also what this
+ * side's offer and its reads for the answer go over the minute on (`SIGNALING_ALLOWANCE_SHARE` in relay.ts).
+ */
+export const LEAVING_SIGNAL_READS = 3;
 /** Only this often while layer 1 carries the chat (WISP 403, Q7): the relays' per-IP budget is shared by every chat. */
 export const LIVE_POLL_MS = 5 * 60_000;
 /**
@@ -102,6 +111,11 @@ export interface DhtDeliveryState {
   confirmed?: string;
   /** The highest number of the contact's reactions taken from its envelopes: said back in every envelope. */
   reactionsTaken?: number;
+  /**
+   * The contact's envelope, by its hint the pinned (or expected) key's, is sealed to another key: the contact paired with
+   * someone else who used the same invite first. Kept until an envelope of the contact's newer than the last read opens.
+   */
+  inviteTaken?: true;
 }
 export interface DhtDeliveryView {
   mode: DeliveryMode;
@@ -118,6 +132,8 @@ export interface DhtDeliveryView {
    * ignored, never a reason to stop the chat: a passive warning only.
    */
   foreignKeySeenAt?: number;
+  /** The invite was used by someone else first (`DhtDeliveryState.inviteTaken`): this side's texts reach nobody. */
+  inviteTaken?: boolean;
 }
 /**
  * What can be said about one DHT envelope without opening it: which text it carried, its sequence and times, the
@@ -155,7 +171,11 @@ export class DhtDelivery {
   private active = false;
   /** The next read was asked for (a refresh, a fresh packet of the contact): it is not a background one. */
   private urgent = false;
+  /** Reads left that are signaling: the contact is leaving DHT only, and the live link waits on them (`expect`). */
+  private signalReads = 0;
   private timer: ReturnType<typeof setTimeout> | null = null;
+  /** The first control envelope of a start that waits (`firstControlAfterMs`). */
+  private controlTimer: ReturnType<typeof setTimeout> | null = null;
   private chain = Promise.resolve();
   private lastPublish = 0;
   private controlDue = 0;
@@ -197,6 +217,11 @@ export class DhtDelivery {
     /** The contact took this side's reactions up to number `n`. */
     reactionsTaken?(n: number): Promise<void>;
     pollMs?: number;
+    /**
+     * A chat already paired, started again: its first control envelope goes this long after the start, not in the
+     * burst of an app coming back (bug hunt r7a). A text, a receipt, a new mode or a new capability revision still go at once.
+     */
+    firstControlAfterMs?: number;
   }) {
     // `peerRejected`, saved by apps before WISP 403 revision 0.3, stopped the chat for good on an envelope anyone
     // holding the invite could forge: it is dropped, not honoured.
@@ -214,7 +239,8 @@ export class DhtDelivery {
   get view(): DhtDeliveryView {
     return { mode: this.mode, peerMode: this.state.peerMode, authenticated: !!this.options.credentials.peerKey,
       error: Object.values(this.errors).join(". ") || undefined, pendingUntil: this.state.pending?.expires, maxTextBytes: DHT_TEXT_BYTES,
-      ...(this.lastPublished && { lastPublished: this.lastPublished }), ...(this.foreignKeySeenAt && { foreignKeySeenAt: this.foreignKeySeenAt }) };
+      ...(this.lastPublished && { lastPublished: this.lastPublished }), ...(this.foreignKeySeenAt && { foreignKeySeenAt: this.foreignKeySeenAt }),
+      ...(this.state.inviteTaken && { inviteTaken: true }) };
   }
   /**
    * Something signed by a participation key other than the pinned one came in over the chat's invite-derived keys (this
@@ -280,12 +306,23 @@ export class DhtDelivery {
   }
   async start(): Promise<void> {
     if (this.running) return; this.running = true;
+    const quiet = this.options.credentials.peerKey ? this.options.firstControlAfterMs ?? 0 : 0;
+    if (quiet > 0) {
+      this.controlDue = Math.max(this.controlDue, Date.now() + quiet);
+      this.controlTimer = setTimeout(() => { this.controlTimer = null; void this.serialize(async () => { try { await this.publish(); } catch { /* the next tick */ } }); }, quiet);
+    }
     if (this.state.confirmed) await this.options.receipt(this.state.confirmed);
     // A chat with no pinned contact is read at the signaling pace only once the contact shows up (`expect`, from its
     // fresh presence packet): an invite nobody opened yet, or one warmed ahead of time, spends no relay budget.
     this.changed(); void this.tick();
   }
-  async stop(): Promise<void> { this.running = false; if (this.timer) clearTimeout(this.timer); this.timer = null; await this.chain; }
+  async stop(): Promise<void> {
+    this.running = false;
+    if (this.timer) clearTimeout(this.timer);
+    if (this.controlTimer) clearTimeout(this.controlTimer);
+    this.timer = this.controlTimer = null;
+    await this.chain;
+  }
   async setMode(mode: DeliveryMode): Promise<void> {
     await this.serialize(async () => {
       // Preserve accepted DHT intent, its stable ID and original expiry across mode changes.
@@ -293,28 +330,39 @@ export class DhtDelivery {
       // The contact learns the new method from the next envelope: it goes out now, not after the publish spacing.
       this.mode = mode; this.controlDue = 0; this.lastPublish = 0;
       this.leavingUntil = mode === "stream" ? Date.now() + LEAVING_DHT_FAST_MS : 0;
+      // DHT only here: no live link waits on the contact leaving it.
+      if (mode === "dht") this.signalReads = 0;
       this.changed();
     });
     void this.tick();
   }
   /** Reads the contact's mailbox now: something says it may have changed its delivery method. */
   refresh(): void { this.urgent = true; void this.tick(); }
-  /** Reads the contact's mailbox at the signaling pace for a while (a fresh packet of a contact not pinned yet). */
-  expect(ms = 2 * 60_000): void {
+  /**
+   * Reads the contact's mailbox at the signaling pace for a while (a fresh packet of a contact not pinned yet).
+   * `signal`: the contact is leaving DHT only (a fresh packet on its link key, or its offer), and the live link waits
+   * on a read to say so: the next read goes now, and it and the next ones while the contact still says DHT only
+   * (`LEAVING_SIGNAL_READS` in all) are signaling (`PkarrRequestOptions.signal`).
+   */
+  expect(ms = 2 * 60_000, signal = false): void {
     const until = Date.now() + ms;
-    if (until <= this.fastUntil) return;
-    this.fastUntil = until; this.urgent = true; void this.tick();
+    if (signal) this.signalReads = LEAVING_SIGNAL_READS;
+    if (until <= this.fastUntil && !signal) return;
+    this.fastUntil = Math.max(this.fastUntil, until); this.urgent = true; void this.tick();
   }
   /**
-   * Layer 1 carries the chat, or no longer does. While it does, the mailbox is read every 5 minutes; the
-   * moment it is lost, at once (WISP 403, poll pace), and then at the chat's pace.
+   * Layer 1 carries the chat, or no longer does. While it does, the mailbox is read every 5 minutes, after one
+   * last look as it goes live: a text the contact put on the DHT in the seconds before (after this side's last
+   * read) would otherwise wait for the next look. That look is a background request, which yields to links that
+   * signal, and only for a contact that wrote in this mailbox already. The moment layer 1 is lost, at once
+   * (WISP 403, poll pace), and then at the chat's pace.
    */
   setLive(live: boolean): void {
     if (live === this.live) return;
     this.live = live;
-    if (live) { this.fastUntil = 0; this.schedule(); return; }
-    this.urgent = true;
-    void this.tick();
+    if (!live) { this.urgent = true; void this.tick(); return; }
+    this.fastUntil = 0; this.signalReads = 0;
+    if (this.options.credentials.peerKey && this.state.peerMode) void this.tick(); else this.schedule();
   }
   get isLive(): boolean { return this.live; }
   /** The chat is open with the app in front: on the DHT, its mailbox is read at the signaling pace. */
@@ -496,7 +544,9 @@ export class DhtDelivery {
     const sender = hints.length ? tryDecrypt(hints[0].value, this.key) : null;
     if (hints.length && !sender) return null;
     let plaintext: string | null;
-    try { plaintext = tryDecrypt(records[0].value, sender ? this.sealedKey(sender) : this.key); } catch { return null; }
+    try { plaintext = tryDecrypt(records[0].value, sender ? this.sealedKey(sender) : this.key); } catch { plaintext = null; }
+    // Sealed, by its hint, from `sender` to a key other than this side's: nothing to read, but who it names says something.
+    if (!plaintext && sender) return { sealedToAnother: sender };
     if (!plaintext || utf8Encode(plaintext).length > MAX_ENVELOPE_PLAINTEXT) return null;
     let envelope: unknown; try { envelope = JSON.parse(plaintext); } catch { return null; }
     if (!Array.isArray(envelope) || envelope.length !== 2 || !Array.isArray(envelope[0])) return null;
@@ -513,12 +563,27 @@ export class DhtDelivery {
     return { body, sender, author, sequence, issued, expires, mode, message, receipt, capsRev, pinnedMailbox, replyTo, editOf, reactions, reactionsTaken, forwarded };
   }
   /**
+   * The contact's envelope is sealed to another key (`open`): it pinned someone else who used the same invite first, so
+   * nothing of this side's will ever be read. Said once this side is not proven the one it pinned (never seen in the
+   * pinned mailbox, no text confirmed, never live). The hint is sealed under the invite's key, which any copy of it
+   * holds: a passive warning, taken back by the contact's next envelope that opens here.
+   */
+  private async sealedToAnother(sender: string): Promise<void> {
+    const expected = this.options.credentials.peerKey ?? this.options.credentials.expectedPeerKey;
+    if (this.state.inviteTaken || !expected || sender !== expected) return;
+    if (this.state.peerPinned === "seen" || this.state.confirmed || this.live) return;
+    traceLink(this.from, "invite-taken", {});
+    await this.persist({ ...this.state, inviteTaken: true });
+    this.changed();
+  }
+  /**
    * One packet from one of the contact's two mailboxes: `invite` (derived from the invite, which anyone holding a copy
    * can write to) or `pinned`. `none`: nothing from the contact in it; `old`: the contact's, already read; `new`: taken.
    */
   private async receive(packet: SignedPacket, box: "invite" | "pinned"): Promise<"none" | "old" | "new"> {
     const opened = this.open(packet, box);
     if (!opened) return "none";
+    if ("sealedToAnother" in opened) { if (opened.sealedToAnother) await this.sealedToAnother(opened.sealedToAnother); return "none"; }
     const { body, sender, author, sequence, issued, expires, mode, message, receipt, capsRev, pinnedMailbox, replyTo, editOf, reactions, reactionsTaken, forwarded } = opened;
     // Before the pin, the key the invite named: another invite holder's envelope is refused, and not remembered,
     // since whoever holds a copy can write to this mailbox and the inviter's next envelope replaces it.
@@ -566,7 +631,10 @@ export class DhtDelivery {
     const confirmed = receipt && this.state.pending?.message[0] === receipt ? receipt : this.state.confirmed;
     if (mode !== this.state.peerMode) traceLink(this.from, "dht-peer-mode", { peerMode: mode });
     if (peerPinned !== this.state.peerPinned) traceLink(this.from, "dht-peer-pinned", { peerPinned });
-    await this.persist({ ...this.state, peerSequence: sequence, peerMode: mode, receipt: nextReceipt, confirmed, ...(peerPinned && { peerPinned }),
+    // A newer envelope of the contact's that opens here: whatever said the invite was taken was not the contact.
+    if (this.state.inviteTaken) traceLink(this.from, "invite-untaken", {});
+    const { inviteTaken: _taken, ...kept } = this.state;
+    await this.persist({ ...kept, peerSequence: sequence, peerMode: mode, receipt: nextReceipt, confirmed, ...(peerPinned && { peerPinned }),
       pending: confirmed && this.state.pending?.message[0] === confirmed ? undefined : this.state.pending,
       ...(newest > (this.state.reactionsTaken ?? 0) && { reactionsTaken: newest }) });
     if (confirmed) await this.options.receipt(confirmed);
@@ -581,8 +649,8 @@ export class DhtDelivery {
    * copy of the invite overwrote this one), or when the contact just said it can use the pinned one. Once the contact's
    * envelope was seen in the pinned mailbox, the invite's is not read any more.
    */
-  private async read(background: boolean): Promise<void> {
-    const pinned = this.pinned(), options = background ? { background } : undefined;
+  private async read(background: boolean, signal = false): Promise<void> {
+    const pinned = this.pinned(), options = signal ? { signal } : background ? { background } : undefined;
     const before = this.state.peerPinned;
     const boxes: ("invite" | "pinned")[] = !pinned ? ["invite"] : before === "seen" ? ["pinned"] : before ? ["pinned", "invite"] : ["invite", "pinned"];
     let found: SignedPacket | null = null;
@@ -615,7 +683,7 @@ export class DhtDelivery {
       const packet = await this.options.transport.resolve(box === "pinned" ? pinned!.peerAddress : this.peerAddress, options);
       reads++;
       const opened = packet && this.open(packet, box);
-      if (!opened || opened.author !== expected) continue;
+      if (!opened || "sealedToAnother" in opened || opened.author !== expected) continue;
       const { sequence, message } = opened;
       const fresh = Array.isArray(message) && typeof message[0] === "string" && ID.test(message[0]) && sequence > this.state.peerSequence && this.state.receipt?.id !== message[0];
       return { reads, text: fresh ? message[0] : null };
@@ -635,10 +703,13 @@ export class DhtDelivery {
       // only, a drop or a text awaiting its receipt reads as signaling. The share also carries held items'
       // pointers, which a busy mailbox must not starve.
       const background = !this.urgent && this.pollMs >= STREAM_POLL_MS;
-      this.urgent = false;
+      const signal = this.signalReads > 0;
+      this.urgent = false; if (signal) this.signalReads--;
       // A read or a publication the relays' request budget held back is a wait, not an error: it goes when the budget frees.
-      try { await this.read(background); if (!this.running) return; delete this.errors.read; }
+      try { await this.read(background, signal); if (!this.running) return; delete this.errors.read; }
       catch (error) { if (!isDiscoveryBudgetError(error)) this.errors.read = `Could not read DHT delivery: ${error instanceof Error ? error.message : String(error)}`; }
+      // The contact says it left DHT only: nothing waits on its mailbox any more.
+      if (this.state.peerMode !== "dht") this.signalReads = 0;
       try { await this.publish(); }
       catch (error) { if (!isDiscoveryBudgetError(error)) this.errors.publish = `Could not publish DHT delivery: ${error instanceof Error ? error.message : String(error)}`; }
       this.changed();

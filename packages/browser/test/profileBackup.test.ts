@@ -1,9 +1,9 @@
 import "fake-indexeddb/auto";
 import { beforeEach, expect, it, vi } from "vitest";
 import { STORES, openDb, transact, wrap } from "../src/shared/idb";
-import { setStorageProfile } from "../../../src/lib/storage";
-import { listProfiles } from "../../../src/lib/profiles";
-import { createProfileBackup, restoreProfileBackup } from "../../../src/lib/profileBackup";
+import { setStorageProfile } from "../../../apps/ui/src/lib/storage";
+import { listProfiles } from "../../../apps/ui/src/lib/profiles";
+import { createProfileBackup, restoreProfileBackup } from "../../../apps/ui/src/lib/profileBackup";
 // covers: backup.profile.file, backup.passphrase-rules, backup.envelope, profiles.delete, profiles.lock
 
 class FakeStorage {
@@ -96,8 +96,8 @@ it("files kept in file storage travel in the bundle up to 16 MiB, whole; larger 
 });
 
 it("deletes another profile completely, after an optional backup of it, and never the active or first one", async () => {
-  const { createProfile, activeProfileId } = await import("../../../src/lib/profiles");
-  const { deleteProfile, profileSummary } = await import("../../../src/lib/profileData");
+  const { createProfile, activeProfileId } = await import("../../../apps/ui/src/lib/profiles");
+  const { deleteProfile, profileSummary } = await import("../../../apps/ui/src/lib/profileData");
   const work = createProfile("Work");
   // Work's data, made the way its own session would.
   storage.setItem(`ghostly_${work.id}_fedcba9876543210fedcba9876543210`, JSON.stringify({ id: "x", mySeedB64: "s", peerPubKeyB64: "p", encKeyB64: "e", messages: [] }));
@@ -112,7 +112,7 @@ it("deletes another profile completely, after an optional backup of it, and neve
   (await wrap(request)).close();
   storage.setItem("ghostly_0123456789abcdef0123456789abcdef", JSON.stringify({ id: "y", mySeedB64: "s", peerPubKeyB64: "keep", encKeyB64: "e", messages: [] }));
 
-  expect(await profileSummary(work.id)).toEqual({ chats: 1, cashuSats: 64, ark: true, usdt: false, services: 1 });
+  expect(await profileSummary(work.id)).toEqual({ chats: 1, cashuSats: 64, wallets: ["Ark"], services: 1 });
   const bundle = await createProfileBackup("a long backup passphrase", work.id);
   expect(bundle).toContain("ghostly-backup");
 
@@ -129,12 +129,12 @@ it("deletes another profile completely, after an optional backup of it, and neve
   // And the backup made before deleting brings it all back.
   const back = await restoreProfileBackup(bundle, "a long backup passphrase");
   expect(back.name).toBe("Work (restored)");
-  expect(await profileSummary(back.id)).toMatchObject({ chats: 1, cashuSats: 64, ark: true, services: 1 });
+  expect(await profileSummary(back.id)).toMatchObject({ chats: 1, cashuSats: 64, wallets: ["Ark"], services: 1 });
 });
 
 it("a restored copy never shares an Ark database with its original, and deleting it leaves the original's alone", async () => {
-  const { registerProfile } = await import("../../../src/lib/profiles");
-  const { deleteProfile } = await import("../../../src/lib/profileData");
+  const { registerProfile } = await import("../../../apps/ui/src/lib/profiles");
+  const { deleteProfile } = await import("../../../apps/ui/src/lib/profileData");
   // The original, in the first profile: an Ark wallet whose database this device has.
   await makeArkDatabase("wallet-original");
   await transact([STORES.settings], (s) => { s[STORES.settings].put({ config: { walletId: "wallet-original" }, seed: { version: 1 } }, "arkWallet-retired-1"); });
@@ -156,8 +156,8 @@ it("a restored copy never shares an Ark database with its original, and deleting
 });
 
 it("a profile running in another tab is not deleted, and nothing of it is touched", async () => {
-  const { registerProfile } = await import("../../../src/lib/profiles");
-  const { deleteProfile } = await import("../../../src/lib/profileData");
+  const { registerProfile } = await import("../../../apps/ui/src/lib/profiles");
+  const { deleteProfile } = await import("../../../apps/ui/src/lib/profileData");
   const busy = registerProfile("klmnopqrst", "Busy");
   storage.setItem(`ghostly_${busy.id}_app_settings`, "{}");
   const previous = Object.getOwnPropertyDescriptor(globalThis, "navigator");
@@ -172,7 +172,7 @@ it("a profile running in another tab is not deleted, and nothing of it is touche
 });
 
 it("a backup of a wallet whose database cannot be read fails instead of leaving the wallet out", async () => {
-  const { registerProfile } = await import("../../../src/lib/profiles");
+  const { registerProfile } = await import("../../../apps/ui/src/lib/profiles");
   const broken = registerProfile("uvwxyzabcd", "Broken");
   const request = indexedDB.open(`ghostly_${broken.id}`, 1);
   request.onupgradeneeded = () => { request.result.createObjectStore("settings").put({ config: { walletId: "wallet-odd" } }, "arkWallet"); };
@@ -185,9 +185,9 @@ it("a backup of a wallet whose database cannot be read fails instead of leaving 
 });
 
 it("a locked profile is backed up or deleted from another one only with its lock password, and new profiles keep the lock", async () => {
-  const { registerProfile, createProfile, settingsKeyFor } = await import("../../../src/lib/profiles");
-  const { deleteProfile } = await import("../../../src/lib/profileData");
-  const { hashPassword } = await import("../../../src/lib/settings");
+  const { registerProfile, createProfile, settingsKeyFor } = await import("../../../apps/ui/src/lib/profiles");
+  const { deleteProfile } = await import("../../../apps/ui/src/lib/profileData");
+  const { hashPassword } = await import("../../../apps/ui/src/lib/settings");
   const lockScreen = { enabled: true, passwordHash: await hashPassword("hunter2 hunter2"), timeoutMinutes: 5 };
   const locked = registerProfile("lockedprof", "Locked");
   storage.setItem(settingsKeyFor(locked.id), JSON.stringify({ lockScreen }));
@@ -207,7 +207,7 @@ it("a locked profile is backed up or deleted from another one only with its lock
 });
 
 it("a wallet parked by the other wallet mode travels in the backup and gets a fresh id too", async () => {
-  const { registerProfile } = await import("../../../src/lib/profiles");
+  const { registerProfile } = await import("../../../apps/ui/src/lib/profiles");
   const parkedOwner = registerProfile("parkedprof", "Parked");
   const request = indexedDB.open(`ghostly_${parkedOwner.id}`, 1);
   request.onupgradeneeded = () => { request.result.createObjectStore("settings").put({ config: { walletId: "wallet-parked", network: "mutinynet" } }, "arkWallet-mode-testnet"); };

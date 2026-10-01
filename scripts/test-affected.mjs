@@ -100,9 +100,9 @@ function sources(...dirs) {
 }
 const inventory = JSON.parse(readFileSync(join(ROOT, "e2e/features.json"), "utf8"));
 const e2eFiles = sources("e2e");
-// Tests import across workspaces by relative path (packages/browser/test → src/, e2e/matrix → packages/browser/),
+// Tests import across workspaces by relative path (packages/browser/test → apps/ui/src/, e2e/matrix → packages/browser/),
 // so the plan reads every workspace's imports.
-const codeFiles = { ...sources("packages", "src", "extension", "web/src", "scripts", "website", "examples"), ...e2eFiles };
+const codeFiles = { ...sources("packages", "apps/ui/src", "apps/extension", "apps/web/src", "scripts", "apps/website", "examples"), ...e2eFiles };
 const p = makePlan({ changed, inventory, e2eFiles, codeFiles });
 
 // ---------- the plan, printed ----------
@@ -222,16 +222,12 @@ for (const r of p.rust) {
   if (r.mode === "skip") { skipped.push(`rust ${r.name}: ${r.reason}`); continue; }
   if (noRust) { skipped.push(`rust ${r.name}: --no-rust`); continue; }
   const cargoJobs = String(Math.max(2, JOBS * 2));
-  if (r.name === "src-tauri") {
-    mkdirSync(join(ROOT, "src-tauri/native-runtime"), { recursive: true });
-    await run("rust src-tauri fmt", "cargo", ["fmt", "--manifest-path", "src-tauri/Cargo.toml", "--", "--check"]);
-    await run("rust src-tauri clippy", "cargo", ["clippy", "-j", cargoJobs, "--manifest-path", "src-tauri/Cargo.toml", "--", "-D", "warnings"]);
-    await run("rust src-tauri test", "cargo", ["test", "-j", cargoJobs, "--manifest-path", "src-tauri/Cargo.toml", "--", `--test-threads=${JOBS}`]);
-    await run("rust native-transports test", "cargo", ["test", "-j", cargoJobs, "--manifest-path", "native-transports/Cargo.toml", "--", `--test-threads=${JOBS}`]);
-  } else {
-    await run("rust cli fmt", "cargo", ["fmt", "--manifest-path", "cli/Cargo.toml", "--", "--check"]);
-    await run("rust cli clippy", "cargo", ["clippy", "-j", cargoJobs, "--manifest-path", "cli/Cargo.toml", "--", "-D", "warnings"]);
-    await run("rust cli test", "cargo", ["test", "-j", cargoJobs, "--manifest-path", "cli/Cargo.toml", "--", `--test-threads=${JOBS}`]);
+  if (r.name === "desktop") {
+    mkdirSync(join(ROOT, "apps/desktop/native-runtime"), { recursive: true });
+    await run("rust desktop fmt", "cargo", ["fmt", "--manifest-path", "apps/desktop/Cargo.toml", "--", "--check"]);
+    await run("rust desktop clippy", "cargo", ["clippy", "-j", cargoJobs, "--manifest-path", "apps/desktop/Cargo.toml", "--", "-D", "warnings"]);
+    await run("rust desktop test", "cargo", ["test", "-j", cargoJobs, "--manifest-path", "apps/desktop/Cargo.toml", "--", `--test-threads=${JOBS}`]);
+    await run("rust native/transports test", "cargo", ["test", "-j", cargoJobs, "--manifest-path", "native/transports/Cargo.toml", "--", `--test-threads=${JOBS}`]);
   }
 }
 
@@ -268,8 +264,8 @@ async function runE2e() {
     }
     if (!(await run("e2e: build the web app", "npm", ["run", "build:web"], { env: suiteEnv }))) return;
     url = `http://localhost:${port}`;
-    console.log(`\n▶ e2e: serve web/dist on ${url}`);
-    preview = spawn("npx", ["vite", "preview", "web", "--port", String(port), "--strictPort"], { cwd: ROOT, stdio: ["ignore", "ignore", "inherit"], detached: true });
+    console.log(`\n▶ e2e: serve apps/web/dist on ${url}`);
+    preview = spawn("npx", ["vite", "preview", "apps/web", "--port", String(port), "--strictPort"], { cwd: ROOT, stdio: ["ignore", "ignore", "inherit"], detached: true });
     if (!(await waitFor(url, 60_000))) {
       results.push({ label: `e2e: serve on port ${port}`, ok: false, seconds: 60 });
       try { process.kill(-preview.pid); } catch { /* gone */ }

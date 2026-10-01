@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { expect, test } from "../support/fixtures";
 import { choose } from "../support/select";
 
-const version = JSON.parse(readFileSync(join(import.meta.dirname, "..", "..", "web", "package.json"), "utf8")).version;
+const version = JSON.parse(readFileSync(join(import.meta.dirname, "..", "..", "apps", "web", "package.json"), "utf8")).version;
 
 test("shows the version being released", { tag: ["@feature:app.version"] }, async ({ peer }) => {
   test.skip(!!process.env.E2E_WEB_URL, "a deployed app may be on another version");
@@ -162,7 +162,9 @@ test("lock screen: locks by itself after the chosen idle time", { tag: ["@featur
 });
 
 test("network: relays can be changed and reset", { tag: ["@feature:settings.network.relays"] }, async ({ peer }) => {
-  const { page } = await peer("alice");
+  const { page, context } = await peer("alice");
+  // The relay typed below is a real name on the Internet: refused here, so the peer never reaches it.
+  await context.route(/^https?:\/\/relay\.example\.org\//, (route) => route.abort());
   // Rarely changed: under Advanced, a page of its own.
   await page.goto("/#/settings");
   await page.getByTestId("settings-advanced").click();

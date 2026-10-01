@@ -12,7 +12,7 @@ const info = vi.fn(async () => ({ network: "mutinynet", signerPubkey: `02${"ab".
 vi.mock("@arkade-os/sdk", async (original) => ({ ...await original<object>(), RestArkProvider: class { getInfo = info; } }));
 vi.mock("../src/engine/paymentAdapters/arkade", () => ({
   ARK_NETWORKS: ["bitcoin", "mutinynet", "signet", "regtest"],
-  ArkadeAdapter: { connect: vi.fn(async (config: { provider: string; network: string }) => ({ config, address: async () => config.network === "bitcoin" ? "ark1me" : "tark1me", balance: async () => 0, boardingAddress: async () => "tb1qme", incoming: async () => 0, recoverable: async () => 0, dispose: vi.fn() })) },
+  ArkadeAdapter: { connect: vi.fn(async (config: { provider: string; network: string }) => ({ config, address: async () => config.network === "bitcoin" ? "ark1me" : "tark1me", balance: async () => 0, boardingAddress: async () => "tb1qme", incoming: async () => 0, expired: async () => ({ recoverable: 0, sweeping: 0 }), dispose: vi.fn() })) },
 }));
 const inspect = vi.fn(async (config: object) => ({ ...config, decimals: 6, codeHash: "0xfixture" }));
 vi.mock("../src/engine/paymentAdapters/usdt", () => ({
@@ -110,7 +110,7 @@ describe("one click makes a wallet of a type on a network", () => {
     info.mockResolvedValueOnce({ network: "bitcoin", signerPubkey: `02${"ab".repeat(32)}` });
     await expect(node.walletCreate({ type: "arkade", network: "testnet" })).rejects.toThrow("Could not create the Testnet Ark wallet: That Ark provider runs on bitcoin, not mutinynet. Nothing was saved; try again.");
     info.mockRejectedValueOnce(new Error("Failed to fetch"));
-    await expect(node.walletCreate({ type: "arkade", network: "testnet" })).rejects.toThrow("Failed to fetch. Nothing was saved");
+    await expect(node.walletCreate({ type: "arkade", network: "testnet" })).rejects.toThrow("Could not reach the network. Nothing was saved");
     expect(wallets()).toEqual([]);
     expect((await settingsKeys()).filter((k) => k.startsWith("arkWallet"))).toEqual([]);
   });

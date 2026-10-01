@@ -7,6 +7,7 @@ import {
   parseCallSignal,
   signalHasVideo,
   waitForIceGathering,
+  sdpHasCandidates,
 } from "../src";
 
 // covers: calls.signal
@@ -203,5 +204,36 @@ describe("waiting for ICE gathering", () => {
     await vi.advanceTimersByTimeAsync(1); expect(done()).toBe(true);
     const short = await pending(waitForIceGathering(new FakePeer() as unknown as RTCPeerConnection, 50));
     await vi.advanceTimersByTimeAsync(50); expect(short()).toBe(true);
+  });
+
+  it("with stallMs, gives up early when not a single candidate showed up", async () => {
+    vi.useFakeTimers();
+    const pc = new FakePeer();
+    const done = await pending(waitForIceGathering(pc as unknown as RTCPeerConnection, 10_000, { stallMs: 3000 }));
+    pc.candidate(null);
+    await vi.advanceTimersByTimeAsync(2999); expect(done()).toBe(false);
+    await vi.advanceTimersByTimeAsync(1); expect(done()).toBe(true);
+  });
+
+  it("with stallMs, keeps waiting for the reflexive candidate once a host one came", async () => {
+    vi.useFakeTimers();
+    const pc = new FakePeer();
+    const done = await pending(waitForIceGathering(pc as unknown as RTCPeerConnection, 10_000, { stallMs: 3000 }));
+    pc.candidate("candidate:1 1 udp 1 192.0.2.1 9 typ host");
+    await vi.advanceTimersByTimeAsync(9_999); expect(done()).toBe(false);
+    await vi.advanceTimersByTimeAsync(1); expect(done()).toBe(true);
+  });
+
+  it("with stallMs, a local description that already has candidates is not a stall", async () => {
+    vi.useFakeTimers();
+    const pc = Object.assign(new FakePeer(), { localDescription: { type: "offer", sdp: "v=0\r\na=candidate:1 1 udp 1 192.0.2.1 9 typ host\r\n" } });
+    const done = await pending(waitForIceGathering(pc as unknown as RTCPeerConnection, 10_000, { stallMs: 3000 }));
+    await vi.advanceTimersByTimeAsync(3000); expect(done()).toBe(false);
+  });
+
+  it("tells a description with candidates from one without", () => {
+    expect(sdpHasCandidates("v=0\r\na=candidate:1 1 udp 1 192.0.2.1 9 typ host\r\n")).toBe(true);
+    expect(sdpHasCandidates("v=0\r\na=ice-ufrag:abcd\r\n")).toBe(false);
+    expect(sdpHasCandidates(undefined)).toBe(false);
   });
 });

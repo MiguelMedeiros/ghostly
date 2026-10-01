@@ -1,4 +1,4 @@
-import { chat, connect, createWallet, expect, link, openChat, openWallet, showNetwork, test, useFakeProviders, useTestnet, walletCard, type Peer } from "../support/fixtures";
+import { chat, connect, createWallet, expect, getTestCoins, link, openChat, openWallet, showNetwork, test, useFakeProviders, useTestnet, walletCard, type Peer } from "../support/fixtures";
 import { composerRow } from "../support/composer";
 import { mockMainnetMints } from "../support/mint";
 import { paymentCard } from "../support/payments";
@@ -70,7 +70,22 @@ test("an empty Testnet wallet goes on one confirm, and is still gone after a rel
   await expect(page.getByTestId("new-wallet-type-bitcoin-status")).toHaveText("Connect…");
 });
 
-test("a funded wallet says how much and on which network, offers its ecash, and goes only once the loss is confirmed", { tag: ["@network", "@feature:wallet.instances.remove"] }, async ({ peer }) => {
+test("an invoice just made on Receive is listed when removing the wallet, before anything else changed", { tag: ["@feature:wallet.instances.remove"] }, async ({ peer }) => {
+  const alice = await peer("remove-receive");
+  await useTestnet(alice);
+  const page = alice.page;
+  await openWallet(alice, "cashu-testnet");
+  await page.getByTestId("wallet-receive").click();
+  await page.getByTestId("wallet-receive-amount").fill("30");
+  await page.getByTestId("wallet-create-invoice").click();
+  await expect(page.getByText("Invoice for 30 test sats")).toBeVisible({ timeout: 60_000 });
+  await page.getByTestId("wallet-remove").click();
+  const dialog = page.getByTestId("wallet-remove-dialog");
+  await expect(dialog.getByTestId("wallet-remove-awaiting-item")).toHaveText(["An invoice for 30 test sats, not paid yet"]);
+  await expect(dialog.getByTestId("wallet-remove-confirm")).toBeDisabled();
+});
+
+test("a funded wallet says how much and on which network, offers its ecash, and goes only once the loss is confirmed", { tag: ["@feature:wallet.instances.remove"] }, async ({ peer }) => {
   const alice = await peer("remove-funded");
   await mockMainnetMints(alice.context);
   await createWallet(alice, "cashu", "testnet");
@@ -107,7 +122,7 @@ test("a funded wallet says how much and on which network, offers its ecash, and 
   await expect(page.getByTestId("wallet-network-mainnet-empty")).toBeVisible();
 });
 
-test("a wallet holding nothing with an open chat request lists it, asks in words, and the request closes on both sides", { tag: ["@network", "@feature:wallet.instances.remove"] }, async ({ peer }) => {
+test("a wallet holding nothing with an open chat request lists it, asks in words, and the request closes on both sides", { tag: ["@feature:wallet.instances.remove"] }, async ({ peer }) => {
   const [alice, bob] = await Promise.all([peer("remove-request-a"), peer("remove-request-b")]);
   for (const p of [alice, bob]) await useTestnet(p);
   await link(alice, bob);
@@ -143,4 +158,35 @@ test("a wallet holding nothing with an open chat request lists it, asks in words
   await expect(bubble(alice).getByTestId("payment-state")).toHaveText("Closed · your contact removed the wallet it was paid to");
   await expect(bubble(alice).getByTestId("payment-pay")).toHaveCount(0);
   await expect(bubble(alice).getByTestId("payment-external")).toHaveCount(0);
+});
+
+test("a request paid in ecash leaves nothing to wait for: its invoice is not listed as money still to come", { tag: ["@feature:wallet.instances.remove"] }, async ({ peer }) => {
+  const [alice, bob] = await Promise.all([peer("remove-paid-a"), peer("remove-paid-b")]);
+  for (const p of [alice, bob]) await useTestnet(p);
+  await getTestCoins(bob);
+  await link(alice, bob);
+  await connect(alice, bob);
+  for (const p of [alice, bob]) await openChat(p);
+
+  // Alice asks for 20 test sats: the request carries an invoice (a quote at her mint); Bob pays it in ecash.
+  await (await composerRow(alice.page, "payment-button")).click();
+  await paymentCard(alice.page, "cashu-testnet").click();
+  await alice.page.getByTestId("payment-amount").fill("20");
+  await alice.page.getByTestId("payment-request").click();
+  // The request's own bubble on each side. The ecash that pays it comes as a bubble of its own ("Sent you 20 test
+  // sats"), which "20" matched too: whenever both were there at once the locator was ambiguous.
+  const request = (p: Peer) => chat(p).getByTestId("payment-bubble").filter({ hasText: p === alice ? "You requested" : "Requests" });
+  await request(bob).getByTestId("payment-pay").click({ timeout: 90_000 });
+  await chat(bob).getByTestId("payment-review").getByRole("button", { name: "Approve payment" }).click();
+  await expect(request(alice).getByTestId("payment-state")).toHaveText("Paid", { timeout: 90_000 });
+  await expect(chat(alice).getByTestId("payment-bubble").filter({ hasText: "Sent you" }).getByTestId("payment-state")).toHaveText("Received");
+
+  // Its invoice is still open at the mint, but nobody pays a paid request: the wallet waits for nothing.
+  await openWallet(alice, "cashu-testnet");
+  await expect(alice.page.getByTestId("wallet-balance")).toHaveText(/^20\s*test sats/, { timeout: 60_000 });
+  await alice.page.getByTestId("wallet-remove").click();
+  const dialog = alice.page.getByTestId("wallet-remove-dialog");
+  await expect(dialog.getByTestId("wallet-remove-held")).toHaveText("It holds 20 test sats on Testnet, test coins worth nothing.");
+  await expect(dialog.getByTestId("wallet-remove-awaiting-item")).toHaveCount(0);
+  await expect(dialog.getByTestId("wallet-remove-consent")).toHaveText("I understand: these 20 test sats become unreachable without this wallet's backup.");
 });

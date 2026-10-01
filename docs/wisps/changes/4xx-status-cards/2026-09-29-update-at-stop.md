@@ -1,0 +1,1 @@
+Pace: an update the headless CLI holds for its 2.5 seconds goes when the runtime stops, if that comes first, so a bot's last word on a card (done, failed) is not lost with a daemon that stops right after it.

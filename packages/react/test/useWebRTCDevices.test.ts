@@ -140,6 +140,23 @@ describe("switching the microphone during a call", () => {
     expect(devices.liveTracks()).toEqual([]);
   });
 
+  it("switched twice quickly, the microphone picked last is the one sent, whichever opens first", async () => {
+    const { call, stream, audio } = await connectedCall();
+
+    act(() => { void call.result.current.switchMicrophone("mic-headset"); });
+    act(() => { void call.result.current.switchMicrophone("mic-builtin"); });
+    const builtin = devices.userMedia[2].grant().getAudioTracks()[0] as FakeTrack;
+    await settle();
+    const headset = devices.userMedia[1].grant().getAudioTracks()[0] as FakeTrack;
+    await settle();
+
+    expect(audio.track).toBe(builtin);
+    expect(headset.stop).toHaveBeenCalled();
+    expect(call.result.current.localStream?.getAudioTracks()).toEqual([builtin]);
+    expect(devices.liveTracks()).toEqual([builtin]);
+    expect((stream.getAudioTracks()[0] as FakeTrack).stop).toHaveBeenCalled();
+  });
+
   it("a device that is gone fails, and the call keeps its microphone", async () => {
     const { call, stream, audio } = await connectedCall();
     let failure: unknown;
@@ -165,6 +182,55 @@ describe("switching the camera during a call", () => {
     expect(old.stop).toHaveBeenCalled();
     expect(call.result.current.isVideoOff).toBe(false);
     expect(call.result.current.callState).toBe("connected");
+  });
+
+  it("turned off while the other camera opens, it stays off and lets go of that camera", async () => {
+    const { call, video } = await connectedCall(true);
+
+    act(() => { void call.result.current.switchCamera("cam-usb"); });
+    await act(() => call.result.current.toggleVideo());
+    expect(call.result.current.isVideoOff).toBe(true);
+
+    const usb = devices.userMedia[1].grant().getVideoTracks()[0] as FakeTrack;
+    await settle();
+
+    expect(call.result.current.isVideoOff).toBe(true);
+    expect(video.track).toBeNull();
+    expect(usb.stop).toHaveBeenCalled();
+    expect(call.result.current.localStream?.getVideoTracks()).toEqual([]);
+    expect(devices.liveTracks().map((t) => t.kind)).toEqual(["audio"]);
+  });
+
+  it("switched twice quickly, the camera picked last is the one shown", async () => {
+    const { call, video } = await connectedCall(true);
+
+    act(() => { void call.result.current.switchCamera("cam-usb"); });
+    act(() => { void call.result.current.switchCamera("cam-builtin"); });
+    const builtin = devices.userMedia[2].grant().getVideoTracks()[0] as FakeTrack;
+    await settle();
+    const usb = devices.userMedia[1].grant().getVideoTracks()[0] as FakeTrack;
+    await settle();
+
+    expect(video.track).toBe(builtin);
+    expect(usb.stop).toHaveBeenCalled();
+    expect(call.result.current.localStream?.getVideoTracks()).toEqual([builtin]);
+  });
+
+  it("turned on, then a screen share whose picker is closed while the camera opens: the camera still comes on", async () => {
+    const { call, video } = await connectedCall(false);
+
+    act(() => { void call.result.current.toggleVideo(); });
+    act(() => { void call.result.current.toggleScreenShare(); });
+    // The person closes the picker: no screen, and nothing to say about it.
+    devices.displayMedia[0].deny(new DOMException("Permission denied", "NotAllowedError"));
+    await settle();
+    const camera = devices.userMedia[1].grant().getVideoTracks()[0] as FakeTrack;
+    await settle();
+
+    expect(call.result.current.isVideoOff).toBe(false);
+    expect(call.result.current.isScreenSharing).toBe(false);
+    expect(video.track).toBe(camera);
+    expect(camera.stop).not.toHaveBeenCalled();
   });
 
   it("with the camera off, or a screen shared, there is nothing to swap", async () => {

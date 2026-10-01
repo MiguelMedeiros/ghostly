@@ -180,6 +180,25 @@ export class IdentityProofs {
     else { this.seeds.get(id)?.fill(0); this.seeds.delete(id); }
   }
 
+  /**
+   * "Clear all data": every proof that was ever shared, and every removed one still being revoked, gets its revocation
+   * record published once more, all at once. Nothing will republish them after the clear, so this is a last word for
+   * contacts who check; proofs posted elsewhere (a Bluesky record, a Pubky file, a DNS record) are the person's to delete.
+   */
+  async revokeAll(): Promise<void> {
+    this.stop();
+    const shared = new Set(this.host.linkIds().flatMap(l => this.host.ledger(l)?.shared.map(s => s.id) ?? []));
+    const at = now();
+    const last: Revocation[] = [
+      ...this.revocations.filter(r => r.expiresAt > at),
+      ...this.proofs.filter(p => shared.has(identityStatement(p.binding).id)).map(p => ({
+        id: identityStatement(p.binding).id, key: p.binding.key, seed: p.seed, revokedAt: at, expiresAt: Math.min(p.binding.expiresAt, p.verified.expiresAt ?? Infinity),
+      })),
+    ];
+    await Promise.allSettled(last.map(r => this.publishRevocation(r)));
+    this.stop();
+  }
+
   private async publishRevocation(r: Revocation): Promise<void> {
     if (!this.host.online()) return;
     await this.host.publish(await this.seedOf(r.id, r.seed), [{ label: IDENTITY_REVOCATION_LABEL, value: identityRevocationValue(r.id, r.revokedAt) }]);

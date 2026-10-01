@@ -1,0 +1,347 @@
+{
+  "accept": {
+    "card": "{{name}}からの{{card}}を受け取る",
+    "cardNetwork": "{{card}}（{{network}}）",
+    "contactOff": "相手：オフ",
+    "contactOn": "相手：受け入れる",
+    "deck": "このチャットで {{name}} から受け入れる支払い方法",
+    "hint": {
+      "both": "{{card}} は双方でオンです：ここではどちらも相手に支払えます。",
+      "off": "{{card}} はここではオフです：このチャットでは、どちらも相手に支払えません。",
+      "onceSaved": "{{card}} は保存するとオンになります。{{name}} もオンにすると使えます。",
+      "theyOff": "{{card}} はここではオンですが、{{name}} はオフにしています：双方がオンにすると使えます。",
+      "unknown": "{{card}} はここではオンです。{{name}} もオンにすると使えます。"
+    },
+    "off": "ここでオフ",
+    "on": "ここでオン",
+    "save": "保存",
+    "saving": "保存中…",
+    "status": {
+      "changed": "未保存：保存すると {{name}} に伝わります。",
+      "idle": "双方がオンにした方法だけが使えます。",
+      "savedLater": "保存しました：次の接続時に {{name}} に伝わります。",
+      "savedLive": "保存しました：{{name}} に伝わりました。"
+    }
+  },
+  "bubble": {
+    "amountSats": "{{amount}} sats",
+    "approve": "支払いを承認",
+    "balance": "{{amount}} {{unit}}",
+    "bitcoinOnchain": "Bitcoin オンチェーン",
+    "cashuMint": "Cashu ミント",
+    "cashuMints": "Cashu ミント",
+    "error": {
+      "amountMismatch": "インボイスが請求額と一致しません",
+      "feeAbove": "Lightning の手数料（最大 {{fee}} {{unit}}）が上限を超えています"
+    },
+    "externalNote": {
+      "ark": "どの Ark ウォレットからでも支払えます。相手のウォレットは入金を確認すると支払い済みにします。",
+      "bitcoin": "どの Bitcoin ウォレットからでも支払えます。相手のウォレットは入金を確認すると、1 回の承認後に支払い済みにします。",
+      "lightning": "どの Lightning ウォレットからでも支払えます。相手のウォレットは入金を確認すると支払い済みにします。"
+    },
+    "externalTitle": "Ghostly 以外のウォレットでスキャン、コピー、または開く",
+    "fedimintNoFederation": "Fedimint · 共通のフェデレーションなし：Lightning",
+    "hide": "隠す",
+    "maxFee": "最大手数料（{{unit}}）",
+    "maxGas": "最大ガス（ETH）",
+    "noSharedMint": "共通の設定済みミントがありません",
+    "noWallet": {
+      "mainnet": "本物のお金（{{unit}}）を求められていますが、支払える Mainnet ウォレットがありません。ウォレットで作成するか、代わりにテスト用のお金を求めてください。",
+      "testnet": "テスト用のお金（{{unit}}）を求められていますが、支払える Testnet ウォレットがありません。ウォレットで作成するか、代わりに本物のお金を求めてください。"
+    },
+    "off": "この支払い方法はこのチャットでオフです。",
+    "payElsewhere": "別のウォレットで支払う",
+    "payOverLightning": "Lightning で {{amount}} {{unit}} を支払う",
+    "preparing": "準備中…",
+    "review": "支払いを確認",
+    "state": {
+      "closed": "終了",
+      "lightningPending": "Lightning の支払いを処理中…",
+      "payment": {
+        "failed": "失敗",
+        "pending": "相手を待っています…",
+        "reclaimed": "取り戻し済み",
+        "settled": "受け取り済み"
+      },
+      "request": {
+        "failed": "失敗",
+        "pending": "支払いを待っています",
+        "settled": "支払い済み"
+      },
+      "waitingConfirmation": "承認を待っています…"
+    },
+    "takeBack": "取り戻す",
+    "takeBackTitle": "相手が受け取らなければ、ecash はあなたのものです",
+    "through": "{{source}} 経由 · 手数料は最大 {{fee}} {{unit}}",
+    "title": {
+      "requests": "請求",
+      "sentYou": "受け取った送金",
+      "youRequested": "あなたの請求",
+      "youSent": "あなたの送金"
+    }
+  },
+  "composer": {
+    "amountIn": "金額（{{unit}}）",
+    "asking": "アドレスを要求中…",
+    "backToCards": "カードに戻る",
+    "balanceWith": "{{balance}} · {{name}} と",
+    "cardStatus": {
+      "notAccepted": "受け入れ不可",
+      "offHere": "ここでオフ"
+    },
+    "chooseOther": "別の人を選ぶ",
+    "continue": "続ける",
+    "error": {
+      "noAnswer": "連絡先のアプリから応答がありません。オフラインか更新が必要な可能性があります。代わりに相手から請求を送ってもらえます。",
+      "noFederation": "あなたと {{name}} に共通のフェデレーションはなく、請求に Lightning インボイスもありません。",
+      "noFederationInvoice": "あなたと {{name}} に共通のフェデレーションはありません：チャット内の請求で「支払いを確認」を使い、Lightning で支払ってください。",
+      "noMint": "先に Cashu のミントを追加してください",
+      "prepare": "支払いを準備できませんでした",
+      "request": "請求を準備できませんでした"
+    },
+    "how": {
+      "arkade": "送金すると {{name}} のアプリに新しい Ark アドレスを求め、承認する支払いを表示します。",
+      "bark": "送金すると {{name}} のアプリに新しい Bark アドレスを求め、承認する支払いを表示します。",
+      "bitcoin": "送金すると {{name}} のアプリに新しい Bitcoin アドレスを求め、承認する支払いを表示します。オンチェーンで承認されると支払い完了です。",
+      "cashu": "送金すると {{name}} にすぐ ecash が届きます。請求には Lightning インボイスも付きます。",
+      "fedimint": "送金すると {{name}} のアプリに対応フェデレーションを尋ね、確認後に共通のフェデレーションの ecash を送ります。共通がなければ、相手の請求に Lightning インボイスが付きます。",
+      "lightning": "Lightning インボイスで請求します。{{name}} に Lightning で支払うには、相手の請求で「支払う」をタップします。",
+      "spark": "送金すると {{name}} のアプリに Spark インボイスを求め、承認する支払いを表示します：Spark から Spark へ、即時、Lightning を経由しません。",
+      "usdt": "送金すると {{name}} のアプリに USDT アドレスを求め、承認する支払いを表示します。"
+    },
+    "memo": "用途（任意）",
+    "networks": "ネットワーク",
+    "newNetworkWallet": "新しい {{network}} ウォレット",
+    "noNetworkWallets": "{{network}} のウォレットはありません",
+    "noWallet": {
+      "action": "ウォレットを作成",
+      "text": "まだウォレットがありません。{{name}} への支払いと受け取りのために作成しましょう：ワンクリックです。"
+    },
+    "payWith": "支払い方法",
+    "payment": "支払い",
+    "preparing": "準備中…",
+    "request": "請求",
+    "requesting": "請求中…",
+    "send": "送金",
+    "sendHint": "このカードで支払うには、連絡先の請求で「支払う」をタップします",
+    "tooMuch": "このカードの {{amount}} {{unit}} を超えています。",
+    "unavailable": {
+      "noWallet": "連絡先は {{card}} ウォレットを持っていません",
+      "notAccepted": "連絡先はこのチャットで {{card}} を受け入れていません",
+      "notHere": "{{card}} はここでは使えません",
+      "notSetUp": "{{card}} はまだ設定されていません",
+      "offHere": "{{card}} はこのチャットではオフです",
+      "status": "{{card}}：{{status}}"
+    },
+    "use": "{{card}} を使う",
+    "with": "{{name}} と",
+    "withTitle": "{{name}} と",
+    "yourContact": "連絡先"
+  },
+  "confirmReal": {
+    "label": "本物のお金を確認",
+    "money": "本物のお金です。",
+    "send": "本物のお金を送る",
+    "text": "{{money}}{{what}} を送ります。決済後は取り消せません。まだ何も送られていません。"
+  },
+  "external": {
+    "asking": "依頼中…",
+    "checking": "確認中…",
+    "checkingNote": "連絡先のウォレットを確認しています。入金が確認されると、ここは自動で「支払い済み」になります。",
+    "copied": "コピーしました",
+    "copyError": "コピーできませんでした。テキストを選択して手動でコピーしてください。",
+    "open": "ウォレットを開く",
+    "openError": "ウォレットを開けませんでした：{{error}}。テキストをコピーするかコードをスキャンしてください。",
+    "openTitle": "このデバイスのウォレットで開く",
+    "paid": "支払いました",
+    "paidTitle": "連絡先のウォレットに今すぐ確認するよう依頼します。入金を確認できた時点で請求を支払い済みにします。",
+    "qrLabel": "支払い用 QR コード"
+  },
+  "formats": {
+    "address": "Bitcoin アドレス",
+    "amount": "金額（{{unit}}）",
+    "amountAria": "金額（{{unit}}）",
+    "anotherChain": "別のチェーン",
+    "arkadeHint": "同じ Ark サーバーの Arkade ウォレットから支払います。",
+    "arkadeLabel": "Ark アドレス（Arkade）",
+    "barkHint": "同じ Ark サーバー（Second のもの）の Bark ウォレットから支払います。Arkade では支払えません。",
+    "barkLabel": "Ark アドレス（Bark）",
+    "bolt12": "Lightning オファー（BOLT 12）",
+    "bolt12Hint": "BOLT 12 オファーに対応したウォレットで支払ってください。ここにはまだオファーを支払えるウォレットがありません。",
+    "chainId": "チェーン {{id}}",
+    "copyAddress": "アドレスをコピー",
+    "copyOffer": "オファーをコピー",
+    "createWallet": "{{network}} の {{wallet}} ウォレットを作成",
+    "from": "{{issuer}} から",
+    "hideQr": "QR を隠す",
+    "maxFee": "許容する最大手数料（{{unit}}）",
+    "maxFeeAria": "最大手数料（{{unit}}）",
+    "millisats": "{{amount}} millisats",
+    "networkNotStated": "ネットワーク不明",
+    "noWallet": {
+      "mainnet": "この本物のお金を支払える Mainnet の {{wallet}} ウォレットがありません。",
+      "testnet": "このテスト用のお金を支払える Testnet の {{wallet}} ウォレットがありません。"
+    },
+    "offline": "{{network}} の Bitcoin ウォレットは現在接続されていません。",
+    "openBitcoinTitle": "この端末の Bitcoin ウォレットで開く",
+    "orLightning": "または Lightning で、同じ支払い：",
+    "otherNeverPays": "{{network}} の {{wallet}} ウォレットでは支払われません。",
+    "paymentLink": "Bitcoin 支払いリンク",
+    "smallestUnit": "（最小単位）",
+    "testUsdt": "テスト USDT",
+    "unlock": "先に {{network}} の {{wallet}} ウォレットのロックを解除してください。",
+    "unsupported": "このリンクはこのアプリが理解できない内容を求めているため、ここからは支払えません。",
+    "usdtLabel": "USDT アドレス",
+    "usdtLabelChain": "USDT アドレス · {{chain}}",
+    "usdtNoChain": "同じアドレスはすべての Ethereum チェーンに存在します。支払う前に、チェーンを明示したリンク（本物の USDT なら ethereum:…@1）を求めてください。",
+    "usdtOtherChain": "このリンクは {{chain}} 用ですが、そこで動く USDT ウォレットはここにありません。",
+    "usdtWrongChain": "{{network}} の USDT ウォレットは {{chain}} 上にあります。このリンクは {{target}} 用です。",
+    "wrongChain": "{{network}} の Bitcoin ウォレットは {{chain}} 上にあります。このアドレスは {{target}} 用です。",
+    "wrongToken": "このリンクはウォレットの USDT とは別のトークンを求めているため、ここからは支払えません。"
+  },
+  "group": {
+    "bitcoinOnchain": "Bitcoin オンチェーン",
+    "chooseOne": "送る相手を 1 人選んでください",
+    "describe": {
+      "cashu": "使っている mint の ecash で請求します。最初に ecash が届いたメンバーが支払い、後の人には返金されます。",
+      "lightning": "Lightning インボイス 1 件で請求します。どのメンバーも 1 回だけ支払えます：インボイスは 2 回支払えません。",
+      "other": "グループ全体には Cashu か Lightning のみです。"
+    },
+    "everyone": "グループに請求",
+    "everyoneHint": "グループの誰でも 1 回だけ支払えます",
+    "formerMember": "元メンバー",
+    "formerMemberObject": "元メンバー",
+    "hint": {
+      "community": "支払いはお二人だけに封印されます：グループは読まずに中継し、不在の人は戻ったときに受け取ります。誰が誰にいくら払ったかは全員に見えます。",
+      "mesh": "支払いはお二人の間だけで行われます。誰が誰にいくら払ったかはグループ全員に見えます。"
+    },
+    "listSeparator": "、",
+    "sendUnavailable": "グループへの請求は 1 人のメンバーが支払います。誰かに支払うには、その人を選んでください",
+    "status": {
+      "claimedPaid": "{{names}} が支払い済み · {{to}} のウォレット待ち",
+      "closed": "終了",
+      "paid": "支払い済み",
+      "paidBy": "{{name}} が支払い済み",
+      "saysPaid": "{{names}} が支払ったと言っています · {{to}} のウォレット待ち",
+      "sent": "送信済み · {{name}} を待っています",
+      "takenBack": "取り消し済み",
+      "waiting": "支払い待ち"
+    },
+    "testUsdt": "テスト USDT",
+    "theGroup": "グループ",
+    "title": {
+      "asked": "{{to}} が {{from}} に請求",
+      "askedGroup": "{{to}} がグループに請求",
+      "paying": "{{from}} が {{to}} に支払い中",
+      "sent": "{{from}} が {{to}} に送金"
+    },
+    "why": {
+      "noPayments": "相手のアプリはグループでの支払いに対応していないか（更新が必要）、すべての方法をオフにしています",
+      "noWay": "あなたが許可する支払い方法を受け付けていません",
+      "unreachable": "現在つながりません"
+    },
+    "you": "あなた",
+    "youObject": "あなた"
+  },
+  "invoice": {
+    "anyAmount": "金額自由",
+    "checking": "確認中…",
+    "confirmWhat": "{{amount}} sats（手数料は最大 {{fee}}）",
+    "copied": "コピーしました",
+    "ecashRequest": "ecash の支払い請求",
+    "ecashToken": "ecash トークン",
+    "expired": "期限切れ",
+    "expiresDays": "あと {{n}} 日で期限切れ",
+    "expiresHours": "あと {{n}} 時間で期限切れ",
+    "expiresMinutes": "あと {{n}} 分で期限切れ",
+    "expiresSeconds": "あと {{n}} 秒で期限切れ",
+    "hideQr": "QR コードを隠す",
+    "label": "Lightning インボイス",
+    "labelNetwork": "Lightning インボイス · {{network}}",
+    "lightningAddress": "Lightning アドレス",
+    "methodOff": "{{method}} はこのチャットでオフです。",
+    "mint": "ミント：{{mint}}",
+    "mintNotAdded": "このミントを追加していないため、ここでは受け取れません。",
+    "mints": "ミント：{{mints}}",
+    "noWallet": {
+      "mainnet": "本物のお金：支払える Mainnet の Lightning ウォレットがありません",
+      "testnet": "テスト用のお金：支払える Testnet の Lightning ウォレットがありません"
+    },
+    "onchainBitcoin": "オンチェーン Bitcoin",
+    "openTitle": "この端末の Lightning ウォレットで開く",
+    "openWallet": "ウォレットを開く",
+    "paid": "支払い済み ✓",
+    "pay": "支払う",
+    "payWithFee": "{{amount}} + 手数料最大 {{fee}} を支払う",
+    "paying": "支払い中…",
+    "paysThrough": "{{domain}} 経由で支払い",
+    "pendingAtMint": "ミントで支払いを処理中…",
+    "redeem": "受け取る",
+    "redeemed": "受け取り済み ✓",
+    "redeeming": "受け取り中…"
+  },
+  "mode": {
+    "accept": "受け入れ",
+    "label": "{{name}} との支払い",
+    "pay": "支払い・請求"
+  },
+  "none": {
+    "action": "このチャットで受け入れる方法を選ぶ",
+    "text": "このチャットでオンの支払い方法はありません。"
+  },
+  "payWith": {
+    "card": "Lightning カード",
+    "label": "支払い方法"
+  },
+  "review": {
+    "approve": "支払いを承認",
+    "check": "既存の支払いを確認",
+    "destination": "宛先",
+    "details": "支払いの詳細",
+    "error": {
+      "update": "この支払いを更新できませんでした。保存された状態を確認してください。"
+    },
+    "expires": "有効期限",
+    "fee": "手数料 / 上限",
+    "feePerGas": "ガスあたりの最大 / 優先手数料（wei）",
+    "gasLimit": "最大ガス / 上限",
+    "gasNonce": "ガスリミット / nonce",
+    "label": "支払いの確認",
+    "money": {
+      "mainnet": "本物のお金：確認するとウォレットから出ていきます。",
+      "testnet": "テスト用のお金：これらのコインはテストネットワークの外では価値がありません。"
+    },
+    "note": {
+      "arkReal": "本物のビットコインです。Ark の承認はオフチェーンです。",
+      "arkTest": "テスト用の資金のみです。Ark の承認はオフチェーンです。",
+      "bark": "Second の Ark サーバー経由でオフチェーン送金されます。支払えるのは同じサーバーのアドレスだけです。",
+      "bitcoin": "この確認内容どおりに署名されたオンチェーン取引です。1 回の承認で決済され、確認しても二重に送られることはありません。",
+      "cashu": "選択したミントが裏付けとなる資金を保有します。承認にはそのミントでのトークン引き換えが必要です。",
+      "fedimint": "このフェデレーションの ecash ノートが連絡先に渡ります。連絡先が引き換えるまではそれがお金です。引き換えられない場合は取り戻せます（1 週間後に自動で戻ってもきます）。",
+      "sparkReal": "本物のビットコインです。Spark から Spark へのオフチェーン送金で、Spark のオペレーターが送金に署名すると確定します。確認しても二重に送られることはありません。",
+      "sparkTest": "Regtest：価値のないテスト sats です。Spark から Spark へのオフチェーン送金で、Spark のオペレーターが送金に署名すると確定します。確認しても二重に送られることはありません。",
+      "usdt": "ガスは ETH で別に支払われ、少額の支払いでは金額を上回ることがあります。{{blocks}} ブロック後に承認されます。",
+      "usdtTest": "ローカルのテスト用トークンで、Tether 発行の USDT ではありません。ガスは ETH で別に支払われ、少額の支払いでは金額を上回ることがあります。{{blocks}} ブロック後に承認されます。"
+    },
+    "payee": "受取人",
+    "provider": "プロバイダー",
+    "states": {
+      "cancelled": "キャンセル済み",
+      "confirmed": "確認済み",
+      "failed": "失敗",
+      "pending": "保留中",
+      "settled": "支払い済み",
+      "submitted": "送信済み",
+      "unknown": "不明"
+    },
+    "status": "状態",
+    "title": {
+      "pending": "支払いを確認",
+      "status": "支払いの状態"
+    },
+    "tokenChain": "トークン / チェーン",
+    "tokenChainValue": "{{token}} · {{chain}} · 小数点以下 {{decimals}} 桁",
+    "total": "合計",
+    "transaction": "トランザクション"
+  }
+}

@@ -62,6 +62,58 @@ test("on a phone: a chat is a screen of its own", { tag: ["@feature:app.mobile-l
   await expect(alice.page.getByText("boo on the small screen")).toBeVisible();
 });
 
+test("on a phone: the tab bar goes behind the keyboard while typing, and comes back", { tag: ["@feature:app.mobile-layout"] }, async ({ peer }) => {
+  // Playwright has no keyboard to open: the viewport loses an iPhone keyboard's height while a field has the focus.
+  const phone = { width: 390, height: 844 }, keyboard = 336;
+  const { page } = await peer("alice", { mobile: true, viewport: phone });
+  const tabs = page.getByTestId("mobile-tabs");
+  const search = page.getByPlaceholder("Search chats...");
+  await search.focus();
+  await page.setViewportSize({ width: phone.width, height: phone.height - keyboard });
+  await expect(page.locator("html")).toHaveAttribute("data-keyboard", "true");
+  await expect(tabs).toBeHidden();
+  await expect(search).toBeInViewport();
+
+  // The same on a settings field.
+  await search.blur();
+  await page.setViewportSize(phone);
+  await expect(tabs).toBeVisible();
+  await tabs.getByRole("button", { name: "Settings" }).click();
+  const nickname = page.getByPlaceholder("Enter your nickname...");
+  await nickname.focus();
+  await page.setViewportSize({ width: phone.width, height: phone.height - keyboard });
+  await expect(tabs).toBeHidden();
+  await expect(nickname).toBeInViewport();
+
+  // Keyboard down: back at the bottom of the screen.
+  await nickname.blur();
+  await page.setViewportSize(phone);
+  await expect(tabs).toBeVisible();
+  const bar = (await tabs.boundingBox())!;
+  expect(bar.y + bar.height).toBe(phone.height);
+});
+
+test("on a 320px phone every tab's name fits whole, in every language", { tag: ["@feature:app.mobile-layout", "@feature:app.i18n"] }, async ({ peer }) => {
+  // 64px a tab: "Configurações", "Identidades", "Portefeuilles" and "Impostazioni" ended in "…".
+  const { page } = await peer("narrow-tabs", { mobile: true, viewport: { width: 320, height: 568 } });
+  const cut: string[] = [];
+  for (const language of ["en", "pt", "es", "fr", "it", "ar", "ja", "zh"]) {
+    await page.evaluate((language) => {
+      const settings = JSON.parse(localStorage.getItem("ghostly_app_settings") ?? "{}");
+      localStorage.setItem("ghostly_app_settings", JSON.stringify({ ...settings, language }));
+    }, language);
+    await page.reload();
+    await expect(page.locator("html")).toHaveAttribute("lang", new RegExp(`^${language}`));
+    const names = page.getByTestId("mobile-tabs").locator("button > span:last-child");
+    await expect(names).toHaveCount(5);
+    for (const name of await names.all()) {
+      const { text, over } = await name.evaluate((element) => ({ text: element.textContent, over: element.scrollWidth - element.clientWidth }));
+      if (over > 0) cut.push(`${language}: ${text}`);
+    }
+  }
+  expect(cut).toEqual([]);
+});
+
 test("on a wide screen the wallet and services are pages beside the list", { tag: ["@feature:app.navigation", "@feature:app.mobile-layout"] }, async ({ peer }) => {
   const { page } = await peer("alice");
   await expect(page.getByTestId("mobile-tabs")).toHaveCount(0);

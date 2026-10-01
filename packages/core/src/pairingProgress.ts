@@ -31,9 +31,10 @@ export type PairingOnDhtReason = "no-common-transport" | "transport" | "chosen" 
  * (discovery unreachable). `timeout`: the offer was not answered in time. `transport`: offer and answer
  * met but no connection came up. `rejected`: the authenticated session failed, or a signal was forged or
  * unauthenticated (never retried). `key-mismatch`: the contact's key is not the one saved (never retried).
- * `offline`: this side went offline.
+ * `offline`: this side went offline. `taken`: a joiner whose inviter answers someone else, who used the same invite
+ * first (the inviter's envelopes are sealed to that one); it holds until an envelope of the inviter's reads again.
  */
-export type PairingFailureReason = "publish" | "timeout" | "transport" | "rejected" | "key-mismatch" | "offline";
+export type PairingFailureReason = "publish" | "timeout" | "transport" | "rejected" | "key-mismatch" | "offline" | "taken";
 
 export interface PairingProgress {
   role: PairingRole;
@@ -74,8 +75,13 @@ export class PairingTracker {
     this.progress = { role, stage: FIRST_STAGE[role], since: startedAt, startedAt, attempt: 1 };
   }
 
-  /** Live, or stopped by a security rejection (a key mismatch, a forged or refused session): nothing moves it after. */
-  get done(): boolean { return this.progress.stage === "live" || (this.progress.stage === "failed" && (this.progress.reason === "key-mismatch" || this.progress.reason === "rejected")); }
+  /**
+   * Live, or stopped by a security rejection (a key mismatch, a forged or refused session), or by an invite someone else
+   * took: nothing moves it after (the last one only `untaken`).
+   */
+  get done(): boolean {
+    return this.progress.stage === "live" || (this.progress.stage === "failed" && (this.progress.reason === "key-mismatch" || this.progress.reason === "rejected" || this.progress.reason === "taken"));
+  }
 
   /** This side's packet is on the network (its first, or the one after a publish that failed). */
   published(): void {
@@ -131,6 +137,15 @@ export class PairingTracker {
     if (this.attemptOpen && reason !== "chosen") return;
     this.attemptOpen = false;
     this.set("on-dht", { reason, retryable: reason !== "chosen" });
+  }
+
+  /** The inviter's envelope reads again after `taken` (that one was forged by someone holding the invite): still trying. */
+  untaken(): void {
+    if (this.progress.stage !== "failed" || this.progress.reason !== "taken") return;
+    const { role, startedAt } = this.progress;
+    this.progress = { role, stage: this.dhtPinned ? "on-dht" : this.idle(), since: this.now(), startedAt, attempt: Math.max(1, this.attempts),
+      ...(this.peerSeen ? { peerSeen: true } : {}), ...(this.dhtPinned ? { reason: "waiting" as const, retryable: true } : {}) };
+    this.changed(this.progress);
   }
 
   /** The attempt ended without a word (the connection went away before the session was ready). */

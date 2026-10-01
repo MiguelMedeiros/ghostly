@@ -1,4 +1,4 @@
-import { decodeBolt11 } from "@ghostly/core";
+import { decodeBolt11, engineError } from "@ghostly/core";
 import type { WalletMode } from "../../../shared/mints";
 import type { CashuWallet } from "../../wallet";
 import type { LightningInvoice, LightningPaymentRef, LightningProvider, LightningProviderDescriptor } from "./lightning";
@@ -66,7 +66,7 @@ export class CashuMintLightning implements LightningProvider {
     // Nothing reaches the mint's melt before `payQuote`, and it throws only when the sats did not leave.
     try {
       quote ??= await this.wallet.quoteInvoice(invoice, this.mode);
-      if (quote.feeReserve > maxFee) throw new Error(`The Lightning fee (${quote.feeReserve} sats) is too high`);
+      if (quote.feeReserve > maxFee) throw engineError("lightningFeeTooHigh", { fee: quote.feeReserve });
     } catch (error) {
       throw new NothingSpentError(error instanceof Error ? error.message : String(error));
     }

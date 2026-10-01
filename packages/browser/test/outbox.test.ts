@@ -111,6 +111,48 @@ describe("automatic resend", () => {
     await p.box.stop();
   });
 
+  it("sends again on the new link a text whose DHT send was still on its way when the chat went live, and the contact keeps it once", async () => {
+    // The Desktop pair of the 2026-09-30 nightly: a text goes on the DHT, and the chat goes live while that publish is
+    // still out. The contact, live now, reads the DHT every 5 minutes: without a send on the link it waited that long.
+    let live = false, publishing: () => void = () => {};
+    const receive = recipient("recipient-race");
+    const send = vi.fn(async (m: StoredMessage) => {
+      if (m.via !== "pkarr") return receive(m);
+      await new Promise<void>(resolve => { publishing = resolve; });
+      return null;
+    });
+    const p = await setup(send, { ready: () => true, via: () => (live ? "datalink" : "pkarr") }, 60_000);
+    const first = p.box.transmit(p.id);
+    await vi.waitFor(() => expect(send).toHaveBeenCalledTimes(1));
+    expect(send.mock.calls[0][0].via).toBe("pkarr");
+    live = true; await p.box.flush({ reopened: true });
+    // Once the publish returns, the text goes again, on the link.
+    publishing(); await first;
+    expect(send).toHaveBeenCalledTimes(2);
+    expect(send.mock.calls[1][0]).toMatchObject({ via: "datalink", wireId: p.wireId });
+    expect((await p.row())).toMatchObject({ delivery: "sent", via: "datalink" });
+    // The DHT copy read later is the same message: the contact keeps one.
+    await receive({ ...(await p.row()), via: "pkarr" });
+    expect(await db.getMessages("recipient-race")).toHaveLength(1);
+    await p.box.received(p.wireId);
+    expect((await p.row()).delivery).toBe("delivered");
+    await p.box.stop();
+  });
+
+  it("does not send twice a text in flight when the chat reopens and it is confirmed before its send returns", async () => {
+    let publishing: () => void = () => {};
+    const send = vi.fn(async () => { await new Promise<void>(resolve => { publishing = resolve; }); return null; });
+    const p = await setup(send, { ready: () => true }, 60_000);
+    const first = p.box.transmit(p.id);
+    await vi.waitFor(() => expect(send).toHaveBeenCalledTimes(1));
+    await p.box.flush({ reopened: true });
+    await p.box.received(p.wireId);
+    publishing(); await first;
+    expect(send).toHaveBeenCalledTimes(1);
+    expect((await p.row()).delivery).toBe("delivered");
+    await p.box.stop();
+  });
+
   it("waits with backoff while the contact is away, and sends as soon as it can", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
     let live = false;

@@ -115,7 +115,7 @@ test("Fedimint on regtest: join by invite, ecash in over the gateway, notes out 
   await alice.page.getByTestId("payment-amount").fill("3000");
   await alice.page.getByTestId("payment-send").click();
   const review = alice.page.getByTestId("payment-composer").getByTestId("payment-review");
-  await expect(review).toContainText("fedimint", { timeout: 60_000 });
+  await expect(review.getByTestId("review-rail")).toHaveText(/^Fedimint( · \w+)?$/, { timeout: 60_000 });
   await review.getByRole("button", { name: "Approve payment" }).click();
   await expect(chat(bob).getByTestId("payment-bubble").filter({ hasText: "Sent you" }).last().getByTestId("payment-state")).toHaveText("Received", { timeout: 90_000 });
   // Gone out: the sheet closed, back to the chat.
@@ -150,7 +150,7 @@ test("Fedimint on regtest: join by invite, ecash in over the gateway, notes out 
   await openWallet(alice, "lightning-testnet");
   await alice.page.getByTestId("wallet-send").click();
   await alice.page.getByTestId("wallet-pay-input").fill(outside.payment_request);
-  await alice.page.getByRole("button", { name: "Pay 3,000 sats" }).click();
+  await alice.page.getByRole("button", { name: "Pay 3,000 test sats" }).click();
   await alice.page.getByRole("button", { name: "Pay", exact: true }).click();
   await expect(alice.page.getByTestId("wallet-notice")).toContainText(/Paid|pending/, { timeout: 90_000 });
   const hash = outside.r_hash;

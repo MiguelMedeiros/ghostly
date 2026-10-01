@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import { BDK_REGTEST } from "../support/bdk-regtest/regtest.mjs";
 import { chat, connect, createWallet, expect, link, openChat, openWallet, say, test, type Peer } from "../support/fixtures";
 import { choose } from "../support/select";
-import { BARK_TESTNET, arkadeAddress, bcrt1q, bolt12Offer } from "../../src/test/payments/moneyFormatFixtures";
+import { BARK_TESTNET, arkadeAddress, bcrt1q, bolt12Offer } from "../../apps/ui/src/test/payments/moneyFormatFixtures";
 
 /**
  * Money formats pasted into a chat (parser v2, card 4), test coins only:
@@ -84,7 +84,7 @@ test("BDK on regtest: a pasted bitcoin: link is paid from the regtest wallet aft
   await onchain.getByTestId("onchain-pay").click();
   await onchain.getByTestId("money-review").click();
   const review = onchain.getByTestId("payment-review");
-  await expect(review).toContainText("bitcoin · regtest", { timeout: 60_000 });
+  await expect(review).toContainText("Bitcoin on-chain · Regtest", { timeout: 60_000 });
   await expect(review).toContainText(payee);
   await review.getByRole("button", { name: "Approve payment" }).click();
   await expect(review.getByTestId("review-status")).toHaveText(/submitted|settled/, { timeout: 60_000 });

@@ -1,0 +1,32 @@
+{
+  "fromContacts": "من جهات اتصالك",
+  "fromContactsEmpty": "تظهر هنا التطبيقات التي تشاركها جهات اتصالك.",
+  "goOffline": "اقطع الاتصال: لن يبقى شيء مما تشاركه متاحًا",
+  "goOnline": "اتصل",
+  "letReach": "اسمح لـ {{contact}} بالوصول إلى {{app}}",
+  "namePlaceholder": "الاسم (Atlas)",
+  "needsApp": "تحتاج مشاركة تطبيق ويب محلي إلى إضافة Ghostly للمتصفح أو تطبيق سطح المكتب.",
+  "noContacts": "لا جهات اتصال بعد.",
+  "nobodyYet": "لا أحد يستطيع فتحه حتى تختار من.",
+  "nothingShared": "لم تشارك شيئًا بعد.",
+  "offline": "غير متصل",
+  "online": "متصل",
+  "open": "افتح {{app}}",
+  "openNeedsApp": "يحتاج فتح تطبيق ويب لجهة اتصال إلى إضافة Ghostly للمتصفح أو تطبيق سطح المكتب.",
+  "people": "الأشخاص",
+  "peopleDone": "تم",
+  "remove": "إزالة",
+  "removeNamed": "أزل {{app}}",
+  "requestCount": "· {{count}} طلبات",
+  "share": "مشاركة",
+  "shareLocal": "شارك خدمة محلية",
+  "shareNamed": "شارك {{app}}",
+  "status": {
+    "notShared": "لم تتم مشاركته مع أحد بعد",
+    "offline": "غير متاح أثناء عدم الاتصال",
+    "sharedCount": "تمت مشاركته مع {{count}} جهات اتصال",
+    "sharedOne": "تمت مشاركته مع جهة اتصال واحدة",
+    "stopped": "متوقف"
+  },
+  "yourApps": "تطبيقاتك"
+}

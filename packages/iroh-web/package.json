@@ -1,9 +1,9 @@
 {
   "name": "@ghostly/iroh-web",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.0.1",
   "type": "module",
-  "description": "Iroh 1.2 compiled for browsers (relay only), built from native-transports/iroh-web by scripts/build-iroh-web.mjs. Loaded on demand by @ghostly/browser.",
+  "description": "Iroh 1.2 compiled for browsers (relay only), built from native/transports/iroh-web by scripts/build-iroh-web.mjs. Loaded on demand by @ghostly/browser.",
   "exports": {
     ".": "./pkg/ghostly_iroh_web.js",
     "./wasm": "./pkg/ghostly_iroh_web_bg.wasm"

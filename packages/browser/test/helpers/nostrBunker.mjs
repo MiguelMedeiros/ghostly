@@ -12,7 +12,7 @@ export async function startTestBunker(port = 0) {
   const signerPub = getPublicKey(signerKey), userPub = getPublicKey(userKey);
   const subscriptions = new Map(); const methods = []; const sessions = new Set();
   const server = createServer((req,res) => {
-    if(req.url==='/avatar') { res.setHeader('Access-Control-Allow-Origin','*');res.setHeader('Content-Type','image/png');res.end(readFileSync(new URL('../../../../src-tauri/icons/32x32.png',import.meta.url)));return; }
+    if(req.url==='/avatar') { res.setHeader('Access-Control-Allow-Origin','*');res.setHeader('Content-Type','image/png');res.end(readFileSync(new URL('../../../../apps/desktop/icons/32x32.png',import.meta.url)));return; }
     res.setHeader('Content-Type','text/html; charset=utf-8'); res.setHeader('Cache-Control','no-store');
     res.end(`<html><body><h1>Ghostly isolated NIP-46 test signer</h1><p>Disposable test identity. Not a real user account. Nothing is published to public relays.</p><label>Test bunker connection<input aria-label="Test bunker connection" style="width:95%" readonly value="${bunker.replaceAll('&','&amp;')}"></label><p>Test user public key: <code>${userPub}</code></p><p>Methods: ${methods.join(', ')}</p></body></html>`);
   });

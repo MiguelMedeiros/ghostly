@@ -1,0 +1,1 @@
+A joiner whose invite someone else used first is told so: the inviter's envelope in the invite mailbox is sealed to another key, so its pairing ends `failed` (`taken`) and its texts are refused instead of showing "sent" forever. A passive state, undone by a newer envelope of the inviter's that opens for it.

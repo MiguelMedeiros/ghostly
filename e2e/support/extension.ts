@@ -4,10 +4,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, guardArchive, openPeer, type Peer, type PeerOptions } from "./fixtures";
 import { test as base } from "./fixtures";
+import { MAINNET_MINTS, mintStandIn, type MintStandIn } from "./mint";
+import { LocalRelay } from "./relay";
 
-const dist = join(import.meta.dirname, "..", "..", "extension", "dist");
+const dist = join(import.meta.dirname, "..", "..", "apps", "extension", "dist");
 
-/** Where the extension asks what the newest release is (extension/src/updates.ts). */
+/** Where the extension asks what the newest release is (apps/extension/src/updates.ts). */
 export const LATEST_URL = "https://ghostly.tools/latest.json";
 
 /**
@@ -15,7 +17,7 @@ export const LATEST_URL = "https://ghostly.tools/latest.json";
  * permission prompt cannot be clicked by automation. Everything else is the shipped code.
  */
 function prepareExtension(work: string): string {
-  if (!existsSync(join(dist, "manifest.json"))) throw new Error("extension/dist is missing: run `npm run build:extension` first (`npm run e2e` does)");
+  if (!existsSync(join(dist, "manifest.json"))) throw new Error("apps/extension/dist is missing: run `npm run build:extension` first (`npm run e2e` does)");
   const dir = join(work, "extension");
   cpSync(dist, dir, { recursive: true });
   const manifestPath = join(dir, "manifest.json");
@@ -39,8 +41,16 @@ export const test = base.extend<Fixtures>({
     // Prepared on first use: a test that asks for the fixture but opens no extension needs no build of it.
     let extensionDir: string | undefined;
     const opened: Peer[] = [];
+    let mint: Promise<MintStandIn | undefined> | undefined;
     await use(async (name, options = {}) => {
       extensionDir ??= prepareExtension(work);
+      const standIn = await (mint ??= mintStandIn());
+      // The engine starts on the public Pkarr relays, before the settings below point it at the test's relay: to the
+      // browser they do not exist, so nothing reaches them meanwhile.
+      // The real Mainnet mints and Ethereum RPC do not exist for it either: the extension never makes a new profile's
+      // Mainnet wallets under test, and if it ever did, nothing would reach real money's servers.
+      const mainnet = [...MAINNET_MINTS.map((mint) => new URL(mint).hostname), "ethereum.publicnode.com"];
+      const rules = [...standIn?.rules ?? [], ...[...LocalRelay.hosts, ...mainnet].map((host) => `MAP ${host} ~NOTFOUND`)];
       const context = await chromium.launchPersistentContext(join(work, name), {
         channel: "chromium",
         headless: !process.env.HEADED,
@@ -55,6 +65,9 @@ export const test = base.extend<Fixtures>({
           "--auto-select-desktop-capture-source=Entire screen",
           // The context option covers pages, not the extension's offscreen document, where its engine runs.
           ...(options.ignoreHTTPSErrors ? ["--ignore-certificate-errors"] : []),
+          // Its engine's requests to the public test mint are out of reach of `context.route` too: see mintStandIn.
+          ...standIn?.args ?? [],
+          `--host-resolver-rules=${rules.join(", ")}`,
         ],
       });
       await guardArchive(context);
@@ -88,6 +101,7 @@ export const test = base.extend<Fixtures>({
       return peer;
     });
     for (const peer of opened) await peer.context.close().catch(() => {});
+    await (await mint)?.close();
     rmSync(work, { recursive: true, force: true });
   },
   webPeer: async ({ relay, baseURL }, use) => {

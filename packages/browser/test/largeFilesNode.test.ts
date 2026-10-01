@@ -5,7 +5,8 @@ import { ChatFiles, FILE_LIMITS, GhostLink, createIdentity, createLink, identity
 import { GhostlyNode } from "../src/engine/node";
 import { db } from "../src/engine/db";
 import { fileStore } from "../src/shared/idb";
-import { fileBytes } from "../src/shared/fileBytes";
+import { fileBytes, registerFileBytes } from "../src/shared/fileBytes";
+import { IdbFileBytes } from "../src/shared/fileBytesIdb";
 import { FakeNativeNet } from "./helpers/fakeNative";
 // covers: files.large.offer, files.large.resume, files.large.integrity, files.storage, files.large.resend, files.large.request
 
@@ -112,6 +113,19 @@ async function setup() {
   };
 }
 
+it("the app has an offered file's transfer before the message that shows it: a file on its way never reads as gone", async () => {
+  const t = await setup();
+  const events = t.node()["events"] as unknown as { onState: ReturnType<typeof vi.fn>; onMessages: ReturnType<typeof vi.fn> };
+  const order: string[] = [];
+  events.onState.mockImplementation((state: { transfers: Record<string, unknown> }) => {
+    if (Object.keys(state.transfers).some((id) => id.startsWith(`${t.id}-in-`))) order.push("transfer");
+  });
+  events.onMessages.mockImplementation((_linkId: string, messages: { file?: unknown }[]) => { if (messages.some((m) => m.file)) order.push("message"); });
+  t.offer("small-0001", 20_000);
+  await vi.waitFor(() => expect(order).toContain("message"));
+  expect(order[0]).toBe("transfer");
+});
+
 it("a large file waits for the person, shows the room here, and is stored whole once accepted", async () => {
   const t = await setup();
   const size = FILE_LIMITS.askAboveBytes + 1234;
@@ -129,6 +143,31 @@ it("a large file waits for the person, shows the room here, and is stored whole 
   expect(stored.blob).toBeUndefined();
   expect(await (await fileBytes()).digest(fileId)).toBe(digestOf(size));
 }, 90_000);
+
+it.each([
+  { storage: "files on disk (Desktop, web, extension, CLI)", onDisk: true },
+  { storage: "IndexedDB pieces", onDisk: false },
+])("a file of no bytes arrives, kept as $storage", async ({ onDisk }) => {
+  // Found with two headless CLIs: an empty file ended "arrived damaged and was deleted" on both sides. Nothing is
+  // ever appended for it, and every backend but IndexedDB reads a file never written as missing: its check failed.
+  class FilesOnDisk extends IdbFileBytes {
+    private made = new Set<string>();
+    override async append(id: string, offset: number, bytes: Uint8Array) { this.made.add(id); await super.append(id, offset, bytes); }
+    override async size(id: string) { return this.made.has(id) ? (await super.size(id)) ?? 0 : super.size(id); }
+    override async digest(id: string) { if (!this.made.has(id) && (await super.size(id)) === null) throw new Error("No such file"); return super.digest(id); }
+  }
+  if (onDisk) {
+    registerFileBytes("idb", async () => new FilesOnDisk());
+    cleanup.push(async () => registerFileBytes("idb", async () => new IdbFileBytes()));
+  }
+  const t = await setup();
+  t.offer("empty-0001", 0);
+  await vi.waitFor(async () => expect((await t.incoming("empty-0001"))?.transfer).toMatchObject({ state: "done", transferred: 0 }));
+  await vi.waitFor(() => expect(t.records.get("out:empty-0001")?.state).toBe("done"));
+  const fileId = (await t.incoming("empty-0001"))!.fileId;
+  if (onDisk) expect(await (await fileBytes()).size(fileId)).toBe(0);
+  expect((await (await fileBytes()).read(fileId, 0, 16)).length).toBe(0);
+}, 60_000);
 
 it("a file under the id of a message the contact sent already is refused, nothing stored for it", async () => {
   const t = await setup();

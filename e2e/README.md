@@ -1,6 +1,6 @@
 # End-to-end tests
 
-Real Chromium against the shipped build: the web app (`web/dist`, served by `vite preview`) and the extension (`extension/dist`). Two or three people per test, each in a browser profile of their own, chatting, sending files, calling and paying each other. Desktop is [its own thing](#desktop): the bundled Tauri app, driven through WebDriver.
+Real Chromium against the shipped build: the web app (`apps/web/dist`, served by `vite preview`) and the extension (`apps/extension/dist`). Two or three people per test, each in a browser profile of their own, chatting, sending files, calling and paying each other. Desktop is [its own thing](#desktop): the bundled Tauri app, driven through WebDriver.
 
 ```bash
 npm run test:affected -- --port 50310   # only the tests tagged with the features your diff touches (docs/TESTING.md)
@@ -70,13 +70,18 @@ endpoint from there, never a literal port. Their names are stable: other suites 
 | 47086 / 47087 | AT Protocol PDS (`@atproto/pds`, as `https://pds.ghostly.test`) / PLC directory in memory (as `https://plc.ghostly.test`), `e2e/infra/atproto`; `support/atproto.ts` routes both names and the handles' DNS, and makes an account per test. The Bluesky spec opens the app at 127.0.0.1 (AT Protocol's development client returns only there) | `E2E_ATPROTO_PDS_URL` / `E2E_ATPROTO_PLC_URL` |
 | 47090 | Cashu test mint (`cashubtc/mintd`, fake Lightning) | `E2E_MINT_URL` |
 | 47095 / 47096 | Fedimint guardian API (websocket, as the invite code names it) / its gateway's API | `GHOSTLY_FEDIMINT_API_URL` / `_GATEWAY_URL` |
-| 47097 | HyperDHT relay for browsers (`native-transports/hyperdht-relay`, on a HyperDHT network of its own) | `GHOSTLY_HYPERDHT_RELAY_URL` (gate `GHOSTLY_HYPERDHT_RELAY`) |
+| 47097 | HyperDHT relay for browsers (`services/hyperdht-relay`, on a HyperDHT network of its own) | `GHOSTLY_HYPERDHT_RELAY_URL` (gate `GHOSTLY_HYPERDHT_RELAY`) |
 | 47100 | the web build under test (`vite preview`) | `E2E_WEB_PORT` |
 | 47110-47119 | Lightning address server, in the test process | `E2E_LNURL_PORT` |
 | 47120-47199 | domain-proof DoH + well-known servers, in the test process | `E2E_DOMAIN_PORT` |
 
 The last three are the suite's own servers: `e2e:full` sets them, and they are left out of `.env.e2e` so that
 another runner reading that file (the scenario matrix, 47300-47399) keeps its own defaults.
+
+On Linux these ports sit inside the ephemeral range (32768-60999), so an outgoing connection can hold one as its
+local port just when a server wants it ("Port 47300 is already in use"). The `E2E (full)` jobs reserve 47000-47399
+first (`sysctl net.ipv4.ip_local_reserved_ports`); do the same on a Linux host that runs the suites often. macOS
+hands out ports from 49152 up, clear of them.
 
 Every Bitcoin service shares the one chain, so Lightning nodes of different implementations can reach each other,
 but each suite has its own pair of nodes: the LND, WebLN and NWC tests assert exact channel balances while other
@@ -156,7 +161,9 @@ Peers find each other through Pkarr relays. Here the relay is `support/relay.ts`
 
 GifCities and the Wayback Machine (`GIFCITIES`, `WAYBACK` in `support/fixtures.ts`) are **never** reached. GifCities limits requests per IP, answering with a 200 HTML page that has no CORS header (a browser page sees a failed request, which `route.abort("failed")` plays; `route.fulfill` cannot, since Playwright adds the CORS header itself), and our runs share the IPs Ghostly's own apps use: in September 2026 they were likely part of why it ran out. Each context gets `guardArchive(context)` first and the stubs after it. The guard answers only what gets past the stubs and aborts it, and the automatic `archiveGuard` fixture then fails the test. A spec with answers of its own adds a `context.route(GIFCITIES, handler)` (later routes win) and removes it with `unroute(GIFCITIES, handler)`. A bare `unroute(GIFCITIES)` drops the guard too. The Desktop suites cannot route requests, so they do not open the GIF panel.
 
-Only the tests tagged `@network` go out: the wallet, against the public Cashu test mint (`testnut.cashu.space`, worthless sats whose invoices read paid by themselves: the app never takes that as a payment, and tests get test sats from "Get test coins", see `getTestCoins` in `support/fixtures.ts`). CI does not even do that: it runs a mint of its own and answers the public one's requests from it, the way the relay answers Pkarr's. `e2e/infra` has that mint (`ghostly-e2e-mint`, `E2E_MINT_URL=http://127.0.0.1:47090`), and the `E2E` workflow starts the same container by itself:
+The tests tagged `@network` need a service on the Internet that the suite has no stand-in for: a public chain server (Mutinynet's Ark server, Second's signet server, a Sepolia RPC) or Breez's regtest. The release gate (the `E2E` workflow) leaves them out, and `E2E (full)` runs them every night. Everything else passes with every outside name refused in Chromium (checked in #611). WebRTC still asks its default STUN servers, and Chromium its own services, but no test needs them: every peer is on this machine. The extension's browser is told the public Pkarr relays do not exist, since its engine starts on them before the fixture points it at the test's relay.
+
+The wallet tests go out only when `E2E_MINT_URL` is not set: they use the public Cashu test mint (`testnut.cashu.space`, worthless sats whose invoices read paid by themselves: the app never takes that as a payment, and tests get test sats from "Get test coins", see `getTestCoins` in `support/fixtures.ts`). CI does not even do that: it runs a mint of its own and answers the public one's requests from it, the way the relay answers Pkarr's. `e2e/infra` has that mint (`ghostly-e2e-mint`, `E2E_MINT_URL=http://127.0.0.1:47090`), and the `E2E` workflow starts the same container by itself:
 
 ```bash
 npm run e2e:infra:up && npm run test:e2e      # .env.e2e sets E2E_MINT_URL
@@ -178,7 +185,7 @@ Some of the specs, not all (`e2e/web/` alone has over 100). To list the tests of
 | `web/calls.spec.ts` | video and audio calls, mute, camera, screen share, decline, the movable self view, the small call window, a call that outlives its chat, the lock over one |
 | `web/menus.spec.ts` | the chat, group and New menus: one line per row, nothing cut, inside the window, in en, pt, ar, wide and 390px (a sheet) |
 | `web/mobile.spec.ts` | the phone layout: tabs, chat screen, composer |
-| `web/wallet.spec.ts` | `@network`: Lightning in, ecash out, requests, history and fees, invoice and token cards, against a real mint (ours in CI) |
+| `web/wallet.spec.ts` | Lightning in, ecash out, requests, history and fees, invoice and token cards, against a real mint (ours in CI) |
 | `web/chat-extras.spec.ts` | unread count, naming a chat, links (new tab, no opener/referrer), hostile text never becomes a link, contact pictures only on click and only https, per-message details, overlong text refused (and not kept), file size limit, Tech Info copy |
 | `web/invite-link.spec.ts` | an invite link opens its chat (fresh tab or running app) and leaves no key in the address or history; broken, damaged or conflicting links say so and never crash |
 | `web/network-settings.spec.ts` | TURN server saved, kept, cleared; relays sanitized; a relay list with none, or a TURN address WebRTC refuses, is refused with the reason |
@@ -191,9 +198,9 @@ Some of the specs, not all (`e2e/web/` alone has over 100). To list the tests of
 | `web/sdk-plugin.spec.ts` | adapters built outside the app against `@ghostlytools/sdk` (`examples/sdk-adapter`), compiled into this build with `GHOSTLY_PLUGINS`: the plugin's Lightning source in the picker (Testnet only), connected, an invoice seen paid; its identity proof added from a pasted signature |
 | `web/store-forward.spec.ts` | held messages (WISP 4xx): with `GHOSTLY_S3_*`, text, a picture and a request held in Alice's S3 while Bob's page is closed, picked up in order when he is back, a changed object refused, an expired one dropped; a contact without the switch is unaffected (no S3 needed) |
 | `web/wallet-cashu.spec.ts` · `wallets-ready.spec.ts` · `wallet-backups.spec.ts` | wallets ready with no setup, Cashu send/mint errors, the Lightning card, test sats; Ark and USDT recovery phrase and encrypted backup files (`@network`) |
-| `web/wallet-providers.spec.ts` | every wallet provider sending and receiving, on Testnet wallets made with New: Cashu (in over Lightning, Send and Request in the chat), Lightning (in through an invoice, out paying an invoice the test mint does not own, `@network`), Ark, Bark and USDT (in, Send from the wallet, Send and Request in the chat; gated, see below) |
+| `web/wallet-providers.spec.ts` | every wallet provider sending and receiving, on Testnet wallets made with New: Cashu (in over Lightning, Send and Request in the chat), Lightning (in through an invoice, out paying an invoice the test mint does not own), Ark, Bark and USDT (in, Send from the wallet, Send and Request in the chat; gated, see below) |
 | `web/fedimint-wallet.spec.ts` | Fedimint joins nothing on Mainnet and refuses what is not an invite code; the Lightning source form lists joined federations only; gated (`GHOSTLY_FEDIMINT_REGTEST=1`, see below): two peers join e2e/infra's federation, ecash in over the gateway, notes out and back, a Send in the chat in ecash, a request paid over the gateway's Lightning, Lightning out, both balances |
-| `web/bark-wallet.spec.ts` | Bark (Second's Ark) on Mainnet: New checks Second's server first (one that does not answer leaves nothing), and a chain on another network is refused; `@network`: a Testnet wallet on Second's signet server, and a chat offers Bark only when both sides allow it (Arkade stays separate) |
+| `web/bark-wallet.spec.ts` | Bark (Second's Ark) on Mainnet: New checks Second's server first (one that does not answer leaves nothing); `@network`: a chain on another network is refused (Second's signet servers answer for its Bitcoin ones), a Testnet wallet on Second's signet server, and a chat offers Bark only when both sides allow it (Arkade stays separate) |
 | `web/wallet-bdk.spec.ts` | the BDK wallet as the on-chain source: offered in Testnet only, a new wallet's 12 words shown once, a bad phrase or an unreachable Esplora refused before anything is saved, the chat's Bitcoin card; gated (see below): funded, a Send from the wallet, a Send and a Request paid in the chat on regtest |
 | `web/wallet-webln.spec.ts` | the browser wallet (WebLN) as the Lightning source, with `window.webln` injected by the test: no wallet, a refused connection, invoices in and payments out (reviewed in Ghostly first), a refused wallet prompt that spends nothing, a chat request paid between two browser wallets (Lightning only, reviewed in the bubble); with `GHOSTLY_WEBLN_REGTEST=1`, the same against two real regtest LND nodes (see below) |
 | `web/wallet-sources.spec.ts` | where Lightning and on-chain Bitcoin come from: a Cashu wallet's Lightning card starts on its mints, New adds another Lightning card beside it (invoices go through the card, the default moves, removing one leaves the other), each network offers only what it can run, and a Bitcoin wallet made with New and a source (Testnet only) pays on-chain. With the fake providers, no network |
@@ -202,12 +209,14 @@ Some of the specs, not all (`e2e/web/` alone has over 100). To list the tests of
 | `web/wallet-cln.spec.ts` | Core Lightning as the Lightning source (gated, `GHOSTLY_CLN_REGTEST=1`): the form with a restricted rune (never back in the page), an invoice of the node paid by the other node, an invoice of the other node paid from the card, a chat request paid from one person's node to the other's, balances on both nodes and both cards |
 | `web/wallet-lnd.spec.ts` | gated (`GHOSTLY_LND_REGTEST=1`): the LND provider against two real regtest nodes, over REST from the page: the form, invoices in and out through the Lightning card, a chat request paid, both nodes' balances |
 | `web/payment-extras.spec.ts` | with `E2E_MINT_URL`: memo and "test sats" in both bubbles, a refused payment is taken back, ecash nobody picks up can be taken back, invoice cards |
-| `web/external-wallet.spec.ts` | @network: a request paid with another wallet (QR, `lightning:` link, Copy, "I paid"; the payer pays from its own wallet page and both bubbles turn Paid by themselves), and a Lightning address served by `support/lnurl.ts` (a server in the test process on `E2E_LNURL_PORT`, 47110 by default, handing out the test mint's invoices) paid through the Cashu source, in the wallet and from a chat card |
+| `web/external-wallet.spec.ts` | a request paid with another wallet (QR, `lightning:` link, Copy, "I paid"; the payer pays from its own wallet page and both bubbles turn Paid by themselves), and a Lightning address served by `support/lnurl.ts` (a server in the test process on `E2E_LNURL_PORT`, 47110 by default, handing out the test mint's invoices) paid through the Cashu source, in the wallet and from a chat card |
 | `extension/wallet-bdk.spec.ts` | gated (`GHOSTLY_BDK_REGTEST=1`): the BDK wallet's WebAssembly in the extension's offscreen document, receiving and sending on regtest |
 | `extension/interop.spec.ts` | the extension and the web app: chat, file, video call |
 | `extension/services.spec.ts` | a local web app shared by one extension and opened by another over WebRTC, stopped, offline, gone |
 | `extension/paired-services.spec.ts` · `services-extras.spec.ts` | sharing from the chat itself; the contact opens it from Services; removed, it is gone everywhere |
 | `desktop/smoke.spec.ts` | the bundled Tauri app opens, the peer behind it is the one Rust backs, and `<html lang>`/`<html dir>` follow the language |
+| `desktop/private-bus.spec.ts` | the D-Bus session bus each Linux Desktop app under test gets activates only xdg-desktop-portal and its permission store (a call's picture needs them): on a Linux desktop it started the person's portals and their backends once per app |
+| `desktop/wayland-clipboard.spec.ts` | Linux: Join → Paste reads text a Wayland app copied, on a headless Sway of its own (the person's clipboard is never touched). Skips without `sway` and `wl-copy` |
 | `desktop/dht-direct.spec.ts` | two Desktop apps pair and go live reading the Mainline DHT directly (a DHT of their own, `support/mainlineTestnet.ts`), never reading a relay |
 | `desktop/voice.spec.ts` | voice recordings from every client play in the Desktop WebView under its Content-Security-Policy |
 | `desktop/calls.spec.ts` | two Linux Desktops (no WebRTC in WebKitGTK) go live, then call through the call window: decline, a video call with sound and pictures both ways (read from Rust and from the window's own `<video>`), mute, camera off and on, screen share off with its reason, hang up. The media runs in Rust with a test picture and tone (`GHOSTLY_FAKE_MEDIA`) |
@@ -245,11 +254,11 @@ Two things to know:
 - Build with `tauri build`, not `cargo build`. A plain cargo debug build points the WebView at `devUrl`, and with no dev server running the window only says "Connection refused". `--debug --no-bundle` keeps the compile short and skips the installers; the test runs the binary from `target/`, newest of `debug` and `release`.
 - The app runs under `GHOSTLY_PROFILE=e2e`, so a test never opens your own chats.
 
-The test needs no network either. It asserts what only the Desktop wiring can produce: Settings → Advanced → Network names Mainline DHT (BEP44) over direct UDP (`data-testid="network-protocol"`: Rust reaching the DHT, where a browser names Pkarr relays over HTTP), and sharing a local web app is offered. If `ghostlyPlatformModules()` ever swaps `src/desktop/host.ts` for a browser stand-in, this goes red.
+The test needs no network either. It asserts what only the Desktop wiring can produce: Settings → Advanced → Network names Mainline DHT (BEP44) over direct UDP (`data-testid="network-protocol"`: Rust reaching the DHT, where a browser names Pkarr relays over HTTP), and sharing a local web app is offered. If `ghostlyPlatformModules()` ever swaps `apps/ui/src/desktop/host.ts` for a browser stand-in, this goes red.
 
 ### On macOS
 
-`npm run check:desktop-bundle` runs everywhere, in a second, and catches the same class of mistake from the other end: it reads what `src/desktop/` asks of Rust and fails if it is not in `dist/`, and it fails when a module is added to `PLATFORM_MODULES` without someone writing down why Desktop can live with the stand-in. It is a build assertion, not a test, but it is what stands between a Mac and a Desktop feature that silently does nothing. CI runs it on every pull request.
+`npm run check:desktop-bundle` runs everywhere, in a second, and catches the same class of mistake from the other end: it reads what `apps/ui/src/desktop/` asks of Rust and fails if it is not in `dist/`, and it fails when a module is added to `PLATFORM_MODULES` without someone writing down why Desktop can live with the stand-in. It is a build assertion, not a test, but it is what stands between a Mac and a Desktop feature that silently does nothing. CI runs it on every pull request.
 
 A Mac can still run the Linux harness inside a Linux container: `ubuntu:22.04` (arm64 works) with the packages of
 the `Desktop (Tauri)` job, Node 22, Rust, `cargo install tauri-driver` and `xvfb`, the repository copied in (not
@@ -265,10 +274,10 @@ for a private network as much as for tests:
 
 | | |
 |---|---|
-| `GHOSTLY_PKARR_RELAYS` | comma-separated Pkarr relay URLs used instead of the Mainline DHT and the public relays, with no read budget (`src-tauri/src/pkarr_network.rs`). The matrix points it at the test's relay (`relay.listen()`), which the browsers reach by request interception |
-| `GHOSTLY_PKARR_DHT_BOOTSTRAP` | comma-separated `ip:port` nodes: join a Mainline DHT of one's own instead of the public one (`src-tauri/src/pkarr_network.rs`). `desktop/dht-direct.spec.ts` points it at `support/mainlineTestnet.ts` |
+| `GHOSTLY_PKARR_RELAYS` | comma-separated Pkarr relay URLs used instead of the Mainline DHT and the public relays, with no read budget (`apps/desktop/src/pkarr_network.rs`). The matrix points it at the test's relay (`relay.listen()`), which the browsers reach by request interception |
+| `GHOSTLY_PKARR_DHT_BOOTSTRAP` | comma-separated `ip:port` nodes: join a Mainline DHT of one's own instead of the public one (`apps/desktop/src/pkarr_network.rs`). `desktop/dht-direct.spec.ts` points it at `support/mainlineTestnet.ts` |
 | `GHOSTLY_DHT` | `0` keeps the headless CLI off the Mainline DHT (relays only); the e2e helpers and the CLI's own tests set it unless a test runs its own DHT testnet (`GHOSTLY_DHT_BOOTSTRAP`) |
-| `GHOSTLY_HYPERDHT_BOOTSTRAP` | `host:port,…` bootstrap nodes for the HyperDHT runtime instead of the public ones (`native-transports/hyperdht/sidecar.mjs`); the matrix starts `hyperdht/testnet` in the test process |
+| `GHOSTLY_HYPERDHT_BOOTSTRAP` | `host:port,…` bootstrap nodes for the HyperDHT runtime instead of the public ones (`native/transports/hyperdht/sidecar.mjs`); the matrix starts `hyperdht/testnet` in the test process |
 
 `DesktopApp` clicks, types (`type`, with `\uE007` for Enter), reads text and attributes, and runs a script in the
 page (`execute`): enough for `matrix/people.ts` to drive a chat.
@@ -285,7 +294,7 @@ npm run test:e2e:desktop-macos     # about 15 s once built
 ```
 
 - **Driving without WebDriver.** `npm run desktop:macos:build` is `tauri build --debug --bundles app --features
-  e2e-driver --config src-tauri/tauri.e2e.conf.json`. The feature compiles in `src-tauri/src/e2e_driver.rs`: an HTTP
+  e2e-driver --config apps/desktop/tauri.e2e.conf.json`. The feature compiles in `apps/desktop/src/e2e_driver.rs`: an HTTP
   server on 127.0.0.1 (only when the app starts with `GHOSTLY_E2E_DRIVER=<port>`, and only for requests carrying
   `GHOSTLY_E2E_DRIVER_TOKEN`) that runs a script in a window (`eval_with_callback`) and answers with its value. A
   release build with the feature does not compile. The same build reads an empty clipboard, never the Mac's.
@@ -299,7 +308,7 @@ npm run test:e2e:desktop-macos     # about 15 s once built
   stored (`~/Library/WebKit/<id>` and the rest) when it stops, and before it starts in case a run stopped halfway.
   The log and the files folder go by the build's identifier and are shared (`forgetSharedData()`, before and after).
   Nobody has to be at the Mac; the windows do show on its screen.
-- **Network.** The Pkarr relay, a HyperDHT testnet and the shared app ("Atlas", `extension/test/atlas.mjs`) are in
+- **Network.** The Pkarr relay, a HyperDHT testnet and the shared app ("Atlas", `apps/extension/test/atlas.mjs`) are in
   the test process on 49701-49703, the drivers on 49710-49711. The call's STUN lookups and the wallets' providers
   go out as the apps always do.
 - **Camera and microphone.** None are used. WKWebView has no fake-device flags, so the test answers
@@ -312,7 +321,7 @@ npm run test:e2e:desktop-macos     # about 15 s once built
   app's log.
 
 In CI it is a required check: `ci.yml` calls `desktop-macos.yml` (`macos-15`, about 4 minutes with the build) on
-every pull request and push (a pull request that changes only `website/` or `docs/` skips it), and CI Success needs
+every pull request and push (a pull request that changes only `apps/website/` or `docs/` skips it), and CI Success needs
 it. Pushes to `dev` save its compiled dependencies, which pull requests restore. It became one after 20 runs in a row passed on GitHub's
 runners. It also runs nightly on `dev`, and by hand with `repeat` (Actions → Desktop on macOS → Run workflow) to run
 the test that many times on one build, which is how to measure a suspected flake.
@@ -382,7 +391,7 @@ E2E_WEB_PORT=50310 E2E_COMPAT_PORT=50311 npm run test:e2e:compat  # other ports 
 ```
 
 - **The old build.** The release attaches no web build, so `scripts/build-compat-web.mjs` exports the tag with
-  `git archive` (nothing is checked out here), runs its own `npm ci` and `build:web`, and keeps `web/dist` in
+  `git archive` (nothing is checked out here), runs its own `npm ci` and `build:web`, and keeps its `web/dist` in
   `~/.cache/ghostly/compat/v0.4.0` (`E2E_COMPAT_CACHE` moves it), shared by every worktree; later runs reuse it,
   `--force` rebuilds. `--serve <port>` serves it with a small static server: the export keeps no `node_modules`.
 - **The config.** `playwright.compat.config.ts` starts both servers (the current build and v0.4.0) and hands the old
@@ -449,6 +458,19 @@ reconciliation after recipient unlock. SDK funding uses a native ESM child proce
 the seed is returned through its private pipe, not logged. This does not validate mainnet, unilateral exits or
 native/mobile payments.
 
+### First-run Mainnet wallets
+
+The apps make a new profile's Mainnet wallets by themselves (Cashu, USDT), but never in an automated browser
+(`navigator.webdriver`), the extension's `--mode e2e` build or the Desktop e2e build (bundle id `tools.ghostly.e2e`):
+every spec starts with no wallet, as before. The Linux Desktop e2e runs the real bundle id, so every Desktop launcher
+(`support/desktop.ts`, `desktopMac.ts`, `streamCheck.ts`) also sets `GHOSTLY_E2E=1`, which the app reads through Rust
+(`under_test`). `openDesktop` also checks that the WebView reports `navigator.webdriver` and fails before any test
+when it doesn't. `localStorage["ghostly-test-wallet-setup"] = "on"` (before the app
+loads, `beforeOpen` in `openPeer`) turns it on, which `web/wallet-first-run.spec.ts` does against the suite's own
+mint (`mockMainnetMints`) and a stubbed Ethereum RPC (`support/ethereum.ts`). Every `peer` also refuses the real
+Mainnet mints, Ethereum RPC and Esplora servers that got past a spec's stubs, and the automatic `mainnetGuard`
+fixture then fails the test.
+
 ### Lightning and on-chain providers
 
 `useFakeProviders(peer)` sets `localStorage["ghostly-test-providers"] = "1"` and reloads: the fake Lightning
@@ -464,7 +486,7 @@ prints a secret (macaroons, runes, URIs). See `packages/browser/src/engine/payme
 ### Bitcoin Core on regtest
 
 The Bitcoin Core source (`providers/bitcoind.ts`) is Desktop only: bitcoind's RPC answers no CORS, so the
-app reaches it through the `bitcoind_rpc` Tauri command (`src-tauri/src/bitcoind_rpc.rs`, which has Rust
+app reaches it through the `bitcoind_rpc` Tauri command (`apps/desktop/src/bitcoind_rpc.rs`, which has Rust
 tests for its method allowlist, URL and wallet-name checks, size limits and redirects). The Desktop e2e
 harness runs on Linux only, so the engine side is covered by a gated vitest against the environment's bitcoind
 instead, reaching it with `fetch` the way the command does (`GHOSTLY_BITCOIND_RPC_URL`, `_USER`, `_PASSWORD` point
@@ -591,7 +613,7 @@ build can be served on any port.
 ```bash
 npx playwright test -c e2e/playwright.config.ts --project=web e2e/web/wallet-lnd.spec.ts
 GHOSTLY_LND_REGTEST=1 npm test -w @ghostly/browser -- lndProvider     # the provider contract against Alice's node, Bob paying
-GHOSTLY_LND_REGTEST=1 cargo test --manifest-path src-tauri/Cargo.toml lnd   # the desktop command, the node's certificate pinned
+GHOSTLY_LND_REGTEST=1 cargo test --manifest-path apps/desktop/Cargo.toml lnd   # the desktop command, the node's certificate pinned
 ```
 
 Each app is given its own node's address, a macaroon baked with `info:read invoices:read invoices:write

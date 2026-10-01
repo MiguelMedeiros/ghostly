@@ -10,7 +10,7 @@ import { NothingSpentError, type ProviderHost, type ProviderNetwork, type Provid
  *  - web and extension: `fetch`. The node must allow Ghostly's origin (`restcors`) and present a certificate
  *    the browser trusts (LND's own is self-signed: a reverse proxy with a real certificate, or LND's
  *    `letsencryptdomain`).
- *  - desktop: the `lnd_request` Tauri command (src-tauri/src/lnd.rs). No CORS, and when a certificate is
+ *  - desktop: the `lnd_request` Tauri command (apps/desktop/src/lnd.rs). No CORS, and when a certificate is
  *    given it is pinned: the node must present exactly that one, whatever the address says.
  *
  * The macaroon is read before anything is contacted: one that can do more than Ghostly needs (admin, on-chain
@@ -250,7 +250,7 @@ export function fetchTransport(url: string, macaroon: string, signal?: AbortSign
 
 type Invoke = NonNullable<ProviderHost["invoke"]>;
 
-/** Desktop: Rust makes the request (src-tauri/src/lnd.rs), pinning the certificate when there is one. */
+/** Desktop: Rust makes the request (apps/desktop/src/lnd.rs), pinning the certificate when there is one. */
 export function tauriTransport(invoke: Invoke, url: string, macaroon: string, certificate?: string): LndTransport {
   let closed = false;
   return {

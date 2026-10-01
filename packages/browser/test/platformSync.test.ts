@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { ChatSession } from "../../../src/lib/types";
+import type { ChatSession } from "../../../apps/ui/src/lib/types";
 import type { LinkView, StoredMessage } from "../src/shared/types";
 // covers: chats.created-marker, chat.paired.join-notice, chat.paired.delete-message, chat.paired.storage, chat.paired.nickname-sync, chat.edit
 
@@ -44,7 +44,7 @@ await import("../src/platform/sync");
 const engine = fake.engine;
 const recordCall = engine.call;
 let sync: typeof import("../src/platform/sync");
-let storage: typeof import("../../../src/lib/storage");
+let storage: typeof import("../../../apps/ui/src/lib/storage");
 let changes: number;
 
 beforeEach(async () => {
@@ -57,7 +57,7 @@ beforeEach(async () => {
   page.addEventListener("session-updated", () => changes++);
   Object.assign(engine, { state: null, messages: new Map(), calls: [], answers: {}, stateListeners: [], messageListeners: [], call: recordCall });
   sync = await import("../src/platform/sync");
-  storage = await import("../../../src/lib/storage");
+  storage = await import("../../../apps/ui/src/lib/storage");
 }, 60_000);
 afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
 
@@ -140,6 +140,17 @@ describe("keeping links and chats in step", () => {
     await start([link({ id: "fresh", peerPubKeyZ32: "p-fresh", createdAt: 1_000_000 }), link({ id: "old", peerPubKeyZ32: "p-old", createdAt: 1 })]);
     expect(engine.calls).toEqual([["removeLink", { linkId: "old" }]]);
     await vi.advanceTimersByTimeAsync(15_000);
+    expect(engine.calls).toContainEqual(["removeLink", { linkId: "fresh" }]);
+  });
+
+  it("drops at once the link of a chat deleted here, however new: the app stops answering for it", async () => {
+    imported();
+    storage.saveSession(session({ id: "s1", peerPubKeyB64: "p-fresh" }));
+    await start([link({ id: "fresh", peerPubKeyZ32: "p-fresh", createdAt: 1_000_000 })]);
+    expect(engine.calls.filter(([m]) => m === "removeLink")).toEqual([]);
+    storage.deleteSession("s1");
+    window.dispatchEvent(new Event("session-updated"));
+    await vi.advanceTimersByTimeAsync(0);
     expect(engine.calls).toContainEqual(["removeLink", { linkId: "fresh" }]);
   });
 
@@ -237,11 +248,22 @@ describe("mirroring what the peer stores into the chat", () => {
 
     changes = 0;
     writes.mockClear();
-    const reacted = history.map((m) => (m.id === "peer_300" ? { ...m, reactions: { me: { e: "👍", n: 1, at: 5 } } } : m));
+    // An older message than the session stores (storage.ts `STORED_MESSAGES`): the engine keeps it, and so its change.
+    // Nothing to write; the chat has it.
+    const older = expected[100]!, newest = expected[599]!;
+    const reactedTo = (id: string, list: StoredMessage[]) => list.map((m) => (m.id === id ? { ...m, reactions: { me: { e: "👍", n: 1, at: 5 } } } : m));
+    let reacted = reactedTo(older, history);
+    engine.messageListeners[0]("link-1", reacted);
+    expect(sessionWrites()).toBe(0);
+    expect(changes).toBe(1);
+    expect(storage.loadSession("s1")!.messages.find((m) => m.id === older)?.reactions).toEqual({ me: { e: "👍", n: 1, at: 5 } });
+    // One of its last messages: one write.
+    changes = 0;
+    reacted = reactedTo(newest, reacted);
     engine.messageListeners[0]("link-1", reacted);
     expect(sessionWrites()).toBe(1);
     expect(changes).toBe(1);
-    expect(storage.loadSession("s1")!.messages.find((m) => m.id === "peer_300")?.reactions).toEqual({ me: { e: "👍", n: 1, at: 5 } });
+    expect(storage.loadSession("s1")!.messages.find((m) => m.id === newest)?.reactions).toEqual({ me: { e: "👍", n: 1, at: 5 } });
 
     // A message the user deleted and the peer still has: nothing to write, nothing to tell.
     changes = 0;
@@ -387,5 +409,26 @@ describe("the contact's own name", () => {
     await start([link({ createdAt: 1 })]);
     engine.messageListeners[0]("link-1", [message({ id: "peer_j", text: "👋 Casper joined" })]);
     expect(storage.loadSession("s1")!.nick).toBe("Casper");
+  });
+});
+
+describe("another page of the app", () => {
+  const stored = (key: string | null) => Object.assign(new Event("storage"), { key });
+
+  it("a chat another tab wrote tells this page's chats to read again; other keys do not", async () => {
+    imported();
+    await start([]);
+    const before = changes;
+    // The extension's second tab mirrored a message into this chat first: this page's mirror adds nothing.
+    window.dispatchEvent(stored(`${storage.getPrefix()}s1`));
+    expect(changes).toBe(before + 1);
+    // Storage cleared everywhere.
+    window.dispatchEvent(stored(null));
+    expect(changes).toBe(before + 2);
+    // A setting, another profile's chat, a key of another app: not this page's chats.
+    window.dispatchEvent(stored(`${storage.getPrefix()}app_settings`));
+    window.dispatchEvent(stored(`${storage.getPrefix()}abcdefghij_s1`));
+    window.dispatchEvent(stored("gb-sessions-imported"));
+    expect(changes).toBe(before + 2);
   });
 });

@@ -88,9 +88,15 @@ export function walletAwaiting({ network, mints, quotes, lightningOps, lightning
     const type = [...through][0];
     out.push({ type, kind: "request", amount: p.amount, paymentId: p.id, ...(type === "lightning" ? onCard(cardOf.get(p.id)) : {}) });
   }
+  // A request of ours already paid another way (ecash, another rail): its invoice is still open at the mint or the
+  // node, but nobody will pay it now, so it waits for nothing. By its id, or by the invoice when the quote names none.
+  const paid = payments.filter((p) => p.kind === "request" && p.direction === "out" && p.state === "settled");
+  const paidIds = new Set(paid.map((p) => p.id));
+  const paidInvoices = new Set(paid.filter((p) => p.invoice).map((p) => invoiceKey(p.invoice!)));
+  const answered = (x: { invoice: string }, owner: string | undefined) => (owner !== undefined && paidIds.has(owner)) || paidInvoices.has(invoiceKey(x.invoice));
   // Invoices of no open request: made on the wallet's Receive, or of a request already closed.
-  for (const q of openQuotes) { const owner = ownerOf(q); if (!owner || !requests.has(owner)) out.push({ type: "cashu", kind: "invoice", amount: q.amount, ...withOwner(owner) }); }
-  for (const op of openOps) { const owner = ownerOf(op); if (!owner || !requests.has(owner)) out.push({ type: "lightning", kind: "invoice", amount: op.amount, ...withOwner(owner), ...onCard(lightningOwner(op)) }); }
+  for (const q of openQuotes) { const owner = ownerOf(q); if ((!owner || !requests.has(owner)) && !answered(q, owner)) out.push({ type: "cashu", kind: "invoice", amount: q.amount, ...withOwner(owner) }); }
+  for (const op of openOps) { const owner = ownerOf(op); if ((!owner || !requests.has(owner)) && !answered(op, owner)) out.push({ type: "lightning", kind: "invoice", amount: op.amount, ...withOwner(owner), ...onCard(lightningOwner(op)) }); }
 
   // Ecash sent that the contact has not taken yet: only the wallet it came from can take it back.
   for (const p of payments) {
@@ -103,4 +109,18 @@ export function walletAwaiting({ network, mints, quotes, lightningOps, lightning
     if (mint && at.has(mint)) out.push({ type: "cashu", kind: "sent", amount: p.amount, paymentId: p.id });
   }
   return out;
+}
+
+/**
+ * What one Cashu mint still waits for: its invoices not paid yet, paid ones whose ecash is not claimed, and requests
+ * of ours whose invoice is one of them. A request other mints or rails can still be paid through is not counted, nor
+ * ecash sent from it (adding the mint again takes that back).
+ */
+export function mintAwaiting(mint: string, sources: Pick<AwaitingSources, "network" | "quotes" | "payments" | "now">): WalletAwaitingView[] {
+  const key = (invoice: string) => invoice.trim().toLowerCase();
+  const invoices = new Set(sources.quotes.filter((q) => q.mint === mint).map((q) => key(q.invoice)));
+  const invoiceOf = new Map(sources.payments.map((p) => [p.id, p.invoice]));
+  const ours = (a: WalletAwaitingView) => a.kind !== "request" || (!!a.paymentId && invoices.has(key(invoiceOf.get(a.paymentId) ?? "")));
+  // No Lightning source is read: an invoice in no mint's journal is not this mint's.
+  return walletAwaiting({ ...sources, mints: [mint], lightningOps: [], lightningSource: "none" }).filter((a) => a.type === "cashu" && a.kind !== "sent" && ours(a));
 }

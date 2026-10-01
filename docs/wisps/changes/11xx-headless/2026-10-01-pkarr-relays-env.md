@@ -1,0 +1,1 @@
+`GHOSTLY_PKARR_RELAYS` (the Desktop's variable) gives the headless runtime its Pkarr relays from the first publish, for a private network or a test: the profile's `relays` setting is not used while it is set, and the Mainline DHT stays off unless `GHOSTLY_DHT_BOOTSTRAP` names nodes.

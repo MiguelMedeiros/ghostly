@@ -1,0 +1,346 @@
+import { useEffect, useState } from "react";
+import { QRCodeSVG } from "qrcode.react";
+import type { Bolt11Invoice, LightningDestination } from "@ghostly/core";
+import { LightningAddressPay } from "./wallet/LightningAddressPay";
+import { lightningNetworkFor } from "./walletCardData";
+import { NetworkTag, satsIn } from "./NetworkTag";
+import { useI18n, type Translate } from "../contexts/I18nContext";
+import { ConfirmRealMoney } from "./ConfirmRealMoney";
+import { LightningPayWith, useLightningPayer } from "./LightningPayWith";
+import { useServicesPlatform } from "../hooks/useServicesPlatform";
+import type { CashuInspection } from "../lib/platform";
+import type { MoneyInText } from "../lib/money";
+import { MoneyFormatsBubble } from "./MoneyFormatsBubble";
+import { moreMoneyMethod } from "../lib/parse/money-more";
+import { formatAmount } from "../lib/amount";
+import { OpenInWallet } from "./OpenInWallet";
+import { errorText, rawError } from "../lib/errorText";
+
+const SETTLED_KEY = "ghostly_settled_money";
+
+// Which invoices and tokens this device already dealt with, so the card does not offer them again.
+function isSettled(id: string): boolean {
+  try {
+    return (JSON.parse(localStorage.getItem(SETTLED_KEY) ?? "[]") as string[]).includes(id);
+  } catch {
+    return false;
+  }
+}
+function markSettled(id: string) {
+  try {
+    const all = JSON.parse(localStorage.getItem(SETTLED_KEY) ?? "[]") as string[];
+    localStorage.setItem(SETTLED_KEY, JSON.stringify([...all.filter((entry) => entry !== id), id].slice(-200)));
+  } catch {
+    // only a convenience
+  }
+}
+
+const button =
+  "px-3 py-1.5 max-md:min-h-11 bg-accent text-on-accent rounded-lg text-xs font-bold hover:bg-accent-hover transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed";
+const quiet = "px-3 py-1.5 max-md:min-h-11 bg-black/20 hover:bg-black/30 rounded-lg text-xs font-bold transition-colors cursor-pointer inline-flex items-center";
+
+function useCopy(value: string) {
+  const [copied, setCopied] = useState(false);
+  return {
+    copied,
+    copy: async () => {
+      await navigator.clipboard.writeText(value).catch(() => {});
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    },
+  };
+}
+
+function Card({ label, tag, amount, unit, lines, qr, children, testId }: {
+  label: string;
+  /** Which money: the network's tag beside the label. */
+  tag?: React.ReactNode;
+  amount: number | null;
+  unit: string;
+  lines: (string | undefined)[];
+  qr: string;
+  children: React.ReactNode;
+  testId: string;
+}) {
+  const { t } = useI18n();
+  const [showQr, setShowQr] = useState(true);
+  return (
+    <div className="min-w-[230px] max-md:min-w-[min(230px,68vw)] max-w-[min(300px,72vw)] px-1 py-0.5" data-testid={testId}>
+      <p className="text-[11px] uppercase tracking-wider text-text-primary/65 m-0 flex items-center gap-2">{label}{tag}</p>
+      <p className="m-0 mt-0.5 leading-tight">
+        {amount === null ? (
+          <span className="text-[15px] font-semibold">{t("payments.invoice.anyAmount")}</span>
+        ) : (
+          <>
+            <span className="text-accent me-1">⚡</span>
+            <span className="text-[22px] font-semibold" data-testid="money-amount">{formatAmount(amount, t.language)}</span>
+            <span className="text-text-primary/65 text-xs ms-1">{unit === "sat" ? "sats" : unit}</span>
+          </>
+        )}
+      </p>
+      {lines.filter(Boolean).map((line) => (
+        <p key={line} className="text-[12.5px] leading-snug m-0 mt-1 wrap-break-word text-text-primary/80">{line}</p>
+      ))}
+      {showQr && (
+        <button
+          onClick={() => setShowQr(false)}
+          className="block mt-2 bg-white p-2.5 rounded-lg cursor-pointer border-none"
+          title={t("payments.invoice.hideQr")}
+        >
+          <QRCodeSVG value={qr} size={184} bgColor="#ffffff" fgColor="#0b0f1a" level="L" className="block max-w-full h-auto" />
+        </button>
+      )}
+      <div className="flex flex-wrap gap-1.5 mt-2">
+        {children}
+        {!showQr && (
+          <button className={quiet} onClick={() => setShowQr(true)}>QR</button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function relativeExpiry(t: Translate, expiresAt: number, now: number): string {
+  const left = expiresAt - now;
+  if (left <= 0) return t("payments.invoice.expired");
+  if (left < 90) return t("payments.invoice.expiresSeconds", { n: left });
+  if (left < 5400) return t("payments.invoice.expiresMinutes", { n: Math.round(left / 60) });
+  if (left < 172800) return t("payments.invoice.expiresHours", { n: Math.round(left / 3600) });
+  return t("payments.invoice.expiresDays", { n: Math.round(left / 86400) });
+}
+
+function LightningCard({ invoice, mine, off }: { invoice: Bolt11Invoice; mine: boolean; off: boolean }) {
+  const { t } = useI18n();
+  const all = useServicesPlatform()?.wallet;
+  // Paid by the Lightning wallet of the invoice's network: a test invoice never meets real money. An invoice on
+  // Bitcoin (a test mint's look the same) goes to the Mainnet wallet when there is one, else the Testnet one; the
+  // money named is that wallet's, since that is what leaves.
+  const network = lightningNetworkFor(all?.getState(), invoice.network);
+  const onNetwork = all?.forNetwork(network);
+  // The Lightning card that pays, on a network with several: the first eligible one until another is picked.
+  const lightningPayer = useLightningPayer(onNetwork, invoice.amountSat ?? undefined);
+  const wallet = lightningPayer.payer;
+  // No Lightning wallet of that network (the profile's wallets are known): said in words, nothing here pays it.
+  const known = all?.getState()?.wallets;
+  const noWallet = !!known && !known.some((w) => w.type === "lightning" && w.network === network);
+  const id = invoice.paymentHash ?? invoice.invoice.slice(-32);
+  const [paid, setPaid] = useState(() => isSettled(id));
+  // Handed to the mint, which has not settled it yet: paying again could pay twice.
+  const [pending, setPending] = useState(false);
+  const [quote, setQuote] = useState<{ quote: string; mint: string; amount: number; feeReserve: number } | null>(null);
+  /** Real money: Pay opens the second step, and only it pays. */
+  const [confirming, setConfirming] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [now, setNow] = useState(() => Math.floor(Date.now() / 1000));
+  const { copied, copy } = useCopy(invoice.invoice);
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Math.floor(Date.now() / 1000)), 15_000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const expired = invoice.expiresAt <= now;
+  const run = async (task: () => Promise<void>) => {
+    setError("");
+    setBusy(true);
+    try {
+      await task();
+    } catch (e) {
+      setError(errorText(e, t));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const pay = (payable: { quote: string; mint: string }, confirmedReal: boolean) =>
+    run(async () => {
+      try {
+        if (!(await wallet!.payQuote(payable.quote, payable.mint, undefined, confirmedReal))) {
+          // Pending at the mint: the wallet settles it, or gives the sats back, on its own.
+          setQuote(null);
+          setConfirming(false);
+          setPending(true);
+          return;
+        }
+      } catch (e) {
+        // Someone else got there first. The mint refused, so it is not paid twice, and there is nothing left to pay.
+        if (!/already paid/i.test(rawError(e))) throw e;
+      }
+      markSettled(id);
+      setPaid(true);
+    });
+
+  return (
+    <Card
+      testId="invoice-bubble"
+      label={invoice.network === "bitcoin" ? t("payments.invoice.label") : t("payments.invoice.labelNetwork", { network: invoice.network })}
+      tag={<NetworkTag network={network} testId="invoice-network" />}
+      amount={invoice.amountSat}
+      unit={satsIn(t, network)}
+      lines={[invoice.description, paid ? undefined : relativeExpiry(t, invoice.expiresAt, now), !mine && !paid && noWallet ? t(`payments.invoice.noWallet.${network}`) : undefined]}
+      qr={`lightning:${invoice.invoice}`.toUpperCase()}
+    >
+      {paid ? (
+        <span className="text-accent-hover text-xs font-bold self-center" data-testid="invoice-paid">{t("payments.invoice.paid")}</span>
+      ) : pending ? (
+        <span className="text-xs self-center text-text-primary/80" data-testid="invoice-pending">{t("payments.invoice.pendingAtMint")}</span>
+      ) : quote && confirming ? (
+        <ConfirmRealMoney what={t("payments.invoice.confirmWhat", { amount: formatAmount(quote.amount, t.language), fee: formatAmount(quote.feeReserve, t.language) })} busy={busy} onSend={() => pay(quote, true)} onBack={() => setConfirming(false)} />
+      ) : quote ? (
+        <>
+          <button className={button} disabled={busy} data-testid="invoice-confirm" onClick={() => network === "mainnet" ? setConfirming(true) : pay(quote, false)}>
+            {busy ? t("payments.invoice.paying") : t("payments.invoice.payWithFee", { amount: formatAmount(quote.amount, t.language), fee: formatAmount(quote.feeReserve, t.language) })}
+          </button>
+          <button className={quiet} disabled={busy} onClick={() => setQuote(null)}>{t("common.cancel")}</button>
+        </>
+      ) : (
+        <>
+          {wallet && !mine && !off && !expired && !noWallet && invoice.amountSat !== null && <LightningPayWith payer={lightningPayer} unit={satsIn(t, network)} disabled={busy} testId="invoice-lightning-card" />}
+          {wallet && !mine && !off && !expired && !noWallet && invoice.amountSat !== null && (
+            <button className={button} disabled={busy} data-testid="invoice-pay" onClick={() => run(async () => setQuote(await wallet.quoteInvoice(invoice.invoice)))}>
+              {busy ? t("payments.invoice.checking") : t("payments.invoice.pay")}
+            </button>
+          )}
+          <button className={quiet} onClick={copy}>{copied ? t("payments.invoice.copied") : t("common.copy")}</button>
+          {!expired && (
+            <OpenInWallet className={`${quiet} no-underline text-inherit`} uri={`lightning:${invoice.invoice}`} title={t("payments.invoice.openTitle")} testId="invoice-open-wallet">
+              {t("payments.invoice.openWallet")}
+            </OpenInWallet>
+          )}
+        </>
+      )}
+      {error && <p className="text-danger-ink text-xs m-0 basis-full">{error}</p>}
+    </Card>
+  );
+}
+
+/** A Lightning address or LNURL: resolved and paid through the Lightning source, step by step, when tapped. */
+function LightningAddressCard({ destination, mine, off }: { destination: LightningDestination; mine: boolean; off: boolean }) {
+  const { t } = useI18n();
+  const all = useServicesPlatform()?.wallet;
+  const network = lightningNetworkFor(all?.getState());
+  const lightningPayer = useLightningPayer(all?.forNetwork(network));
+  const wallet = lightningPayer.payer;
+  const [paying, setPaying] = useState(false);
+  const { copied, copy } = useCopy(destination.text);
+  return (
+    <div className="min-w-[230px] max-md:min-w-[min(230px,68vw)] max-w-[min(300px,72vw)] px-1 py-0.5" data-testid="lnurl-bubble">
+      <p className="text-[11px] uppercase tracking-wider text-text-primary/65 m-0">{destination.kind === "address" ? t("payments.invoice.lightningAddress") : "LNURL"}</p>
+      <p className="m-0 mt-0.5 leading-tight"><span className="text-accent me-1">⚡</span><span className="text-[15px] font-semibold break-all" data-testid="lnurl-text">{destination.text}</span></p>
+      <p className="text-[12.5px] leading-snug m-0 mt-1 text-text-primary/80">{t("payments.invoice.paysThrough", { domain: destination.domain })}</p>
+      {paying && wallet ? (
+        <div className="mt-2"><LightningAddressPay wallet={wallet} text={destination.text} dense onDone={() => setPaying(false)} /></div>
+      ) : (
+        <div className="flex flex-wrap gap-1.5 mt-2">
+          {wallet && !mine && !off && <LightningPayWith payer={lightningPayer} unit={satsIn(t, network)} testId="lnurl-lightning-card" />}
+          {wallet && !mine && !off && <button className={button} data-testid="lnurl-pay-open" onClick={() => setPaying(true)}>{t("payments.invoice.pay")}</button>}
+          <button className={quiet} onClick={copy}>{copied ? t("payments.invoice.copied") : t("common.copy")}</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CashuCard({ value, mine, off }: { value: string; mine: boolean; off: boolean }) {
+  const { t } = useI18n();
+  const wallet = useServicesPlatform()?.wallet;
+  const [inspection, setInspection] = useState<CashuInspection | null | undefined>(undefined);
+  const id = value.slice(-40);
+  const [redeemed, setRedeemed] = useState(() => isSettled(id));
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const { copied, copy } = useCopy(value);
+
+  useEffect(() => {
+    let alive = true;
+    (wallet ? wallet.inspectCashu(value) : Promise.resolve(null)).then((result) => alive && setInspection(result), () => alive && setInspection(null));
+    return () => {
+      alive = false;
+    };
+  }, [wallet, value]);
+
+  if (!inspection) return <span className="text-[14.2px] leading-[19px] wrap-break-word whitespace-pre-wrap">{value}</span>;
+
+  const host = (url: string) => {
+    try {
+      return new URL(url).hostname;
+    } catch {
+      return url;
+    }
+  };
+
+  if (inspection.kind === "request") {
+    return (
+      <Card
+        testId="cashu-request-bubble"
+        label={t("payments.invoice.ecashRequest")}
+        amount={inspection.amount}
+        unit={inspection.unit}
+        lines={[inspection.description, inspection.mints.length > 0 ? t("payments.invoice.mints", { mints: inspection.mints.map(host).join(", ") }) : undefined]}
+        qr={value}
+      >
+        <button className={quiet} onClick={copy}>{copied ? t("payments.invoice.copied") : t("common.copy")}</button>
+      </Card>
+    );
+  }
+
+  return (
+    <Card
+      testId="cashu-token-bubble"
+      label={t("payments.invoice.ecashToken")}
+      amount={inspection.amount}
+      unit={inspection.unit}
+      lines={[inspection.memo, t("payments.invoice.mint", { mint: host(inspection.mint) }), !inspection.accepted && !mine ? t("payments.invoice.mintNotAdded") : undefined]}
+      qr={value}
+    >
+      {redeemed ? (
+        <span className="text-accent-hover text-xs font-bold self-center" data-testid="token-redeemed">{t("payments.invoice.redeemed")}</span>
+      ) : (
+        wallet && !mine && !off && inspection.accepted && (
+          <button
+            className={button}
+            disabled={busy}
+            data-testid="token-redeem"
+            onClick={async () => {
+              setError("");
+              setBusy(true);
+              try {
+                await wallet.receiveToken(value);
+                markSettled(id);
+                setRedeemed(true);
+              } catch (e) {
+                setError(errorText(e, t));
+              } finally {
+                setBusy(false);
+              }
+            }}
+          >
+            {busy ? t("payments.invoice.redeeming") : t("payments.invoice.redeem")}
+          </button>
+        )
+      )}
+      <button className={quiet} onClick={copy}>{copied ? t("payments.invoice.copied") : t("common.copy")}</button>
+      {error && <p className="text-danger-ink text-xs m-0 basis-full">{error}</p>}
+    </Card>
+  );
+}
+
+/** Brand names stay as they are; on-chain Bitcoin is said in the app's language. */
+const METHOD_NAME = { cashu: "Cashu", lightning: "Lightning", arkade: "Ark", bark: "Bark", usdt: "USDT" } as const;
+
+/** Money pasted into the chat, shown as something a person can read and act on. */
+/** `peerPubKey`: the chat it is in, whose choice of ways of paying decides whether it can be paid or redeemed here. */
+export function InvoiceBubble({ money, mine, peerPubKey }: { money: MoneyInText; mine: boolean; peerPubKey?: string }) {
+  const { t } = useI18n();
+  const allowed = useServicesPlatform()?.getPeer(peerPubKey ?? "")?.paymentMethods;
+  const method = money.type === "cashu" ? "cashu" : money.type === "lightning" || money.type === "lnurl" ? "lightning" : moreMoneyMethod(money);
+  const off = !!allowed && !allowed[method];
+  return (
+    <>
+      {money.rest && <p className="text-[14.2px] leading-[19px] wrap-break-word whitespace-pre-wrap m-0 mb-1.5">{money.rest}</p>}
+      {money.type === "lightning" ? <LightningCard invoice={money.invoice} mine={mine} off={off} /> : money.type === "lnurl" ? <LightningAddressCard destination={money.destination} mine={mine} off={off} /> : money.type === "cashu" ? <CashuCard value={money.value} mine={mine} off={off} />
+        : <MoneyFormatsBubble money={money} mine={mine} off={off} renderLightning={(invoice) => <LightningCard invoice={invoice} mine={mine} off={!!allowed && !allowed.lightning} />} />}
+      {off && !mine && <p className="text-[11px] text-text-primary/65 mt-1" data-testid="money-off">{t("payments.invoice.methodOff", { method: method === "bitcoin" ? t("payments.invoice.onchainBitcoin") : METHOD_NAME[method] })}</p>}
+    </>
+  );
+}

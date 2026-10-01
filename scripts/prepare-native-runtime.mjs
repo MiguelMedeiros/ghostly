@@ -1,8 +1,8 @@
 import { cp, copyFile, mkdir, chmod, rm } from 'node:fs/promises'
 import { execFileSync } from 'node:child_process'
 import { resolve } from 'node:path'
-const source = resolve('native-transports/hyperdht')
-const target = resolve('src-tauri/native-runtime')
+const source = resolve('native/transports/hyperdht')
+const target = resolve('apps/desktop/native-runtime')
 // Reproducible dependency graph; runtime matches the architecture building the
 // desktop app. Cross compilation must provide a matching runtime separately.
 // Node refuses to start a .cmd without a shell on Windows (EINVAL since its CVE-2024-27980 fix); the arguments are

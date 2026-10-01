@@ -75,11 +75,11 @@ ghostly1pqqqsyqcyq5rqwzqfpg9scrgwpugpzysnzs23v9ccrydpk8qarc0jqgfzyvjz2f389q5j52e
 
 **What the joiner does with it.** It stores the fields and a fresh participation key, then starts both first contacts at once: the first-contact envelope on the DHT ([403](403-dht-text.md#first-contact)) with its capability record ([03](03-capabilities.md#layer-0-capability-record)), and a stream attempt ([100](100-transports.md)). It also pins the inviter's participation key from the code before either path answers, so an answer signed by any other key, from someone else holding a copy of the invite, is a security rejection.
 
-A copied invitation is a bearer capability; hiding a saved invite after a message does not invalidate other copies. Participation keys are authenticated and durably pinned; possession of an invite can still compete for first admission, and comparing the displayed code verifies the pin separately. Reconnect uses the stored relationship and fresh session context.
+A copied invitation is a bearer capability; hiding a saved invite after a message does not invalidate other copies. Participation keys are authenticated and durably pinned; possession of an invite can still compete for first admission, and comparing the displayed code verifies the pin separately. A joiner that lost that race learns it from the inviter's envelope in the invite mailbox: its hint names the inviter, but it is sealed to another participation key ([403](403-dht-text.md)). The joiner's pairing then ends `failed` with the reason `taken`, and its texts are refused rather than published for nobody. The hint is sealed under a key any copy of the invite derives, so this is a passive state, never a security stop: an envelope of the inviter's that opens for the joiner, newer than the last it read, takes it back. Reconnect uses the stored relationship and fresh session context.
 
 ## Reading an invite
 
-A current app reads an invite by these rules, in order. It never guesses: a code is one format or it is refused with a reason, and nothing is stored for a refused code.
+A current app reads an invite by these rules, in order. It never guesses: a code is one format or it is refused with a reason, and nothing is stored for a refused code. A refused input that ends in `.`, `,`, `)` or `!` (an invite copied from the end of a sentence) is read once more without them, and taken only when that reads; otherwise the first refusal stands.
 
 1. Trim it. If it contains `#`, keep what follows the last `#`; then drop a leading `chat/` or `/chat/` (the earlier rule, so every link form ever shared still reads).
 2. If it starts with `ghostly1` in any case, it is a bech32m invite:
@@ -109,7 +109,7 @@ A refused code MUST NOT be retried as another format: a `ghostly1` string with a
 **Older apps reading a `ghostly1…` code** (checked against the v0.4.0 source):
 
 - The core decoder of 0.4 ([invite.ts at v0.4.0](https://github.com/MiguelMedeiros/ghostly/blob/v0.4.0/packages/core/src/invite.ts)) strips everything up to `#` and a leading `chat/`, then requires exactly three `/`-separated parts. A bech32m string has no `/`: one part, refused as invalid.
-- The app's own parser of 0.4 (`parseInvite` in `src/lib/url.ts`) only takes a link whose fragment starts with `/chat/`, or three `/`-separated parts. The bare string is one part; the link `https://ghostly.tools/#ghostly1…` splits into four. Both refused.
+- The app's own parser of 0.4 (`parseInvite` in `apps/ui/src/lib/url.ts`) only takes a link whose fragment starts with `/chat/`, or three `/`-separated parts. The bare string is one part; the link `https://ghostly.tools/#ghostly1…` splits into four. Both refused.
 - The 0.4 CLI reads only its own `ghost://` URLs and refuses anything else.
 
 So an old app shows its generic invalid-code message and creates nothing: no broken compatibility chat, no half-joined record. It cannot say "update"; only apps that implement the rules above can, which is why they are written now.

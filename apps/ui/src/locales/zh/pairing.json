@@ -1,0 +1,65 @@
+{
+  "attempt": "第 {{n}} 次尝试",
+  "contact": "你的联系人",
+  "done": "已完成",
+  "elapsed": "此步骤已用 {{time}}",
+  "indicator": "配对 · {{stage}}",
+  "newInvite": "请联系人给你一个新的邀请。",
+  "onDht": {
+    "chosen": "此聊天选择了仅 DHT。",
+    "noCommonTransport": "你们的应用没有共同的直连方式。短文本通过 DHT 传递。",
+    "transport": "暂时无法建立直连。正在后台重试。",
+    "waiting": "正在后台尝试直接连接。"
+  },
+  "reason": {
+    "expired": "此邀请已过期。",
+    "keyMismatch": "该联系人的密钥与已保存的不一致。没有接受任何数据。",
+    "offline": "你处于离线状态。恢复在线后配对会继续。",
+    "publish": "无法把邀请发布到网络。请检查你的网络连接。",
+    "rejected": "联系人的应用拒绝了连接。",
+    "resolve": "在网络上找不到该邀请。它可能已过时或复制有误。",
+    "taken": "已有其他人先用这个邀请加入了。请向你的联系人要一个新的邀请。",
+    "timeout": "联系人的应用没有及时回应。",
+    "transport": "无法在你们的设备之间建立直接连接。",
+    "unknown": "连接时出现问题。"
+  },
+  "retry": "重试",
+  "retrying": "正在重试…",
+  "sayHello": "现在可以聊天了。打个招呼吧！",
+  "showProgress": "显示配对进度",
+  "slow": {
+    "answering": "仍在与联系人交换密钥…",
+    "connecting": "仍在建立直接连接。受限网络可能需要更长时间。",
+    "knocking": "联系人的应用还没有回应，可能已关闭或离线。",
+    "publishing": "仍在发布你的邀请，网络响应较慢。",
+    "resolving": "仍在网络上寻找你的联系人…",
+    "waiting": "联系人还没有打开邀请。邀请仍然有效，你可以再次分享。"
+  },
+  "stage": {
+    "answeringInviter": "联系人敲门了。正在回应…",
+    "answeringJoiner": "联系人正在回应…",
+    "connecting": "正在建立直接的加密连接…",
+    "contactSeen": "联系人已打开邀请。正在连接…",
+    "failed": "无法连接",
+    "knocking": "正在敲联系人的门…",
+    "live": "已连接",
+    "onDht": "在 DHT 上。现在就可以聊天；正在尝试直接连接",
+    "publishing": "正在把你的邀请发布到网络…",
+    "resolving": "正在网络上查找邀请…",
+    "waiting": "正在等待联系人打开邀请"
+  },
+  "step": {
+    "answering": "回应",
+    "connecting": "连接",
+    "failed": "失败",
+    "knocking": "敲门",
+    "live": "在线",
+    "onDht": "在 DHT 上 · 正在重试直连",
+    "publishing": "发布",
+    "resolving": "查找",
+    "waiting": "等待"
+  },
+  "stepOf": "第 {{n}} 步，共 {{total}} 步",
+  "steps": "配对步骤",
+  "you": "你"
+}

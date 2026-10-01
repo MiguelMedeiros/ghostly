@@ -61,6 +61,13 @@ test("a proof in its last days puts a dot on Identities, in the bar and in the p
   await expect(page.getByRole("heading", { name: "Identities" })).toBeVisible();
   await page.getByTestId("identities-new").click();
   const add = page.getByTestId("add-identity");
+  // A sheet from the bottom edge, as New wallet is: not a card whose last 16 px sit over the tab bar.
+  await expect(async () => {
+    const [sheet, bar, height] = await Promise.all([add.boundingBox(), page.getByTestId("mobile-tabs").boundingBox(), page.evaluate(() => innerHeight)]);
+    expect(Math.round(sheet!.y + sheet!.height)).toBe(height);
+    expect(sheet!.width).toBe(page.viewportSize()!.width);
+    expect(sheet!.y + sheet!.height).toBeGreaterThanOrEqual(bar!.y + bar!.height);
+  }).toPass({ timeout: 10_000 });
   await add.getByTestId("add-identity-nostr").click();
   await choose(add.getByTestId("add-identity-validity"), "7");
   await add.getByTestId("add-identity-start").click();
@@ -86,4 +93,17 @@ test("a proof in its last days puts a dot on Identities, in the bar and in the p
   await page.getByTestId("identity-proof-remove-confirm").click();
   await expect(page.getByTestId("identity-proof")).toHaveCount(0);
   await expect(page.getByTestId("identities-attention")).toHaveCount(0);
+});
+
+test("the Ghostly card's lines are whole in every language, none cut to an ellipsis", { tag: ["@feature:proofs.page", "@feature:app.i18n"] }, async ({ peer }) => {
+  const { page } = await peer("idpage-languages");
+  for (const language of ["en", "pt", "es", "fr", "it", "zh", "ja", "ar"]) {
+    await page.goto("/#/settings");
+    await choose(page.getByTestId("settings-language"), language);
+    await page.goto("/#/identities");
+    const fields = page.locator(".id-card-face").first().locator(".id-card-field");
+    await expect(fields.first()).toBeVisible();
+    const cut = await fields.evaluateAll((all) => all.filter((f) => f.scrollWidth > f.clientWidth + 1).map((f) => f.textContent));
+    expect(cut, `${language}: lines cut on the card`).toEqual([]);
+  }
 });

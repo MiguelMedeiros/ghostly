@@ -1,0 +1,40 @@
+{
+  "account": "Cuenta",
+  "chats": "Chats",
+  "copyInvite": "Copiar código de invitación",
+  "deleteAllChats": "Eliminar todos los chats",
+  "deleteChat": "Eliminar chat",
+  "group": {
+    "adminAnswered": "La app del admin respondió…",
+    "answerFailed": "No se pudo. Inténtalo de nuevo.",
+    "invitedBy": "Invitado por {{contact}} · {{members}}",
+    "invitedByUnknown": "Invitado por un contacto · {{members}}",
+    "inviterAway": "{{contact}} aún no está conectado. Inténtalo de nuevo en un momento.",
+    "inviterAwayUnknown": "El contacto que te invitó aún no está conectado. Inténtalo de nuevo en un momento.",
+    "letting": "Un miembro te está dejando entrar…",
+    "waitingAdmin": "Esperando la app del admin…",
+    "waitingIn": "Esperando a que te dejen entrar…"
+  },
+  "join": "Unirse",
+  "joinChat": "Unirse a un chat",
+  "new": "Nuevo",
+  "newChat": "Nuevo Chat",
+  "newMenu": {
+    "chat": "Chat",
+    "chatHint": "Una persona, con una invitación",
+    "group": "Grupo",
+    "groupHint": "Un enlace que cualquiera puede abrir",
+    "label": "Crear un grupo o un chat"
+  },
+  "noChats": "Sin chats aún",
+  "noResults": "No hay resultados",
+  "pinned": "Fijado",
+  "quiet": "Hay silencio por aquí...",
+  "quietHint": "¡Hora de asustar a alguien! 👻",
+  "searchPlaceholder": "Buscar chats...",
+  "settings": "Configuración",
+  "sharedIdentity": "Compartió una identidad",
+  "skipToContent": "Saltar al contenido",
+  "startChat": "Nuevo chat",
+  "unread": "Mensajes sin leer"
+}

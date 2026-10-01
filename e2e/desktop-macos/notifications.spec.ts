@@ -10,7 +10,7 @@ import { forgetSharedData, openMacDesktop, type MacDesktop } from "../support/de
  * is offered, and a notification call is answered (without the permission it shows nothing).
  *
  * Nothing here asks macOS for the permission: that opens a dialog for the person at the Mac. How Settings shows a
- * refusal is in src/test/app/systemNotifications.test.tsx (the page cannot fake one here: Tauri's `invoke` cannot
+ * refusal is in apps/ui/src/test/app/systemNotifications.test.tsx (the page cannot fake one here: Tauri's `invoke` cannot
  * be redefined). The banner itself, and a click on it opening its chat, are checked by hand.
  *
  *   npm run desktop:macos:build

@@ -47,6 +47,8 @@ export class MemoryPkarr {
   readsByKey = new Map<string, number>();
   /** Publishes per key. */
   publishesByKey = new Map<string, number>();
+  /** Keys whose reads find nothing while listed: a reader whose last look came just before the packet did. */
+  unseen = new Set<string>();
   constructor(private readonly model: NetworkModel) {}
 
   transport(): PkarrTransport {
@@ -65,7 +67,7 @@ export class MemoryPkarr {
         if (options?.background) this.readsBackground++;
         await after(this.model.readMs);
         const entry = this.packets.get(key);
-        return entry && entry.visibleAt <= Date.now() ? entry.packet : null;
+        return entry && entry.visibleAt <= Date.now() && !this.unseen.has(key) ? entry.packet : null;
       },
       describe: () => ({ protocol: "memory", relays: [] }),
     };
@@ -162,9 +164,10 @@ export function fakePeerConnection(owner?: string): RTCPeerConnection {
 }
 /**
  * The app `owner` ends with nothing said: its connections go dead. The contact's side sees its connection
- * `disconnected` once ICE consent checks stop being answered, `disconnectedAfterMs` later.
+ * `disconnected` once ICE consent checks stop being answered, `disconnectedAfterMs` later. `farFailsAfterMs`: it never
+ * does (node-datachannel, the CLI's WebRTC, reports no `disconnected`), and its connection goes `failed` this long after.
  */
-export function killRtc(owner: string, disconnectedAfterMs = 5_000): void {
+export function killRtc(owner: string, disconnectedAfterMs = 5_000, farFailsAfterMs?: number): void {
   for (const pc of [...peerConnections]) {
     if (pc.owner !== owner || pc.closed) continue;
     peerConnections.delete(pc);
@@ -174,9 +177,9 @@ export function killRtc(owner: string, disconnectedAfterMs = 5_000): void {
     const farPc = [...peerConnections].find(other => other.channel === far);
     if (farPc) setTimeout(() => {
       if (farPc.closed) return;
-      farPc.connectionState = "disconnected";
+      farPc.connectionState = farFailsAfterMs === undefined ? "disconnected" : "failed";
       farPc.dispatchEvent(new Event("connectionstatechange"));
-    }, disconnectedAfterMs);
+    }, farFailsAfterMs ?? disconnectedAfterMs);
   }
 }
 

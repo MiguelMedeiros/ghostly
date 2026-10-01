@@ -149,6 +149,13 @@ test("a chat's row is two lines, the key in its tooltip, the pin and delete butt
 
 test("a row mutes and unmutes its chat without opening it, and its marks keep room between them", { tag: ["@feature:chats.list.rows", "@feature:chats.mute", "@feature:chats.list.pin"] }, async ({ peer }, testInfo) => {
   const { page } = await peer("row-mute", { viewport: { width: 1100, height: 800 } });
+  // Half an hour before the next midnight, whatever the time is (only ever forward): the hour's mute ends tomorrow,
+  // and the bell says the day too. This spec used to pass only before 23:00. A same-day end is the unit tests'.
+  const late = new Date();
+  if (late.getHours() === 23 && late.getMinutes() >= 30) late.setDate(late.getDate() + 1);
+  late.setHours(23, 30, 0, 0);
+  await page.clock.setFixedTime(late);
+  const end = new Date(late.getTime() + 60 * 60_000).toLocaleString("en", { weekday: "short", hour: "numeric", minute: "2-digit" });
   await page.getByRole("button", { name: "New chat", exact: true }).click();
   const row = rows(page).first();
   await expect(row).toBeVisible();
@@ -207,7 +214,8 @@ test("a row mutes and unmutes its chat without opening it, and its marks keep ro
   await page.keyboard.press("Shift+Tab");
   await expect(bell).toBeFocused();
   await expect(actions).toHaveCSS("opacity", "1");
-  await expect(bell).toHaveAccessibleName(/^Notifications muted until \d{1,2}:\d{2}/);
+  // Any space: Node's ICU and the browser's may put a narrow one before AM.
+  await expect(bell).toHaveAccessibleName(new RegExp(`^Notifications muted until ${end.replace(/\s/g, "\\s")}$`));
   await page.keyboard.press("Enter");
   await expect(menu.getByTestId("mute-off")).toBeFocused();
   await page.keyboard.press("Enter");

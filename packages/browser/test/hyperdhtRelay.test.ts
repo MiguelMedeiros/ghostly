@@ -5,8 +5,8 @@ import { createRelayedHyperEndpoint, hyperKeyPair, relayUrlProblem } from "../sr
 // covers: transport.hyperdht-relay, transport.hyperdht, transport.relayed
 
 /**
- * A browser's HyperDHT through a real dht-relay (native-transports/hyperdht-relay) on a HyperDHT network of
- * its own, against the Desktop's own endpoint (native-transports/hyperdht/endpoint.mjs) and against another
+ * A browser's HyperDHT through a real dht-relay (services/hyperdht-relay) on a HyperDHT network of
+ * its own, against the Desktop's own endpoint (native/transports/hyperdht/endpoint.mjs) and against another
  * browser. Node's WebSocket stands in for the browser's; the real browser build runs in e2e/web.
  */
 
@@ -36,7 +36,7 @@ async function web(url = relay.url, seedB64 = seed()) {
   return endpoint;
 }
 async function desktop() {
-  const { createHyperEndpoint } = await import("../../../native-transports/hyperdht/endpoint.mjs");
+  const { createHyperEndpoint } = await import("../../../native/transports/hyperdht/endpoint.mjs");
   const bootstrap = relay.bootstrap.map(node => { const [host, port] = node.split(":"); return { host, port: Number(port) }; });
   const endpoint = await createHyperEndpoint(crypto.getRandomValues(new Uint8Array(32)), { bootstrap, host: "127.0.0.1" }) as NativeEndpoint;
   opened.push(endpoint);
@@ -50,7 +50,7 @@ const contains = (haystack: Uint8Array[], needle: Uint8Array) => {
 };
 
 beforeAll(async () => {
-  const { startRelay } = await import("../../../native-transports/hyperdht-relay/relay.mjs");
+  const { startRelay } = await import("../../../services/hyperdht-relay/relay.mjs");
   relay = await startRelay({ testnet: 3 });
 }, 60_000);
 afterAll(async () => {
@@ -124,6 +124,35 @@ it("connects two browsers through relays, on one relay connection each or shared
   dialled.channel.close(); second.channel.close();
 }, 60_000);
 
+it("reaches the same contact again through one relay, and again after both pages reload", async () => {
+  // The relay's HyperDHT remembers the nodes that carried the first connection to a key, so every later dial sends
+  // its handshake through several at once and gets several replies: dht-relay 0.4.3 hung the dial on the second.
+  const { startRelay } = await import("../../../services/hyperdht-relay/relay.mjs");
+  const own = await startRelay({ testnet: 3 });
+  // On its own loopback network the relay's node is reachable from the start, not after dht-rpc's 20 minute check.
+  expect(own.dht.firewalled).toBe(false);
+  const seeds = [seed(), seed()];
+  const open = () => Promise.all([createRelayedHyperEndpoint(seeds[0], own.url), createRelayedHyperEndpoint(seeds[1], own.url.replace("127.0.0.1", "localhost"))]);
+  const dial = async (from: NativeEndpoint, to: NativeEndpoint) => {
+    const accepted = incoming(to);
+    const dialled = await from.connect(to.descriptor);
+    expect((await accepted).binding).toEqual(dialled.binding);
+    dialled.channel.close();
+  };
+  let [a, b] = await open();
+  try {
+    for (let round = 0; round < 3; round++) await dial(b, a);
+    await dial(a, b);
+    // A reload: both pages' relay connections close, and the same chats listen again on new ones.
+    await Promise.all([a.close(), b.close()]);
+    [a, b] = await open();
+    await dial(b, a);
+  } finally {
+    await Promise.allSettled([a.close(), b.close()]);
+    await own.close();
+  }
+}, 60_000);
+
 it("refuses a malformed descriptor and oversized frames", async () => {
   const [a, b] = [await web(), await web()];
   await expect(a.connect({ publicKey: "zz" })).rejects.toThrow(/Invalid HyperDHT endpoint/);
@@ -141,7 +170,7 @@ it("fails to start, and so is not offered, when the relay cannot be reached", as
 });
 
 it("says it is unavailable when the relay goes away", async () => {
-  const { startRelay } = await import("../../../native-transports/hyperdht-relay/relay.mjs");
+  const { startRelay } = await import("../../../services/hyperdht-relay/relay.mjs");
   const own = await startRelay({ testnet: 2 });
   const endpoint = await createRelayedHyperEndpoint(seed(), own.url);
   const gone = vi.fn();
@@ -152,7 +181,7 @@ it("says it is unavailable when the relay goes away", async () => {
 }, 60_000);
 
 it("drops a client past its listen budget and refuses topic queries, and keeps serving the others", async () => {
-  const { startRelay } = await import("../../../native-transports/hyperdht-relay/relay.mjs");
+  const { startRelay } = await import("../../../services/hyperdht-relay/relay.mjs");
   const own = await startRelay({ testnet: 2, limits: { listens: 2 } });
   const endpoints = [await createRelayedHyperEndpoint(seed(), own.url), await createRelayedHyperEndpoint(seed(), own.url)];
   const gone = vi.fn();

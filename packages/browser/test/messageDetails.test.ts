@@ -133,6 +133,7 @@ describe("a file with files/3", () => {
     t.node.sendFile({ linkId: t.id, file, timestamp: 5 });
     await vi.waitFor(() => expect(t.node.getState().transfers[file.id]).toMatchObject({ state: "done" }), { timeout: 30_000 });
     await vi.waitFor(async () => expect((await t.messages()).find(m => m.file?.id === file.id)?.details?.completedAt).toBeDefined());
+    await vi.waitFor(async () => expect((await t.messages()).find(m => m.file?.id === file.id)?.delivery).toBeDefined());
     const message = (await t.messages()).find(m => m.file?.id === file.id)!;
     expect(message.details).toMatchObject({
       attempts: 1,
@@ -140,8 +141,10 @@ describe("a file with files/3", () => {
       wire: { frame: "pf-offer + pf-data", protocol: "files/3", plaintextBytes: size, chunks: Math.ceil(size / 16_384), chunkBytes: 16_384 },
     });
     expect(message.details!.receiptAt).toBe(message.details!.completedAt);
+    // The contact's app stored it and said so: two ticks, as a text gets from its receipt.
+    expect(message.delivery).toBe("delivered");
     const view = (await t.node.messageDetails({ linkId: t.id, messageId: message.id }))!;
-    expect(view.message.kind).toBe("file");
+    expect(view.message).toMatchObject({ kind: "file", delivery: "delivered" });
     expect(view.file).toMatchObject({ name: "haunted house.bin", size, mime: "application/octet-stream", protocol: "files/3", state: "done", confirmed: size, storage: "blob" });
     expect(view.file!.digest).toMatch(/^[a-f0-9]{64}$|^[A-Za-z0-9_-]{43}$/);
   }, 40_000);

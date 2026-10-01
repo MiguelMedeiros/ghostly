@@ -38,21 +38,21 @@ export default tseslint.config(
     // A context file is a provider and the hook that reads it, together on
     // purpose. Fast refresh cannot hot-reload that, and splitting every context
     // in two to please it costs more than it is worth.
-    files: ["src/contexts/**/*.tsx"],
+    files: ["apps/ui/src/contexts/**/*.tsx"],
     rules: { "react-refresh/only-export-components": "off" },
   },
   {
     // One look and one keyboard for every choice in the app: components/ui/Select.tsx, never a native <select>
     // (WebKit draws it with the system's gradient and double chevron, and its list ignores the app's theme).
-    files: ["src/**/*.tsx"],
-    ignores: ["src/test/**"],
+    files: ["apps/ui/src/**/*.tsx"],
+    ignores: ["apps/ui/src/test/**"],
     rules: {
-      "no-restricted-syntax": ["error", { selector: "JSXOpeningElement[name.name='select']", message: "Use Select from src/components/ui/Select.tsx." }],
+      "no-restricted-syntax": ["error", { selector: "JSXOpeningElement[name.name='select']", message: "Use Select from apps/ui/src/components/ui/Select.tsx." }],
     },
   },
   {
     // Component tests and their harness are never hot-reloaded.
-    files: ["src/test/**/*.{ts,tsx}", "packages/react/test/**/*.{ts,tsx}"],
+    files: ["apps/ui/src/test/**/*.{ts,tsx}", "packages/react/test/**/*.{ts,tsx}"],
     rules: { "react-refresh/only-export-components": "off" },
   },
   {

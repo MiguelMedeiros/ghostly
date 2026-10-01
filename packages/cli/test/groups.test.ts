@@ -53,6 +53,12 @@ describe("a group message names its author", () => {
     expect(groupMessageJson(message("d", { member: "gone" }), undefined).nick).toBeNull();
   });
 
+  it("by the name the group knew them by, once they are out of the roster (removed, or back with a new key)", () => {
+    const after = { ...group, formerNames: { oldkey: "Carol" } } as GroupView;
+    expect(groupMessageJson(message("e", { member: "oldkey" }), after)).toMatchObject({ nick: "Carol", member: "oldkey" });
+    expect(groupMessageJson(message("f", { member: "gone" }), after).nick).toBeNull();
+  });
+
   it("in group history", async () => {
     const { ctx } = fake([message("a", { member: "anakey" }), message("b", { member: "bokey", timestamp: 2 })]);
     const page = await callApi(ctx, "group.history", { group: "Crew" }) as { messages: { id: string; nick: string | null; member: string }[] };

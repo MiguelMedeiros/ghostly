@@ -1,0 +1,29 @@
+{
+  "applyHint": "Updating ends your calls and connections.",
+  "auto": "Check for updates automatically",
+  "autoDescription": "Off: only when you press Check now",
+  "available": "Ghostly {{version}} is available",
+  "checkNow": "Check now",
+  "checking": "Checking...",
+  "download": "Download",
+  "downloading": "Downloading... {{percent}}%",
+  "errorDetails": "What the updater said",
+  "failed": "Could not check for updates",
+  "installing": "Updating...",
+  "lastChecked": "Last checked at {{when}}",
+  "later": "Later",
+  "manualHint": "Download it and replace this install.",
+  "reload": "Reload",
+  "restart": "Update and restart",
+  "title": "Updates",
+  "upToDate": "Ghostly is up to date",
+  "why": {
+    "noRelease": "The update server gave no release information. Try again later.",
+    "notForThisSystem": "The latest release has no update for this system yet.",
+    "offline": "This device is offline.",
+    "signature": "The update's signature did not check out, so it was not used.",
+    "timeout": "The update server took too long to answer.",
+    "unknown": "Something went wrong while checking.",
+    "unreachable": "The update server could not be reached. Check your connection."
+  }
+}

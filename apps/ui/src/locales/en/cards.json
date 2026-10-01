@@ -1,0 +1,77 @@
+{
+  "buttons": {
+    "answers": "Answers",
+    "chosen": "Chosen",
+    "closed": "Closed",
+    "failed": "Couldn't send",
+    "jump": "Go to the question",
+    "sending": "Sending…"
+  },
+  "panel": {
+    "activeCount": "{{count}} active",
+    "allOk": "all OK",
+    "button": "Tasks",
+    "buttonCount": "Tasks, {{count}} active",
+    "close": "Close",
+    "empty": "No tasks running now",
+    "failedCount": "{{count}} failed",
+    "finishedCount": "Finished ({{count}})",
+    "idle": "Nothing running",
+    "info": "Bots post these cards and keep them up to date. Tap one to go to it in the chat.",
+    "nextRun": "next {{when}}",
+    "routinesMany": "{{count}} routines",
+    "routinesOne": "1 routine",
+    "title": "Tasks"
+  },
+  "routine": {
+    "cron": "Cron",
+    "label": "Routine: {{name}}, {{state}}",
+    "lastRun": "Last run: {{result}}",
+    "next": "Next {{when}}",
+    "noRuns": "No runs yet",
+    "result": {
+      "failed": "Failed",
+      "ok": "OK",
+      "skipped": "Skipped"
+    },
+    "runs": "Recent runs",
+    "schedule": "Schedule",
+    "state": {
+      "active": "Active",
+      "paused": "Paused"
+    }
+  },
+  "task": {
+    "branch": "Branch:",
+    "elapsed": {
+      "blocked": "blocked for {{duration}}",
+      "queued": "queued for {{duration}}",
+      "running": "running for {{duration}}",
+      "took": "took {{duration}}"
+    },
+    "item": {
+      "done": "Done",
+      "failed": "Failed",
+      "pending": "To do",
+      "running": "In progress",
+      "skipped": "Skipped"
+    },
+    "label": "Task: {{title}}, {{status}}",
+    "labelProgress": "Task: {{title}}, {{status}}, {{progress}}%",
+    "now": "Now:",
+    "pr": "PR #{{number}}",
+    "prNoNumber": "Pull request",
+    "progress": "Progress",
+    "started": "Started {{ago}}",
+    "status": {
+      "blocked": "Blocked",
+      "cancelled": "Cancelled",
+      "done": "Done",
+      "failed": "Failed",
+      "queued": "Queued",
+      "running": "Running"
+    },
+    "steps": "{{done}} of {{total}} steps",
+    "updated": "updated {{ago}}"
+  }
+}

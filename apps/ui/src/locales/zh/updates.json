@@ -1,0 +1,29 @@
+{
+  "applyHint": "更新会结束当前的通话和连接。",
+  "auto": "自动检查更新",
+  "autoDescription": "关闭:仅在你点击“立即检查”时检查",
+  "available": "Ghostly {{version}} 已发布",
+  "checkNow": "立即检查",
+  "checking": "正在检查...",
+  "download": "下载",
+  "downloading": "正在下载... {{percent}}%",
+  "errorDetails": "更新程序的返回信息",
+  "failed": "无法检查更新",
+  "installing": "正在更新...",
+  "lastChecked": "上次检查于 {{when}}",
+  "later": "稍后",
+  "manualHint": "下载后替换当前安装。",
+  "reload": "重新加载",
+  "restart": "更新并重启",
+  "title": "更新",
+  "upToDate": "Ghostly 已是最新版本",
+  "why": {
+    "noRelease": "更新服务器没有提供版本信息。请稍后再试。",
+    "notForThisSystem": "最新版本尚未提供适用于此系统的更新。",
+    "offline": "此设备处于离线状态。",
+    "signature": "更新的签名未通过验证，因此未被使用。",
+    "timeout": "更新服务器响应时间过长。",
+    "unknown": "检查时出现问题。",
+    "unreachable": "无法连接到更新服务器。请检查网络连接。"
+  }
+}

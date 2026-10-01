@@ -16,11 +16,11 @@ Without Docker:
 npm install && npm run dev -w @ghostly/web
 ```
 
-serves it on <http://localhost:5180> with hot reload, and `npm run build:web` writes the static site to `web/dist`.
+serves it on <http://localhost:5180> with hot reload, and `npm run build:web` writes the static site to `apps/web/dist`.
 
 To put it behind a tunnel or a reverse proxy, choose where it listens with `GHOSTLY_WEB_BIND` (for example `GHOSTLY_WEB_BIND=0.0.0.0:8090 docker compose up --build -d`) and terminate HTTPS in front of it.
 
-What is served is static files (nginx, `web/nginx.conf`). There is no Ghostly backend: the peer runs in the visitor's tab, reaches Pkarr through relays, talks to contacts over WebRTC or Iroh through a relay (HyperDHT too, once a HyperDHT relay is set), and keeps its state in that browser's IndexedDB and localStorage. It needs a secure context, which `http://localhost` is; anywhere else, serve it over HTTPS.
+What is served is static files (nginx, `apps/web/nginx.conf`). There is no Ghostly backend: the peer runs in the visitor's tab, reaches Pkarr through relays, talks to contacts over WebRTC or Iroh through a relay (HyperDHT too, once a HyperDHT relay is set), and keeps its state in that browser's IndexedDB and localStorage. It needs a secure context, which `http://localhost` is; anywhere else, serve it over HTTPS.
 
 Its log names no one: each request is one line with the time, the method, the file served, the status, the size and the time taken. There is no IP address, browser, referrer or query string, and error lines (which would name the client) are kept to `crit`. Docker keeps three files of 10 MB of it (`docker compose logs web`).
 
@@ -29,17 +29,18 @@ Its log names no one: each request is one line with the time, the method, the fi
 ## How it shares code
 
 ```
-src/                 the UI (Desktop's, unchanged)
+apps/ui              the UI (Desktop's, unchanged)
 packages/core        the protocol
 packages/react       hooks shared by every client
 packages/browser     the peer: engine, wallets, IndexedDB, and the stand-ins
                      for the six Desktop modules that touch the platform
-extension/           host: peer in an offscreen document, Chrome permissions, viewer tabs
-web/                 host: peer in the page, one tab at a time
-src/desktop + src-tauri   host: peer in the WebView, Rust for the DHT, native Iroh, the HyperDHT sidecar, local apps, viewer windows
+apps/extension       host: peer in an offscreen document, Chrome permissions, viewer tabs
+apps/web             host: peer in the page, one tab at a time
+apps/ui/src/desktop + apps/desktop
+                     host: peer in the WebView, Rust for the DHT, native Iroh, the HyperDHT sidecar, local apps, viewer windows
 ```
 
-A host (`packages/browser/src/host.ts`) is the small part that differs: how a page reaches the peer, whether the user can grant access to local addresses, how a contact's web app is opened. All three build `src/` with the same Vite plugin (`packages/browser/vite-plugin.ts`).
+A host (`packages/browser/src/host.ts`) is the small part that differs: how a page reaches the peer, whether the user can grant access to local addresses, how a contact's web app is opened. All three build `apps/ui/src/` with the same Vite plugin (`packages/browser/vite-plugin.ts`).
 
 ## On a phone
 
@@ -53,9 +54,9 @@ Screen sharing needs `getDisplayMedia`, which phone browsers do not have; the ca
 
 The web app is an installable app (a PWA). Everything below is behind feature detection: a browser without one of these APIs runs the app as a plain page.
 
-- **Install.** Chromium browsers (Chrome, Edge, Brave, Android) offer it, and **Settings → Install** has the button while they do. On iPhone and iPad, Settings says where it is instead: Safari's Share button, then *Add to Home Screen*. Installed, it opens in a window of its own, portrait on phones.
-- **Offline.** A service worker (`web/src/sw/`, built into `/sw.js` by `web/pwa.ts`) keeps the build's own files: the page, the hashed JavaScript and CSS, sounds, icons and the manifest, precached at install, and a wallet's WebAssembly once it has been loaded. Offline, the app still opens and shows every chat (they live in this browser already), with **Offline** above the chat list; nothing goes out until the network is back.
-- **What it never caches.** Only those build files enter its cache (`web/src/sw/policy.ts` is an allowlist): never a message, a relay or DHT answer, a mint, wallet or provider API, another origin, `/version.json`, the sign-in callback, or a request with a query. An invite's keys ride in the address's fragment, which the cache never keys on: every address of the app is the same cached page.
+- **Install.** Chromium browsers (Chrome, Edge, Brave, Android) offer it, and the app shows it where people look: **Install app** in the account menu (the profile switcher over the account bar, or holding Settings on a phone), **Install** at the top of Settings, and once the app has been used a little (a chat of its own, or a second visit), a hint above the chat list. *Not now* puts the hint away for good in that browser; Install stays in the menu and Settings. Install shows the browser's own dialog. Safari has no such dialog, so Install shows the steps instead: on iPhone and iPad, Share, then *Add to Home Screen*; on a Mac (Safari 17 and later), File, then *Add to Dock*. Firefox cannot install web apps, and gets none of this. Installed, it all goes, and the app opens in a window of its own, portrait on phones.
+- **Offline.** A service worker (`apps/web/src/sw/`, built into `/sw.js` by `apps/web/pwa.ts`) keeps the build's own files: the page, the hashed JavaScript and CSS, sounds, icons and the manifest, precached at install, and a wallet's WebAssembly once it has been loaded. Offline, the app still opens and shows every chat (they live in this browser already), with **Offline** above the chat list; nothing goes out until the network is back.
+- **What it never caches.** Only those build files enter its cache (`apps/web/src/sw/policy.ts` is an allowlist): never a message, a relay or DHT answer, a mint, wallet or provider API, another origin, `/version.json`, the sign-in callback, or a request with a query. An invite's keys ride in the address's fragment, which the cache never keys on: every address of the app is the same cached page.
 - **Share to Ghostly.** Installed, Ghostly is a share target: text, links, pictures and files shared from another app open **Share to…**, a list of chats. The chat picked opens with the text in the draft and the files on the attachment sheet (the one a paste opens), to look over and send there. The service worker holds what was shared in memory until the app asks for it, and drops it after two minutes; it is never written to a cache. Groups take text only, as files are not part of groups yet.
 - **`web+ghostly:` links.** Installed from a Chromium browser, the app handles `web+ghostly:` links: `web+ghostly:ghostly1…` opens the invite like an `app.ghostly.tools/#ghostly1…` link, and leaves the address the same way.
 - **Shortcuts.** The icon's menu (long press, or right click on the dock or taskbar) has **New chat**, **Scan invite** (Join with the camera on) and **Wallets**.
@@ -66,7 +67,7 @@ The web app is an installable app (a PWA). Everything below is behind feature de
   - **Calls** too: a contact who calls while the app is closed wakes it, and it shows **Incoming call** until you answer or dismiss it. A tap opens the chat, and the call rings once it is live. The caller waits up to 60 s.
   - **Where:** Chrome, Edge and Firefox, and on iPhone and iPad only the app added to the Home Screen, from iOS 16.4. The desktop app and the extension keep running on their own, so they only wake others.
   - **Groups:** in a private group, a message that mentions you wakes the app and opens the group. Never `@everyone`, at most once every 5 minutes, and never in a group you muted. Communities do not wake anyone yet.
-  - **Push relay.** A browser can post to some push services only through a relay, set in **Settings → Network → Push relay (optional)**, empty by default. `native-transports/push-relay` is a reference one; none is run by Ghostly. The desktop app and the CLI post directly.
+  - **Push relay.** A browser can post to some push services only through a relay, set in **Settings → Network → Push relay (optional)**, empty by default. `services/push-relay` is a reference one; none is run by Ghostly. The desktop app and the CLI post directly.
   - **New address** makes a fresh subscription, so nobody you stopped talking to can wake you. Deleting or muting a contact does the same by itself, and your other contacts get the new one. Deleting a profile ends its subscription. What the push service, a relay and contacts learn: [WISP 401 § Wake-up push](wisps/401-paired-chat.md#wake-up-push).
 - **Not here.** Opening files with Ghostly from the file manager (`file_handlers`, desktop Chromium only) is left out: the app has no use for a file it did not receive in a chat.
 

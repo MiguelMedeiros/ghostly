@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { DataLink, type DataLinkOptions, type DataLinkState } from "../src/datalink";
+import { DataLink, GATHER_ATTEMPTS, GATHER_STALL_MS, REANSWERS, type DataLinkOptions, type DataLinkState } from "../src/datalink";
 import { DATA_CHANNEL_ID, DATA_CHANNEL_LABEL, RTC_SIGNAL_MAX_AGE_MS, parseRtcSignal, type RtcSignal } from "../src/signal";
 
 // covers: transport.webrtc, core.frames
@@ -16,7 +16,7 @@ afterEach(() => void vi.useRealTimers());
 
 let fingerprintSeed = 0;
 /** A local SDP that `extractRtcParams` understands, with a fingerprint unique to each connection. */
-function sdp(setup: string) {
+function sdp(setup: string, candidates = true) {
   const fingerprint = (++fingerprintSeed).toString(16).padStart(2, "0").repeat(32).match(/.{2}/g)!.join(":").toUpperCase();
   return [
     "v=0",
@@ -24,7 +24,7 @@ function sdp(setup: string) {
     "a=ice-pwd:passwordpasswordpassword",
     `a=fingerprint:sha-256 ${fingerprint}`,
     `a=setup:${setup}`,
-    "a=candidate:1 1 udp 2122260223 192.168.1.2 50000 typ host",
+    ...(candidates ? ["a=candidate:1 1 udp 2122260223 192.168.1.2 50000 typ host"] : []),
     "",
   ].join("\r\n");
 }
@@ -56,6 +56,8 @@ class FakePeerConnection extends EventTarget {
   channel!: FakeDataChannel;
   failRemote = false;
   failOffer = false;
+  /** Gathers nothing, ever: Chromium's rare stall under load. */
+  stalls = false;
   getConfiguration() {
     return { iceServers: [] };
   }
@@ -65,10 +67,10 @@ class FakePeerConnection extends EventTarget {
   }
   async createOffer() {
     if (this.failOffer) throw new Error("no offer");
-    return { type: "offer" as const, sdp: sdp("actpass") };
+    return { type: "offer" as const, sdp: sdp("actpass", !this.stalls) };
   }
   async createAnswer() {
-    return { type: "answer" as const, sdp: sdp("active") };
+    return { type: "answer" as const, sdp: sdp("active", !this.stalls) };
   }
   async setLocalDescription(description: RTCSessionDescriptionInit) {
     this.localDescription = description;
@@ -86,7 +88,7 @@ class FakePeerConnection extends EventTarget {
   }
 }
 
-function link(me: string, peer: string, configure: (pc: FakePeerConnection) => void = () => {}) {
+function link(me: string, peer: string, configure: (pc: FakePeerConnection) => void = () => {}, extra: Partial<DataLinkOptions> = {}) {
   const pcs: FakePeerConnection[] = [];
   const states: DataLinkState[] = [];
   const options = {
@@ -104,7 +106,7 @@ function link(me: string, peer: string, configure: (pc: FakePeerConnection) => v
     onClose: vi.fn(),
     onState: (state: DataLinkState) => void states.push(state),
   } satisfies DataLinkOptions;
-  const dl = new DataLink(options);
+  const dl = new DataLink({ ...options, ...extra });
   const lastSignal = () => {
     const published = options.publishSignal.mock.calls.map(([s]) => s).filter((s): s is string => s !== null);
     return published.at(-1)!;
@@ -123,7 +125,7 @@ describe("DataLink handshake", () => {
 
     await a.dl.connect();
     expect(a.dl.state).toBe("offering");
-    expect(a.options.setFastPoll).toHaveBeenLastCalledWith(true);
+    expect(a.options.setFastPoll).toHaveBeenLastCalledWith(true, true);
     const offer = parseRtcSignal(a.lastSignal())!;
     expect(offer).toMatchObject({ t: "o", ts: NOW, s: "actpass", c: ["h,192.168.1.2,50000"] });
     expect(a.pc().channel.label).toBe(DATA_CHANNEL_LABEL);
@@ -168,6 +170,26 @@ describe("DataLink handshake", () => {
     await a.dl.handleSignal(b.lastSignal());
     expect(a.dl.state).toBe("open");
     expect(a.states).toEqual(["offering", "open"]);
+  });
+
+  // Chrome shows the answer as `remoteDescription` only once setRemoteDescription resolves, and on a quick local path the
+  // channel's open event can come first. The paired handshake binds to both fingerprints: without the remote one there,
+  // the channel was closed as it opened, and a join through a link waited 20 s for the next dial (2026-09-29).
+  it("an offerer whose channel opens before the answer shows as applied has both fingerprints", async () => {
+    const a = link("aaaa", "bbbb", pc => {
+      const apply = pc.setRemoteDescription.bind(pc);
+      pc.setRemoteDescription = async description => { pc.channel.open(); await apply(description); };
+    });
+    const b = link("bbbb", "aaaa");
+    const atOpen: ([string, string] | null)[] = [];
+    a.options.onOpen.mockImplementation(() => void atOpen.push(a.dl.fingerprints));
+    await a.dl.connect();
+    vi.advanceTimersByTime(1);
+    await b.dl.handleSignal(a.lastSignal());
+    await a.dl.handleSignal(b.lastSignal());
+    expect(a.dl.state).toBe("open");
+    expect(atOpen).toEqual([a.dl.fingerprints]);
+    expect(b.dl.fingerprints).toEqual([...a.dl.fingerprints!].reverse());
   });
 
   it("does not offer again while already busy", async () => {
@@ -305,6 +327,21 @@ describe("DataLink failures and teardown", () => {
     expect(a.options.onClose).not.toHaveBeenCalled();
   });
 
+  it("gives an offer the relays held back its whole attempt from when it went out", async () => {
+    const a = link("aaaa", "bbbb");
+    await a.dl.connect();
+    // The relays were down: the offer reached them 60 s after it was made.
+    vi.advanceTimersByTime(60_000);
+    a.dl.signalWentOut();
+    vi.advanceTimersByTime(CONNECT_TIMEOUT_MS - 1);
+    expect(a.dl.state).toBe("offering");
+    vi.advanceTimersByTime(1);
+    expect(a.dl.state).toBe("idle");
+    // Nothing to extend once the attempt is over, or before one began.
+    a.dl.signalWentOut();
+    expect(a.dl.state).toBe("idle");
+  });
+
   it("does not time out a connection that opened", async () => {
     const b = link("bbbb", "aaaa");
     await b.dl.handleSignal(JSON.stringify(offerFrom()));
@@ -393,5 +430,242 @@ describe("DataLink failures and teardown", () => {
     await vi.advanceTimersByTimeAsync(5_000);
     await answering;
     expect(b.options.publishSignal.mock.calls.filter(([s]) => s !== null)).toEqual([]);
+  });
+});
+
+describe("DataLink connections that gather no candidate", () => {
+  /** The first `n` connections made gather nothing (and stay `gathering`); the ones after gather as usual. */
+  const stallingFirst = (n: number) => {
+    let made = 0;
+    return (pc: FakePeerConnection) => {
+      if (++made > n) return;
+      pc.stalls = true;
+      pc.iceGatheringState = "gathering";
+    };
+  };
+  const published = (side: ReturnType<typeof link>) => side.options.publishSignal.mock.calls.map(([s]) => s).filter((s): s is string => s !== null);
+
+  it("an offerer makes a new connection in place of one that found no candidate, and offers that one", async () => {
+    const a = link("aaaa", "bbbb", stallingFirst(1));
+    const connecting = a.dl.connect();
+    await vi.advanceTimersByTimeAsync(GATHER_STALL_MS - 1);
+    expect(a.pcs).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(1);
+    await connecting;
+    expect(a.pcs).toHaveLength(2);
+    expect(a.pcs[0].closed).toBe(true);
+    expect(a.pcs[1].closed).toBe(false);
+    const offers = published(a);
+    expect(offers).toHaveLength(1);
+    expect(parseRtcSignal(offers[0])).toMatchObject({ t: "o", c: ["h,192.168.1.2,50000"] });
+    // The old connection closing reset nothing: the link is still offering, and says nothing of it.
+    expect(a.states).toEqual(["offering"]);
+
+    const b = link("bbbb", "aaaa");
+    await b.dl.handleSignal(offers[0]);
+    await a.dl.handleSignal(b.lastSignal());
+    a.pc().channel.open();
+    expect(a.dl.state).toBe("open");
+    expect(a.pcs[1].remoteDescription?.type).toBe("answer");
+  });
+
+  it("an answerer makes a new connection for the same offer in place of one that found no candidate", async () => {
+    const b = link("bbbb", "aaaa", stallingFirst(2));
+    const answering = b.dl.handleSignal(JSON.stringify(offerFrom()));
+    await vi.advanceTimersByTimeAsync(2 * GATHER_STALL_MS);
+    await answering;
+    expect(b.pcs).toHaveLength(3);
+    expect(b.pcs.map((pc) => pc.closed)).toEqual([true, true, false]);
+    for (const pc of b.pcs) expect(pc.remoteDescription?.type).toBe("offer");
+    const answers = published(b);
+    expect(answers).toHaveLength(1);
+    expect(parseRtcSignal(answers[0])).toMatchObject({ t: "a", o: NOW, c: ["h,192.168.1.2,50000"] });
+    expect(b.states).toEqual(["answering", "connecting"]);
+  });
+
+  it("gives up at once when no connection finds a candidate, instead of holding the attempt for its whole timeout", async () => {
+    const a = link("aaaa", "bbbb", stallingFirst(GATHER_ATTEMPTS));
+    const connecting = a.dl.connect();
+    await vi.advanceTimersByTimeAsync(GATHER_ATTEMPTS * GATHER_STALL_MS);
+    await connecting;
+    expect(a.pcs).toHaveLength(GATHER_ATTEMPTS);
+    expect(a.pcs.every((pc) => pc.closed)).toBe(true);
+    expect(published(a)).toEqual([]);
+    expect(a.dl.state).toBe("idle");
+    expect(a.states).toEqual(["offering", "idle"]);
+    // Idle again, it can be dialled at once.
+    await a.dl.connect();
+    expect(a.pcs).toHaveLength(GATHER_ATTEMPTS + 1);
+    expect(published(a)).toHaveLength(1);
+  });
+
+  it("an answerer that finds no candidate answers nothing and is free for the next offer", async () => {
+    const b = link("bbbb", "aaaa", stallingFirst(GATHER_ATTEMPTS));
+    const answering = b.dl.handleSignal(JSON.stringify(offerFrom()));
+    await vi.advanceTimersByTimeAsync(GATHER_ATTEMPTS * GATHER_STALL_MS);
+    await answering;
+    expect(published(b)).toEqual([]);
+    expect(b.dl.state).toBe("idle");
+    await b.dl.handleSignal(JSON.stringify(offerFrom({ ts: NOW + 1 })));
+    expect(parseRtcSignal(b.lastSignal())).toMatchObject({ t: "a", o: NOW + 1 });
+  });
+
+  it("makes no new connection when closed while one is stalled", async () => {
+    const a = link("aaaa", "bbbb", stallingFirst(GATHER_ATTEMPTS));
+    const connecting = a.dl.connect();
+    await vi.advanceTimersByTimeAsync(GATHER_STALL_MS / 2);
+    a.dl.close();
+    await vi.advanceTimersByTimeAsync(GATHER_ATTEMPTS * GATHER_STALL_MS);
+    await connecting;
+    expect(a.pcs).toHaveLength(1);
+    expect(published(a)).toEqual([]);
+    expect(a.states).toEqual(["offering", "idle"]);
+  });
+
+  it("keeps a connection that found candidates, however long its gathering takes", async () => {
+    const a = link("aaaa", "bbbb", (pc) => (pc.iceGatheringState = "gathering"));
+    const connecting = a.dl.connect();
+    await vi.advanceTimersByTimeAsync(5_000);
+    await connecting;
+    expect(a.pcs).toHaveLength(1);
+    expect(published(a)).toHaveLength(1);
+  });
+});
+
+// A member's app back after a restart answers the hub's offer in a second; the hub's read of that answer can wait half a
+// minute for its relays' budget, and by then the answerer's ICE has given up. Going idle left a standing offer this side
+// had answered once and would not answer again: the edge waited for the offerer's 90 s attempt (110 s in all, 2026-09-30).
+describe("DataLink answers a standing offer again when its answer did not connect", () => {
+  const answers = (side: ReturnType<typeof link>) =>
+    side.options.publishSignal.mock.calls.map(([s]) => s).filter((s): s is string => s !== null).map((s) => parseRtcSignal(s)!);
+
+  it("answers the same offer again, and connects once the offerer reads the new answer", async () => {
+    const a = link("aaaa", "bbbb");
+    await a.dl.connect();
+    const offer = parseRtcSignal(a.lastSignal())!;
+    const b = link("bbbb", "aaaa", () => {}, { offerStanding: (ts) => ts === offer.ts });
+    vi.advanceTimersByTime(1);
+    await b.dl.handleSignal(a.lastSignal());
+    // The offerer does not read that answer (its relays' budget); the answerer's ICE gives up half a minute on.
+    vi.advanceTimersByTime(30_000);
+    b.pcs[0].setConnectionState("failed");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(b.dl.state).toBe("connecting");
+    expect(b.pcs).toHaveLength(2);
+    expect(b.pcs[0].closed).toBe(true);
+    expect(answers(b).map((s) => [s.t, s.o])).toEqual([["a", offer.ts], ["a", offer.ts]]);
+    // The answer is replaced, never cleared in between: the offerer reads one or the other.
+    expect(b.options.publishSignal.mock.calls.filter(([s]) => s === null)).toEqual([]);
+    expect(b.states).toEqual(["answering", "connecting", "answering", "connecting"]);
+
+    await a.dl.handleSignal(b.lastSignal());
+    expect(a.dl.state).toBe("connecting");
+    a.pc().channel.open();
+    b.pc().channel.open();
+    expect([a.dl.state, b.dl.state]).toEqual(["open", "open"]);
+  });
+
+  it(`answers again at most ${REANSWERS} times, then goes idle`, async () => {
+    const b = link("bbbb", "aaaa", () => {}, { offerStanding: () => true });
+    await b.dl.handleSignal(JSON.stringify(offerFrom()));
+    for (let i = 0; i < REANSWERS; i++) {
+      vi.advanceTimersByTime(20_000);
+      b.pc().setConnectionState("failed");
+      await vi.advanceTimersByTimeAsync(0);
+      expect(b.dl.state).toBe("connecting");
+    }
+    b.pc().setConnectionState("failed");
+    expect(b.dl.state).toBe("idle");
+    expect(answers(b)).toHaveLength(1 + REANSWERS);
+    expect(b.options.publishSignal).toHaveBeenLastCalledWith(null);
+  });
+
+  it("goes idle when the offer no longer stands, the offerer's attempt is nearly over, or nothing says", async () => {
+    const cases: [string, Partial<DataLinkOptions>, number][] = [
+      ["no longer offered", { offerStanding: () => false }, 30_000],
+      ["too late for the offerer", { offerStanding: () => true }, 80_000],
+      ["no offerStanding", {}, 30_000],
+    ];
+    for (const [, extra, after] of cases) {
+      vi.setSystemTime(NOW);
+      const b = link("bbbb", "aaaa", () => {}, extra);
+      await b.dl.handleSignal(JSON.stringify(offerFrom()));
+      vi.advanceTimersByTime(after);
+      b.pc().setConnectionState("failed");
+      await vi.advanceTimersByTimeAsync(0);
+      expect(b.dl.state).toBe("idle");
+      expect(b.pcs).toHaveLength(1);
+    }
+  });
+
+  it("does not answer again once the attempt timer ends it: too late for the offerer", async () => {
+    const b = link("bbbb", "aaaa", () => {}, { offerStanding: () => true });
+    await b.dl.handleSignal(JSON.stringify(offerFrom({ ts: NOW })));
+    // A connection that neither fails nor opens: its attempt timer ends it, far too late to answer again.
+    vi.advanceTimersByTime(CONNECT_TIMEOUT_MS);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(b.dl.state).toBe("idle");
+    expect(b.pcs).toHaveLength(1);
+  });
+
+  it("never answers again after close(), nor when its own offer fails", async () => {
+    const b = link("bbbb", "aaaa", () => {}, { offerStanding: () => true });
+    await b.dl.handleSignal(JSON.stringify(offerFrom()));
+    b.dl.close();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(b.dl.state).toBe("idle");
+    expect(b.pcs).toHaveLength(1);
+
+    const a = link("aaaa", "bbbb", () => {}, { offerStanding: () => true });
+    await a.dl.connect();
+    a.pc().setConnectionState("failed");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(a.dl.state).toBe("idle");
+    expect(a.pcs).toHaveLength(1);
+  });
+
+  it("the offerer gives up at once on an answer the answerer made again, and never on one that connected", async () => {
+    const onAnswerReplaced = vi.fn();
+    const a = link("aaaa", "bbbb", () => {}, { onAnswerReplaced });
+    await a.dl.connect();
+    const offer = parseRtcSignal(a.lastSignal())!;
+    const answer = (ts: number) => JSON.stringify({ ...offerFrom({ t: "a", ts, s: "active" }), o: offer.ts });
+    // The first answer, read late: its connection on the answerer's side is already gone.
+    await a.dl.handleSignal(answer(NOW + 1_000));
+    expect(a.dl.state).toBe("connecting");
+    // The same answer again, or an older one: nothing changes.
+    await a.dl.handleSignal(answer(NOW + 1_000));
+    await a.dl.handleSignal(answer(NOW + 500));
+    expect(a.dl.state).toBe("connecting");
+    // The answerer's new answer: this connection can never come up. Given up now, not 90 s on.
+    await a.dl.handleSignal(answer(NOW + 32_000));
+    expect(a.dl.state).toBe("idle");
+    expect(a.pcs[0].closed).toBe(true);
+    expect(a.options.publishSignal).toHaveBeenLastCalledWith(null);
+    expect(a.options.onClose).not.toHaveBeenCalled();
+    // The answerer is there: the caller dials again now.
+    expect(onAnswerReplaced).toHaveBeenCalledOnce();
+
+    // Open, a later answer is nothing to it.
+    await a.dl.connect();
+    const second = parseRtcSignal(a.lastSignal())!;
+    await a.dl.handleSignal(JSON.stringify({ ...offerFrom({ t: "a", ts: NOW + 40_000, s: "active" }), o: second.ts }));
+    a.pc().channel.open();
+    await a.dl.handleSignal(JSON.stringify({ ...offerFrom({ t: "a", ts: NOW + 50_000, s: "active" }), o: second.ts }));
+    expect(a.dl.state).toBe("open");
+    expect(onAnswerReplaced).toHaveBeenCalledOnce();
+  });
+
+  it("takes a newer offer while it waits on an answer made again", async () => {
+    const b = link("bbbb", "aaaa", () => {}, { offerStanding: () => true });
+    await b.dl.handleSignal(JSON.stringify(offerFrom({ ts: NOW })));
+    vi.advanceTimersByTime(30_000);
+    b.pc().setConnectionState("failed");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(b.dl.state).toBe("connecting");
+    // The offerer gave up and offers anew (or its app restarted): that offer is answered.
+    await b.dl.handleSignal(JSON.stringify(offerFrom({ ts: NOW + 31_000 })));
+    expect(b.pcs).toHaveLength(3);
+    expect(answers(b).at(-1)).toMatchObject({ t: "a", o: NOW + 31_000 });
   });
 });

@@ -9,7 +9,7 @@ import type { DesktopApp } from "./desktop";
 /**
  * Ghostly Desktop on a Mac, driven without a WebDriver (WKWebView has none).
  *
- * The app is built once with the test driver compiled in (`src-tauri/src/e2e_driver.rs`, debug builds with
+ * The app is built once with the test driver compiled in (`apps/desktop/src/e2e_driver.rs`, debug builds with
  * `--features e2e-driver` only), then copied once per person with a bundle id of its own: WebKit keeps a
  * page's storage per bundle id, so two copies are two apps with nothing in common, like two Macs. Each copy
  * is started with `GHOSTLY_E2E_DRIVER=<port>`, and the driver runs scripts in its windows. Everything below
@@ -52,7 +52,7 @@ function libraryPaths(bundleId: string): string[] {
 
 /**
  * What the copies share: the app's log and its files go by the identifier it was built with
- * (src-tauri/tauri.e2e.conf.json), files in a folder per GHOSTLY_PROFILE. Removed before the apps start and after
+ * (apps/desktop/tauri.e2e.conf.json), files in a folder per GHOSTLY_PROFILE. Removed before the apps start and after
  * they all stopped, never while one runs.
  */
 export function forgetSharedData(): void {
@@ -116,11 +116,36 @@ export class MacDriver implements DesktopApp {
   }
 
   /**
+   * What the Ghostly window's close button (or Cmd+W), a click on the Dock icon and an app menu item do, through the
+   * app's own handlers (apps/desktop/src/app_window.rs): the app under test never takes the focus, so no real key
+   * press or click reaches it. `menu` answers whether the item was one of the page's commands.
+   */
+  async close(): Promise<void> {
+    await this.request("POST", "/close", {});
+  }
+
+  async reopen(): Promise<void> {
+    await this.request("POST", "/reopen", {});
+  }
+
+  async menu(id: string): Promise<boolean> {
+    return (await this.request("POST", "/menu", id)) as boolean;
+  }
+
+  /**
    * Every link the app handed to the system so far, in order, exactly as `open` would have received it. The app under
-   * the driver writes them down instead of opening them (`launch` in src-tauri/src/commands.rs), so no browser starts.
+   * the driver writes them down instead of opening them (`launch` in apps/desktop/src/commands.rs), so no browser starts.
    */
   async opened(): Promise<string[]> {
     return (await this.request("GET", "/opened")) as string[];
+  }
+
+  /**
+   * What the system shows of the Ghostly window (`GET /window` in apps/desktop/src/e2e_driver.rs): whether it is on screen,
+   * its title bar's appearance, and the label on the app's Dock icon (null when there is none).
+   */
+  async windowState(): Promise<{ visible: boolean | null; theme: "light" | "dark" | null; badge: string | null }> {
+    return (await this.request("GET", "/window")) as { visible: boolean | null; theme: "light" | "dark" | null; badge: string | null };
   }
 
   private async request(method: string, path: string, body?: unknown): Promise<unknown> {
@@ -275,6 +300,8 @@ export async function openMacDesktop(options: MacDesktopOptions): Promise<MacDes
     stdio: ["ignore", "pipe", "pipe"],
     env: {
       ...process.env,
+      // Never a new profile's default Mainnet wallets (#682), as the e2e bundle id already says.
+      GHOSTLY_E2E: "1",
       GHOSTLY_PROFILE: options.profile ?? `e2e-${options.name}`,
       GHOSTLY_E2E_DRIVER: String(options.port),
       GHOSTLY_E2E_DRIVER_TOKEN: token,
