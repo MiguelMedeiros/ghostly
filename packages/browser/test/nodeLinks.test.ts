@@ -238,17 +238,29 @@ describe("an app restarting (WISP 100, Back after a restart)", () => {
     // Stored first (the links store reads back in id order), each idle since long ago.
     const older = () => Array.from({ length: 10 }, (_, i) => row({ ...paired(), id: `chat-a${i}` }));
 
-    it("the chats live when the app quit, then the ones live most recently, take them first", async () => {
+    it("the chats live when the app quit take them first, the one live most recently first of all", async () => {
       // Omarchy (2026-09-30): both apps restarted, and the chat they had just been live in got no listener on one side:
       // the chats stored before it took all eight. Its contact dialled it every 20 s for minutes, never answered.
       const now = Date.now();
-      const wasLive = row({ ...paired(), id: "chat-z", transportHistory: [{ at: now - 60_000, kind: "live", transport: "iroh/1" }] });
-      const droppedLately = row({ ...paired(), id: "chat-y", transportHistory: [{ at: now - 60_000, kind: "live", transport: "iroh/1" }, { at: now - 5_000, kind: "down", from: "iroh/1" }] });
-      const rows = [...older(), droppedLately, wasLive];
+      const liveLongAgo = { transportHistory: [{ at: now - 3_600_000, kind: "live" as const, transport: "iroh/1" as const }] };
+      const rows = [...older().map((r, i) => i < 8 ? { ...r, ...liveLongAgo } : r),
+        row({ ...paired(), id: "chat-z", transportHistory: [{ at: now - 60_000, kind: "live", transport: "iroh/1" }] })];
       const { linkOf } = await nativeStarted(...rows);
       const listening = rows.filter((r) => linkOf(r.id).registerEndpoint.mock.calls.length > 0).map((r) => r.id);
       expect(listening).toHaveLength(8);
-      expect(listening).toEqual(expect.arrayContaining(["chat-z", "chat-y"]));
+      expect(listening).toContain("chat-z");
+      expect(listening).not.toContain("chat-a8");
+      expect(listening).not.toContain("chat-a9");
+    });
+
+    it("then the chats live or written in most recently", async () => {
+      const now = Date.now();
+      const droppedLately = row({ ...paired(), id: "chat-y", transportHistory: [{ at: now - 60_000, kind: "live", transport: "iroh/1" }, { at: now - 5_000, kind: "down", from: "iroh/1" }] });
+      const rows = [...older(), droppedLately];
+      const { linkOf } = await nativeStarted(...rows);
+      const listening = rows.filter((r) => linkOf(r.id).registerEndpoint.mock.calls.length > 0).map((r) => r.id);
+      expect(listening).toHaveLength(8);
+      expect(listening).toContain("chat-y");
     });
 
     it("the chat on screen gets one as soon as one is free, when every one was busy as it opened", async () => {

@@ -4936,10 +4936,13 @@ export class GhostlyNode implements EngineImplementation {
     const isChat = (id: string) => { const stored = this.links.get(id)?.stored; return !!stored && !stored.group; };
     const rank = new Map(linkIds.filter(isChat).map(id => {
       const live = this.links.get(id)!, log = this.transportLogOf(live);
-      return [id, log?.liveAtLastRun ? Number.MAX_SAFE_INTEGER : Math.max(live.lastMessageAt, log?.lastLiveAt ?? 0)] as const;
+      return [id, { resumes: !!log?.liveAtLastRun, recent: Math.max(live.lastMessageAt, log?.lastLiveAt ?? 0) }] as const;
     }));
-    const chats = [...rank.keys()].sort((a, b) => rank.get(b)! - rank.get(a)!);
-    chats.forEach((id, place) => traceLink(this.links.get(id)!.myPubKeyZ32, "native-order", { place, rank: rank.get(id) }));
+    const chats = [...rank.keys()].sort((a, b) => {
+      const x = rank.get(a)!, y = rank.get(b)!;
+      return Number(y.resumes) - Number(x.resumes) || y.recent - x.recent;
+    });
+    chats.forEach((id, place) => traceLink(this.links.get(id)!.myPubKeyZ32, "native-order", { place, ...rank.get(id) }));
     let next = 0;
     return linkIds.map(id => rank.has(id) ? chats[next++] : id);
   }
