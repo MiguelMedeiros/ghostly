@@ -229,6 +229,16 @@ export function addMessages(
   session.messages.push(...fresh);
   session.messages.sort((a, b) => a.timestamp - b.timestamp);
   if (!complete || fresh.some((m) => m.timestamp > newest)) session.lastSyncAt = Date.now();
+  // Unread is "messages since the last read one". A contact's message written before one already read here (it was
+  // held up on its way: a resend once the chat is back, the DHT) sorts in among the read ones, and would never be
+  // counted: the count starts again from it. Not for a history made whole again after a reload: that was read.
+  if (!complete) {
+    const older = session.older ?? 0;
+    const read = getLastReadCount(sessionId) - older;
+    const added = new Set(fresh);
+    const late = session.messages.findIndex((m, i) => i < read && added.has(m) && countsAsUnread(m));
+    if (late >= 0) setReadCount(sessionId, older + late);
+  }
 
   for (const message of fresh) {
     if ((message.sender === "peer" || message.sender === "system") && message.id.startsWith("peer_")) {
