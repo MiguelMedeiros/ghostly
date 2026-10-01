@@ -4927,22 +4927,20 @@ export class GhostlyNode implements EngineImplementation {
 
   /**
    * The order saved chats start in, which is the order they take native listeners in (`NATIVE_SLOTS` per transport):
-   * the 1:1 chats live when this app last ran first, then the ones live or written in most recently; group links keep
-   * their places. In the order they were stored, an app with more paired chats than slots left a chat that was live a
-   * moment before with no listener, and a contact with no WebRTC (the Linux Desktop) never reached it again
-   * (Omarchy, 2026-09-30: "On DHT · retrying live" for minutes after both apps restarted).
+   * the 1:1 chats written in, or live, most recently first; group links keep their places. In the order they were
+   * stored, an app with more paired chats than slots left a chat that was live a moment before with no listener, and a
+   * contact with no WebRTC (the Linux Desktop) never reached it again (Omarchy, 2026-09-30: "On DHT · retrying live" for
+   * minutes after both apps restarted). Not "live when this app last ran" first: a chat that heard its contact leave as
+   * both quit is not, and one that never came back since keeps saying it is, run after run.
    */
   private nativeStartOrder(linkIds: string[]): string[] {
     const isChat = (id: string) => { const stored = this.links.get(id)?.stored; return !!stored && !stored.group; };
     const rank = new Map(linkIds.filter(isChat).map(id => {
-      const live = this.links.get(id)!, log = this.transportLogOf(live);
-      return [id, { resumes: !!log?.liveAtLastRun, recent: Math.max(live.lastMessageAt, log?.lastLiveAt ?? 0) }] as const;
+      const live = this.links.get(id)!;
+      return [id, Math.max(live.lastMessageAt, this.transportLogOf(live)?.lastLiveAt ?? 0)] as const;
     }));
-    const chats = [...rank.keys()].sort((a, b) => {
-      const x = rank.get(a)!, y = rank.get(b)!;
-      return Number(y.resumes) - Number(x.resumes) || y.recent - x.recent;
-    });
-    chats.forEach((id, place) => traceLink(this.links.get(id)!.myPubKeyZ32, "native-order", { place, ...rank.get(id) }));
+    const chats = [...rank.keys()].sort((a, b) => rank.get(b)! - rank.get(a)!);
+    chats.forEach((id, place) => traceLink(this.links.get(id)!.myPubKeyZ32, "native-order", { place, recent: rank.get(id) }));
     let next = 0;
     return linkIds.map(id => rank.has(id) ? chats[next++] : id);
   }
