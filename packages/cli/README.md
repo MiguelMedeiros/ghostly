@@ -428,7 +428,8 @@ then the only Pkarr relays, the profile's `relays` setting is not used, and the 
 `GHOSTLY_DHT_BOOTSTRAP` names your own nodes. `status` shows the relays in use (`discovery.relays`); `settings get`
 still shows the profile's own list, which is used again once the variable is unset. Without the variable,
 `settings set relays '["http://…"]'` before the first `daemon`, with `GHOSTLY_DHT=0` or `GHOSTLY_DHT_BOOTSTRAP`, does
-the same for that profile.
+the same for that profile. Unlike the Desktop, the CLI keeps its request budget per relay (30 a minute), so give a
+busy bot two relays or more.
 
 ## Not yet
 
