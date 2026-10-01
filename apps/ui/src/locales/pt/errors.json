@@ -52,6 +52,7 @@
     "networkUnreachable": "Não foi possível acessar a rede",
     "noSharedMint": "Você não tem nenhum mint em comum com este contato",
     "realMintOnTestnet": "Este mint guarda sats reais: adicione-o a uma carteira Cashu de Mainnet",
+    "reviewedSatsGone": "Os sats com que este pagamento foi revisado foram usados em outro pagamento. Nada foi enviado: revise-o de novo.",
     "testMintOnMainnet": "Este é um mint de teste, e seus sats não valem nada: adicione-o a uma carteira Cashu de Testnet",
     "usdtGasAboveLimit": "O gas máximo estimado passa do seu limite",
     "usdtNeedsSepoliaGas": "Antes é preciso um pouco de ETH de Sepolia para o gas",

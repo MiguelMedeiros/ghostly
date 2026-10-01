@@ -52,6 +52,7 @@
     "networkUnreachable": "ネットワークに接続できませんでした",
     "noSharedMint": "この連絡先と共通のミントがありません",
     "realMintOnTestnet": "このミントは本物の sats を預かります。Mainnet の Cashu ウォレットに追加してください",
+    "reviewedSatsGone": "この支払いの確認に使った sats は別の支払いに使われました。何も送られていません。もう一度確認してください。",
     "testMintOnMainnet": "これはテスト用ミントで、その sats に価値はありません。Testnet の Cashu ウォレットに追加してください",
     "usdtGasAboveLimit": "推定最大ガスが上限を超えています",
     "usdtNeedsSepoliaGas": "先にガス代として少しの Sepolia ETH が必要です",

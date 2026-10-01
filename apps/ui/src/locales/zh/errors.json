@@ -52,6 +52,7 @@
     "networkUnreachable": "无法连接网络",
     "noSharedMint": "你和这个联系人没有共同的铸币厂",
     "realMintOnTestnet": "这个铸币厂保管真实的 sats：请把它添加到 Mainnet Cashu 钱包",
+    "reviewedSatsGone": "审核此付款时使用的 sats 已用于另一笔付款。没有发送任何内容：请重新审核。",
     "testMintOnMainnet": "这是一个测试铸币厂，它的 sats 毫无价值：请把它添加到 Testnet Cashu 钱包",
     "usdtGasAboveLimit": "预估的最高 gas 超出你的上限",
     "usdtNeedsSepoliaGas": "需要先有一点 Sepolia ETH 作为 gas",

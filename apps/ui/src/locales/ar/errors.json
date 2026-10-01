@@ -52,6 +52,7 @@
     "networkUnreachable": "تعذّر الوصول إلى الشبكة",
     "noSharedMint": "لا توجد دار سك مشتركة بينك وبين جهة الاتصال هذه",
     "realMintOnTestnet": "دار السك هذه تحفظ sats حقيقية: أضفها إلى محفظة Cashu على Mainnet",
+    "reviewedSatsGone": "ذهبت الـ sats التي رُوجعت بها هذه الدفعة إلى دفعة أخرى. لم يُرسَل شيء: راجعها من جديد.",
     "testMintOnMainnet": "هذه دار سك تجريبية، والـ sats فيها بلا قيمة: أضفها إلى محفظة Cashu على Testnet",
     "usdtGasAboveLimit": "الحد الأقصى المقدّر للغاز يتجاوز حدّك",
     "usdtNeedsSepoliaGas": "يلزم أولًا قليل من ETH على Sepolia للغاز",

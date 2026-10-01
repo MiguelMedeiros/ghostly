@@ -25,6 +25,7 @@ export const ENGINE_ERRORS = {
   mintNotHttps: "Mints must use https",
   notEnoughSats: "Not enough sats in your wallet",
   noSharedMint: "You share no mint with this contact",
+  reviewedSatsGone: "The sats this payment was reviewed with went to another payment. Nothing was sent: review it again.",
   // Lightning.
   lightningFeeTooHigh: "The Lightning fee ({fee} sats) is too high",
   invoiceExpired: "That invoice has expired",
