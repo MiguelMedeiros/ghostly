@@ -66,6 +66,7 @@
     "reconnectBeforeApprove": "批准前请重新连接聊天。你的审核已保存。",
     "requestHasPayment": "此请求已有一笔付款。请先核对再重试。",
     "requestNotAwaiting": "此请求已不再等待付款。花费前请先查看其状态。",
+    "requestPaymentInFlight": "此请求已有一笔处理中的付款；请核对，不要再付一次",
     "reviewedSatsGone": "审核此付款时使用的 sats 已用于另一笔付款。没有发送任何内容：请重新审核。",
     "sentAfterReview": "此审核之后，这个钱包已发出一笔付款。请重新审核",
     "testMintOnMainnet": "这是一个测试铸币厂，它的 sats 毫无价值：请把它添加到 Testnet Cashu 钱包",
