@@ -949,3 +949,29 @@ describe("a request closed because its wallet was removed", () => {
     await expect(desk.payRequest({ linkId: "l", paymentId: "open", via: "lightning" })).rejects.toThrow("no longer open");
   });
 });
+
+describe("the line kept with a payment message (the CLI and older apps show it)", () => {
+  const TEST_MINT = "https://testnut.cashu.space";
+
+  it("a contact's Testnet request says test sats, and a Mainnet one sats", async () => {
+    const { desk, texts } = setup();
+    await desk.onPaymentRequest("l", { id: "rt", timestamp: 3, amount: { value: "1234", asset: "sat" }, endpoints: [[ENDPOINT.cashu, cashuRequestPayload([TEST_MINT])]], network: "testnet" });
+    await desk.onPaymentRequest("l", { id: "rm", timestamp: 4, amount: { value: "50", asset: "sat" }, endpoints: [[ENDPOINT.cashu, cashuRequestPayload([MINT])]], network: "mainnet" });
+    expect(texts()).toEqual(["⚡ Requested 1,234 test sats", "⚡ Requested 50 sats"]);
+  });
+
+  it("ecash sent from a test mint says test sats", async () => {
+    const { desk, wallet, texts } = setup();
+    wallet.createToken.mockImplementationOnce(async (_amount, _mints, _memo, outbox) => { outbox("cashuBtest", TEST_MINT); return { token: "cashuBtest", mint: TEST_MINT }; });
+    await desk.send({ linkId: "l", amount: 21, timestamp: 3, network: "testnet" });
+    await desk.send({ linkId: "l", amount: 5, timestamp: 4, confirmedReal: true });
+    expect(texts()).toEqual(["⚡ 21 test sats", "⚡ 5 sats"]);
+  });
+
+  it("a reviewed Cashu payment of test sats says so", async () => {
+    const testTarget = { ...cashuTarget(), network: "cashu-test", provider: TEST_MINT } as PaymentTarget;
+    const { desk, texts } = setup([record({ id: "rv", kind: "payment", direction: "out", token: "cashuBrv", requestId: "r", target: testTarget })]);
+    await desk.recordCashu(review(testTarget, { requestId: "r" }), "cashuBrv");
+    expect(texts()).toEqual(["100 test sats via Cashu"]);
+  });
+});
