@@ -151,7 +151,7 @@ No broader list of public relays exists: the pkarr repository's `relays.txt` nam
 - **One profile:** Settings, Advanced, Network, Pkarr relays, one URL per line.
 - **Everyone:** append the URL to `DEFAULT_RELAYS`, and put the old list into `PREVIOUS_DEFAULT_RELAYS` so profiles on the old defaults move with it. A relay that allows few requests gets a share in `RELAY_REQUESTS_PER_MINUTE`.
 - **Private network or tests (Desktop):** `GHOSTLY_PKARR_RELAYS` (comma-separated URLs) alone replaces the DHT. With `GHOSTLY_PKARR_DHT_BOOTSTRAP` (`ip:port`, comma-separated), those relays are written to and the DHT is reached through those nodes.
-- **Private network or tests (headless CLI):** `settings set relays '["http://…"]'` sets the relays, `GHOSTLY_DHT=0` leaves the Mainline DHT out, `GHOSTLY_DHT_BOOTSTRAP` (`host:port`, comma-separated) replaces its bootstrap routers, and `GHOSTLY_HYPERDHT_BOOTSTRAP` HyperDHT's ([CLI.md](CLI.md#pkarr-relays-and-the-mainline-dht)).
+- **Private network or tests (headless CLI):** `GHOSTLY_PKARR_RELAYS` (comma-separated URLs) as on the Desktop: the only relays from the first publish, the setting unused, and the Mainline DHT left out unless `GHOSTLY_DHT_BOOTSTRAP` is given. Otherwise `settings set relays '["http://…"]'` sets the relays, `GHOSTLY_DHT=0` leaves the Mainline DHT out, `GHOSTLY_DHT_BOOTSTRAP` (`host:port`, comma-separated) replaces its bootstrap routers, and `GHOSTLY_HYPERDHT_BOOTSTRAP` HyperDHT's ([CLI.md](CLI.md#pkarr-relays-and-the-mainline-dht)).
 
 ## What observers see
 

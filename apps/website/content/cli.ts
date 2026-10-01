@@ -21,7 +21,7 @@ $ ghostly listen
 {"type":"message.received","message":{"text":"deploy?"}}`;
 
 /** packages/cli/examples/echo-bot.sh, without its comments. */
-export const ECHO_BOT = `ghostly listen --type message.received --cursor ~/.ghostly/echo.cursor --exec '
+export const ECHO_BOT = `ghostly listen --type message.received --cursor "\${GHOSTLY_HOME:-\$HOME/.ghostly}/echo.cursor" --exec '
   event="$(cat)"
   printf "echo: %s" "$(printf "%s" "$event" | jq -r .message.text)" \\
     | ghostly send "$(printf "%s" "$event" | jq -r .chat)" --stdin'`;
