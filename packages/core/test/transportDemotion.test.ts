@@ -1,7 +1,7 @@
 import { afterEach, expect, it, vi } from "vitest";
 import { DEMOTE_AFTER_FAILURES, DEMOTE_MS, GhostLink } from "../src/ghostlink";
 import { createLink } from "../src/invite";
-import { createIdentity } from "../src/identity";
+import { createIdentity, identityFromSeedB64 } from "../src/identity";
 import type { NativeEndpoint, NativeTransport } from "../src/pairedTransports";
 
 // covers: chat.one-chat, transport.iroh, transport.hyperdht
@@ -105,6 +105,31 @@ it("a newer record that lists a transport with no way to dial it: the endpoint k
   link.learnPeerTransports(["iroh/1"], { "iroh/1": { id: "a" } }, true);
   expect((link as unknown as { demotedUntil: Map<string, number> }).demotedUntil.has("iroh/1")).toBe(false);
   await attempt();
+  expect(calls).toEqual(["iroh/1"]);
+  await link.stop(false);
+});
+
+it("a listener that starts late, with the contact there and its way known, is dialled at once, not after the backoff", async () => {
+  // Every native slot was taken when the app started; the chat gets one later (opened on screen). Its attempts with
+  // nothing to dial over had built a backoff of minutes, and the contact, the higher key, does not dial.
+  vi.useFakeTimers();
+  let made = createLink();
+  while (identityFromSeedB64(made.mine.seedB64).pubKeyZ32 > made.mine.peerPubKeyZ32) made = createLink();
+  const link = new GhostLink({
+    params: { ...made.mine, profile: "paired-chat/1" }, rtcAvailable: false, autoConnect: true,
+    pairing: { credentials: { seedB64: createIdentity().seedB64, peerKey: createIdentity().pubKeyZ32 }, pinPeer: async () => {} },
+    native: { fallback: true, automatic: true },
+    transport: { publish: async () => {}, resolve: async () => null, describe: () => ({ protocol: "none", relays: [] }) },
+    createPeerConnection: () => { throw new Error("no WebRTC here"); },
+    localFetch: vi.fn(), getServices: () => [], getHostedHttpService: () => undefined,
+  });
+  const session = (link as unknown as { session: object }).session;
+  Object.defineProperty(session, "peerPresence", { get: () => ({ online: true, lastPacketAt: Date.now(), services: null }) });
+  link.learnPeerTransports(["iroh/1"], { "iroh/1": { id: "a" } });
+  Object.assign(link as unknown as Record<string, number>, { autoConnectFailures: 4, lastAutoConnectAt: Date.now() });
+  const calls: string[] = [];
+  link.registerEndpoint(endpoint("iroh/1", calls));
+  await vi.advanceTimersByTimeAsync(100);
   expect(calls).toEqual(["iroh/1"]);
   await link.stop(false);
 });
