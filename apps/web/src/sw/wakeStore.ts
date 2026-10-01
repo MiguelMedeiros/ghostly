@@ -61,9 +61,18 @@ export async function writeWakeEntries(profile: string, entries: readonly WakeEn
   }
 }
 
-/** Forgets everything of this profile (push turned off). */
-export function clearWakeEntries(profile: string): Promise<void> {
-  return writeWakeEntries(profile, [], { title: "", body: "" });
+/** Forgets everything of this profile (push turned off, its data cleared): its tokens and its words. */
+export async function clearWakeEntries(profile: string): Promise<void> {
+  const db = await open();
+  try {
+    const transaction = db.transaction([TOKENS, TEXT], "readwrite");
+    const prefix = `${profile}|`;
+    transaction.objectStore(TOKENS).delete(IDBKeyRange.bound(prefix, `${prefix}￿`));
+    transaction.objectStore(TEXT).delete(profile);
+    await done(transaction);
+  } finally {
+    db.close();
+  }
 }
 
 function get<T>(db: IDBDatabase, store: string, id: string): Promise<T | undefined> {

@@ -3,6 +3,8 @@ export const UI_PORT = "ui";
 /** One-shot messages, addressed by `target` because every context hears them. */
 export type RuntimeMessage =
   | { target: "background"; type: "ensure-engine" }
+  /** The peer stopped for good ("Clear all data"): its document closes and a new one starts. */
+  | { target: "background"; type: "restart-engine" }
   | { target: "background"; type: "open-service"; peerPubKeyZ32: string; serviceId: string }
   /** A `lightning:` or `bitcoin:` link, for a wallet on this device: the app page cannot open one itself. */
   | { target: "background"; type: "open-payment-link"; uri: string }

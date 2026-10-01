@@ -110,6 +110,21 @@ describe("store-and-forward engine", () => {
     expect(b.received[1]).not.toHaveProperty("reply");
   });
 
+  it("clearing the profile's data deletes every held item and the manifest from storage, and the contact finds nothing", async () => {
+    const { a, b, buckets } = setup();
+    engines.push(a.engine, b.engine);
+    a.messages.set("me_c1", { text: "held, then cleared", timestamp: 1000 });
+    a.messages.set("me_c2", { text: "this one too", timestamp: 2000 });
+    await a.engine.hold("link-a", { kind: "text", id: "wire-clear-1", messageId: "me_c1", bytes: 18, timestamp: 1000 });
+    await a.engine.hold("link-a", { kind: "text", id: "wire-clear-2", messageId: "me_c2", bytes: 12, timestamp: 2000 });
+    expect(buckets.alice.store.objects.size, "two items and the manifest").toBe(3);
+    await a.engine.withdrawAll();
+    expect([...buckets.alice.store.objects.keys()]).toEqual([]);
+    b.engine.start();
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(b.received).toEqual([]);
+  });
+
   it("holds text, a file and a payment request in order, the contact picks them up in order and the sender sees them delivered", async () => {
     const { a, b, buckets, transport } = setup();
     engines.push(a.engine, b.engine);

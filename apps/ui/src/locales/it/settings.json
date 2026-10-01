@@ -11,9 +11,19 @@
   "chatListDensity": "Elenco chat",
   "clear": "Cancella",
   "clearAllData": "Cancella tutti i dati",
-  "clearAllDataConfirm": "Cancellare tutto? Non si può annullare.",
-  "clearAllDataDescription": "Chat, file e impostazioni di questo dispositivo. I wallet restano.",
-  "clearAllDataInfo": "I wallet non vengono eliminati: spendi o fai il backup dei tuoi sats prima, se vuoi che spariscano anche loro.",
+  "clearAllDataConfirm": "Questo cancella per sempre:",
+  "clearAllDataDescription": "Chat, identità e impostazioni di questo profilo. I wallet restano.",
+  "clearAllDataInfo": "Prima di cancellare, Ghostly ritira ciò che può: elementi tenuti per i contatti, il tuo DID, le tue prove di identità e il risveglio. Le prove pubblicate su altri siti restano lì. I wallet non vengono eliminati: spendi o fai il backup dei tuoi sats prima, se vuoi che spariscano anche loro.",
+  "clearAllDataItems": {
+    "apps": "App condivise",
+    "chats": "Chat, messaggi e file",
+    "groups": "Gruppi",
+    "identities": "Prove di identità, il tuo DID e i dati Nostr",
+    "profile": "Il tuo nome e la tua foto",
+    "settings": "Impostazioni, schermata di blocco e rete",
+    "storage": "Impostazioni S3 e risveglio ad app chiusa"
+  },
+  "clearAllDataKeeps": "Restano: i tuoi wallet, i tuoi backup e gli altri profili.",
   "colorScheme": "Modalità",
   "colorSchemes": {
     "dark": "Scuro",

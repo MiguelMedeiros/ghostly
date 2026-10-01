@@ -1,5 +1,5 @@
 import {
-  bytesEqual, createIdentity, didDhtDocument, didDhtFromPublicKey, encodeDidDhtPacket, fromBase64Url, identityFromSeed, PacketTooLargeError,
+  bytesEqual, createIdentity, didDhtDocument, didDhtFromPublicKey, encodeDidDhtDeactivated, encodeDidDhtPacket, fromBase64Url, identityFromSeed, PacketTooLargeError,
   signDidDhtPacket, toBase64Url, toZ32, type DidDhtDocument,
 } from "@ghostly/core";
 import { STORES, store, wrap } from "../shared/idb";
@@ -181,6 +181,19 @@ export class ProfileDid {
       this.error = error instanceof Error ? error.message : String(error);
     }
     this.host.emit();
+  }
+
+  /**
+   * "Clear all data": the DID ends. When a document was ever published, a newer packet reading `deactivated` replaces
+   * it, so resolvers say the DID is gone instead of showing the old document until it expires. Stops publishing first.
+   */
+  async deactivate(): Promise<void> {
+    this.stop();
+    const previous = this.stored?.published;
+    if (!this.stored || !previous) return;
+    const seq = Math.max(Math.floor(Date.now() / 1000), previous.seq + 1);
+    const identity = identityFromSeed(fromBase64Url(await unsealSeed(this.stored.seed.sealed, this.stored.seed.deviceKey)));
+    await this.host.publish(toZ32(this.publicKey()), signDidDhtPacket(identity, encodeDidDhtDeactivated(this.publicKey()), seq));
   }
 
   private listed(): string[] {

@@ -31,6 +31,11 @@ export const extensionHost: BrowserHost = {
     return { send: (request) => port.postMessage(request) };
   },
 
+  async restartEngine() {
+    const reply = await chrome.runtime.sendMessage({ target: "background", type: "restart-engine" } satisfies RuntimeMessage);
+    if (!reply?.ok) throw new Error(reply?.error ?? "The Ghostly peer did not start again. Reopen the extension to retry.");
+  },
+
   // Chrome's own prompt, and only from a user gesture.
   requestLocalAccess: (originPattern) => chrome.permissions.request({ origins: [originPattern] }),
 
