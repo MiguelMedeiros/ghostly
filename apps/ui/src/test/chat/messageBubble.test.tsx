@@ -236,8 +236,13 @@ describe("MessageBubble: system lines", () => {
     expect(pill.classList.contains("bg-danger/10")).toBe(missed);
   });
 
-  it.each([[65_000, "(1m 5s)"], [42_900, "(42s)"], [600_000, "(10m 0s)"]])("shows a call that lasted %i ms as %s", (duration, shown) => {
+  it.each([[65_000, "(1 min 5 s)"], [42_900, "(42 s)"], [600_000, "(10 min 0 s)"], [3_780_000, "(1 h 3 min)"]])("shows a call that lasted %i ms as %s", (duration, shown) => {
     bubble({ sender: "system", text: "Call ended", callEvent: { type: "call_ended", duration } });
+    expect(screen.getByText(shown)).toBeInTheDocument();
+  });
+
+  it.each([["ja", "(1 分 5 秒)"], ["zh", "(1 分 5 秒)"], ["ar", "(1 دقيقة 5 ثانية)"], ["pt", "(1 min 5 s)"]] as const)("says a call's length in %s", (language, shown) => {
+    renderApp(<MessageBubble message={message({ sender: "system", text: "Audio call ended", callEvent: { type: "call_ended", duration: 65_000 } })} peerPubKey="peer" />, { language });
     expect(screen.getByText(shown)).toBeInTheDocument();
   });
 

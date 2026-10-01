@@ -26,6 +26,7 @@ import { canRetryFile } from "../lib/fileStatus";
 import { useTransfer } from "../hooks/useServicesPlatform";
 import type { ChatFile, ChatMessage } from "../lib/types";
 import { callEventText } from "../lib/callLines";
+import { formatCallLength } from "../lib/messageDetails";
 import type { QuoteView } from "../lib/replies";
 import { ReplyQuote } from "./chat/ReplyQuote";
 import { ButtonPress, MessageButtons } from "./chat/MessageButtons";
@@ -407,16 +408,6 @@ function CallEventIcon({ type, hasVideo }: { type: string; hasVideo?: boolean })
       )}
     </span>
   );
-}
-
-function formatDuration(ms: number): string {
-  const totalSeconds = Math.floor(ms / 1000);
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
-  if (minutes === 0) {
-    return `${seconds}s`;
-  }
-  return `${minutes}m ${seconds}s`;
 }
 
 /** The chat's scrolling list of messages: a message's menus stay inside it (see `Menu`'s `within`). */
@@ -828,7 +819,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
           <CallEventIcon type={type} hasVideo={hasVideo} />
           <span>{callEventText(t, type, hasVideo) ?? message.text}</span>
           {duration !== undefined && duration > 0 && (
-            <span className="text-text-muted">({formatDuration(duration)})</span>
+            <span className="text-text-muted">({formatCallLength(duration, t)})</span>
           )}
           <span className="text-text-muted text-[10px]">{time}</span>
         </div>

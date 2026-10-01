@@ -86,6 +86,15 @@ export function formatDuration(ms: number, t: Translate = englishT): string {
   return t("messageDetails.unit.daysHours", { d: int(Math.floor(ms / 86_400_000)), h: int(Math.round((ms % 86_400_000) / 3_600_000)) });
 }
 
+/** How long a call lasted, in whole seconds and the app's language: "42 s", "1 min 5 s", "1 h 3 min". */
+export function formatCallLength(ms: number, t: Translate = englishT): string {
+  const int = (n: number) => decimal(n, 0, languageOf(t));
+  const total = Math.floor(ms / 1000);
+  if (total < 60) return t("messageDetails.unit.seconds", { n: int(total) });
+  if (total < 3600) return t("messageDetails.unit.minutesSeconds", { min: int(Math.floor(total / 60)), s: int(total % 60) });
+  return t("messageDetails.unit.hoursMinutes", { h: int(Math.floor(total / 3600)), min: int(Math.floor((total % 3600) / 60)) });
+}
+
 const CLOCK: Intl.DateTimeFormatOptions = { hour: "2-digit", minute: "2-digit", second: "2-digit", fractionalSecondDigits: 3, hourCycle: "h23" } as Intl.DateTimeFormatOptions;
 
 /** The time to the millisecond, as the app's language writes a time of day (the device's without one). */
@@ -369,7 +378,7 @@ function build(message: ChatMessage, view: MessageDetailsView | null | undefined
     add("call", [
       event ? { label: L("event"), value: t(event) } : { label: L("event"), value: message.callEvent.type, raw: true },
       { label: L("video"), value: V(message.callEvent.hasVideo ? "yes" : "no") },
-      message.callEvent.duration ? { label: L("length"), value: duration(message.callEvent.duration) } : undefined,
+      message.callEvent.duration ? { label: L("length"), value: formatCallLength(message.callEvent.duration, t) } : undefined,
     ]);
   }
 
