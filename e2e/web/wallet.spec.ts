@@ -93,7 +93,7 @@ test.describe("wallet", () => {
     const fees = Number((await alice.page.getByTestId("wallet-fees-paid").textContent())!.match(/(\d+) (?:test )?sats/)![1]);
     await expect.poll(() => balance(alice), "balance = received - sent - fees, to the sat").toBe(TEST_COINS - 21 - 10 - fees);
     await alice.page.screenshot({ path: testInfo.outputPath("cashu-chat-history.png"), fullPage: true });
-    await expect(alice.page.getByTestId("mint-fees").filter({ hasText: "0.1 sat per proof" })).toBeVisible();
+    await expect(alice.page.getByTestId("mint-fees").filter({ hasText: "0.1 test sat per proof" })).toBeVisible();
   });
 
   test("test-mint ecash reaches the contact's Testnet wallet and never their Mainnet one", { tag: ["@feature:payments.cashu.test-sats", "@feature:payments.cashu.send", "@feature:wallet.instances.networks"] }, async ({ peer }) => {

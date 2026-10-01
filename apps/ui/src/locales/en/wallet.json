@@ -101,7 +101,7 @@
     "lastBalance": "Last known balance: {{balance}} {{unit}}",
     "lastBalanceAt": "Last known balance: {{balance}} {{unit}} · {{date}}",
     "maxFee": "Most you accept in fees",
-    "maxFeeInput": "Maximum fee in sats",
+    "maxFeeInput": "Maximum fee in {{unit}}",
     "newAddress": "New address",
     "notConnected": "{{label}} is not connected",
     "notConnectedDefault": "The Bitcoin source is not connected",
@@ -173,7 +173,8 @@
     "createInvoice": "Create Lightning invoice",
     "fee": {
       "none": "No fee to spend",
-      "perProof": "{{fee}} sat per proof (about 1 sat a payment)"
+      "perProof": "{{fee}} sat per proof (about 1 sat a payment)",
+      "perProofTest": "{{fee}} test sat per proof (about 1 test sat a payment)"
     },
     "history": {
       "fee": "fee {{amount}}",
@@ -730,6 +731,10 @@
     "receive": "Receive",
     "receivingAddress": "Receiving address",
     "send": "Send"
+  },
+  "unseen": {
+    "real": "{{place}}, {{amount}} new sats",
+    "test": "{{place}}, {{amount}} new test sats"
   },
   "usdt": {
     "approve": "Nothing is sent until you approve the review.",

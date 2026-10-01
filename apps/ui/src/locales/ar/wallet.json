@@ -101,7 +101,7 @@
     "lastBalance": "آخر رصيد معروف: {{balance}} {{unit}}",
     "lastBalanceAt": "آخر رصيد معروف: {{balance}} {{unit}} · {{date}}",
     "maxFee": "أقصى ما تقبله من رسوم",
-    "maxFeeInput": "الحد الأقصى للرسوم بالـ sats",
+    "maxFeeInput": "الحد الأقصى للرسوم ({{unit}})",
     "newAddress": "عنوان جديد",
     "notConnected": "{{label}} غير متصل",
     "notConnectedDefault": "مصدر Bitcoin غير متصل",
@@ -173,7 +173,8 @@
     "createInvoice": "إنشاء فاتورة Lightning",
     "fee": {
       "none": "بلا رسوم عند الإنفاق",
-      "perProof": "{{fee}} sat لكل إثبات (نحو 1 sat لكل دفعة)"
+      "perProof": "{{fee}} sat لكل إثبات (نحو 1 sat لكل دفعة)",
+      "perProofTest": "{{fee}} sat تجريبي لكل إثبات (نحو 1 sat تجريبي لكل دفعة)"
     },
     "history": {
       "fee": "رسوم {{amount}}",
@@ -730,6 +731,10 @@
     "receive": "استلام",
     "receivingAddress": "عنوان الاستلام",
     "send": "إرسال"
+  },
+  "unseen": {
+    "real": "{{place}}، {{amount}} sats جديدة",
+    "test": "{{place}}، {{amount}} sats تجريبية جديدة"
   },
   "usdt": {
     "approve": "لا يُرسل شيء حتى توافق على المراجعة.",

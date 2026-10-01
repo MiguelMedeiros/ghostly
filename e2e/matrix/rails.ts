@@ -78,7 +78,7 @@ async function requestInChat(payee: Actor, payer: Actor, p: ChatPayment, confirm
   await cardAction(payee, "request");
   await openChat(payer);
   const request = bubble(payer, p.note);
-  if (p.maxFee) await request.getByLabel(either("Maximum fee (sats)")).fill(p.maxFee);
+  if (p.maxFee) await request.getByLabel(filled("Maximum fee ({{unit}})", { unit: `${alternatives("test sats")}|${alternatives("sats")}` })).fill(p.maxFee);
   await request.getByTestId("payment-pay").click({ timeout: 60_000 });
   await approve(request);
   await settles(bubble(payee, p.note), confirm);

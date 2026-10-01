@@ -3845,7 +3845,7 @@ export class GhostlyNode implements EngineImplementation {
       if(params.requestId){
         if(!request || request.linkId!==params.linkId || request.direction!=="in" || request.state!=="pending" || request.amount!==params.amount)throw new Error("Payment review does not match the authenticated request");
         if(params.target.method!=="cashu" ? JSON.stringify(request.target)!==JSON.stringify(params.target) : !!request.target || params.target.address!==request.id || !request.mints?.includes(params.target.provider))throw new Error("Selected method or mint does not match the authenticated request");
-        if(request.lightningPending || Object.values(this.desk.views()).some(p=>p.kind==="payment" && p.requestId===request.id && p.linkId===params.linkId && !["failed","reclaimed"].includes(p.state)))throw new Error("This request already has a payment; reconcile it instead");
+        if(request.lightningPending || Object.values(this.desk.views()).some(p=>p.kind==="payment" && p.requestId===request.id && p.linkId===params.linkId && !["failed","reclaimed"].includes(p.state)))throw engineError("requestPaymentInFlight");
         const asked=paymentNetwork(request);
         if(asked!==paying)throw new Error(crossNetwork(paying, asked));
       } else if(params.target.method!=="cashu" || !payee || params.target.address!==payee)throw new Error("Destination does not match the authenticated peer");
@@ -3867,11 +3867,11 @@ export class GhostlyNode implements EngineImplementation {
     if(intent)assertConfirmedReal(intent.review.method==="cashu" ? mintNetwork(intent.review.provider) : walletNetworkOf(intent.review.network), params.confirmedReal);
     if(intent?.review.linkId) {
       const link=this.paymentLink(intent.review.linkId);
-      if(!link || (intent.review.method==="arkade" && !link.supportsArkPayments))throw new Error("Reconnect the data link before approving. Your review was saved.");
+      if(!link || (intent.review.method==="arkade" && !link.supportsArkPayments))throw engineError("reconnectBeforeApprove");
       // A request closed or paid meanwhile says so first: the contact may have turned that way of paying off because of it.
       if (intent.review.requestId) {
         const request = this.desk.payment(intent.review.requestId);
-        if (!request || request.state !== "pending" || request.lightningPending) throw new Error("This request is no longer awaiting payment. Check its status before spending.");
+        if (!request || request.state !== "pending" || request.lightningPending) throw engineError("requestNotAwaiting");
       }
       // Reach the contact first, as preparing does: until the chat is live again (after a restart, say), its ways of
       // paying are not known, and Cashu would read as off.
