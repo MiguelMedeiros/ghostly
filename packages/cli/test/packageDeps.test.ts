@@ -43,7 +43,25 @@ it("ships every chunk and WebAssembly file the bundle loads", () => {
   expect(loaded).toContain("dist/assets/ghostly_iroh_web_bg.wasm");
   expect([...loaded].some((path) => /^dist\/assets\/ghostly_iroh_web-[\w-]+\.js$/.test(path))).toBe(true);
   expect([...loaded].filter((path) => !existsSync(join(root, path))).sort()).toEqual([]);
-  const [pack] = JSON.parse(execFileSync("npm", ["pack", "--dry-run", "--json", "--ignore-scripts"], { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] })) as [{ files: { path: string }[] }];
-  const packed = new Set(pack.files.map((f) => f.path));
+  const packed = new Set(npmPack(root).map((f) => f.path));
   expect([...loaded].filter((path) => !packed.has(path)).sort()).toEqual([]);
+});
+
+/** What `npm pack` sends: npm 10 and 11 answer `[{files}]`, npm 12 `{"<name>": {files}}`. */
+function npmPack(root: string): { path: string; mode: number }[] {
+  const out = JSON.parse(execFileSync("npm", ["pack", "--dry-run", "--json", "--ignore-scripts"], { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] })) as unknown;
+  const [pack] = (Array.isArray(out) ? out : Object.values(out as object)) as { files: { path: string; mode: number }[] }[];
+  return pack.files;
+}
+
+/** The README and SKILL.md send a reader to `examples/…`: the package holds them, for whoever installed it from npm. */
+it("ships every example the README and SKILL.md name", () => {
+  const root = join(import.meta.dirname, "..");
+  const named = new Set<string>();
+  for (const doc of ["README.md", "SKILL.md"]) for (const m of readFileSync(join(root, doc), "utf8").matchAll(/\bexamples\/[\w-]+\.(?:sh|mjs)\b/g)) named.add(m[0]);
+  expect(named).toContain("examples/payment-bot.mjs");
+  const packed = new Map(npmPack(root).map((f) => [f.path, f.mode]));
+  expect([...named].filter((path) => !packed.has(path)).sort()).toEqual([]);
+  // The shell examples run as `./examples/echo-bot.sh`, as in the repository.
+  expect([...packed].filter(([path, mode]) => path.endsWith(".sh") && !(mode & 0o100)).map(([path]) => path)).toEqual([]);
 });
