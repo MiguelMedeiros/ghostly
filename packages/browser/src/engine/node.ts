@@ -40,7 +40,7 @@ import { ModeChanged, networkLabel, WrongNetworkError } from "./paymentAdapters/
 import { assertConfirmedReal, createTiming, WALLET_NAMES, createFailure, crossNetwork, paymentNetwork, paymentNetworksOf, walletInstances } from "./paymentAdapters/walletInstances";
 import { migrateWalletNetworks } from "./paymentAdapters/walletNetworks";
 import { perNetwork, type PerNetwork } from "./paymentAdapters/perNetwork";
-import { COMMUNITY_EDIT_FRAME, INVITE_TAKEN, engineError, parseCommunityEdit, traceLink } from "@ghostly/core";
+import { COMMUNITY_EDIT_FRAME, INVITE_TAKEN, LIVENESS_MISSED_PINGS, LIVENESS_PING_MS, engineError, parseCommunityEdit, traceLink } from "@ghostly/core";
 import { GROUP_WAKE_FRAME, GROUP_WAKE_RECEIVE_LIMIT, GroupWakeLimiter, RateWindow, WAKE_CALL_INTERVAL_MS, WakeLimiter, groupWakeFrame, groupWakes, parseGroupWakeFrame, checkPushEndpoint, newWakeToken, relayRequest, vapidKeysMatch, wakeRequest, type PushRequest, type WakeKind, type WakeTarget } from "@ghostly/core";
 import { COMMUNITY_REACTION_FRAME, GROUP_REACTION_FRAME, REACTION_LIMITS, ReactionWindow, queueReaction, readReaction, validReactionNumber, wireReaction, type WireReaction } from "@ghostly/core";
 import { COMMUNITY_PIN_FRAME, PIN_LIMITS, mayPin, pinIsNewer, pinNumberHolds, readPin, type GroupPinFrame, type WirePin } from "@ghostly/core";
@@ -194,6 +194,13 @@ export const CLEAR_WITHDRAW_MS = 6_000;
  * session): a dial to a contact that is not there ends within its 20 s timeout, and leaves its slot free until the next.
  */
 const ACTIVE_SLOT_RETRY_MS = 3_000;
+/**
+ * How long a chat live when the app last ran may take to be live again before that stretch counts as over
+ * (`TransportLog.notBackAfterRestart`): past the contact's liveness bound (three pings missed), the session it held is
+ * gone too. Shorter, an app started twice in quick succession would not knock the second time on a contact still
+ * holding the session.
+ */
+export const RESUME_SPENT_MS = LIVENESS_PING_MS * (LIVENESS_MISSED_PINGS + 1);
 
 const DEFAULT_SETTINGS: Settings = {
   online: true,
@@ -1331,6 +1338,8 @@ export class GhostlyNode implements EngineImplementation {
     this.depart();
     if (this.relayRetry) clearTimeout(this.relayRetry);
     if (this.activeSlotRetry) clearTimeout(this.activeSlotRetry);
+    for (const timer of this.resumeTimers.values()) clearTimeout(timer);
+    this.resumeTimers.clear();
     if(this.paymentTimer)clearTimeout(this.paymentTimer);
     clearTimeout(this.awaitingTimer);
     if (this.spareTimer) clearTimeout(this.spareTimer);
@@ -4709,6 +4718,7 @@ export class GhostlyNode implements EngineImplementation {
     });
     const link = live.link;
     link.start(); this.emitState();
+    if (stored.pairedPeerKey && stored.deliveryMode !== "dht" && this.transportLogOf(live)?.liveAtLastRun) this.watchResume(linkId, link);
     // Unused invites need discovery, not two native listeners (`keepsNativeEndpoints`). Saved contacts
     // retain background listeners within the real native capacity.
     const nativeUp = stored.deliveryMode !== "dht" && this.keepsNativeEndpoints(linkId, stored) ? this.ensureNativeEndpoints(linkId) : undefined;
@@ -4948,18 +4958,44 @@ export class GhostlyNode implements EngineImplementation {
    * stored, an app with more paired chats than slots left a chat that was live a moment before with no listener, and a
    * contact with no WebRTC (the Linux Desktop) never reached it again (Omarchy, 2026-09-30: "On DHT · retrying live" for
    * minutes after both apps restarted). Not "live when this app last ran" first: a chat that heard its contact leave as
-   * both quit is not, and one that never came back since keeps saying it is, run after run.
+   * both quit is not.
+   *
+   * On an app with WebRTC, the chats whose contact has none (its capability record lists no `webrtc/1`: a Linux Desktop,
+   * a CLI with WebRTC off) come first, each class in that order: they reach this app over a native transport or not
+   * live at all, while a contact with WebRTC still has it when no listener is left here.
    */
   private nativeStartOrder(linkIds: string[]): string[] {
     const isChat = (id: string) => { const stored = this.links.get(id)?.stored; return !!stored && !stored.group; };
+    const rtc = typeof RTCPeerConnection !== "undefined";
     const rank = new Map(linkIds.filter(isChat).map(id => {
       const live = this.links.get(id)!;
-      return [id, Math.max(live.lastMessageAt, this.transportLogOf(live)?.lastLiveAt ?? 0)] as const;
+      const theirs = live.stored.capsState?.peer?.transports ?? live.stored.peerTransports;
+      return [id, { recent: Math.max(live.lastMessageAt, this.transportLogOf(live)?.lastLiveAt ?? 0),
+        nativeOnly: rtc && !!theirs && !theirs.includes("webrtc/1") }] as const;
     }));
-    const chats = [...rank.keys()].sort((a, b) => rank.get(b)! - rank.get(a)!);
-    chats.forEach((id, place) => traceLink(this.links.get(id)!.myPubKeyZ32, "native-order", { place, recent: rank.get(id) }));
+    const chats = [...rank.keys()].sort((a, b) => {
+      const x = rank.get(a)!, y = rank.get(b)!;
+      return Number(y.nativeOnly) - Number(x.nativeOnly) || y.recent - x.recent;
+    });
+    chats.forEach((id, place) => traceLink(this.links.get(id)!.myPubKeyZ32, "native-order", { place, ...rank.get(id) }));
     let next = 0;
     return linkIds.map(id => rank.has(id) ? chats[next++] : id);
+  }
+
+  /**
+   * A chat started as "live when this app last ran" (it resumes, and knocks): if this run is not live in it within
+   * `RESUME_SPENT_MS`, its history says that stretch is over, so the next start does not resume it again.
+   */
+  private readonly resumeTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private watchResume(linkId: string, link: GhostLink): void {
+    const before = this.resumeTimers.get(linkId);
+    if (before) clearTimeout(before);
+    this.resumeTimers.set(linkId, setTimeout(() => {
+      this.resumeTimers.delete(linkId);
+      const live = this.links.get(linkId), log = live && this.transportLogOf(live);
+      if (this.shuttingDown || !live || !log || live.link !== link) return;
+      if (log.notBackAfterRestart(Date.now())) this.saveTransportLog(live, log);
+    }, RESUME_SPENT_MS));
   }
 
   /** The chat on screen found every native slot busy: it tries again in a moment, while it stays on screen. */

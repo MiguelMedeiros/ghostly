@@ -204,6 +204,8 @@ describe("the chat's connection control and its panel", () => {
     // The history says the wait and its attempts, not a lost connection.
     expect(transportEventText({ at: 1, kind: "down", from: "iroh/1", target: "hyperdht/1", text: "dht" }, "Bea")).toBe("Waiting for HyperDHT · off Iroh · texts go through the DHT");
     expect(transportEventText({ at: 1, kind: "attempt", target: "hyperdht/1", reason: "hyperdht/1 unreachable" }, "Bea")).toBe("Waiting for HyperDHT · last attempt: HyperDHT unreachable");
+    // The stretch this app quit in, not back in the run after it: no drop was seen, it just did not come back.
+    expect(transportEventText({ at: 1, kind: "down", from: "iroh/1", restart: true }, "Bea")).toBe("Live connection not back after this app restarted (Iroh)");
   });
 
   it("says why a change could not be made, and stays open", async () => {
