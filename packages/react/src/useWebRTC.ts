@@ -156,6 +156,14 @@ function audioTransceiver(pc: RTCPeerConnection): RTCRtpTransceiver | undefined 
   return pc.getTransceivers().find((t) => t.receiver.track.kind === "audio" && t.mid !== null);
 }
 
+/**
+ * A device request that got nothing (a picker closed, a device refused or gone) gives the turn back to the one asked
+ * before it, still opening: that one was what the person wanted, and a failed later one does not replace it.
+ */
+function yieldRequest(counter: { current: number }, request: number): void {
+  if (counter.current === request) counter.current = request - 1;
+}
+
 /** Capture from exactly this device, or from the default (null). */
 const exactly = (deviceId: string | null): MediaTrackConstraints | true => (deviceId ? { deviceId: { exact: deviceId } } : true);
 
@@ -231,6 +239,8 @@ export function useWebRTC({
   const shareBusyRef = useRef(false);
   /** Counts the picture changes asked for: one whose camera or screen opens after a later one was asked is dropped. */
   const pictureRequestRef = useRef(0);
+  /** The same for the microphone switches: one that opens after a later one was picked is dropped. */
+  const microphoneRequestRef = useRef(0);
   const screenShareErrorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** The offer we answered and whether we answered with the camera. */
   const answeredRef = useRef<{ offer: CallSignal; withVideo: boolean } | null>(null);
@@ -462,12 +472,17 @@ export function useWebRTC({
       const request = ++pictureRequestRef.current;
 
       let track: MediaStreamTrack | null = null;
-      if (next === "camera") {
-        track = (await mediaRef.current.getUserMedia({ video: camera === undefined ? captureFrom("video") : exactly(camera) })).getVideoTracks()[0];
-      } else if (next === "screen") {
-        const { getDisplayMedia } = mediaRef.current;
-        if (!getDisplayMedia) throw Object.assign(new Error("Screen sharing is not available here"), { name: "NotSupportedError" });
-        track = (await getDisplayMedia({ video: true, audio: false })).getVideoTracks()[0];
+      try {
+        if (next === "camera") {
+          track = (await mediaRef.current.getUserMedia({ video: camera === undefined ? captureFrom("video") : exactly(camera) })).getVideoTracks()[0];
+        } else if (next === "screen") {
+          const { getDisplayMedia } = mediaRef.current;
+          if (!getDisplayMedia) throw Object.assign(new Error("Screen sharing is not available here"), { name: "NotSupportedError" });
+          track = (await getDisplayMedia({ video: true, audio: false })).getVideoTracks()[0];
+        }
+      } catch (error) {
+        yieldRequest(pictureRequestRef, request);
+        throw error;
       }
       // The call ended while the prompt or the picker was open: what it gave is let go, and nobody is told.
       if (attemptRef.current !== attempt) {
@@ -858,9 +873,17 @@ export function useWebRTC({
     const sender = pc ? audioTransceiver(pc)?.sender : undefined;
     if (!pc || !localStreamRef.current || !sender) throw new Error("This call has no microphone to switch");
     const attempt = attemptRef.current;
-    const track = (await mediaRef.current.getUserMedia({ audio: exactly(deviceId) })).getAudioTracks()[0];
-    if (!track) throw Object.assign(new Error("No microphone"), { name: "NotFoundError" });
-    if (attemptRef.current !== attempt) { track.stop(); return; }
+    const request = ++microphoneRequestRef.current;
+    let track: MediaStreamTrack | undefined;
+    try {
+      track = (await mediaRef.current.getUserMedia({ audio: exactly(deviceId) })).getAudioTracks()[0];
+      if (!track) throw Object.assign(new Error("No microphone"), { name: "NotFoundError" });
+    } catch (error) {
+      yieldRequest(microphoneRequestRef, request);
+      throw error;
+    }
+    // Hung up meanwhile, or another microphone picked since (whichever opens first): the last one picked wins.
+    if (attemptRef.current !== attempt || microphoneRequestRef.current !== request) { track.stop(); return; }
     track.enabled = localStreamRef.current?.getAudioTracks()[0]?.enabled ?? true;
     try {
       await sender.replaceTrack(track);
