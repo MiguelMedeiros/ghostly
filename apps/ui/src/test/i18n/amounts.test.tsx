@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { Wallet } from "../../pages/Wallet";
 import { networkState, walletCard } from "../../components/walletCardData";
 import type { WalletState } from "../../lib/platform";
-import { decimalInput, formatAmount, formatTokenAmount } from "../../lib/amount";
+import { amountText, formatAmount, formatTokenAmount, readAmount } from "../../lib/amount";
 import { Amount } from "../../components/wallet/ui";
 import { previewText } from "../../lib/chatList";
 import type { Language } from "../../lib/settings";
@@ -106,20 +106,58 @@ describe("in Portuguese", () => {
     expect(row).not.toHaveTextContent("Test coins from the test mint");
   });
 
-  it("a wallet's decimal amount field takes the comma a phone's decimal key types", async () => {
-    const Field = () => { const [value, setValue] = useState(""); return <Amount value={value} onChange={setValue} unit="USDT" decimals={6} testId="amount" />; };
+  it("a wallet's decimal amount field takes the comma a phone's decimal key types, and shows it as typed", async () => {
+    let meant = "";
+    const Field = () => { const [value, setValue] = useState(""); meant = value; return <Amount value={value} onChange={setValue} unit="USDT" decimals={6} testId="amount" />; };
     const { user } = renderApp(<Field />, { language: "pt" });
     await user.type(screen.getByTestId("amount"), "2,75");
-    expect(screen.getByTestId("amount")).toHaveValue("2.75");
+    expect(screen.getByTestId("amount")).toHaveValue("2,75");
+    expect(meant).toBe("2.75");
+  });
+
+  it("a dot groups thousands in Portuguese: \"1.000\" is a thousand, never one", async () => {
+    let meant = "";
+    const Field = () => { const [value, setValue] = useState(""); meant = value; return <Amount value={value} onChange={setValue} unit="USDT" decimals={6} testId="amount" />; };
+    const { user } = renderApp(<Field />, { language: "pt" });
+    await user.type(screen.getByTestId("amount"), "1.000");
+    expect(meant).toBe("1000");
+    expect(screen.queryByTestId("amount-unclear")).not.toBeInTheDocument();
+    // A dot that cannot be grouping could be a decimal point: refused, said why, nothing meant.
+    await user.clear(screen.getByTestId("amount"));
+    await user.type(screen.getByTestId("amount"), "1.5");
+    expect(meant).toBe("");
+    expect(screen.getByTestId("amount-unclear")).toHaveTextContent("Valor ambíguo: escreva como 1.234,5");
+  });
+
+  it("a sats field refuses a decimal point instead of reading \"1.5\" as 15", async () => {
+    let meant = "";
+    const Field = () => { const [value, setValue] = useState(""); meant = value; return <Amount value={value} onChange={setValue} unit="sats" testId="amount" />; };
+    const { user } = renderApp(<Field />);
+    await user.type(screen.getByTestId("amount"), "1.5");
+    expect(meant).toBe("");
+    expect(screen.getByTestId("amount-unclear")).toHaveTextContent("Whole numbers only, like 1,234");
+    await user.clear(screen.getByTestId("amount"));
+    await user.type(screen.getByTestId("amount"), "21,000");
+    expect(meant).toBe("21000");
   });
 });
 
-describe("a decimal amount typed", () => {
-  it.each(LANGUAGES)("in %s keeps the decimal point, and a comma only where the language writes it so", (language) => {
+describe("an amount typed", () => {
+  const meaning = (text: string, language: Language, decimals = 6) => { const read = readAmount(text, language, decimals); return read.ok ? read.value : read.why; };
+  it.each(LANGUAGES)("in %s reads the language's decimal point, its grouping only in groups of three, and refuses what could be either", (language) => {
     const comma = formatTokenAmount("15", 1, language) === "1,5";
-    expect(decimalInput("1.5", language)).toBe("1.5");
-    expect(decimalInput("1,5", language)).toBe(comma ? "1.5" : "15");
-    expect(decimalInput("1.000,5", language)).toBe(comma ? "1000.5" : "1.0005");
-    expect(decimalInput("12a", language)).toBe("12");
+    const [point, group] = comma ? [",", "."] : [".", ","];
+    expect(meaning(`1${point}5`, language)).toBe("1.5");
+    expect(meaning(`1${group}000`, language), "a thousand, grouped").toBe("1000");
+    expect(meaning(`1${group}000${point}5`, language)).toBe("1000.5");
+    expect(meaning(`12${group}345${group}678`, language)).toBe("12345678");
+    expect(meaning("1 000", language), "a space groups too").toBe("1000");
+    expect(meaning(`1${group}5`, language), "a decimal point in another language's way").toBe("unclear");
+    expect(meaning(`0${group}001`, language)).toBe("unclear");
+    expect(meaning(`1${point}5${point}0`, language)).toBe("unclear");
+    expect(meaning(`1${point}5`, language, 0), "whole sats").toBe("whole");
+    expect(meaning(`21${group}000`, language, 0)).toBe("21000");
+    expect(meaning("", language)).toBe("");
+    expect(amountText("1000.5", language)).toBe(`1000${point}5`);
   });
 });

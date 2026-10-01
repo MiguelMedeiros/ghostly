@@ -723,6 +723,8 @@
   },
   "ui": {
     "amountIn": "Amount in {{unit}}",
+    "amountUnclear": "Unclear amount: write it like {{example}}",
+    "amountWhole": "Whole numbers only, like {{example}}",
     "gettingAddress": "Getting an address… It shows up here once the provider answers.",
     "history": "History",
     "receive": "Receive",

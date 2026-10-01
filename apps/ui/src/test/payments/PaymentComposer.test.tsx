@@ -67,11 +67,13 @@ const tab = (network: WalletNetwork) => screen.getByTestId(`payment-tab-${networ
 const deck = () => screen.getAllByRole("radio").map((r) => r.dataset.testid);
 
 describe("the amount", () => {
-  it("keeps only digits in an amount of sats", async () => {
+  it("keeps digits and separators in an amount of sats, and refuses a fraction of a sat instead of reading 12.5 as 125", async () => {
     const { user } = open({ withWallet: false });
     await user.type(amount(), "1a2.5b");
-    expect(amount()).toHaveValue("125");
+    expect(amount()).toHaveValue("12.5");
     expect(amount()).toHaveAccessibleName("Amount in sats");
+    expect(screen.getByTestId("amount-unclear")).toHaveTextContent("Whole numbers only, like 1,234");
+    expect(request()).toBeDisabled();
   });
 
   it("takes decimals for USDT and requests in the token's smallest units, on the card's network", async () => {
@@ -90,20 +92,37 @@ describe("the amount", () => {
     const { user, onRequest } = open({ language: "pt" });
     await user.click(screen.getByTestId("payment-use"));
     await user.type(amount(), "1.000,5");
-    expect(amount()).toHaveValue("1000.5");
+    expect(amount()).toHaveValue("1.000,5");
     await user.clear(amount());
     await user.type(amount(), "1,5");
-    expect(amount()).toHaveValue("1.5");
+    expect(amount()).toHaveValue("1,5");
     await user.click(request());
     expect(onRequest).toHaveBeenCalledWith(1_500_000, "", "usdt", "usdt", "testnet");
   });
 
-  it("drops a comma as grouping in a language that writes the point", async () => {
+  it("reads a comma as grouping in a language that writes the point", async () => {
     rememberRail("peer", "usdt:testnet");
-    const { user } = open();
+    const { user, onRequest } = open();
     await user.click(screen.getByTestId("payment-use"));
     await user.type(amount(), "1,000.5");
-    expect(amount()).toHaveValue("1000.5");
+    expect(amount()).toHaveValue("1,000.5");
+    await user.click(request());
+    expect(onRequest).toHaveBeenCalledWith(1_000_500_000, "", "usdt", "usdt", "testnet");
+  });
+
+  it("reads \"1.000\" in Portuguese as a thousand, and refuses \"1.5\" there rather than guess", async () => {
+    rememberRail("peer", "usdt:testnet");
+    const { user, onRequest } = open({ language: "pt" });
+    await user.click(screen.getByTestId("payment-use"));
+    await user.type(amount(), "1.000");
+    await user.click(request());
+    expect(onRequest).toHaveBeenCalledWith(1_000_000_000, "", "usdt", "usdt", "testnet");
+    onRequest.mockClear();
+    await user.clear(amount());
+    await user.type(amount(), "1.5");
+    expect(screen.getByTestId("amount-unclear")).toHaveTextContent("Valor ambíguo");
+    expect(request()).toBeDisabled();
+    expect(onRequest).not.toHaveBeenCalled();
   });
 
   it("refuses more USDT decimals than the token has, without asking for anything", async () => {

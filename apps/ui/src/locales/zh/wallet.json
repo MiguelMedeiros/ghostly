@@ -723,6 +723,8 @@
   },
   "ui": {
     "amountIn": "以 {{unit}} 计的金额",
+    "amountUnclear": "金额不明确：请写成 {{example}} 这样",
+    "amountWhole": "只能输入整数，例如 {{example}}",
     "gettingAddress": "正在获取地址… 服务商响应后会显示在这里。",
     "history": "记录",
     "receive": "收款",
