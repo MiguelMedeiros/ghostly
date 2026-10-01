@@ -192,7 +192,7 @@ Errors print `{"error":{"code","message"}}` and exit with 1 (failed), 2 (usage),
 An echo bot in one command ([examples/echo-bot.sh](../packages/cli/examples/echo-bot.sh)):
 
 ```bash
-ghostly listen --type message.received --cursor ~/.ghostly/echo.cursor --exec '
+ghostly listen --type message.received --cursor "${GHOSTLY_HOME:-$HOME/.ghostly}/echo.cursor" --exec '
   event="$(cat)"
   printf "echo: %s" "$(printf "%s" "$event" | jq -r .message.text)" | ghostly send "$(printf "%s" "$event" | jq -r .chat)" --stdin'
 ```
@@ -258,6 +258,12 @@ group's edges come up, while the relays answer errors. `GHOSTLY_DHT=0` leaves th
 `GHOSTLY_DHT_BOOTSTRAP=host:port,…` replaces the public bootstrap routers (a private testnet). The daemon is then a DHT node like any
 other: it answers other nodes' queries and keeps the small values they store for a while, as the Desktop's Pkarr client
 does.
+
+A private network or a test sets `GHOSTLY_PKARR_RELAYS=http://…,…` (the Desktop's variable) on every command: those
+relays are then the only ones from the very first publish, the profile's `relays` setting is not used, and the DHT is
+left out unless `GHOSTLY_DHT_BOOTSTRAP` names your own nodes. A new profile publishes within seconds of its first run,
+so without the variable, set `relays` before the first `daemon`
+([package README](../packages/cli/README.md#private-networks)).
 
 ## Hubs of large private groups
 
