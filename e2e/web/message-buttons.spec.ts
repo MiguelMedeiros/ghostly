@@ -105,6 +105,62 @@ test("a bot asks with Yes and No, the person taps Yes, and the bot hears it and 
   }
 });
 
+test("a question asked while the person's app was closed shows its buttons once the chat is live again", { tag: ["@feature:chat.buttons", "@feature:chat.buttons.wire", "@feature:headless.buttons"] }, async ({ peer, relay }) => {
+  const url = await relay.listen();
+  const bot = new HeadlessBot();
+  try {
+    await bot.start(url, "Shop");
+    const person = await peer("buttons-away-person");
+    const invite = await bot.run("invite", "create", "--label", "person");
+    await person.page.getByRole("button", { name: "Join chat", exact: true }).first().click();
+    await pasteInvite(person.page, invite.invite as string);
+    const chatId = invite.chat as string;
+    await bot.run("chat", "wait", chatId, "--until", "live", "--timeout", "120");
+    await expect(person.page.getByTestId("connection-options")).toHaveAccessibleName(/Connected · /, { timeout: 90_000 });
+
+    // The bot's join notice confirmed first: the DHT floor carries one text at a time, and the question must be it.
+    type Row = { id: string; from: string; via: string; delivery: string | null; edits?: number; editPending?: boolean };
+    const rows = async () => (await bot.run("chat", "history", chatId)).messages as Row[];
+    await expect.poll(async () => (await rows()).filter((m) => m.from === "me" && m.delivery !== "delivered").length, { timeout: 90_000 }).toBe(0);
+    // The person's app closes; the bot sees the chat drop, then asks: the question goes on the DHT floor, text alone.
+    const returnTo = person.page.url();
+    await person.page.goto("about:blank");
+    await bot.event((e) => e.type === "chat.connection" && e.chat === chatId && e.live === false, 90_000);
+    await bot.run("chat", "wait", chatId, "--until", "text", "--timeout", "120");
+    const sent = await bot.run("send", chatId, QUESTION, "--button", "yes:Yes", "--button", "no:No", "--once", "--wait", "sent", "--timeout", "120");
+    const question = sent.messageId as string;
+    const history = async () => (await rows()).find((m) => m.id === question)!;
+    expect(["pkarr", "hold"]).toContain((await history()).via);
+
+    // Back: the question shows, and once the chat is live its buttons come as an edit of the buttons alone.
+    await person.page.goto(returnTo);
+    const room = chat(person);
+    await expect(room.getByText(QUESTION)).toBeVisible({ timeout: 120_000 });
+    const buttons = room.getByTestId("message-buttons");
+    await expect(buttons.getByTestId("message-button")).toHaveText(["Yes", "No"], { timeout: 120_000 });
+    const edited = await bot.event((e) => e.type === "message.edited" && e.chat === chatId && e.messageId === question, 120_000);
+    expect(edited).toMatchObject({ edits: 1, message: { text: QUESTION } });
+    // The same text: no edit mark.
+    await expect(room.locator("[data-message-row]").filter({ has: buttons }).getByTestId("message-edited")).toHaveCount(0);
+
+    // A tap is a press with its button, not a word the bot must guess from.
+    await buttons.locator('[data-testid="message-button"][data-button-id="yes"]').click();
+    const pressed = await bot.event((e) => e.type === "button.pressed" && e.chat === chatId, 90_000);
+    expect(pressed).toMatchObject({ chat: chatId, messageId: question, button: "yes", label: "Yes" });
+    expect(pressed.inferred).toBeUndefined();
+
+    // Once: the app closed and opened again brings no second restore.
+    await expect.poll(async () => (await history()).editPending ?? false, { timeout: 60_000 }).toBe(false);
+    await person.page.reload();
+    await expect(buttons.locator('[data-testid="message-button"][data-button-id="yes"]')).toHaveAttribute("data-chosen", "true", { timeout: 120_000 });
+    await expect(person.page.getByTestId("connection-options")).toHaveAccessibleName(/Connected · /, { timeout: 90_000 });
+    expect((await history()).edits).toBe(1);
+    expect(bot.events.filter((e) => e.type === "message.edited" && e.messageId === question)).toHaveLength(1);
+  } finally {
+    await bot.stop();
+  }
+});
+
 test("in a group, the bot learns which member pressed", { tag: ["@feature:chat.buttons", "@feature:groups.send", "@feature:headless.buttons"] }, async ({ peer, relay }) => {
   test.setTimeout(8 * 60_000);
   const url = await relay.listen();

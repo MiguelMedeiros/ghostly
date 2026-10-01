@@ -103,7 +103,9 @@ test("three people: the admin sets the group's picture, a late joiner by link se
   await expect(carol.page.getByTestId("group-share-dialog").getByTestId("group-share-avatar").locator("img")).toHaveAttribute("src", first!);
   await carol.page.getByTestId("group-share-dialog").getByTestId("group-share-done").click();
 
-  // A new picture replaces it for everyone.
+  // A new picture replaces it for everyone. Alice changes it once she has Carol's admission: a change sealed under the
+  // epoch before it reaches Carol only on a later sync.
+  await expect(alice.page.getByTestId("group-members")).toContainText("3 members", { timeout: 120_000 });
   await openMembers(alice);
   await alice.page.getByTestId("group-picture-input").setInputFiles(await pictureFile(alice, "#2471a3"));
   await expect(alice.page.getByTestId("group-members-avatar").locator("img")).not.toHaveAttribute("src", first!);

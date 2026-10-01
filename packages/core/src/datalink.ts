@@ -41,6 +41,16 @@ export interface DataLinkOptions {
    * restarted; the connection is given `DISCONNECT_GRACE_MS`), or came back from it (false).
    */
   onDisconnected?: (disconnected: boolean) => void;
+  /**
+   * Whether the peer's packet, as last read, still carries its offer of that time (`RtcSignal.ts`). An answer to it
+   * that did not connect is then made again (`REANSWERS`); without this, never.
+   */
+  offerStanding?: (offerTs: number) => boolean;
+  /**
+   * This side's attempt was given up because the answerer answered its offer again (its connection for the answer
+   * applied here is gone): the answerer is there, so the caller may dial again now rather than at its next look.
+   */
+  onAnswerReplaced?: () => void;
 }
 
 export const CONNECT_TIMEOUT_MS = 90_000;
@@ -53,6 +63,16 @@ export const GATHER_STALL_MS = 3_000;
 export const GATHER_ATTEMPTS = 3;
 /** How long a connection may stay `disconnected` before it is given up. */
 const DISCONNECT_GRACE_MS = 12_000;
+/**
+ * An answer whose connection failed, while the peer still offers (`offerStanding`), is made again for the same offer,
+ * up to this many times. The offerer's connection waits for an answer for its whole attempt (`CONNECT_TIMEOUT_MS`), and
+ * its read of the answer may be held back by its relays' budget; the answerer's ICE gives up after about 30 s of no
+ * reply. Going idle then left the link with an offer this side had answered once and would not answer again, until the
+ * offerer's attempt ran out: a community's edge was live again 110 s after a member restarted (2026-09-30).
+ */
+export const REANSWERS = 2;
+/** An offer this close to the end of the offerer's attempt is not answered again: the new answer would come too late. */
+const REANSWER_MARGIN_MS = 15_000;
 
 export class DataLink {
   state: DataLinkState = "idle";
@@ -63,12 +83,15 @@ export class DataLink {
   private remoteSdp: string | null = null;
   private connectTimer: ReturnType<typeof setTimeout> | null = null;
   private disconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  /** The offer this side answered in the current attempt, and how many times it answered it again. */
+  private answered: { offer: RtcSignal; again: number } | null = null;
 
   constructor(private readonly options: DataLinkOptions) {}
 
   /** Offers a connection to the peer. Resolves once the offer is published. */
   async connect(): Promise<void> {
     if (this.state !== "idle") return;
+    this.answered = null;
     this.setState("offering");
     this.options.setFastPoll(true, true);
     try {
@@ -101,7 +124,16 @@ export class DataLink {
       const wasOpen = this.state === "open";
       this.teardown();
       if (wasOpen) this.options.onClose();
+      this.answered = { offer: signal, again: 0 };
       await this.answer(signal);
+    } else if (this.state === "connecting" && this.myOfferTs && signal.o === this.myOfferTs && this.pc) {
+      // A newer answer to the offer this side already took an answer for: the answerer made it again (`REANSWERS`),
+      // its connection for the one applied here is gone, and this one can never come up. It is given up now, rather
+      // than at the end of its attempt (a hub that read a member's first answer late held a dead one 40 s, 2026-09-30).
+      traceLink(this.options.myPubKeyZ32, "answer-replaced", { appliedMs: signal.ts - this.lastSignalTs });
+      this.lastSignalTs = signal.ts;
+      this.reset();
+      this.options.onAnswerReplaced?.();
     } else if (this.state === "offering" && signal.o === this.myOfferTs && this.pc) {
       this.lastSignalTs = signal.ts;
       const pc = this.pc;
@@ -129,6 +161,25 @@ export class DataLink {
   }
 
   close(): void {
+    this.answered = null;
+    this.reset();
+  }
+
+  /**
+   * The attempt on this connection failed (it timed out, ICE failed or closed, its channel closed). An answer the
+   * offerer may not have read yet is made again for the same offer while it still stands (`REANSWERS`); anything
+   * else goes back to idle.
+   */
+  private failed(): void {
+    const answered = this.state === "connecting" ? this.answered : null;
+    const left = answered ? CONNECT_TIMEOUT_MS - (Date.now() - answered.offer.ts) : 0;
+    if (answered && answered.again < REANSWERS && left > REANSWER_MARGIN_MS && this.options.offerStanding?.(answered.offer.ts)) {
+      answered.again++;
+      traceLink(this.options.myPubKeyZ32, "reanswer", { again: answered.again, leftMs: left });
+      this.teardown();
+      void this.answer(answered.offer);
+      return;
+    }
     this.reset();
   }
 
@@ -192,24 +243,25 @@ export class DataLink {
     dc.addEventListener("open", () => {
       if (this.pc !== pc) return;
       this.clearTimers();
+      this.answered = null;
       this.setState("open");
       this.options.setFastPoll(false);
       this.options.publishSignal(null);
       this.options.onOpen(wrapDataChannel(dc));
     });
     dc.addEventListener("close", () => {
-      if (this.pc === pc) this.reset();
+      if (this.pc === pc) this.failed();
     });
 
     pc.addEventListener("connectionstatechange", () => {
       if (this.pc !== pc) return;
       if (this.disconnectTimer) { clearTimeout(this.disconnectTimer); if (pc.connectionState === "connected") this.options.onDisconnected?.(false); }
       this.disconnectTimer = null;
-      if (pc.connectionState === "failed" || pc.connectionState === "closed") this.reset();
+      if (pc.connectionState === "failed" || pc.connectionState === "closed") this.failed();
       else if (pc.connectionState === "disconnected") {
         if (this.state === "open") this.options.onDisconnected?.(true);
         this.disconnectTimer = setTimeout(() => {
-          if (this.pc === pc) this.reset();
+          if (this.pc === pc) this.failed();
         }, DISCONNECT_GRACE_MS);
       }
     });
@@ -224,7 +276,7 @@ export class DataLink {
     this.connectTimer = setTimeout(() => {
       if (this.pc === pc && this.state !== "open") {
         traceLink(this.options.myPubKeyZ32, "attempt-timeout", { state: this.state });
-        this.reset();
+        this.failed();
       }
     }, this.options.attemptTimeoutMs?.() ?? CONNECT_TIMEOUT_MS);
   }

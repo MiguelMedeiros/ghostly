@@ -661,10 +661,10 @@ describe("the call window's device menu", () => {
     expect(screen.getByTestId("call-status")).toHaveTextContent("Conectando...");
   });
 
-  it("sends the call's sound to the chosen speaker, on both elements that play it", () => {
+  it("sends the call's sound to the chosen speaker, on the element that plays it (the picture is muted)", () => {
     const sinks = speakerChoice();
     overlayWith(view({ speaker: "out-headset" }));
-    expect(sinks.map(([element, id]) => [element.tagName, id])).toEqual([["AUDIO", "out-headset"], ["VIDEO", "out-headset"]]);
+    expect(sinks.map(([element, id]) => [element.tagName, id])).toEqual([["AUDIO", "out-headset"]]);
   });
 });
 

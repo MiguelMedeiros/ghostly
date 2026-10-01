@@ -749,6 +749,11 @@ export interface StoredMessage {
    * it: set only when the button was open for this person. What `button.pressed` reports.
    */
   press?: MessagePress;
+  /**
+   * A question of mine with buttons whose text went on the DHT floor or into a hold, which carry text alone (WISP 4xx ·
+   * Message Buttons): `due` until its buttons go again live, as an edit of the buttons alone; `sent` once they did.
+   */
+  buttonsRestore?: "due" | "sent";
 }
 
 /** A page of a chat's history, oldest first, and whether older messages remain (`messagePage`). */

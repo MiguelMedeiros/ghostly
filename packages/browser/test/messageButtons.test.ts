@@ -1,6 +1,6 @@
 import "fake-indexeddb/auto";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { BUTTONS_CAPABILITY, GhostLink, createIdentity, createLink, identityFromSeedB64, readStatusCard, type IncomingMessage, type PairingState, type WireEdit } from "@ghostly/core";
+import { BUTTONS_CAPABILITY, DhtDelivery, GhostLink, createIdentity, createLink, createRelayPayload, identityFromSeedB64, parseRelayPayload, readStatusCard, type IncomingMessage, type PairingState, type SignedPacket, type WireEdit } from "@ghostly/core";
 import { GhostlyNode } from "../src/engine/node";
 import { db } from "../src/engine/db";
 import { buttonPress, buttonsState } from "../src/shared/buttons";
@@ -20,16 +20,23 @@ Object.defineProperty(globalThis.navigator, "storage", { value: { estimate: asyn
 const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const step of cleanup.splice(0).reverse()) await step(); });
 
-async function setup() {
+type Keys = { invitation: ReturnType<typeof createLink>; mine: string; theirs: string; id: string };
+
+/**
+ * A node and its contact, live. `keys`: the same chat again (a restart of both apps); `rows`: kept in the chat before the
+ * node starts; `contactButtons`: false for a contact's app without buttons (1.0.0 has none).
+ */
+async function setup({ keys, rows = [], contactButtons = true }: { keys?: Keys; rows?: StoredMessage[]; contactButtons?: boolean } = {}) {
   const net = new FakeNativeNet();
-  const invitation = createLink();
-  const [mine, theirs] = [createIdentity().seedB64, createIdentity().seedB64];
-  const id = `buttons-${crypto.randomUUID()}`;
+  const invitation = keys?.invitation ?? createLink();
+  const [mine, theirs] = keys ? [keys.mine, keys.theirs] : [createIdentity().seedB64, createIdentity().seedB64];
+  const id = keys?.id ?? `buttons-${crypto.randomUUID()}`;
   await db.putSettings({ online: true, nick: "", relays: [], iceServers: [], mints: [], mintsInitialized: true });
   await db.putLink({ ...invitation.mine, id, profile: "paired-chat/1", participationSeed: mine, createdAt: 1,
     pairedPeerKey: identityFromSeedB64(theirs).pubKeyZ32, peerTrust: { version: 1 },
     peerTransports: ["iroh/1"], peerFallback: true, preferredTransport: "iroh/1", transportFallback: true,
     peerDescriptors: { "iroh/1": { id: "contact:iroh/1" } } });
+  for (const row of rows) await db.putMessage({ ...row, linkId: id });
   const transport = { publish: vi.fn(async () => {}), resolve: vi.fn(async () => null), describe: () => ({ protocol: "in-process", relays: [] }) };
   const node = new GhostlyNode({ onState: vi.fn(), onMessages: vi.fn(), onCallSignal: vi.fn(), onAttention: vi.fn() }, { transport, automaticWallets: false,
     nativeTransports: { "iroh/1": async () => net.endpoint("iroh/1", "app") } });
@@ -40,11 +47,14 @@ async function setup() {
     pairing: { credentials: { seedB64: theirs, peerKey: identityFromSeedB64(mine).pubKeyZ32 }, pinPeer: async () => {} },
     native: { preferred: "iroh/1", fallback: true, peerTransports: ["iroh/1"], peerFallback: true, peerDescriptors: { "iroh/1": { id: "app:iroh/1" } } },
     transport, createPeerConnection: () => { throw new Error("No WebRTC here"); }, localFetch: vi.fn(), getServices: () => [], getHostedHttpService: () => undefined,
-    editSupport: true, statusCardSupport: true, buttonsSupport: true,
+    editSupport: true, statusCardSupport: contactButtons, buttonsSupport: contactButtons,
     events: { onPairingState: state => { contactState = state; }, onMessage: message => { contactGot.push(message); }, onMessageEdit: edit => { contactEdits.push(edit); return true; } },
   });
   contact.registerEndpoint(net.endpoint("iroh/1", "contact"));
-  cleanup.push(async () => { await contact.stop(false); await node.shutdown(); await db.deleteLink(id); });
+  let stopped = false;
+  /** Both apps closed, the chat kept (for a restart with the same `keys`). */
+  const stop = async () => { if (stopped) return; stopped = true; await contact.stop(false); await node.shutdown(); };
+  cleanup.push(async () => { await stop(); await db.deleteLink(id); });
   await node.start();
   node.setActiveLink({ linkId: id });
   const view = () => node.getState().links.find(l => l.id === id)!;
@@ -53,7 +63,7 @@ async function setup() {
   await vi.waitFor(() => expect([view().pairing?.status, contactState.status]).toEqual(["ready", "ready"]));
   const row = async (messageId: string) => (await db.getMessages(id)).find(m => m.id === messageId)!;
   const peerRow = async (text: string) => { await vi.waitFor(async () => expect((await db.getMessages(id)).find(m => m.text === text && m.sender === "peer")).toBeDefined()); return (await db.getMessages(id)).filter(m => m.text === text && m.sender === "peer").at(-1)!; };
-  return { node, contact, id, contactGot, contactEdits, row, peerRow, view };
+  return { node, contact, id, contactGot, contactEdits, row, peerRow, view, stop, keys: { invitation, mine, theirs, id } as Keys };
 }
 
 const ask = (extra: Record<string, unknown> = {}) => ({ kind: "buttons", id: "ask-30", buttons: [{ id: "yes", label: "Yes", style: "primary", once: true }, { id: "no", label: "No", once: true }, { id: "more", label: "Tell me more" }], ...extra });
@@ -224,4 +234,94 @@ describe("a press names a button that holds", () => {
     expect(await t.node.sendMessage({ linkId: t.id, text: "Yes", replyTo: question.id, button: "no way" })).toMatchObject({ refused: true, error: "No such button" });
     expect(await t.node.sendMessage({ linkId: t.id, text: "Yes", button: "yes" })).toMatchObject({ refused: true, error: "No such button" });
   });
+});
+
+describe("buttons that went without their question (the DHT floor, a hold)", () => {
+  it("a question sent on the DHT floor goes as text alone, and its row says its buttons are due", async () => {
+    vi.stubGlobal("RTCPeerConnection", undefined);
+    const packets = new Map<string, SignedPacket>();
+    const transport = { publish: async (identity: Parameters<typeof createRelayPayload>[0], records: Parameters<typeof createRelayPayload>[1]) => {
+      packets.set(identity.pubKeyZ32, parseRelayPayload(identity.pubKeyZ32, createRelayPayload(identity, records)));
+    }, resolve: async (key: string) => packets.get(key) ?? null, describe: () => ({ protocol: "signed packet fixture", relays: [] }) };
+    const node = new GhostlyNode({ onState: vi.fn(), onMessages: vi.fn(), onCallSignal: vi.fn() }, { transport, automaticWallets: false, nativeTransports: {} });
+    const invitation = createLink();
+    const received: { id: string; text: string }[] = [];
+    const contact = new DhtDelivery({ params: invitation.invite, mode: "dht", credentials: { seedB64: createIdentity().seedB64 }, transport,
+      save: async () => {}, pin: async () => {}, message: async m => { received.push(m); }, receipt: async () => {}, changed: () => {}, pollMs: 100 });
+    let linkId = "";
+    try {
+      await node.start();
+      ({ linkId } = await node.ensureLink({ ...invitation.mine, profile: "paired-chat/1", deliveryMode: "dht" }));
+      node.setActiveLink({ linkId });
+      await contact.start();
+      const sent = await node.sendMessage({ linkId, text: QUESTION, card: ask() });
+      expect(sent.error).toBeNull();
+      await vi.waitFor(async () => expect((await db.getMessage(linkId, sent.messageId!))?.delivery).toBe("delivered"), { timeout: 20_000 });
+      expect(received.map(m => m.text)).toEqual([QUESTION]);
+      expect(received[0]).not.toHaveProperty("card");
+      expect(await db.getMessage(linkId, sent.messageId!)).toMatchObject({ via: "pkarr", card: { kind: "buttons" }, buttonsRestore: "due" });
+      // A plain text on the floor has no buttons to restore.
+      const plain = await node.sendMessage({ linkId, text: "just text" });
+      await vi.waitFor(async () => expect((await db.getMessage(linkId, plain.messageId!))?.delivery).toBe("delivered"), { timeout: 20_000 });
+      expect(await db.getMessage(linkId, plain.messageId!)).not.toHaveProperty("buttonsRestore");
+    } finally { await contact.stop(); await node.shutdown(); if (linkId) await db.deleteLink(linkId); vi.unstubAllGlobals(); }
+  }, 60_000);
+
+  // As the floor left it: delivered as text, the buttons due.
+  const floored = (fields: Partial<StoredMessage> = {}): StoredMessage => ({ linkId: "", id: `me_${WIRE("F")}`, wireId: WIRE("F"), text: QUESTION, sender: "me", timestamp: Date.now() - 60_000,
+    via: "pkarr", delivery: "delivered", card: readStatusCard(ask())!, buttonsRestore: "due", ...fields });
+
+  it("once live, the buttons go again as an edit of the buttons alone, once, restarts included", async () => {
+    const t = await setup({ rows: [floored()] });
+    await vi.waitFor(() => expect(t.contactEdits).toHaveLength(1), { timeout: 10_000 });
+    expect(t.contactEdits[0]).toMatchObject({ id: WIRE("F"), e: 1, m: QUESTION, sc: readStatusCard(ask()) });
+    // Here: the same text, no version kept (no edit mark), confirmed by the contact, and not due any more.
+    await vi.waitFor(async () => expect((await t.row(`me_${WIRE("F")}`)).edit?.pending).toBeUndefined(), { timeout: 10_000 });
+    expect(await t.row(`me_${WIRE("F")}`)).toMatchObject({ text: QUESTION, buttonsRestore: "sent", edit: { seq: 1, history: [] } });
+    // Both apps closed and open again: nothing goes a second time.
+    const keys = t.keys;
+    await t.stop();
+    const again = await setup({ keys });
+    await vi.waitFor(() => expect(again.view().sessionOffers?.peer).toContain(BUTTONS_CAPABILITY));
+    await new Promise(resolve => setTimeout(resolve, 1_500));
+    expect(again.contactEdits).toEqual([]);
+    // The bot's own update after it goes as the next number, and the contact takes the highest.
+    expect(await again.node.editMessage({ linkId: again.id, messageId: `me_${WIRE("F")}`, text: QUESTION, card: ask({ chosen: "yes", closed: true }) })).toMatchObject({ error: null });
+    await vi.waitFor(() => expect(again.contactEdits).toEqual([expect.objectContaining({ e: 2, sc: expect.objectContaining({ chosen: "yes", closed: true }) })]), { timeout: 10_000 });
+  }, 60_000);
+
+  it("a question the bot updated meanwhile goes as its latest version, one number above", async () => {
+    const t = await setup({ rows: [floored({ edit: { seq: 3, at: Date.now() - 30_000, history: [] }, card: readStatusCard(ask({ chosen: "no" }))! })] });
+    await vi.waitFor(() => expect(t.contactEdits).toHaveLength(1), { timeout: 10_000 });
+    expect(t.contactEdits[0]).toMatchObject({ e: 4, m: QUESTION, sc: expect.objectContaining({ chosen: "no" }) });
+  }, 30_000);
+
+  it("a contact whose app shows no buttons gets no edit (an older app would mark it edited): the buttons stay due", async () => {
+    const t = await setup({ rows: [floored()], contactButtons: false });
+    await vi.waitFor(() => expect(t.view().sessionOffers?.peer).toContain("edit/1"));
+    await new Promise(resolve => setTimeout(resolve, 1_500));
+    expect(t.contactEdits).toEqual([]);
+    expect(await t.row(`me_${WIRE("F")}`)).toMatchObject({ buttonsRestore: "due" });
+    expect((await t.row(`me_${WIRE("F")}`)).edit).toBeUndefined();
+  }, 30_000);
+
+  it("a question that went live, or a plain text on the floor, gets nothing", async () => {
+    const t = await setup({ rows: [floored({ id: `me_${WIRE("L")}`, wireId: WIRE("L"), via: "datalink", buttonsRestore: undefined }),
+      floored({ id: `me_${WIRE("P")}`, wireId: WIRE("P"), text: "just text", card: undefined, buttonsRestore: undefined })] });
+    await vi.waitFor(() => expect(t.view().sessionOffers?.peer).toContain(BUTTONS_CAPABILITY));
+    await new Promise(resolve => setTimeout(resolve, 1_500));
+    expect(t.contactEdits).toEqual([]);
+  }, 30_000);
+
+  it("on the contact's side, a question that came as text alone takes its buttons from the edit, with no version kept", async () => {
+    const t = await setup();
+    // As the DHT floor or a hold gives it: the text, no card.
+    expect(await t.contact.sendMessage(QUESTION, Date.now(), WIRE("Q"))).toBeNull();
+    expect((await t.peerRow(QUESTION)).card).toBeUndefined();
+    expect(await t.contact.sendEdit({ id: WIRE("Q"), e: 1, ts: Date.now(), m: QUESTION, sc: readStatusCard(ask())! })).toBeNull();
+    await vi.waitFor(async () => expect((await t.peerRow(QUESTION)).card).toEqual(readStatusCard(ask())));
+    const restored = await t.peerRow(QUESTION);
+    expect(restored.edit).toMatchObject({ seq: 1, history: [] });
+    expect(buttonsState(restored, WIRE("Q"), [])).toMatchObject({ open: true });
+  }, 30_000);
 });
