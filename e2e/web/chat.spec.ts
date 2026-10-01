@@ -23,7 +23,8 @@ test("two people chat: relay discovery, then peer-to-peer messages", { tag: ["@f
   const bubble = (await chat(alice).getByText("boo from bob").boundingBox())!;
   const pane = (await chat(alice).boundingBox())!;
   expect(bubble.x - pane.x, "bubbles keep their distance from the edge of the chat").toBeGreaterThanOrEqual(40);
-  await expect(chat(alice).getByText("~Slimer").first()).toBeVisible();
+  // Bob's nickname came over: over his messages, plain, as the header names him (a "~" marks a member's own name in a group).
+  await expect(chat(alice).getByTestId("message-nick").first()).toHaveText("Slimer");
   await expect(alice.page.getByTitle("Click to set a name")).toHaveText(/Slimer/);
   await expect(chat(alice).getByText("joined the chat").first()).toBeVisible();
 

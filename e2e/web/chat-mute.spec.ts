@@ -117,7 +117,7 @@ test("a chat muted for 15 minutes stays quiet but keeps counting, and is heard a
   await expect.poll(() => notices(guest)).toBe(shown + 2);
 });
 
-test("Until I unmute: a call still rings, the mute outlasts a day, and it ends when turned off", { tag: ["@feature:chats.mute", "@feature:calls.paired"] }, async ({ peer }, testInfo) => {
+test("Until I unmute: a call still rings, the mute outlasts a day, and it ends when turned off", { tag: ["@feature:chats.mute", "@feature:calls.paired", "@feature:app.attention.notifications"] }, async ({ peer }, testInfo) => {
   const [alice, bob] = await Promise.all([peer("mute-alice"), peer("mute-bob")]);
   await observe(bob);
   await pair(alice, bob);
@@ -127,11 +127,12 @@ test("Until I unmute: a call still rings, the mute outlasts a day, and it ends w
   await expect(bell).toHaveAccessibleName("Notifications muted");
   await expect(bell).toHaveAttribute("data-muted", "forever");
 
-  // A call is not a notification: it rings in a muted chat.
+  // A call is not a message: it rings in a muted chat and, with the app in the background, says so in a notification.
   await expect(alice.page.getByTestId("call-audio")).toBeEnabled();
   await alice.page.getByTestId("call-audio").click();
   await expect(bob.page.getByText("Incoming audio call...")).toBeVisible();
   await expect.poll(() => heard(bob, NOTE.ring)).toBeGreaterThan(0);
+  await expect.poll(() => notices(bob)).toBe(shown + 1);
   await bob.page.getByTitle("Decline").click();
   await expect(bob.page.getByText("Incoming audio call...")).toHaveCount(0);
 
@@ -143,7 +144,8 @@ test("Until I unmute: a call still rings, the mute outlasts a day, and it ends w
   await expect(chat(bob).getByText("a day later")).toBeVisible({ timeout: 60_000 });
   await bob.page.waitForTimeout(1_500);
   expect(await heard(bob, NOTE.message)).toBe(sounds);
-  expect(await notices(bob)).toBe(shown);
+  // The call's notification, and none for the messages.
+  expect(await notices(bob)).toBe(shown + 1);
   await expect(bell).toHaveAttribute("data-muted", "forever");
 
   // Turned off from the list row's bell: heard again.
@@ -157,5 +159,5 @@ test("Until I unmute: a call still rings, the mute outlasts a day, and it ends w
   await say(alice, "unmuted");
   await expect(chat(bob).getByText("unmuted")).toBeVisible({ timeout: 60_000 });
   await expect.poll(() => heard(bob, NOTE.message)).toBe(sounds + 1);
-  await expect.poll(() => notices(bob)).toBe(shown + 1);
+  await expect.poll(() => notices(bob)).toBe(shown + 2);
 });

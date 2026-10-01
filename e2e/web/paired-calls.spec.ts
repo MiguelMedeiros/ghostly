@@ -12,8 +12,17 @@ const clock = /^\d{1,2}:\d{2}$/;
 /** Size of the picture this peer receives from the other side. */
 const remoteSize = (peer: Peer) =>
   peer.page.evaluate(() => {
-    const video = [...document.querySelectorAll("video")].find((v) => !v.muted);
+    const video = document.querySelector<HTMLVideoElement>("[data-testid=remote-video]");
     return video ? `${video.videoWidth}x${video.videoHeight}` : "none";
+  });
+
+/** Which of the call's elements play the other side's sound. */
+const remoteSound = (peer: Peer) =>
+  peer.page.evaluate(() => {
+    const audio = document.querySelector<HTMLAudioElement>("[data-testid=remote-audio]");
+    const video = document.querySelector<HTMLVideoElement>("[data-testid=remote-video]");
+    const live = (audio?.srcObject as MediaStream | null)?.getAudioTracks().some((track) => track.readyState === "live");
+    return { audio: audio && !audio.paused && !audio.muted && live ? "playing" : "silent", video: video?.muted ? "muted" : "sounding" };
   });
 
 /** Turns the chat's DHT-only delivery on or off from the connection panel. */
@@ -35,6 +44,8 @@ test("a new chat calls over its live session: video, answer, hang up", { tag: ["
   for (const p of [alice, bob]) await expect(p.page.getByText(clock).first()).toBeVisible();
   // Real media crossed: Bob sees Alice's (fake) camera.
   await expect.poll(() => remoteSize(bob)).toMatch(/^[1-9]\d*x[1-9]\d*$/);
+  // And hears her once: the <audio> plays her live microphone, the picture is muted.
+  await expect.poll(() => remoteSound(bob)).toEqual({ audio: "playing", video: "muted" });
   await alice.page.screenshot({ path: testInfo.outputPath("in-call.png") });
 
   await alice.page.getByTitle("End call").click();

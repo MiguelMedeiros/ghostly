@@ -47,9 +47,11 @@ test("a profile picture goes to paired contacts, without anything of the file, a
   expect(bytes).not.toContain("GHOSTLY-SECRET-GPS");
   expect(bytes).not.toContain("Exif");
 
-  // A click on it shows it large, as it arrived (128 px drawn at 320), with her name as the chat shows it; Escape
-  // closes it and gives the focus back to the avatar.
-  const name = (await bob.page.getByTestId("chat-name").textContent())!;
+  // A click on it shows it large, as it arrived (128 px drawn at 320), with her name as the chat list shows it (the
+  // header says the word alone for an unnamed contact, #845); Escape closes it and gives the focus back to the avatar.
+  const name = (await bob.page.getByTestId("chat-row-name").first().textContent())!;
+  expect(name).toMatch(/^Contact · \S{6}$/);
+  await expect(bob.page.getByTestId("chat-name")).toHaveText("Contact");
   const opener = bob.page.getByTestId("chat-avatar-open");
   await expect(opener).toHaveAttribute("aria-label", `View photo of ${name}`);
   await opener.click();
