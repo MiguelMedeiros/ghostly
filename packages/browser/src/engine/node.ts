@@ -152,7 +152,7 @@ import type { WalletRemoval } from "../shared/walletRemoval";
 import { TEST_COINS_SATS, faucetError } from "./paymentAdapters/testCoins";
 import { composeDetails, fileWire, pathSnapshot, withSend, type PathSnapshot } from "./messageDetails";
 import { db } from "./db";
-import { Groups, meshEdgeIntervals } from "./groups";
+import { Groups, meshEdgeIntervals, otherEndSeen } from "./groups";
 import { edgeView } from "./groupEdges";
 import { GroupPayments } from "./groupPayments";
 import { Reactions, groupReactionsToResend, latestReaction, noteAfterChange } from "./reactions";
@@ -935,7 +935,7 @@ export class GhostlyNode implements EngineImplementation {
       return entries;
     },
     openEntry: (link, role, seedB64, peer) => this.openEntry(link, role, seedB64, peer),
-    linkSeen: linkId => { const live = this.links.get(linkId); return !!live?.presence?.online || (!!live?.dataLink && live.dataLink !== "idle"); },
+    linkSeen: linkId => { const live = this.links.get(linkId); return otherEndSeen(live?.presence, live?.dataLink); },
     // Its packet is newer than the moment the edge was last up (both clocks, near enough for seconds of a restart).
     linkBack: linkId => { const live = this.links.get(linkId); return !!live?.lastSyncAt && !!live.presence?.online && live.presence.lastPacketAt > live.lastSyncAt; },
     publish: (identity, records, background) => this.groupTransport.publish(identity, records, { background }),

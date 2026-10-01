@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { DataLink, GATHER_ATTEMPTS, GATHER_STALL_MS, type DataLinkOptions, type DataLinkState } from "../src/datalink";
+import { DataLink, GATHER_ATTEMPTS, GATHER_STALL_MS, REANSWERS, type DataLinkOptions, type DataLinkState } from "../src/datalink";
 import { DATA_CHANNEL_ID, DATA_CHANNEL_LABEL, RTC_SIGNAL_MAX_AGE_MS, parseRtcSignal, type RtcSignal } from "../src/signal";
 
 // covers: transport.webrtc, core.frames
@@ -88,7 +88,7 @@ class FakePeerConnection extends EventTarget {
   }
 }
 
-function link(me: string, peer: string, configure: (pc: FakePeerConnection) => void = () => {}) {
+function link(me: string, peer: string, configure: (pc: FakePeerConnection) => void = () => {}, extra: Partial<DataLinkOptions> = {}) {
   const pcs: FakePeerConnection[] = [];
   const states: DataLinkState[] = [];
   const options = {
@@ -106,7 +106,7 @@ function link(me: string, peer: string, configure: (pc: FakePeerConnection) => v
     onClose: vi.fn(),
     onState: (state: DataLinkState) => void states.push(state),
   } satisfies DataLinkOptions;
-  const dl = new DataLink(options);
+  const dl = new DataLink({ ...options, ...extra });
   const lastSignal = () => {
     const published = options.publishSignal.mock.calls.map(([s]) => s).filter((s): s is string => s !== null);
     return published.at(-1)!;
@@ -529,5 +529,143 @@ describe("DataLink connections that gather no candidate", () => {
     await connecting;
     expect(a.pcs).toHaveLength(1);
     expect(published(a)).toHaveLength(1);
+  });
+});
+
+// A member's app back after a restart answers the hub's offer in a second; the hub's read of that answer can wait half a
+// minute for its relays' budget, and by then the answerer's ICE has given up. Going idle left a standing offer this side
+// had answered once and would not answer again: the edge waited for the offerer's 90 s attempt (110 s in all, 2026-09-30).
+describe("DataLink answers a standing offer again when its answer did not connect", () => {
+  const answers = (side: ReturnType<typeof link>) =>
+    side.options.publishSignal.mock.calls.map(([s]) => s).filter((s): s is string => s !== null).map((s) => parseRtcSignal(s)!);
+
+  it("answers the same offer again, and connects once the offerer reads the new answer", async () => {
+    const a = link("aaaa", "bbbb");
+    await a.dl.connect();
+    const offer = parseRtcSignal(a.lastSignal())!;
+    const b = link("bbbb", "aaaa", () => {}, { offerStanding: (ts) => ts === offer.ts });
+    vi.advanceTimersByTime(1);
+    await b.dl.handleSignal(a.lastSignal());
+    // The offerer does not read that answer (its relays' budget); the answerer's ICE gives up half a minute on.
+    vi.advanceTimersByTime(30_000);
+    b.pcs[0].setConnectionState("failed");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(b.dl.state).toBe("connecting");
+    expect(b.pcs).toHaveLength(2);
+    expect(b.pcs[0].closed).toBe(true);
+    expect(answers(b).map((s) => [s.t, s.o])).toEqual([["a", offer.ts], ["a", offer.ts]]);
+    // The answer is replaced, never cleared in between: the offerer reads one or the other.
+    expect(b.options.publishSignal.mock.calls.filter(([s]) => s === null)).toEqual([]);
+    expect(b.states).toEqual(["answering", "connecting", "answering", "connecting"]);
+
+    await a.dl.handleSignal(b.lastSignal());
+    expect(a.dl.state).toBe("connecting");
+    a.pc().channel.open();
+    b.pc().channel.open();
+    expect([a.dl.state, b.dl.state]).toEqual(["open", "open"]);
+  });
+
+  it(`answers again at most ${REANSWERS} times, then goes idle`, async () => {
+    const b = link("bbbb", "aaaa", () => {}, { offerStanding: () => true });
+    await b.dl.handleSignal(JSON.stringify(offerFrom()));
+    for (let i = 0; i < REANSWERS; i++) {
+      vi.advanceTimersByTime(20_000);
+      b.pc().setConnectionState("failed");
+      await vi.advanceTimersByTimeAsync(0);
+      expect(b.dl.state).toBe("connecting");
+    }
+    b.pc().setConnectionState("failed");
+    expect(b.dl.state).toBe("idle");
+    expect(answers(b)).toHaveLength(1 + REANSWERS);
+    expect(b.options.publishSignal).toHaveBeenLastCalledWith(null);
+  });
+
+  it("goes idle when the offer no longer stands, the offerer's attempt is nearly over, or nothing says", async () => {
+    const cases: [string, Partial<DataLinkOptions>, number][] = [
+      ["no longer offered", { offerStanding: () => false }, 30_000],
+      ["too late for the offerer", { offerStanding: () => true }, 80_000],
+      ["no offerStanding", {}, 30_000],
+    ];
+    for (const [, extra, after] of cases) {
+      vi.setSystemTime(NOW);
+      const b = link("bbbb", "aaaa", () => {}, extra);
+      await b.dl.handleSignal(JSON.stringify(offerFrom()));
+      vi.advanceTimersByTime(after);
+      b.pc().setConnectionState("failed");
+      await vi.advanceTimersByTimeAsync(0);
+      expect(b.dl.state).toBe("idle");
+      expect(b.pcs).toHaveLength(1);
+    }
+  });
+
+  it("does not answer again once the attempt timer ends it: too late for the offerer", async () => {
+    const b = link("bbbb", "aaaa", () => {}, { offerStanding: () => true });
+    await b.dl.handleSignal(JSON.stringify(offerFrom({ ts: NOW })));
+    // A connection that neither fails nor opens: its attempt timer ends it, far too late to answer again.
+    vi.advanceTimersByTime(CONNECT_TIMEOUT_MS);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(b.dl.state).toBe("idle");
+    expect(b.pcs).toHaveLength(1);
+  });
+
+  it("never answers again after close(), nor when its own offer fails", async () => {
+    const b = link("bbbb", "aaaa", () => {}, { offerStanding: () => true });
+    await b.dl.handleSignal(JSON.stringify(offerFrom()));
+    b.dl.close();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(b.dl.state).toBe("idle");
+    expect(b.pcs).toHaveLength(1);
+
+    const a = link("aaaa", "bbbb", () => {}, { offerStanding: () => true });
+    await a.dl.connect();
+    a.pc().setConnectionState("failed");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(a.dl.state).toBe("idle");
+    expect(a.pcs).toHaveLength(1);
+  });
+
+  it("the offerer gives up at once on an answer the answerer made again, and never on one that connected", async () => {
+    const onAnswerReplaced = vi.fn();
+    const a = link("aaaa", "bbbb", () => {}, { onAnswerReplaced });
+    await a.dl.connect();
+    const offer = parseRtcSignal(a.lastSignal())!;
+    const answer = (ts: number) => JSON.stringify({ ...offerFrom({ t: "a", ts, s: "active" }), o: offer.ts });
+    // The first answer, read late: its connection on the answerer's side is already gone.
+    await a.dl.handleSignal(answer(NOW + 1_000));
+    expect(a.dl.state).toBe("connecting");
+    // The same answer again, or an older one: nothing changes.
+    await a.dl.handleSignal(answer(NOW + 1_000));
+    await a.dl.handleSignal(answer(NOW + 500));
+    expect(a.dl.state).toBe("connecting");
+    // The answerer's new answer: this connection can never come up. Given up now, not 90 s on.
+    await a.dl.handleSignal(answer(NOW + 32_000));
+    expect(a.dl.state).toBe("idle");
+    expect(a.pcs[0].closed).toBe(true);
+    expect(a.options.publishSignal).toHaveBeenLastCalledWith(null);
+    expect(a.options.onClose).not.toHaveBeenCalled();
+    // The answerer is there: the caller dials again now.
+    expect(onAnswerReplaced).toHaveBeenCalledOnce();
+
+    // Open, a later answer is nothing to it.
+    await a.dl.connect();
+    const second = parseRtcSignal(a.lastSignal())!;
+    await a.dl.handleSignal(JSON.stringify({ ...offerFrom({ t: "a", ts: NOW + 40_000, s: "active" }), o: second.ts }));
+    a.pc().channel.open();
+    await a.dl.handleSignal(JSON.stringify({ ...offerFrom({ t: "a", ts: NOW + 50_000, s: "active" }), o: second.ts }));
+    expect(a.dl.state).toBe("open");
+    expect(onAnswerReplaced).toHaveBeenCalledOnce();
+  });
+
+  it("takes a newer offer while it waits on an answer made again", async () => {
+    const b = link("bbbb", "aaaa", () => {}, { offerStanding: () => true });
+    await b.dl.handleSignal(JSON.stringify(offerFrom({ ts: NOW })));
+    vi.advanceTimersByTime(30_000);
+    b.pc().setConnectionState("failed");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(b.dl.state).toBe("connecting");
+    // The offerer gave up and offers anew (or its app restarted): that offer is answered.
+    await b.dl.handleSignal(JSON.stringify(offerFrom({ ts: NOW + 31_000 })));
+    expect(b.pcs).toHaveLength(3);
+    expect(answers(b).at(-1)).toMatchObject({ t: "a", o: NOW + 31_000 });
   });
 });

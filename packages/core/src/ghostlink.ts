@@ -796,6 +796,9 @@ export class GhostLink {
       // An offer to a saved contact: its answer may be a while (the contact may still hold this app's old session),
       // so the look for it slows after its first seconds (`OFFER_FAST_MS`). A first pairing looks fast throughout.
       setFastPoll: (fast, offer) => this.session.setFastPoll(fast, !!offer && !!options.pairing?.credentials.peerKey),
+      // An answer that did not connect is made again only while the contact's packet still carries that offer.
+      offerStanding: ts => !this.leaving && !this.stopped && !this.streamBlocked && this.peerOfferTs() === ts,
+      onAnswerReplaced: () => this.redial(),
       onOpen: channel => {
         if (this.streamBlocked || this.keyStopped) { channel.close(); return; }
         const plan = this.switcher.pending;
@@ -929,6 +932,16 @@ export class GhostLink {
     traceLink(this.myPubKeyZ32, "stale-offer", { beforeMs: floor - offer.ts });
     this.maybeAutoConnect(this.presence);
     return true;
+  }
+
+  /** The time of the offer the contact's packet carries, as last read (verified as `handleRtcSignal` does); null for none. */
+  private peerOfferTs(): number | null {
+    const signal = this.session.peerSignal, credentials = this.options.pairing?.credentials;
+    if (!signal) return null;
+    const verified = this.options.params.profile ? verifyPairedSignal(signal, this.options.params.peerPubKeyZ32,
+      this.myPubKeyZ32, credentials?.peerKey, credentials?.requireSignedSignals) : signal;
+    const parsed = verified ? parseRtcSignal(verified) : null;
+    return parsed?.t === "o" ? parsed.ts : null;
   }
 
   private handleRtcSignal(signal: string): void {
@@ -2001,6 +2014,23 @@ export class GhostLink {
     const wait = this.dialWait();
     if (Date.now() - this.lastAutoConnectAt < wait) { traceLink(this.myPubKeyZ32, "dial-backoff", { failures: this.autoConnectFailures, left: wait - (Date.now() - this.lastAutoConnectAt) }); return; }
     traceLink(this.myPubKeyZ32, "dial", { failures: this.autoConnectFailures });
+    this.lastAutoConnectAt = Date.now();
+    this.autoConnectFailures++;
+    void this.dial().catch(error => {
+      this.tracker?.failed("transport", true);
+      this.dialFailed(error instanceof Error ? error.message : String(error));
+    });
+  }
+
+  /**
+   * The contact answered this side's offer again, and the data link gave the attempt up (`DataLink.onAnswerReplaced`):
+   * the contact is there, so this side dials again now. Its packet with that answer often has no room for its presence,
+   * and waiting for a packet that says it is online left the edge to the next look at the background pace (60 s, CLI
+   * bug hunt 2026-09-30).
+   */
+  private redial(): void {
+    if (this.stopped || this.leaving || this.streamBlocked || this.keyStopped || !this.options.autoConnect || this.channel || this.dialing || this.dataLink.state !== "idle") return;
+    traceLink(this.myPubKeyZ32, "dial", { failures: this.autoConnectFailures, again: true });
     this.lastAutoConnectAt = Date.now();
     this.autoConnectFailures++;
     void this.dial().catch(error => {

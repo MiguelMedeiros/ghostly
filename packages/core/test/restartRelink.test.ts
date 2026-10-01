@@ -29,6 +29,8 @@ interface App {
   name: string; side: Side; link: GhostLink; dhtState: DhtDeliveryState; requests: { at: number }[]; stopped?: Promise<void>;
   /** While set, the relays' request budget holds back every publish of this app (it throws `DiscoveryBudgetError`). */
   heldUntil?: number;
+  /** While set, the relays' budget holds back every read of this app: it is answered with the last packet it read. */
+  readsHeldUntil?: number;
 }
 
 /** The session the staying side holds: a new one (or none) means it let the old one go. */
@@ -37,14 +39,21 @@ const apps: App[] = [];
 const peerKeyOf = (side: Side) => identityFromSeedB64(side.seedB64).pubKeyZ32;
 
 function counted(pkarr: MemoryPkarr, app: App): PkarrTransport {
-  const inner = pkarr.transport(), requests = app.requests;
+  const inner = pkarr.transport(), requests = app.requests, lastRead = new Map<string, Awaited<ReturnType<PkarrTransport["resolve"]>>>();
   return {
     publish: async (identity, records) => {
       // Held back: nothing went out, and the caller tries again when the budget frees a request.
       if (app.heldUntil && Date.now() < app.heldUntil) throw new DiscoveryBudgetError(app.heldUntil - Date.now());
       requests.push({ at: Date.now() }); return inner.publish(identity, records);
     },
-    resolve: (key, options) => { requests.push({ at: Date.now() }); return inner.resolve(key, options); },
+    resolve: async (key, options) => {
+      // Held back: as the relay transport does, what it read last is the answer (`RelayTransport.resolve`).
+      if (app.readsHeldUntil && Date.now() < app.readsHeldUntil) return lastRead.get(key) ?? null;
+      requests.push({ at: Date.now() });
+      const packet = await inner.resolve(key, options);
+      lastRead.set(key, packet);
+      return packet;
+    },
     describe: inner.describe,
   };
 }
@@ -132,7 +141,8 @@ function report(result: Result): void {
  * (node-datachannel), and the restarted app's native dials do not reach it, failing after `dialFailMs`.
  */
 async function restart(kind: Kind, restarted: "lower" | "higher", how: How, budgetHeldMs?: number, endpointAfterMs?: number,
-  cli?: { rtcFailsAfterMs: number; dialFailMs: number }): Promise<Result> {
+  cli?: { rtcFailsAfterMs: number; dialFailMs: number },
+  readsHeld?: { afterMs: number; forMs: number; restartedWrites?: { afterMs: number; forMs: number } }): Promise<Result> {
   const world = { pkarr: new MemoryPkarr(DESKTOP_NETWORK), native: new NativeWorld() };
   // The inviter has the lower link key here: it is the one that dials.
   const made = invitationWhere("inviter");
@@ -157,6 +167,9 @@ async function restart(kind: Kind, restarted: "lower" | "higher", how: How, budg
   goes = startApp(world, "goes", goesSide, { side: staysSide, name: "stays" }, kind, dhtState, true, endpointAfterMs);
   const restartedAt = Date.now();
   if (budgetHeldMs) stays.heldUntil = restartedAt + budgetHeldMs;
+  if (readsHeld) setTimeout(() => { stays.readsHeldUntil = Date.now() + readsHeld.forMs; }, readsHeld.afterMs);
+  const writes = readsHeld?.restartedWrites;
+  if (writes) setTimeout(() => { goes.heldUntil = Date.now() + writes.forMs; }, writes.afterMs);
   const liveAgainMs = await until(() => {
     watch();
     return goes.link.isDataLinkOpen && stays.link.isDataLinkOpen && channelOf(stays) !== before;
@@ -340,5 +353,34 @@ describe("a restart whose WebRTC answer the relays' budget holds back", () => {
     expect(result.transport).toBe("iroh/1");
     expect(result.requestsPerMin).toBeLessThanOrEqual(16);
     expect(result.dialFailures).toBe(0);
+  }, 240_000);
+});
+
+/**
+ * A community's hub (the lower key here, the side that dials) offers to a member back after a restart, and the member
+ * answers within a second; the hub's reads then wait for its relays' budget (a restart of the member a minute before
+ * spent it) and return the packet read before. The member's ICE gives up on its answer after 31 s. The member used to
+ * go idle with the hub's offer answered once and never again: the edge waited for the hub's 90 s attempt, then for a
+ * background read, 110 s in all (CLI, 2026-09-30).
+ */
+describe("a restart whose answer the staying side cannot read for its relays' budget", () => {
+  beforeEach(() => { rtc.answerFailsAfterMs = 31_000; });
+
+  it("the restarted app answers the standing offer again, and is live once the reads are back", async () => {
+    const HELD_MS = 40_000;
+    const result = await restart("webrtc", "higher", "graceful", undefined, undefined, undefined, { afterMs: 2_500, forMs: HELD_MS });
+    // Before: 107.1 s, 21 requests a minute (the restarted app). After: 44.3 s, 19 a minute: one answer more, and its
+    // fast looks for the offerer's side.
+    expect(result.liveAgainMs, "from the restart to live on both sides").toBeLessThanOrEqual(2_500 + HELD_MS + 10_000);
+    expect(result.requestsPerMin).toBeLessThanOrEqual(20);
+  }, 240_000);
+
+  it("the answer made again waits for the restarted app's budget too: the staying side drops the stale answer it read for the new one", async () => {
+    // The staying side reads the restarted app's first answer at 47.5 s, long dead; the answer made again at 34 s goes
+    // out only at 55 s. Before: that dead answer was held to the end of its 90 s attempt, and the edge redialled then
+    // (107.1 s). After: 61.4 s, the stale answer dropped as the new one is read and the edge dialled again at once.
+    const result = await restart("webrtc", "higher", "graceful", undefined, undefined, undefined,
+      { afterMs: 2_500, forMs: 45_000, restartedWrites: { afterMs: 30_000, forMs: 25_000 } });
+    expect(result.liveAgainMs, "from the restart to live on both sides").toBeLessThanOrEqual(75_000);
   }, 240_000);
 });
