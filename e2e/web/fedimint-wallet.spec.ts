@@ -115,7 +115,7 @@ test("Fedimint on regtest: join by invite, ecash in over the gateway, notes out 
   await alice.page.getByTestId("payment-amount").fill("3000");
   await alice.page.getByTestId("payment-send").click();
   const review = alice.page.getByTestId("payment-composer").getByTestId("payment-review");
-  await expect(review).toContainText("fedimint", { timeout: 60_000 });
+  await expect(review.getByTestId("review-rail")).toHaveText(/^Fedimint( · \w+)?$/, { timeout: 60_000 });
   await review.getByRole("button", { name: "Approve payment" }).click();
   await expect(chat(bob).getByTestId("payment-bubble").filter({ hasText: "Sent you" }).last().getByTestId("payment-state")).toHaveText("Received", { timeout: 90_000 });
   // Gone out: the sheet closed, back to the chat.
