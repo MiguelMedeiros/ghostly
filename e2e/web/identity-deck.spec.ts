@@ -16,7 +16,8 @@ const b64url = (b: Uint8Array) => Buffer.from(b).toString("base64url");
 
 const deck = (page: Page) => page.getByTestId("identities-mine").locator(".id-deck");
 const byName = (page: Page, name: string) => page.getByTestId("identity-proof").filter({ hasText: name });
-const newButton = (page: Page) => page.getByRole("banner").getByTestId("identities-new");
+// The page's own header: not a banner landmark since the open page is the <main> one (#828).
+const newButton = (page: Page) => page.getByTestId("identities-page").locator("header").getByTestId("identities-new");
 const ghostlyCard = (page: Page) => page.getByTestId("identity-ghostly");
 const panel = (page: Page) => page.getByTestId("identity-panel");
 /** The card is the chosen one, the only one, and the panel below is its own. */
