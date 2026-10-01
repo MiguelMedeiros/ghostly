@@ -349,8 +349,8 @@ describe("an app restarting (WISP 100, Back after a restart)", () => {
       type Holder = Recorded & { registerEndpoint: ReturnType<typeof vi.fn>; releaseEndpoint: ReturnType<typeof vi.fn>; canReleaseEndpoint: ReturnType<typeof vi.fn>;
         yieldEndpoint: ReturnType<typeof vi.fn>; lastActivityAt: number; callOn: boolean };
       /** Eight chats live over Iroh, each last used this many minutes ago, and a ninth with no listener. */
-      async function allLive(minutesAgo: number[]) {
-        const rows = [...older().slice(0, 8), row({ ...paired(), id: "chat-z" })];
+      async function allLive(minutesAgo: number[], ninth: Partial<StoredLink> = {}) {
+        const rows = [...older().slice(0, 8), row({ ...paired(), id: "chat-z", ...ninth })];
         const started = await nativeStarted(...rows);
         const linkOf = (id: string) => started.linkOf(id) as unknown as Holder;
         const holders = rows.slice(0, 8).map((r) => linkOf(r.id));
@@ -414,6 +414,19 @@ describe("an app restarting (WISP 100, Back after a restart)", () => {
         await node["nativeQueue"];
         expect(nine.availableTransports).toContain("iroh/1");
         expect(holders[0].registerEndpoint).toHaveBeenCalledOnce();
+        node.setActiveLink({ linkId: null });
+      });
+
+      it("on an app with WebRTC, a chat whose contact has WebRTC too ends nobody's session for one", async () => {
+        vi.stubGlobal("RTCPeerConnection", class {});
+        onTestFinished(() => { vi.unstubAllGlobals(); });
+        const record = (transports: string[]) => ({ rev: 1, issued: Date.now(), author: createIdentity().pubKeyZ32, versions: [1], transports,
+          capabilities: [], extensions: [], descriptors: {}, name: "" });
+        const { node, holders, nine } = await allLive([10, 9, 8, 7, 6, 5, 4, 3], { capsState: { rev: 1, peer: record(["iroh/1", "webrtc/1"]) } });
+        node.setActiveLink({ linkId: "chat-z" });
+        await node["nativeQueue"];
+        expect(nine.registerEndpoint).not.toHaveBeenCalled();
+        expect(yielded(holders)).toEqual([]);
         node.setActiveLink({ linkId: null });
       });
 

@@ -141,6 +141,8 @@ export const LIVENESS_MISSED_PINGS = 3;
  * these is when the chat was last in use (`canYieldEndpoint`). Every other frame (a text, a receipt, typing, a
  * reaction, an edit, a file, a call, a payment) is use; what this side sends is answered with one of them.
  */
+/** How long a session giving its listener up waits after its goodbye before it closes, so the goodbye gets there. */
+const YIELD_BYE_MS = 300;
 const QUIET_FRAMES = new Set(["paired-ping", "paired-pong", "paired-bye", "paired-policy", "paired-switch-plan", "paired-switch-ready",
   "paired-switch-failed", "paired-switch-keep", "paired-rtc", "paired-adapters", "paired-nick", "paired-avatar", "paired-capabilities",
   "paired-wake", "paired-hold", "paired-payments", "paired-groups", "paired-services", "paired-reconnect", "paired-reconnect-ack"]);
@@ -636,6 +638,8 @@ export class GhostLink {
   private channelSince = 0;
   /** When the contact last sent something other than the session's upkeep (`QUIET_FRAMES`) on a session. */
   private activityAt = 0;
+  /** Set while `yieldEndpoint` ends the session to let its listener go: nothing dials meanwhile. */
+  private yielding = false;
   /**
    * The contact said goodbye on the live session (`paired-bye`): its app is going away, likely to restart. Its packet
    * then was `packet`; it is dialled again once a newer one shows it back, or after `until`.
@@ -1604,9 +1608,16 @@ export class GhostLink {
   async yieldEndpoint(transport: PairedTransport, idleMs: number): Promise<boolean> {
     if (!this.canYieldEndpoint(transport, idleMs)) return false;
     traceLink(this.myPubKeyZ32, "native-yield", { transport, idle: Date.now() - this.lastActivityAt });
-    try { this.channel?.send(JSON.stringify({ t: "paired-bye" })); } catch { /* closing already: its close says as much */ }
-    this.disconnect();
-    await this.releaseEndpoint(transport);
+    // Nothing dials meanwhile (the contact closing first would make this side look for it again), so the endpoint
+    // is free to go once the goodbye is out.
+    this.yielding = true;
+    try {
+      try { this.channel?.send(JSON.stringify({ t: "paired-bye" })); } catch { /* closing already: its close says as much */ }
+      // Closed at once, a HyperDHT stream dropped the goodbye and the contact heard only the close (`peer-lost`).
+      await new Promise(resolve => setTimeout(resolve, YIELD_BYE_MS));
+      this.disconnect();
+      await this.releaseEndpoint(transport);
+    } finally { this.yielding = false; }
     return !this.endpoints.has(transport);
   }
 
@@ -2035,7 +2046,7 @@ export class GhostLink {
    */
   private maybeAutoConnect(presence: PeerPresence): void {
     // Stopping (its loops end after an await): a poll finishing meanwhile must not dial again.
-    if (this.stopped || this.leaving || this.streamBlocked || this.keyStopped || !this.options.autoConnect || !presence.online || this.channel || this.dialing || this.dataLink.state !== "idle") return;
+    if (this.stopped || this.leaving || this.yielding || this.streamBlocked || this.keyStopped || !this.options.autoConnect || !presence.online || this.channel || this.dialing || this.dataLink.state !== "idle") return;
     // On the DHT the chat is usable: layer 1 is retried at the background pace (WISP 100), not the pairing's.
     // A pin over the DHT alone changes nothing here: the joiner still knocks and the inviter still answers.
     // Back after a restart on a native transport whose endpoint is still starting: it is knocked on once it has, and a
@@ -3025,7 +3036,7 @@ export class GhostLink {
    * once, and the contact is watched closely for a while, since an app that went away is usually back in seconds.
    */
   private peerLost(why: string): void {
-    if (this.stopped || this.leaving) return;
+    if (this.stopped || this.leaving || this.yielding) return;
     traceLink(this.myPubKeyZ32, "peer-lost", { why });
     this.lostUntil = Date.now() + WATCH_PEER_MS;
     this.autoConnectFailures = 0;

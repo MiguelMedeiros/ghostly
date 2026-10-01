@@ -4932,6 +4932,15 @@ export class GhostlyNode implements EngineImplementation {
     void this.ensureNativeEndpoints(live.stored.id, true);
   }
 
+  /**
+   * Whether the chat goes live only over a native transport: this app has no WebRTC, or its contact has none (its record
+   * lists no `webrtc/1`). Not known yet (no record read) counts as only natively, as a chat before its first record must.
+   */
+  private reachedOnlyNatively(live: LiveLink): boolean {
+    const theirs = live.stored.capsState?.peer?.transports ?? live.stored.peerTransports;
+    return typeof RTCPeerConnection === "undefined" || !theirs || !theirs.includes("webrtc/1");
+  }
+
   /** `inUse`: a text is going or coming in the chat now, which counts as the chat on screen does for taking a listener. */
   private ensureNativeEndpoints(linkId: string, inUse = false): Promise<void> {
     const expected = this.links.get(linkId)?.link;
@@ -4965,8 +4974,9 @@ export class GhostlyNode implements EngineImplementation {
                 && now - (other.nativeTakenAt?.[key] ?? 0) >= NATIVE_HOLD_MS)
               .sort((a, b) => a.lastMessageAt - b.lastMessageAt)[0] : undefined);
             // Every one carrying a session: from the 1:1 chat whose session has gone unused longest, once that is
-            // NATIVE_HOLD_MS, and never one with a call on or a file moving. Group links keep theirs.
-            const idle = victim || !taking ? undefined : owners
+            // NATIVE_HOLD_MS, and never one with a call on or a file moving. Group links keep theirs. Only for a chat
+            // that can go live no other way: one whose contact has WebRTC, on an app with WebRTC, ends nobody's session.
+            const idle = victim || !taking || !this.reachedOnlyNatively(live) ? undefined : owners
               .filter(other => other !== live && !other.stored.group && other.stored.id !== this.activeLinkId && !this.fileDesk.moving(other.stored.id)
                 && other.link?.canYieldEndpoint(key, NATIVE_HOLD_MS))
               .sort((a, b) => a.link!.lastActivityAt - b.link!.lastActivityAt)[0];
@@ -4980,7 +4990,7 @@ export class GhostlyNode implements EngineImplementation {
               traceLink(live.myPubKeyZ32, "native-no-slot", { transport: key, active: this.activeLinkId === linkId });
               // Each busy for now (dialling, switching, carrying a session): the chat on screen asks again in a moment.
               if (this.activeLinkId === linkId && !group) this.retryActiveSlot(linkId);
-              throw new Error("All eight native connection slots are in use. Disconnect a native connection in another chat, then reopen this chat or press Reconnect.");
+              throw new Error("All eight native connection slots are in use. This chat takes one once a chat live over one has been quiet for 2 minutes. Disconnect a native connection in another chat to free one now.");
             } else {
               await victim.link!.releaseEndpoint(key);
               victim.transportErrors ??= {};
