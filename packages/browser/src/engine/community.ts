@@ -510,7 +510,9 @@ export class Communities {
           if (want()) {
             live.forceHub = false; live.hub = true; live.hubSince = now; live.emptySince = now;
             live.knocksScanned = false;
-            await this.publishBeacon(groupId, live, now, true);
+            // A write the relays' budget holds back is tried again in a moment (`BEACON_RETRY_MS`); meanwhile this hub
+            // goes on with its tick: alone, it is the door before its entry is listed (`doorHubs`).
+            await this.publishBeacon(groupId, live, now, true).catch(() => {});
             traceJoin(groupId, "hub.elected");
           }
         }
@@ -533,7 +535,8 @@ export class Communities {
       } else if (now - live.lastBeaconWrite >= COMMUNITY_TOPOLOGY.beaconEveryMs || !live.beacon.some(h => h.key === me)
         // A load that moved much (or filled up) is said at once, so members stop asking a full hub.
         || (now - live.lastBeaconWrite >= 5_000 && Math.abs(this.beaconLoad(groupId, live, now) - (live.beacon.find(h => h.key === me)?.load ?? load)) >= 8)) {
-        await this.publishBeacon(groupId, live, now, true);
+        // Held back, it does not hold the rest of the tick (knocks, entries, edges) with it.
+        await this.publishBeacon(groupId, live, now, true).catch(() => {});
       }
     }
     if (live.hub) {
@@ -800,8 +803,10 @@ export class Communities {
     if (!s.entryKey || !s.state.entry.seedB64 || s.roster.length >= COMMUNITY_LIMITS.members) return;
     const link = { g: groupId, host: s.entryKey };
     // The hubs that take turns at the door: listed lately and settled, the same set for every hub that
-    // reads the beacon (a closed app stays listed until its entry goes stale; a new hub waits a minute).
-    const hubs = doorHubs(live.beacon, now);
+    // reads the beacon (a closed app stays listed until its entry goes stale; a new hub waits a minute). A hub
+    // with no other in sight is the door at once, before its own entry is listed: a new group's first hub, whose
+    // beacon write waited for the relays' budget while another group's link signaled, answered no knock for a minute.
+    const hubs = doorHubs(live.beacon, now, s.myKey);
     if (!hubs.includes(s.myKey)) return;
     const door = [...hubs].sort()[0], doorSig = [...hubs].sort().join(",");
     // Just became the door (the one before went): whatever knocked meanwhile, in any record.

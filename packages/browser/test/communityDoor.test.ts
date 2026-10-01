@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { EXPECT_PEER_MS, PRESENCE_WINDOW, MAX_KNOCKS, createIdentity, decodeCommunityLink, entryParams, identityFromSeedB64, knockIdentity, lobbyKeys, publicKeyFromZ32, readKnocks, type GroupEntryLink } from "@ghostly/core";
+import { DiscoveryBudgetError, EXPECT_PEER_MS, PRESENCE_WINDOW, MAX_KNOCKS, beaconKeys, createIdentity, decodeCommunityLink, entryParams, identityFromSeedB64, knockIdentity, lobbyKeys, publicKeyFromZ32, readBeacon, readKnocks, type GroupEntryLink } from "@ghostly/core";
 import { COMMUNITY_TIMINGS, KNOCK_SHARDS, dialedKey } from "../src/engine/community";
 import { otherEndSeen } from "../src/engine/groups";
 import { CommunityWorld, RELAY_NETWORK, type Peer } from "./communityWorld";
@@ -141,6 +141,33 @@ describe("a community's door", { timeout: 120_000 }, () => {
     alice.online = true;
     await world.run(1_000);
     expect(alice.groups.communities.isHub(id)).toBe(true);
+  });
+
+  // Miguel's CLI (2026-09-30): a daemon that had just let people into two other communities created a third, and
+  // its door first answered a knock 43 to 65 s later. A hub is at the door once its beacon entry is listed, and that
+  // write is a background request: while a link signals (the last admission's edge, still looking fast), background
+  // requests get 5 a minute on each relay, which the other doors' bell reads (exempt from that share) took. Here the
+  // relays' budget holds the new hub's beacon writes back for a minute; everything else goes through.
+  it("a new group's first hub is its door at once, though the relays' budget holds its beacon entry back", async () => {
+    const world = new CommunityWorld(undefined, RELAY_NETWORK);
+    const alice = world.add("alice");
+    const { id, link } = await community(world, alice);
+    const beacon = beaconKeys(alice.groups.communities.session(id)!.state.rv, id);
+    const heldUntil = world.now + 60_000, publish = alice.host.publish;
+    let held = 0;
+    alice.host.publish = async (identity, records, background) => {
+      if (identity.pubKeyZ32 === beacon.identity.pubKeyZ32 && world.now < heldUntil) { held++; throw new DiscoveryBudgetError(heldUntil - world.now); }
+      return publish(identity, records, background);
+    };
+    const bob = world.add("bob");
+    await bob.groups.joinByLink(link);
+    const answered = await world.until(() => [...alice.links.values()].some(e => e.kind === "host" && e.g === id), 60_000, 500);
+    expect(held).toBeGreaterThan(0);
+    expect(answered).toBeLessThanOrEqual(5_000);
+    await world.until(() => world.member(bob, id), 60_000, 500);
+    // Once the budget lets it, its entry is listed, as any hub's.
+    await world.run(heldUntil - world.now + 10_000, 500);
+    expect(readBeacon(beacon, world.pkarr.get(beacon.identity.pubKeyZ32) ?? []).map(h => h.key)).toContain(alice.groups.communities.session(id)!.myKey);
   });
 
   it("the member let in gets its edge from both sides at once, each looking fast, without the lobby; it is a hub only later", async () => {
