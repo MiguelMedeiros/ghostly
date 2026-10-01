@@ -1,7 +1,4 @@
-import { clearChatData } from "@ghostly/browser/shared/idb";
-import { removeFileBytes } from "@ghostly/browser/shared/fileBytes";
-import { LEGACY_JOIN_PREFIX, getStorageProfile, ownsKey } from "./storage";
-import { registryKey } from "./profiles";
+import { getStorageProfile } from "./storage";
 
 export type ColorScheme = "dark" | "light" | "system";
 export type ColorTheme = "classic" | "monochrome" | "cyan" | "purple";
@@ -147,28 +144,6 @@ export function formatBytes(bytes: number): string {
   const sizes = ["B", "KB", "MB", "GB"];
   const i = Math.floor(Math.log(bytes) / Math.log(k));
   return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
-}
-
-/**
- * Everything this profile keeps on the device except the wallet: its
- * localStorage keys and the chats, files and services in its peer's database.
- * Other profiles and the list of profiles stay. The peer forgets the links on
- * its next reconcile; the caller reloads.
- */
-export async function clearAllData(): Promise<void> {
-  const keysToRemove: string[] = [];
-  for (let i = 0; i < localStorage.length; i++) {
-    const key = localStorage.key(i);
-    if (!key || key === registryKey()) continue;
-    // The join flags of older versions are not in the namespace, and each one
-    // carries the session id of a chat that existed; they are the default profile's.
-    if (ownsKey(key) || (!getStorageProfile() && key.startsWith(LEGACY_JOIN_PREFIX))) {
-      keysToRemove.push(key);
-    }
-  }
-  keysToRemove.forEach((key) => localStorage.removeItem(key));
-  await clearChatData();
-  await removeFileBytes().catch(() => {});
 }
 
 export const APP_WEBSITE = "https://github.com/MiguelMedeiros/ghostly";

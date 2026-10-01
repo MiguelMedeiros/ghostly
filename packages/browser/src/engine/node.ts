@@ -98,7 +98,7 @@ import {
   entryParams,
 } from "@ghostly/core";
 import type { AttentionCue, AttentionEvent, EngineImplementation } from "../shared/rpc";
-import { fileStore, type StoredFile } from "../shared/idb";
+import { clearProfileStores, fileStore, type StoredFile } from "../shared/idb";
 import { fileBytes } from "../shared/fileBytes";
 import { FileAppender, readStored, removeStored, storedSize, streamStored } from "../shared/storedFiles";
 import { FileDesk } from "./fileDesk";
@@ -187,6 +187,8 @@ const NATIVE_SLOTS = 8;
 export const GROUP_NATIVE_SLOTS = 4;
 /** How often a group link that found no free native slot tries again. */
 const GROUP_NATIVE_RETRY_MS = 15_000;
+/** "Clear all data": how long taking things back from the network may hold up the clear, in all. */
+export const CLEAR_WITHDRAW_MS = 6_000;
 
 const DEFAULT_SETTINGS: Settings = {
   online: true,
@@ -1351,6 +1353,19 @@ export class GhostlyNode implements EngineImplementation {
     this.groupEdits.stop();
     this.cardEdits.stop();
     await Promise.allSettled([...this.links.values()].map(async (live) => { await live.link?.stop(true); await live.caps?.stop(); }));
+  }
+
+  /**
+   * "Clear all data" (WISP 04), the peer's part. First what can be taken back from the network, best effort and within
+   * `CLEAR_WITHDRAW_MS` in all: items held in storage for contacts, the DID (a `deactivated` record), the identity
+   * proofs (their revocation records, once more). Then the peer stops, so nothing it holds in memory is written back,
+   * and its database keeps only the wallets. The host starts a new peer afterwards (the page reloads).
+   */
+  async clearProfileData(): Promise<void> {
+    const withdraw = Promise.allSettled([this.hold.withdrawAll(), this.did.deactivate(), this.identities.revokeAll()]);
+    await Promise.race([withdraw, new Promise((resolve) => setTimeout(resolve, CLEAR_WITHDRAW_MS))]);
+    await this.shutdown();
+    await clearProfileStores();
   }
 
   getState(): EngineState {

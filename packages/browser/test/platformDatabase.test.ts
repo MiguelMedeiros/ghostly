@@ -116,7 +116,7 @@ describe("writes across stores", () => {
       stores[idb.STORES.proofs].put({ secret: "coin", amount: 64 });
       stores[idb.STORES.payments].put({ id: "pay" });
     });
-    await idb.clearChatData();
+    await idb.clearProfileStores();
     for (const name of [idb.STORES.links, idb.STORES.messages, idb.STORES.files, idb.STORES.services, idb.STORES.groups]) expect(await count(name)).toBe(0);
     expect(await count(idb.STORES.proofs)).toBe(1);
     expect(await count(idb.STORES.payments)).toBe(1);
@@ -124,7 +124,7 @@ describe("writes across stores", () => {
 
   it("has nothing to clear where there is no IndexedDB", async () => {
     vi.stubGlobal("indexedDB", undefined);
-    await expect(idb.clearChatData()).resolves.toBeUndefined();
+    await expect(idb.clearProfileStores()).resolves.toBeUndefined();
   });
 
   it("deletes one chat's files and no one else's", async () => {

@@ -113,16 +113,47 @@ export function openDb(): Promise<IDBDatabase> {
   return dbPromise;
 }
 
+/** The stores "Clear all data" empties: chats and their keys, messages, files, shared apps, groups. */
+export const PROFILE_STORES = [STORES.links, STORES.messages, STORES.files, STORES.fileState, STORES.fileChunks, STORES.services, STORES.groups] as const;
+
 /**
- * "Clear all data": chats, messages, files and shared services. The wallet
- * (proofs, payments, quotes, history) and the mint list stay: ecash is money,
- * and nothing else holds a copy of it.
+ * Records of the settings store that belong to the profile, not to a wallet: its DID and its key, its identity proofs
+ * with their keys and revocations, its own Nostr data, the public profiles it read. A list of what goes rather than of
+ * what stays, on purpose: every other record of that store is a wallet's (seeds, configuration, pending operations),
+ * and a wallet record a newer version adds must never be deleted by mistake.
  */
-export async function clearChatData(): Promise<void> {
+export const PROFILE_SETTINGS_KEYS = ["profileDid", "identityProofs", "identityRevocations", "nostrSocial", "publicProfiles"] as const;
+
+/**
+ * The fields of the peer's `settings` record that are a wallet's, kept by "Clear all data": the mint list, the first-run
+ * wallet setup and the backup reminders. Everything else in it is the profile's (name, picture, network settings,
+ * storage credentials for held items, the push subscription and who holds it) and goes.
+ */
+export const WALLET_SETTINGS_FIELDS = ["mints", "mintsInitialized", "walletSetup", "backupReminders"] as const;
+
+/**
+ * "Clear all data" (WISP 04): everything of the profile in its peer database except its wallets. The chats' stores are
+ * emptied, the profile's records of the settings store are deleted and the `settings` record keeps only its wallet
+ * fields. The wallets (proofs, payments, quotes, history, payment journal, wallet records) stay: ecash is money, and
+ * nothing else holds a copy of it. The caller stops the peer first, or it may write back what was just deleted.
+ */
+export async function clearProfileStores(): Promise<void> {
   if (typeof indexedDB === "undefined") return;
-  const names = [STORES.links, STORES.messages, STORES.files, STORES.fileState, STORES.fileChunks, STORES.services, STORES.groups];
-  const tx = (await openDb()).transaction(names, "readwrite");
-  for (const name of names) tx.objectStore(name).clear();
+  const db = await openDb();
+  const names = [...PROFILE_STORES, STORES.settings].filter((name) => db.objectStoreNames.contains(name));
+  const tx = db.transaction(names, "readwrite");
+  for (const name of names) if (name !== STORES.settings) tx.objectStore(name).clear();
+  if (names.includes(STORES.settings)) {
+    const settings = tx.objectStore(STORES.settings);
+    for (const key of PROFILE_SETTINGS_KEYS) settings.delete(key);
+    const read = settings.get("settings");
+    read.onsuccess = () => {
+      const record = read.result as Record<string, unknown> | undefined;
+      if (!record || typeof record !== "object") return;
+      const kept = Object.fromEntries(WALLET_SETTINGS_FIELDS.filter((field) => field in record).map((field) => [field, record[field]]));
+      settings.put(kept, "settings");
+    };
+  }
   await new Promise<void>((resolve, reject) => {
     tx.oncomplete = () => resolve();
     tx.onerror = tx.onabort = () => reject(tx.error);
