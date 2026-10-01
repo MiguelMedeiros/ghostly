@@ -131,6 +131,7 @@
     "giveName": "Dai un nome al profilo",
     "noBackupFile": "Questo portafoglio non ha un file di backup",
     "noPhrase": "Questo portafoglio non ha una frase di recupero da mostrare",
+    "noRoom": "Su questo dispositivo non c’è più spazio per questo backup. Libera spazio, poi riprova.",
     "notABackup": "Questo backup non contiene un profilo",
     "openElsewhere": "Questo profilo è aperto in un'altra finestra. Chiudila, poi riprova.",
     "switchFirst": "Passa prima a un altro profilo",

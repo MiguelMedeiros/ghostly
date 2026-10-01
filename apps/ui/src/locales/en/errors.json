@@ -131,6 +131,7 @@
     "giveName": "Give the profile a name",
     "noBackupFile": "This wallet has no backup file",
     "noPhrase": "This wallet has no recovery phrase to show",
+    "noRoom": "This device has no room left for this backup. Free some space, then try again.",
     "notABackup": "This backup does not hold a profile",
     "openElsewhere": "This profile is open in another window. Close it, then try again.",
     "switchFirst": "Switch to another profile first",

@@ -128,6 +128,7 @@ const RULES: readonly Rule[] = [
   exact("This profile is open in another window. Close it, then try again.", "errors.profile.openElsewhere"),
   exact("Wrong lock password for that profile", "errors.profile.wrongPassword"),
   exact("This backup does not hold a profile", "errors.profile.notABackup"),
+  exact("This device has no room left for this backup. Free some space, then try again.", "errors.profile.noRoom"),
   { match: /^Could not read the Ark wallet for the backup: (?<reason>[\s\S]+)$/, key: "errors.profile.arkBackup", params: ({ reason }, t) => ({ reason: errorText(reason, t) }) },
   exact("This wallet has no recovery phrase to show", "errors.profile.noPhrase"),
   exact("This wallet has no backup file", "errors.profile.noBackupFile"),

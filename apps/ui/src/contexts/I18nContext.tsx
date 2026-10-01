@@ -9,7 +9,7 @@ import {
 import { useSettings } from "./SettingsContext";
 import type { Language } from "../lib/settings";
 import { applyDocumentLanguage, textDirection } from "../lib/documentLanguage";
-import { setDefaultProfileName } from "../lib/profiles";
+import { setDefaultProfileName, setRestoredProfileName } from "../lib/profiles";
 
 import { locales as translations } from "../locales";
 import { englishT, translateWith, type Translate } from "../locales/translate";
@@ -39,6 +39,8 @@ export function I18nProvider({ children }: { children: ReactNode }) {
   // The first profile's built-in name in this language, for whatever lists profiles (lib/profiles has no translator):
   // set as this renders, so the screens rendered in the new language read it; those keeping a list hear it after.
   setDefaultProfileName(t("profile.defaultName"));
+  // And a restored profile's "(restored)", which the registry keeps as a flag.
+  setRestoredProfileName((name) => t("profile.restoredName", { name }));
   useEffect(() => { window.dispatchEvent(new Event("profiles-updated")); }, [t]);
 
   return (
