@@ -154,6 +154,7 @@ const ENGINE: Partial<Record<EngineErrorCode, TranslationKey>> = {
   mintHoldsSats: "errors.engine.mintHoldsSats",
   lastMint: "errors.engine.lastMint",
   noSharedMint: "errors.engine.noSharedMint",
+  reviewedSatsGone: "errors.engine.reviewedSatsGone",
   invoiceExpired: "errors.engine.invoiceExpired",
   lnurlExactly: "errors.engine.lnurlExactly",
   lnurlRange: "errors.engine.lnurlRange",

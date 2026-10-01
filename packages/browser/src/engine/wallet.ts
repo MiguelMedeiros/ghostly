@@ -19,7 +19,7 @@ import {
   type SwapPreview,
 } from "@cashu/cashu-ts";
 import { STORES, openDb, store, transact, wrap } from "../shared/idb";
-import { decodeBolt11, engineError, type PaymentReview, type WalletNetwork } from "@ghostly/core";
+import { PaymentPreflightError, decodeBolt11, engineError, engineText, type PaymentReview, type WalletNetwork } from "@ghostly/core";
 import { BITCOIN_INVOICE_ON_TESTNET, fakesLightning, isTestMint, mintNetwork, paysItsOwnInvoices } from "../shared/mints";
 import type {
   CashuInspection,
@@ -467,7 +467,8 @@ export class CashuWallet {
   async executeReviewedCashu(review:PaymentReview,prepared:CashuPrepared):Promise<string> {
     return this.locked(prepared.mint,async()=>{
       const preview=deserializeSwapPreview(prepared.swap);
-      if(prepared.mint!==review.provider || preview.amount.toNumber()!==review.amount || reviewedCashuFee(preview)!==review.fee)throw new Error("Cashu preview does not match review");
+      // Refused before the mint is asked: nothing was sent, and the review fails for good (the request can be paid again).
+      if(prepared.mint!==review.provider || preview.amount.toNumber()!==review.amount || reviewedCashuFee(preview)!==review.fee)throw new PaymentPreflightError("Cashu preview does not match review");
       const tx=(await openDb()).transaction(STORES.proofs,"readwrite");
       await new Promise<void>((resolve,reject)=>{
         const proofs=tx.objectStore(STORES.proofs);
@@ -479,7 +480,7 @@ export class CashuWallet {
             proofs.put({...proof,reserved:true});
           };
         }
-        tx.oncomplete=()=>resolve();tx.onabort=tx.onerror=()=>reject(new Error("Prepared Cashu inputs are no longer available"));
+        tx.oncomplete=()=>resolve();tx.onabort=tx.onerror=()=>reject(new PaymentPreflightError(engineText("reviewedSatsGone")));
       });
       const wallet=await this.wallet(prepared.mint);
       const {keep,send}=await wallet.completeSwap(preview);
