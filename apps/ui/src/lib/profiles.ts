@@ -29,7 +29,8 @@ export const THEME_COLOR: Record<ColorTheme, string> = { cyan: "#22d3ee", purple
 const DEFAULT_ENTRY: ProfileEntry = { id: "", name: "Personal", createdAt: 0 };
 /**
  * The first profile's name until someone renames it, in the app's language: the registry keeps the built-in English
- * one, so a change of language changes it too.
+ * one, so a change of language changes it too. A backup of it carries the built-in one, so the copy restored from it
+ * follows the language as well.
  */
 let defaultName = DEFAULT_ENTRY.name;
 export function setDefaultProfileName(name: string): void {
@@ -41,11 +42,11 @@ export function setRestoredProfileName(format: (name: string) => string): void {
   restoredName = format;
 }
 /**
- * A profile as it is shown: the first one, never renamed, by the name of the app's language; a restored one with the
- * app's word for restored.
+ * A profile as it is shown: one with the built-in name (the first one never renamed, or a copy of it restored from a
+ * backup) by the name of the app's language; a restored one with the app's word for restored.
  */
 const shown = (entry: ProfileEntry): ProfileEntry => {
-  const name = entry.id === "" && entry.name === DEFAULT_ENTRY.name ? defaultName : entry.name;
+  const name = entry.name === DEFAULT_ENTRY.name ? defaultName : entry.name;
   return entry.restored ? { ...entry, name: restoredName(name) } : name === entry.name ? entry : { ...entry, name };
 };
 /**
@@ -54,6 +55,11 @@ const shown = (entry: ProfileEntry): ProfileEntry => {
  * name typed or pasted from the field of another language could carry any of them.
  */
 export const RESTORED_WORDS = ["restored", "restaurado", "restauré", "ripristinato", "مستعاد", "已恢复", "復元"];
+/**
+ * The first profile's name in each language (`profile.defaultName` in every locale, which a test checks against this
+ * list). A backup an older app made of that profile, never renamed, carries one of them instead of the built-in one.
+ */
+export const DEFAULT_NAMES = ["Personal", "Pessoal", "Personnel", "Personale", "شخصي", "个人", "個人"];
 const RESTORED_SUFFIX = new RegExp(`^(.*\\S)\\s*[(（]\\s*(?:${RESTORED_WORDS.join("|")})\\s*[)）]$`, "iu");
 /** A name without the restored words at its end ("Work (restaurado) (restored)" is "Work"), and whether it had any. */
 function withoutRestoredWord(name: string): { name: string; marked: boolean } {
@@ -99,10 +105,18 @@ const cleanName = (name: string) => name.replace(/\s+/g, " ").trim().slice(0, 32
 
 export function listProfiles(): ProfileEntry[] { return read().profiles.map(shown); }
 
-/** A profile's name as shown, without the word the app adds to a restored one: what a backup of it carries. */
+/** A profile's name as shown, without the word the app adds to a restored one: what the Profile page's field holds. */
 export function baseProfileName(id: string): string | undefined {
   const entry = read().profiles.find((p) => p.id === id);
   return entry && shown({ id: entry.id, name: entry.name, createdAt: entry.createdAt }).name;
+}
+
+/**
+ * A profile's name as the registry keeps it: what a backup of it carries. For the first profile never renamed that is
+ * the built-in name, never the app's language's, so the copy restored from it follows the language too.
+ */
+export function storedProfileName(id: string): string | undefined {
+  return read().profiles.find((p) => p.id === id)?.name;
 }
 
 /**
@@ -171,7 +185,9 @@ export function registerProfile(id: string, name: string, restored = false): Pro
   // A backup of a profile an older app restored carries "(restored)", or the word of another language, in its name:
   // the flag says it now.
   const { name: clean, marked } = nameAndMark(id, name);
-  const entry: ProfileEntry = { id, name: clean || "Restored", createdAt: Date.now() };
+  // A backup an older app made of the first profile, never renamed, carries the name of that app's language
+  // ("Pessoal"): it is the built-in one, which follows the language.
+  const entry: ProfileEntry = { id, name: restored && DEFAULT_NAMES.includes(clean) ? DEFAULT_ENTRY.name : clean || "Restored", createdAt: Date.now() };
   if (restored || marked) entry.restored = true;
   write({ ...registry, profiles: [...registry.profiles, entry] });
   return shown(entry);

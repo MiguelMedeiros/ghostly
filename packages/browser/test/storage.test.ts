@@ -15,7 +15,7 @@ import {
 } from "../../../apps/ui/src/lib/storage";
 import type { ChatMessage } from "../../../apps/ui/src/lib/types";
 import { clearAllData } from "../../../apps/ui/src/lib/clearData";
-// covers: chat.paired.delete-message, chats.list.delete, app.clear-data, core.text-limits
+// covers: chat.paired.delete-message, chats.list.delete, app.clear-data, core.text-limits, app.attention.unread
 
 /** Enough of the Web Storage API for the session store; node has none. */
 class FakeStorage {
@@ -127,6 +127,24 @@ describe("the name a peer goes by", () => {
 function peerMessage(n: number): ChatMessage {
   return { id: `peer_${n}`, text: `boo ${n}`, sender: "peer", timestamp: n * 1000 };
 }
+
+describe("the unread count", () => {
+  it("counts a contact's message that arrives late, written before my own last one", () => {
+    const id = ensureSession(keys);
+    addMessage(id, peerMessage(1));
+    addMessage(id, { id: "me_3", text: "anyone there?", sender: "me", timestamp: 3000, delivery: "delivered" });
+    markSessionAsRead(id);
+    expect(getUnreadCount(loadSession(id)!)).toBe(0);
+
+    // Written at 2 s, held up on its way: it sorts in before my message, which was read.
+    addMessage(id, peerMessage(2));
+
+    expect(loadSession(id)!.messages.map((m) => m.id)).toEqual(["peer_1", "peer_2", "me_3"]);
+    expect(getUnreadCount(loadSession(id)!)).toBe(1);
+    markSessionAsRead(id);
+    expect(getUnreadCount(loadSession(id)!)).toBe(0);
+  });
+});
 
 describe("deleting one message", () => {
   it("takes it out of the chat and leaves the rest in order", () => {

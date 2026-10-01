@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MessageBubble } from "../../components/MessageBubble";
 import { servicesPlatform } from "../../lib/platform";
 import type { ChatMessage } from "../../lib/types";
+import { fakeEngine, linkView } from "../fakeEngine";
 import { renderApp } from "../render";
 import { audio, decoder, endPlayback, installFakeAudio, installFakeDecoder } from "./fakeMedia";
 
@@ -155,5 +156,34 @@ describe("the voice bubble's layout", () => {
     show(voice({ sender: "me", id: "me_b1" }));
     expect(screen.getByTestId("voice-mic")).toBeInTheDocument();
     expect(screen.queryByTestId("voice-unplayed")).not.toBeInTheDocument();
+  });
+});
+
+describe("a voice message right after a start", () => {
+  it("does not play until the engine has put its transfers back, then shows where its own stands", async () => {
+    const message = voice();
+    const id = message.file!.id;
+    fakeEngine.update({ links: [linkView({ id: "link-1" })], transfers: {}, transfersRestored: false });
+    show(message);
+    // Not known yet whether it is all here: no play, no seeking.
+    expect(screen.getByTestId("voice-play")).toBeDisabled();
+    expect(screen.getByTestId("voice-waveform")).toHaveAttribute("tabindex", "-1");
+    await clickPlay();
+    expect(audio.players).toHaveLength(0);
+    // Restored: it had stopped arriving, and says so.
+    act(() => fakeEngine.update({ transfersRestored: true, transfers: { [id]: { state: "failed", direction: "in", transferred: 1024, size: 2048, error: "Transfer interrupted. Retry when connected." } } }));
+    expect(screen.getByTestId("voice-status")).toHaveTextContent("Did not arrive");
+    const play = screen.queryByTestId("voice-play");
+    if (play) expect(play).toBeDisabled();
+  });
+
+  it("one from history plays once the transfers are restored with none for it", async () => {
+    fakeEngine.update({ links: [linkView({ id: "link-1" })], transfers: {}, transfersRestored: false });
+    show(voice());
+    expect(screen.getByTestId("voice-play")).toBeDisabled();
+    act(() => fakeEngine.update({ transfersRestored: true }));
+    expect(screen.getByTestId("voice-play")).toBeEnabled();
+    await clickPlay();
+    expect(screen.getByTestId("voice-bubble")).toHaveAttribute("data-state", "playing");
   });
 });

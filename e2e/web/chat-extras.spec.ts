@@ -1,5 +1,5 @@
 import { closeSync, openSync, ftruncateSync } from "node:fs";
-import type { Page } from "@playwright/test";
+import type { Page, Route } from "@playwright/test";
 import { createLink, decodeInviteCode, encodeInviteCode } from "@ghostly/core";
 import { copyInvite } from "../support/clipboard";
 import { chat, connect, expect, GIF, link, linkLegacy, say, test, type Peer } from "../support/fixtures";
@@ -64,6 +64,40 @@ test("the unread count shows what came in while away, and clears once the chat i
   await say(bob, "while you watch");
   await expect(chat(alice).getByText("while you watch")).toBeVisible();
   await expect(unreadBadge(rows(alice.page))).toHaveCount(0);
+});
+
+test("a message written before my reply that reaches me after it still counts as unread", { tag: ["@feature:app.attention.unread", "@feature:chat.paired.offline-send"] }, async ({ peer }) => {
+  test.setTimeout(5 * 60_000);
+  const [alice, bob] = await Promise.all([peer("alice"), peer("bob")]);
+  await link(alice, bob);
+  await connect(alice, bob);
+  const chatUrl = bob.page.url();
+
+  // Bob's app is closed, and Alice reaches no relay: what she writes now waits with her.
+  await bob.page.goto("about:blank");
+  const relays = /^https:\/\/(pkarr\.pubky\.(org|app)|relay\.pkarr\.org)\//;
+  const refuse = (route: Route) => route.abort("connectionrefused");
+  await alice.context.route(relays, refuse);
+  await say(alice, "written while you were away");
+  await expect(chat(alice).getByText("written while you were away")).toBeVisible();
+
+  // Bob is back first, writes, and goes back to his chat list.
+  await bob.page.goto(chatUrl);
+  await say(bob, "anyone there?");
+  await expect(bubble(bob, "anyone there?")).toBeVisible();
+  await expect(chat(bob).getByText("written while you were away")).toHaveCount(0);
+  await bob.page.goto("/#/");
+  const row = rows(bob.page);
+  await expect(row).toContainText("anyone there?");
+  await expect(unreadBadge(row)).toHaveCount(0);
+
+  // Alice's message goes once she reaches the relays: written before Bob's, it sorts in above it, and is unread.
+  await alice.context.unroute(relays, refuse);
+  await expect(unreadBadge(row)).toHaveText("1", { timeout: 150_000 });
+  await row.click();
+  await expect(chat(bob).getByText("written while you were away")).toBeVisible();
+  await bob.page.goto("/#/");
+  await expect(unreadBadge(rows(bob.page))).toHaveCount(0);
 });
 
 test("naming a chat: Escape cancels the edit, leaving the field saves it", { tag: ["@feature:chats.list.rename"] }, async ({ peer }) => {
