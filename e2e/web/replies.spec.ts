@@ -113,9 +113,9 @@ test("a reply in a group, with a mention", { tag: ["@feature:groups.replies", "@
   await expect(groupChat(bob)).toHaveAttribute("data-status", "active", { timeout: 180_000 });
   // A community member's name travels with what they say.
   await say(bob, "hi from Bob");
-  await expect(groupChat(alice).getByText("hi from Bob")).toBeVisible({ timeout: 120_000 });
+  await expect(chat(alice).getByText("hi from Bob")).toBeVisible({ timeout: 120_000 });
   await say(alice, "who is in for pizza?");
-  await expect(groupChat(bob).getByText("who is in for pizza?")).toBeVisible({ timeout: 120_000 });
+  await expect(chat(bob).getByText("who is in for pizza?")).toBeVisible({ timeout: 120_000 });
 
   // Bob answers Alice's message and names her.
   const question = row(bob.page, "who is in for pizza?");

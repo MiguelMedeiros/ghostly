@@ -1,5 +1,5 @@
 import type { Page } from "@playwright/test";
-import { expect, openProfilePage, say, test, type Peer } from "../support/fixtures";
+import { chat, expect, openProfilePage, say, test, type Peer } from "../support/fixtures";
 
 /**
  * Editing a sent message in a group (WISP 9xx § Edits). Alice, in a community with Bob, edits her text from its ⋮ and
@@ -36,7 +36,7 @@ test("an edit in a group shows on the other member's side in place, marked edite
   await bob.page.goto(url);
   await expect(groupChat(bob)).toHaveAttribute("data-status", "active", { timeout: 180_000 });
   await say(bob, "hi from Bob");
-  await expect(groupChat(alice).getByText("hi from Bob")).toBeVisible({ timeout: 120_000 });
+  await expect(chat(alice).getByText("hi from Bob")).toBeVisible({ timeout: 120_000 });
   await say(alice, "Working: 0 of 2");
   await expect(row(bob.page, "Working: 0 of 2")).toBeVisible({ timeout: 120_000 });
 
