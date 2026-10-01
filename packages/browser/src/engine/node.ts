@@ -4529,8 +4529,10 @@ export class GhostlyNode implements EngineImplementation {
         onTransportSwitched: () => {
           // Frames of the old channel may have been cut short: what the contact has not confirmed goes again at
           // once over the new one (it acknowledges a repeated id without showing it twice), and so do payments.
-          if (stored.profile && !stored.group) void this.outboxFor(linkId).flush({ reopened: true }).catch(() => {})
-            .then(() => this.editsFor(linkId).flush({ reopened: true })).catch(() => {});
+          if (stored.profile && !stored.group) {
+            this.editsFor(linkId).reopened();
+            void this.outboxFor(linkId).flush({ reopened: true }).catch(() => {}).then(() => this.editsFor(linkId).flush()).catch(() => {});
+          }
           void this.desk.replay(linkId).catch(() => {});
           this.observeTransport(linkId);
         },
@@ -4579,7 +4581,7 @@ export class GhostlyNode implements EngineImplementation {
         onEditReceipt: stored.profile && !stored.group ? (id, e) => this.editsFor(linkId).received(id, e) : undefined,
         // Edits agreed on a new session: questions whose buttons went on the floor or into a hold get them now, then what waits goes.
         onEditSupport: supported => {
-          if (supported && stored.profile && !stored.group) void this.restoreButtons(linkId).catch(() => {}).then(() => this.editsFor(linkId).flush({ reopened: true })).catch(() => {});
+          if (supported && stored.profile && !stored.group) void this.restoreButtons(linkId).catch(() => {}).then(() => this.editsFor(linkId).flush()).catch(() => {});
         },
         onWakeSupport: supported => { if (supported && stored.profile && !stored.group) void this.shareWake(linkId); },
         onPeerWake: target => {
@@ -4609,8 +4611,11 @@ export class GhostlyNode implements EngineImplementation {
           if (state !== "open" && was === "open") live.caps?.refresh();
           // Back live: what the contact has not confirmed goes again at once, under the same ids.
           // Edits after the messages they change: the contact knows the message first.
-          if (stored.profile && !stored.group && state === "open") void this.outboxFor(linkId).flush({ reopened: true }).catch(() => {})
-            .then(() => this.editsFor(linkId).flush({ reopened: true })).catch(() => {});
+          // The edit queue starts over now, before edits are agreed on this session and anything goes (`reopened`).
+          if (stored.profile && !stored.group && state === "open") {
+            this.editsFor(linkId).reopened();
+            void this.outboxFor(linkId).flush({ reopened: true }).catch(() => {}).then(() => this.editsFor(linkId).flush()).catch(() => {});
+          }
           if (stored.profile && state !== "open" && live.pairing?.status !== "error") live.pairing = { status: "connecting" };
           this.observeTransport(linkId);
           this.emitState();
