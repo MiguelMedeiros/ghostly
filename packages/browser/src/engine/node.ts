@@ -470,10 +470,14 @@ export const LIMITED_MODE_ERROR = "Ghostly could not check which device is activ
  * wait), and the settings. Everything else is refused, whatever it would do: every wallet and payment call (no
  * wallet is opened), every group change (no admin work), every new chat, join, call and identity change (nothing is
  * dialled or published). A list of what is allowed, so a method added later is refused until someone decides.
+ *
+ * Deleting a message and sending one again are not on it: a delete withdraws the message's held item from hold
+ * storage and its pending payment request from the payment desk, and limited mode has neither (no storage, no
+ * wallet started). Done half, the item would still reach the contact. They work again once limited mode is left.
  */
 export const LIMITED_MODE_METHODS: ReadonlySet<string> = new Set<keyof EngineApi>([
   "setActiveLink", "renameLink", "updateSettings", "disconnect",
-  "sendMessage", "editMessage", "retryMessage", "deleteMessage", "react", "pinMessage", "forwardMessages", "messageDetails", "messagePage",
+  "sendMessage", "editMessage", "react", "pinMessage", "forwardMessages", "messageDetails", "messagePage",
   "sendGroupMessage", "groupMessages", "statusCardIndex", "setTyping", "setGroupTyping", "setFastPoll", "exportLinks", "walletBackupReminder",
 ]);
 
@@ -1361,7 +1365,16 @@ export class GhostlyNode implements EngineImplementation {
     } finally {if(!this.shuttingDown)this.paymentTimer=setTimeout(()=>void this.pollPaymentStatus(),10000);}
   }
 
-  async start(): Promise<void> {
+  /** The start in progress or done, and whether it succeeded: `leaveLimited` waits for it. */
+  private starting: Promise<boolean> | null = null;
+
+  start(): Promise<void> {
+    const run = this.startNow();
+    this.starting = run.then(() => true, () => false);
+    return run;
+  }
+
+  private async startNow(): Promise<void> {
     // A new profile has nothing stored yet. Its wallets come from the first-run setup (where the app runs it), or from
     // New; no mint is added by itself here.
     const stored = await db.getSettings();
@@ -1471,9 +1484,16 @@ export class GhostlyNode implements EngineImplementation {
    */
   async leaveLimited(): Promise<void> {
     if (!this.limitedMode) return;
+    // Called while `start()` still loads the chats, it waits: there is nothing to dial before they are loaded.
+    if (!this.starting || !(await this.starting)) throw new Error("The engine did not start");
+    if (!this.limitedMode) return;
     this.limitedMode = false;
-    await this.startWallets();
-    this.openStartedWallets(false);
+    // A wallet that fails to start must not keep the chats from being dialled: the failure is reported after them.
+    let failure: unknown = null;
+    try {
+      await this.startWallets();
+      this.openStartedWallets(false);
+    } catch (error) { failure = error ?? new Error("The wallets did not start"); }
     if (this.networkOn) {
       for (const live of this.links.values()) this.startLink(live.stored.id, await db.getMessages(live.stored.id));
       this.hold.start();
@@ -1482,6 +1502,7 @@ export class GhostlyNode implements EngineImplementation {
       void this.did.publishNow().catch(() => {});
     }
     this.emitState();
+    if (failure) throw failure;
   }
 
   /** The first-run wallet setup, where the app runs it (`NodeOptions.defaultWallets`): begun once, then what is left. */

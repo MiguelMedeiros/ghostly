@@ -163,6 +163,31 @@ describe("limited mode", () => {
     expect(made.startWallets).toHaveBeenCalledOnce();
   });
 
+  it("called while the engine is still starting, it waits for the chats to be loaded, then dials them", async () => {
+    const link = await profile();
+    const made = engine(true);
+    const starting = made.node.start();
+    const leaving = made.node.leaveLimited();
+    await Promise.all([starting, leaving]);
+    expect(made.node.limited).toBe(false);
+    expect(made.startLink.mock.calls.map((call) => call[0])).toEqual([link.id]);
+    expect(made.startWallets).toHaveBeenCalledOnce();
+    // An engine that was never started has nothing to leave.
+    await expect(engine(true).node.leaveLimited()).rejects.toThrow("did not start");
+  });
+
+  it("a wallet that fails to start does not keep the chats from being dialled: they are, and the failure is reported", async () => {
+    const link = await profile();
+    const made = engine(true);
+    await made.node.start();
+    made.startWallets.mockRejectedValueOnce(new Error("the wallet database did not open"));
+    await expect(made.node.leaveLimited()).rejects.toThrow("the wallet database did not open");
+    expect(made.node.limited).toBe(false);
+    expect(made.startLink.mock.calls.map((call) => call[0])).toEqual([link.id]);
+    expect(made.holdStart).toHaveBeenCalledOnce();
+    expect(made.node.getState().limited).toBeUndefined();
+  });
+
   it("leaving it with the person's switch off opens the wallets and dials nothing", async () => {
     await profile();
     await db.putSettings({ online: false } as never);
@@ -199,6 +224,8 @@ describe("what the pages may call in limited mode", () => {
       "createLink", "takeInvite", "joinLink", "connect", "pollNow", "wake", "wakeForCall", "setCallSignal", "peekProfile", "sendFile",
       "beginIdentityProof", "completeIdentityProof", "setDidListed", "nostrPublish", "setWakeSubscription", "setChatHold"];
     for (const method of refused) expect((await call(method)).error, method).toBe(LIMITED_MODE_ERROR);
+    // A delete withdraws a held item and a pending payment request, which limited mode cannot: refused, not half done.
+    for (const method of ["deleteMessage", "retryMessage"]) expect((await call(method, { linkId: "x", messageId: "y" })).error, method).toBe(LIMITED_MODE_ERROR);
     expect((await call("updateSettings", { settings: { nick: "Ana" } })).error).toBeUndefined();
     expect((await call("setActiveLink", { linkId: null })).error).toBeUndefined();
     expect(calls).toEqual([]);
@@ -226,6 +253,44 @@ describe("what the pages may call in limited mode", () => {
     expect(calls.filter((call) => call.startsWith("turn"))).toEqual([]);
     // And no device state database was made for it.
     expect((await indexedDB.databases()).map((d) => d.name)).not.toContain("ghostly-devices");
+  });
+
+  it("outside limited mode a delete withdraws the held item and the pending payment request, as before this change", async () => {
+    const link = await profile();
+    // A payment request that never left (it waits for the chat to be live), and its message.
+    const paymentId = "pay-1", messageId = "me_request";
+    await db.putMessage({ linkId: link.id, id: messageId, text: "", sender: "me", timestamp: 5, via: "datalink", delivery: "waiting", paymentId } as never);
+    const { call, made } = await server(false);
+    const node = (made as unknown as { node: GhostlyNode }).node;
+    const inner = node as unknown as { desk: { withdraw(id: string): Promise<void>; start(): Promise<void> }; hold: { forget(linkId: string, messageId: string): Promise<void> } };
+    const withdraw = vi.spyOn(inner.desk, "withdraw"), forget = vi.spyOn(inner.hold, "forget");
+    expect((await call("deleteMessage", { linkId: link.id, messageId })).error).toBeUndefined();
+    await vi.waitFor(async () => expect(await db.getMessage(link.id, messageId)).toBeUndefined());
+    // Exactly what the base branch does: the held item forgotten, the request withdrawn, the id remembered as deleted.
+    expect(forget.mock.calls).toEqual([[link.id, messageId]]);
+    expect(withdraw.mock.calls).toEqual([[paymentId]]);
+    expect((await db.getLinks()).find((l) => l.id === link.id)?.deletedIds).toEqual([messageId]);
+  });
+
+  it("the start runs its steps in the order of the base branch: the wallets and the payment desk before the chats are loaded", async () => {
+    await profile();
+    const { calls, transport } = recording();
+    const node = new GhostlyNode({ onState: vi.fn(), onMessages: vi.fn(), onCallSignal: vi.fn() }, { transport, automaticWallets: false });
+    nodes.push(node);
+    const order: string[] = [];
+    const inner = node as unknown as { desk: { start(): Promise<void> }; did: { start(): void }; groups: { load(): Promise<void> }; hold: { start(): void }; wallet: { start(): void } };
+    const note = <T extends object>(target: T, method: keyof T & string, name: string) => {
+      const original = (target[method] as unknown as (...args: unknown[]) => unknown).bind(target);
+      vi.spyOn(target, method as never).mockImplementation(((...args: unknown[]) => { order.push(name); return original(...args); }) as never);
+    };
+    note(inner.did, "start", "did");
+    note(inner.desk, "start", "desk");
+    note(inner.wallet, "start", "wallet");
+    note(inner.groups, "load", "groups");
+    note(inner.hold, "start", "hold");
+    await node.start();
+    expect(order).toEqual(["did", "desk", "wallet", "groups", "hold"]);
+    expect(calls.filter((call) => call.startsWith("turn"))).toEqual([]);
   });
 
   it("outside limited mode nothing is refused for it", async () => {
