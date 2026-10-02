@@ -747,6 +747,15 @@ export class CashuWallet {
     return this.settleMelt(melt).catch((): MeltOutcome => "pending");
   }
 
+  /**
+   * Whether a Lightning payment of this invoice is written down as in flight. A melt is written before the mint sees
+   * its proofs, and `pollMelts` settles and reports it: an invoice with none never reached the mint's melt, or is done.
+   */
+  async meltInFlight(invoice: string): Promise<boolean> {
+    const melts = await wrap<PendingMelt[]>((await store(STORES.melts, "readonly")).getAll());
+    return melts.some((m) => m.request === invoice);
+  }
+
   /** Lightning payments left pending, asked about again until the mint settles each one. */
   private async pollMelts(): Promise<void> {
     if (this.meltTimer) clearTimeout(this.meltTimer);
