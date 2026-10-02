@@ -1,5 +1,6 @@
 import { chat, expect, setDhtOnly, test, type Peer } from "../support/fixtures";
 import { pair } from "../support/paired";
+import { watchCalls } from "../support/callTrace";
 
 /**
  * Calls in the one chat: every new chat is a paired chat, and it calls over its live session (`calls/1`,
@@ -87,7 +88,94 @@ test("both call at once: one side rings, and answering connects the call", { tag
   expect(await lines(callee)).toEqual(["Incoming audio call"]);
 });
 
-test("the contact's tab closes mid-call: the call ends here with its line", { tag: ["@feature:calls.paired", "@feature:calls.video"] }, async ({ peer }) => {
+/** The call's own connection in a page watched with `watchCalls` (the chat's link has no media lanes), as text. */
+const callIce = (peer: Peer) =>
+  peer.page.evaluate(() => {
+    const recorded = (globalThis as unknown as { __callPcs?: { pc: RTCPeerConnection }[] }).__callPcs ?? [];
+    const calls = recorded.map((r) => r.pc).filter((pc) => pc.getTransceivers().length > 0);
+    const ufrag = (sdp?: string) => /^a=ice-ufrag:(.*)$/m.exec(sdp ?? "")?.[1]?.trim() ?? "";
+    const pc = calls[calls.length - 1];
+    return {
+      connections: calls.length,
+      local: ufrag(pc?.localDescription?.sdp),
+      remote: ufrag(pc?.remoteDescription?.sdp),
+      signaling: pc?.signalingState,
+      connection: pc?.connectionState,
+    };
+  });
+
+/**
+ * Makes the call's connection in this page say its ICE is `state` (or what it really is again, with null), and tells
+ * the app. Two pages on one machine talk over loopback, which nothing here can cut: the loss is what the connection
+ * reports, and everything after it is real (the restart offer and its answer on the chat session, ICE with new
+ * credentials between the two browsers).
+ */
+const reportIce = (peer: Peer, state: RTCIceConnectionState | null) =>
+  peer.page.evaluate((state) => {
+    const recorded = (globalThis as unknown as { __callPcs?: { pc: RTCPeerConnection }[] }).__callPcs ?? [];
+    const pc = recorded.map((r) => r.pc).filter((pc) => pc.getTransceivers().length > 0).pop();
+    if (!pc) throw new Error("no call connection");
+    if (state) Object.defineProperty(pc, "iceConnectionState", { configurable: true, get: () => state });
+    else delete (pc as unknown as { iceConnectionState?: unknown }).iceConnectionState;
+    pc.oniceconnectionstatechange?.(new Event("iceconnectionstatechange"));
+  }, state);
+
+const seconds = (text: string) => { const [m, s] = text.split(":").map(Number); return m * 60 + s; };
+
+test("a call that loses its path says Reconnecting, restarts ICE on the same connection and goes on", { tag: ["@feature:calls.reconnect", "@feature:calls.paired", "@feature:calls.audio"] }, async ({ peer }, testInfo) => {
+  const [alice, bob] = await Promise.all([peer("reconnect-alice"), peer("reconnect-bob")]);
+  await pair(alice, bob);
+  for (const p of [alice, bob]) await watchCalls(p.page);
+  await expect(alice.page.getByTestId("call-audio")).toBeEnabled();
+  await alice.page.getByTestId("call-audio").click();
+  await bob.page.getByTitle("Accept audio call").click();
+  const status = (p: Peer) => p.page.getByTestId("call-status");
+  for (const p of [alice, bob]) await expect(p.page.getByText(clock).first()).toBeVisible();
+  await expect.poll(() => remoteSound(alice)).toEqual({ audio: "playing", video: "muted" });
+  // Muted before the loss: it must still be after.
+  await alice.page.getByTestId("call-mute").click();
+  await expect(alice.page.getByTestId("call-mute")).toHaveAttribute("title", "Unmute");
+  const [aliceBefore, bobBefore] = [await callIce(alice), await callIce(bob)];
+  expect(aliceBefore).toMatchObject({ connections: 1, remote: bobBefore.local, signaling: "stable" });
+  // The clock has run for a few seconds by the time the path goes.
+  await expect.poll(async () => seconds((await alice.page.getByText(clock).first().innerText()).trim())).toBeGreaterThanOrEqual(2);
+  const ranFor = seconds((await alice.page.getByText(clock).first().innerText()).trim());
+
+  // Alice placed the call: her side restarts ICE. Her connection says its path is gone.
+  await reportIce(alice, "disconnected");
+  await expect(status(alice)).toHaveAttribute("data-reconnecting", "true");
+  await expect(status(alice)).toContainText("Reconnecting...");
+  await expect(status(alice)).toHaveAttribute("data-state", "connected");
+  await alice.page.screenshot({ path: testInfo.outputPath("reconnecting.png") });
+
+  // After the grace her restart offer goes over the chat session and Bob answers it: both ends have new ICE
+  // credentials, each other's, on the connections the call already had.
+  await expect.poll(async () => (await callIce(alice)).local, { timeout: 30_000 }).not.toBe(aliceBefore.local);
+  await expect.poll(async () => (await callIce(bob)).local, { timeout: 30_000 }).not.toBe(bobBefore.local);
+  await expect.poll(async () => {
+    const [a, b] = [await callIce(alice), await callIce(bob)];
+    return a.signaling === "stable" && b.signaling === "stable" && a.remote === b.local && b.remote === a.local;
+  }, { timeout: 30_000 }).toBe(true);
+
+  // The path is back: the call says its clock again, which went on from where it was.
+  await reportIce(alice, null);
+  await expect(status(alice)).not.toHaveAttribute("data-reconnecting");
+  await expect(alice.page.getByText(clock).first()).toBeVisible();
+  expect(seconds((await alice.page.getByText(clock).first().innerText()).trim())).toBeGreaterThanOrEqual(ranFor);
+  for (const p of [alice, bob]) expect(await callIce(p)).toMatchObject({ connections: 1, connection: "connected" });
+  // Still muted, and each still hears the other's (live) microphone track.
+  await expect(alice.page.getByTestId("call-mute")).toHaveAttribute("title", "Unmute");
+  for (const p of [alice, bob]) await expect.poll(() => remoteSound(p)).toEqual({ audio: "playing", video: "muted" });
+  // Bob never lost anything: his window kept its clock.
+  await expect(status(bob)).not.toHaveAttribute("data-reconnecting");
+
+  // The call ends as any call: one call in each chat, connected once.
+  await bob.page.getByTitle("End call").click();
+  for (const p of [alice, bob]) await expect(p.page.getByTitle("End call")).toHaveCount(0);
+  for (const p of [alice, bob]) await expect(chat(p).getByText("Audio call ended")).toHaveCount(1);
+});
+
+test("the contact's tab closes mid-call: the call ends here with its line",{ tag: ["@feature:calls.paired", "@feature:calls.video"] }, async ({ peer }) => {
   const [alice, bob] = await Promise.all([peer("paired-gone-alice"), peer("paired-gone-bob")]);
   await pair(alice, bob);
   await alice.page.getByTestId("call-video").click();

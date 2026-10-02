@@ -12,7 +12,7 @@ import type { GhostlyEvent } from "./events";
 import { keepServing, openHost, serve, type Host } from "./host";
 import { allowlist, checkWebhook, eventHandler, readCursor } from "./listen";
 import { resolve } from "node:path";
-import { restoreProfile } from "./backup";
+import { backupFileProtection, restoreProfile } from "./backup";
 import { buttonsOf } from "./buttons";
 import { secretsFromStdin } from "./secretInput";
 import {
@@ -100,8 +100,8 @@ const SPECIAL: [usage: string, summary: string, options?: Record<string, OptionS
   ["profile use <name>", "Make a profile the current one"],
   ["profile show", "The name contacts see, and whether it is shared"],
   ["profile set [--name <name>] [--share-profile | --no-share-profile]", "Change the name contacts see", { name: o("string", "The name contacts see"), "share-profile": o("boolean", "Share the name and picture with contacts (--no-share-profile: do not)") }],
-  ["profile backup --out <file> [--passphrase-file f]", "An encrypted backup of the profile (passphrase from a file or GHOSTLY_BACKUP_PASSPHRASE)", { out: o("string", "The backup file to write"), "passphrase-file": o("string", "The passphrase, from this file (else GHOSTLY_BACKUP_PASSPHRASE)") }],
-  ["profile restore <file> <new profile> [--passphrase-file f] [--use]", "A backup into a new profile", { "passphrase-file": o("string", "The passphrase, from this file (else GHOSTLY_BACKUP_PASSPHRASE)"), use: o("boolean", "Make it the current profile") }],
+  ["profile backup --out <file> [--passphrase-file f | --no-passphrase]", "A backup of the profile, encrypted with a passphrase (from a file or GHOSTLY_BACKUP_PASSPHRASE); --no-passphrase makes one anyone can read", { out: o("string", "The backup file to write"), "passphrase-file": o("string", "The passphrase, from this file (else GHOSTLY_BACKUP_PASSPHRASE)"), passphrase: o("boolean", "--no-passphrase: do not encrypt. The file then holds the profile's keys and wallet secrets in the clear") }],
+  ["profile restore <file> <new profile> [--passphrase-file f] [--use]", "A backup into a new profile (a backup made with --no-passphrase needs none)", { "passphrase-file": o("string", "The passphrase, from this file (else GHOSTLY_BACKUP_PASSPHRASE)"), use: o("boolean", "Make it the current profile") }],
   ["daemon [--detach]", "Keep the profile online (foreground; --detach runs it in the background)", { detach: o("boolean", "Run in the background (log in the profile folder)"), timeout: o("number", "Seconds --detach waits for it to start (default 60)") }],
   ["daemon status", "Whether a daemon runs the profile, its version, and its socket (for the socket API)"],
   ["daemon stop", "Stop the profile's daemon", { timeout: o("number", "Seconds to wait for it to stop (default 20)") }],
@@ -210,7 +210,7 @@ export function commandHelp(words: readonly string[]): string {
 async function profileCommand(sub: string | undefined, argv: string[]): Promise<void> {
   const specs: Record<string, Record<string, OptionSpec>> = {
     create: { use: { type: "boolean", description: "" }, name: { type: "string", description: "" } },
-    backup: { out: { type: "string", description: "" }, "passphrase-file": { type: "string", description: "" } },
+    backup: { out: { type: "string", description: "" }, "passphrase-file": { type: "string", description: "" }, passphrase: { type: "boolean", description: "" } },
     restore: { "passphrase-file": { type: "string", description: "" }, use: { type: "boolean", description: "" } },
     set: { name: { type: "string", description: "" }, "share-profile": { type: "boolean", description: "" } },
   };
@@ -255,17 +255,24 @@ async function profileCommand(sub: string | undefined, argv: string[]): Promise<
     }
     case "backup": {
       const out = parsed.options.out;
-      if (typeof out !== "string") throw new CliError("usage", "ghostly profile backup --out <file> [--passphrase-file f] (or GHOSTLY_BACKUP_PASSPHRASE)");
-      const passphrase = backupPassphrase(parsed.options["passphrase-file"]);
-      print(await withSession(g, (s) => s.call("profile.backup", { path: resolve(out), passphrase })));
+      if (typeof out !== "string") throw new CliError("usage", "ghostly profile backup --out <file> [--passphrase-file f | --no-passphrase] (or GHOSTLY_BACKUP_PASSPHRASE)");
+      // Encrypted unless --no-passphrase says otherwise, and never a guess: a passphrase and --no-passphrase together are refused.
+      const unsealed = parsed.options.passphrase === false;
+      if (parsed.options.passphrase === true) throw new CliError("usage", "The passphrase comes from --passphrase-file or GHOSTLY_BACKUP_PASSPHRASE, never the command line");
+      if (unsealed && (parsed.options["passphrase-file"] !== undefined || process.env.GHOSTLY_BACKUP_PASSPHRASE)) throw new CliError("usage", "A passphrase is set (--passphrase-file or GHOSTLY_BACKUP_PASSPHRASE) and --no-passphrase was given: choose one");
+      const made = await withSession(g, (s) => s.call("profile.backup", unsealed ? { path: resolve(out), noPassphrase: true } : { path: resolve(out), passphrase: backupPassphrase(parsed.options["passphrase-file"]) }));
+      if (unsealed) process.stderr.write("Not encrypted: this file holds the profile's keys, chats and wallet secrets in the clear. Anyone who gets it gets everything in it, including any money in its wallets.\n");
+      print(made);
       return;
     }
     case "restore": {
       const [file, name] = parsed.positionals;
       if (!file || !name) throw new CliError("usage", "ghostly profile restore <file> <new profile> [--passphrase-file f] [--use]");
-      const paths = await restoreProfile(g.home, checkProfileName(name), readFileSync(file, "utf8"), backupPassphrase(parsed.options["passphrase-file"]));
+      // A backup made without a passphrase says so in its header: none is asked for, and the answer says it was not protected.
+      const protection = await backupFileProtection(file);
+      const paths = await restoreProfile(g.home, checkProfileName(name), file, protection === "none" ? undefined : backupPassphrase(parsed.options["passphrase-file"]));
       if (parsed.options.use) selectProfile(g.home, name);
-      print({ restored: name, folder: paths.dir });
+      print({ restored: name, folder: paths.dir, protection });
       return;
     }
     default:
@@ -298,7 +305,7 @@ function onStopSignals(stop: () => void): void {
 /** The backup passphrase: from a file or the environment, never the command line (it would sit in shell history). */
 function backupPassphrase(file: unknown): string {
   const value = typeof file === "string" ? readFileSync(file, "utf8").replace(/\r?\n$/, "") : process.env.GHOSTLY_BACKUP_PASSPHRASE;
-  if (!value) throw new CliError("usage", "The backup passphrase comes from --passphrase-file or GHOSTLY_BACKUP_PASSPHRASE (at least 12 characters)");
+  if (!value) throw new CliError("usage", "The backup passphrase comes from --passphrase-file or GHOSTLY_BACKUP_PASSPHRASE (at least 12 characters). For a backup that is not encrypted, say so with --no-passphrase");
   return value;
 }
 

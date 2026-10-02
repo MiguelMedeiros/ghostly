@@ -280,6 +280,47 @@ describe("community sessions", { timeout: 60_000 }, () => {
     expect(net.texts(bob)).toContain("just us");
   });
 
+  it("what was said on the branch of a leave that lost reaches a member who was never on that branch", async () => {
+    // The admin leaves; the members are in two parts for a while (the hub they shared is gone), and a member of
+    // each part commits the same leave: two branches, each with its own fresh secret. Each part talks meanwhile.
+    const net = new Net();
+    const alice = net.create("alice");
+    const bob = await net.admit(alice, "bob"), carol = await net.admit(alice, "carol"), dave = await net.admit(alice, "dave"), erin = await net.admit(alice, "erin");
+    await alice.session.transferAdmin(carol.session.myKey);
+    await net.settle();
+    await alice.session.leave();
+    await net.settle();
+    alice.online = false;
+    const left = [bob, erin];
+    net.partition = (a, b) => left.includes(a) === left.includes(b);
+    expect(await bob.session.commitPendingLeaves()).toBe(1);
+    await net.settle();
+    expect(await carol.session.commitPendingLeaves()).toBe(1);
+    await net.settle();
+    expect(bob.session.topHash).not.toBe(carol.session.topHash);
+    await say(net, bob, "said in bob's part");
+    await say(net, carol, "said in carol's part");
+    expect(net.texts(erin)).toContain("said in bob's part");
+    expect(net.texts(dave)).toContain("said in carol's part");
+    // The parts meet through Bob and Carol: both end on one branch, and each reads what the other part said.
+    net.partition = (a, b) => (a === bob && b === carol) || (a === carol && b === bob);
+    await net.meet(bob, carol);
+    await net.meet(bob, carol);
+    expect(bob.session.topHash).toBe(carol.session.topHash);
+    expect(net.texts(bob)).toContain("said in carol's part");
+    expect(net.texts(carol)).toContain("said in bob's part");
+    // Dave and Erin each meet only the member of the other part, who is on the branch that won by now. One of the
+    // two lines was sealed on the branch that lost: its commit and secret come with it, or it could never be read.
+    net.partition = (a, b) => [a, b].includes(dave) && [a, b].includes(bob) || [a, b].includes(erin) && [a, b].includes(carol);
+    await net.meet(dave, bob);
+    await net.meet(erin, carol);
+    await net.meet(dave, bob);
+    await net.meet(erin, carol);
+    expect(net.texts(dave)).toContain("said in bob's part");
+    expect(net.texts(erin)).toContain("said in carol's part");
+    for (const m of [bob, carol, dave, erin]) expect(m.session.topHash, m.name).toBe(bob.session.topHash);
+  });
+
   it("two members admitting at once is a race everyone settles the same way, whatever the order", async () => {
     const net = new Net();
     const alice = net.create("alice");
