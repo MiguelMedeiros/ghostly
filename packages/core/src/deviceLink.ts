@@ -3,6 +3,8 @@ import { sha256 } from "@noble/hashes/sha2.js";
 import { bytesEqual, concatBytes, randomBytes, toBase64Url, toZ32, utf8Encode } from "./bytes";
 import { identityFromSeed } from "./identity";
 import type { LinkParams } from "./invite";
+import type { PairingCredentials } from "./pairedSession";
+import type { Signer } from "./signer";
 
 /*
  * Device links (WISP 06 § Terms): the channel between two of a person's devices. It is an ordinary paired session
@@ -69,6 +71,29 @@ export function deviceLinkParams(d: Uint8Array, ownKey: Uint8Array, peerKey: Uin
 
 /** A device signing key as a session names a participation key (z-base-32). */
 export const deviceKeyZ32 = (signingKey: Uint8Array): string => toZ32(signingKey);
+
+/** What a paired link needs to be a device link: its derived parameters and its pinned, signer-backed pairing. */
+export interface DeviceLinkPairing {
+  params: LinkParams;
+  pairing: { credentials: PairingCredentials; pinPeer: (key: string) => Promise<void>; trustOnFirstUse: false };
+}
+
+/**
+ * The link from this device (its signer) to the device with `peerKey`, ready for a `GhostLink`. The other device's
+ * signing key is pinned before anything is said, as the turn record names it: there is nothing to trust on first
+ * use, and no other key is ever saved in its place. Signals in the link's packets must be signed by that key too.
+ */
+export function deviceLinkPairing(d: Uint8Array, signer: Signer, peerKey: Uint8Array): DeviceLinkPairing {
+  const peer = deviceKeyZ32(peerKey);
+  return {
+    params: deviceLinkParams(d, signer.publicKey, peerKey),
+    pairing: {
+      credentials: { seedB64: "", signer, peerKey: peer, expectedPeerKey: peer, verifiedPeerKey: peer, requireSignedSignals: true },
+      pinPeer: async (key) => { if (key !== peer) throw new Error("Not the device this link belongs to"); },
+      trustOnFirstUse: false,
+    },
+  };
+}
 
 /*
  * Frames. Everything two devices say to each other travels on a device link only, under a capability that only
