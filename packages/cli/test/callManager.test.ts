@@ -293,7 +293,7 @@ describe("two call managers", { timeout: 60_000 }, () => {
       await a.calls.start("chat-ab", {});
       await until(() => b.events.find((e) => e.type === "call.incoming")).catch(diagnose(a, b));
       await b.calls.answer(undefined, {});
-      const offer = JSON.parse(signalsOf(a, "o")[0]) as { ts: number }, answer = JSON.parse(signalsOf(b, "a")[0]) as { ts: number; o: number };
+      const offer = JSON.parse(signalsOf(a, "o")[0]!) as { ts: number }, answer = JSON.parse(signalsOf(b, "a")[0]!) as { ts: number; o: number };
       expect(answer.o).toBe(offer.ts);
       expect(Math.abs(answer.ts - offer.ts)).toBeGreaterThan(60_000);
       await until(() => a.calls.list()[0]?.state === "connected" && b.calls.list()[0]?.state === "connected").catch(diagnose(a, b));
