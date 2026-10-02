@@ -1,0 +1,1 @@
+The admin's app puts an empty `_knock` record under a link's knock identity when the link is made (and when it is handed out again while the relays hold none), so the first joiner reads and writes a key the relays already know.

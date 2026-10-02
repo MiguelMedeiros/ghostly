@@ -195,6 +195,11 @@ const ENTRY_TIMINGS: EntryTimings = { pollMs: 5_000, warmPollMs: 2_000, warmMs: 
 /** Entry sessions the admin runs at once; a joiner who does not finish in time is not answered again for a while. */
 const MAX_PENDING_ENTRIES = 4;
 const ENTRY_TIMEOUT_MS = 3 * 60_000;
+/**
+ * How often, at most, the admin puts an empty knock record under a link's knock identity again when the relays have
+ * none (`warmKnocks`).
+ */
+const KNOCK_WARM_EVERY_MS = 10 * 60_000;
 /** A joiner refused (its app cannot follow the group) is not answered again for this long. */
 const REFUSED_FOR_MS = 10 * 60_000;
 /**
@@ -279,6 +284,9 @@ export class Groups {
   private readonly lastPoll = new Map<string, number>();
   /** Admin side: until when a group's link is looked at the warm pace. */
   private readonly warmUntil = new Map<string, number>();
+  /** Admin side: when the link's knock record was last put there empty, and the groups whose last read found none. */
+  private readonly knocksWarmedAt = new Map<string, number>();
+  private readonly knocksMissing = new Set<string>();
   private readonly lastKnock = new Map<string, number>();
   /** Per group, members met over their admission a moment ago: their edge is opened expecting them. */
   private readonly justMet = new Map<string, Set<string>>();
@@ -629,6 +637,8 @@ export class Groups {
     this.invited.delete(groupId);
     this.lastRoster.delete(groupId);
     this.lastTold.delete(groupId);
+    this.knocksWarmedAt.delete(groupId);
+    this.knocksMissing.delete(groupId);
     this.pendingEntries.delete(groupId);
     this.knocked.delete(groupId);
     this.justMet.delete(groupId);
@@ -666,9 +676,12 @@ export class Groups {
       group.entry = { seedB64: createIdentity().seedB64, createdAt: Date.now() };
       await this.store.putGroup(group);
       this.lastPoll.delete(groupId);
+      this.knocksWarmedAt.delete(groupId);
+      this.knocksMissing.add(groupId);
     }
     // Asked for the link: it is being handed out, and whoever gets it opens it soon.
     this.warmUntil.set(groupId, Date.now() + this.timings.warmMs);
+    this.warmKnocks(group);
     this.host.emit();
     return encodeGroupEntryLink(this.entryOf(group)!.link);
   }
@@ -823,10 +836,29 @@ export class Groups {
     if (!this.knocked.has(group.id)) { this.knocked.add(group.id); this.host.emit(); }
   }
 
+  /**
+   * Puts an empty knock record under the link's knock identity while the relays have none, as the link is handed out.
+   * A read of a key the network has never seen takes a public relay about three seconds (it asks the DHT before it
+   * says there is nothing), and a first packet under such a key takes seconds to land: the first joiner through a new
+   * link waited for its own read, its write, and the admin's read that was under way meanwhile (5.5 s from the knock
+   * to the admin seeing it, on the public relays, 2026-10-02). Under a key the relays know, each is a fraction of a
+   * second. Only when the link is handed out, never while it is being read: a record written after a read that found
+   * nothing would replace a knock that landed during that read.
+   */
+  private warmKnocks(group: StoredGroup): void {
+    const entry = this.entryOf(group), now = Date.now();
+    if (!entry || !this.knocksMissing.has(group.id) || now - (this.knocksWarmedAt.get(group.id) ?? -Infinity) < KNOCK_WARM_EVERY_MS) return;
+    this.knocksWarmedAt.set(group.id, now);
+    void this.host.publish(knockIdentity(entry.link), knockRecords(entry.link, []), true).then(() => { this.knocksMissing.delete(group.id); }, () => {});
+  }
+
   private async answerKnocks(group: StoredGroup, session: GroupSession, now: number): Promise<void> {
     const entry = this.entryOf(group)!;
     const started = Date.now();
-    const knocks = readKnocks(entry.link, (await this.host.resolve(knockIdentity(entry.link).pubKeyZ32)) ?? []);
+    const records = await this.host.resolve(knockIdentity(entry.link).pubKeyZ32);
+    // Whether the relays hold the record at all: an empty one goes there when the link is next handed out (`warmKnocks`).
+    if (records) this.knocksMissing.delete(group.id); else this.knocksMissing.add(group.id);
+    const knocks = readKnocks(entry.link, records ?? []);
     traceJoin(group.id, "knocks.read", { ms: Date.now() - started, knocks: knocks.length });
     let pending = this.pendingEntries.get(group.id);
     for (const { key, ts } of knocks) {
