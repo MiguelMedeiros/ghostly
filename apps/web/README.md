@@ -7,7 +7,7 @@ compared to the extension and Desktop: [docs/WEB.md](../../docs/WEB.md).
 ```bash
 npm run build:web                          # from the root: apps/web/dist
 npm run dev -w @ghostly/web                # Vite dev server
-docker compose up --build -d               # from the root: the image (apps/web/Dockerfile, nginx), on 127.0.0.1:8080
+docker compose -f infra/docker-compose.yml up --build -d   # from the root: the image (apps/web/Dockerfile, nginx), on 127.0.0.1:8080
 ```
 
 `GHOSTLY_WEB_BIND` moves the port; `GHOSTLY_BUILD` names the commit `/version.json` reports, which is how

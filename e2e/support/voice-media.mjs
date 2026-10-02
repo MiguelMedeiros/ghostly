@@ -4,7 +4,7 @@ import { join } from "node:path";
 /**
  * Voice messages across engines: every Ghostly records with its own engine's MediaRecorder and plays with
  * another's `<audio>`, under its own Content-Security-Policy. These run inside a page — a Playwright page,
- * the Tauri WebView through WebDriver, the macOS system WKWebView (`scripts/voice-media/`) — so they are
+ * the Tauri WebView through WebDriver, the macOS system WKWebView (`tools/scripts/voice-media/`) — so they are
  * written as plain functions that are sent as source (`String(fn)`) and use nothing from outside.
  */
 

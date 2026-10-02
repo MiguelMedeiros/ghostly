@@ -95,7 +95,7 @@ the reader shows each one under `/wisps/<slug>`:
 - `docs/wisps/*.md`, except the forwarding stubs of renumbered WISPs and the
   `HANDOFF-CLAUDE*` / `QA-CLAUDE*` notes;
 - `docs/PROTOCOL.md`, `docs/SDK.md`, `docs/USDT-INTEGRATION.md`, `docs/DHT-DELIVERY.md`;
-- `CONTRIBUTING.md` and `SECURITY.md`.
+- `.github/CONTRIBUTING.md` and `.github/SECURITY.md`.
 
 It also writes `docs/wisps/NUMBERING.md` and the forwarding stubs,
 `lib/wisp-numbering.json`, `lib/roadmap-candidates.json` and
@@ -112,7 +112,7 @@ Run `npm run sync:references` once after a checkout before `npm run lint`, `npx 
 `docs/CLI.md`, ...) are not on the site.
 
 A pull request that changes any of these inputs runs the Website jobs in CI
-(`WEBSITE_INPUTS` in `scripts/ci-changes.mjs`); one that does not skips them.
+(`WEBSITE_INPUTS` in `tools/scripts/ci-changes.mjs` at the repository root); one that does not skips them.
 
 ## WISP content has one source
 
@@ -165,6 +165,6 @@ never published.
 
 ## Docker
 
-`docker compose build` builds from the repository root (`context: ..`) because
+`docker compose build` builds from the repository root (`context: ../..`) because
 the site reads `docs/` and quotes `packages/core/src`; `Dockerfile.dockerignore`
 keeps that context small.

@@ -11,7 +11,7 @@ Open **https://app.ghostly.tools** in any modern browser.
   - iPhone and iPad: in Safari, tap Share, then *Add to Home Screen*.
   - What installing adds (offline start, Share to Ghostly, `web+ghostly:` links, shortcuts, the unread badge): [WEB.md](WEB.md#install-it).
 - Keys and wallets live in that browser. What a web page can and cannot do, and how to host it yourself: [WEB.md](WEB.md).
-- **Self-hosted:** `docker compose up -d` in a clone serves the web app on `localhost:8080` ([WEB.md](WEB.md#run-it)).
+- **Self-hosted:** `docker compose -f infra/docker-compose.yml up -d` in a clone serves the web app on `localhost:8080` ([WEB.md](WEB.md#run-it)).
 
 ## Browser extension (Chrome, Brave, Edge)
 
@@ -92,9 +92,9 @@ npm run build:web             # web app, static files in apps/web/dist
 npm run build:extension       # extension, load apps/extension/dist unpacked
 ```
 
-The Desktop build bundles the Node runtime that runs it, for HyperDHT (`scripts/prepare-native-runtime.mjs` runs before `tauri build`). To run the web app in Docker instead, see [WEB.md](WEB.md#run-it).
+The Desktop build bundles the Node runtime that runs it, for HyperDHT (`tools/scripts/prepare-native-runtime.mjs` runs before `tauri build`). To run the web app in Docker instead, see [WEB.md](WEB.md#run-it).
 
-Tests and the rest of the workflow: [Contributing](../CONTRIBUTING.md) and [Testing](TESTING.md).
+Tests and the rest of the workflow: [Contributing](../.github/CONTRIBUTING.md) and [Testing](TESTING.md).
 
 ## Troubleshooting
 
@@ -112,4 +112,4 @@ sudo xattr -cr /Applications/Ghostly.app
 
 **Web app: a second tab only waits.** One tab runs the peer at a time: close the other one ([WEB.md](WEB.md#what-a-web-page-cannot-do)).
 
-Something else? [Open an issue](https://github.com/MiguelMedeiros/ghostly/issues). For a vulnerability, never open an issue: follow [SECURITY.md](../SECURITY.md).
+Something else? [Open an issue](https://github.com/MiguelMedeiros/ghostly/issues). For a vulnerability, never open an issue: follow [SECURITY.md](../.github/SECURITY.md).

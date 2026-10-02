@@ -70,7 +70,7 @@ endpoint from there, never a literal port. Their names are stable: other suites 
 | 47086 / 47087 | AT Protocol PDS (`@atproto/pds`, as `https://pds.ghostly.test`) / PLC directory in memory (as `https://plc.ghostly.test`), `e2e/infra/atproto`; `support/atproto.ts` routes both names and the handles' DNS, and makes an account per test. The Bluesky spec opens the app at 127.0.0.1 (AT Protocol's development client returns only there) | `E2E_ATPROTO_PDS_URL` / `E2E_ATPROTO_PLC_URL` |
 | 47090 | Cashu test mint (`cashubtc/mintd`, fake Lightning) | `E2E_MINT_URL` |
 | 47095 / 47096 | Fedimint guardian API (websocket, as the invite code names it) / its gateway's API | `GHOSTLY_FEDIMINT_API_URL` / `_GATEWAY_URL` |
-| 47097 | HyperDHT relay for browsers (`services/hyperdht-relay`, on a HyperDHT network of its own) | `GHOSTLY_HYPERDHT_RELAY_URL` (gate `GHOSTLY_HYPERDHT_RELAY`) |
+| 47097 | HyperDHT relay for browsers (`infra/services/hyperdht-relay`, on a HyperDHT network of its own) | `GHOSTLY_HYPERDHT_RELAY_URL` (gate `GHOSTLY_HYPERDHT_RELAY`) |
 | 47100 | the web build under test (`vite preview`) | `E2E_WEB_PORT` |
 | 47110-47119 | Lightning address server, in the test process | `E2E_LNURL_PORT` |
 | 47120-47199 | domain-proof DoH + well-known servers, in the test process | `E2E_DOMAIN_PORT` |
@@ -195,7 +195,7 @@ Some of the specs, not all (`e2e/web/` alone has over 100). To list the tests of
 | `web/profiles.spec.ts` · `profile-lock.spec.ts` | profiles keep chats and settings apart, switching, deleting; the lock screen (change, remove, at startup) goes with new profiles and guards deleting a locked one |
 | `web/profile-backup-file.spec.ts` · `profile-backup.spec.ts` | a whole profile backed up to a file (and to S3 with `GHOSTLY_S3_*`), restored as a new profile; passphrase rules |
 | `web/chat-payments.spec.ts` | each chat accepts its own ways of paying, chosen on the composer's cards (+ → Payment → Accept); both sides' choices shown; one chat's choice and starting card are its own |
-| `web/sdk-plugin.spec.ts` | adapters built outside the app against `@ghostlytools/sdk` (`examples/sdk-adapter`), compiled into this build with `GHOSTLY_PLUGINS`: the plugin's Lightning source in the picker (Testnet only), connected, an invoice seen paid; its identity proof added from a pasted signature |
+| `web/sdk-plugin.spec.ts` | adapters built outside the app against `@ghostlytools/sdk` (`packages/sdk/examples/adapter`), compiled into this build with `GHOSTLY_PLUGINS`: the plugin's Lightning source in the picker (Testnet only), connected, an invoice seen paid; its identity proof added from a pasted signature |
 | `web/store-forward.spec.ts` | held messages (WISP 4xx): with `GHOSTLY_S3_*`, text, a picture and a request held in Alice's S3 while Bob's page is closed, picked up in order when he is back, a changed object refused, an expired one dropped; a contact without the switch is unaffected (no S3 needed) |
 | `web/wallet-cashu.spec.ts` · `wallets-ready.spec.ts` · `wallet-backups.spec.ts` | wallets ready with no setup, Cashu send/mint errors, the Lightning card, test sats; Ark and USDT recovery phrase and encrypted backup files (`@network`) |
 | `web/wallet-providers.spec.ts` | every wallet provider sending and receiving, on Testnet wallets made with New: Cashu (in over Lightning, Send and Request in the chat), Lightning (in through an invoice, out paying an invoice the test mint does not own), Ark, Bark and USDT (in, Send from the wallet, Send and Request in the chat; gated, see below) |
@@ -390,7 +390,7 @@ npm run test:e2e:compat                                        # builds v0.4.0 t
 E2E_WEB_PORT=50310 E2E_COMPAT_PORT=50311 npm run test:e2e:compat  # other ports (defaults 4183 and 4184)
 ```
 
-- **The old build.** The release attaches no web build, so `scripts/build-compat-web.mjs` exports the tag with
+- **The old build.** The release attaches no web build, so `tools/scripts/build-compat-web.mjs` exports the tag with
   `git archive` (nothing is checked out here), runs its own `npm ci` and `build:web`, and keeps its `web/dist` in
   `~/.cache/ghostly/compat/v0.4.0` (`E2E_COMPAT_CACHE` moves it), shared by every worktree; later runs reuse it,
   `--force` rebuilds. `--serve <port>` serves it with a small static server: the export keeps no `node_modules`.

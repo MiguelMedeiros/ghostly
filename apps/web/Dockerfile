@@ -1,5 +1,5 @@
 # Build context is the repository root: the web app is one workspace among several.
-#   docker compose up --build
+#   docker compose -f infra/docker-compose.yml up --build
 FROM node:26-alpine AS build
 WORKDIR /app
 

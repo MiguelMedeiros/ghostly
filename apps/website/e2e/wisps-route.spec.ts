@@ -107,8 +107,8 @@ for (const [from, to] of [
 
 // Security, Contributing and the two WISP documents that repeat the list are on GitHub only.
 for (const [slug, file] of [
-  ["security", "main/SECURITY.md"],
-  ["contributing", "main/CONTRIBUTING.md"],
+  ["security", "main/.github/SECURITY.md"],
+  ["contributing", "main/.github/CONTRIBUTING.md"],
   ["implementation", "main/docs/wisps/IMPLEMENTATION.md"],
   ["numbering", "main/docs/wisps/NUMBERING.md"],
 ]) {

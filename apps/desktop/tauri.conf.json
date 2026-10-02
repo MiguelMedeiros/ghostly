@@ -5,7 +5,7 @@
   "identifier": "app.ghostly.chat",
   "build": {
     "beforeDevCommand": "npm run dev",
-    "beforeBuildCommand": "node scripts/prepare-native-runtime.mjs && npm run build",
+    "beforeBuildCommand": "node tools/scripts/prepare-native-runtime.mjs && npm run build",
     "devUrl": "http://localhost:5173",
     "frontendDist": "../ui/dist"
   },

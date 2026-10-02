@@ -42,7 +42,7 @@ https://github.com/user-attachments/assets/38824bb2-0e73-4066-93e2-0850ccd15c2e
 - [Architecture](docs/ARCHITECTURE.md): how the parts fit together.
 - [Protocol](docs/PROTOCOL.md) and [WISPs](docs/wisps/README.md): what goes over the wire.
 - [Testing](docs/TESTING.md): the unit and end-to-end suites.
-- [Contributing](CONTRIBUTING.md) and [Security](SECURITY.md): send a change, report a flaw.
+- [Contributing](.github/CONTRIBUTING.md) and [Security](.github/SECURITY.md): send a change, report a flaw.
 - [All docs](docs/README.md): the full index.
 
 ---

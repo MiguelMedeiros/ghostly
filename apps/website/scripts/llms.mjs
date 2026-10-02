@@ -69,8 +69,8 @@ ${[
   line("Protocol", `${SITE}/wisps`, "the WISPs (Wire Interoperability Specification Proposals), Ghostly's open specs, drawn as layers; each has its own page"),
   line(bySlug("SDK.md").title, reader(bySlug("SDK.md").slug)),
   line("Source code", REPO, "MIT licensed"),
-  line("Security policy", `${REPO}/blob/main/SECURITY.md`, "how to report a vulnerability privately"),
-  line("Contributing", `${REPO}/blob/main/CONTRIBUTING.md`),
+  line("Security policy", `${REPO}/blob/main/.github/SECURITY.md`, "how to report a vulnerability privately"),
+  line("Contributing", `${REPO}/blob/main/.github/CONTRIBUTING.md`),
 ].join("\n")}
 
 ## WISPs

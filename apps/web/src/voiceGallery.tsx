@@ -1,5 +1,5 @@
 // Dev only (served by `npx vite web`, not in the build): the composer's voice recorder alone, for screenshots and
-// scripts/voice-media/clicker.swift. `?tone` records a tone instead of the microphone; `&delay=ms` is a slow microphone.
+// tools/scripts/voice-media/clicker.swift. `?tone` records a tone instead of the microphone; `&delay=ms` is a slow microphone.
 // `window.sent` lists what was sent; `window.trace` the pointer, click and focus events.
 import { createRoot } from "react-dom/client";
 import { MemoryRouter } from "react-router-dom";
