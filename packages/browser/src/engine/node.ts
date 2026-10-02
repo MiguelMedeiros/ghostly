@@ -4261,6 +4261,7 @@ export class GhostlyNode implements EngineImplementation {
     const live = this.links.get(linkId);
     if (!live?.stored.group) return;
     this.links.delete(linkId);
+    this.edgeRtcOff.delete(linkId);
     this.groupWakeReceived.delete(linkId);
     // Its native slot, if it held one, is free: a group link waiting for one tries at the next tick.
     this.groupNativeWaiting.delete(linkId);
