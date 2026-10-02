@@ -1,6 +1,11 @@
-import { utf8Encode } from "./bytes";
-import { MESSAGE_CLOCK_SKEW_MS } from "./messageTime";
-import { sanitizeDisplayText } from "./text";
+/*
+ * FROZEN: packages/core/src/statusCards.ts exactly as Ghostly 1.0.1 shipped it (git tag v1.0.1), with only its three
+ * imports pointed at the sources. Never edit it: packages/core/test/statusCardFields.test.ts feeds it cards with
+ * fields added after 1.0.1, to prove an app that old still shows the card as it always did.
+ */
+import { utf8Encode } from "../../src/bytes";
+import { MESSAGE_CLOCK_SKEW_MS } from "../../src/messageTime";
+import { sanitizeDisplayText } from "../../src/text";
 
 /*
  * Status cards (WISP 4xx · Status Cards): a bot's task or routine, shown as a small card instead of a text. A card rides
@@ -40,9 +45,6 @@ export const STATUS_CARD_LIMITS = {
   nextRunMs: 366 * 24 * 60 * 60_000,
   /** Edits a message with a card takes (a text takes `MAX_EDITS_PER_MESSAGE`): a bot updates a long task often. */
   edits: 5_000,
-  /** Labels on a task, and a label's length in characters. */
-  tags: 3,
-  tag: 24,
   /** Buttons on a message (WISP 4xx · Message Buttons). */
   buttons: 6,
   /** A button's id: what a press names. */
@@ -66,19 +68,9 @@ export type RoutineState = typeof ROUTINE_STATES[number];
 export const RUN_RESULTS = ["ok", "failed", "skipped"] as const;
 export type RunResult = typeof RUN_RESULTS[number];
 
-/**
- * Where a task's pull request stands: `draft` (not ready for review), `open` (ready for review), `merged`, `closed`
- * (closed without a merge). A reader that does not know the field shows the pull request as before.
- */
-export const PR_STATES = ["draft", "open", "merged", "closed"] as const;
-export type PrState = typeof PR_STATES[number];
-/** How a pull request's checks stand. */
-export const PR_CHECKS = ["passing", "failing", "pending"] as const;
-export type PrChecks = typeof PR_CHECKS[number];
-
 export interface CardLink { url: string; label?: string }
 export interface TaskItem { text: string; state: ItemState }
-export interface TaskPr { url: string; number?: number; additions?: number; deletions?: number; files?: number; state?: PrState; checks?: PrChecks }
+export interface TaskPr { url: string; number?: number; additions?: number; deletions?: number; files?: number }
 
 export interface TaskCard {
   kind: "task";
@@ -98,10 +90,6 @@ export interface TaskCard {
   updatedAt?: number;
   items?: TaskItem[];
   links?: CardLink[];
-  /** Up to `STATUS_CARD_LIMITS.tags` short labels (an area, a repository), shown as chips. */
-  tags?: string[];
-  /** The id of another task of the same sender in the same chat that this one is a part of. */
-  parent?: string;
 }
 
 export interface RoutineRun { at: number; result: RunResult; summary?: string }
@@ -220,18 +208,6 @@ function readLinks(raw: unknown): CardLink[] {
   return links;
 }
 
-/** A task's labels as a reader keeps them: the first `STATUS_CARD_LIMITS.tags` that hold, each one clean line, none twice. */
-function readTags(raw: unknown): string[] {
-  if (!Array.isArray(raw)) return [];
-  const tags: string[] = [];
-  for (const entry of raw) {
-    const tag = cardLine(entry, STATUS_CARD_LIMITS.tag);
-    if (tag && !tags.includes(tag)) tags.push(tag);
-    if (tags.length === STATUS_CARD_LIMITS.tags) break;
-  }
-  return tags;
-}
-
 function readRun(raw: unknown, now: number): RoutineRun | undefined {
   if (!isObject(raw)) return undefined;
   const at = time(raw.at, now + MESSAGE_CLOCK_SKEW_MS), result = oneOf(RUN_RESULTS, raw.result);
@@ -269,9 +245,7 @@ export function readStatusCard(raw: unknown, now = Date.now()): StatusCard | und
       const url = cardUrl(raw.pr.url);
       if (url) {
         const number = count(raw.pr.number, 1), additions = count(raw.pr.additions), deletions = count(raw.pr.deletions), files = count(raw.pr.files);
-        const state = oneOf(PR_STATES, raw.pr.state), checks = oneOf(PR_CHECKS, raw.pr.checks);
-        pr = { url, ...(number !== undefined && { number }), ...(additions !== undefined && { additions }), ...(deletions !== undefined && { deletions }), ...(files !== undefined && { files }),
-          ...(state && { state }), ...(checks && { checks }) };
+        pr = { url, ...(number !== undefined && { number }), ...(additions !== undefined && { additions }), ...(deletions !== undefined && { deletions }), ...(files !== undefined && { files }) };
       }
     }
     const items: TaskItem[] = [];
@@ -281,16 +255,12 @@ export function readStatusCard(raw: unknown, now = Date.now()): StatusCard | und
       if (text) items.push({ text, state: oneOf(ITEM_STATES, entry.state) ?? "pending" });
     }
     const startedAt = time(raw.startedAt, latest), updatedAt = time(raw.updatedAt, latest);
-    const tags = readTags(raw.tags);
-    // A task is never a part of itself.
-    const parent = typeof raw.parent === "string" && ID.test(raw.parent) && raw.parent !== id ? raw.parent : undefined;
     return {
       kind: "task", id, title, status,
       ...(progress !== undefined && { progress }), ...(done !== undefined && total !== undefined && { done, total }),
       ...(step && { step }), ...(pr && { pr }), ...(branch && { branch }),
       ...(startedAt && { startedAt }), ...(updatedAt && { updatedAt }),
       ...(items.length && { items }), ...(links.length && { links }),
-      ...(tags.length && { tags }), ...(parent && { parent }),
     };
   }
   if (raw.kind === "routine") {
@@ -387,29 +357,7 @@ export function checkStatusCard(raw: unknown, now = Date.now()): { card: StatusC
     errors.push(line("step", raw.step, STATUS_CARD_LIMITS.line), line("branch", raw.branch, STATUS_CARD_LIMITS.branch));
     if (raw.pr !== undefined) {
       if (!isObject(raw.pr)) errors.push("pr is an object");
-      else {
-        errors.push(url("pr.url", raw.pr.url), whole("pr.number", raw.pr.number, 1), whole("pr.additions", raw.pr.additions), whole("pr.deletions", raw.pr.deletions), whole("pr.files", raw.pr.files));
-        if (raw.pr.state !== undefined && !oneOf(PR_STATES, raw.pr.state)) errors.push(`pr.state is one of ${PR_STATES.join(", ")}`);
-        if (raw.pr.checks !== undefined && !oneOf(PR_CHECKS, raw.pr.checks)) errors.push(`pr.checks is one of ${PR_CHECKS.join(", ")}`);
-      }
-    }
-    if (raw.tags !== undefined) {
-      if (!Array.isArray(raw.tags) || raw.tags.length > STATUS_CARD_LIMITS.tags) errors.push(`tags is a list of at most ${STATUS_CARD_LIMITS.tags}`);
-      else {
-        const seen = new Set<string>();
-        for (const [i, tag] of raw.tags.entries()) {
-          const problem = line(`tags[${i}]`, tag, STATUS_CARD_LIMITS.tag, true);
-          errors.push(problem);
-          if (problem) continue;
-          const clean = cardLine(tag, Infinity)!;
-          if (seen.has(clean)) errors.push(`tags[${i}] ${JSON.stringify(clean)} is there twice`);
-          seen.add(clean);
-        }
-      }
-    }
-    if (raw.parent !== undefined) {
-      if (typeof raw.parent !== "string" || !ID.test(raw.parent)) errors.push(`parent is another task's id: 1 to ${STATUS_CARD_LIMITS.id} of A-Z a-z 0-9 _ . : - and does not start with -`);
-      else if (raw.parent === raw.id) errors.push("parent is another task's id, not its own");
+      else errors.push(url("pr.url", raw.pr.url), whole("pr.number", raw.pr.number, 1), whole("pr.additions", raw.pr.additions), whole("pr.deletions", raw.pr.deletions), whole("pr.files", raw.pr.files));
     }
     for (const field of ["startedAt", "updatedAt"] as const) {
       const value = raw[field];
@@ -471,15 +419,11 @@ export function statusCardText(card: StatusCard): string {
   if (card.kind === "task") {
     const progress = taskProgress(card);
     const state = [STATUS_WORD[card.status], ...(progress !== undefined ? [`${progress}%`] : []), ...(card.done !== undefined && card.total ? [`${card.done} of ${card.total} steps`] : [])].join(" · ");
-    // "PR #612 +123 -45 (open, checks passing): https://…": the state and the checks only when the card says them.
-    const standing = card.pr && [...(card.pr.state ? [card.pr.state] : []), ...(card.pr.checks ? [`checks ${card.pr.checks}`] : [])].join(", ");
     const pr = card.pr && [`PR${card.pr.number !== undefined ? ` #${card.pr.number}` : ""}`,
-      ...(card.pr.additions !== undefined || card.pr.deletions !== undefined ? [`+${card.pr.additions ?? 0} -${card.pr.deletions ?? 0}`] : []),
-      ...(standing ? [`(${standing})`] : [])].join(" ") + `: ${card.pr.url}`;
+      ...(card.pr.additions !== undefined || card.pr.deletions !== undefined ? [`+${card.pr.additions ?? 0} -${card.pr.deletions ?? 0}`] : [])].join(" ") + `: ${card.pr.url}`;
     // "Now:" only while the task is going: a finished one's last step is not what it does now (the card hides it too).
     const now = card.step && ACTIVE_TASK_STATUSES.includes(card.status) ? [`Now: ${card.step}`] : [];
-    return [`${TASK_MARK[card.status]} ${card.title}`, state, ...now, ...(pr ? [pr] : []),
-      ...(card.tags?.length ? [`Tags: ${card.tags.join(", ")}`] : []), ...(card.parent ? [`Part of: ${card.parent}`] : [])].join("\n");
+    return [`${TASK_MARK[card.status]} ${card.title}`, state, ...now, ...(pr ? [pr] : [])].join("\n");
   }
   const last = card.lastRun && `Last run: ${RESULT_WORD[card.lastRun.result]}, ${cardTimeUtc(card.lastRun.at)}${card.lastRun.summary ? ` · ${card.lastRun.summary}` : ""}`;
   return [`🔁 ${card.name}`, `${card.schedule} · ${card.state === "active" ? "active" : "paused"}`, ...(last ? [last] : []),
