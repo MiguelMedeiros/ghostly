@@ -117,7 +117,7 @@ async function decide(force: boolean): Promise<void> {
   const storage = manager();
   const desktop = isDesktopApp();
   if (desktop || !canPersist(storage)) { set(desktop ? null : "unsupported"); return; }
-  let persisted = false;
+  let persisted: boolean;
   try { persisted = await storage.persisted(); } catch { set("unsupported"); return; }
   const installed = isStandalone();
   const notifications = await notificationPermission() === "granted";
