@@ -146,16 +146,16 @@ describe("capability record: keys, seal and signature", () => {
     expect(record.issued).toBe(theirNow - CAPS_ISSUED_BACK_MS);
   });
 
-  it("is dated back by its author, so an app up to 1.0.1 (a record over a minute ahead of its clock is refused) takes one from a clock minutes ahead", () => {
+  it("is dated back by its author, so an app up to 1.0.2 (a record over a minute ahead of its clock is refused) takes one from a clock minutes ahead", () => {
     const { aKeys, bKeys } = pair();
-    // The 1.0.1 reader's rule, kept here as it was: `issued > now + 60_000` is refused.
-    const takenBy101 = (skew: number) => bKeys.open(packetOf(aKeys, aKeys.seal(content(), 1, undefined, Date.now() + skew).records)).issued <= Date.now() + 60_000;
-    expect(takenBy101(0)).toBe(true);
-    expect(takenBy101(2 * 60_000)).toBe(true);
-    expect(takenBy101(10 * 60_000)).toBe(true);
+    // The 1.0.2 reader's rule, kept here as it was: `issued > now + 60_000` is refused.
+    const takenBy102 = (skew: number) => bKeys.open(packetOf(aKeys, aKeys.seal(content(), 1, undefined, Date.now() + skew).records)).issued <= Date.now() + 60_000;
+    expect(takenBy102(0)).toBe(true);
+    expect(takenBy102(2 * 60_000)).toBe(true);
+    expect(takenBy102(10 * 60_000)).toBe(true);
     // What stays refused by them: a clock further ahead than the record is dated back, plus their minute.
-    expect(takenBy101(CAPS_ISSUED_BACK_MS + 61_000)).toBe(false);
-    expect(takenBy101(60 * 60_000)).toBe(false);
+    expect(takenBy102(CAPS_ISSUED_BACK_MS + 61_000)).toBe(false);
+    expect(takenBy102(60 * 60_000)).toBe(false);
   });
 
   it("carries the chat's choice as a trailing element, and none on Automatic (WISP 100, a choice made while not live)", () => {

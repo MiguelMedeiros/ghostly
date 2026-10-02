@@ -26,7 +26,7 @@ const CONTROL_TTL = 10 * 60_000;
 export const DHT_EXPIRY_SKEW_MS = PKARR_FUTURE_SKEW_MS;
 /**
  * How far before its own clock a sender dates an envelope (`issued`), never before the envelope's lifetime began nor
- * 30 s before its text's time. Apps up to 1.0.1 refuse an envelope dated more than 30 s past their clock, so every
+ * 30 s before its text's time. Apps up to 1.0.2 refuse an envelope dated more than 30 s past their clock, so every
  * envelope of a clock two minutes ahead was dropped by them: no first contact, no text, no receipt. Dated back, a
  * control envelope from a clock up to two and a half minutes ahead is taken by them at once, and a text once it has
  * been going out for as long as the clock is ahead.

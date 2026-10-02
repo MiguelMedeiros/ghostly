@@ -205,20 +205,20 @@ describe("DHT delivery: what a receiver refuses", () => {
     await h.bob.stop();
   });
 
-  it("dates what it publishes back, within its lifetime, so an app up to 1.0.1 (over 30 s ahead of its clock is dropped) takes it from a clock two minutes ahead", async () => {
+  it("dates what it publishes back, within its lifetime, so an app up to 1.0.2 (over 30 s ahead of its clock is dropped) takes it from a clock two minutes ahead", async () => {
     const h = setup({ mode: "stream" }); await h.bob.start();
     await vi.advanceTimersByTimeAsync(200);
-    // The 1.0.1 reader's rule, as it was, read by a clock `behind` ms behind this one.
-    const takenBy101 = ([, , issued, expires]: unknown[], behind: number, message = false) => {
+    // The 1.0.2 reader's rule, as it was, read by a clock `behind` ms behind this one.
+    const takenBy102 = ([, , issued, expires]: unknown[], behind: number, message = false) => {
       const now = Date.now() - behind;
       return !((issued as number) > now + 30_000 || (expires as number) <= now || (expires as number) - (issued as number) > (message ? DHT_MESSAGE_TTL : 10 * 60_000) || (issued as number) >= (expires as number));
     };
     const control = h.openPublished();
     expect(control[2]).toBe(Date.now() - 200 - DHT_ISSUED_BACK_MS);
-    expect(takenBy101(control, 0)).toBe(true);
-    expect(takenBy101(control, 2 * 60_000)).toBe(true);
+    expect(takenBy102(control, 0)).toBe(true);
+    expect(takenBy102(control, 2 * 60_000)).toBe(true);
     // What stays refused by them: this clock further ahead than the date goes back, plus their 30 s.
-    expect(takenBy101(control, 3 * 60_000)).toBe(false);
+    expect(takenBy102(control, 3 * 60_000)).toBe(false);
 
     // A text: never dated before its lifetime began (a reader bounds `expires - issued` to five minutes), nor more
     // than 30 s before its own time (a reader refuses a text dated after its envelope).
@@ -227,14 +227,14 @@ describe("DHT delivery: what a receiver refuses", () => {
     let text = h.openPublished();
     expect(text[6]).toEqual([ID, sent, "hello"]);
     expect(text[2]).toBe(sent);
-    expect(takenBy101(text, 0, true)).toBe(true);
-    expect(takenBy101(text, 2 * 60_000, true)).toBe(false);
+    expect(takenBy102(text, 0, true)).toBe(true);
+    expect(takenBy102(text, 2 * 60_000, true)).toBe(false);
     // Going out again two minutes on, it still says when its lifetime began: a clock two minutes behind takes it now.
     await vi.advanceTimersByTimeAsync(2 * 60_000);
     text = h.openPublished();
     expect(text[6]).toEqual([ID, sent, "hello"]);
     expect(text[2]).toBe(sent);
-    expect(takenBy101(text, 2 * 60_000, true)).toBe(true);
+    expect(takenBy102(text, 2 * 60_000, true)).toBe(true);
     await h.bob.stop();
   });
 

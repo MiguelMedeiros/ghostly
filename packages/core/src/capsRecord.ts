@@ -33,7 +33,7 @@ export const CAPS_LIMITS = {
 } as const;
 /**
  * How far before its own clock an author dates a record (`issued`). No reader orders records by that time, `rev` does,
- * and this one refuses none for it. Apps up to 1.0.1 refuse a record dated more than a minute past their clock: one
+ * and this one refuses none for it. Apps up to 1.0.2 refuse a record dated more than a minute past their clock: one
  * dated by a clock two minutes ahead was never read by them, with nothing on screen, and the chat could not dial its
  * contact's native transports before a session. Dated back, a record from a clock up to about eleven minutes ahead is
  * taken by them too.
