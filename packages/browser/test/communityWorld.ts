@@ -102,6 +102,8 @@ export class CommunityWorld {
   /** Cuts two peers apart (their link and their reads of each other), whatever `part` says. */
   cut: ((a: Peer, b: Peer) => boolean) | null = null;
   private sameSide(a: Peer, b: Peer): boolean { return (!this.part || this.part(a) === this.part(b)) && !this.cut?.(a, b); }
+  /** Fails an app's Pkarr reads (a test says whose, and of which key): the relays' budget, or the network. */
+  failRead: ((peer: Peer, key: string) => boolean) | null = null;
   /** Loses frames on the way (a test says which): the network is not perfect. */
   drop: ((from: Peer, to: Peer, frame: Record<string, unknown>) => boolean) | null = null;
   private pending: Promise<unknown>[] = [];
@@ -187,6 +189,7 @@ export class CommunityWorld {
       resolve: async (key, background) => {
         this.pkarrOps++;
         this.onPkarr?.(peer, "resolve", key, !!background);
+        if (this.failRead?.(peer, key)) throw new Error("No Pkarr relay reachable");
         if (!this.spend(peer, 1, background, false, `resolve${background ? " bg" : ""}`)) throw new Error("No Pkarr relay reachable");
         return peer.online ? structuredClone(this.pkarr.get(key) ?? null) : null;
       },
