@@ -1138,10 +1138,15 @@ export class Communities {
     if (!this.knocked.has(group.id) || moved) { this.knocked.add(group.id); this.host.emit(); }
   }
 
+  /**
+   * The entry sessions this device runs for joiners go (it is no door any more). Its own, when it is knocking at the
+   * link itself, stays: a hub taken out of the group that opened the link again at once had that session closed by
+   * its next tick (it stops being a hub and a door there), and knocked for good with nothing for a member to answer on.
+   */
   private async closeEntries(groupId: string): Promise<void> {
-    const live = this.live.get(groupId);
+    const live = this.live.get(groupId), mine = this.stored.get(groupId)?.joining?.linkId;
     live?.pendingEntries.clear();
-    for (const linkId of this.host.entries(groupId).values()) await this.host.closeEdge(linkId);
+    for (const linkId of this.host.entries(groupId).values()) if (linkId !== mine) await this.host.closeEdge(linkId);
   }
 
   // -- frames ----------------------------------------------------------------------------------
