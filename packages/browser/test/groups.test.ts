@@ -252,9 +252,11 @@ describe("group engine: admission over a contact chat, edges from the roster", (
     expect(bob.views()[0].lastMentionAt).toBeGreaterThanOrEqual(onBob[0].timestamp);
     expect(bob.views()[0].lastMentionAt).toBeLessThanOrEqual(Date.now());
     expect(alice.views()[0].lastMentionAt).toBeUndefined();
+    // After a restart it is what it was: when the mention came, not only when it was written.
+    const before = bob.views()[0].lastMentionAt;
     const again = new Groups({ ...(bob as unknown as { host: GroupsHost }).host, emit: vi.fn() }, world.peers.get("bob")!.store);
     await again.load();
-    expect(again.views()[0].lastMentionAt).toBe(onBob[0].timestamp);
+    expect(again.views()[0].lastMentionAt).toBe(before);
   });
 
   it("a stranger joins through the group's link: knocks, is admitted over an entry session, then meets everyone on edges", async () => {
