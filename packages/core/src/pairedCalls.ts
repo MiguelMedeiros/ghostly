@@ -41,8 +41,8 @@ export class PairedCalls {
   private latest: { signal: string; at: number } | null = null;
   /** When this side last said anything about a call, a clear included. */
   private saidAt = 0;
-  /** The contact's latest signal on a session: its kind, and when it came. */
-  private peer: { kind: unknown; at: number } | null = null;
+  /** The contact's latest signal on a session: its kind, when it came, and the time its sender gave it. */
+  private peer: { kind: unknown; at: number; ts: number } | null = null;
 
   constructor(private readonly now: () => number = Date.now) {}
 
@@ -55,9 +55,18 @@ export class PairedCalls {
     return { t: PAIRED_CALL_FRAME, s: signal };
   }
 
-  /** A signal the contact sent (one `parsePairedCallFrame` took). */
-  heard(signal: string): void {
-    this.peer = { kind: signalKind(signal), at: this.now() };
+  /**
+   * A signal the contact sent (one `parsePairedCallFrame` took). False when it is not newer than the last one heard
+   * from the contact on this chat: the contact's app sends its latest signal again on each new session while it is
+   * fresh (`pending`), and one already heard is not news. Handed on again, an answer to an earlier call that names no
+   * offer (an app up to 1.0.2) was taken for the call placed since, whose connection it does not fit.
+   */
+  heard(signal: string): boolean {
+    let ts = NaN;
+    try { ts = Number((JSON.parse(signal) as { ts?: unknown }).ts); } catch { /* not a signal the parser took */ }
+    if (!Number.isFinite(ts) || (this.peer && ts <= this.peer.ts)) return false;
+    this.peer = { kind: signalKind(signal), at: this.now(), ts };
+    return true;
   }
 
   /**

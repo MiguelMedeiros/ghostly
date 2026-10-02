@@ -111,6 +111,19 @@ describe("placing a call", () => {
     expect(pc.remoteDescription?.type).toBe("answer");
   });
 
+  it("a signal dated a day ahead is not taken, and the contact's answer and hang-up after it still are", async () => {
+    const call = renderCall();
+    const { pc } = await offered(call);
+    const mine = JSON.parse(call.published[0]!) as { ts: number };
+    call.receive(JSON.stringify({ ...JSON.parse(remote.hangUp(Date.now() + 24 * 60 * 60_000)), at: Date.now() }));
+    expect(call.result.current.callState).toBe("offering");
+    call.receive(JSON.stringify({ ...JSON.parse(remote.answer(Date.now() + 1)), o: mine.ts, at: Date.now() }));
+    await settle();
+    expect(pc.remoteDescription?.type).toBe("answer");
+    call.receive(JSON.stringify({ ...JSON.parse(remote.hangUp(Date.now() + 2)), at: Date.now() }));
+    expect(call.result.current.callState).toBe("idle");
+  });
+
   it("ICE connecting before the answer's description comes back stays connected, with its video lane open", async () => {
     const call = renderCall();
     const { pc } = await offered(call);
@@ -441,9 +454,9 @@ describe("answering a call", () => {
     expect(call.result.current.callState).toBe("connecting");
   });
 
-  it("names the offer it answers, and rings for one whose sender's clock is an hour off once the engine heard it come", async () => {
+  it("names the offer it answers, and rings for one whose sender's clock is nine minutes off once the engine heard it come", async () => {
     const call = renderCall();
-    const theirs = Date.now() + 60 * 60_000;
+    const theirs = Date.now() + 9 * 60_000;
     // As a record's signal, with only its own time: stale, as before.
     call.receive(remote.offer(theirs));
     expect(call.result.current.callState).toBe("idle");

@@ -2993,8 +2993,8 @@ export class GhostLink {
           }
           if (frame?.t === PAIRED_CALL_FRAME) {
             const signal = this.supportsCalls ? parsePairedCallFrame(frame) : null;
-            if (signal) this.pairedCalls.heard(signal);
-            if (signal) this.options.events?.onCallSignal?.(signal);
+            // One already heard on an earlier session is not handed on again (`PairedCalls.heard`).
+            if (signal && this.pairedCalls.heard(signal)) this.options.events?.onCallSignal?.(signal);
             return;
           }
           if (frame?.t === "ph") { if (this.supportsServices) this.pairedHttp?.handle(frame); return; }
