@@ -455,7 +455,13 @@ export class GhostlyNode implements EngineImplementation {
   private readonly links = new Map<string, LiveLink>();
   private services: StoredService[] = [];
   private activeLinkId: string | null = null;
-  private nativeQueue: Promise<void> = Promise.resolve();
+  /**
+   * Native listeners start one at a time per transport (`ensureNativeEndpoints`): their slots are counted per transport.
+   * Not one queue for all: a transport slow to start held every other chat's listeners of every kind behind it.
+   */
+  private readonly nativeQueues = new Map<NativeTransport, Promise<void>>();
+  /** Every listener start asked for so far has ended. */
+  private get nativeQueue(): Promise<void> { return Promise.all(this.nativeQueues.values()).then(() => {}); }
   private shuttingDown = false;
   /** `start` has put the kept transfers back (EngineState.transfersRestored). */
   private transfersRestored = false;
@@ -4945,85 +4951,101 @@ export class GhostlyNode implements EngineImplementation {
   /** `inUse`: a text is going or coming in the chat now, which counts as the chat on screen does for taking a listener. */
   private ensureNativeEndpoints(linkId: string, inUse = false): Promise<void> {
     const expected = this.links.get(linkId)?.link;
-    const operation = this.nativeQueue.then(async () => {
+    // Each transport's listener starts in that transport's own queue, the transports side by side. HyperDHT with its
+    // DHT out of reach (UDP blocked, a VPN) takes 6 s to listen, and a browser's Iroh up to 10 s for its relay: in one
+    // queue, every chat after the first waited that long per chat before its Iroh listener even started, and a chat
+    // whose WebRTC cannot connect has nothing else to go live on.
+    const starts = Object.entries(this.nativeFactories).map(([transport, factory]) => {
+      const key = transport as NativeTransport;
+      const operation = (this.nativeQueues.get(key) ?? Promise.resolve()).then(() => factory ? this.startNativeEndpoint(linkId, expected, key, factory, inUse) : false);
+      this.nativeQueues.set(key, operation.then(() => {}, () => {}));
+      return operation;
+    });
+    return Promise.all(starts).then(full => {
       const live = this.links.get(linkId), link = live?.link;
-      if (this.shuttingDown || !live?.stored.profile || live.stored.deliveryMode === "dht" || !link || link !== expected) return;
-      // A group's link runs them only where one side has no WebRTC (`keepsGroupNative`).
-      const group = !!live.stored.group;
-      if (group && !this.keepsGroupNative(live.stored)) return;
-      let full = false;
-      for (const [transport, factory] of Object.entries(this.nativeFactories)) {
-        const key = transport as NativeTransport;
-        if (!factory || link.availableTransports.includes(key)) continue;
-        live.transportErrors ??= {};
-        try {
-          // The native SDKs each allow eight listeners. Reclaim an idle listener
-          // only for the selected chat, never an established native connection.
-          const owners = [...this.links.values()].filter(other => other.link?.availableTransports.includes(key));
-          // A group's links take at most half of them, and never one a chat holds: 1:1 chats keep what they had
-          // before group links went native (WISP 9xx § Transports). One that finds none waits for a slot.
-          if (group && (owners.length >= NATIVE_SLOTS || owners.filter(other => other.stored.group).length >= GROUP_NATIVE_SLOTS)) { full = true; continue; }
-          if (owners.length >= NATIVE_SLOTS) {
-            const now = Date.now();
-            const taking = !group && (this.activeLinkId === linkId || inUse);
-            // A chat takes a slot from a group's link first, one that carries no session: the link waits for another.
-            const groupVictim = owners.filter(other => other.stored.group && other.link?.canReleaseEndpoint(key))
-              .sort((a, b) => (a.link?.isDataLinkOpen ? 1 : 0) - (b.link?.isDataLinkOpen ? 1 : 0))[0];
-            // Then from a chat that carries none, unless that chat took it from an idle session moments ago (no ping-pong).
-            const victim = groupVictim ?? (taking ? owners
-              .filter(other => other !== live && other.stored.id !== this.activeLinkId && other.link?.canReleaseEndpoint(key)
-                && now - (other.nativeTakenAt?.[key] ?? 0) >= NATIVE_HOLD_MS)
-              .sort((a, b) => a.lastMessageAt - b.lastMessageAt)[0] : undefined);
-            // Every one carrying a session: from the 1:1 chat whose session has gone unused longest, once that is
-            // NATIVE_HOLD_MS, and never one with a call on or a file moving. Group links keep theirs. Only for a chat
-            // that can go live no other way: one whose contact has WebRTC, on an app with WebRTC, ends nobody's session.
-            const idle = victim || !taking || !this.reachedOnlyNatively(live) ? undefined : owners
-              .filter(other => other !== live && !other.stored.group && other.stored.id !== this.activeLinkId && !this.fileDesk.moving(other.stored.id)
-                && other.link?.canYieldEndpoint(key, NATIVE_HOLD_MS))
-              .sort((a, b) => a.link!.lastActivityAt - b.link!.lastActivityAt)[0];
-            const idleFor = idle ? now - idle.link!.lastActivityAt : 0;
-            if (idle && await idle.link!.yieldEndpoint(key, NATIVE_HOLD_MS)) {
-              traceLink(live.myPubKeyZ32, "native-take", { transport: key, idle: idleFor, active: this.activeLinkId === linkId });
-              live.nativeTakenAt = { ...live.nativeTakenAt, [key]: Date.now() };
-              idle.transportErrors ??= {};
-              idle.transportErrors[key] = "Listener given to a chat in use: this one was quiet. Open this chat to take one back; your messages and transport identity are saved.";
-            } else if (!victim) {
-              traceLink(live.myPubKeyZ32, "native-no-slot", { transport: key, active: this.activeLinkId === linkId });
-              // Each busy for now (dialling, switching, carrying a session): the chat on screen asks again in a moment.
-              if (this.activeLinkId === linkId && !group) this.retryActiveSlot(linkId);
-              throw new Error("All eight native connection slots are in use. This chat takes one once a chat live over one has been quiet for 2 minutes. Disconnect a native connection in another chat to free one now.");
-            } else {
-              await victim.link!.releaseEndpoint(key);
-              victim.transportErrors ??= {};
-              victim.transportErrors[key] = "Listener released for another chat. Open this chat to restore it; your messages and transport identity are saved.";
-              if (victim.stored.group) this.groupNativeWaiting.add(victim.stored.id);
-            }
-          }
-          if (this.shuttingDown || live.link !== link) return;
-          const seed = live.stored.transportSeeds?.[key] ?? createIdentity().seedB64;
-          const transportSeeds = { ...live.stored.transportSeeds, [key]: seed };
-          await db.patchLink(linkId, { transportSeeds });
-          live.stored = { ...live.stored, transportSeeds };
-          const endpoint = await factory(seed);
-          if (this.shuttingDown || live.stored.deliveryMode === "dht" || live.link !== link || !this.links.has(linkId)) { await endpoint.close(); return; }
-          link.registerEndpoint(endpoint);
-          delete live.transportErrors[key];
-          // The record says how to dial it, so a contact whose WebRTC never connects can try it (WISP 03).
-          this.capsChanged(linkId);
-        } catch (error) {
-          live.transportErrors[key] = error instanceof Error ? error.message : "Native adapter could not start. Reopen this chat to retry.";
-        }
-      }
+      if (this.shuttingDown || !live || !link || link !== expected) return;
       // A group's link with no native endpoint because none was free: its member's row says so, and it is tried
       // again as slots free up (`retryGroupNative`).
-      if (group) {
-        const waiting = full && !link.availableTransports.some(t => t !== "webrtc/1");
+      if (live.stored.group && this.keepsGroupNative(live.stored)) {
+        const waiting = full.some(Boolean) && !link.availableTransports.some(t => t !== "webrtc/1");
         if (waiting) this.groupNativeWaiting.add(linkId); else this.groupNativeWaiting.delete(linkId);
       }
       this.emitState();
     });
-    this.nativeQueue = operation.catch(() => {});
-    return operation;
+  }
+
+  /** One transport's listener for one chat, in that transport's queue. True when a group's link found no slot free. */
+  private async startNativeEndpoint(linkId: string, expected: GhostLink | null | undefined, key: NativeTransport,
+    factory: (seedB64: string) => Promise<NativeEndpoint>, inUse: boolean): Promise<boolean> {
+    const live = this.links.get(linkId), link = live?.link;
+    if (this.shuttingDown || !live?.stored.profile || live.stored.deliveryMode === "dht" || !link || link !== expected) return false;
+    // A group's link runs them only where one side has no WebRTC (`keepsGroupNative`).
+    const group = !!live.stored.group;
+    if (group && !this.keepsGroupNative(live.stored)) return false;
+    if (link.availableTransports.includes(key)) return false;
+    live.transportErrors ??= {};
+    try {
+      // The native SDKs each allow eight listeners. Reclaim an idle listener
+      // only for the selected chat, never an established native connection.
+      const owners = [...this.links.values()].filter(other => other.link?.availableTransports.includes(key));
+      // A group's links take at most half of them, and never one a chat holds: 1:1 chats keep what they had
+      // before group links went native (WISP 9xx § Transports). One that finds none waits for a slot.
+      if (group && (owners.length >= NATIVE_SLOTS || owners.filter(other => other.stored.group).length >= GROUP_NATIVE_SLOTS)) return true;
+      if (owners.length >= NATIVE_SLOTS) {
+        const now = Date.now();
+        const taking = !group && (this.activeLinkId === linkId || inUse);
+        // A chat takes a slot from a group's link first, one that carries no session: the link waits for another.
+        const groupVictim = owners.filter(other => other.stored.group && other.link?.canReleaseEndpoint(key))
+          .sort((a, b) => (a.link?.isDataLinkOpen ? 1 : 0) - (b.link?.isDataLinkOpen ? 1 : 0))[0];
+        // Then from a chat that carries none, unless that chat took it from an idle session moments ago (no ping-pong).
+        const victim = groupVictim ?? (taking ? owners
+          .filter(other => other !== live && other.stored.id !== this.activeLinkId && other.link?.canReleaseEndpoint(key)
+            && now - (other.nativeTakenAt?.[key] ?? 0) >= NATIVE_HOLD_MS)
+          .sort((a, b) => a.lastMessageAt - b.lastMessageAt)[0] : undefined);
+        // Every one carrying a session: from the 1:1 chat whose session has gone unused longest, once that is
+        // NATIVE_HOLD_MS, and never one with a call on or a file moving. Group links keep theirs. Only for a chat
+        // that can go live no other way: one whose contact has WebRTC, on an app with WebRTC, ends nobody's session.
+        const idle = victim || !taking || !this.reachedOnlyNatively(live) ? undefined : owners
+          .filter(other => other !== live && !other.stored.group && other.stored.id !== this.activeLinkId && !this.fileDesk.moving(other.stored.id)
+            && other.link?.canYieldEndpoint(key, NATIVE_HOLD_MS))
+          .sort((a, b) => a.link!.lastActivityAt - b.link!.lastActivityAt)[0];
+        const idleFor = idle ? now - idle.link!.lastActivityAt : 0;
+        if (idle && await idle.link!.yieldEndpoint(key, NATIVE_HOLD_MS)) {
+          traceLink(live.myPubKeyZ32, "native-take", { transport: key, idle: idleFor, active: this.activeLinkId === linkId });
+          live.nativeTakenAt = { ...live.nativeTakenAt, [key]: Date.now() };
+          idle.transportErrors ??= {};
+          idle.transportErrors[key] = "Listener given to a chat in use: this one was quiet. Open this chat to take one back; your messages and transport identity are saved.";
+        } else if (!victim) {
+          traceLink(live.myPubKeyZ32, "native-no-slot", { transport: key, active: this.activeLinkId === linkId });
+          // Each busy for now (dialling, switching, carrying a session): the chat on screen asks again in a moment.
+          if (this.activeLinkId === linkId && !group) this.retryActiveSlot(linkId);
+          throw new Error("All eight native connection slots are in use. This chat takes one once a chat live over one has been quiet for 2 minutes. Disconnect a native connection in another chat to free one now.");
+        } else {
+          await victim.link!.releaseEndpoint(key);
+          victim.transportErrors ??= {};
+          victim.transportErrors[key] = "Listener released for another chat. Open this chat to restore it; your messages and transport identity are saved.";
+          if (victim.stored.group) this.groupNativeWaiting.add(victim.stored.id);
+        }
+      }
+      if (this.shuttingDown || live.link !== link) return false;
+      const seed = live.stored.transportSeeds?.[key] ?? createIdentity().seedB64;
+      // Kept before anything is awaited: another transport's listener for this chat starts beside this one, and
+      // each must write the seeds the other already drew.
+      const transportSeeds = { ...live.stored.transportSeeds, [key]: seed };
+      live.stored = { ...live.stored, transportSeeds };
+      await db.patchLink(linkId, { transportSeeds });
+      const endpoint = await factory(seed);
+      if (this.shuttingDown || live.stored.deliveryMode === "dht" || live.link !== link || !this.links.has(linkId)) { await endpoint.close(); return false; }
+      link.registerEndpoint(endpoint);
+      delete live.transportErrors[key];
+      // The record says how to dial it, so a contact whose WebRTC never connects can try it (WISP 03).
+      this.capsChanged(linkId);
+      // Told now: the chat need not wait for a slower transport's listener to say it runs this one.
+      this.emitState();
+    } catch (error) {
+      live.transportErrors[key] = error instanceof Error ? error.message : "Native adapter could not start. Reopen this chat to retry.";
+    }
+    return false;
   }
 
   /**
