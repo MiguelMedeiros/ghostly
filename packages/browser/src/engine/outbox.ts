@@ -40,6 +40,12 @@ export interface Resender {
    * where queuing it would publish it again every few minutes for as long as the contact is away).
    */
   requeueExpired?(message: StoredMessage): boolean;
+  /**
+   * Sends a file (a voice note is one) that waits for the live link. It has its own sender, and goes in its place
+   * among the texts that wait: this returns once it is said on the link (its offer, never its bytes), so a text
+   * written after it goes after its bubble and does not wait for the transfer. `ready` says whether it can go.
+   */
+  sendFile?(message: StoredMessage): Promise<void>;
 }
 
 /** How long one turn of an outbox may hold the next one back: a send that never returns must not stop the chat. */
@@ -50,6 +56,8 @@ const TURN_MS = 30_000;
  * file or a payment request that waits for the live session has no wire id, and its own sender.)
  */
 const toGo = (m: StoredMessage) => m.sender === "me" && m.via !== "hold" && !!m.wireId && (m.delivery === "queued" || m.delivery === "waiting");
+/** A file of mine that waits for the live link (its row has no wire id: the transfer has its own). */
+const waitingFile = (m: StoredMessage) => m.sender === "me" && m.via !== "hold" && !m.wireId && !!m.file && m.delivery === "waiting";
 const oldestFirst = (a: StoredMessage, b: StoredMessage) => a.timestamp - b.timestamp;
 
 /** Durable message IDs survive retries. A lost receipt means unknown delivery, never a claim that the peer did
@@ -181,7 +189,7 @@ export class Outbox {
    */
   private due(messages: StoredMessage[], opened?: number): StoredMessage[] {
     const unconfirmed = (m: StoredMessage) => m.sender === "me" && m.via !== "hold" && m.delivery === "sent" && this.receipts.has(m.id);
-    return messages.filter(m => !this.busy.has(m.id) && (toGo(m) || (unconfirmed(m)
+    return messages.filter(m => !this.busy.has(m.id) && (toGo(m) || this.file(m) || (unconfirmed(m)
       && ((opened !== undefined && (this.sentUnder.get(m.id) ?? 0) < opened) || (!!this.resender.via && this.resender.via(m) !== m.via && this.resender.ready(m)))))).sort(oldestFirst);
   }
 
@@ -191,6 +199,19 @@ export class Outbox {
    * a moment before it carries text, and a look that began in that moment sent the later messages and left the first
    * ones behind.
    */
+  private file(message: StoredMessage): boolean { return !!this.resender.sendFile && waitingFile(message); }
+
+  /** A waiting file is said on the link, after the older messages passed by that can go now. False: the link cannot carry it. */
+  private async fileGoes(message: StoredMessage, passed?: StoredMessage[]): Promise<boolean> {
+    // Not yet: it is looked at again as a queued text is, so a file alone in the chat does not wait for the next link.
+    if (!this.resender.ready(message)) { if (!this.waiting.get(message.id)?.timer) this.schedule(message.id); return false; }
+    if (passed) await this.catchUp(passed);
+    if (!this.sameLink) return true;
+    await this.resender.sendFile!(message).catch(() => {});
+    this.forget(message.id);
+    return true;
+  }
+
   private async inOrder(messages: StoredMessage[]): Promise<StoredMessage[]> {
     const passed: StoredMessage[] = [];
     for (const message of messages) {
@@ -201,7 +222,7 @@ export class Outbox {
         if (this.sameLink) await this.transmitNow(message.id); else if (!this.stopped) await this.waitsItsTurn(message);
         continue;
       }
-      if (!(await this.again(message, passed))) passed.push(message);
+      if (!(await (this.file(message) ? this.fileGoes(message, passed) : this.again(message, passed)))) passed.push(message);
     }
     return passed;
   }
@@ -211,7 +232,7 @@ export class Outbox {
     for (let i = 0; i < passed.length && this.sameLink;) {
       if (!this.resender.ready(passed[i])) { i++; continue; }
       const [older] = passed.splice(i, 1);
-      await this.attempt(older.id);
+      if (this.file(older)) await this.fileGoes(older); else await this.attempt(older.id);
       // Something was awaited: the ones before it are asked again.
       i = 0;
     }
@@ -297,7 +318,7 @@ export class Outbox {
   private async check(id: string): Promise<void> {
     if (this.stopped) return;
     const messages = await this.store.read(), message = messages.find(m => m.id === id);
-    if (!message || !toGo(message)) { await this.attempt(id); return; }
+    if (!message || !(toGo(message) || this.file(message))) { await this.attempt(id); return; }
     await this.inOrder(this.due(messages.filter(m => m.timestamp <= message.timestamp)));
   }
 
