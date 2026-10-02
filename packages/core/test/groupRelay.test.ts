@@ -3,7 +3,7 @@ import { createIdentity } from "../src/identity";
 import { encryptText, epochKeys } from "../src/groupCrypto";
 import { fromBase64Url } from "../src/bytes";
 import { LEGACY_GROUP_MEMBERS, MAX_GROUP_MEMBERS, verifyChain } from "../src/groupCommits";
-import { GROUP_LIMITS, GroupSession, chainPieces, groupMessageId, type GroupMessageFrame, type GroupSecretsFrame, type GroupSyncFrame } from "../src/groupSession";
+import { GROUP_LIMITS, GroupSession, asWritten, chainPieces, groupMessageId, type GroupMessageFrame, type GroupSecretsFrame, type GroupSyncFrame } from "../src/groupSession";
 import { Mesh, admit, clone } from "./support/groupMesh";
 // covers: groups.catch-up, groups.remove-member, groups.protocol.mentions
 
@@ -47,6 +47,33 @@ describe("any member catches up the others", { timeout: 60_000 }, () => {
     // Carol back: nothing is delivered twice.
     await mesh.open(bob, carol);
     expect(mesh.texts(bob)).toHaveLength(3);
+  });
+
+  it("hands a conversation on in the order it was written, not its own lines first", async () => {
+    const { mesh, alice, bob, carol } = await three();
+    away(mesh, bob, [alice, carol]);
+    // Alice and Carol talk while Bob is away, each answering the other.
+    await alice.sendText("anyone seen the build?", 1_000); await mesh.settle();
+    await carol.sendText("red since noon", 2_000); await mesh.settle();
+    await alice.sendText("who broke it?", 3_000); await mesh.settle();
+    await carol.sendText("me, fixing it", 4_000); await mesh.settle();
+    away(mesh, carol, [alice]);
+    await mesh.open(bob, alice, { a: [carol.myKey] });
+    // Bob's app places each message where it arrives: Alice's two, then Carol's two, read as questions, then answers.
+    expect(mesh.texts(bob)).toEqual(["anyone seen the build?", "red since noon", "who broke it?", "me, fixing it"]);
+  });
+
+  it("a member whose clock is ahead moves only where its lines fall among the ones of whoever hands them on", () => {
+    const frame = (s: string, n: number, ts: number) => ({ t: "group-msg", g: "g", e: 1, s, n, ts, nn: "", c: "", sig: "" }) as GroupMessageFrame;
+    const own = [frame("me", 0, 1_000), frame("me", 1, 3_000), frame("me", 2, 5_000)];
+    // As they reached me: Bob's clock is two minutes ahead, Carol's is right.
+    const kept = [frame("bob", 0, 122_000), frame("carol", 0, 2_500), frame("bob", 1, 124_000)];
+    const order = asWritten(own, kept).map(f => `${f.s}${f.n}`);
+    // Each log keeps its order: mine, and the others' as they arrived here.
+    expect(order.filter(x => x.startsWith("me"))).toEqual(["me0", "me1", "me2"]);
+    expect(order.filter(x => !x.startsWith("me"))).toEqual(["bob0", "carol0", "bob1"]);
+    expect(asWritten(own, [])).toEqual(own);
+    expect(asWritten([], kept)).toEqual(kept);
   });
 
   it("hands on nothing to a sync that asks for nobody (apps from before revision 0.9)", async () => {

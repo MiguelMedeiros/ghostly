@@ -5351,11 +5351,19 @@ export class GhostlyNode implements EngineImplementation {
    * chat: the time its sender says is kept beside it (`sentAt`) and shown, and orders nothing (WISP 400, requirement
    * 10). A sender's clock ahead or behind then moves no message past another, and what I send next goes below what I
    * just received. A row of mine keeps its own time; one placed already (it has `sentAt`) is left as it is. A line
-   * of a group's history (a membership change, a rename) is not a message: it stays at its commit's time, as before.
+   * of a group's history (a membership change, a rename) is not a message: it stays at its commit's time, but never
+   * ahead of this clock nor above a row placed here since the app started. The admin's clock picks that time: two
+   * minutes ahead, "X joined" sat under everything said in the next two minutes; behind, it went above what the
+   * members had just read. Read late with nothing newer here (a member back after a while), it keeps its moment.
    */
   private placed(message: StoredMessage): StoredMessage {
     const now = Date.now(), last = this.placedAt.get(message.linkId) ?? 0;
-    if (message.event) return message.sender === "peer" ? { ...message, timestamp: receivedTimestamp(message.timestamp) } : message;
+    if (message.event) {
+      if (message.sender !== "peer") return message;
+      const timestamp = Math.max(Math.min(receivedTimestamp(message.timestamp, now), now), last + 1);
+      this.placedAt.set(message.linkId, timestamp);
+      return { ...message, timestamp };
+    }
     if (message.sender === "peer" && message.sentAt === undefined) {
       const sentAt = claimedTime(message.timestamp);
       message = { ...message, timestamp: arrivalKey(now, last), ...(sentAt !== undefined && { sentAt }) };

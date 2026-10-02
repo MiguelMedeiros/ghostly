@@ -77,6 +77,30 @@ describe.each(["pt", "ar"] as const)("in %s", (language) => {
     expect(lines.join(" ")).not.toMatch(/joined|now the admin|renamed|picture|no longer/);
   });
 
+  it("a line about a member who never said a name, and has left, names it in the interface's words", async () => {
+    const GONE = "46ishssi".padEnd(52, "y");
+    // As the engine stores them: "Member" and the start of the key, in English.
+    openGroup(language, groupView({
+      status: "active", profile: "community",
+      members: [member({ key: ME, me: true, online: true }), member({ key: ANA, nick: "Ana", online: true, role: "admin" })],
+    }), [
+      stored({ id: "e1", event: "joined", member: GONE, text: "Member 46ishssi joined" }),
+      stored({ id: "e2", event: "renamed", member: GONE, text: "Member 46ishssi renamed the group to “Amigos”" }),
+      stored({ id: "e3", event: "gone", member: GONE, text: "Member 46ishssi is no longer a member" }),
+      // A name someone chose stays as written, whatever it looks like.
+      stored({ id: "e4", event: "gone", text: "Member of Parliament is no longer a member" }),
+    ]);
+    const unnamed = t(language, "group.member.unnamed", { key: "46ishssi" });
+    const lines = (await screen.findAllByTestId("group-event")).map(e => e.textContent);
+    expect(lines).toEqual([
+      t(language, "group.event.joined", { name: unnamed }),
+      t(language, "group.event.renamed", { name: unnamed, group: "Amigos" }),
+      t(language, "group.event.gone", { name: unnamed }),
+      t(language, "group.event.gone", { name: "Member of Parliament" }),
+    ]);
+    expect(lines.slice(0, 3).join(" ")).not.toMatch(/Member /);
+  });
+
   it("joining through a link says each step in the interface's language", () => {
     const { container } = openGroup(language, groupView({ name: "Amigos", profile: "community", invitation: { viaLink: true, stage: "answered" } as GroupView["invitation"] }));
     const joining = screen.getByTestId("group-joining");
