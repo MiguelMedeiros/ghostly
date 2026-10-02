@@ -47,7 +47,12 @@ export async function stageBackup(): Promise<StagedBackup> {
     get size() { return size; },
     async write(bytes) {
       if (memory) memory.push(bytes.slice());
-      else await store.append(id, size, bytes);
+      else {
+        // The device ran out of room part of the way: said in words a person can act on, like a restore's.
+        await store.append(id, size, bytes).catch((error: unknown) => {
+          throw (error as { name?: string })?.name === "QuotaExceededError" ? Object.assign(new Error("This device has no room left for this backup. Free some space, then try again."), { cause: error }) : error;
+        });
+      }
       size += bytes.length;
     },
     async save(name) {

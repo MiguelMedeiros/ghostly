@@ -414,6 +414,9 @@ E2E_WEB_PORT=50310 npm run test:e2e:webkit
 
 `playwright.webkit.config.ts` is a config of its own: the rest of the suite is written for Chromium (fake media
 devices, clipboard permissions) and CI installs Chromium only. Not in CI; run it when you touch backups or file storage.
+It runs one test at a time: Playwright's WebKit keeps the origin-private file system of every profile it opens in one
+place per origin (`~/Library/WebKit/org.webkit.Playwright` on a Mac), so each test empties it as it starts, and two at
+once would delete each other's files.
 
 ## When they run
 
