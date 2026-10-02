@@ -1,6 +1,6 @@
 import { generateSecretKey, getPublicKey } from "nostr-tools/pure";
 import { npubEncode } from "nostr-tools/nip19";
-import { copyInvite } from "../support/clipboard";
+import { copiedBy, copyInvite } from "../support/clipboard";
 import { chat, expect, say, test, type Peer } from "../support/fixtures";
 import { LocalNostrRelay } from "../support/nostrRelay";
 import { pair } from "../support/paired";
@@ -41,9 +41,8 @@ test("an invite sent in a chat is a card: the contact joins with a tap, the send
   expect(await chatId(bob)).toBe(bobsChat);
 
   // Copy hands the link over and Show QR shows it to scan: neither joins.
-  await card.getByTestId("entity-invite-copy").click();
+  expect(await copiedBy(bob.page, () => card.getByTestId("entity-invite-copy").click())).toBe(link);
   await expect(card.getByTestId("entity-invite-copy")).toHaveText("Copied!");
-  expect(await bob.page.evaluate(() => navigator.clipboard.readText())).toBe(link);
   await card.getByTestId("entity-invite-qr").click();
   const qr = bob.page.getByTestId("link-qr");
   await expect(qr.getByTestId("link-qr-code").locator("svg")).toBeVisible();
