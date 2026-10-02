@@ -22,6 +22,7 @@ import { ensureSession, loadSession } from "./lib/storage";
 import { useI18n, useT } from "./contexts/I18nContext";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { ProfileGate } from "./components/ProfileUnavailable";
+import { DeviceStandby, useDeviceGate } from "./components/DeviceStandby";
 import { INVITE_REFUSAL_MESSAGE, chatPath, classifyInvite, inviteRouteCode, protocolLinkCode, readInvite } from "./lib/url";
 import { onJoinNotice, showJoinNotice, type JoinNoticeKey } from "./lib/joinNotice";
 import { groupPath } from "./lib/groups";
@@ -191,6 +192,11 @@ export function AppRouter({ children }: { children: ReactNode }) {
 export function Root() {
   // The loops rest while the window is hidden or behind others (index.css `:root[data-away]`).
   useEffect(watchWindowAway, []);
+  // Not the active device for this profile (WISP 06 § The gate): the standby screen, and nothing of the profile. No
+  // router and no link intake either: an invite opened here would be written into a copy that must stay as it is.
+  const standby = useDeviceGate();
+  // Device-link-only mode starts as the engine does, before the lock is passed; it is what the screen hears from.
+  useEffect(() => { if (standby) void engine.connect().catch(() => {}); }, [standby]);
   return (
     <SettingsProvider>
       <ThemeProvider>
@@ -198,6 +204,7 @@ export function Root() {
           <LockScreenProvider>
             <LockScreen />
             <ProfileSwitchSplash />
+            {standby ? <LockGate><DeviceStandby gate={standby} /></LockGate> : (
             <AppRouter>
               <ErrorBoundary>
               <ChatLinkIntake />
@@ -238,6 +245,7 @@ export function Root() {
               </LockGate>
               </ErrorBoundary>
             </AppRouter>
+            )}
           </LockScreenProvider>
         </I18nProvider>
       </ThemeProvider>

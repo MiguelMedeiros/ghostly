@@ -14,7 +14,7 @@ export function databaseName(): string {
   return dbName;
 }
 /** The schema this build reads and writes. A database stored at a higher one is a newer build's: it is never opened. */
-export const DB_VERSION = 11;
+export const DB_VERSION = 12;
 
 /**
  * Why the profile's database did not open. `newer`: a newer Ghostly stored it (IndexedDB never opens a database below
@@ -201,6 +201,9 @@ export function openDb(): Promise<IDBDatabase> {
       // v11: the messages that carry a status card, by the card's kind, across every chat and group (the Tasks board).
       // A message without a card has no such key and is not in it, so the index is as small as the cards are few.
       if (!messages.indexNames.contains(CARD_INDEX)) messages.createIndex(CARD_INDEX, "card.kind");
+      // v12: nothing in the schema. The version is raised with the first build that knows device states (WISP 06
+      // § Compatibility and rollout): an older build given this storage gets a version error, shows "This profile was
+      // last used by a newer version of Ghostly." and starts nothing, so it can never run a standby's frozen copy.
     };
     request.onsuccess = () => {
       // Opened after it was said to be blocked: nobody uses this connection, and it must not block the next open.
