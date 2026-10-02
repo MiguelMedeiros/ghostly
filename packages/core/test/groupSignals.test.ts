@@ -166,6 +166,18 @@ describe("an edge's packets, carried by members beside the relays", () => {
     expect(relays.reads).toBe(1);
   });
 
+  it("an edge that came up through members does not ask the relays right after: its slow look does, later", async () => {
+    const { peer, relays, state, transport } = edge();
+    transport.accept(createRelayPayload(peer, records("answer")));
+    await transport.resolve(peer.pubKeyZ32);
+    state.open = true;
+    expect((await transport.resolve(peer.pubKeyZ32))?.records).toMatchObject(records("answer"));
+    expect(relays.reads).toBe(0);
+    await vi.advanceTimersByTimeAsync(SIGNAL_PROVEN_MS);
+    await transport.resolve(peer.pubKeyZ32);
+    expect(relays.reads).toBe(1);
+  });
+
   it("takes only the member's own packets, and only newer ones", async () => {
     const { me, peer, state, transport } = edge();
     expect(transport.accept(createRelayPayload(createIdentity(), records("someone else's")))).toBe(false);

@@ -174,6 +174,10 @@ export class CarriedTransport implements PkarrTransport {
     if (pubKeyZ32 !== this.peerKey) return this.inner.resolve(pubKeyZ32, options);
     // One that came since the last read: that is the news, and it costs no request.
     if (this.carried && this.carried.timestampMicros > this.returned) return this.take(null);
+    // Up, through packets members carried a moment ago: the relays hold nothing newer than what brought the edge up,
+    // and the look a link takes right after it opens would be a request for nothing. The slow look of a connected
+    // link, a minute on, asks them as before.
+    if (this.carried && this.hooks.open() && Date.now() - this.heardAt < SIGNAL_PROVEN_MS) return this.take(null);
     let came!: () => void;
     const carried = new Promise<"carried">(resolve => { came = () => resolve("carried"); });
     this.waiting = came;
