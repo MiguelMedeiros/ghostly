@@ -27,6 +27,8 @@ class MemoryRelays {
   puts: { at: number; key: string; body: Uint8Array }[] = [];
   /** `host key` → an older packet that relay still serves: it missed the newer ones (its budget refused them). */
   stale = new Map<string, Uint8Array>();
+  /** `host key`: that relay has no packet under the key (it answers 404), whatever the others hold. */
+  missing = new Set<string>();
   constructor(readonly hosts: string[]) {}
   get urls() { return this.hosts.map(h => `https://${h}`); }
   fetchFor(who: string): typeof fetch {
@@ -39,7 +41,7 @@ class MemoryRelays {
         this.packets.set(key, body); this.puts.push({ at: Date.now(), key, body }); this.stale.delete(`${url.host} ${key}`);
         return new Response(null, { status: 204 });
       }
-      const packet = this.stale.get(`${url.host} ${key}`) ?? this.packets.get(key);
+      const packet = this.missing.has(`${url.host} ${key}`) ? undefined : this.stale.get(`${url.host} ${key}`) ?? this.packets.get(key);
       return packet ? new Response(packet as BodyInit) : new Response(null, { status: 404 });
     }) as typeof fetch;
   }
@@ -311,6 +313,46 @@ describe("a contact's offer from before the last session, after a restart", () =
     // downtime offer 1.6 s. Now: 18.6 and 1.6 s.
     const canAnswerIn = Math.max(0, noticeMs - downMs);
     expect(liveMs, "live soon after the contact can answer").toBeLessThanOrEqual(canAnswerIn + 5_000);
+  }, 300_000);
+});
+
+/**
+ * An offer is new to this app when a read of the contact's record did not have it and the next one does. That holds
+ * only when the first of the two showed what the record held: a relay that has no packet of the contact's says nothing
+ * of what another relay still holds, and a copy the transport kept says nothing of now. An offer made long ago must
+ * not be answered for having shown up late: answering it holds the data link on a connection nobody offers any more.
+ */
+describe("an offer made long ago that shows up after this run's first read", () => {
+  const steps = (lines: string[], me: string, step: string) => lines.map(l => JSON.parse(l) as { me: string; step: string; state?: string }).filter(l => l.me === me.slice(0, 6) && l.step === step);
+
+  it.each([
+    { name: "a contact gone for ten minutes, its last packet (with its offer) on one relay only, the other answering that it has none", resume: false },
+    { name: "the same on a chat that was live at its last run, the contact's clock ten minutes behind this one (its offer reads as from before that session either way)", resume: true },
+  ])("$name: not answered", async ({ resume }) => {
+    const lines: string[] = [];
+    setLinkTraceSink(line => lines.push(line));
+    try {
+      const relays = new MemoryRelays(["a.test", "b.test"]);
+      const made = invitationWhere("inviter"), contact = made.inviter, me = made.joiner;
+      const peer = open("p", relays.transport("p"), contact, me);
+      const mine = open("c", relays.transport("c"), me, contact);
+      expect(await until(() => peer.isDataLinkOpen && mine.isDataLinkOpen, 120_000), "live at first").toBeLessThan(Infinity);
+      const liveSince = Date.now();
+      const contactKey = me.params.peerPubKeyZ32, offer = relays.puts.filter(p => p.key === contactKey && p.at < liveSince - 300).pop()!;
+      // Both apps go; the contact's packet from before the session, its offer still in it, is all that is left, on b.test.
+      killRtc("c", 1_000); killRtc("p", 1_000);
+      await mine.stop(false); await peer.stop(false);
+      await run(10 * 60_000);
+      relays.packets.delete(contactKey);
+      relays.missing.add(`a.test ${contactKey}`);
+      relays.stale.set(`b.test ${contactKey}`, offer.body);
+      lines.length = 0;
+      // Back, reading a.test first: nothing there. Then b.test: the old packet.
+      const back = open("c", relays.transport("c2", ["https://a.test", "https://b.test"]), me, contact, resume ? { resume: true, resumeFloor: liveSince + 10 * 60_000 } : {});
+      await run(30_000);
+      expect(steps(lines, back.myPubKeyZ32, "rtc-signal-in"), "the old offer was read").not.toHaveLength(0);
+      expect(steps(lines, back.myPubKeyZ32, "datalink").filter(l => l.state === "answering"), "and not answered").toEqual([]);
+    } finally { setLinkTraceSink(null); }
   }, 300_000);
 });
 

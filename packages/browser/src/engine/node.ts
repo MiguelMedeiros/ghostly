@@ -48,6 +48,7 @@ import { COMMUNITY_PIN_FRAME, PIN_LIMITS, mayPin, pinIsNewer, pinNumberHolds, re
 import { CapsExchange, DHT_TEXT_CAPABILITY, HOLD_CAPABILITY, TRANSPORTS, automaticTransport, capsDescriptors, dialDescriptors, type CapsContent, type CapsRecord, type PairingCredentials } from "@ghostly/core";
 import { fileMessageText, parseLinkPreview, pairedMessageFrame, type WireReply, type LinkPreview, type PaymentRequest, type PaymentAsk, type Payment, type PaymentResult, HOLD_LIMITS, MAX_DHT_TEXT_BYTES, normalizeRelayUrl, sanitizeAvatar, PeerProofs, emptyProofLedger, emptyIdentityLedger, lastSharedWithMe, receivedIdentityStatus, type ProofChallenge, type ProofEvidence, type ProofAdapter, type ProofScope, type PaymentMethodName } from "@ghostly/core";
 import {
+  presenceSeenAt,
   DEFAULT_RELAYS,
   currentRelays,
   GhostLink,
@@ -980,8 +981,8 @@ export class GhostlyNode implements EngineImplementation {
     },
     openEntry: (link, role, seedB64, peer) => this.openEntry(link, role, seedB64, peer),
     linkSeen: linkId => { const live = this.links.get(linkId); return otherEndSeen(live?.presence, live?.dataLink); },
-    // Its packet is newer than the moment the edge was last up (both clocks, near enough for seconds of a restart).
-    linkBack: linkId => { const live = this.links.get(linkId); return !!live?.lastSyncAt && !!live.presence?.online && live.presence.lastPacketAt > live.lastSyncAt; },
+    // Its packet is newer than the moment the edge was last up (when this device first read it, so both times are this clock's).
+    linkBack: linkId => { const live = this.links.get(linkId); return !!live?.lastSyncAt && !!live.presence?.online && presenceSeenAt(live.presence) > live.lastSyncAt; },
     publish: (identity, records, background) => this.groupTransport.publish(identity, records, { background }),
     resolve: async (pubKeyZ32, background, door) => (await this.groupTransport.resolve(pubKeyZ32, { background, door }))?.records ?? null,
     expectPeer: linkId => this.links.get(linkId)?.link?.expectPeer(),
@@ -4375,6 +4376,7 @@ export class GhostlyNode implements EngineImplementation {
       ? TRANSPORTS.find(t => t !== "webrtc/1" && t in this.nativeFactories && !!stored.peerTransports?.includes(t)) : "webrtc/1";
     live.pairing = { status: "connecting" };
     live.link = new GhostLink({
+      ownRecords: true,
       // An edge carries payments with its member (WISP 9xx § Payments), as a chat does; an entry session does not.
       paymentMethods: entry ? { cashu: false, lightning: false, arkade: false, usdt: false, bark: false, bitcoin: false, fedimint: false, spark: false } : stored.paymentMethods,
       arkPaymentsSupport: !entry,
@@ -4833,6 +4835,8 @@ export class GhostlyNode implements EngineImplementation {
         save: async state => { await db.patchLink(linkId, { capsState: state }); live.stored = { ...live.stored, capsState: state }; },
         changed: record => this.peerCapsChanged(linkId, record),
         published: () => live.link?.announceCapsRevision(),
+        // A record that was not taken left no word anywhere: why a chat had nothing to dial was a guess.
+        refused: error => traceLink(live.myPubKeyZ32, "caps-refused", { reason: error.reason }),
       });
       // A saved contact's record goes once this chat's native endpoints are up, with what dials them (or after
       // `STARTUP_QUIET_MS`): started at once, it went out without them and again as each came up, and so did an envelope
@@ -5369,7 +5373,7 @@ export class GhostlyNode implements EngineImplementation {
       status: live.status,
       dataLink: live.dataLink,
       peerOnline: presence.online,
-      peerLastSeenAt: presence.lastPacketAt,
+      peerLastSeenAt: presenceSeenAt(presence),
       peerServices: presence.services,
       lastMessageAt: live.lastMessageAt,
       peerAck: live.peerAck,

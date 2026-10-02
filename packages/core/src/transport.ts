@@ -50,6 +50,7 @@ export function withRequestOptions(transport: PkarrTransport, extra: PkarrReques
   if (transport.discovery) wrapped.discovery = () => transport.discovery!();
   if (transport.subscribe) wrapped.subscribe = (listener) => transport.subscribe!(listener);
   if (transport.networkChanged) wrapped.networkChanged = () => transport.networkChanged!();
+  if (transport.readAnsweredAt) wrapped.readAnsweredAt = (pubKeyZ32) => transport.readAnsweredAt!(pubKeyZ32);
   if (transport.configure) wrapped.configure = (options) => transport.configure!(options);
   return wrapped;
 }
@@ -97,6 +98,13 @@ export interface PkarrTransport {
   subscribe?(listener: (change?: DiscoveryChange) => void): () => void;
   /** The device changed networks (back online): what was learnt about failing relays is forgotten, and links look again. */
   networkChanged?(): void;
+  /**
+   * When the network last answered a read of this key (this clock), whatever it answered. A `resolve` may hand back a
+   * copy it kept (the budget held the read, every relay was resting, the same key was read a moment ago): a caller
+   * that reasons from "the record did not have this at my last read" asks this to know the read was one. Absent
+   * where the transport cannot say; such a caller then takes no read for one.
+   */
+  readAnsweredAt?(pubKeyZ32: string): number | undefined;
   /**
    * Where the DHT is reached directly (Desktop): the relays from Settings, and whether reads may use them too
    * (`readRelays`, "Also use Pkarr relays"). Writes go to them either way, so browser contacts see this peer's packets.

@@ -454,6 +454,8 @@ export class RelayTransport implements PkarrTransport {
     return this.newest.get(pubKeyZ32) ?? null;
   }
 
+  readAnsweredAt(pubKeyZ32: string): number | undefined { return this.readAt.get(pubKeyZ32); }
+
   /** The relays answered a read of this key now; answers older than `FRESH_READ_MS` are dropped as the list grows. */
   private answeredRead(pubKeyZ32: string): void {
     const now = Date.now();
