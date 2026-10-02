@@ -2,12 +2,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ENDPOINT, ONCHAIN_PROVIDER, cashuRequestPayload, type GhostLink, type PaymentRequest, type PaymentReview, type PaymentTarget } from "@ghostly/core";
 import { PaymentDesk, type DeskBitcoin, type DeskLightning } from "../src/engine/payments";
 import { CashuAdapter } from "../src/engine/paymentAdapters/cashu";
-import type { CashuPrepared, CashuWallet } from "../src/engine/wallet";
+import { SwapUnsettledError, type CashuPrepared, type CashuWallet } from "../src/engine/wallet";
 import type { ArkWallet } from "../src/engine/paymentAdapters/arkWallet";
 import type { BarkWallet } from "../src/engine/paymentAdapters/barkWallet";
 import type { UsdtWallet } from "../src/engine/paymentAdapters/usdtWallet";
 import { fakeAddress } from "../src/engine/paymentAdapters/providers/testing";
-import type { StoredMessage, StoredPayment } from "../src/shared/types";
+import type { PendingSwap, StoredMessage, StoredPayment } from "../src/shared/types";
 import { resetDb, rows, seed } from "./fakes";
 import { paymentAlias, paymentWireId } from "../src/shared/paymentIds";
 import { replyRef } from "../src/shared/replies";
@@ -974,5 +974,71 @@ describe("the line kept with a payment message (the CLI and older apps show it)"
     const { desk, texts } = setup([record({ id: "rv", kind: "payment", direction: "out", token: "cashuBrv", requestId: "r", target: testTarget })]);
     await desk.recordCashu(review(testTarget, { requestId: "r" }), "cashuBrv");
     expect(texts()).toEqual(["100 test sats via Cashu"]);
+  });
+});
+
+describe("a redeem the mint has not answered yet", () => {
+  /** As the wallet writes it down: the swap, with the payment record it stores with the ecash. */
+  const swap = (payment?: StoredPayment): PendingSwap => ({ id: "swap-1", mint: MINT, kind: "receive", swap: {}, createdAt: 1, ...(payment ? { payment } : {}) });
+  const received = record({ id: "p1", kind: "payment", direction: "in", state: "settled", mint: MINT, requestId: "r", createdAt: 9 });
+
+  it("says nothing to the contact until the mint has spoken, then settles as if the answer had come in time", async () => {
+    const { desk, wallet, sent, state, texts } = setup([record({ id: "r", direction: "out", mints: [MINT] })]);
+    await desk.start();
+    wallet.receiveToken.mockRejectedValueOnce(new SwapUnsettledError(swap()));
+    await desk.onPayment("l", cashuPayment("p1", { requestId: "r" }));
+    expect(sent, "not known to have failed, so not said to have").toEqual([]);
+    expect(texts()).toEqual([]);
+    expect(state("r")?.state).toBe("pending");
+
+    // The mint had made the swap: the wallet stored the ecash with this record, and says so.
+    seed("payments", [received as unknown as Record<string, unknown>]);
+    await desk.onSwapSettled(swap(received), true);
+    expect(sent).toEqual([{ kind: "res", frame: { id: "p1", ok: true, credited: "100" } }]);
+    expect(state("r")).toMatchObject({ state: "settled", mint: MINT });
+    expect(texts()).toEqual(["⚡ 100 sats"]);
+    // The contact sends it again: answered from the record, nothing redeemed twice.
+    await desk.onPayment("l", cashuPayment("p1", { requestId: "r" }));
+    expect(wallet.receiveToken).toHaveBeenCalledOnce();
+    expect(sent.at(-1)).toMatchObject({ kind: "res", frame: { id: "p1", ok: true, credited: "100" } });
+  });
+
+  it("sent again while the wallet finishes the first redeem, it is answered as received and never as refused", async () => {
+    const { desk, wallet, sent, texts } = setup();
+    await desk.start();
+    // The second redeem waits for the wallet, which finishes the first one meanwhile; the mint then refuses the token.
+    wallet.receiveToken.mockImplementationOnce(async () => {
+      seed("payments", [received as unknown as Record<string, unknown>]);
+      await desk.onSwapSettled(swap(received), true);
+      throw new Error("Token already spent");
+    });
+    await desk.onPayment("l", cashuPayment("p1", { requestId: "r" }));
+    expect(sent.map((s) => s.frame)).toEqual([{ id: "p1", ok: true, credited: "100" }, { id: "p1", ok: true, credited: "100" }]);
+    expect(texts()).toEqual(["⚡ 100 sats"]);
+  });
+
+  it("a redeem the mint never made leaves the ecash the contact's, and the contact is told", async () => {
+    const { desk, sent, state } = setup();
+    await desk.start();
+    await desk.onSwapSettled(swap(received), false);
+    expect(sent).toEqual([{ kind: "res", frame: { id: "p1", ok: false, error: "The mint did not confirm the ecash" } }]);
+    expect(state("p1")).toBeUndefined();
+  });
+
+  it("ecash of ours that came back after the fact is no longer a payment waiting on the contact", async () => {
+    const ours = record({ id: "p", kind: "payment", direction: "out", token: "cashuBp" });
+    const { desk, sent } = setup([ours]);
+    await desk.start();
+    await desk.onSwapSettled(swap({ ...ours, state: "reclaimed", token: undefined }), true);
+    expect(desk.views().p.state).toBe("reclaimed");
+    expect(sent).toEqual([]);
+  });
+
+  it("a redeem with no payment of a chat changes nothing here", async () => {
+    const { desk, sent, host } = setup();
+    await desk.start();
+    await desk.onSwapSettled(swap(), true);
+    expect(sent).toEqual([]);
+    expect(host.storeMessage).not.toHaveBeenCalled();
   });
 });

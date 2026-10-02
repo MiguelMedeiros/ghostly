@@ -191,6 +191,10 @@ export interface WalletState {
   /** `awaiting`: what the mint still waits for, when it does (removing it asks about these first). */
   mints: { url: string; name: string; balance: number; info: MintInfo | null; awaiting?: WalletAwaitingView[] }[];
   balance: number;
+  /** Cashu: sats held for a payment the mints have not settled yet. Not in `balance`. */
+  setAside?: number;
+  /** Cashu: sats in an exchange whose mint took them and cannot say what it gave back. */
+  unconfirmed?: number;
   /** Newest first. */
   history: WalletTransaction[];
   feesPaid: number;

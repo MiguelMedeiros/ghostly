@@ -14,7 +14,7 @@ export function databaseName(): string {
   return dbName;
 }
 /** The schema this build reads and writes. A database stored at a higher one is a newer build's: it is never opened. */
-export const DB_VERSION = 11;
+export const DB_VERSION = 12;
 
 /**
  * Why the profile's database did not open. `newer`: a newer Ghostly stored it (IndexedDB never opens a database below
@@ -108,6 +108,8 @@ export const STORES = {
   quotes: "quotes",
   walletTx: "walletTx",
   melts: "melts",
+  /** Swaps at a mint that have not finished (`PendingSwap`): what gets their outputs back when an answer is missed. */
+  swaps: "swaps",
   intents: "paymentIntents",
   /** Private groups (WISP 900): membership chain, epoch secrets and my own recent messages, by group id. */
   groups: "groups",
@@ -201,6 +203,8 @@ export function openDb(): Promise<IDBDatabase> {
       // v11: the messages that carry a status card, by the card's kind, across every chat and group (the Tasks board).
       // A message without a card has no such key and is not in it, so the index is as small as the cards are few.
       if (!messages.indexNames.contains(CARD_INDEX)) messages.createIndex(CARD_INDEX, "card.kind");
+      // v12: swaps at a mint, written down before the mint is asked.
+      if (!has(STORES.swaps)) db.createObjectStore(STORES.swaps, { keyPath: "id" });
     };
     request.onsuccess = () => {
       // Opened after it was said to be blocked: nobody uses this connection, and it must not block the next open.
