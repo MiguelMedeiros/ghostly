@@ -1,6 +1,6 @@
 import "fake-indexeddb/auto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { GhostLink, createIdentity, type GroupCommit, type GroupEdgeFrame, type GroupSession } from "@ghostly/core";
+import { GhostLink, GroupSession, createIdentity, identityFromSeedB64, type GroupCommit, type GroupEdgeFrame } from "@ghostly/core";
 import { GhostlyNode } from "../src/engine/node";
 import { FAREWELL_OPEN_MS, type Groups, type GroupsHost } from "../src/engine/groups";
 import { MeshHubs, removalEpoch } from "../src/engine/meshHubs";
@@ -214,6 +214,43 @@ describe("a private group's traffic goes to its current members only", () => {
     expect(kinds(bob)).toEqual(expect.arrayContaining(["group-msg", "group-react", "group-pin", "group-pay", "sendPaymentRequest", "sendPaymentResult"]));
     expect(carol.sent).toEqual([]);
     expect(removedAt).toBeLessThan(session.epoch);
+    closeEdge.mockRestore();
+  }, 30_000);
+
+  it("someone just removed, its edge still open for a moment, is not heard over it", async () => {
+    const a = await adminOf(["bob"]);
+    const { node, groupId, session } = a;
+    const texts = async () => (await node.getMessages(`group:${groupId}`)).map(m => m.text);
+    // Carol's app is a session of its own, so what it says is sealed and signed as a member's is.
+    const seed = createIdentity().seedB64, key = identityFromSeedB64(seed).pubKeyZ32;
+    const invite = session.inviteFrame(), welcome = await session.admit(key);
+    const joined = GroupSession.join({ name: invite.name, admin: invite.admin }, welcome.slice(0, -1), welcome[welcome.length - 1], seed);
+    if ("error" in joined) throw new Error(joined.error);
+    const said: GroupEdgeFrame[] = [];
+    const carol = new GroupSession(joined.state, { save: async () => {}, send: (to, frame) => { if (to === session.myKey) said.push(structuredClone(frame)); }, message: () => {}, changed: () => {} });
+    await vi.waitFor(() => expect(a.edgeOf(key)?.link).toBeDefined());
+    const link = a.edgeOf(key)!.link!;
+    standIn(link, { open: true, groups: true }, []);
+    const events = (link as unknown as { options: { events: EdgeEvents } }).options.events;
+    events.onDataLinkState("open"); events.onGroupsSupport(true);
+    await settle();
+    // A member is heard.
+    await carol.sendText("while a member");
+    await events.onGroupFrame(said.pop());
+    await settle();
+    expect(await texts()).toContain("while a member");
+    // Its edge outlives its place in the roster (as a hub keeps it a while, or until the edges are next set right), and
+    // its app goes on as if it had not been told: it writes under the epoch it was in, whose secret it holds.
+    const closeEdge = vi.spyOn(node as unknown as { closeGroupLink(id: string): Promise<void> }, "closeGroupLink").mockResolvedValue();
+    await node.removeGroupMember({ groupId, key });
+    await settle();
+    expect(a.edgeOf(key)).toBeDefined();
+    await carol.sendText("after the removal");
+    const frame = said.pop()!;
+    expect(frame.t).toBe("group-msg");
+    await events.onGroupFrame(frame);
+    await settle();
+    expect(await texts()).not.toContain("after the removal");
     closeEdge.mockRestore();
   }, 30_000);
 });

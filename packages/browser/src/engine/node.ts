@@ -561,6 +561,11 @@ export class GhostlyNode implements EngineImplementation {
     deleted: (linkId, messageId) => !!this.links.get(linkId)?.stored.deletedIds?.includes(messageId),
     messageExists: (linkId, messageId) => db.hasMessage(linkId, messageId),
     storeMessage: (message) => this.storeMessage(message),
+    place: (linkId) => {
+      const place = arrivalKey(Date.now(), this.placedAt.get(linkId));
+      this.placedAt.set(linkId, place);
+      return place;
+    },
     transfers: this.transfers,
     changed: (delayMs) => this.emitState(delayMs),
     flush: () => this.flushState(),
@@ -2482,6 +2487,7 @@ export class GhostlyNode implements EngineImplementation {
   private outboxFor(linkId: string): Outbox {
     let outbox = this.outboxes.get(linkId);
     if (!outbox) {
+      const chat = this.links.get(linkId)?.stored, oneToOne = !!chat?.profile && !chat.group;
       outbox = new Outbox({
         read: () => db.getMessages(linkId),
         update: async (id, delivery, error, extra) => {
@@ -2516,10 +2522,14 @@ export class GhostlyNode implements EngineImplementation {
         // choice, either side's, has no live link to wait for: there it goes on the DHT again.
         ready: message => {
           const live = this.links.get(linkId), link = live?.link;
+          // A file that waits for the live link goes when the link carries text: in its place among the texts.
+          if (message.file && !message.wireId) return !!link?.isDataLinkOpen && link.textDelivery === "stream";
           if (message.via === "pkarr" && !GhostlyNode.dhtByChoice(live) && link?.textDelivery !== "stream") return false;
           return !!link?.canSendText && !!message.wireId && !link.validateText(message.text, message.timestamp, message.wireId, GhostlyNode.wireReply(message));
         },
         requeueExpired: () => !GhostlyNode.dhtByChoice(this.links.get(linkId)),
+        // A 1:1 chat's files that wait for the live link go with its texts; a group edge's go as before (`sendWaiting`).
+        ...(oneToOne && { sendFile: (message: StoredMessage) => this.sendWaitingFile(linkId, message) }),
         via: message => {
           const delivery = this.links.get(linkId)?.link?.textDelivery;
           return delivery === "dht" ? "pkarr" : delivery === "stream" ? "datalink" : message.via;
@@ -2739,17 +2749,21 @@ export class GhostlyNode implements EngineImplementation {
       file,
       ...answers,
     });
-    this.transferFile(live, file, wireId, timestamp, fail, wire, forwarded);
+    void this.transferFile(live, file, wireId, timestamp, fail, wire, forwarded);
   }
 
   /**
    * The file of a stored message goes over the open session: offered with files/3 when both sides agree it,
    * else whole with files/2, which takes up to 100 MB.
    */
-  private transferFile(live: LiveLink, file: MessageFile, wireId: string, timestamp: number, fail: (error: string) => void, reply?: WireReply, forwarded?: number): void {
+  private transferFile(live: LiveLink, file: MessageFile, wireId: string, timestamp: number, fail: (error: string) => void, reply?: WireReply, forwarded?: number): Promise<void> {
     const { link } = live;
-    if (!link) return fail("You are offline");
+    if (!link) { fail("You are offline"); return Promise.resolve(); }
     this.transfers.set(file.id, { state: "transferring", transferred: 0, size: file.size });
+    // Settles once the file is said on the link (its files/3 offer, or the start of a files/2 send), or cannot be:
+    // what was written after it may go then. Never with its bytes.
+    let said = () => {};
+    const offered = new Promise<void>(resolve => { said = resolve; });
     void (async () => {
       // Sent again: the reply its message carries goes with it again, and so does its hop count.
       if (!reply || !forwarded) {
@@ -2772,11 +2786,13 @@ export class GhostlyNode implements EngineImplementation {
       await fileStore.updateTransfer(file.id, { state: "transferring", transferred: 0, size: file.size });
       // Read a step at a time, wherever the bytes are: never the whole file at once.
       const source = streamStored(stored);
+      said();
       await link.sendFile(
         { id: wireId, name: file.name, size: file.size, mime: file.mime, timestamp, ...(file.voice && { voice: file.voice }), ...(file.video && { video: file.video }), ...(file.image && { image: file.image }), ...(reply && { reply }), ...(forwarded && { forwarded }) },
         source,
       );
-    })().catch((error) => fail(error instanceof Error ? error.message : String(error)));
+    })().catch((error) => fail(error instanceof Error ? error.message : String(error))).finally(said);
+    return offered;
   }
 
   fileAction({ linkId, fileId, action }: { linkId: string; fileId: string; action: "accept" | "decline" | "pause" | "resume" | "cancel" | "resend" | "request" }): void {
@@ -2803,13 +2819,36 @@ export class GhostlyNode implements EngineImplementation {
   }
 
   /**
-   * The chat is live: what waited for it goes now, in the order it was written. A file for an app that turns
-   * out not to take files fails with that reason instead of waiting forever (WISP 03).
+   * A file that waited for the chat to be live goes: said on the open session (see `transferFile`), and this returns
+   * then, so the chat's outbox sends it in its place among the texts that waited (WISP 400, requirement 10). A file
+   * for an app that turns out not to take files fails with that reason instead of waiting forever (WISP 03).
+   */
+  private async sendWaitingFile(linkId: string, message: StoredMessage): Promise<void> {
+    const live = this.links.get(linkId), file = message.file;
+    if (!live?.link?.isDataLinkOpen || !file) return;
+    // A session that just opened has not heard the contact's capabilities yet (files/3 comes in them): asked a little.
+    if (!GhostlyNode.takesFiles(live.link)) await GhostlyNode.largeFilesAgreed(live.link);
+    if (!live.link.isDataLinkOpen) return;
+    if (!GhostlyNode.takesFiles(live.link)) await db.updateDelivery(linkId, message.id, "failed", "Your contact's app cannot receive files.");
+    else {
+      await db.putMessage(sentNow(message));
+      await this.transferFile(live, file, file.id.slice(`${linkId}-out-`.length), message.timestamp, error => {
+        this.transfers.set(file.id, { state: "failed", transferred: 0, size: file.size, error });
+        this.emitState();
+      }, GhostlyNode.wireReply(message));
+    }
+    await this.messagesChanged(linkId, [message.id]);
+  }
+
+  /**
+   * The chat is live: what waited for it goes now, in the order it was written. A 1:1 chat's files go with its texts,
+   * through its outbox (`sendWaitingFile`); here its payment requests, and everything of any other chat.
    */
   private async sendWaiting(linkId: string): Promise<void> {
     const live = this.links.get(linkId);
     if (!live?.link?.isDataLinkOpen) return;
-    const waiting = (await db.getMessages(linkId)).filter(m => m.sender === "me" && m.delivery === "waiting" && (m.file || m.paymentId))
+    const withTexts = this.outboxFor(linkId).sendsFiles;
+    const waiting = (await db.getMessages(linkId)).filter(m => m.sender === "me" && m.delivery === "waiting" && ((m.file && !withTexts) || m.paymentId))
       .sort((a, b) => a.timestamp - b.timestamp);
     // A session that just opened has not heard the contact's capabilities yet (files/3 comes in them): asked a little.
     if (waiting.some((m) => m.file) && !GhostlyNode.takesFiles(live.link)) await GhostlyNode.largeFilesAgreed(live.link);
@@ -2818,7 +2857,7 @@ export class GhostlyNode implements EngineImplementation {
         if (!GhostlyNode.takesFiles(live.link)) { await db.updateDelivery(linkId, message.id, "failed", "Your contact's app cannot receive files."); continue; }
         const file = message.file, wireId = file.id.slice(`${linkId}-out-`.length);
         await db.putMessage(sentNow(message));
-        this.transferFile(live, file, wireId, message.timestamp, error => {
+        void this.transferFile(live, file, wireId, message.timestamp, error => {
           this.transfers.set(file.id, { state: "failed", transferred: 0, size: file.size, error });
           this.emitState();
         }, GhostlyNode.wireReply(message));
@@ -3588,6 +3627,12 @@ export class GhostlyNode implements EngineImplementation {
     if (!WALLET_TYPES.includes(type)) throw new Error("Unknown kind of wallet");
     if (network !== "mainnet" && network !== "testnet") throw new Error("Choose Mainnet or Testnet");
     await this.lightnings[network].start();
+    // A Cashu swap its mint can settle now is settled first: what the removal says is then what is still open.
+    if (type === "cashu") {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      await Promise.race([this.wallet.settleSwaps(this.networkMints(network)).catch(() => {}), new Promise((resolve) => { timer = setTimeout(resolve, removalTiming.claimMs); })]);
+      clearTimeout(timer);
+    }
     await this.refreshWallet();
     // A Lightning card: the one named, else the network's default for receiving (a caller from before cards).
     const card = type === "lightning" ? asked ?? this.lightnings[network].receivingId : undefined;
