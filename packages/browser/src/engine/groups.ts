@@ -194,6 +194,14 @@ const ENTRY_LINGER_MS = 20_000;
 const REMOVED_LINGER_MS = 15_000;
 /** How long the tombstone of a group I left waits for the admin to hear it. */
 const LEFT_KEPT_MS = 7 * 24 * 60 * 60_000;
+/** How long the admin keeps the edge to a member it removed while that member was away, to tell it (`StoredGroup.farewells`). */
+export const FAREWELL_KEPT_MS = LEFT_KEPT_MS;
+/** Members removed while away that an admin waits for, per group: each costs an edge that looks for its member. */
+const MAX_FAREWELLS = 8;
+/** Syncs of a removed member answered with the commits it lacks, per farewell: it needs one. */
+const FAREWELL_ANSWERS = 3;
+/** Commits sent to a removed member that was behind when it left, at most. */
+const FAREWELL_COMMITS = 64;
 /**
  * While a member is unreachable, how often a mesh member asks one member it is connected to (in turn) for what that
  * one received and it did not: messages sent where the two of them were cut apart (WISP 9xx § Catch-up).
@@ -575,10 +583,74 @@ export class Groups {
 
   async remove(groupId: string, key: string): Promise<void> {
     if (this.isCommunity(groupId)) return this.communities.remove(groupId, key);
-    const session = this.session(groupId);
-    await session.remove(key);
-    const contact = this.stored.get(groupId)!.contacts?.[key];
-    if (contact) { try { this.host.sendOnLink(contact, { t: "group-removed", g: groupId }); } catch { /* the commit went over the edge, if it was up */ } }
+    const session = this.session(groupId), group = this.stored.get(groupId)!;
+    // Whether the member hears it now: over its edge, which carries the commit, or over the chat that invited it.
+    const edge = this.host.edges(groupId).get(key), edgeUp = !!edge && this.host.linkReady(edge);
+    // Noted before the commit: the roster's change closes the edges of whoever is out of it, and this one must stay.
+    const noted = !edgeUp && session.isAdmin && rosterHas(session.roster, key) && key !== session.myKey;
+    if (noted) this.noteFarewell(group, key, session.epoch + 1);
+    try { await session.remove(key); }
+    catch (error) { if (noted) this.dropFarewell(group, key); throw error; }
+    const contact = group.contacts?.[key];
+    let told = edgeUp;
+    if (contact) { try { this.host.sendOnLink(contact, { t: "group-removed", g: groupId }); told = true; } catch { /* the commit went over the edge, if it was up */ } }
+    if (noted && told) this.dropFarewell(group, key);
+    if (noted) { await this.store.putGroup(group); this.reconcileEdges(groupId); }
+  }
+
+  /** A member removed while it cannot be told: its edge stays until it opens (see `StoredGroup.farewells`). The oldest go past `MAX_FAREWELLS`. */
+  private noteFarewell(group: StoredGroup, key: string, e: number): void {
+    const kept = Object.entries(group.farewells ?? {}).filter(([k]) => k !== key).sort(([, a], [, b]) => b.at - a.at).slice(0, MAX_FAREWELLS - 1);
+    group.farewells = Object.fromEntries([...kept, [key, { at: this.now(), e }]]);
+  }
+  private dropFarewell(group: StoredGroup, key: string): void {
+    if (!group.farewells?.[key]) return;
+    const { [key]: _gone, ...rest } = group.farewells;
+    group.farewells = Object.keys(rest).length ? rest : undefined;
+  }
+  /** The removed members this admin still waits for: not told yet, or told a moment ago (the commit is on its way). */
+  private farewellKeys(group: StoredGroup | undefined, session: GroupSession, now: number): string[] {
+    if (!group?.farewells || session.status !== "active") return [];
+    return Object.entries(group.farewells).filter(([key, f]) => !rosterHas(session.roster, key) && now - f.at <= FAREWELL_KEPT_MS && (f.told === undefined || now - f.told < REMOVED_LINGER_MS)).map(([key]) => key);
+  }
+  /** The edges an active member keeps: what the roster (or the hubs) ask for, and those to members it removed while they were away. */
+  private edgesWanted(groupId: string, session: GroupSession, group: StoredGroup, now: number): Set<string> {
+    const wanted = this.hubs.edgesWanted(groupId, session, group, now), farewells = this.farewellKeys(group, session, now);
+    return farewells.length ? new Set([...wanted, ...farewells]) : wanted;
+  }
+  /** A member key in the roster of a private group I am active in (a community: its own engine answers). */
+  inRoster(groupId: string, key: string): boolean {
+    const session = this.sessions.get(groupId);
+    return !!session && session.status === "active" && rosterHas(session.roster, key);
+  }
+
+  /**
+   * The edge to a member I removed while it was away came up: the commit that removed it goes now, which is all this
+   * edge carries. Its app applies it when it had followed the chain to the commit before; one further behind says
+   * where it is in its sync, and gets the commits between (`farewellSync`). No secret goes with any of them.
+   */
+  private sayFarewell(groupId: string, session: GroupSession, group: StoredGroup, key: string, linkId: string): void {
+    const farewell = group.farewells![key], commit = session.state.chain[farewell.e];
+    if (!commit) { this.dropFarewell(group, key); return; }
+    try { this.host.sendOnLink(linkId, { t: "group-commit", g: groupId, commit }); } catch { return; /* it closed again: the next time it opens */ }
+    farewell.told = this.now();
+    void this.store.putGroup(group).catch(() => {});
+  }
+  /** The sync of a removed member I wait for: the commits it lacks up to the one that removed it, a few times at most. */
+  private farewellSync(groupId: string, session: GroupSession, group: StoredGroup, key: string, frame: Record<string, unknown>): void {
+    const farewell = group.farewells![key], linkId = this.host.edges(groupId).get(key);
+    const from = frame.e;
+    if (!linkId || frame.t !== "group-sync" || !Number.isSafeInteger(from) || (from as number) < 0 || (from as number) >= farewell.e - 1) return;
+    if ((farewell.answered ?? 0) >= FAREWELL_ANSWERS) return;
+    farewell.answered = (farewell.answered ?? 0) + 1;
+    try {
+      for (let e = Math.max((from as number) + 1, farewell.e - FAREWELL_COMMITS); e <= farewell.e; e++) {
+        const commit = session.state.chain[e];
+        if (commit) this.host.sendOnLink(linkId, { t: "group-commit", g: groupId, commit });
+      }
+    } catch { /* it closed: the next sync */ }
+    farewell.told = this.now();
+    void this.store.putGroup(group).catch(() => {});
   }
 
   makeAdmin(groupId: string, key: string): Promise<void> { return this.isCommunity(groupId) ? this.communities.makeAdmin(groupId, key) : this.session(groupId).transferAdmin(key); }
@@ -749,7 +821,7 @@ export class Groups {
       if (!group || group.left || session.status !== "active" || !this.hubs.large(session)) continue;
       await this.hubs.tick(groupId, session, group, now).catch(() => false);
       if (this.hubReconcile.has(groupId)) continue;
-      const wanted = this.hubs.edgesWanted(groupId, session, group, now);
+      const wanted = this.edgesWanted(groupId, session, group, now);
       const edges = this.host.edges(groupId);
       if ([...wanted].some(key => !edges.has(key)) || [...edges.keys()].some(key => !wanted.has(key))) {
         this.hubReconcile.add(groupId);
@@ -962,6 +1034,13 @@ export class Groups {
       return;
     }
     const session = this.sessions.get(groupId);
+    // A member I removed while it was away, on the edge kept to tell it: only its sync is read, to answer it with the
+    // commits it lacks. Nothing else it says counts (it is out of the group), and nothing else is said to it.
+    const waiting = this.stored.get(groupId);
+    if (session && waiting?.farewells?.[peerKey] && !rosterHas(session.roster, peerKey)) {
+      if (session.status === "active" && frame && typeof frame === "object") this.farewellSync(groupId, session, waiting, peerKey, frame as Record<string, unknown>);
+      return;
+    }
     if (session?.status === "active" && frame && typeof frame === "object" && (frame as { t?: unknown }).t === "group-here") { this.heardHere(groupId, session, peerKey, frame as Record<string, unknown>); return; }
     if (session?.status === "active" && frame && typeof frame === "object" && (frame as { t?: unknown }).t === "group-reach") {
       const group = this.stored.get(groupId);
@@ -1037,6 +1116,7 @@ export class Groups {
       return;
     }
     const session = this.sessions.get(groupId), group = this.stored.get(groupId);
+    if (session?.status === "active" && group?.farewells?.[peerKey] && !rosterHas(session.roster, peerKey)) { this.sayFarewell(groupId, session, group, peerKey, linkId); return; }
     if (!session || !group || session.status !== "active" || !rosterHas(session.roster, peerKey)) return;
     const large = this.host.linkReady(linkId, GROUP_VERSION_LARGE) && this.markLarge(group, peerKey);
     // Whether its app takes part in hubs: one that does not keeps edges with the hubs (WISP 9xx · Group Mesh § Hubs).
@@ -1161,6 +1241,7 @@ export class Groups {
     if (reconcile) this.lastReconcile = now;
     for (const [groupId, session] of this.sessions) {
       if (session.status !== "active" || this.stored.get(groupId)?.left) continue;
+      this.farewellsTick(groupId, session, now);
       if (reconcile) {
         const edges = this.host.edges(groupId);
         // A large group's edges follow its hubs, every tick (`hubsTick`).
@@ -1182,6 +1263,18 @@ export class Groups {
       for (const key of away) asked.set(key, { via, at: now });
       try { this.host.sendOnLink(edges.get(via)!, session.syncFrame(away)); } catch { /* it closed: the next turn asks another */ }
     }
+  }
+
+  /** A removed member told a moment ago, or waited for a week: its edge goes, and nothing more is kept about it. */
+  private farewellsTick(groupId: string, session: GroupSession, now: number): void {
+    const group = this.stored.get(groupId);
+    if (!group?.farewells) return;
+    const waiting = new Set(this.farewellKeys(group, session, now));
+    const done = Object.keys(group.farewells).filter(key => !waiting.has(key));
+    if (!done.length) return;
+    for (const key of done) this.dropFarewell(group, key);
+    void this.store.putGroup(group).catch(() => {});
+    this.reconcileEdges(groupId);
   }
 
   edgeNick(groupId: string, peerKey: string, nick: string | undefined): void {
@@ -1297,7 +1390,7 @@ export class Groups {
       const existing = this.host.edges(groupId);
       const left = group?.left;
       const removed = this.removedAt.get(groupId);
-      const wanted = session?.status === "active" && group ? this.hubs.edgesWanted(groupId, session, group, this.now())
+      const wanted = session?.status === "active" && group ? this.edgesWanted(groupId, session, group, this.now())
         : left ? new Set([left.admin, ...left.hubs ?? []])
         : removed !== undefined && this.now() - removed < REMOVED_LINGER_MS ? new Set(existing.keys()) : new Set<string>();
       for (const [key, linkId] of existing) if (!wanted.has(key)) await this.host.closeEdge(linkId);

@@ -4326,6 +4326,10 @@ export class GhostlyNode implements EngineImplementation {
     const { stored } = live;
     const group = stored.group!, peer = stored.groupPeer!, entry = !!stored.groupEntry;
     const role = stored.groupEntry ?? "edge";
+    // A private group's edge to someone out of its roster (a member removed while away, kept to tell it so:
+    // `StoredGroup.farewells`) carries the group's own frames only, which `Groups` answers: no payment, no note about
+    // one, no reaction said again, no way to wake this app.
+    const member = () => entry || this.groups.isCommunityGroup(group) || this.groups.inRoster(group, peer);
     let seen = false;
     // Native where one side has no WebRTC (WISP 9xx § Transports): an edge back after a restart resumes on a native transport both run.
     const native = this.keepsGroupNative(stored);
@@ -4369,6 +4373,7 @@ export class GhostlyNode implements EngineImplementation {
       events: {
         // An entry session carries the admission frames a contact chat would; an edge, the group's own, and what the group sees of payments.
         onGroupFrame: frame => entry ? this.groups.handleContactFrame(linkId, frame)
+          : !member() ? this.groups.handleEdgeFrame(group, peer, frame)
           : (frame as { t?: unknown }).t === "group-pay" ? this.groupPayments.receive(group, peer, frame)
           : (frame as { t?: unknown }).t === GROUP_WAKE_FRAME ? this.receiveGroupWake(linkId, frame as Record<string, unknown>)
           : this.groups.handleEdgeFrame(group, peer, frame),
@@ -4377,6 +4382,7 @@ export class GhostlyNode implements EngineImplementation {
           if (!entry) this.noteEdgeLive(linkId, supported);
           if (supported) {
             if (entry) this.groups.entryReady(group, linkId, peer);
+            else if (!member()) this.groups.edgeReady(group, peer, linkId);
             else {
               this.groups.edgeReady(group, peer, linkId); void this.groupPayments.edgeReady(group, linkId).catch(() => {});
               if (!this.groups.isCommunityGroup(group)) void this.resendGroupReactions(group, linkId).catch(() => {});
@@ -4396,12 +4402,12 @@ export class GhostlyNode implements EngineImplementation {
           if (this.keepsGroupNative(live.stored)) void this.ensureNativeEndpoints(linkId);
         },
         ...(entry ? {} : {
-          onPaymentRequest: (request: PaymentRequest) => this.desk.onPaymentRequest(linkId, request),
-          onPaymentAsk: (ask: PaymentAsk) => this.desk.onPaymentAsk(linkId, ask),
-          onPayment: (payment: Payment) => this.desk.onPayment(linkId, payment),
-          onPaymentResult: (result: PaymentResult) => this.desk.onPaymentResult(linkId, result),
+          onPaymentRequest: (request: PaymentRequest) => member() ? this.desk.onPaymentRequest(linkId, request) : undefined,
+          onPaymentAsk: (ask: PaymentAsk) => member() ? this.desk.onPaymentAsk(linkId, ask) : undefined,
+          onPayment: (payment: Payment) => member() ? this.desk.onPayment(linkId, payment) : undefined,
+          onPaymentResult: (result: PaymentResult) => member() ? this.desk.onPaymentResult(linkId, result) : undefined,
           // The member says its name on every session over the edge, and an empty one when it removed it.
-          onPeerNick: (nick: string | null) => this.groups.edgeNick(group, peer, nick ?? undefined),
+          onPeerNick: (nick: string | null) => { if (member()) this.groups.edgeNick(group, peer, nick ?? undefined); },
         }),
         onPresence: presence => {
           if (presence.online && !seen) { seen = true; traceJoin(group, "link.presence", { role }); }
@@ -4417,7 +4423,7 @@ export class GhostlyNode implements EngineImplementation {
           // The last moment the member was reachable on it: when it opens, and when it stops being open.
           if (state === "open" || live.dataLink === "open") live.lastSyncAt = Date.now();
           // Payments with this member that did not get through go again, never twice.
-          if (state === "open" && !entry) void this.desk.replay(linkId).catch(() => {});
+          if (state === "open" && !entry && member()) void this.desk.replay(linkId).catch(() => {});
           live.dataLink = state;
           // The joiner closed its side on the welcome: the session goes now. Left to itself, it would dial
           // the joiner again (its packet still looks online), spending an offer and fast polls on nobody.
