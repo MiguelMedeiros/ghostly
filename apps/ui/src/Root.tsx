@@ -7,6 +7,7 @@ import { AdvancedSettings, Settings } from "./pages/Settings";
 import { Services } from "./pages/Services";
 import { Profile } from "./pages/Profile";
 import { Identities } from "./pages/Identities";
+import { Tasks } from "./pages/Tasks";
 import { Wallet } from "./pages/Wallet";
 import { GroupChat } from "./pages/GroupChat";
 import { SharePicker } from "./pages/SharePicker";
@@ -221,6 +222,7 @@ export function Root() {
                       <Route path="/services" element={<Services />} />
                       <Route path="/profile" element={<Profile />} />
                       <Route path="/identities" element={<Identities />} />
+                      <Route path="/tasks" element={<Tasks />} />
                       <Route path="/share" element={<Navigate to="/services" replace />} />
                       {/* The installed web app: what another app shared, and the icon's shortcuts (manifest.json). */}
                       <Route path="/shared" element={<SharePicker />} />

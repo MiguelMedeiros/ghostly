@@ -82,6 +82,7 @@ import { useChatSearch } from "../hooks/useChatSearch";
 import { ChatSearchBar, SearchIcon } from "../components/chat/ChatSearch";
 import { PinnedBar } from "../components/chat/PinnedBar";
 import { TasksButton } from "../components/chat/TasksButton";
+import { useJumpTo } from "../hooks/useJumpTo";
 import { RoutineStack } from "../components/chat/RoutineCard";
 import { routineStacks } from "../lib/statusCards";
 import { scrollIntoViewGently } from "../lib/motion";
@@ -369,6 +370,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
   const [showServices, setShowServices] = useState(false);
   /** The message of mine the composer edits (WISP 400 § Edits): a paired chat's only. */
   const [editing, setEditing] = useState<ChatMessage | null>(null);
+  // Opened from the Tasks board: on the card's message, once it is here.
+  useJumpTo(visible, id => messages.some(m => m.id === id));
   const quoteIndex = useMemo(() => replyIndex(messages), [messages]);
   // A bot's buttons (WISP 4xx · Message Buttons): which one was chosen, and whether I may still press, from my replies.
   const buttonsOf = useMemo(() => buttonsViews(messages, m => m.ref), [messages]);

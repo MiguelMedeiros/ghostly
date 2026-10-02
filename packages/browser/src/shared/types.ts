@@ -1,4 +1,4 @@
-import type { DiscoveryStatus, GroupMention, ImageMeta, LinkPreview, PairingProgress, PaymentMethodName, StatusCard, TypingKind, VideoMeta, VoiceMeta, WirePin, WireReaction } from "@ghostly/core";
+import type { DiscoveryStatus, GroupMention, ImageMeta, LinkPreview, PairingProgress, PaymentMethodName, RoutineCard, StatusCard, TaskCard, TypingKind, VideoMeta, VoiceMeta, WirePin, WireReaction } from "@ghostly/core";
 import type { UsdtWalletView } from "../engine/paymentAdapters/usdtWallet";
 import type { ArkWalletView } from "../engine/paymentAdapters/arkWallet";
 import type { BarkWalletView } from "../engine/paymentAdapters/barkWallet";
@@ -760,6 +760,21 @@ export interface StoredMessage {
    * Message Buttons): `due` until its buttons go again live, as an edit of the buttons alone; `sent` once they did.
    */
   buttonsRestore?: "due" | "sent";
+}
+
+/**
+ * A message that carries a task or a routine card, as the Tasks board reads it across every chat and group
+ * (`statusCardIndex`): where it is (`linkId`: a chat's id, or `group:<id>`), its message, who sent it (`member`: a group
+ * member's key, absent for my own), when it was sent and when its last edit was made. Nothing else of the message.
+ */
+export interface CardIndexRow {
+  linkId: string;
+  id: string;
+  card: TaskCard | RoutineCard;
+  sender: "me" | "peer";
+  member?: string;
+  timestamp: number;
+  editedAt?: number;
 }
 
 /** A page of a chat's history, oldest first, and whether older messages remain (`messagePage`). */

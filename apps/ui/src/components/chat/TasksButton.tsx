@@ -4,8 +4,7 @@ import { taskProgress, type RoutineCard } from "@ghostly/core";
 import { useI18n } from "../../contexts/I18nContext";
 import { useOutsideDismiss, useTabTrap } from "../../hooks/useDismiss";
 import { useIsMobile } from "../../hooks/useIsMobile";
-import { revealMessage } from "../../hooks/useRowWindow";
-import { jumpToMessage } from "../../lib/replies";
+import { jumpToCard } from "../../lib/replies";
 import { RESULT_TONE, STATUS_TONE, activeTaskCount, cardEntries, panelModel, untilIn, type CardEntry, type CardRow } from "../../lib/statusCards";
 import { RoutineSummaryLine } from "./RoutineCard";
 import { MemberFace, type MemberFaceOf } from "./SenderAvatar";
@@ -326,14 +325,7 @@ export function TasksButton({ rows, nameOf, faceOf }: {
   };
   const jump = ({ messageId }: CardEntry) => {
     setOpen(false);
-    const land = () => {
-      if (!jumpToMessage(messageId)) return false;
-      const row = [...document.querySelectorAll<HTMLElement>("[data-message-id]")].find((el) => el.dataset.messageId === messageId);
-      row?.querySelector<HTMLElement>("[data-testid=status-card-toggle]")?.focus({ preventScroll: true });
-      return true;
-    };
-    // Its row may not be in the page in a long chat (useRowWindow): the rows around it first, then go.
-    if (!land() && revealMessage(messageId)) requestAnimationFrame(land);
+    jumpToCard(messageId);
   };
   const label = active ? t("cards.panel.buttonCount", { count: active }) : t("cards.panel.button");
   return (

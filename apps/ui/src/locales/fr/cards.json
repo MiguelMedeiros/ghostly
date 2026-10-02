@@ -1,4 +1,50 @@
 {
+  "board": {
+    "card": {
+      "botLabel": "De :",
+      "chatLabel": "Discussion :",
+      "details": "Détails",
+      "filesLabel": "Fichiers :",
+      "from": "{{bot}} dans {{chat}}",
+      "in": "dans {{chat}}",
+      "openPr": "Ouvrir sur {{host}}",
+      "statusLabel": "État :",
+      "steps": "{{done}} sur {{total}}",
+      "updatedLabel": "Mise à jour :"
+    },
+    "column": {
+      "blocked": "Bloquées",
+      "closed": "Arrêtées",
+      "done": "Terminées",
+      "queued": "En attente",
+      "running": "En cours"
+    },
+    "columns": "Colonnes",
+    "empty": "Pas encore de tâches",
+    "emptyHint": "Les cartes de tâche des bots de vos discussions apparaissent ici.",
+    "filter": "Filtrer les tâches",
+    "groupBy": {
+      "bot": "Bot",
+      "chat": "Discussion",
+      "label": "Grouper par",
+      "status": "État"
+    },
+    "hideOlder": "Masquer les anciennes",
+    "info": "Les bots publient des cartes de tâche dans les discussions et les groupes et les tiennent à jour. Ce tableau rassemble celles de toutes les discussions. Les tâches terminées et arrêtées restent un jour ; Arrêtées regroupe les échecs et les annulations. Une carte ne fait que montrer la tâche : son bot change l'état. Ouvrez une carte pour la voir dans sa discussion.",
+    "me": "Vous",
+    "noMatch": "Aucune tâche ne correspond",
+    "none": "Aucune",
+    "showMore": "Afficher plus ({{count}})",
+    "showOlder": "Afficher les anciennes ({{count}})",
+    "tasksMany": "{{count}} tâches",
+    "tasksOne": "1 tâche",
+    "title": "Tâches",
+    "view": {
+      "label": "Afficher",
+      "routines": "Routines",
+      "tasks": "Tâches"
+    }
+  },
   "buttons": {
     "answers": "Réponses",
     "chosen": "Choisie",

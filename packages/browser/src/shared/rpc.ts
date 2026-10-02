@@ -12,7 +12,7 @@ import type { SparkNetwork, WalletNetwork } from "@ghostly/core";
 import type { ProfileChoice } from '../profiles/public';
 import type { ProofChallenge, ProofEvidence, ProofAdapter } from "@ghostly/core";
 import type { LinkParams, LinkPreview, PairedTransport, DeliveryMode } from "@ghostly/core";
-import type { CashuInspection, EngineState, MessageDetailsView, MessageFile, MessagePage, PublicGraphView, PublicPostImageView, PublicPostsView, SettingsPatch, StoredMessage, WalletCreate, WalletInstanceView, WalletRemove, WalletTestCoins, WalletType, TestCoinsResult, WakeSubscription } from "./types";
+import type { CardIndexRow, CashuInspection, EngineState, MessageDetailsView, MessageFile, MessagePage, PublicGraphView, PublicPostImageView, PublicPostsView, SettingsPatch, StoredMessage, WalletCreate, WalletInstanceView, WalletRemove, WalletTestCoins, WalletType, TestCoinsResult, WakeSubscription } from "./types";
 import type { NostrDraft, NostrDraftRequest, NostrLookupRequest, NostrLookupResult, NostrPublishResult } from "../nostr/types";
 import type { MessageChanges } from "./messageChanges";
 
@@ -325,6 +325,11 @@ export interface EngineApi {
    * or those before `before` (the id of a message in it, or a time). Reads that page only, however long the chat is.
    */
   messagePage(params: { linkId: string; limit?: number; before?: string | number }): MessagePage;
+  /**
+   * Every task and routine card of this profile, from all its chats and groups, oldest first (WISP 4xx · Status Cards
+   * § The Tasks board): one row per message with a card. Read from the store's card index, never from the histories.
+   */
+  statusCardIndex(): CardIndexRow[];
   leaveGroup(params: { groupId: string }): void;
   removeGroupMember(params: { groupId: string; key: string }): void;
   makeGroupAdmin(params: { groupId: string; key: string }): void;
