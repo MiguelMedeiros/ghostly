@@ -4,7 +4,7 @@ import type { EngineEvent, RpcRequest, RpcResponse } from "../shared/rpc";
 import type { StoredMessage } from "../shared/types";
 import { profileOpenFailure } from "../shared/idb";
 import type { PeerServer } from "../devices/linkOnly";
-import { GhostlyNode, type NodeOptions } from "./node";
+import { GhostlyNode, LIMITED_MODE_ERROR, LIMITED_MODE_METHODS, type NodeOptions } from "./node";
 
 /**
  * The peer plus what it takes to serve UI clients: answer their calls, and
@@ -101,6 +101,8 @@ export class EngineServer implements PeerServer {
       await this.ready;
       const method = this.node[request.method] as (params: unknown) => unknown;
       if (typeof method !== "function") throw new Error(`Unknown method: ${request.method}`);
+      // Limited mode (WISP 06): only what reads history, writes messages and changes settings.
+      if (this.node.limited && !LIMITED_MODE_METHODS.has(String(request.method))) throw new Error(LIMITED_MODE_ERROR);
       response.result = await method.call(this.node, request.params);
     } catch (error) {
       response.error = error instanceof Error ? error.message : String(error);

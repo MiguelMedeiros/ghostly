@@ -1481,6 +1481,11 @@ export interface ServiceView extends StoredService {
 
 export interface EngineState {
   settings: Settings;
+  /**
+   * Limited mode (WISP 06 § When a device checks): the device could not read which device is active and was started
+   * anyway. The profile is offline whatever `settings.online` says, and no wallet is open. Absent otherwise.
+   */
+  limited?: true;
   transport: {
     protocol: string; relays: string[];
     /** Present where Iroh runs in the browser (web app, extension): the relays it uses and the defaults. */
