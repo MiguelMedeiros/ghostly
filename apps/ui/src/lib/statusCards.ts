@@ -78,7 +78,7 @@ export function panelModel(entries: readonly CardEntry[], grouped: boolean): { a
 }
 
 /** Routines in the order the panel lists them: a failed last run first, then the next to run, the paused ones last. */
-export function sortRoutines(entries: readonly CardEntry[]): CardEntry[] {
+export function sortRoutines<E extends { card: ShownCard }>(entries: readonly E[]): E[] {
   const rank = (card: RoutineCard) => (card.state === "paused" ? 2 : card.lastRun?.result === "failed" ? 0 : 1);
   const next = (card: RoutineCard) => (card.state === "active" && card.nextRunAt) || Number.MAX_SAFE_INTEGER;
   return [...entries].sort((a, b) => {

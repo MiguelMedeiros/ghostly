@@ -31,6 +31,7 @@
   "noAnswer": "No answer",
   "onAnother": "You're on another call",
   "outgoing": "Calling...",
+  "reconnecting": "Reconnecting...",
   "rejected": "Call rejected",
   "selfView": "Drag to move, pull a corner to resize, double-click to reset",
   "shareScreen": "Share screen",

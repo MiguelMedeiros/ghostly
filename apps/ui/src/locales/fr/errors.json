@@ -188,16 +188,24 @@
   },
   "profile": {
     "arkBackup": "Impossible de lire le portefeuille Ark pour la sauvegarde : {{reason}}",
+    "backupTooLarge": "Cette sauvegarde est trop volumineuse pour être restaurée ici.",
+    "damagedBackup": "Cette sauvegarde est endommagée : elle a été modifiée ou tronquée. Essayez une autre copie du fichier.",
     "exists": "Ce profil existe déjà",
     "firstStays": "Le premier profil ne peut pas être supprimé",
     "giveName": "Donnez un nom au profil",
+    "newerBackup": "Cette sauvegarde vient d'un Ghostly plus récent. Mettez à jour, puis restaurez-la.",
     "noBackupFile": "Ce portefeuille n'a pas de fichier de sauvegarde",
+    "noFileStorage": "Cet appareil n'a pas de stockage pour les fichiers. Libérez de l'espace ou essayez un autre navigateur.",
     "noPhrase": "Ce portefeuille n'a pas de phrase de récupération à afficher",
     "noRoom": "Cet appareil n’a plus de place pour cette sauvegarde. Libérez de l’espace, puis réessayez.",
     "notABackup": "Cette sauvegarde ne contient pas de profil",
+    "notGhostlyBackup": "Ce n'est pas une sauvegarde Ghostly. Choisissez un fichier .ghostly-backup.",
     "openElsewhere": "Ce profil est ouvert dans une autre fenêtre. Fermez-la, puis réessayez.",
+    "shortPassphrase": "Utilisez au moins 12 caractères pour la phrase secrète de la sauvegarde.",
     "switchFirst": "Passez d'abord à un autre profil",
     "unknown": "Profil inconnu",
+    "unsupportedBackup": "Ce Ghostly ne peut pas lire cette sauvegarde. Mettez à jour, puis réessayez.",
+    "wrongPassphrase": "Phrase secrète incorrecte, ou le fichier a été modifié. Vérifiez la phrase et réessayez.",
     "wrongPassword": "Mauvais mot de passe de verrouillage pour ce profil"
   }
 }
