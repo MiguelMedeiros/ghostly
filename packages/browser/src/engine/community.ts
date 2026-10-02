@@ -282,7 +282,7 @@ export class Communities {
   has(groupId: string): boolean { return this.stored.has(groupId); }
   session(groupId: string): CommunitySession | undefined { return this.live.get(groupId)?.session; }
   /** Is this device a hub of the group? (tests and the load harness) */
-  isHub(groupId: string): boolean { return !!this.live.get(groupId)?.hub; }
+  isHub(groupId: string): boolean { const live = this.live.get(groupId); return !!live?.hub && live.session.status === "active"; }
 
   async load(groups: StoredGroup[]): Promise<void> {
     for (const group of groups) {
