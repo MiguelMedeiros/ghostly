@@ -1,11 +1,11 @@
 import "fake-indexeddb/auto";
-import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, expect, it, onTestFinished, vi } from "vitest";
 import { encode } from "../src/backup/codec";
 import { snapshotDatabase } from "../src/backup/database";
 import { seal } from "../src/backup/envelope";
 import { memorySink } from "../src/backup/stream";
 import { STORES, openDb, transact, wrap } from "../src/shared/idb";
-import { SMALL_FILE_BYTES, fileBytes, resetFileBytes } from "../src/shared/fileBytes";
+import { SMALL_FILE_BYTES, fileBytes, registerFileBytes, resetFileBytes, type FileBytes } from "../src/shared/fileBytes";
 import { setStorageProfile } from "../../../apps/ui/src/lib/storage";
 import { createProfile, listProfiles } from "../../../apps/ui/src/lib/profiles";
 import { backUpToFile, stageBackup } from "../../../apps/ui/src/lib/backupFile";
@@ -199,6 +199,61 @@ it("a restore cancelled half way leaves no profile, no database, no file and no 
   expect([...storage.entries.keys()].sort()).toEqual(keys);
   expect(listProfiles().map((p) => p.id)).toEqual([""]);
 });
+
+/**
+ * File storage that behaves as the origin-private file system does: one folder per profile space, and a folder is not
+ * removed while a file in it is still open for writing.
+ */
+function foldersOfFiles() {
+  const files = new Map<string, Uint8Array>(), open = new Set<string>();
+  const view = (space: string): FileBytes => ({
+    kind: "opfs",
+    append: async (id: string, offset: number, bytes: Uint8Array) => {
+      const key = `${space}/${id}`, had = files.get(key) ?? new Uint8Array();
+      if (had.length !== offset) throw new Error("File write out of order");
+      const next = new Uint8Array(had.length + bytes.length);
+      next.set(had); next.set(bytes, had.length);
+      files.set(key, next); open.add(key);
+    },
+    flush: async () => {},
+    close: async (id: string) => { open.delete(`${space}/${id}`); },
+    size: async (id: string) => files.get(`${space}/${id}`)?.length ?? null,
+    read: async (id: string, offset: number, length: number) => files.get(`${space}/${id}`)!.slice(offset, offset + length),
+    remove: async (id: string) => { open.delete(`${space}/${id}`); files.delete(`${space}/${id}`); },
+    removeWhere: async (prefix: string) => { for (const key of [...files.keys()]) if (key.startsWith(`${space}/${prefix}`)) { open.delete(key); files.delete(key); } },
+    dropSpace: async (target: string) => {
+      if ([...open].some((key) => key.startsWith(`${target}/`))) throw new DOMException("A file in this folder is open", "NoModificationAllowedError");
+      for (const key of [...files.keys()]) if (key.startsWith(`${target}/`)) files.delete(key);
+    },
+    forSpace: (other: string) => view(other),
+  } as unknown as FileBytes);
+  return { store: view("ghostly"), names: () => [...files.keys()].sort() };
+}
+
+it("a restore that stops in the middle of a large file leaves none of it in file storage", async () => {
+  const folders = foldersOfFiles();
+  registerFileBytes("opfs", async () => folders.store);
+  onTestFinished(() => registerFileBytes("opfs", async () => null));
+  await seed({ small: 3, large: [SMALL_FILE_BYTES + 5 * MIB] });
+  const bundle = await createProfileBackup(PASS);
+  const before = await databases();
+  expect(folders.names()).toEqual(["ghostly/link1-in-l0"]);
+  // Cut inside the large file, which comes first: the restore is writing it when it finds the bundle ends.
+  await expect(restoreProfileBackup(bundle.slice(0, 8 * MIB), PASS)).rejects.toThrow("This backup is damaged");
+  expect(folders.names(), "the half-written file is gone with the rest").toEqual(["ghostly/link1-in-l0"]);
+  expect(await databases()).toEqual(before);
+  // Cancelled while it is being written: the same.
+  const stop = new AbortController();
+  const failure = await restoreProfileBackup(bundle, PASS, { signal: stop.signal, onProgress: (p) => { if (p.stage === "restoring" && p.bytes >= 4 * MIB) stop.abort(); } }).catch((error: unknown) => error);
+  expect(isCancelled(failure)).toBe(true);
+  expect(folders.names()).toEqual(["ghostly/link1-in-l0"]);
+  expect(await databases()).toEqual(before);
+  expect(listProfiles().map((p) => p.id)).toEqual([""]);
+  // And whole, it comes back whole, in the new profile's own folder.
+  const restored = await restoreProfileBackup(bundle, PASS);
+  expect(folders.names()).toEqual(["ghostly/link1-in-l0", `ghostly_${restored.id}/link1-in-l0`]);
+  expect(same(await folders.store.forSpace!(`ghostly_${restored.id}`).read("link1-in-l0", 0, SMALL_FILE_BYTES + 5 * MIB), pattern(SMALL_FILE_BYTES + 5 * MIB, 100))).toBe(true);
+}, 120_000);
 
 it("a backup cancelled half way, or whose save dialog was closed, leaves no half-written file", async () => {
   await seed({ small: 30, large: [3 * MIB] });

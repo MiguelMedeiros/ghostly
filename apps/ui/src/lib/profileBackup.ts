@@ -421,7 +421,7 @@ export async function restoreOpenedBackup(opened: OpenedProfileBackup, run: Back
   // What this restore has written so far: a restore that fails or is cancelled takes all of it away again, so a device
   // short of room is not left holding an unlisted copy of the profile (its keys included) that nothing would ever delete.
   const made: string[] = [];
-  const state = { files: false, db: null as IDBDatabase | null };
+  const state: RestoreState = { files: false, db: null, writing: null };
   const walletIds = new Map<string, string>();
   const fresh = (walletId: string) => walletIds.get(walletId) ?? (walletIds.set(walletId, crypto.randomUUID()), walletIds.get(walletId)!);
   try {
@@ -431,6 +431,9 @@ export async function restoreOpenedBackup(opened: OpenedProfileBackup, run: Back
     state.db = null;
     return register(id, ns, opened.payload);
   } catch (error) {
+    // The file it was in the middle of is let go first: file storage does not remove a folder with a file still open
+    // in it (the origin-private file system refuses), and the half-written file would stay on the device for good.
+    await state.writing?.discard().catch(() => {});
     state.db?.close();
     await undoRestore(ns, made, state.files);
     throw isQuotaError(error) ? Object.assign(new Error("This device has no room left for this backup. Free some space, then try again."), { cause: error }) : error;
@@ -483,8 +486,11 @@ async function largeFile(id: string, space: string, db: IDBDatabase): Promise<La
   };
 }
 
+/** What a restore under way holds: whether it wrote to file storage, its database, and the large file it is writing now. */
+interface RestoreState { files: boolean; db: IDBDatabase | null; writing: LargeFile | null }
+
 /** A version 2 bundle: read record by record, each written as it comes. */
-async function restoreStream(stream: NonNullable<OpenedProfileBackup["stream"]>, ns: string, made: string[], state: { files: boolean; db: IDBDatabase | null }, fresh: (walletId: string) => string, walletIds: Map<string, string>, { signal, onProgress }: BackupRun): Promise<void> {
+async function restoreStream(stream: NonNullable<OpenedProfileBackup["stream"]>, ns: string, made: string[], state: RestoreState, fresh: (walletId: string) => string, walletIds: Map<string, string>, { signal, onProgress }: BackupRun): Promise<void> {
   const space = `ghostly_${ns}`;
   const reader = await BackupReader.open(stream.source, stream.passphrase, signal);
   if (!reader) throw new Error(NOT_A_PROFILE);
@@ -536,7 +542,7 @@ async function restoreStream(stream: NonNullable<OpenedProfileBackup["stream"]>,
         if (!row || typeof row.id !== "string" || !Number.isSafeInteger(value.size) || value.size < 0) throw new Error(DAMAGED);
         checkFileId(row.id);
         const large = value.size > SMALL_FILE_BYTES ? await largeFile(row.id, space, database()) : null;
-        if (large) state.files = true;
+        if (large) { state.files = true; state.writing = large; }
         file = { row, size: value.size, type: typeof value.type === "string" ? value.type : "", got: 0, parts: [], large };
         break;
       }
@@ -544,7 +550,7 @@ async function restoreStream(stream: NonNullable<OpenedProfileBackup["stream"]>,
         if (!file) throw new Error(DAMAGED);
         const { blob: _blob, bytes: _bytes, ...row } = file.row;
         if (value.ok && file.got === file.size) {
-          if (file.large) { await file.large.close(); await putRows(database(), "files", [row.id], [{ ...row, bytes: file.large.kind }]); }
+          if (file.large) { await file.large.close(); state.writing = null; await putRows(database(), "files", [row.id], [{ ...row, bytes: file.large.kind }]); }
           else await putRows(database(), "files", [row.id], [{ ...row, blob: new Blob(file.parts as BlobPart[], { type: file.type }) }]);
           restored += 1;
           restoredBytes += file.size;
@@ -552,6 +558,7 @@ async function restoreStream(stream: NonNullable<OpenedProfileBackup["stream"]>,
         else {
           // The device that made the backup could not read this file: its record comes back, its bytes do not.
           await file.large?.discard();
+          state.writing = null;
           await putRows(database(), "files", [row.id], [row]);
           progress.bytes += file.size - file.got;
         }
