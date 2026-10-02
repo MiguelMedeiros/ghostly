@@ -1,3 +1,4 @@
+import { forgetDeviceSigningKey } from "./signingKey";
 import { amend, parseDeviceRecord, stricter, transition, runsEngine, type DevicePatch, type DeviceRecord, type DeviceState, type StoredDeviceState } from "./state";
 
 /*
@@ -253,10 +254,14 @@ function change(profile: string, next: (current: DeviceRecord | null) => DeviceR
   });
 }
 
-/** The profile is gone from this device: its record goes too, from both homes. Makes no database where there is none. */
+/**
+ * The profile is gone from this device: its record goes too, from both homes, and with it the device signing key the
+ * profile had here. Makes no database where there is none.
+ */
 export async function forgetDevice(profile: string): Promise<void> {
   await exclusive(async () => {
     if (mirror) await mirror.write(profile, null);
+    await forgetDeviceSigningKey(profile);
     if (!(await devicesDbExists())) return;
     const db = await openDevicesDb();
     const tx = db.transaction(STORE, "readwrite", { durability: "strict" });

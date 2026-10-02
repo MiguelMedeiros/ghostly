@@ -1,0 +1,185 @@
+{
+  "about": "Test vectors of a device set's derivations (WISP 06, Terms): the first device-set secret D0 from the DID key's seed, the turn's keys, and every device link. Built by packages/core/test/deviceLink.test.ts from labels; every seed is a test value. Bytes are hex; a key ending in Z32 is z-base-32. All HKDF-SHA256 with the salt below; info is ASCII, then raw key bytes: D0 'device-set' (ikm: the DID seed); turn seed 'turn' and turn seal key 'turn-seal' (ikm: D); link secret 'link' || lowerKey || higherKey (ikm: D; keys compared as bytes); rendezvous seed 'rv' || ownSigningKey and link seal key 'enc' (ikm: the link secret).",
+  "salt": "ghostly-devices/1",
+  "didSeed": "d329683d1ce5d8407ec4f65bbcaa8c27c2c347e766271f31d8f5f3b849ab4bae",
+  "devices": [
+    {
+      "name": "Desktop",
+      "seed": "5d4ccdb320e05cb3a5433f6678a1ba9db39d5cfed5b2d69e5d70758c38676086",
+      "key": "cb5e9f1ccbb37e4e6cdeae9f0321258c4d5b3752b8b19b6f37053c9427896a7b",
+      "keyZ32": "3pxj68gmsp9rh5g6i4xogejfttgisp41zna3s53zyw6jejhjpj7o"
+    },
+    {
+      "name": "Phone",
+      "seed": "9a430009bb8ff53cf2f2d4880add6e060f0f33d2d1c89e0eae9dd1788df25369",
+      "key": "8d7a71467aa100f305aadddff15226fbdcae7d8b2cea39a8b429fe20592911f8",
+      "keyZ32": "ti78ntu4wryxgbpk5zx9nwtg9xqkh9cmfuidukfwf89nysjjn8hy"
+    },
+    {
+      "name": "Laptop",
+      "seed": "a7be6600962afbc4403b08f0f1276ccf2603c3880c126f07633a64dbda4d23b4",
+      "key": "791ceea6bfae8edf8ee406c5860270b862d93606dfdaed1a1706bab7f161c79b",
+      "keyZ32": "xrqq7ji9i48p9dzry5nacyuozbtp1pog59pq4gozy47mxhmba6po"
+    },
+    {
+      "name": "Tablet",
+      "seed": "62b4c4e2c90f4f95b35051252ea6124d9a34e9b9c01c1f670c1b48095cbd376f",
+      "key": "eef7bb612d184b97f9f61e45cde94c1ccecebe5bd4abd2d877df1268924603ed",
+      "keyZ32": "7555sajpdbf3x6xsd3nh54kcdu8c7x1541i7fsdz5hjgtr1gyxso"
+    }
+  ],
+  "sets": [
+    {
+      "name": "the first device set: D0 from the DID key's seed",
+      "d": "35fdd87d94433c5711862367b3e4fb27b9e940ff846639f4694a7fea68af976f",
+      "turnSeed": "27da4049bc657afe6fc3cf186426888449b6a6b6aa785a550f68072dd5199cd1",
+      "turnAddress": "d17564881315badeb0c7a7331a3766c40d479596c524917e6849d8e77795b389",
+      "turnAddressZ32": "4f4sjnyuns7p7cg8wh3twp5gaogwxfcsaw1jn9uej8cqq7hisqro",
+      "turnSealKey": "6b6cbf75c1b649d18a67c3f862185ee72fc01f8149839372528b24d5b03f9cd6",
+      "links": [
+        {
+          "a": 0,
+          "b": 1,
+          "lower": 1,
+          "linkSecret": "b974fa88437aaf851a5b32bb206783977ffb7e503ea352a74d15740824ac8bfc",
+          "rendezvousSeedA": "b2a6123ef06d3e9a0b70a8689fd72e46cc79a35ecb0785fa5954b0aa288cb870",
+          "rendezvousKeyA": "pd74wumkwsakmbqxbgeq1fw3bfnqiyffkidffoqm5bwraguxatry",
+          "rendezvousSeedB": "f7ee48ebaacd53bae14f0f361777a707d6b62856db634779c1cbe41d30b154f1",
+          "rendezvousKeyB": "t48o5zk1k9jw9oggdggayj4uorf9t8ym9fe1oickkankb3k1ruqy",
+          "sealKey": "874a6de502465814673ad2ab9bf15e8e17d7154a7d3a65e2b80574e94cdc0b49"
+        },
+        {
+          "a": 0,
+          "b": 2,
+          "lower": 2,
+          "linkSecret": "54cb8a02cb6339e9f541036970eec29c3550a35b3c13b5f0ed4f8b6a7c1befb3",
+          "rendezvousSeedA": "aa153c60316e998d8d68e21e985c894c146da201d34c88ca2f558300fa23cc3e",
+          "rendezvousKeyA": "yufiuckbzt78m8m3iwcorr1sfeoqunod1pwxmnr13wiamahpduxy",
+          "rendezvousSeedB": "caf92ec192109f172f1d7901c5e55212770dfc3c67bc80d67d0815c730afb82a",
+          "rendezvousKeyB": "x7j481yqs7i71n8a4r8fsmd6k1n9c49tpub45ner4dryrmzuubjo",
+          "sealKey": "749c263cb946841d6066a4f32bc874b2af16c4e53d52d1c5060b6664705a3d3a"
+        },
+        {
+          "a": 0,
+          "b": 3,
+          "lower": 0,
+          "linkSecret": "681900409e8cc8d02c7bbd81720565fb0c655d5b50f012e97d6f1936b81f4b1e",
+          "rendezvousSeedA": "126cf8c2b245dc68a704da0a68c368bb8ae120532d5cde8d5bee570d68ba8e60",
+          "rendezvousKeyA": "mxthnhhadiirka8dcmnhbd7jxk8i6qohsqhrxejx4x3d43sq1t7y",
+          "rendezvousSeedB": "88380bc43c9c4bb22dd210db226deb93121c3055c75702524bfd9a32c5752709",
+          "rendezvousKeyB": "az9epsbmx66a5imrb1c4euoq8aeeomx5tmgd7c39h1oi9uhqftbo",
+          "sealKey": "e360a541e170453bec997d770f5d515fc392382732636fe00163ef99f72a48d7"
+        },
+        {
+          "a": 1,
+          "b": 2,
+          "lower": 2,
+          "linkSecret": "056d9cdee3fd8b4205af8097c5f45151c043a90c64fc0f3c33d67bb7306d90c9",
+          "rendezvousSeedA": "5e11f436122605bc501e7c3970ac4a45d33f56cb8c3223c94eeef9326df16b27",
+          "rendezvousKeyA": "dc5rgrckoipco4tokadtunatkq7q3h45do7anopystdzk4n6jujy",
+          "rendezvousSeedB": "416805c197ff828eeb93c91fb5a81e52a928746ae58fba70c427f9311d340eb6",
+          "rendezvousKeyB": "7x3x6zzfm4cbpsju75b53ky4niwkk7x6nfndjsdg4ixfsjb157sy",
+          "sealKey": "65a2102f832c11a08e9b736d96a71b902fd3da8d96b7bce713c252e258136902"
+        },
+        {
+          "a": 1,
+          "b": 3,
+          "lower": 1,
+          "linkSecret": "f7e6a53bd6f43ec854bda45525677462a2b9d8690b22b744de3900966948fc10",
+          "rendezvousSeedA": "0146172224ef36f15467a6916b5f4af702427e83a874d611be9b55c6ff5170ce",
+          "rendezvousKeyA": "pzpajg4h6wwmnj6ts68fu4hh3nedo1hw7k1j3uyh5ekzzhdwk4oo",
+          "rendezvousSeedB": "a9cca4195c354a41e813f92ac37fb467fb369ca25c574e1d5706f45a7138b8bc",
+          "rendezvousKeyB": "orzn3yoxrwqqu7ruzenbwqih5ixinbci7f7s57ukby9x5f6pweuo",
+          "sealKey": "8166ad9514bc63613fd40265010394b4e13a0ddfcd1b9adfdbf9528d1ac5631f"
+        },
+        {
+          "a": 2,
+          "b": 3,
+          "lower": 2,
+          "linkSecret": "12ff969a6af992fa77dd1acaf0cc7d73e28d33216e650df23bc99e563a173ddc",
+          "rendezvousSeedA": "d17893ac020878d207cab44746bfa27a3062193d3f03cf805ac31d1ec3481903",
+          "rendezvousKeyA": "gxwbe8pe5dt1qrnhitrgrgmdq43zcz68pn1qw8zognggw4ehgmay",
+          "rendezvousSeedB": "951249f113e4a87de0d53a6031139fe0df03280beacd235ee9bd1d39c1ebd783",
+          "rendezvousKeyB": "ikj9w35m4bitmpecs3nirukjzhnfyrdg41qbbprxj5x69j487joo",
+          "sealKey": "ec98501991627f90bf56229e45419fb46afc6a909297481296b91b1a9399e97b"
+        }
+      ]
+    },
+    {
+      "name": "after a removal: a random D",
+      "d": "06ad5464caaa0d74f39f513e48f8064a951859d049dd76eb99ff34ce559c34d2",
+      "turnSeed": "ace9b20069aed7d5a2be5f76da26311510c332a6f90a3820735dfee0086e1616",
+      "turnAddress": "3233f614ff47a10f991593e7703878850486aec192d90ef103a700dad5d5a39d",
+      "turnAddressZ32": "ge39cf89e6oo9gei1xuzyqdaownepmsb1mco7hedwhypiiqiwqqo",
+      "turnSealKey": "96b15aeecdc7d1501f8e17043b66a676387eb7c0d42c203bac7d0c16b91296f8",
+      "links": [
+        {
+          "a": 0,
+          "b": 1,
+          "lower": 1,
+          "linkSecret": "366d45c583a35a49e85d1a3e3603303f552ca6482bc88770d4e5f1135a011084",
+          "rendezvousSeedA": "c1cfa42bfee90221b6b62c9bf8452f3bcb5f21a493420f94ccb3be6b6cf10be0",
+          "rendezvousKeyA": "3taah5frh6stb846bb5gnjc3cg1hp46x9am3qdgt7zornoerkhoy",
+          "rendezvousSeedB": "920ca72d4828a25e06314e5206a74fb7d4f14567c1fc6758b7d413e67999b06f",
+          "rendezvousKeyB": "zpw1gtfzz95yio915cbm4xr73s6zt1duncx4muogbtjdzkcuamco",
+          "sealKey": "83a576fc7b0bb69fcbd0c28f6acb5fe00d24e59b306df8ed72a0fd96e50dbe8b"
+        },
+        {
+          "a": 0,
+          "b": 2,
+          "lower": 2,
+          "linkSecret": "24d5d1858bfd43dc0a1b5972dc4cc6ce9c14967c6a3f17c2b89c65e134b21265",
+          "rendezvousSeedA": "39c55bdc2005730bc1f1007376f6f234dbccfb9556dae893284d107600341b3d",
+          "rendezvousKeyA": "5quhrgzbc5f5xubj3y4xm94yyy5epp5kodffk3c69rr55bguh4gy",
+          "rendezvousSeedB": "1831f00ebc9fecba6cd501f38af360aebf82114d1c32076205cf10967a5eaf19",
+          "rendezvousKeyB": "7myhpzdu47zneddqu6xh8hje1e84ya989hbfc9jq31hxx8giuuyo",
+          "sealKey": "04920e803fdc12d23381131a543ba67a702ced9ac97d14a786558b95e6df60ac"
+        },
+        {
+          "a": 0,
+          "b": 3,
+          "lower": 0,
+          "linkSecret": "e4bbe28eb19040bab3244728736dbb10f5de68f5aa8e6169b34aef6df9a73a57",
+          "rendezvousSeedA": "31b78e4fe5f0ef1975a11d2ebdc4154cdf331e2a243ffd5f2eed48080413f1a2",
+          "rendezvousKeyA": "8yhk51qoztj44x9qipyhn4ckm3b5am1cshrntocbsfpezbd5y44y",
+          "rendezvousSeedB": "e7709d199758c598d7cc97925d5b605bfec5f601f5c07b971185949504b3fecb",
+          "rendezvousKeyB": "98u5mueijqa4xo3qbiodb7xnh3y1cxgja4ui7t7s45ceam6w1izy",
+          "sealKey": "1ccfdc83533ee036709f0cc1e027fa04ba1f4e583d9d6e517029966a36f40318"
+        },
+        {
+          "a": 1,
+          "b": 2,
+          "lower": 2,
+          "linkSecret": "2e78965f7afcb818bd0b06895bfc804ea7912daf0fdcc6dbef44e43f28c2b1fe",
+          "rendezvousSeedA": "b9ac4462ad793ebc2670e857a0464f968fe5a3fcfe418caf0ed42c861c159a1f",
+          "rendezvousKeyA": "6zi76xtyp6e97yh5dyna59uiq8dhqjsh4zgi38r3gt8yaru8ud5y",
+          "rendezvousSeedB": "a08362d5ba623cd3e73c2deb23259122de6dd16e944c8dc82c283ac166e9f086",
+          "rendezvousKeyB": "ota91tqnjuzwjgjp87cq3u9j8d1zkwkroburmzm4wr66dhjcjywo",
+          "sealKey": "506bfad683da603fead26bfed8962b55f43e0fd875fc46cfbe1986e381f5f590"
+        },
+        {
+          "a": 1,
+          "b": 3,
+          "lower": 1,
+          "linkSecret": "1ae7cc845b09fa108bdea337a6523feedc0302fea90adf8430349f9e6032bf18",
+          "rendezvousSeedA": "d4e37fcf1087870e3d2586806a9739d5112f1c31b2266e6d148b03af75c1f146",
+          "rendezvousKeyA": "e6sua84tie8dp8bhbyritxwt4rcn9gg3joby95kqg3fzjkbkaxty",
+          "rendezvousSeedB": "93a8c4167e78c23d3e476bf38a7bfffe1433cf2a793fede7f9ecbfcc22f90970",
+          "rendezvousKeyB": "ybimrw9fzzgq3jk9hf5dhaxnz9nuaq5nhwdhor34o5azc565eiyo",
+          "sealKey": "c72167761d9291570041da7b3a71f1d6377c792a67765ad02b389d31586fb7cd"
+        },
+        {
+          "a": 2,
+          "b": 3,
+          "lower": 2,
+          "linkSecret": "110180a1d403fd9b20951dbc968ad2e14967cf1d56c9ea2c7025ad1927d4adaf",
+          "rendezvousSeedA": "753d649750905d067d94665b21684684256806853447c12faae9a3d5f6c9a609",
+          "rendezvousKeyA": "rft3agnhq3ccxiymh6ip1oty7daygcjzr7q194acd6eys48ekhhy",
+          "rendezvousSeedB": "2428b893ae7d862fc2b51d374c7e312020535bd297ef2505198f9b98cda15b06",
+          "rendezvousKeyB": "h7rra9xq3xqufqf6nxo5z9shmrr91ncr5ak5d8ecs8djid5j88cy",
+          "sealKey": "69ea8018da5b938f2744b0509ade25bae3043a7dff32390c92a8e0ee586cf40d"
+        }
+      ]
+    }
+  ]
+}
