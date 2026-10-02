@@ -39,6 +39,8 @@ interface Live {
   x: number;
   y: number;
   active: boolean;
+  /** The pointer went somewhere once the row was in the hand. */
+  moved: boolean;
   timer?: ReturnType<typeof setTimeout>;
   rows: Box[];
   from: number;
@@ -78,8 +80,12 @@ export function useRowReorder({ ids, enabled, onMove }: {
     now.el.style.transform = "";
     if (!now.active) return;
     document.body.style.userSelect = "";
-    swallow.current = true;
-    setTimeout(() => { swallow.current = false; }, 100);
+    // A row that went somewhere and came down: its click is not a tap. Held and let go where it was, it is a slow tap,
+    // which opens the chat as it always did.
+    if (now.moved) {
+      swallow.current = true;
+      setTimeout(() => { swallow.current = false; }, 100);
+    }
     setDrag(null);
     if (commit && now.to !== now.from) latest.current(now.id, now.to);
   }, []);
@@ -119,6 +125,7 @@ export function useRowReorder({ ids, enabled, onMove }: {
         activate();
         if (!now.active) return;
       }
+      if (Math.hypot(ev.clientX - now.x, ev.clientY - now.y) > MOUSE_SLOP) now.moved = true;
       const own = now.rows[now.from], first = now.rows[0], last = now.rows[now.rows.length - 1];
       // The row stays among the rows that can take it: no further up than the first, no further down than the last.
       const by = Math.max(first.top - own.top, Math.min(last.top + last.height - own.top - own.height, ev.clientY - now.y));
@@ -135,7 +142,7 @@ export function useRowReorder({ ids, enabled, onMove }: {
     window.addEventListener("keydown", key, true);
     const touch = e.pointerType !== "mouse";
     live.current = {
-      id, el, touch, x: e.clientX, y: e.clientY, active: false, rows: [], from: -1, to: -1,
+      id, el, touch, x: e.clientX, y: e.clientY, active: false, moved: false, rows: [], from: -1, to: -1,
       timer: touch ? setTimeout(activate, REORDER_HOLD_MS) : undefined,
       stop() {
         window.removeEventListener("pointermove", move);

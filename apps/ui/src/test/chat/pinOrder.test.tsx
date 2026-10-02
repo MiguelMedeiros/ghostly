@@ -261,6 +261,16 @@ describe("dragging a pinned chat in the list", () => {
     fireEvent.pointerUp(window, pointer("touch", middle("Cy")));
     fireEvent.click(cy);
     expect(screen.getByTestId("where")).toHaveTextContent("/chat/c");
+    // So does a slow one: held until the row is in the hand, and let go where it was.
+    const ben = rowOf("Ben");
+    fireEvent.pointerDown(ben, pointer("touch", middle("Ben")));
+    await act(() => vi.advanceTimersByTimeAsync(REORDER_HOLD_MS + 50));
+    expect(ben).toHaveAttribute("data-dragging", "true");
+    fireEvent.pointerUp(window, pointer("touch", middle("Ben")));
+    expect(ben).not.toHaveAttribute("data-dragging");
+    fireEvent.click(ben);
+    expect(screen.getByTestId("where")).toHaveTextContent("/chat/b");
+    expect(pinnedOrder()).toEqual(["b", "a", "c"]);
   });
 
   it("leaves the other rows alone: a chat that is not pinned, a row's own buttons, the only pinned chat, a search", async () => {
