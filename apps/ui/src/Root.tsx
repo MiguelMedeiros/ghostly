@@ -26,6 +26,7 @@ import { groupPath } from "./lib/groups";
 import { engine } from "@ghostly/browser/platform/engine";
 import { useAnchorHome, useAppNavigation } from "./hooks/useAppNavigation";
 import { errorText } from "./lib/errorText";
+import { watchWindowAway } from "./lib/windowAway";
 import "./index.css";
 
 /**
@@ -186,6 +187,8 @@ export function AppRouter({ children }: { children: ReactNode }) {
 
 /** The whole Ghostly UI. Desktop and Browser both render this; only the platform modules differ. */
 export function Root() {
+  // The loops rest while the window is hidden or behind others (index.css `:root[data-away]`).
+  useEffect(watchWindowAway, []);
   return (
     <SettingsProvider>
       <ThemeProvider>

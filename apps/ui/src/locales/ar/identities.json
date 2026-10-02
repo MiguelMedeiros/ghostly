@@ -353,15 +353,15 @@
     "title": "من جهات اتصالك"
   },
   "share": {
+    "captionMine": "شاركت هذه الهوية",
+    "captionTheirs": "شارك {{contact}} هذه الهوية",
     "checking": "جارٍ التحقق",
     "notChecked": "لم يُتحقق منها",
     "notVerified": "لم يتم التحقق",
     "notVerifiedWhy": "لم يتم التحقق: {{error}}",
     "revokedMine": "أُلغي {{what}} الخاص بك",
     "revokedTheirs": "أُلغي {{what}} الخاص بـ {{contact}}",
-    "sharedMine": "شاركت {{what}}",
     "sharedMineState": "شاركت {{what}} · {{state}}",
-    "sharedTheirs": "شارك {{contact}} {{what}}",
     "sharedTheirsState": "شارك {{contact}} {{what}} · {{state}}",
     "stoppedMine": "أوقفت مشاركة {{what}}",
     "stoppedTheirs": "أوقف {{contact}} مشاركة {{what}}",

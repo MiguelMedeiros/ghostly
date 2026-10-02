@@ -51,12 +51,13 @@ The decrypted, decompressed payload is JSON:
   "format": "ghostly-profile",
   "version": 1,
   "createdAt": 1790000000000,
-  "profile": { "name": "Work" },
+  "profile": { "name": "Work", "builtIn": false },
   "storage": { "<key suffix>": "<value>" },
   "databases": { "peer": { "version": 6, "stores": [ … ] }, "ark": { "<wallet id>": { … } } }
 }
 ```
 
+- `profile.name` is the profile's name as the registry keeps it ([04](04-profiles.md)). `profile.builtIn` says whether that is the built-in name of the default profile never renamed (`true`, with `name` `"Personal"`), which the restored profile shows in the app's language, or a name the user gave (`false`), which is restored exactly as written, even when it is the word a language uses for the built-in name. A writer always sets it. A reader that finds none (bundles made before the marker), or a value that is not a boolean, takes the name as built-in only when it is `"Personal"` or the default profile's name in the language of the bundle's own `app_settings` (English when they set none), which is how clients wrote the default profile then; any other name is kept as written.
 - `storage` holds the profile's local keys with the profile prefix removed (for example `app_settings`, a chat id). Restore writes them under the new profile's prefix.
 - `databases.peer` is a snapshot of the profile's peer database: for each object store its name, key path, auto-increment flag, indexes, keys and values. `databases.ark` holds each Ark wallet's own database ([202](202-arkade.md)), keyed by wallet id.
 - Values that JSON cannot carry are tagged: `{"$ghostly":"bigint","value":"…"}`, `{"$ghostly":"bytes","value":"<base64url>"}`, `{"$ghostly":"blob","type":"<mime>","value":"<base64url>"}`.

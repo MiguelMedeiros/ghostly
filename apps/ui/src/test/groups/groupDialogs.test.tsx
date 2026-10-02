@@ -1,6 +1,6 @@
 import { act, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { createIdentity, encodeGroupEntryLink } from "@ghostly/core";
+import { createIdentity, encodeCommunityLink, encodeGroupEntryLink } from "@ghostly/core";
 import type { GroupMemberView, GroupView, LinkView } from "@ghostly/browser/shared/types";
 import { GroupLinkPanel } from "../../components/GroupLinkPanel";
 import { GroupMembersDialog } from "../../components/GroupMembersDialog";
@@ -87,6 +87,19 @@ describe("GroupMembersDialog", () => {
     expect(screen.getByTestId("group-members-dialog")).toBeInTheDocument();
     expect(onClose).not.toHaveBeenCalled();
     expect(engine.callsTo("removeGroupMember")).toEqual([]);
+  });
+
+  it("gives a community group's member the link's QR too, and none of the admin's controls", async () => {
+    const link = encodeCommunityLink({ g: "AbCdEfGhIjKlMnOpQrStUv", host: createIdentity().pubKeyZ32 });
+    const { user } = members_(groupView({ status: "active", isAdmin: false, profile: "community", entryLink: link, members: [member({ key: ME, me: true, online: true }), member({ key: ALICE, nick: "Alice", role: "admin" })] }));
+    const panel = screen.getByTestId("group-link");
+    expect(within(panel).getByTestId("group-link-share")).toBeVisible();
+    expect(within(panel).getByTestId("group-link-copy")).toBeVisible();
+    expect(within(panel).queryByTestId("group-link-qr")).not.toBeInTheDocument();
+    await user.click(within(panel).getByRole("button", { name: "Show QR" }));
+    expect(within(panel).getByTestId("group-link-qr")).toBeVisible();
+    expect(within(panel).queryByTestId("group-link-reset")).not.toBeInTheDocument();
+    expect(within(panel).queryByTestId("group-link-disable")).not.toBeInTheDocument();
   });
 
   it("says, while the group's link works, that whoever is removed can join again with it until a new link", async () => {

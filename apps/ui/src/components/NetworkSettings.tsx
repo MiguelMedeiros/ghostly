@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { irohRelayUrl } from "@ghostly/core";
 import { iceServerProblem } from "@ghostly/browser/shared/ice";
 import { hyperdhtRelayProblem } from "@ghostly/browser/shared/hyperdhtRelay";
 import { pushRelayProblem } from "@ghostly/browser/shared/pushRelay";
@@ -57,7 +58,8 @@ export function NetworkSettings() {
     try {
       const irohRelays = iroh.split(/\s+/).filter(Boolean);
       // The defaults are stored as "none chosen", so a later change of the defaults reaches this profile.
-      const defaults = network.iroh && JSON.stringify(irohRelays) === JSON.stringify(network.iroh.defaultRelays);
+      // Either spelling of a default (with or without the trailing dot of a full domain name) is that default.
+      const defaults = network.iroh && JSON.stringify(irohRelays.map(url => irohRelayUrl(url))) === JSON.stringify(network.iroh.defaultRelays.map(url => irohRelayUrl(url)));
       await platform.setNetwork({ relays: relays.split(/\s+/).filter(Boolean), turn: server, ...(network.iroh ? { irohRelays: defaults ? [] : irohRelays } : {}), hyperdhtRelay: relay, pushRelay: push });
     } catch (e) { setError(errorText(e, t)); return; }
     setSavedAs(current);
@@ -79,6 +81,7 @@ export function NetworkSettings() {
 
   return (
     <Section title={t("network.title")}>
+      {network.directBlocked && <Row label={t("connection.directBlocked.title")} hint={t("connection.directBlocked.hint")} info={t("connection.directBlocked.info")} testId="network-direct-blocked" />}
       {direct && <Row label={t("network.readRelays")} hint={t("network.readRelaysHint")} info={t("network.readRelaysInfo")} testId="network-read-relays-row">
         <Switch label={t("network.readRelays")} checked={network.readRelays === true} disabled={switching} onChange={(on) => void readRelays(on)} testId="network-read-relays" />
       </Row>}

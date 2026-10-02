@@ -167,7 +167,7 @@ export function FedimintWalletPanel({ wallet, state, backupNow = false }: { wall
       <Row label={t("wallet.fedimint.backup")} hint={t("wallet.fedimint.backupHint")}><Button onClick={() => setOpen(open === "backup" ? "none" : "backup")}>{open === "backup" ? t("common.cancel") : t("wallet.fedimint.download")}</Button></Row>
       {open === "backup" && <Block>
         <input aria-label={t("wallet.fedimint.backupPassword")} type="password" autoComplete="new-password" placeholder={t("wallet.fedimint.backupPasswordPlaceholder")} className={input} value={password} onChange={(e) => setPassword(e.target.value)} />
-        <Button variant="primary" disabled={busy || password.length < 12} onClick={() => void run(async () => { downloadJson(await wallet.fedimintExportBackup(password), "ghostly-fedimint-backup.json"); setPassword(""); setOpen("none"); })}>{t("wallet.fedimint.download")}</Button>
+        <Button variant="primary" disabled={busy || password.length < 12} onClick={() => void run(async () => { if (!(await downloadJson(await wallet.fedimintExportBackup(password), "ghostly-fedimint-backup.json"))) return; setPassword(""); setOpen("none"); })}>{t("wallet.fedimint.download")}</Button>
       </Block>}
     </Section>}
     <Section title={t("wallet.fedimint.restore")}>

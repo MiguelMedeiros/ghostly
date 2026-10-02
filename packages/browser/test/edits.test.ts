@@ -145,7 +145,9 @@ describe("the contact's edits", () => {
     expect(await t.contact.sendEdit({ id: WIRE("A"), e: 2, ts: Date.now(), m: "v2" })).toBeNull();
     await vi.waitFor(() => expect(t.contactReceipts).toEqual([[WIRE("A"), 3], [WIRE("A"), 2]]));
     const edited = await t.row(original.id);
-    expect(edited).toMatchObject({ text: "v3", edit: { seq: 3, history: [{ at: original.timestamp, text: "v0" }] } });
+    // The version it replaces is dated when the contact wrote it, not when it came here.
+    expect(original.sentAt).toBe(at);
+    expect(edited).toMatchObject({ text: "v3", edit: { seq: 3, history: [{ at, text: "v0" }] } });
     expect(edited.edit?.pending).toBeUndefined();
     expect(t.view().lastMessageAt).toBe(lastMessageAt);
     expect(t.onAttention).not.toHaveBeenCalled();

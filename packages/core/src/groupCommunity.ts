@@ -312,8 +312,8 @@ export interface CommunitySessionHooks {
   /** A payload another member sealed to me (see `sendPair`). Payloads to others are carried, never opened. */
   pair?(message: CommunityIncomingPair): Promise<void> | void;
   changed(): void;
-  /** The group's name or picture changed (set, replaced or removed), by `by`. */
-  metaChanged?(by: string, change: GroupMetaChange): void;
+  /** The group's name or picture changed (set, replaced or removed), by `by`, in a statement signed at `at`. */
+  metaChanged?(by: string, change: GroupMetaChange, at: number): void;
   /** A frame that waited here (a commit ahead of its parent) and is now placed: a hub passes it on. */
   relay?(frame: CommunityFrame): void;
   /** The engine's clock, for how often a member is asked for what I lack (defaults to Date.now). */
@@ -491,10 +491,32 @@ export class CommunitySession {
     return false;
   }
   /** Someone the chain took out (removed or left) and who is not back in. */
-  wasRemoved(key: string): boolean {
-    if (rosterHas(this.roster, key)) return false;
-    for (let i = this.state.chain.length - 1; i >= 0; i--) { const c = this.state.chain[i]; if ((c.k === "remove" || c.k === "leave") && c.s === key) return true; }
-    return false;
+  wasRemoved(key: string): boolean { return this.outIndex(key) >= 0; }
+  /** When the chain took them out (the commit's time, by its signer's clock), if it did and they are not back in. */
+  outAt(key: string): number | undefined { const i = this.outIndex(key); return i < 0 ? undefined : this.state.chain[i].ts; }
+  private outIndex(key: string): number {
+    if (rosterHas(this.roster, key)) return -1;
+    for (let i = this.state.chain.length - 1; i >= 0; i--) { const c = this.state.chain[i]; if ((c.k === "remove" || c.k === "leave") && c.s === key) return i; }
+    return -1;
+  }
+  /**
+   * What someone the chain took out is told when it comes back (WISP 9xx § Leaving and removal): the commits from where
+   * it says it is (`sync`: its tip, or its locator) up to the one that took it out, and nothing after. Later commits
+   * are not its business (a `link` commit names the new entry key); no secret, no stored frame, no seed goes with them.
+   * Empty when it is a member, was never one, or already holds that commit.
+   */
+  farewell(key: string, sync: { h?: unknown; loc?: unknown }): CommunityCommitFrame[] {
+    if (!this.isMember) return [];
+    const chain = this.state.chain, out = this.outIndex(key);
+    if (out < 0) return [];
+    let start: number;
+    if (typeof sync.h === "string" && this.mainIndex.has(sync.h)) start = this.mainIndex.get(sync.h)! + 1;
+    else {
+      const path = typeof sync.h === "string" && this.known.has(sync.h) ? this.pathToMain(sync.h) : null;
+      const common = (Array.isArray(sync.loc) ? sync.loc : []).find(x => typeof x === "string" && this.mainIndex.has(x)) as string | undefined;
+      start = path ? this.mainIndex.get(this.known.get(path[0])!.p)! + 1 : common !== undefined ? this.mainIndex.get(common)! + 1 : Math.max(0, out + 1 - COMMUNITY_LIMITS.side);
+    }
+    return chain.slice(start, out + 1).map(commit => ({ t: "group-commit" as const, v: 2 as const, g: this.id, commit }));
   }
   missing(sender: string): number {
     const entry = this.state.seen[sender]?.[seenKey(this.epoch, shortHash(this.topHash))];
@@ -1345,7 +1367,7 @@ export class CommunitySession {
     const frame = this.metaFrame();
     if (frame) this.hooks.broadcast(frame);
     const change = groupMetaChange(before, meta, this.state.name);
-    if (change) this.hooks.metaChanged?.(this.myKey, change);
+    if (change) this.hooks.metaChanged?.(this.myKey, change, meta.ts);
     this.hooks.changed();
   }
 
@@ -1391,7 +1413,7 @@ export class CommunitySession {
     // What the group looked like when I got in is no change: the first statement I take, signed under a commit before
     // mine, makes no line, nor does a new admin's signing again the name the welcome gave me.
     const change = !before && !rosterHas(this.rosterAt(s.h) ?? [], this.myKey) ? null : groupMetaChange(before, opened.meta, this.state.name);
-    if (change) this.hooks.metaChanged?.(s.by, change);
+    if (change) this.hooks.metaChanged?.(s.by, change, opened.meta.ts);
     this.hooks.changed();
     return true;
   }

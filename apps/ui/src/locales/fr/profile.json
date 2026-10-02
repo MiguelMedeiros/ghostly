@@ -48,6 +48,7 @@
       "title": "Cette sauvegarde est {{names}}, qui est sur cet appareil"
     },
     "saveToS3": "Enregistrer sur S3",
+    "saved": "Enregistré sous {{name}} · {{size}}",
     "savedToS3": "Enregistré sur S3 · {{size}}",
     "setUp": "Configurer",
     "spendWarning": "Quiconque a le fichier et la phrase secrète peut dépenser ses portefeuilles.",

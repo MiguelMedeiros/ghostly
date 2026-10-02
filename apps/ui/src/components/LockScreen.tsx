@@ -15,10 +15,14 @@ export function LockScreen() {
   const inputRef = useRef<HTMLInputElement>(null);
   const waitSeconds = retryAt ? Math.max(0, Math.ceil((retryAt - now) / 1000)) : 0;
 
-  // Counts the wait down after too many wrong passwords.
+  // Counts the wait down after too many wrong passwords, and stops with it: a locked app left alone runs no timer.
   useEffect(() => {
-    if (!retryAt) return;
-    const timer = setInterval(() => setNow(Date.now()), 250);
+    if (!retryAt || retryAt <= Date.now()) return;
+    const timer = setInterval(() => {
+      const at = Date.now();
+      setNow(at);
+      if (at >= retryAt) clearInterval(timer);
+    }, 250);
     return () => clearInterval(timer);
   }, [retryAt]);
 

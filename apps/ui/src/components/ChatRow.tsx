@@ -13,10 +13,11 @@ import { BellIcon, MuteMenu } from "./ChatMute";
 import { useI18n } from "../contexts/I18nContext";
 import { filePreview, formatListTime, previewText } from "../lib/chatList";
 import { cardLine, showsCard } from "../lib/statusCards";
-import { deliveryShape, useDeliveryWords } from "../lib/delivery";
+import { deliveryShape, useDeliveryWords, useDhtOnly, waitsForLive, type DhtOnlyBy } from "../lib/delivery";
 import { groupChat, mentionsNotify, muteEndText, useChatMute } from "../lib/chatMute";
 import { authorName, groupReadAt, groupStatusText, groupUnreadAt } from "../lib/groups";
 import { reactionNoteText } from "../lib/reactions";
+import { errorText } from "../lib/errorText";
 import type { ChatListDensity } from "../lib/settings";
 import type { ChatMessage } from "../lib/types";
 import { servicesPlatform } from "../lib/platform";
@@ -38,12 +39,12 @@ export const REFUSAL_SHOWN_MS = 8000;
 const ROW = { compact: "min-h-[66px] py-2.5", comfortable: "min-h-[80px] py-3" } as const;
 
 /** Where my last message is, with the chat's marks: a clock, one tick, two ticks or the red circle. */
-export function DeliveryMark({ delivery }: { delivery?: ChatMessage["delivery"] }) {
+export function DeliveryMark({ delivery, live }: { delivery?: ChatMessage["delivery"]; live?: DhtOnlyBy }) {
   const words = useDeliveryWords();
   const shape = deliveryShape(delivery);
   const state = delivery ?? "sent";
   return (
-    <span role="img" data-testid="chat-row-delivery" data-delivery={state} aria-label={words.label(state)}
+    <span role="img" data-testid="chat-row-delivery" data-delivery={state} aria-label={words.label(state, live)}
       className={`inline-flex shrink-0 align-middle -mt-0.5 ${shape === "sent" || shape === "delivered" ? "me-0.5" : "me-1"} ${shape === "failed" ? "text-danger" : shape === "delivered" ? "text-link" : "text-text-muted"}`}>
       <DeliveryIcon shape={shape} cutout="var(--color-sidebar-bg)" />
     </span>
@@ -192,6 +193,11 @@ export interface ChatRowProps {
   onTogglePin(): void;
   onDelete(e: React.MouseEvent): void;
   deleteLabel: string;
+  /**
+   * A pinned chat that can be dragged to another place among the pinned ones (hooks/useRowReorder.ts): what the row
+   * listens to, whether it is the one in the hand, and the line on its edge when the dragged row would land there.
+   */
+  reorder?: { props: Record<string, unknown>; dragging: boolean; drop?: "before" | "after" };
 }
 
 /** A join notice as the chat's line says it (MessageBubble): mine, or the contact by the name the list shows. */
@@ -221,10 +227,17 @@ export function ChatRow(p: ChatRowProps) {
   const pinLabel = p.pinned ? t("chat.menu.unpin") : t("chat.menu.pin");
   const typing = usePeerTypingActivity(p.peerPubKey);
   const payment = usePaymentLine(p.lastMessage?.paymentId, t);
+  // A file of mine waiting in a DHT-only chat waits for a live connection, as its bubble says.
+  const live = waitsForLive(p.lastMessage?.sender === "me" ? p.lastMessage : undefined, useDhtOnly(p.peerPubKey));
   const previewId = useId();
   useChosenProfile(p.peerPubKey);
   return (
-    <div data-testid="chat-row" data-muted={muted || undefined} onClick={p.onOpen} title={`${p.label} · ${p.keyLabel}`} className={rowClass(p.active, p.density)}>
+    <div data-testid="chat-row" data-chat={p.chatId} data-muted={muted || undefined} data-dragging={p.reorder?.dragging || undefined} onClick={p.onOpen} title={`${p.label} · ${p.keyLabel}`} {...p.reorder?.props}
+      // A row that can be dragged: a held finger moves it, so it selects no text and asks for no callout. In the hand it is
+      // over its neighbours and lets them show through: the line where it would land is always somewhere under it.
+      className={`${rowClass(p.active, p.density)} ${p.reorder ? "select-none [-webkit-touch-callout:none]" : ""} ${p.reorder?.dragging ? "z-20 cursor-grabbing bg-surface-hover opacity-70 shadow-lg transition-none" : ""}`}>
+      {p.reorder?.drop && <span aria-hidden="true" data-testid="chat-row-drop" data-edge={p.reorder.drop}
+        className={`pointer-events-none absolute inset-x-0 z-30 h-0.5 rounded-full bg-accent ${p.reorder.drop === "before" ? "top-0" : "bottom-0"}`} />}
       <RowOpen testId="chat-row-open" label={p.named ? p.label : `${p.label} · ${p.keyLabel}`} active={p.active} describedBy={previewId} />
       <div className={`relative shrink-0 rounded-full flex items-center justify-center ${p.active ? "bg-surface-alt" : "bg-surface-hover"}`} style={{ width: size, height: size }}>
         <PeerAvatar peerPubKey={p.peerPubKey} label={p.label} named={p.named} photo={p.face?.photo} testId="chat-row-avatar" />
@@ -271,7 +284,7 @@ export function ChatRow(p: ChatRowProps) {
           ? <span data-testid="chat-row-note" className="text-text-muted">{p.note}</span>
           : p.lastMessage
           ? <span className={p.unread > 0 ? "text-text-secondary font-medium" : "text-text-muted"}>
-              {p.lastMessage.sender === "me" && <DeliveryMark delivery={p.lastMessage.delivery} />}
+              {p.lastMessage.sender === "me" && <DeliveryMark delivery={p.lastMessage.delivery} live={live} />}
               {p.lastMessage.systemEvent?.type === "join" ? joinPreview(p, p.lastMessage.systemEvent.pubKey, t)
                 : p.lastMessage.callEvent ? callEventText(t, p.lastMessage.callEvent.type, p.lastMessage.callEvent.hasVideo) ?? p.lastMessage.text
                 : showsCard(p.lastMessage.card) ? cardLine(p.lastMessage.card)
@@ -284,8 +297,9 @@ export function ChatRow(p: ChatRowProps) {
         </>}
         trailing={p.unread > 0 && <UnreadBadge count={p.unread} muted={muted} />}
         timeCover={
-          // The layer covers the marks too, so a pinned chat's mark turns into its Unpin button in place.
-          <RowActions active={p.active}>
+          // The layer covers the marks too, so a pinned chat's mark turns into its Unpin button in place. A row in
+          // the hand is under the pointer all the way: it keeps its marks and time, not buttons that cannot be used.
+          !p.reorder?.dragging && <RowActions active={p.active}>
             <RowMute chat={p.chatId} />
             <button type="button" title={pinLabel} aria-label={pinLabel} aria-pressed={p.pinned} data-testid="chat-row-pin"
               onClick={e => { e.stopPropagation(); p.onTogglePin(); }} className={rowAction()}>
@@ -335,7 +349,7 @@ export function GroupRow({ group, active, density, onOpen }: { group: GroupView;
   const members = (count: number) => count === 1 ? t("group.chat.memberOne") : t("group.chat.memberCount", { count });
   const status = invitation ? (invitation.viaLink ? (invitation.admin ? t("group.chat.joining") : group.profile === "community" ? (invitation.stage === "answered" ? t("sidebar.group.letting") : t("sidebar.group.waitingIn")) : invitation.stage === "answered" ? t("sidebar.group.adminAnswered") : t("sidebar.group.waitingAdmin"))
       : invitation.accepted ? t("group.chat.joining") : invitation.contact ? t("sidebar.group.invitedBy", { contact: invitation.contact, members: members(invitation.members) }) : t("sidebar.group.invitedByUnknown", { members: members(invitation.members) }))
-    : group.status !== "active" ? group.statusReason ?? (group.status && groupStatusText(group.status, t)) : members(group.members.length);
+    : group.status !== "active" ? (group.statusReason ? errorText(group.statusReason, t) : group.status && groupStatusText(group.status, t)) : members(group.members.length);
   // The latest reaction, while nothing was said after it (WISP 400 § Reactions).
   const reacted = !invitation && group.status === "active" && group.lastReaction && group.lastReaction.at > group.lastMessageAt ? group.lastReaction : undefined;
   const note = reacted && reactionNoteText(reacted, authorName(group, reacted.by, t), t);

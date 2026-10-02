@@ -11,7 +11,7 @@ import { publicKeyLabel } from "../../lib/publicKeyLabel";
 import { isSessionPinned, saveSession } from "../../lib/storage";
 import type { ChatMessage, ChatSession } from "../../lib/types";
 import { Settings } from "../../pages/Settings";
-import { fakeEngine, groupView } from "../fakeEngine";
+import { fakeEngine, groupView, linkView } from "../fakeEngine";
 import { renderApp } from "../render";
 
 // covers: chats.list.rows, settings.chat-list-density
@@ -61,6 +61,18 @@ describe("the chat list's rows (compact, the default)", () => {
     const row = rowOf("Dan");
     expect(within(row).getByTestId("chat-row-delivery")).toHaveAccessibleName(label);
     expect(row).toHaveTextContent("⚡ Requested 100 sats");
+  });
+
+  it("marks a file of mine waiting in a DHT-only chat as waiting for a live connection, not for the contact", () => {
+    const file = { id: "f-out-1", name: "report.pdf", size: 10, mime: "application/pdf" };
+    saveSession(chat("f", { nick: "Fay", messages: [message({ sender: "me", text: "report.pdf", file, delivery: "waiting" })] }));
+    saveSession(chat("g", { nick: "Gus", messages: [message({ sender: "me", text: "a long text", delivery: "waiting" })] }));
+    const { engine } = list();
+    const markOf = (name: string) => within(rowOf(name)).getByTestId("chat-row-delivery");
+    expect(markOf("Fay")).toHaveAccessibleName("Waiting for your contact to be online");
+    act(() => engine.update({ links: [linkView({ id: "f", peerPubKeyZ32: key("f"), deliveryMode: "dht" }), linkView({ id: "g", peerPubKeyZ32: key("g"), deliveryMode: "dht" })] }));
+    expect(markOf("Fay")).toHaveAccessibleName("Waiting for a live connection");
+    expect(markOf("Gus")).toHaveAccessibleName("Waiting for your contact to be online");
   });
 
   it("puts no delivery mark on the contact's message, and counts what is unread beside it", () => {

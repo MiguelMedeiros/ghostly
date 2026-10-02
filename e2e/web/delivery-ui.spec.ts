@@ -157,7 +157,7 @@ test("home actions have equal sizes and enabled controls signal clicks", { tag: 
     const create = mobile ? p.page.getByRole("button", {name:"New chat", exact:true}) : actions.nth(0);
     const join = mobile ? p.page.getByRole("button", {name: "Join chat", exact: true}).first() : actions.nth(1);
     // Home fades in: let it settle, then measure both, so the animation cannot land between them.
-    await p.page.waitForFunction(() => document.getAnimations().every((a) => a.playState !== "running" || a.effect?.getTiming().iterations === Infinity));
+    await p.page.waitForFunction(() => document.getAnimations().every((a) => a.playState !== "running" || a.effect?.getTiming().iterations !== 1));
     // On a phone these are the list's header actions, where New shares its cell with the arrow that offers a group.
     const first = (await (mobile ? p.page.getByTestId("sidebar-new") : create).boundingBox())!, second = (await join.boundingBox())!;
     expect(Math.abs(first.width - second.width)).toBeLessThanOrEqual(1);

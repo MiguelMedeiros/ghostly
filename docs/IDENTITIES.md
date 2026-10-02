@@ -53,7 +53,7 @@ Notes:
 
 - **+ → Identity** in a paired 1:1 chat opens the picker, a deck of your ID cards (#164). Groups have no identity picker.
 - "Use …" turns the card over (#172). Its back offers **Share with {contact}**, **Stop sharing** or **Share again**. The picker closes after a share (#308).
-- Each share shows in the timeline as a small ID card ("You shared …" / "{contact} shared …") with its state: Checking, Verified, Not verified, Waiting, Not checked (`apps/ui/src/components/identities/IdentityShareLine.tsx`, #308). These lines are local: never sent, never unread.
+- Each share shows in the timeline, on both sides, as the identity's ID card (the picker's card, `IdCardFace.tsx`) with "You shared this identity" / "{contact} shared this identity" and the time under it. The card's status corner is the share's state: Checking, Waiting, Not checked, Verified, Not verified, and later No longer shared or Revoked on the same card. With a mouse the card lifts and plays the deck's flourish once; it is a button that opens the identity's details (`apps/ui/src/components/identities/IdentityShareLine.tsx`, #308). A stop also adds a line after the card. These lines are local: never sent, never unread.
 
 ## A contact's identities
 

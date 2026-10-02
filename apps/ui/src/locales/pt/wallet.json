@@ -41,6 +41,7 @@
   },
   "backupReminder": {
     "body": "Faça um backup para não perdê-lo se este aparelho se perder.",
+    "bodyUnprotected": "Faça um backup para não perdê-lo se este aparelho se perder ou se este navegador apagar os dados.",
     "go": {
       "phrase": "Ver frase de recuperação",
       "profile": "Fazer backup do perfil"

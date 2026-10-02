@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { COMMUNITY_TOPOLOGY, decodeCommunityLink } from "@ghostly/core";
+import { COMMUNITY_TOPOLOGY, beaconKeys, decodeCommunityLink, freshHubs, readBeacon } from "@ghostly/core";
 import { COMMUNITY_TIMINGS } from "../src/engine/community";
 import { CommunityWorld, type Peer } from "./communityWorld";
 // covers: groups.community.join, groups.community.send, groups.community.catch-up, groups.community.remove, groups.community.leave, groups.protocol.community-topology
@@ -232,6 +232,73 @@ describe("community groups on headless engines", { timeout: 120_000 }, () => {
     expect(member.links.get(memberEdge)).toBe(memberSide);
   });
 
+  it("an app that starts while its read of the beacon fails does not take the group for one without hubs", async () => {
+    const world = new CommunityWorld();
+    const alice = world.add("alice"), bob = world.add("bob"), carol = world.add("carol");
+    const { id, link } = await community(world, alice);
+    await joinAll(world, id, link, [bob, carol]);
+    await world.run(90_000);
+    const everyone = [alice, bob, carol];
+    const keyOf = (p: Peer) => p.groups.communities.session(id)!.myKey;
+    // Two hubs and a member (3 members, `minHubs` 2).
+    const member = everyone.find(p => !p.groups.communities.isHub(id))!, hubs = everyone.filter(p => p !== member);
+    expect(hubs.every(p => p.groups.communities.isHub(id))).toBe(true);
+    const keys = beaconKeys(member.groups.communities.session(id)!.state.rv, id);
+    const listed = () => freshHubs(readBeacon(keys, world.pkarr.get(keys.identity.pubKeyZ32) ?? []), world.now).map(h => h.key).sort();
+    expect(listed()).toEqual(hubs.map(keyOf).sort());
+    // The member's app starts again and its reads of the beacon fail for a while: the relays' budget, spent by
+    // everything that starts at once, or the network. A failed read was taken for an empty beacon: the app became a
+    // hub at once, the door alone, answered the knocks the real door was answering, and published a beacon without the
+    // other hubs.
+    world.failRead = (p, key) => p === member && key === keys.identity.pubKeyZ32;
+    await world.restart(member);
+    const dave = world.add("dave");
+    await dave.groups.joinByLink(`https://app.ghostly.tools/#/join/${link}`);
+    const knock = [...dave.links.values()].find(e => e.kind === "guest")!.me;
+    let wasHub = false, answering = 0, erased = false, joined: number | undefined;
+    for (let t = 0; t < 20_000; t += 500) {
+      await world.run(500, 500);
+      wasHub ||= member.groups.communities.isHub(id);
+      answering = Math.max(answering, everyone.filter(p => [...p.links.values()].some(e => e.kind === "host" && e.peer === knock)).length);
+      erased ||= !hubs.every(p => listed().includes(keyOf(p)));
+      if (joined === undefined && world.member(dave, id)) joined = t;
+    }
+    expect(wasHub).toBe(false);
+    // (One hub at most: in this world an admission nobody collides with is over within a step.)
+    expect(answering).toBeLessThanOrEqual(1);
+    expect(erased).toBe(false);
+    expect(joined).toBeLessThanOrEqual(10_000);
+    // The reads work again: it is a member of a group with two hubs, as before, and reads everyone.
+    world.failRead = null;
+    await world.run(30_000);
+    expect(member.groups.communities.isHub(id)).toBe(false);
+    await alice.groups.send(id, "after the restart");
+    await world.until(() => world.texts(member, id).includes("after the restart"), 35_000);
+  });
+
+  it("a hub whose read of the beacon fails as it republishes does not erase the other hubs from it", async () => {
+    const world = new CommunityWorld();
+    const alice = world.add("alice"), bob = world.add("bob"), carol = world.add("carol");
+    const { id, link } = await community(world, alice);
+    await joinAll(world, id, link, [bob, carol]);
+    await world.run(90_000);
+    const everyone = [alice, bob, carol], keyOf = (p: Peer) => p.groups.communities.session(id)!.myKey;
+    const hubs = everyone.filter(p => p.groups.communities.isHub(id));
+    expect(hubs).toHaveLength(2);
+    const keys = beaconKeys(alice.groups.communities.session(id)!.state.rv, id);
+    const listed = () => freshHubs(readBeacon(keys, world.pkarr.get(keys.identity.pubKeyZ32) ?? []), world.now).map(h => h.key).sort();
+    // One hub's reads of the beacon fail for a minute, through two of its republications. (The one whose turn comes
+    // last in this world: the other, republishing after it in the same second, would put itself back unseen.)
+    world.failRead = (p, key) => p === hubs[1] && key === keys.identity.pubKeyZ32;
+    let erased = false;
+    for (let t = 0; t < 60_000; t += 1_000) { await world.run(1_000); erased ||= !listed().includes(keyOf(hubs[0])); }
+    expect(erased).toBe(false);
+    // Its own entry waits for a read; it is back once one works.
+    world.failRead = null;
+    await world.run(40_000);
+    expect(listed()).toEqual(hubs.map(keyOf).sort());
+  });
+
   it("a member waits for a hub that went away 20 s, up to a minute once it is back, and then goes to another", async () => {
     const world = new CommunityWorld();
     const alice = world.add("alice"), bob = world.add("bob"), carol = world.add("carol");
@@ -279,5 +346,41 @@ describe("community groups on headless engines", { timeout: 120_000 }, () => {
     await world.run(5_000);
     expect(world.view(bob, id)).toBeUndefined();
     await expect(alice.groups.decline(id), "a member, not a join under way").rejects.toThrow("No invitation to decline");
+  });
+
+  it("a member back after a while reads the lines where they happened, not after everything it missed", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const world = new CommunityWorld();
+      const alice = world.add("alice"), bob = world.add("bob"), carol = world.add("carol"), dave = world.add("dave");
+      // The wall clock (messages, commits) follows the engines' clock.
+      const pass = async (ms: number) => { await world.run(ms); vi.setSystemTime(world.now); };
+      const { id, link } = await community(world, alice);
+      await joinAll(world, id, link, [bob, carol]);
+      await pass(20_000);
+      carol.online = false;
+      await pass(60_000);
+      await alice.groups.rename(id, "Wide open");
+      const renamedAt = Date.now();
+      await pass(60_000);
+      await bob.groups.send(id, "after the name");
+      await pass(60_000);
+      await joinAll(world, id, link, [dave]);
+      vi.setSystemTime(world.now);
+      const joinedBy = Date.now();
+      await pass(60_000);
+      await bob.groups.send(id, "after dave");
+      // An hour later Carol is back: what she reads is in the order it happened.
+      await pass(3_600_000);
+      world.reopen(carol);
+      await world.until(() => world.texts(carol, id).includes("after dave") && carol.messages.some(m => m.event === "renamed"), 5 * 60_000);
+      vi.setSystemTime(world.now);
+      const daveKey = world.view(dave, id)!.myKey!;
+      const timeline = carol.messages.filter(m => m.event === "renamed" || (m.event === "joined" && m.member === daveKey) || (!m.event && m.text.startsWith("after")))
+        .sort((a, b) => a.timestamp - b.timestamp).map(m => m.event ?? m.text);
+      expect(timeline).toEqual(["renamed", "after the name", "joined", "after dave"]);
+      expect(carol.messages.find(m => m.event === "renamed")!.timestamp).toBe(renamedAt);
+      expect(carol.messages.find(m => m.event === "joined" && m.member === daveKey)!.timestamp).toBeLessThanOrEqual(joinedBy);
+    } finally { vi.useRealTimers(); }
   });
 });

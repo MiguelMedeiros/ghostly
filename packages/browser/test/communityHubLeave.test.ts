@@ -68,7 +68,7 @@ describe("a reading of the beacon the relays held back", { timeout: 120_000 }, (
 
     // A member cannot read the beacon for a while.
     let unread: Peer = members[0];
-    world.held = (peer, op, key) => peer === unread && op === "resolve" && key === keys.identity.pubKeyZ32;
+    world.failRead = (peer, key) => peer === unread && key === keys.identity.pubKeyZ32;
     for (let s = 0; s < 40; s++) {
       await world.run(1000);
       expect(unread.groups.communities.isHub(id), `the member is a hub after ${s + 1} s without a reading`).toBe(false);
@@ -82,7 +82,7 @@ describe("a reading of the beacon the relays held back", { timeout: 120_000 }, (
       expect(world.view(unread, id)?.community?.hubs, `the hubs that hub knows after ${s + 1} s`).toBe(before.length);
     }
     // Read again, it is listed as before, with the others.
-    world.held = null;
+    world.failRead = null;
     await world.run(40_000);
     expect(listed()).toEqual(before);
     for (const p of peers) expect(world.view(p, id)?.community?.connected, p.name).toBeGreaterThan(0);

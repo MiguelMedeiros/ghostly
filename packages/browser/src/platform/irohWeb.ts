@@ -1,4 +1,4 @@
-import { fromBase64Url, type BoundChannel, type FrameChannel, type NativeBinding, type NativeEndpoint } from "@ghostly/core";
+import { fromBase64Url, irohDescriptor, irohRelayUrl, type BoundChannel, type FrameChannel, type NativeBinding, type NativeEndpoint } from "@ghostly/core";
 
 /**
  * Iroh (WISP 102) in a browser: the same QUIC/TLS session and binding as the
@@ -10,13 +10,24 @@ import { fromBase64Url, type BoundChannel, type FrameChannel, type NativeBinding
  * never on the app's first load.
  */
 
-/** n0's public relays, the same ones the Desktop's Iroh homes on by default. */
+/**
+ * n0's public relays, the same ones the Desktop's Iroh homes on by default. Iroh itself names them with the trailing
+ * dot of a full domain name (`use1-1.relay.n0.iroh.link.`), and compares relay URLs as text; here they have none,
+ * because WebKit opens no host name that ends in a dot. `BROWSER_SPELLING` is what keeps the two one relay.
+ */
 export const DEFAULT_IROH_RELAYS = [
   "https://use1-1.relay.n0.iroh.link/",
   "https://euc1-1.relay.n0.iroh.link/",
   "https://aps1-1.relay.n0.iroh.link/",
   "https://usw1-1.relay.n0.iroh.link/",
 ] as const;
+
+/**
+ * The spelling of every relay URL handed to the wasm Iroh (`irohRelayUrl`): the relays it homes on and a contact's
+ * relay before a dial. One spelling, so a contact on this endpoint's relay is reached over the connection already
+ * open to it; without the dot, so Safari can open it (a Desktop's record names its relay with the dot).
+ */
+const BROWSER_SPELLING = "plain";
 
 /**
  * Why a relay URL cannot be used, or null. TLS, except on this machine (a local `iroh-relay --dev`): a page
@@ -124,7 +135,8 @@ class IrohWebChannel implements FrameChannel {
 export async function createIrohWebEndpoint(seedB64: string, options: IrohWebOptions = {}): Promise<NativeEndpoint> {
   const seed = fromBase64Url(seedB64);
   if (seed.length !== 32) throw new Error("Invalid transport seed");
-  const relays = [...(options.relays?.length ? options.relays : DEFAULT_IROH_RELAYS)];
+  // Either spelling of a relay (with or without the trailing dot) homes on it under the one a browser opens.
+  const relays = [...new Set((options.relays?.length ? options.relays : DEFAULT_IROH_RELAYS).map(relay => irohRelayUrl(relay, BROWSER_SPELLING)))];
   const wasm = await (options.load ?? loadIrohWasm)();
   const node = await wasm.IrohNode.start(seed, relays, options.onlineMs ?? 10_000);
   const channels = new Set<IrohWebChannel>();
@@ -145,7 +157,7 @@ export async function createIrohWebEndpoint(seedB64: string, options: IrohWebOpt
     set onConnection(value) { handler = value; if (value) for (const bound of early.splice(0)) value(bound); },
     async connect(descriptor) {
       if (stopped) throw new Error("Iroh endpoint is stopped");
-      const conn = await node.connect(descriptor, options.connectMs ?? 20_000);
+      const conn = await node.connect(irohDescriptor(descriptor, BROWSER_SPELLING), options.connectMs ?? 20_000);
       if (stopped) { conn.close(); throw new Error("Iroh endpoint is stopped"); }
       return bind(conn);
     },

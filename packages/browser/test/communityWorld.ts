@@ -102,8 +102,8 @@ export class CommunityWorld {
   /** Cuts two peers apart (their link and their reads of each other), whatever `part` says. */
   cut: ((a: Peer, b: Peer) => boolean) | null = null;
   private sameSide(a: Peer, b: Peer): boolean { return (!this.part || this.part(a) === this.part(b)) && !this.cut?.(a, b); }
-  /** Holds a Pkarr request back (a test says which), as the relays' budget does: it throws, and nothing was read or written. */
-  held: ((peer: Peer, op: "resolve" | "publish", key: string) => boolean) | null = null;
+  /** Fails an app's Pkarr reads (a test says whose, and of which key): the relays' budget, or the network. */
+  failRead: ((peer: Peer, key: string) => boolean) | null = null;
   /** Loses frames on the way (a test says which): the network is not perfect. */
   drop: ((from: Peer, to: Peer, frame: Record<string, unknown>) => boolean) | null = null;
   private pending: Promise<unknown>[] = [];
@@ -183,13 +183,14 @@ export class CommunityWorld {
       publish: async (identity, records, background) => {
         this.pkarrOps++;
         this.onPkarr?.(peer, "publish", identity.pubKeyZ32, !!background);
-        if (this.held?.(peer, "publish", identity.pubKeyZ32) || !this.spend(peer, 2, background, true, `publish${background ? " bg" : ""}`)) throw new Error("Discovery request budget reached; retry shortly");
+        if (!this.spend(peer, 2, background, true, `publish${background ? " bg" : ""}`)) throw new Error("Discovery request budget reached; retry shortly");
         if (peer.online) this.pkarr.set(identity.pubKeyZ32, structuredClone(records));
       },
       resolve: async (key, background) => {
         this.pkarrOps++;
         this.onPkarr?.(peer, "resolve", key, !!background);
-        if (this.held?.(peer, "resolve", key) || !this.spend(peer, 1, background, false, `resolve${background ? " bg" : ""}`)) throw new Error("No Pkarr relay reachable");
+        if (this.failRead?.(peer, key)) throw new Error("No Pkarr relay reachable");
+        if (!this.spend(peer, 1, background, false, `resolve${background ? " bg" : ""}`)) throw new Error("No Pkarr relay reachable");
         return peer.online ? structuredClone(this.pkarr.get(key) ?? null) : null;
       },
       storeMessage: async message => { if (messages.some(m => m.id === message.id)) return false; messages.push(message); return true; },
