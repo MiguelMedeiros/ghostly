@@ -9,7 +9,7 @@ import { pinOfFormerMember, pinView } from "./pins";
 import { db } from "./db";
 import { traceJoin } from "./joinTrace";
 import { COMMUNITY_TIMINGS, Communities, dialedKey, metaLines, type CommunityTimings } from "./community";
-import { MESH_HUB_TIMINGS, MeshHubs, type MeshHubTimings } from "./meshHubs";
+import { MESH_HUB_TIMINGS, MeshHubs, removalEpoch, type MeshHubTimings } from "./meshHubs";
 import { GroupTypings } from "./groupTyping";
 
 /** What the engine gives the groups: its links, its storage and its state emitter. */
@@ -28,6 +28,8 @@ export interface GroupsHost {
   sendOnLink(linkId: string, frame: object): void;
   /** The link is open and both sides announced groups (`version` 2: community groups too). */
   linkReady(linkId: string, version?: number): boolean;
+  /** Whether the link's connection is open, whatever the other app announces on it. Absent: not known. */
+  linkOpen?(linkId: string): boolean;
   /** A name for a contact chat, for the invitation. */
   contactName(linkId: string): string | undefined;
   /** Member key → edge link id, for the edges of this group that exist. */
@@ -237,6 +239,8 @@ const MAX_FAREWELLS = 8;
 const FAREWELL_ANSWERS = 3;
 /** Commits sent to a removed member that was behind when it left, at most. */
 const FAREWELL_COMMITS = 64;
+/** The edge kept to a removed member closes this long after its connection first opened, told or not. */
+export const FAREWELL_OPEN_MS = 60_000;
 /**
  * While a member is unreachable, how often a mesh member asks one member it is connected to (in turn) for what that
  * one received and it did not: messages sent where the two of them were cut apart (WISP 9xx § Catch-up).
@@ -630,7 +634,11 @@ export class Groups {
     const edge = this.host.edges(groupId).get(key), edgeUp = !!edge && this.host.linkReady(edge);
     // Noted before the commit: the roster's change closes the edges of whoever is out of it, and this one must stay.
     const noted = !edgeUp && session.isAdmin && rosterHas(session.roster, key) && key !== session.myKey;
-    if (noted) this.noteFarewell(group, key, session.epoch + 1);
+    if (noted) {
+      this.noteFarewell(group, key, session.epoch + 1);
+      // Its connection is open already (an app that has not said it takes groups): the time it may stay starts now.
+      if (edge && this.host.linkOpen?.(edge)) group.farewells![key].opened = this.now();
+    }
     try { await session.remove(key); }
     catch (error) { if (noted) this.dropFarewell(group, key); throw error; }
     const contact = group.contacts?.[key];
@@ -653,7 +661,8 @@ export class Groups {
   /** The removed members this admin still waits for: not told yet, or told a moment ago (the commit is on its way). */
   private farewellKeys(group: StoredGroup | undefined, session: GroupSession, now: number): string[] {
     if (!group?.farewells || session.status !== "active") return [];
-    return Object.entries(group.farewells).filter(([key, f]) => !rosterHas(session.roster, key) && now - f.at <= FAREWELL_KEPT_MS && (f.told === undefined || now - f.told < REMOVED_LINGER_MS)).map(([key]) => key);
+    return Object.entries(group.farewells).filter(([key, f]) => !rosterHas(session.roster, key) && now - f.at <= FAREWELL_KEPT_MS && (f.told === undefined || now - f.told < REMOVED_LINGER_MS)
+      && (f.opened === undefined || now - f.opened < FAREWELL_OPEN_MS)).map(([key]) => key);
   }
   /** The edges an active member keeps: what the roster (or the hubs) ask for, and those to members it removed while they were away. */
   private edgesWanted(groupId: string, session: GroupSession, group: StoredGroup, now: number): Set<string> {
@@ -665,6 +674,29 @@ export class Groups {
     const session = this.sessions.get(groupId);
     return !!session && session.status === "active" && rosterHas(session.roster, key);
   }
+  /** A key out of the roster of a private group I am active in: a former member, or a stranger. */
+  outsider(groupId: string, key: string): boolean {
+    const session = this.sessions.get(groupId);
+    return !!session && session.status === "active" && !rosterHas(session.roster, key);
+  }
+  /**
+   * Whether a frame may go over a private group's edge to `key`. To a member, anything. To someone out of the roster
+   * of a group I am active in, only the commits up to the one that took it out: an edge to a former member exists a
+   * moment (its last commit is on its way) or is kept to tell it (`StoredGroup.farewells`), and carries nothing else.
+   */
+  edgeAllows(groupId: string, key: string, frame: unknown): boolean {
+    const session = this.sessions.get(groupId);
+    if (!session || session.status !== "active" || rosterHas(session.roster, key)) return true;
+    const commit = frame && typeof frame === "object" && (frame as { t?: unknown }).t === "group-commit" ? (frame as { commit?: { e?: unknown } }).commit : undefined;
+    return typeof commit?.e === "number" && commit.e <= removalEpoch(session.state.chain, key);
+  }
+  /** The connection of an edge opened. One kept to tell a removed member closes a while after, whatever its app says or does not say. */
+  edgeOpen(groupId: string, peerKey: string): void {
+    const group = this.stored.get(groupId), farewell = group?.farewells?.[peerKey];
+    if (!group || !farewell || farewell.opened !== undefined) return;
+    farewell.opened = this.now();
+    void this.store.putGroup(group).catch(() => {});
+  }
 
   /**
    * The edge to a member I removed while it was away came up: the commit that removed it goes now, which is all this
@@ -675,7 +707,8 @@ export class Groups {
     const farewell = group.farewells![key], commit = session.state.chain[farewell.e];
     if (!commit) { this.dropFarewell(group, key); return; }
     try { this.host.sendOnLink(linkId, { t: "group-commit", g: groupId, commit }); } catch { return; /* it closed again: the next time it opens */ }
-    farewell.told = this.now();
+    // Counted from the first time: saying it again never keeps the edge longer.
+    farewell.told ??= this.now();
     void this.store.putGroup(group).catch(() => {});
   }
   /** The sync of a removed member I wait for: the commits it lacks up to the one that removed it, a few times at most. */
@@ -691,7 +724,7 @@ export class Groups {
         if (commit) this.host.sendOnLink(linkId, { t: "group-commit", g: groupId, commit });
       }
     } catch { /* it closed: the next sync */ }
-    farewell.told = this.now();
+    farewell.told ??= this.now();
     void this.store.putGroup(group).catch(() => {});
   }
 
@@ -1337,7 +1370,10 @@ export class Groups {
 
   edgeNick(groupId: string, peerKey: string, nick: string | undefined): void {
     if (this.isCommunity(groupId)) { this.communities.edgeNick(groupId, peerKey, nick); return; }
-    void this.sessions.get(groupId)?.setNick(peerKey, nick);
+    const session = this.sessions.get(groupId);
+    // Someone I removed and wait for, to tell it: nothing it says is kept.
+    if (session && this.stored.get(groupId)?.farewells?.[peerKey] && !rosterHas(session.roster, peerKey)) return;
+    void session?.setNick(peerKey, nick);
   }
 
   // -- internals -----------------------------------------------------------
