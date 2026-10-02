@@ -75,6 +75,7 @@ export function CashuWallet({ wallet, state, rail, onOpenCashu, focusAmount = fa
   const [removingMint, setRemovingMint] = useState<string | null>(null);
   const [review, setReview] = useState<Review | null>(null);
   const [setAsideInfo, setSetAsideInfo] = useState(false);
+  const [unconfirmedInfo, setUnconfirmedInfo] = useState(false);
 
   // Test sats are worth nothing and must never be added to real ones. A Testnet Cashu wallet has only test
   // mints, so its whole balance is test sats; a Mainnet one never shows a test mint's.
@@ -131,6 +132,16 @@ export function CashuWallet({ wallet, state, rail, onOpenCashu, focusAmount = fa
               </span>
             )}
             {!!state.setAside && setAsideInfo && <span className="mt-1 block text-xs text-text-secondary" data-testid="wallet-set-aside-text">{t("wallet.cashu.setAsideInfo")}</span>}
+            {!!state.unconfirmed && (
+              <span className="mt-1 flex items-center gap-1.5 text-xs text-yellow-500" data-testid="wallet-unconfirmed">
+                {t("wallet.cashu.unconfirmed", { amount: formatAmount(state.unconfirmed, t.language), unit })}
+                <button type="button" data-testid="wallet-unconfirmed-info" aria-expanded={unconfirmedInfo} aria-label={t("common.moreInfo")} title={t("common.moreInfo")} onClick={() => setUnconfirmedInfo(!unconfirmedInfo)}
+                  className="relative grid h-5 w-5 shrink-0 cursor-pointer place-items-center rounded-full text-text-muted transition-colors hover:text-accent aria-expanded:text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent before:absolute before:-inset-2.5 before:content-['']">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9.5" /><path d="M12 11v5.5M12 7.5v.01" /></svg>
+                </button>
+              </span>
+            )}
+            {!!state.unconfirmed && unconfirmedInfo && <span className="mt-1 block text-xs text-text-secondary" data-testid="wallet-unconfirmed-text">{t("wallet.cashu.unconfirmedInfo")}</span>}
           </p>
         ) : (
           <p className="text-text-primary" data-testid="wallet-balance">

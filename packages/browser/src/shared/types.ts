@@ -430,6 +430,13 @@ export interface PendingSwap {
   released?: boolean;
   /** What it brought is stored; only the chat of its payment is still to be told (the app closed in between). */
   finished?: boolean;
+  /**
+   * Its inputs read spent at a mint that cannot say what it signed (no NUT-09): how many times that was the answer.
+   * Kept, since the outputs are the only way back to that ecash, and asked about less and less often (`askAt`).
+   */
+  stuck?: number;
+  /** Not asked about before this time. */
+  askAt?: number;
   /** Came with a restored copy of the profile: what it brings is as old as the copy, and is checked like the copy's ecash. */
   restored?: boolean;
   /** `receive`: the token being redeemed. Redeeming it again while this is kept finishes this swap, and makes no other. */
@@ -600,8 +607,11 @@ export interface NetworkWalletsView {
   balance: number;
   /** Cashu: sats held for a payment or a swap the mints have not settled yet. Not in `balance`, and not gone. */
   setAside?: number;
-  /** Cashu: swaps at these mints that are not finished yet. Removing the wallet waits for them. */
+  /** Cashu: swaps at these mints that are not finished yet, and the sats in them. Removing the wallet names them. */
   openSwaps?: number;
+  swapsAmount?: number;
+  /** Cashu: sats in swaps whose inputs read spent at a mint that cannot say what it gave for them. Not in `setAside`. */
+  unconfirmed?: number;
   /** This network's history, newest first. */
   history: WalletTx[];
   feesPaid: number;
@@ -619,7 +629,8 @@ export interface NetworkWalletsView {
 export interface WalletAwaitingView {
   /** The wallet it goes through (Lightning through the Cashu mints is the Cashu wallet's). */
   type: WalletType;
-  kind: "request" | "invoice" | "paid" | "unclaimed" | "sent";
+  /** `swap`: sats in an exchange with a Cashu mint that the mint has not settled yet (`PendingSwap`). */
+  kind: "request" | "invoice" | "paid" | "unclaimed" | "sent" | "swap";
   /** In the wallet's base unit: sats, or the token's smallest unit for USDT. */
   amount: number;
   /** The chat payment it belongs to, when it does. */
@@ -746,6 +757,8 @@ export interface WalletView {
   /** Cashu: see `NetworkWalletsView`. */
   setAside?: number;
   openSwaps?: number;
+  swapsAmount?: number;
+  unconfirmed?: number;
   /** Newest first. */
   history: WalletTx[];
   feesPaid: number;

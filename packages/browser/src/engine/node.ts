@@ -1229,7 +1229,7 @@ export class GhostlyNode implements EngineImplementation {
       everything = view.history;
       // A network's own story: test ecash is not mixed into the story of real money, nor the reverse.
       const history = view.history.filter((tx) => !tx.mint || mintNetwork(tx.mint) === network);
-      networks[network] = { mints: this.withWaits(view.mints, awaiting.mints), balance: view.balance, setAside: view.setAside, openSwaps: view.openSwaps, history, feesPaid: history.reduce((sum, tx) => sum + tx.fee, 0),
+      networks[network] = { mints: this.withWaits(view.mints, awaiting.mints), balance: view.balance, setAside: view.setAside, openSwaps: view.openSwaps, swapsAmount: view.swapsAmount, unconfirmed: view.unconfirmed, history, feesPaid: history.reduce((sum, tx) => sum + tx.fee, 0),
         ark: this.arkWallets[network].view, bark: this.barkWallets[network].view, fedimint: this.fedimintWallets[network].view, spark: this.sparkWallets[network].view,
         usdt: this.usdtWallets[network].view, lightning: this.lightnings[network].view, lightnings: this.lightnings[network].views(), bitcoin: this.bitcoins[network].view, awaiting: awaiting.networks[network] };
     }
@@ -3608,7 +3608,8 @@ export class GhostlyNode implements EngineImplementation {
     try {
       if (type === "cashu") {
         const mints = this.networkMints(network);
-        await this.wallet.forget(mints);
+        // An open swap was named in what the person agreed to lose (`walletRemoval`'s `swap` item).
+        await this.wallet.forget(mints, acceptLoss === true);
         await this.updateSettings({ settings: { mints: this.settings.mints.filter((m) => !mints.includes(m)) } });
       }
       else if (type === "arkade") await this.arkWallets[network].remove();

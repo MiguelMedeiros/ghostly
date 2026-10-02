@@ -213,7 +213,7 @@
     "removeMintHint": "You can add it again later.",
     "removeMintQuestion": "Remove {{name}}?",
     "setAside": "{{amount}} {{unit}} set aside",
-    "setAsideInfo": "Held for a payment the mint has not confirmed yet. It leaves with the payment or returns to your balance once the mint answers. Until then the wallet cannot be removed.",
+    "setAsideInfo": "Held for a payment the mint has not confirmed yet. It leaves with the payment or returns to your balance once the mint answers.",
     "settings": "Settings",
     "testBalance": "{{amount}} test sats (worthless)",
     "testMintInvoice": "Waiting for the payment… Test mints mark every invoice paid by themselves, so this one counts only once a contact pays it in a chat. For test sats now, use Get test coins above.",
@@ -226,6 +226,8 @@
       "lightningOut": "Paid over Lightning",
       "reclaimed": "Took a payment back"
     },
+    "unconfirmed": "{{amount}} {{unit}} not confirmed",
+    "unconfirmedInfo": "The mint took these sats in an exchange and cannot say what it gave for them. The wallet keeps asking. They may not come back.",
     "unreachable": "Not reachable right now",
     "working": "Working…"
   },
@@ -554,6 +556,7 @@
       "paid": "{{amount}} paid to an invoice, not claimed from the mint yet",
       "request": "A request for {{amount}} in a chat, still open",
       "sent": "{{amount}} in ecash you sent, not taken yet",
+      "swap": "{{amount}} in an exchange with the mint, not finished yet",
       "unclaimed": "{{amount}} the mint says it issued for an invoice, never received here"
     },
     "label": "Remove this wallet",

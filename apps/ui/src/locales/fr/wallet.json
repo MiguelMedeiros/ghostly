@@ -213,7 +213,7 @@
     "removeMintHint": "Vous pourrez l’ajouter à nouveau plus tard.",
     "removeMintQuestion": "Retirer {{name}} ?",
     "setAside": "{{amount}} {{unit}} mis de côté",
-    "setAsideInfo": "Mis de côté pour un paiement que le mint n'a pas encore confirmé. Ils partent avec le paiement ou reviennent dans votre solde dès que le mint répond. D'ici là, le portefeuille ne peut pas être supprimé.",
+    "setAsideInfo": "Mis de côté pour un paiement que le mint n'a pas encore confirmé. Ils partent avec le paiement ou reviennent dans votre solde dès que le mint répond.",
     "settings": "Réglages",
     "testBalance": "{{amount}} sats de test (sans valeur)",
     "testMintInvoice": "En attente du paiement… Les mints de test marquent chaque facture payée d’eux-mêmes, donc celle-ci ne compte que lorsqu’un contact la paie dans un chat. Pour des sats de test tout de suite, utilisez Obtenir des pièces de test plus haut.",
@@ -226,6 +226,8 @@
       "lightningOut": "Payé via Lightning",
       "reclaimed": "Paiement récupéré"
     },
+    "unconfirmed": "{{amount}} {{unit}} non confirmés",
+    "unconfirmedInfo": "Le mint a pris ces sats dans un échange et ne peut pas dire ce qu'il a donné en retour. Le portefeuille continue de demander. Ils peuvent ne pas revenir.",
     "unreachable": "Injoignable pour l’instant",
     "working": "En cours…"
   },
@@ -554,6 +556,7 @@
       "paid": "{{amount}} payés à une facture, pas encore récupérés auprès de la mint",
       "request": "Une demande de {{amount}} dans une discussion, toujours ouverte",
       "sent": "{{amount}} en ecash que vous avez envoyés, pas encore récupérés",
+      "swap": "{{amount}} dans un échange avec le mint, pas encore terminé",
       "unclaimed": "{{amount}} que la mint dit avoir émis pour une facture, jamais reçus ici"
     },
     "label": "Supprimer ce portefeuille",

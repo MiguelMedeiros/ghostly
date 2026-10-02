@@ -193,6 +193,8 @@ export interface WalletState {
   balance: number;
   /** Cashu: sats held for a payment the mints have not settled yet. Not in `balance`. */
   setAside?: number;
+  /** Cashu: sats in an exchange whose mint took them and cannot say what it gave back. */
+  unconfirmed?: number;
   /** Newest first. */
   history: WalletTransaction[];
   feesPaid: number;

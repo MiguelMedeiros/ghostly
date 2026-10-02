@@ -213,7 +213,7 @@
     "removeMintHint": "Você pode adicioná-lo de novo depois.",
     "removeMintQuestion": "Remover {{name}}?",
     "setAside": "{{amount}} {{unit}} reservados",
-    "setAsideInfo": "Reservados para um pagamento que o mint ainda não confirmou. Saem com o pagamento ou voltam ao seu saldo assim que o mint responder. Até lá, a carteira não pode ser removida.",
+    "setAsideInfo": "Reservados para um pagamento que o mint ainda não confirmou. Saem com o pagamento ou voltam ao seu saldo assim que o mint responder.",
     "settings": "Configurações",
     "testBalance": "{{amount}} sats de teste (sem valor)",
     "testMintInvoice": "Aguardando o pagamento… Mints de teste marcam toda fatura como paga sozinhos, então esta só conta quando um contato a pagar em um chat. Para ter sats de teste agora, use Obter moedas de teste acima.",
@@ -226,6 +226,8 @@
       "lightningOut": "Pago via Lightning",
       "reclaimed": "Pagamento recuperado"
     },
+    "unconfirmed": "{{amount}} {{unit}} não confirmados",
+    "unconfirmedInfo": "O mint recebeu estes sats em uma troca e não consegue dizer o que deu por eles. A carteira continua perguntando. Eles podem não voltar.",
     "unreachable": "Fora do ar no momento",
     "working": "Processando…"
   },
@@ -554,6 +556,7 @@
       "paid": "{{amount}} pagos a uma fatura, ainda não resgatados do mint",
       "request": "Um pedido de {{amount}} em uma conversa, ainda aberto",
       "sent": "{{amount}} em ecash que você enviou, ainda não resgatados",
+      "swap": "{{amount}} em uma troca com o mint, ainda não concluída",
       "unclaimed": "{{amount}} que o mint diz ter emitido para uma fatura, nunca recebidos aqui"
     },
     "label": "Remover esta carteira",
