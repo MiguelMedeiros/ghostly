@@ -26,7 +26,8 @@ export type WorkerRequest = { n: number; space: string } & (
   | { op: "read"; id: string; offset: number; length: number }
   | { op: "removeWhere"; prefix: string });
 
-export type WorkerReply = { n: number } & ({ ok: true; value?: unknown } | { ok: false; error: string } | { progress: number });
+/** `name`: the error's own name when it says what happened (`QuotaExceededError`: no room left). */
+export type WorkerReply = { n: number } & ({ ok: true; value?: unknown } | { ok: false; error: string; name?: string } | { progress: number });
 
 interface WorkerScope {
   onmessage: ((event: MessageEvent<WorkerRequest>) => void) | null;
@@ -89,13 +90,24 @@ function readAt(sync: SyncHandle, offset: number, length: number): Uint8Array {
   return pos === out.length ? out : out.slice(0, pos);
 }
 
+/** No room left for the file, named as browsers name it (a write past the quota throws one in WebKit and Firefox). */
+const noRoom = () => Object.assign(new Error("This device has no space left for the file"), { name: "QuotaExceededError" });
+
+/**
+ * Writes `bytes` at `at`, the end of the file, or throws: a write that kept nothing, or less than it was given, found
+ * no room. Chromium at its quota takes the write, answers that it wrote every byte, and keeps only what fits: the
+ * size after the write is what tells. The file is then put back to where it was, still in order.
+ */
 function writeAll(sync: SyncHandle, bytes: Uint8Array, at: number): void {
   let pos = 0;
   while (pos < bytes.length) {
     const wrote = sync.write(bytes.subarray(pos), { at: at + pos });
-    if (wrote <= 0) throw new Error("Could not write the file");
+    if (wrote <= 0) break;
     pos += wrote;
   }
+  if (pos === bytes.length && sync.getSize() >= at + bytes.length) return;
+  try { sync.truncate(at); } catch { /* left as it is */ }
+  throw noRoom();
 }
 
 async function runRequest(request: WorkerRequest): Promise<{ value?: unknown; transfer?: Transferable[] }> {
@@ -207,7 +219,8 @@ scope.onmessage = (event) => {
       const { value, transfer } = await runRequest(request);
       scope.postMessage({ n: request.n, ok: true, value }, transfer);
     } catch (error) {
-      scope.postMessage({ n: request.n, ok: false, error: error instanceof Error ? error.message : String(error) });
+      const name = (error as { name?: unknown })?.name;
+      scope.postMessage({ n: request.n, ok: false, error: error instanceof Error ? error.message : String(error), ...(name === "QuotaExceededError" && { name }) });
     }
   });
   queues.set(key, run);

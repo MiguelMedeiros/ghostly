@@ -208,6 +208,37 @@ describe("the side that placed the call", () => {
     expect(connection.remoteDescription?.sdp).toContain("a=ice-ufrag:peer2");
   });
 
+  it("drops the answer to its first offer that comes while the second is still gathering", async () => {
+    const call = renderCall();
+    await placed(call);
+    const connection = pc();
+    act(() => connection.setIceState("failed"));
+    await settle();
+    const [first] = restartOffers(call);
+
+    // The second offer is made (the connection has its new credentials) but not sent yet: it gathers candidates.
+    FakePeerConnection.holdGathering = true;
+    await pass(ICE_RESTART_RETRY_MS);
+    expect(connection.iceRestarts).toBe(2);
+    expect(restartOffers(call)).toHaveLength(1);
+
+    // The answer to the first offer comes now. Taken, it would settle the second offer with credentials the contact
+    // made for the first, and the contact's answer to the second would then be refused: a restart lost for nothing.
+    call.receive(remote.restartAnswer(Date.now() + 1, first.ts, 1));
+    await settle();
+    expect(connection.remoteDescriptions).toHaveLength(1);
+
+    FakePeerConnection.holdGathering = false;
+    act(() => connection.finishGathering());
+    await settle();
+    const [, second] = restartOffers(call);
+    expect(second.u).toBe("fake2");
+    call.receive(remote.restartAnswer(Date.now() + 2, second.ts, 2));
+    await settle();
+    expect(connection.remoteDescriptions).toHaveLength(2);
+    expect(connection.remoteDescription?.sdp).toContain("a=ice-ufrag:peer2");
+  });
+
   it("with no network sends no offer, and sends one when the network is back", async () => {
     const call = renderCall();
     await placed(call);

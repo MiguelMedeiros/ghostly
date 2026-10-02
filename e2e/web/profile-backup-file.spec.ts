@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { readFileSync, statSync } from "node:fs";
-import type { Page } from "@playwright/test";
+import type { BrowserContext, Page } from "@playwright/test";
 import { expect, openProfilePage, test } from "../support/fixtures";
 import { choose } from "../support/select";
 
@@ -10,8 +10,24 @@ const PASSPHRASE = "a file backup passphrase";
 /**
  * In WebKit (playwright.webkit.config.ts) the profile is on disk, as a person's Safari or the desktop app's is: its
  * in-memory contexts keep no Blob in IndexedDB, which is where the app keeps pictures and voice messages.
+ *
+ * Playwright's WebKit keeps the origin-private file system of every such profile in one place of this machine
+ * (`~/Library/WebKit/org.webkit.Playwright` on a Mac), not in the profile's folder: a test would find the files of
+ * the one before it, and of every run before. So each starts by emptying it, and the WebKit config runs one test at
+ * a time.
  */
-const storage = (browserName: string) => ({ persistent: browserName === "webkit" });
+const storage = (browserName: string) => (browserName === "webkit" ? { persistent: true, beforeOpen: emptyFileStorage } : {});
+async function emptyFileStorage(context: BrowserContext): Promise<void> {
+  const page = await context.newPage();
+  await page.goto("/version.json");
+  await page.evaluate(async () => {
+    const root = await navigator.storage.getDirectory();
+    const names: string[] = [];
+    for await (const name of (root as unknown as { keys(): AsyncIterable<string> }).keys()) names.push(name);
+    for (const name of names) await root.removeEntry(name, { recursive: true });
+  });
+  await page.close();
+}
 
 test("a profile goes to a file and comes back as a new profile, only with its passphrase", { tag: ["@feature:backup.profile.file", "@feature:backup.profile.same-device", "@feature:backup.passphrase-rules", "@feature:backup.envelope", "@feature:profiles.switch"] }, async ({ peer, browserName }) => {
   const { page } = await peer("backup-file", storage(browserName));
@@ -313,8 +329,11 @@ test("a cancelled backup saves nothing, and a damaged file restores nothing", { 
   const bundle = readFileSync((await (await downloading).path())!);
   await expect(backups.getByTestId("backup-done")).toContainText("Downloaded");
   const changed = Buffer.from(bundle); changed[Math.floor(bundle.length * 0.9)] ^= 1;
+  // Cut inside the large file, which comes first in the bundle: the restore is writing it to file storage when the file ends.
+  const cutInLarge = bundle.subarray(0, 8 * MIB);
+  const foldersBefore = await fileFolders(page);
   await backups.getByTestId("restore-open").click();
-  for (const damaged of [changed, bundle.subarray(0, bundle.length - 1000)]) {
+  for (const damaged of [changed, bundle.subarray(0, bundle.length - 1000), cutInLarge]) {
     await backups.getByTestId("restore-file").setInputFiles({ name: "damaged.ghostly-backup", mimeType: "application/octet-stream", buffer: damaged });
     await backups.getByTestId("restore-passphrase").fill(PASSPHRASE);
     await backups.getByTestId("restore-go").click();
@@ -323,5 +342,18 @@ test("a cancelled backup saves nothing, and a damaged file restores nothing", { 
     await expect(backups.getByTestId("backup-error")).toHaveText("This backup is damaged: it was changed or cut short. Try another copy of the file.", { timeout: 120_000 });
     await expect(page.getByTestId("profile-row")).toHaveCount(1);
     expect(Object.keys(await restoredFiles(page)), "what the restore had written is gone").toEqual([]);
+    expect(await fileFolders(page), "and so is the large file it was writing to file storage").toEqual(foldersBefore);
   }
 });
+
+/** The profile folders in this browser's file storage (the origin-private file system), by name. */
+async function fileFolders(page: Page): Promise<string[]> {
+  return page.evaluate(async () => {
+    const names: string[] = [];
+    try {
+      const root = await (await navigator.storage.getDirectory()).getDirectoryHandle("ghostly-files");
+      for await (const name of (root as unknown as { keys(): AsyncIterable<string> }).keys()) names.push(name);
+    } catch { /* no folder yet */ }
+    return names.sort();
+  });
+}

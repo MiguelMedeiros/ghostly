@@ -612,6 +612,9 @@ export function useWebRTC({
     restartRetryRef.current = null;
     const attempt = attemptRef.current;
     const current = () => attemptRef.current === attempt && pcRef.current === pc;
+    // The offer made next replaces the one before it on the connection: from here an answer to that one is late,
+    // though this one has no time of its own until its candidates are gathered.
+    restartOfferRef.current = 0;
     try {
       await pc.setLocalDescription(await pc.createOffer({ iceRestart: true }));
       await waitForIceGathering(pc, ICE_RESTART_GATHER_MS, { fresh: true });

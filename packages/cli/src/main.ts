@@ -12,6 +12,7 @@ import type { GhostlyEvent } from "./events";
 import { keepServing, openHost, serve, type Host } from "./host";
 import { allowlist, checkWebhook, eventHandler, readCursor } from "./listen";
 import { resolve } from "node:path";
+import { format } from "node:util";
 import { backupFileProtection, restoreProfile } from "./backup";
 import { buttonsOf } from "./buttons";
 import { secretsFromStdin } from "./secretInput";
@@ -705,8 +706,19 @@ function exit(code: number): void {
   process.stdout.write("", () => process.exit(code));
 }
 
+/**
+ * Stdout is the command's answer and nothing else: one JSON object, or a stream of JSON lines. What the engine notes
+ * as it works (a relay left alone for a minute, a wallet moved to its network's key) is written with `console.info`
+ * and the like, which Node sends to stdout: a script reading the answer (`ghostly wallet list | jq`) then failed on a
+ * line that is not JSON. Those notes go to stderr, where a daemon's log and a terminal still show them.
+ */
+export function notesToStderr(): void {
+  for (const level of ["log", "info", "debug"] as const) console[level] = (...args: unknown[]) => { process.stderr.write(`${format(...args)}\n`); };
+}
+
 /** Runs the command line; `-1` from `main` means the process stays (a daemon, a listener). */
 export async function run(argv: string[]): Promise<void> {
+  notesToStderr();
   try {
     const code = await main(argv);
     if (code >= 0) exit(code);

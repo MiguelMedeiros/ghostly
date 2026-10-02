@@ -1,4 +1,4 @@
-import { engineError, type PaymentAdapter, type PaymentReview, type PaymentTarget } from '@ghostly/core';
+import { engineError, engineText, type PaymentAdapter, type PaymentReview, type PaymentTarget } from '@ghostly/core';
 import { mintNetwork } from '../../shared/mints';
 import type { CashuWallet, CashuPrepared } from '../wallet';
 
@@ -37,15 +37,27 @@ export class CashuAdapter implements PaymentAdapter<CashuPrepared> {
   catch(error){ prepared.attemptEndedAt=Date.now(); throw error; }
   await persist?.();
   await this.publish(review,token);
-  return {settled:await this.wallet.reviewedCashuSpent(prepared)};
+  return await this.outcome(review,prepared) ?? {settled:false};
+ }
+ /**
+  * What the mint and this wallet know of a payment whose token went out: paid once the mint reads its ecash spent,
+  * unless this wallet is the one that spent it, taking the payment back. Asked in that order: ecash taken back while
+  * the mint was being asked reads spent too. Undefined while the contact has not taken it.
+  */
+ private async outcome(review:PaymentReview,prepared:CashuPrepared){
+  const spent=await this.wallet.reviewedCashuSpent(prepared);
+  if(await this.wallet.reviewedCashuTakenBack(review.id))return {settled:false,failed:true,error:engineText('paymentTakenBack')};
+  return spent?{settled:true}:undefined;
  }
  /** `persist` saves the intent as it is: required, since the abandon path must be durable before it releases anything. */
  async reconcile(review:PaymentReview,prepared:CashuPrepared,persist:()=>Promise<void>){
   if(prepared.abandoned)return this.abandon(prepared,persist);
-  if(await this.wallet.reviewedCashuSpent(prepared))return {settled:true};
+  const known=await this.outcome(review,prepared);
+  if(known)return known;
   const token=prepared.token ?? await this.wallet.recoverReviewedCashu(review,prepared);
   if(token)await this.publish(review,token); // Repeat the same token, never mint a replacement.
-  if(await this.wallet.reviewedCashuSpent(prepared))return {settled:true};
+  const after=await this.outcome(review,prepared);
+  if(after)return after;
   // No token: the swap may never have reached the mint (it was unreachable when approved). Only the mint can say so,
   // and only once no request of it can still be on its way: then the payment failed and its inputs come back.
   if(!token && Date.now()>=swapSettledAt(review,prepared) && await this.wallet.reviewedCashuNeverSwapped(prepared))return this.abandon(prepared,persist);

@@ -157,6 +157,14 @@ export interface StoredGroup {
    * signed leave (`bye`) that they carry to the admin.
    */
   left?: { at: number; admin: string; hubs?: string[]; bye?: GroupByeFrame };
+  /**
+   * On the admin's side: members I removed while they could not be told (their edge was down, and no contact chat
+   * carried the notice), by member key. `e`: the epoch of the commit that removed them; `at`: when. The edge to each
+   * stays until it opens and that commit goes over it (`told`, the first time), or `at` is a week old: a member removed
+   * while its app was closed otherwise never learns it, since every member closes the edge to someone out of the
+   * roster. `opened`: when the edge's connection first opened; it closes a while after, told or not.
+   */
+  farewells?: Record<string, { at: number; e: number; told?: number; answered?: number; opened?: number }>;
   /** The group's pinned message (WISP 400 § Pinned message): the latest pin; `id` "" once unpinned. */
   pin?: StoredPin;
   /**

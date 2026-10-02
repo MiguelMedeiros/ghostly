@@ -172,7 +172,7 @@ Double click, or the message's ⋮ → **Details** (#240, `apps/ui/src/component
 | Interface | cards, new wallets, new groups | off |
 
 - A chat's cues are silent while that chat is muted (a mention it lets through still plays). Nothing new plays while the app is in the background.
-- The message sound and a notification come only with a new message at the end of a chat (#527, `packages/browser/src/engine/attention.ts`). A line of a group's history (someone joined, left, is the admin, renamed it), a late catch-up of older messages and an empty text stay quiet, and so do typing, edits, reactions and receipts. Files and payments have cues of their own. Messages of one chat that arrive together play one sound.
+- The message sound and a notification come only with a new message at the end of a chat (#527, `packages/browser/src/engine/attention.ts`). A line of a group's history (someone joined, left, is the admin, renamed it), a late catch-up of older messages and an empty text stay quiet, and so do typing, edits, reactions and receipts. Files and payments have cues of their own. Messages of one chat that arrive together play one sound. A catch-up is told by the time its sender says; in a 1:1 chat a contact whose clock runs behind is allowed for (the quickest of its latest live messages says how far behind), so its replies are not taken for old ones.
 
 ## Groups
 

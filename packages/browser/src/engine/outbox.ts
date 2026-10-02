@@ -42,9 +42,26 @@ export interface Resender {
   requeueExpired?(message: StoredMessage): boolean;
 }
 
+/** How long one turn of an outbox may hold the next one back: a send that never returns must not stop the chat. */
+const TURN_MS = 30_000;
+
+/**
+ * A text of mine, not handed to store-and-forward, and still to go: queued, or waiting for the chat to carry it. (A
+ * file or a payment request that waits for the live session has no wire id, and its own sender.)
+ */
+const toGo = (m: StoredMessage) => m.sender === "me" && m.via !== "hold" && !!m.wireId && (m.delivery === "queued" || m.delivery === "waiting");
+const oldestFirst = (a: StoredMessage, b: StoredMessage) => a.timestamp - b.timestamp;
+
 /** Durable message IDs survive retries. A lost receipt means unknown delivery, never a claim that the peer did
  * not receive the message: the receiver acknowledges a duplicate id without showing it twice, so an unconfirmed
- * message is sent again by itself while the chat can carry it, within `RESEND_POLICY`, then waits for Retry. */
+ * message is sent again by itself while the chat can carry it, within `RESEND_POLICY`, then waits for Retry.
+ *
+ * What a chat's outbox hands its link goes oldest first. The contact's app places each message where it arrives
+ * (WISP 400, requirement 10), so the order they are sent in is the order the contact reads them in, for good. A new
+ * message, a link that came back, a receipt that freed the DHT path and each queued message's own timer all send, and
+ * each of them took its turn while another was still between two steps: a message written later went out before one
+ * written earlier, and the contact kept them that way. They now take turns (`turn`), and each turn sends what is
+ * older first. Only a message the chat cannot carry (a long text while on the DHT) is passed by a later one. */
 export class Outbox {
   /** Sent, awaiting a receipt. */
   private receipts = new Map<string, ReturnType<typeof setTimeout>>();
@@ -54,6 +71,11 @@ export class Outbox {
   private busy = new Set<string>();
   /** In flight when the chat reopened (`flush({ reopened })`): sent again on the new link once that send returns. */
   private reopenedWhileBusy = new Set<string>();
+  /** The turns taken so far, one after the other (`turn`). */
+  private line: Promise<void> = Promise.resolve();
+  /** How many times the chat reopened, and the count each message last went out under: one sent since is on the new link. */
+  private opened = 0;
+  private sentUnder = new Map<string, number>();
   private stopped = false;
   private readonly resender: Resender;
   private readonly policy: ResendPolicy;
@@ -84,13 +106,91 @@ export class Outbox {
     }
   }
 
-  /** Sends one message now. `manual`: the Retry button — a new window and a fresh count of attempts. */
-  async transmit(id: string, { manual = false }: { manual?: boolean } = {}): Promise<void> {
+  /**
+   * One at a time, in the order asked: `run` starts when the turns before it are over. A turn that takes longer than
+   * `TURN_MS` no longer holds the next one back.
+   */
+  private turn<T>(run: () => Promise<T>): Promise<T> {
+    const result = this.line.then(run);
+    this.line = new Promise<void>(next => {
+      const timer = setTimeout(next, TURN_MS);
+      void result.then(() => {}, () => {}).then(() => { clearTimeout(timer); next(); });
+    });
+    return result;
+  }
+
+  /**
+   * Sends one message. A new one goes after the ones written before it that still wait to go: those the chat can
+   * carry go first, and if it then cannot carry this one (the DHT path took one of them), it waits its turn too.
+   * `manual`: the Retry button — it goes now, with a new window and a fresh count of attempts.
+   */
+  transmit(id: string, { manual = false }: { manual?: boolean } = {}): Promise<void> {
+    return this.turn(async () => {
+      if (manual || this.stopped || this.busy.has(id) || this.receipts.has(id)) return this.transmitNow(id, { manual });
+      const messages = await this.store.read(), message = messages.find(m => m.id === id);
+      // Nothing before it waits (the usual case): it goes as it was read, with no second look at the store.
+      const before = message?.delivery === "sending" ? this.before(messages, message) : [];
+      if (!before.length) return this.transmitNow(id, {}, message);
+      const passed = await this.inOrder(before);
+      if (this.stopped) return;
+      if (this.resender.ready({ ...message!, via: "datalink" })) { await this.catchUp(passed); return this.transmitNow(id); }
+      await this.store.update(id, "waiting", "Waits for the messages before it to go.", { via: "datalink", resendUntil: message!.resendUntil ?? this.now() + this.policy.windowMs });
+      this.schedule(id);
+    });
+  }
+
+  /** The messages written before a new one that have not gone yet, oldest first. */
+  private before(messages: StoredMessage[], message: StoredMessage): StoredMessage[] {
+    // Stored and about to go: its own turn comes after this one.
+    const stored = (m: StoredMessage) => m.sender === "me" && m.via !== "hold" && m.delivery === "sending" && !!m.wireId && m.timestamp < message.timestamp && !this.receipts.has(m.id) && !this.busy.has(m.id);
+    return [...this.due(messages.filter(m => m.id !== message.id && m.timestamp <= message.timestamp)), ...messages.filter(stored)].sort(oldestFirst);
+  }
+
+  /**
+   * What a look at the chat takes up, oldest first: what is queued or waiting, and what was sent and still awaits its
+   * receipt when the path it took is not the one the chat has now (it went on the DHT and the chat is live: it goes on
+   * the link, before what was written after it) or when the chat reopened since (`opened`).
+   */
+  private due(messages: StoredMessage[], opened?: number): StoredMessage[] {
+    const unconfirmed = (m: StoredMessage) => m.sender === "me" && m.via !== "hold" && m.delivery === "sent" && this.receipts.has(m.id);
+    return messages.filter(m => !this.busy.has(m.id) && (toGo(m) || (unconfirmed(m)
+      && ((opened !== undefined && (this.sentUnder.get(m.id) ?? 0) < opened) || (!!this.resender.via && this.resender.via(m) !== m.via && this.resender.ready(m)))))).sort(oldestFirst);
+  }
+
+  /**
+   * Looks at each message, oldest first: it goes if the chat can carry it. The ones the chat could not carry are
+   * handed back, and asked once more at the moment a later one is found able to go (`catchUp`): a link says it is open
+   * a moment before it carries text, and a look that began in that moment sent the later messages and left the first
+   * ones behind.
+   */
+  private async inOrder(messages: StoredMessage[]): Promise<StoredMessage[]> {
+    const passed: StoredMessage[] = [];
+    for (const message of messages) {
+      if (this.stopped) break;
+      if (message.delivery === "sending") { await this.catchUp(passed); await this.transmitNow(message.id); continue; }
+      if (!(await this.again(message, passed))) passed.push(message);
+    }
+    return passed;
+  }
+
+  /** The messages passed by that the chat can carry by now go, oldest first; the others stay where they are. */
+  private async catchUp(passed: StoredMessage[]): Promise<void> {
+    for (let i = 0; i < passed.length && !this.stopped;) {
+      if (!this.resender.ready(passed[i])) { i++; continue; }
+      const [older] = passed.splice(i, 1);
+      await this.attempt(older.id);
+      // Something was awaited: the ones before it are asked again.
+      i = 0;
+    }
+  }
+
+  /** `read`: the message's row, when it was read just now with nothing awaited since. */
+  private async transmitNow(id: string, { manual = false }: { manual?: boolean } = {}, read?: StoredMessage): Promise<void> {
     if (this.stopped || this.busy.has(id) || this.receipts.has(id)) return;
     this.busy.add(id);
     let again: boolean;
     try {
-      let message = (await this.store.read()).find(m => m.id === id);
+      let message = read ?? (await this.store.read()).find(m => m.id === id);
       if (!message?.wireId || !message.delivery || message.delivery === "delivered") return;
       const wait = this.waiting.get(id);
       if (wait?.timer) { clearTimeout(wait.timer); wait.timer = undefined; }
@@ -102,6 +202,7 @@ export class Outbox {
       if (this.stopped) { await this.queue(message, "Connection closed. Delivery is unconfirmed."); return; }
       // Install before send: a fast receipt must be able to cancel it.
       this.track(id, typeof this.timeoutMs === "number" ? this.timeoutMs : this.timeoutMs(message));
+      this.sentUnder.set(id, this.opened);
       const error = await this.send(message);
       if (error) {
         this.clear(id);
@@ -145,24 +246,38 @@ export class Outbox {
    * oldest first. `reopened`: a new link, so what still awaits a receipt from the old one, or from the DHT, goes on it too
    * (a receipt on the link also ends the DHT's own retries).
    */
-  async flush({ reopened = false }: { reopened?: boolean } = {}): Promise<void> {
-    if (this.stopped || (!reopened && !this.waiting.size)) return;
+  flush({ reopened = false }: { reopened?: boolean } = {}): Promise<void> {
+    if (this.stopped || (!reopened && !this.waiting.size)) return Promise.resolve();
     // A send still on its way (a DHT publish takes a moment) is not `sent` yet: it goes again once it returns.
     if (reopened) for (const id of this.busy) this.reopenedWhileBusy.add(id);
-    const due = (await this.store.read())
-      .filter(m => m.sender === "me" && m.via !== "hold" && !this.busy.has(m.id) && (m.delivery === "queued" || m.delivery === "waiting" || (reopened && m.delivery === "sent" && this.receipts.has(m.id))))
-      .sort((a, b) => a.timestamp - b.timestamp);
-    for (const message of due) await this.again(message);
+    // What goes out from here on goes on the new link: a second look at the chat (the link says it is open in two
+    // ways, a receipt comes) does not send it once more.
+    const opened = reopened ? ++this.opened : undefined;
+    return this.turn(async () => {
+      if (!this.stopped) await this.inOrder(this.due(await this.store.read(), opened));
+    });
   }
 
-  /** A queued or waiting message is looked at; one sent and awaiting its receipt goes again now, if the chat can carry it. */
-  private async again(message: StoredMessage): Promise<void> {
-    if (message.sender !== "me" || message.via === "hold") return;
-    if (message.delivery === "queued" || message.delivery === "waiting") { await this.attempt(message.id); return; }
-    if (message.delivery !== "sent" || !this.receipts.has(message.id)) return;
+  /** A queued message's check came due: the ones written before it that have not gone are looked at first. */
+  private async check(id: string): Promise<void> {
+    if (this.stopped) return;
+    const messages = await this.store.read(), message = messages.find(m => m.id === id);
+    if (!message || !toGo(message)) { await this.attempt(id); return; }
+    await this.inOrder(this.due(messages.filter(m => m.timestamp <= message.timestamp)));
+  }
+
+  /**
+   * A queued or waiting message is looked at; one sent and awaiting its receipt goes again now, if the chat can carry
+   * it. False when the chat could not carry it.
+   */
+  private async again(message: StoredMessage, passed?: StoredMessage[]): Promise<boolean> {
+    if (message.sender !== "me" || message.via === "hold") return true;
+    if (message.delivery === "queued" || message.delivery === "waiting") return this.attempt(message.id, passed);
+    if (message.delivery !== "sent" || !this.receipts.has(message.id)) return true;
     this.clear(message.id);
-    if (this.resender.ready(message)) await this.transmit(message.id);
-    else await this.requeue(message.id, "Connection closed before receipt. Delivery is unconfirmed.");
+    if (this.resender.ready(message)) { if (passed) await this.catchUp(passed); await this.transmitNow(message.id); return true; }
+    await this.requeue(message.id, "Connection closed before receipt. Delivery is unconfirmed.");
+    return false;
   }
 
   async disconnected(): Promise<void> {
@@ -184,21 +299,26 @@ export class Outbox {
     await this.disconnected();
   }
 
-  /** Looks at one queued message: sends it if the chat can carry it, hands it to store-and-forward, or waits more. */
-  private async attempt(id: string): Promise<void> {
-    if (this.stopped || this.busy.has(id)) return;
+  /**
+   * Looks at one queued message: sends it if the chat can carry it, hands it to store-and-forward, or waits more.
+   * False when the chat could not carry it and it still waits. `passed`: older messages the chat could not carry a
+   * moment ago, which go first if it can now.
+   */
+  private async attempt(id: string, passed?: StoredMessage[]): Promise<boolean> {
+    if (this.stopped || this.busy.has(id)) return true;
     const message = (await this.store.read()).find(m => m.id === id);
-    if (!message || (message.delivery !== "queued" && message.delivery !== "waiting") || message.via === "hold") { this.forget(id); return; }
+    if (!message || (message.delivery !== "queued" && message.delivery !== "waiting") || message.via === "hold") { this.forget(id); return true; }
     if ((message.resendUntil ?? Infinity) <= this.now()) {
       if (message.delivery === "waiting") { this.forget(id); await this.store.update(id, "failed", `Your contact was not reachable within ${days(this.policy.windowMs)}. It was not sent; Retry sends it.`); }
       else await this.fail(id, `Not confirmed within ${days(this.policy.windowMs)}.`);
-      return;
+      return true;
     }
-    if (this.resender.ready(message)) { await this.transmit(id); return; }
+    if (this.resender.ready(message)) { if (passed) await this.catchUp(passed); await this.transmitNow(id); return true; }
     const wait = this.waiting.get(id);
-    if (this.resender.divert && wait && this.now() - wait.since >= this.policy.holdAfterMs && await this.resender.divert(message)) { this.forget(id); return; }
+    if (this.resender.divert && wait && this.now() - wait.since >= this.policy.holdAfterMs && await this.resender.divert(message)) { this.forget(id); return true; }
     // A flush between two checks leaves the backoff where it was.
     if (!wait?.timer) this.schedule(id);
+    return false;
   }
 
   /** After a failed attempt: queued again, unless its window or its attempts are spent. */
@@ -232,7 +352,7 @@ export class Outbox {
     const wait = this.waiting.get(id) ?? { step: 0, since: this.now() };
     if (wait.timer) clearTimeout(wait.timer);
     const delay = this.policy.backoffMs[Math.min(wait.step, this.policy.backoffMs.length - 1)];
-    wait.timer = setTimeout(() => { wait.timer = undefined; wait.step++; void this.attempt(id).catch(() => {}); }, delay);
+    wait.timer = setTimeout(() => { wait.timer = undefined; wait.step++; void this.turn(() => this.check(id)).catch(() => {}); }, delay);
     this.waiting.set(id, wait);
   }
 
@@ -241,6 +361,7 @@ export class Outbox {
     if (wait?.timer) clearTimeout(wait.timer);
     this.waiting.delete(id);
     this.attempts.delete(id);
+    this.sentUnder.delete(id);
   }
 
   private track(id: string, duration: number): void {

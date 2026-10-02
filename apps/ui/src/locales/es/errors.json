@@ -62,6 +62,7 @@
     "notYetConfirmed": "Aún no confirmado. No se envió un segundo pago.",
     "outcomeUnknown": "Resultado desconocido. Comprueba el pago que ya existe; no envíes otro.",
     "paymentExpired": "La solicitud de pago caducó o tiene una caducidad no válida",
+    "paymentTakenBack": "Este pago se recuperó. Los sats están en tu billetera.",
     "realMintOnTestnet": "Este mint guarda sats reales: añádelo a una billetera Cashu de Mainnet",
     "reconnectBeforeApprove": "Vuelve a conectar el chat antes de aprobar. Tu revisión se guardó.",
     "requestHasPayment": "Esta solicitud ya tiene un pago. Compruébalo antes de volver a intentarlo.",
