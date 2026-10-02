@@ -1,3 +1,4 @@
+import { knownDeviceGate } from "@ghostly/browser/devices/gate";
 import type { ColorTheme } from "./settings";
 
 /**
@@ -284,7 +285,8 @@ export function switchProfile(id: string, options: { route?: string; avatar?: st
   if (!target) throw new Error("Unknown profile");
   // This page's own profile, not the registry's choice: another tab may have made that choice already.
   if (id === activeProfileId()) return;
-  rememberRoute(activeProfileId());
+  // A profile this device is on standby for keeps its place as it was: nothing is written into its copy (WISP 06).
+  if (knownDeviceGate()?.full !== false) rememberRoute(activeProfileId());
   const pending: PendingSwitch = { id, name: shown(target).name, color: THEME_COLOR[themeOf(id)], avatar: options.avatar, at: Date.now() };
   try { sessionStorage.setItem(SWITCH_KEY, JSON.stringify(pending)); } catch { /* no overlay after the reload */ }
   window.dispatchEvent(new CustomEvent<PendingSwitch>("profile-switching", { detail: pending }));

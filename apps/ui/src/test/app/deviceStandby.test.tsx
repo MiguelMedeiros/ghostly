@@ -7,7 +7,7 @@ import type { DeviceGate, DeviceGateView } from "@ghostly/browser/devices/gate";
 import { Root } from "../../Root";
 import { DeviceStandby } from "../../components/DeviceStandby";
 import { desktopDeviceMirror } from "../../desktop/deviceMirror";
-import { createProfile } from "../../lib/profiles";
+import { createProfile, lastRouteOf, switchProfile } from "../../lib/profiles";
 import { locales } from "../../locales";
 import { fakeEngine } from "../fakeEngine";
 import { renderApp } from "../render";
@@ -127,6 +127,27 @@ describe("the standby screen", () => {
     createProfile("Work");
     renderApp(<DeviceStandby gate={{ state: "standby" }} />);
     expect(screen.getByTestId("device-standby-switch")).toHaveTextContent("Work");
+  });
+
+  it("a switch to another profile leaves the standby profile's storage as it was", () => {
+    vi.useFakeTimers({ toFake: ["setTimeout"] });
+    try {
+      const work = createProfile("Work");
+      const other = createProfile("Home");
+      window.location.hash = "#/wallet";
+      page.gate = standbyPage({ state: "standby" });
+      const before = JSON.stringify(Object.entries(localStorage));
+      switchProfile(work.id);
+      expect(JSON.stringify(Object.entries(localStorage))).toBe(before);
+      expect(lastRouteOf("")).toBe("/");
+      // The same switch from a profile that runs here remembers where it was.
+      page.gate = undefined;
+      switchProfile(other.id);
+      expect(lastRouteOf("")).toBe("/wallet");
+    } finally {
+      vi.clearAllTimers();
+      vi.useRealTimers();
+    }
   });
 
   it("is in the app's language", () => {

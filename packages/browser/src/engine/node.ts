@@ -376,6 +376,11 @@ export interface NodeOptions {
   /** Where this engine runs, for the wallet providers that only work on some platforms. Default: web. */
   platform?: ProviderPlatform;
   /**
+   * The profiles of this storage are never on several devices (WISP 06 § Goals and non-goals): the CLI, whose profiles
+   * are always `single`. No device state database is made or read for them. Default: off.
+   */
+  singleDevice?: boolean;
+  /**
    * This app stays online, so it offers to be a hub of the private groups past 16 members it is in (WISP 9xx · Group
    * Mesh § Hubs). Default: the Desktop app; the CLI says so itself; a browser tab only when the admin pins it.
    */
@@ -1164,6 +1169,8 @@ export class GhostlyNode implements EngineImplementation {
     this.transport = options.transport ?? this.relays!;
     this.groupTransport = withRequestOptions(this.transport, { group: true });
     this.profilePeek = new ProfilePeek({ transport: this.transport, direct: !!this.transport.configure, online: () => this.settings.online !== false,
+      // A CLI profile is always `single` (WISP 06 § Goals and non-goals): no device state database is made for it.
+      ...(options.singleDevice ? { runsHere: async () => true } : {}),
       readPath: () => readPathOf(this.relays ? { relays: this.relays.describe().relays } : this.settings, !!this.transport.configure) });
     this.pollIntervals = options.pollIntervals ?? RELAY_POLL_INTERVALS;
     this.localFetch = options.localFetch ?? webLocalFetch;

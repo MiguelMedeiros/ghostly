@@ -43,13 +43,8 @@ pub fn read(dir: &Path, profile: &str) -> Result<Option<String>, String> {
 pub fn write(dir: &Path, profile: &str, record: Option<&str>) -> Result<(), String> {
     let path = file(dir, profile)?;
     let failed = |error: std::io::Error| format!("The device state could not be saved: {error}");
-    fs::create_dir_all(dir).map_err(failed)?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = fs::set_permissions(dir, fs::Permissions::from_mode(0o700));
-    }
     let Some(record) = record else {
+        // Nothing to remove makes nothing: no folder appears for a profile that never had a record.
         match fs::remove_file(&path) {
             Ok(()) => {}
             Err(error) if error.kind() == ErrorKind::NotFound => return Ok(()),
@@ -62,6 +57,12 @@ pub fn write(dir: &Path, profile: &str, record: Option<&str>) -> Result<(), Stri
     }
     if !serde_json::from_str::<serde_json::Value>(record).is_ok_and(|value| value.is_object()) {
         return Err("The device state is not a record".into());
+    }
+    fs::create_dir_all(dir).map_err(failed)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = fs::set_permissions(dir, fs::Permissions::from_mode(0o700));
     }
     let staged = dir.join(format!("{profile}.json.tmp"));
     let mut options = OpenOptions::new();
@@ -151,8 +152,11 @@ mod tests {
         );
         write(&dir, "ghostly_a", None).unwrap();
         assert_eq!(read(&dir, "ghostly_a").unwrap(), None);
-        // Removing what is not there is not an error.
+        // Removing what is not there is not an error, and makes no folder.
         write(&dir, "ghostly_a", None).unwrap();
+        let never = scratch("never-written");
+        write(&never, "ghostly", None).unwrap();
+        assert!(!never.exists());
         let _ = fs::remove_dir_all(&dir);
     }
 
