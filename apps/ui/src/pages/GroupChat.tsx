@@ -108,6 +108,19 @@ const FIXED_EVENTS = new Map([
 /** The lines that name their member, said again from their kind: those of a member who has left too. */
 const FORMER_EVENTS = new Set<StoredMessage["event"]>(["joined", "admin", "picture", "renamed"]);
 
+/** A line the engine wrote as "<name> <what happened>", said in the interface's language with the name it was written with. */
+function writtenEvent(event: StoredMessage["event"], text: string, t: Translate): string | undefined {
+  const named = (ending: string) => text.endsWith(ending) && text.length > ending.length ? text.slice(0, -ending.length) : undefined;
+  if (event === "joined") { const name = named(" joined"); return name && t("group.event.joined", { name }); }
+  if (event === "admin") { const name = named(" is now the admin"); return name && t("group.event.admin", { name }); }
+  if (event === "picture") {
+    const changed = named(" changed the group's picture"), removed = named(" removed the group's picture");
+    return changed ? t("group.event.pictureChanged", { name: changed }) : removed ? t("group.event.pictureRemoved", { name: removed }) : undefined;
+  }
+  const marker = " renamed the group to “", at = event === "renamed" ? text.indexOf(marker) : -1;
+  return at > 0 && text.endsWith("”") ? t("group.event.renamed", { name: text.slice(0, at), group: text.slice(at + marker.length, -1) }) : undefined;
+}
+
 /**
  * A membership line, naming its member as the roster knows them now; what was stored, when they are gone. The engine
  * stores it in English: the line is said again in the interface's language from its kind, where the stored text has
@@ -124,6 +137,10 @@ function eventText(message: StoredMessage, group: GroupView, t: Translate): stri
     if (message.event === "joined" && !message.member && text.startsWith("You joined. ")) return `${t("group.event.youJoined")} ${readNote(group, t)}`;
     const gone = " is no longer a member";
     if (message.event === "gone" && text.endsWith(gone)) return t("group.event.gone", { name: text.slice(0, -gone.length) });
+    // A community's line about a member who has left since: no roster or former name says who it was, but the stored
+    // line does, in the shape the engine writes. Said again in the interface's language with that name.
+    const written = message.member ? writtenEvent(message.event, text, t) : undefined;
+    if (written) return written;
     const fixed = (FIXED_EVENTS as Map<string, string>).get(text);
     return fixed === "rotated" ? t("group.event.rotated") : fixed === "removed" ? t("group.event.removed") : fixed === "forked" ? t("group.event.forked") : text;
   }

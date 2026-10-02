@@ -411,6 +411,22 @@ describe("GroupChat: history and sending", () => {
     expect(screen.getByText("while you were away")).toBeInTheDocument();
   });
 
+  it("a community's lines about a member who has left since read in the app's language", () => {
+    const GONE = "gone".padEnd(52, "y");
+    fakeEngine.on("groupMessages", () => [
+      stored({ id: "e1", event: "joined", member: GONE, text: "Carol joined" }),
+      stored({ id: "e2", event: "admin", member: GONE, text: "Carol is now the admin", timestamp: 1_700_000_000_001 }),
+      stored({ id: "e3", event: "renamed", member: GONE, text: "Carol renamed the group to “Town”", timestamp: 1_700_000_000_002 }),
+      stored({ id: "e4", event: "picture", member: GONE, text: "Carol changed the group's picture", timestamp: 1_700_000_000_003 }),
+      stored({ id: "e5", event: "picture", member: GONE, text: "Carol removed the group's picture", timestamp: 1_700_000_000_004 }),
+    ]).on("updateSettings", () => undefined);
+    fakeEngine.update({ groups: [active({ profile: "community" })] });
+    renderApp(<Routes><Route path="/group/:groupId" element={<GroupChat />} /></Routes>, { route: "/group/group-1", language: "pt" });
+    return screen.findAllByTestId("group-event").then(lines => expect(lines.map(l => l.textContent)).toEqual([
+      "Carol entrou", "Carol agora é o admin", "Carol renomeou o grupo para “Town”", "Carol alterou a foto do grupo", "Carol removeu a foto do grupo",
+    ]));
+  });
+
   it("sends what is typed to the group", async () => {
     const { user, engine } = openGroup(active());
     engine.on("sendGroupMessage", () => ({ error: null }));
