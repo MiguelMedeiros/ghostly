@@ -31,7 +31,7 @@ const rowOf = (name: string) => screen.getAllByTestId("chat-row").find(r => with
 describe("a pinned chat's place, from the chat's ⋮", () => {
   function openChat(id: string) {
     const utils = renderApp(<Chat sessionId={id} visible onCallChange={() => {}} callLayer={null} />);
-    utils.engine.on("ensureLink", () => ({ linkId: "link-1" })).on("setActiveLink", () => undefined);
+    utils.engine.on("ensureLink", () => ({ linkId: "link-1" })).on("setActiveLink", () => undefined).on("sendMessage", () => ({ error: null }));
     utils.engine.update({ links: [linkView({ peerPubKeyZ32: key(id), profile: "paired-chat/1", pairing: { status: "ready" } } as never)] });
     return utils;
   }
@@ -109,7 +109,7 @@ describe("a pinned chat's place, from the chat's ⋮", () => {
   it("says it in the app's language", async () => {
     chats();
     const utils = renderApp(<Chat sessionId="a" visible onCallChange={() => {}} callLayer={null} />, { language: "pt" });
-    utils.engine.on("ensureLink", () => ({ linkId: "link-1" })).on("setActiveLink", () => undefined);
+    utils.engine.on("ensureLink", () => ({ linkId: "link-1" })).on("setActiveLink", () => undefined).on("sendMessage", () => ({ error: null }));
     utils.engine.update({ links: [linkView({ peerPubKeyZ32: key("a"), profile: "paired-chat/1", pairing: { status: "ready" } } as never)] });
     const rows = await menu(utils.user);
     await utils.user.click(rows.getByText("Mover para baixo"));

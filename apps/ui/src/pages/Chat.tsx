@@ -86,7 +86,8 @@ import { RoutineStack } from "../components/chat/RoutineCard";
 import { routineStacks } from "../lib/statusCards";
 import { scrollIntoViewGently } from "../lib/motion";
 import { MessageAnnouncer } from "../components/chat/MessageAnnouncer";
-import { PinMoveItems, PinMoveNote, usePinMoveNote } from "../components/chat/PinOrder";
+import { PinMoveItems, PinMoveNote } from "../components/chat/PinOrder";
+import { usePinMoveNote } from "../hooks/usePinMoveNote";
 import { errorText } from "../lib/errorText";
 
 /** What a call captures from: the devices the profile chose, read when it asks. */

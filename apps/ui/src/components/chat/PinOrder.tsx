@@ -1,8 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from "react";
 import { useI18n } from "../../contexts/I18nContext";
 import { movePinned, pinnedPlace, type PinnedPlace } from "../../lib/storage";
 import { MenuItem } from "../Menu";
-import { ANNOUNCE_CLEAR_MS } from "./MessageAnnouncer";
 
 /*
  * A pinned chat's place among the pinned ones, from its ⋮: Move up and Move down, one place at a time. It is what the
@@ -28,21 +26,7 @@ export function PinMoveItems({ chat, onMoved }: { chat: string; onMoved(place: P
   </>;
 }
 
-/** The line a screen reader hears after a move, and what says it: `[text, announce]`. It empties, so the same place twice is said twice. */
-export function usePinMoveNote(): [string, (place: PinnedPlace | undefined) => void] {
-  const { t } = useI18n();
-  const [text, setText] = useState("");
-  const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
-  useEffect(() => () => clearTimeout(timer.current), []);
-  const announce = useCallback((place: PinnedPlace | undefined) => {
-    if (!place) return;
-    setText(t("chat.announce.pinMoved", { place: place.index + 1, count: place.count }));
-    clearTimeout(timer.current);
-    timer.current = setTimeout(() => setText(""), ANNOUNCE_CLEAR_MS);
-  }, [t]);
-  return [text, announce];
-}
-
+/** The line a screen reader hears after a move (hooks/usePinMoveNote.ts). */
 export function PinMoveNote({ text }: { text: string }) {
   return <p className="sr-only" aria-live="polite" aria-atomic="true" data-testid="chat-pin-announcement">{text}</p>;
 }

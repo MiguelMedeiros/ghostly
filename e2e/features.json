@@ -759,6 +759,7 @@
     "apps/ui/src/hooks/useIncomingCallNotice.ts": ["calls.*","app.attention.notifications"],
     "apps/ui/src/hooks/useIsMobile.ts": ["*"],
     "apps/ui/src/hooks/usePairingProgress.ts": ["chat.paired.pairing-progress","chat.paired.pair"],
+    "apps/ui/src/hooks/usePinMoveNote.ts": ["chats.list.pin-order"],
     "apps/ui/src/hooks/usePkarr.ts": ["invite.create"],
     "apps/ui/src/hooks/useProfilePeek.ts": ["profiles.peek"],
     "apps/ui/src/hooks/useProfileSwitcher.ts": ["profiles.*","backup.*","storage.s3","groups.*","delivery.hold.*","proofs.page","chats.list.delete","chat.paired.nickname-sync","invite.dht"],
