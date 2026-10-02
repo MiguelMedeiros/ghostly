@@ -821,10 +821,11 @@ export class Groups {
 
   /**
    * My packet for the edge to `to`, handed to links that reach that member or may pass it on (WISP 9xx · Group Mesh
-   * § Signaling through members); how many took it. None in a community, whose members keep no edges with each other.
+   * § Signaling through members): how many took it, and whether one of them surely reaches that member. None in a
+   * community, whose members keep no edges with each other.
    */
-  carrySignal(groupId: string, to: string, payload: Uint8Array): number {
-    return this.isCommunity(groupId) ? 0 : this.signals.carry(groupId, to, payload);
+  carrySignal(groupId: string, to: string, payload: Uint8Array): { taken: number; sure: boolean } {
+    return this.isCommunity(groupId) ? { taken: 0, sure: false } : this.signals.carry(groupId, to, payload);
   }
   /** A packet a member carried for the edge to `from` before that edge was started, once. */
   takeSignal(groupId: string, from: string): Uint8Array | undefined { return this.signals.take(groupId, from); }

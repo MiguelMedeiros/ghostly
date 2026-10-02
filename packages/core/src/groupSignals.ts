@@ -32,6 +32,16 @@ export const CARRIED_DEFER_MS = 1_500;
 export const SIGNAL_CARRIERS = 2;
 /** Frames of one member a carrier passes on per minute: a member joining a group of 32 sends about a hundred. */
 export const SIGNALS_PER_MINUTE = 240;
+/**
+ * How long after a carried packet came from the other end the way through members counts as known to work: its own
+ * packets then wait before going to the relays (`CARRIED_DEFER_MS`).
+ */
+export const SIGNAL_PROVEN_MS = 10_000;
+/**
+ * How long a member keeps a frame it cannot pass on yet: the edge to whom it is for is often a moment from up (the
+ * member was just admitted, or its app just came back and its edges open one after the other).
+ */
+export const SIGNAL_HOLD_MS = 5_000;
 /** After a carried packet came from a member, mine goes back the same way at most this often. */
 export const SIGNAL_REPLY_MS = 30_000;
 /**
@@ -62,8 +72,12 @@ export function readGroupSignal(raw: unknown): { g: string; to: string; from: st
 }
 
 export interface CarriedHooks {
-  /** Hands my packet for this edge to members that may pass it on; how many took it (0: nobody could). */
-  carry(payload: Uint8Array): number;
+  /**
+   * Hands my packet for this edge to links that may pass it on. `taken`: how many took it (0: nobody could). `sure`:
+   * one of them reaches the other end as far as anyone can tell (a link of the two of us beside the edge, or the
+   * admin, which keeps an edge with everyone), so the relays can wait even before anything came back that way.
+   */
+  carry(payload: Uint8Array): { taken: number; sure: boolean };
   /** The edge's own data link is open: it carries everything, and nothing is handed to anyone. */
   open(): boolean;
   /** A carried packet of the member's is here and no read is under way: look now. */
@@ -91,6 +105,8 @@ export class CarriedTransport implements PkarrTransport {
   private pending: { identity: Identity; records: GhostRecord[]; options?: PkarrRequestOptions; timer: ReturnType<typeof setTimeout>; heardBefore: number; ended: Promise<"ended">; end: () => void } | null = null;
   /** How many carried packets of the member's came: a deferral that ends with none more says no member reaches it. */
   private heard = 0;
+  /** When the last one came (`SIGNAL_PROVEN_MS`). */
+  private heardAt = -Infinity;
   /** No member reached the other end: packets go to the relays at once until one does. */
   private quiet = false;
   private stopped = false;
@@ -121,9 +137,13 @@ export class CarriedTransport implements PkarrTransport {
     this.lastTimestamp = now > this.lastTimestamp ? now : this.lastTimestamp + 1n;
     const payload = createRelayPayload(identity, records, this.lastTimestamp);
     this.mine = payload;
-    let carriers = 0;
-    try { carriers = this.hooks.carry(payload); } catch { /* nobody took it */ }
-    if (!carriers || this.quiet) return this.inner.publish(identity, records, options);
+    let carried = { taken: 0, sure: false };
+    try { carried = this.hooks.carry(payload); } catch { /* nobody took it */ }
+    // The relays wait only when the way through members is known to work, or as good as: a member that took the
+    // packet may not reach the other end (after a restart, two members answering the same one each hold the other's
+    // answer), and an answer held back for nothing is read a poll later.
+    const proven = Date.now() - this.heardAt < SIGNAL_PROVEN_MS;
+    if (!carried.taken || this.quiet || !(carried.sure || proven)) return this.inner.publish(identity, records, options);
     let end!: () => void;
     const ended = new Promise<"ended">(resolve => { end = () => resolve("ended"); });
     this.pending = { identity, records, options, heardBefore: this.heard, ended, end, timer: setTimeout(() => this.flush(), this.hooks.deferMs ?? CARRIED_DEFER_MS) };
@@ -195,6 +215,7 @@ export class CarriedTransport implements PkarrTransport {
     if (this.carried && packet.timestampMicros <= this.carried.timestampMicros) return false;
     this.carried = packet;
     this.heard++;
+    this.heardAt = Date.now();
     this.quiet = false;
     const waiting = this.waiting;
     this.waiting = null;

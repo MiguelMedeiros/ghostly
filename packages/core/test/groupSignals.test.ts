@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  CARRIED_DEFER_MS, SIGNAL_FRESH_MS, CarriedTransport, DiscoveryBudgetError, createIdentity, createRelayPayload, groupSignalFrame, parseRelayPayload, readGroupSignal,
+  CARRIED_DEFER_MS, SIGNAL_FRESH_MS, SIGNAL_PROVEN_MS, CarriedTransport, DiscoveryBudgetError, createIdentity, createRelayPayload, groupSignalFrame, parseRelayPayload, readGroupSignal,
   type GhostRecord, type Identity, type PkarrTransport, type SignedPacket,
 } from "../src";
 // covers: groups.protocol.signals
@@ -33,11 +33,11 @@ class Relays implements PkarrTransport {
 
 const records = (value: string): GhostRecord[] => [{ label: "_x", value }];
 
-function edge(carriers = 1) {
+function edge(carriers = 1, sure = true) {
   const me = createIdentity(), peer = createIdentity(), relays = new Relays();
-  const state = { open: false, carriers, carried: [] as Uint8Array[], looks: 0 };
+  const state = { open: false, carriers, sure, carried: [] as Uint8Array[], looks: 0 };
   const transport = new CarriedTransport(relays, me.pubKeyZ32, peer.pubKeyZ32, {
-    carry: payload => { state.carried.push(payload); return state.carriers; },
+    carry: payload => { state.carried.push(payload); return { taken: state.carriers, sure: state.sure }; },
     open: () => state.open,
     look: () => { state.looks++; },
   });
@@ -65,6 +65,22 @@ describe("an edge's packets, carried by members beside the relays", () => {
     expect(relays.publishes).toEqual([]);
     await vi.advanceTimersByTimeAsync(CARRIED_DEFER_MS);
     expect(relays.publishes).toEqual([records("offer")]);
+  });
+
+  it("a member that may not reach the other end carries the packet, and the relays get it at once, until something came back that way", async () => {
+    const { me, peer, relays, state, transport } = edge(1, false);
+    await transport.publish(me, records("answer"));
+    expect(state.carried).toHaveLength(1);
+    expect(relays.publishes).toEqual([records("answer")]);
+    // The other end's packet came through a member: that way works, for a while.
+    transport.accept(createRelayPayload(peer, records("theirs")));
+    await transport.publish(me, records("next"));
+    expect(relays.publishes).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(CARRIED_DEFER_MS);
+    expect(relays.publishes).toHaveLength(2);
+    await vi.advanceTimersByTimeAsync(SIGNAL_PROVEN_MS);
+    await transport.publish(me, records("much later"));
+    expect(relays.publishes).toHaveLength(3);
   });
 
   it("an edge that opened meanwhile publishes its settled packet, and the deferred one never goes", async () => {

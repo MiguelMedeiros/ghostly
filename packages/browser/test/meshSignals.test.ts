@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { GROUP_VERSION_SIGNALS, SIGNALS_PER_MINUTE, SIGNAL_REPLY_MS, createIdentity, groupSignalFrame, type GroupSession, type Roster } from "@ghostly/core";
+import { GROUP_VERSION_SIGNALS, SIGNALS_PER_MINUTE, SIGNAL_HOLD_MS, SIGNAL_REPLY_MS, createIdentity, groupSignalFrame, type GroupSession, type Roster } from "@ghostly/core";
 import { MeshSignals } from "../src/engine/meshSignals";
 import type { GroupsHost } from "../src/engine/groups";
 import type { StoredGroup } from "../src/shared/types";
@@ -80,7 +80,8 @@ describe("edge signaling through members", () => {
   it("a member that reaches both ends passes the packet on, and the other end's goes back the same way", () => {
     const { net, alice, bob, carol } = three();
     carol.mine.set("edge:carol>bob", bytes("carol is here"));
-    expect(bob.signals.carry(G, carol.key, bytes("bob's offer"))).toBe(1);
+    // Through the admin, which keeps an edge with everyone: as good as sure.
+    expect(bob.signals.carry(G, carol.key, bytes("bob's offer"))).toEqual({ taken: 1, sure: true });
     expect(carol.took).toEqual(["edge:carol>bob bob's offer"]);
     expect(bob.took).toEqual(["edge:bob>carol carol is here"]);
     expect(alice.took).toEqual([]);
@@ -95,15 +96,24 @@ describe("edge signaling through members", () => {
     expect(bob.took).toEqual(["edge:bob>carol carol is here", "edge:bob>carol carol's answer"]);
   });
 
+  it("through a member that is not the admin it is carried, and not sure to arrive", () => {
+    const net = new Net();
+    const alice = net.add("alice", "admin"), bob = net.add("bob"), carol = net.add("carol");
+    // Carol's app is back: her edges are down, and Alice and Bob reach each other.
+    net.link(alice, bob, "edge"); net.link(alice, carol, "edge", false); net.link(bob, carol, "edge", false);
+    expect(alice.signals.carry(G, carol.key, bytes("alice's answer"))).toEqual({ taken: 1, sure: false });
+    expect(bob.signals.carry(G, carol.key, bytes("bob's answer"))).toEqual({ taken: 1, sure: true });
+  });
+
   it("goes nowhere when no member is reachable, and through no member whose app does not carry signals", () => {
     const net = new Net();
     const alice = net.add("alice", "admin"), bob = net.add("bob"), carol = net.add("carol");
     net.link(bob, carol, "edge", false);
-    expect(bob.signals.carry(G, carol.key, bytes("offer"))).toBe(0);
+    expect(bob.signals.carry(G, carol.key, bytes("offer")).taken).toBe(0);
     net.link(alice, bob, "edge", true, false); net.link(alice, carol, "edge");
-    expect(bob.signals.carry(G, carol.key, bytes("offer"))).toBe(0);
-    expect(bob.signals.carry(G, createIdentity().pubKeyZ32, bytes("to nobody in the group"))).toBe(0);
-    expect(bob.signals.carry(G, bob.key, bytes("to myself"))).toBe(0);
+    expect(bob.signals.carry(G, carol.key, bytes("offer")).taken).toBe(0);
+    expect(bob.signals.carry(G, createIdentity().pubKeyZ32, bytes("to nobody in the group")).taken).toBe(0);
+    expect(bob.signals.carry(G, bob.key, bytes("to myself")).taken).toBe(0);
   });
 
   it("is passed on once, and only by the member its sender handed it to", () => {
@@ -128,14 +138,14 @@ describe("edge signaling through members", () => {
     net.link(alice, carol, "entry"); net.link(alice, carol, "edge", false); net.link(bob, carol, "edge", false);
     carol.signals.keep(G, "entry:carol>alice");
     alice.mine.set("edge:alice>carol", bytes("alice is here")); bob.mine.set("edge:bob>carol", bytes("bob is here"));
-    expect(carol.signals.carry(G, alice.key, bytes("carol to alice"))).toBe(1);
+    expect(carol.signals.carry(G, alice.key, bytes("carol to alice")).taken).toBe(1);
     expect(alice.took).toEqual(["edge:alice>carol carol to alice"]);
     expect(carol.took).toEqual(["edge:carol>alice alice is here"]);
-    expect(carol.signals.carry(G, bob.key, bytes("carol to bob"))).toBe(1);
+    expect(carol.signals.carry(G, bob.key, bytes("carol to bob")).taken).toBe(1);
     expect(bob.took).toEqual(["edge:bob>carol carol to bob"]);
     expect(carol.took).toEqual(["edge:carol>alice alice is here", "edge:carol>bob bob is here"]);
     // The admin's own go to the joiner over the session too, while it is up.
-    expect(alice.signals.carry(G, carol.key, bytes("alice's offer"))).toBe(1);
+    expect(alice.signals.carry(G, carol.key, bytes("alice's offer")).taken).toBe(1);
     expect(carol.took).toContain("edge:carol>alice alice's offer");
     // Released: the entry session is the admin's edge's business no more.
     expect(carol.signals.release(G, "entry:carol>alice")).toBe(true);
@@ -148,7 +158,7 @@ describe("edge signaling through members", () => {
     const alice = net.add("alice", "admin"), bob = net.add("bob");
     net.link(alice, bob, "chat"); net.link(alice, bob, "edge", false);
     alice.contacts = { [bob.key]: "chat:alice>bob" }; bob.contacts = { [alice.key]: "chat:bob>alice" };
-    expect(alice.signals.carry(G, bob.key, bytes("alice's offer"))).toBe(1);
+    expect(alice.signals.carry(G, bob.key, bytes("alice's offer")).taken).toBe(1);
     expect(bob.took).toEqual(["edge:bob>alice alice's offer"]);
   });
 
@@ -173,6 +183,30 @@ describe("edge signaling through members", () => {
     alice.signals.edgeReady(G, session, bob.key, "edge:alice>bob");
     expect(carol.took).toEqual(["edge:carol>alice alice to carol"]);
     expect(dave.took).toEqual([]);
+  });
+
+  it("a frame for a member whose edge is a moment from up waits for it, a few seconds", () => {
+    const net = new Net();
+    const alice = net.add("alice", "admin"), bob = net.add("bob"), carol = net.add("carol");
+    net.link(alice, bob, "edge"); net.link(alice, carol, "edge", false); net.link(bob, carol, "edge", false);
+    const session = { myKey: alice.key, roster: net.roster, others: [bob.key, carol.key] } as unknown as GroupSession;
+    // Carol's app is back and Bob answers her offer; Alice's edge with Carol is not up yet.
+    expect(bob.signals.carry(G, carol.key, bytes("bob's first")).taken).toBe(1);
+    expect(bob.signals.carry(G, carol.key, bytes("bob's answer")).taken).toBe(1);
+    expect(carol.took).toEqual([]);
+    alice.links.get("edge:alice>carol")!.up = carol.links.get("edge:carol>alice")!.up = true;
+    alice.signals.edgeReady(G, session, carol.key, "edge:alice>carol");
+    // The newest one, once.
+    expect(carol.took).toEqual(["edge:carol>bob bob's answer"]);
+    alice.signals.edgeReady(G, session, carol.key, "edge:alice>carol");
+    expect(carol.took).toHaveLength(1);
+    // One that waited too long is dropped: the relays have it by then.
+    alice.links.get("edge:alice>carol")!.up = false;
+    bob.signals.carry(G, carol.key, bytes("bob's late one"));
+    alice.now += SIGNAL_HOLD_MS;
+    alice.links.get("edge:alice>carol")!.up = true;
+    alice.signals.edgeReady(G, session, carol.key, "edge:alice>carol");
+    expect(carol.took).toHaveLength(1);
   });
 
   it("passes on a bounded number of one member's frames a minute", () => {
