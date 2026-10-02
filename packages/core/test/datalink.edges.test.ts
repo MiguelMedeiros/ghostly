@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DataLink, GATHER_ATTEMPTS, GATHER_STALL_MS, REANSWERS, STALLED_EVIDENCE_MS, type DataLinkOptions, type DataLinkState } from "../src/datalink";
 import { DATA_CHANNEL_ID, DATA_CHANNEL_LABEL, RTC_SIGNAL_MAX_AGE_MS, parseRtcSignal, type RtcSignal } from "../src/signal";
 
-// covers: transport.webrtc, core.frames
+// covers: transport.webrtc, core.frames, chat.paired.clock-skew
 
 const NOW = 1_800_000_000_000;
 const CONNECT_TIMEOUT_MS = 90_000;
@@ -224,6 +224,67 @@ describe("DataLink refuses signals it must not act on", () => {
     const b = link("bbbb", "aaaa");
     await b.dl.handleSignal(JSON.stringify(offerFrom({ ts: NOW - RTC_SIGNAL_MAX_AGE_MS })));
     expect(b.dl.state).toBe("connecting");
+  });
+
+  // Reported 2026-10-01: a first pairing between two clocks two minutes apart never went live over WebRTC. Every
+  // signal of the other side was "older than 120 s" or "from the future", and dropped without a word.
+  it.each([
+    ["two minutes ahead", 2 * 60_000 + 500], ["ten minutes ahead", 10 * 60_000], ["an hour ahead", 60 * 60_000],
+    ["two minutes behind", -2 * 60_000 - 500], ["ten minutes behind", -10 * 60_000], ["an hour behind", -60 * 60_000],
+  ])("answers an offer from a clock %s that it saw come (the read before did not have it)", async (_, skew) => {
+    const b = link("bbbb", "aaaa");
+    await b.dl.handleSignal(JSON.stringify(offerFrom({ ts: NOW + skew })), NOW - 3_000);
+    expect(b.dl.state).toBe("connecting");
+    expect(parseRtcSignal(b.lastSignal())).toMatchObject({ t: "a", o: NOW + skew });
+  });
+
+  it("still ignores an offer that may be older than the age limit: the read before it was that long ago, and its own time says so too", async () => {
+    const b = link("bbbb", "aaaa");
+    await b.dl.handleSignal(JSON.stringify(offerFrom({ ts: NOW - RTC_SIGNAL_MAX_AGE_MS - 1 })), NOW - RTC_SIGNAL_MAX_AGE_MS - 5_000);
+    expect(b.dl.state).toBe("idle");
+    expect(b.pcs).toHaveLength(0);
+    // Its own time is inside that span: it is as old as it says, whatever came before.
+    await b.dl.handleSignal(JSON.stringify(offerFrom({ ts: NOW - 30_000 })), NOW - RTC_SIGNAL_MAX_AGE_MS - 5_000);
+    expect(b.dl.state).toBe("connecting");
+  });
+
+  it("an offer the first read of a run finds is judged by its own time: nothing else dates it", async () => {
+    const b = link("bbbb", "aaaa");
+    await b.dl.handleSignal(JSON.stringify(offerFrom({ ts: NOW - RTC_SIGNAL_MAX_AGE_MS - 1 })));
+    await b.dl.handleSignal(JSON.stringify(offerFrom({ ts: NOW + RTC_SIGNAL_MAX_AGE_MS + 1 })));
+    expect(b.pcs).toHaveLength(0);
+  });
+
+  it.each([["two minutes ahead", 2 * 60_000 + 500], ["an hour behind", -60 * 60_000]])("takes the answer to its own offer from a clock %s: an answer names the offer it is for", async (_, skew) => {
+    const a = link("aaaa", "bbbb");
+    await a.dl.connect();
+    await a.dl.handleSignal(JSON.stringify({ ...offerFrom({ t: "a", ts: NOW + skew, s: "active" }), o: NOW }));
+    expect(a.dl.state).toBe("connecting");
+    // The same answer again, or an earlier one of that clock, is not applied twice.
+    await a.dl.handleSignal(JSON.stringify({ ...offerFrom({ t: "a", ts: NOW + skew - 1, s: "active" }), o: NOW }));
+    expect(a.pcs).toHaveLength(1);
+  });
+
+  it("an offer from a clock an hour ahead does not let that clock's older offers back in", async () => {
+    const b = link("bbbb", "aaaa");
+    const ahead = NOW + 60 * 60_000;
+    await b.dl.handleSignal(JSON.stringify(offerFrom({ ts: ahead })), NOW - 1_000);
+    b.pc().channel.open();
+    await b.dl.handleSignal(JSON.stringify(offerFrom({ ts: ahead - 5_000 })), NOW - 1_000);
+    await b.dl.handleSignal(JSON.stringify(offerFrom({ ts: ahead })), NOW - 1_000);
+    expect(b.pcs).toHaveLength(1);
+    expect(b.dl.state).toBe("open");
+  });
+
+  it("answers again within the offerer's attempt as this clock counts it, whatever the offer's own time", async () => {
+    const b = link("bbbb", "aaaa", () => {}, { offerStanding: () => true });
+    // The offerer's clock is ten minutes behind: by its `ts` the attempt would have ended long ago.
+    await b.dl.handleSignal(JSON.stringify(offerFrom({ ts: NOW - 10 * 60_000 })), NOW - 1_000);
+    vi.advanceTimersByTime(30_000);
+    b.pc().setConnectionState("failed");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(b.dl.state).toBe("connecting");
+    expect(b.pcs).toHaveLength(2);
   });
 
   it("ignores a replayed or older offer once one was taken", async () => {

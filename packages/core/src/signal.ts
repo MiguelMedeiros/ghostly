@@ -24,8 +24,18 @@ export interface RtcSignal {
 
 export const DATA_CHANNEL_LABEL = "ghostly/1";
 export const DATA_CHANNEL_ID = 0;
-/** Offers and answers older than this are ignored. */
+/** An offer older than this is ignored. */
 export const RTC_SIGNAL_MAX_AGE_MS = 120_000;
+/**
+ * Whether an offer its maker dated `ts` is recent enough to answer. `since`: this device read the maker's record at
+ * that time, by its own clock, and the offer was not in it. The offer's time is then held between that read and now,
+ * so only this clock measures its age. Without `since` (the first read of a run found the offer) its own time is all
+ * there is to go by, and it may differ from this clock by the age allowed, either way.
+ */
+export function offerIsFresh(ts: number, since?: number, now = Date.now()): boolean {
+  if (since === undefined) return Math.abs(now - ts) <= RTC_SIGNAL_MAX_AGE_MS;
+  return now - Math.max(since, Math.min(ts, now)) <= RTC_SIGNAL_MAX_AGE_MS;
+}
 const MAX_MESSAGE_SIZE = 262_144;
 
 const CANDIDATE_TYPES = { host: "h", srflx: "s", relay: "r" } as const;

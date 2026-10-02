@@ -5,9 +5,9 @@ import { traceLink } from "./linkTrace";
 import {
   DATA_CHANNEL_ID,
   DATA_CHANNEL_LABEL,
-  RTC_SIGNAL_MAX_AGE_MS,
   buildDataSdp,
   extractRtcParams,
+  offerIsFresh,
   parseRtcSignal,
   type RtcSignal,
 } from "./signal";
@@ -100,8 +100,8 @@ export class DataLink {
   private connectingSince = 0;
   private connectTimer: ReturnType<typeof setTimeout> | null = null;
   private disconnectTimer: ReturnType<typeof setTimeout> | null = null;
-  /** The offer this side answered in the current attempt, and how many times it answered it again. */
-  private answered: { offer: RtcSignal; again: number } | null = null;
+  /** The offer this side answered in the current attempt, when it took it (this clock), and how many times it answered it again. */
+  private answered: { offer: RtcSignal; at: number; again: number } | null = null;
 
   constructor(private readonly options: DataLinkOptions) {}
 
@@ -123,11 +123,23 @@ export class DataLink {
     }
   }
 
-  /** Feeds a decrypted `_rtc` value from the peer's packet. */
-  async handleSignal(json: string): Promise<void> {
+  /**
+   * Feeds a decrypted `_rtc` value from the peer's packet. `since`: the peer's record did not carry it when this device
+   * read it at that time (this clock), or it came on a live session just now.
+   *
+   * The peer's `ts` orders its signals (a later one replaces an earlier one, and an answer names the offer it is for).
+   * It is not what says a signal is recent when this device saw it come: two clocks a few minutes apart are common, and
+   * every signal of such a peer was dropped here, without a word. An answer is for the offer it names, which this side
+   * made in this attempt, so it has no age to check. An offer is as old as the time since the read that did not have it
+   * (`offerIsFresh`); only one the first read finds is judged by its own time, as nothing else dates it.
+   */
+  async handleSignal(json: string, since?: number): Promise<void> {
     const signal = parseRtcSignal(json);
     if (!signal || signal.ts <= this.lastSignalTs) return;
-    if (Math.abs(Date.now() - signal.ts) > RTC_SIGNAL_MAX_AGE_MS) return;
+    if (signal.t === "o" && !offerIsFresh(signal.ts, since)) {
+      traceLink(this.options.myPubKeyZ32, "offer-stale", { ageMs: Date.now() - signal.ts, ...(since !== undefined && { sinceMs: Date.now() - since }) });
+      return;
+    }
 
     if (signal.t === "o") {
       if (this.state === "offering") {
@@ -141,7 +153,7 @@ export class DataLink {
       const wasOpen = this.state === "open";
       this.teardown();
       if (wasOpen) { this.options.onDirect?.("closed"); this.options.onClose(); }
-      this.answered = { offer: signal, again: 0 };
+      this.answered = { offer: signal, at: Date.now(), again: 0 };
       await this.answer(signal);
     } else if (this.state === "connecting" && this.myOfferTs && signal.o === this.myOfferTs && this.pc) {
       // A newer answer to the offer this side already took an answer for: the answerer made it again (`REANSWERS`),
@@ -203,7 +215,8 @@ export class DataLink {
    */
   private failed(): void {
     const answered = this.state === "connecting" ? this.answered : null;
-    const left = answered ? CONNECT_TIMEOUT_MS - (Date.now() - answered.offer.ts) : 0;
+    // How long the offerer's attempt still runs, counted on this clock from when its offer was taken (its `ts` is its clock's).
+    const left = answered ? CONNECT_TIMEOUT_MS - (Date.now() - answered.at) : 0;
     const evidence = this.directEvidence();
     if (answered && answered.again < REANSWERS && left > REANSWER_MARGIN_MS && this.options.offerStanding?.(answered.offer.ts)) {
       answered.again++;

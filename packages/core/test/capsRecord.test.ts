@@ -7,14 +7,14 @@ import { fromBase64Url, utf8Encode } from "../src/bytes";
 import { decrypt, encrypt } from "../src/crypto";
 import { measureRecords, MAX_DNS_PACKET_BYTES, type GhostRecord, type SignedPacket } from "../src/pkarr";
 import {
-  CAPS_LABEL, CAPS_PUBLISH_SPACING_MS, CAPS_REFRESH_MS, CapsExchange, CapsKeys, CapsRefusedError, capsDescriptors, dialDescriptors, emptyCapsState,
+  CAPS_ISSUED_BACK_MS, CAPS_LABEL, CAPS_PUBLISH_SPACING_MS, CAPS_REFRESH_MS, CapsExchange, CapsKeys, CapsRefusedError, capsDescriptors, dialDescriptors, emptyCapsState,
   type CapsContent, type CapsState,
 } from "../src/capsRecord";
 import type { PairingCredentials } from "../src/pairedSession";
 import { relayedTransports } from "../src/pairedTransports";
 import { DiscoveryBudgetError } from "../src/transport";
 
-// covers: chat.caps-record
+// covers: chat.caps-record, chat.paired.clock-skew
 
 const IROH = { id: "ab".repeat(32), relay: "https://euw1-1.relay.n0.iroh.iroh.link./", addresses: ["192.0.2.1:4433", "[2001:db8::1]:4433"] };
 const HYPER = { publicKey: "cd".repeat(32), host: "192.0.2.7", port: 49737 };
@@ -125,13 +125,37 @@ describe("capability record: keys, seal and signature", () => {
       .toThrow(expect.objectContaining({ reason: expect.stringMatching(/signature|author/) }));
   });
 
-  it("refuses a record from the future and one whose rev goes backwards", () => {
+  it("refuses a record whose rev goes backwards, whatever the two clocks say", () => {
     const { aKeys, bKeys } = pair();
-    const future = aKeys.seal(content(), 3, undefined, Date.now() + 120_000);
-    expect(() => bKeys.open(packetOf(aKeys, future.records))).toThrow(expect.objectContaining({ reason: "future" }));
     const old = aKeys.seal(content(), 3);
     expect(() => bKeys.open(packetOf(aKeys, old.records), { minRev: 4 })).toThrow(expect.objectContaining({ reason: "rev" }));
     expect(bKeys.open(packetOf(aKeys, old.records), { minRev: 3 }).rev).toBe(3);
+    // An older record replayed with a date that looks new is still the older record: `rev` says so, not the date.
+    const replayed = aKeys.seal(content(), 3, undefined, Date.now() + 60 * 60_000);
+    expect(() => bKeys.open(packetOf(aKeys, replayed.records), { minRev: 4 })).toThrow(expect.objectContaining({ reason: "rev" }));
+  });
+
+  it.each([
+    ["two minutes ahead", 2 * 60_000], ["ten minutes ahead", 10 * 60_000], ["an hour ahead", 60 * 60_000],
+    ["two minutes behind", -2 * 60_000], ["an hour behind", -60 * 60_000],
+  ])("takes the record of a contact whose clock is %s (it was refused, silently, past one minute ahead)", (_, skew) => {
+    const { aKeys, bKeys } = pair();
+    const theirNow = Date.now() + skew;
+    const record = bKeys.open(packetOf(aKeys, aKeys.seal(content(), 1, undefined, theirNow).records));
+    expect(record).toMatchObject({ rev: 1, transports: content().transports, name: "Ada Lovelace" });
+    expect(record.issued).toBe(theirNow - CAPS_ISSUED_BACK_MS);
+  });
+
+  it("is dated back by its author, so an app up to 1.0.1 (a record over a minute ahead of its clock is refused) takes one from a clock minutes ahead", () => {
+    const { aKeys, bKeys } = pair();
+    // The 1.0.1 reader's rule, kept here as it was: `issued > now + 60_000` is refused.
+    const takenBy101 = (skew: number) => bKeys.open(packetOf(aKeys, aKeys.seal(content(), 1, undefined, Date.now() + skew).records)).issued <= Date.now() + 60_000;
+    expect(takenBy101(0)).toBe(true);
+    expect(takenBy101(2 * 60_000)).toBe(true);
+    expect(takenBy101(10 * 60_000)).toBe(true);
+    // What stays refused by them: a clock further ahead than the record is dated back, plus their minute.
+    expect(takenBy101(CAPS_ISSUED_BACK_MS + 61_000)).toBe(false);
+    expect(takenBy101(60 * 60_000)).toBe(false);
   });
 
   it("carries the chat's choice as a trailing element, and none on Automatic (WISP 100, a choice made while not live)", () => {

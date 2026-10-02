@@ -40,7 +40,7 @@ import {
 } from "./http";
 import type { LinkParams } from "./invite";
 import type { Payment, PaymentAsk, PaymentRequest, PaymentResult } from "./payments";
-import { EXPECT_PEER_MS, WATCH_PEER_MS, LinkSession, type LinkStatus, type PeerPresence, type PollIntervals } from "./link";
+import { EXPECT_PEER_MS, WATCH_PEER_MS, LinkSession, presenceSeenAt, type LinkStatus, type PeerPresence, type PollIntervals } from "./link";
 import type { ResolvedLink } from "./records";
 import { servicesFromWire, servicesToWire, type ServiceAd } from "./services";
 import { PairedHttp } from "./pairedHttp";
@@ -665,7 +665,7 @@ export class GhostLink {
   /** Whether the stream was blocked (DHT-only on either side) when last looked at. */
   private streamWasBlocked: boolean;
   /** The contact's latest `_rtc` signal while the stream was blocked. */
-  private heldSignal: string | null = null;
+  private heldSignal: { signal: string; since?: number } | null = null;
   /** The link packet of a DHT-only contact its mailbox was last read early for (its timestamp): once per packet. */
   private leftDhtSeenFor = 0;
   /** The first pairing of this chat, while it is one (`pairingProgress` option, no peer key yet). */
@@ -782,7 +782,7 @@ export class GhostLink {
           if (presence.online) this.tracker?.sawPeer();
           this.peerPacketArrived(presence);
           // A first contact under way: a fresh packet of the contact says its envelope is a read away.
-          if (presence.online && !options.pairing?.credentials.peerKey && Date.now() - presence.lastPacketAt < EXPECT_PEER_MS) this.dht?.expect();
+          if (presence.online && !options.pairing?.credentials.peerKey && Date.now() - presenceSeenAt(presence) < EXPECT_PEER_MS) this.dht?.expect();
           events.onPresence?.(this.mergePresence(presence));
           this.peerMayHaveLeftDht(presence);
           this.maybeAutoConnect(presence);
@@ -798,13 +798,13 @@ export class GhostLink {
         },
         onPeerAck: (ack) => events.onPeerAck?.(ack),
         onCallSignal: (signal) => { if (!options.params.profile) events.onCallSignal?.(signal); },
-        onRtcSignal: signal => {
+        onRtcSignal: (signal, since) => {
           traceLink(this.myPubKeyZ32, "rtc-signal-in", { held: this.streamBlocked });
           // Going away: an answer now would pair the contact with a connection about to die, and it would wait on it.
           if (this.leaving) return;
           // Seen once only: kept, and answered as soon as nothing blocks the stream any more.
-          if (this.streamBlocked) { this.heldSignal = signal; this.peerDialsFromDht(signal); return; }
-          this.handleRtcSignal(signal);
+          if (this.streamBlocked) { this.heldSignal = { signal, since }; this.peerDialsFromDht(signal); return; }
+          this.handleRtcSignal(signal, since);
         },
         onPeerTransports: value => this.peerPacketTransports(value),
         onDiscoveryError: error => events.onDiscoveryError?.(error),
@@ -1014,12 +1014,12 @@ export class GhostLink {
     return parsed?.t === "o" ? parsed.ts : null;
   }
 
-  private handleRtcSignal(signal: string): void {
+  private handleRtcSignal(signal: string, since?: number): void {
     const options = this.options, credentials = options.pairing?.credentials;
     const verified = options.params.profile ? verifyPairedSignal(signal, options.params.peerPubKeyZ32,
       this.myPubKeyZ32, credentials?.peerKey, credentials?.requireSignedSignals) : signal;
     if (verified && this.predatesLastSession(verified)) return;
-    if (verified) void this.dataLink.handleSignal(verified);
+    if (verified) void this.dataLink.handleSignal(verified, since);
     else if (credentials?.peerKey) {
       // The link's records are published under keys derived from the invite: anyone holding a copy of it can put a
       // signal there, signed by a key of their own or by none. After the pin such a signal is dropped, never a reason
@@ -1051,7 +1051,7 @@ export class GhostLink {
     this.session.expectPeer();
     const held = this.heldSignal;
     this.heldSignal = null;
-    if (held) this.handleRtcSignal(held);
+    if (held) this.handleRtcSignal(held.signal, held.since);
     const parked = this.blockedDial;
     if (parked) { this.blockedDial = null; clearTimeout(parked.timer); parked.channel.onClose = null; this.takeDialIn(parked.channel, parked.binding); }
   }
@@ -1065,9 +1065,9 @@ export class GhostLink {
    */
   private peerMayHaveLeftDht(presence: PeerPresence): void {
     if (!this.dht || this.dht.peerMode !== "dht" || this.deliveryMode === "dht" || !presence.online) return;
-    if (Date.now() - presence.lastPacketAt >= EXPECT_PEER_MS || presence.lastPacketAt === this.leftDhtSeenFor) return;
+    if (Date.now() - presenceSeenAt(presence) >= EXPECT_PEER_MS || presence.lastPacketAt === this.leftDhtSeenFor) return;
     this.leftDhtSeenFor = presence.lastPacketAt;
-    traceLink(this.myPubKeyZ32, "peer-link-packet", { age: Date.now() - presence.lastPacketAt });
+    traceLink(this.myPubKeyZ32, "peer-link-packet", { age: Date.now() - presenceSeenAt(presence) });
     this.dht.expect(EXPECT_PEER_MS, true);
   }
 
@@ -2180,7 +2180,7 @@ export class GhostLink {
       // The other side dials as soon as it sees me. A packet of its that is new to me and fresh says it just
       // (re)appeared, so its offer is a poll away; an old one (a contact online for a while, as when this app
       // starts) says nothing is coming now, and looking fast for it would only spend the relays' budget.
-      const fresh = Date.now() - presence.lastPacketAt < EXPECT_PEER_MS;
+      const fresh = Date.now() - presenceSeenAt(presence) < EXPECT_PEER_MS;
       if (fresh && presence.lastPacketAt !== this.offerAwaitedFor) { this.offerAwaitedFor = presence.lastPacketAt; this.session.expectPeer(); }
       return;
     }
@@ -2871,7 +2871,7 @@ export class GhostLink {
               const credentials = this.options.pairing!.credentials;
               const signal = verifyPairedSignal(frame.signal, this.options.params.peerPubKeyZ32,
                 this.myPubKeyZ32, credentials.peerKey, true);
-              if (signal) void this.dataLink.handleSignal(signal);
+              if (signal) void this.dataLink.handleSignal(signal, Date.now());
             }
             return;
           }
@@ -3186,7 +3186,7 @@ export class GhostLink {
     const before = this.peerPacketSeen;
     this.peerPacketSeen = presence.lastPacketAt;
     if (!before || presence.lastPacketAt === before || !presence.online || this.dialing || this.channel) return;
-    if (!this.options.pairing?.credentials.peerKey || Date.now() - presence.lastPacketAt >= EXPECT_PEER_MS) return;
+    if (!this.options.pairing?.credentials.peerKey || Date.now() - presenceSeenAt(presence) >= EXPECT_PEER_MS) return;
     if (Date.now() > this.lostUntil) return;
     this.lostUntil = 0;
     traceLink(this.myPubKeyZ32, "peer-back", {});

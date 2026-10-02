@@ -11,6 +11,7 @@ import {
   MAX_DHT_TEXT_BYTES,
   PRESENCE_HEARTBEAT,
   PRESENCE_WINDOW,
+  presenceSeenAt,
   RELAY_POLL_INTERVALS,
   type LinkSessionEvents,
   type LinkSessionOptions,
@@ -18,7 +19,7 @@ import {
 import type { GhostRecord, SignedPacket } from "../src/pkarr";
 import type { PkarrTransport } from "../src/transport";
 
-// covers: chat.legacy.send, core.records
+// covers: chat.legacy.send, core.records, chat.paired.clock-skew
 
 const NOW = 1_800_000_000_000;
 const I = RELAY_POLL_INTERVALS;
@@ -233,7 +234,7 @@ describe("LinkSession presence and signals", () => {
     await b.s.stop(false);
     a.s.start();
     await settle();
-    expect(a.s.peerPresence).toEqual({ online: true, lastPacketAt: NOW, nick: "Bob", services: [{ id: "atlas", type: "http" }] });
+    expect(a.s.peerPresence).toEqual({ online: true, lastPacketAt: NOW, seenAt: NOW, nick: "Bob", services: [{ id: "atlas", type: "http" }] });
 
     vi.setSystemTime(NOW + PRESENCE_WINDOW);
     a.s.pollNow();
@@ -281,7 +282,8 @@ describe("LinkSession presence and signals", () => {
     a.s.pollNow();
     await settle();
     expect(a.ev.onCallSignal.mock.calls).toEqual([["ring"]]);
-    expect(a.ev.onRtcSignal.mock.calls).toEqual([['{"t":"o"}']]);
+    // The first read of the run found it: nothing says since when it can be there.
+    expect(a.ev.onRtcSignal.mock.calls).toEqual([['{"t":"o"}', undefined]]);
 
     await b.s.setCallSignal("ring again");
     a.s.pollNow();
@@ -289,6 +291,82 @@ describe("LinkSession presence and signals", () => {
     expect(a.ev.onCallSignal.mock.calls).toEqual([["ring"], ["ring again"]]);
     await a.s.stop(false);
     await b.s.stop(false);
+  });
+
+  it("says since when a signal can be there: the read before the one that found it, by this clock", async () => {
+    const { a, b } = pair();
+    a.s.start();
+    await settle();
+    vi.setSystemTime(NOW + 4_000);
+    b.s.start();
+    await b.s.setRtcSignal('{"t":"o"}');
+    vi.setSystemTime(NOW + 6_000);
+    a.s.pollNow();
+    await settle();
+    expect(a.ev.onRtcSignal.mock.calls).toEqual([['{"t":"o"}', NOW]]);
+    await a.s.stop(false);
+    await b.s.stop(false);
+  });
+
+  /** The peer's packet as its own clock dated it: `skew` ms from this one. */
+  const dateBy = (net: ReturnType<typeof network>, skew: number) => {
+    for (const [key, packet] of net.packets) net.packets.set(key, { ...packet, timestampMicros: packet.timestampMicros + BigInt(skew) * 1000n });
+  };
+
+  it.each([
+    ["two minutes behind", -2 * 60_000], ["an hour behind", -60 * 60_000], ["two minutes ahead", 2 * 60_000], ["an hour ahead", 60 * 60_000],
+  ])("counts how long ago a peer whose clock is %s published on this clock, once it has read its record before", async (_, skew) => {
+    const { net, a, b } = pair({}, { getServices: () => [] });
+    a.s.start();
+    await settle();
+    vi.setSystemTime(NOW + 5_000);
+    b.s.start();
+    await settle();
+    await b.s.stop(false);
+    dateBy(net, skew);
+    vi.setSystemTime(NOW + 8_000);
+    a.s.pollNow();
+    await settle();
+    // Its packet is named by its own time, and was seen to come between this run's last two reads.
+    expect(a.s.peerPresence).toMatchObject({ online: true, lastPacketAt: NOW + 5_000 + skew });
+    expect(presenceSeenAt(a.s.peerPresence)).toBeGreaterThanOrEqual(NOW);
+    expect(presenceSeenAt(a.s.peerPresence)).toBeLessThanOrEqual(NOW + 8_000);
+    // The same packet read again is no newer.
+    const seen = presenceSeenAt(a.s.peerPresence);
+    vi.setSystemTime(NOW + 20_000);
+    a.s.pollNow();
+    await settle();
+    expect(presenceSeenAt(a.s.peerPresence)).toBe(seen);
+    // Gone once it is as old as presence lasts, counted here.
+    vi.setSystemTime(seen + PRESENCE_WINDOW);
+    a.s.pollNow();
+    await settle();
+    expect(a.s.peerPresence).toMatchObject({ online: false, services: null });
+    await a.s.stop(false);
+  });
+
+  it("the first read of a run has only the packet's own time: never newer than the read, and a clock behind looks that much older", async () => {
+    const ahead = pair({}, { getServices: () => [] });
+    ahead.b.s.start();
+    await settle();
+    await ahead.b.s.stop(false);
+    dateBy(ahead.net, 60 * 60_000);
+    vi.setSystemTime(NOW + 1_000);
+    ahead.a.s.start();
+    await settle();
+    expect(ahead.a.s.peerPresence).toMatchObject({ online: true, lastPacketAt: NOW + 60 * 60_000, seenAt: NOW + 1_000 });
+    await ahead.a.s.stop(false);
+
+    vi.setSystemTime(NOW);
+    const behind = pair({}, { getServices: () => [] });
+    behind.b.s.start();
+    await settle();
+    await behind.b.s.stop(false);
+    dateBy(behind.net, -60 * 60_000);
+    behind.a.s.start();
+    await settle();
+    expect(behind.a.s.peerPresence).toMatchObject({ online: false, seenAt: NOW - 60 * 60_000 });
+    await behind.a.s.stop(false);
   });
 
   it("keeps the RTC signal out of packets published while not running", async () => {

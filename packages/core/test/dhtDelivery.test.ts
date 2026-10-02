@@ -5,7 +5,7 @@ import { fromBase64Url, utf8Encode } from "../src/bytes";
 import { tryDecrypt } from "../src/crypto";
 import { createIdentity, identityFromSeedB64 } from "../src/identity";
 import { createLink } from "../src/invite";
-import { DhtDelivery, DHT_MESSAGE_TTL, emptyDhtDeliveryState, type DhtDeliveryState } from "../src/dhtDelivery";
+import { DhtDelivery, DHT_EXPIRY_SKEW_MS, DHT_MESSAGE_TTL, emptyDhtDeliveryState, type DhtDeliveryState } from "../src/dhtDelivery";
 import { createRelayPayload, measureRecords, parseRelayPayload, type GhostRecord, type SignedPacket } from "../src/pkarr";
 import type { PairingCredentials } from "../src/pairedSession";
 // covers: chat.dht.delivery, chat.dht.send, chat.dht.offline, chat.dht.fallback, chat.dht.errors, chat.dht.key-change
@@ -54,6 +54,8 @@ it("rejects oversized UTF8 instead of truncating and stops retransmission at exp
   expect(await a.send("x".repeat(256),Date.now(),"abcdefghijklmnopqrstuv")).toBeNull();
   await vi.advanceTimersByTimeAsync(DHT_MESSAGE_TTL+1000);
   expect(h.saved[0].pending?.attempts).toBeLessThanOrEqual(8);
+  // Past its expiry by more than two clocks differ (DHT_EXPIRY_SKEW_MS): a reader no longer takes it.
+  await vi.advanceTimersByTimeAsync(DHT_EXPIRY_SKEW_MS);
   const b=h.make(1);await b.start();await vi.advanceTimersByTimeAsync(1000);expect(h.messages[1].size).toBe(0);
   await a.stop();await b.stop();
 });

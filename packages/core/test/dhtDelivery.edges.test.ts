@@ -6,12 +6,12 @@ import { fromBase64Url, randomBytes, toBase64Url, utf8Encode } from "../src/byte
 import { decrypt, encrypt } from "../src/crypto";
 import { createIdentity, identityFromSeed, identityFromSeedB64, publicKeyFromZ32, sign } from "../src/identity";
 import { createLink } from "../src/invite";
-import { DhtDelivery, DHT_MESSAGE_TTL, DHT_TEXT_REFUSED, LEAVING_DHT_FAST_MS, LIVE_POLL_MS, emptyDhtDeliveryState, type DhtDeliveryState, type DhtDeliveryView } from "../src/dhtDelivery";
+import { DhtDelivery, DHT_EXPIRY_SKEW_MS, DHT_ISSUED_BACK_MS, DHT_MESSAGE_TTL, DHT_TEXT_REFUSED, LEAVING_DHT_FAST_MS, LIVE_POLL_MS, emptyDhtDeliveryState, type DhtDeliveryState, type DhtDeliveryView } from "../src/dhtDelivery";
 import type { PairingCredentials } from "../src/pairedSession";
 import type { GhostRecord, SignedPacket } from "../src/pkarr";
 import { DiscoveryBudgetError } from "../src/transport";
 
-// covers: chat.dht.delivery, chat.dht.send, chat.dht.errors
+// covers: chat.dht.delivery, chat.dht.send, chat.dht.errors, chat.paired.clock-skew
 
 const ID = "abcdefghijklmnopqrstuv", ID2 = "bcdefghijklmnopqrstuvw", ID3 = "cdefghijklmnopqrstuvwx", ID4 = "defghijklmnopqrstuvwxy", ID5 = "efghijklmnopqrstuvwxyz";
 
@@ -167,15 +167,75 @@ describe("DHT delivery: what a receiver refuses", () => {
     ["a fractional sequence", (b: unknown[]) => Object.assign([...b], { 1: 1.5 })],
     ["a string issue date", (b: unknown[]) => Object.assign([...b], { 2: "now" })],
     ["a string expiry", (b: unknown[]) => Object.assign([...b], { 3: "later" })],
-    // The receiver reads 100 ms after the body is built: 30.2 s ahead at build is still over 30 s ahead then.
-    ["an issue date over 30 s ahead", (b: unknown[]) => Object.assign([...b], { 2: Date.now() + 30_200, 3: Date.now() + 90_000, 6: null })],
-    ["an expiry already past", (b: unknown[]) => Object.assign([...b], { 2: Date.now() - 2000, 3: Date.now() })],
+    ["an expiry past by more than two clocks differ", (b: unknown[]) => Object.assign([...b], { 2: Date.now() - DHT_EXPIRY_SKEW_MS - 2000, 3: Date.now() - DHT_EXPIRY_SKEW_MS })],
     ["a control lifetime over 10 minutes", (b: unknown[]) => Object.assign([...b], { 3: (b[2] as number) + 10 * 60_000 + 1, 6: null })],
     ["an unknown mode", (b: unknown[]) => Object.assign([...b], { 5: "carrier-pigeon" })],
     ["a numeric author", (b: unknown[]) => Object.assign([...b], { 4: 7 })],
   ])("ignores a validly signed body with %s", async (_, mutate) => {
     const h = setup(); await h.bob.start();
     await refused(h, h.invitePacket(mutate(h.body())));
+  });
+
+  it.each([
+    ["two minutes ahead", 2 * 60_000], ["ten minutes ahead", 10 * 60_000], ["an hour ahead", 60 * 60_000],
+    ["two minutes behind", -2 * 60_000], ["nine minutes behind", -9 * 60_000],
+  ])("takes a first contact from a clock %s (over 30 s ahead, or behind by a text's lifetime, it was dropped silently)", async (_, skew) => {
+    const h = setup(); await h.bob.start();
+    const theirNow = Date.now() + skew;
+    await h.put(h.invitePacket(h.body({ 2: theirNow, 3: theirNow + 60_000, 6: [ID, theirNow, "hello"] })));
+    expect(h.messages.map(m => m.text)).toEqual(["hello"]);
+    expect(h.pins).toEqual([h.alice.pubKeyZ32]);
+    // The receipt is owed for the time the text had left, counted on this clock: the sender's `expires` is its clock's.
+    expect(h.last()).toMatchObject({ peerSequence: 1, receipt: { id: ID } });
+    expect(h.last().receipt!.expires - Date.now()).toBeGreaterThan(50_000);
+    expect(h.last().receipt!.expires - Date.now()).toBeLessThanOrEqual(60_000);
+    await h.bob.stop();
+  });
+
+  it("does not take an envelope again for a date that looks new: its sequence is what orders it", async () => {
+    const h = setup(); await h.bob.start();
+    await h.put(h.invitePacket(h.body({}, 2)));
+    expect(h.messages.map(m => m.text)).toEqual(["hello"]);
+    // The envelope before it, replayed with any dates: still older.
+    const later = Date.now() + 60 * 60_000;
+    await h.put(h.invitePacket(h.body({ 2: later, 3: later + 60_000, 6: [ID2, later, "again"] }, 1)));
+    await h.put(h.invitePacket(h.body({ 2: later, 3: later + 60_000, 6: [ID2, later, "again"] }, 2)));
+    expect(h.messages.map(m => m.text)).toEqual(["hello"]);
+    expect(h.last().peerSequence).toBe(2);
+    await h.bob.stop();
+  });
+
+  it("dates what it publishes back, within its lifetime, so an app up to 1.0.1 (over 30 s ahead of its clock is dropped) takes it from a clock two minutes ahead", async () => {
+    const h = setup({ mode: "stream" }); await h.bob.start();
+    await vi.advanceTimersByTimeAsync(200);
+    // The 1.0.1 reader's rule, as it was, read by a clock `behind` ms behind this one.
+    const takenBy101 = ([, , issued, expires]: unknown[], behind: number, message = false) => {
+      const now = Date.now() - behind;
+      return !((issued as number) > now + 30_000 || (expires as number) <= now || (expires as number) - (issued as number) > (message ? DHT_MESSAGE_TTL : 10 * 60_000) || (issued as number) >= (expires as number));
+    };
+    const control = h.openPublished();
+    expect(control[2]).toBe(Date.now() - 200 - DHT_ISSUED_BACK_MS);
+    expect(takenBy101(control, 0)).toBe(true);
+    expect(takenBy101(control, 2 * 60_000)).toBe(true);
+    // What stays refused by them: this clock further ahead than the date goes back, plus their 30 s.
+    expect(takenBy101(control, 3 * 60_000)).toBe(false);
+
+    // A text: never dated before its lifetime began (a reader bounds `expires - issued` to five minutes), nor more
+    // than 30 s before its own time (a reader refuses a text dated after its envelope).
+    const sent = Date.now();
+    expect(await h.bob.send("hello", sent, ID)).toBeNull();
+    let text = h.openPublished();
+    expect(text[6]).toEqual([ID, sent, "hello"]);
+    expect(text[2]).toBe(sent);
+    expect(takenBy101(text, 0, true)).toBe(true);
+    expect(takenBy101(text, 2 * 60_000, true)).toBe(false);
+    // Going out again two minutes on, it still says when its lifetime began: a clock two minutes behind takes it now.
+    await vi.advanceTimersByTimeAsync(2 * 60_000);
+    text = h.openPublished();
+    expect(text[6]).toEqual([ID, sent, "hello"]);
+    expect(text[2]).toBe(sent);
+    expect(takenBy101(text, 2 * 60_000, true)).toBe(true);
+    await h.bob.stop();
   });
 
   it("ignores a malformed signature, a signature that does not verify, and one by another key", async () => {
