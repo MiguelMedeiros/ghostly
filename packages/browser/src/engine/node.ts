@@ -55,6 +55,8 @@ import {
   utf8Encode,
   type IncomingMessage,
   emptyLinkRecords,
+  createRelayPayload,
+  type Identity,
   DHT_TEXT_BYTES, DHT_MESSAGE_TTL, type DeliveryMode,
   GhostlyHttpError,
   HTTP_SERVICE_PROTO,
@@ -306,6 +308,8 @@ export const SPARE_INVITE_MIN_AGE_MS = 6_000;
  */
 export const STARTUP_QUIET_MS = 15_000;
 const SPARE_INVITE_MAX_AGE_MS = 15 * 60_000;
+/** How far before this clock a warm packet is dated (`warmKey`): further than a contact's clock is ever behind. */
+export const WARM_DATED_BACK_MS = 24 * 60 * 60_000;
 
 /** How long a removal waits for a wallet's rail to claim what was already paid to it (tests shorten it). */
 export const removalTiming = { claimMs: 30_000 };
@@ -1537,6 +1541,20 @@ export class GhostlyNode implements EngineImplementation {
     return { mine: spare.mine, inviteCode: spare.inviteCode };
   }
 
+  /**
+   * Warms a key with an empty packet (`emptyLinkRecords`), dated `WARM_DATED_BACK_MS` before this clock. One of the two
+   * keys an invite warms is the contact's: its own first packet has to be the later one, or the relays and the DHT keep
+   * this empty one in its place. Dated by this clock, it was later than the first packets of every contact whose clock
+   * runs behind this one: a joiner two minutes behind stayed unseen for two minutes, one an hour behind for an hour.
+   */
+  private warmKey(identity: Identity): void {
+    const records = emptyLinkRecords();
+    const put = this.transport.publishPayload
+      ? this.transport.publishPayload(identity.pubKeyZ32, createRelayPayload(identity, records, BigInt(Date.now() - WARM_DATED_BACK_MS) * 1000n))
+      : this.transport.publish(identity, records);
+    void put.catch(() => {});
+  }
+
   private makeSpare(): SpareInvite {
     // A ghostly1 invite (WISP 801): `mine` keeps the participation seed whose public key the code carries.
     const { mine, invite, inviteCode } = createChatInvite();
@@ -1556,7 +1574,7 @@ export class GhostlyNode implements EngineImplementation {
     spare.warmedAt ??= Date.now();
     for (const identity of [identityFromSeedB64(spare.mine.seedB64), spare.inviteKey]) {
       this.warmedKeys.set(identity.pubKeyZ32, Date.now());
-      void this.transport.publish(identity, emptyLinkRecords()).catch(() => {});
+      this.warmKey(identity);
     }
     this.spareTimer = setTimeout(() => { this.spareTimer = null; if (this.spare === spare) this.prepareSpare(); }, SPARE_INVITE_WARM_EVERY_MS);
   }
@@ -4245,7 +4263,7 @@ export class GhostlyNode implements EngineImplementation {
       // Warmed ahead of time (`takeInvite`): another empty packet now would only be one the relays queue.
       if (Date.now() - (this.warmedKeys.get(identity.pubKeyZ32) ?? 0) < SPARE_INVITE_MAX_AGE_MS) return;
       this.warmedKeys.set(identity.pubKeyZ32, Date.now());
-      void this.transport.publish(identity, emptyLinkRecords()).catch(() => {});
+      this.warmKey(identity);
     } catch { /* a malformed invite warms nothing */ }
   }
 
