@@ -79,6 +79,24 @@ describe("GroupChat: joining through a link", () => {
     expect(await screen.findByTestId("group-joining-stale", {}, { timeout: 3_000 })).toHaveTextContent("Still no answer. If the group's link was replaced, this one no longer works: ask for the new link.");
   });
 
+  it("others knocking too: says how many wait, and after two minutes that the group is busy, not that the link may be dead", async () => {
+    const knocking = (waiting: number | undefined, age = 0) => groupView({ profile: "community", createdAt: Date.now() - age, canSend: false,
+      invitation: { linkId: "", contact: "", admin: "", members: 0, accepted: true, viaLink: true, stage: "knocked", ...(waiting && { waiting }) } });
+    const view = openGroup(knocking(3));
+    expect(screen.getByTestId("group-joining-queue")).toHaveTextContent("3 more people are waiting to be let in.");
+    expect(screen.queryByTestId("group-joining-stale")).not.toBeInTheDocument();
+    act(() => view.engine.update({ groups: [knocking(1)] }));
+    expect(screen.getByTestId("group-joining-queue")).toHaveTextContent("1 more person is waiting to be let in.");
+    // Alone at the door: nothing about a queue.
+    act(() => view.engine.update({ groups: [knocking(undefined)] }));
+    expect(screen.queryByTestId("group-joining-queue")).not.toBeInTheDocument();
+    // Two minutes on, still behind others: a wait, in words that do not send the person to ask for another link.
+    act(() => view.engine.update({ groups: [knocking(2, 2 * 60_000 - 400)] }));
+    const hint = await screen.findByTestId("group-joining-stale", {}, { timeout: 3_000 });
+    expect(hint).toHaveTextContent("Still waiting. The group lets people in a few at a time");
+    expect(hint).not.toHaveTextContent("link was replaced");
+  });
+
   it("a knock someone answered is not told the link may be old", () => {
     openGroup(groupView({ createdAt: Date.now() - 10 * 60_000, canSend: false, invitation: { linkId: "", contact: "", admin: "", members: 0, accepted: true, viaLink: true, stage: "answered" } }));
     expect(screen.getByTestId("group-joining")).toHaveTextContent("The admin's app saw you knock");
@@ -178,9 +196,32 @@ describe("GroupChat: out of the group", () => {
     expect(screen.getByTestId("group-forget")).toBeInTheDocument();
   });
 
-  it("names the status when the engine gave no reason", () => {
+  it("says how to come back when removed from a community, and a line when back in", async () => {
+    openGroup(active({ profile: "community", status: "removed", statusReason: "You were removed from this group", canSend: false }),
+      [stored({ id: "event:4:joined::1", event: "joined", text: "You joined again" })]);
+    expect(screen.getByTestId("group-notice")).toHaveTextContent("You were removed. Open the group's link to join again.");
+    expect(composer()).toBeDisabled();
+    expect(await screen.findByText("You joined again.")).toBeInTheDocument();
+  });
+
+  it("names the status when the engine gave no reason, in the notice too", () => {
     openGroup(active({ status: "left", canSend: false }));
     expect(screen.getByTestId("group-members")).toHaveTextContent("left");
+    expect(screen.getByTestId("group-notice")).toHaveTextContent("left");
+  });
+
+  it.each([
+    ["removed", "You were removed from this group", "Você foi removido deste grupo"],
+    ["forked", "Member 3r69cgd5 holds a different membership history for epoch 4. Membership changes are halted; the admin must re-form the group.",
+      "O membro 3r69cgd5 tem outro histórico de membros na época 4. As mudanças de membros estão paradas; o admin precisa recriar o grupo."],
+    ["lost", "Two members let people in at the same moment and yours did not count. Asking to be let in again…",
+      "Dois membros deixaram pessoas entrar ao mesmo tempo e a sua entrada não valeu. Pedindo para entrar de novo…"],
+  ] as const)("says why when %s in the app's language, not in the engine's English", (status, reason, said) => {
+    fakeEngine.on("groupMessages", () => []).on("updateSettings", () => undefined);
+    fakeEngine.update({ groups: [active({ status, statusReason: reason, canSend: false })] });
+    renderApp(<Routes><Route path="/group/:groupId" element={<GroupChat />} /></Routes>, { route: "/group/group-1", language: "pt" });
+    expect(screen.getByTestId("group-notice")).toHaveTextContent(said);
+    expect(screen.getByTestId("group-members")).toHaveTextContent(said);
   });
 
   it("disables the composer when the engine says it cannot send, even while active", () => {
@@ -396,6 +437,22 @@ describe("GroupChat: history and sending", () => {
     expect(screen.getByText("while you were away")).toBeInTheDocument();
   });
 
+  it("a community's lines about a member who has left since read in the app's language", () => {
+    const GONE = "gone".padEnd(52, "y");
+    fakeEngine.on("groupMessages", () => [
+      stored({ id: "e1", event: "joined", member: GONE, text: "Carol joined" }),
+      stored({ id: "e2", event: "admin", member: GONE, text: "Carol is now the admin", timestamp: 1_700_000_000_001 }),
+      stored({ id: "e3", event: "renamed", member: GONE, text: "Carol renamed the group to “Town”", timestamp: 1_700_000_000_002 }),
+      stored({ id: "e4", event: "picture", member: GONE, text: "Carol changed the group's picture", timestamp: 1_700_000_000_003 }),
+      stored({ id: "e5", event: "picture", member: GONE, text: "Carol removed the group's picture", timestamp: 1_700_000_000_004 }),
+    ]).on("updateSettings", () => undefined);
+    fakeEngine.update({ groups: [active({ profile: "community" })] });
+    renderApp(<Routes><Route path="/group/:groupId" element={<GroupChat />} /></Routes>, { route: "/group/group-1", language: "pt" });
+    return screen.findAllByTestId("group-event").then(lines => expect(lines.map(l => l.textContent)).toEqual([
+      "Carol entrou", "Carol agora é o admin", "Carol renomeou o grupo para “Town”", "Carol alterou a foto do grupo", "Carol removeu a foto do grupo",
+    ]));
+  });
+
   it("sends what is typed to the group", async () => {
     const { user, engine } = openGroup(active());
     engine.on("sendGroupMessage", () => ({ error: null }));
@@ -410,5 +467,26 @@ describe("GroupChat: history and sending", () => {
     await user.type(composer(), "anyone?{Enter}");
     expect(await screen.findByText("You are no longer in this group")).toBeInTheDocument();
     expect(composer()).toHaveValue("anyone?");
+  });
+
+  it("says why the engine refused it in the app's language", async () => {
+    fakeEngine.on("groupMessages", () => []).on("updateSettings", () => undefined)
+      .on("sendGroupMessage", () => ({ error: "This epoch's key has not arrived yet. Wait for a member to catch you up." }));
+    fakeEngine.update({ groups: [active()] });
+    const { user } = renderApp(<Routes><Route path="/group/:groupId" element={<GroupChat />} /></Routes>, { route: "/group/group-1", language: "pt" });
+    await user.type(composer(), "alguém?{Enter}");
+    expect(await screen.findByText("A chave desta época ainda não chegou. Espere um membro atualizar você.")).toBeInTheDocument();
+    expect(composer()).toHaveValue("alguém?");
+  });
+});
+
+describe("GroupChat: the mark on a message of mine", () => {
+  it("marks a message of mine sent, never delivered: a group has no receipts", async () => {
+    const { user } = openGroup(active(), [stored({ id: "m3", sender: "me", member: ME, text: "hello" })]);
+    const mark = await screen.findByTestId("message-delivery");
+    expect(mark).toHaveAttribute("data-delivery", "unacked");
+    expect(mark).toHaveAccessibleName("Sent");
+    await user.click(mark);
+    expect(screen.getByTestId("message-delivery-tip")).toHaveTextContent("Sent to the group. Groups have no receipts.");
   });
 });

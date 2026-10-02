@@ -7,11 +7,12 @@ import { groupCue } from "./cues";
  * member, one that lands at the end of its chat, and what I sent. Everything else a chat's history gains is quiet:
  * a line of a group's history (someone joined, left, is the admin, renamed it), a file (its own cue says it is here),
  * a payment (the wallet's sounds say it), a join notice, a text with nothing to show, and a late catch-up of messages
- * that land among older ones instead of at the end (#506: not new there either). What never becomes a row is quiet
+ * written well before the newest one here (#506: old news, though they are placed where they arrive). The times
+ * compared are the ones the senders say (`shownTime`), never a row's place. What never becomes a row is quiet
  * by construction: typing and a bot's status, edits, reactions, receipts, call signals, transport lines.
  */
 
-/** A message this far behind the newest of its chat, and this old, is a catch-up, not news. Clocks disagree a little. */
+/** A message written this long before the newest of its chat, and this old, is a catch-up, not news. Clocks disagree a little. */
 export const CATCH_UP_SLACK_MS = 60_000;
 
 const JOIN_NOTICE = /^👋 (?:.+ )?joined$/;
@@ -21,7 +22,7 @@ export interface MessageAttention { type: "message" | "sent"; mention: boolean; 
 export interface AttentionContext {
   /** When this engine started: what was sent before it is history, heard already or not. */
   startedAt: number;
-  /** The newest time already stored in the message's chat, while this engine runs; undefined when none. */
+  /** The newest time a message of the chat was written at, among those stored while this engine runs; undefined when none. */
   newest?: number;
   now: number;
 }

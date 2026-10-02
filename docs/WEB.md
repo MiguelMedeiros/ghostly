@@ -24,7 +24,7 @@ serves it on <http://localhost:5180> with hot reload, and `npm run build:web` wr
 
 To put it behind a tunnel or a reverse proxy, choose where it listens with `GHOSTLY_WEB_BIND` (for example `GHOSTLY_WEB_BIND=0.0.0.0:8090 docker compose -f infra/docker-compose.yml up --build -d`) and terminate HTTPS in front of it.
 
-What is served is static files (nginx, `apps/web/nginx.conf`). There is no Ghostly backend: the peer runs in the visitor's tab, reaches Pkarr through relays, talks to contacts over WebRTC or Iroh through a relay (HyperDHT too, once a HyperDHT relay is set), and keeps its state in that browser's IndexedDB and localStorage. It needs a secure context, which `http://localhost` is; anywhere else, serve it over HTTPS.
+What is served is static files (nginx, `apps/web/nginx.conf`). There is no Ghostly backend: the peer runs in the visitor's tab, reaches Pkarr through relays, talks to contacts over WebRTC or Iroh through a relay (HyperDHT too, once a HyperDHT relay is set), and keeps its state in that browser's IndexedDB and localStorage (see [Storage](#storage)). It needs a secure context, which `http://localhost` is; anywhere else, serve it over HTTPS.
 
 Its log names no one: each request is one line with the time, the method, the file served, the status, the size and the time taken. There is no IP address, browser, referrer or query string, and error lines (which would name the client) are kept to `crit`. Docker keeps three files of 10 MB of it (`docker compose -f infra/docker-compose.yml logs web`).
 
@@ -74,6 +74,16 @@ The web app is an installable app (a PWA). Everything below is behind feature de
   - **Push relay.** A browser can post to some push services only through a relay, set in **Settings → Network → Push relay (optional)**, empty by default. `infra/services/push-relay` is a reference one; none is run by Ghostly. The desktop app and the CLI post directly.
   - **New address** makes a fresh subscription, so nobody you stopped talking to can wake you. Deleting or muting a contact does the same by itself, and your other contacts get the new one. Deleting a profile ends its subscription. What the push service, a relay and contacts learn: [WISP 401 § Wake-up push](wisps/401-paired-chat.md#wake-up-push).
 - **Not here.** Opening files with Ghostly from the file manager (`file_handlers`, desktop Chromium only) is left out: the app has no use for a file it did not receive in a chat.
+
+## Storage
+
+Everything the web app keeps (keys, chats, files, wallets) lives in the browser's IndexedDB, OPFS and localStorage. A browser treats that as "best effort" until the site asks for more: when the device runs low on space it may clear the whole origin, and that would be every chat key and every wallet. So the app asks the browser to keep it (`navigator.storage.persist()`, in `apps/ui/src/lib/storagePersistence.ts`).
+
+- **When it asks.** Once the profile holds something worth keeping: at the start for a profile with a chat, a group or a wallet, and the moment the first one is made. Never on a first visit with nothing in it. Once per profile per browser, and again only when a yes became likely: the app was installed, or notifications were allowed.
+- **What each browser does.** Chromium (Chrome, Edge, Brave, Android) answers by itself: yes to an installed app, one allowed to notify, or a site used a lot. Firefox asks the person, so there the app asks only right after a click (the one that made the chat or the wallet), or from **Protect** in Settings. Safari answers by its own rules: an app on the Home Screen is treated better than a tab, and a site in a tab also loses its data after 7 days without a visit.
+- **The extension** asks the same way: its pages and its engine share one origin. **The desktop app** and the CLI keep their data in a folder of their own, which no browser clears: they do not ask.
+- **What Settings shows.** **Settings → Data & storage → Storage on this device**: *Protected*, *Not protected* (this browser may clear Ghostly's data when the device runs low on space) or *Unknown* (the browser does not say), with what to do behind the ⓘ: install the app, allow notifications, keep a backup of the profile. **Storage used** shows the browser's own estimate of what is used and what is available. Where storage is not protected, the wallet's backup reminder says so in its one line.
+- **What it does not cover.** Protected storage is still deleted by clearing the browser's site data or removing the app. A profile backup is the only copy that survives that.
 
 ## What a web page cannot do
 

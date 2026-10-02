@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import { useI18n } from "../../contexts/I18nContext";
 import { CELEBRATE_MS, useNow, type PairingProgressState } from "../../hooks/usePairingProgress";
 import { PAIRING_STEPS, SLOW_AFTER_MS, failureReason, formatElapsed, type PairingStage } from "../../lib/pairingProgress";
+import { useMotionRest, useWindowAway } from "../../lib/windowAway";
 import { usePairingWords } from "./words";
 import "./pairing-scene.css";
 
@@ -49,7 +50,9 @@ function moods(stage: PairingStage): [Mood, Mood] {
  * The first connection of a paired chat, told as a small scene: the invite goes out onto the network, a ghost
  * waits for the other to pick it up, the knock and the answer travel, and the two link up. Every stage also has
  * words, an elapsed time and a step list, so nothing is said by motion alone; with reduced motion the scene is
- * a still picture of the stage. The animation is CSS on a few SVG shapes and pauses while off screen.
+ * a still picture of the stage. The animation is CSS on a few SVG shapes; it pauses while off screen and while the
+ * window is away, and a stage that has lasted a minute (waiting for a contact can take days) becomes the still
+ * picture too, until the stage changes: an open chat nobody is touching draws nothing but its clock.
  */
 export function PairingScene({ progress, contact, retry, retrying, retryError, id }: {
   progress: PairingProgressState;
@@ -63,11 +66,13 @@ export function PairingScene({ progress, contact, retry, retrying, retryError, i
   const words = usePairingWords();
   const { stage, role } = progress;
   const root = useRef<HTMLElement>(null);
-  const [paused, setPaused] = useState(false);
+  const [offScreen, setOffScreen] = useState(false);
+  const paused = useWindowAway() || offScreen;
+  const still = useMotionRest(`${stage} ${progress.attempt ?? 0}`);
   useEffect(() => {
     const element = root.current;
     if (!element || typeof IntersectionObserver === "undefined") return;
-    const observer = new IntersectionObserver(entries => setPaused(!entries[0]?.isIntersecting));
+    const observer = new IntersectionObserver(entries => setOffScreen(!entries[0]?.isIntersecting));
     observer.observe(element);
     return () => observer.disconnect();
   }, []);
@@ -95,7 +100,7 @@ export function PairingScene({ progress, contact, retry, retrying, retryError, i
   // The failure has its own alert; this region tells the stage and, once, that it is taking long.
   const announcement = [label, slowWords].filter(Boolean).join(" ");
 
-  return <section ref={root} id={id} className="ps" data-testid="pairing-scene" data-stage={stage} data-role={role} data-paused={paused || undefined} data-leaving={leaving || undefined} aria-labelledby={titleId}>
+  return <section ref={root} id={id} className="ps" data-testid="pairing-scene" data-stage={stage} data-role={role} data-paused={paused || undefined} data-still={still || undefined} data-leaving={leaving || undefined} aria-labelledby={titleId}>
     <svg className="ps-svg" viewBox="0 0 320 150" aria-hidden="true" focusable="false">
       <defs>
         <marker id={arrow} className="ps-arrow" viewBox="0 0 8 8" refX="6" refY="4" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 L8 4 L0 8 Z" /></marker>

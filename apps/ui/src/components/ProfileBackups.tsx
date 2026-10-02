@@ -9,6 +9,8 @@ import { Block, Button, Notice, Row, Section, Segmented, input } from "./wallet/
 import { useRun } from "./wallet/run";
 import { useServicesPlatform } from "../hooks/useServicesPlatform";
 import { Select } from "./ui/Select";
+import { saveMade } from "../lib/fileDownload";
+import { BACKUP_MEDIA_TYPE } from "@ghostly/browser/backup/envelope";
 import { ButtonGroup, Field, FieldGrid, InputGroup, Truncate } from "./layout";
 
 const size = (bytes: number) => (bytes > 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`);
@@ -23,7 +25,8 @@ export function ProfileBackups({ canSwitch, openBackup = false }: { canSwitch: b
   const { settings, updateBackupStorage } = useSettings();
   const { t, language } = useI18n();
   const { busy, error, setError, run } = useRun();
-  const wallet = useServicesPlatform()?.wallet;
+  const platform = useServicesPlatform();
+  const wallet = platform?.wallet;
   // `openBackup`: the wallet's backup reminder led here. Back up is open, and its passphrase takes the focus.
   const [open, setOpen] = useState<Open>(openBackup ? "backup" : "none");
   const first = useRef<HTMLInputElement>(null);
@@ -53,10 +56,12 @@ export function ProfileBackups({ canSwitch, openBackup = false }: { canSwitch: b
     const name = backupName(space());
     if (to === "s3" && s3) { await s3.put(name, bytes); setDone(t("profile.backups.savedToS3", { size: size(bytes.length) })); }
     else {
-      const url = URL.createObjectURL(new Blob([bytes], { type: "application/vnd.ghostly.backup+json" }));
-      const link = document.createElement("a"); link.href = url; link.download = name.split("/").pop()!; link.click();
-      setTimeout(() => URL.revokeObjectURL(url), 2000);
-      setDone(t("profile.backups.downloaded", { size: size(bytes.length) }));
+      // The desktop app asks where to save it (its WebView downloads nothing from a link). Closing that dialog saves
+      // nothing: nothing is said to be saved, and the passphrase stays to try again.
+      const file = name.split("/").pop()!;
+      const how = await saveMade(platform, new Blob([bytes], { type: BACKUP_MEDIA_TYPE }), file);
+      if (how === "cancelled") return;
+      setDone(how === "saved" ? t("profile.backups.saved", { name: file, size: size(bytes.length) }) : t("profile.backups.downloaded", { size: size(bytes.length) }));
     }
     setPassphrase(""); setConfirm("");
     // A copy of everything now: a wallet's backup reminder that asked for it is over.

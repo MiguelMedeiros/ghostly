@@ -181,8 +181,17 @@
   .ps-names { font-size: 10px; }
 }
 
-/* Off screen, nothing moves. */
+/* Off screen, or with the window away, nothing moves. */
 .ps[data-paused] *, .ps[data-paused] { animation-play-state: paused !important; }
+
+/* A stage that has lasted (lib/windowAway.ts `useMotionRest`): the still picture of reduced motion, arrows on its
+   routes, until the stage changes. The scene itself keeps its own animation (it leaves with one). */
+.ps[data-still] * { animation: none !important; }
+.ps[data-still] :is(.ps-pk, .ps-ping, .ps-knock circle, .ps-burst circle) { opacity: 0 !important; }
+.ps[data-still]:is([data-stage="publishing"], [data-stage="resolving"]) .ps-route-pub,
+.ps[data-still][data-stage="knocking"] :is(.ps-route-up, .ps-route-low),
+.ps[data-still][data-stage="answering"] :is(.ps-route-in, .ps-route-low) { opacity: 0.9; }
+.ps[data-still][data-stage="knocking"] .ps-knock circle:first-child { opacity: 0.3 !important; }
 
 /* Reduced motion (the system's, or the app's setting): a still picture of the stage, arrows on its routes. */
 @media (prefers-reduced-motion: reduce) {
@@ -222,3 +231,5 @@
 @keyframes pi-wait { 0%, 100% { opacity: 0.25; } 50% { opacity: 1; } }
 @media (prefers-reduced-motion: reduce) { .pi-packet { animation: none !important; transform: translateX(7px); opacity: 1; } }
 :root[data-reduce-motion="true"] .pi-packet { animation: none !important; transform: translateX(7px); opacity: 1; }
+/* A stage that has lasted: the packet rests between the two (PairingGlyph.tsx). */
+.pg[data-still] .pi-packet { animation: none !important; transform: translateX(7px); opacity: 1; }

@@ -19,6 +19,11 @@
     "why": "Pourquoi"
   },
   "dhtOnly": "DHT seule",
+  "directBlocked": {
+    "hint": "Les connexions directes sont bloquées sur ce réseau (un VPN ou un pare-feu ?). Les discussions passent quand même par des relais, mais se connectent plus lentement.",
+    "info": "Les dernières tentatives de connexion directe de cet appareil ont toutes échoué : aucune adresse publique n'a été trouvée, ou plusieurs contacts n'ont pas pu être joints directement. Un VPN, un pare-feu ou un opérateur mobile peut en être la cause, et l'app ne sait pas lequel. Les messages et les fichiers passent par des relais ou par la DHT. Un relais voit quels appareils se parlent et quand, jamais ce qu'ils disent. Les appels ont besoin d'un chemin direct ou d'un serveur TURN (Paramètres, Réseau). Cette note disparaît quand une connexion directe fonctionne ou que le réseau change.",
+    "title": "Connexions directes bloquées"
+  },
   "discovery": {
     "dhtDirect": "DHT directe",
     "failing": "en échec",

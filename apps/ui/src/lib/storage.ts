@@ -314,6 +314,8 @@ export function deleteSession(sessionId: string): void {
       // ignore
     }
   }
+  const order = storedPinOrder();
+  if (order.includes(sessionId)) writePinOrder(order.filter(id => id !== sessionId));
 }
 
 /**
@@ -335,12 +337,105 @@ export function isSessionPinned(sessionId: string): boolean {
   return localStorage.getItem(`${getPrefix()}pin_${sessionId}`) === "1";
 }
 
+/*
+ * The order of the pinned chats, as the person put them: one list of ids per profile, the first at the top of the chat
+ * list. An id is a chat's (a group's would be `group:<id>`, as the mute store names it), so the same list can hold
+ * every chat the day the whole list is ordered by hand. The pin itself stays the `pin_<id>` flag; the list only says
+ * where a pinned chat goes. A pinned chat the list does not name (pinned before the list existed, or restored from an
+ * older backup) comes after the named ones, the latest first, as all pinned chats were ordered before.
+ */
+const pinOrderKey = () => `${getPrefix()}pin_order`;
+
+function storedPinOrder(): string[] {
+  try {
+    const stored: unknown = JSON.parse(localStorage.getItem(pinOrderKey()) ?? "[]");
+    return Array.isArray(stored) ? [...new Set(stored.filter((id): id is string => typeof id === "string"))] : [];
+  } catch { return []; }
+}
+
+function writePinOrder(order: readonly string[]): void {
+  try {
+    if (order.length) localStorage.setItem(pinOrderKey(), JSON.stringify(order));
+    else localStorage.removeItem(pinOrderKey());
+  } catch { /* storage unavailable: the pins fall back to the latest first */ }
+}
+
+/**
+ * The pinned ids in the order they are shown: those the stored order names, as it names them, then the rest as
+ * `pinned` gives them. Ids the stored order names that are not pinned (any more) are left out.
+ */
+export function orderPinned(stored: readonly string[], pinned: readonly string[]): string[] {
+  const set = new Set(pinned);
+  const listed = [...new Set(stored)].filter(id => set.has(id));
+  const known = new Set(listed);
+  return [...listed, ...pinned.filter(id => !known.has(id))];
+}
+
+/** `order` with `id` moved to `index` (past either end is that end); the same array when nothing moves. */
+export function moveInOrder(order: readonly string[], id: string, index: number): readonly string[] {
+  const from = order.indexOf(id);
+  const to = Math.max(0, Math.min(order.length - 1, Math.trunc(index)));
+  if (from < 0 || from === to) return order;
+  const next = order.filter(other => other !== id);
+  next.splice(to, 0, id);
+  return next;
+}
+
+/** This profile's pinned chats, top first. Only a pinned chat the stored order does not name is read (for its time). */
+export function pinnedOrder(): string[] {
+  const start = `${getPrefix()}pin_`;
+  const pinned: string[] = [];
+  for (let i = 0; i < localStorage.length; i++) {
+    const key = localStorage.key(i);
+    if (!key?.startsWith(start) || key === pinOrderKey() || !ownsKey(key) || localStorage.getItem(key) !== "1") continue;
+    const id = key.slice(start.length);
+    if (localStorage.getItem(getKey(id)) !== null) pinned.push(id);
+  }
+  const stored = storedPinOrder();
+  const named = new Set(stored);
+  const time = (id: string) => { const session = loadSession(id); return session ? session.lastSyncAt ?? session.createdAt : 0; };
+  const unlisted = pinned.filter(id => !named.has(id)).map(id => ({ id, at: time(id) })).sort((a, b) => b.at - a.at).map(p => p.id);
+  return orderPinned(stored, [...pinned.filter(id => named.has(id)), ...unlisted]);
+}
+
+/** A place among the pinned chats: `index` from 0, the top. */
+export interface PinnedPlace { index: number; count: number }
+
+/** A pinned chat's place among the pinned ones, or undefined for a chat that is not pinned. */
+export function pinnedPlace(sessionId: string): PinnedPlace | undefined {
+  const order = pinnedOrder();
+  const index = order.indexOf(sessionId);
+  return index < 0 ? undefined : { index, count: order.length };
+}
+
+/** Pins a chat, at the top of the pinned ones, or unpins it. */
 export function setSessionPinned(sessionId: string, pinned: boolean): void {
   if (!loadSession(sessionId)) return;
+  const order = pinnedOrder().filter(id => id !== sessionId);
   const key = `${getPrefix()}pin_${sessionId}`;
   if (pinned) localStorage.setItem(key, "1");
   else localStorage.removeItem(key);
+  writePinOrder(pinned ? [sessionId, ...order] : order);
   window.dispatchEvent(new Event("session-updated"));
+}
+
+/**
+ * Moves a pinned chat to `index` among the pinned ones (0 is the top; past either end is that end). Its new place, or
+ * undefined when it is not pinned or already there.
+ */
+export function movePinnedTo(sessionId: string, index: number): PinnedPlace | undefined {
+  const order = pinnedOrder();
+  const next = moveInOrder(order, sessionId, index);
+  if (next === order) return undefined;
+  writePinOrder(next);
+  window.dispatchEvent(new Event("session-updated"));
+  return { index: next.indexOf(sessionId), count: next.length };
+}
+
+/** Moves a pinned chat one place up or down; undefined at that end, or when it is not pinned. */
+export function movePinned(sessionId: string, direction: "up" | "down"): PinnedPlace | undefined {
+  const at = pinnedOrder().indexOf(sessionId);
+  return at < 0 ? undefined : movePinnedTo(sessionId, at + (direction === "up" ? -1 : 1));
 }
 
 /**
@@ -376,9 +471,13 @@ export function listSessions(cache?: SessionCache): ChatSession[] {
     }
   }
   if (cache) for (const key of cache.keys()) if (!seen.has(key)) cache.delete(key);
+  // A pinned chat's rank is its place in the stored order; one the order does not name comes after those, by its time.
+  const place = new Map(storedPinOrder().map((id, index) => [id, index]));
+  const rank = new Map(sessions.map(s => [s.id, isSessionPinned(s.id) ? place.get(s.id) ?? Infinity : undefined]));
   sessions.sort((a, b) => {
-    const pinOrder = Number(isSessionPinned(b.id)) - Number(isSessionPinned(a.id));
-    if (pinOrder) return pinOrder;
+    const aRank = rank.get(a.id), bRank = rank.get(b.id);
+    if ((aRank === undefined) !== (bRank === undefined)) return aRank === undefined ? 1 : -1;
+    if (aRank !== undefined && bRank !== undefined && aRank !== bRank) return aRank - bRank;
     const aTime = a.lastSyncAt ?? a.createdAt;
     const bTime = b.lastSyncAt ?? b.createdAt;
     return bTime - aTime;

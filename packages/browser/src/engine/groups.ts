@@ -8,7 +8,7 @@ import { groupReply } from "../shared/replies";
 import { pinOfFormerMember, pinView } from "./pins";
 import { db } from "./db";
 import { traceJoin } from "./joinTrace";
-import { COMMUNITY_TIMINGS, Communities, metaLines, type CommunityTimings } from "./community";
+import { COMMUNITY_TIMINGS, Communities, dialedKey, metaLines, type CommunityTimings } from "./community";
 import { MESH_HUB_TIMINGS, MeshHubs, type MeshHubTimings } from "./meshHubs";
 import { GroupTypings } from "./groupTyping";
 
@@ -144,12 +144,12 @@ export const mentionAt = (map: Map<string, number>, groupId: string): { lastMent
   return at ? { lastMentionAt: at } : {};
 };
 /**
- * When a member's message counts as having come, for unread and the "@": when it reached me, if that is later than
- * when it was written (a catch-up from another member, a member back after a while). Written before I last looked at
- * the group but handed to me since, it is news here; by its own time it sorted among what I had read, and the group
- * never showed unread. A copy I had already (`stored` false) or one completed in place keeps its own time.
+ * When a message counts as having come, for the list of groups, unread and the "@": when it reached me, never when
+ * its sender says it was written (a member's clock ahead would keep the group unread and on top; written before I
+ * last looked but handed to me since, a catch-up is news here). A copy I had already (`stored` false) or one
+ * completed in place moves nothing forward: its own time, now at the latest.
  */
-export const cameAt = (timestamp: number, stored: boolean | void, now: number): number => stored === false ? timestamp : Math.max(timestamp, now);
+export const cameAt = (timestamp: number, stored: boolean | void, now: number): number => stored === false ? Math.min(timestamp, now) : now;
 /**
  * The time a line of a group's history is kept under: its own, or the next millisecond no other line of this run took.
  * A line's id carries its time, and two lines can share a moment (two members gone in one change, a picture changed
@@ -165,6 +165,20 @@ export function eventTime(taken: Map<string, Set<number>>, groupId: string, time
   if (times.size > 1024) times.delete(times.values().next().value!);
   return timestamp;
 }
+/**
+ * Keeps on the group's record when a member's message came, where that is later than what it holds: the record is
+ * saved with the session right after (a message taken moves its state), so a message handed to me late still makes
+ * the group unread after the app starts again. Read from the history alone, by its own time, it sorted among what I
+ * had read and the mark was gone on the next start.
+ */
+export function noteCame(group: Pick<StoredGroup, "came"> | undefined, came: number, peer: boolean, mentioned: boolean): void {
+  if (!group) return;
+  if (peer && came > (group.came?.peer ?? 0)) group.came = { ...group.came, peer: came };
+  if (mentioned && came > (group.came?.mention ?? 0)) group.came = { ...group.came, mention: came };
+}
+/** What `load` starts the unread marks from: the history's own times, or when its latest came if that was later. */
+export const cameOrWritten = (written: number | undefined, came: number | undefined): number | undefined =>
+  written === undefined && came === undefined ? undefined : Math.max(written ?? 0, came ?? 0);
 /** The view's `lastPeerMessageAt`, when there is one. */
 export const peerMessageAt = (map: Map<string, number>, groupId: string): { lastPeerMessageAt?: number } => {
   const at = map.get(groupId);
@@ -178,6 +192,27 @@ export const peerMessageAt = (map: Map<string, number>, groupId: string): { last
  */
 export interface EntryTimings { pollMs: number; warmPollMs: number; warmMs: number; knockMs: number; slowKnockMs: number; patienceMs: number }
 const ENTRY_TIMINGS: EntryTimings = { pollMs: 5_000, warmPollMs: 2_000, warmMs: 10 * 60_000, knockMs: 5_000, slowKnockMs: 20_000, patienceMs: 2 * 60_000 };
+/**
+ * A knock still in the record is written again only once it is this old. Everyone holding the link writes the same
+ * Pkarr record, so a knock is read back before it is repeated: one that is there and fresh costs a read, not a read
+ * and a write to every relay (a joiner waiting for an admin that is away spent its relays' minute on them, and its
+ * edges then waited for it). Well under `KNOCK_TTL_MS`, with room for the two clocks to differ.
+ */
+export const KNOCK_REFRESH_MS = 30_000;
+/**
+ * How soon after writing its knock a joiner reads it back, and how much later a key reads than another (so two joiners
+ * do not check and rewrite in step). Two joiners that open the link at the same moment both read the record, add their
+ * knock and write: the later write replaces the earlier, whose joiner used to find out at its next knock, 5 s later,
+ * and was let in 6 s after the other (2026-10-02).
+ */
+export const KNOCK_VERIFY_MS = 800;
+const KNOCK_VERIFY_SPREAD_MS = 700;
+/**
+ * Knocks read back that soon in a row. A relay that still answers with the record from before the write (it has not
+ * stored the packet yet, or serves a cached copy) would otherwise have the joiner write again every second: after
+ * this many, the next look is at the knock's own pace, as before.
+ */
+export const KNOCK_VERIFIES = 2;
 /** Entry sessions the admin runs at once; a joiner who does not finish in time is not answered again for a while. */
 const MAX_PENDING_ENTRIES = 4;
 const ENTRY_TIMEOUT_MS = 3 * 60_000;
@@ -266,6 +301,10 @@ export class Groups {
   /** Admin side: until when a group's link is looked at the warm pace. */
   private readonly warmUntil = new Map<string, number>();
   private readonly lastKnock = new Map<string, number>();
+  /** Joiner side: when a knock just written is read back (`KNOCK_VERIFY_MS`); none once it was found there. */
+  private readonly knockCheckAt = new Map<string, number>();
+  /** Joiner side: knocks written in a row without one found in the record since (`KNOCK_VERIFIES`). */
+  private readonly knockRewrites = new Map<string, number>();
   /** Per group, members met over their admission a moment ago: their edge is opened expecting them. */
   private readonly justMet = new Map<string, Set<string>>();
   /** Joiner side: groups whose knock is published, for the stage the joiner is shown. */
@@ -316,9 +355,12 @@ export class Groups {
       const history = await this.store.getMessages(MESSAGE_LINK(group.id)), said = history.filter(m => !m.event && !m.groupPay);
       const last = said[said.length - 1], lastPeer = [...said].reverse().find(m => m.sender !== "me");
       if (last) this.lastMessageAt.set(group.id, last.timestamp);
-      if (lastPeer) this.lastPeerMessageAt.set(group.id, lastPeer.timestamp);
+      // A message that came later than it was written counts from when it came, as it did while the app ran (`noteCame`).
+      const peerAt = cameOrWritten(lastPeer?.timestamp, lastPeer ? group.came?.peer : undefined);
+      if (peerAt) this.lastPeerMessageAt.set(group.id, peerAt);
       const mention = [...history].reverse().find(m => m.mentioned);
-      if (mention) this.lastMentionAt.set(group.id, mention.timestamp);
+      const mentionAt = cameOrWritten(mention?.timestamp, mention ? group.came?.mention : undefined);
+      if (mentionAt) this.lastMentionAt.set(group.id, mentionAt);
     }
     for (const id of this.sessions.keys()) this.reconcileEdges(id);
     // An admission in flight did not survive the restart: its joiner knocks again. A joiner keeps its side.
@@ -487,7 +529,7 @@ export class Groups {
    * Sends a text; `messageId` is the id it is kept under here (what history, replies and reactions name). `forwarded`:
    * the hop count of a forwarded text (WISP 9xx § Forwards). `card`: a checked status card, the text its fallback.
    */
-  async send(groupId: string, text: string, mentions: readonly GroupMention[] = [], reply?: WireReply, forwarded?: number, card?: StatusCard): Promise<{ error: string | null; messageId?: string }> {
+  async send(groupId: string, text: string, mentions: readonly GroupMention[] = [], reply?: WireReply, forwarded?: number, card?: StatusCard): Promise<{ error: string | null; messageId?: string; refused?: boolean }> {
     if (this.isCommunity(groupId)) return card ? this.communities.send(groupId, text, mentions, reply, forwarded, card) : this.communities.send(groupId, text, mentions, reply, forwarded);
     const session = this.sessions.get(groupId);
     if (!session) return { error: "You are not in this group yet" };
@@ -614,6 +656,8 @@ export class Groups {
     this.lastTold.delete(groupId);
     this.pendingEntries.delete(groupId);
     this.knocked.delete(groupId);
+    this.knockCheckAt.delete(groupId);
+    this.knockRewrites.delete(groupId);
     this.justMet.delete(groupId);
     this.relayAsked.delete(groupId);
     this.hubs.forget(groupId);
@@ -685,7 +729,9 @@ export class Groups {
     if (existing?.invitation?.seedB64 && !existing.invitation.entry) throw new Error("You are already joining this group");
     // Out of it (left, removed), invited without answering, or an older link of it: this one replaces that.
     if (existing) await this.forget(link.g);
-    const seedB64 = createIdentity().seedB64;
+    // A member key whose entry session the admin's side dials: it opens that session on seeing the knock, when this
+    // side has been there since it knocked, so its offer goes in its first packet (two trips through Pkarr, not three).
+    const seedB64 = dialedKey(link);
     const linkId = await this.host.openEntry(link, "guest", seedB64, link.host);
     const group: StoredGroup = { id: link.g, createdAt: Date.now(), invitation: { name: "", admin: "", linkId, e: 0, n: 0, seedB64, pieces: [], entry: link.host } };
     this.stored.set(link.g, group);
@@ -710,7 +756,7 @@ export class Groups {
           const waited = now - group.createdAt, every = waited > this.timings.patienceMs ? this.timings.slowKnockMs : this.timings.knockMs;
           // Once the admin's app is on the entry session, knocking only spends the relays' budget its signaling needs.
           const answered = this.host.linkReady(group.invitation.linkId) || !!this.host.linkSeen?.(group.invitation.linkId);
-          if (!answered && now - (this.lastKnock.get(group.id) ?? 0) >= every) await this.knock(group, now).catch(() => {});
+          if (!answered && (now - (this.lastKnock.get(group.id) ?? 0) >= every || now >= (this.knockCheckAt.get(group.id) ?? Infinity))) await this.knock(group, now).catch(() => {});
           continue;
         }
         const session = this.sessions.get(group.id);
@@ -799,9 +845,21 @@ export class Groups {
     this.lastKnock.set(group.id, now);
     const link = { g: group.id, host: invitation.entry! }, identity = knockIdentity(link);
     const started = Date.now();
+    this.knockCheckAt.delete(group.id);
     const existing = readKnocks(link, (await this.host.resolve(identity.pubKeyZ32)) ?? []);
-    traceJoin(group.id, "knock.read", { ms: Date.now() - started, others: existing.length });
-    await this.host.publish(identity, knockRecords(link, mergeKnocks(existing, { key: identityFromSeedB64(invitation.seedB64!).pubKeyZ32, ts: now }, now)));
+    const key = identityFromSeedB64(invitation.seedB64!).pubKeyZ32, mine = existing.find(k => k.key === key);
+    traceJoin(group.id, "knock.read", { ms: Date.now() - started, others: existing.length, ...(mine ? { mine: now - mine.ts } : {}) });
+    // Still there and fresh: the admin's app reads it as it is. One another joiner's write replaced goes again.
+    if (mine && now - mine.ts >= 0 && now - mine.ts < KNOCK_REFRESH_MS) {
+      this.knockRewrites.delete(group.id);
+      if (!this.knocked.has(group.id)) { this.knocked.add(group.id); this.host.emit(); }
+      return;
+    }
+    await this.host.publish(identity, knockRecords(link, mergeKnocks(existing, { key, ts: now }, now)));
+    // Read back in a moment: another joiner writing at the same time may have replaced it.
+    const rewrites = (this.knockRewrites.get(group.id) ?? 0) + 1;
+    this.knockRewrites.set(group.id, rewrites);
+    if (rewrites <= KNOCK_VERIFIES) this.knockCheckAt.set(group.id, now + KNOCK_VERIFY_MS + gossipStart(key) % KNOCK_VERIFY_SPREAD_MS);
     traceJoin(group.id, "knock.published", { ms: Date.now() - started });
     if (!this.knocked.has(group.id)) { this.knocked.add(group.id); this.host.emit(); }
   }
@@ -1217,17 +1275,19 @@ export class Groups {
         }
       },
       message: async m => {
-        // The sender picks the time: one far ahead would pin the group to the top of the list.
-        const timestamp = receivedTimestamp(m.timestamp);
+        // The sender picks the time: the store keeps it beside the row and places the row where it comes (`arrivalKey`),
+        // so neither the history nor the list of groups follows a member's clock.
+        const timestamp = m.timestamp;
         const mentioned = m.sender !== session.myKey && mentionsMember(m.mentions, session.myKey);
         const message: StoredMessage = { linkId: MESSAGE_LINK(state.id), id: m.id, text: m.text, sender: m.sender === session.myKey ? "me" : "peer", member: m.sender, timestamp, via: "datalink",
           ...mentionFields(m.mentions, mentioned), ...(m.reply && { replyTo: groupReply(m.reply, session.myKey) }), ...(m.forwarded && { forwarded: m.forwarded }), ...(m.card && { card: m.card }) };
         // A copy handed on stripped came first: the whole one adds what it lacked (WISP 9xx · Group Mesh § Catch-up).
         const stored = m.completes && this.host.completeMessage ? (await this.host.completeMessage(message), false) : await this.host.storeMessage(message);
-        this.lastMessageAt.set(state.id, Math.max(this.lastMessageAt.get(state.id) ?? 0, timestamp));
-        const came = cameAt(timestamp, stored, this.now());
+        const came = m.sender === session.myKey ? timestamp : cameAt(timestamp, stored, this.now());
+        this.lastMessageAt.set(state.id, Math.max(this.lastMessageAt.get(state.id) ?? 0, came));
         if (mentioned) this.lastMentionAt.set(state.id, Math.max(this.lastMentionAt.get(state.id) ?? 0, came));
         if (m.sender !== session.myKey) this.lastPeerMessageAt.set(state.id, Math.max(this.lastPeerMessageAt.get(state.id) ?? 0, came));
+        noteCame(this.stored.get(state.id), came, m.sender !== session.myKey, mentioned);
         // What the member was typing arrived: it is not typing any more.
         this.typings.messageFrom(state.id, m.sender);
       },

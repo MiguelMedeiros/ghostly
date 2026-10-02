@@ -131,6 +131,24 @@
   "shareProfile": "名前と写真を連絡先と共有",
   "shareProfileHint": "連絡先にはこのプロフィールの名前と写真が表示されます。オフにすると「連絡先」と模様が代わりに表示されます。",
   "sourceCode": "ソースコード",
+  "storageDevice": "この端末のストレージ",
+  "storageHint": {
+    "protected": "このブラウザは、あなたが削除するまで Ghostly のデータを保持します。",
+    "unprotected": "端末の空き容量が少なくなると、このブラウザが Ghostly のデータを消去することがあります。",
+    "unsupported": "このブラウザは Ghostly のデータを保持するかどうかを示しません。"
+  },
+  "storageInfo": {
+    "protected": "ブラウザでサイトデータを消去するか、アプリを削除すると、すべて消えます。プロフィールのバックアップを保管してください。",
+    "safari": "Safari は、ホーム画面にないサイトのデータを、7 日間アクセスがないと削除します。",
+    "unprotected": "Ghostly をインストール（ホーム画面に追加）し、通知を許可し、プロフィールのバックアップを保管してください。ブラウザは、インストールされてよく使われるアプリを保護します。"
+  },
+  "storageOf": "{{used}} / {{quota}}",
+  "storageProtect": "保護する",
+  "storageState": {
+    "protected": "保護されています",
+    "unprotected": "保護されていません",
+    "unsupported": "不明"
+  },
   "storageUsed": "使用中のストレージ",
   "systemNotifications": "システム通知",
   "theme": "テーマ",

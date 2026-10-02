@@ -26,10 +26,11 @@ async function look(page: Page, language: string, scheme: "light" | "dark"): Pro
 
 /** What axe finds serious or critical on the page as it is now, one line per rule and element. */
 async function findings(page: Page): Promise<string[]> {
-  // Past the colour transitions and the fade-ins, so contrast is read on the colours as they end.
+  // Past the colour transitions and the fade-ins, so contrast is read on the colours as they end. Not past the loops:
+  // those that end by themselves take half a minute or more (a "connecting" dot, a spinner), and none is text.
   await page.evaluate(async () => {
     await new Promise(requestAnimationFrame);
-    await Promise.all(document.getAnimations().filter((a) => a.effect?.getComputedTiming().endTime !== Infinity).map((a) => a.finished.catch(() => {})));
+    await Promise.all(document.getAnimations().filter((a) => a.effect?.getComputedTiming().iterations === 1).map((a) => a.finished.catch(() => {})));
   });
   const { violations } = await new AxeBuilder({ page }).withTags(TAGS).analyze();
   return violations.filter((v) => v.impact === "serious" || v.impact === "critical")

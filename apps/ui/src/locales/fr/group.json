@@ -17,12 +17,16 @@
     "noFiles": "Les fichiers ne sont pas encore pris en charge dans les groupes",
     "nobodyElse": "Personne d'autre n'est encore dans le groupe",
     "reachable": "{{members}} · {{reachable}} sur {{total}} joignables",
+    "removedCommunity": "Vous avez été retiré. Ouvrez le lien du groupe pour le rejoindre à nouveau.",
     "sendFailed": "Envoi impossible",
     "shareHint": "Partager le lien du groupe",
     "shareLink": "Partager le lien",
     "unnamed": "Un groupe"
   },
   "connection": {
+    "community": "Connecté au groupe",
+    "communityConnecting": "Connexion au groupe…",
+    "communityNote": "Votre app se relie à un hub du groupe (l'app d'un membre qui relaie), et les hubs transmettent chaque message à tous. Un membre absent reçoit ce qu'il a manqué à son retour.",
     "connecting": "Connexion aux membres…",
     "label": "Connexion du groupe",
     "labelWith": "Connexion du groupe : {{state}}",
@@ -68,7 +72,8 @@
     "renamed": "{{name}} a renommé le groupe en « {{group}} »",
     "renamedYou": "Vous avez renommé le groupe en « {{group}} »",
     "rotated": "Clés renouvelées : une nouvelle époque",
-    "youJoined": "Vous avez rejoint le groupe."
+    "youJoined": "Vous avez rejoint le groupe.",
+    "youJoinedAgain": "Vous avez rejoint le groupe à nouveau."
   },
   "hubs": {
     "auto": "Hub s'il reste allumé",
@@ -91,7 +96,10 @@
     "knockedCommunity": "En attente qu'un membre du groupe vous fasse entrer. Cela se fait tout seul dès que l'app d'un membre est ouverte : vous pouvez quitter cette page et revenir.",
     "knocking": "Dépôt d'une demande là où l'app de l'admin les cherche…",
     "knockingCommunity": "Dépôt d'une demande là où les apps du groupe les cherchent…",
+    "queueCount": "{{count}} autres personnes attendent d'entrer.",
+    "queueOne": "1 autre personne attend d'entrer.",
     "stale": "Toujours pas de réponse. Si le lien du groupe a été remplacé, celui-ci ne fonctionne plus : demandez le nouveau lien.",
+    "staleBusy": "Toujours en attente. Le groupe fait entrer quelques personnes à la fois, tant que l'app d'un membre est ouverte.",
     "step": {
       "admitted": "Admis : réception des clés du groupe",
       "answered": "L'app de l'admin a répondu",

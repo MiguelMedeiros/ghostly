@@ -99,6 +99,12 @@ describe("Sidebar: groups in the chat list", () => {
     expect(row("g-left")).toHaveTextContent("A groupleft");
   });
 
+  it("says why a group is over in the app's language", () => {
+    fakeEngine.update({ groups: [groupView({ id: "g-removed", name: "Old", status: "removed", statusReason: "You were removed from this group" })] });
+    renderApp(<UpdateProvider><Sidebar /><Routes><Route path="*" element={<Where />} /></Routes></UpdateProvider>, { language: "pt" });
+    expect(row("g-removed")).toHaveTextContent("Você foi removido deste grupo");
+  });
+
   it("opens a group", async () => {
     const { user } = sidebar([groupView({ status: "active" })]);
     await user.click(row());

@@ -41,6 +41,7 @@
   },
   "backupReminder": {
     "body": "请备份，以免设备丢失时损失这笔钱。",
+    "bodyUnprotected": "请备份，以免设备丢失或此浏览器清除数据时损失这笔钱。",
     "go": {
       "phrase": "查看恢复短语",
       "profile": "备份个人资料"

@@ -98,6 +98,8 @@ call of the app's engine. `ghostly engine --list` and `ghostly engine <method> '
 ```
 
 - `seq` grows by one per event in the profile, across restarts. `id` is stable for the fact it reports: dedupe on it.
+- A message's `timestamp` is its place in the history: when this profile sent it, or when it arrived here. A
+  received message also has `sentAt`, the time its sender's clock said. Histories are ordered by `timestamp`.
 - `--since <seq>` replays from the journal (the last 10,000 events); `--cursor <file>` remembers the last event
   handled, so a restarted bot resumes where it stopped.
 - `--type message.received` keeps one type; `--type message.` a family.

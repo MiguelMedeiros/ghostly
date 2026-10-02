@@ -1,4 +1,4 @@
-import { utf8Encode, type LinkPreview, type StatusCard } from "@ghostly/core";
+import { shownTime, utf8Encode, type LinkPreview, type StatusCard } from "@ghostly/core";
 import type { MessageEdit, StoredMessage } from "./types";
 
 /*
@@ -52,7 +52,7 @@ export function takesPeerEdit(message: Pick<StoredMessage, "sender" | "file" | "
  */
 export function withEdit(message: StoredMessage, edit: { seq: number; at: number; text: string; preview?: LinkPreview; card?: StatusCard; pending?: boolean }): StoredMessage {
   const before = message.edit?.history ?? [];
-  const history = edit.text === message.text || (edit.card && edit.card.kind !== "buttons") ? before : trimHistory([...before, { at: message.edit?.at ?? message.timestamp, text: message.text }]);
+  const history = edit.text === message.text || (edit.card && edit.card.kind !== "buttons") ? before : trimHistory([...before, { at: message.edit?.at ?? shownTime(message), text: message.text }]);
   const next: MessageEdit = { seq: edit.seq, at: edit.at, history, ...(edit.pending && { pending: true as const }) };
   const { preview: _old, card: _card, ...rest } = message;
   return { ...rest, text: edit.text, edit: next, ...(edit.preview && { preview: edit.preview }), ...(edit.card && { card: edit.card }) };

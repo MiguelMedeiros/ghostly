@@ -353,15 +353,15 @@
     "title": "来自你的联系人"
   },
   "share": {
+    "captionMine": "你共享了此身份",
+    "captionTheirs": "{{contact}} 共享了此身份",
     "checking": "检查中",
     "notChecked": "未检查",
     "notVerified": "未验证",
     "notVerifiedWhy": "未验证：{{error}}",
     "revokedMine": "你的 {{what}} 已被撤销",
     "revokedTheirs": "{{contact}} 的 {{what}} 已被撤销",
-    "sharedMine": "你共享了 {{what}}",
     "sharedMineState": "你共享了 {{what}} · {{state}}",
-    "sharedTheirs": "{{contact}} 共享了 {{what}}",
     "sharedTheirsState": "{{contact}} 共享了 {{what}} · {{state}}",
     "stoppedMine": "你已停止共享 {{what}}",
     "stoppedTheirs": "{{contact}} 已停止共享 {{what}}",

@@ -15,7 +15,7 @@ const link = (id: string, fields: Partial<LinkView> = {}) => ({ id, peerPubKeyZ3
 const group = { id: "g1", name: "Crew", createdAt: 1, profile: "community", isAdmin: true, canSend: true, lastMessageAt: 0, invited: [], memberLinks: {},
   members: [{ key: "mekey", role: "admin", me: true, online: true, missing: 0 }] } as unknown as GroupView;
 
-function fake(result: { error: string | null } = { error: null }) {
+function fake(result: { error: string | null; refused?: boolean } = { error: null }) {
   const node = {
     getState: () => ({ links: [link("chat-one", { label: "Alice" })], groups: [group], settings: {}, transport: {} }) as unknown as EngineState,
     react: vi.fn(async () => result),
@@ -42,6 +42,8 @@ describe("react", () => {
     expect(node.react).toHaveBeenLastCalledWith({ linkId: "group:g1", messageId: "k:0:1", emoji: "🙏" });
     await expect(callApi(ctx, "chat.react", { chat: "Alice", message: "peer_x" })).rejects.toMatchObject({ code: "usage" });
     await expect(callApi(fake({ error: "A reaction is one emoji" }).ctx, "chat.react", { chat: "Alice", message: "peer_x", emoji: "ok" })).rejects.toMatchObject({ code: "bad_request" });
+    // Not a member of the group any more: refused, with the reason the group shows.
+    await expect(callApi(fake({ error: "You were removed from this group", refused: true }).ctx, "group.react", { group: "Crew", message: "k:0:1", emoji: "👍" })).rejects.toMatchObject({ code: "refused", message: "You were removed from this group" });
     await expect(callApi(fake({ error: "That message is not in this chat, or takes no reaction" }).ctx, "chat.react", { chat: "Alice", message: "x", emoji: "👍" })).rejects.toMatchObject({ code: "not_found" });
   });
 });

@@ -48,6 +48,7 @@
       "title": "此备份是本设备上的 {{names}}"
     },
     "saveToS3": "保存到 S3",
+    "saved": "已保存为 {{name}} · {{size}}",
     "savedToS3": "已保存到 S3 · {{size}}",
     "setUp": "设置",
     "spendWarning": "拿到文件和密码短语的人可以花费其中的钱包。",
