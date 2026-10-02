@@ -121,7 +121,7 @@ describe("an app from before these fields (Ghostly 1.0.1's reader)", () => {
     expect(shown).toMatchObject({ kind: "task", title: "Fix relay rotation", status: "running", pr: pr({ files: 7 }) });
     expect(shown).not.toHaveProperty("tags");
     expect(shown).not.toHaveProperty("parent");
-    expect(shown!.kind === "task" && shown.pr).not.toHaveProperty("state");
+    expect((shown as TaskCard).pr).not.toHaveProperty("state");
   });
 
   it("shows it whatever the new fields hold, even nonsense: it never looks at them", () => {
