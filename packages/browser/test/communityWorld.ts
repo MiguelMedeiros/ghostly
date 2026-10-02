@@ -156,7 +156,9 @@ export class CommunityWorld {
       },
       // Version 4 (hubs) only between two apps that announce it.
       linkReady: (linkId, version = 1) => { const edge = links.get(linkId), there = edge && this.counterpart(edge); return !!there && this.up(peer, edge, there.peer) && (version < 4 || (!peer.legacy && !there.peer.legacy)); },
-      linkSeen: linkId => { const edge = links.get(linkId); return !!edge && !!this.counterpart(edge) && (!this.network || edge.polls > 0); },
+      // Its app runs and its packets reach this one: an app that closed, or one cut off, publishes nothing this one reads,
+      // and what it published before is fresh only half a minute (`otherEndSeen`).
+      linkSeen: linkId => { const edge = links.get(linkId), there = edge && this.counterpart(edge); return !!there && there.peer.online && this.sameSide(peer, there.peer) && (!this.network || edge!.polls > 0); },
       // Its other end's app runs again (a restart): its link published, whether or not it is up yet.
       linkBack: linkId => { const edge = links.get(linkId), there = edge && this.counterpart(edge); return !!there && there.peer.online; },
       contactName: () => undefined,

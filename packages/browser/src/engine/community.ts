@@ -651,7 +651,18 @@ export class Communities {
         const since = live.hubWaits.get(key) ?? now;
         live.hubWaits.set(key, since);
         const back = live.hubsUp.has(key) && !!id && !!this.host.linkBack?.(id);
-        if (now - since > (back ? 3 : 1) * this.timings.hubWaitMs) { live.hubsAvoided.set(key, now + 2 * this.timings.hubWaitMs); live.hubWaits.delete(key); live.hubsUp.delete(key); }
+        // A hub whose side of my edge is there took me (its packet is fresh, or a connection with it is under way): the
+        // edge is being set up, and comes when its relays' budget lets its offer or answer out. It gets the longer wait
+        // too. Given up after 20 s, a member went from hub to hub, each opening an edge for someone already gone: with
+        // twelve people let in within a minute, some had no edge for two minutes and more (2026-10-01).
+        const taking = !!id && !!this.host.linkSeen?.(id);
+        // And one I never had an edge with, that said it is a hub lately, reads its lobby every half minute when nobody
+        // asked there before: two waits to see my request, not one that ends before it looks.
+        const listed = !live.hubsUp.has(key) && live.beacon.some(h => h.key === key && now - h.ts < COMMUNITY_TOPOLOGY.beaconEveryMs * 1.5);
+        // Avoided twice as long as it was waited for: with two hubs out of reach, the first is still avoided when the
+        // wait for the second ends, and this member then carries itself (`forceHub`).
+        const wait = (back || taking ? 3 : listed ? 2 : 1) * this.timings.hubWaitMs;
+        if (now - since > wait) { live.hubsAvoided.set(key, now + 2 * wait); live.hubWaits.delete(key); live.hubsUp.delete(key); }
       }
       let kept = live.myHubs.filter(key => (fresh.has(key) || this.recentHub(live, key)) && !live.hubsAvoided.has(key));
       kept = kept.slice(0, COMMUNITY_TOPOLOGY.hubsPerMember);
