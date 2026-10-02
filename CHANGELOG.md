@@ -4,6 +4,86 @@
 
 <!-- Notes for the next release. A new entry goes in docs/changelog/unreleased/ (one file per change, see docs/changelog/unreleased/README.md), not here: tools/scripts/bump-version.mjs adds those files below at release and turns this heading into the version. Editing a line already here is fine. -->
 
+## 1.0.2
+
+Ghostly 1.0.2 makes chats and groups connect in more places, and fixes what the first days of 1.0 turned up. Messages are placed in the order they arrive, whatever the contact's clock says. Chats connect through relays behind a VPN or a firewall, and a note says when the network is the reason. The web app on iPhone and Safari reaches contacts on the desktop app. Several people joining a group by the same link no longer wait on each other, and a message sent before a group's connections are up now reaches everyone. Pinned chats can be put in order, an invite in a chat has Copy and Show QR, a shared identity shows as its card, and the Linux desktop app no longer uses CPU while idle.
+
+Known issues, for the next release: a call drops when your network changes (the fix is ready); a profile with hundreds of megabytes of files cannot be backed up yet (the fix is ready); a first pairing can fail when the two devices' clocks differ by more than a minute; joining a group can still take a minute when the public relays are slow.
+
+### Fixed
+
+**Everywhere**
+
+- A profile you named with the same word as the built-in name of a language ("Pessoal", "Personnel") keeps that name when it is restored from a backup. It used to come back as the built-in name and change with the app's language ("Personal" in English). A backup now says whether its name is the built-in one; backups made before are read by the language they were made in.
+- An app left open and untouched no longer keeps a processor busy. The ghost of the empty chat list moved forever, so a new profile's window was drawn 60 times a second: on Linux that cost about a fifth of a core for as long as the app was open, even with the window on another workspace. It now says boo three times and rests, as does the syncing mark on a chat's row.
+- Motion that says something is under way rests when it has lasted: the pairing scene and its small glyph in the header become a still picture after a minute in the same stage (an invite nobody has opened yet), a "connecting" dot stops pulsing after half a minute, and a spinner stops after two minutes. They move again when their state changes.
+- Every looping animation holds still while the window is hidden or behind other windows, and goes on when it is back.
+- On the web, the phone app and the extension, Ghostly now asks the browser to keep its data, so the browser does not clear your chats and wallets when the device runs low on space. It asks once you have a chat or a wallet, and again after you install the app or allow notifications.
+- Settings shows **Storage on this device**: Protected or Not protected, with what to do behind the ⓘ, and how much space is used. Where it is not protected, the wallet's backup reminder says so.
+
+**Chat**
+
+- On a network that blocks direct connections (a VPN, a firewall), a saved chat took 20 to 50 seconds to come back, and minutes in apps whose WebRTC never reports a failure, before it went through a relay. It now takes about 7 to 10 seconds: an answered WebRTC attempt that has not connected after 6 seconds is raced by the relayed transport, and an app whose WebRTC cannot even start dials the relayed transport itself at once.
+- A file waiting in a chat set to DHT only no longer says it waits for your contact to be online. Its clock now says it waits for a live connection, and whose choice DHT only was: yours, with where to change it, or your contact's.
+- Picking up what a contact held for you while you were away no longer stops for good when the storage does not answer: a request that hangs is given up after 20 seconds plus the time its size needs, and the next try picks everything up. Before, one hung request stopped the pickup in every chat until the app restarted.
+- **Iroh relays under one spelling.** Iroh compares relay addresses as text, and the desktop app names n0's relays with the trailing dot of a full domain name (`relay.n0.iroh.link.`) while the web app lists them without it. A browser and a desktop app on the same relay each took the other's for a second relay, and a dial opened a second connection to the server it was already on. Safari and the iPhone app open no address that ends in a dot, so there the web app could not open a desktop contact's relay at all. Every relay address now goes to Iroh in one spelling, without the dot in a browser, whichever way it is written in Settings or in a contact's record.
+- A conversation reads in the order things happened on your device, whatever your contact's clock says. A contact whose clock runs ahead or behind no longer puts your replies above the messages they answer: a received message is placed where it arrived, in chats, private groups and communities, in the app and in `ghostly chat history` and `group history`. The bubble still shows the time the sender says, but never a time that has not come yet, and the message's details show both that time and when it was received.
+- A member whose clock runs ahead no longer keeps a group unread or at the top of the list.
+- For bots and scripts: a received message's `timestamp` is when it arrived here, which is what histories are ordered by; `sentAt` is the time its sender says.
+- An app with no WebRTC (the Linux Desktop, a CLI bot) talking to more than eight contacts at once: the chat you open, or a text arrives in, goes live again. It takes the native connection of a chat that has been quiet for two minutes, never one with a call or a file going. Before, it stayed "On DHT · retrying live" for as long as the other eight stayed live.
+- On a network that blocks UDP (a VPN, a firewall), chats and groups took longer to connect with every saved chat: each chat's Iroh listener, the one that still works there through a relay, waited about 6 seconds per chat ahead of it for a HyperDHT listener that could not reach its network. Each transport's listeners now start in their own line, so Iroh is ready for every chat at once. This also shortens the start of an app with many chats on any network.
+
+**CLI**
+
+- `ghostly chat wait <chat> --until live` returns only once a live session exists in this run of the daemon: the chat's link is open and the session authenticated on a transport, the rule the app's connection line follows. A chat that was live before a restart does not count until its contact answers again. The `live` field of `chat show` and `chat list`, the `live` count of `status`, `service peer` and the `chat.connection` event follow the same rule.
+- `ghostly group send` says what a bot can do about a message that did not go: `--reply` to a message the group does not have is `not_found` (exit 3), as `group react`, `group edit` and `pin` answer; a group this profile is out of (removed, left, a forked history) is `refused`; only what may go on a later try stays `unavailable`. All of them were `unavailable` before.
+- `ghostly group edit` with the text the message already has answers `sent: false, unchanged: true`: no edit was made. It answered `sent: true` before.
+
+**Groups**
+
+- An app that starts while the relays are busy or the network is down no longer takes a community for one with nobody online. Before, it made itself a hub and answered the people knocking at the same time as the member already letting them in, so they got in through neither; it also hid the other hubs from everyone for up to half a minute.
+- A community's connection icon says "Connected to the group" once your app is linked to a hub. Before, it counted one link per member, so a working community of twelve read "1 of 11 reachable" with a warning dot, and the members panel called everyone behind a hub "not reachable". The panel now says "Through a hub" for them.
+- Joining a community through its link while others are joining too: the waiting card says how many more are waiting. After two minutes it says the group lets people in a few at a time, instead of suggesting that the link was replaced.
+- A member removed from a community while their app was closed is told when they come back: the group says they were removed and the composer closes. Before, the group looked alive and their messages went nowhere.
+- Opening a community's link again lets a removed member back in, with their history kept. Before, they had to delete the group first.
+- CLI: `group send` answers `sent: true` only once an edge took the message, and `group send` and `group react` are `refused` for a profile that is no longer a member.
+- In a community, hubs exchange the group's messages only with current members.
+- A community shared right after it was made: one member's app answers each person who opens the link. Before, in the group's first minute, the creator's app and the first person let in could both answer the next one. One of the two then spent its share of relay requests for a minute and a half on a connection that never came up, and where the two got in each other's way the join waited for it.
+- A new group takes the same names a rename does: up to 64 characters on one line, a new line read as a space. A longer name is refused with the reason (`ghostly group create` answers `bad_request`) instead of being cut at 48 without a word, sometimes through an emoji.
+- A member of a private group behind a VPN or a firewall that blocks direct connections could not be reached by the others, for as long as that network lasted: group links between two apps with WebRTC used nothing else. A link whose WebRTC cannot connect now goes on over Iroh through its relay, as links with a Linux Desktop already do. Joining through a group link from such a network is not covered yet.
+- What a group says when something is refused or over now reads in the app's language, in all eight: why you are out of it ("You were removed from this group", a forked history, a lost admission) in its notice, under its name and in the chat list; why a message or an edit did not go; and what the members panel, leaving, inviting and a group's link answer. They used to show in English whatever the language. A group you are out of with no reason given now names its status in the notice instead of leaving it empty. In a community, the "joined", "is now the admin", rename and picture lines about a member who has left since read in the app's language too.
+- A picture pasted or a file dropped into a group says "Files are not part of groups yet". It used to do nothing and say nothing.
+- In a private group, a message written right after joining, before the connection to the other members was up, now reaches them as soon as it is. Before, when someone else joined at the same moment, it stayed on the sender's device until one of the apps reconnected. The same goes for what a member writes while they have not yet heard of a membership change.
+- A member back after a while reads "joined", "is no longer a member", "is now the admin", the rename and the picture lines where they happened, among the messages of that moment. They used to be stamped when they arrived, so they all came after everything the member had missed: a newcomer's "joined" under the messages that newcomer had already sent. Private groups and communities.
+- Two people who open a private group's link at the same moment are both let in within seconds. One of them used to wait about six seconds more, because their requests to join shared one record and the later one replaced the earlier.
+- Waiting to be let in while the admin's app is closed no longer uses up the relays' request allowance, so the group connects right away once the admin is back.
+- Joining a private group by its link no longer takes an extra round through the relays half the time: the admin's app now always makes the first move, as it already did for communities.
+- A message of yours in a group shows one tick, "Sent", and its line says a group has no receipts. Every one showed two blue ticks and "Delivered: your contact's app received it", even one sent while nobody in the group could be reached.
+- A group stays marked unread (and keeps its "@") after the app starts again when the message that made it so was written before you last looked but reached you later, caught up from another member. The mark used to go on the next start.
+
+**Desktop**
+
+- The desktop app saves a profile backup, and a wallet's backup file, through the system's save dialog. Before, pressing Download there wrote no file at all and still said "Downloaded".
+- On a network that lets no DHT traffic through (some VPNs and firewalls block it), Desktop published through the relays but read nothing back, so no chat or group connected and none said why. When no DHT node answers at all, Desktop now reads through the Pkarr relays, as with "Also use Pkarr relays" on, and goes back to the DHT by itself once it answers again.
+
+### For users
+
+**Chat**
+
+- On a network that blocks direct connections (a VPN, a firewall), the chat's connection panel and Settings, Network now say so: "Direct connections are blocked on this network (a VPN or firewall?). Chats still work through relays, but connect more slowly." The note comes from this device's own failed connection attempts, never from one failed dial, and goes away when a direct connection works or the network changes.
+- An invite or a group link shared in a chat now has Copy and Show QR on its card, beside Join, so you can open it on another device by scanning it. Nothing is copied or shown until you tap.
+- A chat's options menu shows the invite's QR again while you wait for your contact, and a community group's members see the group link's QR in the members panel.
+- Put your pinned chats in the order you want: drag a pinned chat in the list (on a phone, hold it first), or use Move up and Move down in the chat's menu. A newly pinned chat goes to the top. The other chats stay below, the latest first.
+
+**Identities**
+
+- An identity shared in a chat shows in the timeline as its ID card, the one from the picker, on both sides: the provider, the handle and the state of the share, with who shared it and when under it. With a mouse the card lifts and catches the light as the pointer passes over it; a click, a tap or Enter opens the identity's details.
+- A share that is later stopped, or whose proof is found revoked, says so on its card ("No longer shared", "Revoked") in both chats. Before, the card kept its Verified check after the share had stopped.
+
+### For developers
+
+- The repository root holds only workspace configs and project documents. Scripts, patches and the shared Vitest settings moved to `tools/` (`tools/scripts/`, `tools/patches/`, `tools/vitest.shared.ts`); the relays and the web app's compose file to `infra/` (`infra/services/`, `infra/docker-compose.yml`, run with `docker compose -f infra/docker-compose.yml up --build -d`); these changelog entries to `docs/changelog/unreleased/`; `CONTRIBUTING.md` and `SECURITY.md` to `.github/`; and the SDK's example adapter to `packages/sdk/examples/adapter/`.
+
 ## 1.0.1
 
 Ghostly 1.0.1 is a quality release: about 300 fixes and small additions since 1.0.0, found in two days of bug hunting across the web app, the extension, the Desktop apps and the command line. Bots can ask with buttons. Chats come back by themselves after both apps restart, after DHT only, or with many chats open. Ghostly Desktop on Linux joins groups. Errors, wallet words, dates and amounts follow the app's language in all 8 languages. Wallets say what they still hold before a mint or a wallet goes, and a reviewed payment can't get stuck. A second call rings with End and answer and never ends the first by itself. The Mac app gets a Dock badge and keeps running after Cmd+W. Clear all data erases everything of the profile but its wallets. The command-line daemon's memory no longer grows.
