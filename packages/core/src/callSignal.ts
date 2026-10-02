@@ -4,8 +4,11 @@
  * travel and each side rebuilds the SDP around them.
  */
 export interface CallSignal {
-  /** offer, answer, hang-up, or "my picture changed" while the call is up. */
-  t: "o" | "a" | "h" | "v";
+  /**
+   * offer, answer, hang-up, "my picture changed" while the call is up, or `r`: an offer that restarts ICE on the
+   * call's own connection after its path was lost (WISP 601, "Reconnecting"). An app that does not know `r` drops it.
+   */
+  t: "o" | "a" | "h" | "v" | "r";
   ts: number;
   u?: string;
   p?: string;
@@ -30,6 +33,13 @@ export interface CallSignal {
    * candidate, or it did not connect in time). Older apps read it as a plain hang-up.
    */
   r?: "u";
+  /**
+   * On an offer or an answer: 1 when this side can restart ICE on the call's connection, so a call both sides said
+   * it on reconnects after a network change instead of ending. Older apps leave it out, and ignore it.
+   */
+  x?: 1;
+  /** On the answer to a restart offer (`r`): that offer's `ts`, so an answer to an older one is told apart. */
+  re?: number;
 }
 
 /** What the rebuilt SDP gives Opus and VP8 unless the signal says otherwise. */
@@ -63,6 +73,12 @@ export interface CallMedia {
   getUserMedia(constraints: MediaStreamConstraints): Promise<MediaStream>;
   /** Left out where the screen cannot be shared. */
   getDisplayMedia?(options: DisplayMediaStreamOptions): Promise<MediaStream>;
+  /**
+   * Its connections restart ICE as a browser's do: `createOffer({ iceRestart: true })` on a connected one gives an
+   * offer with new ICE credentials and candidates, and a remote offer with new credentials is answered on the same
+   * connection (WISP 601, "Reconnecting"). The browser's own media does; a stand-in says so.
+   */
+  restartsIce?: boolean;
   /** Why the screen cannot be shared, where it cannot: the call window shows it on the share button, turned off. */
   screenUnavailable?: string;
   /**
@@ -328,7 +344,7 @@ export function parseCallSignal(json: string, now = Date.now()): CallSignal | nu
     return null;
   }
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
-  if (raw.t !== "o" && raw.t !== "a" && raw.t !== "h" && raw.t !== "v") return null;
+  if (raw.t !== "o" && raw.t !== "a" && raw.t !== "h" && raw.t !== "v" && raw.t !== "r") return null;
   if (typeof raw.ts !== "number" || !Number.isFinite(raw.ts)) return null;
   if (Math.abs(now - raw.ts) > CALL_SIGNAL_MAX_AGE_MS) return null;
   if (raw.t === "h") return raw.r === "u" ? { t: "h", ts: raw.ts, r: "u" } : { t: "h", ts: raw.ts };
@@ -376,7 +392,14 @@ export function parseCallSignal(json: string, now = Date.now()): CallSignal | nu
   }
   if (payloadTypes.ap !== undefined && payloadTypes.ap === payloadTypes.vp) return null;
 
-  return { t: raw.t, ts: raw.ts, u: raw.u, p: raw.p, f: raw.f, s: raw.s, m: media, c: candidates, ss: ssrcs, ...picture, ...payloadTypes };
+  // Any other value of `x` says nothing. `re` only means something on an answer.
+  const restart: Pick<CallSignal, "x" | "re"> = raw.x === 1 ? { x: 1 } : {};
+  if (raw.re !== undefined) {
+    if (raw.t !== "a" || typeof raw.re !== "number" || !Number.isFinite(raw.re)) return null;
+    restart.re = raw.re;
+  }
+
+  return { t: raw.t, ts: raw.ts, u: raw.u, p: raw.p, f: raw.f, s: raw.s, m: media, c: candidates, ss: ssrcs, ...picture, ...payloadTypes, ...restart };
 }
 
 /** The `v`/`k` pair of any signal. Returns null for a malformed one, `{}` when it says nothing. */
@@ -418,7 +441,10 @@ export function buildSdpFromSignal(signal: CallSignal): string {
   
   const mediaOrder = signal.m ?? ["a"];
   
-  const sessionId = Math.floor(Math.random() * 1e15);
+  // One session for every description of one connection (its fingerprint names it): a restart offer and its answer
+  // describe the session the call already has, a version later.
+  const sessionId = parseInt(signal.f!.slice(0, 12), 16);
+  const sessionVersion = signal.t === "r" || signal.re !== undefined ? Math.max(3, Math.floor(signal.ts / 1000)) : 2;
   const audioSsrc = signal.ss?.[0] ?? Math.floor(Math.random() * 0xFFFFFFFF);
   const videoSsrc = signal.ss?.[1] ?? Math.floor(Math.random() * 0xFFFFFFFF);
   const opus = signal.ap ?? DEFAULT_OPUS_PT;
@@ -426,7 +452,7 @@ export function buildSdpFromSignal(signal: CallSignal): string {
 
   const lines: string[] = [
     "v=0",
-    `o=- ${sessionId} 2 IN IP4 127.0.0.1`,
+    `o=- ${sessionId} ${sessionVersion} IN IP4 127.0.0.1`,
     "s=-",
     "t=0 0",
   ];
@@ -522,10 +548,17 @@ export function waitForIceGathering(
    * Give up after this long when not a single candidate showed up. Host candidates come in a few milliseconds; a
    * connection with none by then has stalled (Chromium, rarely, under load) and will not find any later.
    */
-  { stallMs }: { stallMs?: number } = {},
+  {
+    stallMs,
+    /**
+     * The description was just set on a connection that gathered before (an ICE restart): "complete" may still be
+     * the last round's, so it only counts once the description has a candidate of this round.
+     */
+    fresh = false,
+  }: { stallMs?: number; fresh?: boolean } = {},
 ): Promise<void> {
   return new Promise((resolve) => {
-    if (pc.iceGatheringState === "complete") {
+    if (pc.iceGatheringState === "complete" && (!fresh || sdpHasCandidates(pc.localDescription?.sdp))) {
       resolve();
       return;
     }
@@ -551,7 +584,7 @@ export function waitForIceGathering(
     }, stallMs);
 
     const onState = () => {
-      if (pc.iceGatheringState === "complete") finish();
+      if (pc.iceGatheringState === "complete" && (!fresh || sdpHasCandidates(pc.localDescription?.sdp))) finish();
     };
     const onCandidate = (event: RTCPeerConnectionIceEvent) => {
       if (event.candidate) found = true;

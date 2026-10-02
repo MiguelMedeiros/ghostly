@@ -31,6 +31,7 @@
   "noAnswer": "无人接听",
   "onAnother": "你正在另一通话中",
   "outgoing": "呼叫中...",
+  "reconnecting": "正在重新连接...",
   "rejected": "通话被拒绝",
   "selfView": "拖动以移动，拉动角落以调整大小，双击以重置",
   "shareScreen": "共享屏幕",
