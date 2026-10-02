@@ -116,8 +116,9 @@ function cell(row: TurnRow, column: TurnColumn, facts: TurnFacts): TurnAction {
       break;
     case "superseded":
       switch (column) {
-        case "mine": return IMPOSSIBLE;
-        case "other": case "none": return { do: "stay", offers: ["use-here", "it-wasnt-me"] };
+        // The table says "cannot happen". It can: the record that superseded this device expired on every source while
+        // its own older one is still held somewhere. Nothing changes for it: it was replaced, and it stays so.
+        case "mine": case "other": case "none": return { do: "stay", offers: ["use-here", "it-wasnt-me"] };
         case "clone": case "unreachable": return STAY;
         case "tombstone": return { do: "become", state: tombstone(facts), reload: false };
       }

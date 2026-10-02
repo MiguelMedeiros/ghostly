@@ -1,10 +1,10 @@
 import {
-  classifyTurnRead, fromBase64Url, nextTurnPosition, randomBytes, readTurnPacket, signTurnPacket, signTurnRelease, toBase64Url, turnKeys, turnPutSummary,
+  classifyTurnRead, fromBase64Url, nextTurnPosition, randomBytes, readTurnPacket, signTurnPacket, signTurnRelease, toBase64Url, turnKeys, turnPutSummary, TURN_SOURCE_TIMEOUT_MS,
   type TurnConditions, type TurnFields, type TurnKeys, type TurnNetwork, type TurnRead, type TurnRecord, type TurnRelease, type TurnSigner, type TurnSourcePut,
 } from "@ghostly/core";
 import { MAX_DEVICES, type DevicePatch, type DeviceRecord, type DeviceSlot, type DeviceState, type StoredDeviceState } from "./state";
 import { amendDevice, moveDevice, readDeviceRecord } from "./store";
-import { turnAction, turnRow, type TurnAction, type TurnRow } from "./turnAction";
+import { BEHIND_ROUNDS, turnAction, turnRow, type TurnAction, type TurnRow } from "./turnAction";
 
 /*
  * The turn keeper (WISP 06 § The turn): one profile's turn record on this device. It reads every source, compares
@@ -18,10 +18,37 @@ import { turnAction, turnRow, type TurnAction, type TurnRow } from "./turnAction
  * - a put goes to each source on that source's own condition, and a refusal is never tried again without it: a
  *   refusal means someone else wrote, and the answer is a read;
  * - a record it writes has a sequence above the highest raw one ever seen at the address;
+ * - a device that takes the turn is active only after a second read, made after every racing put has landed (see
+ *   `TURN_RAISE_WINDOW_MS`);
+ * - an active device starts only once a source returned the record it wrote;
  * - a `single` profile has no turn: nothing is read and nothing is put.
  *
  * The device signing key is not this part's: it comes in as `signer`.
  */
+
+/**
+ * `T`: a device that raises the turn to become active (a handoff's taker, a forced takeover) puts within this long of
+ * the start of the read it acts on, or reads again first. Relays ignore `If-Match` (measured: pkarr-relay 2.1.0 and
+ * both default relays), so on relays two devices that read one record can both put and both read their own back.
+ * With this bound, whoever put first also reads last: a device waits longer than `T` after its put and reads every
+ * source again, and by then any device that read the old record has put, so the higher sequence is what the read
+ * finds. Only a read that still says `mine` makes the device active.
+ *
+ * 20 s: a read may take `TURN_SOURCE_TIMEOUT_MS` (8 s) and a put as long again, plus signing and the durable write.
+ * Measured: a read of the public DHT took 3.7 to 4.1 s and a put to a local relay or DHT under 1 s, so the bound is
+ * the two timeouts and a margin, not a typical time. A device whose put would end later than `T` reads again first.
+ */
+export const TURN_RAISE_WINDOW_MS = 20_000;
+/** How much longer than `T` a device waits after its put before the read that may make it active. */
+export const TURN_SETTLE_MARGIN_MS = 1_000;
+
+/** The read this put would act on is older than `TURN_RAISE_WINDOW_MS` allows (or there was none): read again. */
+export class TurnStaleReadError extends Error {
+  constructor() {
+    super("The turn was read too long ago to raise it: read again");
+    this.name = "TurnStaleReadError";
+  }
+}
 
 /** The device state store, as the keeper uses it (tests give their own). */
 export interface TurnStore {
@@ -42,6 +69,8 @@ export interface TurnKeeperOptions {
   now?: () => number;
   /** 8 random bytes for a record's `instance`. */
   instance?: () => Uint8Array;
+  /** Waits this long (tests move a clock of their own). */
+  sleep?: (ms: number) => Promise<void>;
   /** A taking device that lost: moves the registry pointer back and drops the staged state, before `standby` is written. */
   undoStaging?: () => Promise<void>;
 }
@@ -108,12 +137,19 @@ export class TurnKeeper {
   private readonly store: TurnStore;
   private readonly now: () => number;
   private lastGoodAt: number | null = null;
+  /** When the last read was started: a raising put must end within `TURN_RAISE_WINDOW_MS` of it. */
+  private readStartedAt: number | null = null;
+  /** When this device's last put of a turn it is taking ended: the settle read comes more than `T` later. */
+  private raisedAt: number | null = null;
+  private warmed = false;
+  private readonly sleep: (ms: number) => Promise<void>;
   /** Reads and puts are made one after the other: two checks at once would race each other's writes. */
   private queue: Promise<unknown> = Promise.resolve();
 
   constructor(private readonly options: TurnKeeperOptions) {
     this.store = options.store ?? realStore;
     this.now = options.now ?? Date.now;
+    this.sleep = options.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
   }
 
   /**
@@ -128,6 +164,8 @@ export class TurnKeeper {
   private async held(): Promise<Held | null> {
     const record = await this.store.read(this.options.profile);
     if (!record) return null;
+    // The profile has a device set: the sources are made ready for the first read (the Desktop's DHT node joins).
+    if (!this.warmed) { this.warmed = true; void this.options.network.turnWarm?.().catch(() => {}); }
     if (!record.d) throw new Error("The device state has no device-set secret");
     const ownSlot = record.ownSlot;
     const own = ownSlot === undefined ? undefined : record.deviceSet[ownSlot];
@@ -145,7 +183,9 @@ export class TurnKeeper {
 
   /** One read of every source, compared with the stored packet. The highest raw sequence seen is kept, durably. */
   private async readWith(held: Held): Promise<TurnRead> {
+    const startedAt = this.now();
     const answers = await this.options.network.turnRead(held.keys.identity.pubKeyZ32);
+    this.readStartedAt = startedAt;
     const read = classifyTurnRead({
       keys: held.keys, ownKey: held.ownKey, stored: held.stored, ownSlot: held.ownSlot,
       ...(held.record.state === "taking" ? { taking: held.record.turn } : {}),
@@ -172,9 +212,43 @@ export class TurnKeeper {
     });
   }
 
-  private async put(held: Held, payload: Uint8Array, conditions: TurnConditions): Promise<TurnPutReport> {
+  private async put(held: Held, payload: Uint8Array, conditions: TurnConditions, raising = held.record.state === "taking"): Promise<TurnPutReport> {
+    // A put that raises the turn ends within T of the read it acts on: started late, it could land after another
+    // device's last read. So it is not started at all, and the caller reads again.
+    if (raising && (this.readStartedAt === null || this.now() - this.readStartedAt > TURN_RAISE_WINDOW_MS - TURN_SOURCE_TIMEOUT_MS)) throw new TurnStaleReadError();
     const puts = await this.options.network.turnPut(held.keys.identity.pubKeyZ32, payload, conditions);
+    if (raising) this.raisedAt = this.now();
     return { payload, puts, refused: turnPutSummary(puts).refused > 0 };
+  }
+
+  /**
+   * The read that may make a device that raised the turn active (`TURN_RAISE_WINDOW_MS`): made more than `T` after
+   * its put ended, of every source. A device that does not know when it last put (it restarted) counts from now.
+   */
+  private async settledRead(held: Held): Promise<TurnRead> {
+    const from = this.raisedAt ??= this.now();
+    const due = from + TURN_RAISE_WINDOW_MS + TURN_SETTLE_MARGIN_MS;
+    if (this.now() < due) await this.sleep(due - this.now());
+    return this.readWith(held);
+  }
+
+  /**
+   * Raises the turn for a device that takes it without being `taking` (a forced takeover): reads, writes the record
+   * of `turn` within `T` of that read, waits longer than `T`, and reads every source again. `mine` says whether that
+   * last read returned this device's record as the highest: only then may the host make it active. The device state
+   * is the host's to change. Null for a `single` profile.
+   */
+  raise(options: { turn: number; release?: TurnRelease; slots?: (DeviceSlot | null)[] }): Promise<{ mine: boolean; read: TurnRead; report: TurnPutReport | null } | null> {
+    return this.exclusive(async () => {
+      const held = await this.held();
+      if (!held) return null;
+      const first = await this.readWith(held);
+      // A good read is required, and an address that is closed takes no record.
+      if (!first.good || first.result === "tombstone" || first.closed) return { mine: false, read: first, report: null };
+      const report = await this.writeWith(held, first.conditions, options, true);
+      const read = await this.settledRead(held);
+      return { mine: read.result === "mine", read, report };
+    });
   }
 
   /**
@@ -191,7 +265,9 @@ export class TurnKeeper {
     });
   }
 
-  private async writeWith(held: Held, conditions: TurnConditions, options: { turn?: number; release?: TurnRelease; slots?: (DeviceSlot | null)[] } = {}): Promise<TurnPutReport> {
+  private async writeWith(held: Held, conditions: TurnConditions, options: { turn?: number; release?: TurnRelease; slots?: (DeviceSlot | null)[] } = {}, raising = held.record.state === "taking"): Promise<TurnPutReport> {
+    // Checked before anything is signed or stored: a raise on a read too old is not begun.
+    if (raising && (this.readStartedAt === null || this.now() - this.readStartedAt > TURN_RAISE_WINDOW_MS - TURN_SOURCE_TIMEOUT_MS)) throw new TurnStaleReadError();
     const { record, keys, ownSlot, ownKey, storedRecord, wrote } = held;
     const turn = options.turn ?? record.turn;
     const lastRev = wrote && storedRecord!.turn === turn ? storedRecord!.rev : null;
@@ -214,7 +290,7 @@ export class TurnKeeper {
     held.storedRecord = read.kind === "valid" ? read.record : null;
     held.wrote = true;
     held.wroteNow = true;
-    return this.put(held, payload, conditions);
+    return this.put(held, payload, conditions, raising);
   }
 
   /**
@@ -226,22 +302,39 @@ export class TurnKeeper {
     return this.exclusive(async () => {
       const held = await this.held();
       if (!held) return { kind: "single" };
-      let behind = 0;
+      let behind = 0, unconfirmed = 0, settled = false;
+      let read = await this.readWith(held);
       // Every round ends in an outcome or in one more read; the rounds are bounded by the `behind` rule and by refusals.
-      for (let round = 0; round < 8; round++) {
-        const read = await this.readWith(held);
+      for (let round = 0; round < 10; round++) {
         behind = read.result === "behind" ? behind + 1 : 0;
         const row = turnRow(held.record.state, atStart);
-        // Its record of this check was refused somewhere and is still the highest (one source lags, or refuses
-        // what another took): it is written, and a source returned it. Not written a second time.
-        if (held.wroteNow && read.result === "mine" && (row === "active-start" || row === "active-running")) {
-          return row === "active-start" ? { kind: "start", read } : { kind: "go-on", restricted: false, read };
+        const active = row === "active-start" || row === "active-running";
+        if (held.wroteNow && active) {
+          // The record of this check is written, and a source returned it as the highest: not written a second time.
+          if (read.result === "mine") return row === "active-start" ? { kind: "start", read } : { kind: "go-on", restricted: false, read };
+          // Written, and no source returned it (every put failed, or the sources lost it): it is put again, the
+          // same bytes, a few times. A device does not start on a record no source holds.
+          if (read.result === "none" || read.result === "behind" || read.result === "unreachable") {
+            if (read.result === "unreachable" || ++unconfirmed > BEHIND_ROUNDS) return row === "active-start" ? { kind: "ask", read } : { kind: "go-on", restricted: true, read };
+            await this.put(held, held.stored!, read.conditions);
+            read = await this.readWith(held);
+            continue;
+          }
+        }
+        // A taking device that reads its own turn back is active only once that read was made more than T after its
+        // put: by then every device that read the old record has put, and the highest sequence is there to see.
+        if (row === "taking" && read.result === "mine" && !settled) {
+          settled = true;
+          read = await this.settledRead(held);
+          continue;
         }
         const outcome = await this.carryOut(held, row, turnAction(row, read, behind), read);
         if (outcome) return outcome;
+        if (row === "taking") settled = false;
+        read = await this.readWith(held);
       }
       // Sources that keep refusing and keep answering lower: nothing more to try now.
-      return { kind: "wait", read: await this.readWith(held) };
+      return atStart && held.record.state === "active" ? { kind: "ask", read } : { kind: "wait", read };
     });
   }
 
@@ -251,10 +344,9 @@ export class TurnKeeper {
     switch (action.do) {
       case "write": {
         if (read.closed) return { kind: "closed", read };
-        const report = await this.writeWith(held, conditionsAfter(read, action.condition));
-        // A refused put of its own record: someone else wrote. The read says who.
-        if (report.refused) return null;
-        return action.then === "start" ? { kind: "start", read } : { kind: "go-on", restricted: false, read };
+        await this.writeWith(held, conditionsAfter(read, action.condition));
+        // Read back: a refusal means someone else wrote, and a device goes on only with a record a source returned.
+        return null;
       }
       case "put": {
         if (!held.stored) return action.then === "read" ? { kind: "wait", read } : { kind: "go-on", restricted: false, read };

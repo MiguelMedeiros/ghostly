@@ -65,7 +65,7 @@ const TABLE: Cell[] = [
   ["taking", { result: "none" }, "Put with no condition, read back", { do: "put", condition: "none", then: "read" }],
   ["taking", { result: "unreachable" }, "Wait, try again", { do: "wait" }],
   // `superseded`
-  ["superseded", { result: "mine" }, "Cannot happen", impossible],
+  ["superseded", { result: "mine" }, "Cannot happen (it can, once the newer record expired: stay, the same two buttons)", { do: "stay", offers: ["use-here", "it-wasnt-me"] }],
   ["superseded", { result: "other" }, "Stay; Use here (a handoff) or It wasn't me (a takeover)", { do: "stay", offers: ["use-here", "it-wasnt-me"] }],
   ["superseded", { result: "clone", clone: "above" }, "Stay", stay],
   ["superseded", { result: "tombstone", listed: true }, "moving", { do: "become", state: "moving", reload: false }],

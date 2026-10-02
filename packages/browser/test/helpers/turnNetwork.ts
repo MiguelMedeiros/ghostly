@@ -18,6 +18,12 @@ export interface FakeSource {
   frozen?: boolean;
   /** Refuses every put, whatever it holds. */
   refuses?: boolean;
+  /** Answers reads, and fails every put (a timeout). */
+  putFails?: boolean;
+  /** Sequences it names on a read without handing an item over (a relay's header): unsigned. */
+  sequences?: string[];
+  /** Its read answers are marked stale (a relay asked plainly, from its cache). */
+  stale?: boolean;
   /** Called between the conditions being checked and the packet being stored: where another device's put lands first. */
   beforePut?: () => void;
 }
@@ -36,6 +42,10 @@ export class FakeTurnNetwork implements TurnNetwork {
   onPut?: (payload: Uint8Array) => void | Promise<void>;
   /** Called after a read was answered and before the caller gets it: where another device acts in between. */
   afterRead?: () => void;
+  /** As the Desktop puts: the DHT first, and the relays only once it stored. */
+  dhtFirst = false;
+  warmed = 0;
+  async turnWarm(): Promise<void> { this.warmed++; }
 
   constructor(sources: { name: string; kind?: "dht" | "relay" }[] = [{ name: "dht", kind: "dht" }, { name: "https://relay.test", kind: "relay" }]) {
     this.sources = sources.map((source) => ({ name: source.name, kind: source.kind ?? "dht", held: null }));
@@ -59,7 +69,7 @@ export class FakeTurnNetwork implements TurnNetwork {
     this.calls.push({ op: "read" });
     const answers = this.sources.map((source): TurnSourceAnswer => (source.down
       ? { source: source.name, answered: false, payloads: [], detail: "no answer" }
-      : { source: source.name, answered: true, payloads: source.held ? [source.held] : [] }));
+      : { source: source.name, answered: true, payloads: source.held ? [source.held] : [], ...(source.sequences ? { sequences: source.sequences } : {}), ...(source.stale ? { stale: true } : {}) }));
     this.afterRead?.();
     return answers;
   }
@@ -67,16 +77,19 @@ export class FakeTurnNetwork implements TurnNetwork {
   async turnPut(_key: string, payload: Uint8Array, conditions: TurnConditions): Promise<TurnSourcePut[]> {
     await this.onPut?.(payload);
     const results: TurnSourcePut[] = [];
-    for (const source of this.sources) {
+    const ordered = this.dhtFirst ? [...this.sources].sort((a, b) => Number(b.kind === "dht") - Number(a.kind === "dht")) : this.sources;
+    let dhtHeld = false;
+    for (const source of ordered) {
       if (conditions[source.name] === undefined) continue;
+      if (dhtHeld && source.kind === "relay") { results.push({ source: source.name, outcome: "failed", detail: "not sent: the DHT did not store it" }); continue; }
       const condition = conditions[source.name];
       this.calls.push({ op: "put", source: source.name, condition, payload });
-      if (source.down) { results.push({ source: source.name, outcome: "failed", detail: "no answer" }); continue; }
+      if (source.down || source.putFails) { results.push({ source: source.name, outcome: "failed", detail: "no answer" }); if (this.dhtFirst && source.kind === "dht") dhtHeld = true; continue; }
       if (source.refuses) { results.push({ source: source.name, outcome: "refused", detail: "HTTP 409" }); continue; }
       source.beforePut?.();
       const sequence = turnPayloadSequence(payload)!, heldSequence = source.held ? turnPayloadSequence(source.held)! : null;
-      if (source.kind === "dht" && condition !== null && String(heldSequence) !== condition) { results.push({ source: source.name, outcome: "refused", detail: "301" }); continue; }
-      if (heldSequence !== null && sequence < heldSequence) { results.push({ source: source.name, outcome: "refused", detail: source.kind === "dht" ? "302" : "HTTP 409" }); continue; }
+      if (source.kind === "dht" && condition !== null && String(heldSequence) !== condition) { results.push({ source: source.name, outcome: "refused", detail: "301" }); dhtHeld = this.dhtFirst; continue; }
+      if (heldSequence !== null && sequence < heldSequence) { results.push({ source: source.name, outcome: "refused", detail: source.kind === "dht" ? "302" : "HTTP 409" }); if (source.kind === "dht") dhtHeld = this.dhtFirst; continue; }
       if (source.kind === "relay" && heldSequence === sequence && source.held && larger(source.held, payload)) { results.push({ source: source.name, outcome: "refused", detail: "HTTP 409" }); continue; }
       if (!source.frozen) source.held = payload;
       results.push({ source: source.name, outcome: "stored" });
