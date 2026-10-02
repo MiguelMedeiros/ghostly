@@ -3,6 +3,7 @@ import { connect, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { heardCallSignal } from "@ghostly/core";
 import type { EngineState, LinkView } from "@ghostly/browser/shared/types";
 import { AudioSocket, audioSocketPath } from "../src/calls/audioSocket";
 import { CallManager, MAX_REDIALS, type CallEngine } from "../src/calls/manager";
@@ -25,22 +26,24 @@ afterAll(() => {
 
 interface Side { calls: CallManager; events: { type: string; [k: string]: unknown }[]; signals: (string | null)[]; link: Partial<LinkView> }
 
-function pairOfManagers(stacks: { a?: () => Promise<CallStack | string>; now?: () => number; delay?: number; maxRedials?: number } = {}): { a: Side; b: Side } {
+function pairOfManagers(stacks: { a?: () => Promise<CallStack | string>; now?: () => number; nowB?: () => number; delay?: number; maxRedials?: number } = {}): { a: Side; b: Side } {
+  // Each side's clock: the same one unless `nowB` gives the second side its own.
+  const nowA = stacks.now ?? Date.now, nowB = stacks.nowB ?? nowA;
   const make = (chat: string): Side => {
     const side = { events: [], signals: [], link: { id: chat, profile: "paired-chat/1", callsUnavailable: null, label: `to ${chat}` } } as unknown as Side;
     return side;
   };
   const a = make("chat-ab"), b = make("chat-ba");
-  const engine = (me: Side, other: () => Side): CallEngine => ({
+  const engine = (me: Side, other: () => Side, heardAt: () => number): CallEngine => ({
     getState: () => ({ links: [me.link] }) as unknown as EngineState,
     setCallSignal: async ({ signal }) => {
       me.signals.push(signal);
-      // The chat session carries it to the contact, a moment later.
-      if (signal) setTimeout(() => other().calls.onSignal(other().link.id!, signal), stacks.delay ?? 5);
+      // The chat session carries it to the contact, a moment later, and the contact's engine says when it heard it.
+      if (signal) setTimeout(() => other().calls.onSignal(other().link.id!, heardCallSignal(signal, heardAt())), stacks.delay ?? 5);
     },
   });
-  a.calls = new CallManager({ engine: engine(a, () => b), emit: (type, _id, fields) => a.events.push({ type, ...fields }), profileDir: tmp(), stack: stacks.a, now: stacks.now, maxRedials: stacks.maxRedials });
-  b.calls = new CallManager({ engine: engine(b, () => a), emit: (type, _id, fields) => b.events.push({ type, ...fields }), profileDir: tmp(), now: stacks.now });
+  a.calls = new CallManager({ engine: engine(a, () => b, nowB), emit: (type, _id, fields) => a.events.push({ type, ...fields }), profileDir: tmp(), stack: stacks.a, now: stacks.now, maxRedials: stacks.maxRedials });
+  b.calls = new CallManager({ engine: engine(b, () => a, nowA), emit: (type, _id, fields) => b.events.push({ type, ...fields }), profileDir: tmp(), now: stacks.nowB ?? stacks.now });
   return { a, b };
 }
 
@@ -278,6 +281,27 @@ describe("two call managers", { timeout: 60_000 }, () => {
     expect(a.signals.at(-1)).toMatch(/"t":"h"/);
     await a.calls.stopAll();
     await b.calls.stopAll();
+  });
+
+  // Reported 2026-10-01 (a contact whose clock runs two minutes fast): a signal more than two minutes from this clock
+  // never rang, and an answer dated before the caller's offer (a callee's clock behind) was never taken.
+  it.each([["two minutes behind", -2 * 60_000 - 500], ["two minutes ahead", 2 * 60_000 + 500], ["an hour behind", -60 * 60_000]])("a contact whose clock is %s: its call rings, the answer names the offer, and the call connects both ways", async (_, skew) => {
+    for (const calleeIsOff of [true, false]) {
+      const off = () => Date.now() + skew;
+      // The second side is the callee; one of the two has the clock that is off.
+      const { a, b } = calleeIsOff ? pairOfManagers({ nowB: off }) : pairOfManagers({ now: off, nowB: () => Date.now() });
+      await a.calls.start("chat-ab", {});
+      await until(() => b.events.find((e) => e.type === "call.incoming")).catch(diagnose(a, b));
+      await b.calls.answer(undefined, {});
+      const offer = JSON.parse(signalsOf(a, "o")[0]!) as { ts: number }, answer = JSON.parse(signalsOf(b, "a")[0]!) as { ts: number; o: number };
+      expect(answer.o).toBe(offer.ts);
+      expect(Math.abs(answer.ts - offer.ts)).toBeGreaterThan(60_000);
+      await until(() => a.calls.list()[0]?.state === "connected" && b.calls.list()[0]?.state === "connected").catch(diagnose(a, b));
+      await a.calls.hangup(undefined);
+      expect(await until(() => b.events.find((e) => e.type === "call.ended"))).toMatchObject({ reason: "remote-hangup" });
+      await a.calls.stopAll();
+      await b.calls.stopAll();
+    }
   });
 
   /** Both sides call each other at once; the side whose offer lost is the one that ends its call as `crossed`. */

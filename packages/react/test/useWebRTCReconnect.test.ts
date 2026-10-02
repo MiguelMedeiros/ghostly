@@ -409,3 +409,49 @@ describe("with a contact on an older app (no `x`)", () => {
     expect(call.result.current.reconnecting).toBe(false);
   });
 });
+
+describe("with a contact whose clock is off", () => {
+  /** A contact's signal as the engine hands it on from a live session: with when it was heard here. */
+  const heard = (signal: string) => JSON.stringify({ ...JSON.parse(signal), at: Date.now() });
+
+  it.each([["two minutes behind", -2 * 60_000 - 500], ["two minutes ahead", 2 * 60_000 + 500], ["an hour behind", -60 * 60_000]])("the caller takes the answer to its restart offer from a callee whose clock is %s: it names that offer (`re`)", async (_, skew) => {
+    const call = renderCall();
+    act(() => { void call.result.current.startCall(false); });
+    devices.userMedia[0].grant();
+    await settle();
+    const mine = signals(call)[0];
+    // The call's own answer names the call's offer (`o`); the restart's answer names the restart offer (`re`).
+    call.receive(heard(JSON.stringify({ ...JSON.parse(remote.restarting(remote.answer(Date.now() + skew))), o: mine.ts })));
+    await settle();
+    up(pc());
+    expect(call.result.current.callState).toBe("connected");
+    act(() => pc().setIceState("failed"));
+    await settle();
+    const [offer] = restartOffers(call);
+    call.receive(heard(remote.restartAnswer(Date.now() + skew + 1_000, offer.ts)));
+    await settle();
+    expect(pc().remoteDescriptions.map((d) => d.type)).toEqual(["answer", "answer"]);
+    act(() => pc().setIceState("connected"));
+    expect(call.result.current.reconnecting).toBe(false);
+  });
+
+  it.each([["two minutes behind", -2 * 60_000 - 500], ["two minutes ahead", 2 * 60_000 + 500]])("the callee answers the restart offer of a caller whose clock is %s, naming it with `re` and never with `o`", async (_, skew) => {
+    const call = renderCall();
+    const theirs = Date.now() + skew;
+    call.receive(heard(remote.restarting(remote.offer(theirs))));
+    act(() => { void call.result.current.acceptCall(false); });
+    devices.userMedia[0].grant();
+    await settle();
+    up(pc());
+    expect(signals(call)[0]).toMatchObject({ t: "a", o: theirs, x: 1 });
+    expect(signals(call)[0].re).toBeUndefined();
+    await pass(5000);
+    call.receive(heard(remote.restartOffer(theirs + 6_000)));
+    await settle();
+    expect(pc().remoteDescriptions.map((d) => d.type)).toEqual(["offer", "offer"]);
+    const sent = signals(call);
+    const answer = sent[sent.length - 1] as Signal & { o?: number };
+    expect(answer).toMatchObject({ t: "a", re: theirs + 6_000 });
+    expect(answer.o).toBeUndefined();
+  });
+});

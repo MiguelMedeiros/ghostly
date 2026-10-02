@@ -1,6 +1,7 @@
 import { chat, expect, setDhtOnly, test, type Peer } from "../support/fixtures";
 import { pair } from "../support/paired";
 import { watchCalls } from "../support/callTrace";
+import { skewClock } from "../support/clock";
 
 /**
  * Calls in the one chat: every new chat is a paired chat, and it calls over its live session (`calls/1`,
@@ -175,7 +176,31 @@ test("a call that loses its path says Reconnecting, restarts ICE on the same con
   for (const p of [alice, bob]) await expect(chat(p).getByText("Audio call ended")).toHaveCount(1);
 });
 
-test("the contact's tab closes mid-call: the call ends here with its line",{ tag: ["@feature:calls.paired", "@feature:calls.video"] }, async ({ peer }) => {
+for (const [how, offset] of [["behind", -125_000], ["ahead", 125_000]] as const) {
+  test(`a contact whose clock is two minutes ${how}: calls ring and connect, whoever calls`, { tag: ["@feature:calls.paired", "@feature:calls.signal", "@feature:calls.audio"] }, async ({ peer }) => {
+    // Reported 2026-10-01. A call signal more than two minutes from this clock never rang, and the answer of a callee
+    // whose clock is behind was dated before the caller's offer and dropped: the call rang on until it gave up.
+    const [alice, bob] = await Promise.all([peer(`skew-${how}-alice`), peer(`skew-${how}-bob`, { beforeOpen: (context) => skewClock(context, 0) })]);
+    await pair(alice, bob);
+    for (const p of [alice, bob]) await expect(p.page.getByTestId("call-audio")).toBeEnabled();
+    // Paired and live: from here Bob's clock is off. (A first pairing between such clocks is another change.)
+    await bob.page.evaluate((ms) => { (globalThis as { clockOffset?: number }).clockOffset = ms; }, offset);
+    expect(Math.abs(await bob.page.evaluate(() => Date.now()) - await alice.page.evaluate(() => Date.now()))).toBeGreaterThan(120_000);
+
+    for (const [caller, callee] of [[alice, bob], [bob, alice]]) {
+      await caller.page.getByTestId("call-audio").click();
+      await expect(callee.page.getByTitle("Accept audio call")).toBeVisible();
+      await callee.page.getByTitle("Accept audio call").click();
+      for (const p of [alice, bob]) await expect(p.page.getByText(clock).first()).toBeVisible();
+      await caller.page.getByTitle("End call").click();
+      for (const p of [alice, bob]) await expect(p.page.getByTitle("End call")).toHaveCount(0);
+      for (const p of [alice, bob]) await expect(p.page.getByTestId("call-audio")).toBeEnabled();
+    }
+    for (const p of [alice, bob]) await expect(chat(p).getByText("Audio call ended")).toHaveCount(2);
+  });
+}
+
+test("the contact's tab closes mid-call: the call ends here with its line", { tag: ["@feature:calls.paired", "@feature:calls.video"] }, async ({ peer }) => {
   const [alice, bob] = await Promise.all([peer("paired-gone-alice"), peer("paired-gone-bob")]);
   await pair(alice, bob);
   await alice.page.getByTestId("call-video").click();

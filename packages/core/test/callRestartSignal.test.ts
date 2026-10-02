@@ -66,7 +66,8 @@ describe("the chat session carries them", () => {
     let now = NOW;
     const calls = new PairedCalls(() => now);
     const offer = JSON.stringify({ ...ice, t: "r", s: "actpass", x: 1 });
-    expect(parsePairedCallFrame({ t: PAIRED_CALL_FRAME, s: offer }, NOW)).toBe(offer);
+    // Handed on with when it was heard here, as every signal on a session is.
+    expect(parsePairedCallFrame({ t: PAIRED_CALL_FRAME, s: offer }, NOW)).toBe(JSON.stringify({ ...JSON.parse(offer), at: NOW }));
     expect(calls.set(offer)).toEqual({ t: PAIRED_CALL_FRAME, s: offer });
     // The session was down when it was made (the network changed): it goes on the next one.
     now += 20_000;
