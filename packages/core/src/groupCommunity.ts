@@ -1270,12 +1270,18 @@ export class CommunitySession {
     if (secrets.length) this.hooks.direct(from, { t: "group-secrets", v: 2, g: this.id, secrets: secrets.slice(-COMMUNITY_LIMITS.secrets) });
     // What was said while they were away, by anyone, for epochs they were in.
     const have = frame.have && typeof frame.have === "object" ? frame.have as Record<string, Record<string, unknown>> : {};
+    // A frame sealed on a branch I do not follow (two members committed one leave apart, each with a fresh secret,
+    // and that branch lost) goes with that branch's commits and secret: the commits above are my branch's only, and a
+    // member who was never on the other one could not place the frame, and kept it waiting for good (2026-10-02).
+    const handed = new Set<string>();
     for (const stored of this.state.store) {
       if (stored.s === from || this.wasRemoved(stored.s)) continue;
       const found = this.commitByShort(stored.e, stored.h);
       if (!found || !rosterHas(this.rosterAt(found.hash) ?? [], from)) continue;
       const high = have[stored.s]?.[seenKey(stored.e, stored.h)];
-      if (!Number.isSafeInteger(high) || (high as number) < stored.n) this.hooks.direct(from, stored);
+      if (Number.isSafeInteger(high) && (high as number) >= stored.n) continue;
+      if (!this.mainIndex.has(found.hash)) this.handSide(from, found.hash, handed);
+      this.hooks.direct(from, stored);
     }
     // The link's seed, so they can answer it too.
     if (rosterHas(this.roster, from)) { const entry = this.entryFrame(from); if (entry) this.hooks.direct(from, entry); }
@@ -1285,6 +1291,17 @@ export class CommunitySession {
     this.offerMeta(from, frame.mt);
     // And where I am, so they can hand me what I lack (asked once in a while, not in a loop).
     this.ask(from);
+  }
+
+  /** The commits of a branch I do not follow, from where it leaves mine, and the secrets I hold of those `to` was in. */
+  private handSide(to: string, tip: string, handed: Set<string>): void {
+    for (const h of this.pathToMain(tip) ?? []) {
+      if (handed.has(h)) continue;
+      handed.add(h);
+      this.hooks.direct(to, { t: "group-commit", v: 2, g: this.id, commit: this.known.get(h)! });
+      const secret = this.state.secrets[h];
+      if (secret && rosterHas(this.rosterAt(h) ?? [], to)) this.hooks.direct(to, { t: "group-secret", v: 2, g: this.id, to, h, s: sealSecret(to, fromBase64Url(secret), secretAad(this.id, h, to)) });
+    }
   }
 
   /** The current entry seed sealed to a member, when I hold it. */
