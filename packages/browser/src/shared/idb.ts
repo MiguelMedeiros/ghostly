@@ -13,7 +13,9 @@ export function setDatabaseName(name: string): void {
 export function databaseName(): string {
   return dbName;
 }
-const DB_VERSION = 10;
+const DB_VERSION = 11;
+/** The messages store's index of card messages (`card.kind`): what `db.getCardMessages` reads. */
+export const CARD_INDEX = "byCardKind";
 
 export const STORES = {
   links: "links",
@@ -99,6 +101,9 @@ export function openDb(): Promise<IDBDatabase> {
       // v10: a chat's messages in time order, so its latest page is read without the rest.
       const messages = request.transaction!.objectStore(STORES.messages);
       if (!messages.indexNames.contains("byLinkTime")) messages.createIndex("byLinkTime", ["linkId", "timestamp"]);
+      // v11: the messages that carry a status card, by the card's kind, across every chat and group (the Tasks board).
+      // A message without a card has no such key and is not in it, so the index is as small as the cards are few.
+      if (!messages.indexNames.contains(CARD_INDEX)) messages.createIndex(CARD_INDEX, "card.kind");
     };
     request.onsuccess = () => {
       // Let the other context upgrade the schema instead of blocking it.

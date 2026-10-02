@@ -14,7 +14,7 @@ function Where() { const { pathname, search } = useLocation(); return <p data-te
 // here, what the person is asked and what each answer does.
 vi.mock("../../lib/profileBackup", async (original) => ({
   ...(await original<typeof import("../../lib/profileBackup")>()),
-  openProfileBackup: vi.fn(async () => ({ name: "Work", payload: {} })),
+  openProfileBackup: vi.fn(async () => ({ name: "Work", protection: "passphrase", payload: { profile: { name: "Work" }, storage: {} } })),
   sameIdentityProfiles: vi.fn(async () => []),
   restoreOpenedBackup: vi.fn(async () => ({ id: "copycopyco", name: "Work", createdAt: 1, restored: true })),
 }));

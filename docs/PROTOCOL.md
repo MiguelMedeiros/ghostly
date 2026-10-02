@@ -151,11 +151,11 @@ The advertisement is authenticated twice: by the secretbox (only the link peer c
 
 ## 4. Calls
 
-`_call` carries `{ "t": "o" | "a" | "h" | "v", "ts", "u", "p", "f", "s", "m", "c", "ss", "v", "k", "ap", "vp" }`: ICE credentials, DTLS fingerprint, setup role, media order, the candidates (at most two in a `_call` record, one host and one server reflexive; up to eight in a `paired-call` frame, local networks first and VPN tunnels last, relay ones included), the SSRCs, what picture the sender has on, and the payload types its SDP gives Opus and VP8 when they are not 111 and 96 (§4.2). Each side rebuilds a full SDP around these values, because a real SDP does not fit in a packet.
+`_call` carries `{ "t": "o" | "a" | "h" | "v" | "r", "ts", "u", "p", "f", "s", "m", "c", "ss", "v", "k", "ap", "vp", "x", "re" }`: ICE credentials, DTLS fingerprint, setup role, media order, the candidates (at most two in a `_call` record, one host and one server reflexive; up to eight in a `paired-call` frame, local networks first and VPN tunnels last, relay ones included), the SSRCs, what picture the sender has on, and the payload types its SDP gives Opus and VP8 when they are not 111 and 96 (§4.2). Each side rebuilds a full SDP around these values, because a real SDP does not fit in a packet.
 
 Receivers validate a signal before any of it reaches an SDP, whether it came from `_call` or a `call` frame: ICE ufrag/pwd are RFC 8839 ice-chars (4-256 and 22-256 long), `f` is 64 hex digits, `s` is `actpass`, `active` or `passive`, `m` holds one or two distinct `a`/`v`, `ss` holds at most two uint32s, `v` is 0 or 1, `k` is `c` or `s`, `ap` and `vp` are dynamic payload types (35-63 or 96-127) and not the same one, and each of at most eight candidates is parsed and re-serialized from its parts (non-UDP ones are dropped, malformed ones reject the signal). Signals whose `ts` is more than 120 s away from the receiver's clock are ignored, so a stale packet does not ring.
 
-`o` is an offer, `a` the answer to it, `h` ends a call or declines an incoming one, and `v` says what picture the sender has on (§4.1). A receiver acts on a signal only when its `ts` is newer than the last one it acted on, and on an answer only when it is newer than its own offer. An offer that arrives while a call is under way does not ring a second call (a caller may offer again on a call that never connected: [WISP 601](wisps/601-webrtc-media.md#paired-profile)).
+`o` is an offer, `a` the answer to it, `h` ends a call or declines an incoming one, `v` says what picture the sender has on (§4.1), and `r` is an offer that restarts ICE on a call that is up (§4.3). A receiver acts on a signal only when its `ts` is newer than the last one it acted on, and on an answer only when it is newer than its own offer. An offer that arrives while a call is under way does not ring a second call (a caller may offer again on a call that never connected: [WISP 601](wisps/601-webrtc-media.md#paired-profile)).
 
 v1 changed two things, both compatible with v0 peers:
 
@@ -204,6 +204,19 @@ as it did.
 v3 also leaves an IPv6 related address out of the candidates it sends (`raddr :: rport 0`, WebKit's IPv6 srflx),
 and accepts one: a v2 receiver checked `raddr` against the extension-token pattern, which has no colon, and
 refused the whole signal, so the call never rang. The related address is informational for ICE.
+
+### 4.3 Reconnecting (v4)
+
+A call whose path is lost (a network change) restarts ICE on the connection it has, when both sides said they can:
+
+| Key | Meaning |
+|---|---|
+| `x` | on an offer or an answer: `1` when the sender restarts ICE on the call's connection. Any other value says nothing |
+| `re` | on an answer only: the `ts` of the restart offer it answers |
+
+A `"t": "r"` signal is a restart offer: the fields of an offer (`u`, `p`, `f`, `s`, `m`, `c`, `ss`, and `v`/`k`), validated the same way, with new ICE credentials and candidates and the DTLS fingerprint the call already has. Only the side whose offer was answered sends it, and only when the other side said `x`. The receiver applies it to the call's own connection and answers with `"t": "a"` and `re`; the sender takes only the answer to its latest restart offer. A restart offer never rings and never starts a call: with no call on, on the side that placed the call, or with another fingerprint, it is dropped. The rebuilt SDP of every description of one connection has the same session id (from the fingerprint), a restart a version later. Timing and what the person sees: [WISP 601](wisps/601-webrtc-media.md#paired-profile), "Reconnecting".
+
+Compatible with older peers in both directions: a peer before v4 drops `"t": "r"` as an unknown type, ignores `x`, and never sends `x`, so a v4 peer never sends it a restart offer and the call ends on a failed connection as it always did.
 
 ## 5. The data link (v1)
 

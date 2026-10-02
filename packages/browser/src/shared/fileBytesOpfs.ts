@@ -11,7 +11,10 @@ type Request = WorkerRequest extends infer R ? R extends unknown ? Omit<R, "n" |
  */
 export class OpfsFileBytes implements FileBytes {
   readonly kind = "opfs" as const;
-  private next = 1;
+  /** Shared with the views `forSpace` makes: one worker, one run of request numbers. */
+  private readonly counter = { next: 1 };
+  /** Another profile's folder (`forSpace`); the active profile's when not set. */
+  private fixedSpace?: string;
   private readonly waiting = new Map<number, { resolve(value: unknown): void; reject(error: Error): void; progress?(n: number): void }>();
 
   private constructor(private readonly worker: Worker) {
@@ -40,11 +43,20 @@ export class OpfsFileBytes implements FileBytes {
     return null;
   }
 
+  private space(): string { return this.fixedSpace ?? fileSpace(); }
+
+  /** A view on the same worker that reads and writes another profile's folder. */
+  forSpace(space: string): OpfsFileBytes {
+    const view = Object.create(this) as OpfsFileBytes;
+    view.fixedSpace = space;
+    return view;
+  }
+
   private call<T>(request: Request, transfer: Transferable[] = [], progress?: (n: number) => void): Promise<T> {
-    const n = this.next++;
+    const n = this.counter.next++;
     return new Promise<T>((resolve, reject) => {
       this.waiting.set(n, { resolve: resolve as (value: unknown) => void, reject, progress });
-      this.worker.postMessage({ ...request, n, space: fileSpace() } as WorkerRequest, transfer);
+      this.worker.postMessage({ ...request, n, space: this.space() } as WorkerRequest, transfer);
     });
   }
 
@@ -72,7 +84,7 @@ export class OpfsFileBytes implements FileBytes {
     await this.close(id);
     try {
       const root = await (await navigator.storage.getDirectory()).getDirectoryHandle("ghostly-files");
-      const file = await (await (await root.getDirectoryHandle(fileSpace())).getFileHandle(checkFileId(id))).getFile();
+      const file = await (await (await root.getDirectoryHandle(this.space())).getFileHandle(checkFileId(id))).getFile();
       // A slice with a type: still the file on disk, never read into memory.
       return file.slice(0, file.size, type);
     } catch { return null; }

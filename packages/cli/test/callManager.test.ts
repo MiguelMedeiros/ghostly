@@ -218,6 +218,34 @@ describe("two call managers", { timeout: 60_000 }, () => {
     expect(existsSync(placed.audio.socket)).toBe(false);
   });
 
+  it("does not say it restarts ICE (libdatachannel cannot), and a restart offer changes nothing: no ring, no answer, the call goes on", async () => {
+    const { a, b } = pairOfManagers();
+    b.calls.setAuto({ on: true, from: [], rate: 16000 });
+    // With no call on, a restart offer rings nobody.
+    const stray = { t: "r", ts: Date.now(), u: "strayU", p: "strayPstrayPstrayPstrayP", f: "ab".repeat(32), s: "actpass", m: ["a"], c: [], x: 1 };
+    b.calls.onSignal("chat-ba", JSON.stringify(stray));
+    expect(b.events).toEqual([]);
+    expect(b.calls.list()).toEqual([]);
+
+    await a.calls.start("chat-ab", {});
+    await Promise.all([a, b].map((side) => until(() => side.events.find((e) => e.type === "call.connected"))));
+    // Neither its offer nor its answer says `x`: an app's call with it ends on a lost path as before (WISP 601).
+    const [offer] = signalsOf(a, "o").map((s) => JSON.parse(s!));
+    const [answer] = signalsOf(b, "a").map((s) => JSON.parse(s!));
+    expect(offer.x).toBeUndefined();
+    expect(answer.x).toBeUndefined();
+
+    // An app would not send one to a side that did not say `x`; one that comes all the same is dropped.
+    const sent = b.signals.length;
+    b.calls.onSignal("chat-ba", JSON.stringify({ ...offer, t: "r", ts: Date.now() + 1, u: "newU", p: "newPnewPnewPnewPnewPnewP", x: 1 }));
+    await new Promise((r) => setTimeout(r, 300));
+    expect(b.signals).toHaveLength(sent);
+    expect(b.calls.list()).toMatchObject([{ state: "connected" }]);
+    expect(a.calls.list()).toMatchObject([{ state: "connected" }]);
+    await a.calls.hangup("chat-ab");
+    await until(() => b.events.find((e) => e.type === "call.ended"));
+  });
+
   it("a hang-up saying the contact could not connect (an app whose microphone was refused) ends a ringing call as failed", async () => {
     const { a, b } = pairOfManagers();
     await a.calls.start("chat-ab", {});
