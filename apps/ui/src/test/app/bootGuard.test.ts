@@ -9,7 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
  * as the page runs it, a classic script before the bundle, against a document with an empty #root.
  */
 
-const SOURCE = readFileSync(join(process.cwd(), "apps/web/public/boot-guard.js"), "utf8");
+const SOURCE = readFileSync(join(import.meta.dirname, "..", "..", "..", "..", "..", "apps/web/public/boot-guard.js"), "utf8");
 const OLD_WEBVIEW = "Mozilla/5.0 (Linux; Android 9; SM-G960F; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/92.0.4515.159 Mobile Safari/537.36";
 const NEW_ANDROID = "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Mobile Safari/537.36";
 const OLD_IPHONE = "Mozilla/5.0 (iPhone; CPU iPhone OS 15_3 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.3 Mobile/15E148 Safari/604.1";
