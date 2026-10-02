@@ -423,7 +423,7 @@ const METHODS: Record<string, Method> = {
     // A kept `group typing --for` ends with the message (the engine says stop with it).
     endTyping(ctx, { groupId: group.id }, false);
     const result = await node(ctx).sendGroupMessage({ groupId: group.id, text, ...(mentions.length ? { mentions } : {}), ...(replyTo ? { replyTo } : {}), ...(card ? { card } : {}) });
-    if (result.error) throw new CliError("unavailable", result.error);
+    if (result.error) throw groupSendRefused(result.error);
     const messageId = result.messageId ?? null;
     // `edges`: how many took it so far (none yet is not an error: it goes when one opens).
     const edges = messageId ? (wait === "sent" ? await waitForGroupFrame(ctx, group.id, messageId, undefined, num(params, "timeout", 30, { min: 1, max: 3600 }) * 1000) : node(ctx).groupTaken({ groupId: group.id, messageId })) : 0;
@@ -557,6 +557,18 @@ function typingWord(params: Params, typing: boolean): { kind: TypingKind; status
   const status = sanitizeTypingStatus(oneLine);
   if (!status) throw new CliError("bad_request", "status: plain text, with no link or markup");
   return { kind, status };
+}
+
+/**
+ * A group message the engine did not send, by what a bot can do about it: a `--reply` to a message this group does not
+ * have is `not_found` (exit 3), as `group react`, `group edit` and `pin` answer for one; out of the group (removed,
+ * left, a forked history) is `refused`: it will not go later either. Anything else may go on a later try
+ * (`unavailable`): the epoch's key is still on its way. All three were `unavailable` (exit 1) before.
+ */
+export function groupSendRefused(error: string): CliError {
+  if (/not in this chat|cannot be replied to/.test(error)) return new CliError("not_found", error);
+  if (/^You (were removed from|left|are no longer in) this group$|Membership changes are halted/.test(error)) return new CliError("refused", error);
+  return new CliError("unavailable", error);
 }
 
 /**
