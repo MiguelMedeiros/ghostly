@@ -48,7 +48,7 @@ afterEach(() => { vi.useRealTimers(); });
 describe("a packet under a key another clock dated", () => {
   it.each([["two minutes", 2 * 60_000], ["ten minutes", 10 * 60_000], ["an hour", 60 * 60_000]])("a joiner whose clock is %s behind its inviter's is read at its first packet, not once its clock catches up", async (_, behind) => {
     const net = relays(["a.test", "b.test"]), key = createIdentity();
-    // The inviter warmed the key it gave its contact, dated by its own clock (as apps up to 1.0.1 do).
+    // The inviter warmed the key it gave its contact, dated by its own clock (as apps up to 1.0.2 do).
     net.other(key, emptyLinkRecords(), NOW + behind);
     const joiner = net.transport();
     await joiner.publish(key, RECORDS);
