@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createIdentity, createLink, createRelayPayload, parseRelayPayload, HOLD_LIMITS, type PaymentRequest, type PkarrTransport, type SignedPacket, type ImageMeta, type VideoMeta, type VoiceMeta } from "@ghostly/core";
-import { HoldEngine, emptyHoldState, type HoldHost } from "../src/engine/hold";
+import { HoldEngine, emptyHoldState, holdFetchTimeoutMs, type HoldHost } from "../src/engine/hold";
 import { presignS3 } from "../src/backup/s3";
 import type { HoldStore, StoredBackup } from "../src/backup/storage";
 import type { HoldState, StoredLink } from "../src/shared/types";
@@ -55,7 +55,7 @@ interface Side {
   refuseFiles?: string;
 }
 
-function setup(options: { aliceStorage?: boolean; bobStorage?: boolean; now?: () => number } = {}) {
+function setup(options: { aliceStorage?: boolean; bobStorage?: boolean; now?: () => number; fetch?: (inner: typeof fetch) => typeof fetch } = {}) {
   const link = createLink();
   const alice = createIdentity(), bob = createIdentity();
   const transport = relay();
@@ -78,7 +78,7 @@ function setup(options: { aliceStorage?: boolean; bobStorage?: boolean; now?: ()
       receivePaymentRequest: async (_id, request) => { side.received!.push({ kind: "pay-req", id: request.id, request, timestamp: request.timestamp }); },
       changed: () => {},
       // Bob reads Alice's bucket and Alice reads Bob's: each fetches from wherever the manifest points.
-      fetch: other.fetcher,
+      fetch: options.fetch ? options.fetch(other.fetcher) : other.fetcher,
       now: options.now,
     };
     side.engine = new HoldEngine(host);
@@ -252,6 +252,64 @@ describe("store-and-forward engine", () => {
     b.engine.wake("link-b");
     await vi.waitFor(() => expect(b.stored.hold!.inSeq).toBe(4));
     expect(b.stored.hold!.refused).toBe(2);
+  });
+
+  it("a storage request that never answers is given up after its timeout, and the next poll picks everything up", async () => {
+    // "never": no answer at all. "stalled": the answer starts, then its body stops. Neither honours the abort signal.
+    let hang: "never" | "stalled" | null = null;
+    const signals: AbortSignal[] = [];
+    let calls = 0;
+    const { a, b } = setup({
+      fetch: (inner) => (async (input: RequestInfo | URL, init?: RequestInit) => {
+        calls++;
+        if (!hang) return inner(input, init);
+        signals.push(init!.signal!);
+        if (hang === "never") return new Promise<Response>(() => {});
+        return new Response(new ReadableStream<Uint8Array>({ start(c) { c.enqueue(new Uint8Array(8)); } }));
+      }) as unknown as typeof fetch,
+    });
+    engines.push(a.engine, b.engine);
+    a.messages.set("m1", { text: "one", timestamp: 1 }); a.messages.set("m2", { text: "two", timestamp: 2 });
+    for (const [i, id] of ["m1", "m2"].entries()) await a.engine.hold("link-a", { kind: "text", id: `wire-${id}-item`, messageId: id, bytes: 3, timestamp: i + 1 });
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+
+    // The manifest's address hangs: nothing for a moment short of its timeout, then the pickup fails as a network one.
+    hang = "never";
+    b.engine.start();
+    await vi.waitFor(() => expect(signals).toHaveLength(1));
+    const manifestMs = holdFetchTimeoutMs(HOLD_LIMITS.maxManifestBytes);
+    await vi.advanceTimersByTimeAsync(manifestMs - 1_000);
+    expect(signals[0].aborted).toBe(false);
+    expect(b.engine.view("link-b")?.error).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(1_000);
+    await vi.waitFor(() => expect(b.engine.view("link-b")?.error).toMatch(/Could not pick up held items: The storage did not answer in time/));
+    expect(signals[0].aborted, "the request is aborted, not left open").toBe(true);
+    expect(b.received).toEqual([]);
+    expect(b.stored.hold!.inSeq).toBe(0);
+
+    // The answer starts and its body stops half way: the same.
+    hang = "stalled";
+    b.engine.wake("link-b");
+    await vi.waitFor(() => expect(signals).toHaveLength(2));
+    await vi.advanceTimersByTimeAsync(manifestMs);
+    await vi.waitFor(() => expect(signals[1].aborted).toBe(true));
+    expect(b.engine.view("link-b")?.error).toMatch(/did not answer in time/);
+    expect(b.stored.hold!.inSeq).toBe(0);
+
+    // The storage answers again: the next poll starts where it stopped, and the timers of the reads that worked are gone.
+    hang = null;
+    const before = calls;
+    b.engine.wake("link-b");
+    await vi.waitFor(() => expect(b.received.map((r) => r.text)).toEqual(["one", "two"]));
+    expect(calls - before, "the manifest and both items").toBe(3);
+    expect(b.stored.hold!.inSeq).toBe(2);
+    expect(b.engine.view("link-b")?.error).toBeUndefined();
+  });
+
+  it("the timeout grows with what the manifest declared: seconds for a manifest, minutes for the largest item", () => {
+    expect(holdFetchTimeoutMs(0)).toBe(20_000);
+    expect(holdFetchTimeoutMs(HOLD_LIMITS.maxManifestBytes)).toBe(21_000);
+    expect(holdFetchTimeoutMs(HOLD_LIMITS.maxBundleBytes)).toBe(148_000);
   });
 
   it("stops holding at the quota, and fails an item that cannot be uploaded until it is retried", async () => {
