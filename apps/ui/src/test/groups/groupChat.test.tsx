@@ -396,6 +396,15 @@ describe("GroupChat: history and sending", () => {
     expect(screen.getByText("while you were away")).toBeInTheDocument();
   });
 
+  it("marks a message of mine sent, never delivered: a group has no receipts", async () => {
+    const { user } = openGroup(active(), [stored({ id: "m3", sender: "me", member: ME, text: "hello" })]);
+    const mark = await screen.findByTestId("message-delivery");
+    expect(mark).toHaveAttribute("data-delivery", "unacked");
+    expect(mark).toHaveAccessibleName("Sent");
+    await user.click(mark);
+    expect(screen.getByTestId("message-delivery-tip")).toHaveTextContent("Sent to the group. Groups have no receipts.");
+  });
+
   it("sends what is typed to the group", async () => {
     const { user, engine } = openGroup(active());
     engine.on("sendGroupMessage", () => ({ error: null }));

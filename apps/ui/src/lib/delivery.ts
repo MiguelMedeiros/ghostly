@@ -60,8 +60,10 @@ export function useDeliveryWords() {
       : delivery === "failed" ? t("chat.delivery.failed")
       : delivery === "delivered" ? t("chat.delivery.delivered")
       : t("chat.delivery.sent"),
-    hint: (delivery: Delivery, live?: DhtOnlyBy) =>
-      delivery === "waiting" && live ? t(live === "you" ? "chat.delivery.hint.waitingLiveYou" : "chat.delivery.hint.waitingLiveContact")
+    /** `group`: a group's message, which no member's app confirms (WISP 9xx: a group has no receipts). */
+    hint: (delivery: Delivery, live?: DhtOnlyBy, group?: boolean) =>
+      group && delivery === "sent" ? t("chat.delivery.hint.sentGroup")
+      : delivery === "waiting" && live ? t(live === "you" ? "chat.delivery.hint.waitingLiveYou" : "chat.delivery.hint.waitingLiveContact")
       : t(`chat.delivery.hint.${delivery}`),
     retry: t("chat.delivery.retry"),
   };

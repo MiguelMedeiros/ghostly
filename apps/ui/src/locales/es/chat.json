@@ -36,6 +36,7 @@
       "queued": "Aún sin confirmación. Se reenvía solo.",
       "sending": "En camino.",
       "sent": "Enviado. Aún sin confirmación.",
+      "sentGroup": "Enviado al grupo. Los grupos no tienen confirmación.",
       "waiting": "Se envía solo cuando tu contacto esté en línea.",
       "waitingLiveContact": "Los archivos necesitan conexión directa. El chat de tu contacto está en Solo DHT: se envía cuando la permita de nuevo.",
       "waitingLiveYou": "Los archivos necesitan conexión directa. Este chat está en Solo DHT: cámbialo desde el icono de conexión."
