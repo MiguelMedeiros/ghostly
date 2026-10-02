@@ -63,13 +63,31 @@ const CANDIDATE_LIMITS: Record<string, number> = { h: 2, s: 2, r: 1 };
 const CANDIDATE_PRIORITY: Record<string, number> = { h: 2122260223, s: 1686052607, r: 41885439 };
 const CANDIDATE_TYPE_NAME: Record<string, string> = { h: "host", s: "srflx", r: "relay" };
 
+/**
+ * The signal carries two host candidates, and a computer often has more interfaces than that: Wi-Fi, Ethernet, VM
+ * bridges, Tailscale, a VPN. The browser lists them in its own order, and the first two are not always ones the
+ * contact can reach: on a Mac with two VM bridges they are the bridges (addresses that exist on that Mac only), and
+ * the Wi-Fi and Ethernet addresses never left it, so a contact on the same network was reached only if the router
+ * sends a packet for its own public address back in (2026-10-02). So host candidates go in this order of preference:
+ * those a server reflexive candidate was gathered from (`raddr`: an interface with a way out, the network a contact
+ * nearby shares), then the others, and in each case those the browser marks as costly last (`network-cost` 50 or
+ * more: a VPN, or an interface it does not know), as a call's candidates do (`pickCallCandidates`). With no
+ * reflexive candidate, or none that says where it came from, the order is the browser's, as before.
+ */
+function hostRank(parts: string[], reflexiveBases: ReadonlySet<string>): number {
+  const cost = Number(parts[parts.indexOf("network-cost") + 1]);
+  const costly = parts.includes("network-cost") && cost >= 50;
+  return (costly ? 2 : 0) + (reflexiveBases.has(parts[4]) ? 0 : 1);
+}
+
 export function extractRtcParams(sdp: string): Pick<RtcSignal, "u" | "p" | "f" | "s" | "c"> {
   let u = "";
   let p = "";
   let f = "";
   let s = "";
-  const candidates: string[] = [];
-  const counts: Record<string, number> = { h: 0, s: 0, r: 0 };
+  /** UDP component-1 candidates of a type the signal carries, in the SDP's order. */
+  const found: { type: string; parts: string[]; compact: string }[] = [];
+  const reflexiveBases = new Set<string>();
 
   for (const line of sdp.split(/\r?\n/)) {
     if (line.startsWith("a=ice-ufrag:") && !u) u = line.slice("a=ice-ufrag:".length);
@@ -78,16 +96,29 @@ export function extractRtcParams(sdp: string): Pick<RtcSignal, "u" | "p" | "f" |
       f = line.slice("a=fingerprint:sha-256 ".length).replace(/:/g, "").toLowerCase();
     } else if (line.startsWith("a=setup:") && !s) s = line.slice("a=setup:".length);
     else if (line.startsWith("a=candidate:")) {
-      // foundation component transport priority address port typ <type> ...
+      // foundation component transport priority address port typ <type> [raddr <address> rport <port>] ...
       const parts = line.slice("a=candidate:".length).split(" ");
       if (parts.length < 8 || parts[1] !== "1" || parts[2].toLowerCase() !== "udp") continue;
       const type = CANDIDATE_TYPES[parts[7] as keyof typeof CANDIDATE_TYPES];
-      if (!type || counts[type] >= CANDIDATE_LIMITS[type]) continue;
+      if (!type) continue;
       const compact = `${type},${parts[4]},${parts[5]}`;
-      if (candidates.includes(compact)) continue;
-      counts[type]++;
-      candidates.push(compact);
+      if (found.some((c) => c.compact === compact)) continue;
+      found.push({ type, parts, compact });
+      // A browser that hides local addresses says `raddr 0.0.0.0`: nothing to match then.
+      const base = type === "s" && parts.includes("raddr") ? parts[parts.indexOf("raddr") + 1] : undefined;
+      if (base && base !== "0.0.0.0" && base !== "::") reflexiveBases.add(base);
     }
+  }
+  // The host candidates the signal has room for, by preference; every type then goes out in the SDP's order.
+  const hosts = found.filter((c) => c.type === "h");
+  const preferred = new Set(hosts.map((c, at) => ({ c, at, rank: hostRank(c.parts, reflexiveBases) }))
+    .sort((a, b) => a.rank - b.rank || a.at - b.at).slice(0, CANDIDATE_LIMITS.h).map(({ c }) => c));
+  const candidates: string[] = [];
+  const counts: Record<string, number> = { h: 0, s: 0, r: 0 };
+  for (const c of found) {
+    if (c.type === "h" ? !preferred.has(c) : counts[c.type] >= CANDIDATE_LIMITS[c.type]) continue;
+    counts[c.type]++;
+    candidates.push(c.compact);
   }
   return { u, p, f, s, c: candidates };
 }
