@@ -39,6 +39,9 @@ describe("the Desktop's transport and the turn record", () => {
       { source: "https://down.test", answered: false, payloads: [], detail: "timed out" },
     ]);
     expect(tauri.invoke.mock.calls).toEqual([["turn_read", { publicKeyZ32: key }]]);
+    // The read a raising put acts on gives each source less time.
+    await createTauriTransport().turnRead!(key, { timeoutMs: 5_000 });
+    expect(tauri.invoke.mock.calls[1]).toEqual(["turn_read", { publicKeyZ32: key, timeoutMs: 5_000 }]);
     // A profile with a device set has the turn's DHT node made ahead of its first read.
     tauri.invoke.mockResolvedValue(undefined);
     await createTauriTransport().turnWarm!();

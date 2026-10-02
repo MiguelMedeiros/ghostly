@@ -34,6 +34,8 @@ export const TOMBSTONE_TURN = 2 ** 32 - 1;
 export const TURN_REV_LIMIT = 2 ** 18;
 /** Every tombstone has this one sequence number, the highest there is: no ordinary record outranks it. */
 export const TOMBSTONE_SEQUENCE = 2 ** 52 - 1;
+/** The highest sequence an ordinary record can have: the last turn, the last `rev`, the last slot. Anything above it that is no valid tombstone closes the address. */
+export const TURN_LAST_SEQUENCE = TURN_MAX * 2 ** 20 + (TURN_REV_LIMIT - 1) * 4 + (TURN_SLOTS - 1);
 /** `active` in a tombstone, and nowhere else. */
 export const TURN_NO_ACTIVE = 255;
 /** The record's one TXT label: a label that says nothing. */

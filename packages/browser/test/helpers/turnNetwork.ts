@@ -28,7 +28,7 @@ export interface FakeSource {
   beforePut?: () => void;
 }
 
-export interface TurnCall { op: "read" | "put"; source?: string; condition?: string | null; payload?: Uint8Array }
+export interface TurnCall { op: "read" | "put"; source?: string; condition?: string | null; payload?: Uint8Array; timeoutMs?: number }
 
 const larger = (a: Uint8Array, b: Uint8Array): boolean => {
   for (let i = 72; i < Math.min(a.length, b.length); i++) if (a[i] !== b[i]) return a[i] > b[i];
@@ -65,8 +65,8 @@ export class FakeTurnNetwork implements TurnNetwork {
   puts(): TurnCall[] { return this.calls.filter((call) => call.op === "put"); }
   reads(): number { return this.calls.filter((call) => call.op === "read").length; }
 
-  async turnRead(): Promise<TurnSourceAnswer[]> {
-    this.calls.push({ op: "read" });
+  async turnRead(_key?: string, options?: { timeoutMs?: number }): Promise<TurnSourceAnswer[]> {
+    this.calls.push({ op: "read", ...(options?.timeoutMs ? { timeoutMs: options.timeoutMs } : {}) });
     const answers = this.sources.map((source): TurnSourceAnswer => (source.down
       ? { source: source.name, answered: false, payloads: [], detail: "no answer" }
       : { source: source.name, answered: true, payloads: source.held ? [source.held] : [], ...(source.sequences ? { sequences: source.sequences } : {}), ...(source.stale ? { stale: true } : {}) }));

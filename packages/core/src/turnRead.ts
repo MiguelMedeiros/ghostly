@@ -1,5 +1,5 @@
 import { bytesEqual } from "./bytes";
-import { readTurnPacket, TOMBSTONE_SEQUENCE, type TurnKeys, type TurnPacketRead, type TurnRecord, type TurnRefusal } from "./turnRecord";
+import { readTurnPacket, TOMBSTONE_SEQUENCE, TURN_LAST_SEQUENCE, type TurnKeys, type TurnPacketRead, type TurnRecord, type TurnRefusal } from "./turnRecord";
 
 /*
  * Reading the turn (WISP 06 § Publishing and reading): every source is asked, every answer is verified and opened,
@@ -47,7 +47,8 @@ export type TurnConditions = Record<string, string | null>;
 
 /** The turn's own way to the network: every source read, every put conditional, no answer hidden, nothing retried. */
 export interface TurnNetwork {
-  turnRead(pubKeyZ32: string): Promise<TurnSourceAnswer[]>;
+  /** `timeoutMs`: how long each source has, where less than the usual 8 s (`TURN_RAISE_READ_TIMEOUT_MS`). */
+  turnRead(pubKeyZ32: string, options?: { timeoutMs?: number }): Promise<TurnSourceAnswer[]>;
   turnPut(pubKeyZ32: string, payload: Uint8Array, conditions: TurnConditions): Promise<TurnSourcePut[]>;
   /**
    * The profile has a device set: whatever a source needs before its first answer is made ready now (the Desktop's
@@ -64,7 +65,19 @@ export interface TurnNetwork {
  */
 /** `P`: a raising put is sent within this long of the start of the read it acts on. */
 export const TURN_PUT_WINDOW_MS = 10_000;
-/** `V`: the longest a put is assumed to take from being sent to being visible at every source. Assumed, not measured. */
+/**
+ * How long each source has to answer the read a raising put acts on. `P` counts from the start of that read, and a
+ * source may take 8 s to answer an ordinary one, which would leave 2 s to sign, store and send. With 5 s, 5 s remain.
+ * A source that is slower did not answer that read, and is not put to.
+ */
+export const TURN_RAISE_READ_TIMEOUT_MS = 5_000;
+/**
+ * `V`: the longest a put is assumed to take from being sent to being visible at every source. Measured once
+ * (2026-10-02, `live_turn_visible_everywhere_after` in the Desktop's Rust, one put each way): a put through one default
+ * relay ended after 3.6 s and a read of every source started then showed it at the other relay and on the DHT; a
+ * put on the DHT ended after 2.1 s and both relays showed it to a read started then. One sample, so the assumed
+ * 10 s stays.
+ */
 export const TURN_VISIBLE_MS = 10_000;
 /** `T`: how long a device that raised the turn waits, from the end of its put, before the read that may make it active. `T >= P + 2V`. */
 export const TURN_SETTLE_MS = 30_000;
@@ -179,11 +192,12 @@ export function classifyTurnRead(reader: TurnReader, answers: TurnSourceAnswer[]
     }
     conditions[answer.source] = named === null ? null : named.toString();
   }
-  // A packet under the turn key at or above the tombstone's sequence that is no valid tombstone: only a holder of `D`
-  // can have made it, and nothing can be put above it. Never a good read; a valid tombstone at that sequence wins.
+  // A packet under the turn key above the last sequence an ordinary record can have, that is no valid tombstone:
+  // only a holder of `D` can have made it, and no ordinary record can be put above it. Never a good read. A valid
+  // tombstone wins over anything at or below its own sequence.
   const top = BigInt(TOMBSTONE_SEQUENCE);
   const closing = invalid.reduce((max, packet) => (packet.sequence > max ? packet.sequence : max), 0n);
-  if (closing >= top && (closing > top || !found.some((f) => f.read.record.tombstone))) return { result: "closed", good: false, seen, invalid, unsigned, conditions };
+  if (closing > BigInt(TURN_LAST_SEQUENCE) && (closing > top || !found.some((f) => f.read.record.tombstone))) return { result: "closed", good: false, seen, invalid, unsigned, conditions };
   const base = { good, seen, invalid, unsigned, conditions };
   // A newer record is news whoever shows it; the answers of a stale source show nothing else.
   const freshFound = found.filter((f) => f.sources.some((source) => fresh.has(source)));

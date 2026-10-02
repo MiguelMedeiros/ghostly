@@ -778,17 +778,18 @@ export class RelayTransport implements PkarrTransport {
    * memory. Each request counts in the relay's minute, so chats see it, but is never held back by it: a device may
    * not act before it has read its turn.
    */
-  turnRead(pubKeyZ32: string): Promise<TurnSourceAnswer[]> {
+  turnRead(pubKeyZ32: string, options: { timeoutMs?: number } = {}): Promise<TurnSourceAnswer[]> {
+    const timeoutMs = Math.min(options.timeoutMs ?? TURN_SOURCE_TIMEOUT_MS, TURN_SOURCE_TIMEOUT_MS);
     return Promise.all(this.relays.map(async (relay): Promise<TurnSourceAnswer> => {
       try {
         let payload: Uint8Array | undefined;
         const read = async (r: Response, signal: AbortSignal) => { if (r.ok) payload = await readRelayBody(r, signal); };
         // A relay answers a plain GET from its cache while the packet's TTL lasts (five minutes): a record another
         // device put through another relay, or on the DHT itself, would not be seen. `NetworkOnly` makes it look.
-        let response = await this.turnRequest(relay, `${pubKeyZ32}?policy=NetworkOnly`, { method: "GET" }, read);
+        let response = await this.turnRequest(relay, `${pubKeyZ32}?policy=NetworkOnly`, { method: "GET" }, read, timeoutMs);
         // A relay from before that query refuses it (400): asked plainly, once, and its answer may be minutes old.
         const stale = response.status === 400;
-        if (stale) response = await this.turnRequest(relay, pubKeyZ32, { method: "GET" }, read);
+        if (stale) response = await this.turnRequest(relay, pubKeyZ32, { method: "GET" }, read, timeoutMs);
         const age = stale ? { stale: true as const } : {};
         if (response.status === 404) {
           // The DHT holds an item under the key that is no signed packet: the relay names its sequence.
@@ -822,10 +823,10 @@ export class RelayTransport implements PkarrTransport {
     }));
   }
 
-  private async turnRequest(relay: string, path: string, init: RequestInit, read?: (response: Response, signal: AbortSignal) => Promise<void>): Promise<Response> {
+  private async turnRequest(relay: string, path: string, init: RequestInit, read?: (response: Response, signal: AbortSignal) => Promise<void>, timeoutMs = TURN_SOURCE_TIMEOUT_MS): Promise<Response> {
     this.spent.get(relay)?.push(Date.now());
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), TURN_SOURCE_TIMEOUT_MS);
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
       const response = await this.fetchFn(`${relay}/${path}`, { ...init, cache: "no-store", signal: controller.signal });
       await read?.(response, controller.signal);
