@@ -8,7 +8,7 @@ import { groupReply } from "../shared/replies";
 import { pinOfFormerMember, pinView } from "./pins";
 import { db } from "./db";
 import { traceJoin } from "./joinTrace";
-import { COMMUNITY_TIMINGS, Communities, metaLines, type CommunityTimings } from "./community";
+import { COMMUNITY_TIMINGS, Communities, dialedKey, metaLines, type CommunityTimings } from "./community";
 import { MESH_HUB_TIMINGS, MeshHubs, type MeshHubTimings } from "./meshHubs";
 import { GroupTypings } from "./groupTyping";
 
@@ -702,7 +702,9 @@ export class Groups {
     if (existing?.invitation?.seedB64 && !existing.invitation.entry) throw new Error("You are already joining this group");
     // Out of it (left, removed), invited without answering, or an older link of it: this one replaces that.
     if (existing) await this.forget(link.g);
-    const seedB64 = createIdentity().seedB64;
+    // A member key whose entry session the admin's side dials: it opens that session on seeing the knock, when this
+    // side has been there since it knocked, so its offer goes in its first packet (two trips through Pkarr, not three).
+    const seedB64 = dialedKey(link);
     const linkId = await this.host.openEntry(link, "guest", seedB64, link.host);
     const group: StoredGroup = { id: link.g, createdAt: Date.now(), invitation: { name: "", admin: "", linkId, e: 0, n: 0, seedB64, pieces: [], entry: link.host } };
     this.stored.set(link.g, group);
