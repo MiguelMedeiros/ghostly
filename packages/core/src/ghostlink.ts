@@ -709,7 +709,6 @@ export class GhostLink {
   private peerPacketSeen = 0;
   /** A live session ended without this side ending it (`peerLost`): until when the contact's next new packet is news. */
   private lostUntil = 0;
-  /** This app is going away (`depart`): no more dials. */
   /** Counts the signals a signer was asked to sign: only the latest one goes out. */
   private signalTurn = 0;
   /** A signal ready to go: on the live session during a switch to WebRTC, in this side's packet otherwise. */
@@ -723,6 +722,7 @@ export class GhostLink {
     void this.session.setRtcSignal(signed, !!this.options.params.profile).catch(report);
   }
 
+  /** This app is going away (`depart`): no more dials. */
   private leaving = false;
   /** `resume` still to act on: the first dial after the start goes to it, and a native one is knocked on. */
   private resuming: PairedTransport | undefined;
