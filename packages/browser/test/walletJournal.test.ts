@@ -166,10 +166,13 @@ describe("ecash in", () => {
 
   it("a token the mint says is spent credits nothing and records nothing", async () => {
     mint.receive.mockRejectedValue(new MintOperationError(11001, "Token already spent"));
+    // Asked what became of it, the mint has signed nothing for this wallet and reads the token spent.
+    mint.checkProofsStates.mockResolvedValue([{ state: "SPENT" }]);
     const payment = vi.fn();
     const { wallet, events } = setup();
     await expect(wallet.receiveToken(tokenFrom(MINT, [64]), "ecash-in", undefined, { payment })).rejects.toThrow("already spent");
-    expect(payment).not.toHaveBeenCalled();
+    expect(rows("payments")).toEqual([]);
+    expect(rows("swaps"), "nothing is left to ask the mint about").toEqual([]);
     expect(rows("proofs")).toEqual([]);
     expect(rows("walletTx")).toEqual([]);
     expect(events.onChange).not.toHaveBeenCalled();

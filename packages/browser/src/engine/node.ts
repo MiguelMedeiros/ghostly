@@ -671,6 +671,8 @@ export class GhostlyNode implements EngineImplementation {
     onQuotePaid: (quote) => void this.lightnings[mintNetwork(quote.mint)].reportInvoicePaid(quote.invoice, { paymentId: quote.paymentId, mint: quote.mint }),
     onMeltResolved: (melt, paid) => void this.lightnings[mintNetwork(melt.mint)].reportPaymentResolved(melt.request, paid, { paymentId: melt.paymentId, mint: melt.mint }),
     onTestMintNeeded: async (mint) => void (await this.walletAddMint({ url: mint })),
+    // A redeem finished after its call was over: the chat it belongs to learns of it.
+    onSwapSettled: (swap, done) => void this.desk.onSwapSettled(swap, done).catch(() => {}),
   }, () => this.settings.mints);
   private registry?: ProviderRegistry;
   private providers() { return this.registry ??= this.options.providers ?? defaultRegistry(); }

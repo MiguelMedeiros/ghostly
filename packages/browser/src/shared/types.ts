@@ -408,6 +408,29 @@ export interface PendingMelt {
   createdAt: number;
 }
 
+/**
+ * A swap at a mint, written down before the mint is asked, with everything that finishes it: the mint signs the
+ * outputs of `swap` and nothing else, so its signatures can be asked for again (NUT-09) for as long as this is kept.
+ * Deleted in the transaction that stores what the swap brought, or once the mint says it never happened.
+ */
+export interface PendingSwap {
+  id: string;
+  mint: string;
+  /** `receive`: a token redeemed into this wallet. `send`: this wallet's ecash split, for a token or a Lightning payment. */
+  kind: "receive" | "send";
+  /** cashu-ts' `SerializedSwapPreview`: the inputs and the blinded outputs with their secrets. As secret as the ecash itself. */
+  swap: unknown;
+  createdAt: number;
+  /** When the request to the mint ended with no answer. The mint may still act on it for a moment after that. */
+  attemptEndedAt?: number;
+  /** `receive`: the token being redeemed. Redeeming it again while this is kept finishes this swap, and makes no other. */
+  token?: string;
+  /** `receive`: the history line of the ecash, written with it. */
+  tx?: WalletTx;
+  /** `receive`: the payment record written with the ecash (a contact's payment received, or one of ours taken back). */
+  payment?: StoredPayment;
+}
+
 /** A Lightning invoice the mint issued for us; paid invoices turn into ecash. */
 export interface StoredQuote {
   quote: string;
