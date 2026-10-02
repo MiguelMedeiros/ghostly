@@ -1167,6 +1167,11 @@ export class Groups {
     }
   }
 
+  /** A key the group's chain had as a member and has no more (not one it never had: a member my chain has not reached yet). */
+  private tookOut(session: GroupSession, key: string): boolean {
+    return !rosterHas(session.roster, key) && removalEpoch(session.state.chain, key) >= 0;
+  }
+
   /** A `group-*` frame on an edge: from the member the edge is pinned to. */
   async handleEdgeFrame(groupId: string, peerKey: string, frame: unknown): Promise<void> {
     if (this.isCommunity(groupId)) return this.communities.handleEdgeFrame(groupId, peerKey, frame);
@@ -1184,6 +1189,9 @@ export class Groups {
       if (session.status === "active" && frame && typeof frame === "object") this.farewellSync(groupId, session, waiting, peerKey, frame as Record<string, unknown>);
       return;
     }
+    // Someone the chain took out, on an edge that is still there for a moment (a hub keeps it to pass on the commit that
+    // tells it): nothing it says over it is taken, as nothing but that commit is said to it (`edgeAllows`).
+    if (session?.status === "active" && this.tookOut(session, peerKey)) return;
     if (session?.status === "active" && frame && typeof frame === "object" && (frame as { t?: unknown }).t === "group-here") { this.heardHere(groupId, session, peerKey, frame as Record<string, unknown>); return; }
     if (session?.status === "active" && frame && typeof frame === "object" && (frame as { t?: unknown }).t === "group-reach") {
       const group = this.stored.get(groupId);
