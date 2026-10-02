@@ -65,6 +65,61 @@ describe("invite cards", () => {
     expect(listSessions()).toHaveLength(1);
   });
 
+  it("copies the invite as its link and shows its QR, each on a click only, and joins nothing", async () => {
+    const { inviteCode } = createChatInvite();
+    const writeText = vi.spyOn(navigator.clipboard, "writeText").mockResolvedValue();
+    // Sent bare: what is copied is still the link.
+    const { user } = bubble(inviteCode);
+    const card = screen.getByTestId("entity-invite");
+    expect(writeText).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("link-qr")).toBeNull();
+
+    const copy = within(card).getByTestId("entity-invite-copy");
+    expect(copy).toHaveTextContent("Copy");
+    await user.click(copy);
+    expect(writeText.mock.calls).toEqual([[inviteLink(inviteCode)]]);
+    expect(copy).toHaveTextContent("Copied!");
+
+    const show = within(card).getByRole("button", { name: "Show QR" });
+    await user.click(show);
+    const dialog = screen.getByRole("dialog", { name: "Chat invite" });
+    expect(dialog).toHaveAccessibleDescription("Scan it with another device. Anyone who sees it can join.");
+    expect(within(dialog).getByTestId("link-qr-code").querySelector("svg")).not.toBeNull();
+    expect(within(dialog).getByRole("textbox", { name: "Link" })).toHaveValue(inviteLink(inviteCode));
+    await user.click(within(dialog).getByTestId("link-qr-copy"));
+    expect(writeText.mock.calls).toEqual([[inviteLink(inviteCode)], [inviteLink(inviteCode)]]);
+    await user.keyboard("{Escape}");
+    expect(screen.queryByTestId("link-qr")).toBeNull();
+    expect(show).toHaveFocus();
+    expect(listSessions()).toHaveLength(0);
+    expect(card).toHaveAttribute("data-outcome", "new");
+  });
+
+  it("offers Copy and Show QR on the sender's own card and on one already joined", () => {
+    const made = createChatInvite();
+    ensureSession({ seedB64: made.mine.seedB64, peerPubKeyB64: made.mine.peerPubKeyZ32, encKeyB64: made.mine.encKeyB64, profile: "paired-chat/1" });
+    const other = createChatInvite();
+    ensureSession({ seedB64: other.invite.seedB64, peerPubKeyB64: other.invite.peerPubKeyZ32, encKeyB64: other.invite.encKeyB64, profile: "paired-chat/1" });
+    bubble(`${made.inviteCode} ${other.inviteCode}`, { mine: true });
+    const [own, joined] = screen.getAllByTestId("entity-invite");
+    expect(own).toHaveAttribute("data-outcome", "own");
+    expect(joined).toHaveAttribute("data-outcome", "joined");
+    for (const card of [own, joined]) {
+      expect(within(card).getByTestId("entity-invite-copy")).toBeVisible();
+      expect(within(card).getByTestId("entity-invite-qr")).toBeVisible();
+    }
+  });
+
+  it("says so when the link could not be copied", async () => {
+    const { inviteCode } = createChatInvite();
+    vi.spyOn(navigator.clipboard, "writeText").mockRejectedValue(new DOMException("denied", "NotAllowedError"));
+    document.execCommand = vi.fn(() => false);
+    const { user } = bubble(inviteCode);
+    await user.click(screen.getByTestId("entity-invite-copy"));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Copy did not work");
+    expect(screen.getByTestId("entity-invite-copy")).toHaveTextContent("Copy");
+  });
+
   it("shows no card for a code with a typo", () => {
     const { inviteCode } = createChatInvite();
     bubble(`${inviteCode.slice(0, -1)}${inviteCode.endsWith("q") ? "p" : "q"}`);
@@ -87,6 +142,26 @@ describe("group cards", () => {
     await waitFor(() => expect(screen.getByTestId("where")).toHaveTextContent(`/group/${g}`));
   });
 
+  it("copies the group's link as its address and shows its QR, without joining", async () => {
+    for (const link of [encodeGroupEntryLink({ g, host }), encodeCommunityLink({ g, host })]) {
+      const address = `${window.location.origin}/#/join/${link}`;
+      const writeText = vi.spyOn(navigator.clipboard, "writeText").mockResolvedValue();
+      const { user, engine, unmount } = bubble(link);
+      const card = screen.getByTestId("entity-group");
+      expect(writeText).not.toHaveBeenCalled();
+      await user.click(within(card).getByTestId("entity-group-copy"));
+      expect(writeText.mock.calls).toEqual([[address]]);
+      await user.click(within(card).getByTestId("entity-group-qr"));
+      const dialog = screen.getByTestId("link-qr");
+      expect(within(dialog).getByTestId("link-qr-url")).toHaveValue(address);
+      await user.click(within(dialog).getByTestId("link-qr-close"));
+      expect(screen.queryByTestId("link-qr")).toBeNull();
+      expect(engine.callsTo("joinGroupByLink")).toEqual([]);
+      writeText.mockRestore();
+      unmount();
+    }
+  });
+
   it("says why a join failed", async () => {
     const { user, engine } = bubble(encodeCommunityLink({ g, host }));
     engine.on("joinGroupByLink", () => { throw new Error("This group's link was turned off"); });
@@ -99,7 +174,10 @@ describe("group cards", () => {
     const { user, engine } = bubble(encodeGroupEntryLink({ g, host }));
     engine.update({ groups: [groupView({ id: g, name: "Book club", status: "active" })] });
     const card = await screen.findByText("Book club");
-    await user.click(within(card.closest("[data-entity-card]") as HTMLElement).getByTestId("entity-group-open"));
+    const frame = card.closest("[data-entity-card]") as HTMLElement;
+    expect(within(frame).getByTestId("entity-group-copy")).toBeVisible();
+    expect(within(frame).getByTestId("entity-group-qr")).toBeVisible();
+    await user.click(within(frame).getByTestId("entity-group-open"));
     expect(screen.getByTestId("where")).toHaveTextContent(`/group/${g}`);
     expect(engine.callsTo("joinGroupByLink")).toEqual([]);
   });

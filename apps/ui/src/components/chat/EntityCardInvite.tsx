@@ -1,13 +1,15 @@
 import { useEffect, useState } from "react";
+import { inviteQrSegments } from "@ghostly/core";
 import { engine } from "@ghostly/browser/platform/engine";
 import { useI18n, type Translate } from "../../contexts/I18nContext";
 import { useAppNavigation } from "../../hooks/useAppNavigation";
-import { groupPath } from "../../lib/groups";
+import { groupLinkUrl, groupPath } from "../../lib/groups";
 import { useEngineState } from "../../lib/identities";
 import { showJoinNotice } from "../../lib/joinNotice";
 import { ensureSession } from "../../lib/storage";
-import { INVITE_REFUSAL_MESSAGE, chatPath, classifyInvite, readInvite, type JoinOutcome } from "../../lib/url";
+import { INVITE_REFUSAL_MESSAGE, chatPath, classifyInvite, inviteShareText, readInvite, type JoinOutcome } from "../../lib/url";
 import { CardIcon, EntityCardFrame, cardButton, cardQuiet } from "./EntityCardFrame";
+import { LinkActions } from "./LinkQrDialog";
 import { errorText } from "../../lib/errorText";
 
 
@@ -26,7 +28,8 @@ function outcomeOf(code: string): JoinOutcome | null {
 /**
  * A `ghostly1…` invite in a message. Nothing happens until a tap on Join, which runs the Join dialog's rules again at
  * that moment: this profile's own invite is refused (WISP 801 Q9) with the way to the chat that owns it, one already
- * joined by opens its chat, a new one makes the chat and opens it.
+ * joined by opens its chat, a new one makes the chat and opens it. Beside it, in every state and for the sender too:
+ * Copy (the invite as its link) and Show QR (that link, to scan with another device), each on a click only.
  */
 export function InviteEntityCard({ code, mine, from }: { code: string; mine: boolean; from?: string }) {
   const { t } = useI18n();
@@ -54,19 +57,20 @@ export function InviteEntityCard({ code, mine, from }: { code: string; mine: boo
     nav.conversation(chatPath(sessionId));
   };
 
+  const actions = <LinkActions name="entity-invite" title={t("chat.entity.chatInvite")} url={inviteShareText(code)} qr={inviteQrSegments(code)} />;
   return (
     <EntityCardFrame testId="entity-invite" data={{ "data-outcome": outcome?.kind ?? "invalid" }} label={t("chat.entity.chatInvite")}
       mark={<CardIcon><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /><path d="M12 7v6M9 10h6" /></CardIcon>}
       title={outcome?.kind === "own" ? t("chat.entity.yourInvite") : t("chat.entity.privateInvite")} subtitle={fromLine(t, mine, from)}>
       {outcome?.kind === "own" ? <>
         <p role="note" data-testid="entity-invite-own" className="m-0">{t("join.own")}</p>
-        <button type="button" data-testid="entity-invite-open" className={cardQuiet} onClick={() => nav.conversation(chatPath(outcome.sessionId))}>{t("join.openChat")}</button>
+        <div className="flex flex-wrap items-center gap-1.5"><button type="button" data-testid="entity-invite-open" className={cardQuiet} onClick={() => nav.conversation(chatPath(outcome.sessionId))}>{t("join.openChat")}</button>{actions}</div>
       </> : outcome?.kind === "joined" ? <>
         <p className="m-0" data-testid="entity-invite-joined">{t("join.alreadyIn")}</p>
-        <button type="button" data-testid="entity-invite-open" className={cardQuiet} onClick={join}>{t("join.openChat")}</button>
+        <div className="flex flex-wrap items-center gap-1.5"><button type="button" data-testid="entity-invite-open" className={cardQuiet} onClick={join}>{t("join.openChat")}</button>{actions}</div>
       </> : <>
         <p className="m-0">{t("chat.entity.joinHint")}</p>
-        <button type="button" data-testid="entity-invite-join" className={cardButton} onClick={join}>{t("chat.entity.join")}</button>
+        <div className="flex flex-wrap items-center gap-1.5"><button type="button" data-testid="entity-invite-join" className={cardButton} onClick={join}>{t("chat.entity.join")}</button>{actions}</div>
       </>}
       {error && <p role="alert" className="m-0 text-danger-ink">{error}</p>}
     </EntityCardFrame>
@@ -76,7 +80,7 @@ export function InviteEntityCard({ code, mine, from }: { code: string; mine: boo
 /**
  * A group's link (`group1/…`) or a community group's (`group2/…`) in a message. A tap on Join group knocks through
  * the link like the Join dialog does and opens the group, which says it waits for the admin's app; a group this profile
- * is already in just opens.
+ * is already in just opens. Copy and Show QR hand the link's address over, as the invite card does.
  */
 export function GroupEntityCard({ link, community, groupId, mine, from }: { link: string; community: boolean; groupId: string; mine: boolean; from?: string }) {
   const { t } = useI18n();
@@ -93,6 +97,7 @@ export function GroupEntityCard({ link, community, groupId, mine, from }: { link
       nav.conversation(groupPath(id));
     } catch (e) { setError(errorText(e, t)); } finally { setBusy(false); }
   };
+  const actions = <LinkActions name="entity-group" title={community ? t("chat.entity.communityGroup") : t("chat.entity.groupInvite")} url={groupLinkUrl({ entryLink: link })} />;
   return (
     <EntityCardFrame testId="entity-group" data={{ "data-community": community ? "true" : undefined, "data-member": group ? "true" : undefined }}
       label={community ? t("chat.entity.communityGroup") : t("chat.entity.groupInvite")}
@@ -100,10 +105,10 @@ export function GroupEntityCard({ link, community, groupId, mine, from }: { link
       title={group?.name || (community ? t("chat.entity.aCommunity") : t("chat.entity.aPrivateGroup"))} subtitle={fromLine(t, mine, from)}>
       {group ? <>
         <p className="m-0" data-testid="entity-group-member">{t("chat.entity.inGroup")}</p>
-        <button type="button" data-testid="entity-group-open" className={cardQuiet} onClick={() => nav.conversation(groupPath(group.id))}>{t("chat.entity.openGroup")}</button>
+        <div className="flex flex-wrap items-center gap-1.5"><button type="button" data-testid="entity-group-open" className={cardQuiet} onClick={() => nav.conversation(groupPath(group.id))}>{t("chat.entity.openGroup")}</button>{actions}</div>
       </> : <>
         <p className="m-0">{community ? t("chat.entity.communityHint") : t("chat.entity.groupHint")}</p>
-        <button type="button" data-testid="entity-group-join" disabled={busy} className={cardButton} onClick={() => void join()}>{busy ? t("chat.entity.joining") : t("chat.entity.joinGroup")}</button>
+        <div className="flex flex-wrap items-center gap-1.5"><button type="button" data-testid="entity-group-join" disabled={busy} className={cardButton} onClick={() => void join()}>{busy ? t("chat.entity.joining") : t("chat.entity.joinGroup")}</button>{actions}</div>
       </>}
       {error && <p role="alert" className="m-0 text-danger-ink">{error}</p>}
     </EntityCardFrame>
