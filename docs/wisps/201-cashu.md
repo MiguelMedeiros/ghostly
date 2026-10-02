@@ -51,6 +51,12 @@ The opt-in [test-mint integration test](../../packages/browser/test/cashuAdapter
 
 The reviewed fee includes both the mint swap fee and the prepaid recipient redemption fee, derived from prepared input value minus change minus the requested amount. The SDK 4.x `preview.fees` field alone omits the recipient top-up. Integration tests assert exact balance reduction and reject a fee cap below the full cost before spending.
 
+## Every swap is written down first (2026-10-02)
+
+The same rule now holds for every request that asks a mint to sign new outputs, not only the reviewed payment: redeeming a token (a contact's payment, a pasted token, ecash taken back), splitting ecash for a token or for a Lightning payment, and minting the ecash of a paid invoice. The wallet stores the request's inputs and blinded outputs with their secrets before it asks the mint, and sends what it stored, so a second try asks for the same outputs. A redeem is stored with the history line and the payment record that go in with its ecash; a split reserves its inputs in the same transaction. Coins that add up exactly are sent as they are, with no mint and nothing to store.
+
+When the answer does not arrive, the wallet asks the mint for its signatures on those exact outputs (NUT-09) and for the state of the inputs (NUT-07), at once and again at every start until it knows. Signed: the result is stored as the answer would have been, in one transaction that also deletes the stored swap, so it is stored once. Not signed and the inputs unspent: the swap never happened, and its inputs are free again once no request of it can still reach the mint (two minutes after the attempt ended, or at once when the mint refused it). Not signed and an input spent: that proof is dropped. A split finished after its payment was given up returns everything it made to the wallet, and the mint's fee shows in the history. A contact whose ecash is being redeemed is answered only once the mint has spoken. A mint without NUT-09 gives no signatures back: the swap then ends by the state of its inputs alone.
+
 ## Revision log
 
 One file per change in [changes/201-cashu/](changes/201-cashu/) ([how](00-process.md#revisions)). The site lists them here, newest first, and derives the Revision and Updated rows from them.

@@ -455,6 +455,11 @@ export interface StoredQuote {
   held?: boolean;
   /** Asked for on purpose, as test coins from a test mint ("Get test coins"): minted as soon as the mint says paid. */
   testCoins?: boolean;
+  /**
+   * The blinded outputs the mint is asked to sign for this invoice (`OutputData.serialize`), written down before it
+   * is asked: the ecash it issues is for these, and its signatures for them can be asked for again (NUT-09).
+   */
+  outputs?: unknown[];
 }
 
 export type PaymentState =

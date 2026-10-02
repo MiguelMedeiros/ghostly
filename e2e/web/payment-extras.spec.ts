@@ -287,6 +287,46 @@ test("ecash paid to a request and taken back leaves the request to be paid again
   await expect.poll(() => balanceOf(bob.page)).toBe(100);
 });
 
+// A redeem is written down before the mint is asked. Here the mint makes it and its answer never reaches the app:
+// the tab is gone first. The app that opens next asks the mint what it did, and finishes from there.
+test("a payment whose redeem is cut off at the mint is in the wallet when the app opens again", { tag: ["@feature:wallet.cashu.receive-token", "@feature:payments.cashu.send", "@feature:payments.chat.reconcile"] }, async ({ peer }) => {
+  const [alice, bob] = await chatting(peer, "cut-redeem-alice", "cut-redeem-bob");
+  await fund(alice);
+  await expect.poll(() => balanceOf(alice.page)).toBe(TEST_COINS);
+  for (const p of [alice, bob]) await openChat(p);
+  // Bob's swap reaches the mint, which makes it; the answer is held back for good.
+  let held = true;
+  let made = 0;
+  await bob.context.route(/^https:\/\/testnut\.cashu\.space\/v1\/swap/, async (route) => {
+    if (!held) return route.fallback();
+    const answer = await route.fetch({ url: `${mintEndpoint()}/v1/swap` });
+    if (answer.ok()) made++;
+    await new Promise<void>(() => {});
+  });
+
+  const review = await prepareSend(alice, 21);
+  await review.getByRole("button", { name: "Approve payment" }).click();
+  await expect.poll(() => made).toBe(1);
+  await expect(chat(bob).getByTestId("payment-bubble"), "no answer, so nothing to show yet").toHaveCount(0);
+
+  // The tab goes with the swap unanswered; the mint answers the app that opens next.
+  held = false;
+  await bob.page.reload();
+  await expect(bob.page.getByTitle("New Chat")).toBeVisible();
+
+  // The ecash is Bob's, with its payment in the chat, once.
+  const got = bubble(bob, "Sent you");
+  await expect(got.getByTestId("payment-state")).toHaveText(/Received/);
+  await expect(got).toContainText(/21\s*test sats/);
+  await expect(got).toHaveCount(1);
+  await expect(bubble(alice, "You sent").getByTestId("payment-state")).toHaveText(/Received/);
+  await openWallet(bob, "cashu-testnet");
+  await expect.poll(() => balanceOf(bob.page)).toBe(21);
+  await bob.page.getByTestId("wallet-history").click();
+  await expect(bob.page.getByTestId("wallet-tx")).toHaveCount(1);
+  expect(made, "one swap at the mint: the answer was asked for again, not the swap").toBe(1);
+});
+
 test("a Lightning invoice pasted into the chat is a card with a QR code to hide and a Copy button", { tag: ["@feature:payments.lightning.invoice-card"] }, async ({ peer }) => {
   const [alice, bob] = await chatting(peer, "invoice-alice", "invoice-bob");
   // An invoice from the mint, made outside Ghostly and pasted as text.

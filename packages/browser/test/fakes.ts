@@ -89,7 +89,11 @@ export class FakeWallet {
   async loadMint(): Promise<void> {}
   checkMintQuoteBolt11 = (...args: unknown[]) => mint.checkMintQuoteBolt11(...args);
   createMintQuoteBolt11 = (...args: unknown[]) => mint.createMintQuoteBolt11(this.url, ...args);
-  mintProofsBolt11 = (...args: unknown[]) => mint.mintProofsBolt11(...args);
+  /** Minting is prepared, written down, then sent: `mint.mintProofsBolt11` answers it, with the amount and the quote's id. */
+  async prepareMint(method: string, amount: number, quote: { quote: string }) {
+    return { method, amount, payload: { quote: quote.quote, outputs: [] }, outputData: [], keysetId: "009a1f293253e41e", quote };
+  }
+  completeMint = (preview: { amount: number; quote: { quote: string } }) => mint.mintProofsBolt11(preview.amount, preview.quote.quote);
   checkMeltQuoteBolt11 = (...args: unknown[]) => mint.checkMeltQuoteBolt11(...args);
   createMeltQuoteBolt11 = (...args: unknown[]) => mint.createMeltQuoteBolt11(this.url, ...args);
   /** No coins ever add up by themselves here: every send is a swap, which `mint.send` answers. */

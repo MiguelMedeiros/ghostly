@@ -85,11 +85,11 @@ function reviewedCashuFee(preview: SwapPreview): number {
  * stands until it knows, then stores what it brought or frees what it held. Nothing is known to have failed.
  */
 export class SwapUnsettledError extends Error {
-  constructor(readonly swap: PendingSwap, options?: ErrorOptions) {
+  constructor(readonly swap: PendingSwap, readonly cause?: unknown) {
     const host = new URL(swap.mint).host;
     super(swap.kind === "receive"
       ? `${host} has not answered yet. The ecash is added to your wallet as soon as it does.`
-      : `${host} has not answered yet. Nothing was sent, and the sats are back in your wallet as soon as it does.`, options);
+      : `${host} has not answered yet. The payment was not made, and the sats set aside for it are back in your wallet as soon as it does.`);
     this.name = "SwapUnsettledError";
   }
 }
@@ -447,7 +447,8 @@ export class CashuWallet {
     const quote = await wrap<StoredQuote | undefined>((await store(STORES.quotes, "readonly")).get(id));
     if (!quote || quote.issuedUnclaimed || quote.held) return null;
     const wallet = await this.wallet(quote.mint);
-    const { state } = await wallet.checkMintQuoteBolt11(quote.quote);
+    const answer = await wallet.checkMintQuoteBolt11(quote.quote);
+    const { state } = answer;
 
     if (state === "UNPAID") {
       if (quote.expiresAt && quote.expiresAt + 60_000 < Date.now()) {
@@ -455,7 +456,11 @@ export class CashuWallet {
       }
       return null;
     }
+    const saved = (quote.outputs as SerializedOutputData[] | undefined)?.map((o) => OutputData.deserialize(o));
     if (state === "ISSUED") {
+      // Issued for outputs that were written down here: the mint still has its signatures for them (NUT-09).
+      const issued = saved && await this.signedOutputs(wallet, saved);
+      if (issued) return this.storeMinted(quote, issued);
       // The ecash is stored in the same transaction that drops the quote, so a quote still here was never
       // credited to this wallet. It is the only trace of those sats: keep it, stop asking.
       console.warn(`[wallet] ${quote.mint} issued quote ${quote.quote} (${quote.amount} sats) but this wallet holds no ecash for it`);
@@ -465,8 +470,29 @@ export class CashuWallet {
 
     // Paid: money arrived, and until it is minted this quote is the only claim on it. Written down, so a wallet
     // about to be removed can say so (walletRemoval) while the mint is slow to hand the ecash over.
-    if (!quote.paid) await wrap((await store(STORES.quotes, "readwrite")).put({ ...quote, paid: true } satisfies StoredQuote));
-    const proofs = await wallet.mintProofsBolt11(quote.amount, quote.quote);
+    // The outputs the mint is asked to sign are written down with it, and asked for again as they are: whichever
+    // request the mint acts on, what it issues is for these, and can be asked for again.
+    const preview = await wallet.prepareMint("bolt11", quote.amount, { ...answer, quote: quote.quote });
+    if (saved) preview.outputData = saved;
+    const written: StoredQuote = { ...quote, paid: true, outputs: saved ? quote.outputs : preview.outputData.map((o) => OutputData.serialize(o as OutputData)) };
+    if (!quote.paid || !saved) await wrap((await store(STORES.quotes, "readwrite")).put(written));
+    let proofs: Proof[];
+    try {
+      proofs = await wallet.completeMint(preview);
+    } catch (error) {
+      // Outputs of an earlier try that the mint refuses while the quote is still only paid (a keyset it retired
+      // since) would be refused every round: the next one makes new ones. Nothing was issued for these.
+      if (saved && isMintOperationError(error) && (await wallet.checkMintQuoteBolt11(quote.quote).catch(() => null))?.state === "PAID") {
+        const { outputs: _refused, ...fresh } = written;
+        await wrap((await store(STORES.quotes, "readwrite")).put(fresh satisfies StoredQuote));
+      }
+      throw error;
+    }
+    return this.storeMinted(quote, proofs);
+  }
+
+  /** The ecash of a paid invoice goes in with its history line, in the transaction that drops the quote. */
+  private async storeMinted(quote: StoredQuote, proofs: Proof[]): Promise<StoredQuote> {
     const minted = sats(proofs);
     const tx = walletTx(quote.mint, "lightning-in", minted, quote.amount - minted, quote.paymentId ? "Request paid over Lightning" : quote.testCoins ? TEST_COINS_NOTE : undefined);
     await transact([STORES.proofs, STORES.walletTx, STORES.quotes], (stores) => {
@@ -578,6 +604,19 @@ export class CashuWallet {
     const restored=await this.restoreOutputs(wallet,outputs);
     if(!restored)return undefined;
     return this.finishReviewedCashu(review,prepared,restored.slice(0,keep.length),restored.slice(keep.length));
+  }
+
+  /**
+   * `restoreOutputs`, for outputs that were written down before the mint was asked to sign them. A mint that does not
+   * restore (NUT-09) has no signatures to give back; one that cannot be reached throws, and is asked later.
+   */
+  private async signedOutputs(wallet: Wallet, outputs: OutputData[]): Promise<Proof[] | undefined> {
+    if (outputs.length === 0) return undefined;
+    try { return await this.restoreOutputs(wallet, outputs); }
+    catch (error) {
+      if (isMintOperationError(error) || (error instanceof HttpResponseError && [404, 405, 501].includes(error.status))) return undefined;
+      throw error;
+    }
   }
 
   /**
@@ -790,7 +829,7 @@ export class CashuWallet {
       this.swapTimer ??= setTimeout(() => void this.pollSwaps(), SWAP_POLL_MS);
       // A first try the mint refused is a refusal, and is said as one; the swap stays until the mint confirms it.
       if (refused && !retried) throw error;
-      throw new SwapUnsettledError(ended, { cause: error });
+      throw new SwapUnsettledError(ended, error);
     }
   }
 
@@ -805,12 +844,7 @@ export class CashuWallet {
     const keep = (saved.keepOutputs ?? []).map(OutputData.deserialize);
     const send = (saved.sendOutputs ?? []).map(OutputData.deserialize);
     const signed = async (): Promise<SwapOutcome | undefined> => {
-      let proofs: Proof[] | undefined;
-      try { proofs = keep.length + send.length > 0 ? await this.restoreOutputs(wallet, [...keep, ...send]) : undefined; }
-      catch (error) {
-        // A mint that does not restore (NUT-09) has no signatures to give back; one that cannot be reached is asked later.
-        if (!isMintOperationError(error) && !(error instanceof HttpResponseError && [404, 405, 501].includes(error.status))) throw error;
-      }
+      const proofs = await this.signedOutputs(wallet, [...keep, ...send]);
       return proofs && { state: "done", keep: proofs.slice(0, keep.length), send: proofs.slice(keep.length) };
     };
     const done = await signed();
