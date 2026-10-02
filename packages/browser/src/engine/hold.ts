@@ -198,7 +198,7 @@ export class HoldEngine {
       const mailbox = hold.mailbox ?? newHoldMailbox();
       const seq = hold.outSeq + 1;
       const now = this.now();
-      const entry: HeldEntry = { seq, id: item.id, messageId: item.messageId, kind: item.kind, ref: item.ref, name: heldName(storage.space, mailbox, seq), bytes: item.bytes, ts: item.timestamp, expires: now - HOLD_DATED_BACK_MS + this.ttl(), state: "queued" };
+      const entry: HeldEntry = { seq, id: item.id, messageId: item.messageId, kind: item.kind, ref: item.ref, name: heldName(storage.space, mailbox, seq), bytes: item.bytes, ts: item.timestamp, expires: now + Math.min(this.ttl(), HOLD_LIMITS.ttlMs - HOLD_DATED_BACK_MS), state: "queued" };
       await this.save(linkId, { ...hold, mailbox, outSeq: seq, outbox: [...hold.outbox, entry] });
       await this.upload(linkId, entry);
     });

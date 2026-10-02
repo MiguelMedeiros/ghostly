@@ -146,6 +146,7 @@ describe("store-and-forward engine", () => {
       await a.engine.hold("link-a", { kind: "text", id: "wire-old-1", messageId: "me_o1", bytes: 15, timestamp: Date.now() });
       const pointer = keys.bob.readPointer([...transport.packets.values()][0])!;
       expect(Math.abs(pointer.issued - (a.stored.hold!.outbox[0].expires - HOLD_LIMITS.ttlMs))).toBeLessThan(1_000);
+      expect(Math.abs(pointer.expires - a.stored.hold!.outbox[0].expires)).toBeLessThan(1_000);
       const readBy101 = pointer.issued <= Date.now() + 60_000 && a.stored.hold!.outbox[0].expires <= Date.now() + HOLD_LIMITS.ttlMs + 60_000 && pointer.expires <= Date.now() + HOLD_LIMITS.ttlMs + 60_000;
       expect(readBy101, `a sender ${skew / 60_000} min ahead`).toBe(taken);
     }
