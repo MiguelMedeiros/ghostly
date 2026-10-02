@@ -1,4 +1,4 @@
-import { screen } from "@testing-library/react";
+import { act, screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { decodeBolt11 } from "@ghostly/core";
 import type { LinkView, PaymentView, WalletView } from "@ghostly/browser/shared/types";
@@ -6,7 +6,7 @@ import { PaymentBubble } from "../../components/PaymentBubble";
 import { fakeEngine, linkView, paymentView } from "../fakeEngine";
 import { renderApp } from "../render";
 import { lightningSource, MAINNET_INVOICE, mint, REAL_MINT, REGTEST_INVOICE, reviewOf, SIGNET_INVOICE, target, TEST_MINT, TESTNET_INVOICE } from "./fixtures";
-import { choose } from "../select";
+import { choose, listOf, readOption } from "../select";
 
 // covers: payments.chat.review, payments.chat.method-off, payments.cashu.request, payments.cashu.reclaim, payments.cashu.test-sats, payments.lightning.request, payments.bitcoin.send, payments.usdt.send, payments.external, payments.chat.networks
 
@@ -42,6 +42,18 @@ describe("what the bubble says", () => {
     expect(screen.getByText(title)).toBeInTheDocument();
   });
 
+  // A bare verb ("Pede") read like an order: the contact's request says who asks whom, like "Sent you" does.
+  it.each([
+    ["pt", "Pediu a você"],
+    ["es", "Te pidió"],
+    ["it", "Ti ha chiesto"],
+    ["ar", "طلب منك"],
+  ] as const)("titles a contact's request in %s “%s”", (language, title) => {
+    fakeEngine.setState({ links: [linkView()], wallet: { mints: [mint(REAL_MINT, 0)] }, payments: { "pay-1": paymentView(incomingRequest()) } });
+    renderApp(<PaymentBubble paymentId="pay-1" peerPubKey="peer" fallbackText="[a payment]" />, { language });
+    expect(screen.getByText(title)).toBeInTheDocument();
+  });
+
   it.each([
     ["payment", "pending", "Waiting for your contact…"],
     ["payment", "settled", "Received"],
@@ -72,7 +84,7 @@ describe("what the bubble says", () => {
   it("says an on-chain payment waits for a confirmation", () => {
     show({ kind: "payment", direction: "in", state: "pending", target: target({ method: "bitcoin", network: "bitcoin", provider: "onchain" }) });
     expect(status()).toHaveTextContent("Waiting for a confirmation…");
-    expect(screen.getByText("Bitcoin on-chain · bitcoin")).toBeInTheDocument();
+    expect(screen.getByTestId("payment-rail")).toHaveTextContent(/^Bitcoin on-chain$/);
   });
 
   it("adds why a payment failed", () => {
@@ -94,7 +106,7 @@ describe("what the bubble says", () => {
     show({ amount: 1_500_000, target: target({ method: "usdt", network: "sepolia", asset: "TEST-USDT", unit: "token-base", decimals: 6 }) });
     expect(screen.getByText("1.5")).toBeInTheDocument();
     expect(screen.getByText("TEST-USDT")).toBeInTheDocument();
-    expect(screen.getByText("USDT · sepolia")).toBeInTheDocument();
+    expect(screen.getByText("USDT · Sepolia")).toBeInTheDocument();
   });
 });
 
@@ -151,6 +163,44 @@ describe("a request with a payment already on its way", () => {
     expect(await screen.findByRole("region", { name: "Payment review" })).toBeInTheDocument();
   });
 
+  it("a review made and not yet approved comes back after the chat was opened again: Approve or Cancel, no second Review", async () => {
+    const pending = { ...unfinished("unknown"), state: "pending" as const, error: undefined };
+    const { user, engine } = show(incomingRequest({ mints: [REAL_MINT] }), { wallet: { mints: [mint(REAL_MINT, 900)], intents: [pending] } });
+    const review = screen.getByRole("region", { name: "Payment review" });
+    expect(within(review).getByTestId("review-approve")).toBeEnabled();
+    expect(payButton(), "the engine refuses a second review of this request").toBeDisabled();
+    // Cancel gives the request back: its Review is offered again.
+    engine.on("cancelPayment", ({ id }) => ({ ...pending, id, state: "cancelled" }));
+    await user.click(within(review).getByRole("button", { name: "Cancel" }));
+    expect(engine.callsTo("cancelPayment")).toEqual([{ id: pending.id }]);
+    engine.update({ wallet: { mints: [mint(REAL_MINT, 900)], intents: [{ ...pending, state: "cancelled" }] } });
+    expect(await screen.findByRole("button", { name: "Review payment" })).toBeEnabled();
+    expect(screen.queryByRole("region", { name: "Payment review" })).not.toBeInTheDocument();
+  });
+
+  it("a review not approved yet goes once the request is paid some other way, or closed: nothing left to approve", async () => {
+    const pending = { ...unfinished("unknown"), state: "pending" as const, error: undefined };
+    for (const request of [{ state: "settled" as const }, { state: "failed" as const, closed: true }]) {
+      const { unmount } = show(incomingRequest({ mints: [REAL_MINT], ...request }), { wallet: { mints: [mint(REAL_MINT, 900)], intents: [pending] } });
+      expect(screen.queryByRole("region", { name: "Payment review" })).not.toBeInTheDocument();
+      expect(screen.queryByTestId("review-approve")).not.toBeInTheDocument();
+      unmount();
+    }
+    // One made here, then paid elsewhere while it waits for Approve: it goes too.
+    const { user, engine } = show(incomingRequest({ mints: [REAL_MINT] }), { wallet: { mints: [mint(REAL_MINT, 900)] } });
+    engine.on("preparePayment", reviewOf);
+    await user.click(payButton());
+    await screen.findByRole("region", { name: "Payment review" });
+    act(() => engine.update({ payments: { "pay-1": paymentView(incomingRequest({ mints: [REAL_MINT], state: "settled" })) } }));
+    expect(screen.getByTestId("payment-state")).toHaveTextContent("Paid");
+    expect(screen.queryByRole("region", { name: "Payment review" })).not.toBeInTheDocument();
+  });
+
+  it("an approved payment of it stays, with Check, even once the request reads as paid", () => {
+    show(incomingRequest({ mints: [REAL_MINT], state: "settled" }), { wallet: { mints: [mint(REAL_MINT, 900)], intents: [unfinished("submitted")] } });
+    expect(screen.getByRole("region", { name: "Payment review" })).toBeInTheDocument();
+  });
+
   it("a payment of it that failed leaves the request payable again", () => {
     show(incomingRequest({ mints: [REAL_MINT] }), { wallet: { mints: [mint(REAL_MINT, 900)], intents: [unfinished("failed")] } });
     expect(screen.queryByRole("region", { name: "Payment review" })).not.toBeInTheDocument();
@@ -164,7 +214,9 @@ describe("paying a request with Cashu", () => {
     engine.on("preparePayment", reviewOf);
     const picker = screen.getByRole("combobox", { name: "Cashu mint" });
     expect(picker).toHaveAttribute("data-value", REAL_MINT);
-    expect(picker).toHaveTextContent(`${REAL_MINT} 900 sats`);
+    // A mint known by its URL alone reads as its host.
+    expect(picker).toHaveTextContent("mint.example.com 900 sats");
+    expect(picker).not.toHaveTextContent("https://");
     await user.click(payButton());
     expect(await screen.findByRole("region", { name: "Payment review" })).toBeInTheDocument();
     expect(engine.callsTo("preparePayment")).toEqual([{
@@ -173,6 +225,15 @@ describe("paying a request with Cashu", () => {
     }]);
     // One review at a time.
     expect(payButton()).toBeDisabled();
+  });
+
+  it("names each shared mint by its own name, and one without a name by its host, never by its URL", async () => {
+    const other = "https://other.example:3338";
+    const { user } = show(incomingRequest({ mints: [REAL_MINT, other] }), { wallet: { mints: [{ ...mint(REAL_MINT, 900), name: "Coinos Mint" }, { ...mint(other, 50), name: "" }] } });
+    const picker = screen.getByRole("combobox", { name: "Cashu mint" });
+    expect(picker).toHaveTextContent("Coinos Mint 900 sats");
+    await user.click(picker);
+    expect(within(listOf(picker)).getAllByRole("option").map((o) => readOption(o).label)).toEqual(["Coinos Mint", "other.example:3338"]);
   });
 
   it("pays from the test mint on the Cashu test network, through the Testnet wallet", async () => {
@@ -258,7 +319,7 @@ describe("paying a request on other rails", () => {
     const { user, engine } = show(incomingRequest({ amount: 5_000, target: onchain }));
     engine.on("preparePayment", reviewOf);
     expect(screen.queryByRole("combobox", { name: "Cashu mint" })).not.toBeInTheDocument();
-    expect(screen.getByRole("textbox", { name: "Maximum fee (sats)" })).toHaveValue("2000");
+    expect(screen.getByRole("textbox", { name: "Maximum fee (test sats)" })).toHaveValue("2000");
     await user.click(payButton());
     await screen.findByRole("region", { name: "Payment review" });
     // A signet address: the Testnet wallet pays it.
@@ -357,6 +418,19 @@ describe("paying a request's invoice over Lightning", () => {
     await user.click(payButton());
     expect(await screen.findByTestId("payment-review")).toHaveTextContent("Pay 250,000 test sats over Lightning");
     expect(engine.callsTo("walletQuoteInvoice")).toEqual([{ invoice: REGTEST_INVOICE, via: undefined, network: "testnet" }]);
+  });
+
+  it("says test sats for every fee of a Testnet request: the ceiling, the fee line and a fee above it", async () => {
+    const { user, engine } = show(incomingRequest({ amount: 250_000, invoice: REGTEST_INVOICE }));
+    engine.on("walletQuoteInvoice", () => quote({ amount: 250_000 }));
+    const fee = screen.getByRole("textbox", { name: "Maximum fee (test sats)" });
+    await user.click(payButton());
+    expect(await screen.findByTestId("payment-review")).toHaveTextContent(/· fee up to 5 test sats/);
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    await user.clear(fee);
+    await user.type(fee, "2");
+    await user.click(payButton());
+    expect(await screen.findByText("The Lightning fee (up to 5 test sats) is above your maximum")).toBeInTheDocument();
   });
 
   it("shows the Testnet Lightning source for a Testnet request, not the Mainnet one", async () => {

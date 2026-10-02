@@ -1,4 +1,9 @@
 {
+  "announce": {
+    "message": "{{name}}：{{text}}",
+    "messages": "{{count}} 条新消息",
+    "messagesFrom": "来自 {{name}} 的 {{count}} 条新消息"
+  },
   "audio": {
     "cantPlay": "此设备无法播放此音频（{{format}}）。请下载后收听。",
     "pause": "暂停音频",
@@ -97,6 +102,7 @@
     "resolveNote": "解析只能显示它是什么，而不是谁持有它。",
     "resolveNoteNone": "解析只能显示它是什么，而不是谁持有它：联系人将其作为身份分享即可证明。",
     "revokedBy": "已被 {{who}} 撤销",
+    "someContact": "一位联系人",
     "youSent": "你发送的",
     "yourDid": "你的 Ghostly DID",
     "yourIdentity": "你的身份",
@@ -159,6 +165,8 @@
     "contactOff": "联系人：已关闭，或需要更新 Ghostly",
     "contactOnConnect": "联系人：连接后显示",
     "contactOnSession": "联系人：会话建立后显示",
+    "heldMany": "为 {{name}} 保留了 {{count}} 项 · {{used}} MB / {{max}} MB",
+    "heldOne": "为 {{name}} 保留了 1 项 · {{used}} MB / {{max}} MB",
     "intro": "{{name}} 不在时，你发送的内容会在你自己的存储中等待，最多 {{days}} 天，并加密封存，只有对方能打开。包括文字、图片和付款请求，从不包括 ecash。对方也需要允许。",
     "noStorage": "存储：未设置。要暂存消息，请在个人资料 → 备份中设置 S3 存储；领取对方暂存的消息则不需要。",
     "nothing": "已暂存：无",
@@ -259,11 +267,14 @@
     "invoiceSats": "⚡ Lightning 发票 · {{amount}} sats",
     "lightningAddress": "Lightning 地址",
     "lightningOffer": "⚡ Lightning 报价",
+    "payment": "⚡ {{what}}：{{amount}}",
     "realMoney": "真实资金",
     "sats": "{{amount}} sats",
     "testMoney": "测试资金",
     "testSats": "{{amount}} 测试 sats",
-    "usdtAddress": "USDT 地址"
+    "usdtAddress": "USDT 地址",
+    "video": "🎬 视频 ({{duration}})",
+    "voice": "🎤 语音消息 ({{duration}})"
   },
   "reactions": {
     "chipLabel": "{{emoji}}：{{names}}",

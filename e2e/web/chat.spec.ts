@@ -23,7 +23,8 @@ test("two people chat: relay discovery, then peer-to-peer messages", { tag: ["@f
   const bubble = (await chat(alice).getByText("boo from bob").boundingBox())!;
   const pane = (await chat(alice).boundingBox())!;
   expect(bubble.x - pane.x, "bubbles keep their distance from the edge of the chat").toBeGreaterThanOrEqual(40);
-  await expect(chat(alice).getByText("~Slimer").first()).toBeVisible();
+  // Bob's nickname came over: over his messages, plain, as the header names him (a "~" marks a member's own name in a group).
+  await expect(chat(alice).getByTestId("message-nick").first()).toHaveText("Slimer");
   await expect(alice.page.getByTitle("Click to set a name")).toHaveText(/Slimer/);
   await expect(chat(alice).getByText("joined the chat").first()).toBeVisible();
 
@@ -157,6 +158,24 @@ test("files, peer to peer, arrive intact", { tag: ["@feature:files.paired.send",
   // Pictures show themselves.
   await bob.page.getByTestId("file-input").setInputFiles({ name: "ghost.gif", mimeType: "image/gif", buffer: GIF });
   await expect(alice.page.getByTestId("file-bubble").filter({ hasText: "ghost.gif" }).getByRole("img", { name: "ghost.gif" })).toBeVisible();
+
+  // + → Document takes several files at once, and each goes as its own message. None of them reads as gone on its way
+  // in: a file shown before its transfer said "No longer available" until it was all here (bug hunt r10).
+  await bob.page.evaluate(() => {
+    const seen: string[] = ((window as unknown as { goneSeen: string[] }).goneSeen = []);
+    new MutationObserver(() => {
+      for (const status of document.querySelectorAll("[data-testid=file-status]")) if (status.textContent === "No longer available") seen.push(status.closest("[data-testid=file-bubble]")?.textContent ?? "");
+    }).observe(document.body, { subtree: true, childList: true, characterData: true });
+  });
+  const several = [
+    { name: "attic map.txt", mimeType: "text/plain", buffer: Buffer.from("the attic, at midnight") },
+    { name: "cellar plan.csv", mimeType: "text/csv", buffer: Buffer.from("cellar,stairs\n") },
+    { name: "stairs.bin", mimeType: "application/octet-stream", buffer: Buffer.alloc(300_000, 7) },
+    { name: "hall.bin", mimeType: "application/octet-stream", buffer: Buffer.alloc(600_000, 9) },
+  ];
+  await alice.page.getByTestId("file-input").setInputFiles(several);
+  for (const { name } of several) await expect(bob.page.getByTestId("file-bubble").filter({ hasText: name }).getByTestId("file-save")).toBeVisible();
+  expect(await bob.page.evaluate(() => (window as unknown as { goneSeen: string[] }).goneSeen)).toEqual([]);
 });
 
 /** How many files this peer still holds the bytes of, straight out of its IndexedDB. */

@@ -16,12 +16,13 @@ import { PublicDid } from "./PublicDid";
 import { ApprovalPanel } from "./ApprovalPanel";
 import { PublicProfileDetails } from "./PublicProfileDetails";
 import { useAppNavigation } from "../../hooks/useAppNavigation";
+import { deckArrows } from "../deck/arrows";
+import { errorText } from "../../lib/errorText";
 
 type Entry =
   | { id: typeof GHOSTLY; ghostly: true; card: IdCardContent }
   | { id: string; ghostly?: false; proof: IdentityProofView; card: IdCardContent };
 const PANEL = { id: "identity-panel", tabId: (id: string) => `identity-tab-${id}` };
-const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 /**
  * Identities → Yours: a deck of ID cards (the wallet's deck, with ID cards for faces). The first card is the
@@ -69,7 +70,7 @@ export function IdentityProofsSection({ onAdd }: { onAdd?: () => void }) {
   ];
   const entry = entries.find(e => e.id === chosen) ?? entries[0];
   const select = (id: string) => { removeAbort.current?.abort(); setChosen(id); setRemoving(null); setError(""); setRemoval({}); };
-  const act = (key: string, work: () => Promise<unknown>) => { setBusy(key); setError(""); void work().catch(e => setError(message(e))).finally(() => setBusy("")); };
+  const act = (key: string, work: () => Promise<unknown>) => { setBusy(key); setError(""); void work().catch(e => setError(errorText(e, t))).finally(() => setBusy("")); };
   /**
    * Removes a proof: first what its provider published, when it can take that down (an AT Protocol record, after a
    * fresh approval on the person's server), then the proof itself, which withdraws it and publishes the revocation.
@@ -88,7 +89,7 @@ export function IdentityProofsSection({ onAdd }: { onAdd?: () => void }) {
       }).catch((e: unknown) => { setRemoval({ failed: p.id }); throw e; })
       : Promise.resolve();
     void takenDown.then(() => { setTakingDown(null); setApproval(null); setRevoking(p.id); return engine.call("removeIdentityProof", { id: p.id }); })
-      .then(() => setRemoving(null), e => { if (!controller.signal.aborted) setError(message(e)); })
+      .then(() => setRemoving(null), e => { if (!controller.signal.aborted) setError(errorText(e, t)); })
       .finally(() => { setRevoking(null); setTakingDown(null); setApproval(null); setRemoval(r => ({ failed: r.failed })); });
   };
   const tone = (e: Entry) => idCardTone({ provider: e.card.provider, subject: e.card.bound, attested: e.card.attested });
@@ -97,7 +98,7 @@ export function IdentityProofsSection({ onAdd }: { onAdd?: () => void }) {
     <section className="space-y-3" data-testid="identities-mine">
       <h2 className="text-sm font-semibold text-accent uppercase tracking-wide">{t("identities.mine.title")}</h2>
       <Deck<Entry> cards={entries} selected={entry.id} onSelect={select}
-        kind="tabs" panel={PANEL} label={t("identities.mine.deckLabel")} name="identity-deck" className="id-deck"
+        kind="tabs" panel={PANEL} label={t("identities.mine.deckLabel")} name="identity-deck" arrows={deckArrows(t)} className="id-deck"
         testId={e => (e.ghostly ? "identity-ghostly" : "identity-proof")}
         face={(e, { after }) => <IdCardFace card={e.card} after={after} />}
         mark={e => <IdCardMark provider={e.card.provider} subject={e.card.bound} />} tone={tone} />

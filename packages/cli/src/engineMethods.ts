@@ -14,7 +14,7 @@ export const ENGINE_METHODS: readonly string[] = [
   "choosePublicProfile", "preparePeerProof", "submitPeerProof", "withdrawPeerProof", "beginIdentityProof",
   "completeIdentityProof", "cancelIdentityProof", "removeIdentityProof", "shareIdentityProof",
   "withdrawIdentityProof", "recheckIdentityProof", "lookupIdentityDisplay", "loadPublicProfile", "loadPublicPosts",
-  "loadPublicGraph", "loadPublicPostImage", "setDidListed", "nostrLoadContact", "nostrForgetContact", "nostrLoadOwn",
+  "loadPublicGraph", "loadPublicPostImage", "clearProfileData", "setDidListed", "nostrLoadContact", "nostrForgetContact", "nostrLoadOwn",
   "nostrLookup", "nostrDraft", "nostrPublish", "createLink", "takeInvite", "joinLink", "ensureLink", "confirmPair",
   "pollNow", "removeLink", "renameLink", "setActiveLink", "sendMessage", "editMessage", "retryMessage", "react", "pinMessage", "messageDetails",
   "deleteMessage", "exportLinks", "sendFile", "forwardMessages", "fileAction", "setDeliveryMode", "setTransportPreference",
@@ -28,7 +28,7 @@ export const ENGINE_METHODS: readonly string[] = [
   "payRequest", "reclaimPayment", "disconnect", "addService", "removeService", "setServiceEnabled",
   "setServiceShared", "updateSettings", "setCallSignal", "setTyping", "setWakeSubscription", "setWakeMuted", "wakeForCall", "setFastPoll", "createGroup", "inviteToGroup",
   "acceptGroupInvitation", "declineGroupInvitation", "enableGroupLink", "disableGroupLink", "joinGroupByLink",
-  "sendGroupMessage", "groupMessages", "messagePage", "groupTaken", "leaveGroup", "removeGroupMember", "makeGroupAdmin", "setGroupHub", "rotateGroup",
+  "sendGroupMessage", "pressButton", "groupMessages", "messagePage", "groupTaken", "leaveGroup", "removeGroupMember", "makeGroupAdmin", "setGroupHub", "rotateGroup",
   "setGroupPicture", "renameGroup", "setGroupTyping", "forgetGroup",
 ];
 

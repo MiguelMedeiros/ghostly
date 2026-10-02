@@ -101,7 +101,7 @@
     "lastBalance": "最後に確認した残高：{{balance}} {{unit}}",
     "lastBalanceAt": "最後に確認した残高：{{balance}} {{unit}} · {{date}}",
     "maxFee": "許容する手数料の上限",
-    "maxFeeInput": "手数料の上限（sats）",
+    "maxFeeInput": "手数料の上限（{{unit}}）",
     "newAddress": "新しいアドレス",
     "notConnected": "{{label}} に接続されていません",
     "notConnectedDefault": "Bitcoin ソースに接続されていません",
@@ -173,7 +173,8 @@
     "createInvoice": "Lightning インボイスを作成",
     "fee": {
       "none": "使うときの手数料なし",
-      "perProof": "プルーフごとに {{fee}} sat（支払い 1 回あたり約 1 sat）"
+      "perProof": "プルーフごとに {{fee}} sat（支払い 1 回あたり約 1 sat）",
+      "perProofTest": "プルーフごとに {{fee}} テスト sat（支払い 1 回あたり約 1 テスト sat）"
     },
     "history": {
       "fee": "手数料 {{amount}}",
@@ -181,7 +182,12 @@
       "movements": "{{count}} 件の取引",
       "movementsOne": "1 件の取引",
       "noFee": "手数料なし",
-      "none": "まだありません"
+      "none": "まだありません",
+      "note": {
+        "paymentFailed": "Lightning の支払いが失敗しました",
+        "requestPaid": "Lightning で支払われたリクエスト",
+        "testCoins": "テストミントからのテストコイン"
+      }
     },
     "intent": "{{amount}} {{unit}} · {{state}}",
     "invoiceFor": "{{amount}} のインボイス",
@@ -191,15 +197,20 @@
     "newAmount": "金額を変更",
     "paid": "支払いました。",
     "pastePlaceholder": "Lightning インボイス、Lightning アドレス、または ecash トークンを貼り付け",
-    "payAmount": "{{amount}} sats を支払う",
+    "payAmount": "{{amount}} {{unit}} を支払う",
     "payLine": "{{amount}} を支払う{{fees}}",
     "pendingMint": "支払いはまだミントで保留中です。",
     "primary": "メイン",
-    "received": "⚡ {{amount}} sats を受け取りました",
+    "received": "⚡ {{amount}} {{unit}} を受け取りました",
     "redeem": "ecash トークンを受け取る",
-    "redeemed": "{{amount}} sats を受け取りました。",
+    "redeemed": "{{amount}} {{unit}} を受け取りました。",
     "remove": "削除",
+    "removeLastMint": "これはこのウォレットの最後のミントです。削除すると {{label}} ウォレットとその Lightning カードも削除されます。",
     "removeMint": "{{name}} を削除",
+    "removeMintAwaiting": "まだ入金を待っています:",
+    "removeMintConsent": "削除後に支払われた分は、このミントをもう一度追加したときにだけ表示されます。",
+    "removeMintHint": "あとでもう一度追加できます。",
+    "removeMintQuestion": "{{name}} を削除しますか？",
     "settings": "設定",
     "testBalance": "{{amount}} テスト sats（価値なし）",
     "testMintInvoice": "支払いを待っています… テスト用ミントはすべてのインボイスを自動で支払い済みにするため、このインボイスは連絡先がチャットで支払ったときだけ数えられます。今すぐテスト sats が必要なら、上の「テストコインを入手」を使ってください。",
@@ -331,7 +342,7 @@
     "asking": "{{source}} に問い合わせ中…",
     "askingInvoice": "インボイスを要求中…",
     "askingSource": "ソースに問い合わせ中…",
-    "asksExactly": "ちょうど {{amount}} sats を求めています。",
+    "asksExactly": "ちょうど {{amount}} {{unit}} を求めています。",
     "balance": "残高",
     "balanceHint": "Lightning は Cashu の残高を使います。インボイスは Cashu のミントに入金され、ミントから支払われます。",
     "balanceSource": "{{unit}} · {{source}}",
@@ -361,17 +372,26 @@
     "lookupAsks": "調べると {{domain}} に受け付け内容を問い合わせます。そのサーバーはあなたが支払おうとしていることを知ります。",
     "mismatch": "インボイスが選んだ金額と一致しません",
     "notInvoice": "Lightning インボイスでも Lightning アドレスでもありません。",
-    "paidTo": "{{to}} に {{amount}} sats を支払いました ✓",
+    "opState": {
+      "expired": "期限切れ",
+      "failed": "失敗",
+      "open": "支払い待ち",
+      "paid": "支払い済み",
+      "pending": "保留中",
+      "sending": "送信中",
+      "unknown": "結果不明"
+    },
+    "paidTo": "{{to}} に {{amount}} {{unit}} を支払いました ✓",
     "pastePlaceholder": "Lightning インボイスまたは Lightning アドレスを貼り付け",
     "pay": "支払う",
     "payTo": "{{to}} に {{amount}} を支払う{{fees}}",
     "paying": "支払い中…",
     "pending": "支払いはまだ保留中です。確認中のため、二重に支払われることはありません。",
     "recent": "最近",
-    "recentIn": "インボイス · {{amount}} sats",
-    "recentOut": "支払い · {{amount}} sats",
+    "recentIn": "インボイス · {{amount}} {{unit}}",
+    "recentOut": "支払い · {{amount}} {{unit}}",
     "says": "{{domain}} からのメッセージ：{{message}}",
-    "takesRange": "{{min}}〜{{max}} sats を受け付けます。",
+    "takesRange": "{{min}}〜{{max}} {{unit}} を受け付けます。",
     "theSource": "ソース",
     "waiting": "支払いを待っています… どの Lightning ウォレットでも支払えます。ソースが確認すると、ここで支払い済みになります。"
   },
@@ -465,7 +485,6 @@
     "inUse": "使用中",
     "instant": "{{wallet}}（即時）",
     "intent": "{{amount}} {{unit}} · {{state}}",
-    "intentSats": "{{amount}} sats · {{state}}",
     "network": "ネットワーク",
     "networkStuck": "このネットワークが応答しません。別のネットワークに切り替えられます。",
     "noBalance": "送れる残高はまだありません",
@@ -494,6 +513,7 @@
       "reaches": "その後に支払われたものも {{source}} に届きます。Ghostly に表示されなくなるだけです。",
       "reachesWallet": "その後に支払われたものもウォレットに届きます。Ghostly に表示されなくなるだけです。"
     },
+    "and": "{{first}} と {{second}}",
     "ask": "{{label}} を削除…",
     "awaiting": "まだ入金待ち",
     "backupFirst": "先にバックアップ",
@@ -512,6 +532,10 @@
       "waitsReal": "理解しました：削除後にその未払いの請求やインボイスに支払われたものは失われます。それは本物のお金です。"
     },
     "copyTokens": "Ecash のバックアップをコピー",
+    "gas": {
+      "mainnet": "{{amount}} ETH",
+      "testnet": "{{amount}} テスト ETH"
+    },
     "held": {
       "elsewhere": "お金はそのまま残ります。Ghostly は接続方法を忘れるだけです。あとでまた接続できます。",
       "elsewhereIn": "お金は {{source}} に残ります。Ghostly は接続方法を忘れるだけです。あとでまた接続できます。",
@@ -522,6 +546,13 @@
     },
     "hintDevice": "鍵と設定がこのデバイスから消えます。ほかのウォレットはそのままです。",
     "hintElsewhere": "Ghostly は接続方法を忘れるだけで、お金はそのまま残ります。",
+    "item": {
+      "invoice": "{{amount}} の請求書（未払い）",
+      "paid": "請求書に支払われた {{amount}}（ミントからまだ受け取っていません）",
+      "request": "チャットでの {{amount}} のリクエスト（未完了）",
+      "sent": "あなたが送った {{amount}} の ecash（まだ受け取られていません）",
+      "unclaimed": "ミントが請求書に対して発行したという {{amount}}（ここでは受け取っていません）"
+    },
     "label": "このウォレットを削除",
     "noBackup": "Ghostly はこのウォレットのリカバリーフレーズをもう表示できません。このお金を取り戻せるのは、作成時に書き留めたフレーズだけです。",
     "noTokens": "コピーする Ecash はありません。",
@@ -693,11 +724,17 @@
   },
   "ui": {
     "amountIn": "{{unit}} での金額",
+    "amountUnclear": "金額があいまいです。{{example}} のように入力してください",
+    "amountWhole": "整数のみ（例: {{example}}）",
     "gettingAddress": "アドレスを取得中… プロバイダーが応答するとここに表示されます。",
     "history": "履歴",
     "receive": "受け取る",
     "receivingAddress": "受け取りアドレス",
     "send": "送金"
+  },
+  "unseen": {
+    "real": "{{place}}、新着 {{amount}} sats",
+    "test": "{{place}}、新着 {{amount}} テスト sats"
   },
   "usdt": {
     "approve": "確認を承認するまで何も送られません。",

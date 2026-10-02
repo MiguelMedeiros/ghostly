@@ -27,10 +27,10 @@
     "label": "Group connection",
     "labelWith": "Group connection: {{state}}",
     "noWebrtc": "Groups can't connect from this app yet",
-    "noWebrtcHint": "Group links use WebRTC, which Ghostly Desktop on Linux does not have yet, so no member can be reached from here. Your 1:1 chats and calls work. Open the group on the web app or on another device to take part.",
+    "noWebrtcHint": "Group links need WebRTC or a native transport (Iroh, HyperDHT), and this app has neither, so no member can be reached from here. Open the group on the web app or on another device to take part.",
     "nobody": "Nobody reachable",
     "nobodyElse": "Nobody else is in the group yet.",
-    "note": "Each member is a direct, end-to-end encrypted link from your app to theirs. Group links use WebRTC: Iroh, HyperDHT and DHT-only delivery are not offered in groups yet. A member who is not reachable gets what they missed from any member who has it when they are back.",
+    "note": "Each member is a direct, end-to-end encrypted link from your app to theirs. Group links use WebRTC, and Iroh or HyperDHT with a member whose app has no WebRTC (Ghostly Desktop on Linux). DHT-only delivery is not offered in groups yet. A member who is not reachable gets what they missed from any member who has it when they are back.",
     "offline": "Offline",
     "offlineHint": "This device is offline: no member can be reached until it is back online.",
     "onlyYou": "Only you so far",
@@ -112,6 +112,7 @@
     "titleUnnamed": "Leave this group?"
   },
   "link": {
+    "broken": "This link to a group does not work",
     "copied": "Copied",
     "copyFailed": "Copy did not work. Select the link and copy it.",
     "disable": "Turn off",
@@ -141,6 +142,7 @@
     "issue": "Connection issue · {{seen}}",
     "lastSeen": "last seen {{time}}",
     "noConnection": "No connection yet",
+    "noSlot": "Waiting for a free connection on this device",
     "notSeen": "not seen yet",
     "unnamed": "Member {{key}}",
     "unreachable": "Not reachable · {{seen}}",
@@ -177,6 +179,7 @@
   "readNoteCommunity": "Anyone with the group's link can join, and any member can let people in. Everyone in the group can read everything sent while they are a member; someone removed cannot read what comes after, someone who joins later cannot read what came before. Members who were away get the last {{count}} messages from whoever is there when they return.",
   "remove": {
     "body": "They won't get the group's new messages.",
+    "linkHint": "They can still join again with the group's link: a new link keeps them out.",
     "title": "Remove {{name}}?"
   },
   "rename": {

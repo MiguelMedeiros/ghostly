@@ -28,6 +28,7 @@ export * from "./messageTime";
 export * from "./payments";
 export * from "./bolt11";
 export * from "./paymentUri";
+export * from "./engineErrors";
 export * from "./lnurl";
 export * from "./version";
 
@@ -85,4 +86,4 @@ export * from "./groupHubs";
 export * from "./groupMeta";
 export * from "./groupTyping";
 export * from "./pairingProgress";
-export { setLinkTraceSink } from "./linkTrace";
+export { setLinkTraceSink, traceLink } from "./linkTrace";

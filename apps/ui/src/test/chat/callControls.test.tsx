@@ -3,9 +3,11 @@ import type { ComponentProps } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { CallButtons } from "../../components/CallButtons";
 import { CallOverlay } from "../../components/CallOverlay";
+import { IncomingCallNotification } from "../../components/IncomingCallNotification";
+import { FakeMediaStream, FakeTrack } from "../../../../../packages/react/test/fakes";
 import { renderApp } from "../render";
 
-// covers: calls.screen-share, calls.audio, calls.video, calls.mini-window
+// covers: calls.screen-share, calls.audio, calls.video, calls.mini-window, calls.end-and-answer
 
 /**
  * The chat header starts a voice or a video call, and nothing else; the screen is shared from inside a call,
@@ -146,5 +148,152 @@ describe("sharing the screen from inside a call", () => {
     overlay({ callState: "offering", canShareScreen: false, isScreenSharing: false });
     expect(screen.queryByTestId("share-screen")).toBeNull();
     expect(screen.queryByTestId("call-sharing")).toBeNull();
+  });
+});
+
+describe("a call for a screen reader and the keys", () => {
+  it("rings as a dialog named for the caller: the focus in it, not on Accept, the keys kept in it, back where it was after", async () => {
+    const before = document.createElement("textarea");
+    document.body.append(before);
+    before.focus();
+    const onAcceptAudio = vi.fn();
+    const { user, unmount } = renderApp(<IncomingCallNotification peerName="Ana" hasVideo onAcceptAudio={onAcceptAudio} onAcceptVideo={vi.fn()} onReject={vi.fn()} />);
+    const ring = screen.getByRole("alertdialog", { name: "Ana" });
+    expect(ring).toHaveAccessibleDescription("Incoming video call...");
+    expect(ring).toHaveAttribute("aria-modal", "true");
+    expect(ring).toHaveFocus();
+    // An Enter meant for the message does not answer.
+    await user.keyboard("{Enter}");
+    expect(onAcceptAudio).not.toHaveBeenCalled();
+    const buttons = within(ring).getAllByRole("button");
+    expect(buttons.map((b) => b.getAttribute("aria-label"))).toEqual(["Decline", "Accept audio call", "Accept video call"]);
+    await user.tab();
+    await user.tab();
+    await user.tab();
+    expect(buttons[2]).toHaveFocus();
+    await user.tab();
+    expect(buttons[0]).toHaveFocus();
+    unmount();
+    expect(before).toHaveFocus();
+    before.remove();
+  });
+
+  it("says the call's state in words as it moves on, never the running clock", () => {
+    const { rerender } = overlay({ callState: "offering" });
+    // Calling... is the state line itself, read out as it changes; nothing says it twice.
+    expect(screen.getByTestId("call-status")).toHaveAttribute("role", "status");
+    expect(screen.getByTestId("call-status")).toHaveTextContent("Calling...");
+    expect(screen.getAllByText("Calling...")).toHaveLength(1);
+    expect(screen.getByTestId("call-state-spoken")).toHaveTextContent(/^$/);
+    const props = { localStream: null, remoteStream: null, isMuted: false, isVideoOff: true, canSendVideo: true, remoteHasVideo: false, callStartedAt: Date.now() - 65_000,
+      peerName: "Ana", onHangUp: vi.fn(), onToggleMute: vi.fn(), onToggleVideo: vi.fn() };
+    rerender(<CallOverlay callState="connected" {...props} />);
+    // Connected: said once; the line becomes the clock and stops being read out.
+    expect(screen.getByTestId("call-state-spoken")).toHaveAttribute("role", "status");
+    expect(screen.getByTestId("call-state-spoken")).toHaveTextContent(/^Connected$/);
+    expect(screen.getByTestId("call-status")).not.toHaveAttribute("role");
+  });
+});
+
+describe("a call ringing while you are on another (End and answer)", () => {
+  it("offers End and answer and Decline only, named for a screen reader and under each button, with the keys kept in it", async () => {
+    const onAcceptAudio = vi.fn(), onAcceptVideo = vi.fn(), onReject = vi.fn();
+    const { user } = renderApp(<IncomingCallNotification peerName="Ana" hasVideo={false} onCall onAcceptAudio={onAcceptAudio} onAcceptVideo={onAcceptVideo} onReject={onReject} />);
+    const ring = screen.getByRole("alertdialog", { name: "Ana" });
+    expect(ring).toHaveAccessibleDescription("Incoming audio call... Answering ends your current call");
+    expect(ring).toHaveFocus();
+    // An Enter meant for the message does not end the call that is on.
+    await user.keyboard("{Enter}");
+    expect(onAcceptAudio).not.toHaveBeenCalled();
+
+    const buttons = within(ring).getAllByRole("button");
+    expect(buttons.map((b) => b.getAttribute("aria-label"))).toEqual(["Decline", "End and answer"]);
+    expect(buttons.map((b) => b.getAttribute("title"))).toEqual(["Decline", "End and answer"]);
+    // The words are on screen too: no icon says "End and answer".
+    expect(within(ring).getAllByText("End and answer")).toHaveLength(1);
+    expect(within(ring).queryByRole("button", { name: /^Accept/ })).toBeNull();
+
+    await user.tab();
+    await user.tab();
+    expect(buttons[1]).toHaveFocus();
+    await user.tab();
+    expect(buttons[0]).toHaveFocus();
+    await user.tab();
+    await user.keyboard("{Enter}");
+    expect(onAcceptAudio).toHaveBeenCalledOnce();
+    expect(onAcceptVideo).not.toHaveBeenCalled();
+  });
+
+  it("answers a video call as it came, with the camera; Decline declines", async () => {
+    const onAcceptVideo = vi.fn(), onReject = vi.fn();
+    const { user } = renderApp(<IncomingCallNotification peerName="Ana" hasVideo onCall onAcceptAudio={vi.fn()} onAcceptVideo={onAcceptVideo} onReject={onReject} />);
+    expect(screen.getByRole("alertdialog")).toHaveAccessibleDescription("Incoming video call... Answering ends your current call");
+    await user.click(screen.getByRole("button", { name: "End and answer" }));
+    expect(onAcceptVideo).toHaveBeenCalledOnce();
+    await user.click(screen.getByRole("button", { name: "Decline" }));
+    expect(onReject).toHaveBeenCalledOnce();
+  });
+
+  it("goes back to the plain Accept once the call that was on has ended", () => {
+    const props = { peerName: "Ana", hasVideo: true, onAcceptAudio: vi.fn(), onAcceptVideo: vi.fn(), onReject: vi.fn() };
+    const { rerender } = renderApp(<IncomingCallNotification {...props} onCall />);
+    rerender(<IncomingCallNotification {...props} onCall={false} />);
+    const ring = screen.getByRole("alertdialog", { name: "Ana" });
+    expect(ring).toHaveAccessibleDescription("Incoming video call...");
+    expect(within(ring).getAllByRole("button").map((b) => b.getAttribute("aria-label"))).toEqual(["Decline", "Accept audio call", "Accept video call"]);
+  });
+
+  it("is said in every language", async () => {
+    for (const language of ["en", "pt", "es", "fr", "it", "ja", "zh", "ar"]) {
+      const calls = (await import(`../../locales/${language}/calls.json`)).default as Record<string, unknown>;
+      for (const key of ["endAndAnswer", "endsCurrent", "onAnother"]) expect(calls[key], `${language} ${key}`).toEqual(expect.any(String));
+    }
+  });
+});
+
+describe("your own camera in the corner", () => {
+  it("plays the camera's picture alone, never the microphone with it", () => {
+    // Linux's microphone is a silent stand-in track; in the self view's stream it kept WebKitGTK from loading the picture.
+    vi.stubGlobal("MediaStream", FakeMediaStream);
+    // happy-dom's srcObject takes its own MediaStream only: what the page gives it is kept here.
+    const given: unknown[] = [];
+    const srcObject = vi.spyOn(HTMLMediaElement.prototype, "srcObject", "set").mockImplementation((stream) => { given.push(stream); });
+    try {
+      const camera = new FakeTrack("video");
+      const microphone = new FakeTrack("audio");
+      overlay({ isVideoOff: false, localStream: new FakeMediaStream([camera, microphone]) as unknown as MediaStream });
+      expect(screen.getByTestId("call-self-view").querySelector("video")).not.toBeNull();
+      expect(given).toHaveLength(1);
+      expect((given[0] as FakeMediaStream).getTracks()).toEqual([camera]);
+    } finally {
+      srcObject.mockRestore();
+      vi.unstubAllGlobals();
+    }
+  });
+});
+
+describe("the contact's sound", () => {
+  it("plays from one element only, on the chosen speaker: the picture is muted", () => {
+    vi.stubGlobal("MediaStream", FakeMediaStream);
+    // happy-dom's srcObject takes its own MediaStream only: what the page gives each element is kept here.
+    const given = new Map<HTMLMediaElement, unknown>();
+    const srcObject = vi.spyOn(HTMLMediaElement.prototype, "srcObject", "set").mockImplementation(function (this: HTMLMediaElement, stream) { given.set(this, stream); });
+    const sinks: string[] = [];
+    Object.defineProperty(HTMLMediaElement.prototype, "setSinkId", { configurable: true, value: async function (this: HTMLMediaElement) { sinks.push(this.tagName); } });
+    try {
+      const remote = new FakeMediaStream([new FakeTrack("audio"), new FakeTrack("video")]);
+      const devices = { list: { audioinput: [], videoinput: [], audiooutput: [], defaults: {}, named: true }, current: { audioinput: "", videoinput: "", audiooutput: "spk" },
+        speaker: "spk", speakers: true, choose: vi.fn(), notice: null, dismiss: vi.fn(), switchBack: vi.fn() };
+      overlay({ remoteStream: remote as unknown as MediaStream, remoteHasVideo: true, devices });
+      const showing = [...document.querySelectorAll<HTMLMediaElement>("audio, video")].filter((element) => given.get(element) === remote);
+      // The <audio> and the picture both show the contact's stream; only one may sound, or the voice comes out twice.
+      expect(showing.map((element) => element.tagName)).toEqual(["AUDIO", "VIDEO"]);
+      expect(showing.filter((element) => !element.muted).map((element) => element.tagName)).toEqual(["AUDIO"]);
+      expect(sinks).toEqual(["AUDIO"]);
+    } finally {
+      srcObject.mockRestore();
+      delete (HTMLMediaElement.prototype as { setSinkId?: unknown }).setSinkId;
+      vi.unstubAllGlobals();
+    }
   });
 });

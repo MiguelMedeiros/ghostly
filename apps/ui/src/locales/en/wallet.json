@@ -101,7 +101,7 @@
     "lastBalance": "Last known balance: {{balance}} {{unit}}",
     "lastBalanceAt": "Last known balance: {{balance}} {{unit}} · {{date}}",
     "maxFee": "Most you accept in fees",
-    "maxFeeInput": "Maximum fee in sats",
+    "maxFeeInput": "Maximum fee in {{unit}}",
     "newAddress": "New address",
     "notConnected": "{{label}} is not connected",
     "notConnectedDefault": "The Bitcoin source is not connected",
@@ -173,7 +173,8 @@
     "createInvoice": "Create Lightning invoice",
     "fee": {
       "none": "No fee to spend",
-      "perProof": "{{fee}} sat per proof (about 1 sat a payment)"
+      "perProof": "{{fee}} sat per proof (about 1 sat a payment)",
+      "perProofTest": "{{fee}} test sat per proof (about 1 test sat a payment)"
     },
     "history": {
       "fee": "fee {{amount}}",
@@ -181,7 +182,12 @@
       "movements": "{{count}} movements",
       "movementsOne": "1 movement",
       "noFee": "no fee",
-      "none": "Nothing yet"
+      "none": "Nothing yet",
+      "note": {
+        "paymentFailed": "A Lightning payment failed",
+        "requestPaid": "Request paid over Lightning",
+        "testCoins": "Test coins from the test mint"
+      }
     },
     "intent": "{{amount}} {{unit}} · {{state}}",
     "invoiceFor": "Invoice for {{amount}}",
@@ -191,15 +197,20 @@
     "newAmount": "New amount",
     "paid": "Paid.",
     "pastePlaceholder": "Paste a Lightning invoice, a Lightning address or an ecash token",
-    "payAmount": "Pay {{amount}} sats",
+    "payAmount": "Pay {{amount}} {{unit}}",
     "payLine": "Pay {{amount}}{{fees}}",
     "pendingMint": "The payment is still pending at the mint.",
     "primary": "Primary",
-    "received": "⚡ {{amount}} sats received",
+    "received": "⚡ {{amount}} {{unit}} received",
     "redeem": "Redeem ecash token",
-    "redeemed": "Redeemed {{amount}} sats.",
+    "redeemed": "Redeemed {{amount}} {{unit}}.",
     "remove": "Remove",
+    "removeLastMint": "This is its last mint: removing it removes the {{label}} wallet and its Lightning card.",
     "removeMint": "Remove {{name}}",
+    "removeMintAwaiting": "It still waits for money:",
+    "removeMintConsent": "What is paid to it afterwards shows only once I add this mint again.",
+    "removeMintHint": "You can add it again later.",
+    "removeMintQuestion": "Remove {{name}}?",
     "settings": "Settings",
     "testBalance": "{{amount}} test sats (worthless)",
     "testMintInvoice": "Waiting for the payment… Test mints mark every invoice paid by themselves, so this one counts only once a contact pays it in a chat. For test sats now, use Get test coins above.",
@@ -331,7 +342,7 @@
     "asking": "Asking {{source}}…",
     "askingInvoice": "Asking for the invoice…",
     "askingSource": "Asking the source…",
-    "asksExactly": "It asks for exactly {{amount}} sats.",
+    "asksExactly": "It asks for exactly {{amount}} {{unit}}.",
     "balance": "Balance",
     "balanceHint": "Lightning uses your Cashu balance: invoices are paid into, and paid from, your Cashu mints.",
     "balanceSource": "{{unit}} · {{source}}",
@@ -361,17 +372,26 @@
     "lookupAsks": "Looking this up asks {{domain}} what it accepts: that server learns that you are about to pay it.",
     "mismatch": "The invoice does not match the amount you chose",
     "notInvoice": "That is not a Lightning invoice or a Lightning address.",
-    "paidTo": "Paid {{amount}} sats to {{to}} ✓",
+    "opState": {
+      "expired": "expired",
+      "failed": "failed",
+      "open": "waiting for payment",
+      "paid": "paid",
+      "pending": "pending",
+      "sending": "sending",
+      "unknown": "outcome unknown"
+    },
+    "paidTo": "Paid {{amount}} {{unit}} to {{to}} ✓",
     "pastePlaceholder": "Paste a Lightning invoice or a Lightning address",
     "pay": "Pay",
     "payTo": "Pay {{amount}} to {{to}}{{fees}}",
     "paying": "Paying…",
     "pending": "The payment is still pending. It is being checked; nothing is paid again.",
     "recent": "Recent",
-    "recentIn": "Invoice · {{amount}} sats",
-    "recentOut": "Payment · {{amount}} sats",
+    "recentIn": "Invoice · {{amount}} {{unit}}",
+    "recentOut": "Payment · {{amount}} {{unit}}",
     "says": "{{domain}} says: {{message}}",
-    "takesRange": "It takes {{min}} to {{max}} sats.",
+    "takesRange": "It takes {{min}} to {{max}} {{unit}}.",
     "theSource": "the source",
     "waiting": "Waiting for the payment… Any Lightning wallet can pay it; it is marked paid here once the source sees it."
   },
@@ -465,7 +485,6 @@
     "inUse": "In use",
     "instant": "{{wallet}} (instant)",
     "intent": "{{amount}} {{unit}} · {{state}}",
-    "intentSats": "{{amount}} sats · {{state}}",
     "network": "Network",
     "networkStuck": "This network is not answering. You can switch to another one.",
     "noBalance": "No balance to send yet",
@@ -494,6 +513,7 @@
       "reaches": "Anything paid to them afterwards still reaches {{source}}; Ghostly just no longer sees it.",
       "reachesWallet": "Anything paid to them afterwards still reaches the wallet; Ghostly just no longer sees it."
     },
+    "and": "{{first}} and {{second}}",
     "ask": "Remove {{label}}…",
     "awaiting": "Still waiting for money",
     "backupFirst": "Back up first",
@@ -512,6 +532,10 @@
       "waitsReal": "I understand: anything paid to its open requests and invoices after it is removed is lost, and it is real money."
     },
     "copyTokens": "Copy ecash backup",
+    "gas": {
+      "mainnet": "{{amount}} ETH",
+      "testnet": "{{amount}} test ETH"
+    },
     "held": {
       "elsewhere": "Your money stays where it is: Ghostly only forgets how to reach it. You can connect it again later.",
       "elsewhereIn": "Your money stays in {{source}}: Ghostly only forgets how to reach it. You can connect it again later.",
@@ -522,6 +546,13 @@
     },
     "hintDevice": "Its keys and settings leave this device. Other wallets stay as they are.",
     "hintElsewhere": "Ghostly forgets how to reach it; the money stays where it is.",
+    "item": {
+      "invoice": "An invoice for {{amount}}, not paid yet",
+      "paid": "{{amount}} paid to an invoice, not claimed from the mint yet",
+      "request": "A request for {{amount}} in a chat, still open",
+      "sent": "{{amount}} in ecash you sent, not taken yet",
+      "unclaimed": "{{amount}} the mint says it issued for an invoice, never received here"
+    },
     "label": "Remove this wallet",
     "noBackup": "Ghostly cannot show this wallet's recovery phrase again: only the phrase you wrote down when you made it brings this money back.",
     "noTokens": "There is no ecash to copy.",
@@ -693,11 +724,17 @@
   },
   "ui": {
     "amountIn": "Amount in {{unit}}",
+    "amountUnclear": "Unclear amount: write it like {{example}}",
+    "amountWhole": "Whole numbers only, like {{example}}",
     "gettingAddress": "Getting an address… It shows up here once the provider answers.",
     "history": "History",
     "receive": "Receive",
     "receivingAddress": "Receiving address",
     "send": "Send"
+  },
+  "unseen": {
+    "real": "{{place}}, {{amount}} new sats",
+    "test": "{{place}}, {{amount}} new test sats"
   },
   "usdt": {
     "approve": "Nothing is sent until you approve the review.",

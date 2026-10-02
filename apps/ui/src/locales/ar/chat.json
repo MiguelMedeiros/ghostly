@@ -1,4 +1,9 @@
 {
+  "announce": {
+    "message": "{{name}}: {{text}}",
+    "messages": "{{count}} رسائل جديدة",
+    "messagesFrom": "{{count}} رسائل جديدة من {{name}}"
+  },
   "audio": {
     "cantPlay": "لا يمكن لهذا الجهاز تشغيل هذا الصوت ({{format}}). نزّله للاستماع إليه.",
     "pause": "إيقاف الصوت مؤقتًا",
@@ -97,6 +102,7 @@
     "resolveNote": "الحلّ يُظهر ما هو، لا من يملكه.",
     "resolveNoteNone": "الحلّ يُظهر ما هو، لا من يملكه: تثبت جهة الاتصال ذلك بمشاركته كهوية.",
     "revokedBy": "ألغاه {{who}}",
+    "someContact": "جهة اتصال",
     "youSent": "أرسلته أنت",
     "yourDid": "معرّف DID الخاص بك في Ghostly",
     "yourIdentity": "هويتك",
@@ -159,6 +165,8 @@
     "contactOff": "جهة الاتصال: أوقفته، أو تحتاج إلى تحديث Ghostly",
     "contactOnConnect": "جهة الاتصال: تظهر عند الاتصال",
     "contactOnSession": "جهة الاتصال: تظهر بعد بدء الجلسة",
+    "heldMany": "{{count}} عناصر محفوظة لـ {{name}} · {{used}} ميغابايت من {{max}} ميغابايت",
+    "heldOne": "عنصر واحد محفوظ لـ {{name}} · {{used}} ميغابايت من {{max}} ميغابايت",
     "intro": "أثناء غياب {{name}}، ينتظر ما ترسله في مساحة التخزين الخاصة بك، مختومًا بحيث لا يفتحه غيره، لمدة تصل إلى {{days}} أيام. نصوص وصور وطلبات دفع، دون ecash أبدًا. يجب أن يسمح بذلك أيضًا.",
     "noStorage": "التخزين: غير مُعدّ. أعدّ مساحة S3 من الملف الشخصي ← النسخ الاحتياطية للاحتفاظ بالرسائل؛ استلام رسائله لا يحتاج إلى ذلك.",
     "nothing": "المحفوظ: لا شيء",
@@ -259,11 +267,14 @@
     "invoiceSats": "⚡ فاتورة Lightning · {{amount}} ساتس",
     "lightningAddress": "عنوان Lightning",
     "lightningOffer": "⚡ عرض Lightning",
+    "payment": "⚡ {{what}} {{amount}}",
     "realMoney": "أموال حقيقية",
     "sats": "{{amount}} ساتس",
     "testMoney": "أموال تجريبية",
     "testSats": "{{amount}} ساتس تجريبية",
-    "usdtAddress": "عنوان USDT"
+    "usdtAddress": "عنوان USDT",
+    "video": "🎬 فيديو ({{duration}})",
+    "voice": "🎤 رسالة صوتية ({{duration}})"
   },
   "reactions": {
     "chipLabel": "{{emoji}}: {{names}}",

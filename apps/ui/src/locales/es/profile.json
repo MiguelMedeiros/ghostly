@@ -9,6 +9,7 @@
     "connected": "Conectado · {{store}}",
     "download": "Descargar",
     "downloaded": "Descargado · {{size}}",
+    "emptyFile": "Este archivo está vacío. Elige un archivo de copia.",
     "fromFile": "Archivo",
     "keepOne": "¿Sigue aquí el original? Usa solo uno: comparten monederos.",
     "list": "Listar",
@@ -38,6 +39,14 @@
       "testing": "Probando…",
       "title": "Almacenamiento S3"
     },
+    "sameDevice": {
+      "copy": "Restaurar como copia de todos modos",
+      "firstProfile": "El primer perfil no se puede eliminar. Para reemplazarlo, borra sus datos en Ajustes.",
+      "hint": "Ambos actuarían como la misma persona para tus contactos. Reemplaza el original o no uses los dos.",
+      "info": "Una copia restaurada conserva las claves de chat del original. Con ambos en marcha, responden a los mismos contactos como una sola persona y compiten por las mismas conexiones, así que los mensajes pueden llegar a cualquiera. Reemplazar restaura la copia, cambia a ella y luego ofrece eliminar el original con las comprobaciones de siempre: lo que guarda, una copia de seguridad antes y su nombre para confirmar.",
+      "replace": "Reemplazar el original",
+      "title": "Esta copia es {{names}}, que está en este dispositivo"
+    },
     "saveToS3": "Guardar en S3",
     "savedToS3": "Guardado en S3 · {{size}}",
     "setUp": "Configurar",
@@ -53,8 +62,8 @@
   "color": "Color",
   "colorLabel": "Color del perfil",
   "create": "Crear",
+  "defaultName": "Personal",
   "delete": {
-    "arkWallet": "Monedero Ark",
     "backupFirst": "Descarga antes una copia",
     "backupPassphrase": "Frase de contraseña de la copia",
     "cashuSats": "{{amount}} sats en Cashu",
@@ -68,7 +77,7 @@
     "serviceCount": "{{count}} apps",
     "serviceOne": "1 app",
     "title": "¿Eliminar «{{name}}»?",
-    "usdtWallet": "Monedero USDT",
+    "wallet": "Monedero {{name}}",
     "warning": "No se puede deshacer. Sus monederos se van con él."
   },
   "deleteNamed": "Eliminar {{name}}",
@@ -83,6 +92,10 @@
   "oneOnly": "Por ahora, un solo perfil en esta app.",
   "profiles": "Perfiles",
   "removePicture": "Quitar la foto",
+  "restoredName": "{{name}} (restaurado)",
+  "restoredRemove": "Quitar la marca de restaurado",
+  "restoredTag": "Restaurado",
+  "restoredTagHint": "Recuperado de una copia de seguridad",
   "sats": "{{amount}} sats",
   "switch": "Cambiar"
 }

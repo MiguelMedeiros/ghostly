@@ -46,9 +46,10 @@ function describeFailure(what: string, error: unknown): string {
 export function VoiceBubble({ file, sender, peerName: named }: { file: ChatFile & { voice: VoiceMeta }; sender: "me" | "peer"; peerName?: string }) {
   const t = useT();
   const peerName = named ?? t("pairing.contact");
-  const { platform, transfer } = useTransfer(file.id);
+  const { platform, transfer, restoring } = useTransfer(file.id);
   const locale = languageTag(useOptionalI18n()?.language ?? "en");
-  const ready = transfer === null || transfer.state === "done";
+  // No transfer is "finished" only once the engine has put its kept transfers back after a start (as AudioBubble).
+  const ready = (transfer === null && !restoring) || transfer?.state === "done";
   const seconds = file.voice.duration / 1000;
 
   const [state, setState] = useState<PlayState>("idle");
@@ -82,6 +83,12 @@ export function VoiceBubble({ file, sender, peerName: named }: { file: ChatFile 
   const decodedRef = useRef(false);
   /** What the system's media controls call: set on every render, below, once every function it names exists. */
   const mediaRef = useRef<MediaSessionPlayer | null>(null);
+  /** Whether the bubble is still on screen: a load or a start that finishes later must not play for nobody. */
+  const mountedRef = useRef(true);
+  /** Each play() takes a turn; a pause, another play or leaving the screen ends it, and a late load then stays silent. */
+  const turnRef = useRef(0);
+  /** Whether the latest turn still wants to play (a pause or leaving the screen says no). */
+  const wantedRef = useRef(false);
 
   const objectUrl = (blob: Blob) => {
     const url = URL.createObjectURL(blob);
@@ -97,6 +104,7 @@ export function VoiceBubble({ file, sender, peerName: named }: { file: ChatFile 
 
   /** It will not play here: say so plainly, and offer the file to save. */
   const giveUp = useCallback((message: string) => {
+    if (!mountedRef.current) return;
     if (blobRef.current) setSaveUrl((url) => url ?? objectUrl(blobRef.current!));
     setProblem(message);
   }, []);
@@ -127,6 +135,7 @@ export function VoiceBubble({ file, sender, peerName: named }: { file: ChatFile 
     if (decodedRef.current || !blobRef.current) return false;
     decodedRef.current = true;
     const wav = await decodeToWav(blobRef.current);
+    if (!mountedRef.current) return false;
     if (!wav) { report("decode", new Error("Web Audio could not decode it either")); return false; }
     audio.src = objectUrl(wav);
     audio.load();
@@ -138,6 +147,7 @@ export function VoiceBubble({ file, sender, peerName: named }: { file: ChatFile 
     if (audioRef.current) return Promise.resolve(audioRef.current);
     loadingRef.current ??= (async () => {
       const blob = await platform?.getFile(file.id);
+      if (!mountedRef.current) return null;
       if (!blob) { setProblem(t("chat.file.gone")); return null; }
       blobRef.current = blob;
       const audio = new Audio();
@@ -177,6 +187,14 @@ export function VoiceBubble({ file, sender, peerName: named }: { file: ChatFile 
       const speaker = followSpeaker(audio);
       speakerRef.current = speaker.stop;
       await speaker.ready;
+      if (!mountedRef.current) {
+        // Gone while it loaded: its cleanup has already run, so let go of what was made since.
+        speaker.stop();
+        audio.removeAttribute("src");
+        for (const url of urlsRef.current) URL.revokeObjectURL(url);
+        urlsRef.current = [];
+        return null;
+      }
       audioRef.current = audio;
       return audio;
     })().finally(() => { loadingRef.current = null; });
@@ -184,8 +202,12 @@ export function VoiceBubble({ file, sender, peerName: named }: { file: ChatFile 
   }, [platform, file.id, file.mime, seconds, showProgress, report, giveUp, cannotPlayHere, switchToDecoded, t]);
 
   const pause = useCallback(() => {
+    turnRef.current += 1;
+    wantedRef.current = false;
     audioRef.current?.pause();
     releasePlayback(file.id);
+    // Stopped while still loading (another one was tapped): it will not start when its bytes arrive.
+    setState((s) => (s === "loading" ? "idle" : s));
   }, [file.id]);
 
   /** Starts `audio` where the waveform says; on a refusal, tries the decoded WAV once. Resolves whether it plays. */
@@ -221,13 +243,24 @@ export function VoiceBubble({ file, sender, peerName: named }: { file: ChatFile 
   const play = useCallback(async () => {
     if (!ready) return;
     claimPlayback(file.id);
+    const turn = ++turnRef.current;
+    wantedRef.current = true;
+    // Paused, played again or gone while it waited: whoever came since decides.
+    const stale = () => turn !== turnRef.current || !mountedRef.current;
     setProblem(null);
     setState("loading");
     const audio = await load();
+    if (stale()) return;
     if (!audio) { releasePlayback(file.id); setState("idle"); return; }
     // Played to the end last time, or scrubbed while stopped: start from where the waveform says.
     if (positionRef.current >= seconds - 0.05) showProgress(0);
-    if (!(await start(audio))) {
+    const started = await start(audio);
+    if (stale()) {
+      // It started after all, but nobody wants it now.
+      if (started && !wantedRef.current) audio.pause();
+      return;
+    }
+    if (!started) {
       releasePlayback(file.id);
       setState("idle");
       return;
@@ -252,7 +285,13 @@ export function VoiceBubble({ file, sender, peerName: named }: { file: ChatFile 
     setRate(next);
     if (audioRef.current) applyVoiceRate(audioRef.current, next);
   }), []);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
   useEffect(() => () => {
+    turnRef.current += 1;
+    wantedRef.current = false;
     stopFrames();
     releasePlayback(file.id);
     releaseMediaSession(file.id);

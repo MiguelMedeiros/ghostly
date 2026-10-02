@@ -220,6 +220,8 @@ export function transportEventText(event: TransportEvent, contact: string, tr: T
       return parts(event.from ? tr("connection.event.liveFrom", { transport, from: name(event.from) }) : tr("connection.event.live", { transport }), how, rtt);
     }
     case "down": {
+      // The live stretch this app quit in, not back by the time the contact's side would have let it go.
+      if (event.restart) return tr("connection.event.notBack", { from: name(event.from) });
       const meanwhile = event.text === "dht" ? tr("connection.event.textsDht") : event.text === "hold" ? tr("connection.event.messagesWait", { contact }) : undefined;
       // Off live to wait for a chosen transport (Fallback off), not a drop.
       if (event.target) return parts(tr("connection.waitingFor", { transport: name(event.target) }), !!event.from && tr("connection.event.offFrom", { from: name(event.from) }), meanwhile);

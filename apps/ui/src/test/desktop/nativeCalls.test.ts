@@ -106,9 +106,38 @@ describe("the RTCPeerConnection stand-in", () => {
     await pc.setRemoteDescription({ type: "answer", sdp: "their answer" });
     expect(tauri.invoke).toHaveBeenCalledWith("native_call_accept", { id: pc.id, answer: "their answer" });
     expect(pc.getTransceivers().map((t) => [t.mid, t.currentDirection])).toEqual([["0", "sendrecv"], ["1", "sendrecv"]]);
-    await Promise.resolve();
-    expect(ontrack).toHaveBeenCalledTimes(1);
+  });
+
+  it("hands the peer's picture over with its first frame, not before: no frame, no black screen in place of the name", async () => {
+    vi.stubGlobal("createImageBitmap", async () => ({ width: 640, height: 480, close() {} }));
+    const pc = new NativePeerConnection({});
+    const ontrack = vi.fn();
+    pc.ontrack = ontrack;
+    await pc.createOffer();
+    await pc.setRemoteDescription({ type: "answer", sdp: "their answer" });
+    tauri.channels[0].onmessage(json({ ice: "connected" }));
+    await new Promise((done) => setTimeout(done, 10));
+    // Connected, the peer's camera said on, but nothing drawn: the call window keeps the peer's name.
+    expect(ontrack).not.toHaveBeenCalled();
+
+    tauri.channels[0].onmessage(new Uint8Array([0xff, 0xd8, 0xff, 0xe0]).buffer);
+    await vi.waitFor(() => expect(ontrack).toHaveBeenCalledTimes(1));
     expect(ontrack.mock.calls[0][0].track.kind).toBe("video");
+    tauri.channels[0].onmessage(new Uint8Array([0xff, 0xd8, 0xff, 0xe0]).buffer);
+    await new Promise((done) => setTimeout(done, 10));
+    expect(ontrack).toHaveBeenCalledTimes(1);
+  });
+
+  it("hands the picture over at once when a frame was drawn before the answer was taken", async () => {
+    vi.stubGlobal("createImageBitmap", async () => ({ width: 640, height: 480, close() {} }));
+    const pc = new NativePeerConnection({});
+    const ontrack = vi.fn();
+    pc.ontrack = ontrack;
+    await pc.createOffer();
+    tauri.channels[0].onmessage(new Uint8Array([0xff, 0xd8, 0xff, 0xe0]).buffer);
+    await new Promise((done) => setTimeout(done, 10));
+    await pc.setRemoteDescription({ type: "answer", sdp: "their answer" });
+    await vi.waitFor(() => expect(ontrack).toHaveBeenCalledTimes(1));
   });
 
   it("answers an offer through Rust, the lanes known as soon as the offer is", async () => {

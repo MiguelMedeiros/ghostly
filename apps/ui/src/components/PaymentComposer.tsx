@@ -17,10 +17,13 @@ import { CardFlip, FlipTurnButton } from "./deck/Flip";
 import { useCardFlip } from "./deck/useCardFlip";
 import { ChatPaymentAccept } from "./ChatPaymentAccept";
 import { ConfirmRealMoney } from "./ConfirmRealMoney";
+import { deckArrows } from "./deck/arrows";
 import { NetworkTabs } from "./wallet/NetworkTabs";
 import { NETWORK_NAME } from "./wallet/names";
 import "./payment-composer.css";
 import { formatAmount } from "../lib/amount";
+import { useAmountText } from "../hooks/useAmountText";
+import { errorText } from "../lib/errorText";
 
 interface PaymentComposerProps {
   balance: number;
@@ -180,6 +183,8 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, onDone = 
   const usdt = here?.usdt;
   const unit = method === "usdt" ? (network === "testnet" || (usdt?.chainId && usdt.chainId !== 1) ? "TEST-USDT" : "USDT") : satsIn(t, network ?? "mainnet");
   const decimals = method === "usdt" ? usdt?.decimals ?? 6 : 0;
+  /** The amount typed the person's way ("1.000,5" in Portuguese); `amount` is what it means ("1000.5"), or "". */
+  const amountField = useAmountText(amount, setAmount, t.language ?? "en", decimals, t);
   const value = Number(amount);
   // What the second step names is what it sends: another amount or card asks again.
   useEffect(() => setConfirmSend(false), [amount, selected]);
@@ -248,7 +253,7 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, onDone = 
         const err = await onSend(value, memo, network, confirmedReal || undefined);
         if (err) setError(err); else onDone();
       }
-    } catch (e) { setError(e instanceof Error ? e.message : t("payments.composer.error.prepare")); }
+    } catch (e) { setError(e instanceof Error ? errorText(e, t) : t("payments.composer.error.prepare")); }
     finally { setBusy(null); }
   };
   // The contact's app answers an ask with a request: review it here, as Pay on that request would.
@@ -266,7 +271,7 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, onDone = 
         clearInterval(timer);
         const token = answer.target.method === "usdt";
         void bound.preparePayment({ target: answer.target, amount: answer.amount, feeCap: token ? parsePaymentAmount("0.001", 18) : answer.target.method === "bitcoin" ? ONCHAIN_FEE_CAP : CASHU_FEE_CAP, payee: context.peer, linkId: answer.linkId, requestId: answer.id })
-          .then(setReview, (e: unknown) => setError(e instanceof Error ? e.message : t("payments.composer.error.prepare")))
+          .then(setReview, (e: unknown) => setError(e instanceof Error ? errorText(e, t) : t("payments.composer.error.prepare")))
           .finally(() => setAsking(null));
       } else if (Date.now() - started > 45_000) {
         clearInterval(timer);
@@ -282,7 +287,7 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, onDone = 
     try {
       const err = await onRequest(method === "usdt" ? parsePaymentAmount(amount, decimals) : value, memo, method, rail, network, ...(card?.card ? [card.card] : []));
       if (err) setError(err); else onDone();
-    } catch (e) { setError(e instanceof Error ? e.message : t("payments.composer.error.request")); }
+    } catch (e) { setError(e instanceof Error ? errorText(e, t) : t("payments.composer.error.request")); }
     finally { setBusy(null); }
   };
 
@@ -313,11 +318,11 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, onDone = 
         {review && bound ? <PaymentReview key={review.id} review={review} wallet={bound} onClose={onClose} onSent={onDone} /> : <>
           <label className="payment-back-amount" data-over={tooMuch || undefined}>
             <input ref={amountRef} data-testid="payment-amount" inputMode={decimals ? "decimal" : "numeric"} placeholder="0" aria-label={t("payments.composer.amountIn", { unit })}
-              value={amount} onChange={(e) => setAmount(e.target.value.replace(decimals ? /[^0-9.]/g : /\D/g, ""))} />
+              aria-invalid={amountField.hint ? true : undefined} value={amountField.text} onChange={(e) => amountField.change(e.target.value)} />
             <span>{unit}</span>
           </label>
           <input className="payment-back-memo" placeholder={t("payments.composer.memo")} aria-label={t("payments.composer.memo")} maxLength={140} value={memo} onChange={(e) => setMemo(e.target.value)} />
-          <p className="payment-back-hint">{blocked ?? (tooMuch ? t("payments.composer.tooMuch", { amount: formatAmount(holds!, t.language), unit }) : how(rail))}</p>
+          <p className="payment-back-hint" data-testid={amountField.hint && !blocked ? "amount-unclear" : undefined}>{blocked ?? amountField.hint ?? (tooMuch ? t("payments.composer.tooMuch", { amount: formatAmount(holds!, t.language), unit }) : how(rail))}</p>
           {confirmSend ? <ConfirmRealMoney what={`${formatAmount(value, t.language)} ${unit}`} busy={busy !== null} onSend={() => void send(true)} onBack={() => setConfirmSend(false)} /> : <div className="payment-back-actions" data-turning={turning || undefined}>
             <button data-testid="payment-request" disabled={turning || !value || busy !== null || !!asking || !!blocked} onClick={() => void request()} className="payment-back-secondary">
               {busy === "request" ? t("payments.composer.requesting") : t("payments.composer.request")}
@@ -409,7 +414,7 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, onDone = 
             </button>
           </div>
           : <>
-            <CardDeck<string> key={net} compact tagAll kind="radios" label={t("payments.composer.payWith")} name="payment-deck" cards={shown} selected={selected} onSelect={(id) => { pick(id); setError(""); }} onChoose={use}
+            <CardDeck<string> key={net} compact tagAll kind="radios" label={t("payments.composer.payWith")} name="payment-deck" arrows={deckArrows(t)} cards={shown} selected={selected} onSelect={(id) => { pick(id); setError(""); }} onChoose={use}
               testId={paymentCardTestId} blocked={(c) => unavailable(c as InstanceCard)} size={{ max: 250, share: .62 }} />
             <p className="composer-sheet-hint" data-blocked={blocked ? true : undefined}>{blocked ?? how(rail)}</p>
             <button type="button" data-testid="payment-use" className="composer-sheet-action" disabled={!!blocked || !card} onClick={() => use(selected)}>

@@ -197,6 +197,8 @@ describe("where a notification goes, and what a click opens", () => {
       runtime: { id: "ext", getURL: (path: string) => `chrome-extension://ext/${path}` },
       permissions: { contains: vi.fn(async () => true), request: vi.fn(async () => true) },
       notifications: { create: vi.fn(async (id: string) => id), clear: vi.fn(async () => true), onClicked: { addListener: (listener: (id: string) => void) => { clicked = listener; } } },
+      tabs: { getCurrent: vi.fn(async () => ({ id: 7, windowId: 3 })), update: vi.fn(async () => ({})) },
+      windows: { update: vi.fn(async () => ({})) },
     };
     (globalThis as { chrome?: unknown }).chrome = chrome;
     const { showPrivateNotification, onNotificationOpen } = await lib();
@@ -205,13 +207,17 @@ describe("where a notification goes, and what a click opens", () => {
     vi.spyOn(window, "focus").mockImplementation(() => {});
     await showPrivateNotification("event-1", "New message", "chat-a");
     expect(chrome.notifications.create).toHaveBeenCalledWith("event-1", expect.objectContaining({ title: "Ghostly", message: "New message", silent: true }));
-    // Another page's notification: this page does nothing.
+    // Another page's notification: this page does nothing, and stays where it is.
     clicked!("event-other");
     expect(opened).not.toHaveBeenCalled();
     expect(chrome.notifications.clear).not.toHaveBeenCalled();
+    expect(chrome.tabs.update).not.toHaveBeenCalled();
     clicked!("event-1");
     expect(opened).toHaveBeenCalledWith("chat-a");
     expect(chrome.notifications.clear).toHaveBeenCalledWith("event-1");
+    // The app page is a tab: window.focus() cannot bring a background tab forward, so the tab and its window are.
+    await waitFor(() => expect(chrome.windows.update).toHaveBeenCalledWith(3, { focused: true }));
+    expect(chrome.tabs.update).toHaveBeenCalledWith(7, { active: true });
   });
   it("extension without the notifications permission: listening does not throw, and a grant later still opens chats", async () => {
     // "notifications" is an optional permission: until the user grants it, chrome.notifications is undefined.
@@ -275,7 +281,7 @@ describe("Settings → System notifications", () => {
     expect(commands()).toContainEqual(["open_notification_settings"]);
   });
 
-  it("Desktop on Windows, denied: its own settings; on Linux the general line and no button", async () => {
+  it("Desktop on Windows, denied: its own settings; on Linux the system's settings and no button", async () => {
     desktop("Win32", { native_notification_permission: "denied" });
     const { unmount } = renderSettings();
     await waitFor(() => expect(row()).toHaveTextContent("Allow them in Windows Settings → Notifications"));
@@ -283,7 +289,8 @@ describe("Settings → System notifications", () => {
     unmount();
     desktop("Linux x86_64", { native_notification_permission: "denied" });
     renderSettings();
-    await waitFor(() => expect(row()).toHaveTextContent("Blocked. Allow them in device or browser settings."));
+    // No browser here: the line said "device or browser settings".
+    await waitFor(() => expect(row()).toHaveTextContent("Blocked. Allow them in system settings."));
     expect(screen.queryByTestId("settings-notification-settings")).toBeNull();
   });
 
@@ -296,6 +303,27 @@ describe("Settings → System notifications", () => {
     expect(toggle()).toHaveAttribute("aria-checked", "false");
     expect(loadSettings().notifications.systemEnabled).toBe(false);
     expect(screen.queryByTestId("settings-notification-settings")).toBeNull();
+  });
+
+  it("extension, declined: turning the switch on asks again, and the line says so, not a browser setting", async () => {
+    // "notifications" is an optional permission: Chrome asks each time it is requested, so a refusal is undone here.
+    const chrome = {
+      runtime: { id: "ext", getURL: (path: string) => `chrome-extension://ext/${path}` },
+      permissions: { contains: vi.fn(async () => false), request: vi.fn(async () => false) },
+    };
+    (globalThis as { chrome?: unknown }).chrome = chrome;
+    const { user } = renderSettings();
+    await waitFor(() => expect(row()).toHaveTextContent("While Ghostly is open"));
+    await user.click(toggle());
+    await waitFor(() => expect(row()).toHaveTextContent("Not allowed. Turn the switch on to ask again."));
+    expect(row()).not.toHaveTextContent(/browser settings/);
+    expect(screen.queryByTestId("settings-notification-settings")).toBeNull();
+    expect(toggle()).toHaveAttribute("aria-checked", "false");
+    chrome.permissions.request.mockResolvedValue(true);
+    chrome.permissions.contains.mockResolvedValue(true);
+    await user.click(toggle());
+    await waitFor(() => expect(toggle()).toHaveAttribute("aria-checked", "true"));
+    expect(chrome.permissions.request).toHaveBeenCalledTimes(2);
   });
 
   it("web: blocked in the browser has no button; no Notification API says so", async () => {

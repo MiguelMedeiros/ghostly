@@ -1,0 +1,1 @@
+Registry: renaming a restored profile keeps `restored: true`; the user edits the name alone and takes the mark off on purpose. A name ending in the word for "restored" in parentheses in any language the client speaks, not only English, is read, renamed and restored as the name without it, marked.

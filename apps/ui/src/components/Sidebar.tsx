@@ -2,6 +2,7 @@ import { contactTag, publicKeyLabel } from "../lib/publicKeyLabel";
 import { DeleteChatDialog } from "./DeleteChatDialog";
 import { ChatRow, GroupRow } from "./ChatRow";
 import { formatListTime } from "../lib/chatList";
+import { foldText } from "../lib/chatSearch";
 import { useState, useEffect, useCallback, useRef, useSyncExternalStore } from "react";
 import { engine } from "@ghostly/browser/platform/engine";
 import { NewGroupDialog } from "./NewGroupDialog";
@@ -43,6 +44,15 @@ const MAX_WIDTH = 600;
 const DEFAULT_WIDTH = 420;
 /** What the page beside the list always keeps, however wide the list is dragged: a phone's width, about. */
 const MIN_PAGE_WIDTH = 320;
+
+/** Search folds case and accents, as the in-chat search does: "jose" finds "José". `q` is folded already. */
+const found = (text: string | undefined, q: string) => !!text && foldText(text).includes(q);
+
+/** The groups whose name has the search in it; all of them with no search. (Outside the component: the React Compiler keeps its memoization then.) */
+function groupsFound<G extends { name: string }>(groups: G[], search: string): G[] {
+  const q = foldText(search);
+  return search ? groups.filter(g => found(g.name, q)) : groups;
+}
 
 export function Sidebar() {
   const nav = useAppNavigation();
@@ -156,15 +166,16 @@ export function Sidebar() {
 
   // The identity a contact is shown as (identities/contactFace.ts): its name in the row, and found by search.
   const faceOf = useContactFaces();
+  const query = foldText(search);
   const filtered = sessions.filter((s) => {
     if (!search) return true;
-    const q = search.toLowerCase();
-    if (s.label?.toLowerCase().includes(q)) return true;
-    if (s.nick?.toLowerCase().includes(q)) return true;
-    if (faceOf(s.peerPubKeyB64)?.name?.toLowerCase().includes(q)) return true;
-    if (s.peerPubKeyB64.toLowerCase().includes(q)) return true;
-    return s.messages.some((m) => m.text.toLowerCase().includes(q));
+    if (found(s.label, query)) return true;
+    if (found(s.nick, query)) return true;
+    if (found(faceOf(s.peerPubKeyB64)?.name, query)) return true;
+    if (found(s.peerPubKeyB64, query)) return true;
+    return s.messages.some((m) => found(m.text, query));
   });
+  const shownGroups = groupsFound(groups, search);
 
   return (
     <div
@@ -232,7 +243,7 @@ export function Sidebar() {
 
       {/* Chat List */}
       <div className="flex-1 overflow-y-auto">
-        {groups.filter(g => !search || g.name.toLowerCase().includes(search.toLowerCase())).map(group => (
+        {shownGroups.map(group => (
           <GroupRow key={group.id} group={group} density={density} active={activeGroupId === group.id} onOpen={() => { nav.conversation(groupPath(group.id)); setConfirmDeleteId(null); }} />
         ))}
         {filtered.length === 0 && sessions.length === 0 && groups.length === 0 && (
@@ -249,7 +260,8 @@ export function Sidebar() {
           </div>
         )}
 
-        {filtered.length === 0 && sessions.length > 0 && (
+        {/* Nothing matches the search: neither a chat nor a group. */}
+        {filtered.length === 0 && shownGroups.length === 0 && (sessions.length > 0 || groups.length > 0) && (
           <div className="flex items-center justify-center py-10 px-8">
             <p className="text-text-muted text-sm">{t("sidebar.noResults")}</p>
           </div>

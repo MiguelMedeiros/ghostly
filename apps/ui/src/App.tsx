@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Outlet, useLocation } from "react-router-dom";
 import { Sidebar } from "./components/Sidebar";
 import { MobileTabBar } from "./components/MobileTabBar";
@@ -17,6 +17,7 @@ import { useEngineNick } from "./hooks/useAvatars";
 import { useProfilePeek } from "./hooks/useProfilePeek";
 import { guardFileDrops } from "./lib/pastedFiles";
 import { useWakeLock } from "./hooks/useWakeLock";
+import { useAppCommands } from "./hooks/useAppCommands";
 import { useAppBadge } from "./lib/appBadge";
 import { useWakeTableSync } from "./lib/wakePush";
 import { useI18n } from "./contexts/I18nContext";
@@ -97,34 +98,36 @@ function useProfileNameSync() {
 
 function useLoadedChats() {
   const routeSession = chatRouteSession(useLocation().pathname);
-  const [callSession, setCallSession] = useState<string | null>(null);
+  // Every chat on a call or ringing: a second call ringing (or declined) while one is on must not unload the first.
+  const [callSessions, setCallSessions] = useState<readonly string[]>([]);
   // A call keeps the screen on (Screen Wake Lock, where there is one).
-  useWakeLock(!!callSession);
+  useWakeLock(callSessions.length > 0);
   // The call window hangs here instead of inside its chat, which may be off
   // screen. Still within `LockGate`, so the lock reaches it like the rest.
   const [callLayer, setCallLayer] = useState<HTMLElement | null>(null);
 
   // A call can come in for a chat that is not open: that chat is loaded, off screen, so it rings.
-  const [ringSession, setRingSession] = useState<string | null>(null);
+  const [ringSessions, setRingSessions] = useState<readonly string[]>([]);
   useEffect(() => engine.onCallSignal((linkId, signal) => {
     if (parseCallSignal(signal)?.t !== "o") return;
     const peer = engine.state?.links.find((link) => link.id === linkId)?.peerPubKeyZ32;
     const session = peer ? listSessions().find((s) => s.peerPubKeyB64 === peer) : undefined;
     if (!session) return;
-    setRingSession(session.id);
+    setRingSessions((current) => (current.includes(session.id) ? current : [...current, session.id]));
     // It holds itself once it rings (a call keeps its chat loaded); one that never does is let go.
-    setTimeout(() => setRingSession((current) => (current === session.id ? null : current)), 15_000);
+    setTimeout(() => setRingSessions((current) => current.filter((id) => id !== session.id)), 15_000);
   }), []);
 
   const onCallChange = useCallback((sessionId: string, onCall: boolean) => {
-    setCallSession((current) => (onCall ? sessionId : current === sessionId ? null : current));
-    if (onCall) setRingSession((current) => (current === sessionId ? null : current));
+    setCallSessions((current) =>
+      onCall ? (current.includes(sessionId) ? current : [...current, sessionId]) : current.includes(sessionId) ? current.filter((id) => id !== sessionId) : current);
+    if (onCall) setRingSessions((current) => (current.includes(sessionId) ? current.filter((id) => id !== sessionId) : current));
   }, []);
 
   // Keyed by session id, so a chat that changes places here keeps its call.
   const loaded = useMemo(
-    () => [...new Set([routeSession, callSession, ringSession].filter((id): id is string => !!id))],
-    [routeSession, callSession, ringSession],
+    () => [...new Set([routeSession, ...callSessions, ...ringSessions].filter((id): id is string => !!id))],
+    [routeSession, callSessions, ringSessions],
   );
 
   const render = (visibleClassName: string) => (
@@ -158,10 +161,13 @@ export function App() {
   useWakeOnReturn();
   useAppBadge();
   useProfilePeek();
+  // Desktop's menu and shortcuts: New Chat, Settings.
+  useAppCommands();
   const { t } = useI18n();
   // What a wake-up shows, and which chats it may name (the installed web app; nothing elsewhere).
   useWakeTableSync({ title: "Ghostly", body: t("pwa.wakeNotice"), call: t("pwa.wakeCall") });
   const chats = useLoadedChats();
+  const mainRef = useRef<HTMLElement>(null);
 
   const inChat = pathname.startsWith("/chat");
   // A group is a conversation too: on a phone it takes the whole screen, without the tab bar.
@@ -170,13 +176,23 @@ export function App() {
   if (!isMobile) {
     return (
       <div className="two-pane w-full flex bg-app-bg">
+        {/* The first stop of the keys: past the chat list to the open page, however long the list is. A button, not
+            a #fragment link: the router lives in the hash. */}
+        <button type="button" data-testid="skip-to-content" onClick={() => mainRef.current?.focus()}
+          className="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:start-2 focus:z-[60] focus:rounded-lg focus:bg-accent focus:px-4 focus:py-2 focus:text-sm focus:font-semibold focus:text-on-accent focus:outline-2 focus:outline-offset-2 focus:outline-accent">
+          {t("sidebar.skipToContent")}
+        </button>
         <Sidebar />
-        {chats("flex-1 flex flex-col min-w-0")}
-        {!inChat && (
-          <div className="flex-1 flex flex-col min-w-0">
-            <Outlet />
-          </div>
-        )}
+        {/* Keyed as on a phone: a phone turned on its side (or back) keeps the open chat and page mounted, and the
+            message field its focus and its keyboard. */}
+        <main key="main" ref={mainRef} tabIndex={-1} className="flex-1 flex min-w-0 focus:outline-none">
+          <Fragment key="chats">{chats("flex-1 flex flex-col min-w-0")}</Fragment>
+          {!inChat && (
+            <div key="page" className="flex-1 flex flex-col min-w-0">
+              <Outlet />
+            </div>
+          )}
+        </main>
         <InstallSteps />
       </div>
     );
@@ -187,15 +203,17 @@ export function App() {
   const onChatList = pathname === "/";
   return (
     <div className="app-shell w-full flex flex-col bg-app-bg">
-      <div className={onChatList ? "flex-1 flex min-h-0" : "hidden"}>
-        <Sidebar />
-      </div>
-      {chats("flex-1 flex flex-col min-h-0 min-w-0")}
-      {!onChatList && !inChat && (
-        <div className="flex-1 flex flex-col min-h-0 min-w-0">
-          <Outlet />
+      <main key="main" className="flex-1 flex flex-col min-h-0 min-w-0">
+        <div className={onChatList ? "flex-1 flex min-h-0" : "hidden"}>
+          <Sidebar />
         </div>
-      )}
+        <Fragment key="chats">{chats("flex-1 flex flex-col min-h-0 min-w-0")}</Fragment>
+        {!onChatList && !inChat && (
+          <div key="page" className="flex-1 flex flex-col min-h-0 min-w-0">
+            <Outlet />
+          </div>
+        )}
+      </main>
       {!inChat && !inGroup && <MobileTabBar />}
       <InstallSteps />
     </div>

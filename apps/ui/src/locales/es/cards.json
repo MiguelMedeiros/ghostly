@@ -1,4 +1,12 @@
 {
+  "buttons": {
+    "answers": "Respuestas",
+    "chosen": "Elegida",
+    "closed": "Cerrada",
+    "failed": "No se pudo enviar",
+    "jump": "Ir a la pregunta",
+    "sending": "Enviando…"
+  },
   "panel": {
     "activeCount": "{{count}} activas",
     "allOk": "todo OK",
@@ -16,7 +24,7 @@
     "title": "Tareas"
   },
   "routine": {
-    "cron": "Cron:",
+    "cron": "Cron",
     "label": "Rutina: {{name}}, {{state}}",
     "lastRun": "Última ejecución: {{result}}",
     "next": "Próxima {{when}}",
@@ -27,6 +35,7 @@
       "skipped": "Omitida"
     },
     "runs": "Ejecuciones recientes",
+    "schedule": "Horario",
     "state": {
       "active": "Activa",
       "paused": "En pausa"

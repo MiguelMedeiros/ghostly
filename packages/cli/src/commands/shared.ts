@@ -59,6 +59,13 @@ export function pairs(values: unknown): Record<string, string> | undefined {
 export const rate: OptionSpec = { type: "number", description: "The audio's sample rate: 48000 (default), 24000, 16000, 12000 or 8000" };
 export const force: OptionSpec = { type: "boolean", description: "Send even if the text looks like a seed, a key or ecash" };
 export const reply: OptionSpec = { type: "string", description: "Reply to this message (its id, from history or an event)" };
+/** Buttons under a message (WISP 4xx · Message Buttons): the text is the question. */
+export const buttonOptions: Record<string, OptionSpec> = {
+  button: { type: "list", description: "A button under the message, id:Label (again for each, 1 to 6; the label may hold colons). A press comes back as button.pressed" },
+  style: { type: "list", description: "A button's look, id=primary, neutral or danger" },
+  once: { type: "boolean", description: "Each person answers once: after a press their app offers the buttons no more" },
+  id: { type: "string", description: "The question's id (default: made up, ask-…)" },
+};
 /** The group's entry link lets anyone join: printed only when asked for. */
 export const showSecret: Record<string, OptionSpec> = { "show-secret": { type: "boolean", description: "Print the group's entry link (anyone who has it can join)" } };
 export const secret = (options: Parsed["options"]) => (options["show-secret"] === true ? { showSecret: true } : {});
@@ -142,6 +149,17 @@ export function taskFields(options: Parsed["options"]): Record<string, unknown> 
   const links = cardLinks(options.link);
   if (links) fields.links = links;
   return fields;
+}
+
+/**
+ * The fields a new card cannot go without, given as a flag or in `--json`: a usage error (exit 2) that names the
+ * flags. Before, a missing `--title` reached the card's own check and failed as `bad_request` (exit 1) with
+ * "Status card: title is text".
+ */
+export function needs(card: Record<string, unknown>, fields: readonly (readonly [key: string, flag: string])[], usage: string): Record<string, unknown> {
+  const missing = fields.filter(([key]) => typeof card[key] !== "string" || !(card[key] as string).trim()).map(([, flag]) => `--${flag}`);
+  if (missing.length) throw new CliError("usage", `${missing.join(" and ")} ${missing.length > 1 ? "are" : "is"} needed: ghostly ${usage}`);
+  return card;
 }
 
 /** A time a command names: milliseconds, or a date the JavaScript Date reads (`2026-09-30T01:00:00Z`). */

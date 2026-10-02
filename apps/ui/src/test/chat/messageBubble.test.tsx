@@ -226,6 +226,8 @@ describe("MessageBubble: system lines", () => {
     ["call_missed", "Missed audio call", true],
     ["call_rejected", "Audio call declined", true],
     ["call_failed", "Audio call couldn't connect", true],
+    ["call_unanswered", "Audio call, no answer", true],
+    ["call_cancelled", "Audio call cancelled", false],
     ["call_ended", "Audio call ended", false],
     ["call_received", "Incoming audio call", false],
   ] as const)("marks a %s event as missed or not", (type, text, missed) => {
@@ -234,14 +236,24 @@ describe("MessageBubble: system lines", () => {
     expect(pill.classList.contains("bg-danger/10")).toBe(missed);
   });
 
-  it.each([[65_000, "(1m 5s)"], [42_900, "(42s)"], [600_000, "(10m 0s)"]])("shows a call that lasted %i ms as %s", (duration, shown) => {
+  it.each([[65_000, "(1 min 5 s)"], [42_900, "(42 s)"], [600_000, "(10 min 0 s)"], [3_780_000, "(1 h 3 min)"]])("shows a call that lasted %i ms as %s", (duration, shown) => {
     bubble({ sender: "system", text: "Call ended", callEvent: { type: "call_ended", duration } });
+    expect(screen.getByText(shown)).toBeInTheDocument();
+  });
+
+  it.each([["ja", "(1 分 5 秒)"], ["zh", "(1 分 5 秒)"], ["ar", "(1 دقيقة 5 ثانية)"], ["pt", "(1 min 5 s)"]] as const)("says a call's length in %s", (language, shown) => {
+    renderApp(<MessageBubble message={message({ sender: "system", text: "Audio call ended", callEvent: { type: "call_ended", duration: 65_000 } })} peerPubKey="peer" />, { language });
     expect(screen.getByText(shown)).toBeInTheDocument();
   });
 
   it("shows no length for a call that never started", () => {
     bubble({ sender: "system", text: "Missed audio call", callEvent: { type: "call_missed", duration: 0 } });
     expect(screen.getByText("Missed audio call").parentElement).not.toHaveTextContent("(");
+  });
+
+  it("shows no length for a call ended within its first second, rather than (0 s)", () => {
+    bubble({ sender: "system", text: "Audio call ended", callEvent: { type: "call_ended", duration: 400 } });
+    expect(screen.getByText("Audio call ended").parentElement).not.toHaveTextContent("(");
   });
 
   it("lets a system line be deleted too, from its menu", async () => {

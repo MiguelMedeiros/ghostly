@@ -9,6 +9,7 @@ import { externalLinkProps } from "../../lib/externalLink";
 import { useI18n, type Translate } from "../../contexts/I18nContext";
 import { fillNodes } from "../../lib/fillNodes";
 import { formatAmount } from "../../lib/amount";
+import { errorText } from "../../lib/errorText";
 
 /**
  * Where a Testnet wallet's test coins come from. `ask`: Ghostly asks the faucet itself, on one press (`coin`: what it
@@ -99,7 +100,7 @@ export function TestCoins({ rail, network, wallet, state }: { rail: WalletRail; 
       const words = { amount: formatAmount(result.amount, t.language), unit };
       setGot(result.pending ? t("wallet.testCoins.gotPending", words) : t("wallet.testCoins.got", words));
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorText(e, t));
     } finally { setAsking(false); }
   };
   const label = <span className="inline-flex flex-wrap items-center gap-2">{t("wallet.testCoins.title")} <NetworkTag network="testnet" testId="test-coins-network" /></span>;

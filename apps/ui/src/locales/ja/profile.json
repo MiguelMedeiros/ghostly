@@ -9,6 +9,7 @@
     "connected": "接続済み · {{store}}",
     "download": "ダウンロード",
     "downloaded": "ダウンロード済み · {{size}}",
+    "emptyFile": "このファイルは空です。バックアップファイルを選んでください。",
     "fromFile": "ファイル",
     "keepOne": "元のプロフィールも残っていますか？片方だけ使ってください。ウォレットを共有しています。",
     "list": "一覧",
@@ -38,6 +39,14 @@
       "testing": "テスト中…",
       "title": "S3 ストレージ"
     },
+    "sameDevice": {
+      "copy": "それでもコピーとして復元",
+      "firstProfile": "最初のプロフィールは削除できません。置き換えるには、設定でデータを消去してください。",
+      "hint": "連絡先から見ると両方が同じ人として動きます。元のプロフィールを置き換えるか、両方を使わないでください。",
+      "info": "復元したコピーは元のチャット鍵をそのまま持ちます。両方を動かすと、同じ連絡先に同じ人として応答し、同じ接続を取り合うため、メッセージがどちらに届くかわかりません。置き換えではコピーを復元して切り替え、そのあと元のプロフィールの削除をいつもの確認つきで提案します：中身の確認、先にバックアップ、名前の入力。",
+      "replace": "元のプロフィールを置き換える",
+      "title": "このバックアップは、この端末にある {{names}} です"
+    },
     "saveToS3": "S3 に保存",
     "savedToS3": "S3 に保存しました · {{size}}",
     "setUp": "設定",
@@ -53,8 +62,8 @@
   "color": "カラー",
   "colorLabel": "プロフィールの色",
   "create": "作成",
+  "defaultName": "個人",
   "delete": {
-    "arkWallet": "Ark ウォレット",
     "backupFirst": "先にバックアップをダウンロード",
     "backupPassphrase": "バックアップのパスフレーズ",
     "cashuSats": "Cashu に {{amount}} sats",
@@ -68,7 +77,7 @@
     "serviceCount": "{{count}} 個のアプリ",
     "serviceOne": "1 個のアプリ",
     "title": "「{{name}}」を削除しますか？",
-    "usdtWallet": "USDT ウォレット",
+    "wallet": "{{name}} ウォレット",
     "warning": "元に戻せません。ウォレットも一緒に削除されます。"
   },
   "deleteNamed": "{{name}} を削除",
@@ -83,6 +92,10 @@
   "oneOnly": "このアプリでは今のところプロフィールは 1 つだけです。",
   "profiles": "プロフィール",
   "removePicture": "写真を削除",
+  "restoredName": "{{name}}（復元）",
+  "restoredRemove": "復元の印を外す",
+  "restoredTag": "復元",
+  "restoredTagHint": "バックアップから復元しました",
   "sats": "{{amount}} sats",
   "switch": "切り替え"
 }

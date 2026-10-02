@@ -10,6 +10,7 @@ import { BackupRows } from "./BackupRows";
 import { exportBackup, reveal } from "./walletPhrase";
 import { NETWORK_NAME, WALLET_NAME, walletLabel } from "./names";
 import { useRun } from "./run";
+import { removalWords } from "./removalWords";
 import { Block, Button, Notice, Row, Section } from "./ui";
 
 /**
@@ -29,7 +30,7 @@ export function RemoveWalletSection({ type, network, card, wallet, state, onRemo
 }) {
   const { t } = useI18n();
   const [asking, setAsking] = useState(false);
-  const removal = walletRemoval(type, network, networkState(state, network), state.intents, card);
+  const removal = walletRemoval(type, network, networkState(state, network), state.intents, card, removalWords(t));
   const label = card ? networkState(state, network, card).lightning?.name || walletLabel(type, network) : walletLabel(type, network);
   return (
     <Section title={t("wallet.remove.title")} testId="wallet-remove-section">
@@ -58,8 +59,10 @@ function sourceName(type: WalletType, network: WalletNetwork, state: WalletState
  * confirmation in words when the money on this device goes with it. An empty test wallet is one plain confirm. The
  * engine checks the same again (walletRemove): nothing here is the only guard.
  */
-export function RemoveWalletDialog({ removal, wallet, source, onClose, onRemoved }: {
+export function RemoveWalletDialog({ removal, wallet, source, lead, onClose, onRemoved }: {
   removal: WalletRemoval;
+  /** Why this removal takes the whole wallet (its last mint was asked to go), said first. */
+  lead?: string;
   /** Bound to the wallet's network. */
   wallet: WalletPlatform;
   source?: string;
@@ -112,6 +115,7 @@ export function RemoveWalletDialog({ removal, wallet, source, onClose, onRemoved
       <div className="space-y-2">
         <NetworkTag network={network} testId="wallet-remove-network" />
         <h2 id={`${id}-title`} className="text-base font-semibold">{t("wallet.remove.question", { label })}</h2>
+        {lead && <p className="text-sm text-text-primary" data-testid="wallet-remove-lead">{lead}</p>}
         <p id={`${id}-body`} className="text-sm text-text-secondary" data-testid="wallet-remove-held">{what}</p>
       </div>
       {awaiting.length > 0 && (

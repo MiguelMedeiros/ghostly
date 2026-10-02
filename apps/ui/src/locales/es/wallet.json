@@ -101,7 +101,7 @@
     "lastBalance": "Último saldo conocido: {{balance}} {{unit}}",
     "lastBalanceAt": "Último saldo conocido: {{balance}} {{unit}} · {{date}}",
     "maxFee": "Lo máximo que aceptas en comisiones",
-    "maxFeeInput": "Comisión máxima en sats",
+    "maxFeeInput": "Comisión máxima en {{unit}}",
     "newAddress": "Nueva dirección",
     "notConnected": "{{label}} no está conectado",
     "notConnectedDefault": "La fuente Bitcoin no está conectada",
@@ -173,7 +173,8 @@
     "createInvoice": "Crear factura Lightning",
     "fee": {
       "none": "Sin comisión al gastar",
-      "perProof": "{{fee}} sat por prueba (cerca de 1 sat por pago)"
+      "perProof": "{{fee}} sat por prueba (cerca de 1 sat por pago)",
+      "perProofTest": "{{fee}} sat de prueba por prueba (cerca de 1 sat de prueba por pago)"
     },
     "history": {
       "fee": "comisión {{amount}}",
@@ -181,7 +182,12 @@
       "movements": "{{count}} movimientos",
       "movementsOne": "1 movimiento",
       "noFee": "sin comisión",
-      "none": "Nada todavía"
+      "none": "Nada todavía",
+      "note": {
+        "paymentFailed": "Un pago Lightning falló",
+        "requestPaid": "Solicitud pagada por Lightning",
+        "testCoins": "Monedas de prueba del mint de prueba"
+      }
     },
     "intent": "{{amount}} {{unit}} · {{state}}",
     "invoiceFor": "Factura de {{amount}}",
@@ -191,15 +197,20 @@
     "newAmount": "Otra cantidad",
     "paid": "Pagado.",
     "pastePlaceholder": "Pega una factura Lightning, una dirección Lightning o un token ecash",
-    "payAmount": "Pagar {{amount}} sats",
+    "payAmount": "Pagar {{amount}} {{unit}}",
     "payLine": "Pagar {{amount}}{{fees}}",
     "pendingMint": "El pago sigue pendiente en el mint.",
     "primary": "Principal",
-    "received": "⚡ {{amount}} sats recibidos",
+    "received": "⚡ {{amount}} {{unit}} recibidos",
     "redeem": "Canjear token ecash",
-    "redeemed": "{{amount}} sats canjeados.",
+    "redeemed": "{{amount}} {{unit}} canjeados.",
     "remove": "Quitar",
+    "removeLastMint": "Es el último mint de la billetera: quitarlo elimina la billetera {{label}} y su tarjeta Lightning.",
     "removeMint": "Quitar {{name}}",
+    "removeMintAwaiting": "Todavía espera dinero:",
+    "removeMintConsent": "Lo que se le pague después solo aparece cuando vuelva a añadir este mint.",
+    "removeMintHint": "Puedes volver a añadirlo más tarde.",
+    "removeMintQuestion": "¿Quitar {{name}}?",
     "settings": "Ajustes",
     "testBalance": "{{amount}} sats de prueba (sin valor)",
     "testMintInvoice": "Esperando el pago… Los mints de prueba marcan toda factura como pagada por sí solos, así que esta solo cuenta cuando un contacto la paga en un chat. Para tener sats de prueba ya, usa Obtener monedas de prueba arriba.",
@@ -331,7 +342,7 @@
     "asking": "Pidiendo a {{source}}…",
     "askingInvoice": "Pidiendo la factura…",
     "askingSource": "Pidiendo a la fuente…",
-    "asksExactly": "Pide exactamente {{amount}} sats.",
+    "asksExactly": "Pide exactamente {{amount}} {{unit}}.",
     "balance": "Saldo",
     "balanceHint": "Lightning usa tu saldo Cashu: las facturas se pagan a tus mints Cashu y desde ellos.",
     "balanceSource": "{{unit}} · {{source}}",
@@ -361,17 +372,26 @@
     "lookupAsks": "Consultar pregunta a {{domain}} qué acepta: ese servidor sabrá que vas a pagarle.",
     "mismatch": "La factura no coincide con la cantidad que elegiste",
     "notInvoice": "Eso no es una factura Lightning ni una dirección Lightning.",
-    "paidTo": "{{amount}} sats pagados a {{to}} ✓",
+    "opState": {
+      "expired": "caducado",
+      "failed": "fallido",
+      "open": "esperando el pago",
+      "paid": "pagado",
+      "pending": "pendiente",
+      "sending": "enviando",
+      "unknown": "resultado desconocido"
+    },
+    "paidTo": "{{amount}} {{unit}} pagados a {{to}} ✓",
     "pastePlaceholder": "Pega una factura Lightning o una dirección Lightning",
     "pay": "Pagar",
     "payTo": "Pagar {{amount}} a {{to}}{{fees}}",
     "paying": "Pagando…",
     "pending": "El pago sigue pendiente. Se está comprobando; no se paga nada otra vez.",
     "recent": "Recientes",
-    "recentIn": "Factura · {{amount}} sats",
-    "recentOut": "Pago · {{amount}} sats",
+    "recentIn": "Factura · {{amount}} {{unit}}",
+    "recentOut": "Pago · {{amount}} {{unit}}",
     "says": "{{domain}} dice: {{message}}",
-    "takesRange": "Acepta de {{min}} a {{max}} sats.",
+    "takesRange": "Acepta de {{min}} a {{max}} {{unit}}.",
     "theSource": "la fuente",
     "waiting": "Esperando el pago… Cualquier billetera Lightning puede pagarla; aquí se marca pagada en cuanto la fuente lo ve."
   },
@@ -465,7 +485,6 @@
     "inUse": "En uso",
     "instant": "{{wallet}} (instantáneo)",
     "intent": "{{amount}} {{unit}} · {{state}}",
-    "intentSats": "{{amount}} sats · {{state}}",
     "network": "Red",
     "networkStuck": "Esta red no responde. Puedes cambiar a otra.",
     "noBalance": "Aún no hay saldo para enviar",
@@ -494,6 +513,7 @@
       "reaches": "Lo que se les pague después sigue llegando a {{source}}; Ghostly simplemente deja de verlo.",
       "reachesWallet": "Lo que se les pague después sigue llegando a la billetera; Ghostly simplemente deja de verlo."
     },
+    "and": "{{first}} y {{second}}",
     "ask": "Eliminar {{label}}…",
     "awaiting": "Aún esperando dinero",
     "backupFirst": "Haz una copia primero",
@@ -512,6 +532,10 @@
       "waitsReal": "Entiendo: lo que se pague a sus solicitudes y facturas abiertas después de eliminarla se pierde, y es dinero real."
     },
     "copyTokens": "Copiar copia del ecash",
+    "gas": {
+      "mainnet": "{{amount}} ETH",
+      "testnet": "{{amount}} ETH de prueba"
+    },
     "held": {
       "elsewhere": "Tu dinero se queda donde está: Ghostly solo olvida cómo llegar a ella. Puedes volver a conectarla más tarde.",
       "elsewhereIn": "Tu dinero se queda en {{source}}: Ghostly solo olvida cómo llegar a ella. Puedes volver a conectarla más tarde.",
@@ -522,6 +546,13 @@
     },
     "hintDevice": "Sus claves y ajustes salen de este dispositivo. Las demás billeteras siguen como están.",
     "hintElsewhere": "Ghostly olvida cómo llegar a ella; el dinero se queda donde está.",
+    "item": {
+      "invoice": "Una factura de {{amount}}, aún sin pagar",
+      "paid": "{{amount}} pagados a una factura, aún sin reclamar al mint",
+      "request": "Una solicitud de {{amount}} en un chat, aún abierta",
+      "sent": "{{amount}} en ecash que enviaste, aún sin recoger",
+      "unclaimed": "{{amount}} que el mint dice haber emitido para una factura, nunca recibidos aquí"
+    },
     "label": "Eliminar esta billetera",
     "noBackup": "Ghostly no puede volver a mostrar la frase de recuperación de esta billetera: solo la frase que anotaste al crearla recupera este dinero.",
     "noTokens": "No hay ecash que copiar.",
@@ -693,11 +724,17 @@
   },
   "ui": {
     "amountIn": "Cantidad en {{unit}}",
+    "amountUnclear": "Importe ambiguo: escríbelo como {{example}}",
+    "amountWhole": "Solo números enteros, como {{example}}",
     "gettingAddress": "Obteniendo una dirección… Aparece aquí en cuanto responda el proveedor.",
     "history": "Historial",
     "receive": "Recibir",
     "receivingAddress": "Dirección de cobro",
     "send": "Enviar"
+  },
+  "unseen": {
+    "real": "{{place}}, {{amount}} sats nuevos",
+    "test": "{{place}}, {{amount}} sats de prueba nuevos"
   },
   "usdt": {
     "approve": "No se envía nada hasta que apruebes la revisión.",

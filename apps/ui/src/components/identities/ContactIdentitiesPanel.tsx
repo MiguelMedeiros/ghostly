@@ -23,8 +23,9 @@ import { contactGhostlyCard, GHOSTLY, idCardTone, machineLine, receivedIdCard, t
 import { ProviderMark } from "./ProviderMark";
 import { PublicProfileDetails } from "./PublicProfileDetails";
 import "./contact-panel.css";
+import { deckArrows } from "../deck/arrows";
+import { errorText } from "../../lib/errorText";
 
-const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 type Entry = { id: typeof GHOSTLY; ghostly: true; card: IdCardContent } | { id: string; ghostly?: false; r: ReceivedIdentityView; card: IdCardContent };
 type Received = Extract<Entry, { r: ReceivedIdentityView }>;
 
@@ -100,6 +101,10 @@ function TheirCards({ t, entries, link, links, name, nostr, initial }: { t: Tran
   // The card shown first: the one tapped in the timeline, else their first shared identity, else their Ghostly card.
   const [chosen, setChosen] = useState<string | undefined>(initial ?? entries.find(e => !e.ghostly)?.id);
   const { side, flipped, turn, turnBack } = useCardFlip();
+  // Until the turned card is still (deck/Flip.tsx), its back's buttons wait: a click on a card still swinging round
+  // reaches nothing (#762, the payment sheet's #776), and Check again seemed to do nothing.
+  const [atRest, setAtRest] = useState(false);
+  const turning = !atRest;
   const root = useRef<HTMLDivElement>(null);
   const entry = entries.find(e => e.id === chosen) ?? entries[0];
   const tone = (e: Entry) => idCardTone({ provider: e.card.provider, subject: e.card.bound, attested: e.card.attested });
@@ -111,14 +116,14 @@ function TheirCards({ t, entries, link, links, name, nostr, initial }: { t: Tran
   const showing = side === "back" ? entry : undefined;
   return (
     <div ref={root} className={`contact-cards ${tone(entry)}`} data-side={showing ? "back" : "cards"}>
-      {showing ? <CardFlip className="contact-identity" flipped={flipped} tone={tone(showing)}
+      {showing ? <CardFlip className="contact-identity" flipped={flipped} onSettle={setAtRest} tone={tone(showing)}
         front={<IdCardFace card={showing.card} />}
         back={showing.ghostly
-          ? <TheirGhostlyBack t={t} card={showing.card} link={link} name={name} onCards={cards} />
-          : <TheirCardBack t={t} entry={showing} linkId={link.id} name={name} nostr={nostr.find(v => v.subject === showing.r.subject)} onCards={cards} />} />
+          ? <TheirGhostlyBack t={t} card={showing.card} link={link} name={name} turning={turning} onCards={cards} />
+          : <TheirCardBack t={t} entry={showing} linkId={link.id} name={name} nostr={nostr.find(v => v.subject === showing.r.subject)} turning={turning} onCards={cards} />} />
       : <>
         <Deck<Entry> compact cards={entries} selected={entry.id} onSelect={setChosen} onChoose={id => { setChosen(id); turn(); }}
-          kind="radios" label={t("identities.contact.deckLabel", { name })} name="contact-identity-deck" className="id-deck" size={{ max: 300, share: .78 }}
+          kind="radios" label={t("identities.contact.deckLabel", { name })} name="contact-identity-deck" arrows={deckArrows(t)} className="id-deck" size={{ max: 300, share: .78 }}
           testId={e => (e.ghostly ? "chat-identity-ghostly" : "chat-identity-received")}
           face={(e, { after }) => <IdCardFace card={e.card} after={after} />}
           mark={e => <IdCardMark provider={e.card.provider} subject={e.card.bound} />}
@@ -137,7 +142,7 @@ function TheirCards({ t, entries, link, links, name, nostr, initial }: { t: Tran
  * The contact's Ghostly card turned over: the name and picture as they sent them (not a proof), their key in this
  * chat in full, to copy, whether it is verified (codes compared), and since when the chat exists.
  */
-function TheirGhostlyBack({ t, card, link, name, onCards }: { t: Translate; card: IdCardContent; link: LinkView; name: string; onCards: () => void }) {
+function TheirGhostlyBack({ t, card, link, name, turning, onCards }: { t: Translate; card: IdCardContent; link: LinkView; name: string; turning: boolean; onCards: () => void }) {
   const { copied, copy } = useCopyKey(card.subject);
   return (
     <div className="id-card-back contact-card-back" data-testid="chat-identity-back" data-provider={GHOSTLY} data-status={card.status}>
@@ -163,7 +168,7 @@ function TheirGhostlyBack({ t, card, link, name, onCards }: { t: Translate; card
           {card.issued && <><dt>{t("identities.contact.since")}</dt><dd>{card.validity}</dd></>}
         </dl>
         <div className="flex flex-wrap gap-2">
-          <button type="button" className="contact-card-action" data-testid="chat-identity-copy-key" onClick={copy}>{copied ? t("identities.ghostly.copied") : t("identities.ghostly.copyKey")}</button>
+          <button type="button" className="contact-card-action" data-testid="chat-identity-copy-key" disabled={turning} onClick={copy}>{copied ? t("identities.ghostly.copied") : t("identities.ghostly.copyKey")}</button>
         </div>
       </div>
       <span className="id-card-mrz id-card-back-mrz" aria-hidden="true">{card.mrz ?? machineLine(card.label, card.subject)}</span>
@@ -176,11 +181,11 @@ function TheirGhostlyBack({ t, card, link, name, onCards }: { t: Translate; card
  * checked it and until when it holds, Check again, and a public profile when the provider has one. A Nostr card's
  * back holds what the key published, loaded on request.
  */
-function TheirCardBack({ t, entry, linkId, name, nostr, onCards }: { t: Translate; entry: Received; linkId: string; name: string; nostr?: NostrContactView; onCards: () => void }) {
+function TheirCardBack({ t, entry, linkId, name, nostr, turning, onCards }: { t: Translate; entry: Received; linkId: string; name: string; nostr?: NostrContactView; turning: boolean; onCards: () => void }) {
   const { r, card } = entry;
   const provider = providerOf(r.provider);
   const [busy, setBusy] = useState(""), [error, setError] = useState("");
-  const act = (key: string, work: () => Promise<unknown>) => { setBusy(key); setError(""); void work().catch(e => setError(message(e))).finally(() => setBusy("")); };
+  const act = (key: string, work: () => Promise<unknown>) => { setBusy(key); setError(""); void work().catch(e => setError(errorText(e, t))).finally(() => setBusy("")); };
   const ok = card.status === "verified" || card.status === "expiring";
   const canCheck = r.status !== "withdrawn" && r.status !== "revoked" && r.status !== "previous-key";
   return (
@@ -215,9 +220,9 @@ function TheirCardBack({ t, entry, linkId, name, nostr, onCards }: { t: Translat
             : r.status === "revoked" ? t("identities.contact.revoked", { status: card.statusLabel }) : card.statusLabel}</dd>
         </dl>
         <div className="flex flex-wrap gap-2">
-          {canCheck && <button type="button" className="contact-card-action" data-testid="chat-identity-recheck" aria-disabled={!!busy || undefined}
+          {canCheck && <button type="button" className="contact-card-action" data-testid="chat-identity-recheck" disabled={turning} aria-disabled={!!busy || undefined}
             onClick={() => { if (!busy) act("recheck", () => engine.call("recheckIdentityProof", { linkId, id: r.id })); }}>{busy === "recheck" ? t("identities.contact.checking") : t("identities.contact.recheck")}</button>}
-          {provider?.lookupDisplay && ok && <button type="button" className="contact-card-action" data-testid="chat-identity-lookup" aria-disabled={!!busy || undefined}
+          {provider?.lookupDisplay && ok && <button type="button" className="contact-card-action" data-testid="chat-identity-lookup" disabled={turning} aria-disabled={!!busy || undefined}
             onClick={() => { if (!busy) act("lookup", () => engine.call("lookupIdentityDisplay", { linkId, id: r.id })); }}>{busy === "lookup" ? t("identities.contact.lookingUp") : provider.lookupLabel ?? t("identities.contact.showProfile")}</button>}
         </div>
         <p className="id-card-back-note">{provider?.recheck ? t("identities.contact.recheckNoteRepeat") : t("identities.contact.recheckNote")}{provider?.lookupDisplay && ok ? ` ${t("identities.contact.lookupNote")}` : ""}</p>

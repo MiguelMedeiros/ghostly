@@ -8,6 +8,8 @@
   "copied": "Copied!",
   "copy": "Copy",
   "deck": {
+    "next": "Next card",
+    "previous": "Previous card",
     "turnBack": "Cards"
   },
   "delete": "Delete",
@@ -20,5 +22,6 @@
   "save": "Save",
   "success": "Success",
   "unnamedContact": "Contact · {{key}}",
+  "unnamedContactShort": "Contact",
   "viewPhoto": "View photo of {{name}}"
 }

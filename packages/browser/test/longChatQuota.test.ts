@@ -146,6 +146,24 @@ describe("a long chat past the page's storage", () => {
     expect(space.writes).not.toContain(KEY);
   });
 
+  it("after a reload hours later, keeps its place and time in the list: its older messages coming back are not new", async () => {
+    await engineSpeaks();
+    const listed = storage.loadSession(SESSION)!.lastSyncAt;
+    await page();
+    vi.setSystemTime(at(COUNT + 10) + 3 * 3_600_000);
+    space.writes = [];
+    await engineSpeaks();
+    expect(storage.loadSession(SESSION)!.messages).toHaveLength(COUNT + 3);
+    expect(storage.loadSession(SESSION)!.lastSyncAt).toBe(listed);
+    expect(space.writes).not.toContain(KEY);
+
+    // A message that is new does move it.
+    const next = [...engine.messages.get(LINK)!, stored(COUNT + 200)];
+    engine.messages.set(LINK, next);
+    for (const listener of engine.messageListeners) listener(LINK, next);
+    expect(storage.loadSession(SESSION)!.lastSyncAt).toBe(Date.now());
+  });
+
   it("two pages over one storage (the extension's) settle: once both have mirrored, neither writes the chat again", async () => {
     await engineSpeaks();
     const first = { sync, storage };

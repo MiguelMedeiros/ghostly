@@ -116,11 +116,36 @@ export class MacDriver implements DesktopApp {
   }
 
   /**
+   * What the Ghostly window's close button (or Cmd+W), a click on the Dock icon and an app menu item do, through the
+   * app's own handlers (apps/desktop/src/app_window.rs): the app under test never takes the focus, so no real key
+   * press or click reaches it. `menu` answers whether the item was one of the page's commands.
+   */
+  async close(): Promise<void> {
+    await this.request("POST", "/close", {});
+  }
+
+  async reopen(): Promise<void> {
+    await this.request("POST", "/reopen", {});
+  }
+
+  async menu(id: string): Promise<boolean> {
+    return (await this.request("POST", "/menu", id)) as boolean;
+  }
+
+  /**
    * Every link the app handed to the system so far, in order, exactly as `open` would have received it. The app under
    * the driver writes them down instead of opening them (`launch` in apps/desktop/src/commands.rs), so no browser starts.
    */
   async opened(): Promise<string[]> {
     return (await this.request("GET", "/opened")) as string[];
+  }
+
+  /**
+   * What the system shows of the Ghostly window (`GET /window` in apps/desktop/src/e2e_driver.rs): whether it is on screen,
+   * its title bar's appearance, and the label on the app's Dock icon (null when there is none).
+   */
+  async windowState(): Promise<{ visible: boolean | null; theme: "light" | "dark" | null; badge: string | null }> {
+    return (await this.request("GET", "/window")) as { visible: boolean | null; theme: "light" | "dark" | null; badge: string | null };
   }
 
   private async request(method: string, path: string, body?: unknown): Promise<unknown> {

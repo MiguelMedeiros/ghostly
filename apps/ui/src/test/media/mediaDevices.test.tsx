@@ -496,6 +496,17 @@ describe("a headset plugged in and out during a call", () => {
     expect(hook.result.current.devices?.notice).toMatchObject({ kind: "audiooutput", type: "lost" });
   });
 
+  it("a chosen speaker the browser gave a new id is found by its name: the call plays there, with nothing to say", async () => {
+    speakerChoice();
+    // Chosen under an id the browser no longer uses (its ids were reset); the same speaker is there as "out-headset".
+    chooseDevice("audiooutput", { id: "out-old-id", label: "AirPods" });
+    const { hook } = await callWithDevices();
+    await waitFor(() => expect(hook.result.current.devices?.speaker).toBe("out-headset"));
+    await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
+    expect(hook.result.current.devices?.speaker).toBe("out-headset");
+    expect(hook.result.current.devices?.notice).toBeNull();
+  });
+
   it("choosing in the call switches live and becomes the profile's choice", async () => {
     const { hook, audio } = await callWithDevices();
     act(() => hook.result.current.devices!.choose("audioinput", "mic-builtin"));
@@ -650,10 +661,10 @@ describe("the call window's device menu", () => {
     expect(screen.getByTestId("call-status")).toHaveTextContent("Conectando...");
   });
 
-  it("sends the call's sound to the chosen speaker, on both elements that play it", () => {
+  it("sends the call's sound to the chosen speaker, on the element that plays it (the picture is muted)", () => {
     const sinks = speakerChoice();
     overlayWith(view({ speaker: "out-headset" }));
-    expect(sinks.map(([element, id]) => [element.tagName, id])).toEqual([["AUDIO", "out-headset"], ["VIDEO", "out-headset"]]);
+    expect(sinks.map(([element, id]) => [element.tagName, id])).toEqual([["AUDIO", "out-headset"]]);
   });
 });
 

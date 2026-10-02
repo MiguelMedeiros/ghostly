@@ -94,7 +94,8 @@ describe("group picture, group-mesh/1", () => {
     await alice.setPicture(null);
     await mesh.settle();
     expect([alice.picture, bob.picture, carol.picture]).toEqual([undefined, undefined, undefined]);
-    expect(mesh.pictures.filter(p => p.at === carol.myKey).map(p => p.picture)).toEqual([RED, BLUE, undefined]);
+    // The picture Carol got in with is no change she saw happen (no line in her history): only the two after it.
+    expect(mesh.pictures.filter(p => p.at === carol.myKey).map(p => p.picture)).toEqual([BLUE, undefined]);
     // Kept across a restart.
     await alice.setPicture(RED);
     await mesh.settle();
@@ -393,7 +394,8 @@ describe("group picture, group-community/1", () => {
     const carol = await net.admit(bob, "carol");
     await net.meet(bob, carol);
     expect(carol.session.picture).toBe(RED);
-    expect(net.pictures).toContainEqual({ at: "carol", picture: RED });
+    // Set before she got in: she has it, and hears of no change (no line in her history).
+    expect(net.pictures).not.toContainEqual({ at: "carol", picture: RED });
     // Alice is back, changes it, then removes it.
     net.members.set("alice", alice);
     await net.meet(alice, carol);

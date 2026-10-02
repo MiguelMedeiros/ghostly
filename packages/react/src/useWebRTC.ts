@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useCallback, useSyncExternalStore } from "react";
 import {
   callRtcConfig,
   extractParamsFromSdp,
@@ -6,6 +6,7 @@ import {
   parseCallSignal,
   sdpHasCandidates,
   signalHasVideo,
+  traceLink,
   waitForIceGathering,
   type CallState,
   type CallSignal,
@@ -13,6 +14,7 @@ import {
   type CallMedia,
   type CallIceServer,
 } from "@ghostly/core";
+import { endOtherCalls, otherCallOn as anotherCallOn, setCallOn, subscribeCalls } from "./callRegistry";
 
 /** What a peer can put on the video lane of a call. */
 export type Picture = "camera" | "screen";
@@ -21,7 +23,17 @@ interface UseWebRTCParams {
   incomingCallSignal: string | null;
   publishCallSignal: (signal: string | null) => void;
   setFastPoll: (fast: boolean) => void;
-  addCallEventMessage?: (type: CallEventType, hasVideo: boolean, duration?: number) => void;
+  /**
+   * A line for the chat. `call`, on the lines a call has one of on this side (its ring, its miss): the time of the offer
+   * it rang with, the same when that offer is heard again (the app reopened while it rang), so its line is not added twice.
+   * Returns the line's id, for `removeCallEventMessage`.
+   */
+  addCallEventMessage?: (type: CallEventType, hasVideo: boolean, duration?: number, call?: number) => string | void;
+  /**
+   * Takes a line back out of the chat, by the id `addCallEventMessage` gave: our call's "call started" when the
+   * contact's offer won a glare, so this chat keeps the winning call's lines only, as the contact's does.
+   */
+  removeCallEventMessage?: (id: string) => void;
   /** Called when a call could not be placed or answered, e.g. the microphone was denied. */
   onError?: (error: unknown) => void;
   /** Where the media comes from, when not the browser's own WebRTC (Ghostly Desktop on Linux). */
@@ -71,6 +83,31 @@ export const RING_MS = 60_000;
 
 /** How long "No answer" stays on the caller's screen. */
 export const NO_ANSWER_SHOWN_MS = 6000;
+
+/** How long the reason a microphone or camera could not be used stays on screen. */
+export const MEDIA_PROBLEM_SHOWN_MS = 8000;
+
+/** Why the microphone or camera could not be used: refused (by the person, the browser or the system), or none to use. */
+export type MediaProblem = "denied" | "unavailable";
+
+/** What a failed `getUserMedia` means for the person, or null when the failure was not the microphone's or camera's. */
+export function mediaProblem(error: unknown): MediaProblem | null {
+  const { name } = (error ?? {}) as { name?: unknown };
+  switch (name) {
+    case "NotAllowedError":
+    case "SecurityError":
+    case "PermissionDeniedError":
+      return "denied";
+    case "NotFoundError":
+    case "NotReadableError":
+    case "OverconstrainedError":
+    case "DevicesNotFoundError":
+    case "TrackStartError":
+      return "unavailable";
+    default:
+      return null;
+  }
+}
 
 /**
  * A new connection that has not found a single candidate by then has stalled: Chromium, rarely and under load, leaves
@@ -127,6 +164,26 @@ function audioTransceiver(pc: RTCPeerConnection): RTCRtpTransceiver | undefined 
   return pc.getTransceivers().find((t) => t.receiver.track.kind === "audio" && t.mid !== null);
 }
 
+/**
+ * A device request that got nothing (a picker closed, a device refused or gone) gives the turn back to the one asked
+ * before it, still opening: that one was what the person wanted, and a failed later one does not replace it.
+ */
+function yieldRequest(counter: { current: number }, request: number): void {
+  if (counter.current === request) counter.current = request - 1;
+}
+
+/**
+ * Why a call ended, in the diagnostic log (`link {"me":"call","step":"call-end",…}`, the Desktop's log file, or the
+ * console where link traces are on): a hang-up here or from the contact, a connection that failed (its ICE and
+ * connection states), or the chat unloaded mid-call. A call that ends by itself is otherwise silent.
+ */
+function traceCallEnd(why: string, detail: Record<string, unknown> = {}): void {
+  traceLink("call", "call-end", { why, ...detail });
+}
+
+/** The states in which this chat's call is on (placed or answered), for the app's one call at a time. */
+const ON_A_CALL: ReadonlySet<CallState> = new Set<CallState>(["offering", "answering", "connecting", "connected"]);
+
 /** Capture from exactly this device, or from the default (null). */
 const exactly = (deviceId: string | null): MediaTrackConstraints | true => (deviceId ? { deviceId: { exact: deviceId } } : true);
 
@@ -135,6 +192,7 @@ export function useWebRTC({
   publishCallSignal,
   setFastPoll,
   addCallEventMessage,
+  removeCallEventMessage,
   onError,
   media,
   iceServers,
@@ -159,6 +217,8 @@ export function useWebRTC({
   }, []);
 
   const [callState, setCallState] = useState<CallState>("idle");
+  /** This chat's key among the app's calls (`callRegistry`): a second call answered elsewhere ends this one. */
+  const [callKey] = useState(() => Symbol("call"));
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
   const [isMuted, setIsMuted] = useState(false);
@@ -175,6 +235,13 @@ export function useWebRTC({
   const [screenShareError, setScreenShareErrorState] = useState<string | null>(null);
   /** Our call rang out unanswered, for a few seconds (`NO_ANSWER_SHOWN_MS`). */
   const [noAnswer, setNoAnswer] = useState(false);
+  /** The microphone or camera a call asked for could not be used, and why, for a few seconds (`MEDIA_PROBLEM_SHOWN_MS`). */
+  const [mediaProblemShown, setMediaProblemShown] = useState<MediaProblem | null>(null);
+  /** Tells the person why a call could not use the microphone or camera, when that is what `error` was. */
+  const showMediaProblem = useCallback((error: unknown) => {
+    const problem = mediaProblem(error);
+    if (problem) setMediaProblemShown(problem);
+  }, []);
 
   const pcRef = useRef<RTCPeerConnection | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
@@ -193,6 +260,10 @@ export function useWebRTC({
   const pictureBeforeShareRef = useRef<Picture | null>(null);
   /** A share is being started or stopped: the picker may be open. */
   const shareBusyRef = useRef(false);
+  /** Counts the picture changes asked for: one whose camera or screen opens after a later one was asked is dropped. */
+  const pictureRequestRef = useRef(0);
+  /** The same for the microphone switches: one that opens after a later one was picked is dropped. */
+  const microphoneRequestRef = useRef(0);
   const screenShareErrorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** The offer we answered and whether we answered with the camera. */
   const answeredRef = useRef<{ offer: CallSignal; withVideo: boolean } | null>(null);
@@ -203,6 +274,8 @@ export function useWebRTC({
   const mediaUpRef = useRef(false);
   /** Whether this call already started over on a caller's second offer: a second failure is final. */
   const restartedRef = useRef(false);
+  /** The id of our call's "call started" line, while it rings: a glare it loses takes the line back out. */
+  const startedLineRef = useRef<string | null>(null);
   /** The wait for a second offer after the answered call's connection failed (`RESTART_GRACE_MS`). */
   const restartGraceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -217,10 +290,16 @@ export function useWebRTC({
     setPictureState(next);
   }, []);
 
+  /** The latest `hangUp`, for what runs before it is defined or outlives a render. */
+  const hangUpRef = useRef<(sendSignal?: boolean, addEndMessage?: boolean, unreachable?: boolean) => void>(() => {});
+
   const updateCallState = useCallback((state: CallState) => {
     callStateRef.current = state;
     setCallState(state);
-  }, []);
+    // One call at a time (WISP 601, "On a call already"): answering a call in another chat hangs this one up, as its
+    // person would, so the contact is told and both chats keep the end line.
+    setCallOn(callKey, ON_A_CALL.has(state) ? () => { traceCallEnd("answered-another", { state: callStateRef.current }); hangUpRef.current(true, true); } : null);
+  }, [callKey]);
 
   /**
    * Which call attempt is current. Hanging up (or any cleanup) moves it on, so a start or an answer
@@ -229,8 +308,6 @@ export function useWebRTC({
    */
   const attemptRef = useRef(0);
 
-  /** The latest `hangUp`, for what runs before it is defined or outlives a render. */
-  const hangUpRef = useRef<(sendSignal?: boolean, addEndMessage?: boolean, unreachable?: boolean) => void>(() => {});
   const addCallEventMessageRef = useRef(addCallEventMessage);
   addCallEventMessageRef.current = addCallEventMessage;
 
@@ -333,6 +410,7 @@ export function useWebRTC({
     };
 
     const giveUp = () => {
+      traceCallEnd("connection", { ice: pc.iceConnectionState, connection: pc.connectionState, connected: callConnectedEventFiredRef.current });
       // A connected call whose contact went away (a closed tab, a reload, a lost network) ends as a hang-up ends it:
       // with its line and its length in the chat. One that never connected could not: the chat says so.
       if (callConnectedEventFiredRef.current) {
@@ -421,17 +499,28 @@ export function useWebRTC({
       const sender = pc ? videoTransceiver(pc)?.sender : undefined;
       if (!pc || !localStreamRef.current || !sender) throw new Error("This call has no video to send on");
       const attempt = attemptRef.current;
+      const request = ++pictureRequestRef.current;
 
       let track: MediaStreamTrack | null = null;
-      if (next === "camera") {
-        track = (await mediaRef.current.getUserMedia({ video: camera === undefined ? captureFrom("video") : exactly(camera) })).getVideoTracks()[0];
-      } else if (next === "screen") {
-        const { getDisplayMedia } = mediaRef.current;
-        if (!getDisplayMedia) throw Object.assign(new Error("Screen sharing is not available here"), { name: "NotSupportedError" });
-        track = (await getDisplayMedia({ video: true, audio: false })).getVideoTracks()[0];
+      try {
+        if (next === "camera") {
+          track = (await mediaRef.current.getUserMedia({ video: camera === undefined ? captureFrom("video") : exactly(camera) })).getVideoTracks()[0];
+        } else if (next === "screen") {
+          const { getDisplayMedia } = mediaRef.current;
+          if (!getDisplayMedia) throw Object.assign(new Error("Screen sharing is not available here"), { name: "NotSupportedError" });
+          track = (await getDisplayMedia({ video: true, audio: false })).getVideoTracks()[0];
+        }
+      } catch (error) {
+        yieldRequest(pictureRequestRef, request);
+        throw error;
       }
       // The call ended while the prompt or the picker was open: what it gave is let go, and nobody is told.
       if (attemptRef.current !== attempt) {
+        track?.stop();
+        return;
+      }
+      // Something else was asked for while it opened (the camera turned off, another camera picked): that one wins.
+      if (pictureRequestRef.current !== request) {
         track?.stop();
         return;
       }
@@ -486,7 +575,8 @@ export function useWebRTC({
 
   const startCall = useCallback(
     async (withVideo: boolean) => {
-      if (callStateRef.current !== "idle") return;
+      // Never two calls at once: a call is placed once the one on in another chat has ended.
+      if (callStateRef.current !== "idle" || anotherCallOn(callKey)) return;
 
       // A hang-up schedules clearing `_call` a few seconds later; that must not
       // wipe the offer of a call placed in the meantime.
@@ -503,7 +593,7 @@ export function useWebRTC({
         callHadVideoRef.current = withVideo;
         callConnectedEventFiredRef.current = false;
         updateCallState("offering");
-        addCallEventMessage?.("call_started", withVideo);
+        startedLineRef.current = addCallEventMessage?.("call_started", withVideo) || null;
 
         // A screen is shared from inside a call (`toggleScreenShare`), never as the way one starts.
         const stream = await mediaRef.current.getUserMedia({ audio: captureFrom("audio"), video: withVideo && captureFrom("video") });
@@ -547,8 +637,10 @@ export function useWebRTC({
         // A newer attempt (or none) owns the call now: its state is not ours to reset.
         if (cancelled()) return;
         onErrorRef.current?.(error);
-        // No connection found a way out: the chat says so. No offer went out, so the contact has nothing to hear.
-        if (error instanceof CallUnreachableError) addCallEventMessage?.("call_failed", withVideo);
+        showMediaProblem(error);
+        // The call ended before it rang anyone (no microphone, or no connection found a way out): the chat says so,
+        // after its "call started" line. No offer went out, so the contact has nothing to hear.
+        addCallEventMessage?.("call_failed", withVideo);
         cleanupConnection();
         updateCallState("idle");
         setFastPoll(false);
@@ -564,6 +656,8 @@ export function useWebRTC({
       updateCallState,
       cleanupConnection,
       addCallEventMessage,
+      showMediaProblem,
+      callKey,
     ],
   );
 
@@ -637,6 +731,9 @@ export function useWebRTC({
     async (withVideo: boolean) => {
       const offer = pendingOfferRef.current;
       if (!offer || callStateRef.current !== "incoming") return;
+      // On a call in another chat: that call ends first ("End and answer"), with its hang-up and its end line, and its
+      // microphone and camera are let go before this call asks for its own. Never two calls at once.
+      endOtherCalls(callKey);
 
       if (hangupTimerRef.current) {
         clearTimeout(hangupTimerRef.current);
@@ -668,11 +765,10 @@ export function useWebRTC({
       } catch (error) {
         if (cancelled()) return;
         onErrorRef.current?.(error);
-        // The caller is told at once, instead of ringing on until its own ring runs out.
-        if (error instanceof CallUnreachableError) { couldNotConnect(true); return; }
-        cleanupConnection();
-        updateCallState("idle");
-        setFastPoll(false);
+        showMediaProblem(error);
+        // Whatever stopped the answer (a microphone refused, no connection found), the caller is told at once
+        // instead of ringing on until its own ring runs out, and both chats say the call couldn't connect.
+        couldNotConnect(true);
       }
     },
     [
@@ -681,9 +777,9 @@ export function useWebRTC({
       applyRemotePicture,
       setPicture,
       updateCallState,
-      cleanupConnection,
-      setFastPoll,
       couldNotConnect,
+      showMediaProblem,
+      callKey,
     ],
   );
 
@@ -725,6 +821,12 @@ export function useWebRTC({
       }
 
       const wasConnected = callConnectedEventFiredRef.current;
+      // A call of ours that never connected keeps a line too: cancelled while it rang, or ended while it connected.
+      const ringingOut = callStateRef.current === "offering";
+      const wasCalling = callStateRef.current !== "idle" && callStateRef.current !== "incoming";
+      if (callStateRef.current !== "idle") {
+        traceCallEnd(sendSignal ? (unreachable ? "unreachable" : "hang-up") : "ended", { state: callStateRef.current, connected: wasConnected });
+      }
       const duration = callStartedAt ? Date.now() - callStartedAt : undefined;
 
       if (sendSignal) {
@@ -740,6 +842,8 @@ export function useWebRTC({
 
       if (addEndMessage && wasConnected) {
         addCallEventMessage?.("call_ended", callHadVideoRef.current, duration);
+      } else if (addEndMessage && wasCalling) {
+        addCallEventMessage?.(ringingOut && sendSignal ? "call_cancelled" : "call_ended", callHadVideoRef.current);
       }
 
       cleanupConnection();
@@ -773,8 +877,9 @@ export function useWebRTC({
       await showPicture(pictureRef.current === "camera" ? null : "camera");
     } catch (error) {
       onErrorRef.current?.(error);
+      showMediaProblem(error);
     }
-  }, [showPicture]);
+  }, [showPicture, showMediaProblem]);
 
   /** Shares the screen in place of whatever picture is on, or stops and goes back to it. */
   const toggleScreenShare = useCallback(async () => {
@@ -807,9 +912,17 @@ export function useWebRTC({
     const sender = pc ? audioTransceiver(pc)?.sender : undefined;
     if (!pc || !localStreamRef.current || !sender) throw new Error("This call has no microphone to switch");
     const attempt = attemptRef.current;
-    const track = (await mediaRef.current.getUserMedia({ audio: exactly(deviceId) })).getAudioTracks()[0];
-    if (!track) throw Object.assign(new Error("No microphone"), { name: "NotFoundError" });
-    if (attemptRef.current !== attempt) { track.stop(); return; }
+    const request = ++microphoneRequestRef.current;
+    let track: MediaStreamTrack | undefined;
+    try {
+      track = (await mediaRef.current.getUserMedia({ audio: exactly(deviceId) })).getAudioTracks()[0];
+      if (!track) throw Object.assign(new Error("No microphone"), { name: "NotFoundError" });
+    } catch (error) {
+      yieldRequest(microphoneRequestRef, request);
+      throw error;
+    }
+    // Hung up meanwhile, or another microphone picked since (whichever opens first): the last one picked wins.
+    if (attemptRef.current !== attempt || microphoneRequestRef.current !== request) { track.stop(); return; }
     track.enabled = localStreamRef.current?.getAudioTracks()[0]?.enabled ?? true;
     try {
       await sender.replaceTrack(track);
@@ -872,6 +985,9 @@ export function useWebRTC({
       cleanupConnection();
       myOfferTimestampRef.current = 0;
       myOfferFingerprintRef.current = "";
+      // Our attempt is not a call of its own: the chat keeps the winner's lines only, as the contact's chat does.
+      if (startedLineRef.current) removeCallEventMessage?.(startedLineRef.current);
+      startedLineRef.current = null;
       yielded = true;
     }
 
@@ -881,7 +997,7 @@ export function useWebRTC({
       const offerHasVideo = signalHasVideo(signal);
       callHadVideoRef.current = offerHasVideo;
       callConnectedEventFiredRef.current = false;
-      addCallEventMessage?.("call_received", offerHasVideo);
+      addCallEventMessage?.("call_received", offerHasVideo, undefined, signal.ts);
       updateCallState("incoming");
       setFastPoll(true);
     } else if (signal.t === "a" && (callStateRef.current === "offering" || callStateRef.current === "connecting")) {
@@ -896,9 +1012,15 @@ export function useWebRTC({
       if (callStateRef.current !== "idle") applyRemotePicture(signal);
     } else if (signal.t === "h") {
       lastProcessedSignalRef.current = signal.ts;
+      if (callStateRef.current !== "idle") traceCallEnd("contact-hang-up", { state: callStateRef.current, ...(signal.r && { r: signal.r }) });
       // The caller gave up (or its ring ran out) before we answered: a missed call, as when our own ring runs out.
-      if (callStateRef.current === "incoming") addCallEventMessage?.("call_missed", callHadVideoRef.current);
-      else if (signal.r === "u" && callStateRef.current !== "idle" && !callConnectedEventFiredRef.current) {
+      if (callStateRef.current === "incoming") addCallEventMessage?.("call_missed", callHadVideoRef.current, undefined, pendingOfferRef.current?.ts);
+      else if (callStateRef.current === "offering" && signal.r !== "u" && myOfferTimestampRef.current && signal.ts > myOfferTimestampRef.current) {
+        // Our call still rang there: the contact declined it (a side that rings sends nothing else).
+        addCallEventMessage?.("call_rejected", callHadVideoRef.current);
+        hangUp(false, false);
+        return;
+      } else if (signal.r === "u" && callStateRef.current !== "idle" && !callConnectedEventFiredRef.current) {
         // The contact's side could not connect (it found no candidate, or the call did not connect in time): this
         // side's call could not either, and says so the same way.
         addCallEventMessage?.("call_failed", callHadVideoRef.current);
@@ -909,7 +1031,7 @@ export function useWebRTC({
         hangUp(false);
       }
     }
-  }, [incomingCallSignal, handleAnswer, hangUp, updateCallState, setFastPoll, addCallEventMessage, applyRemotePicture, restartAnswer, restartable, cleanupConnection]);
+  }, [incomingCallSignal, handleAnswer, hangUp, updateCallState, setFastPoll, addCallEventMessage, applyRemotePicture, restartAnswer, restartable, cleanupConnection, removeCallEventMessage]);
 
   // An unanswered call does not ring forever (RING_MS). Ours hangs up and says "No answer". Theirs stops ringing here
   // with a missed call and sends nothing: the caller's own ring runs out too, and a hang-up would read as declined.
@@ -920,10 +1042,11 @@ export function useWebRTC({
     const timer = setTimeout(() => {
       if (callStateRef.current !== ringing) return;
       if (ringing === "offering") {
+        addCallEventMessageRef.current?.("call_unanswered", callHadVideoRef.current);
         hangUpRef.current(true, false);
         setNoAnswer(true);
       } else {
-        addCallEventMessageRef.current?.("call_missed", callHadVideoRef.current);
+        addCallEventMessageRef.current?.("call_missed", callHadVideoRef.current, undefined, pendingOfferRef.current?.ts);
         hangUpRef.current(false, false);
       }
     }, RING_MS);
@@ -935,8 +1058,10 @@ export function useWebRTC({
   // call's end line. A call still ringing here is left to ring out on the caller's side: a hang-up would read as declined.
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const leaving = () => {
-      if (callStateRef.current !== "idle" && callStateRef.current !== "incoming") hangUpRef.current(true, true);
+    const leaving = (event: Event) => {
+      if (callStateRef.current === "idle" || callStateRef.current === "incoming") return;
+      traceCallEnd("app-leaving", { event: event.type });
+      hangUpRef.current(true, true);
     };
     window.addEventListener("pagehide", leaving);
     window.addEventListener("ghostly-departing", leaving);
@@ -965,10 +1090,20 @@ export function useWebRTC({
   }, [noAnswer]);
 
   useEffect(() => {
+    if (!mediaProblemShown) return;
+    const timer = setTimeout(() => setMediaProblemShown(null), MEDIA_PROBLEM_SHOWN_MS);
+    return () => clearTimeout(timer);
+  }, [mediaProblemShown]);
+
+  useEffect(() => {
     const attempts = attemptRef;
     return () => {
+      // Not on a call any more as far as the other chats can tell.
+      setCallOn(callKey, null);
       // A start or an answer still waiting for the microphone or for ICE is cancelled, as a hang-up cancels it.
       attempts.current++;
+      // The chat holding the call went away with it on: nothing is sent, and the contact's call ends when its media does.
+      if (callStateRef.current !== "idle") traceCallEnd("unloaded", { state: callStateRef.current });
       if (hangupTimerRef.current) clearTimeout(hangupTimerRef.current);
       if (screenShareErrorTimerRef.current) clearTimeout(screenShareErrorTimerRef.current);
       if (restartGraceRef.current) clearTimeout(restartGraceRef.current);
@@ -986,7 +1121,10 @@ export function useWebRTC({
         pcRef.current = null;
       }
     };
-  }, []);
+  }, [callKey]);
+
+  /** A call is on in another chat: answering the one that rings here ends it first ("End and answer"). */
+  const otherCallOn = useSyncExternalStore(subscribeCalls, () => anotherCallOn(callKey), () => false);
 
   const connected = callState === "connected";
   // Phones have no screen to capture (no getDisplayMedia): there the share button does not show at all.
@@ -1020,7 +1158,13 @@ export function useWebRTC({
     screenShareError,
     /** Our last call rang out with no answer, for a few seconds. */
     noAnswer,
+    mediaProblem: mediaProblemShown,
     callStartedAt,
+    /**
+     * A call is on in another chat of this app. A call that rings here then offers "End and answer": `acceptCall` ends
+     * that call first, and `startCall` places nothing until it has ended.
+     */
+    otherCallOn,
     startCall,
     acceptCall,
     hangUp,

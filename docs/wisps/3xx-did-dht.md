@@ -26,7 +26,7 @@ Ghostly has no profile-wide key pair: every chat has its own participation key (
 - an Ed25519 key made the first time the profile's peer starts, and never changed (did:dht identity keys cannot rotate);
 - kept in the profile's peer database (the settings record `profileDid`), its seed sealed with a device key the way proof-key seeds are ([300](300-peer-proofs.md));
 - used for nothing but this DID: never for a chat, a signal, a proof or a group;
-- carried by a profile backup ([05](05-backups.md)), so a restored profile keeps its DID; clearing the profile's data or removing the profile ends it (the next start makes a new DID, and the old document leaves the DHT within hours).
+- carried by a profile backup ([05](05-backups.md)), so a restored profile keeps its DID; clearing the profile's data or removing the profile ends it (the next start makes a new DID, and the old document leaves the DHT within hours). Clearing first publishes, when the DID was ever published, a newer packet whose root record reads `deactivated`, so resolvers report the DID as deactivated until that record expires too; best effort, and never in the way of the clear.
 
 A key has exactly one Pkarr packet: a second packet under the same key replaces the first. Nothing else publishes under the DID key today, so its packet holds the DID document alone. Records added under this key in the future MUST go into the same signed packet as the document, and the whole packet MUST fit 1000 bytes; the encoder takes such records and checks the combined size.
 

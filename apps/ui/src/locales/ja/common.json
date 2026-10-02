@@ -8,6 +8,8 @@
   "copied": "コピーしました！",
   "copy": "コピー",
   "deck": {
+    "next": "次のカード",
+    "previous": "前のカード",
     "turnBack": "カード"
   },
   "delete": "削除",
@@ -20,5 +22,6 @@
   "save": "保存",
   "success": "成功",
   "unnamedContact": "連絡先 · {{key}}",
+  "unnamedContactShort": "連絡先",
   "viewPhoto": "{{name}}の写真を見る"
 }

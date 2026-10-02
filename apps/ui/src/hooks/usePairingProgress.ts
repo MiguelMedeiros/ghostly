@@ -3,6 +3,8 @@ import { engine } from "@ghostly/browser/platform/engine";
 import { deriveStage, reportedProgress, type PairingProgress, type PairingRole, type PairingStage } from "../lib/pairingProgress";
 import { loadSettings } from "../lib/settings";
 import { playSound } from "../lib/sounds";
+import { errorText } from "../lib/errorText";
+import { useT } from "../contexts/I18nContext";
 
 const subscribe = (listener: () => void) => engine.subscribe(listener);
 const snapshot = () => engine.state;
@@ -36,6 +38,7 @@ export interface PairingPresence {
  * scene's "connected" moment comes with one short sound, unless sounds are off, or `muted` for this chat.
  */
 export function usePairingProgress(peerKey: string | undefined, { inviter, enabled, createdAt, muted = false }: { inviter: boolean; enabled: boolean; createdAt?: number; muted?: boolean }): PairingPresence {
+  const t = useT();
   const state = useSyncExternalStore(subscribe, snapshot);
   const link = peerKey ? state?.links.find(l => l.peerPubKeyZ32 === peerKey) : undefined;
   const reported = reportedProgress(link);
@@ -100,9 +103,9 @@ export function usePairingProgress(peerKey: string | undefined, { inviter, enabl
     if (!linkId) return;
     setRetrying(true); setRetryError(""); setAttempt(n => n + 1);
     try { await engine.call("connect", { linkId }); }
-    catch (cause) { setRetryError(cause instanceof Error ? cause.message : String(cause)); }
+    catch (cause) { setRetryError(errorText(cause, t)); }
     finally { setRetrying(false); }
-  }, [linkId]);
+  }, [linkId, t]);
 
   if (!enabled) return { progress: null, show: false, scene: false, celebrating: false, retry, retrying, retryError };
   const progress: PairingProgressState = reported

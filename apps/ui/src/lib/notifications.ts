@@ -10,6 +10,9 @@ interface ExtensionNotifications {
     clear?(id:string):Promise<boolean>;
     onClicked?:{addListener(listener:(id:string)=>void):void};
   };
+  /** Present in extension pages (no permission needed for the page's own tab). */
+  tabs?: {getCurrent():Promise<{id?:number;windowId?:number}|undefined>;update(id:number,props:{active:boolean}):Promise<unknown>};
+  windows?: {update(id:number,props:{focused:boolean}):Promise<unknown>};
 }
 const extension=()=> {
   const value=(globalThis as unknown as {chrome?:ExtensionNotifications}).chrome;
@@ -21,6 +24,15 @@ const platform=()=>(navigator as Navigator&{userAgentData?:{platform?:string}}).
 export function noticeSettings():"macos"|"windows"|undefined{
   if(!native()) return undefined;
   return /Mac/i.test(platform())?"macos":/Win/i.test(platform())?"windows":undefined;
+}
+/**
+ * Where notifications that were refused are allowed again, which the Settings hint names: the Desktop app's system
+ * settings (a pane of their own on macOS and Windows), the extension's own switch (Chrome asks again for an optional
+ * permission it was refused), or the browser's or device's settings for a web page.
+ */
+export function noticePlace():"macos"|"windows"|"system"|"extension"|"web"{
+  if(native()) return noticeSettings()??"system";
+  return extension()?"extension":"web";
 }
 export async function openNoticeSettings():Promise<void>{
   try{await invoke("open_notification_settings");}catch{/* nothing to open here */}
@@ -53,7 +65,24 @@ function listen(){
   const clicks=extension()?.notifications?.onClicked;
   if(!clicks) return;
   listening=true;
-  clicks.addListener(id=>{if(opened(id)) void extension()?.notifications?.clear?.(id);});
+  clicks.addListener(id=>{
+    if(!opened(id)) return;
+    void extension()?.notifications?.clear?.(id);
+    void showExtensionTab();
+  });
+}
+/**
+ * The extension's app page is a tab, and `window.focus()` does not bring a background tab forward: without this, a
+ * click on a notification opened its chat in a tab the person could not see.
+ */
+async function showExtensionTab(){
+  const chrome=extension();
+  try{
+    const tab=await chrome?.tabs?.getCurrent();
+    if(tab?.id===undefined) return;
+    await chrome?.tabs?.update(tab.id,{active:true});
+    if(tab.windowId!==undefined) await chrome?.windows?.update(tab.windowId,{focused:true});
+  }catch{/* the tab or its window went away */}
 }
 /** Called with the chat whose notification was clicked. */
 export function onNotificationOpen(open:(chat:string)=>void):()=>void{

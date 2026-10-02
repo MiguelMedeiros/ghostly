@@ -1,12 +1,15 @@
 #!/usr/bin/env node
 // A voice bot on the daemon's socket, no dependencies: it answers every call, plays a WAV greeting, and then
 // echoes what the caller says one second later. Speaking over the greeting stops it at once (barge-in: call.flush).
+// With `ghostly call auto on`, the daemon answers and the bot takes the call once it connects.
 //
 //   ghostly daemon --detach
 //   node call-echo.mjs [greeting.wav]
 //
-// GHOSTLY_SOCKET is the daemon's socket (`ghostly daemon status` prints it). The call's audio is raw PCM on a
-// socket of its own: s16le, mono, at the call's rate, 20 ms frames from the call, any amount to it (WISP 11xx § Calls).
+// GHOSTLY_SOCKET names the daemon's socket (`ghostly daemon status` prints it; left out, the bot asks). The call's
+// audio is raw PCM on a socket of its own: s16le, mono, at the call's rate, 20 ms frames from the call, any amount to
+// it (WISP 11xx § Calls).
+import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { connect } from "node:net";
 import { createInterface } from "node:readline";
@@ -15,7 +18,9 @@ const RATE = 48000;
 const ECHO_MS = 1000;
 const greeting = process.argv[2] ? wavToPcm(readFileSync(process.argv[2]), RATE) : null;
 
-const socket = connect(process.env.GHOSTLY_SOCKET ?? `${process.env.HOME}/.ghostly/profiles/default/daemon.sock`);
+// GHOSTLY_SOCKET, else the socket `ghostly daemon status` names: where it is depends on GHOSTLY_HOME, the profile
+// (--profile or GHOSTLY_PROFILE) and the path's length, so it is asked, never guessed.
+const socket = connect(process.env.GHOSTLY_SOCKET ?? JSON.parse(execFileSync("ghostly", ["daemon", "status"], { encoding: "utf8" })).socket);
 let nextId = 1;
 const waiting = new Map();
 function call(method, params) {
@@ -33,7 +38,9 @@ createInterface({ input: socket }).on("line", async (line) => {
     return;
   }
   const event = message.event;
-  if (event?.type === "call.incoming") {
+  // With `ghostly call auto on`, the daemon answers by itself (`auto: true`): the audio socket comes with call.connected.
+  if (event?.type === "call.connected" && !talking.has(event.call)) talk(event.call, event.audio.socket);
+  if (event?.type === "call.incoming" && !event.auto) {
     try {
       const answered = await call("call.answer", { call: event.call, rate: RATE });
       talk(answered.call, answered.audio.socket);
@@ -45,7 +52,10 @@ createInterface({ input: socket }).on("line", async (line) => {
 });
 
 /** One call: the greeting, then the echo. */
+const talking = new Set();
 function talk(id, path) {
+  if (talking.has(id)) return;
+  talking.add(id);
   const audio = connect(path);
   let greetingUntil = 0;
   audio.on("connect", () => {
@@ -64,7 +74,7 @@ function talk(id, path) {
     }
     setTimeout(() => { if (!audio.destroyed) audio.write(frame); }, ECHO_MS);
   });
-  audio.on("end", () => audio.destroy());
+  audio.on("end", () => { talking.delete(id); audio.destroy(); });
   audio.on("error", (error) => console.error(`call ${id}:`, error.message));
 }
 

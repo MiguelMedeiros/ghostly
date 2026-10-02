@@ -12,6 +12,7 @@ import { canPlayVideo, videoBox, videoFormat as formatOf } from "../../lib/video
 import { localPoster, posterUrl } from "../../lib/videoPoster";
 import { RoundRetry, WhyButton, WhyText } from "../chat/RoundRetry";
 import { useT } from "../../contexts/I18nContext";
+import { errorText } from "../../lib/errorText";
 
 type Phase = "poster" | "loading" | "playing";
 type Problem = "unsupported" | "too-large" | "missing" | "not-yet";
@@ -38,8 +39,9 @@ function fullScreen(video: HTMLVideoElement | null): boolean {
 export function VideoBubble({ file, sender, peerName: named }: { file: ChatFile; sender: "me" | "peer"; peerName?: string }) {
   const t = useT();
   const peerName = named ?? t("pairing.contact");
-  const { platform, transfer } = useTransfer(file.id);
-  const ready = transfer === null || transfer.state === "done";
+  const { platform, transfer, restoring } = useTransfer(file.id);
+  // No transfer is "finished" only once the engine has put its kept transfers back after a start.
+  const ready = (transfer === null && !restoring) || transfer?.state === "done";
   const [playable] = useState(() => canPlayVideo(file.mime));
   const [phase, setPhase] = useState<Phase>("poster");
   const [problem, setProblem] = useState<Problem | null>(null);
@@ -128,8 +130,9 @@ export function VideoBubble({ file, sender, peerName: named }: { file: ChatFile;
     setPhase("loading");
     claimPlayback(file.id);
     // Desktop streams its files from Rust, in ranges, as a video seeks; elsewhere the bytes come as a Blob. One on
-    // its way from here plays from what the page holds.
-    const source = await openStoredMedia(platform, file.id, file.mime, { bytes: !ready || fellBack.current });
+    // its way from here streams too once it has been copied (WebKitGTK stops a large one from a Blob partway), and
+    // plays from what the page holds where nothing streams it.
+    const source = await openStoredMedia(platform, file.id, file.mime, { bytes: fellBack.current || (!ready && sender !== "me") });
     if (!source) {
       releasePlayback(file.id);
       setPhase("poster");
@@ -142,10 +145,14 @@ export function VideoBubble({ file, sender, peerName: named }: { file: ChatFile;
     srcRef.current = source.url;
     setSrc(source.url);
     setPhase("playing");
-  }, [platform, phase, file.id, file.mime, ready]);
+  }, [platform, phase, file.id, file.mime, ready, sender]);
 
-  /** The player refused it: a stream is tried again from the file's bytes, once; anything else is unplayable here. */
+  /**
+   * The player refused it: a stream is tried again from the file's bytes, once; anything else is unplayable here. A
+   * failed source both fires `error` and rejects its pending play(): the second finds nothing loaded and is ignored.
+   */
   const refused = useCallback(() => {
+    if (!sourceRef.current) return;
     const retry = sourceRef.current?.streamed && !fellBack.current;
     const at = videoRef.current?.currentTime ?? 0;
     unload();
@@ -190,16 +197,18 @@ export function VideoBubble({ file, sender, peerName: named }: { file: ChatFile;
   }, [file.id]);
 
   useEffect(() => setBusy(false), [transfer?.state, transfer?.stalled]);
+  // Sent now: "It plays once it has been sent" is over, and the play button is back.
+  useEffect(() => { if (ready) setProblem((was) => (was === "not-yet" ? null : was)); }, [ready]);
 
-  const act = (action: FileAction) => {
+  const act =(action: FileAction) => {
     setActionError("");
-    void platform?.fileAction?.(file.id, action).catch((error: Error) => setActionError(String(error.message ?? error)));
+    void platform?.fileAction?.(file.id, action).catch((error: Error) => setActionError(errorText(error, t)));
   };
   const save = () => {
     if (!platform) return;
     setActionError("");
     void downloadFile(platform, file, sanitizeFileName(file.name)).then((result) => { if (result === "missing") setProblem("missing"); })
-      .catch((error: Error) => setActionError(String(error.message ?? error)));
+      .catch((error: Error) => setActionError(errorText(error, t)));
   };
 
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
@@ -230,7 +239,7 @@ export function VideoBubble({ file, sender, peerName: named }: { file: ChatFile;
   const again = (action: () => Promise<unknown>) => {
     setActionError("");
     setBusy(true);
-    void action().catch((error: Error) => setActionError(String(error.message ?? error))).finally(() => setBusy(false));
+    void action().catch((error: Error) => setActionError(errorText(error, t))).finally(() => setBusy(false));
   };
   const percent = moving ? Math.floor((transfer.transferred / Math.max(1, transfer.size)) * 100) : 0;
   // A video sent from here can be watched while it goes, once it has been copied.
@@ -245,7 +254,7 @@ export function VideoBubble({ file, sender, peerName: named }: { file: ChatFile;
     : null;
 
   return (
-    <div className="max-w-full" data-testid="video-bubble" data-stage={transfer?.stage ?? transfer?.state ?? "done"} data-phase={phase} data-playable={playable ? "true" : "false"}>
+    <div className="max-w-full" data-testid="video-bubble" data-stage={transfer?.stage ?? transfer?.state ?? (restoring ? "restoring" : "done")} data-phase={phase} data-playable={playable ? "true" : "false"}>
       <div
         ref={rootRef}
         tabIndex={phase === "playing" ? 0 : -1}

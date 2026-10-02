@@ -89,6 +89,15 @@ describe("GroupMembersDialog", () => {
     expect(engine.callsTo("removeGroupMember")).toEqual([]);
   });
 
+  it("says, while the group's link works, that whoever is removed can join again with it until a new link", async () => {
+    for (const profile of ["mesh", "community"] as const) {
+      const { user, unmount } = members_(groupView({ status: "active", isAdmin: true, profile, members, entryLink: "https://app.ghostly.tools/#/join/group2/g/k" }));
+      await user.click(within(row(BOB)).getByTestId("group-remove-member"));
+      expect(screen.getByTestId("group-remove-dialog"), profile).toHaveAccessibleDescription("They won't get the group's new messages. They can still join again with the group's link: a new link keeps them out.");
+      unmount();
+    }
+  });
+
   it("past 16 members with hubs, marks the hubs, says who is reached through one, and lets the admin choose", async () => {
     const many = Array.from({ length: 15 }, (_, i) => member({ key: `m${i}`.padEnd(52, "y"), viaHub: true, online: true }));
     const hub = member({ key: ALICE, nick: "Alice", online: true, hub: true, hubRole: "pin", edge: { linkId: "e1", state: "open", lastSeenAt: 1 } });
@@ -297,12 +306,21 @@ describe("NewGroupDialog", () => {
     expect(screen.getByTestId("new-group-create")).toBeEnabled();
   });
 
-  it("on an app with no WebRTC, says before creating that no member could be reached from here", async () => {
-    // Ghostly Desktop on Linux: group links are WebRTC only, so a group made here gets a link whose knocks
-    // this app sees but can never let in (the joiner waits at "A member is letting you in" for good).
-    const { user, engine, onCreated } = open();
+  it("on an app with no WebRTC, creates the group: its links go over Iroh or HyperDHT", async () => {
+    // Ghostly Desktop on Linux (WISP 9xx § Transports): no WebRTC, but native transports carry its group links.
+    const { user, engine } = open();
     act(() => engine.update({ transport: { protocol: "webrtc/1", relays: [], webrtc: false } }));
-    expect(screen.getByTestId("new-group-no-webrtc")).toHaveTextContent("Ghostly Desktop on Linux does not have yet");
+    expect(screen.queryByTestId("new-group-no-webrtc")).not.toBeInTheDocument();
+    await user.type(screen.getByTestId("new-group-name"), "Climbing");
+    expect(screen.getByTestId("new-group-create")).toBeEnabled();
+  });
+
+  it("on an app with no transport for group links, says before creating that no member could be reached from here", async () => {
+    // No WebRTC and no native transport: a group made here gets a link whose knocks this app sees but can never let
+    // in (the joiner waits at "A member is letting you in" for good).
+    const { user, engine, onCreated } = open();
+    act(() => engine.update({ transport: { protocol: "webrtc/1", relays: [], webrtc: false, groupLinks: false } }));
+    expect(screen.getByTestId("new-group-no-webrtc")).toHaveTextContent("this app has neither");
     await user.type(screen.getByTestId("new-group-name"), "Climbing");
     expect(screen.getByTestId("new-group-create")).toBeDisabled();
     await user.keyboard("{Enter}");

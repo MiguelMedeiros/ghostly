@@ -51,6 +51,7 @@
     "lostFrom": "直连已断开（{{from}}）",
     "messagesWait": "消息等待 {{contact}}",
     "moved": "从 {{from}} 转到 {{transport}}",
+    "notBack": "此应用重启后直连未恢复（{{from}}）",
     "offFrom": "已离开 {{from}}",
     "setTo": "设为 {{transport}}",
     "started": "此应用已启动",

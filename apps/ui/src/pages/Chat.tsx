@@ -33,12 +33,14 @@ import { useSettings } from "../contexts/SettingsContext";
 import { MessageBubble } from "../components/MessageBubble";
 import { MessageInput } from "../components/MessageInput";
 import { messageSnippet, quoteFor, replyIndex, replyTarget, sentReply, type NameOf } from "../lib/replies";
+import { buttonsViews, compactPresses } from "../lib/buttons";
 import { replySnippet, type RoutineCard } from "@ghostly/core";
 import { composerServices } from "../components/composer/servicesRow";
 import { CallButtons } from "../components/CallButtons";
 import { CallOverlay } from "../components/CallOverlay";
 import { IncomingCallNotification } from "../components/IncomingCallNotification";
 import { contactStatus } from "../lib/contactStatus";
+import { callLineId } from "../lib/callLines";
 import { PeerServices } from "../components/PeerServices";
 import { formatFileSize } from "../lib/format";
 import { playSound, startRinging } from "../lib/sounds";
@@ -65,6 +67,7 @@ import { useAppNavigation } from "../hooks/useAppNavigation";
 import { MuteMenu, MuteMenuItem } from "../components/ChatMute";
 import { MUTE_SILENCES, callRings, useChatMute } from "../lib/chatMute";
 import { useWakeCall } from "../hooks/useWakeCall";
+import { useIncomingCallNotice } from "../hooks/useIncomingCallNotice";
 import { useChatLink } from "../hooks/useChatLink";
 import { useTypingSender } from "../hooks/useTyping";
 import { ChatSubtitle } from "../components/TypingIndicator";
@@ -80,6 +83,9 @@ import { PinnedBar } from "../components/chat/PinnedBar";
 import { TasksButton } from "../components/chat/TasksButton";
 import { RoutineStack } from "../components/chat/RoutineCard";
 import { routineStacks } from "../lib/statusCards";
+import { scrollIntoViewGently } from "../lib/motion";
+import { MessageAnnouncer } from "../components/chat/MessageAnnouncer";
+import { errorText } from "../lib/errorText";
 
 /** What a call captures from: the devices the profile chose, read when it asks. */
 const callDevicePreferences = () => ({ audio: preferredDevice("audioinput"), video: preferredDevice("videoinput") });
@@ -149,7 +155,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
   }, [sharedNick, setNick]);
 
   const addCallEventMessage = useCallback(
-    (type: CallEventType, hasVideo: boolean, duration?: number) => {
+    (type: CallEventType, hasVideo: boolean, duration?: number, call?: number) => {
       // Kept in English in the history: the call line is worded in the person's language where it is drawn (MessageBubble).
       const textMap: Record<CallEventType, string> = {
         call_started: hasVideo ? "Video call started" : "Audio call started",
@@ -157,12 +163,14 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
         call_connected: hasVideo ? "Video call connected" : "Audio call connected",
         call_ended: hasVideo ? "Video call ended" : "Audio call ended",
         call_missed: hasVideo ? "Missed video call" : "Missed audio call",
+        call_unanswered: hasVideo ? "Video call, no answer" : "Audio call, no answer",
+        call_cancelled: hasVideo ? "Video call cancelled" : "Audio call cancelled",
         call_rejected: hasVideo ? "Video call declined" : "Audio call declined",
         call_failed: hasVideo ? "Video call couldn't connect" : "Audio call couldn't connect",
       };
 
       const msg: ChatMessage = {
-        id: `system_call_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+        id: callLineId(type, call),
         text: textMap[type],
         sender: "system",
         timestamp: Date.now(),
@@ -174,6 +182,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
       };
 
       addSystemMessage?.(msg);
+      return msg.id;
     },
     [addSystemMessage],
   );
@@ -184,6 +193,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
     publishCallSignal: setCallSignal,
     setFastPoll: setChatFastPoll,
     addCallEventMessage,
+    // Only a line of this side's own (a call that lost a glare): the contact never had it, so nothing goes out.
+    removeCallEventMessage: deleteMessage,
     media: platform?.callMedia?.(),
     // The profile's ICE servers (a TURN relay) serve calls too; a signal on the chat session carries every path.
     iceServers: engine.state?.settings.iceServers,
@@ -203,6 +214,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
     if (callState === "offering") return startRinging("ringback");
     if (callState === "idle" && before !== "idle") playSound("hangup");
   }, [callState, sessionId]);
+  // Out of sight, a ringing call is a system notification too.
+  useIncomingCallNotice(callState === "incoming" && callRings(sessionId), sessionId, t("pwa.wakeCall"));
 
   // A chat on a call is kept loaded by `App` wherever the person goes next,
   // so the call itself — and the signaling that ends it — survives the trip.
@@ -276,7 +289,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
         window.dispatchEvent(new Event("session-updated"));
         return null;
       } catch (e) {
-        return e instanceof Error ? e.message : String(e);
+        return errorText(e, t);
       }
     },
     [platform, peerKey, paired, addSystemMessage, replied, t],
@@ -311,10 +324,10 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
         window.dispatchEvent(new Event("session-updated"));
         return null;
       } catch (e) {
-        return e instanceof Error ? e.message : String(e);
+        return errorText(e, t);
       }
     },
-    [wallet, peerKey, addSystemMessage],
+    [wallet, peerKey, addSystemMessage, t],
   );
   const paySend = useCallback((amount: number, memo: string, network?: WalletNetwork, confirmedReal?: boolean) => pay("send", amount, memo, undefined, network, confirmedReal), [pay]);
   const payRequest = useCallback((amount: number, memo: string, method?: "cashu" | "arkade" | "usdt" | "bark" | "bitcoin" | "fedimint" | "spark", _rail?: unknown, network?: WalletNetwork, lightningCard?: string) => pay("request", amount, memo, method, network, undefined, lightningCard), [pay]);
@@ -355,6 +368,9 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
   /** The message of mine the composer edits (WISP 400 § Edits): a paired chat's only. */
   const [editing, setEditing] = useState<ChatMessage | null>(null);
   const quoteIndex = useMemo(() => replyIndex(messages), [messages]);
+  // A bot's buttons (WISP 4xx · Message Buttons): which one was chosen, and whether I may still press, from my replies.
+  const buttonsOf = useMemo(() => buttonsViews(messages, m => m.ref), [messages]);
+  const presses = useMemo(() => compactPresses(messages, m => m.ref), [messages]);
   const [menuOpen, setMenuOpen] = useState(false);
   const [showMute, setShowMute] = useState(false);
   const [showTechInfo, setShowTechInfo] = useState(false);
@@ -514,6 +530,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
     // The chat's column, and beside it (over it when narrow) the contact's identities: the page is their container.
     <CueChat.Provider value={sessionId}>
     <div className="chat-pane flex-1 h-full">
+    {/* A message that comes while the chat is open, read out once to a screen reader. */}
+    <MessageAnnouncer chat={sessionId} messages={messages} nameOf={() => shownName} active={visible} />
     {/* Files dropped anywhere on the column go to the composer (`data-file-drop`). */}
     <div data-file-drop className="chat-column relative flex-1 flex flex-col h-full min-w-0 bg-chat-bg">
       {(wakeCall.waking || wakeCall.gaveUp) && (
@@ -528,6 +546,13 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
         <div role="status" data-testid="call-no-answer"
           className="fixed top-3 left-1/2 -translate-x-1/2 z-[60] rounded-lg border border-border bg-panel-header px-4 py-2 text-sm text-text-primary shadow-xl">
           {t("calls.noAnswer")}
+        </div>
+      )}
+      {/* A call could not use the microphone or camera (refused, or none there): it says why, and how to fix it. */}
+      {webrtc.mediaProblem && (
+        <div role="alert" data-testid="call-media-problem" data-problem={webrtc.mediaProblem}
+          className="fixed top-3 left-1/2 -translate-x-1/2 z-[60] w-max max-w-[calc(100%-2rem)] rounded-lg border border-border bg-panel-header px-4 py-2 text-center text-sm text-text-primary shadow-xl">
+          {t(webrtc.mediaProblem === "denied" ? "calls.mediaDenied" : "calls.mediaUnavailable")}
         </div>
       )}
       {/* Chat Header. On a phone every button can be there at once (the connection, a call, a video call, a bot's Tasks,
@@ -583,10 +608,12 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
               <div className="flex items-center gap-1.5 max-md:gap-1 min-w-0">
               <p
                 onClick={startEditLabel}
-                className={`text-[15px] font-normal m-0 leading-tight truncate cursor-pointer hover:text-accent transition-colors ${isAnonymous ? "text-text-muted/60 italic" : "text-text-primary"}`}
+                className={`group/name text-[15px] font-normal m-0 leading-tight truncate cursor-pointer hover:text-accent transition-colors ${isAnonymous ? "text-text-muted italic" : "text-text-primary"}`}
                 title={t("chat.setNameHint")}
               >
-                <bdi data-testid="chat-name">{shownName}</bdi>
+                {/* With no name, the word alone: the start of their key ("Contact · 1kwb54" elsewhere) is on the line
+                    right under it, and the whole of it was cut to "Contac…" on a 320px phone. */}
+                <bdi data-testid="chat-name">{isAnonymous ? t("common.unnamedContactShort") : shownName}</bdi>
                 {!chatLabel && (
                   <svg
                     width="12"
@@ -597,7 +624,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
                     strokeWidth="2"
                     strokeLinecap="round"
                     strokeLinejoin="round"
-                    className="inline ms-1.5 text-text-muted opacity-0 group-hover:opacity-100"
+                    className="inline ms-1.5 text-text-muted opacity-0 group-hover/name:opacity-100 max-md:hidden"
                   >
                     <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
                     <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
@@ -619,8 +646,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
           {/* The chat's one connection control: its icon, and one panel with the choice and the rest under Details. */}
           <ChatConnection key={sessionId} peerKey={params.peerPubKeyB64} paired={paired} myKey={techInfo?.myPubKey} status={statusLabel}
             pairing={pairingShown && pairing.progress ? { progress: pairing.progress, onShow: pairing.scene
-              ? () => document.getElementById(pairingSceneId)?.scrollIntoView({ block: "center", behavior: "smooth" }) : undefined } : undefined} />
-          <CallButtons blocked={canWakeForCall ? null : callsBlocked} busy={webrtc.callState !== "idle" || wakeCall.waking}
+              ? () => scrollIntoViewGently(document.getElementById(pairingSceneId)) : undefined } : undefined} />
+          <CallButtons blocked={webrtc.otherCallOn && webrtc.callState === "idle" ? t("calls.onAnother") : canWakeForCall ? null : callsBlocked} busy={webrtc.callState !== "idle" || wakeCall.waking}
             onCall={(withVideo) => (callsBlocked && canWakeForCall ? void wakeCall.ring(withVideo) : webrtc.startCall(withVideo))} />
           {/* Only while a bot's card is here (WISP 4xx · Status Cards). */}
           <TasksButton rows={messages} />
@@ -762,11 +789,16 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
                 peerAck={peerAck}
                 peerPubKey={params.peerPubKeyB64}
                 peerNick={contactNick}
+                contactName={isAnonymous ? "" : shownName}
                 onDelete={() => forgetMessage(row.message.id)}
                 // Only a paired chat carries replies; a compatibility chat's contact would see the text alone.
                 onReply={paired && replyTarget(row.message) ? () => { setEditing(null); setReplyingTo(row.message); } : undefined}
                 onEdit={paired && chatLink && editableText(row.message) ? () => { setReplyingTo(null); setEditing(row.message); } : undefined}
                 quote={paired && row.message.replyTo ? quoteFor(row.message.replyTo, quoteIndex, nameOf) : undefined}
+                // A press is a reply: only a paired chat carries one.
+                buttons={paired ? buttonsOf.get(row.message.id) : undefined}
+                compactPress={paired && presses.has(row.message.id)}
+                linkId={paired ? chatLink?.id : undefined}
                 // The same: a compatibility chat has no room for a reaction.
                 onReact={paired && replyTarget(row.message) ? emoji => react(row.message.id, emoji) : undefined}
                 onPin={paired && replyTarget(row.message) ? () => pinMessage(row.message.id, replyTarget(row.message) === pin?.id) : undefined}
@@ -793,9 +825,12 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
 
       {chatPeer?.hold && (chatPeer.hold.outstanding > 0 || chatPeer.hold.error) && (
         <div data-testid="hold-indicator" className="px-4 py-1 text-[11px] text-text-secondary bg-surface-alt/60 border-t border-border truncate" role="status">
-          {chatPeer.hold.outstanding > 0 && `${chatPeer.hold.outstanding} ${chatPeer.hold.outstanding === 1 ? "item" : "items"} held for ${shownName} · ${(chatPeer.hold.bytes / 1024 / 1024).toFixed(1)} MB of ${Math.round(chatPeer.hold.maxBytes / 1024 / 1024)} MB`}
+          {chatPeer.hold.outstanding > 0 && t(chatPeer.hold.outstanding === 1 ? "chat.hold.heldOne" : "chat.hold.heldMany", {
+            count: chatPeer.hold.outstanding, name: shownName,
+            used: new Intl.NumberFormat(language, { minimumFractionDigits: 1, maximumFractionDigits: 1 }).format(chatPeer.hold.bytes / 1024 / 1024),
+            max: new Intl.NumberFormat(language).format(Math.round(chatPeer.hold.maxBytes / 1024 / 1024)) })}
           {chatPeer.hold.outstanding > 0 && chatPeer.hold.error && " · "}
-          {chatPeer.hold.error && <span className="text-danger">{chatPeer.hold.error}</span>}
+          {chatPeer.hold.error && <span className="text-danger">{errorText(chatPeer.hold.error, t)}</span>}
         </div>
       )}
 
@@ -818,7 +853,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
         // Editing one of mine (WISP 400 § Edits): the new text shows here at once and reaches the contact when it can.
         edit={editing && chatLink ? { key: editing.id, text: editing.text, snippet: replySnippet(editing.text), onClose: () => setEditing(null),
           onSave: async (text, extra) => (await engine.call("editMessage", { linkId: chatLink.id, messageId: editing.id, text, ...(extra?.preview && { preview: extra.preview }) })
-            .catch((e: unknown) => ({ error: e instanceof Error ? e.message : t("chat.editFailed") }))).error } : undefined}
+            .catch((e: unknown) => ({ error: e instanceof Error ? errorText(e, t) : t("chat.editFailed") }))).error } : undefined}
         onEditLast={paired && chatLink ? () => {
           const last = [...messages].reverse().find(editableText);
           if (last) { setReplyingTo(null); setEditing(last); }
@@ -862,6 +897,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
           onAcceptAudio={() => { webrtc.acceptCall(false); if (!visible) nav.conversation(chatPath(sessionId)); }}
           onAcceptVideo={() => { webrtc.acceptCall(true); if (!visible) nav.conversation(chatPath(sessionId)); }}
           onReject={webrtc.rejectCall}
+          // On a call in another chat: End and answer ends it first (useWebRTC), or Decline. Never two calls at once.
+          onCall={webrtc.otherCallOn}
         />,
         callLayer ?? document.body,
       )}

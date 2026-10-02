@@ -43,6 +43,11 @@ export interface BrowserHost {
     /** Can this host restart as another local profile (WISP 04)? The page's own peer, or the extension's offscreen one. */
     profiles?: boolean;
   };
+  /**
+   * Starts a new peer in place of one that stopped for good ("Clear all data"). Left out where the peer lives in the
+   * page: reloading the page starts it again. The extension's peer outlives its pages, so it is restarted on purpose.
+   */
+  restartEngine?(): Promise<void>;
   /** Reaches the peer. `onDisconnect` fires when it goes away; the client then connects again. */
   connect(onMessage: (message: EngineEvent | RpcResponse) => void, onDisconnect: () => void): Promise<EngineConnection>;
   /**

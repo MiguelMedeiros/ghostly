@@ -6,6 +6,7 @@ import { IDENTITY_MAX_FRAME, type IdentityScope } from "./identityProofs";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { identityFromSeedB64 } from "./identity";
 import { TRANSPORTS, rankTransports, relayedTransports, transportOrder, type NativeEndpoint, type NativeBinding, type NativeTransport, type PairedTransport, type TransportDescriptors } from "./pairedTransports";
+import { dialDescriptors, encodePacketTransports, parsePacketTransports } from "./capsRecord";
 import { sanitizeNick } from "./text";
 import { sanitizeAvatar } from "./avatar";
 import { parseLinkPreview, type LinkPreview } from "./linkPreview";
@@ -42,7 +43,7 @@ import { EXPECT_PEER_MS, WATCH_PEER_MS, LinkSession, type LinkStatus, type PeerP
 import type { ResolvedLink } from "./records";
 import { servicesFromWire, servicesToWire, type ServiceAd } from "./services";
 import { PairedHttp } from "./pairedHttp";
-import { CALLS_CAPABILITY, FILES_CAPABILITY, KNOWN_SESSION_CAPABILITIES, SERVICES_CAPABILITY, SESSION_CAPABILITIES_FRAME, SessionCapabilities, TYPING_CAPABILITY, REACTIONS_CAPABILITY, EDIT_CAPABILITY, WAKE_SESSION_CAPABILITY, PIN_CAPABILITY, STATUS_CARD_CAPABILITY, type SessionCapability } from "./pairedCapabilities";
+import { CALLS_CAPABILITY, FILES_CAPABILITY, KNOWN_SESSION_CAPABILITIES, SERVICES_CAPABILITY, SESSION_CAPABILITIES_FRAME, SessionCapabilities, TYPING_CAPABILITY, REACTIONS_CAPABILITY, EDIT_CAPABILITY, WAKE_SESSION_CAPABILITY, PIN_CAPABILITY, STATUS_CARD_CAPABILITY, BUTTONS_CAPABILITY, type SessionCapability } from "./pairedCapabilities";
 import { WAKE_FRAME, parseWakeFrame, wakeFrame, type WakeTarget } from "./pairedWake";
 import { REACTED_FRAME, REACTION_FRAME, REACTION_LIMITS, ReactionWindow, parseReactedFrame, parseReactionFrame, reactedFrame, reactionFrame, type WireReaction } from "./reactions";
 import { PINNED_FRAME, PIN_FRAME, PIN_LIMITS, parsePinFrame, parsePinnedFrame, pinFrame, pinnedFrame, type WirePin } from "./pins";
@@ -65,6 +66,8 @@ import { PairingTracker, type PairingProgress, type PairingRole } from "./pairin
 /** Unanswered offers are repeated less and less often: 1.5, 3, 6, then every 12 minutes. */
 /** After a failed attempt: 20 s, then doubling up to 3 min. Someone opening the chat starts it over. */
 const AUTO_CONNECT_RETRY_MS = 20_000;
+/** A group link with nothing to dial looks fast for the member's `_tr` on this many attempts, then at its own pace. */
+const PACKET_TRANSPORTS_FAST_ATTEMPTS = 3;
 /** A native transport that fails this many attempts in a row is skipped for `DEMOTE_MS`, while another remains (WISP 100). */
 /** Pinned over the DHT with no stream up this long after, a first pairing shows as on the DHT (WISP 400). */
 export const DHT_PIN_GRACE_MS = 10_000;
@@ -87,9 +90,19 @@ export const INVITE_TAKEN = "Someone else joined with this invite first. Ask you
 export const BLOCKED_DIAL_WAIT_MS = 10_000;
 /**
  * A connection dialled in on a pinned chat must authenticate within this long, or it closes. Anyone who read the
- * endpoint from the record can dial it: until it proves the pinned key it holds no place a person waits on.
+ * endpoint from the record can dial it: until it proves the pinned key it holds no place a person waits on. A native
+ * connection this side dialled on a pinned chat has as long too: its path is up when it opens, and the handshake takes
+ * a few round trips, so one still unfinished by then carries nothing (a relay path that died with the handshake), and
+ * the chat dials again rather than hold it until QUIC's idle timeout (Omarchy, 2026-10-01: the web app had refused the
+ * Desktop's knock 15 s in, and the Desktop dialled again only 30 s in).
  */
 export const UNPROVEN_AUTH_MS = 15_000;
+/**
+ * A native connection this side dialled that has not authenticated this long after it opened, while the contact's
+ * record names a newer way to dial it: the dial went to an old address (the web app's Iroh homed on another relay after
+ * a restart), and the chat dials the new one at once. Sooner, it is a handshake still under way.
+ */
+export const REDESCRIBED_GRACE_MS = 3_000;
 /**
  * A WebRTC offer this side made that has no answer after this long: a direct native transport ranked after WebRTC is
  * dialled meanwhile, the offer still standing, and whichever goes live first carries the chat. The contact may not read
@@ -133,6 +146,24 @@ export const LIVENESS_PING_MS = 15_000;
  */
 export const SWITCH_RETIRE_MS = 3_000;
 export const LIVENESS_MISSED_PINGS = 3;
+/**
+ * Frames that keep a session going rather than say something of the two people's: what the contact sent last outside
+ * these is when the chat was last in use (`canYieldEndpoint`). Every other frame (a text, a receipt, typing, a
+ * reaction, an edit, a file, a call, a payment) is use; what this side sends is answered with one of them.
+ */
+/** How long a session giving its listener up waits after its goodbye before it closes, so the goodbye gets there. */
+const YIELD_BYE_MS = 300;
+const QUIET_FRAMES = new Set(["paired-ping", "paired-pong", "paired-bye", "paired-policy", "paired-switch-plan", "paired-switch-ready",
+  "paired-switch-failed", "paired-switch-keep", "paired-rtc", "paired-adapters", "paired-nick", "paired-avatar", "paired-capabilities",
+  "paired-wake", "paired-hold", "paired-payments", "paired-groups", "paired-services", "paired-reconnect", "paired-reconnect-ack"]);
+/**
+ * A ping with nothing at all back this long after it went: the contact may have crashed and started again, with its new
+ * offer waiting on the relays, while this side still holds the old session and reads them at a live chat's pace (30 s).
+ * They are read now. Nothing more: the session is let go only by `LIVENESS_MISSED_PINGS`, or by the contact's offer
+ * (`DataLink.handleSignal`). A connection whose close this side does not hear (node-datachannel never says
+ * `disconnected`) otherwise went on until its consent checks gave up, 27 s after the crash (CI run 36741701666).
+ */
+export const PONG_WAIT_MS = 4_000;
 
 export interface IncomingMessage {
   id?: string;
@@ -178,10 +209,12 @@ export function pairedMessageFrame(id: string, ts: number, m: string, preview?: 
  * The record carries only how to dial, never an address: the Iroh endpoint id and the relay it is homed on, the
  * HyperDHT key and the relay a browser's goes through. For the same endpoint, a known Iroh descriptor keeps its
  * addresses and takes the record's relay. `newer`: the record was just read, so what it says replaces what is known;
- * otherwise it only fills a relay the known one lacks. The known one itself when nothing changes.
+ * otherwise it only fills a relay the known one lacks. The known one itself when nothing changes. `listed`: the record
+ * names the transport. One just read that names it with no descriptor says its endpoint is not up (WISP 03: still
+ * starting, or no free listener there): the one known is not dialled meanwhile (none, `undefined`).
  */
-function recordDescriptor(transport: NativeTransport, known: unknown, record: unknown, newer: boolean): unknown {
-  if (!record) return known;
+function recordDescriptor(transport: NativeTransport, known: unknown, record: unknown, newer: boolean, listed: boolean): unknown {
+  if (!record) return newer && listed ? undefined : known;
   if (!known) return record;
   const k = known as { id?: unknown; publicKey?: unknown; relay?: unknown }, r = record as typeof k;
   if (transport === "iroh/1" ? k.id !== r.id : k.publicKey !== r.publicKey) return newer ? record : known;
@@ -260,6 +293,11 @@ export interface GhostLinkEvents {
   /** Round trip of a liveness ping on the open session, in milliseconds. */
   onRtt?(ms: number): void;
   onTransportDiscovery?(descriptors: TransportDescriptors, transports: PairedTransport[], fallback: boolean): Promise<void>;
+  /**
+   * With `packetTransports`: the member's packet said which transports its app runs on this link and how to dial them.
+   * Without `webrtc/1` among them, it has none, and a session takes native endpoints on this side too.
+   */
+  onPacketTransports?(transports: PairedTransport[], descriptors: TransportDescriptors): void;
   onPairingState?(state: PairingState): void;
   /** How far a first pairing got (`pairingProgress` option): every change, up to `live`. */
   onPairingProgress?(progress: PairingProgress): void;
@@ -401,6 +439,8 @@ export interface GhostLinkOptions {
   pinSupport?: boolean;
   /** Offer `status-card/1` on the paired session: this app shows status cards (WISP 4xx · Status Cards). */
   statusCardSupport?: boolean;
+  /** Offer `buttons/1` on the paired session: this app shows and presses message buttons (WISP 4xx · Message Buttons). */
+  buttonsSupport?: boolean;
   /** Offer `wake/1` on paired sessions: this app wakes a contact's closed web app with a push (1:1 chats, not group edges). */
   wakeSupport?: boolean;
   dht?: {
@@ -458,6 +498,12 @@ export interface GhostLinkOptions {
    * its offer or answer in its packet rather than publishing again to clear it.
    */
   oneShot?: boolean;
+  /**
+   * A group's link (an edge, an entry session), which has no capability record: once this side runs a native endpoint on
+   * it, its transports and how to dial them ride its own packet (`_tr`), and the member's are read from its packet
+   * (WISP 9xx § Transports). The owner starts endpoints only where one side has no WebRTC (`onPacketTransports`).
+   */
+  packetTransports?: boolean;
   createPeerConnection: () => RTCPeerConnection;
   localFetch: LocalFetch;
   /** Everything this peer currently offers on this link. */
@@ -572,6 +618,8 @@ export class GhostLink {
   /** The contact's transport policy as last seen on this session, to tell its explicit choices apart. */
   private peerPolicySeen: { intent: number } | null = null;
   private unansweredPings = 0;
+  /** The last ping's `PONG_WAIT_MS`: running until something comes back from the contact. */
+  private pongWait: ReturnType<typeof setTimeout> | null = null;
   private openWaiters: { resolve: () => void; reject: (e: Error) => void }[] = [];
   /** Set while a WebRTC attempt this side dialled is pending: the ranked transports to try if it fails. */
   private afterRtc?: { epoch: number; rest: PairedTransport[] };
@@ -583,6 +631,8 @@ export class GhostLink {
   private offered?: { epoch: number; at: number };
   private lastAutoConnectAt = 0;
   private autoConnectFailures = 0;
+  /** Native transports a record just read listed with no way to dial them (`record-undescribed`), until one describes them again. */
+  private readonly undescribed = new Set<NativeTransport>();
   /** The peer's packet I last looked fast for its offer after (its timestamp): once per packet. */
   private offerAwaitedFor = 0;
   /** Whether the stream was blocked (DHT-only on either side) when last looked at. */
@@ -598,6 +648,10 @@ export class GhostLink {
   private peerSeenAt = 0;
   /** When the channel carrying the chat now was attached. */
   private channelSince = 0;
+  /** When the contact last sent something other than the session's upkeep (`QUIET_FRAMES`) on a session. */
+  private activityAt = 0;
+  /** Set while `yieldEndpoint` ends the session to let its listener go: nothing dials meanwhile. */
+  private yielding = false;
   /**
    * The contact said goodbye on the live session (`paired-bye`): its app is going away, likely to restart. Its packet
    * then was `packet`; it is dialled again once a newer one shows it back, or after `until`.
@@ -725,6 +779,7 @@ export class GhostLink {
           if (this.streamBlocked) { this.heldSignal = signal; this.peerDialsFromDht(signal); return; }
           this.handleRtcSignal(signal);
         },
+        onPeerTransports: value => this.peerPacketTransports(value),
         onDiscoveryError: error => events.onDiscoveryError?.(error),
         onStatus: (status) => events.onStatus?.(status),
         onPoll: (poll) => events.onPoll?.(poll),
@@ -769,6 +824,9 @@ export class GhostLink {
       // An offer to a saved contact: its answer may be a while (the contact may still hold this app's old session),
       // so the look for it slows after its first seconds (`OFFER_FAST_MS`). A first pairing looks fast throughout.
       setFastPoll: (fast, offer) => this.session.setFastPoll(fast, !!offer && !!options.pairing?.credentials.peerKey),
+      // An answer that did not connect is made again only while the contact's packet still carries that offer.
+      offerStanding: ts => !this.leaving && !this.stopped && !this.streamBlocked && this.peerOfferTs() === ts,
+      onAnswerReplaced: () => this.redial(),
       onOpen: channel => {
         if (this.streamBlocked || this.keyStopped) { channel.close(); return; }
         const plan = this.switcher.pending;
@@ -902,6 +960,16 @@ export class GhostLink {
     traceLink(this.myPubKeyZ32, "stale-offer", { beforeMs: floor - offer.ts });
     this.maybeAutoConnect(this.presence);
     return true;
+  }
+
+  /** The time of the offer the contact's packet carries, as last read (verified as `handleRtcSignal` does); null for none. */
+  private peerOfferTs(): number | null {
+    const signal = this.session.peerSignal, credentials = this.options.pairing?.credentials;
+    if (!signal) return null;
+    const verified = this.options.params.profile ? verifyPairedSignal(signal, this.options.params.peerPubKeyZ32,
+      this.myPubKeyZ32, credentials?.peerKey, credentials?.requireSignedSignals) : signal;
+    const parsed = verified ? parseRtcSignal(verified) : null;
+    return parsed?.t === "o" ? parsed.ts : null;
   }
 
   private handleRtcSignal(signal: string): void {
@@ -1212,31 +1280,68 @@ export class GhostLink {
     const listed = !!wanted && !!this.peerRecordTransports?.includes(wanted), dialable = !!wanted && !!this.peerDescriptors[wanted as NativeTransport];
     // The record lists every transport the contact's app runs, started or not (WISP 03): what it lacks, it lacks.
     this.peerRecordTransports = [...transports];
-    let changed = false, redescribed = false;
+    let changed = false, redescribed = false, again = false, news = false;
+    const renamed = new Set<NativeTransport>();
     for (const t of ["iroh/1", "hyperdht/1"] as const) {
-      const known = this.peerDescriptors[t], next = recordDescriptor(t, known, descriptors[t], fresh);
+      const known = this.peerDescriptors[t], next = recordDescriptor(t, known, descriptors[t], fresh, transports.includes(t));
       if (next === known) continue;
+      if (next === undefined) {
+        // Its endpoint is down for now: dials to the old one only timed out (each 20 s, the chat "retrying live" for
+        // minutes after both apps restarted). The record that describes it again is news, and dialled at once.
+        const { [t]: _gone, ...rest } = this.peerDescriptors;
+        this.peerDescriptors = rest;
+        traceLink(this.myPubKeyZ32, "record-undescribed", { transport: t });
+        this.undescribed.add(t);
+        continue;
+      }
       this.peerDescriptors = { ...this.peerDescriptors, [t]: next };
-      changed = true; redescribed ||= t === wanted;
+      // Described again after a record said its endpoint was down: dialled at once, but the attempts that failed keep
+      // counting. A contact whose record keeps going down and up again must not undo the wait between attempts.
+      if (this.undescribed.delete(t)) again = true; else news = true;
+      changed = true; redescribed ||= t === wanted; renamed.add(t);
       // A new way to dial it: the attempts that failed on the old one say nothing about this one.
       this.nativeFailures.delete(t); this.demotedUntil.delete(t);
     }
-    if (!this.peerTransports && transports.length) { this.peerTransports = transports; this.peerFallback = true; changed = true; }
+    if (!this.peerTransports && transports.length) { this.peerTransports = transports; this.peerFallback = true; changed = news = true; }
     else {
       // Its app runs more than a session said (an endpoint that started later): those go after the session's order.
       const added = transports.filter(t => !this.peerTransports?.includes(t));
-      if (added.length) { this.peerTransports = [...this.peerTransports!, ...added]; changed = true; }
+      if (added.length) { this.peerTransports = [...this.peerTransports!, ...added]; changed = news = true; }
     }
     // A transport the chat waits for, newly listed or dialable: tried again now, not at the next retry (WISP 100).
     if (wanted && ((!listed && transports.includes(wanted)) || (!dialable && !!this.peerDescriptors[wanted as NativeTransport]) || redescribed)) this.waitNews();
     this.notifyWait();
     if (!changed) return;
     traceLink(this.myPubKeyZ32, "record-transports", { transports });
+    // A connection of this side's that has not authenticated, dialled where the contact's record no longer says it is:
+    // it went to the old address, and the new one is dialled now rather than when that connection gives up.
+    const held = this.channel, heldOn = this.activeBinding?.transport as NativeTransport | undefined;
+    if (held && heldOn && renamed.has(heldOn) && !this.dialedIn.has(held) && this.paired?.state.status !== "ready"
+      && Date.now() - this.channelSince >= REDESCRIBED_GRACE_MS) {
+      traceLink(this.myPubKeyZ32, "redescribed-redial", { transport: heldOn });
+      this.disconnect();
+      this.redial();
+      return;
+    }
     // Something new to dial: the next attempt is now, not after the wait that attempts with nothing to try built up.
     if (this.channel || this.dialing) return;
-    this.autoConnectFailures = 0;
-    this.lastAutoConnectAt = 0;
+    if (news || !again) { this.autoConnectFailures = 0; this.lastAutoConnectAt = 0; }
+    else this.dialOnNews();
     this.maybeAutoConnect(this.presence);
+  }
+
+  /** When `dialOnNews` last let a dial go before its wait was over. */
+  private lastNewsDialAt = -Infinity;
+  /**
+   * A chat's listener came up, or the contact's record describes again an endpoint it said was down: the next dial goes
+   * now rather than after the wait between attempts, once per that wait. An endpoint registered again and again (a
+   * listener lost and started anew) or a record going down and up again would otherwise dial every time, each a native
+   * dial, Rust work on a Desktop (a Linux Desktop's idle CPU, 2026-10-01). The failures keep counting.
+   */
+  private dialOnNews(): void {
+    if (Date.now() - this.lastNewsDialAt < this.dialWait()) return;
+    this.lastNewsDialAt = Date.now();
+    this.lastAutoConnectAt = 0;
   }
 
   /**
@@ -1419,6 +1524,35 @@ export class GhostLink {
     this.advertiseTransports();
     if (this.resuming === endpoint.transport) void this.knock(endpoint.transport);
     else this.joinRace(endpoint.transport);
+    // Something new to dial, now: a group link whose member's packet already said how to dial this transport, or a
+    // chat that had no listener for it (every native slot was taken when the app started) and its contact is there.
+    // A chat's attempts that failed keep counting: an endpoint registered again and again (a listener lost and started
+    // anew, a slot taken back and given again) must not undo the wait between attempts, each of them a native dial.
+    if (!this.channel && !this.dialing && this.dataLink.state === "idle" && this.canDial(endpoint.transport)
+      && this.peerTransports?.includes(endpoint.transport)) {
+      if (this.options.packetTransports) { this.autoConnectFailures = 0; this.lastAutoConnectAt = 0; }
+      else this.dialOnNews();
+      this.maybeAutoConnect(this.presence);
+    }
+  }
+
+  /** A group link's `_tr` in its packet: what this side runs and how to dial it, once it runs a native endpoint there. */
+  private publishPacketTransports(): void {
+    if (!this.options.packetTransports) return;
+    this.session.setTransports(this.endpoints.size ? encodePacketTransports(this.availableTransports, this.localDescriptors()) : null);
+  }
+
+  /** The member's packet said which transports its app runs on this group link, and how to dial them. */
+  private peerPacketTransports(value: string): void {
+    if (!this.options.packetTransports || this.stopped) return;
+    const said = parsePacketTransports(value);
+    if (!said) return;
+    const transports = said.transports as PairedTransport[], descriptors = dialDescriptors(said.descriptors);
+    traceLink(this.myPubKeyZ32, "packet-transports", { transports });
+    // Its app has no WebRTC: an offer out to it is never answered, and would hold the data link for its whole attempt.
+    if (!transports.includes("webrtc/1") && !this.channel && this.dataLink.state === "offering") this.disconnect();
+    this.options.events?.onPacketTransports?.(transports, descriptors);
+    this.learnPeerTransports(transports, descriptors, true);
   }
 
   /** A connection the contact dialled on one of this side's native endpoints. */
@@ -1494,7 +1628,45 @@ export class GhostLink {
     this.options.events?.onTransportsChanged?.();
   }
 
+  /** When the chat was last in use on its session: the contact's last frame of use, or the session's start. */
+  get lastActivityAt(): number { return Math.max(this.activityAt, this.channelSince); }
+
+  /**
+   * Whether the live session on this transport may end so another chat takes its listener (`yieldEndpoint`): open, and
+   * unused, for `idleMs` at least (a session that just started has been in use for none of it); no call on, no file
+   * moving, nothing being dialled or switched. `canReleaseEndpoint` never gives up a live session; this does, once idle.
+   */
+  canYieldEndpoint(transport: PairedTransport, idleMs: number): boolean {
+    if (this.activeBinding?.transport !== transport || !this.isDataLinkOpen || this.paired?.state.status !== "ready") return false;
+    if (this.candidate || this.dialing || this.switcher.pending || this.transitionTarget) return false;
+    if (this.pairedCalls.on || this.pairedFiles?.busy) return false;
+    return Date.now() - this.lastActivityAt >= idleMs;
+  }
+
+  /**
+   * Ends the idle live session on this transport and lets its listener go, for a chat in use that found every one
+   * taken. The contact hears a goodbye, as when an app quits, rather than finding out when its pings go unanswered; the
+   * record then lists the transport undescribed, so it stops dialling here. The chat goes on over the DHT (or WebRTC),
+   * and takes a listener again the same way once it is in use. False when the session may not end (see above).
+   */
+  async yieldEndpoint(transport: PairedTransport, idleMs: number): Promise<boolean> {
+    if (!this.canYieldEndpoint(transport, idleMs)) return false;
+    traceLink(this.myPubKeyZ32, "native-yield", { transport, idle: Date.now() - this.lastActivityAt });
+    // Nothing dials meanwhile (the contact closing first would make this side look for it again), so the endpoint
+    // is free to go once the goodbye is out.
+    this.yielding = true;
+    try {
+      try { this.channel?.send(JSON.stringify({ t: "paired-bye" })); } catch { /* closing already: its close says as much */ }
+      // Closed at once, a HyperDHT stream dropped the goodbye and the contact heard only the close (`peer-lost`).
+      await new Promise(resolve => setTimeout(resolve, YIELD_BYE_MS));
+      this.disconnect();
+      await this.releaseEndpoint(transport);
+    } finally { this.yielding = false; }
+    return !this.endpoints.has(transport);
+  }
+
   private advertiseTransports(): void {
+    this.publishPacketTransports();
     if (this.paired?.state.status !== "ready" || !this.options.params.profile) return;
     if (this.paired.peerTransportSwitchSupport) { this.switcher.changed(false); return; }
     const descriptors: TransportDescriptors = {};
@@ -1566,7 +1738,13 @@ export class GhostLink {
       const chosen = this.switcher.chosenTarget ?? this.choiceApart?.transport ?? this.resuming;
       if (chosen && chosen === this.resuming && ranked.includes(chosen)) this.resuming = undefined;
       const choices = chosen && ranked.includes(chosen) ? [chosen, ...ranked.filter(t => t !== chosen)] : ranked;
-      if (!choices.length) throw new Error("No transport both apps allow is available yet");
+      if (!choices.length) {
+        // A group link: the member's app may be starting a native endpoint for this one right now, and says how to dial
+        // it in its packet (`_tr`), which is looked for fast meanwhile rather than at the background pace. On the first
+        // few attempts only: a member whose app never says one (an older app, no transport in common) is not read fast forever.
+        if (this.options.packetTransports && this.autoConnectFailures <= PACKET_TRANSPORTS_FAST_ATTEMPTS) this.session.expectPeer();
+        throw new Error("No transport both apps allow is available yet");
+      }
       const fallback = this.fallback && this.peerFallback;
       let lastError: unknown;
       // A transport that keeps failing is tried last for an hour, not first on every attempt.
@@ -1618,12 +1796,14 @@ export class GhostLink {
     const endpoint = this.endpoints.get(transport as NativeEndpoint["transport"]);
     const descriptor = this.peerDescriptors[transport as NativeEndpoint["transport"]];
     if (!endpoint || !descriptor) return new Error("Peer native address unavailable; reconnect WebRTC once to exchange endpoints");
+    const started = Date.now();
     try {
       const { channel, binding } = await endpoint.connect(descriptor);
       this.nativeFailures.delete(transport); this.demotedUntil.delete(transport);
       if (this.stopped || epoch !== this.connectionEpoch || this.channel) { channel.close(); return true; }
       this.attach(channel, binding); return true;
     } catch (error) {
+      traceLink(this.myPubKeyZ32, "dial-failed", { transport, error: error instanceof Error ? error.message : String(error), ms: Date.now() - started });
       if (epoch !== this.connectionEpoch) return true;
       this.attemptFailed(transport, error instanceof Error ? error.message : String(error));
       // Three failures in a row demote it for an hour (WISP 100).
@@ -1910,7 +2090,7 @@ export class GhostLink {
    */
   private maybeAutoConnect(presence: PeerPresence): void {
     // Stopping (its loops end after an await): a poll finishing meanwhile must not dial again.
-    if (this.stopped || this.leaving || this.streamBlocked || this.keyStopped || !this.options.autoConnect || !presence.online || this.channel || this.dialing || this.dataLink.state !== "idle") return;
+    if (this.stopped || this.leaving || this.yielding || this.streamBlocked || this.keyStopped || !this.options.autoConnect || !presence.online || this.channel || this.dialing || this.dataLink.state !== "idle") return;
     // On the DHT the chat is usable: layer 1 is retried at the background pace (WISP 100), not the pairing's.
     // A pin over the DHT alone changes nothing here: the joiner still knocks and the inviter still answers.
     // Back after a restart on a native transport whose endpoint is still starting: it is knocked on once it has, and a
@@ -1940,6 +2120,23 @@ export class GhostLink {
     const wait = this.dialWait();
     if (Date.now() - this.lastAutoConnectAt < wait) { traceLink(this.myPubKeyZ32, "dial-backoff", { failures: this.autoConnectFailures, left: wait - (Date.now() - this.lastAutoConnectAt) }); return; }
     traceLink(this.myPubKeyZ32, "dial", { failures: this.autoConnectFailures });
+    this.lastAutoConnectAt = Date.now();
+    this.autoConnectFailures++;
+    void this.dial().catch(error => {
+      this.tracker?.failed("transport", true);
+      this.dialFailed(error instanceof Error ? error.message : String(error));
+    });
+  }
+
+  /**
+   * The contact answered this side's offer again, and the data link gave the attempt up (`DataLink.onAnswerReplaced`):
+   * the contact is there, so this side dials again now. Its packet with that answer often has no room for its presence,
+   * and waiting for a packet that says it is online left the edge to the next look at the background pace (60 s, CLI
+   * bug hunt 2026-09-30).
+   */
+  private redial(): void {
+    if (this.stopped || this.leaving || this.streamBlocked || this.keyStopped || !this.options.autoConnect || this.channel || this.dialing || this.dataLink.state !== "idle") return;
+    traceLink(this.myPubKeyZ32, "dial", { failures: this.autoConnectFailures, again: true });
     this.lastAutoConnectAt = Date.now();
     this.autoConnectFailures++;
     void this.dial().catch(error => {
@@ -2118,6 +2315,7 @@ export class GhostLink {
     if (this.options.wakeSupport) offered.push(WAKE_SESSION_CAPABILITY);
     if (this.options.pinSupport) offered.push(PIN_CAPABILITY);
     if (this.options.statusCardSupport) offered.push(STATUS_CARD_CAPABILITY);
+    if (this.options.buttonsSupport) offered.push(BUTTONS_CAPABILITY);
     return offered;
   }
   /** Both sides offer `calls/1` on the open session: call signals can flow. Calls need a live session. */
@@ -2459,6 +2657,9 @@ export class GhostLink {
           this.rejectWaiters(new Error("The peer closed this connection. Check that both transport preferences allow a common transport, then reconnect."));
           this.detach();
           if (wasLive) this.peerLost("closed");
+          // A native connection that never authenticated (the contact refused it, or its path died): the side whose turn
+          // it is dials again now, not when a later look at the contact's packet happens to ask.
+          else if (binding) this.maybeAutoConnect(this.presence);
         }
       };
       const unproven = this.unproven(channel);
@@ -2474,7 +2675,8 @@ export class GhostLink {
         fingerprints: fingerprints ?? undefined,
         binding, transports: migration?.plan?.choices ?? this.transportOffer(), allowFallback: migration?.plan?.local.fallback ?? this.fallback,
         transportSwitchSupport: true,
-        ...(unproven ? { authTimeoutMs: UNPROVEN_AUTH_MS } : {}),
+        // Dialled in, or dialled out on a native transport (its path was up when it opened): bounded either way on a pinned chat.
+        ...(unproven || (binding && this.options.pairing.credentials.peerKey) ? { authTimeoutMs: UNPROVEN_AUTH_MS } : {}),
         holdSupport: !!this.options.holdSupport,
         proofSupport: !!this.options.events?.onPeerProof,
         identitySupport: !!this.options.events?.onIdentityProof,
@@ -2488,11 +2690,14 @@ export class GhostLink {
         // A connection dialled in on a pinned chat says nothing until it authenticated: one refused leaves no trace in the state.
         onState: () => { if (this.channel === channel && (!this.unproven(channel) || paired.state.status === "ready")) this.emitPairingState(); },
         onFailure: () => {
-          if (this.unproven(channel)) {
+          // Dialled in and unproven, or a connection that carried nothing in time: neither says anything about the contact.
+          if (this.unproven(channel) || paired.authTimedOut) {
             if (paired.state.keyMismatch) this.dht?.foreignKeySeen("stream");
-            traceLink(this.myPubKeyZ32, "dialed-in-refused", { keyMismatch: !!paired.state.keyMismatch });
+            if (this.unproven(channel)) traceLink(this.myPubKeyZ32, "dialed-in-refused", { keyMismatch: !!paired.state.keyMismatch });
+            else traceLink(this.myPubKeyZ32, "auth-timeout", { transport: binding?.transport ?? "webrtc/1" });
             migration?.reject(new Error(paired.state.error ?? "Candidate authentication failed"));
             channel.close(); if (this.channel === channel) this.detach();
+            if (!this.channel && binding) this.maybeAutoConnect(this.presence);
             return;
           }
           this.securityRejected = true;
@@ -2579,10 +2784,12 @@ export class GhostLink {
         onApplication: async data => {
           if (this.channel !== channel) return;
           // Anything from the peer shows the session is alive.
-          this.unansweredPings = 0;
+          this.unansweredPings = 0; this.heardFromPeer();
           if (typeof data !== "string" || data.length > 60 * 1024) return;
           let frame: Record<string, unknown>;
           try { frame = JSON.parse(data); } catch { return; }
+          // What the two people do (texts, receipts, typing, files, calls, payments...), not the session's upkeep.
+          if (frame && typeof frame === "object" && !QUIET_FRAMES.has(String(frame.t))) this.activityAt = Date.now();
           if (frame?.t === "paired-ping") { try { channel.send(JSON.stringify({ t: "paired-pong" })); } catch { /* closing */ } return; }
           if (frame?.t === "paired-pong") {
             this.peerAnswersPings = true;
@@ -2704,6 +2911,7 @@ export class GhostLink {
           }
           if (frame?.t === PAIRED_CALL_FRAME) {
             const signal = this.supportsCalls ? parsePairedCallFrame(frame) : null;
+            if (signal) this.pairedCalls.heard(signal);
             if (signal) this.options.events?.onCallSignal?.(signal);
             return;
           }
@@ -2737,7 +2945,9 @@ export class GhostLink {
             // The contact's latest word on held items; an older app never sends it and keeps its handshake offer.
             if (typeof frame.on !== "boolean" || (frame.top !== undefined && !(Number.isSafeInteger(frame.top) && (frame.top as number) >= 0))) return;
             this.peerHoldOverride = frame.on;
-            await this.options.events?.onHold?.({ peerAllows: frame.on, peerTop: frame.top as number | undefined });
+            // Not awaited: the owner may be picking up held items (from the contact's storage, seconds or more), and
+            // every frame after this one would wait for it, the edits, texts and pings that keep this session alive too.
+            void Promise.resolve(this.options.events?.onHold?.({ peerAllows: frame.on, peerTop: frame.top as number | undefined })).catch(() => {});
             this.emitPairingState();
             return;
           }
@@ -2831,7 +3041,17 @@ export class GhostLink {
     this.stopLiveness();
     this.peerAnswersPings = peerAnswersPings;
     // One ping at the open, not counted as missed: the round trip is known at once, not 15 s later.
-    const ping = () => { this.pingSentAt = Date.now(); channel.send(JSON.stringify({ t: "paired-ping" })); };
+    const ping = () => {
+      this.pingSentAt = Date.now(); channel.send(JSON.stringify({ t: "paired-ping" }));
+      // An app that never answers pings (an older one) would cost a read of the relays at each.
+      if (!this.peerAnswersPings || this.pongWait) return;
+      this.pongWait = setTimeout(() => {
+        this.pongWait = null;
+        if (this.channel !== channel || this.stopped) return;
+        traceLink(this.myPubKeyZ32, "pong-late", { unanswered: this.unansweredPings });
+        this.session.pollNow();
+      }, PONG_WAIT_MS);
+    };
     if (peerAnswersPings) try { ping(); } catch { /* closing: the timer below finds out */ }
     this.livenessTimer = setInterval(() => {
       if (this.channel !== channel) { this.stopLiveness(); return; }
@@ -2843,10 +3063,16 @@ export class GhostLink {
   private stopLiveness(): void {
     if (this.livenessTimer) clearInterval(this.livenessTimer);
     this.livenessTimer = null;
+    this.heardFromPeer();
     this.unansweredPings = 0;
     this.peerAnswersPings = false;
     this.pingSentAt = 0;
     this.rtt = undefined;
+  }
+  /** Something came back on the session: the ping's wait is over. */
+  private heardFromPeer(): void {
+    if (this.pongWait) clearTimeout(this.pongWait);
+    this.pongWait = null;
   }
   private dropDeadSession(channel: FrameChannel): void {
     this.stopLiveness();
@@ -2861,7 +3087,7 @@ export class GhostLink {
    * once, and the contact is watched closely for a while, since an app that went away is usually back in seconds.
    */
   private peerLost(why: string): void {
-    if (this.stopped || this.leaving) return;
+    if (this.stopped || this.leaving || this.yielding) return;
     traceLink(this.myPubKeyZ32, "peer-lost", { why });
     this.lostUntil = Date.now() + WATCH_PEER_MS;
     this.autoConnectFailures = 0;

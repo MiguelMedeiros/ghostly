@@ -8,13 +8,14 @@ import { providerOf, shortSubject, useEngineState } from "../../lib/identities";
 import { EntityCardFrame, cardQuiet } from "./EntityCardFrame";
 import { identityStanding } from "./identityStanding";
 import { useT, type Translate } from "../../contexts/I18nContext";
+import { errorText } from "../../lib/errorText";
 
-const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 const fetchForCard = boundedIdentityFetch({ online: () => globalThis.navigator?.onLine !== false });
 const host = (url: string) => url.replace(/^https?:\/\//, "").replace(/\/.*$/, "");
 
 /** The badge's words for a contact's proof of it: "Proved by Ana". */
-function stateWords(t: Translate, state: BadgeState, who: string): string {
+function stateWords(t: Translate, state: BadgeState, named: string): string {
+  const who = named || t("chat.entity.someContact");
   switch (state) {
     case "verified": case "expiring": return t("chat.entity.provedBy", { who });
     case "revoked": return t("chat.entity.revokedBy", { who });
@@ -65,7 +66,7 @@ export function IdentityEntityCard({ provider, subject, peerPubKey }: { provider
         facts = (await preview(subject, { signal: current.signal })).facts;
       }
       if (!current.signal.aborted) setLookup({ status: "ok", facts });
-    } catch (e) { if (!current.signal.aborted) setLookup({ status: "error", error: message(e) }); }
+    } catch (e) { if (!current.signal.aborted) setLookup({ status: "error", error: errorText(e, t) }); }
   }, [provider, subject, t]);
 
   // Offline checks run once the card scrolls into view; anything that reaches a server waits for the tap.

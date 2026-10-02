@@ -129,14 +129,30 @@ test("message details on a phone: a long press opens the quick bar, and Details 
   await say(alice, "press and hold me");
   const row = rowOf(bob, "press and hold me");
   await expect(row).toBeVisible();
+  // Its words are not selectable on a touch screen: iOS fires no `contextmenu` to cancel, and selected a word with its
+  // own Copy, Look Up, Translate menu over the quick bar. With a mouse they are.
+  const selectable = (peer: Peer) => rowOf(peer, "press and hold me").evaluate((element) => getComputedStyle(element).userSelect);
+  expect(await selectable(bob)).toBe("none");
+  expect(await selectable(alice)).toBe("auto");
   // A finger held on the message: the same pointer events a touch screen sends.
   const box = (await row.boundingBox())!;
   const at = { pointerType: "touch", button: 0, clientX: box.x + box.width / 2, clientY: box.y + box.height / 2, bubbles: true };
-  await row.dispatchEvent("pointerdown", at);
-  await bob.page.waitForTimeout(700);
-  await row.dispatchEvent("pointerup", at);
-  // The reactions' quick bar (WISP 400 § Reactions), with the details one tap under it.
+  const hold = async () => {
+    await row.dispatchEvent("pointerdown", at);
+    await bob.page.waitForTimeout(700);
+    await row.dispatchEvent("pointerup", at);
+  };
+  await hold();
+  // The reactions' quick bar (WISP 400 § Reactions), with Copy, and the details one tap under it.
   await expect(bob.page.getByTestId("reaction-bar").getByTestId("reaction-quick")).toHaveCount(6);
+  // What it writes, kept in the page: the machine's clipboard is shared with every other test running.
+  await bob.page.evaluate(() => {
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: async (text: string) => { (window as unknown as { copied?: string }).copied = text; } } });
+  });
+  await bob.page.getByTestId("reaction-bar-copy").click();
+  await expect(bob.page.getByTestId("reaction-bar")).toHaveCount(0);
+  await expect.poll(() => bob.page.evaluate(() => (window as unknown as { copied?: string }).copied)).toBe("press and hold me");
+  await hold();
   await bob.page.getByTestId("reaction-bar-details").click();
   await expect(panel(bob.page)).toHaveAttribute("data-loaded", "yes");
   await expect(panel(bob.page)).toHaveAttribute("data-side", "bottom");

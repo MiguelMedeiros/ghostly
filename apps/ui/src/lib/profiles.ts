@@ -10,6 +10,8 @@ export interface ProfileEntry {
   id: string;
   name: string;
   createdAt: number;
+  /** Brought back from a backup (WISP 05), until the mark is taken off: shown with the app's word for it after the name. */
+  restored?: true;
 }
 interface Registry { version: 1; active: string; profiles: ProfileEntry[] }
 
@@ -25,6 +27,56 @@ export const PROFILE_THEMES: ColorTheme[] = ["cyan", "purple", "classic", "monoc
 /** The swatch each theme shows in the switcher and on the profile's avatar. */
 export const THEME_COLOR: Record<ColorTheme, string> = { cyan: "#22d3ee", purple: "#a78bfa", classic: "#00a884", monochrome: "#d4d4d8" };
 const DEFAULT_ENTRY: ProfileEntry = { id: "", name: "Personal", createdAt: 0 };
+/**
+ * The first profile's name until someone renames it, in the app's language: the registry keeps the built-in English
+ * one, so a change of language changes it too. A backup of it carries the built-in one, so the copy restored from it
+ * follows the language as well.
+ */
+let defaultName = DEFAULT_ENTRY.name;
+export function setDefaultProfileName(name: string): void {
+  defaultName = cleanName(name) || DEFAULT_ENTRY.name;
+}
+/** A restored profile's name as shown, "Work (restored)" in the app's language: the registry keeps only "Work". */
+let restoredName = (name: string) => `${name} (restored)`;
+export function setRestoredProfileName(format: (name: string) => string): void {
+  restoredName = format;
+}
+/**
+ * A profile as it is shown: one with the built-in name (the first one never renamed, or a copy of it restored from a
+ * backup) by the name of the app's language; a restored one with the app's word for restored.
+ */
+const shown = (entry: ProfileEntry): ProfileEntry => {
+  const name = entry.name === DEFAULT_ENTRY.name ? defaultName : entry.name;
+  return entry.restored ? { ...entry, name: restoredName(name) } : name === entry.name ? entry : { ...entry, name };
+};
+/**
+ * The word each language puts after a restored profile's name (`profile.restoredName` in every locale, which a test
+ * checks against this list). The registry never keeps it in a name: an older app wrote the English one there, and a
+ * name typed or pasted from the field of another language could carry any of them.
+ */
+export const RESTORED_WORDS = ["restored", "restaurado", "restauré", "ripristinato", "مستعاد", "已恢复", "復元"];
+/**
+ * The first profile's name in each language (`profile.defaultName` in every locale, which a test checks against this
+ * list). A backup an older app made of that profile, never renamed, carries one of them instead of the built-in one.
+ */
+export const DEFAULT_NAMES = ["Personal", "Pessoal", "Personnel", "Personale", "شخصي", "个人", "個人"];
+const RESTORED_SUFFIX = new RegExp(`^(.*\\S)\\s*[(（]\\s*(?:${RESTORED_WORDS.join("|")})\\s*[)）]$`, "iu");
+/** A name without the restored words at its end ("Work (restaurado) (restored)" is "Work"), and whether it had any. */
+function withoutRestoredWord(name: string): { name: string; marked: boolean } {
+  let rest = name, match: RegExpExecArray | null;
+  while ((match = RESTORED_SUFFIX.exec(rest))) rest = match[1].trimEnd();
+  return { name: rest, marked: rest !== name };
+}
+/** A cleaned name for profile `id`, the word for restored taken out of it, and whether that marks it restored. */
+function nameAndMark(id: string, raw: string): { name: string; marked: boolean } {
+  // The first profile is never a restored one: its name is left as it is. The word comes off before the name is cut to
+  // its 32 characters, which could cut the word in half.
+  if (!id) return { name: cleanName(raw), marked: false };
+  const collapsed = raw.replace(/\s+/g, " ").trim();
+  // Composed first, so "restauré" typed as e + accent is the word too.
+  const { name, marked } = withoutRestoredWord(collapsed.normalize("NFC"));
+  return { name: cleanName(marked ? name : collapsed), marked };
+}
 
 
 function read(): Registry {
@@ -32,7 +84,12 @@ function read(): Registry {
     const raw = JSON.parse(localStorage.getItem(registryKey()) ?? "null") as Partial<Registry> | null;
     const profiles = (Array.isArray(raw?.profiles) ? raw!.profiles : [])
       .filter((p): p is ProfileEntry => !!p && typeof p.id === "string" && (p.id === "" || ID.test(p.id)) && typeof p.name === "string")
-      .map((p) => ({ id: p.id, name: cleanName(p.name) || (p.id ? "Profile" : DEFAULT_ENTRY.name), createdAt: Number(p.createdAt) || 0 }));
+      .map((p) => {
+        const { name, marked } = nameAndMark(p.id, p.name);
+        const entry: ProfileEntry = { id: p.id, name: name || (p.id ? "Profile" : DEFAULT_ENTRY.name), createdAt: Number(p.createdAt) || 0 };
+        if (p.restored === true || marked) entry.restored = true;
+        return entry;
+      });
     if (!profiles.some((p) => p.id === "")) profiles.unshift({ ...DEFAULT_ENTRY });
     const active = typeof raw?.active === "string" && profiles.some((p) => p.id === raw.active) ? raw.active : "";
     return { version: 1, active, profiles };
@@ -46,12 +103,36 @@ function write(registry: Registry, notify = true): void {
 }
 const cleanName = (name: string) => name.replace(/\s+/g, " ").trim().slice(0, 32);
 
-export function listProfiles(): ProfileEntry[] { return read().profiles; }
-/** The profile to start as: the one last chosen in this space. */
-export function activeProfileId(): string { return read().active; }
+export function listProfiles(): ProfileEntry[] { return read().profiles.map(shown); }
+
+/** A profile's name as shown, without the word the app adds to a restored one: what the Profile page's field holds. */
+export function baseProfileName(id: string): string | undefined {
+  const entry = read().profiles.find((p) => p.id === id);
+  return entry && shown({ id: entry.id, name: entry.name, createdAt: entry.createdAt }).name;
+}
+
+/**
+ * A profile's name as the registry keeps it: what a backup of it carries. For the first profile never renamed that is
+ * the built-in name, never the app's language's, so the copy restored from it follows the language too.
+ */
+export function storedProfileName(id: string): string | undefined {
+  return read().profiles.find((p) => p.id === id)?.name;
+}
+
+/**
+ * The profile this page runs as, fixed when it starts (see the entry points). The registry's choice can change under
+ * a running page: a tab that waited for another to close takes over as the profile it opened with, while the other
+ * tab may have switched the choice to another profile meanwhile. Until a page starts, it is the registry's.
+ */
+let running: string | undefined;
+export function setRunningProfile(id: string | undefined): void { running = id; }
+/** The profile last chosen in this space: the one the next page starts as. */
+export function chosenProfileId(): string { return read().active; }
+/** The profile this page runs as; before it starts, the one to start as (the one last chosen in this space). */
+export function activeProfileId(): string { return running ?? chosenProfileId(); }
 export function currentProfile(): ProfileEntry {
   const id = activeProfileId();
-  return read().profiles.find((p) => p.id === id) ?? { id, name: id || DEFAULT_ENTRY.name, createdAt: 0 };
+  return shown(read().profiles.find((p) => p.id === id) ?? { id, name: id || DEFAULT_ENTRY.name, createdAt: 0 });
 }
 
 export const settingsKeyFor = (id: string) => (namespaceOf(id) ? `ghostly_${namespaceOf(id)}_app_settings` : "ghostly_app_settings");
@@ -68,12 +149,12 @@ export function themeOf(id: string): ColorTheme {
  * once. It inherits language and light/dark mode from the current profile; nothing else is copied.
  */
 export function createProfile(name: string): ProfileEntry {
-  const clean = cleanName(name);
+  const id = newProfileId();
+  const { name: clean, marked } = nameAndMark(id, name);
   if (!clean) throw new Error("Give the profile a name");
   const registry = read();
   const used = registry.profiles.map((p) => themeOf(p.id));
   const theme = PROFILE_THEMES.find((t) => !used.includes(t)) ?? PROFILE_THEMES[registry.profiles.length % PROFILE_THEMES.length];
-  const id = newProfileId();
   let inherited: Record<string, unknown> = {};
   try {
     const current = JSON.parse(localStorage.getItem(settingsKeyFor(activeProfileId())) ?? "{}") as Record<string, unknown>;
@@ -81,9 +162,10 @@ export function createProfile(name: string): ProfileEntry {
     inherited = { language: current.language, colorScheme: current.colorScheme, theme: current.colorScheme, lockScreen: current.lockScreen };
   } catch { /* defaults */ }
   localStorage.setItem(settingsKeyFor(id), JSON.stringify({ ...inherited, colorTheme: theme }));
-  const entry = { id, name: clean, createdAt: Date.now() };
+  const entry: ProfileEntry = { id, name: clean, createdAt: Date.now() };
+  if (marked) entry.restored = true;
   write({ ...registry, profiles: [...registry.profiles, entry] });
-  return entry;
+  return shown(entry);
 }
 
 /** A fresh id no profile of this space uses yet. */
@@ -95,14 +177,20 @@ export function newProfileId(): string {
   return id;
 }
 
-/** Adds a profile whose data is already in place (a restored backup, WISP 05). */
-export function registerProfile(id: string, name: string): ProfileEntry {
+/** Adds a profile whose data is already in place (a restored backup, WISP 05), and returns it as it is shown. */
+export function registerProfile(id: string, name: string, restored = false): ProfileEntry {
   if (!ID.test(id)) throw new Error("Invalid profile id");
   const registry = read();
   if (registry.profiles.some((p) => p.id === id)) throw new Error("That profile already exists");
-  const entry = { id, name: cleanName(name) || "Restored", createdAt: Date.now() };
+  // A backup of a profile an older app restored carries "(restored)", or the word of another language, in its name:
+  // the flag says it now.
+  const { name: clean, marked } = nameAndMark(id, name);
+  // A backup an older app made of the first profile, never renamed, carries the name of that app's language
+  // ("Pessoal"): it is the built-in one, which follows the language.
+  const entry: ProfileEntry = { id, name: restored && DEFAULT_NAMES.includes(clean) ? DEFAULT_ENTRY.name : clean || "Restored", createdAt: Date.now() };
+  if (restored || marked) entry.restored = true;
   write({ ...registry, profiles: [...registry.profiles, entry] });
-  return entry;
+  return shown(entry);
 }
 
 /** Takes a profile off the list. Its data must already be gone (see profileData). */
@@ -113,11 +201,21 @@ export function unregisterProfile(id: string): void {
   write({ ...registry, profiles: registry.profiles.filter((p) => p.id !== id) });
 }
 
+/**
+ * Gives a profile a new name. A restored one stays marked restored (the Profile page's tag takes the mark off): the
+ * field edits the name only, and the word for restored typed or pasted into it is the mark, never part of the name.
+ */
 export function renameProfile(id: string, name: string): void {
-  const clean = cleanName(name);
+  const { name: clean, marked } = nameAndMark(id, name);
   if (!clean) throw new Error("Give the profile a name");
   const registry = read();
-  write({ ...registry, profiles: registry.profiles.map((p) => (p.id === id ? { ...p, name: clean } : p)) });
+  write({ ...registry, profiles: registry.profiles.map((p) => (p.id === id ? { ...p, name: clean, ...(marked ? { restored: true as const } : {}) } : p)) });
+}
+
+/** Takes the restored mark off a profile: from now on it is shown by its name alone. */
+export function clearRestoredMark(id: string): void {
+  const registry = read();
+  write({ ...registry, profiles: registry.profiles.map((p) => (p.id === id ? { id: p.id, name: p.name, createdAt: p.createdAt } : p)) });
 }
 
 /** Where a profile's own keys start in localStorage: `ghostly_<ns>_`, or `ghostly_` for the default one. */
@@ -168,9 +266,10 @@ export function switchProfile(id: string, options: { route?: string; avatar?: st
   const registry = read();
   const target = registry.profiles.find((p) => p.id === id);
   if (!target) throw new Error("Unknown profile");
-  if (id === registry.active) return;
-  rememberRoute(registry.active);
-  const pending: PendingSwitch = { id, name: target.name, color: THEME_COLOR[themeOf(id)], avatar: options.avatar, at: Date.now() };
+  // This page's own profile, not the registry's choice: another tab may have made that choice already.
+  if (id === activeProfileId()) return;
+  rememberRoute(activeProfileId());
+  const pending: PendingSwitch = { id, name: shown(target).name, color: THEME_COLOR[themeOf(id)], avatar: options.avatar, at: Date.now() };
   try { sessionStorage.setItem(SWITCH_KEY, JSON.stringify(pending)); } catch { /* no overlay after the reload */ }
   window.dispatchEvent(new CustomEvent<PendingSwitch>("profile-switching", { detail: pending }));
   // A moment for the overlay to be painted: the browser keeps that frame until the new page draws. Until

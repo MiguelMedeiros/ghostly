@@ -1,23 +1,221 @@
-/* /developers/agents: page rules are prefixed ag-; the rest is cli.css (cl-). */
+/* /developers/agents: page rules are prefixed ag-, the chat that plays (components/agents/AgentDemo.tsx) agd-; the
+   rest is cli.css (cl-). */
 .ag-hero {
-  padding-block: calc(var(--nav-h) + 56px) 48px;
+  padding-block: calc(var(--nav-h) + 56px) 56px;
 }
-.ag-hero-inner {
+/* Words and the playing chat side by side on a laptop; the chat under the words on anything narrower. */
+.ag-hero-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 40px;
+  align-items: center;
+}
+@media (min-width: 1024px) {
+  .ag-hero-grid {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 440px);
+    gap: clamp(40px, 5vw, 80px);
+  }
+}
+.ag-hero-copy {
   display: grid;
   gap: 18px;
   justify-items: start;
+  min-width: 0;
 }
-.ag-hero-inner > .lead {
-  max-width: 760px;
+.ag-hero-copy > .lead {
+  max-width: 640px;
 }
 .ag-title {
-  font-size: clamp(40px, 6vw, 72px);
+  font-size: clamp(40px, 6vw, 76px);
+}
+.ag-actions {
+  align-items: center;
+  gap: 14px 24px;
 }
 .ag-note {
   font-size: 14px;
 }
 
-/* The prompt: a terminal-like box, its Copy button big and first in reading order. */
+/* A section: a quiet eyebrow, its title and one line, then the thing. */
+.ag-section {
+  padding-block: clamp(48px, 6vw, 80px);
+}
+.ag-section > .eyebrow {
+  margin-bottom: -6px;
+}
+.ag-h2 {
+  font-size: clamp(28px, 3.4vw, 42px);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+}
+.ag-lead {
+  max-width: 720px;
+  font-size: var(--t-body);
+}
+.ag-h3 {
+  font-size: 17px;
+  font-weight: 650;
+}
+
+/* ── What your agent can show: the app's window and its phone, feet on one line (the home's rows, next.css) ── */
+.ag-shots {
+  display: grid;
+  gap: 10px;
+  margin: 8px 0 0;
+  min-width: 0;
+}
+.ag-devices {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 19%;
+  align-items: end;
+  column-gap: 16px;
+}
+.ag-win {
+  min-width: 0;
+  border-radius: 12px;
+  border: 1px solid var(--line-2);
+  background: var(--surface);
+  overflow: hidden;
+  box-shadow:
+    0 60px 120px -50px rgba(0, 0, 0, 0.95),
+    0 24px 48px -30px rgba(0, 0, 0, 0.8),
+    0 0 110px -40px rgba(34, 211, 238, 0.28);
+}
+.ag-win-bar {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  height: 28px;
+  padding-inline: 12px;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--line);
+}
+.ag-win-bar span {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--line-2);
+}
+.ag-shot,
+.ag-phone {
+  display: block;
+  width: 100%;
+  height: auto;
+  background: #0b141a;
+}
+.ag-phone {
+  border-radius: 18px;
+  border: 4px solid #111a25;
+  box-shadow: 0 30px 50px -20px rgba(0, 0, 0, 0.9);
+}
+.ag-shots .caption {
+  text-align: right;
+  margin-right: calc(19% + 16px);
+}
+/* On a phone the phone's own screen is the natural picture: it replaces the window. */
+@media (max-width: 760px) {
+  .ag-devices {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .ag-win {
+    display: none;
+  }
+  .ag-phone {
+    width: 70%;
+    max-width: 300px;
+    margin-inline: auto;
+  }
+  .ag-shots .caption {
+    margin-right: 0;
+    text-align: center;
+  }
+}
+
+.ag-shows {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr)); /* six: three by two, two by three, or one */
+  gap: 12px;
+  margin-top: 16px;
+}
+.ag-show {
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  gap: 8px;
+  min-width: 0;
+  padding: 18px 20px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: linear-gradient(180deg, var(--surface-2), var(--surface));
+}
+.ag-show p {
+  font-size: 14.5px;
+  line-height: 1.5;
+}
+.ag-word {
+  white-space: nowrap;
+}
+.ag-show code {
+  color: var(--cyan);
+  font-size: 12.5px;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+/* ── Connect your agent: three numbered steps, each command on its own line with Copy ── */
+.ag-connect {
+  display: grid;
+  gap: 14px;
+  counter-reset: none;
+}
+.ag-step {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr);
+  gap: 16px;
+  padding: 20px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: linear-gradient(180deg, var(--surface-2), var(--surface));
+}
+.ag-step-n {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 1px solid rgba(34, 211, 238, 0.5);
+  color: var(--cyan);
+  font-family: var(--font-jetbrains), ui-monospace, monospace;
+  font-size: 15px;
+  font-weight: 600;
+}
+.ag-step-body {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+.ag-step-body > p {
+  font-size: 15px;
+}
+.ag-version {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  align-items: baseline;
+  font-size: 14px;
+}
+@media (max-width: 640px) {
+  .ag-step {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 10px;
+    padding: 16px;
+  }
+  .ag-step .cl-line {
+    padding-left: 14px;
+  }
+}
+
+/* The prompt: a terminal-like box, its Copy button first in reading order. */
 .ag-prompt {
   width: 100%;
   max-width: 1000px;
@@ -53,7 +251,6 @@
 .ag-prompt-text {
   margin: 0;
   padding: 20px 24px 24px;
-  max-height: 460px;
   overflow: auto;
   font-family: var(--font-jetbrains), ui-monospace, monospace;
   font-size: 13.5px;
@@ -65,6 +262,9 @@
 }
 
 /* How it works: the detail, quieter than the prompt. */
+.ag-how {
+  padding-block: clamp(48px, 6vw, 80px) 28px;
+}
 .ag-sub {
   border-top: 0;
   padding-block: 12px 28px;
@@ -73,14 +273,10 @@
 .ag-sub .cl-cmds {
   grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
 }
-.ag-h3 {
-  font-size: 17px;
-  font-weight: 650;
-}
 
 @media (max-width: 640px) {
   .ag-hero {
-    padding-block: calc(var(--nav-h) + 32px) 32px;
+    padding-block: calc(var(--nav-h) + 32px) 40px;
   }
   .ag-prompt-bar {
     padding-left: 14px;
@@ -92,6 +288,458 @@
   .ag-prompt-text {
     font-size: 12px;
     padding: 16px;
+  }
+}
+
+/* ── The chat that plays (AgentDemo): the app's dark chat, drawn small. Every piece is always laid out; `data-on`
+   fades it in (`slow` on `enter`, rising 8 px) or out (`fast` on `exit`), so the frame never changes size. ── */
+.agd {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  width: 100%;
+  max-width: 440px;
+  min-width: 0;
+}
+@media (max-width: 1023px) {
+  .agd {
+    justify-self: start;
+  }
+}
+.agd-chat {
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  border-radius: 18px;
+  border: 1px solid var(--line-2);
+  background: #0b141a;
+  overflow: hidden;
+  box-shadow:
+    0 50px 110px -44px #000,
+    0 0 90px -34px rgba(34, 211, 238, 0.28);
+  transition: opacity var(--dur-slow) var(--ease-move);
+}
+.agd-chat[data-fading] {
+  opacity: 0;
+}
+.agd-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--line);
+}
+.agd-avatar {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  flex: none;
+  border-radius: 50%;
+  background: #0f2a33;
+}
+.agd-who {
+  display: grid;
+  min-width: 0;
+  line-height: 1.25;
+}
+.agd-who b {
+  font-size: 14.5px;
+  font-weight: 650;
+  color: var(--text);
+}
+.agd-sub {
+  font-size: 12px;
+  color: var(--dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.agd-sub[data-thinking] {
+  color: var(--cyan);
+}
+.agd-body {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  padding: 14px 12px 16px;
+  background:
+    radial-gradient(ellipse at 20% 0%, rgba(34, 211, 238, 0.05), transparent 60%),
+    #0b141a;
+}
+.agd-row {
+  display: flex;
+  min-width: 0;
+}
+.agd-row--out {
+  justify-content: flex-end;
+}
+/* The thinking line and Casper's answer share one place: one leaves as the other arrives. */
+.agd-stack {
+  display: grid;
+  justify-items: start;
+}
+.agd-stack > * {
+  grid-area: 1 / 1;
+}
+.agd-bubble {
+  max-width: 82%;
+  margin: 0;
+  padding: 7px 11px;
+  border-radius: 12px;
+  font-size: 13.5px;
+  line-height: 1.4;
+}
+.agd-bubble--out {
+  background: #005c4b;
+  color: #e9edef;
+  border-top-right-radius: 4px;
+}
+.agd-bubble--in {
+  background: #1f2c34;
+  color: #e9edef;
+  border-top-left-radius: 4px;
+}
+.agd-typing {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 9px 12px;
+  border-radius: 12px;
+  border-top-left-radius: 4px;
+  background: #1f2c34;
+  color: var(--cyan);
+  font-size: 12.5px;
+}
+.agd-dots {
+  display: inline-flex;
+  gap: 3px;
+}
+.agd-dots i {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.4;
+}
+.agd[data-playing] .agd-typing[data-on="true"] .agd-dots i {
+  animation: agd-dot 1.2s var(--ease-move) infinite;
+}
+.agd-dots i:nth-child(2) {
+  animation-delay: 0.15s !important;
+}
+.agd-dots i:nth-child(3) {
+  animation-delay: 0.3s !important;
+}
+@keyframes agd-dot {
+  0%,
+  60%,
+  100% {
+    opacity: 0.35;
+    transform: none;
+  }
+  30% {
+    opacity: 1;
+    transform: translateY(-2px);
+  }
+}
+
+/* A task card: the app's StatusCard, drawn small (apps/ui/src/components/chat/StatusCard.tsx). */
+.agd-card {
+  --tone: var(--dim);
+  display: grid;
+  gap: 6px;
+  width: min(100%, 340px);
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--line-2);
+  background: #111b21;
+  font-size: 11.5px;
+  color: rgba(233, 237, 239, 0.65);
+}
+.agd-card[data-status="running"] {
+  --tone: var(--cyan);
+}
+.agd-card[data-status="done"] {
+  --tone: var(--mint);
+}
+.agd-card-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.agd-dot {
+  width: 8px;
+  height: 8px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--tone);
+  transition: background-color var(--dur-base) var(--ease-enter);
+}
+.agd-title {
+  flex: 1;
+  min-width: 0;
+  color: #e9edef;
+  font-size: 13.5px;
+  font-weight: 650;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.agd-status {
+  flex: none;
+  color: var(--tone);
+  font-size: 11px;
+  font-weight: 600;
+}
+.agd-bar {
+  height: 4px;
+  border-radius: 999px;
+  background: rgba(233, 237, 239, 0.1);
+  overflow: hidden;
+}
+.agd-bar span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--tone);
+  transform-origin: left;
+  transition:
+    transform 0.9s var(--ease-move),
+    background-color var(--dur-base) var(--ease-enter);
+}
+.agd-meta,
+.agd-foot {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+  white-space: nowrap;
+}
+.agd-meta > span,
+.agd-foot > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.agd-foot {
+  color: rgba(233, 237, 239, 0.55);
+}
+.agd-now b {
+  font-weight: 600;
+  color: rgba(233, 237, 239, 0.8);
+}
+.agd-elapsed {
+  flex: none;
+}
+.agd-add {
+  color: var(--mint);
+}
+.agd-del {
+  color: #f87171;
+}
+
+/* A question with buttons: the app's MessageButtons (apps/ui/src/components/chat/MessageButtons.tsx and .message-button
+   in its index.css), in its dark theme. Tiles under the bubble, two to a row; the primary one by its accent edge and
+   link-blue text over a light accent wash. Once answered, the chosen one has ✓ and the other is off. */
+.agd-ask {
+  display: grid;
+  justify-items: start;
+  gap: 4px;
+  width: fit-content;
+  min-width: 216px;
+  max-width: 82%;
+}
+.agd-ask .agd-bubble {
+  max-width: none;
+}
+.agd-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  width: 100%;
+}
+.agd-button {
+  display: inline-flex;
+  flex: 1 1 calc(50% - 3px);
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 0;
+  min-height: 38px;
+  padding: 6px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(233, 237, 239, 0.1);
+  background: #202c33;
+  color: #e9edef;
+  font-size: 13.5px;
+  font-weight: 500;
+  line-height: 1.2;
+  box-shadow: 0 1px 0.5px rgba(11, 20, 26, 0.13);
+  transition:
+    opacity var(--dur-base) var(--ease-enter),
+    background-color var(--dur-base) var(--ease-enter);
+}
+.agd-button[data-style="primary"] {
+  border-color: rgba(0, 168, 132, 0.55);
+  background: color-mix(in srgb, #00a884 12%, #202c33);
+  color: #8ad3f6;
+}
+.agd-button[data-chosen] {
+  font-weight: 600;
+}
+.agd-buttons[data-answered] .agd-button:not([data-chosen]) {
+  opacity: 0.5;
+}
+.agd-button[data-sending] {
+  opacity: 0.7;
+}
+.agd-spin,
+.agd-check {
+  display: none;
+}
+.agd-button[data-sending] .agd-spin {
+  display: block;
+  width: 12px;
+  height: 12px;
+  flex: none;
+  border-radius: 50%;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  animation: agd-spin 0.8s linear infinite;
+}
+.agd-button[data-chosen] .agd-check {
+  display: inline;
+}
+@keyframes agd-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.agd-closed {
+  padding: 0 4px;
+  color: rgba(233, 237, 239, 0.55);
+  font-size: 11.5px;
+  line-height: 16px;
+}
+/* Your tap, as the app draws a press: "↩ Merge" in your bubble, and the bot's 👍 under it. */
+.agd-press-row {
+  flex-direction: column;
+  align-items: flex-end;
+}
+.agd-press-mark {
+  color: rgba(233, 237, 239, 0.6);
+}
+.agd-react {
+  margin: -6px 10px 0 0;
+  padding: 1px 6px;
+  border-radius: 999px;
+  border: 2px solid #0b141a;
+  background: #202c33;
+  font-size: 12px;
+  line-height: 16px;
+}
+
+/* A routine: one line, as the app shows several in a row. */
+.agd-routine {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  width: min(100%, 340px);
+  padding: 9px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--line-2);
+  background: #111b21;
+  color: rgba(233, 237, 239, 0.65);
+  font-size: 12px;
+  line-height: 1.45;
+}
+.agd-routine-mark {
+  color: var(--cyan);
+  font-size: 13px;
+}
+.agd-routine-text {
+  display: grid;
+  min-width: 0;
+}
+.agd-routine-text b {
+  color: #e9edef;
+  font-weight: 600;
+}
+.agd-ok {
+  color: var(--mint);
+}
+.agd-composer {
+  padding: 10px 12px;
+  background: var(--surface-2);
+  border-top: 1px solid var(--line);
+}
+.agd-composer span {
+  display: block;
+  padding: 8px 14px;
+  border-radius: 999px;
+  background: #1f2c34;
+  color: var(--dim);
+  font-size: 13px;
+}
+
+.agd [data-on] {
+  transition:
+    opacity var(--dur-slow) var(--ease-enter),
+    transform var(--dur-slow) var(--ease-enter),
+    visibility 0s;
+}
+.agd [data-on="false"] {
+  opacity: 0;
+  transform: translateY(8px);
+  visibility: hidden;
+  transition:
+    opacity var(--dur-fast) var(--ease-exit),
+    transform var(--dur-fast) var(--ease-exit),
+    visibility 0s var(--dur-fast);
+}
+/* The PR's size and the step line swap in place: they fade, they do not rise. */
+.agd .agd-pr[data-on],
+.agd .agd-now[data-on] {
+  transform: none;
+}
+
+.agd-caption {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 32px;
+}
+.agd-caption .caption {
+  color: var(--muted);
+}
+.agd-toggle {
+  min-height: 32px;
+  padding: 4px 12px;
+  border: 1px solid var(--line-2);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12.5px;
+  cursor: pointer;
+  transition:
+    border-color var(--dur-fast) var(--ease-exit),
+    color var(--dur-fast) var(--ease-exit);
+}
+.agd-toggle:hover,
+.agd-toggle:focus-visible {
+  border-color: rgba(34, 211, 238, 0.5);
+  color: var(--text);
+}
+
+/* Reduced motion: the finished frame, and nothing moves (the component shows it; this stops the rest). */
+@media (prefers-reduced-motion: reduce) {
+  .agd *,
+  .agd-chat {
+    transition: none !important;
+    animation: none !important;
   }
 }
 

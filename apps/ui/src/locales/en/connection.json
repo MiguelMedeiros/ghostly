@@ -51,6 +51,7 @@
     "lostFrom": "Live connection lost ({{from}})",
     "messagesWait": "messages wait for {{contact}}",
     "moved": "Moved from {{from}} to {{transport}}",
+    "notBack": "Live connection not back after this app restarted ({{from}})",
     "offFrom": "off {{from}}",
     "setTo": "set to {{transport}}",
     "started": "this app started",

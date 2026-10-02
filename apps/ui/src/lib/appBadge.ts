@@ -1,12 +1,13 @@
 import { useEffect, useSyncExternalStore } from "react";
 import { engine } from "@ghostly/browser/platform/engine";
 import { getUnreadCount, listSessions } from "./storage";
-import { groupReadAt } from "./groups";
+import { groupReadAt, groupUnreadAt } from "./groups";
 import { MUTE_EVENT, groupChat, mutedFor } from "./chatMute";
 import type { ChatSession } from "./types";
 
 /*
- * The number on the app's icon (the Badging API: an installed web app's icon, where the system shows one). It
+ * The number on the app's icon (the Badging API: an installed web app's icon, where the system shows one; on
+ * Desktop, the Dock icon on macOS and the launcher's on Linux desktops that show one). It
  * follows the chat mute (#250): a muted chat's messages make no sound and no notification, so they do not
  * count here either, except a mention of me in a group that lets mentions through. Unread in the list stays
  * as it is: the list shows a muted chat's count in grey.
@@ -16,6 +17,7 @@ import type { ChatSession } from "./types";
 export interface BadgeGroup {
   id: string;
   lastMessageAt: number;
+  lastPeerMessageAt?: number;
   lastMentionAt?: number;
   invitation?: unknown;
 }
@@ -28,27 +30,40 @@ export function badgeCount(sessions: readonly ChatSession[], groups: readonly Ba
   }
   for (const group of groups) {
     const readAt = groupReadAt(group.id);
-    if (group.invitation || group.lastMessageAt <= readAt) continue;
+    if (group.invitation || groupUnreadAt(group) <= readAt) continue;
     const mention = (group.lastMentionAt ?? 0) > readAt;
     if (!mutedFor(groupChat(group.id), mention, now)) count += 1;
   }
   return count;
 }
 
-interface BadgeNavigator {
+export interface BadgeNavigator {
   setAppBadge?: (count?: number) => Promise<void>;
   clearAppBadge?: () => Promise<void>;
 }
 
+/**
+ * Where the number goes instead of `navigator`: Desktop's Dock or launcher icon, whose WebView has no Badging API.
+ * Its host sets it before the app is drawn, with the Badging API's two calls.
+ */
+let target: BadgeNavigator | null = null;
+let shown: number | null = null;
+
+/** Sends the number to `next` rather than to `navigator` (the Desktop host does); `null` goes back to the browser's. */
+export function setAppBadgeTarget(next: BadgeNavigator | null): void {
+  target = next;
+  shown = null;
+}
+
+const badgeNavigator = (): BadgeNavigator => target ?? (typeof navigator === "undefined" ? {} : navigator as BadgeNavigator);
+
 /** Whether this browser can put a number on the app's icon at all. */
-export function canBadge(nav: BadgeNavigator = navigator as BadgeNavigator): boolean {
+export function canBadge(nav: BadgeNavigator = badgeNavigator()): boolean {
   return typeof nav.setAppBadge === "function";
 }
 
-let shown: number | null = null;
-
 /** Puts `count` on the icon, or clears it at 0. Quiet where there is no badge; only a change is sent. */
-export function showAppBadge(count: number, nav: BadgeNavigator = navigator as BadgeNavigator): void {
+export function showAppBadge(count: number, nav: BadgeNavigator = badgeNavigator()): void {
   if (!canBadge(nav) || count === shown) return;
   shown = count;
   try {

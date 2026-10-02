@@ -1,4 +1,12 @@
 {
+  "buttons": {
+    "answers": "الإجابات",
+    "chosen": "مُختارة",
+    "closed": "مغلقة",
+    "failed": "تعذّر الإرسال",
+    "jump": "الانتقال إلى السؤال",
+    "sending": "جارٍ الإرسال…"
+  },
   "panel": {
     "activeCount": "{{count}} نشطة",
     "allOk": "كلها ناجحة",
@@ -16,7 +24,7 @@
     "title": "المهام"
   },
   "routine": {
-    "cron": "Cron:",
+    "cron": "Cron",
     "label": "روتين: {{name}}، {{state}}",
     "lastRun": "آخر تشغيل: {{result}}",
     "next": "التالي {{when}}",
@@ -27,6 +35,7 @@
       "skipped": "تم التخطي"
     },
     "runs": "آخر التشغيلات",
+    "schedule": "الجدول",
     "state": {
       "active": "نشط",
       "paused": "متوقف مؤقتًا"

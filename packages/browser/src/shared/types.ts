@@ -194,8 +194,13 @@ export interface GroupEdgeView {
    * `waiting`: nothing heard from the member's app yet. `error`: the last attempt failed (`error` says why).
    */
   state: "open" | "connecting" | "waiting" | "error";
-  /** The transport carrying the edge while it is open. Edges only offer WebRTC today. */
+  /** The transport carrying the edge while it is open: WebRTC, or Iroh or HyperDHT where one side has none. */
   transport?: PairedTransport;
+  /**
+   * Waiting because this device has no free native slot for it (a member reached over Iroh or HyperDHT, and the
+   * device's native listeners held by chats and other group links): it is tried again as one frees up.
+   */
+  noSlot?: true;
   /** When this device last heard from the member on this edge, in ms (0: never). */
   lastSeenAt: number;
   error?: string;
@@ -229,6 +234,8 @@ export interface GroupView {
   /** Contact chats that are members, by chat id → member key. */
   memberLinks: Record<string, string>;
   lastMessageAt: number;
+  /** When the latest message from another member arrived (what makes the group unread; mine and membership lines do not); absent for none. */
+  lastPeerMessageAt?: number;
   /** When the latest message that names me arrived; absent for none. */
   lastMentionAt?: number;
   /** The latest reaction in the group, for the chat list. */
@@ -471,6 +478,8 @@ export interface MintView {
   balance: number;
   /** Null until the mint answered once. */
   info: MintInfoView | null;
+  /** What it still waits for (see `mintAwaiting`), when it does: removing it asks about these first. */
+  awaiting?: WalletAwaitingView[];
 }
 
 /** What a mint says about itself and what it charges. */
@@ -735,6 +744,16 @@ export interface StoredMessage {
    * It belongs to the version it came with: an edit brings its own, or leaves the message a text.
    */
   card?: StatusCard;
+  /**
+   * A reply that presses a button of this side's own message (WISP 4xx · Message Buttons), as the author's engine took
+   * it: set only when the button was open for this person. What `button.pressed` reports.
+   */
+  press?: MessagePress;
+  /**
+   * A question of mine with buttons whose text went on the DHT floor or into a hold, which carry text alone (WISP 4xx ·
+   * Message Buttons): `due` until its buttons go again live, as an edit of the buttons alone; `sent` once they did.
+   */
+  buttonsRestore?: "due" | "sent";
 }
 
 /** A page of a chat's history, oldest first, and whether older messages remain (`messagePage`). */
@@ -776,6 +795,11 @@ export interface MessageEdit {
   history: MessageVersion[];
   /** Mine: the contact has not confirmed this edit yet. It goes by itself once the chat is live and both sides offer edit/1. */
   pending?: true;
+  /**
+   * Mine: the engine's own edit that sends a question's buttons again, the text unchanged (WISP 4xx · Message Buttons),
+   * never one a person or a bot made. The bot's event stream reports none for it; a later edit makes a new one without it.
+   */
+  restore?: true;
 }
 
 export interface MessageVersion { at: number; text: string }
@@ -785,6 +809,16 @@ export interface MessageVersion { at: number; text: string }
  * with the reply; the receiver keeps its own view of the original when it has it (`messageId`), and the line and the
  * author then come from there, not from the wire.
  */
+/** A button press on this side's message (WISP 4xx · Message Buttons). */
+export interface MessagePress {
+  /** The message with the buttons, its id here. */
+  messageId: string;
+  button: string;
+  label: string;
+  /** Named by its label or id in the text, not by the reply (the DHT floor, or an app without buttons). */
+  inferred?: true;
+}
+
 export interface MessageReply {
   /** The original's id in this chat as both sides know it: a paired chat's wire, file or payment id; a group message id. */
   id: string;
@@ -794,6 +828,8 @@ export interface MessageReply {
   from?: "me" | "peer";
   /** A group's original: its author's member key. */
   member?: string;
+  /** A button press (WISP 4xx · Message Buttons): the original's button this reply presses, its text the label. */
+  button?: string;
   /**
    * The original here, when it was found in this chat as the reply was kept (always, for a reply sent here). Without
    * it the line is only what the replier's app said: shown, but marked as not checked.
@@ -1417,11 +1453,14 @@ export interface EngineState {
     direct?: boolean;
     /** How reads go and how each relay is doing, for the connection panel's Details. */
     discovery?: DiscoveryStatus;
-    /**
-     * False where this client has no WebRTC (Ghostly Desktop on Linux: WebKitGTK has none). Group links are WebRTC
-     * only (WISP 9xx), so no member of a group can be reached from it. Absent where it has.
-     */
+    /** False where this client has no WebRTC (Ghostly Desktop on Linux: WebKitGTK has none). Absent where it has. */
     webrtc?: false;
+    /**
+     * False where a group's links have no transport at all here: no WebRTC and no native transport (WISP 9xx §
+     * Transports), so no member of a group can be reached from it. Absent where they have one (the Linux Desktop runs
+     * Iroh and HyperDHT).
+     */
+    groupLinks?: false;
   };
   links: LinkView[];
   services: ServiceView[];

@@ -29,6 +29,7 @@ import { useComposition } from "../hooks/useComposition";
 import "./composer/composer.css";
 import { touchOnly } from "../lib/touchOnly";
 import { formatAmount } from "../lib/amount";
+import { errorText } from "../lib/errorText";
 
 interface MessageInputProps {
   draftId?: string;
@@ -179,6 +180,8 @@ export function MessageInput({
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   const composition = useComposition();
   const [canRecord] = useState(canRecordVoice);
+  /** A voice message being recorded: the mic stays (and its recording with it) even if an edit or a reply fills the field. */
+  const [recording, setRecording] = useState(false);
   const sharedIdentities = useSharedIdentityCount(identities?.peerKey);
   const hasCamera = useHasCamera();
   const picker = useMentionPicker({ mentions, text, setText, textareaRef, caretRef });
@@ -277,7 +280,7 @@ export function MessageInput({
           const send = onSendRef.current;
           err = await (next.named.length ? send(next.words, next.named) : next.preview ? send(next.words, undefined, { preview: next.preview }) : send(next.words));
         } catch (e) {
-          err = e instanceof Error ? e.message : String(e);
+          err = errorText(e, t);
         }
         if (err) {
           const failed = outbox.current.splice(0).map((o) => o.words);
@@ -441,7 +444,7 @@ export function MessageInput({
     if (!onSendFile || disabled || !pasteShowsNothing(data)) return false;
     const reading = platformPastedFiles();
     if (!reading) return false;
-    reading.then((found) => { if (found.length) offerRef.current(found); }, (error: unknown) => showToast(error instanceof Error ? error.message : String(error)));
+    reading.then((found) => { if (found.length) offerRef.current(found); }, (error: unknown) => showToast(errorText(error, t)));
     return true;
   };
   const takeRef = useRef(takePaste); takeRef.current = takePaste;
@@ -660,14 +663,14 @@ export function MessageInput({
         </div>
 
         {/* Send button; the mic while there is nothing to send, as in WhatsApp */}
-        {onSendFile && canRecord && !text.trim() ? (
+        {onSendFile && canRecord && (recording || !text.trim()) ? (
           <VoiceRecorderButton
             onSend={(file, voice) => onSendFile(file, voice)}
             unavailable={fileUnavailable}
             disabled={disabled}
             onError={showToast}
             // Recording: the composer's pickers close, and the contact sees "recording audio…" until it ends.
-            onActiveChange={(active) => { if (active) closeAll(); onTyping?.(active, "recording"); }}
+            onActiveChange={(active) => { setRecording(active); if (active) closeAll(); onTyping?.(active, "recording"); }}
           />
         ) : <button
           aria-label={t("composer.sendMessage")}
@@ -711,7 +714,7 @@ export function MessageInput({
       </div>
 
       {onSendFile && <>
-        <input ref={fileInputRef} type="file" className="hidden" data-testid="file-input" disabled={disabled || !!fileUnavailable}
+        <input ref={fileInputRef} type="file" multiple className="hidden" data-testid="file-input" disabled={disabled || !!fileUnavailable}
           onChange={(e) => void sendFiles(e.target.files, e.target)} />
         <input ref={mediaInputRef} type="file" accept="image/*,video/*" multiple className="hidden" data-testid="media-input" disabled={disabled || !!fileUnavailable}
           onChange={(e) => void sendFiles(e.target.files, e.target)} />

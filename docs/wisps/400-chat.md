@@ -280,6 +280,10 @@ A pin names the message by the same id a reply does ([above](#replies)), or `""`
 
 A bot may send a **status card** (revision 2026-09-29): a task or a routine shown as a small card beside the message's text, which is its fallback, and kept current by editing the message ([4xx · Status Cards](4xx-status-cards.md)). It rides as `sc` on every path that carries a message's own fields: a 1:1 chat's live session ([401](401-paired-chat.md#status-cards)), a private group ([mesh](9xx-group-mesh.md#status-cards)) and a community ([community](9xx-group-community.md#status-cards)); the DHT floor and a hold carry the text alone. A message with a card takes up to 5,000 edits (a text keeps its 100), and a card belongs to the version it came with. Only the headless runtime sends cards; every app shows them, and an app without cards shows the text.
 
+## Message buttons
+
+A bot may put **buttons** under its message (revision 2026-09-30): a status card of kind `buttons` beside the text, which shows with them and is their fallback ([4xx · Message Buttons](4xx-message-buttons.md)). A press is a reply to that message whose text is the button's label and whose `r` carries `b`, the button's id; an app from before drops `b` and shows an ordinary reply. The author's app takes a reply as a press only for its own buttons that are still open, once per person for a `once` button. The bot marks the answer or closes the question with an edit.
+
 ## Candidate semantics
 
 Future messages need a stable sender-scoped message ID, authenticated channel/participation context, sequence within a sender generation, content type and bounded body. Distinguish locally queued, sent, received, durably stored and read; only advertise receipts actually implemented. Retries reuse IDs. Deduplication retention must cover the declared retry window and survive restart where durable delivery is promised.

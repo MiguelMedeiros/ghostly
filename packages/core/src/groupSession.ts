@@ -1071,7 +1071,7 @@ export class GroupSession {
       const frame = wrapGroupMeta(meta, this.epoch, epochKeys(secret, this.id, this.epoch).message);
       for (const key of this.others) this.hooks.send(key, frame);
     }
-    const change = groupMetaChange(before, meta);
+    const change = groupMetaChange(before, meta, this.state.name);
     if (change) this.hooks.metaChanged?.(this.myKey, change);
     this.hooks.changed();
   }
@@ -1104,8 +1104,9 @@ export class GroupSession {
     const before = this.state.meta;
     this.state.meta = opened.meta;
     await this.persist();
-    // A change of hubs alone is no line in the history.
-    const change = groupMetaChange(before, opened.meta);
+    // A change of hubs alone is no line in the history, nor what the group looked like when I got in: the first
+    // statement I take, signed under a commit before mine, is no change made while I was a member.
+    const change = !before && !rosterHas(commit.m, this.myKey) ? null : groupMetaChange(before, opened.meta, this.state.name);
     if (change) this.hooks.metaChanged?.(s.by, change);
     this.hooks.changed();
     this.took({ t: "group-meta", ...s, k: frame.k as number, nn: frame.nn, c: frame.c });

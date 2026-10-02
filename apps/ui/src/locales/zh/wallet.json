@@ -101,7 +101,7 @@
     "lastBalance": "最后已知余额：{{balance}} {{unit}}",
     "lastBalanceAt": "最后已知余额：{{balance}} {{unit}} · {{date}}",
     "maxFee": "你接受的最高手续费",
-    "maxFeeInput": "最高手续费（sats）",
+    "maxFeeInput": "最高手续费（{{unit}}）",
     "newAddress": "新地址",
     "notConnected": "{{label}} 未连接",
     "notConnectedDefault": "Bitcoin 来源未连接",
@@ -173,7 +173,8 @@
     "createInvoice": "创建 Lightning 发票",
     "fee": {
       "none": "花费时无手续费",
-      "perProof": "每个证明 {{fee}} sat（每笔付款约 1 sat）"
+      "perProof": "每个证明 {{fee}} sat（每笔付款约 1 sat）",
+      "perProofTest": "每个证明 {{fee}} 测试 sat（每笔付款约 1 测试 sat）"
     },
     "history": {
       "fee": "手续费 {{amount}}",
@@ -181,7 +182,12 @@
       "movements": "{{count}} 笔记录",
       "movementsOne": "1 笔记录",
       "noFee": "无手续费",
-      "none": "暂无记录"
+      "none": "暂无记录",
+      "note": {
+        "paymentFailed": "一笔闪电网络付款失败",
+        "requestPaid": "通过闪电网络支付的请求",
+        "testCoins": "来自测试铸币所的测试币"
+      }
     },
     "intent": "{{amount}} {{unit}} · {{state}}",
     "invoiceFor": "{{amount}} 的发票",
@@ -191,15 +197,20 @@
     "newAmount": "更改金额",
     "paid": "已付款。",
     "pastePlaceholder": "粘贴 Lightning 发票、Lightning 地址或 ecash 代币",
-    "payAmount": "支付 {{amount}} sats",
+    "payAmount": "支付 {{amount}} {{unit}}",
     "payLine": "支付 {{amount}}{{fees}}",
     "pendingMint": "付款仍在铸币厂处理中。",
     "primary": "主要",
-    "received": "⚡ 已收到 {{amount}} sats",
+    "received": "⚡ 已收到 {{amount}} {{unit}}",
     "redeem": "兑换 ecash 代币",
-    "redeemed": "已兑换 {{amount}} sats。",
+    "redeemed": "已兑换 {{amount}} {{unit}}。",
     "remove": "移除",
+    "removeLastMint": "这是钱包的最后一个铸币厂：移除它会移除 {{label}} 钱包及其 Lightning 卡。",
     "removeMint": "移除 {{name}}",
+    "removeMintAwaiting": "它仍在等待收款：",
+    "removeMintConsent": "之后付给它的钱，只有在我重新添加这个铸币厂后才会显示。",
+    "removeMintHint": "以后可以再次添加。",
+    "removeMintQuestion": "移除 {{name}}？",
     "settings": "设置",
     "testBalance": "{{amount}} 测试 sats（没有价值）",
     "testMintInvoice": "正在等待付款… 测试铸币厂会自动把每张发票标记为已付，所以这张发票只有在联系人于聊天中支付后才算数。现在就要测试 sats，请使用上方的“获取测试币”。",
@@ -331,7 +342,7 @@
     "asking": "正在询问 {{source}}…",
     "askingInvoice": "正在索取发票…",
     "askingSource": "正在询问来源…",
-    "asksExactly": "要求正好 {{amount}} sats。",
+    "asksExactly": "要求正好 {{amount}} {{unit}}。",
     "balance": "余额",
     "balanceHint": "Lightning 使用你的 Cashu 余额：发票付入你的 Cashu 铸币厂，也从中付出。",
     "balanceSource": "{{unit}} · {{source}}",
@@ -361,17 +372,26 @@
     "lookupAsks": "查询会询问 {{domain}} 接受什么：该服务器会得知你即将向它付款。",
     "mismatch": "发票与你选择的金额不符",
     "notInvoice": "这不是 Lightning 发票，也不是 Lightning 地址。",
-    "paidTo": "已向 {{to}} 支付 {{amount}} sats ✓",
+    "opState": {
+      "expired": "已过期",
+      "failed": "失败",
+      "open": "等待付款",
+      "paid": "已支付",
+      "pending": "待处理",
+      "sending": "发送中",
+      "unknown": "结果未知"
+    },
+    "paidTo": "已向 {{to}} 支付 {{amount}} {{unit}} ✓",
     "pastePlaceholder": "粘贴 Lightning 发票或 Lightning 地址",
     "pay": "支付",
     "payTo": "向 {{to}} 支付 {{amount}}{{fees}}",
     "paying": "正在支付…",
     "pending": "付款仍在处理中。正在核实，不会重复支付。",
     "recent": "最近",
-    "recentIn": "发票 · {{amount}} sats",
-    "recentOut": "付款 · {{amount}} sats",
+    "recentIn": "发票 · {{amount}} {{unit}}",
+    "recentOut": "付款 · {{amount}} {{unit}}",
     "says": "{{domain}} 说：{{message}}",
-    "takesRange": "接受 {{min}} 到 {{max}} sats。",
+    "takesRange": "接受 {{min}} 到 {{max}} {{unit}}。",
     "theSource": "来源",
     "waiting": "正在等待付款… 任何 Lightning 钱包都可以支付；来源确认后，这里会显示已付。"
   },
@@ -465,7 +485,6 @@
     "inUse": "使用中",
     "instant": "{{wallet}}（即时）",
     "intent": "{{amount}} {{unit}} · {{state}}",
-    "intentSats": "{{amount}} sats · {{state}}",
     "network": "网络",
     "networkStuck": "此网络没有响应。你可以切换到其他网络。",
     "noBalance": "还没有可发送的余额",
@@ -494,6 +513,7 @@
       "reaches": "之后支付给它们的款项仍会到达 {{source}}；只是 Ghostly 不再看到。",
       "reachesWallet": "之后支付给它们的款项仍会到达该钱包；只是 Ghostly 不再看到。"
     },
+    "and": "{{first}}和{{second}}",
     "ask": "移除 {{label}}…",
     "awaiting": "仍在等待收款",
     "backupFirst": "先备份",
@@ -512,6 +532,10 @@
       "waitsReal": "我明白：移除后支付到其未结请求和发票的款项都会丢失，而且是真实资金。"
     },
     "copyTokens": "复制 Ecash 备份",
+    "gas": {
+      "mainnet": "{{amount}} ETH",
+      "testnet": "{{amount}} 测试 ETH"
+    },
     "held": {
       "elsewhere": "你的资金仍留在原处：Ghostly 只是忘记如何连接它。你之后可以再次连接。",
       "elsewhereIn": "你的资金仍留在 {{source}}：Ghostly 只是忘记如何连接它。你之后可以再次连接。",
@@ -522,6 +546,13 @@
     },
     "hintDevice": "它的密钥和设置将离开此设备。其他钱包保持不变。",
     "hintElsewhere": "Ghostly 只是忘记如何连接它；资金仍留在原处。",
+    "item": {
+      "invoice": "一张 {{amount}} 的发票，尚未支付",
+      "paid": "已为发票支付 {{amount}}，尚未从铸币所领取",
+      "request": "聊天中一笔 {{amount}} 的请求，仍未完成",
+      "sent": "你发送的 {{amount}} ecash，尚未被领取",
+      "unclaimed": "铸币所称已为发票发行 {{amount}}，但这里从未收到"
+    },
     "label": "移除此钱包",
     "noBackup": "Ghostly 无法再次显示此钱包的恢复短语：只有你创建时写下的短语才能找回这笔资金。",
     "noTokens": "没有可复制的 Ecash。",
@@ -693,11 +724,17 @@
   },
   "ui": {
     "amountIn": "以 {{unit}} 计的金额",
+    "amountUnclear": "金额不明确：请写成 {{example}} 这样",
+    "amountWhole": "只能输入整数，例如 {{example}}",
     "gettingAddress": "正在获取地址… 服务商响应后会显示在这里。",
     "history": "记录",
     "receive": "收款",
     "receivingAddress": "收款地址",
     "send": "发送"
+  },
+  "unseen": {
+    "real": "{{place}}，新到 {{amount}} sats",
+    "test": "{{place}}，新到 {{amount}} 测试 sats"
   },
   "usdt": {
     "approve": "在你批准检查之前，不会发送任何内容。",

@@ -6,7 +6,7 @@ import {
 } from "@ghostly/core";
 import type { GroupEvent, GroupJoinStage, GroupView, StoredGroup, StoredMessage } from "../shared/types";
 import { groupReply } from "../shared/replies";
-import { FramesTaken, editKey, mentionAt, mentionFields, type GroupStore, type GroupsHost } from "./groups";
+import { FramesTaken, cameAt, editKey, mentionAt, mentionFields, peerMessageAt, type GroupStore, type GroupsHost } from "./groups";
 import { traceJoin } from "./joinTrace";
 
 /** The line a change of a group's picture leaves in its history (both profiles). */
@@ -210,6 +210,8 @@ export class Communities {
   private readonly stored = new Map<string, StoredGroup>();
   private readonly live = new Map<string, Live>();
   private readonly lastMessageAt = new Map<string, number>();
+  /** The latest message from another member, per group: what makes it unread in the list. */
+  private readonly lastPeerMessageAt = new Map<string, number>();
   private readonly lastMentionAt = new Map<string, number>();
   private readonly refused = new Map<string, number>();
   private readonly lastKnock = new Map<string, number>();
@@ -245,8 +247,11 @@ export class Communities {
     for (const group of groups) {
       this.stored.set(group.id, group);
       if (group.community) this.attach(group.community);
-      const history = await this.store.getMessages(MESSAGE_LINK(group.id)), last = history[history.length - 1];
+      // Messages only, as while the app runs: a membership line or a payment's note moves neither the list nor unread.
+      const history = await this.store.getMessages(MESSAGE_LINK(group.id)), said = history.filter(m => !m.event && !m.groupPay);
+      const last = said[said.length - 1], lastPeer = [...said].reverse().find(m => m.sender !== "me");
       if (last) this.lastMessageAt.set(group.id, last.timestamp);
+      if (lastPeer) this.lastPeerMessageAt.set(group.id, lastPeer.timestamp);
       const mention = [...history].reverse().find(m => m.mentioned);
       if (mention) this.lastMentionAt.set(group.id, mention.timestamp);
       // Admissions in flight did not survive the restart; a joiner keeps its side.
@@ -263,7 +268,7 @@ export class Communities {
   views(): GroupView[] {
     return [...this.stored.values()].flatMap((group): GroupView[] => {
       const live = this.live.get(group.id);
-      const base = { id: group.id, profile: "community" as const, createdAt: group.createdAt, lastMessageAt: this.lastMessageAt.get(group.id) ?? 0, ...mentionAt(this.lastMentionAt, group.id), invited: [], memberLinks: {} };
+      const base = { id: group.id, profile: "community" as const, createdAt: group.createdAt, lastMessageAt: this.lastMessageAt.get(group.id) ?? 0, ...peerMessageAt(this.lastPeerMessageAt, group.id), ...mentionAt(this.lastMentionAt, group.id), invited: [], memberLinks: {} };
       if (group.joining && (!live || live.session.status === "lost")) {
         return [{ ...base, name: groupName(group.joining.name) ?? live?.session.name ?? "", isAdmin: false, members: [], canSend: false,
           invitation: { linkId: group.joining.linkId, contact: "", admin: group.joining.inviter, members: 0, accepted: true, viaLink: true, stage: this.joinStage(group) } }];
@@ -436,6 +441,7 @@ export class Communities {
     this.live.delete(groupId);
     this.stored.delete(groupId);
     this.lastMessageAt.delete(groupId);
+    this.lastPeerMessageAt.delete(groupId);
     this.lastMentionAt.delete(groupId);
     for (const linkId of [...this.host.edges(groupId).values(), ...this.host.entries(groupId).values()]) await this.host.closeEdge(linkId);
     await this.store.deleteGroup(groupId);
@@ -504,7 +510,9 @@ export class Communities {
           if (want()) {
             live.forceHub = false; live.hub = true; live.hubSince = now; live.emptySince = now;
             live.knocksScanned = false;
-            await this.publishBeacon(groupId, live, now, true);
+            // A write the relays' budget holds back is tried again in a moment (`BEACON_RETRY_MS`); meanwhile this hub
+            // goes on with its tick: alone, it is the door before its entry is listed (`doorHubs`).
+            await this.publishBeacon(groupId, live, now, true).catch(() => {});
             traceJoin(groupId, "hub.elected");
           }
         }
@@ -527,7 +535,8 @@ export class Communities {
       } else if (now - live.lastBeaconWrite >= COMMUNITY_TOPOLOGY.beaconEveryMs || !live.beacon.some(h => h.key === me)
         // A load that moved much (or filled up) is said at once, so members stop asking a full hub.
         || (now - live.lastBeaconWrite >= 5_000 && Math.abs(this.beaconLoad(groupId, live, now) - (live.beacon.find(h => h.key === me)?.load ?? load)) >= 8)) {
-        await this.publishBeacon(groupId, live, now, true);
+        // Held back, it does not hold the rest of the tick (knocks, entries, edges) with it.
+        await this.publishBeacon(groupId, live, now, true).catch(() => {});
       }
     }
     if (live.hub) {
@@ -794,8 +803,10 @@ export class Communities {
     if (!s.entryKey || !s.state.entry.seedB64 || s.roster.length >= COMMUNITY_LIMITS.members) return;
     const link = { g: groupId, host: s.entryKey };
     // The hubs that take turns at the door: listed lately and settled, the same set for every hub that
-    // reads the beacon (a closed app stays listed until its entry goes stale; a new hub waits a minute).
-    const hubs = doorHubs(live.beacon, now);
+    // reads the beacon (a closed app stays listed until its entry goes stale; a new hub waits a minute). A hub
+    // with no other in sight is the door at once, before its own entry is listed: a new group's first hub, whose
+    // beacon write waited for the relays' budget while another group's link signaled, answered no knock for a minute.
+    const hubs = doorHubs(live.beacon, now, s.myKey);
     if (!hubs.includes(s.myKey)) return;
     const door = [...hubs].sort()[0], doorSig = [...hubs].sort().join(",");
     // Just became the door (the one before went): whatever knocked meanwhile, in any record.
@@ -836,8 +847,10 @@ export class Communities {
       // neither would get through; so each attempt belongs to one hub, in turns of `KNOCK_SLOT_MS`:
       // the door first, then the others in the order they rank for this joiner, round again. A hub
       // opens only early in its turn and gives up before it ends, so turns never overlap.
+      // A lone door has no turn to leave to another hub: it answers again as soon as its last attempt is over (a joiner
+      // away when it answered, back after the attempt was given up, waited up to two minutes for the next turn).
       const waited = now - first, order = [door, ...rankHubs(key, hubs.filter(k => k !== door))];
-      const turn = Math.floor(waited / KNOCK_SLOT_MS) % order.length, early = waited % KNOCK_SLOT_MS < KNOCK_SLOT_OPEN_MS;
+      const turn = Math.floor(waited / KNOCK_SLOT_MS) % order.length, early = order.length === 1 || waited % KNOCK_SLOT_MS < KNOCK_SLOT_OPEN_MS;
       if (order[turn] !== s.myKey || !early || (waited >= KNOCK_SLOT_MS && !stillKnocking)) continue;
       if (live.pendingEntries.size >= MAX_PENDING_ENTRIES) break;
       // A hub with no room for one more member (its budget of connections) lets the next hub in turn answer.
@@ -867,7 +880,9 @@ export class Communities {
     const joining = group.joining!;
     const first = !this.lastKnock.has(group.id);
     this.lastKnock.set(group.id, now);
-    if (!first && now - joining.since < this.timings.patienceMs) this.host.expectPeer?.(joining.linkId);
+    // The first knock of this run too: after a restart the entry session starts again at the background pace, and the
+    // door's side, opened on this knock, waited up to half a minute for its answer.
+    if (first || now - joining.since < this.timings.patienceMs) this.host.expectPeer?.(joining.linkId);
     const me = identityFromSeedB64(joining.seedB64).pubKeyZ32, link = { g: group.id, host: joining.host };
     const started = Date.now();
     const read = async (n: number) => { const record = knockRecord(link, n); return { record, knocks: readKnocks(record, (await this.host.resolve(knockIdentity(record).pubKeyZ32, !first)) ?? []) }; };
@@ -1077,10 +1092,12 @@ export class Communities {
         // The sender picks the time: one far ahead would pin the group to the top of the list.
         const timestamp = receivedTimestamp(m.timestamp);
         const mentioned = m.sender !== session.myKey && mentionsMember(m.mentions, session.myKey);
-        if (mentioned) this.lastMentionAt.set(id, Math.max(this.lastMentionAt.get(id) ?? 0, timestamp));
-        await this.host.storeMessage({ linkId: MESSAGE_LINK(id), id: m.id, text: m.text, sender: m.sender === session.myKey ? "me" : "peer", member: m.sender, timestamp, via: "datalink",
+        const stored = await this.host.storeMessage({ linkId: MESSAGE_LINK(id), id: m.id, text: m.text, sender: m.sender === session.myKey ? "me" : "peer", member: m.sender, timestamp, via: "datalink",
           ...mentionFields(m.mentions, mentioned), ...(m.reply && { replyTo: groupReply(m.reply, session.myKey) }), ...(m.forwarded && { forwarded: m.forwarded }), ...(m.card && { card: m.card }) });
         this.lastMessageAt.set(id, Math.max(this.lastMessageAt.get(id) ?? 0, timestamp));
+        const came = cameAt(timestamp, stored, this.now());
+        if (mentioned) this.lastMentionAt.set(id, Math.max(this.lastMentionAt.get(id) ?? 0, came));
+        if (m.sender !== session.myKey) this.lastPeerMessageAt.set(id, Math.max(this.lastPeerMessageAt.get(id) ?? 0, came));
       },
       // Outside the session's queue, in order: what they carry (a payment) may send through the session again.
       app: m => this.deliver(id, () => this.host.communityApp?.(id, m.sender, m.frame)),

@@ -75,8 +75,9 @@ it cleanly: it tells contacts it is going and removes its socket.
 While it runs, every command goes through its socket. With no daemon, a command runs the profile itself and leaves
 (a one-shot), so the contact sees it come and go. Bots should run the daemon.
 
-The daemon listens on a Unix socket, `daemon.sock` in the profile's folder, owner-only (0600), never on TCP. One JSON
-object per line each way:
+The daemon listens on a Unix socket, `daemon.sock` in the profile's folder (or in `/tmp/ghostly-<hash>/` when that
+path is too long for a socket), owner-only (0600), never on TCP. `ghostly daemon status` prints its path as `socket`.
+One JSON object per line each way:
 
 ```json
 {"id":1,"method":"chat.send","params":{"chat":"alice","text":"hi","wait":"sent"}}
@@ -110,7 +111,8 @@ call of the app's engine. `ghostly engine --list` and `ghostly engine <method> '
 
 Main types: `message.received`, `message.sent`, `message.delivery`, `message.edited`, `chat.pairing`, `chat.connection`, `chat.joined`,
 `typing.started` (with `kind` and `status`) and `typing.stopped` (`group.typing.started` and `group.typing.stopped` in a private group, with `member`), `message.reaction` and `group.reaction`, `group.message.edited`,
-`group.message` and `group.sent` (with `messageId`, `member`, `nick` from the roster, and `mentioned`), `group.members`,
+`group.message` and `group.sent` (with `messageId`, `member`, `nick` from the roster, and `mentioned`), `group.mentioned`
+(a mention of this profile learned after its `group.message`, once), `group.members`,
 `file.offered`, `file.done` and `file.failed` (with the file's `messageId`), `payment.created`, `payment.updated`,
 `identity.received`, `call.incoming`, `call.outgoing`, `call.connected`, `call.ended`. The full list is in the
 [package README](../packages/cli/README.md#events).
@@ -137,7 +139,8 @@ ghostly listen --from alice --from bob --group team --exec ./bot.sh
 ### Agent turns
 
 `--turns` is the event shape for an agent (Claude Code, a bot on a model): each `message.received`, and each
-`group.message` that mentions this profile, becomes one `agent.turn`. Nothing else is one (my own messages, edits,
+`group.message` that mentions this profile, becomes one `agent.turn`. A mention learned later (the message first
+came through another member without it) is a `group.mentioned`, and its turn then, with `source: "group.mentioned"`. Nothing else is one (my own messages, edits,
 reactions, typing).
 
 ```json
@@ -150,6 +153,8 @@ reactions, typing).
   `ghostly send <chat> --reply <messageId>` (or `group send <group> --reply`) takes to answer it.
 - `seq` is the source event's, so `--since` and `--cursor` work as for any event. `id` is stable for the message:
   dedupe on it.
+- `press` (`{messageId, button, label}`) when the message pressed a button of a question you sent with `--button`:
+  act on it, not on the text, which is only the label.
 - **Untrusted data.** Everything the sender controls (the text, their name, a quoted snippet, a file's name) is under
   `untrusted` and nowhere else. Hand it to the agent as quoted data, never merged into its instructions: nothing a
   contact writes should change what the agent does, reveal a secret or move money. A prompt cannot promise that, so
@@ -187,7 +192,7 @@ Errors print `{"error":{"code","message"}}` and exit with 1 (failed), 2 (usage),
 An echo bot in one command ([examples/echo-bot.sh](../packages/cli/examples/echo-bot.sh)):
 
 ```bash
-ghostly listen --type message.received --cursor ~/.ghostly/echo.cursor --exec '
+ghostly listen --type message.received --cursor "${GHOSTLY_HOME:-$HOME/.ghostly}/echo.cursor" --exec '
   event="$(cat)"
   printf "echo: %s" "$(printf "%s" "$event" | jq -r .message.text)" | ghostly send "$(printf "%s" "$event" | jq -r .chat)" --stdin'
 ```
@@ -202,11 +207,18 @@ ghostly listen --type message.received --cursor ~/.ghostly/echo.cursor --exec '
   tools, no MCP servers and none of your Claude Code settings, so a contact's text can shape an answer but cannot
   read a file or run a command. A group gets one conversation per member ([safe setup](AI-AGENTS.md#safe-setup)).
 - A task card: `ghostly task send <chat|group> --title "…" --steps 1/4`, then `ghostly task update <chat|group> <task>
-  --steps 2/4 --step "…"` as the work goes, and `--status done` at the end. People see a small card with a progress
+  --steps 2/4 --step "…"` as the work goes, and `--status done --steps 4/4` at the end. People see a small card with a progress
   bar and the pull request's size, which opens on a tap; apps without cards read a short text. Updates merge, at
   most one per card every 2.5 s ([WISP 4xx · Status Cards](wisps/4xx-status-cards.md)). A routine the same way:
   `ghostly routine send <chat|group> --name "…" --schedule "every day 01:00" --next <date>`, then
   `ghostly routine update <chat|group> <routine> --run ok` after each run.
+- Buttons: `ghostly send <chat> "Want the $30 one? Reply yes or no" --button yes:Yes --button no:No --once` puts
+  buttons under the question (`group send` too). A press comes back as `button.pressed` (`messageId`, `button`,
+  `label`, `by`), then `ghostly button update <chat|group> <message> --chosen yes --close` shows the answer and
+  takes no more. Someone else's question is answered with `ghostly button press <chat> <message> <button>`, as a
+  tap in the app. The text is what apps without buttons show, so it says how to answer in words
+  ([WISP 4xx · Message Buttons](wisps/4xx-message-buttons.md)). A typed answer is matched by label or id, ignoring
+  case, so two labels alike (`Yes` and `yes`) or a label that is another button's id are refused (exit 2).
 - A voice bot: [examples/call-echo.mjs](../packages/cli/examples/call-echo.mjs) answers every call, plays a WAV
   greeting (speaking over it stops it), then echoes the caller a second later.
 
@@ -247,6 +259,12 @@ group's edges come up, while the relays answer errors. `GHOSTLY_DHT=0` leaves th
 `GHOSTLY_DHT_BOOTSTRAP=host:port,…` replaces the public bootstrap routers (a private testnet). The daemon is then a DHT node like any
 other: it answers other nodes' queries and keeps the small values they store for a while, as the Desktop's Pkarr client
 does.
+
+A private network or a test sets `GHOSTLY_PKARR_RELAYS=http://…,…` (the Desktop's variable) on every command: those
+relays are then the only ones from the very first publish, the profile's `relays` setting is not used, and the DHT is
+left out unless `GHOSTLY_DHT_BOOTSTRAP` names your own nodes. A new profile publishes within seconds of its first run,
+so without the variable, set `relays` before the first `daemon`
+([package README](../packages/cli/README.md#private-networks)).
 
 ## Hubs of large private groups
 

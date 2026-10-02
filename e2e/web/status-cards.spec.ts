@@ -284,7 +284,11 @@ test("a room of bots with many routines: the panel scrolls inside the window, th
     await stack.getByTestId("routine-stack-toggle").click();
     await expect(stack.getByTestId("status-card").first()).toBeHidden();
 
+    // The phone is an installed app on an iPhone: the status bar is 47px of the page's top.
+    const cdp = await page.context().newCDPSession(page);
     for (const size of [{ width: 1280, height: 800 }, { width: 375, height: 812 }]) {
+      const statusBar = size.width < 768 ? 47 : 0;
+      await cdp.send("Emulation.setSafeAreaInsetsOverride", { insets: { top: statusBar, bottom: statusBar ? 34 : 0, left: 0, right: 0 } });
       await page.setViewportSize(size);
       await page.getByTestId("chat-tasks").click();
       const panel = page.getByTestId("chat-tasks-panel");
@@ -302,6 +306,8 @@ test("a room of bots with many routines: the panel scrolls inside the window, th
       await page.getByTestId("chat-tasks-finished-toggle").click();
       expect(await underStuck(panel)).toEqual([]);
       await inWindow(page, panel);
+      // Its header clear of the status bar: the sheet reached 40px from the top, under it.
+      expect((await panel.boundingBox())!.y).toBeGreaterThanOrEqual(statusBar);
       // Only the list scrolls: nothing in it makes the panel itself taller than its box, so a row scrolled into view
       // (a click, a focus) never scrolls the header out of sight.
       // (It was 119 px over with Hermes Zero's routines open; a pixel of rounding is not that.)
@@ -338,5 +344,179 @@ test("a room of bots with many routines: the panel scrolls inside the window, th
     await page.screenshot({ path: test.info().outputPath("chat-375.png") });
   } finally {
     await Promise.all([coordinator.stop(), zero.stop(), one.stop()]);
+  }
+});
+
+/** The app in another language, as Settings sets it: the page reloads in it. */
+async function useLanguage(page: Page, language: string) {
+  await page.evaluate((language) => {
+    const settings = JSON.parse(localStorage.getItem("ghostly_app_settings") ?? "{}");
+    localStorage.setItem("ghostly_app_settings", JSON.stringify({ ...settings, language }));
+  }, language);
+  await page.reload();
+  await expect(page.locator("html")).toHaveAttribute("dir", language === "ar" ? "rtl" : "ltr");
+}
+
+/**
+ * What spills: any part of a card drawn past the card's own box, and any of its row's actions (⋮, reply, react) drawn
+ * over it. Empty when every card keeps to its box.
+ */
+async function spills(room: Locator): Promise<string[]> {
+  return room.evaluate((room) => {
+    const out: string[] = [];
+    const cards = [...room.querySelectorAll<HTMLElement>("[data-message-card], [data-testid=routine-stack-toggle]")].filter((c) => c.offsetParent);
+    for (const card of cards) {
+      const box = card.getBoundingClientRect();
+      const name = (card.textContent ?? "").slice(0, 40);
+      for (const el of card.querySelectorAll<HTMLElement>("*")) {
+        if (el.closest(".sr-only") || getComputedStyle(el).display === "none") continue;
+        const r = el.getBoundingClientRect();
+        if (!r.width || !r.height) continue;
+        if (r.left < box.left - 1 || r.right > box.right + 1) out.push(`${name} → <${el.tagName.toLowerCase()}> "${(el.textContent ?? "").slice(0, 30)}"`);
+      }
+      const row = card.closest("[data-message-row]");
+      for (const action of row?.querySelectorAll<HTMLElement>("[data-testid=message-reply-action], [data-testid=message-react-action], [data-testid=message-options]") ?? []) {
+        const r = action.getBoundingClientRect();
+        if (r.width && r.left < box.right - 1 && r.right > box.left + 1) out.push(`${name} → its ${action.dataset.testid} over the card`);
+      }
+    }
+    return out;
+  });
+}
+
+test("the review pictures: a bot room's routines and tasks at every width, both looks, and in Arabic, Portuguese and French", { tag: ["@feature:chat.status-cards", "@feature:groups.send", "@feature:headless.status-cards"] }, async ({ peer, relay }) => {
+  test.setTimeout(12 * 60_000);
+  const url = await relay.listen();
+  const [coordinator, zero] = [new HeadlessBot(), new HeadlessBot()];
+  const shot = (name: string) => test.info().outputPath(`review-${name}.png`);
+  try {
+    await Promise.all([coordinator.start(url, "Coordinator"), zero.start(url, "Hermes Zero")]);
+    const person = await peer("cards-review-person", { viewport: { width: 1280, height: 860 } });
+    const page = person.page;
+    const created = await coordinator.run("group", "create", "Sala de Máquinas", "--mesh");
+    const group = created.group as string;
+    const { link } = await coordinator.run("group", "link", group) as { link: string };
+    const code = link.includes("#/join/") ? link.slice(link.indexOf("#/join/") + "#/join/".length) : link;
+    await zero.run("group", "join", code);
+    await page.goto(`/#/join/${code}`);
+    await expect(page.getByTestId("group-chat")).toHaveAttribute("data-status", "active", { timeout: 150_000 });
+    type Shown = { status?: string; members?: { me: boolean; online: boolean }[] };
+    const ready = async (bot: HeadlessBot) => {
+      const shown = await bot.run("group", "show", group) as Shown;
+      return shown.status === "active" && shown.members?.length === 3 && shown.members.every(m => m.me || m.online);
+    };
+    for (const bot of [coordinator, zero]) await expect.poll(() => ready(bot), { timeout: 200_000, intervals: [2_000] }).toBe(true);
+    await expect(page.getByTestId("group-members")).toContainText("3 members", { timeout: 200_000 });
+
+    // Miguel's room: Hermes Zero's routines with long names between the coordinator's tasks, one routine failed with a
+    // long error, and three routines in a row folded into one line.
+    const sent = ["--wait", "sent", "--timeout", "150"];
+    const now = Date.now(), min = 60_000, hr = 60 * min;
+    const json = (value: unknown) => ["--json", JSON.stringify(value)];
+    const error = "RuntimeError: HTTP 429: This request would exceed your account's rate limit. Please try again later.";
+    await zero.run("routine", "send", group, "--id", "zero-nas", "--name", "Zero · zero NAS backup freshness watchdog", "--schedule", "every 15 min", "--next", String(now + 11 * min), "--run", "ok", ...sent);
+    await zero.run("routine", "send", group, "--id", "zero-log", "--name", "Zero · Murray Rothbot zero log auto-remediation", "--schedule", "every hour", "--next", String(now + 26 * min), "--run", "ok", ...sent);
+    await coordinator.run("task", "send", group, "--id", "ux", "--title", "Status cards: a cleaner layout for the tasks and routines in the chat", "--progress", "45", "--steps", "2/5",
+      "--step", "Tasks panel", ...json({ startedAt: now - 12 * min }), ...sent);
+    await zero.run("routine", "send", group, "--id", "zero-daily", "--name", "Zero · Murray Rothbot daily product/quality review", "--schedule", "weekdays at 10:30", "--cron", "30 10 * * 1-5",
+      "--next", String(now + 23 * hr), ...json({ lastRun: { at: now - 29 * min, result: "failed", summary: error }, runs: [{ at: now - 29 * min, result: "failed", summary: error }, { at: now - 13 * hr, result: "ok", summary: "12 issues checked" }] }), ...sent);
+    await coordinator.run("task", "send", group, "--id", "relay", "--title", "Fix relay rotation", "--status", "done", "--progress", "100", "--pr-url", "https://github.com/MiguelMedeiros/ghostly/pull/712",
+      "--pr-number", "712", "--additions", "123", "--deletions", "45", ...json({ startedAt: now - 54 * min }), ...sent);
+    await zero.run("routine", "send", group, "--id", "zero-hosted", "--name", "Zero · zero hosted products — maintenance and improvement sweep", "--schedule", "every day 11:00", "--next", String(now + 24 * hr), "--run", "ok", ...sent);
+    await coordinator.run("task", "send", group, "--id", "bench", "--title", "Benchmarks on One", "--status", "blocked", "--progress", "30", "--step", "Waiting for the runner", ...json({ startedAt: now - 5 * min }), ...sent);
+    await zero.run("routine", "send", group, "--id", "zero-mempool", "--name", "Zero · Mempool Matrix recurring product maintenance", "--schedule", "every Monday", "--next", String(now + 7 * 24 * hr), "--run", "ok", ...sent);
+    await coordinator.run("routine", "send", group, "--id", "bughunt", "--name", "Nightly bug hunt", "--schedule", "every day 01:00", "--next", String(now + 5 * hr), "--run", "ok", ...sent);
+    await coordinator.run("routine", "send", group, "--id", "prqueue", "--name", "PR queue", "--schedule", "every 5 min", "--next", String(now + 4 * min), "--run", "ok", ...sent);
+    await coordinator.run("routine", "send", group, "--id", "docs", "--name", "Docs sync", "--schedule", "every 6 h", "--state", "paused", ...sent);
+    const room = page.locator(".chat-wallpaper");
+    await expect(room.getByTestId("status-card")).toHaveCount(11, { timeout: 300_000 });
+    const failed = room.locator('[data-testid="status-card"][data-card-id="zero-daily"]');
+
+    const widths = [{ width: 1280, height: 860 }, { width: 768, height: 1024 }, { width: 375, height: 812 }, { width: 320, height: 640 }];
+    for (const size of widths) {
+      await page.setViewportSize(size);
+      for (const scheme of ["dark", "light"] as const) {
+        await theme(page, scheme);
+        await room.getByTestId("routine-stack").last().scrollIntoViewIfNeeded();
+        expect.soft(await spills(room), `${size.width} px, ${scheme}`).toEqual([]);
+        await page.screenshot({ path: shot(`${size.width}-${scheme}`) });
+      }
+    }
+
+    // The folded routines opened: each one in its sender's run, their face beside the last, as bubbles have it.
+    const stack = room.getByTestId("routine-stack").last();
+    await stack.getByTestId("routine-stack-toggle").click();
+    for (const size of [widths[0], widths[2]]) {
+      await page.setViewportSize(size);
+      await theme(page, "dark");
+      await stack.getByTestId("status-card").last().scrollIntoViewIfNeeded();
+      expect.soft(await spills(room), `stack open, ${size.width} px`).toEqual([]);
+      await page.screenshot({ path: shot(`stack-open-${size.width}-dark`) });
+    }
+    await stack.getByTestId("routine-stack-toggle").click();
+
+    // A row's actions on hover, beside the card, not on it.
+    await page.setViewportSize(widths[0]);
+    await theme(page, "dark");
+    const logRow = room.locator("[data-message-row]").filter({ has: page.locator('[data-card-id="zero-log"]') });
+    await logRow.evaluate((row) => row.scrollIntoView({ block: "center", behavior: "instant" }));
+    await page.waitForTimeout(300);
+    await logRow.locator("[data-message-card]").hover();
+    await expect(logRow.getByTestId("message-reply-action")).toHaveCSS("opacity", "1");
+    expect.soft(await spills(room), "hovered").toEqual([]);
+    await page.screenshot({ path: shot("1280-dark-hover") });
+
+    // The failed routine opened: its error, when it runs next, its cron line, its recent runs.
+    await failed.getByTestId("status-card-toggle").click();
+    await expect(failed.getByTestId("status-card-details")).toContainText("HTTP 429");
+    for (const size of [widths[0], widths[2]]) {
+      await page.setViewportSize(size);
+      for (const scheme of ["dark", "light"] as const) {
+        await theme(page, scheme);
+        await failed.scrollIntoViewIfNeeded();
+        expect.soft(await spills(room), `opened, ${size.width} px, ${scheme}`).toEqual([]);
+        await page.screenshot({ path: shot(`opened-${size.width}-${scheme}`) });
+      }
+    }
+    await theme(page, "dark");
+    await failed.getByTestId("status-card-toggle").click();
+
+    // The Tasks panel, wide and as a phone's sheet.
+    for (const size of [widths[0], widths[2]]) {
+      await page.setViewportSize(size);
+      await page.getByTestId("chat-tasks").click();
+      const panel = page.getByTestId("chat-tasks-panel");
+      // Each bot's face before its name, its initial in its colour (these bots have no picture); a finished task's row too.
+      for (const [name, initial] of [["Hermes Zero", "H"], ["Coordinator", "C"]]) {
+        await expect(panel.getByTestId("chat-tasks-sender").filter({ hasText: name }).locator("h3").getByTestId("member-face")).toHaveText(initial);
+      }
+      await panel.getByTestId("chat-tasks-sender").filter({ hasText: "Hermes Zero" }).getByTestId("chat-tasks-routines-toggle").click();
+      await panel.getByTestId("chat-tasks-finished-toggle").click();
+      await expect(panel.getByTestId("chat-tasks-finished").getByTestId("member-face")).toHaveText("C");
+      await page.waitForTimeout(400);
+      await page.screenshot({ path: shot(`panel-${size.width}-dark`) });
+      await page.keyboard.press("Escape");
+      await expect(panel).toHaveCount(0);
+    }
+
+    // Right to left, and the longer words of Portuguese and French.
+    for (const [language, size] of [["ar", widths[0]], ["ar", widths[2]], ["pt", widths[2]], ["fr", widths[3]]] as const) {
+      await page.setViewportSize(size);
+      await useLanguage(page, language);
+      await expect(room.getByTestId("status-card")).toHaveCount(11, { timeout: 60_000 });
+      await theme(page, "dark");
+      await room.getByTestId("routine-stack").last().scrollIntoViewIfNeeded();
+      expect.soft(await spills(room), `${language}, ${size.width} px`).toEqual([]);
+      await page.screenshot({ path: shot(`${language}-${size.width}-dark`) });
+      if (language === "ar") {
+        await page.getByTestId("chat-tasks").click();
+        await page.getByTestId("chat-tasks-sender").filter({ hasText: "Hermes Zero" }).getByTestId("chat-tasks-routines-toggle").click();
+        await page.waitForTimeout(400);
+        await page.screenshot({ path: shot(`panel-ar-${size.width}-dark`) });
+        await page.keyboard.press("Escape");
+      }
+    }
+  } finally {
+    await Promise.all([coordinator.stop(), zero.stop()]);
   }
 });

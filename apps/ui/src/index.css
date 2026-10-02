@@ -20,7 +20,10 @@
   --color-accent: var(--theme-accent);
   --color-accent-dim: var(--theme-accent-dim);
   --color-accent-hover: var(--theme-accent-hover);
-  --color-danger: #ea4335;
+  /* Danger's red: brighter on dark themes, darker on light ones, so its words read at 4.5:1 on either. */
+  --color-danger: var(--theme-danger);
+  /* Danger as a fill under white words (Delete, hang up): dark enough for 4.5:1 with white in every theme. */
+  --color-danger-fill: var(--theme-danger-fill);
   /* Something finished well (a bot's task done), the same in every theme, as danger is. */
   --color-success: #22a55a;
   /* Test money's colour, the same in every theme (Real money takes the accent). */
@@ -85,6 +88,8 @@
   /* Shared by every dark theme: at least 4.5:1 (link) and 3:1 (danger) on each one's bubbles. */
   --theme-link: #8ad3f6;
   --theme-danger-ink: #ff9a8f;
+  --theme-danger: #ea4335;
+  --theme-danger-fill: #d93025;
   --theme-on-accent: #111b21;
   /* Group members' names (lib/memberColors.ts), shared by every dark theme: at least 4.5:1 on each one's bubbles and header. */
   --theme-member-0: #f2b7b7;
@@ -128,6 +133,8 @@
   /* Shared by every light theme, as for dark. */
   --theme-link: #026aa0;
   --theme-danger-ink: #c5221f;
+  --theme-danger: #c5221f;
+  --theme-danger-fill: #c5221f;
   --theme-on-accent: #111b21;
   /* Shared by every light theme, as for dark. */
   --theme-member-0: #c82020;
@@ -215,7 +222,8 @@
   --theme-border-bright: #264060;
   --theme-text-primary: #e0f4ff;
   --theme-text-secondary: #7eb8d8;
-  --theme-text-muted: #4a8ab0;
+  /* At least 4.5:1 on the list, the panels and a chosen row. */
+  --theme-text-muted: #5c96b8;
   --theme-received-bg: #0c1929;
   --theme-input-bg: #142840;
   --theme-search-bg: #0c1929;
@@ -247,10 +255,13 @@
   --theme-chat-pattern: #d5f5f8;
   --theme-scrollbar: #a5f3fc;
   --theme-scrollbar-hover: #67e8f9;
-  --theme-accent: #0891b2;
+  /* Words in the accent (links, section titles, a chosen tab) read at 4.5:1 on white, on the cyan panels and on the
+     accent's own tints (a pill at 10-20 %), and white words on it as well. */
+  --theme-accent: #0b6680;
   --theme-accent-dim: #cffafe;
-  --theme-accent-hover: #0e7490;
+  --theme-accent-hover: #155e75;
   --theme-sent-bg: #cffafe;
+  --theme-on-accent: #ffffff;
 }
 
 /* ============================================
@@ -373,6 +384,13 @@ html[data-standalone="true"] {
   select {
     font-size: 16px !important;
   }
+
+  /* As on a phone held upright too: a list pulled down at its top would pull the page with it, and the browser's
+     pull-to-refresh reloaded the app (Chrome on an Android phone on its side, a tablet), dropping its chats and calls. */
+  html,
+  body {
+    overscroll-behavior: none;
+  }
 }
 
 .pb-safe {
@@ -486,7 +504,9 @@ html[data-standalone="true"] {
 /*
  * A narrow screen's row keeps its buttons round, with less room between them. A phone's video call has four
  * (microphone, camera, devices, hang up: 264 px), which the 32 px gaps pushed to 360 px, past a 320 px screen: the
- * room between them follows the width, 12 to 32 px. Five (Share screen too, in a narrow browser window) get 8 px.
+ * room between them follows the width, 12 to 32 px. Five (Share screen too, in a narrow browser window) were 328 px
+ * of buttons, wider than a 320 px window and edge to edge at 360: they are smaller (48 px, hang up 56 px: 248 px), and
+ * the room between them follows the width the same way, 8 to 32 px, so 16 px stay on each side down to 312 px.
  * The small call window has buttons and gaps of its own.
  */
 @media (max-width: 480px) {
@@ -495,7 +515,23 @@ html[data-standalone="true"] {
   }
 
   :not(.call-mini) > .call-controls:has(> :nth-child(5)) {
-    gap: 0.5rem;
+    gap: clamp(0.5rem, calc((100vw - 280px) / 4), 2rem);
+  }
+
+  :not(.call-mini) > .call-controls:has(> :nth-child(5)) > button,
+  :not(.call-mini) > .call-controls:has(> :nth-child(5)) > * > button {
+    width: 48px;
+    height: 48px;
+  }
+
+  :not(.call-mini) > .call-controls:has(> :nth-child(5)) > button:last-child {
+    width: 56px;
+    height: 56px;
+  }
+
+  :not(.call-mini) > .call-controls:has(> :nth-child(5)) svg {
+    width: 22px;
+    height: 22px;
   }
 }
 
@@ -769,6 +805,21 @@ html[data-standalone="true"] {
   contain: size;
 }
 
+/* On a touch screen a long press on a message opens its quick bar (Copy is there). iOS fires no `contextmenu` to cancel,
+   so it also selected a word and put its own Copy, Look Up, Translate menu over the bar. Links keep their own callout. */
+@media (pointer: coarse) {
+  [data-message-row] {
+    -webkit-user-select: none;
+    user-select: none;
+  }
+
+  /* A field in a message (a card's) still takes its text: iOS would not type into one inside an unselectable box. */
+  [data-message-row] :is(input, textarea, [contenteditable]) {
+    -webkit-user-select: text;
+    user-select: text;
+  }
+}
+
 /* Inline timestamp float (WhatsApp-style) */
 .msg-meta {
   user-select: none;
@@ -822,8 +873,11 @@ html[data-standalone="true"] {
   from { opacity: 0; transform: translate(10px, 8px) scale(0.96); }
   to { opacity: 1; transform: none; }
 }
-.animate-bubble-in-left { animation: bubble-in-left 0.22s cubic-bezier(0.2, 0.8, 0.2, 1) both; transform-origin: bottom left; }
-.animate-bubble-in-right { animation: bubble-in-right 0.22s cubic-bezier(0.2, 0.8, 0.2, 1) both; transform-origin: bottom right; }
+/* `backwards`, never `both`: an entry kept in effect once it ends stays alive on every row that came while the chat was
+   open, for as long as the row is in the page (one more animation per message in Chromium and WebKit, a transform per
+   row in Chromium). Ended, the row is as any other. */
+.animate-bubble-in-left { animation: bubble-in-left 0.22s cubic-bezier(0.2, 0.8, 0.2, 1) backwards; transform-origin: bottom left; }
+.animate-bubble-in-right { animation: bubble-in-right 0.22s cubic-bezier(0.2, 0.8, 0.2, 1) backwards; transform-origin: bottom right; }
 
 /* A band of light crossing a payment that just settled. */
 @keyframes sats-shine {
@@ -890,14 +944,37 @@ html[data-standalone="true"] {
  * bubble. No tail, round on every corner, the theme's surface with an edge and a lift, so it reads apart from the
  * messages around it in every theme.
  */
+/* A bot's card: a received bubble's colour (so it sits in every theme's palette), a hairline of the text's own colour
+   and a bubble's light shadow; no fill of its own. */
 .status-card-surface {
   position: relative;
-  border-radius: 12px;
-  border: 1px solid var(--color-border-bright);
-  background-color: var(--color-surface);
-  box-shadow: 0 1px 2px rgb(11 20 26 / 0.08), 0 3px 10px rgb(11 20 26 / 0.07);
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--color-text-primary) 10%, transparent);
+  background-color: var(--color-received-bg);
+  box-shadow: 0 1px 0.5px rgb(11 20 26 / 0.13);
 }
-:root:not([data-theme="light"]) .status-card-surface { box-shadow: 0 1px 2px rgb(0 0 0 / 0.45), 0 4px 14px rgb(0 0 0 / 0.3); }
+
+/* A bot's buttons under its message (chat/MessageButtons.tsx): the same surface as its card, a received bubble's colour
+   and a hairline. The primary one is marked by its accent edge and text over a light accent wash, never a solid fill; a
+   danger one by its danger text and edge. */
+.message-button {
+  border: 1px solid color-mix(in srgb, var(--color-text-primary) 10%, transparent);
+  background-color: var(--color-received-bg);
+  color: var(--color-text-primary);
+  box-shadow: 0 1px 0.5px rgb(11 20 26 / 0.13);
+}
+.message-button[data-style="primary"] {
+  border-color: color-mix(in srgb, var(--color-accent) 55%, transparent);
+  background-color: color-mix(in srgb, var(--color-accent) 12%, var(--color-received-bg));
+  color: var(--color-link);
+}
+.message-button[data-style="danger"] {
+  border-color: color-mix(in srgb, var(--color-danger) 45%, transparent);
+  color: var(--color-danger-ink);
+}
+.message-button[aria-disabled="true"]:not([data-chosen]) { opacity: 0.5; }
+.message-button:not([aria-disabled="true"]):hover { background-color: color-mix(in srgb, var(--color-text-primary) 6%, var(--color-received-bg)); }
+.message-button[data-style="primary"]:not([aria-disabled="true"]):hover { background-color: color-mix(in srgb, var(--color-accent) 20%, var(--color-received-bg)); }
 
 /* The user's choice in Settings, or the system's. */
 :root[data-reduce-motion="true"] *,
@@ -974,10 +1051,22 @@ button:disabled, button[aria-disabled="true"], input[type="checkbox"]:disabled, 
 @media (min-width: 768px) {
   :root { --conversation-footer-height: 60px; --conversation-control-height: 40px; }
   .account-actions { height: calc(var(--conversation-footer-height) - 1px); }
+  /* Two panes on a touch screen (an iPad, a phone on its side) have the home indicator under both bottom rows: the
+     composer and the account bar end above it, level with each other. The inset is 0 everywhere else. */
   .composer-safe {
-    min-height: var(--conversation-footer-height);
+    min-height: calc(var(--conversation-footer-height) + env(safe-area-inset-bottom));
     border-top: 1px solid var(--theme-border);
     padding-block: calc((var(--conversation-footer-height) - var(--conversation-control-height) - 1px) / 2);
+    padding-bottom: calc((var(--conversation-footer-height) - var(--conversation-control-height) - 1px) / 2 + env(safe-area-inset-bottom));
+  }
+  .account-footer { padding-bottom: env(safe-area-inset-bottom); }
+}
+
+/* With the keyboard up the home indicator is covered: the composer stands on the keyboard, as on a phone held upright. */
+@media (min-width: 768px) and (pointer: coarse) {
+  html[data-keyboard="true"] .composer-safe {
+    padding-bottom: calc((var(--conversation-footer-height) - var(--conversation-control-height) - 1px) / 2);
+    min-height: var(--conversation-footer-height);
   }
 }
 

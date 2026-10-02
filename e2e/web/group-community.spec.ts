@@ -107,6 +107,8 @@ test("six people: join by link with the admin away, everyone reads everyone, cat
 
   // Frank joins late: none of the earlier messages are his to read; what comes next is.
   await join(frank, url);
+  // Dave speaks once he has Frank's admission: Frank is given the epochs from it on, and never reads one before it.
+  await expect(dave.page.getByTestId("group-members")).toContainText("5 members", { timeout: 180_000 });
   await say(dave, "welcome frank");
   await sees(frank, "welcome frank");
   await sees(bob, "welcome frank");

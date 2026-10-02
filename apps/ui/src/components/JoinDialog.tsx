@@ -5,8 +5,10 @@ import { decodeCommunityLink, decodeGroupEntryLink } from "@ghostly/core";
 import { INVITE_REFUSAL_MESSAGE, classifyInvite, readInvite } from "../lib/url";
 import { showJoinNotice } from "../lib/joinNotice";
 import { pasteShortcut, readClipboardText } from "../lib/clipboard";
+import { touchOnly } from "../lib/touchOnly";
 import { useI18n } from "../contexts/I18nContext";
 import type { SessionKeys } from "../lib/storage";
+import { errorText } from "../lib/errorText";
 
 /**
  * Scanned data is only parsed as an invite; never opened as a URL or executed. A group's link
@@ -64,7 +66,7 @@ export function JoinDialog({ onJoin, onOpenChat, onJoinGroup, onClose, autoScan 
       onJoinGroup(value.trim()).catch((cause: unknown) => {
         if (closed.current) return;
         joined.current = false; busyRef.current = false; setBusy(false);
-        setError(cause instanceof Error ? cause.message : t("join.invalid")); setManual(true);
+        setError(cause instanceof Error ? errorText(cause, t) : t("join.invalid")); setManual(true);
       });
       return;
     }
@@ -85,8 +87,10 @@ export function JoinDialog({ onJoin, onOpenChat, onJoinGroup, onClose, autoScan 
       // One click: the desktop app reads natively (no WebKit "Paste" callout); a refusal leaves the field and the shortcut.
       const value = await readClipboardText();
       if (current !== generation.current || closed.current) return;
-      if (value === null) { setError(t("join.clipboardUnavailable", { keys: pasteShortcut() })); setManual(true); return; }
-      if (!value.trim()) { setError(t("join.empty", { keys: pasteShortcut() })); setManual(true); return; }
+      // A phone has no keys to press: there the field pastes with a long press.
+      const touch = touchOnly();
+      if (value === null) { setError(touch ? t("join.clipboardUnavailableTouch") : t("join.clipboardUnavailable", { keys: pasteShortcut() })); setManual(true); return; }
+      if (!value.trim()) { setError(touch ? t("join.emptyTouch") : t("join.empty", { keys: pasteShortcut() })); setManual(true); return; }
       accept(value.trim());
     } finally {
       if (current === generation.current && !closed.current) { busyRef.current = false; setBusy(false); }

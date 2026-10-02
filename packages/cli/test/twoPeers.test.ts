@@ -8,7 +8,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { RACE_DIRECT_MS, TYPING_REFRESH_MS } from "@ghostly/core";
 import { BIN, error, ghostly, home, hyperdhtTestnet, localRelay, ok, Running } from "./support/cli";
 import { dominantHz, tone, wavFile } from "./support/tone";
-// covers: chat.paired.reconnect, groups.edit, files.large.resend, files.large.request, headless.calls, headless.daemon, headless.chat, headless.events, headless.hooks, headless.groups, headless.one-shot, headless.cli, headless.files, headless.group-admin, headless.identities, headless.services, headless.typing, headless.reactions, headless.edit, headless.forward, chat.forward.files
+// covers: chat.paired.reconnect, headless.buttons, groups.edit, files.large.resend, files.large.request, headless.calls, headless.daemon, headless.chat, headless.events, headless.hooks, headless.groups, headless.one-shot, headless.cli, headless.files, headless.group-admin, headless.identities, headless.services, headless.typing, headless.reactions, headless.edit, headless.forward, chat.forward.files
 
 /**
  * Two bots, each a `ghostly` daemon on its own profile, as a person would run them: a chat from an invite, live over
@@ -342,7 +342,9 @@ describe("two headless peers", { timeout: 180_000 }, () => {
     await listenB.stop();
   });
 
-  it("the call-echo example answers, greets with its WAV, and echoes the caller a second later", async () => {
+  // The README runs it beside `call auto on`: the daemon answers then, and the example takes the call once it connects.
+  it.each([["answers", false], ["takes an auto-answered call", true]])("the call-echo example %s, greets with its WAV, and echoes the caller a second later", async (_, auto) => {
+    if (auto) ok(await as(alice, "call", "auto", "on", "--from", "bob"));
     const wav = join(alice, "greeting.wav");
     writeFileSync(wav, wavFile(tone(300, 24000, 800), 24000));
     const example = spawn(process.execPath, [join(import.meta.dirname, "../examples/call-echo.mjs"), wav], { env: { ...process.env, GHOSTLY_SOCKET: sockets[alice] }, stdio: ["ignore", "pipe", "pipe"] });
@@ -368,9 +370,11 @@ describe("two headless peers", { timeout: 180_000 }, () => {
       expect(dominantHz(all.subarray(start + 1920 * 100, start + 1920 * 140), 48000)).toBeCloseTo(520, -1);
       ok(await as(bob, "call", "hangup"));
       await expect.poll(() => said, { timeout: 20_000 }).toContain("ended: remote-hangup");
+      expect(said).not.toContain("answer:");
       program.destroy();
     } finally {
       example.kill();
+      if (auto) ok(await as(alice, "call", "auto", "off"));
     }
   });
 
@@ -406,10 +410,32 @@ describe("two headless peers", { timeout: 180_000 }, () => {
     const last = (ok(await as(bob, "chat", "history", "alice")).messages as { text: string; edits?: number; editedAt?: number }[]).at(-1)!;
     expect(last).toMatchObject({ text: "Done: 3 of 3", edits: 3 });
     expect(last.editedAt).toBeGreaterThan(0);
-    error(await as(alice, "edit", "bob", "nope", "anything"), "refused", 1);
+    error(await as(alice, "edit", "bob", "nope", "anything"), "not_found", 3);
     error(await as(alice, "edit", "bob", id), "usage", 2);
     await new Promise((r) => setTimeout(r, 500));
     expect(listen.lines).toHaveLength(3);
+    await listen.stop();
+  });
+
+  it("ask with buttons: the contact presses one, the bot's stream says button.pressed, button update closes them", async () => {
+    const listen = await listenTo(alice, "--type", "button.pressed");
+    const sent = ok(await as(alice, "send", "bob", "Want the $30 one? Reply yes or no", "--button", "yes:Yes", "--button", "no:No", "--style", "yes=primary", "--once", "--wait", "delivered"));
+    expect(sent).toMatchObject({ chat: chatA, pressable: true, card: { kind: "buttons", buttons: [{ id: "yes", label: "Yes", style: "primary", once: true }, { id: "no", label: "No", once: true }] } });
+    const id = sent.messageId as string;
+    const theirs = (ok(await as(bob, "chat", "history", "alice")).messages as { id: string; card?: { id: string } }[]).find((m) => m.card?.id === sent.buttons)!;
+    expect(theirs).toBeDefined();
+    // The contact presses from its own CLI, as a tap in the app.
+    expect(ok(await as(bob, "button", "press", "alice", theirs.id, "yes"))).toMatchObject({ chat: chatB, messageId: theirs.id, button: "yes", label: "Yes" });
+    const event = await listen.waitFor((l) => l.type === "button.pressed");
+    // `name` is the chat's name here (the invite's label); the name Bob gave himself is under `untrusted`.
+    expect(event).toMatchObject({ chat: chatA, messageId: id, button: "yes", label: "Yes", by: chatA, name: "bob", untrusted: { name: "Bob" } });
+    expect(event).not.toHaveProperty("inferred");
+    const reply = (ok(await as(alice, "chat", "history", "bob")).messages as { id: string }[]).find((m) => m.id === event.replyId);
+    expect(reply).toMatchObject({ text: "Yes", from: "peer", press: { messageId: id, button: "yes", label: "Yes" }, replyTo: { id, button: "yes", found: true } });
+    expect(ok(await as(alice, "button", "update", "bob", id, "--chosen", "yes", "--close", "--wait", "confirmed"))).toMatchObject({ chat: chatA, messageId: id, confirmed: true, card: { chosen: "yes", closed: true } });
+    await expect.poll(async () => (ok(await as(bob, "chat", "history", "alice")).messages as { id: string; card?: { closed?: boolean } }[]).find((m) => m.id === theirs.id)?.card?.closed, { timeout: 30_000 }).toBe(true);
+    // Answered, and closed: the contact's engine presses no more.
+    error(await as(bob, "button", "press", "alice", theirs.id, "no"), "refused", 1);
     await listen.stop();
   });
 

@@ -73,14 +73,16 @@ test("a request's memo shows on both sides, and test-mint payments say test sats
 
   // A payment: test sats on both sides too, and never shown as plain sats.
   const review = await prepareSend(alice, 21);
-  await expect(review).toContainText("cashu-test");
+  // Test sats through the test mint: the review names the rail in words and the money as test money.
+  await expect(review.getByTestId("review-rail")).toHaveText("Cashu");
+  await expect(review).toHaveAttribute("data-network", "testnet");
   await review.getByRole("button", { name: "Approve payment" }).click();
   for (const p of [alice, bob]) {
     const sent = bubble(p, /(You sent|Sent you)/);
     await expect(sent.getByTestId("payment-state")).toHaveText(/Received/);
     await expect(sent).toContainText(/21\s*test sats/);
   }
-  await expect(bubble(alice, "You sent")).toContainText("Cashu · cashu-test");
+  await expect(bubble(alice, "You sent").getByTestId("payment-rail")).toHaveText("Cashu");
   await expect(bubble(alice, "You sent")).toHaveCount(1);
   await expect(bubble(bob, "Sent you")).toHaveCount(1);
 });

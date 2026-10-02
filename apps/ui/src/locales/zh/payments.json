@@ -32,7 +32,7 @@
     "cashuMints": "Cashu 铸币厂",
     "error": {
       "amountMismatch": "发票与请求的金额不符",
-      "feeAbove": "Lightning 手续费（最多 {{fee}} sats）超出你的上限"
+      "feeAbove": "Lightning 手续费（最多 {{fee}} {{unit}}）超出你的上限"
     },
     "externalNote": {
       "ark": "可从任何 Ark 钱包支付。你的联系人的钱包看到款项后，会将其标为已付款。",
@@ -42,7 +42,7 @@
     "externalTitle": "扫描、复制，或在 Ghostly 以外的钱包中打开",
     "fedimintNoFederation": "Fedimint · 你们没有共同的联盟：Lightning",
     "hide": "隐藏",
-    "maxFee": "最高手续费（sats）",
+    "maxFee": "最高手续费（{{unit}}）",
     "maxGas": "最高 gas（ETH）",
     "noSharedMint": "没有共同配置的铸币厂",
     "noWallet": {
@@ -72,7 +72,7 @@
     },
     "takeBack": "取回",
     "takeBackTitle": "如果你的联系人一直没有领取，这笔 ecash 仍归你所有",
-    "through": "经由 {{source}} · 手续费最多 {{fee}} sats",
+    "through": "经由 {{source}} · 手续费最多 {{fee}} {{unit}}",
     "title": {
       "requests": "请求付款",
       "sentYou": "发给你的",
@@ -330,7 +330,7 @@
       "confirmed": "已确认",
       "failed": "失败",
       "pending": "待处理",
-      "settled": "已结算",
+      "settled": "已支付",
       "submitted": "已提交",
       "unknown": "未知"
     },

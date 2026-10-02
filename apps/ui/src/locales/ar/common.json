@@ -8,6 +8,8 @@
   "copied": "تم النسخ!",
   "copy": "نسخ",
   "deck": {
+    "next": "البطاقة التالية",
+    "previous": "البطاقة السابقة",
     "turnBack": "البطاقات"
   },
   "delete": "حذف",
@@ -20,5 +22,6 @@
   "save": "حفظ",
   "success": "نجاح",
   "unnamedContact": "جهة اتصال · {{key}}",
+  "unnamedContactShort": "جهة اتصال",
   "viewPhoto": "عرض صورة {{name}}"
 }

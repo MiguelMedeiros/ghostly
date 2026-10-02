@@ -70,6 +70,11 @@ export interface TransportEvent {
   started?: boolean;
   /** `live`, `switched`: the latest round trip measured on it. */
   rttMs?: number;
+  /**
+   * `down`: written by the run after the one the chat was live in, once it lasted past the contact's liveness bound
+   * with the chat never live again (`notBackAfterRestart`). When the stretch really ended is unknown: not "last live".
+   */
+  restart?: true;
 }
 
 /** What the chat's link looks like now, as the engine sees it. */
@@ -208,6 +213,19 @@ export class TransportLog {
   }
 
   /**
+   * When the chat was last live, as far as the history tells: the latest time a live stretch began, moved or ended.
+   * 0 when it never was.
+   */
+  get lastLiveAt(): number {
+    for (let i = this.history.length - 1; i >= 0; i--) {
+      const e = this.history[i];
+      if (e.kind === "down" && e.restart) continue;
+      if (e.kind === "live" || e.kind === "switched" || e.kind === "down") return e.at;
+    }
+    return 0;
+  }
+
+  /**
    * When the live stretch `liveAtLastRun` names began: a contact's offer from before it set that session up (or an
    * older one) and is not answered after a restart (`GhostLinkOptions.resumeFloor`). None when the history ends off live.
    */
@@ -218,6 +236,20 @@ export class TransportLog {
       if (e.kind === "down" || e.kind === "dht-only") return undefined;
     }
     return undefined;
+  }
+
+  /**
+   * This run has lasted past the contact's liveness bound, and the chat was never live in it: the session it was live
+   * in when the app last ran is gone on the contact's side too. The history says so, and the next start no longer
+   * takes the chat for "live at last run" and knocks: before, a contact that never came back was knocked on at every
+   * start, run after run (all ten chats of the #966 repro). Written during the run, not as it ends: a page reload or a
+   * crash records nothing then. This run's own knock already went; only the next start reads it. True when written.
+   */
+  notBackAfterRestart(now: number): boolean {
+    const from = this.seenLive ? undefined : this.liveAtLastRun;
+    if (!from) return false;
+    this.event({ at: now, kind: "down", from, restart: true });
+    return true;
   }
 
   /**

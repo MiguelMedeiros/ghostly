@@ -2,7 +2,7 @@ import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { formatFileSize, formatVideoDuration, sanitizeFileName } from "@ghostly/core";
 import { useOptionalI18n, useT } from "../../contexts/I18nContext";
 import { useChosenSpeaker } from "../../hooks/useChosenSpeaker";
-import { useServicesPlatform } from "../../hooks/useServicesPlatform";
+import { useTransfer } from "../../hooks/useServicesPlatform";
 import { languageTag } from "../../lib/documentLanguage";
 import { downloadFile } from "../../lib/fileDownload";
 import { canRetryFile, fileStatus, stalledAction } from "../../lib/fileStatus";
@@ -15,6 +15,7 @@ import { claimMediaSession, mediaSessionPosition, mediaSessionState, releaseMedi
 import { Highlight } from "../chat/ChatSearch";
 import { ProgressRing, RoundRetry, WhyButton, WhyText } from "../chat/RoundRetry";
 import { SpeedPill } from "../voice/VoiceBubble";
+import { errorText } from "../../lib/errorText";
 
 type PlayState = "idle" | "loading" | "playing" | "paused";
 type Problem = "unsupported" | "too-large" | "missing" | "not-yet";
@@ -31,10 +32,10 @@ const pill = "text-xs px-2.5 py-0.5 rounded-full bg-black/20 hover:bg-black/30 b
 export function AudioBubble({ file, sender, peerName: named, highlight }: { file: ChatFile; sender: "me" | "peer"; peerName?: string; highlight?: string }) {
   const t = useT();
   const peerName = named ?? t("pairing.contact");
-  const platform = useServicesPlatform();
+  const { platform, transfer, restoring } = useTransfer(file.id);
   const locale = languageTag(useOptionalI18n()?.language ?? "en");
-  const transfer = platform?.getTransfer(file.id) ?? null;
-  const ready = transfer === null || transfer.state === "done";
+  // No transfer is "finished" only once the engine has put its kept transfers back after a start.
+  const ready = (transfer === null && !restoring) || transfer?.state === "done";
   const [playable] = useState(() => canPlayAudio(file.mime));
   const [state, setPlayState] = useState<PlayState>("idle");
   const [problem, setProblem] = useState<Problem | null>(null);
@@ -60,6 +61,8 @@ export function AudioBubble({ file, sender, peerName: named, highlight }: { file
   const mediaRef = useRef<MediaSessionPlayer | null>(null);
 
   useEffect(() => setBusy(false), [transfer?.state, transfer?.stalled]);
+  // Sent now: "It plays once it has been sent" is over, and the play button is back.
+  useEffect(() => { if (ready) setProblem((was) => (was === "not-yet" ? null : was)); }, [ready]);
   useEffect(() => onVoiceRate((next) => {
     setRate(next);
     if (audioRef.current) applyVoiceRate(audioRef.current, next);
@@ -102,8 +105,12 @@ export function AudioBubble({ file, sender, peerName: named, highlight }: { file
     setSrc(source.url);
   }, [platform, state, file.id, file.mime, ready, setPlayState, setProblem]);
 
-  /** The player refused it: a stream is tried again from the file's bytes, once; anything else is unplayable here. */
+  /**
+   * The player refused it: a stream is tried again from the file's bytes, once; anything else is unplayable here. A
+   * failed source both fires `error` and rejects its pending play(): the second finds nothing loaded and is ignored.
+   */
   const refused = () => {
+    if (!sourceRef.current) return;
     const retry = sourceRef.current?.streamed && !fellBack.current;
     const at = audioRef.current?.currentTime ?? 0;
     unload();
@@ -150,18 +157,18 @@ export function AudioBubble({ file, sender, peerName: named, highlight }: { file
 
   const act = (action: FileAction) => {
     setActionError("");
-    void platform?.fileAction?.(file.id, action).catch((error: Error) => setActionError(String(error.message ?? error)));
+    void platform?.fileAction?.(file.id, action).catch((error: Error) => setActionError(errorText(error, t)));
   };
   const save = () => {
     if (!platform) return;
     setActionError("");
     void downloadFile(platform, file, sanitizeFileName(file.name)).then((result) => { if (result === "missing") setProblem("missing"); })
-      .catch((error: Error) => setActionError(String(error.message ?? error)));
+      .catch((error: Error) => setActionError(errorText(error, t)));
   };
   const again = (action: () => Promise<unknown>) => {
     setActionError("");
     setBusy(true);
-    void action().catch((error: Error) => setActionError(String(error.message ?? error))).finally(() => setBusy(false));
+    void action().catch((error: Error) => setActionError(errorText(error, t))).finally(() => setBusy(false));
   };
 
   const moving = transfer?.state === "transferring";
@@ -188,7 +195,7 @@ export function AudioBubble({ file, sender, peerName: named, highlight }: { file
     : null;
 
   return (
-    <div className="w-[300px] max-w-full pt-1" data-testid="audio-bubble" data-state={state} data-playable={playable ? "true" : "false"} data-stage={transfer?.stage ?? transfer?.state ?? "done"}>
+    <div className="w-[300px] max-w-full pt-1" data-testid="audio-bubble" data-state={state} data-playable={playable ? "true" : "false"} data-stage={transfer?.stage ?? transfer?.state ?? (restoring ? "restoring" : "done")}>
       <div className="flex items-center gap-2">
         {canRetry ? (
           <RoundRetry danger busy={busy} testId="audio-retry" label={t("chat.message.retry")} hint={t("chat.file.notSentHint")} onClick={() => again(() => platform!.retryFile!(file.id))} />

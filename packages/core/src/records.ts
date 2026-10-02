@@ -21,6 +21,11 @@ export const LABEL = {
   svc: "_svc",
   /** Signaling for the WebRTC data link, see `signal.ts`. */
   rtc: "_rtc",
+  /**
+   * A group link's layer-1 transports and how to dial its native ones (`encodePacketTransports` in `capsRecord.ts`):
+   * published only by an app with no WebRTC and by a member answering one, so two apps that have WebRTC never send it.
+   */
+  tr: "_tr",
 } as const;
 
 export const RECORD_TTL = 300;
@@ -41,6 +46,8 @@ export interface OutgoingLinkState {
   rtcSignal?: string | null;
   /** `undefined` publishes no `_svc` at all, which is what a legacy peer looks like. */
   services?: ServiceAd[];
+  /** A group link's `_tr` value, already encoded; absent publishes none. */
+  transports?: string | null;
 }
 
 export interface BuiltLinkRecords {
@@ -89,11 +96,13 @@ export function buildLinkRecords(
   if (state.nick) fixed.push(record(LABEL.nick, encrypt(state.nick, encKey)));
   if (state.callSignal) fixed.push(record(LABEL.call, encrypt(state.callSignal, encKey)));
   if (state.rtcSignal) fixed.push(record(LABEL.rtc, encrypt(state.rtcSignal, encKey)));
+  const tr = state.transports ? record(LABEL.tr, encrypt(state.transports, encKey)) : null;
 
   const svc = state.services ? record(LABEL.svc, encrypt(encodeServices(state.services), encKey)) : null;
 
-  const attempt = (withServices: boolean): BuiltLinkRecords | null => {
-    const base = withServices && svc ? [...fixed, svc] : fixed;
+  const attempt = (withServices: boolean, withTransports = true): BuiltLinkRecords | null => {
+    const head = withTransports && tr ? [...fixed, tr] : fixed;
+    const base = withServices && svc ? [...head, svc] : head;
     const batch = [...sorted];
     for (;;) {
       let payload = encrypt(JSON.stringify(batch), encKey);
@@ -113,7 +122,8 @@ export function buildLinkRecords(
     }
   };
 
-  const built = attempt(true) ?? attempt(false);
+  // The transports go before the advertisement, and are left out only when nothing else would fit.
+  const built = attempt(true) ?? attempt(false) ?? attempt(false, false);
   if (!built) throw new Error("Link records do not fit in a Pkarr packet");
   return built;
 }
@@ -133,6 +143,8 @@ export interface ResolvedLink {
   rtcSignal: string | null;
   /** `null` when the peer published no advertisement (legacy client or offline). */
   services: ServiceAd[] | null;
+  /** A group link's `_tr` value as published (`parsePacketTransports`); `null` when there is none. */
+  transports: string | null;
   rawRecordNames: string[];
   encryptedPayloadLength: number;
   /** Milliseconds since the UNIX epoch. */
@@ -147,6 +159,7 @@ export function parseLinkRecords(packet: SignedPacket, encKey: Uint8Array): Reso
     callSignal: null,
     rtcSignal: null,
     services: null,
+    transports: null,
     rawRecordNames: [],
     encryptedPayloadLength: 0,
     packetTimestamp: Number(packet.timestampMicros / 1000n),
@@ -176,6 +189,9 @@ export function parseLinkRecords(packet: SignedPacket, encKey: Uint8Array): Reso
         break;
       case LABEL.rtc:
         resolved.rtcSignal = tryDecrypt(value, encKey);
+        break;
+      case LABEL.tr:
+        resolved.transports = tryDecrypt(value, encKey);
         break;
       case LABEL.svc: {
         const json = tryDecrypt(value, encKey);

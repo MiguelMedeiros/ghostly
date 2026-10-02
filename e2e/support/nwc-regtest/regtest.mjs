@@ -54,16 +54,24 @@ function aliceChannel(bobKey) {
   return lncli("alice", "listchannels", "--peer", bobKey).channels[0];
 }
 
+// Alice's peer link to bob. A channel stays inactive while the two are not connected, however many blocks are mined.
+function connect(bobKey) {
+  try { lncli("alice", "connect", `${bobKey}@nwc-lnd-bob:9735`); } catch (e) { if (!/already connected/.test(String(e.stderr))) throw e; }
+}
+
 async function ensureChannel(bobKey) {
   const pending = () => lncli("alice", "pendingchannels").pending_open_channels.some((p) => p.channel.remote_node_pub === bobKey);
   if (!aliceChannel(bobKey) && !pending()) {
-    try { lncli("alice", "connect", `${bobKey}@nwc-lnd-bob:9735`); } catch (e) { if (!/already connected/.test(String(e.stderr))) throw e; }
+    connect(bobKey);
     const { capacity, push } = NWC_REGTEST.channel;
     const bothSynced = async () => { await synced("alice"); await synced("bob"); };
     await retry("opening alice's channel", () => lncli("alice", "openchannel", "--node_key", bobKey, "--local_amt", String(capacity), "--push_amt", String(push)), { before: bothSynced });
   }
   await until("the channel to open", () => {
-    if (aliceChannel(bobKey)?.active) return true;
+    const channel = aliceChannel(bobKey);
+    if (channel?.active) return true;
+    // Confirmed but inactive: the peers lost each other (a busy host, a restart), so dial bob again.
+    if (channel) connect(bobKey);
     mine(1);
     return false;
   }, { tries: 60 });

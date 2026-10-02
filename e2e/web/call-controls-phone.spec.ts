@@ -6,20 +6,27 @@ import { connect, expect, link, test, type Peer } from "../support/fixtures";
  * in a narrow window) the row had five buttons of 64 px with 32 px between them: wider than 375 px, so flex squeezed
  * four of them into ovals pressed against both edges. A phone's browser has no screen capture, but its video call has
  * four: microphone, camera (once the video lane is open), devices and hang up, 360 px with those gaps, past a 320 px
- * phone. The row is measured once all of them are there.
+ * phone. A narrow desktop window (320 to 360 px) has all five: 328 px of buttons even with 8 px gaps, wider than 320 px
+ * and edge to edge at 360. The row is measured once all of them are there, and keeps 8 px clear of each edge.
  */
 /** Buttons of the row that are squeezed out of round (flex shrinks them) or reach the screen's edges. */
 const misshapen = (page: Page) => page.getByTestId("call-hang-up").evaluate((hangUp) => {
   const width = document.documentElement.clientWidth;
   return [...hangUp.parentElement!.children].map((b) => b.getBoundingClientRect())
-    .filter((r) => r.width > 0 && (Math.abs(r.width - r.height) > 1 || r.left < 4 || r.right > width - 4))
+    .filter((r) => r.width > 0 && (Math.abs(r.width - r.height) > 1 || r.left < 8 || r.right > width - 8))
     .map((r) => `${Math.round(r.width)}x${Math.round(r.height)} at ${Math.round(r.left)}..${Math.round(r.right)} of ${width}`);
 });
 
-for (const { width, share } of [{ width: 320, share: false }, { width: 375, share: true }]) {
-  test(`the call's buttons fit a ${width} px phone${share ? ", Share screen too" : ""}`, { tag: ["@feature:calls.video"] }, async ({ peer }) => {
+const rows = [
+  { width: 320, share: false, mobile: true },
+  { width: 375, share: true, mobile: true },
+  { width: 320, share: true, mobile: false },
+  { width: 360, share: true, mobile: false },
+];
+for (const { width, share, mobile } of rows) {
+  test(`the call's buttons fit a ${width} px ${mobile ? "phone" : "desktop window"}${share ? ", Share screen too" : ""}`, { tag: ["@feature:calls.video"] }, async ({ peer }) => {
     const alice = await peer("alice");
-    const bob: Peer = await peer("bob", { mobile: true, viewport: { width, height: 740 } });
+    const bob: Peer = await peer("bob", { mobile, viewport: { width, height: 740 } });
     // A phone's browser has no screen capture, so its row has no Share screen button.
     if (!share) {
       await bob.page.addInitScript(() => { delete (MediaDevices.prototype as { getDisplayMedia?: unknown }).getDisplayMedia; });
@@ -36,6 +43,28 @@ for (const { width, share } of [{ width: 320, share: false }, { width: 375, shar
     await expect(bob.page.getByTestId("share-screen")).toHaveCount(share ? 1 : 0);
     await expect.poll(() => misshapen(bob.page)).toEqual([]);
     await bob.page.getByTestId("call-hang-up").click();
+  });
+}
+
+/** The incoming call's Decline / Accept / Accept with video: squeezed out of round, or reaching the screen's edges. */
+const misshapenAnswer = (page: Page) => page.getByTitle("Decline").evaluate((decline) => {
+  const width = document.documentElement.clientWidth;
+  return [...decline.parentElement!.children].map((b) => b.getBoundingClientRect())
+    .filter((r) => r.width > 0 && (Math.abs(r.width - r.height) > 1 || r.left < 4 || r.right > width - 4))
+    .map((r) => `${Math.round(r.width)}x${Math.round(r.height)} at ${Math.round(r.left)}..${Math.round(r.right)} of ${width}`);
+});
+
+for (const width of [320, 375]) {
+  test(`a video call ringing on a ${width} px phone: its three buttons stay round`, { tag: ["@feature:calls.video", "@feature:app.mobile-layout"] }, async ({ peer }) => {
+    const alice = await peer("alice");
+    const bob: Peer = await peer("bob", { mobile: true, viewport: { width, height: 740 } });
+    await link(alice, bob);
+    await connect(alice, bob);
+    await alice.page.getByTestId("call-video").click();
+    await expect(bob.page.getByTitle("Accept video call")).toBeVisible();
+    // Three 72px buttons with 48px between them were wider than a 320px screen less its sides: ovals 53px wide.
+    await expect.poll(() => misshapenAnswer(bob.page)).toEqual([]);
+    await bob.page.getByTitle("Decline").click();
   });
 }
 

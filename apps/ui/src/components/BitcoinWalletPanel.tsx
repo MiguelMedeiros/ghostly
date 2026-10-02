@@ -2,14 +2,17 @@ import { useState } from "react";
 import type { PaymentReview as Review } from "@ghostly/core";
 import type { WalletPlatform, WalletState } from "../lib/platform";
 import { PaymentReview } from "./PaymentReview";
+import { paymentStateLabel } from "./paymentWords";
 import { Actions, Address, Amount, Button, Notice, Row, Section, input, type Action } from "./wallet/ui";
 import { useRun } from "./wallet/run";
 import { SourcePicker } from "./wallet/providers/SourcePicker";
 import { changeableFields } from "./wallet/providers/sourceStatus";
 import { useI18n } from "../contexts/I18nContext";
+import { formatAt } from "../lib/time";
 import { satsIn } from "./NetworkTag";
 import { fillNodes } from "../lib/fillNodes";
 import { formatAmount } from "../lib/amount";
+import { useAmountText } from "../hooks/useAmountText";
 
 /** The most the person accepts to pay in fees unless they change it; the review shows the real fee. */
 const DEFAULT_FEE_CAP = 2_000;
@@ -25,6 +28,8 @@ export function BitcoinWalletPanel({ wallet, state }: { wallet: WalletPlatform; 
   const [action, setAction] = useState<Action>("receive");
   const [address, setAddress] = useState(""), [amount, setAmount] = useState(""), [feeCap, setFeeCap] = useState(String(DEFAULT_FEE_CAP));
   const [review, setReview] = useState<Review | null>(null);
+  /** The fee limit typed the person's way; `feeCap` is what it means, or "" while unclear. */
+  const feeField = useAmountText(feeCap, setFeeCap, t.language ?? "en", 0, t);
   const [changing, setChanging] = useState(false);
   const ready = bt?.status === "ready";
   // On-chain Bitcoin goes through its network's source: a Testnet wallet's coins are test sats.
@@ -45,7 +50,7 @@ export function BitcoinWalletPanel({ wallet, state }: { wallet: WalletPlatform; 
           <p className="text-text-primary">{bt.status === "error" ? (bt.label ? t("wallet.bitcoin.notConnected", { label: bt.label }) : t("wallet.bitcoin.notConnectedDefault")) : bt.label ? t("wallet.bitcoin.connectingTo", { label: bt.label }) : t("wallet.bitcoin.connectingDefault")}</p>
           {bt.balance !== undefined && (
             <p className="text-text-secondary text-sm" data-testid="bitcoin-last-balance">
-              {fillNodes(bt.balanceAt ? t("wallet.bitcoin.lastBalanceAt", { unit, date: new Date(bt.balanceAt).toLocaleString() }) : t("wallet.bitcoin.lastBalance", { unit }), { balance: <span className="tabular-nums">{formatAmount(bt.balance, t.language)}</span> })}
+              {fillNodes(bt.balanceAt ? t("wallet.bitcoin.lastBalanceAt", { unit, date: formatAt(bt.balanceAt, { dateStyle: "medium", timeStyle: "short" }, t.language) }) : t("wallet.bitcoin.lastBalance", { unit }), { balance: <span className="tabular-nums">{formatAmount(bt.balance, t.language)}</span> })}
             </p>
           )}
           {bt.error && <Notice tone={bt.status === "error" ? "error" : "warning"} testId="bitcoin-connect-error">{bt.status === "connecting" ? t("wallet.bitcoin.retrying", { error: bt.error }) : bt.error}</Notice>}
@@ -78,9 +83,10 @@ export function BitcoinWalletPanel({ wallet, state }: { wallet: WalletPlatform; 
               <input aria-label={t("wallet.panel.recipient", { wallet: "Bitcoin" })} placeholder={t("wallet.panel.recipientPlaceholder", { wallet: "Bitcoin" })} spellCheck={false} className={`${input} font-mono text-xs`} value={address} onChange={(e) => setAddress(e.target.value.trim())} />
               <Amount value={amount} onChange={setAmount} unit={unit} testId="bitcoin-amount" />
               <label className="flex flex-wrap items-center gap-2 text-xs text-text-secondary"><span className="min-w-0">{t("wallet.bitcoin.maxFee")}</span>
-                <input aria-label={t("wallet.bitcoin.maxFeeInput")} inputMode="numeric" className={`${input} !w-28 shrink-0`} value={feeCap} onChange={(e) => setFeeCap(e.target.value.replace(/\D/g, ""))} /> sats
+                <input aria-label={t("wallet.bitcoin.maxFeeInput", { unit })} inputMode="numeric" className={`${input} !w-28 shrink-0`} aria-invalid={feeField.hint ? true : undefined} value={feeField.text} onChange={(e) => feeField.change(e.target.value)} /> {unit}
               </label>
-              <Button variant="primary" className="w-full" disabled={busy || !!review || !address || !Number(amount)} onClick={() => void run(async () => {
+              {feeField.hint && <Notice tone="error" testId="amount-unclear">{feeField.hint}</Notice>}
+              <Button variant="primary" className="w-full" disabled={busy || !!review || !address || !Number(amount) || !feeCap} onClick={() => void run(async () => {
                 setReview(await wallet.preparePayment({ target: { method: "bitcoin", network: bt.network!, provider: "onchain", asset: "BTC", unit: "sat", address, expiresAt: Date.now() + 15 * 60 * 1000 }, amount: Number(amount), feeCap: Number(feeCap), payee: address }));
               })}>{t("wallet.panel.review")}</Button>
               <Notice>{t("wallet.bitcoin.reviewNote")}</Notice>
@@ -97,7 +103,7 @@ export function BitcoinWalletPanel({ wallet, state }: { wallet: WalletPlatform; 
             </div>
           )}
           {review && <PaymentReview key={review.id} review={review} wallet={wallet} onClose={() => setReview(null)} />}
-          {intents.map((i) => <Button key={i.id} className="block w-full text-start" onClick={() => setReview(i)}>{t("wallet.panel.intent", { amount: formatAmount(i.amount, t.language), unit, state: i.state })}</Button>)}
+          {intents.map((i) => <Button key={i.id} className="block w-full text-start" onClick={() => setReview(i)}>{t("wallet.panel.intent", { amount: formatAmount(i.amount, t.language), unit, state: paymentStateLabel(t, i.state) })}</Button>)}
           {error && <Notice tone="error" testId="bitcoin-error">{error}</Notice>}
         </div>
       )}

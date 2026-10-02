@@ -57,4 +57,23 @@ describe("Paste from clipboard in Join", () => {
     await user.click(screen.getByRole("button", { name: "Paste from clipboard" }));
     await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent(/^Clipboard is empty\. Copy an invite, then press (⌘V|Ctrl\+V) below\.$/));
   });
+
+  it("on a phone, names no keys: the field pastes with a long press", async () => {
+    // A touch screen with no mouse (`any-pointer` coarse, never fine), whatever the platform string says.
+    const matchMedia = window.matchMedia.bind(window);
+    const media = vi.spyOn(window, "matchMedia").mockImplementation((query: string) =>
+      query === "(any-pointer: coarse)" || query === "(any-pointer: fine)"
+        ? ({ ...matchMedia(query), matches: query === "(any-pointer: coarse)" } as MediaQueryList)
+        : matchMedia(query));
+    try {
+      const { user } = renderApp(<JoinDialog onJoin={() => {}} onClose={() => {}} />);
+      pageClipboard(async () => { throw new DOMException("denied", "NotAllowedError"); });
+      await user.click(screen.getByRole("button", { name: "Paste from clipboard" }));
+      expect(await screen.findByRole("alert")).toHaveTextContent(/^Could not read the clipboard\. Touch and hold the field below, then tap Paste\.$/);
+      pageClipboard(async () => "  ");
+      await user.click(screen.getByRole("button", { name: "Paste from clipboard" }));
+      await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent(/^Clipboard is empty\. Copy an invite, then paste it below\.$/));
+      expect(screen.getByRole("alert").textContent).not.toMatch(/⌘|Ctrl/);
+    } finally { media.mockRestore(); }
+  });
 });

@@ -5,6 +5,8 @@ import { LONG_PRESS_MS, MessageBubble } from "../../components/MessageBubble";
 import { buildDetails, formatBytes, formatDuration, pathWords } from "../../lib/messageDetails";
 import type { ChatMessage } from "../../lib/types";
 import { servicesPlatform } from "../../lib/platform";
+import { locales } from "../../locales";
+import { translateWith } from "../../locales/translate";
 import { fakeEngine, linkView } from "../fakeEngine";
 import { renderApp } from "../render";
 
@@ -335,6 +337,22 @@ describe("the words", () => {
     expect(formatDuration(42)).toBe("42 ms");
     expect(formatDuration(3_456)).toBe("3.46 s");
     expect(formatDuration(125_000)).toBe("2 min 5 s");
+  });
+
+  it("in another language: its words, its numbers and its times, with the JSON copy still in English", () => {
+    const pt = translateWith(locales.pt, "pt");
+    expect(formatBytes(3_000_000, pt)).toBe("2,9 MB (3.000.000 bytes)");
+    expect(formatDuration(3_456, pt)).toBe("3,46 s");
+    expect(pathWords({ path: "iroh/1", relayed: true }, pt)).toBe("Iroh por um relay");
+    const model = buildDetails(message({ delivery: "sent" }), null, { t: pt });
+    expect(model.summary).toBe("Mensagem: envio feito.");
+    expect(model.sections.map(s => s.title)).toEqual(["Identidade", "Tempos", "Entrega"]);
+    expect(model.sections[0].rows.find(r => r.label === "Direção")?.value).toBe("Enviada por você");
+    expect(model.json).toMatchObject({ kind: "Text", summary: "Message sent.", identity: { Direction: "Sent by you" }, delivery: { State: "Sent, waiting for the receipt" } });
+    // A time of day as the app's language writes it, to the millisecond, whatever the device's language.
+    const clock = (tag: string) => new Intl.DateTimeFormat(tag, { hour: "2-digit", minute: "2-digit", second: "2-digit", fractionalSecondDigits: 3, hourCycle: "h23" } as Intl.DateTimeFormatOptions).format(1_700_000_000_000);
+    expect(model.sections[1].rows[0].value).toBe(clock("pt-BR"));
+    expect(buildDetails(message(), null, { t: translateWith(locales.ar, "ar") }).sections[1].rows[0].value).toBe(clock("ar"));
   });
 
   it("says nothing it does not know", () => {

@@ -6,8 +6,8 @@ import { SMALL_FILE_BYTES } from "@ghostly/browser/shared/fileBytes";
 import { storedBlob, storedSize } from "@ghostly/browser/shared/storedFiles";
 import { restoreArkDatabase, snapshotArkDatabase, type ArkDatabaseSnapshot } from "@ghostly/browser/engine/paymentAdapters/backup";
 import { getPrefix, getStorageProfile, ownsKey } from "./storage";
-import { assertUnlocked } from "./profileData";
-import { currentProfile, listProfiles, namespaceOf, newProfileId, registerProfile, registryKey, type ProfileEntry } from "./profiles";
+import { assertUnlocked, identityKeysOf, profileIdentityKeys } from "./profileData";
+import { currentProfile, listProfiles, namespaceOf, newProfileId, registerProfile, registryKey, storedProfileName, type ProfileEntry } from "./profiles";
 
 /** The decrypted content of a profile bundle (WISP 05). */
 interface ProfilePayload {
@@ -42,7 +42,10 @@ async function withFileBytes(peer: DatabaseSnapshot | null, active: boolean): Pr
   if (pieces) { pieces.keys = []; pieces.values = []; }
 }
 
-const isArkRecord = (key: IDBValidKey) => key === "arkWallet" || (typeof key === "string" && (key.startsWith("arkWallet-retired-") || key.startsWith("arkWallet-mode-")));
+const isRecordOf = (rail: "arkWallet" | "barkWallet") => (key: IDBValidKey) => key === rail || (typeof key === "string" && (key.startsWith(`${rail}-retired-`) || key.startsWith(`${rail}-mode-`)));
+const isArkRecord = isRecordOf("arkWallet");
+/** A Bark wallet keeps its coins in a database of its own, named after its id (`ghostly-bark-<id>`), which no bundle carries. */
+const isBarkRecord = isRecordOf("barkWallet");
 
 /**
  * Everything of a profile — chats and keys, messages and files, wallets and their journal, services,
@@ -91,8 +94,59 @@ export async function createProfileBackup(passphrase: string, id?: string, lockP
     if (!(await databaseExists(`ghostly-ark-${walletId}`))) continue;
     ark[walletId] = await snapshotArkDatabase(walletId).catch((e: unknown) => Promise.reject(Object.assign(new Error(`Could not read the Ark wallet for the backup: ${e instanceof Error ? e.message : e}`), { cause: e })));
   }
-  const payload: ProfilePayload = { format: "ghostly-profile", version: 1, createdAt: Date.now(), profile: { name: active ? currentProfile().name : listProfiles().find((p) => p.id === id)?.name ?? "Profile" }, storage, databases: { peer, ark } };
+  const payload: ProfilePayload = { format: "ghostly-profile", version: 1, createdAt: Date.now(), profile: { name: storedProfileName(active ? currentProfile().id : id!) ?? "Profile" }, storage, databases: { peer, ark } };
   return seal(await encode(payload), passphrase);
+}
+
+const isQuotaError = (error: unknown) => (error as { name?: string })?.name === "QuotaExceededError";
+
+/** Takes away what a failed restore wrote: its databases and every local key of its namespace. */
+async function undoRestore(ns: string, databases: string[]): Promise<void> {
+  for (const name of databases) {
+    await new Promise<void>((resolve) => { try { const r = indexedDB.deleteDatabase(name); r.onsuccess = r.onerror = r.onblocked = () => resolve(); } catch { resolve(); } });
+  }
+  const prefix = `ghostly_${ns}_`;
+  const keys = Array.from({ length: localStorage.length }, (_, i) => localStorage.key(i)).filter((key): key is string => !!key?.startsWith(prefix));
+  for (const key of keys) { try { localStorage.removeItem(key); } catch { /* nothing more to do */ } }
+}
+
+/**
+ * The file a profile's backup downloads as, named after the profile: its letters and digits in any script kept
+ * ("仕事", "Trabalho-é"), everything else (spaces, punctuation, direction marks) a dash. A name with none left is "profile".
+ */
+export function backupFileName(profileName: string): string {
+  const base = profileName.normalize("NFC").replace(/[^\p{L}\p{M}\p{N}_-]+/gu, "-").replace(/^-+|-+$/g, "").slice(0, 64);
+  return `${base || "profile"}.ghostly-backup`;
+}
+
+/** A bundle opened with its passphrase and checked, not restored yet. */
+export interface OpenedProfileBackup { readonly name: string; readonly payload: ProfilePayload }
+
+/** Opens a bundle with its passphrase, without writing anything. Throws when it is not a profile's. */
+export async function openProfileBackup(text: string, passphrase: string): Promise<OpenedProfileBackup> {
+  const payload = decode(await open(text, passphrase)) as ProfilePayload;
+  if (payload?.format !== "ghostly-profile" || payload.version !== 1 || typeof payload.profile?.name !== "string" || !payload.storage || typeof payload.storage !== "object" || !payload.databases) throw new Error("This backup does not hold a profile");
+  return { name: payload.profile.name, payload };
+}
+
+/**
+ * The profiles of this device that the bundle is a copy of: those sharing a chat key or the DID key with it (WISP 05
+ * § Restoring on the same device). A copy restored beside one of them would answer its contacts as the same person.
+ * Every profile is compared, a locked one too; only its name is shown.
+ */
+export async function sameIdentityProfiles(opened: OpenedProfileBackup): Promise<ProfileEntry[]> {
+  const peer = opened.payload.databases.peer;
+  const valuesOf = (name: string) => peer?.stores.find((store) => store.name === name);
+  const settings = valuesOf("settings");
+  const didAt = settings?.keys.findIndex((key) => key === "profileDid") ?? -1;
+  const theirs = identityKeysOf(valuesOf("links")?.values ?? [], didAt >= 0 ? settings!.values[didAt] : undefined);
+  if (!theirs.size) return [];
+  const found: ProfileEntry[] = [];
+  for (const entry of listProfiles()) {
+    const ours = await profileIdentityKeys(entry.id).catch(() => new Set<string>());
+    if ([...ours].some((key) => theirs.has(key))) found.push(entry);
+  }
+  return found;
 }
 
 /**
@@ -100,52 +154,72 @@ export async function createProfileBackup(passphrase: string, id?: string, lockP
  * Ark wallet databases move to fresh ids; unfinished payment attempts are kept as unknown.
  */
 export async function restoreProfileBackup(text: string, passphrase: string): Promise<ProfileEntry> {
-  const payload = decode(await open(text, passphrase)) as ProfilePayload;
-  if (payload?.format !== "ghostly-profile" || payload.version !== 1 || typeof payload.profile?.name !== "string" || !payload.storage || typeof payload.storage !== "object" || !payload.databases) throw new Error("This backup does not hold a profile");
+  return restoreOpenedBackup(await openProfileBackup(text, passphrase));
+}
+
+/** `restoreProfileBackup` of a bundle already opened (after `sameIdentityProfiles` was asked, say). */
+export async function restoreOpenedBackup({ payload }: OpenedProfileBackup): Promise<ProfileEntry> {
   const id = newProfileId(), ns = namespaceOf(id);
 
-  // Every Ark wallet gets a new id, with or without a copy of its database: a restored profile must never
-  // share a database with the one it was copied from, which may still be on this device.
+  // Every Ark and Bark wallet gets a new id, with or without a copy of its database: a restored profile must never
+  // share a database with the one it was copied from, which may still be on this device. A Bark wallet's is never in
+  // the bundle: under its new id it starts empty and the server's recovery scan fills it from the phrase, as a
+  // restore of a Bark backup does.
   const walletIds = new Map<string, string>();
   const ark = payload.databases.ark ?? {};
   const peer = payload.databases.peer;
   const settings = peer?.stores.find((store) => store.name === "settings");
+  const hasOwnDatabase = (key: IDBValidKey) => isArkRecord(key) || isBarkRecord(key);
   for (const [i, value] of (settings?.values ?? []).entries()) {
     const walletId = (value as { config?: { walletId?: unknown } })?.config?.walletId;
-    if (isArkRecord(settings!.keys[i]) && typeof walletId === "string" && !walletIds.has(walletId)) walletIds.set(walletId, crypto.randomUUID());
+    if (hasOwnDatabase(settings!.keys[i]) && typeof walletId === "string" && !walletIds.has(walletId)) walletIds.set(walletId, crypto.randomUUID());
   }
-  for (const [oldId, fresh] of walletIds) if (Object.prototype.hasOwnProperty.call(ark, oldId)) await restoreArkDatabase(fresh, ark[oldId]);
-  // Fedimint client databases are files of this origin, not in the bundle: every federation gets a new file name,
-  // which the wallet finds missing and fills by joining again with the mnemonic (the federation's recovery).
-  const freshFedimint = (value: unknown) => {
-    const record = value as { database?: unknown; federations?: { database?: unknown }[] };
-    const renamed = (f: { database?: unknown }) => typeof f?.database === "string" ? { ...f, database: `ghostly-fedimint-${crypto.randomUUID()}.db` } : f;
-    return Array.isArray(record?.federations) ? { ...record, federations: record.federations.map(renamed) } : typeof record?.database === "string" ? renamed(record) : value;
-  };
-  if (peer) {
-    for (const store of peer.stores) {
-      if (store.name === "settings") {
-        store.values = store.values.map((value, i) => {
-          const record = value as { config?: { walletId?: string } };
-          const moved = record?.config?.walletId && walletIds.get(record.config.walletId);
-          if (typeof store.keys[i] === "string" && (store.keys[i] as string).startsWith("fedimint")) return freshFedimint(value);
-          return isArkRecord(store.keys[i]) && moved ? { ...record, config: { ...record.config, walletId: moved } } : value;
-        });
-      }
-      if (store.name === "paymentIntents") {
-        // An older copy cannot prove an unfinished attempt was never sent; it may not authorize a new one.
-        store.values = store.values.map((value) => {
-          const intent = value as { review?: { state?: string } };
-          return intent?.review && ["pending", "submitted", "unknown"].includes(intent.review.state ?? "") ? { ...intent, review: { ...intent.review, state: "unknown" } } : value;
-        });
-      }
+  // What this restore has written so far: a restore that fails takes all of it away again, so a device short of
+  // room is not left holding an unlisted copy of the profile (its keys included) that nothing would ever delete.
+  const made: string[] = [];
+  try {
+    for (const [oldId, fresh] of walletIds) {
+      if (!Object.prototype.hasOwnProperty.call(ark, oldId)) continue;
+      await restoreArkDatabase(fresh, ark[oldId]);
+      made.push(`ghostly-ark-${fresh}`);
     }
-    await restoreDatabase(`ghostly_${ns}`, peer);
+    // Fedimint client databases are files of this origin, not in the bundle: every federation gets a new file name,
+    // which the wallet finds missing and fills by joining again with the mnemonic (the federation's recovery).
+    const freshFedimint = (value: unknown) => {
+      const record = value as { database?: unknown; federations?: { database?: unknown }[] };
+      const renamed = (f: { database?: unknown }) => typeof f?.database === "string" ? { ...f, database: `ghostly-fedimint-${crypto.randomUUID()}.db` } : f;
+      return Array.isArray(record?.federations) ? { ...record, federations: record.federations.map(renamed) } : typeof record?.database === "string" ? renamed(record) : value;
+    };
+    if (peer) {
+      for (const store of peer.stores) {
+        if (store.name === "settings") {
+          store.values = store.values.map((value, i) => {
+            const record = value as { config?: { walletId?: string } };
+            const moved = record?.config?.walletId && walletIds.get(record.config.walletId);
+            if (typeof store.keys[i] === "string" && (store.keys[i] as string).startsWith("fedimint")) return freshFedimint(value);
+            return hasOwnDatabase(store.keys[i]) && moved ? { ...record, config: { ...record.config, walletId: moved } } : value;
+          });
+        }
+        if (store.name === "paymentIntents") {
+          // An older copy cannot prove an unfinished attempt was never sent; it may not authorize a new one.
+          store.values = store.values.map((value) => {
+            const intent = value as { review?: { state?: string } };
+            return intent?.review && ["pending", "submitted", "unknown"].includes(intent.review.state ?? "") ? { ...intent, review: { ...intent.review, state: "unknown" } } : value;
+          });
+        }
+      }
+      await restoreDatabase(`ghostly_${ns}`, peer);
+      made.push(`ghostly_${ns}`);
+    }
+    for (const [suffix, value] of Object.entries(payload.storage)) {
+      if (typeof value !== "string" || !/^[A-Za-z0-9_.-]{1,200}$/.test(suffix)) continue;
+      localStorage.setItem(`ghostly_${ns}_${suffix}`, value);
+    }
+    // Registered last: an interrupted restore leaves no half-made profile in the list. Its name as it was, marked
+    // restored: the app says "(restored)" in its language, which a name written here would not follow.
+    return registerProfile(id, payload.profile.name, true);
+  } catch (error) {
+    await undoRestore(ns, made);
+    throw isQuotaError(error) ? Object.assign(new Error("This device has no room left for this backup. Free some space, then try again."), { cause: error }) : error;
   }
-  for (const [suffix, value] of Object.entries(payload.storage)) {
-    if (typeof value !== "string" || !/^[A-Za-z0-9_.-]{1,200}$/.test(suffix)) continue;
-    localStorage.setItem(`ghostly_${ns}_${suffix}`, value);
-  }
-  // Registered last: an interrupted restore leaves no half-made profile in the list.
-  return registerProfile(id, `${payload.profile.name} (restored)`.slice(0, 32));
 }

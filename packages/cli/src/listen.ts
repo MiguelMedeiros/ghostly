@@ -71,7 +71,7 @@ export async function allowlist(from: readonly string[], groups: readonly string
  */
 export interface AgentTurn extends GhostlyEvent {
   type: "agent.turn";
-  source: "message.received" | "group.message";
+  source: "message.received" | "group.message" | "group.mentioned";
   chat?: string;
   group?: string;
   /** A group's author (their key). */
@@ -79,10 +79,15 @@ export interface AgentTurn extends GhostlyEvent {
   /** What `send --reply` (or `group send --reply`) takes to answer it. */
   messageId: string;
   timestamp: number;
+  /**
+   * The message pressed a button of a question this profile sent (WISP 4xx · Message Buttons), as this side's engine
+   * matched it: the question's id, the button's id and its label, all this profile's own words.
+   */
+  press?: { messageId: string; button: string; label: string; inferred?: true };
   untrusted: { text: string; name: string | null; replyTo?: { id: string; snippet: string }; file?: { id: string; name: string; size: number; mime: string; voice: boolean } };
 }
 
-interface TurnMessage { id: string; text: string; timestamp: number; nick: string | null; member?: string; mentioned?: boolean; replyTo?: { id: string; snippet: string }; file?: { id: string; name: string; size: number; mime: string; voice?: unknown } }
+interface TurnMessage { id: string; text: string; timestamp: number; nick: string | null; member?: string; mentioned?: boolean; replyTo?: { id: string; snippet: string }; press?: AgentTurn["press"]; file?: { id: string; name: string; size: number; mime: string; voice?: unknown } }
 
 /** The turn an event starts, or null: only a contact's message, and a group message that mentions this profile. */
 export function toTurn(event: GhostlyEvent): AgentTurn | null {
@@ -90,6 +95,8 @@ export function toTurn(event: GhostlyEvent): AgentTurn | null {
   if (!message || typeof message.text !== "string") return null;
   if (event.type === "message.received" && typeof event.chat === "string") return turn(event, "message.received", { chat: event.chat }, message);
   if (event.type === "group.message" && typeof event.group === "string" && message.mentioned) return turn(event, "group.message", { group: event.group, ...(message.member ? { member: message.member } : {}) }, message);
+  // A mention learned after its message was reported (its `group.message` named nobody): the turn it did not start then.
+  if (event.type === "group.mentioned" && typeof event.group === "string" && message.mentioned) return turn(event, "group.mentioned", { group: event.group, ...(message.member ? { member: message.member } : {}) }, message);
   return null;
 }
 
@@ -97,6 +104,7 @@ function turn(event: GhostlyEvent, source: AgentTurn["source"], where: Pick<Agen
   const file = message.file;
   return {
     seq: event.seq, id: `agent.turn:${event.id}`, type: "agent.turn", at: event.at, source, ...where, messageId: message.id, timestamp: message.timestamp,
+    ...(message.press ? { press: message.press } : {}),
     untrusted: {
       text: message.text, name: message.nick ?? null,
       ...(message.replyTo ? { replyTo: { id: message.replyTo.id, snippet: message.replyTo.snippet } } : {}),

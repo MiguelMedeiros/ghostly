@@ -136,7 +136,7 @@ test("two people pay on the same network; a card of a network the contact has no
   await alice.page.getByTestId("payment-amount").fill("21");
   await alice.page.getByTestId("payment-send").click();
   const review = alice.page.getByTestId("payment-composer").getByTestId("payment-review");
-  await expect(review).toContainText("cashu-test");
+  await expect(review.getByTestId("review-rail")).toHaveText("Cashu");
   // Which money, in words: test money goes on Approve, with no second question.
   await expect(review.getByTestId("review-network")).toHaveText("Test money");
   await expect(review).toContainText("21 test sats");

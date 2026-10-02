@@ -29,10 +29,23 @@ async function startEngine(): Promise<void> {
   if (status.profile === status.active) return;
   // A page made another profile the one in use. The running peer stops and its document closes before
   // the next one opens: never two peers, and never one peer over two profiles' data.
+  await replaceEngine();
+}
+
+async function replaceEngine(): Promise<void> {
   await chrome.runtime.sendMessage({ target: "engine", type: "stop" } satisfies RuntimeMessage).catch(() => {});
   await chrome.offscreen.closeDocument().catch(() => {});
   await createEngineDocument();
   await waitForEngine();
+}
+
+/** A new peer in place of the running one, which stopped for good ("Clear all data"); after any start in progress. */
+function restartEngine(): Promise<void> {
+  const previous = starting ?? Promise.resolve();
+  const next = previous.catch(() => {}).then(replaceEngine);
+  const tracked: Promise<void> = next.finally(() => { if (starting === tracked) starting = null; });
+  starting = tracked;
+  return next;
 }
 
 async function createEngineDocument(): Promise<void> {
@@ -63,7 +76,15 @@ async function waitForEngine(): Promise<EngineStatus> {
 }
 
 chrome.runtime.onStartup.addListener(() => void ensureEngine());
-chrome.runtime.onInstalled.addListener(() => void ensureEngine());
+/**
+ * A first install also opens the app in a tab: without it nothing showed, and a new user had to find the toolbar
+ * button. The tab opens even when the peer does not start, so the page can say why. An update opens nothing.
+ */
+chrome.runtime.onInstalled.addListener((details) => {
+  const started = ensureEngine();
+  if (details?.reason === "install") void started.catch(() => {}).then(showApp).catch(() => {});
+  else void started.catch(() => {});
+});
 
 /**
  * Chrome has a newer version but will not swap it in while Ghostly is running,
@@ -76,21 +97,43 @@ chrome.runtime.onUpdateAvailable.addListener((details) => {
 
 chrome.action.onClicked.addListener(async () => {
   await ensureEngine();
+  await showApp();
+});
+
+/** Brings the app's tab forward, or opens one. */
+async function showApp(): Promise<void> {
   const url = chrome.runtime.getURL("app.html");
-  const [existing] = await chrome.tabs.query({ url });
-  if (existing?.id !== undefined) {
-    await chrome.tabs.update(existing.id, { active: true });
-    if (existing.windowId !== undefined) await chrome.windows.update(existing.windowId, { focused: true });
+  const existing = await openAppTab(url);
+  if (existing) {
+    await chrome.tabs.update(existing.tabId, { active: true });
+    if (existing.windowId >= 0) await chrome.windows.update(existing.windowId, { focused: true });
   } else {
     await chrome.tabs.create({ url });
   }
-});
+}
+
+/**
+ * A tab that shows the app already, on any of its pages (`app.html#/chat/…`). Asked of the extension's own contexts:
+ * `chrome.tabs.query({ url })` needs the `tabs` permission, which Ghostly does not have, and finds nothing without it.
+ */
+async function openAppTab(url: string): Promise<{ tabId: number; windowId: number } | null> {
+  const contexts = await chrome.runtime.getContexts({ contextTypes: [chrome.runtime.ContextType.TAB] });
+  const app = contexts.find((context) => context.tabId >= 0 && context.documentUrl?.split("#")[0] === url);
+  return app ? { tabId: app.tabId, windowId: app.windowId } : null;
+}
 
 // Only the extension's own pages are heard (`fromOwnPage`).
 chrome.runtime.onMessage.addListener((message: RuntimeMessage, sender, sendResponse) => {
   if (message?.target !== "background" || !fromOwnPage(sender)) return false;
   if (message.type === "ensure-engine") {
     void ensureEngine().then(
+      () => sendResponse({ ok: true }),
+      (error) => sendResponse({ ok: false, error: String(error) }),
+    );
+    return true;
+  }
+  if (message.type === "restart-engine") {
+    void restartEngine().then(
       () => sendResponse({ ok: true }),
       (error) => sendResponse({ ok: false, error: String(error) }),
     );

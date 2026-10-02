@@ -5,6 +5,7 @@ import type { GroupJoinStage, GroupMemberView, GroupView, StoredMessage } from "
 import { GroupChat } from "../../pages/GroupChat";
 import { fakeEngine, groupView } from "../fakeEngine";
 import { renderApp } from "../render";
+import { groupChat, mutedUntil, setChatMute } from "../../lib/chatMute";
 
 // covers: groups.send, groups.leave, groups.forget, groups.rotate, groups.link.join
 
@@ -84,8 +85,15 @@ describe("GroupChat: joining through a link", () => {
     expect(screen.queryByTestId("group-joining-stale")).not.toBeInTheDocument();
   });
 
-  it("an app with no WebRTC says it cannot get in from here, not that it is in in a moment", () => {
+  it("an app with no WebRTC but native transports is told it is in in a moment, as any", () => {
+    // Ghostly Desktop on Linux: Iroh or HyperDHT carry the entry session (WISP 9xx § Transports).
     fakeEngine.update({ transport: { protocol: "webrtc/1", relays: [], webrtc: false } });
+    openGroup({ ...groupView({ canSend: false, invitation: { linkId: "", contact: "", admin: "", members: 0, accepted: true, viaLink: true, stage: "answered" } }), profile: "community" });
+    expect(screen.getByTestId("group-joining")).not.toHaveTextContent("Groups can't connect from this app yet");
+  });
+
+  it("an app with no transport for group links says it cannot get in from here, not that it is in in a moment", () => {
+    fakeEngine.update({ transport: { protocol: "webrtc/1", relays: [], webrtc: false, groupLinks: false } });
     openGroup({ ...groupView({ canSend: false, invitation: { linkId: "", contact: "", admin: "", members: 0, accepted: true, viaLink: true, stage: "answered" } }), profile: "community" });
     const card = screen.getByTestId("group-joining");
     expect(card).toHaveTextContent("Groups can't connect from this app yet");
@@ -258,12 +266,25 @@ describe("GroupChat: leaving", () => {
     expect(await screen.findByText("Chat list")).toBeInTheDocument();
   });
 
+  it("forgets the group's mute with its history: rejoining by link reuses the group id, and it is not muted then", async () => {
+    setChatMute(groupChat("group-1"), "forever");
+    const { user, engine } = openGroup(active());
+    engine.on("leaveGroup", () => undefined);
+    const dialog = await leaveFromMenu(user);
+    await user.click(within(dialog).getByTestId("group-leave-confirm"));
+    expect(await screen.findByText("Chat list")).toBeInTheDocument();
+    expect(mutedUntil(groupChat("group-1"))).toBeUndefined();
+  });
+
   it("stays, and says why, when the engine refuses", async () => {
+    setChatMute(groupChat("group-1"), "forever");
     const { user, engine } = openGroup(active());
     engine.on("leaveGroup", () => { throw new Error("Nobody is online to take over"); });
     const dialog = await leaveFromMenu(user);
     await user.click(within(dialog).getByTestId("group-leave-confirm"));
     expect(await within(dialog).findByRole("alert")).toHaveTextContent("Nobody is online to take over");
+    // Still in the group: still muted.
+    expect(mutedUntil(groupChat("group-1"))).toBe("forever");
     expect(within(dialog).getByTestId("group-leave-confirm")).toBeEnabled();
     expect(screen.getByTestId("group-chat")).toBeInTheDocument();
   });
@@ -275,6 +296,21 @@ describe("GroupChat: leaving", () => {
     const dialog = await leaveFromMenu(user);
     expect(within(dialog).getByTestId("group-leave-successor")).toHaveTextContent("You are the admin: Alice becomes the admin when you leave.");
     expect(within(dialog).getByTestId("group-leave-confirm")).toBeEnabled();
+  });
+
+  // The engine hands the role to the first member in roster order over a direct edge of mine (`successor()`): a member
+  // reached through a hub cannot take the role commit, so the dialog does not name one.
+  it("names the member the engine hands the role to: the first one over a direct edge, not one reached through a hub", async () => {
+    const { user } = openGroup(adminOf([member({ key: BOB, nick: "Bob", online: true, viaHub: true }), member({ key: ALICE, nick: "Alice", online: true })]));
+    const dialog = await leaveFromMenu(user);
+    expect(within(dialog).getByTestId("group-leave-successor")).toHaveTextContent("You are the admin: Alice becomes the admin when you leave.");
+  });
+
+  it("keeps the admin from leaving while the only members online are reached through a hub", async () => {
+    const { user } = openGroup(adminOf([member({ key: BOB, nick: "Bob", online: true, viaHub: true })]));
+    const dialog = await leaveFromMenu(user);
+    expect(within(dialog).queryByTestId("group-leave-successor")).not.toBeInTheDocument();
+    expect(within(dialog).getByTestId("group-leave-confirm")).toBeDisabled();
   });
 
   it("keeps the admin from leaving while no member is online to take over", async () => {

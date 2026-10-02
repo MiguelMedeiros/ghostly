@@ -1,6 +1,7 @@
 import { act, screen, waitFor, within } from "@testing-library/react";
 import { useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { Language } from "../../lib/settings";
 import type { LinkView, WalletInstanceView, WalletView } from "@ghostly/browser/shared/types";
 import type { WalletNetwork } from "@ghostly/core";
 import { PaymentComposer } from "../../components/PaymentComposer";
@@ -27,6 +28,7 @@ interface Open {
   withWallet?: boolean;
   onSend?: (amount: number, memo: string, network?: WalletNetwork, confirmedReal?: boolean) => Promise<string | null>;
   onRequest?: (amount: number, memo: string, method?: string, rail?: string, network?: WalletNetwork) => Promise<string | null>;
+  language?: Language;
 }
 
 /** Where the app is: the composer navigates away to make a wallet. */
@@ -35,7 +37,7 @@ function Where() {
 }
 
 /** The composer in a chat with "peer", whose name the chat shows as Alice. */
-function open({ wallet = everyWallet(), link, balance = 1_000, withWallet = true, onSend, onRequest }: Open = {}) {
+function open({ wallet = everyWallet(), link, balance = 1_000, withWallet = true, onSend, onRequest, language }: Open = {}) {
   // The chat and the wallet are there before the composer opens, as they are in the app.
   fakeEngine.setState({ links: [linkView(link)], wallet });
   const handlers = {
@@ -45,6 +47,7 @@ function open({ wallet = everyWallet(), link, balance = 1_000, withWallet = true
   };
   const view = renderApp(
     <><PaymentComposer balance={balance} {...handlers} reviewContext={withWallet ? reviewContext() : undefined} contact="Alice" /><Where /></>,
+    { language },
   );
   return { ...view, ...handlers };
 }
@@ -64,11 +67,13 @@ const tab = (network: WalletNetwork) => screen.getByTestId(`payment-tab-${networ
 const deck = () => screen.getAllByRole("radio").map((r) => r.dataset.testid);
 
 describe("the amount", () => {
-  it("keeps only digits in an amount of sats", async () => {
+  it("keeps digits and separators in an amount of sats, and refuses a fraction of a sat instead of reading 12.5 as 125", async () => {
     const { user } = open({ withWallet: false });
     await user.type(amount(), "1a2.5b");
-    expect(amount()).toHaveValue("125");
+    expect(amount()).toHaveValue("12.5");
     expect(amount()).toHaveAccessibleName("Amount in sats");
+    expect(screen.getByTestId("amount-unclear")).toHaveTextContent("Whole numbers only, like 1,234");
+    expect(request()).toBeDisabled();
   });
 
   it("takes decimals for USDT and requests in the token's smallest units, on the card's network", async () => {
@@ -80,6 +85,44 @@ describe("the amount", () => {
     await user.type(screen.getByRole("textbox", { name: "What for? (optional)" }), "coffee");
     await user.click(request());
     expect(onRequest).toHaveBeenCalledWith(1_500_000, "coffee", "usdt", "usdt", "testnet");
+  });
+
+  it("takes a comma as the decimal point where the language writes one (a phone's decimal key types it)", async () => {
+    rememberRail("peer", "usdt:testnet");
+    const { user, onRequest } = open({ language: "pt" });
+    await user.click(screen.getByTestId("payment-use"));
+    await user.type(amount(), "1.000,5");
+    expect(amount()).toHaveValue("1.000,5");
+    await user.clear(amount());
+    await user.type(amount(), "1,5");
+    expect(amount()).toHaveValue("1,5");
+    await user.click(request());
+    expect(onRequest).toHaveBeenCalledWith(1_500_000, "", "usdt", "usdt", "testnet");
+  });
+
+  it("reads a comma as grouping in a language that writes the point", async () => {
+    rememberRail("peer", "usdt:testnet");
+    const { user, onRequest } = open();
+    await user.click(screen.getByTestId("payment-use"));
+    await user.type(amount(), "1,000.5");
+    expect(amount()).toHaveValue("1,000.5");
+    await user.click(request());
+    expect(onRequest).toHaveBeenCalledWith(1_000_500_000, "", "usdt", "usdt", "testnet");
+  });
+
+  it("reads \"1.000\" in Portuguese as a thousand, and refuses \"1.5\" there rather than guess", async () => {
+    rememberRail("peer", "usdt:testnet");
+    const { user, onRequest } = open({ language: "pt" });
+    await user.click(screen.getByTestId("payment-use"));
+    await user.type(amount(), "1.000");
+    await user.click(request());
+    expect(onRequest).toHaveBeenCalledWith(1_000_000_000, "", "usdt", "usdt", "testnet");
+    onRequest.mockClear();
+    await user.clear(amount());
+    await user.type(amount(), "1.5");
+    expect(screen.getByTestId("amount-unclear")).toHaveTextContent("Valor ambíguo");
+    expect(request()).toBeDisabled();
+    expect(onRequest).not.toHaveBeenCalled();
   });
 
   it("refuses more USDT decimals than the token has, without asking for anything", async () => {

@@ -1,11 +1,11 @@
 import "fake-indexeddb/auto";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { LIMITS, createIdentity, type FileSink, type GhostLinkOptions } from "@ghostly/core";
-import { GhostlyNode } from "../src/engine/node";
+import { GROUP_NATIVE_SLOTS, GhostlyNode, NATIVE_HOLD_MS, RESUME_SPENT_MS } from "../src/engine/node";
 import { db } from "../src/engine/db";
 import { STORES, fileStore, transact } from "../src/shared/idb";
 import { storedBlob } from "../src/shared/storedFiles";
-import type { StoredLink } from "../src/shared/types";
+import type { GroupEdgeView, StoredLink } from "../src/shared/types";
 // covers: core.peer-keys, chat.paired.send, chat.paired.receipts, chat.paired.nickname-sync, files.paired.send, files.size-limit, files.persistence, delivery.hold.text, delivery.hold.picture, groups.protocol.link-frames, chat.waiting, chat.caps-record
 
 /**
@@ -34,7 +34,22 @@ vi.mock("@ghostly/core", async (importOriginal) => {
     setChatActive = (active: boolean) => this.session.setActive(active);
     learnPeerTransports = vi.fn();
     learnPeerChoice = vi.fn();
+    registerEndpoint = vi.fn((endpoint: { transport: string }) => { this.availableTransports = [...this.availableTransports, endpoint.transport]; });
+    canReleaseEndpoint = vi.fn(() => true);
+    releaseEndpoint = vi.fn(async (transport: string) => { this.availableTransports = this.availableTransports.filter((t) => t !== transport); });
+    /** As the real one: live over the transport, and unused for `idleMs` (`lastActivityAt`); a call holds it (`callOn`). */
+    lastActivityAt = Date.now();
+    callOn = false;
+    canYieldEndpoint = vi.fn((transport: string, idleMs: number) => this.isDataLinkOpen && this.availableTransports.includes(transport)
+      && !this.callOn && Date.now() - this.lastActivityAt >= idleMs);
+    yieldEndpoint = vi.fn(async (transport: string, idleMs: number) => {
+      if (!this.canYieldEndpoint(transport, idleMs)) return false;
+      this.isDataLinkOpen = false;
+      this.availableTransports = this.availableTransports.filter((t) => t !== transport);
+      return true;
+    });
     nativeDescriptors = {};
+    relayedTransports: string[] = [];
     start = vi.fn();
     stop = vi.fn(async () => {});
     wake = vi.fn();
@@ -215,6 +230,216 @@ describe("an app restarting (WISP 100, Back after a restart)", () => {
       .toEqual(["iroh/1", "hyperdht/1", undefined, undefined, undefined]);
   });
 
+  it("a chat not live again within the contact's liveness bound is not resumed at the next start; one live again is", async () => {
+    // #966 follow-up: a chat that never came back after its last live stretch said "live at last run" at every start,
+    // and knocked every time (all ten chats of the repro).
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"], shouldAdvanceTime: true });
+    onTestFinished(() => { vi.useRealTimers(); });
+    const paired = () => ({ pairedPeerKey: createIdentity().pubKeyZ32 });
+    const gone = row({ ...paired(), transportHistory: [{ at: 1, kind: "live", transport: "iroh/1" }] });
+    const back = row({ ...paired(), transportHistory: [{ at: 1, kind: "live", transport: "iroh/1" }] });
+    const first = await started(gone, back);
+    expect([gone, back].map((chat) => first.linkOf(chat.id).options.resume)).toEqual(["iroh/1", "iroh/1"]);
+    // One is live again in this run; the other's contact never comes back.
+    first.node["links"].get(back.id)!.pairing = { status: "ready", transport: "iroh/1" } as never;
+    first.node["links"].get(back.id)!.dataLink = "open";
+    first.node["observeTransport"](back.id);
+    // Not yet past the bound: a run this short says nothing (the contact may still hold the session).
+    await vi.advanceTimersByTimeAsync(RESUME_SPENT_MS - 1_000);
+    expect((await saved(gone.id))?.transportHistory).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(1_000);
+    await vi.waitFor(async () => expect((await saved(gone.id))?.transportHistory?.at(-1)).toMatchObject({ kind: "down", from: "iroh/1", restart: true }));
+    expect((await saved(back.id))?.transportHistory?.at(-1)).toMatchObject({ kind: "live", transport: "iroh/1" });
+    await first.node.shutdown();
+    nodes.splice(nodes.indexOf(first.node), 1);
+    links.length = 0;
+    const again = await started();
+    expect([gone, back].map((chat) => again.linkOf(chat.id).options.resume)).toEqual([undefined, "iroh/1"]);
+  });
+
+  // covers: transport.native-pool
+  describe("more paired chats than native slots (eight per transport)", () => {
+    const paired = () => ({ pairedPeerKey: createIdentity().pubKeyZ32 });
+    const endpoint = () => ({ transport: "iroh/1" as const, descriptor: { id: "ab".repeat(32), relay: "https://relay.test./", addresses: [] },
+      connect: vi.fn(), close: vi.fn(async () => {}), onConnection: null, onDescriptor: null });
+    /** Started as a Linux Desktop is: Iroh native, no WebRTC to fall back on. */
+    async function nativeStarted(...rows: StoredLink[]) {
+      for (const r of rows) await db.putLink(r);
+      const events = { onState: vi.fn(), onMessages: vi.fn(), onCallSignal: vi.fn(), onAttention: vi.fn() };
+      const node = new GhostlyNode(events, { automaticWallets: false, transport: fixture, nativeTransports: { "iroh/1": vi.fn(async () => endpoint()) } });
+      nodes.push(node);
+      await node.start();
+      await node["nativeQueue"];
+      const linkOf = (id: string) => links.filter((l) => l.options.params.id === id).at(-1)! as unknown as Recorded & {
+        registerEndpoint: ReturnType<typeof vi.fn>; releaseEndpoint: ReturnType<typeof vi.fn>; canReleaseEndpoint: ReturnType<typeof vi.fn> };
+      return { node, linkOf };
+    }
+    // Stored first (the links store reads back in id order), each idle since long ago.
+    const older = () => Array.from({ length: 10 }, (_, i) => row({ ...paired(), id: `chat-a${i}` }));
+
+    it("the chat live most recently takes one first, among chats live when the app quit", async () => {
+      // Omarchy (2026-09-30): both apps restarted, and the chat they had just been live in got no listener on one side:
+      // the chats stored before it took all eight. Its contact dialled it every 20 s for minutes, never answered.
+      const now = Date.now();
+      const liveLongAgo = { transportHistory: [{ at: now - 3_600_000, kind: "live" as const, transport: "iroh/1" as const }] };
+      const rows = [...older().map((r, i) => i < 8 ? { ...r, ...liveLongAgo } : r),
+        row({ ...paired(), id: "chat-z", transportHistory: [{ at: now - 60_000, kind: "live", transport: "iroh/1" }] })];
+      const { linkOf } = await nativeStarted(...rows);
+      const listening = rows.filter((r) => linkOf(r.id).registerEndpoint.mock.calls.length > 0).map((r) => r.id);
+      expect(listening).toHaveLength(8);
+      expect(listening).toContain("chat-z");
+      expect(listening).not.toContain("chat-a8");
+      expect(listening).not.toContain("chat-a9");
+    });
+
+    it("a chat whose contact left just before this app quit, ahead of chats live when an older run ended", async () => {
+      // Both apps quitting together: one hears the other's goodbye first and the chat ends off live there. The chats
+      // that were live an hour ago and never came back since still end on that live stretch, run after run.
+      const now = Date.now();
+      const liveLongAgo = { transportHistory: [{ at: now - 3_600_000, kind: "live" as const, transport: "iroh/1" as const }] };
+      const droppedLately = row({ ...paired(), id: "chat-y", transportHistory: [{ at: now - 60_000, kind: "live", transport: "iroh/1" }, { at: now - 5_000, kind: "down", from: "iroh/1" }] });
+      const rows = [...older().map((r) => ({ ...r, ...liveLongAgo })), droppedLately];
+      const { linkOf } = await nativeStarted(...rows);
+      const listening = rows.filter((r) => linkOf(r.id).registerEndpoint.mock.calls.length > 0).map((r) => r.id);
+      expect(listening).toHaveLength(8);
+      expect(listening).toContain("chat-y");
+    });
+
+    it("on an app with WebRTC, chats whose contact has none take them first, each class most recent first", async () => {
+      // #966 follow-up: a web app's listeners went to its most recent chats, contacts with WebRTC among them, and a
+      // Linux Desktop (or a CLI with WebRTC off), which can reach it only natively, was left with none.
+      vi.stubGlobal("RTCPeerConnection", class {});
+      onTestFinished(() => { vi.unstubAllGlobals(); });
+      const now = Date.now();
+      const record = (transports: string[]) => ({ rev: 1, issued: now, author: createIdentity().pubKeyZ32, versions: [1], transports,
+        capabilities: [], extensions: [], descriptors: {}, name: "" });
+      const liveAt = (at: number) => [{ at, kind: "live" as const, transport: "iroh/1" as const }];
+      const withRtc = Array.from({ length: 8 }, (_, i) => row({ ...paired(), id: `chat-w${i}`, transportHistory: liveAt(now - (i + 1) * 60_000),
+        capsState: { rev: 1, peer: record(["iroh/1", "hyperdht/1", "webrtc/1"]) } }));
+      const nativeOnly = [0, 1].map((i) => row({ ...paired(), id: `chat-n${i}`, transportHistory: liveAt(now - (i + 1) * 3_600_000),
+        capsState: { rev: 1, peer: record(["iroh/1"]) } }));
+      const rows = [...withRtc, ...nativeOnly];
+      const { linkOf } = await nativeStarted(...rows);
+      const listening = rows.filter((r) => linkOf(r.id).registerEndpoint.mock.calls.length > 0).map((r) => r.id);
+      expect(listening).toHaveLength(8);
+      expect(listening).toEqual(expect.arrayContaining(["chat-n0", "chat-n1"]));
+      // Among the contacts with WebRTC, #966's order: the two least recent are the ones left without.
+      expect(listening).not.toContain("chat-w6");
+      expect(listening).not.toContain("chat-w7");
+    });
+
+    it("the chat on screen gets one as soon as one is free, when every one was busy as it opened", async () => {
+      const rows = [...older().slice(0, 8), row({ ...paired(), id: "chat-z" })];
+      const { node, linkOf } = await nativeStarted(...rows);
+      const holders = rows.slice(0, 8).map((r) => linkOf(r.id));
+      for (const holder of holders) expect(holder.registerEndpoint).toHaveBeenCalled();
+      // Each one dialling its contact (an app back after a restart dials every chat at once): none can let go.
+      for (const holder of holders) holder.canReleaseEndpoint.mockReturnValue(false);
+      node.setActiveLink({ linkId: "chat-z" });
+      await node["nativeQueue"];
+      expect(linkOf("chat-z").registerEndpoint).not.toHaveBeenCalled();
+      expect(node.getState().links.find((l) => l.id === "chat-z")?.transportErrors?.["iroh/1"]).toMatch(/slots are in use/);
+      // A dial ends (it timed out): that chat can let its listener go, and the chat on screen takes it.
+      holders[3].canReleaseEndpoint.mockReturnValue(true);
+      await vi.waitFor(() => expect(linkOf("chat-z").registerEndpoint).toHaveBeenCalled(), { timeout: 10_000 });
+      expect(holders.filter((h) => h.releaseEndpoint.mock.calls.length > 0)).toEqual([holders[3]]);
+    }, 15_000);
+
+    describe("every listener carrying a live session (a Linux Desktop or a CLI bot talking to more contacts than that)", () => {
+      type Holder = Recorded & { registerEndpoint: ReturnType<typeof vi.fn>; releaseEndpoint: ReturnType<typeof vi.fn>; canReleaseEndpoint: ReturnType<typeof vi.fn>;
+        yieldEndpoint: ReturnType<typeof vi.fn>; lastActivityAt: number; callOn: boolean };
+      /** Eight chats live over Iroh, each last used this many minutes ago, and a ninth with no listener. */
+      async function allLive(minutesAgo: number[], ninth: Partial<StoredLink> = {}) {
+        const rows = [...older().slice(0, 8), row({ ...paired(), id: "chat-z", ...ninth })];
+        const started = await nativeStarted(...rows);
+        const linkOf = (id: string) => started.linkOf(id) as unknown as Holder;
+        const holders = rows.slice(0, 8).map((r) => linkOf(r.id));
+        const now = Date.now();
+        holders.forEach((holder, i) => {
+          expect(holder.registerEndpoint).toHaveBeenCalled();
+          // Each carries a session: none can simply let its listener go.
+          holder.canReleaseEndpoint.mockReturnValue(false);
+          holder.lastActivityAt = now - minutesAgo[i] * 60_000;
+        });
+        const nine = linkOf("chat-z");
+        nine.isDataLinkOpen = false;
+        expect(nine.registerEndpoint).not.toHaveBeenCalled();
+        return { node: started.node, linkOf, holders, nine };
+      }
+      const yielded = (holders: Holder[]) => holders.filter((h) => h.yieldEndpoint.mock.results.some((r) => r.type === "return"
+        && !h.availableTransports.includes("iroh/1")));
+
+      it("the chat on screen takes the listener of the session unused longest, once that is two minutes", async () => {
+        // #1006: chat ten, made while eight others were live over Iroh, stayed "On DHT · retrying live" for as long as they did.
+        const { node, holders, nine } = await allLive([1, 5, 3, 9, 0, 2.5, 4, 1]);
+        node.setActiveLink({ linkId: "chat-z" });
+        await node["nativeQueue"];
+        expect(nine.registerEndpoint).toHaveBeenCalled();
+        expect(yielded(holders)).toEqual([holders[3]]);
+        expect(holders[3].yieldEndpoint).toHaveBeenCalledWith("iroh/1", NATIVE_HOLD_MS);
+        expect(node.getState().links.find((l) => l.id === "chat-z")?.transportErrors?.["iroh/1"]).toBeUndefined();
+        expect(node.getState().links.find((l) => l.id === holders[3].options.params.id)?.transportErrors?.["iroh/1"]).toMatch(/quiet/);
+      });
+
+      it("never one with a call on, nor one used in the last two minutes: the chat on screen waits until one goes quiet", async () => {
+        const { node, holders, nine } = await allLive([1, 1, 30, 1, 1, 1, 1, 1]);
+        // The quietest has a call on: its media runs elsewhere, the session itself says nothing for half an hour.
+        holders[2].callOn = true;
+        node.setActiveLink({ linkId: "chat-z" });
+        await node["nativeQueue"];
+        expect(nine.registerEndpoint).not.toHaveBeenCalled();
+        expect(yielded(holders)).toEqual([]);
+        expect(node.getState().links.find((l) => l.id === "chat-z")?.transportErrors?.["iroh/1"]).toMatch(/slots are in use/);
+        // One goes quiet: the chat on screen, asking again in a moment, takes its listener.
+        holders[5].lastActivityAt = Date.now() - 3 * 60_000;
+        await vi.waitFor(() => expect(nine.registerEndpoint).toHaveBeenCalled(), { timeout: 10_000 });
+        expect(yielded(holders)).toEqual([holders[5]]);
+      }, 15_000);
+
+      it("no ping-pong: the chat a listener was taken from does not take it straight back", async () => {
+        const { node, holders, nine } = await allLive([10, 1, 1, 1, 1, 1, 1, 1]);
+        node.setActiveLink({ linkId: "chat-z" });
+        await node["nativeQueue"];
+        expect(yielded(holders)).toEqual([holders[0]]);
+        // Back to the chat it was taken from, while the ninth still dials (no session: it could simply let go).
+        node.setActiveLink({ linkId: holders[0].options.params.id });
+        await node["nativeQueue"];
+        expect(nine.releaseEndpoint).not.toHaveBeenCalled();
+        expect(nine.availableTransports).toContain("iroh/1");
+        expect(holders[0].registerEndpoint).toHaveBeenCalledOnce();
+        // Live now, and just used: still not.
+        nine.isDataLinkOpen = true;
+        nine.lastActivityAt = Date.now();
+        node.setActiveLink({ linkId: holders[0].options.params.id });
+        await node["nativeQueue"];
+        expect(nine.availableTransports).toContain("iroh/1");
+        expect(holders[0].registerEndpoint).toHaveBeenCalledOnce();
+        node.setActiveLink({ linkId: null });
+      });
+
+      it("on an app with WebRTC, a chat whose contact has WebRTC too ends nobody's session for one", async () => {
+        vi.stubGlobal("RTCPeerConnection", class {});
+        onTestFinished(() => { vi.unstubAllGlobals(); });
+        const record = (transports: string[]) => ({ rev: 1, issued: Date.now(), author: createIdentity().pubKeyZ32, versions: [1], transports,
+          capabilities: [], extensions: [], descriptors: {}, name: "" });
+        const { node, holders, nine } = await allLive([10, 9, 8, 7, 6, 5, 4, 3], { capsState: { rev: 1, peer: record(["iroh/1", "webrtc/1"]) } });
+        node.setActiveLink({ linkId: "chat-z" });
+        await node["nativeQueue"];
+        expect(nine.registerEndpoint).not.toHaveBeenCalled();
+        expect(yielded(holders)).toEqual([]);
+        node.setActiveLink({ linkId: null });
+      });
+
+      it("a text over the DHT in a chat not on screen takes one too: a bot has no chat on screen", async () => {
+        const { node, holders, nine } = await allLive([3, 4, 5, 6, 7, 8, 9, 10]);
+        await nine.options.events.onMessage({ id: "dht-1", text: "are you there?", timestamp: Date.now(), via: "pkarr" });
+        await node["nativeQueue"];
+        expect(nine.registerEndpoint).toHaveBeenCalled();
+        expect(yielded(holders)).toEqual([holders[7]]);
+      });
+    });
+  });
+
   it("shutting down says goodbye on every link before anything else it waits for", async () => {
     const chat = row({ pairedPeerKey: createIdentity().pubKeyZ32 });
     const { node, linkOf } = await started(chat);
@@ -301,6 +526,22 @@ describe("files a contact sends", () => {
     // Asked whether it is already here: only an exact match of what was announced says yes.
     expect(await events.onFileStored({ id: wire, name: "a.txt", size: 5, mime: "text/html", timestamp: 7 })).toBe("digest-1");
     expect(await events.onFileStored({ id: wire, name: "b.txt", size: 5, mime: "text/html", timestamp: 7 })).toBeUndefined();
+  });
+
+  it("the app has a file's transfer before the message that shows it: a file still arriving never reads as gone", async () => {
+    const { node, chat, announce } = await incoming();
+    // The engine's own events (what the app hears), not the link's.
+    const events = node["events"] as unknown as { onState: ReturnType<typeof vi.fn>; onMessages: ReturnType<typeof vi.fn> };
+    // Whatever the start left to say has been said.
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    const order: string[] = [];
+    events.onState.mockImplementation((state: { transfers: Record<string, unknown> }) => {
+      if (Object.keys(state.transfers).some((id) => id.startsWith(`${chat.id}-in-`))) order.push("transfer");
+    });
+    events.onMessages.mockImplementation((_linkId: string, messages: { file?: unknown }[]) => { if (messages.some((m) => m.file)) order.push("message"); });
+    announce("w.first");
+    await vi.waitFor(() => expect(order).toContain("message"));
+    expect(order[0]).toBe("transfer");
   });
 
   it("a wire id is used once, and a contact cannot announce more than the room it has here", async () => {
@@ -650,6 +891,9 @@ describe("private groups through the engine", () => {
   });
 
   it("an edge live when the app quit is dialled at once when it starts again; one that dropped before is not", async () => {
+    // An app with WebRTC: the edge resumes on it.
+    vi.stubGlobal("RTCPeerConnection", class {});
+    onTestFinished(() => { vi.unstubAllGlobals(); });
     const { node } = await started();
     // A community: its edges are kept as the app starts (a private group's to keys not in its roster go at once).
     const { groupId } = await node.createGroup({ name: "Plaza" });
@@ -682,6 +926,114 @@ describe("private groups through the engine", () => {
     await started();
     expect(links.length).toBeGreaterThan(before);
     expect([keptId, droppedId].map(id => edge(id).options.resume)).toEqual(["webrtc/1", undefined]);
+  });
+
+  // covers: groups.native-links
+  describe("native transports on a group's links (WISP 9xx § Transports)", () => {
+    const endpoint = () => ({ transport: "iroh/1" as const, descriptor: { id: "ab".repeat(32), relay: "https://relay.test./", addresses: [] },
+      connect: vi.fn(), close: vi.fn(async () => {}), onConnection: null, onDescriptor: null });
+    /** An engine running Iroh as the Desktop does (the host's own adapter). */
+    async function nativeEngine() {
+      const iroh = vi.fn(async () => endpoint());
+      const events = { onState: vi.fn(), onMessages: vi.fn(), onCallSignal: vi.fn(), onAttention: vi.fn() };
+      const node = new GhostlyNode(events, { automaticWallets: false, transport: fixture, nativeTransports: { "iroh/1": iroh } });
+      nodes.push(node);
+      await node.start();
+      return { node, iroh };
+    }
+    const edgeOf = (id: string) => links.filter((l) => l.options.params.id === id).at(-1)!;
+
+    it("an app with WebRTC takes an endpoint on an edge only once the member's packet says it has none, and again after a restart", async () => {
+      vi.stubGlobal("RTCPeerConnection", class {});
+      onTestFinished(() => { vi.unstubAllGlobals(); });
+      const { node, iroh } = await nativeEngine();
+      expect(node.getState().transport.groupLinks).toBeUndefined();
+      const { groupId } = await node.createGroup({ name: "Plaza" });
+      const state = (await db.getGroups()).find((g) => g.id === groupId)!.community;
+      const edgeId = await node["openEdge"](state as never, createIdentity().pubKeyZ32);
+      expect(edgeOf(edgeId).options.packetTransports).toBe(true);
+      // Two apps with WebRTC: no endpoint, as before.
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(iroh).not.toHaveBeenCalled();
+      // The member's app has none (a Linux Desktop): this side starts Iroh for that edge, and keeps what it said.
+      const descriptors = { "iroh/1": { id: "cd".repeat(32), relay: null, addresses: [], relayed: true } };
+      edgeOf(edgeId).options.events.onPacketTransports(["iroh/1", "hyperdht/1"], descriptors);
+      await vi.waitFor(() => expect(edgeOf(edgeId).registerEndpoint).toHaveBeenCalledTimes(1));
+      expect(iroh).toHaveBeenCalledTimes(1);
+      await vi.waitFor(async () => expect((await saved(edgeId))?.peerTransports).toEqual(["iroh/1", "hyperdht/1"]));
+      // Started again, with the edge live when it quit: Iroh at once, the member dialled how it said, resumed on Iroh.
+      await db.patchLink(edgeId, { edgeLive: true, edgeLiveSince: Date.now() });
+      await node.shutdown();
+      nodes.splice(nodes.indexOf(node), 1);
+      const again = await nativeEngine();
+      await vi.waitFor(() => expect(again.iroh).toHaveBeenCalledTimes(1));
+      expect(edgeOf(edgeId).options.native).toMatchObject({ peerTransports: ["iroh/1", "hyperdht/1"], peerDescriptors: descriptors });
+      expect(edgeOf(edgeId).options.resume).toBe("iroh/1");
+    });
+
+    it("an app with no WebRTC takes an endpoint on every edge at once, and can make groups", async () => {
+      const { node, iroh } = await nativeEngine();
+      expect(node.getState().transport).toMatchObject({ webrtc: false });
+      expect(node.getState().transport.groupLinks).toBeUndefined();
+      const { groupId } = await node.createGroup({ name: "Penguins" });
+      const state = (await db.getGroups()).find((g) => g.id === groupId)!.community;
+      const edgeId = await node["openEdge"](state as never, createIdentity().pubKeyZ32);
+      await vi.waitFor(() => expect(edgeOf(edgeId).registerEndpoint).toHaveBeenCalledTimes(1));
+      expect(iroh).toHaveBeenCalled();
+    });
+
+    it("an app with no WebRTC offers to be no private group's hub, and gives its groups four connections in all", async () => {
+      const iroh = vi.fn(async () => endpoint());
+      const events = { onState: vi.fn(), onMessages: vi.fn(), onCallSignal: vi.fn(), onAttention: vi.fn() };
+      const node = new GhostlyNode(events, { automaticWallets: false, transport: fixture, platform: "desktop", nativeTransports: { "iroh/1": iroh } });
+      nodes.push(node);
+      await node.start();
+      const host = node["groups"]["host"] as { staysOnline(): boolean; peerRoom(groupId: string): number | undefined };
+      // A Linux Desktop: native listeners only, a few of them. A Mac (WebRTC) stays a hub candidate, as before.
+      expect(host.staysOnline()).toBe(false);
+      const { groupId } = await node.createGroup({ name: "Plaza" });
+      expect(host.peerRoom(groupId)).toBe(GROUP_NATIVE_SLOTS);
+      // Another group's links take from the same four.
+      const other = await node.createGroup({ name: "Other" });
+      const state = (await db.getGroups()).find((g) => g.id === other.groupId)!.community;
+      await node["openEdge"](state as never, createIdentity().pubKeyZ32);
+      expect(host.peerRoom(groupId)).toBe(GROUP_NATIVE_SLOTS - 1);
+      vi.stubGlobal("RTCPeerConnection", class {});
+      onTestFinished(() => { vi.unstubAllGlobals(); });
+      expect(host.staysOnline()).toBe(true);
+      expect(host.peerRoom(groupId)).toBeUndefined();
+    });
+
+    it("group links hold at most half the native slots, a chat takes one back from an idle group link, and a link with none says it waits", async () => {
+      // Five saved contacts: each keeps a native listener (five of eight).
+      const chats = Array.from({ length: 5 }, () => row({ pairedPeerKey: createIdentity().pubKeyZ32 }));
+      const later = row();
+      for (const r of [...chats, later]) await db.putLink(r);
+      const { node } = await nativeEngine();
+      await vi.waitFor(() => { for (const chat of chats) expect(edgeOf(chat.id).registerEndpoint).toHaveBeenCalled(); });
+      const { groupId } = await node.createGroup({ name: "Plaza" });
+      const state = (await db.getGroups()).find((g) => g.id === groupId)!.community;
+      const members = Array.from({ length: 5 }, () => createIdentity().pubKeyZ32);
+      const edgeIds: string[] = [];
+      for (const member of members) edgeIds.push(await node["openEdge"](state as never, member));
+      await node["nativeQueue"];
+      await vi.waitFor(() => expect(edgeIds.filter((id) => edgeOf(id).availableTransports.includes("iroh/1"))).toHaveLength(3));
+      // Three of the five got the three slots left (eight in all); the other two wait, and their rows say so.
+      // (What each member's row shows: the edge's view.)
+      const members$ = () => members.map((member) => ({ edge: node["edgeView"](groupId, member) as GroupEdgeView | undefined }));
+      await vi.waitFor(() => expect(members$().filter((m) => m.edge?.noSlot)).toHaveLength(2));
+      // Opening a chat with no listener takes one from a group link that carries nothing, never from a chat.
+      node.setActiveLink({ linkId: later.id });
+      await vi.waitFor(() => expect(edgeOf(later.id).registerEndpoint).toHaveBeenCalled());
+      for (const chat of chats) expect(edgeOf(chat.id).releaseEndpoint).not.toHaveBeenCalled();
+      expect(edgeIds.filter((id) => edgeOf(id).availableTransports.includes("iroh/1"))).toHaveLength(2);
+      await vi.waitFor(() => expect(members$().filter((m) => m.edge?.noSlot)).toHaveLength(3));
+    });
+
+    it("an app with neither WebRTC nor a native transport says its group links have none", async () => {
+      const { node } = await started();
+      expect(node.getState().transport).toMatchObject({ webrtc: false, groupLinks: false });
+    });
   });
 
   it("a member's name stays while their edge is down, and only the member removes it", async () => {

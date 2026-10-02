@@ -1,18 +1,37 @@
-import { decodeBolt11, parsePaymentAmount, paymentUri } from "@ghostly/core";
+import { parsePaymentAmount, paymentUri } from "@ghostly/core";
 import { PayExternally } from "./PayExternally";
 import type { PaymentReview as Review } from "@ghostly/core";
 import { PaymentReview } from "./PaymentReview";
 import { useEffect, useRef, useState } from "react";
 import { useCountUp } from "../hooks/useCountUp";
 import { useServicesPlatform } from "../hooks/useServicesPlatform";
-import { isWorthlessMint, mintNetwork } from "@ghostly/browser/shared/mints";
+import { mintNetwork } from "@ghostly/browser/shared/mints";
 import { ONCHAIN_FEE_CAP } from "./walletCardData";
 import { LightningPayWith, lightningPayer as payerOf } from "./LightningPayWith";
 import { Select } from "./ui/Select";
 import { NetworkTag, satsIn } from "./NetworkTag";
 import { useI18n } from "../contexts/I18nContext";
 import { ConfirmRealMoney } from "./ConfirmRealMoney";
+import { paymentIsTest, paymentTitle, railLine } from "./paymentWords";
 import { formatAmount, formatTokenAmount } from "../lib/amount";
+import { useAmountText } from "../hooks/useAmountText";
+import { errorText } from "../lib/errorText";
+
+/** A mint as a person knows it: its own name, else its host (the full URL says nothing more to them). */
+const mintLabel = (m: { url: string; name: string }) => {
+  if (m.name && m.name !== m.url) return m.name;
+  try { return new URL(m.url).host; } catch { return m.url; }
+};
+
+/** The bubble's fee limit, typed the person's way: `value` is what it means ("0.001", or "" while unclear). */
+function FeeCapInput({ label, value, onChange, decimals }: { label: string; value: string; onChange: (value: string) => void; decimals: number }) {
+  const { t } = useI18n();
+  const field = useAmountText(value, onChange, t.language ?? "en", decimals, t);
+  return <>
+    <input aria-label={label} aria-invalid={field.hint ? true : undefined} className="block w-20 bg-input-bg rounded p-1" inputMode={decimals ? "decimal" : "numeric"} value={field.text} onChange={(e) => field.change(e.target.value)} />
+    {field.hint && <span role="alert" className="block text-danger-ink" data-testid="amount-unclear">{field.hint}</span>}
+  </>;
+}
 
 /** A payment or a payment request in the chat. The amounts are live: they follow what the wallet knows. */
 export function PaymentBubble({ paymentId, peerPubKey, fallbackText }: { paymentId: string; peerPubKey: string; fallbackText: string }) {
@@ -65,37 +84,31 @@ export function PaymentBubble({ paymentId, peerPubKey, fallbackText }: { payment
     try {
       await task();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorText(e, t));
     } finally {
       setBusy(false);
     }
   };
 
-  // A payment of this request already approved and not finished (its outcome unknown, or on its way) is shown with its
-  // state and Check, also after the chat was left and opened again: a second one would be refused anyway.
+  // A payment of this request not finished is shown again after the chat was left and opened again (or the app
+  // restarted): one approved, with its state and Check (its outcome unknown, or on its way), and one reviewed but not
+  // approved yet, with Approve and Cancel. The engine refuses a second review of the request while either is open.
+  // A review not approved yet only while the request can still be paid: one paid some other way (or closed) meanwhile
+  // has nothing left to approve, and the engine cancels that review (dropStaleReviews). One approved stays, with Check.
+  const payable = (payment.state === "pending" || payment.state === "failed") && !payment.closed;
+  const intents = wallet.getState()?.intents;
   const unfinished = payment.kind === "request" && payment.direction === "in"
-    ? wallet.getState()?.intents?.find((r) => r.requestId === payment.id && r.linkId === payment.linkId && (r.state === "submitted" || r.state === "unknown"))
+    ? intents?.find((r) => r.requestId === payment.id && r.linkId === payment.linkId && ((r.state === "pending" && payable) || r.state === "submitted" || r.state === "unknown"))
     : undefined;
-  const shownReview = review ?? (unfinished && `${unfinished.id}:${unfinished.state}` !== putAway ? unfinished : null);
+  const ownReview = review && (payable || (intents?.find((i) => i.id === review.id) ?? review).state !== "pending") ? review : null;
+  const shownReview = ownReview ?? (unfinished && `${unfinished.id}:${unfinished.state}` !== putAway ? unfinished : null);
   const tokenPayment=payment.target?.method==='usdt';
   const outgoing = payment.direction === "out";
   const isRequest = payment.kind === "request";
-  const title = t(isRequest ? (outgoing ? "payments.bubble.title.youRequested" : "payments.bubble.title.requests") : outgoing ? "payments.bubble.title.youSent" : "payments.bubble.title.sentYou");
-  // Test sats are worth nothing, and the bubble says so: a contact must not pass them off as money. The payment says
-  // its network; one from before networks carries it (a target's chain, a test mint, an invoice's chain).
-  // Fedimint: the network of the federation it names, when we joined it.
+  const title = paymentTitle(t, payment);
+  // Test sats are worth nothing, and the bubble says so (paymentIsTest).
   const fedimint = payment.federation ?? payment.federations?.[0];
-  const networks = wallet.getState()?.networks;
-  const federationNetwork = fedimint ? [...(networks?.mainnet.fedimint?.federations ?? []), ...(networks?.testnet.fedimint?.federations ?? []), ...(wallet.getState()?.fedimint?.federations ?? [])].find((f) => f.id === fedimint)?.network : undefined;
-  const testSats = payment.network ? payment.network === "testnet"
-    : payment.target?.method === "arkade" || payment.target?.method === "bark" || payment.target?.method === "bitcoin" || payment.target?.method === "fedimint" || payment.target?.method === "spark" ? payment.target.network !== "bitcoin"
-    : fedimint ? !!federationNetwork && federationNetwork !== "bitcoin"
-    : payment.target?.method === "cashu" ? payment.target.network === "cashu-test"
-    : payment.target?.method === "usdt" ? payment.target.network !== "ethereum"
-    : !tokenPayment && (payment.mint ? isWorthlessMint(payment.mint) : payment.mints?.length ? payment.mints.every(isWorthlessMint)
-      // A request with only an invoice: its chain says (test mints use lnbc, but they come with their mints).
-      : !!payment.invoice && (decodeBolt11(payment.invoice)?.network ?? "bitcoin") !== "bitcoin");
-  const network = testSats ? "testnet" : "mainnet";
+  const network = paymentIsTest(payment, wallet.getState()) ? "testnet" : "mainnet";
   const sats = satsIn(t, network);
   const stateLabel = payment.kind === "payment" ? t(`payments.bubble.state.payment.${payment.state}`) : payment.state === "reclaimed" ? "" : t(`payments.bubble.state.request.${payment.state}`);
   /** The wallets of the payment's own network: only they pay it, quote its invoice or show its mints. */
@@ -147,7 +160,7 @@ export function PaymentBubble({ paymentId, peerPubKey, fallbackText }: { payment
         </span>
         {" "}<span className="text-xs ms-1 text-text-primary/75">{tokenPayment?payment.target?.asset:sats}</span>
       </p>
-      {payment.target && <p className="text-xs text-text-primary/65">{payment.target.method==="usdt"?"USDT":payment.target.method==="arkade"?"Ark":payment.target.method==="bark"?"Bark":payment.target.method==="spark"?"Spark":payment.target.method==="bitcoin"?t("payments.bubble.bitcoinOnchain"):payment.target.method==="fedimint"?"Fedimint":"Cashu"} · {payment.target.network}</p>}
+      {payment.target && <p className="text-xs text-text-primary/65" data-testid="payment-rail">{railLine(t, payment.target.method, payment.target.network)}</p>}
       {!payment.target && fedimint && <p className="text-xs text-text-primary/65" data-testid="payment-fedimint">{isRequest && !outgoing && payment.state === "pending" ? t("payments.bubble.fedimintNoFederation") : "Fedimint"}</p>}
       {shownReview && <PaymentReview key={shownReview.id} review={shownReview} wallet={wallet} onClose={()=>{ setReview(null); if (!review && unfinished) setPutAway(`${unfinished.id}:${unfinished.state}`); }}/>}
       {payment.memo && <p className="text-[13px] m-0 mt-0.5 wrap-break-word">{payment.memo}</p>}
@@ -156,7 +169,7 @@ export function PaymentBubble({ paymentId, peerPubKey, fallbackText }: { payment
         data-testid="payment-state"
       >
         {payment.lightningPending && payment.state === "pending" ? t("payments.bubble.state.lightningPending") : payment.kind === "payment" && payment.state === "pending" && payment.target?.method === "bitcoin" ? t("payments.bubble.state.waitingConfirmation") : payment.closed ? t("payments.bubble.state.closed") : stateLabel}
-        {payment.error && payment.state !== "settled" ? ` · ${payment.error}` : ""}
+        {payment.error && payment.state !== "settled" ? ` · ${errorText(payment.error, t)}` : ""}
       </p>
 
       {isRequest && !outgoing && !payment.closed && paymentsOff && (payment.state === "pending" || payment.state === "failed") && (
@@ -169,13 +182,13 @@ export function PaymentBubble({ paymentId, peerPubKey, fallbackText }: { payment
         <div className="flex flex-col gap-2 mt-2">
           {/* Paying from here needs a wallet of the request's network; another wallet can still be pointed at it. */}
           {!noWallet && <>
-          {!payment.target && !viaLightning && <label className="block space-y-1 text-xs">{t("payments.bubble.cashuMint")}<Select size="sm" aria-label={t("payments.bubble.cashuMint")} value={selectedMint ?? ""} onChange={setMint} disabled={!sharedMints.length} placeholder={t("payments.bubble.noSharedMint")} options={sharedMints.map(m => ({ value: m.url, label: m.url, description: t("payments.bubble.balance", { amount: formatAmount(m.balance, t.language), unit: sats }) }))} /></label>}
+          {!payment.target && !viaLightning && <label className="block space-y-1 text-xs">{t("payments.bubble.cashuMint")}<Select size="sm" aria-label={t("payments.bubble.cashuMint")} value={selectedMint ?? ""} onChange={setMint} disabled={!sharedMints.length} placeholder={t("payments.bubble.noSharedMint")} options={sharedMints.map(m => ({ value: m.url, label: mintLabel(m), description: t("payments.bubble.balance", { amount: formatAmount(m.balance, t.language), unit: sats }) }))} /></label>}
           {viaLightning && <LightningPayWith payer={lightningPayer} unit={sats} disabled={busy || !!lnReview} testId="payment-lightning-card" />}
-          <label className="text-xs">{t(tokenPayment?"payments.bubble.maxGas":"payments.bubble.maxFee")}<input aria-label={t(tokenPayment?"payments.bubble.maxGas":"payments.bubble.maxFee")} className="block w-20 bg-input-bg rounded p-1" inputMode="numeric" value={feeInput} onChange={e=>setFeeCap(e.target.value.replace(tokenPayment?/[^0-9.]/g:/\D/g,""))}/></label>
+          <label className="text-xs">{tokenPayment?t("payments.bubble.maxGas"):t("payments.bubble.maxFee",{unit:sats})}<FeeCapInput label={tokenPayment?t("payments.bubble.maxGas"):t("payments.bubble.maxFee",{unit:sats})} value={feeInput} onChange={setFeeCap} decimals={tokenPayment?18:0}/></label>
           {lnReview && (
             <div data-testid="payment-review" className="rounded-lg bg-black/20 p-2 space-y-1 text-xs">
               <p className="m-0 flex items-center gap-2">{t("payments.bubble.payOverLightning", { amount: formatAmount(payment.amount, t.language), unit: sats })}<NetworkTag network={network} testId="payment-lightning-network" /></p>
-              <p className="m-0 text-text-primary/75">{t("payments.bubble.through", { source: lnReview.source, fee: formatAmount(lnReview.fee, t.language) })}</p>
+              <p className="m-0 text-text-primary/75">{t("payments.bubble.through", { source: lnReview.source, fee: formatAmount(lnReview.fee, t.language), unit: sats })}</p>
               {lnConfirming ? <ConfirmRealMoney what={t("payments.bubble.amountSats", { amount: formatAmount(payment.amount, t.language) })} busy={busy} onSend={() => payLightning(true)} onBack={() => setLnConfirming(false)} /> : (
                 <div className="flex gap-2">
                   <button className={button} data-testid="payment-lightning-approve" disabled={busy} onClick={() => network === "mainnet" ? setLnConfirming(true) : payLightning(false)}>{t("payments.bubble.approve")}</button>
@@ -184,12 +197,12 @@ export function PaymentBubble({ paymentId, peerPubKey, fallbackText }: { payment
               )}
             </div>
           )}
-          <button data-testid="payment-pay" className={button} disabled={busy || (!payment.target && !viaLightning && !selectedMint) || !!review || !!unfinished || !!lnReview} onClick={() => run(async () => {
+          <button data-testid="payment-pay" className={button} disabled={busy || !feeInput || (!payment.target && !viaLightning && !selectedMint) || !!review || !!unfinished || !!lnReview} onClick={() => run(async () => {
             if (viaLightning) {
               // What the Lightning source would spend, shown before anything is asked of it.
               const quote = await payer.quoteInvoice(payment.invoice!);
               if (quote.amount !== payment.amount) throw new Error(t("payments.bubble.error.amountMismatch"));
-              if (quote.feeReserve > Number(feeInput)) throw new Error(t("payments.bubble.error.feeAbove", { fee: quote.feeReserve }));
+              if (quote.feeReserve > Number(feeInput)) throw new Error(t("payments.bubble.error.feeAbove", { fee: formatAmount(quote.feeReserve, t.language), unit: sats }));
               const ln = payer.getState()?.lightning;
               setLnReview({ fee: quote.feeReserve, source: quote.source && quote.source === ln?.providerId ? (payerCard && ln.name) || ln.alias || ln.label || quote.source : quote.source ?? t("payments.bubble.cashuMints") });
               return;

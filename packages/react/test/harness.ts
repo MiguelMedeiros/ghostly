@@ -12,12 +12,15 @@ export function renderCall(media?: CallMedia, devices?: () => { audio?: Constrai
   const published: (string | null)[] = [];
   const publishCallSignal = vi.fn((signal: string | null) => { published.push(signal); });
   const setFastPoll = vi.fn();
-  const addCallEventMessage = vi.fn();
+  let lines = 0;
+  /** Each line gets an id, as the chat's history gives one. */
+  const addCallEventMessage = vi.fn((type: string) => `line_${type}_${++lines}`);
+  const removeCallEventMessage = vi.fn();
   const onError = vi.fn();
 
   const hook = renderHook(
     ({ signal }: { signal: string | null }) =>
-      useWebRTC({ incomingCallSignal: signal, publishCallSignal, setFastPoll, addCallEventMessage, onError, media, devices }),
+      useWebRTC({ incomingCallSignal: signal, publishCallSignal, setFastPoll, addCallEventMessage, removeCallEventMessage, onError, media, devices }),
     { initialProps: { signal: null as string | null } },
   );
 
@@ -28,6 +31,7 @@ export function renderCall(media?: CallMedia, devices?: () => { audio?: Constrai
     publishedKinds: () => published.map((s) => (s === null ? null : (JSON.parse(s) as { t: string }).t)),
     setFastPoll,
     addCallEventMessage,
+    removeCallEventMessage,
     onError,
     receive(signal: string) {
       hook.rerender({ signal });

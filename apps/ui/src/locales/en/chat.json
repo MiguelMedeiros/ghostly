@@ -1,4 +1,9 @@
 {
+  "announce": {
+    "message": "{{name}}: {{text}}",
+    "messages": "{{count}} new messages",
+    "messagesFrom": "{{count}} new messages from {{name}}"
+  },
   "audio": {
     "cantPlay": "This device can't play this audio ({{format}}). Download it to listen.",
     "pause": "Pause audio",
@@ -97,6 +102,7 @@
     "resolveNote": "Resolving shows what it is, not who holds it.",
     "resolveNoteNone": "Resolving shows what it is, not who holds it: a contact proves that by sharing it as an identity.",
     "revokedBy": "Revoked by {{who}}",
+    "someContact": "a contact",
     "youSent": "You sent this",
     "yourDid": "Your Ghostly DID",
     "yourIdentity": "Your identity",
@@ -159,6 +165,8 @@
     "contactOff": "Contact: has it off, or needs an updated Ghostly",
     "contactOnConnect": "Contact: shown when connected",
     "contactOnSession": "Contact: shown once the session is up",
+    "heldMany": "{{count}} items held for {{name}} · {{used}} MB of {{max}} MB",
+    "heldOne": "1 item held for {{name}} · {{used}} MB of {{max}} MB",
     "intro": "While {{name}} is away, what you send waits in your own storage, sealed so only they can open it, for up to {{days}} days. Text, pictures and payment requests; never ecash. They need to allow it too.",
     "noStorage": "Storage: not set up. Set up S3 storage under Profile → Backups to hold messages; picking up theirs needs none.",
     "nothing": "Held: nothing",
@@ -259,11 +267,14 @@
     "invoiceSats": "⚡ Lightning invoice · {{amount}} sats",
     "lightningAddress": "Lightning address",
     "lightningOffer": "⚡ Lightning offer",
+    "payment": "⚡ {{what}} {{amount}}",
     "realMoney": "Real money",
     "sats": "{{amount}} sats",
     "testMoney": "Test money",
     "testSats": "{{amount}} test sats",
-    "usdtAddress": "USDT address"
+    "usdtAddress": "USDT address",
+    "video": "🎬 Video ({{duration}})",
+    "voice": "🎤 Voice message ({{duration}})"
   },
   "reactions": {
     "chipLabel": "{{emoji}}: {{names}}",

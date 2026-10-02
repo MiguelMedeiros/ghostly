@@ -16,6 +16,7 @@ import { avatarFromFile } from "../lib/avatarImage";
 import { ContactMarks } from "./identities/ContactMarks";
 import { Select } from "./ui/Select";
 import { useI18n } from "../contexts/I18nContext";
+import { errorText } from "../lib/errorText";
 
 const subscribe = (listener: () => void) => engine.subscribe(listener);
 const snapshot = () => engine.state;
@@ -44,7 +45,7 @@ export function GroupMembersDialog({ group, onClose, focusKey }: { group: GroupV
   const live = state?.groups.find(g => g.id === group.id) ?? group;
   const run = async (key: string, action: () => Promise<unknown>) => {
     setBusy(key); setError("");
-    try { await action(); } catch (e) { setError(e instanceof Error ? e.message : t("group.error.generic")); } finally { setBusy(null); }
+    try { await action(); } catch (e) { setError(e instanceof Error ? errorText(e, t) : t("group.error.generic")); } finally { setBusy(null); }
   };
   // The name being typed, while the admin renames the group; null otherwise. The engine cleans it and says what it refuses.
   const [naming, setNaming] = useState<string | null>(null);
@@ -114,7 +115,7 @@ export function GroupMembersDialog({ group, onClose, focusKey }: { group: GroupV
         {/* The name keeps room for about 16 characters: the badges and an admin's buttons go under it when the row is narrower (a phone, a long word in another language). */}
         <span className="contact-row min-w-[8.5rem] flex-1">
           <span className="flex min-w-0 items-center gap-1.5 text-sm"><span className="min-w-0 truncate">{memberName(m, t)}</span>{!m.me && <ContactMarks peerKey={contactKey(m.key)} testId="group-member-marks" />}{/* An unnamed member's name is its key already ("Member 3r69cg...d51a"): the key again was cut to one character on a phone. */}
-            {(m.me || m.nick) && <span data-testid="group-member-key" className="min-w-0 shrink-[100] truncate font-mono text-[10px] text-text-muted/60">{publicKeyLabel(m.key)}</span>}</span>
+            {(m.me || m.nick) && <span data-testid="group-member-key" className="min-w-0 shrink-[100] truncate font-mono text-[10px] text-text-muted">{publicKeyLabel(m.key)}</span>}</span>
           {!m.me && <span className="block truncate text-[11px] text-text-muted" data-testid="group-member-status">{edgeLabel(m, Date.now(), t, agoIn(language))}</span>}
         </span>
         {m.role === "admin" && <span className="rounded-full bg-accent/15 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-accent">{t("group.members.admin")}</span>}
@@ -148,7 +149,7 @@ export function GroupMembersDialog({ group, onClose, focusKey }: { group: GroupV
       </ul>
     </div>}
     {error && <p role="alert" className="mt-3 text-sm text-danger">{error}</p>}
-    {removing && <RemoveMemberDialog name={memberName(removing, t)} onClose={() => setRemoving(null)}
+    {removing && <RemoveMemberDialog name={memberName(removing, t)} linkOn={!!live.entryLink} onClose={() => setRemoving(null)}
       onConfirm={() => { const key = removing.key; setRemoving(null); void run(key, () => engine.call("removeGroupMember", { groupId: live.id, key })); }} />}
     <p data-testid="group-read-note" className="mt-4 rounded-lg bg-surface-alt/80 p-3 text-xs leading-relaxed text-text-secondary">{live.profile === "community" ? t("group.readNoteCommunity", { count: COMMUNITY_LIMITS.store }) : t("group.readNote", { count: GROUP_LIMITS.relay })}</p>
   </dialog>, document.body);

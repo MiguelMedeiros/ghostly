@@ -7,6 +7,7 @@ import { dots, focus, type ConnectionKind } from "../lib/connection";
 import { ConnectionIcon } from "./ConnectionIcon";
 import { useI18n } from "../contexts/I18nContext";
 import { agoIn } from "../lib/relativeTime";
+import { errorText } from "../lib/errorText";
 
 const subscribe = (listener: () => void) => engine.subscribe(listener);
 const snapshot = () => engine.state;
@@ -29,11 +30,13 @@ export function GroupConnection({ group }: { group: GroupView }) {
   const root = useRef<HTMLDivElement>(null), trigger = useRef<HTMLButtonElement>(null);
   const id = useId();
   const others = group.members.filter(m => !m.me);
-  const reachable = others.filter(m => m.edge?.state === "open").length;
+  // Reachable over an edge of mine, or through a hub (a group past 16 members): as the header line and the dots count it.
+  const reachable = others.filter(m => m.edge?.state === "open" || m.viaHub).length;
   const failing = others.some(m => m.edge?.state === "error");
   const connecting = others.some(m => m.edge?.state === "connecting");
-  // Group links are WebRTC only: an app with none (Ghostly Desktop on Linux) reaches no member, however long it tries.
-  const noLinks = state?.transport.webrtc === false && others.length > 0;
+  // Group links go over WebRTC, or a native transport where one side has none: an app with neither reaches no member,
+  // however long it tries. (Ghostly Desktop on Linux has no WebRTC, and runs Iroh and HyperDHT.)
+  const noLinks = state?.transport.groupLinks === false && others.length > 0;
   const kind: GroupKind = !online ? "offline" : others.length === 0 ? "waiting" : noLinks ? "failure" : reachable === others.length ? "connected"
     : reachable > 0 ? "partial" : failing ? "failure" : "waiting";
   const label = !online ? t("group.connection.offline") : others.length === 0 ? t("group.connection.onlyYou")
@@ -47,7 +50,7 @@ export function GroupConnection({ group }: { group: GroupView }) {
   useOutsideDismiss(root, menuOpen, () => setMenuOpen(false));
   const reconnect = async (linkId: string) => {
     setBusy(linkId); setError("");
-    try { await engine.call("connect", { linkId }); } catch (e) { setError(e instanceof Error ? e.message : t("group.connection.reconnectFailed")); } finally { setBusy(""); }
+    try { await engine.call("connect", { linkId }); } catch (e) { setError(e instanceof Error ? errorText(e, t) : t("group.connection.reconnectFailed")); } finally { setBusy(""); }
   };
   const now = Date.now();
   return <div ref={root} className="relative shrink-0" data-testid="group-connection" data-open={menuOpen || undefined} onKeyDown={e => {
@@ -72,7 +75,8 @@ export function GroupConnection({ group }: { group: GroupView }) {
         {online && noLinks && <p className="mt-1 text-[11px]" data-testid="group-connection-no-webrtc">{t("group.connection.noWebrtcHint")}</p>}
         <ul className="mt-3 space-y-1" data-testid="group-connection-members">
           {others.map(m => {
-            const down = m.edge && m.edge.state !== "open";
+            // A member reached through a hub is not down: reconnecting my own edge to them would not help.
+            const down = m.edge && m.edge.state !== "open" && !m.viaHub;
             return <li key={m.key} data-testid="group-connection-member" data-key={m.key} data-state={m.edge?.state ?? "none"} className="rounded-lg bg-surface-hover px-2.5 py-1.5">
               <div className="flex min-h-8 items-center gap-2">
                 <span aria-hidden="true" className={`h-2 w-2 shrink-0 rounded-full ${edgeDot(m)}`} />

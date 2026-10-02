@@ -223,9 +223,22 @@ export function addMessages(
   const fresh = messages.filter((m) => !known.has(m.id) && known.add(m.id));
   if (!fresh.length) return session;
 
+  // A history made whole again (after a reload) brings back older messages, not new ones: the chat keeps its place and
+  // time in the list unless one of them is newer than what it had.
+  const newest = session.messages[session.messages.length - 1]?.timestamp ?? 0;
   session.messages.push(...fresh);
   session.messages.sort((a, b) => a.timestamp - b.timestamp);
-  session.lastSyncAt = Date.now();
+  if (!complete || fresh.some((m) => m.timestamp > newest)) session.lastSyncAt = Date.now();
+  // Unread is "messages since the last read one". A contact's message written before one already read here (it was
+  // held up on its way: a resend once the chat is back, the DHT) sorts in among the read ones, and would never be
+  // counted: the count starts again from it. Not for a history made whole again after a reload: that was read.
+  if (!complete) {
+    const older = session.older ?? 0;
+    const read = getLastReadCount(sessionId) - older;
+    const added = new Set(fresh);
+    const late = session.messages.findIndex((m, i) => i < read && added.has(m) && countsAsUnread(m));
+    if (late >= 0) setReadCount(sessionId, older + late);
+  }
 
   for (const message of fresh) {
     if ((message.sender === "peer" || message.sender === "system") && message.id.startsWith("peer_")) {
@@ -283,12 +296,14 @@ export function deleteSession(sessionId: string): void {
   whole.delete(sessionId);
   inEngine.delete(sessionId);
   for (const key of [
-    ...(lastOfPeer ? [`${getPrefix()}face_${peer}`] : []),
+    // So do the card and network tab the payment sheet last used with them (lib/chatPayments.ts), kept by their key.
+    ...(lastOfPeer ? [`${getPrefix()}face_${peer}`, `${getPrefix()}payment_rail_${peer}`, `${getPrefix()}payment_network_${peer}`] : []),
     getKey(sessionId),
     `${getPrefix()}read_${sessionId}`,
     `${getPrefix()}invite_${sessionId}`,
     `${getPrefix()}pin_${sessionId}`,
     `${getPrefix()}mute_${sessionId}`,
+    `${getPrefix()}mute_mentions_${sessionId}`,
     `${getPrefix()}draft_${sessionId}`,
     joinKey(sessionId),
     LEGACY_JOIN_PREFIX + sessionId,
@@ -419,8 +434,11 @@ export function markSessionAsRead(sessionId: string): void {
 /**
  * What counts as unread: what came to me since the last read message. Never a message of mine (one forwarded here
  * from another chat lands while this one is not open) nor a join line, which the other side's app adds by itself.
+ * Of a call's lines, only a missed call: the others tell of a call I was on or made, written while its chat was
+ * loaded off screen (it rang, or I opened another chat during it).
  */
 function countsAsUnread(message: ChatMessage): boolean {
+  if (message.callEvent) return message.callEvent.type === "call_missed";
   return message.sender !== "me" && message.systemEvent?.type !== "join";
 }
 

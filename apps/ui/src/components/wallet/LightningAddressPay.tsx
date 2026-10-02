@@ -7,6 +7,9 @@ import { useI18n } from "../../contexts/I18nContext";
 import { fillNodes } from "../../lib/fillNodes";
 import { formatAmount } from "../../lib/amount";
 import { useComposition } from "../../hooks/useComposition";
+import { errorText } from "../../lib/errorText";
+import { satsIn } from "../NetworkTag";
+import { useAmountText } from "../../hooks/useAmountText";
 
 interface Quote { quote: string; mint: string; amount: number; feeReserve: number; source?: string }
 interface Invoice { invoice: string; note: string; successAction?: { tag: "message" | "url"; message?: string; description?: string; url?: string } }
@@ -30,13 +33,17 @@ export function LightningAddressPay({ wallet, text, via, onDone, dense }: { wall
   const [error, setError] = useState("");
   /** Real money: Pay opens the second step, and only it pays. A wallet naming no network is Mainnet's. */
   const [confirming, setConfirming] = useState(false);
+  /** The amount typed the person's way ("1.000" sats in Portuguese); `amount` is what it means, or "" while unclear. */
+  const amountField = useAmountText(amount, setAmount, t.language ?? "en", 0, t);
   const real = wallet.getState()?.mode !== "testnet";
+  /** Test sats say so wherever an amount shows, as the Cashu panel does. */
+  const unit = satsIn(t, real ? "mainnet" : "testnet");
   const ln = wallet.getState()?.lightning;
   const sourceName = (source?: string) => (via === "cashu" || !source || source === CASHU_MINT_SOURCE ? t("wallet.lightning.cashuMints") : source === ln?.providerId ? ln.alias ?? ln.label ?? source : source);
 
   const run = async (task: () => Promise<void>) => {
     setError(""); setBusy(true);
-    try { await task(); } catch (e) { setError(e instanceof Error ? e.message : String(e)); } finally { setBusy(false); }
+    try { await task(); } catch (e) { setError(errorText(e, t)); } finally { setBusy(false); }
   };
   const primary = `${dense ? "px-3 py-1.5 text-xs" : "px-4 py-2 min-h-10 text-sm"} max-md:min-h-11 rounded-lg font-bold bg-accent text-on-accent hover:bg-accent-hover transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed`;
   const quiet = `${dense ? "px-3 py-1.5 text-xs" : "px-4 py-2 min-h-10 text-sm"} max-md:min-h-11 rounded-lg font-bold bg-black/20 hover:bg-black/30 transition-colors cursor-pointer disabled:opacity-40`;
@@ -46,7 +53,7 @@ export function LightningAddressPay({ wallet, text, via, onDone, dense }: { wall
   if (outcome) {
     return (
       <div className="space-y-1.5" data-testid="lnurl-done">
-        <p className={`${dense ? "text-xs" : "text-sm"} font-semibold text-accent m-0`} data-testid={outcome === "paid" ? "lnurl-paid" : "lnurl-pending"}>{outcome === "paid" ? t("wallet.lightning.paidTo", { amount: quote ? formatAmount(quote.amount, t.language) : "", to: text }) : t("wallet.lightning.pending")}</p>
+        <p className={`${dense ? "text-xs" : "text-sm"} font-semibold text-accent m-0`} data-testid={outcome === "paid" ? "lnurl-paid" : "lnurl-pending"}>{outcome === "paid" ? t("wallet.lightning.paidTo", { amount: quote ? formatAmount(quote.amount, t.language) : "", unit, to: text }) : t("wallet.lightning.pending")}</p>
         {invoice?.successAction?.tag === "message" && invoice.successAction.message && <p className={muted} data-testid="lnurl-success">{t("wallet.lightning.says", { domain: info?.domain ?? "", message: invoice.successAction.message })}</p>}
         {invoice?.successAction?.tag === "url" && invoice.successAction.url && <p className={muted}>{fillNodes(t("wallet.lightning.linkLine", { what: invoice.successAction.description || t("wallet.lightning.leftLink", { domain: info?.domain ?? "" }) }), { link: <a className="underline" {...externalLinkProps(invoice.successAction.url)}>{invoice.successAction.url}</a> })}</p>}
         {onDone && <button type="button" className={quiet} onClick={onDone}>{t("wallet.lightning.done")}</button>}
@@ -76,7 +83,7 @@ export function LightningAddressPay({ wallet, text, via, onDone, dense }: { wall
     return (
       <div className="space-y-2" data-testid="lnurl-review">
         <p className={`${dense ? "text-xs" : "text-sm"} m-0`}>{fillNodes(t("wallet.lightning.payTo", { to: info.text }), {
-          amount: <b>{t("wallet.cashu.amountSats", { amount: formatAmount(quote.amount, t.language) })}</b>,
+          amount: <b>{t("wallet.cards.amount", { amount: formatAmount(quote.amount, t.language), unit })}</b>,
           fees: <span className="opacity-70"> {t("wallet.lightning.feesThrough", { fee: formatAmount(quote.feeReserve, t.language), source: sourceName(quote.source) })}</span>,
         })}</p>
         {info.description && <p className={muted}>{info.description}</p>}
@@ -105,14 +112,15 @@ export function LightningAddressPay({ wallet, text, via, onDone, dense }: { wall
       <p className={`${dense ? "text-xs" : "text-sm"} m-0`}><b>{info.text}</b>{info.description ? ` · ${info.description}` : ""}</p>
       <p className={muted} data-testid="lnurl-domain">{t("wallet.lightning.domainLine", {
         answered: info.callbackDomain !== info.domain ? t("wallet.lightning.answeredVia", { domain: info.domain, callback: info.callbackDomain }) : t("wallet.lightning.answeredBy", { domain: info.domain }),
-        limits: fixed ? t("wallet.lightning.asksExactly", { amount: formatAmount(info.minSat, t.language) }) : t("wallet.lightning.takesRange", { min: formatAmount(info.minSat, t.language), max: formatAmount(info.maxSat, t.language) }),
+        limits: fixed ? t("wallet.lightning.asksExactly", { amount: formatAmount(info.minSat, t.language), unit }) : t("wallet.lightning.takesRange", { min: formatAmount(info.minSat, t.language), max: formatAmount(info.maxSat, t.language), unit }),
       })}</p>
       <label className="flex items-baseline gap-2 bg-black/20 rounded-lg px-3 py-2 focus-within:ring-1 focus-within:ring-accent">
-        <input data-testid="lnurl-amount" inputMode="numeric" placeholder="0" aria-label={t("wallet.ui.amountIn", { unit: "sats" })} autoFocus={!fixed} disabled={fixed}
+        <input data-testid="lnurl-amount" inputMode="numeric" placeholder="0" aria-label={t("wallet.ui.amountIn", { unit })} autoFocus={!fixed} disabled={fixed}
           className={`min-w-0 flex-1 bg-transparent border-none outline-none ${dense ? "text-lg" : "text-2xl"} font-semibold tabular-nums`}
-          value={amount} onChange={(e) => setAmount(e.target.value.replace(/\D/g, ""))} onKeyDown={onEnter} />
-        <span className="text-xs opacity-70 shrink-0">sats</span>
+          aria-invalid={amountField.hint ? true : undefined} value={fixed ? amount : amountField.text} onChange={(e) => amountField.change(e.target.value)} onKeyDown={onEnter} />
+        <span className="text-xs opacity-70 shrink-0">{unit}</span>
       </label>
+      {amountField.hint && <p role="alert" className="text-xs m-0 text-danger-ink" data-testid="amount-unclear">{amountField.hint}</p>}
       {info.commentAllowed > 0 && <input data-testid="lnurl-comment" className={field} placeholder={t("wallet.lightning.commentFor", { to: info.text })} maxLength={info.commentAllowed} value={comment} onChange={(e) => setComment(e.target.value)} {...composition.inputProps} onKeyDown={onEnter} />}
       <div className="flex flex-wrap gap-2">
         <button type="button" className={primary} disabled={busy || !Number(amount)} data-testid="lnurl-invoice" onClick={getInvoice}>{busy ? t("wallet.lightning.askingInvoice") : t("wallet.lightning.getInvoice")}</button>

@@ -101,7 +101,7 @@
     "lastBalance": "آخر رصيد معروف: {{balance}} {{unit}}",
     "lastBalanceAt": "آخر رصيد معروف: {{balance}} {{unit}} · {{date}}",
     "maxFee": "أقصى ما تقبله من رسوم",
-    "maxFeeInput": "الحد الأقصى للرسوم بالـ sats",
+    "maxFeeInput": "الحد الأقصى للرسوم ({{unit}})",
     "newAddress": "عنوان جديد",
     "notConnected": "{{label}} غير متصل",
     "notConnectedDefault": "مصدر Bitcoin غير متصل",
@@ -173,7 +173,8 @@
     "createInvoice": "إنشاء فاتورة Lightning",
     "fee": {
       "none": "بلا رسوم عند الإنفاق",
-      "perProof": "{{fee}} sat لكل إثبات (نحو 1 sat لكل دفعة)"
+      "perProof": "{{fee}} sat لكل إثبات (نحو 1 sat لكل دفعة)",
+      "perProofTest": "{{fee}} sat تجريبي لكل إثبات (نحو 1 sat تجريبي لكل دفعة)"
     },
     "history": {
       "fee": "رسوم {{amount}}",
@@ -181,7 +182,12 @@
       "movements": "{{count}} حركات",
       "movementsOne": "حركة واحدة",
       "noFee": "بلا رسوم",
-      "none": "لا شيء بعد"
+      "none": "لا شيء بعد",
+      "note": {
+        "paymentFailed": "فشلت دفعة Lightning",
+        "requestPaid": "طلب مدفوع عبر Lightning",
+        "testCoins": "عملات تجريبية من منفذ السكّ التجريبي"
+      }
     },
     "intent": "{{amount}} {{unit}} · {{state}}",
     "invoiceFor": "فاتورة بمبلغ {{amount}}",
@@ -191,15 +197,20 @@
     "newAmount": "مبلغ جديد",
     "paid": "تم الدفع.",
     "pastePlaceholder": "الصق فاتورة Lightning أو عنوان Lightning أو رمز ecash",
-    "payAmount": "ادفع {{amount}} sats",
+    "payAmount": "ادفع {{amount}} {{unit}}",
     "payLine": "ادفع {{amount}}{{fees}}",
     "pendingMint": "لا تزال الدفعة معلّقة لدى دار السك.",
     "primary": "الرئيسية",
-    "received": "⚡ استُلم {{amount}} sats",
+    "received": "⚡ استُلم {{amount}} {{unit}}",
     "redeem": "استرداد رمز ecash",
-    "redeemed": "استُرد {{amount}} sats.",
+    "redeemed": "استُرد {{amount}} {{unit}}.",
     "remove": "إزالة",
+    "removeLastMint": "هذه آخر دار سك في المحفظة: إزالتها تزيل محفظة {{label}} وبطاقة Lightning الخاصة بها.",
     "removeMint": "إزالة {{name}}",
+    "removeMintAwaiting": "ما زالت بانتظار أموال:",
+    "removeMintConsent": "ما يُدفع لها بعد ذلك لا يظهر إلا عندما أضيف دار السك هذه مرة أخرى.",
+    "removeMintHint": "يمكنك إضافتها مرة أخرى لاحقًا.",
+    "removeMintQuestion": "إزالة {{name}}؟",
     "settings": "الإعدادات",
     "testBalance": "{{amount}} sats تجريبية (بلا قيمة)",
     "testMintInvoice": "بانتظار الدفع… دور السك التجريبية تعلّم كل فاتورة مدفوعة من تلقاء نفسها، لذا لا تُحتسب هذه الفاتورة إلا حين تدفعها جهة اتصال في محادثة. للحصول على sats تجريبية الآن، استخدم «احصل على عملات تجريبية» أعلاه.",
@@ -331,7 +342,7 @@
     "asking": "جارٍ سؤال {{source}}…",
     "askingInvoice": "جارٍ طلب الفاتورة…",
     "askingSource": "جارٍ سؤال المصدر…",
-    "asksExactly": "يطلب {{amount}} sats بالضبط.",
+    "asksExactly": "يطلب {{amount}} {{unit}} بالضبط.",
     "balance": "الرصيد",
     "balanceHint": "يستخدم Lightning رصيدك في Cashu: تُدفع الفواتير إلى دور السك الخاصة بك في Cashu ومنها.",
     "balanceSource": "{{unit}} · {{source}}",
@@ -361,17 +372,26 @@
     "lookupAsks": "الاستعلام يسأل {{domain}} عمّا يقبله: فيعرف ذلك الخادم أنك على وشك الدفع له.",
     "mismatch": "الفاتورة لا تطابق المبلغ الذي اخترته",
     "notInvoice": "هذه ليست فاتورة Lightning ولا عنوان Lightning.",
-    "paidTo": "دُفع {{amount}} sats إلى {{to}} ✓",
+    "opState": {
+      "expired": "منتهي الصلاحية",
+      "failed": "فشل",
+      "open": "بانتظار الدفع",
+      "paid": "مدفوع",
+      "pending": "قيد الانتظار",
+      "sending": "جارٍ الإرسال",
+      "unknown": "النتيجة غير معروفة"
+    },
+    "paidTo": "دُفع {{amount}} {{unit}} إلى {{to}} ✓",
     "pastePlaceholder": "الصق فاتورة Lightning أو عنوان Lightning",
     "pay": "ادفع",
     "payTo": "ادفع {{amount}} إلى {{to}}{{fees}}",
     "paying": "جارٍ الدفع…",
     "pending": "لا تزال الدفعة معلّقة. يجري التحقق منها، ولن يُدفع شيء مرة أخرى.",
     "recent": "الأحدث",
-    "recentIn": "فاتورة · {{amount}} sats",
-    "recentOut": "دفعة · {{amount}} sats",
+    "recentIn": "فاتورة · {{amount}} {{unit}}",
+    "recentOut": "دفعة · {{amount}} {{unit}}",
     "says": "يقول {{domain}}: {{message}}",
-    "takesRange": "يقبل من {{min}} إلى {{max}} sats.",
+    "takesRange": "يقبل من {{min}} إلى {{max}} {{unit}}.",
     "theSource": "المصدر",
     "waiting": "بانتظار الدفع… يمكن لأي محفظة Lightning دفعها، وتظهر هنا مدفوعة بمجرد أن يراها المصدر."
   },
@@ -465,7 +485,6 @@
     "inUse": "قيد الاستخدام",
     "instant": "{{wallet}} (فوري)",
     "intent": "{{amount}} {{unit}} · {{state}}",
-    "intentSats": "{{amount}} sats · {{state}}",
     "network": "الشبكة",
     "networkStuck": "هذه الشبكة لا تستجيب. يمكنك التبديل إلى شبكة أخرى.",
     "noBalance": "لا يوجد رصيد للإرسال بعد",
@@ -494,6 +513,7 @@
       "reaches": "ما يُدفع لها بعد ذلك يصل إلى {{source}}؛ لكن Ghostly لن يراه.",
       "reachesWallet": "ما يُدفع لها بعد ذلك يصل إلى المحفظة؛ لكن Ghostly لن يراه."
     },
+    "and": "{{first}} و{{second}}",
     "ask": "إزالة {{label}}…",
     "awaiting": "ما زال بانتظار أموال",
     "backupFirst": "انسخ احتياطيًا أولًا",
@@ -512,6 +532,10 @@
       "waitsReal": "أفهم: كل ما يُدفع لطلباتها وفواتيرها المفتوحة بعد إزالتها يضيع، وهي أموال حقيقية."
     },
     "copyTokens": "نسخ النسخة الاحتياطية للـ Ecash",
+    "gas": {
+      "mainnet": "{{amount}} ETH",
+      "testnet": "{{amount}} ETH تجريبي"
+    },
     "held": {
       "elsewhere": "تبقى أموالك حيث هي: ينسى Ghostly فقط كيفية الوصول إليها. يمكنك توصيلها مجددًا لاحقًا.",
       "elsewhereIn": "تبقى أموالك في {{source}}: ينسى Ghostly فقط كيفية الوصول إليها. يمكنك توصيلها مجددًا لاحقًا.",
@@ -522,6 +546,13 @@
     },
     "hintDevice": "تغادر مفاتيحها وإعداداتها هذا الجهاز. تبقى المحافظ الأخرى كما هي.",
     "hintElsewhere": "ينسى Ghostly كيفية الوصول إليها؛ وتبقى الأموال حيث هي.",
+    "item": {
+      "invoice": "فاتورة بقيمة {{amount}}، لم تُدفع بعد",
+      "paid": "{{amount}} دُفعت لفاتورة، ولم تُستلم من منفذ السكّ بعد",
+      "request": "طلب بقيمة {{amount}} في محادثة، ما زال مفتوحًا",
+      "sent": "{{amount}} من ecash أرسلتها، ولم تُستلم بعد",
+      "unclaimed": "{{amount}} يقول منفذ السكّ إنه أصدرها لفاتورة، ولم تصل إلى هنا قط"
+    },
     "label": "إزالة هذه المحفظة",
     "noBackup": "لا يستطيع Ghostly عرض عبارة الاسترداد لهذه المحفظة مجددًا: وحدها العبارة التي دوّنتها عند إنشائها تعيد هذه الأموال.",
     "noTokens": "لا يوجد Ecash لنسخه.",
@@ -693,11 +724,17 @@
   },
   "ui": {
     "amountIn": "المبلغ بـ {{unit}}",
+    "amountUnclear": "المبلغ غير واضح: اكتبه هكذا {{example}}",
+    "amountWhole": "أعداد صحيحة فقط، مثل {{example}}",
     "gettingAddress": "جارٍ الحصول على عنوان… يظهر هنا بمجرد أن يرد المزوّد.",
     "history": "السجل",
     "receive": "استلام",
     "receivingAddress": "عنوان الاستلام",
     "send": "إرسال"
+  },
+  "unseen": {
+    "real": "{{place}}، {{amount}} sats جديدة",
+    "test": "{{place}}، {{amount}} sats تجريبية جديدة"
   },
   "usdt": {
     "approve": "لا يُرسل شيء حتى توافق على المراجعة.",

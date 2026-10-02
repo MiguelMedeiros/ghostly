@@ -129,7 +129,15 @@ export function useCallDevices(webrtc: CallMediaControls): CallDevices | null {
       return;
     }
     if (sink && !next.audiooutput.some((d) => d.id === sink)) {
-      lost("audiooutput", loadDeviceChoices().audiooutput?.label ?? "");
+      // The chosen speaker under the id it was saved with, which the browser no longer uses: found by its name, it
+      // is still there, and the call plays on it with nothing to tell.
+      const chosen = loadDeviceChoices().audiooutput;
+      const found = chosen?.id === sink ? resolveDevice("audiooutput", next).id : undefined;
+      if (found && found !== sink) {
+        setSpeaker(found);
+        return;
+      }
+      lost("audiooutput", chosen?.label ?? "");
       setSpeaker(undefined);
       return;
     }

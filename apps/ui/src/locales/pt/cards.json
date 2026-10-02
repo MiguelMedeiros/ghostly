@@ -1,4 +1,12 @@
 {
+  "buttons": {
+    "answers": "Respostas",
+    "chosen": "Escolhida",
+    "closed": "Encerrada",
+    "failed": "Não foi enviada",
+    "jump": "Ir para a pergunta",
+    "sending": "Enviando…"
+  },
   "panel": {
     "activeCount": "{{count}} ativas",
     "allOk": "tudo OK",
@@ -16,7 +24,7 @@
     "title": "Tarefas"
   },
   "routine": {
-    "cron": "Cron:",
+    "cron": "Cron",
     "label": "Rotina: {{name}}, {{state}}",
     "lastRun": "Última execução: {{result}}",
     "next": "Próxima {{when}}",
@@ -27,6 +35,7 @@
       "skipped": "Pulada"
     },
     "runs": "Execuções recentes",
+    "schedule": "Agenda",
     "state": {
       "active": "Ativa",
       "paused": "Pausada"

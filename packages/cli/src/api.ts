@@ -10,6 +10,7 @@ import {
 import { FILE_METHODS } from "./files";
 import { waitForEdit, waitForGroupFrame, waitForMessage } from "./waits";
 import { STATUS_CARD_METHODS } from "./statusCards";
+import { BUTTON_METHODS, buttonsCard, pressable } from "./buttons";
 import { HOLD_MAX_MINUTES, holdChat, holdOf, releaseHold } from "./holds";
 import { endTyping, keepTyping, sayTyping } from "./typing";
 import { GROUP_ADMIN_METHODS } from "./groupAdmin";
@@ -18,7 +19,7 @@ import { SERVICE_METHODS } from "./services";
 import { BACKUP_METHODS } from "./backup";
 import { CALL_METHODS } from "./calls/api";
 import { WALLET_METHODS } from "./wallets";
-import { chatDetailsJson, chatJson, groupJson, groupMessageJson, messageJson, type MessageJson } from "./views";
+import { chatDetailsJson, chatJson, chatMessageJson, groupJson, groupMessageJson, messageJson, type MessageJson } from "./views";
 
 /**
  * A text past what a chat or a group carries (16 KiB of UTF-8, as the engine counts it: trimmed) is refused before the
@@ -94,6 +95,7 @@ const METHODS: Record<string, Method> = {
   ...WALLET_METHODS,
   ...FILE_METHODS,
   ...STATUS_CARD_METHODS,
+  ...BUTTON_METHODS,
   ...GROUP_ADMIN_METHODS,
   ...IDENTITY_METHODS,
   ...SERVICE_METHODS,
@@ -183,7 +185,7 @@ const METHODS: Record<string, Method> = {
   },
   async "chat.history"(ctx, params) {
     const link = chatOf(ctx, params);
-    return historyOf(ctx, link.id, params);
+    return historyOf(ctx, link.id, params, (m) => chatMessageJson(m, link));
   },
   async "chat.send"(ctx, params) {
     const link = chatOf(ctx, params);
@@ -195,14 +197,16 @@ const METHODS: Record<string, Method> = {
     }
     const wait = oneOf(params, "wait", ["none", "sent", "delivered"] as const, "none");
     const replyTo = str(params, "reply");
+    // Buttons under the text (WISP 4xx · Message Buttons): the text is the question, and what older apps show.
+    const card = buttonsCard(params);
     // A kept `typing --for` ends with the message (the engine says stop with it).
     endTyping(ctx, { linkId: link.id }, false);
-    const result = await node(ctx).sendMessage({ linkId: link.id, text, ...(replyTo ? { replyTo } : {}) });
+    const result = await node(ctx).sendMessage({ linkId: link.id, text, ...(replyTo ? { replyTo } : {}), ...(card ? { card } : {}) });
     if (result.error) throw new CliError(result.refused ? "refused" : "unavailable", result.error);
     if (!result.messageId) throw new CliError("bad_request", "Nothing to send");
     let message = (await node(ctx).getMessages(link.id)).find((m) => m.id === result.messageId);
     if (wait !== "none") message = await waitForMessage(ctx, link.id, result.messageId, wait, num(params, "timeout", 30, { min: 1, max: 3600 }) * 1000);
-    return { chat: link.id, messageId: result.messageId, delivery: message?.delivery ?? null };
+    return { chat: link.id, messageId: result.messageId, delivery: message?.delivery ?? null, ...(card ? { buttons: card.id, card, pressable: pressable(link) } : {}) };
   },
   /**
    * WISP 400 § Edits: the whole new text of one of my texts in a 1:1 chat. It shows here at once and reaches the contact
@@ -218,7 +222,7 @@ const METHODS: Record<string, Method> = {
     }
     const wait = oneOf(params, "wait", ["none", "confirmed"] as const, "none");
     const result = await node(ctx).editMessage({ linkId: link.id, messageId, text });
-    if (result.error) throw new CliError(result.refused ? "refused" : "unavailable", result.error);
+    if (result.error) throw editRefused(await node(ctx).getMessages(link.id), messageId, "chat", result.error, result.refused);
     const id = result.messageId ?? messageId;
     let message = (await node(ctx).getMessages(link.id)).find((m) => m.id === id);
     if (wait === "confirmed" && message?.edit?.pending) message = await waitForEdit(ctx, link.id, id, num(params, "timeout", 30, { min: 1, max: 3600 }) * 1000);
@@ -414,14 +418,15 @@ const METHODS: Record<string, Method> = {
     const mentions = mentionsFor(text, list(params, "mentions"), group);
     const replyTo = str(params, "reply");
     const wait = oneOf(params, "wait", ["none", "sent"] as const, "none");
+    const card = buttonsCard(params);
     // A kept `group typing --for` ends with the message (the engine says stop with it).
     endTyping(ctx, { groupId: group.id }, false);
-    const result = await node(ctx).sendGroupMessage({ groupId: group.id, text, ...(mentions.length ? { mentions } : {}), ...(replyTo ? { replyTo } : {}) });
+    const result = await node(ctx).sendGroupMessage({ groupId: group.id, text, ...(mentions.length ? { mentions } : {}), ...(replyTo ? { replyTo } : {}), ...(card ? { card } : {}) });
     if (result.error) throw new CliError("unavailable", result.error);
     const messageId = result.messageId ?? null;
     // `edges`: how many took it so far (none yet is not an error: it goes when one opens).
     const edges = messageId ? (wait === "sent" ? await waitForGroupFrame(ctx, group.id, messageId, undefined, num(params, "timeout", 30, { min: 1, max: 3600 }) * 1000) : node(ctx).groupTaken({ groupId: group.id, messageId })) : 0;
-    return { group: group.id, messageId, sent: true, edges };
+    return { group: group.id, messageId, sent: true, edges, ...(card ? { buttons: card.id, card } : {}) };
   },
   /**
    * WISP 9xx § Edits: the whole new text of one of my messages in a group. It shows here at once and goes to the members
@@ -439,7 +444,7 @@ const METHODS: Record<string, Method> = {
     const mentions = mentionsFor(text, list(params, "mentions"), group);
     const wait = oneOf(params, "wait", ["none", "sent"] as const, "none");
     const result = await node(ctx).editMessage({ linkId: `group:${group.id}`, messageId, text, ...(mentions.length ? { mentions } : {}) });
-    if (result.error) throw new CliError(result.refused ? "refused" : "unavailable", result.error);
+    if (result.error) throw editRefused(await node(ctx).groupMessages({ groupId: group.id }), messageId, "group", result.error, result.refused);
     const message = (await node(ctx).groupMessages({ groupId: group.id })).find((m) => m.id === messageId);
     const edits = message?.edit?.seq ?? 0;
     // An edit waiting for the pace is not said yet: `--wait sent` waits for that too, then for an edge to take it.
@@ -551,6 +556,17 @@ function typingWord(params: Params, typing: boolean): { kind: TypingKind; status
   const status = sanitizeTypingStatus(oneLine);
   if (!status) throw new CliError("bad_request", "status: plain text, with no link or markup");
   return { kind, status };
+}
+
+/**
+ * An edit the engine refused. A message that is not in the chat or group at all is `not_found` (exit 3), naming the id
+ * to give, as `button update` and `task update` do; before, a mistyped or lost id read "Only your own text messages
+ * can be edited" (`refused`, exit 1), as if the message were someone else's.
+ */
+function editRefused(messages: readonly StoredMessage[], ref: string, where: "chat" | "group", error: string, refused: boolean | undefined): CliError {
+  if (refused && !messages.some((m) => m.id === ref || m.wireId === ref))
+    return new CliError("not_found", `No message ${JSON.stringify(ref)} in this ${where}: give the messageId ${where === "group" ? "group send" : "send"} printed`);
+  return new CliError(refused ? "refused" : "unavailable", error);
 }
 
 /**

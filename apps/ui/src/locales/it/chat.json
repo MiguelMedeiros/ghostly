@@ -1,4 +1,9 @@
 {
+  "announce": {
+    "message": "{{name}}: {{text}}",
+    "messages": "{{count}} nuovi messaggi",
+    "messagesFrom": "{{count}} nuovi messaggi da {{name}}"
+  },
   "audio": {
     "cantPlay": "Questo dispositivo non può riprodurre questo audio ({{format}}). Scaricalo per ascoltarlo.",
     "pause": "Metti in pausa l'audio",
@@ -97,6 +102,7 @@
     "resolveNote": "Risolverlo mostra cos'è, non chi lo possiede.",
     "resolveNoteNone": "Risolverlo mostra cos'è, non chi lo possiede: un contatto lo prova condividendolo come identità.",
     "revokedBy": "Revocato da {{who}}",
+    "someContact": "un contatto",
     "youSent": "L'hai inviato tu",
     "yourDid": "Il tuo DID Ghostly",
     "yourIdentity": "La tua identità",
@@ -159,6 +165,8 @@
     "contactOff": "Contatto: l'ha disattivato o deve aggiornare Ghostly",
     "contactOnConnect": "Contatto: mostrato quando connesso",
     "contactOnSession": "Contatto: mostrato quando la sessione è attiva",
+    "heldMany": "{{count}} elementi trattenuti per {{name}} · {{used}} MB di {{max}} MB",
+    "heldOne": "1 elemento trattenuto per {{name}} · {{used}} MB di {{max}} MB",
     "intro": "Mentre {{name}} non c'è, ciò che invii attende nella tua memoria, sigillato perché solo quella persona possa aprirlo, fino a {{days}} giorni. Testi, immagini e richieste di pagamento; mai ecash. Deve consentirlo anche lei.",
     "noStorage": "Archiviazione: non configurata. Configura un S3 in Profilo → Backup per trattenere i messaggi; per ritirare i suoi non serve.",
     "nothing": "Trattenuti: niente",
@@ -259,11 +267,14 @@
     "invoiceSats": "⚡ Fattura Lightning · {{amount}} sats",
     "lightningAddress": "Indirizzo Lightning",
     "lightningOffer": "⚡ Offerta Lightning",
+    "payment": "⚡ {{what}} {{amount}}",
     "realMoney": "Denaro reale",
     "sats": "{{amount}} sats",
     "testMoney": "Denaro di prova",
     "testSats": "{{amount}} sats di prova",
-    "usdtAddress": "Indirizzo USDT"
+    "usdtAddress": "Indirizzo USDT",
+    "video": "🎬 Video ({{duration}})",
+    "voice": "🎤 Messaggio vocale ({{duration}})"
   },
   "reactions": {
     "chipLabel": "{{emoji}}: {{names}}",

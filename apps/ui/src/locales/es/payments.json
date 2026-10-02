@@ -32,7 +32,7 @@
     "cashuMints": "los mints Cashu",
     "error": {
       "amountMismatch": "La factura no coincide con el importe pedido",
-      "feeAbove": "La comisión Lightning (hasta {{fee}} sats) supera tu máximo"
+      "feeAbove": "La comisión Lightning (hasta {{fee}} {{unit}}) supera tu máximo"
     },
     "externalNote": {
       "ark": "Se paga desde cualquier cartera Ark. La cartera de tu contacto lo marca como pagado cuando ve el dinero.",
@@ -42,7 +42,7 @@
     "externalTitle": "Escanéalo, cópialo o ábrelo en una cartera que no sea Ghostly",
     "fedimintNoFederation": "Fedimint · no comparten federación: Lightning",
     "hide": "Ocultar",
-    "maxFee": "Comisión máxima (sats)",
+    "maxFee": "Comisión máxima ({{unit}})",
     "maxGas": "Gas máximo (ETH)",
     "noSharedMint": "Ningún mint configurado en común",
     "noWallet": {
@@ -72,9 +72,9 @@
     },
     "takeBack": "Recuperarlo",
     "takeBackTitle": "Si tu contacto nunca lo recoge, el ecash sigue siendo tuyo",
-    "through": "Mediante {{source}} · comisión de hasta {{fee}} sats",
+    "through": "Mediante {{source}} · comisión de hasta {{fee}} {{unit}}",
     "title": {
-      "requests": "Pide",
+      "requests": "Te pidió",
       "sentYou": "Te envió",
       "youRequested": "Pediste",
       "youSent": "Enviaste"
@@ -330,7 +330,7 @@
       "confirmed": "confirmado",
       "failed": "fallido",
       "pending": "pendiente",
-      "settled": "liquidado",
+      "settled": "pagado",
       "submitted": "enviado",
       "unknown": "desconocido"
     },

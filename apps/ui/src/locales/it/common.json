@@ -8,6 +8,8 @@
   "copied": "Copiato!",
   "copy": "Copia",
   "deck": {
+    "next": "Carta successiva",
+    "previous": "Carta precedente",
     "turnBack": "Carte"
   },
   "delete": "Elimina",
@@ -20,5 +22,6 @@
   "save": "Salva",
   "success": "Successo",
   "unnamedContact": "Contatto · {{key}}",
+  "unnamedContactShort": "Contatto",
   "viewPhoto": "Vedi la foto di {{name}}"
 }

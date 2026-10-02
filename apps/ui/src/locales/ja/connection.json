@@ -51,6 +51,7 @@
     "lostFrom": "直接接続が切れました（{{from}}）",
     "messagesWait": "メッセージは {{contact}} を待機",
     "moved": "{{from}} から {{transport}} に移動",
+    "notBack": "このアプリの再起動後、直接接続は戻りませんでした（{{from}}）",
     "offFrom": "{{from}} から離脱",
     "setTo": "{{transport}} に設定",
     "started": "このアプリが起動",

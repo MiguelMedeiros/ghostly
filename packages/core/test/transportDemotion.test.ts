@@ -1,7 +1,7 @@
 import { afterEach, expect, it, vi } from "vitest";
 import { DEMOTE_AFTER_FAILURES, DEMOTE_MS, GhostLink } from "../src/ghostlink";
 import { createLink } from "../src/invite";
-import { createIdentity } from "../src/identity";
+import { createIdentity, identityFromSeedB64 } from "../src/identity";
 import type { NativeEndpoint, NativeTransport } from "../src/pairedTransports";
 
 // covers: chat.one-chat, transport.iroh, transport.hyperdht
@@ -71,5 +71,97 @@ it("puts a demoted transport after the others", async () => {
   calls.length = 0;
   await attempt();
   expect(calls).toEqual(["hyperdht/1", "iroh/1"]);
+  await link.stop(false);
+});
+
+it("a newer record that lists a transport with no way to dial it: the endpoint known before is not dialled until a record describes it again", async () => {
+  // Omarchy (2026-09-30): both apps restarted, and the web app had no Iroh listener left for the chat (its eight slots
+  // taken by other chats). Its record said so, but the Desktop kept the endpoint it knew and dialled it, 20 s each
+  // timing out, until it demoted Iroh and nothing was left to try.
+  vi.useFakeTimers();
+  const { mine } = createLink();
+  const link = new GhostLink({
+    params: { ...mine, profile: "paired-chat/1" }, rtcAvailable: false,
+    pairing: { credentials: { seedB64: createIdentity().seedB64, peerKey: createIdentity().pubKeyZ32 }, pinPeer: async () => {} },
+    native: { preferred: "iroh/1", fallback: false, automatic: false },
+    transport: { publish: async () => {}, resolve: async () => null, describe: () => ({ protocol: "none", relays: [] }) },
+    createPeerConnection: () => { throw new Error("no WebRTC here"); },
+    localFetch: vi.fn(), getServices: () => [], getHostedHttpService: () => undefined,
+  });
+  const calls: string[] = [];
+  link.registerEndpoint(endpoint("iroh/1", calls));
+  const attempt = async () => { await link.connect(1_000).catch(() => {}); await vi.advanceTimersByTimeAsync(1_000); };
+  // As saved from the last session.
+  link.learnPeerTransports(["iroh/1"], { "iroh/1": { id: "a" } });
+  for (let i = 0; i < DEMOTE_AFTER_FAILURES; i++) await attempt();
+  expect(calls).toEqual(Array(DEMOTE_AFTER_FAILURES).fill("iroh/1"));
+  // The contact's record, read just now: Iroh listed, not started.
+  link.learnPeerTransports(["iroh/1"], {}, true);
+  expect(link.transportWait).toMatchObject({ transport: "iroh/1", reason: "starting" });
+  calls.length = 0;
+  await attempt();
+  expect(calls, "nothing to dial while its endpoint is down").toEqual([]);
+  // Its next record describes it: dialled again, the failures and the demotion of the old one forgotten.
+  link.learnPeerTransports(["iroh/1"], { "iroh/1": { id: "a" } }, true);
+  expect((link as unknown as { demotedUntil: Map<string, number> }).demotedUntil.has("iroh/1")).toBe(false);
+  await attempt();
+  expect(calls).toEqual(["iroh/1"]);
+  await link.stop(false);
+});
+
+it("a listener that starts late, with the contact there and its way known, is dialled at once, not after the backoff", async () => {
+  // Every native slot was taken when the app started; the chat gets one later (opened on screen). Its attempts with
+  // nothing to dial over had built a backoff of minutes, and the contact, the higher key, does not dial.
+  vi.useFakeTimers();
+  let made = createLink();
+  while (identityFromSeedB64(made.mine.seedB64).pubKeyZ32 > made.mine.peerPubKeyZ32) made = createLink();
+  const link = new GhostLink({
+    params: { ...made.mine, profile: "paired-chat/1" }, rtcAvailable: false, autoConnect: true,
+    pairing: { credentials: { seedB64: createIdentity().seedB64, peerKey: createIdentity().pubKeyZ32 }, pinPeer: async () => {} },
+    native: { fallback: true, automatic: true },
+    transport: { publish: async () => {}, resolve: async () => null, describe: () => ({ protocol: "none", relays: [] }) },
+    createPeerConnection: () => { throw new Error("no WebRTC here"); },
+    localFetch: vi.fn(), getServices: () => [], getHostedHttpService: () => undefined,
+  });
+  const session = (link as unknown as { session: object }).session;
+  Object.defineProperty(session, "peerPresence", { get: () => ({ online: true, lastPacketAt: Date.now(), services: null }) });
+  link.learnPeerTransports(["iroh/1"], { "iroh/1": { id: "a" } });
+  Object.assign(link as unknown as Record<string, number>, { autoConnectFailures: 4, lastAutoConnectAt: Date.now() });
+  const calls: string[] = [];
+  link.registerEndpoint(endpoint("iroh/1", calls));
+  await vi.advanceTimersByTimeAsync(100);
+  expect(calls).toEqual(["iroh/1"]);
+  await link.stop(false);
+});
+
+it("a listener registered again and again, and a record that keeps describing it again, dial no more often than the wait between attempts", async () => {
+  // Idle CPU (Linux Desktop, 2026-10-01): each registration and each record that described the endpoint again set the
+  // failed attempts back to none and dialled at once, so a chat whose contact never answered was dialled every time,
+  // each a native dial, instead of backing off to minutes.
+  vi.useFakeTimers();
+  let made = createLink();
+  while (identityFromSeedB64(made.mine.seedB64).pubKeyZ32 > made.mine.peerPubKeyZ32) made = createLink();
+  const link = new GhostLink({
+    params: { ...made.mine, profile: "paired-chat/1" }, rtcAvailable: false, autoConnect: true,
+    pairing: { credentials: { seedB64: createIdentity().seedB64, peerKey: createIdentity().pubKeyZ32 }, pinPeer: async () => {} },
+    native: { fallback: true, automatic: true },
+    transport: { publish: async () => {}, resolve: async () => null, describe: () => ({ protocol: "none", relays: [] }) },
+    createPeerConnection: () => { throw new Error("no WebRTC here"); },
+    localFetch: vi.fn(), getServices: () => [], getHostedHttpService: () => undefined,
+  });
+  const session = (link as unknown as { session: object }).session;
+  Object.defineProperty(session, "peerPresence", { get: () => ({ online: true, lastPacketAt: Date.now(), services: null }) });
+  link.learnPeerTransports(["iroh/1"], { "iroh/1": { id: "a" } });
+  const calls: string[] = [];
+  // Ten minutes: every 20 s the listener is lost and started anew, and every 30 s the record says it is down, then up.
+  for (let s = 0; s < 600; s += 10) {
+    if (s % 20 === 0) link.registerEndpoint(endpoint("iroh/1", calls));
+    if (s % 30 === 0) link.learnPeerTransports(["iroh/1"], {}, true);
+    if (s % 30 === 10) link.learnPeerTransports(["iroh/1"], { "iroh/1": { id: "a" } }, true);
+    await vi.advanceTimersByTimeAsync(10_000);
+  }
+  // The backoff alone (20 s doubling to 3 min) allows about six in ten minutes; dialling on every change made 40.
+  expect(calls.length).toBeGreaterThan(0);
+  expect(calls.length).toBeLessThanOrEqual(8);
   await link.stop(false);
 });

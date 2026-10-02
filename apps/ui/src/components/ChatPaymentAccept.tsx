@@ -1,11 +1,13 @@
 import { useRef, useState, type ReactNode } from "react";
 import { WALLET_NETWORKS, type PaymentMethodName } from "@ghostly/core";
 import { useI18n } from "../contexts/I18nContext";
+import { deckArrows } from "./deck/arrows";
 import { ALL_METHODS_ON, cardOn, type ChatAccepts, type ChatPaymentNetworks } from "../lib/chatPayments";
 import type { PeerLinkState, WalletNetwork } from "../lib/platform";
 import { CardDeck } from "./WalletDeck";
 import { SwitchLook } from "./wallet/ui";
 import type { InstanceCard } from "./walletCardData";
+import { errorText } from "../lib/errorText";
 
 /** A card's test id on the Accept side: its kind and its network (`payment-accept-cashu-testnet`). */
 export const acceptCardTestId = (id: string) => `payment-accept-${id.replace(/:/g, "-")}`;
@@ -110,14 +112,14 @@ export function ChatPaymentAccept({ peer, contact, cards, network, empty, onSave
       // Save goes grey once saved: the keyboard goes back to the cards rather than out of the sheet.
       const at = document.activeElement;
       if (!at || at === document.body || at === saveRef.current) saveRef.current?.closest(".composer-sheet")?.querySelector<HTMLElement>('[role=switch][tabindex="0"]')?.focus({ preventScroll: true });
-    }, (e: unknown) => { setError(e instanceof Error ? e.message : String(e)); setBusy(false); });
+    }, (e: unknown) => { setError(errorText(e, t)); setBusy(false); });
   };
 
   // A network with no card says so alone, unless the other network's switches wait to be saved.
   const bare = !here.length && !!empty;
   return <>
     {bare ? empty : <>
-    <CardDeck<string> key={network} compact tagAll kind="checks" label={t("payments.accept.deck", { name: contact })} name="payment-accept-deck" cards={shown} selected={active}
+    <CardDeck<string> key={network} compact tagAll kind="checks" label={t("payments.accept.deck", { name: contact })} name="payment-accept-deck" arrows={deckArrows(t)} cards={shown} selected={active}
       onSelect={setActive} onChoose={toggle} checked={(c) => !!draft[c.id]} cardLabel={(c) => label(c as InstanceCard)} testId={acceptCardTestId} size={{ max: 250, share: .62 }}
       corner={(c) => <SwitchLook checked={!!draft[c.id]} className="wallet-deck-card-switch" testId={`payment-accept-switch-${c.id.replace(":", "-")}`} />} />
     <p className="composer-sheet-hint" data-testid="payment-accept-hint">{card && hint(card)}</p>

@@ -5,7 +5,7 @@ import { MessageInput } from "../../components/MessageInput";
 import { chooseDevice } from "../../lib/mediaDevices";
 import { MICROPHONE_MESSAGES } from "../../lib/voiceRecorder";
 import { renderApp } from "../render";
-import { installFakeAudio, installFakeMedia, media, recordableTypes, removeFakeMedia } from "./fakeMedia";
+import { audio, installFakeAudio, installFakeMedia, media, recordableTypes, removeFakeMedia } from "./fakeMedia";
 
 // covers: files.voice.record, settings.media
 
@@ -232,6 +232,42 @@ describe("hands-free (locked) recording", () => {
     expect(onSendFile).not.toHaveBeenCalled();
   });
 
+  it("keeps recording when an edit fills the field meanwhile, and the contact stops seeing \"recording\" once it is sent", async () => {
+    const onTyping = vi.fn();
+    const edit = { key: "m1", text: "fixed words", snippet: "fixed words", onSave: vi.fn(async () => null), onClose: vi.fn() };
+    const view = composer({ onTyping });
+    await press(mouse);
+    fireEvent.pointerUp(mic(), mouse);
+    fireEvent.click(screen.getByTestId("voice-send"));
+    await wait(2_000);
+    expect(onTyping).toHaveBeenLastCalledWith(true, "recording");
+
+    view.rerender(<MessageInput onSend={onSend} onSendFile={onSendFile} onTyping={onTyping} edit={edit} />);
+    await wait(0);
+    expect(screen.getByTestId("voice-bar")).toBeInTheDocument();
+    expect(media.released()).toBe(false);
+
+    fireEvent.click(screen.getByTestId("voice-send"));
+    await wait(0);
+    expect(onSendFile).toHaveBeenCalledOnce();
+    expect(onTyping).toHaveBeenLastCalledWith(false, "recording");
+    // The edit's words wait in the field, with its Send.
+    expect(screen.getByPlaceholderText("Message…")).toHaveValue("fixed words");
+  });
+
+  it("tells the contact the recording stopped when the composer goes away mid-recording", async () => {
+    const onTyping = vi.fn();
+    const view = composer({ onTyping });
+    await press(mouse);
+    fireEvent.pointerUp(mic(), mouse);
+    fireEvent.click(screen.getByTestId("voice-send"));
+    await wait(1_000);
+    expect(onTyping).toHaveBeenLastCalledWith(true, "recording");
+    view.unmount();
+    expect(media.released()).toBe(true);
+    expect(onTyping).toHaveBeenLastCalledWith(false, "recording");
+  });
+
   it("pauses without counting the pause, plays what is recorded so far, and resumes", async () => {
     await locked();
     await wait(2_000);
@@ -257,6 +293,37 @@ describe("hands-free (locked) recording", () => {
     // Two seconds, a pause of ten, one more second.
     expect(voice!.duration).toBeGreaterThanOrEqual(2_900);
     expect(voice!.duration).toBeLessThan(4_000);
+  });
+
+  it("plays what is recorded once for a double tap on play, and the one player stops with the preview", async () => {
+    const created = vi.spyOn(URL, "createObjectURL");
+    const revoked = vi.spyOn(URL, "revokeObjectURL");
+    await locked();
+    await wait(2_000);
+    fireEvent.click(screen.getByRole("button", { name: "Pause" }));
+    const previews = () => created.mock.calls.length;
+    const before = previews();
+    // Two taps before the recording so far is ready.
+    fireEvent.click(screen.getByTestId("voice-preview"));
+    fireEvent.click(screen.getByTestId("voice-preview"));
+    await wait(500);
+    expect(previews() - before).toBe(1);
+    expect(audio.players).toHaveLength(1);
+
+    fireEvent.click(screen.getByRole("button", { name: "Resume" }));
+    expect(audio.players.every((player) => player.paused)).toBe(true);
+    expect(revoked).toHaveBeenCalledWith(created.mock.results[created.mock.results.length - 1]!.value);
+  });
+
+  it("does not start the preview once Send was pressed while it was getting ready", async () => {
+    await locked();
+    await wait(2_000);
+    fireEvent.click(screen.getByRole("button", { name: "Pause" }));
+    fireEvent.click(screen.getByTestId("voice-preview"));
+    fireEvent.click(screen.getByTestId("voice-send"));
+    await wait(500);
+    expect(onSendFile).toHaveBeenCalledOnce();
+    expect(audio.players.filter((player) => !player.paused)).toHaveLength(0);
   });
 
   it("starts from the keyboard, since there is nothing to hold", async () => {

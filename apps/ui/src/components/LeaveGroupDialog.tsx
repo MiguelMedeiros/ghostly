@@ -4,10 +4,11 @@ import type { GroupView } from "@ghostly/browser/shared/types";
 import { useBackdropDismiss } from "../hooks/useDismiss";
 import { memberName } from "../lib/groups";
 import { useI18n } from "../contexts/I18nContext";
+import { errorText } from "../lib/errorText";
 
 /**
  * Leaving a group, said before it happens: it goes from this device with its history, and an admin
- * hands the role to a member who is online (the engine picks the first reachable one, as here).
+ * hands the role to a member who is online (the engine picks the first one over a direct edge, as here).
  */
 export function LeaveGroupDialog({ group, onClose, onConfirm }: { group: GroupView; onClose(): void; onConfirm(): Promise<void> }) {
   const { t } = useI18n();
@@ -22,12 +23,14 @@ export function LeaveGroupDialog({ group, onClose, onConfirm }: { group: GroupVi
   }, []);
   const others = group.members.filter(m => !m.me);
   // A community hands the role to a member it is connected to, or to anyone: the commit travels through the hubs.
+  // A private group hands it to the first member over a direct edge of mine, as the engine's `successor()` does: a
+  // member reached through a hub is online, but the role commit does not travel through hubs.
   const community = group.profile === "community";
-  const successor = group.isAdmin ? others.find(m => m.online) ?? (community ? others[0] : undefined) : undefined;
+  const successor = !group.isAdmin ? undefined : community ? others.find(m => m.online) ?? others[0] : others.find(m => m.online && !m.viaHub);
   const blocked = others.length > 0 && (community ? !group.community?.connected : group.isAdmin && !successor);
   const leave = async () => {
     setBusy(true); setError("");
-    try { await onConfirm(); } catch (e) { setError(e instanceof Error ? e.message : t("group.error.generic")); setBusy(false); }
+    try { await onConfirm(); } catch (e) { setError(e instanceof Error ? errorText(e, t) : t("group.error.generic")); setBusy(false); }
   };
   return createPortal(<dialog ref={dialog} {...backdrop} onCancel={e => { e.preventDefault(); onClose(); }} aria-labelledby={`${id}-title`} aria-describedby={`${id}-body`}
     data-testid="group-leave-dialog" className="m-auto w-[calc(100%_-_2rem)] max-w-sm rounded-2xl border border-border bg-sidebar-bg p-5 text-text-primary shadow-2xl backdrop:bg-black/60">

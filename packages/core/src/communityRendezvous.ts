@@ -100,12 +100,16 @@ function unpack(bytes: Uint8Array, withLoad: boolean, max: number): Hub[] {
 /**
  * The hubs that take turns at the door (WISP 9xx § Admission): those that said so lately and have
  * been hubs for a minute, so that every hub, having read the beacon at least once since, agrees on
- * the same set. Only when there is none, every hub that said so lately.
+ * the same set. Only when there is none, every hub that said so lately. And when none did, a hub asking (`me`)
+ * that sees no other fresh hub in the beacon is the door alone, listed or not: its own entry may not have reached the
+ * relays yet (a new group's first hub, whose write the relays' budget holds back), and there is nobody to agree with.
  */
-export function doorHubs(hubs: Hub[], now = Date.now()): string[] {
+export function doorHubs(hubs: Hub[], now = Date.now(), me?: string): string[] {
   const lately = hubs.filter(h => now - h.ts < COMMUNITY_TOPOLOGY.beaconEveryMs * 1.5);
   const settled = lately.filter(h => now - (h.since ?? h.ts) >= 60_000);
-  return (settled.length ? settled : lately).map(h => h.key);
+  const door = (settled.length ? settled : lately).map(h => h.key);
+  if (door.length || me === undefined || freshHubs(hubs, now).some(h => h.key !== me)) return door;
+  return [me];
 }
 
 /**

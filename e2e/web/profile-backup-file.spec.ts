@@ -1,11 +1,12 @@
 import { readFileSync } from "node:fs";
 import { expect, openProfilePage, test } from "../support/fixtures";
+import { choose } from "../support/select";
 
 // WISP 05: a whole profile backed up to a file, sealed with a passphrase, and restored as a new profile.
 // Offline: no S3, no second peer.
 const PASSPHRASE = "a file backup passphrase";
 
-test("a profile goes to a file and comes back as a new profile, only with its passphrase", { tag: ["@feature:backup.profile.file", "@feature:backup.passphrase-rules", "@feature:backup.envelope", "@feature:profiles.switch"] }, async ({ peer }) => {
+test("a profile goes to a file and comes back as a new profile, only with its passphrase", { tag: ["@feature:backup.profile.file", "@feature:backup.profile.same-device", "@feature:backup.passphrase-rules", "@feature:backup.envelope", "@feature:profiles.switch"] }, async ({ peer }) => {
   const { page } = await peer("backup-file");
 
   // A profile worth keeping: a name of its own, a chat and a nickname.
@@ -56,10 +57,19 @@ test("a profile goes to a file and comes back as a new profile, only with its pa
   await expect(page.getByTestId("profile-row")).toHaveCount(1);
   await expect(page.getByTestId("profile-name")).toHaveValue("Diary");
 
-  // With the right one: a new profile, and Ghostly switches to it, chat and nickname included.
+  // With the right one: the backup is of Diary, still on this device, so Ghostly warns before restoring anything.
   await backups.getByTestId("restore-passphrase").fill(PASSPHRASE);
   await backups.getByTestId("restore-go").click();
-  await expect(page.getByTestId("profile-name")).toHaveValue("Diary (restored)", { timeout: 60_000 });
+  const warning = backups.getByTestId("restore-same-device");
+  await expect(warning).toContainText("This backup is “Diary”, which is on this device");
+  await expect(warning).toContainText("Both would act as the same person to your contacts.");
+  await expect(warning.getByTestId("restore-replace"), "the first profile cannot be removed").toHaveCount(0);
+  await expect(page.getByTestId("profile-row")).toHaveCount(1);
+  // A copy anyway: a new profile, and Ghostly switches to it, chat and nickname included.
+  await warning.getByTestId("restore-copy").click();
+  // The name field holds the name alone; "Restored" is a tag beside it.
+  await expect(page.getByTestId("profile-restored-tag")).toHaveText("Restored", { timeout: 60_000 });
+  await expect(page.getByTestId("profile-name")).toHaveValue("Diary");
   await expect(page.getByTestId("profile-links")).toContainText("1 chat");
   await expect(page.getByTestId("account-nickname")).toHaveValue("Nick Kept Secret");
 
@@ -69,7 +79,48 @@ test("a profile goes to a file and comes back as a new profile, only with its pa
   const original = rows.filter({ has: page.getByText("Diary", { exact: true }) });
   await expect(original).toHaveCount(1);
   await original.getByTestId("profile-switch").click();
-  await expect(page.getByTestId("profile-name")).toHaveValue("Diary", { timeout: 30_000 });
+  await expect(page.getByTestId("profile-restored-tag")).toHaveCount(0, { timeout: 30_000 });
+  await expect(page.getByTestId("profile-name")).toHaveValue("Diary");
   await expect(page.getByTestId("profile-links")).toContainText("1 chat");
   await expect(page.getByTestId("account-nickname")).toHaveValue("Nick Kept Secret");
+});
+
+// The first profile never renamed is called by the app's language. A backup made in Portuguese carried "Pessoal", and
+// the restored copy kept it in English too: the backup now carries the built-in name, which every language translates.
+test("the first profile never renamed, backed up in Portuguese and restored, is called by the language of the app", { tag: ["@feature:backup.profile.file", "@feature:app.i18n"] }, async ({ peer }) => {
+  const { page } = await peer("backup-default-name");
+  await page.goto("/#/settings");
+  await choose(page.getByTestId("settings-language"), "pt");
+  // A chat, so the copy is of a profile still on this device: Ghostly asks first, and always the same way.
+  await page.getByTitle("Nova Conversa").click();
+  await expect(page.getByTestId("invite-card")).toBeVisible();
+  await openProfilePage(page);
+  await expect(page.getByTestId("profile-name")).toHaveValue("Pessoal");
+
+  const backups = page.getByTestId("profile-backups");
+  await backups.getByTestId("backup-open").click();
+  await backups.getByTestId("backup-passphrase").fill(PASSPHRASE);
+  await backups.getByTestId("backup-confirm").fill(PASSPHRASE);
+  const downloading = page.waitForEvent("download");
+  await backups.getByTestId("backup-download").click();
+  const file = await downloading;
+  const bundle = readFileSync((await file.path())!, "utf8");
+
+  await backups.getByTestId("restore-open").click();
+  await backups.getByTestId("restore-file").setInputFiles({ name: file.suggestedFilename(), mimeType: "application/json", buffer: Buffer.from(bundle) });
+  await backups.getByTestId("restore-passphrase").fill(PASSPHRASE);
+  await backups.getByTestId("restore-go").click();
+  await expect(backups.getByTestId("restore-same-device")).toContainText("“Pessoal”");
+  await backups.getByTestId("restore-copy").click();
+  await expect(page.getByTestId("profile-restored-tag")).toHaveText("Restaurado", { timeout: 60_000 });
+  await expect(page.getByTestId("profile-name")).toHaveValue("Pessoal");
+
+  // The restored profile, now in English: its name follows.
+  await page.goto("/#/settings");
+  await choose(page.getByTestId("settings-language"), "en");
+  await expect(page.getByTitle("New Chat")).toBeVisible();
+  await openProfilePage(page);
+  await expect(page.getByTestId("profile-restored-tag")).toHaveText("Restored");
+  await expect(page.getByTestId("profile-name")).toHaveValue("Personal");
+  await expect(page.getByTestId("profile-row").filter({ hasText: "Pessoal" })).toHaveCount(0);
 });

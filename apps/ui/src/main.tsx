@@ -10,7 +10,7 @@ import { Root } from "./Root";
 import { createDesktopHost } from "./desktop/host";
 import { nativeCallSupport } from "./desktop/nativeCalls";
 import { setStorageProfile } from "./lib/storage";
-import { activeProfileId, namespaceOf, setProfileBase } from "./lib/profiles";
+import { activeProfileId, namespaceOf, setProfileBase, setRunningProfile } from "./lib/profiles";
 import { loadSettings } from "./lib/settings";
 import { applyDocumentLanguage } from "./lib/documentLanguage";
 
@@ -23,7 +23,9 @@ async function boot() {
   }
   // GHOSTLY_PROFILE gives this process a space of its own; inside it, the profile chosen in the app (WISP 04).
   setProfileBase(profile);
-  profile = namespaceOf(activeProfileId());
+  const profileId = activeProfileId();
+  setRunningProfile(profileId);
+  profile = namespaceOf(profileId);
   // Profiles share the WebView's storage area; each gets its own sessions, database and peer.
   if (profile) {
     setStorageProfile(profile);

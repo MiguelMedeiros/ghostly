@@ -150,9 +150,9 @@ function walletPlatform(network?: WalletNetwork, card?: string): WalletPlatform 
       return { ...state, ...here, lightning, mode: network };
     },
     // The test mint is for trying things out right away, so it takes over as primary.
-    addMint: async (url) => void (await engine.call("walletAddMint", { url, primary: TEST_MINTS.includes(url) })),
+    addMint: async (url) => void (await engine.call("walletAddMint", { url, primary: TEST_MINTS.includes(url), ...on })),
     setPrimaryMint: (url) => engine.call("walletSetPrimaryMint", { url }),
-    removeMint: (url) => engine.call("walletRemoveMint", { url }),
+    removeMint: (url, acceptLoss) => engine.call("walletRemoveMint", { url, ...(acceptLoss ? { acceptLoss } : {}) }),
     receiveLightning: (amount, via) => engine.call("walletReceiveLightning", { amount, via, ...ln }),
     quoteInvoice: (invoice, via) => engine.call("walletQuoteInvoice", { invoice, via, ...ln }),
     lightningSetSource: (providerId, values) => engine.call("lightningSetSource", { providerId, values, ...ln }),

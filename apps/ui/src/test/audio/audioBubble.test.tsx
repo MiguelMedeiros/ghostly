@@ -203,6 +203,28 @@ describe("an audio file in the chat", () => {
     expect(screen.getByTestId("audio-problem")).toHaveTextContent("(MP3)");
   });
 
+  it("a refused stream fires error and rejects its play: it plays from its bytes, with no \"can't play\"", async () => {
+    const release = vi.fn();
+    vi.spyOn(servicesPlatform!, "streamFile").mockResolvedValue({ url: "ghostly-file://localhost/song-3", release });
+    let reject: (error: Error) => void = () => {};
+    // As a real element: "play" fires at once, and the promise waits for the source.
+    play.mockImplementationOnce(function (this: HTMLMediaElement) { this.dispatchEvent(new Event("play")); return new Promise<void>((_, no) => { reject = no; }); });
+    show(song());
+    fireEvent.click(screen.getByTestId("audio-play"));
+    await flush();
+    const streamed = screen.getByTestId("audio-element") as HTMLAudioElement;
+    expect(streamed.getAttribute("src")).toBe("ghostly-file://localhost/song-3");
+    // The element's source failed: it fires error, and its pending play() is rejected too.
+    fireEvent.error(streamed);
+    await act(async () => reject(new DOMException("unsupported source", "NotSupportedError")));
+    await flush();
+    await flush();
+    expect(release).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId("audio-element").getAttribute("src")).toMatch(/^blob:/);
+    expect(screen.queryByTestId("audio-problem")).toBeNull();
+    expect(screen.getByTestId("audio-play")).toBeEnabled();
+  });
+
   it("too large to hand out here, and nothing streams it: Download to listen", async () => {
     getFile.mockResolvedValue(null);
     vi.spyOn(servicesPlatform!, "streamFile").mockResolvedValue(null);
@@ -244,6 +266,43 @@ describe("an audio file not here yet", () => {
     await waitFor(() => expect(last(fakeEngine.callsTo("fileAction"))?.action).toBe("pause"));
     fireEvent.click(screen.getByTestId("audio-cancel"));
     await waitFor(() => expect(last(fakeEngine.callsTo("fileAction"))?.action).toBe("cancel"));
+  });
+
+  it("one sent from here whose bytes cannot be read yet says so, and plays once it has gone", async () => {
+    const file = song({ id: "chat1-out-song-early", size: 10 * MB });
+    getFile.mockResolvedValue(null);
+    const view = show(file, { state: "transferring", direction: "out", transferred: 4 * MB, size: file.size }, "me");
+    fireEvent.click(screen.getByTestId("audio-play"));
+    await flush();
+    expect(screen.getByTestId("audio-problem")).toHaveTextContent("It plays once it has been sent.");
+    expect(screen.getByTestId("audio-play")).toBeDisabled();
+    act(() => fakeEngine.update({ transfers: { [file.id]: { state: "done", direction: "out", transferred: file.size, size: file.size } } }));
+    view.rerender(<AudioBubble file={file} sender="me" peerName="Ana" />);
+    expect(screen.queryByTestId("audio-problem")).toBeNull();
+    expect(screen.getByTestId("audio-play")).toBeEnabled();
+  });
+
+  it("right after a start, one whose transfer is not restored yet is not offered to play or save", () => {
+    const file = song({ size: 10 * MB });
+    fakeEngine.update({ links: [linkView({ id: "chat1" })], transfers: {}, transfersRestored: false });
+    renderApp(<AudioBubble file={file} sender="peer" peerName="Ana" />);
+    expect(screen.getByTestId("audio-bubble")).toHaveAttribute("data-stage", "restoring");
+    expect(screen.getByTestId("audio-play")).toBeDisabled();
+    expect(screen.queryByTestId("audio-save")).toBeNull();
+    // Restored: it is still arriving.
+    act(() => fakeEngine.update({ transfersRestored: true, transfers: { [file.id]: { state: "transferring", direction: "in", transferred: 4 * MB, size: file.size } } }));
+    expect(screen.getByTestId("audio-progress")).toBeInTheDocument();
+    expect(screen.getByTestId("audio-play")).toBeDisabled();
+    expect(screen.queryByTestId("audio-save")).toBeNull();
+  });
+
+  it("one from history plays once the transfers are restored with none for it", () => {
+    fakeEngine.update({ links: [linkView({ id: "chat1" })], transfers: {}, transfersRestored: false });
+    renderApp(<AudioBubble file={song()} sender="peer" peerName="Ana" />);
+    expect(screen.getByTestId("audio-play")).toBeDisabled();
+    act(() => fakeEngine.update({ transfersRestored: true }));
+    expect(screen.getByTestId("audio-play")).toBeEnabled();
+    expect(screen.getByTestId("audio-save")).toBeInTheDocument();
   });
 
   it("one that did not go offers the round Send again, with the reason behind its ⓘ", () => {

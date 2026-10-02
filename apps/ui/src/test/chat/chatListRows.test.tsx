@@ -1,4 +1,5 @@
 import { act, screen, within } from "@testing-library/react";
+import { Route, Routes, useLocation } from "react-router-dom";
 import { describe, expect, it } from "vitest";
 import { Sidebar } from "../../components/Sidebar";
 import { LockScreenProvider } from "../../contexts/LockScreenContext";
@@ -96,6 +97,17 @@ describe("the chat list's rows (compact, the default)", () => {
     expect(pt("calls.timeline.videoMissed")).not.toBe("Missed video call");
   });
 
+  it("says a voice message or a video in the app's language, not the English the history keeps", () => {
+    const file = (over: object) => ({ id: "f", name: "clip", size: 1, mime: "audio/webm", ...over });
+    saveSession(chat("v", { nick: "Val", messages: [message({ text: "🎤 Voice message (0:07)", file: file({ voice: { duration: 7_000, peaks: [] } }) })] }));
+    saveSession(chat("w", { nick: "Wes", messages: [message({ text: "🎬 Video (1:05)", file: file({ mime: "video/mp4", video: { duration: 65_000 } }) })] }));
+    saveSession(chat("x", { nick: "Xan", messages: [message({ text: "📎 notes.pdf", file: file({ name: "notes.pdf", mime: "application/pdf" }) })] }));
+    renderApp(<UpdateProvider><Sidebar /></UpdateProvider>, { language: "pt" });
+    expect(within(rowOf("Val")).getByTestId("chat-row-preview")).toHaveTextContent(/^🎤 Mensagem de voz \(0:07\)$/);
+    expect(within(rowOf("Wes")).getByTestId("chat-row-preview")).toHaveTextContent(/^🎬 Vídeo \(1:05\)$/);
+    expect(within(rowOf("Xan")).getByTestId("chat-row-preview")).toHaveTextContent(/^📎 notes.pdf$/);
+  });
+
   it("says a join as the chat's line does, in the app's language, not the notice's English text", () => {
     saveSession(chat("j", { nick: "Jo", messages: [message({ text: "👋 Jo joined", sender: "system", systemEvent: { type: "join", pubKey: key("j") } })] }));
     saveSession(chat("k", { nick: "Kim", messages: [message({ text: "👋 Me joined", sender: "system", systemEvent: { type: "join", pubKey: key("z") } })] }));
@@ -162,6 +174,29 @@ describe("the chat list's rows (compact, the default)", () => {
     await user.keyboard(" ");
     expect(isSessionPinned("k")).toBe(false);
     expect(within(rowOf("Kim")).getByRole("button", { name: "Pin chat" })).toHaveAttribute("aria-pressed", "false");
+  });
+
+  it("opens from the keyboard: each row is a stop named for the chat and described by its last line, Enter or Space opens it", async () => {
+    saveSession(chat("n", { nick: "Nell", messages: [message({ text: "lunch?" })] }));
+    saveSession(chat("o"));
+    act(() => fakeEngine.update({ groups: [groupView({ id: "g1", name: "Climbing", status: "active", lastMessageAt: NOW })] }));
+    function Where() { return <p data-testid="where">{useLocation().pathname}</p>; }
+    const { user } = renderApp(<UpdateProvider><Sidebar /><Routes><Route path="*" element={<Where />} /></Routes></UpdateProvider>);
+    const open = within(rowOf("Nell")).getByTestId("chat-row-open");
+    expect(open).toHaveAccessibleName("Nell");
+    expect(open).toHaveAccessibleDescription("lunch?");
+    expect(open).not.toHaveAttribute("aria-current");
+    // A contact with no name is told apart by its key, as the tooltip does.
+    expect(within(rowOf("Contact · oooooo")).getByTestId("chat-row-open")).toHaveAccessibleName(`Contact · oooooo · ${publicKeyLabel(key("o"))}`);
+    open.focus();
+    await user.keyboard("{Enter}");
+    expect(screen.getByTestId("where")).toHaveTextContent("/chat/n");
+    const group = within(screen.getByTestId("group-row")).getByTestId("group-row-open");
+    expect(group).toHaveAccessibleName("Climbing");
+    group.focus();
+    await user.keyboard(" ");
+    expect(screen.getByTestId("where")).toHaveTextContent("/group/g1");
+    expect(within(screen.getByTestId("group-row")).getByTestId("group-row-open")).toHaveAttribute("aria-current", "page");
   });
 
   it("the pinned mark takes nothing from the time or the row: its own lane, shrinking never, the name giving way", () => {

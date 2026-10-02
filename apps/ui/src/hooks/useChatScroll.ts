@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { reducedMotion } from "../lib/motion";
 import { JUMP_EVENT } from "../lib/replies";
 import type { RowWindow } from "./useRowWindow";
 
@@ -25,6 +26,8 @@ interface Anchor {
   id: string;
   /** Where the row's top was, from the list's top edge. */
   offset: number;
+  /** The list's height then: when it changes, the view keeps its bottom edge (see `settle`). */
+  height: number;
 }
 
 /** Where a chat was left: at its bottom, or on a message. Kept while the app runs, so a chat opened again is where it was. */
@@ -56,7 +59,6 @@ export function forgetChatScroll() {
 
 const rowsOf = (list: HTMLElement) => list.querySelectorAll<HTMLElement>("[data-message-id]");
 const rowById = (list: HTMLElement, id: string) => list.querySelector<HTMLElement>(`[data-message-id="${CSS.escape(id)}"]`);
-const reducedMotion = () => typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
 const editable = (target: EventTarget | null) =>
   target instanceof Element && !!target.closest("input, textarea, select, [contenteditable]:not([contenteditable='false']), [role='dialog'], [role='menu']");
 
@@ -136,7 +138,7 @@ export function useChatScroll({ rows, chat, keys = true, window: rowWindow }: { 
       const mid = (lo + hi) >> 1;
       if (all[mid].getBoundingClientRect().bottom > top) { found = mid; hi = mid - 1; } else lo = mid + 1;
     }
-    anchor.current = found < 0 ? null : { id: all[found].dataset.messageId!, offset: all[found].getBoundingClientRect().top - top };
+    anchor.current = found < 0 ? null : { id: all[found].dataset.messageId!, offset: all[found].getBoundingClientRect().top - top, height: el.clientHeight };
   }, []);
 
   const clear = useCallback(() => {
@@ -144,13 +146,22 @@ export function useChatScroll({ rows, chat, keys = true, window: rowWindow }: { 
     setCount(0);
   }, []);
 
-  /** After the rows or their sizes changed: at the bottom, stay there; otherwise put the anchored row back where it was. */
+  /**
+   * After the rows or their sizes changed: at the bottom, stay there; otherwise put the anchored row back where it was.
+   * The list itself taller or shorter (a phone turned on its side, the keyboard, a window resized) keeps what was at the
+   * view's bottom edge where it was, as a chat does at its bottom: the anchored row moves with that edge. Held by its
+   * top instead, the view would keep the history above and lose the messages it was showing below (a video playing
+   * there stops), and go to the very top when what is above the rows (the pairing scene) got shorter too.
+   */
   const settle = useCallback(() => {
     const el = list.current;
     if (!el || !hasRows.current || hidden(el)) return;
     if (atBottom.current) {
       el.scrollTop = el.scrollHeight;
     } else if (anchor.current) {
+      // A height of 0: taken while the list was off screen, so not known yet.
+      const { offset, height } = anchor.current;
+      if (el.clientHeight !== height) anchor.current = { ...anchor.current, offset: height ? offset + el.clientHeight - height : offset, height: el.clientHeight };
       const row = rowById(el, anchor.current.id);
       if (row) {
         const moved = row.getBoundingClientRect().top - el.getBoundingClientRect().top - anchor.current.offset;
@@ -225,7 +236,8 @@ export function useChatScroll({ rows, chat, keys = true, window: rowWindow }: { 
       seen.current = new Set(rows.map(row => row.id));
       following.current = false;
       atBottom.current = false;
-      anchor.current = was.anchor;
+      // Where it was on the list as it is now: a chat left upright and opened again on its side is on the same message.
+      anchor.current = { ...was.anchor!, height: el.clientHeight };
       firstNew.current = null;
       setCount(0);
       // A bubble that came seconds ago still plays its entry, drawn a few pixels off: measured at rest, it lands exactly.
@@ -272,6 +284,9 @@ export function useChatScroll({ rows, chat, keys = true, window: rowWindow }: { 
       }
     }
     settle();
+    // Resting at the bottom, the rows that came while the chat stayed open would pile up in the page for as long as it
+    // stays open: past the most rows, the oldest go (all above the view, which stays at the bottom).
+    if (atBottom.current && !following.current && !jumping.current && !hidden(el) && distance(el) <= NEAR_BOTTOM_PX) win.current?.trim();
   }, [rows, listEl, chat, settle, clear]);
 
   useEffect(() => {
@@ -347,7 +362,7 @@ export function useChatScroll({ rows, chat, keys = true, window: rowWindow }: { 
       // Near the bottom: it goes to the bottom, as a hand taking it there would.
       if (max - target <= NEAR_BOTTOM_PX) { handAt.current = performance.now(); return; }
       atBottom.current = false;
-      anchor.current = { id: row.dataset.messageId, offset: box.top - view.top - (target - el.scrollTop) };
+      anchor.current = { id: row.dataset.messageId, offset: box.top - view.top - (target - el.scrollTop), height: el.clientHeight };
       jumping.current = performance.now() + JUMP_MS;
     };
     el.addEventListener(JUMP_EVENT, onJump);

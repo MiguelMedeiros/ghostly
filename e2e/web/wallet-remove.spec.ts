@@ -78,7 +78,7 @@ test("an invoice just made on Receive is listed when removing the wallet, before
   await page.getByTestId("wallet-receive").click();
   await page.getByTestId("wallet-receive-amount").fill("30");
   await page.getByTestId("wallet-create-invoice").click();
-  await expect(page.getByText("Invoice for 30 sats")).toBeVisible({ timeout: 60_000 });
+  await expect(page.getByText("Invoice for 30 test sats")).toBeVisible({ timeout: 60_000 });
   await page.getByTestId("wallet-remove").click();
   const dialog = page.getByTestId("wallet-remove-dialog");
   await expect(dialog.getByTestId("wallet-remove-awaiting-item")).toHaveText(["An invoice for 30 test sats, not paid yet"]);
@@ -173,10 +173,13 @@ test("a request paid in ecash leaves nothing to wait for: its invoice is not lis
   await paymentCard(alice.page, "cashu-testnet").click();
   await alice.page.getByTestId("payment-amount").fill("20");
   await alice.page.getByTestId("payment-request").click();
-  const bubble = (p: Peer) => chat(p).getByTestId("payment-bubble").filter({ hasText: "20" });
-  await bubble(bob).getByTestId("payment-pay").click({ timeout: 90_000 });
+  // The request's own bubble on each side. The ecash that pays it comes as a bubble of its own ("Sent you 20 test
+  // sats"), which "20" matched too: whenever both were there at once the locator was ambiguous.
+  const request = (p: Peer) => chat(p).getByTestId("payment-bubble").filter({ hasText: p === alice ? "You requested" : "Requests" });
+  await request(bob).getByTestId("payment-pay").click({ timeout: 90_000 });
   await chat(bob).getByTestId("payment-review").getByRole("button", { name: "Approve payment" }).click();
-  await expect(bubble(alice).getByTestId("payment-state")).toHaveText(/Paid|Received/, { timeout: 90_000 });
+  await expect(request(alice).getByTestId("payment-state")).toHaveText("Paid", { timeout: 90_000 });
+  await expect(chat(alice).getByTestId("payment-bubble").filter({ hasText: "Sent you" }).getByTestId("payment-state")).toHaveText("Received");
 
   // Its invoice is still open at the mint, but nobody pays a paid request: the wallet waits for nothing.
   await openWallet(alice, "cashu-testnet");

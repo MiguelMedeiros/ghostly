@@ -18,7 +18,7 @@ import type { LocalRelay } from "../support/relay";
 import { testSshKey } from "../support/ssh";
 import type { WebLNProvider } from "../../packages/browser/src/engine/paymentAdapters/providers/webln";
 import {
-  alternatives, cardAction, chatOption, chatPane, composerButton, containing, either, go, home, newWallet, newWalletDialog, nickname, openChat, paymentCard, reloaded, say, sees, setLanguage, wallet, type Actor,
+  alternatives, cardAction, chatOption, chatPane, composerButton, containing, either, filled, go, home, newWallet, newWalletDialog, nickname, openChat, paymentCard, reloaded, say, sees, setLanguage, wallet, type Actor,
 } from "./actors";
 import type { Combination } from "./dimensions";
 import { CARD, type Step } from "./plan";
@@ -548,7 +548,7 @@ async function lightningThroughMint({ a, b }: World): Promise<void> {
   await wallet(a, "lightning");
   await a.page.getByTestId("wallet-send").click();
   await a.page.getByTestId("wallet-pay-input").fill(strangerInvoice(25, "ghostly e2e", "lntb"));
-  await a.page.getByRole("button", { name: "Pay 25 sats" }).click();
+  await a.page.getByRole("button", { name: filled("Pay {{amount}} {{unit}}", { amount: "25", unit: alternatives("test sats") }) }).click();
   await a.page.getByRole("button", { name: either("Pay") }).click();
   await expect(a.page.getByTestId("wallet-notice")).toHaveText(either("Paid."), { timeout: 60_000 });
   // In, on B's side: an invoice of B's own wallet. The test mint reads it paid by itself, which is nobody paying:
@@ -801,8 +801,12 @@ export const restore: Block = {
     await again.getByTestId("restore-passphrase").fill(PASSPHRASE);
     await again.getByTestId("restore-go").click();
     // "A restore always becomes a new profile, then Ghostly switches to it" (ProfileBackups.tsx): the app
-    // starts again on #/profile by itself. Navigating meanwhile would race that reload.
-    await expect(restored.page.getByTestId("profile-name"), "the restored profile is the one in use").toHaveValue(/\(restored\)$/, { timeout: 60_000 });
+    // starts again on #/profile by itself. Navigating meanwhile would race that reload. The registry keeps the plain
+    // name and a restored flag: the name field holds the name alone, and a tag beside it says restored in the app's
+    // language (profile.restoredTag), "Restaurado".
+    await expect(restored.page.getByTestId("profile-restored-tag"), "the restored profile is the one in use")
+      .toHaveText(either("Restored"), { timeout: 60_000 });
+    await expect(restored.page.getByTestId("profile-name")).toHaveValue(either("Personal"));
     await expect(restored.page.getByTestId("profile-row")).toHaveCount(2);
     restored.chatHash = b.chatHash;
     w.b = restored;

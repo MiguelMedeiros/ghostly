@@ -56,8 +56,8 @@ export const WEBSITE_INPUTS = [
 export const NOT_APP = /^(apps\/website|docs)\//;
 
 /**
- * The packages' unit tests (the packages shards) read no document and, of the site, only what is below: they skip a
- * pull request whose every change is in docs/ or elsewhere in apps/website/. tools/scripts/test/ci-changes.test.ts holds this
+ * The packages' unit tests (the packages shards) read, of the docs and the site, only what is below: they skip a
+ * pull request whose every change is elsewhere in docs/ or apps/website/. tools/scripts/test/ci-changes.test.ts holds this
  * list to the paths the packages' tests and sources name.
  */
 export const PACKAGES_READ_FROM_SITE = [
@@ -65,6 +65,9 @@ export const PACKAGES_READ_FROM_SITE = [
   "apps/website/lib/invite.ts",
   // packages/browser's atprotoOAuth test: the client metadata the site serves.
   "apps/website/public/oauth/",
+  // packages/cli's agentDocs test: every command the agents guide (and its prompt) and the agents page teach.
+  "docs/AI-AGENTS.md",
+  "apps/website/content/agents.ts",
 ];
 
 export const covers = (inputs, file) => inputs.some((p) => (p.endsWith("/") ? file.startsWith(p) : file === p));

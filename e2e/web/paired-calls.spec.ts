@@ -12,8 +12,17 @@ const clock = /^\d{1,2}:\d{2}$/;
 /** Size of the picture this peer receives from the other side. */
 const remoteSize = (peer: Peer) =>
   peer.page.evaluate(() => {
-    const video = [...document.querySelectorAll("video")].find((v) => !v.muted);
+    const video = document.querySelector<HTMLVideoElement>("[data-testid=remote-video]");
     return video ? `${video.videoWidth}x${video.videoHeight}` : "none";
+  });
+
+/** Which of the call's elements play the other side's sound. */
+const remoteSound = (peer: Peer) =>
+  peer.page.evaluate(() => {
+    const audio = document.querySelector<HTMLAudioElement>("[data-testid=remote-audio]");
+    const video = document.querySelector<HTMLVideoElement>("[data-testid=remote-video]");
+    const live = (audio?.srcObject as MediaStream | null)?.getAudioTracks().some((track) => track.readyState === "live");
+    return { audio: audio && !audio.paused && !audio.muted && live ? "playing" : "silent", video: video?.muted ? "muted" : "sounding" };
   });
 
 /** Turns the chat's DHT-only delivery on or off from the connection panel. */
@@ -35,6 +44,8 @@ test("a new chat calls over its live session: video, answer, hang up", { tag: ["
   for (const p of [alice, bob]) await expect(p.page.getByText(clock).first()).toBeVisible();
   // Real media crossed: Bob sees Alice's (fake) camera.
   await expect.poll(() => remoteSize(bob)).toMatch(/^[1-9]\d*x[1-9]\d*$/);
+  // And hears her once: the <audio> plays her live microphone, the picture is muted.
+  await expect.poll(() => remoteSound(bob)).toEqual({ audio: "playing", video: "muted" });
   await alice.page.screenshot({ path: testInfo.outputPath("in-call.png") });
 
   await alice.page.getByTitle("End call").click();
@@ -52,8 +63,8 @@ test("an audio call from the other side, declined, leaves neither on a call", { 
   await expect(alice.page.getByText("Incoming audio call...")).toBeVisible();
   await alice.page.getByTitle("Decline").click();
   for (const p of [alice, bob]) await expect(p.page.getByTitle("End call")).toHaveCount(0);
-  await expect(chat(bob).getByText("Audio call declined")).toHaveCount(0);
-  await expect(chat(alice).getByText("Audio call declined")).toBeVisible();
+  // Both chats say so: the caller's too, not only "Audio call started".
+  for (const p of [alice, bob]) await expect(chat(p).getByText("Audio call declined")).toBeVisible();
 });
 
 test("both call at once: one side rings, and answering connects the call", { tag: ["@feature:calls.paired", "@feature:calls.audio"] }, async ({ peer }) => {
@@ -70,6 +81,10 @@ test("both call at once: one side rings, and answering connects the call", { tag
   await caller.page.getByTitle("End call").click();
   for (const p of [alice, bob]) await expect(p.page.getByTitle("End call")).toHaveCount(0);
   for (const p of [alice, bob]) await expect(chat(p).getByText("Audio call ended")).toBeVisible();
+  // One call in both chats: the side whose offer lost keeps the incoming call's lines, not a "started" one of its own.
+  const lines = (p: Peer) => chat(p).getByText(/^(Audio call started|Incoming audio call)$/).allInnerTexts();
+  expect(await lines(caller)).toEqual(["Audio call started"]);
+  expect(await lines(callee)).toEqual(["Incoming audio call"]);
 });
 
 test("the contact's tab closes mid-call: the call ends here with its line", { tag: ["@feature:calls.paired", "@feature:calls.video"] }, async ({ peer }) => {
@@ -101,4 +116,115 @@ test("calls need a live connection: on the DHT the buttons are off and say so", 
   await dhtOnly(alice, false);
   await dhtOnly(bob, false);
   for (const p of [alice, bob]) await expect(p.page.getByTestId("call-audio")).toBeEnabled({ timeout: 120_000 });
+});
+
+test("the app reopened while a call rings rings again, with one incoming line", { tag: ["@feature:calls.paired", "@feature:calls.video"] }, async ({ peer }) => {
+  const [alice, bob] = await Promise.all([peer("reopen-alice"), peer("reopen-bob")]);
+  await pair(alice, bob);
+  await expect(alice.page.getByTestId("call-video")).toBeEnabled();
+  await alice.page.getByTestId("call-video").click();
+  await expect(bob.page.getByText("Incoming video call...")).toBeVisible();
+
+  // The caller's same offer reaches the reopened app: it rings again, and the chat keeps one line for the call.
+  await bob.page.reload();
+  await expect(bob.page.getByText("Incoming video call...")).toBeVisible({ timeout: 45_000 });
+  await expect(chat(bob).getByText("Incoming video call", { exact: true })).toHaveCount(1);
+
+  await alice.page.getByTitle("End call").click();
+  await expect(chat(bob).getByText("Missed video call")).toBeVisible();
+  await expect(chat(bob).getByText("Incoming video call", { exact: true })).toHaveCount(1);
+});
+
+test("a second call while on one: declining it leaves the first call going, wherever you are", { tag: ["@feature:calls.paired", "@feature:calls.route-keep", "@feature:calls.decline", "@feature:calls.end-and-answer"] }, async ({ peer }) => {
+  const [alice, bob, carol] = await Promise.all([peer("busy-alice"), peer("busy-bob"), peer("busy-carol")]);
+  await pair(alice, carol);
+  await pair(alice, bob);
+  await expect(alice.page.getByTestId("call-audio")).toBeEnabled();
+  await alice.page.getByTestId("call-audio").click();
+  await bob.page.getByTitle("Accept audio call").click();
+  for (const p of [alice, bob]) await expect(p.page.getByText(clock).first()).toBeVisible();
+
+  // The call follows Alice out of its chat.
+  await alice.page.getByTitle("Keep the call in a small window").click();
+  await alice.page.getByTitle("Settings", { exact: true }).click();
+  await expect(alice.page.getByRole("heading", { name: "Settings" })).toBeVisible();
+  const callWindow = alice.page.getByTestId("call-window");
+  await expect(callWindow).toBeVisible();
+
+  // Carol calls: it rings over the call, and the call with Bob goes on while it does.
+  await expect(carol.page.getByTestId("call-audio")).toBeEnabled();
+  await carol.page.getByTestId("call-audio").click();
+  await expect(alice.page.getByText("Incoming audio call...")).toBeVisible({ timeout: 30_000 });
+  await expect(callWindow, "the call with Bob is still here while Carol rings").toBeVisible();
+  // On a call already: End and answer or Decline, never a plain Accept that would open a second call.
+  await expect(alice.page.getByRole("button", { name: "End and answer" })).toBeVisible();
+  await expect(alice.page.getByTitle("Accept audio call")).toHaveCount(0);
+
+  await alice.page.getByTitle("Decline").click();
+  await expect(alice.page.getByText("Incoming audio call...")).toHaveCount(0);
+  await expect(chat(carol).getByText("Audio call declined")).toBeVisible();
+
+  // Declining Carol ended nothing else: the call with Bob is on, on both sides, a while later too.
+  await alice.page.waitForTimeout(3_000);
+  await expect(callWindow, "the call with Bob survives the second call").toBeVisible();
+  await expect(alice.page.getByText(clock).first()).toBeVisible();
+  await expect(bob.page.getByTitle("End call")).toBeVisible();
+
+  await bob.page.getByTitle("End call").click();
+  await expect(callWindow).toHaveCount(0);
+  await expect(chat(bob).getByText("Audio call ended")).toBeVisible();
+});
+
+/** Counts the live microphones this page captured from now on (the app asks `navigator.mediaDevices` each time). */
+async function watchMicrophones(peer: Peer) {
+  await peer.page.evaluate(() => {
+    const tracks: MediaStreamTrack[] = [];
+    (window as unknown as { __microphones: MediaStreamTrack[] }).__microphones = tracks;
+    const ask = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
+    navigator.mediaDevices.getUserMedia = async (constraints) => {
+      const stream = await ask(constraints);
+      tracks.push(...stream.getAudioTracks());
+      return stream;
+    };
+  });
+  return () => peer.page.evaluate(() => (window as unknown as { __microphones: MediaStreamTrack[] }).__microphones.filter((t) => t.readyState === "live").length);
+}
+
+test("a second call while on one: End and answer ends the first on both sides and answers, one microphone", { tag: ["@feature:calls.paired", "@feature:calls.end-and-answer", "@feature:calls.ring-elsewhere"] }, async ({ peer }) => {
+  const [alice, bob, carol] = await Promise.all([peer("swap-alice"), peer("swap-bob"), peer("swap-carol")]);
+  await pair(alice, carol);
+  await pair(alice, bob);
+  const microphones = await watchMicrophones(alice);
+  await expect(alice.page.getByTestId("call-audio")).toBeEnabled();
+  await alice.page.getByTestId("call-audio").click();
+  await bob.page.getByTitle("Accept audio call").click();
+  for (const p of [alice, bob]) await expect(p.page.getByText(clock).first()).toBeVisible();
+  expect(await microphones()).toBe(1);
+
+  // Carol calls: it rings over the call with two choices only, and says what answering does.
+  await expect(carol.page.getByTestId("call-audio")).toBeEnabled();
+  await carol.page.getByTestId("call-audio").click();
+  const ring = alice.page.getByRole("alertdialog");
+  await expect(ring).toBeVisible({ timeout: 30_000 });
+  await expect(ring).toHaveAccessibleDescription("Incoming audio call... Answering ends your current call");
+  await expect(ring.getByRole("button")).toHaveCount(2);
+  await expect(ring.getByRole("button", { name: "Decline" })).toBeVisible();
+  await expect(ring.getByRole("button", { name: /^Accept/ })).toHaveCount(0);
+
+  await ring.getByRole("button", { name: "End and answer" }).click();
+
+  // The call with Bob ended on both sides, with its line: Bob is not on a call any more.
+  await expect(bob.page.getByTitle("End call")).toHaveCount(0);
+  await expect(chat(bob).getByText("Audio call ended")).toBeVisible();
+  await expect(bob.page.getByTestId("call-audio")).toBeEnabled();
+  // Alice and Carol are on the call: one call, one microphone.
+  for (const p of [alice, carol]) await expect(p.page.getByText(clock).first()).toBeVisible();
+  await expect(alice.page.getByTitle("End call")).toHaveCount(1);
+  await expect(alice.page.getByTestId("incoming-call")).toHaveCount(0);
+  await expect.poll(microphones).toBe(1);
+
+  await carol.page.getByTitle("End call").click();
+  await expect(alice.page.getByTitle("End call")).toHaveCount(0);
+  await expect(chat(carol).getByText("Audio call ended")).toBeVisible();
+  await expect.poll(microphones).toBe(0);
 });

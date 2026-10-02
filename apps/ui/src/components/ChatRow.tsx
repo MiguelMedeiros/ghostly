@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useId, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { engine } from "@ghostly/browser/platform/engine";
 import type { GroupView } from "@ghostly/browser/shared/types";
 import { PeerAvatar } from "./Avatar";
@@ -11,14 +11,16 @@ import { TypingText } from "./TypingIndicator";
 import { usePeerTypingActivity } from "../hooks/useTyping";
 import { BellIcon, MuteMenu } from "./ChatMute";
 import { useI18n } from "../contexts/I18nContext";
-import { formatListTime, previewText } from "../lib/chatList";
+import { filePreview, formatListTime, previewText } from "../lib/chatList";
 import { cardLine, showsCard } from "../lib/statusCards";
 import { deliveryShape, useDeliveryWords } from "../lib/delivery";
 import { groupChat, mentionsNotify, muteEndText, useChatMute } from "../lib/chatMute";
-import { authorName, groupReadAt, groupStatusText } from "../lib/groups";
+import { authorName, groupReadAt, groupStatusText, groupUnreadAt } from "../lib/groups";
 import { reactionNoteText } from "../lib/reactions";
 import type { ChatListDensity } from "../lib/settings";
 import type { ChatMessage } from "../lib/types";
+import { servicesPlatform } from "../lib/platform";
+import { paymentLine } from "./paymentWords";
 import { callEventText } from "../lib/callLines";
 import type { Translate } from "../locales/translate";
 
@@ -117,8 +119,10 @@ function RowMute({ chat, mentions }: { chat: string; mentions?: boolean }) {
 }
 
 /** The two (or, comfortable, three) lines beside the avatar, shared by chats and groups. */
-function RowText({ name, nameClass, marks, status, time, timeClass = "text-text-muted", sub, preview, trailing, timeCover }: {
+function RowText({ name, nameClass, marks, status, time, timeClass = "text-text-muted", sub, preview, previewId, trailing, timeCover }: {
   name: ReactNode; nameClass: string;
+  /** The preview line's id: what the row's button is described by. */
+  previewId?: string;
   /** After the name: the contact's verified identities (identities/ContactMarks.tsx), which give way before the time does. */
   marks?: ReactNode;
   /** Before the time: what the chat is set to (StatusMark), muted, never at the time's expense. */
@@ -143,11 +147,21 @@ function RowText({ name, nameClass, marks, status, time, timeClass = "text-text-
       {sub}
       <div className="mt-0.5 flex items-center gap-2">
         {/* The last message in its own direction: an English one in the Arabic app, cut at its own end. */}
-        <p dir="auto" data-testid="chat-row-preview" className="flex-1 min-w-0 truncate m-0 text-[13px] leading-5">{preview}</p>
+        <p id={previewId} dir="auto" data-testid="chat-row-preview" className="flex-1 min-w-0 truncate m-0 text-[13px] leading-5">{preview}</p>
         {trailing && <div className="flex shrink-0 items-center gap-1.5">{trailing}</div>}
       </div>
     </div>
   );
+}
+
+/**
+ * What opens the row from the keyboard: a button over the whole row, first in it, so Tab reaches every chat and group
+ * and Enter or Space opens it (the click it makes is the row's own). The pointer goes through it to the row and to the
+ * buttons laid over it, as before; its ring is the row's edge.
+ */
+function RowOpen({ label, active, describedBy, testId }: { label: string; active: boolean; describedBy: string; testId: string }) {
+  return <button type="button" data-testid={testId} aria-label={label} aria-describedby={describedBy} aria-current={active ? "page" : undefined}
+    className="pointer-events-none absolute inset-0 rounded-sm focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent" />;
 }
 
 const rowClass = (active: boolean, density: ChatListDensity) =>
@@ -186,6 +200,19 @@ function joinPreview(p: ChatRowProps, joiner: string | undefined, t: Translate):
   return `${p.named ? p.label : p.keyLabel} ${t("chat.joined")}`;
 }
 
+/**
+ * A payment or a request as the list's line (paymentLine: what its bubble says, in the app's language, test sats as
+ * test sats), or undefined while the wallet does not know it. Only a change of that line draws the row again.
+ */
+function usePaymentLine(paymentId: string | undefined, t: Translate): string | undefined {
+  const subscribe = useCallback((listener: () => void) => (paymentId && servicesPlatform?.subscribe(listener)) || (() => {}), [paymentId]);
+  return useSyncExternalStore(subscribe, () => {
+    const wallet = paymentId ? servicesPlatform?.wallet : undefined;
+    const payment = wallet?.getPayment(paymentId!);
+    return payment ? paymentLine(t, payment, wallet!.getState()) : undefined;
+  });
+}
+
 /** A 1:1 chat in the list. */
 export function ChatRow(p: ChatRowProps) {
   const { t } = useI18n();
@@ -193,9 +220,12 @@ export function ChatRow(p: ChatRowProps) {
   const size = AVATAR[p.density];
   const pinLabel = p.pinned ? t("chat.menu.unpin") : t("chat.menu.pin");
   const typing = usePeerTypingActivity(p.peerPubKey);
+  const payment = usePaymentLine(p.lastMessage?.paymentId, t);
+  const previewId = useId();
   useChosenProfile(p.peerPubKey);
   return (
     <div data-testid="chat-row" data-muted={muted || undefined} onClick={p.onOpen} title={`${p.label} · ${p.keyLabel}`} className={rowClass(p.active, p.density)}>
+      <RowOpen testId="chat-row-open" label={p.named ? p.label : `${p.label} · ${p.keyLabel}`} active={p.active} describedBy={previewId} />
       <div className={`relative shrink-0 rounded-full flex items-center justify-center ${p.active ? "bg-surface-alt" : "bg-surface-hover"}`} style={{ width: size, height: size }}>
         <PeerAvatar peerPubKey={p.peerPubKey} label={p.label} named={p.named} photo={p.face?.photo} testId="chat-row-avatar" />
         {p.face && <FaceCorner face={p.face} />}
@@ -223,14 +253,15 @@ export function ChatRow(p: ChatRowProps) {
       </div>
       <RowText
         name={<bdi>{p.label}</bdi>}
+        previewId={previewId}
         marks={<ContactMarks peerKey={p.peerPubKey} />}
-        nameClass={!p.named ? "text-text-muted/60 italic" : p.unread > 0 ? "text-text-primary font-semibold" : "text-text-primary"}
+        nameClass={!p.named ? "text-text-muted italic" : p.unread > 0 ? "text-text-primary font-semibold" : "text-text-primary"}
         time={p.time}
         timeClass={p.unread > 0 && !muted ? "text-accent font-medium" : "text-text-muted"}
         sub={<>
           {/* The key, for whoever needs it: its own line when comfortable, else read out with the name. */}
           {p.density === "comfortable"
-            ? <span data-testid="chat-row-key" className="block text-[11px] leading-4 text-text-muted/60 font-mono whitespace-nowrap">{p.keyLabel}</span>
+            ? <span data-testid="chat-row-key" className="block text-[11px] leading-4 text-text-muted font-mono whitespace-nowrap">{p.keyLabel}</span>
             : <span className="sr-only"> · {p.keyLabel}</span>}
         </>}
         // The contact writing now takes the last message's place, in the accent, until it stops or the message comes.
@@ -244,7 +275,7 @@ export function ChatRow(p: ChatRowProps) {
               {p.lastMessage.systemEvent?.type === "join" ? joinPreview(p, p.lastMessage.systemEvent.pubKey, t)
                 : p.lastMessage.callEvent ? callEventText(t, p.lastMessage.callEvent.type, p.lastMessage.callEvent.hasVideo) ?? p.lastMessage.text
                 : showsCard(p.lastMessage.card) ? cardLine(p.lastMessage.card)
-                : previewText(p.lastMessage.text, t)}
+                : payment ?? filePreview(p.lastMessage.file, t) ?? previewText(p.lastMessage.text, t)}
             </span>
           : <span className="italic text-text-muted">{t("chat.noMessages")}</span>}
         status={(muted || p.pinned) && <>
@@ -280,7 +311,7 @@ export function GroupRow({ group, active, density, onOpen }: { group: GroupView;
   const [busy, setBusy] = useState(false);
   const muted = useChatMute(groupChat(group.id)) !== undefined;
   const invitation = group.invitation;
-  const unread = !active && !invitation && group.lastMessageAt > groupReadAt(group.id);
+  const unread = !active && !invitation && groupUnreadAt(group) > groupReadAt(group.id);
   // An unread message that names me: "@" beside the dot, in the accent unless the mute keeps mentions quiet too.
   const mention = unread && (group.lastMentionAt ?? 0) > groupReadAt(group.id);
   const mentionQuiet = muted && !mentionsNotify(groupChat(group.id));
@@ -308,15 +339,18 @@ export function GroupRow({ group, active, density, onOpen }: { group: GroupView;
   // The latest reaction, while nothing was said after it (WISP 400 § Reactions).
   const reacted = !invitation && group.status === "active" && group.lastReaction && group.lastReaction.at > group.lastMessageAt ? group.lastReaction : undefined;
   const note = reacted && reactionNoteText(reacted, authorName(group, reacted.by, t), t);
+  const previewId = useId();
   const size = AVATAR[density];
   return (
     <div data-testid="group-row" data-group={group.id} data-muted={muted || undefined} onClick={onOpen} title={group.name || t("group.chat.unnamed")} className={rowClass(active, density)}>
+      <RowOpen testId="group-row-open" label={group.name || t("group.chat.unnamed")} active={active} describedBy={previewId} />
       <div className="relative shrink-0">
         <GroupAvatar picture={group.picture} size={size} glyph={Math.round(size * 0.46)} testId="group-row-avatar" className={active ? "bg-surface-alt" : "bg-surface-hover"} />
       </div>
       <div className="flex-1 min-w-0">
         <RowText
           name={group.name || t("group.chat.unnamed")}
+          previewId={previewId}
           nameClass={unread ? "text-text-primary font-semibold" : "text-text-primary"}
           time={group.lastMessageAt > 0 ? formatListTime(group.lastMessageAt, undefined, language, t) : undefined}
           timeClass={unread && !muted ? "text-accent font-medium" : "text-text-muted"}

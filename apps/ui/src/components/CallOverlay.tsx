@@ -123,7 +123,9 @@ export function CallOverlay({
 
   useEffect(() => {
     if (localVideoRef.current && localStream) {
-      localVideoRef.current.srcObject = localStream;
+      // The picture only: the self view is muted anyway. On Linux the microphone's track is a silent stand-in
+      // (the sound stays in Rust), and with it in the stream WebKitGTK never loaded the picture: paused, 0 frames.
+      localVideoRef.current.srcObject = new MediaStream(localStream.getVideoTracks());
     }
     // The element is recreated when the camera is turned back on, so it needs its stream again.
   }, [localStream, isVideoOff]);
@@ -144,10 +146,10 @@ export function CallOverlay({
     }
   }, [remoteStream]);
 
-  // Both elements play the peer's stream, so both go to the chosen speaker.
+  // The peer's sound plays from the <audio> alone (the picture is muted), on the chosen speaker.
   const speaker = devices?.speaker;
   useEffect(() => {
-    for (const element of [remoteAudioRef.current, remoteVideoRef.current]) void applySpeaker(element, speaker).catch(() => {});
+    void applySpeaker(remoteAudioRef.current, speaker).catch(() => {});
   }, [speaker, remoteStream]);
 
   useEffect(() => {
@@ -205,14 +207,20 @@ export function CallOverlay({
         </svg>
       </button>
 
-      {/* Remote audio (always present for audio playback) */}
-      <audio ref={remoteAudioRef} autoPlay playsInline className="hidden" />
-      
-      {/* Remote video (always rendered, visibility controlled) */}
+      {/* What a screen reader hears as the call moves on: the state line below says Calling... and Connecting... itself,
+          and once connected this says so, while the line turns into the clock, which is never read out as it runs. */}
+      <p role="status" className="sr-only" data-testid="call-state-spoken">{callState === "connected" ? t("calls.connected") : ""}</p>
+
+      {/* Remote audio: the only element that plays the peer's sound */}
+      <audio ref={remoteAudioRef} autoPlay playsInline className="hidden" data-testid="remote-audio" />
+
+      {/* Remote video (always rendered, visibility controlled). Muted: it shows the same stream as the <audio>, and
+          with both playing it the peer's voice came out twice. */}
       <video
         ref={remoteVideoRef}
         autoPlay
         playsInline
+        muted
         data-testid="remote-video"
         onResize={(e) => setRemoteIsWide(e.currentTarget.videoWidth >= 1000)}
         className={`absolute inset-0 w-full h-full bg-black ${remoteIsWide ? "object-contain" : "object-cover"} ${showRemoteVideo ? "" : "hidden"}`}
@@ -232,7 +240,7 @@ export function CallOverlay({
 
       {/* Status */}
       <div className="call-top absolute top-8 left-0 right-0 text-center z-10">
-        <p className="text-text-muted text-sm" data-testid="call-status" data-state={callState}>
+        <p className="text-text-muted text-sm" data-testid="call-status" data-state={callState} role={callState === "connected" ? undefined : "status"}>
           {!remoteHasVideo && isVideoOff && callState === "connected" && (
             <span className="text-accent">{t("calls.audio")}</span>
           )}
@@ -413,7 +421,7 @@ export function CallOverlay({
         {/* Hang up */}
         <button
           onClick={onHangUp}
-          className="w-16 h-16 max-md:w-[72px] max-md:h-[72px] rounded-full bg-danger flex items-center justify-center text-white hover:bg-danger/80 transition-colors cursor-pointer"
+          className="w-16 h-16 max-md:w-[72px] max-md:h-[72px] rounded-full bg-danger-fill flex items-center justify-center text-white hover:bg-danger-fill/80 transition-colors cursor-pointer"
           data-testid="call-hang-up"
           title={t("calls.end")}
         >

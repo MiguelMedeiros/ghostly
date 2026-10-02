@@ -1,4 +1,12 @@
 {
+  "buttons": {
+    "answers": "Risposte",
+    "chosen": "Scelta",
+    "closed": "Chiusa",
+    "failed": "Invio non riuscito",
+    "jump": "Vai alla domanda",
+    "sending": "Invio…"
+  },
   "panel": {
     "activeCount": "{{count}} in corso",
     "allOk": "tutto OK",
@@ -16,7 +24,7 @@
     "title": "Attività"
   },
   "routine": {
-    "cron": "Cron:",
+    "cron": "Cron",
     "label": "Routine: {{name}}, {{state}}",
     "lastRun": "Ultima esecuzione: {{result}}",
     "next": "Prossima {{when}}",
@@ -27,6 +35,7 @@
       "skipped": "Saltata"
     },
     "runs": "Esecuzioni recenti",
+    "schedule": "Orario",
     "state": {
       "active": "Attiva",
       "paused": "In pausa"

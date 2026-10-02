@@ -3,13 +3,13 @@ import { S3Store, type S3Config } from "@ghostly/browser/backup/s3";
 import { backupName, newSpace, type StoredBackup } from "@ghostly/browser/backup/storage";
 import { useSettings } from "../contexts/SettingsContext";
 import { useI18n } from "../contexts/I18nContext";
-import { createProfileBackup, restoreProfileBackup } from "../lib/profileBackup";
-import { switchProfile } from "../lib/profiles";
+import { createProfileBackup, openProfileBackup, restoreOpenedBackup, sameIdentityProfiles, type OpenedProfileBackup } from "../lib/profileBackup";
+import { switchProfile, type ProfileEntry } from "../lib/profiles";
 import { Block, Button, Notice, Row, Section, Segmented, input } from "./wallet/ui";
 import { useRun } from "./wallet/run";
 import { useServicesPlatform } from "../hooks/useServicesPlatform";
 import { Select } from "./ui/Select";
-import { ButtonGroup, FieldGrid, InputGroup, Truncate } from "./layout";
+import { ButtonGroup, Field, FieldGrid, InputGroup, Truncate } from "./layout";
 
 const size = (bytes: number) => (bytes > 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`);
 const EMPTY_S3: S3Config = { endpoint: "", region: "us-east-1", bucket: "", prefix: "ghostly", accessKeyId: "", secretAccessKey: "" };
@@ -40,10 +40,12 @@ export function ProfileBackups({ canSwitch, openBackup = false }: { canSwitch: b
   const [file, setFile] = useState<string | null>(null);
   const [listing, setListing] = useState<StoredBackup[] | null>(null), [picked, setPicked] = useState("");
   const [restorePass, setRestorePass] = useState("");
+  // A backup of a profile still on this device (WISP 05 § Restoring on the same device) waits here for the person's choice.
+  const [sameDevice, setSameDevice] = useState<{ opened: OpenedProfileBackup; originals: ProfileEntry[] } | null>(null);
   const [draft, setDraft] = useState<S3Config>(settings.backupS3 ?? EMPTY_S3);
   const s3 = settings.backupS3 ? new S3Store(settings.backupS3) : null;
   const space = () => { if (settings.backupSpace) return settings.backupSpace; const fresh = newSpace(); updateBackupStorage({ backupSpace: fresh }); return fresh; };
-  const toggle = (next: Open) => { setOpen(open === next ? "none" : next); setError(""); setDone(""); if (next === "s3") setDraft(settings.backupS3 ?? EMPTY_S3); };
+  const toggle = (next: Open) => { setOpen(open === next ? "none" : next); setError(""); setDone(""); setSameDevice(null); if (next === "s3") setDraft(settings.backupS3 ?? EMPTY_S3); };
   const ready = passphrase.length >= 12 && passphrase === confirm;
 
   const backup = (to: "file" | "s3") => run(async () => {
@@ -60,13 +62,26 @@ export function ProfileBackups({ canSwitch, openBackup = false }: { canSwitch: b
     // A copy of everything now: a wallet's backup reminder that asked for it is over.
     await wallet?.backupReminder({ event: "profile" }).catch(() => {});
   });
+  // An empty file would leave Restore off with nothing said: say why instead.
+  const pickFile = (text: string) => { const empty = !text.trim(); setFile(empty ? null : text); setDone(""); setSameDevice(null); setError(empty ? t("profile.backups.emptyFile") : ""); };
   const restore = () => run(async () => {
     const text = from === "file" ? file : new TextDecoder().decode(await s3!.get(picked));
     if (!text) throw new Error(t("profile.backups.chooseFirst"));
-    const entry = await restoreProfileBackup(text, restorePass);
-    setRestorePass("");
-    if (canSwitch) switchProfile(entry.id, { route: "/profile" }); else setDone(t("profile.backups.restored", { name: entry.name }));
+    const opened = await openProfileBackup(text, restorePass);
+    const originals = await sameIdentityProfiles(opened);
+    if (originals.length) { setSameDevice({ opened, originals }); return; }
+    await finish(opened);
   });
+  /** `replacing`: the original, which the profile page of the copy then offers to remove, with its usual checks. */
+  const finish = async (opened: OpenedProfileBackup, replacing?: ProfileEntry) => {
+    const entry = await restoreOpenedBackup(opened);
+    setRestorePass(""); setSameDevice(null);
+    if (canSwitch) switchProfile(entry.id, { route: replacing ? `/profile?replace=${encodeURIComponent(replacing.id)}` : "/profile" });
+    else setDone(t("profile.backups.restored", { name: entry.name }));
+  };
+  // Replace needs the copy running and the original removable: never the first profile.
+  const replaceable = canSwitch ? sameDevice?.originals.find((entry) => entry.id) : undefined;
+  const firstOnly = !!sameDevice && !replaceable && sameDevice.originals.some((entry) => !entry.id);
 
   return (
     <Section title={t("profile.backups.title")} testId="profile-backups">
@@ -90,7 +105,7 @@ export function ProfileBackups({ canSwitch, openBackup = false }: { canSwitch: b
         <Block>
           {s3 && <Segmented label={t("profile.backups.restoreFrom")} value={from} onChange={(next) => { setFrom(next); setError(""); }} options={[{ value: "file", label: t("profile.backups.fromFile") }, { value: "s3", label: "S3" }]} />}
           {from === "file" || !s3 ? (
-            <input data-testid="restore-file" type="file" accept=".ghostly-backup,application/json" className={input} onChange={(e) => { const f = e.target.files?.[0]; if (f) void f.text().then(setFile); }} />
+            <input data-testid="restore-file" type="file" accept=".ghostly-backup,application/json" className={input} onChange={(e) => { const f = e.target.files?.[0]; if (f) void f.text().then(pickFile); }} />
           ) : (
             <InputGroup>
               {listing?.length ? (
@@ -102,10 +117,22 @@ export function ProfileBackups({ canSwitch, openBackup = false }: { canSwitch: b
           )}
           <InputGroup>
             <input data-testid="restore-passphrase" type="password" autoComplete="current-password" className={input} placeholder={t("profile.backups.passphrase")} value={restorePass} onChange={(e) => setRestorePass(e.target.value)} />
-            <Button variant="primary" data-testid="restore-go" disabled={busy || !restorePass || (from === "file" || !s3 ? !file : !picked)} onClick={() => void restore()}>{busy ? t("profile.backups.restoring") : t("profile.backups.restore")}</Button>
+            <Button variant="primary" data-testid="restore-go" disabled={busy || !restorePass || !!sameDevice || (from === "file" || !s3 ? !file : !picked)} onClick={() => void restore()}>{busy ? t("profile.backups.restoring") : t("profile.backups.restore")}</Button>
           </InputGroup>
-          <Notice>{t("profile.backups.keepOne")}</Notice>
+          {!sameDevice && <Notice>{t("profile.backups.keepOne")}</Notice>}
         </Block>
+      )}
+      {open === "restore" && sameDevice && (
+        // The original is on this device: both would answer contacts as the same person. The person chooses.
+        <Field testId="restore-same-device" label={<span className="font-semibold">{t("profile.backups.sameDevice.title", { names: sameDevice.originals.map((entry) => `“${entry.name}”`).join(", ") })}</span>}
+          hint={t("profile.backups.sameDevice.hint")} info={t("profile.backups.sameDevice.info")}>
+          {firstOnly && <Notice>{t("profile.backups.sameDevice.firstProfile")}</Notice>}
+          <ButtonGroup>
+            {replaceable && <Button variant="primary" data-testid="restore-replace" disabled={busy} onClick={() => void run(() => finish(sameDevice.opened, replaceable))}>{t("profile.backups.sameDevice.replace")}</Button>}
+            <Button data-testid="restore-copy" disabled={busy} onClick={() => void run(() => finish(sameDevice.opened))}>{t("profile.backups.sameDevice.copy")}</Button>
+            <Button data-testid="restore-cancel" disabled={busy} onClick={() => setSameDevice(null)}>{t("common.cancel")}</Button>
+          </ButtonGroup>
+        </Field>
       )}
 
       <Row label={t("profile.backups.s3.title")} hint={s3 ? <Truncate>{s3.description.replace(/^S3 · /, "")}</Truncate> : t("profile.backups.off")}><Button data-testid="s3-setup" onClick={() => toggle("s3")}>{open === "s3" ? t("common.close") : s3 ? t("profile.backups.s3.edit") : t("profile.backups.setUp")}</Button></Row>

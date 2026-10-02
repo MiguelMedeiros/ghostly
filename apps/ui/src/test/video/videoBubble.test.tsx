@@ -261,6 +261,26 @@ describe("a video in the chat", () => {
     expect(screen.getByTestId("video-problem")).toHaveTextContent("This device can't play this video (MP4).");
   });
 
+  it("a refused stream fires error and rejects its play: it plays from its bytes, with no \"can't play\"", async () => {
+    const release = vi.fn();
+    vi.spyOn(servicesPlatform!, "streamFile").mockResolvedValue({ url: "ghostly-file://localhost/token-5", release });
+    let reject: (error: Error) => void = () => {};
+    play.mockImplementationOnce(() => new Promise<void>((_, no) => { reject = no; }));
+    show(video({ size: 20 * MB }));
+    fireEvent.click(screen.getByTestId("video-play"));
+    await flush();
+    const streamed = screen.getByTestId("video-player") as HTMLVideoElement;
+    expect(streamed.getAttribute("src")).toBe("ghostly-file://localhost/token-5");
+    // The element's source failed: it fires error, and its pending play() is rejected too.
+    fireEvent.error(streamed);
+    await act(async () => reject(new DOMException("unsupported source", "NotSupportedError")));
+    await flush();
+    await flush();
+    expect(release).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId("video-player").getAttribute("src")).toMatch(/^blob:/);
+    expect(screen.queryByTestId("video-problem")).toBeNull();
+  });
+
   // covers: files.video.play
   it("where the engine has no full screen (Desktop on Linux), its own button fills the window with it", async () => {
     const fullscreenWindow = vi.fn(async (_on: boolean) => {});
@@ -363,11 +383,61 @@ describe("a video not here yet", () => {
     expect(screen.queryByTestId("video-progress")).toBeNull();
   });
 
+  it("right after a start, one whose transfer is not restored yet is not offered to play or save", () => {
+    const file = video();
+    fakeEngine.update({ links: [linkView({ id: "chat1" })], transfers: {}, transfersRestored: false });
+    renderApp(<VideoBubble file={file} sender="peer" peerName="Ana" />);
+    expect(screen.getByTestId("video-bubble")).toHaveAttribute("data-stage", "restoring");
+    expect(screen.queryByTestId("video-play")).toBeNull();
+    expect(screen.queryByTestId("video-save")).toBeNull();
+    // Restored: it is still arriving.
+    act(() => fakeEngine.update({ transfersRestored: true, transfers: { [file.id]: { state: "transferring", direction: "in", transferred: 14 * MB, size: file.size } } }));
+    expect(screen.getByTestId("video-progress")).toHaveTextContent("40%");
+    expect(screen.queryByTestId("video-play")).toBeNull();
+    expect(screen.queryByTestId("video-save")).toBeNull();
+  });
+
+  it("one from history plays once the transfers are restored with none for it", () => {
+    fakeEngine.update({ links: [linkView({ id: "chat1" })], transfers: {}, transfersRestored: false });
+    renderApp(<VideoBubble file={video()} sender="peer" peerName="Ana" />);
+    expect(screen.queryByTestId("video-play")).toBeNull();
+    act(() => fakeEngine.update({ transfersRestored: true }));
+    expect(screen.getByTestId("video-play")).toBeInTheDocument();
+    expect(screen.getByTestId("video-save")).toBeInTheDocument();
+  });
+
   it("one sent from here can be watched while it goes", () => {
     const file = video({ id: "chat1-out-video" });
     show(file, { state: "transferring", direction: "out", transferred: 14 * MB, size: file.size }, "me");
     expect(screen.getByTestId("video-play")).toBeInTheDocument();
     expect(screen.getByTestId("video-status")).toHaveTextContent("40% of 35.0 MB");
+  });
+
+  // WebKitGTK (Desktop on Linux) stops a large video from a blob URL partway with a decode error; from the stream it plays.
+  it("one sent from here plays from the platform's stream while it goes, where there is one", async () => {
+    const file = video({ id: "chat1-out-video-streamed" });
+    const release = vi.fn();
+    const streamFile = vi.spyOn(servicesPlatform!, "streamFile").mockResolvedValue({ url: "http://127.0.0.1:40000/token-7", release });
+    show(file, { state: "transferring", direction: "out", transferred: 14 * MB, size: file.size }, "me");
+    fireEvent.click(screen.getByTestId("video-play"));
+    await flush();
+    expect(streamFile).toHaveBeenCalledWith(file.id);
+    expect(getFile).not.toHaveBeenCalled();
+    expect(screen.getByTestId("video-player").getAttribute("src")).toBe("http://127.0.0.1:40000/token-7");
+  });
+
+  it("one sent from here whose bytes cannot be read yet says so, and plays once it has gone", async () => {
+    const file = video({ id: "chat1-out-video-early" });
+    getFile.mockResolvedValue(null);
+    const view = show(file, { state: "transferring", direction: "out", transferred: 14 * MB, size: file.size }, "me");
+    fireEvent.click(screen.getByTestId("video-play"));
+    await flush();
+    expect(screen.getByTestId("video-problem")).toHaveTextContent("It plays once it has been sent.");
+    expect(screen.queryByTestId("video-play")).toBeNull();
+    act(() => fakeEngine.update({ transfers: { [file.id]: { state: "done", direction: "out", transferred: file.size, size: file.size } } }));
+    view.rerender(<VideoBubble file={file} sender="me" peerName="Ana" />);
+    expect(screen.queryByTestId("video-problem")).toBeNull();
+    expect(screen.getByTestId("video-play")).toBeInTheDocument();
   });
 });
 

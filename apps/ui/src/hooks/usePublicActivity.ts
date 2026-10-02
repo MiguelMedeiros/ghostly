@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { engine } from "@ghostly/browser/platform/engine";
 import type { PublicGraphView, PublicPostsView } from "@ghostly/browser/shared/types";
+import { errorText } from "../lib/errorText";
+import { useT } from "../contexts/I18nContext";
 
-const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 export interface PublicActivityState {
   posts?: PublicPostsView | null;
@@ -21,6 +22,7 @@ export interface PublicActivityState {
  * page. An identity that changes starts over; an answer for the one before is dropped.
  */
 export function usePublicActivity(provider: string, subject: string, on: boolean): PublicActivityState {
+  const t = useT();
   const [posts, setPosts] = useState<PublicPostsView | null>();
   const [graph, setGraph] = useState<PublicGraphView | null>();
   const [loading, setLoading] = useState<"posts" | "more">();
@@ -37,19 +39,19 @@ export function usePublicActivity(provider: string, subject: string, on: boolean
     setLoading("posts");
     const force = attempt > 0;
     void engine.call("loadPublicPosts", { provider, subject, force })
-      .then(v => { if (current.current === key) setPosts(v); }, e => { if (current.current === key) setError(message(e)); })
+      .then(v => { if (current.current === key) setPosts(v); }, e => { if (current.current === key) setError(errorText(e, t)); })
       .finally(() => { if (current.current === key) setLoading(undefined); });
     void engine.call("loadPublicGraph", { provider, subject, force })
-      .then(v => { if (current.current === key) setGraph(v); }, e => { if (current.current === key) setGraphError(message(e)); });
-  }, [key, provider, subject, on, attempt]);
+      .then(v => { if (current.current === key) setGraph(v); }, e => { if (current.current === key) setGraphError(errorText(e, t)); });
+  }, [key, provider, subject, on, attempt, t]);
 
   const more = useCallback(() => {
     if (!on || loading) return;
     setLoading("more"); setError(undefined);
     void engine.call("loadPublicPosts", { provider, subject, more: true })
-      .then(v => { if (current.current === key) setPosts(v); }, e => { if (current.current === key) setError(message(e)); })
+      .then(v => { if (current.current === key) setPosts(v); }, e => { if (current.current === key) setError(errorText(e, t)); })
       .finally(() => { if (current.current === key) setLoading(undefined); });
-  }, [key, provider, subject, on, loading]);
+  }, [key, provider, subject, on, loading, t]);
   const retry = useCallback(() => setAttempt(n => n + 1), []);
 
   return { posts, graph, loading, error, graphError, more, retry };

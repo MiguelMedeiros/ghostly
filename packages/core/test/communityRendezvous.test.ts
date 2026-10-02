@@ -4,7 +4,7 @@ import { randomBytes, toBase64Url } from "../src/bytes";
 import { measureRecords, MAX_DNS_PACKET_BYTES } from "../src/pkarr";
 import {
 // covers: groups.protocol.community-topology, groups.community.head
-  COMMUNITY_TOPOLOGY, beaconKeys, beaconRecords, freshHubs, newerHead, readBeaconHead, type CommunityHead, lobbyKeys, lobbyRecords, mergeBeacon, mergeLobby, pickHubs, rankHubs, readBeacon, readLobby, shouldBeHub,
+  COMMUNITY_TOPOLOGY, beaconKeys, beaconRecords, doorHubs, freshHubs, newerHead, readBeaconHead, type CommunityHead, lobbyKeys, lobbyRecords, mergeBeacon, mergeLobby, pickHubs, rankHubs, readBeacon, readLobby, shouldBeHub,
   type Hub,
 } from "../src/communityRendezvous";
 
@@ -62,6 +62,21 @@ describe("community rendezvous: beacon and lobbies", () => {
     const many: Hub[] = keys(COMMUNITY_TOPOLOGY.maxHubs).map(key => ({ key, ts: now, load: COMMUNITY_TOPOLOGY.hubCapacity }));
     expect(shouldBeHub(me, many, now)).toBe(false);
     expect(freshHubs([{ key: a, ts: now - COMMUNITY_TOPOLOGY.beaconFreshMs, load: 0 }], now)).toEqual([]);
+  });
+
+  it("the hubs at the door: settled ones; a hub that sees no other is the door alone, listed yet or not", () => {
+    const now = Date.now(), [me, other] = keys(2);
+    const hub = (key: string, age: number, since = now - 5 * 60_000): Hub => ({ key, ts: now - age, load: 0, since });
+    expect(doorHubs([hub(me, 1_000), hub(other, 1_000, now - 10_000)], now, me)).toEqual([me]);
+    // Not listed (its write held back), nobody else: the door at once. Without asking as a hub, nobody.
+    expect(doorHubs([], now, me)).toEqual([me]);
+    expect(doorHubs([], now)).toEqual([]);
+    // Its own entry stale for the door (45 s) but nobody else there: still the door.
+    expect(doorHubs([hub(me, 50_000)], now, me)).toEqual([me]);
+    // Another hub listed lately: that one, whatever this one's entry says.
+    expect(doorHubs([hub(other, 1_000)], now, me)).toEqual([other]);
+    // Another hub fresh in the beacon but not lately: nobody, as before (two of them must not both count themselves).
+    expect(doorHubs([hub(other, 50_000)], now, me)).toEqual([]);
   });
 
   it("ranks hubs per subject: one order for everyone, different subjects spread", () => {

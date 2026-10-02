@@ -237,10 +237,14 @@ export function groupDisplayName(meta: GroupMeta | undefined, first: string): st
 /** What a new statement changed that members see (a line in the history); `null` for a field now unset. */
 export interface GroupMetaChange { name?: string | null; picture?: string | null }
 
-/** The name and picture that differ between two statements; null when neither does (hubs alone, or the same body signed again). */
-export function groupMetaChange(before: GroupMeta | undefined, after: GroupMeta): GroupMetaChange | null {
+/**
+ * The name and picture that differ between two statements; null when neither does (hubs alone, or the same body signed
+ * again). With `first` (the name the group had when this member got in), a name is a change only when the name shown
+ * changes: a joiner's welcome already gave the name the statement then brings, and a new admin signs it again.
+ */
+export function groupMetaChange(before: GroupMeta | undefined, after: GroupMeta, first?: string): GroupMetaChange | null {
   const a = groupMetaBody(before), b = groupMetaBody(after), change: GroupMetaChange = {};
-  if (a.name !== b.name) change.name = b.name ?? null;
+  if ((a.name ?? first) !== (b.name ?? first)) change.name = b.name ?? null;
   if (a.pic !== b.pic) change.picture = b.pic ?? null;
   return "name" in change || "picture" in change ? change : null;
 }

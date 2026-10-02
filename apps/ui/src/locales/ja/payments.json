@@ -32,7 +32,7 @@
     "cashuMints": "Cashu ミント",
     "error": {
       "amountMismatch": "インボイスが請求額と一致しません",
-      "feeAbove": "Lightning の手数料（最大 {{fee}} sats）が上限を超えています"
+      "feeAbove": "Lightning の手数料（最大 {{fee}} {{unit}}）が上限を超えています"
     },
     "externalNote": {
       "ark": "どの Ark ウォレットからでも支払えます。相手のウォレットは入金を確認すると支払い済みにします。",
@@ -42,7 +42,7 @@
     "externalTitle": "Ghostly 以外のウォレットでスキャン、コピー、または開く",
     "fedimintNoFederation": "Fedimint · 共通のフェデレーションなし：Lightning",
     "hide": "隠す",
-    "maxFee": "最大手数料（sats）",
+    "maxFee": "最大手数料（{{unit}}）",
     "maxGas": "最大ガス（ETH）",
     "noSharedMint": "共通の設定済みミントがありません",
     "noWallet": {
@@ -72,7 +72,7 @@
     },
     "takeBack": "取り戻す",
     "takeBackTitle": "相手が受け取らなければ、ecash はあなたのものです",
-    "through": "{{source}} 経由 · 手数料は最大 {{fee}} sats",
+    "through": "{{source}} 経由 · 手数料は最大 {{fee}} {{unit}}",
     "title": {
       "requests": "請求",
       "sentYou": "受け取った送金",
@@ -330,7 +330,7 @@
       "confirmed": "確認済み",
       "failed": "失敗",
       "pending": "保留中",
-      "settled": "決済済み",
+      "settled": "支払い済み",
       "submitted": "送信済み",
       "unknown": "不明"
     },

@@ -1,13 +1,32 @@
+import { identityFromSeedB64 } from "@ghostly/core";
 import { databaseExists } from "@ghostly/browser/backup/database";
 import { dropFileSpace } from "@ghostly/browser/shared/fileBytes";
-import { activeProfileId, listProfiles, namespaceOf, prefixOf, settingsKeyFor, unregisterProfile } from "./profiles";
+import { activeProfileId, chosenProfileId, listProfiles, namespaceOf, prefixOf, settingsKeyFor, unregisterProfile } from "./profiles";
 import { unreadUnder } from "./storage";
 import { peekFresh } from "./profilePeek";
 import { verifyPassword } from "./settings";
 import { pushPlatform } from "./wakePush";
 
-/** What deleting a profile would take away, read from its own storage without starting it. */
-export interface ProfileSummary { chats: number; cashuSats: number; ark: boolean; usdt: boolean; services: number }
+/**
+ * What deleting a profile would take away, read from its own storage without starting it. `wallets`: the kinds of
+ * wallet it keeps (Cashu aside, counted in sats), each named once however many networks it has one on.
+ */
+export interface ProfileSummary { chats: number; cashuSats: number; wallets: WalletName[]; services: number }
+export type WalletName = "Ark" | "USDT" | "Bark" | "Spark" | "Fedimint" | "Lightning" | "Bitcoin";
+
+/**
+ * The wallet a settings key holds, if it holds one in use. Each network's wallet is under `<rail>-mode-<network>`
+ * (an older app kept one under the bare `<rail>`); an archived one (`-retired-`) is not counted.
+ */
+const WALLET_KEYS: [RegExp, WalletName][] = [
+  [/^arkWallet(-mode-.+)?$/, "Ark"], [/^usdtWallet(-mode-.+)?$/, "USDT"], [/^barkWallet(-mode-.+)?$/, "Bark"], [/^sparkWallet(-mode-.+)?$/, "Spark"],
+  [/^fedimintWallet-(mainnet|testnet)$/, "Fedimint"], [/^lightningSource-/, "Lightning"], [/^onchainSource-/, "Bitcoin"],
+];
+export function walletsIn(keys: readonly IDBValidKey[]): WalletName[] {
+  const found = new Set<WalletName>();
+  for (const key of keys) for (const [pattern, name] of WALLET_KEYS) if (typeof key === "string" && pattern.test(key)) found.add(name);
+  return WALLET_KEYS.map(([, name]) => name).filter((name) => found.has(name));
+}
 
 const request = <T>(r: IDBRequest<T>) => new Promise<T>((resolve, reject) => { r.onsuccess = () => resolve(r.result); r.onerror = () => reject(r.error); });
 async function openExisting(name: string): Promise<IDBDatabase | null> {
@@ -24,14 +43,14 @@ function chatsOf(prefix: string): number {
 
 export async function profileSummary(id: string): Promise<ProfileSummary> {
   const ns = namespaceOf(id);
-  const summary: ProfileSummary = { chats: chatsOf(`ghostly_${ns}_`), cashuSats: 0, ark: false, usdt: false, services: 0 };
+  const summary: ProfileSummary = { chats: chatsOf(`ghostly_${ns}_`), cashuSats: 0, wallets: [], services: 0 };
   const db = await openExisting(`ghostly_${ns}`);
   if (!db) return summary;
   try {
     const has = (name: string) => db.objectStoreNames.contains(name);
     const tx = db.transaction(["proofs", "settings", "services"].filter(has), "readonly");
     if (has("proofs")) summary.cashuSats = (await request(tx.objectStore("proofs").getAll()) as { amount: number; reserved?: boolean }[]).reduce((sum, p) => sum + (p.reserved ? 0 : p.amount), 0);
-    if (has("settings")) { const keys = await request(tx.objectStore("settings").getAllKeys()); summary.ark = keys.includes("arkWallet"); summary.usdt = keys.includes("usdtWallet"); }
+    if (has("settings")) summary.wallets = walletsIn(await request(tx.objectStore("settings").getAllKeys()));
     if (has("services")) summary.services = (await request(tx.objectStore("services").count()));
   } finally { db.close(); }
   return summary;
@@ -50,19 +69,75 @@ const databaseOf = (id: string) => (namespaceOf(id) ? `ghostly_${namespaceOf(id)
 /** A profile's peer database (WISP 04). */
 export const profileDatabase = databaseOf;
 
-/** The Ark wallets a profile's database names, current and retired. */
-async function arkWalletIds(dbName: string): Promise<string[]> {
-  const db = await openExisting(dbName);
-  if (!db) return [];
+/**
+ * The public keys a profile acts with toward others: each chat's participation key (or, for a chat from before them,
+ * its own chat key) and its DID's key. Two profiles sharing one of them answer as the same person, which is what a
+ * backup restored on the device it was made on would do (WISP 05). Read from the stored records, nothing started.
+ */
+export function identityKeysOf(links: readonly unknown[], did: unknown): Set<string> {
+  const keys = new Set<string>();
+  for (const link of links) {
+    const { participationSeed, seedB64 } = (link ?? {}) as { participationSeed?: unknown; seedB64?: unknown };
+    const seed = typeof participationSeed === "string" ? participationSeed : typeof seedB64 === "string" ? seedB64 : null;
+    if (!seed) continue;
+    try { keys.add(`chat:${identityFromSeedB64(seed).pubKeyZ32}`); } catch { /* not a seed: nothing to compare */ }
+  }
+  const didKey = (did as { publicKey?: unknown } | null | undefined)?.publicKey;
+  if (typeof didKey === "string" && didKey) keys.add(`did:${didKey}`);
+  return keys;
+}
+
+/** `identityKeysOf` a profile of this space, from its peer database (read only, closed at once). */
+export async function profileIdentityKeys(id: string): Promise<Set<string>> {
+  const db = await openExisting(databaseOf(id));
+  if (!db) return new Set();
   try {
-    if (!db.objectStoreNames.contains("settings")) return [];
+    const names = ["links", "settings"].filter((name) => db.objectStoreNames.contains(name));
+    if (!names.length) return new Set();
+    const tx = db.transaction(names, "readonly");
+    const [links, did] = await Promise.all([
+      names.includes("links") ? request(tx.objectStore("links").getAll()) : Promise.resolve([]),
+      names.includes("settings") ? request(tx.objectStore("settings").get("profileDid")) : Promise.resolve(undefined),
+    ]);
+    return identityKeysOf(links, did);
+  } finally { db.close(); }
+}
+
+/**
+ * The storage outside its peer database that a profile's wallets name, current and retired: each Ark wallet's
+ * database (`ghostly-ark-<id>`), each Bark wallet's two (`ghostly-bark-<id>`, `…-onchain`), and each Fedimint
+ * federation's client database, a file of the origin-private file system.
+ */
+interface WalletStorage { databases: string[]; files: string[] }
+const FEDIMINT_FILE = /^ghostly-fedimint-[\w-]{1,80}\.db$/;
+async function walletStorage(dbName: string): Promise<WalletStorage> {
+  const found: WalletStorage = { databases: [], files: [] };
+  const db = await openExisting(dbName);
+  if (!db) return found;
+  try {
+    if (!db.objectStoreNames.contains("settings")) return found;
     const store = db.transaction("settings", "readonly").objectStore("settings");
     const [keys, values] = await Promise.all([request(store.getAllKeys()), request(store.getAll())]);
-    return keys.flatMap((key, i) => {
-      const walletId = (values[i] as { config?: { walletId?: string } })?.config?.walletId;
-      return walletId && typeof key === "string" && key.startsWith("arkWallet") ? [walletId] : [];
+    keys.forEach((key, i) => {
+      if (typeof key !== "string") return;
+      const value = values[i] as { config?: { walletId?: unknown }; database?: unknown; federations?: { database?: unknown }[] } | null;
+      const walletId = value?.config?.walletId;
+      if (typeof walletId === "string" && walletId && key.startsWith("arkWallet")) found.databases.push(`ghostly-ark-${walletId}`);
+      if (typeof walletId === "string" && walletId && key.startsWith("barkWallet")) found.databases.push(`ghostly-bark-${walletId}`, `ghostly-bark-${walletId}-onchain`);
+      if (key.startsWith("fedimint")) {
+        const federations = Array.isArray(value?.federations) ? value.federations.map((f) => f?.database) : [];
+        for (const file of [value?.database, ...federations]) if (typeof file === "string" && FEDIMINT_FILE.test(file)) found.files.push(file);
+      }
     });
+    return found;
   } finally { db.close(); }
+}
+
+/** Removes a file of the origin-private file system, if there is one; a platform without it has none to remove. */
+async function dropFile(name: string): Promise<void> {
+  if (typeof navigator === "undefined") return;
+  const root = await navigator.storage?.getDirectory?.().catch(() => undefined);
+  await root?.removeEntry(name).catch((error: { name?: string }) => { if (error?.name !== "NotFoundError") throw error; });
 }
 
 /** The password hash of a profile's lock screen, when it has one turned on. */
@@ -120,21 +195,27 @@ async function lockHeld(ns: string): Promise<boolean> {
 }
 
 /**
- * Deletes a profile of this space for good: its local keys, its peer database and its Ark wallets'
- * databases, then its place on the list (WISP 04). Never the active one, never the first, never one
- * running in another tab, and never an Ark database another profile still uses.
+ * Deletes a profile of this space for good: its local keys, its peer database and its wallets' own storage
+ * (Ark and Bark databases, Fedimint client files), then its place on the list (WISP 04). Never the active one,
+ * never the first, never one running in another tab, and never a wallet's storage another profile still uses.
  */
 export async function deleteProfile(id: string, password?: string): Promise<void> {
   if (!id) throw new Error("The first profile cannot be deleted");
   if (id === activeProfileId()) throw new Error("Switch to another profile first");
-  await assertUnlocked(id, password);
   const ns = namespaceOf(id), dbName = `ghostly_${ns}`;
+  // Another tab runs it (and has likely made it the registry's choice): that is what to say, since switching here
+  // would not close it.
   if (await lockHeld(ns)) throw new Error("This profile is open in another window. Close it, then try again.");
-  const others = new Set((await Promise.all(listProfiles().filter((p) => p.id !== id).map((p) => arkWalletIds(databaseOf(p.id))))).flat());
-  const arkIds = (await arkWalletIds(dbName)).filter((walletId) => !others.has(walletId));
+  // Nor the one the registry has chosen, which the next page starts as.
+  if (id === chosenProfileId()) throw new Error("Switch to another profile first");
+  await assertUnlocked(id, password);
+  const others = await Promise.all(listProfiles().filter((p) => p.id !== id).map((p) => walletStorage(databaseOf(p.id))));
+  const usedElsewhere = new Set(others.flatMap((o) => [...o.databases, ...o.files]));
+  const own = await walletStorage(dbName);
   if (await databaseExists(dbName)) await drop(dbName);
   await dropFileSpace(dbName).catch(() => {});
-  for (const walletId of arkIds) await drop(`ghostly-ark-${walletId}`);
+  for (const name of new Set(own.databases)) if (!usedElsewhere.has(name)) await drop(name);
+  for (const name of new Set(own.files)) if (!usedElsewhere.has(name)) await dropFile(name).catch(() => {});
   const prefix = `ghostly_${ns}_`;
   for (const key of Array.from({ length: localStorage.length }, (_, i) => localStorage.key(i)).filter((k): k is string => !!k?.startsWith(prefix))) localStorage.removeItem(key);
   // Its push subscription (WISP 401 § Wake-up push) ends with it: its worker goes, and contacts who kept it get 410.

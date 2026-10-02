@@ -37,16 +37,19 @@ export function releasePlayback(id: string): void {
 
 /**
  * The message after this one, when it is a voice message from the same sender, starts.
- * "After" is the next message on screen: anything else in between (a text, a payment)
- * breaks the run, as it does in WhatsApp.
+ * "After" is the next row on screen: anything else in between (a text, a payment, a group
+ * event) breaks the run, as it does in WhatsApp. Only a line about the connection
+ * (`data-voice-passes`) is not part of the conversation, so the run goes on past it.
+ * In a group the same sender is the same member (the row's `data-member`), not any other one.
  */
 export function playNextVoice(element: HTMLElement | null): boolean {
   const row = element?.closest("[data-message-row]");
   const sender = element?.getAttribute("data-voice-sender");
   if (!row || !sender) return false;
   let next = row.nextElementSibling;
-  while (next && !next.hasAttribute("data-message-row")) next = next.nextElementSibling;
-  const player = next?.querySelector<HTMLElement>("[data-voice-player]");
+  while (next?.hasAttribute("data-voice-passes")) next = next.nextElementSibling;
+  if (!next?.hasAttribute("data-message-row") || next.getAttribute("data-member") !== row.getAttribute("data-member")) return false;
+  const player = next.querySelector<HTMLElement>("[data-voice-player]");
   const id = player?.getAttribute("data-voice-player");
   if (!player || !id || player.getAttribute("data-voice-sender") !== sender) return false;
   const target = players.get(id);

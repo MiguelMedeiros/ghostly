@@ -9,6 +9,7 @@ import { Button, Notice, input } from "./ui";
 import { NETWORK_NAME, WALLET_NAME, failedBecause, shortReason } from "./names";
 import { ProviderConfigForm } from "./providers/SourcePicker";
 import { PROVIDER_FORMS } from "./providers/forms";
+import { errorText } from "../../lib/errorText";
 import "./new-wallet.css";
 
 type Key = Parameters<Translate>[0];
@@ -44,7 +45,6 @@ const NETWORKS: WalletNetwork[] = ["mainnet", "testnet"];
 const FIRST_STEP_MS = 700;
 /** How long Ready shows before the dialog closes and the new card is dealt into its deck. */
 const READY_MS = 650;
-const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 type Phase = { type: WalletType; state: "busy" | "done" | "error"; step: number; text?: string; made?: WalletInstanceView };
 type Action = "create" | "key" | "connect" | "add-another" | "join" | "join-another" | "added" | "off";
@@ -115,7 +115,7 @@ export function NewWalletDialog({ wallet, offers, setupFailed = [], initialNetwo
       const made = await wallet.create({ type, network, ...extra });
       setPhase({ type, state: "done", step: 2, made });
       later(READY_MS, () => finish(made));
-    } catch (e) { setPhase({ type, state: "error", step: 1, text: message(e) }); }
+    } catch (e) { setPhase({ type, state: "error", step: 1, text: errorText(e, t) }); }
   };
   const pick = (type: WalletType) => {
     const action = actionOf(type, offer(type));

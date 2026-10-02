@@ -2,6 +2,7 @@ import { useState } from "react";
 import { SPARK_PROVIDER, sparkAddressKind, sparkInvoiceDetails, type PaymentReview as Review } from "@ghostly/core";
 import type { WalletPlatform, WalletState } from "../lib/platform";
 import { PaymentReview } from "./PaymentReview";
+import { paymentStateLabel } from "./paymentWords";
 import { BackupRows } from "./wallet/BackupRows";
 import { Actions, Address, Amount, Block, Button, Notice, Row, Section, input, type Action } from "./wallet/ui";
 import { useRun } from "./wallet/run";
@@ -9,10 +10,11 @@ import { useI18n } from "../contexts/I18nContext";
 import { satsIn } from "./NetworkTag";
 import { fillNodes } from "../lib/fillNodes";
 import { formatAmount } from "../lib/amount";
+import { formatAt } from "../lib/time";
 
 /** Spark transfers cost nothing today; the cap only stops a surprise, and the review shows the real fee. */
 const feeCap = (amount: number) => Math.max(100, Math.ceil(amount / 100));
-const when = (at: number) => new Date(at).toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" });
+const WHEN: Intl.DateTimeFormatOptions = { dateStyle: "short", timeStyle: "short" };
 
 /**
  * Spark: wallet to wallet, instant and off-chain, through the Breez SDK. Its address is the wallet's identity, the
@@ -68,13 +70,13 @@ export function SparkWalletPanel({ wallet, state, backupNow = false }: { wallet:
     <Notice>{t("wallet.spark.approve")}</Notice>
    </div>}
    {review && <PaymentReview key={review.id} review={review} wallet={wallet} onClose={() => { setReview(null); setTo(""); setAmount(""); }} />}
-   {intents.filter(i => i.id !== review?.id && i.state !== "settled").map(i => <Button key={i.id} className="block w-full text-start" onClick={() => setReview(i)}>{t("wallet.panel.intent", { amount: formatAmount(i.amount, t.language), unit, state: i.state })}</Button>)}
+   {intents.filter(i => i.id !== review?.id && i.state !== "settled").map(i => <Button key={i.id} className="block w-full text-start" onClick={() => setReview(i)}>{t("wallet.panel.intent", { amount: formatAmount(i.amount, t.language), unit, state: paymentStateLabel(t, i.state) })}</Button>)}
    {!!spark.history?.length && <Section title={t("wallet.spark.history")}>
     <ul className="divide-y divide-border" data-testid="spark-history">
      {spark.history.map(entry => <li key={entry.id} className="flex items-center gap-3 py-2 text-sm" data-testid="spark-history-row">
       <span className={entry.direction === "in" ? "text-green-500" : "text-text-primary"}>{entry.direction === "in" ? "+" : "−"}{formatAmount(entry.amount, t.language)} <span className="text-xs text-text-muted">{unit}</span></span>
       <span className="flex-1 min-w-0 truncate text-text-muted text-xs">{[entry.via === "spark" ? "Spark" : entry.via === "lightning" ? "Lightning" : entry.via === "onchain" ? t("wallet.spark.via.onchain") : t("wallet.spark.via.other"), entry.memo, entry.status !== "completed" ? entry.status : "", entry.fee ? t("wallet.spark.fee", { fee: entry.fee }) : ""].filter(Boolean).join(" · ")}</span>
-      <span className="text-text-muted text-xs tabular-nums">{when(entry.at)}</span>
+      <span className="text-text-muted text-xs tabular-nums">{formatAt(entry.at, WHEN, t.language)}</span>
      </li>)}
     </ul>
    </Section>}

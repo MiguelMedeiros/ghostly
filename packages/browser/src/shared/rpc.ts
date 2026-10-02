@@ -106,6 +106,11 @@ export interface EngineApi {
   loadPublicGraph(params: { provider: string; subject: string; force?: boolean }): PublicGraphView | null;
   /** One picture of a post already loaded, on the reader's tap. */
   loadPublicPostImage(params: { provider: string; subject: string; postId: string; index: number }): PublicPostImageView;
+  /**
+   * "Clear all data", the peer's part: takes back what it can from the network (held items, the DID, identity
+   * proofs), stops, and empties its database but for the wallets. The peer is stopped afterwards: the host starts a new one.
+   */
+  clearProfileData(): void;
   /** Lists one of the profile's identities in its public DID document (`alsoKnownAs`), or takes it out. */
   setDidListed(params: { id: string; listed: boolean }): void;
   /** Nostr social layer, per contact: their profile (kind 0), follows (kind 3) or notes (kind 1), from the person's relays. Refused without a verified Nostr proof from that contact. */
@@ -183,7 +188,7 @@ export interface EngineApi {
   /** Store-and-forward in one chat (WISP 4xx): accept held items from this contact, and hold items for it while it is away. */
   setChatHold(params: { linkId: string; enabled: boolean }): void;
   connect(params: { linkId: string }): void;
-  walletAddMint(params: { url: string; primary?: boolean }): { url: string; name: string };
+  walletAddMint(params: { url: string; primary?: boolean; network?: WalletNetwork }): { url: string; name: string };
   /** New → a type → a network: made in one click and checked before its card appears; nothing saved on failure. */
   walletCreate(params: WalletCreate): WalletInstanceView;
   /** Removes one wallet, its keys and config; refused while it holds money on this device and `acceptLoss` is not set. */
@@ -203,7 +208,8 @@ export interface EngineApi {
   peekProfile(params: { profile: string; dbName: string }): import("../engine/profilePeek").PeekResult;
   /** The primary mint is where Lightning invoices are created. */
   walletSetPrimaryMint(params: { url: string }): void;
-  walletRemoveMint(params: { url: string }): void;
+  /** Never a mint that holds sats, nor a network's last one; one that still waits for money only with `acceptLoss`. */
+  walletRemoveMint(params: { url: string; acceptLoss?: boolean }): void;
   /** A Lightning invoice from the active source (`via: "cashu"`: from the mints, landing as ecash). */
   walletReceiveLightning(params: { amount: number; via?: "cashu"; network?:WalletNetwork; card?: string }): { quote: string; invoice: string; expiresAt: number | null; paymentHash?: string; source: string };
   walletQuoteInvoice(params: { invoice: string; via?: "cashu"; network?:WalletNetwork; card?: string }): { quote: string; mint: string; amount: number; feeReserve: number; source?: string };
@@ -309,6 +315,8 @@ export interface EngineApi {
   /** `mentions`: places of the text that name members (WISP 9xx § Mentions); the session keeps only what holds. */
   /** `replyTo`: the id of a message of this group the text answers (WISP 9xx § Replies). */
   sendGroupMessage(params: { groupId: string; text: string; mentions?: GroupMention[]; replyTo?: string; card?: StatusCard }): { error: string | null; messageId?: string };
+  /** A press on a button of someone else's message in a chat or a group (`group:<id>`), WISP 4xx · Message Buttons. */
+  pressButton(params: { linkId: string; messageId: string; buttonId: string }): { error: string | null; refused?: boolean; paced?: true; messageId?: string };
   /** How many edges took my message `messageId` (or its edit number `edit`): members' edges in a private group, hubs' in a community. */
   groupTaken(params: { groupId: string; messageId: string; edit?: number }): number;
   groupMessages(params: { groupId: string }): StoredMessage[];

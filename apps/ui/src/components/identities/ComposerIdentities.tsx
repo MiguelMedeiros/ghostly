@@ -17,8 +17,9 @@ import { ProviderMark } from "./ProviderMark";
 import { PublicProfileDetails } from "./PublicProfileDetails";
 import "./composer-identities.css";
 import { useAppNavigation } from "../../hooks/useAppNavigation";
+import { deckArrows } from "../deck/arrows";
+import { errorText } from "../../lib/errorText";
 
-const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 type Shared = NonNullable<LinkView["identities"]>["shared"][number];
 /** Shared in this chat, or about to be: what the card shows as shared. */
 const isOn = (s?: Shared) => !!s && s.status !== "withdrawn" && s.status !== "withdrawal-pending";
@@ -151,7 +152,7 @@ export function IdentityPicker({ peerKey, contact, initial, onManage, onAdding, 
     if (!link || busy) return;
     setBusy(p.id); setStopping(on); setError("");
     void engine.call(on ? "withdrawIdentityProof" : "shareIdentityProof", { linkId: link.id, id: p.id })
-      .then(() => { if (!on && onShared) onShared(); else setDone(on ? "stopped" : "shared"); }, e => setError(message(e))).finally(() => setBusy(""));
+      .then(() => { if (!on && onShared) onShared(); else setDone(on ? "stopped" : "shared"); }, e => setError(errorText(e, t))).finally(() => setBusy(""));
   };
 
   const ghostly: Ghostly | undefined = state && link ? {
@@ -194,7 +195,7 @@ export function IdentityPicker({ peerKey, contact, initial, onManage, onAdding, 
     if (!link || busy || others.length === 0) return;
     setBusy(GHOSTLY); setError("");
     void Promise.all(others.map(p => engine.call("withdrawIdentityProof", { linkId: link.id, id: p.id })))
-      .then(() => setDone("only"), e => setError(message(e))).finally(() => setBusy(""));
+      .then(() => setDone("only"), e => setError(errorText(e, t))).finally(() => setBusy(""));
   };
   // The card turned over, while it is still there (an identity removed elsewhere meanwhile gives the cards back).
   const showing = side === "back" && !entry.add ? entry : undefined;
@@ -212,7 +213,7 @@ export function IdentityPicker({ peerKey, contact, initial, onManage, onAdding, 
       : <>
         {head && <ComposerSheetHead title={t("identities.mine.deckLabel")} who={t("identities.picker.shownTo", { contact })} />}
         <Deck<Entry> compact cards={entries} selected={entry.id} onSelect={select} onChoose={use}
-          kind="radios" label={t("identities.mine.deckLabel")} name="composer-identity-deck" className="id-deck" size={{ max: 250, share: .62 }}
+          kind="radios" label={t("identities.mine.deckLabel")} name="composer-identity-deck" arrows={deckArrows(t)} className="id-deck" size={{ max: 250, share: .62 }}
           testId={e => (e.add ? "composer-identity-add" : e.ghostly ? "composer-identity-ghostly" : "composer-identity")} blocked={why}
           face={(e, { after }) => (e.add ? <AddIdCardFace first={mine.length === 0} providers={providers} /> : <IdCardFace card={e.card} after={after} shared={e.on} />)}
           mark={e => <IdCardMark provider={e.add ? undefined : e.card.provider} subject={e.add ? undefined : e.card.bound} />}

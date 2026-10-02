@@ -13,8 +13,11 @@ import { USDT_CHAINS, type UsdtRequest } from "../lib/parse/money-usdt";
 import { useI18n } from "../contexts/I18nContext";
 import { moneyLabel, satsIn } from "./NetworkTag";
 import { PaymentReview } from "./PaymentReview";
+import { OpenInWallet } from "./OpenInWallet";
 import { ONCHAIN_FEE_CAP } from "./walletCardData";
 import { formatAmount, formatTokenAmount } from "../lib/amount";
+import { useAmountText } from "../hooks/useAmountText";
+import { errorText } from "../lib/errorText";
 
 const button =
   "px-3 py-1.5 max-md:min-h-11 bg-accent text-on-accent rounded-lg text-xs font-bold hover:bg-accent-hover transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed";
@@ -151,8 +154,11 @@ function NoWallet({ rail, network, other }: { rail: Rail; network: WalletNetwork
  * Tap Pay, check the amount and the fee limit, then the usual review (Approve or Cancel): nothing is sent from
  * the card itself. `prepare` builds the target for the wallet of the money's own network.
  */
-function PayStep({ wallet, fixedAmount, unit, defaultFee, feeUnit, parse, prepare, testId }: {
+function PayStep({ wallet, fixedAmount, unit, defaultFee, feeUnit, parse, prepare, testId, decimals = 0, feeDecimals = 0 }: {
   wallet: WalletPlatform;
+  /** Decimal places the amount and the fee limit take (0: whole sats). */
+  decimals?: number;
+  feeDecimals?: number;
   fixedAmount?: string;
   unit: string;
   defaultFee: string;
@@ -168,6 +174,9 @@ function PayStep({ wallet, fixedAmount, unit, defaultFee, feeUnit, parse, prepar
   const [review, setReview] = useState<Review | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  // Typed the person's way ("1.000,5" in Portuguese); `amount` and `fee` are what they mean, or "" while unclear.
+  const amountField = useAmountText(amount, setAmount, t.language ?? "en", decimals, t);
+  const feeField = useAmountText(fee, setFee, t.language ?? "en", feeDecimals, t);
   if (review) return <div className="basis-full mt-1"><PaymentReview review={review} wallet={wallet} onClose={() => { setReview(null); setOpen(false); }} /></div>;
   if (!open) return <button className={button} data-testid={`${testId}-pay`} onClick={() => setOpen(true)}>{t("payments.invoice.pay")}</button>;
   let value = NaN;
@@ -176,21 +185,22 @@ function PayStep({ wallet, fixedAmount, unit, defaultFee, feeUnit, parse, prepar
     <div className="basis-full space-y-1.5" data-testid={`${testId}-pay-form`}>
       {fixedAmount === undefined && (
         <label className="block text-[12px]">{t("payments.formats.amount", { unit })}
-          <input aria-label={t("payments.formats.amountAria", { unit })} inputMode="decimal" className={field} value={amount} onChange={(e) => setAmount(e.target.value.replace(/[^0-9.]/g, ""))} data-testid="money-pay-amount" />
+          <input aria-label={t("payments.formats.amountAria", { unit })} inputMode="decimal" className={field} aria-invalid={amountField.hint ? true : undefined} value={amountField.text} onChange={(e) => amountField.change(e.target.value)} data-testid="money-pay-amount" />
         </label>
       )}
       <label className="block text-[12px]">{t("payments.formats.maxFee", { unit: feeUnit })}
-        <input aria-label={t("payments.formats.maxFeeAria", { unit: feeUnit })} inputMode="decimal" className={field} value={fee} onChange={(e) => setFee(e.target.value.replace(/[^0-9.]/g, ""))} />
+        <input aria-label={t("payments.formats.maxFeeAria", { unit: feeUnit })} inputMode="decimal" className={field} aria-invalid={feeField.hint ? true : undefined} value={feeField.text} onChange={(e) => feeField.change(e.target.value)} />
       </label>
+      {(amountField.hint ?? feeField.hint) && <p role="alert" className="text-[12px] m-0 text-danger-ink" data-testid="amount-unclear">{amountField.hint ?? feeField.hint}</p>}
       <div className="flex flex-wrap gap-1.5">
         <button
           className={button}
-          disabled={busy || !(value > 0)}
+          disabled={busy || !(value > 0) || !fee}
           data-testid="money-review"
           onClick={async () => {
             setBusy(true); setError("");
             try { setReview(await prepare(value, Number(fee))); }
-            catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+            catch (e) { setError(errorText(e, t)); }
             finally { setBusy(false); }
           }}
         >
@@ -244,7 +254,7 @@ function OnchainCard({ request, mine, off, lightning }: { request: OnchainReques
       >
         {status}
         <button className={quiet} onClick={copy}>{copied ? t("payments.invoice.copied") : t("payments.formats.copyAddress")}</button>
-        <a className={`${quiet} no-underline text-inherit`} href={request.uri ?? `bitcoin:${request.address}`} title={t("payments.formats.openBitcoinTitle")}>{t("payments.invoice.openWallet")}</a>
+        <OpenInWallet className={`${quiet} no-underline text-inherit`} uri={request.uri ?? `bitcoin:${request.address}`} title={t("payments.formats.openBitcoinTitle")} testId="onchain-open-wallet">{t("payments.invoice.openWallet")}</OpenInWallet>
       </Shell>
       {lightning && (
         <div className="mt-2" data-testid="onchain-lightning">
@@ -273,7 +283,7 @@ function Bolt12Card({ offer }: { offer: Bolt12Offer }) {
       detail={offer.offer} qr={offer.offer.toUpperCase()}
     >
       <button className={quiet} onClick={copy}>{copied ? t("payments.invoice.copied") : t("payments.formats.copyOffer")}</button>
-      <a className={`${quiet} no-underline text-inherit`} href={`lightning:${offer.offer}`} title={t("payments.invoice.openTitle")}>{t("payments.invoice.openWallet")}</a>
+      <OpenInWallet className={`${quiet} no-underline text-inherit`} uri={`lightning:${offer.offer}`} title={t("payments.invoice.openTitle")} testId="bolt12-open-wallet">{t("payments.invoice.openWallet")}</OpenInWallet>
     </Shell>
   );
 }
@@ -346,6 +356,7 @@ function UsdtCard({ request, mine, off }: { request: UsdtRequest; mine: boolean;
           wallet={wallet} testId="usdt" unit={network === "mainnet" ? "USDT" : t("payments.formats.testUsdt")} feeUnit="ETH" defaultFee="0.001"
           fixedAmount={request.amount === undefined ? undefined : formatPaymentAmount(request.amount.toString(), decimals).replace(/,/g, "")}
           parse={(text) => parsePaymentAmount(text, decimals)}
+          decimals={decimals} feeDecimals={18}
           prepare={(value, gas) => {
             const now = Date.now();
             return wallet.preparePayment({

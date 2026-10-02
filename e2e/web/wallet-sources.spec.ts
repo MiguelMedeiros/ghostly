@@ -85,7 +85,7 @@ test("Lightning cards: New adds one of its own beside the mints' card; invoices 
   await page.getByTestId("wallet-receive-amount").fill("12");
   await page.getByTestId("wallet-create-invoice").click();
   await expect(page.getByTestId("wallet-invoice")).toHaveText(/^\s*lnbcrt/);
-  await expect(page.getByTestId("wallet-paid")).toContainText("12 sats received", { timeout: 30_000 });
+  await expect(page.getByTestId("wallet-paid")).toContainText("12 test sats received", { timeout: 30_000 });
   await expect(page.getByTestId("lightning-recent").getByTestId("lightning-op").first()).toContainText("paid");
 
   // The Mainnet Lightning wallet has its own cards: still only the mints'.
@@ -149,7 +149,7 @@ test("no Bitcoin wallet until New makes one with a source, on Testnet only; then
   await panel.getByTestId("bitcoin-amount").fill("1000");
   await panel.getByRole("button", { name: "Review payment" }).click();
   const review = panel.getByTestId("payment-review");
-  await expect(review).toContainText("bitcoin · regtest");
+  await expect(review).toContainText("Bitcoin on-chain · Regtest");
   await review.getByRole("button", { name: "Approve payment" }).click();
   await expect(review.getByTestId("review-status")).toHaveText(/submitted|settled/);
   await expect(review.getByTestId("review-status")).toHaveText("settled", { timeout: 30_000 });

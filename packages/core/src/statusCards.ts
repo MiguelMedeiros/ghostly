@@ -40,7 +40,17 @@ export const STATUS_CARD_LIMITS = {
   nextRunMs: 366 * 24 * 60 * 60_000,
   /** Edits a message with a card takes (a text takes `MAX_EDITS_PER_MESSAGE`): a bot updates a long task often. */
   edits: 5_000,
+  /** Buttons on a message (WISP 4xx · Message Buttons). */
+  buttons: 6,
+  /** A button's id: what a press names. */
+  buttonId: 32,
+  /** A button's label, in characters. */
+  buttonLabel: 40,
 } as const;
+
+/** How a button looks: `primary` is the one highlighted, `danger` warns; `neutral` when none is said. */
+export const BUTTON_STYLES = ["primary", "neutral", "danger"] as const;
+export type ButtonStyle = typeof BUTTON_STYLES[number];
 
 export const TASK_STATUSES = ["queued", "running", "blocked", "done", "failed", "cancelled"] as const;
 export type TaskStatus = typeof TASK_STATUSES[number];
@@ -94,11 +104,56 @@ export interface RoutineCard {
   links?: CardLink[];
 }
 
-export type StatusCard = TaskCard | RoutineCard;
+/**
+ * A button under a bot's message (WISP 4xx · Message Buttons). `once`: a press on it answers the question for that
+ * person, and their app offers none of the buttons again; a button without it may be pressed again.
+ */
+export interface CardButton { id: string; label: string; style?: ButtonStyle; once?: true }
+
+/**
+ * Buttons under a bot's message (WISP 4xx · Message Buttons): unlike a task or a routine, the message's text shows
+ * with them, and is also what an app without buttons shows (so it should say how to answer in words). `chosen` is the
+ * answer the bot took, marked for everyone; `closed`: no button takes a press any more.
+ */
+export interface ButtonsCard {
+  kind: "buttons";
+  id: string;
+  buttons: CardButton[];
+  chosen?: string;
+  closed?: true;
+}
+
+export type StatusCard = TaskCard | RoutineCard | ButtonsCard;
 export type StatusCardKind = StatusCard["kind"];
 
 const ID = /^[A-Za-z0-9_.:][A-Za-z0-9_.:-]{0,63}$/;
+/** A button's id: 1 to 32 of `A-Z a-z 0-9 _ . : -`, not starting with `-`. */
+export const BUTTON_ID = /^[A-Za-z0-9_.:][A-Za-z0-9_.:-]{0,31}$/;
 const CRON = /^[0-9A-Za-z*,/?#\- ]{1,64}$/;
+
+/**
+ * Whether a typed answer is a button's label or id (WISP 4xx · Message Buttons): ignoring case and spaces at the ends.
+ * Not the device's locale's case: the presser's and the author's apps must agree ("I" is not "ı" anywhere).
+ */
+export const sameButtonText = (a: string, b: string): boolean => a.trim().toLowerCase() === b.trim().toLowerCase();
+
+/**
+ * Two buttons a typed answer could not tell apart, or none: a label that reads as an earlier label (`label`), or a
+ * label that reads as another button's id (`id`), both as `sameButtonText` compares them. The labels as a reader keeps
+ * them (one line, cleaned). `at` is the button that clashes, `with` the one it clashes with.
+ */
+export function buttonLabelClash(buttons: readonly unknown[]): { at: number; with: number; kind: "label" | "id" } | undefined {
+  const labels = buttons.map(button => (isObject(button) ? cardLine(button.label, Infinity) : undefined));
+  const ids = buttons.map(button => (isObject(button) && typeof button.id === "string" ? button.id : undefined));
+  for (const [at, label] of labels.entries()) {
+    if (!label) continue;
+    const twin = labels.findIndex((other, i) => i < at && !!other && sameButtonText(other, label));
+    if (twin !== -1) return { at, with: twin, kind: "label" };
+    const named = ids.findIndex((id, i) => i !== at && id !== undefined && sameButtonText(id, label));
+    if (named !== -1) return { at, with: named, kind: "id" };
+  }
+  return undefined;
+}
 
 const isObject = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
 
@@ -220,6 +275,21 @@ export function readStatusCard(raw: unknown, now = Date.now()): StatusCard | und
       ...(runs.length && { runs }), ...(links.length && { links }),
     };
   }
+  if (raw.kind === "buttons") {
+    if (!Array.isArray(raw.buttons)) return undefined;
+    const buttons: CardButton[] = [], seen = new Set<string>();
+    for (const entry of raw.buttons.slice(0, STATUS_CARD_LIMITS.buttons)) {
+      if (!isObject(entry) || typeof entry.id !== "string" || !BUTTON_ID.test(entry.id) || seen.has(entry.id)) continue;
+      const label = cardLine(entry.label, STATUS_CARD_LIMITS.buttonLabel);
+      if (!label) continue;
+      seen.add(entry.id);
+      const style = oneOf(BUTTON_STYLES, entry.style);
+      buttons.push({ id: entry.id, label, ...(style && style !== "neutral" && { style }), ...(entry.once === true && { once: true as const }) });
+    }
+    if (!buttons.length) return undefined;
+    const chosen = typeof raw.chosen === "string" && seen.has(raw.chosen) ? raw.chosen : undefined;
+    return { kind: "buttons", id, buttons, ...(chosen && { chosen }), ...(raw.closed === true && { closed: true as const }) };
+  }
   return undefined;
 }
 
@@ -232,7 +302,7 @@ export function checkStatusCard(raw: unknown, now = Date.now()): { card: StatusC
   if (!isObject(raw)) return { error: "A card is an object" };
   const bytes = statusCardBytes(raw);
   if (bytes > STATUS_CARD_LIMITS.bytes) return { error: `The card takes ${bytes} bytes; at most ${STATUS_CARD_LIMITS.bytes}` };
-  if (raw.kind !== "task" && raw.kind !== "routine") return { error: "kind is task or routine" };
+  if (raw.kind !== "task" && raw.kind !== "routine" && raw.kind !== "buttons") return { error: "kind is task, routine or buttons" };
   if (typeof raw.id !== "string" || !ID.test(raw.id)) return { error: `id is 1 to ${STATUS_CARD_LIMITS.id} of A-Z a-z 0-9 _ . : - and does not start with -` };
   const line = (field: string, value: unknown, max: number, required = false): string | null => {
     if (value === undefined && !required) return null;
@@ -250,7 +320,27 @@ export function checkStatusCard(raw: unknown, now = Date.now()): { card: StatusC
       errors.push(url(`links[${i}].url`, link.url), line(`links[${i}].label`, link.label, STATUS_CARD_LIMITS.linkLabel));
     }
   }
-  if (raw.kind === "task") {
+  if (raw.kind === "buttons") {
+    if (raw.links !== undefined) errors.push("buttons take no links");
+    if (!Array.isArray(raw.buttons) || !raw.buttons.length || raw.buttons.length > STATUS_CARD_LIMITS.buttons) errors.push(`buttons is a list of 1 to ${STATUS_CARD_LIMITS.buttons}`);
+    else {
+      const ids = new Set<string>();
+      for (const [i, button] of raw.buttons.entries()) {
+        if (!isObject(button)) { errors.push(`buttons[${i}] is an object`); continue; }
+        if (typeof button.id !== "string" || !BUTTON_ID.test(button.id)) errors.push(`buttons[${i}].id is 1 to ${STATUS_CARD_LIMITS.buttonId} of A-Z a-z 0-9 _ . : - and does not start with -`);
+        else if (ids.has(button.id)) errors.push(`buttons[${i}].id "${button.id}" is used twice`);
+        else ids.add(button.id);
+        errors.push(line(`buttons[${i}].label`, button.label, STATUS_CARD_LIMITS.buttonLabel, true));
+        if (button.style !== undefined && !oneOf(BUTTON_STYLES, button.style)) errors.push(`buttons[${i}].style is one of ${BUTTON_STYLES.join(", ")}`);
+        if (button.once !== undefined && button.once !== true) errors.push(`buttons[${i}].once is true or left out`);
+      }
+      // A typed answer is matched by label or id: two buttons it could not tell apart are refused (a reader takes the first).
+      const clash = buttonLabelClash(raw.buttons);
+      if (clash) errors.push(`buttons[${clash.at}].label ${JSON.stringify(cardLine((raw.buttons[clash.at] as Record<string, unknown>).label, Infinity))} ${clash.kind === "label" ? `repeats buttons[${clash.with}].label` : `is buttons[${clash.with}].id`} (ignoring case and spaces at the ends)`);
+      if (raw.chosen !== undefined && !(typeof raw.chosen === "string" && ids.has(raw.chosen))) errors.push("chosen names one of the buttons");
+    }
+    if (raw.closed !== undefined && raw.closed !== true) errors.push("closed is true or left out");
+  } else if (raw.kind === "task") {
     errors.push(line("title", raw.title, STATUS_CARD_LIMITS.title, true));
     if (!oneOf(TASK_STATUSES, raw.status)) errors.push(`status is one of ${TASK_STATUSES.join(", ")}`);
     if (raw.progress !== undefined && !(typeof raw.progress === "number" && Number.isFinite(raw.progress) && raw.progress >= 0 && raw.progress <= 100)) errors.push("progress is a number from 0 to 100");
@@ -319,6 +409,8 @@ export function cardTimeUtc(ms: number): string {
  * and search finds. Plain lines, the first naming the card, no bars or layout that would read badly elsewhere.
  */
 export function statusCardText(card: StatusCard): string {
+  // Buttons show with the bot's own text; this is only what goes when it gave none.
+  if (card.kind === "buttons") return `Reply: ${card.buttons.map(b => b.label).join(" / ")}`;
   if (card.kind === "task") {
     const progress = taskProgress(card);
     const state = [STATUS_WORD[card.status], ...(progress !== undefined ? [`${progress}%`] : []), ...(card.done !== undefined && card.total ? [`${card.done} of ${card.total} steps`] : [])].join(" · ");

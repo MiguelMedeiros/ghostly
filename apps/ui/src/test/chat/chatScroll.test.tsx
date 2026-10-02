@@ -17,6 +17,8 @@ const VIEW = 300;
 /** The list's height now: shorter when something under it (the composer) grows. */
 let view = VIEW;
 const ROW = 50;
+/** What the column holds above the rows (the pairing scene, the invite): shorter when the column gets wider. */
+let above = 0;
 const heights = new Map<string, number>();
 /** Rows still in their entry animation, and how far down it draws them for now (a transform: the layout does not move). */
 const entering = new Map<string, number>();
@@ -24,7 +26,7 @@ const positions = new WeakMap<Element, number>();
 const isList = (el: Element) => el instanceof HTMLElement && el.dataset.testid === "list";
 const rowsIn = (el: Element) => [...el.querySelectorAll<HTMLElement>("[data-message-id]")];
 const heightOf = (row: HTMLElement) => heights.get(row.dataset.messageId!) ?? ROW;
-const contentHeight = (el: Element) => rowsIn(el).reduce((sum, row) => sum + heightOf(row), 0);
+const contentHeight = (el: Element) => rowsIn(el).reduce((sum, row) => sum + heightOf(row), above);
 const maxTop = (el: Element) => Math.max(0, contentHeight(el) - view);
 
 function inherited(name: string): PropertyDescriptor {
@@ -63,7 +65,7 @@ beforeAll(() => {
         if (isList(this)) return new DOMRect(0, 0, 400, view);
         const list = this.closest<HTMLElement>("[data-testid='list']");
         if (!list || !this.dataset.messageId) return rect.call(this);
-        let y = -list.scrollTop;
+        let y = above - list.scrollTop;
         for (const row of rowsIn(list)) {
           if (row === this) return new DOMRect(0, y + (entering.get(row.dataset.messageId!) ?? 0), 400, heightOf(row));
           y += heightOf(row);
@@ -92,7 +94,7 @@ afterAll(() => {
   vi.unstubAllGlobals();
 });
 
-beforeEach(() => { heights.clear(); entering.clear(); observed = []; view = VIEW; forgetChatScroll(); });
+beforeEach(() => { heights.clear(); entering.clear(); observed = []; view = VIEW; above = 0; forgetChatScroll(); });
 
 function Timeline({ rows, chat = "chat-1" }: { rows: ScrollRow[]; chat?: string }) {
   const jump = useChatScroll({ rows, chat });
@@ -324,12 +326,40 @@ describe("the chat timeline's scrolling", () => {
     expect(list().scrollTop).toBe(150);
   });
 
-  it("scrolled up, the list resizing keeps the message it shows in place", () => {
+  it("scrolled up, the list resizing keeps the messages at its bottom edge in place", () => {
     renderApp(<Timeline rows={theirs(0, 10)} />);
     scrollTo(60);
-    const before = topOf("peer_1");
+    // peer_7 is the last message in view, its top 10 px above the view's bottom edge.
+    expect(topOf("peer_7") - VIEW).toBe(-10);
     act(() => { view = 120; list().scrollTop = 70; });
-    expect(topOf("peer_1")).toBe(before);
+    // A chat keeps its bottom, as it does at the bottom and when a keyboard comes up: the messages it was showing there
+    // are still there, not scrolled out below a shorter view.
+    expect(topOf("peer_7") - view).toBe(-10);
+    expect(list().scrollTop).toBe(240);
+    // And back: the same messages where they were.
+    act(() => { view = VIEW; });
+    resized();
+    expect(topOf("peer_7") - VIEW).toBe(-10);
+    expect(list().scrollTop).toBe(60);
+  });
+
+  it("scrolled up, a phone turned on its side while what is above the rows gets shorter stays on its messages, not at the top", () => {
+    // The pairing scene above the first message, 350 px tall upright and 80 px on its side (two panes, wider).
+    above = 350;
+    renderApp(<Timeline rows={theirs(0, 10)} />);
+    expect(list().scrollTop).toBe(550);
+    // A little up (Play on a video scrolled it into view): the first message 80 px below the view's top.
+    fireEvent.wheel(list());
+    scrollTo(270);
+    expect(topOf("peer_0")).toBe(80);
+    expect(topOf("peer_4") - VIEW).toBe(-20);
+    fireEvent.pointerUp(window);
+    // Turned: the list much shorter and the scene too, the scroll position unchanged (still in range, no scroll event).
+    act(() => { above = 80; view = 120; });
+    resized();
+    expect(list().scrollTop).toBeGreaterThan(0);
+    expect(topOf("peer_4") - view).toBe(-20);
+    expect(list().scrollTop).toBe(180);
   });
 
   it("at the bottom, the browser pulling the view a little up with no hand on it goes back to the bottom", () => {
@@ -733,6 +763,35 @@ describe("a long timeline's window of rows", () => {
     expect(inPage()).toBeLessThanOrEqual(MAX_ROWS);
     // Up the history now: the view is not at the bottom, and a ↓ takes it back there.
     expect(pill()).not.toBeNull();
+  });
+
+  it("open at its bottom while messages keep coming, the page never holds more than its most rows and the view stays at the bottom", () => {
+    let rows = theirs(0, 40);
+    const { rerender } = renderApp(<WindowTimeline rows={rows} />);
+    for (let i = 0; i < MAX_ROWS + 60; i++) {
+      rows = [...rows, ...theirs(40 + i, 1)];
+      rerender(<WindowTimeline rows={rows} />);
+      expect(inPage()).toBeLessThanOrEqual(MAX_ROWS);
+    }
+    expect(lastInPage()).toBe(`peer_${rows.length - 1}`);
+    expect(list().scrollTop).toBe(list().scrollHeight - VIEW);
+    expect(pill()).toBeNull();
+    // The rows that went are still there to scroll up to.
+    upTimes(3);
+    expect(rowsIn(list())[0].dataset.messageId).toBe("peer_0");
+  });
+
+  it("scrolled up, messages that keep coming never take away the rows being read", () => {
+    let rows = theirs(0, 40);
+    const { rerender } = renderApp(<WindowTimeline rows={rows} />);
+    scrollTo(0);
+    const was = topOf("peer_0");
+    for (let i = 0; i < MAX_ROWS + 60; i++) {
+      rows = [...rows, ...theirs(40 + i, 1)];
+      rerender(<WindowTimeline rows={rows} />);
+    }
+    expect(topOf("peer_0")).toBe(was);
+    expect(pill()).toHaveAttribute("data-count", String(MAX_ROWS + 60));
   });
 
   it("left scrolled up far in the history, it opens on that message again", () => {

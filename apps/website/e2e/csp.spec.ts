@@ -25,6 +25,8 @@ for (const path of PAGES) {
     page.on("pageerror", (error) => errors.push(error.message));
     const response = await page.goto(path);
     expect(response?.headers()["content-security-policy"]).toContain("script-src 'self' 'unsafe-inline'");
+    // eval() is for React's development build only (next.config.ts): the served site never allows it.
+    expect(response?.headers()["content-security-policy"]).not.toContain("unsafe-eval");
     await page.waitForLoadState("networkidle");
     // The head script ran (it marks the page as having JavaScript), and React took the page over.
     await expect(page.locator("html")).toHaveClass(/\bjs\b/);

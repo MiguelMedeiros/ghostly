@@ -27,10 +27,10 @@
     "label": "Conexão do grupo",
     "labelWith": "Conexão do grupo: {{state}}",
     "noWebrtc": "Grupos ainda não conectam neste app",
-    "noWebrtcHint": "Os links de grupo usam WebRTC, que o Ghostly Desktop no Linux ainda não tem, então nenhum membro pode ser alcançado daqui. Suas conversas 1:1 e chamadas funcionam. Abra o grupo no app web ou em outro aparelho para participar.",
+    "noWebrtcHint": "Os links de grupo precisam de WebRTC ou de um transporte nativo (Iroh, HyperDHT), e este app não tem nenhum dos dois, então nenhum membro pode ser alcançado daqui. Abra o grupo no app web ou em outro aparelho para participar.",
     "nobody": "Ninguém acessível",
     "nobodyElse": "Ainda não há mais ninguém no grupo.",
-    "note": "Cada membro é um link direto, criptografado de ponta a ponta, do seu app para o dele. Os links de grupo usam WebRTC: Iroh, HyperDHT e entrega só pela DHT ainda não são oferecidos em grupos. Um membro inacessível recebe o que perdeu de qualquer membro que tenha quando voltar.",
+    "note": "Cada membro é um link direto, criptografado de ponta a ponta, do seu app para o dele. Os links de grupo usam WebRTC, e Iroh ou HyperDHT com um membro cujo app não tem WebRTC (Ghostly Desktop no Linux). A entrega só pela DHT ainda não é oferecida em grupos. Um membro inacessível recebe o que perdeu de qualquer membro que tenha quando voltar.",
     "offline": "Offline",
     "offlineHint": "Este dispositivo está offline: nenhum membro pode ser alcançado até ele voltar a ficar online.",
     "onlyYou": "Só você por enquanto",
@@ -112,6 +112,7 @@
     "titleUnnamed": "Sair deste grupo?"
   },
   "link": {
+    "broken": "Este link para um grupo não funciona",
     "copied": "Copiado",
     "copyFailed": "A cópia não funcionou. Selecione o link e copie.",
     "disable": "Desativar",
@@ -141,6 +142,7 @@
     "issue": "Problema de conexão · {{seen}}",
     "lastSeen": "visto {{time}}",
     "noConnection": "Ainda sem conexão",
+    "noSlot": "Esperando uma conexão livre neste aparelho",
     "notSeen": "ainda não visto",
     "unnamed": "Membro {{key}}",
     "unreachable": "Inacessível · {{seen}}",
@@ -177,6 +179,7 @@
   "readNoteCommunity": "Qualquer pessoa com o link do grupo pode entrar, e qualquer membro pode deixar pessoas entrarem. Todos no grupo podem ler tudo o que é enviado enquanto são membros; quem é removido não pode ler o que vem depois, quem entra depois não pode ler o que veio antes. Membros que estavam ausentes recebem as últimas {{count}} mensagens de quem estiver lá quando voltarem.",
   "remove": {
     "body": "A pessoa não vai receber as novas mensagens do grupo.",
+    "linkHint": "A pessoa ainda pode voltar pelo link do grupo: um novo link impede isso.",
     "title": "Remover {{name}}?"
   },
   "rename": {
