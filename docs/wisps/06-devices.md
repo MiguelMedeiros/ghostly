@@ -107,16 +107,16 @@ To be measured before or during phase 1, each with its experiment. A row that fa
 ### Terms
 
 - **Device**: one install of a client holding (or able to hold) the profile: a Desktop app, a browser's web app, an extension. Two browsers on one machine are two devices.
-- **Device key**: an Ed25519 key made on the device, in no backup and in no handoff. It is described as what it is: where the WebView offers Ed25519 in WebCrypto, the key is generated non-extractable, so **the app cannot export it**; it is still bytes in the browser's storage on disk, and copied storage copies it. Where WebCrypto lacks Ed25519 (Safari before 17, and any WebView not yet verified), the key is a stored seed like every other key in the profile. No OS keychain is used. The device key does three things: it signs the turn record, it authenticates the device's links, and it signs a release.
+- **Device signing key**: an Ed25519 key made on the device, in no backup and in no handoff. (The name avoids `deviceKey`, which the code already uses for the local key that seals a seed, `packages/browser/src/engine/did.ts`; in code this one is `deviceSigningKey`.) It is described as what it is: where the WebView offers Ed25519 in WebCrypto, the key is generated non-extractable, so **the app cannot export it**; it is still bytes in the browser's storage on disk, and copied storage copies it. Where WebCrypto lacks Ed25519 (Safari before 17, and any WebView not yet verified), the key is a stored seed like every other key in the profile. No OS keychain is used. The device signing key does three things: it signs the turn record, it authenticates the device's links, and it signs a release. Because the app may hold no seed for it, `PairedSession` takes a **signer** (`sign(bytes)` returning a signature, asynchronous) for a device link, where today it signs from a raw seed (`packages/core/src/pairedSession.ts`); a chat's seed is wrapped in the same interface.
 - **Device set**: the devices enrolled in one profile, at most 4. It has one secret, the **device-set secret** `D` (32 bytes), held by every enrolled device.
 - **`D` is the authority.** Whoever holds `D` can write the turn record and can enroll a key. Device signatures say which device wrote and let the others show it; they do not limit a holder of `D`. A backup of an enrolled profile contains `D`, so **a backup holder is a `D` holder**.
 - **The first `D`** is derived from the profile's DID key, which every backup already carries: `D0 = HKDF-SHA256(ikm = DID seed, salt = "ghostly-devices/1", info = "device-set", 32)`. So a bundle made before the profile had a second device still leads a 1.1 app to the turn record. After a device is removed, `D` is random (see [Removing a device](#removing-a-device)).
 - **Turn**: a counter. The device that holds the highest turn is the active one.
-- **Device link**: an authenticated channel between two of the person's devices. It is an ordinary paired chat session ([401](401-paired-chat.md)) whose keys are **derived from `D` and the two device keys**, so any two enrolled devices have one without ever having met, and a removed device has none once `D` changes:
+- **Device link**: an authenticated channel between two of the person's devices. It is an ordinary paired chat session ([401](401-paired-chat.md)) whose keys are **derived from `D` and the two device signing keys**, so any two enrolled devices have one without ever having met, and a removed device has none once `D` changes:
   - `linkSecret = HKDF-SHA256(ikm = D, salt = "ghostly-devices/1", info = "link" || lowerKey || higherKey, 32)`;
-  - each side's rendezvous seed is `HKDF(linkSecret, info = "rv" || ownDeviceKey)`, the link's sealing key `HKDF(linkSecret, info = "enc")`;
-  - each side's participation key **is its device key**, pinned from the turn record. Trust on first use is off for a device link (`trustOnFirstUse: false`; chats default to on, `packages/core/src/ghostlink.ts`).
-  A holder of `D` can compute both rendezvous seeds, so it can disturb a link's rendezvous; it cannot pass the session's authentication without a device key. The link reuses the transports ([100](100-transports.md)) and the file transfer ([501](501-paired-files.md)) and is never listed among chats.
+  - each side's rendezvous seed is `HKDF(linkSecret, info = "rv" || ownSigningKey)`, the link's sealing key `HKDF(linkSecret, info = "enc")`;
+  - each side's participation key **is its device signing key**, pinned from the turn record. Trust on first use is off for a device link (`trustOnFirstUse: false`; chats default to on, `packages/core/src/ghostlink.ts`).
+  A holder of `D` can compute both rendezvous seeds, so it can disturb a link's rendezvous; it cannot pass the session's authentication without a device signing key. The link reuses the transports ([100](100-transports.md)) and the file transfer ([501](501-paired-files.md)) and is never listed among chats.
 
 Choice recorded: the reviews offered "derive the links" or "two devices only in phase 1". Links are derived. Two devices would have been simpler to test, but removal and a third device both need a link between devices that never enrolled each other, and deriving the link also retires the bearer secret that a first design showed in the QR code for the life of the link.
 
@@ -126,11 +126,12 @@ Choice recorded: the reviews offered "derive the links" or "two devices only in 
 |---|---|---|
 | `single` | The profile has no device set (today's behaviour, and every CLI profile) | Everything, as today |
 | `active` | Holds the turn | Everything, plus the turn record |
-| `standby` | Enrolled, not active. Holds its device key, `D`, the device set and either nothing else (**no copy here**) or a **frozen copy** of the state as it was when it last released | **Device-link-only mode**: reads the turn record, publishes and reads the rendezvous records of its device links while the app is open, answers those links. Nothing else |
+| `standby` | Enrolled, not active. Holds its device signing key, `D`, the device set and either nothing else (**no copy here**) or a **frozen copy** of the state as it was when it last released | **Device-link-only mode**: reads the turn record, publishes and reads the rendezvous records of its device links while the app is open, answers those links. Nothing else |
 | `releasing` | Was active, has frozen its database for a handoff, has not signed the release yet | Device-link-only mode. Goes back to `active` on cancel |
 | `taking` | Holds a release and a verified staged state, has not yet seen its own turn accepted | Device-link-only mode |
-| `superseded` | Found a higher turn that it did not release | Device-link-only mode |
-| `removed` | Taken out of the device set | Nothing |
+| `superseded` | Found a higher turn that it did not release. Its copy has forked from the active one | Device-link-only mode |
+| `moving` | Read a tombstone that still lists it: the device set moved to a new `D` and this device has not received it yet | Device-link-only mode on its **old** links, to receive the new `D` |
+| `removed` | Read a tombstone that no longer lists it | Nothing |
 
 ### The gate
 
@@ -140,13 +141,15 @@ Device-link-only mode is a different start, not a flag checked here and there.
 - In any state but `single` and `active` the client **does not open the peer database at all**. It starts a small engine that knows only the device state, the turn record and the device links. So no wallet SDK starts (they start eagerly today), no DID or proof record is put, no chat or group link starts, no hold poll runs, and an app update never migrates a frozen copy.
 - **Profile peek** ("Check other profiles", [04](04-profiles.md#checking-other-profiles)) skips a profile that is not `single` or `active`: it reads mailboxes with the profile's own keys, which a standby must not do, and a standby would show unread counts.
 - The notice of [the newer-version check](#versions) is never raised by a frozen copy: nothing opens it.
+- **The push worker** reads the device state itself, from the `ghostly-devices` database, each time a push arrives, and picks its notice from it ([Push and the phone](#push-and-the-phone)). It needs no message from a page.
+- A standby writes nothing into a frozen copy, ever. What it must do without the profile database is listed where it arises: deleting the Breez database by its name, and serving files left for later from an index kept beside the device state.
 - Stopping is done by **writing the state and reloading into the gate**, never by trusting each SDK to close. Bark runs a background daemon and Fedimint holds an exclusive file handle; a reload ends both.
 
 ### Durable device state
 
 The device state decides safety, so it is stored apart and strictly:
 
-- a small database of its own, `ghostly-devices`, one record per profile: state, turn, `rev`, the stored signed turn packet, the device set, `D`, the lineage and takeover count, the handoff in progress (role, step, staging namespace, the release);
+- a small database of its own, `ghostly-devices`, one record per profile: state, turn, `rev`, the stored signed turn packet, the device set, `D`, the lineage and takeover count, the handoff in progress (role, step, staging namespace, the release), the highest turn it ever signed a release for, the stored tombstone packets of earlier device sets (at most 8), the devices that have not yet acknowledged a new `D`, and the index of files left for later;
 - every write uses `durability: "strict"` and waits for the transaction to complete. The Desktop also writes the same record to a file through a Rust command that calls `fsync`, and at start takes the stricter of the two (a state other than `active` wins);
 - the profile's own storage is found through the registry ([04](04-profiles.md#local-model)); a handoff installs a new storage namespace by changing one pointer (see [Installing](#installing-the-staged-state)).
 
@@ -156,7 +159,7 @@ The device state decides safety, so it is stored apart and strictly:
 
 Today's path is a backup restored on the second device. It copies every secret through a passphrase file, leaves the first copy running, and nothing tells either copy about the other. Enrollment replaces it.
 
-**Conditions.** The profile has a lock password of at least 8 characters (the lock screen allows 4 today; a device set needs 8), typed again on the active device to open **Add a device**. On iPhone and iPad the new device is the app on the Home Screen: a Safari tab has other storage, so **Add this device to my profile** is offered only in the installed app, and a tab says "Add Ghostly to your Home Screen first." Elsewhere the client calls `navigator.storage.persist()` and, when it is not granted, warns and goes on: "This browser may clear Ghostly's data. Keep a copy on <device>."
+**Conditions.** The profile has a lock password of at least 8 characters (the lock screen allows 4 today; a device set needs 8), typed again on the active device to open **Add a device**. That is also when a profile whose lock password already existed gets its handoff verifier ([Authorizing a handoff](#authorizing-a-handoff)): the app has the password in hand only then. A password under 8 characters must be changed first. On iPhone and iPad the new device is the app on the Home Screen: a Safari tab has other storage, so **Add this device to my profile** is offered only in the installed app, and a tab says "Add Ghostly to your Home Screen first." Elsewhere the client calls `navigator.storage.persist()` and, when it is not granted, warns and goes on: "This browser may clear Ghostly's data. Keep a copy on <device>."
 
 **The invite.** A new invite version (the bech32m code of [800](800-invite-join.md), version symbol 2), since today's has four fields and no flag, expiry or use count (`packages/core/src/invite.ts`):
 
@@ -165,16 +168,16 @@ Today's path is a backup restored on the second device. It copies every secret t
 | One-time rendezvous seed for the joiner | 32 bytes |
 | One-time link key | 32 bytes |
 | The inviter's one-time rendezvous key | 32 bytes |
-| The inviter's device key | 32 bytes |
+| The inviter's device signing key | 32 bytes |
 | Flags (bit 0: own device) | 1 byte |
 | Expires, UNIX seconds | 4 bytes |
 
 It is shown as a QR code and as a code to copy, through the existing `JoinDialog` (scan, paste, open an image). The code may travel by any channel the person likes: the digits below protect it. The inviter enforces the 10 minutes and the single use; an app from before this WISP does not know version 2 and must refuse the code.
 
-**The session** is a paired session on that one-time link, with capability `enroll/1` and these frames:
+**The session** is a paired session on that one-time link, with capability `enroll/1`. Its participation keys are the two device signing keys: B pins A's from the invite; A, for this one session only, accepts the first joiner's key, which is exactly what the digits then confirm. Its frames:
 
-1. `B → A` `{"t":"enroll-hello","k":"<B's device key>","name":"Phone","kind":"web","app":"1.1.0","s":"<signature>"}`, signed with B's device key over `["ghostly-enroll", transcriptHash, A's key, B's key]`. The transcript hash is the session's ([401](401-paired-chat.md)); device keys are not in it, which is why both are signed in here.
-2. `A → B` `{"t":"enroll-proof","s":"<signature>"}`, the same tuple signed with A's device key. B checks it against the key in the invite.
+1. `B → A` `{"t":"enroll-hello","k":"<B's device signing key>","name":"Phone","kind":"web","app":"1.1.0","s":"<signature>"}`, signed with B's device signing key over `["ghostly-enroll", transcriptHash, A's key, B's key]`. The transcript hash is the session's ([401](401-paired-chat.md)); device signing keys are not in it, which is why both are signed in here.
+2. `A → B` `{"t":"enroll-proof","s":"<signature>"}`, the same tuple signed with A's device signing key. B checks it against the key in the invite.
 3. Both compute six digits: the first 20 bits of `SHA-256("ghostly-enroll-digits" || transcriptHash || A's key || B's key)`, as a decimal number modulo 1,000,000.
 4. The person confirms on A that both screens show the same digits.
 5. `A → B` `{"t":"enroll-grant","d":"<D>","set":[[key, name], ...],"turn":N,"rev":R}`. B stores it durably as `standby` and answers `{"t":"enroll-done"}`.
@@ -191,7 +194,7 @@ Enrollment transfers `D` and the device set, **nothing else**: no chat key, no w
 
 ### A backup restored where a device set exists
 
-A backup of an enrolled profile carries `D`, the device set and the turn it was made at, never a device key (stripped like the push subscription and the storage credentials are today). A bundle made before enrollment carries the DID key, from which a 1.1 app derives `D0`. Either way the client, before it registers the restored profile:
+A backup of an enrolled profile carries `D`, the device set and the turn it was made at, never a device signing key (stripped like the push subscription and the storage credentials are today). A bundle made before enrollment carries the DID key, from which a 1.1 app derives `D0`. Either way the client, before it registers the restored profile:
 
 1. derives the turn address and reads the record ([Publishing and reading](#publishing-and-reading));
 2. finds **no record** and no device set in the bundle: restores as today (a profile that was never enrolled). A record that expired because every device was off for hours is missed here, which is a limit until every profile keeps a record ([open question 3](#decisions-and-open-questions));
@@ -206,11 +209,13 @@ A start from a bundle is a forced takeover in every case: the bundle is older st
 Phase 1 includes removal: the phone is the device most likely to be lost, and the superseded screen offers it. On the active device: Profile, Devices, Remove. The client:
 
 1. makes a new random device-set secret `D'` and so a new turn address and new device links;
-2. sends `D'` to each remaining device over its old link (authenticated by device keys, so the removed device cannot join that session). A device that is off gets it at its next link, and shows "Open Ghostly on <active device> to finish" until then; the active device keeps the old link to that device alone until it has;
+2. sends `D'` to each remaining device over its old link (authenticated by device signing keys, so the removed device cannot join that session), as `{"t":"set-update","d":"<D'>","set":[[key, name], ...],"turn":N,"rev":R}` under a capability `devices/1`. The receiver writes it durably as `standby` under `D'`, then answers `{"t":"set-ack"}`. The active device keeps, durably, the list of devices that have not acknowledged, keeps the old link to each of them alone, and sends the frame again at every session until the answer comes; a receiver that already holds that `D'` just answers. A device that was off meanwhile reads the tombstone, finds itself still listed, becomes `moving`, and shows "Open Ghostly on <active device> to finish";
 3. publishes the turn record at the new address, without the removed device;
 4. publishes a **tombstone** at the old address and puts it again every hour while the profile exists.
 
-The tombstone is the turn record with turn 2^32 - 1, the highest `rev` and no active device (`active` is 255). It keeps the old device set in its slots (the record is sealed, so nothing new shows) and is signed by the removing device from its own slot, so it verifies by the reader's ordinary rule. It tells an **honest** device that was removed or left behind, whenever it comes back, to stop. It is not a lock: a DHT node accepts another packet at an equal sequence, so a holder of the old `D` can replace it, and the active device's hourly put restores it.
+The tombstone is the turn record with turn 2^32 - 1 and no active device (`active` is 255). Its slots keep the devices that **stay** and are zero for the removed one, so a device that reads it knows which it is: still listed means `moving` (wait for `D'`), not listed means `removed`. It is signed by the removing device from its own slot, so it verifies by the reader's ordinary rule. **Every tombstone has the one sequence number 2^52 - 1**, whatever its author's slot: ordinary records stop at turn 2^32 - 2, so no record can outrank a tombstone and its hourly put is never refused as older. Tombstone packets are kept beside the device state (at most 8, the oldest dropped) and move in a handoff, so whichever device is active puts them. It tells an **honest** device that was removed or left behind, whenever it comes back, to stop. It is not a lock: a DHT node accepts another packet at an equal sequence, so a holder of the old `D` can replace it, and the active device's hourly put restores it.
+
+A `moving` device whose active device is gone for good is not stuck: **My other device is lost or broken** there makes a new device set of its own (a new random `D`, itself the only device) from its frozen copy, as a forced takeover, and says that other devices must be added again.
 
 What removal can and cannot do depends on what the removed device held:
 
@@ -222,7 +227,7 @@ What removal can and cannot do depends on what the removed device held:
 
 **Removal protects the turn, not the keys.** Chats have no key rotation ([02](02-peer-keys.md) leaves it open), so a copied chat key stays valid until the chat is paired again. So the forced-takeover and the remove screens ask **Lost or stolen?** and, on yes, lead to the money step first:
 
-- **Phase 1: a written checklist**, one line per wallet the lost device could spend from, each with its button where one exists: Cashu, "Swap all ecash now" (every proof is swapped at its mint, so the copies are spent); wallets with a phrase, "Make a new wallet and send the funds to it"; remote Lightning, "Revoke the connection at your node". The guided flow that does these in one pass is phase 2.
+- **Phase 1: a written checklist**. First line, when the lost device held a copy and storage is set up: "Change your storage keys" (the copy holds the credentials of the hold and backup storage; the keys are changed at the provider and typed again here). Then one line per wallet the lost device could spend from, each with its button where one exists: Cashu, "Swap all ecash now" (every proof is swapped at its mint, so the copies are spent); wallets with a phrase, "Make a new wallet and send the funds to it"; remote Lightning, "Revoke the connection at your node". The guided flow that does these in one pass is phase 2.
 - **Chats.** Each chat is paired again with a new invite; the contact sees a new chat. For a group, the admin removes the member key and adds a new one. This costs every contact an action, and the client says so.
 - **Later.** A participation-key rotation bound to the old key ([02](02-peer-keys.md)) would let a chat move to a new key without a new invite. It is the real fix and is not designed here.
 
@@ -241,12 +246,12 @@ The body is **binary and of fixed length**, so every record has one size and not
 | Offset | Size | Field |
 |---|---|---|
 | 0 | 1 | Version, `1` |
-| 1 | 4 | `turn`, unsigned, big-endian, at most 2^32 - 1 |
-| 5 | 3 | `rev`, unsigned, under 2^18 |
+| 1 | 4 | `turn`, unsigned, big-endian; at most 2^32 - 2 in an ordinary record, 2^32 - 1 in a tombstone |
+| 5 | 3 | `rev`, unsigned, under 2^18; 0 in the first record of a turn |
 | 8 | 1 | `author`: index (0 to 3) of the device that signed this record |
 | 9 | 1 | `active`: index of the active device, or 255 for none (a tombstone; in phase 2, a prepared handoff) |
 | 10 | 1 | Number of devices, 0 to 4 |
-| 11 | 192 | Four slots of `deviceKey(32) || name(16, UTF-8, zero-padded)`; unused slots are zero |
+| 11 | 192 | Four slots of `signingKey(32) || name(16, UTF-8, zero-padded)`; unused slots are zero |
 | 203 | 8 | `instance`: random, made by the active device each time its engine starts |
 | 211 | 1 | Release present, 0 or 1 |
 | 212 | 1 | Release: `from`, the index of the device that gave the turn up |
@@ -257,11 +262,11 @@ The body is **binary and of fixed length**, so every record has one size and not
 
 374 bytes of body, 414 sealed, 552 characters of base64url: a packet of about 640 bytes by estimate (the review measured a binary body with 7 devices at 938). The exact packet and test vectors are a blocker before Proposed. A device keeps its slot for life; a name longer than 16 bytes is cut at a character boundary.
 
-**The BEP44 sequence number is `turn * 2^20 + rev * 4 + author`**, not the clock. The first turn is random under 2^29, so the sequence stays under today's microsecond clock and the absolute count says nothing; the highest value, the tombstone's, is under 2^52, exact in JavaScript and far from the dates a relay cannot format. Folding the author's slot into the low bits means **two devices never sign an equal sequence**, whatever they race on. A lower sequence is refused by a DHT node (measured) and, by its source, by a relay (409); a stale device that tries to put its old record back learns from the refusal that it was replaced.
+**The BEP44 sequence number is `turn * 2^20 + rev * 4 + author`**, not the clock (a tombstone alone has the fixed sequence 2^52 - 1). `rev` starts at 0 in each turn and rises by one with every record the active device writes in it (a start, a device added or renamed). If `rev` would reach 2^18, the active device writes the next turn instead, with a release from itself to itself; readers accept a release whose `from` and `to` are both the device that was active. The first turn is random under 2^29, so the sequence stays under today's microsecond clock and the absolute count says nothing; the highest value, the tombstone's, is 2^52 - 1, exact in JavaScript and far from the dates a relay cannot format. Folding the author's slot into the low bits means **two enrolled devices never sign an equal sequence**, whatever they race on: each has its own slot. The one exception is two copies restored from backups that both take over at once and pick the same free slot; that is settled as a clone is, below. A lower sequence is refused by a DHT node (measured) and, by its source, by a relay (409); a stale device that tries to put its old record back learns from the refusal that it was replaced.
 
-A reader accepts a record that: verifies as a BEP44 packet under the turn key; opens under the seal key; has version 1 and a consistent layout; is signed by the key in its own slot `author`; has a sequence not lower than the highest it holds; and, when a release is present, whose release verifies under the key in slot `from`, names the record's turn and the key in slot `to`, with `to` equal to `active`. A reader that knew the previous record also checks that `from` was the active device there, and shows a mismatch as a takeover without a release.
+A reader accepts a record that: verifies as a BEP44 packet under the turn key; opens under the seal key; has version 1 and a consistent layout; is signed by the key in its own slot `author`; has a sequence not lower than the highest it holds, equal to the formula below for its turn, `rev` and author (or, for a tombstone, to 2^52 - 1); and, when a release is present, whose release verifies under the key in slot `from`, names the record's turn and the key in slot `to`, with `to` equal to `active`. A reader that knew the previous record also checks that `from` was the active device there, and shows a mismatch as a takeover without a release. **Inside a turn only its active device writes**: a record at the highest known turn whose author is not that turn's active device is invalid and dropped, so a holder of `D` cannot quietly add a slot at a higher `rev`; to change anything it must raise the turn, which every device shows.
 
-**An unknown signer is accepted.** A record with no release whose author is a key the reader never saw is a forced takeover by a holder of `D` (for example a restored backup with a new device key). It is valid, it supersedes, and every device shows it as such. This follows from "`D` is the authority"; a rule that refused it would leave two devices active for ever.
+**An unknown signer is accepted.** A record with no release whose author is a key the reader never saw is a forced takeover by a holder of `D` (for example a restored backup with a new device signing key). It is valid, it supersedes, and every device shows it as such. This follows from "`D` is the authority"; a rule that refused it would leave two devices active for ever.
 
 If two valid records at one sequence ever meet (they cannot be signed by two devices; a clone can do it), a reader compares the opened bodies and keeps the one with the lower `instance`; the copy whose `instance` lost stops. It never uses a library's own rule for equal sequences: the `pkarr` crate prefers the larger encoded bytes, which for a sealed record is random.
 
@@ -272,6 +277,8 @@ The turn has its own publish and read path. The chat path (`packages/core/src/re
 **Put.**
 
 - A device signs and seals a record once and **stores the packet's bytes**. Every later put of that record sends the same bytes: a fresh nonce at the same sequence would be a different packet, which a node may take as a conflict.
+- A device stores a packet durably **before** it puts it, so what it finds on the network after a crash is never newer than what it holds.
+- When the last read was `none` there is nothing to compare with: the put carries no condition, and the read back decides.
 - A put that raises the turn or the `rev` is conditional on the sequence it replaces: `cas` on the DHT (measured to work), `If-Match` on relays (to be measured; if a relay ignores it, the race stays open there and is in the "detected" list).
 - **A refusal is an answer, never retried without the condition.** Error 301 or 302 from a node, 409 or 412 from a relay, mean someone else wrote: read.
 - The put reports each source's answer; "one relay took it" is not success by itself.
@@ -286,10 +293,10 @@ The turn has its own publish and read path. The chat path (`packages/core/src/re
 
 | Result | Meaning |
 |---|---|
-| `mine` | The highest record names this device as active, with this engine's `instance` |
+| `mine` | The highest record is **byte for byte the packet this device stored** |
 | `other` | A higher turn, or another device active at this turn |
-| `clone` | This device's key is active at this turn with another `instance`: another copy of this device's storage is running |
-| `tombstone` | The address is closed |
+| `clone` | A record **above this device's stored sequence**, authored from this device's own slot and key, that is not its stored packet: another copy of this device's storage wrote it. A device's own last record, found again after a restart, is its stored packet and reads `mine`, whatever `instance` it carries |
+| `tombstone` | The address is closed; the reader is either still listed (`moving`) or not (`removed`) |
 | `none` | At least one source answered, and none has a record |
 | `unreachable` | No source answered |
 
@@ -298,7 +305,7 @@ A read is **good** when at least one source answered. Both default relays are ru
 ### Who may raise the turn
 
 - The device that takes a normal handoff, with the release of the device that was active.
-- A device that forces a takeover, with no release. The record says so, and every other device shows it.
+- A device that forces a takeover, with no release. The record says so, and every other device shows it. Its turn is one above the highest turn it knows, **counting any release it signed itself**: a device that released turn `N + 1` and then takes over uses `N + 2`, so the taker's held release can never outrank it.
 
 Each needs the person to press a button. Nothing raises the turn by itself.
 
@@ -306,7 +313,7 @@ Each needs the person to press a button. Nothing raises the turn by itself.
 
 A relay read is not free: the web app and the extension share 30 requests a minute per relay with every chat ([04](04-profiles.md#checking-other-profiles)). The turn is not read before every send. An active device reads it:
 
-- **at start, as a condition of starting.** With a good read that says `mine` or `none` it puts its record and starts. With `unreachable` it shows "Can't check which device is active" with **Try again** and **Start anyway**; started that way it runs in **limited mode** until a good read: no single-writer wallet is opened, no real money is spent, no admin work is done;
+- **at start, as a condition of starting.** With a good read that says `mine` or `none` it writes its next record (`rev` plus one, a new `instance`), stores it, puts it and starts. With `unreachable` it shows "Can't check which device is active" with **Try again** and **Start anyway**; started that way it runs in **limited mode** until a good read: **nothing is published, nothing is dialled and nothing is settled in hold storage**; no wallet is opened and no admin work is done. It is the profile offline: history can be read and messages written, which wait in the outbox. The read is tried again every 30 seconds, and the first good one either starts the engine properly or stops the device;
 - when the app comes back to the front, the network changes or the machine wakes;
 - every 10 minutes (with jitter) while it runs;
 - when its last good read is older than 60 seconds, **before** each of: a Mainnet spend; opening a single-writer wallet SDK on any network (Fedimint, Spark, Ark, Bark); a group commit; taking door duty in a community. If the read is not good, the action does not happen;
@@ -318,9 +325,32 @@ A standby reads the record when its screen is opened and every 10 minutes while 
 
 ### When a device finds itself superseded
 
-On `other`, `clone` or `tombstone`, at once: it writes `superseded` (or `removed`) durably and **reloads into the gate**. Nothing is said to contacts and nothing more is published. The reload ends every session, timer and wallet SDK. Its state stays as it is; what only it holds is the subject of [After a forced takeover](#after-a-forced-takeover).
+On `other`, `clone` or `tombstone`, at once: it writes `superseded` (on a tombstone, `moving` or `removed`) durably and **reloads into the gate**. Nothing is said to contacts and nothing more is published. The reload ends every session, timer and wallet SDK. Its state stays as it is; what only it holds is the subject of [After a forced takeover](#after-a-forced-takeover).
 
-On `clone`, the copy that reads a foreign `instance` in a record with a higher sequence stops: the copy that started last wrote that record (each start raises `rev`) and goes on. At an equal sequence the lower `instance` goes on. This detects a cloned storage at the clone's next read, which the first design could not.
+On `clone`, the copy that reads it stops: the other copy started first and wrote a record this one never stored. If both started in the same moment and signed the same sequence, the lower `instance` goes on. This detects a cloned storage at the clone's next read, which the first design could not.
+
+### Device state by turn read
+
+Every state, against every result of a read. No cell is empty, and every state has a way out.
+
+| State | `mine` | `other` | `clone` | `tombstone` | `none` | `unreachable` |
+|---|---|---|---|---|---|---|
+| `active`, at start | Write the next record, store, put, start | `superseded` | `superseded`, shown as "Another copy of this device is running" | `moving` if listed, else `removed` | Write the next record, store, put with no condition, start | Do not start; "Try again" or "Start anyway" (offline only) |
+| `active`, running | Go on | `superseded`, reload | `superseded`, reload | `moving` or `removed`, reload | Put the stored packet again, go on | Go on; no wallet opened, no spend, no admin work until a good read |
+| `standby` | Cannot happen (its stored packet is not the highest unless it is active); treated as `other` | Show "Active on <device>" | Treated as `other` | `moving` or `removed` | Show the device it last knew as active; a handoff still needs that device | Show "Can't check which device is active" |
+| `releasing`, at start | Write `active`, then as `active` | `superseded` | `superseded` | `moving` or `removed` | Write `active`, then as `active` | Write `active`, then as `active` at start |
+| `taking` | Write `active`, start | Pointer back, drop staging, `standby` | The same | The same, then `moving` or `removed` | Put with no condition, read back | Wait, try again |
+| `superseded` | Cannot happen | Stay; **Use here** (a handoff) or **It wasn't me** (a takeover) | Stay | `moving` or `removed` | Stay; the same two buttons | Stay |
+| `moving` | Cannot happen | Cannot happen at the old address | Cannot happen | Stay until `set-update` arrives, then `standby` under the new `D`; or a takeover into a device set of its own | Stay (the tombstone expired; the active device puts it again) | Stay |
+| `removed` | n/a | n/a | n/a | Stay; **Add it again** is a new enrollment | Stay | Stay |
+
+What the table and the rules above give, stated so a reviewer can check each:
+
+- **Every state has an exit.** `superseded` leaves by a handoff or a takeover; a `verified` taker leaves by a release, a cancel or its own read; `moving` leaves by `set-update` or by a takeover into its own set; `removed` leaves by enrollment.
+- **Honest devices are never all unable to start.** After a release, the taker finishes alone, and if it is gone the releaser takes over at `N + 2`. With no record on the network, an active device puts its own. With no source reachable, an active device opens offline and starts at the first good read. After a removal, the active device runs under the new `D` and the others wait for it or, if it is gone, start a set of their own.
+- **Two enrolled devices never sign an equal sequence**: the slot is in the low bits, `rev` only rises inside a turn and is 0 in a new one, and a releaser's takeover skips the turn it released.
+- **A tombstone is never outranked**: it has the one highest sequence, and ordinary turns stop one below its turn.
+- **A device's own record after a restart is never read as a clone**: it is stored before it is put, `mine` is a comparison of bytes, and `clone` needs a sequence above the stored one.
 
 ### Failure cases
 
@@ -328,13 +358,14 @@ On `clone`, the copy that reads a foreign `instance` in a record with a higher s
 |---|---|
 | Normal handoff, the old device then goes offline for a month | Nothing to do: it wrote `standby` durably before it signed the release, so it never acts again without a handoff back |
 | Forced takeover while the old device is off; it comes back | It reads the higher turn at start, before the engine starts, and becomes `superseded` without publishing |
-| The same, and it comes back where no relay answers | It does not start by itself. If the person chooses **Start anyway**, it runs in limited mode: chats over live transports work, admin work and money do not. That is the double-active window, and its cost is in the next section |
+| The same, and it comes back where no relay answers | It does not start by itself. **Start anyway** gives limited mode, which publishes, dials and settles nothing, so it opens no double-active window |
 | The record expired (a DHT node keeps an item about two hours) while every device was off | The first device to start reads `none`. An active one puts its stored record and goes on. A standby stays a standby. If a stale active device returns first, the newer one, at its own start, reads the lower record and puts its higher one, and the stale device stops at its next read or refused put |
 | Clocks wrong by days | No effect on the turn. A clock far ahead still makes that device's chat packets win during a double-active window, as today |
 | A relay operator hides the new record | A web or extension device that reads only that operator is not told it was replaced. Desktop also reads the DHT. Hints remain |
 | A buggy standby that publishes chat records | The active device notices its own records carrying counters it did not write, reads the turn, finds itself still active, and reports "Another copy of this profile is acting" with the device list. It cannot stop the other copy |
+| A holder of `D` writes a record inside the current turn (a slot added at a higher `rev`) | Invalid for every reader: only the turn's active device writes in it. The active device reads a record that is not its stored packet, keeps its turn, writes its own record above it and shows "Something else changed your device list" with **Remove a device** |
 | A hostile holder of `D` raises the turn | The real device becomes `superseded`. Its screen offers **It wasn't me**: take the turn back and remove that device, which moves the set to a new `D` |
-| A device's storage was copied (a disk image, a phone restored to a new phone, a browser profile folder) | Two installs share one device key. The `instance` in the record exposes it at the next read of whichever started first; that copy stops |
+| A device's storage was copied (a disk image, a phone restored to a new phone, a browser profile folder) | Two installs share one device signing key. The copy that starts second reads a record from its own slot that it never stored, and stops |
 
 ### What is and is not guaranteed
 
@@ -374,7 +405,7 @@ A handoff is a copy with one writer. `A` is the active device, `B` the one that 
 7. **Release.** `A` writes `standby` durably (released turn `N + 1` to `B`, digest `H`), **then** sends `handoff-release`. From the durable write on, `A` is on standby even if the frame never arrives.
 8. **Take.** `B` stores the release durably as `taking`, installs the staged state, puts the turn record `N + 1` conditionally on `N`, **reads it back**, and only on `mine` writes `active` and starts the engine. It tells `A` (`handoff-done`). If the put is refused, someone else wrote: `B` reads, and stays `taking` or becomes `standby` as the record says.
 
-**Cancel is safe until step 7.** A drop between 7 and 8 leaves nobody active, never two. `B` needs nothing more from `A`: it holds the release and the verified state, and finishes alone when it has a network. `A`, meanwhile, shows "Moving to <B>. Waiting for it to finish." and **Use here**; that button reads the turn first: if `N + 1` exists it answers "<B> finished the move. This device is on standby."; if the turn is still `N`, it is a forced takeover and says so. `B`'s conditional put then fails, and `B` drops its staged state.
+**Cancel is safe until step 7.** A drop between 7 and 8 leaves nobody active, never two. `B` needs nothing more from `A`: it holds the release and the verified state, and finishes alone when it has a network. `A`, meanwhile, shows "Moving to <B>. Waiting for it to finish." and **Use here**; that button reads the turn first: if `N + 1` exists it answers "<B> finished the move. This device is on standby."; if the turn is still `N`, it is a forced takeover and says so, **at turn `N + 2`**: the release `A` signed was for `N + 1`, so `A`'s takeover must outrank it whatever the slots are. `B`'s put of `N + 1` is then lower than what the network holds and is refused; `B` reads `other` and drops its staged state. If `B` was still waiting for the release, `A` answers its next request with `handoff-cancel`, which `B` accepts after a release only when its own read of the turn shows a turn above the one the release named.
 
 A contact's dial-in during the gap finds nobody, as when the app is closed. Contacts cannot call or pay meanwhile; their apps say so with today's words ("Calls need a live connection", "Payments need a live connection"), and texts wait in the DHT mailbox or a hold.
 
@@ -384,7 +415,7 @@ All frames travel on a device link only, under a capability `handoff/1` that onl
 
 | Frame | From | Body |
 |---|---|---|
-| `handoff-hello` | both | `{"v":1,"app":"1.1.0","db":12,"pins":{"ark":"0.4.74","bark":"0.25.0","fedimint":"<build>","breez":"<version>"},"kind":"web","room":<bytes free>,"metered":<bool>}` |
+| `handoff-hello` | both | `{"v":1,"e":"<X25519 public key, made for this handoff>","app":"1.1.0","db":12,"pins":{"ark":"0.4.74","bark":"0.25.0","fedimint":"<build>","breez":"<version>"},"kind":"web","room":<bytes free>,"metered":<bool>}` |
 | `handoff-request` | B | `{"turn":N}` |
 | `handoff-offer` | A | `{"turn":N}`; B answers with `handoff-request` once the person agrees |
 | `handoff-busy` | A | `{"why":"handoff" or "payment" or "call" or "locked-out","retry":<seconds>}` |
@@ -394,9 +425,11 @@ All frames travel on a device link only, under a capability `handoff/1` that onl
 | `handoff-verified` | B | `{"h":"<H>","s":"<B's signature over [\"ghostly-handoff-verified\", turnAddress, N + 1, H]>"}` |
 | `handoff-release` | A | `{"turn":N + 1,"to":"<B's key>","h":"<H>","s":"<the release signature of the turn record>"}` |
 | `handoff-done` | B | `{"seq":<the sequence it read back>}` |
-| `handoff-cancel` | either | `{"why":"..."}`; valid from A only before `handoff-release` |
+| `handoff-cancel` | either | `{"why":"..."}`. From A it is valid before `handoff-release`; after it, only once A holds a turn above the released one, which B checks by reading the turn |
+| `handoff-file-request` | the active device | `{"sha256":"<digest>"}`: asks a standby for a file left for later; answered by a file transfer of the part `file/<sha256>`, or `{"t":"handoff-file-missing","sha256":"..."}` |
+| `device-wake` | any device | `{"w":{...} or null}`: this device's push target, in the shape of `paired-wake` ([401](401-paired-chat.md#wake-up-push)), with a token of its own. Sent on each new device-link session and when it changes |
 
-Parts travel as files of [501](501-paired-files.md) (resumed from confirmed bytes after a drop), each sealed with the stream key of the password proof or, on a push, of the session. A part's `name` is one of `db/<store>`, `local`, `file/<sha256>`, `wallet/<type>/<name>`.
+Parts travel as files of [501](501-paired-files.md) (resumed from confirmed bytes after a drop), each sealed (XSalsa20-Poly1305, a random nonce per 1 MiB piece) with the handoff's **stream key**. A paired session has no key of its own, so the handoff makes one: both sides send a fresh X25519 public key in `handoff-hello`, and `streamKey = HKDF-SHA256(ikm = X25519(e_A, e_B) || K, salt = the session's transcript hash, info = "ghostly-handoff-stream/1", 32)`, where `K` is the shared key of the password proof on a pull and empty on a push. The session's signed transcript binds the hello frames to the two device signing keys. A part's `name` is one of `db/<store>`, `local`, `file/<sha256>`, `wallet/<type>/<name>`.
 
 **`H`** is `SHA-256` of the UTF-8 bytes of `JSON.stringify(["ghostly-handoff/1", N + 1, fromKey, toKey, parts])`, where `parts` is every part of both passes and every part `B` already held and keeps, as `[name, size, sha256]` with `sha256` in base64url, sorted by `name` as byte strings. Only arrays, strings and integers appear, so the form is canonical.
 
@@ -417,7 +450,7 @@ One handoff at a time per profile: a second request gets `handoff-busy`.
 | pass 2 | The link drops, or no `handoff-verified` within 10 minutes of the last part | Writes `active`, reloads, starts | `active` |
 | pass 2 | `handoff-verified` with a valid signature and the same `H` | Writes `standby` durably, sends `handoff-release` | `standby` |
 | `standby` (just released) | `handoff-request` again from B with the same turn | Sends the same release again | `standby` |
-| `standby` | `handoff-done` | Applies the [on standby](#what-moves) column | `standby` |
+| `standby` | `handoff-done` | Deletes its Breez database by name and writes the index of files left for later beside the device state; touches nothing in the frozen copy | `standby` |
 
 | B is | Event | B does | Next |
 |---|---|---|---|
@@ -426,19 +459,22 @@ One handoff at a time per profile: a second request gets `handoff-busy`.
 | requesting | `handoff-busy` | Shows why | `standby` |
 | receiving | Parts | Writes to staging, checks each digest; a bad part is asked again once, then the handoff fails | receiving |
 | receiving | All parts of pass 2 | Verifies, sends `handoff-verified` | verified |
-| verified | No release within 60 s | Asks again each time the link is back; never starts without it | verified |
+| verified | No release within 60 s | Reads the turn, then asks again each time the link is back; never starts without a release | verified |
+| verified | `handoff-cancel`, or its own read shows a turn above `N` | Drops the staged parts of pass 2, keeps the files | `standby` |
 | verified | `handoff-release` that verifies | Writes `taking` durably, installs | `taking` |
-| `taking` | Install done | Conditional put of `N + 1`, read back | `taking` |
+| `taking` | Install done | Reads the turn, then puts `N + 1` conditionally on `N`, and reads back | `taking` |
+| `taking` | Read says `none` (A's record expired) | Puts `N + 1` with no condition, reads back | `taking` |
 | `taking` | Read says `mine` | Writes `active`, starts, sends `handoff-done` | `active` |
-| `taking` | Read says `other` | Drops the staged state | `standby` |
+| `taking` | Read says `other` or `clone` | Moves the registry pointer back, drops the staged state | `standby` |
+| `taking` | Read says `tombstone` | The same, then as the tombstone says | `moving` or `removed` |
 | `taking` | Read is `unreachable` | Waits and tries again; shows "Finishing: waiting for the network" | `taking` |
 
 ### Authorizing a handoff
 
-The active device is often unattended (the desktop at home while the person is out), so it cannot be asked to confirm. A pull is authorized by the device link (the device keys of the turn record) **and** by the profile's lock password, typed on the taking device and proven to the active one without sending it:
+The active device is often unattended (the desktop at home while the person is out), so it cannot be asked to confirm. A pull is authorized by the device link (the device signing keys of the turn record) **and** by the profile's lock password, typed on the taking device and proven to the active one without sending it:
 
 - **Protocol:** SPAKE2+ ([RFC 9383](https://www.rfc-editor.org/rfc/rfc9383)), suite P256-SHA256-HKDF-SHA256-HMAC-SHA256, an augmented exchange: the active device stores a verifier, not the password. The verifier is made when the lock password is set or changed, from the password with PBKDF2-SHA256, 600,000 rounds and its own salt, and it moves with the profile. The taker gets the salt in the first message.
-- **Binding:** the exchange's context is `"ghostly-handoff/1" || turnAddress || A's key || B's key || the session's transcript hash`. Its shared key derives the stream key that seals every part, so the state is unreadable without the password even to someone who broke the link.
+- **Binding:** the exchange's context is `"ghostly-handoff/1" || turnAddress || A's key || B's key || the session's transcript hash`. Its shared key goes into the stream key ([Frames](#frames)), so on a pull the state is unreadable without the password even to someone who broke the link.
 - **Attempts:** the active device counts failures per taking device. After 5 in an hour it answers `handoff-busy` `locked-out` for an hour; after 15 with no success between them it refuses that device until the person, on the active device, chooses "Let <device> try again". Every failure raises a notice on the active device: "<device> tried to move this profile with a wrong password."
 - **What it protects:** a stolen standby with no copy cannot pull the profile, and gets a handful of guesses. It does not protect a frozen copy: that data is already on the stolen device, unencrypted.
 
@@ -457,7 +493,7 @@ The first frame carries the app version, the database version (`DB_VERSION`) and
 
 `B` never writes into a live profile. Incoming parts go to a **staging namespace**: a new storage namespace as a restore makes one ([05](05-backups.md#restore) already writes "every store and key before the profile is registered"), with its own peer database, local keys and file area. Files `B` already held are linked into it, not copied.
 
-- **Install** is one durable write: the profile's registry entry points at the staged namespace. Before it, `B`'s old frozen copy is the profile's storage; after it, the new state is. The old namespace is kept until `active` is written: if the put of step 8 is refused, the pointer moves back to it and the staged one is deleted. Only then is the old one deleted.
+- **Install** is one durable write: the profile's registry entry points at the staged namespace. Before it, `B`'s old frozen copy is the profile's storage; after it, the new state is. The old namespace is kept until `active` is written: if the put of step 8 is refused, the pointer moves back to it and the staged one is deleted. Only then is the old one deleted. Deleting a namespace removes its peer database, its local keys and its file area, and the wallet databases that its records name **except those of a wallet whose home is this device**: a stay-home wallet's database is named by wallet id, belongs to no namespace, and its record in the new state points at the same name. On a `superseded` device the old namespace is not deleted at install: it is the fork, kept as "Only on this device" in Data and storage until the person discards it or phase 2 sends its contents over.
 - A wallet's own database (Ark, Bark) arrives under a new local database name, and the wallet's record is pointed at it, as a restore does with fresh wallet ids. Nothing is written over a database that exists.
 - A staging namespace that is not installed is deleted when its handoff is cancelled or fails, and at the latest after 24 hours. Settings, Data and storage, shows it ("A move that did not finish · 1.2 GB") with **Discard**.
 - Room is checked with the app's own `FileBytes.room()` (`navigator.storage.estimate()` on the web) against the manifests before each pass.
@@ -483,7 +519,7 @@ In phase 1 **a device that goes to standby keeps its frozen copy**. It makes com
 
 | State | Moves | Exactly once | Can be rebuilt | On the device that goes to standby |
 |---|---|---|---|---|
-| Device key | Never | n/a | n/a | Kept |
+| Device signing key | Never | n/a | n/a | Kept |
 | `D`, device set | Not in the stream (enrollment gave them) | n/a | By enrolling again | Kept |
 | Chats: rendezvous seed, invite secret, participation seed, pinned contact key, trust | Yes | Secrets | No: lost keys end the chat | Frozen |
 | Per-chat counters: mailbox `sequence` and `peerSequence`, capability `rev`, hold `pointerRev`, `outSeq`, `inSeq`, `peerAck`, hold mailbox name | Yes | **Yes** | No. Lower values are dropped silently by the contact | Frozen; never used again without a handoff back |
@@ -492,7 +528,7 @@ In phase 1 **a device that goes to standby keeps its frozen copy**. It makes com
 | Outbox: message rows in `sending`, `queued`, `waiting`, `held`, with wire ids and resend window; pending edits, reactions, pins | Yes | Ids make a resend harmless | No | Frozen |
 | Message history | Yes | No | No | Frozen, not shown in phase 1 |
 | Items held for contacts in the hold storage | Stay in the storage; their records move | Sequence numbers, yes | No | n/a |
-| Files (OPFS, Desktop files, database pieces) | Yes, whatever the size, in pass 1, skipped when the taker holds the digest. Files left for later show as "On <device>" and are fetched over the device link when both are on | No | No | Frozen. A standby serves a file over a device link; that is all it serves |
+| Files (OPFS, Desktop files, database pieces) | Yes, whatever the size, in pass 1, skipped when the taker holds the digest. Files left for later show as "On <device>" and are fetched over the device link when both are on (`handoff-file-request`) | No | No | Frozen. A standby serves a file over a device link, found through the index written at release (digest, size, where the bytes are), without opening the profile database; that is all it serves |
 | File transfers in progress with a contact | Yes | No | The transfer starts over from its checkpoint | Frozen |
 | Private groups: member seed, chain, epoch secrets, send counter, seen windows, hubs used | Yes | **Send counter and, for an admin, the chain head** | A member is caught up by `group-sync` within the 32 epochs kept; an admin's wrong commit cannot be undone | Frozen |
 | Communities: chain and side branches, secrets, entry seed, rendezvous secret, counters, the last 256 frames | Yes | Counters; admin chain head | Frames, from hubs; the rest no | Frozen |
@@ -513,8 +549,8 @@ In phase 1 **a device that goes to standby keeps its frozen copy**. It makes com
 
 For a device that is lost, broken or wiped while it was active. Only a device with a frozen copy, or a copy restored from a backup, can do it. The person chooses **My other device is lost or broken**, answers **Lost or stolen?**, and confirms by typing the lost device's name. The device then:
 
-1. reads the turn (a good read is required: it must know the turn it replaces);
-2. puts turn `N + 1` with no release, conditionally on `N`, itself in its slot (a restored copy takes a free slot with its new device key, or the lost device's slot when all four are used), and reads it back;
+1. reads the turn. A good read is required. Let `M` be the highest of: the turn it read, the turn it has stored, and any turn it signed a release for. On `none` there is no record to read, and `M` comes from what it has stored;
+2. puts turn `M + 1` with no release, conditionally on the record it read (with no condition after `none`), itself in its slot (a restored copy takes a free slot with its new device signing key, or the lost device's slot when all four are used), and reads it back;
 3. raises its counters ([Raised counters](#raised-counters)) and adds one to the profile's takeover count;
 4. starts with these limits:
    - **Admin work is off.** No commit is signed (the automatic one on a member's leave included) and no door duty is taken in any group, until the person turns on "Manage groups from this device" in that group, which says: "If your other device changed this group after <date>, managing it from here can break the group for everyone." Catching up from another member does not make it safe by itself: that member may not have the lost device's last commit. This is a risk the person accepts, written down, not one the app removes;
@@ -543,7 +579,7 @@ What contacts on any version see once, after a forced takeover: in a chat with h
 
 ### After a forced takeover
 
-If the old device comes back it is `superseded`, and its state has forked from the active one. Phase 1 keeps that state untouched and says what is there ("3 messages and 1 payment are only on this device"); it deletes nothing. Phase 2 adds **Send what is only here** over the device link: messages and their files by id, and unspent Cashu proofs as tokens that the active device redeems at the mint (what was already spent fails harmlessly). Nothing else is ever merged: not counters, not group state, not settings.
+If the old device comes back it is `superseded`, and its state has forked from the active one. Phase 1 keeps that state untouched and says what is there ("3 messages and 1 payment are only on this device"); it deletes nothing. A `superseded` device is otherwise a standby: **Use here** takes a normal handoff from the active device, the new state is installed beside the fork, and the device is `active`; **It wasn't me** is a forced takeover from the fork. Phase 2 adds **Send what is only here** over the device link: messages and their files by id, and unspent Cashu proofs as tokens that the active device redeems at the mint (what was already spent fails harmlessly). Nothing else is ever merged: not counters, not group state, not settings.
 
 ### Later phases, in short
 
@@ -564,7 +600,7 @@ A wallet type is in one of three classes in a given release:
 
 | Provider | Phase 1 | Rule in a handoff | Cost of a double-active window | Rule in a forced takeover or restore |
 |---|---|---|---|---|
-| **Cashu** | Moves | Proofs, pending melts (with reserved proofs and blank outputs), mint quotes and history move exactly once. Quiesce drains the per-mint lock first: `createToken`, the split before a melt and `receiveToken` swap at the mint before any local write and save no outputs, so they must end, not be cut (`packages/browser/src/engine/wallet.ts`). The standby's frozen proofs are marked `moved` (new work) | Both spend the same proofs: the second spend fails at the mint, which can break a payment a contact was promised. Change or received ecash that exists only on a device that is later wiped is lost | Every frozen proof is checked at the mint before it counts (new work); spent ones are dropped. Ecash the lost device received after its last release is gone unless that device comes back |
+| **Cashu** | Moves | Proofs, pending melts (with reserved proofs and blank outputs), mint quotes and history move exactly once. Quiesce drains the per-mint lock first: `createToken`, the split before a melt and `receiveToken` swap at the mint before any local write and save no outputs, so they must end, not be cut (`packages/browser/src/engine/wallet.ts`). The standby writes nothing into its frozen copy: that every proof in it has moved follows from the device state, not from a mark | Both spend the same proofs: the second spend fails at the mint, which can break a payment a contact was promised. Change or received ecash that exists only on a device that is later wiped is lost | Because the copy is a frozen one, every proof in it is checked at the mint before it counts (new work); spent ones are dropped. Ecash the lost device received after its last release is gone unless that device comes back |
 | **Ark via Arkade** | Moves, once the move test passes; until then stays home | The phrase and the database (`ghostly-ark-<wallet id>`) move whole, under a new local name | Two copies sign from the same coins and disagree about renewals | The stale database is what a restored backup has today, with the same open risk ([202](202-arkade.md) lists stale copies as an open gate). Needs the provider's word; until then a forced takeover parks the wallet as "Needs your decision" |
 | **Ark via Bark** | **Stays home** in phase 1 | When it moves (phase 2): both databases move by a database snapshot taken after the SDK has stopped, imported before the SDK first opens that name; refused on a pin mismatch and **while an exit or a round is pending** (the 30 seconds of quiesce are shorter than a round) | As Arkade. An exit in progress needs this device's database | The server's recovery scan runs when a wallet is opened on an empty database (the SDK's default, by the review's reading of its source; the SDK is not in this tree to confirm). The on-chain scan runs only for a typed phrase (`packages/browser/src/engine/paymentAdapters/bark.ts`) and would have to run here too. A send's outcome is found by a movement id that exists only in the old database, so an `unknown` attempt never resolves on a fresh one: it is parked for the person |
 | **Fedimint** | **Stays home** in phase 1 | When it moves: the client file is copied byte for byte at the same client build, after the worker releases its handle; otherwise recovery from the guardians | Two clients on one phrase collide on keys ("never joined fresh twice with one mnemonic", [2xx Fedimint](2xx-fedimint.md)) | Never open the old file: join with recovery. Whether the SDK backs up to the guardians by itself is unconfirmed, and recovery of a real profile is not yet exercised. A **Take over** from a restore while another device is alive would be a second join by one button: the SDK stays closed until a good turn read says this device is active |
@@ -641,7 +677,8 @@ Copy follows the app's rules: short labels, one-line hints, details behind ⓘ. 
 | `releasing` | "Moving to <device>" | "Nothing changes until the last step." | "Cancel" |
 | `standby`, just released, no `handoff-done` | "Moving to <device>. Waiting for it to finish." | "Open Ghostly on <device>." | "Use here" (reads the turn first) |
 | `taking` | "Finishing" | "Waiting for the network." | none |
-| `superseded` | "This device was replaced" | "<device> took over without this one. This device has stopped." | "It wasn't me"; a line "3 messages and 1 payment are only on this device" |
+| `superseded` | "This device was replaced" | "<device> took over without this one. This device has stopped." | "Use here", "It wasn't me"; a line "3 messages and 1 payment are only on this device" |
+| `moving` | "Almost there" | "Open Ghostly on <device> to finish." | link "My other device is lost or broken" |
 | `removed` | "This device was removed" | "Add it again from <device>." | "Remove this profile here" |
 | Enrollment not finished | "Not finished" | "Start again on <device>." | "Remove" |
 
@@ -697,10 +734,11 @@ The phone is the installed web app ([docs/WEB.md](../WEB.md)).
 - **The phone's push target survives a switch.** A contact holds one target per chat and learns it only on a live session, and a desktop has none of its own, so today a desktop coming home would clear the phone's (`w: null`) and a contact who was offline could never wake the phone again. Instead, the description of the phone's target (endpoint, keys, the per-chat tokens) moves with the profile, and an active device with no subscription of its own goes on giving contacts the phone's, with the unchanged `paired-wake` frame. When the phone is active again, contacts already hold its target.
 - **A subscription that changes on a standby.** A browser may replace a push subscription at any time. A standby whose subscription changed tells the active device over the device link when they next meet, and the active device hands out the new description; until then contacts hold a target that answers 404 or 410 and forget it, as today.
 - **A standby phone never rings.** A push that reaches a standby shows "New message. Active on <device>." or, for a call, "Call for you. Active on <device>.", quietly: no ring, no vibration pattern, no notice that stays up. A tap opens the standby screen. The caller sees today's "<name> did not open Ghostly." after its wait; the standby cannot answer, and the notice tells the person where to.
-- **The device link can wake a phone.** Each device with a push subscription shares its target with the person's other devices over the device link. A desktop asking a suspended phone for a handoff posts a push to it: "<device> wants to take over. Open Ghostly."
+- **The device link can wake a phone.** Each device with a push subscription shares its target with the person's other devices in a `device-wake` frame on the device link, with a token of its own. A desktop asking a suspended phone for a handoff posts a push to it, body `{"wake":1,"k":"<token>","d":1}`, sent as a wake-up to a contact is ([401](401-paired-chat.md#wake-up-push)); the worker shows "<device> wants to take over. Open Ghostly."
+- **How the worker knows.** It reads the device state from the `ghostly-devices` database when a push arrives: `active` shows today's notices; any other state shows the standby ones, with the active device's name from the stored device set.
 - **Storage.** On iPhone and iPad the Home Screen install gates enrollment. Elsewhere a refused `persist()` is a warning, not a stop. If a phone's storage is cleared while it is active, the frozen copy on the other device and a forced takeover are the recovery, which is why phase 1 always keeps one.
 - **Background.** A phone suspends the web app in the background, so a handoff runs with the app in front (a screen wake lock, "Keep Ghostly open"). Pass 1 resumes after an interruption.
-- **Platform floor.** Push needs iOS 16.4; a non-extractable device key needs Safari 17. Below that the device key is a stored seed.
+- **Platform floor.** Push needs iOS 16.4; a non-extractable device signing key needs Safari 17. Below that the device signing key is a stored seed.
 
 ## Security and privacy
 
@@ -709,8 +747,9 @@ The phone is the installed web app ([docs/WEB.md](../WEB.md)).
 | Threat | What limits it | What remains |
 |---|---|---|
 | A stolen standby with a frozen copy | The device's own lock and disk encryption. Removal closes the turn and the device links to it | **The copy is not encrypted by Ghostly**: seeds are sealed with a key stored beside them ([202](202-arkade.md), persistence), and the lock password is a screen gate. Everything in the copy is readable and usable until money is moved and chats are paired again |
-| A stolen standby with no copy | It holds `D` and a device key, nothing of the profile. A pull needs the lock password: 5 tries an hour, 15 in all | A weak password guessed within the limit. The device names in the turn record |
+| A stolen standby with no copy | It holds `D` and a device signing key, nothing of the profile. A pull needs the lock password: 5 tries an hour, 15 in all | A weak password guessed within the limit. The device names in the turn record |
 | A few minutes at the unlocked active device | Adding a device asks for the lock password; the digits must be confirmed there; every device shows the device list; a new device raises a notice on the active one for a day | With the password known to the attacker, an enrolled device that can pull later. A backup export has the same reach, once |
+| A holder of a backup made **before** enrollment | None until a device is removed: the first `D` comes from the DID seed, which every older bundle holds. So every bundle ever made of the profile can read the turn record and take the turn | It could already start the whole profile as a second copy; what is new is that it can also stop the honest devices. Removing a device, or "New device secret" on the Devices page (the same steps with nobody removed), moves the set to a random `D` that no older bundle holds |
 | A holder of a backup made after enrollment | It has `D`: it can read the turn record and take over | By design: a backup is the profile. Removal moves the set to a new `D`, after which that bundle can only start a separate copy |
 | A relay operator hides or replays the turn record | A lower sequence cannot replace a higher one on an honest node; Desktop also reads the DHT | Web and extension read one operator by default. A device that is shown only old records is not told it was replaced |
 | A photographed enrollment code | One session per invite; digits only after the inviter's proof; the code holds no long-lived secret (links are derived from `D`) | The attacker can make the person's own attempt fail; the person starts again |
@@ -773,7 +812,7 @@ And: a security review of the implementation ([docs/SECURITY-REVIEW.md](../SECUR
 | A new Pkarr record under a new key, with a counter as its sequence number | The person's devices, relays and DHT nodes |
 | Device links: ordinary paired sessions on derived keys, with capabilities `enroll/1` and `handoff/1` and their frames | The person's devices only |
 | Invite version 2 | The person's devices only |
-| The backup envelope version 2 when a device set is inside; never a device key | Backups |
+| The backup envelope version 2 when a device set is inside; never a device signing key | Backups |
 | `DB_VERSION` raised; an index on the files store by digest; the `ghostly-devices` database | One device |
 | A conditional put (`cas`) in the Desktop's DHT client and a turn path of its own in the relay client | Code only |
 | Phase 2: a `handoff/` folder and a multipart object in the storage layout ([1000](1000-storage.md)) | The person's storage |
@@ -784,12 +823,12 @@ Phase 1 is the daily story: the desktop at home, the phone outside, both able to
 
 1. **Device state and the gate.** The `ghostly-devices` database with strict writes (and the Desktop's fsynced file); the gate in front of `start()` on web, extension and Desktop; device-link-only mode; profile peek skipping standbys; `DB_VERSION` raised.
 2. **The turn record.** The binary codec with vectors; the reader; the conditional put and the read of every source, in TypeScript and in the Desktop's Rust (`cas`); the checks and limited mode; `instance` and clone detection.
-3. **Device keys and derived links.** Non-extractable where it exists, a seed elsewhere; link derivation; device keys as participation keys with trust on first use off.
+3. **Device signing keys and derived links.** Non-extractable where it exists, a seed elsewhere; link derivation; device signing keys as participation keys with trust on first use off; the signer interface in `PairedSession`.
 4. **Enrollment.** Invite version 2; `enroll/1`; the digits; the 8-character lock password; the iOS install gate and the `persist()` warning; the first-run "I already use Ghostly" screen.
 5. **The handoff.** `handoff/1`; pull and push; the password proof and its limits; two passes; skip by digest (the new index); files left for later and fetched over the device link; staging and install; the crash matrix; versions in the first frame; the progress and failure screens.
 6. **Forced takeover and the restore guard.** Raised counters and the group floor; admin work off; signed bytes parked; the BDK rescan; the first `D` from the DID key; envelope version 2; the superseded screen.
-7. **Remove a device.** The new `D`, its delivery over the old links, the tombstone, the "Lost or stolen?" checklist.
-8. **Wallets.** The single-writer rule behind a fresh turn read; Cashu's `moved` mark, lock drain and proof check; Spark's database deleted on release; home devices, the "On <device>" cards and the expiry dates and refusals; the per-type Testnet tests.
+7. **Remove a device.** The new `D`, its delivery over the old links (`set-update`, `set-ack`, the pending list), the tombstone and the `moving` state, "New device secret", the "Lost or stolen?" checklist with the storage keys line.
+8. **Wallets.** The single-writer rule behind a fresh turn read; Cashu's lock drain and the proof check after a takeover; Spark's database deleted on release; home devices, the "On <device>" cards and the expiry dates and refusals; the per-type Testnet tests.
 9. **Push.** The phone's target kept by the active device; the standby worker's quiet notices; the wake push over the device link; "Keep this computer awake" on Desktop.
 10. **Devices on the Profile page**, the standby screens and the switcher's "Standby".
 
@@ -805,7 +844,7 @@ Phase 1 is the daily story: the desktop at home, the phone outside, both able to
 - A frozen copy is kept on every device that was active, unencrypted. A lost phone means Remove, the money checklist and pairing chats again.
 - After a forced takeover, what only the lost device had is not here, groups are not managed from the new device until the person says so, and a payment that was signed but not confirmed waits for a decision.
 - Some wallets stay on the desktop, and Ark or Bark coins there need the desktop to be the active device every few weeks.
-- A device that cannot read the turn record does not start by itself.
+- A device that cannot read the turn record does not start by itself, and "Start anyway" gives the profile offline only. With both default relays down, a web or extension device cannot send until one answers.
 - CLI profiles are not part of it.
 
 ### Later phases
@@ -818,7 +857,7 @@ Phase 1 is the daily story: the desktop at home, the phone outside, both able to
 
 ## Why not two live devices
 
-It is the natural next wish, so the reasons are written down. Two live devices need: a device key per chat known to each contact, so the contact can send to both and tell them apart (every chat record and the session handshake change, and old contacts cannot follow); delivery of each message to every device, with no server to fan it out; group counters and admin commits per device; and wallets with two writers, which Cashu proofs, Fedimint clients and Spark leaves do not allow. One active device with a handoff needs none of that and keeps every existing format.
+It is the natural next wish, so the reasons are written down. Two live devices need: a device signing key per chat known to each contact, so the contact can send to both and tell them apart (every chat record and the session handshake change, and old contacts cannot follow); delivery of each message to every device, with no server to fan it out; group counters and admin commits per device; and wallets with two writers, which Cashu proofs, Fedimint clients and Spark leaves do not allow. One active device with a handoff needs none of that and keeps every existing format.
 
 ## Decisions and open questions
 
@@ -834,12 +873,12 @@ It is the natural next wish, so the reasons are written down. Two live devices n
 | A lock password to have a second device | Required, 8 characters |
 | CLI profiles as devices | No. CLI profiles are `single`; no `ghostly device` commands in phase 1 |
 | How many devices | 4, with a binary record |
-| Device links | Derived from `D` and the device keys |
+| Device links | Derived from `D` and the device signing keys |
 
 **Still open, for the owner:**
 
 1. **Mainnet money.** The rule above lets a wallet type move on Mainnet once its two Testnet tests and the soak pass. Recommendation: keep that rule, and let the owner say go per type; the first release may well ship with Mainnet Cashu and remote Lightning only.
-2. **"Start anyway" when the turn cannot be read.** It keeps the person's chats usable on a bad network, in limited mode, at the cost of a possible double-active window for messages. Recommendation: keep it, on Desktop and web alike; the alternative is a profile that will not open whenever both relays are down.
+2. **"Start anyway" when the turn cannot be read.** It now opens the profile offline only: nothing is published, dialled or settled before a good read, so it costs no safety. The open part is whether it should later do more (live sessions with contacts while the relays are down), which would bring back a double-active window for messages. Recommendation: not in phase 1.
 3. **A turn record for every profile, even with one device.** It costs one more key and one hourly put per profile, and it would let a restored backup always find out that the original still runs. Recommendation: yes, in phase 2, once the record has run in the field.
 4. **Readable history on a standby.** Recommendation: not yet. It is useful, but every screen that reads history would need proof that it starts nothing, and the gate's strength in phase 1 is that it opens no database at all.
 5. **Participation-key rotation** as its own WISP. It is the real answer to a lost device that held a copy. Recommendation: design it alongside phase 2.
@@ -848,11 +887,14 @@ It is the natural next wish, so the reasons are written down. Two live devices n
 
 A client that implements this WISP MUST:
 
-- keep a device key that is in no backup and no handoff;
+- keep a device signing key that is in no backup and no handoff;
 - read the device state before starting anything, and in any state but `single` and `active` open no profile database and publish nothing but the turn record and device-link rendezvous;
 - write `standby` with strict durability before it signs a release, and name the taker in every release;
 - start as active only with a verified state, a stored release and its own turn read back, or after an explicit forced takeover;
-- use `turn * 2^20 + rev * 4 + author` as the turn record's sequence number, put a stored record byte for byte, make every raising put conditional, and never repeat a refused put without its condition;
+- use `turn * 2^20 + rev * 4 + author` as the turn record's sequence number and 2^52 - 1 for every tombstone, store a packet before putting it, put a stored record byte for byte, make every raising put conditional, and never repeat a refused put without its condition;
+- treat a record as its own only when it equals its stored packet, and drop a record written inside a turn by anyone but that turn's active device;
+- in limited mode publish, dial and settle nothing before a good read;
+- take over, after releasing a turn, only at a turn above the one it released;
 - read the turn from every source it has, and stop at once on a higher turn, a foreign `instance` or a tombstone;
 - open a single-writer wallet SDK, spend real money, sign a group commit or take door duty only after a good turn read under 60 seconds old;
 - after a forced takeover or a restore: raise exactly the listed counters, keep admin work off until the person turns it on, and never broadcast saved signed bytes;
