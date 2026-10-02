@@ -557,6 +557,14 @@ export class CashuWallet {
     this.events.onChange();
   }
 
+  /**
+   * Whether the ecash of a reviewed payment came back to this wallet (Take it back, or a refusal). Its proofs then read
+   * SPENT at the mint because this wallet redeemed them, not the contact.
+   */
+  async reviewedCashuTakenBack(id:string):Promise<boolean> {
+    return (await wrap<StoredPayment|undefined>((await store(STORES.payments,"readonly")).get(id)))?.state==="reclaimed";
+  }
+
   async reviewedCashuSpent(prepared:CashuPrepared):Promise<boolean> {
     const outputs=(prepared.swap.sendOutputs??[]).map(OutputData.deserialize);
     const states=await (await this.wallet(prepared.mint)).checkProofsStates(outputs.map(o=>({secret:new TextDecoder().decode(o.secret),id:o.blindedMessage.id})));
