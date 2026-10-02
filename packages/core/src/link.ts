@@ -10,6 +10,7 @@ import {
   type ResolvedMessage,
 } from "./records";
 import type { ServiceAd } from "./services";
+import type { SignalSight } from "./signal";
 import { budgetRetryMs, isDiscoveryBudgetError, type PkarrTransport } from "./transport";
 import { traceLink } from "./linkTrace";
 
@@ -126,10 +127,11 @@ export interface LinkSessionEvents {
   onPeerAck?(ackTimestamp: number): void;
   onCallSignal?(signal: string): void;
   /**
-   * `since`: this run read the peer's record at that time (this clock) and the signal was not in it, so it is at most
-   * that old whatever its own `ts` says. Absent for a signal the first read of the record found.
+   * `sight`: a read of the peer's record that the network answered, earlier in this run, did not have the signal
+   * (`SignalSight`): when that read began, and the time of the peer's packet it found, if any. Absent for a signal
+   * the first such read found.
    */
-  onRtcSignal?(signal: string, since?: number): void;
+  onRtcSignal?(signal: string, sight?: SignalSight): void;
   /** The peer's packet carries a new `_tr` value (a group link's transports, `parsePacketTransports`). */
   onPeerTransports?(value: string): void;
   onStatus?(status: LinkStatus): void;
@@ -224,8 +226,14 @@ export class LinkSession {
   private discoveryErrors: Partial<Record<"publish" | "read", string>> = {};
   private unsubscribe: (() => void) | null = null;
   private presence: PeerPresence = { online: false, lastPacketAt: 0, services: null };
-  /** When the last read of the peer's record that got an answer began (0: none yet in this run). */
+  /**
+   * When the last read of the peer's record that the network answered began (0: none yet in this run). A read that
+   * handed back a copy kept from before (`PkarrTransport.readAnsweredAt`) is not one: it says nothing of what the
+   * record holds now.
+   */
   private lastReadAt = 0;
+  /** The latest time of the peer's own packets those reads found, by the peer's clock (0: none; the inviter's empty packet is not the peer's). */
+  private peerPacketAt = 0;
 
   constructor(options: LinkSessionOptions) {
     this.identity = identityFromSeedB64(options.params.seedB64);
@@ -583,8 +591,10 @@ export class LinkSession {
       const ms = Date.now() - started;
       const wasOnline = this.presence.online, wasSeen = this.presence.lastPacketAt;
       // What this read finds that the read before did not have came in between, by this device's clock.
-      const readBefore = this.lastReadAt;
-      this.lastReadAt = started;
+      const readBefore = this.lastReadAt, peerPacketBefore = this.peerPacketAt;
+      const answered = this.transport.readAnsweredAt?.(this.peerPubKeyZ32);
+      const read = answered !== undefined && answered >= started;
+      if (read) this.lastReadAt = started;
 
       let receivedNew = false;
       // The packet an inviter puts under the contact's key before they join (`emptyLinkRecords`), so
@@ -607,6 +617,7 @@ export class LinkSession {
           if (fresh.length > 0) this.events.onMessages?.(fresh, batch);
         }
 
+        if (read && batch.packetTimestamp > this.peerPacketAt) this.peerPacketAt = batch.packetTimestamp;
         // How long ago the peer published is measured on this clock, from when its packet was first read here.
         const seenAt = batch.packetTimestamp === wasSeen ? presenceSeenAt(this.presence) : Math.max(readBefore, Math.min(batch.packetTimestamp, Date.now()));
         const online = batch.services !== null && Date.now() - seenAt < PRESENCE_WINDOW;
@@ -636,7 +647,7 @@ export class LinkSession {
           traceLink(this.identity.pubKeyZ32, "poll", { ms, pace, online, age: Date.now() - batch.packetTimestamp, seen: Date.now() - seenAt, rtc: newSignal, first: wasSeen === 0 });
         if (newSignal) {
           this.lastRtcSignalIn = batch.rtcSignal!;
-          this.events.onRtcSignal?.(batch.rtcSignal!, readBefore || undefined);
+          this.events.onRtcSignal?.(batch.rtcSignal!, readBefore ? { since: readBefore, after: peerPacketBefore || null } : undefined);
         }
       } else if (ms > 1_500 || (globalThis as { __ghostlyLinkTrace?: boolean }).__ghostlyLinkTrace) traceLink(this.identity.pubKeyZ32, "poll", { ms, pace, packet: false });
 

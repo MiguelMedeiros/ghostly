@@ -4366,6 +4366,7 @@ export class GhostlyNode implements EngineImplementation {
       ? TRANSPORTS.find(t => t !== "webrtc/1" && t in this.nativeFactories && !!stored.peerTransports?.includes(t)) : "webrtc/1";
     live.pairing = { status: "connecting" };
     live.link = new GhostLink({
+      ownRecords: true,
       // An edge carries payments with its member (WISP 9xx § Payments), as a chat does; an entry session does not.
       paymentMethods: entry ? { cashu: false, lightning: false, arkade: false, usdt: false, bark: false, bitcoin: false, fedimint: false, spark: false } : stored.paymentMethods,
       arkPaymentsSupport: !entry,

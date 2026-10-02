@@ -26,15 +26,35 @@ export const DATA_CHANNEL_LABEL = "ghostly/1";
 export const DATA_CHANNEL_ID = 0;
 /** An offer older than this is ignored. */
 export const RTC_SIGNAL_MAX_AGE_MS = 120_000;
+/** A signal dated further ahead of this clock than this is not taken: its time would outrank every later one of its sender. */
+export const RTC_SIGNAL_FUTURE_MS = 10 * 60_000;
 /**
- * Whether an offer its maker dated `ts` is recent enough to answer. `since`: this device read the maker's record at
- * that time, by its own clock, and the offer was not in it. The offer's time is then held between that read and now,
- * so only this clock measures its age. Without `since` (the first read of a run found the offer) its own time is all
- * there is to go by, and it may differ from this clock by the age allowed, either way.
+ * How this device saw a signal come. `since`: when its read of the maker's record that did not have the signal began,
+ * by this clock; only a read the network answered counts, never a copy kept from before. `after`: the time of the
+ * maker's own packet that read found, by the maker's clock; null when that read found none of the maker's.
  */
-export function offerIsFresh(ts: number, since?: number, now = Date.now()): boolean {
-  if (since === undefined) return Math.abs(now - ts) <= RTC_SIGNAL_MAX_AGE_MS;
-  return now - Math.max(since, Math.min(ts, now)) <= RTC_SIGNAL_MAX_AGE_MS;
+export interface SignalSight { since: number; after: number | null; live?: boolean }
+/**
+ * Whether an offer its maker dated `ts` is recent enough to answer.
+ *
+ * With a `sight`, two things place it in time without holding the maker's clock against this one. It was not in the
+ * maker's record at `since`, so it reached the record after that; and it is not dated before the maker's packet that
+ * was there (`after`, the same clock as `ts`), so it was not made before that packet either. An offer made earlier and
+ * put in the record again later fails the second. Its time is then held between `since` and now, and only this clock
+ * measures its age.
+ *
+ * When that read found nothing of the maker's (`after` null: a first contact), there is no packet to hold the offer
+ * against, and a record that looked empty a moment ago is weaker ground: the offer's own time then has to be within
+ * `RTC_SIGNAL_FUTURE_MS` of this clock too, which is as far as two clocks are taken to differ.
+ *
+ * Without a sight (the first read of a run found the offer) its own time is all there is to go by, and it may differ
+ * from this clock by the age allowed, either way.
+ */
+export function offerIsFresh(ts: number, sight?: SignalSight, now = Date.now()): boolean {
+  if (!sight) return Math.abs(now - ts) <= RTC_SIGNAL_MAX_AGE_MS;
+  if (!sight.live && sight.after !== null && ts < sight.after) return false;
+  if (!sight.live && sight.after === null && Math.abs(now - ts) > RTC_SIGNAL_FUTURE_MS) return false;
+  return now - Math.max(sight.since, Math.min(ts, now)) <= RTC_SIGNAL_MAX_AGE_MS;
 }
 const MAX_MESSAGE_SIZE = 262_144;
 

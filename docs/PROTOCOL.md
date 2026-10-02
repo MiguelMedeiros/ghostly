@@ -218,7 +218,7 @@ The data link is one `RTCPeerConnection` per link with a single DataChannel. All
 An answer has `"t": "a"` and `"o": <ts of the offer it answers>`. Candidates are `<h|s|r>,<address>,<port>` for host, server reflexive and relay; at most two, two and one, UDP only. Each side builds a minimal `m=application … webrtc-datachannel` SDP from the signal. Receivers validate every field against strict patterns before it goes anywhere near an SDP.
 
 - Either peer may offer, on demand. The other answers automatically: the link already authenticated the peer, and only explicitly shared services are reachable.
-- An offer older than 120 seconds is ignored. Its age is counted on the reader's clock, from the last read of the record that did not have it; `ts` orders signals and names the offer an answer is for ([WISP 101](wisps/101-webrtc.md)).
+- An offer older than 120 seconds is ignored. Its age is counted on the reader's clock, from the last read of the record that did not have it, provided it is not dated before the maker's packet that read found; `ts` orders signals and names the offer an answer is for, and one dated more than ten minutes ahead is not taken ([WISP 101](wisps/101-webrtc.md)).
 - If both offer at once, the peer with the lexicographically lower public key keeps its offer and the other answers it.
 - A new offer while connected means the peer lost the connection; the receiver drops the old one and answers.
 - Both peers poll fast while signaling, clear `_rtc` once the channel is open, and poll slowly while it stays open.

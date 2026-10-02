@@ -575,15 +575,17 @@ export class DhtDelivery {
     if (body.length < 8 || body.length > 16 || version !== 1 || !Number.isSafeInteger(sequence) || sequence < 1 || !Number.isSafeInteger(issued) ||
       !Number.isSafeInteger(expires) || expires - issued > CONTROL_TTL || issued >= expires ||
       (mode !== "stream" && mode !== "dht") || typeof author !== "string" || typeof signature !== "string" || !/^[A-Za-z0-9_-]{86}$/.test(signature)) return null;
-    // Past its expiry by more than two clocks differ (`DHT_EXPIRY_SKEW_MS`). Said once per envelope: it stays in the mailbox.
-    if (expires + DHT_EXPIRY_SKEW_MS <= now) {
-      if (this.expiredSeen !== sequence) { this.expiredSeen = sequence; traceLink(this.from, "dht-envelope-expired", { seq: sequence, lateMs: now - expires }); }
-      return null;
-    }
+    // Past its expiry by more than two clocks differ (`DHT_EXPIRY_SKEW_MS`).
+    const expired = expires + DHT_EXPIRY_SKEW_MS <= now;
     if (sender && sender !== author) return null;
     try {
       if (!verify(fromBase64Url(signature), utf8Encode(JSON.stringify(["ghostly-dht-envelope", this.to, this.from, sender ? this.participation.pubKeyZ32 : "invite", body])), publicKeyFromZ32(author))) return null;
     } catch { return null; }
+    if (expired) {
+      // Said once per envelope, and only of one its author signed: it stays in the mailbox.
+      if (this.expiredSeen !== sequence) { this.expiredSeen = sequence; traceLink(this.from, "dht-envelope-expired", { seq: sequence, lateMs: now - expires }); }
+      return null;
+    }
     return { body, sender, author, sequence, issued, expires, mode, message, receipt, capsRev, pinnedMailbox, replyTo, editOf, reactions, reactionsTaken, forwarded };
   }
   /**

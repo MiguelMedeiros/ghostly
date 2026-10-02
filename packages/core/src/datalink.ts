@@ -5,9 +5,11 @@ import { traceLink } from "./linkTrace";
 import {
   DATA_CHANNEL_ID,
   DATA_CHANNEL_LABEL,
+  RTC_SIGNAL_FUTURE_MS,
   buildDataSdp,
   extractRtcParams,
   offerIsFresh,
+  type SignalSight,
   parseRtcSignal,
   type RtcSignal,
 } from "./signal";
@@ -124,20 +126,27 @@ export class DataLink {
   }
 
   /**
-   * Feeds a decrypted `_rtc` value from the peer's packet. `since`: the peer's record did not carry it when this device
-   * read it at that time (this clock), or it came on a live session just now.
+   * Feeds a decrypted `_rtc` value from the peer's packet. `sight`: how this device saw it come (`SignalSight`): the
+   * peer's record did not carry it at a read the network answered, or it came on a live session just now.
    *
    * The peer's `ts` orders its signals (a later one replaces an earlier one, and an answer names the offer it is for).
    * It is not what says a signal is recent when this device saw it come: two clocks a few minutes apart are common, and
    * every signal of such a peer was dropped here, without a word. An answer is for the offer it names, which this side
    * made in this attempt, so it has no age to check. An offer is as old as the time since the read that did not have it
    * (`offerIsFresh`); only one the first read finds is judged by its own time, as nothing else dates it.
+   *
+   * A signal dated more than `RTC_SIGNAL_FUTURE_MS` ahead of this clock is not taken at all: taken, its time would
+   * be the latest this link knows of the peer, and every signal the peer makes after it would read as older.
    */
-  async handleSignal(json: string, since?: number): Promise<void> {
+  async handleSignal(json: string, sight?: SignalSight): Promise<void> {
     const signal = parseRtcSignal(json);
     if (!signal || signal.ts <= this.lastSignalTs) return;
-    if (signal.t === "o" && !offerIsFresh(signal.ts, since)) {
-      traceLink(this.options.myPubKeyZ32, "offer-stale", { ageMs: Date.now() - signal.ts, ...(since !== undefined && { sinceMs: Date.now() - since }) });
+    if (signal.ts > Date.now() + RTC_SIGNAL_FUTURE_MS) {
+      traceLink(this.options.myPubKeyZ32, "signal-ahead", { aheadMs: signal.ts - Date.now() });
+      return;
+    }
+    if (signal.t === "o" && !offerIsFresh(signal.ts, sight)) {
+      traceLink(this.options.myPubKeyZ32, "offer-stale", { ageMs: Date.now() - signal.ts, ...(sight && { sinceMs: Date.now() - sight.since, ...(sight.after !== null && { beforePacketMs: sight.after - signal.ts }) }) });
       return;
     }
 

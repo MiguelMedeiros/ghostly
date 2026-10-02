@@ -37,15 +37,23 @@ function network() {
     const t = {
       failPublish: null as unknown,
       failResolve: null as unknown,
+      /** The transport hands back the copy it kept (its budget held the read, its relays rest): the network answered nothing. */
+      kept: false,
+      answered: new Map<string, number>(),
+      readAnsweredAt: (key: string) => t.answered.get(key),
       publish: vi.fn(async (identity: Identity, records: GhostRecord[]) => {
         if (t.failPublish !== null) throw t.failPublish;
         packets.set(identity.pubKeyZ32, { pubKeyZ32: identity.pubKeyZ32, timestampMicros: BigInt(Date.now()) * 1000n, records });
       }),
       resolve: vi.fn(async (key: string) => {
         if (t.failResolve !== null) throw t.failResolve;
+        if (t.kept) return t.last.get(key) ?? null;
+        t.answered.set(key, Date.now());
+        t.last.set(key, packets.get(key) ?? null);
         return packets.get(key) ?? null;
       }),
       describe: () => ({ protocol: "memory", relays: [] }),
+      last: new Map<string, SignedPacket | null>(),
     };
     return t satisfies PkarrTransport;
   };
@@ -75,7 +83,7 @@ function session(params: LinkParams, transport: ReturnType<ReturnType<typeof net
 function pair(optionsA: Partial<LinkSessionOptions> = {}, optionsB: Partial<LinkSessionOptions> = {}) {
   const net = network();
   const params = createLink();
-  return { net, a: session(params.mine, net.transport(), optionsA), b: session(params.invite, net.transport(), optionsB) };
+  return { net, params, a: session(params.mine, net.transport(), optionsA), b: session(params.invite, net.transport(), optionsB) };
 }
 
 const settle = () => vi.advanceTimersByTimeAsync(0);
@@ -293,19 +301,70 @@ describe("LinkSession presence and signals", () => {
     await b.s.stop(false);
   });
 
-  it("says since when a signal can be there: the read before the one that found it, by this clock", async () => {
-    const { a, b } = pair();
+  it("says how a signal was seen to come: the read before it, and the peer's packet that read found", async () => {
+    const { a, b } = pair({}, { getServices: () => [] });
+    b.s.start();
+    await settle();
     a.s.start();
     await settle();
+    // The peer's packet was there at NOW, with no signal; the signal comes in its next one.
     vi.setSystemTime(NOW + 4_000);
-    b.s.start();
     await b.s.setRtcSignal('{"t":"o"}');
     vi.setSystemTime(NOW + 6_000);
     a.s.pollNow();
     await settle();
-    expect(a.ev.onRtcSignal.mock.calls).toEqual([['{"t":"o"}', NOW]]);
+    expect(a.ev.onRtcSignal.mock.calls).toEqual([['{"t":"o"}', { since: NOW, after: NOW }]]);
     await a.s.stop(false);
     await b.s.stop(false);
+  });
+
+  it("a read that found nothing of the peer's, or only the inviter's empty packet, says so: there is no packet to hold a signal against", async () => {
+    for (const placeholder of [false, true]) {
+      const { net, params, a, b } = pair(); const theirs = identityFromSeedB64(params.invite.seedB64).pubKeyZ32;
+      if (placeholder) net.packets.set(theirs, { pubKeyZ32: theirs, timestampMicros: BigInt(NOW - 60_000) * 1000n, records: emptyLinkRecords() });
+      a.s.start();
+      await settle();
+      vi.setSystemTime(NOW + 4_000);
+      b.s.start();
+      await b.s.setRtcSignal('{"t":"o"}');
+      vi.setSystemTime(NOW + 6_000);
+      a.s.pollNow();
+      await settle();
+      expect(a.ev.onRtcSignal.mock.calls, placeholder ? "after the empty packet" : "after nothing").toEqual([['{"t":"o"}', { since: NOW, after: null }]]);
+      await a.s.stop(false);
+      await b.s.stop(false);
+      vi.setSystemTime(NOW);
+    }
+  });
+
+  it("a copy the transport kept is not a read: a signal that shows up after one was not seen to come", async () => {
+    // The relays' budget held the read, or every relay rested: `resolve` handed back what it had, and the record may
+    // have held the signal all along (a relay that lagged, a packet days old).
+    const { a, b } = pair();
+    a.transport.kept = true;
+    a.s.start();
+    await settle();
+    a.s.pollNow();
+    await settle();
+    vi.setSystemTime(NOW + 4_000);
+    b.s.start();
+    await b.s.setRtcSignal('{"t":"o"}');
+    a.transport.kept = false;
+    vi.setSystemTime(NOW + 6_000);
+    a.s.pollNow();
+    await settle();
+    expect(a.ev.onRtcSignal.mock.calls).toEqual([['{"t":"o"}', undefined]]);
+    // Nor does a transport that cannot say whether the network answered give one.
+    const blind = pair();
+    (blind.a.transport as { readAnsweredAt?: unknown }).readAnsweredAt = undefined;
+    blind.a.s.start();
+    await settle();
+    blind.b.s.start();
+    await blind.b.s.setRtcSignal('{"t":"o"}');
+    blind.a.s.pollNow();
+    await settle();
+    expect(blind.a.ev.onRtcSignal.mock.calls).toEqual([['{"t":"o"}', undefined]]);
+    for (const side of [a, b, blind.a, blind.b]) await side.s.stop(false);
   });
 
   /** The peer's packet as its own clock dated it: `skew` ms from this one. */

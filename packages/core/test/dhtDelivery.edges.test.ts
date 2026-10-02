@@ -7,6 +7,7 @@ import { decrypt, encrypt } from "../src/crypto";
 import { createIdentity, identityFromSeed, identityFromSeedB64, publicKeyFromZ32, sign } from "../src/identity";
 import { createLink } from "../src/invite";
 import { DhtDelivery, DHT_EXPIRY_SKEW_MS, DHT_ISSUED_BACK_MS, DHT_MESSAGE_TTL, DHT_TEXT_REFUSED, LEAVING_DHT_FAST_MS, LIVE_POLL_MS, emptyDhtDeliveryState, type DhtDeliveryState, type DhtDeliveryView } from "../src/dhtDelivery";
+import { setLinkTraceSink } from "../src/linkTrace";
 import type { PairingCredentials } from "../src/pairedSession";
 import type { GhostRecord, SignedPacket } from "../src/pkarr";
 import { DiscoveryBudgetError } from "../src/transport";
@@ -190,6 +191,41 @@ describe("DHT delivery: what a receiver refuses", () => {
     expect(h.last().receipt!.expires - Date.now()).toBeGreaterThan(50_000);
     expect(h.last().receipt!.expires - Date.now()).toBeLessThanOrEqual(60_000);
     await h.bob.stop();
+  });
+
+  it("an envelope inside the ten minutes after its expiry is taken once, its mode with it, and nothing older after it", async () => {
+    const h = setup(); await h.bob.start();
+    // A control envelope that says the contact is on streams, five minutes past its expiry by this clock.
+    const expired = Date.now() - 5 * 60_000;
+    await h.put(h.invitePacket(h.body({ 2: expired - 4 * 60_000, 3: expired, 5: "stream", 6: null }, 2)));
+    expect(h.last()).toMatchObject({ peerSequence: 2, peerMode: "stream" });
+    expect(h.pins).toEqual([h.alice.pubKeyZ32]);
+    // The envelope before it, saying DHT only, fresh dates and all: its sequence is older, and the mode stays.
+    await h.put(h.invitePacket(h.body({ 5: "dht", 6: null }, 1)));
+    await h.put(h.invitePacket(h.body({ 2: expired - 4 * 60_000, 3: expired, 5: "dht", 6: null }, 2)));
+    expect(h.last()).toMatchObject({ peerSequence: 2, peerMode: "stream" });
+    // One past the ten minutes is not taken, whatever its sequence.
+    const gone = Date.now() - DHT_EXPIRY_SKEW_MS - 1_000;
+    await h.put(h.invitePacket(h.body({ 2: gone - 60_000, 3: gone, 5: "dht", 6: null }, 3)));
+    expect(h.last()).toMatchObject({ peerSequence: 2, peerMode: "stream" });
+    await h.bob.stop();
+  });
+
+  it("says an envelope is past its expiry only of one its author signed", async () => {
+    const lines: string[] = [];
+    setLinkTraceSink(line => lines.push(line));
+    try {
+      const h = setup(); await h.bob.start();
+      const gone = Date.now() - DHT_EXPIRY_SKEW_MS - 1_000;
+      const body = h.body({ 2: gone - 60_000, 3: gone, 6: null }, 7);
+      await h.put(h.invitePacket(body, "A".repeat(86)));
+      expect(lines.filter(l => l.includes("dht-envelope-expired"))).toEqual([]);
+      // The contact's own, later: said, once, though the same packet is read at every poll.
+      await h.put(h.invitePacket(body));
+      await h.put(h.invitePacket(body));
+      expect(lines.filter(l => l.includes("dht-envelope-expired"))).toHaveLength(1);
+      await h.bob.stop();
+    } finally { setLinkTraceSink(null); }
   });
 
   it("does not take an envelope again for a date that looks new: its sequence is what orders it", async () => {
