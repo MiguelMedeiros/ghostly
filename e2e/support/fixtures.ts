@@ -105,7 +105,8 @@ type Fixtures = {
 export async function openPeer(browser: Browser, relay: LocalRelay, baseURL: string, name: string, options: PeerOptions = {}): Promise<Peer> {
   const context = await browser.newContext({
     baseURL,
-    permissions: ["camera", "microphone", "clipboard-read", "clipboard-write"],
+    // WebKit (e2e/playwright.webkit.config.ts) knows none of these by name and refuses a context that asks for them.
+    permissions: browser.browserType().name() === "chromium" ? ["camera", "microphone", "clipboard-read", "clipboard-write"] : [],
     viewport: options.viewport ?? (options.mobile ? { width: 390, height: 844 } : { width: 1280, height: 800 }),
     ...(options.mobile ? { isMobile: true, hasTouch: true } : {}),
     ...(options.ignoreHTTPSErrors ? { ignoreHTTPSErrors: true } : {}),

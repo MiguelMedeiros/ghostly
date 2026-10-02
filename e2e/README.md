@@ -400,6 +400,21 @@ E2E_WEB_PORT=50310 E2E_COMPAT_PORT=50311 npm run test:e2e:compat  # other ports 
   the E2E workflow (so before every release), and by hand. Not on pull requests, like the rest of the app's e2e:
   v0.4.0 never changes, only `dev` can break it, and a night is soon enough to hear about it.
 
+## WebKit
+
+The main suite runs in Chromium. The macOS desktop app, Safari and the iPhone's installed app run WebKit, which keeps
+stored Blobs and files differently, so the specs that depend on that also run there: profile backups to a file
+(`web/profile-backup-file.spec.ts`: a profile with files backed up, restored byte for byte, cancelled, refused).
+
+```bash
+npx playwright install webkit      # once
+npm run test:e2e:webkit
+E2E_WEB_PORT=50310 npm run test:e2e:webkit
+```
+
+`playwright.webkit.config.ts` is a config of its own: the rest of the suite is written for Chromium (fake media
+devices, clipboard permissions) and CI installs Chromium only. Not in CI; run it when you touch backups or file storage.
+
 ## When they run
 
 The app's e2e suites do not run on pull requests: they would hold up every merge. The table of every workflow is in
