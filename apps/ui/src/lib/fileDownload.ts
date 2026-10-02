@@ -66,6 +66,19 @@ async function downloadMp3(platform: ServicesPlatform, file: ChatFile, name: str
   return "saved";
 }
 
+/**
+ * Saves bytes made here (a backup) under `name`: through the system's save dialog where the platform has one (the
+ * desktop app, whose WebView downloads nothing from a link), else as a download. `cancelled` when the person closed
+ * the dialog: nothing was saved.
+ */
+export async function saveMade(platform: Pick<ServicesPlatform, "saveBlob"> | null | undefined, blob: Blob, name: string): Promise<"saved" | "downloaded" | "cancelled"> {
+  const saved = await platform?.saveBlob?.(blob, name);
+  if (saved === true) return "saved";
+  if (saved === false) return "cancelled";
+  saveThroughLink(blob, name);
+  return "downloaded";
+}
+
 function saveThroughLink(blob: Blob, name: string): void {
   const type = safeBlobType(blob.type);
   const url = URL.createObjectURL(blob.type === type ? blob : new Blob([blob], { type }));
