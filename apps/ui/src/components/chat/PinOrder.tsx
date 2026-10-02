@@ -21,8 +21,8 @@ export function PinMoveItems({ chat, onMoved }: { chat: string; onMoved(place: P
   if (!place || place.count < 2) return null;
   const first = place.index === 0, last = place.index === place.count - 1;
   return <>
-    <MenuItem testId="chat-pin-up" disabled={first} title={first ? t("chat.menu.moveFirst") : undefined} onClick={() => onMoved(movePinned(chat, "up"))} icon={<Arrow up />}>{t("chat.menu.moveUp")}</MenuItem>
-    <MenuItem testId="chat-pin-down" disabled={last} title={last ? t("chat.menu.moveLast") : undefined} onClick={() => onMoved(movePinned(chat, "down"))} icon={<Arrow />}>{t("chat.menu.moveDown")}</MenuItem>
+    <MenuItem testId="chat-pin-up" disabled={first} title={first ? t("chat.menu.moveFirst") : undefined} className="disabled:opacity-40" onClick={() => onMoved(movePinned(chat, "up"))} icon={<Arrow up />}>{t("chat.menu.moveUp")}</MenuItem>
+    <MenuItem testId="chat-pin-down" disabled={last} title={last ? t("chat.menu.moveLast") : undefined} className="disabled:opacity-40" onClick={() => onMoved(movePinned(chat, "down"))} icon={<Arrow />}>{t("chat.menu.moveDown")}</MenuItem>
   </>;
 }
 

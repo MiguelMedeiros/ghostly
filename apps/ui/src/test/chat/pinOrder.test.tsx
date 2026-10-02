@@ -52,6 +52,8 @@ describe("a pinned chat's place, from the chat's ⋮", () => {
     expect(up).toHaveTextContent("Move up");
     expect(up).toBeDisabled();
     expect(up).toHaveAttribute("title", "Already first");
+    // Dimmed, too: a phone shows no tooltip.
+    expect(up).toHaveClass("disabled:opacity-40");
     expect(rows.getByTestId("chat-pin-down")).toBeEnabled();
     // Right under Unpin: the place is the pin's.
     const items = [...screen.getByTestId("chat-options-menu").querySelectorAll("[data-menu-item]")].map(i => i.textContent);
