@@ -1226,7 +1226,7 @@ export function useWebRTC({
       const offerHasVideo = signalHasVideo(signal);
       callHadVideoRef.current = offerHasVideo;
       callConnectedEventFiredRef.current = false;
-      addCallEventMessage?.("call_received", offerHasVideo, undefined, callSignalHeardAt(signal));
+      addCallEventMessage?.("call_received", offerHasVideo, undefined, signal.ts);
       updateCallState("incoming");
       setFastPoll(true);
     } else if (signal.t === "a" && (callStateRef.current === "offering" || callStateRef.current === "connecting")) {
@@ -1243,7 +1243,7 @@ export function useWebRTC({
       lastProcessedSignalRef.current = signal.ts;
       if (callStateRef.current !== "idle") traceCallEnd("contact-hang-up", { state: callStateRef.current, ...(signal.r && { r: signal.r }) });
       // The caller gave up (or its ring ran out) before we answered: a missed call, as when our own ring runs out.
-      if (callStateRef.current === "incoming") addCallEventMessage?.("call_missed", callHadVideoRef.current, undefined, pendingOfferRef.current ? callSignalHeardAt(pendingOfferRef.current) : undefined);
+      if (callStateRef.current === "incoming") addCallEventMessage?.("call_missed", callHadVideoRef.current, undefined, pendingOfferRef.current?.ts);
       else if (callStateRef.current === "offering" && signal.r !== "u" && myOfferTimestampRef.current && callSignalHeardAt(signal) > myOfferTimestampRef.current) {
         // Our call still rang there: the contact declined it (a side that rings sends nothing else).
         addCallEventMessage?.("call_rejected", callHadVideoRef.current);
@@ -1275,7 +1275,7 @@ export function useWebRTC({
         hangUpRef.current(true, false);
         setNoAnswer(true);
       } else {
-        addCallEventMessageRef.current?.("call_missed", callHadVideoRef.current, undefined, pendingOfferRef.current ? callSignalHeardAt(pendingOfferRef.current) : undefined);
+        addCallEventMessageRef.current?.("call_missed", callHadVideoRef.current, undefined, pendingOfferRef.current?.ts);
         hangUpRef.current(false, false);
       }
     }, RING_MS);

@@ -449,8 +449,8 @@ describe("answering a call", () => {
     expect(call.result.current.callState).toBe("idle");
     call.receive(JSON.stringify({ ...JSON.parse(remote.offer(theirs + 1)), at: Date.now() }));
     expect(call.result.current.callState).toBe("incoming");
-    // The call's line is placed when it rang here, not at the caller's hour.
-    expect(call.addCallEventMessage).toHaveBeenCalledWith("call_received", false, undefined, Date.now());
+    // The call's line keeps the offer's own time: that is what makes it the same line when the offer is heard again.
+    expect(call.addCallEventMessage).toHaveBeenCalledWith("call_received", false, undefined, theirs + 1);
     act(() => { void call.result.current.acceptCall(false); });
     devices.userMedia[0].grant();
     await settle();
