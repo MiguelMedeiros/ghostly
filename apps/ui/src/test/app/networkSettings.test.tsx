@@ -39,16 +39,16 @@ describe("Settings, Network: Pkarr relays", () => {
 });
 
 describe("Settings, Network: Iroh relays", () => {
-  const DEFAULTS = ["https://use1-1.relay.n0.iroh.link./", "https://euc1-1.relay.n0.iroh.link./"];
+  const DEFAULTS = ["https://use1-1.relay.n0.iroh.link/", "https://euc1-1.relay.n0.iroh.link/"];
   const transport = { protocol: "Pkarr relays (HTTP) → Mainline DHT (BEP44)", relays: RELAYS, iroh: { relays: DEFAULTS, defaults: DEFAULTS } };
 
-  it("takes the defaults written without the trailing dot for the defaults, and keeps a relay of the person's own as typed", async () => {
+  it("takes the defaults written with the trailing dot for the defaults, and keeps a relay of the person's own as typed", async () => {
     const { engine, user } = renderApp(<NetworkSettings />);
     act(() => engine.update({ transport, settings: { relays: RELAYS } }));
     const field = screen.getByTestId("network-iroh-relays");
-    // As the app listed them before it wrote the dot: the same relays, stored as "none chosen".
+    // As Iroh itself names them, with the trailing dot: the same relays, stored as "none chosen".
     await user.clear(field);
-    await user.type(field, DEFAULTS.map(url => url.replace("link./", "link/")).join("\n"));
+    await user.type(field, DEFAULTS.map(url => url.replace("link/", "link./")).join("\n"));
     await user.click(screen.getByTestId("network-save"));
     expect(engine.callsTo("updateSettings").slice(-1)[0]).toMatchObject({ settings: { irohRelays: [] } });
     await user.clear(field);

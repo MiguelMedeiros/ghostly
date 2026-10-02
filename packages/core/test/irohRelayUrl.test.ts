@@ -21,10 +21,24 @@ it("spells a relay the way Iroh's own peers do: a domain name with its trailing 
   for (const url of ["https://relay.example.com/", "http://localhost.:3340/", "http://127.0.0.1:3340"]) expect(irohRelayUrl(irohRelayUrl(url))).toBe(irohRelayUrl(url));
 });
 
+it("has a spelling without the dot for a browser's Iroh: WebKit opens no host name that ends in one", () => {
+  expect(irohRelayUrl("https://use1-1.relay.n0.iroh.link./", "plain")).toBe("https://use1-1.relay.n0.iroh.link/");
+  expect(irohRelayUrl("https://use1-1.relay.n0.iroh.link/", "plain")).toBe("https://use1-1.relay.n0.iroh.link/");
+  expect(irohRelayUrl("https://relay.example.com.:8443", "plain")).toBe("https://relay.example.com:8443/");
+  // The two spellings name one relay: each turns into the other, and compares equal once put in either.
+  for (const url of ["https://relay.example.com/", "https://relay.example.com./", "http://localhost.:3340/", "http://127.0.0.1:3340", "https://relay/"]) {
+    expect(irohRelayUrl(irohRelayUrl(url, "plain"), "dotted")).toBe(irohRelayUrl(url, "dotted"));
+    expect(irohRelayUrl(irohRelayUrl(url, "dotted"), "plain")).toBe(irohRelayUrl(url, "plain"));
+    expect(new URL(irohRelayUrl(url, "plain")).hostname.endsWith(".")).toBe(false);
+  }
+  const desktop = { id: "a".repeat(64), relay: "https://euc1-1.relay.n0.iroh.link./", addresses: ["192.168.0.2:4000"] };
+  expect(irohDescriptor(desktop, "plain")).toEqual({ ...desktop, relay: "https://euc1-1.relay.n0.iroh.link/" });
+});
+
 it("leaves addresses and single-label names as written, and loopback without a dot", () => {
   for (const url of ["http://127.0.0.1:47085", "http://127.0.0.1:47085/", "http://[::1]:3340/", "https://192.0.2.7/", "http://localhost:3340/", "https://relay/"])
-    expect(irohRelayUrl(url)).toBe(url);
-  expect(irohRelayUrl("http://localhost.:3340/")).toBe("http://localhost:3340/");
+    for (const spelling of ["dotted", "plain"] as const) expect(irohRelayUrl(url, spelling)).toBe(url);
+  for (const spelling of ["dotted", "plain"] as const) expect(irohRelayUrl("http://localhost.:3340/", spelling)).toBe("http://localhost:3340/");
   // Not a URL: the caller's own check refuses it.
   for (const junk of ["", "not a url", "relay.example.com"]) expect(irohRelayUrl(junk)).toBe(junk);
 });

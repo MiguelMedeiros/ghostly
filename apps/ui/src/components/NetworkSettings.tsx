@@ -59,7 +59,7 @@ export function NetworkSettings() {
       const irohRelays = iroh.split(/\s+/).filter(Boolean);
       // The defaults are stored as "none chosen", so a later change of the defaults reaches this profile.
       // Either spelling of a default (with or without the trailing dot of a full domain name) is that default.
-      const defaults = network.iroh && JSON.stringify(irohRelays.map(irohRelayUrl)) === JSON.stringify(network.iroh.defaultRelays.map(irohRelayUrl));
+      const defaults = network.iroh && JSON.stringify(irohRelays.map(url => irohRelayUrl(url))) === JSON.stringify(network.iroh.defaultRelays.map(url => irohRelayUrl(url)));
       await platform.setNetwork({ relays: relays.split(/\s+/).filter(Boolean), turn: server, ...(network.iroh ? { irohRelays: defaults ? [] : irohRelays } : {}), hyperdhtRelay: relay, pushRelay: push });
     } catch (e) { setError(errorText(e, t)); return; }
     setSavedAs(current);
