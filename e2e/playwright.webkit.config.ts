@@ -19,10 +19,12 @@ export default defineConfig({
   testMatch: ["profile-backup-file.spec.ts"],
   outputDir: "../test-results/webkit",
   globalSetup: "./support/headlessBuild.ts",
-  fullyParallel: true,
+  // One test at a time: Playwright's WebKit keeps one origin-private file system per origin for every browser profile
+  // it opens, so two tests at once would write and delete each other's files (each test empties it as it starts).
+  fullyParallel: false,
   forbidOnly: !!process.env.CI,
   retries: 0,
-  workers: Number(process.env.E2E_WORKERS) || 2,
+  workers: 1,
   timeout: 3 * 60_000,
   expect: { timeout: 60_000 },
   reporter: [["list"]],
