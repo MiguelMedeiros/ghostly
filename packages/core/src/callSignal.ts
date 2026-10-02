@@ -15,7 +15,7 @@ export interface CallSignal {
   at?: number;
   /**
    * On an answer: the `ts` of the offer it answers, so the caller takes it for that offer and no other, whatever the two
-   * clocks say. Apps up to 1.0.1 send none and ignore it; they take an answer only when its `ts` is later than their
+   * clocks say. Apps up to 1.0.2 send none and ignore it; they take an answer only when its `ts` is later than their
    * offer's, which a callee whose clock is behind by longer than it took to answer never met.
    */
   o?: number;
@@ -443,7 +443,7 @@ export const callSignalHeardAt = (signal: Pick<CallSignal, "ts" | "at">): number
 
 /**
  * Whether a contact's answer is for the offer this side made at `offerTs` (its own clock). An answer that names its
- * offer (`o`) says so itself. One that names none (an app up to 1.0.1) is taken when it came after this side offered.
+ * offer (`o`) says so itself. One that names none (an app up to 1.0.2) is taken when it came after this side offered.
  */
 export function answersOffer(answer: Pick<CallSignal, "ts" | "at" | "o">, offerTs: number): boolean {
   return answer.o !== undefined ? answer.o === offerTs : callSignalHeardAt(answer) > offerTs;

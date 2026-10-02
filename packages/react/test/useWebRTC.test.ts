@@ -97,7 +97,7 @@ describe("placing a call", () => {
     expect(call.result.current.callState).toBe("offering");
   });
 
-  it("takes an answer that names no offer (an app up to 1.0.1) when it was heard after ours went out, its clock behind or not", async () => {
+  it("takes an answer that names no offer (an app up to 1.0.2) when it was heard after ours went out, its clock behind or not", async () => {
     const call = renderCall();
     const { pc } = await offered(call);
     const mine = JSON.parse(call.published[0]!) as { ts: number };

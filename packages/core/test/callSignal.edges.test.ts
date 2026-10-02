@@ -124,7 +124,7 @@ describe("a signal's time and this device's clock", () => {
     expect(answersOffer(other, offerTs)).toBe(false);
   });
 
-  it("an answer that names no offer (an app up to 1.0.1) is taken when it came after this side offered", () => {
+  it("an answer that names no offer (an app up to 1.0.2) is taken when it came after this side offered", () => {
     const offerTs = NOW - 5_000;
     const heard = parseCallSignal(heardCallSignal(answer({ ts: offerTs - 60_000 }), NOW), NOW)!;
     expect(heard).not.toHaveProperty("o");
