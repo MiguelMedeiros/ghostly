@@ -3588,6 +3588,12 @@ export class GhostlyNode implements EngineImplementation {
     if (!WALLET_TYPES.includes(type)) throw new Error("Unknown kind of wallet");
     if (network !== "mainnet" && network !== "testnet") throw new Error("Choose Mainnet or Testnet");
     await this.lightnings[network].start();
+    // A Cashu swap its mint can settle now is settled first: what the removal says is then what is still open.
+    if (type === "cashu") {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      await Promise.race([this.wallet.settleSwaps(this.networkMints(network)).catch(() => {}), new Promise((resolve) => { timer = setTimeout(resolve, removalTiming.claimMs); })]);
+      clearTimeout(timer);
+    }
     await this.refreshWallet();
     // A Lightning card: the one named, else the network's default for receiving (a caller from before cards).
     const card = type === "lightning" ? asked ?? this.lightnings[network].receivingId : undefined;
