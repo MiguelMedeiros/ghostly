@@ -165,6 +165,20 @@ export function eventTime(taken: Map<string, Set<number>>, groupId: string, time
   if (times.size > 1024) times.delete(times.values().next().value!);
   return timestamp;
 }
+/**
+ * Keeps on the group's record when a member's message came, where that is later than what it holds: the record is
+ * saved with the session right after (a message taken moves its state), so a message handed to me late still makes
+ * the group unread after the app starts again. Read from the history alone, by its own time, it sorted among what I
+ * had read and the mark was gone on the next start.
+ */
+export function noteCame(group: Pick<StoredGroup, "came"> | undefined, came: number, peer: boolean, mentioned: boolean): void {
+  if (!group) return;
+  if (peer && came > (group.came?.peer ?? 0)) group.came = { ...group.came, peer: came };
+  if (mentioned && came > (group.came?.mention ?? 0)) group.came = { ...group.came, mention: came };
+}
+/** What `load` starts the unread marks from: the history's own times, or when its latest came if that was later. */
+export const cameOrWritten = (written: number | undefined, came: number | undefined): number | undefined =>
+  written === undefined && came === undefined ? undefined : Math.max(written ?? 0, came ?? 0);
 /** The view's `lastPeerMessageAt`, when there is one. */
 export const peerMessageAt = (map: Map<string, number>, groupId: string): { lastPeerMessageAt?: number } => {
   const at = map.get(groupId);
@@ -316,9 +330,12 @@ export class Groups {
       const history = await this.store.getMessages(MESSAGE_LINK(group.id)), said = history.filter(m => !m.event && !m.groupPay);
       const last = said[said.length - 1], lastPeer = [...said].reverse().find(m => m.sender !== "me");
       if (last) this.lastMessageAt.set(group.id, last.timestamp);
-      if (lastPeer) this.lastPeerMessageAt.set(group.id, lastPeer.timestamp);
+      // A message that came later than it was written counts from when it came, as it did while the app ran (`noteCame`).
+      const peerAt = cameOrWritten(lastPeer?.timestamp, lastPeer ? group.came?.peer : undefined);
+      if (peerAt) this.lastPeerMessageAt.set(group.id, peerAt);
       const mention = [...history].reverse().find(m => m.mentioned);
-      if (mention) this.lastMentionAt.set(group.id, mention.timestamp);
+      const mentionAt = cameOrWritten(mention?.timestamp, mention ? group.came?.mention : undefined);
+      if (mentionAt) this.lastMentionAt.set(group.id, mentionAt);
     }
     for (const id of this.sessions.keys()) this.reconcileEdges(id);
     // An admission in flight did not survive the restart: its joiner knocks again. A joiner keeps its side.
@@ -1228,6 +1245,7 @@ export class Groups {
         const came = cameAt(timestamp, stored, this.now());
         if (mentioned) this.lastMentionAt.set(state.id, Math.max(this.lastMentionAt.get(state.id) ?? 0, came));
         if (m.sender !== session.myKey) this.lastPeerMessageAt.set(state.id, Math.max(this.lastPeerMessageAt.get(state.id) ?? 0, came));
+        noteCame(this.stored.get(state.id), came, m.sender !== session.myKey, mentioned);
         // What the member was typing arrived: it is not typing any more.
         this.typings.messageFrom(state.id, m.sender);
       },

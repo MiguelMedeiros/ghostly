@@ -6,7 +6,7 @@ import {
 } from "@ghostly/core";
 import type { GroupEvent, GroupJoinStage, GroupView, StoredGroup, StoredMessage } from "../shared/types";
 import { groupReply } from "../shared/replies";
-import { FramesTaken, cameAt, editKey, eventTime, mentionAt, mentionFields, peerMessageAt, type GroupStore, type GroupsHost } from "./groups";
+import { FramesTaken, cameAt, cameOrWritten, editKey, eventTime, mentionAt, mentionFields, noteCame, peerMessageAt, type GroupStore, type GroupsHost } from "./groups";
 import { traceJoin } from "./joinTrace";
 
 /** The line a change of a group's picture leaves in its history (both profiles). */
@@ -258,9 +258,12 @@ export class Communities {
       const history = await this.store.getMessages(MESSAGE_LINK(group.id)), said = history.filter(m => !m.event && !m.groupPay);
       const last = said[said.length - 1], lastPeer = [...said].reverse().find(m => m.sender !== "me");
       if (last) this.lastMessageAt.set(group.id, last.timestamp);
-      if (lastPeer) this.lastPeerMessageAt.set(group.id, lastPeer.timestamp);
+      // A message that came later than it was written counts from when it came, as it did while the app ran (`noteCame`).
+      const peerAt = cameOrWritten(lastPeer?.timestamp, lastPeer ? group.came?.peer : undefined);
+      if (peerAt) this.lastPeerMessageAt.set(group.id, peerAt);
       const mention = [...history].reverse().find(m => m.mentioned);
-      if (mention) this.lastMentionAt.set(group.id, mention.timestamp);
+      const mentionAt = cameOrWritten(mention?.timestamp, mention ? group.came?.mention : undefined);
+      if (mentionAt) this.lastMentionAt.set(group.id, mentionAt);
       // Admissions in flight did not survive the restart; a joiner keeps its side.
       for (const [, linkId] of this.host.entries(group.id)) if (group.joining?.linkId !== linkId) await this.host.closeEdge(linkId);
       // The edges of the last run stay a while, whatever the topology wants at first (see `reconcile`).
@@ -1125,6 +1128,7 @@ export class Communities {
         const came = cameAt(timestamp, stored, this.now());
         if (mentioned) this.lastMentionAt.set(id, Math.max(this.lastMentionAt.get(id) ?? 0, came));
         if (m.sender !== session.myKey) this.lastPeerMessageAt.set(id, Math.max(this.lastPeerMessageAt.get(id) ?? 0, came));
+        noteCame(this.stored.get(id), came, m.sender !== session.myKey, mentioned);
       },
       // Outside the session's queue, in order: what they carry (a payment) may send through the session again.
       app: m => this.deliver(id, () => this.host.communityApp?.(id, m.sender, m.frame)),

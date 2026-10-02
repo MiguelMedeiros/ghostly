@@ -36,6 +36,9 @@ describe("a group's unread mark and a message that reaches me late", { timeout: 
     await bob.groups.send(id, "my reply");
     await world.until(() => world.texts(bob, id).includes("written before Bob looked"), MESH_GOSSIP_MS + 10_000);
     expect(world.view(bob, id)!.lastPeerMessageAt).toBeGreaterThan(readAt);
+    // Bob's app starts again before he opens the group: it is still unread (its history alone says the message is old).
+    await world.restart(bob);
+    expect(world.view(bob, id)!.lastPeerMessageAt).toBeGreaterThan(readAt);
   });
 
   it("in a community: one caught up when my hub's edge comes back after I looked at the group is unread", async () => {
@@ -53,5 +56,24 @@ describe("a group's unread mark and a message that reaches me late", { timeout: 
     world.cut = null;
     await world.until(() => world.texts(bob, id).includes("written before Bob looked"), 3 * 60_000);
     expect(world.view(bob, id)!.lastPeerMessageAt).toBeGreaterThan(readAt);
+    // The same after Bob's app starts again (a community saves what a message moved a second later, in a batch).
+    await new Promise(r => setTimeout(r, 1_100));
+    await world.restart(bob);
+    expect(world.view(bob, id)!.lastPeerMessageAt).toBeGreaterThan(readAt);
+  });
+
+  it("a mention that reached me late is still marked after a restart", async () => {
+    const { world, peers, id } = await groupOf("mesh", ["alice", "bob", "carol"]);
+    const [alice, bob] = peers;
+    const bobKey = world.view(bob, id)!.myKey!;
+    world.cut = (a, b) => (a === alice && b === bob) || (a === bob && b === alice);
+    await world.run(3_000);
+    await alice.groups.send(id, "@bob look", [{ k: bobKey, o: 0, l: 4 }]);
+    await world.run(5_000);
+    const readAt = world.now;
+    await world.until(() => world.texts(bob, id).includes("@bob look"), MESH_GOSSIP_MS + 10_000);
+    expect(world.view(bob, id)!.lastMentionAt).toBeGreaterThan(readAt);
+    await world.restart(bob);
+    expect(world.view(bob, id)!.lastMentionAt).toBeGreaterThan(readAt);
   });
 });
