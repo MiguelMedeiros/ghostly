@@ -18,6 +18,7 @@ import { fitSignedPairedSignal, verifyPairedSignal } from "./pairedSignal";
 import { parseRtcSignal } from "./signal";
 import { PairedSession, type PairingState, type PairingCredentials, type PaymentMethodName } from "./pairedSession";
 import { DataLink, type DataLinkState } from "./datalink";
+import type { DirectEvidence } from "./directPath";
 import {
   CHUNK_KIND,
   LIMITS,
@@ -364,6 +365,8 @@ export interface GhostLinkEvents {
   onWakeSupport?(supported: boolean): void;
   onStatus?(status: LinkStatus): void;
   onDataLinkState?(state: DataLinkState): void;
+  /** What a WebRTC attempt of this link said about direct connections from this device (`directPath.ts`). */
+  onDirectEvidence?(evidence: DirectEvidence): void;
   onPoll?(poll: { polling: boolean; nextInMs: number }): void;
   /** The peer is sending a file. Return where to put it, or null (or a reason) to refuse. */
   onFileStored?(file: FileInfo): Promise<string | undefined>;
@@ -829,6 +832,7 @@ export class GhostLink {
       // An answer that did not connect is made again only while the contact's packet still carries that offer.
       offerStanding: ts => !this.leaving && !this.stopped && !this.streamBlocked && this.peerOfferTs() === ts,
       onAnswerReplaced: () => this.redial(),
+      onDirect: evidence => events.onDirectEvidence?.(evidence),
       onOpen: channel => {
         if (this.streamBlocked || this.keyStopped) { channel.close(); return; }
         const plan = this.switcher.pending;

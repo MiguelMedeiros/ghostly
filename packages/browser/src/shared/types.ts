@@ -1461,6 +1461,11 @@ export interface EngineState {
     /** False where this client has no WebRTC (Ghostly Desktop on Linux: WebKitGTK has none). Absent where it has. */
     webrtc?: false;
     /**
+     * This device's own WebRTC attempts say direct connections do not get through its network (a VPN, a firewall, a
+     * carrier's NAT: `DirectPathWatch` in packages/core). Chats still go live through relays. Absent otherwise.
+     */
+    directBlocked?: true;
+    /**
      * False where a group's links have no transport at all here: no WebRTC and no native transport (WISP 9xx §
      * Transports), so no member of a group can be reached from it. Absent where they have one (the Linux Desktop runs
      * Iroh and HyperDHT).

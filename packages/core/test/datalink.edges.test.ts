@@ -669,3 +669,74 @@ describe("DataLink answers a standing offer again when its answer did not connec
     expect(answers(b).at(-1)).toMatchObject({ t: "a", o: NOW + 31_000 });
   });
 });
+
+describe("DataLink says what each attempt showed about direct connections (directPath.ts)", () => {
+  /** A connection whose local description lists these candidates beside its host one. */
+  const gathering = (...lines: string[]) => (pc: FakePeerConnection) => {
+    const describe = pc.setLocalDescription.bind(pc);
+    pc.setLocalDescription = async description => describe({ ...description, sdp: description.sdp + lines.map(line => `a=candidate:${line}\r\n`).join("") });
+  };
+  const SRFLX = "2 1 udp 1677729535 203.0.113.7 40000 typ srflx raddr 0.0.0.0 rport 0";
+  const SYMMETRIC = [40000, 40001, 40002].map(port => `2 1 udp 1677729535 203.0.113.7 ${port} typ srflx raddr 0.0.0.0 rport 0`);
+  const answerTo = (offer: RtcSignal) => JSON.stringify({ ...offerFrom({ t: "a", ts: NOW + 1_000, s: "active" }), o: offer.ts });
+
+  it("an attempt that opens says so, and says when that connection closes", async () => {
+    const onDirect = vi.fn();
+    const a = link("aaaa", "bbbb", () => {}, { onDirect });
+    await a.dl.connect();
+    await a.dl.handleSignal(answerTo(parseRtcSignal(a.lastSignal())!));
+    a.pc().channel.open();
+    expect(onDirect.mock.calls).toEqual([["open"]]);
+    a.pc().setConnectionState("failed");
+    expect(onDirect.mock.calls).toEqual([["open"], ["closed"]]);
+  });
+
+  it("an answered offer that never connects: no public candidate of its own, a port per STUN server, or no path", async () => {
+    for (const [candidates, evidence] of [[[], "no-public"], [SYMMETRIC, "symmetric"], [[SRFLX], "no-path"]] as const) {
+      const onDirect = vi.fn();
+      const a = link("aaaa", "bbbb", gathering(...candidates), { onDirect });
+      await a.dl.connect();
+      await a.dl.handleSignal(answerTo(parseRtcSignal(a.lastSignal())!));
+      a.pc().setConnectionState("failed");
+      expect(onDirect.mock.calls, evidence).toEqual([[evidence]]);
+      expect(a.dl.state).toBe("idle");
+    }
+  });
+
+  it("an offer nobody answered says nothing: the contact may be away", async () => {
+    const onDirect = vi.fn();
+    const a = link("aaaa", "bbbb", () => {}, { onDirect });
+    await a.dl.connect();
+    vi.advanceTimersByTime(CONNECT_TIMEOUT_MS);
+    expect(a.dl.state).toBe("idle");
+    expect(onDirect).not.toHaveBeenCalled();
+  });
+
+  it("an answerer says only what is its own: nothing when it had public candidates, once however often it answered again", async () => {
+    const reachable = vi.fn();
+    const b = link("bbbb", "aaaa", gathering(SRFLX), { onDirect: reachable });
+    await b.dl.handleSignal(JSON.stringify(offerFrom()));
+    b.pc().setConnectionState("failed");
+    expect(b.dl.state).toBe("idle");
+    expect(reachable).not.toHaveBeenCalled();
+
+    const onDirect = vi.fn();
+    const c = link("bbbb", "aaaa", () => {}, { onDirect, offerStanding: () => true });
+    await c.dl.handleSignal(JSON.stringify(offerFrom()));
+    for (let again = 0; again <= REANSWERS; again++) {
+      c.pc().setConnectionState("failed");
+      await vi.advanceTimersByTimeAsync(0);
+    }
+    expect(c.dl.state).toBe("idle");
+    expect(onDirect.mock.calls).toEqual([["no-public"]]);
+  });
+
+  it("a connection that gathers no candidate at all, every time, says this device has no public candidate", async () => {
+    const onDirect = vi.fn();
+    const a = link("aaaa", "bbbb", pc => { pc.stalls = true; pc.iceGatheringState = "gathering"; }, { onDirect });
+    const connecting = a.dl.connect();
+    await vi.advanceTimersByTimeAsync(GATHER_ATTEMPTS * GATHER_STALL_MS);
+    await connecting;
+    expect(onDirect.mock.calls).toEqual([["no-public"]]);
+  });
+});

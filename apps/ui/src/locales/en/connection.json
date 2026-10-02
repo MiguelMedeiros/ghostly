@@ -19,6 +19,11 @@
     "why": "Why"
   },
   "dhtOnly": "DHT only",
+  "directBlocked": {
+    "hint": "Direct connections are blocked on this network (a VPN or firewall?). Chats still work through relays, but connect more slowly.",
+    "info": "This device's recent direct connection attempts all failed: no public address was found, or several contacts could not be reached directly. A VPN, a firewall or a mobile carrier can cause this, and the app cannot tell which. Messages and files go through relays or the DHT instead. A relay sees which devices talk and when, never what they say. Calls need a direct path or a TURN server (Settings, Network). This note goes away when a direct connection works or the network changes.",
+    "title": "Direct connections blocked"
+  },
   "discovery": {
     "dhtDirect": "DHT direct",
     "failing": "failing",

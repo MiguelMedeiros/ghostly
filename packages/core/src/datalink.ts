@@ -1,4 +1,5 @@
 import { sdpHasCandidates, waitForIceGathering } from "./callSignal";
+import { symmetricNat, type DirectEvidence } from "./directPath";
 import { wrapDataChannel, type FrameChannel } from "./frames";
 import { traceLink } from "./linkTrace";
 import {
@@ -51,7 +52,16 @@ export interface DataLinkOptions {
    * applied here is gone): the answerer is there, so the caller may dial again now rather than at its next look.
    */
   onAnswerReplaced?: () => void;
+  /**
+   * What an attempt said about direct connections from this device (`directPath.ts`): it opened (and, later, closed);
+   * it did not connect and this device had no public candidate for it, or a public port per STUN server; or this
+   * side's offer was answered and no path connected.
+   */
+  onDirect?: (evidence: DirectEvidence) => void;
 }
+
+/** A candidate another network can reach: server reflexive (STUN answered), relayed (TURN), or learnt from the peer. */
+const PUBLIC_CANDIDATE = /^a=candidate:.* typ (srflx|relay|prflx)\b/m;
 
 export const CONNECT_TIMEOUT_MS = 90_000;
 const ICE_GATHERING_TIMEOUT_MS = 5_000;
@@ -123,7 +133,7 @@ export class DataLink {
       this.lastSignalTs = signal.ts;
       const wasOpen = this.state === "open";
       this.teardown();
-      if (wasOpen) this.options.onClose();
+      if (wasOpen) { this.options.onDirect?.("closed"); this.options.onClose(); }
       this.answered = { offer: signal, again: 0 };
       await this.answer(signal);
     } else if (this.state === "connecting" && this.myOfferTs && signal.o === this.myOfferTs && this.pc) {
@@ -173,6 +183,10 @@ export class DataLink {
   private failed(): void {
     const answered = this.state === "connecting" ? this.answered : null;
     const left = answered ? CONNECT_TIMEOUT_MS - (Date.now() - answered.offer.ts) : 0;
+    // Both descriptions were exchanged (this side's offer answered, or its answer out) and nothing connected.
+    const local = this.pc?.localDescription?.sdp ?? "";
+    const evidence: DirectEvidence | null = this.state !== "connecting" || !this.pc ? null
+      : !PUBLIC_CANDIDATE.test(local) ? "no-public" : symmetricNat(local) ? "symmetric" : this.myOfferTs ? "no-path" : null;
     if (answered && answered.again < REANSWERS && left > REANSWER_MARGIN_MS && this.options.offerStanding?.(answered.offer.ts)) {
       answered.again++;
       traceLink(this.options.myPubKeyZ32, "reanswer", { again: answered.again, leftMs: left });
@@ -181,6 +195,7 @@ export class DataLink {
       return;
     }
     this.reset();
+    if (evidence) this.options.onDirect?.(evidence);
   }
 
   private async answer(offer: RtcSignal): Promise<void> {
@@ -229,7 +244,7 @@ export class DataLink {
         return pc;
       }
       traceLink(this.options.myPubKeyZ32, "ice-stalled", { ms, offer, attempt });
-      if (attempt >= GATHER_ATTEMPTS) { this.reset(); return null; }
+      if (attempt >= GATHER_ATTEMPTS) { this.reset(); this.options.onDirect?.("no-public"); return null; }
       stalled = pc;
     }
   }
@@ -247,6 +262,7 @@ export class DataLink {
       this.setState("open");
       this.options.setFastPoll(false);
       this.options.publishSignal(null);
+      this.options.onDirect?.("open");
       this.options.onOpen(wrapDataChannel(dc));
     });
     dc.addEventListener("close", () => {
@@ -313,7 +329,7 @@ export class DataLink {
     this.setState("idle");
     this.options.setFastPoll(false);
     this.options.publishSignal(null);
-    if (wasOpen) this.options.onClose();
+    if (wasOpen) { this.options.onDirect?.("closed"); this.options.onClose(); }
   }
 
   private setState(state: DataLinkState): void {
