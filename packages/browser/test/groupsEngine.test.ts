@@ -82,7 +82,8 @@ class World {
         return id;
       },
       entries: groupId => new Map([...peer.entries.entries()].filter(([, e]) => e.g === groupId).map(([id, e]) => [e.peer, id])),
-      publish: async (identity, records) => { this.publishes++; this.pkarr.set(identity.pubKeyZ32, records); },
+      // `publishes` counts the writes someone waits for (a joiner's knock), not a background one (the admin's empty knock record).
+      publish: async (identity, records, background) => { if (!background) this.publishes++; this.pkarr.set(identity.pubKeyZ32, records); },
       resolve: async key => { this.resolves.set(name, (this.resolves.get(name) ?? 0) + 1); return this.pkarr.get(key) ?? null; },
       edgeNick: () => undefined,
       storeMessage: async message => { if (!peer.messages.some(m => m.id === message.id)) peer.messages.push(message); },
