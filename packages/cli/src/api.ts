@@ -19,7 +19,7 @@ import { SERVICE_METHODS } from "./services";
 import { BACKUP_METHODS } from "./backup";
 import { CALL_METHODS } from "./calls/api";
 import { WALLET_METHODS } from "./wallets";
-import { chatDetailsJson, chatJson, chatMessageJson, groupJson, groupMessageJson, messageJson, type MessageJson } from "./views";
+import { chatDetailsJson, chatJson, chatMessageJson, groupJson, groupMessageJson, isLive, messageJson, type MessageJson } from "./views";
 
 /**
  * A text past what a chat or a group carries (16 KiB of UTF-8, as the engine counts it: trimmed) is refused before the
@@ -107,7 +107,7 @@ const METHODS: Record<string, Method> = {
     return {
       version: ctx.version, profile: ctx.runtime.paths.name, mode: ctx.mode, pid: process.pid,
       online: s.settings.online, name: s.settings.nick || null, webrtc: ctx.runtime.webrtc, calls: ctx.runtime.callsUnavailable === null,
-      chats: s.links.length, live: s.links.filter((l) => l.textDelivery === "stream").length, groups: s.groups.length,
+      chats: s.links.length, live: s.links.filter(isLive).length, groups: s.groups.length,
       discovery: { protocol: s.transport.protocol, relays: s.transport.relays },
       events: { lastSeq: ctx.hub.lastSeq },
     };
@@ -376,9 +376,10 @@ const METHODS: Record<string, Method> = {
     const view = await waitForState(ctx, (s) => {
       const now = s.links.find((l) => l.id === link.id);
       if (!now) throw new CliError("not_found", `Chat ${link.id} was removed`);
-      const ok = until === "live" ? now.textDelivery === "stream"
+      // Live: a session that exists now, never one remembered from the last run (`isLive`).
+      const ok = until === "live" ? isLive(now)
         : until === "text" ? now.textDelivery === "stream" || now.textDelivery === "dht" || now.textDelivery === "hold"
-        : !!now.pairingProgress?.peerSeen || now.pairing?.status === "ready" || now.textDelivery === "stream";
+        : !!now.pairingProgress?.peerSeen || now.pairing?.status === "ready" || isLive(now);
       return ok ? now : undefined;
     }, ms, `chat ${link.id} to be ${until}`);
     return chatJson(view);

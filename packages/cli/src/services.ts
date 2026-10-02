@@ -6,6 +6,7 @@ import { pipeline } from "node:stream/promises";
 import { GhostlyHttpError, LIMITS, type ClientRequest, type ClientResponse, type LocalFetch } from "@ghostly/core";
 import { bool, chatOf, node, num, state, str, type Method } from "./apiKit";
 import { CliError } from "./errors";
+import { isLive } from "./views";
 
 /**
  * Shared services (WISP 700/701, WISP 11xx phase 3b): a web app on this machine a contact may open over the chat's live
@@ -206,7 +207,7 @@ export const SERVICE_METHODS: Record<string, Method> = {
   /** What a contact shares with this profile (while its app is live). */
   async "service.peer"(ctx, params) {
     const link = chatOf(ctx, params);
-    return { chat: link.id, live: link.textDelivery === "stream", services: link.peerServices ?? [] };
+    return { chat: link.id, live: isLive(link), services: link.peerServices ?? [] };
   },
   /** A contact's shared app on a loopback port of this machine, as the Desktop opens it in a window. */
   async "service.open"(ctx, params) {
