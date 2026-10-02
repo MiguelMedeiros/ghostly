@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { DataLink, GATHER_ATTEMPTS, GATHER_STALL_MS, REANSWERS, type DataLinkOptions, type DataLinkState } from "../src/datalink";
+import { DataLink, GATHER_ATTEMPTS, GATHER_STALL_MS, REANSWERS, STALLED_EVIDENCE_MS, type DataLinkOptions, type DataLinkState } from "../src/datalink";
 import { DATA_CHANNEL_ID, DATA_CHANNEL_LABEL, RTC_SIGNAL_MAX_AGE_MS, parseRtcSignal, type RtcSignal } from "../src/signal";
 
 // covers: transport.webrtc, core.frames
@@ -701,6 +701,27 @@ describe("DataLink says what each attempt showed about direct connections (direc
       expect(onDirect.mock.calls, evidence).toEqual([[evidence]]);
       expect(a.dl.state).toBe("idle");
     }
+  });
+
+  it("an answered offer given up for another transport that went live says the same, once it had its seconds to connect", async () => {
+    const onDirect = vi.fn();
+    const a = link("aaaa", "bbbb", gathering(SRFLX), { onDirect });
+    await a.dl.connect();
+    await a.dl.handleSignal(answerTo(parseRtcSignal(a.lastSignal())!));
+    vi.advanceTimersByTime(STALLED_EVIDENCE_MS);
+    a.dl.close();
+    expect(onDirect.mock.calls).toEqual([["no-path"]]);
+
+    // Closed sooner (the other transport was simply quicker), or before any answer: nothing.
+    const quick = vi.fn();
+    const b = link("aaaa", "bbbb", gathering(SRFLX), { onDirect: quick });
+    await b.dl.connect();
+    b.dl.close();
+    await b.dl.connect();
+    await b.dl.handleSignal(answerTo(parseRtcSignal(b.lastSignal())!));
+    vi.advanceTimersByTime(STALLED_EVIDENCE_MS - 1);
+    b.dl.close();
+    expect(quick).not.toHaveBeenCalled();
   });
 
   it("an offer nobody answered says nothing: the contact may be away", async () => {

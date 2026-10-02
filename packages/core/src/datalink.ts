@@ -60,6 +60,11 @@ export interface DataLinkOptions {
   onDirect?: (evidence: DirectEvidence) => void;
 }
 
+/**
+ * An attempt ended from outside (another transport went live first) that had both descriptions for this long and no
+ * connection says what one that failed does: a path that exists connects within a second or two.
+ */
+export const STALLED_EVIDENCE_MS = 5_000;
 /** A candidate another network can reach: server reflexive (STUN answered), relayed (TURN), or learnt from the peer. */
 const PUBLIC_CANDIDATE = /^a=candidate:.* typ (srflx|relay|prflx)\b/m;
 
@@ -91,6 +96,8 @@ export class DataLink {
   private lastSignalTs = 0;
   /** The peer's description as this connection was given it: Chrome shows it as `remoteDescription` only once applied. */
   private remoteSdp: string | null = null;
+  /** When the connection had both descriptions (`connecting`). */
+  private connectingSince = 0;
   private connectTimer: ReturnType<typeof setTimeout> | null = null;
   private disconnectTimer: ReturnType<typeof setTimeout> | null = null;
   /** The offer this side answered in the current attempt, and how many times it answered it again. */
@@ -171,8 +178,22 @@ export class DataLink {
   }
 
   close(): void {
+    // Given up for another transport that went live while this one had long had both descriptions: evidence all the same.
+    const evidence = Date.now() - this.connectingSince >= STALLED_EVIDENCE_MS ? this.directEvidence() : null;
     this.answered = null;
     this.reset();
+    if (evidence) this.options.onDirect?.(evidence);
+  }
+
+  /**
+   * What this attempt says about direct connections if it ends now without opening: nothing unless both descriptions
+   * were exchanged (this side's offer answered, or its answer out). Then, what this device gathered: no public
+   * candidate, a public port per STUN server, or (for the side that offered) candidates that read as reachable.
+   */
+  private directEvidence(): DirectEvidence | null {
+    if (this.state !== "connecting" || !this.pc) return null;
+    const local = this.pc.localDescription?.sdp ?? "";
+    return !PUBLIC_CANDIDATE.test(local) ? "no-public" : symmetricNat(local) ? "symmetric" : this.myOfferTs ? "no-path" : null;
   }
 
   /**
@@ -183,10 +204,7 @@ export class DataLink {
   private failed(): void {
     const answered = this.state === "connecting" ? this.answered : null;
     const left = answered ? CONNECT_TIMEOUT_MS - (Date.now() - answered.offer.ts) : 0;
-    // Both descriptions were exchanged (this side's offer answered, or its answer out) and nothing connected.
-    const local = this.pc?.localDescription?.sdp ?? "";
-    const evidence: DirectEvidence | null = this.state !== "connecting" || !this.pc ? null
-      : !PUBLIC_CANDIDATE.test(local) ? "no-public" : symmetricNat(local) ? "symmetric" : this.myOfferTs ? "no-path" : null;
+    const evidence = this.directEvidence();
     if (answered && answered.again < REANSWERS && left > REANSWER_MARGIN_MS && this.options.offerStanding?.(answered.offer.ts)) {
       answered.again++;
       traceLink(this.options.myPubKeyZ32, "reanswer", { again: answered.again, leftMs: left });
@@ -335,6 +353,7 @@ export class DataLink {
   private setState(state: DataLinkState): void {
     if (this.state === state) return;
     this.state = state;
+    if (state === "connecting") this.connectingSince = Date.now();
     this.options.onState?.(state);
   }
 }
