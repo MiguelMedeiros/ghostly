@@ -2,7 +2,8 @@
   "announce": {
     "message": "{{name}}: {{text}}",
     "messages": "{{count}} رسائل جديدة",
-    "messagesFrom": "{{count}} رسائل جديدة من {{name}}"
+    "messagesFrom": "{{count}} رسائل جديدة من {{name}}",
+    "pinMoved": "نُقلت إلى الموضع {{place}} من {{count}} محادثات مثبتة"
   },
   "audio": {
     "cantPlay": "لا يمكن لهذا الجهاز تشغيل هذا الصوت ({{format}}). نزّله للاستماع إليه.",
@@ -218,6 +219,10 @@
   "menu": {
     "continueNew": "المتابعة في محادثة جديدة",
     "hold": "الاحتفاظ بالرسائل…",
+    "moveDown": "تحريك لأسفل",
+    "moveFirst": "هي الأولى بالفعل",
+    "moveLast": "هي الأخيرة بالفعل",
+    "moveUp": "تحريك لأعلى",
     "pin": "تثبيت المحادثة",
     "refresh": "تحديث",
     "techInfo": "معلومات تقنية",

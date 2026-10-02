@@ -19,6 +19,11 @@
     "why": "Por quê"
   },
   "dhtOnly": "Só DHT",
+  "directBlocked": {
+    "hint": "As conexões diretas estão bloqueadas nesta rede (VPN ou firewall?). As conversas ainda funcionam por relays, mas conectam mais devagar.",
+    "info": "As tentativas recentes de conexão direta deste dispositivo falharam todas: nenhum endereço público foi encontrado, ou vários contatos não puderam ser alcançados diretamente. Uma VPN, um firewall ou uma operadora de celular pode causar isso, e o app não sabe dizer qual. Mensagens e arquivos passam por relays ou pela DHT. Um relay vê quais dispositivos conversam e quando, nunca o que dizem. Chamadas precisam de um caminho direto ou de um servidor TURN (Configurações, Rede). Este aviso some quando uma conexão direta funciona ou a rede muda.",
+    "title": "Conexões diretas bloqueadas"
+  },
   "discovery": {
     "dhtDirect": "DHT direta",
     "failing": "falhando",

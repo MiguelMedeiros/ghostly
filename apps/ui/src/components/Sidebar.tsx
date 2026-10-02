@@ -24,6 +24,7 @@ import {
   listSessions,
   isSessionPinned,
   setSessionPinned,
+  movePinnedTo,
   deleteSession,
   getUnreadCount,
   markSessionAsRead,
@@ -34,6 +35,7 @@ import { createPairedChat } from "../lib/pairedChat";
 import { chatPath } from "../lib/url";
 import type { ChatSession } from "../lib/types";
 import { useAppNavigation } from "../hooks/useAppNavigation";
+import { useRowReorder } from "../hooks/useRowReorder";
 import { shownContactName, useContactFaces } from "./identities/contactFace";
 import { reactionNoteText } from "../lib/reactions";
 
@@ -54,6 +56,9 @@ function groupsFound<G extends { name: string }>(groups: G[], search: string): G
   const q = foldText(search);
   return search ? groups.filter(g => found(g.name, q)) : groups;
 }
+
+/** The pinned chats among `sessions`, as the list shows them. (Outside the component, as `groupsFound`.) */
+const pinnedRows = (sessions: ChatSession[]): string[] => sessions.filter(s => isSessionPinned(s.id)).map(s => s.id);
 
 export function Sidebar() {
   const nav = useAppNavigation();
@@ -177,6 +182,9 @@ export function Sidebar() {
     return s.messages.some((m) => found(m.text, query));
   });
   const shownGroups = groupsFound(groups, search);
+  // The pinned chats are put in order by dragging one among the others; a search shows only some of them, so not then.
+  const pinnedIds = pinnedRows(search ? [] : filtered);
+  const reorder = useRowReorder({ ids: pinnedIds, enabled: !search, onMove: movePinnedTo });
 
   return (
     <div
@@ -305,6 +313,9 @@ export function Sidebar() {
               onTogglePin={() => setSessionPinned(session.id, !isSessionPinned(session.id))}
               onDelete={(e) => handleDelete(session.id, e)}
               deleteLabel={t("sidebar.deleteChat")}
+              reorder={pinnedIds.length > 1 && pinnedIds.includes(session.id)
+                ? { props: reorder.rowProps(session.id), dragging: reorder.dragging === session.id, drop: reorder.drop?.id === session.id ? reorder.drop.edge : undefined }
+                : undefined}
             />
           );
         })}

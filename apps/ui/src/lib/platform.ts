@@ -102,6 +102,8 @@ export interface NetworkSettings {
    * relays". Writes go to the relays either way, so contacts on the web see this app's packets.
    */
   readRelays?: boolean;
+  /** This device's own attempts say direct connections are blocked on its network (a VPN, a firewall): chats go through relays. */
+  directBlocked?: boolean;
 }
 
 /** What a person can do to a files/3 transfer: `resend` a stuck one they send, `request` again one they receive. */

@@ -41,6 +41,7 @@ import { assertConfirmedReal, createTiming, WALLET_NAMES, createFailure, crossNe
 import { migrateWalletNetworks } from "./paymentAdapters/walletNetworks";
 import { perNetwork, type PerNetwork } from "./paymentAdapters/perNetwork";
 import { COMMUNITY_EDIT_FRAME, INVITE_TAKEN, LIVENESS_MISSED_PINGS, LIVENESS_PING_MS, MAX_GROUP_NAME_LENGTH, engineError, groupName, parseCommunityEdit, traceLink } from "@ghostly/core";
+import { DirectPathWatch } from "@ghostly/core";
 import { GROUP_WAKE_FRAME, GROUP_WAKE_RECEIVE_LIMIT, GroupWakeLimiter, RateWindow, WAKE_CALL_INTERVAL_MS, WakeLimiter, groupWakeFrame, groupWakes, parseGroupWakeFrame, checkPushEndpoint, newWakeToken, relayRequest, vapidKeysMatch, wakeRequest, type PushRequest, type WakeKind, type WakeTarget } from "@ghostly/core";
 import { COMMUNITY_REACTION_FRAME, GROUP_REACTION_FRAME, REACTION_LIMITS, ReactionWindow, queueReaction, readReaction, validReactionNumber, wireReaction, type WireReaction } from "@ghostly/core";
 import { COMMUNITY_PIN_FRAME, PIN_LIMITS, mayPin, pinIsNewer, pinNumberHolds, readPin, type GroupPinFrame, type WirePin } from "@ghostly/core";
@@ -451,6 +452,8 @@ export class GhostlyNode implements EngineImplementation {
   private readonly relays: RelayTransport | null;
   /** Other profiles of this device, looked at for new messages (WISP 04 § Checking other profiles). */
   private readonly profilePeek: ProfilePeek;
+  /** Whether this device's WebRTC attempts say direct connections are blocked on its network (`directPath.ts`). */
+  private readonly directPath = new DirectPathWatch(() => { if (!this.shuttingDown) this.emitState(); });
   private readonly pollIntervals: PollIntervals;
   private readonly localFetch: LocalFetch;
   private readonly links = new Map<string, LiveLink>();
@@ -1363,6 +1366,7 @@ export class GhostlyNode implements EngineImplementation {
     this.shuttingDown = true;
     // First, before anything that waits: every live contact hears this app is going, and watches for it to come back.
     this.depart();
+    this.directPath.close();
     if (this.relayRetry) clearTimeout(this.relayRetry);
     if (this.activeSlotRetry) clearTimeout(this.activeSlotRetry);
     for (const timer of this.resumeTimers.values()) clearTimeout(timer);
@@ -1421,6 +1425,7 @@ export class GhostlyNode implements EngineImplementation {
         ...this.transport.describe(), ...(this.options.irohWeb ? { iroh: { relays: this.irohRelays, defaults: [...DEFAULT_IROH_RELAYS] } } : {}),
         ...(this.transport.configure && { direct: true }), ...(this.transport.discovery && { discovery: this.transport.discovery() }),
         ...(typeof RTCPeerConnection === "undefined" && { webrtc: false as const }),
+        ...(this.directPath.blocked && { directBlocked: true as const }),
         // A group's link goes over WebRTC, or a native transport where one side has none (WISP 9xx § Transports).
         ...(typeof RTCPeerConnection === "undefined" && !Object.keys(this.nativeFactories).length && { groupLinks: false as const }),
       },
@@ -2011,7 +2016,7 @@ export class GhostlyNode implements EngineImplementation {
    * (`network`): relays left alone for failing on the old network are asked again at once.
    */
   wake(params: { network?: boolean } = {}): void {
-    if (params.network) this.transport.networkChanged?.();
+    if (params.network) { this.transport.networkChanged?.(); this.directPath.reset(); }
     for (const live of this.links.values()) live.link?.wake();
     this.hold.wake();
     // A wallet source that could not be reached at start-up (no network yet, a server asleep) tries again.
@@ -4432,6 +4437,7 @@ export class GhostlyNode implements EngineImplementation {
           if (!entry && presence.nick && !live.link?.isDataLinkOpen) this.groups.edgeNick(group, peer, presence.nick);
           this.emitState(); },
         onPairingState: state => { live.pairing = state; this.emitState(); },
+        onDirectEvidence: evidence => this.directPath.note(peer, evidence),
         onDataLinkState: state => {
           traceJoin(group, `link.${state}`, { role });
           // The last moment the member was reachable on it: when it opens, and when it stops being open.
@@ -4660,6 +4666,7 @@ export class GhostlyNode implements EngineImplementation {
           live.peerAck = ack;
           this.emitState();
         },
+        onDirectEvidence: evidence => this.directPath.note(stored.peerPubKeyZ32, evidence),
         onDataLinkState: (state) => {
           const was = live.dataLink;
           live.dataLink = state;

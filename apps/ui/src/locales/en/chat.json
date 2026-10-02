@@ -2,7 +2,8 @@
   "announce": {
     "message": "{{name}}: {{text}}",
     "messages": "{{count}} new messages",
-    "messagesFrom": "{{count}} new messages from {{name}}"
+    "messagesFrom": "{{count}} new messages from {{name}}",
+    "pinMoved": "Moved to place {{place}} of {{count}} pinned chats"
   },
   "audio": {
     "cantPlay": "This device can't play this audio ({{format}}). Download it to listen.",
@@ -218,6 +219,10 @@
   "menu": {
     "continueNew": "Continue in a new chat",
     "hold": "Hold messages…",
+    "moveDown": "Move down",
+    "moveFirst": "Already first",
+    "moveLast": "Already last",
+    "moveUp": "Move up",
     "pin": "Pin chat",
     "refresh": "Refresh",
     "techInfo": "Tech Info",
