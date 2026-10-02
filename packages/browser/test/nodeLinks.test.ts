@@ -862,6 +862,13 @@ describe("private groups through the engine", () => {
     const legacy = row({ profile: undefined, participationSeed: undefined });
     const { node } = await started(legacy);
     await expect(node.createGroup({ name: "   " })).rejects.toThrow("Give the group a name");
+    // A name a group cannot have is refused, as a rename refuses it: it was cut at 48 without a word.
+    await expect(node.createGroup({ name: "x".repeat(65), profile: "mesh" })).rejects.toThrow("A group's name is 1 to 64 characters on one line");
+    // A new line is a space, and 64 characters fit.
+    const { groupId } = await node.createGroup({ name: " Book\nclub ", profile: "mesh" });
+    expect(node.getState().groups.find(g => g.id === groupId)?.name).toBe("Book club");
+    const long = await node.createGroup({ name: "y".repeat(64), profile: "mesh" });
+    expect(node.getState().groups.find(g => g.id === long.groupId)?.name).toBe("y".repeat(64));
     expect(() => node.inviteToGroup({ groupId: "g", linkId: legacy.id })).toThrow("Invite a paired contact");
     await expect(node.joinGroupByLink({ link: 42 as never })).rejects.toThrow("not a link to a group");
     await node.updateSettings({ settings: { online: false } });
