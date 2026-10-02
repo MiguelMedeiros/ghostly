@@ -236,7 +236,7 @@ When an edge opens, each side sends what it knows:
   "miss"?: { <sender>: { <epoch>: [ <seq>, … ] } }, "ask"?: [ <member key>, … ] }
 ```
 
-The side that is ahead answers with the commits the other lacks (each with the secret sealed for the other when it was in that epoch's roster and the secret is still held), `{ "t": "group-secrets", "g", "secrets": [ … ] }` for epochs the other was in but does not hold (at most sixteen to a frame, what apps from before revision 0.9 take), and its **own** messages the other lacks, from its bounded log and only for epochs the other was a member of. A member behind on the chain asks in turn.
+The side that is ahead answers with the commits the other lacks (each with the secret sealed for the other when it was in that epoch's roster and the secret is still held), `{ "t": "group-secrets", "g", "secrets": [ … ] }` for epochs the other was in but does not hold (at most sixteen to a frame, what apps from before revision 0.9 take), and its **own** messages the other lacks, from its bounded log and only for epochs the other was a member of. A member behind on the chain asks in turn, and answers too with its own messages the other lacks, for the epochs of its own chain the other was a member of: what it sent before it heard of the newer commits (a joiner's first message, written before its first edge opened and while the admin admitted someone else) would otherwise wait until the edge opened another time, since nobody asks it again once it has caught up. It hands on nothing for other members while behind: whom to hand on for is the newer roster's to say.
 
 **Any member hands on (revision 0.9).** A message whose author's edge to me is down can come from anyone else who received it:
 
