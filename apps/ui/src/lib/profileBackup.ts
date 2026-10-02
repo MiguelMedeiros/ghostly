@@ -403,6 +403,10 @@ function restoredRows(store: string, keys: IDBValidKey[], values: unknown[], fre
       return proof && typeof proof === "object" && typeof proof.secret === "string" && !proof.reserved ? { ...proof, unchecked: true } : value;
     });
   }
+  if (store === "swaps") {
+    // A swap as it stood when the backup was made: what it brings is checked like the copy's ecash.
+    return values.map((value) => (value && typeof value === "object" ? { ...value, restored: true } : value));
+  }
   if (store === "paymentIntents") {
     // An older copy cannot prove an unfinished attempt was never sent; it may not authorize a new one.
     return values.map((value) => {

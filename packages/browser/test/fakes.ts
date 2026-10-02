@@ -50,7 +50,12 @@ export const idbModule = {
   async transact(names: string[], work: (stores: Record<string, ReturnType<typeof objectStore>>) => void): Promise<void> {
     // Stage on a copy; commit only if everything went through.
     const staged = new Map([...db].map(([name, t]) => [name, new Map(t)]));
-    work(Object.fromEntries(names.map((name) => [name, objectStore(staged, name)])));
+    // Inside a transaction a read is a request, as IndexedDB's: its result is there when `onsuccess` is set.
+    const inTransaction = (name: string) => {
+      const plain = objectStore(staged, name);
+      return { ...plain, get: (key: string) => { const result = plain.get(key); return { result, set onsuccess(run: () => void) { run(); } }; } };
+    };
+    work(Object.fromEntries(names.map((name) => [name, inTransaction(name)])) as never);
     if (failures.nextTransact) {
       failures.nextTransact = false;
       throw new Error("QuotaExceededError");
@@ -87,6 +92,8 @@ const real = () => vi.importActual<typeof import("@cashu/cashu-ts")>("@cashu/cas
 export class FakeWallet {
   constructor(readonly url: string) {}
   async loadMint(): Promise<void> {}
+  /** A mint that restores (NUT-09), unless a test gives it info of its own. */
+  getMintInfo: () => unknown = () => ({ isSupported: () => ({ supported: true, params: [] }) });
   checkMintQuoteBolt11 = (...args: unknown[]) => mint.checkMintQuoteBolt11(...args);
   createMintQuoteBolt11 = (...args: unknown[]) => mint.createMintQuoteBolt11(this.url, ...args);
   /** Minting is prepared, written down, then sent: `mint.mintProofsBolt11` answers it, with the amount and the quote's id. */

@@ -672,8 +672,8 @@ export class GhostlyNode implements EngineImplementation {
     onMeltResolved: (melt, paid) => void this.lightnings[mintNetwork(melt.mint)].reportPaymentResolved(melt.request, paid, { paymentId: melt.paymentId, mint: melt.mint }),
     onTestMintNeeded: async (mint) => void (await this.walletAddMint({ url: mint })),
     // A redeem finished after its call was over: the chat it belongs to learns of it, and ecash of ours that came
-    // back this way ends its review as any ecash taken back does.
-    onSwapSettled: (swap, done) => void this.desk.onSwapSettled(swap, done).then(() => (swap.payment?.direction === "out" ? this.reviewTakenBack(swap.payment.id) : undefined)).catch(() => {}),
+    // back this way ends its review as any ecash taken back does. The wallet waits for this before it lets the swap go.
+    onSwapSettled: (swap, done) => this.desk.onSwapSettled(swap, done).then(() => (swap.payment?.direction === "out" ? this.reviewTakenBack(swap.payment.id) : undefined)),
   }, () => this.settings.mints);
   private registry?: ProviderRegistry;
   private providers() { return this.registry ??= this.options.providers ?? defaultRegistry(); }
@@ -1229,7 +1229,7 @@ export class GhostlyNode implements EngineImplementation {
       everything = view.history;
       // A network's own story: test ecash is not mixed into the story of real money, nor the reverse.
       const history = view.history.filter((tx) => !tx.mint || mintNetwork(tx.mint) === network);
-      networks[network] = { mints: this.withWaits(view.mints, awaiting.mints), balance: view.balance, history, feesPaid: history.reduce((sum, tx) => sum + tx.fee, 0),
+      networks[network] = { mints: this.withWaits(view.mints, awaiting.mints), balance: view.balance, setAside: view.setAside, openSwaps: view.openSwaps, history, feesPaid: history.reduce((sum, tx) => sum + tx.fee, 0),
         ark: this.arkWallets[network].view, bark: this.barkWallets[network].view, fedimint: this.fedimintWallets[network].view, spark: this.sparkWallets[network].view,
         usdt: this.usdtWallets[network].view, lightning: this.lightnings[network].view, lightnings: this.lightnings[network].views(), bitcoin: this.bitcoins[network].view, awaiting: awaiting.networks[network] };
     }

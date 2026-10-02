@@ -423,6 +423,15 @@ export interface PendingSwap {
   createdAt: number;
   /** When the request to the mint ended with no answer. The mint may still act on it for a moment after that. */
   attemptEndedAt?: number;
+  /**
+   * The inputs were given back (the swap was overdue with nothing signed), and it holds nothing any more. Still asked
+   * about for a while: a request that reached the mint late is recovered from what is written here.
+   */
+  released?: boolean;
+  /** What it brought is stored; only the chat of its payment is still to be told (the app closed in between). */
+  finished?: boolean;
+  /** Came with a restored copy of the profile: what it brings is as old as the copy, and is checked like the copy's ecash. */
+  restored?: boolean;
   /** `receive`: the token being redeemed. Redeeming it again while this is kept finishes this swap, and makes no other. */
   token?: string;
   /** `receive`: the history line of the ecash, written with it. */
@@ -589,6 +598,10 @@ export interface NetworkWalletsView {
   /** This network's Cashu mints (test mints and mints on this machine are Testnet's). */
   mints: MintView[];
   balance: number;
+  /** Cashu: sats held for a payment or a swap the mints have not settled yet. Not in `balance`, and not gone. */
+  setAside?: number;
+  /** Cashu: swaps at these mints that are not finished yet. Removing the wallet waits for them. */
+  openSwaps?: number;
   /** This network's history, newest first. */
   history: WalletTx[];
   feesPaid: number;
@@ -730,6 +743,9 @@ export interface WalletView {
   intents?: PaymentReview[];
   mints: MintView[];
   balance: number;
+  /** Cashu: see `NetworkWalletsView`. */
+  setAside?: number;
+  openSwaps?: number;
   /** Newest first. */
   history: WalletTx[];
   feesPaid: number;

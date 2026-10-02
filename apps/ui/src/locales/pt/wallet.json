@@ -212,6 +212,8 @@
     "removeMintConsent": "O que for pago a ele depois só aparece quando eu adicionar este mint de novo.",
     "removeMintHint": "Você pode adicioná-lo de novo depois.",
     "removeMintQuestion": "Remover {{name}}?",
+    "setAside": "{{amount}} {{unit}} reservados",
+    "setAsideInfo": "Reservados para um pagamento que o mint ainda não confirmou. Saem com o pagamento ou voltam ao seu saldo assim que o mint responder. Até lá, a carteira não pode ser removida.",
     "settings": "Configurações",
     "testBalance": "{{amount}} sats de teste (sem valor)",
     "testMintInvoice": "Aguardando o pagamento… Mints de teste marcam toda fatura como paga sozinhos, então esta só conta quando um contato a pagar em um chat. Para ter sats de teste agora, use Obter moedas de teste acima.",

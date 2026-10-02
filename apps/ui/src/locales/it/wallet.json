@@ -212,6 +212,8 @@
     "removeMintConsent": "Ciò che gli viene pagato dopo appare solo quando aggiungo di nuovo questo mint.",
     "removeMintHint": "Potrai aggiungerlo di nuovo più tardi.",
     "removeMintQuestion": "Rimuovere {{name}}?",
+    "setAside": "{{amount}} {{unit}} messi da parte",
+    "setAsideInfo": "Messi da parte per un pagamento che il mint non ha ancora confermato. Escono con il pagamento o tornano nel saldo appena il mint risponde. Fino ad allora il portafoglio non può essere rimosso.",
     "settings": "Impostazioni",
     "testBalance": "{{amount}} sats di prova (senza valore)",
     "testMintInvoice": "In attesa del pagamento… I mint di prova segnano da soli ogni fattura come pagata, quindi questa conta solo quando un contatto la paga in una chat. Per avere subito sats di prova, usa Ottieni monete di prova qui sopra.",

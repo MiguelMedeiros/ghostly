@@ -83,7 +83,7 @@ const knownIn = (amount: number, network: WalletNetwork, words: RemovalWords) =>
 const phraseHeld = (secrets: string[] | undefined) => !!secrets?.includes("mnemonic");
 
 /** The parts of a network's view a removal reads. */
-export type RemovalView = Partial<Pick<NetworkWalletsView, "balance" | "lightning" | "lightnings" | "bitcoin" | "ark" | "bark" | "spark" | "fedimint" | "usdt" | "awaiting">>;
+export type RemovalView = Partial<Pick<NetworkWalletsView, "balance" | "setAside" | "openSwaps" | "lightning" | "lightnings" | "bitcoin" | "ark" | "bark" | "spark" | "fedimint" | "usdt" | "awaiting">>;
 
 function items(type: WalletType, network: WalletNetwork, view: RemovalView | undefined, words: RemovalWords, card?: string) {
   const amount = (n: number) => type === "usdt" ? words.token(String(n), view?.usdt?.decimals ?? 6, network) : words.sats(n, network);
@@ -106,7 +106,9 @@ export function walletRemoval(type: WalletType, network: WalletNetwork, view: Re
   const base = { type, network, ...items(type, network, view, words, lnCard?.card ?? card), ...(lnCard ? { card: lnCard.card } : card !== undefined ? { card } : {}) };
   const pending = intents.filter((i) => i.method === type && UNFINISHED.has(i.state) && walletNetworkOf(i.network) === network).length;
   switch (type) {
-    case "cashu": return { ...base, custody: "device", held: known(view?.balance ?? 0), backup: "tokens", pending };
+    // What is set aside for a payment or a swap the mints have not settled is the wallet's too, and a swap still open
+    // is a payment not finished: the removal waits for it.
+    case "cashu": return { ...base, custody: "device", held: known((view?.balance ?? 0) + (view?.setAside ?? 0)), backup: "tokens", pending: pending + (view?.openSwaps ?? 0) };
     case "lightning": {
       const ln = lnCard ?? view?.lightning;
       // The mints' card holds nothing of its own (its ecash is the Cashu wallet's): it goes alone next to other cards.

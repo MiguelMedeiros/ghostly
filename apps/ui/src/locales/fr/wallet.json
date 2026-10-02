@@ -212,6 +212,8 @@
     "removeMintConsent": "Ce qui lui est payé ensuite n’apparaît qu’une fois ce mint ajouté à nouveau.",
     "removeMintHint": "Vous pourrez l’ajouter à nouveau plus tard.",
     "removeMintQuestion": "Retirer {{name}} ?",
+    "setAside": "{{amount}} {{unit}} mis de côté",
+    "setAsideInfo": "Mis de côté pour un paiement que le mint n'a pas encore confirmé. Ils partent avec le paiement ou reviennent dans votre solde dès que le mint répond. D'ici là, le portefeuille ne peut pas être supprimé.",
     "settings": "Réglages",
     "testBalance": "{{amount}} sats de test (sans valeur)",
     "testMintInvoice": "En attente du paiement… Les mints de test marquent chaque facture payée d’eux-mêmes, donc celle-ci ne compte que lorsqu’un contact la paie dans un chat. Pour des sats de test tout de suite, utilisez Obtenir des pièces de test plus haut.",

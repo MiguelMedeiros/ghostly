@@ -212,6 +212,8 @@
     "removeMintConsent": "What is paid to it afterwards shows only once I add this mint again.",
     "removeMintHint": "You can add it again later.",
     "removeMintQuestion": "Remove {{name}}?",
+    "setAside": "{{amount}} {{unit}} set aside",
+    "setAsideInfo": "Held for a payment the mint has not confirmed yet. It leaves with the payment or returns to your balance once the mint answers. Until then the wallet cannot be removed.",
     "settings": "Settings",
     "testBalance": "{{amount}} test sats (worthless)",
     "testMintInvoice": "Waiting for the payment… Test mints mark every invoice paid by themselves, so this one counts only once a contact pays it in a chat. For test sats now, use Get test coins above.",
