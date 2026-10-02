@@ -168,7 +168,7 @@ export class ProfilePeek {
       const keys = new HoldKeys(link, link.participationSeed!, link.pairedPeerKey!);
       const packet = await transport.resolve(keys.peerAddress, { background: true });
       const now = this.now(), hold = link.hold!;
-      const pointer = packet ? keys.readPointer(packet, now) : null;
+      const pointer = packet ? keys.readPointer(packet) : null;
       if (pointer && pointer.rev >= hold.peerPointerRev && pointer.expires > now && pointer.top > hold.inSeq) held = Math.min(pointer.count, pointer.top - hold.inSeq);
     }
     return { linkId: link.id, peer: link.peerPubKeyZ32, peerSequence: link.dhtDeliveryState?.peerSequence ?? 0, text, held };
