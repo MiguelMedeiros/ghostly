@@ -6,7 +6,7 @@ import {
 } from "@ghostly/core";
 import type { GroupEvent, GroupJoinStage, GroupView, StoredGroup, StoredMessage } from "../shared/types";
 import { groupReply } from "../shared/replies";
-import { FramesTaken, cameAt, editKey, mentionAt, mentionFields, peerMessageAt, type GroupStore, type GroupsHost } from "./groups";
+import { FramesTaken, cameAt, editKey, eventTime, mentionAt, mentionFields, peerMessageAt, type GroupStore, type GroupsHost } from "./groups";
 import { traceJoin } from "./joinTrace";
 
 /** The line a change of a group's picture leaves in its history (both profiles). */
@@ -1103,10 +1103,12 @@ export class Communities {
       app: m => this.deliver(id, () => this.host.communityApp?.(id, m.sender, m.frame)),
       pair: m => this.deliver(id, () => this.host.communityPair?.(id, m.sender, m.payload)),
       changed: () => { void this.membershipChanged(id); },
-      metaChanged: (by, change) => {
+      metaChanged: (by, change, at) => {
         const name = by === session.myKey ? "You" : session.state.nicks[by] ?? `Member ${by.slice(0, 8)}`;
+        // When the admin signed it, as a membership line keeps its commit's time (`membershipChanged`).
+        const when = receivedTimestamp(at, this.now());
         void (async () => {
-          for (const line of metaLines(name, change, session.name)) await this.event(id, line.event, line.text, this.now(), session.epoch, by);
+          for (const line of metaLines(name, change, session.name)) await this.event(id, line.event, line.text, when, session.epoch, by);
           this.host.emit();
         })();
       },
@@ -1131,24 +1133,21 @@ export class Communities {
     if (statusChanged && s.status === "removed") await this.event(groupId, "removed", s.state.statusReason ?? "You were removed from this group", when, s.epoch);
     else if (statusChanged && s.status === "forked") await this.event(groupId, "forked", s.state.statusReason ?? "The membership history forked", when, s.epoch);
     else if (s.status === "active" && before !== after) {
-      for (const [key] of after) if (!rosterHas(before, key) && key !== s.myKey) await this.event(groupId, "joined", `${name(key)} joined`, when, top.e, key);
-      for (const [key] of before) if (!rosterHas(after, key)) await this.event(groupId, "gone", `${name(key)} is no longer a member`, when, top.e, key);
-      if (top.k === "role" && before.find(([k]) => k === top.s)?.[1] !== "admin") await this.event(groupId, "admin", `${name(top.s!)} ${top.s === s.myKey ? "are" : "is"} now the admin`, when, top.e, top.s);
-      if (top.k === "rotate") await this.event(groupId, "rotated", "Keys rotated: a fresh epoch", when, top.e);
+      // When the change was made (the newest commit's time), not when it got here: a member back after a while reads
+      // the lines among the messages of their moment, not after everything it missed.
+      const at = receivedTimestamp(top.ts, when);
+      for (const [key] of after) if (!rosterHas(before, key) && key !== s.myKey) await this.event(groupId, "joined", `${name(key)} joined`, at, top.e, key);
+      for (const [key] of before) if (!rosterHas(after, key)) await this.event(groupId, "gone", `${name(key)} is no longer a member`, at, top.e, key);
+      if (top.k === "role" && before.find(([k]) => k === top.s)?.[1] !== "admin") await this.event(groupId, "admin", `${name(top.s!)} ${top.s === s.myKey ? "are" : "is"} now the admin`, at, top.e, top.s);
+      if (top.k === "rotate") await this.event(groupId, "rotated", "Keys rotated: a fresh epoch", at, top.e);
     }
     this.host.emit();
   }
 
-  /**
-   * A line in the group's history. Its id carries its time, and the engine's clock moves once a tick: two
-   * lines of one kind within a tick (a picture changed, then removed) get distinct times, a millisecond
-   * apart, or the store would keep the first and drop the second as already there.
-   */
+  /** A line in the group's history. Its id carries its time: two lines at the same moment get distinct ones (`eventTime`). */
   private async event(groupId: string, event: GroupEvent, text: string, timestamp: number, epoch: number, member?: string): Promise<void> {
-    const last = this.lastEventAt.get(groupId) ?? 0;
-    if (timestamp <= last) timestamp = last + 1;
-    this.lastEventAt.set(groupId, Math.max(last, timestamp));
+    timestamp = eventTime(this.eventTimes, groupId, timestamp);
     await this.host.storeMessage({ linkId: MESSAGE_LINK(groupId), id: `event:${epoch}:${event}:${member ?? ""}:${timestamp}`, text, sender: "peer", event, member, timestamp, via: "datalink" });
   }
-  private readonly lastEventAt = new Map<string, number>();
+  private readonly eventTimes = new Map<string, Set<number>>();
 }

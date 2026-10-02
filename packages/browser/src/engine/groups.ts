@@ -150,6 +150,21 @@ export const mentionAt = (map: Map<string, number>, groupId: string): { lastMent
  * never showed unread. A copy I had already (`stored` false) or one completed in place keeps its own time.
  */
 export const cameAt = (timestamp: number, stored: boolean | void, now: number): number => stored === false ? timestamp : Math.max(timestamp, now);
+/**
+ * The time a line of a group's history is kept under: its own, or the next millisecond no other line of this run took.
+ * A line's id carries its time, and two lines can share a moment (two members gone in one change, a picture changed
+ * then removed within a tick): the store would keep the first and drop the second as already there. Only a time
+ * already taken moves: a line older than the last one written (a rename read after a later commit, in a catch-up)
+ * keeps its place.
+ */
+export function eventTime(taken: Map<string, Set<number>>, groupId: string, timestamp: number): number {
+  let times = taken.get(groupId);
+  if (!times) taken.set(groupId, (times = new Set()));
+  while (times.has(timestamp)) timestamp++;
+  times.add(timestamp);
+  if (times.size > 1024) times.delete(times.values().next().value!);
+  return timestamp;
+}
 /** The view's `lastPeerMessageAt`, when there is one. */
 export const peerMessageAt = (map: Map<string, number>, groupId: string): { lastPeerMessageAt?: number } => {
   const at = map.get(groupId);
@@ -1222,7 +1237,7 @@ export class Groups {
         if (session.status === "removed" && this.hubs.isHub(state.id) && !this.removedAt.has(state.id)) this.removedAt.set(state.id, this.now());
         void this.membershipChanged(state.id);
       },
-      metaChanged: (by, change) => { void this.metaChanged(state.id, session, by, change); },
+      metaChanged: (by, change, at) => { void this.metaChanged(state.id, session, by, change, at); },
     });
     this.sessions.set(state.id, session);
     this.lastRoster.set(state.id, session.roster);
@@ -1240,7 +1255,9 @@ export class Groups {
     const moved = told?.top !== top, statusChanged = told?.status !== session.status;
     this.lastTold.set(groupId, { status: session.status, top });
     const name = (key: string) => key === session.myKey ? "You" : session.state.nicks[key] ?? `Member ${key.slice(0, 8)}`;
-    const when = Date.now();
+    // When the change was made (its commit's time), not when it got here: a member back after a while reads each line
+    // among the messages of its moment. Stamped on arrival, they all came after everything it had missed.
+    const when = moved ? receivedTimestamp(top.ts) : Date.now();
     if (session.status === "removed") { if (statusChanged) await this.event(groupId, "removed", session.state.statusReason ?? "You were removed from this group", when, session.epoch); }
     else if (session.status === "forked") { if (statusChanged) await this.event(groupId, "forked", session.state.statusReason ?? "The membership history forked", when, session.epoch); }
     else if (session.status === "active" && moved) {
@@ -1262,9 +1279,11 @@ export class Groups {
     this.host.emit();
   }
 
-  private async metaChanged(groupId: string, session: GroupSession, by: string, change: GroupMetaChange): Promise<void> {
+  /** `at`: when the admin signed the statement (the line's time, as a commit's is its line's). */
+  private async metaChanged(groupId: string, session: GroupSession, by: string, change: GroupMetaChange, at?: number): Promise<void> {
     const name = by === session.myKey ? "You" : session.state.nicks[by] ?? `Member ${by.slice(0, 8)}`;
-    for (const line of metaLines(name, change, session.name)) await this.event(groupId, line.event, line.text, Date.now(), session.epoch, by);
+    const when = at === undefined ? Date.now() : receivedTimestamp(at);
+    for (const line of metaLines(name, change, session.name)) await this.event(groupId, line.event, line.text, when, session.epoch, by);
     this.host.emit();
   }
 
@@ -1300,13 +1319,11 @@ export class Groups {
   }
 
   /** `member`: whom it is about, so the apps can name them as they are known now, not as they were then. */
-  /** A line in the group's history; lines at the same time (two members gone in one change) get distinct ones, see `Communities.event`. */
+  /** A line in the group's history; lines at the same time (two members gone in one change) get distinct ones, see `eventTime`. */
   private async event(groupId: string, event: GroupEvent, text: string, timestamp: number, epoch: number, member?: string): Promise<void> {
-    const last = this.lastEventAt.get(groupId) ?? 0;
-    if (timestamp <= last) timestamp = last + 1;
-    this.lastEventAt.set(groupId, Math.max(last, timestamp));
+    timestamp = eventTime(this.eventTimes, groupId, timestamp);
     await this.host.storeMessage({ linkId: MESSAGE_LINK(groupId), id: `event:${epoch}:${event}:${timestamp}`, text, sender: "peer", event, member, timestamp, via: "datalink" });
   }
-  private readonly lastEventAt = new Map<string, number>();
+  private readonly eventTimes = new Map<string, Set<number>>();
 }
 
