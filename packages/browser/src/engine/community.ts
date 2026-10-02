@@ -153,6 +153,13 @@ interface Live {
   /** The newest message frame the beacon names (WISP 9xx § Head), as last read or written. */
   head: CommunityHead | null;
   lastBeaconRead: number;
+  /**
+   * The beacon was read at least once in this run (always, in a group of one: nobody else can be a hub). Until then
+   * nothing says who the hubs are, which is not the same as there being none. And when a read last failed.
+   */
+  beaconKnown: boolean;
+  beaconFailedAt: number;
+  beaconAskedAt?: number;
   lastBeaconWrite: number;
   lastBeaconTry: number;
   hubCandidateAt: number;
@@ -492,7 +499,14 @@ export class Communities {
     // welcome) or a while: left open, it would look fast for a joiner that is gone, spending the relays' budget.
     for (const [linkId, until] of live.lingering) if (now >= until || !this.host.linkReady(linkId, 2)) { live.lingering.delete(linkId); if ([...this.host.entries(groupId).values()].includes(linkId)) await this.host.closeEdge(linkId); }
     const alone = live.hub && !freshHubs(live.beacon, now).some(h => h.key !== me);
-    if (now - live.lastBeaconRead >= (alone ? COMMUNITY_TOPOLOGY.beaconEveryMs : this.timings.beaconReadMs) || live.lastBeaconRead === 0) await this.readBeacon(groupId, live, now);
+    // A read that failed is tried again in a moment, not at the next turn of the usual pace.
+    const readDue = live.beaconFailedAt ? now - live.beaconFailedAt >= BEACON_RETRY_MS : now - live.lastBeaconRead >= (alone ? COMMUNITY_TOPOLOGY.beaconEveryMs : this.timings.beaconReadMs);
+    if (readDue || live.lastBeaconRead === 0) await this.readBeacon(groupId, live, now);
+    // Never read yet (the app just started, and the relays' budget or the network refused the read): who the hubs are
+    // is unknown, which is not "there are none". Taken for none, this app became a hub at once and the door alone, and
+    // answered the knocks the real door was answering: two hubs on one entry session, and nobody got in. The edges it
+    // has stay; hubs, the door and the lobby wait for a reading.
+    if (!live.beaconKnown) { await this.keepLooking(groupId, live, now); await this.reconcile(groupId, live, now); return; }
     const others = freshHubs(live.beacon, now).filter(h => h.key !== me);
     if (!live.hub) {
       // A newcomer first connects to the member who let it in (a hub): only then, or a while after, is it one more.
@@ -666,7 +680,16 @@ export class Communities {
   private async readBeacon(groupId: string, live: Live, now: number): Promise<void> {
     live.lastBeaconRead = now;
     const keys = beaconKeys(live.session.state.rv, groupId);
-    const records = await this.host.resolve(keys.identity.pubKeyZ32, true).catch(() => null);
+    const records = await this.host.resolve(keys.identity.pubKeyZ32, true).catch(() => undefined);
+    // A read that failed says nothing: what the last one said stays (entries go stale by their own time). Alone in the
+    // group, nobody else can be a hub, read or not. Nor does an app wait for ever for its first reading: after as long
+    // as an entry stays fresh, whatever was there would be stale by now.
+    if (records === undefined) {
+      live.beaconFailedAt = now; live.beaconAskedAt ||= now;
+      if (live.session.roster.length === 1 || now - live.beaconAskedAt >= COMMUNITY_TOPOLOGY.beaconFreshMs) live.beaconKnown = true;
+      return;
+    }
+    live.beaconFailedAt = 0; live.beaconKnown = true;
     // Hubs I do not know yet are members newer than my view of the roster: exactly whom I need to catch up.
     live.beacon = readBeacon(keys, records ?? []);
     live.head = readBeaconHead(keys, records ?? []);
@@ -688,8 +711,12 @@ export class Communities {
     const keys = beaconKeys(live.session.state.rv, groupId);
     // Read this very tick already: what it said is what there is to merge with.
     let existing = live.beacon, head = live.head;
-    if (live.lastBeaconRead !== now) {
-      const records = (await this.host.resolve(keys.identity.pubKeyZ32, true).catch(() => null)) ?? [];
+    if (live.lastBeaconRead !== now || live.beaconFailedAt === now) {
+      // Read, merge, publish: without the read there is nothing to merge with, and publishing my entry alone would
+      // erase every other hub's (each puts its own back only when it republishes, up to half a minute later).
+      const read = await this.host.resolve(keys.identity.pubKeyZ32, true).catch(() => undefined);
+      if (read === undefined && live.session.roster.length > 1) throw new Error("The beacon could not be read; not published");
+      const records = read ?? [];
       existing = readBeacon(keys, records); head = readBeaconHead(keys, records);
     }
     // Nobody drops a hub it does not know: a member behind on the roster would erase newer ones.
@@ -699,7 +726,7 @@ export class Communities {
     await this.host.publish(keys.identity, beaconRecords(keys, hubs, newest), true);
     live.beacon = hubs; live.head = newest;
     this.noteHubs(live, now);
-    live.lastBeaconWrite = now; live.lastBeaconRead = now;
+    live.lastBeaconWrite = now; live.lastBeaconRead = now; live.beaconFailedAt = 0; live.beaconKnown = true;
   }
 
   private noteHubs(live: Live, now: number): void {
@@ -1113,7 +1140,7 @@ export class Communities {
       clock: () => this.now(),
       relay: frame => { if (this.live.get(id)?.hub) for (const linkId of this.host.edges(id).values()) this.sendTo(linkId, frame); },
     });
-    this.live.set(id, { session, hub: false, hubSince: 0, beacon: [], head: null, lastBeaconRead: 0, lastBeaconWrite: 0, lastBeaconTry: 0, hubCandidateAt: 0, members: new Map(), emptySince: 0,
+    this.live.set(id, { session, hub: false, hubSince: 0, beacon: [], head: null, lastBeaconRead: 0, beaconKnown: false, beaconFailedAt: 0, lastBeaconWrite: 0, lastBeaconTry: 0, hubCandidateAt: 0, members: new Map(), emptySince: 0,
       lastLobbyPoll: 0, myHubs: [], lobbyWrites: new Map(), lastKnockPoll: 0, pendingEntries: new Map(), knocksSeen: new Map(),
       hubWaits: new Map(), hubsAvoided: new Map(), hubsUp: new Set(), lingering: new Map(), seenHubs: new Map(), restored: new Map(),
       knocksScanned: false, knockCursor: 0, lastShardPoll: 0, crowdUntil: 0, doors: "", warmUntil: 0, lobbyBusyUntil: 0, expect: new Set(), awaited: new Map(), joinedAt: 0, admittedAt: 0, lastRearm: 0,
