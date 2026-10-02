@@ -382,6 +382,8 @@ export interface GhostLinkEvents {
   onDataLinkState?(state: DataLinkState): void;
   /** What a WebRTC attempt of this link said about direct connections from this device (`directPath.ts`). */
   onDirectEvidence?(evidence: DirectEvidence): void;
+  /** The contact's packet came between two reads of its record: its clock against this one (`LinkSessionEvents.onPeerClock`). */
+  onPeerClock?(packetAt: number, readBefore: number, readAt: number): void;
   onPoll?(poll: { polling: boolean; nextInMs: number }): void;
   /** The peer is sending a file. Return where to put it, or null (or a reason) to refuse. */
   onFileStored?(file: FileInfo): Promise<string | undefined>;
@@ -812,6 +814,7 @@ export class GhostLink {
           if (this.streamBlocked) { this.heldSignal = { signal, sight }; this.peerDialsFromDht(signal); return; }
           this.handleRtcSignal(signal, sight);
         },
+        onPeerClock: (packetAt, readBefore, readAt) => events.onPeerClock?.(packetAt, readBefore, readAt),
         onPeerTransports: value => this.peerPacketTransports(value),
         onDiscoveryError: error => events.onDiscoveryError?.(error),
         onStatus: (status) => events.onStatus?.(status),

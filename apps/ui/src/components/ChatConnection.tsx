@@ -19,6 +19,7 @@ import { TransportOptions } from "./TransportOptions";
 import { ConnectionHistory } from "./TransportTimeline";
 import { DiscoveryHealth } from "./DiscoveryHealth";
 import { DirectBlockedHint } from "./DirectBlockedHint";
+import { ClockOffHint } from "./ClockOffHint";
 import { errorText } from "../lib/errorText";
 import { useWindowAway } from "../lib/windowAway";
 
@@ -181,6 +182,7 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, pairing 
       </div>}
       {failure && <p role="alert" className="mt-1.5 break-words px-1 text-danger">{failure}</p>}
       {paired && online && !dht && state?.transport?.directBlocked && <DirectBlockedHint />}
+      {online && state?.transport?.clockOffMs !== undefined && <ClockOffHint ms={state.transport.clockOffMs} />}
       {paired && <fieldset disabled={busy || !online || !link} className="mt-2">
         <legend className="sr-only">{t("connection.panel.legend")}</legend>
         {link && <TransportOptions link={link} disabled={busy || !online}
