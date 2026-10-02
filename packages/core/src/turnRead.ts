@@ -56,8 +56,21 @@ export interface TurnNetwork {
   turnWarm?(): Promise<void>;
 }
 
+/*
+ * Settle (WISP 06 § Settle: how a raised turn becomes active). No relay refuses the second of two puts, so a device
+ * that reads its own record back straight after its put learns nothing. Every device that raises the turn reads, sends
+ * its put within `P` of the start of that read (or reads again first), is `taking` after the put, waits `T` from the
+ * end of the put, reads every source again, and goes active only on `mine`. The three numbers live here and nowhere else.
+ */
+/** `P`: a raising put is sent within this long of the start of the read it acts on. */
+export const TURN_PUT_WINDOW_MS = 10_000;
+/** `V`: the longest a put is assumed to take from being sent to being visible at every source. Assumed, not measured. */
+export const TURN_VISIBLE_MS = 10_000;
+/** `T`: how long a device that raised the turn waits, from the end of its put, before the read that may make it active. `T >= P + 2V`. */
+export const TURN_SETTLE_MS = 30_000;
+
 /** WISP 06 § Publishing and reading, the result table. */
-export type TurnResult = "mine" | "behind" | "other" | "clone" | "tombstone" | "none" | "unreachable";
+export type TurnResult = "mine" | "behind" | "other" | "clone" | "tombstone" | "closed" | "none" | "unreachable";
 
 /** Who reads: what this device holds. */
 export interface TurnReader {
@@ -70,11 +83,16 @@ export interface TurnReader {
   ownSlot?: number;
   /** A `taking` device: the turn it takes. It yields to any other valid record at that turn, whatever the sequences. */
   taking?: number;
+  /**
+   * The mark: the highest sequence this device ever saw at the address in a packet that verified under the turn key.
+   * A record below it is no news (`behind`): a newer record that expired does not make an older one current again.
+   */
+  seen?: bigint;
 }
 
 export interface TurnRead {
   result: TurnResult;
-  /** A read is good when at least one source answered. */
+  /** A read is good when at least one source answered and the result is not `closed`. */
   good: boolean;
   /**
    * The record the result is about: the highest valid one the sources hold (`mine`: this device's own; `behind`: the
@@ -93,7 +111,10 @@ export interface TurnRead {
   forced?: boolean;
   /** `other`: the record is the one this device already stored (a standby reading the active device's record again). */
   known?: boolean;
-  /** The highest raw sequence among the answers, from valid and invalid packets alike. 0 when there was none. */
+  /**
+   * The highest sequence among the answers in a packet that verified under the turn key, its record valid or not.
+   * 0 when there was none. What moves the device's mark; a number a source only reports never does.
+   */
   seen: bigint;
   /** Packets under the turn key that are no valid record, with the rule each breaks. Signed by the turn key, every one. */
   invalid: { source: string; sequence: bigint; refusal: TurnRefusal }[];
@@ -101,11 +122,6 @@ export interface TurnRead {
   unsigned: { source: string; sequence: bigint }[];
   /** Per source that answered: the highest raw sequence it holds, for the next put's conditions. */
   conditions: TurnConditions;
-  /**
-   * No ordinary record can be written at this address any more: a packet at or above the tombstone's sequence is
-   * there. With a `result` other than `tombstone`, that packet is no valid tombstone.
-   */
-  closed: boolean;
 }
 
 /** A valid packet, once however many sources returned it, with every one of them. */
@@ -163,11 +179,18 @@ export function classifyTurnRead(reader: TurnReader, answers: TurnSourceAnswer[]
     }
     conditions[answer.source] = named === null ? null : named.toString();
   }
-  const base = { good, seen, invalid, unsigned, conditions, closed: seen >= BigInt(TOMBSTONE_SEQUENCE) };
+  // A packet under the turn key at or above the tombstone's sequence that is no valid tombstone: only a holder of `D`
+  // can have made it, and nothing can be put above it. Never a good read; a valid tombstone at that sequence wins.
+  const top = BigInt(TOMBSTONE_SEQUENCE);
+  const closing = invalid.reduce((max, packet) => (packet.sequence > max ? packet.sequence : max), 0n);
+  if (closing >= top && (closing > top || !found.some((f) => f.read.record.tombstone))) return { result: "closed", good: false, seen, invalid, unsigned, conditions };
+  const base = { good, seen, invalid, unsigned, conditions };
   // A newer record is news whoever shows it; the answers of a stale source show nothing else.
   const freshFound = found.filter((f) => f.sources.some((source) => fresh.has(source)));
   if (!good && !found.length) return { result: "unreachable", ...base };
   if (!found.length) return { result: "none", ...base };
+  /** The mark, this read included. */
+  const mark = reader.seen !== undefined && reader.seen > seen ? reader.seen : seen;
 
   // The highest sequence wins; at an equal one, the lower instance, for every reader alike.
   const best = found.reduce((a, b) => (b.read.sequence > a.read.sequence || (b.read.sequence === a.read.sequence && keptAtEqualSequence(kept(b), kept(a)) < 0) ? b : a));
@@ -186,8 +209,10 @@ export function classifyTurnRead(reader: TurnReader, answers: TurnSourceAnswer[]
   const activeKey = stored && !stored.tombstone ? stored.slots[stored.active]?.key : undefined;
   const other = (f: Found, extra: Partial<TurnRead> = {}): TurnRead => {
     const release = f.read.record.release;
-    // Without a release, or released by a device this reader did not know as active: a takeover.
-    const forced = !release || (!!activeKey && !bytesEqual(f.read.record.slots[release.from]!.key, activeKey));
+    // Without a release, or released by a device this reader did not know as active: a takeover. A reader that
+    // holds no record of the set yet takes the first valid one as current and shows no takeover for it: the first
+    // record of a set has no release, and without an earlier record that cannot be told from a takeover.
+    const forced = !!stored && (!release || (!!activeKey && !bytesEqual(f.read.record.slots[release.from]!.key, activeKey)));
     return { result: "other", record: f.read.record, payload: f.payload, forced, ...extra, ...base };
   };
   const clone = (f: Found, extra: Partial<TurnRead>): TurnRead => ({ result: "clone", record: f.read.record, payload: f.payload, ...extra, ...base });
@@ -205,15 +230,21 @@ export function classifyTurnRead(reader: TurnReader, answers: TurnSourceAnswer[]
 
   const storedSequence = BigInt(stored.sequence);
   if (best.read.sequence < storedSequence) return good ? { result: "behind", record, payload, ...base } : { result: "unreachable", ...base };
-  if (best.read.sequence > storedSequence) return fromOwnSlot(record) ? clone(best, { clone: "above" }) : other(best);
+  if (best.read.sequence > storedSequence) {
+    // Above what this device stored, and below something it saw before: the newer record expired, or a source lags.
+    if (reader.seen !== undefined && best.read.sequence < reader.seen) return good ? { result: "behind", record, payload, ...base } : { result: "unreachable", ...base };
+    return fromOwnSlot(record) ? clone(best, { clone: "above" }) : other(best);
+  }
 
   // At the stored sequence. The stored packet itself and nothing else there: this device's own record, or the one it
   // already accepted from the active device.
   const rivals = found.filter((f) => f.read.sequence === storedSequence && !bytesEqual(f.payload, reader.stored!));
   if (!rivals.length) {
-    if (!wrote) return other(best, { known: true });
-    // `mine` needs a fresh source that returned the stored packet. A stale one alone: no fresh answer says so.
-    if (freshFound.some((f) => bytesEqual(f.payload, reader.stored!))) return { result: "mine", record, payload, ...base };
+    // The record this device already accepted from the active device; below its mark, it is no news.
+    if (!wrote) return mark > storedSequence && good ? { result: "behind", record, payload, ...base } : other(best, { known: true });
+    // `mine` needs a fresh source that returned the stored packet (a stale one alone: no fresh answer says so), and
+    // nothing this device ever saw verified above it.
+    if (mark <= storedSequence && freshFound.some((f) => bytesEqual(f.payload, reader.stored!))) return { result: "mine", record, payload, ...base };
     return good ? { result: "behind", record, payload, ...base } : { result: "unreachable", ...base };
   }
   // An equal sequence is an equal turn, rev and slot. In another device's slot, that device and its copy settle it.

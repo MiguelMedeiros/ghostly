@@ -5,12 +5,13 @@
 //! judges every turn record, and this side only carries packets (`turn_network.rs`). This module is the
 //! same format written a second time, compiled for the tests alone: both suites read
 //! `packages/core/test/vectors/turn-record.json`, so a change to the bytes on either side fails the other.
+//! The packet is canonical: this writer and the TypeScript one make the same bytes for the same record.
 
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
 use crypto_secretbox::aead::{Aead, KeyInit};
 use crypto_secretbox::XSalsa20Poly1305;
-use pkarr::{Keypair, PublicKey, SignedPacket};
+use pkarr::{Keypair, PublicKey};
 use simple_dns::rdata::RData;
 
 pub const SLOTS: usize = 4;
@@ -338,22 +339,49 @@ pub fn open(value: &str, seal_key: &[u8; 32]) -> Option<Vec<u8>> {
     cipher.decrypt(nonce.into(), &sealed[24..]).ok()
 }
 
-/// The packet of a signed body, as a relay payload, signed under the turn key at the record's own sequence.
+/// The canonical DNS packet of a TXT value (WISP 06, Record, "The packet is canonical"): one answer, the
+/// name `_s.<turn key in z-base-32>` with no compression, class IN, type TXT, TTL 300, and the value cut
+/// into strings of 255 bytes with the rest last. `simple-dns` cuts at 254, so the packet is written here.
+pub fn dns_packet(turn_key_z32: &str, value: &str) -> Vec<u8> {
+    // No id, a reply, no question, one answer, no other section.
+    let mut dns = vec![0, 0, 0x80, 0, 0, 0, 0, 1, 0, 0, 0, 0];
+    for label in [LABEL, turn_key_z32] {
+        dns.push(label.len() as u8);
+        dns.extend_from_slice(label.as_bytes());
+    }
+    dns.push(0);
+    dns.extend_from_slice(&[0, 16, 0, 1]);
+    dns.extend_from_slice(&TTL.to_be_bytes());
+    let strings: Vec<u8> = value
+        .as_bytes()
+        .chunks(255)
+        .flat_map(|chunk| std::iter::once(chunk.len() as u8).chain(chunk.iter().copied()))
+        .collect();
+    dns.extend_from_slice(&(strings.len() as u16).to_be_bytes());
+    dns.extend_from_slice(&strings);
+    dns
+}
+
+/// The packet of a signed body, as a relay payload (`signature || sequence || DNS packet`), signed under the
+/// turn key at the record's own sequence: the canonical packet, byte for byte what the TypeScript writer makes.
 pub fn packet(turn_key: &Keypair, seal_key: &[u8; 32], body: &[u8], nonce: &[u8; 24]) -> Vec<u8> {
     let address = turn_key.public_key().to_bytes();
     let record = read_body(body, &address).expect("a valid body");
-    let value = seal(body, seal_key, nonce);
-    SignedPacket::builder()
-        .txt(
-            LABEL.try_into().unwrap(),
-            value.as_str().try_into().unwrap(),
-            TTL,
-        )
-        .timestamp(record.sequence.into())
-        .sign(turn_key)
-        .expect("a packet under the limit")
-        .to_relay_payload()
-        .to_vec()
+    let dns = dns_packet(
+        &turn_key.public_key().to_z32(),
+        &seal(body, seal_key, nonce),
+    );
+    let signable = [
+        format!("3:seqi{}e1:v{}:", record.sequence, dns.len()).as_bytes(),
+        &dns,
+    ]
+    .concat();
+    [
+        turn_key.sign(&signable).to_bytes().as_slice(),
+        &record.sequence.to_be_bytes(),
+        &dns,
+    ]
+    .concat()
 }
 
 /// A packet read at the turn address: a valid record, a packet a node stores that is no record (its
@@ -570,7 +598,7 @@ mod tests {
     }
 
     #[test]
-    fn every_record_s_body_and_seal_are_written_byte_for_byte_as_typescript_writes_them() {
+    fn every_record_is_written_byte_for_byte_as_typescript_writes_it() {
         let v = vectors();
         let turn_key = Keypair::from_secret_key(&array(&v.turn_seed));
         let (address, seal_key): ([u8; 32], [u8; 32]) = (array(&v.address), array(&v.seal_key));
@@ -601,21 +629,13 @@ mod tests {
                 vector.name
             );
             assert_eq!(vector.value.len(), 552);
-            // The packet around it is each writer's own: DNS lets the 552 characters be cut into strings of
-            // 255, 255 and 42 (the TypeScript writer) or 254, 254 and 44 (`simple-dns`). A device stores the
-            // bytes it signed and puts those, so no two writers ever need the same ones; every reader takes both.
-            let ours = packet(&turn_key, &seal_key, &body, &nonce);
-            assert_eq!(ours.len(), hex(&vector.payload).len(), "{}", vector.name);
+            // The canonical packet: the whole payload is the one the TypeScript writer makes.
             assert_eq!(
-                read_packet(&address, &seal_key, &ours),
-                read_packet(&address, &seal_key, &hex(&vector.payload)),
+                to_hex(&packet(&turn_key, &seal_key, &body, &nonce)),
+                vector.payload,
                 "{}",
                 vector.name
             );
-            assert!(matches!(
-                read_packet(&address, &seal_key, &ours),
-                PacketRead::Valid(_)
-            ));
         }
     }
 

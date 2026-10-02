@@ -21,7 +21,7 @@
 //! passes `None`, and its node is private). So the turn has a Mainline node of its own. It is made, and
 //! joins the DHT, when the engine says the profile has a device set (`warm`), or at the first turn read:
 //! a profile on one device never makes one. A read or a put waits for the node to have joined, up to
-//! `BOOTSTRAP_TIMEOUT`; a node that has not joined did not answer, it does not say "no record".
+//! `BOOTSTRAP_TIMEOUT`. A lookup that finds nothing is that source not answering, never "no record".
 
 use std::collections::HashMap;
 use std::net::SocketAddrV4;
@@ -214,10 +214,19 @@ async fn read_dht(dht: &TurnDht, key: &PublicKey) -> SourceAnswer {
         detailed.outcome.recv().await
     };
     let outcome = tokio::time::timeout(SOURCE_TIMEOUT, collect).await;
-    // A node that returned an item answered, whatever became of the rest of the lookup.
-    let answered = !payloads.is_empty() || outcome.is_ok_and(|outcome| outcome.responded() > 0);
-    if !answered {
-        return silent(source, "no node answered");
+    // A lookup that found nothing is this source not answering, never "no record" (WISP 06, Publishing and
+    // reading): a node that has not found the network yet finds nothing either, and so does one whose
+    // lookup reached too few nodes. The record still gets to the DHT: a relay that takes a put publishes it.
+    if payloads.is_empty() {
+        let heard = outcome.is_ok_and(|outcome| outcome.responded() > 0);
+        return silent(
+            source,
+            if heard {
+                "found nothing"
+            } else {
+                "no node answered"
+            },
+        );
     }
     SourceAnswer {
         source,
@@ -565,7 +574,9 @@ mod tests {
         let empty = read(&pkarr.turn_sources(), &key).await;
         assert_eq!(empty.len(), 3, "the DHT and both relays");
         assert_eq!(empty[0].source, DHT_SOURCE);
-        assert!(empty[0].answered && empty[0].payloads.is_empty());
+        // The DHT found nothing: that is the source not answering, never "no record".
+        assert!(!empty[0].answered);
+        assert_eq!(empty[0].detail.as_deref(), Some("found nothing"));
         assert_eq!(empty[1].source, relay.url);
         assert!(empty[1].answered && empty[1].payloads.is_empty());
         assert!(!empty[2].answered, "a relay that is broken did not answer");

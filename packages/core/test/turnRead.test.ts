@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   classifyTurnRead, identityFromSeed, keptAtEqualSequence, readTurnPacket, signRelayPayload, signTurnPacket, signTurnRelease, turnPutSummary, turnSequence,
-  encodeTxtPacket, TOMBSTONE_SEQUENCE, TOMBSTONE_TURN, TURN_NO_ACTIVE, type Identity, type TurnFields, type TurnReader, type TurnSourceAnswer,
+  encodeTxtPacket, TURN_PUT_WINDOW_MS, TURN_SETTLE_MS, TURN_VISIBLE_MS, TOMBSTONE_SEQUENCE, TOMBSTONE_TURN, TURN_NO_ACTIVE, type Identity, type TurnFields, type TurnReader, type TurnSourceAnswer,
 } from "../src/index";
 import { devices, signerOf, vectorKeys } from "./turnVectors";
 // covers: devices.turn.read
@@ -145,14 +145,14 @@ describe("the result of a turn read", () => {
   it("tombstone: the address is closed, and the reader is still listed or not", async () => {
     const mine = await packet(5, 2, 0);
     const closed = await tombstone(1, [1, 2]);
-    expect(classifyTurnRead(reader(0, mine), [has("a", mine), has("b", closed)])).toMatchObject({ result: "tombstone", listed: false, closed: true, seen: BigInt(TOMBSTONE_SEQUENCE) });
+    expect(classifyTurnRead(reader(0, mine), [has("a", mine), has("b", closed)])).toMatchObject({ result: "tombstone", listed: false, good: true, seen: BigInt(TOMBSTONE_SEQUENCE) });
     expect(classifyTurnRead(reader(2, mine), [has("a", closed)])).toMatchObject({ result: "tombstone", listed: true });
     // A tombstone is never outranked, by a taker either.
     expect(classifyTurnRead(reader(2, await packet(6, 0, 2), { taking: 6 }), [has("a", closed), has("b", await packet(6, 0, 1))]).result).toBe("tombstone");
   });
 
   it("none: sources answered and none has a record", async () => {
-    expect(classifyTurnRead(reader(0, await packet(5, 2, 0)), [has("a"), has("b")])).toMatchObject({ result: "none", good: true, seen: 0n, closed: false });
+    expect(classifyTurnRead(reader(0, await packet(5, 2, 0)), [has("a"), has("b")])).toMatchObject({ result: "none", good: true, seen: 0n });
     expect(classifyTurnRead(reader(0, null), [has("a")]).result).toBe("none");
   });
 
@@ -175,7 +175,8 @@ describe("the result of a turn read", () => {
     const mine = await packet(5, 2, 0);
     const high = turnSequence(5, 4000, 3);
     const read = classifyTurnRead(reader(0, mine), [has("a", mine), has("b", junk(high))]);
-    expect(read).toMatchObject({ result: "mine", seen: BigInt(high) });
+    // Not `mine`: something this device saw verified is above its record. It must write above it.
+    expect(read).toMatchObject({ result: "behind", seen: BigInt(high) });
     expect(read.invalid).toEqual([{ source: "b", sequence: BigInt(high), refusal: "seal" }]);
     expect(read.conditions).toEqual({ a: String(turnSequence(5, 2, 0)), b: String(high) });
     // Only the invalid packet is left on the sources: no record, and the next put must go above it.
@@ -187,13 +188,13 @@ describe("the result of a turn read", () => {
     // A relay's 404 header says the DHT holds an item that is no signed packet, at the tombstone's sequence.
     const closing: TurnSourceAnswer = { source: "a", answered: true, payloads: [], sequences: [String(TOMBSTONE_SEQUENCE)] };
     const read = classifyTurnRead(reader(0, mine), [closing, has("b", mine)]);
-    expect(read).toMatchObject({ result: "mine", closed: false, seen: BigInt(turnSequence(5, 2, 0)), invalid: [] });
+    expect(read).toMatchObject({ result: "mine", good: true, seen: BigInt(turnSequence(5, 2, 0)), invalid: [] });
     expect(read.unsigned).toEqual([{ source: "a", sequence: BigInt(TOMBSTONE_SEQUENCE) }]);
     // It is that source's condition, so a put there names it, and nothing else.
     expect(read.conditions).toEqual({ a: String(TOMBSTONE_SEQUENCE), b: String(turnSequence(5, 2, 0)) });
     // At a later turn: no writer's place moves.
     const raising: TurnSourceAnswer = { source: "a", answered: true, payloads: [], sequences: [String(turnSequence(45, 0, 0))] };
-    expect(classifyTurnRead(reader(0, mine), [raising])).toMatchObject({ result: "none", seen: 0n, closed: false });
+    expect(classifyTurnRead(reader(0, mine), [raising])).toMatchObject({ result: "none", seen: 0n, good: true });
     // Text that is no number is dropped.
     expect(classifyTurnRead(reader(0, mine), [{ source: "a", answered: true, payloads: [], sequences: ["-1", "1e9", "x"] }]).conditions).toEqual({ a: null });
   });
@@ -219,10 +220,46 @@ describe("the result of a turn read", () => {
     expect(classifyTurnRead(reader(0, mine), [has("a", new Uint8Array(10))])).toMatchObject({ result: "none", conditions: { a: null } });
   });
 
-  it("an invalid packet at the tombstone's sequence closes the address without being a tombstone", async () => {
+  it("closed: a packet under the turn key at or above the tombstone's sequence that is no tombstone, and never a good read", async () => {
     const mine = await packet(5, 2, 0);
-    expect(classifyTurnRead(reader(0, mine), [has("a", mine), has("b", junk(TOMBSTONE_SEQUENCE))])).toMatchObject({ result: "mine", closed: true });
-    expect(classifyTurnRead(reader(0, mine), [has("b", junk(2n ** 62n))])).toMatchObject({ result: "none", closed: true, seen: 2n ** 62n });
+    expect(classifyTurnRead(reader(0, mine), [has("a", mine), has("b", junk(TOMBSTONE_SEQUENCE))])).toMatchObject({ result: "closed", good: false });
+    expect(classifyTurnRead(reader(0, mine), [has("b", junk(2n ** 62n))])).toMatchObject({ result: "closed", good: false, seen: 2n ** 62n });
+    expect(classifyTurnRead(reader(1, null), [has("b", junk(TOMBSTONE_SEQUENCE))]).result).toBe("closed");
+    // A valid tombstone at that sequence is a tombstone; something above it closes the address all the same.
+    const closed = await tombstone(1, [1, 2]);
+    expect(classifyTurnRead(reader(0, mine), [has("a", closed), has("b", junk(TOMBSTONE_SEQUENCE))]).result).toBe("tombstone");
+    expect(classifyTurnRead(reader(0, mine), [has("a", closed), has("b", junk(TOMBSTONE_SEQUENCE + 1))]).result).toBe("closed");
+    // Just below it, the address is open: an invalid packet, and the device's record under it.
+    expect(classifyTurnRead(reader(0, mine), [has("a", mine), has("b", junk(TOMBSTONE_SEQUENCE - 1))]).result).toBe("behind");
+  });
+
+  it("the mark: a record below the highest sequence this device ever saw verified is no news", async () => {
+    const mine = await packet(5, 2, 0), newer = await packet(6, 0, 1);
+    const mark = BigInt(turnSequence(6, 0, 1));
+    // A superseded device whose own record comes back after the newer one expired: not `mine`.
+    expect(classifyTurnRead(reader(0, mine, { seen: mark }), [has("a", mine)])).toMatchObject({ result: "behind", good: true });
+    // A record between its own and the mark is no news either.
+    expect(classifyTurnRead(reader(0, mine, { seen: mark }), [has("a", await packet(5, 9, 1))]).result).toBe("behind");
+    // The record at the mark, and one above it, are.
+    expect(classifyTurnRead(reader(0, mine, { seen: mark }), [has("a", newer)]).result).toBe("other");
+    expect(classifyTurnRead(reader(0, mine, { seen: mark }), [has("a", await packet(7, 0, 2))]).result).toBe("other");
+    // A standby that accepted the newer record and is shown the older one again.
+    expect(classifyTurnRead(reader(2, mine, { seen: mark }), [has("a", mine)]).result).toBe("behind");
+    expect(classifyTurnRead(reader(2, newer, { seen: mark }), [has("a", newer)])).toMatchObject({ result: "other", known: true });
+    // With a mark at its own record, its own record is `mine`.
+    expect(classifyTurnRead(reader(0, mine, { seen: BigInt(turnSequence(5, 2, 0)) }), [has("a", mine)]).result).toBe("mine");
+  });
+
+  it("a reader that holds no record of the set yet takes the first valid one as current, and shows no takeover for it", async () => {
+    const first = await packet(5, 0, 0);
+    expect(classifyTurnRead(reader(1, null), [has("a", first)])).toMatchObject({ result: "other", forced: false });
+    // Once it holds one, a record with no release above it is a takeover.
+    expect(classifyTurnRead(reader(1, first), [has("a", await packet(6, 0, 2))])).toMatchObject({ result: "other", forced: true });
+  });
+
+  it("the settle constants: T is at least P plus twice V", () => {
+    expect([TURN_PUT_WINDOW_MS, TURN_VISIBLE_MS, TURN_SETTLE_MS]).toEqual([10_000, 10_000, 30_000]);
+    expect(TURN_SETTLE_MS).toBeGreaterThanOrEqual(TURN_PUT_WINDOW_MS + 2 * TURN_VISIBLE_MS);
   });
 
   it("the DHT's several items are one source's answer: the highest among them counts", async () => {
