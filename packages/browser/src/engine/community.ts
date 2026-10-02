@@ -191,8 +191,9 @@ interface Live {
   hubsAvoided: Map<string, number>;
   /** Hubs whose edge has been up: when it drops, the hub is gone. */
   hubsUp: Set<string>;
-  /** As a hub stepping down: when I took myself out of the beacon (0: not stepping down). */
+  /** As a hub stepping down: when I took myself out of the beacon (0: not stepping down), and not before when the next try. */
   leaving: number;
+  stepDownAt: number;
   /** Hubs taken in place of one that left: all its members ask them at once, so each gets the longer wait. */
   replacing?: Set<string>;
   /** Entry sessions kept open a little after the welcome went: link id → until. */
@@ -534,34 +535,36 @@ export class Communities {
       if (live.leaving) {
         // Out of the beacon since `leaving`, still a hub. On the next reading: the hub I count on is still listed, so I
         // am a member now; it is not (it was stepping down too, counting on me), or someone asked for me meanwhile, so
-        // I stay, listed again, and try later (not at the same moment as that hub again).
-        if (live.beaconAt > live.leaving) {
-          const listed = live.beacon.some(h => h.key === me);
-          if (idle && !listed && this.canStepDown(groupId, live, now)) {
-            live.leaving = 0; live.hub = false;
-            // A member of the hubs I counted on: the edges are up, no lobby needed.
-            const edges = this.host.edges(groupId);
-            live.myHubs = freshHubs(live.beacon, now).map(h => h.key).filter(key => { const id = edges.get(key); return key !== me && !!id && this.host.linkReady(id, 2); }).slice(0, COMMUNITY_TOPOLOGY.hubsPerMember);
-            for (const key of live.myHubs) { live.hubsAvoided.delete(key); live.hubWaits.delete(key); live.hubsUp.add(key); }
-            live.members.clear();
-            // No longer at the door: admissions in flight are closed, so they do not collide with the next door's.
-            await this.closeEntries(groupId);
-          } else if (idle && listed && this.canStepDown(groupId, live, now)) {
-            // Another hub's write put me back (it had read the beacon before mine): out again, and one more reading.
-            if (await this.publishBeacon(groupId, live, now, false).then(() => true, () => false)) live.leaving = now;
-          } else {
-            live.leaving = 0;
-            live.emptySince = now + Math.floor(this.random() * this.timings.idleHubMs);
-            await this.publishBeacon(groupId, live, now, true).catch(() => {});
-          }
+        // I stay, listed again, and try later (not at the same moment as that hub again). No reading in a while (the
+        // relays hold them back): I stay too, rather than be a hub nobody finds.
+        const read = live.beaconAt > live.leaving, listed = live.beacon.some(h => h.key === me);
+        if (read && idle && !listed && this.canStepDown(groupId, live, now)) {
+          live.leaving = 0; live.hub = false;
+          // A member of the hubs I counted on: the edges are up, no lobby needed.
+          const edges = this.host.edges(groupId);
+          live.myHubs = freshHubs(live.beacon, now).map(h => h.key).filter(key => { const id = edges.get(key); return key !== me && !!id && this.host.linkReady(id, 2); }).slice(0, COMMUNITY_TOPOLOGY.hubsPerMember);
+          for (const key of live.myHubs) { live.hubsAvoided.delete(key); live.hubWaits.delete(key); live.hubsUp.add(key); }
+          live.members.clear();
+        } else if (read && idle && listed && this.canStepDown(groupId, live, now)) {
+          // Another hub's write put me back (it had read the beacon before mine): out again, and one more reading.
+          if (await this.publishBeacon(groupId, live, now, false).then(() => true, () => false)) live.leaving = now;
+        } else if (read || now - live.leaving > COMMUNITY_TOPOLOGY.beaconEveryMs) {
+          live.leaving = 0;
+          live.stepDownAt = now + this.timings.idleHubMs + Math.floor(this.random() * this.timings.idleHubMs);
         }
-      } else if (idle && this.canStepDown(groupId, live, now)) {
-        // On a reading of this very moment. Held back by the relays, I am still a hub and try again in a moment.
-        if (now - live.lastBeaconTry >= BEACON_RETRY_MS) {
-          live.lastBeaconTry = now;
-          if ((live.beaconAt === now || await this.readBeacon(groupId, live, now)) && this.canStepDown(groupId, live, now)
-            && await this.publishBeacon(groupId, live, now, false).then(() => true, () => false)) live.leaving = now;
+      } else if (idle && now >= live.stepDownAt && this.canStepDown(groupId, live, now)) {
+        // On a reading of this very moment. Held back by the relays (the reading, or the write), I am a hub as before,
+        // listed as before, and try again in a while.
+        live.stepDownAt = now + 3 * BEACON_RETRY_MS;
+        if ((live.beaconAt === now || await this.readBeacon(groupId, live, now)) && this.canStepDown(groupId, live, now)
+          && await this.publishBeacon(groupId, live, now, false).then(() => true, () => false)) {
+          live.leaving = now;
+          // No longer at the door: admissions in flight are closed, so they do not collide with the next door's.
+          await this.closeEntries(groupId);
         }
+      }
+      if (!live.hub || live.leaving) {
+        // Stepping down, or a member now: nothing to say in the beacon.
       } else if (now - live.lastBeaconTry < BEACON_RETRY_MS) {
         // A publish that just failed (the relays' budget, say) is tried again in a moment, not every tick.
       } else if (now - live.lastBeaconWrite >= COMMUNITY_TOPOLOGY.beaconEveryMs || !live.beacon.some(h => h.key === me)
@@ -1191,7 +1194,7 @@ export class Communities {
       clock: () => this.now(),
       relay: frame => { if (this.live.get(id)?.hub) for (const linkId of this.host.edges(id).values()) this.sendTo(linkId, frame); },
     });
-    this.live.set(id, { session, hub: false, hubSince: 0, beacon: [], head: null, lastBeaconRead: 0, beaconAt: 0, leaving: 0, lastBeaconWrite: 0, lastBeaconTry: 0, hubCandidateAt: 0, members: new Map(), emptySince: 0,
+    this.live.set(id, { session, hub: false, hubSince: 0, beacon: [], head: null, lastBeaconRead: 0, beaconAt: 0, leaving: 0, stepDownAt: 0, lastBeaconWrite: 0, lastBeaconTry: 0, hubCandidateAt: 0, members: new Map(), emptySince: 0,
       lastLobbyPoll: 0, myHubs: [], lobbyWrites: new Map(), lastKnockPoll: 0, pendingEntries: new Map(), knocksSeen: new Map(),
       hubWaits: new Map(), hubsAvoided: new Map(), hubsUp: new Set(), lingering: new Map(), seenHubs: new Map(), restored: new Map(),
       knocksScanned: false, knockCursor: 0, lastShardPoll: 0, crowdUntil: 0, doors: "", warmUntil: 0, lobbyBusyUntil: 0, expect: new Set(), awaited: new Map(), joinedAt: 0, admittedAt: 0, lastRearm: 0,

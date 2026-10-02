@@ -26,9 +26,7 @@ const connected = (world: CommunityWorld, p: Peer, id: string) => world.view(p, 
 
 describe("a hub that leaves", { timeout: 120_000 }, () => {
   for (const network of [null, RELAY_NETWORK]) it(`its members are on another hub within seconds, and the group talks again (${network ? "relay budget" : "free network"})`, async () => {
-    // With the wait before becoming a hub that apps have (the harness's default is none): a member whose reading of
-    // the beacon falls in the second its hub left would otherwise become a hub in that second, before it asked another.
-    const world = new CommunityWorld({ ...COMMUNITY_TIMINGS }, network);
+    const world = new CommunityWorld(undefined, network);
     const { id, peers } = await settled(world, ["admin", "bob", "carol", "dave", "erin"]);
     const [admin, ...rest] = peers;
     expect(admin.groups.communities.isHub(id)).toBe(true);
