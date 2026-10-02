@@ -2,7 +2,8 @@
   "announce": {
     "message": "{{name}}: {{text}}",
     "messages": "新着メッセージ {{count}} 件",
-    "messagesFrom": "{{name}} から新着メッセージ {{count}} 件"
+    "messagesFrom": "{{name}} から新着メッセージ {{count}} 件",
+    "pinMoved": "ピン留めしたチャット {{count}} 件中 {{place}} 番目に移動しました"
   },
   "audio": {
     "cantPlay": "この端末ではこの音声（{{format}}）を再生できません。ダウンロードして聴いてください。",
@@ -218,6 +219,10 @@
   "menu": {
     "continueNew": "新しいチャットで続ける",
     "hold": "メッセージを保留…",
+    "moveDown": "下へ移動",
+    "moveFirst": "すでに先頭です",
+    "moveLast": "すでに末尾です",
+    "moveUp": "上へ移動",
     "pin": "チャットをピン留め",
     "refresh": "更新",
     "techInfo": "技術情報",
