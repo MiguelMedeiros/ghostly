@@ -86,6 +86,8 @@ import { RoutineStack } from "../components/chat/RoutineCard";
 import { routineStacks } from "../lib/statusCards";
 import { scrollIntoViewGently } from "../lib/motion";
 import { MessageAnnouncer } from "../components/chat/MessageAnnouncer";
+import { PinMoveItems, PinMoveNote } from "../components/chat/PinOrder";
+import { usePinMoveNote } from "../hooks/usePinMoveNote";
 import { errorText } from "../lib/errorText";
 
 /** What a call captures from: the devices the profile chose, read when it asks. */
@@ -452,6 +454,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
   }, [sessionId]);
 
   const closeMenu = () => setMenuOpen(false);
+  const [pinNote, announcePinMove] = usePinMoveNote();
   const techBackdrop = useBackdropDismiss(() => setShowTechInfo(false));
 
   // A bot's routines in a row: one row, opened on a tap (WISP 4xx · Status Cards). Found over the whole timeline, so a
@@ -534,6 +537,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
     <div className="chat-pane flex-1 h-full">
     {/* A message that comes while the chat is open, read out once to a screen reader. */}
     <MessageAnnouncer chat={sessionId} messages={messages} nameOf={() => shownName} active={visible} />
+    <PinMoveNote text={pinNote} />
     {/* Files dropped anywhere on the column go to the composer (`data-file-drop`). */}
     <div data-file-drop className="chat-column relative flex-1 flex flex-col h-full min-w-0 bg-chat-bg">
       {(wakeCall.waking || wakeCall.gaveUp) && (
@@ -679,9 +683,10 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
               </svg>
             </button>
             <Menu testId="chat-options-menu" open={menuOpen} onClose={closeMenu} anchorRef={menuRef}>
-              <MenuItem onClick={() => { setSessionPinned(sessionId, !isSessionPinned(sessionId)); closeMenu(); }} icon={<PinIcon active={isSessionPinned(sessionId)} />}>
+              <MenuItem testId="chat-pin-toggle" onClick={() => { setSessionPinned(sessionId, !isSessionPinned(sessionId)); closeMenu(); }} icon={<PinIcon active={isSessionPinned(sessionId)} />}>
                 {isSessionPinned(sessionId) ? t("chat.menu.unpin") : t("chat.menu.pin")}
               </MenuItem>
+              <PinMoveItems chat={sessionId} onMoved={place => { announcePinMove(place); closeMenu(); }} />
               <MuteMenuItem chat={sessionId} onChoose={() => { closeMenu(); setShowMute(true); }} onDone={closeMenu} />
               <MenuItem testId="chat-search-open" onClick={() => { closeMenu(); search.show(); }} icon={<SearchIcon />}>{t("chat.search.open")}</MenuItem>
               {/* Until the contact's session is ready, not just while the card is up: the card goes as soon as the

@@ -2,7 +2,8 @@
   "announce": {
     "message": "{{name}}: {{text}}",
     "messages": "{{count}} nuovi messaggi",
-    "messagesFrom": "{{count}} nuovi messaggi da {{name}}"
+    "messagesFrom": "{{count}} nuovi messaggi da {{name}}",
+    "pinMoved": "Spostata al posto {{place}} di {{count}} chat fissate"
   },
   "audio": {
     "cantPlay": "Questo dispositivo non può riprodurre questo audio ({{format}}). Scaricalo per ascoltarlo.",
@@ -218,6 +219,10 @@
   "menu": {
     "continueNew": "Continua in una nuova chat",
     "hold": "Trattieni messaggi…",
+    "moveDown": "Sposta giù",
+    "moveFirst": "È già la prima",
+    "moveLast": "È già l'ultima",
+    "moveUp": "Sposta su",
     "pin": "Fissa chat",
     "refresh": "Aggiorna",
     "techInfo": "Info tecniche",
