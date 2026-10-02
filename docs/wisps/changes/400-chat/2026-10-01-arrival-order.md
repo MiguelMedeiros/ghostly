@@ -1,0 +1,1 @@
+Message order: a received message is placed where it arrived and the history is sorted by that moment, never by the sender's clock, which could put a reply above the message it answers; the sender's time is still shown, never later than the arrival (requirement 10). No change on the wire.

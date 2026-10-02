@@ -1,5 +1,5 @@
 import {
-  EDIT_RATE_WINDOW_MS, EDIT_RECEIVE_LIMIT, EDIT_SEND_LIMIT, GROUP_EDIT_TEXT_BYTES, MAX_EDITS_PER_MESSAGE, RateWindow, STATUS_CARD_LIMITS, carryMentions, mentionsMember, receivedTimestamp, utf8Encode,
+  EDIT_RATE_WINDOW_MS, EDIT_RECEIVE_LIMIT, EDIT_SEND_LIMIT, GROUP_EDIT_TEXT_BYTES, MAX_EDITS_PER_MESSAGE, RateWindow, STATUS_CARD_LIMITS, carryMentions, mentionsMember, heardTime, utf8Encode,
   type GroupEdit, type GroupMention, type StatusCard,
 } from "@ghostly/core";
 import { canEditInGroup, isJoinNotice, takesPeerEdit, withEdit } from "../shared/edits";
@@ -172,7 +172,7 @@ export class GroupEdits {
     if ((message.edit?.seq ?? 0) >= edit.e) return "stale";
     const updated = await this.host.patch(chat, message.id, current => {
       if (!takes(current) || (current.edit?.seq ?? 0) >= edit.e) return null;
-      const next = withEdit(current, { seq: edit.e, at: receivedTimestamp(edit.ts), text: edit.m, card: edit.sc });
+      const next = withEdit(current, { seq: edit.e, at: heardTime(edit.ts), text: edit.m, card: edit.sc });
       // Who it names now shows as such; an edit that names me is never a new mention (no sound, no @ in the list).
       return { text: next.text, edit: next.edit, card: next.card, mentions: edit.k?.length ? edit.k : undefined, mentioned: mentionsMember(edit.k, me) ? true : undefined };
     });

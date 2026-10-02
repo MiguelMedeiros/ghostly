@@ -263,6 +263,9 @@ commands, `group.created` events and `engine getState` print it as `<hidden>`; `
 {"seq":6,"id":"message.received:f3gg…:peer_jY7N…","type":"message.received","at":1790450767762,"chat":"f3gg…","message":{"id":"peer_jY7N…","chat":"f3gg…","from":"peer","text":"hello bob","timestamp":1790450767735,"delivery":null,"deliveryError":null,"via":"datalink","nick":"Alice"}}
 ```
 
+- A message's `timestamp` is its place in the history, which `chat history` and `group history` are ordered by: when
+  this profile sent it, or when it arrived here. A received message also has `sentAt`, the time its sender's clock
+  said, which orders nothing (a clock can be wrong).
 - `seq` grows by one per event in the profile, across restarts; `id` is the same whenever the same fact is reported.
   Dedupe by `id`; resume with `--since <seq>`, or let `--cursor <file>` remember the last event handled.
 - Types: `daemon.started`, `chat.created`, `chat.removed`, `chat.renamed`, `chat.pairing` (`stage`: publishing,

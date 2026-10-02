@@ -427,7 +427,9 @@ export class HoldEngine {
       const manifest = keys.open(await this.fetchBytes(pointer.manifestUrl, HOLD_LIMITS.maxManifestBytes), { maxBytes: HOLD_LIMITS.maxManifestBytes, now });
       if (manifest.header.kind !== "manifest") throw new HoldRefusedError("format", "Not a manifest");
       mailbox = manifest.header.mailbox;
-      entries = readManifest(manifest.header.meta).filter(([seq]) => seq > this.state(linkId).inSeq);
+      // In the order the contact held them, whatever order the manifest lists them in: they take their places in the
+      // history as they are stored here.
+      entries = readManifest(manifest.header.meta).filter(([seq]) => seq > this.state(linkId).inSeq).sort((a, b) => a[0] - b[0]);
     } catch (error) {
       if (error instanceof HoldRefusedError) { await this.save(linkId, { ...this.state(linkId), refused: this.state(linkId).refused + 1 }); this.errors.set(linkId, `Refused what the contact's storage offered: ${error.message}`); }
       else this.errors.set(linkId, `Could not pick up held items: ${error instanceof Error ? error.message : String(error)}`);
