@@ -3,6 +3,7 @@ import { MAX_BACKUP_BYTES, open } from "@ghostly/browser/backup/envelope";
 import { BackupReader, BackupWriter, backupProtection, blobSource, bytesSource, isCancelled, memorySink, type BackupSink, type BackupSource } from "@ghostly/browser/backup/stream";
 import { createDatabase, databaseExists, putRows, restoreDatabase, snapshotDatabase, type DatabaseSnapshot, type StoreShape } from "@ghostly/browser/backup/database";
 import { databaseName, wrap, type StoredFile } from "@ghostly/browser/shared/idb";
+import { RESTORED_WALLET_STORES, restoredWalletRow } from "@ghostly/browser/shared/restoredRows";
 import { FILE_BYTES_STEP, SMALL_FILE_BYTES, checkFileId, dropFileSpace, fileBytes, fileBytesOf, type FileBytes, type FileBytesKind } from "@ghostly/browser/shared/fileBytes";
 import { restoreArkDatabase, snapshotArkDatabase, type ArkDatabaseSnapshot } from "@ghostly/browser/engine/paymentAdapters/backup";
 import { getPrefix, getStorageProfile, ownsKey } from "./storage";
@@ -396,24 +397,8 @@ function restoredRows(store: string, keys: IDBValidKey[], values: unknown[], fre
       return hasOwnDatabase(keys[i]) && typeof walletId === "string" ? { ...record, config: { ...record.config, walletId: fresh(walletId) } } : value;
     });
   }
-  if (store === "proofs") {
-    // Ecash as it was when the backup was made: what was spent since is found by asking the mint, once the wallet runs.
-    return values.map((value) => {
-      const proof = value as { secret?: unknown; reserved?: boolean } | null;
-      return proof && typeof proof === "object" && typeof proof.secret === "string" && !proof.reserved ? { ...proof, unchecked: true } : value;
-    });
-  }
-  if (store === "swaps") {
-    // A swap as it stood when the backup was made: what it brings is checked like the copy's ecash.
-    return values.map((value) => (value && typeof value === "object" ? { ...value, restored: true } : value));
-  }
-  if (store === "paymentIntents") {
-    // An older copy cannot prove an unfinished attempt was never sent; it may not authorize a new one.
-    return values.map((value) => {
-      const intent = value as { review?: { state?: string } };
-      return intent?.review && ["pending", "submitted", "unknown"].includes(intent.review.state ?? "") ? { ...intent, review: { ...intent.review, state: "unknown" } } : value;
-    });
-  }
+  // Money as the bundle held it is not taken at its word: ecash to check, swaps to check, attempts unknown.
+  if (RESTORED_WALLET_STORES.includes(store)) return values.map((value) => restoredWalletRow(store, value));
   return values;
 }
 
