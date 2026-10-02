@@ -6,8 +6,10 @@ import { fromBase64Url, randomBytes, toBase64Url, toZ32, utf8Encode } from "../s
 import { PairedSession, type PairedSessionOptions, type PairingCredentials, type PairingState } from "../src/pairedSession";
 import { fitSignedPairedSignal, fitSignedPairedSignalWith, signPairedSignal, signPairedSignalWith, verifyPairedSignal } from "../src/pairedSignal";
 import { seedSigner, webCryptoSigner, type Signer } from "../src/signer";
-import { DEVICES_CAPABILITY, deviceEchoFrame, deviceEchoNonce, deviceLinkPairing, deviceLinkParams, devicePingFrame, type DeviceFrame } from "../src/deviceLink";
+import { DEVICES_CAPABILITY, deviceEchoFrame, deviceEchoNonce, deviceLinkPairing, deviceLinkParams, devicePingFrame, signDeviceTransports, verifyDeviceTransports, type DeviceFrame } from "../src/deviceLink";
+import { encodePacketTransports } from "../src/capsRecord";
 import { DESKTOP_NETWORK, MemoryPkarr, closeWorld, fakePeerConnection, useFakeWorld, yieldToLoop } from "./support/pairingWorld";
+import { NativeWorld } from "./support/nativeWorld";
 import { createChannelPair } from "./helpers";
 // covers: devices.links.session, devices.signing-key
 
@@ -309,5 +311,84 @@ describe("a device link", () => {
     expect(() => make({ params: { ...pairing.params, deliveryMode: "dht" } })).toThrow("no DHT delivery");
     expect(publicKeyFromZ32(pairing.pairing.credentials.peerKey!)).toEqual(phone.publicKey);
     expect(pairing.pairing.trustOnFirstUse).toBe(false);
+  });
+});
+
+describe("a device link's transports in its packet (`_tr`)", () => {
+  const from = createIdentity().pubKeyZ32, to = createIdentity().pubKeyZ32;
+  const value = encodePacketTransports(["iroh/1"], { "iroh/1": { id: "a".repeat(64), relay: "https://relay.test./", addresses: [] } });
+
+  it("is signed by the device signing key, over both rendezvous keys, and read back only under that key", async () => {
+    const device = seedDevice(), other = seedDevice();
+    const signed = await signDeviceTransports(value, device, from, to);
+    expect(verifyDeviceTransports(signed, from, to, device.publicKey)).toBe(value);
+    expect(verifyDeviceTransports(signed, from, to, other.publicKey)).toBeNull();
+    expect(verifyDeviceTransports(signed, to, from, device.publicKey)).toBeNull();
+    expect(verifyDeviceTransports(value, from, to, device.publicKey)).toBeNull();
+    const tampered = JSON.parse(signed) as { t: string[] };
+    tampered.t = ["iroh/1", "webrtc/1"];
+    expect(verifyDeviceTransports(JSON.stringify(tampered), from, to, device.publicKey)).toBeNull();
+    expect(verifyDeviceTransports("not json", from, to, device.publicKey)).toBeNull();
+  });
+
+  describe("on a link with no WebRTC", () => {
+    let native: NativeWorld;
+    beforeEach(() => { useFakeWorld(); pkarr = new MemoryPkarr(DESKTOP_NETWORK); native = new NativeWorld(); native.hexIds = true; });
+    afterEach(async () => {
+      const stopping = Promise.all(opened.splice(0).map((link) => link.stop(false)));
+      await run(3_000);
+      await stopping;
+      await closeWorld();
+    });
+
+    /** One end, native only, as the device links of an app with no WebRTC run (the Linux Desktop). */
+    function openNative(name: string, params: ReturnType<typeof deviceLinkPairing>, said: string[][]) {
+      const states: PairingState[] = [];
+      const link: GhostLink = new GhostLink({
+        ...params, deviceCapabilities: [DEVICES_CAPABILITY], rtcAvailable: false, native: { automatic: true }, packetTransports: true,
+        transport: pkarr.transport(), pollIntervals: RELAY_POLL_INTERVALS, autoConnect: true,
+        createPeerConnection: () => { throw new ReferenceError("RTCPeerConnection is not defined"); },
+        localFetch: vi.fn(), getServices: () => [{ id: "chat", type: "chat" }], getHostedHttpService: () => undefined,
+        events: { onPairingState: (state) => { states.push(state); }, onPacketTransports: (transports) => { said.push(transports); } },
+      });
+      opened.push(link);
+      link.start();
+      link.registerEndpoint(native.endpoint("iroh/1", name));
+      return { link, states };
+    }
+
+    it("goes live on the transports each device signed", async () => {
+      const d = randomBytes(32), desktop = seedDevice(), phone = await webCryptoDevice();
+      const heard: string[][] = [];
+      const a = openNative("desktop", deviceLinkPairing(d, desktop, phone.publicKey), heard);
+      const b = openNative("phone", deviceLinkPairing(d, phone, desktop.publicKey), []);
+      for (let i = 0; i < 480 && !(a.link.isDataLinkOpen && b.link.supportsDevice(DEVICES_CAPABILITY)); i++) await run(250);
+      expect(a.link.supportsDevice(DEVICES_CAPABILITY) && b.link.supportsDevice(DEVICES_CAPABILITY)).toBe(true);
+      expect(heard[0]).toEqual(["iroh/1"]);
+    });
+
+    it("ignores transports a holder of D wrote in the other device's packet, dials none of them, and goes live once the device itself says its own", async () => {
+      const d = randomBytes(32), desktop = seedDevice(), phone = seedDevice(), intruder = seedDevice();
+      const heard: string[][] = [];
+      const a = openNative("desktop", deviceLinkPairing(d, desktop, phone.publicKey), heard);
+      // The intruder holds D: it publishes at the phone's rendezvous key, with an endpoint of its own, signed by its own key.
+      const forged = { ...deviceLinkPairing(d, intruder, desktop.publicKey), params: deviceLinkParams(d, phone.publicKey, desktop.publicKey) };
+      const x = openNative("intruder", forged, []);
+      expect(x.link.myPubKeyZ32).toBe((a.link as unknown as { options: { params: { peerPubKeyZ32: string } } }).options.params.peerPubKeyZ32);
+      await run(120_000);
+      expect(heard).toEqual([]);
+      expect(native.dials).toBe(0);
+      expect(a.link.isDataLinkOpen).toBe(false);
+      expect(a.states.some((s) => s.keyMismatch)).toBe(false);
+      expect((a.link as unknown as { keyStopped: boolean }).keyStopped).toBe(false);
+
+      // The intruder goes, and the phone comes: its signed transports are taken at once, and the link goes live.
+      await x.link.stop(false);
+      opened.splice(opened.indexOf(x.link), 1);
+      const b = openNative("phone", deviceLinkPairing(d, phone, desktop.publicKey), []);
+      for (let i = 0; i < 480 && !(a.link.supportsDevice(DEVICES_CAPABILITY) && b.link.supportsDevice(DEVICES_CAPABILITY)); i++) await run(250);
+      expect(a.link.supportsDevice(DEVICES_CAPABILITY)).toBe(true);
+      expect(heard).toEqual([["iroh/1"]]);
+    });
   });
 });

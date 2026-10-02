@@ -25,8 +25,28 @@ interface SetVector {
   name: string; d: string; turnSeed: string; turnAddress: string; turnAddressZ32: string; turnSealKey: string;
   links: { a: number; b: number; lower: number; linkSecret: string; rendezvousSeedA: string; rendezvousKeyA: string; rendezvousSeedB: string; rendezvousKeyB: string; sealKey: string }[];
 }
+/**
+ * A few of the values below, computed once by another implementation and written here by hand: Node's own
+ * `crypto.hkdfSync("sha256", …)` and its Ed25519 (a PKCS#8 key from the seed, the public key from its SPKI), with
+ * nothing of this code or of @noble, from the inputs of this file (the DID seed, the first set's D, devices 0 and 1).
+ * The script that made them is in the pull request that added them (#1135). The test checks this code against them.
+ */
+const INDEPENDENT = {
+  note: "Computed with node:crypto (hkdfSync sha256, Ed25519 from a PKCS#8 seed), not with this code: D0 from didSeed; the first set's turn seed, turn address (its Ed25519 public key) and turn seal key; device 0's public key; the link of devices 0 and 1 under the first set's D: its secret, device 0's rendezvous seed and key, and the sealing key.",
+  d0: "35fdd87d94433c5711862367b3e4fb27b9e940ff846639f4694a7fea68af976f",
+  turnSeed: "27da4049bc657afe6fc3cf186426888449b6a6b6aa785a550f68072dd5199cd1",
+  turnAddress: "d17564881315badeb0c7a7331a3766c40d479596c524917e6849d8e77795b389",
+  turnSealKey: "6b6cbf75c1b649d18a67c3f862185ee72fc01f8149839372528b24d5b03f9cd6",
+  device0Key: "cb5e9f1ccbb37e4e6cdeae9f0321258c4d5b3752b8b19b6f37053c9427896a7b",
+  linkSecret01: "b974fa88437aaf851a5b32bb206783977ffb7e503ea352a74d15740824ac8bfc",
+  rendezvousSeed0: "b2a6123ef06d3e9a0b70a8689fd72e46cc79a35ecb0785fa5954b0aa288cb870",
+  rendezvousKey0: "68fbaa4d6aa5b0a585cf0990e916990944ea80a5554652c1cbd8684c1a6fc448",
+  sealKey01: "874a6de502465814673ad2ab9bf15e8e17d7154a7d3a65e2b80574e94cdc0b49",
+};
+
 interface Vectors {
   about: string; salt: string; didSeed: string;
+  independent: typeof INDEPENDENT;
   devices: { name: string; seed: string; key: string; keyZ32: string }[];
   sets: SetVector[];
 }
@@ -56,6 +76,7 @@ function build(): Vectors {
     didSeed: bytesToHex(didSeed),
     devices: devices.map((d) => ({ name: d.name, seed: bytesToHex(d.seed), key: bytesToHex(d.publicKey), keyZ32: d.pubKeyZ32 })),
     sets: [set("the first device set: D0 from the DID key's seed", firstDeviceSetSecret(didSeed)), set("after a removal: a random D", seed("D after a removal"))],
+    independent: INDEPENDENT,
   };
 }
 
@@ -68,6 +89,24 @@ describe("a device set's derivations: the vectors", () => {
   });
 
   const vectors = (): Vectors => JSON.parse(readFileSync(FILE, "utf8")) as Vectors;
+
+  it("matches values another implementation computed (Node's own HKDF and Ed25519)", () => {
+    const v = vectors(), i = v.independent, d = hexToBytes(v.sets[0].d);
+    expect(bytesToHex(firstDeviceSetSecret(hexToBytes(v.didSeed)))).toBe(i.d0);
+    expect(v.sets[0].d).toBe(i.d0);
+    const turn = turnKeys(d);
+    expect(bytesToHex(turn.identity.seed)).toBe(i.turnSeed);
+    expect(bytesToHex(turn.address)).toBe(i.turnAddress);
+    expect(bytesToHex(turn.sealKey)).toBe(i.turnSealKey);
+    expect(v.devices[0].key).toBe(i.device0Key);
+    const a = hexToBytes(v.devices[0].key), b = hexToBytes(v.devices[1].key);
+    const secret = deviceLinkSecret(d, a, b);
+    expect(bytesToHex(secret)).toBe(i.linkSecret01);
+    const rv = deviceLinkRendezvousSeed(secret, a);
+    expect(bytesToHex(rv)).toBe(i.rendezvousSeed0);
+    expect(bytesToHex(identityFromSeed(rv).publicKey)).toBe(i.rendezvousKey0);
+    expect(bytesToHex(deviceLinkSealKey(secret))).toBe(i.sealKey01);
+  });
 
   it("the first D comes from the DID key's seed, and the turn's keys from D", () => {
     const v = vectors(), first = v.sets[0];

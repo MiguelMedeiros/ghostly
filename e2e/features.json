@@ -916,7 +916,7 @@
     "packages/browser/src/devices/linkOnly.ts": ["devices.*"],
     "packages/browser/src/devices/turn{,Action}.ts": ["devices.turn.*"],
     "packages/browser/src/devices/{gate,peer,state,store}.ts": ["*"],
-    "packages/browser/src/devices/{links,setup,signingKey}.ts": ["devices.*"],
+    "packages/browser/src/devices/{links,network,setup,signingKey}.ts": ["devices.*"],
     "packages/browser/src/engine/arrival.ts": ["chat.order"],
     "packages/browser/src/engine/attention.ts": ["app.attention.sounds","app.attention.notifications","app.attention.cues"],
     "packages/browser/src/engine/community.ts": ["groups.community.*","groups.protocol.*","groups.link.share"],
