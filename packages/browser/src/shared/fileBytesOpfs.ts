@@ -23,7 +23,8 @@ export class OpfsFileBytes implements FileBytes {
       if (!pending) return;
       if ("progress" in reply) return pending.progress?.(reply.progress);
       this.waiting.delete(reply.n);
-      if (reply.ok) pending.resolve(reply.value); else pending.reject(new Error(reply.error));
+      // An error keeps the name the worker gave it: "no room left" is told from any other failure by its name.
+      if (reply.ok) pending.resolve(reply.value); else pending.reject(reply.name ? Object.assign(new Error(reply.error), { name: reply.name }) : new Error(reply.error));
     };
     worker.onerror = (event) => {
       event.preventDefault();

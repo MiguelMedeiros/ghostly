@@ -112,6 +112,8 @@ export class BackupWriter {
   /** Bytes handed to the sink so far. */
   written = 0;
   private finished = false;
+  /** Set once the sink refused a frame: the error it gave, thrown again at every later write. */
+  private failed: { error: unknown } | null = null;
 
   private constructor(private readonly sink: BackupSink, private readonly key: CryptoKey | null, private readonly base: Uint8Array, private chain: Uint8Array, private readonly signal?: AbortSignal) {}
 
@@ -133,8 +135,11 @@ export class BackupWriter {
 
   private async put(kind: number, plain: Uint8Array): Promise<void> {
     check(this.signal);
+    if (this.failed) throw this.failed.error;
     if (this.finished) throw new Error("This backup is already finished");
     if (this.frame >= 0xffffffff) throw new Error("This backup is too large");
+    // What a reader refuses is not written: found out now, not when the backup is needed.
+    if (plain.length > MAX_FRAME_BYTES) throw new Error("A record of this profile is too large for a backup");
     let out: Uint8Array;
     if (this.key) {
       // The header's digest is every frame's associated data: a frame of another backup, or under a changed header, fails.
@@ -146,7 +151,9 @@ export class BackupWriter {
       else { out = join([head, plain]); this.chain = await sha256(this.chain, out); }
     }
     this.frame += 1;
-    await this.sink.write(out);
+    // A frame the sink did not take (no room left, say) is the end of this backup: every frame after it would be
+    // numbered past a gap, and the file would never open. Nothing more is written, whatever the caller does next.
+    try { await this.sink.write(out); } catch (error) { this.failed = { error }; throw error; }
     this.written += out.length;
   }
 

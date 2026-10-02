@@ -289,6 +289,34 @@ it("a backup cancelled half way, or whose save dialog was closed, leaves no half
   expect(await staged()).toEqual([]);
 });
 
+it("a backup whose bundle cannot be written fails: it never leaves the file out and goes on", async () => {
+  await seed({ small: 3, large: [3 * MIB] });
+  // The store takes everything but one frame of the large file's bytes (no room at that moment), then takes the rest.
+  for (const passphrase of [PASS, null]) {
+    const sink = memorySink();
+    let refused = false;
+    const flaky = { write: async (bytes: Uint8Array) => { if (!refused && bytes.length >= MIB) { refused = true; throw Object.assign(new Error("no space left"), { name: "QuotaExceededError" }); } await sink.write(bytes); } };
+    // Before: the file was counted as one "that could not be read", the backup was said to be made, and the bundle,
+    // a frame short, was refused as damaged by every restore.
+    await expect(writeProfileBackup(flaky, { passphrase })).rejects.toThrow("no space left");
+    expect(refused).toBe(true);
+  }
+});
+
+it("a backup that runs out of room on the device says so, and leaves no half-written file", async () => {
+  await seed({ small: 3, large: [3 * MIB] });
+  const store = await fileBytes();
+  const append = store.append.bind(store);
+  // Room for the first megabyte of the bundle, then the browser's own error, as file storage hands it on.
+  let written = 0;
+  vi.spyOn(store, "append").mockImplementation(async (id, offset, bytes) => {
+    if (id.startsWith("save-") && (written += bytes.length) > MIB) throw Object.assign(new Error("This device has no space left for the file"), { name: "QuotaExceededError" });
+    return append(id, offset, bytes);
+  });
+  await expect(backUpToFile({ passphrase: PASS }, "x.ghostly-backup")).rejects.toThrow("This device has no room left for this backup. Free some space, then try again.");
+  expect((await readAll("ghostly", STORES.fileChunks) as { id: string }[]).filter((row) => row.id.startsWith("save-"))).toEqual([]);
+});
+
 it("where storage cannot keep a byte (a private window), the bundle is made in memory instead of failing", async () => {
   await seed();
   const store = await fileBytes();
