@@ -56,6 +56,7 @@ Every transport runs the same authenticated chat session ([WISP 401](wisps/401-p
 ### Choosing a transport
 
 - **Automatic** (the default): both apps rank the transports they share. A relayed path ranks after every direct one. When WebRTC fails, the dialling side goes on to the next one (often a relayed Iroh) before the chat stays on the DHT.
+- WebRTC that cannot connect on a network (a VPN, a firewall) does not hold the chat back: an answered offer with no connection after 6 s is raced by what ranks after it, relayed transports too (`RACE_ANSWERED_MS`), and a side that gathers no candidate dials its other transports itself and tries WebRTC last for 10 minutes (`RTC_UNSTARTED_MS`). See [WISP 100](wisps/100-transports.md#webrtc-that-cannot-connect-on-this-network).
 - A transport or **DHT only** can be chosen per chat in the connection panel (the connection icon in the chat header). A choice made with no stream open travels in the capability record, so the contact dials it first.
 - A native transport that fails three attempts in a row is tried last for an hour.
 - Native listeners start one at a time per transport, the transports side by side (`nativeQueues` in `packages/browser/src/engine/node.ts`). HyperDHT with its DHT out of reach (UDP blocked, a VPN) takes about 6 s to start listening; in one shared queue each chat's Iroh listener waited that long per chat ahead of it.
