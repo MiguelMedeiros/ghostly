@@ -1002,12 +1002,19 @@ export class GhostLink {
    * A contact's offer from before the session that was live when this app last ran began (`resumeFloor`): answering
    * it held the resumed link on a connection the contact no longer offers, until ICE gave up (about 30 s), and its
    * resume dial never went (bug hunt r7a). Dropped; the resumed link dials when it sees the contact.
+   *
+   * The floor is this device's clock and the offer's time is the contact's: the two are compared only for an offer
+   * the first read of this run found, which nothing else dates. One this run saw arrive (`sight`: the contact's record
+   * did not have it at an earlier read, and it is not dated before the contact's packet that read found) was made
+   * since this app is back. Held against the floor, the offers of a contact whose clock is behind were all dropped
+   * until that clock passed the moment the last session began: minutes without a live chat after a restart.
    */
-  private predatesLastSession(verified: string): boolean {
+  private predatesLastSession(verified: string, sight?: SignalSight): boolean {
     const floor = this.options.resumeFloor;
     if (floor === undefined) return false;
     const offer = parseRtcSignal(verified);
     if (offer?.t !== "o" || offer.ts >= floor) return false;
+    if (sight && (sight.after === null || offer.ts >= sight.after)) return false;
     traceLink(this.myPubKeyZ32, "stale-offer", { beforeMs: floor - offer.ts });
     this.maybeAutoConnect(this.presence);
     return true;
@@ -1033,7 +1040,7 @@ export class GhostLink {
     const options = this.options, credentials = options.pairing?.credentials;
     const verified = options.params.profile ? verifyPairedSignal(signal, options.params.peerPubKeyZ32,
       this.myPubKeyZ32, credentials?.peerKey, credentials?.requireSignedSignals) : signal;
-    if (verified && this.predatesLastSession(verified)) return;
+    if (verified && this.predatesLastSession(verified, sight)) return;
     if (verified) void this.dataLink.handleSignal(verified, sight);
     else if (credentials?.peerKey) {
       // The link's records are published under keys derived from the invite: anyone holding a copy of it can put a
