@@ -1,6 +1,7 @@
 import type { DiscoveryStatus } from "./relayBreaker";
 import type { Identity } from "./identity";
 import type { GhostRecord, SignedPacket } from "./pkarr";
+import type { TurnConditions, TurnSourceAnswer, TurnSourcePut } from "./turnRead";
 
 /**
  * How a Ghostly peer reaches Pkarr. Desktop talks to the Mainline DHT directly
@@ -53,6 +54,8 @@ export function withRequestOptions(transport: PkarrTransport, extra: PkarrReques
   if (transport.readAnsweredAt) wrapped.readAnsweredAt = (pubKeyZ32) => transport.readAnsweredAt!(pubKeyZ32);
   if (transport.onServerTime) wrapped.onServerTime = (listener) => transport.onServerTime!(listener);
   if (transport.configure) wrapped.configure = (options) => transport.configure!(options);
+  if (transport.turnRead) wrapped.turnRead = (pubKeyZ32) => transport.turnRead!(pubKeyZ32);
+  if (transport.turnPut) wrapped.turnPut = (pubKeyZ32, payload, conditions) => transport.turnPut!(pubKeyZ32, payload, conditions);
   return wrapped;
 }
 
@@ -122,4 +125,16 @@ export interface PkarrTransport {
    * (`readRelays`, "Also use Pkarr relays"). Writes go to them either way, so browser contacts see this peer's packets.
    */
   configure?(options: { relays: string[]; readRelays: boolean }): void;
+  /**
+   * The turn record's own read (WISP 06 § Publishing and reading): every source is asked, in parallel, and each
+   * one's answer is handed back as it came, not verified, not cached and never taken from this client's own writes.
+   * Only the turn uses it; a transport without it cannot hold a profile on several devices.
+   */
+  turnRead?(pubKeyZ32: string): Promise<TurnSourceAnswer[]>;
+  /**
+   * The turn record's own put: the stored bytes, to each source named in `conditions`, on that source's condition
+   * (`cas` on the DHT, `If-Match` on a relay). Every source's answer is reported, and a refusal is never tried again
+   * without its condition.
+   */
+  turnPut?(pubKeyZ32: string, payload: Uint8Array, conditions: TurnConditions): Promise<TurnSourcePut[]>;
 }
