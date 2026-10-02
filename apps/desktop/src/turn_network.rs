@@ -13,15 +13,16 @@
 //!   on the DHT, `If-Match` on a relay. Each source's answer is reported. A refusal (301 or 302 from a node,
 //!   409, 412 or 428 from a relay) is an answer, never tried again.
 //!
-//! - On the Desktop a put goes to the DHT first, and to the relays only once the DHT stored it: relays ignore
+//! - On the Desktop a put goes to the DHT first, and not to the relays when the DHT refused it: relays ignore
 //!   `If-Match` (measured), so a record the DHT's `cas` refused must not land on them and supersede the
-//!   device that won there.
+//!   device that won there. A DHT put that only failed (a timeout) does not hold the relays back.
 //!
 //! The DHT side needs `put_mutable` with a `cas`, which `pkarr`'s `DhtClient` does not offer (its `publish`
 //! passes `None`, and its node is private). So the turn has a Mainline node of its own. It is made, and
 //! joins the DHT, when the engine says the profile has a device set (`warm`), or at the first turn read:
 //! a profile on one device never makes one. A read or a put waits for the node to have joined, up to
-//! `BOOTSTRAP_TIMEOUT`. A lookup that finds nothing is that source not answering, never "no record".
+//! `BOOTSTRAP_TIMEOUT`. On a node that joined, a lookup nodes answered without an item is "no record"; a lookup
+//! nobody answered is that source not answering.
 
 use std::collections::HashMap;
 use std::net::SocketAddrV4;
@@ -196,7 +197,7 @@ fn item_of(key: &PublicKey, payload: &[u8]) -> Result<MutableItem, String> {
     ))
 }
 
-async fn read_dht(dht: &TurnDht, key: &PublicKey) -> SourceAnswer {
+async fn read_dht(dht: &TurnDht, key: &PublicKey, within: Duration) -> SourceAnswer {
     let source = DHT_SOURCE.to_string();
     let node = match dht.node().await {
         Ok(node) => node,
@@ -213,20 +214,12 @@ async fn read_dht(dht: &TurnDht, key: &PublicKey) -> SourceAnswer {
         }
         detailed.outcome.recv().await
     };
-    let outcome = tokio::time::timeout(SOURCE_TIMEOUT, collect).await;
-    // A lookup that found nothing is this source not answering, never "no record" (WISP 06, Publishing and
-    // reading): a node that has not found the network yet finds nothing either, and so does one whose
-    // lookup reached too few nodes. The record still gets to the DHT: a relay that takes a put publishes it.
-    if payloads.is_empty() {
-        let heard = outcome.is_ok_and(|outcome| outcome.responded() > 0);
-        return silent(
-            source,
-            if heard {
-                "found nothing"
-            } else {
-                "no node answered"
-            },
-        );
+    let outcome = tokio::time::timeout(within, collect).await;
+    // The node joined the DHT (`node()` waited for that) and nodes answered the lookup without an item: no
+    // record. A lookup nobody answered, or one cut off before it ended with nothing found, is this source
+    // not answering: a node that cannot reach the network finds nothing either.
+    if payloads.is_empty() && !outcome.is_ok_and(|outcome| outcome.responded() > 0) {
+        return silent(source, "no node answered");
     }
     SourceAnswer {
         source,
@@ -241,17 +234,23 @@ async fn read_dht(dht: &TurnDht, key: &PublicKey) -> SourceAnswer {
     }
 }
 
-async fn read_relay(http: &reqwest::Client, relay: &Url, key: &PublicKey) -> SourceAnswer {
+async fn read_relay(
+    http: &reqwest::Client,
+    relay: &Url,
+    key: &PublicKey,
+    within: Duration,
+) -> SourceAnswer {
     let source = plain(relay);
     // A relay answers a plain GET from its cache while the packet's TTL lasts: a record another device put
     // elsewhere would not be seen. `NetworkOnly` makes it look; a relay from before that query refuses it (400).
-    let mut response = match get(http, key_url(relay, key, Some("policy=NetworkOnly"))).await {
+    let network_only = key_url(relay, key, Some("policy=NetworkOnly"));
+    let mut response = match get(http, network_only, within).await {
         Ok(response) => response,
         Err(e) => return silent(source, e),
     };
     let stale = response.status().as_u16() == 400;
     if stale {
-        response = match get(http, key_url(relay, key, None)).await {
+        response = match get(http, key_url(relay, key, None), within).await {
             Ok(response) => response,
             Err(e) => return silent(source, e),
         };
@@ -298,25 +297,31 @@ async fn read_relay(http: &reqwest::Client, relay: &Url, key: &PublicKey) -> Sou
     }
 }
 
-async fn get(http: &reqwest::Client, url: Url) -> Result<reqwest::Response, String> {
-    http.get(url)
-        .timeout(SOURCE_TIMEOUT)
-        .send()
-        .await
-        .map_err(|e| {
-            if e.is_timeout() {
-                "timed out".to_string()
-            } else {
-                e.to_string()
-            }
-        })
+async fn get(
+    http: &reqwest::Client,
+    url: Url,
+    within: Duration,
+) -> Result<reqwest::Response, String> {
+    http.get(url).timeout(within).send().await.map_err(|e| {
+        if e.is_timeout() {
+            "timed out".to_string()
+        } else {
+            e.to_string()
+        }
+    })
 }
 
 /// Reads the turn record at `key` from every source, at once. One answer per source, the DHT first.
-pub async fn read(sources: &TurnSources<'_>, key: &PublicKey) -> Vec<SourceAnswer> {
+/// `within`: how long each source has, where less than `SOURCE_TIMEOUT` (the read a raising put acts on).
+pub async fn read(
+    sources: &TurnSources<'_>,
+    key: &PublicKey,
+    within: Option<Duration>,
+) -> Vec<SourceAnswer> {
+    let within = within.map_or(SOURCE_TIMEOUT, |given| given.min(SOURCE_TIMEOUT));
     let dht = async {
         match sources.dht {
-            Some(dht) => Some(read_dht(dht, key).await),
+            Some(dht) => Some(read_dht(dht, key, within).await),
             None => None,
         }
     };
@@ -324,7 +329,7 @@ pub async fn read(sources: &TurnSources<'_>, key: &PublicKey) -> Vec<SourceAnswe
         sources
             .relays
             .iter()
-            .map(|relay| read_relay(sources.http, relay, key)),
+            .map(|relay| read_relay(sources.http, relay, key, within)),
     );
     let (dht, relays) = tokio::join!(dht, relays);
     dht.into_iter().chain(relays).collect()
@@ -435,12 +440,13 @@ pub async fn put(
         .relays
         .iter()
         .filter_map(|relay| Some((relay, conditions.get(&plain(relay))?)));
-    // What the DHT did not store does not go to the relays: they would take it whatever their condition says.
-    if dht.as_ref().is_some_and(|put| put.outcome != "stored") {
+    // What the DHT refused does not go to the relays: they would take it whatever their condition says. A put
+    // the DHT only failed to answer (a timeout, no node reached) says nothing of another writer: the relays get it.
+    if dht.as_ref().is_some_and(|put| put.outcome == "refused") {
         let held_back = named.map(|(relay, _)| SourcePut {
             source: plain(relay),
             outcome: "failed",
-            detail: Some("not sent: the DHT did not store it".into()),
+            detail: Some("not sent: the DHT refused it".into()),
         });
         return Ok(dht.into_iter().chain(held_back).collect());
     }
@@ -552,7 +558,7 @@ mod tests {
     /// Whether the DHT comes to answer `payload` (nodes take a moment).
     async fn dht_holds(pkarr: &Pkarr, key: &PublicKey, payload: &[u8]) -> bool {
         for _ in 0..20 {
-            let answers = read(&pkarr.turn_sources(), key).await;
+            let answers = read(&pkarr.turn_sources(), key, None).await;
             if held(&answers[0]).iter().any(|item| item == payload) {
                 return true;
             }
@@ -571,12 +577,11 @@ mod tests {
 
         // Nothing there yet: the DHT and the working relay answer that they hold nothing.
         *broken.broken.lock().unwrap() = true;
-        let empty = read(&pkarr.turn_sources(), &key).await;
+        let empty = read(&pkarr.turn_sources(), &key, None).await;
         assert_eq!(empty.len(), 3, "the DHT and both relays");
         assert_eq!(empty[0].source, DHT_SOURCE);
-        // The DHT found nothing: that is the source not answering, never "no record".
-        assert!(!empty[0].answered);
-        assert_eq!(empty[0].detail.as_deref(), Some("found nothing"));
+        // The node joined and nodes answered without an item: no record there, and the first put names the DHT.
+        assert!(empty[0].answered && empty[0].payloads.is_empty());
         assert_eq!(empty[1].source, relay.url);
         assert!(empty[1].answered && empty[1].payloads.is_empty());
         assert!(!empty[2].answered, "a relay that is broken did not answer");
@@ -597,14 +602,14 @@ mod tests {
             "{stored:?}"
         );
         assert!(dht_holds(&pkarr, &key, &first).await);
-        let answers = read(&pkarr.turn_sources(), &key).await;
+        let answers = read(&pkarr.turn_sources(), &key, None).await;
         assert_eq!(held(&answers[1]), [first.clone()], "the bytes as put");
         assert!(!answers[2].answered);
 
         // Another device, on the DHT alone, reads the same bytes.
         let other = app(&bootstrap, &[]);
         assert!(dht_holds(&other, &key, &first).await);
-        assert_eq!(read(&other.turn_sources(), &key).await.len(), 1);
+        assert_eq!(read(&other.turn_sources(), &key, None).await.len(), 1);
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -661,10 +666,10 @@ mod tests {
         assert_eq!(refused[1].outcome, "failed");
         assert_eq!(
             refused[1].detail.as_deref(),
-            Some("not sent: the DHT did not store it")
+            Some("not sent: the DHT refused it")
         );
         assert_eq!(puts(&relay).len(), before, "no request to the relay");
-        let answers = read(&pkarr.turn_sources(), &key).await;
+        let answers = read(&pkarr.turn_sources(), &key, None).await;
         assert!(!held(&answers[0]).contains(&third));
         assert!(held(&answers[0]).contains(&second));
         assert_eq!(held(&answers[1]), [second.clone()]);
@@ -728,11 +733,11 @@ mod tests {
         put(&pkarr.turn_sources(), &set.key(), &first, &on)
             .await
             .unwrap();
-        let fresh = read(&pkarr.turn_sources(), &set.key()).await;
+        let fresh = read(&pkarr.turn_sources(), &set.key(), None).await;
         assert!(fresh[0].answered && !fresh[0].stale);
         // A relay from before `?policy=NetworkOnly` refuses it (400) and is asked plainly, once.
         *relay.old.lock().unwrap() = true;
-        let answers = read(&pkarr.turn_sources(), &set.key()).await;
+        let answers = read(&pkarr.turn_sources(), &set.key(), None).await;
         assert!(answers[0].answered && answers[0].stale, "{answers:?}");
         assert_eq!(held(&answers[0]), [first]);
         let json = serde_json::to_value(&answers[0]).unwrap();
@@ -759,6 +764,125 @@ mod tests {
             .unwrap()
             .turn_dht()
             .is_none());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_dht_put_that_only_fails_does_not_hold_the_relays_back() {
+        // A DHT nobody answers on (UDP that goes nowhere): its put fails, which says nothing of another writer.
+        let nowhere: SocketAddrV4 = format!("127.0.0.1:{}", closed_port()).parse().unwrap();
+        let relay = pkarr_relay().await;
+        let pkarr = Pkarr::direct(
+            Dht::mainline(Some(vec![nowhere])).unwrap(),
+            &[relay.url.parse().unwrap()],
+        )
+        .unwrap();
+        let set = Set::new();
+        let first = set.record(40, 0, 1);
+        let both = conditions(&[(DHT_SOURCE, None), (&relay.url, None)]);
+        let puts = put(&pkarr.turn_sources(), &set.key(), &first, &both)
+            .await
+            .unwrap();
+        assert_eq!(outcomes(&puts), ["failed", "stored"], "{puts:?}");
+        let answers = read(&pkarr.turn_sources(), &set.key(), None).await;
+        assert_eq!(held(&answers[1]), [first]);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn the_read_a_raising_put_acts_on_gives_each_source_less_time() {
+        let relay = pkarr_relay().await;
+        *relay.delay.lock().unwrap() = Duration::from_millis(600);
+        let pkarr = Pkarr::private(&[relay.url.parse().unwrap()]).unwrap();
+        let key = Set::new().key();
+        let began = std::time::Instant::now();
+        let short = read(
+            &pkarr.turn_sources(),
+            &key,
+            Some(Duration::from_millis(200)),
+        )
+        .await;
+        assert!(!short[0].answered, "{short:?}");
+        assert_eq!(short[0].detail.as_deref(), Some("timed out"));
+        assert!(began.elapsed() < Duration::from_millis(550));
+        // Never more than the usual time, whatever is asked.
+        let usual = read(&pkarr.turn_sources(), &key, Some(Duration::from_secs(60))).await;
+        assert!(usual[0].answered);
+    }
+
+    /// The measurement of `V` (WISP 06, Settle): how long after a put is sent every source shows the packet
+    /// to a `NetworkOnly` read. One put through one default relay, then reads of every source (the other
+    /// relay, and the DHT from a node of our own) 1, 3, 6 and 10 s later, stopping once all show it; then
+    /// one put on the DHT and the same reads of the relays. A random key, at most 17 requests to the relays.
+    /// `cargo test --manifest-path apps/desktop/Cargo.toml live_turn_visible -- --ignored --nocapture`
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "reaches the real DHT and the default relays"]
+    async fn live_turn_visible_everywhere_after() {
+        let relays: Vec<Url> = ["https://pkarr.pubky.org", "https://pkarr.pubky.app"]
+            .iter()
+            .map(|url| url.parse().unwrap())
+            .collect();
+        let http = reqwest::Client::new();
+        let dht = TurnDht::new(None);
+        let joining = std::time::Instant::now();
+        dht.warm().await;
+        println!("node joined in {:?}", joining.elapsed());
+        let sources = TurnSources {
+            dht: Some(&dht),
+            relays: relays.clone(),
+            http: &http,
+        };
+        let set = Set::new();
+        let key = set.key();
+        let watch = |label: &'static str, payload: Vec<u8>, sent: std::time::Instant| {
+            let sources = &sources;
+            let key = key.clone();
+            async move {
+                let mut seen: HashMap<String, Duration> = HashMap::new();
+                for after in [1u64, 3, 6, 10] {
+                    let at = Duration::from_secs(after);
+                    if sent.elapsed() < at {
+                        tokio::time::sleep(at - sent.elapsed()).await;
+                    }
+                    let started = sent.elapsed();
+                    let answers = read(sources, &key, None).await;
+                    for answer in &answers {
+                        if held(answer).contains(&payload) {
+                            seen.entry(answer.source.clone()).or_insert(started);
+                        }
+                    }
+                    println!(
+                        "{label}: read started {started:?} after the put was sent, ended {:?}; shown by {:?}",
+                        sent.elapsed(),
+                        answers
+                            .iter()
+                            .filter(|a| held(a).contains(&payload))
+                            .map(|a| a.source.as_str())
+                            .collect::<Vec<_>>()
+                    );
+                    if seen.len() == answers.len() {
+                        break;
+                    }
+                }
+                println!("{label}: first shown, by source: {seen:?}");
+            }
+        };
+        // Through one relay.
+        let first = set.record(40, 0, 1);
+        let through = conditions(&[(relays[0].as_str().trim_end_matches('/'), None)]);
+        let sent = std::time::Instant::now();
+        let puts = put(&sources, &key, &first, &through).await.unwrap();
+        println!(
+            "put through {}: {puts:?} in {:?}",
+            relays[0],
+            sent.elapsed()
+        );
+        watch("relay put", first, sent).await;
+        // On the DHT, from this node.
+        let second = set.record(40, 1, 1);
+        let on_dht = conditions(&[(DHT_SOURCE, Some(&sequence_of(&set.record(40, 0, 1))))]);
+        let sent = std::time::Instant::now();
+        let puts = put(&sources, &key, &second, &on_dht).await.unwrap();
+        println!("put on the DHT: {puts:?} in {:?}", sent.elapsed());
+        watch("DHT put", second, sent).await;
     }
 
     /// The measurement behind `BOOTSTRAP_TIMEOUT`: how long a new node takes to join the public DHT.
@@ -864,13 +988,13 @@ mod tests {
         assert_eq!(puts(&relay), [""]);
 
         let set = Set::new();
-        let answers = read(&pkarr.turn_sources(), &set.key()).await;
+        let answers = read(&pkarr.turn_sources(), &set.key(), None).await;
         assert!(!answers[0].answered, "{answers:?}");
         assert!(answers[1].answered);
         assert!(pkarr.turn_sources().dht.unwrap().started());
         // Relays alone (no DHT in this app): the relays are the sources.
         let private = Pkarr::private(&[relay.url.parse().unwrap()]).unwrap();
-        let answers = read(&private.turn_sources(), &set.key()).await;
+        let answers = read(&private.turn_sources(), &set.key(), None).await;
         assert_eq!(answers.len(), 1);
         assert_eq!(answers[0].source, relay.url);
     }

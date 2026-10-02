@@ -178,6 +178,20 @@ describe("the turn record on relays", () => {
     expect(read).toMatchObject({ result: "none", good: true, seen: 0n, conditions: { "https://a.test": "5242895" }, invalid: [], unsigned: [{ source: "https://a.test", sequence: 5242895n }] });
   });
 
+  it("the read a raising put acts on gives each relay less time", async () => {
+    vi.useFakeTimers();
+    const { state, transport } = relays(["a.test", "b.test"]);
+    state["a.test"].mode = "hang";
+    const reading = transport.turnRead(key, { timeoutMs: 5_000 });
+    await vi.advanceTimersByTimeAsync(5_001);
+    const answers = bySource(await reading);
+    expect([answers["a.test"].answered, answers["b.test"].answered]).toEqual([false, true]);
+    // Never more than the usual 8 s, whatever is asked.
+    const long = transport.turnRead(key, { timeoutMs: 60_000 });
+    await vi.advanceTimersByTimeAsync(TURN_SOURCE_TIMEOUT_MS + 1);
+    expect(bySource(await long)["a.test"].answered).toBe(false);
+  });
+
   it("a transport wrapped with request options still has the turn's path", async () => {
     const { transport } = relays(["a.test"]);
     const wrapped = withRequestOptions(transport, { group: true });

@@ -98,8 +98,15 @@ export interface DeviceRecord {
   handoff?: DeviceHandoff;
   /** The highest turn this device ever signed a release for. */
   releasedTurn?: number;
-  /** The highest raw sequence ever seen at the turn address, from valid and invalid packets alike. */
+  /** The mark: the highest sequence ever seen at the turn address in a packet that verified under the turn key, at most the last an ordinary record can have. */
   seenSequence?: number;
+  /**
+   * A raised turn that is settling (WISP 06 § Settle): when this device's put ended (ms; null while the put is out,
+   * or when it never ended: the wait then counts from the next start), and the sources that took it (while the put
+   * is out: the sources it was sent to). The settle read counts only if every one of them answers. Stored, so a
+   * reload while settling loses neither.
+   */
+  settle?: { at: number | null; sources: string[] };
   /** Written at quiesce: the files left for later. */
   leftFiles?: LeftFile[];
   /** Written at quiesce: the Breez database to delete once the handoff is done. */
@@ -229,6 +236,10 @@ export function parseDeviceRecord(value: unknown): DeviceRecord {
   if (!optional(r.breezDatabase, text)) return bad("breezDatabase");
   if (!optional(r.releasedTurn, (v): v is number => count(v, 2 ** 32 - 1))) return bad("releasedTurn");
   if (!optional(r.seenSequence, (v): v is number => count(v, Number.MAX_SAFE_INTEGER))) return bad("seenSequence");
+  if (r.settle !== undefined) {
+    const settle = r.settle as { at?: unknown; sources?: unknown } | null;
+    if (!settle || typeof settle !== "object" || !(settle.at === null || count(settle.at, Number.MAX_SAFE_INTEGER)) || !Array.isArray(settle.sources) || settle.sources.length > 16 || !settle.sources.every(text)) return bad("settle");
+  }
   if (r.handoff !== undefined) {
     const h = r.handoff as Partial<DeviceHandoff> | null;
     if (!h || typeof h !== "object" || (h.role !== "releasing" && h.role !== "taking") || !text(h.step) || !optional(h.staging, text)) return bad("the handoff");

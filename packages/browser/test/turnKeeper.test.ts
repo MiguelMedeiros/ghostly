@@ -2,7 +2,7 @@ import "fake-indexeddb/auto";
 import { beforeEach, describe, expect, it } from "vitest";
 import {
   createIdentity, encodeTxtPacket, fromBase64Url, identityFromSeed, readTurnPacket, sign, signRelayPayload, signTurnPacket, signTurnRelease, toBase64Url, turnKeys,
-  turnPayloadSequence, turnSequence, TURN_PUT_WINDOW_MS, TURN_SETTLE_MS, TOMBSTONE_SEQUENCE, TOMBSTONE_TURN, TURN_NO_ACTIVE, TURN_REV_LIMIT, type Identity, type TurnRecord, type TurnRelease,
+  turnPayloadSequence, turnSequence, TURN_LAST_SEQUENCE, TURN_PUT_WINDOW_MS, TURN_RAISE_READ_TIMEOUT_MS, TURN_SETTLE_MS, TOMBSTONE_SEQUENCE, TOMBSTONE_TURN, TURN_NO_ACTIVE, TURN_REV_LIMIT, type Identity, type TurnRecord, type TurnRelease,
 } from "@ghostly/core";
 import { amend, firstRecord, transition, type DevicePatch, type DeviceRecord, type StoredDeviceState } from "../src/devices/state";
 import { DEVICES_DB, closeDevicesDb, enrollDevice, readDeviceRecord, setDeviceMirror } from "../src/devices/store";
@@ -411,6 +411,38 @@ describe("the active device", () => {
     expect(gone.store.record!.seenSequence).toBe(TOMBSTONE_SEQUENCE);
   });
 
+  it("signed junk just under the tombstone's sequence closes the address only while it is there: it is never kept as the mark", async () => {
+    const { keeper, store } = await started(0, network, 40);
+    const mine = network.source("dht").held!;
+    network.seed(junk(TOMBSTONE_SEQUENCE - 5));
+    const outcome = await keeper.check(true);
+    expect(outcome.kind).toBe("ask");
+    expect(outcome.kind === "ask" && outcome.read.result).toBe("closed");
+    expect(store.record!.seenSequence).toBe(turnSequence(40, 0, 0));
+    // The packet expired: an ordinary read, and the device writes its next record and starts.
+    network.seed(mine);
+    expect((await keeper.check(true)).kind).toBe("start");
+    expect(store.record).toMatchObject({ turn: 40, rev: 1 });
+  });
+
+  it("with nothing left to write above what it saw, the device is told so and nothing throws", async () => {
+    const { keeper, store } = await started(0, network, 40);
+    // Signed junk at the last sequence an ordinary record can have: not above it, so it is the mark, and no
+    // record of this device's slot fits above it.
+    network.seed(junk(TURN_LAST_SEQUENCE));
+    network.calls.length = 0;
+    const outcome = await keeper.check(true);
+    expect(outcome).toMatchObject({ kind: "ask", exhausted: true });
+    expect(await keeper.check(false)).toMatchObject({ kind: "go-on", restricted: true, exhausted: true });
+    expect(network.puts()).toEqual([]);
+    expect(store.record!.seenSequence).toBe(TURN_LAST_SEQUENCE);
+    // A forced takeover there writes nothing either, and the device stays what it was.
+    const standby = device(1, network, { ...recordOf(1, "standby", 40), seenSequence: TURN_LAST_SEQUENCE });
+    expect(await standby.keeper.raise({ turn: 41 })).toMatchObject({ kind: "show", screen: "cannot-check", exhausted: true });
+    expect(standby.store.record!.state).toBe("standby");
+    expect(standby.store.record!.handoff).toBeUndefined();
+  });
+
   it("closed is never a good read: the device does what it does on unreachable, and the packet is not remembered", async () => {
     const { keeper, store } = await started(0, network, 40);
     const mine = network.source("dht").held!;
@@ -766,17 +798,71 @@ describe("settle: how a raised turn becomes active", () => {
     expect((await taker.keeper.write(again.conditions, { turn: 41, release: await releaseTo(41, 0, 1) }))!.puts[0].outcome).toBe("stored");
   });
 
-  it("a taker that crashed while it settled does not know when it put: it waits the whole of T again", async () => {
+  it("a taker that was reloaded while it settled finds in its record when its put ended and which sources took it", async () => {
     const network = new FakeTurnNetwork([{ name: "https://relay.test", kind: "relay" }]);
     network.seed(await packet(40, 3, 0));
     const first = device(1, network, takingRecord(1));
-    const read = (await first.keeper.read())!;
+    const read = (await first.keeper.read({ raising: true }))!;
     await first.keeper.write(read.conditions, { turn: 41, release: await releaseTo(41, 0, 1) });
+    expect(first.store.record!.settle).toEqual({ at: clock.t, sources: ["https://relay.test"] });
     clock.t += 25_000;
-    // The app is closed and opened again: a new keeper on the stored state.
+    // The app is closed and opened again: a new keeper on the stored state. It waits what is left of T.
     const again = device(1, network, structuredClone(first.store.record), { undo: async () => {} });
     expect((await again.keeper.check(true)).kind).toBe("start");
+    expect(clock.slept).toEqual([TURN_SETTLE_MS - 25_000]);
+    // Active, the settling is over and gone from the record.
+    expect(again.store.record!.settle).toBeUndefined();
+  });
+
+  it("a reload while settling does not lose the sources: a relay that took the put, then holds the rival's record and goes silent, must answer", async () => {
+    const network = new FakeTurnNetwork([{ name: "https://a.test", kind: "relay" }, { name: "https://b.test", kind: "relay" }]);
+    network.seed(await packet(40, 3, 0));
+    const first = device(1, network, takingRecord(1));
+    const read = (await first.keeper.read({ raising: true }))!;
+    await first.keeper.write(read.conditions, { turn: 41, release: await releaseTo(41, 0, 1) });
+    expect(first.store.record!.settle!.sources).toEqual(["https://a.test", "https://b.test"]);
+    // A device in a higher slot forced the same turn: its record is on b, which then goes silent; a lags with ours.
+    network.seed(await packet(41, 0, 2), "https://b.test");
+    network.source("https://b.test").down = true;
+    // The page is reloaded: a new keeper, nothing in memory.
+    const again = device(1, network, structuredClone(first.store.record), { undo: async () => {} });
+    const outcome = await again.keeper.check(true);
+    // a alone says `mine`. Not a settle read: b took the put and did not answer.
+    expect(outcome.kind).toBe("wait");
+    expect(outcome.kind === "wait" && outcome.read.result).toBe("mine");
+    expect(again.store.record!.state).toBe("taking");
+    // b answers again: the rival's record is read, and the taker steps back.
+    network.source("https://b.test").down = false;
+    expect(await again.keeper.check(true)).toMatchObject({ kind: "gated", state: "standby" });
+    expect(again.store.record!.settle).toBeUndefined();
+  });
+
+  it("a taker that crashed with its put out waits the whole of T from its restart, and needs every source the put was sent to", async () => {
+    const network = new FakeTurnNetwork([{ name: "https://a.test", kind: "relay" }, { name: "https://b.test", kind: "relay" }]);
+    network.seed(await packet(40, 3, 0));
+    const first = device(1, network, takingRecord(1));
+    const read = (await first.keeper.read({ raising: true }))!;
+    let crashed: DeviceRecord | null = null;
+    // The record as it is while the put is out: stored before anything is sent.
+    network.onPut = () => { crashed = structuredClone(first.store.record); };
+    await first.keeper.write(read.conditions, { turn: 41, release: await releaseTo(41, 0, 1) });
+    expect(crashed!.settle).toEqual({ at: null, sources: ["https://a.test", "https://b.test"] });
+    clock.t += 25_000;
+    network.source("https://b.test").down = true;
+    const again = device(1, network, crashed, { undo: async () => {} });
+    expect((await again.keeper.check(true)).kind).toBe("wait");
     expect(clock.slept).toEqual([TURN_SETTLE_MS]);
+    network.source("https://b.test").down = false;
+    expect((await again.keeper.check(true)).kind).toBe("start");
+  });
+
+  it("the read a raising put acts on gives each source less time, and the settle read the usual time", async () => {
+    const network = new FakeTurnNetwork();
+    network.seed(await packet(40, 3, 0));
+    const forcing = device(2, network, await knowing(2));
+    network.calls.length = 0;
+    expect((await forcing.keeper.raise({ turn: 41 }))!.kind).toBe("start");
+    expect(network.calls.filter((call) => call.op === "read").map((call) => call.timeoutMs)).toEqual([TURN_RAISE_READ_TIMEOUT_MS, undefined, undefined]);
   });
 
   it("the settle read counts only if every source that took the put answers; with fewer the device waits and reads again", async () => {

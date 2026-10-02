@@ -148,12 +148,14 @@ pub fn pkarr_status(state: State<'_, AppState>) -> crate::pkarr_network::Discove
 pub async fn turn_read(
     state: State<'_, AppState>,
     public_key_z32: String,
+    timeout_ms: Option<u64>,
 ) -> Result<Vec<crate::turn_network::SourceAnswer>, String> {
     let key: pkarr::PublicKey = public_key_z32
         .as_str()
         .try_into()
         .map_err(|e| format!("Invalid public key: {}", e))?;
-    Ok(crate::turn_network::read(&state.pkarr.turn_sources(), &key).await)
+    let timeout = timeout_ms.map(std::time::Duration::from_millis);
+    Ok(crate::turn_network::read(&state.pkarr.turn_sources(), &key, timeout).await)
 }
 
 /// The profile has a device set: the turn's own DHT node is made and joins the DHT, ahead of the first read.

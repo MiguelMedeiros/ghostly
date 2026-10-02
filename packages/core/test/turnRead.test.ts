@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   classifyTurnRead, identityFromSeed, keptAtEqualSequence, readTurnPacket, signRelayPayload, signTurnPacket, signTurnRelease, turnPutSummary, turnSequence,
-  encodeTxtPacket, TURN_PUT_WINDOW_MS, TURN_SETTLE_MS, TURN_VISIBLE_MS, TOMBSTONE_SEQUENCE, TOMBSTONE_TURN, TURN_NO_ACTIVE, type Identity, type TurnFields, type TurnReader, type TurnSourceAnswer,
+  encodeTxtPacket, TURN_LAST_SEQUENCE, TURN_PUT_WINDOW_MS, TURN_RAISE_READ_TIMEOUT_MS, TURN_SETTLE_MS, TURN_VISIBLE_MS, TOMBSTONE_SEQUENCE, TOMBSTONE_TURN, TURN_NO_ACTIVE, type Identity, type TurnFields, type TurnReader, type TurnSourceAnswer,
 } from "../src/index";
 import { devices, signerOf, vectorKeys } from "./turnVectors";
 // covers: devices.turn.read
@@ -229,8 +229,16 @@ describe("the result of a turn read", () => {
     const closed = await tombstone(1, [1, 2]);
     expect(classifyTurnRead(reader(0, mine), [has("a", closed), has("b", junk(TOMBSTONE_SEQUENCE))]).result).toBe("tombstone");
     expect(classifyTurnRead(reader(0, mine), [has("a", closed), has("b", junk(TOMBSTONE_SEQUENCE + 1))]).result).toBe("closed");
-    // Just below it, the address is open: an invalid packet, and the device's record under it.
-    expect(classifyTurnRead(reader(0, mine), [has("a", mine), has("b", junk(TOMBSTONE_SEQUENCE - 1))]).result).toBe("behind");
+    // Anything above the last sequence an ordinary record can have closes it too: nothing could be written above it.
+    expect(TURN_LAST_SEQUENCE).toBe(turnSequence(2 ** 32 - 2, 2 ** 18 - 1, 3));
+    expect(TURN_LAST_SEQUENCE).toBe(2 ** 52 - 2 ** 20 - 1);
+    for (const sequence of [TOMBSTONE_SEQUENCE - 1, TOMBSTONE_SEQUENCE - 5, TURN_LAST_SEQUENCE + 1]) {
+      expect(classifyTurnRead(reader(0, mine), [has("a", mine), has("b", junk(sequence))]), String(sequence)).toMatchObject({ result: "closed", good: false });
+    }
+    // At the last ordinary sequence the address is open: an invalid packet, and the device's record under it.
+    expect(classifyTurnRead(reader(0, mine), [has("a", mine), has("b", junk(TURN_LAST_SEQUENCE))]).result).toBe("behind");
+    // A valid tombstone wins over junk just under it.
+    expect(classifyTurnRead(reader(0, mine), [has("a", closed), has("b", junk(TOMBSTONE_SEQUENCE - 5))]).result).toBe("tombstone");
   });
 
   it("the mark: a record below the highest sequence this device ever saw verified is no news", async () => {
@@ -260,6 +268,8 @@ describe("the result of a turn read", () => {
   it("the settle constants: T is at least P plus twice V", () => {
     expect([TURN_PUT_WINDOW_MS, TURN_VISIBLE_MS, TURN_SETTLE_MS]).toEqual([10_000, 10_000, 30_000]);
     expect(TURN_SETTLE_MS).toBeGreaterThanOrEqual(TURN_PUT_WINDOW_MS + 2 * TURN_VISIBLE_MS);
+    // The read a raising put acts on leaves half of P to sign, store and send.
+    expect(TURN_PUT_WINDOW_MS - TURN_RAISE_READ_TIMEOUT_MS).toBeGreaterThanOrEqual(5_000);
   });
 
   it("the DHT's several items are one source's answer: the highest among them counts", async () => {

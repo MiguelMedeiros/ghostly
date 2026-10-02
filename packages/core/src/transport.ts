@@ -54,7 +54,7 @@ export function withRequestOptions(transport: PkarrTransport, extra: PkarrReques
   if (transport.readAnsweredAt) wrapped.readAnsweredAt = (pubKeyZ32) => transport.readAnsweredAt!(pubKeyZ32);
   if (transport.onServerTime) wrapped.onServerTime = (listener) => transport.onServerTime!(listener);
   if (transport.configure) wrapped.configure = (options) => transport.configure!(options);
-  if (transport.turnRead) wrapped.turnRead = (pubKeyZ32) => transport.turnRead!(pubKeyZ32);
+  if (transport.turnRead) wrapped.turnRead = (pubKeyZ32, options) => transport.turnRead!(pubKeyZ32, options);
   if (transport.turnPut) wrapped.turnPut = (pubKeyZ32, payload, conditions) => transport.turnPut!(pubKeyZ32, payload, conditions);
   if (transport.turnWarm) wrapped.turnWarm = () => transport.turnWarm!();
   return wrapped;
@@ -131,7 +131,7 @@ export interface PkarrTransport {
    * one's answer is handed back as it came, not verified, not cached and never taken from this client's own writes.
    * Only the turn uses it; a transport without it cannot hold a profile on several devices.
    */
-  turnRead?(pubKeyZ32: string): Promise<TurnSourceAnswer[]>;
+  turnRead?(pubKeyZ32: string, options?: { timeoutMs?: number }): Promise<TurnSourceAnswer[]>;
   /**
    * The turn record's own put: the stored bytes, to each source named in `conditions`, on that source's condition
    * (`cas` on the DHT, `If-Match` on a relay). Every source's answer is reported, and a refusal is never tried again

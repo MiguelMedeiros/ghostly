@@ -1,6 +1,6 @@
 import {
   classifyTurnRead, fromBase64Url, nextTurnPosition, randomBytes, readTurnPacket, signTurnPacket, signTurnRelease, toBase64Url, turnKeys, turnPutSummary,
-  TOMBSTONE_SEQUENCE, TURN_PUT_WINDOW_MS, TURN_SETTLE_MS,
+  TURN_LAST_SEQUENCE, TURN_PUT_WINDOW_MS, TURN_RAISE_READ_TIMEOUT_MS, TURN_SETTLE_MS,
   type TurnConditions, type TurnFields, type TurnKeys, type TurnNetwork, type TurnRead, type TurnRecord, type TurnRelease, type TurnSigner, type TurnSourcePut,
 } from "@ghostly/core";
 import { MAX_DEVICES, type DevicePatch, type DeviceRecord, type DeviceSlot, type DeviceState, type StoredDeviceState } from "./state";
@@ -62,8 +62,13 @@ export interface TurnKeeperOptions {
   undoStaging?: () => Promise<void>;
 }
 
-/** What the host does next. Every state change named here is already written durably. */
-export type TurnOutcome =
+/**
+ * What the host does next. Every state change named here is already written durably. `exhausted`: nothing can be
+ * written above what this device saw at the address (the last ordinary turn is spent); the device did what it does
+ * when it cannot read the turn, and the host says "Something else closed your device set".
+ */
+export type TurnOutcome = TurnStep & { exhausted?: true };
+type TurnStep =
   /** The profile has no device set. Nothing was read or put. */
   | { kind: "single" }
   /** Start the engine: this device is the active one and a source returned its record. */
@@ -135,10 +140,6 @@ export class TurnKeeper {
   private lastGoodAt: number | null = null;
   /** When the last read was started: a raising put is sent within `P` of it. */
   private readStartedAt: number | null = null;
-  /** When this device's last put of a turn it raised ended: the settle read comes `T` later. Null after a restart. */
-  private raisedAt: number | null = null;
-  /** The sources that took that put: the settle read counts only if every one of them answers. */
-  private tookPut: string[] = [];
   /** The packet a source refused, and the sources that refused it: it is never sent to them again. */
   private refused: { packet: string; sources: Set<string> } | null = null;
   private warmed = false;
@@ -182,29 +183,34 @@ export class TurnKeeper {
 
   /**
    * One read of every source, compared with the stored packet and the mark. The mark (the highest sequence seen in
-   * a packet that verified under the turn key) is kept durably. A packet that closes the address is not kept: when
-   * it expires, the next read is an ordinary one.
+   * a packet that verified under the turn key) is kept durably, up to the last sequence an ordinary record can have:
+   * a packet above that closes the address while it is there and is never kept, so when it expires the next read is
+   * an ordinary one. `raising`: the read a raising put acts on, with less time for each source.
    */
-  private async readWith(held: Held): Promise<TurnRead> {
+  private async readWith(held: Held, raising = false): Promise<TurnRead> {
     const startedAt = this.now();
-    const answers = await this.options.network.turnRead(held.keys.identity.pubKeyZ32);
+    const answers = await this.options.network.turnRead(held.keys.identity.pubKeyZ32, raising ? { timeoutMs: TURN_RAISE_READ_TIMEOUT_MS } : undefined);
     this.readStartedAt = startedAt;
     const read = classifyTurnRead({
       keys: held.keys, ownKey: held.ownKey, stored: held.stored, ownSlot: held.ownSlot, seen: BigInt(held.record.seenSequence ?? 0),
       ...(held.record.state === "taking" ? { taking: held.record.turn } : {}),
     }, answers);
     if (read.good) this.lastGoodAt = this.now();
-    if (read.result !== "closed" && read.seen <= BigInt(TOMBSTONE_SEQUENCE) && Number(read.seen) > (held.record.seenSequence ?? 0)) {
-      held.record = await this.store.amend(this.options.profile, { seenSequence: Number(read.seen) });
-    }
+    const mark = read.seen > BigInt(TURN_LAST_SEQUENCE) ? TURN_LAST_SEQUENCE : Number(read.seen);
+    // Above the last ordinary sequence only a valid tombstone is remembered (it is the whole of the mark then).
+    const kept = read.result === "tombstone" ? Number(read.record!.sequence) : read.result === "closed" ? 0 : mark;
+    if (kept > (held.record.seenSequence ?? 0)) held.record = await this.store.amend(this.options.profile, { seenSequence: kept });
     return read;
   }
 
-  /** One read. Null for a `single` profile, which has no turn: no source is asked. */
-  read(): Promise<TurnRead | null> {
+  /**
+   * One read. Null for a `single` profile, which has no turn: no source is asked. `raising`: the read a taker's put
+   * acts on (`write` within `P` of it): each source gets less time, so that time is left to sign, store and send.
+   */
+  read(options: { raising?: boolean } = {}): Promise<TurnRead | null> {
     return this.exclusive(async () => {
       const held = await this.held();
-      return held ? this.readWith(held) : null;
+      return held ? this.readWith(held, options.raising === true) : null;
     });
   }
 
@@ -229,27 +235,35 @@ export class TurnKeeper {
     const packet = toBase64Url(payload);
     if (this.refused?.packet !== packet) this.refused = null;
     const sent = Object.fromEntries(Object.entries(conditions).filter(([source]) => !this.refused?.sources.has(source)));
+    // Settling is stored, not remembered: a reload while it waits must still know which sources took the put and
+    // when it ended. Before the put, the sources it goes to and no time; after it, the ones that took it and the end.
+    const settling = raising || !!held.selfRaised;
+    if (settling) held.record = await this.store.amend(this.options.profile, { settle: { at: null, sources: Object.keys(sent) } });
     const puts = await this.options.network.turnPut(held.keys.identity.pubKeyZ32, payload, sent);
     const refusedBy = puts.filter((p) => p.outcome === "refused").map((p) => p.source);
     if (refusedBy.length) this.refused = { packet, sources: new Set([...(this.refused?.sources ?? []), ...refusedBy]) };
-    if (raising || held.selfRaised) {
-      // T counts from the end of the put: every answer in, or timed out.
-      this.raisedAt = this.now();
-      this.tookPut = puts.filter((p) => p.outcome === "stored").map((p) => p.source);
-    }
+    // T counts from the end of the put: every answer in, or timed out.
+    if (settling) held.record = await this.store.amend(this.options.profile, { settle: { at: this.now(), sources: puts.filter((p) => p.outcome === "stored").map((p) => p.source) } });
     return { payload, puts, refused: turnPutSummary(puts).refused > 0 };
   }
 
   /**
    * The settle read (WISP 06 § Settle, steps 3 and 4): made `T` after the end of this device's put, of every source.
    * It counts only if every source that took the put answers; with fewer it is no read at all (null: wait, and read
-   * again). A device that does not know when it put (it restarted while it settled) waits the whole of `T` from now.
+   * again). Both come from the device record, so a keeper made after a reload asks the same sources. A device whose
+   * put never ended (it crashed with the put out) waits the whole of `T` from now, and needs every source the put
+   * was sent to.
    */
   private async settledRead(held: Held): Promise<TurnRead | null> {
-    const due = (this.raisedAt ??= this.now()) + TURN_SETTLE_MS;
+    let settle = held.record.settle;
+    if (!settle || settle.at === null) {
+      settle = { at: this.now(), sources: settle?.sources ?? [] };
+      held.record = await this.store.amend(this.options.profile, { settle });
+    }
+    const due = settle.at! + TURN_SETTLE_MS;
     if (this.now() < due) await this.sleep(due - this.now());
     const read = await this.readWith(held);
-    return this.tookPut.every((source) => read.conditions[source] !== undefined) ? read : null;
+    return settle.sources.every((source) => read.conditions[source] !== undefined) ? read : null;
   }
 
   /**
@@ -309,12 +323,14 @@ export class TurnKeeper {
       if (!held) return null;
       const prior = held.record.state;
       if (prior !== "standby" && prior !== "superseded") throw new Error(`A ${prior} device does not force a takeover`);
-      const read = await this.readWith(held);
+      const read = await this.readWith(held, true);
       if (!read.good || read.result === "tombstone") return this.settle(held, read, true);
       held.record = await this.store.move(this.options.profile, "taking", { handoff: { role: "taking", step: `${TAKEOVER}${prior}` } });
       try { await this.writeWith(held, read.conditions, options, true); } catch (error) {
         // Nothing was put: the device is what it was.
-        if (!held.wroteNow) held.record = await this.store.move(this.options.profile, prior, { handoff: undefined });
+        if (!held.wroteNow) held.record = await this.store.move(this.options.profile, prior, { handoff: undefined, settle: undefined });
+        // No record can be written above what it saw: it stays what it was, and the host is told.
+        if (error instanceof TurnClosedError) return this.exhausted(held, turnRow(prior, true), read);
         throw error;
       }
       return this.settle(held, await this.readWith(held), true);
@@ -349,6 +365,7 @@ export class TurnKeeper {
           if (held.selfRaised && !settled) {
             settled = true;
             read = await this.settledRead(held) ?? await this.readWith(held);
+            held.record = await this.store.amend(this.options.profile, { settle: undefined });
             continue;
           }
           // The record of this check is written, and a source returned it as the highest: not written a second time.
@@ -373,14 +390,27 @@ export class TurnKeeper {
         read = settledRead;
         continue;
       }
-      const outcome = await this.carryOut(held, row, turnAction(row, read, behind), read);
+      let outcome: TurnOutcome | null;
+      try { outcome = await this.carryOut(held, row, turnAction(row, read, behind), read); } catch (error) {
+        // No record can be written above what this device saw: it does what it does when it cannot read the turn.
+        if (error instanceof TurnClosedError) return this.exhausted(held, row, read);
+        // A taking device's put would be sent more than P after the start of its read: it starts over with a read.
+        if (!(error instanceof TurnStaleReadError)) throw error;
+        outcome = null;
+      }
       if (outcome) return outcome;
       // A taking device that put again settles again.
       if (row === "taking") settled = false;
-      read = await this.readWith(held);
+      read = await this.readWith(held, row === "taking");
     }
     // Sources that keep refusing and keep answering lower: nothing more to try now.
     return atStart && held.record.state === "active" ? { kind: "ask", read } : { kind: "wait", read };
+  }
+
+  /** The outcome of a device that can write nothing above what it saw: its `unreachable` cell, marked. */
+  private async exhausted(held: Held, row: TurnRow, read: TurnRead): Promise<TurnOutcome> {
+    const outcome = await this.carryOut(held, row, turnAction(row, { result: "closed" }), read);
+    return { ...(outcome ?? { kind: "wait", read }), exhausted: true };
   }
 
   /** One action. Null: read again. */
@@ -411,7 +441,8 @@ export class TurnKeeper {
           if (!this.options.undoStaging) throw new Error("A taking device needs its staged state undone before it steps back");
           await this.options.undoStaging();
         }
-        held.record = await this.store.move(this.options.profile, state, takeover ? { handoff: undefined } : {});
+        // Leaving `taking`, the settling is over, whichever way it went.
+        held.record = await this.store.move(this.options.profile, state, { ...(takeover ? { handoff: undefined } : {}), ...(held.record.settle ? { settle: undefined } : {}) });
         if (!action.then) return { kind: "gated", state, reload: action.reload, ...(action.notice ? { notice: action.notice } : {}), read };
         return this.carryOut(held, turnRow(state as DeviceState, true), action.then, read);
       }
