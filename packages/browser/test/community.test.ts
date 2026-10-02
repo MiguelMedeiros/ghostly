@@ -280,4 +280,40 @@ describe("community groups on headless engines", { timeout: 120_000 }, () => {
     expect(world.view(bob, id)).toBeUndefined();
     await expect(alice.groups.decline(id), "a member, not a join under way").rejects.toThrow("No invitation to decline");
   });
+
+  it("a member back after a while reads the lines where they happened, not after everything it missed", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const world = new CommunityWorld();
+      const alice = world.add("alice"), bob = world.add("bob"), carol = world.add("carol"), dave = world.add("dave");
+      // The wall clock (messages, commits) follows the engines' clock.
+      const pass = async (ms: number) => { await world.run(ms); vi.setSystemTime(world.now); };
+      const { id, link } = await community(world, alice);
+      await joinAll(world, id, link, [bob, carol]);
+      await pass(20_000);
+      carol.online = false;
+      await pass(60_000);
+      await alice.groups.rename(id, "Wide open");
+      const renamedAt = Date.now();
+      await pass(60_000);
+      await bob.groups.send(id, "after the name");
+      await pass(60_000);
+      await joinAll(world, id, link, [dave]);
+      vi.setSystemTime(world.now);
+      const joinedBy = Date.now();
+      await pass(60_000);
+      await bob.groups.send(id, "after dave");
+      // An hour later Carol is back: what she reads is in the order it happened.
+      await pass(3_600_000);
+      world.reopen(carol);
+      await world.until(() => world.texts(carol, id).includes("after dave") && carol.messages.some(m => m.event === "renamed"), 5 * 60_000);
+      vi.setSystemTime(world.now);
+      const daveKey = world.view(dave, id)!.myKey!;
+      const timeline = carol.messages.filter(m => m.event === "renamed" || (m.event === "joined" && m.member === daveKey) || (!m.event && m.text.startsWith("after")))
+        .sort((a, b) => a.timestamp - b.timestamp).map(m => m.event ?? m.text);
+      expect(timeline).toEqual(["renamed", "after the name", "joined", "after dave"]);
+      expect(carol.messages.find(m => m.event === "renamed")!.timestamp).toBe(renamedAt);
+      expect(carol.messages.find(m => m.event === "joined" && m.member === daveKey)!.timestamp).toBeLessThanOrEqual(joinedBy);
+    } finally { vi.useRealTimers(); }
+  });
 });

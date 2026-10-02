@@ -312,8 +312,8 @@ export interface CommunitySessionHooks {
   /** A payload another member sealed to me (see `sendPair`). Payloads to others are carried, never opened. */
   pair?(message: CommunityIncomingPair): Promise<void> | void;
   changed(): void;
-  /** The group's name or picture changed (set, replaced or removed), by `by`. */
-  metaChanged?(by: string, change: GroupMetaChange): void;
+  /** The group's name or picture changed (set, replaced or removed), by `by`, in a statement signed at `at`. */
+  metaChanged?(by: string, change: GroupMetaChange, at: number): void;
   /** A frame that waited here (a commit ahead of its parent) and is now placed: a hub passes it on. */
   relay?(frame: CommunityFrame): void;
   /** The engine's clock, for how often a member is asked for what I lack (defaults to Date.now). */
@@ -1328,7 +1328,7 @@ export class CommunitySession {
     const frame = this.metaFrame();
     if (frame) this.hooks.broadcast(frame);
     const change = groupMetaChange(before, meta, this.state.name);
-    if (change) this.hooks.metaChanged?.(this.myKey, change);
+    if (change) this.hooks.metaChanged?.(this.myKey, change, meta.ts);
     this.hooks.changed();
   }
 
@@ -1374,7 +1374,7 @@ export class CommunitySession {
     // What the group looked like when I got in is no change: the first statement I take, signed under a commit before
     // mine, makes no line, nor does a new admin's signing again the name the welcome gave me.
     const change = !before && !rosterHas(this.rosterAt(s.h) ?? [], this.myKey) ? null : groupMetaChange(before, opened.meta, this.state.name);
-    if (change) this.hooks.metaChanged?.(s.by, change);
+    if (change) this.hooks.metaChanged?.(s.by, change, opened.meta.ts);
     this.hooks.changed();
     return true;
   }

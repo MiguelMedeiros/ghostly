@@ -561,6 +561,33 @@ describe("group engine: admission over a contact chat, edges from the roster", (
       expect(lines("carol")).toBe(1);
     });
 
+    it("a member back after a while reads the lines where they happened, not after everything it missed", async () => {
+      const { world, alice, bob, carol, groupId, edge } = await trio();
+      vi.useFakeTimers({ toFake: ["Date"] });
+      try {
+        const t0 = Date.now();
+        // Carol is away from both.
+        edge("alice", carol, false); edge("bob", carol, false);
+        vi.setSystemTime(t0 + 60_000);
+        await alice.rename(groupId, "Spirits"); await world.settle();
+        vi.setSystemTime(t0 + 120_000);
+        await alice.send(groupId, "after the name"); await world.settle();
+        vi.setSystemTime(t0 + 180_000);
+        await alice.rotate(groupId); await world.settle();
+        vi.setSystemTime(t0 + 240_000);
+        await bob.send(groupId, "after the keys"); await world.settle();
+        // An hour later Carol is back: what she reads is in the order it happened.
+        vi.setSystemTime(t0 + 3_600_000);
+        edge("alice", carol, true); edge("bob", carol, true);
+        await world.meet(); await world.settle();
+        const timeline = (await carol.messages(groupId)).filter(m => m.event !== "joined").map(m => m.event ?? m.text);
+        expect(timeline).toEqual(["renamed", "after the name", "rotated", "after the keys"]);
+        const at = (event: string) => world.peers.get("carol")!.messages.find(m => m.event === event)!.timestamp;
+        expect(at("renamed")).toBe(t0 + 60_000);
+        expect(at("rotated")).toBe(t0 + 180_000);
+      } finally { vi.useRealTimers(); }
+    });
+
     it("a tombstone survives a restart and still delivers the leave", async () => {
       const { world, alice, bob, groupId, key, edge, known } = await trio();
       const bobKey = key(bob);
