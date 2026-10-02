@@ -23,6 +23,9 @@
     "unnamed": "Un gruppo"
   },
   "connection": {
+    "community": "Connesso al gruppo",
+    "communityConnecting": "Connessione al gruppo…",
+    "communityNote": "La tua app si collega a un hub del gruppo (l'app di un membro che inoltra), e gli hub passano ogni messaggio a tutti. Chi era assente riceve ciò che ha perso quando torna.",
     "connecting": "Connessione ai membri…",
     "label": "Connessione del gruppo",
     "labelWith": "Connessione del gruppo: {{state}}",

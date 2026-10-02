@@ -59,5 +59,9 @@ test("with a member's app open a while, joining a community through its link tak
     expect(stages.length).toBeGreaterThan(0);
     expect(stages.map(s => order.indexOf(s))).toEqual(stages.map(s => order.indexOf(s)).sort((a, b) => a - b));
     await expect(alice.page.getByTestId("group-members")).toContainText(`${members} members`);
+    // The connection control speaks for the group, through its hub: connected with three members as with two (counted
+    // per member, the third person read "1 of 2 reachable" with a warning dot).
+    await expect(joiner.page.getByTestId("group-connection-options")).toHaveAttribute("data-state", "connected");
+    await expect(joiner.page.getByTestId("group-connection-options")).toHaveAccessibleName(/Connected to the group/);
   }
 });

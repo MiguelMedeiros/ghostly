@@ -23,6 +23,9 @@
     "unnamed": "一个群组"
   },
   "connection": {
+    "community": "已连接到群组",
+    "communityConnecting": "正在连接群组…",
+    "communityNote": "你的应用连接到群组的一个中继节点（负责转发的成员应用），中继节点会把每条消息传给所有人。离开过的成员回来后会收到错过的内容。",
     "connecting": "正在连接成员…",
     "label": "群组连接",
     "labelWith": "群组连接：{{state}}",

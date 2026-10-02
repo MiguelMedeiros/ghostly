@@ -23,6 +23,9 @@
     "unnamed": "グループ"
   },
   "connection": {
+    "community": "グループに接続済み",
+    "communityConnecting": "グループに接続中…",
+    "communityNote": "あなたのアプリはグループのハブ（中継するメンバーのアプリ）につながり、ハブがすべてのメッセージを全員に渡します。離れていたメンバーは、戻ったときに見逃した分を受け取ります。",
     "connecting": "メンバーに接続中…",
     "label": "グループの接続",
     "labelWith": "グループの接続: {{state}}",

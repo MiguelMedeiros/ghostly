@@ -30,21 +30,28 @@ export function GroupConnection({ group }: { group: GroupView }) {
   const root = useRef<HTMLDivElement>(null), trigger = useRef<HTMLButtonElement>(null);
   const id = useId();
   const others = group.members.filter(m => !m.me);
+  // A community runs on hubs: my app holds an edge to a hub or two (as a hub, to its members and the other hubs), and
+  // everyone else is reached through them. So its connection is those edges, not one per member: counted per member, a
+  // community of twelve said "1 of 11 reachable" with a warning dot for as long as it worked.
+  const community = group.profile === "community";
+  const linked = community ? others.filter(m => m.edge) : others;
   // Reachable over an edge of mine, or through a hub (a group past 16 members): as the header line and the dots count it.
-  const reachable = others.filter(m => m.edge?.state === "open" || m.viaHub).length;
-  const failing = others.some(m => m.edge?.state === "error");
-  const connecting = others.some(m => m.edge?.state === "connecting");
+  const reachable = linked.filter(m => m.edge?.state === "open" || m.viaHub).length;
+  const failing = linked.some(m => m.edge?.state === "error");
+  const connecting = linked.some(m => m.edge?.state === "connecting");
   // Group links go over WebRTC, or a native transport where one side has none: an app with neither reaches no member,
   // however long it tries. (Ghostly Desktop on Linux has no WebRTC, and runs Iroh and HyperDHT.)
   const noLinks = state?.transport.groupLinks === false && others.length > 0;
-  const kind: GroupKind = !online ? "offline" : others.length === 0 ? "waiting" : noLinks ? "failure" : reachable === others.length ? "connected"
-    : reachable > 0 ? "partial" : failing ? "failure" : "waiting";
+  const kind: GroupKind = !online ? "offline" : others.length === 0 ? "waiting" : noLinks ? "failure"
+    : community ? (reachable > 0 ? "connected" : failing ? "failure" : "waiting")
+    : reachable === others.length ? "connected" : reachable > 0 ? "partial" : failing ? "failure" : "waiting";
   const label = !online ? t("group.connection.offline") : others.length === 0 ? t("group.connection.onlyYou")
     : noLinks ? t("group.connection.noWebrtc")
+    : community ? (reachable > 0 ? t("group.connection.community") : failing || !linked.length ? t("group.connection.nobody") : t("group.connection.communityConnecting"))
     : reachable === 0 ? (connecting ? t("group.connection.connecting") : t("group.connection.nobody")) : t("group.connection.reachable", { reachable, total: others.length });
   const dot = kind === "partial" ? "bg-amber-500" : dots[kind];
   // Over what the reachable members are live: the icon takes the mark of the transport they share.
-  const carried = online ? groupTransports(group.members, t) : undefined;
+  const carried = online ? groupTransports(community ? linked : group.members, t) : undefined;
   const iconKind: ConnectionKind = kind === "partial" ? "connected" : kind;
   const close = () => { setMenuOpen(false); trigger.current?.focus(); };
   useOutsideDismiss(root, menuOpen, () => setMenuOpen(false));
@@ -74,7 +81,7 @@ export function GroupConnection({ group }: { group: GroupView }) {
         {!online && <p className="mt-1 text-[11px]">{t("group.connection.offlineHint")}</p>}
         {online && noLinks && <p className="mt-1 text-[11px]" data-testid="group-connection-no-webrtc">{t("group.connection.noWebrtcHint")}</p>}
         <ul className="mt-3 space-y-1" data-testid="group-connection-members">
-          {others.map(m => {
+          {linked.map(m => {
             // A member reached through a hub is not down: reconnecting my own edge to them would not help.
             const down = m.edge && m.edge.state !== "open" && !m.viaHub;
             return <li key={m.key} data-testid="group-connection-member" data-key={m.key} data-state={m.edge?.state ?? "none"} className="rounded-lg bg-surface-hover px-2.5 py-1.5">
@@ -94,7 +101,7 @@ export function GroupConnection({ group }: { group: GroupView }) {
         </ul>
         {error && <p role="alert" className="mt-2 break-words text-danger">{error}</p>}
         <p className="mt-3 border-t border-border pt-2 text-[11px]" data-testid="group-connection-note">
-          {t("group.connection.note")}
+          {community ? t("group.connection.communityNote") : t("group.connection.note")}
         </p>
       </div>}
     <span role="tooltip" id={`${id}-tip`} data-testid="group-connection-tooltip" className={`pointer-events-none absolute right-0 top-full z-50 mt-1.5 w-max max-w-[min(16rem,55vw)] rounded-md border border-border bg-surface-alt px-2 py-1 text-[11px] leading-4 text-text-primary shadow-lg motion-safe:transition-opacity ${tip && !menuOpen ? "opacity-100" : "invisible opacity-0"}`}>

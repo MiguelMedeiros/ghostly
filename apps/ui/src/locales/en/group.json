@@ -23,6 +23,9 @@
     "unnamed": "A group"
   },
   "connection": {
+    "community": "Connected to the group",
+    "communityConnecting": "Connecting to the group…",
+    "communityNote": "Your app links to one of the group's hubs (members' apps that relay), and the hubs pass every message on to everyone. A member who was away gets what they missed when they are back.",
     "connecting": "Connecting to members…",
     "label": "Group connection",
     "labelWith": "Group connection: {{state}}",
