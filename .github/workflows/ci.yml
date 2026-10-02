@@ -410,7 +410,17 @@ jobs:
               sudo rm -rf "$debs/partial" "$debs/lock"
             fi
             echo "$(date +%T) install $(ls "$debs" | wc -l) packages, $(du -sh "$debs" | cut -f1)"
-            apt_get install "$debs"/*.deb
+            # A cached set can miss a package a newer runner image now needs, and the image's own index can name a
+            # version the mirror no longer serves (404). Then fetch the set again from a fresh index.
+            if ! apt_get install "$debs"/*.deb; then
+              echo "$(date +%T) install from the cached set failed: update and download again"
+              apt_get update
+              mkdir -p "$debs/partial"
+              # shellcheck disable=SC2086
+              apt_get install --download-only -o Dir::Cache::Archives="$debs" $APT_PACKAGES
+              sudo rm -rf "$debs/partial" "$debs/lock"
+              apt_get install "$debs"/*.deb
+            fi
             echo "$(date +%T) done"
           } > "$RUNNER_TEMP/apt.log" 2>&1 &
           echo $! > "$RUNNER_TEMP/apt.pid"

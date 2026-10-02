@@ -190,7 +190,7 @@ Only the community's admin pins a message, or unpins it ([400](400-chat.md#pinne
 { "x": { "t": "pin", "id": <message id or "">, "n": <number> }, "nick"? }
 ```
 
-A member takes it only when the payload's author is the admin at that moment and `n` is at most 5 minutes past its clock ([400](400-chat.md#pinned-message)); a pin from anyone else is dropped. Apps from before drop the frame as they drop reactions.
+A member takes it only when the payload's author is the admin at that moment and `n` is at most 10 minutes past its clock ([400](400-chat.md#pinned-message)); a pin from anyone else is dropped. Apps from before drop the frame as they drop reactions.
 
 ## Edits
 

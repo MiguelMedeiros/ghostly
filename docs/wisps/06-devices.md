@@ -689,7 +689,7 @@ Old state means old outgoing counters. On a forced takeover and on a start from 
 
 The floor is why a plain stride is not enough for groups: the counter starts over at each epoch, so a device that took over at epoch E and then catches up to E+1 would send again from 0 there, where the lost device already sent. The community beacon packs the counter in 32 bits (`packages/core/src/communityRendezvous.ts`), which allows about 4,000 takeovers in the life of a profile.
 
-**Not raised:** edit numbers (capped at 100 per message, `packages/core/src/pairedEdits.ts`), pin numbers (clock-bound: refused more than 5 minutes ahead, `packages/core/src/pins.ts`), message ids (random), incoming high-water marks (something taken twice is removed by its id). So after a forced takeover an edit of a message that the lost device edited later can be ignored by the contact as older; the person edits again.
+**Not raised:** edit numbers (capped at 100 per message, `packages/core/src/pairedEdits.ts`), pin numbers (clock-bound: refused more than 10 minutes ahead, `packages/core/src/pins.ts`), message ids (random), incoming high-water marks (something taken twice is removed by its id). So after a forced takeover an edit of a message that the lost device edited later can be ignored by the contact as older; the person edits again.
 
 What contacts on any version see once, after a forced takeover: in a chat with holding on, the line "The contact holds items for you, but their address expired" and a faster poll until the first real held item; in a group, up to 255 frames counted as missing from that member. Neither loses a message. To be tested: the groups' seen windows and the hold manifest's "strictly increasing" rule with a floor and a stride.
 
