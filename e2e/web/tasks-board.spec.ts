@@ -236,3 +236,99 @@ test("a bot's tasks from two chats on one board: columns by status, live updates
     await bot.stop();
   }
 });
+
+test("richer task cards: a Review column for an open pull request, its checks, tags, and parts stacked under their task", { tag: ["@feature:chat.tasks-board", "@feature:chat.status-cards.wire", "@feature:headless.status-cards"] }, async ({ peer, relay }) => {
+  const url = await relay.listen();
+  const bot = new HeadlessBot();
+  try {
+    await bot.start(url, "Coordinator");
+    const person = await peer("board-fields-person");
+    const page = person.page;
+    const invite = await bot.run("invite", "create", "--label", "person");
+    await page.getByRole("button", { name: "Join chat", exact: true }).first().click();
+    await pasteInvite(page, invite.invite as string);
+    await bot.run("chat", "wait", invite.chat as string, "--until", "live", "--timeout", "120");
+    await expect(page.getByTestId("connection-options")).toHaveAccessibleName(/Connected · /, { timeout: 90_000 });
+    const direct = invite.chat as string;
+    const prOf = (n: number) => ["--pr-url", `https://github.com/MiguelMedeiros/ghostly/pull/${n}`, "--pr-number", String(n)];
+
+    // The CLI refuses what a reader would leave out, and a parent that is not there.
+    await expect(bot.run("task", "send", direct, "--title", "x", ...prOf(1), "--pr-state", "approved")).rejects.toThrow(/pr.state is one of/);
+    await expect(bot.run("task", "send", direct, "--title", "x", "--tag", "a", "--tag", "b", "--tag", "c", "--tag", "d")).rejects.toThrow(/tags is a list of at most 3/);
+    await expect(bot.run("task", "send", direct, "--title", "x", "--parent", "never-sent")).rejects.toThrow(/never-sent/);
+
+    // A task with three parts; tasks whose pull requests stand in different places.
+    await bot.run("task", "send", direct, "--id", "rework", "--title", "Relay rework", "--tag", "core", "--wait", "delivered");
+    await bot.run("task", "send", direct, "--id", "codec", "--title", "Write the codec", "--parent", "rework", "--status", "done", "--wait", "delivered");
+    await bot.run("task", "send", direct, "--id", "engine", "--title", "Wire the engine", "--parent", "rework", "--wait", "delivered");
+    await bot.run("task", "send", direct, "--id", "ui", "--title", "Draw the panel", "--parent", "rework", "--status", "queued", "--wait", "delivered");
+    await bot.run("task", "send", direct, "--id", "flaky", "--title", "Fix the flaky large-file spec", "--progress", "80", ...prOf(612), "--additions", "123", "--deletions", "45",
+      "--pr-state", "open", "--pr-checks", "passing", "--tag", "e2e", "--tag", "web", "--wait", "delivered");
+    await bot.run("task", "send", direct, "--id", "docs", "--title", "Write the WISP", "--progress", "30", ...prOf(613), "--pr-state", "draft", "--pr-checks", "pending", "--tag", "docs", "--wait", "delivered");
+    await bot.run("task", "send", direct, "--id", "idle", "--title", "Rest the idle animations", "--status", "blocked", ...prOf(614), "--pr-state", "open", "--pr-checks", "failing", "--tag", "web", "--wait", "delivered");
+
+    // In the chat the cards are the cards they always were: the new fields change nothing there.
+    await expect(chat(person).locator('[data-testid="status-card"]')).toHaveCount(7, { timeout: 60_000 });
+    await expect(chat(person).locator('[data-testid="status-card"][data-card-id="flaky"]').getByTestId("status-card-pr")).toHaveText("+123−45·PR #612");
+
+    await page.getByTestId("sidebar-tasks").click();
+    const board = page.getByTestId("tasks-board");
+    await expect(page.getByTestId("board-column").getByRole("heading")).toHaveText(["Queued0", "Running2", "Blocked1", "Review1", "Done0", "Stopped0"]);
+    await expect(page.getByTestId("tasks-summary")).toHaveText("6 active · 7 tasks");
+    // Review: the running task whose pull request is open. The blocked one stays in Blocked, the draft in Running.
+    expect(await ids(column(page, "review"))).toEqual(["flaky"]);
+    expect(await ids(column(page, "blocked"))).toEqual(["idle"]);
+    expect((await ids(column(page, "running"))).sort()).toEqual(["docs", "rework"]);
+    const card = (id: string) => board.locator(`[data-testid="board-card"][data-card-id="${id}"]`);
+    await expect(card("flaky")).toHaveAttribute("data-status", "running");
+    await expect(card("flaky").getByTestId("board-card-checks")).toHaveAttribute("data-checks", "passing");
+    await expect(card("flaky").getByTestId("board-card-checks")).toHaveText("✓Checks passing");
+    await expect(card("idle").getByTestId("board-card-checks")).toHaveAttribute("data-checks", "failing");
+    await expect(card("docs").getByTestId("board-card-checks")).toHaveAttribute("data-checks", "pending");
+    await expect(card("flaky").getByTestId("board-card-open")).toHaveAccessibleName(/PR #612, Open, Checks passing, e2e, web, updated /);
+
+    // The parts are under their task, in no column of their own.
+    await expect(card("codec")).toHaveCount(0);
+    await expect(card("rework").getByTestId("board-card-parts")).toHaveText("1 of 3 done");
+    await card("rework").getByTestId("board-card-stack-toggle").click();
+    await expect(card("rework").getByTestId("board-card-part")).toHaveText(["Wire the engineRunning", "Draw the panelQueued", "Write the codecDone"]);
+    for (const scheme of ["dark", "light"] as const) {
+      await theme(page, scheme);
+      await shot(page, `fields-desktop-${scheme}.png`);
+    }
+    await theme(page, "dark");
+
+    // The bot marks a part done and the pull request merged: the summary and the columns follow.
+    await bot.run("task", "update", direct, "engine", "--status", "done", "--wait", "confirmed", "--timeout", "60");
+    await expect(card("rework").getByTestId("board-card-parts")).toHaveText("2 of 3 done", { timeout: 60_000 });
+    await bot.run("task", "update", direct, "flaky", "--pr-state", "merged", "--wait", "confirmed", "--timeout", "60");
+    // Merged, and still running: the task is done when its bot says so.
+    await expect.poll(() => ids(column(page, "review")), { timeout: 60_000 }).toEqual([]);
+    expect(await ids(column(page, "running"))).toContain("flaky");
+    await bot.run("task", "update", direct, "flaky", "--status", "done", "--progress", "100", "--wait", "confirmed", "--timeout", "60");
+    await expect.poll(() => ids(column(page, "done")), { timeout: 60_000 }).toEqual(["flaky"]);
+
+    // Filtered by a tag; a part opens its own message in the chat.
+    await expect(page.getByTestId("tasks-tag")).toHaveText(["web", "core", "docs", "e2e"]);
+    await page.getByTestId("tasks-tags").getByRole("button", { name: "web" }).click();
+    expect((await ids(board)).sort()).toEqual(["flaky", "idle"]);
+    await page.getByTestId("tasks-tags").getByRole("button", { name: "web" }).click();
+    // The filter took the task off the board and brought it back: its stack is folded again.
+    await card("rework").getByTestId("board-card-stack-toggle").click();
+    await card("rework").getByTestId("board-card-part").filter({ hasText: "Write the codec" }).click();
+    await expect(page).toHaveURL(/#\/chat\//);
+    await expect(chat(person).locator("[data-message-row]").filter({ has: page.locator('[data-testid="status-card"][data-card-id="codec"]') })).toHaveAttribute("data-reply-flash", "", { timeout: 30_000 });
+
+    // A phone: Review is a tab like the others.
+    await page.setViewportSize({ width: 375, height: 740 });
+    await page.goto("/#/tasks");
+    await expect(page.getByTestId("tasks-tab")).toHaveText(["Queued0", "Running2", "Blocked1", "Review0", "Done1", "Stopped0"]);
+    await page.getByTestId("tasks-tab").nth(1).click();
+    await page.locator('[data-testid="board-card"][data-card-id="rework"]').getByTestId("board-card-stack-toggle").click();
+    await page.waitForTimeout(500);
+    await shot(page, "fields-phone.png");
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  } finally {
+    await bot.stop();
+  }
+});
