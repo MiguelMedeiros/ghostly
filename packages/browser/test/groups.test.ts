@@ -397,6 +397,25 @@ describe("group engine: admission over a contact chat, edges from the roster", (
     expect(knocks()).toEqual([keyOf(carol), keyOf(dave)].sort());
   });
 
+  it("a relay that keeps answering with the record from before the write is not written to every second", async () => {
+    const world = new World();
+    const alice = world.add("alice"), carol = world.add("carol");
+    await alice.load(); await carol.load();
+    const groupId = await alice.create("Ghosts", "mesh");
+    const code = await alice.enableLink(groupId);
+    const knockKey = knockIdentity(decodeGroupEntryLink(code)!).pubKeyZ32;
+    // What the relay answers reads with, whatever is written: nothing.
+    const writes = vi.spyOn(world.pkarr, "set").mockImplementation(() => world.pkarr);
+    await carol.joinByLink(code);
+    await vi.waitFor(() => expect(writes).toHaveBeenCalledTimes(1));
+    expect(world.pkarr.has(knockKey)).toBe(false);
+    const t0 = Date.now();
+    // Read back twice in quick succession and written again each time (1.6 s, 3.2 s); from then on at the knock's own
+    // pace, every five seconds as before: 9.6 s, 16 s, 22.4 s, 28.8 s. Read back every time, it would be twenty writes.
+    for (let s = 1; s <= 20; s++) await carol.tick(t0 + s * 1_600);
+    expect(writes).toHaveBeenCalledTimes(7);
+  });
+
   it("tells the joiner how far a join through a link got: knocking, knocked, answered, admitted", async () => {
     let publish!: () => void;
     let seen = false, ready = false;

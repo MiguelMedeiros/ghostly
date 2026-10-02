@@ -207,6 +207,12 @@ export const KNOCK_REFRESH_MS = 30_000;
  */
 export const KNOCK_VERIFY_MS = 800;
 const KNOCK_VERIFY_SPREAD_MS = 700;
+/**
+ * Knocks read back that soon in a row. A relay that still answers with the record from before the write (it has not
+ * stored the packet yet, or serves a cached copy) would otherwise have the joiner write again every second: after
+ * this many, the next look is at the knock's own pace, as before.
+ */
+export const KNOCK_VERIFIES = 2;
 /** Entry sessions the admin runs at once; a joiner who does not finish in time is not answered again for a while. */
 const MAX_PENDING_ENTRIES = 4;
 const ENTRY_TIMEOUT_MS = 3 * 60_000;
@@ -297,6 +303,8 @@ export class Groups {
   private readonly lastKnock = new Map<string, number>();
   /** Joiner side: when a knock just written is read back (`KNOCK_VERIFY_MS`); none once it was found there. */
   private readonly knockCheckAt = new Map<string, number>();
+  /** Joiner side: knocks written in a row without one found in the record since (`KNOCK_VERIFIES`). */
+  private readonly knockRewrites = new Map<string, number>();
   /** Per group, members met over their admission a moment ago: their edge is opened expecting them. */
   private readonly justMet = new Map<string, Set<string>>();
   /** Joiner side: groups whose knock is published, for the stage the joiner is shown. */
@@ -649,6 +657,7 @@ export class Groups {
     this.pendingEntries.delete(groupId);
     this.knocked.delete(groupId);
     this.knockCheckAt.delete(groupId);
+    this.knockRewrites.delete(groupId);
     this.justMet.delete(groupId);
     this.relayAsked.delete(groupId);
     this.hubs.forget(groupId);
@@ -840,12 +849,15 @@ export class Groups {
     traceJoin(group.id, "knock.read", { ms: Date.now() - started, others: existing.length, ...(mine ? { mine: now - mine.ts } : {}) });
     // Still there and fresh: the admin's app reads it as it is. One another joiner's write replaced goes again.
     if (mine && now - mine.ts >= 0 && now - mine.ts < KNOCK_REFRESH_MS) {
+      this.knockRewrites.delete(group.id);
       if (!this.knocked.has(group.id)) { this.knocked.add(group.id); this.host.emit(); }
       return;
     }
     await this.host.publish(identity, knockRecords(link, mergeKnocks(existing, { key, ts: now }, now)));
     // Read back in a moment: another joiner writing at the same time may have replaced it.
-    this.knockCheckAt.set(group.id, now + KNOCK_VERIFY_MS + gossipStart(key) % KNOCK_VERIFY_SPREAD_MS);
+    const rewrites = (this.knockRewrites.get(group.id) ?? 0) + 1;
+    this.knockRewrites.set(group.id, rewrites);
+    if (rewrites <= KNOCK_VERIFIES) this.knockCheckAt.set(group.id, now + KNOCK_VERIFY_MS + gossipStart(key) % KNOCK_VERIFY_SPREAD_MS);
     traceJoin(group.id, "knock.published", { ms: Date.now() - started });
     if (!this.knocked.has(group.id)) { this.knocked.add(group.id); this.host.emit(); }
   }
