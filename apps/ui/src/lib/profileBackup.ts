@@ -217,20 +217,24 @@ export async function writeProfileBackup(sink: BackupSink, { passphrase, id, loc
       const { blob, bytes: _where, ...row } = file;
       await put({ t: "file", row: row as StoredFile, size: source.size, type: blob?.type ?? file.metadata?.mime ?? "" });
       let ok = true, done = 0;
-      try {
-        while (done < source.size) {
-          const part = await source.read(done, Math.min(FILE_BYTES_STEP, source.size - done));
+      while (done < source.size) {
+        let part: Uint8Array;
+        try {
+          part = await source.read(done, Math.min(FILE_BYTES_STEP, source.size - done));
           if (!part.length) throw new Error("The file is shorter than it says");
-          await writer.bytes(part);
-          done += part.length;
-          progress.bytes += part.length;
-          tell();
+        } catch (error) {
+          // A file this device can no longer read (WebKit can lose a stored Blob) is left out, not the whole backup.
+          if (isCancelled(error) || signal?.aborted) throw error;
+          ok = false;
+          progress.bytes += source.size - done;
+          break;
         }
-      } catch (error) {
-        // A file this device can no longer read (WebKit can lose a stored Blob) is left out, not the whole backup.
-        if (isCancelled(error) || signal?.aborted) throw error;
-        ok = false;
-        progress.bytes += source.size - done;
+        // A piece that cannot be written (no room left where the bundle is made) is another matter: it stops the
+        // backup. Left out and gone on from, the bundle would miss a frame, and would never open again.
+        await writer.bytes(part);
+        done += part.length;
+        progress.bytes += part.length;
+        tell();
       }
       await put({ t: "file-end", ok });
       if (ok) { files += 1; fileBytes += source.size; } else skipped += 1;
