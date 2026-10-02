@@ -136,8 +136,8 @@ describe("store-and-forward engine", () => {
     expect(b.received).toHaveLength(2);
   });
 
-  it("dates its pointer and the lifetimes it gives back, so an app up to 1.0.1 (a date over a minute ahead is refused) reads a sender whose clock is minutes ahead", async () => {
-    // The 1.0.1 reader's rules, as they were: a pointer issued over 60 s ahead is dropped; an expiry over one
+  it("dates its pointer and the lifetimes it gives back, so an app up to 1.0.2 (a date over a minute ahead is refused) reads a sender whose clock is minutes ahead", async () => {
+    // The 1.0.2 reader's rules, as they were: a pointer issued over 60 s ahead is dropped; an expiry over one
     // lifetime plus 60 s from now is refused.
     for (const [skew, taken] of [[0, true], [2 * 60_000, true], [10 * 60_000, true], [12 * 60_000, false]] as const) {
       const { a, transport, keys } = setup({ aliceNow: () => Date.now() + skew });
@@ -147,8 +147,8 @@ describe("store-and-forward engine", () => {
       const pointer = keys.bob.readPointer([...transport.packets.values()][0])!;
       expect(Math.abs(pointer.issued - (a.stored.hold!.outbox[0].expires - HOLD_LIMITS.ttlMs))).toBeLessThan(1_000);
       expect(Math.abs(pointer.expires - a.stored.hold!.outbox[0].expires)).toBeLessThan(1_000);
-      const readBy101 = pointer.issued <= Date.now() + 60_000 && a.stored.hold!.outbox[0].expires <= Date.now() + HOLD_LIMITS.ttlMs + 60_000 && pointer.expires <= Date.now() + HOLD_LIMITS.ttlMs + 60_000;
-      expect(readBy101, `a sender ${skew / 60_000} min ahead`).toBe(taken);
+      const readBy102 = pointer.issued <= Date.now() + 60_000 && a.stored.hold!.outbox[0].expires <= Date.now() + HOLD_LIMITS.ttlMs + 60_000 && pointer.expires <= Date.now() + HOLD_LIMITS.ttlMs + 60_000;
+      expect(readBy102, `a sender ${skew / 60_000} min ahead`).toBe(taken);
     }
   });
 

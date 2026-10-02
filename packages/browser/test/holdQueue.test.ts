@@ -208,7 +208,7 @@ describe("the sender's queue", () => {
     expect(a.stored.hold!.outbox[0].expires).toBe(clock.t + 1_000);
     a.ttl = 30 * 24 * 3600_000;
     await holdText("m2", "two");
-    // The longest an item lives ends ten minutes early (`HOLD_DATED_BACK_MS`): an app up to 1.0.1 refuses an expiry more than
+    // The longest an item lives ends ten minutes early (`HOLD_DATED_BACK_MS`): an app up to 1.0.2 refuses an expiry more than
     // a minute past one lifetime from its own now, which a sender whose clock ran ahead always gave.
     expect(a.stored.hold!.outbox[1].expires).toBe(clock.t + HOLD_LIMITS.ttlMs - HOLD_DATED_BACK_MS);
   });

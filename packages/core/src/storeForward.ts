@@ -39,7 +39,7 @@ export const HOLD_LIMITS = {
 /**
  * How far before its own clock a sender dates its pointer and its manifest, and ends the lifetimes it gives. A reader
  * refuses nothing for those dates: `rev` orders pointers and `seq` orders items, both kept by the reader. Apps up to
- * 1.0.1 refuse a pointer or a manifest dated more than a minute past their clock, and an expiry more than a minute
+ * 1.0.2 refuse a pointer or a manifest dated more than a minute past their clock, and an expiry more than a minute
  * past one lifetime from now, each without a word: the items of a sender whose clock ran two minutes fast were never
  * fetched. Dated back, a sender up to about eleven minutes ahead is read by them.
  */
