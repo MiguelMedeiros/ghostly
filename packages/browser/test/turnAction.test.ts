@@ -65,7 +65,7 @@ const TABLE: Cell[] = [
   ["taking", { result: "none" }, "Put with no condition, read back", { do: "put", condition: "none", then: "read" }],
   ["taking", { result: "unreachable" }, "Wait, try again", { do: "wait" }],
   // `superseded`
-  ["superseded", { result: "mine" }, "Cannot happen (it can, once the newer record expired: stay, the same two buttons)", { do: "stay", offers: ["use-here", "it-wasnt-me"] }],
+  ["superseded", { result: "mine" }, "Never read (its own packet coming back is behind, treated as none); were it, the same as none", { do: "stay", offers: ["use-here", "it-wasnt-me"] }],
   ["superseded", { result: "other" }, "Stay; Use here (a handoff) or It wasn't me (a takeover)", { do: "stay", offers: ["use-here", "it-wasnt-me"] }],
   ["superseded", { result: "clone", clone: "above" }, "Stay", stay],
   ["superseded", { result: "tombstone", listed: true }, "moving", { do: "become", state: "moving", reload: false }],
@@ -73,9 +73,9 @@ const TABLE: Cell[] = [
   ["superseded", { result: "none" }, "Stay; the same two buttons", { do: "stay", offers: ["use-here", "it-wasnt-me"] }],
   ["superseded", { result: "unreachable" }, "Stay", stay],
   // `moving`
-  ["moving", { result: "mine" }, "Cannot happen", impossible],
-  ["moving", { result: "other" }, "Cannot happen at the old address", impossible],
-  ["moving", { result: "clone", clone: "above" }, "Cannot happen", impossible],
+  ["moving", { result: "mine" }, "Stay: the tombstone expired at that source, or the source lags", waitsForSetUpdate],
+  ["moving", { result: "other" }, "Stay, the same", waitsForSetUpdate],
+  ["moving", { result: "clone", clone: "above" }, "Stay, the same", waitsForSetUpdate],
   ["moving", { result: "tombstone", listed: true }, "Stay until a set-update signed by the device its stored record names active arrives", waitsForSetUpdate],
   ["moving", { result: "none" }, "Stay (the tombstone expired; the active device puts it again)", waitsForSetUpdate],
   ["moving", { result: "unreachable" }, "Stay", waitsForSetUpdate],
@@ -127,6 +127,13 @@ describe("device state by turn read", () => {
     expect(turnAction("taking", { result: "behind" }, 4)).toEqual({ do: "wait" });
     expect(turnAction("active-start", { result: "behind" }, 4)).toEqual({ do: "write", condition: "none", then: "start" });
     expect(turnAction("active-running", { result: "behind" }, 4)).toEqual({ do: "put", condition: "none", then: "go-on" });
+  });
+
+  it("closed has no column either: every state does what its unreachable cell says", () => {
+    for (const row of TURN_ROWS) expect(turnAction(row, { result: "closed" }), row).toEqual(turnAction(row, { result: "unreachable" }));
+    expect(turnAction("active-start", { result: "closed" })).toEqual({ do: "ask" });
+    expect(turnAction("active-running", { result: "closed" })).toEqual({ do: "go-on", restricted: true });
+    expect(turnAction("taking", { result: "closed" })).toEqual({ do: "wait" });
   });
 
   it("behind in any state that does not write is none, at once", () => {

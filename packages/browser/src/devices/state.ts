@@ -119,7 +119,8 @@ export const runsEngine = (state: DeviceState): boolean => state === "single" ||
  * - `active`: quiesce for a handoff (`releasing`); a higher turn it did not release (`superseded`); a tombstone.
  * - `releasing`: cancel or a failure (`active`); the release (`standby`); a higher turn; a tombstone.
  * - `standby`: a release it holds (`taking`); a forced takeover (`active`); a tombstone.
- * - `taking`: its own turn read back (`active`); another record at its turn (`standby`); a tombstone.
+ * - `taking`: its own turn at its settle read (`active`); another record at its turn (`standby`, or `superseded` for a
+ *   device that was forcing a takeover from that state: it goes back to the state it had); a tombstone.
  * - `superseded`: "Use here" (`taking`); "It wasn't me" (`active`); a tombstone.
  * - `moving`: an accepted `set-update` or a new enrollment (`standby`); a device set of its own (`active`); no longer listed (`removed`).
  * - `removed`: a new enrollment (`standby`).
@@ -129,7 +130,7 @@ const LEGAL: Record<DeviceState, readonly StoredDeviceState[]> = {
   active: ["releasing", "superseded", "moving", "removed"],
   releasing: ["active", "standby", "superseded", "moving", "removed"],
   standby: ["taking", "active", "moving", "removed"],
-  taking: ["active", "standby", "moving", "removed"],
+  taking: ["active", "standby", "superseded", "moving", "removed"],
   superseded: ["taking", "active", "moving", "removed"],
   moving: ["standby", "active", "removed"],
   removed: ["standby"],

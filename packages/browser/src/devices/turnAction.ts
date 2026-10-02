@@ -12,8 +12,8 @@ import type { DeviceState, StoredDeviceState } from "./state";
 /** The table's rows. An `active` device has two: the read that lets it start, and every read while it runs. */
 export type TurnRow = "active-start" | "active-running" | "standby" | "releasing" | "taking" | "superseded" | "moving" | "removed";
 export const TURN_ROWS: readonly TurnRow[] = ["active-start", "active-running", "standby", "releasing", "taking", "superseded", "moving", "removed"];
-/** The table's columns. `behind` has none: it becomes one of these (see `turnAction`). */
-export type TurnColumn = Exclude<TurnResult, "behind">;
+/** The table's columns. `behind` and `closed` have none: each becomes one of these (see `turnAction`). */
+export type TurnColumn = Exclude<TurnResult, "behind" | "closed">;
 export const TURN_COLUMNS: readonly TurnColumn[] = ["mine", "other", "clone", "tombstone", "none", "unreachable"];
 
 /** How many rounds (put the stored packet again, read again) a writer makes on `behind` before it stops asking. */
@@ -116,8 +116,9 @@ function cell(row: TurnRow, column: TurnColumn, facts: TurnFacts): TurnAction {
       break;
     case "superseded":
       switch (column) {
-        // The table says "cannot happen". It can: the record that superseded this device expired on every source while
-        // its own older one is still held somewhere. Nothing changes for it: it was replaced, and it stays so.
+        // `mine` is never read: its stored packet is below the turn that superseded it, which it keeps as the highest it
+        // saw, so its own packet coming back (the newer record expired, a relay lags) is `behind`, treated as `none`.
+        // Were it read all the same, nothing changes: the device was replaced, stays so, and never puts its packet again.
         case "mine": case "other": case "none": return { do: "stay", offers: ["use-here", "it-wasnt-me"] };
         case "clone": case "unreachable": return STAY;
         case "tombstone": return { do: "become", state: tombstone(facts), reload: false };
@@ -125,11 +126,10 @@ function cell(row: TurnRow, column: TurnColumn, facts: TurnFacts): TurnAction {
       break;
     case "moving":
       switch (column) {
-        case "mine": case "other": case "clone": return IMPOSSIBLE;
         // Until a `set-update` signed by the device its stored record names active arrives; a tombstone that no longer lists it ends the wait.
         case "tombstone": return facts.listed ? { do: "stay", offers: [], awaits: "set-update" } : { do: "become", state: "removed", reload: false };
-        // The tombstone expired; the active device puts it again.
-        case "none": case "unreachable": return { do: "stay", offers: [], awaits: "set-update" };
+        // The tombstone expired at that source, or the source lags; the active device puts it again.
+        case "mine": case "other": case "clone": case "none": case "unreachable": return { do: "stay", offers: [], awaits: "set-update" };
       }
       break;
     case "removed":
@@ -147,9 +147,11 @@ function cell(row: TurnRow, column: TurnColumn, facts: TurnFacts): TurnAction {
  * What a device in `row` does on a read. `round` counts the reads that said `behind` in a row, this one included (1 for the first):
  * a device that writes (`active`, `taking`) puts its stored packet again, conditionally on what it read, and reads
  * again, three rounds at most; then `taking` treats it as `unreachable` and `active` as `none`. Any other state
- * treats `behind` as `none` at once.
+ * treats `behind` as `none` at once, and puts nothing. `closed` (a packet under the turn key at or above the tombstone's
+ * sequence that is no tombstone) is never a good read: every state does what its `unreachable` cell says.
  */
 export function turnAction(row: TurnRow, facts: TurnFacts, round = 1): TurnAction {
+  if (facts.result === "closed") return cell(row, "unreachable", facts);
   if (facts.result !== "behind") return cell(row, facts.result, facts);
   const writer = row === "active-start" || row === "active-running" || row === "taking";
   if (!writer) return cell(row, "none", facts);

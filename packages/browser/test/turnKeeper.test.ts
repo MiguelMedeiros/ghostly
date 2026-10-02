@@ -2,11 +2,11 @@ import "fake-indexeddb/auto";
 import { beforeEach, describe, expect, it } from "vitest";
 import {
   createIdentity, encodeTxtPacket, fromBase64Url, identityFromSeed, readTurnPacket, sign, signRelayPayload, signTurnPacket, signTurnRelease, toBase64Url, turnKeys,
-  turnPayloadSequence, turnSequence, TOMBSTONE_SEQUENCE, TOMBSTONE_TURN, TURN_NO_ACTIVE, TURN_REV_LIMIT, type Identity, type TurnRecord, type TurnRelease,
+  turnPayloadSequence, turnSequence, TURN_PUT_WINDOW_MS, TURN_SETTLE_MS, TOMBSTONE_SEQUENCE, TOMBSTONE_TURN, TURN_NO_ACTIVE, TURN_REV_LIMIT, type Identity, type TurnRecord, type TurnRelease,
 } from "@ghostly/core";
 import { amend, firstRecord, transition, type DevicePatch, type DeviceRecord, type StoredDeviceState } from "../src/devices/state";
 import { DEVICES_DB, closeDevicesDb, enrollDevice, readDeviceRecord, setDeviceMirror } from "../src/devices/store";
-import { TURN_RAISE_WINDOW_MS, TURN_SETTLE_MARGIN_MS, TurnClosedError, TurnKeeper, TurnStaleReadError, type TurnStore } from "../src/devices/turn";
+import { TurnKeeper, TurnStaleReadError, type TurnStore } from "../src/devices/turn";
 import { FakeTurnNetwork } from "./helpers/turnNetwork";
 import type { TurnNetwork } from "@ghostly/core";
 // covers: devices.turn.keeper
@@ -161,7 +161,7 @@ describe("the active device", () => {
     network.source("https://relay.test").sequences = [String(TOMBSTONE_SEQUENCE)];
     const outcome = await keeper.check(true);
     expect(outcome.kind).toBe("start");
-    expect(outcome.kind === "start" && outcome.read.closed).toBe(false);
+    expect(outcome.kind === "start" && outcome.read).toMatchObject({ result: "mine", good: true });
     expect(store.record!.seenSequence).toBe(turnSequence(40, 1, 0));
     expect(store.record).toMatchObject({ turn: 40, rev: 1 });
     // The header gone, every later start works: nothing was stored of it.
@@ -411,14 +411,29 @@ describe("the active device", () => {
     expect(gone.store.record!.seenSequence).toBe(TOMBSTONE_SEQUENCE);
   });
 
-  it("an address closed by something that is no tombstone takes no further record, and it says so", async () => {
-    const { keeper } = await started(0, network, 40);
+  it("closed is never a good read: the device does what it does on unreachable, and the packet is not remembered", async () => {
+    const { keeper, store } = await started(0, network, 40);
+    const mine = network.source("dht").held!;
+    const mark = store.record!.seenSequence;
     network.seed(junk(TOMBSTONE_SEQUENCE));
     network.calls.length = 0;
-    expect((await keeper.check(true)).kind).toBe("closed");
+    clock.t += 120_000;
+    // At start it does not start by itself; running, it goes on without a wallet, a spend or admin work.
+    const outcome = await keeper.check(true);
+    expect(outcome.kind).toBe("ask");
+    expect(outcome.kind === "ask" && outcome.read).toMatchObject({ result: "closed", good: false });
+    expect(await keeper.check(false)).toMatchObject({ kind: "go-on", restricted: true });
+    expect(keeper.goodWithin(60_000)).toBe(false);
     expect(network.puts()).toEqual([]);
-    const read = (await keeper.read())!;
-    await expect(keeper.write(read.conditions)).rejects.toThrow(TurnClosedError);
+    // The mark did not move: when the packet expires, the next read is an ordinary one and the device writes on.
+    expect(store.record!.seenSequence).toBe(mark);
+    network.seed(mine);
+    expect((await keeper.check(true)).kind).toBe("start");
+    expect(store.record).toMatchObject({ turn: 40, rev: 1 });
+    // A standby says it cannot check, and a taking device waits.
+    network.seed(junk(TOMBSTONE_SEQUENCE));
+    expect(await device(1, network, recordOf(1, "standby", 40)).keeper.check(true)).toMatchObject({ kind: "show", screen: "cannot-check" });
+    expect((await device(1, network, { ...recordOf(1, "standby", 40), state: "taking" }).keeper.check(true)).kind).toBe("wait");
   });
 });
 
@@ -689,11 +704,12 @@ describe("the other states", () => {
   });
 });
 
-describe("raising the turn where relays ignore the condition", () => {
-  const SETTLE = TURN_RAISE_WINDOW_MS + TURN_SETTLE_MARGIN_MS;
+describe("settle: how a raised turn becomes active", () => {
   const takingRecord = (own: number) => ({ ...recordOf(own, "standby", 40), state: "taking" as const });
+  const knowing = async (own: number, state: "standby" | "superseded" = "standby") =>
+    ({ ...recordOf(own, "standby", 40, [0, 1, 2], { turnPacket: toBase64Url(await packet(40, 3, 0)), rev: 3, activeSlot: 0, seenSequence: turnSequence(40, 3, 0) }), state });
 
-  it("a taker is active only after a read made more than T after its put", async () => {
+  it("a taker is active only at its settle read, T after the end of its put", async () => {
     const network = new FakeTurnNetwork([{ name: "https://relay.test", kind: "relay" }]);
     network.seed(await packet(40, 3, 0));
     const taker = device(1, network, takingRecord(1), { undo: async () => {} });
@@ -703,14 +719,13 @@ describe("raising the turn where relays ignore the condition", () => {
     clock.t += 500;
     network.calls.length = 0;
     expect((await taker.keeper.check(true)).kind).toBe("start");
-    // Its own record read back at once is not enough: it waits out the rest of T and a margin, and reads again.
-    expect(clock.slept).toEqual([SETTLE - 500]);
+    // Its own record read back at once is not enough: it waits out the rest of T, counted from the end of the put.
+    expect(clock.slept).toEqual([TURN_SETTLE_MS - 500]);
     expect(network.reads()).toBe(2);
     expect(taker.store.record!.state).toBe("active");
-    expect(TURN_RAISE_WINDOW_MS).toBe(20_000);
   });
 
-  it("the race the condition does not close on relays: the lower slot puts first, the higher second, both read their own back; only one is active", async () => {
+  it("the race no relay closes: the lower slot puts first, the higher second, both read their own back; only one is active", async () => {
     const network = new FakeTurnNetwork([{ name: "https://relay.test", kind: "relay" }]);
     network.seed(await packet(40, 3, 0));
     const low = device(1, network, takingRecord(1), { undo: async () => {} });
@@ -719,23 +734,24 @@ describe("raising the turn where relays ignore the condition", () => {
     await low.keeper.write(lowRead.conditions, { turn: 41, release: await releaseTo(41, 0, 1) });
     // Read at once, the lower slot's own record is the highest: without the wait it would start here.
     expect((await low.keeper.read())!.result).toBe("mine");
-    // The other device read the old record too, and puts inside its window: the relay takes it, whatever `If-Match` says.
-    clock.t += TURN_RAISE_WINDOW_MS - 8_000;
+    // The other device read the old record too, and sends its put at the end of its window: the relay takes it,
+    // whatever `If-Match` says.
+    clock.t += TURN_PUT_WINDOW_MS;
     const second = (await high.keeper.write(highRead.conditions, { turn: 41 }))!;
     expect(second.puts.map((p) => p.outcome)).toEqual(["stored"]);
     expect((await high.keeper.read())!.result).toBe("mine");
-    // Each waits longer than T after its own put and reads again.
+    // Each waits T from the end of its own put and reads again.
     expect(await low.keeper.check(true)).toMatchObject({ kind: "gated", state: "standby" });
     expect((await high.keeper.check(true)).kind).toBe("start");
     expect([low.store.record!.state, high.store.record!.state]).toEqual(["standby", "active"]);
   });
 
-  it("a put that would end later than T after its read is not begun: the device reads again", async () => {
+  it("a put is sent within P of the start of its read, or not at all: the device starts over with a read", async () => {
     const network = new FakeTurnNetwork([{ name: "https://relay.test", kind: "relay" }]);
     network.seed(await packet(40, 3, 0));
     const taker = device(1, network, takingRecord(1));
     const read = (await taker.keeper.read())!;
-    clock.t += TURN_RAISE_WINDOW_MS - 8_000 + 1;
+    clock.t += TURN_PUT_WINDOW_MS + 1;
     network.calls.length = 0;
     await expect(taker.keeper.write(read.conditions, { turn: 41, release: await releaseTo(41, 0, 1) })).rejects.toThrow(TurnStaleReadError);
     // Nothing was signed, stored or put.
@@ -744,44 +760,157 @@ describe("raising the turn where relays ignore the condition", () => {
     // With no read at all, the same.
     const blind = device(2, network, takingRecord(2));
     await expect(blind.keeper.write({}, { turn: 41 })).rejects.toThrow(TurnStaleReadError);
-    // After a fresh read it goes through.
+    // After a fresh read, at the very end of the window, it goes through.
     const again = (await taker.keeper.read())!;
+    clock.t += TURN_PUT_WINDOW_MS;
     expect((await taker.keeper.write(again.conditions, { turn: 41, release: await releaseTo(41, 0, 1) }))!.puts[0].outcome).toBe("stored");
   });
 
-  it("a taker that restarted does not know when it put: it waits the whole of T from its first read", async () => {
+  it("a taker that crashed while it settled does not know when it put: it waits the whole of T again", async () => {
     const network = new FakeTurnNetwork([{ name: "https://relay.test", kind: "relay" }]);
     network.seed(await packet(40, 3, 0));
     const first = device(1, network, takingRecord(1));
     const read = (await first.keeper.read())!;
     await first.keeper.write(read.conditions, { turn: 41, release: await releaseTo(41, 0, 1) });
+    clock.t += 25_000;
     // The app is closed and opened again: a new keeper on the stored state.
     const again = device(1, network, structuredClone(first.store.record), { undo: async () => {} });
     expect((await again.keeper.check(true)).kind).toBe("start");
-    expect(clock.slept).toEqual([SETTLE]);
+    expect(clock.slept).toEqual([TURN_SETTLE_MS]);
   });
 
-  it("a forced takeover goes the same way: read, put within T, wait, read every source again", async () => {
+  it("the settle read counts only if every source that took the put answers; with fewer the device waits and reads again", async () => {
     const network = new FakeTurnNetwork();
     network.seed(await packet(40, 3, 0));
-    const forcing = device(2, network, recordOf(2, "standby", 40, [0, 1, 2], { turnPacket: toBase64Url(await packet(40, 3, 0)), rev: 3, activeSlot: 0 }));
+    const taker = device(1, network, takingRecord(1), { undo: async () => {} });
+    const read = (await taker.keeper.read())!;
+    await taker.keeper.write(read.conditions, { turn: 41, release: await releaseTo(41, 0, 1) });
+    // The relay took the put, and does not answer the settle read. The DHT says `mine`: not enough.
+    clock.onSleep = async () => { network.source("https://relay.test").down = true; };
+    expect((await taker.keeper.check(true)).kind).toBe("wait");
+    expect(taker.store.record!.state).toBe("taking");
+    // It answers again: the device reads again (T is long over) and is active.
+    clock.onSleep = undefined;
+    network.source("https://relay.test").down = false;
+    clock.slept = [];
+    expect((await taker.keeper.check(true)).kind).toBe("start");
+    expect(clock.slept).toEqual([]);
+  });
+
+  it("a put that was lost (none) is put again, naming nothing, and settled again", async () => {
+    const network = new FakeTurnNetwork([{ name: "https://relay.test", kind: "relay" }]);
+    network.seed(await packet(40, 3, 0));
+    const taker = device(1, network, takingRecord(1), { undo: async () => {} });
+    const read = (await taker.keeper.read())!;
+    await taker.keeper.write(read.conditions, { turn: 41, release: await releaseTo(41, 0, 1) });
+    const stored = fromBase64Url(taker.store.record!.turnPacket!);
+    // During the wait the relay loses everything.
+    clock.onSleep = async () => { clock.onSleep = undefined; network.seed(null); };
     network.calls.length = 0;
-    const raised = (await forcing.keeper.raise({ turn: 41 }))!;
-    expect(raised.mine).toBe(true);
-    expect(clock.slept).toEqual([SETTLE]);
-    expect(network.reads()).toBe(2);
+    expect((await taker.keeper.check(true)).kind).toBe("start");
+    expect(network.puts().map((p) => [p.condition, toBase64Url(p.payload!)])).toEqual([[null, toBase64Url(stored)]]);
+    // Two waits of T: one for the put that was lost, one for the put that stayed.
+    expect(clock.slept).toEqual([TURN_SETTLE_MS, TURN_SETTLE_MS]);
+  });
+
+  it("a settling device applies no tie-break of instance: a packet at its own sequence that is not its own means it does not start", async () => {
+    const network = new FakeTurnNetwork([{ name: "source", kind: "dht" }]);
+    network.seed(await packet(40, 3, 0));
+    // The same device twice (cloned storage), both taking the same turn, the copy here with the lower instance.
+    const taker = device(1, network, takingRecord(1), { undo: async () => {}, instance: 1 });
+    const read = (await taker.keeper.read())!;
+    await taker.keeper.write(read.conditions, { turn: 41, release: await releaseTo(41, 0, 1) });
+    clock.onSleep = async () => { network.seed(await packet(41, 0, 1, { instance: 2, release: await releaseTo(41, 0, 1) })); };
+    const outcome = await taker.keeper.check(true);
+    expect(outcome).toMatchObject({ kind: "gated", state: "standby" });
+    expect(outcome.kind === "gated" && outcome.read).toMatchObject({ result: "clone", clone: "equal", lower: true });
+  });
+
+  it("a forced takeover is taking after its put, settles the same way, and is active only then", async () => {
+    const network = new FakeTurnNetwork();
+    network.seed(await packet(40, 3, 0));
+    const forcing = device(2, network, await knowing(2));
+    let during: DeviceRecord | null = null;
+    clock.onSleep = async () => { during = structuredClone(forcing.store.record); };
+    network.calls.length = 0;
+    const outcome = (await forcing.keeper.raise({ turn: 41 }))!;
+    expect(outcome.kind).toBe("start");
+    // Taking, durably, with the state it had: a crash while it settles finds it there.
+    expect(during).toMatchObject({ state: "taking", turn: 41, handoff: { role: "taking", step: "takeover:standby" } });
+    expect(clock.slept).toEqual([TURN_SETTLE_MS]);
+    expect(network.reads()).toBe(3);
     expect(opened(network.source("dht").held)).toMatchObject({ turn: 41, author: 2 });
     expect(opened(network.source("dht").held).release).toBeUndefined();
-    // The state is the host's to change: the keeper only says whether the device may.
-    expect(forcing.store.record!.state).toBe("standby");
-    // With no source reachable nothing is written.
-    const blind = device(1, network, recordOf(1, "standby", 40));
+    expect(forcing.store.record).toMatchObject({ state: "active", turn: 41 });
+    expect(forcing.store.record!.handoff).toBeUndefined();
+  });
+
+  it("a forcing device that loses goes back to the state it had, with nothing staged to undo", async () => {
+    for (const prior of ["standby", "superseded"] as const) {
+      const network = new FakeTurnNetwork([{ name: "https://relay.test", kind: "relay" }]);
+      network.seed(await packet(40, 3, 0));
+      const forcing = device(1, network, await knowing(1, prior));
+      // During its wait a device in a higher slot puts the same turn.
+      clock.onSleep = async () => { network.seed(await packet(41, 0, 2)); };
+      const outcome = (await forcing.keeper.raise({ turn: 41 }))!;
+      expect(outcome, prior).toMatchObject({ kind: "gated", state: prior });
+      expect(forcing.store.record!.state).toBe(prior);
+      expect(forcing.store.record!.handoff).toBeUndefined();
+    }
+  });
+
+  it("a takeover needs a good read: with no source, at a closed address or under a tombstone nothing is written", async () => {
+    const network = new FakeTurnNetwork();
+    const blind = device(1, network, await knowing(1));
     for (const source of network.sources) source.down = true;
-    network.calls.length = 0;
-    expect(await blind.keeper.raise({ turn: 41 })).toMatchObject({ mine: false, report: null });
+    expect(await blind.keeper.raise({ turn: 41 })).toMatchObject({ kind: "show", screen: "cannot-check" });
+    for (const source of network.sources) source.down = false;
+    network.seed(junk(TOMBSTONE_SEQUENCE));
+    const closed = await blind.keeper.raise({ turn: 41 });
+    expect(closed).toMatchObject({ kind: "show", screen: "cannot-check" });
+    expect(closed && "read" in closed && closed.read.result).toBe("closed");
+    network.seed(await tombstone(0, [0, 2]));
+    expect(await blind.keeper.raise({ turn: 41 })).toMatchObject({ kind: "gated", state: "removed" });
     expect(network.puts()).toEqual([]);
-    // And a profile on one device has no turn to raise.
+    // An active device does not force a takeover of itself, and a profile on one device has no turn to raise.
+    await expect(device(0, network, recordOf(0, "active", 40)).keeper.raise({ turn: 41 })).rejects.toThrow("does not force");
     expect(await device(0, network, null).keeper.raise({ turn: 41 })).toBeNull();
+  });
+
+  it("a release to itself moves the number, never the active device: it puts, and reads again after T", async () => {
+    const network = new FakeTurnNetwork();
+    const stored = await packet(40, TURN_REV_LIMIT - 1, 0);
+    network.seed(stored);
+    const active = device(0, network, recordOf(0, "active", 40, [0, 1, 2], { rev: TURN_REV_LIMIT - 1, turnPacket: toBase64Url(stored), activeSlot: 0 }));
+    expect((await active.keeper.check(false)).kind).toBe("go-on");
+    // Running, with rev not spent: nothing to write, no wait.
+    expect(clock.slept).toEqual([]);
+    expect((await active.keeper.check(true)).kind).toBe("start");
+    expect(clock.slept).toEqual([TURN_SETTLE_MS]);
+    expect(active.store.record).toMatchObject({ state: "active", turn: 41, rev: 0 });
+    // If another device took the turn above it meanwhile, the read after T stops it.
+    const again = device(0, network, { ...structuredClone(active.store.record!), rev: TURN_REV_LIMIT - 1, turnPacket: toBase64Url(await packet(41, TURN_REV_LIMIT - 1, 0)) });
+    network.seed(await packet(41, TURN_REV_LIMIT - 1, 0));
+    clock.onSleep = async () => { network.seed(await packet(43, 0, 1)); };
+    expect(await again.keeper.check(true)).toMatchObject({ kind: "gated", state: "superseded" });
+  });
+
+  it("a packet a source refused is never sent to that source again", async () => {
+    const network = new FakeTurnNetwork();
+    const { keeper, store } = await started(0, network, 40);
+    expect((await keeper.check(true)).kind).toBe("start");
+    const stored = fromBase64Url(store.record!.turnPacket!);
+    // The sources lose the record; the relay refuses every put from now on.
+    network.seed(null);
+    network.source("https://relay.test").refuses = true;
+    network.calls.length = 0;
+    const read = (await keeper.read())!;
+    expect((await keeper.putStored(read.conditions))!.puts.map((p) => p.outcome)).toEqual(["stored", "refused"]);
+    network.source("dht").held = null;
+    const again = (await keeper.putStored((await keeper.read())!.conditions))!;
+    expect(again.puts.map((p) => p.source)).toEqual(["dht"]);
+    expect(network.puts().filter((p) => p.source === "https://relay.test").length).toBe(1);
+    expect(network.source("dht").held).toEqual(stored);
   });
 
   /** All orders of `items`. */
@@ -790,10 +919,10 @@ describe("raising the turn where relays ignore the condition", () => {
 
   /**
    * Devices that all read the same record (turn 40, device 0 active), then each put turn 41 in `order`, then each
-   * make the read that decides. A taker (it holds device 0's release) and devices that force the turn. Returns the
-   * slots that ended active.
+   * make its settle read. A taker (it holds device 0's release) and devices that force the turn. Returns the slots
+   * that ended active, and the state every device ended in.
    */
-  async function race(slotsRacing: number[], takerSlot: number | null, order: number[], sources: { name: string; kind: "dht" | "relay" }[], dhtFirst: boolean): Promise<number[]> {
+  async function race(slotsRacing: number[], takerSlot: number | null, order: number[], sources: { name: string; kind: "dht" | "relay" }[], dhtFirst: boolean): Promise<{ active: number[]; states: string[] }> {
     const network = new FakeTurnNetwork(sources);
     network.dhtFirst = dhtFirst;
     const old = await packet(40, 3, 0, { held: [0, 1, 2, 3] });
@@ -801,7 +930,7 @@ describe("raising the turn where relays ignore the condition", () => {
     const allRead = deferred(), allPut = deferred();
     const read = new Set<number>(), put = new Set<number>();
     const turns = new Map(order.map((slot) => [slot, deferred()]));
-    // A wait ends after every device's put: each put within T of its own read, each read before the first put.
+    // A wait ends after every device's put: each put is sent within P of its own read, and each read came before the first put.
     clock.onSleep = () => allPut.promise;
     const view = (slot: number): TurnNetwork => ({
       turnRead: async (key) => {
@@ -817,22 +946,21 @@ describe("raising the turn where relays ignore the condition", () => {
         if (before !== undefined) await turns.get(before)!.promise;
         const answers = await network.turnPut(key, payload, conditions);
         turns.get(slot)!.resolve();
-        if (put.size === slotsRacing.length && order.at(-1) === slot) allPut.resolve();
+        if (order.at(-1) === slot) allPut.resolve();
         return answers;
       },
     });
     const set = deviceSet([0, 1, 2, 3]);
-    const active = await Promise.all(slotsRacing.map(async (slot) => {
-      if (slot === takerSlot) {
-        const made = device(slot, view(slot), { ...recordOf(slot, "standby", 40, [0, 1, 2, 3], { deviceSet: set }), state: "taking" }, { undo: async () => {} });
-        const first = (await made.keeper.read())!;
-        await made.keeper.write(first.conditions, { turn: 41, release: await releaseTo(41, 0, slot) });
-        return (await made.keeper.check(true)).kind === "start";
-      }
-      const made = device(slot, view(slot), recordOf(slot, "standby", 40, [0, 1, 2, 3], { deviceSet: set, turnPacket: toBase64Url(old), rev: 3, activeSlot: 0 }));
-      return (await made.keeper.raise({ turn: 41 }))!.mine;
+    const made = slotsRacing.map((slot) => (slot === takerSlot
+      ? device(slot, view(slot), { ...recordOf(slot, "standby", 40, [0, 1, 2, 3], { deviceSet: set }), state: "taking" }, { undo: async () => {} })
+      : device(slot, view(slot), recordOf(slot, "standby", 40, [0, 1, 2, 3], { deviceSet: set, turnPacket: toBase64Url(old), rev: 3, activeSlot: 0 }))));
+    const outcomes = await Promise.all(slotsRacing.map(async (slot, i) => {
+      if (slot !== takerSlot) return made[i].keeper.raise({ turn: 41 });
+      const first = (await made[i].keeper.read())!;
+      await made[i].keeper.write(first.conditions, { turn: 41, release: await releaseTo(41, 0, slot) });
+      return made[i].keeper.check(true);
     }));
-    return slotsRacing.filter((_, i) => active[i]);
+    return { active: slotsRacing.filter((_, i) => outcomes[i]!.kind === "start"), states: made.map((device) => device.store.record!.state) };
   }
 
   const RELAY = [{ name: "https://relay.test", kind: "relay" as const }];
@@ -850,23 +978,26 @@ describe("raising the turn where relays ignore the condition", () => {
 
   it.each(cases)("%s, relays only, in every put order: exactly one is active, the one with the highest sequence", async (_name, racing, taker) => {
     for (const sources of [RELAY, TWO_RELAYS]) for (const order of orders(racing)) {
-      const active = await race(racing, taker, order, sources, false);
-      expect(active, `put order ${order.join(", ")} on ${sources.length} relay(s)`).toEqual([Math.max(...racing)]);
+      const { active, states } = await race(racing, taker, order, sources, false);
+      const winner = Math.max(...racing);
+      expect(active, `put order ${order.join(", ")} on ${sources.length} relay(s)`).toEqual([winner]);
+      // And every other device is back on standby: none is left taking.
+      expect(states, `put order ${order.join(", ")}`).toEqual(racing.map((slot) => (slot === winner ? "active" : "standby")));
     }
   });
 
   it.each(cases)("%s, the DHT and a relay, in every put order: exactly one is active, the one whose put the DHT took", async (_name, racing, taker) => {
     for (const order of orders(racing)) {
-      const active = await race(racing, taker, order, MIXED, true);
+      const { active, states } = await race(racing, taker, order, MIXED, true);
       expect(active, `put order ${order.join(", ")}`).toEqual([order[0]]);
+      expect(states, `put order ${order.join(", ")}`).toEqual(racing.map((slot) => (slot === order[0] ? "active" : "standby")));
     }
   });
 
-  it("why the Desktop puts to the DHT first: a put the DHT refused that still landed on the relay can leave nobody active", async () => {
-    // The taker (slot 2) puts second: the DHT refuses it, and with every source put to at once the relay takes it.
-    // The device that forced the turn reads the taker's higher record on the relay and stops; the taker reads the
-    // forcing device's record on the DHT and yields.
-    expect(await race([1, 2], 2, [1, 2], MIXED, false)).toEqual([]);
-    expect(await race([1, 2], 2, [1, 2], MIXED, true)).toEqual([1]);
+  it("why the Desktop puts to the DHT first: a put the DHT refused that still landed on the relay leaves nobody active", async () => {
+    // The device in slot 2 puts second: the DHT refuses it, and with every source put to at once the relay takes it.
+    // Each then reads the other's record at its turn on one of the sources, and both step back.
+    expect((await race([1, 2], 2, [1, 2], MIXED, false)).active).toEqual([]);
+    expect((await race([1, 2], 2, [1, 2], MIXED, true)).active).toEqual([1]);
   });
 });
