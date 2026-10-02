@@ -3,13 +3,27 @@
     "card": {
       "botLabel": "من:",
       "chatLabel": "المحادثة:",
+      "checks": {
+        "failing": "الفحوص فاشلة",
+        "passing": "الفحوص ناجحة",
+        "pending": "الفحوص جارية"
+      },
       "details": "التفاصيل",
       "filesLabel": "الملفات:",
       "from": "{{bot}} في {{chat}}",
       "in": "في {{chat}}",
       "openPr": "فتح على {{host}}",
+      "parts": "اكتمل {{done}} من {{total}}",
+      "prLabel": "طلب الدمج:",
+      "prState": {
+        "closed": "مغلق",
+        "draft": "مسودة",
+        "merged": "مدموج",
+        "open": "مفتوح"
+      },
       "statusLabel": "الحالة:",
       "steps": "{{done}} من {{total}}",
+      "tagsLabel": "الوسوم:",
       "updatedLabel": "آخر تحديث:"
     },
     "column": {
@@ -17,6 +31,7 @@
       "closed": "متوقفة",
       "done": "مكتملة",
       "queued": "في الانتظار",
+      "review": "المراجعة",
       "running": "قيد التنفيذ"
     },
     "columns": "الأعمدة",
@@ -36,6 +51,8 @@
     "none": "لا شيء",
     "showMore": "عرض المزيد ({{count}})",
     "showOlder": "عرض الأقدم ({{count}})",
+    "tagFilter": "عرض {{tag}} فقط",
+    "tags": "الوسوم",
     "tasksMany": "{{count}} مهام",
     "tasksOne": "مهمة واحدة",
     "title": "المهام",

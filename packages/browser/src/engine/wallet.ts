@@ -557,6 +557,14 @@ export class CashuWallet {
     this.events.onChange();
   }
 
+  /**
+   * Whether the ecash of a reviewed payment came back to this wallet (Take it back, or a refusal). Its proofs then read
+   * SPENT at the mint because this wallet redeemed them, not the contact.
+   */
+  async reviewedCashuTakenBack(id:string):Promise<boolean> {
+    return (await wrap<StoredPayment|undefined>((await store(STORES.payments,"readonly")).get(id)))?.state==="reclaimed";
+  }
+
   async reviewedCashuSpent(prepared:CashuPrepared):Promise<boolean> {
     const outputs=(prepared.swap.sendOutputs??[]).map(OutputData.deserialize);
     const states=await (await this.wallet(prepared.mint)).checkProofsStates(outputs.map(o=>({secret:new TextDecoder().decode(o.secret),id:o.blindedMessage.id})));
@@ -737,6 +745,15 @@ export class CashuWallet {
       return "paid";
     }
     return this.settleMelt(melt).catch((): MeltOutcome => "pending");
+  }
+
+  /**
+   * Whether a Lightning payment of this invoice is written down as in flight. A melt is written before the mint sees
+   * its proofs, and `pollMelts` settles and reports it: an invoice with none never reached the mint's melt, or is done.
+   */
+  async meltInFlight(invoice: string): Promise<boolean> {
+    const melts = await wrap<PendingMelt[]>((await store(STORES.melts, "readonly")).getAll());
+    return melts.some((m) => m.request === invoice);
   }
 
   /** Lightning payments left pending, asked about again until the mint settles each one. */

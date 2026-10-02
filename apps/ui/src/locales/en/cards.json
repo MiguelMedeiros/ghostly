@@ -3,13 +3,27 @@
     "card": {
       "botLabel": "From:",
       "chatLabel": "Chat:",
+      "checks": {
+        "failing": "Checks failing",
+        "passing": "Checks passing",
+        "pending": "Checks pending"
+      },
       "details": "Details",
       "filesLabel": "Files:",
       "from": "{{bot}} in {{chat}}",
       "in": "in {{chat}}",
       "openPr": "Open on {{host}}",
+      "parts": "{{done}} of {{total}} done",
+      "prLabel": "Pull request:",
+      "prState": {
+        "closed": "Closed",
+        "draft": "Draft",
+        "merged": "Merged",
+        "open": "Open"
+      },
       "statusLabel": "Status:",
       "steps": "{{done}} of {{total}}",
+      "tagsLabel": "Tags:",
       "updatedLabel": "Updated:"
     },
     "column": {
@@ -17,6 +31,7 @@
       "closed": "Stopped",
       "done": "Done",
       "queued": "Queued",
+      "review": "Review",
       "running": "Running"
     },
     "columns": "Columns",
@@ -36,6 +51,8 @@
     "none": "None",
     "showMore": "Show more ({{count}})",
     "showOlder": "Show older ({{count}})",
+    "tagFilter": "Show only {{tag}}",
+    "tags": "Tags",
     "tasksMany": "{{count}} tasks",
     "tasksOne": "1 task",
     "title": "Tasks",

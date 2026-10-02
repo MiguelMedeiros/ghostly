@@ -3,13 +3,27 @@
     "card": {
       "botLabel": "De:",
       "chatLabel": "Conversa:",
+      "checks": {
+        "failing": "Verificações falhando",
+        "passing": "Verificações passando",
+        "pending": "Verificações pendentes"
+      },
       "details": "Detalhes",
       "filesLabel": "Arquivos:",
       "from": "{{bot}} em {{chat}}",
       "in": "em {{chat}}",
       "openPr": "Abrir em {{host}}",
+      "parts": "{{done}} de {{total}} concluídas",
+      "prLabel": "Pull request:",
+      "prState": {
+        "closed": "Fechado",
+        "draft": "Rascunho",
+        "merged": "Mesclado",
+        "open": "Aberto"
+      },
       "statusLabel": "Estado:",
       "steps": "{{done}} de {{total}}",
+      "tagsLabel": "Etiquetas:",
       "updatedLabel": "Atualizado:"
     },
     "column": {
@@ -17,6 +31,7 @@
       "closed": "Paradas",
       "done": "Concluídas",
       "queued": "Na fila",
+      "review": "Revisão",
       "running": "Em execução"
     },
     "columns": "Colunas",
@@ -36,6 +51,8 @@
     "none": "Nenhuma",
     "showMore": "Mostrar mais ({{count}})",
     "showOlder": "Mostrar antigas ({{count}})",
+    "tagFilter": "Mostrar só {{tag}}",
+    "tags": "Etiquetas",
     "tasksMany": "{{count}} tarefas",
     "tasksOne": "1 tarefa",
     "title": "Tarefas",

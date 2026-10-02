@@ -62,6 +62,7 @@
     "notYetConfirmed": "Pas encore confirmé. Aucun second paiement n’a été envoyé.",
     "outcomeUnknown": "Résultat inconnu. Vérifiez le paiement existant ; n’en envoyez pas un autre.",
     "paymentExpired": "La demande de paiement a expiré ou son échéance n’est pas valide",
+    "paymentTakenBack": "Ce paiement a été repris. Les sats sont dans votre portefeuille.",
     "realMintOnTestnet": "Ce mint garde de vrais sats : ajoutez-le à un portefeuille Cashu Mainnet",
     "reconnectBeforeApprove": "Reconnectez la conversation avant d’approuver. Votre vérification a été enregistrée.",
     "requestHasPayment": "Cette demande a déjà un paiement. Vérifiez-le avant de réessayer.",

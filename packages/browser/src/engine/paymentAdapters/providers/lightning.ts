@@ -82,6 +82,17 @@ export interface LightningProvider {
    */
   payInvoice(invoice: string, maxFee: number, note?: string): Promise<LightningPayResult>;
   paymentStatus(payment: LightningPaymentRef): Promise<LightningPaymentStatus>;
+  /**
+   * The handle `payInvoice` will give this invoice's payment, when the source knows it before paying. It is journaled
+   * before the spend, so a payment cut off before its answer can still be asked about.
+   */
+  paymentRef?(invoice: string): string | undefined;
+  /**
+   * For a source that settles its own payments (`settlesItself`): what became of one the app was cut off from before
+   * its answer was written down. `paid` or `failed` only when the source can prove it; `pending` while it will report
+   * the outcome itself; `unknown` when it cannot tell.
+   */
+  interruptedPayment?(payment: LightningPaymentRef): Promise<"paid" | "failed" | "pending" | "unknown">;
   /** Ends connections and timers. The provider is not used again. */
   close(): Promise<void>;
 }

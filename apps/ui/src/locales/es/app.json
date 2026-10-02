@@ -1,4 +1,26 @@
 {
   "name": "Ghostly",
+  "profileUnavailable": {
+    "detail": "Lo que dijo el sistema:",
+    "info": "No se cambió ni se borró nada. Mientras los datos estén cerrados, Ghostly no se conecta con nadie ni envía nada por este perfil. Esta app es Ghostly {{app}} y lee datos de perfil hasta la versión {{supported}}.",
+    "newerHint": "Actualiza la app para abrirlo.",
+    "newerInfo": "Los datos de este perfil están en la versión {{stored}}. Esta app, Ghostly {{app}}, lee hasta la versión {{supported}}. Un Ghostly más nuevo abrió el perfil y avanzó sus datos, y uno más antiguo no puede leerlos con seguridad. Por eso no se abre ni se envía nada, y no se cambió ni se borró nada: tus chats, claves y monederos siguen ahí. Actualiza esta app o abre el perfil con la más nueva.",
+    "newerTitle": "Este perfil se usó por última vez con una versión más nueva de Ghostly.",
+    "noUpdate": "Todavía no hay una versión más nueva. Abre este perfil con la app que lo usó por última vez.",
+    "reason": {
+      "blocked": "Otra ventana o pestaña de Ghostly aún lo tiene abierto con una versión más antigua.",
+      "denied": "Este navegador no da almacenamiento a Ghostly aquí: una ventana privada, o el almacenamiento bloqueado para este sitio.",
+      "failed": "Los datos no se abrieron, y el sistema no dio un motivo claro.",
+      "full": "Este dispositivo no tiene espacio de almacenamiento."
+    },
+    "title": "Ghostly no pudo abrir los datos de este perfil.",
+    "try": {
+      "blocked": "Cierra las otras ventanas y pestañas de Ghostly y vuelve a intentarlo.",
+      "denied": "Usa una ventana normal o permite el almacenamiento para este sitio y vuelve a intentarlo.",
+      "failed": "Reinicia la app o el dispositivo y vuelve a intentarlo.",
+      "full": "Libera espacio y vuelve a intentarlo."
+    },
+    "tryAgain": "Reintentar"
+  },
   "tagline": "Mensajería efímera y cifrada sobre DHT"
 }

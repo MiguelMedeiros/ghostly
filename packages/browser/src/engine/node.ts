@@ -35,12 +35,12 @@ import { readPubkyProof } from '../proofs/storage';
 import { lookupPublicProfile, currentProfileProof, PROFILE_RETRY, PROFILE_TTL, type ProfileChoice } from '../profiles/public';
 import { BUTTON_ID, BUTTONS_CAPABILITY, EDIT_CAPABILITY, MAX_EDITS_PER_MESSAGE, STATUS_CARD_LIMITS, checkStatusCard, forwardedAgain, readForwarded, statusCardText, withRequestOptions, type StatusCard, type WireEdit } from "@ghostly/core";
 import { FORWARD_MESSAGES, FORWARD_TARGETS, copyForForward, forwardKind, type ForwardResult } from "./forwards";
-import { TEST_USDT_FAUCET_AMOUNT, arrivalKey, claimedTime, heardTime, receivedTimestamp, shownTime, typingActivity, type TypingActivity, type TypingKind, WALLET_NETWORKS, walletNetworkOf, type GroupMention, type PaymentNetworks, type PaymentReview, type PaymentTarget, type WalletNetwork } from "@ghostly/core";
+import { TEST_USDT_FAUCET_AMOUNT, arrivalKey, claimedTime, heardTime, receivedTimestamp, typingActivity, type TypingActivity, type TypingKind, WALLET_NETWORKS, walletNetworkOf, type GroupMention, type PaymentNetworks, type PaymentReview, type PaymentTarget, type WalletNetwork } from "@ghostly/core";
 import { ModeChanged, networkLabel, WrongNetworkError } from "./paymentAdapters/modeGate";
 import { assertConfirmedReal, createTiming, WALLET_NAMES, createFailure, crossNetwork, paymentNetwork, paymentNetworksOf, walletInstances } from "./paymentAdapters/walletInstances";
 import { migrateWalletNetworks } from "./paymentAdapters/walletNetworks";
 import { perNetwork, type PerNetwork } from "./paymentAdapters/perNetwork";
-import { COMMUNITY_EDIT_FRAME, INVITE_TAKEN, LIVENESS_MISSED_PINGS, LIVENESS_PING_MS, MAX_GROUP_NAME_LENGTH, engineError, groupName, parseCommunityEdit, traceLink } from "@ghostly/core";
+import { COMMUNITY_EDIT_FRAME, INVITE_TAKEN, LIVENESS_MISSED_PINGS, LIVENESS_PING_MS, MAX_GROUP_NAME_LENGTH, engineError, engineText, groupName, parseCommunityEdit, traceLink } from "@ghostly/core";
 import { ClockWatch, DirectPathWatch } from "@ghostly/core";
 import { GROUP_WAKE_FRAME, GROUP_WAKE_RECEIVE_LIMIT, GroupWakeLimiter, RateWindow, WAKE_CALL_INTERVAL_MS, WakeLimiter, groupWakeFrame, groupWakes, parseGroupWakeFrame, checkPushEndpoint, newWakeToken, relayRequest, vapidKeysMatch, wakeRequest, type PushRequest, type WakeKind, type WakeTarget } from "@ghostly/core";
 import { COMMUNITY_REACTION_FRAME, GROUP_REACTION_FRAME, REACTION_LIMITS, ReactionWindow, queueReaction, readReaction, validReactionNumber, wireReaction, type WireReaction } from "@ghostly/core";
@@ -175,7 +175,7 @@ import type { HoldStore } from "../backup/storage";
 import { PaymentDesk } from "./payments";
 import { CashuWallet, TEST_COINS_NOTE, normalizeMintUrl } from "./wallet";
 import { identityCues, knockCue, paymentCue, transportCue, transportMark, type Cue } from "./cues";
-import { messageAttention } from "./attention";
+import { CLOCK_SAMPLES, messageAttention, writtenAt } from "./attention";
 import { DEFAULT_HYPERDHT_RELAY, hyperdhtRelayProblem } from "../shared/hyperdhtRelay";
 import { pushRelayProblem } from "../shared/pushRelay";
 import { traceJoin } from "./joinTrace";
@@ -502,9 +502,19 @@ export class GhostlyNode implements EngineImplementation {
   private readonly newestAt = new Map<string, number>();
   /** The last place given in each chat while this engine runs (`arrivalKey`). */
   private readonly placedAt = new Map<string, number>();
+  /**
+   * Each 1:1 chat's contact: how far the time its latest live messages said was from when they came (`CLOCK_SAMPLES`
+   * of them). What tells a contact's clock that is behind from a message that is late (`writtenAt`).
+   */
+  private readonly clockLeads = new Map<string, number[]>();
+  /** A contact's row came on the live session of a 1:1 chat: what it says of the contact's clock is kept. */
+  private clockSample(message: StoredMessage): void {
+    if (message.sender !== "peer" || message.sentAt === undefined || message.event || message.via !== "datalink" || message.linkId.startsWith("group:")) return;
+    this.clockLeads.set(message.linkId, [...(this.clockLeads.get(message.linkId) ?? []), message.sentAt - message.timestamp].slice(-CLOCK_SAMPLES));
+  }
   /** Only a new message, or mine going out, says anything (engine/attention.ts): judged by when it was written. */
   private messageFeedback(type: "message" | "sent", message: StoredMessage, newest = this.newestAt.get(message.linkId)) {
-    const attention = messageAttention(type, { ...message, timestamp: shownTime(message) }, { startedAt: this.feedbackStartedAt, newest, now: Date.now() });
+    const attention = messageAttention(type, { ...message, timestamp: writtenAt(message, this.clockLeads.get(message.linkId)) }, { startedAt: this.feedbackStartedAt, newest, now: Date.now() });
     if (attention) this.feedback(attention.type, message.linkId + ":" + message.id, message.linkId, attention.mention, attention.cue);
   }
   /**
@@ -694,7 +704,7 @@ export class GhostlyNode implements EngineImplementation {
     getLink: (linkId) => this.paymentLink(linkId),
     groupOf: (linkId) => { const stored = this.links.get(linkId)?.stored; return stored?.group && !stored.groupEntry ? stored.group : parsePayLink(linkId)?.groupId; },
     // A community has no edges to its members: one frame the whole group carries.
-    groupLinks: (groupId) => this.groups.isCommunityGroup(groupId) ? [groupLinkId(groupId)] : [...this.groupEdges(groupId).values()],
+    groupLinks: (groupId) => this.groups.isCommunityGroup(groupId) ? [groupLinkId(groupId)] : [...this.memberEdges(groupId).values()],
     storeMessage: (message) => this.storeMessage(message),
     heldPaymentMethods: (linkId): PaymentMethodName[] | null => { const live = this.links.get(linkId); return live && this.holdingFor(live) ? this.hold.heldPaymentMethods(linkId) : null; },
     // What the contact allowed at the last session; before any, Cashu and Lightning, as a chat that negotiated nothing.
@@ -955,11 +965,15 @@ export class GhostlyNode implements EngineImplementation {
   /** Private groups (WISP 900): sessions, admission on contact chats, and the pairwise edges that carry them. */
   private readonly groups = new Groups({
     sendOnLink: (linkId, frame) => {
-      const link = this.links.get(linkId)?.link;
-      if (!link) throw new Error("You are offline");
-      link.sendGroupFrame(frame);
+      const live = this.links.get(linkId);
+      if (!live?.link) throw new Error("You are offline");
+      // An edge to someone out of the roster carries the commits up to the one that took them out, and nothing else.
+      const { group, groupPeer, groupEntry } = live.stored;
+      if (group && groupPeer && !groupEntry && !this.groups.edgeAllows(group, groupPeer, frame)) return;
+      live.link.sendGroupFrame(frame);
     },
     linkReady: (linkId, version = 1) => !!this.links.get(linkId)?.link?.supportsGroupVersion(version),
+    linkOpen: linkId => !!this.links.get(linkId)?.link?.isDataLinkOpen,
     myNick: () => this.sharedNick,
     // An app with no WebRTC (the Linux Desktop) reaches members over native listeners, a few of them
     // (`GROUP_NATIVE_SLOTS`): it does not offer to be a private group's hub, which keeps an edge with everyone.
@@ -1065,7 +1079,7 @@ export class GhostlyNode implements EngineImplementation {
   }
 
   /** The link payments with `linkId` go over: a chat's or an edge's, or a community member's through the group. */
-  private paymentLink(linkId: string) { return this.links.get(linkId)?.link ?? this.communityPay.link(linkId); }
+  private paymentLink(linkId: string) { return this.outsideEdge(linkId) ? null : this.links.get(linkId)?.link ?? this.communityPay.link(linkId); }
 
   /**
    * Payments in groups (WISP 9xx § Payments): the money goes over the edge to one member through the desk, like a
@@ -1079,7 +1093,7 @@ export class GhostlyNode implements EngineImplementation {
       return stored?.group && stored.groupPeer && !stored.groupEntry ? { groupId: stored.group, member: stored.groupPeer } : undefined;
     },
     // In a community, notes go to everyone at once, through the group.
-    edges: groupId => this.groups.isCommunityGroup(groupId) ? new Map([["*", groupLinkId(groupId)]]) : this.groupEdges(groupId),
+    edges: groupId => this.groups.isCommunityGroup(groupId) ? new Map([["*", groupLinkId(groupId)]]) : this.memberEdges(groupId),
     membership: groupId => this.membership(groupId),
     send: (linkId, frame) => {
       const pay = parsePayLink(linkId);
@@ -1099,11 +1113,46 @@ export class GhostlyNode implements EngineImplementation {
     },
   });
 
-  /** Member key → edge link id, for the edges of a group that exist (open or not). */
+  /**
+   * Member key → edge link id, for the edges of a group that exist (open or not), whoever is at the other end: an edge
+   * outlives its member's place in the roster for a moment, or for as long as it is kept to tell it (`StoredGroup.farewells`).
+   * For the group engine alone, which opens and closes them. Whatever is said to the group goes over `memberEdges`.
+   */
   private groupEdges(groupId: string): Map<string, string> {
     const edges = new Map<string, string>();
     for (const live of this.links.values()) if (live.stored.group === groupId && live.stored.groupPeer && !live.stored.groupEntry) edges.set(live.stored.groupPeer, live.stored.id);
     return edges;
+  }
+
+  /** The edges of a private group to its members as the roster has them now: the only ones the group's traffic goes over. */
+  private memberEdges(groupId: string): Map<string, string> {
+    const edges = this.groupEdges(groupId);
+    for (const key of [...edges.keys()]) if (!this.groups.inRoster(groupId, key)) edges.delete(key);
+    return edges;
+  }
+
+  /** An edge of a private group to someone its roster no longer has: it says no name and no picture of mine. */
+  private quietEdge(stored: StoredLink | undefined): boolean {
+    return !!stored && this.meshEdge(stored) && this.groups.outsider(stored.group!, stored.groupPeer!);
+  }
+  /** Edges that said no name while their other end was out of the roster: the name is said again once it is back in. */
+  private readonly quietEdges = new Set<string>();
+  /** A group's roster changed: an edge kept to someone now out of it (closed, waiting for them) stops carrying my name. */
+  private quietOutsideEdges(groupId: string): void {
+    for (const live of this.links.values()) {
+      if (live.stored.group !== groupId || !live.link || !this.meshEdge(live.stored)) continue;
+      const id = live.stored.id;
+      if (this.quietEdge(live.stored)) {
+        // One still open closes in a moment (its last commit is on its way): nothing more is said on it, not even this.
+        if (!this.quietEdges.has(id) && !live.link.isDataLinkOpen) { this.quietEdges.add(id); live.link.setNick(undefined); }
+      } else if (this.quietEdges.delete(id)) live.link.setNick(this.sharedNick);
+    }
+  }
+
+  /** An edge of a private group whose other end is not in its roster: nothing of the group goes over it but what the group engine says. */
+  private outsideEdge(linkId: string): boolean {
+    const stored = this.links.get(linkId)?.stored;
+    return !!stored && this.meshEdge(stored) && !this.groups.inRoster(stored.group!, stored.groupPeer!);
   }
 
   constructor(
@@ -1304,6 +1353,8 @@ export class GhostlyNode implements EngineImplementation {
       const files = linkFilesFrom(stored.id, storedFiles, messages);
       this.links.set(stored.id, newLiveLink(stored, messages[messages.length - 1]?.timestamp ?? 0, files));
       history.set(stored.id, messages);
+      // What the contact's clock was when the chat was last live: its first message of this run is read by it.
+      for (const message of messages.slice(-4 * CLOCK_SAMPLES)) this.clockSample(message);
       const note = latestReaction(messages);
       if (note) this.reactionNotes.set(stored.id, note);
       if (stored.profile && !stored.group) await this.outboxFor(stored.id).recover();
@@ -1850,6 +1901,7 @@ export class GhostlyNode implements EngineImplementation {
    * (a group on hubs dropped it) and is no longer in the group, or a group I left or forgot, replaces it.
    */
   private groupMembersChanged(groupId: string): void {
+    this.quietOutsideEdges(groupId);
     const holders = this.settings.wakeHeldBy?.[groupId];
     if (!holders?.length) return;
     const members = this.membership(groupId)?.members;
@@ -1902,7 +1954,7 @@ export class GhostlyNode implements EngineImplementation {
   private async shareGroupWake(linkId: string): Promise<void> {
     const live = this.links.get(linkId);
     const own = this.settings.wake;
-    if (!live?.link?.groupsSupport || !this.meshEdge(live.stored)) return;
+    if (!live?.link?.groupsSupport || !this.meshEdge(live.stored) || this.outsideEdge(linkId)) return;
     if (this.settings.wakeMutedGroups?.includes(live.stored.group!)) { this.sendGroupWake(live, null); return; }
     if (!own) return;
     let token = live.stored.wakeToken;
@@ -1918,7 +1970,7 @@ export class GhostlyNode implements EngineImplementation {
   /** A `group-wake` frame on an edge: the member it is pinned to shares how to wake it, or says to forget it. */
   private receiveGroupWake(linkId: string, frame: Record<string, unknown>): void {
     const live = this.links.get(linkId);
-    if (!live || !this.meshEdge(live.stored)) return;
+    if (!live || !this.meshEdge(live.stored) || this.outsideEdge(linkId)) return;
     let window = this.groupWakeReceived.get(linkId);
     if (!window) this.groupWakeReceived.set(linkId, window = new RateWindow(GROUP_WAKE_RECEIVE_LIMIT, 60_000));
     if (!window.take()) return;
@@ -1935,7 +1987,7 @@ export class GhostlyNode implements EngineImplementation {
    */
   private wakeMentioned(groupId: string, text: string, mentions: readonly GroupMention[]): void {
     if (!mentions.length || !this.settings.online || this.groups.isCommunityGroup(groupId)) return;
-    const edges = this.groupEdges(groupId);
+    const edges = this.memberEdges(groupId);
     const wakes = groupWakes({
       group: groupId, mentions, text, limiter: this.groupWakeLimiter,
       target: member => { const id = edges.get(member); return id ? this.links.get(id)?.stored.peerWake && id : undefined; },
@@ -3250,12 +3302,13 @@ export class GhostlyNode implements EngineImplementation {
     // Signed, so that hubs pass it on to members I have no edge with (older apps read the wire fields only).
     const frame = { t: GROUP_REACTION_FRAME, g: groupId, ...wireReaction(reaction), ...this.groups.signReaction(groupId, wireReaction(reaction)) };
     // An edge that is down hears it when it opens (`resendGroupReactions`).
-    for (const edge of this.groupEdges(groupId).values()) { try { this.links.get(edge)?.link?.sendGroupFrame(frame); } catch { /* said again when it opens */ } }
+    for (const edge of this.memberEdges(groupId).values()) { try { this.links.get(edge)?.link?.sendGroupFrame(frame); } catch { /* said again when it opens */ } }
     return { error: null };
   }
 
   /** An edge of a private group opened: the member hears my latest reactions again, in case it missed them. */
   private async resendGroupReactions(groupId: string, linkId: string): Promise<void> {
+    if (this.outsideEdge(linkId)) return;
     const mine = groupReactionsToResend(await db.getMessages(`group:${groupId}`), REACTION_LIMITS.pending);
     for (const reaction of mine) { try { this.links.get(linkId)?.link?.sendGroupFrame({ t: GROUP_REACTION_FRAME, g: groupId, ...reaction, ...this.groups.signReaction(groupId, reaction) }); } catch { return; } }
   }
@@ -3294,7 +3347,7 @@ export class GhostlyNode implements EngineImplementation {
       if (!frame) return { error: "You are not in this group" };
       await this.groups.setPin(groupId, { ...pin, k: frame.k, sig: frame.sig });
       // An edge that is down hears it when it opens (`edgeUp`).
-      for (const member of this.groupEdges(groupId).keys()) this.sendGroupPinFrame(groupId, member);
+      for (const member of this.memberEdges(groupId).keys()) this.sendGroupPinFrame(groupId, member);
       return { error: null };
     }
     const live = this.links.get(linkId);
@@ -3355,12 +3408,12 @@ export class GhostlyNode implements EngineImplementation {
     if (!mayPin(view.profile, member, view.members.find(m => m.role === "admin")?.key)) return;
     const kept = await this.pinCame(`group:${groupId}`, member === view.myKey ? "me" : member, pin);
     if (!await this.groups.setPin(groupId, { ...kept, ...(via && { k: via.frame.k, sig: via.frame.sig }) }) || !via) return;
-    for (const key of this.groupEdges(groupId).keys()) if (key !== via.from && key !== member) this.sendGroupPinFrame(groupId, key);
+    for (const key of this.memberEdges(groupId).keys()) if (key !== via.from && key !== member) this.sendGroupPinFrame(groupId, key);
   }
 
   /** A private group's pin, as its pinner signed it, over the edge to `member`; nothing when it is down (said when it opens). */
   private sendGroupPinFrame(groupId: string, member: string): void {
-    const pin = this.groups.pinOf(groupId), edge = this.groupEdges(groupId).get(member);
+    const pin = this.groups.pinOf(groupId), edge = this.memberEdges(groupId).get(member);
     // One whose number does not hold counts as none: no member takes it.
     if (!pin?.k || !pin.sig || !edge || this.groups.isCommunityGroup(groupId) || !pinNumberHolds(pin.n)) return;
     const frame: GroupPinFrame = { t: "group-pin", g: groupId, id: pin.id, n: pin.n, k: pin.k, sig: pin.sig };
@@ -4032,8 +4085,22 @@ export class GhostlyNode implements EngineImplementation {
     return this.desk.payRequest(params);
   }
 
-  reclaimPayment({ paymentId }: { paymentId: string }) {
-    return this.desk.reclaim(paymentId);
+  async reclaimPayment({ paymentId }: { paymentId: string }): Promise<void> {
+    await this.desk.reclaim(paymentId);
+    await this.reviewTakenBack(paymentId);
+  }
+
+  /**
+   * A reviewed payment whose ecash this wallet took back: its review ends failed, at once. The mint reads that ecash
+   * spent (this wallet redeemed it), which the review would otherwise take for the contact being paid, and a request
+   * whose review reads paid can never be reviewed again. Only when the ecash is back for certain (`reclaimed`).
+   */
+  private async reviewTakenBack(id: string): Promise<void> {
+    if (this.desk.payment(id)?.state !== "reclaimed") return;
+    const intent = await intentRepository.get(id);
+    if (!intent || intent.review.method !== "cashu" || !["submitted", "unknown", "settled"].includes(intent.review.state)) return;
+    await intentRepository.put({ ...intent, review: { ...intent.review, state: "failed", error: engineText("paymentTakenBack") } });
+    this.emitState();
   }
 
   // -- services ------------------------------------------------------------
@@ -4170,11 +4237,11 @@ export class GhostlyNode implements EngineImplementation {
     }
     // Contacts connected now are told at once, the others on their next session.
     if (settings.avatar !== undefined || settings.shareProfile !== undefined) {
-      for (const live of this.links.values()) live.link?.setAvatar(this.sharedAvatar);
+      for (const live of this.links.values()) if (!this.quietEdge(live.stored)) live.link?.setAvatar(this.sharedAvatar);
     }
     if (settings.nick !== undefined || settings.shareProfile !== undefined) {
       // GhostLink tells a paired peer directly; a legacy one still reads the record.
-      for (const live of this.links.values()) live.link?.setNick(this.sharedNick);
+      for (const live of this.links.values()) if (!this.quietEdge(live.stored)) live.link?.setNick(this.sharedNick);
       // A chat that is not live learns the name from the capability record.
       this.capsChanged();
     }
@@ -4310,6 +4377,7 @@ export class GhostlyNode implements EngineImplementation {
     this.links.delete(linkId);
     this.edgeRtcOff.delete(linkId);
     this.groupWakeReceived.delete(linkId);
+    this.quietEdges.delete(linkId);
     // Its native slot, if it held one, is free: a group link waiting for one tries at the next tick.
     this.groupNativeWaiting.delete(linkId);
     this.groupNativeRetryAt = 0;
@@ -4394,6 +4462,10 @@ export class GhostlyNode implements EngineImplementation {
     const { stored } = live;
     const group = stored.group!, peer = stored.groupPeer!, entry = !!stored.groupEntry;
     const role = stored.groupEntry ?? "edge";
+    // A private group's edge to someone out of its roster (a member removed while away, kept to tell it so:
+    // `StoredGroup.farewells`) carries the group's own frames only, which `Groups` answers: no payment, no note about
+    // one, no reaction said again, no way to wake this app.
+    const member = () => entry || this.groups.isCommunityGroup(group) || this.groups.inRoster(group, peer);
     let seen = false;
     // Native where one side has no WebRTC (WISP 9xx § Transports): an edge back after a restart resumes on a native transport both run.
     const native = this.keepsGroupNative(stored);
@@ -4422,7 +4494,7 @@ export class GhostlyNode implements EngineImplementation {
       pairing: { credentials: { seedB64: stored.participationSeed!, peerKey: peer, requireSignedSignals: true, verifiedPeerKey: peer },
         pinPeer: async key => { if (key !== peer) throw new Error("Not the member this edge belongs to"); }, trustOnFirstUse: false },
       transport: this.groupTransport,
-      nick: this.sharedNick,
+      nick: !entry && this.quietEdge(stored) ? undefined : this.sharedNick,
       // A private group's edges look at Pkarr more slowly as it grows: one edge per member (WISP 9xx § Cost per member).
       pollIntervals: entry || this.groups.isCommunityGroup(group) ? this.pollIntervals : meshEdgeIntervals(this.pollIntervals, () => this.groups.meshSize(group)),
       autoConnect: true,
@@ -4438,6 +4510,7 @@ export class GhostlyNode implements EngineImplementation {
       events: {
         // An entry session carries the admission frames a contact chat would; an edge, the group's own, and what the group sees of payments.
         onGroupFrame: frame => entry ? this.groups.handleContactFrame(linkId, frame)
+          : !member() ? this.groups.handleEdgeFrame(group, peer, frame)
           : (frame as { t?: unknown }).t === "group-pay" ? this.groupPayments.receive(group, peer, frame)
           : (frame as { t?: unknown }).t === GROUP_WAKE_FRAME ? this.receiveGroupWake(linkId, frame as Record<string, unknown>)
           : this.groups.handleEdgeFrame(group, peer, frame),
@@ -4446,6 +4519,7 @@ export class GhostlyNode implements EngineImplementation {
           if (!entry) this.noteEdgeLive(linkId, supported);
           if (supported) {
             if (entry) this.groups.entryReady(group, linkId, peer);
+            else if (!member()) this.groups.edgeReady(group, peer, linkId);
             else {
               this.groups.edgeReady(group, peer, linkId); void this.groupPayments.edgeReady(group, linkId).catch(() => {});
               if (!this.groups.isCommunityGroup(group)) void this.resendGroupReactions(group, linkId).catch(() => {});
@@ -4465,10 +4539,10 @@ export class GhostlyNode implements EngineImplementation {
           if (this.keepsGroupNative(live.stored)) void this.ensureNativeEndpoints(linkId);
         },
         ...(entry ? {} : {
-          onPaymentRequest: (request: PaymentRequest) => this.desk.onPaymentRequest(linkId, request),
-          onPaymentAsk: (ask: PaymentAsk) => this.desk.onPaymentAsk(linkId, ask),
-          onPayment: (payment: Payment) => this.desk.onPayment(linkId, payment),
-          onPaymentResult: (result: PaymentResult) => this.desk.onPaymentResult(linkId, result),
+          onPaymentRequest: (request: PaymentRequest) => member() ? this.desk.onPaymentRequest(linkId, request) : undefined,
+          onPaymentAsk: (ask: PaymentAsk) => member() ? this.desk.onPaymentAsk(linkId, ask) : undefined,
+          onPayment: (payment: Payment) => member() ? this.desk.onPayment(linkId, payment) : undefined,
+          onPaymentResult: (result: PaymentResult) => member() ? this.desk.onPaymentResult(linkId, result) : undefined,
           // The member says its name on every session over the edge, and an empty one when it removed it.
           onPeerNick: (nick: string | null) => this.groups.edgeNick(group, peer, nick ?? undefined),
         }),
@@ -4489,8 +4563,9 @@ export class GhostlyNode implements EngineImplementation {
           traceJoin(group, `link.${state}`, { role });
           // The last moment the member was reachable on it: when it opens, and when it stops being open.
           if (state === "open" || live.dataLink === "open") live.lastSyncAt = Date.now();
+          if (state === "open" && !entry) this.groups.edgeOpen(group, peer);
           // Payments with this member that did not get through go again, never twice.
-          if (state === "open" && !entry) void this.desk.replay(linkId).catch(() => {});
+          if (state === "open" && !entry && member()) void this.desk.replay(linkId).catch(() => {});
           live.dataLink = state;
           // The joiner closed its side on the welcome: the session goes now. Left to itself, it would dial
           // the joiner again (its packet still looks online), spending an offer and fast polls on nobody.
@@ -5312,8 +5387,9 @@ export class GhostlyNode implements EngineImplementation {
       message = { ...message, details: { ...withSend(message.details, { at, ...pathSnapshot(live, message.via), result: "sent" }), sentAt: at } };
     }
     if (!(await db.addMessage(message))) return false;
+    this.clockSample(message);
     const newest = this.newestAt.get(message.linkId);
-    if (!message.event) this.newestAt.set(message.linkId, Math.max(newest ?? 0, shownTime(message)));
+    if (!message.event) this.newestAt.set(message.linkId, Math.max(newest ?? 0, writtenAt(message, this.clockLeads.get(message.linkId))));
     if (message.sender === "peer") this.messageFeedback("message", message, newest);
     if (live) live.lastMessageAt = Math.max(live.lastMessageAt, message.timestamp);
     // An edit that came before its message is shown now, and confirmed.

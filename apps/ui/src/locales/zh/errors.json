@@ -62,6 +62,7 @@
     "notYetConfirmed": "尚未确认。没有发送第二笔付款。",
     "outcomeUnknown": "结果未知。请核对已有的付款，不要再发一笔。",
     "paymentExpired": "付款请求已过期，或有效期无效",
+    "paymentTakenBack": "这笔付款已取回。sats 已回到你的钱包。",
     "realMintOnTestnet": "这个铸币厂保管真实的 sats：请把它添加到 Mainnet Cashu 钱包",
     "reconnectBeforeApprove": "批准前请重新连接聊天。你的审核已保存。",
     "requestHasPayment": "此请求已有一笔付款。请先核对再重试。",

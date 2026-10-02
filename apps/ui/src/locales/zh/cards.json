@@ -3,13 +3,27 @@
     "card": {
       "botLabel": "来自：",
       "chatLabel": "聊天：",
+      "checks": {
+        "failing": "检查失败",
+        "passing": "检查通过",
+        "pending": "检查进行中"
+      },
       "details": "详情",
       "filesLabel": "文件：",
       "from": "{{bot}}，在 {{chat}}",
       "in": "在 {{chat}}",
       "openPr": "在 {{host}} 打开",
+      "parts": "已完成 {{done}} / {{total}}",
+      "prLabel": "拉取请求：",
+      "prState": {
+        "closed": "已关闭",
+        "draft": "草稿",
+        "merged": "已合并",
+        "open": "开放"
+      },
       "statusLabel": "状态：",
       "steps": "{{done}} / {{total}}",
+      "tagsLabel": "标签：",
       "updatedLabel": "更新："
     },
     "column": {
@@ -17,6 +31,7 @@
       "closed": "已停止",
       "done": "已完成",
       "queued": "排队中",
+      "review": "评审",
       "running": "进行中"
     },
     "columns": "列",
@@ -36,6 +51,8 @@
     "none": "无",
     "showMore": "显示更多 ({{count}})",
     "showOlder": "显示较早的 ({{count}})",
+    "tagFilter": "只显示 {{tag}}",
+    "tags": "标签",
     "tasksMany": "{{count}} 个任务",
     "tasksOne": "1 个任务",
     "title": "任务",

@@ -3,13 +3,27 @@
     "card": {
       "botLabel": "送信者:",
       "chatLabel": "チャット:",
+      "checks": {
+        "failing": "チェック失敗",
+        "passing": "チェック成功",
+        "pending": "チェック実行中"
+      },
       "details": "詳細",
       "filesLabel": "ファイル:",
       "from": "{{chat}} の {{bot}}",
       "in": "{{chat}} 内",
       "openPr": "{{host}} で開く",
+      "parts": "{{total}} 件中 {{done}} 件完了",
+      "prLabel": "プルリクエスト:",
+      "prState": {
+        "closed": "クローズ",
+        "draft": "下書き",
+        "merged": "マージ済み",
+        "open": "オープン"
+      },
       "statusLabel": "状態:",
       "steps": "{{total}} 件中 {{done}} 件",
+      "tagsLabel": "タグ:",
       "updatedLabel": "更新:"
     },
     "column": {
@@ -17,6 +31,7 @@
       "closed": "停止",
       "done": "完了",
       "queued": "待機中",
+      "review": "レビュー",
       "running": "実行中"
     },
     "columns": "列",
@@ -36,6 +51,8 @@
     "none": "なし",
     "showMore": "さらに表示 ({{count}})",
     "showOlder": "古いものを表示 ({{count}})",
+    "tagFilter": "{{tag}} のみ表示",
+    "tags": "タグ",
     "tasksMany": "タスク {{count}} 件",
     "tasksOne": "タスク 1 件",
     "title": "タスク",

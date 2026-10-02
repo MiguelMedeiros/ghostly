@@ -317,6 +317,43 @@ describe("a contact's offer from before the last session, after a restart", () =
 });
 
 /**
+ * The start of the last session is this device's clock, and an offer's time is the contact's. Held one against the
+ * other, an offer the contact made a moment ago read as "from before the last session" for as long as the contact's
+ * clock was behind the moment that session began: an app that restarted within two minutes of going live, with a
+ * contact whose clock ran two minutes behind, dropped every offer of the contact until its clock caught up. Seen with
+ * two web apps (2026-10-02): both reloaded 40 s after pairing, live again after 190 s; with clocks that agree, 3 s.
+ * When both apps are back at once both offer, and the one with the lower key keeps its offer: the other has to take
+ * it. An offer this run saw arrive (it was not in the contact's record at an earlier read) is new, whatever its time.
+ */
+describe("both apps restart soon after their session began, and the contact's clock is behind", () => {
+  beforeEach(() => { rtc.answerFailsAfterMs = 31_000; });
+  it.each([
+    { name: "two minutes", behindMs: 2 * 60_000 },
+    { name: "nine minutes", behindMs: 9 * 60_000 },
+  ])("$name behind: live again within seconds", async ({ behindMs }) => {
+    const relays = new MemoryRelays(["a.test", "b.test"]);
+    // The contact has the lower key: its offer is the one that stands when both offer.
+    const made = invitationWhere("inviter"), contact = made.inviter, me = made.joiner;
+    const peer = open("p", relays.transport("p"), contact, me);
+    const mine = open("c", relays.transport("c"), me, contact);
+    expect(await until(() => peer.isDataLinkOpen && mine.isDataLinkOpen, 120_000), "live at first").toBeLessThan(Infinity);
+    const liveSince = Date.now();
+    await run(20_000);
+    killRtc("c", 1_000); killRtc("p", 1_000);
+    await mine.stop(false); await peer.stop(false);
+    await run(2_500);
+    // Both back, this app a second before its contact. The contact's clock is behind this one: by this clock the
+    // session began that much after the time the contact's offers say, and by the contact's that much before mine.
+    const back = open("c", relays.transport("c2"), me, contact, { resume: true, resumeFloor: liveSince + behindMs });
+    await run(1_000);
+    const peerBack = open("p", relays.transport("p2"), contact, me, { resume: true, resumeFloor: liveSince - behindMs });
+    const liveMs = await until(() => back.isDataLinkOpen && peerBack.isDataLinkOpen, 15 * 60_000);
+    report({ scenario: "both-restart-soon-after-live-contact-behind", behindMs, liveMs });
+    expect(liveMs, "live within seconds of the contact's offer").toBeLessThanOrEqual(10_000);
+  }, 300_000);
+});
+
+/**
  * An offer is new to this app when a read of the contact's record did not have it and the next one does. That holds
  * only when the first of the two showed what the record held: a relay that has no packet of the contact's says nothing
  * of what another relay still holds, and a copy the transport kept says nothing of now. An offer made long ago must

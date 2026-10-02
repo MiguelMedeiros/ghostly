@@ -105,14 +105,14 @@ export const commands: Record<string, Command> = {
     params: ({ options }, a) => ({ chat: a.chat, routine: a.routine, card: routineFields(options), run: runOf(options.run), text: options.text, wait: options.wait, timeout: options.timeout }),
   },
   "task send": {
-    method: "task.send", usage: "task send <chat|group> --title <title> [--status s] [--progress n | --steps a/b] [--step \"...\"] [--item state:text]... [--pr-url url --pr-number n --additions n --deletions n --files n] [--branch b] [--link url]... [--id id] [--json json|-|file] [--wait none|sent|delivered] [--timeout s]",
+    method: "task.send", usage: "task send <chat|group> --title <title> [--status s] [--progress n | --steps a/b] [--step \"...\"] [--item state:text]... [--pr-url url --pr-number n --additions n --deletions n --files n --pr-state s --pr-checks c] [--branch b] [--tag label]... [--parent task] [--link url]... [--id id] [--json json|-|file] [--wait none|sent|delivered] [--timeout s]",
     summary: "Send a task card (a bot's work: status, progress, its PR) to a chat or group; prints its id and message",
     args: ["chat"],
     options: { id: { type: "string", description: "The task's id, kept across updates (default: made up)" }, ...taskOptions, ...groupWait, wait: wait.wait },
     params: ({ options }, { chat }) => ({ chat, card: needs(taskFields(options), [["title", "title"]], "task send <chat|group> --title <title>"), text: options.text, wait: options.wait, timeout: options.timeout }),
   },
   "task update": {
-    method: "task.update", usage: "task update <chat|group> <task> [--status s] [--progress n | --steps a/b] [--step \"...\"] [--item state:text]... [--pr-url ...] [--json json|-|file] [--wait none|confirmed|sent] [--timeout s]",
+    method: "task.update", usage: "task update <chat|group> <task> [--status s] [--progress n | --steps a/b] [--step \"...\"] [--item state:text]... [--pr-url ...] [--pr-state s] [--pr-checks c] [--tag label]... [--parent task] [--json json|-|file] [--wait none|confirmed|sent] [--timeout s]",
     summary: "Update a task card you sent: the fields given, merged over it (at most one update per 2.5 s; sooner ones merge)",
     args: ["chat", "task"],
     options: { ...taskOptions, wait: { type: "string", description: "none (default), confirmed (a chat's contact took it) or sent (a group's edge took it)" }, timeout: groupWait.timeout },

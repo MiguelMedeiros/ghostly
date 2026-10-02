@@ -237,7 +237,7 @@ async function probeClasses(factory: IDBFactory): Promise<RawClasses> {
 }
 
 function restore(classes: RawClasses, databases: Map<string, RawDatabase>, snapshot: Snapshot) {
-  if (snapshot?.format !== 1) throw new Error("This profile's store was written by a newer ghostly");
+  if (snapshot?.format !== 1) throw new Error("This profile was last used by a newer version of ghostly (its store has a format this version does not read). Update ghostly to open it.");
   for (const saved of snapshot.databases) {
     const db = new classes.Database(saved.name, saved.version);
     for (const s of saved.stores) {

@@ -169,6 +169,31 @@ describe("a backup written a piece at a time (envelope version 2)", () => {
     expect(isCancelled(await reader.next().catch((error: unknown) => error))).toBe(true);
   });
 
+  it("a frame its sink refused ends the backup: nothing more is written after the gap", async () => {
+    for (const passphrase of [PASS, null]) {
+      const sink = memorySink();
+      let refuse = false, asked = 0;
+      const writer = await BackupWriter.start({ write: async (bytes) => { asked += 1; if (refuse) { refuse = false; throw Object.assign(new Error("no space left"), { name: "QuotaExceededError" }); } await sink.write(bytes); } }, passphrase);
+      await writer.json("{}");
+      refuse = true;
+      await expect(writer.bytes(pattern(100))).rejects.toThrow("no space left");
+      // The sink would take the next ones: the writer does not hand them over, and says why again.
+      const before = asked;
+      await expect(writer.json("{}")).rejects.toThrow("no space left");
+      await expect(writer.finish()).rejects.toThrow("no space left");
+      expect(asked).toBe(before);
+    }
+  });
+
+  it("a piece of JSON a reader would refuse (over 64 MiB once compressed) is not written", async () => {
+    // Random bytes as base64 text, 96 MiB of it: compression takes a quarter off at best, which leaves 72 MiB.
+    const noise = crypto.getRandomValues.bind(crypto);
+    let text = "";
+    for (let i = 0; i < 96 * 16; i++) text += Buffer.from(noise(new Uint8Array(49_152))).toString("base64");
+    const writer = await BackupWriter.start(memorySink(), PASS);
+    await expect(writer.json(text)).rejects.toThrow("A record of this profile is too large for a backup");
+  }, 120_000);
+
   it("reads a large bundle in ranges: the source is never asked for all of it", async () => {
     const bundle = await make(PASS, async (writer) => { await writer.json("{}"); await writer.bytes(pattern(9 * MIB)); });
     const asks: number[] = [];

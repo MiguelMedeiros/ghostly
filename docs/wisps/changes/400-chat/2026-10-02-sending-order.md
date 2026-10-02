@@ -1,0 +1,1 @@
+Requirement 10 now also says what it asks of the sender: since a receiver places a message where it arrives, a sender should send a chat's messages in the order they were written, the ones that waited first. Ghostly's outbox did not always do so around a reconnect, and the contact kept the order they came in. Client policy, no change on the wire.
