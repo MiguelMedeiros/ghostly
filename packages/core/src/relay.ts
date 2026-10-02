@@ -786,15 +786,17 @@ export class RelayTransport implements PkarrTransport {
         // A relay answers a plain GET from its cache while the packet's TTL lasts (five minutes): a record another
         // device put through another relay, or on the DHT itself, would not be seen. `NetworkOnly` makes it look.
         let response = await this.turnRequest(relay, `${pubKeyZ32}?policy=NetworkOnly`, { method: "GET" }, read);
-        // A relay from before that query refuses it (400): asked plainly, once.
-        if (response.status === 400) response = await this.turnRequest(relay, pubKeyZ32, { method: "GET" }, read);
+        // A relay from before that query refuses it (400): asked plainly, once, and its answer may be minutes old.
+        const stale = response.status === 400;
+        if (stale) response = await this.turnRequest(relay, pubKeyZ32, { method: "GET" }, read);
+        const age = stale ? { stale: true as const } : {};
         if (response.status === 404) {
           // The DHT holds an item under the key that is no signed packet: the relay names its sequence.
           const invalid = response.headers.get(INVALID_PACKET_SEQ_HEADER);
-          return { source: relay, answered: true, payloads: [], ...(invalid && /^\d{1,19}$/.test(invalid) ? { sequences: [invalid] } : {}) };
+          return { source: relay, answered: true, payloads: [], ...age, ...(invalid && /^\d{1,19}$/.test(invalid) ? { sequences: [invalid] } : {}) };
         }
         if (!response.ok || !payload) return { source: relay, answered: false, payloads: [], detail: `HTTP ${response.status}` };
-        return { source: relay, answered: true, payloads: [payload] };
+        return { source: relay, answered: true, payloads: [payload], ...age };
       } catch (error) {
         return { source: relay, answered: false, payloads: [], detail: error instanceof Error ? error.message : String(error) };
       }

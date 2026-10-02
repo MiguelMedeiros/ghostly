@@ -137,6 +137,27 @@ export async function buildTurnVectors(): Promise<TurnVectors> {
   forged[70] ^= 1;
   add("a packet whose BEP44 signature does not verify", "foreign", forged);
 
+  // The DNS packet around the value: one TXT answer and nothing else.
+  const sealedTwo = sealTurnBody(two, keys.sealKey, nonceOf("dns"));
+  const txt = { name: `${TURN_LABEL}.${keys.identity.pubKeyZ32}`, value: sealedTwo, ttl: TURN_TTL };
+  const dns = encodeTxtPacket([txt]);
+  const signed = (packet: Uint8Array, sequence = twoSequence) => signRelayPayload(keys.identity, packet, sequence);
+  add("a second record beside the TXT one (a name server)", "label", signed(encodeTxtPacket([txt, { type: "NS", name: keys.identity.pubKeyZ32, host: "ns.example", ttl: 300 }])));
+  add("a second TXT record under another name", "label", signed(encodeTxtPacket([txt, { name: `_t.${keys.identity.pubKeyZ32}`, value: "x", ttl: 300 }])));
+  add("a byte after the TXT record", "label", signed(concatBytes(dns, Uint8Array.of(0))));
+  const withAdditional = concatBytes(dns, Uint8Array.of(0, 0, 16, 0, 1, 0, 0, 0, 0, 0, 1, 0));
+  withAdditional[11] = 1;
+  add("a record in the additional section", "label", signed(withAdditional));
+  add("a tombstone below the tombstone's sequence", "sequence", rawPacket(keys, tomb, BigInt(TOMBSTONE_SEQUENCE) - 1n, nonceOf("low tombstone")));
+  changed("a release from slot 4", "release-layout", handoff, 1, handoffSequence, (b) => { b[212] = 4; });
+  changed("a release to slot 5", "release-layout", handoff, 1, handoffSequence, (b) => { b[213] = 5; });
+  // Over the 1000 bytes a DHT node takes for a value: no node stores it, so it is no packet at all.
+  const oversize = encodeTxtPacket([txt, { name: `_t.${keys.identity.pubKeyZ32}`, value: "x".repeat(400), ttl: 300 }]);
+  const bencoded = concatBytes(utf8Encode(`3:seqi${twoSequence}e1:v${oversize.length}:`), oversize);
+  const seq = new Uint8Array(8);
+  new DataView(seq.buffer).setBigUint64(0, twoSequence);
+  add("a DNS packet over 1000 bytes", "foreign", concatBytes(sign(bencoded, keys.identity.seed), seq, oversize));
+
   return {
     about: "Test vectors of the turn record (WISP 06, The turn, Record). Built by packages/core/test/turnVectors.ts; read by the TypeScript and the Rust suites. Bytes are hex; `value` is the TXT value (base64url); `payload` is the relay payload (signature, sequence, DNS packet).",
     d: bytesToHex(VECTOR_D), turnSeed: bytesToHex(keys.identity.seed), address: bytesToHex(keys.address), addressZ32: keys.identity.pubKeyZ32, sealKey: bytesToHex(keys.sealKey),

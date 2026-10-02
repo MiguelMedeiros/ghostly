@@ -2,7 +2,7 @@ import { xsalsa20poly1305 } from "@noble/ciphers/salsa.js";
 import { hkdf } from "@noble/hashes/hkdf.js";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { bytesEqual, concatBytes, fromBase64Url, randomBytes, toBase64Url, utf8Encode } from "./bytes";
-import { decodeTxtPacket, encodeTxtPacket } from "./dns";
+import { decodeDnsAnswers, decodeTxtPacket, encodeTxtPacket } from "./dns";
 import { identityFromSeed, verify, type Identity } from "./identity";
 import { openRelayPayload, signRelayPayload } from "./pkarr";
 
@@ -348,6 +348,12 @@ export function readTurnPacket(keys: TurnKeys, payload: Uint8Array): TurnPacketR
   const invalid = (refusal: TurnRefusal): TurnPacketRead => ({ kind: "invalid", sequence, refusal });
   let value: string;
   try {
+    // Exactly one answer, a TXT record under `_s`, and nothing else in the packet: no question, no other section,
+    // no other record, no byte after it. The Desktop's Rust reader refuses the same packets.
+    const view = new DataView(dns.buffer, dns.byteOffset, dns.byteLength);
+    if (dns.length < 12 || view.getUint16(4) !== 0 || view.getUint16(6) !== 1 || view.getUint16(8) !== 0 || view.getUint16(10) !== 0) return invalid("label");
+    const raw = decodeDnsAnswers(dns);
+    if (raw.length !== 1 || raw[0].type !== 16 || raw[0].offset + raw[0].length !== dns.length) return invalid("label");
     const records = decodeTxtPacket(dns);
     if (records.length !== 1 || records[0].name !== `${TURN_LABEL}.${keys.identity.pubKeyZ32}`) return invalid("label");
     value = records[0].value;

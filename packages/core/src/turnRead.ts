@@ -18,9 +18,16 @@ export interface TurnSourceAnswer {
   payloads: Uint8Array[];
   /**
    * Sequences (decimal text) the source reports holding without handing the item over: an item under the key that is
-   * no signed packet at all. No record, and its number counts as seen: a node refuses a put below it.
+   * no signed packet at all. Nobody signed that number, and the source could say anything: it is that source's put
+   * condition and nothing else. It never counts as seen, never closes the address and never moves a writer's place.
    */
   sequences?: string[];
+  /**
+   * The answer may be minutes old: a relay that does not know `?policy=NetworkOnly` was asked plainly and answered
+   * from its cache. Such an answer can show a newer record (that is never stale news), but never makes `mine` or
+   * `none`, and alone it does not make a read good.
+   */
+  stale?: boolean;
   detail?: string;
 }
 
@@ -83,8 +90,10 @@ export interface TurnRead {
   known?: boolean;
   /** The highest raw sequence among the answers, from valid and invalid packets alike. 0 when there was none. */
   seen: bigint;
-  /** Packets under the turn key that are no valid record, with the rule each breaks. */
+  /** Packets under the turn key that are no valid record, with the rule each breaks. Signed by the turn key, every one. */
   invalid: { source: string; sequence: bigint; refusal: TurnRefusal }[];
+  /** Sequences a source named for an item it did not hand over (`TurnSourceAnswer.sequences`): unsigned, so only reported. */
+  unsigned: { source: string; sequence: bigint }[];
   /** Per source that answered: the highest raw sequence it holds, for the next put's conditions. */
   conditions: TurnConditions;
   /**
@@ -94,7 +103,8 @@ export interface TurnRead {
   closed: boolean;
 }
 
-interface Found { source: string; payload: Uint8Array; read: Extract<TurnPacketRead, { kind: "valid" }> }
+/** A valid packet, once however many sources returned it, with every one of them. */
+interface Found { sources: string[]; payload: Uint8Array; read: Extract<TurnPacketRead, { kind: "valid" }> }
 type Kept = { record: TurnRecord; payload: Uint8Array };
 
 function compareBytes(a: Uint8Array, b: Uint8Array): number {
@@ -118,12 +128,15 @@ const kept = (f: Found): Kept => ({ record: f.read.record, payload: f.payload })
 export function classifyTurnRead(reader: TurnReader, answers: TurnSourceAnswer[]): TurnRead {
   const { keys } = reader;
   const invalid: TurnRead["invalid"] = [];
+  const unsigned: TurnRead["unsigned"] = [];
   const conditions: TurnConditions = {};
   const found: Found[] = [];
   let seen = 0n, good = false;
+  /** Sources whose answer is fresh: only they can say `mine` or `none`. */
+  const fresh = new Set<string>();
   for (const answer of answers) {
     if (!answer.answered) continue;
-    good = true;
+    if (!answer.stale) { good = true; fresh.add(answer.source); }
     let top: bigint | null = null;
     for (const payload of answer.payloads) {
       const read = readTurnPacket(keys, payload);
@@ -131,19 +144,24 @@ export function classifyTurnRead(reader: TurnReader, answers: TurnSourceAnswer[]
       if (read.kind === "foreign") continue;
       if (top === null || read.sequence > top) top = read.sequence;
       if (read.kind === "invalid") { invalid.push({ source: answer.source, sequence: read.sequence, refusal: read.refusal }); continue; }
-      if (!found.some((f) => bytesEqual(f.payload, payload))) found.push({ source: answer.source, payload, read });
+      const known = found.find((f) => bytesEqual(f.payload, payload));
+      if (known) known.sources.push(answer.source); else found.push({ sources: [answer.source], payload, read });
     }
+    if (top !== null && top > seen) seen = top;
+    // What the source says it holds without showing it: its condition, so a put there names it, and nothing more.
+    let named = top;
     for (const text of answer.sequences ?? []) {
       if (!/^\d{1,19}$/.test(text)) continue;
       const sequence = BigInt(text);
-      if (top === null || sequence > top) top = sequence;
-      invalid.push({ source: answer.source, sequence, refusal: "packet" });
+      unsigned.push({ source: answer.source, sequence });
+      if (named === null || sequence > named) named = sequence;
     }
-    conditions[answer.source] = top === null ? null : top.toString();
-    if (top !== null && top > seen) seen = top;
+    conditions[answer.source] = named === null ? null : named.toString();
   }
-  const base = { good, seen, invalid, conditions, closed: seen >= BigInt(TOMBSTONE_SEQUENCE) };
-  if (!good) return { result: "unreachable", ...base };
+  const base = { good, seen, invalid, unsigned, conditions, closed: seen >= BigInt(TOMBSTONE_SEQUENCE) };
+  // A newer record is news whoever shows it; the answers of a stale source show nothing else.
+  const freshFound = found.filter((f) => f.sources.some((source) => fresh.has(source)));
+  if (!good && !found.length) return { result: "unreachable", ...base };
   if (!found.length) return { result: "none", ...base };
 
   // The highest sequence wins; at an equal one, the lower instance, for every reader alike.
@@ -181,13 +199,18 @@ export function classifyTurnRead(reader: TurnReader, answers: TurnSourceAnswer[]
   if (!stored) return fromOwnSlot(record) ? clone(best, { clone: "above" }) : other(best);
 
   const storedSequence = BigInt(stored.sequence);
-  if (best.read.sequence < storedSequence) return { result: "behind", record, payload, ...base };
+  if (best.read.sequence < storedSequence) return good ? { result: "behind", record, payload, ...base } : { result: "unreachable", ...base };
   if (best.read.sequence > storedSequence) return fromOwnSlot(record) ? clone(best, { clone: "above" }) : other(best);
 
   // At the stored sequence. The stored packet itself and nothing else there: this device's own record, or the one it
   // already accepted from the active device.
   const rivals = found.filter((f) => f.read.sequence === storedSequence && !bytesEqual(f.payload, reader.stored!));
-  if (!rivals.length) return wrote ? { result: "mine", record, payload, ...base } : other(best, { known: true });
+  if (!rivals.length) {
+    if (!wrote) return other(best, { known: true });
+    // `mine` needs a fresh source that returned the stored packet. A stale one alone: no fresh answer says so.
+    if (freshFound.some((f) => bytesEqual(f.payload, reader.stored!))) return { result: "mine", record, payload, ...base };
+    return good ? { result: "behind", record, payload, ...base } : { result: "unreachable", ...base };
+  }
   // An equal sequence is an equal turn, rev and slot. In another device's slot, that device and its copy settle it.
   if (!wrote) return other(best);
   const rival = rivals.reduce((a, b) => (keptAtEqualSequence(kept(b), kept(a)) < 0 ? b : a));

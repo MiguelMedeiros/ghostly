@@ -182,6 +182,35 @@ describe("the result of a turn read", () => {
     expect(classifyTurnRead(reader(0, mine), [has("a", junk(high))])).toMatchObject({ result: "none", seen: BigInt(high) });
   });
 
+  it("a number a source names without a signed packet cannot close the address or raise the turn", async () => {
+    const mine = await packet(5, 2, 0);
+    // A relay's 404 header says the DHT holds an item that is no signed packet, at the tombstone's sequence.
+    const closing: TurnSourceAnswer = { source: "a", answered: true, payloads: [], sequences: [String(TOMBSTONE_SEQUENCE)] };
+    const read = classifyTurnRead(reader(0, mine), [closing, has("b", mine)]);
+    expect(read).toMatchObject({ result: "mine", closed: false, seen: BigInt(turnSequence(5, 2, 0)), invalid: [] });
+    expect(read.unsigned).toEqual([{ source: "a", sequence: BigInt(TOMBSTONE_SEQUENCE) }]);
+    // It is that source's condition, so a put there names it, and nothing else.
+    expect(read.conditions).toEqual({ a: String(TOMBSTONE_SEQUENCE), b: String(turnSequence(5, 2, 0)) });
+    // At a later turn: no writer's place moves.
+    const raising: TurnSourceAnswer = { source: "a", answered: true, payloads: [], sequences: [String(turnSequence(45, 0, 0))] };
+    expect(classifyTurnRead(reader(0, mine), [raising])).toMatchObject({ result: "none", seen: 0n, closed: false });
+    // Text that is no number is dropped.
+    expect(classifyTurnRead(reader(0, mine), [{ source: "a", answered: true, payloads: [], sequences: ["-1", "1e9", "x"] }]).conditions).toEqual({ a: null });
+  });
+
+  it("a stale answer (a relay asked plainly, from its cache) shows a newer record, and never makes mine or none", async () => {
+    const mine = await packet(5, 2, 0), newer = await packet(6, 0, 1);
+    const stale = (source: string, ...payloads: Uint8Array[]): TurnSourceAnswer => ({ source, answered: true, payloads, stale: true });
+    expect(classifyTurnRead(reader(0, mine), [stale("a", mine)])).toMatchObject({ result: "unreachable", good: false });
+    expect(classifyTurnRead(reader(0, mine), [stale("a")])).toMatchObject({ result: "unreachable", good: false });
+    // With a fresh source that does not hold it: not `mine`, and the fresh one is put to again.
+    expect(classifyTurnRead(reader(0, mine), [stale("a", mine), has("b")])).toMatchObject({ result: "behind", good: true });
+    expect(classifyTurnRead(reader(0, mine), [stale("a", mine), has("b", mine)])).toMatchObject({ result: "mine", good: true });
+    // Bad news is news whoever brings it.
+    expect(classifyTurnRead(reader(0, mine), [stale("a", newer), has("b", mine)])).toMatchObject({ result: "other" });
+    expect(classifyTurnRead(reader(0, mine), [stale("a", newer)])).toMatchObject({ result: "other", good: false });
+  });
+
   it("a packet that is not under the turn key counts for nothing", async () => {
     const mine = await packet(5, 2, 0);
     const forged = junk(2n ** 51n);

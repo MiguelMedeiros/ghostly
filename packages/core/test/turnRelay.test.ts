@@ -162,17 +162,20 @@ describe("the turn record on relays", () => {
     state["b.test"].mode = "old";
     const answers = await transport.turnRead(key);
     expect(answers.map((a) => a.payloads)).toEqual([[mine], [mine]]);
+    // The plain answer may be five minutes old: it is marked, and never makes `mine` alone.
+    expect(answers.map((a) => a.stale)).toEqual([undefined, true]);
+    expect(classifyTurnRead({ keys, ownKey: all[0].publicKey, stored: mine }, [answers[1]]).result).toBe("unreachable");
     expect(state["a.test"].urls).toEqual([`/${key}?policy=NetworkOnly`]);
     expect(state["b.test"].urls).toEqual([`/${key}?policy=NetworkOnly`, `/${key}`]);
   });
 
-  it("an item on the DHT that is no signed packet is no record, and its sequence counts as seen", async () => {
+  it("a sequence a relay names for an item it does not hand over is unsigned: that relay's condition, never seen", async () => {
     const { state, transport } = relays(["a.test"]);
     state["a.test"].mode = "invalid-item";
     const answers = await transport.turnRead(key);
     expect(answers).toEqual([{ source: "https://a.test", answered: true, payloads: [], sequences: ["5242895"] }]);
     const read = classifyTurnRead({ keys, ownKey: all[0].publicKey, stored: await packet(5, 2, 0) }, answers);
-    expect(read).toMatchObject({ result: "none", seen: 5242895n, conditions: { "https://a.test": "5242895" }, invalid: [{ source: "https://a.test", sequence: 5242895n, refusal: "packet" }] });
+    expect(read).toMatchObject({ result: "none", seen: 0n, closed: false, conditions: { "https://a.test": "5242895" }, invalid: [], unsigned: [{ source: "https://a.test", sequence: 5242895n }] });
   });
 
   it("a transport wrapped with request options still has the turn's path", async () => {
