@@ -1,4 +1,4 @@
-import { inviteLink, LIMITS, MENTION_EVERYONE, sanitizeTypingStatus, TYPING_KINDS, TYPING_STATUS_MAX, type GroupMention, type PairedTransport, type TypingKind } from "@ghostly/core";
+import { groupName, inviteLink, LIMITS, MAX_GROUP_NAME_LENGTH, MENTION_EVERYONE, sanitizeTypingStatus, TYPING_KINDS, TYPING_STATUS_MAX, type GroupMention, type PairedTransport, type TypingKind } from "@ghostly/core";
 import type { GroupView, Settings, StoredMessage } from "@ghostly/browser/shared/types";
 import { findSecret } from "../../../apps/ui/src/lib/parse/secrets";
 import { ENGINE_METHODS, ENGINE_READS } from "./engineMethods";
@@ -386,7 +386,9 @@ const METHODS: Record<string, Method> = {
   },
 
   async "group.create"(ctx, params) {
-    const name = str(params, "name", true);
+    // As `group rename` checks it: a name a group cannot have is said here, before anything is made.
+    const name = groupName(str(params, "name", true));
+    if (!name) throw new CliError("bad_request", `A group's name is 1 to ${MAX_GROUP_NAME_LENGTH} characters on one line`);
     const profile = oneOf(params, "profile", ["community", "mesh"] as const, "community");
     const { groupId } = await node(ctx).createGroup({ name, profile });
     let link: string | null = null;

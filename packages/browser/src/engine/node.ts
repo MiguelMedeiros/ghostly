@@ -40,7 +40,7 @@ import { ModeChanged, networkLabel, WrongNetworkError } from "./paymentAdapters/
 import { assertConfirmedReal, createTiming, WALLET_NAMES, createFailure, crossNetwork, paymentNetwork, paymentNetworksOf, walletInstances } from "./paymentAdapters/walletInstances";
 import { migrateWalletNetworks } from "./paymentAdapters/walletNetworks";
 import { perNetwork, type PerNetwork } from "./paymentAdapters/perNetwork";
-import { COMMUNITY_EDIT_FRAME, INVITE_TAKEN, LIVENESS_MISSED_PINGS, LIVENESS_PING_MS, engineError, parseCommunityEdit, traceLink } from "@ghostly/core";
+import { COMMUNITY_EDIT_FRAME, INVITE_TAKEN, LIVENESS_MISSED_PINGS, LIVENESS_PING_MS, MAX_GROUP_NAME_LENGTH, engineError, groupName, parseCommunityEdit, traceLink } from "@ghostly/core";
 import { GROUP_WAKE_FRAME, GROUP_WAKE_RECEIVE_LIMIT, GroupWakeLimiter, RateWindow, WAKE_CALL_INTERVAL_MS, WakeLimiter, groupWakeFrame, groupWakes, parseGroupWakeFrame, checkPushEndpoint, newWakeToken, relayRequest, vapidKeysMatch, wakeRequest, type PushRequest, type WakeKind, type WakeTarget } from "@ghostly/core";
 import { COMMUNITY_REACTION_FRAME, GROUP_REACTION_FRAME, REACTION_LIMITS, ReactionWindow, queueReaction, readReaction, validReactionNumber, wireReaction, type WireReaction } from "@ghostly/core";
 import { COMMUNITY_PIN_FRAME, PIN_LIMITS, mayPin, pinIsNewer, pinNumberHolds, readPin, type GroupPinFrame, type WirePin } from "@ghostly/core";
@@ -2975,7 +2975,11 @@ export class GhostlyNode implements EngineImplementation {
 
   async createGroup({ name, profile }: { name: string; profile?: "community" | "mesh" }): Promise<{ groupId: string }> {
     if (typeof name !== "string" || !name.trim()) throw new Error("Give the group a name");
-    return { groupId: await this.groups.create(name.trim().slice(0, 48), profile === "mesh" ? "mesh" : "community") };
+    // The name a rename would give it (`groupName`): one line, a new line read as a space, 64 characters at most. It
+    // was cut at 48 code units without a word (through an emoji, at times), and its lines were joined with nothing between.
+    const clean = groupName(name);
+    if (!clean) throw new Error(`A group's name is 1 to ${MAX_GROUP_NAME_LENGTH} characters on one line`);
+    return { groupId: await this.groups.create(clean, profile === "mesh" ? "mesh" : "community") };
   }
   inviteToGroup({ groupId, linkId }: { groupId: string; linkId: string }): Promise<void> {
     if (!this.links.get(linkId)?.stored.profile || this.links.get(linkId)?.stored.group) throw new Error("Invite a paired contact");

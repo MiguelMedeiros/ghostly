@@ -96,6 +96,20 @@ describe("group send", () => {
   });
 });
 
+describe("group create", () => {
+  it("gives the engine the name a group can have, and refuses one it cannot before anything is made", async () => {
+    const { ctx, node } = fake();
+    const createGroup = vi.fn(async () => ({ groupId: "g2" }));
+    Object.assign(node, { createGroup, enableGroupLink: vi.fn(async () => ({ link: LINK })) });
+    expect(await callApi(ctx, "group.create", { name: " Book\nclub ", profile: "mesh" })).toEqual({ group: "g2", link: null });
+    expect(createGroup).toHaveBeenLastCalledWith({ name: "Book club", profile: "mesh" });
+    for (const name of ["x".repeat(65), "   ", "\n"]) {
+      await expect(callApi(ctx, "group.create", { name, profile: "mesh" }), JSON.stringify(name)).rejects.toMatchObject({ code: "bad_request" });
+    }
+    expect(createGroup).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe("group rename", () => {
   it("sends one clean line to the engine and refuses a name no member would see", async () => {
     const { ctx, node } = fake();
