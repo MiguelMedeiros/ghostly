@@ -1,8 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { ENDPOINT, ONCHAIN_PROVIDER, cashuRequestPayload, type GhostLink, type PaymentRequest, type PaymentReview, type PaymentTarget } from "@ghostly/core";
+import { ENDPOINT, ONCHAIN_PROVIDER, cashuRequestPayload, engineText, type GhostLink, type PaymentRequest, type PaymentReview, type PaymentTarget } from "@ghostly/core";
 import { PaymentDesk, type DeskBitcoin, type DeskLightning } from "../src/engine/payments";
 import { CashuAdapter } from "../src/engine/paymentAdapters/cashu";
 import { SwapUnsettledError, type CashuPrepared, type CashuWallet } from "../src/engine/wallet";
+import { MintOperationError } from "@cashu/cashu-ts";
 import type { ArkWallet } from "../src/engine/paymentAdapters/arkWallet";
 import type { BarkWallet } from "../src/engine/paymentAdapters/barkWallet";
 import type { UsdtWallet } from "../src/engine/paymentAdapters/usdtWallet";
@@ -762,6 +763,29 @@ describe("the reviewed Cashu adapter", () => {
     expect(await cashu.execute(review(cashuTarget()), prepared, async () => { order.push("persist"); })).toEqual({ settled: true });
     expect(order).toEqual(["persist", "publish cashuBfresh"]);
     expect(publish).toHaveBeenCalledOnce();
+  });
+
+  it("a payment whose ecash was spent somewhere else ends, at the refusal or when it is checked, and its ecash is let go", async () => {
+    const { cashu, wallet, publish } = adapter();
+    const persist = vi.fn(async () => {});
+    // Refused at approval, and the mint says why.
+    wallet.executeReviewedCashu.mockRejectedValueOnce(new MintOperationError(11001, "Token already spent"));
+    wallet.reviewedCashuSpentElsewhere.mockResolvedValue(true);
+    const ran = { ...prepared };
+    expect(await cashu.execute(review(cashuTarget()), ran, persist)).toEqual({ settled: false, failed: true, error: engineText("reviewedEcashSpent") });
+    expect(ran.spentElsewhere, "written down before anything is let go").toBe(true);
+    expect(persist).toHaveBeenCalledOnce();
+    expect(wallet.dropReviewedCashu).toHaveBeenCalledWith(ran);
+    expect(publish).not.toHaveBeenCalled();
+
+    // One already waiting on "Status unknown": checking it ends it the same way.
+    wallet.recoverReviewedCashu.mockResolvedValueOnce(undefined);
+    const waiting = { ...prepared };
+    expect(await cashu.reconcile(review(cashuTarget()), waiting, persist)).toMatchObject({ failed: true, error: engineText("reviewedEcashSpent") });
+    expect(waiting.spentElsewhere).toBe(true);
+    // A transport error is no refusal: nothing is decided at approval.
+    wallet.executeReviewedCashu.mockRejectedValueOnce(new TypeError("Failed to fetch"));
+    await expect(cashu.execute(review(cashuTarget()), { ...prepared }, persist)).rejects.toThrow("Failed to fetch");
   });
 
   it("reconciling repeats the very same token, never a new one, and nothing once it was taken", async () => {

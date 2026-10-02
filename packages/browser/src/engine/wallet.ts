@@ -209,6 +209,8 @@ export class CashuWallet {
   private swapTimerAt = 0;
   /** Per melt quote that ended unpaid: the sats the mint kept all the same (the fee of the split before the melt). */
   private readonly failedFees = new Map<string, number>();
+  /** Melt quotes that ended unpaid with proofs the mint read spent: ecash spent somewhere else, said as such. */
+  private readonly spentAway = new Set<string>();
 
   /**
    * `getMints`: the mints of one network (the engine's default when none is named), primary first: balances,
@@ -1236,6 +1238,8 @@ export class CashuWallet {
       if (outcome === "unpaid") {
         // The mint's refusal ("Invoice already paid") stays what the person reads, with what it cost them.
         const lost = this.takeFailedFee(melt.quote);
+        // Its ecash was spent somewhere else: said in plain words, whatever the mint's own were.
+        if (this.spentAway.delete(melt.quote)) throw Object.assign(engineError("ecashAlreadySpent"), { cause: error });
         if (lost > 0) throw Object.assign(new Error(`${error instanceof Error ? error.message : String(error)} ${backInWallet(lost)}`), { cause: error });
         throw error;
       }
@@ -1272,6 +1276,7 @@ export class CashuWallet {
         });
         if (outcome === "paid" || outcome === "unpaid") {
           this.takeFailedFee(melt.quote);
+          this.spentAway.delete(melt.quote);
           this.events.onMeltResolved(melt, outcome === "paid");
           this.events.onChange();
         }
@@ -1332,7 +1337,7 @@ export class CashuWallet {
       if (lost > 0) stores[STORES.walletTx].put(walletTx(melt.mint, "fee", 0, lost, melt.note ? `Payment failed: ${melt.note}` : "A Lightning payment failed"));
     });
     if (lost > 0) this.failedFees.set(melt.quote, lost);
-    if (spent.size > 0) void this.recheck(melt.mint).catch(() => {});
+    if (spent.size > 0) { this.spentAway.add(melt.quote); void this.recheck(melt.mint).catch(() => {}); }
     return "unpaid";
   }
 

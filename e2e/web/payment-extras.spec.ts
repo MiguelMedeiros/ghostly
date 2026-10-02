@@ -348,6 +348,37 @@ test("sats held for a payment the mint has not answered show as set aside, and c
   held = false;
 });
 
+// The wallet's ecash, copied as a backup and redeemed in another wallet: the copy here is spent. A payment that picks it
+// ends at once, saying so, and the balance becomes what the mint still holds.
+test("a payment from ecash spent somewhere else ends with that reason, and the balance is what the mint holds", { tag: ["@feature:payments.cashu.send", "@feature:payments.chat.review", "@feature:wallet.cashu.export"] }, async ({ peer }) => {
+  const [alice, bob] = await chatting(peer, "elsewhere-alice", "elsewhere-bob");
+  await fund(alice);
+  await expect.poll(() => balanceOf(alice.page)).toBe(TEST_COINS);
+
+  // "Copy backup", and the tokens redeemed outside Ghostly, straight at the mint.
+  await alice.page.getByRole("button", { name: "Copy backup" }).click();
+  await expect(alice.page.getByText(/Backup copied/)).toBeVisible();
+  const tokens = (await alice.page.evaluate(() => navigator.clipboard.readText())).split("\n").filter(Boolean);
+  const { Wallet } = await import("@cashu/cashu-ts");
+  const elsewhere = new Wallet(mintEndpoint(), { unit: "sat" });
+  await elsewhere.loadMint();
+  // The tokens name the public test mint, which this mint answers for: its proofs are handed over as they are.
+  for (const token of tokens) await elsewhere.receive(elsewhere.decodeToken(token).proofs);
+
+  for (const p of [alice, bob]) await openChat(p);
+  const review = await prepareSend(alice, 21);
+  await review.getByRole("button", { name: "Approve payment" }).click();
+  await expect(alice.page.getByText(/already spent somewhere else/).first()).toBeVisible();
+  await expect(chat(bob).getByTestId("payment-bubble"), "nothing reached the contact").toHaveCount(0);
+
+  // Nothing is held for it, and the wallet holds what the mint says: nothing.
+  await openWallet(alice, "cashu-testnet");
+  await expect.poll(() => balanceOf(alice.page)).toBe(0);
+  await expect(alice.page.getByTestId("wallet-set-aside")).toHaveCount(0);
+  await alice.page.getByTestId("wallet-history").click();
+  await expect(alice.page.getByText("Fees paid: 0 test sats"), "no fee for ecash spent elsewhere").toBeVisible();
+});
+
 test("a Lightning invoice pasted into the chat is a card with a QR code to hide and a Copy button", { tag: ["@feature:payments.lightning.invoice-card"] }, async ({ peer }) => {
   const [alice, bob] = await chatting(peer, "invoice-alice", "invoice-bob");
   // An invoice from the mint, made outside Ghostly and pasted as text.
