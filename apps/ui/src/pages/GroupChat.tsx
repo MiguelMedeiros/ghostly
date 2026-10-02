@@ -301,7 +301,8 @@ export function GroupChat() {
         if (replyingRef.current === answering) replyingRef.current = null;
         setReplyingTo(current => current === answering ? null : current);
       }
-      return error;
+      // The engine says why in English: said here in the app's language (lib/errorText.ts).
+      return error && errorText(error, t);
     }
     catch (e) { return e instanceof Error ? errorText(e, t) : t("group.chat.sendFailed"); }
   }, [groupId, t]);
@@ -380,13 +381,15 @@ export function GroupChat() {
   const justJoined = messages.some(m => m.event === "joined" && !m.member && Date.now() - m.timestamp < JUST_JOINED_MS);
   const connecting = group.status === "active" && others.length > 0 && reachable === 0 && justJoined;
   const community = group.profile === "community" ? group.community : undefined;
+  // Why I am out of it (removed, left, forked, lost), as the engine says it, in the app's language; else its status in a word.
+  const outOfIt = group.status && group.status !== "active" ? (group.statusReason ? errorText(group.statusReason, t) : groupStatusText(group.status, t)) : undefined;
   const count = group.members.length === 1 ? t("group.chat.memberOne") : t("group.chat.memberCount", { count: group.members.length });
   const subtitle = joiningByLink ? (group.invitation!.admin ? t("group.chat.joining") : t("group.chat.joiningByLink"))
     : community && group.status === "active" ? (community.hub ? t("group.chat.communityHub", { members: count })
       : community.connected ? t("group.chat.communityConnected", { members: count }) : t("group.chat.communityConnecting", { members: count }))
     : group.invitation ? (group.invitation.contact ? t("group.chat.invitation", { contact: group.invitation.contact }) : t("group.chat.invitationUnknown"))
     : group.status === "active" ? t("group.chat.reachable", { members: count, reachable, total: others.length })
-    : group.statusReason ?? (group.status && groupStatusText(group.status, t));
+    : outOfIt;
   // In a community every member can let people in, so every member hands the link out; in a private group, the admin.
   const canShare = group.status === "active" && (group.isAdmin || (group.profile === "community" && !!group.entryLink));
   const openShare = async () => {
@@ -464,7 +467,7 @@ export function GroupChat() {
         {community ? t("group.chat.connectingCommunity") : t("group.chat.connectingMembers")}
       </div>}
       {(error || (group.status && group.status !== "active")) && <div role="status" data-testid="group-notice" className="px-4 py-2 text-xs bg-surface-alt text-text-secondary border-b border-border">
-        {error || group.statusReason}
+        {error || outOfIt}
       </div>}
 
 
@@ -520,7 +523,7 @@ export function GroupChat() {
         // Editing one of mine (WISP 9xx § Edits): the new text shows here at once and goes to the members; @ names more.
         edit={editing ? { key: editing.id, text: editing.text, snippet: replySnippet(editing.text), onClose: () => setEditing(null),
           onSave: async (text, extra) => (await engine.call("editMessage", { linkId: `group:${groupId}`, messageId: editing.id, text, ...(extra?.mentions?.length && { mentions: extra.mentions }) })
-            .catch((e: unknown) => ({ error: e instanceof Error ? errorText(e, t) : t("group.chat.editFailed") }))).error } : undefined}
+            .then(result => ({ error: result.error && errorText(result.error, t) }), (e: unknown) => ({ error: e instanceof Error ? errorText(e, t) : t("group.chat.editFailed") }))).error } : undefined}
         onEditLast={group.canSend ? () => {
           const last = [...messages].reverse().find(m => canEditInGroup(m) && !m.card);
           if (last) { setReplyingTo(null); setEditing(last); }
