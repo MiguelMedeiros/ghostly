@@ -54,6 +54,15 @@
     "numberAssignment": "defined"
   },
   {
+    "oldId": "none",
+    "id": "06",
+    "oldFile": "06-devices.md",
+    "file": "06-devices.md",
+    "kind": "Contract",
+    "displayNumber": "06",
+    "numberAssignment": "defined"
+  },
+  {
     "oldId": "05",
     "id": "100",
     "oldFile": "05-transports.md",

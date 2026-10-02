@@ -1,6 +1,6 @@
 # WISP numbering and compatibility
 
-All 55 specifications have the document status Draft; each says in its header what is implemented, and the [index](README.md) lists them all. Family numbering was approved on 2026-09-22. This migration is editorial: wire capability names, versions, storage keys and implemented protocol behavior are unchanged.
+All 56 specifications have the document status Draft; each says in its header what is implemented, and the [index](README.md) lists them all. Family numbering was approved on 2026-09-22. This migration is editorial: wire capability names, versions, storage keys and implemented protocol behavior are unchanged.
 
 ## Independent families
 
@@ -33,6 +33,7 @@ Generated from [numbering.json](numbering.json); edit that source instead of thi
 | 04 | [03](03-capabilities.md) |
 | none | [04](04-profiles.md) |
 | none | [05](05-backups.md) |
+| none | [06](06-devices.md) |
 | 05 | [100](100-transports.md) |
 | 06 | [101](101-webrtc.md) |
 | 07 | [102](102-iroh.md) |
