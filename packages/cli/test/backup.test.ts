@@ -1,8 +1,11 @@
-import { mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { spawn } from "node:child_process";
+import { randomBytes } from "node:crypto";
+import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, it } from "vitest";
 import { seal } from "@ghostly/browser/backup/envelope";
-import { error, ghostly, home, ok } from "./support/cli";
+import { openPersistentIndexedDb } from "../src/runtime/storage";
+import { BIN, error, ghostly, home, ok } from "./support/cli";
 // covers: headless.backup
 
 const PASS = { GHOSTLY_BACKUP_PASSPHRASE: "correct horse battery staple" };
@@ -103,4 +106,73 @@ it("a backup an older CLI made (version 1) still restores", async () => {
   expect(restored).toMatchObject({ restored: "copy", protection: "passphrase" });
   expect(readFileSync(join(restored.folder, "files", "ghostly", "chat-in-a")).equals(pattern(3000, 3))).toBe(true);
   expect(ok(await ghostly(["--home", dir, "--profile", "copy", "profile", "show"]))).toMatchObject({ name: "Old bot" });
+});
+
+// The folder took the profile's name before anything was in it: a restore stopped half way (Ctrl-C, a kill) left a
+// profile that was listed and opened, with the keys of the original and a file cut short.
+it("a restore stopped while it writes leaves no profile, and the next one is whole", { timeout: 120_000 }, async () => {
+  const dir = home("backup-stopped");
+  ok(await ghostly(["--home", dir, "profile", "set", "--name", "Stopped bot"]));
+  const files = join(dir, "profiles", "default", "files", "ghostly");
+  mkdirSync(files, { recursive: true });
+  const big = randomBytes(64 * 1024 * 1024);
+  writeFileSync(join(files, "chat-in-big"), big);
+  const file = join(dir, "big.ghostly-backup");
+  ok(await ghostly(["--home", dir, "profile", "backup", "--out", file], { env: PASS }));
+
+  // Killed the moment its folder appears beside the profiles: nothing of the file is in it yet, or only a part.
+  const profiles = join(dir, "profiles");
+  const child = spawn(process.execPath, [BIN, "--home", dir, "profile", "restore", file, "copy"], { env: { ...process.env, ...PASS }, stdio: "ignore" });
+  const gone = new Promise<void>((done) => child.once("exit", () => done()));
+  while (child.exitCode === null && child.signalCode === null && readdirSync(profiles).length < 2) await new Promise((r) => setImmediate(r));
+  child.kill("SIGKILL");
+  await gone;
+  expect(child.signalCode, "the restore was still running when it was stopped").toBe("SIGKILL");
+  expect(existsSync(join(profiles, "copy")), "no profile under the name it was restoring into").toBe(false);
+  expect((ok(await ghostly(["--home", dir, "profile", "list"])).profiles as { name: string }[]).map((p) => p.name)).toEqual(["default"]);
+
+  // The same name again: restored whole, and what the stopped one left is gone.
+  const restored = ok(await ghostly(["--home", dir, "profile", "restore", file, "copy"], { env: PASS })) as { folder: string };
+  expect(readdirSync(profiles).sort()).toEqual(["copy", "default"]);
+  expect(readFileSync(join(restored.folder, "files", "ghostly", "chat-in-big")).equals(big)).toBe(true);
+  expect(ok(await ghostly(["--home", dir, "--profile", "copy", "profile", "show"]))).toMatchObject({ name: "Stopped bot" });
+});
+
+// The store came back as the backup held it: ecash the original spent afterwards stayed in the copy's balance, and
+// its payments failed with the mint's "Token already spent". The app's restore marks the ecash to be checked.
+it("a restored profile's ecash is marked to be checked with its mint the first time it starts", async () => {
+  const dir = home("backup-ecash");
+  ok(await ghostly(["--home", dir, "profile", "set", "--name", "Ecash bot"]));
+  // A mint nobody answers at: what is asked of it stays to be asked.
+  const proof = (secret: string, extra: Record<string, unknown> = {}) => ({ mint: "http://127.0.0.1:9", id: "009a1f293253e41e", amount: 64, secret, C: "02ab", ...extra });
+  const rows = async (folder: string, store: string, put: unknown[] = []) => {
+    const opened = await openPersistentIndexedDb(join(folder, "db"));
+    try {
+      const db = await new Promise<IDBDatabase>((resolve, reject) => { const r = opened.factory.open("ghostly"); r.onsuccess = () => resolve(r.result); r.onerror = () => reject(r.error); });
+      const tx = db.transaction(store, "readwrite");
+      for (const row of put) tx.objectStore(store).put(row);
+      const all = tx.objectStore(store).getAll();
+      await new Promise<void>((resolve, reject) => { tx.oncomplete = () => resolve(); tx.onabort = tx.onerror = () => reject(tx.error); });
+      db.close();
+      return all.result as Record<string, unknown>[];
+    } finally { await opened.close(); }
+  };
+  const original = join(dir, "profiles", "default");
+  await rows(original, "proofs", [proof("free"), proof("held", { reserved: true })]);
+  await rows(original, "swaps", [{ id: "swap-1", mint: "http://127.0.0.1:9", kind: "send", swap: { inputs: [], keepOutputs: [], sendOutputs: [] }, createdAt: Date.now() }]);
+
+  const file = join(dir, "ecash.ghostly-backup");
+  ok(await ghostly(["--home", dir, "profile", "backup", "--out", file], { env: PASS }));
+  const restored = ok(await ghostly(["--home", dir, "profile", "restore", file, "copy"], { env: PASS })) as { folder: string };
+  // Its engine starts (any command does it), and the copy's money is the copy of a backup from then on.
+  ok(await ghostly(["--home", dir, "--profile", "copy", "wallet", "list"]));
+  const proofs = await rows(restored.folder, "proofs");
+  expect(proofs.find((p) => p.secret === "free")).toMatchObject({ amount: 64, unchecked: true });
+  expect(proofs.find((p) => p.secret === "held"), "ecash a payment holds is left to that payment").toEqual(proof("held", { reserved: true }));
+  expect(await rows(restored.folder, "swaps")).toMatchObject([{ id: "swap-1", restored: true }]);
+  expect(existsSync(join(restored.folder, "restored")), "done once: the mark is gone").toBe(false);
+  // The profile it was copied from is as it was.
+  ok(await ghostly(["--home", dir, "wallet", "list"]));
+  expect((await rows(original, "proofs")).some((p) => p.unchecked)).toBe(false);
+  expect(await rows(original, "swaps")).toEqual([expect.not.objectContaining({ restored: true })]);
 });
