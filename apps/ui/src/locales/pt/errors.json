@@ -188,16 +188,24 @@
   },
   "profile": {
     "arkBackup": "Não foi possível ler a carteira Ark para o backup: {{reason}}",
+    "backupTooLarge": "Este backup é grande demais para restaurar aqui.",
+    "damagedBackup": "Este backup está danificado: foi alterado ou está incompleto. Tente outra cópia do arquivo.",
     "exists": "Esse perfil já existe",
     "firstStays": "O primeiro perfil não pode ser removido",
     "giveName": "Dê um nome ao perfil",
+    "newerBackup": "Este backup vem de um Ghostly mais novo. Atualize e depois restaure.",
     "noBackupFile": "Esta carteira não tem arquivo de backup",
+    "noFileStorage": "Este dispositivo não tem armazenamento para arquivos. Libere espaço ou tente outro navegador.",
     "noPhrase": "Esta carteira não tem frase de recuperação para mostrar",
     "noRoom": "Este dispositivo não tem mais espaço para este backup. Libere espaço e tente de novo.",
     "notABackup": "Este backup não contém um perfil",
+    "notGhostlyBackup": "Isto não é um backup do Ghostly. Escolha um arquivo .ghostly-backup.",
     "openElsewhere": "Este perfil está aberto em outra janela. Feche-a e tente de novo.",
+    "shortPassphrase": "Use pelo menos 12 caracteres na frase-senha do backup.",
     "switchFirst": "Troque para outro perfil primeiro",
     "unknown": "Perfil desconhecido",
+    "unsupportedBackup": "Este Ghostly não consegue ler este backup. Atualize e tente de novo.",
+    "wrongPassphrase": "Frase-senha incorreta, ou o arquivo foi alterado. Confira a frase-senha e tente de novo.",
     "wrongPassword": "Senha de bloqueio errada para esse perfil"
   }
 }
