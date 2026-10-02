@@ -181,6 +181,8 @@ export class LinkSession {
   /** Stopped without a last packet (`stop(false)`): nothing more goes out. */
   private silent = false;
   private polling = false;
+  /** `lookNow` came during a read: the next one follows it at once. */
+  private pollAgain = false;
   private publishing: Promise<void> | null = null;
   private publishAgain = false;
   private pollTimer: ReturnType<typeof setTimeout> | null = null;
@@ -425,6 +427,16 @@ export class LinkSession {
   }
 
   /**
+   * The peer's packet is at hand now (a member of the group carried it, `CarriedTransport`): read it. A read under way
+   * may be past the point where it would see it, so another follows that one at once rather than at the pace's wait.
+   */
+  lookNow(): void {
+    if (!this.running) return;
+    if (this.polling) { this.pollAgain = true; return; }
+    this.pollNow();
+  }
+
+  /**
    * The next poll's wait. After a window that looked fast for the peer (`expectPeer`), the wait grows with the time
    * since the window ended (on the relays: 4, 4, 8, 16 s, then 30 s) up to the pace's own. A
    * peer's offer held back by its relays' budget lands whenever that frees a request: it used to land seconds after
@@ -632,7 +644,12 @@ export class LinkSession {
       }
     } finally {
       this.polling = false;
-      if (this.running && !this.pollTimer) {
+      if (this.running && this.pollAgain) {
+        this.pollAgain = false;
+        if (this.pollTimer) clearTimeout(this.pollTimer);
+        this.pollTimer = null;
+        void this.poll();
+      } else if (this.running && !this.pollTimer) {
         const interval = this.nextInterval();
         // The interval is a period, counted from the start of this read: a read that took long (a key
         // nobody has yet, a relay asking its DHT) does not push the next one further out.
