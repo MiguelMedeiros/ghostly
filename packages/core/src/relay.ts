@@ -807,7 +807,7 @@ export class RelayTransport implements PkarrTransport {
    * 428) is not asked again without the condition: its refusal is the answer, and every relay's answer is reported.
    */
   turnPut(pubKeyZ32: string, payload: Uint8Array, conditions: TurnConditions): Promise<TurnSourcePut[]> {
-    const relays = this.relays.filter((relay) => Object.hasOwn(conditions, relay));
+    const relays = this.relays.filter((relay) => conditions[relay] !== undefined);
     return Promise.all(relays.map(async (relay): Promise<TurnSourcePut> => {
       const replaces = conditions[relay];
       try {

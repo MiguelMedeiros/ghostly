@@ -4,6 +4,7 @@ import {
   DHT_POLL_INTERVALS,
   GhostlyHttpError,
   fromBase64,
+  fromBase64Url,
   toBase64,
   toBase64Url,
   type Identity,
@@ -14,6 +15,9 @@ import {
   type PkarrRequestOptions,
   type PkarrTransport,
   type SignedPacket,
+  type TurnConditions,
+  type TurnSourceAnswer,
+  type TurnSourcePut,
   setLinkTraceSink,
   viewerResponseHeaders,
 } from "@ghostly/core";
@@ -49,7 +53,7 @@ const STATUS_EVERY_MS = 2_000;
  * Pkarr through the Rust client: the Mainline DHT read directly, the relays in Settings written to (browser
  * contacts read only relays), and read from too when "Also use Pkarr relays" is on.
  */
-function createTauriTransport(): PkarrTransport {
+export function createTauriTransport(): PkarrTransport {
   let status: DiscoveryStatus | undefined;
   let askedAt = 0;
   const listeners = new Set<(change?: DiscoveryChange) => void>();
@@ -82,6 +86,16 @@ function createTauriTransport(): PkarrTransport {
       }).finally(refresh);
       // Rust verified the signature while resolving.
       return packet && { pubKeyZ32, timestampMicros: BigInt(packet.timestamp_micros), records: packet.records };
+    },
+    // The turn record's own path (WISP 06 § Publishing and reading), in Rust (`turn_network.rs`): the DHT itself and
+    // every relay are read, each put goes out on its source's condition (`cas` on the DHT), and nothing is retried.
+    async turnRead(pubKeyZ32: string): Promise<TurnSourceAnswer[]> {
+      const answers = await invoke<{ source: string; answered: boolean; payloads: string[]; sequences?: string[]; detail?: string }[]>("turn_read", { publicKeyZ32: pubKeyZ32 });
+      return answers.map(({ source, answered, payloads, sequences, detail }) =>
+        ({ source, answered, payloads: payloads.map(fromBase64Url), ...(sequences?.length ? { sequences } : {}), ...(detail ? { detail } : {}) }));
+    },
+    turnPut(pubKeyZ32: string, payload: Uint8Array, conditions: TurnConditions): Promise<TurnSourcePut[]> {
+      return invoke<TurnSourcePut[]>("turn_put", { publicKeyZ32: pubKeyZ32, payloadB64: toBase64Url(payload), conditions });
     },
     describe: () => ({ protocol: "Mainline DHT (BEP44) — Direct UDP", relays: [] }),
     networkChanged() {

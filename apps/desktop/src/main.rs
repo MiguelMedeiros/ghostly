@@ -34,6 +34,9 @@ mod share;
 mod single_instance;
 #[cfg(test)]
 mod test_support;
+mod turn_network;
+#[cfg(test)]
+mod turn_record;
 mod types;
 mod viewer;
 
@@ -96,6 +99,8 @@ macro_rules! commands {
             commands::resolve_records,
             commands::service_respond,
             commands::set_pkarr_relays,
+            commands::turn_put,
+            commands::turn_read,
             commands::under_test,
             commands::updater_can_install,
             device_state::device_state_read,

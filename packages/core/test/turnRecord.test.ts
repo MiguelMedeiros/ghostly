@@ -5,7 +5,7 @@ import { hkdf } from "@noble/hashes/hkdf.js";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { describe, expect, it } from "vitest";
 import {
-  createRelayPayload, firstDeviceSetSecret, identityFromSeed, measureRecords, nextTurnPosition, openTurnValue, readTurnBody, readTurnPacket, sealTurnBody, signTurnBody,
+  createRelayPayload, firstDeviceSetSecret, fromBase64Url, signRelayPayload, identityFromSeed, measureRecords, nextTurnPosition, openTurnValue, readTurnBody, readTurnPacket, sealTurnBody, signTurnBody,
   signTurnPacket, turnKeys, turnName, turnPacket, turnPayloadSequence, turnSequence, utf8Encode, MAX_DNS_PACKET_BYTES, TOMBSTONE_SEQUENCE, TOMBSTONE_TURN,
   TURN_BODY_BYTES, TURN_LABEL, TURN_MAX, TURN_NO_ACTIVE, TURN_REV_LIMIT, TURN_SEALED_BYTES, TurnRecordError, type TurnFields,
 } from "../src/index";
@@ -154,6 +154,26 @@ describe("the turn record", () => {
     // A character is a whole one: a family of four (25 bytes) does not fit, and is not cut into two people.
     expect(turnName("👩‍👩‍👧‍👧 family")).toBe("");
     expect(turnName("Ana 👩‍👩‍👧‍👧")).toBe("Ana ");
+  });
+
+  it("is read whatever way its writer cut the TXT value into DNS strings: the Desktop's Rust cuts at 254, this code at 255", async () => {
+    const body = await signTurnBody(keys.address, fields(), signerOf(all[0]));
+    const value = sealTurnBody(body, keys.sealKey);
+    // The DNS packet by hand: header, one answer, the name, TXT, class IN, TTL, and the value in strings of `size`.
+    const packetCutAt = (size: number): Uint8Array => {
+      const name = [TURN_LABEL, keys.identity.pubKeyZ32].flatMap((label) => [label.length, ...utf8Encode(label)]);
+      const strings: number[] = [];
+      for (let at = 0; at < value.length; at += size) { const part = utf8Encode(value.slice(at, at + size)); strings.push(part.length, ...part); }
+      return Uint8Array.from([0, 0, 0x80, 0, 0, 0, 0, 1, 0, 0, 0, 0, ...name, 0, 0, 16, 0, 1, 0, 0, 1, 44, strings.length >> 8, strings.length & 0xff, ...strings]);
+    };
+    const sequence = BigInt(turnSequence(40, 0, 0));
+    for (const size of [255, 254, 100]) {
+      const read = readTurnPacket(keys, signRelayPayload(keys.identity, packetCutAt(size), sequence));
+      expect(read.kind, `strings of ${size}`).toBe("valid");
+    }
+    // The same size on the wire either way.
+    expect(packetCutAt(254).length).toBe(packetCutAt(255).length);
+    expect(bytesToHex(signRelayPayload(keys.identity, packetCutAt(255), sequence).subarray(72))).toBe(bytesToHex(turnPacket(keys, body, fromBase64Url(value).subarray(0, 24)).subarray(72)));
   });
 
   it("is not a chat packet: nothing dated by the clock reads as a turn record", () => {

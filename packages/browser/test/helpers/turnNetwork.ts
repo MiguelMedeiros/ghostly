@@ -66,7 +66,7 @@ export class FakeTurnNetwork implements TurnNetwork {
     await this.onPut?.(payload);
     const results: TurnSourcePut[] = [];
     for (const source of this.sources) {
-      if (!Object.hasOwn(conditions, source.name)) continue;
+      if (conditions[source.name] === undefined) continue;
       const condition = conditions[source.name];
       this.calls.push({ op: "put", source: source.name, condition, payload });
       if (source.down) { results.push({ source: source.name, outcome: "failed", detail: "no answer" }); continue; }

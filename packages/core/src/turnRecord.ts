@@ -147,8 +147,10 @@ const isZero = (bytes: Uint8Array): boolean => bytes.every((b) => b === 0);
  * A character is what a person sees as one (a grapheme), so a cut never leaves half an emoji or a lone joiner.
  */
 export function turnName(name: string): string {
-  const clean = name.replaceAll("\0", "");
-  const characters = typeof Intl !== "undefined" && "Segmenter" in Intl ? [...new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(clean)].map((s) => s.segment) : [...clean];
+  const clean = name.replace(/\0/g, "");
+  const Segmenter = typeof Intl === "undefined" ? undefined
+    : (Intl as unknown as { Segmenter?: new (locale: undefined, options: { granularity: "grapheme" }) => { segment(text: string): Iterable<{ segment: string }> } }).Segmenter;
+  const characters = Segmenter ? Array.from(new Segmenter(undefined, { granularity: "grapheme" }).segment(clean), (s) => s.segment) : Array.from(clean);
   let out = "", length = 0;
   for (const character of characters) {
     const size = utf8Encode(character).length;

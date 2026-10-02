@@ -143,6 +143,35 @@ pub fn pkarr_status(state: State<'_, AppState>) -> crate::pkarr_network::Discove
     state.pkarr.status()
 }
 
+/// The turn record (WISP 06), read from every source: the DHT and each relay, one answer per source.
+#[tauri::command]
+pub async fn turn_read(
+    state: State<'_, AppState>,
+    public_key_z32: String,
+) -> Result<Vec<crate::turn_network::SourceAnswer>, String> {
+    let key: pkarr::PublicKey = public_key_z32
+        .as_str()
+        .try_into()
+        .map_err(|e| format!("Invalid public key: {}", e))?;
+    Ok(crate::turn_network::read(&state.pkarr.turn_sources(), &key).await)
+}
+
+/// The turn record, put as given on each source named, on that source's condition. Never retried.
+#[tauri::command]
+pub async fn turn_put(
+    state: State<'_, AppState>,
+    public_key_z32: String,
+    payload_b64: String,
+    conditions: std::collections::HashMap<String, Option<String>>,
+) -> Result<Vec<crate::turn_network::SourcePut>, String> {
+    let key: pkarr::PublicKey = public_key_z32
+        .as_str()
+        .try_into()
+        .map_err(|e| format!("Invalid public key: {}", e))?;
+    let payload = crypto::from_base64_url(&payload_b64)?;
+    crate::turn_network::put(&state.pkarr.turn_sources(), &key, &payload, &conditions).await
+}
+
 /// A relay payload signed in the WebView (the profile's did:dht), published as is.
 #[tauri::command]
 pub async fn publish_signed_packet(
