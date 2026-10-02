@@ -210,7 +210,7 @@ Phase 1 includes removal: the phone is the device most likely to be lost, and th
 3. publishes the turn record at the new address, without the removed device;
 4. publishes a **tombstone** at the old address and puts it again every hour while the profile exists.
 
-The tombstone is the turn record with turn 2^32 - 1, the highest `rev`, no active device and an empty set. It tells an **honest** device that was removed or left behind, whenever it comes back, to stop. It is not a lock: a DHT node accepts another packet at an equal sequence, so a holder of the old `D` can replace it, and the active device's hourly put restores it.
+The tombstone is the turn record with turn 2^32 - 1, the highest `rev` and no active device (`active` is 255). It keeps the old device set in its slots (the record is sealed, so nothing new shows) and is signed by the removing device from its own slot, so it verifies by the reader's ordinary rule. It tells an **honest** device that was removed or left behind, whenever it comes back, to stop. It is not a lock: a DHT node accepts another packet at an equal sequence, so a holder of the old `D` can replace it, and the active device's hourly put restores it.
 
 What removal can and cannot do depends on what the removed device held:
 
@@ -263,7 +263,7 @@ A reader accepts a record that: verifies as a BEP44 packet under the turn key; o
 
 **An unknown signer is accepted.** A record with no release whose author is a key the reader never saw is a forced takeover by a holder of `D` (for example a restored backup with a new device key). It is valid, it supersedes, and every device shows it as such. This follows from "`D` is the authority"; a rule that refused it would leave two devices active for ever.
 
-If two valid records at one sequence ever meet (they cannot be signed by two devices; a clone can do it), a reader compares the opened bodies and keeps the one with the lower `instance`. It never uses a library's own rule for equal sequences: the `pkarr` crate prefers the larger encoded bytes, which for a sealed record is random.
+If two valid records at one sequence ever meet (they cannot be signed by two devices; a clone can do it), a reader compares the opened bodies and keeps the one with the lower `instance`; the copy whose `instance` lost stops. It never uses a library's own rule for equal sequences: the `pkarr` crate prefers the larger encoded bytes, which for a sealed record is random.
 
 ### Publishing and reading
 
@@ -320,7 +320,7 @@ A standby reads the record when its screen is opened and every 10 minutes while 
 
 On `other`, `clone` or `tombstone`, at once: it writes `superseded` (or `removed`) durably and **reloads into the gate**. Nothing is said to contacts and nothing more is published. The reload ends every session, timer and wallet SDK. Its state stays as it is; what only it holds is the subject of [After a forced takeover](#after-a-forced-takeover).
 
-On `clone`, the copy that reads the foreign `instance` stops; the one that started last wrote the record and goes on. This detects a cloned storage at the clone's next read, which the first design could not.
+On `clone`, the copy that reads a foreign `instance` in a record with a higher sequence stops: the copy that started last wrote that record (each start raises `rev`) and goes on. At an equal sequence the lower `instance` goes on. This detects a cloned storage at the clone's next read, which the first design could not.
 
 ### Failure cases
 
@@ -457,7 +457,7 @@ The first frame carries the app version, the database version (`DB_VERSION`) and
 
 `B` never writes into a live profile. Incoming parts go to a **staging namespace**: a new storage namespace as a restore makes one ([05](05-backups.md#restore) already writes "every store and key before the profile is registered"), with its own peer database, local keys and file area. Files `B` already held are linked into it, not copied.
 
-- **Install** is one durable write: the profile's registry entry points at the staged namespace. Before it, `B`'s old frozen copy is the profile's storage; after it, the new state is. The old namespace is deleted afterwards.
+- **Install** is one durable write: the profile's registry entry points at the staged namespace. Before it, `B`'s old frozen copy is the profile's storage; after it, the new state is. The old namespace is kept until `active` is written: if the put of step 8 is refused, the pointer moves back to it and the staged one is deleted. Only then is the old one deleted.
 - A wallet's own database (Ark, Bark) arrives under a new local database name, and the wallet's record is pointed at it, as a restore does with fresh wallet ids. Nothing is written over a database that exists.
 - A staging namespace that is not installed is deleted when its handoff is cancelled or fails, and at the latest after 24 hours. Settings, Data and storage, shows it ("A move that did not finish · 1.2 GB") with **Discard**.
 - Room is checked with the app's own `FileBytes.room()` (`navigator.storage.estimate()` on the web) against the manifests before each pass.
@@ -695,6 +695,7 @@ The account switcher ([04](04-profiles.md)) shows such a profile with the word "
 The phone is the installed web app ([docs/WEB.md](../WEB.md)).
 
 - **The phone's push target survives a switch.** A contact holds one target per chat and learns it only on a live session, and a desktop has none of its own, so today a desktop coming home would clear the phone's (`w: null`) and a contact who was offline could never wake the phone again. Instead, the description of the phone's target (endpoint, keys, the per-chat tokens) moves with the profile, and an active device with no subscription of its own goes on giving contacts the phone's, with the unchanged `paired-wake` frame. When the phone is active again, contacts already hold its target.
+- **A subscription that changes on a standby.** A browser may replace a push subscription at any time. A standby whose subscription changed tells the active device over the device link when they next meet, and the active device hands out the new description; until then contacts hold a target that answers 404 or 410 and forget it, as today.
 - **A standby phone never rings.** A push that reaches a standby shows "New message. Active on <device>." or, for a call, "Call for you. Active on <device>.", quietly: no ring, no vibration pattern, no notice that stays up. A tap opens the standby screen. The caller sees today's "<name> did not open Ghostly." after its wait; the standby cannot answer, and the notice tells the person where to.
 - **The device link can wake a phone.** Each device with a push subscription shares its target with the person's other devices over the device link. A desktop asking a suspended phone for a handoff posts a push to it: "<device> wants to take over. Open Ghostly."
 - **Storage.** On iPhone and iPad the Home Screen install gates enrollment. Elsewhere a refused `persist()` is a warning, not a stop. If a phone's storage is cleared while it is active, the frozen copy on the other device and a forced takeover are the recovery, which is why phase 1 always keeps one.
