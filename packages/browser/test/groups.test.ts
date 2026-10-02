@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Groups, type GroupStore, type GroupsHost } from "../src/engine/groups";
-import { createIdentity, encodeGroupEntryLink, identityFromSeedB64, randomBytes, toBase64Url, type GhostRecord, type GroupState } from "@ghostly/core";
+import { createIdentity, encodeGroupEntryLink, decodeGroupEntryLink, knockIdentity, readKnocks, identityFromSeedB64, randomBytes, toBase64Url, type GhostRecord, type GroupState } from "@ghostly/core";
 import type { StoredGroup, StoredMessage } from "../src/shared/types";
 // covers: groups.picture.set, groups.rename, groups.create, groups.invite, groups.send, groups.leave, groups.forget, groups.link.enable, groups.link.join, groups.link.replace, groups.protocol.entry, groups.protocol.mentions
 
@@ -362,6 +362,39 @@ describe("group engine: admission over a contact chat, edges from the roster", (
     expect([alice, bob, carol].map(g => [g.views()[0].name, g.views()[0].picture])).toEqual([["Book club", pic(2)], ["Book club", pic(2)], ["Book club", pic(2)]]);
     expect(world.peers.get("alice")!.messages.filter(m => m.event === "renamed").map(m => m.text)).toEqual(["You renamed the group to “Book club”"]);
     expect(world.peers.get("carol")!.messages.filter(m => m.event === "renamed").map(m => m.member)).toEqual([alice.views()[0].myKey]);
+  });
+
+  it("a knock another joiner's write replaced goes again within moments, and one still there is not rewritten", async () => {
+    const world = new World();
+    const alice = world.add("alice"), carol = world.add("carol"), dave = world.add("dave");
+    await alice.load(); await carol.load(); await dave.load();
+    const groupId = await alice.create("Ghosts", "mesh");
+    const code = await alice.enableLink(groupId);
+    const link = decodeGroupEntryLink(code)!;
+    const knockKey = knockIdentity(link).pubKeyZ32;
+    const knocks = () => readKnocks(link, world.pkarr.get(knockKey) ?? []).map(k => k.key).sort();
+    const keyOf = (g: Groups) => identityFromSeedB64((g as unknown as { stored: Map<string, StoredGroup> }).stored.get(groupId)!.invitation!.seedB64!).pubKeyZ32;
+    await carol.joinByLink(code);
+    await vi.waitFor(() => expect(knocks()).toHaveLength(1));
+    const carolOnly = world.pkarr.get(knockKey)!;
+    await dave.joinByLink(code);
+    await vi.waitFor(() => expect(knocks()).toHaveLength(2));
+    // As when both open the link at the same moment: each read the record without the other's knock, and Carol's write landed last.
+    world.pkarr.set(knockKey, carolOnly);
+    expect(knocks()).toEqual([keyOf(carol)]);
+    const writes = vi.spyOn(world.pkarr, "set");
+    const t0 = Date.now();
+    // Dave reads his knock back within moments and finds it gone: it goes again, beside Carol's.
+    await dave.tick(t0 + 1_600);
+    expect(knocks()).toEqual([keyOf(carol), keyOf(dave)].sort());
+    expect(writes).toHaveBeenCalledTimes(1);
+    // Carol's is there: read back, and not written again while it is fresh. Dave's neither.
+    await carol.tick(t0 + 1_600); await carol.tick(t0 + 5_100); await carol.tick(t0 + 10_200); await dave.tick(t0 + 10_200);
+    expect(writes).toHaveBeenCalledTimes(1);
+    // Past the refresh age it is written again: the admin's app answers only fresh knocks.
+    await carol.tick(t0 + 31_000);
+    expect(writes).toHaveBeenCalledTimes(2);
+    expect(knocks()).toEqual([keyOf(carol), keyOf(dave)].sort());
   });
 
   it("tells the joiner how far a join through a link got: knocking, knocked, answered, admitted", async () => {
