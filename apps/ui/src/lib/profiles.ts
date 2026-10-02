@@ -29,8 +29,8 @@ export const THEME_COLOR: Record<ColorTheme, string> = { cyan: "#22d3ee", purple
 const DEFAULT_ENTRY: ProfileEntry = { id: "", name: "Personal", createdAt: 0 };
 /**
  * The first profile's name until someone renames it, in the app's language: the registry keeps the built-in English
- * one, so a change of language changes it too. A backup of it carries the built-in one, so the copy restored from it
- * follows the language as well.
+ * one, so a change of language changes it too. A backup of it carries the built-in one and says that it is
+ * (`profile.builtIn`), so the copy restored from it follows the language as well.
  */
 let defaultName = DEFAULT_ENTRY.name;
 export function setDefaultProfileName(name: string): void {
@@ -57,9 +57,10 @@ const shown = (entry: ProfileEntry): ProfileEntry => {
 export const RESTORED_WORDS = ["restored", "restaurado", "restauré", "ripristinato", "مستعاد", "已恢复", "復元"];
 /**
  * The first profile's name in each language (`profile.defaultName` in every locale, which a test checks against this
- * list). A backup an older app made of that profile, never renamed, carries one of them instead of the built-in one.
+ * list). A backup an older app made of that profile, never renamed, carries the one of that app's language instead
+ * of the built-in one.
  */
-export const DEFAULT_NAMES = ["Personal", "Pessoal", "Personnel", "Personale", "شخصي", "个人", "個人"];
+export const DEFAULT_NAMES: Readonly<Record<string, string>> = { en: "Personal", pt: "Pessoal", es: "Personal", fr: "Personnel", it: "Personale", ar: "شخصي", zh: "个人", ja: "個人" };
 const RESTORED_SUFFIX = new RegExp(`^(.*\\S)\\s*[(（]\\s*(?:${RESTORED_WORDS.join("|")})\\s*[)）]$`, "iu");
 /** A name without the restored words at its end ("Work (restaurado) (restored)" is "Work"), and whether it had any. */
 function withoutRestoredWord(name: string): { name: string; marked: boolean } {
@@ -78,6 +79,16 @@ function nameAndMark(id: string, raw: string): { name: string; marked: boolean }
   return { name: cleanName(marked ? name : collapsed), marked };
 }
 
+/**
+ * Whether the name in a backup with no `profile.builtIn` (made before the marker) is the built-in one. Those apps
+ * wrote the first profile never renamed as the name in the app's language, so it is only when the name is the first
+ * profile's name in the language the backup itself was made in (its settings; English when they name none). The same
+ * word of another language ("Pessoal" in a backup of an English app) was typed by someone, and is kept as typed.
+ */
+export function builtInNameBefore(name: string, language: string | undefined): boolean {
+  const { name: clean } = nameAndMark("restored", name);
+  return clean === DEFAULT_ENTRY.name || clean === (DEFAULT_NAMES[language ?? "en"] ?? DEFAULT_ENTRY.name);
+}
 
 function read(): Registry {
   try {
@@ -118,6 +129,9 @@ export function baseProfileName(id: string): string | undefined {
 export function storedProfileName(id: string): string | undefined {
   return read().profiles.find((p) => p.id === id)?.name;
 }
+
+/** Whether a name the registry keeps is the built-in one, which is shown in the app's language: what a backup marks. */
+export const isBuiltInName = (name: string) => name === DEFAULT_ENTRY.name;
 
 /**
  * The profile this page runs as, fixed when it starts (see the entry points). The registry's choice can change under
@@ -177,17 +191,19 @@ export function newProfileId(): string {
   return id;
 }
 
-/** Adds a profile whose data is already in place (a restored backup, WISP 05), and returns it as it is shown. */
-export function registerProfile(id: string, name: string, restored = false): ProfileEntry {
+/**
+ * Adds a profile whose data is already in place (a restored backup, WISP 05), and returns it as it is shown.
+ * `builtIn`: the backup says its name is the built-in one, so the profile takes it and follows the app's language.
+ * Any other name is kept as it was written, a word that is the first profile's name in some language included.
+ */
+export function registerProfile(id: string, name: string, restored = false, builtIn = false): ProfileEntry {
   if (!ID.test(id)) throw new Error("Invalid profile id");
   const registry = read();
   if (registry.profiles.some((p) => p.id === id)) throw new Error("That profile already exists");
   // A backup of a profile an older app restored carries "(restored)", or the word of another language, in its name:
   // the flag says it now.
   const { name: clean, marked } = nameAndMark(id, name);
-  // A backup an older app made of the first profile, never renamed, carries the name of that app's language
-  // ("Pessoal"): it is the built-in one, which follows the language.
-  const entry: ProfileEntry = { id, name: restored && DEFAULT_NAMES.includes(clean) ? DEFAULT_ENTRY.name : clean || "Restored", createdAt: Date.now() };
+  const entry: ProfileEntry = { id, name: builtIn ? DEFAULT_ENTRY.name : clean || "Restored", createdAt: Date.now() };
   if (restored || marked) entry.restored = true;
   write({ ...registry, profiles: [...registry.profiles, entry] });
   return shown(entry);
