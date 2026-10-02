@@ -82,7 +82,8 @@ describe("a community member removed while its app was closed", { timeout: 120_0
     // The hubs' commits are lost on the way: he stays as he was, and becomes a hub of his own.
     world.drop = (from, to, frame) => { if (from === dave || to === dave) seen.push({ at: world.now, from: from.name, to: to.name, t: String(frame.t) }); return to === dave; };
     await world.restart(dave);
-    await world.until(() => dave.groups.communities.isHub(id), 3 * 60_000);
+    // (A while: each hub opens him an edge for its farewell, and a member waits a minute for a hub whose side is there.)
+    await world.until(() => dave.groups.communities.isHub(id), 5 * 60_000);
     await bob.groups.send(id, "after the removal");
     await carol.groups.send(id, "after the removal, too");
     await world.run(3 * 60_000);
