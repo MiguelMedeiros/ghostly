@@ -406,7 +406,8 @@ export function GroupChat() {
     <CueChat.Provider value={groupChat(groupId)}>
     {/* Each member's colour, given out over the roster: the same on every member's device (lib/memberColors.ts). */}
     <MemberColorsProvider keys={group.members.map(m => m.key)}>
-    <div className="flex-1 flex flex-col h-full bg-chat-bg" data-testid="group-chat" data-status={group.status ?? "invitation"}>
+    {/* A file dropped anywhere on the group is answered by the composer (`data-file-drop`): groups take no files yet, and it says so. */}
+    <div data-file-drop className="flex-1 flex flex-col h-full bg-chat-bg" data-testid="group-chat" data-status={group.status ?? "invitation"}>
       {/* A member's message that comes while the group is open, read out once to a screen reader. */}
       <MessageAnnouncer chat={groupId} messages={messages} nameOf={m => m.member ? authorName(group, m.member, t) : group.name || t("group.chat.unnamed")} />
       <div className="h-14 header-safe flex items-center justify-between px-4 max-md:pl-1 max-md:pr-1 bg-panel-header border-b border-border shrink-0">
