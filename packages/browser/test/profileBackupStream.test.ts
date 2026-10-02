@@ -161,6 +161,16 @@ it("a backup without a passphrase says so, restores with none, and is still refu
   expect((await readAll(`ghostly_${restored.id}`, STORES.files)).length).toBe(3);
 });
 
+it("a Blob on a record is the whole file, whatever size its description says", async () => {
+  await seed({ small: 0 });
+  await transact([STORES.files], (s) => { s[STORES.files].put({ id: "link1-in-odd", linkId: "link1", blob: new Blob([pattern(700, 4)]), createdAt: 1, metadata: { name: "odd.bin", size: 9999, mime: "", timestamp: 1 } }); });
+  const sink = memorySink();
+  expect(await writeProfileBackup(sink, { passphrase: PASS })).toMatchObject({ files: 1, fileBytes: 700, skipped: 0 });
+  const restored = await restoreProfileBackup(sink.bytes(), PASS);
+  const [file] = await readAll(`ghostly_${restored.id}`, STORES.files) as { blob: Blob }[];
+  expect(same(new Uint8Array(await file.blob.arrayBuffer()), pattern(700, 4))).toBe(true);
+});
+
 it("a sealed bundle changed or cut short is refused, and what the restore had written is taken away", async () => {
   await seed({ small: 40 });
   const bundle = await createProfileBackup(PASS);

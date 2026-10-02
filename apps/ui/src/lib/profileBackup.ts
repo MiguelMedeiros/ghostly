@@ -96,9 +96,11 @@ function piecesSource(db: IDBDatabase, id: string): Promise<FileSource | null> {
 async function fileSource(file: StoredFile, space: string, active: boolean, pieces: () => Promise<IDBDatabase | null>): Promise<FileSource | null> {
   let source: FileSource | null = null;
   if (file.blob) {
+    // A Blob on the record is the whole file: kept only once it was.
     const blob = file.blob;
-    source = { size: blob.size, read: async (offset, length) => new Uint8Array(await blob.slice(offset, offset + length).arrayBuffer()) };
-  } else if (file.bytes) {
+    return { size: blob.size, read: async (offset, length) => new Uint8Array(await blob.slice(offset, offset + length).arrayBuffer()) };
+  }
+  if (file.bytes) {
     const backend = await fileBytesOf(file.bytes);
     const store = !backend ? null : active ? backend : backend.forSpace?.(space) ?? null;
     if (store) {
