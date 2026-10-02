@@ -74,6 +74,7 @@
     "joinGroup": "Entrar no grupo",
     "joinHint": "Entrar cria uma conversa com quem fez este convite. Nada é enviado até você entrar.",
     "joining": "Entrando…",
+    "link": "Link",
     "loadKeyHint": "Carregar consulta seus relays ({{relays}}), que ficam sabendo seu endereço IP e esta chave.",
     "loadNote": "Carregar nota",
     "loadNoteHint": "Carregar consulta seus relays ({{relays}}), que ficam sabendo seu endereço IP e esta nota.",
@@ -101,6 +102,8 @@
     "proofExpired": "Prova expirada de {{who}}",
     "provedBy": "Comprovado por {{who}}",
     "pubkyKey": "Chave Pubky",
+    "qrHint": "Escaneie com outro dispositivo. Quem vir este código pode entrar.",
+    "qrTitle": "Código QR do link",
     "resolveFailed": "Não foi possível resolver: {{error}}",
     "resolveNote": "Resolver mostra o que é, não quem o possui.",
     "resolveNoteNone": "Resolver mostra o que é, não quem o possui: um contato prova isso compartilhando como identidade.",
@@ -109,10 +112,7 @@
     "youSent": "Você enviou",
     "yourDid": "Seu DID do Ghostly",
     "yourIdentity": "Sua identidade",
-    "yourInvite": "Seu convite",
-    "link": "Link",
-    "qrHint": "Escaneie com outro dispositivo. Quem vir este código pode entrar.",
-    "qrTitle": "Código QR do link"
+    "yourInvite": "Seu convite"
   },
   "file": {
     "accept": "Aceitar",

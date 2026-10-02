@@ -74,6 +74,7 @@
     "joinGroup": "Join group",
     "joinHint": "Joining makes a chat with whoever made this invite. Nothing is sent until you join.",
     "joining": "Joining…",
+    "link": "Link",
     "loadKeyHint": "Loading asks your relays ({{relays}}), which learn your IP address and this key.",
     "loadNote": "Load note",
     "loadNoteHint": "Loading asks your relays ({{relays}}), which learn your IP address and this note.",
@@ -101,6 +102,8 @@
     "proofExpired": "Proof expired from {{who}}",
     "provedBy": "Proved by {{who}}",
     "pubkyKey": "Pubky key",
+    "qrHint": "Scan it with another device. Anyone who sees it can join.",
+    "qrTitle": "Link QR code",
     "resolveFailed": "Could not resolve it: {{error}}",
     "resolveNote": "Resolving shows what it is, not who holds it.",
     "resolveNoteNone": "Resolving shows what it is, not who holds it: a contact proves that by sharing it as an identity.",
@@ -109,10 +112,7 @@
     "youSent": "You sent this",
     "yourDid": "Your Ghostly DID",
     "yourIdentity": "Your identity",
-    "yourInvite": "Your invite",
-    "link": "Link",
-    "qrHint": "Scan it with another device. Anyone who sees it can join.",
-    "qrTitle": "Link QR code"
+    "yourInvite": "Your invite"
   },
   "file": {
     "accept": "Accept",

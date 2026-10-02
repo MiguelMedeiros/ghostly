@@ -13,7 +13,7 @@ const COPIED_MS = 1500;
  * Copies a link on a click and says so for a moment; `failed` when neither way of copying worked. The link is
  * a secret that lets someone in: it goes to the clipboard and nowhere else.
  */
-export function useCopyLink(url: string) {
+function useCopyLink(url: string) {
   const [state, setState] = useState<"" | "copied" | "failed">("");
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   useEffect(() => () => clearTimeout(timer.current), []);
