@@ -1,4 +1,4 @@
-import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { MessageDetailsView } from "@ghostly/browser/shared/types";
 import { LONG_PRESS_MS, MessageBubble } from "../../components/MessageBubble";
@@ -171,6 +171,24 @@ describe("what it says", () => {
     expect(rows("path")).toMatchObject({ "Received over": "Iroh through relay.example", Relay: "relay.example" });
     expect(rows("timing")).toMatchObject({ Received: "2023-11-14T22:13:20.300Z", "After composing": "300 ms (by the two devices' clocks)" });
     expect(rows("crypto")).toMatchObject({ Channel: "Iroh: QUIC with TLS 1.3 (raw public keys)" });
+  });
+
+  it("a text from a contact whose clock is two minutes ahead: both times as they are, and the bubble shows no time to come", async () => {
+    // Placed when it came (`timestamp`); the contact's clock said two minutes later (`sentAt`).
+    const cameAt = 1_700_000_000_300, said = cameAt + 120_000;
+    fakeEngine.on("messageDetails", () => textView({
+      message: { id: "peer_x", wireId: "w", linkId: "link-1", sender: "peer", timestamp: cameAt, sentAt: said, via: "datalink", kind: "text", textBytes: 5 },
+      details: { received: { at: cameAt, path: "webrtc/1", relayed: false }, wire: { frame: "paired-message", protocol: "chat/1", plaintextBytes: 5, wireBytes: 61 } },
+    }));
+    const { user } = bubble({ id: "peer_x", sender: "peer", delivery: undefined, timestamp: cameAt, sentAt: said });
+    expect(screen.getByTestId("message-time")).toHaveAttribute("data-at", String(cameAt));
+    await user.dblClick(screen.getByText("hello"));
+    await waitFor(() => expect(screen.getByTestId("message-details")).toHaveAttribute("data-loaded", "yes"));
+    expect(rows("timing")).toMatchObject({ Composed: "2023-11-14T22:15:20.300Z", Received: "2023-11-14T22:13:20.300Z" });
+    // A clock behind shows on the bubble as the contact said it.
+    cleanup();
+    bubble({ id: "peer_y", sender: "peer", delivery: undefined, timestamp: cameAt, sentAt: cameAt - 120_000 });
+    expect(screen.getByTestId("message-time")).toHaveAttribute("data-at", String(cameAt - 120_000));
   });
 
   it("a text on the DHT floor: the envelope, its nonce and the record it went in", async () => {

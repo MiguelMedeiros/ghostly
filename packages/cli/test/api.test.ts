@@ -4,7 +4,7 @@ import { callApi, findChat, mentionsFor, redactSettings, type ApiContext } from 
 import type { GhostlyEvent } from "../src/events";
 import { chatJson, isLive } from "../src/views";
 import { pageOf } from "./support/messagePage";
-// covers: headless.api, headless.engine-passthrough, headless.secret-guard, headless.typing
+// covers: headless.api, headless.engine-passthrough, headless.secret-guard, headless.typing, chat.order
 
 /** The API over a fake engine: what it checks before the engine is asked, and what it makes of the answers. */
 const link = (id: string, fields: Partial<LinkView> = {}) => ({ id, peerPubKeyZ32: "p" + id, createdAt: 1, lastMessageAt: 0, profile: "paired-chat/1", textDelivery: "stream", ...fields }) as unknown as LinkView;
@@ -186,6 +186,18 @@ describe("chats", () => {
     expect(await callApi(ctx, "chat.history", { chat: "chat-one", after: 1, limit: 2 })).toMatchObject({ messages: [{ id: "b" }, { id: "c" }], more: true });
     await expect(callApi(ctx, "chat.history", { chat: "chat-one", before: "zz" })).rejects.toMatchObject({ code: "not_found" });
     await expect(callApi(ctx, "chat.history", { chat: "chat-one", limit: -1 })).rejects.toMatchObject({ code: "bad_request" });
+  });
+
+  it("history is in the order messages came here, whatever each sender's clock said, and gives both times", async () => {
+    // As the engine stores them: `timestamp` is the row's place (when it came), `sentAt` what the contact's clock said.
+    // The contact's clock was two minutes ahead for "b", and days behind for "d".
+    const { ctx } = fake([msg("b", 2_000, { sentAt: 122_000 }), msg("a", 1_000, { sender: "me" }), msg("d", 4_000, { sentAt: 4_000 - 3 * 86_400_000 }), msg("c", 3_000, { sender: "me" })]);
+    const page = await callApi(ctx, "chat.history", { chat: "chat-one" }) as { messages: { id: string; timestamp: number; sentAt?: number }[] };
+    expect(page.messages.map((m) => m.id)).toEqual(["a", "b", "c", "d"]);
+    expect(page.messages.map((m) => m.sentAt)).toEqual([undefined, 122_000, undefined, 4_000 - 3 * 86_400_000]);
+    // A time as a cursor is a place, as `timestamp` is.
+    expect(await callApi(ctx, "chat.history", { chat: "chat-one", after: 2_000 })).toMatchObject({ messages: [{ id: "c" }, { id: "d" }] });
+    expect(await callApi(ctx, "chat.history", { chat: "chat-one", before: 3_000 })).toMatchObject({ messages: [{ id: "a" }, { id: "b" }] });
   });
 
   it("remove needs a yes", async () => {
