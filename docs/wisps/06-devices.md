@@ -138,11 +138,11 @@ Choice recorded: the reviews offered "derive the links" or "two devices only in 
 Device-link-only mode is a different start, not a flag checked here and there.
 
 - The device state is read **before** `GhostlyNode.start()` runs anything, on every client: the web app's first `engine.connect()`, the extension's `onStartup` and `onInstalled`, the Desktop's webview. Today `start()` starts identities and the DID first, then every wallet, then chats (`packages/browser/src/engine/node.ts`); none of that may run.
-- In any state but `single` and `active` the client **does not open the peer database at all**. It starts a small engine that knows only the device state, the turn record and the device links. So no wallet SDK starts (they start eagerly today), no DID or proof record is put, no chat or group link starts, no hold poll runs, and an app update never migrates a frozen copy.
+- In any state but `single` and `active` the client **does not open the peer database**, with one exception: a `releasing` device opens it **read-only** to send the parts of pass 2, and closes it at the release. It starts a small engine that knows only the device state, the turn record and the device links. So no wallet SDK starts (they start eagerly today), no DID or proof record is put, no chat or group link starts, no hold poll runs, and an app update never migrates a frozen copy.
 - **Profile peek** ("Check other profiles", [04](04-profiles.md#checking-other-profiles)) skips a profile that is not `single` or `active`: it reads mailboxes with the profile's own keys, which a standby must not do, and a standby would show unread counts.
 - The notice of [the newer-version check](#versions) is never raised by a frozen copy: nothing opens it.
 - **The push worker** reads the device state itself, from the `ghostly-devices` database, each time a push arrives, and picks its notice from it ([Push and the phone](#push-and-the-phone)). It needs no message from a page.
-- A standby writes nothing into a frozen copy, ever. What it must do without the profile database is listed where it arises: deleting the Breez database by its name, and serving files left for later from an index kept beside the device state.
+- A standby writes nothing into a frozen copy, ever. What it must do without the profile database is listed where it arises: deleting the Breez database by its name, and serving files left for later from an index. Both the index and the Breez database's name are written beside the device state **at quiesce, before the reload into the gate**.
 - Stopping is done by **writing the state and reloading into the gate**, never by trusting each SDK to close. Bark runs a background daemon and Fedimint holds an exclusive file handle; a reload ends both.
 
 ### Durable device state
@@ -198,7 +198,7 @@ A backup of an enrolled profile carries `D`, the device set and the turn it was 
 
 1. derives the turn address and reads the record ([Publishing and reading](#publishing-and-reading));
 2. finds **no record** and no device set in the bundle: restores as today (a profile that was never enrolled). A record that expired because every device was off for hours is missed here, which is a limit until every profile keeps a record ([open question 3](#decisions-and-open-questions));
-3. finds **a record with a device active**: does not start the copy. It says "This profile is active on <device>" and offers **Add this device instead** (enrollment, then a handoff: the safe path), **Take over** (a [forced takeover](#forced-takeover), for when the other devices are gone) or **Cancel**;
+3. finds **a record with a device active**, or **no record (`none`) while the bundle itself carries a device set** (the record expired; the devices may still be alive): does not start the copy. It says "This profile is active on <device>" and offers **Add this device instead** (enrollment, then a handoff: the safe path), **Take over** (a [forced takeover](#forced-takeover), for when the other devices are gone) or **Cancel**;
 4. finds **a tombstone** (the device set moved to a new `D` after a removal): says "This backup is from before a device was removed. Starting it makes a second copy of your profile." It cannot take over (it has no current `D`). It may start only as a profile of its own, after the person types the profile's name, and that copy is the "two live copies" case of [05](05-backups.md#security-and-operation), which nothing here can stop;
 5. **cannot read** the record: does not start the copy, and says so.
 
@@ -213,9 +213,9 @@ Phase 1 includes removal: the phone is the device most likely to be lost, and th
 3. publishes the turn record at the new address, without the removed device;
 4. publishes a **tombstone** at the old address and puts it again every hour while the profile exists.
 
-The tombstone is the turn record with turn 2^32 - 1 and no active device (`active` is 255). Its slots keep the devices that **stay** and are zero for the removed one, so a device that reads it knows which it is: still listed means `moving` (wait for `D'`), not listed means `removed`. It is signed by the removing device from its own slot, so it verifies by the reader's ordinary rule. **Every tombstone has the one sequence number 2^52 - 1**, whatever its author's slot: ordinary records stop at turn 2^32 - 2, so no record can outrank a tombstone and its hourly put is never refused as older. Tombstone packets are kept beside the device state (at most 8, the oldest dropped) and move in a handoff, so whichever device is active puts them. It tells an **honest** device that was removed or left behind, whenever it comes back, to stop. It is not a lock: a DHT node accepts another packet at an equal sequence, so a holder of the old `D` can replace it, and the active device's hourly put restores it.
+The tombstone is the turn record with turn 2^32 - 1 and no active device (`active` is 255). Its slots keep the devices that **stay** and are zero for the removed one, so a device that reads it knows which it is: still listed means `moving` (wait for `D'`), not listed means `removed`. It is signed by the removing device from its own slot, so it verifies by the reader's ordinary rule. **Every tombstone has the one sequence number 2^52 - 1**, whatever its author's slot: ordinary records stop at turn 2^32 - 2, so no record can outrank a tombstone and its hourly put is never refused as older. Tombstone packets are kept beside the device state (at most 8, the oldest dropped). They, the old `D` of each, and the list of devices that have not acknowledged the new one are written durably **before** the tombstone is put, so the remover's crash loses none of it, and they **move in a handoff** (a part `devices`), so whichever device is active puts the tombstones and goes on delivering `D'`. **Any device that holds `D'` answers `set-update`** to a `moving` device that reaches it on an old link, not only the remover. It tells an **honest** device that was removed or left behind, whenever it comes back, to stop. It is not a lock: a DHT node accepts another packet at an equal sequence, so a holder of the old `D` can replace it, and the active device's hourly put restores it.
 
-A `moving` device whose active device is gone for good is not stuck: **My other device is lost or broken** there makes a new device set of its own (a new random `D`, itself the only device) from its frozen copy, as a forced takeover, and says that other devices must be added again.
+A `moving` device whose active device is gone for good is not stuck: **My other device is lost or broken** there makes a new device set of its own (a new random `D`, itself the only device) from its frozen copy, as a forced takeover, and says that other devices must be added again. It **replaces the tombstone at the old address with one that lists only itself**, so any other `moving` device reads `removed` instead of starting a second set, and a remover that was alive after all finds its tombstone replaced and shows "<device> started a device set of its own": two sets of one profile are then visible to the person, who removes one. A removed device holding the old `D` can write such a tombstone too. That costs liveness only: a staying device that wrongly reads `removed`, or whose old link is jammed, is added again by enrollment from the active device, which uses a one-time link and needs nothing of the old set.
 
 What removal can and cannot do depends on what the removed device held:
 
@@ -264,11 +264,11 @@ The body is **binary and of fixed length**, so every record has one size and not
 
 **The BEP44 sequence number is `turn * 2^20 + rev * 4 + author`**, not the clock (a tombstone alone has the fixed sequence 2^52 - 1). `rev` starts at 0 in each turn and rises by one with every record the active device writes in it (a start, a device added or renamed). If `rev` would reach 2^18, the active device writes the next turn instead, with a release from itself to itself; readers accept a release whose `from` and `to` are both the device that was active. The first turn is random under 2^29, so the sequence stays under today's microsecond clock and the absolute count says nothing; the highest value, the tombstone's, is 2^52 - 1, exact in JavaScript and far from the dates a relay cannot format. Folding the author's slot into the low bits means **two enrolled devices never sign an equal sequence**, whatever they race on: each has its own slot. The one exception is two copies restored from backups that both take over at once and pick the same free slot; that is settled as a clone is, below. A lower sequence is refused by a DHT node (measured) and, by its source, by a relay (409); a stale device that tries to put its old record back learns from the refusal that it was replaced.
 
-A reader accepts a record that: verifies as a BEP44 packet under the turn key; opens under the seal key; has version 1 and a consistent layout; is signed by the key in its own slot `author`; has a sequence not lower than the highest it holds, equal to the formula below for its turn, `rev` and author (or, for a tombstone, to 2^52 - 1); and, when a release is present, whose release verifies under the key in slot `from`, names the record's turn and the key in slot `to`, with `to` equal to `active`. A reader that knew the previous record also checks that `from` was the active device there, and shows a mismatch as a takeover without a release. **Inside a turn only its active device writes**: a record at the highest known turn whose author is not that turn's active device is invalid and dropped, so a holder of `D` cannot quietly add a slot at a higher `rev`; to change anything it must raise the turn, which every device shows.
+A reader accepts a record that: verifies as a BEP44 packet under the turn key; opens under the seal key; has version 1 and a consistent layout; is signed by the key in its own slot `author`; has a sequence not lower than the highest it holds, equal to the formula below for its turn, `rev` and author (or, for a tombstone, to 2^52 - 1); and, when a release is present, whose release verifies under the key in slot `from`, names the record's turn and the key in slot `to`, with `to` equal to `active`. A reader that knew the previous record also checks that `from` was the active device there, and shows a mismatch as a takeover without a release. **A record is written by the device it names active**: a record whose `author` differs from its own `active` is invalid and dropped, a tombstone excepted (its `active` is 255 and its author is the remover). So a holder of `D` cannot quietly add a slot at a higher `rev` under someone else's turn; it can only write a record that names itself active, which every device shows as a takeover. **Of two valid records at one turn** (a taker with a release and a third device forcing the same turn, for example) **the higher sequence wins**, which the slot in the low bits makes the same for every reader; the device whose record lost reads `other`.
 
 **An unknown signer is accepted.** A record with no release whose author is a key the reader never saw is a forced takeover by a holder of `D` (for example a restored backup with a new device signing key). It is valid, it supersedes, and every device shows it as such. This follows from "`D` is the authority"; a rule that refused it would leave two devices active for ever.
 
-If two valid records at one sequence ever meet (they cannot be signed by two devices; a clone can do it), a reader compares the opened bodies and keeps the one with the lower `instance`; the copy whose `instance` lost stops. It never uses a library's own rule for equal sequences: the `pkarr` crate prefers the larger encoded bytes, which for a sealed record is random.
+If two valid records at one sequence ever meet (they cannot be signed by two enrolled devices; a clone, or two restored copies in one slot, can do it), a reader compares the opened bodies and keeps the one with the lower `instance`; its writer goes on and writes `rev` plus one at once, and the other stops. It never uses a library's own rule for equal sequences: the `pkarr` crate prefers the larger encoded bytes, which for a sealed record is random.
 
 ### Publishing and reading
 
@@ -288,14 +288,15 @@ The turn has its own publish and read path. The chat path (`packages/core/src/re
 
 1. Ask **every** configured relay, and on Desktop the DHT itself, in parallel, 8 seconds each.
 2. Verify and open each answer; drop what fails.
-3. Take the highest sequence among them and the record stored locally.
+3. Take the highest sequence among the answers. The locally stored packet is what the answers are compared with; it is never counted as an answer.
 4. The result is one of:
 
 | Result | Meaning |
 |---|---|
-| `mine` | The highest record is **byte for byte the packet this device stored** |
+| `mine` | **A source returned**, as the highest record, byte for byte the packet this device stored |
+| `behind` | Sources answered, and the highest they hold is below this device's stored sequence (its put reached nobody, or was forgotten). The device puts its stored packet again, conditionally on what it read, and reads again. It is not `mine` until a source returns it |
 | `other` | A higher turn, or another device active at this turn |
-| `clone` | A record **above this device's stored sequence**, authored from this device's own slot and key, that is not its stored packet: another copy of this device's storage wrote it. A device's own last record, found again after a restart, is its stored packet and reads `mine`, whatever `instance` it carries |
+| `clone` | A record **at or above this device's stored sequence**, authored from this device's own slot and key, that is not its stored packet: another copy of this device's storage wrote it. A device's own last record, found again after a restart, is its stored packet and reads `mine`, whatever `instance` it carries |
 | `tombstone` | The address is closed; the reader is either still listed (`moving`) or not (`removed`) |
 | `none` | At least one source answered, and none has a record |
 | `unreachable` | No source answered |
@@ -305,6 +306,7 @@ A read is **good** when at least one source answered. Both default relays are ru
 ### Who may raise the turn
 
 - The device that takes a normal handoff, with the release of the device that was active.
+- The active device itself, when `rev` runs out, with a release from itself to itself. It stays active throughout; this is the one release that is not preceded by writing `standby`.
 - A device that forces a takeover, with no release. The record says so, and every other device shows it. Its turn is one above the highest turn it knows, **counting any release it signed itself**: a device that released turn `N + 1` and then takes over uses `N + 2`, so the taker's held release can never outrank it.
 
 Each needs the person to press a button. Nothing raises the turn by itself.
@@ -327,7 +329,7 @@ A standby reads the record when its screen is opened and every 10 minutes while 
 
 On `other`, `clone` or `tombstone`, at once: it writes `superseded` (on a tombstone, `moving` or `removed`) durably and **reloads into the gate**. Nothing is said to contacts and nothing more is published. The reload ends every session, timer and wallet SDK. Its state stays as it is; what only it holds is the subject of [After a forced takeover](#after-a-forced-takeover).
 
-On `clone`, the copy that reads it stops: the other copy started first and wrote a record this one never stored. If both started in the same moment and signed the same sequence, the lower `instance` goes on. This detects a cloned storage at the clone's next read, which the first design could not.
+On `clone` above its stored sequence, the copy that reads it stops: the other copy wrote a newer record that this one never stored. That is the copy that started last, so an original that has run since before the copy was made stops at its next read and the fresh copy goes on; which of the two is "the original" cannot be told from inside. On `clone` at an **equal** sequence (both started in the same moment), the lower `instance` goes on and **writes `rev` plus one at once**, so the network holds one record again; the other stops. This detects a cloned storage at the clone's next read, which the first design could not.
 
 ### Device state by turn read
 
@@ -337,12 +339,14 @@ Every state, against every result of a read. No cell is empty, and every state h
 |---|---|---|---|---|---|---|
 | `active`, at start | Write the next record, store, put, start | `superseded` | `superseded`, shown as "Another copy of this device is running" | `moving` if listed, else `removed` | Write the next record, store, put with no condition, start | Do not start; "Try again" or "Start anyway" (offline only) |
 | `active`, running | Go on | `superseded`, reload | `superseded`, reload | `moving` or `removed`, reload | Put the stored packet again, go on | Go on; no wallet opened, no spend, no admin work until a good read |
-| `standby` | Cannot happen (its stored packet is not the highest unless it is active); treated as `other` | Show "Active on <device>" | Treated as `other` | `moving` or `removed` | Show the device it last knew as active; a handoff still needs that device | Show "Can't check which device is active" |
+| `standby` | Its own last record is still the highest: it released and the taker has not put its turn yet. Show "Moving to <device>. Waiting for it to finish." | Show "Active on <device>" | Treated as `other` | `moving` or `removed` | Show the device it last knew as active; a handoff still needs that device | Show "Can't check which device is active" |
 | `releasing`, at start | Write `active`, then as `active` | `superseded` | `superseded` | `moving` or `removed` | Write `active`, then as `active` | Write `active`, then as `active` at start |
 | `taking` | Write `active`, start | Pointer back, drop staging, `standby` | The same | The same, then `moving` or `removed` | Put with no condition, read back | Wait, try again |
 | `superseded` | Cannot happen | Stay; **Use here** (a handoff) or **It wasn't me** (a takeover) | Stay | `moving` or `removed` | Stay; the same two buttons | Stay |
 | `moving` | Cannot happen | Cannot happen at the old address | Cannot happen | Stay until `set-update` arrives, then `standby` under the new `D`; or a takeover into a device set of its own | Stay (the tombstone expired; the active device puts it again) | Stay |
 | `removed` | n/a | n/a | n/a | Stay; **Add it again** is a new enrollment | Stay | Stay |
+
+`behind` has no column: a device that writes (`active`, `taking`) puts its stored packet again and reads again; any other state treats it as `none`.
 
 What the table and the rules above give, stated so a reviewer can check each:
 
@@ -365,7 +369,7 @@ What the table and the rules above give, stated so a reviewer can check each:
 | A buggy standby that publishes chat records | The active device notices its own records carrying counters it did not write, reads the turn, finds itself still active, and reports "Another copy of this profile is acting" with the device list. It cannot stop the other copy |
 | A holder of `D` writes a record inside the current turn (a slot added at a higher `rev`) | Invalid for every reader: only the turn's active device writes in it. The active device reads a record that is not its stored packet, keeps its turn, writes its own record above it and shows "Something else changed your device list" with **Remove a device** |
 | A hostile holder of `D` raises the turn | The real device becomes `superseded`. Its screen offers **It wasn't me**: take the turn back and remove that device, which moves the set to a new `D` |
-| A device's storage was copied (a disk image, a phone restored to a new phone, a browser profile folder) | Two installs share one device signing key. The copy that starts second reads a record from its own slot that it never stored, and stops |
+| A device's storage was copied (a disk image, a phone restored to a new phone, a browser profile folder) | Two installs share one device signing key. The copy that did not write the newest record reads one from its own slot that it never stored, at its next read, and stops. If the original has not restarted since the copy was made, that is the original |
 
 ### What is and is not guaranteed
 
@@ -446,11 +450,11 @@ One handoff at a time per profile: a second request gets `handoff-busy`.
 | pass 1 | `handoff-have` | Sends manifest 1 and the files | pass 1 |
 | pass 1 | No confirmed bytes for 2 minutes, or the link drops | Pauses; resumes when the link is back; gives up after 24 hours | pass 1 or `active` |
 | pass 1 | All files confirmed | Tries to quiesce; if a payment runs, waits up to 30 s, then `handoff-busy` `payment` | quiescing or pass 1 |
-| quiescing | Database frozen | Writes `releasing`, reloads into the gate, sends manifest 2 and the parts | pass 2 |
+| quiescing | Database frozen | Writes the index of files left for later and the Breez database's name beside the device state, writes `releasing`, reloads into the gate, opens the database read-only, sends manifest 2 and the parts | pass 2 |
 | pass 2 | The link drops, or no `handoff-verified` within 10 minutes of the last part | Writes `active`, reloads, starts | `active` |
 | pass 2 | `handoff-verified` with a valid signature and the same `H` | Writes `standby` durably, sends `handoff-release` | `standby` |
 | `standby` (just released) | `handoff-request` again from B with the same turn | Sends the same release again | `standby` |
-| `standby` | `handoff-done` | Deletes its Breez database by name and writes the index of files left for later beside the device state; touches nothing in the frozen copy | `standby` |
+| `standby` | `handoff-done` | Deletes its Breez database by the name it noted at quiesce; touches nothing in the frozen copy | `standby` |
 
 | B is | Event | B does | Next |
 |---|---|---|---|
@@ -528,7 +532,7 @@ In phase 1 **a device that goes to standby keeps its frozen copy**. It makes com
 | Outbox: message rows in `sending`, `queued`, `waiting`, `held`, with wire ids and resend window; pending edits, reactions, pins | Yes | Ids make a resend harmless | No | Frozen |
 | Message history | Yes | No | No | Frozen, not shown in phase 1 |
 | Items held for contacts in the hold storage | Stay in the storage; their records move | Sequence numbers, yes | No | n/a |
-| Files (OPFS, Desktop files, database pieces) | Yes, whatever the size, in pass 1, skipped when the taker holds the digest. Files left for later show as "On <device>" and are fetched over the device link when both are on (`handoff-file-request`) | No | No | Frozen. A standby serves a file over a device link, found through the index written at release (digest, size, where the bytes are), without opening the profile database; that is all it serves |
+| Files (OPFS, Desktop files, database pieces) | Yes, whatever the size, in pass 1, skipped when the taker holds the digest. Files left for later show as "On <device>" and are fetched over the device link when both are on (`handoff-file-request`) | No | No | Frozen. A standby serves a file over a device link, found through the index written at quiesce (digest, size, where the bytes are), without opening the profile database; that is all it serves |
 | File transfers in progress with a contact | Yes | No | The transfer starts over from its checkpoint | Frozen |
 | Private groups: member seed, chain, epoch secrets, send counter, seen windows, hubs used | Yes | **Send counter and, for an admin, the chain head** | A member is caught up by `group-sync` within the 32 epochs kept; an admin's wrong commit cannot be undone | Frozen |
 | Communities: chain and side branches, secrets, entry seed, rendezvous secret, counters, the last 256 frames | Yes | Counters; admin chain head | Frames, from hubs; the rest no | Frozen |
@@ -889,10 +893,10 @@ A client that implements this WISP MUST:
 
 - keep a device signing key that is in no backup and no handoff;
 - read the device state before starting anything, and in any state but `single` and `active` open no profile database and publish nothing but the turn record and device-link rendezvous;
-- write `standby` with strict durability before it signs a release, and name the taker in every release;
+- write `standby` with strict durability before it signs a release to another device (a release to itself, when `rev` runs out, excepted), and name the taker in every release;
 - start as active only with a verified state, a stored release and its own turn read back, or after an explicit forced takeover;
 - use `turn * 2^20 + rev * 4 + author` as the turn record's sequence number and 2^52 - 1 for every tombstone, store a packet before putting it, put a stored record byte for byte, make every raising put conditional, and never repeat a refused put without its condition;
-- treat a record as its own only when it equals its stored packet, and drop a record written inside a turn by anyone but that turn's active device;
+- treat a record as its own only when a source returns its stored packet, and drop a record whose author is not the device it names active (a tombstone excepted);
 - in limited mode publish, dial and settle nothing before a good read;
 - take over, after releasing a turn, only at a turn above the one it released;
 - read the turn from every source it has, and stop at once on a higher turn, a foreign `instance` or a tombstone;
