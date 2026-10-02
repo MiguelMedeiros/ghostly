@@ -486,15 +486,16 @@ export class LimitedModeError extends Error {
 }
 
 /**
- * The transport with every publish refused while `limited()` says so. The engine's own switches keep it from
- * trying; this is the one place that cannot be forgotten, since every Pkarr record of a profile goes through it.
+ * A transport over `transport` with every publish refused while `limited()` says so. The engine's own switches keep
+ * it from trying; this is the one place that cannot be forgotten, since every Pkarr record of a profile goes through
+ * it. A transport of its own: the one given is shared by every engine of the app (a profile switch makes a new one
+ * on the same transport), and must not keep this engine's refusal.
  */
 function refusingWhileLimited(transport: PkarrTransport, limited: () => boolean): PkarrTransport {
-  const publish = transport.publish.bind(transport);
-  transport.publish = (identity, records, options) => (limited() ? Promise.reject(new LimitedModeError()) : publish(identity, records, options));
-  const publishPayload = transport.publishPayload?.bind(transport);
-  if (publishPayload) transport.publishPayload = (pubKeyZ32, payload, options) => (limited() ? Promise.reject(new LimitedModeError()) : publishPayload(pubKeyZ32, payload, options));
-  return transport;
+  const guarded = withRequestOptions(transport, {});
+  guarded.publish = (identity, records, options) => (limited() ? Promise.reject(new LimitedModeError()) : transport.publish(identity, records, options));
+  if (transport.publishPayload) guarded.publishPayload = (pubKeyZ32, payload, options) => (limited() ? Promise.reject(new LimitedModeError()) : transport.publishPayload!(pubKeyZ32, payload, options));
+  return guarded;
 }
 
 export class GhostlyNode implements EngineImplementation {
@@ -1220,7 +1221,8 @@ export class GhostlyNode implements EngineImplementation {
     // Relays are a setting only where relays are the transport.
     this.relays = options.transport ? null : new RelayTransport();
     this.limitedMode = options.limited === true;
-    this.transport = refusingWhileLimited(options.transport ?? this.relays!, () => this.limitedMode);
+    // An engine that starts properly uses the transport as it is, as before.
+    this.transport = this.limitedMode ? refusingWhileLimited(options.transport ?? this.relays!, () => this.limitedMode) : options.transport ?? this.relays!;
     this.groupTransport = withRequestOptions(this.transport, { group: true });
     this.profilePeek = new ProfilePeek({ transport: this.transport, direct: !!this.transport.configure, online: () => this.networkOn,
       // A CLI profile is always `single` (WISP 06 § Goals and non-goals): no device state database is made for it.

@@ -190,6 +190,19 @@ describe("the active device", () => {
     expect(network.puts().filter((p) => p.source === "dht").length).toBe(1);
   });
 
+  it("a source that refuses what another took does not make it write again and again: one record, and it starts", async () => {
+    const { keeper, store } = await started(0, network, 40);
+    // The relay refuses the put (409) while the DHT takes it and returns it: the refusal is answered with a read,
+    // the read says `mine`, and that is the end of it.
+    network.source("https://relay.test").refuses = true;
+    network.calls.length = 0;
+    const outcome = await keeper.check(true);
+    expect(outcome.kind).toBe("start");
+    expect(store.record!.rev).toBe(1);
+    expect(network.puts().map((p) => p.source)).toEqual(["dht", "https://relay.test"]);
+    expect(network.reads()).toBe(2);
+  });
+
   it("with no source reachable it does not start by itself: Try again, or Start anyway", async () => {
     let now = 1_000_000;
     const { keeper } = await started(0, network, 40, { now: () => now });

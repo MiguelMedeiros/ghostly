@@ -96,7 +96,13 @@ export function deviceSetOf(record: TurnRecord): (DeviceSlot | null)[] {
   return record.slots.map((slot) => slot && { key: toBase64Url(slot.key), name: slot.name });
 }
 
-interface Held { record: DeviceRecord; keys: TurnKeys; ownSlot: number; ownKey: Uint8Array; stored: Uint8Array | null; storedRecord: TurnRecord | null; wrote: boolean }
+interface Held {
+  record: DeviceRecord; keys: TurnKeys; ownSlot: number; ownKey: Uint8Array; stored: Uint8Array | null; storedRecord: TurnRecord | null;
+  /** This device wrote the packet it stored. */
+  wrote: boolean;
+  /** A record was written since this was read from the store (in this check). */
+  wroteNow?: boolean;
+}
 
 export class TurnKeeper {
   private readonly store: TurnStore;
@@ -207,6 +213,7 @@ export class TurnKeeper {
     const read = readTurnPacket(keys, payload);
     held.storedRecord = read.kind === "valid" ? read.record : null;
     held.wrote = true;
+    held.wroteNow = true;
     return this.put(held, payload, conditions);
   }
 
@@ -225,6 +232,11 @@ export class TurnKeeper {
         const read = await this.readWith(held);
         behind = read.result === "behind" ? behind + 1 : 0;
         const row = turnRow(held.record.state, atStart);
+        // Its record of this check was refused somewhere and is still the highest (one source lags, or refuses
+        // what another took): it is written, and a source returned it. Not written a second time.
+        if (held.wroteNow && read.result === "mine" && (row === "active-start" || row === "active-running")) {
+          return row === "active-start" ? { kind: "start", read } : { kind: "go-on", restricted: false, read };
+        }
         const outcome = await this.carryOut(held, row, turnAction(row, read, behind), read);
         if (outcome) return outcome;
       }

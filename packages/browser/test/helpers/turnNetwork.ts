@@ -16,6 +16,8 @@ export interface FakeSource {
   down?: boolean;
   /** Takes every put and keeps answering what it held before: a source that lags for good. */
   frozen?: boolean;
+  /** Refuses every put, whatever it holds. */
+  refuses?: boolean;
   /** Called between the conditions being checked and the packet being stored: where another device's put lands first. */
   beforePut?: () => void;
 }
@@ -70,6 +72,7 @@ export class FakeTurnNetwork implements TurnNetwork {
       const condition = conditions[source.name];
       this.calls.push({ op: "put", source: source.name, condition, payload });
       if (source.down) { results.push({ source: source.name, outcome: "failed", detail: "no answer" }); continue; }
+      if (source.refuses) { results.push({ source: source.name, outcome: "refused", detail: "HTTP 409" }); continue; }
       source.beforePut?.();
       const sequence = turnPayloadSequence(payload)!, heldSequence = source.held ? turnPayloadSequence(source.held)! : null;
       if (source.kind === "dht" && condition !== null && String(heldSequence) !== condition) { results.push({ source: source.name, outcome: "refused", detail: "301" }); continue; }
