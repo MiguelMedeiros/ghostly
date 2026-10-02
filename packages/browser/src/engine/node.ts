@@ -41,7 +41,7 @@ import { assertConfirmedReal, createTiming, WALLET_NAMES, createFailure, crossNe
 import { migrateWalletNetworks } from "./paymentAdapters/walletNetworks";
 import { perNetwork, type PerNetwork } from "./paymentAdapters/perNetwork";
 import { COMMUNITY_EDIT_FRAME, INVITE_TAKEN, LIVENESS_MISSED_PINGS, LIVENESS_PING_MS, MAX_GROUP_NAME_LENGTH, engineError, groupName, parseCommunityEdit, traceLink } from "@ghostly/core";
-import { DirectPathWatch } from "@ghostly/core";
+import { ClockWatch, DirectPathWatch } from "@ghostly/core";
 import { GROUP_WAKE_FRAME, GROUP_WAKE_RECEIVE_LIMIT, GroupWakeLimiter, RateWindow, WAKE_CALL_INTERVAL_MS, WakeLimiter, groupWakeFrame, groupWakes, parseGroupWakeFrame, checkPushEndpoint, newWakeToken, relayRequest, vapidKeysMatch, wakeRequest, type PushRequest, type WakeKind, type WakeTarget } from "@ghostly/core";
 import { COMMUNITY_REACTION_FRAME, GROUP_REACTION_FRAME, REACTION_LIMITS, ReactionWindow, queueReaction, readReaction, validReactionNumber, wireReaction, type WireReaction } from "@ghostly/core";
 import { COMMUNITY_PIN_FRAME, PIN_LIMITS, mayPin, pinIsNewer, pinNumberHolds, readPin, type GroupPinFrame, type WirePin } from "@ghostly/core";
@@ -460,6 +460,9 @@ export class GhostlyNode implements EngineImplementation {
   private readonly profilePeek: ProfilePeek;
   /** Whether this device's WebRTC attempts say direct connections are blocked on its network (`directPath.ts`). */
   private readonly directPath = new DirectPathWatch(() => { if (!this.shuttingDown) this.emitState(); });
+  /** Whether this device's clock seems to be off, from what the relays' answers and several contacts' packets say (`clockWatch.ts`). */
+  private readonly clock = new ClockWatch(() => { if (!this.shuttingDown) this.emitState(); });
+  private clockOff: (() => void) | undefined;
   /**
    * Edges of groups whose WebRTC did not connect in this run of the app (`edgeWithoutRtc`): they go on as an app with
    * no WebRTC does, over a native transport. Not kept: the next start tries WebRTC first again.
@@ -1118,6 +1121,7 @@ export class GhostlyNode implements EngineImplementation {
     (this.hold as unknown as { host: { transport: PkarrTransport } }).host.transport = this.transport;
     // A relay that trips or recovers shows in the connection panel's Details.
     this.transport.subscribe?.(() => this.emitState());
+    this.clockOff = this.transport.onServerTime?.(time => this.clock.server(time.source, time.date, time.sent, time.received));
   }
 
   /** The Desktop reaches the DHT itself: the relays in Settings are written to, and read from only when the person chose so. */
@@ -1378,6 +1382,8 @@ export class GhostlyNode implements EngineImplementation {
     // First, before anything that waits: every live contact hears this app is going, and watches for it to come back.
     this.depart();
     this.directPath.close();
+    this.clock.close();
+    this.clockOff?.();
     if (this.relayRetry) clearTimeout(this.relayRetry);
     if (this.activeSlotRetry) clearTimeout(this.activeSlotRetry);
     for (const timer of this.resumeTimers.values()) clearTimeout(timer);
@@ -1437,6 +1443,7 @@ export class GhostlyNode implements EngineImplementation {
         ...(this.transport.configure && { direct: true }), ...(this.transport.discovery && { discovery: this.transport.discovery() }),
         ...(typeof RTCPeerConnection === "undefined" && { webrtc: false as const }),
         ...(this.directPath.blocked && { directBlocked: true as const }),
+        ...(this.clock.offset !== null && { clockOffMs: this.clock.offset }),
         // A group's link goes over WebRTC, or a native transport where one side has none (WISP 9xx § Transports).
         ...(typeof RTCPeerConnection === "undefined" && !Object.keys(this.nativeFactories).length && { groupLinks: false as const }),
       },
@@ -4729,6 +4736,8 @@ export class GhostlyNode implements EngineImplementation {
           this.emitState();
         },
         onDirectEvidence: evidence => this.directPath.note(stored.peerPubKeyZ32, evidence),
+        // A pinned contact only, by the key that is the person: a group's edges and a contact's other chats are the same device again.
+        onPeerClock: (packetAt, readBefore, readAt) => { const peer = live.stored.pairedPeerKey; if (peer && !live.stored.group) this.clock.peer(peer, packetAt, readBefore, readAt); },
         onDataLinkState: (state) => {
           const was = live.dataLink;
           live.dataLink = state;

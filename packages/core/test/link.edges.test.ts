@@ -19,7 +19,7 @@ import {
 import type { GhostRecord, SignedPacket } from "../src/pkarr";
 import type { PkarrTransport } from "../src/transport";
 
-// covers: chat.legacy.send, core.records, chat.paired.clock-skew
+// covers: chat.legacy.send, core.records, chat.paired.clock-skew, app.clock-off
 
 const NOW = 1_800_000_000_000;
 const I = RELAY_POLL_INTERVALS;
@@ -68,6 +68,7 @@ function events() {
     onPeerAck: vi.fn(),
     onCallSignal: vi.fn(),
     onRtcSignal: vi.fn(),
+    onPeerClock: vi.fn(),
     onStatus: vi.fn(),
     onPoll: vi.fn(),
   } satisfies LinkSessionEvents;
@@ -426,6 +427,37 @@ describe("LinkSession presence and signals", () => {
     await settle();
     expect(behind.a.s.peerPresence).toMatchObject({ online: false, seenAt: NOW - 60 * 60_000 });
     await behind.a.s.stop(false);
+  });
+
+  it("says what a peer's clock reads against this one when its packet comes between two reads, and nothing for one the first read finds", async () => {
+    const { net, a, b } = pair({}, { getServices: () => [] });
+    a.s.start();
+    await settle();
+    vi.setSystemTime(NOW + 4_000);
+    b.s.start();
+    await settle();
+    await b.s.stop(false);
+    // The peer's clock is two minutes ahead: that is what dated its packet.
+    for (const [key, packet] of net.packets) net.packets.set(key, { ...packet, timestampMicros: packet.timestampMicros + 120_000_000n });
+    vi.setSystemTime(NOW + 6_000);
+    a.s.pollNow();
+    await settle();
+    expect(a.ev.onPeerClock.mock.calls).toEqual([[NOW + 4_000 + 120_000, NOW, NOW + 6_000]]);
+    // The same packet read again says nothing new.
+    a.s.pollNow();
+    await settle();
+    expect(a.ev.onPeerClock).toHaveBeenCalledOnce();
+    await a.s.stop(false);
+
+    // A session that starts with the packet already there cannot tell how long it has been there.
+    const late = pair({}, { getServices: () => [] });
+    late.b.s.start();
+    await settle();
+    late.a.s.start();
+    await settle();
+    expect(late.a.ev.onPeerClock).not.toHaveBeenCalled();
+    await late.a.s.stop(false);
+    await late.b.s.stop(false);
   });
 
   it("keeps the RTC signal out of packets published while not running", async () => {

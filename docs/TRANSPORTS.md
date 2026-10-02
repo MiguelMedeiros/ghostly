@@ -76,6 +76,19 @@ A VPN, a firewall or a carrier's NAT can stop every direct path. The app cannot 
 - The note is kept in memory. After a restart it comes back only when attempts fail again; a chat that resumes straight on a relayed transport makes no WebRTC attempt.
 - Clients without WebRTC (Desktop on Linux, the headless CLI's UI-less daemon) show no note.
 
+### When this device's clock is off
+
+Ghostly dates what it publishes by the device's clock, and a clock a few minutes off makes chats slow to connect, or not connect at all with apps that have not been updated. The app cannot set the clock; it notices and says so, in the chat's connection panel and in Settings, Network: "This device's clock seems to be off by about 2 minutes. Chats may be slow to connect.", with which way, why it matters and what to do behind the ⓘ.
+
+What it goes by (`ClockWatch` in `packages/core/src/clockWatch.ts`):
+
+- **A relay's own time**: the `Date` header of a Pkarr relay's answer, where the app may read it. The CLI can; a browser only when the relay exposes that header to other origins. An answer a cache kept (it has an `Age`) is not a clock.
+- **A contact's clock**: the time of a pinned contact's packet that came between two reads of its record at most 15 s apart, both answered by the network. Group edges do not count, and a contact counts once, by its participation key.
+
+The Desktop's own Pkarr client passes on neither a relay's time nor whether a read was answered by the network, so the Desktop has no evidence yet and shows no note.
+
+The rule is slow to say yes, and never goes by one contact, whose clock is as likely the one that is off: two relays that agree; or one relay and a contact, with no contact saying otherwise; or three contacts that agree, with at least three for each one that does not. A relay that says the clock is right outweighs any number of contacts. Under a minute off is not off. The note goes away by itself when the next answers agree with the clock, and the evidence is forgotten after half an hour.
+
 ## Layer 0: Pkarr and the Mainline DHT
 
 A Pkarr record is a small DNS packet (at most 1,000 bytes), signed with Ed25519 and stored in the Mainline DHT (BEP 44). Ghostly publishes several kinds per chat: the link's presence and signals, the DHT mailboxes, the capability record and the hold pointer. See [PROTOCOL.md](PROTOCOL.md#records-on-the-dht).
