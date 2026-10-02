@@ -5,7 +5,7 @@ import { proofHash, type ProofAdapter, type ProofScope } from "./peerProofs";
 import { IDENTITY_MAX_FRAME, type IdentityScope } from "./identityProofs";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { identityFromSeedB64 } from "./identity";
-import { TRANSPORTS, rankTransports, relayedTransports, transportOrder, type NativeEndpoint, type NativeBinding, type NativeTransport, type PairedTransport, type TransportDescriptors } from "./pairedTransports";
+import { TRANSPORTS, irohRelayUrl, rankTransports, relayedTransports, transportOrder, type NativeEndpoint, type NativeBinding, type NativeTransport, type PairedTransport, type TransportDescriptors } from "./pairedTransports";
 import { dialDescriptors, encodePacketTransports, parsePacketTransports } from "./capsRecord";
 import { sanitizeNick } from "./text";
 import { sanitizeAvatar } from "./avatar";
@@ -218,7 +218,9 @@ function recordDescriptor(transport: NativeTransport, known: unknown, record: un
   if (!known) return record;
   const k = known as { id?: unknown; publicKey?: unknown; relay?: unknown }, r = record as typeof k;
   if (transport === "iroh/1" ? k.id !== r.id : k.publicKey !== r.publicKey) return newer ? record : known;
-  if (!r.relay || r.relay === k.relay || (k.relay && !newer)) return known;
+  // The same Iroh relay spelled another way (with or without the trailing dot) is no change.
+  const same = r.relay === k.relay || (transport === "iroh/1" && typeof r.relay === "string" && typeof k.relay === "string" && irohRelayUrl(r.relay) === irohRelayUrl(k.relay));
+  if (!r.relay || same || (k.relay && !newer)) return known;
   return transport === "iroh/1" ? { ...k, relay: r.relay } : record;
 }
 

@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { NetworkSettings } from "../../components/NetworkSettings";
 import { renderApp } from "../render";
 
-// covers: settings.network.native-dht, settings.network.relays
+// covers: settings.network.native-dht, settings.network.relays, settings.network.iroh-relays
 
 const RELAYS = ["https://pkarr.pubky.org", "https://pkarr.pubky.app"];
 
@@ -35,5 +35,25 @@ describe("Settings, Network: Pkarr relays", () => {
     act(() => engine.update({ transport: { protocol: "Pkarr relays (HTTP) → Mainline DHT (BEP44)", relays: RELAYS }, settings: { relays: RELAYS } }));
     expect(screen.queryByTestId("network-read-relays")).toBeNull();
     expect(await info(user, screen.getByTestId("network-relays-field"))).toHaveTextContent(/Browsers cannot reach the Mainline DHT directly/);
+  });
+});
+
+describe("Settings, Network: Iroh relays", () => {
+  const DEFAULTS = ["https://use1-1.relay.n0.iroh.link/", "https://euc1-1.relay.n0.iroh.link/"];
+  const transport = { protocol: "Pkarr relays (HTTP) → Mainline DHT (BEP44)", relays: RELAYS, iroh: { relays: DEFAULTS, defaults: DEFAULTS } };
+
+  it("takes the defaults written with the trailing dot for the defaults, and keeps a relay of the person's own as typed", async () => {
+    const { engine, user } = renderApp(<NetworkSettings />);
+    act(() => engine.update({ transport, settings: { relays: RELAYS } }));
+    const field = screen.getByTestId("network-iroh-relays");
+    // As Iroh itself names them, with the trailing dot: the same relays, stored as "none chosen".
+    await user.clear(field);
+    await user.type(field, DEFAULTS.map(url => url.replace("link/", "link./")).join("\n"));
+    await user.click(screen.getByTestId("network-save"));
+    expect(engine.callsTo("updateSettings").slice(-1)[0]).toMatchObject({ settings: { irohRelays: [] } });
+    await user.clear(field);
+    await user.type(field, "https://relay.example.com/");
+    await user.click(screen.getByTestId("network-save"));
+    expect(engine.callsTo("updateSettings").slice(-1)[0]).toMatchObject({ settings: { irohRelays: ["https://relay.example.com/"] } });
   });
 });
