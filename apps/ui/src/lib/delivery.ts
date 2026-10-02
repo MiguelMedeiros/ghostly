@@ -27,11 +27,14 @@ export type DhtOnlyBy = "you" | "contact";
 
 const subscribe = (listener: () => void) => engine.subscribe(listener);
 
-/** Whether this chat is on DHT only by choice, and whose. This side's choice is said first: it is the one to change here. */
+/**
+ * Whether this chat is on DHT only by choice, and whose, by the rule the chat's header says it with (lib/contactStatus):
+ * this side's choice first, the one to change here; the contact's while the chat's texts go through the DHT for it.
+ */
 export function useDhtOnly(peerPubKey?: string): DhtOnlyBy | undefined {
   return useSyncExternalStore(subscribe, () => {
     const link = peerPubKey ? engine.linkByPeer(peerPubKey) : undefined;
-    return link?.deliveryMode === "dht" ? "you" : link?.dhtDelivery?.peerMode === "dht" ? "contact" : undefined;
+    return link?.deliveryMode === "dht" ? "you" : link?.textDelivery === "dht" && link.dhtDelivery?.peerMode === "dht" ? "contact" : undefined;
   });
 }
 

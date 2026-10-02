@@ -307,7 +307,7 @@ describe("MessageBubble: delivery", () => {
 
     it.each([
       ["I chose DHT only", { deliveryMode: "dht" }, "Files need a live connection. This chat is on DHT only: change it from the connection icon."],
-      ["the contact chose DHT only", { dhtDelivery: dhtOnly({ mode: "stream", peerMode: "dht", authenticated: true, maxTextBytes: 256 }) }, "Files need a live connection. Your contact's chat is on DHT only: it goes when they allow live again."],
+      ["the contact chose DHT only", { textDelivery: "dht", dhtDelivery: dhtOnly({ mode: "stream", peerMode: "dht", authenticated: true, maxTextBytes: 256 }) }, "Files need a live connection. Your contact's chat is on DHT only: it goes when they allow live again."],
       // Both chose it: mine is said, the one that can be changed here.
       ["both chose DHT only", { deliveryMode: "dht", dhtDelivery: dhtOnly({ mode: "dht", peerMode: "dht", authenticated: true, maxTextBytes: 256 }) }, "Files need a live connection. This chat is on DHT only: change it from the connection icon."],
     ] as const)("waits for a live connection, not for the contact, when %s", async (_, link, hint) => {
@@ -328,6 +328,15 @@ describe("MessageBubble: delivery", () => {
       expect(mark()).toHaveAccessibleName(LIVE);
       act(() => engine.update({ links: [linkView({ deliveryMode: "stream" })] }));
       expect(mark()).toHaveAccessibleName(ONLINE);
+    });
+
+    it("says the contact chose it only while the header does: the chat's texts go through the DHT", () => {
+      const { engine } = bubble(waitingFile);
+      const theirs = dhtOnly({ mode: "stream", peerMode: "dht", authenticated: true, maxTextBytes: 256 });
+      act(() => engine.update({ links: [linkView({ textDelivery: "hold", dhtDelivery: theirs })] }));
+      expect(mark()).toHaveAccessibleName(ONLINE);
+      act(() => engine.update({ links: [linkView({ textDelivery: "dht", dhtDelivery: theirs })] }));
+      expect(mark()).toHaveAccessibleName(LIVE);
     });
 
     it("says so of a file only, and only while it waits", () => {
