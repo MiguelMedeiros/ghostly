@@ -88,7 +88,7 @@ export class CarriedTransport implements PkarrTransport {
   /** A read under way: resolved when a carried packet comes meanwhile. */
   private waiting: (() => void) | null = null;
   /** The packet the relays have not got yet. */
-  private pending: { identity: Identity; records: GhostRecord[]; options?: PkarrRequestOptions; timer: ReturnType<typeof setTimeout>; heardBefore: number } | null = null;
+  private pending: { identity: Identity; records: GhostRecord[]; options?: PkarrRequestOptions; timer: ReturnType<typeof setTimeout>; heardBefore: number; ended: Promise<"ended">; end: () => void } | null = null;
   /** How many carried packets of the member's came: a deferral that ends with none more says no member reaches it. */
   private heard = 0;
   /** No member reached the other end: packets go to the relays at once until one does. */
@@ -113,7 +113,9 @@ export class CarriedTransport implements PkarrTransport {
   async publish(identity: Identity, records: GhostRecord[], options?: PkarrRequestOptions): Promise<void> {
     if (this.stopped || identity.pubKeyZ32 !== this.myKey) return this.inner.publish(identity, records, options);
     this.drop();
-    if (this.hooks.open()) { this.mine = null; return this.inner.publish(identity, records, options); }
+    // Up: the edge carries everything, and its packet on the relays (it is here, its offer is settled) is nothing
+    // anyone waits for. It goes as a background write, behind the links that are signaling (a new offer of its own aside).
+    if (this.hooks.open()) { this.mine = null; return this.inner.publish(identity, records, options?.signal ? options : { ...options, background: true }); }
     // The same order as the relays' copy keeps: each packet newer than the last.
     const now = BigInt(Date.now()) * 1000n;
     this.lastTimestamp = now > this.lastTimestamp ? now : this.lastTimestamp + 1n;
@@ -122,13 +124,16 @@ export class CarriedTransport implements PkarrTransport {
     let carriers = 0;
     try { carriers = this.hooks.carry(payload); } catch { /* nobody took it */ }
     if (!carriers || this.quiet) return this.inner.publish(identity, records, options);
-    this.pending = { identity, records, options, heardBefore: this.heard, timer: setTimeout(() => this.flush(), this.hooks.deferMs ?? CARRIED_DEFER_MS) };
+    let end!: () => void;
+    const ended = new Promise<"ended">(resolve => { end = () => resolve("ended"); });
+    this.pending = { identity, records, options, heardBefore: this.heard, ended, end, timer: setTimeout(() => this.flush(), this.hooks.deferMs ?? CARRIED_DEFER_MS) };
   }
 
   /** The deferred packet goes to the relays: the edge did not open meanwhile. Tried again while it is still the newest. */
   private flush(): void {
     const pending = this.pending;
     if (!pending || this.stopped) return;
+    pending.end();
     // Nothing came back through a member: none reaches the other end (or its app does not take carried packets).
     if (this.heard === pending.heardBefore) this.quiet = true;
     this.inner.publish(pending.identity, pending.records, pending.options).then(
@@ -141,7 +146,7 @@ export class CarriedTransport implements PkarrTransport {
   }
 
   private drop(): void {
-    if (this.pending) clearTimeout(this.pending.timer);
+    if (this.pending) { clearTimeout(this.pending.timer); this.pending.end(); }
     this.pending = null;
   }
 
@@ -153,6 +158,9 @@ export class CarriedTransport implements PkarrTransport {
     const carried = new Promise<"carried">(resolve => { came = () => resolve("carried"); });
     this.waiting = came;
     try {
+      // My packet is with members and not yet on the relays: the answer comes back the way it went, and a relay asked
+      // now would only say it has nothing. The relays are read once that wait is over.
+      if (this.pending && await Promise.race([carried, this.pending.ended]) === "carried") return this.take(null);
       const read = this.inner.resolve(pubKeyZ32, options).then(packet => ({ packet }), (error: unknown) => ({ error }));
       const first = await Promise.race([read, carried]);
       if (first === "carried") return this.take(null);

@@ -9,15 +9,17 @@ import {
 class Relays implements PkarrTransport {
   readonly packets = new Map<string, SignedPacket>();
   publishes: GhostRecord[][] = [];
+  options: unknown[] = [];
   reads = 0;
   failPublish: unknown = null;
   failRead: unknown = null;
   /** A read that stays open until `answer` is called. */
   hold: (() => void) | null = null;
   held = false;
-  async publish(identity: Identity, records: GhostRecord[]): Promise<void> {
+  async publish(identity: Identity, records: GhostRecord[], options?: unknown): Promise<void> {
     if (this.failPublish) throw this.failPublish;
     this.publishes.push(records);
+    this.options.push(options);
     this.packets.set(identity.pubKeyZ32, { pubKeyZ32: identity.pubKeyZ32, timestampMicros: BigInt(Date.now()) * 1000n, records });
   }
   async resolve(key: string): Promise<SignedPacket | null> {
@@ -72,6 +74,8 @@ describe("an edge's packets, carried by members beside the relays", () => {
     await transport.publish(me, records("settled"));
     await vi.advanceTimersByTimeAsync(CARRIED_DEFER_MS * 2);
     expect(relays.publishes).toEqual([records("settled")]);
+    // Nobody waits for it: a background write.
+    expect(relays.options).toEqual([{ background: true }]);
     expect(state.carried).toHaveLength(1);
     expect(transport.latest()).toBeNull();
   });
@@ -127,6 +131,23 @@ describe("an edge's packets, carried by members beside the relays", () => {
     expect((await read)?.records).toMatchObject(records("offer"));
     expect(state.looks).toBe(0);
     relays.hold?.();
+  });
+
+  it("asks the relays nothing while its own packet is with members only: the answer comes back the same way", async () => {
+    const { me, peer, relays, transport } = edge();
+    await transport.publish(me, records("here"));
+    const read = transport.resolve(peer.pubKeyZ32);
+    await vi.advanceTimersByTimeAsync(CARRIED_DEFER_MS / 2);
+    expect(relays.reads).toBe(0);
+    transport.accept(createRelayPayload(peer, records("theirs")));
+    expect((await read)?.records).toMatchObject(records("theirs"));
+    expect(relays.reads).toBe(0);
+    // Nothing comes back: the relays are read once the packet goes to them.
+    await transport.publish(me, records("offer"));
+    const next = transport.resolve(peer.pubKeyZ32);
+    await vi.advanceTimersByTimeAsync(CARRIED_DEFER_MS);
+    await next;
+    expect(relays.reads).toBe(1);
   });
 
   it("takes only the member's own packets, and only newer ones", async () => {
