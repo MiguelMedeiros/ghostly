@@ -1,4 +1,4 @@
-import { act, screen, within } from "@testing-library/react";
+import { act, fireEvent, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { IdentityTimelineEntry } from "@ghostly/core";
 import type { LinkView, PublicProfileView } from "@ghostly/browser/shared/types";
@@ -31,51 +31,160 @@ function line(e: IdentityTimelineEntry, state: Parameters<ReturnType<typeof rend
 }
 const card = () => screen.getByTestId("identity-share");
 const text = () => screen.getByTestId("identity-share-text").textContent;
-const mark = () => screen.getByTestId("identity-share-state");
+const button = () => within(card()).getByRole("button");
+/** The ID card itself (IdCardFace.tsx), and the words in its status corner. */
+const face = () => card().querySelector<HTMLElement>(".id-card-face")!;
+const status = () => face().querySelector(".id-card-status-text")!.textContent;
 
-/** An identity shared in the chat, as its timeline shows it: a small ID card on both sides, a line when it stops. */
+/** An identity shared in the chat, as its timeline shows it: its ID card on both sides, a line when it stops. */
 describe("IdentityShareLine", () => {
-  it("is the contact's card: who shared what, the picture and name when the identity has them, and Verified", async () => {
+  it("is the contact's ID card, the picker's: the picture and name when the identity has them, Verified, and who shared it under it", async () => {
     const publicProfile: PublicProfileView = { found: true, name: "Pat", avatar: AVATAR, hosts: ["relay.damus.io"], fetchedAt: now() - 60 };
     const received = receivedView({ id: "n1", provider: "nostr", subject: NOSTR_KEY, verified: { subject: NOSTR_KEY, source: "Nostr signature" }, publicProfile });
     const { user, onOpen } = line(entry({ proof: "n1", provider: "nostr", subject: NOSTR_KEY }), { links: [paired({ identities: identitiesView({ received: [received] }) })] });
     expect(card()).toHaveAttribute("data-side", "theirs");
-    expect(text()).toBe("Alice shared Nostr");
-    expect(screen.getByTestId("identity-share-name")).toHaveTextContent("Pat");
-    expect(screen.getByTestId("identity-share-subject")).toHaveTextContent(/^npub1/);
-    expect(screen.getByTestId("identity-share-photo")).toHaveAttribute("src", AVATAR);
-    expect(mark()).toHaveAttribute("data-state", "verified");
-    expect(mark()).toHaveAccessibleName("Verified");
-    const button = within(card()).getByRole("button");
-    expect(button).toHaveAccessibleName(/^Alice shared Nostr · npub1.* · Verified$/);
-    await user.click(button);
+    expect(card()).toHaveAttribute("data-state", "verified");
+    expect(text()).toBe("Alice shared this identity");
+    expect(within(card()).getByText(/\d:\d\d/).tagName).toBe("TIME");
+    // The card is the deck's face, in its provider's ink, not a copy of it.
+    expect(face()).toHaveAttribute("data-deck", "face");
+    expect(button()).toHaveClass("id-card-nostr");
+    expect(within(face()).getByText("Nostr")).toBeInTheDocument();
+    expect(within(face()).getByTestId("id-card-name")).toHaveTextContent("Pat");
+    expect(within(face()).getByTestId("identity-proof-subject")).toHaveTextContent(/^npub1/);
+    expect(within(face()).getByTestId("id-card-photo")).toHaveAttribute("src", AVATAR);
+    expect(face()).toHaveAttribute("data-status", "verified");
+    expect(status()).toBe("Verified");
+    // A button with the whole of it in its name: the hover is never the only way to what the card says.
+    expect(button()).toHaveAccessibleName(/^Alice shared Nostr · npub1.* · Verified$/);
+    button().focus();
+    await user.keyboard("{Enter}");
     expect(onOpen).toHaveBeenCalledWith(expect.objectContaining({ proof: "n1", side: "theirs" }));
+    await user.click(button());
+    expect(onOpen).toHaveBeenCalledTimes(2);
   });
 
   it("is my card while the contact checks it, then Verified, or Not verified with why", () => {
-    const shared = (status: "pending" | "queued") => ({ links: [paired({ identities: identitiesView({ shared: [sharedView({ id: "proof-1", status })] }) })], identityProofs: [proofView()] });
+    const shared = (status: "pending" | "queued" | "accepted") => ({ links: [paired({ identities: identitiesView({ shared: [sharedView({ id: "proof-1", status })] }) })], identityProofs: [proofView()] });
     const mine = entry({ id: "mine:proof-1:0", proof: "proof-1", side: "mine", subject: "example.com", state: "verifying" });
     const first = line(mine, shared("pending"));
-    expect(text()).toBe("You shared Domain");
-    expect(screen.getByTestId("identity-share-subject")).toHaveTextContent("example.com");
-    expect(mark()).toHaveAttribute("data-state", "verifying");
+    expect(card()).toHaveAttribute("data-side", "mine");
+    expect(text()).toBe("You shared this identity");
+    expect(within(face()).getByTestId("identity-proof-subject")).toHaveTextContent("example.com");
+    // My own card says Verified (I proved it when I made it); the share says where the contact's check stands.
+    expect(card()).toHaveAttribute("data-state", "verifying");
+    expect(face()).toHaveAttribute("data-status", "checking");
+    expect(status()).toBe("Checking");
+    expect(button()).toHaveAccessibleName("You shared Domain · example.com · Checking");
     first.unmount();
     // Shared while the contact is away: waiting, not checking.
     const second = line(mine, shared("queued"));
-    expect(mark()).toHaveAccessibleName("Waiting");
+    expect(card()).toHaveAttribute("data-state", "waiting");
+    expect(status()).toBe("Waiting");
     second.unmount();
-    line({ ...mine, state: "failed", error: "The record is gone" });
-    expect(mark()).toHaveAccessibleName("Not verified: The record is gone");
+    const third = line({ ...mine, state: "verified" }, shared("accepted"));
+    expect(face()).toHaveAttribute("data-status", "verified");
+    expect(status()).toBe("Verified");
+    third.unmount();
+    line({ ...mine, state: "failed", error: "The record is gone" }, shared("pending"));
     expect(card()).toHaveAttribute("data-state", "failed");
-    // Why, on the card itself, not only in a tooltip.
+    expect(face()).toHaveAttribute("data-status", "failed");
+    expect(status()).toBe("Not verified");
+    expect(button()).toHaveAccessibleName("You shared Domain · example.com · Not verified: The record is gone");
+    // Why, under the card, not only in its name.
     expect(screen.getByTestId("identity-share-reason")).toHaveTextContent("The record is gone");
   });
 
-  it("says the contact's share was never checked once its challenge can no longer be answered", () => {
+  it("is the contact's card while this app checks it, Not verified when it could not, and Not checked once its challenge can no longer be answered", () => {
+    const checking = line(entry({ state: "verifying", subject: undefined }));
+    expect(card()).toHaveAttribute("data-state", "verifying");
+    expect(face()).toHaveAttribute("data-status", "checking");
+    expect(status()).toBe("Checking");
+    // Before it is presented, the kind is all this app knows.
+    expect(within(face()).getByText("Domain")).toBeInTheDocument();
+    expect(within(face()).getByTestId("identity-proof-subject")).toHaveTextContent("…");
+    expect(button()).toHaveAccessibleName("Alice shared Domain · Checking");
+    checking.unmount();
+    const failed = line(entry({ state: "failed", error: "No such record" }));
+    expect(face()).toHaveAttribute("data-status", "failed");
+    expect(status()).toBe("Not verified");
+    expect(screen.getByTestId("identity-share-reason")).toHaveTextContent("No such record");
+    failed.unmount();
     line(entry({ state: "verifying", subject: undefined, at: Date.now() - 10 * 60_000 }));
-    expect(mark()).toHaveAccessibleName("Not checked");
-    // Before it is presented, the kind is all the contact's app knows.
-    expect(screen.getByTestId("identity-share-subject")).toHaveTextContent("…");
+    expect(card()).toHaveAttribute("data-state", "unanswered");
+    expect(status()).toBe("Not checked");
+  });
+
+  it("shows on the same card that the share stopped later: no longer shared, or revoked, on both sides, and never a card that still looks valid", () => {
+    const publicProfile: PublicProfileView = { found: true, name: "Pat", avatar: AVATAR, hosts: ["relay.damus.io"], fetchedAt: now() - 60 };
+    const stop = (of: IdentityTimelineEntry, reason: "withdrawn" | "revoked"): IdentityTimelineEntry => ({ id: `${of.side}:${of.proof}:1`, proof: of.proof, side: of.side, kind: "stopped", provider: of.provider, subject: of.subject, reason, at: of.at + 500 });
+    // Theirs, verified, with a public profile; then the contact stops sharing it.
+    const theirs = entry({ proof: "n1", provider: "nostr", subject: NOSTR_KEY });
+    const received = receivedView({ id: "n1", provider: "nostr", subject: NOSTR_KEY, status: "withdrawn", verified: { subject: NOSTR_KEY, source: "Nostr signature" }, publicProfile });
+    const withdrawn = line(theirs, { links: [paired({ identities: identitiesView({ received: [received] }), identityTimeline: [theirs, stop(theirs, "withdrawn")] })] });
+    expect(card()).toHaveAttribute("data-state", "withdrawn");
+    expect(face()).toHaveAttribute("data-status", "withdrawn");
+    expect(status()).toBe("No longer shared");
+    // A stopped share wears nothing the account says about itself.
+    expect(within(face()).queryByTestId("id-card-name")).not.toBeInTheDocument();
+    expect(within(face()).queryByTestId("id-card-photo")).not.toBeInTheDocument();
+    expect(button()).toHaveAccessibleName(/^Alice shared Nostr · npub1.* · No longer shared$/);
+    withdrawn.unmount();
+    // Found revoked by its owner.
+    const revoked = line(theirs, { links: [paired({ identities: identitiesView({ received: [{ ...received, status: "revoked" }] }), identityTimeline: [theirs, stop(theirs, "revoked")] })] });
+    expect(card()).toHaveAttribute("data-state", "revoked");
+    expect(face()).toHaveAttribute("data-status", "revoked");
+    expect(status()).toBe("Revoked");
+    revoked.unmount();
+    // Mine: I stopped sharing it. My own proof still stands, the share does not.
+    const mine = entry({ id: "mine:proof-1:0", proof: "proof-1", side: "mine", subject: "example.com" });
+    const again = { ...mine, id: "mine:proof-1:2", at: mine.at + 900 };
+    const mineStopped = line(mine, { identityProofs: [proofView()], links: [paired({ identities: identitiesView({ shared: [sharedView({ id: "proof-1", status: "withdrawn" })] }), identityTimeline: [mine, stop(mine, "withdrawn")] })] });
+    expect(face()).toHaveAttribute("data-status", "withdrawn");
+    expect(status()).toBe("No longer shared");
+    expect(button()).toHaveAccessibleName("You shared Domain · example.com · No longer shared");
+    mineStopped.unmount();
+    // Shared again after the stop: the old card stays stopped, the new one is the live share.
+    const timeline = [mine, stop(mine, "withdrawn"), again];
+    const state = { identityProofs: [proofView()], links: [paired({ identities: identitiesView({ shared: [sharedView({ id: "proof-1", status: "accepted" })] }), identityTimeline: timeline })] };
+    const old = line(mine, state);
+    expect(face()).toHaveAttribute("data-status", "withdrawn");
+    old.unmount();
+    line(again, state);
+    expect(face()).toHaveAttribute("data-status", "verified");
+  });
+
+  it("plays the deck's flourish once under a mouse, and nothing for a finger or with reduced motion", () => {
+    const animate = vi.fn(() => ({ cancel() {} }) as unknown as Animation);
+    const original = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "animate");
+    Object.defineProperty(HTMLElement.prototype, "animate", { configurable: true, writable: true, value: animate });
+    try {
+      line(entry());
+      // A hover effect, never a loop: nothing runs until a pointer comes.
+      expect(animate).not.toHaveBeenCalled();
+      fireEvent.pointerEnter(button(), { pointerType: "touch" });
+      expect(animate).not.toHaveBeenCalled();
+      fireEvent.pointerEnter(button(), { pointerType: "mouse" });
+      expect(animate).toHaveBeenCalled();
+      // Each animation ends by itself: a duration, and no repeat.
+      for (const [, timing] of animate.mock.calls as unknown as [unknown, KeyframeAnimationOptions][]) {
+        expect(timing.duration).toBeGreaterThan(0);
+        expect(timing.iterations ?? 1).toBe(1);
+      }
+      animate.mockClear();
+      fireEvent.pointerLeave(button(), { pointerType: "mouse" });
+      document.documentElement.dataset.reduceMotion = "true";
+      fireEvent.pointerEnter(button(), { pointerType: "mouse" });
+      expect(animate).not.toHaveBeenCalled();
+    } finally {
+      if (original) Object.defineProperty(HTMLElement.prototype, "animate", original); else delete (HTMLElement.prototype as { animate?: unknown }).animate;
+    }
+  });
+
+  it("keeps the card left to right in a right-to-left language, with the caption in the page's direction", () => {
+    line(entry());
+    expect(button()).toHaveAttribute("dir", "ltr");
+    expect(screen.getByTestId("identity-share-text").closest("[dir]")).not.toBe(button());
   });
 
   it("is a line when a share stops, or when the contact's proof turns out revoked", async () => {

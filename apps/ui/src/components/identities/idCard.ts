@@ -1,3 +1,4 @@
+import type { IdentityTimelineEntry } from "@ghostly/core";
 import type { IdentityProofView, LinkView, PublicProfileView, ReceivedIdentityView } from "@ghostly/browser/shared/types";
 import { hasPublicProfile } from "@ghostly/browser/profiles/readers";
 import type { ProfileLookup } from "../../hooks/usePublicProfileRequest";
@@ -14,9 +15,10 @@ import { ago, badgeState } from "./contactBadges";
  * deck: a removed proof is not kept), `expired`, `failed` when a contact's app checked it and refused it,
  * `expiring` in its last days (lib/identities.ts's rule) and otherwise `verified`: it was checked, the way
  * contacts check it, when it was made. A contact's card (receivedIdCard) can also be `revoked` by its owner, or
- * `withdrawn`: no longer shared, or made with a key the contact has since replaced.
+ * `withdrawn`: no longer shared, or made with a key the contact has since replaced. A share in a chat's timeline
+ * (shareIdCard) is `checking` until the contact's app has answered.
  */
-export type IdCardStatus = "verified" | "expiring" | "expired" | "failed" | "revoking" | "revoked" | "withdrawn" | "default";
+export type IdCardStatus = "verified" | "expiring" | "expired" | "failed" | "revoking" | "revoked" | "withdrawn" | "default" | "checking";
 
 export interface IdCardContent {
   id: string;
@@ -146,6 +148,42 @@ export function receivedIdCard(r: ReceivedIdentityView, now = Date.now() / 1000,
     refusedBy: [],
     ...pp,
   };
+}
+
+/**
+ * Where a share stands in its chat's timeline (IdentityShareLine.tsx). `waiting`: mine, the contact not connected
+ * yet. `unanswered`: theirs, never presented. `withdrawn`, `revoked`: it stopped later (its owner took it back, or
+ * its proof key published a revocation).
+ */
+export type ShareState = "verifying" | "waiting" | "unanswered" | "verified" | "failed" | "withdrawn" | "revoked";
+
+/**
+ * A share in a chat's timeline as an ID card: the identity's own card (mine: idCard, the contact's: receivedIdCard)
+ * when this app still holds it, else what the timeline entry kept (the kind, and the identity once presented), with
+ * the share's state in the status corner. A verified share says what its card says now (verified, expiring,
+ * expired); any other state is the share's own, and then the card wears no public profile: a share that failed or
+ * stopped never shows what the account says about itself.
+ */
+export function shareIdCard(entry: IdentityTimelineEntry, state: ShareState, { proof, received, contact, now = Date.now() / 1000, t = english, language }: {
+  proof?: IdentityProofView; received?: ReceivedIdentityView; contact?: string; now?: number; t?: Translate; language?: string;
+} = {}): IdCardContent {
+  const own = received ? receivedIdCard(received, now, t, language) : proof ? idCard(proof, { now, t }) : undefined;
+  const subject = own?.subject ?? entry.subject ?? "";
+  const base: IdCardContent = own ?? {
+    id: entry.proof, provider: entry.provider, label: providerLabel(entry.provider), subject, short: subject ? shortSubject(entry.provider, subject) : "…", bound: subject,
+    category: "", attested: providerOf(entry.provider)?.category === "provider-attested", status: "checking", statusLabel: "", validity: "", issued: "", shared: "", refusedBy: [],
+  };
+  // One of mine says, as in the picker, whether this contact sees it.
+  const stopped = state === "withdrawn" || state === "revoked";
+  const shared = proof && contact ? { shared: stopped ? t("identities.picker.notSharedWith", { contact }) : t("identities.ghostly.sharedWith", { contact }) } : {};
+  if (state === "verified") return own ? { ...own, ...shared } : { ...base, status: "verified", statusLabel: t("identities.card.verified") };
+  const { name: _name, photo: _photo, profile: _profile, lookup: _lookup, ...plain } = base;
+  const status: IdCardStatus = state === "failed" || stopped ? state : "checking";
+  const statusLabel = {
+    verifying: t("identities.share.checking"), waiting: t("identities.share.waiting"), unanswered: t("identities.share.notChecked"),
+    failed: t("identities.share.notVerified"), withdrawn: t("identities.status.withdrawn"), revoked: t("identities.card.revoked"),
+  }[state];
+  return { ...plain, ...shared, status, statusLabel };
 }
 
 /** The ink an identity's card wears (id-deck.css): its provider's, or a key's/an attestation's for one without a mark. */
