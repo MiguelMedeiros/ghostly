@@ -6,10 +6,10 @@
 | Status | Draft |
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [01](01-ghost-core.md), [02](02-peer-keys.md), [03](03-capabilities.md), [04](04-profiles.md), [05](05-backups.md), [200](200-payments.md), [400](400-chat.md), [401](401-paired-chat.md), [403](403-dht-text.md), [4xx store-and-forward](4xx-store-and-forward.md), [501](501-paired-files.md), [800](800-invite-join.md), [900](900-group-sessions.md), [1000](1000-storage.md), [1002](1002-s3-storage.md), [11xx](11xx-headless.md) |
-| Implementation | None. A design proposal, revised after two reviews, with phase 1 specified to be built from |
+| Implementation | Parts 1 and 2 of the 10 of phase 1 (the device state and the gate; the turn record, its reader, its own publish and read path, and limited mode) are built on the branch `feat/devices`, which is not on `dev` and in no release. Nothing can enroll a device yet, so every profile is `single`. This text is revised with what building them measured |
 | Summary | Use one profile on a desktop and a phone: one device is active at a time, and one button moves everything to the device in your hand. |
 | Availability | Planned |
-| Notes | Not built. Phase 1 targets 1.1: web, desktop and extension, both devices online. Two devices live at once, server accounts and background sync are out of scope. |
+| Notes | Not in the app yet: the first parts are built on a branch. Phase 1 targets 1.1: web, desktop and extension, both devices online. Two devices live at once, server accounts and background sync are out of scope. |
 
 > This is a review draft. Candidate numbers and new record formats are not registered standards. Normative language describes a candidate requirement, not a shipped guarantee. See the [catalogue](README.md) and [implementation evidence](IMPLEMENTATION.md).
 
