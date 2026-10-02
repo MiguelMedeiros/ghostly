@@ -1,21 +1,7 @@
-import { useId, useState, useSyncExternalStore } from "react";
-import { engine } from "@ghostly/browser/platform/engine";
-import { knownDeviceGate, type DeviceGateView } from "@ghostly/browser/devices/gate";
+import { useId, useState } from "react";
+import type { DeviceGateView } from "@ghostly/browser/devices/gate";
 import { useI18n } from "../contexts/I18nContext";
 import { activeProfileId, listProfiles, switchProfile } from "../lib/profiles";
-
-const subscribe = (listener: () => void) => engine.subscribe(listener);
-/** What the peer said, or what the page itself read before it drew anything (the entry points do, see `openDeviceGate`). */
-const gateNow = (): DeviceGateView | null => engine.deviceGate ?? knownDeviceGate()?.view ?? null;
-
-/**
- * Set when this device is not the active one for the profile (WISP 06 § The gate). The app then shows the standby
- * screen and nothing of the profile: no chat list, no composer, no link intake, since nothing may be written into a
- * standby's copy and no engine runs to send anything.
- */
-export function useDeviceGate(): DeviceGateView | null {
-  return useSyncExternalStore(subscribe, gateNow);
-}
 
 const BUTTON = "px-4 py-2 rounded-lg text-sm font-semibold bg-accent text-on-accent hover:bg-accent-hover cursor-pointer";
 const QUIET = "px-3 py-1.5 rounded-lg text-sm text-text-secondary border border-border hover:bg-surface-hover cursor-pointer";

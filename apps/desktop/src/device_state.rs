@@ -138,7 +138,12 @@ mod tests {
     #[test]
     fn a_write_replaces_the_record_whole_and_none_removes_it() {
         let dir = scratch("replace");
-        write(&dir, "ghostly_a", Some(r#"{"state":"active","saved":1,"note":"a longer first record"}"#)).unwrap();
+        write(
+            &dir,
+            "ghostly_a",
+            Some(r#"{"state":"active","saved":1,"note":"a longer first record"}"#),
+        )
+        .unwrap();
         write(&dir, "ghostly_a", Some(r#"{"state":"standby","saved":2}"#)).unwrap();
         assert_eq!(
             read(&dir, "ghostly_a").unwrap().as_deref(),
@@ -179,9 +184,16 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
         let dir = scratch("modes");
         write(&dir, "ghostly", Some("{}")).unwrap();
-        assert_eq!(fs::metadata(&dir).unwrap().permissions().mode() & 0o777, 0o700);
         assert_eq!(
-            fs::metadata(dir.join("ghostly.json")).unwrap().permissions().mode() & 0o777,
+            fs::metadata(&dir).unwrap().permissions().mode() & 0o777,
+            0o700
+        );
+        assert_eq!(
+            fs::metadata(dir.join("ghostly.json"))
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
             0o600
         );
         let _ = fs::remove_dir_all(&dir);

@@ -776,6 +776,7 @@
     "apps/ui/src/hooks/useComposition.ts": ["chat.paired.send","chat.edit","chat.replies","groups.mentions","app.composer.attach"],
     "apps/ui/src/hooks/useCopyKey.ts": ["proofs.ghostly-card"],
     "apps/ui/src/hooks/useCountUp.ts": ["payments.chat.cards","wallet.cashu.*","wallet.history","app.reduce-motion"],
+    "apps/ui/src/hooks/useDeviceGate.ts": ["devices.*"],
     "apps/ui/src/hooks/useDismiss.ts": ["*"],
     "apps/ui/src/hooks/useFloatingBox.ts": ["calls.*"],
     "apps/ui/src/hooks/useIncomingCallNotice.ts": ["calls.*","app.attention.notifications"],
