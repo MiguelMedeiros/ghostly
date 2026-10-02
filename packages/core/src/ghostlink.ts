@@ -4,7 +4,7 @@ import { TransportSwitch, allowedTransports, type SwitchPlan } from "./transport
 import { proofHash, type ProofAdapter, type ProofScope } from "./peerProofs";
 import { IDENTITY_MAX_FRAME, type IdentityScope } from "./identityProofs";
 import { sha256 } from "@noble/hashes/sha2.js";
-import { identityFromSeedB64 } from "./identity";
+import { identityFromSeedB64, publicKeyFromZ32 } from "./identity";
 import { TRANSPORTS, irohRelayUrl, rankTransports, relayedTransports, transportOrder, type NativeEndpoint, type NativeBinding, type NativeTransport, type PairedTransport, type TransportDescriptors } from "./pairedTransports";
 import { dialDescriptors, encodePacketTransports, parsePacketTransports } from "./capsRecord";
 import { sanitizeNick } from "./text";
@@ -15,7 +15,7 @@ import { readForwarded } from "./forwards";
 import { readStatusCard, type StatusCard } from "./statusCards";
 import { randomBytes, toBase64Url, toZ32, utf8Encode } from "./bytes";
 import { fitSignedPairedSignal, fitSignedPairedSignalWith, verifyPairedSignal } from "./pairedSignal";
-import { deviceFrameCapability, type DeviceCapability, type DeviceFrame } from "./deviceLink";
+import { deviceFrameCapability, signDeviceTransports, verifyDeviceTransports, type DeviceCapability, type DeviceFrame } from "./deviceLink";
 import { parseRtcSignal, type SignalSight } from "./signal";
 import { PairedSession, type PairingState, type PairingCredentials, type PaymentMethodName } from "./pairedSession";
 import { DataLink, type DataLinkState } from "./datalink";
@@ -1638,12 +1638,34 @@ export class GhostLink {
   /** A group link's `_tr` in its packet: what this side runs and how to dial it, once it runs a native endpoint there. */
   private publishPacketTransports(): void {
     if (!this.options.packetTransports) return;
-    this.session.setTransports(this.endpoints.size ? encodePacketTransports(this.availableTransports, this.localDescriptors()) : null);
+    const value = this.endpoints.size ? encodePacketTransports(this.availableTransports, this.localDescriptors()) : null;
+    const signer = this.options.pairing?.credentials.signer;
+    if (!signer) { this.session.setTransports(value); return; }
+    // A device link (WISP 06): signed with the device signing key, so a holder of `D` cannot write one in its place.
+    // The latest value goes out; one overtaken while it was being signed is dropped.
+    const turn = ++this.transportsTurn;
+    if (value === null) { this.session.setTransports(null); return; }
+    void signDeviceTransports(value, signer, this.myPubKeyZ32, this.options.params.peerPubKeyZ32)
+      .then(signed => { if (turn === this.transportsTurn && !this.stopped) this.session.setTransports(signed); })
+      .catch(() => {});
   }
+  /** Counts the `_tr` values a signer was asked to sign (a device link): only the latest goes out. */
+  private transportsTurn = 0;
 
   /** The member's packet said which transports its app runs on this group link, and how to dial them. */
   private peerPacketTransports(value: string): void {
     if (!this.options.packetTransports || this.stopped) return;
+    const credentials = this.options.pairing?.credentials;
+    if (credentials?.signer) {
+      // A device link: only a value signed by the device signing key it pinned. Anything else (unsigned, or signed by
+      // another key: a holder of `D` writing in the other device's packet) is dropped, and dials nothing.
+      const verified = credentials.peerKey ? verifyDeviceTransports(value, this.options.params.peerPubKeyZ32, this.myPubKeyZ32, publicKeyFromZ32(credentials.peerKey)) : null;
+      if (!verified) { traceLink(this.myPubKeyZ32, "packet-transports-refused", {}); return; }
+      value = verified;
+      // Newly said by the device itself: whatever an earlier value made fail waits no longer.
+      this.autoConnectFailures = 0; this.lastAutoConnectAt = 0;
+      this.nativeFailures.clear(); this.demotedUntil.clear();
+    }
     const said = parsePacketTransports(value);
     if (!said) return;
     const transports = said.transports as PairedTransport[], descriptors = dialDescriptors(said.descriptors);

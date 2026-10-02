@@ -1,7 +1,7 @@
 import { hkdf } from "@noble/hashes/hkdf.js";
 import { sha256 } from "@noble/hashes/sha2.js";
-import { bytesEqual, concatBytes, randomBytes, toBase64Url, toZ32, utf8Encode } from "./bytes";
-import { identityFromSeed } from "./identity";
+import { bytesEqual, concatBytes, fromBase64Url, randomBytes, toBase64Url, toZ32, utf8Encode } from "./bytes";
+import { identityFromSeed, verify } from "./identity";
 import type { LinkParams } from "./invite";
 import type { PairingCredentials } from "./pairedSession";
 import type { Signer } from "./signer";
@@ -77,6 +77,35 @@ export function deviceLinkParams(d: Uint8Array, ownKey: Uint8Array, peerKey: Uin
 
 /** A device signing key as a session names a participation key (z-base-32). */
 export const deviceKeyZ32 = (signingKey: Uint8Array): string => toZ32(signingKey);
+
+/*
+ * A device link's transports in its own packet (`_tr`, as a group's link has them): which layer-1 transports the app
+ * runs and how to dial its native ones. The packet is published under a key derived from `D`, so any holder of `D`
+ * could write a `_tr` there: endpoints of its own, or "no WebRTC", and stall the link. So on a device link the value
+ * is signed with the device signing key, over the two rendezvous keys and the value, and a reader takes only one
+ * signed by the key it pinned.
+ */
+const SIGNATURE = /^[A-Za-z0-9_-]{86}$/;
+const transportsMessage = (from: string, to: string, t: unknown, d: unknown) =>
+  utf8Encode(JSON.stringify(["ghostly-device-transports", 1, from, to, t, d ?? null]));
+
+/** A `_tr` value signed by this device: `{"t":…,"d":…,"s":"<signature>"}`. `from`/`to`: the link's two rendezvous keys, this side's first. */
+export async function signDeviceTransports(value: string, signer: Signer, from: string, to: string): Promise<string> {
+  const parsed = JSON.parse(value) as { t?: unknown; d?: unknown };
+  const signature = await signer.sign(transportsMessage(from, to, parsed.t, parsed.d));
+  return JSON.stringify({ t: parsed.t, d: parsed.d, s: toBase64Url(signature) });
+}
+
+/** The unsigned `_tr` value of one signed by `signingKey`, or null for anything else (unsigned, another key, another link). */
+export function verifyDeviceTransports(value: string, from: string, to: string, signingKey: Uint8Array): string | null {
+  try {
+    if (value.length > 1_200) return null;
+    const parsed = JSON.parse(value) as { t?: unknown; d?: unknown; s?: unknown };
+    if (!parsed || typeof parsed !== "object" || typeof parsed.s !== "string" || !SIGNATURE.test(parsed.s)) return null;
+    if (!verify(fromBase64Url(parsed.s), transportsMessage(from, to, parsed.t, parsed.d), signingKey)) return null;
+    return JSON.stringify({ t: parsed.t, d: parsed.d });
+  } catch { return null; }
+}
 
 /** What a paired link needs to be a device link: its derived parameters and its pinned, signer-backed pairing. */
 export interface DeviceLinkPairing {

@@ -102,7 +102,9 @@ import {
   entryParams,
 } from "@ghostly/core";
 import type { AttentionCue, AttentionEvent, EngineImplementation } from "../shared/rpc";
-import { clearProfileStores, fileStore, type StoredFile } from "../shared/idb";
+import { clearProfileStores, databaseName, fileStore, type StoredFile } from "../shared/idb";
+import { knownDeviceGate } from "../devices/gate";
+import { saveDeviceNetwork } from "../devices/network";
 import { fileBytes } from "../shared/fileBytes";
 import { FileAppender, readStored, removeStored, storedSize, streamStored } from "../shared/storedFiles";
 import { FileDesk } from "./fileDesk";
@@ -4394,7 +4396,22 @@ export class GhostlyNode implements EngineImplementation {
     }
     if (wasOnline && !this.networkOn) this.stopGroupEntries();
     if (wasOnline && !this.networkOn) await this.hold.stop();
+    // A profile with a device set: its standbys go through these relays and servers, and stay off with the network.
+    const gate = knownDeviceGate();
+    if (gate && gate.state !== "single" && (["online", "relays", "readRelays", "irohRelays", "iceServers"] as const).some((key) => key in settings)) {
+      await this.syncDeviceNetwork().catch(() => {});
+    }
     this.emitState();
+  }
+
+  /**
+   * Copies the network settings into the device record (WISP 06, `devices/network.ts`), where device-link-only mode
+   * reads them. Nothing for a profile with no device set, or a CLI profile. Called on every change of one, and by
+   * whatever makes or joins a device set.
+   */
+  async syncDeviceNetwork(): Promise<void> {
+    if (this.options.singleDevice) return;
+    await saveDeviceNetwork(databaseName(), this.settings);
   }
 
   // -- internals -----------------------------------------------------------

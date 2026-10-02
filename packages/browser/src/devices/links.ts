@@ -55,6 +55,8 @@ export interface DeviceLinksOptions {
   /** The native transports this app runs, as the engine is given them (`NodeOptions.nativeTransports`). */
   nativeTransports?: Partial<Record<NativeTransport, (seedB64: string) => Promise<NativeEndpoint>>>;
   pollIntervals?: PollIntervals;
+  /** The person turned the network off: no link is started and nothing is asked of a relay or the DHT. */
+  offline?: boolean;
   /** Every device frame that is not the link's own ping or echo, with the signing key (base64url) of the device that sent it. */
   onFrame?: (from: string, frame: DeviceFrame) => void | Promise<void>;
   /** The links changed (one opened, closed, or the set changed). */
@@ -128,6 +130,7 @@ export class DeviceLinks implements DeviceLinkEngine {
 
   /** The links the record asks for. Empty for a `single` profile, which is not even asked for its key. */
   private async wanted(): Promise<Wanted[]> {
+    if (this.options.offline) return [];
     const record = await (this.options.readRecord ?? readDeviceRecord)(this.options.profile);
     this.problem = null;
     if (!record) { this.key = null; this.keeper = null; return []; }
@@ -150,8 +153,10 @@ export class DeviceLinks implements DeviceLinkEngine {
     for (const earlier of record.earlierSets) {
       for (const key of earlier.pending) {
         if (key === own || earlier.d === record.d) continue;
-        const name = record.deviceSet.find((slot) => slot?.key === key)?.name ?? "";
-        wanted.push({ id: `${earlier.d}|${key}`, d: fromBase64Url(earlier.d), key, name, earlier: true });
+        // Only a device that stays: a key the current set no longer lists gets no link, whatever the list says.
+        const staying = record.deviceSet.find((slot) => slot?.key === key);
+        if (!staying) continue;
+        wanted.push({ id: `${earlier.d}|${key}`, d: fromBase64Url(earlier.d), key, name: staying.name, earlier: true });
       }
     }
     return wanted;
@@ -290,6 +295,7 @@ export class DeviceLinks implements DeviceLinkEngine {
    */
   turnKeeper(): Promise<TurnKeeper | null> {
     const transport = this.options.transport;
+    if (this.options.offline) return Promise.resolve(null);
     const network = this.options.turn ?? (transport.turnRead && transport.turnPut
       ? { turnRead: transport.turnRead.bind(transport), turnPut: transport.turnPut.bind(transport), ...(transport.turnWarm ? { turnWarm: transport.turnWarm.bind(transport) } : {}) } as TurnNetwork : null);
     if (!network) return Promise.resolve(null);

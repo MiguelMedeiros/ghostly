@@ -1,26 +1,34 @@
-import { RelayTransport } from "@ghostly/core";
 import { EngineServer } from "../engine/server";
 import type { NodeOptions } from "../engine/node";
 import { DEFAULT_IROH_RELAYS, createIrohWebEndpoint } from "../platform/irohWeb";
 import { openDeviceGate, type DeviceGate } from "./gate";
 import { DeviceLinkOnlyServer, type DeviceLinkEngine, type PeerServer } from "./linkOnly";
 import { DeviceLinks } from "./links";
+import { standbyNetwork } from "./network";
+import { readDeviceRecord } from "./store";
 
 /**
  * What device-link-only mode runs for a device that is not the active one (WISP 06 § The gate): its device links,
- * over the transports the engine would use, from the device record and the device signing key alone. The relays and
- * the Iroh relays are the app's defaults: the person's own settings are in the profile's database, which stays shut.
- * A device whose state could not be read holds no links: nothing is known of its device set.
+ * over the transports the engine would use, from the device record and the device signing key alone. The person's
+ * relays, Iroh relays and ICE servers come from the record's copy of the settings (`network.ts`), and with the network
+ * off the links ask nothing of anyone. A device whose state could not be read holds no links: nothing is known of its
+ * device set.
  */
-export function standbyEngine(gate: DeviceGate, options: NodeOptions | undefined): DeviceLinkEngine | undefined {
+export async function standbyEngine(gate: DeviceGate, options: NodeOptions | undefined): Promise<DeviceLinkEngine | undefined> {
   if (gate.state === "unreadable") return undefined;
+  let record = null;
+  try { record = await readDeviceRecord(gate.profile); } catch { /* the links read it again, and say why they hold none */ }
+  const network = standbyNetwork(record?.network, options?.transport);
+  const irohRelays = network.irohRelays ?? [...DEFAULT_IROH_RELAYS];
   return new DeviceLinks({
     profile: gate.profile,
-    transport: options?.transport ?? new RelayTransport(),
+    offline: network.off,
+    transport: network.transport,
+    createPeerConnection: network.createPeerConnection,
     pollIntervals: options?.pollIntervals,
     nativeTransports: {
       ...options?.nativeTransports,
-      ...(options?.irohWeb ? { "iroh/1": (seedB64: string) => createIrohWebEndpoint(seedB64, { relays: [...DEFAULT_IROH_RELAYS] }) } : {}),
+      ...(options?.irohWeb ? { "iroh/1": (seedB64: string) => createIrohWebEndpoint(seedB64, { relays: irohRelays }) } : {}),
     },
   });
 }
@@ -33,5 +41,6 @@ export function standbyEngine(gate: DeviceGate, options: NodeOptions | undefined
  */
 export async function createPeerServer(options: NodeOptions | undefined, overrides: { gate?: DeviceGate; standby?: DeviceLinkEngine } = {}): Promise<PeerServer> {
   const gate = overrides.gate ?? await openDeviceGate();
-  return gate.full ? new EngineServer(options) : new DeviceLinkOnlyServer(gate, overrides.standby ?? standbyEngine(gate, options));
+  if (gate.full) return new EngineServer(options);
+  return new DeviceLinkOnlyServer(gate, overrides.standby ?? await standbyEngine(gate, options));
 }
