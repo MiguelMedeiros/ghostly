@@ -29,6 +29,12 @@
 //! anyway every 15 s (`ALL_DOWN_PROBE_EVERY`, as packages/core/src/relayBreaker.ts):
 //! with the DHT out of reach too (UDP blocked, a VPN) that was minutes with no
 //! way to publish at all. A change of network forgets every breaker.
+//!
+//! The DHT is UDP, and BitTorrent's: a VPN or a firewall may let none of it through, while the relays
+//! (HTTPS) still answer. A lookup that heard from no node at all says so, and after
+//! `DHT_SILENT_LOOKUPS` of them in a row reads go to the relays as if "Also use Pkarr relays" were on,
+//! until a lookup hears from a node again (every read still starts one). Without it the app published
+//! through the relays and read nothing back: no chat connected, and none said why.
 
 use std::collections::{HashMap, VecDeque};
 use std::net::SocketAddrV4;
@@ -106,6 +112,9 @@ const BREAKER_MAX: Duration = Duration::from_secs(300);
 /// While every relay is left alone for failing, one of them (whose wait ends first) is asked anyway this often.
 const ALL_DOWN_PROBE_EVERY: Duration = Duration::from_secs(15);
 
+/// Lookups in a row that heard from no DHT node at all before reads go to the relays too (see the module's notes).
+const DHT_SILENT_LOOKUPS: u32 = 2;
+
 /// The DHT as this client reaches it: the Mainline DHT itself, or, in tests, a stand-in behind a Pkarr client.
 #[derive(Clone)]
 pub enum Dht {
@@ -139,26 +148,29 @@ impl Dht {
         }
     }
 
-    /// Looks `key` up: `first` is handed the first packet found, the return is the most recent one.
+    /// Looks `key` up: `first` is handed the first packet found, the return is the most recent one, and
+    /// whether any node answered the lookup at all (with the packet or without).
     async fn resolve(
         &self,
         key: &PublicKey,
         first: impl FnOnce(&SignedPacket),
-    ) -> Option<SignedPacket> {
+    ) -> (Option<SignedPacket>, bool) {
         match self {
             Dht::Mainline(dht) => {
                 let response = dht.resolve(key, None).await;
                 if let Some(packet) = response.first() {
                     first(packet);
                 }
-                response.complete().await.most_recent.ok()
+                let outcome = response.complete().await;
+                let heard = outcome.report.responded() > 0;
+                (outcome.most_recent.ok(), heard)
             }
             Dht::StandIn(client) => {
                 let found = client.resolve(key, ResolvePolicy::NetworkOnly).await.ok();
                 if let Some(packet) = &found {
                     first(packet);
                 }
-                found
+                (found, true)
             }
         }
     }
@@ -195,6 +207,8 @@ struct State {
     path: Option<Path>,
     /// When a relay was last asked because every relay was left alone.
     last_all_down_probe: Option<Instant>,
+    /// DHT lookups in a row that heard from no node (`DHT_SILENT_LOOKUPS`).
+    dht_silent: u32,
 }
 
 /// A lookup's progress, as its watch channel carries it.
@@ -384,6 +398,7 @@ impl Pkarr {
             turn: 0,
             path: None,
             last_all_down_probe: None,
+            dht_silent: 0,
         };
         Ok(Self {
             inner: Arc::new(Inner {
@@ -427,6 +442,8 @@ impl Pkarr {
             relay.budget.resting_until = None;
         }
         state.last_all_down_probe = None;
+        // The DHT may answer on this one: reads go back to it until its lookups say otherwise.
+        state.dht_silent = 0;
         drop(state);
         diagnostics::log("pkarr network changed: every relay is asked again");
     }
@@ -653,7 +670,12 @@ impl Pkarr {
         let started = Instant::now();
         let before = self.newest(key).map(|p| p.timestamp());
         let lookup = self.look_up(key);
-        let read_relays = self.inner.state.lock().unwrap().read_relays;
+        // A DHT no node of which answers (UDP blocked, a VPN) reads the relays, background reads too.
+        let (read_relays, dht_silent) = {
+            let state = self.inner.state.lock().unwrap();
+            let silent = state.dht_silent >= DHT_SILENT_LOOKUPS;
+            (state.read_relays || silent, silent)
+        };
         let source;
 
         if !read_relays {
@@ -667,7 +689,7 @@ impl Pkarr {
             }
             self.went(Path::Dht);
             source = "dht";
-        } else if background && self.inner.lookup.is_some() {
+        } else if background && self.inner.lookup.is_some() && !dht_silent {
             // (With no DHT, a private network's relays are all there is: a background read asks them too, or it
             // would only ever hand back what is known, and a key watched in the background never changed.)
             if self.newest(key).is_none() {
@@ -786,7 +808,7 @@ impl Pkarr {
         state.lookups.insert(key.clone(), rx.clone());
         let (inner, key) = (self.inner.clone(), key.clone());
         tokio::spawn(async move {
-            let found = dht
+            let (found, heard) = dht
                 .resolve(&key, |first| {
                     inner.state.lock().unwrap().keep(first.clone());
                     let _ = tx.send(ANSWERED);
@@ -795,6 +817,19 @@ impl Pkarr {
             let mut state = inner.state.lock().unwrap();
             if let Some(packet) = found {
                 state.keep(packet);
+            }
+            let was_silent = state.dht_silent >= DHT_SILENT_LOOKUPS;
+            state.dht_silent = if heard {
+                0
+            } else {
+                state.dht_silent.saturating_add(1)
+            };
+            if was_silent != (state.dht_silent >= DHT_SILENT_LOOKUPS) {
+                diagnostics::log(if was_silent {
+                    "pkarr dht answers again: reads go back to it"
+                } else {
+                    "pkarr dht silent (no node answered): reads go to the relays"
+                });
             }
             state.lookups.remove(&key);
             let _ = tx.send(DONE);
@@ -1735,7 +1770,7 @@ mod tests {
 mod direct {
     // covers: core.dht-direct, core.relay-breaker, settings.network.native-dht
     use super::*;
-    use crate::test_support::{pkarr_client, pkarr_relay, Relay};
+    use crate::test_support::{closed_port, pkarr_client, pkarr_relay, Relay};
     use pkarr::Keypair;
 
     fn packet(keypair: &Keypair, value: &str) -> SignedPacket {
@@ -1743,6 +1778,21 @@ mod direct {
             .txt("_n".try_into().unwrap(), value.try_into().unwrap(), 300)
             .sign(keypair)
             .unwrap()
+    }
+
+    fn put(relay: &Relay, packet: &SignedPacket) {
+        relay.packets.lock().unwrap().insert(
+            packet.public_key().to_z32(),
+            packet.to_relay_payload().to_vec(),
+        );
+    }
+
+    fn value(packet: &SignedPacket) -> String {
+        let record = packet.all_resource_records().next().unwrap();
+        match &record.rdata {
+            simple_dns::rdata::RData::TXT(txt) => String::try_from(txt.clone()).unwrap(),
+            _ => unreachable!(),
+        }
     }
 
     fn requests(relay: &Relay, method: &str) -> usize {
@@ -1789,6 +1839,93 @@ mod direct {
             Some(Path::Dht),
             "the panel says DHT direct"
         );
+    }
+
+    /// A DHT whose only bootstrap node is a closed port: UDP that goes nowhere, as behind a VPN or a firewall.
+    fn silent_dht() -> Dht {
+        let nowhere: SocketAddrV4 = format!("127.0.0.1:{}", closed_port()).parse().unwrap();
+        Dht::mainline(Some(vec![nowhere])).unwrap()
+    }
+
+    async fn lookups_over(pkarr: &Pkarr) {
+        for _ in 0..200 {
+            if pkarr.inner.state.lock().unwrap().lookups.is_empty() {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        panic!("a lookup never ended");
+    }
+
+    #[tokio::test]
+    async fn a_dht_no_node_answers_on_sends_reads_to_the_relays() {
+        let relay = pkarr_relay().await;
+        let keypair = Keypair::random();
+        put(&relay, &packet(&keypair, "1"));
+        let pkarr = Pkarr::direct(silent_dht(), &[relay.url.parse().unwrap()]).unwrap();
+        let key = keypair.public_key();
+
+        // The first reads go to the DHT alone, as always: nothing says yet that it is out of reach.
+        assert!(pkarr.resolve(&key).await.is_none());
+        assert_eq!(requests(&relay, "GET"), 0);
+        // Lookups that heard from no node: the relays are read, and have the packet.
+        let mut found = None;
+        for _ in 0..40 {
+            found = pkarr.resolve(&key).await;
+            if found.is_some() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(250)).await;
+        }
+        assert_eq!(value(&found.expect("the relay's copy")), "1");
+        assert_eq!(
+            pkarr.status().path,
+            Some(Path::Relay {
+                relay: relay.url.trim_end_matches('/').to_string()
+            }),
+            "the panel says which relay"
+        );
+
+        // A background read asks a relay too: the lookup it would wait for finds nothing.
+        put(&relay, &packet(&keypair, "2"));
+        let got = pkarr.resolve_with(&key, true, false).await.unwrap();
+        assert_eq!(value(&got), "2");
+
+        // Another network: the DHT is asked alone again, until its lookups say it is still silent.
+        lookups_over(&pkarr).await;
+        pkarr.network_changed();
+        let before = requests(&relay, "GET");
+        assert!(pkarr
+            .resolve(&Keypair::random().public_key())
+            .await
+            .is_none());
+        assert_eq!(requests(&relay, "GET"), before);
+    }
+
+    #[tokio::test]
+    async fn a_dht_that_answers_keeps_reads_off_the_relays() {
+        let testnet = mainline::Testnet::builder(8).build().unwrap();
+        let bootstrap: Vec<SocketAddrV4> = testnet
+            .bootstrap
+            .iter()
+            .map(|node| node.parse().unwrap())
+            .collect();
+        let relay = pkarr_relay().await;
+        let pkarr = Pkarr::direct(
+            Dht::mainline(Some(bootstrap)).unwrap(),
+            &[relay.url.parse().unwrap()],
+        )
+        .unwrap();
+        // Keys nobody published: every lookup comes back empty-handed, but nodes answered it.
+        for _ in 0..4 {
+            assert!(pkarr
+                .resolve(&Keypair::random().public_key())
+                .await
+                .is_none());
+            lookups_over(&pkarr).await;
+        }
+        assert_eq!(pkarr.inner.state.lock().unwrap().dht_silent, 0);
+        assert_eq!(requests(&relay, "GET"), 0);
     }
 
     fn packet_timestamp(relay: &Relay, key: &str) -> pkarr::Timestamp {

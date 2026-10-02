@@ -174,8 +174,8 @@ export interface GroupSessionHooks {
   edit?(edit: GroupIncomingEdit): Promise<void> | void;
   /** Roster, epoch or status changed. */
   changed(): void;
-  /** The group's name or picture changed (set, replaced or removed), by `by`. */
-  metaChanged?(by: string, change: GroupMetaChange): void;
+  /** The group's name or picture changed (set, replaced or removed), by `by`, in a statement signed at `at`. */
+  metaChanged?(by: string, change: GroupMetaChange, at: number): void;
   /** The clock the limits read (the engine's, or a simulation's); the wall clock when absent. */
   clock?(): number;
 }
@@ -1072,7 +1072,7 @@ export class GroupSession {
       for (const key of this.others) this.hooks.send(key, frame);
     }
     const change = groupMetaChange(before, meta, this.state.name);
-    if (change) this.hooks.metaChanged?.(this.myKey, change);
+    if (change) this.hooks.metaChanged?.(this.myKey, change, meta.ts);
     this.hooks.changed();
   }
 
@@ -1107,7 +1107,7 @@ export class GroupSession {
     // A change of hubs alone is no line in the history, nor what the group looked like when I got in: the first
     // statement I take, signed under a commit before mine, is no change made while I was a member.
     const change = !before && !rosterHas(commit.m, this.myKey) ? null : groupMetaChange(before, opened.meta, this.state.name);
-    if (change) this.hooks.metaChanged?.(s.by, change);
+    if (change) this.hooks.metaChanged?.(s.by, change, opened.meta.ts);
     this.hooks.changed();
     this.took({ t: "group-meta", ...s, k: frame.k as number, nn: frame.nn, c: frame.c });
   }

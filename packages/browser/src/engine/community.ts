@@ -6,7 +6,7 @@ import {
 } from "@ghostly/core";
 import type { GroupEvent, GroupJoinStage, GroupView, StoredGroup, StoredMessage } from "../shared/types";
 import { groupReply } from "../shared/replies";
-import { FramesTaken, cameAt, editKey, mentionAt, mentionFields, peerMessageAt, type GroupStore, type GroupsHost } from "./groups";
+import { FramesTaken, cameAt, editKey, eventTime, mentionAt, mentionFields, peerMessageAt, type GroupStore, type GroupsHost } from "./groups";
 import { traceJoin } from "./joinTrace";
 
 /** The line a change of a group's picture leaves in its history (both profiles). */
@@ -153,6 +153,13 @@ interface Live {
   /** The newest message frame the beacon names (WISP 9xx § Head), as last read or written. */
   head: CommunityHead | null;
   lastBeaconRead: number;
+  /**
+   * The beacon was read at least once in this run (always, in a group of one: nobody else can be a hub). Until then
+   * nothing says who the hubs are, which is not the same as there being none. And when a read last failed.
+   */
+  beaconKnown: boolean;
+  beaconFailedAt: number;
+  beaconAskedAt?: number;
   lastBeaconWrite: number;
   lastBeaconTry: number;
   hubCandidateAt: number;
@@ -492,7 +499,14 @@ export class Communities {
     // welcome) or a while: left open, it would look fast for a joiner that is gone, spending the relays' budget.
     for (const [linkId, until] of live.lingering) if (now >= until || !this.host.linkReady(linkId, 2)) { live.lingering.delete(linkId); if ([...this.host.entries(groupId).values()].includes(linkId)) await this.host.closeEdge(linkId); }
     const alone = live.hub && !freshHubs(live.beacon, now).some(h => h.key !== me);
-    if (now - live.lastBeaconRead >= (alone ? COMMUNITY_TOPOLOGY.beaconEveryMs : this.timings.beaconReadMs) || live.lastBeaconRead === 0) await this.readBeacon(groupId, live, now);
+    // A read that failed is tried again in a moment, not at the next turn of the usual pace.
+    const readDue = live.beaconFailedAt ? now - live.beaconFailedAt >= BEACON_RETRY_MS : now - live.lastBeaconRead >= (alone ? COMMUNITY_TOPOLOGY.beaconEveryMs : this.timings.beaconReadMs);
+    if (readDue || live.lastBeaconRead === 0) await this.readBeacon(groupId, live, now);
+    // Never read yet (the app just started, and the relays' budget or the network refused the read): who the hubs are
+    // is unknown, which is not "there are none". Taken for none, this app became a hub at once and the door alone, and
+    // answered the knocks the real door was answering: two hubs on one entry session, and nobody got in. The edges it
+    // has stay; hubs, the door and the lobby wait for a reading.
+    if (!live.beaconKnown) { await this.keepLooking(groupId, live, now); await this.reconcile(groupId, live, now); return; }
     const others = freshHubs(live.beacon, now).filter(h => h.key !== me);
     if (!live.hub) {
       // A newcomer first connects to the member who let it in (a hub): only then, or a while after, is it one more.
@@ -666,7 +680,16 @@ export class Communities {
   private async readBeacon(groupId: string, live: Live, now: number): Promise<void> {
     live.lastBeaconRead = now;
     const keys = beaconKeys(live.session.state.rv, groupId);
-    const records = await this.host.resolve(keys.identity.pubKeyZ32, true).catch(() => null);
+    const records = await this.host.resolve(keys.identity.pubKeyZ32, true).catch(() => undefined);
+    // A read that failed says nothing: what the last one said stays (entries go stale by their own time). Alone in the
+    // group, nobody else can be a hub, read or not. Nor does an app wait for ever for its first reading: after as long
+    // as an entry stays fresh, whatever was there would be stale by now.
+    if (records === undefined) {
+      live.beaconFailedAt = now; live.beaconAskedAt ||= now;
+      if (live.session.roster.length === 1 || now - live.beaconAskedAt >= COMMUNITY_TOPOLOGY.beaconFreshMs) live.beaconKnown = true;
+      return;
+    }
+    live.beaconFailedAt = 0; live.beaconKnown = true;
     // Hubs I do not know yet are members newer than my view of the roster: exactly whom I need to catch up.
     live.beacon = readBeacon(keys, records ?? []);
     live.head = readBeaconHead(keys, records ?? []);
@@ -688,8 +711,12 @@ export class Communities {
     const keys = beaconKeys(live.session.state.rv, groupId);
     // Read this very tick already: what it said is what there is to merge with.
     let existing = live.beacon, head = live.head;
-    if (live.lastBeaconRead !== now) {
-      const records = (await this.host.resolve(keys.identity.pubKeyZ32, true).catch(() => null)) ?? [];
+    if (live.lastBeaconRead !== now || live.beaconFailedAt === now) {
+      // Read, merge, publish: without the read there is nothing to merge with, and publishing my entry alone would
+      // erase every other hub's (each puts its own back only when it republishes, up to half a minute later).
+      const read = await this.host.resolve(keys.identity.pubKeyZ32, true).catch(() => undefined);
+      if (read === undefined && live.session.roster.length > 1) throw new Error("The beacon could not be read; not published");
+      const records = read ?? [];
       existing = readBeacon(keys, records); head = readBeaconHead(keys, records);
     }
     // Nobody drops a hub it does not know: a member behind on the roster would erase newer ones.
@@ -699,7 +726,7 @@ export class Communities {
     await this.host.publish(keys.identity, beaconRecords(keys, hubs, newest), true);
     live.beacon = hubs; live.head = newest;
     this.noteHubs(live, now);
-    live.lastBeaconWrite = now; live.lastBeaconRead = now;
+    live.lastBeaconWrite = now; live.lastBeaconRead = now; live.beaconFailedAt = 0; live.beaconKnown = true;
   }
 
   private noteHubs(live: Live, now: number): void {
@@ -1103,17 +1130,19 @@ export class Communities {
       app: m => this.deliver(id, () => this.host.communityApp?.(id, m.sender, m.frame)),
       pair: m => this.deliver(id, () => this.host.communityPair?.(id, m.sender, m.payload)),
       changed: () => { void this.membershipChanged(id); },
-      metaChanged: (by, change) => {
+      metaChanged: (by, change, at) => {
         const name = by === session.myKey ? "You" : session.state.nicks[by] ?? `Member ${by.slice(0, 8)}`;
+        // When the admin signed it, as a membership line keeps its commit's time (`membershipChanged`).
+        const when = receivedTimestamp(at, this.now());
         void (async () => {
-          for (const line of metaLines(name, change, session.name)) await this.event(id, line.event, line.text, this.now(), session.epoch, by);
+          for (const line of metaLines(name, change, session.name)) await this.event(id, line.event, line.text, when, session.epoch, by);
           this.host.emit();
         })();
       },
       clock: () => this.now(),
       relay: frame => { if (this.live.get(id)?.hub) for (const linkId of this.host.edges(id).values()) this.sendTo(linkId, frame); },
     });
-    this.live.set(id, { session, hub: false, hubSince: 0, beacon: [], head: null, lastBeaconRead: 0, lastBeaconWrite: 0, lastBeaconTry: 0, hubCandidateAt: 0, members: new Map(), emptySince: 0,
+    this.live.set(id, { session, hub: false, hubSince: 0, beacon: [], head: null, lastBeaconRead: 0, beaconKnown: false, beaconFailedAt: 0, lastBeaconWrite: 0, lastBeaconTry: 0, hubCandidateAt: 0, members: new Map(), emptySince: 0,
       lastLobbyPoll: 0, myHubs: [], lobbyWrites: new Map(), lastKnockPoll: 0, pendingEntries: new Map(), knocksSeen: new Map(),
       hubWaits: new Map(), hubsAvoided: new Map(), hubsUp: new Set(), lingering: new Map(), seenHubs: new Map(), restored: new Map(),
       knocksScanned: false, knockCursor: 0, lastShardPoll: 0, crowdUntil: 0, doors: "", warmUntil: 0, lobbyBusyUntil: 0, expect: new Set(), awaited: new Map(), joinedAt: 0, admittedAt: 0, lastRearm: 0,
@@ -1131,24 +1160,21 @@ export class Communities {
     if (statusChanged && s.status === "removed") await this.event(groupId, "removed", s.state.statusReason ?? "You were removed from this group", when, s.epoch);
     else if (statusChanged && s.status === "forked") await this.event(groupId, "forked", s.state.statusReason ?? "The membership history forked", when, s.epoch);
     else if (s.status === "active" && before !== after) {
-      for (const [key] of after) if (!rosterHas(before, key) && key !== s.myKey) await this.event(groupId, "joined", `${name(key)} joined`, when, top.e, key);
-      for (const [key] of before) if (!rosterHas(after, key)) await this.event(groupId, "gone", `${name(key)} is no longer a member`, when, top.e, key);
-      if (top.k === "role" && before.find(([k]) => k === top.s)?.[1] !== "admin") await this.event(groupId, "admin", `${name(top.s!)} ${top.s === s.myKey ? "are" : "is"} now the admin`, when, top.e, top.s);
-      if (top.k === "rotate") await this.event(groupId, "rotated", "Keys rotated: a fresh epoch", when, top.e);
+      // When the change was made (the newest commit's time), not when it got here: a member back after a while reads
+      // the lines among the messages of their moment, not after everything it missed.
+      const at = receivedTimestamp(top.ts, when);
+      for (const [key] of after) if (!rosterHas(before, key) && key !== s.myKey) await this.event(groupId, "joined", `${name(key)} joined`, at, top.e, key);
+      for (const [key] of before) if (!rosterHas(after, key)) await this.event(groupId, "gone", `${name(key)} is no longer a member`, at, top.e, key);
+      if (top.k === "role" && before.find(([k]) => k === top.s)?.[1] !== "admin") await this.event(groupId, "admin", `${name(top.s!)} ${top.s === s.myKey ? "are" : "is"} now the admin`, at, top.e, top.s);
+      if (top.k === "rotate") await this.event(groupId, "rotated", "Keys rotated: a fresh epoch", at, top.e);
     }
     this.host.emit();
   }
 
-  /**
-   * A line in the group's history. Its id carries its time, and the engine's clock moves once a tick: two
-   * lines of one kind within a tick (a picture changed, then removed) get distinct times, a millisecond
-   * apart, or the store would keep the first and drop the second as already there.
-   */
+  /** A line in the group's history. Its id carries its time: two lines at the same moment get distinct ones (`eventTime`). */
   private async event(groupId: string, event: GroupEvent, text: string, timestamp: number, epoch: number, member?: string): Promise<void> {
-    const last = this.lastEventAt.get(groupId) ?? 0;
-    if (timestamp <= last) timestamp = last + 1;
-    this.lastEventAt.set(groupId, Math.max(last, timestamp));
+    timestamp = eventTime(this.eventTimes, groupId, timestamp);
     await this.host.storeMessage({ linkId: MESSAGE_LINK(groupId), id: `event:${epoch}:${event}:${member ?? ""}:${timestamp}`, text, sender: "peer", event, member, timestamp, via: "datalink" });
   }
-  private readonly lastEventAt = new Map<string, number>();
+  private readonly eventTimes = new Map<string, Set<number>>();
 }

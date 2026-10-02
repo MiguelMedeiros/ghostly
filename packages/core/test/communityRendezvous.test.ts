@@ -79,6 +79,24 @@ describe("community rendezvous: beacon and lobbies", () => {
     expect(doorHubs([hub(other, 50_000)], now, me)).toEqual([]);
   });
 
+  it("with no settled hub (a group's first minute), one hub is at the door: the one that has been a hub longest", () => {
+    const now = Date.now(), [a, b] = keys(2).sort();
+    const hub = (key: string, since: number): Hub => ({ key, ts: now - 1_000, load: 0, since });
+    // The first hub (40 s) and a member that just became one (5 s), whichever key is lower, as both see it.
+    for (const [first, second] of [[a, b], [b, a]]) {
+      const both = [hub(second, now - 5_000), hub(first, now - 40_000)];
+      expect(doorHubs(both, now, first)).toEqual([first]);
+      expect(doorHubs(both, now, second)).toEqual([first]);
+      // …and as the first hub sees it before it reads of the second.
+      expect(doorHubs([hub(first, now - 40_000)], now, first)).toEqual([first]);
+    }
+    // Hubs since the same second (the beacon keeps seconds): the lower key.
+    expect(doorHubs([hub(b, now - 5_000), hub(a, now - 5_000)], now, b)).toEqual([a]);
+    // Once hubs are settled, they take turns as before, and the new one waits its minute.
+    expect(doorHubs([hub(a, now - 90_000), hub(b, now - 70_000)], now, a).sort()).toEqual([a, b]);
+    expect(doorHubs([hub(a, now - 5_000), hub(b, now - 70_000)], now, a)).toEqual([b]);
+  });
+
   it("ranks hubs per subject: one order for everyone, different subjects spread", () => {
     const hubs = keys(5), subjects = keys(40);
     expect(rankHubs(subjects[0], hubs)).toEqual(rankHubs(subjects[0], [...hubs].reverse()));
