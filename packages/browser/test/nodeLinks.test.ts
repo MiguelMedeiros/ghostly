@@ -989,6 +989,40 @@ describe("private groups through the engine", () => {
       expect(iroh).toHaveBeenCalled();
     });
 
+    it("an edge whose WebRTC connects nothing goes on over a native transport, as on an app with no WebRTC; one that connects stays as it is", async () => {
+      // A member behind a VPN or a firewall: both apps have WebRTC, so the edge ran nothing else, and never went live.
+      vi.stubGlobal("RTCPeerConnection", class {});
+      onTestFinished(() => { vi.unstubAllGlobals(); });
+      const { node, iroh } = await nativeEngine();
+      const { groupId } = await node.createGroup({ name: "Plaza" });
+      const state = (await db.getGroups()).find((g) => g.id === groupId)!.community;
+      const blocked = await node["openEdge"](state as never, createIdentity().pubKeyZ32);
+      const fine = await node["openEdge"](state as never, createIdentity().pubKeyZ32);
+      await node["nativeQueue"];
+      expect(iroh).not.toHaveBeenCalled();
+      const first = edgeOf(blocked), other = edgeOf(fine);
+      expect(first.options.rtcAvailable).toBe(true);
+
+      other.options.events.onDirectEvidence("open");
+      first.options.events.onDirectEvidence("no-path");
+      await vi.waitFor(() => expect(edgeOf(blocked)).not.toBe(first));
+      // No goodbye: the member must not take the restart for a leave.
+      expect(first.stop).toHaveBeenCalledWith(false);
+      const again = edgeOf(blocked);
+      expect(again.options.rtcAvailable).toBe(false);
+      await vi.waitFor(() => expect(again.registerEndpoint).toHaveBeenCalledOnce());
+      expect(iroh).toHaveBeenCalledOnce();
+      // The edge that connects keeps WebRTC, and takes no listener.
+      expect(edgeOf(fine)).toBe(other);
+      expect(other.registerEndpoint).not.toHaveBeenCalled();
+      // Said again (the old link's last words, a later attempt): nothing more happens.
+      first.options.events.onDirectEvidence("no-public");
+      again.options.events.onDirectEvidence("no-path");
+      await node["nativeQueue"];
+      expect(edgeOf(blocked)).toBe(again);
+      expect(iroh).toHaveBeenCalledOnce();
+    });
+
     it("an app with no WebRTC offers to be no private group's hub, and gives its groups four connections in all", async () => {
       const iroh = vi.fn(async () => endpoint());
       const events = { onState: vi.fn(), onMessages: vi.fn(), onCallSignal: vi.fn(), onAttention: vi.fn() };
