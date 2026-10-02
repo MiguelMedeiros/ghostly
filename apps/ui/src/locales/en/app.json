@@ -1,4 +1,26 @@
 {
   "name": "Ghostly",
+  "profileUnavailable": {
+    "detail": "What the system said:",
+    "info": "Nothing was changed or deleted. While the data is closed, Ghostly connects to nobody and sends nothing for this profile. This app is Ghostly {{app}} and reads profile data up to version {{supported}}.",
+    "newerHint": "Update the app to open it.",
+    "newerInfo": "This profile's data is at version {{stored}}. This app, Ghostly {{app}}, reads up to version {{supported}}. A newer Ghostly opened the profile and moved its data forward, and an older one cannot read it safely. So nothing is opened and nothing is sent, and nothing was changed or deleted: your chats, keys and wallets are still there. Update this app, or open the profile with the newer one.",
+    "newerTitle": "This profile was last used by a newer version of Ghostly.",
+    "noUpdate": "No newer version is out yet. Open this profile with the app that used it last.",
+    "reason": {
+      "blocked": "Another Ghostly window or tab still has it open with an older version.",
+      "denied": "This browser gives Ghostly no storage here: a private window, or storage blocked for this site.",
+      "failed": "The data did not open, and the system gave no clear reason.",
+      "full": "This device is out of storage space."
+    },
+    "title": "Ghostly could not open this profile's data.",
+    "try": {
+      "blocked": "Close the other Ghostly windows and tabs, then try again.",
+      "denied": "Use a normal window or allow storage for this site, then try again.",
+      "failed": "Restart the app or the device, then try again.",
+      "full": "Free some space, then try again."
+    },
+    "tryAgain": "Try again"
+  },
   "tagline": "Ephemeral encrypted messaging over the DHT"
 }
