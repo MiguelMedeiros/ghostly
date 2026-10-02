@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { readStatusCard, type RoutineCard, type TaskCard } from "@ghostly/core";
 import type { CardIndexRow } from "@ghostly/browser/shared/types";
-import { BOARD_COLUMNS, RECENT_MS, boardEntries, boardModel, boardMove, columnOf, progressWords, type BoardEntry, type BoardTask } from "../../lib/taskBoard";
+import { BOARD_COLUMNS, RECENT_MS, boardEntries, boardModel, boardMove, boardTags, columnOf, partsDone, progressWords, stackTasks, type BoardEntry, type BoardTask } from "../../lib/taskBoard";
 
 // covers: chat.tasks-board
 
@@ -72,8 +72,8 @@ describe("the cards of every chat", () => {
 
 describe("the board's columns", () => {
   it("are Queued, Running, Blocked, Done and Stopped, with failed and cancelled tasks together", () => {
-    expect(BOARD_COLUMNS).toEqual(["queued", "running", "blocked", "done", "closed"]);
-    expect((["queued", "running", "blocked", "done", "failed", "cancelled"] as const).map(columnOf)).toEqual(["queued", "running", "blocked", "done", "closed", "closed"]);
+    expect(BOARD_COLUMNS).toEqual(["queued", "running", "blocked", "review", "done", "closed"]);
+    expect((["queued", "running", "blocked", "done", "failed", "cancelled"] as const).map((status) => columnOf({ status }))).toEqual(["queued", "running", "blocked", "done", "closed", "closed"]);
     const tasks = named(boardEntries((["queued", "running", "blocked", "done", "failed", "cancelled"] as const).map((status) => row("chat-a", task({ id: status, status })))));
     expect(columns(tasks)).toEqual({ queued: ["queued"], running: ["running"], blocked: ["blocked"], done: ["done"], closed: ["cancelled", "failed"] });
     expect(boardModel(tasks, { now: NOW })).toMatchObject({ active: 3, total: 6, shown: 6 });
@@ -151,6 +151,132 @@ describe("the board's columns", () => {
     expect(found("nothing like it")).toEqual([]);
     // The header's count is of every task: the filter does not change it.
     expect(boardModel(tasks, { now: NOW, filter: "ecrire" })).toMatchObject({ active: 1, total: 2, shown: 1 });
+  });
+});
+
+describe("the Review column", () => {
+  const pr = (state?: string, extra: Record<string, unknown> = {}) => ({ url: "https://github.com/o/r/pull/612", number: 612, ...(state && { state }), ...extra });
+
+  it("is not there until a task says where its pull request stands", () => {
+    const plain = named(boardEntries([row("chat-a", task({ pr: pr() }))]));
+    expect(Object.keys(columns(plain))).toEqual(["queued", "running", "blocked", "done", "closed"]);
+    const stated = named(boardEntries([row("chat-a", task({ pr: pr("draft") }))]));
+    expect(Object.keys(columns(stated))).toEqual(["queued", "running", "blocked", "review", "done", "closed"]);
+  });
+
+  it("holds a running or queued task whose pull request is open; its status is still what the bot said", () => {
+    const tasks = named(boardEntries([
+      row("chat-a", task({ id: "open-running", pr: pr("open") })),
+      row("chat-a", task({ id: "open-queued", status: "queued", pr: pr("open") })),
+      row("chat-a", task({ id: "draft", pr: pr("draft") })),
+      // Blocked stays where it is seen; a merged pull request moves nothing until the bot says done.
+      row("chat-a", task({ id: "open-blocked", status: "blocked", pr: pr("open") })),
+      row("chat-a", task({ id: "merged-running", pr: pr("merged") })),
+      row("chat-a", task({ id: "merged-done", status: "done", pr: pr("merged") })),
+      row("chat-a", task({ id: "open-done", status: "done", pr: pr("open") })),
+      row("chat-a", task({ id: "closed-failed", status: "failed", pr: pr("closed") })),
+    ]));
+    expect(columns(tasks)).toEqual({
+      queued: [], running: ["merged-running", "draft"], blocked: ["open-blocked"], review: ["open-queued", "open-running"],
+      done: ["open-done", "merged-done"], closed: ["closed-failed"],
+    });
+    // A task in Review is still going.
+    expect(boardModel(tasks, { now: NOW }).active).toBe(5);
+    expect(tasks.find((t) => t.card.id === "open-running")!.card.status).toBe("running");
+  });
+});
+
+describe("tags", () => {
+  const tasks = () => named(boardEntries([
+    row("chat-a", task({ id: "a", tags: ["core", "web"] })),
+    row("chat-a", task({ id: "b", tags: ["core"] })),
+    row("chat-a", task({ id: "c", tags: ["cli"] })),
+    row("chat-a", task({ id: "d" })),
+  ]));
+
+  it("are offered to filter by, the most used first", () => {
+    expect(boardTags(tasks())).toEqual(["core", "cli", "web"]);
+    expect(boardModel(tasks(), { now: NOW }).tags).toEqual(["core", "cli", "web"]);
+  });
+
+  it("filter the board, alone or with the text filter, which reads them too", () => {
+    const found = (options: Parameters<typeof boardModel>[1]) => boardModel(tasks(), { now: NOW, ...options }).groups.flatMap((g) => g.tasks.map((t) => t.card.id)).sort();
+    expect(found({ tag: "core" })).toEqual(["a", "b"]);
+    expect(found({ tag: "web" })).toEqual(["a"]);
+    expect(found({ tag: "nope" })).toEqual([]);
+    expect(found({ filter: "cli" })).toEqual(["c"]);
+    expect(found({ tag: "core", filter: "web" })).toEqual(["a"]);
+  });
+});
+
+describe("a task's parts", () => {
+  const family = () => named(boardEntries([
+    row("group:mesh", task({ id: "epic", title: "Relay rework" }), { member: "hermes" }),
+    row("group:mesh", task({ id: "codec", parent: "epic", status: "done" }), { member: "hermes" }),
+    row("group:mesh", task({ id: "engine", parent: "epic", status: "running" }), { member: "hermes" }),
+    row("group:mesh", task({ id: "ui", parent: "epic", status: "done", tags: ["web"] }), { member: "hermes" }),
+    row("group:mesh", task({ id: "alone" }), { member: "hermes" }),
+  ]));
+
+  it("stack under their parent, going first, with how many are done", () => {
+    const stacked = stackTasks(family());
+    expect(stacked.map((t) => t.card.id).sort()).toEqual(["alone", "epic"]);
+    const epic = stacked.find((t) => t.card.id === "epic")!;
+    expect(epic.parts!.map((t) => t.card.id)).toEqual(["engine", "ui", "codec"]);
+    expect(partsDone(epic)).toEqual({ done: 2, total: 3 });
+    expect(partsDone(stacked.find((t) => t.card.id === "alone")!)).toBeUndefined();
+    // On the board: the parent in its column, its parts under it and in no column of their own.
+    expect(columns(family())).toMatchObject({ running: ["alone", "epic"], done: [] });
+    // Every task counts in the header, parts too.
+    expect(boardModel(family(), { now: NOW })).toMatchObject({ total: 5, active: 3, shown: 2 });
+  });
+
+  it("a parent that is missing leaves its parts ungrouped", () => {
+    const orphans = named(boardEntries([
+      row("chat-a", task({ id: "codec", parent: "gone", status: "done" })),
+      row("chat-a", task({ id: "engine", parent: "gone" })),
+    ]));
+    expect(stackTasks(orphans).map((t) => [t.card.id, t.parts])).toEqual([["engine", undefined], ["codec", undefined]]);
+    expect(columns(orphans)).toMatchObject({ running: ["engine"], done: ["codec"] });
+  });
+
+  it("the parent is a task of the same sender in the same chat, never another's or another chat's", () => {
+    const tasks = named(boardEntries([
+      row("group:mesh", task({ id: "epic" }), { member: "hermes" }),
+      row("group:mesh", task({ id: "other-sender", parent: "epic" }), { member: "coordinator" }),
+      row("chat-a", task({ id: "other-chat", parent: "epic" }), { member: "hermes" }),
+      row("group:mesh", task({ id: "mine", parent: "epic" }), { member: "hermes" }),
+    ]));
+    const stacked = stackTasks(tasks);
+    expect(stacked.map((t) => t.card.id).sort()).toEqual(["epic", "other-chat", "other-sender"]);
+    expect(stacked.find((t) => t.card.id === "epic")!.parts!.map((t) => t.card.id)).toEqual(["mine"]);
+  });
+
+  it("parts of a part go under the top task; a ring of parents stacks nothing", () => {
+    const deep = named(boardEntries([
+      row("chat-a", task({ id: "top" })), row("chat-a", task({ id: "mid", parent: "top" })), row("chat-a", task({ id: "leaf", parent: "mid" })),
+    ]));
+    const [top, ...rest] = stackTasks(deep);
+    expect(rest).toEqual([]);
+    expect(top.parts!.map((t) => t.card.id).sort()).toEqual(["leaf", "mid"]);
+    const ring = named(boardEntries([row("chat-a", task({ id: "a", parent: "b" })), row("chat-a", task({ id: "b", parent: "a" }))]));
+    expect(stackTasks(ring).map((t) => [t.card.id, t.parts]).sort()).toEqual([["a", undefined], ["b", undefined]]);
+    // A part whose parent is there, under a top that is not: the parent stands alone with its part.
+    const broken = named(boardEntries([row("chat-a", task({ id: "mid", parent: "gone" })), row("chat-a", task({ id: "leaf", parent: "mid" }))]));
+    expect(stackTasks(broken).map((t) => [t.card.id, t.parts?.map((p) => p.card.id)])).toEqual([["mid", ["leaf"]]]);
+  });
+
+  it("a filter keeps a parent when one of its parts matches; a finished parent stays while a part is going", () => {
+    const found = (options: Parameters<typeof boardModel>[1]) => boardModel(family(), { now: NOW, ...options }).groups.flatMap((g) => g.tasks.map((t) => t.card.id));
+    expect(found({ tag: "web" })).toEqual(["epic"]);
+    const longAgo = NOW - RECENT_MS - 60_000;
+    const old = named(boardEntries([
+      row("chat-a", task({ id: "epic", status: "done" }), { timestamp: longAgo }),
+      row("chat-a", task({ id: "part", parent: "epic", status: "running" }), { timestamp: longAgo }),
+      row("chat-a", task({ id: "epic2", status: "done" }), { timestamp: longAgo }),
+      row("chat-a", task({ id: "part2", parent: "epic2", status: "done" }), { timestamp: longAgo }),
+    ]));
+    expect(columns(old).done).toEqual(["epic"]);
   });
 });
 

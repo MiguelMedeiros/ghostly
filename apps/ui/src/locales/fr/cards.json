@@ -3,13 +3,27 @@
     "card": {
       "botLabel": "De :",
       "chatLabel": "Discussion :",
+      "checks": {
+        "failing": "Vérifications en échec",
+        "passing": "Vérifications réussies",
+        "pending": "Vérifications en cours"
+      },
       "details": "Détails",
       "filesLabel": "Fichiers :",
       "from": "{{bot}} dans {{chat}}",
       "in": "dans {{chat}}",
       "openPr": "Ouvrir sur {{host}}",
+      "parts": "{{done}} sur {{total}} terminées",
+      "prLabel": "Pull request :",
+      "prState": {
+        "closed": "Fermée",
+        "draft": "Brouillon",
+        "merged": "Fusionnée",
+        "open": "Ouverte"
+      },
       "statusLabel": "État :",
       "steps": "{{done}} sur {{total}}",
+      "tagsLabel": "Étiquettes :",
       "updatedLabel": "Mise à jour :"
     },
     "column": {
@@ -17,6 +31,7 @@
       "closed": "Arrêtées",
       "done": "Terminées",
       "queued": "En attente",
+      "review": "Revue",
       "running": "En cours"
     },
     "columns": "Colonnes",
@@ -36,6 +51,8 @@
     "none": "Aucune",
     "showMore": "Afficher plus ({{count}})",
     "showOlder": "Afficher les anciennes ({{count}})",
+    "tagFilter": "Afficher seulement {{tag}}",
+    "tags": "Étiquettes",
     "tasksMany": "{{count}} tâches",
     "tasksOne": "1 tâche",
     "title": "Tâches",
