@@ -36,12 +36,15 @@
       "queued": "尚未收到回执。会自动重发。",
       "sending": "正在路上。",
       "sent": "已发送。尚未收到回执。",
-      "waiting": "联系人上线后自动发送。"
+      "waiting": "联系人上线后自动发送。",
+      "waitingLiveContact": "文件需要直连。联系人的聊天为仅 DHT：对方重新允许直连后发送。",
+      "waitingLiveYou": "文件需要直连。此聊天为仅 DHT：可通过连接图标更改。"
     },
     "retry": "未发送。重新发送",
     "sending": "正在发送",
     "sent": "已发送",
-    "waiting": "等待联系人上线"
+    "waiting": "等待联系人上线",
+    "waitingLive": "等待直连"
   },
   "disabledPlaceholder": "消息…",
   "edit": {

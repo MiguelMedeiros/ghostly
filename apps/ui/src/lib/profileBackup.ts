@@ -7,14 +7,18 @@ import { storedBlob, storedSize } from "@ghostly/browser/shared/storedFiles";
 import { restoreArkDatabase, snapshotArkDatabase, type ArkDatabaseSnapshot } from "@ghostly/browser/engine/paymentAdapters/backup";
 import { getPrefix, getStorageProfile, ownsKey } from "./storage";
 import { assertUnlocked, identityKeysOf, profileIdentityKeys } from "./profileData";
-import { currentProfile, listProfiles, namespaceOf, newProfileId, registerProfile, registryKey, storedProfileName, type ProfileEntry } from "./profiles";
+import { builtInNameBefore, currentProfile, isBuiltInName, listProfiles, namespaceOf, newProfileId, registerProfile, registryKey, storedProfileName, type ProfileEntry } from "./profiles";
 
 /** The decrypted content of a profile bundle (WISP 05). */
 interface ProfilePayload {
   format: "ghostly-profile";
   version: 1;
   createdAt: number;
-  profile: { name: string };
+  /**
+   * `builtIn`: whether `name` is the built-in name, which the restored profile shows in the app's language, or a name
+   * someone gave, kept as written. Absent in a bundle made before the marker (see `builtInNameBefore`).
+   */
+  profile: { name: string; builtIn?: boolean };
   /** The profile's local keys, without its prefix. */
   storage: Record<string, string>;
   databases: { peer: DatabaseSnapshot | null; ark: Record<string, ArkDatabaseSnapshot> };
@@ -94,7 +98,8 @@ export async function createProfileBackup(passphrase: string, id?: string, lockP
     if (!(await databaseExists(`ghostly-ark-${walletId}`))) continue;
     ark[walletId] = await snapshotArkDatabase(walletId).catch((e: unknown) => Promise.reject(Object.assign(new Error(`Could not read the Ark wallet for the backup: ${e instanceof Error ? e.message : e}`), { cause: e })));
   }
-  const payload: ProfilePayload = { format: "ghostly-profile", version: 1, createdAt: Date.now(), profile: { name: storedProfileName(active ? currentProfile().id : id!) ?? "Profile" }, storage, databases: { peer, ark } };
+  const name = storedProfileName(active ? currentProfile().id : id!) ?? "Profile";
+  const payload: ProfilePayload = { format: "ghostly-profile", version: 1, createdAt: Date.now(), profile: { name, builtIn: isBuiltInName(name) }, storage, databases: { peer, ark } };
   return seal(await encode(payload), passphrase);
 }
 
@@ -147,6 +152,14 @@ export async function sameIdentityProfiles(opened: OpenedProfileBackup): Promise
     if ([...ours].some((key) => theirs.has(key))) found.push(entry);
   }
   return found;
+}
+
+/** The language the profile in a bundle was set to: its settings', or English, which an app with none set runs in. */
+function languageOf(storage: Record<string, string>): string | undefined {
+  try {
+    const language = (JSON.parse(storage.app_settings ?? "{}") as { language?: unknown } | null)?.language;
+    return typeof language === "string" ? language : undefined;
+  } catch { return undefined; }
 }
 
 /**
@@ -216,8 +229,10 @@ export async function restoreOpenedBackup({ payload }: OpenedProfileBackup): Pro
       localStorage.setItem(`ghostly_${ns}_${suffix}`, value);
     }
     // Registered last: an interrupted restore leaves no half-made profile in the list. Its name as it was, marked
-    // restored: the app says "(restored)" in its language, which a name written here would not follow.
-    return registerProfile(id, payload.profile.name, true);
+    // restored: the app says "(restored)" in its language, which a name written here would not follow. Only a name
+    // the bundle marks as the built-in one follows the language; one made before the marker is read by its own language.
+    const { name, builtIn } = payload.profile;
+    return registerProfile(id, name, true, typeof builtIn === "boolean" ? builtIn : builtInNameBefore(name, languageOf(payload.storage)));
   } catch (error) {
     await undoRestore(ns, made);
     throw isQuotaError(error) ? Object.assign(new Error("This device has no room left for this backup. Free some space, then try again."), { cause: error }) : error;

@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
-import { deliveryShape, useDeliveryWords, type DeliveryShape } from "../../lib/delivery";
+import { deliveryShape, useDeliveryWords, type DeliveryShape, type DhtOnlyBy } from "../../lib/delivery";
 import type { ChatMessage } from "../../lib/types";
 
 /**
@@ -41,8 +41,10 @@ const TIP_MS = 2500;
  * held, it says in one line what it means; the details panel (⋮ → Details) has the rest. A message that was not
  * sent is a button: pressing the red mark sends it again.
  */
-export function DeliveryStatus({ delivery, acked = false, onPicture = false, onRetry }: {
+export function DeliveryStatus({ delivery, acked = false, onPicture = false, onRetry, live }: {
   delivery?: ChatMessage["delivery"];
+  /** A waiting file in a DHT-only chat: it waits for a live connection, and who chose DHT only. */
+  live?: DhtOnlyBy;
   acked?: boolean;
   /** On the dark chip over a picture, dark in every theme. */
   onPicture?: boolean;
@@ -113,7 +115,7 @@ export function DeliveryStatus({ delivery, acked = false, onPicture = false, onR
           <DeliveryIcon shape={shape} cutout={onPicture ? "#0b141a" : undefined} />
         </button>
       ) : (
-        <span role="img" {...common} aria-label={words.label(state)}
+        <span role="img" {...common} aria-label={words.label(state, live)}
           onClick={(e) => { e.stopPropagation(); if (press.current?.fired) { press.current = null; return; } press.current = null; show(true); }}>
           <DeliveryIcon shape={shape} cutout={onPicture ? "#0b141a" : undefined} />
         </span>
@@ -121,7 +123,7 @@ export function DeliveryStatus({ delivery, acked = false, onPicture = false, onR
       {tip && (
         <span role="tooltip" id={tipId} data-testid="message-delivery-tip"
           className="absolute bottom-full end-0 mb-1.5 z-20 w-max max-w-[15rem] whitespace-normal rounded-md border border-border bg-surface-alt px-2 py-1 text-start text-[11.5px] leading-snug text-text-primary shadow-lg pointer-events-none animate-fade-in">
-          {words.hint(state)}
+          {words.hint(state, live)}
         </span>
       )}
     </span>
