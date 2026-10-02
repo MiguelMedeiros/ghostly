@@ -265,6 +265,8 @@ describe("waking a contact whose app is closed", () => {
 describe("private groups: a mention wakes a member whose app is closed", () => {
   const memberKey = () => createIdentity().pubKeyZ32;
   async function addEdge(node: GhostlyNode, group: string, peer: string, link: Stub | null, stored: Partial<StoredLink> = {}) {
+    // The edges here stand for members the roster has (no group session runs in these tests): a group's traffic goes to those only.
+    vi.spyOn(node["groups"], "inRoster").mockReturnValue(true);
     return addChat(node, link, { profile: undefined, group, groupPeer: peer, ...stored });
   }
   const edgeLink = (overrides: Record<string, unknown> = {}) => stubLink({ groupsSupport: true, sendGroupFrame: vi.fn(), ...overrides });
