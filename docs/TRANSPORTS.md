@@ -62,6 +62,20 @@ Every transport runs the same authenticated chat session ([WISP 401](wisps/401-p
 - Native listeners start one at a time per transport, the transports side by side (`nativeQueues` in `packages/browser/src/engine/node.ts`). HyperDHT with its DHT out of reach (UDP blocked, a VPN) takes about 6 s to start listening; in one shared queue each chat's Iroh listener waited that long per chat ahead of it.
 - While live, the chat does not probe for a better transport. It changes when the current one drops or someone switches.
 
+### When direct connections are blocked
+
+A VPN, a firewall or a carrier's NAT can stop every direct path. The app cannot see a VPN; it sees its own WebRTC attempts fail, and says so in the chat's connection panel and in Settings, Advanced, Network: "Direct connections are blocked on this network (a VPN or firewall?). Chats still work through relays, but connect more slowly." It never says a VPN was found.
+
+- **What counts** (`DataLink` reports per attempt, `DirectPathWatch` in `packages/core/src/directPath.ts` decides):
+  - `no-public`: both descriptions were exchanged, nothing connected, and this device had no public candidate (no STUN server answered, or no candidate at all).
+  - `symmetric`: nothing connected, and this device's public address had three or more ports on one address: a mapping per destination.
+  - `no-path`: this device's offer was answered, it had public candidates, and nothing connected. The contact may be the blocked one.
+- **The rule:** no WebRTC connection open now, none opened since, and either two attempts with this device's own evidence (`no-public`, `symmetric`) or failed attempts with three different contacts. One failed dial shows nothing.
+- **It clears by itself:** when a WebRTC connection opens, when the network changes (the browser's `online` event), and when the evidence is older than 30 minutes.
+- An offer nobody answered says nothing: the contact may be away. An answerer reports only its own evidence.
+- The note is kept in memory. After a restart it comes back only when attempts fail again; a chat that resumes straight on a relayed transport makes no WebRTC attempt.
+- Clients without WebRTC (Desktop on Linux, the headless CLI's UI-less daemon) show no note.
+
 ## Layer 0: Pkarr and the Mainline DHT
 
 A Pkarr record is a small DNS packet (at most 1,000 bytes), signed with Ed25519 and stored in the Mainline DHT (BEP 44). Ghostly publishes several kinds per chat: the link's presence and signals, the DHT mailboxes, the capability record and the hold pointer. See [PROTOCOL.md](PROTOCOL.md#records-on-the-dht).
