@@ -231,7 +231,8 @@ export interface GroupView {
   isAdmin: boolean;
   members: GroupMemberView[];
   /** On the invitee's side, until the welcome arrives. */
-  invitation?: { linkId: string; contact: string; admin: string; members: number; accepted: boolean; viaLink?: boolean; stage?: GroupJoinStage };
+  /** `waiting`: joining a community through its link, how many others were knocking with me when I last knocked. */
+  invitation?: { linkId: string; contact: string; admin: string; members: number; accepted: boolean; viaLink?: boolean; stage?: GroupJoinStage; waiting?: number };
   /** The group's link while it is on (`group1/<id>/<entry key>`); only the admin who made it sees it. */
   entryLink?: string;
   /** Contacts (by chat id) invited by me and not yet in. */

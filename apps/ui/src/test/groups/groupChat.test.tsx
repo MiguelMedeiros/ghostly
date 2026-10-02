@@ -79,6 +79,24 @@ describe("GroupChat: joining through a link", () => {
     expect(await screen.findByTestId("group-joining-stale", {}, { timeout: 3_000 })).toHaveTextContent("Still no answer. If the group's link was replaced, this one no longer works: ask for the new link.");
   });
 
+  it("others knocking too: says how many wait, and after two minutes that the group is busy, not that the link may be dead", async () => {
+    const knocking = (waiting: number | undefined, age = 0) => groupView({ profile: "community", createdAt: Date.now() - age, canSend: false,
+      invitation: { linkId: "", contact: "", admin: "", members: 0, accepted: true, viaLink: true, stage: "knocked", ...(waiting && { waiting }) } });
+    const view = openGroup(knocking(3));
+    expect(screen.getByTestId("group-joining-queue")).toHaveTextContent("3 more people are waiting to be let in.");
+    expect(screen.queryByTestId("group-joining-stale")).not.toBeInTheDocument();
+    act(() => view.engine.update({ groups: [knocking(1)] }));
+    expect(screen.getByTestId("group-joining-queue")).toHaveTextContent("1 more person is waiting to be let in.");
+    // Alone at the door: nothing about a queue.
+    act(() => view.engine.update({ groups: [knocking(undefined)] }));
+    expect(screen.queryByTestId("group-joining-queue")).not.toBeInTheDocument();
+    // Two minutes on, still behind others: a wait, in words that do not send the person to ask for another link.
+    act(() => view.engine.update({ groups: [knocking(2, 2 * 60_000 - 400)] }));
+    const hint = await screen.findByTestId("group-joining-stale", {}, { timeout: 3_000 });
+    expect(hint).toHaveTextContent("Still waiting. The group lets people in a few at a time");
+    expect(hint).not.toHaveTextContent("link was replaced");
+  });
+
   it("a knock someone answered is not told the link may be old", () => {
     openGroup(groupView({ createdAt: Date.now() - 10 * 60_000, canSend: false, invitation: { linkId: "", contact: "", admin: "", members: 0, accepted: true, viaLink: true, stage: "answered" } }));
     expect(screen.getByTestId("group-joining")).toHaveTextContent("The admin's app saw you knock");
