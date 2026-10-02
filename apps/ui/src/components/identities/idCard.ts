@@ -163,6 +163,10 @@ export type ShareState = "verifying" | "waiting" | "unanswered" | "verified" | "
  * the share's state in the status corner. A verified share says what its card says now (verified, expiring,
  * expired); any other state is the share's own, and then the card wears no public profile: a share that failed or
  * stopped never shows what the account says about itself.
+ *
+ * It never asks for a public profile (no `lookup`): a card in the timeline wears the picture and name this app
+ * already has, and a contact's profile is only fetched once their card is opened (PUBLIC-PROFILES.md: a chat on
+ * screen must not reach the identity's network by itself).
  */
 export function shareIdCard(entry: IdentityTimelineEntry, state: ShareState, { proof, received, contact, now = Date.now() / 1000, t = english, language }: {
   proof?: IdentityProofView; received?: ReceivedIdentityView; contact?: string; now?: number; t?: Translate; language?: string;
@@ -176,8 +180,9 @@ export function shareIdCard(entry: IdentityTimelineEntry, state: ShareState, { p
   // One of mine says, as in the picker, whether this contact sees it.
   const stopped = state === "withdrawn" || state === "revoked";
   const shared = proof && contact ? { shared: stopped ? t("identities.picker.notSharedWith", { contact }) : t("identities.ghostly.sharedWith", { contact }) } : {};
-  if (state === "verified") return own ? { ...own, ...shared } : { ...base, status: "verified", statusLabel: t("identities.card.verified") };
-  const { name: _name, photo: _photo, profile: _profile, lookup: _lookup, ...plain } = base;
+  const { lookup: _lookup, ...known } = base;
+  if (state === "verified") return own ? { ...known, ...shared } : { ...known, status: "verified", statusLabel: t("identities.card.verified") };
+  const { name: _name, photo: _photo, profile: _profile, ...plain } = known;
   const status: IdCardStatus = state === "failed" || stopped ? state : "checking";
   const statusLabel = {
     verifying: t("identities.share.checking"), waiting: t("identities.share.waiting"), unanswered: t("identities.share.notChecked"),

@@ -41,7 +41,8 @@ describe("IdentityShareLine", () => {
   it("is the contact's ID card, the picker's: the picture and name when the identity has them, Verified, and who shared it under it", async () => {
     const publicProfile: PublicProfileView = { found: true, name: "Pat", avatar: AVATAR, hosts: ["relay.damus.io"], fetchedAt: now() - 60 };
     const received = receivedView({ id: "n1", provider: "nostr", subject: NOSTR_KEY, verified: { subject: NOSTR_KEY, source: "Nostr signature" }, publicProfile });
-    const { user, onOpen } = line(entry({ proof: "n1", provider: "nostr", subject: NOSTR_KEY }), { links: [paired({ identities: identitiesView({ received: [received] }) })] });
+    const view = line(entry({ proof: "n1", provider: "nostr", subject: NOSTR_KEY }), { links: [paired({ identities: identitiesView({ received: [received] }) })] });
+    const { user, onOpen } = view;
     expect(card()).toHaveAttribute("data-side", "theirs");
     expect(card()).toHaveAttribute("data-state", "verified");
     expect(text()).toBe("Alice shared this identity");
@@ -55,6 +56,8 @@ describe("IdentityShareLine", () => {
     expect(within(face()).getByTestId("id-card-photo")).toHaveAttribute("src", AVATAR);
     expect(face()).toHaveAttribute("data-status", "verified");
     expect(status()).toBe("Verified");
+    // It wears the profile this app already has and never asks for one: only an opened card reaches the identity's network.
+    expect(view.engine.calls.filter(c => c.method === "loadPublicProfile")).toEqual([]);
     // A button with the whole of it in its name: the hover is never the only way to what the card says.
     expect(button()).toHaveAccessibleName(/^Alice shared Nostr · npub1.* · Verified$/);
     button().focus();
