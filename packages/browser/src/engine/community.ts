@@ -145,6 +145,16 @@ const FAREWELL_SAY_MS = 10_000;
  * a returning member whose clock runs behind the admin's is told all the same.
  */
 const FAREWELL_SKEW_MS = 5 * 60_000;
+/**
+ * A hub dates its beacon entry by its own clock, and a reader judges it by its own. A hub's time closer than this to
+ * what this app saw is taken as written; past it the two clocks differ, and the entry is read in this app's time
+ * (`inMyTime`). Half as long again as a hub's pace: what an entry may trail a reading by, between two clocks that agree.
+ */
+const HUB_CLOCK_SLACK_MS = COMMUNITY_TOPOLOGY.beaconEveryMs * 1.5;
+/** Two readings of the beacon no further apart than this say when an entry that moved between them was written. */
+const HUB_CLOCK_READ_GAP_MS = 45_000;
+/** A hub's clock is remembered this long after its entry was last in the beacon. */
+const HUB_CLOCK_KEPT_MS = 10 * 60_000;
 /** A member that opens the group's link again knocks to check it is still in, this long at most (`joinByLink`). */
 const CHECK_MS = 3 * 60_000;
 const MESSAGE_LINK = (groupId: string) => `group:${groupId}`;
@@ -169,7 +179,15 @@ interface Live {
   session: CommunitySession;
   hub: boolean;
   hubSince: number;
+  /** The beacon's hubs, each entry in this app's time (`inMyTime`). */
   beacon: Hub[];
+  /**
+   * Each hub's clock as its entry showed it: the time it last said (`said`, its own clock), how far this app's clock
+   * is from it once the entry was seen to move between two readings (`ahead`, ms: positive when mine is ahead), and
+   * when the entry was last in the beacon. `beaconSeenAt`: my last reading that got an answer.
+   */
+  hubClocks: Map<string, { said: number; ahead?: number; at: number }>;
+  beaconSeenAt: number;
   /** The newest message frame the beacon names (WISP 9xx § Head), as last read or written. */
   head: CommunityHead | null;
   lastBeaconRead: number;
@@ -836,11 +854,43 @@ export class Communities {
     }
     live.beaconFailedAt = 0; live.beaconKnown = true;
     // Hubs I do not know yet are members newer than my view of the roster: exactly whom I need to catch up.
-    live.beacon = readBeacon(keys, records ?? []);
+    live.beacon = this.inMyTime(live, readBeacon(keys, records ?? []), now);
     live.head = readBeaconHead(keys, records ?? []);
     live.beaconAt = now;
     this.noteHubs(live, now);
     return true;
+  }
+
+  /**
+   * A reading of the beacon in this app's time. A hub dates its entry by its own clock; held against mine as it is, a
+   * hub whose clock is a minute and a half from mine never looks fresh (its entry is "stale", or "not come yet"): a
+   * member saw no hub and took itself for the only one, and a hub with such a clock was no hub to anyone. So a hub's
+   * clock is learned from its entry: when the entry moved between two readings of mine, it was written between them,
+   * and what it says the time was then, against my own, is how far the two clocks are apart. An entry of a clock
+   * further than `HUB_CLOCK_SLACK_MS` from mine is moved by that much (its `since` with it); one closer, or one not
+   * seen to move yet, is taken as written, as before. An entry that stops moving ages by my clock like any other.
+   */
+  private inMyTime(live: Live, read: Hub[], now: number): Hub[] {
+    const gap = now - live.beaconSeenAt;
+    for (const h of read) {
+      if (h.key === live.session.myKey) continue;
+      const known = live.hubClocks.get(h.key);
+      // Moved since I last looked: written within `gap`, about half of it ago for all I know.
+      const moved = !!known && h.ts > known.said && live.beaconSeenAt > 0 && gap <= HUB_CLOCK_READ_GAP_MS;
+      live.hubClocks.set(h.key, { said: Math.max(h.ts, known?.said ?? 0), ahead: moved ? now - gap / 2 - h.ts : known?.ahead, at: now });
+    }
+    for (const [key, clock] of live.hubClocks) if (now - clock.at > HUB_CLOCK_KEPT_MS) live.hubClocks.delete(key);
+    live.beaconSeenAt = now;
+    return read.map(h => { const ahead = this.clockAhead(live, h.key); return ahead ? { ...h, ts: h.ts + ahead, ...(h.since !== undefined && { since: h.since + ahead }) } : h; });
+  }
+  /** How far my clock is ahead of a hub's (ms, negative when behind), when the two differ; 0 when they agree or nothing says. */
+  private clockAhead(live: Live, hub: string): number {
+    const ahead = hub === live.session.myKey ? 0 : live.hubClocks.get(hub)?.ahead ?? 0;
+    return Math.abs(ahead) > HUB_CLOCK_SLACK_MS ? Math.round(ahead) : 0;
+  }
+  /** Entries in my time, as each hub wrote them: what goes back into the beacon, so no hub's entry is dated by another's clock. */
+  private asWritten(live: Live, hubs: Hub[]): Hub[] {
+    return hubs.map(h => { const ahead = this.clockAhead(live, h.key); return ahead ? { ...h, ts: h.ts - ahead, ...(h.since !== undefined && { since: h.since - ahead }) } : h; });
   }
 
   /**
@@ -864,13 +914,13 @@ export class Communities {
       const read = await this.host.resolve(keys.identity.pubKeyZ32, true).catch(() => undefined);
       if (read === undefined && live.session.roster.length > 1) throw new Error("The beacon could not be read; not published");
       const records = read ?? [];
-      existing = readBeacon(keys, records); head = readBeaconHead(keys, records);
+      existing = this.inMyTime(live, readBeacon(keys, records), now); head = readBeaconHead(keys, records);
     }
     // Nobody drops a hub it does not know: a member behind on the roster would erase newer ones.
     const hubs = mergeBeacon(existing, live.session.myKey, listed ? { key: live.session.myKey, ts: now, load: this.beaconLoad(groupId, live, now), since: live.hubSince || now } : null, now, key => !live.session.wasRemoved(key));
     // Nor a newer head: several hubs write this record in turn.
     const newest = newerHead(head, this.newestFrame(live), now);
-    await this.host.publish(keys.identity, beaconRecords(keys, hubs, newest), true);
+    await this.host.publish(keys.identity, beaconRecords(keys, this.asWritten(live, hubs), newest), true);
     live.beacon = hubs; live.head = newest;
     this.noteHubs(live, now);
     live.lastBeaconWrite = now; live.lastBeaconRead = live.beaconAt = now; live.beaconFailedAt = 0; live.beaconKnown = true;
@@ -947,7 +997,9 @@ export class Communities {
   private async askHub(groupId: string, live: Live, hub: string, now: number): Promise<void> {
     const keys = lobbyKeys(live.session.state.rv, groupId, hub);
     const existing = readLobby(keys, (await this.host.resolve(keys.identity.pubKeyZ32, true)) ?? []);
-    await this.host.publish(keys.identity, lobbyRecords(keys, mergeLobby(existing, { key: live.session.myKey, ts: now }, now)), true);
+    // Dated by the hub's clock, where mine differs: the hub reads its lobby by its own, and so do the members that write there.
+    const theirs = now - this.clockAhead(live, hub);
+    await this.host.publish(keys.identity, lobbyRecords(keys, mergeLobby(existing, { key: live.session.myKey, ts: theirs }, theirs)), true);
     traceJoin(groupId, "lobby.written");
   }
 
@@ -1236,6 +1288,11 @@ export class Communities {
         live.expect.add(joining.inviter);
         live.lobbyWrites.set(joining.inviter, now);
         live.joinedAt = now;
+        // Its clock, from the commit that let me in: signed a moment ago by its clock, read now by mine. So its beacon
+        // entry reads right from my first look, before it is seen to move; a welcome said again long after the commit
+        // gives a wrong start, which the entry's next move puts right (`inMyTime`).
+        const admission = [...joined.state.chain].reverse().find(c => c.k === "add" && c.s === live.session.myKey);
+        if (admission?.by === joining.inviter) live.hubClocks.set(joining.inviter, { said: 0, ahead: now - admission.ts, at: now });
         await this.store.putGroup(member);
         if (!again) await this.event(g, "joined", `You joined. ${GROUP_READ_NOTE_COMMUNITY}`, now, joined.state.chain.length - 1);
         else if (back) await this.event(g, "joined", "You joined again", now, joined.state.chain.length - 1);
@@ -1376,7 +1433,7 @@ export class Communities {
       clock: () => this.now(),
       relay: frame => { if (this.live.get(id)?.hub) for (const [, linkId] of this.hearers(id, frame)) this.sendTo(linkId, frame); },
     });
-    this.live.set(id, { session, hub: false, hubSince: 0, beacon: [], head: null, lastBeaconRead: 0, beaconKnown: false, beaconFailedAt: 0, beaconAt: 0, leaving: 0, stepDownAt: 0, lastBeaconWrite: 0, lastBeaconTry: 0, hubCandidateAt: 0, members: new Map(), emptySince: 0,
+    this.live.set(id, { session, hub: false, hubSince: 0, beacon: [], hubClocks: new Map(), beaconSeenAt: 0, head: null, lastBeaconRead: 0, beaconKnown: false, beaconFailedAt: 0, beaconAt: 0, leaving: 0, stepDownAt: 0, lastBeaconWrite: 0, lastBeaconTry: 0, hubCandidateAt: 0, members: new Map(), emptySince: 0,
       lastLobbyPoll: 0, myHubs: [], lobbyWrites: new Map(), lastKnockPoll: 0, pendingEntries: new Map(), knocksSeen: new Map(),
       hubWaits: new Map(), hubsAvoided: new Map(), hubsUp: new Set(), lingering: new Map(), seenHubs: new Map(), restored: new Map(),
       farewells: new Map(), farewellQuiet: new Map(), farewellSaid: new Map(),
