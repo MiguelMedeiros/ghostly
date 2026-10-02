@@ -15,7 +15,7 @@
   "pushRelayInfo": "浏览器页面无法自行向推送服务发送。你选择的中继会代为发送已加密的唤醒：它知道你何时唤醒了某人以及你的 IP 地址，但永远不知道你写了什么。Ghostly 不运行任何中继。桌面版和命令行不需要中继。",
   "readRelays": "同时使用 Pkarr 中继",
   "readRelaysHint": "更快找到首个联系人。中继能看到查询了哪些密钥。",
-  "readRelaysInfo": "本应用直接读取 Mainline DHT。开启后,还会通过下方的 Pkarr 中继读取。",
+  "readRelaysInfo": "本应用直接读取 Mainline DHT。开启后,还会通过下方的 Pkarr 中继读取。如果完全无法连接 DHT(VPN 或防火墙可能会拦截),即使关闭也会通过这些中继读取。",
   "relays": "Pkarr 中继",
   "relaysHint": "每行一个。它们只能看到已签名的加密数据包。",
   "relaysInfoDirect": "网页版和扩展中的联系人无法访问 Mainline DHT,只能通过中继读取,因此本应用也会写入中继。",
