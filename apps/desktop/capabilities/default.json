@@ -99,6 +99,9 @@
     "allow-service-respond",
     "allow-set-pkarr-relays",
     "allow-share-text",
+    "allow-turn-put",
+    "allow-turn-read",
+    "allow-turn-warm",
     "allow-under-test",
     "allow-updater-can-install"
   ]

@@ -23,7 +23,7 @@ const LEGAL: Record<DeviceState, DeviceState[]> = {
   // A release it holds; a forced takeover; a tombstone.
   standby: ["taking", "active", "moving", "removed"],
   // Its own turn read back; another record at its turn; a tombstone.
-  taking: ["active", "standby", "moving", "removed"],
+  taking: ["active", "standby", "superseded", "moving", "removed"],
   // Use here; It wasn't me; a tombstone.
   superseded: ["taking", "active", "moving", "removed"],
   // An accepted set-update or a new enrollment; a device set of its own; no longer listed.

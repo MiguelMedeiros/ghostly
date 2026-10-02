@@ -381,6 +381,13 @@ export interface NodeOptions {
    */
   singleDevice?: boolean;
   /**
+   * Start in limited mode (WISP 06 § When a device checks): the device could not read which device is active, and the
+   * person chose "Start anyway". It is the profile offline: history can be read and messages written, which wait.
+   * Nothing is published, nothing is dialled, nothing is settled in hold storage, no wallet is opened and no admin
+   * work is done, until `leaveLimited()` is called after the first good read. Default: off.
+   */
+  limited?: boolean;
+  /**
    * This app stays online, so it offers to be a hub of the private groups past 16 members it is in (WISP 9xx · Group
    * Mesh § Hubs). Default: the Desktop app; the CLI says so itself; a browser tab only when the admin pins it.
    */
@@ -455,8 +462,57 @@ function sentNow(message: StoredMessage): StoredMessage {
   return sent;
 }
 
+/** What a call refused in limited mode is answered with. */
+export const LIMITED_MODE_ERROR = "Ghostly could not check which device is active yet. This works once it can.";
+
+/**
+ * What the pages may call in limited mode (WISP 06 § When a device checks): reading history, writing messages (they
+ * wait), and the settings. Everything else is refused, whatever it would do: every wallet and payment call (no
+ * wallet is opened), every group change (no admin work), every new chat, join, call and identity change (nothing is
+ * dialled or published). A list of what is allowed, so a method added later is refused until someone decides.
+ *
+ * Deleting a message and sending one again are not on it: a delete withdraws the message's held item from hold
+ * storage and its pending payment request from the payment desk, and limited mode has neither (no storage, no
+ * wallet started). Done half, the item would still reach the contact. They work again once limited mode is left.
+ */
+export const LIMITED_MODE_METHODS: ReadonlySet<string> = new Set<keyof EngineApi>([
+  "setActiveLink", "renameLink", "updateSettings", "disconnect",
+  "sendMessage", "editMessage", "react", "pinMessage", "forwardMessages", "messageDetails", "messagePage",
+  "sendGroupMessage", "groupMessages", "statusCardIndex", "setTyping", "setGroupTyping", "setFastPoll", "exportLinks", "walletBackupReminder",
+]);
+
+/** Thrown by the transport when something tries to publish in limited mode: a bug in a switch point, never a wait. */
+export class LimitedModeError extends Error {
+  constructor() {
+    super("Nothing is published before the turn was read (limited mode)");
+    this.name = "LimitedModeError";
+  }
+}
+
+/**
+ * A transport over `transport` with every publish refused while `limited()` says so. The engine's own switches keep
+ * it from trying; this is the one place that cannot be forgotten, since every Pkarr record of a profile goes through
+ * it. A transport of its own: the one given is shared by every engine of the app (a profile switch makes a new one
+ * on the same transport), and must not keep this engine's refusal.
+ */
+function refusingWhileLimited(transport: PkarrTransport, limited: () => boolean): PkarrTransport {
+  const guarded = withRequestOptions(transport, {});
+  guarded.publish = (identity, records, options) => (limited() ? Promise.reject(new LimitedModeError()) : transport.publish(identity, records, options));
+  if (transport.publishPayload) guarded.publishPayload = (pubKeyZ32, payload, options) => (limited() ? Promise.reject(new LimitedModeError()) : transport.publishPayload!(pubKeyZ32, payload, options));
+  return guarded;
+}
+
 export class GhostlyNode implements EngineImplementation {
   private settings: Settings = DEFAULT_SETTINGS;
+  /** Limited mode (`NodeOptions.limited`): on from the start until `leaveLimited()`. */
+  private limitedMode = false;
+  /** Whether this engine is in limited mode (WISP 06 § When a device checks). */
+  get limited(): boolean { return this.limitedMode; }
+  /**
+   * Whether this engine may use the network for the profile: the person's own switch, and never in limited mode.
+   * Everything that publishes, dials, polls or settles asks this, not the stored setting.
+   */
+  private get networkOn(): boolean { return !!this.settings.online && !this.limitedMode; }
   private readonly transport: PkarrTransport;
   /** The same, for groups' requests: a relay budget keeps a chat's share from them (`CHAT_RESERVE`). */
   private readonly groupTransport: PkarrTransport;
@@ -755,6 +811,8 @@ export class GhostlyNode implements EngineImplementation {
   private readonly hold: HoldEngine = new HoldEngine({
     transport: undefined as unknown as PkarrTransport,
     storage: () => {
+      // Limited mode settles nothing in hold storage: with no storage the hold engine puts, reads and deletes nothing.
+      if (this.limitedMode) return null;
       const config = this.settings.holdStorage;
       if (!config?.s3 || !/^[a-z2-7]{16}$/.test(config.space ?? "")) return null;
       const key = JSON.stringify(config.s3);
@@ -838,7 +896,7 @@ export class GhostlyNode implements EngineImplementation {
       return { mine: stored?.participationSeed ? identityFromSeedB64(stored.participationSeed).pubKeyZ32 : undefined, theirs: stored?.pairedPeerKey };
     },
     linkIds: () => [...this.links.keys()],
-    online: () => this.settings.online,
+    online: () => this.networkOn,
     emit: () => { this.emitState(); this.did.changed(); void this.publicProfiles.prune().catch(() => {}); this.publicActivity.prune(); },
     publicProfile: (provider, subject) => this.publicProfiles.view({ provider, subject }),
     publish: (seed, records) => this.transport.publish(identityFromSeed(seed), records),
@@ -847,7 +905,7 @@ export class GhostlyNode implements EngineImplementation {
 
   /** The profile's did:dht: a key of its own, public, never tied to a chat (WISP 3xx-did-dht). */
   readonly did = new ProfileDid({
-    online: () => this.settings.online,
+    online: () => this.networkOn,
     emit: () => this.emitState(),
     listable: () => {
       const now = Date.now() / 1000;
@@ -864,7 +922,7 @@ export class GhostlyNode implements EngineImplementation {
   /** The Nostr social layer (profile, follows, notes, publication) on top of verified Nostr proofs. */
   private readonly nostrSocial = new NostrSocial({
     settings: () => this.settings.nostr,
-    online: () => this.settings.online,
+    online: () => this.networkOn,
     emit: () => this.emitState(),
     ownSubjects: () => this.identities.views().filter(p => p.provider === "nostr").map(p => p.subject),
     contactSubjects: linkId => {
@@ -892,7 +950,7 @@ export class GhostlyNode implements EngineImplementation {
   /** Public profiles of verified identities, read when their cards are on screen (PUBLIC-PROFILES.md). */
   private readonly publicProfiles = new PublicProfiles({
     enabled: () => this.settings.publicProfiles !== false,
-    online: () => this.settings.online,
+    online: () => this.networkOn,
     emit: () => this.emitState(),
     eligible: () => this.profileSubjects(),
     nostrRelays: () => effectiveNostrSettings(this.settings.nostr).relays,
@@ -901,7 +959,7 @@ export class GhostlyNode implements EngineImplementation {
   /** A contact's verified identity's posts and follows, asked when its card is chosen (PUBLIC-PROFILES.md, "Posts and follows"). */
   private readonly publicActivity = new PublicActivity({
     enabled: () => this.settings.publicProfiles !== false,
-    online: () => this.settings.online,
+    online: () => this.networkOn,
     eligible: () => this.profileSubjects(),
     nostrRelays: () => effectiveNostrSettings(this.settings.nostr).relays,
     own: () => { const t = Math.floor(Date.now() / 1000); return this.identities.views().filter(p => p.expiresAt > t).map(p => ({ provider: p.provider, subject: p.verified.subject })); },
@@ -1166,9 +1224,11 @@ export class GhostlyNode implements EngineImplementation {
   ) {
     // Relays are a setting only where relays are the transport.
     this.relays = options.transport ? null : new RelayTransport();
-    this.transport = options.transport ?? this.relays!;
+    this.limitedMode = options.limited === true;
+    // An engine that starts properly uses the transport as it is, as before.
+    this.transport = this.limitedMode ? refusingWhileLimited(options.transport ?? this.relays!, () => this.limitedMode) : options.transport ?? this.relays!;
     this.groupTransport = withRequestOptions(this.transport, { group: true });
-    this.profilePeek = new ProfilePeek({ transport: this.transport, direct: !!this.transport.configure, online: () => this.settings.online !== false,
+    this.profilePeek = new ProfilePeek({ transport: this.transport, direct: !!this.transport.configure, online: () => this.networkOn,
       // A CLI profile is always `single` (WISP 06 § Goals and non-goals): no device state database is made for it.
       ...(options.singleDevice ? { runsHere: async () => true } : {}),
       readPath: () => readPathOf(this.relays ? { relays: this.relays.describe().relays } : this.settings, !!this.transport.configure) });
@@ -1305,7 +1365,16 @@ export class GhostlyNode implements EngineImplementation {
     } finally {if(!this.shuttingDown)this.paymentTimer=setTimeout(()=>void this.pollPaymentStatus(),10000);}
   }
 
-  async start(): Promise<void> {
+  /** The start in progress or done, and whether it succeeded: `leaveLimited` waits for it. */
+  private starting: Promise<boolean> | null = null;
+
+  start(): Promise<void> {
+    const run = this.startNow();
+    this.starting = run.then(() => true, () => false);
+    return run;
+  }
+
+  private async startNow(): Promise<void> {
     // A new profile has nothing stored yet. Its wallets come from the first-run setup (where the app runs it), or from
     // New; no mint is added by itself here.
     const stored = await db.getSettings();
@@ -1325,25 +1394,8 @@ export class GhostlyNode implements EngineImplementation {
     this.did.start();
     await this.nostrSocial.load();
     await this.publicProfiles.load();
-    // Wallets stored the way they were before each had its own network take their network's key first. Nothing
-    // is deleted: see walletNetworks.ts. The report names keys only.
-    const migrated = await migrateWalletNetworks();
-    if (migrated.moved.length || migrated.unreadable.length) console.info("[wallet] wallets moved to their network's key:", migrated.moved.map((m) => m.key).join(", ") || "none", migrated.unreadable.length ? `; left as they were: ${migrated.unreadable.join(", ")}` : "");
-    for (const network of WALLET_NETWORKS) {
-      await this.arkWallets[network].start();
-      await this.barkWallets[network].start();
-      await this.fedimintWallets[network].start();
-      await this.sparkWallets[network].start();
-      await this.usdtWallets[network].start();
-      await this.lightnings[network].start();
-      await this.bitcoins[network].start();
-    }
-    await this.desk.start();
-    await this.refreshWallet();
-    this.wallet.start();
-    void this.dropStaleReviews();
-    this.staleReviewTimer ??= setInterval(() => void this.dropStaleReviews(), 60_000);
-    this.stopWatchingAdapters ??= onAdaptersChanged(() => { if (!this.shuttingDown) for (const network of WALLET_NETWORKS) { this.lightnings[network].refreshOffered(); this.bitcoins[network].refreshOffered(); } });
+    // Limited mode opens no wallet: they start when it is left (`leaveLimited`).
+    if (!this.limitedMode) await this.startWallets();
 
     const history = new Map<string, StoredMessage[]>();
     for (const stored of await db.getLinks()) {
@@ -1376,14 +1428,42 @@ export class GhostlyNode implements EngineImplementation {
     }
     // With the chats loaded, profiles of identities no longer verified can be told apart and dropped.
     this.publicProfiles.start();
-    if (this.settings.online) for (const linkId of this.nativeStartOrder([...history.keys()])) {
+    if (this.networkOn) for (const linkId of this.nativeStartOrder([...history.keys()])) {
       const messages = history.get(linkId)!;
       if (!this.links.has(linkId)) continue;
       this.startLink(linkId, messages);
       if (!this.links.get(linkId)?.stored.group) void this.refreshPublicProfiles({ linkId }).catch(() => {});
     }
     this.emitState();
-    if (this.settings.online) { this.hold.start(); this.startGroupEntries(); this.prepareSpare(STARTUP_QUIET_MS); }
+    if (this.networkOn) { this.hold.start(); this.startGroupEntries(); this.prepareSpare(STARTUP_QUIET_MS); }
+    if (!this.limitedMode) this.openStartedWallets(fresh);
+  }
+
+  /** Every wallet's stored state, loaded: the first half of what `start()` does for money. */
+  private async startWallets(): Promise<void> {
+    // Wallets stored the way they were before each had its own network take their network's key first. Nothing
+    // is deleted: see walletNetworks.ts. The report names keys only.
+    const migrated = await migrateWalletNetworks();
+    if (migrated.moved.length || migrated.unreadable.length) console.info("[wallet] wallets moved to their network's key:", migrated.moved.map((m) => m.key).join(", ") || "none", migrated.unreadable.length ? `; left as they were: ${migrated.unreadable.join(", ")}` : "");
+    for (const network of WALLET_NETWORKS) {
+      await this.arkWallets[network].start();
+      await this.barkWallets[network].start();
+      await this.fedimintWallets[network].start();
+      await this.sparkWallets[network].start();
+      await this.usdtWallets[network].start();
+      await this.lightnings[network].start();
+      await this.bitcoins[network].start();
+    }
+    await this.desk.start();
+    await this.refreshWallet();
+    this.wallet.start();
+    void this.dropStaleReviews();
+    this.staleReviewTimer ??= setInterval(() => void this.dropStaleReviews(), 60_000);
+    this.stopWatchingAdapters ??= onAdaptersChanged(() => { if (!this.shuttingDown) for (const network of WALLET_NETWORKS) { this.lightnings[network].refreshOffered(); this.bitcoins[network].refreshOffered(); } });
+  }
+
+  /** The wallets that exist, opened, and what was in flight looked at again: the second half. */
+  private openStartedWallets(fresh: boolean): void {
     void this.pollPaymentStatus().catch(()=>{});
     // Federations joined before: opened (and the notes a contact sent that an interruption left unredeemed, redeemed).
     void Promise.all(WALLET_NETWORKS.map((n) => this.fedimintWallets[n].ensureReady())).then(() => this.desk.resumeFedimint());
@@ -1395,6 +1475,34 @@ export class GhostlyNode implements EngineImplementation {
     }
     // A new profile (nothing stored, no wallet, no chat) gets its default Mainnet wallets, in the background.
     void this.startWalletSetup(fresh && !this.walletView.wallets?.length && this.links.size === 0).catch(() => {});
+  }
+
+  /**
+   * Leaves limited mode after the first good turn read that says this device is the active one (WISP 06 § When a
+   * device checks: "the first good one either starts the engine properly or stops the device"). What `start()` left
+   * out runs now: the wallets, then every chat, the hold storage and the group entries, as when the person goes online.
+   */
+  async leaveLimited(): Promise<void> {
+    if (!this.limitedMode) return;
+    // Called while `start()` still loads the chats, it waits: there is nothing to dial before they are loaded.
+    if (!this.starting || !(await this.starting)) throw new Error("The engine did not start");
+    if (!this.limitedMode) return;
+    this.limitedMode = false;
+    // A wallet that fails to start must not keep the chats from being dialled: the failure is reported after them.
+    let failure: unknown = null;
+    try {
+      await this.startWallets();
+      this.openStartedWallets(false);
+    } catch (error) { failure = error ?? new Error("The wallets did not start"); }
+    if (this.networkOn) {
+      for (const live of this.links.values()) this.startLink(live.stored.id, await db.getMessages(live.stored.id));
+      this.hold.start();
+      this.startGroupEntries();
+      this.prepareSpare(STARTUP_QUIET_MS);
+      void this.did.publishNow().catch(() => {});
+    }
+    this.emitState();
+    if (failure) throw failure;
   }
 
   /** The first-run wallet setup, where the app runs it (`NodeOptions.defaultWallets`): begun once, then what is left. */
@@ -1496,6 +1604,7 @@ export class GhostlyNode implements EngineImplementation {
     const groups = this.groups.views();
     return {
       settings: this.settings,
+      ...(this.limitedMode && { limited: true as const }),
       transport: {
         ...this.transport.describe(), ...(this.options.irohWeb ? { iroh: { relays: this.irohRelays, defaults: [...DEFAULT_IROH_RELAYS] } } : {}),
         ...(this.transport.configure && { direct: true }), ...(this.transport.discovery && { discovery: this.transport.discovery() }),
@@ -1628,7 +1737,7 @@ export class GhostlyNode implements EngineImplementation {
 
   /** One invite warmed and waiting (`after` ms from now), warmed again every so often while it waits (the relays forget). */
   private prepareSpare(after = 0): void {
-    if (this.shuttingDown || !this.settings.online) return;
+    if (this.shuttingDown || !this.networkOn) return;
     if (!this.spare) this.spare = this.makeSpare();
     const spare = this.spare;
     if (this.spareTimer) clearTimeout(this.spareTimer);
@@ -1700,7 +1809,7 @@ export class GhostlyNode implements EngineImplementation {
   }
   private async loadPublicProfiles(linkId: string, force: boolean): Promise<void> {
     if (!EXTERNAL_IDENTITIES_ENABLED) return;
-    const live=this.links.get(linkId);if(!live || !this.settings.online || live.stored.profileChoice==='ghostly')return;
+    const live=this.links.get(linkId);if(!live || !this.networkOn || live.stored.profileChoice==='ghostly')return;
     const mine=live.myPubKeyZ32;
     // Participation, not rendezvous, is the proof audience.
     const audience=live.stored.participationSeed ? identityFromSeedB64(live.stored.participationSeed).pubKeyZ32 : mine;
@@ -1993,7 +2102,7 @@ export class GhostlyNode implements EngineImplementation {
    * reach now, is woken, within the limits. Never waits, never fails the send.
    */
   private wakeMentioned(groupId: string, text: string, mentions: readonly GroupMention[]): void {
-    if (!mentions.length || !this.settings.online || this.groups.isCommunityGroup(groupId)) return;
+    if (!mentions.length || !this.networkOn || this.groups.isCommunityGroup(groupId)) return;
     const edges = this.memberEdges(groupId);
     const wakes = groupWakes({
       group: groupId, mentions, text, limiter: this.groupWakeLimiter,
@@ -2006,7 +2115,7 @@ export class GhostlyNode implements EngineImplementation {
   /** The contact is away: one wake-up, if it shared how and none went to it lately. Never waits, never fails a send. */
   private wakePeer(live: LiveLink, kind: WakeKind = "message"): void {
     const target = live.stored.peerWake, linkId = live.stored.id;
-    if (!target || !live.stored.profile || live.stored.group || !this.settings.online) return;
+    if (!target || !live.stored.profile || live.stored.group || !this.networkOn) return;
     if (!(kind === "call" ? this.callWakeLimiter : this.wakeLimiter).take(linkId)) return;
     this.postWake(linkId, target, kind);
   }
@@ -2033,7 +2142,7 @@ export class GhostlyNode implements EngineImplementation {
    */
   async wakeForCall({ linkId }: { linkId: string }): Promise<boolean> {
     const live = this.links.get(linkId);
-    if (!live?.stored.peerWake || !live.stored.profile || live.stored.group || live.link?.isDataLinkOpen || !this.settings.online) return false;
+    if (!live?.stored.peerWake || !live.stored.profile || live.stored.group || live.link?.isDataLinkOpen || !this.networkOn) return false;
     this.wakePeer(live, "call");
     // It is looked for at once too: the woken app answers on the DHT first.
     live.link?.session.pollNow();
@@ -3112,7 +3221,7 @@ export class GhostlyNode implements EngineImplementation {
   disableGroupLink({ groupId }: { groupId: string }): Promise<void> { return this.groups.disableLink(groupId); }
   async joinGroupByLink({ link }: { link: string }): Promise<{ groupId: string }> {
     if (typeof link !== "string") throw new Error("This is not a link to a group");
-    if (!this.settings.online) throw new Error("Go online to join a group");
+    if (!this.networkOn) throw new Error("Go online to join a group");
     return { groupId: await this.groups.joinByLink(link) };
   }
   async sendGroupMessage({ groupId, text: given, mentions, replyTo, card: raw, button }: { groupId: string; text: string; mentions?: GroupMention[]; replyTo?: string; card?: unknown; button?: string }): Promise<{ error: string | null; messageId?: string; refused?: boolean }> {
@@ -4168,7 +4277,7 @@ export class GhostlyNode implements EngineImplementation {
     const settings: Partial<Settings> = rest;
     // The backup reminders are the engine's: only a wallet's backup, a profile backup or "Later" changes them.
     delete settings.backupReminders;
-    const wasOnline = this.settings.online;
+    const wasOnline = this.networkOn;
     // Checked before anything changes: a relay list with no relay, or a TURN server a browser rejects,
     // would leave this peer unreachable or without WebRTC.
     for (const server of settings.iceServers ?? []) { const problem = iceServerProblem(server); if (problem) throw new Error(problem); }
@@ -4256,7 +4365,7 @@ export class GhostlyNode implements EngineImplementation {
       // The default is kept as no setting at all, so a later default reaches whoever never chose.
       if (settings.hyperdhtRelay === DEFAULT_HYPERDHT_RELAY) delete this.settings.hyperdhtRelay;
       await db.putSettings(this.settings);
-      if (this.hyperdhtRelay !== relayBefore && this.settings.online) await this.relayChanged();
+      if (this.hyperdhtRelay !== relayBefore && this.networkOn) await this.relayChanged();
     }
     if (settings.pushRelay !== undefined) {
       if (!this.settings.pushRelay) delete this.settings.pushRelay;
@@ -4267,7 +4376,7 @@ export class GhostlyNode implements EngineImplementation {
       await db.putSettings(this.settings);
       this.hold.storageChanged();
     }
-    if (wasOnline && !this.settings.online) {
+    if (wasOnline && !this.networkOn) {
       await Promise.allSettled(
         [...this.links.values()].map(async (live) => {
           await live.link?.stop(true); await live.caps?.stop(); live.caps = undefined;
@@ -4276,15 +4385,15 @@ export class GhostlyNode implements EngineImplementation {
           live.dataLink = "idle";
         }),
       );
-    } else if (!wasOnline && this.settings.online) {
+    } else if (!wasOnline && this.networkOn) {
       for (const live of this.links.values()) this.startLink(live.stored.id, await db.getMessages(live.stored.id));
       this.hold.start();
       this.startGroupEntries();
       this.prepareSpare(STARTUP_QUIET_MS);
       void this.did.publishNow().catch(() => {});
     }
-    if (wasOnline && !this.settings.online) this.stopGroupEntries();
-    if (wasOnline && !this.settings.online) await this.hold.stop();
+    if (wasOnline && !this.networkOn) this.stopGroupEntries();
+    if (wasOnline && !this.networkOn) await this.hold.stop();
     this.emitState();
   }
 
@@ -4319,12 +4428,12 @@ export class GhostlyNode implements EngineImplementation {
     this.links.set(stored.id, newLiveLink(stored, 0));
     try { await db.putLink(stored); }
     catch (error) { this.links.delete(stored.id); throw error; }
-    if (this.settings.online) this.startLink(stored.id, []);
+    if (this.networkOn) this.startLink(stored.id, []);
     // The other side is due any moment: the joiner's inviter is polling for this very moment and its offer
     // (or its answer) is a poll away; an inviter's contact is reading the invite right now more often than
     // not. Both look fast for a while, as a group's entry session does.
     if (params.profile) this.links.get(stored.id)?.link?.expectPeer();
-    if (params.profile && inviteCode && this.settings.online) this.warmInviteKey(inviteCode);
+    if (params.profile && inviteCode && this.networkOn) this.warmInviteKey(inviteCode);
     this.emitState();
     return stored.id;
   }
@@ -4429,7 +4538,7 @@ export class GhostlyNode implements EngineImplementation {
     this.links.set(id, newLiveLink(stored, 0));
     try { await db.putLink(stored); }
     catch (error) { this.links.delete(id); throw error; }
-    if (this.settings.online) this.startLink(id, []);
+    if (this.networkOn) this.startLink(id, []);
     if (expectPeer) this.links.get(id)?.link?.expectPeer();
     return id;
   }
@@ -4448,7 +4557,7 @@ export class GhostlyNode implements EngineImplementation {
     this.links.set(id, newLiveLink(stored, 0));
     try { await db.putLink(stored); }
     catch (error) { this.links.delete(id); throw error; }
-    if (this.settings.online) this.startLink(id, []);
+    if (this.networkOn) this.startLink(id, []);
     // The other side is due any moment (the admin's app answers a knock in seconds): look fast meanwhile.
     this.links.get(id)?.link?.expectPeer();
     return id;
@@ -4617,7 +4726,7 @@ export class GhostlyNode implements EngineImplementation {
     live.link = null;
     // No goodbye: the edge is back in a moment, and the member must not take this for a leave.
     await link.stop(false).catch(() => {});
-    if (this.links.get(linkId) !== live || live.link || this.shuttingDown || this.settings.online === false) return;
+    if (this.links.get(linkId) !== live || live.link || this.shuttingDown || !this.networkOn) return;
     this.startEdge(linkId);
   }
 

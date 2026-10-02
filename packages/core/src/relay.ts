@@ -3,6 +3,7 @@ import { createRelayPayload, newerPacket, openRelayPayload, parseRelayPayload, R
 import { RelayBreaker, type DiscoveryStatus, type RelayBreakerOptions, type RelayFailure } from "./relayBreaker";
 import { DiscoveryBudgetError, isDiscoveryBudgetError, type DiscoveryChange, type PkarrRequestOptions, type PkarrTransport, type ServerTime } from "./transport";
 import { traceLink } from "./linkTrace";
+import type { TurnConditions, TurnSourceAnswer, TurnSourcePut } from "./turnRead";
 
 /** Who asks, for the budget: a 1:1 chat's link comes before a group's, and both before background looks. */
 interface Asker { background: boolean; group: boolean; urgent: boolean; door: boolean; write: boolean; signal: boolean }
@@ -126,6 +127,13 @@ const NETWORK_ERROR_COOLDOWN_MS = 20_000;
  * count once one took them; reads go to a relay with requests left.
  */
 export const RELAY_REQUESTS_PER_MINUTE: Record<string, number> = { "https://relay.pkarr.org": 5, "https://pkarr.pubky.app": 60 };
+
+/** How long each source has to answer a read or a put of the turn record (WISP 06 § Publishing and reading). */
+export const TURN_SOURCE_TIMEOUT_MS = 8_000;
+/** A relay's refusals of a turn put: someone else wrote (409 an older or equal packet, 412 the condition, 428 a put in flight). */
+const TURN_REFUSALS = [409, 412, 428];
+/** On a relay's 404: the sequence of an item the DHT holds under the key that is no signed packet. */
+const INVALID_PACKET_SEQ_HEADER = "pkarr-invalid-signed-packet-seq";
 
 export interface RelayTransportOptions {
   relays?: string[];
@@ -762,6 +770,69 @@ export class RelayTransport implements PkarrTransport {
   onServerTime(listener: (time: ServerTime) => void): () => void {
     this.timeListeners.add(listener);
     return () => this.timeListeners.delete(listener);
+  }
+
+  /**
+   * The turn record's read (WISP 06 § Publishing and reading): every relay, in parallel, `TURN_SOURCE_TIMEOUT_MS`
+   * each. Unlike `resolve`, it does not stop at the first relay that answers, keeps nothing, and answers nothing from
+   * memory. Each request counts in the relay's minute, so chats see it, but is never held back by it: a device may
+   * not act before it has read its turn.
+   */
+  turnRead(pubKeyZ32: string): Promise<TurnSourceAnswer[]> {
+    return Promise.all(this.relays.map(async (relay): Promise<TurnSourceAnswer> => {
+      try {
+        let payload: Uint8Array | undefined;
+        const read = async (r: Response, signal: AbortSignal) => { if (r.ok) payload = await readRelayBody(r, signal); };
+        // A relay answers a plain GET from its cache while the packet's TTL lasts (five minutes): a record another
+        // device put through another relay, or on the DHT itself, would not be seen. `NetworkOnly` makes it look.
+        let response = await this.turnRequest(relay, `${pubKeyZ32}?policy=NetworkOnly`, { method: "GET" }, read);
+        // A relay from before that query refuses it (400): asked plainly, once, and its answer may be minutes old.
+        const stale = response.status === 400;
+        if (stale) response = await this.turnRequest(relay, pubKeyZ32, { method: "GET" }, read);
+        const age = stale ? { stale: true as const } : {};
+        if (response.status === 404) {
+          // The DHT holds an item under the key that is no signed packet: the relay names its sequence.
+          const invalid = response.headers.get(INVALID_PACKET_SEQ_HEADER);
+          return { source: relay, answered: true, payloads: [], ...age, ...(invalid && /^\d{1,19}$/.test(invalid) ? { sequences: [invalid] } : {}) };
+        }
+        if (!response.ok || !payload) return { source: relay, answered: false, payloads: [], detail: `HTTP ${response.status}` };
+        return { source: relay, answered: true, payloads: [payload], ...age };
+      } catch (error) {
+        return { source: relay, answered: false, payloads: [], detail: error instanceof Error ? error.message : String(error) };
+      }
+    }));
+  }
+
+  /**
+   * The turn record's put: the bytes as given, to each relay `conditions` names, with `If-Match` on the sequence that
+   * relay is known to hold (none where it held no record). Unlike `putEverywhere`, a relay that refuses (409, 412,
+   * 428) is not asked again without the condition: its refusal is the answer, and every relay's answer is reported.
+   */
+  turnPut(pubKeyZ32: string, payload: Uint8Array, conditions: TurnConditions): Promise<TurnSourcePut[]> {
+    const relays = this.relays.filter((relay) => conditions[relay] !== undefined);
+    return Promise.all(relays.map(async (relay): Promise<TurnSourcePut> => {
+      const replaces = conditions[relay];
+      try {
+        const response = await this.turnRequest(relay, pubKeyZ32, { method: "PUT", body: payload as BodyInit, headers: replaces === null ? undefined : { "If-Match": replaces } });
+        if (response.ok) return { source: relay, outcome: "stored", detail: `HTTP ${response.status}` };
+        return { source: relay, outcome: TURN_REFUSALS.includes(response.status) ? "refused" : "failed", detail: `HTTP ${response.status}` };
+      } catch (error) {
+        return { source: relay, outcome: "failed", detail: error instanceof Error ? error.message : String(error) };
+      }
+    }));
+  }
+
+  private async turnRequest(relay: string, path: string, init: RequestInit, read?: (response: Response, signal: AbortSignal) => Promise<void>): Promise<Response> {
+    this.spent.get(relay)?.push(Date.now());
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), TURN_SOURCE_TIMEOUT_MS);
+    try {
+      const response = await this.fetchFn(`${relay}/${path}`, { ...init, cache: "no-store", signal: controller.signal });
+      await read?.(response, controller.signal);
+      return response;
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   private async request(url: string, init: RequestInit, read?: (response: Response, signal: AbortSignal) => Promise<void>): Promise<Response> {

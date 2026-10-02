@@ -7,6 +7,8 @@ export * from "./dns";
 export * from "./pkarr";
 export * from "./transport";
 export * from "./relay";
+export * from "./turnRecord";
+export * from "./turnRead";
 export * from "./relayBreaker";
 export * from "./invite";
 export * from "./services";
