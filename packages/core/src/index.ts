@@ -9,6 +9,8 @@ export * from "./transport";
 export * from "./relay";
 export * from "./turnRecord";
 export * from "./turnRead";
+export * from "./signer";
+export * from "./deviceLink";
 export * from "./relayBreaker";
 export * from "./invite";
 export * from "./services";
