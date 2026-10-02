@@ -214,30 +214,44 @@ describe("redeeming a token", () => {
     mintApi.completeSwap.mockRejectedValue(new MintOperationError(11001, "Token already spent"));
     mintApi.checkProofsStates.mockResolvedValue([{ state: "SPENT" }]);
     const { wallet } = setup();
-    await expect(wallet.receiveToken(TOKEN, "reclaimed")).rejects.toThrow("Token already spent");
+    await expect(wallet.receiveToken(TOKEN, "reclaimed")).rejects.toThrow("This ecash was already spent somewhere else");
     expect(mintApi.restore, "the mint is asked first whether it signed this wallet's outputs").toHaveBeenCalled();
     expect(await balance()).toBe(72);
     expect(await swaps()).toEqual([]);
   });
 
-  it("a redeem the mint never made is given up only once no request of it can still arrive, and watched after that", async () => {
-    mintApi.completeSwap.mockRejectedValue(lost());
+  it("a redeem that never reached the mint is sent again, as it was written down, as soon as the mint answers", async () => {
+    mintApi.completeSwap.mockRejectedValueOnce(lost());
+    mintApi.restore.mockRejectedValue(lost());
+    const { wallet, events } = setup();
+    await expect(wallet.receiveToken(TOKEN, "ecash-in", undefined, { payment: incoming })).rejects.toBeInstanceOf(SwapUnsettledError);
+    await pass(60_000);
+    expect(mintApi.completeSwap, "not while the mint cannot be asked").toHaveBeenCalledOnce();
+    // The mint is back, and has done nothing with it: unsigned, unspent.
+    mintApi.restore.mockResolvedValue(UNSIGNED);
+    mintApi.checkProofsStates.mockResolvedValue([{ state: "UNSPENT" }]);
+    mintApi.completeSwap.mockResolvedValueOnce(receiveAnswer());
+    await pass(30_000);
+    const sent = mintApi.completeSwap.mock.calls.map(([preview]) => (preview as SwapPreview).keepOutputs?.map((o) => o.blindedMessage.B_));
+    expect(sent).toHaveLength(2);
+    expect(sent[1], "the same outputs").toEqual(sent[0]);
+    expect(events.onSwapSettled).toHaveBeenCalledWith(expect.objectContaining({ payment: expect.objectContaining({ id: "p1" }) }), true);
+    expect(await balance()).toBe(72 + 62);
+    expect(await all<StoredPayment>(STORES.payments)).toMatchObject([{ id: "p1", state: "settled" }]);
+    expect(await swaps()).toEqual([]);
+  });
+
+  it("a redeem the mint refuses when it is sent again ends there, and its contact is told", async () => {
+    mintApi.completeSwap.mockRejectedValueOnce(lost());
     mintApi.checkProofsStates.mockResolvedValue([{ state: "UNSPENT" }]);
     const { wallet, events } = setup();
     await expect(wallet.receiveToken(TOKEN, "ecash-in", undefined, { payment: incoming })).rejects.toBeInstanceOf(SwapUnsettledError);
-    expect(await swaps(), "unspent and unsigned now says nothing about a request still on its way").toHaveLength(1);
-    // Two minutes after the attempt ended is not enough: a request lives up to five.
-    await pass(180_000);
-    expect(events.onSwapSettled).not.toHaveBeenCalled();
-    await pass(SETTLED_MS);
+    mintApi.completeSwap.mockRejectedValue(new MintOperationError(11002, "Transaction is not balanced"));
+    await pass(30_000);
     expect(events.onSwapSettled).toHaveBeenCalledWith(expect.objectContaining({ payment: expect.objectContaining({ id: "p1" }) }), false);
-    expect(await swaps(), "kept, in case the mint made it after all").toMatchObject([{ released: true }]);
+    expect(await swaps()).toEqual([]);
     expect(await balance()).toBe(72);
     expect(await all(STORES.payments)).toEqual([]);
-    // An hour on, still unspent and unsigned: nothing is left to wait for.
-    await pass(WATCH_MS);
-    expect(await swaps()).toEqual([]);
-    expect(events.onSwapSettled).toHaveBeenCalledOnce();
   });
 
   it("a mint that holds the token pending is asked again", async () => {
@@ -524,11 +538,15 @@ describe("splitting ecash for a token", () => {
   it("a swap the mint refuses frees its inputs at once, less any the mint reads spent", async () => {
     mintApi.prepareSend.mockImplementation(async () => ({ ...sendPreview(), inputs: [proof(64, "a"), proof(8, "b")] }));
     mintApi.completeSwap.mockRejectedValue(new MintOperationError(11001, "Token already spent"));
-    mintApi.checkProofsStates.mockResolvedValue([{ state: "UNSPENT" }, { state: "SPENT" }]);
+    mintApi.checkProofsStates.mockResolvedValueOnce([{ state: "UNSPENT" }, { state: "SPENT" }]);
+    mintApi.checkProofsStates.mockImplementation(async (asked: unknown[]) => asked.map(() => ({ state: "UNSPENT" })));
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const { wallet } = setup();
-    await expect(wallet.createToken(40)).rejects.toThrow("Token already spent");
-    expect(await proofs(), "the spent proof no longer counts, the other is free").toEqual([stored(64, "a")]);
+    await expect(wallet.createToken(40)).rejects.toThrow("This ecash was already spent somewhere else");
+    await pass(0);
+    // The other proof is free, and was asked about with the rest of the wallet's ecash at that mint.
+    expect(await proofs(), "the spent proof no longer counts").toEqual([stored(64, "a")]);
+    expect(mintApi.checkProofsStates.mock.calls.length, "the rest is checked once").toBe(2);
     expect(await swaps()).toEqual([]);
     expect(warn).toHaveBeenCalled();
   });

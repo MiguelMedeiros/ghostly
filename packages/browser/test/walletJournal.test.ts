@@ -372,9 +372,13 @@ describe("Lightning out", () => {
     const { wallet, events } = setup();
     await wallet.payQuote("m1", MINT);
     mint.checkMeltQuoteBolt11.mockResolvedValue(meltQuote("UNPAID"));
-    mint.checkProofsStates.mockResolvedValue([{ state: "SPENT" }, { state: "UNSPENT" }, { state: "UNSPENT" }]);
+    // The payment's own proofs first; then the rest of the wallet's ecash at that mint is asked about, once.
+    mint.checkProofsStates.mockResolvedValueOnce([{ state: "SPENT" }, { state: "UNSPENT" }, { state: "UNSPENT" }]);
+    mint.checkProofsStates.mockImplementation(async (asked: unknown[]) => asked.map(() => ({ state: "UNSPENT" })));
     await vi.advanceTimersByTimeAsync(30_000);
     expect(secrets()).toEqual(["b", "c", "d"]);
+    expect(rows<StoredProof>("proofs").some((p) => p.unchecked), "checked, and found unspent").toBe(false);
+    expect(rows<WalletTx>("walletTx").filter((tx) => tx.kind === "fee"), "a proof spent elsewhere is no fee of this payment").toEqual([]);
     expect(balance()).toBe(44);
     expect(events.onMeltResolved).toHaveBeenCalledWith(expect.anything(), false);
     expect(warn).toHaveBeenCalledWith(expect.stringContaining("1 of its proofs are spent"));
