@@ -1,6 +1,6 @@
 import { useEffect, useSyncExternalStore } from "react";
 import { isDesktopApp } from "./externalLink";
-import { isStandalone } from "./installPrompt";
+import { installState, isStandalone } from "./installPrompt";
 import { notificationPermission } from "./notifications";
 import { getStorageProfile } from "./storage";
 
@@ -119,7 +119,8 @@ async function decide(force: boolean): Promise<void> {
   if (desktop || !canPersist(storage)) { set(desktop ? null : "unsupported"); return; }
   let persisted: boolean;
   try { persisted = await storage.persisted(); } catch { set("unsupported"); return; }
-  const installed = isStandalone();
+  // Installed a moment ago from this tab counts too: the browser may say yes at once.
+  const installed = isStandalone() || installState() === "installed";
   const notifications = await notificationPermission() === "granted";
   const ask = force ? !persisted : shouldAskPersist({
     desktop, supported: true, persisted, hasData: holdsData, installed, notifications, prompts: browserPrompts(), gesture: justActed(), asked: lastAsk(),
