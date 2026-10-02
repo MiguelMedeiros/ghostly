@@ -75,5 +75,5 @@ test("an Iroh relay address the app cannot use is refused in Settings", {
   await expect(alice.page.getByTestId("network-error")).toHaveText("Use an https:// relay address: http://relay.example.org/");
   // Reset puts back n0's public relays, the ones the desktop app uses.
   await alice.page.getByRole("button", { name: "Reset Iroh relays to defaults" }).click();
-  await expect(field).toHaveValue(/^https:\/\/use1-1\.relay\.n0\.iroh\.link\/\n/);
+  await expect(field).toHaveValue(/^https:\/\/use1-1\.relay\.n0\.iroh\.link\.\/\n/);
 });

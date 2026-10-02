@@ -24,6 +24,33 @@ export interface NativeEndpoint {
 export type TransportDescriptors = Partial<Record<NativeTransport, unknown>>;
 
 /**
+ * One spelling per Iroh relay. Iroh compares relay URLs as text, and its own relays are named with the trailing dot
+ * of a fully qualified name (`https://use1-1.relay.n0.iroh.link./`): the same server written without the dot is
+ * another relay to it, and an endpoint dialling a contact there opens a second connection to the server it is already
+ * homed on, which the server answers by setting the first one aside. So a relay named by a domain gets the dot,
+ * wherever a relay URL goes into Iroh (the relays an endpoint homes on, a contact's descriptor before a dial). An IP
+ * address and a single-label name (a search domain may complete it) stay as written; `localhost.` loses its dot, the
+ * form the relay settings accept. What does not parse comes back untouched, for the caller's own check to refuse.
+ */
+export function irohRelayUrl(value: string): string {
+  let url: URL;
+  try { url = new URL(value); } catch { return value; }
+  const host = url.hostname;
+  if (host === "localhost.") url.hostname = "localhost";
+  else if (host.endsWith(".") || !host.includes(".") || host.startsWith("[") || /^\d+(\.\d+){3}$/.test(host)) return value;
+  else url.hostname = `${host}.`;
+  return url.href;
+}
+
+/** An Iroh descriptor with its relay in the one spelling (`irohRelayUrl`); anything else as it is. */
+export function irohDescriptor<T>(descriptor: T): T {
+  const relay = (descriptor as { relay?: unknown } | null | undefined)?.relay;
+  if (typeof relay !== "string") return descriptor;
+  const canonical = irohRelayUrl(relay);
+  return canonical === relay ? descriptor : { ...descriptor, relay: canonical };
+}
+
+/**
  * Relay only (WISP 100, "Relayed"): the transport reaches this contact only through a relay server, never
  * directly. A descriptor says so with `relayed: true`, and an Iroh descriptor with no direct address is relayed
  * too (a browser's, WISP 102). Either side being relay only makes the whole path relayed. Both sides hold both

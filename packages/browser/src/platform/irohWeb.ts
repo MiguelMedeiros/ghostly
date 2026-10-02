@@ -1,4 +1,4 @@
-import { fromBase64Url, type BoundChannel, type FrameChannel, type NativeBinding, type NativeEndpoint } from "@ghostly/core";
+import { fromBase64Url, irohDescriptor, irohRelayUrl, type BoundChannel, type FrameChannel, type NativeBinding, type NativeEndpoint } from "@ghostly/core";
 
 /**
  * Iroh (WISP 102) in a browser: the same QUIC/TLS session and binding as the
@@ -10,12 +10,16 @@ import { fromBase64Url, type BoundChannel, type FrameChannel, type NativeBinding
  * never on the app's first load.
  */
 
-/** n0's public relays, the same ones the Desktop's Iroh homes on by default. */
+/**
+ * n0's public relays, the same ones the Desktop's Iroh homes on by default, and spelled as Iroh spells them: with the
+ * trailing dot. Iroh compares relay URLs as text, so without it a browser and a Desktop homed on the same server each
+ * took the other's relay for a second one (`irohRelayUrl`).
+ */
 export const DEFAULT_IROH_RELAYS = [
-  "https://use1-1.relay.n0.iroh.link/",
-  "https://euc1-1.relay.n0.iroh.link/",
-  "https://aps1-1.relay.n0.iroh.link/",
-  "https://usw1-1.relay.n0.iroh.link/",
+  "https://use1-1.relay.n0.iroh.link./",
+  "https://euc1-1.relay.n0.iroh.link./",
+  "https://aps1-1.relay.n0.iroh.link./",
+  "https://usw1-1.relay.n0.iroh.link./",
 ] as const;
 
 /**
@@ -124,7 +128,8 @@ class IrohWebChannel implements FrameChannel {
 export async function createIrohWebEndpoint(seedB64: string, options: IrohWebOptions = {}): Promise<NativeEndpoint> {
   const seed = fromBase64Url(seedB64);
   if (seed.length !== 32) throw new Error("Invalid transport seed");
-  const relays = [...(options.relays?.length ? options.relays : DEFAULT_IROH_RELAYS)];
+  // Either spelling of a relay (with or without the trailing dot) homes on it under the one Iroh's own peers use.
+  const relays = [...new Set((options.relays?.length ? options.relays : DEFAULT_IROH_RELAYS).map(irohRelayUrl))];
   const wasm = await (options.load ?? loadIrohWasm)();
   const node = await wasm.IrohNode.start(seed, relays, options.onlineMs ?? 10_000);
   const channels = new Set<IrohWebChannel>();
@@ -145,7 +150,8 @@ export async function createIrohWebEndpoint(seedB64: string, options: IrohWebOpt
     set onConnection(value) { handler = value; if (value) for (const bound of early.splice(0)) value(bound); },
     async connect(descriptor) {
       if (stopped) throw new Error("Iroh endpoint is stopped");
-      const conn = await node.connect(descriptor, options.connectMs ?? 20_000);
+      // A contact homed on this endpoint's relay is reached over the connection already open to it.
+      const conn = await node.connect(irohDescriptor(descriptor), options.connectMs ?? 20_000);
       if (stopped) { conn.close(); throw new Error("Iroh endpoint is stopped"); }
       return bind(conn);
     },

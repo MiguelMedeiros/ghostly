@@ -38,10 +38,11 @@ Every transport runs the same authenticated chat session ([WISP 401](wisps/401-p
 - **Desktop:** native Iroh (`native/transports/`, `apps/desktop/src/paired_transport.rs`) on n0's public relays.
 - **Web and extension** ([#225](https://github.com/MiguelMedeiros/ghostly/pull/225)): the same Iroh 1.2 built for browsers (`native/transports/iroh-web`, shipped as `packages/iroh-web`). A page cannot send UDP, so every packet goes through an Iroh relay. The QUIC/TLS session is still end to end.
 - Default Iroh relays (`DEFAULT_IROH_RELAYS` in `packages/browser/src/platform/irohWeb.ts`), editable in Settings, Advanced, Network (up to four):
-  - `https://use1-1.relay.n0.iroh.link/`
-  - `https://euc1-1.relay.n0.iroh.link/`
-  - `https://aps1-1.relay.n0.iroh.link/`
-  - `https://usw1-1.relay.n0.iroh.link/`
+  - `https://use1-1.relay.n0.iroh.link./`
+  - `https://euc1-1.relay.n0.iroh.link./`
+  - `https://aps1-1.relay.n0.iroh.link./`
+  - `https://usw1-1.relay.n0.iroh.link./`
+- Iroh compares relay URLs as text, and names its own relays with the trailing dot of a full domain name. A relay URL is put in that spelling (`irohRelayUrl` in `packages/core/src/pairedTransports.ts`) before an endpoint homes on it or dials a contact through it, so `https://relay.example.com/` and `https://relay.example.com./` are the same relay, in Settings and in a contact's record. Without that, an endpoint dialling a contact on its own relay opened a second connection to the same server.
 - The wasm (about 1.1 MB gzipped) loads only when a chat first starts an endpoint.
 - **Web to Desktop** ([#270](https://github.com/MiguelMedeiros/ghostly/pull/270)): a Desktop's Iroh learns its home relay a few seconds after it starts. The capability record is republished when that happens, so a browser can dial the Desktop through that relay. This is the path when WebRTC between a browser and a Desktop does not connect.
 - The relay sees which endpoints talk, when and how much. It never sees frames.
