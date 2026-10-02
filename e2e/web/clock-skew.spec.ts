@@ -18,3 +18,14 @@ test("a first pairing with a contact whose clock is two minutes ahead goes live,
   await say(bob, "from the future");
   await expect(chat(alice).getByText("from the future", { exact: true })).toBeVisible();
 });
+
+test("a first pairing with a contact whose clock is two minutes behind goes live: its first packet is not hidden by the inviter's warm one", { tag: ["@feature:chat.paired.clock-behind"] }, async ({ peer }) => {
+  // The inviter warms the key it gives its contact with an empty packet. Dated by the inviter's clock, it was later
+  // than everything the joiner published until the joiner's clock caught up, and the relay kept it in their place.
+  const [alice, bob] = await Promise.all([peer("alice"), peer("bob", { beforeOpen: (context) => skewClock(context, -AHEAD) })]);
+  expect(await alice.page.evaluate(() => Date.now()) - await bob.page.evaluate(() => Date.now())).toBeGreaterThan(AHEAD - 5_000);
+  await link(alice, bob);
+  await connect(alice, bob);
+  await say(bob, "from the past");
+  await expect(chat(alice).getByText("from the past", { exact: true })).toBeVisible();
+});
