@@ -1293,10 +1293,12 @@ export class Communities {
     if (live.relayed.size > RELAYED_KEPT) live.relayed.delete(live.relayed.values().next().value!);
     return true;
   }
-  private sendTo(linkId: string | undefined, frame: object): void {
-    if (!linkId || !this.host.linkReady(linkId, 2)) return;
-    try { this.host.sendOnLink(linkId, frame); } catch { return; /* down: the next sync carries it */ }
+  /** True when the edge took the frame. */
+  private sendTo(linkId: string | undefined, frame: object): boolean {
+    if (!linkId || !this.host.linkReady(linkId, 2)) return false;
+    try { this.host.sendOnLink(linkId, frame); } catch { return false; /* down: the next sync carries it */ }
     this.noteTaken(frame);
+    return true;
   }
 
   /** My frame went out on an edge (at first, or in a catch-up): the message it is, or the edit it carries, was taken. */
@@ -1336,7 +1338,7 @@ export class Communities {
         group.community = next;
         await this.store.putGroup(group);
       },
-      broadcast: (frame: CommunityFrame) => { for (const [, linkId] of this.hearers(id, frame)) this.sendTo(linkId, frame); },
+      broadcast: (frame: CommunityFrame) => this.hearers(id, frame).filter(([, linkId]) => this.sendTo(linkId, frame)).length,
       direct: (to, frame) => { if (this.mayHear(this.live.get(id), to, frame)) this.sendTo(this.host.edges(id).get(to), frame); },
       addressed: (to, frame) => {
         const edges = this.host.edges(id), live = this.live.get(id);

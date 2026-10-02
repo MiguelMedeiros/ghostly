@@ -283,6 +283,11 @@ export interface CommunityState {
   nicks: Record<string, string>;
   /** Recent frames from everyone (mine included), oldest first. */
   store: CommunityMessageFrame[];
+  /**
+   * Frames of mine no edge took when I said them (none was up), as `e:h16:n`, oldest first: the first member I reach
+   * may have joined after I sealed them, and carries them all the same (see `receiveSync`). Absent in older states.
+   */
+  unheard?: string[];
   /** Leave requests waiting for a member to commit them. */
   pendingLeaves: { s: string; ls: string }[];
   /** The group's metadata (its picture), as the admin last signed it and I accepted it. */
@@ -300,8 +305,8 @@ export interface CommunityIncomingPair { id: string; sender: string; epoch: numb
 
 export interface CommunitySessionHooks {
   save(state: CommunityState): Promise<void>;
-  /** To everyone this member has an edge to (hubs relay it on). */
-  broadcast(frame: CommunityFrame): void;
+  /** To everyone this member has an edge to (hubs relay it on). Returns how many edges took it; nothing when the host does not say. */
+  broadcast(frame: CommunityFrame): number | void;
   /** To the member at the other end of an edge, if there is one. */
   direct(to: string, frame: CommunityFrame): void;
   /** To one member, wherever they are: over their edge if I have it, else to the hubs with `to`. */
@@ -331,6 +336,10 @@ const isObject = (v: unknown): v is Record<string, unknown> => !!v && typeof v =
 const messageSigned = (f: Omit<CommunityMessageFrame, "sig" | "t" | "v">) => utf8Encode(JSON.stringify(["ghostly-group/2 msg", f.g, f.e, f.h, f.s, f.n, f.ts, f.nn, f.c]));
 export const communityMessageId = (sender: string, epoch: number, h: string, seq: number) => `${sender}:${epoch}:${h}:${seq}`;
 const seenKey = (e: number, h: string) => `${e}:${h}`;
+/** One of a member's frames, among its own. */
+const frameKey = (f: { e: number; h: string; n: number }) => `${f.e}:${f.h}:${f.n}`;
+/** Frames of mine remembered as not heard by anyone yet. */
+const UNHEARD_KEPT = 64;
 /** Whether a frame, by its identity, is one this state took already (or is too old to be taken again). */
 function seenIn(seen: CommunityState["seen"], f: { s: string; e: number; h: string; n: number }): boolean {
   const entry = seen[f.s]?.[seenKey(f.e, f.h)];
@@ -984,8 +993,7 @@ export class CommunitySession {
       const sent = await this.sendPayload(() => ({ text: trimmed, ...(named.length ? { m: named } : {}), ...(answers ? { r: answers } : {}), ...(hops ? { fw: hops } : {}), ...(card ? { sc: card } : {}) }), nick, now);
       if ("error" in sent) return sent;
       await this.hooks.message({ id: sent.id, sender: this.myKey, epoch: sent.frame.e, seq: sent.frame.n, timestamp: now, text: trimmed, ...(named.length ? { mentions: named } : {}), ...(answers ? { reply: answers } : {}), ...(hops ? { forwarded: hops } : {}), ...(card ? { card } : {}) });
-      await this.persist();
-      this.hooks.broadcast(sent.frame);
+      await this.say(sent.frame);
       return { id: sent.id };
     });
   }
@@ -1001,8 +1009,7 @@ export class CommunitySession {
       if (!isObject(frame) || utf8Encode(JSON.stringify(frame)).length > COMMUNITY_LIMITS.appBytes) return { error: "Too large for the group" };
       const sent = await this.sendPayload(() => ({ x: frame }), nick, now);
       if ("error" in sent) return sent;
-      await this.persist();
-      this.hooks.broadcast(sent.frame);
+      await this.say(sent.frame);
       return { id: sent.id };
     });
   }
@@ -1027,8 +1034,7 @@ export class CommunitySession {
       if (size(false) > room) return { error: "Too long to edit in this group" };
       const sent = await this.sendPayload(() => ({ x: frame }), size(true) <= room ? nick : undefined, now);
       if ("error" in sent) return sent;
-      await this.persist();
-      this.hooks.broadcast(sent.frame);
+      await this.say(sent.frame);
       return { id: sent.id };
     });
   }
@@ -1047,8 +1053,7 @@ export class CommunitySession {
       if (plain.length > COMMUNITY_LIMITS.appBytes) return { error: "Too large for the group" };
       const sent = await this.sendPayload(header => ({ p: { to, ...sealPair(this.identity.seed, this.myKey, to, plain, pairAad(header, to)) } }), nick, now);
       if ("error" in sent) return sent;
-      await this.persist();
-      this.hooks.broadcast(sent.frame);
+      await this.say(sent.frame);
       return { id: sent.id };
     });
   }
@@ -1068,6 +1073,20 @@ export class CommunitySession {
     this.markSeen(frame);
     this.keep(frame);
     return { id: communityMessageId(this.myKey, header.e, header.h, n), frame };
+  }
+
+  /**
+   * Saves, then says my frame on every edge. One no edge took (none is up: I just joined, or my app just opened) is
+   * remembered until a member it was written for is handed it: I may be behind on the chain without knowing, and the
+   * first member I reach may be one let in since, who cannot read it but can carry it (`receiveSync`).
+   */
+  private async say(frame: CommunityMessageFrame): Promise<void> {
+    const inStore = new Set(this.state.store.filter(f => f.s === this.myKey).map(frameKey));
+    this.state.unheard = [...(this.state.unheard ?? []).filter(key => inStore.has(key)), frameKey(frame)].slice(-UNHEARD_KEPT);
+    await this.persist();
+    if (this.hooks.broadcast(frame) === 0) return;
+    this.state.unheard = this.state.unheard.filter(key => key !== frameKey(frame));
+    this.persistSoon();
   }
 
   private keep(frame: CommunityMessageFrame): void {
@@ -1151,9 +1170,18 @@ export class CommunitySession {
     const found = this.commitByShort(raw.e, raw.h);
     if (!found) { this.park(from, raw); return false; }
     const roster = this.rosterOf(found.hash)!;
-    // Not a member of that epoch, or I was not one: nothing to read, nothing to relay.
-    if (!rosterHas(roster, raw.s) || !rosterHas(roster, this.myKey)) return false;
+    // Not from a member of that epoch: nothing to read, nothing to relay.
+    if (!rosterHas(roster, raw.s)) return false;
     if (this.isDuplicate(raw)) return false;
+    // From before I was let in: nothing for me to read, but its author may have reached nobody else yet (it wrote
+    // before it heard of me, with no edge up, and I am its hub). Kept and passed on like any frame, never opened, so
+    // the members it was written for get it; the store hands it to those only.
+    if (!rosterHas(roster, this.myKey)) {
+      this.markSeen(raw);
+      this.keep(raw);
+      this.persistSoon();
+      return true;
+    }
     const secret = this.state.secrets[found.hash];
     if (!secret) { this.park(from, raw); return true; }
     const payload = decryptText(epochKeys(fromBase64Url(secret), this.id, raw.e).message, messageAad(raw), raw.nn, raw.c);
@@ -1274,15 +1302,23 @@ export class CommunitySession {
     // and that branch lost) goes with that branch's commits and secret: the commits above are my branch's only, and a
     // member who was never on the other one could not place the frame, and kept it waiting for good (2026-10-02).
     const handed = new Set<string>();
+    // Mine that no edge took when I said them go to a member let in since too: it cannot read them, and carries them
+    // to the members they were written for (a hub passes them on). Anyone else's it could not read stays here.
+    const unheard = new Set(this.state.unheard ?? []);
     for (const stored of this.state.store) {
       if (stored.s === from || this.wasRemoved(stored.s)) continue;
       const found = this.commitByShort(stored.e, stored.h);
-      if (!found || !rosterHas(this.rosterAt(found.hash) ?? [], from)) continue;
+      if (!found) continue;
+      const reads = rosterHas(this.rosterAt(found.hash) ?? [], from), mine = stored.s === this.myKey && unheard.has(frameKey(stored));
+      if (!reads && !(mine && rosterHas(this.roster, from))) continue;
       const high = have[stored.s]?.[seenKey(stored.e, stored.h)];
       if (Number.isSafeInteger(high) && (high as number) >= stored.n) continue;
       if (!this.mainIndex.has(found.hash)) this.handSide(from, found.hash, handed);
       this.hooks.direct(from, stored);
+      // Handed to a member it was written for: heard.
+      if (mine && reads) unheard.delete(frameKey(stored));
     }
+    if (unheard.size !== (this.state.unheard?.length ?? 0)) { this.state.unheard = [...unheard]; this.persistSoon(); }
     // The link's seed, so they can answer it too.
     if (rosterHas(this.roster, from)) { const entry = this.entryFrame(from); if (entry) this.hooks.direct(from, entry); }
     // Pending leaves travel too, so whoever commits next can.
