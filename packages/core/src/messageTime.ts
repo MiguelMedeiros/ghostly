@@ -4,6 +4,16 @@
  */
 export const MESSAGE_CLOCK_SKEW_MS = 5 * 60_000;
 
+/**
+ * The time a line of a group's history is kept under (a membership change, a rename): what its commit says, but at
+ * most `MESSAGE_CLOCK_SKEW_MS` past this clock, and now when it is not a positive number. Messages do not use it:
+ * they are placed where they arrive (below).
+ */
+export function receivedTimestamp(ts: number, now = Date.now()): number {
+  if (!Number.isFinite(ts) || ts <= 0) return now;
+  return Math.min(ts, now + MESSAGE_CLOCK_SKEW_MS);
+}
+
 /** The latest moment a date can hold. */
 const MAX_DATE_MS = 8.64e15;
 

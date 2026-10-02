@@ -2,7 +2,7 @@ import { bech32 } from "@scure/base";
 import { describe, expect, it } from "vitest";
 import { findLightningDestination } from "../src/lnurl";
 import { LINK_MAX_CHARS, linkEnd, linksIn, parseLinkPreview } from "../src/linkPreview";
-import { arrivalKey, claimedTime, heardTime, shownTime } from "../src/messageTime";
+import { MESSAGE_CLOCK_SKEW_MS, arrivalKey, claimedTime, heardTime, receivedTimestamp, shownTime } from "../src/messageTime";
 
 // covers: chat.link-preview.wire, wallet.lnurl.protocol, chats.list.rows
 
@@ -75,6 +75,13 @@ describe("a received message's time", () => {
     expect(shownTime({ timestamp: now, sentAt: now - 3 * DAY })).toBe(now - 3 * DAY);
     // Mine, and a row from before the claim was kept: its own time.
     expect(shownTime({ timestamp: now })).toBe(now);
+  });
+
+  it("a group's history line is kept at its commit's time, a few minutes ahead of this clock at most", () => {
+    expect(receivedTimestamp(now - 60_000, now)).toBe(now - 60_000);
+    expect(receivedTimestamp(now + MESSAGE_CLOCK_SKEW_MS + 1, now)).toBe(now + MESSAGE_CLOCK_SKEW_MS);
+    expect(receivedTimestamp(Number.MAX_SAFE_INTEGER, now)).toBe(now + MESSAGE_CLOCK_SKEW_MS);
+    for (const ts of [0, -1, Number.NaN, Infinity]) expect(receivedTimestamp(ts, now)).toBe(now);
   });
 
   it("dates an edit now at the latest, and now when its time is no time", () => {

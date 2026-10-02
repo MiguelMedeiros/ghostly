@@ -35,7 +35,7 @@ import { readPubkyProof } from '../proofs/storage';
 import { lookupPublicProfile, currentProfileProof, PROFILE_RETRY, PROFILE_TTL, type ProfileChoice } from '../profiles/public';
 import { BUTTON_ID, BUTTONS_CAPABILITY, EDIT_CAPABILITY, MAX_EDITS_PER_MESSAGE, STATUS_CARD_LIMITS, checkStatusCard, forwardedAgain, readForwarded, statusCardText, withRequestOptions, type StatusCard, type WireEdit } from "@ghostly/core";
 import { FORWARD_MESSAGES, FORWARD_TARGETS, copyForForward, forwardKind, type ForwardResult } from "./forwards";
-import { TEST_USDT_FAUCET_AMOUNT, arrivalKey, claimedTime, heardTime, shownTime, typingActivity, type TypingActivity, type TypingKind, WALLET_NETWORKS, walletNetworkOf, type GroupMention, type PaymentNetworks, type PaymentReview, type PaymentTarget, type WalletNetwork } from "@ghostly/core";
+import { TEST_USDT_FAUCET_AMOUNT, arrivalKey, claimedTime, heardTime, receivedTimestamp, shownTime, typingActivity, type TypingActivity, type TypingKind, WALLET_NETWORKS, walletNetworkOf, type GroupMention, type PaymentNetworks, type PaymentReview, type PaymentTarget, type WalletNetwork } from "@ghostly/core";
 import { ModeChanged, networkLabel, WrongNetworkError } from "./paymentAdapters/modeGate";
 import { assertConfirmedReal, createTiming, WALLET_NAMES, createFailure, crossNetwork, paymentNetwork, paymentNetworksOf, walletInstances } from "./paymentAdapters/walletInstances";
 import { migrateWalletNetworks } from "./paymentAdapters/walletNetworks";
@@ -5191,10 +5191,12 @@ export class GhostlyNode implements EngineImplementation {
    * A new row with its place in its history. A received row takes it here and now, past the last place given in its
    * chat: the time its sender says is kept beside it (`sentAt`) and shown, and orders nothing (WISP 400, requirement
    * 10). A sender's clock ahead or behind then moves no message past another, and what I send next goes below what I
-   * just received. A row of mine keeps its own time; one placed already (it has `sentAt`) is left as it is.
+   * just received. A row of mine keeps its own time; one placed already (it has `sentAt`) is left as it is. A line
+   * of a group's history (a membership change, a rename) is not a message: it stays at its commit's time, as before.
    */
   private placed(message: StoredMessage): StoredMessage {
     const now = Date.now(), last = this.placedAt.get(message.linkId) ?? 0;
+    if (message.event) return message.sender === "peer" ? { ...message, timestamp: receivedTimestamp(message.timestamp) } : message;
     if (message.sender === "peer" && message.sentAt === undefined) {
       const sentAt = claimedTime(message.timestamp);
       message = { ...message, timestamp: arrivalKey(now, last), ...(sentAt !== undefined && { sentAt }) };

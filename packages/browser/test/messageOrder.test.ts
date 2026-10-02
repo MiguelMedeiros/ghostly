@@ -281,4 +281,24 @@ describe("a history stored before places were kept", () => {
     const settled = settleAhead([row("just", "me", now), row("x", "peer", now + 1_000), row("y", "peer", now + 2_000)], now);
     expect(settled.map((m) => [m.id, m.timestamp, m.sentAt])).toEqual([["x", now + 1, now + 1_000], ["y", now + 2, now + 2_000]]);
   });
+
+  it("settling that stopped half way is finished at the next start: no row lost, the order kept", () => {
+    const row = (id: string, sender: "me" | "peer", timestamp: number): StoredMessage => ({ linkId: CHAT, id, text: id, sender, timestamp, via: "datalink" });
+    const history = [row("a", "me", now - 5_000), row("x", "peer", now + 1_000), row("y", "peer", now + 2_000), row("z", "peer", now + 3_000)];
+    const byPlace = (rows: StoredMessage[]) => [...rows].sort((a, b) => a.timestamp - b.timestamp || (a.id < b.id ? -1 : 1)).map((m) => m.id);
+    // Only the first row was written before the app was closed.
+    const [first] = settleAhead(history, now);
+    const half = history.map((m) => (m.id === first.id ? first : m));
+    expect(byPlace(half)).toEqual(["a", "x", "y", "z"]);
+    // A moment later it starts again: the rest is settled after the row already placed.
+    const later = now + 500;
+    const rest = settleAhead(half, later);
+    expect(rest.map((m) => m.id)).toEqual(["y", "z"]);
+    const done = half.map((m) => rest.find((r) => r.id === m.id) ?? m);
+    expect(byPlace(done)).toEqual(["a", "x", "y", "z"]);
+    expect(done).toHaveLength(history.length);
+    expect(done.every((m) => m.timestamp <= later)).toBe(true);
+    expect(done.slice(1).map((m) => m.sentAt)).toEqual([now + 1_000, now + 2_000, now + 3_000]);
+    expect(settleAhead(done, later)).toEqual([]);
+  });
 });
