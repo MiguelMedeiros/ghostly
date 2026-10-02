@@ -57,18 +57,19 @@ test("two people chat: relay discovery, then peer-to-peer messages", { tag: ["@f
 });
 
 /**
- * Puts a page's clock `offset` ms ahead (or behind) before the app loads: `Date.now()` and `new Date()`. The engine
- * runs in the page, so the peer dates everything it sends by that clock, as a device with a wrong clock does. Timers
- * are left alone: nothing waits longer or shorter.
+ * Lets a test move a page's clock: `Date.now()` and `new Date()` read `window.clockOffset` ms ahead (or behind), 0
+ * until the test sets it. The engine runs in the page, so from then on the peer dates everything it sends by that
+ * clock, as a device whose clock is wrong does. Timers are left alone: nothing waits longer or shorter.
  */
-function shiftClock(offset: number): void {
+function movableClock(): void {
   const Real = Date;
+  const offset = () => (globalThis as { clockOffset?: number }).clockOffset ?? 0;
   class Shifted extends Real {
     constructor(...args: unknown[]) {
       if (args.length) super(...(args as [number]));
-      else super(Real.now() + offset);
+      else super(Real.now() + offset());
     }
-    static now(): number { return Real.now() + offset; }
+    static now(): number { return Real.now() + offset(); }
   }
   (globalThis as { Date: DateConstructor }).Date = Shifted as unknown as DateConstructor;
 }
@@ -76,10 +77,13 @@ function shiftClock(offset: number): void {
 test("a contact whose clock is two minutes ahead: the conversation reads in the order it happened", { tag: ["@feature:chat.order"] }, async ({ peer }) => {
   // Reported 2026-10-01: the contact's messages said "11:23 PM" at 11:21, and my replies were placed above them.
   const AHEAD = 2 * 60_000;
-  const [alice, bob] = await Promise.all([peer("alice"), peer("bob", { beforeOpen: async (context) => { await context.addInitScript(shiftClock, AHEAD); } })]);
-  expect(await bob.page.evaluate(() => Date.now()) - await alice.page.evaluate(() => Date.now())).toBeGreaterThan(AHEAD - 5_000);
+  const [alice, bob] = await Promise.all([peer("alice"), peer("bob", { beforeOpen: async (context) => { await context.addInitScript(movableClock); } })]);
   await link(alice, bob);
   await connect(alice, bob);
+  // Paired and live: from here Bob's clock runs two minutes ahead of Alice's. (A first pairing between clocks that
+  // far apart is another matter: records dated ahead are refused.)
+  await bob.page.evaluate((offset) => { (globalThis as { clockOffset?: number }).clockOffset = offset; }, AHEAD);
+  expect(await bob.page.evaluate(() => Date.now()) - await alice.page.evaluate(() => Date.now())).toBeGreaterThan(AHEAD - 5_000);
 
   const talk = ["bob one", "alice answers one", "bob two", "bob three", "alice answers two", "bob four"];
   for (const line of talk) {
