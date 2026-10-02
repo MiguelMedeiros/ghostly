@@ -57,7 +57,7 @@ const snapshot = () => engine.state;
 function toChatMessage(message: StoredMessage, group: GroupView, t: Translate, myName = ""): ChatMessage {
   const names = group.members.map(m => ({ key: m.key, me: m.me, name: m.me ? myName : memberName(m, t) }));
   const mentions = mentionViews(message.text, message.mentions, names, message.sender === "me");
-  return { id: message.id, text: message.text, sender: message.sender, timestamp: message.timestamp, paymentId: message.paymentId,
+  return { id: message.id, text: message.text, sender: message.sender, timestamp: message.timestamp, ...(message.sentAt !== undefined && { sentAt: message.sentAt }), paymentId: message.paymentId,
     nick: message.sender === "peer" && message.member ? authorName(group, message.member, t) : undefined,
     ...(mentions.length ? { mentions } : {}), ...(message.replyTo && { replyTo: message.replyTo }), ...(message.reactions && { reactions: message.reactions }),
     ...(message.edit && { edit: message.edit }), ...(message.forwarded && { forwarded: message.forwarded }), ...(message.card && { card: message.card }) };

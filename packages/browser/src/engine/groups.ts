@@ -144,12 +144,12 @@ export const mentionAt = (map: Map<string, number>, groupId: string): { lastMent
   return at ? { lastMentionAt: at } : {};
 };
 /**
- * When a member's message counts as having come, for unread and the "@": when it reached me, if that is later than
- * when it was written (a catch-up from another member, a member back after a while). Written before I last looked at
- * the group but handed to me since, it is news here; by its own time it sorted among what I had read, and the group
- * never showed unread. A copy I had already (`stored` false) or one completed in place keeps its own time.
+ * When a message counts as having come, for the list of groups, unread and the "@": when it reached me, never when
+ * its sender says it was written (a member's clock ahead would keep the group unread and on top; written before I
+ * last looked but handed to me since, a catch-up is news here). A copy I had already (`stored` false) or one
+ * completed in place moves nothing forward: its own time, now at the latest.
  */
-export const cameAt = (timestamp: number, stored: boolean | void, now: number): number => stored === false ? timestamp : Math.max(timestamp, now);
+export const cameAt = (timestamp: number, stored: boolean | void, now: number): number => stored === false ? Math.min(timestamp, now) : now;
 /**
  * The time a line of a group's history is kept under: its own, or the next millisecond no other line of this run took.
  * A line's id carries its time, and two lines can share a moment (two members gone in one change, a picture changed
@@ -1234,15 +1234,16 @@ export class Groups {
         }
       },
       message: async m => {
-        // The sender picks the time: one far ahead would pin the group to the top of the list.
-        const timestamp = receivedTimestamp(m.timestamp);
+        // The sender picks the time: the store keeps it beside the row and places the row where it comes (`arrivalKey`),
+        // so neither the history nor the list of groups follows a member's clock.
+        const timestamp = m.timestamp;
         const mentioned = m.sender !== session.myKey && mentionsMember(m.mentions, session.myKey);
         const message: StoredMessage = { linkId: MESSAGE_LINK(state.id), id: m.id, text: m.text, sender: m.sender === session.myKey ? "me" : "peer", member: m.sender, timestamp, via: "datalink",
           ...mentionFields(m.mentions, mentioned), ...(m.reply && { replyTo: groupReply(m.reply, session.myKey) }), ...(m.forwarded && { forwarded: m.forwarded }), ...(m.card && { card: m.card }) };
         // A copy handed on stripped came first: the whole one adds what it lacked (WISP 9xx · Group Mesh § Catch-up).
         const stored = m.completes && this.host.completeMessage ? (await this.host.completeMessage(message), false) : await this.host.storeMessage(message);
-        this.lastMessageAt.set(state.id, Math.max(this.lastMessageAt.get(state.id) ?? 0, timestamp));
-        const came = cameAt(timestamp, stored, this.now());
+        const came = m.sender === session.myKey ? timestamp : cameAt(timestamp, stored, this.now());
+        this.lastMessageAt.set(state.id, Math.max(this.lastMessageAt.get(state.id) ?? 0, came));
         if (mentioned) this.lastMentionAt.set(state.id, Math.max(this.lastMentionAt.get(state.id) ?? 0, came));
         if (m.sender !== session.myKey) this.lastPeerMessageAt.set(state.id, Math.max(this.lastPeerMessageAt.get(state.id) ?? 0, came));
         noteCame(this.stored.get(state.id), came, m.sender !== session.myKey, mentioned);
