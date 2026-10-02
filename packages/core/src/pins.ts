@@ -1,5 +1,4 @@
 import { REPLY_ID } from "./replies";
-import { MESSAGE_CLOCK_SKEW_MS } from "./messageTime";
 import { nextReactionNumber, validReactionNumber } from "./reactions";
 
 /**
@@ -7,7 +6,7 @@ import { nextReactionNumber, validReactionNumber } from "./reactions";
  * message (the id both sides know it by, as a reply names it) and a number: the clock in milliseconds, past the pin
  * it replaces. An empty id unpins. The highest number wins, whatever order the frames arrive in, so the last pin wins
  * on every side and a late frame changes nothing. A number further ahead of the receiver's clock than
- * `MESSAGE_CLOCK_SKEW_MS` is refused: clocks drift, but a number past that is the sender's choice, and one near the
+ * `PIN_CLOCK_SKEW_MS` is refused: clocks drift, but a number past that is the sender's choice, and one near the
  * largest safe integer would leave nobody a higher number to pin or unpin with.
  *
  * A 1:1 chat says it on the live session once both sides list `pin/1` in `paired-capabilities`, and the contact
@@ -26,6 +25,13 @@ export const PINNED_FRAME = "paired-pinned";
 export const GROUP_PIN_FRAME = "group-pin";
 /** A pin in a community, as an application frame sealed to the group. */
 export const COMMUNITY_PIN_FRAME = "pin";
+
+/**
+ * How far ahead of this device's clock a pin's number may be. What a session and a call allow a contact's clock
+ * (`RTC_SIGNAL_FUTURE_MS`, `CALL_SIGNAL_FUTURE_MS`): a contact whose clock runs seven minutes ahead pairs, chats and
+ * calls, and its pins were dropped, each said again every 30 seconds and never taken.
+ */
+export const PIN_CLOCK_SKEW_MS = 10 * 60_000;
 
 export const PIN_LIMITS = {
   /** Pin frames a receiver takes per window on one chat; the rest are dropped unconfirmed and come again. */
@@ -48,10 +54,10 @@ export function mayPin(kind: "mesh" | "community", member: string, admin: string
 
 /**
  * Whether a pin's number holds at `now`: a positive safe integer no further ahead of the clock than
- * `MESSAGE_CLOCK_SKEW_MS`. A kept pin whose number does not hold (taken before receivers checked it) counts as none.
+ * `PIN_CLOCK_SKEW_MS`. A kept pin whose number does not hold (taken before receivers checked it) counts as none.
  */
 export function pinNumberHolds(n: unknown, now = Date.now()): n is number {
-  return validReactionNumber(n) && n <= now + MESSAGE_CLOCK_SKEW_MS;
+  return validReactionNumber(n) && n <= now + PIN_CLOCK_SKEW_MS;
 }
 
 /**

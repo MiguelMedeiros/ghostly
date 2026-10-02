@@ -292,10 +292,14 @@ describe("the side that placed the call", () => {
     expect(call.result.current.callState).toBe("idle");
     expect(call.result.current.reconnecting).toBe(false);
     expect(connection.closed).toBe(true);
-    expect(call.published[call.published.length - 1]).toBeNull();
+    // The contact is told, as a hang-up tells it: its side would otherwise go on reconnecting a call that is over.
+    expect(signals(call).slice(-1)[0]).toMatchObject({ t: "h" });
+    expect(signals(call).slice(-1)[0]).not.toHaveProperty("r");
     expect(stream.getTracks().every((t) => t.readyState === "ended")).toBe(true);
     // The call's end line, with its length: the ten seconds it was up and the time it tried to come back.
     expect(call.addCallEventMessage).toHaveBeenLastCalledWith("call_ended", false, 10_000 + RECONNECT_TIMEOUT_MS);
+    await pass(5000);
+    expect(call.published[call.published.length - 1]).toBeNull();
     // Nothing is left to fire.
     const sent = call.published.length;
     await pass(ICE_RESTART_RETRY_MS * 2);
@@ -389,6 +393,21 @@ describe("the side that answered the call", () => {
     expect(call.result.current.callState).toBe("idle");
     expect(call.addCallEventMessage).toHaveBeenLastCalledWith("call_ended", false, RECONNECT_TIMEOUT_MS);
     expect(pc().closed).toBe(true);
+    // The caller is told: it would otherwise send restart offers to a call that is over here.
+    expect(signals(call).slice(-1)[0]).toMatchObject({ t: "h" });
+  });
+
+  it("a contact that gave up reconnecting ends the call here at once, with its end line", async () => {
+    const call = renderCall();
+    await answered(call);
+    act(() => pc().setIceState("disconnected"));
+    expect(call.result.current.reconnecting).toBe(true);
+    await pass(5000);
+    call.receive(JSON.stringify({ t: "h", ts: Date.now() }));
+    await settle();
+    expect(call.result.current.callState).toBe("idle");
+    expect(call.result.current.reconnecting).toBe(false);
+    expect(call.addCallEventMessage.mock.calls.filter(([type]) => type === "call_ended")).toHaveLength(1);
   });
 });
 
