@@ -165,6 +165,6 @@ never published.
 
 ## Docker
 
-`docker compose build` builds from the repository root (`context: ..`) because
+`docker compose build` builds from the repository root (`context: ../..`) because
 the site reads `docs/` and quotes `packages/core/src`; `Dockerfile.dockerignore`
 keeps that context small.
