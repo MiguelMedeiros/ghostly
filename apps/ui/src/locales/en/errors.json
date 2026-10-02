@@ -62,6 +62,7 @@
     "notYetConfirmed": "Not yet confirmed. No second payment was sent.",
     "outcomeUnknown": "Outcome unknown. Check the existing payment; do not send another.",
     "paymentExpired": "Payment request expired or has an invalid expiry",
+    "paymentTakenBack": "This payment was taken back. The sats are in your wallet.",
     "realMintOnTestnet": "This mint holds real sats: add it to a Mainnet Cashu wallet",
     "reconnectBeforeApprove": "Reconnect the data link before approving. Your review was saved.",
     "requestHasPayment": "This request already has a payment. Reconcile it before trying again.",

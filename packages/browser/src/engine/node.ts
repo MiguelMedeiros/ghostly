@@ -35,12 +35,12 @@ import { readPubkyProof } from '../proofs/storage';
 import { lookupPublicProfile, currentProfileProof, PROFILE_RETRY, PROFILE_TTL, type ProfileChoice } from '../profiles/public';
 import { BUTTON_ID, BUTTONS_CAPABILITY, EDIT_CAPABILITY, MAX_EDITS_PER_MESSAGE, STATUS_CARD_LIMITS, checkStatusCard, forwardedAgain, readForwarded, statusCardText, withRequestOptions, type StatusCard, type WireEdit } from "@ghostly/core";
 import { FORWARD_MESSAGES, FORWARD_TARGETS, copyForForward, forwardKind, type ForwardResult } from "./forwards";
-import { TEST_USDT_FAUCET_AMOUNT, arrivalKey, claimedTime, heardTime, receivedTimestamp, shownTime, typingActivity, type TypingActivity, type TypingKind, WALLET_NETWORKS, walletNetworkOf, type GroupMention, type PaymentNetworks, type PaymentReview, type PaymentTarget, type WalletNetwork } from "@ghostly/core";
+import { TEST_USDT_FAUCET_AMOUNT, arrivalKey, claimedTime, heardTime, receivedTimestamp, typingActivity, type TypingActivity, type TypingKind, WALLET_NETWORKS, walletNetworkOf, type GroupMention, type PaymentNetworks, type PaymentReview, type PaymentTarget, type WalletNetwork } from "@ghostly/core";
 import { ModeChanged, networkLabel, WrongNetworkError } from "./paymentAdapters/modeGate";
 import { assertConfirmedReal, createTiming, WALLET_NAMES, createFailure, crossNetwork, paymentNetwork, paymentNetworksOf, walletInstances } from "./paymentAdapters/walletInstances";
 import { migrateWalletNetworks } from "./paymentAdapters/walletNetworks";
 import { perNetwork, type PerNetwork } from "./paymentAdapters/perNetwork";
-import { COMMUNITY_EDIT_FRAME, INVITE_TAKEN, LIVENESS_MISSED_PINGS, LIVENESS_PING_MS, MAX_GROUP_NAME_LENGTH, engineError, groupName, parseCommunityEdit, traceLink } from "@ghostly/core";
+import { COMMUNITY_EDIT_FRAME, INVITE_TAKEN, LIVENESS_MISSED_PINGS, LIVENESS_PING_MS, MAX_GROUP_NAME_LENGTH, engineError, engineText, groupName, parseCommunityEdit, traceLink } from "@ghostly/core";
 import { ClockWatch, DirectPathWatch } from "@ghostly/core";
 import { GROUP_WAKE_FRAME, GROUP_WAKE_RECEIVE_LIMIT, GroupWakeLimiter, RateWindow, WAKE_CALL_INTERVAL_MS, WakeLimiter, groupWakeFrame, groupWakes, parseGroupWakeFrame, checkPushEndpoint, newWakeToken, relayRequest, vapidKeysMatch, wakeRequest, type PushRequest, type WakeKind, type WakeTarget } from "@ghostly/core";
 import { COMMUNITY_REACTION_FRAME, GROUP_REACTION_FRAME, REACTION_LIMITS, ReactionWindow, queueReaction, readReaction, validReactionNumber, wireReaction, type WireReaction } from "@ghostly/core";
@@ -175,7 +175,7 @@ import type { HoldStore } from "../backup/storage";
 import { PaymentDesk } from "./payments";
 import { CashuWallet, TEST_COINS_NOTE, normalizeMintUrl } from "./wallet";
 import { identityCues, knockCue, paymentCue, transportCue, transportMark, type Cue } from "./cues";
-import { messageAttention } from "./attention";
+import { CLOCK_SAMPLES, messageAttention, writtenAt } from "./attention";
 import { DEFAULT_HYPERDHT_RELAY, hyperdhtRelayProblem } from "../shared/hyperdhtRelay";
 import { pushRelayProblem } from "../shared/pushRelay";
 import { traceJoin } from "./joinTrace";
@@ -502,9 +502,19 @@ export class GhostlyNode implements EngineImplementation {
   private readonly newestAt = new Map<string, number>();
   /** The last place given in each chat while this engine runs (`arrivalKey`). */
   private readonly placedAt = new Map<string, number>();
+  /**
+   * Each 1:1 chat's contact: how far the time its latest live messages said was from when they came (`CLOCK_SAMPLES`
+   * of them). What tells a contact's clock that is behind from a message that is late (`writtenAt`).
+   */
+  private readonly clockLeads = new Map<string, number[]>();
+  /** A contact's row came on the live session of a 1:1 chat: what it says of the contact's clock is kept. */
+  private clockSample(message: StoredMessage): void {
+    if (message.sender !== "peer" || message.sentAt === undefined || message.event || message.via !== "datalink" || message.linkId.startsWith("group:")) return;
+    this.clockLeads.set(message.linkId, [...(this.clockLeads.get(message.linkId) ?? []), message.sentAt - message.timestamp].slice(-CLOCK_SAMPLES));
+  }
   /** Only a new message, or mine going out, says anything (engine/attention.ts): judged by when it was written. */
   private messageFeedback(type: "message" | "sent", message: StoredMessage, newest = this.newestAt.get(message.linkId)) {
-    const attention = messageAttention(type, { ...message, timestamp: shownTime(message) }, { startedAt: this.feedbackStartedAt, newest, now: Date.now() });
+    const attention = messageAttention(type, { ...message, timestamp: writtenAt(message, this.clockLeads.get(message.linkId)) }, { startedAt: this.feedbackStartedAt, newest, now: Date.now() });
     if (attention) this.feedback(attention.type, message.linkId + ":" + message.id, message.linkId, attention.mention, attention.cue);
   }
   /**
@@ -1343,6 +1353,8 @@ export class GhostlyNode implements EngineImplementation {
       const files = linkFilesFrom(stored.id, storedFiles, messages);
       this.links.set(stored.id, newLiveLink(stored, messages[messages.length - 1]?.timestamp ?? 0, files));
       history.set(stored.id, messages);
+      // What the contact's clock was when the chat was last live: its first message of this run is read by it.
+      for (const message of messages.slice(-4 * CLOCK_SAMPLES)) this.clockSample(message);
       const note = latestReaction(messages);
       if (note) this.reactionNotes.set(stored.id, note);
       if (stored.profile && !stored.group) await this.outboxFor(stored.id).recover();
@@ -4073,8 +4085,22 @@ export class GhostlyNode implements EngineImplementation {
     return this.desk.payRequest(params);
   }
 
-  reclaimPayment({ paymentId }: { paymentId: string }) {
-    return this.desk.reclaim(paymentId);
+  async reclaimPayment({ paymentId }: { paymentId: string }): Promise<void> {
+    await this.desk.reclaim(paymentId);
+    await this.reviewTakenBack(paymentId);
+  }
+
+  /**
+   * A reviewed payment whose ecash this wallet took back: its review ends failed, at once. The mint reads that ecash
+   * spent (this wallet redeemed it), which the review would otherwise take for the contact being paid, and a request
+   * whose review reads paid can never be reviewed again. Only when the ecash is back for certain (`reclaimed`).
+   */
+  private async reviewTakenBack(id: string): Promise<void> {
+    if (this.desk.payment(id)?.state !== "reclaimed") return;
+    const intent = await intentRepository.get(id);
+    if (!intent || intent.review.method !== "cashu" || !["submitted", "unknown", "settled"].includes(intent.review.state)) return;
+    await intentRepository.put({ ...intent, review: { ...intent.review, state: "failed", error: engineText("paymentTakenBack") } });
+    this.emitState();
   }
 
   // -- services ------------------------------------------------------------
@@ -5361,8 +5387,9 @@ export class GhostlyNode implements EngineImplementation {
       message = { ...message, details: { ...withSend(message.details, { at, ...pathSnapshot(live, message.via), result: "sent" }), sentAt: at } };
     }
     if (!(await db.addMessage(message))) return false;
+    this.clockSample(message);
     const newest = this.newestAt.get(message.linkId);
-    if (!message.event) this.newestAt.set(message.linkId, Math.max(newest ?? 0, shownTime(message)));
+    if (!message.event) this.newestAt.set(message.linkId, Math.max(newest ?? 0, writtenAt(message, this.clockLeads.get(message.linkId))));
     if (message.sender === "peer") this.messageFeedback("message", message, newest);
     if (live) live.lastMessageAt = Math.max(live.lastMessageAt, message.timestamp);
     // An edit that came before its message is shown now, and confirmed.
