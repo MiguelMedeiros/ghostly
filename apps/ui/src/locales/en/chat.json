@@ -36,12 +36,15 @@
       "queued": "No receipt yet. Sends again by itself.",
       "sending": "On its way.",
       "sent": "Sent. No receipt yet.",
-      "waiting": "Sends by itself when your contact is online."
+      "waiting": "Sends by itself when your contact is online.",
+      "waitingLiveContact": "Files need a live connection. Your contact's chat is on DHT only: it goes when they allow live again.",
+      "waitingLiveYou": "Files need a live connection. This chat is on DHT only: change it from the connection icon."
     },
     "retry": "Not sent. Send again",
     "sending": "Sending",
     "sent": "Sent",
-    "waiting": "Waiting for your contact to be online"
+    "waiting": "Waiting for your contact to be online",
+    "waitingLive": "Waiting for a live connection"
   },
   "disabledPlaceholder": "Message…",
   "edit": {

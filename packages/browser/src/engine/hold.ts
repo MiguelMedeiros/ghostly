@@ -44,6 +44,14 @@ const POLL_IDLE_MS = 5 * 60_000;
 const RENEW_AFTER_MS = 4 * 24 * 3600_000;
 /** My pointer is published again this often while something is held, in case a relay forgot it. */
 const REPUBLISH_MS = 60 * 60_000;
+/**
+ * A held item's address has this long to answer and be read whole, plus the time its declared size takes at the
+ * slowest pace worth waiting for (64 KiB a second): about 21 s for a manifest, two and a half minutes for the largest
+ * item. Past it the read is given up as any failed one is, and the next poll starts there again.
+ */
+export const HOLD_FETCH_MS = 20_000;
+const HOLD_FETCH_BYTES_PER_S = 64 * 1024;
+export const holdFetchTimeoutMs = (max: number): number => HOLD_FETCH_MS + Math.ceil(max / HOLD_FETCH_BYTES_PER_S) * 1000;
 const hex = (bytes: Uint8Array) => Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
 
 /**
@@ -479,10 +487,28 @@ export class HoldEngine {
     this.host.changed();
   }
 
-  /** A presigned address read whole, but never past `max` bytes: what the manifest declared, not what a server sends. */
+  /**
+   * A presigned address read whole, but never past `max` bytes: what the manifest declared, not what a server sends.
+   * And never past `holdFetchTimeoutMs(max)`: a request that hangs (no answer, or a body that stops) is aborted and
+   * fails as a network problem does. Before, one hung request held the pickup, and every chat's after it, for good.
+   */
   private async fetchBytes(url: string, max: number): Promise<Uint8Array> {
+    const abort = new AbortController();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    // Raced as well as aborted: a fetch that does not honour the signal must not hold the pickup either.
+    const late = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => { reject(new Error("The storage did not answer in time")); abort.abort(); }, holdFetchTimeoutMs(max));
+    });
+    const read = this.readBytes(url, max, abort.signal);
+    // Once given up on, what it says later (the abort) is nobody's to hear.
+    read.catch(() => {});
+    try { return await Promise.race([read, late]); }
+    finally { clearTimeout(timer); }
+  }
+
+  private async readBytes(url: string, max: number, signal: AbortSignal): Promise<Uint8Array> {
     const doFetch = this.host.fetch ?? ((...args: Parameters<typeof fetch>) => fetch(...args));
-    const response = await doFetch(url, { cache: "no-store", credentials: "omit" });
+    const response = await doFetch(url, { cache: "no-store", credentials: "omit", signal });
     if (!response.ok) throw new Error(`The storage answered ${response.status}`);
     const declared = Number(response.headers.get("content-length"));
     if (declared > max) throw new HoldRefusedError("size", "The held item is larger than the manifest said");
@@ -492,6 +518,8 @@ export class HoldEngine {
       return bytes;
     }
     const reader = response.body.getReader();
+    // A body that stops half way: the read under way ends with the request.
+    signal.addEventListener("abort", () => { void reader.cancel().catch(() => {}); }, { once: true });
     const chunks: Uint8Array[] = [];
     let size = 0;
     for (let next = await reader.read(); !next.done; next = await reader.read()) {

@@ -36,12 +36,15 @@
       "queued": "Sem confirmação ainda. Envia de novo sozinha.",
       "sending": "A caminho.",
       "sent": "Enviada. Sem confirmação ainda.",
-      "waiting": "Envia sozinha quando seu contato estiver online."
+      "waiting": "Envia sozinha quando seu contato estiver online.",
+      "waitingLiveContact": "Arquivos precisam de conexão direta. A conversa do seu contato está em Só DHT: o arquivo vai quando ele permitir de novo.",
+      "waitingLiveYou": "Arquivos precisam de conexão direta. Esta conversa está em Só DHT: mude no ícone de conexão."
     },
     "retry": "Não enviada. Enviar de novo",
     "sending": "Enviando",
     "sent": "Enviada",
-    "waiting": "Aguardando seu contato ficar online"
+    "waiting": "Aguardando seu contato ficar online",
+    "waitingLive": "Aguardando uma conexão direta"
   },
   "disabledPlaceholder": "Mensagem…",
   "edit": {
