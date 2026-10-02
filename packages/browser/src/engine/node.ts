@@ -453,6 +453,11 @@ export class GhostlyNode implements EngineImplementation {
   private readonly profilePeek: ProfilePeek;
   /** Whether this device's WebRTC attempts say direct connections are blocked on its network (`directPath.ts`). */
   private readonly directPath = new DirectPathWatch(() => { if (!this.shuttingDown) this.emitState(); });
+  /**
+   * Edges of groups whose WebRTC did not connect in this run of the app (`edgeWithoutRtc`): they go on as an app with
+   * no WebRTC does, over a native transport. Not kept: the next start tries WebRTC first again.
+   */
+  private readonly edgeRtcOff = new Set<string>();
   private readonly pollIntervals: PollIntervals;
   private readonly localFetch: LocalFetch;
   private readonly links = new Map<string, LiveLink>();
@@ -4354,7 +4359,7 @@ export class GhostlyNode implements EngineImplementation {
       usdtPaymentsSupport: !entry,
       barkPaymentsSupport: !entry,
       params: stored,
-      rtcAvailable: typeof RTCPeerConnection !== "undefined",
+      rtcAvailable: typeof RTCPeerConnection !== "undefined" && !this.edgeRtcOff.has(linkId),
       // Live when this app last ran: the member likely watches for this app to come back, and is dialled at once,
       // whichever end's turn it is, rather than left to its offer and a read at the background pace (WISP 100).
       // WebRTC, unless one side has none: then the native transport both run.
@@ -4427,7 +4432,10 @@ export class GhostlyNode implements EngineImplementation {
           if (!entry && presence.nick && !live.link?.isDataLinkOpen) this.groups.edgeNick(group, peer, presence.nick);
           this.emitState(); },
         onPairingState: state => { live.pairing = state; this.emitState(); },
-        onDirectEvidence: evidence => this.directPath.note(peer, evidence),
+        onDirectEvidence: evidence => {
+          this.directPath.note(peer, evidence);
+          if (!entry && evidence !== "open" && evidence !== "closed") void this.edgeWithoutRtc(linkId);
+        },
         onDataLinkState: state => {
           traceJoin(group, `link.${state}`, { role });
           // The last moment the member was reachable on it: when it opens, and when it stops being open.
@@ -4457,7 +4465,29 @@ export class GhostlyNode implements EngineImplementation {
    */
   private keepsGroupNative(stored: StoredLink): boolean {
     if (this.options.webrtcGroupLinks) return false;
-    return typeof RTCPeerConnection === "undefined" || (!!stored.peerTransports && !stored.peerTransports.includes("webrtc/1"));
+    return typeof RTCPeerConnection === "undefined" || this.edgeRtcOff.has(stored.id) || (!!stored.peerTransports && !stored.peerTransports.includes("webrtc/1"));
+  }
+
+  /**
+   * An edge's WebRTC attempt exchanged both descriptions and connected nothing, or found no candidate at all
+   * (`DirectEvidence`): a network that lets no direct connection through (a VPN, a firewall, on either side). WebRTC is
+   * all an edge between two apps that have it runs, and there is no TURN server unless someone set one, so the edge
+   * never went live, and the member stayed unreachable for as long as that network lasted. The edge starts again as on an
+   * app with no WebRTC (WISP 9xx § Transports): it runs its native endpoints and says so in its packet (`_tr`, with no
+   * `webrtc/1`), the member's app starts its own for it as it does for a Linux Desktop, and the two meet over Iroh
+   * through its relay. For this run of the app only.
+   */
+  private async edgeWithoutRtc(linkId: string): Promise<void> {
+    const live = this.links.get(linkId), link = live?.link;
+    if (!live || !link || !live.stored.group || live.stored.groupEntry || this.shuttingDown || this.options.webrtcGroupLinks) return;
+    if (this.edgeRtcOff.has(linkId) || this.keepsGroupNative(live.stored) || !Object.keys(this.nativeFactories).length) return;
+    this.edgeRtcOff.add(linkId);
+    traceLink(live.myPubKeyZ32, "edge-rtc-off", {});
+    live.link = null;
+    // No goodbye: the edge is back in a moment, and the member must not take this for a leave.
+    await link.stop(false).catch(() => {});
+    if (this.links.get(linkId) !== live || live.link || this.shuttingDown || this.settings.online === false) return;
+    this.startEdge(linkId);
   }
 
   private startLink(linkId: string, messages: StoredMessage[]): void {
