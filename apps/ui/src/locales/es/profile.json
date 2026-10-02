@@ -48,6 +48,7 @@
       "title": "Esta copia es {{names}}, que está en este dispositivo"
     },
     "saveToS3": "Guardar en S3",
+    "saved": "Guardado como {{name}} · {{size}}",
     "savedToS3": "Guardado en S3 · {{size}}",
     "setUp": "Configurar",
     "spendWarning": "Quien tenga el archivo y la frase de contraseña puede gastar sus monederos.",

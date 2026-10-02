@@ -48,6 +48,7 @@
       "title": "Este backup é {{names}}, que está neste dispositivo"
     },
     "saveToS3": "Salvar no S3",
+    "saved": "Salvo como {{name}} · {{size}}",
     "savedToS3": "Salvo no S3 · {{size}}",
     "setUp": "Configurar",
     "spendWarning": "Quem tiver o arquivo e a frase-senha pode gastar as carteiras dele.",
