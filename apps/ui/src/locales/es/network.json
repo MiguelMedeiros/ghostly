@@ -15,7 +15,7 @@
   "pushRelayInfo": "Una página del navegador no puede enviar a un servicio push por sí misma. Un relay que elijas envía el aviso por ella, ya cifrado: sabe cuándo despertaste a alguien y tu dirección IP, nunca lo que escribiste. Ghostly no mantiene ninguno. El escritorio y la línea de comandos no lo necesitan.",
   "readRelays": "Usar también relays Pkarr",
   "readRelaysHint": "Encuentra antes un primer contacto. Los relays ven qué claves busca.",
-  "readRelaysInfo": "Esta app lee la DHT Mainline directamente. Con esto activado, también lee a través de los relays Pkarr de abajo.",
+  "readRelaysInfo": "Esta app lee la DHT Mainline directamente. Con esto activado, también lee a través de los relays Pkarr de abajo. Si no se puede llegar a la DHT (una VPN o un cortafuegos puede bloquearla), lee a través de ellos igualmente.",
   "relays": "Relays Pkarr",
   "relaysHint": "Uno por línea. Solo ven paquetes firmados y cifrados.",
   "relaysInfoDirect": "Los contactos en la web y en la extensión no llegan a la DHT Mainline y leen a través de relays, así que esta app también escribe en ellos.",
