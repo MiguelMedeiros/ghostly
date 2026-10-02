@@ -68,7 +68,10 @@ export async function deviceIdentity(profile: string, sources: { record?: Device
   const ownSlot = record.ownSlot;
   const own = ownSlot === undefined ? undefined : record.deviceSet[ownSlot];
   if (ownSlot === undefined || !own) throw new DeviceSetError("the device state does not say which slot is this device's");
-  const key = await (sources.loadKey ?? loadDeviceSigningKey)(profile);
+  let key: DeviceSigningKey | null;
+  // A stored key that cannot be read (no key object, a seed that does not match, a database that fails) is no key.
+  try { key = await (sources.loadKey ?? loadDeviceSigningKey)(profile); }
+  catch (error) { throw Object.assign(new DeviceSetError(`its signing key cannot be read (${error instanceof Error ? error.message : String(error)})`), { cause: error }); }
   if (!key) throw new DeviceSetError("this device has no signing key");
   if (toBase64Url(key.publicKey) !== own.key) throw new DeviceSetError("the signing key stored here is not the one the device state names");
   return { record, d, ownSlot, key };

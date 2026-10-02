@@ -1,6 +1,6 @@
 import "fake-indexeddb/auto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { deviceKeyZ32, firstDeviceSetSecret, fromBase64Url, randomBytes, readTurnPacket, toBase64Url, turnKeys, verify } from "@ghostly/core";
+import { deviceKeyZ32, firstDeviceSetSecret, fromBase64Url, randomBytes, readTurnPacket, seedSigner, toBase64Url, turnKeys, verify } from "@ghostly/core";
 import { DeviceSetError, deviceIdentity, firstDeviceSet, firstTurn, openTurnKeeper } from "../src/devices/setup";
 import { DEVICE_KEYS_DB, checkNonExtractableEd25519, closeDeviceKeysDb, createDeviceSigningKey, forgetDeviceSigningKey, loadDeviceSigningKey } from "../src/devices/signingKey";
 import { parseDeviceRecord } from "../src/devices/state";
@@ -93,6 +93,41 @@ describe("the device signing key", () => {
     vi.spyOn(crypto.subtle, "generateKey").mockImplementation((async () => generate({ name: "Ed25519" }, true, ["sign", "verify"])) as typeof crypto.subtle.generateKey);
     expect(await checkNonExtractableEd25519()).toEqual({ supported: false, reason: "The key was made extractable" });
     expect((await createDeviceSigningKey("ghostly")).kind).toBe("seed");
+  });
+
+  it("is never handed out when it does not sign: a stored key that fails its check and cannot be taken back is refused", async () => {
+    const sign = crypto.subtle.sign.bind(crypto.subtle);
+    let calls = 0;
+    // The first signature (the engine check) works; the one with the key read back from storage fails.
+    vi.spyOn(crypto.subtle, "sign").mockImplementation(((...args: Parameters<typeof crypto.subtle.sign>) => (++calls === 1 ? sign(...args) : Promise.reject(new DOMException("broken", "OperationError")))) as typeof crypto.subtle.sign);
+    // And taking it back fails too.
+    vi.spyOn(IDBObjectStore.prototype, "delete").mockImplementation(() => { throw new DOMException("The disk is full", "UnknownError"); });
+    await expect(createDeviceSigningKey("ghostly")).rejects.toThrow("does not sign");
+    // The key that does not sign is still stored, and nothing named it: a device record is written only with a key that signs.
+    expect((await storedKey("ghostly"))!.kind).toBe("webcrypto");
+  });
+
+  it("taking back the key this page made never removes one another page stored meanwhile, and that one is used", async () => {
+    const sign = crypto.subtle.sign.bind(crypto.subtle);
+    const otherSeed = randomBytes(32), otherKey = seedSigner(otherSeed);
+    let calls = 0;
+    vi.spyOn(crypto.subtle, "sign").mockImplementation((async (...args: Parameters<typeof crypto.subtle.sign>) => {
+      if (++calls === 1) return sign(...args);
+      // While this page checks the key it stored, another page put a key of its own in its place (the first was
+      // forgotten and a new one made); then this page's check fails.
+      const db = await new Promise<IDBDatabase>((resolve, reject) => { const r = indexedDB.open(DEVICE_KEYS_DB); r.onsuccess = () => resolve(r.result); r.onerror = () => reject(r.error); });
+      await new Promise<void>((resolve, reject) => {
+        const tx = db.transaction("keys", "readwrite");
+        tx.objectStore("keys").put({ profile: "ghostly", kind: "seed", publicKey: toBase64Url(otherKey.publicKey), seed: toBase64Url(otherSeed), createdAt: 1 });
+        tx.oncomplete = () => resolve(); tx.onerror = tx.onabort = () => reject(tx.error);
+      });
+      db.close();
+      throw new DOMException("broken", "OperationError");
+    }) as typeof crypto.subtle.sign);
+    const key = await createDeviceSigningKey("ghostly");
+    expect(key.publicKey).toEqual(otherKey.publicKey);
+    expect((await storedKey("ghostly"))!.publicKey).toBe(toBase64Url(otherKey.publicKey));
+    expect(verify(await key.sign(message), message, otherKey.publicKey)).toBe(true);
   });
 
   it("is a stored seed where the engine cannot keep the key it made, and nothing of that key stays behind", async () => {

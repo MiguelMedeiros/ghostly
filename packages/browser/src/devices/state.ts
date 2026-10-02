@@ -21,6 +21,20 @@ export const MAX_EARLIER_SETS = 8;
 export const DEVICE_SIGNING_KEY_KINDS = ["webcrypto", "seed"] as const;
 export type DeviceSigningKeyKind = (typeof DEVICE_SIGNING_KEY_KINDS)[number];
 
+/** A copy of the person's network settings, for a standby (`network.ts`). Absent fields are the app's defaults. */
+export interface DeviceNetwork {
+  /** The network is off: a standby asks nothing of anyone. */
+  off?: boolean;
+  /** The Pkarr relays. */
+  relays?: string[];
+  /** Where the DHT is reached directly (Desktop): reads use the relays too. */
+  readRelays?: boolean;
+  /** The Iroh relays a browser homes on. */
+  irohRelays?: string[];
+  /** ICE servers (TURN) beside the app's own. */
+  iceServers?: { urls: string; username?: string; credential?: string }[];
+}
+
 /** One slot of the device set. Bytes are base64url everywhere in the record, so it is the same in IndexedDB and in Desktop's file. */
 export interface DeviceSlot {
   /** The device signing key (Ed25519 public key). */
@@ -101,6 +115,11 @@ export interface DeviceRecord {
    * that copies this record (Desktop's file, a backup, a handoff) carries it.
    */
   signingKey?: DeviceSigningKeyKind;
+  /**
+   * The person's network settings, as the active device last had them (`network.ts`): what device-link-only mode uses,
+   * since the profile's own database, where the settings live, stays shut on a standby.
+   */
+  network?: DeviceNetwork;
   /** Which copy of the state this device holds, for the incremental handoff (WISP 06 § Later phases). */
   lineage?: string;
   /** Forced takeovers in the life of the profile: the floor of the group counters. */
@@ -212,6 +231,23 @@ const bytes = (value: unknown): value is string => text(value) && B64URL.test(va
 const optional = <T>(value: unknown, is: (v: unknown) => v is T): boolean => value === undefined || is(value);
 const slotIndex = (value: unknown): value is number => count(value, MAX_DEVICES - 1);
 
+const texts = (value: unknown, max: number): value is string[] => Array.isArray(value) && value.length <= max && value.every((v) => typeof v === "string" && v.length <= 2048);
+function isNetwork(value: unknown): value is DeviceNetwork {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const n = value as Record<string, unknown>;
+  if (n.off !== undefined && typeof n.off !== "boolean") return false;
+  if (n.readRelays !== undefined && typeof n.readRelays !== "boolean") return false;
+  if (n.relays !== undefined && !texts(n.relays, 16)) return false;
+  if (n.irohRelays !== undefined && !texts(n.irohRelays, 4)) return false;
+  if (n.iceServers !== undefined) {
+    if (!Array.isArray(n.iceServers) || n.iceServers.length > 8) return false;
+    for (const server of n.iceServers as Record<string, unknown>[]) {
+      if (!server || typeof server !== "object" || typeof server.urls !== "string" || !optional(server.username, text) || !optional(server.credential, text)) return false;
+    }
+  }
+  return true;
+}
+
 /** Why a stored record cannot be trusted. The gate then starts nothing (see `gate.ts`). */
 export class DeviceRecordError extends Error {
   constructor(what: string) {
@@ -244,6 +280,7 @@ export function parseDeviceRecord(value: unknown): DeviceRecord {
   if (!optional(r.activeSlot, slotIndex) || !optional(r.ownSlot, slotIndex)) return bad("a slot index");
   for (const field of ["turnPacket", "d", "lineage"] as const) if (!optional(r[field], bytes)) return bad(field);
   if (!optional(r.signingKey, (v): v is DeviceSigningKeyKind => (DEVICE_SIGNING_KEY_KINDS as readonly unknown[]).includes(v))) return bad("signingKey");
+  if (r.network !== undefined && !isNetwork(r.network)) return bad("network");
   if (!optional(r.breezDatabase, text)) return bad("breezDatabase");
   if (!optional(r.releasedTurn, (v): v is number => count(v, 2 ** 32 - 1))) return bad("releasedTurn");
   if (!optional(r.seenSequence, (v): v is number => count(v, Number.MAX_SAFE_INTEGER))) return bad("seenSequence");

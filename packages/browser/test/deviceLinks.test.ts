@@ -231,6 +231,26 @@ describe("the device links of a profile on this device", () => {
     expect(await settled(phone.links.ping(desktop.slot.key))).toBeGreaterThanOrEqual(0);
   });
 
+  it("give no old link to a key the current set does not list, whatever the list of devices still to acknowledge says", async () => {
+    const oldD = newDeviceSetSecret(), newD = newDeviceSetSecret();
+    const desktop = await makeDevice("Desktop"), phone = await makeDevice("Phone"), lost = await makeDevice("Lost");
+    await write(desktop, "active", newD, [desktop, phone, null], { earlierSets: [{ d: toBase64Url(oldD), tombstone: "", setUpdate: "{}", pending: [phone.slot.key, lost.slot.key] }] });
+    await settled(desktop.links.start());
+    expect(desktop.links.views().map((v) => [v.name, v.earlier ?? false]).sort()).toEqual([["Phone", false], ["Phone", true]]);
+    expect(desktop.links.views().some((v) => v.key === lost.slot.key)).toBe(false);
+  });
+
+  it("are none, and the engine says why, when the stored key cannot be read; the start itself does not fail", async () => {
+    const d = newDeviceSetSecret();
+    const desktop = await makeDevice("Desktop");
+    const phone = await makeDevice("Phone", { loadKey: async () => { throw new Error("The stored device signing key has no key"); } });
+    await write(phone, "standby", d, [desktop, phone]);
+    await expect(settled(phone.links.start())).resolves.toBeUndefined();
+    expect(phone.links.views()).toEqual([]);
+    expect(phone.links.problem).toContain("cannot be read");
+    expect(pkarr.reads + pkarr.publishes).toBe(0);
+  });
+
   it("are none where the record cannot carry them, and the engine says why", async () => {
     const d = newDeviceSetSecret();
     const desktop = await makeDevice("Desktop"), phone = await makeDevice("Phone");

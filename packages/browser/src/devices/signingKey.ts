@@ -122,14 +122,21 @@ async function storeOnce(key: StoredKey): Promise<StoredKey> {
   });
 }
 
-async function remove(profile: string): Promise<void> {
+/**
+ * Removes the profile's key. With `onlyKey` (a public key, base64url), only if that is the key stored, in the same
+ * transaction: a page taking back the key it made never removes one another page stored meanwhile.
+ */
+async function remove(profile: string, onlyKey?: string): Promise<void> {
   if (!(await keysDbExists())) return;
   const db = await openKeysDb();
   const tx = db.transaction(STORE, "readwrite", { durability: "strict" });
   await new Promise<void>((resolve, reject) => {
     tx.oncomplete = () => resolve();
     tx.onabort = tx.onerror = () => reject(tx.error ?? new Error("The device signing key could not be removed"));
-    tx.objectStore(STORE).delete(profile);
+    const store = tx.objectStore(STORE);
+    if (onlyKey === undefined) { store.delete(profile); return; }
+    const current = store.get(profile);
+    current.onsuccess = () => { if ((current.result as StoredKey | undefined)?.publicKey === onlyKey) store.delete(profile); };
   });
 }
 
@@ -205,18 +212,27 @@ export async function createDeviceSigningKey(profile: string, options: { forceSe
   if (!options.forceSeed) {
     const made = await generateNonExtractable();
     if (!("reason" in made)) {
+      const publicKey = toBase64Url(made.publicKey);
       try {
         // Stored as the browser's own object (a structured clone): an engine that cannot store one throws here.
-        const kept = await storeOnce({ profile, kind: "webcrypto", publicKey: toBase64Url(made.publicKey), privateKey: made.privateKey, createdAt });
+        const kept = await storeOnce({ profile, kind: "webcrypto", publicKey, privateKey: made.privateKey, createdAt });
+        // What is stored must sign: this is the key every later start reads. It is this page's, or one another page
+        // stored a moment before.
         const signer = signerOf(kept);
-        // What was stored must still sign: this is the key every later start reads.
         if (await signsCorrectly(signer)) return signer;
       } catch { /* this engine does not keep such a key: a seed */ }
-      await remove(profile).catch(() => {});
+      // Taken back only if it is the key this page made: one another page stored meanwhile stays.
+      await remove(profile, publicKey).catch(() => {});
     }
   }
   const identity = identityFromSeed(randomBytes(32));
-  return signerOf(await storeOnce({ profile, kind: "seed", publicKey: toBase64Url(identity.publicKey), seed: identity.seedB64, createdAt }));
+  const kept = await storeOnce({ profile, kind: "seed", publicKey: toBase64Url(identity.publicKey), seed: identity.seedB64, createdAt });
+  // The seed, or what another page stored first, or a key this page could not take back: whichever it is, a key that
+  // does not sign is refused here, never handed out to be named in a device record.
+  let signer: DeviceSigningKey;
+  try { signer = signerOf(kept); } catch (error) { throw Object.assign(new Error(`The device signing key stored here cannot be used: ${why(error)}`), { cause: error }); }
+  if (!(await signsCorrectly(signer).catch(() => false))) throw new Error("The device signing key stored here does not sign");
+  return signer;
 }
 
 /** The profile is gone from this device, or its device left the set for good: its key goes too. Makes no database. */
