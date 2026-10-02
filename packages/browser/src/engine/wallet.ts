@@ -971,7 +971,8 @@ export class CashuWallet {
   /**
    * Pays a melt quote. True once paid; false while the mint holds the payment pending, in which case its
    * proofs stay reserved and the wallet keeps asking until the mint settles it (`onMeltResolved`).
-   * Throws only when the sats never left the wallet or are known to be back in it.
+   * Throws only when the sats never left the wallet or are known to be back in it, or when the split before the payment
+   * has no answer yet (`SwapUnsettledError`): the payment was not made, and the split is settled by `pollSwaps`.
    */
   async payQuote(quoteId: string, mint: string, note?: string, paymentId?: string): Promise<boolean> {
     try {
