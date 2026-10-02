@@ -1073,7 +1073,10 @@ export class GhostlyNode implements EngineImplementation {
     },
     messages: groupId => db.getMessages(`group:${groupId}`),
     putMessage: async message => {
-      await db.putMessage(message);
+      // A note is written again as its payment moves on: it keeps the place it took when it first came here, and a
+      // member's takes that place as any received row does, never the time the member's clock said.
+      const kept = await db.getMessage(message.linkId, message.id);
+      await db.putMessage(kept ? { ...message, timestamp: kept.timestamp, ...(kept.sentAt !== undefined && { sentAt: kept.sentAt }) } : this.placed(message));
       await this.messagesChanged(message.linkId, [message.id]);
       this.emitState();
     },
@@ -5184,6 +5187,24 @@ export class GhostlyNode implements EngineImplementation {
     for (const row of settleAhead(await db.getMessages(linkId), now)) await db.putMessage(row);
   }
 
+  /**
+   * A new row with its place in its history. A received row takes it here and now, past the last place given in its
+   * chat: the time its sender says is kept beside it (`sentAt`) and shown, and orders nothing (WISP 400, requirement
+   * 10). A sender's clock ahead or behind then moves no message past another, and what I send next goes below what I
+   * just received. A row of mine keeps its own time; one placed already (it has `sentAt`) is left as it is.
+   */
+  private placed(message: StoredMessage): StoredMessage {
+    const now = Date.now(), last = this.placedAt.get(message.linkId) ?? 0;
+    if (message.sender === "peer" && message.sentAt === undefined) {
+      const sentAt = claimedTime(message.timestamp);
+      message = { ...message, timestamp: arrivalKey(now, last), ...(sentAt !== undefined && { sentAt }) };
+      this.placedAt.set(message.linkId, message.timestamp);
+    }
+    // Mine count too, up to now: a message that comes in the millisecond I sent one goes below it.
+    else this.placedAt.set(message.linkId, Math.max(last, Math.min(message.timestamp, now)));
+    return message;
+  }
+
   private async storeMessage(message: StoredMessage): Promise<void> { await this.storeNewMessage(message); }
 
   /** Stores a message; false when it was there already (or deleted here): nothing new came. */
@@ -5195,17 +5216,8 @@ export class GhostlyNode implements EngineImplementation {
     // …and one with a member of a community, which has no edge: its link through the group names them.
     const pay = parsePayLink(message.linkId);
     if (pay?.member) message = { ...message, linkId: `group:${pay.groupId}`, id: `${message.linkId}:${message.id}`, ...(message.sender === "peer" ? { member: pay.member } : {}) };
-    // A received row takes its place here and now, in the order rows come (before anything is awaited): the time its
-    // sender says is kept beside it and shown, and orders nothing (WISP 400, requirement 10). A sender's clock ahead
-    // or behind then moves no message past another, and what I send next goes below what I just received.
-    const now = Date.now(), placed = this.placedAt.get(message.linkId) ?? 0;
-    if (message.sender === "peer") {
-      const sentAt = claimedTime(message.timestamp);
-      message = { ...message, timestamp: arrivalKey(now, placed), ...(sentAt !== undefined && { sentAt }) };
-      this.placedAt.set(message.linkId, message.timestamp);
-    }
-    // Mine count too, up to now: a message that comes in the millisecond I sent one goes below it.
-    else this.placedAt.set(message.linkId, Math.max(placed, Math.min(message.timestamp, now)));
+    // Its place, in the order rows come (before anything is awaited).
+    message = this.placed(message);
     const live = this.links.get(message.linkId);
     // The peer republishes what it sent for a few minutes: what was deleted here stays deleted.
     if (live?.stored.deletedIds?.includes(message.id)) return false;

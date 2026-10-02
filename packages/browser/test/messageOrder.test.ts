@@ -183,6 +183,28 @@ describe("messages that arrive late keep their order and land where they arrive"
     expect(said_(client.messages.get(link))).toEqual(order);
   });
 
+  it("a group payment's note from a member takes its place when it comes, and keeps it as the payment moves on", async () => {
+    const { node, store } = await started();
+    const { groupId } = await node.createGroup({ name: "Plaza", profile: "mesh" });
+    const link = `group:${groupId}`;
+    const put = (message: StoredMessage) => (node as unknown as { groupPayments: { host: { putMessage(m: StoredMessage): Promise<void> } } }).groupPayments.host.putMessage(message);
+    const note = (state: string): StoredMessage => ({ linkId: link, id: "gpay:r1", text: `request ${state}`, sender: "peer", member: "ana", timestamp: claim, via: "datalink" });
+    // Ana's clock is three minutes ahead.
+    const claim = now + 3 * MINUTE;
+    await put(note("pending"));
+    const [first] = (await db.getMessages(link)).filter((m) => !m.event);
+    // (The group's own first line took this millisecond.)
+    expect(first.sentAt).toBe(claim);
+    expect(first.timestamp - now).toBeLessThan(5);
+    tick();
+    await store({ linkId: link, id: "me:1", text: "paying", sender: "me", timestamp: now, via: "datalink" });
+    tick();
+    await put(note("paid"));
+    const said = (await db.getMessages(link)).filter((m) => !m.event);
+    expect(texts(said)).toEqual(["request paid", "paying"]);
+    expect(said[0]).toMatchObject({ timestamp: first.timestamp, sentAt: claim });
+  });
+
   it("the list of groups and unread follow when a message came, never a member's clock", () => {
     expect(cameAt(now + 3 * MINUTE, true, now)).toBe(now);
     expect(cameAt(now - 2 * DAY, true, now)).toBe(now);
