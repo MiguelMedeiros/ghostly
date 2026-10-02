@@ -176,7 +176,6 @@ test("a call that loses its path says Reconnecting, restarts ICE on the same con
   for (const p of [alice, bob]) await expect(chat(p).getByText("Audio call ended")).toHaveCount(1);
 });
 
-test("the contact's tab closes mid-call: the call ends here with its line",{ tag: ["@feature:calls.paired", "@feature:calls.video"] }, async ({ peer }) => {
 for (const [how, offset] of [["behind", -125_000], ["ahead", 125_000]] as const) {
   test(`a contact whose clock is two minutes ${how}: calls ring and connect, whoever calls`, { tag: ["@feature:calls.paired", "@feature:calls.signal", "@feature:calls.audio"] }, async ({ peer }) => {
     // Reported 2026-10-01. A call signal more than two minutes from this clock never rang, and the answer of a callee
