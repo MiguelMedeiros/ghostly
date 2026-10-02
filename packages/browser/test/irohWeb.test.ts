@@ -75,6 +75,30 @@ it.skipIf(!RELAY)("two browsers pair and chat over Iroh through a relay, with th
   }
 }, 40000);
 
+/**
+ * Iroh compares relay URLs as text, so one server spelled two ways (n0's hosts with and without the trailing dot of
+ * a fully qualified name) counts as two relays: the dialler opens a second connection to the server it is already
+ * homed on. Here the same loopback relay is spelled `localhost` and `localhost.`; both are one relay to the endpoint.
+ */
+it.skipIf(!RELAY || !/\/\/(localhost|127\.0\.0\.1)[:/]/.test(RELAY ?? ""))("pairs when the two sides spell the same relay differently", async () => {
+  const plain = RELAY!.replace("127.0.0.1", "localhost"), dotted = plain.replace("localhost", "localhost.");
+  const web = await Promise.all([[48, plain], [49, dotted]].map(([n, relay]) => createIrohWebEndpoint(seed(n as number), { relays: [relay as string], load: loadNode })));
+  opened.push(...web);
+  const relays = web.map(e => (e.descriptor as { relay: string }).relay);
+  expect(relays[0]).toBe(relays[1]);
+  const { links, states, received } = await pair([web[0], web[1]], "iroh-web-spelling");
+  try {
+    const started = Date.now();
+    await links[0].connect(15000);
+    await vi.waitFor(() => expect(states.map(s => s.status)).toEqual(["ready", "ready"]), { timeout: 15000 });
+    console.info(`paired across two spellings of one relay in ${Date.now() - started} ms`);
+    expect(await links[0].sendMessage("one relay, two spellings")).toBeNull();
+    await vi.waitFor(() => expect(received[1]).toEqual(["one relay, two spellings"]));
+  } finally {
+    await Promise.all(links.map(link => link.stop(false)));
+  }
+}, 40000);
+
 it.skipIf(!RELAY || !existsSync(NATIVE))("a browser and the Desktop's native Iroh pair through the same relay, either side dialling", async () => {
   for (const dialler of [0, 1]) {
     // A stopped link closes its endpoints: each direction gets fresh ones.
