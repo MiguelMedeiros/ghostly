@@ -22,6 +22,11 @@ test("scrolled up, new messages keep the view and a pill counts them", { tag: ["
   expect(await distanceToBottom(bob)).toBeLessThan(100);
   await expect(pill(bob)).toHaveCount(0);
 
+  // The first pairing's scene sits above the first message and goes 1.8 s after the chat went live (CELEBRATE_MS).
+  // On a fast runner the ten pages above take less than that: the scene then left while Bob was at the top, and the
+  // rows under it moved up by its height, which is the scene going, not a new message moving the view.
+  await expect(bob.page.getByTestId("pairing-scene")).toHaveCount(0);
+
   // Bob scrolls to the top and reads the first page.
   await chat(bob).evaluate(el => { el.scrollTop = 0; });
   const first = chat(bob).getByText(`hello from ${alice.name}`);
