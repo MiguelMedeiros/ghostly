@@ -131,6 +131,24 @@
   "shareProfile": "Condividi il mio nome e la mia foto con i contatti",
   "shareProfileHint": "I tuoi contatti vedono il nome e la foto di questo profilo. Se disattivato, vedono “Contatto” e un motivo al loro posto.",
   "sourceCode": "Codice sorgente",
+  "storageDevice": "Archiviazione su questo dispositivo",
+  "storageHint": {
+    "protected": "Questo browser conserva i dati di Ghostly finché non li rimuovi.",
+    "unprotected": "Questo browser può cancellare i dati di Ghostly quando il dispositivo ha poco spazio.",
+    "unsupported": "Questo browser non dice se conserva i dati di Ghostly."
+  },
+  "storageInfo": {
+    "protected": "Cancellare i dati del sito nel browser o rimuovere l'app elimina comunque tutto. Tieni un backup del tuo profilo.",
+    "safari": "Safari cancella anche i dati di un sito dopo 7 giorni senza visite, a meno che non sia nella schermata Home.",
+    "unprotected": "Installa Ghostly (aggiungilo alla schermata Home), consenti le notifiche e tieni un backup del tuo profilo. I browser proteggono le app installate e usate spesso."
+  },
+  "storageOf": "{{used}} di {{quota}}",
+  "storageProtect": "Proteggi",
+  "storageState": {
+    "protected": "Protetta",
+    "unprotected": "Non protetta",
+    "unsupported": "Sconosciuta"
+  },
   "storageUsed": "Spazio utilizzato",
   "systemNotifications": "Notifiche di sistema",
   "theme": "Tema",

@@ -41,6 +41,7 @@
   },
   "backupReminder": {
     "body": "Fai un backup per non perderlo se perdi questo dispositivo.",
+    "bodyUnprotected": "Fai un backup per non perderlo se perdi questo dispositivo o se questo browser cancella i dati.",
     "go": {
       "phrase": "Mostra frase di recupero",
       "profile": "Backup del profilo"

@@ -63,6 +63,9 @@ export function GroupMembersDialog({ group, onClose, focusKey }: { group: GroupV
     return linkId ? state?.links.find(l => l.id === linkId) : undefined;
   };
   const contactKey = (key: string) => contactOf(key)?.peerPubKeyZ32;
+  // In a community my app holds an edge only with a hub or two (as a hub, with its members): everyone else is reached
+  // through the hubs, which is not "not reachable".
+  const viaHubs = (m: GroupMemberView) => live.profile === "community" && !m.me && !m.edge;
   const photoOf = (m: GroupMemberView) => memberPhoto(live, m, state?.links, faces, state?.settings.avatar);
   // The member whose name or picture was tapped in the chat: their row, in sight and marked.
   const list = useRef<HTMLUListElement>(null);
@@ -110,13 +113,15 @@ export function GroupMembersDialog({ group, onClose, focusKey }: { group: GroupV
     <ul ref={list} className="mt-3 max-h-56 space-y-1 overflow-y-auto" data-testid="group-member-list">
       {live.members.map(m => <li key={m.key} data-testid="group-member" data-key={m.key} data-role={m.role} data-focused={m.key === focusKey || undefined}
         className={`flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg px-2 py-1.5 hover:bg-surface-hover ${m.key === focusKey ? "bg-surface-hover ring-1 ring-accent/60" : ""}`}>
-        <span role="img" aria-label={m.online ? t("group.members.reachable") : t("group.members.notReachable")} className={`h-2 w-2 shrink-0 rounded-full ${m.edge || m.me ? edgeDot(m) : m.online ? "bg-accent" : "bg-text-muted"}`} />
+        {/* A community member my app holds no edge with is reached through the hubs: not "not reachable", and nothing says whether their app is open. */}
+        {viaHubs(m) ? <span role="img" aria-label={t("group.member.viaHub")} className="h-2 w-2 shrink-0 rounded-full bg-text-muted/50" />
+          : <span role="img" aria-label={m.online ? t("group.members.reachable") : t("group.members.notReachable")} className={`h-2 w-2 shrink-0 rounded-full ${m.edge || m.me ? edgeDot(m) : m.online ? "bg-accent" : "bg-text-muted"}`} />}
         <MemberAvatar src={photoOf(m)} name={m.me ? state?.settings.nick || memberName(m, t) : memberName(m, t)} />
         {/* The name keeps room for about 16 characters: the badges and an admin's buttons go under it when the row is narrower (a phone, a long word in another language). */}
         <span className="contact-row min-w-[8.5rem] flex-1">
           <span className="flex min-w-0 items-center gap-1.5 text-sm"><span className="min-w-0 truncate">{memberName(m, t)}</span>{!m.me && <ContactMarks peerKey={contactKey(m.key)} testId="group-member-marks" />}{/* An unnamed member's name is its key already ("Member 3r69cg...d51a"): the key again was cut to one character on a phone. */}
             {(m.me || m.nick) && <span data-testid="group-member-key" className="min-w-0 shrink-[100] truncate font-mono text-[10px] text-text-muted">{publicKeyLabel(m.key)}</span>}</span>
-          {!m.me && <span className="block truncate text-[11px] text-text-muted" data-testid="group-member-status">{edgeLabel(m, Date.now(), t, agoIn(language))}</span>}
+          {!m.me && <span className="block truncate text-[11px] text-text-muted" data-testid="group-member-status">{viaHubs(m) ? t("group.member.viaHub") : edgeLabel(m, Date.now(), t, agoIn(language))}</span>}
         </span>
         {m.role === "admin" && <span className="rounded-full bg-accent/15 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-accent">{t("group.members.admin")}</span>}
         {m.hub && <span data-testid="group-member-hub" title={t("group.hubs.badgeHint")} className="rounded-full bg-surface-alt px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-text-secondary">{t("group.hubs.badge")}</span>}

@@ -59,6 +59,9 @@ export const TIMING = { card: 560, out: 460, ghost: 640, ghostDelay: 90, sheen: 
 const ADD = { composite: 'add' } as const;
 const face = (card: HTMLElement | null | undefined) => card?.querySelector<HTMLElement>('[data-deck=face]') ?? null;
 
+/** The person asked for less motion, in the system or in Settings: a deck changes at once, and nothing swings. */
+export const reducedMotion = (): boolean => typeof window !== 'undefined' && (document.documentElement.dataset.reduceMotion === 'true' || window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+
 /** Play the switch from `outgoing` to `incoming`. Nothing moves with reduced motion: the caller does not call it. */
 export function playSwitch({ glow, incoming, outgoing, dir }: { glow: HTMLElement | null; incoming: HTMLElement | null; outgoing: HTMLElement | null; dir: Dir }) {
   const inFace = face(incoming), outFace = face(outgoing);
