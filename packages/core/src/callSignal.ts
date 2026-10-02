@@ -444,7 +444,7 @@ export function buildSdpFromSignal(signal: CallSignal): string {
   // One session for every description of one connection (its fingerprint names it): a restart offer and its answer
   // describe the session the call already has, a version later.
   const sessionId = parseInt(signal.f!.slice(0, 12), 16);
-  const sessionVersion = signal.t === "r" || signal.re !== undefined ? Math.max(3, Math.floor(signal.ts / 1000)) : 2;
+  const sessionVersion = signal.t === "r" || signal.re !== undefined ? Math.max(3, Math.floor(signal.ts)) : 2;
   const audioSsrc = signal.ss?.[0] ?? Math.floor(Math.random() * 0xFFFFFFFF);
   const videoSsrc = signal.ss?.[1] ?? Math.floor(Math.random() * 0xFFFFFFFF);
   const opus = signal.ap ?? DEFAULT_OPUS_PT;
