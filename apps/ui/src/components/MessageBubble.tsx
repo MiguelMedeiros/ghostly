@@ -23,6 +23,7 @@ import { engine } from "@ghostly/browser/platform/engine";
 import { playCue, useCueChat } from "../lib/cues";
 import { downloadFile, downloadName, downloadState, type DownloadFormat } from "../lib/fileDownload";
 import { canRetryFile } from "../lib/fileStatus";
+import { useDhtOnly, waitsForLive } from "../lib/delivery";
 import { useTransfer } from "../hooks/useServicesPlatform";
 import type { ChatFile, ChatMessage } from "../lib/types";
 import { callEventText } from "../lib/callLines";
@@ -720,6 +721,8 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
   // message keeps its own mark: the bytes' progress is the file's to show (held files travel by hold/1, not files/3).
   const fileFailed = !!message.file && canRetryFile(message.file, transfer, platform);
   const shown = fileFailed ? "failed" as const : message.delivery;
+  // A file waiting in a DHT-only chat waits for a live connection, not for the contact to be online.
+  const live = waitsForLive(isMe && !fileFailed ? message : undefined, useDhtOnly(peerPubKey));
   /** A message that was not sent, sent again: its red mark, or its ⋮. */
   const retry = () => {
     if (fileFailed) { void platform!.retryFile!(message.file!.id).catch(() => {}); return; }
@@ -851,7 +854,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
     // (its fallback). Updates are its normal life, so no "edited": when it last changed, in the card.
     const card = message.card;
     const time = <CardTime sent={message.timestamp} changed={message.edit?.at} />;
-    const marks = isMe ? <DeliveryStatus delivery={shown} acked={isAcked} onRetry={retry} /> : undefined;
+    const marks = isMe ? <DeliveryStatus delivery={shown} acked={isAcked} onRetry={retry} live={live} /> : undefined;
     const edge = card.kind === "task" ? STATUS_TONE[card.status].bar
       : card.state === "paused" ? "bg-text-muted" : card.lastRun?.result === "failed" ? "bg-danger" : undefined;
     return (
@@ -914,7 +917,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
       <span className="text-[11px] leading-none text-text-primary/65">
         {time}
       </span>
-      {isMe && <DeliveryStatus delivery={shown} acked={isAcked} onRetry={retry} />}
+      {isMe && <DeliveryStatus delivery={shown} acked={isAcked} onRetry={retry} live={live} />}
     </span>
   );
 
@@ -1033,7 +1036,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
               <span className="text-[11px] leading-none text-[hsla(0,0%,100%,0.9)]">
                 {time}
               </span>
-              {isMe && <DeliveryStatus delivery={shown} acked={isAcked} onRetry={retry} onPicture />}
+              {isMe && <DeliveryStatus delivery={shown} acked={isAcked} onRetry={retry} live={live} onPicture />}
             </span>
           </div>
         ) : bigEmoji ? (

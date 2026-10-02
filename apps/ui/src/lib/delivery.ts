@@ -1,3 +1,5 @@
+import { useSyncExternalStore } from "react";
+import { engine } from "@ghostly/browser/platform/engine";
 import { useI18n } from "../contexts/I18nContext";
 import type { ChatMessage } from "./types";
 
@@ -20,17 +22,44 @@ export function deliveryShape(delivery: ChatMessage["delivery"], acked = false):
   }
 }
 
-/** The mark's short name (its accessible name) and the one line its tooltip says. */
+/** Who set a chat to DHT only: this side, or the contact. Such a chat does not go live until that side leaves it. */
+export type DhtOnlyBy = "you" | "contact";
+
+const subscribe = (listener: () => void) => engine.subscribe(listener);
+
+/** Whether this chat is on DHT only by choice, and whose. This side's choice is said first: it is the one to change here. */
+export function useDhtOnly(peerPubKey?: string): DhtOnlyBy | undefined {
+  return useSyncExternalStore(subscribe, () => {
+    const link = peerPubKey ? engine.linkByPeer(peerPubKey) : undefined;
+    return link?.deliveryMode === "dht" ? "you" : link?.dhtDelivery?.peerMode === "dht" ? "contact" : undefined;
+  });
+}
+
+/**
+ * What a waiting message of mine waits for when it is not the contact: a file in a DHT-only chat needs a live
+ * connection, which the chat does not make until the side that chose DHT only leaves it. Online or not changes nothing.
+ */
+export function waitsForLive(message: Pick<ChatMessage, "delivery" | "file"> | undefined, dhtOnly: DhtOnlyBy | undefined): DhtOnlyBy | undefined {
+  return message?.delivery === "waiting" && message.file ? dhtOnly : undefined;
+}
+
+/**
+ * The mark's short name (its accessible name) and the one line its tooltip says. `live`: the message waits for a live
+ * connection this DHT-only chat does not make (see `waitsForLive`), not for the contact to be online.
+ */
 export function useDeliveryWords() {
   const { t } = useI18n();
   return {
-    label: (delivery: Delivery) =>
-      delivery === "waiting" || delivery === "held" ? t("chat.delivery.waiting")
+    label: (delivery: Delivery, live?: DhtOnlyBy) =>
+      delivery === "waiting" && live ? t("chat.delivery.waitingLive")
+      : delivery === "waiting" || delivery === "held" ? t("chat.delivery.waiting")
       : delivery === "sending" || delivery === "queued" ? t("chat.delivery.sending")
       : delivery === "failed" ? t("chat.delivery.failed")
       : delivery === "delivered" ? t("chat.delivery.delivered")
       : t("chat.delivery.sent"),
-    hint: (delivery: Delivery) => t(`chat.delivery.hint.${delivery}`),
+    hint: (delivery: Delivery, live?: DhtOnlyBy) =>
+      delivery === "waiting" && live ? t(live === "you" ? "chat.delivery.hint.waitingLiveYou" : "chat.delivery.hint.waitingLiveContact")
+      : t(`chat.delivery.hint.${delivery}`),
     retry: t("chat.delivery.retry"),
   };
 }

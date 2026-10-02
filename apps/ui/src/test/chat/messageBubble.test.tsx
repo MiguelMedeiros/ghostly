@@ -1,5 +1,5 @@
 import { act, fireEvent, screen, within } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { MessageBubble } from "../../components/MessageBubble";
 import { publicKeyLabel } from "../../lib/publicKeyLabel";
 import { servicesPlatform } from "../../lib/platform";
@@ -295,6 +295,57 @@ describe("MessageBubble: delivery", () => {
       expect(screen.queryByRole("button", { name: "Cancel" })).not.toBeInTheDocument();
       unmount();
     }
+  });
+
+  describe("a file waiting in a DHT-only chat", () => {
+    const file = { id: "link-1-out-f", name: "report.pdf", size: 10, mime: "application/pdf" };
+    const waitingFile = { sender: "me", text: "report.pdf", file, delivery: "waiting" } as const;
+    const ONLINE = "Waiting for your contact to be online";
+    const LIVE = "Waiting for a live connection";
+    const dhtOnly = (delivery: ReturnType<typeof linkView>["dhtDelivery"]) => delivery;
+    beforeEach(() => { vi.spyOn(servicesPlatform!, "getFile").mockResolvedValue(null); });
+
+    it.each([
+      ["I chose DHT only", { deliveryMode: "dht" }, "Files need a live connection. This chat is on DHT only: change it from the connection icon."],
+      ["the contact chose DHT only", { dhtDelivery: dhtOnly({ mode: "stream", peerMode: "dht", authenticated: true, maxTextBytes: 256 }) }, "Files need a live connection. Your contact's chat is on DHT only: it goes when they allow live again."],
+      // Both chose it: mine is said, the one that can be changed here.
+      ["both chose DHT only", { deliveryMode: "dht", dhtDelivery: dhtOnly({ mode: "dht", peerMode: "dht", authenticated: true, maxTextBytes: 256 }) }, "Files need a live connection. This chat is on DHT only: change it from the connection icon."],
+    ] as const)("waits for a live connection, not for the contact, when %s", async (_, link, hint) => {
+      const { user, engine } = bubble(waitingFile);
+      // The chat's mode comes with the engine's state: before it, the mark says what it always said.
+      expect(mark()).toHaveAccessibleName(ONLINE);
+      act(() => engine.update({ links: [linkView({ ...link })] }));
+      expect(mark()).toHaveAttribute("data-delivery", "waiting");
+      expect(mark()).toHaveAccessibleName(LIVE);
+      await user.hover(mark());
+      expect(screen.getByRole("tooltip")).toHaveTextContent(hint);
+      expect(screen.getByRole("tooltip").textContent).not.toMatch(/online|—/);
+    });
+
+    it("waits for the contact again once the chat leaves DHT only", () => {
+      const { engine } = bubble(waitingFile);
+      act(() => engine.update({ links: [linkView({ deliveryMode: "dht" })] }));
+      expect(mark()).toHaveAccessibleName(LIVE);
+      act(() => engine.update({ links: [linkView({ deliveryMode: "stream" })] }));
+      expect(mark()).toHaveAccessibleName(ONLINE);
+    });
+
+    it("says so of a file only, and only while it waits", () => {
+      const { engine, rerender } = bubble({ sender: "me", text: "a long text", delivery: "waiting" });
+      act(() => engine.update({ links: [linkView({ deliveryMode: "dht" })] }));
+      // A text too long for the DHT keeps its own words.
+      expect(mark()).toHaveAccessibleName(ONLINE);
+      rerender(<MessageBubble message={message({ ...waitingFile, delivery: "sending" })} peerPubKey="peer" />);
+      expect(mark()).toHaveAccessibleName("Sending");
+    });
+
+    it("says it in the chat's language", async () => {
+      const { user, engine } = renderApp(<MessageBubble message={message(waitingFile)} peerPubKey="peer" />, { language: "pt" });
+      act(() => engine.update({ links: [linkView({ deliveryMode: "dht" })] }));
+      expect(mark()).toHaveAccessibleName("Aguardando uma conexão direta");
+      await user.hover(mark());
+      expect(screen.getByRole("tooltip")).toHaveTextContent("Esta conversa está em Só DHT");
+    });
   });
 
   it("says nothing about delivery on the contact's messages", () => {
