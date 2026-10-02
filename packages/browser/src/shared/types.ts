@@ -379,6 +379,12 @@ export interface StoredProof {
   dleq?: unknown;
   /** Handed to the mint for a Lightning payment that has not settled: not spendable, not yet gone. */
   reserved?: boolean;
+  /**
+   * Brought back by a profile restore: a copy of ecash as it was when the backup was made, which the profile it was
+   * copied from (or this one, before the backup was restored) may have spent since. The mint is asked once, and a
+   * proof it reads spent is dropped (see `CashuWallet.checkRestored`).
+   */
+  unchecked?: boolean;
 }
 
 /** A Lightning payment the mint has not settled yet. Its proofs stay in the wallet, reserved, until it does. */

@@ -396,6 +396,13 @@ function restoredRows(store: string, keys: IDBValidKey[], values: unknown[], fre
       return hasOwnDatabase(keys[i]) && typeof walletId === "string" ? { ...record, config: { ...record.config, walletId: fresh(walletId) } } : value;
     });
   }
+  if (store === "proofs") {
+    // Ecash as it was when the backup was made: what was spent since is found by asking the mint, once the wallet runs.
+    return values.map((value) => {
+      const proof = value as { secret?: unknown; reserved?: boolean } | null;
+      return proof && typeof proof === "object" && typeof proof.secret === "string" && !proof.reserved ? { ...proof, unchecked: true } : value;
+    });
+  }
   if (store === "paymentIntents") {
     // An older copy cannot prove an unfinished attempt was never sent; it may not authorize a new one.
     return values.map((value) => {
