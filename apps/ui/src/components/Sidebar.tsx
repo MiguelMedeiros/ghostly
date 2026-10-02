@@ -38,6 +38,7 @@ import { useAppNavigation } from "../hooks/useAppNavigation";
 import { useRowReorder } from "../hooks/useRowReorder";
 import { shownContactName, useContactFaces } from "./identities/contactFace";
 import { reactionNoteText } from "../lib/reactions";
+import { SidebarTasks } from "./tasks/SidebarTasks";
 
 const subscribeEngine = (listener: () => void) => engine.subscribe(listener);
 const engineSnapshot = () => engine.state;
@@ -250,6 +251,8 @@ export function Sidebar() {
           />
         </div>
       </div>
+
+      <SidebarTasks active={location.pathname === "/tasks"} onOpen={() => (location.pathname === "/tasks" ? nav.home() : nav.place("/tasks"))} />
 
       {/* Chat List */}
       <div className="flex-1 overflow-y-auto">
