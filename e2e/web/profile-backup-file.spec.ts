@@ -7,9 +7,14 @@ import { choose } from "../support/select";
 // WISP 05: a whole profile backed up to a file, sealed with a passphrase, and restored as a new profile.
 // Offline: no S3, no second peer.
 const PASSPHRASE = "a file backup passphrase";
+/**
+ * In WebKit (playwright.webkit.config.ts) the profile is on disk, as a person's Safari or the desktop app's is: its
+ * in-memory contexts keep no Blob in IndexedDB, which is where the app keeps pictures and voice messages.
+ */
+const storage = (browserName: string) => ({ persistent: browserName === "webkit" });
 
-test("a profile goes to a file and comes back as a new profile, only with its passphrase", { tag: ["@feature:backup.profile.file", "@feature:backup.profile.same-device", "@feature:backup.passphrase-rules", "@feature:backup.envelope", "@feature:profiles.switch"] }, async ({ peer }) => {
-  const { page } = await peer("backup-file");
+test("a profile goes to a file and comes back as a new profile, only with its passphrase", { tag: ["@feature:backup.profile.file", "@feature:backup.profile.same-device", "@feature:backup.passphrase-rules", "@feature:backup.envelope", "@feature:profiles.switch"] }, async ({ peer, browserName }) => {
+  const { page } = await peer("backup-file", storage(browserName));
 
   // A profile worth keeping: a name of its own, a chat and a nickname.
   await page.getByTitle("New Chat").click();
@@ -87,8 +92,8 @@ test("a profile goes to a file and comes back as a new profile, only with its pa
 
 // The first profile never renamed is called by the app's language. A backup made in Portuguese carried "Pessoal", and
 // the restored copy kept it in English too: the backup now carries the built-in name, which every language translates.
-test("the first profile never renamed, backed up in Portuguese and restored, is called by the language of the app", { tag: ["@feature:backup.profile.file", "@feature:app.i18n"] }, async ({ peer }) => {
-  const { page } = await peer("backup-default-name");
+test("the first profile never renamed, backed up in Portuguese and restored, is called by the language of the app", { tag: ["@feature:backup.profile.file", "@feature:app.i18n"] }, async ({ peer, browserName }) => {
+  const { page } = await peer("backup-default-name", storage(browserName));
   await page.goto("/#/settings");
   await choose(page.getByTestId("settings-language"), "pt");
   // A chat, so the copy is of a profile still on this device: Ghostly asks first, and always the same way.
@@ -191,9 +196,9 @@ const whatCameBack = (profile: Restored[string]) => Object.fromEntries(Object.en
 // A profile with files: pictures by the dozen and one file too large to keep in the database. The backup shows its
 // progress, holds every byte, and restores them where the restoring browser keeps files. Then the same without a
 // passphrase, made from the restored copy: its large file is read back from file storage this time.
-test("a profile with many files and a large one is backed up with its progress and comes back byte for byte, with a passphrase and without", { tag: ["@feature:backup.profile.file", "@feature:backup.stream", "@feature:backup.progress", "@feature:backup.unprotected", "@feature:backup.profile.same-device"] }, async ({ peer }) => {
+test("a profile with many files and a large one is backed up with its progress and comes back byte for byte, with a passphrase and without", { tag: ["@feature:backup.profile.file", "@feature:backup.stream", "@feature:backup.progress", "@feature:backup.unprotected", "@feature:backup.profile.same-device"] }, async ({ peer, browserName }) => {
   test.setTimeout(6 * 60_000);
-  const { page } = await peer("backup-files");
+  const { page } = await peer("backup-files", storage(browserName));
   await page.getByTitle("New Chat").click();
   await expect(page.getByTestId("invite-card")).toBeVisible();
   await seedFiles(page);
@@ -233,8 +238,8 @@ test("a profile with many files and a large one is backed up with its progress a
   await backups.getByTestId("restore-same-device").getByTestId("restore-copy").click();
   await expect(page.getByTestId("profile-restored-tag")).toHaveText("Restored", { timeout: 120_000 });
   await expect(page.getByTestId("profile-links")).toContainText("1 chat");
-  const first = await restoredFiles(page);
-  expect(Object.keys(first)).toHaveLength(1);
+  let first: Restored = {};
+  await expect(async () => { first = await restoredFiles(page); expect(Object.keys(first)).toHaveLength(1); }).toPass({ timeout: 60_000 });
   const [copy] = Object.values(first);
   expect(whatCameBack(copy)).toEqual(EXPECTED);
   expect(copy["seed-in-s3"].where).toBe("blob:image/png");
@@ -264,16 +269,19 @@ test("a profile with many files and a large one is backed up with its progress a
   await again.getByTestId("restore-go").click();
   await again.getByTestId("restore-same-device").getByTestId("restore-copy").click();
   await expect(page.getByTestId("profile-row")).toHaveCount(3, { timeout: 120_000 });
-  const all = await restoredFiles(page);
-  expect(Object.keys(all)).toHaveLength(2);
-  for (const profile of Object.values(all)) expect(whatCameBack(profile)).toEqual(EXPECTED);
+  // The app starts again on the new profile: asked again if the page was still changing.
+  await expect(async () => {
+    const all = await restoredFiles(page);
+    expect(Object.keys(all)).toHaveLength(2);
+    for (const profile of Object.values(all)) expect(whatCameBack(profile)).toEqual(EXPECTED);
+  }).toPass({ timeout: 60_000 });
 });
 
 // Cancel: the backup stops, nothing is downloaded, and nothing of it stays in the browser's storage. A damaged file
 // is refused in words, and adds no profile.
-test("a cancelled backup saves nothing, and a damaged file restores nothing", { tag: ["@feature:backup.progress", "@feature:backup.stream"] }, async ({ peer }) => {
+test("a cancelled backup saves nothing, and a damaged file restores nothing", { tag: ["@feature:backup.progress", "@feature:backup.stream"] }, async ({ peer, browserName }) => {
   test.setTimeout(6 * 60_000);
-  const { page } = await peer("backup-cancel");
+  const { page } = await peer("backup-cancel", storage(browserName));
   await seedFiles(page);
   await openProfilePage(page);
   const backups = page.getByTestId("profile-backups");
@@ -310,6 +318,8 @@ test("a cancelled backup saves nothing, and a damaged file restores nothing", { 
     await backups.getByTestId("restore-file").setInputFiles({ name: "damaged.ghostly-backup", mimeType: "application/octet-stream", buffer: damaged });
     await backups.getByTestId("restore-passphrase").fill(PASSPHRASE);
     await backups.getByTestId("restore-go").click();
+    // Its first frames are whole, so it opens and is recognised as this profile's; the damage is met while restoring.
+    await backups.getByTestId("restore-same-device").getByTestId("restore-copy").click();
     await expect(backups.getByTestId("backup-error")).toHaveText("This backup is damaged: it was changed or cut short. Try another copy of the file.", { timeout: 120_000 });
     await expect(page.getByTestId("profile-row")).toHaveCount(1);
     expect(Object.keys(await restoredFiles(page)), "what the restore had written is gone").toEqual([]);

@@ -234,6 +234,22 @@ it("a backup cancelled half way, or whose save dialog was closed, leaves no half
   expect(await staged()).toEqual([]);
 });
 
+it("where storage cannot keep a byte (a private window), the bundle is made in memory instead of failing", async () => {
+  await seed();
+  const store = await fileBytes();
+  // WebKit's private windows: "Error preparing Blob/File data to be stored in object store".
+  vi.spyOn(store, "flush").mockRejectedValue(new DOMException("Error preparing Blob/File data to be stored in object store", "DataCloneError"));
+  const append = vi.spyOn(store, "append");
+  const staged = await stageBackup();
+  append.mockClear();
+  const result = await writeProfileBackup(staged, { passphrase: PASS });
+  expect(append, "nothing more is asked of the storage that refused").not.toHaveBeenCalled();
+  expect(staged.size).toBe(result.bytes);
+  const restored = await restoreProfileBackup(await staged.bytes(), PASS);
+  expect((await readAll(`ghostly_${restored.id}`, STORES.files)).length).toBe(3);
+  await staged.discard();
+});
+
 it("a file this device can no longer read is left out and counted, not the whole backup", async () => {
   await seed({ small: 4 });
   // WebKit can lose the file behind a stored Blob: every read of it then fails.

@@ -8,6 +8,9 @@ import { writeProfileBackup, type BackupOptions, type BackupResult } from "./pro
  * origin-private file system in a browser, pieces in IndexedDB where neither exists) as it is made, then saved where
  * the person chooses. `save-` copies are removed when the save is over; one a closed window left behind goes when
  * the next backup starts (and, on Desktop, when the app starts).
+ *
+ * A private window has no storage to stage it in (WebKit's keeps no Blob in IndexedDB and has no origin-private file
+ * system): there the bundle is kept in memory, which a private window's short-lived profile fits in.
  */
 export interface StagedBackup extends BackupSink {
   /** Bytes written so far. */
@@ -29,18 +32,26 @@ export async function stageBackup(): Promise<StagedBackup> {
   await store.removeWhere(PREFIX).catch(() => {});
   const id = `${PREFIX}${crypto.randomUUID()}`;
   let size = 0, gone = false, keepUntil = 0;
+  // Asked once before anything is written: a store that cannot keep a byte is not found out half way through.
+  let memory: Uint8Array[] | null = null;
+  if (!store.save) {
+    try { await store.append(id, 0, new Uint8Array([0])); await store.flush(id); await store.remove(id); } catch { await store.remove(id).catch(() => {}); memory = []; }
+  }
   const discard = async () => {
     if (gone || Date.now() < keepUntil) return;
     gone = true;
+    if (memory) { memory = []; return; }
     await store.remove(id).catch(() => {});
   };
   return {
     get size() { return size; },
     async write(bytes) {
-      await store.append(id, size, bytes);
+      if (memory) memory.push(bytes.slice());
+      else await store.append(id, size, bytes);
       size += bytes.length;
     },
     async save(name) {
+      if (memory) { await saveMade(null, new Blob(memory as BlobPart[], { type: "application/octet-stream" }), name); return "downloaded"; }
       await store.close(id);
       if (store.save) return (await store.save(id, name)) ? "saved" : "cancelled";
       const blob = await store.blob(id, "application/octet-stream");
@@ -53,8 +64,9 @@ export async function stageBackup(): Promise<StagedBackup> {
       return "downloaded";
     },
     async bytes() {
-      await store.close(id);
       const out = new Uint8Array(size);
+      if (memory) { let at = 0; for (const part of memory) { out.set(part, at); at += part.length; } return out; }
+      await store.close(id);
       for (let at = 0; at < size;) {
         const part = await store.read(id, at, 1024 * 1024);
         if (!part.length) throw new Error("The file is shorter than it says");

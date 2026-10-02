@@ -2,6 +2,9 @@ import { copyInvite } from "./clipboard";
 import { IMAGE_HOSTS, IMAGE_REDIRECTS } from "../../packages/browser/src/profiles/public";
 import { pasteInvite } from "./clipboard";
 import { createLink, encodeInviteCode } from "@ghostly/core";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { test as base, expect, type Browser, type BrowserContext, type Locator, type Page } from "@playwright/test";
 import { MAINNET_MINTS, attachMint } from "./mint";
 import { LocalRelay } from "./relay";
@@ -43,6 +46,12 @@ export interface PeerOptions {
    * answers never reach `context.route`, which the stubs above rely on.
    */
   serviceWorkers?: "allow";
+  /**
+   * A browser profile on disk of its own (a temporary folder), as a person's browser has. WebKit keeps no Blob in
+   * IndexedDB and has no origin-private file system in the in-memory contexts the suite otherwise uses (they behave
+   * as a private window does), so a spec about stored files in WebKit asks for this.
+   */
+  persistent?: boolean;
   /** Runs on the new context before the app first loads: stubs and storage the app reads as it starts. */
   beforeOpen?: (context: BrowserContext) => Promise<void>;
 }
@@ -103,7 +112,7 @@ type Fixtures = {
 };
 
 export async function openPeer(browser: Browser, relay: LocalRelay, baseURL: string, name: string, options: PeerOptions = {}): Promise<Peer> {
-  const context = await browser.newContext({
+  const settings = {
     baseURL,
     // WebKit (e2e/playwright.webkit.config.ts) knows none of these by name and refuses a context that asks for them.
     permissions: browser.browserType().name() === "chromium" ? ["camera", "microphone", "clipboard-read", "clipboard-write"] : [],
@@ -112,7 +121,10 @@ export async function openPeer(browser: Browser, relay: LocalRelay, baseURL: str
     ...(options.ignoreHTTPSErrors ? { ignoreHTTPSErrors: true } : {}),
     ...(options.serviceWorkers ? { serviceWorkers: options.serviceWorkers } : {}),
     ...(options.userAgent ? { userAgent: options.userAgent } : {}),
-  });
+  };
+  const context = options.persistent
+    ? await browser.browserType().launchPersistentContext(mkdtempSync(join(tmpdir(), "ghostly-e2e-profile-")), settings)
+    : await browser.newContext(settings);
   await guardMainnet(context);
   await guardArchive(context);
   await guardPublicProfiles(context);
@@ -123,7 +135,7 @@ export async function openPeer(browser: Browser, relay: LocalRelay, baseURL: str
   if (options.offlineMainnet) for (const service of MAINNET_SERVICES) await context.route(service, (route) => route.abort("connectionrefused"));
   if (!options.irohRelay) await context.addInitScript(() => { try { localStorage.setItem("ghostly-test-iroh", "off"); } catch { /* opaque origin */ } });
   await options.beforeOpen?.(context);
-  const page = await context.newPage();
+  const page = context.pages()[0] ?? await context.newPage();
   page.on("pageerror", (error) => console.log(`  [${name}] ${error.message}`));
   await page.goto("/");
   await expect(page.getByTitle("New Chat")).toBeVisible();
