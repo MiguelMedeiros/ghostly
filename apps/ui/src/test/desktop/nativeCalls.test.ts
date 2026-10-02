@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FakeMediaStream, FakeTrack } from "../../../../../packages/react/test/fakes";
 
-// covers: calls.linux-native, calls.devices-linux
+// covers: calls.linux-native, calls.devices-linux, calls.reconnect
 
 /**
  * Ghostly Desktop on Linux calls without WebRTC in its WebView: apps/ui/src/desktop/nativeCalls.ts stands in for
@@ -147,6 +147,45 @@ describe("the RTCPeerConnection stand-in", () => {
     const answer = await pc.createAnswer();
     expect(answer.sdp).toBe("sdp of native_call_answer");
     expect(tauri.invoke).toHaveBeenCalledWith("native_call_answer", { id: pc.id, offer: "their offer", camera: null, microphone: null, speaker: null });
+  });
+
+  it("restarts ICE through Rust on the call it started: a restart offer, and the peer's answer to it", async () => {
+    const pc = new NativePeerConnection({});
+    const microphone = new FakeTrack("audio") as unknown as MediaStreamTrack;
+    pc.addTrack(microphone);
+    await pc.setLocalDescription(await pc.createOffer());
+    await pc.setRemoteDescription({ type: "answer", sdp: "their answer" });
+    tauri.invoke.mockClear();
+
+    const restart = await pc.createOffer({ iceRestart: true });
+    expect(restart).toEqual({ type: "offer", sdp: "sdp of native_call_offer" });
+    // The same call in Rust (its id), told to restart: its media is not started again.
+    expect(tauri.invoke).toHaveBeenCalledWith("native_call_offer", { id: pc.id, camera: null, microphone: null, speaker: null, restart: true });
+    expect(tauri.invoke).not.toHaveBeenCalledWith("native_call_open", expect.anything());
+    expect(tauri.invoke).not.toHaveBeenCalledWith("native_call_mute", expect.anything());
+    await pc.setLocalDescription(restart);
+    expect(pc.iceGatheringState).toBe("complete");
+    await pc.setRemoteDescription({ type: "answer", sdp: "their restart answer" });
+    expect(tauri.invoke).toHaveBeenCalledWith("native_call_accept", { id: pc.id, answer: "their restart answer" });
+    // A second offer that restarts nothing is refused, as before.
+    await expect(pc.createOffer()).rejects.toMatchObject({ name: "InvalidStateError" });
+  });
+
+  it("answers the peer's restart offer through Rust on the call it answered", async () => {
+    const pc = new NativePeerConnection({});
+    await pc.setRemoteDescription({ type: "offer", sdp: "their offer" });
+    await pc.setLocalDescription(await pc.createAnswer());
+    tauri.invoke.mockClear();
+
+    await pc.setRemoteDescription({ type: "offer", sdp: "their restart offer" });
+    const answer = await pc.createAnswer();
+    expect(answer).toEqual({ type: "answer", sdp: "sdp of native_call_answer" });
+    expect(tauri.invoke).toHaveBeenCalledWith("native_call_answer", { id: pc.id, offer: "their restart offer", camera: null, microphone: null, speaker: null, restart: true });
+    expect(pc.getTransceivers().map((t) => [t.mid, t.currentDirection])).toEqual([["0", "sendrecv"], ["1", "sendrecv"]]);
+  });
+
+  it("says its media restarts ICE, so its calls reconnect", () => {
+    expect(nativeCallMedia().restartsIce).toBe(true);
   });
 
   it("relays Rust's ICE states as the browser's events, and ignores pictures for them", () => {

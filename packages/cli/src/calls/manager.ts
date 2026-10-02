@@ -120,6 +120,11 @@ export class CallManager {
     if (!signal) return;
     if (signal.ts <= (this.lastSignal.get(chat) ?? 0)) return;
     const call = this.byChat(chat);
+    // Reconnecting (WISP 601): this side never says it restarts ICE (`x`), so an app sends it no restart offer (`r`),
+    // and one that comes all the same is dropped here, on a call or not. libdatachannel (0.24.5) cannot restart ICE
+    // on a connection that has started: it refuses a remote offer with new ICE credentials ("Invalid ICE settings
+    // from remote SDP") and cannot make one. A call whose path is lost ends as before (`MEDIA_GRACE_MS`).
+    if (signal.t === "r" || (signal.t === "a" && signal.re !== undefined)) return;
     // A connected call only hears a hang-up (and picture changes, which are no business of an audio-only side).
     if (call?.state === "connected" && signal.t !== "h" && signal.t !== "v") return;
     if (signal.t === "o" && !call) {
