@@ -16,6 +16,11 @@ export interface TurnSourceAnswer {
   answered: boolean;
   /** The packets it returned, as relay payloads: one from a relay, every distinct item the nodes returned from the DHT. */
   payloads: Uint8Array[];
+  /**
+   * Sequences (decimal text) the source reports holding without handing the item over: an item under the key that is
+   * no signed packet at all. No record, and its number counts as seen: a node refuses a put below it.
+   */
+  sequences?: string[];
   detail?: string;
 }
 
@@ -127,6 +132,12 @@ export function classifyTurnRead(reader: TurnReader, answers: TurnSourceAnswer[]
       if (top === null || read.sequence > top) top = read.sequence;
       if (read.kind === "invalid") { invalid.push({ source: answer.source, sequence: read.sequence, refusal: read.refusal }); continue; }
       if (!found.some((f) => bytesEqual(f.payload, payload))) found.push({ source: answer.source, payload, read });
+    }
+    for (const text of answer.sequences ?? []) {
+      if (!/^\d{1,19}$/.test(text)) continue;
+      const sequence = BigInt(text);
+      if (top === null || sequence > top) top = sequence;
+      invalid.push({ source: answer.source, sequence, refusal: "packet" });
     }
     conditions[answer.source] = top === null ? null : top.toString();
     if (top !== null && top > seen) seen = top;

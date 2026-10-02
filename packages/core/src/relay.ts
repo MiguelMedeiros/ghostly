@@ -132,6 +132,8 @@ export const RELAY_REQUESTS_PER_MINUTE: Record<string, number> = { "https://rela
 export const TURN_SOURCE_TIMEOUT_MS = 8_000;
 /** A relay's refusals of a turn put: someone else wrote (409 an older or equal packet, 412 the condition, 428 a put in flight). */
 const TURN_REFUSALS = [409, 412, 428];
+/** On a relay's 404: the sequence of an item the DHT holds under the key that is no signed packet. */
+const INVALID_PACKET_SEQ_HEADER = "pkarr-invalid-signed-packet-seq";
 
 export interface RelayTransportOptions {
   relays?: string[];
@@ -780,10 +782,17 @@ export class RelayTransport implements PkarrTransport {
     return Promise.all(this.relays.map(async (relay): Promise<TurnSourceAnswer> => {
       try {
         let payload: Uint8Array | undefined;
-        const response = await this.turnRequest(relay, pubKeyZ32, { method: "GET" }, async (r, signal) => {
-          if (r.ok) payload = await readRelayBody(r, signal);
-        });
-        if (response.status === 404) return { source: relay, answered: true, payloads: [] };
+        const read = async (r: Response, signal: AbortSignal) => { if (r.ok) payload = await readRelayBody(r, signal); };
+        // A relay answers a plain GET from its cache while the packet's TTL lasts (five minutes): a record another
+        // device put through another relay, or on the DHT itself, would not be seen. `NetworkOnly` makes it look.
+        let response = await this.turnRequest(relay, `${pubKeyZ32}?policy=NetworkOnly`, { method: "GET" }, read);
+        // A relay from before that query refuses it (400): asked plainly, once.
+        if (response.status === 400) response = await this.turnRequest(relay, pubKeyZ32, { method: "GET" }, read);
+        if (response.status === 404) {
+          // The DHT holds an item under the key that is no signed packet: the relay names its sequence.
+          const invalid = response.headers.get(INVALID_PACKET_SEQ_HEADER);
+          return { source: relay, answered: true, payloads: [], ...(invalid && /^\d{1,19}$/.test(invalid) ? { sequences: [invalid] } : {}) };
+        }
         if (!response.ok || !payload) return { source: relay, answered: false, payloads: [], detail: `HTTP ${response.status}` };
         return { source: relay, answered: true, payloads: [payload] };
       } catch (error) {
@@ -811,12 +820,12 @@ export class RelayTransport implements PkarrTransport {
     }));
   }
 
-  private async turnRequest(relay: string, pubKeyZ32: string, init: RequestInit, read?: (response: Response, signal: AbortSignal) => Promise<void>): Promise<Response> {
+  private async turnRequest(relay: string, path: string, init: RequestInit, read?: (response: Response, signal: AbortSignal) => Promise<void>): Promise<Response> {
     this.spent.get(relay)?.push(Date.now());
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), TURN_SOURCE_TIMEOUT_MS);
     try {
-      const response = await this.fetchFn(`${relay}/${pubKeyZ32}`, { ...init, cache: "no-store", signal: controller.signal });
+      const response = await this.fetchFn(`${relay}/${path}`, { ...init, cache: "no-store", signal: controller.signal });
       await read?.(response, controller.signal);
       return response;
     } finally {
