@@ -285,7 +285,7 @@ describe("two call managers", { timeout: 60_000 }, () => {
 
   // Reported 2026-10-01 (a contact whose clock runs two minutes fast): a signal more than two minutes from this clock
   // never rang, and an answer dated before the caller's offer (a callee's clock behind) was never taken.
-  it.each([["two minutes behind", -2 * 60_000 - 500], ["two minutes ahead", 2 * 60_000 + 500], ["an hour behind", -60 * 60_000]])("a contact whose clock is %s: its call rings, the answer names the offer, and the call connects both ways", async (_, skew) => {
+  it.each([["two minutes behind", -2 * 60_000 - 500], ["two minutes ahead", 2 * 60_000 + 500], ["nine minutes behind", -9 * 60_000]])("a contact whose clock is %s: its call rings, the answer names the offer, and the call connects both ways", async (_, skew) => {
     for (const calleeIsOff of [true, false]) {
       const off = () => Date.now() + skew;
       // The second side is the callee; one of the two has the clock that is off.
@@ -302,6 +302,17 @@ describe("two call managers", { timeout: 60_000 }, () => {
       await a.calls.stopAll();
       await b.calls.stopAll();
     }
+  });
+
+  it("a signal dated a day ahead is not taken, and the contact's call after it still rings", async () => {
+    const { a, b } = pairOfManagers();
+    b.calls.onSignal("chat-ba", heardCallSignal(JSON.stringify({ t: "h", ts: Date.now() + 24 * 60 * 60_000 }), Date.now()));
+    await a.calls.start("chat-ab", {});
+    await until(() => b.events.find((e) => e.type === "call.incoming")).catch(diagnose(a, b));
+    await a.calls.hangup(undefined);
+    expect(await until(() => b.events.find((e) => e.type === "call.ended"))).toMatchObject({ reason: "missed" });
+    await a.calls.stopAll();
+    await b.calls.stopAll();
   });
 
   /** Both sides call each other at once; the side whose offer lost is the one that ends its call as `crossed`. */

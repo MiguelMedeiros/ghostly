@@ -73,7 +73,9 @@ describe("paired-call frames", () => {
     expect(parsePairedCallFrame({ s: JSON.stringify({ t: "h", ts: now }) }, now)).toBe(heard(JSON.stringify({ t: "h", ts: now })));
     // Its own time is its sender's clock, minutes from this one or not: a frame on a live session is heard now.
     expect(parsePairedCallFrame({ s: offer(now - CALL_SIGNAL_MAX_AGE_MS - 1) }, now)).toBe(heard(offer(now - CALL_SIGNAL_MAX_AGE_MS - 1)));
-    expect(parsePairedCallFrame({ s: offer(now + 60 * 60_000) }, now)).toBe(heard(offer(now + 60 * 60_000)));
+    expect(parsePairedCallFrame({ s: offer(now + 9 * 60_000) }, now)).toBe(heard(offer(now + 9 * 60_000)));
+    // Dated more than ten minutes ahead: not taken, so its time cannot outrank the sender's later signals.
+    expect(parsePairedCallFrame({ s: offer(now + 60 * 60_000) }, now)).toBeNull();
     // What it says of when it was heard is not its to say.
     expect(parsePairedCallFrame({ s: JSON.stringify({ ...JSON.parse(offer(now)), at: 1 }) }, now)).toBe(heard(offer(now)));
     expect(parsePairedCallFrame({ s: JSON.stringify({ t: "o", ts: now, u: "a\r\nb" }) }, now), "SDP injection").toBeNull();

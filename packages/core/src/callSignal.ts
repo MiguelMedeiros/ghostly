@@ -279,6 +279,12 @@ export function extractParamsFromSdp(sdp: string, { maxCandidates = 2, loopback 
 
 /** Offers, answers and hang-ups older (or further in the future) than this are ignored. */
 export const CALL_SIGNAL_MAX_AGE_MS = 120_000;
+/**
+ * A signal dated further ahead of this clock than this is not taken, however it was heard. A receiver acts on a signal
+ * only when its `ts` is later than the last one it acted on: taken, a signal dated a day ahead would be that last one,
+ * and every offer, answer and hang-up its sender made afterwards would be dropped as older, until the app started again.
+ */
+export const CALL_SIGNAL_FUTURE_MS = 10 * 60_000;
 
 /** RFC 8839: ice-char is ALPHA / DIGIT / "+" / "/"; ufrag is 4-256 of them, pwd 22-256. */
 const ICE_UFRAG = /^[A-Za-z0-9+/]{4,256}$/;
@@ -355,6 +361,7 @@ export function parseCallSignal(json: string, now = Date.now()): CallSignal | nu
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
   if (raw.t !== "o" && raw.t !== "a" && raw.t !== "h" && raw.t !== "v" && raw.t !== "r") return null;
   if (typeof raw.ts !== "number" || !Number.isFinite(raw.ts)) return null;
+  if (raw.ts > now + CALL_SIGNAL_FUTURE_MS) return null;
   // How old it is, on this clock when the engine heard it come (`heardCallSignal`), by its own time otherwise.
   const heard = typeof raw.at === "number" && Number.isFinite(raw.at) ? { at: raw.at } : {};
   if (Math.abs(now - (heard.at ?? raw.ts)) > CALL_SIGNAL_MAX_AGE_MS) return null;

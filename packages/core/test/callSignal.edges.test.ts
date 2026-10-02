@@ -4,6 +4,7 @@ import {
   buildSdpFromSignal,
   compressSdp,
   decompressSdp,
+  CALL_SIGNAL_FUTURE_MS,
   answersOffer,
   callSignalHeardAt,
   heardCallSignal,
@@ -90,7 +91,7 @@ describe("a signal's time and this device's clock", () => {
   const MAX = 120_000;
   const answer = (over: Record<string, unknown> = {}) => JSON.stringify({ ...base, t: "a", s: "active", ...over });
 
-  it.each([["two minutes ahead", MAX + 500], ["an hour ahead", 60 * 60_000], ["two minutes behind", -MAX - 500], ["an hour behind", -60 * 60_000]])("a signal the engine heard come is as old as that, whatever its sender's clock (%s) dated it", (_, skew) => {
+  it.each([["two minutes ahead", MAX + 500], ["ten minutes ahead", 10 * 60_000], ["two minutes behind", -MAX - 500], ["an hour behind", -60 * 60_000]])("a signal the engine heard come is as old as that, whatever its sender's clock (%s) dated it", (_, skew) => {
     const theirs = JSON.stringify({ ...base, ts: NOW + skew });
     // By its own time alone, as one found in a record: refused, as before.
     expect(parseCallSignal(theirs, NOW)).toBeNull();
@@ -100,6 +101,14 @@ describe("a signal's time and this device's clock", () => {
     // It goes stale two minutes after it was heard, as any offer does.
     expect(parseCallSignal(heardCallSignal(theirs, NOW - MAX - 1), NOW)).toBeNull();
     expect(parseCallSignal(heardCallSignal(theirs, NOW - MAX), NOW)).not.toBeNull();
+  });
+
+  it.each(["o", "a", "h", "v", "r"])("a signal (%s) dated more than ten minutes ahead is not taken, heard just now or not", (t) => {
+    const signal = (ts: number) => JSON.stringify({ ...base, t, ts, ...(t === "a" || t === "o" || t === "r" ? {} : { u: undefined, p: undefined, f: undefined, s: undefined }) });
+    expect(parseCallSignal(heardCallSignal(signal(NOW + CALL_SIGNAL_FUTURE_MS + 1), NOW), NOW)).toBeNull();
+    expect(parseCallSignal(heardCallSignal(signal(NOW + 24 * 60 * 60_000), NOW), NOW)).toBeNull();
+    expect(parseCallSignal(signal(NOW + CALL_SIGNAL_FUTURE_MS + 1), NOW)).toBeNull();
+    expect(parseCallSignal(heardCallSignal(signal(NOW + CALL_SIGNAL_FUTURE_MS), NOW), NOW)).toMatchObject({ t, ts: NOW + CALL_SIGNAL_FUTURE_MS });
   });
 
   it("when it was heard is the engine's to say: what a contact put there is dropped", () => {
