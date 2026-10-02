@@ -1,8 +1,9 @@
 import "fake-indexeddb/auto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { shownTime } from "@ghostly/core";
+import { createIdentity, createLink, shownTime } from "@ghostly/core";
 import { EngineServer } from "../src/engine/server";
 import { db } from "../src/engine/db";
+import { settleAhead } from "../src/engine/arrival";
 import { cameAt } from "../src/engine/groups";
 import { STORES, transact } from "../src/shared/idb";
 import { applyMessageChanges } from "../src/shared/messageChanges";
@@ -213,5 +214,49 @@ describe("a history stored before places were kept", () => {
     const history = await db.getMessages(CHAT);
     expect(texts(history)).toEqual([...texts(before), "new", "new reply"]);
     expect(history.slice(0, before.length)).toEqual(before);
+  });
+
+  it("rows stored under a time that has not come yet take a place before now, once, in their order", async () => {
+    // The contact's clock is two minutes ahead, and it wrote within the last two minutes: its rows are ahead of now.
+    const old: StoredMessage[] = [
+      { linkId: CHAT, id: "me_1", text: "question", sender: "me", timestamp: now - 3 * MINUTE, via: "datalink" },
+      { linkId: CHAT, id: "peer_b", text: "answer", sender: "peer", timestamp: now - MINUTE + 2 * MINUTE, via: "datalink" },
+      { linkId: CHAT, id: "me_2", text: "reply", sender: "me", timestamp: now - 30_000, via: "datalink" },
+      { linkId: CHAT, id: "peer_a", text: "last", sender: "peer", timestamp: now - 20_000 + 2 * MINUTE, via: "datalink" },
+    ];
+    await db.putLink({ ...createLink().mine, id: CHAT, profile: "paired-chat/1", participationSeed: createIdentity().seedB64, createdAt: 1 });
+    for (const row of old) await db.putMessage(row);
+    const before = await db.getMessages(CHAT);
+    expect(texts(before)).toEqual(["question", "reply", "answer", "last"]);
+    const { store, client } = await started();
+    const settled = await db.getMessages(CHAT);
+    // The same order; the two rows ahead are before now, and still say what the contact's clock said.
+    expect(texts(settled)).toEqual(texts(before));
+    expect(settled.every((m) => m.timestamp <= now)).toBe(true);
+    expect(settled.slice(2).map((m) => m.sentAt)).toEqual([before[2].timestamp, before[3].timestamp]);
+    expect(settled.slice(0, 2)).toEqual(before.slice(0, 2));
+    // What I write right after the update goes below them, and so does what comes.
+    tick(1_000);
+    await store(mine("written right after the update"));
+    tick(1_000);
+    await store(theirs("and this", 2 * MINUTE));
+    const order = [...texts(before), "written right after the update", "and this"];
+    expect(texts(await db.getMessages(CHAT))).toEqual(order);
+    expect(texts(client.messages.get(CHAT)).slice(-2)).toEqual(order.slice(-2));
+    // The next start changes nothing.
+    expect(settleAhead(await db.getMessages(CHAT), now)).toEqual([]);
+  });
+
+  it("settling touches nothing but received rows that are ahead, and keeps every row after the ones before it", () => {
+    const row = (id: string, sender: "me" | "peer", timestamp: number, extra: Partial<StoredMessage> = {}): StoredMessage => ({ linkId: CHAT, id, text: id, sender, timestamp, via: "datalink", ...extra });
+    expect(settleAhead([], now)).toEqual([]);
+    expect(settleAhead([row("a", "peer", now - 1), row("b", "me", now)], now)).toEqual([]);
+    // Mine ahead (this device's clock went back) is left: both sides know it by its time.
+    expect(settleAhead([row("mine", "me", now + MINUTE)], now)).toEqual([]);
+    // A row placed here already (it has `sentAt`) is left too.
+    expect(settleAhead([row("placed", "peer", now + 3, { sentAt: now + MINUTE })], now)).toEqual([]);
+    // Right behind a row stored this very millisecond: still after it.
+    const settled = settleAhead([row("just", "me", now), row("x", "peer", now + 1_000), row("y", "peer", now + 2_000)], now);
+    expect(settled.map((m) => [m.id, m.timestamp, m.sentAt])).toEqual([["x", now + 1, now + 1_000], ["y", now + 2, now + 2_000]]);
   });
 });

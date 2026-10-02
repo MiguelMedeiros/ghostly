@@ -152,6 +152,7 @@ import type { WalletRemoval } from "../shared/walletRemoval";
 import { TEST_COINS_SATS, faucetError } from "./paymentAdapters/testCoins";
 import { composeDetails, fileWire, pathSnapshot, withSend, type PathSnapshot } from "./messageDetails";
 import { db } from "./db";
+import { settleAhead } from "./arrival";
 import { Groups, meshEdgeIntervals, otherEndSeen } from "./groups";
 import { edgeView } from "./groupEdges";
 import { GroupPayments } from "./groupPayments";
@@ -1269,6 +1270,7 @@ export class GhostlyNode implements EngineImplementation {
 
     const history = new Map<string, StoredMessage[]>();
     for (const stored of await db.getLinks()) {
+      if (!stored.group) await this.settleHistory(stored.id);
       const messages = stored.group ? [] : await db.getMessages(stored.id);
       const storedFiles = stored.group ? [] : await fileStore.listForLink(stored.id);
       // A file whose message still waits for the chat to be live never started: it goes then (`sendWaiting`), as it
@@ -1286,6 +1288,7 @@ export class GhostlyNode implements EngineImplementation {
       if (stored.profile && !stored.group) await this.outboxFor(stored.id).recover();
     }
     this.transfersRestored = true;
+    for (const group of await db.getGroups()) await this.settleHistory(`group:${group.id}`);
     // Groups know their edges from the links above, and may add or drop some before anything dials.
     await this.groups.load();
     for (const group of this.groups.views()) {
@@ -5167,6 +5170,18 @@ export class GhostlyNode implements EngineImplementation {
     if (!unique.length) return;
     const rows = await Promise.all(unique.map(id => db.getMessage(linkId, id)));
     onChanges.call(this.events, linkId, { messages: rows.filter((row): row is StoredMessage => !!row), deleted: unique.filter((_, i) => !rows[i]) });
+  }
+
+  /**
+   * At the start, before anything reads a history: received rows an earlier version stored under a time that has not
+   * come yet take a place before now (`settleAhead`). One row is read when nothing is ahead, which is every start but
+   * the first after the update.
+   */
+  private async settleHistory(linkId: string): Promise<void> {
+    const now = Date.now();
+    const newest = (await db.getMessagePage(linkId, { limit: 1 })).messages[0];
+    if (!newest || newest.timestamp <= now) return;
+    for (const row of settleAhead(await db.getMessages(linkId), now)) await db.putMessage(row);
   }
 
   private async storeMessage(message: StoredMessage): Promise<void> { await this.storeNewMessage(message); }

@@ -874,6 +874,7 @@
     "packages/browser/src/backup/**/*": ["backup.*"],
     "packages/browser/src/backup/database.ts": ["backup.database-snapshot","profiles.*"],
     "packages/browser/src/backup/{s3,storage}.ts": ["storage.*","delivery.hold.*"],
+    "packages/browser/src/engine/arrival.ts": ["chat.order"],
     "packages/browser/src/engine/attention.ts": ["app.attention.sounds","app.attention.notifications","app.attention.cues"],
     "packages/browser/src/engine/community.ts": ["groups.community.*","groups.protocol.*","groups.link.share"],
     "packages/browser/src/engine/communityPay.ts": ["groups.community.payments.*","groups.protocol.community-pair"],

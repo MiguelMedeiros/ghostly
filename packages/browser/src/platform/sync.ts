@@ -127,7 +127,7 @@ function mirrorMessages(linkId: string, messages: StoredMessage[]): void {
   const partial = !!session.older;
   const at = new Map(session.messages.map((m, i) => [m.id, i]));
   const added: ChatMessage[] = [];
-  let dirty = false;
+  let dirty = false, moved = false;
   for (const message of messages) {
     const i = at.get(message.id);
     const previous = i === undefined ? undefined : session.messages[i];
@@ -140,6 +140,14 @@ function mirrorMessages(linkId: string, messages: StoredMessage[]): void {
     const reacted = !!previous && (!!previous.reactions || !!message.reactions) && JSON.stringify(previous.reactions ?? null) !== JSON.stringify(message.reactions ?? null);
     if (reacted) change().reactions = message.reactions;
     const mapped = () => toChatMessage(message, link.peerPubKeyZ32, link.myPubKeyZ32, !!link.profile);
+    // A received row the engine gave a place to after this chat had it (one stored, before places were kept, under a
+    // time that had not come yet: engine/arrival.ts): its place here follows, with the time its sender said.
+    if (previous && message.sender === "peer" && previous.timestamp !== message.timestamp) {
+      const row = change();
+      row.timestamp = message.timestamp;
+      if (message.sentAt !== undefined) row.sentAt = message.sentAt;
+      moved = true;
+    }
     if (previous && mirrorable(message)) {
       if (message.delivery && (previous.delivery !== message.delivery || previous.deliveryError !== message.deliveryError)) {
         change().delivery = message.delivery;
@@ -165,6 +173,7 @@ function mirrorMessages(linkId: string, messages: StoredMessage[]): void {
     if (previous || !mirrorable(message)) continue;
     added.push(mapped());
   }
+  if (moved) session.messages.sort((a, b) => a.timestamp - b.timestamp);
   let changed = dirty;
   // A long history stored whole (before its stored copy kept only its last messages) is stored anew: saving writes only
   // what changed, so this writes once.
