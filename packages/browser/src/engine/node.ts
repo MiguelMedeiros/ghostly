@@ -4407,7 +4407,7 @@ export class GhostlyNode implements EngineImplementation {
           onPayment: (payment: Payment) => member() ? this.desk.onPayment(linkId, payment) : undefined,
           onPaymentResult: (result: PaymentResult) => member() ? this.desk.onPaymentResult(linkId, result) : undefined,
           // The member says its name on every session over the edge, and an empty one when it removed it.
-          onPeerNick: (nick: string | null) => { if (member()) this.groups.edgeNick(group, peer, nick ?? undefined); },
+          onPeerNick: (nick: string | null) => this.groups.edgeNick(group, peer, nick ?? undefined),
         }),
         onPresence: presence => {
           if (presence.online && !seen) { seen = true; traceJoin(group, "link.presence", { role }); }
