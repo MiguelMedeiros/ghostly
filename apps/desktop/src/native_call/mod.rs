@@ -375,15 +375,23 @@ fn call(id: &str) -> Result<Arc<engine::Call>, String> {
 }
 
 /// Our offer, its candidates gathered. `microphone` and `speaker`: the devices by name (null: the default).
+/// `restart`: the call has started, and this offer restarts ICE on its connection (WISP 601, "Reconnecting");
+/// its media and devices stay as they are.
 #[tauri::command]
 pub async fn native_call_offer(
     id: String,
     camera: Option<u32>,
     microphone: Option<String>,
     speaker: Option<String>,
+    restart: Option<bool>,
 ) -> Result<Described, String> {
     #[cfg(target_os = "linux")]
     {
+        if restart == Some(true) {
+            let call = call(&id)?;
+            let sdp = logged("the restart offer", call.offer(true).await)?;
+            return Ok(described(&call, sdp));
+        }
         let devices = engine::Devices {
             microphone,
             speaker,
@@ -392,17 +400,18 @@ pub async fn native_call_offer(
             "starting",
             media(&id, (engine::OPUS_PT, engine::VP8_PT), camera, devices).await,
         )?;
-        let sdp = logged("the offer", call.offer().await)?;
+        let sdp = logged("the offer", call.offer(false).await)?;
         Ok(described(&call, sdp))
     }
     #[cfg(not(target_os = "linux"))]
     {
-        let _ = (id, camera, microphone, speaker);
+        let _ = (id, camera, microphone, speaker, restart);
         Err(ELSEWHERE.into())
     }
 }
 
-/// Our answer to the peer's offer, its candidates gathered. The devices as for the offer.
+/// Our answer to the peer's offer, its candidates gathered. The devices as for the offer. `restart`: the call
+/// has started, and the offer is the peer's ICE restart: answered on the call's connection.
 #[tauri::command]
 pub async fn native_call_answer(
     id: String,
@@ -410,9 +419,15 @@ pub async fn native_call_answer(
     camera: Option<u32>,
     microphone: Option<String>,
     speaker: Option<String>,
+    restart: Option<bool>,
 ) -> Result<Described, String> {
     #[cfg(target_os = "linux")]
     {
+        if restart == Some(true) {
+            let call = call(&id)?;
+            let sdp = logged("the restart answer", call.answer(&offer, true).await)?;
+            return Ok(described(&call, sdp));
+        }
         let devices = engine::Devices {
             microphone,
             speaker,
@@ -421,12 +436,12 @@ pub async fn native_call_answer(
             "starting",
             media(&id, engine::offered_payload_types(&offer), camera, devices).await,
         )?;
-        let sdp = logged("the answer", call.answer(&offer).await)?;
+        let sdp = logged("the answer", call.answer(&offer, false).await)?;
         Ok(described(&call, sdp))
     }
     #[cfg(not(target_os = "linux"))]
     {
-        let _ = (id, offer, camera, microphone, speaker);
+        let _ = (id, offer, camera, microphone, speaker, restart);
         Err(ELSEWHERE.into())
     }
 }

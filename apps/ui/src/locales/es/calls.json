@@ -31,6 +31,7 @@
   "noAnswer": "Sin respuesta",
   "onAnother": "Estás en otra llamada",
   "outgoing": "Llamando...",
+  "reconnecting": "Reconectando...",
   "rejected": "Llamada rechazada",
   "selfView": "Arrastra para mover, tira de una esquina para cambiar el tamaño, doble clic para restablecer",
   "shareScreen": "Compartir pantalla",

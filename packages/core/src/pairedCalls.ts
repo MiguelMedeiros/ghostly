@@ -64,7 +64,8 @@ export class PairedCalls {
   get on(): boolean {
     const own = { kind: this.latest ? signalKind(this.latest.signal) : "h", at: this.saidAt };
     const last = this.peer && this.peer.at > own.at ? this.peer : own;
-    if (last.kind === "a" || last.kind === "v") return true;
+    // A restart offer (`r`) is only sent on a call that is on.
+    if (last.kind === "a" || last.kind === "v" || last.kind === "r") return true;
     return last.kind === "o" && this.now() - last.at <= CALL_SIGNAL_MAX_AGE_MS;
   }
 
@@ -77,7 +78,7 @@ export class PairedCalls {
     if (!this.latest) return null;
     let said: { t?: unknown; ts?: unknown };
     try { said = JSON.parse(this.latest.signal); } catch { return null; }
-    if (said.t !== "o" && said.t !== "a" && said.t !== "v") return null;
+    if (said.t !== "o" && said.t !== "a" && said.t !== "v" && said.t !== "r") return null;
     const ts = Math.max(this.now(), typeof said.ts === "number" ? said.ts + 1 : 0);
     return this.set(JSON.stringify({ t: "h", ts }));
   }

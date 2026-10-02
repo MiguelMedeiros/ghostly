@@ -939,6 +939,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
           remoteHasVideo={webrtc.remoteHasVideo}
           remoteIsScreenSharing={webrtc.remoteIsScreenSharing}
           callStartedAt={webrtc.callStartedAt}
+          reconnecting={webrtc.reconnecting}
           peerName={shownName}
           onHangUp={() => webrtc.hangUp()}
           onToggleMute={webrtc.toggleMute}

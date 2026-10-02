@@ -29,6 +29,8 @@ interface CallOverlayProps {
   /** The peer's picture is its screen. */
   remoteIsScreenSharing?: boolean;
   callStartedAt: number | null;
+  /** The connected call lost its path and is getting it back: it says so in place of its clock. */
+  reconnecting?: boolean;
   peerName: string;
   onHangUp: () => void;
   onToggleMute: () => void;
@@ -76,6 +78,7 @@ export function CallOverlay({
   remoteHasVideo,
   remoteIsScreenSharing = false,
   callStartedAt,
+  reconnecting = false,
   peerName,
   onHangUp,
   onToggleMute,
@@ -167,7 +170,7 @@ export function CallOverlay({
     offering: t("calls.outgoing"),
     answering: t("calls.connecting"),
     connecting: t("calls.connecting"),
-    connected: formatDuration(duration),
+    connected: reconnecting ? t("calls.reconnecting") : formatDuration(duration),
     idle: "",
     incoming: "",
     ended: t("calls.ended"),
@@ -209,7 +212,7 @@ export function CallOverlay({
 
       {/* What a screen reader hears as the call moves on: the state line below says Calling... and Connecting... itself,
           and once connected this says so, while the line turns into the clock, which is never read out as it runs. */}
-      <p role="status" className="sr-only" data-testid="call-state-spoken">{callState === "connected" ? t("calls.connected") : ""}</p>
+      <p role="status" className="sr-only" data-testid="call-state-spoken">{callState !== "connected" ? "" : reconnecting ? t("calls.reconnecting") : t("calls.connected")}</p>
 
       {/* Remote audio: the only element that plays the peer's sound */}
       <audio ref={remoteAudioRef} autoPlay playsInline className="hidden" data-testid="remote-audio" />
@@ -240,7 +243,7 @@ export function CallOverlay({
 
       {/* Status */}
       <div className="call-top absolute top-8 left-0 right-0 text-center z-10">
-        <p className="text-text-muted text-sm" data-testid="call-status" data-state={callState} role={callState === "connected" ? undefined : "status"}>
+        <p className="text-text-muted text-sm" data-testid="call-status" data-state={callState} data-reconnecting={reconnecting || undefined} role={callState === "connected" ? undefined : "status"}>
           {!remoteHasVideo && isVideoOff && callState === "connected" && (
             <span className="text-accent">{t("calls.audio")}</span>
           )}
