@@ -129,13 +129,10 @@ export function useRowReorder({ ids, enabled, onMove }: {
     const up = (ev: globalThis.PointerEvent) => { if (ev.pointerId === pointer) finish(true); };
     const cancel = (ev: globalThis.PointerEvent) => { if (ev.pointerId === pointer) finish(false); };
     const key = (ev: KeyboardEvent) => { if (ev.key === "Escape" && live.current?.active) { ev.stopPropagation(); finish(false); } };
-    // Once the row is held, the finger moves the row, not the list. (Not passive: a passive listener cannot say so.)
-    const touchMove = (ev: TouchEvent) => { if (live.current?.active && ev.cancelable) ev.preventDefault(); };
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
     window.addEventListener("pointercancel", cancel);
     window.addEventListener("keydown", key, true);
-    el.addEventListener("touchmove", touchMove, { passive: false });
     const touch = e.pointerType !== "mouse";
     live.current = {
       id, el, touch, x: e.clientX, y: e.clientY, active: false, rows: [], from: -1, to: -1,
@@ -145,10 +142,18 @@ export function useRowReorder({ ids, enabled, onMove }: {
         window.removeEventListener("pointerup", up);
         window.removeEventListener("pointercancel", cancel);
         window.removeEventListener("keydown", key, true);
-        el.removeEventListener("touchmove", touchMove);
       },
     };
   }, [finish]);
+
+  // Once the row is held, the finger moves the row, not the list. Not passive (a passive listener cannot say so), and
+  // on the row from the start: a browser decides when the finger lands whether a touch there can be kept from scrolling.
+  const ref = useCallback((el: HTMLElement | null) => {
+    if (!el) return;
+    const touchMove = (ev: TouchEvent) => { if (live.current?.active && live.current.el === el && ev.cancelable) ev.preventDefault(); };
+    el.addEventListener("touchmove", touchMove, { passive: false });
+    return () => el.removeEventListener("touchmove", touchMove);
+  }, []);
 
   const onClickCapture = useCallback((e: MouseEvent) => {
     if (!swallow.current) return;
@@ -162,8 +167,8 @@ export function useRowReorder({ ids, enabled, onMove }: {
 
   const usable = enabled && ids.length > 1;
   const rowProps = useCallback((id: string) => usable && ids.includes(id)
-    ? { "data-reorder-id": id, onPointerDown, onClickCapture, onContextMenu, onDragStart }
-    : {}, [usable, ids, onPointerDown, onClickCapture, onContextMenu, onDragStart]);
+    ? { "data-reorder-id": id, ref, onPointerDown, onClickCapture, onContextMenu, onDragStart }
+    : {}, [usable, ids, ref, onPointerDown, onClickCapture, onContextMenu, onDragStart]);
 
   if (!drag || !usable) return { rowProps };
   const others = ids.filter(id => id !== drag.id);

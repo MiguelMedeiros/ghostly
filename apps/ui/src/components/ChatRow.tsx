@@ -236,7 +236,7 @@ export function ChatRow(p: ChatRowProps) {
       // A row that can be dragged: a held finger moves it, so it selects no text and asks for no callout. In the hand it is over its neighbours.
       className={`${rowClass(p.active, p.density)} ${p.reorder ? "select-none [-webkit-touch-callout:none]" : ""} ${p.reorder?.dragging ? "z-20 cursor-grabbing bg-surface-hover shadow-lg transition-none" : ""}`}>
       {p.reorder?.drop && <span aria-hidden="true" data-testid="chat-row-drop" data-edge={p.reorder.drop}
-        className={`pointer-events-none absolute inset-x-0 z-10 h-0.5 rounded-full bg-accent ${p.reorder.drop === "before" ? "-top-px" : "-bottom-px"}`} />}
+        className={`pointer-events-none absolute inset-x-0 z-10 h-0.5 rounded-full bg-accent ${p.reorder.drop === "before" ? "top-0" : "bottom-0"}`} />}
       <RowOpen testId="chat-row-open" label={p.named ? p.label : `${p.label} · ${p.keyLabel}`} active={p.active} describedBy={previewId} />
       <div className={`relative shrink-0 rounded-full flex items-center justify-center ${p.active ? "bg-surface-alt" : "bg-surface-hover"}`} style={{ width: size, height: size }}>
         <PeerAvatar peerPubKey={p.peerPubKey} label={p.label} named={p.named} photo={p.face?.photo} testId="chat-row-avatar" />
