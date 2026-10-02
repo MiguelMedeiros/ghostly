@@ -17,6 +17,7 @@
     "noFiles": "群组暂不支持文件",
     "nobodyElse": "群组里还没有其他人",
     "reachable": "{{members}} · {{total}} 人中 {{reachable}} 人可连接",
+    "removedCommunity": "你已被移出。打开群组链接即可重新加入。",
     "sendFailed": "无法发送",
     "shareHint": "分享群组链接",
     "shareLink": "分享链接",
@@ -71,7 +72,8 @@
     "renamed": "{{name}} 将群组重命名为“{{group}}”",
     "renamedYou": "你将群组重命名为“{{group}}”",
     "rotated": "密钥已轮换：新的纪元",
-    "youJoined": "你已加入。"
+    "youJoined": "你已加入。",
+    "youJoinedAgain": "你已重新加入。"
   },
   "hubs": {
     "auto": "常在线时作为中继",

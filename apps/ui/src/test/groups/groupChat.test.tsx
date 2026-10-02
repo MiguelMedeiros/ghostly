@@ -196,6 +196,14 @@ describe("GroupChat: out of the group", () => {
     expect(screen.getByTestId("group-forget")).toBeInTheDocument();
   });
 
+  it("says how to come back when removed from a community, and a line when back in", async () => {
+    openGroup(active({ profile: "community", status: "removed", statusReason: "You were removed from this group", canSend: false }),
+      [stored({ id: "event:4:joined::1", event: "joined", text: "You joined again" })]);
+    expect(screen.getByTestId("group-notice")).toHaveTextContent("You were removed. Open the group's link to join again.");
+    expect(composer()).toBeDisabled();
+    expect(await screen.findByText("You joined again.")).toBeInTheDocument();
+  });
+
   it("names the status when the engine gave no reason, in the notice too", () => {
     openGroup(active({ status: "left", canSend: false }));
     expect(screen.getByTestId("group-members")).toHaveTextContent("left");

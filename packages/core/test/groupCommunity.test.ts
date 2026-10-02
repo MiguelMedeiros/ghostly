@@ -559,3 +559,49 @@ describe("community admin changes are final", { timeout: 60_000 }, () => {
     expect(bob.session.roster.map(([k]) => k)).not.toContain(mallory.session.myKey);
   });
 });
+
+describe("a member removed while it was away is told when it is back (farewell)", () => {
+  it("is handed the commits up to the one that took it out, and nothing after; then it is removed", async () => {
+    const net = new Net();
+    const alice = net.create("alice");
+    const bob = await net.admit(alice, "bob"), carol = await net.admit(alice, "carol");
+    await net.meet(alice, bob); await net.meet(alice, carol); await net.meet(bob, carol);
+    carol.online = false;
+    // While Carol is away: someone joins, Carol is removed, the link is replaced, someone else joins.
+    const dave = await net.admit(bob, "dave");
+    await net.meet(alice, dave);
+    await alice.session.remove(carol.session.myKey);
+    await net.settle();
+    const entry = await alice.session.replaceLink();
+    await net.settle();
+    await net.admit(alice, "erin");
+    await net.settle();
+    const chain = bob.session.state.chain, out = chain.findIndex(c => c.k === "remove" && c.s === carol.session.myKey);
+    expect(chain.length).toBe(out + 3);
+
+    // A member, and whoever is not out, gets nothing this way.
+    expect(bob.session.farewell(dave.session.myKey, dave.session.syncFrame())).toEqual([]);
+    expect(bob.session.farewell(createIdentity().pubKeyZ32, {})).toEqual([]);
+    // Carol says where she is: the admission she missed and her removal, in order, with nothing else.
+    const frames = bob.session.farewell(carol.session.myKey, carol.session.syncFrame());
+    expect(frames.map(f => f.commit.k)).toEqual(["add", "remove"]);
+    expect(frames.every(f => f.t === "group-commit" && Object.keys(f).sort().join() === "commit,g,t,v")).toBe(true);
+    expect(frames.some(f => f.commit.x === entry)).toBe(false);
+    // Whatever she says about where she is (a tip nobody knows, no locator), never past her removal.
+    const blind = bob.session.farewell(carol.session.myKey, { h: "f".repeat(64) });
+    expect(blind[blind.length - 1].commit).toEqual(chain[out]);
+    expect(blind.length).toBe(out + 1);
+
+    carol.online = true;
+    for (const frame of frames) await carol.session.handle(bob.session.myKey, clone(frame));
+    expect(carol.session.status).toBe("removed");
+    expect(carol.session.canSend).toBe(false);
+    expect(carol.session.state.chain).toHaveLength(out + 1);
+    expect(carol.session.entryKey).not.toBe(entry);
+    expect(await carol.session.sendText("anyone?")).toEqual({ error: "You were removed from this group" });
+    // Told once: she holds the commit, there is nothing more to hand her.
+    expect(bob.session.farewell(carol.session.myKey, { h: carol.session.topHash })).toEqual([]);
+    // Someone out says nothing for others either.
+    expect(carol.session.farewell(dave.session.myKey, {})).toEqual([]);
+  });
+});

@@ -17,6 +17,7 @@
     "noFiles": "Files are not part of groups yet",
     "nobodyElse": "Nobody else is in the group yet",
     "reachable": "{{members}} · {{reachable}} of {{total}} reachable",
+    "removedCommunity": "You were removed. Open the group's link to join again.",
     "sendFailed": "Could not send",
     "shareHint": "Share the group's link",
     "shareLink": "Share link",
@@ -71,7 +72,8 @@
     "renamed": "{{name}} renamed the group to “{{group}}”",
     "renamedYou": "You renamed the group to “{{group}}”",
     "rotated": "Keys rotated: a fresh epoch",
-    "youJoined": "You joined."
+    "youJoined": "You joined.",
+    "youJoinedAgain": "You joined again."
   },
   "hubs": {
     "auto": "Hub if always on",

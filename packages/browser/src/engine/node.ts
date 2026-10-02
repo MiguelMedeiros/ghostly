@@ -3015,7 +3015,7 @@ export class GhostlyNode implements EngineImplementation {
     if (!this.settings.online) throw new Error("Go online to join a group");
     return { groupId: await this.groups.joinByLink(link) };
   }
-  async sendGroupMessage({ groupId, text: given, mentions, replyTo, card: raw, button }: { groupId: string; text: string; mentions?: GroupMention[]; replyTo?: string; card?: unknown; button?: string }): Promise<{ error: string | null; messageId?: string }> {
+  async sendGroupMessage({ groupId, text: given, mentions, replyTo, card: raw, button }: { groupId: string; text: string; mentions?: GroupMention[]; replyTo?: string; card?: unknown; button?: string }): Promise<{ error: string | null; messageId?: string; refused?: boolean }> {
     // A bot's status card (WISP 4xx · Status Cards), its fallback text written from it unless one is given.
     const card = raw === undefined ? undefined : GhostlyNode.cardToSend(raw);
     if (typeof card === "string") return { error: card };
@@ -3137,11 +3137,12 @@ export class GhostlyNode implements EngineImplementation {
    * Reacts to a message of a chat or a group (WISP 400 § Reactions): shown here at once; a 1:1 chat keeps it until the
    * contact confirms it (the live session, or DHT envelopes meanwhile), a group sends it to its members.
    */
-  async react({ linkId, messageId, emoji }: { linkId: string; messageId: string; emoji: string }): Promise<{ error: string | null }> {
+  async react({ linkId, messageId, emoji }: { linkId: string; messageId: string; emoji: string }): Promise<{ error: string | null; refused?: boolean }> {
     if (typeof linkId !== "string" || !linkId) return { error: "No chat to react in" };
     if (linkId.startsWith("group:")) {
       const groupId = linkId.slice("group:".length);
-      if (!this.membership(groupId)) return { error: "You are not in this group" };
+      // Not a member (removed, say): refused with the reason the group shows, and nothing is kept here.
+      if (!this.membership(groupId)) return { error: this.groups.views().find(g => g.id === groupId)?.statusReason ?? "You are not in this group", refused: true };
       const result = await this.reactions.mine(linkId, messageId, emoji);
       return "error" in result ? result : this.sendGroupReaction(groupId, result.reaction);
     }

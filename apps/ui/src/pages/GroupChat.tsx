@@ -135,6 +135,7 @@ function eventText(message: StoredMessage, group: GroupView, t: Translate): stri
   if (!member && !former) {
     if (message.event === "created" && text.startsWith("Group created. ")) return `${t("group.event.created")} ${readNote(group, t)}`;
     if (message.event === "joined" && !message.member && text.startsWith("You joined. ")) return `${t("group.event.youJoined")} ${readNote(group, t)}`;
+    if (message.event === "joined" && !message.member && text === "You joined again") return t("group.event.youJoinedAgain");
     const gone = " is no longer a member";
     if (message.event === "gone" && text.endsWith(gone)) return t("group.event.gone", { name: text.slice(0, -gone.length) });
     // A community's line about a member who has left since: no roster or former name says who it was, but the stored
@@ -487,7 +488,7 @@ export function GroupChat() {
         {community ? t("group.chat.connectingCommunity") : t("group.chat.connectingMembers")}
       </div>}
       {(error || (group.status && group.status !== "active")) && <div role="status" data-testid="group-notice" className="px-4 py-2 text-xs bg-surface-alt text-text-secondary border-b border-border">
-        {error || outOfIt}
+        {error || (group.profile === "community" && group.status === "removed" ? t("group.chat.removedCommunity") : outOfIt)}
       </div>}
 
 

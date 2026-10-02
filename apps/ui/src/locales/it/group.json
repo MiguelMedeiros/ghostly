@@ -17,6 +17,7 @@
     "noFiles": "I file non sono ancora disponibili nei gruppi",
     "nobodyElse": "Nel gruppo non c'è ancora nessun altro",
     "reachable": "{{members}} · {{reachable}} su {{total}} raggiungibili",
+    "removedCommunity": "Sei stato rimosso. Apri il link del gruppo per rientrare.",
     "sendFailed": "Impossibile inviare",
     "shareHint": "Condividi il link del gruppo",
     "shareLink": "Condividi link",
@@ -71,7 +72,8 @@
     "renamed": "{{name}} ha rinominato il gruppo in “{{group}}”",
     "renamedYou": "Hai rinominato il gruppo in “{{group}}”",
     "rotated": "Chiavi rinnovate: una nuova epoca",
-    "youJoined": "Sei entrato."
+    "youJoined": "Sei entrato.",
+    "youJoinedAgain": "Sei entrato di nuovo."
   },
   "hubs": {
     "auto": "Hub se sempre acceso",
