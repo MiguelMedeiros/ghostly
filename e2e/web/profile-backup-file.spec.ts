@@ -1,8 +1,9 @@
 import { createHash } from "node:crypto";
 import { readFileSync, statSync } from "node:fs";
 import type { Page } from "@playwright/test";
-import { expect, openProfilePage, test } from "../support/fixtures";
+import { TEST_COINS, expect, getTestCoins, openProfilePage, openWallet, test, useTestnet } from "../support/fixtures";
 import { choose } from "../support/select";
+import { strangerInvoice } from "../support/bolt11";
 
 // WISP 05: a whole profile backed up to a file, sealed with a passphrase, and restored as a new profile.
 // Offline: no S3, no second peer.
@@ -128,6 +129,60 @@ test("the first profile never renamed, backed up in Portuguese and restored, is 
   await expect(page.getByTestId("profile-restored-tag")).toHaveText("Restored");
   await expect(page.getByTestId("profile-name")).toHaveValue("Personal");
   await expect(page.getByTestId("profile-row").filter({ hasText: "Pessoal" })).toHaveCount(0);
+});
+
+// A restored profile holds the ecash of the day its backup was made. What the original spent afterwards still counted in
+// the copy's balance, for good, and its payments failed with the mint's "Token already spent".
+test("a restored copy's Cashu balance is what the mint still holds, and it pays", { tag: ["@feature:backup.profile.file", "@feature:backup.profile.same-device", "@feature:wallet.cashu.pay-invoice"] }, async ({ peer, browserName }) => {
+  test.skip(!process.env.E2E_MINT_URL?.startsWith("http://127.0.0.1:"), "Requires an explicitly local fake mint (E2E_MINT_URL=http://127.0.0.1:…)");
+  const alice = await peer("backup-cashu", storage(browserName));
+  const page = alice.page;
+  // A chat, so the copy is of a profile still on this device: Ghostly asks first, and always the same way.
+  await page.getByTitle("New Chat").click();
+  await expect(page.getByTestId("invite-card")).toBeVisible();
+  await useTestnet(alice);
+  await getTestCoins(alice);
+  const balance = async () => Number(((await page.getByTestId("wallet-balance").textContent()) ?? "").match(/^([\d,]+)/)?.[1].replace(/,/g, "") ?? NaN);
+  const pay = async (sats: number, note: string) => {
+    await page.getByTestId("wallet-send").click();
+    await page.getByTestId("wallet-pay-input").fill(strangerInvoice(sats, note));
+    await page.getByRole("button", { name: `Pay ${sats.toLocaleString("en-US")} test sats` }).click();
+    await page.getByTestId("wallet-pay-confirm").click();
+    await expect(page.getByText("Paid.", { exact: true })).toBeVisible({ timeout: 30_000 });
+  };
+  await expect.poll(balance).toBe(TEST_COINS);
+
+  // The backup, with all 10,000 test sats in it.
+  await openProfilePage(page);
+  const backups = page.getByTestId("profile-backups");
+  await backups.getByTestId("backup-open").click();
+  await backups.getByTestId("backup-passphrase").fill(PASSPHRASE);
+  await backups.getByTestId("backup-confirm").fill(PASSPHRASE);
+  const downloading = page.waitForEvent("download");
+  await backups.getByTestId("backup-download").click();
+  const file = await downloading;
+  const bundle = readFileSync((await file.path())!);
+
+  // Then the profile spends some of them.
+  await openWallet(alice, "cashu-testnet");
+  await pay(2000, "after the backup");
+  await expect.poll(balance).toBeLessThan(TEST_COINS - 2000);
+
+  // The copy: its wallet asks the mint, and what was spent since the backup is not in its balance.
+  await openProfilePage(page);
+  await backups.getByTestId("restore-open").click();
+  await backups.getByTestId("restore-file").setInputFiles({ name: file.suggestedFilename(), mimeType: "application/octet-stream", buffer: bundle });
+  await backups.getByTestId("restore-passphrase").fill(PASSPHRASE);
+  await backups.getByTestId("restore-go").click();
+  await backups.getByTestId("restore-same-device").getByTestId("restore-copy").click();
+  await expect(page.getByTestId("profile-restored-tag")).toHaveText("Restored", { timeout: 60_000 });
+  await openWallet(alice, "cashu-testnet");
+  await expect.poll(balance).toBeLessThan(TEST_COINS - 2000);
+  const held = await balance();
+  expect(held, "what the original did not spend is still the copy's").toBeGreaterThan(600);
+  // And what it shows is there to spend.
+  await pay(500, "from the copy");
+  await expect.poll(balance).toBeLessThan(held - 499);
 });
 
 /** The clear header of a bundle: its first line. */
