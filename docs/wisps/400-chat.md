@@ -264,9 +264,9 @@ A pin names the message by the same id a reply does ([above](#replies)), or `""`
 | Field | Meaning |
 |---|---|
 | `id` | The message's id in this chat as both sides know it (as a reply's `i`), or `""` to unpin. |
-| `n` | The pinner's number: a positive safe integer, at most 5 minutes past the receiver's clock. |
+| `n` | The pinner's number: a positive safe integer, at most 10 minutes past the receiver's clock. |
 
-**Numbers from the future.** A receiver MUST drop a pin whose `n` is more than 5 minutes past its own clock, as it bounds a message's time (requirement 10 [above](#candidate-requirements-for-the-one-chat)), and not confirm it: clocks drift, but a number further ahead is the pinner's choice, and one near the largest safe integer would leave nobody a higher number to pin or unpin with. The pinner says it again, and it is taken once the clocks agree. A pin already kept with such a number counts as none: any pin replaces it, and the next number is the clock. A pinner's next number never passes the largest safe integer. Ghostly keeps this rule in `pinNumberHolds` (`packages/core/src/pins.ts`).
+**Numbers from the future.** A receiver MUST drop a pin whose `n` is more than 10 minutes past its own clock, the bound a session's and a call's signals have ([101](101-webrtc.md), [601](601-webrtc-media.md)), and not confirm it: clocks drift, but a number further ahead is the pinner's choice, and one near the largest safe integer would leave nobody a higher number to pin or unpin with. The pinner says it again, and it is taken once the clocks agree. A pin already kept with such a number counts as none: any pin replaces it, and the next number is the clock. A pinner's next number never passes the largest safe integer. Ghostly keeps this rule in `pinNumberHolds` (`packages/core/src/pins.ts`).
 
 **Who pins.** In a 1:1 chat, either side. In a private group ([mesh](9xx-group-mesh.md#pinned-message)), any member; in a community ([community](9xx-group-community.md#pinned-message)), only its admin. A receiver MUST drop a pin from anyone else, and one whose `id` or `n` does not hold. Ghostly keeps this rule in one place (`mayPin`, `packages/core/src/pins.ts`).
 
