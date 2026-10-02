@@ -55,7 +55,7 @@ function Column({ group, name, dot, grouping, board, now, older, onOlder, onOpen
   return (
     <section data-testid="board-column" data-board-column data-column={group.id} aria-labelledby={labelledBy ?? titleId}
       {...(phone ? { role: "tabpanel", id: `${labelledBy}-panel` } : {})}
-      className={phone ? "flex h-full w-full shrink-0 snap-start flex-col min-h-0" : "flex max-h-full w-72 shrink-0 flex-col rounded-xl bg-text-primary/[0.04]"}>
+      className={phone ? "flex h-full w-full shrink-0 snap-start flex-col min-h-0" : "flex max-h-full min-w-64 max-w-96 flex-1 basis-64 flex-col rounded-xl bg-text-primary/[0.04]"}>
       {!phone && (
         <h2 id={titleId} className="m-0 flex shrink-0 items-center gap-2 px-3 pt-2.5 pb-1.5 text-xs font-semibold text-text-secondary">
           {dot && <span aria-hidden="true" className={`h-2 w-2 shrink-0 rounded-full ${dot}`} />}

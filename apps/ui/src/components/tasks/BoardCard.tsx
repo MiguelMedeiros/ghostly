@@ -68,7 +68,7 @@ export function BoardCard({ task, grouping, face, now, onOpen, onKeys }: {
   ].slice(0, 3);
   return (
     <article data-testid="board-card" data-card-id={card.id} data-status={card.status} data-open={open ? "" : undefined}
-      className="group relative min-w-0 overflow-hidden rounded-lg border border-border bg-surface-alt text-start transition-colors hover:bg-surface-hover has-[[data-board-card]:focus-visible]:border-accent">
+      className="group relative min-w-0 shrink-0 overflow-hidden rounded-lg border border-border bg-surface-alt text-start transition-colors hover:bg-surface-hover has-[[data-board-card]:focus-visible]:border-accent">
       {/* The card as a whole is this button; the link and Details sit above it and take their own clicks. */}
       <button type="button" data-board-card data-testid="board-card-open" aria-label={boardCardLabel(t, task, age)} title={card.title} onClick={onOpen} onKeyDown={onKeys}
         className="absolute inset-0 cursor-pointer rounded-lg focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent" />
