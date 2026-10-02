@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { errorText } from "../../lib/errorText";
 import { useT } from "../../contexts/I18nContext";
+import { saveMade } from "../../lib/fileDownload";
+import { servicesPlatform } from "../../lib/platform";
 
 /** Runs one wallet operation at a time and keeps its error. */
 export function useRun() {
@@ -13,8 +15,6 @@ export function useRun() {
   return { busy, error, setError, run };
 }
 
-export const downloadJson = (text: string, name: string) => {
-  const url = URL.createObjectURL(new Blob([text], { type: "application/json" }));
-  const link = document.createElement("a"); link.href = url; link.download = name; link.click();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
-};
+/** Saves a wallet's backup file: the desktop app asks where (false when the person cancelled), a browser downloads it. */
+export const downloadJson = async (text: string, name: string): Promise<boolean> =>
+  (await saveMade(servicesPlatform, new Blob([text], { type: "application/json" }), name)) !== "cancelled";
