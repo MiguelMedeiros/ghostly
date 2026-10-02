@@ -235,12 +235,12 @@ export class LightningService {
     this.quotes.delete(quoteId);
     const existing = await this.get("out", quote.paymentHash);
     if (existing && existing.state !== "failed") throw new Error(existing.state === "paid" ? "This invoice is already paid" : "This invoice is already being paid");
-    let op: LightningOp = { direction: "out", providerId: quote.providerId, mode: this.mode, ...this.cardField(), paymentHash: quote.paymentHash, invoice: quote.invoice, amount: quote.amount, paymentId: context.paymentId, note: context.note?.slice(0, 140), expiresAt: 0, createdAt: Date.now(), selfSettled: !!quote.provider.settlesItself, state: "sending", maxFee: quote.maxFee };
+    let op: LightningOp = { direction: "out", providerId: quote.providerId, mode: this.mode, ...this.cardField(), paymentHash: quote.paymentHash, invoice: quote.invoice, amount: quote.amount, paymentId: context.paymentId, note: context.note?.slice(0, 140), expiresAt: 0, createdAt: Date.now(), selfSettled: !!quote.provider.settlesItself, state: "sending", maxFee: quote.maxFee, ref: quote.provider.paymentRef?.(quote.invoice) };
     // Written down before the provider sees it: from here on the sats may be gone.
     await this.put(op);
     try {
       const result = await quote.provider.payInvoice(quote.invoice, quote.maxFee, context.note);
-      op = result.state === "paid" ? { ...op, state: "paid", fee: result.fee, ref: result.ref, settledAt: Date.now() } : { ...op, state: "pending", ref: result.ref };
+      op = result.state === "paid" ? { ...op, state: "paid", fee: result.fee, ref: result.ref ?? op.ref, settledAt: Date.now() } : { ...op, state: "pending", ref: result.ref ?? op.ref };
     } catch (error) {
       if (isNothingSpentError(error)) { await this.put({ ...op, state: "failed", error: redact(error) }); throw error; }
       // A source that cannot look payments up never settles this by itself: say so rather than "being checked".
@@ -275,7 +275,25 @@ export class LightningService {
     try {
       const provider = this.sources.active, providerId = this.sources.activeId;
       for (const op of await this.list()) {
-        if (op.selfSettled || !this.owns(op)) continue;
+        if (!this.owns(op)) continue;
+        if (op.selfSettled) {
+          // The source settles and reports its own. One cut off before its answer was written (`recover`) it may
+          // never have heard of, and would never report: the source is asked what became of it.
+          if (op.direction !== "out" || op.state !== "unknown") continue;
+          // No source connected yet: asked again. Another source's waits until its own is active again.
+          if (!provider) { again = again || OUT_POLL_MS; continue; }
+          if (op.providerId !== providerId || !provider.interruptedPayment) continue;
+          try {
+            const outcome = await provider.interruptedPayment({ invoice: op.invoice, paymentHash: op.paymentHash, ref: op.ref });
+            if (outcome === "pending") again = again || OUT_POLL_MS;
+            if (outcome !== "paid" && outcome !== "failed") continue;
+            // Written only over the state that was asked about: the source's own report wins.
+            if ((await this.get("out", op.paymentHash))?.state !== "unknown") continue;
+            await this.put({ ...op, state: outcome, error: outcome === "failed" ? "The payment did not go through" : undefined, settledAt: Date.now() });
+            this.events.resolved(op, outcome === "paid");
+          } catch { again = again || OUT_POLL_MS; }
+          continue;
+        }
         // `sending` is a spend under way in this process: its own answer decides. One left by a crash is
         // made `unknown` by `recover` at the next start, and only then asked about.
         const waiting = op.direction === "in" ? op.state === "open" : ["pending", "unknown"].includes(op.state);
