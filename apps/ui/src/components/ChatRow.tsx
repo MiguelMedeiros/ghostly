@@ -233,10 +233,11 @@ export function ChatRow(p: ChatRowProps) {
   useChosenProfile(p.peerPubKey);
   return (
     <div data-testid="chat-row" data-chat={p.chatId} data-muted={muted || undefined} data-dragging={p.reorder?.dragging || undefined} onClick={p.onOpen} title={`${p.label} · ${p.keyLabel}`} {...p.reorder?.props}
-      // A row that can be dragged: a held finger moves it, so it selects no text and asks for no callout. In the hand it is over its neighbours.
-      className={`${rowClass(p.active, p.density)} ${p.reorder ? "select-none [-webkit-touch-callout:none]" : ""} ${p.reorder?.dragging ? "z-20 cursor-grabbing bg-surface-hover shadow-lg transition-none" : ""}`}>
+      // A row that can be dragged: a held finger moves it, so it selects no text and asks for no callout. In the hand it is
+      // over its neighbours and lets them show through: the line where it would land is always somewhere under it.
+      className={`${rowClass(p.active, p.density)} ${p.reorder ? "select-none [-webkit-touch-callout:none]" : ""} ${p.reorder?.dragging ? "z-20 cursor-grabbing bg-surface-hover opacity-70 shadow-lg transition-none" : ""}`}>
       {p.reorder?.drop && <span aria-hidden="true" data-testid="chat-row-drop" data-edge={p.reorder.drop}
-        className={`pointer-events-none absolute inset-x-0 z-10 h-0.5 rounded-full bg-accent ${p.reorder.drop === "before" ? "top-0" : "bottom-0"}`} />}
+        className={`pointer-events-none absolute inset-x-0 z-30 h-0.5 rounded-full bg-accent ${p.reorder.drop === "before" ? "top-0" : "bottom-0"}`} />}
       <RowOpen testId="chat-row-open" label={p.named ? p.label : `${p.label} · ${p.keyLabel}`} active={p.active} describedBy={previewId} />
       <div className={`relative shrink-0 rounded-full flex items-center justify-center ${p.active ? "bg-surface-alt" : "bg-surface-hover"}`} style={{ width: size, height: size }}>
         <PeerAvatar peerPubKey={p.peerPubKey} label={p.label} named={p.named} photo={p.face?.photo} testId="chat-row-avatar" />
@@ -296,8 +297,9 @@ export function ChatRow(p: ChatRowProps) {
         </>}
         trailing={p.unread > 0 && <UnreadBadge count={p.unread} muted={muted} />}
         timeCover={
-          // The layer covers the marks too, so a pinned chat's mark turns into its Unpin button in place.
-          <RowActions active={p.active}>
+          // The layer covers the marks too, so a pinned chat's mark turns into its Unpin button in place. A row in
+          // the hand is under the pointer all the way: it keeps its marks and time, not buttons that cannot be used.
+          !p.reorder?.dragging && <RowActions active={p.active}>
             <RowMute chat={p.chatId} />
             <button type="button" title={pinLabel} aria-label={pinLabel} aria-pressed={p.pinned} data-testid="chat-row-pin"
               onClick={e => { e.stopPropagation(); p.onTogglePin(); }} className={rowAction()}>
