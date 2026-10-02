@@ -2,6 +2,18 @@
 
 We welcome all ghosts, ghouls, and developers! Here's how to haunt our codebase.
 
+## How to contribute
+
+**Open an issue.** Bugs, ideas and protocol proposals are all welcome there: see
+[Bugs, features and protocol proposals](#bugs-features-and-protocol-proposals).
+
+**Pull requests from outside are not reviewed, and are closed.** Changes land through the maintainer's own
+pipeline, so an outside pull request cannot be merged as it is. If you wrote a fix, describe it in an issue (a link to
+your branch is welcome) and it will be picked up from there. Security flaws go through a private advisory, never an
+issue: see [Security](#security).
+
+The rest of this page documents how the code is built and how changes land, for reading and for forks.
+
 ## Getting started
 
 ### Prerequisites
@@ -86,7 +98,9 @@ The SDK's example adapter, built outside the app on `@ghostlytools/sdk`, is in `
 
 ## Pull requests
 
-1. Branch off `dev` (or fork, and branch off `dev` there):
+This is the maintainer's flow. Outside pull requests are closed: [open an issue](#how-to-contribute) instead.
+
+1. Branch off `dev`:
    ```bash
    git checkout -b feat/spooky-feature origin/dev
    ```
