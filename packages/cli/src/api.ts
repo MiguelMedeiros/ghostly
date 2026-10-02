@@ -425,7 +425,7 @@ const METHODS: Record<string, Method> = {
     // A kept `group typing --for` ends with the message (the engine says stop with it).
     endTyping(ctx, { groupId: group.id }, false);
     const result = await node(ctx).sendGroupMessage({ groupId: group.id, text, ...(mentions.length ? { mentions } : {}), ...(replyTo ? { replyTo } : {}), ...(card ? { card } : {}) });
-    if (result.error) throw new CliError("unavailable", result.error);
+    if (result.error) throw groupSendRefused(result.error);
     const messageId = result.messageId ?? null;
     // `edges`: how many took it so far (none yet is not an error: it goes when one opens).
     const edges = messageId ? (wait === "sent" ? await waitForGroupFrame(ctx, group.id, messageId, undefined, num(params, "timeout", 30, { min: 1, max: 3600 }) * 1000) : node(ctx).groupTaken({ groupId: group.id, messageId })) : 0;
@@ -446,10 +446,14 @@ const METHODS: Record<string, Method> = {
     }
     const mentions = mentionsFor(text, list(params, "mentions"), group);
     const wait = oneOf(params, "wait", ["none", "sent"] as const, "none");
+    const before = (await node(ctx).groupMessages({ groupId: group.id })).find((m) => m.id === messageId)?.edit?.seq ?? 0;
     const result = await node(ctx).editMessage({ linkId: `group:${group.id}`, messageId, text, ...(mentions.length ? { mentions } : {}) });
     if (result.error) throw editRefused(await node(ctx).groupMessages({ groupId: group.id }), messageId, "group", result.error, result.refused);
     const message = (await node(ctx).groupMessages({ groupId: group.id })).find((m) => m.id === messageId);
     const edits = message?.edit?.seq ?? 0;
+    // The text the message already has: no edit was made and nothing went. It answered `sent: true` before, for a
+    // message never edited, as if an edit had gone.
+    if (edits === before) return { group: group.id, messageId, edits, sent: false, edges: 0, unchanged: true };
     // An edit waiting for the pace is not said yet: `--wait sent` waits for that too, then for an edge to take it.
     const edges = !edits ? 0 : wait === "sent" ? await waitForGroupFrame(ctx, group.id, messageId, edits, num(params, "timeout", 30, { min: 1, max: 3600 }) * 1000)
       : node(ctx).groupTaken({ groupId: group.id, messageId, edit: edits });
@@ -559,6 +563,18 @@ function typingWord(params: Params, typing: boolean): { kind: TypingKind; status
   const status = sanitizeTypingStatus(oneLine);
   if (!status) throw new CliError("bad_request", "status: plain text, with no link or markup");
   return { kind, status };
+}
+
+/**
+ * A group message the engine did not send, by what a bot can do about it: a `--reply` to a message this group does not
+ * have is `not_found` (exit 3), as `group react`, `group edit` and `pin` answer for one; out of the group (removed,
+ * left, a forked history) is `refused`: it will not go later either. Anything else may go on a later try
+ * (`unavailable`): the epoch's key is still on its way. All three were `unavailable` (exit 1) before.
+ */
+export function groupSendRefused(error: string): CliError {
+  if (/not in this chat|cannot be replied to/.test(error)) return new CliError("not_found", error);
+  if (/^You (were removed from|left|are no longer in) this group$|Membership changes are halted/.test(error)) return new CliError("refused", error);
+  return new CliError("unavailable", error);
 }
 
 /**
