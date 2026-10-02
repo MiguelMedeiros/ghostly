@@ -1,7 +1,7 @@
 {
   "name": "@ghostly/extension",
   "private": true,
-  "version": "1.0.1",
+  "version": "1.0.2",
   "type": "module",
   "description": "Ghostly Browser: an ephemeral Ghostly peer as a Chromium extension",
   "scripts": {
@@ -24,7 +24,7 @@
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.3.3",
-    "@types/chrome": "^0.3.0",
+    "@types/chrome": "^0.3.3",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.1.1",

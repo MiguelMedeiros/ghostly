@@ -1,6 +1,6 @@
 # Testing
 
-Every user-visible feature and every protocol capability of Ghostly is listed once in [`e2e/features.json`](../e2e/features.json), with a stable id, the WISP that describes it, the clients it exists in and the infrastructure it needs. Every test says which of those ids it covers. [`scripts/test-map.mjs`](../scripts/test-map.mjs) puts the two together: it runs no test, it reads the declarations, prints the matrix and fails when something is off. CI runs it on every pull request (Frontend lint and types job); it takes well under a second.
+Every user-visible feature and every protocol capability of Ghostly is listed once in [`e2e/features.json`](../e2e/features.json), with a stable id, the WISP that describes it, the clients it exists in and the infrastructure it needs. Every test says which of those ids it covers. [`tools/scripts/test-map.mjs`](../tools/scripts/test-map.mjs) puts the two together: it runs no test, it reads the declarations, prints the matrix and fails when something is off. CI runs it on every pull request (Frontend lint and types job); it takes well under a second.
 
 ```bash
 npm run test:map              # check, and print the summary
@@ -63,7 +63,7 @@ npm run test:affected -- --no-stack       # @gated tests: leave .env.e2e as it i
 npm run test:affected -- --base HEAD~1    # another base;  --files a.ts b.tsx  instead of the diff
 ```
 
-It prints each step with the reason it runs, runs whole, or is skipped, then a summary with timings, and exits non-zero when a step fails. [`scripts/test-affected.mjs`](../scripts/test-affected.mjs) runs it; what it picks is decided in [`scripts/affected/select.mjs`](../scripts/affected/select.mjs), which has its own tests (`npm run test:scripts`).
+It prints each step with the reason it runs, runs whole, or is skipped, then a summary with timings, and exits non-zero when a step fails. [`tools/scripts/test-affected.mjs`](../tools/scripts/test-affected.mjs) runs it; what it picks is decided in [`tools/scripts/affected/select.mjs`](../tools/scripts/affected/select.mjs), which has its own tests (`npm run test:scripts`).
 
 | Step | What runs |
 |---|---|
@@ -73,7 +73,7 @@ It prints each step with the reason it runs, runs whole, or is skipped, then a s
 | Rust | `cargo fmt --check`, `clippy -D warnings` and `test` for `apps/desktop` (+ `native/transports`), only when they changed |
 | E2E | changed file → features (`"paths"` in `e2e/features.json`) → the web and extension tests tagged with them (`--grep @feature:…`), plus changed specs and the specs importing a changed `e2e/support` helper, `--workers=$E2E_WORKERS`. Without `--port` (or `E2E_WEB_PORT`, or `E2E_WEB_URL` for a build you serve yourself) it says what it would run and runs none. Desktop specs run on Linux only: it prints the command instead. |
 
-**Falling back.** When the diff cannot be narrowed, that area runs whole, and the plan says why: `package-lock.json`, a root `package.json` change other than `"scripts"`, or `patches/` run everything; a Vitest config or setup file runs its project whole; `eslint.config.mjs` the whole lint; a `tsconfig` every typecheck; `e2e/playwright.config.ts`, a file the `paths` map marks `"*"` (the app shell, `@ghostly/core`'s `index.ts`, the pairing path every spec walks through, `en.json`, whose strings the specs click) or a file no glob matches runs every e2e spec.
+**Falling back.** When the diff cannot be narrowed, that area runs whole, and the plan says why: `package-lock.json`, a root `package.json` change other than `"scripts"`, or `tools/patches/` run everything; a Vitest config or setup file runs its project whole; `eslint.config.mjs` the whole lint; a `tsconfig` every typecheck; `e2e/playwright.config.ts`, a file the `paths` map marks `"*"` (the app shell, `@ghostly/core`'s `index.ts`, the pairing path every spec walks through, `en.json`, whose strings the specs click) or a file no glob matches runs every e2e spec.
 
 **The `paths` map.** At the end of `e2e/features.json`, sorted by glob like the features by id: a glob (`*`, `**/`, `{a,b}`) → the features a change there can break, as ids, `area.*` prefixes (the id `area` and everything under it), `"*"` for everything, or `[]` for nothing an e2e spec sees (docs, tests, tooling, Rust). A file matching several globs gets all their features. `npm run test:map` (in CI) fails on a pattern that names no feature and warns on a source file no glob matches.
 
@@ -85,9 +85,9 @@ It prints each step with the reason it runs, runs whole, or is skipped, then a s
 | `--list` | `node e2e/infra/infra.mjs check --host one`: the same verdict through the connection this machine already has, read-only; with none running it says "not checked". It prints what a run would do, `use` command included, and writes nothing |
 | one does not answer (or `use` fails) | says why and how many gated tests will skip. If `.env.e2e` points at one, its variables go to Playwright empty, so those tests skip instead of timing out on dead ports (and the Cashu tests use the public mint). A `.env.e2e` naming another stack (a local one) is used as it is |
 
-It never starts, stops, resets or seeds a stack, here or on one, and never falls back to a local Docker stack: when one is down, `npm run e2e:infra:status -- --host one` tells you why, and bringing it up is a decision for whoever owns it. The decisions are pure functions in [`scripts/affected/stack.mjs`](../scripts/affected/stack.mjs), tested in `scripts/test/affected-stack.test.ts`.
+It never starts, stops, resets or seeds a stack, here or on one, and never falls back to a local Docker stack: when one is down, `npm run e2e:infra:status -- --host one` tells you why, and bringing it up is a decision for whoever owns it. The decisions are pure functions in [`tools/scripts/affected/stack.mjs`](../tools/scripts/affected/stack.mjs), tested in `tools/scripts/test/affected-stack.test.ts`.
 
-**Workers.** Locally Vitest runs at most `JOBS` workers (default 2; [`vitest.shared.ts`](../vitest.shared.ts), shared by every Vitest config) and Playwright `E2E_WORKERS` (default 2; `MATRIX_WORKERS` for the matrix), so a plain `npm test` or `npx playwright test` no longer takes a worker per core. CI is unchanged (Vitest's default, 2 Playwright workers). `--maxWorkers` / `--workers` on the command line still win.
+**Workers.** Locally Vitest runs at most `JOBS` workers (default 2; [`tools/vitest.shared.ts`](../tools/vitest.shared.ts), shared by every Vitest config) and Playwright `E2E_WORKERS` (default 2; `MATRIX_WORKERS` for the matrix), so a plain `npm test` or `npx playwright test` no longer takes a worker per core. CI is unchanged (Vitest's default, 2 Playwright workers). `--maxWorkers` / `--workers` on the command line still win.
 
 ### When several sessions share a machine
 
@@ -101,10 +101,10 @@ It never starts, stops, resets or seeds a stack, here or on one, and never falls
 
 | Job | What it runs | When |
 |---|---|---|
-| Changed paths | [`scripts/ci-changes.mjs`](../scripts/ci-changes.mjs): which path-gated jobs below this pull request needs | pull requests (pushes run everything) |
-| Frontend lint and types | `npm run lint`, `npm run typecheck`, `node scripts/changes.mjs` (the `changes/` entries), `npm run test:map -- --summary` (the check, and the map on the run's summary page) | always |
+| Changed paths | [`tools/scripts/ci-changes.mjs`](../tools/scripts/ci-changes.mjs): which path-gated jobs below this pull request needs | pull requests (pushes run everything) |
+| Frontend lint and types | `npm run lint`, `npm run typecheck`, `node tools/scripts/changes.mjs` (the `docs/changelog/unreleased/` entries), `npm run test:map -- --summary` (the check, and the map on the run's summary page) | always |
 | Frontend tests (app) | `npm run test:app` (UI components, matrix, scripts) | always |
-| Frontend tests (packages 1/4 to 4/4) | `npm run test:packages` (core, browser, sdk, extension and the headless CLI, whose tests build it and pair two bots) in 4 shards balanced by time ([`scripts/test-shards.mjs`](../scripts/test-shards.mjs), `scripts/test-durations.json`); the CLI's two-peer story has a shard of its own. The two jobs together are `npm test` | skipped only when every change is under `docs/`, or under `apps/website/` outside the site files the packages' tests read |
+| Frontend tests (packages 1/4 to 4/4) | `npm run test:packages` (core, browser, sdk, extension and the headless CLI, whose tests build it and pair two bots) in 4 shards balanced by time ([`tools/scripts/test-shards.mjs`](../tools/scripts/test-shards.mjs), `tools/scripts/test-durations.json`); the CLI's two-peer story has a shard of its own. The two jobs together are `npm test` | skipped only when every change is under `docs/`, or under `apps/website/` outside the site files the packages' tests read |
 | CLI on Linux ARM64 | the CLI packed as npm publishes it, installed into an empty folder, starts a daemon with WebRTC and calls; then the CLI's whole suite, voice calls included, on an arm64 runner | as the packages' tests |
 | Frontend builds | `npm run build`, `check:desktop-bundle`, `build:extension`, `build:web`, `test:sdk-example` | always |
 | Tauri Backend | `cargo fmt --check`, `clippy -D warnings`, `build`, `test` for `apps/desktop` (+ `native/transports`) | a draft skips it unless it changed `apps/desktop/`, `native/transports/`, `Cargo.*` or `ci.yml`; leaving draft runs it |
@@ -112,13 +112,13 @@ It never starts, stops, resets or seeds a stack, here or on one, and never falls
 | Desktop media, Desktop on macOS | voice recordings in WKWebView; on a Mac, the specs of `e2e/desktop-macos/` (two apps call and share an app, notifications, links, a 100 MB video from the stored file, …) (`desktop-macos.yml`) | skipped only when every change is under `apps/website/` or `docs/` |
 | CI Success | the required check: fails if any job failed, or was skipped without the gate saying so. A pull request into `dev` merges only with it green and the branch up to date with `dev` | always |
 
-The gates are tested in `scripts/test/ci-changes.test.ts`. If the file lookup fails, CI Success fails: nothing is skipped by accident.
+The gates are tested in `tools/scripts/test/ci-changes.test.ts`. If the file lookup fails, CI Success fails: nothing is skipped by accident.
 
 Other workflows:
 
 | Workflow | What | When |
 |---|---|---|
-| Security (`security.yml`) | known advisories in the lock files (OSV, `scripts/security-scan.mjs`) | pull requests, pushes, every morning |
+| Security (`security.yml`) | known advisories in the lock files (OSV, `tools/scripts/security-scan.mjs`) | pull requests, pushes, every morning |
 | E2E (`e2e.yml`) | web and extension e2e, the Desktop specs on Linux, compatibility with v0.4.0 | before every release (`release.yml` calls it) and by hand |
 | E2E (full) (`e2e-full.yml`) | `npm run e2e:full` (gated suites included) and the combination matrix | nightly on `dev` and by hand |
 | E2E (compatibility) (`e2e-compat.yml`) | the current web app against a real v0.4.0 | nightly, before every release, by hand |
@@ -259,7 +259,7 @@ What it found:
 - **Turning Fallback off failed on a Linux Desktop in Automatic** with "Transport unavailable". The popover's switch sends the chat's preference back, and Automatic reported WebRTC, which the app does not have. Automatic now reports the app's own first transport (`automaticTransport`: WebRTC where there is one, else Iroh, then HyperDHT), which is also what choosing Automatic asks the link for (before, whichever endpoint had started first).
 - The harness learned: the Connection options are `role=radio` buttons (no longer inputs), and the Desktop person must wait for its choice to be drawn before flipping Fallback, which sends the preference the page shows.
 
-<!-- matrix:begin (scripts/matrix-docs.mjs writes this section; edit the text above it) -->
+<!-- matrix:begin (tools/scripts/matrix-docs.mjs writes this section; edit the text above it) -->
 
 Last full run: 2026-09-24.
 

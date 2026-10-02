@@ -10,7 +10,7 @@ import { MAINNET_MINTS } from "../support/mint";
  * there without leaving anything behind.
  *
  * e2e/web/compat-chat.spec.ts covers the same chat with the 0.4 side played by a prefix-less session in the
- * current app; this one runs the old app itself, built from its tag (scripts/build-compat-web.mjs).
+ * current app; this one runs the old app itself, built from its tag (tools/scripts/build-compat-web.mjs).
  */
 
 /**

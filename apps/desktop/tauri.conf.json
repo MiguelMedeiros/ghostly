@@ -1,11 +1,11 @@
 {
   "$schema": "https://raw.githubusercontent.com/tauri-apps/tauri/dev/crates/tauri-cli/schema.json",
   "productName": "Ghostly",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "identifier": "app.ghostly.chat",
   "build": {
     "beforeDevCommand": "npm run dev",
-    "beforeBuildCommand": "node scripts/prepare-native-runtime.mjs && npm run build",
+    "beforeBuildCommand": "node tools/scripts/prepare-native-runtime.mjs && npm run build",
     "devUrl": "http://localhost:5173",
     "frontendDist": "../ui/dist"
   },

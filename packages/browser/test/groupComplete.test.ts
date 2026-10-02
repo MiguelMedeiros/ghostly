@@ -28,10 +28,12 @@ describe("a group message completed by its whole copy", () => {
   it("takes the mentions, reply and hop count of the whole copy, and keeps the text and time", async () => {
     const node = engine();
     await node["storeMessage"](base);
+    const [first] = await db.getMessages("group:g1");
     await node["completeGroupMessage"]({ ...base, text: "ignored", timestamp: 9_999, mentions: [{ k: me, o: 0, l: 3 }], mentioned: true, forwarded: 2,
       replyTo: { id: `${author}:0:1`, snippet: "earlier", member: author } });
     const [stored] = await db.getMessages("group:g1");
-    expect(stored).toMatchObject({ text: "@Bo look", timestamp: 1_000, mentions: [{ k: me, o: 0, l: 3 }], mentioned: true, forwarded: 2 });
+    // Its place (when the first copy came) and the time its author said stay as they were.
+    expect(stored).toMatchObject({ text: "@Bo look", timestamp: first.timestamp, sentAt: 1_000, mentions: [{ k: me, o: 0, l: 3 }], mentioned: true, forwarded: 2 });
     expect(stored.replyTo?.id).toBe(`${author}:0:1`);
   });
 

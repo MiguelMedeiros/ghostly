@@ -15,7 +15,7 @@
   "pushRelayInfo": "A browser page may not post to a push service itself. A relay you choose posts the wake-up for it, already encrypted: it learns when you woke someone, and your IP address, never what you wrote. Ghostly runs none. Desktop and the command line need none.",
   "readRelays": "Also use Pkarr relays",
   "readRelaysHint": "Finds a first contact sooner. Relays see which keys it looks up.",
-  "readRelaysInfo": "This app reads the Mainline DHT directly. With this on, it also reads through the Pkarr relays below.",
+  "readRelaysInfo": "This app reads the Mainline DHT directly. With this on, it also reads through the Pkarr relays below. If the DHT cannot be reached at all (a VPN or a firewall may block it), it reads through them anyway.",
   "relays": "Pkarr relays",
   "relaysHint": "One per line. They only see signed, encrypted packets.",
   "relaysInfoDirect": "Contacts on the web and in the extension cannot reach the Mainline DHT and read through relays, so this app writes to them too.",

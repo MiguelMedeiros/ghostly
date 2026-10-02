@@ -41,6 +41,7 @@
   },
   "backupReminder": {
     "body": "Sauvegardez-le pour ne pas le perdre si vous perdez cet appareil.",
+    "bodyUnprotected": "Sauvegardez-le pour ne pas le perdre si vous perdez cet appareil ou si ce navigateur efface ses données.",
     "go": {
       "phrase": "Voir la phrase de récupération",
       "profile": "Sauvegarder le profil"

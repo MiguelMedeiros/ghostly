@@ -1,7 +1,7 @@
 # Releasing
 
 A release is a tag on `main`. Work lands on `dev`; `main` holds only what was released
-([CONTRIBUTING.md](../CONTRIBUTING.md#branches)).
+([CONTRIBUTING.md](../.github/CONTRIBUTING.md#branches)).
 
 | Step | What |
 |---|---|
@@ -31,10 +31,10 @@ Keep the private key. Losing it means no app already out there can ever be updat
 On a branch off `dev`:
 
 ```bash
-node scripts/bump-version.mjs 1.0.0
+node tools/scripts/bump-version.mjs 1.0.0
 ```
 
-That sets the version in the root `package.json` and every workspace's (the root `workspaces` field, so a new package under `packages/` moves too), the lock files, the extension manifest, the Tauri config, both crates, the website's fallback release (`apps/website/lib/release.ts`) and the tables in `docs/INSTALLATION.md`, moves every entry of `changes/` into the changelog's `## Unreleased` (deleting the files), and turns that heading into `## 1.0.0`. `node scripts/changes.mjs --preview` shows the section beforehand.
+That sets the version in the root `package.json` and every workspace's (the root `workspaces` field, so a new package under `packages/` moves too), the lock files, the extension manifest, the Tauri config, both crates, the website's fallback release (`apps/website/lib/release.ts`) and the tables in `docs/INSTALLATION.md`, moves every entry of `docs/changelog/unreleased/` into the changelog's `## Unreleased` (deleting the files), and turns that heading into `## 1.0.0`. `node tools/scripts/changes.mjs --preview` shows the section beforehand.
 
 Then, by hand:
 
@@ -97,7 +97,7 @@ The website's download panel asks GitHub for the latest published release (at mo
 
 Only after publishing.
 
-- **app.ghostly.tools** serves `main`. To move it to the release: `docker compose pull && docker compose up -d`, or build from the checkout with `GHOSTLY_BUILD=$(git rev-parse --short HEAD) docker compose up -d --build`. Without `GHOSTLY_BUILD` the image cannot say which commit it serves, and tabs already open are not told about the deploy.
+- **app.ghostly.tools** serves `main`. To move it to the release, from the checkout's root: `docker compose -f infra/docker-compose.yml --env-file .env pull`, then the same with `up -d`, or build from the checkout with `GHOSTLY_BUILD=$(git rev-parse --short HEAD) docker compose -f infra/docker-compose.yml --env-file .env up -d --build` (`--env-file .env` keeps reading the root `.env`, where the server sets `GHOSTLY_WEB_BIND`). Without `GHOSTLY_BUILD` the image cannot say which commit it serves, and tabs already open are not told about the deploy.
 - **ghostly.tools**: rebuild the `apps/website/` container. Its `/latest.json` answers with the version in `apps/website/lib/release.ts`, which is how the extension learns about the release.
 
 How each client picks it up:
@@ -110,10 +110,10 @@ How each client picks it up:
 
 A hotfix branches off `main`, bumps the patch version, is merged into `main` and tagged there (steps 3 to 5). Then `main` is merged back into `dev`.
 
-A fix for a security flaw in a released version never goes through a public issue or pull request, not even into `dev`: it is prepared in the private fork of a GitHub security advisory and disclosed after the release ([SECURITY.md](../SECURITY.md)).
+A fix for a security flaw in a released version never goes through a public issue or pull request, not even into `dev`: it is prepared in the private fork of a GitHub security advisory and disclosed after the release ([SECURITY.md](../.github/SECURITY.md)).
 
 ## Security patch releases
 
-The security routine pushes its fixes to a `claude/security-auto-*` branch with the patch version already bumped. Once CI passes there, `security-autorelease.yml` (which runs from `main`) checks the branch with `scripts/autorelease-gate.mjs`, fast-forwards `main` to it, tags it, runs the `Release` workflow with `publish: true` and marks the release Latest. The repository variable `SECURITY_AUTORELEASE` chooses what may ship this way: `all` (the default), `deps` or `off`. See [SECURITY-REVIEW.md](SECURITY-REVIEW.md).
+The security routine pushes its fixes to a `claude/security-auto-*` branch with the patch version already bumped. Once CI passes there, `security-autorelease.yml` (which runs from `main`) checks the branch with `tools/scripts/autorelease-gate.mjs`, fast-forwards `main` to it, tags it, runs the `Release` workflow with `publish: true` and marks the release Latest. The repository variable `SECURITY_AUTORELEASE` chooses what may ship this way: `all` (the default), `deps` or `off`. See [SECURITY-REVIEW.md](SECURITY-REVIEW.md).
 
 After one, merge `main` back into `dev`, and deploy (step 5).

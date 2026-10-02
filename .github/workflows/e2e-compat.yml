@@ -2,7 +2,7 @@ name: E2E (compatibility)
 
 # The current web app against a real v0.4.0 (e2e/compat/, WISP 402): a v0.4 invite opens a compatibility chat
 # that works both ways and continues in a new chat, and v0.4 refuses a ghostly1 invite. v0.4.0 is built from its
-# tag by scripts/build-compat-web.mjs (the release attaches no web build) and cached, so a run spends its time on
+# tag by tools/scripts/build-compat-web.mjs (the release attaches no web build) and cached, so a run spends its time on
 # the current app's build and two short tests: about 4 minutes.
 # Not on pull requests, like every other app e2e (they run before a release and nightly), and v0.4.0 never
 # changes: what can break it is dev, so it runs nightly on dev, in the E2E workflow (the release gate), and by hand.
@@ -51,11 +51,11 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/ghostly/compat
-          key: compat-web-v0.4.0-${{ hashFiles('scripts/build-compat-web.mjs') }}
+          key: compat-web-v0.4.0-${{ hashFiles('tools/scripts/build-compat-web.mjs') }}
 
       # The checkout has no tags; the script fetches v0.4.0 alone when it has to build.
       - name: Build v0.4.0's web app
-        run: node scripts/build-compat-web.mjs --tag v0.4.0
+        run: node tools/scripts/build-compat-web.mjs --tag v0.4.0
 
       - name: The current app with v0.4.0
         run: npm run test:e2e:compat

@@ -4,8 +4,8 @@
 !docs
 !packages/core/src
 !packages/cli/SKILL.md
-!CONTRIBUTING.md
-!SECURITY.md
+!.github/CONTRIBUTING.md
+!.github/SECURITY.md
 apps/website/node_modules
 apps/website/.next
 apps/website/public/reference

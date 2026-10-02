@@ -8,6 +8,9 @@ import { input } from "./wallet/ui";
 import { InputGroup } from "./layout";
 import { formatAmount } from "../lib/amount";
 import { errorText } from "../lib/errorText";
+import { saveMade } from "../lib/fileDownload";
+import { servicesPlatform } from "../lib/platform";
+import { BACKUP_MEDIA_TYPE } from "@ghostly/browser/backup/envelope";
 
 /**
  * Deleting a profile removes its chats, keys and wallets for good. The dialog says what is inside, offers
@@ -54,9 +57,8 @@ export function DeleteProfileDialog({ entry, onClose }: { entry: ProfileEntry; o
             <button type="button" disabled={busy || passphrase.length < 12 || (locked && !lockPassword)} className={`${button} bg-surface-alt text-text-primary border border-border`}
               onClick={() => void run(async () => {
                 const text = await createProfileBackup(passphrase, entry.id, lockPassword);
-                const url = URL.createObjectURL(new Blob([text], { type: "application/vnd.ghostly.backup+json" }));
-                const link = document.createElement("a"); link.href = url; link.download = backupFileName(plain); link.click();
-                setTimeout(() => URL.revokeObjectURL(url), 2000);
+                // The desktop app asks where to save it; closing that dialog saves nothing, and the passphrase stays to try again.
+                if ((await saveMade(servicesPlatform, new Blob([text], { type: BACKUP_MEDIA_TYPE }), backupFileName(plain))) === "cancelled") return;
                 setSaved(true); setBackingUp(false); setPassphrase("");
               })}>{t("common.save")}</button>
           </InputGroup>

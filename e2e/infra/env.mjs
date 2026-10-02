@@ -76,7 +76,7 @@ export const VARIABLES = {
   // https://pds.ghostly.test and https://plc.ghostly.test here, as the PDS believes it is the first.
   E2E_ATPROTO_PDS_URL: ["http://127.0.0.1:47086", "AT Protocol PDS (@atproto/pds, as https://pds.ghostly.test): Bluesky identity suites"],
   E2E_ATPROTO_PLC_URL: ["http://127.0.0.1:47087", "AT Protocol PLC directory (in memory, as https://plc.ghostly.test)"],
-  GHOSTLY_HYPERDHT_RELAY_URL: ["ws://127.0.0.1:47097", "HyperDHT relay (dht-relay over WebSocket, services/hyperdht-relay)"],
+  GHOSTLY_HYPERDHT_RELAY_URL: ["ws://127.0.0.1:47097", "HyperDHT relay (dht-relay over WebSocket, infra/services/hyperdht-relay)"],
 
   // Pubky (WISP 302): Pubky's testnet. The suites route Pubky's public relays and the homeserver's name here.
   GHOSTLY_PUBKY_PKARR_RELAY_URL: ["http://127.0.0.1:47091", "Pubky testnet: its Pkarr relay (the homeserver's record, on the testnet's own DHT)"],

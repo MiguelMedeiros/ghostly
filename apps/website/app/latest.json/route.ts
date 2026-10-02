@@ -5,7 +5,7 @@ import { VERSION } from "@/lib/release";
  * of date. Ghostly serves this itself so that no client has to ask a third
  * party, and any origin may read it: the extension asks from its own.
  *
- * `scripts/bump-version.mjs` sets the version this answers with, and the site
+ * `tools/scripts/bump-version.mjs` sets the version this answers with, and the site
  * is rebuilt as part of every release.
  */
 export const dynamic = "force-static";

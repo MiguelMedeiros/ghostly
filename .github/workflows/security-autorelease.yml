@@ -3,7 +3,7 @@ name: Security autorelease
 # The security routine (a scheduled Claude Code agent) pushes its fixes to a
 # `claude/security-auto-*` branch, version already bumped by one patch. Once
 # CI passes on that push, this workflow, which always runs from `main`, checks
-# the branch against scripts/autorelease-gate.mjs, fast-forwards main to it,
+# the branch against tools/scripts/autorelease-gate.mjs, fast-forwards main to it,
 # tags it and publishes the release.
 #
 # Repository variable SECURITY_AUTORELEASE: "all" (default: dependency and
@@ -55,7 +55,7 @@ jobs:
           BRANCH: ${{ github.event.workflow_run.head_branch }}
           HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
           MODE: ${{ vars.SECURITY_AUTORELEASE || 'all' }}
-        run: node scripts/autorelease-gate.mjs
+        run: node tools/scripts/autorelease-gate.mjs
 
   merge:
     name: Merge and tag

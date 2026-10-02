@@ -626,7 +626,8 @@ describe("two headless peers", { timeout: 180_000 }, () => {
     await waitForMember(bob, "Bot crew", "Alice bot");
     const listen = await listenTo(bob, "--type", "group.");
     const sent = ok(await as(alice, "group", "send", "Bot crew", "hey @Bob", "--mention", "Bob"));
-    expect(sent).toMatchObject({ group: created.group, messageId: expect.any(String), sent: true });
+    // `sent`: whether an edge took it already (it goes when one opens otherwise).
+    expect(sent).toMatchObject({ group: created.group, messageId: expect.any(String), sent: expect.any(Boolean) });
     const event = await listen.waitFor((l) => l.type === "group.message", 60_000);
     expect(event).toMatchObject({ group: joined.group, message: { id: sent.messageId, text: "hey @Bob", mentioned: true, nick: "Alice bot", member: expect.any(String) } });
 

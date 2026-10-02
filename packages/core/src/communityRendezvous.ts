@@ -100,14 +100,20 @@ function unpack(bytes: Uint8Array, withLoad: boolean, max: number): Hub[] {
 /**
  * The hubs that take turns at the door (WISP 9xx § Admission): those that said so lately and have
  * been hubs for a minute, so that every hub, having read the beacon at least once since, agrees on
- * the same set. Only when there is none, every hub that said so lately. And when none did, a hub asking (`me`)
+ * the same set. Only when there is none (a group's first minute), the one that has been a hub longest. And when none said so lately, a hub asking (`me`)
  * that sees no other fresh hub in the beacon is the door alone, listed or not: its own entry may not have reached the
  * relays yet (a new group's first hub, whose write the relays' budget holds back), and there is nobody to agree with.
  */
 export function doorHubs(hubs: Hub[], now = Date.now(), me?: string): string[] {
   const lately = hubs.filter(h => now - h.ts < COMMUNITY_TOPOLOGY.beaconEveryMs * 1.5);
   const settled = lately.filter(h => now - (h.since ?? h.ts) >= 60_000);
-  const door = (settled.length ? settled : lately).map(h => h.key);
+  // None settled (a group's first minute): the hub that has been one longest, alone, and the lowest key between two of
+  // the same second. A hub alone in the beacon reads it only when it republishes, so for half a minute it does not know
+  // of a member that just became a hub; that member, counting both of them at the door with the lower key, answered
+  // the same knock as the first hub did: two hubs on one entry session, where at best one of them looks 90 s for nobody.
+  const since = (h: Hub) => Math.floor((h.since ?? h.ts) / 1000);
+  const first = [...lately].sort((a, b) => since(a) - since(b) || (a.key < b.key ? -1 : 1)).slice(0, 1);
+  const door = (settled.length ? settled : first).map(h => h.key);
   if (door.length || me === undefined || freshHubs(hubs, now).some(h => h.key !== me)) return door;
   return [me];
 }

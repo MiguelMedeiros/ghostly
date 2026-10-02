@@ -2,7 +2,7 @@ import { defineConfig, devices } from "@playwright/test";
 
 /**
  * The current web app against a real older release (e2e/compat/): v0.4.0, built from its tag by
- * scripts/build-compat-web.mjs (about a minute the first time, cached after that) and served beside the
+ * tools/scripts/build-compat-web.mjs (about a minute the first time, cached after that) and served beside the
  * current build. Peers meet on the test's Pkarr relay, as in the main suite: nothing leaves the machine.
  *
  *   npm run test:e2e:compat
@@ -46,7 +46,7 @@ export default defineConfig({
       timeout: 5 * 60_000,
     }]),
     {
-      command: `node scripts/build-compat-web.mjs --tag v0.4.0 --serve ${compatPort}`,
+      command: `node tools/scripts/build-compat-web.mjs --tag v0.4.0 --serve ${compatPort}`,
       cwd: "..",
       url: `http://localhost:${compatPort}`,
       reuseExistingServer: !process.env.CI,

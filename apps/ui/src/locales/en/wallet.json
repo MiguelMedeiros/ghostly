@@ -41,6 +41,7 @@
   },
   "backupReminder": {
     "body": "Back it up so you don't lose it if this device is lost.",
+    "bodyUnprotected": "Back it up so you don't lose it if this device is lost or this browser clears its data.",
     "go": {
       "phrase": "Show recovery phrase",
       "profile": "Back up profile"

@@ -15,7 +15,7 @@
   "pushRelayInfo": "Une page de navigateur ne peut pas envoyer elle-même à un service push. Un relais de votre choix envoie le réveil pour elle, déjà chiffré : il apprend quand vous avez réveillé quelqu'un, et votre adresse IP, jamais ce que vous avez écrit. Ghostly n'en fait tourner aucun. Desktop et la ligne de commande n'en ont pas besoin.",
   "readRelays": "Utiliser aussi les relais Pkarr",
   "readRelaysHint": "Trouve plus vite un premier contact. Les relais voient quelles clés sont cherchées.",
-  "readRelaysInfo": "Cette app lit directement la DHT Mainline. Activé, elle lit aussi via les relais Pkarr ci-dessous.",
+  "readRelaysInfo": "Cette app lit directement la DHT Mainline. Activé, elle lit aussi via les relais Pkarr ci-dessous. Si la DHT est injoignable (un VPN ou un pare-feu peut la bloquer), elle lit quand même via ces relais.",
   "relays": "Relais Pkarr",
   "relaysHint": "Un par ligne. Ils ne voient que des paquets signés et chiffrés.",
   "relaysInfoDirect": "Les contacts sur le web et dans l'extension n'atteignent pas la DHT Mainline et lisent via des relais : cette app y écrit donc aussi.",

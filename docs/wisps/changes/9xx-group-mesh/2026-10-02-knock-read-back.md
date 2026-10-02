@@ -1,0 +1,1 @@
+A joiner reads its knock back about a second after writing it and writes it again at once when another joiner's write replaced it; a knock still in the record is written again only when it is thirty seconds old, where it was rewritten every five seconds.

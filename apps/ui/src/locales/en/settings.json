@@ -131,6 +131,24 @@
   "shareProfile": "Share my name and picture with contacts",
   "shareProfileHint": "Your contacts see this profile's name and picture. Off, they see “Contact” and a pattern instead.",
   "sourceCode": "Source code",
+  "storageDevice": "Storage on this device",
+  "storageHint": {
+    "protected": "This browser keeps Ghostly's data until you remove it.",
+    "unprotected": "This browser may clear Ghostly's data when the device runs low on space.",
+    "unsupported": "This browser does not say if it keeps Ghostly's data."
+  },
+  "storageInfo": {
+    "protected": "Clearing the browser's site data or removing the app still deletes everything. Keep a backup of your profile.",
+    "safari": "Safari also deletes a website's data after 7 days without a visit, unless it is on the Home Screen.",
+    "unprotected": "Install Ghostly (add it to the Home Screen), allow notifications, and keep a backup of your profile. Browsers protect apps that are installed and used often."
+  },
+  "storageOf": "{{used}} of {{quota}}",
+  "storageProtect": "Protect",
+  "storageState": {
+    "protected": "Protected",
+    "unprotected": "Not protected",
+    "unsupported": "Unknown"
+  },
   "storageUsed": "Storage used",
   "systemNotifications": "System notifications",
   "theme": "Theme",

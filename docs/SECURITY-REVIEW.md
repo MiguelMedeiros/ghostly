@@ -1,6 +1,6 @@
 # Security review log
 
-What we know about Ghostly's security, what was fixed, how it was proven, and what is still open. The security routine reads this file before every run and updates it after. People reporting a vulnerability: see [SECURITY.md](../SECURITY.md).
+What we know about Ghostly's security, what was fixed, how it was proven, and what is still open. The security routine reads this file before every run and updates it after. People reporting a vulnerability: see [SECURITY.md](../.github/SECURITY.md).
 
 ## Threat model
 
@@ -22,7 +22,7 @@ What we know about Ghostly's security, what was fixed, how it was proven, and wh
 3. The HTTP host keeps every guarantee in [PROTOCOL.md §6.4](PROTOCOL.md): loopback only, no escaping the base path, no redirects off target, no host credentials, limits hold.
 4. A payment request is settled only by the full amount from a mint the request named; ecash is never lost or counted twice (persist before sending, reconcile after).
 5. Secrets (seeds, link keys, wallet proofs) never land in URLs, history, logs or third-party requests.
-6. CI actions are pinned to commits; `scripts/security-scan.mjs` is clean except for entries in `.github/security-allowlist.json`.
+6. CI actions are pinned to commits; `tools/scripts/security-scan.mjs` is clean except for entries in `.github/security-allowlist.json`.
 7. What a contact's message costs the parser and renderer is bounded (size, nesting, time), and one bad message cannot take down the chat.
 8. A Mainnet spend needs the person's explicit confirmation in the engine (`confirmedReal`), not only in the UI.
 
@@ -34,7 +34,7 @@ Status: **open**, **fixed** (merged, with the proof), **accepted** (with why).
 
 This repository is public, so anything written here or in an issue or pull request is readable by an attacker the moment it lands. A finding that is **open**, or **fixed but not yet released**, is a working recipe against every user running the current version.
 
-- **Never** open a public issue or pull request that describes an unfixed or unreleased flaw, and never leave a security issue open. `SECURITY.md` asks reporters not to; the repository's own practice has to match.
+- **Never** open a public issue or pull request that describes an unfixed or unreleased flaw, and never leave a security issue open. `.github/SECURITY.md` asks reporters not to; the repository's own practice has to match.
 - The private channel is GitHub **private vulnerability reporting** (enabled) and a **draft security advisory**: the advisory carries the detail, its **private fork** carries the fix, and the advisory is published only after the release is out and people have had a chance to update.
 - Findings recorded here while still **open** are written as the shape of the problem and the invariant it touches, not as steps to reproduce it, and not with the code path that makes it work. The reproduction lives in the private advisory.
 - A finding that can be fixed and proven ships straight through the autorelease gate; that is the preferred path, because a released fix is also the shortest disclosure window.
@@ -67,7 +67,7 @@ This repository is public, so anything written here or in an issue or pull reque
 
 ### Routine run 2026-09-19 (area 3: UI and local storage)
 
-Scanned: `package-lock.json`, `apps/website/package-lock.json` and `Cargo.lock`. `scripts/security-scan.mjs` could not run here (this runner's egress policy answers 403 for `api.osv.dev`), so the same lock files were checked against `npm audit` (0 advisories in both trees) and against a clone of `rustsec/advisory-db` (8 advisories, all of them the ones already accepted in the allowlist, none expired). The scanner itself still runs in the Security workflow on every push, which is what the gate waits for.
+Scanned: `package-lock.json`, `apps/website/package-lock.json` and `Cargo.lock`. `tools/scripts/security-scan.mjs` could not run here (this runner's egress policy answers 403 for `api.osv.dev`), so the same lock files were checked against `npm audit` (0 advisories in both trees) and against a clone of `rustsec/advisory-db` (8 advisories, all of them the ones already accepted in the allowlist, none expired). The scanner itself still runs in the Security workflow on every push, which is what the gate waits for.
 
 Reviewed: everything merged since the first review, which is all dependency work (#25, #26, #30, #34, #40, #42, #43, #44, #45, #46, #50, #51). Every workflow `uses:` is still pinned to a commit (invariant 6). Two of those bumps touch code that matters here and both hold up: the rand 0.10 migration replaces `OsRng.fill_bytes` with `SysRng.try_fill_bytes` for link keys and secretbox nonces, which is the same OS generator and now fails loudly instead of quietly, with no fallback to a seeded one; and the pkarr 8 migration replaces `resolve_most_recent` with `resolve(…, ResolvePolicy::NetworkOnly)`, which that crate documents as "guaranteed to return the newest valid signed packet", so a relay or DHT node still cannot make a stale packet look current.
 
@@ -177,15 +177,15 @@ Every fix is verified in the client it affects, not only in unit tests.
 | Desktop | `cargo test --manifest-path apps/desktop/Cargo.toml` (IPC against the real capabilities); two apps: `npm run test:e2e:desktop` (Linux), `npm run test:e2e:desktop-macos`; attacks: `npm run tauri dev` + `node apps/extension/test/desktop-attacks.mjs` |
 | Headless CLI | `npm test -w @ghostlytools/cli` (builds it, then two bots pair over the network); against the web app: `e2e/web/headless-chat.spec.ts` |
 | Website | `cd apps/website && npx next build`; after deploy, `curl -sI https://ghostly.tools` |
-| Dependencies | `node scripts/security-scan.mjs` |
+| Dependencies | `node tools/scripts/security-scan.mjs` |
 
 ## The security routine
 
 A scheduled Claude Code agent reviews the repository a few times a week. Each run:
 
-1. reads this file, runs `node scripts/security-scan.mjs`, and reviews what changed since the last run plus one area in depth (rotating);
+1. reads this file, runs `node tools/scripts/security-scan.mjs`, and reviews what changed since the last run plus one area in depth (rotating);
 2. fixes what it can prove, with a test, on a `claude/security-auto-<date>` branch that also bumps the patch version and adds a changelog entry;
-3. `security-autorelease.yml` then checks the branch (`scripts/autorelease-gate.mjs`: no CI or release changes, no new dependencies, size cap, one patch bump, one release per 20 h, CI and Security green), fast-forwards main to it (no pull request), tags it and publishes the release;
+3. `security-autorelease.yml` then checks the branch (`tools/scripts/autorelease-gate.mjs`: no CI or release changes, no new dependencies, size cap, one patch bump, one release per 20 h, CI and Security green), fast-forwards main to it (no pull request), tags it and publishes the release;
 4. anything it cannot fix safely is added here as **open**, in the shape described under [Disclosure](#disclosure-nothing-unfixed-is-described-in-public), and the reproduction goes into a **draft security advisory**, never into an issue or pull request.
 
 When the gate refuses a run (the 20 h window, a change outside its limits, a red check), the fix does **not** become a public pull request describing the flaw. It waits for the next window, or goes through a draft advisory and its private fork and is released from there. A run that opens a public branch or pull request must not say what the flaw lets an attacker do until the release carrying the fix is out.

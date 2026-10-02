@@ -9,6 +9,7 @@ import { PairingScene } from "../../components/pairing/PairingScene";
 import { CELEBRATE_MS, usePairingProgress } from "../../hooks/usePairingProgress";
 import { deriveStage, failureReason, formatElapsed, type PairingProgress } from "../../lib/pairingProgress";
 import { loadSettings, saveSettings } from "../../lib/settings";
+import { MOTION_REST_MS } from "../../lib/windowAway";
 import { fakeEngine, linkView } from "../fakeEngine";
 import { renderApp } from "../render";
 
@@ -462,6 +463,40 @@ describe("motion", () => {
     expect(scene()).not.toHaveAttribute("data-paused");
   });
 
+  it("pauses while the window is away, and goes on when it is back", () => {
+    let focused = true;
+    vi.spyOn(document, "hasFocus").mockImplementation(() => focused);
+    const { engine } = renderApp(<Pairing inviter />);
+    show(published, engine);
+    expect(scene()).not.toHaveAttribute("data-paused");
+    focused = false;
+    act(() => { window.dispatchEvent(new Event("blur")); });
+    expect(scene()).toHaveAttribute("data-paused");
+    focused = true;
+    act(() => { window.dispatchEvent(new Event("focus")); });
+    expect(scene()).not.toHaveAttribute("data-paused");
+  });
+
+  it("a stage that has lasted a minute becomes a still picture, until the stage changes", () => {
+    vi.useFakeTimers();
+    try {
+      vi.spyOn(document, "hasFocus").mockReturnValue(true);
+      const { engine } = renderApp(<Pairing inviter />);
+      show(published, engine);
+      const glyph = () => screen.getAllByTestId("pairing-glyph")[0];
+      expect(scene()).toHaveAttribute("data-stage", "waiting");
+      expect(scene()).not.toHaveAttribute("data-still");
+      act(() => { vi.advanceTimersByTime(MOTION_REST_MS); });
+      expect(scene()).toHaveAttribute("data-still");
+      expect(glyph()).toHaveAttribute("data-still");
+      // Its words and its clock go on.
+      expect(screen.getByTestId("pairing-elapsed")).toBeInTheDocument();
+      show(knocked, engine);
+      expect(scene()).not.toHaveAttribute("data-still");
+      expect(glyph()).not.toHaveAttribute("data-still");
+    } finally { vi.useRealTimers(); }
+  });
+
   it("with reduced motion, every stage still says the same in words and steps", () => {
     document.documentElement.dataset.reduceMotion = "true";
     const { engine } = renderApp(<Pairing inviter={false} />);
@@ -478,6 +513,7 @@ describe("motion", () => {
     expect(css).toMatch(/:root\[data-reduce-motion="true"\] \.ps, :root\[data-reduce-motion="true"\] \.ps \* \{ animation: none !important;/);
     expect(css).toMatch(/:root\[data-reduce-motion="true"\] \.ps\[data-stage="knocking"\] :is\(\.ps-route-up, \.ps-route-low\)/);
     expect(css).toMatch(/\.ps\[data-paused\] \*, \.ps\[data-paused\] \{ animation-play-state: paused !important; \}/);
+    expect(css).toMatch(/\.ps\[data-still\]\[data-stage="knocking"\] :is\(\.ps-route-up, \.ps-route-low\)/);
   });
 });
 

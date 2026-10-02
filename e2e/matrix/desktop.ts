@@ -23,7 +23,7 @@ export interface DesktopWorld {
   cleanup: (() => Promise<void> | void)[];
 }
 
-/** The HyperDHT testnet the Desktop runtime's own dependency graph ships (scripts/prepare-native-runtime.mjs installs it). */
+/** The HyperDHT testnet the Desktop runtime's own dependency graph ships (tools/scripts/prepare-native-runtime.mjs installs it). */
 export const HYPERDHT_TESTNET = join(import.meta.dirname, "..", "..", "native", "transports", "hyperdht", "node_modules", "hyperdht", "testnet.js");
 
 /**

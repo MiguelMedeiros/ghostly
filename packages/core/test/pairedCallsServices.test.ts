@@ -5,7 +5,9 @@ import { createIdentity } from "../src/identity";
 import { parseLocalTarget, utf8Decode, type LocalFetch } from "../src";
 import type { BoundChannel, NativeBinding, NativeEndpoint } from "../src/pairedTransports";
 import type { FrameChannel } from "../src/frames";
-// covers: calls.paired.negotiate, calls.signal, services.paired.negotiate, services.http
+import { PairedCalls } from "../src/pairedCalls";
+import { CALL_SIGNAL_MAX_AGE_MS } from "../src/callSignal";
+// covers: calls.paired.negotiate, calls.signal, services.paired.negotiate, services.http, transport.native-pool
 
 /**
  * Calls and shared apps on a paired session, end to end in one process: two GhostLinks connected over an
@@ -201,6 +203,98 @@ describe("calls on a paired session (calls/1)", () => {
     expect(a.link.callsUnavailable).toBe("Calls need a live connection");
     expect(a.link.sessionOffers.peer).toBeNull();
     await expect(a.link.setCallSignal(hangUp())).rejects.toThrow("Calls need a live connection");
+  });
+});
+
+describe("a live session giving its native listener to a chat in use", () => {
+  /** Unused this long counts as idle here: the engine asks for two minutes (`NATIVE_HOLD_MS`). */
+  const IDLE = 400;
+  const quiet = () => new Promise(resolve => setTimeout(resolve, IDLE + 50));
+
+  it("an idle session gives it up with a goodbye; one just opened, used lately or with a call on keeps it", async () => {
+    const sentByA: string[] = [];
+    const received: string[] = [];
+    const { a, b } = pair({ drop: { a: data => { sentByA.push(data); return false; } }, a: { events: { onMessage: m => { received.push(m.text); } } } });
+    await live(a, b);
+    await vi.waitFor(() => expect(a.link.supportsCalls && b.link.supportsCalls).toBe(true));
+    // Just opened: unused for none of the hold. And never a transport the session is not on.
+    expect(a.link.canYieldEndpoint("iroh/1", IDLE)).toBe(false);
+    await quiet();
+    expect(a.link.canYieldEndpoint("iroh/1", IDLE)).toBe(true);
+    expect(a.link.canYieldEndpoint("hyperdht/1", IDLE)).toBe(false);
+    // A text from the contact is use; so is the receipt that answers this side's.
+    expect(await b.link.sendMessage("still here")).toBeNull();
+    await vi.waitFor(() => expect(received).toEqual(["still here"]));
+    expect(a.link.canYieldEndpoint("iroh/1", IDLE)).toBe(false);
+    await vi.waitFor(() => expect(b.link.canYieldEndpoint("iroh/1", IDLE)).toBe(false));
+    // A call on, however long, keeps the session: its media runs elsewhere, so the session itself goes quiet.
+    await a.link.setCallSignal(offer());
+    await vi.waitFor(() => expect(b.calls).toHaveLength(1));
+    await b.link.setCallSignal(answer());
+    await vi.waitFor(() => expect(a.calls).toHaveLength(1));
+    await quiet();
+    expect(a.link.canYieldEndpoint("iroh/1", IDLE)).toBe(false);
+    expect(b.link.canYieldEndpoint("iroh/1", IDLE)).toBe(false);
+    // Hung up (by either side): idle again once quiet.
+    await b.link.setCallSignal(hangUp());
+    await vi.waitFor(() => expect(a.calls).toHaveLength(2));
+    await quiet();
+    expect(a.link.canYieldEndpoint("iroh/1", IDLE)).toBe(true);
+    expect(b.link.canYieldEndpoint("iroh/1", IDLE)).toBe(true);
+
+    // Given up: the contact hears a goodbye, and this side no longer listens on Iroh.
+    const close = vi.spyOn(a.endpoint, "close");
+    expect(await a.link.yieldEndpoint("iroh/1", IDLE)).toBe(true);
+    expect(sentByA.some(data => data.includes('"t":"paired-bye"'))).toBe(true);
+    expect(close).toHaveBeenCalled();
+    expect(a.link.isDataLinkOpen).toBe(false);
+    expect(a.link.availableTransports).not.toContain("iroh/1");
+    await vi.waitFor(() => expect(b.link.isDataLinkOpen).toBe(false));
+    // Nothing left to give.
+    expect(await a.link.yieldEndpoint("iroh/1", IDLE)).toBe(false);
+  });
+
+  it("a file moving keeps the session, however quiet the chat", async () => {
+    let finish!: () => void;
+    const held = new Promise<void>(resolve => { finish = resolve; });
+    const sink = { write: async () => {}, close: async () => {}, abort: () => {} };
+    const { a, b } = pair({ a: { events: { onFileIncoming: () => sink } }, b: { events: { onFileIncoming: () => sink } } });
+    await live(a, b);
+    await vi.waitFor(() => expect(a.link.supportsFiles).toBe(true));
+    async function* slow() { yield new Uint8Array(8); await held; yield new Uint8Array(8); }
+    const sending = a.link.sendFile({ id: "f".repeat(22), name: "slow.bin", size: 16, mime: "application/octet-stream", timestamp: Date.now() }, slow()).catch(() => {});
+    await quiet();
+    expect(a.link.canYieldEndpoint("iroh/1", IDLE)).toBe(false);
+    finish();
+    await sending;
+    await quiet();
+    expect(a.link.canYieldEndpoint("iroh/1", IDLE)).toBe(true);
+  });
+
+  it("a call is on from an answer either side gave until a hang-up or a clear; an offer nobody answers rings only so long", () => {
+    let now = 1_000_000;
+    const calls = new PairedCalls(() => now);
+    expect(calls.on).toBe(false);
+    calls.set(offer());
+    expect(calls.on).toBe(true);
+    now += CALL_SIGNAL_MAX_AGE_MS + 1;
+    expect(calls.on).toBe(false);
+    calls.set(offer());
+    now += 1;
+    calls.heard(answer());
+    now += 60 * 60_000;
+    expect(calls.on).toBe(true);
+    now += 1;
+    calls.heard(hangUp());
+    expect(calls.on).toBe(false);
+    now += 1;
+    calls.heard(offer());
+    now += 1;
+    calls.set(answer());
+    expect(calls.on).toBe(true);
+    now += 1;
+    calls.set(null);
+    expect(calls.on).toBe(false);
   });
 });
 

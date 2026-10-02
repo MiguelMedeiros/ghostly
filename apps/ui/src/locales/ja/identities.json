@@ -353,15 +353,15 @@
     "title": "連絡先から"
   },
   "share": {
+    "captionMine": "この ID を共有しました",
+    "captionTheirs": "{{contact}} がこの ID を共有しました",
     "checking": "確認中",
     "notChecked": "未確認",
     "notVerified": "確認できません",
     "notVerifiedWhy": "確認できません: {{error}}",
     "revokedMine": "あなたの {{what}} は取り消されました",
     "revokedTheirs": "{{contact}} の {{what}} は取り消されました",
-    "sharedMine": "{{what}} を共有しました",
     "sharedMineState": "{{what}} を共有しました · {{state}}",
-    "sharedTheirs": "{{contact}} が {{what}} を共有しました",
     "sharedTheirsState": "{{contact}} が {{what}} を共有しました · {{state}}",
     "stoppedMine": "{{what}} の共有を停止しました",
     "stoppedTheirs": "{{contact}} が {{what}} の共有を停止しました",

@@ -42,6 +42,7 @@ Every transport runs the same authenticated chat session ([WISP 401](wisps/401-p
   - `https://euc1-1.relay.n0.iroh.link/`
   - `https://aps1-1.relay.n0.iroh.link/`
   - `https://usw1-1.relay.n0.iroh.link/`
+- Iroh compares relay URLs as text, and native Iroh names n0's relays with the trailing dot of a full domain name (`use1-1.relay.n0.iroh.link.`), which WebKit (Safari, the iPhone app) refuses to open. So a relay URL is put in one spelling before it goes into an endpoint (`irohRelayUrl` in `packages/core/src/pairedTransports.ts`): without the dot for the browser build, with it for the Desktop. `https://relay.example.com/` and `https://relay.example.com./` are then the same relay, in Settings and in a contact's record, and no browser is asked to open a dotted host.
 - The wasm (about 1.1 MB gzipped) loads only when a chat first starts an endpoint.
 - **Web to Desktop** ([#270](https://github.com/MiguelMedeiros/ghostly/pull/270)): a Desktop's Iroh learns its home relay a few seconds after it starts. The capability record is republished when that happens, so a browser can dial the Desktop through that relay. This is the path when WebRTC between a browser and a Desktop does not connect.
 - The relay sees which endpoints talk, when and how much. It never sees frames.
@@ -49,15 +50,31 @@ Every transport runs the same authenticated chat session ([WISP 401](wisps/401-p
 ### HyperDHT
 
 - **Desktop** ([#187](https://github.com/MiguelMedeiros/ghostly/pull/187)): `hyperdht` 6.34 runs in a Node sidecar (`apps/desktop/native-runtime`, bundled with the app). One sidecar per app, started on first use, stopped with the last chat, and it exits with the app.
-- **Web and extension** ([#231](https://github.com/MiguelMedeiros/ghostly/pull/231)): through a HyperDHT relay (Holepunch's `@hyperswarm/dht-relay`, fixed in `services/hyperdht-relay`). Always non-custodial: the browser keeps its keys and runs the Noise handshake and the encrypted stream. The relay forwards ciphertext and sees the browser's address, the per-chat keys and timing.
+- **Web and extension** ([#231](https://github.com/MiguelMedeiros/ghostly/pull/231)): through a HyperDHT relay (Holepunch's `@hyperswarm/dht-relay`, fixed in `infra/services/hyperdht-relay`). Always non-custodial: the browser keeps its keys and runs the Noise handshake and the encrypted stream. The relay forwards ciphertext and sees the browser's address, the per-chat keys and timing.
 - **Off by default:** `DEFAULT_HYPERDHT_RELAY` is empty and no public Ghostly relay is run. Set a `wss://` relay in Settings, Advanced, Network to turn it on.
 
 ### Choosing a transport
 
 - **Automatic** (the default): both apps rank the transports they share. A relayed path ranks after every direct one. When WebRTC fails, the dialling side goes on to the next one (often a relayed Iroh) before the chat stays on the DHT.
+- WebRTC that cannot connect on a network (a VPN, a firewall) does not hold the chat back: an answered offer with no connection after 6 s is raced by what ranks after it, relayed transports too (`RACE_ANSWERED_MS`), and a side that gathers no candidate dials its other transports itself and tries WebRTC last for 10 minutes (`RTC_UNSTARTED_MS`). See [WISP 100](wisps/100-transports.md#webrtc-that-cannot-connect-on-this-network).
 - A transport or **DHT only** can be chosen per chat in the connection panel (the connection icon in the chat header). A choice made with no stream open travels in the capability record, so the contact dials it first.
 - A native transport that fails three attempts in a row is tried last for an hour.
+- Native listeners start one at a time per transport, the transports side by side (`nativeQueues` in `packages/browser/src/engine/node.ts`). HyperDHT with its DHT out of reach (UDP blocked, a VPN) takes about 6 s to start listening; in one shared queue each chat's Iroh listener waited that long per chat ahead of it.
 - While live, the chat does not probe for a better transport. It changes when the current one drops or someone switches.
+
+### When direct connections are blocked
+
+A VPN, a firewall or a carrier's NAT can stop every direct path. The app cannot see a VPN; it sees its own WebRTC attempts fail, and says so in the chat's connection panel and in Settings, Advanced, Network: "Direct connections are blocked on this network (a VPN or firewall?). Chats still work through relays, but connect more slowly." It never says a VPN was found.
+
+- **What counts** (`DataLink` reports per attempt, `DirectPathWatch` in `packages/core/src/directPath.ts` decides):
+  - `no-public`: both descriptions were exchanged, nothing connected, and this device had no public candidate (no STUN server answered, or no candidate at all).
+  - `symmetric`: nothing connected, and this device's public address had three or more ports on one address: a mapping per destination.
+  - `no-path`: this device's offer was answered, it had public candidates, and nothing connected. The contact may be the blocked one.
+- **The rule:** no WebRTC connection open now, none opened since, and either two attempts with this device's own evidence (`no-public`, `symmetric`) or failed attempts with three different contacts. One failed dial shows nothing.
+- **It clears by itself:** when a WebRTC connection opens, when the network changes (the browser's `online` event), and when the evidence is older than 30 minutes.
+- An offer nobody answered says nothing: the contact may be away. An answerer reports only its own evidence.
+- The note is kept in memory. After a restart it comes back only when attempts fail again; a chat that resumes straight on a relayed transport makes no WebRTC attempt.
+- Clients without WebRTC (Desktop on Linux, the headless CLI's UI-less daemon) show no note.
 
 ## Layer 0: Pkarr and the Mainline DHT
 
@@ -68,7 +85,7 @@ A Pkarr record is a small DNS packet (at most 1,000 bytes), signed with Ed25519 
 | Client | Reads | Writes |
 |---|---|---|
 | Web app, extension | Through the Pkarr relays: a page cannot send UDP | Every relay. The publish returns on the first relay that took the packet ([#293](https://github.com/MiguelMedeiros/ghostly/pull/293)) |
-| Desktop | The Mainline DHT directly ([#289](https://github.com/MiguelMedeiros/ghostly/pull/289)). Relay reads only with Settings, Advanced, Network, "Also use Pkarr relays" | The DHT and every relay |
+| Desktop | The Mainline DHT directly ([#289](https://github.com/MiguelMedeiros/ghostly/pull/289)). Relay reads only with Settings, Advanced, Network, "Also use Pkarr relays", or while no DHT node answers at all (UDP blocked, a VPN): two lookups in a row that heard from nobody send reads to the relays until one hears from a node again (`DHT_SILENT_LOOKUPS` in `apps/desktop/src/pkarr_network.rs`) | The DHT and every relay |
 | Headless CLI (`ghostly`) | The relays first, the Mainline DHT when every relay fails ([#392](https://github.com/MiguelMedeiros/ghostly/pull/392), `RelaysAndDht` in `packages/cli/src/runtime/mainline.ts`). `GHOSTLY_DHT=0` leaves the DHT out ([CLI.md](CLI.md#pkarr-relays-and-the-mainline-dht)) | The DHT and every relay |
 
 - Native apps still write to the relays because a browser contact can only read relays, and a relay keeps serving the copy it holds. Measured on 2026-09-25: after a newer packet went to the DHT alone, `pkarr.pubky.org` still served the older one 30 s later, even with a record TTL of 1 s.

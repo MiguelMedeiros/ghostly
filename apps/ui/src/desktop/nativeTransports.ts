@@ -1,5 +1,5 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
-import type { BoundChannel, FrameChannel, NativeBinding, NativeEndpoint } from "@ghostly/core";
+import { irohDescriptor, type BoundChannel, type FrameChannel, type NativeBinding, type NativeEndpoint } from "@ghostly/core";
 
 type Event = { type: "open"; id: number; binding: NativeBinding; incoming: boolean }
   | { type: "frame"; id: number; text: string } | { type: "closed"; id: number };
@@ -81,7 +81,8 @@ export async function createNativeEndpoint(seedB64: string, kind: "iroh" | "hype
     set onConnection(value) { handler = value; if (value) for (const bound of early.splice(0)) value(bound); },
     async connect(descriptor) {
       if (stopped) throw new Error("Native endpoint is stopped");
-      const id = await invoke<number>(`paired_${kind}_connect`, { endpointId: result.id, descriptor });
+      // Iroh takes a relay spelled another way for another relay, and the native one homes on names with the trailing dot; a browser's record has none.
+      const id = await invoke<number>(`paired_${kind}_connect`, { endpointId: result.id, descriptor: kind === "iroh" ? irohDescriptor(descriptor) : descriptor });
       // Tauri channels and command results can be dispatched in separate turns.
       for (let attempt = 0; attempt < 100; attempt++) {
         const bound = connections.get(id);

@@ -3,7 +3,7 @@
 # so they arrive as a few pull requests, not dozens.
 #
 # Everything targets dev, where work lands; main only holds what is released
-# (CONTRIBUTING.md). Security updates still open against the default branch,
+# (.github/CONTRIBUTING.md). Security updates still open against the default branch,
 # which is dev as well.
 version: 2
 updates:

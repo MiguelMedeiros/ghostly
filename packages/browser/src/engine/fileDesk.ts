@@ -131,6 +131,12 @@ export class FileDesk {
     return { live: !!files?.live, peerRoom: files?.peerRoom ?? null };
   }
 
+  /** A files/3 transfer of this chat's under way on its session: offered, moving, or being checked. */
+  moving(linkId: string): boolean {
+    const files = this.chats.get(linkId)?.files;
+    return !!files?.live && files.records().some((r) => r.state === "offered" || r.state === "active" || r.state === "verifying");
+  }
+
   /**
    * Offers a file whose record and bytes are stored under its local id (`outgoingFileId`). Offered before (Retry, a
    * restart): an unfinished transfer is taken over and offered again, a failed one sent again; never a second one.

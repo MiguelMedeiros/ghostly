@@ -17,9 +17,13 @@ describe("the words a restored profile's name is said with", () => {
 });
 
 // A backup an older app made of the first profile, never renamed, carries its name in that app's language: restored,
-// lib/profiles reads any of them as the built-in name, so its list is profile.defaultName in every language.
+// lib/profiles reads the one of the backup's language as the built-in name, so its list is profile.defaultName by language.
 describe("the first profile's name in every language", () => {
-  it.each(LANGUAGES)("%s: profile.defaultName is one of lib/profiles' DEFAULT_NAMES", (language) => {
-    expect(DEFAULT_NAMES).toContain(lookup(language, "profile.defaultName"));
+  it.each(LANGUAGES)("%s: profile.defaultName is lib/profiles' DEFAULT_NAMES of that language", (language) => {
+    expect(DEFAULT_NAMES[language]).toBe(lookup(language, "profile.defaultName"));
+  });
+
+  it("lists no language the app does not speak", () => {
+    expect(Object.keys(DEFAULT_NAMES).sort()).toEqual([...LANGUAGES].sort());
   });
 });

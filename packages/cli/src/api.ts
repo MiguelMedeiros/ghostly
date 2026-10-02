@@ -1,4 +1,4 @@
-import { inviteLink, LIMITS, MENTION_EVERYONE, sanitizeTypingStatus, TYPING_KINDS, TYPING_STATUS_MAX, type GroupMention, type PairedTransport, type TypingKind } from "@ghostly/core";
+import { groupName, inviteLink, LIMITS, MAX_GROUP_NAME_LENGTH, MENTION_EVERYONE, sanitizeTypingStatus, TYPING_KINDS, TYPING_STATUS_MAX, type GroupMention, type PairedTransport, type TypingKind } from "@ghostly/core";
 import type { GroupView, Settings, StoredMessage } from "@ghostly/browser/shared/types";
 import { findSecret } from "../../../apps/ui/src/lib/parse/secrets";
 import { ENGINE_METHODS, ENGINE_READS } from "./engineMethods";
@@ -19,7 +19,7 @@ import { SERVICE_METHODS } from "./services";
 import { BACKUP_METHODS } from "./backup";
 import { CALL_METHODS } from "./calls/api";
 import { WALLET_METHODS } from "./wallets";
-import { chatDetailsJson, chatJson, chatMessageJson, groupJson, groupMessageJson, messageJson, type MessageJson } from "./views";
+import { chatDetailsJson, chatJson, chatMessageJson, groupJson, groupMessageJson, isLive, messageJson, type MessageJson } from "./views";
 
 /**
  * A text past what a chat or a group carries (16 KiB of UTF-8, as the engine counts it: trimmed) is refused before the
@@ -107,7 +107,7 @@ const METHODS: Record<string, Method> = {
     return {
       version: ctx.version, profile: ctx.runtime.paths.name, mode: ctx.mode, pid: process.pid,
       online: s.settings.online, name: s.settings.nick || null, webrtc: ctx.runtime.webrtc, calls: ctx.runtime.callsUnavailable === null,
-      chats: s.links.length, live: s.links.filter((l) => l.textDelivery === "stream").length, groups: s.groups.length,
+      chats: s.links.length, live: s.links.filter(isLive).length, groups: s.groups.length,
       discovery: { protocol: s.transport.protocol, relays: s.transport.relays },
       events: { lastSeq: ctx.hub.lastSeq },
     };
@@ -376,16 +376,19 @@ const METHODS: Record<string, Method> = {
     const view = await waitForState(ctx, (s) => {
       const now = s.links.find((l) => l.id === link.id);
       if (!now) throw new CliError("not_found", `Chat ${link.id} was removed`);
-      const ok = until === "live" ? now.textDelivery === "stream"
+      // Live: a session that exists now, never one remembered from the last run (`isLive`).
+      const ok = until === "live" ? isLive(now)
         : until === "text" ? now.textDelivery === "stream" || now.textDelivery === "dht" || now.textDelivery === "hold"
-        : !!now.pairingProgress?.peerSeen || now.pairing?.status === "ready" || now.textDelivery === "stream";
+        : !!now.pairingProgress?.peerSeen || now.pairing?.status === "ready" || isLive(now);
       return ok ? now : undefined;
     }, ms, `chat ${link.id} to be ${until}`);
     return chatJson(view);
   },
 
   async "group.create"(ctx, params) {
-    const name = str(params, "name", true);
+    // As `group rename` checks it: a name a group cannot have is said here, before anything is made.
+    const name = groupName(str(params, "name", true));
+    if (!name) throw new CliError("bad_request", `A group's name is 1 to ${MAX_GROUP_NAME_LENGTH} characters on one line`);
     const profile = oneOf(params, "profile", ["community", "mesh"] as const, "community");
     const { groupId } = await node(ctx).createGroup({ name, profile });
     let link: string | null = null;
@@ -422,11 +425,13 @@ const METHODS: Record<string, Method> = {
     // A kept `group typing --for` ends with the message (the engine says stop with it).
     endTyping(ctx, { groupId: group.id }, false);
     const result = await node(ctx).sendGroupMessage({ groupId: group.id, text, ...(mentions.length ? { mentions } : {}), ...(replyTo ? { replyTo } : {}), ...(card ? { card } : {}) });
-    if (result.error) throw new CliError("unavailable", result.error);
+    // Not a member (removed, say): refused, and nothing was sent. Anything else by what a bot can do about it.
+    if (result.error) throw result.refused ? new CliError("refused", result.error) : groupSendRefused(result.error);
     const messageId = result.messageId ?? null;
-    // `edges`: how many took it so far (none yet is not an error: it goes when one opens).
+    // `edges`: how many took it so far (none yet is not an error: it goes when one opens). `sent`: whether one did.
+    // Before 2026-10-02 `sent` was always true, also for a message no edge had taken.
     const edges = messageId ? (wait === "sent" ? await waitForGroupFrame(ctx, group.id, messageId, undefined, num(params, "timeout", 30, { min: 1, max: 3600 }) * 1000) : node(ctx).groupTaken({ groupId: group.id, messageId })) : 0;
-    return { group: group.id, messageId, sent: true, edges, ...(card ? { buttons: card.id, card } : {}) };
+    return { group: group.id, messageId, sent: edges > 0, edges, ...(card ? { buttons: card.id, card } : {}) };
   },
   /**
    * WISP 9xx § Edits: the whole new text of one of my messages in a group. It shows here at once and goes to the members
@@ -443,10 +448,14 @@ const METHODS: Record<string, Method> = {
     }
     const mentions = mentionsFor(text, list(params, "mentions"), group);
     const wait = oneOf(params, "wait", ["none", "sent"] as const, "none");
+    const before = (await node(ctx).groupMessages({ groupId: group.id })).find((m) => m.id === messageId)?.edit?.seq ?? 0;
     const result = await node(ctx).editMessage({ linkId: `group:${group.id}`, messageId, text, ...(mentions.length ? { mentions } : {}) });
     if (result.error) throw editRefused(await node(ctx).groupMessages({ groupId: group.id }), messageId, "group", result.error, result.refused);
     const message = (await node(ctx).groupMessages({ groupId: group.id })).find((m) => m.id === messageId);
     const edits = message?.edit?.seq ?? 0;
+    // The text the message already has: no edit was made and nothing went. It answered `sent: true` before, for a
+    // message never edited, as if an edit had gone.
+    if (edits === before) return { group: group.id, messageId, edits, sent: false, edges: 0, unchanged: true };
     // An edit waiting for the pace is not said yet: `--wait sent` waits for that too, then for an edge to take it.
     const edges = !edits ? 0 : wait === "sent" ? await waitForGroupFrame(ctx, group.id, messageId, edits, num(params, "timeout", 30, { min: 1, max: 3600 }) * 1000)
       : node(ctx).groupTaken({ groupId: group.id, messageId, edit: edits });
@@ -538,7 +547,7 @@ async function react(ctx: ApiContext, linkId: string, params: Params): Promise<{
   const emoji = removed ? "" : str(params, "emoji");
   if (!removed && !emoji) throw new CliError("usage", "Give one emoji, or --remove to take yours back");
   const result = await node(ctx).react({ linkId, messageId, emoji: emoji ?? "" });
-  if (result.error) throw new CliError(/not in this chat|No reaction of yours/.test(result.error) ? "not_found" : "bad_request", result.error);
+  if (result.error) throw new CliError(result.refused ? "refused" : /not in this chat|No reaction of yours/.test(result.error) ? "not_found" : "bad_request", result.error);
   return { messageId, emoji: emoji || null, removed };
 }
 
@@ -556,6 +565,18 @@ function typingWord(params: Params, typing: boolean): { kind: TypingKind; status
   const status = sanitizeTypingStatus(oneLine);
   if (!status) throw new CliError("bad_request", "status: plain text, with no link or markup");
   return { kind, status };
+}
+
+/**
+ * A group message the engine did not send, by what a bot can do about it: a `--reply` to a message this group does not
+ * have is `not_found` (exit 3), as `group react`, `group edit` and `pin` answer for one; out of the group (removed,
+ * left, a forked history) is `refused`: it will not go later either. Anything else may go on a later try
+ * (`unavailable`): the epoch's key is still on its way. All three were `unavailable` (exit 1) before.
+ */
+export function groupSendRefused(error: string): CliError {
+  if (/not in this chat|cannot be replied to/.test(error)) return new CliError("not_found", error);
+  if (/^You (were removed from|left|are no longer in) this group$|Membership changes are halted/.test(error)) return new CliError("refused", error);
+  return new CliError("unavailable", error);
 }
 
 /**

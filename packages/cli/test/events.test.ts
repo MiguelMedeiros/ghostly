@@ -47,7 +47,7 @@ describe("the event stream", () => {
     h.sink.post({ kind: "messages", linkId: "c1", messages: [message("c1", "old"), message("c1", "new"), message("c1", "me_1", { sender: "me", delivery: "sending" })] });
     h.sink.post({ kind: "messages", linkId: "c1", messages: [message("c1", "old"), message("c1", "new"), message("c1", "me_1", { sender: "me", delivery: "delivered" })] });
     h.sink.post({ kind: "messages", linkId: "c1", messages: [message("c1", "new"), message("c1", "me_1", { sender: "me", delivery: "delivered" })] });
-    h.sink.post({ kind: "state", state: state([link("c1", { textDelivery: "stream", pairing: { status: "ready", transport: "hyperdht/1" }, pairingProgress: { stage: "live" } as never }), link("c2")]) });
+    h.sink.post({ kind: "state", state: state([link("c1", { textDelivery: "stream", dataLink: "open", pairing: { status: "ready", transport: "hyperdht/1" }, pairingProgress: { stage: "live" } as never }), link("c2")]) });
     h.sink.post({ kind: "state", state: state([link("c2", { label: "bot" })]) });
     const signals: [string, string][] = [];
     h.onCallSignal((chat, signal) => signals.push([chat, signal]));

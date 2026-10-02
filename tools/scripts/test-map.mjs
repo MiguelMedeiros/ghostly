@@ -1,0 +1,273 @@
+#!/usr/bin/env node
+// The test map: which feature of e2e/features.json is covered by which kind of test.
+//
+// Tests declare what they cover, and this script reads the declarations (it runs no test):
+//   Playwright   tag: ["@feature:chat.paired.send"]          on a test or a describe
+//                tag: ["@feature:wallet.lightning.lnd.pay", "@gated"]   runs only with its infrastructure
+//                tag: ["@feature:x", "@client:extension"]  counts for a client other than its folder's
+//   vitest/Rust  // covers: chat.paired.send, chat.paired.receipts     anywhere in the file
+//                // covers-gated: wallet.lightning.lnd.pay            only runs with its infrastructure
+//
+//   node tools/scripts/test-map.mjs            check; print the summary and what is wrong
+//   node tools/scripts/test-map.mjs --matrix   also print every feature's row
+//   node tools/scripts/test-map.mjs --write    also write the map as Markdown to docs/test-map.md (not committed)
+//   node tools/scripts/test-map.mjs --summary  also append it to $GITHUB_STEP_SUMMARY (CI shows it on the run's page)
+//   node tools/scripts/test-map.mjs --fix      first put e2e/features.json in order (see below)
+//
+// It fails when a feature has no test at all and is not in e2e/allow-untested.json, when a tag or
+// a covers comment names a feature that does not exist, and when the allow list names a feature
+// that is tested by now (take it off the list) or does not exist.
+//
+// It also fails when e2e/features.json is out of order: infrastructure, features and paths each sorted by key (id,
+// glob), one entry per line. Parallel pull requests then add lines at different places instead of all appending to
+// the end of an area or of the paths map, and do not conflict. `--fix` sorts it.
+import { appendFileSync, readFileSync, readdirSync, statSync, writeFileSync, existsSync } from "node:fs";
+import { join, sep } from "node:path";
+import { fileURLToPath } from "node:url";
+import { checkPaths, globToRegExp } from "./affected/select.mjs";
+
+const ROOT = join(fileURLToPath(import.meta.url), "..", "..", "..");
+const FEATURES = "e2e/features.json";
+const ALLOW = "e2e/allow-untested.json";
+const NUMBERING = "docs/wisps/numbering.json";
+// Generated, never committed: it changed with every feature, and parallel pull requests conflicted in it.
+const DOC = "docs/test-map.md";
+
+const COLUMNS = ["unit", "rust", "web", "extension", "desktop", "gated"];
+const COLUMN_TITLE = { unit: "Unit", rust: "Rust", web: "E2E web", extension: "E2E ext", desktop: "E2E desktop", gated: "Gated" };
+const E2E_CLIENTS = ["web", "extension", "desktop"];
+const ID = /^[a-z0-9]+(?:-[a-z0-9]+)*(?:\.[a-z0-9]+(?:-[a-z0-9]+)*)+$/;
+const SKIP_DIRS = new Set(["node_modules", "dist", "target", ".git", ".claude", "coverage", "website", "notes-local", "gen", "test-results", "playwright-report"]);
+
+const args = new Set(process.argv.slice(2));
+const errors = [];
+const warnings = [];
+const read = (path) => readFileSync(join(ROOT, path), "utf8");
+const json = (path) => {
+  try { return JSON.parse(read(path)); } catch (error) { errors.push(`${path}: ${error.message}`); return null; }
+};
+
+// ---------- the inventory ----------
+const byKey = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
+/** e2e/features.json as it must be written: each list sorted by its key, one entry per line. */
+function formatInventory(inv) {
+  const block = (open, entries, close, last) => [
+    open,
+    ...entries.map((entry, i) => `    ${entry}${i < entries.length - 1 ? "," : ""}`),
+    `  ${close}${last ? "" : ","}`,
+  ];
+  const pairs = (object) => Object.entries(object ?? {}).sort((a, b) => byKey(a[0], b[0])).map(([k, v]) => `${JSON.stringify(k)}: ${JSON.stringify(v)}`);
+  const rest = Object.keys(inv).filter((k) => !["$comment", "clients", "infra", "features", "paths"].includes(k));
+  if (rest.length) throw new Error(`${FEATURES}: unknown top-level keys ${rest.join(", ")}`);
+  return [
+    "{",
+    `  "$comment": ${JSON.stringify(inv.$comment)},`,
+    `  "clients": ${JSON.stringify(inv.clients).replace(/","/g, '", "')},`,
+    ...block('  "infra": {', pairs(inv.infra), "}"),
+    ...block('  "features": [', [...inv.features].sort((a, b) => byKey(a.id, b.id)).map((f) => JSON.stringify(f)), "]"),
+    ...block('  "paths": {', pairs(inv.paths), "}", true),
+    "}",
+    "",
+  ].join("\n");
+}
+const inventory = json(FEATURES) ?? { features: [], infra: {}, clients: [] };
+if (inventory.$comment) {
+  const ordered = formatInventory(inventory);
+  if (read(FEATURES) !== ordered) {
+    if (args.has("--fix")) {
+      writeFileSync(join(ROOT, FEATURES), ordered);
+      console.log(`sorted ${FEATURES}`);
+    } else errors.push(`${FEATURES}: not in order (infra, features and paths each sorted by key, one per line). Run npm run test:map -- --fix`);
+  }
+}
+const allow = existsSync(join(ROOT, ALLOW)) ? json(ALLOW) ?? {} : {};
+const wisps = new Set((json(NUMBERING) ?? []).map((w) => w.id));
+const features = new Map();
+for (const f of inventory.features) {
+  const where = `${FEATURES}: ${f.id ?? JSON.stringify(f)}`;
+  if (typeof f.id !== "string" || !ID.test(f.id)) errors.push(`${where}: an id is lowercase words joined by dots (area.thing[.detail])`);
+  if (features.has(f.id)) errors.push(`${where}: listed twice`);
+  if (!f.title) errors.push(`${where}: no title`);
+  if (f.wisp !== null && !wisps.has(f.wisp)) errors.push(`${where}: WISP ${f.wisp} is not in ${NUMBERING} (null for a feature no WISP describes)`);
+  if (!["feature", "protocol"].includes(f.kind)) errors.push(`${where}: kind is "feature" or "protocol"`);
+  if (!Array.isArray(f.clients) || f.clients.length === 0) errors.push(`${where}: no clients`);
+  for (const c of f.clients ?? []) if (!inventory.clients.includes(c)) errors.push(`${where}: unknown client ${c}`);
+  for (const i of f.infra ?? []) if (!inventory.infra[i]) errors.push(`${where}: unknown infrastructure ${i}`);
+  features.set(f.id, { ...f, hits: Object.fromEntries(COLUMNS.map((c) => [c, new Set()])) });
+}
+
+// ---------- the tests ----------
+function walk(dir, out = []) {
+  for (const name of readdirSync(join(ROOT, dir))) {
+    if (SKIP_DIRS.has(name)) continue;
+    const path = dir ? `${dir}/${name}` : name;
+    const stat = statSync(join(ROOT, path));
+    if (stat.isDirectory()) walk(path, out);
+    else out.push(path);
+  }
+  return out;
+}
+const files = walk("").map((p) => p.split(sep).join("/"));
+const isSpec = (p) => p.startsWith("e2e/") && /\.spec\.[cm]?[jt]sx?$/.test(p);
+const isUnit = (p) => !p.startsWith("e2e/") && /\.test\.[cm]?[jt]sx?$/.test(p);
+const isRust = (p) => p.endsWith(".rs");
+
+const tested = { specs: 0, specsTagged: 0, units: 0, unitsTagged: 0, rust: 0 };
+const lineOf = (text, index) => text.slice(0, index).split("\n").length;
+
+function hit(id, column, file, line) {
+  const f = features.get(id);
+  if (!f) { errors.push(`${file}:${line}: unknown feature "${id}" (add it to ${FEATURES} or fix the id)`); return; }
+  f.hits[column].add(file);
+}
+
+for (const file of files.filter(isSpec)) {
+  tested.specs++;
+  const text = read(file);
+  const folder = file.includes("/extension/") ? "extension" : file.includes("/desktop/") ? "desktop" : "web";
+  const literals = [];
+  for (const m of text.matchAll(/\btag\s*:\s*(\[[^\]]*\]|"[^"]*"|'[^']*'|`[^`]*`)/g)) {
+    literals.push({ start: m.index, end: m.index + m[0].length, tags: [...m[1].matchAll(/["'`](@[^"'`]+)["'`]/g)].map((t) => t[1]) });
+  }
+  let any = false;
+  for (const { start, tags } of literals) {
+    const ids = tags.filter((t) => t.startsWith("@feature:")).map((t) => t.slice("@feature:".length));
+    if (!ids.length) continue;
+    any = true;
+    const gated = tags.includes("@gated");
+    const clients = tags.filter((t) => t.startsWith("@client:")).map((t) => t.slice("@client:".length));
+    for (const c of clients) if (!E2E_CLIENTS.includes(c)) errors.push(`${file}:${lineOf(text, start)}: unknown client tag @client:${c}`);
+    for (const id of ids) for (const c of clients.length ? clients : [folder]) hit(id, gated ? "gated" : c, file, lineOf(text, start));
+  }
+  for (const m of text.matchAll(/@feature:[^\s"'`\]]*/g)) {
+    if (!literals.some((l) => m.index > l.start && m.index < l.end)) errors.push(`${file}:${lineOf(text, m.index)}: "${m[0]}" outside a tag: [...] is not read; put it in the test's tags`);
+  }
+  if (any) tested.specsTagged++;
+  else warnings.push(`${file}: no @feature tag`);
+}
+
+for (const file of files.filter((p) => isUnit(p) || isRust(p))) {
+  const text = read(file);
+  const rust = isRust(file);
+  let any = false;
+  for (const m of text.matchAll(/^[ \t]*(?:\/\/+|\*|#)[ \t]*covers(-gated)?:[ \t]*(.*)$/gm)) {
+    any = true;
+    const column = m[1] ? "gated" : rust ? "rust" : "unit";
+    for (const id of m[2].split(/[\s,]+/).filter(Boolean)) hit(id, column, file, lineOf(text, m.index));
+  }
+  if (rust) { if (any) tested.rust++; continue; }
+  tested.units++;
+  if (any) tested.unitsTagged++;
+  else warnings.push(`${file}: no // covers: comment`);
+}
+
+// ---------- the paths map (npm run test:affected) ----------
+// A bad pattern fails; a source file no glob matches only warns: test:affected runs every spec for it.
+for (const problem of checkPaths(inventory)) errors.push(`${FEATURES}: ${problem}`);
+const globs = Object.keys(inventory.paths ?? {}).map((g) => globToRegExp(g));
+const SOURCE = /^(?:apps\/ui\/src|packages\/[^/]+\/src|apps\/extension\/src|apps\/web\/src)\//;
+const unmapped = files.filter((p) => SOURCE.test(p) && !isUnit(p) && !p.endsWith(".md") && !globs.some((re) => re.test(p)));
+for (const p of unmapped) warnings.push(`${p}: no glob in ${FEATURES} "paths" (npm run test:affected runs every e2e spec when it changes)`);
+
+// ---------- the verdict ----------
+const covered = (f) => COLUMNS.some((c) => f.hits[c].size > 0);
+for (const f of features.values()) {
+  if (covered(f) && allow[f.id] !== undefined) errors.push(`${ALLOW}: ${f.id} is tested now (${COLUMNS.filter((c) => f.hits[c].size).join(", ")}); take it off the list`);
+  if (!covered(f) && allow[f.id] === undefined) errors.push(`${f.id}: no test covers it (tag one, or add it to ${ALLOW} with the reason)`);
+}
+for (const [id, reason] of Object.entries(allow)) {
+  if (!features.has(id)) errors.push(`${ALLOW}: ${id} is not a feature`);
+  if (typeof reason !== "string" || reason.trim().length < 8) errors.push(`${ALLOW}: ${id} needs a one-line reason`);
+}
+
+// ---------- the report ----------
+const all = [...features.values()];
+const count = (pred) => all.filter(pred).length;
+const summary = {
+  features: all.length,
+  covered: count(covered),
+  untested: count((f) => !covered(f)),
+  columns: Object.fromEntries(COLUMNS.map((c) => [c, count((f) => f.hits[c].size > 0)])),
+  e2eAny: count((f) => E2E_CLIENTS.some((c) => f.hits[c].size > 0)),
+  unitOnly: count((f) => (f.hits.unit.size || f.hits.rust.size) && !E2E_CLIENTS.some((c) => f.hits[c].size) && !f.hits.gated.size),
+  gatedOnly: count((f) => f.hits.gated.size && !["unit", "rust", ...E2E_CLIENTS].some((c) => f.hits[c].size)),
+  clientGaps: Object.fromEntries(E2E_CLIENTS.map((c) => [c, count((f) => f.clients.includes(c) && f.kind === "feature" && !f.hits[c].size)])),
+};
+
+const cell = (f, c) => (f.hits[c].size ? String(f.hits[c].size) : "·");
+const area = (id) => id.split(".")[0];
+
+function printConsole() {
+  const pct = (n) => `${Math.round((100 * n) / Math.max(1, summary.features))}%`;
+  console.log(`test map: ${summary.features} features, ${summary.covered} with a test (${pct(summary.covered)}), ${summary.untested} without one`);
+  console.log(`  ${COLUMNS.map((c) => `${COLUMN_TITLE[c]} ${summary.columns[c]}`).join(" · ")}`);
+  console.log(`  e2e in any client ${summary.e2eAny} · unit only ${summary.unitOnly} · gated only ${summary.gatedOnly}`);
+  console.log(`  tests read: ${tested.specs} e2e specs (${tested.specsTagged} tagged), ${tested.units} unit files (${tested.unitsTagged} tagged), ${tested.rust} Rust files with covers`);
+  if (args.has("--matrix")) {
+    const w = Math.max(...all.map((f) => f.id.length));
+    console.log(`\n${"feature".padEnd(w)}  ${COLUMNS.map((c) => c.slice(0, 5).padStart(5)).join(" ")}`);
+    for (const f of all) console.log(`${f.id.padEnd(w)}  ${COLUMNS.map((c) => cell(f, c).padStart(5)).join(" ")}`);
+  }
+  if (warnings.length && (args.has("--matrix") || args.has("--warnings"))) {
+    console.log(`\n${warnings.length} warnings:`);
+    for (const w of warnings) console.log(`  ${w}`);
+  } else if (warnings.length) {
+    console.log(`  ${warnings.length - unmapped.length} test files declare no feature, ${unmapped.length} source files have no "paths" glob (--warnings lists them)`);
+  }
+}
+
+function markdown() {
+  const lines = [];
+  const pct = (n) => `${Math.round((100 * n) / Math.max(1, summary.features))}%`;
+  lines.push("# Test map", "", "Generated by `npm run test:map:write` from `e2e/features.json` and the tests' tags; not committed. See [TESTING.md](../docs/TESTING.md).", "");
+  lines.push(`**${summary.features} features**, ${summary.covered} covered by at least one test (${pct(summary.covered)}), ${summary.untested} on the [allow-untested list](../${ALLOW}).`, "");
+  lines.push(`| | ${COLUMNS.map((c) => COLUMN_TITLE[c]).join(" | ")} |`);
+  lines.push(`|---|${COLUMNS.map(() => "---:").join("|")}|`);
+  lines.push(`| features with one | ${COLUMNS.map((c) => summary.columns[c]).join(" | ")} |`, "");
+  lines.push(`E2E in any client: ${summary.e2eAny}. Unit tests only: ${summary.unitOnly}. Gated suites only: ${summary.gatedOnly}. User-visible features of a client with no E2E test in that client: ${E2E_CLIENTS.map((c) => `${c} ${summary.clientGaps[c]}`).join(", ")}.`, "");
+  lines.push(`Tests read: ${tested.specs} E2E specs (${tested.specsTagged} tagged), ${tested.units} unit test files (${tested.unitsTagged} tagged), ${tested.rust} Rust files with \`// covers:\`.`, "");
+
+  lines.push("### Gaps", "");
+  const gaps = all.filter((f) => !covered(f));
+  if (!gaps.length) lines.push("None: every feature has a test.", "");
+  else {
+    lines.push("| Feature | WISP | Clients | Needs | Why untested |", "|---|---|---|---|---|");
+    for (const f of gaps) lines.push(`| \`${f.id}\` | ${f.wisp ?? ""} | ${f.clients.join(", ")} | ${f.infra.join(", ")} | ${allow[f.id] ?? ""} |`);
+    lines.push("");
+  }
+
+  lines.push("### Matrix", "");
+  lines.push("Numbers are test files. Gated: runs only with its infrastructure (`@gated`, `// covers-gated:`).", "");
+  let current = "";
+  for (const f of all) {
+    if (area(f.id) !== current) {
+      current = area(f.id);
+      lines.push("", `#### ${current}`, "", `| Feature | WISP | Clients | ${COLUMNS.map((c) => COLUMN_TITLE[c]).join(" | ")} |`, `|---|---|---|${COLUMNS.map(() => ":---:").join("|")}|`);
+    }
+    lines.push(`| \`${f.id}\`${f.kind === "protocol" ? " (protocol)" : ""} | ${f.wisp ?? ""} | ${f.clients.map((c) => c[0].toUpperCase()).join("")} | ${COLUMNS.map((c) => cell(f, c)).join(" | ")} |`);
+  }
+  lines.push("");
+
+  const untagged = warnings.filter((w) => /no (@feature tag|\/\/ covers: comment)/.test(w));
+  if (untagged.length) {
+    lines.push("### Test files that declare no feature", "");
+    for (const w of untagged) lines.push(`- \`${w.split(":")[0]}\``);
+    lines.push("");
+  }
+
+  return `${lines.join("\n")}\n`;
+}
+
+printConsole();
+if (args.has("--write")) {
+  writeFileSync(join(ROOT, DOC), markdown());
+  console.log(`wrote ${DOC}`);
+}
+if (args.has("--summary") && process.env.GITHUB_STEP_SUMMARY) {
+  appendFileSync(process.env.GITHUB_STEP_SUMMARY, markdown().replace(/\]\(\.\.\/([^)]+)\)/g, `](${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/blob/${process.env.GITHUB_SHA}/$1)`));
+}
+if (errors.length) {
+  console.error(`\n${errors.length} problem${errors.length > 1 ? "s" : ""}:`);
+  for (const e of errors) console.error(`  ${e}`);
+  process.exit(1);
+}

@@ -6,8 +6,8 @@ import type { NextConfig } from "next";
  */
 const GITHUB = "https://github.com/MiguelMedeiros/ghostly/blob";
 const ON_GITHUB = [
-  ["security", `${GITHUB}/main/SECURITY.md`],
-  ["contributing", `${GITHUB}/main/CONTRIBUTING.md`],
+  ["security", `${GITHUB}/main/.github/SECURITY.md`],
+  ["contributing", `${GITHUB}/main/.github/CONTRIBUTING.md`],
   ["implementation", `${GITHUB}/main/docs/wisps/IMPLEMENTATION.md`],
   ["numbering", `${GITHUB}/main/docs/wisps/NUMBERING.md`],
 ];
