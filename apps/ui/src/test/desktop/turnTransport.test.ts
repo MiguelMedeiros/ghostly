@@ -42,7 +42,7 @@ describe("the Desktop's transport and the turn record", () => {
     // A profile with a device set has the turn's DHT node made ahead of its first read.
     tauri.invoke.mockResolvedValue(undefined);
     await createTauriTransport().turnWarm!();
-    expect(tauri.invoke.mock.calls.at(-1)).toEqual(["turn_warm"]);
+    expect(tauri.invoke.mock.calls[tauri.invoke.mock.calls.length - 1]).toEqual(["turn_warm"]);
   });
 
   it("puts through turn_put with each source's condition, and hands back every source's answer", async () => {
