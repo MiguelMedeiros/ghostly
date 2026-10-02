@@ -1,11 +1,11 @@
 import { existsSync } from "node:fs";
-import { link, mkdir, open, readdir, readFile, rm, stat, writeFile, type FileHandle } from "node:fs/promises";
+import { link, mkdir, open, readdir, readFile, rename, rm, stat, writeFile, type FileHandle } from "node:fs/promises";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { open as openEnvelope } from "@ghostly/browser/backup/envelope";
 import { BackupReader, BackupWriter, FRAME_BYTES, backupProtection, type BackupSource } from "@ghostly/browser/backup/stream";
 import { bool, str, type Method } from "./apiKit";
 import { CliError } from "./errors";
-import { createProfile, profileExists, type ProfilePaths } from "./profiles";
+import { RESTORED_MARK, profileExists, profilePaths, type ProfilePaths } from "./profiles";
 
 /**
  * A headless profile's backup: the WISP 05 envelope around the profile itself, its store and its files, written and
@@ -133,26 +133,67 @@ function inside(root: string, path: unknown): string {
   return target;
 }
 
+/** While a restore writes it, the profile's folder is not a profile: no profile name starts with a dot (`listProfiles`). */
+const RESTORING = /^\.restoring-(.+)-(\d+)$/;
+
+/**
+ * The folder a restore writes into, beside the profiles: it takes the profile's name only once everything is in it,
+ * so a restore that is stopped at any moment (Ctrl-C, a kill, the power) leaves no profile, whole or half-made.
+ * What an earlier restore that was stopped left behind is removed here, once the process that made it is gone.
+ */
+async function restoringFolder(home: string, name: string): Promise<ProfilePaths> {
+  const root = join(home, "profiles");
+  await mkdir(root, { recursive: true, mode: 0o700 });
+  for (const entry of await readdir(root)) {
+    const pid = Number(RESTORING.exec(entry)?.[2]);
+    if (!pid) continue;
+    let alive = pid === process.pid;
+    if (!alive) try { process.kill(pid, 0); alive = true; } catch (error) { alive = (error as NodeJS.ErrnoException).code === "EPERM"; }
+    if (!alive) await rm(join(root, entry), { recursive: true, force: true });
+  }
+  const dir = join(root, `.restoring-${name}-${process.pid}`);
+  await rm(dir, { recursive: true, force: true });
+  await mkdir(dir, { mode: 0o700 });
+  return { ...profilePaths(home, name), dir, db: join(dir, "db"), files: join(dir, "files") };
+}
+
+/** The folder is whole: marked as a restored copy (`RESTORED_MARK`), then given the profile's name. Never over a profile. */
+async function finishRestore(home: string, name: string, work: ProfilePaths): Promise<ProfilePaths> {
+  const paths = profilePaths(home, name);
+  await writeFile(join(work.dir, RESTORED_MARK), "", { mode: 0o600 });
+  if (existsSync(paths.dir)) throw new CliError("refused", `Profile ${name} exists: restore into a new name`);
+  await rename(work.dir, paths.dir);
+  return paths;
+}
+
 /**
  * Opens the backup at `file` into a new profile (never over an existing one), with its passphrase when it has one.
- * Runs with no engine: nothing is open yet. A backup that is refused, damaged or cut short leaves no profile behind.
+ * Runs with no engine: nothing is open yet. A backup that is refused, damaged or cut short leaves no profile behind,
+ * and neither does a restore that is stopped while it runs (`restoringFolder`). The profile is marked as a restored
+ * copy: its engine, the first time it starts, treats the money in it as a restore does (`RESTORED_MARK`).
  */
 export async function restoreProfile(home: string, name: string, file: string, passphrase?: string): Promise<ProfilePaths> {
   if (profileExists(home, name)) throw new CliError("refused", `Profile ${name} exists: restore into a new name`);
   const source = await fileSource(file);
-  let paths: ProfilePaths | null = null;
+  let work: ProfilePaths | null = null;
   try {
     let reader: BackupReader | null;
     try { reader = await BackupReader.open(source, passphrase); } catch (error) { throw new CliError("refused", error instanceof Error ? error.message : String(error)); }
-    if (!reader) { paths = await restoreWhole(home, name, file, passphrase ?? ""); return paths; }
+    if (!reader) {
+      const payload = await readWhole(file, passphrase ?? "");
+      work = await restoringFolder(home, name);
+      await writeWhole(work, payload);
+      return await finishRestore(home, name, work);
+    }
     const next = async () => { try { return await reader.next(); } catch (error) { throw new CliError("refused", error instanceof Error ? error.message : String(error)); } };
     const parse = (json: string) => { try { return JSON.parse(json) as BackupRecord; } catch { throw new CliError("refused", "This backup is damaged: it was changed or cut short"); } };
 
-    // The first record is read (and with it the passphrase checked) before the profile's folder is made.
+    // The first record is read (and with it the passphrase checked) before any folder is made.
     const first = await next();
     const head = first?.json === undefined ? null : parse(first.json);
     if (head?.t !== "profile" || head.format !== FORMAT) throw new CliError("refused", "This backup is not a headless Ghostly profile");
-    paths = createProfile(home, name);
+    work = await restoringFolder(home, name);
+    const paths = work;
     await mkdir(paths.db, { recursive: true, mode: 0o700 });
     let out: { handle: FileHandle; left: number } | null = null, files = 0, bytes = 0, ended = false, stored = false;
     try {
@@ -175,9 +216,9 @@ export async function restoreProfile(home: string, name: string, file: string, p
       }
       if (out || !ended || !stored) throw new CliError("refused", "This backup is damaged: it was changed or cut short");
     } finally { await out?.handle.close().catch(() => {}); }
-    return paths;
+    return await finishRestore(home, name, work);
   } catch (error) {
-    if (paths) await rm(paths.dir, { recursive: true, force: true });
+    if (work) await rm(work.dir, { recursive: true, force: true });
     throw error;
   } finally {
     await source.close();
@@ -185,22 +226,19 @@ export async function restoreProfile(home: string, name: string, file: string, p
 }
 
 /** A version 1 backup: one sealed JSON document, read whole. */
-async function restoreWhole(home: string, name: string, file: string, passphrase: string): Promise<ProfilePaths> {
+async function readWhole(file: string, passphrase: string): Promise<Payload1> {
   let payload: Payload1;
   try { payload = JSON.parse(await openEnvelope(await readFile(file, "utf8"), passphrase)) as Payload1; } catch (error) { throw new CliError("refused", error instanceof Error ? error.message : String(error)); }
   if (payload?.format !== FORMAT_1 || typeof payload.store !== "string" || !Array.isArray(payload.files)) throw new CliError("refused", "This backup is not a headless Ghostly profile");
-  const paths = createProfile(home, name);
-  try {
-    await mkdir(paths.db, { recursive: true, mode: 0o700 });
-    await writeFile(join(paths.db, "snapshot.bin"), Buffer.from(payload.store, "base64"), { mode: 0o600 });
-    for (const entry of payload.files) {
-      const target = inside(paths.files, entry.path);
-      await mkdir(dirname(target), { recursive: true, mode: 0o700 });
-      await writeFile(target, Buffer.from(entry.data, "base64"), { mode: 0o600 });
-    }
-  } catch (error) {
-    await rm(paths.dir, { recursive: true, force: true });
-    throw error;
+  return payload;
+}
+
+async function writeWhole(paths: ProfilePaths, payload: Payload1): Promise<void> {
+  await mkdir(paths.db, { recursive: true, mode: 0o700 });
+  await writeFile(join(paths.db, "snapshot.bin"), Buffer.from(payload.store, "base64"), { mode: 0o600 });
+  for (const entry of payload.files) {
+    const target = inside(paths.files, entry.path);
+    await mkdir(dirname(target), { recursive: true, mode: 0o700 });
+    await writeFile(target, Buffer.from(entry.data, "base64"), { mode: 0o600 });
   }
-  return paths;
 }
