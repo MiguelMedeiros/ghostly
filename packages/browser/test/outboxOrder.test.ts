@@ -18,7 +18,7 @@ const row = (n: number, delivery: Delivery, over: Partial<StoredMessage> = {}): 
   ({ linkId: "order", id: `me_${wire(n)}`, wireId: wire(n), text: `m${n}`, sender: "me", timestamp: n, via: "datalink", delivery, ...over });
 
 /** A chat's rows in memory. `slow`: ids whose next write takes a few turns of the event loop, as a write to storage may. */
-function chat(rows: StoredMessage[], send: (message: StoredMessage) => Promise<string | null> = async () => null, resender: Resender = { ready: () => true }) {
+function chat(rows: StoredMessage[], send: (message: StoredMessage) => Promise<string | null> = async () => null, resender: Resender = { ready: () => true }, timeout: number | ((message: StoredMessage) => number) = 60_000) {
   const slow = new Set<string>(), sent: string[] = [], hooks = { reads: 0, read: (_n: number) => {} };
   const store = {
     read: async () => { hooks.read(++hooks.reads); return rows.map(m => ({ ...m })); },
@@ -28,7 +28,7 @@ function chat(rows: StoredMessage[], send: (message: StoredMessage) => Promise<s
       if (found && found.delivery !== "delivered") Object.assign(found, extra, { delivery, deliveryError: error });
     },
   };
-  const box = new Outbox(store, async message => { sent.push(message.text); return send(message); }, 60_000, undefined, { resender });
+  const box = new Outbox(store, async message => { sent.push(message.text); return send(message); }, timeout, undefined, { resender });
   return { box, rows, sent, slow, hooks, add: (message: StoredMessage) => { rows.push(message); return message.id; }, state: (n: number) => rows.find(m => m.id === `me_${wire(n)}`)?.delivery };
 }
 
@@ -142,6 +142,76 @@ describe("a chat's messages go out in the order they were written", () => {
     expect(c.sent).toEqual(["m1"]);
     await vi.advanceTimersByTimeAsync(1_000);
     expect(c.sent).toEqual(["m1", "m2"]);
+    await c.box.stop();
+  });
+});
+
+/**
+ * Seen 2026-10-02, two daemons on local relays, 200 texts while the contact's app was killed and started again: the
+ * link stayed open 18 s after the kill, so 140 texts were sent on it and awaited a receipt. It closed and was back
+ * 600 ms later, while those were still being queued again one by one. The look the new link asked for found half of
+ * them neither awaiting a receipt nor queued, passed them by, and the contact read 167, 169, 171… before 89.
+ */
+describe("a link that drops with messages unconfirmed", () => {
+  const sentOnce = async (c: ReturnType<typeof chat>, ns: number[]) => {
+    for (const n of ns) await c.box.transmit(`me_${wire(n)}`);
+    expect(ns.map(c.state)).toEqual(ns.map(() => "sent"));
+    c.sent.length = 0;
+  };
+
+  it("and is back before they are all queued again: they go on the new link oldest first", async () => {
+    const ns = [1, 2, 3, 4, 5, 6];
+    const c = chat(ns.map(n => row(n, "sending")));
+    await sentOnce(c, ns);
+    // Queuing the first ones again takes a moment (a write to storage), and the link is back meanwhile.
+    for (const n of [1, 2, 3]) c.slow.add(`me_${wire(n)}`);
+    const closed = c.box.disconnected();
+    await Promise.all([closed, c.box.flush({ reopened: true })]);
+    expect(c.sent).toEqual(["m1", "m2", "m3", "m4", "m5", "m6"]);
+    await c.box.stop();
+  });
+
+  it("while a look is half way: what it sent on the old link goes again before the rest goes on the new one", async () => {
+    const ns = [1, 2, 3, 4];
+    let dropAt: string | undefined = "m2";
+    const c = chat(ns.map(n => row(n, "queued")), async m => {
+      // The second one is on its way when the link closes, and a new link is there at once.
+      if (m.text === dropAt) { dropAt = undefined; void c.box.disconnected(); void c.box.flush({ reopened: true }); }
+      return null;
+    });
+    await c.box.recover();
+    await c.box.flush({ reopened: true });
+    await c.box.flush();
+    // On the old link 1 and 2 (lost with it); on the new one all four, in order. Not 3 and 4 before 1 and 2.
+    expect(c.sent).toEqual(["m1", "m2", "m1", "m2", "m3", "m4"]);
+    await c.box.stop();
+  });
+
+  it("a new message written as the link closes under the look before it waits its turn", async () => {
+    const c = chat([row(1, "queued"), row(2, "queued")], async m => {
+      if (m.text === "m1" && c.sent.length === 1) void c.box.disconnected();
+      return null;
+    });
+    await c.box.recover();
+    await c.box.transmit(c.add(row(3, "sending")));
+    // The first went on the link that closed; neither the second nor the new one goes past it.
+    expect(c.sent).toEqual(["m1"]);
+    expect(c.state(3)).toBe("waiting");
+    await c.box.flush({ reopened: true });
+    expect(c.sent).toEqual(["m1", "m1", "m2", "m3"]);
+    await c.box.stop();
+  });
+
+  it("a receipt that runs out while the chat is looked at: the message goes again in its place", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    const ns = [1, 2, 3];
+    const c = chat(ns.map(n => row(n, "sending")), async () => null, { ready: () => true }, m => (m.text === "m1" ? 1_000 : 60_000));
+    await sentOnce(c, ns);
+    // Its receipt runs out, queuing it again takes a moment, and the link comes back in that moment.
+    c.slow.add(`me_${wire(1)}`);
+    vi.advanceTimersByTime(1_000);
+    await c.box.flush({ reopened: true });
+    expect(c.sent).toEqual(["m1", "m2", "m3"]);
     await c.box.stop();
   });
 });
