@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createIdentity, createLink, createRelayPayload, parseRelayPayload, HOLD_LIMITS, type PaymentRequest, type PkarrTransport, type SignedPacket, type ImageMeta, type VideoMeta, type VoiceMeta } from "@ghostly/core";
+import { createIdentity, createLink, createRelayPayload, parseRelayPayload, HoldKeys, HOLD_LIMITS, type PaymentRequest, type PkarrTransport, type SignedPacket, type ImageMeta, type VideoMeta, type VoiceMeta } from "@ghostly/core";
 import { HoldEngine, emptyHoldState, holdFetchTimeoutMs, type HoldHost } from "../src/engine/hold";
 import { presignS3 } from "../src/backup/s3";
 import type { HoldStore, StoredBackup } from "../src/backup/storage";
@@ -55,12 +55,12 @@ interface Side {
   refuseFiles?: string;
 }
 
-function setup(options: { aliceStorage?: boolean; bobStorage?: boolean; now?: () => number; fetch?: (inner: typeof fetch) => typeof fetch } = {}) {
+function setup(options: { aliceStorage?: boolean; bobStorage?: boolean; now?: () => number; aliceNow?: () => number; fetch?: (inner: typeof fetch) => typeof fetch } = {}) {
   const link = createLink();
   const alice = createIdentity(), bob = createIdentity();
   const transport = relay();
   const buckets = { alice: bucket(), bob: bucket() };
-  const make = (mine: StoredLink, storageOn: boolean, own: typeof buckets.alice, other: typeof buckets.alice): Side => {
+  const make = (mine: StoredLink, storageOn: boolean, own: typeof buckets.alice, other: typeof buckets.alice, now = options.now): Side => {
     const side: Partial<Side> = { stored: mine, messages: new Map(), received: [], delivery: new Map(), files: new Map(), requests: new Map(), replies: new Map(), open: false };
     const host: HoldHost = {
       transport,
@@ -79,15 +79,15 @@ function setup(options: { aliceStorage?: boolean; bobStorage?: boolean; now?: ()
       changed: () => {},
       // Bob reads Alice's bucket and Alice reads Bob's: each fetches from wherever the manifest points.
       fetch: options.fetch ? options.fetch(other.fetcher) : other.fetcher,
-      now: options.now,
+      now,
     };
     side.engine = new HoldEngine(host);
     return side as Side;
   };
   const enabled: HoldState = { ...emptyHoldState(), enabled: true, peerAllows: true, peerPaymentMethods: ["cashu", "lightning"] };
-  const a = make({ id: "link-a", ...link.mine, profile: "paired-chat/1", participationSeed: alice.seedB64, pairedPeerKey: bob.pubKeyZ32, createdAt: 0, hold: structuredClone(enabled) }, options.aliceStorage ?? true, buckets.alice, buckets.bob);
+  const a = make({ id: "link-a", ...link.mine, profile: "paired-chat/1", participationSeed: alice.seedB64, pairedPeerKey: bob.pubKeyZ32, createdAt: 0, hold: structuredClone(enabled) }, options.aliceStorage ?? true, buckets.alice, buckets.bob, options.aliceNow ?? options.now);
   const b = make({ id: "link-b", ...link.invite, profile: "paired-chat/1", participationSeed: bob.seedB64, pairedPeerKey: alice.pubKeyZ32, createdAt: 0, hold: structuredClone(enabled) }, options.bobStorage ?? false, buckets.bob, buckets.alice);
-  return { a, b, transport, buckets };
+  return { a, b, transport, buckets, keys: { bob: new HoldKeys(link.invite, bob.seedB64, alice.pubKeyZ32) } };
 }
 
 const engines: HoldEngine[] = [];
@@ -108,6 +108,47 @@ describe("store-and-forward engine", () => {
     await vi.waitFor(() => expect(b.received).toHaveLength(2));
     expect(b.received[0]).toMatchObject({ id: "wire-reply-1", text: "yes, that one", reply });
     expect(b.received[1]).not.toHaveProperty("reply");
+  });
+
+  // Reported 2026-10-01 (a contact whose clock runs two minutes fast). Its pointer was dropped without a word (dated
+  // over a minute ahead), so nothing it held was ever fetched; past that, its manifest and each item were refused, the
+  // items for good, and it was told they "could not be verified as yours, or were too large".
+  it.each([["two minutes ahead", 2 * 60_000], ["an hour ahead", 60 * 60_000], ["an hour behind", -60 * 60_000]])("what a contact whose clock is %s holds is picked up, in order, once, and it sees it delivered", async (_, skew) => {
+    const theirNow = () => Date.now() + skew;
+    const { a, b, buckets } = setup({ aliceNow: theirNow });
+    engines.push(a.engine, b.engine);
+    a.messages.set("me_s1", { text: "from a clock that is off", timestamp: theirNow() });
+    a.messages.set("me_s2", { text: "and a second one", timestamp: theirNow() + 1 });
+    await a.engine.hold("link-a", { kind: "text", id: "wire-skew-1", messageId: "me_s1", bytes: 24, timestamp: theirNow() });
+    await a.engine.hold("link-a", { kind: "text", id: "wire-skew-2", messageId: "me_s2", bytes: 16, timestamp: theirNow() + 1 });
+    b.engine.start();
+    await vi.waitFor(() => expect(b.received).toHaveLength(2));
+    expect(b.received.map((r) => r.text)).toEqual(["from a clock that is off", "and a second one"]);
+    expect(b.engine.view("link-b")).toMatchObject({ refused: 0 });
+    expect(b.stored.hold!.inSeq).toBe(2);
+    // The sender reads the acknowledgement: delivered, nothing refused, its storage empty again.
+    a.engine.start();
+    await vi.waitFor(() => expect([...a.delivery.values()].map((d) => d.state)).toEqual(["delivered", "delivered"]));
+    await vi.waitFor(() => expect(buckets.alice.store.objects.size).toBe(0));
+    // Its sequence is what stops an item from being taken twice: another look takes nothing.
+    b.engine.wake("link-b");
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(b.received).toHaveLength(2);
+  });
+
+  it("dates its pointer and the lifetimes it gives back, so an app up to 1.0.1 (a date over a minute ahead is refused) reads a sender whose clock is minutes ahead", async () => {
+    // The 1.0.1 reader's rules, as they were: a pointer issued over 60 s ahead is dropped; an expiry over one
+    // lifetime plus 60 s from now is refused.
+    for (const [skew, taken] of [[0, true], [2 * 60_000, true], [10 * 60_000, true], [12 * 60_000, false]] as const) {
+      const { a, transport, keys } = setup({ aliceNow: () => Date.now() + skew });
+      engines.push(a.engine);
+      a.messages.set("me_o1", { text: "to an older app", timestamp: Date.now() });
+      await a.engine.hold("link-a", { kind: "text", id: "wire-old-1", messageId: "me_o1", bytes: 15, timestamp: Date.now() });
+      const pointer = keys.bob.readPointer([...transport.packets.values()][0])!;
+      expect(Math.abs(pointer.issued - (a.stored.hold!.outbox[0].expires - HOLD_LIMITS.ttlMs))).toBeLessThan(1_000);
+      const readBy101 = pointer.issued <= Date.now() + 60_000 && a.stored.hold!.outbox[0].expires <= Date.now() + HOLD_LIMITS.ttlMs + 60_000 && pointer.expires <= Date.now() + HOLD_LIMITS.ttlMs + 60_000;
+      expect(readBy101, `a sender ${skew / 60_000} min ahead`).toBe(taken);
+    }
   });
 
   it("clearing the profile's data deletes every held item and the manifest from storage, and the contact finds nothing", async () => {
