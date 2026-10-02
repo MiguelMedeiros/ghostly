@@ -156,6 +156,16 @@ pub async fn turn_read(
     Ok(crate::turn_network::read(&state.pkarr.turn_sources(), &key).await)
 }
 
+/// The profile has a device set: the turn's own DHT node is made and joins the DHT, ahead of the first read.
+/// Never called for a profile on one device.
+#[tauri::command]
+pub async fn turn_warm(state: State<'_, AppState>) -> Result<(), String> {
+    if let Some(dht) = state.pkarr.turn_dht() {
+        tauri::async_runtime::spawn(async move { dht.warm().await });
+    }
+    Ok(())
+}
+
 /// The turn record, put as given on each source named, on that source's condition. Never retried.
 #[tauri::command]
 pub async fn turn_put(

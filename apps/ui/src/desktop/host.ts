@@ -90,10 +90,12 @@ export function createTauriTransport(): PkarrTransport {
     // The turn record's own path (WISP 06 § Publishing and reading), in Rust (`turn_network.rs`): the DHT itself and
     // every relay are read, each put goes out on its source's condition (`cas` on the DHT), and nothing is retried.
     async turnRead(pubKeyZ32: string): Promise<TurnSourceAnswer[]> {
-      const answers = await invoke<{ source: string; answered: boolean; payloads: string[]; sequences?: string[]; detail?: string }[]>("turn_read", { publicKeyZ32: pubKeyZ32 });
-      return answers.map(({ source, answered, payloads, sequences, detail }) =>
-        ({ source, answered, payloads: payloads.map(fromBase64Url), ...(sequences?.length ? { sequences } : {}), ...(detail ? { detail } : {}) }));
+      const answers = await invoke<{ source: string; answered: boolean; payloads: string[]; sequences?: string[]; stale?: boolean; detail?: string }[]>("turn_read", { publicKeyZ32: pubKeyZ32 });
+      return answers.map(({ source, answered, payloads, sequences, stale, detail }) =>
+        ({ source, answered, payloads: payloads.map(fromBase64Url), ...(sequences?.length ? { sequences } : {}), ...(stale ? { stale: true } : {}), ...(detail ? { detail } : {}) }));
     },
+    // The profile has a device set: the turn's own DHT node is made and joins, ahead of the first read.
+    turnWarm: () => invoke<void>("turn_warm"),
     turnPut(pubKeyZ32: string, payload: Uint8Array, conditions: TurnConditions): Promise<TurnSourcePut[]> {
       return invoke<TurnSourcePut[]>("turn_put", { publicKeyZ32: pubKeyZ32, payloadB64: toBase64Url(payload), conditions });
     },

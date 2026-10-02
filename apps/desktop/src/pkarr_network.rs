@@ -438,6 +438,14 @@ impl Pkarr {
         }
     }
 
+    /// The turn's own DHT node, to make ahead of the first read (a profile that has a device set).
+    pub fn turn_dht(&self) -> Option<Arc<TurnDht>> {
+        match &self.inner.lookup {
+            Some(Dht::Mainline(_, turn)) => Some(turn.clone()),
+            _ => None,
+        }
+    }
+
     /// Settings, Network: the relays written to, and whether reads may use them. Relays named by
     /// `GHOSTLY_PKARR_RELAYS` stay; without a DHT, reads always use the relays.
     pub fn configure(&self, relays: Vec<Url>, read_relays: bool) {

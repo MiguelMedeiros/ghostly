@@ -56,6 +56,7 @@ export function withRequestOptions(transport: PkarrTransport, extra: PkarrReques
   if (transport.configure) wrapped.configure = (options) => transport.configure!(options);
   if (transport.turnRead) wrapped.turnRead = (pubKeyZ32) => transport.turnRead!(pubKeyZ32);
   if (transport.turnPut) wrapped.turnPut = (pubKeyZ32, payload, conditions) => transport.turnPut!(pubKeyZ32, payload, conditions);
+  if (transport.turnWarm) wrapped.turnWarm = () => transport.turnWarm!();
   return wrapped;
 }
 
@@ -137,4 +138,6 @@ export interface PkarrTransport {
    * without its condition.
    */
   turnPut?(pubKeyZ32: string, payload: Uint8Array, conditions: TurnConditions): Promise<TurnSourcePut[]>;
+  /** The profile has a device set: the turn's sources are made ready ahead of the first read (`TurnNetwork.turnWarm`). */
+  turnWarm?(): Promise<void>;
 }

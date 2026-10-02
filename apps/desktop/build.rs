@@ -90,6 +90,7 @@ const COMMANDS: &[&str] = &[
     "share_text",
     "turn_put",
     "turn_read",
+    "turn_warm",
     "under_test",
     "updater_can_install",
 ];

@@ -49,6 +49,11 @@ export type TurnConditions = Record<string, string | null>;
 export interface TurnNetwork {
   turnRead(pubKeyZ32: string): Promise<TurnSourceAnswer[]>;
   turnPut(pubKeyZ32: string, payload: Uint8Array, conditions: TurnConditions): Promise<TurnSourcePut[]>;
+  /**
+   * The profile has a device set: whatever a source needs before its first answer is made ready now (the Desktop's
+   * own DHT node for the turn, which takes seconds to join). Never called for a profile on one device.
+   */
+  turnWarm?(): Promise<void>;
 }
 
 /** WISP 06 § Publishing and reading, the result table. */

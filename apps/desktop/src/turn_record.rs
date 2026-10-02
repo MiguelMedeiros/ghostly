@@ -366,26 +366,55 @@ pub enum PacketRead {
 }
 
 pub fn read_packet(address: &[u8; 32], seal_key: &[u8; 32], payload: &[u8]) -> PacketRead {
+    // A BEP44 item: a signature, a sequence, and a value of at most 1000 bytes. One that does not verify
+    // under the turn key, or that no node would store, is no packet at all.
+    if payload.len() < 72 + 12 || payload.len() > 72 + 1000 {
+        return PacketRead::Foreign;
+    }
+    let signature: [u8; 64] = payload[..64].try_into().unwrap();
+    let sequence = u64::from_be_bytes(payload[64..72].try_into().unwrap());
+    let value = &payload[72..];
+    let signable = [
+        format!("3:seqi{sequence}e1:v{}:", value.len()).as_bytes(),
+        value,
+    ]
+    .concat();
+    if !verifies(address, &signable, &signature) {
+        return PacketRead::Foreign;
+    }
+    let invalid = |refusal| PacketRead::Invalid { sequence, refusal };
+    // Exactly one answer, a TXT record under `_s`, and nothing else: no question, no other section, no
+    // other record, no byte after it (simple-dns would read past a trailing byte and drop an OPT record).
+    let count = |at: usize| u16::from_be_bytes([value[at], value[at + 1]]);
+    if count(4) != 0 || count(6) != 1 || count(8) != 0 || count(10) != 0 {
+        return invalid(Refusal::Label);
+    }
+    let Some(end) = single_record_end(value) else {
+        return invalid(Refusal::Label);
+    };
+    if end != value.len() {
+        return invalid(Refusal::Label);
+    }
+    let Ok(packet) = simple_dns::Packet::parse(value) else {
+        return invalid(Refusal::Label);
+    };
     let Ok(key) = PublicKey::try_from(address) else {
         return PacketRead::Foreign;
     };
-    let Ok(signed) = SignedPacket::from_relay_payload(&key, &payload.to_vec().into()) else {
-        return PacketRead::Foreign;
-    };
-    let sequence = signed.timestamp().as_u64();
-    let invalid = |refusal| PacketRead::Invalid { sequence, refusal };
-    let records: Vec<_> = signed.all_resource_records().collect();
     let name = format!("{LABEL}.{}", key.to_z32());
-    if records.len() != 1 || records[0].name.to_string().trim_end_matches('.') != name {
+    let [record] = packet.answers.as_slice() else {
+        return invalid(Refusal::Label);
+    };
+    if record.name.to_string().trim_end_matches('.') != name {
         return invalid(Refusal::Label);
     }
-    let RData::TXT(txt) = &records[0].rdata else {
+    let RData::TXT(txt) = &record.rdata else {
         return invalid(Refusal::Label);
     };
-    let Ok(value) = String::try_from(txt.clone()) else {
+    let Ok(text) = String::try_from(txt.clone()) else {
         return invalid(Refusal::Label);
     };
-    let Some(body) = open(&value, seal_key) else {
+    let Some(body) = open(&text, seal_key) else {
         return invalid(Refusal::Seal);
     };
     match read_body(&body, address) {
@@ -393,6 +422,27 @@ pub fn read_packet(address: &[u8; 32], seal_key: &[u8; 32], payload: &[u8]) -> P
         Ok(record) if record.sequence != sequence => invalid(Refusal::Sequence),
         Ok(record) => PacketRead::Valid(record),
     }
+}
+
+/// Where the one record of a DNS packet with no question ends: its name (labels, or a pointer), type,
+/// class, TTL, length and data. `None` when it runs past the packet.
+fn single_record_end(dns: &[u8]) -> Option<usize> {
+    let mut at = 12;
+    loop {
+        let length = *dns.get(at)? as usize;
+        if length == 0 {
+            at += 1;
+            break;
+        }
+        if length & 0xc0 == 0xc0 {
+            at += 2;
+            break;
+        }
+        at += 1 + length;
+    }
+    let data = u16::from_be_bytes([*dns.get(at + 8)?, *dns.get(at + 9)?]) as usize;
+    let end = at + 10 + data;
+    (end <= dns.len()).then_some(end)
 }
 
 #[cfg(test)]
@@ -603,7 +653,7 @@ mod tests {
     fn the_reader_refuses_every_invalid_packet_for_the_rule_typescript_names() {
         let v = vectors();
         let (address, seal_key): ([u8; 32], [u8; 32]) = (array(&v.address), array(&v.seal_key));
-        assert!(v.invalid.len() >= 29);
+        assert!(v.invalid.len() >= 38);
         for vector in &v.invalid {
             let payload = hex(&vector.payload);
             let refusal = match read_packet(&address, &seal_key, &payload) {

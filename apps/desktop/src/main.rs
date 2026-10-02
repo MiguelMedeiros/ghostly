@@ -101,6 +101,7 @@ macro_rules! commands {
             commands::set_pkarr_relays,
             commands::turn_put,
             commands::turn_read,
+            commands::turn_warm,
             commands::under_test,
             commands::updater_can_install,
             device_state::device_state_read,
