@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { EngineState, GroupView, LinkView, Settings, StoredMessage } from "@ghostly/browser/shared/types";
 import { callApi, findChat, mentionsFor, redactSettings, type ApiContext } from "../src/api";
 import type { GhostlyEvent } from "../src/events";
+import { chatJson, isLive } from "../src/views";
 import { pageOf } from "./support/messagePage";
 // covers: headless.api, headless.engine-passthrough, headless.secret-guard, headless.typing
 
@@ -190,6 +191,75 @@ describe("chats", () => {
   it("remove needs a yes", async () => {
     const { ctx } = fake();
     await expect(callApi(ctx, "chat.remove", { chat: "chat-one" })).rejects.toMatchObject({ code: "confirm" });
+  });
+});
+
+describe("chat wait", () => {
+  /** A fake engine whose state a test moves, as the daemon's hub hands each new state on. */
+  function moving(first: LinkView) {
+    let links = [first];
+    const listeners = new Set<(s: EngineState) => void>();
+    const stateOf = () => ({ links, groups: [], settings: { online: true } as unknown as Settings, transport: { protocol: "p", relays: [] } }) as unknown as EngineState;
+    const ctx = {
+      runtime: { server: { node: { getState: stateOf } }, paths: { name: "default" } },
+      hub: { onEvent: () => () => {}, onState: (l: (s: EngineState) => void) => { listeners.add(l); return () => listeners.delete(l); }, lastSeq: 0, replay: () => [] },
+      mode: "daemon", version: "test",
+    } as unknown as ApiContext;
+    return { ctx, set: (next: LinkView) => { links = [next]; for (const l of listeners) l(stateOf()); } };
+  }
+  /** Live when the app last ran (its history ends on a live stretch, WISP 100), and no session in this run yet. */
+  const remembered = (fields: Partial<LinkView> = {}) => link("chat-one", {
+    label: "Alice", dataLink: "idle", pairing: { status: "connecting" }, peerParticipationKey: "peerkey",
+    transportHistory: [{ at: 1, kind: "live", transport: "iroh/1" }], ...fields,
+  } as Partial<LinkView>);
+  const session = { dataLink: "open", pairing: { status: "ready", transport: "iroh/1" }, textDelivery: "stream" } as Partial<LinkView>;
+
+  it("a chat that was live when the daemon last ran is not live until a session exists in this run", () => {
+    // Whatever the text path says: no open link and no authenticated session is not live.
+    for (const text of ["stream", "dht", "hold", "unavailable"] as const) {
+      const chat = remembered({ textDelivery: text });
+      expect(isLive(chat), text).toBe(false);
+      expect(chatJson(chat), text).toMatchObject({ live: false, transport: null });
+    }
+    // Each half alone is not a session either: a link open before it authenticated, a pairing with no open link.
+    expect(isLive(remembered({ dataLink: "open" }))).toBe(false);
+    expect(isLive(remembered({ pairing: { status: "ready", transport: "iroh/1" } } as Partial<LinkView>))).toBe(false);
+    expect(isLive(remembered({ dataLink: "open", pairing: { status: "ready" } } as Partial<LinkView>))).toBe(false);
+    expect(chatJson(remembered(session))).toMatchObject({ live: true, transport: "iroh/1" });
+    // The older protocol has no pairing: its open link is the session.
+    expect(isLive(link("old", { profile: undefined, dataLink: "open" }))).toBe(true);
+    expect(isLive(link("old", { profile: undefined, dataLink: "idle" }))).toBe(false);
+  });
+
+  it("--until live waits for that session, and times out with none", async () => {
+    const { ctx, set } = moving(remembered());
+    await expect(callApi(ctx, "chat.wait", { chat: "Alice", until: "live", timeout: 1 })).rejects.toMatchObject({ code: "timeout" });
+    let done = false;
+    const waiting = callApi(ctx, "chat.wait", { chat: "Alice", until: "live", timeout: 30 }).then((view) => { done = true; return view; });
+    // The link dialling, then open and not authenticated yet: still waiting.
+    set(remembered({ dataLink: "connecting" }));
+    set(remembered({ dataLink: "open", pairing: { status: "negotiating" } } as Partial<LinkView>));
+    await new Promise((r) => setTimeout(r, 20));
+    expect(done).toBe(false);
+    set(remembered(session));
+    expect(await waiting).toMatchObject({ id: "chat-one", live: true, transport: "iroh/1", text: "stream" });
+    // The status line counts the same chats.
+    expect(await callApi(ctx, "status", {})).toMatchObject({ chats: 1, live: 1 });
+    set(remembered());
+    expect(await callApi(ctx, "status", {})).toMatchObject({ chats: 1, live: 0 });
+  });
+
+  it("--until text takes the DHT floor or a hold, and --until paired the contact seen or a session, not the last run's", async () => {
+    const { ctx, set } = moving(remembered({ textDelivery: "unavailable" }));
+    await expect(callApi(ctx, "chat.wait", { chat: "Alice", until: "text", timeout: 1 })).rejects.toMatchObject({ code: "timeout" });
+    set(remembered({ textDelivery: "dht" }));
+    expect(await callApi(ctx, "chat.wait", { chat: "Alice", until: "text", timeout: 1 })).toMatchObject({ live: false, text: "dht" });
+    set(remembered({ textDelivery: "stream" }));
+    await expect(callApi(ctx, "chat.wait", { chat: "Alice", until: "paired", timeout: 1 })).rejects.toMatchObject({ code: "timeout" });
+    set(remembered({ pairingProgress: { stage: "waiting", peerSeen: true } } as Partial<LinkView>));
+    expect(await callApi(ctx, "chat.wait", { chat: "Alice", until: "paired", timeout: 1 })).toMatchObject({ live: false });
+    set(remembered(session));
+    expect(await callApi(ctx, "chat.wait", { chat: "Alice", until: "paired", timeout: 1 })).toMatchObject({ live: true });
   });
 });
 

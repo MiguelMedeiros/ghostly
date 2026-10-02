@@ -16,7 +16,7 @@ export interface ChatJson {
   peer: string;
   createdAt: number;
   lastMessageAt: number;
-  /** A live session carries the chat (text, files, payments go at once). */
+  /** A live session carries the chat now, in this run (text, files, payments go at once). */
   live: boolean;
   /** The transport of the live session, or null. */
   transport: string | null;
@@ -35,10 +35,21 @@ export interface ChatJson {
   peerPicture: boolean;
 }
 
+/**
+ * A live session carries the chat now, in this run: its link is open and, on a paired chat, the session authenticated
+ * on a transport. The engine's own rule for a chat's connection line (`observeTransport`). `textDelivery` alone says
+ * how a text would go, and nothing the engine remembers from an earlier run (a chat that was live when the app last
+ * ran, WISP 100) counts: until the contact answers again the link is not open and the pairing is `connecting`.
+ */
+export function isLive(link: LinkView): boolean {
+  if (link.textDelivery !== "stream" || link.dataLink !== "open") return false;
+  return !link.profile || (link.pairing?.status === "ready" && !!link.pairing.transport);
+}
+
 export function chatJson(link: LinkView): ChatJson {
   const label = link.label?.trim() || null;
   const peerName = link.peerNick?.trim() || null;
-  const live = link.textDelivery === "stream";
+  const live = isLive(link);
   return {
     id: link.id,
     name: label ?? peerName,
