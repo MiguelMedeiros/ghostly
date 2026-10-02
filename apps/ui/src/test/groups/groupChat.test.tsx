@@ -178,9 +178,24 @@ describe("GroupChat: out of the group", () => {
     expect(screen.getByTestId("group-forget")).toBeInTheDocument();
   });
 
-  it("names the status when the engine gave no reason", () => {
+  it("names the status when the engine gave no reason, in the notice too", () => {
     openGroup(active({ status: "left", canSend: false }));
     expect(screen.getByTestId("group-members")).toHaveTextContent("left");
+    expect(screen.getByTestId("group-notice")).toHaveTextContent("left");
+  });
+
+  it.each([
+    ["removed", "You were removed from this group", "Você foi removido deste grupo"],
+    ["forked", "Member 3r69cgd5 holds a different membership history for epoch 4. Membership changes are halted; the admin must re-form the group.",
+      "O membro 3r69cgd5 tem outro histórico de membros na época 4. As mudanças de membros estão paradas; o admin precisa recriar o grupo."],
+    ["lost", "Two members let people in at the same moment and yours did not count. Asking to be let in again…",
+      "Dois membros deixaram pessoas entrar ao mesmo tempo e a sua entrada não valeu. Pedindo para entrar de novo…"],
+  ] as const)("says why when %s in the app's language, not in the engine's English", (status, reason, said) => {
+    fakeEngine.on("groupMessages", () => []).on("updateSettings", () => undefined);
+    fakeEngine.update({ groups: [active({ status, statusReason: reason, canSend: false })] });
+    renderApp(<Routes><Route path="/group/:groupId" element={<GroupChat />} /></Routes>, { route: "/group/group-1", language: "pt" });
+    expect(screen.getByTestId("group-notice")).toHaveTextContent(said);
+    expect(screen.getByTestId("group-members")).toHaveTextContent(said);
   });
 
   it("disables the composer when the engine says it cannot send, even while active", () => {
@@ -396,6 +411,22 @@ describe("GroupChat: history and sending", () => {
     expect(screen.getByText("while you were away")).toBeInTheDocument();
   });
 
+  it("a community's lines about a member who has left since read in the app's language", () => {
+    const GONE = "gone".padEnd(52, "y");
+    fakeEngine.on("groupMessages", () => [
+      stored({ id: "e1", event: "joined", member: GONE, text: "Carol joined" }),
+      stored({ id: "e2", event: "admin", member: GONE, text: "Carol is now the admin", timestamp: 1_700_000_000_001 }),
+      stored({ id: "e3", event: "renamed", member: GONE, text: "Carol renamed the group to “Town”", timestamp: 1_700_000_000_002 }),
+      stored({ id: "e4", event: "picture", member: GONE, text: "Carol changed the group's picture", timestamp: 1_700_000_000_003 }),
+      stored({ id: "e5", event: "picture", member: GONE, text: "Carol removed the group's picture", timestamp: 1_700_000_000_004 }),
+    ]).on("updateSettings", () => undefined);
+    fakeEngine.update({ groups: [active({ profile: "community" })] });
+    renderApp(<Routes><Route path="/group/:groupId" element={<GroupChat />} /></Routes>, { route: "/group/group-1", language: "pt" });
+    return screen.findAllByTestId("group-event").then(lines => expect(lines.map(l => l.textContent)).toEqual([
+      "Carol entrou", "Carol agora é o admin", "Carol renomeou o grupo para “Town”", "Carol alterou a foto do grupo", "Carol removeu a foto do grupo",
+    ]));
+  });
+
   it("sends what is typed to the group", async () => {
     const { user, engine } = openGroup(active());
     engine.on("sendGroupMessage", () => ({ error: null }));
@@ -410,5 +441,15 @@ describe("GroupChat: history and sending", () => {
     await user.type(composer(), "anyone?{Enter}");
     expect(await screen.findByText("You are no longer in this group")).toBeInTheDocument();
     expect(composer()).toHaveValue("anyone?");
+  });
+
+  it("says why the engine refused it in the app's language", async () => {
+    fakeEngine.on("groupMessages", () => []).on("updateSettings", () => undefined)
+      .on("sendGroupMessage", () => ({ error: "This epoch's key has not arrived yet. Wait for a member to catch you up." }));
+    fakeEngine.update({ groups: [active()] });
+    const { user } = renderApp(<Routes><Route path="/group/:groupId" element={<GroupChat />} /></Routes>, { route: "/group/group-1", language: "pt" });
+    await user.type(composer(), "alguém?{Enter}");
+    expect(await screen.findByText("A chave desta época ainda não chegou. Espere um membro atualizar você.")).toBeInTheDocument();
+    expect(composer()).toHaveValue("alguém?");
   });
 });
