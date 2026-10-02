@@ -78,6 +78,21 @@ it("backs up a whole profile and restores it as a new one, wallets relocated and
   expect(storage.getItem(`ghostly_${restored.id}_0123456789abcdef0123456789abcdef`)).toContain("peerPubKeyB64");
 });
 
+it("ecash comes back marked as a copy to check with its mint; ecash a payment holds is left to that payment", async () => {
+  await openDb();
+  const proof = (secret: string, extra: Record<string, unknown> = {}) => ({ mint: "https://mint.example", id: "009a1f293253e41e", amount: 64, secret, C: "02ab", ...extra });
+  await transact([STORES.proofs], (s) => {
+    s[STORES.proofs].put(proof("free"));
+    s[STORES.proofs].put(proof("in-a-melt", { reserved: true }));
+  });
+  const restored = await restoreProfileBackup(await createProfileBackup("a long backup passphrase"), "a long backup passphrase");
+  const proofs = await readAll(`ghostly_${restored.id}`, STORES.proofs) as { secret: string; unchecked?: boolean; reserved?: boolean }[];
+  expect(proofs.find((p) => p.secret === "free")).toMatchObject({ amount: 64, unchecked: true });
+  expect(proofs.find((p) => p.secret === "in-a-melt")).toEqual(proof("in-a-melt", { reserved: true }));
+  // The profile it was copied from is as it was.
+  expect((await readAll("ghostly", STORES.proofs) as { unchecked?: boolean }[]).some((p) => p.unchecked)).toBe(false);
+});
+
 it("a file kept in file storage travels in the bundle; one whose bytes are not all here keeps its record only", async () => {
   const { fileBytes } = await import("../src/shared/fileBytes");
   const { SMALL_FILE_BYTES } = await import("../src/shared/fileBytes");

@@ -51,6 +51,8 @@ const MAX_AMOUNT = 1_000_000;
 /** How long "Get test coins" waits for the test mint to mark its invoice paid before saying the coins come later. */
 const TEST_COINS_WAIT_MS = 30_000;
 const HISTORY_SHOWN = 100;
+/** How long before a mint that could not say which restored ecash is spent is asked again. */
+const RESTORED_POLL_MS = 60_000;
 /** `abandoned`: the mint proved the swap never happened (`reviewedCashuNeverSwapped`); it is never sent again. */
 /**
  * `attemptEndedAt`: when the approval's swap failed with no answer. `abandoned`: the mint proved the swap never
@@ -152,6 +154,7 @@ export class CashuWallet {
   private readonly locks = new Map<string, Promise<unknown>>();
   private quoteTimer: ReturnType<typeof setTimeout> | null = null;
   private meltTimer: ReturnType<typeof setTimeout> | null = null;
+  private restoredTimer: ReturnType<typeof setTimeout> | null = null;
   /** Per melt quote that ended unpaid: the sats the mint kept all the same (the fee of the split before the melt). */
   private readonly failedFees = new Map<string, number>();
 
@@ -169,6 +172,7 @@ export class CashuWallet {
   start(): void {
     void this.pollQuotes();
     void this.pollMelts();
+    void this.checkRestored();
     // Names, fees and limits for the UI; a mint that is down simply stays without them.
     for (const mint of this.getKnownMints()) void this.checkMint(mint).then(() => this.events.onChange(), () => {});
   }
@@ -190,6 +194,43 @@ export class CashuWallet {
       history: all.slice(0, HISTORY_SHOWN),
       feesPaid: all.reduce((sum, tx) => sum + tx.fee, 0),
     };
+  }
+
+  /**
+   * Ecash a profile restore brought back (`unchecked`) is a copy from when the backup was made. What was spent since
+   * (by the profile it was copied from, or by this one before it was restored) still counted in the balance, for good,
+   * and every payment that picked one of those proofs failed with the mint's "Token already spent". Each mint is asked
+   * once which of them it still reads unspent: a spent proof is dropped, an unspent one is checked for good, and one
+   * the mint holds pending, or a mint that cannot be asked, is asked again later.
+   */
+  private async checkRestored(): Promise<void> {
+    if (this.restoredTimer) clearTimeout(this.restoredTimer);
+    this.restoredTimer = null;
+    const waiting = (p: StoredProof) => !!p.unchecked && !p.reserved;
+    let again = false, changed = false;
+    for (const mint of new Set((await this.allProofs()).filter(waiting).map((p) => p.mint))) {
+      try {
+        await this.locked(mint, async () => {
+          const proofs = (await this.allProofs()).filter((p) => p.mint === mint && waiting(p));
+          if (!proofs.length) return;
+          const states = await (await this.wallet(mint)).checkProofsStates(proofs);
+          if (states.length !== proofs.length) throw new Error("The mint answered for another number of proofs");
+          await transact([STORES.proofs], (stores) => {
+            proofs.forEach((proof, i) => {
+              const state = states[i]?.state;
+              if (state === "SPENT") stores[STORES.proofs].delete(proof.secret);
+              else if (state === "UNSPENT") { const { unchecked: _checked, ...kept } = proof; stores[STORES.proofs].put(kept satisfies StoredProof); }
+              else again = true;
+            });
+          });
+          changed = true;
+        });
+      } catch {
+        again = true;
+      }
+    }
+    if (changed) this.events.onChange();
+    if (again) this.restoredTimer = setTimeout(() => void this.checkRestored(), RESTORED_POLL_MS);
   }
 
   /** Talks to the mint before it is added: a typo should not become a place to keep money. */

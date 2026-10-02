@@ -120,6 +120,7 @@ Bundles made before version 2 are one UTF-8 JSON document, and are still restore
 - A client shows what a backup or a restore is doing (reading, writing, checking; files and bytes done of the total) and offers Cancel. A cancelled backup leaves no file, whole or partial.
 - Every Ark wallet record gets a fresh wallet id, with or without a database to copy, so a restored profile never shares an Ark database with the profile it came from. So does every Bark wallet record ([204](204-bark.md)), current or retired: its databases are never in the bundle, and under the new id the wallet starts an empty one that the server's recovery scan fills from the phrase. A backup of a wallet whose database exists but cannot be read fails instead of leaving it out.
 - Payment attempts that were `pending`, `submitted` or `unknown` in the bundle are marked `unknown`: an older backup cannot prove an attempt was never sent, and nothing restored may authorize a new send ([200](200-payments.md)).
+- Every Cashu proof restored that no payment holds is marked as a copy to check. When its wallet starts, it asks each mint once which of those proofs are still unspent (NUT-07, [201](201-cashu.md)) and drops the ones the mint reads spent, so the balance is what the mints still hold and not what the bundle held. A mint that cannot be asked is asked again later; until it answers, its proofs count as before.
 - After restore the client switches to the new profile ([04](04-profiles.md)).
 
 ### Restoring on the same device
@@ -135,7 +136,7 @@ Without a match the bundle is restored at once.
 ## Security and operation
 
 - **Two live copies.** Restoring on a second device while the original still runs makes both answer for the same chats and hold the same keys. Contacts may see messages arrive at one copy only; wallets may race on the same funds. Treat a bundle as a move unless you know both copies will not run together.
-- **Staleness.** A bundle reflects the moment it was made. Ecash spent later, Lightning quotes, Ark renewals and payments made afterwards are not in it. Restoring an old bundle can show ecash already spent; the wallet discovers that at the mint.
+- **Staleness.** A bundle reflects the moment it was made. Ecash spent later, Lightning quotes, Ark renewals and payments made afterwards are not in it. Restoring an old bundle brings back ecash already spent: the wallet asks its mints when it starts and drops it (see Restore).
 - **Secrets at rest.** The bundle is as sensitive as the device. Storage credentials for remote adapters ([1002](1002-s3-storage.md)) are never part of a bundle.
 
 ## Implementation status
