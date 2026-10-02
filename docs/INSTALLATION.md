@@ -11,7 +11,7 @@ Open **https://app.ghostly.tools** in any modern browser.
   - iPhone and iPad: in Safari, tap Share, then *Add to Home Screen*.
   - What installing adds (offline start, Share to Ghostly, `web+ghostly:` links, shortcuts, the unread badge): [WEB.md](WEB.md#install-it).
 - Keys and wallets live in that browser. What a web page can and cannot do, and how to host it yourself: [WEB.md](WEB.md).
-- **Self-hosted:** `docker compose up -d` in a clone serves the web app on `localhost:8080` ([WEB.md](WEB.md#run-it)).
+- **Self-hosted:** `docker compose -f infra/docker-compose.yml up -d` in a clone serves the web app on `localhost:8080` ([WEB.md](WEB.md#run-it)).
 
 ## Browser extension (Chrome, Brave, Edge)
 
@@ -19,7 +19,7 @@ Open **https://app.ghostly.tools** in any modern browser.
 
 **From the release zip** (the newest version, or a browser without store access):
 
-1. Download [ghostly-browser-extension-1.0.0.zip](https://github.com/MiguelMedeiros/ghostly/releases/download/v1.0.0/ghostly-browser-extension-1.0.0.zip) from the [latest release](https://github.com/MiguelMedeiros/ghostly/releases/latest) and unzip it somewhere you will keep.
+1. Download [ghostly-browser-extension-1.0.1.zip](https://github.com/MiguelMedeiros/ghostly/releases/download/v1.0.1/ghostly-browser-extension-1.0.1.zip) from the [latest release](https://github.com/MiguelMedeiros/ghostly/releases/latest) and unzip it somewhere you will keep.
 2. Open `chrome://extensions` and turn on **Developer mode**.
 3. Click **Load unpacked** and pick the folder.
 
@@ -31,12 +31,12 @@ Download from the [latest release](https://github.com/MiguelMedeiros/ghostly/rel
 
 | Platform | File |
 |---|---|
-| macOS, Apple silicon | [Ghostly_1.0.0_aarch64.dmg](https://github.com/MiguelMedeiros/ghostly/releases/download/v1.0.0/Ghostly_1.0.0_aarch64.dmg) |
-| macOS, Intel | [Ghostly_1.0.0_x64.dmg](https://github.com/MiguelMedeiros/ghostly/releases/download/v1.0.0/Ghostly_1.0.0_x64.dmg) |
-| Windows x64, installer | [Ghostly_1.0.0_x64-setup.exe](https://github.com/MiguelMedeiros/ghostly/releases/download/v1.0.0/Ghostly_1.0.0_x64-setup.exe) |
-| Windows x64, MSI | [Ghostly_1.0.0_x64_en-US.msi](https://github.com/MiguelMedeiros/ghostly/releases/download/v1.0.0/Ghostly_1.0.0_x64_en-US.msi) |
-| Linux x64, AppImage | [Ghostly_1.0.0_amd64.AppImage](https://github.com/MiguelMedeiros/ghostly/releases/download/v1.0.0/Ghostly_1.0.0_amd64.AppImage) |
-| Linux x64, Debian/Ubuntu | [Ghostly_1.0.0_amd64.deb](https://github.com/MiguelMedeiros/ghostly/releases/download/v1.0.0/Ghostly_1.0.0_amd64.deb) |
+| macOS, Apple silicon | [Ghostly_1.0.1_aarch64.dmg](https://github.com/MiguelMedeiros/ghostly/releases/download/v1.0.1/Ghostly_1.0.1_aarch64.dmg) |
+| macOS, Intel | [Ghostly_1.0.1_x64.dmg](https://github.com/MiguelMedeiros/ghostly/releases/download/v1.0.1/Ghostly_1.0.1_x64.dmg) |
+| Windows x64, installer | [Ghostly_1.0.1_x64-setup.exe](https://github.com/MiguelMedeiros/ghostly/releases/download/v1.0.1/Ghostly_1.0.1_x64-setup.exe) |
+| Windows x64, MSI | [Ghostly_1.0.1_x64_en-US.msi](https://github.com/MiguelMedeiros/ghostly/releases/download/v1.0.1/Ghostly_1.0.1_x64_en-US.msi) |
+| Linux x64, AppImage | [Ghostly_1.0.1_amd64.AppImage](https://github.com/MiguelMedeiros/ghostly/releases/download/v1.0.1/Ghostly_1.0.1_amd64.AppImage) |
+| Linux x64, Debian/Ubuntu | [Ghostly_1.0.1_amd64.deb](https://github.com/MiguelMedeiros/ghostly/releases/download/v1.0.1/Ghostly_1.0.1_amd64.deb) |
 
 - **Updates.** The app offers a new release, downloads it, checks Ghostly's signature and restarts into it. On Linux that is the AppImage; a `.deb` install is sent to the download instead. The check runs only while **Settings, Updates** allows it, and nothing installs without your OK.
 - **Linux has no WebRTC in its WebView** (WebKitGTK ships without it). Chats connect over Iroh, HyperDHT or the DHT, and calls run in the app itself, with GStreamer: the `.deb` and `.rpm` depend on its base and good plugins, and the AppImage carries them. If a plugin is missing, the call buttons name the package to install. Screen sharing is not available on Linux yet.
@@ -92,9 +92,9 @@ npm run build:web             # web app, static files in apps/web/dist
 npm run build:extension       # extension, load apps/extension/dist unpacked
 ```
 
-The Desktop build bundles the Node runtime that runs it, for HyperDHT (`scripts/prepare-native-runtime.mjs` runs before `tauri build`). To run the web app in Docker instead, see [WEB.md](WEB.md#run-it).
+The Desktop build bundles the Node runtime that runs it, for HyperDHT (`tools/scripts/prepare-native-runtime.mjs` runs before `tauri build`). To run the web app in Docker instead, see [WEB.md](WEB.md#run-it).
 
-Tests and the rest of the workflow: [Contributing](../CONTRIBUTING.md) and [Testing](TESTING.md).
+Tests and the rest of the workflow: [Contributing](../.github/CONTRIBUTING.md) and [Testing](TESTING.md).
 
 ## Troubleshooting
 
@@ -112,4 +112,4 @@ sudo xattr -cr /Applications/Ghostly.app
 
 **Web app: a second tab only waits.** One tab runs the peer at a time: close the other one ([WEB.md](WEB.md#what-a-web-page-cannot-do)).
 
-Something else? [Open an issue](https://github.com/MiguelMedeiros/ghostly/issues). For a vulnerability, never open an issue: follow [SECURITY.md](../SECURITY.md).
+Something else? [Open an issue](https://github.com/MiguelMedeiros/ghostly/issues). For a vulnerability, never open an issue: follow [SECURITY.md](../.github/SECURITY.md).

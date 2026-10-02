@@ -17,7 +17,7 @@ COPY apps/website/ ./
 COPY docs /app/docs
 COPY packages/core/src /app/packages/core/src
 COPY packages/cli/SKILL.md /app/packages/cli/SKILL.md
-COPY CONTRIBUTING.md SECURITY.md /app/
+COPY .github/CONTRIBUTING.md .github/SECURITY.md /app/.github/
 
 ENV NEXT_TELEMETRY_DISABLED=1
 

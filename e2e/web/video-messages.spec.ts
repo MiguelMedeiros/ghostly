@@ -5,7 +5,7 @@ import { chat, expect, test, type Peer } from "../support/fixtures";
 import { pair } from "../support/paired";
 
 /**
- * Two seconds of a test pattern, VP9 in MP4 (`scripts/video-media/make-fixtures.mjs`): Chromium plays it on every
+ * Two seconds of a test pattern, VP9 in MP4 (`tools/scripts/video-media/make-fixtures.mjs`): Chromium plays it on every
  * OS, open-source Linux builds included, which have no H.264.
  */
 const FIXTURE = fileURLToPath(new URL("../support/video-fixtures/ghosts.mp4", import.meta.url));

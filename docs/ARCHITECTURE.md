@@ -34,11 +34,11 @@ The [WISP catalogue](wisps/README.md) and [composable map](wisps/MAP.md) describ
 | [`apps/web`](../apps/web) | The web app: the peer in a tab, and its service worker (offline shell, share target, wake-up pushes). See [WEB.md](WEB.md) |
 | [`apps/extension`](../apps/extension) | Ghostly Browser (Chromium, Manifest V3): the peer in an offscreen document. See [BROWSER.md](BROWSER.md) |
 | [`native/transports`](../native/transports) | Native Iroh (Rust), the HyperDHT endpoint and sidecar (Node) and the Iroh wasm crate |
-| [`services/hyperdht-relay`](../services/hyperdht-relay) | The HyperDHT relay for browsers (dht-relay over WebSocket) |
-| [`services/push-relay`](../services/push-relay) | A reference push relay for browsers that cannot post a wake-up themselves |
+| [`infra/services/hyperdht-relay`](../infra/services/hyperdht-relay) | The HyperDHT relay for browsers (dht-relay over WebSocket) |
+| [`infra/services/push-relay`](../infra/services/push-relay) | A reference push relay for browsers that cannot post a wake-up themselves |
 | [`apps/website`](../apps/website) | ghostly.tools |
 | [`e2e`](../e2e) | End-to-end tests. See [TESTING.md](TESTING.md) |
-| [`examples/sdk-adapter`](../examples/sdk-adapter) | A complete SDK adapter project |
+| [`packages/sdk/examples/adapter`](../packages/sdk/examples/adapter) | A complete SDK adapter project |
 
 One peer, three hosts: the web app, the extension and Desktop all build `apps/ui/src/` with the same Vite plugin (`packages/browser/vite-plugin.ts`), which swaps the platform modules for ones backed by the peer. A host (`packages/browser/src/host.ts`) is the small part that differs. The headless CLI (`packages/cli`) hosts the same peer on Node, with no UI.
 
@@ -88,4 +88,4 @@ There is no Ghostly server in the message path. The DHT is not a durable history
 - **Expiry is not deletion.** Records expire from the network; contacts, observers and local history may keep copies.
 - **Real money is asked for.** Mainnet spends need an explicit confirmation; wallet secrets are sealed with a device key.
 
-Reporting a flaw: [SECURITY.md](../SECURITY.md). Past audit fixes: [Security review](SECURITY-REVIEW.md). Source evidence and limits per platform: [wisps/IMPLEMENTATION.md](wisps/IMPLEMENTATION.md).
+Reporting a flaw: [SECURITY.md](../.github/SECURITY.md). Past audit fixes: [Security review](SECURITY-REVIEW.md). Source evidence and limits per platform: [wisps/IMPLEMENTATION.md](wisps/IMPLEMENTATION.md).

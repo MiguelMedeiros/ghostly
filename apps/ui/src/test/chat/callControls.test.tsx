@@ -7,7 +7,7 @@ import { IncomingCallNotification } from "../../components/IncomingCallNotificat
 import { FakeMediaStream, FakeTrack } from "../../../../../packages/react/test/fakes";
 import { renderApp } from "../render";
 
-// covers: calls.screen-share, calls.audio, calls.video, calls.mini-window
+// covers: calls.screen-share, calls.audio, calls.video, calls.mini-window, calls.end-and-answer
 
 /**
  * The chat header starts a voice or a video call, and nothing else; the screen is shared from inside a call,
@@ -192,6 +192,62 @@ describe("a call for a screen reader and the keys", () => {
     expect(screen.getByTestId("call-state-spoken")).toHaveAttribute("role", "status");
     expect(screen.getByTestId("call-state-spoken")).toHaveTextContent(/^Connected$/);
     expect(screen.getByTestId("call-status")).not.toHaveAttribute("role");
+  });
+});
+
+describe("a call ringing while you are on another (End and answer)", () => {
+  it("offers End and answer and Decline only, named for a screen reader and under each button, with the keys kept in it", async () => {
+    const onAcceptAudio = vi.fn(), onAcceptVideo = vi.fn(), onReject = vi.fn();
+    const { user } = renderApp(<IncomingCallNotification peerName="Ana" hasVideo={false} onCall onAcceptAudio={onAcceptAudio} onAcceptVideo={onAcceptVideo} onReject={onReject} />);
+    const ring = screen.getByRole("alertdialog", { name: "Ana" });
+    expect(ring).toHaveAccessibleDescription("Incoming audio call... Answering ends your current call");
+    expect(ring).toHaveFocus();
+    // An Enter meant for the message does not end the call that is on.
+    await user.keyboard("{Enter}");
+    expect(onAcceptAudio).not.toHaveBeenCalled();
+
+    const buttons = within(ring).getAllByRole("button");
+    expect(buttons.map((b) => b.getAttribute("aria-label"))).toEqual(["Decline", "End and answer"]);
+    expect(buttons.map((b) => b.getAttribute("title"))).toEqual(["Decline", "End and answer"]);
+    // The words are on screen too: no icon says "End and answer".
+    expect(within(ring).getAllByText("End and answer")).toHaveLength(1);
+    expect(within(ring).queryByRole("button", { name: /^Accept/ })).toBeNull();
+
+    await user.tab();
+    await user.tab();
+    expect(buttons[1]).toHaveFocus();
+    await user.tab();
+    expect(buttons[0]).toHaveFocus();
+    await user.tab();
+    await user.keyboard("{Enter}");
+    expect(onAcceptAudio).toHaveBeenCalledOnce();
+    expect(onAcceptVideo).not.toHaveBeenCalled();
+  });
+
+  it("answers a video call as it came, with the camera; Decline declines", async () => {
+    const onAcceptVideo = vi.fn(), onReject = vi.fn();
+    const { user } = renderApp(<IncomingCallNotification peerName="Ana" hasVideo onCall onAcceptAudio={vi.fn()} onAcceptVideo={onAcceptVideo} onReject={onReject} />);
+    expect(screen.getByRole("alertdialog")).toHaveAccessibleDescription("Incoming video call... Answering ends your current call");
+    await user.click(screen.getByRole("button", { name: "End and answer" }));
+    expect(onAcceptVideo).toHaveBeenCalledOnce();
+    await user.click(screen.getByRole("button", { name: "Decline" }));
+    expect(onReject).toHaveBeenCalledOnce();
+  });
+
+  it("goes back to the plain Accept once the call that was on has ended", () => {
+    const props = { peerName: "Ana", hasVideo: true, onAcceptAudio: vi.fn(), onAcceptVideo: vi.fn(), onReject: vi.fn() };
+    const { rerender } = renderApp(<IncomingCallNotification {...props} onCall />);
+    rerender(<IncomingCallNotification {...props} onCall={false} />);
+    const ring = screen.getByRole("alertdialog", { name: "Ana" });
+    expect(ring).toHaveAccessibleDescription("Incoming video call...");
+    expect(within(ring).getAllByRole("button").map((b) => b.getAttribute("aria-label"))).toEqual(["Decline", "Accept audio call", "Accept video call"]);
+  });
+
+  it("is said in every language", async () => {
+    for (const language of ["en", "pt", "es", "fr", "it", "ja", "zh", "ar"]) {
+      const calls = (await import(`../../locales/${language}/calls.json`)).default as Record<string, unknown>;
+      for (const key of ["endAndAnswer", "endsCurrent", "onAnother"]) expect(calls[key], `${language} ${key}`).toEqual(expect.any(String));
+    }
   });
 });
 

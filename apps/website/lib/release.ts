@@ -1,9 +1,9 @@
 /**
  * The release the site falls back to when it cannot ask GitHub for the latest
- * published one (lib/latestRelease.ts). `scripts/bump-version.mjs` sets it, and
+ * published one (lib/latestRelease.ts). `tools/scripts/bump-version.mjs` sets it, and
  * /latest.json answers with it.
  */
-export const VERSION = "1.0.0";
+export const VERSION = "1.0.1";
 
 const BASE = "https://github.com/MiguelMedeiros/ghostly/releases";
 

@@ -153,12 +153,12 @@ jobs:
         if: matrix.platform == 'ubuntu-22.04'
         run: |
           sudo apt-get install -y squashfs-tools
-          scripts/appimage-drop-wayland-libs.sh target/release/bundle/appimage/*.AppImage
+          tools/scripts/appimage-drop-wayland-libs.sh target/release/bundle/appimage/*.AppImage
 
       # `tauri build` signed the AppImage before the repack above changed it, so that signature no longer
       # matches and every installed Linux app would refuse the update (1.0.0 shipped that way). Sign the
       # file that is published, bound to the app's version as `tauri build` does. The release job checks
-      # every signature again (scripts/verify-updater-signatures.mjs).
+      # every signature again (tools/scripts/verify-updater-signatures.mjs).
       - name: Sign the repacked AppImage again
         if: matrix.platform == 'ubuntu-22.04'
         env:
@@ -225,7 +225,7 @@ jobs:
         run: |
           VERSION=$(node -p "require('./apps/extension/public/manifest.json').version")
           cd apps/extension/dist
-          zip -r "../../ghostly-browser-extension-${VERSION}.zip" .
+          zip -r "../../../ghostly-browser-extension-${VERSION}.zip" .
 
       - name: Upload artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -325,13 +325,13 @@ jobs:
       # What the desktop app reads to update itself. It also copies in the
       # bundles it points at; nothing unsigned ends up in the manifest.
       - name: Build the updater manifest
-        run: node scripts/updater-manifest.mjs artifacts release-assets "${RELEASE_TAG}"
+        run: node tools/scripts/updater-manifest.mjs artifacts release-assets "${RELEASE_TAG}"
 
       # What each installed app checks before it takes an update, checked here first: every platform's
       # bundle in latest.json against its signature and the updater's public key. A bundle changed after
       # signing (the 1.0.0 AppImage) stops the release instead of reaching the apps.
       - name: Verify the updater signatures
-        run: node scripts/verify-updater-signatures.mjs release-assets
+        run: node tools/scripts/verify-updater-signatures.mjs release-assets
 
       - name: Generate SHA256 checksums
         run: |

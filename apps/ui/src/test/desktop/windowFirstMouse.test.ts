@@ -10,7 +10,7 @@ import { describe, expect, it } from "vitest";
  * message's Send twice (#355, then this): whenever the Ghostly window had lost focus while recording (a
  * microphone prompt, another app), the first click only activated it, and WebKit drew the focus ring on the
  * send button instead of sending. Measured with real AppKit events in a WKWebView
- * (`scripts/voice-media/clicker.swift`): locked, window inactive, one click on Send: nothing without
+ * (`tools/scripts/voice-media/clicker.swift`): locked, window inactive, one click on Send: nothing without
  * acceptFirstMouse, sent with it. No browser test sees this; only the window's configuration does.
  */
 const read = (path: string) => JSON.parse(readFileSync(join(import.meta.dirname, "../../../../..", path), "utf8"));

@@ -6,7 +6,7 @@ import { DIMENSIONS, SEED } from "./dimensions";
 /**
  * The matrix as a table: one row per scenario, one column per dimension, and
  * how it went. Written as JSON (for the docs and for merging shards) and as
- * markdown (the job summary, and docs/TESTING.md through scripts/matrix-docs.mjs).
+ * markdown (the job summary, and docs/TESTING.md through tools/scripts/matrix-docs.mjs).
  *
  * The HTML report shows the same thing from the other side: every scenario is
  * a test titled with its id and combination, tagged `@<dimension>:<value>`, so

@@ -296,7 +296,7 @@ jobs:
       - name: Install tauri-driver
         run: command -v tauri-driver || cargo install tauri-driver --locked
 
-      # Also installs the HyperDHT runtime (scripts/prepare-native-runtime.mjs), whose testnet the scenarios use.
+      # Also installs the HyperDHT runtime (tools/scripts/prepare-native-runtime.mjs), whose testnet the scenarios use.
       - name: Build the Desktop app
         run: npm run tauri -- build --debug --no-bundle
 

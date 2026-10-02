@@ -2,7 +2,7 @@ import { fileURLToPath } from "node:url";
 import { chat, expect, test, type Peer } from "../support/fixtures";
 import { pair } from "../support/paired";
 
-/** Two seconds of a 440 Hz tone, sent as a file (`scripts/video-media/make-fixtures.mjs`). */
+/** Two seconds of a 440 Hz tone, sent as a file (`tools/scripts/video-media/make-fixtures.mjs`). */
 const MP3 = fileURLToPath(new URL("../support/audio-fixtures/ghost-tune.mp3", import.meta.url));
 
 test.use({

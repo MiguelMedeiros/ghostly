@@ -9,6 +9,7 @@ import type { BoundChannel, NativeEndpoint, NativeTransport } from "../../src/pa
  * - `kill(name)` is the process ending with nothing said: its channels go dead, and the far end hears nothing until
  *   `idleMs` passed (QUIC's idle timeout, 30 s in Iroh), then sees its channel close.
  * Dials take `dialMs`; a dial to an endpoint that is not running fails after `dialFailMs`.
+ * A dial from an app in `deadPaths` connects, then its path dies (`deadPath`).
  */
 
 interface End extends FrameChannel {
@@ -35,6 +36,12 @@ export class NativeWorld {
    */
   dialsLost = new Set<string>();
   idleMs = 30_000;
+  /**
+   * Apps whose next dial connects and then carries nothing: the handshake went through, and no frame or close crosses
+   * after it, either way; each end closes when its idle timeout (`idleMs`) runs out (the Linux Desktop dialling the web
+   * app back after both restarted, through a relay path that died with the handshake: Omarchy, 2026-10-01).
+   */
+  deadPaths = new Set<string>();
   /** Every dial that reached an endpoint, and every one that did not. */
   dials = 0;
   dialFailures = 0;
@@ -63,6 +70,7 @@ export class NativeWorld {
         if (remote.closed || entry.closed || this.find(d.id ?? d.publicKey ?? "") !== remote) { this.dialFailures++; throw new Error(`${transport}: the contact's endpoint went away`); }
         this.dials++;
         const [mine, theirs] = this.pair(entry, remote);
+        if (this.deadPaths.delete(name)) this.deadPath(mine, theirs);
         const binding = { transport, context: hex(transport === "hyperdht/1" ? 64 : 32), identities: [entry.identity, remote.identity] as [string, string] };
         remote.endpoint.onConnection?.({ channel: theirs, binding: { ...binding, identities: [remote.identity, entry.identity] } });
         return { channel: mine, binding };
@@ -90,6 +98,11 @@ export class NativeWorld {
         setTimeout(() => far.hear(), this.idleMs);
       }
     }
+  }
+
+  /** Nothing crosses between these two ends any more; each hears its idle timeout. */
+  private deadPath(...ends: End[]): void {
+    for (const end of ends) { end.dead = true; setTimeout(() => end.hear(), this.idleMs); }
   }
 
   private pair(a: Entry, b: Entry): [End, End] {
