@@ -45,9 +45,9 @@ test("a whole profile goes to S3 and to a file, and each comes back as a new pro
   await backups.getByTestId("backup-download").click();
   const download = await downloading;
   expect(download.suggestedFilename()).toMatch(/^\d{8}T\d{6}Z-[a-z2-7]{8}\.ghostly-backup$/);
-  const bundle = readFileSync((await download.path())!, "utf8");
-  expect(bundle).not.toContain("Backed Up");
-  expect(bundle).not.toContain(credentials.secretAccessKey);
+  const bundle = readFileSync((await download.path())!);
+  expect(bundle.toString("latin1")).not.toContain("Backed Up");
+  expect(bundle.toString("latin1")).not.toContain(credentials.secretAccessKey);
 
   // Restore from S3: a new profile, with the chat and the name, and Ghostly switches to it.
   await backups.getByTestId("restore-open").click();
@@ -70,7 +70,7 @@ test("a whole profile goes to S3 and to a file, and each comes back as a new pro
 
   // Restore the file too: a third profile.
   await page.getByTestId("profile-backups").getByTestId("restore-open").click();
-  await page.getByTestId("profile-backups").getByTestId("restore-file").setInputFiles({ name: download.suggestedFilename(), mimeType: "application/json", buffer: Buffer.from(bundle) });
+  await page.getByTestId("profile-backups").getByTestId("restore-file").setInputFiles({ name: download.suggestedFilename(), mimeType: "application/octet-stream", buffer: bundle });
   await page.getByTestId("profile-backups").getByTestId("restore-passphrase").fill("an e2e backup passphrase");
   await page.getByTestId("profile-backups").getByTestId("restore-go").click();
   await page.getByTestId("restore-same-device").getByTestId("restore-copy").click();
