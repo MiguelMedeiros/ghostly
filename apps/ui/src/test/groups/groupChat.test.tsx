@@ -453,3 +453,14 @@ describe("GroupChat: history and sending", () => {
     expect(composer()).toHaveValue("alguém?");
   });
 });
+
+describe("GroupChat: the mark on a message of mine", () => {
+  it("marks a message of mine sent, never delivered: a group has no receipts", async () => {
+    const { user } = openGroup(active(), [stored({ id: "m3", sender: "me", member: ME, text: "hello" })]);
+    const mark = await screen.findByTestId("message-delivery");
+    expect(mark).toHaveAttribute("data-delivery", "unacked");
+    expect(mark).toHaveAccessibleName("Sent");
+    await user.click(mark);
+    expect(screen.getByTestId("message-delivery-tip")).toHaveTextContent("Sent to the group. Groups have no receipts.");
+  });
+});

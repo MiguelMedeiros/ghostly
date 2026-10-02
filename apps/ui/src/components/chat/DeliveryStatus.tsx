@@ -41,11 +41,13 @@ const TIP_MS = 2500;
  * held, it says in one line what it means; the details panel (⋮ → Details) has the rest. A message that was not
  * sent is a button: pressing the red mark sends it again.
  */
-export function DeliveryStatus({ delivery, acked = false, onPicture = false, onRetry, live }: {
+export function DeliveryStatus({ delivery, acked = false, onPicture = false, onRetry, live, group }: {
   delivery?: ChatMessage["delivery"];
   /** A waiting file in a DHT-only chat: it waits for a live connection, and who chose DHT only. */
   live?: DhtOnlyBy;
   acked?: boolean;
+  /** A group's message: its line says a group has no receipts, where a chat's says none came yet. */
+  group?: boolean;
   /** On the dark chip over a picture, dark in every theme. */
   onPicture?: boolean;
   /** Sends a message that was not sent again. */
@@ -123,7 +125,7 @@ export function DeliveryStatus({ delivery, acked = false, onPicture = false, onR
       {tip && (
         <span role="tooltip" id={tipId} data-testid="message-delivery-tip"
           className="absolute bottom-full end-0 mb-1.5 z-20 w-max max-w-[15rem] whitespace-normal rounded-md border border-border bg-surface-alt px-2 py-1 text-start text-[11.5px] leading-snug text-text-primary shadow-lg pointer-events-none animate-fade-in">
-          {words.hint(state, live)}
+          {words.hint(state, live, group)}
         </span>
       )}
     </span>

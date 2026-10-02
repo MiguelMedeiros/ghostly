@@ -716,6 +716,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
   const isMe = message.sender === "me";
   const isSystem = message.sender === "system";
   const isAcked = isMe && (message.delivery ? message.delivery === "delivered" : peerAck >= message.timestamp);
+  const inGroup = !!linkId?.startsWith("group:");
   const { platform, transfer } = useTransfer(isMe ? message.file?.id : undefined);
   // A file of mine whose bytes did not go has the red mark, not ticks beside its "Not sent". While they move, the
   // message keeps its own mark: the bytes' progress is the file's to show (held files travel by hold/1, not files/3).
@@ -854,7 +855,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
     // (its fallback). Updates are its normal life, so no "edited": when it last changed, in the card.
     const card = message.card;
     const time = <CardTime sent={message.timestamp} changed={message.edit?.at} />;
-    const marks = isMe ? <DeliveryStatus delivery={shown} acked={isAcked} onRetry={retry} live={live} /> : undefined;
+    const marks = isMe ? <DeliveryStatus delivery={shown} acked={isAcked} onRetry={retry} live={live} group={inGroup} /> : undefined;
     const edge = card.kind === "task" ? STATUS_TONE[card.status].bar
       : card.state === "paused" ? "bg-text-muted" : card.lastRun?.result === "failed" ? "bg-danger" : undefined;
     return (
@@ -917,7 +918,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
       <span className="text-[11px] leading-none text-text-primary/65">
         {time}
       </span>
-      {isMe && <DeliveryStatus delivery={shown} acked={isAcked} onRetry={retry} live={live} />}
+      {isMe && <DeliveryStatus delivery={shown} acked={isAcked} onRetry={retry} live={live} group={inGroup} />}
     </span>
   );
 
@@ -1036,7 +1037,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
               <span className="text-[11px] leading-none text-[hsla(0,0%,100%,0.9)]">
                 {time}
               </span>
-              {isMe && <DeliveryStatus delivery={shown} acked={isAcked} onRetry={retry} live={live} onPicture />}
+              {isMe && <DeliveryStatus delivery={shown} acked={isAcked} onRetry={retry} live={live} group={inGroup} onPicture />}
             </span>
           </div>
         ) : bigEmoji ? (
