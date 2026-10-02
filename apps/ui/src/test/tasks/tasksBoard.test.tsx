@@ -278,6 +278,104 @@ describe("the Tasks board", () => {
   });
 });
 
+describe("richer task cards on the board", () => {
+  const pr = (extra: Record<string, unknown> = {}) => ({ url: "https://github.com/o/r/pull/612", number: 612, ...extra });
+
+  it("a task whose pull request is open sits in Review, between Blocked and Done, still running", async () => {
+    profile([
+      row("link-1", task({ id: "reviewing", pr: pr({ state: "open", checks: "passing" }) })),
+      row("link-1", task({ id: "drafting", pr: pr({ state: "draft" }) })),
+      row("link-1", task({ id: "merged", status: "done", pr: pr({ state: "merged" }) })),
+    ]);
+    await loaded();
+    expect(screen.getAllByTestId("board-column").map((c) => within(c).getByRole("heading").textContent)).toEqual(["Queued0", "Running1", "Blocked0", "Review1", "Done1", "Stopped0"]);
+    expect(cardIds("review")).toEqual(["reviewing"]);
+    expect(cardIds("running")).toEqual(["drafting"]);
+    expect(cardIds("done")).toEqual(["merged"]);
+    expect(within(column("review")).getByTestId("board-card")).toHaveAttribute("data-status", "running");
+    expect(screen.getByTestId("tasks-summary")).toHaveTextContent("2 active · 3 tasks");
+  });
+
+  it("without a pull request state on any card, the board has no Review column", async () => {
+    profile(rowsOfThree());
+    await loaded();
+    expect(screen.getByTestId("tasks-board").querySelector('[data-column="review"]')).toBeNull();
+  });
+
+  it("the pull request's chip carries its checks as a mark with words, and its state in its name and Details", async () => {
+    const { user } = profile([
+      row("link-1", task({ id: "pass", pr: pr({ state: "open", checks: "passing" }) })),
+      row("link-1", task({ id: "fail", status: "blocked", pr: pr({ state: "open", checks: "failing" }) })),
+      row("link-1", task({ id: "wait", status: "queued", pr: pr({ state: "draft", checks: "pending" }) })),
+    ]);
+    await loaded();
+    const card = (id: string) => screen.getByTestId("tasks-board").querySelector<HTMLElement>(`[data-testid="board-card"][data-card-id="${id}"]`)!;
+    expect(within(card("pass")).getByTestId("board-card-checks")).toHaveAttribute("data-checks", "passing");
+    expect(within(card("pass")).getByTestId("board-card-checks")).toHaveTextContent("✓Checks passing");
+    expect(within(card("fail")).getByTestId("board-card-checks")).toHaveTextContent("✕Checks failing");
+    expect(within(card("wait")).getByTestId("board-card-checks")).toHaveTextContent("●Checks pending");
+    expect(within(card("pass")).getByTestId("board-card-pr")).toHaveAttribute("title", "Open on github.com · Open · Checks passing");
+    expect(within(card("pass")).getByTestId("board-card-open")).toHaveAccessibleName(/PR #612, Open, Checks passing, updated /);
+    await user.click(within(card("wait")).getByRole("button", { name: "Details" }));
+    expect(within(card("wait")).getByTestId("board-card-pr-standing")).toHaveTextContent("Draft · Checks pending");
+  });
+
+  it("shows tags as chips (three chips at most, all of them in Details) and filters by one", async () => {
+    const { user } = profile([
+      row("link-1", task({ id: "a", tags: ["core", "web"] })),
+      row("link-1", task({ id: "b", tags: ["core"], pr: pr() })),
+      row("group:g1", task({ id: "c", tags: ["cli", "docs", "web"], pr: pr() }), { member: "hermes-key" }),
+    ]);
+    await loaded();
+    const card = (id: string) => screen.getByTestId("tasks-board").querySelector<HTMLElement>(`[data-testid="board-card"][data-card-id="${id}"]`)!;
+    // A 1:1 chat's card: its bot, then its tags.
+    expect(within(card("a")).getAllByTestId("board-card-tag").map((el) => el.textContent)).toEqual(["core", "web"]);
+    // Bot, chat and pull request take the three places: the tags are in Details.
+    expect(within(card("c")).getByTestId("board-card-chips").children).toHaveLength(3);
+    expect(within(card("c")).queryByTestId("board-card-tag")).not.toBeInTheDocument();
+    await user.click(within(card("c")).getByRole("button", { name: "Details" }));
+    expect(within(card("c")).getByTestId("board-card-tags")).toHaveTextContent("cli, docs, web");
+
+    // The tags to filter by, the most used first; a card's tag chip filters too.
+    expect(within(screen.getByTestId("tasks-tags")).getAllByTestId("tasks-tag").map((el) => el.textContent)).toEqual(["core", "web", "cli", "docs"]);
+    await user.click(within(screen.getByTestId("tasks-tags")).getByRole("button", { name: "web" }));
+    expect(screen.getAllByTestId("board-card").map((c) => c.getAttribute("data-card-id")).sort()).toEqual(["a", "c"]);
+    expect(within(screen.getByTestId("tasks-tags")).getByRole("button", { name: "web" })).toHaveAttribute("aria-pressed", "true");
+    await user.click(within(screen.getByTestId("tasks-tags")).getByRole("button", { name: "web" }));
+    expect(screen.getAllByTestId("board-card")).toHaveLength(3);
+    await user.click(within(card("a")).getAllByTestId("board-card-tag")[0]);
+    expect(screen.getAllByTestId("board-card").map((c) => c.getAttribute("data-card-id")).sort()).toEqual(["a", "b"]);
+    expect(screen.getByTestId("where")).toHaveTextContent("/tasks");
+  });
+
+  it("stacks a task's parts under it with how many are done; a part opens its own message", async () => {
+    const rows = [
+      row("group:g1", task({ id: "epic", title: "Relay rework" }), { member: "hermes-key" }),
+      row("group:g1", task({ id: "codec", title: "Codec", parent: "epic", status: "done" }), { member: "hermes-key" }),
+      row("group:g1", task({ id: "engine", title: "Engine", parent: "epic" }), { member: "hermes-key" }),
+      row("group:g1", task({ id: "orphan", title: "Orphan", parent: "never-sent", status: "queued" }), { member: "hermes-key" }),
+    ];
+    const { user } = profile(rows);
+    await loaded();
+    // The parts are in no column of their own; a part whose parent is missing stands alone.
+    expect(cardIds("running")).toEqual(["epic"]);
+    expect(cardIds("done")).toEqual([]);
+    expect(cardIds("queued")).toEqual(["orphan"]);
+    expect(screen.getByTestId("tasks-summary")).toHaveTextContent("3 active · 4 tasks");
+    const epic = within(column("running")).getByTestId("board-card");
+    expect(within(epic).getByTestId("board-card-parts")).toHaveTextContent("1 of 2 done");
+    expect(within(epic).getByTestId("board-card-open")).toHaveAccessibleName(/^Relay rework, Running, 1 of 2 done, /);
+    expect(within(epic).queryByTestId("board-card-part")).not.toBeInTheDocument();
+    const toggle = within(epic).getByTestId("board-card-stack-toggle");
+    await user.click(toggle);
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    expect(within(epic).getAllByTestId("board-card-part").map((p) => p.textContent)).toEqual(["EngineRunning", "CodecDone"]);
+    await user.click(within(epic).getAllByTestId("board-card-part")[1]);
+    await waitFor(() => expect(screen.getByTestId("where")).toHaveTextContent("/group/g1"));
+    expect(screen.getByTestId("where")).toHaveAttribute("data-jump", rows[1].id);
+  });
+});
+
 describe("the Tasks board on a phone", () => {
   it("shows the columns as tabs with their counts, one column for each", async () => {
     viewport(375, 740);

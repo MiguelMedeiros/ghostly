@@ -24,10 +24,10 @@ const GROUPINGS: readonly BoardGrouping[] = ["status", "bot", "chat"];
 const icon = { viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": true } as const;
 
 /** A column's dot, by status: the tones the cards themselves use. */
-const COLUMN_DOT: Record<BoardColumn, string> = { queued: "bg-text-muted", running: "bg-accent", blocked: "bg-amber-500", done: "bg-success", closed: "bg-danger" };
+const COLUMN_DOT: Record<BoardColumn, string> = { queued: "bg-text-muted", running: "bg-accent", blocked: "bg-amber-500", review: "bg-link", done: "bg-success", closed: "bg-danger" };
 
-function Column({ group, name, dot, grouping, board, now, older, onOlder, onOpen, phone, labelledBy }: {
-  group: BoardGroup; name: string; dot?: string; grouping: BoardGrouping; board: TaskBoardData; now: number;
+function Column({ group, name, dot, grouping, board, now, older, onOlder, onOpen, onTag, phone, labelledBy }: {
+  group: BoardGroup; name: string; dot?: string; grouping: BoardGrouping; board: TaskBoardData; now: number; onTag: (tag: string) => void;
   older: boolean; onOlder: () => void; onOpen: (entry: BoardEntry) => void; phone: boolean; labelledBy?: string;
 }) {
   const { t } = useI18n();
@@ -65,7 +65,7 @@ function Column({ group, name, dot, grouping, board, now, older, onOlder, onOpen
       )}
       <div data-testid="board-column-cards" className={`flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto overscroll-contain ${phone ? "px-3 pt-2 pb-4" : "px-1.5 pb-1.5"}`}>
         {shown.map((task) => (
-          <BoardCard key={task.key} task={task} grouping={grouping} face={board.faceOf(task)} now={now} onOpen={() => onOpen(task)} onKeys={keys} />
+          <BoardCard key={task.key} task={task} grouping={grouping} face={board.faceOf(task)} now={now} onOpen={() => onOpen(task)} onOpenPart={onOpen} onKeys={keys} onTag={onTag} />
         ))}
         {!group.tasks.length && <p data-testid="board-column-empty" className="m-0 px-2 py-3 text-center text-xs text-text-muted">{t("cards.board.none")}</p>}
         {rest > 0 && (
@@ -122,6 +122,7 @@ export function Tasks() {
   const [grouping, setGrouping] = useState<BoardGrouping>("status");
   const [filter, setFilter] = useState("");
   const [older, setOlder] = useState(false);
+  const [tag, setTag] = useState<string>();
   const [info, setInfo] = useState(false);
   const [tab, setTab] = useState(0);
   const boardRef = useRef<HTMLDivElement>(null);
@@ -131,7 +132,7 @@ export function Tasks() {
 
   const statusWord = (status: TaskStatus) => t(`cards.task.status.${status}`);
   // eslint-disable-next-line react-hooks/exhaustive-deps -- `statusWord` follows `t`
-  const model = useMemo(() => boardModel(board.tasks, { grouping, filter, now, older, statusWord }), [board.tasks, grouping, filter, now, older, t]);
+  const model = useMemo(() => boardModel(board.tasks, { grouping, filter, tag, now, older, statusWord }), [board.tasks, grouping, filter, tag, now, older, t]);
   const routines = useMemo(() => sortRoutines(board.routines), [board.routines]);
   const nameOf = (group: BoardGroup) => group.label ?? t(`cards.board.column.${group.id as BoardColumn}`);
   const showing = routines.length && (view === "routines" || !board.tasks.length) ? "routines" : "tasks";
@@ -230,7 +231,17 @@ export function Tasks() {
             </ul>
           ) : (
             <>
-              {filter.trim() && !model.shown && <p data-testid="tasks-no-match" className="m-0 shrink-0 px-4 pt-3 text-center text-xs text-text-muted">{t("cards.board.noMatch")}</p>}
+              {model.tags.length > 0 && (
+                <div role="group" aria-label={t("cards.board.tags")} data-testid="tasks-tags" className="flex shrink-0 items-center gap-1 overflow-x-auto border-b border-border px-4 py-1.5 [scrollbar-width:none]">
+                  <span aria-hidden="true" className="shrink-0 text-xs text-text-muted">{t("cards.board.tags")}</span>
+                  {model.tags.map((name) => (
+                    <button key={name} type="button" data-testid="tasks-tag" aria-pressed={tag === name} onClick={() => setTag(tag === name ? undefined : name)} className={`${pill(tag === name)} max-w-40 shrink-0 truncate`}>
+                      <bdi>{name}</bdi>
+                    </button>
+                  ))}
+                </div>
+              )}
+              {(filter.trim() || tag) && !model.shown && <p data-testid="tasks-no-match" className="m-0 shrink-0 px-4 pt-3 text-center text-xs text-text-muted">{t("cards.board.noMatch")}</p>}
               {phone && (
                 <div role="tablist" aria-label={t("cards.board.columns")} data-testid="tasks-tabs" onKeyDown={tabKeys}
                   className="flex shrink-0 gap-1 overflow-x-auto border-b border-border px-2 py-1.5 [scrollbar-width:none]">
@@ -248,7 +259,7 @@ export function Tasks() {
                 className={phone ? "flex min-h-0 flex-1 snap-x snap-mandatory overflow-x-auto overflow-y-hidden overscroll-x-contain [scrollbar-width:none]" : "flex min-h-0 flex-1 items-start gap-3 overflow-x-auto p-3"}>
                 {model.groups.map((group, i) => (
                   <Column key={group.id} group={group} name={nameOf(group)} dot={grouping === "status" ? COLUMN_DOT[group.id as BoardColumn] : undefined} grouping={grouping}
-                    board={board} now={now} older={older} onOlder={() => setOlder(!older)} onOpen={open} phone={phone} labelledBy={phone ? `${tabsId}-${i}` : undefined} />
+                    board={board} now={now} older={older} onOlder={() => setOlder(!older)} onOpen={open} onTag={(name) => setTag(tag === name ? undefined : name)} phone={phone} labelledBy={phone ? `${tabsId}-${i}` : undefined} />
                 ))}
               </div>
             </>
