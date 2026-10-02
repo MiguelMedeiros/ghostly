@@ -68,15 +68,17 @@ export function BoardCard({ task, grouping, face, now, onOpen, onKeys }: {
   ].slice(0, 3);
   return (
     <article data-testid="board-card" data-card-id={card.id} data-status={card.status} data-open={open ? "" : undefined}
-      className="group relative min-w-0 shrink-0 overflow-hidden rounded-lg border border-border bg-surface-alt text-start transition-colors hover:bg-surface-hover has-[[data-board-card]:focus-visible]:border-accent">
+      className="relative min-w-0 shrink-0 overflow-hidden rounded-lg border border-border bg-surface-alt text-start transition-colors hover:bg-surface-hover has-[[data-board-card]:focus-visible]:border-accent">
       {/* The card as a whole is this button; the link and Details sit above it and take their own clicks. */}
+      {/* The title opens while the button has keyboard focus, by a sibling rule. Tailwind's group variant of `has` would write a
+          `:has()` rule anchored on every `.group`, which each message row is, and a keystroke in a long chat pays for it. */}
       <button type="button" data-board-card data-testid="board-card-open" aria-label={boardCardLabel(t, task, age)} title={card.title} onClick={onOpen} onKeyDown={onKeys}
         className="absolute inset-0 cursor-pointer rounded-lg focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent" />
       <div className="pointer-events-none relative px-2.5 pt-2 pb-2.5">
         <div className="flex min-w-0 items-start gap-2">
           <span aria-hidden="true" className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${tone.dot}`} />
           <bdi data-testid="board-card-title"
-            className={`min-w-0 flex-1 text-[13px] font-medium leading-5 text-text-primary ${open ? "[overflow-wrap:anywhere]" : "truncate group-has-[[data-board-card]:focus-visible]:whitespace-normal group-has-[[data-board-card]:focus-visible]:[overflow-wrap:anywhere]"}`}>{card.title}</bdi>
+            className={`min-w-0 flex-1 text-[13px] font-medium leading-5 text-text-primary ${open ? "[overflow-wrap:anywhere]" : "truncate [[data-board-card]:focus-visible~*_&]:whitespace-normal [[data-board-card]:focus-visible~*_&]:[overflow-wrap:anywhere]"}`}>{card.title}</bdi>
           <time data-testid="board-card-age" dateTime={new Date(task.at).toISOString()} className="shrink-0 text-[11px] leading-5 text-text-muted">{age}</time>
         </div>
         <div className="mt-1 flex min-w-0 items-center gap-1 ps-4">
