@@ -1,4 +1,50 @@
 {
+  "board": {
+    "card": {
+      "botLabel": "De:",
+      "chatLabel": "Conversa:",
+      "details": "Detalhes",
+      "filesLabel": "Arquivos:",
+      "from": "{{bot}} em {{chat}}",
+      "in": "em {{chat}}",
+      "openPr": "Abrir em {{host}}",
+      "statusLabel": "Estado:",
+      "steps": "{{done}} de {{total}}",
+      "updatedLabel": "Atualizado:"
+    },
+    "column": {
+      "blocked": "Bloqueadas",
+      "closed": "Paradas",
+      "done": "Concluídas",
+      "queued": "Na fila",
+      "running": "Em execução"
+    },
+    "columns": "Colunas",
+    "empty": "Nenhuma tarefa ainda",
+    "emptyHint": "Os cartões de tarefa dos bots das suas conversas aparecem aqui.",
+    "filter": "Filtrar tarefas",
+    "groupBy": {
+      "bot": "Bot",
+      "chat": "Conversa",
+      "label": "Agrupar por",
+      "status": "Estado"
+    },
+    "hideOlder": "Ocultar antigas",
+    "info": "Os bots publicam cartões de tarefa em conversas e grupos e os mantêm atualizados. Este quadro reúne os de todas as conversas. Tarefas concluídas e paradas ficam por um dia; Paradas reúne as que falharam e as canceladas. Um cartão só mostra a tarefa: quem muda o estado é o bot. Abra um cartão para vê-lo na conversa.",
+    "me": "Você",
+    "noMatch": "Nenhuma tarefa corresponde",
+    "none": "Nenhuma",
+    "showMore": "Mostrar mais ({{count}})",
+    "showOlder": "Mostrar antigas ({{count}})",
+    "tasksMany": "{{count}} tarefas",
+    "tasksOne": "1 tarefa",
+    "title": "Tarefas",
+    "view": {
+      "label": "Mostrar",
+      "routines": "Rotinas",
+      "tasks": "Tarefas"
+    }
+  },
   "buttons": {
     "answers": "Respostas",
     "chosen": "Escolhida",

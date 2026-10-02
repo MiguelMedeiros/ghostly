@@ -1,0 +1,1 @@
+An edge between two apps that both have WebRTC falls back to a native transport when WebRTC connects nothing on it (a VPN or a firewall on either side): the app says `_tr` with no `webrtc/1` on that edge for the rest of its run, as an app with no WebRTC does, and the member's app follows. Before, such an edge never went live.

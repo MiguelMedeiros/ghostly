@@ -439,6 +439,8 @@ export const servicesPlatform: ServicesPlatform | null = {
       hyperdhtRelay: state.settings.hyperdhtRelay ?? DEFAULT_HYPERDHT_RELAY,
       pushRelay: state.settings.pushRelay ?? "",
       ...(state.transport.direct ? { readRelays: state.settings.readRelays === true } : {}),
+      ...(state.transport.directBlocked ? { directBlocked: true } : {}),
+      ...(state.transport.clockOffMs !== undefined ? { clockOffMs: state.transport.clockOffMs } : {}),
     };
   },
   setNetwork: ({ relays, turn, irohRelays, hyperdhtRelay, readRelays, pushRelay }) =>

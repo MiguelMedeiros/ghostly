@@ -56,9 +56,38 @@ Every transport runs the same authenticated chat session ([WISP 401](wisps/401-p
 ### Choosing a transport
 
 - **Automatic** (the default): both apps rank the transports they share. A relayed path ranks after every direct one. When WebRTC fails, the dialling side goes on to the next one (often a relayed Iroh) before the chat stays on the DHT.
+- WebRTC that cannot connect on a network (a VPN, a firewall) does not hold the chat back: an answered offer with no connection after 6 s is raced by what ranks after it, relayed transports too (`RACE_ANSWERED_MS`), and a side that gathers no candidate dials its other transports itself and tries WebRTC last for 10 minutes (`RTC_UNSTARTED_MS`). See [WISP 100](wisps/100-transports.md#webrtc-that-cannot-connect-on-this-network).
 - A transport or **DHT only** can be chosen per chat in the connection panel (the connection icon in the chat header). A choice made with no stream open travels in the capability record, so the contact dials it first.
 - A native transport that fails three attempts in a row is tried last for an hour.
+- Native listeners start one at a time per transport, the transports side by side (`nativeQueues` in `packages/browser/src/engine/node.ts`). HyperDHT with its DHT out of reach (UDP blocked, a VPN) takes about 6 s to start listening; in one shared queue each chat's Iroh listener waited that long per chat ahead of it.
 - While live, the chat does not probe for a better transport. It changes when the current one drops or someone switches.
+
+### When direct connections are blocked
+
+A VPN, a firewall or a carrier's NAT can stop every direct path. The app cannot see a VPN; it sees its own WebRTC attempts fail, and says so in the chat's connection panel and in Settings, Advanced, Network: "Direct connections are blocked on this network (a VPN or firewall?). Chats still work through relays, but connect more slowly." It never says a VPN was found.
+
+- **What counts** (`DataLink` reports per attempt, `DirectPathWatch` in `packages/core/src/directPath.ts` decides):
+  - `no-public`: both descriptions were exchanged, nothing connected, and this device had no public candidate (no STUN server answered, or no candidate at all).
+  - `symmetric`: nothing connected, and this device's public address had three or more ports on one address: a mapping per destination.
+  - `no-path`: this device's offer was answered, it had public candidates, and nothing connected. The contact may be the blocked one.
+- **The rule:** no WebRTC connection open now, none opened since, and either two attempts with this device's own evidence (`no-public`, `symmetric`) or failed attempts with three different contacts. One failed dial shows nothing.
+- **It clears by itself:** when a WebRTC connection opens, when the network changes (the browser's `online` event), and when the evidence is older than 30 minutes.
+- An offer nobody answered says nothing: the contact may be away. An answerer reports only its own evidence.
+- The note is kept in memory. After a restart it comes back only when attempts fail again; a chat that resumes straight on a relayed transport makes no WebRTC attempt.
+- Clients without WebRTC (Desktop on Linux, the headless CLI's UI-less daemon) show no note.
+
+### When this device's clock is off
+
+Ghostly dates what it publishes by the device's clock, and a clock a few minutes off makes chats slow to connect, or not connect at all with apps that have not been updated. The app cannot set the clock; it notices and says so, in the chat's connection panel and in Settings, Network: "This device's clock seems to be off by about 2 minutes. Chats may be slow to connect.", with which way, why it matters and what to do behind the ⓘ.
+
+What it goes by (`ClockWatch` in `packages/core/src/clockWatch.ts`):
+
+- **A relay's own time**: the `Date` header of a Pkarr relay's answer, where the app may read it. The CLI can; a browser only when the relay exposes that header to other origins. An answer a cache kept (it has an `Age`) is not a clock.
+- **A contact's clock**: the time of a pinned contact's packet that came between two reads of its record at most 15 s apart, both answered by the network. Group edges do not count, and a contact counts once, by its participation key.
+
+The Desktop's own Pkarr client passes on neither a relay's time nor whether a read was answered by the network, so the Desktop has no evidence yet and shows no note.
+
+The rule is slow to say yes, and never goes by one contact, whose clock is as likely the one that is off: two relays that agree; or one relay and a contact, with no contact saying otherwise; or three contacts that agree, with at least three for each one that does not. A relay that says the clock is right outweighs any number of contacts. Under a minute off is not off. The note goes away by itself when the next answers agree with the clock, and the evidence is forgotten after half an hour.
 
 ## Layer 0: Pkarr and the Mainline DHT
 

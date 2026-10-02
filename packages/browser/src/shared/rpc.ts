@@ -12,7 +12,7 @@ import type { SparkNetwork, WalletNetwork } from "@ghostly/core";
 import type { ProfileChoice } from '../profiles/public';
 import type { ProofChallenge, ProofEvidence, ProofAdapter } from "@ghostly/core";
 import type { LinkParams, LinkPreview, PairedTransport, DeliveryMode } from "@ghostly/core";
-import type { CashuInspection, EngineState, MessageDetailsView, MessageFile, MessagePage, PublicGraphView, PublicPostImageView, PublicPostsView, SettingsPatch, StoredMessage, WalletCreate, WalletInstanceView, WalletRemove, WalletTestCoins, WalletType, TestCoinsResult, WakeSubscription } from "./types";
+import type { CardIndexRow, CashuInspection, EngineState, MessageDetailsView, MessageFile, MessagePage, PublicGraphView, PublicPostImageView, PublicPostsView, SettingsPatch, StoredMessage, WalletCreate, WalletInstanceView, WalletRemove, WalletTestCoins, WalletType, TestCoinsResult, WakeSubscription } from "./types";
 import type { NostrDraft, NostrDraftRequest, NostrLookupRequest, NostrLookupResult, NostrPublishResult } from "../nostr/types";
 import type { MessageChanges } from "./messageChanges";
 
@@ -158,7 +158,7 @@ export interface EngineApi {
    * here or the id both sides know it by, `emoji` one emoji, or "" to take this side's reaction back. One reaction per
    * person per message: a new one replaces the old.
    */
-  react(params: { linkId: string; messageId: string; emoji: string }): { error: string | null };
+  react(params: { linkId: string; messageId: string; emoji: string }): { error: string | null; refused?: boolean };
   /**
    * Pins a message (WISP 400 § Pinned message), or unpins with `remove`: `linkId` a chat's link or `group:<id>`,
    * `messageId` the message's id here or the id both sides know it by. One per chat: a new pin replaces the old. In a
@@ -314,7 +314,8 @@ export interface EngineApi {
   joinGroupByLink(params: { link: string }): { groupId: string };
   /** `mentions`: places of the text that name members (WISP 9xx § Mentions); the session keeps only what holds. */
   /** `replyTo`: the id of a message of this group the text answers (WISP 9xx § Replies). */
-  sendGroupMessage(params: { groupId: string; text: string; mentions?: GroupMention[]; replyTo?: string; card?: StatusCard }): { error: string | null; messageId?: string };
+  /** `refused`: not a member of the group (removed from it, say), so nothing was sent and trying again will not help. */
+  sendGroupMessage(params: { groupId: string; text: string; mentions?: GroupMention[]; replyTo?: string; card?: StatusCard }): { error: string | null; messageId?: string; refused?: boolean };
   /** A press on a button of someone else's message in a chat or a group (`group:<id>`), WISP 4xx · Message Buttons. */
   pressButton(params: { linkId: string; messageId: string; buttonId: string }): { error: string | null; refused?: boolean; paced?: true; messageId?: string };
   /** How many edges took my message `messageId` (or its edit number `edit`): members' edges in a private group, hubs' in a community. */
@@ -325,6 +326,11 @@ export interface EngineApi {
    * or those before `before` (the id of a message in it, or a time). Reads that page only, however long the chat is.
    */
   messagePage(params: { linkId: string; limit?: number; before?: string | number }): MessagePage;
+  /**
+   * Every task and routine card of this profile, from all its chats and groups, oldest first (WISP 4xx · Status Cards
+   * § The Tasks board): one row per message with a card. Read from the store's card index, never from the histories.
+   */
+  statusCardIndex(): CardIndexRow[];
   leaveGroup(params: { groupId: string }): void;
   removeGroupMember(params: { groupId: string; key: string }): void;
   makeGroupAdmin(params: { groupId: string; key: string }): void;
@@ -392,4 +398,9 @@ export type EngineEvent =
   | { kind: "messages"; linkId: string; messages: StoredMessage[] }
   /** What changed in a history the client was sent whole already (`applyMessageChanges`): only those rows. */
   | ({ kind: "message-changes"; linkId: string } & MessageChanges)
-  | { kind: "call-signal"; linkId: string; signal: string };
+  | { kind: "call-signal"; linkId: string; signal: string }
+  /**
+   * The peer did not start: the profile's database did not open (`shared/idb.ts`). Sent to every client in place of
+   * its first state; no state follows, and every call fails with the same words.
+   */
+  | { kind: "start-failed"; failure: import("./idb").ProfileOpenFailure };

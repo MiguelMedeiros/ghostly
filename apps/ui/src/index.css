@@ -8,6 +8,11 @@
 @source not "./test";
 
 @theme {
+  /* Tailwind's spinner and pulse, which never end by themselves: here they do. A dot that pulses while a contact is
+     being reached rests after half a minute, a spinner after two (whatever it waits for is not coming), so a chat
+     left open on a contact who is away does not keep the window drawing. They start again when their state does. */
+  --animate-spin: spin 1s linear 120;
+  --animate-pulse: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) 15;
   --color-app-bg: var(--theme-app-bg);
   --color-sidebar-bg: var(--theme-sidebar-bg);
   --color-chat-bg: var(--theme-chat-bg);
@@ -832,7 +837,11 @@ html[data-standalone="true"] {
   clear: both;
 }
 
-/* Ghost "boo!" animation for syncing indicator */
+/*
+ * Ghost "boo!": the syncing mark on a chat's row, and the ghost of the empty chat list. A few times, then it rests
+ * at the opacity it moves around: a loop that never ends keeps the window drawing 60 frames a second for as long as
+ * it is on screen, and on Linux (WebKitGTK) that is a core kept busy by an idle app.
+ */
 @keyframes ghost-boo {
   0%, 100% {
     transform: translateX(0) rotate(0deg);
@@ -853,8 +862,19 @@ html[data-standalone="true"] {
 }
 
 .animate-ghost-boo {
-  animation: ghost-boo 1s ease-in-out infinite;
+  opacity: 0.35;
+  animation: ghost-boo 1s ease-in-out 3;
 }
+
+/*
+ * Motion that rests (lib/windowAway.ts). The loops below say something is under way; while the window is away
+ * (hidden, or not the focused one: behind others, on another workspace) nobody is looking, so they hold still and go
+ * on when it is back. Only loops are listed: a finite animation (a bubble coming in) must finish, or it would leave
+ * its element half shown. A new loop goes here too (test/idleMotion.test.ts checks the stylesheets).
+ */
+:root[data-away] :is(.animate-spin, .animate-pulse, .animate-pulse-dot, .typing-dots > span, .profile-switch-badge,
+  .voice-bar-dot, .voice-slide-arrow, .new-wallet-spinner, .pi-packet),
+:root[data-away] .new-wallet-shimmer::after { animation-play-state: paused !important; }
 
 /* RTL support for Arabic */
 [dir="rtl"] {

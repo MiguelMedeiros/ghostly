@@ -16,6 +16,7 @@ import { PinIcon } from "../components/PinIcon";
 import { Menu, MenuItem, MenuSeparator } from "../components/Menu";
 import { useI18n } from "../contexts/I18nContext";
 import { InviteCard } from "../components/InviteCard";
+import { LinkQrDialog } from "../components/chat/LinkQrDialog";
 import { ChatConnection } from "../components/ChatConnection";
 import { PairingScene } from "../components/pairing/PairingScene";
 import { usePairingProgress } from "../hooks/usePairingProgress";
@@ -59,7 +60,7 @@ import {
 import { chatPath, inviteShareText } from "../lib/url";
 import { continueInNewChat } from "../lib/continueChat";
 import { engine } from "@ghostly/browser/platform/engine";
-import { fileMessageText, isPlayableVideoType, PAIRED_CALL_CANDIDATES, parseCallSignal, signalHasVideo, type VoiceMeta } from "@ghostly/core";
+import { fileMessageText, inviteQrSegments, isPlayableVideoType, PAIRED_CALL_CANDIDATES, parseCallSignal, signalHasVideo, type VoiceMeta } from "@ghostly/core";
 import { videoMetaOf } from "../lib/videoPoster";
 import type { ChatParams, CallEventType, ChatMessage } from "../lib/types";
 import type { WalletNetwork } from "../lib/platform";
@@ -81,10 +82,13 @@ import { useChatSearch } from "../hooks/useChatSearch";
 import { ChatSearchBar, SearchIcon } from "../components/chat/ChatSearch";
 import { PinnedBar } from "../components/chat/PinnedBar";
 import { TasksButton } from "../components/chat/TasksButton";
+import { useJumpTo } from "../hooks/useJumpTo";
 import { RoutineStack } from "../components/chat/RoutineCard";
 import { routineStacks } from "../lib/statusCards";
 import { scrollIntoViewGently } from "../lib/motion";
 import { MessageAnnouncer } from "../components/chat/MessageAnnouncer";
+import { PinMoveItems, PinMoveNote } from "../components/chat/PinOrder";
+import { usePinMoveNote } from "../hooks/usePinMoveNote";
 import { errorText } from "../lib/errorText";
 
 /** What a call captures from: the devices the profile chose, read when it asks. */
@@ -359,6 +363,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
   const contactRefusesPay = paired && chatLive && !chatPeer?.capabilities?.payments;
   const paymentsOn = walletState?.wallets?.length ? walletCards(walletState).some((c) => cardOn(chatPeer ?? undefined, c.rail, c.network)) : !chatPeer?.paymentMethods || Object.values(chatPeer.paymentMethods).some(Boolean);
   const [showHold, setShowHold] = useState(false);
+  const [showInviteQr, setShowInviteQr] = useState(false);
   const [showIdentities, setShowIdentities] = useState(false);
   /** The card the identities panel opens on: a share tapped in the timeline. */
   const [identityCard, setIdentityCard] = useState<{ side: "mine" | "theirs"; id: string }>();
@@ -367,6 +372,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
   const [showServices, setShowServices] = useState(false);
   /** The message of mine the composer edits (WISP 400 § Edits): a paired chat's only. */
   const [editing, setEditing] = useState<ChatMessage | null>(null);
+  // Opened from the Tasks board: on the card's message, once it is here.
+  useJumpTo(visible, id => messages.some(m => m.id === id));
   const quoteIndex = useMemo(() => replyIndex(messages), [messages]);
   // A bot's buttons (WISP 4xx · Message Buttons): which one was chosen, and whether I may still press, from my replies.
   const buttonsOf = useMemo(() => buttonsViews(messages, m => m.ref), [messages]);
@@ -450,6 +457,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
   }, [sessionId]);
 
   const closeMenu = () => setMenuOpen(false);
+  const [pinNote, announcePinMove] = usePinMoveNote();
   const techBackdrop = useBackdropDismiss(() => setShowTechInfo(false));
 
   // A bot's routines in a row: one row, opened on a tap (WISP 4xx · Status Cards). Found over the whole timeline, so a
@@ -532,6 +540,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
     <div className="chat-pane flex-1 h-full">
     {/* A message that comes while the chat is open, read out once to a screen reader. */}
     <MessageAnnouncer chat={sessionId} messages={messages} nameOf={() => shownName} active={visible} />
+    <PinMoveNote text={pinNote} />
     {/* Files dropped anywhere on the column go to the composer (`data-file-drop`). */}
     <div data-file-drop className="chat-column relative flex-1 flex flex-col h-full min-w-0 bg-chat-bg">
       {(wakeCall.waking || wakeCall.gaveUp) && (
@@ -677,9 +686,10 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
               </svg>
             </button>
             <Menu testId="chat-options-menu" open={menuOpen} onClose={closeMenu} anchorRef={menuRef}>
-              <MenuItem onClick={() => { setSessionPinned(sessionId, !isSessionPinned(sessionId)); closeMenu(); }} icon={<PinIcon active={isSessionPinned(sessionId)} />}>
+              <MenuItem testId="chat-pin-toggle" onClick={() => { setSessionPinned(sessionId, !isSessionPinned(sessionId)); closeMenu(); }} icon={<PinIcon active={isSessionPinned(sessionId)} />}>
                 {isSessionPinned(sessionId) ? t("chat.menu.unpin") : t("chat.menu.pin")}
               </MenuItem>
+              <PinMoveItems chat={sessionId} onMoved={place => { announcePinMove(place); closeMenu(); }} />
               <MuteMenuItem chat={sessionId} onChoose={() => { closeMenu(); setShowMute(true); }} onDone={closeMenu} />
               <MenuItem testId="chat-search-open" onClick={() => { closeMenu(); search.show(); }} icon={<SearchIcon />}>{t("chat.search.open")}</MenuItem>
               {/* Until the contact's session is ready, not just while the card is up: the card goes as soon as the
@@ -690,6 +700,13 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
                     ? <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-accent"><polyline points="20 6 9 17 4 12" /></svg>
                     : <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" /><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" /></svg>}>
                   {codeCopied ? t("common.copied") : t("sidebar.copyInvite")}
+                </MenuItem>
+              )}
+              {/* The invite card and its QR go with the first message: until the chat is live this shows the QR again. */}
+              {inviteCode && !pairedReady && (
+                <MenuItem testId="chat-invite-qr" onClick={() => { setShowInviteQr(true); closeMenu(); }}
+                  icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" /><rect x="3" y="14" width="7" height="7" rx="1" /><path d="M14 14h3v3h-3zM21 14v.01M21 21v.01M17 21h.01M21 17.5v.01" /></svg>}>
+                  {t("invite.qrTitle")}
                 </MenuItem>
               )}
               {paired && platform?.getPeer(params.peerPubKeyB64) && (
@@ -925,6 +942,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
           remoteHasVideo={webrtc.remoteHasVideo}
           remoteIsScreenSharing={webrtc.remoteIsScreenSharing}
           callStartedAt={webrtc.callStartedAt}
+          reconnecting={webrtc.reconnecting}
           peerName={shownName}
           onHangUp={() => webrtc.hangUp()}
           onToggleMute={webrtc.toggleMute}
@@ -936,6 +954,9 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
 
       {showServices && params && (
         <ChatServicesDialog peerPubKey={params.peerPubKeyB64} name={shownName} onClose={() => setShowServices(false)} />
+      )}
+      {showInviteQr && inviteCode && !pairedReady && (
+        <LinkQrDialog title={t("invite.title")} url={inviteShareText(inviteCode)} qr={inviteQrSegments(inviteCode)} onClose={() => setShowInviteQr(false)} />
       )}
       {showHold && chatPeer && params && platform && (
         <ChatHoldDialog peer={chatPeer} name={shownName} onClose={() => setShowHold(false)}

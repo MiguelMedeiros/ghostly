@@ -326,8 +326,18 @@ export class NativePeerConnection extends EventTarget {
     }
   }
 
-  async createOffer(): Promise<RTCSessionDescriptionInit> {
+  /**
+   * `iceRestart` on a call that has started: Rust restarts ICE on the call's connection (new credentials,
+   * candidates gathered anew on sockets bound again) and gives the restart offer; the media, the devices and the
+   * mute stay as they are (WISP 601, "Reconnecting").
+   */
+  async createOffer(options: RTCOfferOptions = {}): Promise<RTCSessionDescriptionInit> {
     await this.opened;
+    if (this.started) {
+      if (!options.iceRestart) throw named("The call has started already", "InvalidStateError");
+      const { sdp } = await this.hold(() => invoke<Described>("native_call_offer", { id: this.id, ...this.devices(), restart: true }));
+      return { type: "offer", sdp };
+    }
     this.started = true;
     const { sdp, microphone } = await this.hold(() => invoke<Described>("native_call_offer", { id: this.id, ...this.devices() }));
     this.using(microphone);
@@ -338,8 +348,13 @@ export class NativePeerConnection extends EventTarget {
   async createAnswer(): Promise<RTCSessionDescriptionInit> {
     if (!this.offer) throw named("There is no offer to answer", "InvalidStateError");
     await this.opened;
-    this.started = true;
     const offer = this.offer;
+    // A second offer on a call that has started is the peer's ICE restart: answered on the same connection.
+    if (this.started) {
+      const { sdp } = await this.hold(() => invoke<Described>("native_call_answer", { id: this.id, offer, ...this.devices(), restart: true }));
+      return { type: "answer", sdp };
+    }
+    this.started = true;
     const { sdp, microphone } = await this.hold(() => invoke<Described>("native_call_answer", { id: this.id, offer, ...this.devices() }));
     this.using(microphone);
     if (this.muted) await this.mute(true);
@@ -485,6 +500,7 @@ export function nativeCallMedia(): CallMedia {
     getUserMedia: capture,
     screenUnavailable: SCREEN_UNAVAILABLE,
     choosesDevices: true,
+    restartsIce: true,
   };
 }
 

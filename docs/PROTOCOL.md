@@ -125,7 +125,7 @@ Clients ignore labels they do not know. A v0 client therefore keeps working with
 
 **Packet budget.** When everything does not fit in 1000 bytes, space goes to `_ts`, `_ack`, `_nick`, `_call` and `_rtc` first, then `_svc`, then as many of the newest messages as fit (the encrypted batch is also capped at 800 characters, as before). If it still does not fit, `_svc` is left out; the data link repeats the advertisement (§6.1).
 
-**Presence.** A peer that advertises services publishes on start and republishes every 4 minutes. It is considered online while its packet carries `_svc` and is younger than 10 minutes. When it goes offline it publishes once more without `_svc` and `_rtc`. If it cannot (the machine lost power), the packet goes stale on its own. Presence is a hint; the real test is whether the data link comes up.
+**Presence.** A peer that advertises services publishes on start and republishes every 4 minutes. It is considered online while its packet carries `_svc` and is younger than 10 minutes. Its age is counted on the reader's clock from when the reader first read it: the packet's own time counts only between the read that found it and the one before, since the two clocks are often minutes apart. When it goes offline it publishes once more without `_svc` and `_rtc`. If it cannot (the machine lost power), the packet goes stale on its own. Presence is a hint; the real test is whether the data link comes up.
 
 **Transports.** Desktop reads the Mainline DHT directly and publishes to the DHT and to the Pkarr relays; the headless `ghostly` CLI publishes to both and reads the DHT when every relay fails. Browsers cannot open UDP sockets and use relays only: `PUT /<key>` and `GET /<key>` with `<signature(64)><timestamp µs, u64 BE><DNS packet>`. A relay is an HTTP bridge to the DHT. It sees public keys, signed packets, plaintext `_ts`/`_ack`, sizes and activity. Without link secrets it cannot decrypt protected values or forge the expected signature. Browser peers publish to every configured relay (a publish returns once one relay took it) and read from them in turn (for each key, the relay after the one that answered its last read), keeping the newest validly signed packet seen. Desktop reads the DHT every 2 s while a chat is active, every 8 s after 60 s without activity, every 0.7 s while signaling (for at most 45 s), every 20 s in the background and every 30 s while the data link is up (`DHT_POLL_INTERVALS` in `packages/core/src/link.ts`). Relay clients poll slower than DHT clients (4 s active, 10 s idle, 2 s while signaling for at most 45 s or for 30 s when the peer's offer is due (an offer to a saved contact: 2 s for 10 s, then 4 to 8 s for as long as the offer stands, 90 s), 30 s in the background, 60 s while the data link is up), keep to 30 requests a minute per relay, 60 on `pkarr.pubky.app` (a request that budget, or a relay's 429, holds back is a wait, never an error), stop using a relay that keeps failing (a circuit breaker per relay), and send `If-Match: <timestamp of the packet being replaced>` so that a burst of publishes is not refused with 428. The relay list, the budget and the breaker: [TRANSPORTS.md](TRANSPORTS.md#layer-0-pkarr-and-the-mainline-dht).
 
@@ -151,11 +151,11 @@ The advertisement is authenticated twice: by the secretbox (only the link peer c
 
 ## 4. Calls
 
-`_call` carries `{ "t": "o" | "a" | "h" | "v", "ts", "u", "p", "f", "s", "m", "c", "ss", "v", "k", "ap", "vp" }`: ICE credentials, DTLS fingerprint, setup role, media order, the candidates (at most two in a `_call` record, one host and one server reflexive; up to eight in a `paired-call` frame, local networks first and VPN tunnels last, relay ones included), the SSRCs, what picture the sender has on, and the payload types its SDP gives Opus and VP8 when they are not 111 and 96 (§4.2). Each side rebuilds a full SDP around these values, because a real SDP does not fit in a packet.
+`_call` carries `{ "t": "o" | "a" | "h" | "v" | "r", "ts", "o", "u", "p", "f", "s", "m", "c", "ss", "v", "k", "ap", "vp", "x", "re" }`: ICE credentials, DTLS fingerprint, setup role, media order, the candidates (at most two in a `_call` record, one host and one server reflexive; up to eight in a `paired-call` frame, local networks first and VPN tunnels last, relay ones included), the SSRCs, what picture the sender has on, and the payload types its SDP gives Opus and VP8 when they are not 111 and 96 (§4.2). Each side rebuilds a full SDP around these values, because a real SDP does not fit in a packet.
 
 Receivers validate a signal before any of it reaches an SDP, whether it came from `_call` or a `call` frame: ICE ufrag/pwd are RFC 8839 ice-chars (4-256 and 22-256 long), `f` is 64 hex digits, `s` is `actpass`, `active` or `passive`, `m` holds one or two distinct `a`/`v`, `ss` holds at most two uint32s, `v` is 0 or 1, `k` is `c` or `s`, `ap` and `vp` are dynamic payload types (35-63 or 96-127) and not the same one, and each of at most eight candidates is parsed and re-serialized from its parts (non-UDP ones are dropped, malformed ones reject the signal). Signals whose `ts` is more than 120 s away from the receiver's clock are ignored, so a stale packet does not ring.
 
-`o` is an offer, `a` the answer to it, `h` ends a call or declines an incoming one, and `v` says what picture the sender has on (§4.1). A receiver acts on a signal only when its `ts` is newer than the last one it acted on, and on an answer only when it is newer than its own offer. An offer that arrives while a call is under way does not ring a second call (a caller may offer again on a call that never connected: [WISP 601](wisps/601-webrtc-media.md#paired-profile)).
+`o` is an offer, `a` the answer to it, `h` ends a call or declines an incoming one, `v` says what picture the sender has on (§4.1), and `r` is an offer that restarts ICE on a call that is up (§4.3). A receiver acts on a signal only when its `ts` is newer than the last one it acted on. An answer names what it answers by that offer's `ts`: `o` on the answer to a call's offer, `re` on the answer to a restart offer (§4.3). Each is taken for the offer it names and no other. An answer to a call's offer that names none (an app up to 1.0.2) is taken when it was heard after the receiver's own offer went out, or, read from a record, when its `ts` is newer than that offer's. `ts` is the sender's clock: how old a signal on a live session is, is counted on the receiver's clock from when it came ([WISP 601](wisps/601-webrtc-media.md)). An offer that arrives while a call is under way does not ring a second call (a caller may offer again on a call that never connected: [WISP 601](wisps/601-webrtc-media.md#paired-profile)).
 
 v1 changed two things, both compatible with v0 peers:
 
@@ -205,6 +205,19 @@ v3 also leaves an IPv6 related address out of the candidates it sends (`raddr ::
 and accepts one: a v2 receiver checked `raddr` against the extension-token pattern, which has no colon, and
 refused the whole signal, so the call never rang. The related address is informational for ICE.
 
+### 4.3 Reconnecting (v4)
+
+A call whose path is lost (a network change) restarts ICE on the connection it has, when both sides said they can:
+
+| Key | Meaning |
+|---|---|
+| `x` | on an offer or an answer: `1` when the sender restarts ICE on the call's connection. Any other value says nothing |
+| `re` | on an answer only: the `ts` of the restart offer it answers |
+
+A `"t": "r"` signal is a restart offer: the fields of an offer (`u`, `p`, `f`, `s`, `m`, `c`, `ss`, and `v`/`k`), validated the same way, with new ICE credentials and candidates and the DTLS fingerprint the call already has. Only the side whose offer was answered sends it, and only when the other side said `x`. The receiver applies it to the call's own connection and answers with `"t": "a"` and `re`; the sender takes only the answer to its latest restart offer. A restart offer never rings and never starts a call: with no call on, on the side that placed the call, or with another fingerprint, it is dropped. The rebuilt SDP of every description of one connection has the same session id (from the fingerprint), a restart a version later. Timing and what the person sees: [WISP 601](wisps/601-webrtc-media.md#paired-profile), "Reconnecting".
+
+Compatible with older peers in both directions: a peer before v4 drops `"t": "r"` as an unknown type, ignores `x`, and never sends `x`, so a v4 peer never sends it a restart offer and the call ends on a failed connection as it always did.
+
 ## 5. The data link (v1)
 
 The data link is one `RTCPeerConnection` per link with a single DataChannel. All application traffic other than v0 chat and call signaling flows through it, peer to peer.
@@ -218,7 +231,7 @@ The data link is one `RTCPeerConnection` per link with a single DataChannel. All
 An answer has `"t": "a"` and `"o": <ts of the offer it answers>`. Candidates are `<h|s|r>,<address>,<port>` for host, server reflexive and relay; at most two, two and one, UDP only. Each side builds a minimal `m=application … webrtc-datachannel` SDP from the signal. Receivers validate every field against strict patterns before it goes anywhere near an SDP.
 
 - Either peer may offer, on demand. The other answers automatically: the link already authenticated the peer, and only explicitly shared services are reachable.
-- Signals older than 120 seconds are ignored.
+- An offer older than 120 seconds is ignored. Its age is counted on the reader's clock, from the last read of the record that did not have it, provided it is not dated before the maker's packet that read found; `ts` orders signals and names the offer an answer is for, and one dated more than ten minutes ahead is not taken ([WISP 101](wisps/101-webrtc.md)).
 - If both offer at once, the peer with the lexicographically lower public key keeps its offer and the other answers it.
 - A new offer while connected means the peer lost the connection; the receiver drops the old one and answers.
 - Both peers poll fast while signaling, clear `_rtc` once the channel is open, and poll slowly while it stays open.

@@ -1,7 +1,7 @@
 {
   "name": "ghostly",
   "private": true,
-  "version": "1.0.1",
+  "version": "1.0.2",
   "type": "module",
   "scripts": {
     "dev": "vite apps/ui",
@@ -29,6 +29,7 @@
     "test:e2e:report": "playwright show-report",
     "test:e2e:desktop": "playwright test -c e2e/playwright.desktop.config.ts",
     "test:e2e:compat": "playwright test -c e2e/playwright.compat.config.ts",
+    "test:e2e:webkit": "playwright test -c e2e/playwright.webkit.config.ts",
     "test:e2e:desktop-macos": "playwright test -c e2e/playwright.desktop-macos.config.ts",
     "desktop:macos:build": "tauri build --debug --bundles app --features e2e-driver --config apps/desktop/tauri.e2e.conf.json",
     "e2e:matrix": "node tools/scripts/e2e-matrix.mjs",

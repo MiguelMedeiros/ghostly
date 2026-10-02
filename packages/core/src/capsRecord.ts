@@ -30,9 +30,15 @@ export const CAPS_LIMITS = {
   /** One identifier, capability or extension. */
   itemChars: 48,
   nameBytes: 64,
-  /** A record dated further ahead than this is refused. */
-  clockSkewMs: 60_000,
 } as const;
+/**
+ * How far before its own clock an author dates a record (`issued`). No reader orders records by that time, `rev` does,
+ * and this one refuses none for it. Apps up to 1.0.2 refuse a record dated more than a minute past their clock: one
+ * dated by a clock two minutes ahead was never read by them, with nothing on screen, and the chat could not dial its
+ * contact's native transports before a session. Dated back, a record from a clock up to about eleven minutes ahead is
+ * taken by them too.
+ */
+export const CAPS_ISSUED_BACK_MS = 10 * 60_000;
 /** Published again this often while the chat exists, so it does not age out of the DHT. */
 export const CAPS_REFRESH_MS = 60 * 60_000;
 /** Reads of the contact's record closer together than this are merged into one. */
@@ -88,7 +94,7 @@ export interface CapsRecord extends CapsContent {
 type Body = [version: 1, rev: number, issued: number, author: string, versions: number[], transports: string[], capabilities: string[],
   extensions: string[], descriptors: CapsDescriptors, name: string, choice?: string];
 
-export type CapsRefusal = "address" | "size" | "sealed" | "format" | "signature" | "author" | "future" | "rev";
+export type CapsRefusal = "address" | "size" | "sealed" | "format" | "signature" | "author" | "rev";
 /** Why a record was not used. A refused record leaves the last good one in force. */
 export class CapsRefusedError extends Error {
   constructor(readonly reason: CapsRefusal, message: string) { super(message); }
@@ -227,7 +233,7 @@ export class CapsKeys {
     const dropped: ("name" | "extensions")[] = [];
     let name = content.name, extensions = content.extensions;
     for (;;) {
-      const body: Body = [1, rev, now, this.me, content.versions, content.transports, content.capabilities, extensions, content.descriptors, name,
+      const body: Body = [1, rev, now - CAPS_ISSUED_BACK_MS, this.me, content.versions, content.transports, content.capabilities, extensions, content.descriptors, name,
         ...(content.choice ? [content.choice] : [])] as Body;
       const signature = toBase64Url(sign(this.signable(this.from, this.to, body), this.seed));
       const records = [{ label: CAPS_LABEL, value: encrypt(JSON.stringify([body, signature]), peerKey ? this.pinnedKey(peerKey) : this.inviteKey), ttl: 3600 }];
@@ -240,11 +246,14 @@ export class CapsKeys {
 
   /**
    * The contact's record, checked: its address, its seal, a well-formed body, a signature by the pinned
-   * participation key (before the pin, by `expected` when a first contact named one), not from the future
-   * and not older than `minRev`.
+   * participation key (before the pin, by `expected` when a first contact named one) and not older than `minRev`.
+   *
+   * Its `issued` is the author's word on its own clock and refuses nothing. A record is the author's alone (signed by
+   * its participation key, bound to both rendezvous keys), and an older one cannot take a newer one's place because of
+   * `rev`, which the reader keeps. Refusing a record dated over a minute ahead added nothing to that, and cost every
+   * contact whose clock runs a couple of minutes fast its record.
    */
-  open(packet: SignedPacket, options: { pinned?: string; expected?: string; minRev?: number; now?: number } = {}): CapsRecord {
-    const now = options.now ?? Date.now();
+  open(packet: SignedPacket, options: { pinned?: string; expected?: string; minRev?: number } = {}): CapsRecord {
     if (packet.pubKeyZ32 !== this.peerAddress) throw new CapsRefusedError("address", "Not this contact's capability record.");
     if (measureRecords(packet.pubKeyZ32, packet.records) > MAX_DNS_PACKET_BYTES) throw new CapsRefusedError("size", "Capability record over the DHT packet budget.");
     const sealed = packet.records.filter(r => r.label === CAPS_LABEL);
@@ -277,7 +286,6 @@ export class CapsKeys {
       if (error instanceof CapsRefusedError) throw error;
       throw new CapsRefusedError("signature", "The capability record's signature does not verify.");
     }
-    if ((issued as number) > now + CAPS_LIMITS.clockSkewMs) throw new CapsRefusedError("future", "The capability record is dated in the future.");
     if (options.minRev !== undefined && (rev as number) < options.minRev) throw new CapsRefusedError("rev", "An older capability record than one already seen.");
     return { rev: rev as number, issued: issued as number, author, versions: versions as number[], transports: transports as string[],
       capabilities: capabilities as string[], extensions: extensions as string[], descriptors, name, ...(choice !== undefined ? { choice: choice as string } : {}) };

@@ -1,5 +1,5 @@
 import { emptyIdentityLedger, emptyProofLedger, type IdentityLedger, type ProofLedger } from "@ghostly/core";
-import { STORES, fileStore, store, wrap, openDb } from "../shared/idb";
+import { CARD_INDEX, STORES, fileStore, store, wrap, openDb } from "../shared/idb";
 import { removeFileBytes } from "../shared/fileBytes";
 import type { MessagePage, Settings, StoredGroup, StoredLink, StoredMessage, StoredService } from "../shared/types";
 
@@ -157,6 +157,16 @@ export const db = {
       if (page.length > limit || newest.length < want) return { messages: page.slice(0, limit).reverse(), more: page.length > limit };
       want += newest.length - page.length;
     }
+  },
+  /**
+   * Every message of this profile that carries a task or a routine card, from every chat and group, oldest first (time,
+   * then id). Reads the card index only (`CARD_INDEX`): no chat's history is read, however long. The index follows the
+   * rows, so an edit's card, a deleted message and a deleted chat or group are in step with no bookkeeping.
+   */
+  async getCardMessages(): Promise<StoredMessage[]> {
+    const index = (await store(STORES.messages, "readonly")).index(CARD_INDEX);
+    const [tasks, routines] = await Promise.all([wrap<StoredMessage[]>(index.getAll("task")), wrap<StoredMessage[]>(index.getAll("routine"))]);
+    return [...tasks, ...routines].sort((a, b) => a.timestamp - b.timestamp || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
   },
   /** Returns false when the message was already stored. */
   async addMessage(message: StoredMessage): Promise<boolean> {

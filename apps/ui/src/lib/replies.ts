@@ -116,6 +116,24 @@ export function jumpToMessage(id: string, root: ParentNode = document): boolean 
 }
 
 /**
+ * Goes to a status card's message (a row of the Tasks panel, a card of the Tasks board) and puts the focus on the card.
+ * In a long chat its row may not be in the page (useRowWindow): the rows around it first, then go. False when no open
+ * chat has it.
+ */
+export function jumpToCard(messageId: string): boolean {
+  const land = () => {
+    if (!jumpToMessage(messageId)) return false;
+    const row = [...document.querySelectorAll<HTMLElement>("[data-message-id]")].find((el) => el.dataset.messageId === messageId);
+    row?.querySelector<HTMLElement>("[data-testid=status-card-toggle]")?.focus({ preventScroll: true });
+    return true;
+  };
+  if (land()) return true;
+  if (!revealMessage(messageId)) return false;
+  requestAnimationFrame(land);
+  return true;
+}
+
+/**
  * Goes to the message a reply answers. Not in the page (a long chat has a window of its rows, useRowWindow): the rows
  * around it first, and again. False when it is not in this chat.
  */

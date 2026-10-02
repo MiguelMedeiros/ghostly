@@ -62,7 +62,7 @@ A profile is a folder, `~/.ghostly/profiles/<name>/` (0700, files 0600), with it
 | `--profile <name>` or `GHOSTLY_PROFILE` | Run one command on another profile |
 | `--home <dir>` or `GHOSTLY_HOME` | Move the whole `~/.ghostly` folder |
 | `profile set --name <name>`, `profile picture <jpeg>` | What contacts see |
-| `profile backup --out <file>`, `profile restore <file> <name>` | An encrypted backup of the headless profile |
+| `profile backup --out <file>`, `profile restore <file> <name>` | A backup of the headless profile, encrypted with a passphrase (`--no-passphrase`: not encrypted, by explicit choice) |
 
 Only one process opens a profile at a time.
 
@@ -98,6 +98,8 @@ call of the app's engine. `ghostly engine --list` and `ghostly engine <method> '
 ```
 
 - `seq` grows by one per event in the profile, across restarts. `id` is stable for the fact it reports: dedupe on it.
+- A message's `timestamp` is its place in the history: when this profile sent it, or when it arrived here. A
+  received message also has `sentAt`, the time its sender's clock said. Histories are ordered by `timestamp`.
 - `--since <seq>` replays from the journal (the last 10,000 events); `--cursor <file>` remembers the last event
   handled, so a restarted bot resumes where it stopped.
 - `--type message.received` keeps one type; `--type message.` a family.

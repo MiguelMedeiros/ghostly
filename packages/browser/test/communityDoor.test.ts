@@ -60,6 +60,30 @@ describe("a community's door", { timeout: 120_000 }, () => {
     expect(world.view(alice, id)?.epoch).toBe(crowd.length);
   });
 
+  it("a joiner's view says how many others knock with it, and stops once it is in", async () => {
+    const world = new CommunityWorld();
+    const alice = world.add("alice");
+    const { id, link } = await community(world, alice);
+    await world.run(5_000);
+    // Nobody at the door while three people open the link.
+    alice.online = false;
+    const crowd = Array.from({ length: 3 }, (_, i) => world.add(`p${i}`));
+    for (const p of crowd) { await p.groups.joinByLink(link); await landed(); }
+    const waiting = (p: Peer) => world.view(p, id)?.invitation?.waiting;
+    // Each saw who had knocked before it; a refresh of its knock shows it the rest.
+    expect(crowd.map(waiting)).toEqual([undefined, 1, 2]);
+    await world.run(COMMUNITY_TIMINGS.knockMs + 1_000);
+    expect(crowd.map(waiting)).toEqual([2, 2, 2]);
+    // One gives up: the others' count follows once its knock stops being refreshed.
+    await crowd[2].groups.forget(id);
+    await world.run(2 * COMMUNITY_TIMINGS.slowKnockMs + COMMUNITY_TIMINGS.knockMs + 1_000);
+    expect(crowd.slice(0, 2).map(waiting)).toEqual([1, 1]);
+    // A member's app opens: they are let in, and nothing waits any more.
+    alice.online = true;
+    await world.until(() => crowd.slice(0, 2).every(p => world.member(p, id)), 5 * 60_000);
+    expect(crowd.slice(0, 2).map(p => world.view(p, id)?.invitation)).toEqual([undefined, undefined]);
+  });
+
   it("a lone door reads the bell every few seconds and the other records now and then, within its share of the relays' budget", async () => {
     const world = new CommunityWorld(undefined, RELAY_NETWORK);
     const alice = world.add("alice");
@@ -199,7 +223,7 @@ describe("a community's door", { timeout: 120_000 }, () => {
   it("in a group's first minute, a member that just became a hub leaves the knock to the first hub", async () => {
     // The first hub, alone in the beacon, reads it only when it republishes: for half a minute it does not know that
     // the first member let in became a hub. That member used to count both of them at the door and, with the lower
-    // key, answer the next knock too: two hubs on one entry session, and nobody got in for minutes.
+    // key, answer the next knock too: two hubs on one entry session (in this world, nobody gets in through either).
     let lower = 0;
     for (let run = 0; run < 40 && lower < 3; run++) {
       const world = new CommunityWorld(undefined, RELAY_NETWORK);

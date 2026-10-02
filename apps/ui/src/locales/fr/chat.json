@@ -2,7 +2,8 @@
   "announce": {
     "message": "{{name}} : {{text}}",
     "messages": "{{count}} nouveaux messages",
-    "messagesFrom": "{{count}} nouveaux messages de {{name}}"
+    "messagesFrom": "{{count}} nouveaux messages de {{name}}",
+    "pinMoved": "Déplacée à la place {{place}} sur {{count}} discussions épinglées"
   },
   "audio": {
     "cantPlay": "Cet appareil ne peut pas lire cet audio ({{format}}). Téléchargez-le pour l'écouter.",
@@ -36,6 +37,7 @@
       "queued": "Pas encore d'accusé. Renvoyé automatiquement.",
       "sending": "En route.",
       "sent": "Envoyé. Pas encore d'accusé.",
+      "sentGroup": "Envoyé au groupe. Les groupes n'ont pas d'accusé.",
       "waiting": "Part tout seul quand votre contact est en ligne.",
       "waitingLiveContact": "Les fichiers ont besoin d'une liaison directe. La discussion de votre contact est en DHT seule : il part quand il l'autorise à nouveau.",
       "waitingLiveYou": "Les fichiers ont besoin d'une liaison directe. Cette discussion est en DHT seule : changez-le depuis l'icône de connexion."
@@ -74,6 +76,7 @@
     "joinGroup": "Rejoindre le groupe",
     "joinHint": "Rejoindre crée une discussion avec l'auteur de cette invitation. Rien n'est envoyé avant que vous rejoigniez.",
     "joining": "Connexion au groupe…",
+    "link": "Lien",
     "loadKeyHint": "Le chargement interroge vos relais ({{relays}}), qui apprennent votre adresse IP et cette clé.",
     "loadNote": "Charger la note",
     "loadNoteHint": "Le chargement interroge vos relais ({{relays}}), qui apprennent votre adresse IP et cette note.",
@@ -101,6 +104,8 @@
     "proofExpired": "Preuve expirée de {{who}}",
     "provedBy": "Prouvé par {{who}}",
     "pubkyKey": "Clé Pubky",
+    "qrHint": "Scannez-le avec un autre appareil. Toute personne qui le voit peut rejoindre.",
+    "qrTitle": "Code QR du lien",
     "resolveFailed": "Impossible de le résoudre : {{error}}",
     "resolveNote": "La résolution montre ce que c'est, pas qui le détient.",
     "resolveNoteNone": "La résolution montre ce que c'est, pas qui le détient : un contact le prouve en le partageant comme identité.",
@@ -214,6 +219,10 @@
   "menu": {
     "continueNew": "Continuer dans une nouvelle discussion",
     "hold": "Retenir les messages…",
+    "moveDown": "Descendre",
+    "moveFirst": "Déjà en premier",
+    "moveLast": "Déjà en dernier",
+    "moveUp": "Monter",
     "pin": "Épingler la discussion",
     "refresh": "Actualiser",
     "techInfo": "Infos techniques",

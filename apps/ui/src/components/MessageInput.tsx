@@ -424,8 +424,11 @@ export function MessageInput({
   /** Files pasted or dropped: to the sheet, or the reason they cannot go. False where files have no place here. */
   const offerFiles = (files: File[]): boolean => {
     // An edit is text only: files wait until it ends.
-    if (!onSendFile || disabled || !files.length || edit) return false;
+    if (disabled || !files.length || edit) return false;
+    // Where files cannot go, the reason is said: also in a group, which has no way to send one at all (no
+    // `onSendFile`). A file pasted or dropped there did nothing and said nothing.
     if (fileUnavailable) { showToast(fileUnavailable); return true; }
+    if (!onSendFile) return false;
     closeAll();
     setAttached((was) => [...(was ?? []), ...files]);
     return true;
@@ -472,6 +475,8 @@ export function MessageInput({
 
   // Behind the lock screen nothing is pasted or dropped in (the composer stays mounted under it).
   const canAttach = !!onSendFile && !disabled && !locked;
+  // Files are listened for where they can go, and where there is a reason to give for why they cannot (a group).
+  const hearsFiles = canAttach || (!!fileUnavailable && !disabled && !locked);
   // Something shared into the app from another one, sent to this chat from the "Share to…" picker: its text into
   // the draft, its files onto the sheet a paste opens. Files wait until they can go (the composer unlocked).
   useEffect(() => {
@@ -491,7 +496,7 @@ export function MessageInput({
 
   // A paste where no field has the focus (the chat's messages clicked last) still brings its files here.
   useEffect(() => {
-    if (!canAttach) return;
+    if (!hearsFiles) return;
     const paste = (e: globalThis.ClipboardEvent) => {
       const target = e.target instanceof Element ? e.target : null;
       if (e.defaultPrevented || target?.closest("input, textarea, select, [contenteditable=''], [contenteditable='true'], [role='dialog']")) return;
@@ -499,18 +504,19 @@ export function MessageInput({
     };
     document.addEventListener("paste", paste);
     return () => document.removeEventListener("paste", paste);
-  }, [canAttach]);
+  }, [hearsFiles]);
 
   // Files dragged over the chat (its column, where the page marks one): a veil says they can be dropped.
   useEffect(() => {
     const zone = composerRef.current?.closest<HTMLElement>("[data-file-drop]") ?? composerRef.current;
-    if (!canAttach || !zone) return;
+    if (!hearsFiles || !zone) return;
     let depth = 0;
     const enter = (e: DragEvent) => {
       if (!dragHasFiles(e.dataTransfer)) return;
       e.preventDefault();
       depth += 1;
-      setDragging(zone);
+      // The veil invites a drop: only where one can be sent. Elsewhere the drop is taken, and answered with the reason.
+      if (canAttach) setDragging(zone);
     };
     const over = (e: DragEvent) => {
       if (!dragHasFiles(e.dataTransfer)) return;
@@ -546,7 +552,7 @@ export function MessageInput({
       window.removeEventListener("dragend", done);
       setDragging(null);
     };
-  }, [canAttach]);
+  }, [hearsFiles, canAttach]);
 
   const actions: ComposerAction[] = [];
   // A chat that chooses its own ways of paying always reaches them, to turn one on again: the reason is a hint then.

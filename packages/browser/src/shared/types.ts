@@ -1,4 +1,4 @@
-import type { DiscoveryStatus, GroupMention, ImageMeta, LinkPreview, PairingProgress, PaymentMethodName, StatusCard, TypingKind, VideoMeta, VoiceMeta, WirePin, WireReaction } from "@ghostly/core";
+import type { DiscoveryStatus, GroupMention, ImageMeta, LinkPreview, PairingProgress, PaymentMethodName, RoutineCard, StatusCard, TaskCard, TypingKind, VideoMeta, VoiceMeta, WirePin, WireReaction } from "@ghostly/core";
 import type { UsdtWalletView } from "../engine/paymentAdapters/usdtWallet";
 import type { ArkWalletView } from "../engine/paymentAdapters/arkWallet";
 import type { BarkWalletView } from "../engine/paymentAdapters/barkWallet";
@@ -166,13 +166,18 @@ export interface StoredGroup {
   farewells?: Record<string, { at: number; e: number; told?: number; answered?: number }>;
   /** The group's pinned message (WISP 400 § Pinned message): the latest pin; `id` "" once unpinned. */
   pin?: StoredPin;
+  /**
+   * When the latest message of another member (`peer`) and the latest one that names me (`mention`) reached this
+   * device, where that is later than the message's own time (`cameAt`): what makes the group unread survives a restart.
+   */
+  came?: { peer?: number; mention?: number };
   /** A community group (`group-community/1`) I am in: its session state. Mesh groups use `state`. */
   community?: CommunityState;
   /**
    * Joining a community group through its link (`group2/…`), or again after my admission lost a
    * race: my member seed, the entry session, and what arrived of the welcome.
    */
-  joining?: { g: string; host: string; seedB64: string; linkId: string; name: string; inviter: string; invitedAt?: number; pieces: unknown[]; since: number };
+  joining?: { g: string; host: string; seedB64: string; linkId: string; name: string; inviter: string; invitedAt?: number; pieces: unknown[]; since: number; check?: boolean };
 }
 
 export interface GroupMemberView {
@@ -233,7 +238,8 @@ export interface GroupView {
   isAdmin: boolean;
   members: GroupMemberView[];
   /** On the invitee's side, until the welcome arrives. */
-  invitation?: { linkId: string; contact: string; admin: string; members: number; accepted: boolean; viaLink?: boolean; stage?: GroupJoinStage };
+  /** `waiting`: joining a community through its link, how many others were knocking with me when I last knocked. */
+  invitation?: { linkId: string; contact: string; admin: string; members: number; accepted: boolean; viaLink?: boolean; stage?: GroupJoinStage; waiting?: number };
   /** The group's link while it is on (`group1/<id>/<entry key>`); only the admin who made it sees it. */
   entryLink?: string;
   /** Contacts (by chat id) invited by me and not yet in. */
@@ -712,7 +718,14 @@ export interface StoredMessage {
   id: string;
   text: string;
   sender: "me" | "peer";
+  /**
+   * The row's place in its history, which is sorted by it (WISP 400, requirement 10). Mine: when I sent it. Received:
+   * when it was first stored on this device (`arrivalKey`), never the sender's clock, so a conversation reads in the
+   * order things happened here. A row received before `sentAt` existed keeps the sender's time it was stored under.
+   */
   timestamp: number;
+  /** Received: when the sender says it sent it, by its own clock. Shown (`shownTime`), never sorted by. */
+  sentAt?: number;
   /** `hold`: through the sender's storage while the other side was away (WISP 4xx). */
   via: "pkarr" | "datalink" | "hold";
   nick?: string;
@@ -761,6 +774,21 @@ export interface StoredMessage {
    * Message Buttons): `due` until its buttons go again live, as an edit of the buttons alone; `sent` once they did.
    */
   buttonsRestore?: "due" | "sent";
+}
+
+/**
+ * A message that carries a task or a routine card, as the Tasks board reads it across every chat and group
+ * (`statusCardIndex`): where it is (`linkId`: a chat's id, or `group:<id>`), its message, who sent it (`member`: a group
+ * member's key, absent for my own), when it was sent and when its last edit was made. Nothing else of the message.
+ */
+export interface CardIndexRow {
+  linkId: string;
+  id: string;
+  card: TaskCard | RoutineCard;
+  sender: "me" | "peer";
+  member?: string;
+  timestamp: number;
+  editedAt?: number;
 }
 
 /** A page of a chat's history, oldest first, and whether older messages remain (`messagePage`). */
@@ -899,7 +927,7 @@ export const MESSAGE_DETAILS_MAX_SENDS = 6;
 
 /** What the details view is made of: the row, its record, and what the engine knows around it right now. */
 export interface MessageDetailsView {
-  message: Pick<StoredMessage, "id" | "wireId" | "linkId" | "sender" | "timestamp" | "via" | "delivery" | "deliveryError" | "resendUntil" | "member" | "nick"> & {
+  message: Pick<StoredMessage, "id" | "wireId" | "linkId" | "sender" | "timestamp" | "sentAt" | "via" | "delivery" | "deliveryError" | "resendUntil" | "member" | "nick"> & {
     kind: "text" | "file" | "voice" | "payment" | "event" | "note";
     /** UTF-8 bytes of the text. */
     textBytes: number;
@@ -1462,6 +1490,16 @@ export interface EngineState {
     discovery?: DiscoveryStatus;
     /** False where this client has no WebRTC (Ghostly Desktop on Linux: WebKitGTK has none). Absent where it has. */
     webrtc?: false;
+    /**
+     * This device's own WebRTC attempts say direct connections do not get through its network (a VPN, a firewall, a
+     * carrier's NAT: `DirectPathWatch` in packages/core). Chats still go live through relays. Absent otherwise.
+     */
+    directBlocked?: true;
+    /**
+     * This device's clock seems to be off: this clock minus what the relays and several contacts say, in ms (positive
+     * when it is ahead). From several sources agreeing, never one contact (`ClockWatch` in packages/core). Absent otherwise.
+     */
+    clockOffMs?: number;
     /**
      * False where a group's links have no transport at all here: no WebRTC and no native transport (WISP 9xx §
      * Transports), so no member of a group can be reached from it. Absent where they have one (the Linux Desktop runs

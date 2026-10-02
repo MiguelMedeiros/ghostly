@@ -1,3 +1,4 @@
+import { shownTime } from "@ghostly/core";
 import type { MessageDetailsView, MessagePath, MessageSend } from "@ghostly/browser/shared/types";
 import { englishT, type Translate, type TranslationKey } from "../locales/translate";
 import { languageTag } from "./documentLanguage";
@@ -190,7 +191,7 @@ function summarize(message: ChatMessage, view: MessageDetailsView | null | undef
   if (!mine) {
     const r = d?.received;
     if (!r) return say("received");
-    const after = formatDuration(Math.max(0, r.at - message.timestamp), t);
+    const after = formatDuration(Math.max(0, r.at - (message.sentAt ?? message.timestamp)), t);
     if (r.path === "hold") return say("receivedHold", { after });
     if (r.path === "dht" || r.path === "legacy-dht") return say("receivedDht", { after });
     return say("receivedLive", { over: pathWords(r, t) });
@@ -262,7 +263,7 @@ function build(message: ChatMessage, view: MessageDetailsView | null | undefined
   if (edit) add("edits", [
     { label: L("edits"), value: V("edits", { count: edit.seq, time: time(edit.at) }) },
     edit.pending ? group ? { label: L("group"), value: V("groupNotSent") } : { label: L("contact"), value: V("contactNotShown") } : undefined,
-    ...edit.history.map((version): DetailRow => ({ label: t(version.at === message.timestamp ? "messageDetails.label.original" : "messageDetails.label.before", { time: time(version.at) }), value: version.text, copy: version.text, raw: true })),
+    ...edit.history.map((version): DetailRow => ({ label: t(version.at === shownTime(message) ? "messageDetails.label.original" : "messageDetails.label.before", { time: time(version.at) }), value: version.text, copy: version.text, raw: true })),
   ]);
 
   const last = d?.sends?.[d.sends.length - 1];
@@ -279,11 +280,12 @@ function build(message: ChatMessage, view: MessageDetailsView | null | undefined
 
   const receipt = d?.receiptAt !== undefined && d.sentAt !== undefined ? d.receiptAt - d.sentAt : undefined;
   add("timing", [
-    timeRow("composed", message.timestamp),
+    // What the sender's clock said, as it said it: beside "Received", a clock that is off shows.
+    timeRow("composed", message.sentAt ?? message.timestamp),
     d?.sentAt !== undefined ? timeRow("sent", d.sentAt) : undefined,
     d?.heldAt !== undefined ? timeRow("held", d.heldAt) : undefined,
     d?.received ? timeRow("received", d.received.at) : undefined,
-    d?.received ? { label: L("afterComposing"), value: V("afterComposing", { after: duration(Math.max(0, d.received.at - message.timestamp)) }) } : undefined,
+    d?.received ? { label: L("afterComposing"), value: V("afterComposing", { after: duration(Math.max(0, d.received.at - (message.sentAt ?? message.timestamp))) }) } : undefined,
     d?.receiptAt !== undefined ? timeRow(mine && last?.path === "hold" ? "pickedUp" : "receipt", d.receiptAt) : undefined,
     receipt !== undefined ? { label: L(mine && last?.path === "hold" ? "pickedUpAfter" : "receiptAfter"), value: duration(Math.max(0, receipt)) } : undefined,
     d?.completedAt !== undefined ? timeRow("transferCompleted", d.completedAt) : undefined,

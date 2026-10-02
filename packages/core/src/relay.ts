@@ -1,7 +1,8 @@
 import type { Identity } from "./identity";
 import { createRelayPayload, newerPacket, openRelayPayload, parseRelayPayload, RELAY_PAYLOAD_MAX_BYTES, type GhostRecord, type SignedPacket } from "./pkarr";
 import { RelayBreaker, type DiscoveryStatus, type RelayBreakerOptions, type RelayFailure } from "./relayBreaker";
-import { DiscoveryBudgetError, isDiscoveryBudgetError, type DiscoveryChange, type PkarrRequestOptions, type PkarrTransport } from "./transport";
+import { DiscoveryBudgetError, isDiscoveryBudgetError, type DiscoveryChange, type PkarrRequestOptions, type PkarrTransport, type ServerTime } from "./transport";
+import { traceLink } from "./linkTrace";
 
 /** Who asks, for the budget: a 1:1 chat's link comes before a group's, and both before background looks. */
 interface Asker { background: boolean; group: boolean; urgent: boolean; door: boolean; write: boolean; signal: boolean }
@@ -157,8 +158,18 @@ export class RelayTransport implements PkarrTransport {
   private relays: string[];
   private readonly timeoutMs: number;
   private readonly fetchFn: typeof fetch;
+  private readonly timeListeners = new Set<(time: ServerTime) => void>();
   private readonly lastTimestamp = new Map<string, bigint>();
   private readonly newest = new Map<string, SignedPacket>();
+  /**
+   * The latest time of any packet read under a key, whoever dated it: the next packet this client puts there is dated
+   * past it (`nextTimestamp`). A key is not always one writer's with one clock: a group's lobby, beacon and knock
+   * records are written by every member, an inviter warms its contact's key with an empty packet, and this device's
+   * own clock may have been set back since it last wrote. A relay and the DHT keep only the packet dated latest, so
+   * one dated by this clock alone, when it is behind, was refused (409) or silently never read, until this clock
+   * caught up with the other one: minutes, or an hour.
+   */
+  private readonly seenTimestamp = new Map<string, bigint>();
   /**
    * The last packet this client put under a key that a relay took. A read the budget holds back answers the newer of
    * it and the last one read: a hub that wrote its own beacon entry since it last read the beacon must not see that
@@ -281,21 +292,82 @@ export class RelayTransport implements PkarrTransport {
    */
   async publish(identity: Identity, records: GhostRecord[], options: PkarrRequestOptions = {}): Promise<void> {
     if (this.relays.length === 0) throw new Error("No Pkarr relays configured");
-
-    // BEP44 sequence numbers must strictly increase.
-    const now = BigInt(Date.now()) * 1000n;
-    const last = this.lastTimestamp.get(identity.pubKeyZ32) ?? 0n;
-    const timestamp = now > last ? now : last + 1n;
-    this.lastTimestamp.set(identity.pubKeyZ32, timestamp);
-
-    await this.putEverywhere(identity.pubKeyZ32, createRelayPayload(identity, records, timestamp), timestamp, options);
+    await this.publishDated(identity, records, (key, payload, timestamp, conflict) => this.putEverywhere(key, payload, timestamp, options, conflict), options);
   }
 
-  /** Puts a payload signed elsewhere (a did:dht document), byte for byte, on every relay. */
-  async publishPayload(pubKeyZ32: string, payload: Uint8Array, options: PkarrRequestOptions = {}): Promise<void> {
+  /**
+   * The time the next packet under a key is dated: this clock's, and past every packet this client put or read there.
+   * BEP44 sequence numbers must strictly increase, and the clock that dated the last one may not be this one's.
+   */
+  nextTimestamp(pubKeyZ32: string): bigint {
+    const now = BigInt(Date.now()) * 1000n;
+    const last = this.lastTimestamp.get(pubKeyZ32) ?? 0n, seen = this.seenTimestamp.get(pubKeyZ32) ?? 0n;
+    const floor = last > seen ? last : seen;
+    const timestamp = now > floor ? now : floor + 1n;
+    this.lastTimestamp.set(pubKeyZ32, timestamp);
+    return timestamp;
+  }
+
+  /**
+   * Signs the records, dated by `nextTimestamp`, and hands the payload to `put` (the relays; the CLI adds the DHT).
+   * `put` calls `conflict` for a relay that answered 409: it holds a packet under this key dated at or after this one,
+   * which this client has not read (an inviter's warm packet under the key it gave its contact, from a clock ahead of
+   * this one). That packet is read from that relay, and the records go again dated just past it, once. Without this
+   * the packet was refused until this device's clock passed the other one's, however long that took, and on a relay
+   * that did take it, readers still preferred the later-dated empty packet of another relay.
+   */
+  async publishDated(identity: Identity, records: GhostRecord[],
+    put: (pubKeyZ32: string, payload: Uint8Array, timestamp: bigint, conflict: (relay: string) => void) => Promise<void>,
+    options: PkarrRequestOptions = {}, again = false): Promise<void> {
+    const key = identity.pubKeyZ32, timestamp = this.nextTimestamp(key);
+    let redated: Promise<boolean> | undefined;
+    const conflict = (relay: string) => {
+      if (again || redated) return;
+      redated = (async () => {
+        const held = await this.heldAt(relay, key, asker(options, true));
+        // Not dated later than this one: the relay was still putting another packet. The caller tries again, as before.
+        if (held === null || held < timestamp) return false;
+        traceLink(key, "publish-redated", { aheadMs: Number((held - timestamp) / 1000n), relay });
+        // A later publication of this key took over meanwhile: it is dated past what was just read.
+        if (this.lastTimestamp.get(key) !== timestamp) return true;
+        await this.publishDated(identity, records, put, options, true);
+        return true;
+      })();
+      redated.catch(() => {});
+    };
+    try { await put(key, createRelayPayload(identity, records, timestamp), timestamp, conflict); }
+    catch (error) {
+      // Refused everywhere, and somewhere for a later-dated packet: what the publication dated past it did is the answer.
+      const pending = redated as Promise<boolean> | undefined;
+      if (!pending || !(await pending)) throw error;
+    }
+  }
+
+  /** One relay's packet for a key, read now: its time, kept for `nextTimestamp`. Null when it has none or does not answer. */
+  private async heldAt(relay: string, pubKeyZ32: string, who: Asker): Promise<bigint | null> {
+    if (!this.take(relay, who, pubKeyZ32)) return null;
+    try {
+      let payload: Uint8Array | undefined;
+      const response = await this.request(`${relay}/${pubKeyZ32}`, { method: "GET" }, async (r, signal) => {
+        if (r.ok && r.status !== 404) payload = await readRelayBody(r, signal);
+      });
+      if (!response.ok || !payload) return null;
+      const packet = parseRelayPayload(pubKeyZ32, payload);
+      this.sawTimestamp(pubKeyZ32, packet.timestampMicros);
+      return packet.timestampMicros;
+    } catch { return null; }
+  }
+
+  /** A packet under this key was read (on a relay, or by the CLI on the DHT): its time, for `nextTimestamp`. */
+  sawTimestamp(pubKeyZ32: string, timestamp: bigint): void {
+    if (timestamp > (this.seenTimestamp.get(pubKeyZ32) ?? 0n)) this.seenTimestamp.set(pubKeyZ32, timestamp);
+  }
+
+  /** Puts a payload signed elsewhere (a did:dht document), byte for byte, on every relay. `conflict`: as `publishDated` gives it. */
+  async publishPayload(pubKeyZ32: string, payload: Uint8Array, options: PkarrRequestOptions = {}, conflict?: (relay: string) => void): Promise<void> {
     if (this.relays.length === 0) throw new Error("No Pkarr relays configured");
     const { seq } = openRelayPayload(pubKeyZ32, payload);
-    await this.putEverywhere(pubKeyZ32, payload, seq, options);
+    await this.putEverywhere(pubKeyZ32, payload, seq, options, conflict);
   }
 
   /**
@@ -304,7 +376,7 @@ export class RelayTransport implements PkarrTransport {
    * presence, offer or answer back: the rest finish in the background, their outcomes still counted.
    * When no relay takes it, this waits for all of them to say why.
    */
-  private putEverywhere(pubKeyZ32: string, payload: Uint8Array, timestamp: bigint, options: PkarrRequestOptions): Promise<void> {
+  private putEverywhere(pubKeyZ32: string, payload: Uint8Array, timestamp: bigint, options: PkarrRequestOptions, conflict?: (relay: string) => void): Promise<void> {
     // A record read, changed and written back (a lobby, a knock record) is read from the relays the next time.
     this.readAt.delete(pubKeyZ32);
     // A newer packet goes everywhere now: none waiting for a relay that refused an older one.
@@ -329,8 +401,10 @@ export class RelayTransport implements PkarrTransport {
       // A relay refuses (428) to replace a packet whose DHT put is still in flight, unless told which
       // packet is being replaced. Links publish in bursts (a message, its ack, a signal), so say so.
       let response = await this.put(relay, pubKeyZ32, payload, previous, asker(options, true), relay === probe);
-      // 412: the relay never got `previous` (it was busy, or restarted). There is one writer per key, so insist.
+      // 412: the relay never got `previous` (it was busy, or restarted). This client's packet is the one to replace, so insist.
       if (response.status === 412) response = await this.put(relay, pubKeyZ32, payload, undefined, asker(options, true));
+      // 409: this relay holds a packet under the key dated at or after this one (`publishDated` reads it and dates past it).
+      if (response.status === 409) conflict?.(relay);
       // The relay's own rate limit: this packet did not go in, and goes once the relay says so.
       if (response.status === 429) throw new DiscoveryBudgetError(this.coolDown(relay, response), `${relay} responded 429; retry shortly`);
       if (!response.ok) throw new Error(`${relay} responded ${response.status}`);
@@ -423,6 +497,7 @@ export class RelayTransport implements PkarrTransport {
         if (response.status !== 404) {
           if (!response.ok) throw new Error(`${relay} responded ${response.status}`);
           const packet = parseRelayPayload(pubKeyZ32, payload!);
+          this.sawTimestamp(pubKeyZ32, packet.timestampMicros);
           this.newest.set(pubKeyZ32, newerPacket(this.newest.get(pubKeyZ32), packet)!);
         }
         this.answered(relay, undefined, "GET");
@@ -453,6 +528,8 @@ export class RelayTransport implements PkarrTransport {
     }
     return this.newest.get(pubKeyZ32) ?? null;
   }
+
+  readAnsweredAt(pubKeyZ32: string): number | undefined { return this.readAt.get(pubKeyZ32); }
 
   /** The relays answered a read of this key now; answers older than `FRESH_READ_MS` are dropped as the list grows. */
   private answeredRead(pubKeyZ32: string): void {
@@ -665,12 +742,36 @@ export class RelayTransport implements PkarrTransport {
    * time as well: a relay that sends its headers and then trickles, or never ends, is given up on like one that
    * never answered.
    */
+  /**
+   * The relay's own time, when its answer says it and this runtime may read it: Node and the Desktop can, a browser
+   * only when the relay exposes the header to other origins. Held against this device's clock (`ClockWatch`).
+   */
+  private serverTime(url: string, response: Response, sent: number): void {
+    if (!this.timeListeners.size) return;
+    let date = NaN;
+    try {
+      // An answer a cache kept says when it was made, not when it was served (`Age` says how long ago): not a clock.
+      if (Number(response.headers.get("age") ?? 0) > 0) return;
+      date = Date.parse(response.headers.get("date") ?? "");
+    } catch { /* an answer with no headers to read */ }
+    if (!Number.isFinite(date)) return;
+    const time: ServerTime = { source: new URL(url).origin, date, sent, received: Date.now() };
+    for (const listener of this.timeListeners) try { listener(time); } catch { /* a listener that fails must not fail a request */ }
+  }
+
+  onServerTime(listener: (time: ServerTime) => void): () => void {
+    this.timeListeners.add(listener);
+    return () => this.timeListeners.delete(listener);
+  }
+
   private async request(url: string, init: RequestInit, read?: (response: Response, signal: AbortSignal) => Promise<void>): Promise<Response> {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.timeoutMs);
     try {
       // Relays answer with `cache-control: max-age=300`; polling needs fresh data.
+      const sent = Date.now();
       const response = await this.fetchFn(url, { ...init, cache: "no-store", signal: controller.signal });
+      this.serverTime(url, response, sent);
       await read?.(response, controller.signal);
       return response;
     } finally {

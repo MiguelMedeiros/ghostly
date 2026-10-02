@@ -108,7 +108,7 @@ async function sendCard(ctx: ApiContext, params: Params, kind: Kind): Promise<Re
   const ms = num(params, "timeout", 30, { min: 1, max: 3600 }) * 1000;
   if (target.group) {
     const result = await node(ctx).sendGroupMessage({ groupId: target.id, text, card });
-    if (result.error || !result.messageId) throw new CliError("unavailable", result.error ?? "Nothing to send");
+    if (result.error || !result.messageId) throw new CliError(result.refused ? "refused" : "unavailable", result.error ?? "Nothing to send");
     const edges = wait === "sent" ? await waitForGroupFrame(ctx, target.id, result.messageId, undefined, ms) : undefined;
     return answer(target, kind, id, result.messageId, { card, ...(edges !== undefined && { edges }) });
   }

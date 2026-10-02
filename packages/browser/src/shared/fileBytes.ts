@@ -49,6 +49,12 @@ export interface FileBytes {
   stream?(id: string, type: string): Promise<FileStream | null>;
   /** Removes another profile's folder (a deleted profile). IndexedDB pieces go with the profile's database. */
   dropSpace?(space: string): Promise<void>;
+  /**
+   * The same storage for another profile's space: a backup of a profile that is not the active one reads its files
+   * through it, and a restore writes a new profile's files through it before that profile exists. Absent where files
+   * are pieces in the profile's own database (`idb`): those are read and written with that database.
+   */
+  forSpace?(space: string): FileBytes;
 }
 
 export type FileBytesKind = "opfs" | "native" | "idb";

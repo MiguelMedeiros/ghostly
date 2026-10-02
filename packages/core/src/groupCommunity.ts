@@ -491,10 +491,32 @@ export class CommunitySession {
     return false;
   }
   /** Someone the chain took out (removed or left) and who is not back in. */
-  wasRemoved(key: string): boolean {
-    if (rosterHas(this.roster, key)) return false;
-    for (let i = this.state.chain.length - 1; i >= 0; i--) { const c = this.state.chain[i]; if ((c.k === "remove" || c.k === "leave") && c.s === key) return true; }
-    return false;
+  wasRemoved(key: string): boolean { return this.outIndex(key) >= 0; }
+  /** When the chain took them out (the commit's time, by its signer's clock), if it did and they are not back in. */
+  outAt(key: string): number | undefined { const i = this.outIndex(key); return i < 0 ? undefined : this.state.chain[i].ts; }
+  private outIndex(key: string): number {
+    if (rosterHas(this.roster, key)) return -1;
+    for (let i = this.state.chain.length - 1; i >= 0; i--) { const c = this.state.chain[i]; if ((c.k === "remove" || c.k === "leave") && c.s === key) return i; }
+    return -1;
+  }
+  /**
+   * What someone the chain took out is told when it comes back (WISP 9xx § Leaving and removal): the commits from where
+   * it says it is (`sync`: its tip, or its locator) up to the one that took it out, and nothing after. Later commits
+   * are not its business (a `link` commit names the new entry key); no secret, no stored frame, no seed goes with them.
+   * Empty when it is a member, was never one, or already holds that commit.
+   */
+  farewell(key: string, sync: { h?: unknown; loc?: unknown }): CommunityCommitFrame[] {
+    if (!this.isMember) return [];
+    const chain = this.state.chain, out = this.outIndex(key);
+    if (out < 0) return [];
+    let start: number;
+    if (typeof sync.h === "string" && this.mainIndex.has(sync.h)) start = this.mainIndex.get(sync.h)! + 1;
+    else {
+      const path = typeof sync.h === "string" && this.known.has(sync.h) ? this.pathToMain(sync.h) : null;
+      const common = (Array.isArray(sync.loc) ? sync.loc : []).find(x => typeof x === "string" && this.mainIndex.has(x)) as string | undefined;
+      start = path ? this.mainIndex.get(this.known.get(path[0])!.p)! + 1 : common !== undefined ? this.mainIndex.get(common)! + 1 : Math.max(0, out + 1 - COMMUNITY_LIMITS.side);
+    }
+    return chain.slice(start, out + 1).map(commit => ({ t: "group-commit" as const, v: 2 as const, g: this.id, commit }));
   }
   missing(sender: string): number {
     const entry = this.state.seen[sender]?.[seenKey(this.epoch, shortHash(this.topHash))];
@@ -1248,12 +1270,18 @@ export class CommunitySession {
     if (secrets.length) this.hooks.direct(from, { t: "group-secrets", v: 2, g: this.id, secrets: secrets.slice(-COMMUNITY_LIMITS.secrets) });
     // What was said while they were away, by anyone, for epochs they were in.
     const have = frame.have && typeof frame.have === "object" ? frame.have as Record<string, Record<string, unknown>> : {};
+    // A frame sealed on a branch I do not follow (two members committed one leave apart, each with a fresh secret,
+    // and that branch lost) goes with that branch's commits and secret: the commits above are my branch's only, and a
+    // member who was never on the other one could not place the frame, and kept it waiting for good (2026-10-02).
+    const handed = new Set<string>();
     for (const stored of this.state.store) {
       if (stored.s === from || this.wasRemoved(stored.s)) continue;
       const found = this.commitByShort(stored.e, stored.h);
       if (!found || !rosterHas(this.rosterAt(found.hash) ?? [], from)) continue;
       const high = have[stored.s]?.[seenKey(stored.e, stored.h)];
-      if (!Number.isSafeInteger(high) || (high as number) < stored.n) this.hooks.direct(from, stored);
+      if (Number.isSafeInteger(high) && (high as number) >= stored.n) continue;
+      if (!this.mainIndex.has(found.hash)) this.handSide(from, found.hash, handed);
+      this.hooks.direct(from, stored);
     }
     // The link's seed, so they can answer it too.
     if (rosterHas(this.roster, from)) { const entry = this.entryFrame(from); if (entry) this.hooks.direct(from, entry); }
@@ -1263,6 +1291,17 @@ export class CommunitySession {
     this.offerMeta(from, frame.mt);
     // And where I am, so they can hand me what I lack (asked once in a while, not in a loop).
     this.ask(from);
+  }
+
+  /** The commits of a branch I do not follow, from where it leaves mine, and the secrets I hold of those `to` was in. */
+  private handSide(to: string, tip: string, handed: Set<string>): void {
+    for (const h of this.pathToMain(tip) ?? []) {
+      if (handed.has(h)) continue;
+      handed.add(h);
+      this.hooks.direct(to, { t: "group-commit", v: 2, g: this.id, commit: this.known.get(h)! });
+      const secret = this.state.secrets[h];
+      if (secret && rosterHas(this.rosterAt(h) ?? [], to)) this.hooks.direct(to, { t: "group-secret", v: 2, g: this.id, to, h, s: sealSecret(to, fromBase64Url(secret), secretAad(this.id, h, to)) });
+    }
   }
 
   /** The current entry seed sealed to a member, when I hold it. */

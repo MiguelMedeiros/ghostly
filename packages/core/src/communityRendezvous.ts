@@ -110,7 +110,7 @@ export function doorHubs(hubs: Hub[], now = Date.now(), me?: string): string[] {
   // None settled (a group's first minute): the hub that has been one longest, alone, and the lowest key between two of
   // the same second. A hub alone in the beacon reads it only when it republishes, so for half a minute it does not know
   // of a member that just became a hub; that member, counting both of them at the door with the lower key, answered
-  // the same knock as the first hub did, and two hubs on one entry session let nobody in.
+  // the same knock as the first hub did: two hubs on one entry session, where at best one of them looks 90 s for nobody.
   const since = (h: Hub) => Math.floor((h.since ?? h.ts) / 1000);
   const first = [...lately].sort((a, b) => since(a) - since(b) || (a.key < b.key ? -1 : 1)).slice(0, 1);
   const door = (settled.length ? settled : first).map(h => h.key);

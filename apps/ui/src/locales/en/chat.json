@@ -2,7 +2,8 @@
   "announce": {
     "message": "{{name}}: {{text}}",
     "messages": "{{count}} new messages",
-    "messagesFrom": "{{count}} new messages from {{name}}"
+    "messagesFrom": "{{count}} new messages from {{name}}",
+    "pinMoved": "Moved to place {{place}} of {{count}} pinned chats"
   },
   "audio": {
     "cantPlay": "This device can't play this audio ({{format}}). Download it to listen.",
@@ -36,6 +37,7 @@
       "queued": "No receipt yet. Sends again by itself.",
       "sending": "On its way.",
       "sent": "Sent. No receipt yet.",
+      "sentGroup": "Sent to the group. Groups have no receipts.",
       "waiting": "Sends by itself when your contact is online.",
       "waitingLiveContact": "Files need a live connection. Your contact's chat is on DHT only: it goes when they allow live again.",
       "waitingLiveYou": "Files need a live connection. This chat is on DHT only: change it from the connection icon."
@@ -74,6 +76,7 @@
     "joinGroup": "Join group",
     "joinHint": "Joining makes a chat with whoever made this invite. Nothing is sent until you join.",
     "joining": "Joining…",
+    "link": "Link",
     "loadKeyHint": "Loading asks your relays ({{relays}}), which learn your IP address and this key.",
     "loadNote": "Load note",
     "loadNoteHint": "Loading asks your relays ({{relays}}), which learn your IP address and this note.",
@@ -101,6 +104,8 @@
     "proofExpired": "Proof expired from {{who}}",
     "provedBy": "Proved by {{who}}",
     "pubkyKey": "Pubky key",
+    "qrHint": "Scan it with another device. Anyone who sees it can join.",
+    "qrTitle": "Link QR code",
     "resolveFailed": "Could not resolve it: {{error}}",
     "resolveNote": "Resolving shows what it is, not who holds it.",
     "resolveNoteNone": "Resolving shows what it is, not who holds it: a contact proves that by sharing it as an identity.",
@@ -214,6 +219,10 @@
   "menu": {
     "continueNew": "Continue in a new chat",
     "hold": "Hold messages…",
+    "moveDown": "Move down",
+    "moveFirst": "Already first",
+    "moveLast": "Already last",
+    "moveUp": "Move up",
     "pin": "Pin chat",
     "refresh": "Refresh",
     "techInfo": "Tech Info",

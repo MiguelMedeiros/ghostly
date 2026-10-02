@@ -9,7 +9,7 @@ import { MessageBoundary } from "./MessageBoundary";
 import { MessageDetailsPanel } from "./MessageDetailsPanel";
 import { VoiceBubble } from "./voice/VoiceBubble";
 import { VideoBubble } from "./video/VideoBubble";
-import { isPlayableAudioType, isPlayableVideoType } from "@ghostly/core";
+import { isPlayableAudioType, isPlayableVideoType, shownTime } from "@ghostly/core";
 import { AudioBubble } from "./audio/AudioBubble";
 import { InvoiceBubble } from "./InvoiceBubble";
 import { findMoney } from "../lib/money";
@@ -716,6 +716,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
   const isMe = message.sender === "me";
   const isSystem = message.sender === "system";
   const isAcked = isMe && (message.delivery ? message.delivery === "delivered" : peerAck >= message.timestamp);
+  const inGroup = !!linkId?.startsWith("group:");
   const { platform, transfer } = useTransfer(isMe ? message.file?.id : undefined);
   // A file of mine whose bytes did not go has the red mark, not ticks beside its "Not sent". While they move, the
   // message keeps its own mark: the bytes' progress is the file's to show (held files travel by hold/1, not files/3).
@@ -737,7 +738,9 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
     if (link) void engine.call("deleteMessage", { linkId: link.id, messageId: message.id }).catch(() => {});
   };
   const sending = isMe && message.delivery === "waiting" ? { onCancelSend: cancelSending } : isMe && shown === "failed" ? { onRetry: retry } : {};
-  const time = clockTime(message.timestamp, language);
+  // What the sender's clock said, never later than when the message came (WISP 400, requirement 10).
+  const shownAt = shownTime(message);
+  const time = clockTime(shownAt, language);
   const contentType = imgError || message.file || message.paymentId || pressed ? "text" : detectContentType(message.text);
   const download = message.file && !isSystem
     ? {
@@ -853,8 +856,8 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
     // A bot's task or routine (WISP 4xx · Status Cards): not a bubble but a card of its own, standing for the text
     // (its fallback). Updates are its normal life, so no "edited": when it last changed, in the card.
     const card = message.card;
-    const time = <CardTime sent={message.timestamp} changed={message.edit?.at} />;
-    const marks = isMe ? <DeliveryStatus delivery={shown} acked={isAcked} onRetry={retry} live={live} /> : undefined;
+    const time = <CardTime sent={shownTime(message)} changed={message.edit?.at} />;
+    const marks = isMe ? <DeliveryStatus delivery={shown} acked={isAcked} onRetry={retry} live={live} group={inGroup} /> : undefined;
     const edge = card.kind === "task" ? STATUS_TONE[card.status].bar
       : card.state === "paused" ? "bg-text-muted" : card.lastRun?.result === "failed" ? "bg-danger" : undefined;
     return (
@@ -914,10 +917,10 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
     <span dir={dir} className="msg-meta inline-flex items-center gap-[3px] float-end relative top-[4px] ms-[8px] select-none">
       {/* A question's buttons marked or closed by its bot is its normal life, not an edit to point out; a new text is. */}
       {message.edit && (!buttonsView || !!message.edit.history?.length) && <EditedMark edit={message.edit} group={linkId?.startsWith("group:")} />}
-      <span className="text-[11px] leading-none text-text-primary/65">
+      <span data-testid="message-time" data-at={shownAt} className="text-[11px] leading-none text-text-primary/65">
         {time}
       </span>
-      {isMe && <DeliveryStatus delivery={shown} acked={isAcked} onRetry={retry} live={live} />}
+      {isMe && <DeliveryStatus delivery={shown} acked={isAcked} onRetry={retry} live={live} group={inGroup} />}
     </span>
   );
 
@@ -1036,7 +1039,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
               <span className="text-[11px] leading-none text-[hsla(0,0%,100%,0.9)]">
                 {time}
               </span>
-              {isMe && <DeliveryStatus delivery={shown} acked={isAcked} onRetry={retry} live={live} onPicture />}
+              {isMe && <DeliveryStatus delivery={shown} acked={isAcked} onRetry={retry} live={live} group={inGroup} onPicture />}
             </span>
           </div>
         ) : bigEmoji ? (
@@ -1050,7 +1053,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
           // What was written reads in its own direction (an English message in the Arabic app left to right, an Arabic
           // one in the English app right to left), with the time at its end; the cards and the time keep the app's.
           <div className="clearfix" dir="auto" data-testid="message-body">
-            <RichText testId="message-text" text={message.text} sentAt={message.timestamp} mentions={message.mentions} highlight={highlight} className="text-[14.2px] leading-[19px] wrap-break-word whitespace-pre-wrap" />
+            <RichText testId="message-text" text={message.text} sentAt={shownAt} mentions={message.mentions} highlight={highlight} className="text-[14.2px] leading-[19px] wrap-break-word whitespace-pre-wrap" />
             {/* No box of its own: with no card the time still floats beside the last line of text. */}
             <div dir={dir} className="contents">
               <EntityCards text={message.text} mine={isMe} from={message.nick || peerNick || undefined} peerPubKey={peerPubKey} />

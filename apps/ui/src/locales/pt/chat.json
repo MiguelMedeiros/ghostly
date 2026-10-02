@@ -2,7 +2,8 @@
   "announce": {
     "message": "{{name}}: {{text}}",
     "messages": "{{count}} mensagens novas",
-    "messagesFrom": "{{count}} mensagens novas de {{name}}"
+    "messagesFrom": "{{count}} mensagens novas de {{name}}",
+    "pinMoved": "Movida para a posição {{place}} de {{count}} conversas fixadas"
   },
   "audio": {
     "cantPlay": "Este aparelho não reproduz este áudio ({{format}}). Baixe para ouvir.",
@@ -36,6 +37,7 @@
       "queued": "Sem confirmação ainda. Envia de novo sozinha.",
       "sending": "A caminho.",
       "sent": "Enviada. Sem confirmação ainda.",
+      "sentGroup": "Enviada ao grupo. Grupos não têm confirmação.",
       "waiting": "Envia sozinha quando seu contato estiver online.",
       "waitingLiveContact": "Arquivos precisam de conexão direta. A conversa do seu contato está em Só DHT: o arquivo vai quando ele permitir de novo.",
       "waitingLiveYou": "Arquivos precisam de conexão direta. Esta conversa está em Só DHT: mude no ícone de conexão."
@@ -74,6 +76,7 @@
     "joinGroup": "Entrar no grupo",
     "joinHint": "Entrar cria uma conversa com quem fez este convite. Nada é enviado até você entrar.",
     "joining": "Entrando…",
+    "link": "Link",
     "loadKeyHint": "Carregar consulta seus relays ({{relays}}), que ficam sabendo seu endereço IP e esta chave.",
     "loadNote": "Carregar nota",
     "loadNoteHint": "Carregar consulta seus relays ({{relays}}), que ficam sabendo seu endereço IP e esta nota.",
@@ -101,6 +104,8 @@
     "proofExpired": "Prova expirada de {{who}}",
     "provedBy": "Comprovado por {{who}}",
     "pubkyKey": "Chave Pubky",
+    "qrHint": "Escaneie com outro dispositivo. Quem vir este código pode entrar.",
+    "qrTitle": "Código QR do link",
     "resolveFailed": "Não foi possível resolver: {{error}}",
     "resolveNote": "Resolver mostra o que é, não quem o possui.",
     "resolveNoteNone": "Resolver mostra o que é, não quem o possui: um contato prova isso compartilhando como identidade.",
@@ -214,6 +219,10 @@
   "menu": {
     "continueNew": "Continuar numa nova conversa",
     "hold": "Reter mensagens…",
+    "moveDown": "Mover para baixo",
+    "moveFirst": "Já é a primeira",
+    "moveLast": "Já é a última",
+    "moveUp": "Mover para cima",
     "pin": "Fixar conversa",
     "refresh": "Atualizar",
     "techInfo": "Informações técnicas",

@@ -2,7 +2,8 @@
   "announce": {
     "message": "{{name}}: {{text}}",
     "messages": "{{count}} nuovi messaggi",
-    "messagesFrom": "{{count}} nuovi messaggi da {{name}}"
+    "messagesFrom": "{{count}} nuovi messaggi da {{name}}",
+    "pinMoved": "Spostata al posto {{place}} di {{count}} chat fissate"
   },
   "audio": {
     "cantPlay": "Questo dispositivo non può riprodurre questo audio ({{format}}). Scaricalo per ascoltarlo.",
@@ -36,6 +37,7 @@
       "queued": "Ancora nessuna conferma. Si reinvia da solo.",
       "sending": "In arrivo.",
       "sent": "Inviato. Ancora nessuna conferma.",
+      "sentGroup": "Inviato al gruppo. I gruppi non hanno conferme.",
       "waiting": "Parte da solo quando il tuo contatto è online.",
       "waitingLiveContact": "I file richiedono una connessione diretta. La chat del tuo contatto è in Solo DHT: parte quando la consente di nuovo.",
       "waitingLiveYou": "I file richiedono una connessione diretta. Questa chat è in Solo DHT: cambialo dall'icona di connessione."
@@ -74,6 +76,7 @@
     "joinGroup": "Entra nel gruppo",
     "joinHint": "Entrando crei una chat con chi ha fatto questo invito. Non viene inviato nulla finché non entri.",
     "joining": "Ingresso…",
+    "link": "Link",
     "loadKeyHint": "Il caricamento interroga i tuoi relay ({{relays}}), che vengono a sapere il tuo indirizzo IP e questa chiave.",
     "loadNote": "Carica nota",
     "loadNoteHint": "Il caricamento interroga i tuoi relay ({{relays}}), che vengono a sapere il tuo indirizzo IP e questa nota.",
@@ -101,6 +104,8 @@
     "proofExpired": "Prova scaduta di {{who}}",
     "provedBy": "Provato da {{who}}",
     "pubkyKey": "Chiave Pubky",
+    "qrHint": "Scansionalo con un altro dispositivo. Chi lo vede può entrare.",
+    "qrTitle": "Codice QR del link",
     "resolveFailed": "Impossibile risolverlo: {{error}}",
     "resolveNote": "Risolverlo mostra cos'è, non chi lo possiede.",
     "resolveNoteNone": "Risolverlo mostra cos'è, non chi lo possiede: un contatto lo prova condividendolo come identità.",
@@ -214,6 +219,10 @@
   "menu": {
     "continueNew": "Continua in una nuova chat",
     "hold": "Trattieni messaggi…",
+    "moveDown": "Sposta giù",
+    "moveFirst": "È già la prima",
+    "moveLast": "È già l'ultima",
+    "moveUp": "Sposta su",
     "pin": "Fissa chat",
     "refresh": "Aggiorna",
     "techInfo": "Info tecniche",

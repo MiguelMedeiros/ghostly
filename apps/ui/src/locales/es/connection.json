@@ -9,6 +9,12 @@
     "reason": "{{reason}}.",
     "retryAt": "Se reintentará hacia las {{time}}."
   },
+  "clockOff": {
+    "hint": "El reloj de este dispositivo parece estar desajustado unos {{amount}}. Los chats pueden tardar en conectar.",
+    "infoAhead": "La hora de este dispositivo va unos {{amount}} por delante de lo que dicen los relays y los dispositivos de tus contactos. Ghostly fecha lo que envía con este reloj, y las otras apps rechazan o retrasan lo que lleva una fecha demasiado lejana de su propia hora: los chats y grupos pueden tardar en conectar, las llamadas pueden no sonar, y una app sin actualizar puede no conectar en absoluto. Activa la fecha y hora automáticas en los ajustes de este dispositivo. Este aviso desaparece cuando el reloj vuelve a coincidir. Hacen falta varias fuentes que coincidan, nunca un solo contacto.",
+    "infoBehind": "La hora de este dispositivo va unos {{amount}} por detrás de lo que dicen los relays y los dispositivos de tus contactos. Ghostly fecha lo que envía con este reloj, y las otras apps rechazan o retrasan lo que lleva una fecha demasiado lejana de su propia hora: los chats y grupos pueden tardar en conectar, las llamadas pueden no sonar, y una app sin actualizar puede no conectar en absoluto. Activa la fecha y hora automáticas en los ajustes de este dispositivo. Este aviso desaparece cuando el reloj vuelve a coincidir. Hacen falta varias fuentes que coincidan, nunca un solo contacto.",
+    "title": "Reloj del dispositivo"
+  },
   "detail": {
     "noneLive": "Ninguna directa",
     "notLiveFor": "Sin conexión durante",
@@ -19,6 +25,11 @@
     "why": "Por qué"
   },
   "dhtOnly": "Solo DHT",
+  "directBlocked": {
+    "hint": "Las conexiones directas están bloqueadas en esta red (¿una VPN o un cortafuegos?). Los chats siguen funcionando por relays, pero conectan más despacio.",
+    "info": "Los últimos intentos de conexión directa de este dispositivo fallaron todos: no se encontró ninguna dirección pública, o no se pudo llegar directamente a varios contactos. Una VPN, un cortafuegos o un operador móvil puede causarlo, y la app no sabe cuál. Los mensajes y archivos van por relays o por la DHT. Un relay ve qué dispositivos hablan y cuándo, nunca lo que dicen. Las llamadas necesitan un camino directo o un servidor TURN (Configuración, Red). Este aviso desaparece cuando una conexión directa funciona o la red cambia.",
+    "title": "Conexiones directas bloqueadas"
+  },
   "discovery": {
     "dhtDirect": "DHT directa",
     "failing": "fallando",

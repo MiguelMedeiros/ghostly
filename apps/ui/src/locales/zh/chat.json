@@ -2,7 +2,8 @@
   "announce": {
     "message": "{{name}}：{{text}}",
     "messages": "{{count}} 条新消息",
-    "messagesFrom": "来自 {{name}} 的 {{count}} 条新消息"
+    "messagesFrom": "来自 {{name}} 的 {{count}} 条新消息",
+    "pinMoved": "已移到 {{count}} 个置顶聊天中的第 {{place}} 位"
   },
   "audio": {
     "cantPlay": "此设备无法播放此音频（{{format}}）。请下载后收听。",
@@ -36,6 +37,7 @@
       "queued": "尚未收到回执。会自动重发。",
       "sending": "正在路上。",
       "sent": "已发送。尚未收到回执。",
+      "sentGroup": "已发送到群组。群组没有回执。",
       "waiting": "联系人上线后自动发送。",
       "waitingLiveContact": "文件需要直连。联系人的聊天为仅 DHT：对方重新允许直连后发送。",
       "waitingLiveYou": "文件需要直连。此聊天为仅 DHT：可通过连接图标更改。"
@@ -74,6 +76,7 @@
     "joinGroup": "加入群组",
     "joinHint": "加入后会与创建此邀请的人建立聊天。加入前不会发送任何内容。",
     "joining": "正在加入…",
+    "link": "链接",
     "loadKeyHint": "加载会询问你的中继（{{relays}}），它们会得知你的 IP 地址和此密钥。",
     "loadNote": "加载笔记",
     "loadNoteHint": "加载会询问你的中继（{{relays}}），它们会得知你的 IP 地址和这条笔记。",
@@ -101,6 +104,8 @@
     "proofExpired": "{{who}} 的证明已过期",
     "provedBy": "由 {{who}} 证明",
     "pubkyKey": "Pubky 密钥",
+    "qrHint": "用另一台设备扫描。任何看到它的人都可以加入。",
+    "qrTitle": "链接二维码",
     "resolveFailed": "无法解析：{{error}}",
     "resolveNote": "解析只能显示它是什么，而不是谁持有它。",
     "resolveNoteNone": "解析只能显示它是什么，而不是谁持有它：联系人将其作为身份分享即可证明。",
@@ -214,6 +219,10 @@
   "menu": {
     "continueNew": "在新聊天中继续",
     "hold": "暂存消息…",
+    "moveDown": "下移",
+    "moveFirst": "已在最前",
+    "moveLast": "已在最后",
+    "moveUp": "上移",
     "pin": "置顶聊天",
     "refresh": "刷新",
     "techInfo": "技术信息",
