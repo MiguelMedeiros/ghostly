@@ -102,6 +102,8 @@ export class CommunityWorld {
   /** Cuts two peers apart (their link and their reads of each other), whatever `part` says. */
   cut: ((a: Peer, b: Peer) => boolean) | null = null;
   private sameSide(a: Peer, b: Peer): boolean { return (!this.part || this.part(a) === this.part(b)) && !this.cut?.(a, b); }
+  /** Keeps the edges between two peers from coming up (their entry session still does): an edge whose signaling is slow. */
+  holdEdge: ((a: Peer, b: Peer) => boolean) | null = null;
   /** Fails an app's Pkarr reads (a test says whose, and of which key): the relays' budget, or the network. */
   failRead: ((peer: Peer, key: string) => boolean) | null = null;
   /** Loses frames on the way (a test says which): the network is not perfect. */
@@ -228,6 +230,7 @@ export class CommunityWorld {
   /** Both ends online and reachable, and (with a `NetworkModel`) signaling done on both sides. */
   private up(peer: Peer, edge: Edge, there: Peer): boolean {
     if (!peer.online || !there.online || !this.sameSide(peer, there)) return false;
+    if (edge.kind === "edge" && this.holdEdge?.(peer, there)) return false;
     if (!this.network) return true;
     if (edge.upAt !== undefined) return true;
     const other = this.counterpart(edge);
