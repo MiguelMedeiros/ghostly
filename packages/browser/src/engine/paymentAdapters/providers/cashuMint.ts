@@ -60,6 +60,27 @@ export class CashuMintLightning implements LightningProvider {
     return this.quotes.get(invoice.trim().toLowerCase());
   }
 
+  /** The melt quote `payInvoice` pays, when its fee was shown first: what the mint is asked about later. */
+  paymentRef(invoice: string) {
+    const quote = this.quotes.get(invoice.trim().toLowerCase());
+    return quote ? JSON.stringify({ mint: quote.mint, quote: quote.quote } satisfies MintRef) : undefined;
+  }
+
+  /**
+   * A payment the app was cut off from (the tab closed while it was being paid). A melt written down is the wallet's
+   * to settle and report. With none, the mint's word on the quote decides: paid, or never melted (the melt is written
+   * down before the mint is handed anything, so an unpaid quote with no melt spent nothing).
+   */
+  async interruptedPayment(payment: LightningPaymentRef) {
+    if (await this.wallet.meltInFlight(payment.invoice)) return "pending" as const;
+    if (!payment.ref) return "unknown" as const;
+    const { mint, quote } = parseRef(payment.ref);
+    const state = await this.wallet.meltQuoteState(mint, quote);
+    // Asked again: a melt written while the mint was being asked is the wallet's to settle.
+    if (await this.wallet.meltInFlight(payment.invoice)) return "pending" as const;
+    return state === "PAID" ? "paid" as const : state === "PENDING" ? "pending" as const : "failed" as const;
+  }
+
   async payInvoice(invoice: string, maxFee: number, note?: string) {
     const key = invoice.trim().toLowerCase();
     let quote = this.quotes.get(key);
