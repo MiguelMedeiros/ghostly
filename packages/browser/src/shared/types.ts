@@ -711,7 +711,14 @@ export interface StoredMessage {
   id: string;
   text: string;
   sender: "me" | "peer";
+  /**
+   * The row's place in its history, which is sorted by it (WISP 400, requirement 10). Mine: when I sent it. Received:
+   * when it was first stored on this device (`arrivalKey`), never the sender's clock, so a conversation reads in the
+   * order things happened here. A row received before `sentAt` existed keeps the sender's time it was stored under.
+   */
   timestamp: number;
+  /** Received: when the sender says it sent it, by its own clock. Shown (`shownTime`), never sorted by. */
+  sentAt?: number;
   /** `hold`: through the sender's storage while the other side was away (WISP 4xx). */
   via: "pkarr" | "datalink" | "hold";
   nick?: string;
@@ -898,7 +905,7 @@ export const MESSAGE_DETAILS_MAX_SENDS = 6;
 
 /** What the details view is made of: the row, its record, and what the engine knows around it right now. */
 export interface MessageDetailsView {
-  message: Pick<StoredMessage, "id" | "wireId" | "linkId" | "sender" | "timestamp" | "via" | "delivery" | "deliveryError" | "resendUntil" | "member" | "nick"> & {
+  message: Pick<StoredMessage, "id" | "wireId" | "linkId" | "sender" | "timestamp" | "sentAt" | "via" | "delivery" | "deliveryError" | "resendUntil" | "member" | "nick"> & {
     kind: "text" | "file" | "voice" | "payment" | "event" | "note";
     /** UTF-8 bytes of the text. */
     textBytes: number;

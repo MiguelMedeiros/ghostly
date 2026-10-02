@@ -67,6 +67,7 @@ export function toChatMessage(message: StoredMessage, peerPubKeyZ32: string, myP
     text: message.text,
     sender: isJoin ? "system" : message.sender,
     timestamp: message.timestamp,
+    ...(message.sentAt !== undefined && { sentAt: message.sentAt }),
     nick: message.nick,
     file: message.file,
     paymentId: message.paymentId,

@@ -35,7 +35,7 @@ import { readPubkyProof } from '../proofs/storage';
 import { lookupPublicProfile, currentProfileProof, PROFILE_RETRY, PROFILE_TTL, type ProfileChoice } from '../profiles/public';
 import { BUTTON_ID, BUTTONS_CAPABILITY, EDIT_CAPABILITY, MAX_EDITS_PER_MESSAGE, STATUS_CARD_LIMITS, checkStatusCard, forwardedAgain, readForwarded, statusCardText, withRequestOptions, type StatusCard, type WireEdit } from "@ghostly/core";
 import { FORWARD_MESSAGES, FORWARD_TARGETS, copyForForward, forwardKind, type ForwardResult } from "./forwards";
-import { TEST_USDT_FAUCET_AMOUNT, receivedTimestamp, typingActivity, type TypingActivity, type TypingKind, WALLET_NETWORKS, walletNetworkOf, type GroupMention, type PaymentNetworks, type PaymentReview, type PaymentTarget, type WalletNetwork } from "@ghostly/core";
+import { TEST_USDT_FAUCET_AMOUNT, arrivalKey, claimedTime, heardTime, shownTime, typingActivity, type TypingActivity, type TypingKind, WALLET_NETWORKS, walletNetworkOf, type GroupMention, type PaymentNetworks, type PaymentReview, type PaymentTarget, type WalletNetwork } from "@ghostly/core";
 import { ModeChanged, networkLabel, WrongNetworkError } from "./paymentAdapters/modeGate";
 import { assertConfirmedReal, createTiming, WALLET_NAMES, createFailure, crossNetwork, paymentNetwork, paymentNetworksOf, walletInstances } from "./paymentAdapters/walletInstances";
 import { migrateWalletNetworks } from "./paymentAdapters/walletNetworks";
@@ -480,11 +480,13 @@ export class GhostlyNode implements EngineImplementation {
   private cueFeedback({ cue, key }: Cue, linkId?: string) {
     this.feedback("cue", cue + ":" + key, linkId, false, cue);
   }
-  /** The newest time stored in each chat while this engine runs: a message landing well behind it is a catch-up. */
+  /** The newest time written in each chat while this engine runs: a message written well before it is a catch-up. */
   private readonly newestAt = new Map<string, number>();
-  /** Only a new message at the end of its chat, or mine going out, says anything (engine/attention.ts). */
+  /** The last place given in each chat while this engine runs (`arrivalKey`). */
+  private readonly placedAt = new Map<string, number>();
+  /** Only a new message, or mine going out, says anything (engine/attention.ts): judged by when it was written. */
   private messageFeedback(type: "message" | "sent", message: StoredMessage, newest = this.newestAt.get(message.linkId)) {
-    const attention = messageAttention(type, message, { startedAt: this.feedbackStartedAt, newest, now: Date.now() });
+    const attention = messageAttention(type, { ...message, timestamp: shownTime(message) }, { startedAt: this.feedbackStartedAt, newest, now: Date.now() });
     if (attention) this.feedback(attention.type, message.linkId + ":" + message.id, message.linkId, attention.mention, attention.cue);
   }
   /**
@@ -1811,6 +1813,7 @@ export class GhostlyNode implements EngineImplementation {
   private groupHistoryGone(groupId: string): void {
     const linkId = `group:${groupId}`;
     this.newestAt.delete(linkId);
+    this.placedAt.delete(linkId);
     this.reactionNotes.delete(linkId);
     this.events.onMessages(linkId, []);
   }
@@ -2042,7 +2045,8 @@ export class GhostlyNode implements EngineImplementation {
     if (!live?.link) return { error: "You are offline" };
     if (!trimmed) return { error: null };
 
-    const timestamp = params.timestamp ?? Date.now();
+    // Picked here (the CLI, a bot): past what just came, so an answer written in the same millisecond goes below it.
+    const timestamp = params.timestamp ?? arrivalKey(Date.now(), this.placedAt.get(linkId));
     // Sent: whatever this side was typing is done (the contact clears it on the message too).
     if (live.stored.profile) live.link.setTyping(false);
     if (live.stored.profile) {
@@ -2251,7 +2255,7 @@ export class GhostlyNode implements EngineImplementation {
   private async applyPeerEditNow(linkId: string, message: StoredMessage, edit: WireEdit): Promise<void> {
     const updated = await db.patchMessage(linkId, message.id, current => {
       if (!takesPeerEdit(current, edit.m) || (current.edit?.seq ?? 0) >= edit.e) return null;
-      const next = withEdit(current, { seq: edit.e, at: receivedTimestamp(edit.ts), text: edit.m, preview: edit.pv, card: edit.sc });
+      const next = withEdit(current, { seq: edit.e, at: heardTime(edit.ts), text: edit.m, preview: edit.pv, card: edit.sc });
       return { text: next.text, edit: next.edit, preview: next.preview, card: next.card };
     });
     if (updated) await this.messagesChanged(linkId, [message.id]);
@@ -4461,7 +4465,7 @@ export class GhostlyNode implements EngineImplementation {
     if (stored.group) return this.startEdge(linkId);
     if (stored.profile) live.pairing = { status: "connecting" };
     const lastSeenTimestamp = messages.reduce(
-      (max, m) => (m.sender === "peer" && m.via === "pkarr" ? Math.max(max, m.timestamp) : max),
+      (max, m) => (m.sender === "peer" && m.via === "pkarr" ? Math.max(max, m.sentAt ?? m.timestamp) : max),
       0,
     );
 
@@ -5169,9 +5173,6 @@ export class GhostlyNode implements EngineImplementation {
 
   /** Stores a message; false when it was there already (or deleted here): nothing new came. */
   private async storeNewMessage(message: StoredMessage): Promise<boolean> {
-    // A peer says when it sent a message; a time far ahead of this clock would pin the chat to the top of the list
-    // and may be past what a date holds, so it is taken as now at the latest.
-    if (message.sender === "peer") message = { ...message, timestamp: receivedTimestamp(message.timestamp) };
     // A payment with a member lands in the group's history, from that member, under an id of the edge's own.
     const edge = this.links.get(message.linkId)?.stored;
     if (edge?.group && edge.groupPeer && !edge.groupEntry)
@@ -5179,6 +5180,17 @@ export class GhostlyNode implements EngineImplementation {
     // …and one with a member of a community, which has no edge: its link through the group names them.
     const pay = parsePayLink(message.linkId);
     if (pay?.member) message = { ...message, linkId: `group:${pay.groupId}`, id: `${message.linkId}:${message.id}`, ...(message.sender === "peer" ? { member: pay.member } : {}) };
+    // A received row takes its place here and now, in the order rows come (before anything is awaited): the time its
+    // sender says is kept beside it and shown, and orders nothing (WISP 400, requirement 10). A sender's clock ahead
+    // or behind then moves no message past another, and what I send next goes below what I just received.
+    const now = Date.now(), placed = this.placedAt.get(message.linkId) ?? 0;
+    if (message.sender === "peer") {
+      const sentAt = claimedTime(message.timestamp);
+      message = { ...message, timestamp: arrivalKey(now, placed), ...(sentAt !== undefined && { sentAt }) };
+      this.placedAt.set(message.linkId, message.timestamp);
+    }
+    // Mine count too, up to now: a message that comes in the millisecond I sent one goes below it.
+    else this.placedAt.set(message.linkId, Math.max(placed, Math.min(message.timestamp, now)));
     const live = this.links.get(message.linkId);
     // The peer republishes what it sent for a few minutes: what was deleted here stays deleted.
     if (live?.stored.deletedIds?.includes(message.id)) return false;
@@ -5192,7 +5204,7 @@ export class GhostlyNode implements EngineImplementation {
     }
     if (!(await db.addMessage(message))) return false;
     const newest = this.newestAt.get(message.linkId);
-    if (!message.event) this.newestAt.set(message.linkId, Math.max(newest ?? 0, message.timestamp));
+    if (!message.event) this.newestAt.set(message.linkId, Math.max(newest ?? 0, shownTime(message)));
     if (message.sender === "peer") this.messageFeedback("message", message, newest);
     if (live) live.lastMessageAt = Math.max(live.lastMessageAt, message.timestamp);
     // An edit that came before its message is shown now, and confirmed.
