@@ -162,5 +162,6 @@ export class RelaysAndDht implements PkarrTransport {
   subscribe(listener: Parameters<RelayTransport["subscribe"]>[0]): () => void { return this.relays.subscribe(listener); }
   /** A relay's answer only: a packet the DHT hands back when the relays are down may be older than one already read. */
   readAnsweredAt(pubKeyZ32: string): number | undefined { return this.relays.readAnsweredAt(pubKeyZ32); }
+  onServerTime(listener: Parameters<RelayTransport["onServerTime"]>[0]): () => void { return this.relays.onServerTime(listener); }
   configure({ relays }: { relays: string[]; readRelays: boolean }): void { if (!this.pinned) this.relays.setRelays(relays); }
 }

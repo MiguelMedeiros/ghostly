@@ -132,6 +132,11 @@ export interface LinkSessionEvents {
    * the first such read found.
    */
   onRtcSignal?(signal: string, sight?: SignalSight): void;
+  /**
+   * The peer's packet, dated `packetAt` by the peer's clock, was not there at this run's read of `readBefore` and is
+   * there at `readAt` (this clock): what its clock says against this one (`ClockWatch.peer`).
+   */
+  onPeerClock?(packetAt: number, readBefore: number, readAt: number): void;
   /** The peer's packet carries a new `_tr` value (a group link's transports, `parsePacketTransports`). */
   onPeerTransports?(value: string): void;
   onStatus?(status: LinkStatus): void;
@@ -634,6 +639,7 @@ export class LinkSession {
           this.events.onPeerTransports?.(batch.transports);
         }
         this.events.onPresence?.(this.presence);
+        if (read && readBefore && batch.packetTimestamp !== wasSeen) this.events.onPeerClock?.(batch.packetTimestamp, readBefore, Date.now());
 
         if (batch.callSignal !== null && batch.callSignal !== this.lastCallSignalIn) {
           this.lastCallSignalIn = batch.callSignal;

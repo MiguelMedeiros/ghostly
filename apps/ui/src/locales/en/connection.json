@@ -9,6 +9,12 @@
     "reason": "{{reason}}.",
     "retryAt": "Trying again at about {{time}}."
   },
+  "clockOff": {
+    "hint": "This device's clock seems to be off by about {{amount}}. Chats may be slow to connect.",
+    "infoAhead": "The time on this device is about {{amount}} ahead of what the relays and your contacts' devices say. Ghostly dates what it sends by this clock, and other apps refuse or delay what is dated too far from their own time: chats and groups can be slow to connect, calls may not ring, and an app that has not been updated may not connect at all. Set the date and time to automatic in this device's settings. This note goes away once the clock agrees again. It takes several sources that agree, never one contact alone.",
+    "infoBehind": "The time on this device is about {{amount}} behind what the relays and your contacts' devices say. Ghostly dates what it sends by this clock, and other apps refuse or delay what is dated too far from their own time: chats and groups can be slow to connect, calls may not ring, and an app that has not been updated may not connect at all. Set the date and time to automatic in this device's settings. This note goes away once the clock agrees again. It takes several sources that agree, never one contact alone.",
+    "title": "Device clock"
+  },
   "detail": {
     "noneLive": "None live",
     "notLiveFor": "Not live for",

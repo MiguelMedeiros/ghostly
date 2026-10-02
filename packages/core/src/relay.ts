@@ -1,7 +1,7 @@
 import type { Identity } from "./identity";
 import { createRelayPayload, newerPacket, openRelayPayload, parseRelayPayload, RELAY_PAYLOAD_MAX_BYTES, type GhostRecord, type SignedPacket } from "./pkarr";
 import { RelayBreaker, type DiscoveryStatus, type RelayBreakerOptions, type RelayFailure } from "./relayBreaker";
-import { DiscoveryBudgetError, isDiscoveryBudgetError, type DiscoveryChange, type PkarrRequestOptions, type PkarrTransport } from "./transport";
+import { DiscoveryBudgetError, isDiscoveryBudgetError, type DiscoveryChange, type PkarrRequestOptions, type PkarrTransport, type ServerTime } from "./transport";
 import { traceLink } from "./linkTrace";
 
 /** Who asks, for the budget: a 1:1 chat's link comes before a group's, and both before background looks. */
@@ -158,6 +158,7 @@ export class RelayTransport implements PkarrTransport {
   private relays: string[];
   private readonly timeoutMs: number;
   private readonly fetchFn: typeof fetch;
+  private readonly timeListeners = new Set<(time: ServerTime) => void>();
   private readonly lastTimestamp = new Map<string, bigint>();
   private readonly newest = new Map<string, SignedPacket>();
   /**
@@ -741,12 +742,36 @@ export class RelayTransport implements PkarrTransport {
    * time as well: a relay that sends its headers and then trickles, or never ends, is given up on like one that
    * never answered.
    */
+  /**
+   * The relay's own time, when its answer says it and this runtime may read it: Node and the Desktop can, a browser
+   * only when the relay exposes the header to other origins. Held against this device's clock (`ClockWatch`).
+   */
+  private serverTime(url: string, response: Response, sent: number): void {
+    if (!this.timeListeners.size) return;
+    let date = NaN;
+    try {
+      // An answer a cache kept says when it was made, not when it was served (`Age` says how long ago): not a clock.
+      if (Number(response.headers.get("age") ?? 0) > 0) return;
+      date = Date.parse(response.headers.get("date") ?? "");
+    } catch { /* an answer with no headers to read */ }
+    if (!Number.isFinite(date)) return;
+    const time: ServerTime = { source: new URL(url).origin, date, sent, received: Date.now() };
+    for (const listener of this.timeListeners) try { listener(time); } catch { /* a listener that fails must not fail a request */ }
+  }
+
+  onServerTime(listener: (time: ServerTime) => void): () => void {
+    this.timeListeners.add(listener);
+    return () => this.timeListeners.delete(listener);
+  }
+
   private async request(url: string, init: RequestInit, read?: (response: Response, signal: AbortSignal) => Promise<void>): Promise<Response> {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.timeoutMs);
     try {
       // Relays answer with `cache-control: max-age=300`; polling needs fresh data.
+      const sent = Date.now();
       const response = await this.fetchFn(url, { ...init, cache: "no-store", signal: controller.signal });
+      this.serverTime(url, response, sent);
       await read?.(response, controller.signal);
       return response;
     } finally {

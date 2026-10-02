@@ -51,6 +51,7 @@ export function withRequestOptions(transport: PkarrTransport, extra: PkarrReques
   if (transport.subscribe) wrapped.subscribe = (listener) => transport.subscribe!(listener);
   if (transport.networkChanged) wrapped.networkChanged = () => transport.networkChanged!();
   if (transport.readAnsweredAt) wrapped.readAnsweredAt = (pubKeyZ32) => transport.readAnsweredAt!(pubKeyZ32);
+  if (transport.onServerTime) wrapped.onServerTime = (listener) => transport.onServerTime!(listener);
   if (transport.configure) wrapped.configure = (options) => transport.configure!(options);
   return wrapped;
 }
@@ -79,6 +80,12 @@ export function budgetRetryMs(error: DiscoveryBudgetError, min: number, max: num
   return Math.min(max, Math.max(min, Number.isFinite(error.retryInMs) ? error.retryInMs : max));
 }
 
+/**
+ * A server's own time: the `Date` header (ms, to the second) of its answer to a request that went out at `sent` and
+ * came back at `received`, both by this device's clock. `source` names the server (a relay's origin), never a key.
+ */
+export interface ServerTime { source: string; date: number; sent: number; received: number }
+
 export interface PkarrTransport {
   publish(identity: Identity, records: GhostRecord[], options?: PkarrRequestOptions): Promise<void>;
   /**
@@ -105,6 +112,11 @@ export interface PkarrTransport {
    * where the transport cannot say; such a caller then takes no read for one.
    */
   readAnsweredAt?(pubKeyZ32: string): number | undefined;
+  /**
+   * Called with each time a server gave (`ServerTime`), where the transport can read one: what `ClockWatch` holds this
+   * device's clock against. Returns the unsubscribe.
+   */
+  onServerTime?(listener: (time: ServerTime) => void): () => void;
   /**
    * Where the DHT is reached directly (Desktop): the relays from Settings, and whether reads may use them too
    * (`readRelays`, "Also use Pkarr relays"). Writes go to them either way, so browser contacts see this peer's packets.

@@ -1489,6 +1489,11 @@ export interface EngineState {
      */
     directBlocked?: true;
     /**
+     * This device's clock seems to be off: this clock minus what the relays and several contacts say, in ms (positive
+     * when it is ahead). From several sources agreeing, never one contact (`ClockWatch` in packages/core). Absent otherwise.
+     */
+    clockOffMs?: number;
+    /**
      * False where a group's links have no transport at all here: no WebRTC and no native transport (WISP 9xx §
      * Transports), so no member of a group can be reached from it. Absent where they have one (the Linux Desktop runs
      * Iroh and HyperDHT).
