@@ -109,7 +109,10 @@
     "youSent": "Você enviou",
     "yourDid": "Seu DID do Ghostly",
     "yourIdentity": "Sua identidade",
-    "yourInvite": "Seu convite"
+    "yourInvite": "Seu convite",
+    "link": "Link",
+    "qrHint": "Escaneie com outro dispositivo. Quem vir este código pode entrar.",
+    "qrTitle": "Código QR do link"
   },
   "file": {
     "accept": "Aceitar",

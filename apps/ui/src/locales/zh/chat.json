@@ -109,7 +109,10 @@
     "youSent": "你发送的",
     "yourDid": "你的 Ghostly DID",
     "yourIdentity": "你的身份",
-    "yourInvite": "你的邀请"
+    "yourInvite": "你的邀请",
+    "link": "链接",
+    "qrHint": "用另一台设备扫描。任何看到它的人都可以加入。",
+    "qrTitle": "链接二维码"
   },
   "file": {
     "accept": "接受",

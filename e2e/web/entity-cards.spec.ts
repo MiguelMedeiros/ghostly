@@ -39,6 +39,23 @@ test("an invite sent in a chat is a card: the contact joins with a tap, the send
   await expect(card).toContainText("From");
   await expect(chat(bob).getByTestId("message-text").last()).toContainText(link);
   expect(await chatId(bob)).toBe(bobsChat);
+
+  // Copy hands the link over and Show QR shows it to scan: neither joins.
+  await card.getByTestId("entity-invite-copy").click();
+  await expect(card.getByTestId("entity-invite-copy")).toHaveText("Copied!");
+  expect(await bob.page.evaluate(() => navigator.clipboard.readText())).toBe(link);
+  await card.getByTestId("entity-invite-qr").click();
+  const qr = bob.page.getByTestId("link-qr");
+  await expect(qr.getByTestId("link-qr-code").locator("svg")).toBeVisible();
+  await expect(qr.getByTestId("link-qr-url")).toHaveValue(link);
+  await qr.getByTestId("link-qr-close").click();
+  await expect(qr).toHaveCount(0);
+  await expect(card).toHaveAttribute("data-outcome", "new");
+  expect(await chatId(bob)).toBe(bobsChat);
+  // The sender's own card has both too.
+  await expect(own.getByTestId("entity-invite-copy")).toBeVisible();
+  await expect(own.getByTestId("entity-invite-qr")).toBeVisible();
+
   await card.getByTestId("entity-invite-join").click();
 
   // The tap made a new chat, and it pairs with the chat the invite came from.

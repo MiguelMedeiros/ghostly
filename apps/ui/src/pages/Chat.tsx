@@ -16,6 +16,7 @@ import { PinIcon } from "../components/PinIcon";
 import { Menu, MenuItem, MenuSeparator } from "../components/Menu";
 import { useI18n } from "../contexts/I18nContext";
 import { InviteCard } from "../components/InviteCard";
+import { LinkQrDialog } from "../components/chat/LinkQrDialog";
 import { ChatConnection } from "../components/ChatConnection";
 import { PairingScene } from "../components/pairing/PairingScene";
 import { usePairingProgress } from "../hooks/usePairingProgress";
@@ -59,7 +60,7 @@ import {
 import { chatPath, inviteShareText } from "../lib/url";
 import { continueInNewChat } from "../lib/continueChat";
 import { engine } from "@ghostly/browser/platform/engine";
-import { fileMessageText, isPlayableVideoType, PAIRED_CALL_CANDIDATES, parseCallSignal, signalHasVideo, type VoiceMeta } from "@ghostly/core";
+import { fileMessageText, inviteQrSegments, isPlayableVideoType, PAIRED_CALL_CANDIDATES, parseCallSignal, signalHasVideo, type VoiceMeta } from "@ghostly/core";
 import { videoMetaOf } from "../lib/videoPoster";
 import type { ChatParams, CallEventType, ChatMessage } from "../lib/types";
 import type { WalletNetwork } from "../lib/platform";
@@ -359,6 +360,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
   const contactRefusesPay = paired && chatLive && !chatPeer?.capabilities?.payments;
   const paymentsOn = walletState?.wallets?.length ? walletCards(walletState).some((c) => cardOn(chatPeer ?? undefined, c.rail, c.network)) : !chatPeer?.paymentMethods || Object.values(chatPeer.paymentMethods).some(Boolean);
   const [showHold, setShowHold] = useState(false);
+  const [showInviteQr, setShowInviteQr] = useState(false);
   const [showIdentities, setShowIdentities] = useState(false);
   /** The card the identities panel opens on: a share tapped in the timeline. */
   const [identityCard, setIdentityCard] = useState<{ side: "mine" | "theirs"; id: string }>();
@@ -692,6 +694,13 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
                   {codeCopied ? t("common.copied") : t("sidebar.copyInvite")}
                 </MenuItem>
               )}
+              {/* The invite card and its QR go with the first message: until the chat is live this shows the QR again. */}
+              {inviteCode && !pairedReady && (
+                <MenuItem testId="chat-invite-qr" onClick={() => { setShowInviteQr(true); closeMenu(); }}
+                  icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" /><rect x="3" y="14" width="7" height="7" rx="1" /><path d="M14 14h3v3h-3zM21 14v.01M21 21v.01M17 21h.01M21 17.5v.01" /></svg>}>
+                  {t("invite.qrTitle")}
+                </MenuItem>
+              )}
               {paired && platform?.getPeer(params.peerPubKeyB64) && (
                 <MenuItem testId="chat-hold-open" onClick={() => { setShowHold(true); closeMenu(); }}
                   icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 8v13H3V8" /><path d="M1 3h22v5H1z" /><path d="M10 12h4" /></svg>}>
@@ -936,6 +945,9 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
 
       {showServices && params && (
         <ChatServicesDialog peerPubKey={params.peerPubKeyB64} name={shownName} onClose={() => setShowServices(false)} />
+      )}
+      {showInviteQr && inviteCode && !pairedReady && (
+        <LinkQrDialog title={t("invite.title")} url={inviteShareText(inviteCode)} qr={inviteQrSegments(inviteCode)} onClose={() => setShowInviteQr(false)} />
       )}
       {showHold && chatPeer && params && platform && (
         <ChatHoldDialog peer={chatPeer} name={shownName} onClose={() => setShowHold(false)}

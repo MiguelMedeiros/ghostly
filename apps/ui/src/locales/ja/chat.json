@@ -109,7 +109,10 @@
     "youSent": "あなたが送信",
     "yourDid": "あなたの Ghostly DID",
     "yourIdentity": "あなたの ID",
-    "yourInvite": "あなたの招待"
+    "yourInvite": "あなたの招待",
+    "link": "リンク",
+    "qrHint": "別のデバイスでスキャンしてください。これを見た人は誰でも参加できます。",
+    "qrTitle": "リンクの QR コード"
   },
   "file": {
     "accept": "受け取る",

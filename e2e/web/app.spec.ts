@@ -66,7 +66,7 @@ test("a second tab stays out of the way: one peer per browser", { tag: ["@featur
   await expect(second.getByTitle("New Chat")).toHaveCount(0);
 });
 
-test("creating a chat shows an invite code, the options menu copies it", { tag: ["@feature:invite.create"] }, async ({ peer }) => {
+test("creating a chat shows an invite code, the options menu copies it and shows its QR", { tag: ["@feature:invite.create"] }, async ({ peer }) => {
   const { page } = await peer("alice");
   const invite = await createChat(page);
   // A new chat's invite is one ghostly1 code (WISP 801), copied as its link on ghostly.tools.
@@ -83,6 +83,15 @@ test("creating a chat shows an invite code, the options menu copies it", { tag: 
   await page.getByTestId("chat-options").click();
   await page.getByText("Copy invite code").click();
   expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(invite);
+
+  // And shows its QR again, with the same link under it.
+  await page.getByTestId("chat-options").click();
+  await page.getByTestId("chat-invite-qr").click();
+  const qr = page.getByTestId("link-qr");
+  await expect(qr.getByTestId("link-qr-code").locator("svg")).toBeVisible();
+  await expect(qr.getByTestId("link-qr-url")).toHaveValue(invite);
+  await page.keyboard.press("Escape");
+  await expect(qr).toHaveCount(0);
 });
 
 test("a bad invite code is refused", { tag: ["@feature:invite.invalid"] }, async ({ peer }) => {

@@ -109,7 +109,10 @@
     "youSent": "You sent this",
     "yourDid": "Your Ghostly DID",
     "yourIdentity": "Your identity",
-    "yourInvite": "Your invite"
+    "yourInvite": "Your invite",
+    "link": "Link",
+    "qrHint": "Scan it with another device. Anyone who sees it can join.",
+    "qrTitle": "Link QR code"
   },
   "file": {
     "accept": "Accept",
