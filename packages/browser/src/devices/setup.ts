@@ -15,8 +15,8 @@ import { TurnKeeper, type TurnKeeperOptions } from "./turn";
 
 /** The device record names a device set this device cannot act in: it lacks `D`, its slot, or the key the slot names. */
 export class DeviceSetError extends Error {
-  constructor(what: string, options?: ErrorOptions) {
-    super(`This device cannot use its device set: ${what}`, options);
+  constructor(what: string) {
+    super(`This device cannot use its device set: ${what}`);
     this.name = "DeviceSetError";
   }
 }
@@ -71,7 +71,7 @@ export async function deviceIdentity(profile: string, sources: { record?: Device
   let key: DeviceSigningKey | null;
   // A stored key that cannot be read (no key object, a seed that does not match, a database that fails) is no key.
   try { key = await (sources.loadKey ?? loadDeviceSigningKey)(profile); }
-  catch (error) { throw new DeviceSetError(`its signing key cannot be read (${error instanceof Error ? error.message : String(error)})`, { cause: error }); }
+  catch (error) { throw Object.assign(new DeviceSetError(`its signing key cannot be read (${error instanceof Error ? error.message : String(error)})`), { cause: error }); }
   if (!key) throw new DeviceSetError("this device has no signing key");
   if (toBase64Url(key.publicKey) !== own.key) throw new DeviceSetError("the signing key stored here is not the one the device state names");
   return { record, d, ownSlot, key };

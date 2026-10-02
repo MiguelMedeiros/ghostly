@@ -230,7 +230,7 @@ export async function createDeviceSigningKey(profile: string, options: { forceSe
   // The seed, or what another page stored first, or a key this page could not take back: whichever it is, a key that
   // does not sign is refused here, never handed out to be named in a device record.
   let signer: DeviceSigningKey;
-  try { signer = signerOf(kept); } catch (error) { throw new Error(`The device signing key stored here cannot be used: ${why(error)}`, { cause: error }); }
+  try { signer = signerOf(kept); } catch (error) { throw Object.assign(new Error(`The device signing key stored here cannot be used: ${why(error)}`), { cause: error }); }
   if (!(await signsCorrectly(signer).catch(() => false))) throw new Error("The device signing key stored here does not sign");
   return signer;
 }
