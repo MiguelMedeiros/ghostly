@@ -36,12 +36,15 @@
       "queued": "Ancora nessuna conferma. Si reinvia da solo.",
       "sending": "In arrivo.",
       "sent": "Inviato. Ancora nessuna conferma.",
-      "waiting": "Parte da solo quando il tuo contatto è online."
+      "waiting": "Parte da solo quando il tuo contatto è online.",
+      "waitingLiveContact": "I file richiedono una connessione diretta. La chat del tuo contatto è in Solo DHT: parte quando la consente di nuovo.",
+      "waitingLiveYou": "I file richiedono una connessione diretta. Questa chat è in Solo DHT: cambialo dall'icona di connessione."
     },
     "retry": "Non inviato. Invia di nuovo",
     "sending": "Invio in corso",
     "sent": "Inviato",
-    "waiting": "In attesa che il tuo contatto sia online"
+    "waiting": "In attesa che il tuo contatto sia online",
+    "waitingLive": "In attesa di una connessione diretta"
   },
   "disabledPlaceholder": "Messaggio…",
   "edit": {

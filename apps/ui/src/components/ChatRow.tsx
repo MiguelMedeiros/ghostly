@@ -13,7 +13,7 @@ import { BellIcon, MuteMenu } from "./ChatMute";
 import { useI18n } from "../contexts/I18nContext";
 import { filePreview, formatListTime, previewText } from "../lib/chatList";
 import { cardLine, showsCard } from "../lib/statusCards";
-import { deliveryShape, useDeliveryWords } from "../lib/delivery";
+import { deliveryShape, useDeliveryWords, useDhtOnly, waitsForLive, type DhtOnlyBy } from "../lib/delivery";
 import { groupChat, mentionsNotify, muteEndText, useChatMute } from "../lib/chatMute";
 import { authorName, groupReadAt, groupStatusText, groupUnreadAt } from "../lib/groups";
 import { reactionNoteText } from "../lib/reactions";
@@ -38,12 +38,12 @@ export const REFUSAL_SHOWN_MS = 8000;
 const ROW = { compact: "min-h-[66px] py-2.5", comfortable: "min-h-[80px] py-3" } as const;
 
 /** Where my last message is, with the chat's marks: a clock, one tick, two ticks or the red circle. */
-export function DeliveryMark({ delivery }: { delivery?: ChatMessage["delivery"] }) {
+export function DeliveryMark({ delivery, live }: { delivery?: ChatMessage["delivery"]; live?: DhtOnlyBy }) {
   const words = useDeliveryWords();
   const shape = deliveryShape(delivery);
   const state = delivery ?? "sent";
   return (
-    <span role="img" data-testid="chat-row-delivery" data-delivery={state} aria-label={words.label(state)}
+    <span role="img" data-testid="chat-row-delivery" data-delivery={state} aria-label={words.label(state, live)}
       className={`inline-flex shrink-0 align-middle -mt-0.5 ${shape === "sent" || shape === "delivered" ? "me-0.5" : "me-1"} ${shape === "failed" ? "text-danger" : shape === "delivered" ? "text-link" : "text-text-muted"}`}>
       <DeliveryIcon shape={shape} cutout="var(--color-sidebar-bg)" />
     </span>
@@ -221,6 +221,8 @@ export function ChatRow(p: ChatRowProps) {
   const pinLabel = p.pinned ? t("chat.menu.unpin") : t("chat.menu.pin");
   const typing = usePeerTypingActivity(p.peerPubKey);
   const payment = usePaymentLine(p.lastMessage?.paymentId, t);
+  // A file of mine waiting in a DHT-only chat waits for a live connection, as its bubble says.
+  const live = waitsForLive(p.lastMessage?.sender === "me" ? p.lastMessage : undefined, useDhtOnly(p.peerPubKey));
   const previewId = useId();
   useChosenProfile(p.peerPubKey);
   return (
@@ -271,7 +273,7 @@ export function ChatRow(p: ChatRowProps) {
           ? <span data-testid="chat-row-note" className="text-text-muted">{p.note}</span>
           : p.lastMessage
           ? <span className={p.unread > 0 ? "text-text-secondary font-medium" : "text-text-muted"}>
-              {p.lastMessage.sender === "me" && <DeliveryMark delivery={p.lastMessage.delivery} />}
+              {p.lastMessage.sender === "me" && <DeliveryMark delivery={p.lastMessage.delivery} live={live} />}
               {p.lastMessage.systemEvent?.type === "join" ? joinPreview(p, p.lastMessage.systemEvent.pubKey, t)
                 : p.lastMessage.callEvent ? callEventText(t, p.lastMessage.callEvent.type, p.lastMessage.callEvent.hasVideo) ?? p.lastMessage.text
                 : showsCard(p.lastMessage.card) ? cardLine(p.lastMessage.card)
