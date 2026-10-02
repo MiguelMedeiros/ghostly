@@ -1,0 +1,25 @@
+{
+  "standby": {
+    "hint": {
+      "moving": "Ouvrez Ghostly sur l'appareil que vous utilisez maintenant pour terminer.",
+      "releasing": "Rien ne change avant la dernière étape.",
+      "removed": "Ajoutez-le à nouveau depuis l'appareil que vous utilisez maintenant.",
+      "standby": "Cet appareil est en veille pour ce profil.",
+      "superseded": "Un autre appareil a pris le relais sans celui-ci. Cet appareil s'est arrêté.",
+      "taking": "En attente du réseau.",
+      "unreadable": "Redémarrez l'application ou l'appareil, puis réessayez."
+    },
+    "info": "Un seul appareil envoie, reçoit et paie à la fois, pour que vos messages et votre argent ne soient jamais à deux endroits.",
+    "title": {
+      "moving": "Presque terminé",
+      "releasing": "Déplacement vers un autre appareil",
+      "removed": "Cet appareil a été retiré",
+      "standby": "Actif sur {{device}}",
+      "standbyUnnamed": "Actif sur un autre appareil",
+      "superseded": "Cet appareil a été remplacé",
+      "taking": "Finalisation",
+      "unreadable": "Ghostly n'a pas pu vérifier quel appareil est actif."
+    },
+    "unreadableInfo": "Ghostly lit lequel de vos appareils est actif avant de démarrer quoi que ce soit. Cela n'a pas fonctionné ici : rien n'a été démarré, rien n'a été envoyé et rien n'a été modifié."
+  }
+}

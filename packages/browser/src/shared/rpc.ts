@@ -403,4 +403,10 @@ export type EngineEvent =
    * The peer did not start: the profile's database did not open (`shared/idb.ts`). Sent to every client in place of
    * its first state; no state follows, and every call fails with the same words.
    */
-  | { kind: "start-failed"; failure: import("./idb").ProfileOpenFailure };
+  | { kind: "start-failed"; failure: import("./idb").ProfileOpenFailure }
+  /**
+   * This device is not the active one for the profile (WISP 06 § The gate): no engine runs, only device-link-only
+   * mode. Sent to every client in place of its first state, and again when what the standby screen shows changes;
+   * every engine call fails.
+   */
+  | { kind: "device-gate"; gate: import("../devices/gate").DeviceGateView };

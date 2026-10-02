@@ -3,6 +3,7 @@ import type { MessageChanges } from "../shared/messageChanges";
 import type { EngineEvent, RpcRequest, RpcResponse } from "../shared/rpc";
 import type { StoredMessage } from "../shared/types";
 import { profileOpenFailure } from "../shared/idb";
+import type { PeerServer } from "../devices/linkOnly";
 import { GhostlyNode, type NodeOptions } from "./node";
 
 /**
@@ -14,7 +15,9 @@ export interface EngineClientSink {
   post(message: EngineEvent | RpcResponse): void;
 }
 
-export class EngineServer {
+export class EngineServer implements PeerServer {
+  /** The whole engine: never made on a device that is not the active one (`devices/peer.ts` decides, WISP 06 § The gate). */
+  readonly gated = false;
   readonly node: GhostlyNode;
   readonly ready: Promise<void>;
   private readonly clients = new Set<EngineClientSink>();
@@ -77,6 +80,10 @@ export class EngineServer {
       // The client went away mid-snapshot (dropped, as broadcast does).
       this.clients.delete(client);
     });
+  }
+
+  stop(): Promise<void> {
+    return this.node.shutdown();
   }
 
   detach(client: EngineClientSink): void {

@@ -158,6 +158,8 @@ export async function startRuntime(paths: ProfilePaths, options: RuntimeOptions 
   const server = new EngineServer({
     ...(transport ? { transport } : {}),
     irohWeb: true,
+    // A CLI profile is one device's (WISP 06): no device state is kept for it.
+    singleDevice: true,
     nativeTransports: { "hyperdht/1": (seedB64: string) => createHyperEndpoint(fromBase64Url(seedB64), network) },
     // No wallet starts by itself: a bot has the wallets it made (WISP 11xx § Wallet SDKs on Node).
     automaticWallets: false,

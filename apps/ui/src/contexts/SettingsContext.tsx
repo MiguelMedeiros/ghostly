@@ -1,4 +1,5 @@
 import { getStorageProfile } from "../lib/storage";
+import { knownDeviceGate } from "@ghostly/browser/devices/gate";
 import {
   createContext,
   useContext,
@@ -47,6 +48,9 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
   const [settings, setSettings] = useState<AppSettings>(() => loadSettings());
 
   useEffect(() => {
+    // Not the active device for this profile (WISP 06 § The gate): its settings are part of a copy that stays as it
+    // is. They are read (the language, the theme, the lock) and never written back.
+    if (knownDeviceGate()?.full === false) return;
     saveSettings(settings);
   }, [settings]);
 

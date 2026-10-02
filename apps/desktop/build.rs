@@ -6,6 +6,8 @@ const COMMANDS: &[&str] = &[
     "bitcoind_rpc",
     "create_keypair",
     "decrypt_text",
+    "device_state_read",
+    "device_state_write",
     "diagnostic_log",
     "encrypt_text",
     "file_bytes_append",

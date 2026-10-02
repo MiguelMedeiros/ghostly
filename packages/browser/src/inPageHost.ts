@@ -1,4 +1,6 @@
-import { EngineServer, type EngineClientSink } from "./engine/server";
+import type { EngineServer, EngineClientSink } from "./engine/server";
+import { createPeerServer } from "./devices/peer";
+import type { PeerServer } from "./devices/linkOnly";
 import type { NodeOptions } from "./engine/node";
 import type { BrowserHost } from "./host";
 
@@ -10,12 +12,14 @@ import type { BrowserHost } from "./host";
 export interface InPageHostOptions
   extends Pick<BrowserHost, "version" | "notice" | "updates" | "features" | "requestLocalAccess" | "forgetLocalAccess" | "openService" | "oidc" | "atproto" | "openPaymentLink" | "fullscreenWindow" | "shareText" | "readClipboardText" | "readClipboardFiles" | "openPubkyPassport" | "pubkyCookieSession" | "callMedia"> {
   node?: NodeOptions;
-  /** Called once the peer exists, e.g. to let something outside the page reach it. */
+  /** Called once the peer exists, e.g. to let something outside the page reach it. Never on a standby: no engine runs there. */
   onServer?: (server: EngineServer) => void;
 }
 
 export function createInPageHost(options: InPageHostOptions): BrowserHost & { announceDeparture(): void } {
-  let server: EngineServer | null = null;
+  // The device state is read first (WISP 06 § The gate): the engine, or device-link-only mode on a standby.
+  let server: Promise<PeerServer> | null = null;
+  let running: PeerServer | null = null;
   return {
     version: options.version,
     notice: options.notice,
@@ -36,11 +40,12 @@ export function createInPageHost(options: InPageHostOptions): BrowserHost & { an
     callMedia: options.callMedia,
 
     async connect(onMessage) {
-      if (!server) {
-        server = new EngineServer(options.node);
-        options.onServer?.(server);
-      }
-      const active = server;
+      server ??= createPeerServer(options.node).then((peer) => {
+        running = peer;
+        if (!peer.gated) options.onServer?.(peer as EngineServer);
+        return peer;
+      });
+      const active = await server;
       const client: EngineClientSink = { post: (message) => queueMicrotask(() => onMessage(message)) };
       active.attach(client);
       return { send: (request) => void active.handle(client, request) };
@@ -48,7 +53,7 @@ export function createInPageHost(options: InPageHostOptions): BrowserHost & { an
 
     /** Say goodbye to every peer when the page closes, if there is time. */
     announceDeparture() {
-      void server?.node.shutdown();
+      void running?.stop().catch(() => {});
     },
   };
 }

@@ -1,0 +1,25 @@
+{
+  "standby": {
+    "hint": {
+      "moving": "Abre Ghostly en el dispositivo que usas ahora para terminar.",
+      "releasing": "Nada cambia hasta el último paso.",
+      "removed": "Añádelo de nuevo desde el dispositivo que usas ahora.",
+      "standby": "Este dispositivo está en espera para este perfil.",
+      "superseded": "Otro dispositivo tomó el relevo sin este. Este dispositivo se ha detenido.",
+      "taking": "Esperando la red.",
+      "unreadable": "Reinicia la app o el dispositivo y vuelve a intentarlo."
+    },
+    "info": "Solo un dispositivo envía, recibe y paga a la vez, para que tus mensajes y tu dinero nunca estén en dos lugares.",
+    "title": {
+      "moving": "Ya casi",
+      "releasing": "Moviendo a otro dispositivo",
+      "removed": "Este dispositivo fue eliminado",
+      "standby": "Activo en {{device}}",
+      "standbyUnnamed": "Activo en otro dispositivo",
+      "superseded": "Este dispositivo fue reemplazado",
+      "taking": "Terminando",
+      "unreadable": "Ghostly no pudo comprobar qué dispositivo está activo."
+    },
+    "unreadableInfo": "Ghostly lee cuál de tus dispositivos está activo antes de iniciar nada. Eso no funcionó aquí, así que no se inició nada, no se envió nada y no se cambió nada."
+  }
+}
