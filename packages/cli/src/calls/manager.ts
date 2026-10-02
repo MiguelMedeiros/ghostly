@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { parseCallSignal, signalHasVideo, CALL_SIGNAL_MAX_AGE_MS, type CallSignal } from "@ghostly/core";
+import { answersOffer, callSignalHeardAt, parseCallSignal, signalHasVideo, CALL_SIGNAL_MAX_AGE_MS, type CallSignal } from "@ghostly/core";
 import type { EngineState, LinkView } from "@ghostly/browser/shared/types";
 import { findChat } from "../apiKit";
 import { CliError } from "../errors";
@@ -130,7 +130,7 @@ export class CallManager {
     if (signal.t === "o" && !call) {
       this.lastSignal.set(chat, signal.ts);
       this.incoming(chat, signal);
-    } else if (signal.t === "a" && call?.direction === "out" && call.offering && signal.ts > call.offerTs) {
+    } else if (signal.t === "a" && call?.direction === "out" && call.offering && answersOffer(signal, call.offerTs)) {
       this.lastSignal.set(chat, signal.ts);
       this.accepted(call, signal);
     } else if (signal.t === "o" && call?.direction === "out" && call.state === "ringing") {
@@ -178,7 +178,7 @@ export class CallManager {
     call.offer = offer;
     call.video = signalHasVideo(offer);
     // Unanswered, an offer goes stale: the contact's app has given up or will, and answering it would be refused.
-    this.arm(call, Math.max(1000, offer.ts + CALL_SIGNAL_MAX_AGE_MS - this.now), "missed", false);
+    this.arm(call, Math.max(1000, callSignalHeardAt(offer) + CALL_SIGNAL_MAX_AGE_MS - this.now), "missed", false);
     this.host.emit("call.incoming", `call.incoming:${call.id}`, { call: call.id, chat, name: link ? nameOf(link) : null, video: call.video, auto: this.autoFor(chat) });
     if (this.host.answers !== false && this.autoFor(chat)) {
       void this.answer(call.id, {}).catch((error) => process.stderr.write(`ghostly: auto-answer failed: ${error instanceof Error ? error.message : String(error)}\n`));
@@ -259,7 +259,7 @@ export class CallManager {
     try {
       const stack = await this.stack();
       if (!(await this.connect(call, (media) => CallMedia.answer(stack, offer, media)))) return;
-      await this.send(call.chat, { t: "a", ts: this.now, ...call.media!.local, v: 0 });
+      await this.send(call.chat, { t: "a", ts: this.now, o: offer.ts, ...call.media!.local, v: 0 });
     } catch (error) {
       process.stderr.write(`ghostly: call ${call.id}: answering again failed (${error instanceof Error ? error.message : String(error)})\n`);
       void this.end(call, "failed", true);
@@ -304,7 +304,7 @@ export class CallManager {
     try {
       await this.attach(call, (media) => CallMedia.answer(stack, call.offer!, media));
       if (call.ended) throw new CliError("unavailable", "The call ended before it was answered");
-      await this.send(call.chat, { t: "a", ts: this.now, ...call.media!.local, v: 0 });
+      await this.send(call.chat, { t: "a", ts: this.now, o: call.offer!.ts, ...call.media!.local, v: 0 });
     } catch (error) {
       await this.end(call, "failed", true, false);
       throw error;

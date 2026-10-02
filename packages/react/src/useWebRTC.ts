@@ -4,6 +4,8 @@ import {
   extractParamsFromSdp,
   buildSdpFromSignal,
   parseCallSignal,
+  answersOffer,
+  callSignalHeardAt,
   sdpHasCandidates,
   signalHasVideo,
   traceLink,
@@ -885,7 +887,7 @@ export function useWebRTC({
       if (!pc) return false;
 
       const params = extractParamsFromSdp(pc.localDescription!.sdp, { maxCandidates: maxCandidatesRef.current });
-      const signal: CallSignal = { t: "a", ts: Date.now(), ...params, v: withVideo ? 1 : 0, ...(mediaRef.current.restartsIce ? { x: 1 as const } : {}) };
+      const signal: CallSignal = { t: "a", ts: Date.now(), o: offer.ts, ...params, v: withVideo ? 1 : 0, ...(mediaRef.current.restartsIce ? { x: 1 as const } : {}) };
       if (withVideo) signal.k = "c";
       peerRestartsRef.current = offer.x === 1;
       peerFingerprintRef.current = offer.f ?? "";
@@ -1224,11 +1226,11 @@ export function useWebRTC({
       const offerHasVideo = signalHasVideo(signal);
       callHadVideoRef.current = offerHasVideo;
       callConnectedEventFiredRef.current = false;
-      addCallEventMessage?.("call_received", offerHasVideo, undefined, signal.ts);
+      addCallEventMessage?.("call_received", offerHasVideo, undefined, callSignalHeardAt(signal));
       updateCallState("incoming");
       setFastPoll(true);
     } else if (signal.t === "a" && (callStateRef.current === "offering" || callStateRef.current === "connecting")) {
-      if (signal.ts > myOfferTimestampRef.current) {
+      if (answersOffer(signal, myOfferTimestampRef.current)) {
         lastProcessedSignalRef.current = signal.ts;
         if (callStateRef.current === "offering") {
           handleAnswer(signal);
@@ -1241,8 +1243,8 @@ export function useWebRTC({
       lastProcessedSignalRef.current = signal.ts;
       if (callStateRef.current !== "idle") traceCallEnd("contact-hang-up", { state: callStateRef.current, ...(signal.r && { r: signal.r }) });
       // The caller gave up (or its ring ran out) before we answered: a missed call, as when our own ring runs out.
-      if (callStateRef.current === "incoming") addCallEventMessage?.("call_missed", callHadVideoRef.current, undefined, pendingOfferRef.current?.ts);
-      else if (callStateRef.current === "offering" && signal.r !== "u" && myOfferTimestampRef.current && signal.ts > myOfferTimestampRef.current) {
+      if (callStateRef.current === "incoming") addCallEventMessage?.("call_missed", callHadVideoRef.current, undefined, pendingOfferRef.current ? callSignalHeardAt(pendingOfferRef.current) : undefined);
+      else if (callStateRef.current === "offering" && signal.r !== "u" && myOfferTimestampRef.current && callSignalHeardAt(signal) > myOfferTimestampRef.current) {
         // Our call still rang there: the contact declined it (a side that rings sends nothing else).
         addCallEventMessage?.("call_rejected", callHadVideoRef.current);
         hangUp(false, false);
@@ -1273,7 +1275,7 @@ export function useWebRTC({
         hangUpRef.current(true, false);
         setNoAnswer(true);
       } else {
-        addCallEventMessageRef.current?.("call_missed", callHadVideoRef.current, undefined, pendingOfferRef.current?.ts);
+        addCallEventMessageRef.current?.("call_missed", callHadVideoRef.current, undefined, pendingOfferRef.current ? callSignalHeardAt(pendingOfferRef.current) : undefined);
         hangUpRef.current(false, false);
       }
     }, RING_MS);

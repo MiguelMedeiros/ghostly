@@ -1,4 +1,4 @@
-import { CALL_SIGNAL_MAX_AGE_MS, parseCallSignal } from "./callSignal";
+import { CALL_SIGNAL_MAX_AGE_MS, heardCallSignal, parseCallSignal } from "./callSignal";
 
 /**
  * Call signaling on a paired session (`calls/1`, WISP 601): the same compact signals a compatibility chat
@@ -17,11 +17,15 @@ export const MAX_PAIRED_CALL_SIGNAL = 8192;
 
 export interface PairedCallFrame { t: typeof PAIRED_CALL_FRAME; s: string }
 
-/** The signal a `paired-call` frame carries, or null when it is not a fresh, well-formed one. */
+/**
+ * The signal a `paired-call` frame carries, or null when it is not a well-formed one. It came on a live session, now:
+ * that is when it was heard (`heardCallSignal`), whatever time its sender's clock gave it.
+ */
 export function parsePairedCallFrame(frame: Record<string, unknown>, now = Date.now()): string | null {
   const signal = frame.s;
   if (typeof signal !== "string" || signal.length > MAX_PAIRED_CALL_SIGNAL) return null;
-  return parseCallSignal(signal, now) ? signal : null;
+  const heard = heardCallSignal(signal, now);
+  return parseCallSignal(heard, now) ? heard : null;
 }
 
 function signalKind(signal: string): unknown {

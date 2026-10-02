@@ -52,6 +52,7 @@ import { TYPING_FRAME, TypingReceiver, TypingSender, type TypingActivity } from 
 import { EDIT_FRAME, EDIT_RATE_WINDOW_MS, EDIT_RECEIVE_LIMIT, EDITED_FRAME, RateWindow, dhtEditId, editFrame, editedFrame, parseEditFrame, parseEditedFrame, validEditMessage, validEditNumber, type WireEdit } from "./pairedEdits";
 import { FILE_FRAMES } from "./chatFiles";
 import { PAIRED_CALL_FRAME, PairedCalls, parsePairedCallFrame } from "./pairedCalls";
+import { heardCallSignal } from "./callSignal";
 import { traceLink } from "./linkTrace";
 import { isDiscoveryBudgetError, type PkarrTransport } from "./transport";
 import { GROUP_VERSION_LARGE } from "./groupCommits";
@@ -802,7 +803,7 @@ export class GhostLink {
           this.publishRecovered();
         },
         onPeerAck: (ack) => events.onPeerAck?.(ack),
-        onCallSignal: (signal) => { if (!options.params.profile) events.onCallSignal?.(signal); },
+        onCallSignal: (signal) => { if (!options.params.profile) events.onCallSignal?.(heardCallSignal(signal)); },
         onRtcSignal: (signal, sight) => {
           traceLink(this.myPubKeyZ32, "rtc-signal-in", { held: this.streamBlocked });
           // Going away: an answer now would pair the contact with a connection about to die, and it would wait on it.
@@ -3304,7 +3305,7 @@ export class GhostLink {
         this.options.events?.onMessage?.({ text: frame.m, timestamp: frame.ts, via: "datalink" });
         break;
       case "call":
-        this.options.events?.onCallSignal?.(frame.s);
+        this.options.events?.onCallSignal?.(heardCallSignal(frame.s, Date.now()));
         break;
       case "req":
         this.httpHost?.handleRequest(frame);

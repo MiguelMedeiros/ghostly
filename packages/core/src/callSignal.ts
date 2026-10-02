@@ -9,7 +9,16 @@ export interface CallSignal {
    * call's own connection after its path was lost (WISP 601, "Reconnecting"). An app that does not know `r` drops it.
    */
   t: "o" | "a" | "h" | "v" | "r";
+  /** The sender's clock when it made the signal: its order among that sender's signals. */
   ts: number;
+  /** When this device heard a contact's signal, by its own clock. Never sent: the engine sets it (`heardCallSignal`). */
+  at?: number;
+  /**
+   * On an answer: the `ts` of the offer it answers, so the caller takes it for that offer and no other, whatever the two
+   * clocks say. Apps up to 1.0.1 send none and ignore it; they take an answer only when its `ts` is later than their
+   * offer's, which a callee whose clock is behind by longer than it took to answer never met.
+   */
+  o?: number;
   u?: string;
   p?: string;
   f?: string;
@@ -346,13 +355,15 @@ export function parseCallSignal(json: string, now = Date.now()): CallSignal | nu
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
   if (raw.t !== "o" && raw.t !== "a" && raw.t !== "h" && raw.t !== "v" && raw.t !== "r") return null;
   if (typeof raw.ts !== "number" || !Number.isFinite(raw.ts)) return null;
-  if (Math.abs(now - raw.ts) > CALL_SIGNAL_MAX_AGE_MS) return null;
-  if (raw.t === "h") return raw.r === "u" ? { t: "h", ts: raw.ts, r: "u" } : { t: "h", ts: raw.ts };
+  // How old it is, on this clock when the engine heard it come (`heardCallSignal`), by its own time otherwise.
+  const heard = typeof raw.at === "number" && Number.isFinite(raw.at) ? { at: raw.at } : {};
+  if (Math.abs(now - (heard.at ?? raw.ts)) > CALL_SIGNAL_MAX_AGE_MS) return null;
+  if (raw.t === "h") return raw.r === "u" ? { t: "h", ts: raw.ts, r: "u", ...heard } : { t: "h", ts: raw.ts, ...heard };
 
   const picture = parsePicture(raw);
   if (picture === null) return null;
   // A media state carries no ICE: it only says whether a picture is on, and which.
-  if (raw.t === "v") return { t: "v", ts: raw.ts, ...picture };
+  if (raw.t === "v") return { t: "v", ts: raw.ts, ...picture, ...heard };
 
   if (typeof raw.u !== "string" || !ICE_UFRAG.test(raw.u)) return null;
   if (typeof raw.p !== "string" || !ICE_PWD.test(raw.p)) return null;
@@ -399,7 +410,43 @@ export function parseCallSignal(json: string, now = Date.now()): CallSignal | nu
     restart.re = raw.re;
   }
 
-  return { t: raw.t, ts: raw.ts, u: raw.u, p: raw.p, f: raw.f, s: raw.s, m: media, c: candidates, ss: ssrcs, ...picture, ...payloadTypes, ...restart };
+  // `o` names the offer an answer is for; on anything else it says nothing.
+  if (raw.o !== undefined && (typeof raw.o !== "number" || !Number.isFinite(raw.o))) return null;
+  const answers = raw.t === "a" && raw.o !== undefined ? { o: raw.o } : {};
+
+  return { t: raw.t, ts: raw.ts, u: raw.u, p: raw.p, f: raw.f, s: raw.s, m: media, c: candidates, ss: ssrcs, ...picture, ...payloadTypes, ...restart, ...answers, ...heard };
+}
+
+/**
+ * A contact's signal as the engine hands it on: `at` says when this device heard it, by its own clock (absent: nothing
+ * says, as for one found in a record). Whatever `at` the signal came with is dropped: it is never the sender's to say.
+ *
+ * A signal's `ts` is its sender's clock. It orders that sender's signals, and settles two calls made at once the same
+ * way on both sides. It cannot say how long ago the signal was made, nor whether it came before or after something this
+ * device did: two devices' clocks are often minutes apart. Held against this clock, a contact two minutes off never
+ * rang here, and an answer from a contact whose clock was behind by longer than it took to answer was dropped as
+ * "from before the offer", so the call never connected.
+ */
+export function heardCallSignal(json: string, at?: number): string {
+  let raw: unknown;
+  try { raw = JSON.parse(json); } catch { return json; }
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return json;
+  const { at: _theirs, ...signal } = raw as Record<string, unknown>;
+  return JSON.stringify(at === undefined ? signal : { ...signal, at });
+}
+
+/**
+ * When a contact's signal came, to hold against something this device did (its own offer): on this clock when the
+ * engine said (`at`), by the signal's own time otherwise, as before.
+ */
+export const callSignalHeardAt = (signal: Pick<CallSignal, "ts" | "at">): number => signal.at ?? signal.ts;
+
+/**
+ * Whether a contact's answer is for the offer this side made at `offerTs` (its own clock). An answer that names its
+ * offer (`o`) says so itself. One that names none (an app up to 1.0.1) is taken when it came after this side offered.
+ */
+export function answersOffer(answer: Pick<CallSignal, "ts" | "at" | "o">, offerTs: number): boolean {
+  return answer.o !== undefined ? answer.o === offerTs : callSignalHeardAt(answer) > offerTs;
 }
 
 /** The `v`/`k` pair of any signal. Returns null for a malformed one, `{}` when it says nothing. */
