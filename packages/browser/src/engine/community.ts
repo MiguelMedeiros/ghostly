@@ -225,6 +225,8 @@ export class Communities {
   /** Joiners: groups whose knock is out (published), and the knock record it is in. */
   private readonly knocked = new Set<string>();
   private readonly knockAt = new Map<string, number>();
+  /** Joiners: how many others had a knock still being refreshed in the record I last read (they wait with me). */
+  private readonly knockingWith = new Map<string, number>();
   /** My frames an edge took, and which of them carry an edit (`frame id → editKey`). */
   private readonly frames = new FramesTaken();
   private readonly carriers = new Map<string, string>();
@@ -281,7 +283,8 @@ export class Communities {
       const base = { id: group.id, profile: "community" as const, createdAt: group.createdAt, lastMessageAt: this.lastMessageAt.get(group.id) ?? 0, ...peerMessageAt(this.lastPeerMessageAt, group.id), ...mentionAt(this.lastMentionAt, group.id), invited: [], memberLinks: {} };
       if (group.joining && (!live || live.session.status === "lost")) {
         return [{ ...base, name: groupName(group.joining.name) ?? live?.session.name ?? "", isAdmin: false, members: [], canSend: false,
-          invitation: { linkId: group.joining.linkId, contact: "", admin: group.joining.inviter, members: 0, accepted: true, viaLink: true, stage: this.joinStage(group) } }];
+          invitation: { linkId: group.joining.linkId, contact: "", admin: group.joining.inviter, members: 0, accepted: true, viaLink: true, stage: this.joinStage(group),
+            ...(this.knockingWith.get(group.id) ? { waiting: this.knockingWith.get(group.id) } : {}) } }];
       }
       if (!live) return [];
       const s = live.session, edges = this.host.edges(group.id);
@@ -334,7 +337,7 @@ export class Communities {
   }
 
   private async startJoining(link: GroupEntryLink, seedB64: string, since: number): Promise<void> {
-    this.lastKnock.delete(link.g); this.knocked.delete(link.g); this.knockAt.delete(link.g);
+    this.lastKnock.delete(link.g); this.knocked.delete(link.g); this.knockAt.delete(link.g); this.knockingWith.delete(link.g);
     const linkId = await this.host.openEntry(link, "guest", seedB64, link.host);
     const group: StoredGroup = this.stored.get(link.g) ?? { id: link.g, createdAt: since };
     group.joining = { g: link.g, host: link.host, seedB64, linkId, name: group.community?.name ?? "", inviter: "", pieces: [], since };
@@ -453,6 +456,7 @@ export class Communities {
     this.lastMessageAt.delete(groupId);
     this.lastPeerMessageAt.delete(groupId);
     this.lastMentionAt.delete(groupId);
+    this.knockingWith.delete(groupId);
     for (const linkId of [...this.host.edges(groupId).values(), ...this.host.entries(groupId).values()]) await this.host.closeEdge(linkId);
     await this.store.deleteGroup(groupId);
     this.host.historyGone?.(groupId);
@@ -921,7 +925,12 @@ export class Communities {
     await this.host.publish(knockIdentity(record), knockRecords(record, mergeKnocks(knocks, { key: me, ts: now }, now)), !first);
     this.knockAt.set(group.id, n);
     traceJoin(group.id, "knock.published", { ms: Date.now() - started, record: n });
-    if (!this.knocked.has(group.id)) { this.knocked.add(group.id); this.host.emit(); }
+    // Who else is knocking in my record (their knock refreshed lately, as a hub counts it): the joining card says so,
+    // since a wait behind others is not a link that stopped working.
+    const others = knocks.filter(k => k.key !== me && now - k.ts < 2 * this.timings.slowKnockMs).length;
+    const moved = (this.knockingWith.get(group.id) ?? 0) !== others;
+    this.knockingWith.set(group.id, others);
+    if (!this.knocked.has(group.id) || moved) { this.knocked.add(group.id); this.host.emit(); }
   }
 
   private async closeEntries(groupId: string): Promise<void> {
@@ -1018,6 +1027,7 @@ export class Communities {
         this.lastKnock.delete(g);
         this.knocked.delete(g);
         this.knockAt.delete(g);
+        this.knockingWith.delete(g);
         await this.host.closeEdge(linkId);
         await this.reconcile(g, live, now);
         this.host.emit();

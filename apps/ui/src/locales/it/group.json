@@ -91,7 +91,10 @@
     "knockedCommunity": "In attesa che qualcuno del gruppo ti faccia entrare. Succede da solo appena l'app di un membro è aperta: puoi lasciare questa pagina e tornare.",
     "knocking": "Lascio una richiesta dove l'app dell'admin la cerca…",
     "knockingCommunity": "Lascio una richiesta dove le app del gruppo la cercano…",
+    "queueCount": "Altre {{count}} persone aspettano di entrare.",
+    "queueOne": "Un'altra persona aspetta di entrare.",
     "stale": "Ancora nessuna risposta. Se il link del gruppo è stato sostituito, questo non funziona più: chiedi il nuovo link.",
+    "staleBusy": "Ancora in attesa. Il gruppo fa entrare poche persone alla volta, finché l'app di un membro è aperta.",
     "step": {
       "admitted": "Ammesso: ricezione delle chiavi del gruppo",
       "answered": "L'app dell'admin ha risposto",
