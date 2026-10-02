@@ -504,7 +504,7 @@ export class Groups {
    * Sends a text; `messageId` is the id it is kept under here (what history, replies and reactions name). `forwarded`:
    * the hop count of a forwarded text (WISP 9xx § Forwards). `card`: a checked status card, the text its fallback.
    */
-  async send(groupId: string, text: string, mentions: readonly GroupMention[] = [], reply?: WireReply, forwarded?: number, card?: StatusCard): Promise<{ error: string | null; messageId?: string }> {
+  async send(groupId: string, text: string, mentions: readonly GroupMention[] = [], reply?: WireReply, forwarded?: number, card?: StatusCard): Promise<{ error: string | null; messageId?: string; refused?: boolean }> {
     if (this.isCommunity(groupId)) return card ? this.communities.send(groupId, text, mentions, reply, forwarded, card) : this.communities.send(groupId, text, mentions, reply, forwarded);
     const session = this.sessions.get(groupId);
     if (!session) return { error: "You are not in this group yet" };

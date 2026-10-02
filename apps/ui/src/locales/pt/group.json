@@ -17,6 +17,7 @@
     "noFiles": "Arquivos ainda não fazem parte dos grupos",
     "nobodyElse": "Ainda não há mais ninguém no grupo",
     "reachable": "{{members}} · {{reachable}} de {{total}} acessíveis",
+    "removedCommunity": "Você foi removido. Abra o link do grupo para entrar de novo.",
     "sendFailed": "Não foi possível enviar",
     "shareHint": "Compartilhar o link do grupo",
     "shareLink": "Compartilhar link",
@@ -71,7 +72,8 @@
     "renamed": "{{name}} renomeou o grupo para “{{group}}”",
     "renamedYou": "Você renomeou o grupo para “{{group}}”",
     "rotated": "Chaves renovadas: uma nova época",
-    "youJoined": "Você entrou."
+    "youJoined": "Você entrou.",
+    "youJoinedAgain": "Você entrou de novo."
   },
   "hubs": {
     "auto": "Hub se sempre ligado",

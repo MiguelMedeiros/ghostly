@@ -170,7 +170,7 @@ export interface StoredGroup {
    * Joining a community group through its link (`group2/…`), or again after my admission lost a
    * race: my member seed, the entry session, and what arrived of the welcome.
    */
-  joining?: { g: string; host: string; seedB64: string; linkId: string; name: string; inviter: string; invitedAt?: number; pieces: unknown[]; since: number };
+  joining?: { g: string; host: string; seedB64: string; linkId: string; name: string; inviter: string; invitedAt?: number; pieces: unknown[]; since: number; check?: boolean };
 }
 
 export interface GroupMemberView {

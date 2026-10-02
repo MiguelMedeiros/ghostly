@@ -425,11 +425,13 @@ const METHODS: Record<string, Method> = {
     // A kept `group typing --for` ends with the message (the engine says stop with it).
     endTyping(ctx, { groupId: group.id }, false);
     const result = await node(ctx).sendGroupMessage({ groupId: group.id, text, ...(mentions.length ? { mentions } : {}), ...(replyTo ? { replyTo } : {}), ...(card ? { card } : {}) });
-    if (result.error) throw groupSendRefused(result.error);
+    // Not a member (removed, say): refused, and nothing was sent. Anything else by what a bot can do about it.
+    if (result.error) throw result.refused ? new CliError("refused", result.error) : groupSendRefused(result.error);
     const messageId = result.messageId ?? null;
-    // `edges`: how many took it so far (none yet is not an error: it goes when one opens).
+    // `edges`: how many took it so far (none yet is not an error: it goes when one opens). `sent`: whether one did.
+    // Before 2026-10-02 `sent` was always true, also for a message no edge had taken.
     const edges = messageId ? (wait === "sent" ? await waitForGroupFrame(ctx, group.id, messageId, undefined, num(params, "timeout", 30, { min: 1, max: 3600 }) * 1000) : node(ctx).groupTaken({ groupId: group.id, messageId })) : 0;
-    return { group: group.id, messageId, sent: true, edges, ...(card ? { buttons: card.id, card } : {}) };
+    return { group: group.id, messageId, sent: edges > 0, edges, ...(card ? { buttons: card.id, card } : {}) };
   },
   /**
    * WISP 9xx § Edits: the whole new text of one of my messages in a group. It shows here at once and goes to the members
@@ -545,7 +547,7 @@ async function react(ctx: ApiContext, linkId: string, params: Params): Promise<{
   const emoji = removed ? "" : str(params, "emoji");
   if (!removed && !emoji) throw new CliError("usage", "Give one emoji, or --remove to take yours back");
   const result = await node(ctx).react({ linkId, messageId, emoji: emoji ?? "" });
-  if (result.error) throw new CliError(/not in this chat|No reaction of yours/.test(result.error) ? "not_found" : "bad_request", result.error);
+  if (result.error) throw new CliError(result.refused ? "refused" : /not in this chat|No reaction of yours/.test(result.error) ? "not_found" : "bad_request", result.error);
   return { messageId, emoji: emoji || null, removed };
 }
 

@@ -17,6 +17,7 @@
     "noFiles": "グループではまだファイルを送れません",
     "nobodyElse": "グループにはまだ他に誰もいません",
     "reachable": "{{members}} · {{total}} 人中 {{reachable}} 人に到達可能",
+    "removedCommunity": "削除されました。もう一度参加するには、グループのリンクを開いてください。",
     "sendFailed": "送信できませんでした",
     "shareHint": "グループのリンクを共有",
     "shareLink": "リンクを共有",
@@ -71,7 +72,8 @@
     "renamed": "{{name}} がグループ名を「{{group}}」に変更しました",
     "renamedYou": "グループ名を「{{group}}」に変更しました",
     "rotated": "鍵を更新しました: 新しいエポック",
-    "youJoined": "参加しました。"
+    "youJoined": "参加しました。",
+    "youJoinedAgain": "再び参加しました。"
   },
   "hubs": {
     "auto": "常時オンならハブ",
