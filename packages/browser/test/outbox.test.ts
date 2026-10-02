@@ -125,9 +125,9 @@ describe("automatic resend", () => {
     const first = p.box.transmit(p.id);
     await vi.waitFor(() => expect(send).toHaveBeenCalledTimes(1));
     expect(send.mock.calls[0][0].via).toBe("pkarr");
-    live = true; await p.box.flush({ reopened: true });
+    live = true; const reopened = p.box.flush({ reopened: true });
     // Once the publish returns, the text goes again, on the link.
-    publishing(); await first;
+    publishing(); await first; await reopened;
     expect(send).toHaveBeenCalledTimes(2);
     expect(send.mock.calls[1][0]).toMatchObject({ via: "datalink", wireId: p.wireId });
     expect((await p.row())).toMatchObject({ delivery: "sent", via: "datalink" });
@@ -145,9 +145,9 @@ describe("automatic resend", () => {
     const p = await setup(send, { ready: () => true }, 60_000);
     const first = p.box.transmit(p.id);
     await vi.waitFor(() => expect(send).toHaveBeenCalledTimes(1));
-    await p.box.flush({ reopened: true });
+    const reopened = p.box.flush({ reopened: true });
     await p.box.received(p.wireId);
-    publishing(); await first;
+    publishing(); await first; await reopened;
     expect(send).toHaveBeenCalledTimes(1);
     expect((await p.row()).delivery).toBe("delivered");
     await p.box.stop();
