@@ -1355,10 +1355,7 @@ impl Call {
         if restart {
             self.gather_anew();
         }
-        let options = restart.then(|| RTCOfferOptions {
-            ice_restart: true,
-            ..Default::default()
-        });
+        let options = restart.then_some(RTCOfferOptions { ice_restart: true });
         let offer = self
             .pc
             .create_offer(options)
