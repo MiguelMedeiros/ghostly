@@ -40,7 +40,7 @@ import { ModeChanged, networkLabel, WrongNetworkError } from "./paymentAdapters/
 import { assertConfirmedReal, createTiming, WALLET_NAMES, createFailure, crossNetwork, paymentNetwork, paymentNetworksOf, walletInstances } from "./paymentAdapters/walletInstances";
 import { migrateWalletNetworks } from "./paymentAdapters/walletNetworks";
 import { perNetwork, type PerNetwork } from "./paymentAdapters/perNetwork";
-import { COMMUNITY_EDIT_FRAME, INVITE_TAKEN, LIVENESS_MISSED_PINGS, LIVENESS_PING_MS, MAX_GROUP_NAME_LENGTH, engineError, groupName, parseCommunityEdit, traceLink } from "@ghostly/core";
+import { COMMUNITY_EDIT_FRAME, INVITE_TAKEN, LIVENESS_MISSED_PINGS, LIVENESS_PING_MS, MAX_GROUP_NAME_LENGTH, engineError, engineText, groupName, parseCommunityEdit, traceLink } from "@ghostly/core";
 import { ClockWatch, DirectPathWatch } from "@ghostly/core";
 import { GROUP_WAKE_FRAME, GROUP_WAKE_RECEIVE_LIMIT, GroupWakeLimiter, RateWindow, WAKE_CALL_INTERVAL_MS, WakeLimiter, groupWakeFrame, groupWakes, parseGroupWakeFrame, checkPushEndpoint, newWakeToken, relayRequest, vapidKeysMatch, wakeRequest, type PushRequest, type WakeKind, type WakeTarget } from "@ghostly/core";
 import { COMMUNITY_REACTION_FRAME, GROUP_REACTION_FRAME, REACTION_LIMITS, ReactionWindow, queueReaction, readReaction, validReactionNumber, wireReaction, type WireReaction } from "@ghostly/core";
@@ -4085,8 +4085,22 @@ export class GhostlyNode implements EngineImplementation {
     return this.desk.payRequest(params);
   }
 
-  reclaimPayment({ paymentId }: { paymentId: string }) {
-    return this.desk.reclaim(paymentId);
+  async reclaimPayment({ paymentId }: { paymentId: string }): Promise<void> {
+    await this.desk.reclaim(paymentId);
+    await this.reviewTakenBack(paymentId);
+  }
+
+  /**
+   * A reviewed payment whose ecash this wallet took back: its review ends failed, at once. The mint reads that ecash
+   * spent (this wallet redeemed it), which the review would otherwise take for the contact being paid, and a request
+   * whose review reads paid can never be reviewed again. Only when the ecash is back for certain (`reclaimed`).
+   */
+  private async reviewTakenBack(id: string): Promise<void> {
+    if (this.desk.payment(id)?.state !== "reclaimed") return;
+    const intent = await intentRepository.get(id);
+    if (!intent || intent.review.method !== "cashu" || !["submitted", "unknown", "settled"].includes(intent.review.state)) return;
+    await intentRepository.put({ ...intent, review: { ...intent.review, state: "failed", error: engineText("paymentTakenBack") } });
+    this.emitState();
   }
 
   // -- services ------------------------------------------------------------

@@ -49,6 +49,7 @@ export const ENGINE_ERRORS = {
   outcomeUnknown: "Outcome unknown. Check the existing payment; do not send another.",
   notYetConfirmed: "Not yet confirmed. No second payment was sent.",
   couldNotVerify: "Could not verify this payment yet. No second payment was sent.",
+  paymentTakenBack: "This payment was taken back. The sats are in your wallet.",
   // Real money and test coins.
   realMoneyUnconfirmed: "This pays with real money: confirm it with Send real money first. Nothing was sent.",
   mainnetPaymentOnTestnet: "This is a Mainnet payment (real money): a Testnet wallet never pays it. Use a Mainnet wallet.",
