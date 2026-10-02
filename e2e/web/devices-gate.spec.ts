@@ -105,23 +105,13 @@ test("a profile on standby on this device opens no peer database, asks no relay 
   await expect(delivered(chat(alice).locator("[data-message]", { hasText: "back again" }).last()).or(chat(alice).getByText("back again"))).toBeVisible();
 });
 
-test("a profile with no device set starts as before: the device state is read once, first, and nothing is stored for it", { tag: ["@feature:devices.gate"] }, async ({ peer }) => {
+test("a profile with no device set starts as before: no device state database is made or opened for it", { tag: ["@feature:devices.gate"] }, async ({ peer }) => {
   const alice = await peer("alice", { beforeOpen: recordOpens });
   const { page } = alice;
   await expect(page.getByTestId("sidebar")).toBeVisible();
   await expect(page.getByTestId("device-standby")).toHaveCount(0);
   await expect.poll(async () => (await opens(page)).includes("ghostly")).toBe(true);
-  const opened = await opens(page);
-  // One small read before the peer's own database, and only one.
-  expect(opened.filter((name) => name === "ghostly-devices")).toHaveLength(1);
-  expect(opened.indexOf("ghostly-devices")).toBe(0);
-  expect(opened.indexOf("ghostly")).toBeGreaterThan(0);
-  const stored = await page.evaluate(async () => {
-    const db = await new Promise<IDBDatabase>((resolve, reject) => { const r = indexedDB.open("ghostly-devices"); r.onsuccess = () => resolve(r.result); r.onerror = () => reject(r.error); });
-    const records = await new Promise<unknown[]>((resolve) => { const r = db.transaction("devices").objectStore("devices").getAll(); r.onsuccess = () => resolve(r.result); });
-    const version = db.version;
-    db.close();
-    return { version, records, peer: (await indexedDB.databases()).find((d) => d.name === "ghostly")?.version };
-  });
-  expect(stored).toEqual({ version: 1, records: [], peer: 12 });
+  // Nothing was ever enrolled on this device: the gate learns that without opening anything, and nothing is left behind.
+  expect(await opens(page)).not.toContain("ghostly-devices");
+  expect(await page.evaluate(async () => (await indexedDB.databases()).map((d) => d.name))).not.toContain("ghostly-devices");
 });

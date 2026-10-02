@@ -1,5 +1,6 @@
 import { useId, useState } from "react";
 import type { DeviceGateView } from "@ghostly/browser/devices/gate";
+import { getBrowserHost } from "@ghostly/browser/host";
 import { useI18n } from "../contexts/I18nContext";
 import { activeProfileId, listProfiles, switchProfile } from "../lib/profiles";
 
@@ -39,7 +40,7 @@ export function DeviceStandby({ gate }: { gate: DeviceGateView }) {
           </div>
         )}
         {gate.state === "unreadable" && (
-          <button type="button" data-testid="device-standby-retry" onClick={() => location.reload()} className={BUTTON}>{t("app.profileUnavailable.tryAgain")}</button>
+          <button type="button" data-testid="device-standby-retry" onClick={() => void tryAgain()} className={BUTTON}>{t("app.profileUnavailable.tryAgain")}</button>
         )}
         {others.length > 0 && (
           <div className="flex flex-wrap justify-center gap-2 pt-2">
@@ -53,6 +54,15 @@ export function DeviceStandby({ gate }: { gate: DeviceGateView }) {
       </div>
     </div>
   );
+}
+
+/**
+ * Reads the state again. Where the peer outlives its pages (the extension's offscreen document), it is started anew
+ * first: it keeps what it read when it started, and would tell the reloaded page the same.
+ */
+async function tryAgain(): Promise<void> {
+  try { await getBrowserHost().restartEngine?.(); } catch { /* the reload says what is wrong now */ }
+  window.location.reload();
 }
 
 /** The other profiles of this device: one on standby here must not keep the person out of the rest. */

@@ -227,7 +227,8 @@ it("leaves mesh groups and groups it left out: they publish nothing to look at",
 
 // covers: devices.gate
 it("skips a profile this device is not the active one for: nothing of it is opened or read (WISP 06)", async () => {
-  const { closeDevicesDb, forgetDevice, writeDeviceRecord } = await import("../src/devices/store");
+  const { closeDevicesDb, forgetDevice } = await import("../src/devices/store");
+  const { putDeviceRecord } = await import("./helpers/deviceRecord");
   const w = await pairedThenAway();
   expect(await w.c.send("for B's active device", Date.now(), "textforbbbbbbbbbbbbbbb")).toBeNull();
   await vi.advanceTimersByTimeAsync(200);
@@ -238,14 +239,14 @@ it("skips a profile this device is not the active one for: nothing of it is open
   const record = (state: "standby" | "active" | "superseded") => ({ v: 1 as const, profile: "ghostly_b", state, saved: 1, turn: 3, rev: 0, deviceSet: [], takeovers: 0, earlierSets: [] });
 
   for (const state of ["standby", "superseded"] as const) {
-    await writeDeviceRecord(record(state));
+    await putDeviceRecord(record(state));
     expect(await peek.peek("b", "ghostly_b")).toEqual({ status: "standby", reads: 0, chats: [] });
   }
   expect(read).not.toHaveBeenCalled();
   expect(w.dht.resolve.mock.calls.length).toBe(reads);
 
   // The active device of that profile, and a profile with no device set, are looked at as before.
-  await writeDeviceRecord(record("active"));
+  await putDeviceRecord(record("active"));
   expect((await peek.peek("b", "ghostly_b")).chats[0]).toMatchObject({ linkId: "link-b", text: "textforbbbbbbbbbbbbbbb" });
   await forgetDevice("ghostly_b");
   expect((await new ProfilePeek(host(w.dht.transport, () => [w.stored()], { read, runsHere: undefined })).peek("b", "ghostly_b")).status).toBe("done");

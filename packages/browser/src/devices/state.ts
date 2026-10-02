@@ -164,12 +164,21 @@ export function transition(from: DeviceRecord | null, profile: string, to: Store
     if (to !== "active" && to !== "standby") throw new DeviceTransitionError(state, to);
     return firstRecord(profile, to, patch);
   }
-  return checked({ ...from, ...clean(patch), state: to });
+  return checked(rising(from, { ...from, ...clean(patch), state: to }));
 }
 
 /** The record with some fields changed and its state kept. */
 export function amend(from: DeviceRecord, patch: DevicePatch): DeviceRecord {
-  return checked({ ...from, ...clean(patch) });
+  return checked(rising(from, { ...from, ...clean(patch) }));
+}
+
+/** The "highest ever" fields and the takeover count only rise: a change that would lower or drop one is refused. */
+function rising(from: DeviceRecord, next: DeviceRecord): DeviceRecord {
+  for (const field of ["releasedTurn", "seenSequence", "takeovers"] as const) {
+    const was = from[field];
+    if (was !== undefined && (next[field] === undefined || next[field] < was)) throw new DeviceRecordError(`${field} may only rise`);
+  }
+  return next;
 }
 
 /** A patch without what it may not set, whatever its type says. */

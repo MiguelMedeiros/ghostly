@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createLink, encodeInviteCode } from "@ghostly/core";
 import { engine } from "@ghostly/browser/platform/engine";
+import type { BrowserHost } from "@ghostly/browser/host";
 import type { DeviceGate, DeviceGateView } from "@ghostly/browser/devices/gate";
 import { Root } from "../../Root";
 import { DeviceStandby } from "../../components/DeviceStandby";
@@ -121,6 +122,24 @@ describe("the standby screen", () => {
     const text = screen.getByTestId("device-standby-text");
     expect(text).toHaveTextContent("nothing was started, nothing was sent and nothing was changed");
     expect(text).toHaveTextContent("VersionError: The requested version (1) is less than the existing version (2).");
+  });
+
+  it("Try again starts the peer anew where it outlives the page (the extension), then reloads", async () => {
+    const user = userEvent.setup();
+    const order: string[] = [];
+    const reload = vi.fn(() => { order.push("reload"); });
+    vi.spyOn(window, "location", "get").mockReturnValue({ ...window.location, reload } as Location);
+    (fakeEngine as BrowserHost).restartEngine = vi.fn(async () => { order.push("restart"); });
+    try {
+      renderApp(<DeviceStandby gate={{ state: "unreadable" }} />);
+      await user.click(screen.getByTestId("device-standby-retry"));
+      await waitFor(() => expect(order).toEqual(["restart", "reload"]));
+    } finally { delete (fakeEngine as BrowserHost).restartEngine; }
+    // Where the peer lives in the page (web, Desktop) the reload alone starts it again.
+    order.length = 0;
+    renderApp(<DeviceStandby gate={{ state: "unreadable" }} />);
+    await user.click(screen.getAllByTestId("device-standby-retry").slice(-1)[0]);
+    await waitFor(() => expect(order).toEqual(["reload"]));
   });
 
   it("leaves the person's other profiles one click away", () => {

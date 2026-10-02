@@ -90,6 +90,15 @@ describe("a change of state", () => {
     expect(amend(record("standby"), patch)).toMatchObject({ state: "standby", profile: "ghostly", saved: 3, v: 1 });
   });
 
+  it("the highest-ever fields and the takeover count only rise", () => {
+    const from = record("active", { releasedTurn: 8, seenSequence: 900, takeovers: 2 });
+    expect(amend(from, { releasedTurn: 9, seenSequence: 900, takeovers: 3 })).toMatchObject({ releasedTurn: 9, seenSequence: 900, takeovers: 3 });
+    expect(() => amend(from, { releasedTurn: 7 })).toThrow("releasedTurn may only rise");
+    expect(() => amend(from, { seenSequence: 899 })).toThrow("seenSequence may only rise");
+    expect(() => amend(from, { seenSequence: undefined })).toThrow("seenSequence may only rise");
+    expect(() => transition(from, "ghostly", "releasing", { takeovers: 1 })).toThrow("takeovers may only rise");
+  });
+
   it("refuses to make a record that would not be valid", () => {
     expect(() => amend(record("active"), { rev: 2 ** 18 })).toThrow(DeviceRecordError);
     expect(() => amend(record("active"), { deviceSet: Array.from({ length: 5 }, () => ({ key: KEY, name: "x" })) })).toThrow(DeviceRecordError);

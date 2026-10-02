@@ -1,5 +1,7 @@
 import { identityFromSeedB64 } from "@ghostly/core";
 import { databaseExists } from "@ghostly/browser/backup/database";
+import { runsEngine } from "@ghostly/browser/devices/state";
+import { deviceStateOf, forgetDevice } from "@ghostly/browser/devices/store";
 import { dropFileSpace } from "@ghostly/browser/shared/fileBytes";
 import { activeProfileId, chosenProfileId, listProfiles, namespaceOf, prefixOf, settingsKeyFor, unregisterProfile } from "./profiles";
 import { unreadUnder } from "./storage";
@@ -44,6 +46,8 @@ function chatsOf(prefix: string): number {
 export async function profileSummary(id: string): Promise<ProfileSummary> {
   const ns = namespaceOf(id);
   const summary: ProfileSummary = { chats: chatsOf(`ghostly_${ns}_`), cashuSats: 0, wallets: [], services: 0 };
+  // A profile this device is on standby for (WISP 06 § The gate): its database is not opened, even to count.
+  if (!(await deviceStateOf(`ghostly_${ns}`).then(runsEngine, () => false))) return summary;
   const db = await openExisting(`ghostly_${ns}`);
   if (!db) return summary;
   try {
@@ -220,5 +224,7 @@ export async function deleteProfile(id: string, password?: string): Promise<void
   for (const key of Array.from({ length: localStorage.length }, (_, i) => localStorage.key(i)).filter((k): k is string => !!k?.startsWith(prefix))) localStorage.removeItem(key);
   // Its push subscription (WISP 401 § Wake-up push) ends with it: its worker goes, and contacts who kept it get 410.
   await pushPlatform()?.unsubscribe(id).catch(() => {});
+  // Its device state goes with it (WISP 06): a profile made later under the same name must not inherit it.
+  await forgetDevice(dbName).catch(() => {});
   unregisterProfile(id);
 }

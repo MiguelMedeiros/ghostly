@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fire, type FakeWorld } from "./fakeChrome";
 import { engineControl, resetEngine } from "./fakeEngine";
 import { PEER, SERVICE, bootExtension, useProfile } from "./extension";
+import { putDeviceRecord } from "../../../packages/browser/test/helpers/deviceRecord";
 
 // covers: devices.gate, extension.engine
 
@@ -21,9 +22,7 @@ const KEY = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 
 /** Puts a profile in a state directly: nothing can enroll a device yet. */
 async function putState(profile: string, state: "active" | "standby" | "superseded" | "removed"): Promise<void> {
-  const store = await import("@ghostly/browser/devices/store");
-  await store.writeDeviceRecord({ v: 1, profile, state, saved: 1, turn: 4, rev: 0, deviceSet: [{ key: KEY, name: "MacBook" }, { key: KEY, name: "This browser" }], activeSlot: 0, ownSlot: 1, takeovers: 0, earlierSets: [] });
-  await store.closeDevicesDb();
+  await putDeviceRecord({ v: 1, profile, state, saved: 1, turn: 4, rev: 0, deviceSet: [{ key: KEY, name: "MacBook" }, { key: KEY, name: "This browser" }], activeSlot: 0, ownSlot: 1, takeovers: 0, earlierSets: [] });
 }
 const dropDevices = () => new Promise<void>((resolve) => { const r = indexedDB.deleteDatabase("ghostly-devices"); r.onsuccess = r.onerror = r.onblocked = () => resolve(); });
 
@@ -117,5 +116,28 @@ describe("the state is the profile's own", () => {
     useProfile(world, "", [WORK]);
     expect(await ensure()).toEqual({ ok: true });
     expect(log()).toEqual(["start ghostly", "stop ghostly", "start ghostly"]);
+  });
+});
+
+describe("a device state that could not be read", () => {
+  it("is read again by Try again: the document is made anew, and the engine starts once the state reads", async () => {
+    // A newer build stored the device state database at a version this one does not open.
+    await new Promise<void>((resolve) => { const r = indexedDB.open("ghostly-devices", 2); r.onupgradeneeded = () => { r.result.createObjectStore("later"); }; r.onsuccess = () => { r.result.close(); resolve(); }; });
+    world = await bootExtension();
+    expect(await ensure()).toEqual({ ok: true });
+    const port = world.chrome.runtime.connect({ name: "ui" });
+    const heard: { kind?: string; gate?: { state?: string } }[] = [];
+    port.onMessage.addListener((message: unknown) => heard.push(message as never));
+    await vi.waitFor(() => expect(heard).toHaveLength(1));
+    expect(heard[0]).toMatchObject({ kind: "device-gate", gate: { state: "unreadable" } });
+    expect(log()).toEqual([]);
+
+    // What was in the way is gone; the page asks for a new peer (the host's `restartEngine`), which reads again.
+    await dropDevices();
+    const { extensionHost } = await import("../src/host");
+    await extensionHost.restartEngine!();
+    expect(world.callsTo("offscreen.closeDocument")).toHaveLength(1);
+    expect(world.callsTo("offscreen.createDocument")).toHaveLength(2);
+    expect(log()).toEqual(["start ghostly"]);
   });
 });

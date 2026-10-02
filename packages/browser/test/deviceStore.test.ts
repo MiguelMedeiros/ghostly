@@ -1,8 +1,9 @@
 import "fake-indexeddb/auto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DeviceRecordError, DeviceTransitionError, type DeviceRecord } from "../src/devices/state";
-import { DEVICES_DB, DEVICES_DB_VERSION, amendDevice, closeDevicesDb, deviceStateOf, enrollDevice, forgetDevice, moveDevice, readDeviceRecord, setDeviceMirror, writeDeviceRecord,
+import { DEVICES_DB, DEVICES_DB_VERSION, DEVICE_READ_TIMINGS, amendDevice, closeDevicesDb, deviceStateOf, enrollDevice, forgetDevice, moveDevice, readDeviceRecord, setDeviceMirror,
   type DeviceMirror } from "../src/devices/store";
+import { putDeviceRecord } from "./helpers/deviceRecord";
 // covers: devices.gate
 
 /*
@@ -32,7 +33,13 @@ describe("a profile's device state", () => {
     expect(await readDeviceRecord("ghostly")).toBeNull();
     expect(await deviceStateOf("ghostly")).toBe("single");
     expect(await deviceStateOf("ghostly_work")).toBe("single");
-    expect(await stored("ghostly")).toBeUndefined();
+    // A read never makes the database: a device where nothing was ever enrolled has none.
+    expect((await indexedDB.databases()).map((d) => d.name)).toEqual([]);
+  });
+
+  it("forgetting a profile that has no record makes no database either", async () => {
+    await forgetDevice("ghostly");
+    expect((await indexedDB.databases()).map((d) => d.name)).toEqual([]);
   });
 
   it("is kept per profile, in a database of its own", async () => {
@@ -92,11 +99,10 @@ describe("durability", () => {
     expect(completed).toEqual(["complete"]);
     await moveDevice("ghostly", "releasing");
     await amendDevice("ghostly", { rev: 1 });
-    await writeDeviceRecord(record("standby"));
     await forgetDevice("ghostly");
-    expect(asked).toHaveLength(5);
+    expect(asked).toHaveLength(4);
     expect(asked.every((options) => options?.durability === "strict")).toBe(true);
-    expect(completed).toHaveLength(5);
+    expect(completed).toHaveLength(4);
   });
 
   it("a write whose transaction aborts is a failure, never a silent success", async () => {
@@ -110,6 +116,58 @@ describe("durability", () => {
     await expect(moveDevice("ghostly", "releasing")).rejects.toBeTruthy();
     vi.restoreAllMocks();
     expect(await stored("ghostly")).toMatchObject({ state: "active" });
+  });
+});
+
+describe("a device where nothing was ever enrolled", () => {
+  it("is `single` when the database cannot be made or opened at all (no space, storage that hangs): it is never opened", async () => {
+    const open = vi.spyOn(indexedDB, "open").mockImplementation(() => { throw new DOMException("The quota has been exceeded.", "QuotaExceededError"); });
+    expect(await deviceStateOf("ghostly")).toBe("single");
+    expect(open).not.toHaveBeenCalled();
+  });
+
+  it("is `single` when the browser never says which databases exist", async () => {
+    vi.spyOn(indexedDB, "databases").mockImplementation(() => new Promise<never>(() => {}));
+    const { existsMs } = DEVICE_READ_TIMINGS;
+    DEVICE_READ_TIMINGS.existsMs = 40;
+    try { expect(await deviceStateOf("ghostly")).toBe("single"); } finally { DEVICE_READ_TIMINGS.existsMs = existsMs; }
+  });
+
+  it("is `single` when the browser cannot list databases: an open that would make it is undone", async () => {
+    const databases = indexedDB.databases.bind(indexedDB);
+    (indexedDB as { databases?: unknown }).databases = undefined;
+    try {
+      expect(await deviceStateOf("ghostly")).toBe("single");
+    } finally { (indexedDB as { databases?: unknown }).databases = databases; }
+    expect((await indexedDB.databases()).map((d) => d.name)).toEqual([]);
+    // And one that exists is found the same way.
+    await putDeviceRecord(record("standby"));
+    (indexedDB as { databases?: unknown }).databases = undefined;
+    try {
+      expect(await deviceStateOf("ghostly")).toBe("standby");
+    } finally { (indexedDB as { databases?: unknown }).databases = databases; }
+  });
+});
+
+describe("a device set that cannot be read", () => {
+  it("is an error when the database exists and its read never answers", async () => {
+    await putDeviceRecord(record("standby"));
+    vi.spyOn(indexedDB, "open").mockImplementation(() => ({}) as IDBOpenDBRequest);
+    const { readMs } = DEVICE_READ_TIMINGS;
+    DEVICE_READ_TIMINGS.readMs = 40;
+    try { await expect(deviceStateOf("ghostly")).rejects.toMatchObject({ name: "DeviceReadTimeout" }); } finally { DEVICE_READ_TIMINGS.readMs = readMs; }
+  });
+});
+
+describe("two pages at once", () => {
+  it("a change made on what another page has since changed is refused, and nothing is written over it", async () => {
+    await enrollDevice("ghostly", "active");
+    // The other page writes between this one's read and its write.
+    const mirror: DeviceMirror = { read: async () => null, write: async () => { await putDeviceRecord(record("superseded", { saved: 9 })); } };
+    await putDeviceRecord(record("active", { saved: 1 }));
+    setDeviceMirror({ read: async () => JSON.stringify(record("active", { saved: 1 })), write: mirror.write });
+    await expect(moveDevice("ghostly", "releasing")).rejects.toThrow("changed in another window");
+    expect(await stored("ghostly")).toMatchObject({ state: "superseded", saved: 9 });
   });
 });
 
@@ -163,7 +221,7 @@ describe("Desktop's file beside the database", () => {
   });
 
   it("a file that says standby wins over a database that says active, and the database is brought in line", async () => {
-    await writeDeviceRecord(record("active", { saved: 8 }));
+    await putDeviceRecord(record("active", { saved: 8 }));
     const mirror = fileMirror();
     mirror.files.set("ghostly", JSON.stringify(record("standby", { saved: 7 })));
     setDeviceMirror(mirror);
@@ -172,7 +230,7 @@ describe("Desktop's file beside the database", () => {
   });
 
   it("a database that says standby wins over a file that says active, and the file is brought in line", async () => {
-    await writeDeviceRecord(record("standby", { saved: 2 }));
+    await putDeviceRecord(record("standby", { saved: 2 }));
     const mirror = fileMirror();
     mirror.files.set("ghostly", JSON.stringify(record("active", { saved: 9 })));
     setDeviceMirror(mirror);
@@ -197,17 +255,42 @@ describe("Desktop's file beside the database", () => {
     expect(mirror.log).toEqual(["read ghostly"]);
   });
 
-  it("a file that cannot be read, is not a record, or is another profile's is an error, never `single`", async () => {
+  it("a file that is there and is not this profile's record is an error, never `single`", async () => {
     const mirror = fileMirror();
     setDeviceMirror(mirror);
     mirror.files.set("ghostly", "{not json");
     await expect(deviceStateOf("ghostly")).rejects.toBeTruthy();
     mirror.files.set("ghostly", JSON.stringify({ state: "standby" }));
-    await expect(deviceStateOf("ghostly")).rejects.toBeInstanceOf(DeviceRecordError);
+    await expect(deviceStateOf("ghostly")).rejects.toThrow("not valid");
     mirror.files.set("ghostly", JSON.stringify(record("standby", { profile: "ghostly_other" })));
     await expect(deviceStateOf("ghostly")).rejects.toThrow("another profile");
-    mirror.read = async () => { throw new Error("The device state could not be read: permission denied"); };
-    await expect(deviceStateOf("ghostly")).rejects.toThrow("permission denied");
+  });
+
+  it("a file that cannot be reached locks nobody out without evidence of a device set", async () => {
+    const mirror = fileMirror();
+    setDeviceMirror(mirror);
+    mirror.read = async () => { throw new Error("The app's data folder is unavailable"); };
+    // No record in the database: nothing says this profile was ever enrolled.
+    expect(await deviceStateOf("ghostly")).toBe("single");
+    // A record that stops the engine is believed without the file.
+    await putDeviceRecord(record("standby"));
+    expect(await deviceStateOf("ghostly")).toBe("standby");
+    // An `active` one is not: the file may hold the stricter state.
+    await putDeviceRecord(record("active", { saved: 2 }));
+    await expect(deviceStateOf("ghostly")).rejects.toThrow("unavailable");
+  });
+
+  it("a file read that never answers is the same, after a wait", async () => {
+    const mirror = fileMirror();
+    setDeviceMirror(mirror);
+    mirror.read = () => new Promise<never>(() => {});
+    const { readMs } = DEVICE_READ_TIMINGS;
+    DEVICE_READ_TIMINGS.readMs = 40;
+    try {
+      expect(await deviceStateOf("ghostly")).toBe("single");
+      await putDeviceRecord(record("active"));
+      await expect(deviceStateOf("ghostly")).rejects.toMatchObject({ name: "DeviceReadTimeout" });
+    } finally { DEVICE_READ_TIMINGS.readMs = readMs; }
   });
 
   it("forgetting a profile removes both copies", async () => {
