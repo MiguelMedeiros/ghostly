@@ -17,6 +17,10 @@ export const MAX_DEVICES = 4;
 /** Earlier device sets kept beside the state, the oldest dropped (WISP 06 § Removing a device). */
 export const MAX_EARLIER_SETS = 8;
 
+/** The two forms of a device signing key (WISP 06 § Terms). */
+export const DEVICE_SIGNING_KEY_KINDS = ["webcrypto", "seed"] as const;
+export type DeviceSigningKeyKind = (typeof DEVICE_SIGNING_KEY_KINDS)[number];
+
 /** One slot of the device set. Bytes are base64url everywhere in the record, so it is the same in IndexedDB and in Desktop's file. */
 export interface DeviceSlot {
   /** The device signing key (Ed25519 public key). */
@@ -91,6 +95,12 @@ export interface DeviceRecord {
   ownSlot?: number;
   /** The device-set secret `D`. */
   d?: string;
+  /**
+   * Which form this device's signing key has (WISP 06 § Terms): `webcrypto`, a non-extractable key the app cannot
+   * export, or `seed`, a stored seed. The key itself is never here: it is kept apart (`signingKey.ts`), so nothing
+   * that copies this record (Desktop's file, a backup, a handoff) carries it.
+   */
+  signingKey?: DeviceSigningKeyKind;
   /** Which copy of the state this device holds, for the incremental handoff (WISP 06 § Later phases). */
   lineage?: string;
   /** Forced takeovers in the life of the profile: the floor of the group counters. */
@@ -226,6 +236,7 @@ export function parseDeviceRecord(value: unknown): DeviceRecord {
   }
   if (!optional(r.activeSlot, slotIndex) || !optional(r.ownSlot, slotIndex)) return bad("a slot index");
   for (const field of ["turnPacket", "d", "lineage"] as const) if (!optional(r[field], bytes)) return bad(field);
+  if (!optional(r.signingKey, (v): v is DeviceSigningKeyKind => (DEVICE_SIGNING_KEY_KINDS as readonly unknown[]).includes(v))) return bad("signingKey");
   if (!optional(r.breezDatabase, text)) return bad("breezDatabase");
   if (!optional(r.releasedTurn, (v): v is number => count(v, 2 ** 32 - 1))) return bad("releasedTurn");
   if (!optional(r.seenSequence, (v): v is number => count(v, Number.MAX_SAFE_INTEGER))) return bad("seenSequence");

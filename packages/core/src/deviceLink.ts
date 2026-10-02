@@ -26,6 +26,12 @@ import type { Signer } from "./signer";
 
 const SALT = utf8Encode("ghostly-devices/1");
 
+/**
+ * A new device-set secret `D`: 32 random bytes (WISP 06 § Terms). The first `D` of a profile is not random, it comes
+ * from the DID key's seed (`firstDeviceSetSecret`); every later one, made when a device is removed, is.
+ */
+export const newDeviceSetSecret = (): Uint8Array => randomBytes(32);
+
 /** -1, 0 or 1: two keys compared as bytes. */
 function compareKeys(a: Uint8Array, b: Uint8Array): number {
   for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return a[i] < b[i] ? -1 : 1;
