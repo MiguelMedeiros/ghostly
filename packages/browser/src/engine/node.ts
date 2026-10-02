@@ -2487,6 +2487,7 @@ export class GhostlyNode implements EngineImplementation {
   private outboxFor(linkId: string): Outbox {
     let outbox = this.outboxes.get(linkId);
     if (!outbox) {
+      const chat = this.links.get(linkId)?.stored, oneToOne = !!chat?.profile && !chat.group;
       outbox = new Outbox({
         read: () => db.getMessages(linkId),
         update: async (id, delivery, error, extra) => {
@@ -2527,7 +2528,8 @@ export class GhostlyNode implements EngineImplementation {
           return !!link?.canSendText && !!message.wireId && !link.validateText(message.text, message.timestamp, message.wireId, GhostlyNode.wireReply(message));
         },
         requeueExpired: () => !GhostlyNode.dhtByChoice(this.links.get(linkId)),
-        sendFile: message => this.sendWaitingFile(linkId, message),
+        // A 1:1 chat's files that wait for the live link go with its texts; a group edge's go as before (`sendWaiting`).
+        ...(oneToOne && { sendFile: (message: StoredMessage) => this.sendWaitingFile(linkId, message) }),
         via: message => {
           const delivery = this.links.get(linkId)?.link?.textDelivery;
           return delivery === "dht" ? "pkarr" : delivery === "stream" ? "datalink" : message.via;
@@ -2845,7 +2847,7 @@ export class GhostlyNode implements EngineImplementation {
   private async sendWaiting(linkId: string): Promise<void> {
     const live = this.links.get(linkId);
     if (!live?.link?.isDataLinkOpen) return;
-    const withTexts = !!live.stored.profile && !live.stored.group;
+    const withTexts = this.outboxFor(linkId).sendsFiles;
     const waiting = (await db.getMessages(linkId)).filter(m => m.sender === "me" && m.delivery === "waiting" && ((m.file && !withTexts) || m.paymentId))
       .sort((a, b) => a.timestamp - b.timestamp);
     // A session that just opened has not heard the contact's capabilities yet (files/3 comes in them): asked a little.

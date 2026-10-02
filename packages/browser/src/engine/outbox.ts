@@ -199,7 +199,9 @@ export class Outbox {
    * a moment before it carries text, and a look that began in that moment sent the later messages and left the first
    * ones behind.
    */
-  private file(message: StoredMessage): boolean { return !!this.resender.sendFile && waitingFile(message); }
+  /** Whether this chat's waiting files go through this outbox (`Resender.sendFile`). */
+  get sendsFiles(): boolean { return !!this.resender.sendFile; }
+  private file(message: StoredMessage): boolean { return this.sendsFiles && waitingFile(message); }
 
   /** A waiting file is said on the link, after the older messages passed by that can go now. False: the link cannot carry it. */
   private async fileGoes(message: StoredMessage, passed?: StoredMessage[]): Promise<boolean> {
