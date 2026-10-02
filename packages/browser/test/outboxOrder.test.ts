@@ -215,3 +215,74 @@ describe("a link that drops with messages unconfirmed", () => {
     await c.box.stop();
   });
 });
+
+/**
+ * Seen 2026-10-02, two daemons on local relays: a text, a file, a text, a voice note and a text written while the
+ * contact was away, all waiting for the live link. The texts went through the outbox and the files by themselves
+ * when the link came back, and the contact read the text, the file, the voice note, then the two other texts.
+ */
+describe("a file that waits for the live link goes in its place among the texts", () => {
+  const file = (n: number): StoredMessage => ({ linkId: "order", id: `me_${n}`, text: `f${n}`, sender: "me", timestamp: n, via: "datalink", delivery: "waiting",
+    file: { id: `order-out-${n}`, name: `f${n}.bin`, size: 10, mime: "application/octet-stream" } });
+  /** A link that carries files as it carries text; `said` is the order everything went in. */
+  function withFiles(rows: StoredMessage[], live = { open: true }, offer: (message: StoredMessage) => Promise<void> = async () => {}) {
+    const said: string[] = [];
+    const c = chat(rows, async m => { said.push(m.text); return null; }, {
+      ready: () => live.open,
+      sendFile: async message => { await offer(message); said.push(message.text); const row = rows.find(m => m.id === message.id)!; delete row.delivery; },
+    });
+    return { ...c, said };
+  }
+
+  it("texts and files written while away go in the order they were written", async () => {
+    const c = withFiles([row(1, "waiting"), file(2), row(3, "waiting"), file(4), row(5, "waiting")]);
+    await c.box.recover();
+    await c.box.flush({ reopened: true });
+    expect(c.said).toEqual(["m1", "f2", "m3", "f4", "m5"]);
+    // Each once: a second look finds nothing left.
+    await c.box.flush({ reopened: true });
+    expect(c.said.filter(t => t.startsWith("f"))).toEqual(["f2", "f4"]);
+    await c.box.stop();
+  });
+
+  it("a text written after a file waits for the file to be said, not for more", async () => {
+    let offered = () => {};
+    const c = withFiles([file(1), row(2, "waiting")], { open: true }, () => new Promise<void>(resolve => { offered = resolve; }));
+    await c.box.recover();
+    const look = c.box.flush({ reopened: true });
+    for (let i = 0; i < 50; i++) await Promise.resolve();
+    expect(c.said).toEqual([]);
+    offered();
+    await look;
+    expect(c.said).toEqual(["f1", "m2"]);
+    await c.box.stop();
+  });
+
+  it("a new text written while live goes after a file that still waits", async () => {
+    const c = withFiles([file(1)]);
+    await c.box.transmit(c.add(row(2, "sending")));
+    expect(c.said).toEqual(["f1", "m2"]);
+    await c.box.stop();
+  });
+
+  it("a link that cannot carry it yet: the file is asked again by itself, and stays in its place", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    const live = { open: false };
+    const c = withFiles([file(1), row(2, "waiting")], live);
+    await c.box.recover();
+    await c.box.flush({ reopened: true });
+    expect(c.said).toEqual([]);
+    live.open = true;
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(c.said).toEqual(["f1", "m2"]);
+    await c.box.stop();
+  });
+
+  it("an outbox given no way to send files leaves them alone", async () => {
+    const c = chat([file(1), row(2, "waiting")]);
+    await c.box.recover();
+    await c.box.flush({ reopened: true });
+    expect(c.sent).toEqual(["m2"]);
+    await c.box.stop();
+  });
+});
