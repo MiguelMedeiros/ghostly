@@ -23,6 +23,9 @@
     "unnamed": "Un grupo"
   },
   "connection": {
+    "community": "Conectado al grupo",
+    "communityConnecting": "Conectando con el grupo…",
+    "communityNote": "Tu app se enlaza con un hub del grupo (la app de un miembro que retransmite), y los hubs pasan cada mensaje a todos. Quien estuvo ausente recibe lo que se perdió cuando vuelva.",
     "connecting": "Conectando con los miembros…",
     "label": "Conexión del grupo",
     "labelWith": "Conexión del grupo: {{state}}",
@@ -91,7 +94,10 @@
     "knockedCommunity": "Esperando a que alguien del grupo te deje entrar. Ocurre solo en cuanto la app de cualquier miembro esté abierta: puedes salir de esta página y volver.",
     "knocking": "Dejando una llamada donde la app del admin la busca…",
     "knockingCommunity": "Dejando una llamada donde las apps del grupo la buscan…",
+    "queueCount": "{{count}} personas más esperan para entrar.",
+    "queueOne": "1 persona más espera para entrar.",
     "stale": "Todavía sin respuesta. Si el enlace del grupo se cambió, este ya no funciona: pide el enlace nuevo.",
+    "staleBusy": "Sigue la espera. El grupo deja entrar a pocas personas a la vez, mientras la app de un miembro está abierta.",
     "step": {
       "admitted": "Admitido: recibiendo las claves del grupo",
       "answered": "La app del admin respondió",
