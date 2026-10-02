@@ -261,6 +261,42 @@ describe("one peer per storage area", () => {
     }
   });
 
+  it("refuses, and never says it is waiting, where the lock cannot be had: no Web Locks, a request that throws, one that rejects", async () => {
+    vi.useFakeTimers();
+    const refused = new DOMException("denied", "SecurityError");
+    const browsers: unknown[] = [
+      {},
+      { locks: undefined },
+      { locks: { request: () => { throw refused; } } },
+      { locks: { request: () => Promise.reject(refused) } },
+    ];
+    try {
+      for (const browser of browsers) {
+        vi.stubGlobal("navigator", browser);
+        const onWaiting = vi.fn();
+        const outcome = becomeThePeer("ghostly-peer", onWaiting).then(() => "ours", (error: Error) => error.name);
+        await vi.advanceTimersByTimeAsync(1000);
+        expect(await outcome).toBe("PeerLockUnavailable");
+        expect(onWaiting).not.toHaveBeenCalled();
+      }
+    } finally {
+      vi.unstubAllGlobals();
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps the lock it was granted when the request's promise fails later", async () => {
+    let fail: (error: unknown) => void = () => {};
+    vi.stubGlobal("navigator", { locks: { request: (_name: string, grant: () => unknown) => { grant(); return new Promise((_resolve, reject) => { fail = reject; }); } } });
+    try {
+      await expect(becomeThePeer("ghostly-peer", vi.fn())).resolves.toBeUndefined();
+      fail(new Error("released"));
+      await Promise.resolve();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("does not report waiting when the lock is granted at once", async () => {
     vi.useFakeTimers();
     vi.stubGlobal("navigator", { locks: { request: (_name: string, grant: () => unknown) => { grant(); return Promise.resolve(); } } });

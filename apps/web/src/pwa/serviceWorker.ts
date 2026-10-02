@@ -11,7 +11,8 @@ import type { FromWorker, ToWorker } from "../sw/messages";
 const SCRIPT = "/sw.js";
 
 function container(): ServiceWorkerContainer | null {
-  return "serviceWorker" in navigator && window.isSecureContext ? navigator.serviceWorker : null;
+  // Reading it can throw where the browser refuses service workers outright (site data blocked): then there is none.
+  try { return "serviceWorker" in navigator && window.isSecureContext ? navigator.serviceWorker ?? null : null; } catch { return null; }
 }
 
 function tell(worker: ServiceWorker | null | undefined, message: ToWorker): void {
@@ -26,9 +27,11 @@ function tell(worker: ServiceWorker | null | undefined, message: ToWorker): void
 export function registerServiceWorker(): void {
   const workers = container();
   if (!workers || !import.meta.env.PROD) return;
-  const register = () => void workers.register(SCRIPT, { scope: "/", updateViaCache: "none" }).catch(() => {
-    // Refused (private mode, storage off): the app works from the network, as it did before there was a worker.
-  });
+  const register = () => {
+    // Refused, by a rejection or by throwing (private mode, storage off, a browser that blocks workers): the app
+    // works from the network, as it did before there was a worker.
+    try { void workers.register(SCRIPT, { scope: "/", updateViaCache: "none" }).catch(() => {}); } catch { /* no worker */ }
+  };
   if (document.readyState === "complete") register();
   else addEventListener("load", register, { once: true });
 }

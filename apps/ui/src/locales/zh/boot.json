@@ -1,0 +1,12 @@
+{
+  "copied": "已复制",
+  "copy": "复制详情",
+  "missingCrypto": "Web Crypto 已关闭。它只在安全（https）地址上可用。",
+  "missingIndexedDB": "IndexedDB 已关闭或被拦截，无法保存聊天和密钥。",
+  "missingLocks": "缺少 Web Locks，Ghostly 无法确保只运行一次。",
+  "missingStorage": "网站数据被拦截，无法保存任何内容。",
+  "reload": "重新加载",
+  "title": "Ghostly 无法在此浏览器中运行",
+  "tryOther": "请退出无痕模式并允许网站数据，更新浏览器，或在其他浏览器中打开 Ghostly。",
+  "trySecure": "请通过 https:// 地址打开 Ghostly。"
+}
