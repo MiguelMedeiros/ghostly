@@ -159,6 +159,11 @@ export interface StoredGroup {
   left?: { at: number; admin: string; hubs?: string[]; bye?: GroupByeFrame };
   /** The group's pinned message (WISP 400 § Pinned message): the latest pin; `id` "" once unpinned. */
   pin?: StoredPin;
+  /**
+   * When the latest message of another member (`peer`) and the latest one that names me (`mention`) reached this
+   * device, where that is later than the message's own time (`cameAt`): what makes the group unread survives a restart.
+   */
+  came?: { peer?: number; mention?: number };
   /** A community group (`group-community/1`) I am in: its session state. Mesh groups use `state`. */
   community?: CommunityState;
   /**

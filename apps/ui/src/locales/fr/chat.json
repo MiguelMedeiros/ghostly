@@ -36,6 +36,7 @@
       "queued": "Pas encore d'accusé. Renvoyé automatiquement.",
       "sending": "En route.",
       "sent": "Envoyé. Pas encore d'accusé.",
+      "sentGroup": "Envoyé au groupe. Les groupes n'ont pas d'accusé.",
       "waiting": "Part tout seul quand votre contact est en ligne.",
       "waitingLiveContact": "Les fichiers ont besoin d'une liaison directe. La discussion de votre contact est en DHT seule : il part quand il l'autorise à nouveau.",
       "waitingLiveYou": "Les fichiers ont besoin d'une liaison directe. Cette discussion est en DHT seule : changez-le depuis l'icône de connexion."

@@ -131,10 +131,28 @@ describe("a pasted picture or file", () => {
     expect(sheet()).toBeNull();
   });
 
-  it("a composer with no files (a group) never takes a paste", () => {
+  it("a composer with no files and nothing to say about it never takes a paste", () => {
     composer({ onSendFile: undefined });
     expect(paste(field(), { files: [png()] })).toBe(true);
     expect(sheet()).toBeNull();
+  });
+
+  it("a group's composer has no files: a picture pasted or a file dropped there is told so, not ignored", async () => {
+    composer({ onSendFile: undefined, fileUnavailable: "Files are not part of groups yet" });
+    expect(paste(field(), { files: [png()] })).toBe(false);
+    expect(await screen.findByRole("alert")).toHaveTextContent("Files are not part of groups yet");
+    expect(sheet()).toBeNull();
+  });
+
+  it("a file dropped on a group is told so too, with no veil inviting the drop", async () => {
+    composer({ onSendFile: undefined, fileUnavailable: "Files are not part of groups yet" });
+    const column = screen.getByTestId("column"), data = transfer({ files: [png()] });
+    fireEvent.dragEnter(column, { dataTransfer: data });
+    expect(screen.queryByTestId("file-drop-overlay")).toBeNull();
+    const drop = createEvent.drop(column, { dataTransfer: data });
+    fireEvent(column, drop);
+    expect(drop.defaultPrevented).toBe(true);
+    expect(await screen.findByRole("alert")).toHaveTextContent("Files are not part of groups yet");
   });
 
   it("behind the lock screen, a paste opens nothing", () => {

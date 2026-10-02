@@ -46,6 +46,16 @@ describe("--reply", () => {
     const refused = fake({ error: "That message is not in this chat, or cannot be replied to", refused: true });
     await expect(callApi(refused.ctx, "chat.send", { chat: "Alice", text: "yes", reply: "nope" })).rejects.toMatchObject({ code: "refused" });
   });
+
+  it("in a group, a message the group does not have is not_found; out of the group is refused; a key on its way is unavailable", async () => {
+    const send = (error: string) => callApi(fake({ error }).ctx, "group.send", { group: "Crew", text: "yes", reply: "nope" });
+    await expect(send("That message is not in this chat, or cannot be replied to")).rejects.toMatchObject({ code: "not_found" });
+    await expect(send("That message cannot be replied to")).rejects.toMatchObject({ code: "not_found" });
+    await expect(send("You were removed from this group")).rejects.toMatchObject({ code: "refused" });
+    await expect(send("You are no longer in this group")).rejects.toMatchObject({ code: "refused" });
+    await expect(send("Member 3r69cgd5 holds a different membership history for epoch 4. Membership changes are halted; the admin must re-form the group.")).rejects.toMatchObject({ code: "refused" });
+    await expect(send("This epoch's key has not arrived yet. Wait for a member to catch you up.")).rejects.toMatchObject({ code: "unavailable" });
+  });
 });
 
 describe("replyTo on a message", () => {
