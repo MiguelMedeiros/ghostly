@@ -853,5 +853,6 @@ describe("DHT delivery: the relays' request budget", () => {
     await vi.advanceTimersByTimeAsync(200);
     expect(h.transport.publish.mock.calls.length).toBe(settled + 1);
     await h.bob.stop();
-  });
+  // Two and a half minutes of polls, each one opening and checking the contact's envelope: an envelope is now checked until ten minutes past its expiry, not dropped at it unchecked.
+  }, 20_000);
 });
