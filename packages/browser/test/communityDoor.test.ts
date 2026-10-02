@@ -195,6 +195,37 @@ describe("a community's door", { timeout: 120_000 }, () => {
     expect(bob.groups.communities.isHub(id)).toBe(true);
     expect(identityFromSeedB64(bob.groups.communities.session(id)!.state.seedB64).pubKeyZ32).toBe(bobKey);
   });
+
+  it("in a group's first minute, a member that just became a hub leaves the knock to the first hub", async () => {
+    // The first hub, alone in the beacon, reads it only when it republishes: for half a minute it does not know that
+    // the first member let in became a hub. That member used to count both of them at the door and, with the lower
+    // key, answer the next knock too: two hubs on one entry session, and nobody got in for minutes.
+    let lower = 0;
+    for (let run = 0; run < 40 && lower < 3; run++) {
+      const world = new CommunityWorld(undefined, RELAY_NETWORK);
+      const alice = world.add("alice"), made = world.now;
+      const { id, link } = await community(world, alice);
+      await world.run(5_000);
+      const bob = world.add("bob");
+      await bob.groups.joinByLink(link);
+      // Only where the newcomer's key is the lower one did it take the door (half the groups).
+      if (guestKey(bob) > world.view(alice, id)!.myKey!) continue;
+      lower++;
+      await world.until(() => bob.groups.communities.isHub(id), 60_000, 500);
+      expect(world.now - made).toBeLessThan(60_000);
+      const carol = world.add("carol");
+      await carol.groups.joinByLink(link);
+      const key = guestKey(carol);
+      let answering = 0;
+      const took = await world.until(() => {
+        answering = Math.max(answering, [alice, bob].filter(p => [...p.links.values()].some(e => e.kind === "host" && e.peer === key)).length);
+        return world.member(carol, id);
+      }, 60_000, 500, () => `${answering} hubs answered the knock`);
+      expect(answering).toBe(1);
+      expect(took).toBeLessThanOrEqual(12_000);
+    }
+    expect(lower).toBe(3);
+  });
 });
 
 describe("a joiner away while the door let it in", { timeout: 120_000 }, () => {
