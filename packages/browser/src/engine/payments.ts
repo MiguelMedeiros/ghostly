@@ -775,6 +775,12 @@ export class PaymentDesk {
       // The mint has not said what became of the redeem: nothing failed, so the contact is not told it did. The wallet
       // keeps asking, and `onSwapSettled` answers the contact once the mint has spoken.
       if (error instanceof SwapUnsettledError) return;
+      // Sent again while the wallet was finishing the first redeem: that one is in, and is what the contact is told.
+      const settled = this.payments.get(payment.id);
+      if (settled && settled.linkId === linkId && settled.direction === "in" && settled.kind === "payment" && settled.state === "settled") {
+        link?.sendPaymentResult({ id: payment.id, ok: true, credited: String(settled.amount) });
+        return;
+      }
       const reason = error instanceof Error ? error.message : String(error);
       link?.sendPaymentResult({ id: payment.id, ok: false, error: reason });
       // Said once in the chat (same id on a retransmission), so a refusal is never silent.

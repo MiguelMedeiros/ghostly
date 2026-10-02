@@ -473,6 +473,7 @@ export class CashuWallet {
     // The outputs the mint is asked to sign are written down with it, and asked for again as they are: whichever
     // request the mint acts on, what it issues is for these, and can be asked for again.
     const preview = await wallet.prepareMint("bolt11", quote.amount, { ...answer, quote: quote.quote });
+    // These quotes are not locked to a key (NUT-20), so no signature over the outputs has to be made again.
     if (saved) preview.outputData = saved;
     const written: StoredQuote = { ...quote, paid: true, outputs: saved ? quote.outputs : preview.outputData.map((o) => OutputData.serialize(o as OutputData)) };
     if (!quote.paid || !saved) await wrap((await store(STORES.quotes, "readwrite")).put(written));

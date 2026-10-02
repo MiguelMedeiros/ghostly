@@ -1003,6 +1003,20 @@ describe("a redeem the mint has not answered yet", () => {
     expect(sent.at(-1)).toMatchObject({ kind: "res", frame: { id: "p1", ok: true, credited: "100" } });
   });
 
+  it("sent again while the wallet finishes the first redeem, it is answered as received and never as refused", async () => {
+    const { desk, wallet, sent, texts } = setup();
+    await desk.start();
+    // The second redeem waits for the wallet, which finishes the first one meanwhile; the mint then refuses the token.
+    wallet.receiveToken.mockImplementationOnce(async () => {
+      seed("payments", [received as unknown as Record<string, unknown>]);
+      await desk.onSwapSettled(swap(received), true);
+      throw new Error("Token already spent");
+    });
+    await desk.onPayment("l", cashuPayment("p1", { requestId: "r" }));
+    expect(sent.map((s) => s.frame)).toEqual([{ id: "p1", ok: true, credited: "100" }, { id: "p1", ok: true, credited: "100" }]);
+    expect(texts()).toEqual(["⚡ 100 sats"]);
+  });
+
   it("a redeem the mint never made leaves the ecash the contact's, and the contact is told", async () => {
     const { desk, sent, state } = setup();
     await desk.start();
