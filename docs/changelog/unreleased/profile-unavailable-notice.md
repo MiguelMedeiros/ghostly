@@ -1,0 +1,4 @@
+---
+section: Fixed
+---
+- **A profile the app cannot open says so.** A profile last used by a newer Ghostly (a test build, or a newer version before a downgrade) could not be opened by an older one, and the older app still showed its chat list while it connected nobody, sent nothing and gave no error. It now shows one screen in place of the app: "This profile was last used by a newer version of Ghostly. Update the app to open it.", with the versions behind the ⓘ, a way to look for the update, and your other profiles one press away. When the data does not open for another reason (another window still holds it with an older version, no storage space, storage not allowed in a private window), the screen says which and what to try. Nothing is deleted, reset or downgraded. `ghostly` (the CLI) answers the same way: `engine` (exit 1) with a message that names both versions, from `ghostly status` too.

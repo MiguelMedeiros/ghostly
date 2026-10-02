@@ -398,4 +398,9 @@ export type EngineEvent =
   | { kind: "messages"; linkId: string; messages: StoredMessage[] }
   /** What changed in a history the client was sent whole already (`applyMessageChanges`): only those rows. */
   | ({ kind: "message-changes"; linkId: string } & MessageChanges)
-  | { kind: "call-signal"; linkId: string; signal: string };
+  | { kind: "call-signal"; linkId: string; signal: string }
+  /**
+   * The peer did not start: the profile's database did not open (`shared/idb.ts`). Sent to every client in place of
+   * its first state; no state follows, and every call fails with the same words.
+   */
+  | { kind: "start-failed"; failure: import("./idb").ProfileOpenFailure };
