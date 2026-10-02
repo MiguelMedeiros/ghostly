@@ -168,6 +168,13 @@ export function eventTime(taken: Map<string, Set<number>>, groupId: string, time
   return timestamp;
 }
 /**
+ * The moment something arrives, for the unread marks: this device's clock, never behind it. The engine's own clock is
+ * its last tick's time, up to a second old, while the page marks a group read by the device's clock as it is looked at:
+ * a message that came within that second of leaving the group counted as come before it was read, and the list showed
+ * nothing new. (A simulation's clock runs ahead of the device's: it stands.)
+ */
+export const arrivalNow = (tick: number): number => Math.max(tick, Date.now());
+/**
  * Keeps on the group's record when a member's message came, where that is later than what it holds: the record is
  * saved with the session right after (a message taken moves its state), so a message handed to me late still makes
  * the group unread after the app starts again. Read from the history alone, by its own time, it sorted among what I
@@ -1468,7 +1475,7 @@ export class Groups {
           ...mentionFields(m.mentions, mentioned), ...(m.reply && { replyTo: groupReply(m.reply, session.myKey) }), ...(m.forwarded && { forwarded: m.forwarded }), ...(m.card && { card: m.card }) };
         // A copy handed on stripped came first: the whole one adds what it lacked (WISP 9xx · Group Mesh § Catch-up).
         const stored = m.completes && this.host.completeMessage ? (await this.host.completeMessage(message), false) : await this.host.storeMessage(message);
-        const came = m.sender === session.myKey ? timestamp : cameAt(timestamp, stored, this.now());
+        const came = m.sender === session.myKey ? timestamp : cameAt(timestamp, stored, arrivalNow(this.now()));
         this.lastMessageAt.set(state.id, Math.max(this.lastMessageAt.get(state.id) ?? 0, came));
         if (mentioned) this.lastMentionAt.set(state.id, Math.max(this.lastMentionAt.get(state.id) ?? 0, came));
         if (m.sender !== session.myKey) this.lastPeerMessageAt.set(state.id, Math.max(this.lastPeerMessageAt.get(state.id) ?? 0, came));
