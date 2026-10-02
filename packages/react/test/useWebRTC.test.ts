@@ -673,7 +673,11 @@ describe("a headless caller starting over on a second offer", () => {
     act(() => { vi.advanceTimersByTime(RESTART_GRACE_MS); });
 
     expect(call.result.current.callState).toBe("idle");
-    expect(call.publishedKinds()).toEqual(["a", null]);
+    // The caller is told the call could not connect, as a hang-up tells it, and the signal is taken back after.
+    expect(call.publishedKinds()).toEqual(["a", "h"]);
+    expect(JSON.parse(call.published[call.published.length - 1]!)).toMatchObject({ t: "h", r: "u" });
+    act(() => { vi.advanceTimersByTime(5000); });
+    expect(call.publishedKinds()).toEqual(["a", "h", null]);
     expect(stream.getTracks().every((t) => t.stop.mock.calls.length > 0)).toBe(true);
     expect(call.fastPoll()).toBe(false);
   });
@@ -688,7 +692,8 @@ describe("a headless caller starting over on a second offer", () => {
     act(() => FakePeerConnection.instances[1].setIceState("failed"));
 
     expect(call.result.current.callState).toBe("idle");
-    expect(call.publishedKinds()).toEqual(["a", "a", null]);
+    act(() => { vi.advanceTimersByTime(5000); });
+    expect(call.publishedKinds()).toEqual(["a", "a", "h", null]);
   });
 
   it("hanging up while it waits ends the call, and the wait does nothing later", async () => {
