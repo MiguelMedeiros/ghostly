@@ -18,6 +18,7 @@ import { AccountBar } from "./AccountBar";
 import { AppBrand } from "./AppBrand";
 import { OfflineBanner } from "./OfflineBanner";
 import { InstallHint } from "./InstallApp";
+import { StorageKeeper } from "./StorageKeeper";
 import { UpdateBanner } from "./UpdateBanner";
 import {
   listSessions,
@@ -211,6 +212,7 @@ export function Sidebar() {
       <UpdateBanner />
       <OfflineBanner />
       <InstallHint hasChats={sessions.length > 0 || groups.length > 0} />
+      <StorageKeeper hasChats={sessions.length > 0 || groups.length > 0} />
       {showNewGroup && <NewGroupDialog onClose={() => setShowNewGroup(false)} onCreated={id => { setShowNewGroup(false); nav.conversation(groupPath(id), { share: "created" }); }} />}
       {showNewChat && <JoinDialog autoScan={scanOnOpen} onClose={() => setShowNewChat(false)} onJoin={keys => {setShowNewChat(false); nav.conversation(chatPath(ensureSession(keys))); refreshSessions();}}
         onOpenChat={id => { setShowNewChat(false); nav.conversation(chatPath(id)); }}
