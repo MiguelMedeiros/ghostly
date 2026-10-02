@@ -19,6 +19,7 @@ import { TransportOptions } from "./TransportOptions";
 import { ConnectionHistory } from "./TransportTimeline";
 import { DiscoveryHealth } from "./DiscoveryHealth";
 import { errorText } from "../lib/errorText";
+import { useWindowAway } from "../lib/windowAway";
 
 const subscribe = (listener: () => void) => engine.subscribe(listener);
 const snapshot = () => engine.state;
@@ -82,7 +83,9 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, pairing 
   const pairingOn = !!progress && stage !== "live" && stage !== "on-dht" && stage !== "failed";
   const pairingFailed = stage === "failed";
   const ticking = pairingOn && online;
-  const now = useNow(ticking);
+  // The clock of a pairing's stage ticks for someone looking: not while the window is hidden or behind others.
+  const away = useWindowAway();
+  const now = useNow(ticking && !away);
   // `now` only ticks; a stage that began after its last tick still reads from the clock.
   const inStage = progress ? Math.max(0, Math.max(now, Date.now()) - progress.since) : 0;
   const stageWords = progress ? words.stage(progress.stage, progress.role, progress.peerSeen) : "";
