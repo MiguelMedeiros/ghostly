@@ -1,7 +1,9 @@
 import { useId, useState } from "react";
 import type { DeviceGateView } from "@ghostly/browser/devices/gate";
 import { getBrowserHost } from "@ghostly/browser/host";
+import { engine } from "@ghostly/browser/platform/engine";
 import { useI18n } from "../contexts/I18nContext";
+import { useDeviceSet } from "../lib/devices";
 import { activeProfileId, listProfiles, switchProfile } from "../lib/profiles";
 
 const BUTTON = "px-4 py-2 rounded-lg text-sm font-semibold bg-accent text-on-accent hover:bg-accent-hover cursor-pointer";
@@ -17,16 +19,21 @@ export function DeviceStandby({ gate }: { gate: DeviceGateView }) {
   const [open, setOpen] = useState(false);
   const id = useId();
   const others = otherProfiles();
-  const title = gate.state === "standby"
-    ? (gate.activeDevice ? t("devices.standby.title.standby", { device: gate.activeDevice }) : t("devices.standby.title.standbyUnnamed"))
-    : t(`devices.standby.title.${gate.state}`);
+  const unfinished = gate.state === "standby" && !!gate.unfinished;
+  const title = unfinished ? t("devices.standby.unfinished.title")
+    : gate.state === "standby"
+      ? (gate.activeDevice ? t("devices.standby.title.standby", { device: gate.activeDevice }) : t("devices.standby.title.standbyUnnamed"))
+      : t(`devices.standby.title.${gate.state}`);
+  const hint = unfinished
+    ? (gate.activeDevice ? t("devices.standby.unfinished.hint", { device: gate.activeDevice }) : t("devices.standby.unfinished.hintUnnamed"))
+    : t(`devices.standby.hint.${gate.state}`);
   return (
-    <div role="status" data-testid="device-standby" data-state={gate.state} className="h-dvh overflow-y-auto grid place-items-center bg-chat-bg p-6 text-center">
+    <div role="status" data-testid="device-standby" data-state={gate.state} data-unfinished={unfinished ? "true" : undefined} className="h-dvh overflow-y-auto grid place-items-center bg-chat-bg p-6 text-center">
       <div className="max-w-md space-y-3">
         <div className="text-5xl" aria-hidden="true">👻</div>
         <p data-testid="device-standby-title" className="text-text-primary font-semibold break-words">{title}</p>
         <p className="flex items-start justify-center gap-1.5 text-text-secondary text-sm">
-          <span className="min-w-0 break-words">{t(`devices.standby.hint.${gate.state}`)}</span>
+          <span className="min-w-0 break-words">{hint}</span>
           <button type="button" data-testid="device-standby-info" aria-expanded={open} aria-controls={id} aria-label={t("common.moreInfo")} title={t("common.moreInfo")}
             onClick={() => setOpen(!open)}
             className="relative grid h-5 w-5 shrink-0 cursor-pointer place-items-center rounded-full text-text-muted transition-colors hover:text-accent aria-expanded:text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent before:absolute before:-inset-2.5 before:content-['']">
@@ -42,6 +49,8 @@ export function DeviceStandby({ gate }: { gate: DeviceGateView }) {
         {gate.state === "unreadable" && (
           <button type="button" data-testid="device-standby-retry" onClick={() => void tryAgain()} className={BUTTON}>{t("app.profileUnavailable.tryAgain")}</button>
         )}
+        {unfinished && <Unfinished />}
+        {gate.state !== "unreadable" && !unfinished && <Links />}
         {others.length > 0 && (
           <div className="flex flex-wrap justify-center gap-2 pt-2">
             {others.map((profile) => (
@@ -53,6 +62,46 @@ export function DeviceStandby({ gate }: { gate: DeviceGateView }) {
         )}
       </div>
     </div>
+  );
+}
+
+/**
+ * "Not finished" (WISP 06 § Adding a device): the active device never listed this one. Try again looks for its record
+ * once more; Remove takes the device set off this device, which then opens the profile it had before, as it was.
+ */
+function Unfinished() {
+  const { t } = useI18n();
+  const [busy, setBusy] = useState(false);
+  const act = (work: () => Promise<unknown>) => { setBusy(true); void work().then(() => tryAgain(), () => setBusy(false)); };
+  return (
+    <div className="flex flex-wrap justify-center gap-2">
+      <button type="button" data-testid="device-standby-finish" disabled={busy} onClick={() => act(async () => { if (!(await engine.call("deviceEnrollFinish")).finished) throw new Error("not yet"); })} className={BUTTON}>{t("devices.standby.unfinished.retry")}</button>
+      <button type="button" data-testid="device-standby-remove" disabled={busy} onClick={() => act(() => engine.call("deviceEnrollRemove"))} className={QUIET}>{t("devices.standby.unfinished.remove")}</button>
+    </div>
+  );
+}
+
+/** The device links this standby holds: each other device, whether it is connected, and a check that it answers. */
+function Links() {
+  const { t } = useI18n();
+  const view = useDeviceSet();
+  const [answer, setAnswer] = useState<Record<string, string>>({});
+  const others = view?.devices.filter((device) => !device.self) ?? [];
+  if (!others.length) return null;
+  const check = async (key: string) => {
+    try { const { ms } = await engine.call("devicePing", { key }); setAnswer((was) => ({ ...was, [key]: t("devices.section.answered", { ms: Math.max(1, Math.round(ms)) }) })); }
+    catch { setAnswer((was) => ({ ...was, [key]: t("devices.section.noAnswer") })); }
+  };
+  return (
+    <ul className="space-y-1.5 text-sm text-text-secondary" data-testid="device-standby-links">
+      {others.map((device) => (
+        <li key={device.key} data-testid="device-standby-link" data-status={device.status ?? "none"} className="flex flex-wrap items-center justify-center gap-2">
+          <span className="break-words">{t("devices.standby.link", { device: device.name, status: device.status === "live" ? t("devices.section.live") : t("devices.section.connecting") })}</span>
+          {device.status === "live" && <button type="button" data-testid="device-standby-check" onClick={() => void check(device.key)} className={QUIET}>{t("devices.section.check")}</button>}
+          {answer[device.key] && <span data-testid="device-standby-check-result" className="text-xs text-text-muted">{answer[device.key]}</span>}
+        </li>
+      ))}
+    </ul>
   );
 }
 

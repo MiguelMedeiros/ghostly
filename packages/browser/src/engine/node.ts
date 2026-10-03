@@ -64,6 +64,8 @@ import {
   LIMITS,
   RELAY_POLL_INTERVALS,
   RTC_CONFIG,
+  type DeviceKind,
+  type TurnNetwork,
   RelayTransport,
   createChatInvite,
   createIdentity,
@@ -103,8 +105,11 @@ import {
 } from "@ghostly/core";
 import type { AttentionCue, AttentionEvent, EngineImplementation } from "../shared/rpc";
 import { clearProfileStores, databaseName, fileStore, type StoredFile } from "../shared/idb";
-import { knownDeviceGate } from "../devices/gate";
+import { knownDeviceGate, viewOf, type DeviceGateView } from "../devices/gate";
 import { saveDeviceNetwork } from "../devices/network";
+import { EnrollCodeError, EnrollInviter, EnrollJoiner, EnrollRefusal, ghostLinkEnrollChannel, type EnrollView, type OpenEnrollChannel } from "../devices/enroll";
+import { DeviceLinks, deviceSetView, type DeviceSetView } from "../devices/links";
+import { readDeviceRecord } from "../devices/store";
 import { fileBytes } from "../shared/fileBytes";
 import { FileAppender, readStored, removeStored, storedSize, streamStored } from "../shared/storedFiles";
 import { FileDesk } from "./fileDesk";
@@ -442,6 +447,11 @@ export interface NodeEvents {
   /** Only what changed in a chat's or group's history; without it, `onMessages` gets the whole history on each change. */
   onMessageChanges?(linkId: string, changes: MessageChanges): void;
   onCallSignal(linkId: string, signal: string): void;
+  /**
+   * The device state changed so that this engine may no longer run (WISP 06): another device took the turn. The state
+   * is written; the pages show the standby screen and start again into the gate.
+   */
+  onDeviceGate?(gate: DeviceGateView): void;
 }
 
 /**
@@ -1439,6 +1449,9 @@ export class GhostlyNode implements EngineImplementation {
     this.emitState();
     if (this.networkOn) { this.hold.start(); this.startGroupEntries(); this.prepareSpare(STARTUP_QUIET_MS); }
     if (!this.limitedMode) this.openStartedWallets(fresh);
+    // The active device of a device set (WISP 06): its links to the other devices, and its turn record put again. A
+    // `single` profile never gets here: the gate read no record for it, and nothing more is asked.
+    if (!this.options.singleDevice && this.networkOn && knownDeviceGate()?.state === "active") void this.startDeviceSet().catch(() => {});
   }
 
   /** Every wallet's stored state, loaded: the first half of what `start()` does for money. */
@@ -1566,6 +1579,11 @@ export class GhostlyNode implements EngineImplementation {
     this.pinTimers.clear();
     this.stopGroupEntries();
     this.stopWatchingAdapters?.();
+    void this.enrollment?.cancel().catch(() => {});
+    this.enrollment = null;
+    const links = this.deviceLinks;
+    this.deviceLinks = null;
+    await links?.stop().catch(() => {});
     this.identities.stop();
     this.did.stop();
     this.nostrSocial.stop();
@@ -4398,7 +4416,7 @@ export class GhostlyNode implements EngineImplementation {
     if (wasOnline && !this.networkOn) await this.hold.stop();
     // A profile with a device set: its standbys go through these relays and servers, and stay off with the network.
     const gate = knownDeviceGate();
-    if (gate && gate.state !== "single" && (["online", "relays", "readRelays", "irohRelays", "iceServers"] as const).some((key) => key in settings)) {
+    if (((gate && gate.state !== "single") || this.deviceLinks) && (["online", "relays", "readRelays", "irohRelays", "iceServers"] as const).some((key) => key in settings)) {
       await this.syncDeviceNetwork().catch(() => {});
     }
     this.emitState();
@@ -4412,6 +4430,150 @@ export class GhostlyNode implements EngineImplementation {
   async syncDeviceNetwork(): Promise<void> {
     if (this.options.singleDevice) return;
     await saveDeviceNetwork(databaseName(), this.settings);
+  }
+
+  // -- one profile on several devices: adding a device (WISP 06 § Adding a device) -----------------------------------
+
+  /** The enrollment in progress on this device, either side: one at a time. */
+  private enrollment: EnrollInviter | EnrollJoiner | null = null;
+  /** The device links of the active device of a device set (WISP 06 § Terms). None for a `single` profile. */
+  private deviceLinks: DeviceLinks | null = null;
+  /** Another device took the turn while this engine ran: it stops, and tells the pages nothing more. */
+  private gatedOut = false;
+
+  /** The turn record's sources: the transport as given (the limited-mode guard does not apply to the turn's own path). */
+  private turnNetwork(): TurnNetwork {
+    const transport: PkarrTransport = this.options.transport ?? this.relays!;
+    if (!transport.turnRead || !transport.turnPut) throw new Error("This app cannot read which device is active");
+    return { turnRead: transport.turnRead.bind(transport), turnPut: transport.turnPut.bind(transport), ...(transport.turnWarm ? { turnWarm: transport.turnWarm.bind(transport) } : {}) };
+  }
+
+  /** WebRTC with the person's ICE servers, where this engine has WebRTC. */
+  private devicePeerConnection(): (() => RTCPeerConnection) | undefined {
+    if (typeof RTCPeerConnection === "undefined") return undefined;
+    return () => new RTCPeerConnection({ iceServers: [...(RTC_CONFIG.iceServers ?? []), ...this.settings.iceServers.filter((server) => !iceServerProblem(server))] });
+  }
+
+  /** The one-time session of an enrollment, over the transports a chat uses. */
+  private enrollLink(): OpenEnrollChannel {
+    return ghostLinkEnrollChannel({ transport: this.transport, createPeerConnection: this.devicePeerConnection(), nativeTransports: this.nativeFactories, pollIntervals: this.pollIntervals });
+  }
+
+  /** What an enrollment may not start without: a profile on several devices, an engine that may use the network. */
+  private enrollAllowed(): void {
+    if (this.options.singleDevice) throw new Error("enroll-single: A profile of the command line is on one device only");
+    if (this.limitedMode) throw new Error(LIMITED_MODE_ERROR);
+    if (!this.networkOn) throw new Error("enroll-offline: You are offline");
+  }
+
+  /**
+   * The active device's links to the other devices, and its stored turn record put again (WISP 06 § Publishing and
+   * reading: "The active device puts its stored bytes at start"). This is also what completes an enrollment that a
+   * crash stopped after the record with the new device was stored and before it was put.
+   */
+  private async startDeviceSet(): Promise<void> {
+    if (this.shuttingDown) return;
+    if (!this.deviceLinks) {
+      this.deviceLinks = new DeviceLinks({
+        profile: databaseName(), transport: this.transport, turn: this.turnNetwork(), pollIntervals: this.pollIntervals,
+        createPeerConnection: this.devicePeerConnection(), nativeTransports: this.nativeFactories, offline: !this.networkOn,
+        onChange: () => this.emitState(),
+      });
+      await this.deviceLinks.start();
+    } else await this.deviceLinks.refresh();
+    const keeper = await this.deviceLinks.turnKeeper();
+    const outcome = await keeper?.check(false);
+    // Another device took the turn: the keeper wrote this device's new state. The pages start again into the gate.
+    if (outcome?.kind === "gated" && !this.shuttingDown) {
+      const record = await readDeviceRecord(databaseName());
+      if (!record) return;
+      this.gatedOut = true;
+      this.events.onDeviceGate?.(viewOf(record));
+      await this.shutdown();
+    }
+  }
+
+  /**
+   * Add a device: the code for the new device, good for ten minutes. The lock password was checked by the page (it is
+   * a screen gate, which only the page knows). `name`: what this device is called in the set, when it gets its first one.
+   */
+  async deviceEnrollInvite({ name }: { name: string }): Promise<EnrollView> {
+    this.enrollAllowed();
+    await this.enrollment?.cancel().catch(() => {});
+    const inviter = new EnrollInviter({
+      profile: databaseName(), network: this.turnNetwork(), open: this.enrollLink(), name,
+      didSeed: () => this.did.deviceSetSeed(),
+      // The record now lists the new device: the network settings go into it, and the links start.
+      afterWrite: async () => { await this.syncDeviceNetwork(); await this.startDeviceSet(); },
+    });
+    this.enrollment = inviter;
+    try { return await inviter.start(); } catch (error) {
+      if (this.enrollment === inviter) this.enrollment = null;
+      if (error instanceof EnrollRefusal) throw new Error(`enroll-${error.reason}: ${error.message}`, { cause: error });
+      throw error;
+    }
+  }
+
+  /** The person compared the digits on this device (the active one). */
+  async deviceEnrollConfirm({ match }: { match: boolean }): Promise<EnrollView> {
+    if (!(this.enrollment instanceof EnrollInviter)) throw new Error("There are no digits to confirm");
+    return this.enrollment.confirm(match);
+  }
+
+  /** Stops the enrollment in progress, either side. Nothing it did not finish stays. */
+  async deviceEnrollCancel(): Promise<void> {
+    await this.enrollment?.cancel();
+  }
+
+  /** The enrollment in progress, or the last one, as the page shows it. */
+  deviceEnrollView(): EnrollView | null {
+    return this.enrollment?.current() ?? null;
+  }
+
+  /**
+   * This device joins the profile of the code (the new device's side). It becomes a standby of that profile here, in
+   * place of the profile it runs now, which must be new: nothing in it is lost (no chat, no group, no money).
+   */
+  async deviceEnrollJoin({ code, name, kind, app }: { code: string; name: string; kind?: DeviceKind; app?: string }): Promise<EnrollView> {
+    this.enrollAllowed();
+    const inUse = this.links.size > 0 || this.groups.views().length > 0 || this.walletView.balance > 0
+      || Object.values(this.walletView.networks ?? {}).some((network) => (network?.balance ?? 0) > 0);
+    if (inUse) throw new Error("enroll-in-use: This profile is in use here. Add a new profile first, and add the device from there.");
+    await this.enrollment?.cancel().catch(() => {});
+    const joiner = new EnrollJoiner({
+      profile: databaseName(), network: this.turnNetwork(), open: this.enrollLink(),
+      about: { name, kind: kind ?? (this.options.platform === "desktop" ? "desktop" : this.options.platform === "extension" ? "extension" : "web"), app: app ?? "" },
+      // A standby keeps the network settings beside its state: its links go through them (`devices/network.ts`).
+      afterWrite: () => this.syncDeviceNetwork(),
+    });
+    this.enrollment = joiner;
+    try { return await joiner.start(code); } catch (error) {
+      if (this.enrollment === joiner) this.enrollment = null;
+      if (error instanceof EnrollCodeError) throw new Error(`enroll-${error.reason}: ${error.message}`, { cause: error });
+      throw error;
+    }
+  }
+
+  /** The device set of this profile as the Devices section shows it; `single` with none. */
+  async deviceSet(): Promise<DeviceSetView> {
+    if (this.options.singleDevice) return { state: "single", devices: [] };
+    return deviceSetView(await readDeviceRecord(databaseName()), this.deviceLinks?.views() ?? []);
+  }
+
+  /** A ping over the device link to the device with this signing key, and how long its echo took. */
+  async devicePing({ key }: { key: string }): Promise<{ ms: number }> {
+    if (!this.deviceLinks) throw new Error("This device has no link to that device");
+    return { ms: await this.deviceLinks.ping(key) };
+  }
+
+  /** On the active device the enrollment it holds is finished: only a standby finishes one. */
+  async deviceEnrollFinish(): Promise<{ finished: boolean }> {
+    return { finished: true };
+  }
+
+  /** Only a standby whose enrollment did not finish removes it (`DeviceLinks`). */
+  async deviceEnrollRemove(): Promise<void> {
+    throw new Error("Only an enrollment that did not finish is removed here");
   }
 
   // -- internals -----------------------------------------------------------
@@ -5632,6 +5794,8 @@ export class GhostlyNode implements EngineImplementation {
 
   /** State changes arrive in bursts; the UI gets one snapshot per tick. */
   private emitState(delayMs = 50): void {
+    // Another device took the turn (WISP 06): the pages show the standby screen, and hear nothing more of this engine.
+    if (this.gatedOut) return;
     if (this.stateTimer) return;
     this.stateTimer = setTimeout(() => {
       this.stateTimer = null;

@@ -38,14 +38,6 @@ export function isIosBrowserTab(env: InstallEnv | null = currentInstallEnv()): b
   return env.standalone !== true && env.displayStandalone !== true;
 }
 
-/** Thrown where a device may not be enrolled: an iPhone or iPad tab. */
-export class HomeScreenRequiredError extends Error {
-  constructor() {
-    super("Add Ghostly to your Home Screen first.");
-    this.name = "HomeScreenRequiredError";
-  }
-}
-
 /**
  * Asks the browser to keep this origin's storage. True when it is kept (asked now or granted before), false when the
  * browser said no, null where it has no such thing. Never throws: a refusal is a warning, not a stop.

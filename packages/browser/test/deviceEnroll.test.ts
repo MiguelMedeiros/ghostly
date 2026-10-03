@@ -32,7 +32,6 @@ import { FakeTurnNetwork } from "./helpers/turnNetwork";
 
 const A = "ghostly_a", B = "ghostly_b", C = "ghostly_c";
 const dropKeys = () => new Promise<void>((resolve) => { const r = indexedDB.deleteDatabase(DEVICE_KEYS_DB); r.onsuccess = r.onerror = r.onblocked = () => resolve(); });
-const tick = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 const quick = { doneMs: 300, proofMs: 300, finishRounds: 100, finishEveryMs: 5 };
 const shortSleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, Math.min(ms, 5)));
 const noSleep = async () => {};

@@ -1,4 +1,88 @@
 {
+  "add": {
+    "adding": "Aggiunta di {{device}}…",
+    "button": "Aggiungi un dispositivo",
+    "codeHint": "Sull’altro dispositivo, apri Ghostly e scegli Aggiungi questo dispositivo al mio profilo. Poi inquadra questo codice.",
+    "confirm": "{{device}} mostra le stesse cifre?",
+    "done": "{{device}} aggiunto. È in attesa.",
+    "finish": "Fatto",
+    "match": "Corrispondono",
+    "noMatch": "Non corrispondono",
+    "notPublished": "Gli altri tuoi dispositivi lo vedranno appena questo dispositivo raggiunge la rete.",
+    "refused": "Un altro dispositivo ha provato a usare questo codice. Non ha ricevuto nulla.",
+    "title": "Aggiungi un dispositivo",
+    "tryAgain": "Ricomincia",
+    "valid": "Valido per 10 minuti"
+  },
+  "fail": {
+    "cancelled": "Interrotto. Non è stato aggiunto nulla.",
+    "chat": "Questo è un invito a una chat. Usa Unisciti nell’elenco delle chat.",
+    "damaged": "Questo codice è danneggiato. Creane uno nuovo.",
+    "digits": "Le cifre non corrispondevano. Non è stato aggiunto nulla.",
+    "dropped": "La connessione è caduta. Non è stato aggiunto nulla.",
+    "elsewhere": "Questo profilo ha già dispositivi altrove. Aggiungi questo dispositivo da quello che usi ora.",
+    "expired": "Il tempo di questo codice è scaduto. Creane uno nuovo.",
+    "failed": "Qualcosa è andato storto. Non è stato aggiunto nulla.",
+    "full": "Questo profilo ha già 4 dispositivi.",
+    "inUse": "Questo profilo è in uso qui. Crea prima un nuovo profilo, poi aggiungi il dispositivo da lì.",
+    "notGhostly": "Questo non è un codice per aggiungere un dispositivo.",
+    "offline": "Sei offline.",
+    "proof": "L’altro dispositivo non è riuscito a dimostrare chi è. Non è stato aggiunto nulla.",
+    "replaced": "Questo dispositivo non è più quello attivo.",
+    "set": "Questo profilo è già su più dispositivi.",
+    "typo": "Questo codice contiene un errore di battitura. Controllalo o creane uno nuovo.",
+    "unanswered": "L’altro tuo dispositivo non ha risposto. Controlla il codice o creane uno nuovo.",
+    "unreachable": "Impossibile verificare quale dispositivo è attivo. Controlla la connessione.",
+    "update": "Un Ghostly più recente ha creato questo codice. Aggiorna per usarlo.",
+    "used": "Un altro dispositivo ha usato questo codice per primo. Creane uno nuovo."
+  },
+  "join": {
+    "addThis": "Aggiungi questo dispositivo al mio profilo",
+    "already": "Uso già Ghostly",
+    "confirm": "I due dispositivi mostrano queste cifre?",
+    "confirmOn": "Conferma sull’altro tuo dispositivo.",
+    "connecting": "Connessione all’altro tuo dispositivo…",
+    "continue": "Continua",
+    "done": "Questo dispositivo è in attesa per il tuo profilo.",
+    "finishing": "Completamento…",
+    "homeScreen": "Prima aggiungi Ghostly alla schermata Home.",
+    "homeScreenInfo": "Su iPhone e iPad una scheda del browser tiene i dati a parte, e il browser può cancellarli. L’app nella schermata Home li conserva.",
+    "name": "Dai un nome a questo dispositivo",
+    "nameHint": "Fino a 16 caratteri.",
+    "otherDevice": "l’altro tuo dispositivo",
+    "persist": "Questo browser può cancellare i dati di Ghostly. Tieni una copia su {{device}}.",
+    "restore": "Ripristina un backup",
+    "unfinished": "Non completato: l’altro tuo dispositivo non ha ancora aggiunto questo."
+  },
+  "password": {
+    "confirm": "Digitala di nuovo",
+    "current": "Password di blocco",
+    "keep": "Un profilo su più dispositivi mantiene la sua password di blocco, di 8 caratteri o più.",
+    "longerHint": "Un profilo su più dispositivi richiede 8 caratteri o più.",
+    "longerTitle": "Scegli una password più lunga",
+    "mismatch": "Le due password non sono uguali.",
+    "new": "Nuova password",
+    "next": "Avanti",
+    "setHint": "Senza password, chiunque abbia uno dei tuoi dispositivi può prendere questo profilo.",
+    "setTitle": "Prima imposta una password",
+    "tooShort": "Usa 8 caratteri o più.",
+    "typeTitle": "Digita la tua password di blocco",
+    "wrong": "Password errata."
+  },
+  "section": {
+    "active": "Attivo",
+    "answered": "Ha risposto in {{ms}} ms",
+    "check": "Verifica",
+    "connecting": "Non connesso",
+    "hint": "Usa questo profilo su un altro dispositivo. Un solo dispositivo è attivo alla volta.",
+    "info": "Solo il dispositivo attivo invia, riceve e paga, così i tuoi messaggi e i tuoi soldi non sono mai in due posti. Sposta il profilo quando vuoi.",
+    "live": "Connesso",
+    "noAnswer": "Nessuna risposta",
+    "standby": "In attesa",
+    "thisActive": "Questo dispositivo · Attivo",
+    "thisStandby": "Questo dispositivo · In attesa",
+    "title": "Dispositivi"
+  },
   "standby": {
     "hint": {
       "moving": "Apri Ghostly sul dispositivo che usi ora per finire.",
@@ -10,6 +94,7 @@
       "unreadable": "Riavvia l'app o il dispositivo, poi riprova."
     },
     "info": "Un solo dispositivo alla volta invia, riceve e paga, così i tuoi messaggi e il tuo denaro non sono mai in due posti.",
+    "link": "{{device}}: {{status}}",
     "title": {
       "moving": "Ci siamo quasi",
       "releasing": "Spostamento su un altro dispositivo",
@@ -19,6 +104,13 @@
       "superseded": "Questo dispositivo è stato sostituito",
       "taking": "Completamento",
       "unreadable": "Ghostly non è riuscito a verificare quale dispositivo è attivo."
+    },
+    "unfinished": {
+      "hint": "Ricomincia su {{device}}.",
+      "hintUnnamed": "Ricomincia sull’altro tuo dispositivo.",
+      "remove": "Rimuovi",
+      "retry": "Riprova",
+      "title": "Non completato"
     },
     "unreadableInfo": "Ghostly legge quale dei tuoi dispositivi è attivo prima di avviare qualsiasi cosa. Qui non ha funzionato, quindi nulla è stato avviato, nulla è stato inviato e nulla è stato modificato."
   }

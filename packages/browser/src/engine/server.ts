@@ -46,6 +46,8 @@ export class EngineServer implements PeerServer {
           else this.offers.delete(linkId);
           this.broadcast({ kind: "call-signal", linkId, signal });
         },
+        // Another device took the turn (WISP 06): the pages show the standby screen and start again into the gate.
+        onDeviceGate: (gate) => this.broadcast({ kind: "device-gate", gate }),
       },
       options,
     );

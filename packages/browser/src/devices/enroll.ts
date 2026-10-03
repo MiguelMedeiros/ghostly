@@ -5,7 +5,7 @@ import {
   type DeviceFrame, type DeviceInviteRefusal, type DeviceKind, type EnrollCancelReason, type EnrollSlot, type LinkParams, type NativeEndpoint, type NativeTransport,
   type PkarrTransport, type PollIntervals, type Signer, type TurnNetwork, type TurnRead,
 } from "@ghostly/core";
-import { HomeScreenRequiredError, isIosBrowserTab, type InstallEnv } from "./install";
+import { isIosBrowserTab, type InstallEnv } from "./install";
 import { DeviceSetError, deviceIdentity, firstTurn, openTurnKeeper } from "./setup";
 import { createDeviceSigningKey, type DeviceSigningKey } from "./signingKey";
 import { MAX_DEVICES, type DeviceRecord, type DeviceSlot } from "./state";

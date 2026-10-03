@@ -1,4 +1,88 @@
 {
+  "add": {
+    "adding": "Adding {{device}}…",
+    "button": "Add a device",
+    "codeHint": "On the other device, open Ghostly and choose Add this device to my profile. Then scan this code.",
+    "confirm": "Does {{device}} show the same digits?",
+    "done": "{{device}} added. It is on standby.",
+    "finish": "Done",
+    "match": "They match",
+    "noMatch": "They don't match",
+    "notPublished": "Your other devices see it once this device reaches the network.",
+    "refused": "Another device tried to use this code. It got nothing.",
+    "title": "Add a device",
+    "tryAgain": "Start again",
+    "valid": "Valid for 10 minutes"
+  },
+  "fail": {
+    "cancelled": "Stopped. Nothing was added.",
+    "chat": "This is a chat invite. Use Join in the chat list.",
+    "damaged": "This code is damaged. Make a new one.",
+    "digits": "The digits did not match. Nothing was added.",
+    "dropped": "The connection dropped. Nothing was added.",
+    "elsewhere": "This profile already has devices elsewhere. Add this device from the device you use now.",
+    "expired": "This code ran out of time. Make a new one.",
+    "failed": "Something went wrong. Nothing was added.",
+    "full": "This profile has 4 devices already.",
+    "inUse": "This profile is in use here. Add a new profile first, then add the device from there.",
+    "notGhostly": "This is not a code to add a device.",
+    "offline": "You are offline.",
+    "proof": "The other device could not prove itself. Nothing was added.",
+    "replaced": "This device is no longer the active one.",
+    "set": "This profile is already on several devices.",
+    "typo": "This code has a typo. Check it, or make a new one.",
+    "unanswered": "Your other device did not answer. Check the code, or make a new one.",
+    "unreachable": "Can't check which device is active. Check your connection.",
+    "update": "A newer Ghostly made this code. Update to use it.",
+    "used": "Another device used this code first. Make a new one."
+  },
+  "join": {
+    "addThis": "Add this device to my profile",
+    "already": "I already use Ghostly",
+    "confirm": "Do both devices show these digits?",
+    "confirmOn": "Confirm on your other device.",
+    "connecting": "Connecting to your other device…",
+    "continue": "Continue",
+    "done": "This device is on standby for your profile.",
+    "finishing": "Finishing…",
+    "homeScreen": "Add Ghostly to your Home Screen first.",
+    "homeScreenInfo": "On iPhone and iPad a browser tab keeps its own storage, which the browser may clear. The app on the Home Screen keeps it.",
+    "name": "Name this device",
+    "nameHint": "Up to 16 characters.",
+    "otherDevice": "your other device",
+    "persist": "This browser may clear Ghostly's data. Keep a copy on {{device}}.",
+    "restore": "Restore a backup",
+    "unfinished": "Not finished: your other device has not listed this one yet."
+  },
+  "password": {
+    "confirm": "Type it again",
+    "current": "Lock password",
+    "keep": "A profile on several devices keeps its lock password, 8 characters or more.",
+    "longerHint": "A profile on several devices needs 8 characters or more.",
+    "longerTitle": "Choose a longer password",
+    "mismatch": "The two passwords are not the same.",
+    "new": "New password",
+    "next": "Next",
+    "setHint": "Without a password, anyone holding one of your devices can take this profile.",
+    "setTitle": "Set a password first",
+    "tooShort": "Use 8 characters or more.",
+    "typeTitle": "Type your lock password",
+    "wrong": "Wrong password."
+  },
+  "section": {
+    "active": "Active",
+    "answered": "Answered in {{ms}} ms",
+    "check": "Check",
+    "connecting": "Not connected",
+    "hint": "Use this profile on another device. One device is active at a time.",
+    "info": "Only the active device sends, receives and pays, so your messages and money are never in two places. Move the profile whenever you like.",
+    "live": "Connected",
+    "noAnswer": "No answer",
+    "standby": "Standby",
+    "thisActive": "This device · Active",
+    "thisStandby": "This device · Standby",
+    "title": "Devices"
+  },
   "standby": {
     "hint": {
       "moving": "Open Ghostly on the device you use now to finish.",
@@ -10,6 +94,7 @@
       "unreadable": "Restart the app or the device, then try again."
     },
     "info": "Only one device sends, receives and pays at a time, so your messages and money are never in two places.",
+    "link": "{{device}}: {{status}}",
     "title": {
       "moving": "Almost there",
       "releasing": "Moving to another device",
@@ -19,6 +104,13 @@
       "superseded": "This device was replaced",
       "taking": "Finishing",
       "unreadable": "Ghostly could not check which device is active."
+    },
+    "unfinished": {
+      "hint": "Start again on {{device}}.",
+      "hintUnnamed": "Start again on your other device.",
+      "remove": "Remove",
+      "retry": "Try again",
+      "title": "Not finished"
     },
     "unreadableInfo": "Ghostly reads which of your devices is active before it starts anything. That did not work here, so nothing was started, nothing was sent and nothing was changed."
   }
