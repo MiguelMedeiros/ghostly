@@ -97,6 +97,27 @@ describe("the active device's read before its engine starts", () => {
     expect((await readDeviceRecord(databaseName()))?.state).toBe("active");
   });
 
+  it("an enrollment whose record was put and whose write was lost is taken back first, not read as a clone", async () => {
+    const network = new FakeTurnNetwork();
+    const key = await createDeviceSigningKey(databaseName(), { forceSeed: true });
+    const alone = [{ key: key.publicKey, name: "Desktop" }, null, null, null];
+    const stored = await signTurnPacket(keys, { turn: N, rev: 0, author: 0, active: 0, slots: alone, instance: new Uint8Array(8).fill(1) }, (bytes) => key.sign(bytes));
+    // The record listing the phone went out; the write that stored it here did not land (a crash between the two).
+    const withPhone = [{ key: key.publicKey, name: "Desktop" }, { key: phone.publicKey, name: "Phone" }, null, null];
+    network.seed(await signTurnPacket(keys, { turn: N, rev: 1, author: 0, active: 0, slots: withPhone, instance: new Uint8Array(8).fill(1) }, (bytes) => key.sign(bytes)));
+    await putDeviceRecord({
+      v: 1, profile: databaseName(), state: "active", saved: 1, turn: N, rev: 0, d: toBase64Url(D), ownSlot: 0, activeSlot: 0, signingKey: key.kind,
+      deviceSet: [{ key: toBase64Url(key.publicKey), name: "Desktop" }], turnPacket: toBase64Url(stored), takeovers: 0, earlierSets: [],
+      unfinishedGrants: [{ key: toBase64Url(phone.publicKey), name: "Phone", at: 1 }],
+    } satisfies DeviceRecord);
+    const server = await createPeerServer({}, { turn: network });
+    expect(server).toBeInstanceOf(EngineServer);
+    const after = await readDeviceRecord(databaseName());
+    expect(after?.state).toBe("active");
+    expect(after?.deviceSet.flatMap((slot) => (slot ? [slot.name] : []))).toEqual(["Desktop", "Phone"]);
+    expect(after?.unfinishedGrants).toEqual([]);
+  });
+
   it("a profile with no device set reads nothing and starts as before", async () => {
     const network = new FakeTurnNetwork();
     const server = await createPeerServer({}, { turn: network });

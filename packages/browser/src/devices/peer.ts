@@ -4,6 +4,7 @@ import { DEFAULT_IROH_RELAYS, createIrohWebEndpoint } from "../platform/irohWeb"
 import type { PkarrTransport, TurnNetwork } from "@ghostly/core";
 import { openDeviceGate, replaceDeviceGate, viewOf, type DeviceGate, type DeviceGateView } from "./gate";
 import { openTurnKeeper } from "./setup";
+import { recoverEnrollment } from "./enroll";
 import type { TurnOutcome } from "./turn";
 import { DeviceLinkOnlyServer, type DeviceLinkEngine, type PeerServer } from "./linkOnly";
 import { DeviceLinks } from "./links";
@@ -89,6 +90,9 @@ export async function activeStart(gate: DeviceGate, options: NodeOptions | undef
   if (!record || record.state !== "active" || record.network?.off) return {};
   const network = given === undefined ? turnPathOf(standbyNetwork(record.network, options?.transport).transport) : given;
   if (!network) return {};
+  // An enrollment whose own record was put and whose write of it was lost takes that record back first: the read below
+  // would take it for a clone of this device and stop it (as `GhostlyNode.startDeviceSet` does, in the same order).
+  await recoverEnrollment(gate.profile, network).catch(() => false);
   let outcome: TurnOutcome | null;
   try {
     const keeper = await openTurnKeeper(gate.profile, network);
