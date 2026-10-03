@@ -61,8 +61,9 @@
       "unreachable": "Não foi possível alcançar {{device}}. Ele precisa estar ligado, com o Ghostly aberto.",
       "version": "O Ghostly foi atualizado no meio do caminho. Nada mudou.",
       "wallet": "Uma carteira daqui não pode ser movida com esta versão do Ghostly.",
-      "woken": "Abra o Ghostly em {{device}} e deixe-o aberto."
+      "woken": "Abra o Ghostly em {{device}} e deixe-o aberto. Um aviso foi enviado a ele."
     },
+    "keepOpen": "Deixe o Ghostly aberto.",
     "later": "Trazer arquivos grandes depois",
     "laterNote": "{{size}} de arquivos grandes ficam em {{device}} por enquanto.",
     "metered": "Você está usando dados móveis.",
@@ -79,13 +80,16 @@
       "authorizing": "Conferindo a senha",
       "checking": "Conferindo",
       "connecting": "Conectando a {{device}}",
+      "copy": "Copiando arquivos",
       "copying": "Copiando arquivos · {{done}} de {{total}}",
       "done": "Este dispositivo agora está ativo.",
       "doneGiver": "{{device}} agora está ativo.",
       "finishing": "Terminando: esperando pela rede",
       "keepUsing": "Você pode continuar usando o Ghostly.",
+      "paused": "Parou em {{percent}}%. Continua quando os dois dispositivos estiverem online.",
       "ready": "Preparando",
       "rest": "Copiando o resto",
+      "settle": "Verificando qual dispositivo está ativo",
       "settling": "Verificando qual dispositivo está ativo · cerca de 30 segundos",
       "settlingInfo": "O Ghostly espera para ter certeza de que nenhum outro dispositivo assumiu no mesmo momento.",
       "switching": "Trocando"
@@ -114,6 +118,15 @@
     "persist": "Este navegador pode apagar os dados do Ghostly. Mantenha uma cópia em {{device}}.",
     "restore": "Restaurar um backup",
     "unfinished": "Não concluído: seu outro dispositivo ainda não listou este."
+  },
+  "limited": {
+    "banner": "Offline até o Ghostly verificar qual dispositivo está ativo",
+    "bannerHint": "As mensagens que você escrever esperam até lá.",
+    "hint": "Confira sua conexão.",
+    "info": "Antes de ficar online, o Ghostly verifica que nenhum outro dispositivo pegou este perfil. Iniciar mesmo assim abre o perfil aqui offline: você pode ler e escrever, e nada é enviado, pago ou recebido até a verificação funcionar. O Ghostly tenta de novo a cada 30 segundos.",
+    "startAnyway": "Iniciar mesmo assim",
+    "title": "Não foi possível verificar qual dispositivo está ativo",
+    "tryAgain": "Tentar de novo"
   },
   "lost": {
     "cashu": "Cashu: troque todo o ecash",
@@ -153,7 +166,7 @@
   "remove": {
     "button": "Remover",
     "copy": "Se ele tinha uma cópia do seu perfil, essa cópia continua nele, sem criptografia.",
-    "done": "{{device}} foi removido. Seus outros dispositivos recebem a mudança na próxima vez que abrirem o Ghostly.",
+    "doneInfo": "Ele não pode mais pegar este perfil. Seus outros dispositivos recebem a mudança na próxima vez que abrirem o Ghostly.",
     "fail": {
       "busy": "Outra coisa está mudando seus dispositivos. Tente de novo daqui a pouco.",
       "failed": "Algo deu errado. Nada foi mudado.",
@@ -183,6 +196,7 @@
     "done": "Novo segredo dos dispositivos criado.",
     "hint": "Um dispositivo que não está nesta lista não poderá mais usar este perfil.",
     "info": "Use quando um dispositivo ainda puder ter o segredo dos dispositivos deste perfil, como um do qual você assumiu. Seus outros dispositivos recebem o novo segredo na próxima vez que abrirem o Ghostly.",
+    "make": "Criar",
     "notNow": "Agora não",
     "offer": "Você assumiu no lugar de {{device}}. Ele ainda tem o segredo dos dispositivos deste perfil.",
     "offerUnnamed": "Você assumiu no lugar de outro dispositivo. Ele ainda tem o segredo dos dispositivos deste perfil.",
@@ -191,15 +205,19 @@
   "section": {
     "active": "Ativo",
     "answered": "Respondeu em {{ms}} ms",
-    "check": "Verificar",
+    "check": "Verificar conexão",
+    "checking": "Verificando…",
     "connecting": "Não conectado",
     "foreign": "Outra coisa fechou seu conjunto antigo de dispositivos.",
-    "hint": "Use este perfil em outro dispositivo. Um dispositivo fica ativo por vez.",
     "info": "Só o dispositivo ativo envia, recebe e paga, para que suas mensagens e seu dinheiro nunca estejam em dois lugares. Mova o perfil quando quiser.",
     "keepAwake": "Manter este computador acordado",
     "keepAwakeHint": "Para que seu celular possa assumir enquanto você está fora.",
+    "lead": "Use este perfil em outro dispositivo",
+    "leadHint": "Um dispositivo fica ativo por vez.",
     "live": "Conectado",
+    "menu": "Opções de {{device}}",
     "noAnswer": "Sem resposta",
+    "removed": "Removido",
     "standby": "Em espera",
     "thisActive": "Este dispositivo · Ativo",
     "thisStandby": "Este dispositivo · Em espera",
@@ -219,16 +237,18 @@
       "superseded": "Outro dispositivo assumiu sem este. Este dispositivo parou.",
       "supersededBy": "{{device}} assumiu sem este dispositivo. Este dispositivo parou.",
       "taking": "Aguardando a rede.",
-      "unreadable": "Reinicie o app ou o dispositivo e tente de novo."
+      "unreadable": "Nada foi iniciado."
     },
     "info": "Só um dispositivo envia, recebe e paga de cada vez, para que suas mensagens e seu dinheiro nunca estejam em dois lugares.",
     "link": "{{device}}: {{status}}",
+    "links": "Seus dispositivos",
     "notice": {
       "hint": "Se esta lista parecer errada, não use este dispositivo.",
       "ok": "OK",
       "title": "Seus dispositivos agora são: {{devices}}",
       "wrong": "Isto está errado"
     },
+    "others": "Outros perfis",
     "reenroll": {
       "hint": "Adicione este dispositivo de novo a partir do dispositivo que você usa agora.",
       "title": "Seus dispositivos mudaram enquanto este estava desligado"
@@ -241,7 +261,7 @@
       "standbyUnnamed": "Ativo em outro dispositivo",
       "superseded": "Este dispositivo foi substituído",
       "taking": "Concluindo",
-      "unreadable": "O Ghostly não conseguiu verificar qual dispositivo está ativo."
+      "unreadable": "Não foi possível ler o estado deste dispositivo"
     },
     "unfinished": {
       "hint": "Comece de novo em {{device}}.",
@@ -250,7 +270,7 @@
       "retry": "Tentar de novo",
       "title": "Não concluído"
     },
-    "unreadableInfo": "O Ghostly lê qual dos seus dispositivos está ativo antes de iniciar qualquer coisa. Isso não funcionou aqui, então nada foi iniciado, nada foi enviado e nada foi alterado."
+    "unreadableInfo": "O Ghostly lê qual dos seus dispositivos está ativo antes de iniciar qualquer coisa. Isso não funcionou aqui, então nada foi iniciado, nada foi enviado e nada foi alterado. Reinicie o app ou o dispositivo e tente de novo."
   },
   "takeover": {
     "checking": "Verificando qual dispositivo está ativo · cerca de 30 segundos",
@@ -270,12 +290,14 @@
     "info": "Mensagens e dinheiro que chegaram a {{device}} depois disso não estão aqui. Se {{device}} voltar, ele para, sem dizer nada aos seus contatos.",
     "lost": "Meu outro dispositivo foi perdido ou quebrou",
     "lostNo": "Só quebrou ou foi apagado",
+    "lostNoHint": "Ele para se voltar a funcionar.",
     "lostQuestion": "Perdido ou roubado?",
     "lostRace": "Outro dispositivo assumiu no mesmo momento. Este dispositivo está em espera.",
     "lostYes": "Perdido ou roubado",
+    "lostYesHint": "Depois de assumir, uma lista de passos ajuda a proteger seu dinheiro e suas conversas.",
     "notMe": "Não fui eu",
-    "ownSetHint": "Este dispositivo começa um conjunto de dispositivos próprio. Depois, adicione seus outros dispositivos a ele de novo.",
-    "ownSetRemoved": "Outro dispositivo seu começou um conjunto próprio antes. Adicione este dispositivo de novo a partir dele.",
+    "ownSetHint": "Este dispositivo recomeça como seu único dispositivo. Depois, adicione seus outros dispositivos de novo.",
+    "ownSetRemoved": "Outro dispositivo seu recomeçou antes. Adicione este dispositivo de novo a partir dele.",
     "ownSetWait": "Esperando a rede. Tente de novo em instantes.",
     "restoredHint": "Este dispositivo tem uma cópia de um backup. Nada é iniciado até você assumir.",
     "title": "Assumir sem {{device}}?",

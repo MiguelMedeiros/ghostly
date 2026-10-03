@@ -9,6 +9,7 @@
   "open": "Open profile",
   "othersNew": "new messages in another profile",
   "othersUnread": "unread messages in another profile",
+  "standby": "Standby",
   "switchTo": "Switch to {{name}}",
   "switching": "Opening {{name}}…",
   "title": "Switch profile",

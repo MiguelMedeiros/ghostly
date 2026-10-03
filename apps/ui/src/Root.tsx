@@ -23,6 +23,7 @@ import { useI18n, useT } from "./contexts/I18nContext";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { ProfileGate } from "./components/ProfileUnavailable";
 import { DeviceStandby } from "./components/DeviceStandby";
+import { LimitedStartGate } from "./components/devices/LimitedStart";
 import { useDeviceGate } from "./hooks/useDeviceGate";
 import { INVITE_REFUSAL_MESSAGE, chatPath, classifyInvite, inviteRouteCode, protocolLinkCode, readInvite } from "./lib/url";
 import { onJoinNotice, showJoinNotice, type JoinNoticeKey } from "./lib/joinNotice";
@@ -217,6 +218,8 @@ export function Root() {
                 <UpdateProvider>
                   {/* A profile whose database did not open shows why, and nothing that looks alive. */}
                   <ProfileGate>
+                  {/* A start that could not check which device is active asks first (WISP 06 § When a device checks). */}
+                  <LimitedStartGate>
                   <AttentionFeedback />
                   <Routes>
                     {/* What the intakes above take out of the history at once (a group's link, an invite code, a
@@ -241,6 +244,7 @@ export function Root() {
                       <Route path="/scan" element={<Home />} />
                     </Route>
                   </Routes>
+                  </LimitedStartGate>
                   </ProfileGate>
                 </UpdateProvider>
               </LockGate>

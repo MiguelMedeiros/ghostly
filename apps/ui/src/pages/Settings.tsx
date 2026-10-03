@@ -28,6 +28,7 @@ import { CATEGORY_PREVIEW, categoryOn } from "../lib/cues";
 import { playSound } from "../lib/sounds";
 import { clearAllData } from "../lib/clearData";
 import { lockPasswordMin, useDeviceSet } from "../lib/devices";
+import { useEngineState } from "../lib/identities";
 import { engine } from "@ghostly/browser/platform/engine";
 import {
   hashPassword,
@@ -123,6 +124,10 @@ export function Settings() {
   // Until the answer comes (or when the call fails), as if there were one: the stricter rule.
   const devices = useDeviceSet(0);
   const deviceSet = devices === null || devices.state !== "single";
+  // The push address contacts hold is another device's (WISP 06 § Push and the phone): this one is not woken by it.
+  const engineState = useEngineState();
+  const wakeAway = engineState?.wakeOwner === "away" && !!engineState.settings.wake;
+  const wakeAwayDevice = wakeAway ? devices?.devices.find((device) => device.key === engineState?.settings.wake?.device)?.name : undefined;
 
   useEffect(() => {
     setStorageInfo(getStorageUsage());
@@ -393,7 +398,7 @@ export function Settings() {
         </Row>
         {canWake && (
           <Row label={t("pwa.wake")} testId="settings-wake-row" info={t("pwa.wakeInfo")}
-            hint={<span role="status">{wakeError || t(wakeOn ? "pwa.wakeOnHint" : "pwa.wakeHint")}</span>}>
+            hint={<span role="status" data-testid="settings-wake-hint">{wakeError || (wakeAway ? (wakeAwayDevice ? t("pwa.wakeAway", { device: wakeAwayDevice }) : t("pwa.wakeAwayUnnamed")) : t(wakeOn ? "pwa.wakeOnHint" : "pwa.wakeHint"))}</span>}>
             {wakeOn && <Button data-testid="settings-wake-rotate" disabled={wakeBusy} onClick={() => void changeWake(true)}>{t("pwa.wakeRotate")}</Button>}
             <Switch testId="settings-wake" label={t("pwa.wake")} checked={wakeOn} disabled={wakeBusy} onChange={(on) => void changeWake(on)} />
           </Row>

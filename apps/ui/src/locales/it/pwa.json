@@ -28,6 +28,8 @@
   "shareWaiting": "Ricezione di ciò che è stato condiviso...",
   "stepsThen": "Poi apri Ghostly dalla sua nuova icona.",
   "wake": "Svegliami ad app chiusa",
+  "wakeAway": "Disattivato qui. Per ora i contatti svegliano {{device}}.",
+  "wakeAwayUnnamed": "Disattivato qui. Per ora i contatti svegliano l'altro tuo dispositivo.",
   "wakeCall": "Chiamata in arrivo",
   "wakeHint": "Le app dei tuoi contatti possono svegliare questa con un push. Nulla del messaggio ci finisce dentro.",
   "wakeInfo": "Quando il messaggio di un contatto non ti raggiunge perché Ghostly è chiuso, la sua app invia una sveglia vuota al servizio push del tuo browser (Google, Apple o Mozilla, a seconda del browser). Dice solo che c'è un nuovo messaggio: nessun testo, nessun nome. Il servizio push sa che c'è stato un push e quando; i tuoi contatti conoscono il tuo indirizzo push. Le chat silenziate non lo mostrano mai. Nuovo indirizzo ne crea un altro, così chi non senti più non può svegliarti.",

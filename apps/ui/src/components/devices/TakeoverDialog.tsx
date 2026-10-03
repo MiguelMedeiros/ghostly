@@ -1,17 +1,20 @@
-import { useState } from "react";
+import { useId, useState } from "react";
 import { engine } from "@ghostly/browser/platform/engine";
 import { useI18n } from "../../contexts/I18nContext";
 import { errorText } from "../../lib/errorText";
 import { reloadIntoGate, takeoverErrorKey } from "../../lib/devices";
+import { InfoButton } from "../layout/Section";
 import { DeviceDialog, field, primaryButton } from "./DeviceDialog";
 
 /**
  * A forced takeover (WISP 06 § Forced takeover): "My other device is lost or broken" on a standby that holds a copy, and
- * "It wasn't me" on a device that was replaced. The lock password (where this copy is a frozen one) and the name of the
- * device that stops; then about half a minute in which this device checks that no other one took the turn too.
+ * "It wasn't me" on a device that was replaced. "Lost or stolen?", the lock password (where this copy is a frozen one)
+ * and the name of the device that stops; then about half a minute in which this device checks that no other one took
+ * the turn too.
  */
 export function TakeoverDialog({ device, password: asks, restored, ownSet, onClose }: { device?: string; password: boolean; restored?: boolean; ownSet?: boolean; onClose(): void }) {
   const { t } = useI18n();
+  const id = useId();
   const [password, setPassword] = useState("");
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
@@ -36,29 +39,38 @@ export function TakeoverDialog({ device, password: asks, restored, ownSet, onClo
   };
   return (
     <DeviceDialog title={device ? t("devices.takeover.title", { device }) : t("devices.takeover.titleUnnamed")} onClose={onClose} testId="takeover-dialog">
-      <p className="flex items-start gap-1.5 text-text-secondary">
-        <span className="min-w-0">{restored ? t("devices.takeover.hintRestored") : t("devices.takeover.hint", { device: other })}</span>
-        <button type="button" data-testid="takeover-info" aria-expanded={info} aria-label={t("common.moreInfo")} title={t("common.moreInfo")} onClick={() => setInfo(!info)}
-          className="grid h-5 w-5 shrink-0 cursor-pointer place-items-center rounded-full text-text-muted hover:text-accent aria-expanded:text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">ⓘ</button>
-      </p>
-      {info && <p data-testid="takeover-info-text" className="rounded-lg bg-surface-hover px-3 py-2 text-xs leading-5 text-text-secondary">{t("devices.takeover.info", { device: other })}</p>}
+      <div className="space-y-2">
+        <p className="flex items-start gap-1.5 text-text-secondary">
+          <span className="min-w-0">{restored ? t("devices.takeover.hintRestored") : t("devices.takeover.hint", { device: other })}</span>
+          <InfoButton open={info} onToggle={() => setInfo(!info)} controls={`${id}-info`} testId="takeover-info" className="mt-px" />
+        </p>
+        {info && <p id={`${id}-info`} data-testid="takeover-info-text" className="rounded-lg bg-surface-hover px-3 py-2 text-xs leading-5 text-text-secondary">{t("devices.takeover.info", { device: other })}</p>}
+      </div>
       {ownSet && <p data-testid="takeover-own-set" className="text-text-secondary">{t("devices.takeover.ownSetHint")}</p>}
       {!restored && !ownSet && (
-        <fieldset className="space-y-1.5" data-testid="takeover-lost">
-          <legend className="text-text-secondary">{t("devices.takeover.lostQuestion")}</legend>
-          {([[true, "devices.takeover.lostYes", "takeover-lost-yes"], [false, "devices.takeover.lostNo", "takeover-lost-no"]] as const).map(([value, key, testId]) => (
-            <label key={testId} className="flex items-center gap-2 cursor-pointer">
-              <input type="radio" name="takeover-lost" data-testid={testId} checked={lost === value} onChange={() => setLost(value)} className="accent-accent" />
-              <span>{t(key)}</span>
+        <fieldset className="space-y-2" data-testid="takeover-lost">
+          <legend className="mb-2 font-medium text-text-primary">{t("devices.takeover.lostQuestion")}</legend>
+          {([[true, "devices.takeover.lostYes", "devices.takeover.lostYesHint", "takeover-lost-yes"], [false, "devices.takeover.lostNo", "devices.takeover.lostNoHint", "takeover-lost-no"]] as const).map(([value, key, hint, testId]) => (
+            <label key={testId} className={`flex min-h-11 cursor-pointer items-start gap-3 rounded-lg border px-3 py-2.5 transition-colors has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-accent ${lost === value ? "border-accent bg-accent/10" : "border-border hover:bg-surface-hover"}`}>
+              <input type="radio" name={`${id}-lost`} data-testid={testId} checked={lost === value} onChange={() => setLost(value)} className="mt-0.5 accent-accent" />
+              <span className="min-w-0">
+                <span className="block text-text-primary">{t(key)}</span>
+                <span className="block text-xs text-text-muted">{t(hint)}</span>
+              </span>
             </label>
           ))}
         </fieldset>
       )}
       <form className="space-y-3" onSubmit={(event) => { event.preventDefault(); if (ready && !busy) void submit(); }}>
-        {asks && <input type="password" autoFocus data-testid="takeover-password" aria-label={t("devices.password.current")} placeholder={t("devices.password.current")}
+        {asks && <input type="password" autoFocus autoComplete="current-password" data-testid="takeover-password" aria-label={t("devices.password.current")} placeholder={t("devices.password.current")}
           value={password} onChange={(event) => setPassword(event.target.value)} className={field} />}
-        {device && <input type="text" data-testid="takeover-name" autoComplete="off" spellCheck={false} aria-label={t("devices.takeover.confirm", { device })} placeholder={t("devices.takeover.confirm", { device })}
-          value={name} onChange={(event) => setName(event.target.value)} className={field} />}
+        {device && (
+          <label className="block space-y-1">
+            <span className="text-text-secondary">{t("devices.takeover.confirm", { device })}</span>
+            <input type="text" data-testid="takeover-name" autoComplete="off" autoCapitalize="off" spellCheck={false} placeholder={device}
+              value={name} onChange={(event) => setName(event.target.value)} className={field} />
+          </label>
+        )}
         {busy && <p role="status" data-testid="takeover-checking" className="text-text-secondary">{t("devices.takeover.checking")}</p>}
         {error && <p role="alert" data-testid="takeover-error" className="text-danger">{error}</p>}
         <button type="submit" data-testid="takeover-go" disabled={busy || !ready} className={primaryButton}>{t("devices.takeover.go")}</button>

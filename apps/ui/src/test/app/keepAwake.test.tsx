@@ -1,4 +1,4 @@
-import { renderHook, screen, waitFor } from "@testing-library/react";
+import { renderHook, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { DeviceSetView } from "@ghostly/browser/devices/links";
 import type { HandoffView } from "@ghostly/browser/devices/handoff";
@@ -44,6 +44,8 @@ describe("the switch", () => {
     const { user } = renderApp(<DevicesSection />);
     renderHook(() => useComputerAwake());
     const toggle = await screen.findByTestId("device-keep-awake-switch");
+    // Why, behind its ⓘ.
+    await user.click(within(screen.getByTestId("device-keep-awake")).getByTestId("row-info"));
     expect(screen.getByTestId("device-keep-awake")).toHaveTextContent("So your phone can take over while you are out.");
     expect(toggle).toHaveAttribute("aria-checked", "false");
     await waitFor(() => expect(keepAwake).toHaveBeenLastCalledWith(false));

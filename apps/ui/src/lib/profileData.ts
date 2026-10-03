@@ -156,10 +156,13 @@ export function profileLock(id: string): string | null {
  * What the switcher shows of a profile that is not running: its picture, how many messages were left unread in its
  * chats, and in how many chats something new waits for it (`fresh`), as the running profile saw while checking the
  * others (WISP 04 § Checking other profiles). A locked profile shows none of it: only its name and that it is locked.
+ * A profile this device is on standby for (WISP 06 § User experience) shows "Standby" in place of its counts: what it
+ * left unread is no longer where the profile runs, and its database is not opened, even for its picture.
  */
-export interface ProfileGlance { locked: boolean; unread: number; fresh: number; avatar?: string }
+export interface ProfileGlance { locked: boolean; unread: number; fresh: number; avatar?: string; standby?: true }
 export async function profileGlance(id: string): Promise<ProfileGlance> {
   if (profileLock(id)) return { locked: true, unread: 0, fresh: 0 };
+  if (!(await deviceStateOf(databaseOf(id)).then(runsEngine, () => false))) return { locked: false, standby: true, unread: 0, fresh: 0 };
   return { locked: false, unread: unreadUnder(prefixOf(id)), fresh: peekFresh(id), avatar: await storedAvatar(databaseOf(id)) };
 }
 /** The picture a profile's peer keeps in its settings (WISP 04), if it is the small JPEG the peer accepts. */

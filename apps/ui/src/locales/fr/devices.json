@@ -61,8 +61,9 @@
       "unreachable": "Impossible de joindre {{device}}. Il doit être allumé, avec Ghostly ouvert.",
       "version": "Ghostly a été mis à jour entre-temps. Rien n'a changé.",
       "wallet": "Un portefeuille d'ici ne peut pas être déplacé avec cette version de Ghostly.",
-      "woken": "Ouvrez Ghostly sur {{device}} et laissez-le ouvert."
+      "woken": "Ouvrez Ghostly sur {{device}} et laissez-le ouvert. Une notification lui a été envoyée."
     },
+    "keepOpen": "Gardez Ghostly ouvert.",
     "later": "Apporter les gros fichiers plus tard",
     "laterNote": "{{size}} de gros fichiers restent sur {{device}} pour l'instant.",
     "metered": "Vous utilisez des données mobiles.",
@@ -79,13 +80,16 @@
       "authorizing": "Vérification du mot de passe",
       "checking": "Vérification",
       "connecting": "Connexion à {{device}}",
+      "copy": "Copie des fichiers",
       "copying": "Copie des fichiers · {{done}} sur {{total}}",
       "done": "Cet appareil est maintenant actif.",
       "doneGiver": "{{device}} est maintenant actif.",
       "finishing": "Finalisation : en attente du réseau",
       "keepUsing": "Vous pouvez continuer à utiliser Ghostly.",
+      "paused": "Arrêté à {{percent}} %. Cela reprend quand les deux appareils sont en ligne.",
       "ready": "Préparation",
       "rest": "Copie du reste",
+      "settle": "Vérification de l'appareil actif",
       "settling": "Vérification de l'appareil actif · environ 30 secondes",
       "settlingInfo": "Ghostly attend pour être sûr qu'aucun autre appareil n'a pris le relais au même moment.",
       "switching": "Bascule"
@@ -114,6 +118,15 @@
     "persist": "Ce navigateur peut effacer les données de Ghostly. Gardez une copie sur {{device}}.",
     "restore": "Restaurer une sauvegarde",
     "unfinished": "Pas terminé : votre autre appareil n’a pas encore inscrit celui-ci."
+  },
+  "limited": {
+    "banner": "Hors ligne tant que Ghostly ne peut pas vérifier quel appareil est actif",
+    "bannerHint": "Les messages que vous écrivez attendent jusque-là.",
+    "hint": "Vérifiez votre connexion.",
+    "info": "Avant de se connecter, Ghostly vérifie qu'aucun autre appareil n'a pris ce profil. Démarrer quand même l'ouvre ici hors ligne : vous pouvez lire et écrire, et rien n'est envoyé, payé ni reçu tant que la vérification n'a pas fonctionné. Ghostly réessaie toutes les 30 secondes.",
+    "startAnyway": "Démarrer quand même",
+    "title": "Impossible de vérifier quel appareil est actif",
+    "tryAgain": "Réessayer"
   },
   "lost": {
     "cashu": "Cashu : échangez tout l’ecash",
@@ -153,7 +166,7 @@
   "remove": {
     "button": "Retirer",
     "copy": "S’il avait une copie de votre profil, cette copie reste sur lui, non chiffrée.",
-    "done": "{{device}} a été retiré. Vos autres appareils reçoivent le changement la prochaine fois qu’ils ouvrent Ghostly.",
+    "doneInfo": "Il ne peut plus prendre ce profil. Vos autres appareils reçoivent le changement la prochaine fois qu’ils ouvrent Ghostly.",
     "fail": {
       "busy": "Autre chose modifie vos appareils. Réessayez dans un instant.",
       "failed": "Un problème est survenu. Rien n’a été modifié.",
@@ -183,6 +196,7 @@
     "done": "Nouveau secret des appareils créé.",
     "hint": "Un appareil qui n’est pas dans cette liste ne pourra plus utiliser ce profil.",
     "info": "À utiliser quand un appareil peut encore détenir le secret des appareils de ce profil, par exemple celui que vous avez remplacé. Vos autres appareils reçoivent le nouveau secret la prochaine fois qu’ils ouvrent Ghostly.",
+    "make": "Créer",
     "notNow": "Pas maintenant",
     "offer": "Vous avez pris le relais de {{device}}. Il détient encore le secret des appareils de ce profil.",
     "offerUnnamed": "Vous avez pris le relais d’un autre appareil. Il détient encore le secret des appareils de ce profil.",
@@ -191,15 +205,19 @@
   "section": {
     "active": "Actif",
     "answered": "A répondu en {{ms}} ms",
-    "check": "Vérifier",
+    "check": "Vérifier la connexion",
+    "checking": "Vérification…",
     "connecting": "Non connecté",
     "foreign": "Autre chose a fermé votre ancien ensemble d’appareils.",
-    "hint": "Utilisez ce profil sur un autre appareil. Un seul appareil est actif à la fois.",
     "info": "Seul l’appareil actif envoie, reçoit et paie, ainsi vos messages et votre argent ne sont jamais à deux endroits. Déplacez le profil quand vous voulez.",
     "keepAwake": "Garder cet ordinateur éveillé",
     "keepAwakeHint": "Pour que votre téléphone puisse prendre le relais quand vous êtes sorti.",
+    "lead": "Utilisez ce profil sur un autre appareil",
+    "leadHint": "Un seul appareil est actif à la fois.",
     "live": "Connecté",
+    "menu": "Options de {{device}}",
     "noAnswer": "Pas de réponse",
+    "removed": "Retiré",
     "standby": "En veille",
     "thisActive": "Cet appareil · Actif",
     "thisStandby": "Cet appareil · En veille",
@@ -219,16 +237,18 @@
       "superseded": "Un autre appareil a pris le relais sans celui-ci. Cet appareil s'est arrêté.",
       "supersededBy": "{{device}} a pris le relais sans cet appareil. Cet appareil s'est arrêté.",
       "taking": "En attente du réseau.",
-      "unreadable": "Redémarrez l'application ou l'appareil, puis réessayez."
+      "unreadable": "Rien n'a été démarré."
     },
     "info": "Un seul appareil envoie, reçoit et paie à la fois, pour que vos messages et votre argent ne soient jamais à deux endroits.",
     "link": "{{device}} : {{status}}",
+    "links": "Vos appareils",
     "notice": {
       "hint": "Si cette liste vous semble fausse, n’utilisez pas cet appareil.",
       "ok": "OK",
       "title": "Vos appareils sont maintenant : {{devices}}",
       "wrong": "C’est faux"
     },
+    "others": "Autres profils",
     "reenroll": {
       "hint": "Ajoutez cet appareil à nouveau depuis l’appareil que vous utilisez maintenant.",
       "title": "Vos appareils ont changé pendant que celui-ci était éteint"
@@ -241,7 +261,7 @@
       "standbyUnnamed": "Actif sur un autre appareil",
       "superseded": "Cet appareil a été remplacé",
       "taking": "Finalisation",
-      "unreadable": "Ghostly n'a pas pu vérifier quel appareil est actif."
+      "unreadable": "Impossible de lire l'état de cet appareil"
     },
     "unfinished": {
       "hint": "Recommencez sur {{device}}.",
@@ -250,7 +270,7 @@
       "retry": "Réessayer",
       "title": "Pas terminé"
     },
-    "unreadableInfo": "Ghostly lit lequel de vos appareils est actif avant de démarrer quoi que ce soit. Cela n'a pas fonctionné ici : rien n'a été démarré, rien n'a été envoyé et rien n'a été modifié."
+    "unreadableInfo": "Ghostly lit lequel de vos appareils est actif avant de démarrer quoi que ce soit. Cela n'a pas fonctionné ici : rien n'a été démarré, rien n'a été envoyé et rien n'a été modifié. Redémarrez l'application ou l'appareil, puis réessayez."
   },
   "takeover": {
     "checking": "Vérification de l'appareil actif · environ 30 secondes",
@@ -270,12 +290,14 @@
     "info": "Les messages et l'argent arrivés sur {{device}} depuis ne sont pas ici. Si {{device}} revient, il s'arrête, sans rien dire à vos contacts.",
     "lost": "Mon autre appareil est perdu ou cassé",
     "lostNo": "Juste cassé ou effacé",
+    "lostNoHint": "Il s'arrête s'il revient un jour.",
     "lostQuestion": "Perdu ou volé ?",
     "lostRace": "Un autre appareil a pris le relais au même moment. Cet appareil est en veille.",
     "lostYes": "Perdu ou volé",
+    "lostYesHint": "Après la reprise, une liste d'étapes aide à protéger votre argent et vos discussions.",
     "notMe": "Ce n'était pas moi",
-    "ownSetHint": "Cet appareil commence son propre ensemble d'appareils. Ajoutez-y de nouveau vos autres appareils ensuite.",
-    "ownSetRemoved": "Un autre de vos appareils a commencé son propre ensemble avant. Ajoutez de nouveau cet appareil depuis celui-ci.",
+    "ownSetHint": "Cet appareil repart comme votre seul appareil. Ajoutez de nouveau vos autres appareils ensuite.",
+    "ownSetRemoved": "Un autre de vos appareils est reparti avant. Ajoutez de nouveau cet appareil depuis celui-ci.",
     "ownSetWait": "En attente du réseau. Réessayez dans un instant.",
     "restoredHint": "Cet appareil a une copie issue d'une sauvegarde. Rien ne démarre tant que vous ne prenez pas le relais.",
     "title": "Prendre le relais sans {{device}} ?",
