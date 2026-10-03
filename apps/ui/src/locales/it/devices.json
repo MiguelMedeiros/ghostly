@@ -25,6 +25,7 @@
     "failed": "Qualcosa è andato storto. Non è stato aggiunto nulla.",
     "full": "Questo profilo ha già 4 dispositivi.",
     "inUse": "Questo profilo è in uso qui. Crea prima un nuovo profilo, poi aggiungi il dispositivo da lì.",
+    "loading": "I tuoi portafogli qui non sono ancora caricati. Controlla la connessione e riprova.",
     "notGhostly": "Questo non è un codice per aggiungere un dispositivo.",
     "offline": "Sei offline.",
     "proof": "L’altro dispositivo non è riuscito a dimostrare chi è. Non è stato aggiunto nulla.",

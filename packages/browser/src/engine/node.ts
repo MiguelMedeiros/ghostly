@@ -5160,7 +5160,9 @@ export class GhostlyNode implements EngineImplementation {
     this.enrollAllowed();
     // What the profile holds is known once it started: its chats and wallets are read by then.
     if (this.starting) await this.starting;
-    if (this.inUse()) throw new Error("enroll-in-use: This profile is in use here. Add a new profile first, and add the device from there.");
+    const held = this.inUse();
+    if (held === "loading") throw new Error("enroll-loading: The wallets of this profile have not loaded yet. Check your connection and try again.");
+    if (held) throw new Error("enroll-in-use: This profile is in use here. Add a new profile first, and add the device from there.");
     await this.enrollment?.cancel().catch(() => {});
     const joiner = new EnrollJoiner({
       profile: databaseName(), network: this.turnNetwork(), open: this.enrollLink(),
@@ -5179,23 +5181,26 @@ export class GhostlyNode implements EngineImplementation {
   /**
    * Whether this profile holds anything a person would lose if it became a standby here: a chat, a group, an identity,
    * money or a payment, or a wallet with keys of its own. The wallets a new profile gets by itself (Mainnet Cashu and
-   * USDT, `walletSetup.ts`) count only once they hold or have moved money: otherwise no new install could join.
+   * USDT, `walletSetup.ts`) count only once they hold, wait for or have moved money: otherwise no new install could
+   * join. `loading`: what they hold is not known yet (the engine is starting, or the USDT balance was not read).
    */
-  private inUse(): boolean {
-    if (this.links.size > 0 || this.groups.views().length > 0 || this.identities.views().length > 0) return true;
+  private inUse(): "in-use" | "loading" | null {
+    if (this.links.size > 0 || this.groups.views().length > 0 || this.identities.views().length > 0) return "in-use";
     // Before the wallets were read the view says nothing about them.
-    if (!this.walletsStarted) return true;
-    if ((this.walletView.intents ?? []).length > 0) return true;
+    if (!this.walletsStarted) return "loading";
+    if ((this.walletView.intents ?? []).length > 0) return "in-use";
     const networks = [this.walletView, ...Object.values(this.walletView.networks ?? {})];
     // Any money a network's wallets hold or wait for: ecash, sats a payment or a swap set aside, a paid quote not
-    // claimed yet, and the first-run USDT wallet's tokens and gas, or a balance it has not read yet.
+    // claimed yet, and the first-run USDT wallet's tokens and gas.
     const holds = (network: NetworkWalletsView | undefined) => !!network && (
       money(network.balance) || (network.history?.length ?? 0) > 0 || (network.awaiting?.length ?? 0) > 0
       || money(network.setAside) || money(network.openSwaps) || money(network.swapsAmount) || money(network.unconfirmed)
-      || (!!network.usdt?.configured && (money(network.usdt.balance) || money(network.usdt.gasBalance) || network.usdt.locked || !network.usdt.read)));
-    if (networks.some(holds)) return true;
+      || (!!network.usdt?.configured && (money(network.usdt.balance) || money(network.usdt.gasBalance))));
+    if (networks.some(holds)) return "in-use";
     const firstRun = (wallet: { type: string; network: string }) => wallet.network === "mainnet" && (wallet.type === "cashu" || wallet.type === "usdt");
-    return (this.walletView.wallets ?? []).some((wallet) => !firstRun(wallet));
+    if ((this.walletView.wallets ?? []).some((wallet) => !firstRun(wallet))) return "in-use";
+    // A USDT balance not read yet says 0 for tokens it never read.
+    return networks.some((network) => !!network?.usdt?.configured && (network.usdt.locked || !network.usdt.read)) ? "loading" : null;
   }
 
   /** The device set of this profile as the Devices section shows it; `single` with none. */

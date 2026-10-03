@@ -54,12 +54,12 @@ describe("a running active device that another device replaced", () => {
 });
 
 describe("joining a profile in place of the one this device runs", () => {
-  const refuse = async (setup: (inner: Record<string, unknown>) => void) => {
+  const refuse = async (setup: (inner: Record<string, unknown>) => void, reason = "in-use") => {
     const { node: n, inner } = node();
     (inner as { settings: { online: boolean } }).settings.online = true;
     inner.walletsStarted = true;
     setup(inner);
-    await expect(n.deviceEnrollJoin({ code: "ghostly1zx", name: "Phone" })).rejects.toThrow(/^enroll-in-use:/);
+    await expect(n.deviceEnrollJoin({ code: "ghostly1zx", name: "Phone" })).rejects.toThrow(new RegExp(`^enroll-${reason}:`));
   };
 
   it("is refused when that profile holds an identity, money, a payment, or a wallet with keys of its own", async () => {
@@ -81,14 +81,17 @@ describe("joining a profile in place of the one this device runs", () => {
     const usdt = (patch: Record<string, unknown>) => ({ usdt: { configured: true, locked: false, read: true, balance: "0", gasBalance: "0", ...patch } });
     await refuse(mainnet(usdt({ balance: "25.0" })));
     await refuse(mainnet(usdt({ gasBalance: "0.01" })));
-    await refuse(mainnet(usdt({ read: undefined })));
+    await refuse(mainnet(usdt({ read: undefined })), "loading");
+    await refuse(mainnet(usdt({ locked: true, read: undefined })), "loading");
+    // Money it holds counts before what it has not read.
+    await refuse(mainnet({ ...usdt({ read: undefined }), setAside: 1 }));
     await refuse(mainnet({ setAside: 1000 }));
     await refuse(mainnet({ unconfirmed: 1000 }));
     await refuse(mainnet({ openSwaps: 1, swapsAmount: 1000 }));
     await refuse(mainnet({ awaiting: [{ type: "cashu", kind: "paid", amount: 2100 }] }));
     await refuse((inner) => { inner.walletView = { ...net({}), feesPaid: 0, wallets, intents: [{ id: "r1", state: "unknown" }] }; });
     // Before the wallets were read, the view says nothing about them.
-    await refuse((inner) => { inner.walletsStarted = false; inner.walletView = { ...net({}), feesPaid: 0, wallets }; });
+    await refuse((inner) => { inner.walletsStarted = false; inner.walletView = { ...net({}), feesPaid: 0, wallets }; }, "loading");
   });
 
   it("is not refused for the wallets a new profile gets by itself, empty", async () => {

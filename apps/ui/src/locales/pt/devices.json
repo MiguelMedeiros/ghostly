@@ -25,6 +25,7 @@
     "failed": "Algo deu errado. Nada foi adicionado.",
     "full": "Este perfil já tem 4 dispositivos.",
     "inUse": "Este perfil está em uso aqui. Crie um novo perfil primeiro e adicione o dispositivo a partir dele.",
+    "loading": "Suas carteiras aqui ainda não carregaram. Verifique sua conexão e tente de novo.",
     "notGhostly": "Este não é um código para adicionar um dispositivo.",
     "offline": "Você está offline.",
     "proof": "O outro dispositivo não conseguiu se provar. Nada foi adicionado.",
