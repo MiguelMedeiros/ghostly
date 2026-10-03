@@ -22,6 +22,8 @@ const isGroupUrgentRead = (who: Asker): boolean => who.group && who.urgent && !w
 const isWatch = (who: Asker): boolean => who.watch && who.group && !who.write;
 /** Watch reads that the same other limits hold take turns together: urgent or not, background or not. */
 const watchLane = (who: Asker): string => `${+who.urgent}${+who.background}`;
+/** A group's read that is not a background one: an edge's, a private group's knock poll (`GROUP_RATION_WINDOW_MS`). */
+const isGroupRead = (who: Asker): boolean => who.group && !who.write && !who.background;
 /** A write that goes first once the budget frees a request (see `WRITE_FIRST_MS`): a chat's or a group's, never a background one. */
 const firstWriter = (who: Asker): "chat" | "group" | null => (!who.write || who.background ? null : who.group ? "group" : "chat");
 
@@ -106,8 +108,23 @@ export const GROUP_BURST_ONE_LINK = 8;
  * came up then (bug hunt r12, measured again 2026-10-03). One contact watched alone reads every 3 s rather than 2.
  */
 export const WATCH_SHARE = 1 / 3;
-/** A watched key that asked within this long and was not read since keeps its turn (`WATCH_SHARE`). */
+/**
+ * A key a group reads that asked within this long and was not read since keeps its turn: while one read longer ago
+ * waits, the others wait too (`WATCH_SHARE`, `GROUP_RATION_WINDOW_MS`). One that stops asking loses it.
+ */
 const WATCH_TURN_MS = 5_000;
+/** How long a read that let an older one go first waits before it asks again. */
+const TURN_WAIT_MS = 1_000;
+/**
+ * Once a group's read found a relay's minute full, the groups' reads there are spread over the minute for a minute
+ * (`GROUP_RATION_MS`): at most a sixth of it in any 10 s (5 on a relay of 30), the key read longest ago first. A sliding
+ * minute that demand keeps full hands out its requests in bursts: the minute is spent in 25 to 35 s as requests age
+ * out, then nothing frees for the rest of it. A private group's admin (its knock poll every 2 s while its link is new)
+ * whose members left and came back read nothing for 18 to 42 s at a time, and the member back first waited that long
+ * for its edge (bug hunt r12, measured again on 2026-10-03). Writes are not counted: they go first anyway.
+ */
+export const GROUP_RATION_WINDOW_MS = 10_000;
+const GROUP_RATION_MS = 60_000;
 /**
  * While a link polls fast (an `urgent` read: its peer, or the peer's offer or answer, is due any moment) within this
  * long, background requests (a community's periodic looks) are held to `BACKGROUND_WHILE_SIGNALING` a minute on each
@@ -227,10 +244,17 @@ export class RelayTransport implements PkarrTransport {
   private readonly spentBackground = new Map<string, number[]>();
   /** Groups' urgent reads on each relay in the last `GROUP_BURST_MS`. */
   private readonly spentGroupUrgent = new Map<string, number[]>();
-  /** Watch reads on each relay in the last minute (`WATCH_SHARE`). */
+  /** Watch reads on each relay in the last `GROUP_RATION_WINDOW_MS` (`WATCH_SHARE`). */
   private readonly spentWatch = new Map<string, number[]>();
-  /** Per watched key, when a watch read of it last went out and when it last asked (`WATCH_SHARE`): whose turn it is. */
-  private readonly watchTurns = new Map<string, { servedAt: number; askedAt: number; waiting: boolean; lane: string }>();
+  /**
+   * Per key a group reads (not in the background), when a read of it last went out and when it last asked: whose turn
+   * it is under the watch share (`WATCH_SHARE`) and while the groups' reads are rationed (`GROUP_RATION_WINDOW_MS`).
+   */
+  private readonly readTurns = new Map<string, { servedAt: number; askedAt: number; waiting: boolean; watch: boolean; lane: string }>();
+  /** Groups' reads (not background ones) on each relay in the last `GROUP_RATION_WINDOW_MS`. */
+  private readonly spentGroupReads = new Map<string, number[]>();
+  /** When a group's read last found each relay's minute full: its reads there are rationed for `GROUP_RATION_MS`. */
+  private readonly groupsFullAt = new Map<string, number>();
   /** When a link's write was last refused on each relay (`chat <relay>`, `group <relay>`), while it waits for the budget. */
   private readonly writeWaiting = new Map<string, number>();
   /**
@@ -800,8 +824,10 @@ export class RelayTransport implements PkarrTransport {
       this.urgentAt = now;
       if (isChat(who)) this.chatNeed(key).urgentAt = now;
     }
-    if (isWatch(who)) this.watchAsked(key, watchLane(who), now);
+    if (isGroupRead(who)) this.readAsked(key, who, now);
     if (this.heldFor(relay, who, now, key) > 0) {
+      // The minute is full: the groups' reads are rationed from now on.
+      if (isGroupRead(who) && (this.spent.get(relay)?.length ?? 0) >= this.limitOf(relay)) this.groupsFullAt.set(relay, now);
       if (isChat(who)) this.chatNeed(key).refused.set(relay, now);
       if (writer) this.writeWaiting.set(`${writer} ${relay}`, now);
       return false;
@@ -810,9 +836,10 @@ export class RelayTransport implements PkarrTransport {
     this.spent.get(relay)!.push(now);
     if (who.background) this.spentBackground.get(relay)!.push(now);
     if (isGroupUrgentRead(who)) this.spentGroupUrgent.get(relay)!.push(now);
-    if (isWatch(who)) {
-      this.spentWatch.get(relay)!.push(now);
-      this.watchTurns.set(key, { servedAt: now, askedAt: now, waiting: false, lane: watchLane(who) });
+    if (isWatch(who)) this.spentWatch.get(relay)!.push(now);
+    if (isGroupRead(who)) {
+      this.spentGroupReads.get(relay)!.push(now);
+      this.readTurns.set(key, { servedAt: now, askedAt: now, waiting: false, watch: isWatch(who), lane: watchLane(who) });
     }
     return true;
   }
@@ -850,10 +877,22 @@ export class RelayTransport implements PkarrTransport {
       const most = Math.max(GROUP_BURST_ONE_LINK, Math.floor(limit * GROUP_BURST_MS / 60_000));
       if (burst.length >= most) wait = Math.max(wait, burst[burst.length - most] + GROUP_BURST_MS - now);
     }
-    // Watch reads: their share of the minute, and the keys read longest ago first.
-    const watched = (this.spentWatch.get(relay) ?? []).filter((at) => now - at < 60_000);
+    // Watch reads: their share, spread over the minute, the keys read longest ago first.
+    const watched = (this.spentWatch.get(relay) ?? []).filter((at) => now - at < GROUP_RATION_WINDOW_MS);
     this.spentWatch.set(relay, watched);
-    if (isWatch(who)) wait = Math.max(wait, over(watched, Math.max(1, Math.floor(limit * WATCH_SHARE) - this.watchAhead(key, watchLane(who), now))));
+    if (isWatch(who)) {
+      const most = Math.max(1, Math.ceil(limit * WATCH_SHARE * GROUP_RATION_WINDOW_MS / 60_000));
+      if (watched.length >= most) wait = Math.max(wait, watched[watched.length - most] + GROUP_RATION_WINDOW_MS - now);
+      if (this.readsAhead(key, now, watchLane(who)) > 0) wait = Math.max(wait, TURN_WAIT_MS);
+    }
+    // The groups' reads after one found the minute full: spread over it, in turn.
+    const rationed = (this.spentGroupReads.get(relay) ?? []).filter((at) => now - at < GROUP_RATION_WINDOW_MS);
+    this.spentGroupReads.set(relay, rationed);
+    if (isGroupRead(who) && now - (this.groupsFullAt.get(relay) ?? -Infinity) < GROUP_RATION_MS) {
+      const most = Math.max(1, Math.ceil(limit * GROUP_RATION_WINDOW_MS / 60_000));
+      if (rationed.length >= most) wait = Math.max(wait, rationed[rationed.length - most] + GROUP_RATION_WINDOW_MS - now);
+      if (this.readsAhead(key, now) > 0) wait = Math.max(wait, TURN_WAIT_MS);
+    }
     if (who.group) {
       const reserved = this.chatReservedFor(relay, now);
       if (reserved > 0) wait = Math.max(wait, Math.min(reserved, over(recent, limit - this.reserveOf(relay))));
@@ -868,23 +907,24 @@ export class RelayTransport implements PkarrTransport {
     return Math.max(wait, 0);
   }
 
-  /** A watch read of `key` asks (`WATCH_SHARE`): it waits for its turn from now on, unless it is taken. */
-  private watchAsked(key: string, lane: string, now: number): void {
-    for (const [other, turn] of this.watchTurns) if (now - Math.max(turn.askedAt, turn.servedAt) >= 60_000) this.watchTurns.delete(other);
-    const turn = this.watchTurns.get(key);
-    this.watchTurns.set(key, { servedAt: turn?.servedAt ?? -Infinity, askedAt: now, waiting: true, lane });
+  /** A group's read of `key` asks: it waits for its turn from now on, unless it is taken (`readsAhead`). */
+  private readAsked(key: string, who: Asker, now: number): void {
+    for (const [other, turn] of this.readTurns) if (now - Math.max(turn.askedAt, turn.servedAt) >= 60_000) this.readTurns.delete(other);
+    const turn = this.readTurns.get(key);
+    this.readTurns.set(key, { servedAt: turn?.servedAt ?? -Infinity, askedAt: now, waiting: true, watch: isWatch(who), lane: watchLane(who) });
   }
 
   /**
-   * Watched keys still asking (within `WATCH_TURN_MS`) that were read longer ago than `key`: the share keeps a read for
-   * each. Only keys the same other limits hold (`watchLane`): one a chat's reserve or the groups' burst holds back
+   * Keys a group reads, still asking (within `WATCH_TURN_MS`), that were read longer ago than `key`: a share keeps a
+   * request for each. With `watchLane`, only watched keys the same other limits hold: one the groups' burst holds back
    * would keep a turn it cannot take.
    */
-  private watchAhead(key: string | undefined, lane: string, now: number): number {
-    const mine = key === undefined ? -Infinity : this.watchTurns.get(key)?.servedAt ?? -Infinity;
+  private readsAhead(key: string | undefined, now: number, watchLane?: string): number {
+    const mine = key === undefined ? -Infinity : this.readTurns.get(key)?.servedAt ?? -Infinity;
     let ahead = 0;
-    for (const [other, turn] of this.watchTurns) {
-      if (other === key || turn.lane !== lane || !turn.waiting || now - turn.askedAt >= WATCH_TURN_MS) continue;
+    for (const [other, turn] of this.readTurns) {
+      if (other === key || !turn.waiting || now - turn.askedAt >= WATCH_TURN_MS) continue;
+      if (watchLane !== undefined && (!turn.watch || turn.lane !== watchLane)) continue;
       if (turn.servedAt < mine) ahead++;
     }
     return ahead;
