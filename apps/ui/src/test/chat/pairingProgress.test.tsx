@@ -284,6 +284,15 @@ describe("which chats get the scene", () => {
     expect(label()).toBe("Connected");
   });
 
+  it("not a chat made before this page loaded, whose link the engine has not brought back yet (a reload): it waits for its link", () => {
+    const { engine } = renderApp(<Pairing inviter={false} createdAt={performance.timeOrigin - 20_000} />);
+    expect(scene()).toBeNull();
+    show({ ...published, peerParticipationKey: "p" }, engine);
+    expect(scene()).toBeNull();
+    show(live, engine);
+    expect(scene()).toBeNull();
+  });
+
   it("not an old chat whose link is missing", () => {
     renderApp(<Pairing inviter={false} createdAt={Date.now() - 2 * 3600_000} />);
     expect(scene()).toBeNull();
@@ -609,6 +618,59 @@ describe("motion", () => {
     expect(css).toMatch(/:root\[data-reduce-motion="true"\] \.ps\[data-stage="knocking"\] :is\(\.ps-route-up, \.ps-route-low\)/);
     expect(css).toMatch(/\.ps\[data-paused\] \*, \.ps\[data-paused\] \{ animation-play-state: paused !important; \}/);
     expect(css).toMatch(/\.ps\[data-still\]\[data-stage="knocking"\] :is\(\.ps-route-up, \.ps-route-low\)/);
+  });
+});
+
+describe("a chat that already delivers over the DHT ends its scene, whatever the engine's pairing still says", () => {
+  /** Chat.tsx's split: the icon while `show` (until live), the scene only while `scene`. */
+  function Chat({ inviter = false }: { inviter?: boolean }) {
+    const p = usePairingProgress("peer", { inviter, enabled: true, createdAt: Date.now() });
+    return <>
+      <ChatConnection peerKey="peer" pairing={p.show && p.progress && p.progress.stage !== "live" ? { progress: p.progress } : undefined} />
+      {p.scene && p.progress ? <PairingScene progress={p.progress} contact="Alice" retry={() => {}} retrying={false} retryError="" /> : <p>the chat</p>}
+    </>;
+  }
+  const chosen = { dhtDelivery: { peerMode: "dht" } } as Partial<LinkView>;
+  const icon = () => screen.getByTestId("connection-options");
+
+  it("the joiner of a contact who chose DHT only: at once, and the icon says so", () => {
+    const { engine } = renderApp(<Chat />);
+    show(published, engine);
+    expect(scene()).toHaveAttribute("data-stage", "resolving");
+    // Still "resolving" for the engine: no stream will ever be tried, and texts go over the DHT.
+    show({ ...published, ...chosen, textDelivery: "dht" }, engine);
+    expect(scene()).toBeNull();
+    expect(icon()).toHaveAttribute("data-pairing", "on-dht");
+    expect(icon()).toHaveAccessibleName("Connection options: DHT only · chosen by your contact");
+  });
+
+  it("no live attempt under way (an app with no WebRTC, before its native link): after a short wait; one under way keeps the steps", () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "Date"] });
+    const { engine } = renderApp(<Chat />);
+    show({ ...knocked, dataLink: "offering", textDelivery: "dht" }, engine);
+    act(() => vi.advanceTimersByTime(30_000));
+    expect(scene()).toHaveAttribute("data-stage", "answering");
+    expect(icon()).toHaveAttribute("data-pairing", "answering");
+    show({ ...published, textDelivery: "dht" }, engine);
+    act(() => vi.advanceTimersByTime(5_000));
+    expect(scene()).not.toBeNull();
+    act(() => vi.advanceTimersByTime(5_100));
+    expect(scene()).toBeNull();
+    expect(icon()).toHaveAttribute("data-pairing", "on-dht");
+    expect(icon()).toHaveAccessibleName("Connection options: On DHT · retrying live");
+    // The live link that comes later is the chat's connection: no scene, no celebration.
+    show(live, engine);
+    expect(scene()).toBeNull();
+    expect(icon()).toHaveAccessibleName("Connection options: Connected · WebRTC");
+  });
+
+  it("the inviter too, once its contact is there and texts go over the DHT", () => {
+    const { engine } = renderApp(<Chat inviter />);
+    show(published, engine);
+    expect(scene()).toHaveAttribute("data-stage", "waiting");
+    show({ ...knocked, ...chosen, textDelivery: "dht" }, engine);
+    expect(scene()).toBeNull();
+    expect(icon()).toHaveAccessibleName("Connection options: DHT only · chosen by your contact");
   });
 });
 

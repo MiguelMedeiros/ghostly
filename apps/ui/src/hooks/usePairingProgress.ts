@@ -11,6 +11,13 @@ const snapshot = () => engine.state;
 
 /** How long the "connected" moment stays before the chat takes over. The chat is live, and usable, all along. */
 export const CELEBRATE_MS = 1800;
+/**
+ * Texts go over the DHT and no live attempt is under way for this long: the chat is on the DHT, and the scene gives
+ * it back. The engine waits as long after a pin over the DHT before it says so itself (`DHT_PIN_GRACE_MS`).
+ */
+export const DHT_FLOOR_MS = 10_000;
+/** When this page started (ms since the epoch). */
+const pageStart = () => (typeof performance !== "undefined" && performance.timeOrigin) || 0;
 /** A chat whose link is not in the engine yet is a new one only if it was made this recently. */
 const NEW_CHAT_MS = 60 * 60_000;
 
@@ -68,11 +75,14 @@ export function usePairingProgress(peerKey: string | undefined, { inviter, enabl
   const aside = useRef(false);
   /** The furthest step shown: the scene and the icon never step back. */
   const reached = useRef(-1);
+  /** Since when texts have gone over the DHT with no live attempt under way; `on` once that is the chat's state. */
+  const floor = useRef<{ since: number | null; on: boolean }>({ since: null, on: false });
   if (owner.current !== peerKey) {
     owner.current = peerKey;
     role.current = first.current = since.current = wasLive.current = celebrateUntil.current = null;
     shown.current = celebrated.current = soundOwed.current = aside.current = false;
     reached.current = -1;
+    floor.current = { since: null, on: false };
   }
 
   // The role is what this device did first; the invite code is forgotten once the contact shows up.
@@ -80,13 +90,35 @@ export function usePairingProgress(peerKey: string | undefined, { inviter, enabl
 
   // Decided once the link is there to decide from: never paired yet. Until then (a chat just joined), a new chat is,
   // and a scene already on stays on: a fast handshake can pin the contact before the link reaches this page.
-  const provisional = !!state && Date.now() - (createdAt ?? Date.now()) < NEW_CHAT_MS;
+  // Only a chat made since this page loaded: after a reload or a restart, the engine can be a moment behind with its
+  // links, and a chat made a minute before (paired since) would show the scene for a reconnect. That one waits for its link.
+  const made = createdAt ?? Date.now();
+  const provisional = !!state && made >= pageStart() && Date.now() - made < NEW_CHAT_MS;
   if (first.current === null && enabled && link) first.current = shown.current || !link.peerParticipationKey;
   const firstPairing = first.current ?? provisional;
   if (!link && firstPairing) shown.current = true;
 
   const derived = deriveStage(link, reported?.role ?? role.current, online);
-  const stage: PairingStage = reported?.stage ?? derived.stage;
+  const engineStage: PairingStage = reported?.stage ?? derived.stage;
+  // The chat can already deliver over the DHT (WISP 400) while the engine's pairing still says it is looking up the
+  // invite: the contact chose DHT only, or an app with no stream transport in common (a Desktop without WebRTC before
+  // its native link) carries texts on the DHT. Then the chat is usable, and honestly on the DHT: the pairing is
+  // on-dht for the scene and the icon. A live attempt under way (`dataLink` not idle) keeps the steps for as long.
+  const contactChoseDht = link?.dhtDelivery?.peerMode === "dht";
+  const onFloor = !!link && link.textDelivery === "dht" && (contactChoseDht || link.dataLink === "idle")
+    && engineStage !== "live" && engineStage !== "failed" && engineStage !== "on-dht";
+  if (!onFloor) floor.current.since = null;
+  else if (floor.current.since === null) floor.current.since = Date.now();
+  if (onFloor && (contactChoseDht || Date.now() - floor.current.since! >= DHT_FLOOR_MS)) floor.current.on = true;
+  const floorWait = onFloor && !floor.current.on ? floor.current.since! + DHT_FLOOR_MS : null;
+  const [, setFloorTick] = useState(0);
+  useEffect(() => {
+    if (floorWait === null) return;
+    const timer = window.setTimeout(() => setFloorTick(n => n + 1), Math.max(0, floorWait - Date.now()) + 1);
+    return () => window.clearTimeout(timer);
+  }, [floorWait]);
+  const onDhtNow = floor.current.on && engineStage !== "live" && engineStage !== "failed";
+  const stage: PairingStage = onDhtNow ? "on-dht" : engineStage;
   const mounted = useRef(Date.now());
   if (!reported && (since.current?.stage !== stage || (link && !since.current.linked))) {
     // The first stage seen on the link began when the link did; later ones begin when they are seen.
@@ -130,8 +162,11 @@ export function usePairingProgress(peerKey: string | undefined, { inviter, enabl
   const celebrating = until !== null && ended !== until;
   const done = celebrated.current && !celebrating;
 
-  const base: PairingProgress = reported
+  const engineBase: PairingProgress = reported
     ?? { role: role.current, ...derived, since: since.current!.at, startedAt: link?.createdAt || mounted.current, attempt };
+  const base: PairingProgress = onDhtNow && engineBase.stage !== "on-dht"
+    ? { ...engineBase, stage: "on-dht", reason: contactChoseDht ? "chosen" : "waiting", retryable: !contactChoseDht }
+    : engineBase;
   // An engine that reports no progress can lose the contact again (its packet went stale): the invite card comes back
   // (`contactArrived`), and the steps go back to the wait with it rather than say the contact is still there.
   if (!contactArrived(base)) reached.current = Math.min(reached.current, stepIndex(base.role, base.stage, base.peerSeen));
