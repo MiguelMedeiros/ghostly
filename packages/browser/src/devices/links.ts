@@ -461,8 +461,15 @@ export class DeviceLinks implements DeviceLinkEngine {
       try { running.link.sendDeviceFrame(setAckFrame()); } catch { /* the remover sends it again; the new link acknowledges it too */ }
       const now = await this.record();
       if (now) this.host?.show(viewOf(now));
-      this.later(SET_ACK_FLUSH_MS, () => void this.refresh().then(() => this.checkTurn()).catch(() => {}));
+      this.later(SET_ACK_FLUSH_MS, () => void this.refresh().then(() => this.restartHandoff()).then(() => this.checkTurn()).catch(() => {}));
     });
+  }
+
+  /** The handoff of this device made again: it signs and checks releases over the turn address, which moved with the secret. */
+  private async restartHandoff(): Promise<void> {
+    if (!this.options.handoff || this.stopped) return;
+    try { const handler = await this.options.handoff(this, this.host); if (handler && !this.stopped) this.setHandoff(handler); else handler?.stop(); }
+    catch { /* no handoff here: the links still run */ }
   }
 
   /** The record changed in a way the pages show, and the links follow it. */

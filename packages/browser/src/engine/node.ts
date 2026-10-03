@@ -4702,6 +4702,8 @@ export class GhostlyNode implements EngineImplementation {
     })();
     this.settingMove = work;
     try { await work; } finally { this.settingMove = null; }
+    // The giver signs releases over the turn address, which moved with the secret: it is made again for the new one.
+    if (this.handoffGiver) { this.deviceLinks?.setHandoff(null); this.handoffGiver = null; await this.startHandoff().catch(() => {}); }
     this.watchTombstones();
     return this.deviceSet();
   }
