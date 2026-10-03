@@ -67,7 +67,8 @@ impl Gathering {
 
     /// The candidates worth sending: until the reflexive one and a moment more, or complete. Never none:
     /// with nothing gathered when the reflexive wait runs out (or gathering says complete), it waits on for
-    /// the first candidate, and past [`Bounds::first`] it is an error.
+    /// the first candidate, and past [`Bounds::first`] it is an error. A call uses [`Gathering::wait_for`].
+    #[cfg(test)]
     pub async fn wait(&self, bounds: Bounds) -> Result<Vec<String>, String> {
         self.wait_for(bounds, REFLEXIVE).await
     }
