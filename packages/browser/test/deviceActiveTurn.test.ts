@@ -1,16 +1,22 @@
 import "fake-indexeddb/auto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { RELAY_POLL_INTERVALS, newDeviceSetSecret, toBase64Url, type PkarrTransport } from "@ghostly/core";
+import {
+  RELAY_POLL_INTERVALS, newDeviceSetSecret, readTurnPacket, seedSigner, signTurnPacket, toBase64Url, turnKeys,
+  type PkarrTransport, type Signer, type TurnConditions, type TurnNetwork, type TurnSourceAnswer, type TurnSourcePut,
+} from "@ghostly/core";
 import { replaceDeviceGate, resetDeviceGates } from "../src/devices/gate";
 import { DeviceLinks } from "../src/devices/links";
+import { moveSet, type SetMovePorts } from "../src/devices/remove";
 import { DEVICE_KEYS_DB, closeDeviceKeysDb, createDeviceSigningKey, type DeviceSigningKey } from "../src/devices/signingKey";
-import type { DeviceSlot } from "../src/devices/state";
+import { amend, firstRecord, transition, type DevicePatch, type DeviceRecord, type DeviceSlot, type StoredDeviceState } from "../src/devices/state";
+import { TurnKeeper, type TurnStore } from "../src/devices/turn";
+import { FakeTurnNetwork } from "./helpers/turnNetwork";
 import { closeDevicesDb, setDeviceMirror } from "../src/devices/store";
 import { GhostlyNode } from "../src/engine/node";
 import { databaseName } from "../src/shared/idb";
 import { dropDevicesDatabase, putDeviceRecord } from "./helpers/deviceRecord";
 import { DESKTOP_NETWORK, MemoryPkarr, closeWorld, fakePeerConnection, useFakeWorld, yieldToLoop } from "../../core/test/support/pairingWorld";
-// covers: devices.turn.keeper
+// covers: devices.turn.keeper, devices.remove
 
 /*
  * A running active device reads the turn (WISP 06 § When a device checks): every 10 minutes while it runs, and at once
@@ -118,5 +124,60 @@ describe("the device links of the active device", () => {
     const start = Date.now();
     while (Date.now() - start < 120_000 && !hinted.mock.calls.length) await run(250);
     expect(hinted).toHaveBeenCalled();
+  });
+});
+
+describe("a turn read out while the active device removes a device", () => {
+  class SlowNetwork implements TurnNetwork {
+    readonly at = new Map<string, FakeTurnNetwork>();
+    gate: { z32: string; wait: Promise<void> } | null = null;
+    of(z32: string): FakeTurnNetwork {
+      let net = this.at.get(z32);
+      if (!net) this.at.set(z32, (net = new FakeTurnNetwork()));
+      return net;
+    }
+    async turnRead(z32: string): Promise<TurnSourceAnswer[]> {
+      // The first read of the gated address is slow, as a NetworkOnly read can be.
+      if (this.gate && this.gate.z32 === z32) { const { wait } = this.gate; this.gate = null; await wait; }
+      return this.of(z32).turnRead(z32);
+    }
+    async turnPut(z32: string, payload: Uint8Array, conditions: TurnConditions): Promise<TurnSourcePut[]> { return this.of(z32).turnPut(z32, payload, conditions); }
+  }
+
+  it("does not take the old set's tombstone for the new set's: the device goes on as the active one", async () => {
+    const label = (n: number) => new Uint8Array(32).fill(n);
+    const signers: Signer[] = [1, 2, 3].map((n) => seedSigner(label(60 + n)));
+    const names = ["Desktop", "Phone", "Tablet"];
+    const slot = (i: number): DeviceSlot => ({ key: toBase64Url(signers[i].publicKey), name: names[i] });
+    const oldD = label(0xd1), oldKeys = turnKeys(oldD);
+    const network = new SlowNetwork();
+    const packet = await signTurnPacket(oldKeys, { turn: 4242, rev: 2, author: 0, active: 0, slots: [0, 1, 2, 3].map((i) => (i < 3 ? { key: signers[i].publicKey, name: names[i] } : null)), instance: label(9).slice(0, 8) }, (b) => signers[0].sign(b));
+    network.of(oldKeys.identity.pubKeyZ32).seed(packet);
+    const seen = Number((readTurnPacket(oldKeys, packet) as { sequence: bigint }).sequence);
+    let record: DeviceRecord = { ...firstRecord("ghostly", "standby", { turn: 4242, rev: 2, d: toBase64Url(oldD), deviceSet: [0, 1, 2].map(slot), ownSlot: 0, activeSlot: 0, turnPacket: toBase64Url(packet), seenSequence: seen }), state: "active", saved: 1 };
+    const store: TurnStore = {
+      read: async () => record,
+      amend: async (_p, patch: DevicePatch) => (record = { ...amend(record, patch), saved: record.saved + 1 }),
+      move: async (p, to: StoredDeviceState, patch: DevicePatch = {}) => (record = { ...transition(record, p, to, patch), saved: record.saved + 1 }),
+    };
+    const keeper = () => new TurnKeeper({ profile: "ghostly", network, store, signer: (b) => signers[0].sign(b), now: () => 1_000_000, sleep: async () => {} });
+
+    // A check starts its read of the old address (the 10-minute read, a wallet opening); the read is slow.
+    let open!: () => void;
+    network.gate = { z32: oldKeys.identity.pubKeyZ32, wait: new Promise<void>((resolve) => { open = resolve; }) };
+    const running = keeper().check(false);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    // Meanwhile the person removes the tablet: a new secret, and the old address's tombstone put.
+    const ports: SetMovePorts = { read: async () => record, amend: (patch) => store.amend("ghostly", patch), signer: signers[0], network };
+    await moveSet(ports, { remove: slot(2).key });
+    const moved = record.d;
+    expect(moved).not.toBe(toBase64Url(oldD));
+    open();
+    await running;
+    // The new set's record is untouched by what the old address showed, and the device starts there.
+    expect(record).toMatchObject({ d: moved, state: "active" });
+    expect(record.seenSequence ?? 0).toBeLessThan(2 ** 52 - 1);
+    expect((await keeper().check(true)).kind).not.toBe("gated");
+    expect(record.state).toBe("active");
   });
 });
