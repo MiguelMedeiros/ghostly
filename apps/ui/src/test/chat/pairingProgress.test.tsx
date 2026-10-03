@@ -181,6 +181,73 @@ describe("the joiner's scene", () => {
   });
 });
 
+describe("one sequence that only moves forward", () => {
+  const report = (patch: Partial<PairingProgress>): Partial<LinkView> =>
+    ({ ...published, pairingProgress: { role: "inviter", stage: "waiting", since: Date.now(), startedAt: Date.now(), attempt: 1, ...patch } } as Partial<LinkView>);
+  const step = () => scene()?.dataset.step;
+  const icon = () => screen.getByTestId("connection-options");
+
+  it("is the same scene from the first stage to the connected moment: it never leaves and comes back as it goes live", () => {
+    const { engine } = renderApp(<Pairing inviter />);
+    show(published, engine);
+    const first = scene();
+    const removed: Node[] = [];
+    const watch = new MutationObserver(records => { for (const r of records) removed.push(...r.removedNodes); });
+    watch.observe(document.body, { childList: true, subtree: true });
+    for (const link of [knocked, connecting, live]) show(link, engine);
+    watch.disconnect();
+    expect(scene()).toHaveAttribute("data-stage", "live");
+    expect(scene()).toBe(first);
+    expect(removed.some(node => node === first || (node instanceof Element && node.querySelector("[data-testid=pairing-scene]")))).toBe(false);
+    expect(screen.queryByText("the chat")).toBeNull();
+  });
+
+  it("an inviter that knocks itself is at its handshake step, never at no step", () => {
+    const { engine } = renderApp(<Pairing inviter />);
+    show(report({ stage: "waiting" }), engine);
+    expect(step()).toBe("1");
+    show(report({ stage: "waiting", peerSeen: true }), engine);
+    expect(currentStep()).toBe("answering");
+    show(report({ stage: "knocking", peerSeen: true }), engine);
+    expect(label()).toBe("Knocking on your contact's door…");
+    expect(currentStep()).toBe("answering");
+    expect(icon()).toHaveAttribute("data-pairing", "knocking");
+  });
+
+  it("an attempt that fails takes the engine back between attempts, not the steps", () => {
+    const { engine } = renderApp(<Pairing inviter />);
+    show(report({ stage: "connecting", peerSeen: true }), engine);
+    expect(step()).toBe("3");
+    show(report({ stage: "waiting", peerSeen: true, attempt: 2, detail: "No connection came up; trying again." }), engine);
+    expect(step()).toBe("3");
+    expect(currentStep()).toBe("connecting");
+    expect(label()).toBe("Opening a direct, encrypted link…");
+    expect(screen.getByTestId("pairing-elapsed")).toHaveTextContent("attempt 2");
+  });
+
+  it("keeps one clock for the whole pairing: a new stage does not start it over", () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "Date"] });
+    const start = Date.now();
+    const { engine } = renderApp(<Pairing inviter={false} />);
+    show(report({ role: "joiner", stage: "resolving", startedAt: start, since: start }), engine);
+    act(() => vi.advanceTimersByTime(14_000));
+    expect(screen.getByTestId("pairing-elapsed")).toHaveTextContent("0:14");
+    show(report({ role: "joiner", stage: "knocking", startedAt: start, since: Date.now() }), engine);
+    expect(screen.getByTestId("pairing-elapsed")).toHaveTextContent("0:14");
+    act(() => vi.advanceTimersByTime(2_000));
+    expect(screen.getByTestId("pairing-elapsed")).toHaveTextContent("0:16");
+  });
+
+  it("the icon tells the scene's pairing, even while texts already go over the DHT", () => {
+    const { engine } = renderApp(<Pairing inviter={false} />);
+    show({ ...report({ role: "joiner", stage: "knocking", peerSeen: true }), peerOnline: true, textDelivery: "dht" }, engine);
+    expect(scene()).toHaveAttribute("data-stage", "knocking");
+    expect(icon()).toHaveAttribute("data-pairing", "knocking");
+    expect(icon()).toHaveAttribute("data-state", "waiting");
+    expect(icon()).toHaveAccessibleName("Connection options: Pairing · Knocking on your contact's door…");
+  });
+});
+
 describe("which chats get the scene", () => {
   // An existing chat opens with its link already in the engine's state.
   const opened = (link: Partial<LinkView>, inviter: boolean) => {
@@ -225,9 +292,10 @@ describe("the engine's own report (the pairing-progress contract)", () => {
 
   it("wins over what the link's fields suggest, with its times and attempt", () => {
     const { engine } = renderApp(<Pairing inviter />);
-    show(report({ since: Date.now() - 20_000, attempt: 2 }), engine);
+    // The clock is the pairing's (from `startedAt`); the stage's own time (`since`) only says when it is slow.
+    show(report({ since: Date.now() - 20_000, startedAt: Date.now() - 65_000, attempt: 2 }), engine);
     expect(label()).toBe("Knocking on your contact's door…");
-    expect(screen.getByTestId("pairing-elapsed")).toHaveTextContent("0:20 · attempt 2");
+    expect(screen.getByTestId("pairing-elapsed")).toHaveTextContent("1:05 · attempt 2");
     expect(screen.getByTestId("pairing-slow")).toHaveTextContent("Your contact's app has not answered yet");
   });
 
@@ -407,13 +475,16 @@ describe("the connected sound", () => {
     expect(scene()).toBeNull();
   });
 
-  it("not for a pairing that ends on the DHT; its first live link, if one comes up later, is the connected moment", () => {
+  it("not for a pairing that ends on the DHT; its first live link, if one comes up later, is heard, and the scene stays away", () => {
     const { engine } = renderApp(<Pairing inviter={false} createdAt={Date.now()} />);
     const report = (stage: PairingProgress["stage"]) => ({ ...published, pairingProgress: { role: "joiner", stage, reason: stage === "on-dht" ? "transport" : undefined, since: Date.now(), startedAt: Date.now(), attempt: 2 } } as Partial<LinkView>);
+    show(report("connecting"), engine);
+    expect(scene()).toHaveAttribute("data-stage", "connecting");
     show(report("on-dht"), engine);
     expect(sounds()).toEqual([]);
+    // The chat took over at on-dht: the scene does not come back to celebrate a live link that came later.
     show(report("live"), engine);
-    expect(scene()).toHaveAttribute("data-stage", "live");
+    expect(scene()).toBeNull();
     expect(sounds()).toEqual(["connected"]);
   });
 
