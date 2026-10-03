@@ -1,0 +1,1 @@
+Where a Pubky Ring approval completes, by browser: Firefox keeps the homeserver's cookie too (a user's report, 2026-10-03), and Vanadium on GrapheneOS drops it like Safari, since it blocks cookies from other sites. Pubky Passport needs no cookie and works in all of them. The error a refused Ring approval shows now names these choices instead of Chrome.
