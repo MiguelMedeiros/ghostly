@@ -13,10 +13,12 @@ import { CommunityWorld, type Peer } from "./communityWorld";
  */
 const MINUTE = 60_000;
 const SIZE = 18, HUBS = [3, 7], MEMBER = 10, HUB = 3;
+/** The admin as a hub (a CLI daemon): its clock also dates the commits that let members in. */
+const ADMIN_HUBS = [0, 7];
 
-async function build(off: number, by: number) {
+async function build(off: number, by: number, hubs: number[]) {
   const world = new CommunityWorld();
-  const app = (i: number) => ({ staysOnline: HUBS.includes(i), ...(i === off ? { clock: by } : {}) });
+  const app = (i: number) => ({ staysOnline: hubs.includes(i), ...(i === off ? { clock: by } : {}) });
   const admin = world.add("admin", undefined, app(0));
   const id = await admin.groups.create("Clocks", "mesh");
   const link = await admin.groups.enableLink(id);
@@ -40,11 +42,13 @@ describe("hubs of a private group whose members' clocks differ", { timeout: 240_
     ["a hub's clock 90 s behind", HUB, -90_000],
     ["a hub's clock two minutes ahead", HUB, 2 * MINUTE],
     ["a hub's clock two minutes behind", HUB, -2 * MINUTE],
-  ])("%s: everyone counts on both hubs, and what each says reaches the others", async (_, off, by) => {
-    const { world, id, peers } = await build(off, by);
+    ["the admin's clock two minutes ahead, the admin a hub", 0, 2 * MINUTE, ADMIN_HUBS],
+    ["the admin's clock two minutes behind, the admin a hub", 0, -2 * MINUTE, ADMIN_HUBS],
+  ])("%s: everyone counts on both hubs, and what each says reaches the others", async (_, off, by, hubs = HUBS) => {
+    const { world, id, peers } = await build(off, by, hubs);
     const view = (p: Peer) => world.view(p, id)!;
-    const hubKeys = HUBS.map(i => view(peers[i]).myKey!).sort();
-    const members = peers.filter((_, i) => !HUBS.includes(i));
+    const hubKeys = hubs.map(i => view(peers[i]).myKey!).sort();
+    const members = peers.filter((_, i) => !hubs.includes(i));
     const edges = (p: Peer) => [...p.links.values()].filter(e => e.kind === "edge" && e.g === id).length;
     // Every member sees both hubs (the one with the clock off too), reaches everyone, and keeps edges with its hubs only.
     const settled = () => peers.every(p => !!view(p).hubs && view(p).members.every(m => m.online))
