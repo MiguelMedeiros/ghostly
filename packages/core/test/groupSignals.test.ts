@@ -20,7 +20,17 @@ class Relays implements PkarrTransport {
     if (this.failPublish) throw this.failPublish;
     this.publishes.push(records);
     this.options.push(options);
-    this.packets.set(identity.pubKeyZ32, { pubKeyZ32: identity.pubKeyZ32, timestampMicros: BigInt(Date.now()) * 1000n, records });
+    // Dated again here, as `RelayTransport.publish` does (past anything it put under the key before).
+    const last = this.packets.get(identity.pubKeyZ32)?.timestampMicros ?? 0n, now = BigInt(Date.now()) * 1000n + 1n;
+    this.packets.set(identity.pubKeyZ32, { pubKeyZ32: identity.pubKeyZ32, timestampMicros: now > last ? now : last + 1n, records });
+  }
+  /** A packet signed by the caller, kept as it is (`RelayTransport.publishPayload`). */
+  async publishPayload(key: string, payload: Uint8Array, options?: unknown): Promise<void> {
+    if (this.failPublish) throw this.failPublish;
+    const packet = parseRelayPayload(key, payload);
+    this.publishes.push(packet.records.map(({ label, value }) => ({ label, value })));
+    this.options.push(options);
+    this.packets.set(key, packet);
   }
   async resolve(key: string): Promise<SignedPacket | null> {
     this.reads++;
@@ -176,6 +186,78 @@ describe("an edge's packets, carried by members beside the relays", () => {
     await vi.advanceTimersByTimeAsync(SIGNAL_PROVEN_MS);
     await transport.resolve(peer.pubKeyZ32);
     expect(relays.reads).toBe(1);
+  });
+
+  it("gives the relays the very packet a member carried, so the member's end does not take the relays' copy for news after a goodbye", async () => {
+    // Both ends of one edge, on the same relays.
+    const a = createIdentity(), b = createIdentity(), relays = new Relays();
+    const ends = { open: false, looks: 0 };
+    const carried: Uint8Array[] = [];
+    const mine = new CarriedTransport(relays, a.pubKeyZ32, b.pubKeyZ32, {
+      carry: payload => { carried.push(payload); return { taken: 1, sure: false }; }, open: () => ends.open, look: () => {},
+    });
+    const theirs = new CarriedTransport(relays, b.pubKeyZ32, a.pubKeyZ32, {
+      carry: () => ({ taken: 1, sure: false }), open: () => ends.open, look: () => { ends.looks++; },
+    });
+    // The packet that goes as the edge opens (before the session is ready): carried, and on the relays at once.
+    await mine.publish(a, records("settled"));
+    expect(relays.publishes).toEqual([records("settled")]);
+    expect(theirs.accept(carried[0])).toBe(true);
+    const known = (await theirs.resolve(a.pubKeyZ32))!.timestampMicros;
+    // The edge is up for a while, then this app says goodbye: the member's end reads the relays, and finds nothing newer.
+    ends.open = true;
+    await vi.advanceTimersByTimeAsync(SIGNAL_PROVEN_MS);
+    ends.open = false;
+    vi.advanceTimersByTime(1);
+    expect((await theirs.resolve(a.pubKeyZ32))!.timestampMicros).toBe(known);
+    expect(relays.packets.get(a.pubKeyZ32)!.timestampMicros).toBe(known);
+    expect(relays.reads).toBe(1);
+  });
+
+  it("an edge that is up hands the member the packet the relays took, over itself, and nothing over an edge that is down", async () => {
+    const a = createIdentity(), b = createIdentity(), relays = new Relays();
+    const direct: Uint8Array[] = [];
+    const ends = { open: true, looks: 0 };
+    const mine = new CarriedTransport(relays, a.pubKeyZ32, b.pubKeyZ32, {
+      carry: () => ({ taken: 1, sure: false }), open: () => ends.open, look: () => {},
+      direct: payload => { direct.push(payload); return true; },
+    });
+    const theirs = new CarriedTransport(relays, b.pubKeyZ32, a.pubKeyZ32, {
+      carry: () => ({ taken: 1, sure: false }), open: () => ends.open, look: () => { ends.looks++; },
+    });
+    await mine.publish(a, records("nick"));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(relays.publishes).toEqual([records("nick")]);
+    expect(direct).toHaveLength(1);
+    expect(parseRelayPayload(a.pubKeyZ32, direct[0]).timestampMicros).toBe(relays.packets.get(a.pubKeyZ32)!.timestampMicros);
+    expect(theirs.accept(direct[0], true)).toBe(true);
+    expect(ends.looks).toBe(1);
+    // A packet over the edge itself says nothing of the way through members: the next one goes to the relays at once.
+    ends.open = false;
+    await theirs.publish(b, records("offer"));
+    expect(relays.publishes).toHaveLength(2);
+    await mine.publish(a, records("offer"));
+    expect(direct).toHaveLength(1);
+  });
+
+  it("hands the settled packet once the member's app says it takes carried packets, when that comes after it", async () => {
+    const { me, relays, state } = edge();
+    const ready = { now: false }, direct: Uint8Array[] = [];
+    const end = new CarriedTransport(relays, me.pubKeyZ32, createIdentity().pubKeyZ32, {
+      carry: () => ({ taken: 0, sure: false }), open: () => state.open, look: () => {},
+      direct: payload => { if (!ready.now) return false; direct.push(payload); return true; },
+    });
+    state.open = true;
+    await end.publish(me, records("settled"));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(direct).toHaveLength(0);
+    ready.now = true;
+    end.linkReady();
+    expect(direct).toHaveLength(1);
+    expect(parseRelayPayload(me.pubKeyZ32, direct[0]).timestampMicros).toBe(relays.packets.get(me.pubKeyZ32)!.timestampMicros);
+    // Once.
+    end.linkReady();
+    expect(direct).toHaveLength(1);
   });
 
   it("takes only the member's own packets, and only newer ones", async () => {

@@ -72,7 +72,7 @@ export interface GroupsHost {
    * A packet of the member at the other end of this edge that a member carried here (WISP 9xx § Signaling through
    * members): true when it is theirs and news to the edge, which reads it at once (`CarriedTransport.accept`).
    */
-  signalIn?(linkId: string, payload: Uint8Array): boolean;
+  signalIn?(linkId: string, payload: Uint8Array, direct?: boolean): boolean;
   /** My newest packet for this edge while it is down, to hand to a member that may pass it on (`CarriedTransport.latest`). */
   edgeSignal?(linkId: string): Uint8Array | null;
   /** Resolves false when the message was there already: nothing new came (void: a host that does not say). */
@@ -979,6 +979,10 @@ export class Groups {
    */
   carrySignal(groupId: string, to: string, payload: Uint8Array): { taken: number; sure: boolean } {
     return this.isCommunity(groupId) ? { taken: 0, sure: false } : this.signals.carry(groupId, to, payload);
+  }
+  /** My packet for the edge to `to`, over that edge itself while it is up (`MeshSignals.direct`). */
+  directSignal(groupId: string, to: string, linkId: string, payload: Uint8Array): boolean {
+    return !this.isCommunity(groupId) && this.signals.direct(groupId, to, linkId, payload);
   }
   /** A packet a member carried for the edge to `from` before that edge was started, once. */
   takeSignal(groupId: string, from: string): Uint8Array | undefined { return this.signals.take(groupId, from); }

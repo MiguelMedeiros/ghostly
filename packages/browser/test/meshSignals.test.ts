@@ -50,7 +50,7 @@ class Net {
       linkReady: (linkId: string, version = 1) => { const link = member.links.get(linkId); return !!link?.up && (version !== GROUP_VERSION_SIGNALS || link.signals); },
       edges: () => new Map([...member.links].filter(([, l]) => l.kind === "edge").map(([id, l]) => [l.to, id])),
       entries: () => new Map([...member.links].filter(([, l]) => l.kind === "entry").map(([id, l]) => [l.to, id])),
-      signalIn: (linkId: string, payload: Uint8Array) => { const line = `${linkId} ${text(payload)}`; if (member.took.includes(line)) return false; member.took.push(line); return true; },
+      signalIn: (linkId: string, payload: Uint8Array, direct?: boolean) => { const line = `${linkId} ${direct ? "(direct) " : ""}${text(payload)}`; if (member.took.includes(line)) return false; member.took.push(line); return true; },
       edgeSignal: (linkId: string) => member.mine.get(linkId) ?? null,
     } as unknown as GroupsHost;
     member.signals = new MeshSignals(host, {
@@ -183,6 +183,23 @@ describe("edge signaling through members", () => {
     alice.signals.edgeReady(G, session, bob.key, "edge:alice>bob");
     expect(carol.took).toEqual(["edge:carol>alice alice to carol"]);
     expect(dave.took).toEqual([]);
+  });
+
+  it("an edge that is up hands its packet over itself, to an app that takes them, and nothing comes back", () => {
+    const { net, alice, bob, carol } = three();
+    bob.mine.set("edge:bob>alice", bytes("bob's settled"));
+    expect(alice.signals.direct(G, bob.key, "edge:alice>bob", bytes("alice's settled"))).toBe(true);
+    expect(bob.took).toEqual(["edge:bob>alice (direct) alice's settled"]);
+    expect(alice.took).toEqual([]);
+    expect(net.sent).toBe(1);
+    // Not over another member's edge, nor over an edge that is down or whose member's app takes no carried packets.
+    expect(alice.signals.direct(G, carol.key, "edge:alice>bob", bytes("wrong edge"))).toBe(false);
+    expect(bob.signals.direct(G, carol.key, "edge:bob>carol", bytes("down"))).toBe(false);
+    const old = new Net();
+    const dan = old.add("dan", "admin"), eve = old.add("eve");
+    old.link(dan, eve, "edge", true, false);
+    expect(dan.signals.direct(G, eve.key, "edge:dan>eve", bytes("older app"))).toBe(false);
+    expect(old.sent).toBe(0);
   });
 
   it("a frame for a member whose edge is a moment from up waits for it, a few seconds", () => {

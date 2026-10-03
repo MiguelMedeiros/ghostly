@@ -1018,7 +1018,7 @@ export class GhostlyNode implements EngineImplementation {
     publish: (identity, records, background) => this.groupTransport.publish(identity, records, { background }),
     resolve: async (pubKeyZ32, background, door) => (await this.groupTransport.resolve(pubKeyZ32, { background, door }))?.records ?? null,
     expectPeer: linkId => this.links.get(linkId)?.link?.expectPeer(),
-    signalIn: (linkId, payload) => !!this.links.get(linkId)?.carried?.accept(payload),
+    signalIn: (linkId, payload, direct) => !!this.links.get(linkId)?.carried?.accept(payload, direct),
     edgeSignal: linkId => this.links.get(linkId)?.carried?.latest() ?? null,
     openEdge: (state, peer, expectPeer) => this.openEdge(state, peer, expectPeer),
     closeEdge: linkId => this.closeGroupLink(linkId),
@@ -4535,6 +4535,7 @@ export class GhostlyNode implements EngineImplementation {
       carry: payload => this.groups.carrySignal(group, peer, payload),
       open: () => !!live.link?.isDataLinkOpen,
       look: () => live.link?.look(),
+      direct: payload => this.groups.directSignal(group, peer, linkId, payload),
     });
     const waiting = live.carried && this.groups.takeSignal(group, peer);
     if (waiting) live.carried!.accept(waiting);
@@ -4583,6 +4584,7 @@ export class GhostlyNode implements EngineImplementation {
         onGroupsSupport: supported => {
           if (supported) traceJoin(group, "link.ready", { role });
           if (!entry) this.noteEdgeLive(linkId, supported);
+          if (supported) live.carried?.linkReady();
           if (supported) {
             if (entry) this.groups.entryReady(group, linkId, peer);
             else if (!member()) this.groups.edgeReady(group, peer, linkId);

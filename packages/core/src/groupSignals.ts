@@ -82,6 +82,11 @@ export interface CarriedHooks {
   open(): boolean;
   /** A carried packet of the member's is here and no read is under way: look now. */
   look(): void;
+  /**
+   * Hands my packet to the member over this edge's own data link while it is open: false when it could not go (the
+   * member's app takes no carried packets, or the link closed).
+   */
+  direct?(payload: Uint8Array): boolean;
   /** `CARRIED_DEFER_MS`, for tests. */
   deferMs?: number;
 }
@@ -94,6 +99,8 @@ export class CarriedTransport implements PkarrTransport {
   /** My last packet while the edge is down: what a member that just became reachable is handed. */
   private mine: Uint8Array | null = null;
   private lastTimestamp = 0n;
+  /** My packet the relays took while the edge is up, which its own link could not hand the member yet (`linkReady`). */
+  private settled: Uint8Array | null = null;
   /** The newest packet of the member's that came through a carrier, and the timestamp of the one a read last returned. */
   private carried: SignedPacket | null = null;
   private returned = -1n;
@@ -102,7 +109,7 @@ export class CarriedTransport implements PkarrTransport {
   /** A read under way: resolved when a carried packet comes meanwhile. */
   private waiting: (() => void) | null = null;
   /** The packet the relays have not got yet. */
-  private pending: { identity: Identity; records: GhostRecord[]; options?: PkarrRequestOptions; timer: ReturnType<typeof setTimeout>; heardBefore: number; ended: Promise<"ended">; end: () => void } | null = null;
+  private pending: { identity: Identity; records: GhostRecord[]; payload: Uint8Array; options?: PkarrRequestOptions; timer: ReturnType<typeof setTimeout>; heardBefore: number; ended: Promise<"ended">; end: () => void } | null = null;
   /** How many carried packets of the member's came: a deferral that ends with none more says no member reaches it. */
   private heard = 0;
   /** When the last one came (`SIGNAL_PROVEN_MS`). */
@@ -129,13 +136,16 @@ export class CarriedTransport implements PkarrTransport {
   async publish(identity: Identity, records: GhostRecord[], options?: PkarrRequestOptions): Promise<void> {
     if (this.stopped || identity.pubKeyZ32 !== this.myKey) return this.inner.publish(identity, records, options);
     this.drop();
+    this.settled = null;
+    const payload = this.stamp(identity, records);
     // Up: the edge carries everything, and its packet on the relays (it is here, its offer is settled) is nothing
     // anyone waits for. It goes as a background write, behind the links that are signaling (a new offer of its own aside).
-    if (this.hooks.open()) { this.mine = null; return this.inner.publish(identity, records, options?.signal ? options : { ...options, background: true }); }
-    // The same order as the relays' copy keeps: each packet newer than the last.
-    const now = BigInt(Date.now()) * 1000n;
-    this.lastTimestamp = now > this.lastTimestamp ? now : this.lastTimestamp + 1n;
-    const payload = createRelayPayload(identity, records, this.lastTimestamp);
+    if (this.hooks.open()) {
+      this.mine = null;
+      const published = this.toRelays(identity, records, payload, options?.signal ? options : { ...options, background: true });
+      if (this.hooks.direct && this.inner.publishPayload) void published.then(() => this.handDirect(payload), () => { /* the link publishes again, and hands it then */ });
+      return published;
+    }
     this.mine = payload;
     let carried = { taken: 0, sure: false };
     try { carried = this.hooks.carry(payload); } catch { /* nobody took it */ }
@@ -143,10 +153,46 @@ export class CarriedTransport implements PkarrTransport {
     // packet may not reach the other end (after a restart, two members answering the same one each hold the other's
     // answer), and an answer held back for nothing is read a poll later.
     const proven = Date.now() - this.heardAt < SIGNAL_PROVEN_MS;
-    if (!carried.taken || this.quiet || !(carried.sure || proven)) return this.inner.publish(identity, records, options);
+    if (!carried.taken || this.quiet || !(carried.sure || proven)) return this.toRelays(identity, records, payload, options);
     let end!: () => void;
     const ended = new Promise<"ended">(resolve => { end = () => resolve("ended"); });
-    this.pending = { identity, records, options, heardBefore: this.heard, ended, end, timer: setTimeout(() => this.flush(), this.hooks.deferMs ?? CARRIED_DEFER_MS) };
+    this.pending = { identity, records, payload, options, heardBefore: this.heard, ended, end, timer: setTimeout(() => this.flush(), this.hooks.deferMs ?? CARRIED_DEFER_MS) };
+  }
+
+  /** My next packet for this edge, signed and dated: each newer than the last, as the relays' copy keeps them. */
+  private stamp(identity: Identity, records: GhostRecord[]): Uint8Array {
+    const now = BigInt(Date.now()) * 1000n;
+    this.lastTimestamp = now > this.lastTimestamp ? now : this.lastTimestamp + 1n;
+    return createRelayPayload(identity, records, this.lastTimestamp);
+  }
+
+  /**
+   * The relays get the very packet members carried or the edge itself handed over, byte for byte, where the transport
+   * can put a payload signed here: a copy dated again by the relays' transport was a packet the member had not seen,
+   * and its first read after this app said goodbye took it for a sign that the app was back already. It dialled: two
+   * writes and fast looks for an app that was gone, and an offer left on the relays that this app could answer after
+   * its restart and then wait 40 s for (7 of 16 goodbyes on the admin in the member-back runs, 1 of 16 on dev, 2026-10-03).
+   */
+  private toRelays(identity: Identity, records: GhostRecord[], payload: Uint8Array, options?: PkarrRequestOptions): Promise<void> {
+    return this.inner.publishPayload ? this.inner.publishPayload(identity.pubKeyZ32, payload, options) : this.inner.publish(identity, records, options);
+  }
+
+  /**
+   * The packet the relays just took, handed to the member over the edge itself while it is up. An edge up reads nothing
+   * from the relays until its slow look, so the member's app would otherwise meet that packet first after a goodbye.
+   */
+  private handDirect(payload: Uint8Array): void {
+    this.settled = null;
+    if (this.stopped || !this.hooks.open()) return;
+    let handed = false;
+    try { handed = !!this.hooks.direct?.(payload); } catch { /* it closed */ }
+    // The packet that goes as the edge opens is often out before the member's app says it takes carried packets.
+    if (!handed) this.settled = payload;
+  }
+
+  /** The edge's link says the member's app takes carried packets: the settled packet it could not take before goes now. */
+  linkReady(): void {
+    if (this.settled) this.handDirect(this.settled);
   }
 
   /** The deferred packet goes to the relays: the edge did not open meanwhile. Tried again while it is still the newest. */
@@ -156,7 +202,7 @@ export class CarriedTransport implements PkarrTransport {
     pending.end();
     // Nothing came back through a member: none reaches the other end (or its app does not take carried packets).
     if (this.heard === pending.heardBefore) this.quiet = true;
-    this.inner.publish(pending.identity, pending.records, pending.options).then(
+    this.toRelays(pending.identity, pending.records, pending.payload, pending.options).then(
       () => { if (this.pending === pending) this.pending = null; },
       error => {
         if (this.pending !== pending || this.stopped) return;
@@ -209,8 +255,10 @@ export class CarriedTransport implements PkarrTransport {
   /**
    * A packet a member carried here. True when it is the member's (its signature holds under the edge's key), of now
    * (`SIGNAL_FRESH_MS`) and newer than any seen before, carried or read: the next read answers with it, at once.
+   * `direct`: the member handed it over this edge itself while it was up (`CarriedHooks.direct`), which says nothing
+   * about whether other members reach it.
    */
-  accept(payload: Uint8Array): boolean {
+  accept(payload: Uint8Array, direct = false): boolean {
     if (this.stopped) return false;
     let packet: SignedPacket;
     try { packet = parseRelayPayload(this.peerKey, payload); } catch { return false; }
@@ -218,9 +266,11 @@ export class CarriedTransport implements PkarrTransport {
     if (age > fresh || age < -fresh || packet.timestampMicros <= this.seen) return false;
     if (this.carried && packet.timestampMicros <= this.carried.timestampMicros) return false;
     this.carried = packet;
-    this.heard++;
-    this.heardAt = Date.now();
-    this.quiet = false;
+    if (!direct) {
+      this.heard++;
+      this.heardAt = Date.now();
+      this.quiet = false;
+    }
     const waiting = this.waiting;
     this.waiting = null;
     if (waiting) waiting(); else this.hooks.look();

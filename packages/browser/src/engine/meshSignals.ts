@@ -96,6 +96,8 @@ export class MeshSignals {
         waiting.set(frame.from, { payload: frame.payload, at: this.scope.now() });
         return;
       }
+      // Over the edge itself, while it is up (`direct`): the packet the relays got, so the edge knows it is not news.
+      if (linkId === edge) { this.host.signalIn?.(edge, frame.payload, true); return; }
       if (!this.host.signalIn?.(edge, frame.payload)) return;
       const key = `${frame.g} ${frame.from}`, now = this.scope.now();
       this.via.set(key, linkId);
@@ -122,6 +124,16 @@ export class MeshSignals {
       return;
     }
     try { this.host.sendOnLink(target, groupSignalFrame(frame.g, frame.from, frame.to, frame.payload, true)); } catch { /* it closed */ }
+  }
+
+  /**
+   * My packet for the edge to `to`, over that edge itself while it is up (`CarriedHooks.direct`): the packet the relays
+   * just took, so the member does not take that one for news after I said goodbye. Only to an app that takes them.
+   */
+  direct(groupId: string, to: string, linkId: string, payload: Uint8Array): boolean {
+    const session = this.scope.session(groupId);
+    if (!session || session.status !== "active" || !this.ready(linkId) || this.host.edges(groupId).get(to) !== linkId) return false;
+    try { this.host.sendOnLink(linkId, groupSignalFrame(groupId, session.myKey, to, payload)); return true; } catch { return false; }
   }
 
   /** A packet that came for the edge to `from` before the edge was started, once. */

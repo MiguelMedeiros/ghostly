@@ -1,0 +1,1 @@
+Signaling through members: the relays get the very packet that was handed over, byte for byte, where the app can put a packet signed elsewhere, and a packet the relays take while the edge is up also goes over the edge itself as a `group-signal` (to an app that announced `5`), so a member's first read after a goodbye no longer takes the relays' copy for the app being back.
