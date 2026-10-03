@@ -11,7 +11,8 @@ import type { FromWorker, ToWorker } from "../sw/messages";
 const SCRIPT = "/sw.js";
 
 function container(): ServiceWorkerContainer | null {
-  return "serviceWorker" in navigator && window.isSecureContext ? navigator.serviceWorker : null;
+  // Reading it can throw where the browser refuses service workers outright (site data blocked): then there is none.
+  try { return "serviceWorker" in navigator && window.isSecureContext ? navigator.serviceWorker ?? null : null; } catch { return null; }
 }
 
 function tell(worker: ServiceWorker | null | undefined, message: ToWorker): void {
@@ -26,9 +27,11 @@ function tell(worker: ServiceWorker | null | undefined, message: ToWorker): void
 export function registerServiceWorker(): void {
   const workers = container();
   if (!workers || !import.meta.env.PROD) return;
-  const register = () => void workers.register(SCRIPT, { scope: "/", updateViaCache: "none" }).catch(() => {
-    // Refused (private mode, storage off): the app works from the network, as it did before there was a worker.
-  });
+  const register = () => {
+    // Refused, by a rejection or by throwing (private mode, storage off, a browser that blocks workers): the app
+    // works from the network, as it did before there was a worker.
+    try { void workers.register(SCRIPT, { scope: "/", updateViaCache: "none" }).catch(() => {}); } catch { /* no worker */ }
+  };
   if (document.readyState === "complete") register();
   else addEventListener("load", register, { once: true });
 }
@@ -102,10 +105,12 @@ export function listenForShares(): void {
 
 /**
  * A wake-up notification was tapped: its chat, in its profile. Another profile's chat means switching to it (the
- * app restarts as that profile, on that chat). Only a chat or group route; anything else is ignored.
+ * app restarts as that profile, on that chat). Only a chat or group route, or the app's home (`/`: the notice of a
+ * device that is not the active one, which opens its standby screen, WISP 06 § Push and the phone); anything else is
+ * ignored.
  */
 export function openChat(path: string, profile: string): void {
-  if (typeof path !== "string" || !/^\/(chat|group)\/[^/?#]+$/.test(path)) return;
+  if (typeof path !== "string" || (path !== "/" && !/^\/(chat|group)\/[^/?#]+$/.test(path))) return;
   if (profile === activeProfileId()) {
     if (window.location.hash !== `#${path}`) window.location.hash = path;
     return;

@@ -35,7 +35,8 @@ export function ProfileSwitchSplash() {
   const [arrived] = useState(() => !!pendingSwitch());
   const [pending, setPending] = useState<PendingSwitch | null>(() => pendingSwitch());
   const [leaving, setLeaving] = useState(false);
-  const ready = useSyncExternalStore(subscribe, () => !!engine.state);
+  // Something to see: the profile, the notice that it cannot be opened (`ProfileUnavailable`), or the standby screen.
+  const ready = useSyncExternalStore(subscribe, () => !!engine.state || !!engine.startFailure || !!engine.deviceGate);
 
   useEffect(() => {
     const starting = (e: Event) => setPending((e as CustomEvent<PendingSwitch>).detail);

@@ -9,6 +9,12 @@
     "reason": "{{reason}}.",
     "retryAt": "Nouvel essai vers {{time}}."
   },
+  "clockOff": {
+    "hint": "L'horloge de cet appareil semble décalée d'environ {{amount}}. Les discussions peuvent être lentes à se connecter.",
+    "infoAhead": "L'heure de cet appareil avance d'environ {{amount}} sur ce que disent les relais et les appareils de vos contacts. Ghostly date ce qu'il envoie avec cette horloge, et les autres apps refusent ou retardent ce qui est daté trop loin de leur propre heure : les discussions et les groupes peuvent être lents à se connecter, les appels peuvent ne pas sonner, et une app qui n'a pas été mise à jour peut ne pas se connecter du tout. Activez la date et l'heure automatiques dans les réglages de cet appareil. Cette note disparaît dès que l'horloge concorde à nouveau. Il faut plusieurs sources qui concordent, jamais un seul contact.",
+    "infoBehind": "L'heure de cet appareil retarde d'environ {{amount}} sur ce que disent les relais et les appareils de vos contacts. Ghostly date ce qu'il envoie avec cette horloge, et les autres apps refusent ou retardent ce qui est daté trop loin de leur propre heure : les discussions et les groupes peuvent être lents à se connecter, les appels peuvent ne pas sonner, et une app qui n'a pas été mise à jour peut ne pas se connecter du tout. Activez la date et l'heure automatiques dans les réglages de cet appareil. Cette note disparaît dès que l'horloge concorde à nouveau. Il faut plusieurs sources qui concordent, jamais un seul contact.",
+    "title": "Horloge de l'appareil"
+  },
   "detail": {
     "noneLive": "Aucune liaison directe",
     "notLiveFor": "Sans liaison pendant",

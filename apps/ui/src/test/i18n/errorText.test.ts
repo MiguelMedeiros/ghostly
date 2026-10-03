@@ -154,6 +154,14 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["Wrong lock password for that profile", "apps/ui/src/lib/profileData.ts"],
   ["This backup does not hold a profile", "apps/ui/src/lib/profileBackup.ts"],
   ["This device has no room left for this backup. Free some space, then try again.", "apps/ui/src/lib/profileBackup.ts"],
+  ["Wrong passphrase, or the backup was changed", "packages/browser/src/backup/stream.ts"],
+  ["This is not a Ghostly backup", "packages/browser/src/backup/envelope.ts"],
+  ["This backup is damaged: it was changed or cut short", "packages/browser/src/backup/stream.ts"],
+  ["This backup is too large to restore", "packages/browser/src/backup/stream.ts"],
+  ["This backup comes from a newer Ghostly; update to restore it", "packages/browser/src/backup/stream.ts"],
+  ["Unsupported backup encryption", "packages/browser/src/backup/stream.ts"],
+  ["Use at least 12 characters for the backup passphrase", "packages/browser/src/backup/stream.ts"],
+  ["This device has no storage for files", "packages/browser/src/shared/fileBytes.ts"],
   ["Could not read the Ark wallet for the backup: quota exceeded", "apps/ui/src/lib/profileBackup.ts", "Could not read the Ark wallet for the backup: "],
   ["This wallet has no recovery phrase to show", "apps/ui/src/components/wallet/walletPhrase.ts"],
   ["This wallet has no backup file", "apps/ui/src/components/wallet/walletPhrase.ts"],
@@ -209,7 +217,7 @@ describe("errors in the app's language", () => {
 });
 
 describe("the engine's known errors (@ghostly/core ENGINE_ERRORS)", () => {
-  const SAMPLE: Record<string, string> = { host: "mint.example.com", domain: "shop.example", chain: "mutinynet", network: "Testnet", amount: "1,000", fee: "1200", min: "5", max: "500" };
+  const SAMPLE: Record<string, string> = { wallet: "Bark", device: "Desktop", host: "mint.example.com", domain: "shop.example", chain: "mutinynet", network: "Testnet", amount: "1,000", fee: "1200", min: "5", max: "500" };
   const texts = (Object.keys(ENGINE_ERRORS) as EngineErrorCode[]).map((code) => [code, engineText(code, Object.fromEntries([...ENGINE_ERRORS[code].matchAll(/\{(\w+)\}/g)].map(([, name]) => [name, SAMPLE[name]])))] as const);
 
   it.each(LANGUAGES.filter((l) => l !== "en"))("every one reads in %s, by a rule or by its code", (language) => {

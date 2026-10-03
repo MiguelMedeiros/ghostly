@@ -11,6 +11,8 @@
  * The frame carries no message id, so older apps drop it.
  */
 
+import type { DeviceCapability } from "./deviceLink";
+
 /** Voice and video calls: `paired-call` signals on this session, media on a WebRTC connection of its own (WISP 601). */
 export const CALLS_CAPABILITY = "calls/1";
 /** Shared local web apps: `paired-services` and `ph` HTTP frames on this session (WISP 701). */
@@ -50,7 +52,11 @@ export const STATUS_CARD_CAPABILITY = "status-card/1";
  */
 export const BUTTONS_CAPABILITY = "buttons/1";
 
-export type SessionCapability = typeof CALLS_CAPABILITY | typeof SERVICES_CAPABILITY | typeof FILES_CAPABILITY | typeof TYPING_CAPABILITY | typeof REACTIONS_CAPABILITY | typeof EDIT_CAPABILITY | typeof WAKE_SESSION_CAPABILITY | typeof PIN_CAPABILITY | typeof STATUS_CARD_CAPABILITY | typeof BUTTONS_CAPABILITY;
+/**
+ * What only a device link offers (WISP 06, `deviceLink.ts`): the frames between a person's own devices. They are in
+ * the type so a device link can announce them, and not in `KNOWN_SESSION_CAPABILITIES`: no chat knows them.
+ */
+export type SessionCapability = DeviceCapability | typeof CALLS_CAPABILITY | typeof SERVICES_CAPABILITY | typeof FILES_CAPABILITY | typeof TYPING_CAPABILITY | typeof REACTIONS_CAPABILITY | typeof EDIT_CAPABILITY | typeof WAKE_SESSION_CAPABILITY | typeof PIN_CAPABILITY | typeof STATUS_CARD_CAPABILITY | typeof BUTTONS_CAPABILITY;
 
 /** Every capability this app knows on a session: what `receive` reports changes of. */
 export const KNOWN_SESSION_CAPABILITIES: readonly SessionCapability[] = [CALLS_CAPABILITY, SERVICES_CAPABILITY, FILES_CAPABILITY, TYPING_CAPABILITY, REACTIONS_CAPABILITY, EDIT_CAPABILITY, WAKE_SESSION_CAPABILITY, PIN_CAPABILITY, STATUS_CARD_CAPABILITY, BUTTONS_CAPABILITY];

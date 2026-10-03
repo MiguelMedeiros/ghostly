@@ -1,6 +1,7 @@
 import type { DiscoveryStatus } from "./relayBreaker";
 import type { Identity } from "./identity";
 import type { GhostRecord, SignedPacket } from "./pkarr";
+import type { TurnConditions, TurnSourceAnswer, TurnSourcePut } from "./turnRead";
 
 /**
  * How a Ghostly peer reaches Pkarr. Desktop talks to the Mainline DHT directly
@@ -34,7 +35,11 @@ export type DiscoveryChange = "tripped" | "recovered";
  * up to three while it still says DHT only (the live link waits on them). A 1:1 chat's may go a little over the relay's minute
  * (`SIGNALING_ALLOWANCE_SHARE` in relay.ts).
  */
-export interface PkarrRequestOptions { background?: boolean; urgent?: boolean; group?: boolean; door?: boolean; signal?: boolean }
+export interface PkarrRequestOptions {
+  background?: boolean; urgent?: boolean; group?: boolean; door?: boolean; signal?: boolean;
+  /** A read for a contact that went away from a live session and has not shown itself back (`LinkSession.watchPeer`). */
+  watch?: boolean;
+}
 
 /**
  * `transport` with `extra` added to every request's options: a group's edges say `group` so. The optional methods
@@ -50,7 +55,12 @@ export function withRequestOptions(transport: PkarrTransport, extra: PkarrReques
   if (transport.discovery) wrapped.discovery = () => transport.discovery!();
   if (transport.subscribe) wrapped.subscribe = (listener) => transport.subscribe!(listener);
   if (transport.networkChanged) wrapped.networkChanged = () => transport.networkChanged!();
+  if (transport.readAnsweredAt) wrapped.readAnsweredAt = (pubKeyZ32) => transport.readAnsweredAt!(pubKeyZ32);
+  if (transport.onServerTime) wrapped.onServerTime = (listener) => transport.onServerTime!(listener);
   if (transport.configure) wrapped.configure = (options) => transport.configure!(options);
+  if (transport.turnRead) wrapped.turnRead = (pubKeyZ32, options) => transport.turnRead!(pubKeyZ32, options);
+  if (transport.turnPut) wrapped.turnPut = (pubKeyZ32, payload, conditions) => transport.turnPut!(pubKeyZ32, payload, conditions);
+  if (transport.turnWarm) wrapped.turnWarm = () => transport.turnWarm!();
   return wrapped;
 }
 
@@ -78,6 +88,12 @@ export function budgetRetryMs(error: DiscoveryBudgetError, min: number, max: num
   return Math.min(max, Math.max(min, Number.isFinite(error.retryInMs) ? error.retryInMs : max));
 }
 
+/**
+ * A server's own time: the `Date` header (ms, to the second) of its answer to a request that went out at `sent` and
+ * came back at `received`, both by this device's clock. `source` names the server (a relay's origin), never a key.
+ */
+export interface ServerTime { source: string; date: number; sent: number; received: number }
+
 export interface PkarrTransport {
   publish(identity: Identity, records: GhostRecord[], options?: PkarrRequestOptions): Promise<void>;
   /**
@@ -98,8 +114,34 @@ export interface PkarrTransport {
   /** The device changed networks (back online): what was learnt about failing relays is forgotten, and links look again. */
   networkChanged?(): void;
   /**
+   * When the network last answered a read of this key (this clock), whatever it answered. A `resolve` may hand back a
+   * copy it kept (the budget held the read, every relay was resting, the same key was read a moment ago): a caller
+   * that reasons from "the record did not have this at my last read" asks this to know the read was one. Absent
+   * where the transport cannot say; such a caller then takes no read for one.
+   */
+  readAnsweredAt?(pubKeyZ32: string): number | undefined;
+  /**
+   * Called with each time a server gave (`ServerTime`), where the transport can read one: what `ClockWatch` holds this
+   * device's clock against. Returns the unsubscribe.
+   */
+  onServerTime?(listener: (time: ServerTime) => void): () => void;
+  /**
    * Where the DHT is reached directly (Desktop): the relays from Settings, and whether reads may use them too
    * (`readRelays`, "Also use Pkarr relays"). Writes go to them either way, so browser contacts see this peer's packets.
    */
   configure?(options: { relays: string[]; readRelays: boolean }): void;
+  /**
+   * The turn record's own read (WISP 06 § Publishing and reading): every source is asked, in parallel, and each
+   * one's answer is handed back as it came, not verified, not cached and never taken from this client's own writes.
+   * Only the turn uses it; a transport without it cannot hold a profile on several devices.
+   */
+  turnRead?(pubKeyZ32: string, options?: { timeoutMs?: number }): Promise<TurnSourceAnswer[]>;
+  /**
+   * The turn record's own put: the stored bytes, to each source named in `conditions`, on that source's condition
+   * (`cas` on the DHT, `If-Match` on a relay). Every source's answer is reported, and a refusal is never tried again
+   * without its condition.
+   */
+  turnPut?(pubKeyZ32: string, payload: Uint8Array, conditions: TurnConditions): Promise<TurnSourcePut[]>;
+  /** The profile has a device set: the turn's sources are made ready ahead of the first read (`TurnNetwork.turnWarm`). */
+  turnWarm?(): Promise<void>;
 }

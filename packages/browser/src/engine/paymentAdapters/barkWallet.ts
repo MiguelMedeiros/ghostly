@@ -1,4 +1,5 @@
 import { generateMnemonic, validateMnemonic } from "@scure/bip39";
+import { awayFrom, refuseAway, requireTurn } from "./away";
 import { wordlist } from "@scure/bip39/wordlists/english.js";
 import type { PaymentTarget, WalletNetwork } from "@ghostly/core";
 import { store, STORES, transact, wrap } from "../../shared/idb";
@@ -12,6 +13,8 @@ import type { SavedIntent } from "./coordinator";
 
 export interface BarkWalletView {
   configured: boolean; locked: boolean;
+  /** The balances were read once since this wallet opened (until then `balance` says nothing). */
+  read?: true;
   network?: BarkNetwork; provider?: string; address?: string; onchainAddress?: string;
   /** The server's terms of service, when it publishes them (Second's Bitcoin server does). */
   terms?: string;
@@ -25,9 +28,15 @@ export interface BarkWalletView {
   exiting?: number;
   /** On-chain coins of this wallet not moved into Ark yet. */
   onchain?: number;
+  /** A restored wallet is looking once for the on-chain coins its phrase received before. */
+  scanning?: boolean;
   error?: string;
 }
-interface StoredBark { config: BarkConfig; seed: EncryptedSeed; deviceKey: string }
+/**
+ * `scan`: the wallet was restored (a Bark backup, a profile backup, a phrase typed in) into an empty database, and
+ * has yet to finish its one on-chain scan for addresses its phrase used before. Cleared once the scan finished.
+ */
+interface StoredBark { config: BarkConfig; seed: EncryptedSeed; deviceKey: string; scan?: true }
 export interface BarkCreate { network: BarkNetwork; provider: string; explorer: string; mnemonic?: string }
 
 /**
@@ -68,6 +77,7 @@ export class BarkWallet {
   private readying?: Promise<void>;
   private stopped = false;
   private lastMaintenance = 0;
+  private scanning = false;
   private queue: Promise<unknown> = Promise.resolve();
   private gate = new ModeGate();
   adapter?: BarkAdapter;
@@ -86,6 +96,8 @@ export class BarkWallet {
 
   /** Opens the wallet; `create`: makes this network's default one first when there is none. Retries while the server is unreachable. */
   ensureReady(create = false): Promise<void> {
+    // At home on another device (WISP 06 § Wallets that stay home): never opened here.
+    if (awayFrom(`bark:${this.network}`) !== undefined) return Promise.resolve();
     if (this.readying) return this.readying.then(() => this.needsReady(create) ? this.startReady(create) : undefined);
     return this.startReady(create);
   }
@@ -94,6 +106,7 @@ export class BarkWallet {
   private async ready(create: boolean) {
     clearTimeout(this.retry);
     try {
+      await requireTurn();
       if (!this.saved) { if (create) await this.serial(async () => { if (!this.saved) await this.createNow({ ...barkDefaults(this.network) }); }); }
       else if (!this.adapter) await this.serial(() => this.stopped ? Promise.resolve() : this.open());
     } catch (error) {
@@ -112,6 +125,8 @@ export class BarkWallet {
   }
   create(params: BarkCreate) { return this.serial(() => this.createNow(params)); }
   private async createNow(params: BarkCreate) {
+    // At home on another device (WISP 06 § Wallets that stay home): never made again, unlocked or restored over here.
+    refuseAway(`bark:${this.network}`, "Bark");
     if (!BARK_NETWORKS.includes(params.network)) throw new Error("Unsupported Bark network");
     if (barkMode(params.network) !== this.network) throw new WrongNetworkError(barkMode(params.network), `${params.network === "bitcoin" ? "Bitcoin" : params.network} is a ${networkLabel(barkMode(params.network))} network: this is the ${networkLabel(this.network)} Bark wallet`);
     const provider = params.provider.replace(/\/$/, ""), explorer = params.explorer.replace(/\/$/, "");
@@ -127,7 +142,7 @@ export class BarkWallet {
       const serverKey = await this.gate.within(this.serverKey(draft, mnemonic));
       const config = { ...draft, serverKey };
       adapter = await this.gate.within(BarkAdapter.connect(config, mnemonic, { sdk: await this.sdk(), restore: !!params.mnemonic }), (a) => a.dispose());
-      const saved: StoredBark = { config, seed: await sealSeed(mnemonic, deviceKey), deviceKey };
+      const saved: StoredBark = { config, seed: await sealSeed(mnemonic, deviceKey), deviceKey, ...(params.mnemonic ? { scan: true as const } : {}) };
       await this.save(saved, replaced || undefined);
       this.saved = saved;
     } catch (error) {
@@ -137,7 +152,29 @@ export class BarkWallet {
       if (replaced) void this.ensureReady();
       throw readableBarkError(error);
     }
-    this.adapter = adapter; this.view = { ...this.idle(this.saved.config), locked: false }; await this.refresh();
+    this.adapter = adapter; this.view = { ...this.idle(this.saved.config), locked: false }; this.watchScan(adapter); await this.refresh();
+  }
+  /**
+   * Follows a restore's on-chain scan: the page says the wallet is looking while it runs, and once it finished the
+   * wallet's `scan` mark goes, so it never runs again. One that failed or was cut short (the app closed) runs again on
+   * the next open; looking twice finds the same coins.
+   */
+  private watchScan(adapter: BarkAdapter) {
+    const scanned = adapter.scanned;
+    if (!scanned) return;
+    this.scanning = true; this.view = { ...this.view, scanning: true }; this.changed();
+    void scanned.then(async (finished) => {
+      if (finished) await this.serial(async () => {
+        const saved = this.saved;
+        if (!saved?.scan || saved.config.walletId !== adapter.config.walletId) return;
+        const { scan: _done, ...rest } = saved;
+        await transact([STORES.settings], (s) => { s[STORES.settings].put(rest, this.key); });
+        this.saved = rest;
+      }).catch((error) => console.warn("Bark on-chain scan:", error instanceof Error ? error.message : error));
+      if (this.adapter !== adapter) return;
+      this.scanning = false; this.view = { ...this.view, scanning: undefined }; this.changed();
+      void this.refresh();
+    });
   }
   /** Opens the wallet (made just for this) with no key pinned yet, to read the server's. */
   private async serverKey(config: BarkConfig, mnemonic: string) {
@@ -152,8 +189,8 @@ export class BarkWallet {
   private async open() {
     if (!this.saved || this.adapter) return;
     const mnemonic = await unsealSeed(this.saved.seed, this.saved.deviceKey);
-    this.adapter = await this.gate.within(BarkAdapter.connect(this.saved.config, mnemonic, { sdk: await this.sdk() }), (a) => a.dispose());
-    this.view = { ...this.view, locked: false }; await this.refresh();
+    this.adapter = await this.gate.within(BarkAdapter.connect(this.saved.config, mnemonic, { sdk: await this.sdk(), restore: !!this.saved.scan }), (a) => a.dispose());
+    this.view = { ...this.view, locked: false }; this.watchScan(this.adapter); await this.refresh();
   }
   /** Shutting down: nothing reconnects afterwards. */
   async stop() { this.stopped = true; this.gate.close(); await this.serial(() => this.lock()); }
@@ -169,7 +206,7 @@ export class BarkWallet {
       this.view = this.idle(); this.changed();
     }).finally(() => this.gate.resume());
   }
-  async lock() { clearTimeout(this.timer); clearTimeout(this.retry); const adapter = this.adapter; this.adapter = undefined; this.view = { ...this.view, locked: true, address: undefined }; this.changed(); await adapter?.dispose(); }
+  async lock() { clearTimeout(this.timer); clearTimeout(this.retry); const adapter = this.adapter; this.adapter = undefined; this.scanning = false; this.view = { ...this.view, locked: true, address: undefined, scanning: undefined }; this.changed(); await adapter?.dispose(); }
 
   /** Stopping ends it where it is: a wallet shutting down needs no balance. */
   async refresh() { await this.poll().catch((error) => { if (!(error instanceof ModeChanged)) throw error; }); }
@@ -191,12 +228,14 @@ export class BarkWallet {
     // Renewing what is close to expiry keeps money left alone spendable: every few minutes is plenty.
     if (Date.now() - this.lastMaintenance > 5 * 60_000) { this.lastMaintenance = Date.now(); void adapter.maintain().catch((error) => console.warn("Bark maintenance:", error instanceof Error ? error.message : error)); }
     if (this.adapter !== adapter) return;
+    const balancesRead = this.view.read || (balance !== undefined && onchain !== undefined);
     this.view = {
-      ...this.idle(adapter.config), locked: false, address, onchainAddress,
+      ...this.idle(adapter.config), locked: false, ...(balancesRead ? { read: true as const } : {}), address, onchainAddress,
       balance: balance?.spendableSats ?? this.view.balance,
       pending: balance ? balance.pendingInRoundSats + balance.pendingBoardSats + balance.pendingLightningSendSats + balance.claimableLightningReceiveSats : this.view.pending,
       exiting: balance?.pendingExitSats ?? this.view.exiting,
       onchain: onchain?.totalSats ?? this.view.onchain,
+      scanning: this.scanning || undefined,
       expiry,
       error: failed.length ? `Could not read the ${failed.join(", ")} from the Bark server. Last values may be stale.` : undefined,
     };
@@ -218,7 +257,7 @@ export class BarkWallet {
     const intents = (await intentRepository.list()).filter((i) => this.ours(i));
     return JSON.stringify({ format: "ghostly-bark-encrypted", version: 1, vault: await sealSeed(JSON.stringify({ format: "ghostly-bark", version: 1, mnemonic, config, intents }), password) });
   }
-  restoreBackup(text: string, password: string): Promise<void> { return this.serial(async () => {
+  restoreBackup(text: string, password: string): Promise<void> { return this.serial(async () => { refuseAway(`bark:${this.network}`, "Bark");
     if (text.length > 16 * 1024 * 1024) throw new Error("Bark backup is too large");
     const envelope = JSON.parse(text);
     if (envelope.format !== "ghostly-bark-encrypted" || envelope.version !== 1) throw new Error("Unsupported Bark backup");
@@ -229,10 +268,11 @@ export class BarkWallet {
     if (payload.intents.some((i) => i.review.method !== "bark" || i.review.provider !== payload.config.provider || i.review.network !== payload.config.network)) throw new Error("Backup payments do not match its wallet");
     BarkAdapter.checkConfig(payload.config);
     const replaced = this.saved && await this.retirable("Restore into a fresh profile or an unused wallet; this wallet will not be replaced");
-    // A new local database: the server's recovery scan fills it from the phrase on first open.
+    // A new local database: the server's recovery scan fills it from the phrase on first open, and the on-chain scan
+    // (once, `scan`) finds the on-chain addresses the phrase used before.
     const config: BarkConfig = { ...payload.config, walletId: crypto.randomUUID() };
     const deviceKey = newDeviceKey();
-    const saved: StoredBark = { config, seed: await sealSeed(payload.mnemonic, deviceKey), deviceKey };
+    const saved: StoredBark = { config, seed: await sealSeed(payload.mnemonic, deviceKey), deviceKey, scan: true };
     await this.save(saved, replaced || undefined, payload.intents.map((intent) => ({ ...intent, review: { ...intent.review, state: ["pending", "submitted", "unknown"].includes(intent.review.state) ? "unknown" : intent.review.state } })));
     this.saved = saved; this.view = this.idle(config); this.changed();
   }); }

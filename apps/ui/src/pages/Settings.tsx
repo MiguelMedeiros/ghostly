@@ -6,7 +6,7 @@ import { useUpdate } from "../contexts/UpdateContext";
 import { updateFailure } from "../lib/updateFailure";
 import { canInstall, isAppleMobile, isMacSafari, startInstall, useInstallState } from "../lib/installPrompt";
 import { browserPrompts, reconsiderPersist, requestPersist, useStorageProtection } from "../lib/storagePersistence";
-import { pushPlatform, setWake, useWakeOn } from "../lib/wakePush";
+import { pushPlatform, pushUnavailable, setWake, useWakeOn } from "../lib/wakePush";
 import { noticePlace, noticeSettings, notificationPermission, openNoticeSettings, requestNotifications, type NoticePermission } from "../lib/notifications";
 import { getVersion } from "@tauri-apps/api/app";
 import { NetworkSettings } from "../components/NetworkSettings";
@@ -27,6 +27,9 @@ import { Select } from "../components/ui/Select";
 import { CATEGORY_PREVIEW, categoryOn } from "../lib/cues";
 import { playSound } from "../lib/sounds";
 import { clearAllData } from "../lib/clearData";
+import { lockPasswordMin, useDeviceSet } from "../lib/devices";
+import { useEngineState } from "../lib/identities";
+import { engine } from "@ghostly/browser/platform/engine";
 import {
   hashPassword,
   verifyPassword,
@@ -116,6 +119,15 @@ export function Settings() {
   const [appVersion, setAppVersion] = useState("0.0.0");
 
   const hasPassword = !!settings.lockScreen.passwordHash;
+  // A profile on several devices (WISP 06) keeps a lock password of 8 characters or more: it cannot be shortened,
+  // turned off or removed here. One with no device set keeps today's rule.
+  // Until the answer comes (or when the call fails), as if there were one: the stricter rule.
+  const devices = useDeviceSet(0);
+  const deviceSet = devices === null || devices.state !== "single";
+  // The push address contacts hold is another device's (WISP 06 § Push and the phone): this one is not woken by it.
+  const engineState = useEngineState();
+  const wakeAway = engineState?.wakeOwner === "away" && !!engineState.settings.wake;
+  const wakeAwayDevice = wakeAway ? devices?.devices.find((device) => device.key === engineState?.settings.wake?.device)?.name : undefined;
 
   useEffect(() => {
     setStorageInfo(getStorageUsage());
@@ -142,6 +154,10 @@ export function Settings() {
       return;
     }
 
+    if (lockEnabled && deviceSet) {
+      setMessage({ type: "error", text: t("devices.password.keep") });
+      return;
+    }
     if (lockEnabled) {
       setLockEnabled(false);
       updateLockScreen({ enabled: false });
@@ -152,8 +168,8 @@ export function Settings() {
   };
 
   const handleSetPassword = async () => {
-    if (newPassword.length < 4) {
-      setMessage({ type: "error", text: t("settings.passwordTooShort") });
+    if (newPassword.length < lockPasswordMin(deviceSet)) {
+      setMessage({ type: "error", text: deviceSet ? t("devices.password.keep") : t("settings.passwordTooShort") });
       return;
     }
 
@@ -178,13 +194,17 @@ export function Settings() {
       enabled: true,
       passwordHash: hash,
     });
+    // A profile on several devices: a pull proves this password now, so its verifier is made again while it is typed (WISP 06).
+    let verifierFailed = false;
+    if (deviceSet) await engine.call("deviceHandoffVerifier", { password: newPassword, current: hasPassword ? currentPassword : undefined }).catch(() => { verifierFailed = true; });
 
     setLockEnabled(true);
     setNewPassword("");
     setConfirmPassword("");
     setCurrentPassword("");
     setShowPasswordForm(false);
-    setMessage({
+    // The lock changed, and a pull would still need a proof that could not be made: said, not hidden.
+    setMessage(verifierFailed ? { type: "error", text: t("devices.handoff.verifierFailed") } : {
       type: "success",
       text: hasPassword
         ? t("settings.passwordChanged")
@@ -195,6 +215,10 @@ export function Settings() {
   };
 
   const handleRemovePassword = async () => {
+    if (deviceSet) {
+      setMessage({ type: "error", text: t("devices.password.keep") });
+      return;
+    }
     if (hasPassword) {
       const valid = await verifyPassword(
         currentPassword,
@@ -374,10 +398,13 @@ export function Settings() {
         </Row>
         {canWake && (
           <Row label={t("pwa.wake")} testId="settings-wake-row" info={t("pwa.wakeInfo")}
-            hint={<span role="status">{wakeError || t(wakeOn ? "pwa.wakeOnHint" : "pwa.wakeHint")}</span>}>
+            hint={<span role="status" data-testid="settings-wake-hint">{wakeError || (wakeAway ? (wakeAwayDevice ? t("pwa.wakeAway", { device: wakeAwayDevice }) : t("pwa.wakeAwayUnnamed")) : t(wakeOn ? "pwa.wakeOnHint" : "pwa.wakeHint"))}</span>}>
             {wakeOn && <Button data-testid="settings-wake-rotate" disabled={wakeBusy} onClick={() => void changeWake(true)}>{t("pwa.wakeRotate")}</Button>}
             <Switch testId="settings-wake" label={t("pwa.wake")} checked={wakeOn} disabled={wakeBusy} onChange={(on) => void changeWake(on)} />
           </Row>
+        )}
+        {!canWake && pushUnavailable() && (
+          <Row label={t("pwa.wake")} testId="settings-wake-unavailable" hint={<span role="status">{t("pwa.wakeUnavailable")}</span>} />
         )}
       </Section>
 

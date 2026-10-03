@@ -1,4 +1,26 @@
 {
   "name": "Ghostly",
+  "profileUnavailable": {
+    "detail": "Ce que le système a dit :",
+    "info": "Rien n'a été modifié ni supprimé. Tant que les données sont fermées, Ghostly ne se connecte à personne et n'envoie rien pour ce profil. Cette app est Ghostly {{app}} et lit les données de profil jusqu'à la version {{supported}}.",
+    "newerHint": "Mettez l'app à jour pour l'ouvrir.",
+    "newerInfo": "Les données de ce profil sont à la version {{stored}}. Cette app, Ghostly {{app}}, lit jusqu'à la version {{supported}}. Un Ghostly plus récent a ouvert le profil et fait avancer ses données, et un plus ancien ne peut pas les lire sans risque. Rien n'est donc ouvert ni envoyé, et rien n'a été modifié ni supprimé : vos discussions, vos clés et vos portefeuilles sont toujours là. Mettez cette app à jour, ou ouvrez le profil avec la plus récente.",
+    "newerTitle": "Ce profil a été utilisé en dernier par une version plus récente de Ghostly.",
+    "noUpdate": "Aucune version plus récente n'est encore sortie. Ouvrez ce profil avec l'app qui l'a utilisé en dernier.",
+    "reason": {
+      "blocked": "Une autre fenêtre ou un autre onglet Ghostly le garde ouvert avec une version plus ancienne.",
+      "denied": "Ce navigateur ne donne pas de stockage à Ghostly ici : une fenêtre privée, ou le stockage bloqué pour ce site.",
+      "failed": "Les données ne se sont pas ouvertes, et le système n'a pas donné de raison claire.",
+      "full": "Cet appareil n'a plus d'espace de stockage."
+    },
+    "title": "Ghostly n'a pas pu ouvrir les données de ce profil.",
+    "try": {
+      "blocked": "Fermez les autres fenêtres et onglets Ghostly, puis réessayez.",
+      "denied": "Utilisez une fenêtre normale ou autorisez le stockage pour ce site, puis réessayez.",
+      "failed": "Redémarrez l'app ou l'appareil, puis réessayez.",
+      "full": "Libérez de l'espace, puis réessayez."
+    },
+    "tryAgain": "Réessayer"
+  },
   "tagline": "Messagerie éphémère et chiffrée sur DHT"
 }

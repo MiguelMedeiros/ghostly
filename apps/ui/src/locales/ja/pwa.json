@@ -28,10 +28,19 @@
   "shareWaiting": "共有された内容を受け取っています...",
   "stepsThen": "あとは新しいアイコンから Ghostly を開きます。",
   "wake": "閉じているときに通知",
+  "wakeAway": "このデバイスではオフです。今は連絡先が {{device}} を起こします。",
+  "wakeAwayUnnamed": "このデバイスではオフです。今は連絡先がもう一方のデバイスを起こします。",
   "wakeCall": "着信",
   "wakeHint": "連絡先のアプリがプッシュでこのアプリを起こせます。メッセージの内容は含まれません。",
   "wakeInfo": "Ghostly が閉じていて連絡先のメッセージが届かないとき、相手のアプリがあなたのブラウザのプッシュサービス(ブラウザにより Google、Apple、Mozilla)に空の起動通知を送ります。新しいメッセージがあることだけを伝え、本文も名前も含みません。プッシュサービスはプッシュがあったこととその時刻を知り、連絡先はあなたのプッシュアドレスを知ります。ミュートしたチャットでは表示されません。「新しいアドレス」で作り直すと、やり取りをやめた相手はあなたを起こせなくなります。",
+  "wakeMoveHere": "{{device}} がこのプロフィールをこちらに移そうとしています。Ghostly を開いてください。",
   "wakeNotice": "新しいメッセージ",
   "wakeOnHint": "オン。Ghostly が閉じている間に届いたメッセージは「新しいメッセージ」と表示されます。",
-  "wakeRotate": "新しいアドレス"
+  "wakeRotate": "新しいアドレス",
+  "wakeStandby": "新しいメッセージ。{{device}} で使用中です。",
+  "wakeStandbyCall": "着信があります。{{device}} で使用中です。",
+  "wakeStandbyCallUnnamed": "着信があります。使用中のデバイスで Ghostly を開いてください。",
+  "wakeStandbyUnnamed": "新しいメッセージ。使用中のデバイスで Ghostly を開いてください。",
+  "wakeTakeover": "{{device}} が引き継ごうとしています。Ghostly を開いてください。",
+  "wakeUnavailable": "このブラウザは、閉じている Ghostly を起こせません。"
 }

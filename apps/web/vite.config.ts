@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
+import { assetLinksFile } from "./assetlinks";
 import { serviceWorker } from "./pwa";
 import { ghostlyPlatformModules, repositoryRoot, tauriAliases } from "../../packages/browser/vite-plugin";
 
@@ -36,6 +37,12 @@ function versionFile(): Plugin {
     generateBundle() {
       this.emitFile({ type: "asset", fileName: "version.json", source: body });
     },
+    // The same two facts in the page itself, for the boot guard's "Copy details" (public/boot-guard.js): it runs
+    // where the bundle may not, so it cannot be handed them in code.
+    transformIndexHtml(html, context) {
+      if (!context.path.endsWith("index.html")) return html;
+      return { html, tags: [{ tag: "meta", attrs: { name: "ghostly-build", content: `${version} ${build}` }, injectTo: "head" }] };
+    },
     configureServer(server) {
       server.middlewares.use("/version.json", (_request, response) => {
         response.setHeader("Content-Type", "application/json");
@@ -48,7 +55,7 @@ function versionFile(): Plugin {
 
 export default defineConfig({
   define: { __APP_VERSION__: JSON.stringify(version), __APP_BUILD__: JSON.stringify(build) },
-  plugins: [versionFile(), serviceWorker(build), ghostlyPlatformModules(), react(), tailwindcss()],
+  plugins: [versionFile(), serviceWorker(build), assetLinksFile(), ghostlyPlatformModules(), react(), tailwindcss()],
   envDir: repositoryRoot,
   resolve: { alias: tauriAliases },
   server: { port: 5180, strictPort: true },

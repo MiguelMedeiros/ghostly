@@ -396,21 +396,29 @@ describe("the group's link: knocks, pending entries and refusals", () => {
     const alice = world.add("alice"), dan = world.add("dan", timings);
     const groupId = await alice.create("Ghosts", "mesh");
     await dan.joinByLink(await alice.enableLink(groupId)); await flush();
-    expect(world.publishes).toBe(1);
-    await dan.tick(t0 + 1_000);
-    expect(world.publishes).toBe(1);
+    // A knock is a look at the record, and a write only when the joiner's entry is gone from it or old.
+    const looks = () => world.resolves.get("dan") ?? 0;
+    expect([looks(), world.publishes]).toEqual([1, 1]);
+    // Read back a moment after it was written (another joiner's write may have replaced it): it is there.
+    await dan.tick(t0 + 1_600);
+    expect([looks(), world.publishes]).toEqual([2, 1]);
     await dan.tick(t0 + 2_000);
-    expect(world.publishes).toBe(2);
+    expect([looks(), world.publishes]).toEqual([2, 1]);
+    await dan.tick(t0 + 3_600);
+    expect([looks(), world.publishes]).toEqual([3, 1]);
+    // Thirty seconds old: written again, and read back again.
     await dan.tick(t0 + 40_000);
-    expect(world.publishes).toBe(3);
+    expect([looks(), world.publishes]).toEqual([4, 2]);
     await dan.tick(t0 + 45_000);
-    expect(world.publishes).toBe(3); // patience ran out: every ten seconds now
+    expect([looks(), world.publishes]).toEqual([5, 2]);
     await dan.tick(t0 + 50_000);
-    expect(world.publishes).toBe(4);
+    expect(looks()).toBe(5); // patience ran out: every ten seconds now
+    await dan.tick(t0 + 55_000);
+    expect([looks(), world.publishes]).toEqual([6, 2]);
     // The admin's app answers: a session is up, and knocking stops.
-    await alice.tick(t0 + 50_000); await world.settle();
+    await alice.tick(t0 + 55_000); await world.settle();
     await dan.tick(t0 + 70_000);
-    expect(world.publishes).toBe(4);
+    expect([looks(), world.publishes]).toEqual([6, 2]);
   });
 
   it("a joiner stops knocking as soon as the admin's side of the entry session is seen, before it is up", async () => {
@@ -424,15 +432,16 @@ describe("the group's link: knocks, pending entries and refusals", () => {
     let seen = false;
     host.linkSeen = () => seen;
     host.linkReady = () => false;
+    const looks = () => world.resolves.get("dan") ?? 0;
     await dan.tick(t0 + 2_000);
-    expect(world.publishes).toBe(2);
+    expect([looks(), world.publishes]).toEqual([2, 1]);
     seen = true;
     await dan.tick(t0 + 4_000); await dan.tick(t0 + 30_000);
-    expect(world.publishes).toBe(2);
-    // The admin's side went away (it gave up, or its app closed): knock again.
+    expect([looks(), world.publishes]).toEqual([2, 1]);
+    // The admin's side went away (it gave up, or its app closed): knock again, and the knock, old by now, is written again.
     seen = false;
     await dan.tick(t0 + 32_000);
-    expect(world.publishes).toBe(3);
+    expect([looks(), world.publishes]).toEqual([3, 2]);
   });
 
   it("an admission that does not finish in time is dropped, and that key is answered again after 30 s, then a minute, doubling", async () => {

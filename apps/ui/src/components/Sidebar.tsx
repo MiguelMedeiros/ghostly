@@ -17,6 +17,7 @@ import { useSettings } from "../contexts/SettingsContext";
 import { AccountBar } from "./AccountBar";
 import { AppBrand } from "./AppBrand";
 import { OfflineBanner } from "./OfflineBanner";
+import { LimitedBanner } from "./devices/LimitedStart";
 import { InstallHint } from "./InstallApp";
 import { StorageKeeper } from "./StorageKeeper";
 import { UpdateBanner } from "./UpdateBanner";
@@ -38,6 +39,7 @@ import { useAppNavigation } from "../hooks/useAppNavigation";
 import { useRowReorder } from "../hooks/useRowReorder";
 import { shownContactName, useContactFaces } from "./identities/contactFace";
 import { reactionNoteText } from "../lib/reactions";
+import { SidebarTasks } from "./tasks/SidebarTasks";
 
 const subscribeEngine = (listener: () => void) => engine.subscribe(listener);
 const engineSnapshot = () => engine.state;
@@ -219,6 +221,7 @@ export function Sidebar() {
       </div>
       <UpdateBanner />
       <OfflineBanner />
+      <LimitedBanner />
       <InstallHint hasChats={sessions.length > 0 || groups.length > 0} />
       <StorageKeeper hasChats={sessions.length > 0 || groups.length > 0} />
       {showNewGroup && <NewGroupDialog onClose={() => setShowNewGroup(false)} onCreated={id => { setShowNewGroup(false); nav.conversation(groupPath(id), { share: "created" }); }} />}
@@ -250,6 +253,8 @@ export function Sidebar() {
           />
         </div>
       </div>
+
+      <SidebarTasks active={location.pathname === "/tasks"} onOpen={() => (location.pathname === "/tasks" ? nav.home() : nav.place("/tasks"))} />
 
       {/* Chat List */}
       <div className="flex-1 overflow-y-auto">

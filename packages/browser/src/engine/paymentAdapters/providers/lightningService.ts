@@ -90,6 +90,10 @@ const PREFIX = "lightningOp-";
 const opKey = (direction: LightningOp["direction"], hash: string) => `${PREFIX}${direction}-${hash}`;
 const RANGE = () => IDBKeyRange.bound(PREFIX, `${PREFIX}\uffff`);
 /** Every Lightning operation journaled, of every network and card. */
+/** Lightning payments whose call to the source has not returned, on any card of this page (WISP 06 § Payments in flight). */
+let paying = 0;
+export const lightningPaying = (): number => paying;
+
 export async function readLightningJournal(): Promise<LightningOp[]> { return wrap<LightningOp[]>((await store(STORES.settings, "readonly")).getAll(RANGE())); }
 const IN_POLL_MS = 4_000;
 const OUT_POLL_MS = 15_000;
@@ -235,17 +239,18 @@ export class LightningService {
     this.quotes.delete(quoteId);
     const existing = await this.get("out", quote.paymentHash);
     if (existing && existing.state !== "failed") throw new Error(existing.state === "paid" ? "This invoice is already paid" : "This invoice is already being paid");
-    let op: LightningOp = { direction: "out", providerId: quote.providerId, mode: this.mode, ...this.cardField(), paymentHash: quote.paymentHash, invoice: quote.invoice, amount: quote.amount, paymentId: context.paymentId, note: context.note?.slice(0, 140), expiresAt: 0, createdAt: Date.now(), selfSettled: !!quote.provider.settlesItself, state: "sending", maxFee: quote.maxFee };
+    let op: LightningOp = { direction: "out", providerId: quote.providerId, mode: this.mode, ...this.cardField(), paymentHash: quote.paymentHash, invoice: quote.invoice, amount: quote.amount, paymentId: context.paymentId, note: context.note?.slice(0, 140), expiresAt: 0, createdAt: Date.now(), selfSettled: !!quote.provider.settlesItself, state: "sending", maxFee: quote.maxFee, ref: quote.provider.paymentRef?.(quote.invoice) };
     // Written down before the provider sees it: from here on the sats may be gone.
     await this.put(op);
+    paying += 1;
     try {
       const result = await quote.provider.payInvoice(quote.invoice, quote.maxFee, context.note);
-      op = result.state === "paid" ? { ...op, state: "paid", fee: result.fee, ref: result.ref, settledAt: Date.now() } : { ...op, state: "pending", ref: result.ref };
+      op = result.state === "paid" ? { ...op, state: "paid", fee: result.fee, ref: result.ref ?? op.ref, settledAt: Date.now() } : { ...op, state: "pending", ref: result.ref ?? op.ref };
     } catch (error) {
       if (isNothingSpentError(error)) { await this.put({ ...op, state: "failed", error: redact(error) }); throw error; }
       // A source that cannot look payments up never settles this by itself: say so rather than "being checked".
       op = { ...op, state: "unknown", error: quote.provider.capabilities.lookup ? "No answer from the source. It is being checked; nothing is paid again." : "No answer from the source, and it cannot be asked: check this payment in the wallet itself. It is never paid again." };
-    }
+    } finally { paying -= 1; }
     await this.put(op);
     if (op.state !== "paid") this.schedule(OUT_POLL_MS);
     return op.state === "paid";
@@ -275,7 +280,25 @@ export class LightningService {
     try {
       const provider = this.sources.active, providerId = this.sources.activeId;
       for (const op of await this.list()) {
-        if (op.selfSettled || !this.owns(op)) continue;
+        if (!this.owns(op)) continue;
+        if (op.selfSettled) {
+          // The source settles and reports its own. One cut off before its answer was written (`recover`) it may
+          // never have heard of, and would never report: the source is asked what became of it.
+          if (op.direction !== "out" || op.state !== "unknown") continue;
+          // No source connected yet: asked again. Another source's waits until its own is active again.
+          if (!provider) { again = again || OUT_POLL_MS; continue; }
+          if (op.providerId !== providerId || !provider.interruptedPayment) continue;
+          try {
+            const outcome = await provider.interruptedPayment({ invoice: op.invoice, paymentHash: op.paymentHash, ref: op.ref });
+            if (outcome === "pending") again = again || OUT_POLL_MS;
+            if (outcome !== "paid" && outcome !== "failed") continue;
+            // Written only over the state that was asked about: the source's own report wins.
+            if ((await this.get("out", op.paymentHash))?.state !== "unknown") continue;
+            await this.put({ ...op, state: outcome, error: outcome === "failed" ? "The payment did not go through" : undefined, settledAt: Date.now() });
+            this.events.resolved(op, outcome === "paid");
+          } catch { again = again || OUT_POLL_MS; }
+          continue;
+        }
         // `sending` is a spend under way in this process: its own answer decides. One left by a crash is
         // made `unknown` by `recover` at the next start, and only then asked about.
         const waiting = op.direction === "in" ? op.state === "open" : ["pending", "unknown"].includes(op.state);

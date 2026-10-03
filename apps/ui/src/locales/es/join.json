@@ -6,6 +6,7 @@
   "clipboardUnavailableTouch": "No se pudo leer el portapapeles. Mantén pulsado el campo de abajo y toca Pegar.",
   "close": "Cerrar",
   "damaged": "Esta invitación está dañada. Pide una nueva.",
+  "device": "Este código añade un dispositivo a un perfil. En el dispositivo nuevo, elige Ya uso Ghostly.",
   "empty": "El portapapeles está vacío. Copia una invitación y pulsa {{keys}} abajo.",
   "emptyTouch": "El portapapeles está vacío. Copia una invitación y pégala abajo.",
   "image": "Abrir imagen",

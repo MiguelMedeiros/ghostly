@@ -1,4 +1,4 @@
-import type { DiscoveryStatus, GroupMention, ImageMeta, LinkPreview, PairingProgress, PaymentMethodName, StatusCard, TypingKind, VideoMeta, VoiceMeta, WirePin, WireReaction } from "@ghostly/core";
+import type { DiscoveryStatus, GroupMention, ImageMeta, LinkPreview, PairingProgress, PaymentMethodName, RoutineCard, StatusCard, TaskCard, TypingKind, VideoMeta, VoiceMeta, WirePin, WireReaction } from "@ghostly/core";
 import type { UsdtWalletView } from "../engine/paymentAdapters/usdtWallet";
 import type { ArkWalletView } from "../engine/paymentAdapters/arkWallet";
 import type { BarkWalletView } from "../engine/paymentAdapters/barkWallet";
@@ -157,6 +157,14 @@ export interface StoredGroup {
    * signed leave (`bye`) that they carry to the admin.
    */
   left?: { at: number; admin: string; hubs?: string[]; bye?: GroupByeFrame };
+  /**
+   * On the admin's side: members I removed while they could not be told (their edge was down, and no contact chat
+   * carried the notice), by member key. `e`: the epoch of the commit that removed them; `at`: when. The edge to each
+   * stays until it opens and that commit goes over it (`told`, the first time), or `at` is a week old: a member removed
+   * while its app was closed otherwise never learns it, since every member closes the edge to someone out of the
+   * roster. `opened`: when the edge's connection first opened; it closes a while after, told or not.
+   */
+  farewells?: Record<string, { at: number; e: number; told?: number; answered?: number; opened?: number }>;
   /** The group's pinned message (WISP 400 § Pinned message): the latest pin; `id` "" once unpinned. */
   pin?: StoredPin;
   /**
@@ -229,6 +237,11 @@ export interface GroupView {
   epoch?: number;
   myKey?: string;
   isAdmin: boolean;
+  /**
+   * Admin work is off for this group on this device (WISP 06 § Forced takeover): no commit is signed and no door duty
+   * taken until the person turns on "Manage groups from this device" (`setGroupManage`).
+   */
+  adminOff?: true;
   members: GroupMemberView[];
   /** On the invitee's side, until the welcome arrives. */
   /** `waiting`: joining a community through its link, how many others were knocking with me when I last knocked. */
@@ -371,6 +384,12 @@ export interface StoredProof {
   dleq?: unknown;
   /** Handed to the mint for a Lightning payment that has not settled: not spendable, not yet gone. */
   reserved?: boolean;
+  /**
+   * Brought back by a profile restore: a copy of ecash as it was when the backup was made, which the profile it was
+   * copied from (or this one, before the backup was restored) may have spent since. The mint is asked once, and a
+   * proof it reads spent is dropped (see `CashuWallet.checkRestored`).
+   */
+  unchecked?: boolean;
 }
 
 /** A Lightning payment the mint has not settled yet. Its proofs stay in the wallet, reserved, until it does. */
@@ -392,6 +411,45 @@ export interface PendingMelt {
   /** Set when the invoice pays a contact's payment request. */
   paymentId?: string;
   createdAt: number;
+}
+
+/**
+ * A swap at a mint, written down before the mint is asked, with everything that finishes it: the mint signs the
+ * outputs of `swap` and nothing else, so its signatures can be asked for again (NUT-09) for as long as this is kept.
+ * Deleted in the transaction that stores what the swap brought, or once the mint says it never happened.
+ */
+export interface PendingSwap {
+  id: string;
+  mint: string;
+  /** `receive`: a token redeemed into this wallet. `send`: this wallet's ecash split, for a token or a Lightning payment. */
+  kind: "receive" | "send";
+  /** cashu-ts' `SerializedSwapPreview`: the inputs and the blinded outputs with their secrets. As secret as the ecash itself. */
+  swap: unknown;
+  createdAt: number;
+  /** When the request to the mint ended with no answer. The mint may still act on it for a moment after that. */
+  attemptEndedAt?: number;
+  /**
+   * The inputs were given back (the swap was overdue with nothing signed), and it holds nothing any more. Still asked
+   * about for a while: a request that reached the mint late is recovered from what is written here.
+   */
+  released?: boolean;
+  /** What it brought is stored; only the chat of its payment is still to be told (the app closed in between). */
+  finished?: boolean;
+  /**
+   * Its inputs read spent at a mint that cannot say what it signed (no NUT-09): how many times that was the answer.
+   * Kept, since the outputs are the only way back to that ecash, and asked about less and less often (`askAt`).
+   */
+  stuck?: number;
+  /** Not asked about before this time. */
+  askAt?: number;
+  /** Came with a restored copy of the profile: what it brings is as old as the copy, and is checked like the copy's ecash. */
+  restored?: boolean;
+  /** `receive`: the token being redeemed. Redeeming it again while this is kept finishes this swap, and makes no other. */
+  token?: string;
+  /** `receive`: the history line of the ecash, written with it. */
+  tx?: WalletTx;
+  /** `receive`: the payment record written with the ecash (a contact's payment received, or one of ours taken back). */
+  payment?: StoredPayment;
 }
 
 /** A Lightning invoice the mint issued for us; paid invoices turn into ecash. */
@@ -418,6 +476,11 @@ export interface StoredQuote {
   held?: boolean;
   /** Asked for on purpose, as test coins from a test mint ("Get test coins"): minted as soon as the mint says paid. */
   testCoins?: boolean;
+  /**
+   * The blinded outputs the mint is asked to sign for this invoice (`OutputData.serialize`), written down before it
+   * is asked: the ecash it issues is for these, and its signatures for them can be asked for again (NUT-09).
+   */
+  outputs?: unknown[];
 }
 
 export type PaymentState =
@@ -547,6 +610,13 @@ export interface NetworkWalletsView {
   /** This network's Cashu mints (test mints and mints on this machine are Testnet's). */
   mints: MintView[];
   balance: number;
+  /** Cashu: sats held for a payment or a swap the mints have not settled yet. Not in `balance`, and not gone. */
+  setAside?: number;
+  /** Cashu: swaps at these mints that are not finished yet, and the sats in them. Removing the wallet names them. */
+  openSwaps?: number;
+  swapsAmount?: number;
+  /** Cashu: sats in swaps whose inputs read spent at a mint that cannot say what it gave for them. Not in `setAside`. */
+  unconfirmed?: number;
   /** This network's history, newest first. */
   history: WalletTx[];
   feesPaid: number;
@@ -564,7 +634,8 @@ export interface NetworkWalletsView {
 export interface WalletAwaitingView {
   /** The wallet it goes through (Lightning through the Cashu mints is the Cashu wallet's). */
   type: WalletType;
-  kind: "request" | "invoice" | "paid" | "unclaimed" | "sent";
+  /** `swap`: sats in an exchange with a Cashu mint that the mint has not settled yet (`PendingSwap`). */
+  kind: "request" | "invoice" | "paid" | "unclaimed" | "sent" | "swap";
   /** In the wallet's base unit: sats, or the token's smallest unit for USDT. */
   amount: number;
   /** The chat payment it belongs to, when it does. */
@@ -587,6 +658,11 @@ export interface WalletInstanceView {
   card?: string;
   name?: string;
   receive?: boolean;
+  /**
+   * At home on another device (WISP 06 § Wallets that stay home): that device's name ("" when this device does not know
+   * it), and when its coins expire (Ark, Bark). It is never opened here, and takes no payment here.
+   */
+  home?: { device: string; expiresAt?: number };
 }
 
 /**
@@ -688,6 +764,11 @@ export interface WalletView {
   intents?: PaymentReview[];
   mints: MintView[];
   balance: number;
+  /** Cashu: see `NetworkWalletsView`. */
+  setAside?: number;
+  openSwaps?: number;
+  swapsAmount?: number;
+  unconfirmed?: number;
   /** Newest first. */
   history: WalletTx[];
   feesPaid: number;
@@ -767,6 +848,21 @@ export interface StoredMessage {
    * Message Buttons): `due` until its buttons go again live, as an edit of the buttons alone; `sent` once they did.
    */
   buttonsRestore?: "due" | "sent";
+}
+
+/**
+ * A message that carries a task or a routine card, as the Tasks board reads it across every chat and group
+ * (`statusCardIndex`): where it is (`linkId`: a chat's id, or `group:<id>`), its message, who sent it (`member`: a group
+ * member's key, absent for my own), when it was sent and when its last edit was made. Nothing else of the message.
+ */
+export interface CardIndexRow {
+  linkId: string;
+  id: string;
+  card: TaskCard | RoutineCard;
+  sender: "me" | "peer";
+  member?: string;
+  timestamp: number;
+  editedAt?: number;
 }
 
 /** A page of a chat's history, oldest first, and whether older messages remain (`messagePage`). */
@@ -1116,6 +1212,12 @@ export interface Settings {
    */
   wakeHeldBy?: Record<string, string[]>;
   /**
+   * In a profile on several devices (WISP 06 § Push and the phone): devices asked for a new subscription over their
+   * device link, by signing key, with the endpoint they are to replace. A device that shares another endpoint (or none)
+   * has done it. Set by the engine only.
+   */
+  wakeRenew?: Record<string, string>;
+  /**
    * A push relay (https) this app hands a finished wake-up to when it may not post to the contact's push service
    * itself (a browser page: the services answer without CORS). Empty or absent: none; nobody runs one by default.
    */
@@ -1130,6 +1232,12 @@ export interface WakeSubscription {
   p256dh: string;
   auth: string;
   vapid: VapidKeys;
+  /**
+   * In a profile on several devices (WISP 06 § Push and the phone): the signing key of the device whose subscription
+   * this is. It moves with the profile, so a device with none of its own (a desktop) goes on giving contacts the
+   * phone's. Set by the engine only; absent in a profile on one device, and for a subscription made before.
+   */
+  device?: string;
 }
 
 /**
@@ -1458,6 +1566,17 @@ export interface ServiceView extends StoredService {
 
 export interface EngineState {
   settings: Settings;
+  /**
+   * Limited mode (WISP 06 § When a device checks): the device could not read which device is active and was started
+   * anyway. The profile is offline whatever `settings.online` says, and no wallet is open. Absent otherwise.
+   */
+  limited?: true;
+  /**
+   * Whose push subscription `settings.wake` is, in a profile on several devices (WISP 06 § Push and the phone): `here`,
+   * this device's own; `away`, another device's, given to contacts because this device has none of its own (the page
+   * neither replaces nor turns off what is not its own). Absent in a profile on one device, or when nobody said.
+   */
+  wakeOwner?: "here" | "away";
   transport: {
     protocol: string; relays: string[];
     /** Present where Iroh runs in the browser (web app, extension): the relays it uses and the defaults. */
@@ -1473,6 +1592,11 @@ export interface EngineState {
      * carrier's NAT: `DirectPathWatch` in packages/core). Chats still go live through relays. Absent otherwise.
      */
     directBlocked?: true;
+    /**
+     * This device's clock seems to be off: this clock minus what the relays and several contacts say, in ms (positive
+     * when it is ahead). From several sources agreeing, never one contact (`ClockWatch` in packages/core). Absent otherwise.
+     */
+    clockOffMs?: number;
     /**
      * False where a group's links have no transport at all here: no WebRTC and no native transport (WISP 9xx §
      * Transports), so no member of a group can be reached from it. Absent where they have one (the Linux Desktop runs

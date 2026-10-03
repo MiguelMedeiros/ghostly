@@ -1,6 +1,9 @@
 import { identityFromSeedB64 } from "@ghostly/core";
 import { databaseExists } from "@ghostly/browser/backup/database";
+import { runsEngine } from "@ghostly/browser/devices/state";
+import { deviceStateOf, forgetDevice } from "@ghostly/browser/devices/store";
 import { dropFileSpace } from "@ghostly/browser/shared/fileBytes";
+import { dropBreezDatabasesOf } from "@ghostly/browser/engine/paymentAdapters/providers/breezDatabases";
 import { activeProfileId, chosenProfileId, listProfiles, namespaceOf, prefixOf, settingsKeyFor, unregisterProfile } from "./profiles";
 import { unreadUnder } from "./storage";
 import { peekFresh } from "./profilePeek";
@@ -44,6 +47,8 @@ function chatsOf(prefix: string): number {
 export async function profileSummary(id: string): Promise<ProfileSummary> {
   const ns = namespaceOf(id);
   const summary: ProfileSummary = { chats: chatsOf(`ghostly_${ns}_`), cashuSats: 0, wallets: [], services: 0 };
+  // A profile this device is on standby for (WISP 06 § The gate): its database is not opened, even to count.
+  if (!(await deviceStateOf(`ghostly_${ns}`).then(runsEngine, () => false))) return summary;
   const db = await openExisting(`ghostly_${ns}`);
   if (!db) return summary;
   try {
@@ -152,10 +157,13 @@ export function profileLock(id: string): string | null {
  * What the switcher shows of a profile that is not running: its picture, how many messages were left unread in its
  * chats, and in how many chats something new waits for it (`fresh`), as the running profile saw while checking the
  * others (WISP 04 § Checking other profiles). A locked profile shows none of it: only its name and that it is locked.
+ * A profile this device is on standby for (WISP 06 § User experience) shows "Standby" in place of its counts: what it
+ * left unread is no longer where the profile runs, and its database is not opened, even for its picture.
  */
-export interface ProfileGlance { locked: boolean; unread: number; fresh: number; avatar?: string }
+export interface ProfileGlance { locked: boolean; unread: number; fresh: number; avatar?: string; standby?: true }
 export async function profileGlance(id: string): Promise<ProfileGlance> {
   if (profileLock(id)) return { locked: true, unread: 0, fresh: 0 };
+  if (!(await deviceStateOf(databaseOf(id)).then(runsEngine, () => false))) return { locked: false, standby: true, unread: 0, fresh: 0 };
   return { locked: false, unread: unreadUnder(prefixOf(id)), fresh: peekFresh(id), avatar: await storedAvatar(databaseOf(id)) };
 }
 /** The picture a profile's peer keeps in its settings (WISP 04), if it is the small JPEG the peer accepts. */
@@ -196,7 +204,7 @@ async function lockHeld(ns: string): Promise<boolean> {
 
 /**
  * Deletes a profile of this space for good: its local keys, its peer database and its wallets' own storage
- * (Ark and Bark databases, Fedimint client files), then its place on the list (WISP 04). Never the active one,
+ * (Ark, Bark and Breez databases, Fedimint client files), then its place on the list (WISP 04). Never the active one,
  * never the first, never one running in another tab, and never a wallet's storage another profile still uses.
  */
 export async function deleteProfile(id: string, password?: string): Promise<void> {
@@ -216,9 +224,13 @@ export async function deleteProfile(id: string, password?: string): Promise<void
   await dropFileSpace(dbName).catch(() => {});
   for (const name of new Set(own.databases)) if (!usedElsewhere.has(name)) await drop(name);
   for (const name of new Set(own.files)) if (!usedElsewhere.has(name)) await dropFile(name).catch(() => {});
+  // Its Breez databases, as the device's register lists them: each is one profile's only.
+  await dropBreezDatabasesOf(dbName).catch(() => {});
   const prefix = `ghostly_${ns}_`;
   for (const key of Array.from({ length: localStorage.length }, (_, i) => localStorage.key(i)).filter((k): k is string => !!k?.startsWith(prefix))) localStorage.removeItem(key);
   // Its push subscription (WISP 401 § Wake-up push) ends with it: its worker goes, and contacts who kept it get 410.
   await pushPlatform()?.unsubscribe(id).catch(() => {});
+  // Its device state goes with it (WISP 06): a profile made later under the same name must not inherit it.
+  await forgetDevice(dbName).catch(() => {});
   unregisterProfile(id);
 }

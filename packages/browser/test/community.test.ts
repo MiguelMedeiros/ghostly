@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { COMMUNITY_TOPOLOGY, beaconKeys, decodeCommunityLink, freshHubs, readBeacon } from "@ghostly/core";
 import { COMMUNITY_TIMINGS } from "../src/engine/community";
-import { CommunityWorld, type Peer } from "./communityWorld";
+import { CommunityWorld, RELAY_NETWORK, type Peer } from "./communityWorld";
 // covers: groups.community.join, groups.community.send, groups.community.catch-up, groups.community.remove, groups.community.leave, groups.protocol.community-topology
 
 /**
@@ -330,6 +330,62 @@ describe("community groups on headless engines", { timeout: 120_000 }, () => {
     expect(left).toBeLessThanOrEqual(22_000);
     expect(edgeTo(member, other)).toBeDefined();
     await world.until(() => world.view(member, id)?.community?.connected === 1, 60_000);
+  });
+
+  it("a newcomer stays with the hub that is setting up its edge, however long that hub's relay budget makes it take", async () => {
+    const world = new CommunityWorld(undefined, RELAY_NETWORK);
+    const alice = world.add("alice"), bob = world.add("bob");
+    const { id, link } = await community(world, alice);
+    await joinAll(world, id, link, [bob]);
+    // Two hubs, the first one settled at the door.
+    await world.until(() => bob.groups.communities.isHub(id), 2 * 60_000);
+    await world.run(2 * 60_000);
+    const keyOf = (p: Peer) => p.groups.communities.session(id)!.myKey;
+    const door = [alice, bob].sort((a, b) => (keyOf(a) < keyOf(b) ? -1 : 1))[0], other = door === alice ? bob : alice;
+    const carol = world.add("carol");
+    await carol.groups.joinByLink(link);
+    const edgeTo = (to: Peer) => [...carol.links.values()].find(e => e.kind === "edge" && e.peer === keyOf(to));
+    // Let in by the door, which opens their edge at once; carol sees the door's side of it…
+    await world.until(() => world.member(carol, id) && (edgeTo(door)?.polls ?? 0) > 0, 60_000, 500);
+    const edge = edgeTo(door)!, joined = world.now;
+    expect(edge.upAt).toBeUndefined();
+    // …and the door's relay budget is spent for the next 35 s (a crowd at the door): its offer waits for it.
+    door.spent = Array.from({ length: RELAY_NETWORK.budgetPerMinute }, () => world.now - 25_000);
+    let hopped = false;
+    const took = await world.until(() => { hopped ||= !!edgeTo(other) || edgeTo(door) !== edge; return edge.upAt !== undefined; }, 90_000, 500,
+      () => `carol's edges: ${[...carol.links.values()].filter(e => e.kind === "edge").map(e => (e.peer === keyOf(door) ? "door" : "other")).join(",")}`);
+    // It used to give the door up after 20 s and ask the other hub in its lobby (read every half minute), which opened
+    // an edge for a member that had gone back to the first by then: from hub to hub, with no edge for minutes.
+    expect(hopped).toBe(false);
+    expect(world.now - joined).toBeGreaterThan(20_000);
+    expect(took).toBeLessThanOrEqual(60_000);
+    expect(carol.groups.communities.isHub(id)).toBe(false);
+  });
+
+  it("a member asking a hub in its lobby waits long enough for that hub to read it", async () => {
+    const world = new CommunityWorld();
+    const alice = world.add("alice"), bob = world.add("bob"), carol = world.add("carol");
+    const { id, link } = await community(world, alice);
+    await joinAll(world, id, link, [bob, carol]);
+    // Two hubs and a member of one of them; nobody asked in a lobby for a while (it is read every half minute).
+    await world.run(3 * 60_000);
+    const everyone = [alice, bob, carol], keyOf = (p: Peer) => p.groups.communities.session(id)!.myKey;
+    const member = everyone.find(p => !p.groups.communities.isHub(id))!;
+    const edgeTo = (to: Peer) => [...member.links.values()].find(e => e.kind === "edge" && e.peer === keyOf(to));
+    const hub = everyone.find(p => p !== member && edgeTo(p))!, other = everyone.find(p => p !== member && p !== hub)!;
+    const lobbyReadBy = (p: Peer) => (p.groups.communities as unknown as { live: Map<string, { lastLobbyPoll: number }> }).live.get(id)!.lastLobbyPoll;
+    // The member's hub closes its app 10 s after the other hub read its lobby: the member asks there 21 s later, just
+    // after the next reading, so the one after comes 29 s later.
+    await world.until(() => world.now - lobbyReadBy(other) === 10_000, 60_000);
+    hub.online = false;
+    const took = await world.until(() => world.view(member, id)!.community!.connected > 0, 3 * 60_000);
+    // 20 s for the hub that dropped, then the other hub's lobby: read within half a minute, and the edge opens. The
+    // member used to give that hub up after 20 s too, before it had read its lobby, and made itself a hub.
+    expect(member.groups.communities.isHub(id)).toBe(false);
+    expect(edgeTo(other)).toBeDefined();
+    expect(took).toBeLessThanOrEqual(55_000);
+    await other.groups.send(id, "through the other hub");
+    await world.until(() => world.texts(member, id).includes("through the other hub"), 10_000);
   });
 
   it("a join through the link that nobody answers yet is declined like an invitation: it stops, and the group is gone", async () => {

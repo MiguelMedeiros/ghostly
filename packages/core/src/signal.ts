@@ -5,6 +5,8 @@
  * arrives inside a packet that is signed by the peer's key and encrypted with
  * the link key, which is what binds the WebRTC connection to the peer identity.
  */
+import { isGlobalIpv4Host } from "./callSignal";
+
 export interface RtcSignal {
   t: "o" | "a";
   ts: number;
@@ -24,8 +26,38 @@ export interface RtcSignal {
 
 export const DATA_CHANNEL_LABEL = "ghostly/1";
 export const DATA_CHANNEL_ID = 0;
-/** Offers and answers older than this are ignored. */
+/** An offer older than this is ignored. */
 export const RTC_SIGNAL_MAX_AGE_MS = 120_000;
+/** A signal dated further ahead of this clock than this is not taken: its time would outrank every later one of its sender. */
+export const RTC_SIGNAL_FUTURE_MS = 10 * 60_000;
+/**
+ * How this device saw a signal come. `since`: when its read of the maker's record that did not have the signal began,
+ * by this clock; only a read the network answered counts, never a copy kept from before. `after`: the time of the
+ * maker's own packet that read found, by the maker's clock; null when that read found none of the maker's.
+ */
+export interface SignalSight { since: number; after: number | null; live?: boolean }
+/**
+ * Whether an offer its maker dated `ts` is recent enough to answer.
+ *
+ * With a `sight`, two things place it in time without holding the maker's clock against this one. It was not in the
+ * maker's record at `since`, so it reached the record after that; and it is not dated before the maker's packet that
+ * was there (`after`, the same clock as `ts`), so it was not made before that packet either. An offer made earlier and
+ * put in the record again later fails the second. Its time is then held between `since` and now, and only this clock
+ * measures its age.
+ *
+ * When that read found nothing of the maker's (`after` null: a first contact), there is no packet to hold the offer
+ * against, and a record that looked empty a moment ago is weaker ground: the offer's own time then has to be within
+ * `RTC_SIGNAL_FUTURE_MS` of this clock too, which is as far as two clocks are taken to differ.
+ *
+ * Without a sight (the first read of a run found the offer) its own time is all there is to go by, and it may differ
+ * from this clock by the age allowed, either way.
+ */
+export function offerIsFresh(ts: number, sight?: SignalSight, now = Date.now()): boolean {
+  if (!sight) return Math.abs(now - ts) <= RTC_SIGNAL_MAX_AGE_MS;
+  if (!sight.live && sight.after !== null && ts < sight.after) return false;
+  if (!sight.live && sight.after === null && Math.abs(now - ts) > RTC_SIGNAL_FUTURE_MS) return false;
+  return now - Math.max(sight.since, Math.min(ts, now)) <= RTC_SIGNAL_MAX_AGE_MS;
+}
 const MAX_MESSAGE_SIZE = 262_144;
 
 const CANDIDATE_TYPES = { host: "h", srflx: "s", relay: "r" } as const;
@@ -41,13 +73,17 @@ const CANDIDATE_TYPE_NAME: Record<string, string> = { h: "host", s: "srflx", r: 
  * sends a packet for its own public address back in (2026-10-02). So host candidates go in this order of preference:
  * those a server reflexive candidate was gathered from (`raddr`: an interface with a way out, the network a contact
  * nearby shares), then the others, and in each case those the browser marks as costly last (`network-cost` 50 or
- * more: a VPN, or an interface it does not know), as a call's candidates do (`pickCallCandidates`). With no
- * reflexive candidate, or none that says where it came from, the order is the browser's, as before.
+ * more: a VPN, or an interface it does not know), as a call's candidates do (`pickCallCandidates`). A host on a
+ * global IPv4 address has a way out too: it gets no reflexive candidate (Chromium drops one equal to a host), and the
+ * gathering wait ends on it (`isGlobalIpv4Host`). That wait ends 400 ms after the first reflexive candidate, so only
+ * the interfaces whose STUN answer came by then are known to have a way out. With no reflexive candidate, or none
+ * that says where it came from, the order is the browser's, as before.
  */
 function hostRank(parts: string[], reflexiveBases: ReadonlySet<string>): number {
   const cost = Number(parts[parts.indexOf("network-cost") + 1]);
   const costly = parts.includes("network-cost") && cost >= 50;
-  return (costly ? 2 : 0) + (reflexiveBases.has(parts[4]) ? 0 : 1);
+  const wayOut = reflexiveBases.has(parts[4]) || isGlobalIpv4Host(parts.join(" "));
+  return (costly ? 2 : 0) + (wayOut ? 0 : 1);
 }
 
 export function extractRtcParams(sdp: string): Pick<RtcSignal, "u" | "p" | "f" | "s" | "c"> {

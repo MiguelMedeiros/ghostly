@@ -24,13 +24,25 @@ describe("the site's invite reader agrees with the app's", () => {
     same(inviteCode.toUpperCase());
     expect(checkInvite(inviteCode.toUpperCase())).toEqual({ ok: true, code: inviteCode });
     for (let i = 8; i < inviteCode.length; i += 7) same(inviteCode.slice(0, i) + (inviteCode[i] === "q" ? "p" : "q") + inviteCode.slice(i + 1));
-    for (const version of [0, 2, 17, 31]) same(bech32m.encode("ghostly", [version, ...words.slice(1)], false));
+    // Version 2 adds a device to a profile (WISP 06): both say so, and neither makes a chat of it.
+    for (const version of [0, 2, 3, 17, 31]) same(bech32m.encode("ghostly", [version, ...words.slice(1)], false));
     same(bech32.encode("ghostly", words, false));
     const bytes = bech32m.fromWords(words.slice(1));
     same(bech32m.encode("ghostly", [1, ...bech32m.toWords(bytes.slice(0, 96))], false));
     const padded = [...words]; padded[padded.length - 1] |= 1;
     same(bech32m.encode("ghostly", padded, false));
     for (const other of ["ghostly1", "ghostly1qqqqqq", `ghostly1${"q".repeat(1016)}`, "ghostly1bbbbbbbbbb", inviteCode.slice(0, -1)]) same(other);
+  });
+
+  it("a version above every one either reader knows is a newer Ghostly's, in both; version 2 adds a device, in both", () => {
+    for (const version of [3, 4, 16, 31]) {
+      const code = bech32m.encode("ghostly", [version, ...words.slice(1)], false);
+      expect(readInviteCode(code)).toMatchObject({ ok: false, reason: "update" });
+      expect(checkInvite(code)).toEqual({ ok: false, reason: "update" });
+    }
+    const device = bech32m.encode("ghostly", [2, ...words.slice(1)], false);
+    expect(readInviteCode(device)).toEqual({ ok: false, reason: "device" });
+    expect(checkInvite(device)).toEqual({ ok: false, reason: "device" });
   });
 
   it("on arbitrary strings after ghostly1", () => {

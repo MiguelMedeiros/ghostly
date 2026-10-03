@@ -62,7 +62,7 @@ A profile is a folder, `~/.ghostly/profiles/<name>/` (0700, files 0600), with it
 | `--profile <name>` or `GHOSTLY_PROFILE` | Run one command on another profile |
 | `--home <dir>` or `GHOSTLY_HOME` | Move the whole `~/.ghostly` folder |
 | `profile set --name <name>`, `profile picture <jpeg>` | What contacts see |
-| `profile backup --out <file>`, `profile restore <file> <name>` | An encrypted backup of the headless profile |
+| `profile backup --out <file>`, `profile restore <file> <name>` | A backup of the headless profile, encrypted with a passphrase (`--no-passphrase`: not encrypted, by explicit choice) |
 
 Only one process opens a profile at a time.
 
@@ -210,7 +210,9 @@ ghostly listen --type message.received --cursor "${GHOSTLY_HOME:-$HOME/.ghostly}
   read a file or run a command. A group gets one conversation per member ([safe setup](AI-AGENTS.md#safe-setup)).
 - A task card: `ghostly task send <chat|group> --title "…" --steps 1/4`, then `ghostly task update <chat|group> <task>
   --steps 2/4 --step "…"` as the work goes, and `--status done --steps 4/4` at the end. People see a small card with a progress
-  bar and the pull request's size, which opens on a tap; apps without cards read a short text. Updates merge, at
+  bar and the pull request's size, which opens on a tap; apps without cards read a short text. `--pr-state open
+  --pr-checks passing`, `--tag core` and `--parent <task>` say more for the Tasks board (a Review column, a checks mark,
+  tag chips, parts stacked under their task); older apps ignore them. Updates merge, at
   most one per card every 2.5 s ([WISP 4xx · Status Cards](wisps/4xx-status-cards.md)). A routine the same way:
   `ghostly routine send <chat|group> --name "…" --schedule "every day 01:00" --next <date>`, then
   `ghostly routine update <chat|group> <routine> --run ok` after each run.

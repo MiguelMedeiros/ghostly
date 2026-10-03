@@ -1,4 +1,67 @@
 {
+  "board": {
+    "card": {
+      "botLabel": "来自：",
+      "chatLabel": "聊天：",
+      "checks": {
+        "failing": "检查失败",
+        "passing": "检查通过",
+        "pending": "检查进行中"
+      },
+      "details": "详情",
+      "filesLabel": "文件：",
+      "from": "{{bot}}，在 {{chat}}",
+      "in": "在 {{chat}}",
+      "openPr": "在 {{host}} 打开",
+      "parts": "已完成 {{done}} / {{total}}",
+      "prLabel": "拉取请求：",
+      "prState": {
+        "closed": "已关闭",
+        "draft": "草稿",
+        "merged": "已合并",
+        "open": "开放"
+      },
+      "statusLabel": "状态：",
+      "steps": "{{done}} / {{total}}",
+      "tagsLabel": "标签：",
+      "updatedLabel": "更新："
+    },
+    "column": {
+      "blocked": "受阻",
+      "closed": "已停止",
+      "done": "已完成",
+      "queued": "排队中",
+      "review": "评审",
+      "running": "进行中"
+    },
+    "columns": "列",
+    "empty": "还没有任务",
+    "emptyHint": "你聊天中的机器人发来的任务卡片会显示在这里。",
+    "filter": "筛选任务",
+    "groupBy": {
+      "bot": "机器人",
+      "chat": "聊天",
+      "label": "分组方式",
+      "status": "状态"
+    },
+    "hideOlder": "隐藏较早的",
+    "info": "机器人在聊天和群组中发布任务卡片并保持更新。此看板汇集所有聊天中的卡片。已完成和已停止的任务保留一天；“已停止”包含失败和已取消的任务。卡片只显示任务：状态由机器人更改。打开卡片可在其聊天中查看。",
+    "me": "你",
+    "noMatch": "没有匹配的任务",
+    "none": "无",
+    "showMore": "显示更多 ({{count}})",
+    "showOlder": "显示较早的 ({{count}})",
+    "tagFilter": "只显示 {{tag}}",
+    "tags": "标签",
+    "tasksMany": "{{count}} 个任务",
+    "tasksOne": "1 个任务",
+    "title": "任务",
+    "view": {
+      "label": "显示",
+      "routines": "例行任务",
+      "tasks": "任务"
+    }
+  },
   "buttons": {
     "answers": "回答",
     "chosen": "已选择",

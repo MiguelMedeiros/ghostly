@@ -1,4 +1,26 @@
 {
   "name": "Ghostly",
+  "profileUnavailable": {
+    "detail": "Cosa ha detto il sistema:",
+    "info": "Niente è stato modificato o eliminato. Finché i dati sono chiusi, Ghostly non si connette a nessuno e non invia nulla per questo profilo. Questa app è Ghostly {{app}} e legge i dati del profilo fino alla versione {{supported}}.",
+    "newerHint": "Aggiorna l'app per aprirlo.",
+    "newerInfo": "I dati di questo profilo sono alla versione {{stored}}. Questa app, Ghostly {{app}}, legge fino alla versione {{supported}}. Un Ghostly più recente ha aperto il profilo e ne ha portato avanti i dati, e uno più vecchio non può leggerli in modo sicuro. Per questo niente viene aperto e niente viene inviato, e niente è stato modificato o eliminato: le tue chat, le chiavi e i portafogli sono ancora lì. Aggiorna questa app, oppure apri il profilo con quella più recente.",
+    "newerTitle": "Questo profilo è stato usato l'ultima volta da una versione più recente di Ghostly.",
+    "noUpdate": "Non è ancora uscita una versione più recente. Apri questo profilo con l'app che lo ha usato per ultima.",
+    "reason": {
+      "blocked": "Un'altra finestra o scheda di Ghostly lo tiene ancora aperto con una versione più vecchia.",
+      "denied": "Questo browser non dà spazio di archiviazione a Ghostly qui: una finestra privata, o l'archiviazione bloccata per questo sito.",
+      "failed": "I dati non si sono aperti, e il sistema non ha dato un motivo chiaro.",
+      "full": "Questo dispositivo ha esaurito lo spazio di archiviazione."
+    },
+    "title": "Ghostly non è riuscito ad aprire i dati di questo profilo.",
+    "try": {
+      "blocked": "Chiudi le altre finestre e schede di Ghostly, poi riprova.",
+      "denied": "Usa una finestra normale o consenti l'archiviazione per questo sito, poi riprova.",
+      "failed": "Riavvia l'app o il dispositivo, poi riprova.",
+      "full": "Libera spazio, poi riprova."
+    },
+    "tryAgain": "Riprova"
+  },
   "tagline": "Messaggistica effimera e crittografata su DHT"
 }

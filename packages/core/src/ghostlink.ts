@@ -4,7 +4,7 @@ import { TransportSwitch, allowedTransports, type SwitchPlan } from "./transport
 import { proofHash, type ProofAdapter, type ProofScope } from "./peerProofs";
 import { IDENTITY_MAX_FRAME, type IdentityScope } from "./identityProofs";
 import { sha256 } from "@noble/hashes/sha2.js";
-import { identityFromSeedB64 } from "./identity";
+import { identityFromSeedB64, publicKeyFromZ32 } from "./identity";
 import { TRANSPORTS, irohRelayUrl, rankTransports, relayedTransports, transportOrder, type NativeEndpoint, type NativeBinding, type NativeTransport, type PairedTransport, type TransportDescriptors } from "./pairedTransports";
 import { dialDescriptors, encodePacketTransports, parsePacketTransports } from "./capsRecord";
 import { sanitizeNick } from "./text";
@@ -13,9 +13,10 @@ import { parseLinkPreview, type LinkPreview } from "./linkPreview";
 import { pairedReplyAuthor, readReply, wireReply, type WireReply } from "./replies";
 import { readForwarded } from "./forwards";
 import { readStatusCard, type StatusCard } from "./statusCards";
-import { randomBytes, toBase64Url, utf8Encode } from "./bytes";
-import { fitSignedPairedSignal, verifyPairedSignal } from "./pairedSignal";
-import { parseRtcSignal } from "./signal";
+import { randomBytes, toBase64Url, toZ32, utf8Encode } from "./bytes";
+import { fitSignedPairedSignal, fitSignedPairedSignalWith, verifyPairedSignal } from "./pairedSignal";
+import { deviceFrameCapability, signDeviceTransports, verifyDeviceTransports, type DeviceCapability, type DeviceFrame } from "./deviceLink";
+import { parseRtcSignal, type SignalSight } from "./signal";
 import { PairedSession, type PairingState, type PairingCredentials, type PaymentMethodName } from "./pairedSession";
 import { DataLink, type DataLinkState } from "./datalink";
 import type { DirectEvidence } from "./directPath";
@@ -40,7 +41,7 @@ import {
 } from "./http";
 import type { LinkParams } from "./invite";
 import type { Payment, PaymentAsk, PaymentRequest, PaymentResult } from "./payments";
-import { EXPECT_PEER_MS, WATCH_PEER_MS, LinkSession, type LinkStatus, type PeerPresence, type PollIntervals } from "./link";
+import { EXPECT_PEER_MS, WATCH_PEER_MS, LinkSession, presenceSeenAt, type LinkStatus, type PeerPresence, type PollIntervals } from "./link";
 import type { ResolvedLink } from "./records";
 import { servicesFromWire, servicesToWire, type ServiceAd } from "./services";
 import { PairedHttp } from "./pairedHttp";
@@ -52,6 +53,7 @@ import { TYPING_FRAME, TypingReceiver, TypingSender, type TypingActivity } from 
 import { EDIT_FRAME, EDIT_RATE_WINDOW_MS, EDIT_RECEIVE_LIMIT, EDITED_FRAME, RateWindow, dhtEditId, editFrame, editedFrame, parseEditFrame, parseEditedFrame, validEditMessage, validEditNumber, type WireEdit } from "./pairedEdits";
 import { FILE_FRAMES } from "./chatFiles";
 import { PAIRED_CALL_FRAME, PairedCalls, parsePairedCallFrame } from "./pairedCalls";
+import { heardCallSignal } from "./callSignal";
 import { traceLink } from "./linkTrace";
 import { isDiscoveryBudgetError, type PkarrTransport } from "./transport";
 import { GROUP_VERSION_LARGE } from "./groupCommits";
@@ -381,6 +383,8 @@ export interface GhostLinkEvents {
   onDataLinkState?(state: DataLinkState): void;
   /** What a WebRTC attempt of this link said about direct connections from this device (`directPath.ts`). */
   onDirectEvidence?(evidence: DirectEvidence): void;
+  /** The contact's packet came between two reads of its record: its clock against this one (`LinkSessionEvents.onPeerClock`). */
+  onPeerClock?(packetAt: number, readBefore: number, readAt: number): void;
   onPoll?(poll: { polling: boolean; nextInMs: number }): void;
   /** The peer is sending a file. Return where to put it, or null (or a reason) to refuse. */
   onFileStored?(file: FileInfo): Promise<string | undefined>;
@@ -404,6 +408,18 @@ export interface GhostLinkEvents {
   onGroupFrame?(frame: Record<string, unknown>): void | Promise<void>;
   /** Group frames can flow (both announced), or no longer can. */
   onGroupsSupport?(supported: boolean): void;
+  /**
+   * A frame between two of a person's devices (WISP 06, `deviceLink.ts`), on a device link only, and only while both
+   * ends announced the capability its type travels under.
+   */
+  onDeviceFrame?(frame: DeviceFrame): void | Promise<void>;
+  /** The device capabilities both ends announced on the open session changed: what is agreed now. */
+  onDeviceCapabilities?(agreed: DeviceCapability[]): void;
+  /**
+   * A session was refused because the other end authenticated with another participation key than the one pinned.
+   * A device's one-time enrollment link (WISP 06 § Adding a device) tells the person that a second device tried its code.
+   */
+  onPeerKeyRefused?(): void;
 }
 
 const PAYMENT_METHODS: PaymentMethodName[] = ["cashu", "lightning", "arkade", "usdt", "bark", "bitcoin", "fedimint", "spark"];
@@ -462,6 +478,11 @@ export interface GhostLinkOptions {
   buttonsSupport?: boolean;
   /** Offer `wake/1` on paired sessions: this app wakes a contact's closed web app with a push (1:1 chats, not group edges). */
   wakeSupport?: boolean;
+  /**
+   * A device link (WISP 06): the capabilities it announces on the open session, and so the device frames it carries
+   * (`sendDeviceFrame`, `onDeviceFrame`). Never given for a chat or a group's link, which drop every device frame.
+   */
+  deviceCapabilities?: readonly DeviceCapability[];
   dht?: {
     state?: DhtDeliveryState; save(state: DhtDeliveryState): Promise<void>; pollMs?: number;
     /** A chat already paired, started again: its first control envelope waits this long (`DhtDelivery`). */
@@ -504,6 +525,11 @@ export interface GhostLinkOptions {
    * downtime) is answered as any. Unknown (never live, a log lost): every offer is taken as before (bug hunt r7a).
    */
   resumeFloor?: number;
+  /**
+   * Only this link's two ends can write its records: a group's edge or entry session, whose keys come from the two
+   * members' own keys. A chat's records are under keys from its invite, which whoever holds a copy of it can write.
+   */
+  ownRecords?: boolean;
   /**
    * Open the data link on its own whenever the peer is online, instead of on
    * first use. Chat and call signaling then travel peer to peer and Pkarr is
@@ -665,7 +691,7 @@ export class GhostLink {
   /** Whether the stream was blocked (DHT-only on either side) when last looked at. */
   private streamWasBlocked: boolean;
   /** The contact's latest `_rtc` signal while the stream was blocked. */
-  private heldSignal: string | null = null;
+  private heldSignal: { signal: string; sight?: SignalSight } | null = null;
   /** The link packet of a DHT-only contact its mailbox was last read early for (its timestamp): once per packet. */
   private leftDhtSeenFor = 0;
   /** The first pairing of this chat, while it is one (`pairingProgress` option, no peer key yet). */
@@ -688,6 +714,19 @@ export class GhostLink {
   private peerPacketSeen = 0;
   /** A live session ended without this side ending it (`peerLost`): until when the contact's next new packet is news. */
   private lostUntil = 0;
+  /** Counts the signals a signer was asked to sign: only the latest one goes out. */
+  private signalTurn = 0;
+  /** A signal ready to go: on the live session during a switch to WebRTC, in this side's packet otherwise. */
+  private signalOut(signed: string | null, report: (error: unknown) => void): void {
+    // During migration the authenticated channel already reaches the peer.
+    // Carry signed ICE signaling there instead of waiting for DHT polling.
+    if (this.switcher?.pending?.choices.includes("webrtc/1") && this.channel && this.paired?.state.status === "ready") {
+      if (signed) this.channel.send(JSON.stringify({ t: "paired-rtc", signal: signed }));
+      return;
+    }
+    void this.session.setRtcSignal(signed, !!this.options.params.profile).catch(report);
+  }
+
   /** This app is going away (`depart`): no more dials. */
   private leaving = false;
   /** `resume` still to act on: the first dial after the start goes to it, and a native one is knocked on. */
@@ -697,6 +736,8 @@ export class GhostLink {
 
   constructor(options: GhostLinkOptions) {
     this.options = options;
+    // A link that signs through a signer (a device link) has no seed for what a chat signs beside its session.
+    if (options.pairing?.credentials.signer && (options.dht || options.params.deliveryMode === "dht")) throw new Error("A link that signs through a signer has no DHT delivery");
     this.deliveryMode = options.params.deliveryMode ?? "stream";
     // A DHT-only invite pairs through its mailbox, not through these stages.
     this.tracker = options.pairingProgress && options.pairing && !options.pairing.credentials.peerKey && this.deliveryMode !== "dht"
@@ -782,7 +823,7 @@ export class GhostLink {
           if (presence.online) this.tracker?.sawPeer();
           this.peerPacketArrived(presence);
           // A first contact under way: a fresh packet of the contact says its envelope is a read away.
-          if (presence.online && !options.pairing?.credentials.peerKey && Date.now() - presence.lastPacketAt < EXPECT_PEER_MS) this.dht?.expect();
+          if (presence.online && !options.pairing?.credentials.peerKey && Date.now() - presenceSeenAt(presence) < EXPECT_PEER_MS) this.dht?.expect();
           events.onPresence?.(this.mergePresence(presence));
           this.peerMayHaveLeftDht(presence);
           this.maybeAutoConnect(presence);
@@ -797,15 +838,16 @@ export class GhostLink {
           this.publishRecovered();
         },
         onPeerAck: (ack) => events.onPeerAck?.(ack),
-        onCallSignal: (signal) => { if (!options.params.profile) events.onCallSignal?.(signal); },
-        onRtcSignal: signal => {
+        onCallSignal: (signal) => { if (!options.params.profile) events.onCallSignal?.(heardCallSignal(signal)); },
+        onRtcSignal: (signal, sight) => {
           traceLink(this.myPubKeyZ32, "rtc-signal-in", { held: this.streamBlocked });
           // Going away: an answer now would pair the contact with a connection about to die, and it would wait on it.
           if (this.leaving) return;
           // Seen once only: kept, and answered as soon as nothing blocks the stream any more.
-          if (this.streamBlocked) { this.heldSignal = signal; this.peerDialsFromDht(signal); return; }
-          this.handleRtcSignal(signal);
+          if (this.streamBlocked) { this.heldSignal = { signal, sight }; this.peerDialsFromDht(signal); return; }
+          this.handleRtcSignal(signal, sight);
         },
+        onPeerClock: (packetAt, readBefore, readAt) => events.onPeerClock?.(packetAt, readBefore, readAt),
         onPeerTransports: value => this.peerPacketTransports(value),
         onDiscoveryError: error => events.onDiscoveryError?.(error),
         onStatus: (status) => events.onStatus?.(status),
@@ -836,16 +878,23 @@ export class GhostLink {
             const kind = (JSON.parse(signal) as { t?: string }).t;
             if (kind === "o") this.tracker.offerSent(); else if (kind === "a") this.tracker.answerSent();
           }
+          const signer = options.params.profile ? options.pairing?.credentials.signer : undefined;
+          if (signer) {
+            // A device link (WISP 06): its signer signs asynchronously. Signals go out in the order they were made,
+            // and one that a later signal (or a cleared one) overtook while it was being signed is dropped.
+            const turn = ++this.signalTurn;
+            if (signal) {
+              void fitSignedPairedSignalWith(signal, signer, this.myPubKeyZ32, options.params.peerPubKeyZ32, candidate => this.session.fitsRtcSignal(candidate))
+                .then(signed => { if (turn === this.signalTurn && !this.stopped) this.signalOut(signed, report); })
+                // What the seed's path throws to the data link: the attempt ends, and the next one starts afresh.
+                .catch(error => { report(error); if (turn === this.signalTurn && !this.stopped) this.dataLink.close(); });
+              return;
+            }
+          }
           const signed = signal && options.params.profile && options.pairing
             ? fitSignedPairedSignal(signal, options.pairing.credentials.seedB64, this.myPubKeyZ32,
               options.params.peerPubKeyZ32, candidate => this.session.fitsRtcSignal(candidate)) : signal;
-          // During migration the authenticated channel already reaches the peer.
-          // Carry signed ICE signaling there instead of waiting for DHT polling.
-          if (this.switcher?.pending?.choices.includes("webrtc/1") && this.channel && this.paired?.state.status === "ready") {
-            if (signed) this.channel.send(JSON.stringify({ t: "paired-rtc", signal: signed }));
-            return;
-          }
-          void this.session.setRtcSignal(signed, !!options.params.profile).catch(report);
+          this.signalOut(signed, report);
         } catch (error) { report(error); throw error; }
       },
       // An offer to a saved contact: its answer may be a while (the contact may still hold this app's old session),
@@ -993,12 +1042,19 @@ export class GhostLink {
    * A contact's offer from before the session that was live when this app last ran began (`resumeFloor`): answering
    * it held the resumed link on a connection the contact no longer offers, until ICE gave up (about 30 s), and its
    * resume dial never went (bug hunt r7a). Dropped; the resumed link dials when it sees the contact.
+   *
+   * The floor is this device's clock and the offer's time is the contact's: the two are compared only for an offer
+   * the first read of this run found, which nothing else dates. One this run saw arrive (`sight`: the contact's record
+   * did not have it at an earlier read, and it is not dated before the contact's packet that read found) was made
+   * since this app is back. Held against the floor, the offers of a contact whose clock is behind were all dropped
+   * until that clock passed the moment the last session began: minutes without a live chat after a restart.
    */
-  private predatesLastSession(verified: string): boolean {
+  private predatesLastSession(verified: string, sight?: SignalSight): boolean {
     const floor = this.options.resumeFloor;
     if (floor === undefined) return false;
     const offer = parseRtcSignal(verified);
     if (offer?.t !== "o" || offer.ts >= floor) return false;
+    if (sight && (sight.after === null || offer.ts >= sight.after)) return false;
     traceLink(this.myPubKeyZ32, "stale-offer", { beforeMs: floor - offer.ts });
     this.maybeAutoConnect(this.presence);
     return true;
@@ -1014,12 +1070,18 @@ export class GhostLink {
     return parsed?.t === "o" ? parsed.ts : null;
   }
 
-  private handleRtcSignal(signal: string): void {
+  private handleRtcSignal(signal: string, seen?: SignalSight): void {
+    // A read that found nothing of the contact's leaves nothing to hold the offer's own time against. A first contact
+    // goes by it all the same, its first packet being the one with its offer: a first pairing, before the pin, and a
+    // group's link, whose records only its two members write. A pinned contact's offer in a chat is then judged by
+    // its own time, as one the first read finds.
+    const firstContact = !!this.options.ownRecords || (!!this.options.pairing && !this.options.pairing.credentials.peerKey);
+    const sight = seen && seen.after === null && !firstContact ? undefined : seen;
     const options = this.options, credentials = options.pairing?.credentials;
     const verified = options.params.profile ? verifyPairedSignal(signal, options.params.peerPubKeyZ32,
       this.myPubKeyZ32, credentials?.peerKey, credentials?.requireSignedSignals) : signal;
-    if (verified && this.predatesLastSession(verified)) return;
-    if (verified) void this.dataLink.handleSignal(verified);
+    if (verified && this.predatesLastSession(verified, sight)) return;
+    if (verified) void this.dataLink.handleSignal(verified, sight);
     else if (credentials?.peerKey) {
       // The link's records are published under keys derived from the invite: anyone holding a copy of it can put a
       // signal there, signed by a key of their own or by none. After the pin such a signal is dropped, never a reason
@@ -1051,7 +1113,7 @@ export class GhostLink {
     this.session.expectPeer();
     const held = this.heldSignal;
     this.heldSignal = null;
-    if (held) this.handleRtcSignal(held);
+    if (held) this.handleRtcSignal(held.signal, held.sight);
     const parked = this.blockedDial;
     if (parked) { this.blockedDial = null; clearTimeout(parked.timer); parked.channel.onClose = null; this.takeDialIn(parked.channel, parked.binding); }
   }
@@ -1065,9 +1127,9 @@ export class GhostLink {
    */
   private peerMayHaveLeftDht(presence: PeerPresence): void {
     if (!this.dht || this.dht.peerMode !== "dht" || this.deliveryMode === "dht" || !presence.online) return;
-    if (Date.now() - presence.lastPacketAt >= EXPECT_PEER_MS || presence.lastPacketAt === this.leftDhtSeenFor) return;
+    if (Date.now() - presenceSeenAt(presence) >= EXPECT_PEER_MS || presence.lastPacketAt === this.leftDhtSeenFor) return;
     this.leftDhtSeenFor = presence.lastPacketAt;
-    traceLink(this.myPubKeyZ32, "peer-link-packet", { age: Date.now() - presence.lastPacketAt });
+    traceLink(this.myPubKeyZ32, "peer-link-packet", { age: Date.now() - presenceSeenAt(presence) });
     this.dht.expect(EXPECT_PEER_MS, true);
   }
 
@@ -1581,12 +1643,34 @@ export class GhostLink {
   /** A group link's `_tr` in its packet: what this side runs and how to dial it, once it runs a native endpoint there. */
   private publishPacketTransports(): void {
     if (!this.options.packetTransports) return;
-    this.session.setTransports(this.endpoints.size ? encodePacketTransports(this.availableTransports, this.localDescriptors()) : null);
+    const value = this.endpoints.size ? encodePacketTransports(this.availableTransports, this.localDescriptors()) : null;
+    const signer = this.options.pairing?.credentials.signer;
+    if (!signer) { this.session.setTransports(value); return; }
+    // A device link (WISP 06): signed with the device signing key, so a holder of `D` cannot write one in its place.
+    // The latest value goes out; one overtaken while it was being signed is dropped.
+    const turn = ++this.transportsTurn;
+    if (value === null) { this.session.setTransports(null); return; }
+    void signDeviceTransports(value, signer, this.myPubKeyZ32, this.options.params.peerPubKeyZ32)
+      .then(signed => { if (turn === this.transportsTurn && !this.stopped) this.session.setTransports(signed); })
+      .catch(() => {});
   }
+  /** Counts the `_tr` values a signer was asked to sign (a device link): only the latest goes out. */
+  private transportsTurn = 0;
 
   /** The member's packet said which transports its app runs on this group link, and how to dial them. */
   private peerPacketTransports(value: string): void {
     if (!this.options.packetTransports || this.stopped) return;
+    const credentials = this.options.pairing?.credentials;
+    if (credentials?.signer) {
+      // A device link: only a value signed by the device signing key it pinned. Anything else (unsigned, or signed by
+      // another key: a holder of `D` writing in the other device's packet) is dropped, and dials nothing.
+      const verified = credentials.peerKey ? verifyDeviceTransports(value, this.options.params.peerPubKeyZ32, this.myPubKeyZ32, publicKeyFromZ32(credentials.peerKey)) : null;
+      if (!verified) { traceLink(this.myPubKeyZ32, "packet-transports-refused", {}); return; }
+      value = verified;
+      // Newly said by the device itself: whatever an earlier value made fail waits no longer.
+      this.autoConnectFailures = 0; this.lastAutoConnectAt = 0;
+      this.nativeFailures.clear(); this.demotedUntil.clear();
+    }
     const said = parsePacketTransports(value);
     if (!said) return;
     const transports = said.transports as PairedTransport[], descriptors = dialDescriptors(said.descriptors);
@@ -2180,7 +2264,7 @@ export class GhostLink {
       // The other side dials as soon as it sees me. A packet of its that is new to me and fresh says it just
       // (re)appeared, so its offer is a poll away; an old one (a contact online for a while, as when this app
       // starts) says nothing is coming now, and looking fast for it would only spend the relays' budget.
-      const fresh = Date.now() - presence.lastPacketAt < EXPECT_PEER_MS;
+      const fresh = Date.now() - presenceSeenAt(presence) < EXPECT_PEER_MS;
       if (fresh && presence.lastPacketAt !== this.offerAwaitedFor) { this.offerAwaitedFor = presence.lastPacketAt; this.session.expectPeer(); }
       return;
     }
@@ -2259,10 +2343,15 @@ export class GhostLink {
     const paired = this.paired;
     const context = await proofHash(JSON.stringify(["ghostly-conversation", 1, [this.myPubKeyZ32, this.options.params.peerPubKeyZ32].sort()]));
     if (this.paired !== paired || !this.peerProofSupport) throw new Error("Connection changed");
-    return { subject: identityFromSeedB64(credentials.seedB64).pubKeyZ32, audience: credentials.peerKey, context, session: paired.proofSession };
+    return { subject: credentials.signer ? toZ32(credentials.signer.publicKey) : identityFromSeedB64(credentials.seedB64).pubKeyZ32, audience: credentials.peerKey, context, session: paired.proofSession };
   }
 
   get proofSession(): string | undefined { return this.peerProofSupport ? this.paired?.proofSession : undefined; }
+  /**
+   * The transcript hash of the session that is open and ready (WISP 401), lower-case hex, whatever proofs it offers:
+   * what a device's enrollment (WISP 06) signs and derives its digits from. Undefined while no session is ready.
+   */
+  get sessionTranscriptHash(): string | undefined { return this.paired?.state.status === "ready" ? this.paired.proofSession || undefined : undefined; }
 
   /** Identity proofs can be exchanged now: both offers carry `identity-proof/1` and the channel is open. */
   get identitySupport(): boolean { return !!this.options.events?.onIdentityProof && !!this.paired?.identitySupport && this.isDataLinkOpen; }
@@ -2273,7 +2362,7 @@ export class GhostLink {
     if (!credentials?.peerKey || !this.paired || !this.identitySupport) throw new Error("Connect to this contact first");
     const conversation = [this.myPubKeyZ32, this.options.params.peerPubKeyZ32].sort();
     const context = Array.from(sha256(utf8Encode(JSON.stringify(["ghostly-conversation", 1, conversation]))), b => b.toString(16).padStart(2, "0")).join("");
-    return { subject: identityFromSeedB64(credentials.seedB64).pubKeyZ32, audience: credentials.peerKey, context, session: this.paired.proofSession };
+    return { subject: credentials.signer ? toZ32(credentials.signer.publicKey) : identityFromSeedB64(credentials.seedB64).pubKeyZ32, audience: credentials.peerKey, context, session: this.paired.proofSession };
   }
 
   sendIdentityProof(frame: object): void {
@@ -2383,7 +2472,20 @@ export class GhostLink {
     if (this.options.pinSupport) offered.push(PIN_CAPABILITY);
     if (this.options.statusCardSupport) offered.push(STATUS_CARD_CAPABILITY);
     if (this.options.buttonsSupport) offered.push(BUTTONS_CAPABILITY);
+    if (this.options.deviceCapabilities) offered.push(...this.options.deviceCapabilities);
     return offered;
+  }
+  /** Both ends announced this device capability on the open session (a device link only). */
+  supportsDevice(capability: DeviceCapability): boolean {
+    return !!this.options.deviceCapabilities?.includes(capability) && this.isDataLinkOpen && this.sessionCapabilities.agreed(capability);
+  }
+  /** A frame to the person's other device. Only while both ends announced the capability its type travels under; never queued. */
+  sendDeviceFrame(frame: DeviceFrame): void {
+    const capability = deviceFrameCapability(frame.t);
+    if (!capability || !this.supportsDevice(capability) || !this.channel) throw new Error("This device is not connected");
+    const data = JSON.stringify(frame);
+    if (data.length > LIMITS.maxControlFrameBytes) throw new Error("Device frame too large");
+    this.channel.send(data);
   }
   /** Both sides offer `calls/1` on the open session: call signals can flow. Calls need a live session. */
   get supportsCalls(): boolean { return this.isDataLinkOpen && this.sessionCapabilities.agreed(CALLS_CAPABILITY); }
@@ -2539,6 +2641,8 @@ export class GhostLink {
     if (changed.includes(EDIT_CAPABILITY)) this.options.events?.onEditSupport?.(this.supportsEdits);
     if (changed.includes(PIN_CAPABILITY)) this.options.events?.onPinSupport?.(this.supportsPins);
     if (changed.includes(WAKE_SESSION_CAPABILITY)) this.options.events?.onWakeSupport?.(this.supportsWake);
+    const devices = this.options.deviceCapabilities;
+    if (devices && changed.some(capability => (devices as readonly string[]).includes(capability))) this.options.events?.onDeviceCapabilities?.(devices.filter(capability => this.supportsDevice(capability)));
     this.emitPairingState();
   }
   /** Both sides announced groups on this session and it is open. */
@@ -2757,6 +2861,8 @@ export class GhostLink {
         // A connection dialled in on a pinned chat says nothing until it authenticated: one refused leaves no trace in the state.
         onState: () => { if (this.channel === channel && (!this.unproven(channel) || paired.state.status === "ready")) this.emitPairingState(); },
         onFailure: () => {
+          // Another participation key than the one pinned: a device's one-time enrollment link says so (WISP 06).
+          if (paired.state.keyMismatch) this.options.events?.onPeerKeyRefused?.();
           // Dialled in and unproven, or a connection that carried nothing in time: neither says anything about the contact.
           if (this.unproven(channel) || paired.authTimedOut) {
             if (paired.state.keyMismatch) this.dht?.foreignKeySeen("stream");
@@ -2871,7 +2977,7 @@ export class GhostLink {
               const credentials = this.options.pairing!.credentials;
               const signal = verifyPairedSignal(frame.signal, this.options.params.peerPubKeyZ32,
                 this.myPubKeyZ32, credentials.peerKey, true);
-              if (signal) void this.dataLink.handleSignal(signal);
+              if (signal) void this.dataLink.handleSignal(signal, { since: Date.now(), after: null, live: true });
             }
             return;
           }
@@ -2915,7 +3021,8 @@ export class GhostLink {
             return;
           }
           if (frame?.t === SESSION_CAPABILITIES_FRAME) {
-            const changed = this.sessionCapabilities.receive(frame);
+            const devices = this.options.deviceCapabilities;
+            const changed = devices ? this.sessionCapabilities.receive(frame, [...KNOWN_SESSION_CAPABILITIES, ...devices]) : this.sessionCapabilities.receive(frame);
             if (changed) this.sessionCapabilitiesChanged(changed);
             return;
           }
@@ -2978,8 +3085,8 @@ export class GhostLink {
           }
           if (frame?.t === PAIRED_CALL_FRAME) {
             const signal = this.supportsCalls ? parsePairedCallFrame(frame) : null;
-            if (signal) this.pairedCalls.heard(signal);
-            if (signal) this.options.events?.onCallSignal?.(signal);
+            // One already heard on an earlier session is not handed on again (`PairedCalls.heard`).
+            if (signal && this.pairedCalls.heard(signal)) this.options.events?.onCallSignal?.(signal);
             return;
           }
           if (frame?.t === "ph") { if (this.supportsServices) this.pairedHttp?.handle(frame); return; }
@@ -3007,6 +3114,14 @@ export class GhostLink {
           if (typeof frame?.t === "string" && frame.t.startsWith("group-")) {
             if (this.groupsSupport) await this.options.events?.onGroupFrame?.(frame);
             return;
+          }
+          // A device link's own frames (WISP 06): handed on only under a capability both ends announced.
+          if (this.options.deviceCapabilities) {
+            const capability = deviceFrameCapability(frame?.t);
+            if (capability) {
+              if (this.supportsDevice(capability)) await this.options.events?.onDeviceFrame?.(frame as DeviceFrame);
+              return;
+            }
           }
           if (frame?.t === "paired-hold") {
             // The contact's latest word on held items; an older app never sends it and keeps its handshake offer.
@@ -3186,7 +3301,7 @@ export class GhostLink {
     const before = this.peerPacketSeen;
     this.peerPacketSeen = presence.lastPacketAt;
     if (!before || presence.lastPacketAt === before || !presence.online || this.dialing || this.channel) return;
-    if (!this.options.pairing?.credentials.peerKey || Date.now() - presence.lastPacketAt >= EXPECT_PEER_MS) return;
+    if (!this.options.pairing?.credentials.peerKey || Date.now() - presenceSeenAt(presence) >= EXPECT_PEER_MS) return;
     if (Date.now() > this.lostUntil) return;
     this.lostUntil = 0;
     traceLink(this.myPubKeyZ32, "peer-back", {});
@@ -3293,7 +3408,7 @@ export class GhostLink {
         this.options.events?.onMessage?.({ text: frame.m, timestamp: frame.ts, via: "datalink" });
         break;
       case "call":
-        this.options.events?.onCallSignal?.(frame.s);
+        this.options.events?.onCallSignal?.(heardCallSignal(frame.s, Date.now()));
         break;
       case "req":
         this.httpHost?.handleRequest(frame);

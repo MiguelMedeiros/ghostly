@@ -108,6 +108,11 @@ pub struct Relay {
     pub putting: Arc<Mutex<bool>>,
     /// The relay is broken: every request gets a 503.
     pub broken: Arc<Mutex<bool>>,
+    /// The relay honours `If-Match` (412 when it names another packet). Off, as pkarr-relay 2.1.0 and the
+    /// public relays were measured to behave: the header is ignored.
+    pub if_match: Arc<Mutex<bool>>,
+    /// A relay from before the `policy` query: a request that carries a query gets a 400.
+    pub old: Arc<Mutex<bool>>,
 }
 
 /// The timestamp of a relay payload (bytes 64..72, microseconds, big-endian).
@@ -126,6 +131,10 @@ pub async fn pkarr_relay() -> Relay {
     let headers = Arc::new(Mutex::new(Vec::<(String, String)>::new()));
     let putting = Arc::new(Mutex::new(false));
     let broken = Arc::new(Mutex::new(false));
+    let if_match_honoured = Arc::new(Mutex::new(false));
+    let honours = if_match_honoured.clone();
+    let old_relay = Arc::new(Mutex::new(false));
+    let old = old_relay.clone();
     let (store, seen, slow, extra, busy, down) = (
         packets.clone(),
         requests.clone(),
@@ -144,6 +153,8 @@ pub async fn pkarr_relay() -> Relay {
                 busy.clone(),
                 down.clone(),
             );
+            let honours = honours.clone();
+            let old = old.clone();
             tokio::spawn(async move {
                 let Some((head, body)) = read_request(&mut stream).await else {
                     return;
@@ -173,6 +184,9 @@ pub async fn pkarr_relay() -> Relay {
                 if *down.lock().unwrap() {
                     return respond(&mut stream, "503 Service Unavailable", &extra, b"").await;
                 }
+                if *old.lock().unwrap() && target.contains('?') {
+                    return respond(&mut stream, "400 Bad Request", &extra, b"").await;
+                }
                 match method {
                     "PUT" => {
                         let held = store
@@ -187,7 +201,9 @@ pub async fn pkarr_relay() -> Relay {
                                 "409 Conflict"
                             }
                             (Some(_), None, true) => "428 Precondition Required",
-                            (held, Some(named), _) if held != Some(named) => {
+                            (held, Some(named), _)
+                                if held != Some(named) && *honours.lock().unwrap() =>
+                            {
                                 "412 Precondition Failed"
                             }
                             _ => "200 OK",
@@ -224,6 +240,8 @@ pub async fn pkarr_relay() -> Relay {
         headers,
         putting,
         broken,
+        if_match: if_match_honoured,
+        old: old_relay,
     }
 }
 

@@ -1,4 +1,5 @@
 import { generateMnemonic, validateMnemonic } from "@scure/bip39";
+import { awayFrom, refuseAway, requireTurn } from "./away";
 import { wordlist } from "@scure/bip39/wordlists/english.js";
 import { RestArkProvider } from "@arkade-os/sdk";
 import { validatePaymentTarget, type PaymentTarget } from "@ghostly/core";
@@ -11,7 +12,10 @@ import type { WalletNetwork } from "@ghostly/core";
 import type { WalletMode } from "../../shared/mints";
 import { ModeChanged, ModeGate, WrongNetworkError, networkLabel } from "./modeGate";
 import { walletKey } from "./walletNetworks";
-export interface ArkWalletView { configured:boolean; locked:boolean; automatic?:boolean; network?:ArkConfig["network"]; provider?:string; address?:string; boardingAddress?:string; incoming?:number; balance:number; recoverable?:number; sweeping?:number; small?:number; error?:string }
+/** `read`: the balances were read once since this wallet opened (until then `balance` says nothing). */
+export interface ArkWalletView { configured:boolean; locked:boolean; read?:true; automatic?:boolean; network?:ArkConfig["network"]; provider?:string; address?:string; boardingAddress?:string; incoming?:number; balance:number; recoverable?:number; sweeping?:number; small?:number;
+  /** When the first coin still spendable expires (ms), unless it is renewed first; absent with no coin or no expiry known (WISP 06 § Wallets that stay home). */
+  expiresAt?:number; error?:string }
 /** A wallet with a device key opens by itself; one sealed with a password (older profiles) waits for it. */
 interface StoredArk {config:ArkConfig;seed:EncryptedSeed;deviceKey?:string}
 export interface ArkCreate {network:ArkConfig["network"];provider:string;explorer:string;password?:string;mnemonic?:string}
@@ -48,6 +52,8 @@ export class ArkWallet {
    * while the provider is unreachable.
    */
   ensureReady(create=false):Promise<void> {
+    // At home on another device (WISP 06 § Wallets that stay home): never opened here.
+    if (awayFrom(`arkade:${this.network}`) !== undefined) return Promise.resolve();
     // One already under way may not have created: once it ends, look again (once).
     if(this.readying)return this.readying.then(()=>this.needsReady(create)?this.startReady(create):undefined);
     return this.startReady(create);
@@ -57,6 +63,7 @@ export class ArkWallet {
   private async ready(create:boolean) {
     clearTimeout(this.retry);
     try {
+      await requireTurn();
       if(!this.saved){if(create)await this.createDefault();}
       else if(this.saved.deviceKey && !this.adapter)await this.serial(()=>this.stopped?Promise.resolve():this.unlock());
     } catch(error) {
@@ -74,6 +81,8 @@ export class ArkWallet {
   resume() {this.gate.resume();}
   create(params:ArkCreate) {return this.serial(()=>this.createNow(params));}
   private async createNow(params:ArkCreate) {
+    // At home on another device (WISP 06 § Wallets that stay home): never made again, unlocked or restored over here.
+    refuseAway(`arkade:${this.network}`, "Ark");
     if(!ARK_NETWORKS.includes(params.network))throw new Error("Unsupported Ark network");
     if(arkMode(params.network)!==this.network)throw new WrongNetworkError(arkMode(params.network),`${params.network==="bitcoin"?"Bitcoin":params.network} is a ${networkLabel(arkMode(params.network))} network: this is the ${networkLabel(this.network)} Ark wallet`);
     checkProviders(params.network,params.provider,params.explorer);
@@ -94,6 +103,8 @@ export class ArkWallet {
     void this.refresh().catch(error=>console.warn("Ark refresh:",error instanceof Error?error.message:error));
   }
   async unlock(password?:string) {
+    // At home on another device (WISP 06 § Wallets that stay home): never made again, unlocked or restored over here.
+    refuseAway(`arkade:${this.network}`, "Ark");
     if(!this.saved)throw new Error("Create or restore an Ark wallet first");
     if(this.adapter)return;
     const key=this.saved.deviceKey??password;
@@ -130,7 +141,7 @@ export class ArkWallet {
     const payload=encodeBackup({format:"ghostly-ark",version:1,sdk:"0.4.74",createdAt:Date.now(),mnemonic,config,database,intents});
     return JSON.stringify({format:"ghostly-ark-encrypted",version:1,vault:await sealSeed(payload,password)});
   }
-  restoreBackup(text:string,password:string):Promise<void> {return this.serial(async()=>{
+  restoreBackup(text:string,password:string):Promise<void> {return this.serial(async()=>{ refuseAway(`arkade:${this.network}`, "Ark");
     if(text.length>16*1024*1024)throw new Error("Ark backup is too large");
     const envelope=JSON.parse(text);
     if(envelope.format!=="ghostly-ark-encrypted" || envelope.version!==1)throw new Error("Unsupported Ark backup");
@@ -170,8 +181,11 @@ export class ArkWallet {
     const balance=await read("balance",()=>adapter.balance(),this.view.balance);
     const incoming=await read("incoming",()=>adapter.incoming(),this.view.incoming);
     const {recoverable,sweeping,small}=await read("recoverable",()=>adapter.expired(),{recoverable:this.view.recoverable,sweeping:this.view.sweeping,small:this.view.small});
+    // The expiry is for the move between devices only: one not read leaves the last one, and no error on the card.
+    const expiresAt=await this.gate.within(Promise.resolve().then(()=>adapter.expiresAt?.())).catch((error)=>{if(error instanceof ModeChanged)throw error;return this.view.expiresAt;});
     if(this.adapter!==adapter)return;
-    this.view={configured:true,locked:false,automatic:!!this.saved?.deviceKey,network:adapter.config.network,provider:adapter.config.provider,address,boardingAddress,incoming,balance,recoverable,sweeping,small,
+    const balancesRead=this.view.read||!failed.some((what)=>what==="balance"||what==="incoming"||what==="recoverable");
+    this.view={configured:true,locked:false,...(balancesRead?{read:true as const}:{}),automatic:!!this.saved?.deviceKey,network:adapter.config.network,provider:adapter.config.provider,address,boardingAddress,incoming,balance,recoverable,sweeping,small,...(expiresAt!==undefined?{expiresAt}:{}),
       error:failed.length?`Could not read the ${failed.join(", ")} from the Ark provider. Last values may be stale.`:undefined};
     this.changed();
     if(this.adapter)this.timer=setTimeout(()=>void this.refresh(),10000);

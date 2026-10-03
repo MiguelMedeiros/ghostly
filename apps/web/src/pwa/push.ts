@@ -1,6 +1,6 @@
 import type { VapidKeys } from "@ghostly/core";
 import { pushScope } from "../sw/policy";
-import { clearWakeEntries, writeWakeEntries, type WakeEntry, type WakeText } from "../sw/wakeStore";
+import { clearWakeEntries, writeWakeEntries, writeWakeText, type WakeEntry, type WakeText } from "../sw/wakeStore";
 
 /*
  * The page's side of wake-up push (WISP 401 § Wake-up push): this profile's push subscription, made on a worker
@@ -18,7 +18,7 @@ export interface PushSubscriptionKeys {
 const SCRIPT = "/sw.js";
 
 function workers(): ServiceWorkerContainer | null {
-  return "serviceWorker" in navigator && window.isSecureContext ? navigator.serviceWorker : null;
+  try { return "serviceWorker" in navigator && window.isSecureContext ? navigator.serviceWorker ?? null : null; } catch { return null; }
 }
 
 /**
@@ -60,7 +60,7 @@ function keysOf(subscription: PushSubscription): PushSubscriptionKeys {
  * Subscribes this profile with its VAPID key (asking for notifications first: a push must show one). Throws with
  * a sentence to show when the person refuses or the browser cannot.
  */
-export async function subscribePush(profile: string, vapid: VapidKeys): Promise<PushSubscriptionKeys> {
+export async function subscribePush(profile: string, vapid: Pick<VapidKeys, "publicKey">): Promise<PushSubscriptionKeys> {
   if (!pushSupported()) throw new Error("This browser cannot wake Ghostly while it is closed.");
   const permission = Notification.permission === "granted" ? "granted" : await Notification.requestPermission();
   if (permission !== "granted") throw new Error("Notifications are off for Ghostly in this browser. Allow them, then try again.");
@@ -91,4 +91,9 @@ export async function unsubscribePush(profile: string): Promise<void> {
 /** The worker's table for this profile: which chat each token names, its mute, and the words to show. */
 export function syncWakeTable(profile: string, entries: readonly WakeEntry[], text: WakeText): Promise<void> {
   return writeWakeEntries(profile, entries, text);
+}
+
+/** The words to show and where the device state is, the tokens left as they are (a standby's page, WISP 06). */
+export function syncWakeText(profile: string, text: WakeText): Promise<void> {
+  return writeWakeText(profile, text);
 }

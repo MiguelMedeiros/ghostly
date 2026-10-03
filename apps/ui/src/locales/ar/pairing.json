@@ -2,7 +2,7 @@
   "attempt": "المحاولة {{n}}",
   "contact": "جهة اتصالك",
   "done": "تمّت",
-  "elapsed": "{{time}} في هذه الخطوة",
+  "elapsed": "{{time}} منذ بدء الاقتران",
   "indicator": "الاقتران · {{stage}}",
   "newInvite": "اطلب دعوة جديدة من جهة اتصالك.",
   "onDht": {

@@ -223,7 +223,7 @@ describe("a community's door", { timeout: 120_000 }, () => {
   it("in a group's first minute, a member that just became a hub leaves the knock to the first hub", async () => {
     // The first hub, alone in the beacon, reads it only when it republishes: for half a minute it does not know that
     // the first member let in became a hub. That member used to count both of them at the door and, with the lower
-    // key, answer the next knock too: two hubs on one entry session, and nobody got in for minutes.
+    // key, answer the next knock too: two hubs on one entry session (in this world, nobody gets in through either).
     let lower = 0;
     for (let run = 0; run < 40 && lower < 3; run++) {
       const world = new CommunityWorld(undefined, RELAY_NETWORK);

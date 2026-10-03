@@ -9,6 +9,12 @@
     "reason": "{{reason}}.",
     "retryAt": "Tentando de novo por volta das {{time}}."
   },
+  "clockOff": {
+    "hint": "O relógio deste dispositivo parece estar errado em cerca de {{amount}}. As conversas podem demorar a conectar.",
+    "infoAhead": "A hora deste dispositivo está cerca de {{amount}} adiantada em relação ao que os relays e os dispositivos dos seus contatos dizem. O Ghostly data o que envia por este relógio, e os outros apps recusam ou atrasam o que tem data muito distante da hora deles: conversas e grupos podem demorar a conectar, chamadas podem não tocar, e um app que não foi atualizado pode não conectar de jeito nenhum. Ative a data e hora automáticas nos ajustes deste dispositivo. Este aviso some quando o relógio voltar a concordar. Ele precisa de várias fontes que concordem, nunca de um contato só.",
+    "infoBehind": "A hora deste dispositivo está cerca de {{amount}} atrasada em relação ao que os relays e os dispositivos dos seus contatos dizem. O Ghostly data o que envia por este relógio, e os outros apps recusam ou atrasam o que tem data muito distante da hora deles: conversas e grupos podem demorar a conectar, chamadas podem não tocar, e um app que não foi atualizado pode não conectar de jeito nenhum. Ative a data e hora automáticas nos ajustes deste dispositivo. Este aviso some quando o relógio voltar a concordar. Ele precisa de várias fontes que concordem, nunca de um contato só.",
+    "title": "Relógio do dispositivo"
+  },
   "detail": {
     "noneLive": "Nenhuma direta",
     "notLiveFor": "Sem conexão por",

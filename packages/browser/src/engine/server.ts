@@ -2,7 +2,9 @@ import { parseCallSignal } from "@ghostly/core";
 import type { MessageChanges } from "../shared/messageChanges";
 import type { EngineEvent, RpcRequest, RpcResponse } from "../shared/rpc";
 import type { StoredMessage } from "../shared/types";
-import { GhostlyNode, type NodeOptions } from "./node";
+import { profileOpenFailure } from "../shared/idb";
+import type { PeerServer } from "../devices/linkOnly";
+import { GhostlyNode, LIMITED_MODE_ERROR, LIMITED_MODE_METHODS, type NodeOptions } from "./node";
 
 /**
  * The peer plus what it takes to serve UI clients: answer their calls, and
@@ -13,7 +15,9 @@ export interface EngineClientSink {
   post(message: EngineEvent | RpcResponse): void;
 }
 
-export class EngineServer {
+export class EngineServer implements PeerServer {
+  /** The whole engine: never made on a device that is not the active one (`devices/peer.ts` decides, WISP 06 § The gate). */
+  readonly gated = false;
   readonly node: GhostlyNode;
   readonly ready: Promise<void>;
   private readonly clients = new Set<EngineClientSink>();
@@ -42,10 +46,14 @@ export class EngineServer {
           else this.offers.delete(linkId);
           this.broadcast({ kind: "call-signal", linkId, signal });
         },
+        // Another device took the turn (WISP 06): the pages show the standby screen and start again into the gate.
+        onDeviceGate: (gate) => this.broadcast({ kind: "device-gate", gate }),
       },
       options,
     );
     this.ready = this.node.start();
+    // A start that fails is told to each client as it attaches; nothing else may be left to report it as unhandled.
+    this.ready.catch(() => {});
   }
 
   attach(client: EngineClientSink): void {
@@ -66,10 +74,18 @@ export class EngineServer {
           this.histories.get(client)?.add(link.id);
         });
       }
+    }, (error: unknown) => {
+      // The peer never started (the profile's database did not open): the client is told why, so the app says so
+      // instead of showing a chat list that looks alive. Before, this was dropped here and nothing was said.
+      this.post(client, { kind: "start-failed", failure: profileOpenFailure(error) });
     }).catch(() => {
-      // The client went away mid-snapshot (dropped, as broadcast does), or the peer never started (every call says so).
+      // The client went away mid-snapshot (dropped, as broadcast does).
       this.clients.delete(client);
     });
+  }
+
+  stop(): Promise<void> {
+    return this.node.shutdown();
   }
 
   detach(client: EngineClientSink): void {
@@ -87,6 +103,8 @@ export class EngineServer {
       await this.ready;
       const method = this.node[request.method] as (params: unknown) => unknown;
       if (typeof method !== "function") throw new Error(`Unknown method: ${request.method}`);
+      // Limited mode (WISP 06): only what reads history, writes messages and changes settings.
+      if (this.node.limited && !LIMITED_MODE_METHODS.has(String(request.method))) throw new Error(LIMITED_MODE_ERROR);
       response.result = await method.call(this.node, request.params);
     } catch (error) {
       response.error = error instanceof Error ? error.message : String(error);

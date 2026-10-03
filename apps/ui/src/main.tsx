@@ -6,6 +6,12 @@ import { setBrowserHost } from "@ghostly/browser/host";
 import { becomeThePeer } from "@ghostly/browser/inPageHost";
 import { startSessionSync } from "@ghostly/browser/platform/sync";
 import { setDatabaseName } from "@ghostly/browser/shared/idb";
+import { openDeviceGate } from "@ghostly/browser/devices/gate";
+import { setDeviceMirror } from "@ghostly/browser/devices/store";
+import { setHandoffProfileHost } from "@ghostly/browser/devices/handoffHost";
+import { handoffProfileHost } from "./lib/handoffProfile";
+import { desktopDeviceMirror } from "./desktop/deviceMirror";
+import { isDesktopApp } from "./lib/externalLink";
 import { Root } from "./Root";
 import { createDesktopHost } from "./desktop/host";
 import { nativeCallSupport } from "./desktop/nativeCalls";
@@ -39,9 +45,18 @@ async function boot() {
     root.render(<p lang="en" style={{ padding: 24, font: "15px system-ui" }}>Ghostly is already running with this profile.</p>),
   );
 
-  const host = createDesktopHost(await getVersion().catch(() => "0.0.0"), await nativeCallSupport());
+  // The device state, before anything of the profile starts (WISP 06 § The gate). Desktop keeps it twice, in the
+  // WebView's database and in a file Rust fsyncs, and takes the stricter of the two. A profile that never enrolled a
+  // device is `single` and goes on exactly as before; on a standby the host starts device-link-only mode.
+  if (isDesktopApp()) setDeviceMirror(desktopDeviceMirror(invoke));
+  const gate = await openDeviceGate();
+
+  const version = await getVersion().catch(() => "0.0.0");
+  // What a handoff reads and writes of a profile's storage (WISP 06 § The handoff), before the host starts the engine.
+  setHandoffProfileHost(handoffProfileHost(version, "desktop"));
+  const host = createDesktopHost(version, await nativeCallSupport());
   setBrowserHost(host);
-  startSessionSync();
+  if (gate.full) startSessionSync();
   addEventListener("pagehide", () => host.announceDeparture());
   // The app is exiting (apps/desktop's main.rs `on_run_event`): contacts hear it now, in the moment it waits for this.
   addEventListener("ghostly-departing", () => host.announceDeparture());

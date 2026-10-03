@@ -1,0 +1,1 @@
+A restore marks the Cashu proofs it brings back, and the wallet asks each mint once which of them are still unspent, dropping the ones spent since the backup was made. Before, a restored profile kept showing the backup's balance, and its payments failed at the mint.

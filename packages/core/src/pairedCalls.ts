@@ -1,4 +1,4 @@
-import { CALL_SIGNAL_MAX_AGE_MS, parseCallSignal } from "./callSignal";
+import { CALL_SIGNAL_MAX_AGE_MS, heardCallSignal, parseCallSignal } from "./callSignal";
 
 /**
  * Call signaling on a paired session (`calls/1`, WISP 601): the same compact signals a compatibility chat
@@ -17,11 +17,15 @@ export const MAX_PAIRED_CALL_SIGNAL = 8192;
 
 export interface PairedCallFrame { t: typeof PAIRED_CALL_FRAME; s: string }
 
-/** The signal a `paired-call` frame carries, or null when it is not a fresh, well-formed one. */
+/**
+ * The signal a `paired-call` frame carries, or null when it is not a well-formed one. It came on a live session, now:
+ * that is when it was heard (`heardCallSignal`), whatever time its sender's clock gave it.
+ */
 export function parsePairedCallFrame(frame: Record<string, unknown>, now = Date.now()): string | null {
   const signal = frame.s;
   if (typeof signal !== "string" || signal.length > MAX_PAIRED_CALL_SIGNAL) return null;
-  return parseCallSignal(signal, now) ? signal : null;
+  const heard = heardCallSignal(signal, now);
+  return parseCallSignal(heard, now) ? heard : null;
 }
 
 function signalKind(signal: string): unknown {
@@ -37,8 +41,8 @@ export class PairedCalls {
   private latest: { signal: string; at: number } | null = null;
   /** When this side last said anything about a call, a clear included. */
   private saidAt = 0;
-  /** The contact's latest signal on a session: its kind, and when it came. */
-  private peer: { kind: unknown; at: number } | null = null;
+  /** The contact's latest signal on a session: its kind, when it came, and the time its sender gave it. */
+  private peer: { kind: unknown; at: number; ts: number } | null = null;
 
   constructor(private readonly now: () => number = Date.now) {}
 
@@ -51,9 +55,18 @@ export class PairedCalls {
     return { t: PAIRED_CALL_FRAME, s: signal };
   }
 
-  /** A signal the contact sent (one `parsePairedCallFrame` took). */
-  heard(signal: string): void {
-    this.peer = { kind: signalKind(signal), at: this.now() };
+  /**
+   * A signal the contact sent (one `parsePairedCallFrame` took). False when it is not newer than the last one heard
+   * from the contact on this chat: the contact's app sends its latest signal again on each new session while it is
+   * fresh (`pending`), and one already heard is not news. Handed on again, an answer to an earlier call that names no
+   * offer (an app up to 1.0.2) was taken for the call placed since, whose connection it does not fit.
+   */
+  heard(signal: string): boolean {
+    let ts = NaN;
+    try { ts = Number((JSON.parse(signal) as { ts?: unknown }).ts); } catch { /* not a signal the parser took */ }
+    if (!Number.isFinite(ts) || (this.peer && ts <= this.peer.ts)) return false;
+    this.peer = { kind: signalKind(signal), at: this.now(), ts };
+    return true;
   }
 
   /**
@@ -64,7 +77,8 @@ export class PairedCalls {
   get on(): boolean {
     const own = { kind: this.latest ? signalKind(this.latest.signal) : "h", at: this.saidAt };
     const last = this.peer && this.peer.at > own.at ? this.peer : own;
-    if (last.kind === "a" || last.kind === "v") return true;
+    // A restart offer (`r`) is only sent on a call that is on.
+    if (last.kind === "a" || last.kind === "v" || last.kind === "r") return true;
     return last.kind === "o" && this.now() - last.at <= CALL_SIGNAL_MAX_AGE_MS;
   }
 
@@ -77,7 +91,7 @@ export class PairedCalls {
     if (!this.latest) return null;
     let said: { t?: unknown; ts?: unknown };
     try { said = JSON.parse(this.latest.signal); } catch { return null; }
-    if (said.t !== "o" && said.t !== "a" && said.t !== "v") return null;
+    if (said.t !== "o" && said.t !== "a" && said.t !== "v" && said.t !== "r") return null;
     const ts = Math.max(this.now(), typeof said.ts === "number" ? said.ts + 1 : 0);
     return this.set(JSON.stringify({ t: "h", ts }));
   }

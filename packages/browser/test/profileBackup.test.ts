@@ -3,8 +3,9 @@ import { beforeEach, expect, it, vi } from "vitest";
 import { STORES, openDb, transact, wrap } from "../src/shared/idb";
 import { setStorageProfile } from "../../../apps/ui/src/lib/storage";
 import { listProfiles } from "../../../apps/ui/src/lib/profiles";
-import { createProfileBackup, restoreProfileBackup } from "../../../apps/ui/src/lib/profileBackup";
-// covers: backup.profile.file, backup.passphrase-rules, backup.envelope, profiles.delete, profiles.lock
+import { createProfileBackup, restoreHandoffBundle, restoreProfileBackup, writeProfileBackup } from "../../../apps/ui/src/lib/profileBackup";
+import { memorySink } from "../src/backup/stream";
+// covers: backup.profile.file, backup.passphrase-rules, backup.envelope, profiles.delete, profiles.lock, devices.push
 
 class FakeStorage {
   entries = new Map<string, string>();
@@ -21,6 +22,9 @@ beforeEach(() => {
   Object.defineProperty(globalThis, "localStorage", { value: storage, configurable: true });
   Object.defineProperty(globalThis, "window", { value: { dispatchEvent: vi.fn(), location: { hash: "", reload: vi.fn() } }, configurable: true });
 });
+
+/** A bundle's bytes as text, to look for what must not be readable in it. */
+const textOf = (bundle: Uint8Array) => new TextDecoder("latin1").decode(bundle);
 
 async function makeArkDatabase(walletId: string) {
   const request = indexedDB.open(`ghostly-ark-${walletId}`, 3);
@@ -50,9 +54,11 @@ it("backs up a whole profile and restores it as a new one, wallets relocated and
   });
 
   const bundle = await createProfileBackup("a long backup passphrase");
-  expect(bundle).not.toContain("top-secret");
-  expect(bundle, "the peer's copy of the storage credentials stays out too").not.toContain("peer-side-secret");
-  expect(bundle).not.toContain("hello");
+  expect(textOf(bundle).split("\n")[0], "the clear header says only how to open it").toMatch(/^\{"format":"ghostly-backup","version":2,"protection":"passphrase","kdf":\{"name":"PBKDF2-SHA256","iterations":600000,"salt":"[\w-]{22}"\},"cipher":\{"name":"AES-256-GCM","nonce":"[\w-]{10}"\}\}$/);
+  expect(textOf(bundle)).not.toContain("top-secret");
+  expect(textOf(bundle), "the peer's copy of the storage credentials stays out too").not.toContain("peer-side-secret");
+  expect(textOf(bundle)).not.toContain("hello");
+  expect(textOf(bundle)).not.toContain("link1");
   await expect(restoreProfileBackup(bundle, "not the passphrase")).rejects.toThrow("Wrong passphrase");
 
   const restored = await restoreProfileBackup(bundle, "a long backup passphrase");
@@ -73,7 +79,35 @@ it("backs up a whole profile and restores it as a new one, wallets relocated and
   expect(storage.getItem(`ghostly_${restored.id}_0123456789abcdef0123456789abcdef`)).toContain("peerPubKeyB64");
 });
 
-it("files kept in file storage travel in the bundle up to 16 MiB, whole; larger ones and the pieces stay out", async () => {
+it("the push subscription moves in a handoff (it names its device), and stays out of a backup", async () => {
+  await openDb();
+  const wake = { endpoint: "https://fcm.googleapis.com/fcm/send/phone", p256dh: "p", auth: "a", vapid: { publicKey: "v", privateKey: "k" }, device: "P".repeat(43) };
+  await transact([STORES.settings], (s) => { s[STORES.settings].put({ nick: "Miguel", wake }, "settings"); });
+  const settingsIn = async (ns: string) => ((await readAll(`ghostly_${ns}`, STORES.settings)) as { nick?: string; wake?: unknown }[]).find((row) => row.nick === "Miguel");
+  const sink = memorySink();
+  await writeProfileBackup(sink, { passphrase: null, handoff: true });
+  await restoreHandoffBundle(sink.bytes(), "stagedhandoff");
+  expect((await settingsIn("stagedhandoff"))?.wake).toEqual(wake);
+  const restored = await restoreProfileBackup(await createProfileBackup("a long backup passphrase"), "a long backup passphrase");
+  expect((await settingsIn(restored.id))?.wake).toBeUndefined();
+});
+
+it("ecash comes back marked as a copy to check with its mint; ecash a payment holds is left to that payment", async () => {
+  await openDb();
+  const proof = (secret: string, extra: Record<string, unknown> = {}) => ({ mint: "https://mint.example", id: "009a1f293253e41e", amount: 64, secret, C: "02ab", ...extra });
+  await transact([STORES.proofs], (s) => {
+    s[STORES.proofs].put(proof("free"));
+    s[STORES.proofs].put(proof("in-a-melt", { reserved: true }));
+  });
+  const restored = await restoreProfileBackup(await createProfileBackup("a long backup passphrase"), "a long backup passphrase");
+  const proofs = await readAll(`ghostly_${restored.id}`, STORES.proofs) as { secret: string; unchecked?: boolean; reserved?: boolean }[];
+  expect(proofs.find((p) => p.secret === "free")).toMatchObject({ amount: 64, unchecked: true });
+  expect(proofs.find((p) => p.secret === "in-a-melt")).toEqual(proof("in-a-melt", { reserved: true }));
+  // The profile it was copied from is as it was.
+  expect((await readAll("ghostly", STORES.proofs) as { unchecked?: boolean }[]).some((p) => p.unchecked)).toBe(false);
+});
+
+it("a file kept in file storage travels in the bundle; one whose bytes are not all here keeps its record only", async () => {
   const { fileBytes } = await import("../src/shared/fileBytes");
   const { SMALL_FILE_BYTES } = await import("../src/shared/fileBytes");
   await openDb();
@@ -82,7 +116,7 @@ it("files kept in file storage travel in the bundle up to 16 MiB, whole; larger 
   await bytes.close("link2-in-small");
   await transact([STORES.files], (s) => {
     s[STORES.files].put({ id: "link2-in-small", linkId: "link2", bytes: bytes.kind, createdAt: 1, metadata: { name: "a.png", size: 3, mime: "image/png", timestamp: 1 } });
-    // Never read: its size alone keeps it out.
+    // A transfer that never finished: no bytes of it are on this device.
     s[STORES.files].put({ id: "link2-in-large", linkId: "link2", bytes: bytes.kind, createdAt: 1, metadata: { name: "b.bin", size: SMALL_FILE_BYTES + 1, mime: "", timestamp: 1 } });
   });
   const restored = await restoreProfileBackup(await createProfileBackup("a long backup passphrase"), "a long backup passphrase");
@@ -114,7 +148,7 @@ it("deletes another profile completely, after an optional backup of it, and neve
 
   expect(await profileSummary(work.id)).toEqual({ chats: 1, cashuSats: 64, wallets: ["Ark"], services: 1 });
   const bundle = await createProfileBackup("a long backup passphrase", work.id);
-  expect(bundle).toContain("ghostly-backup");
+  expect(textOf(bundle)).toContain("ghostly-backup");
 
   await expect(deleteProfile("")).rejects.toThrow("first profile");
   await deleteProfile(work.id);
@@ -194,7 +228,7 @@ it("a locked profile is backed up or deleted from another one only with its lock
 
   await expect(createProfileBackup("a long backup passphrase", locked.id)).rejects.toThrow("lock password");
   await expect(createProfileBackup("a long backup passphrase", locked.id, "wrong")).rejects.toThrow("lock password");
-  expect(await createProfileBackup("a long backup passphrase", locked.id, "hunter2 hunter2")).toContain("ghostly-backup");
+  expect(textOf(await createProfileBackup("a long backup passphrase", locked.id, "hunter2 hunter2"))).toContain("ghostly-backup");
   await expect(deleteProfile(locked.id, "wrong")).rejects.toThrow("lock password");
   expect(listProfiles().map((p) => p.id)).toContain(locked.id);
   await deleteProfile(locked.id, "hunter2 hunter2");

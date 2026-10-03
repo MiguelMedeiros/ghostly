@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { BACKGROUND_REQUESTS_PER_MINUTE, BACKGROUND_WHILE_SIGNALING, CHAT_RESERVE, SIGNALING_ALLOWANCE_SHARE, DiscoveryBudgetError, GROUP_BURST_MS, GROUP_BURST_ONE_LINK, FRESH_READ_MS, REQUESTS_PER_MINUTE, PKARR_FUTURE_SKEW_MS, RelayTransport, newerPacket, parseRelayPayload, SIGNALING_WINDOW_MS, WRITE_FIRST_MS, createIdentity, createRelayPayload, isDiscoveryBudgetError, withRequestOptions } from "../src";
+import { BACKGROUND_REQUESTS_PER_MINUTE, BACKGROUND_WHILE_SIGNALING, CHAT_RESERVE, SIGNALING_ALLOWANCE_SHARE, DiscoveryBudgetError, GROUP_BURST_MS, GROUP_BURST_ONE_LINK, FRESH_READ_MS, REQUESTS_PER_MINUTE, PKARR_FUTURE_SKEW_MS, RelayTransport, newerPacket, parseRelayPayload, SIGNALING_WINDOW_MS, GROUP_RATION_WINDOW_MS, WATCH_SHARE, WRITE_FIRST_MS, createIdentity, createRelayPayload, isDiscoveryBudgetError, withRequestOptions } from "../src";
 import type { PkarrRequestOptions, PkarrTransport } from "../src/transport";
 // covers: core.relay-client
 
@@ -883,5 +883,117 @@ describe("relay transport: a chat's offer or answer goes over a spent minute", (
     expect(await went(write(relay))).toBe(true);
     expect(await went(write(relay))).toBe(false);
     expect(log).toHaveLength(6);
+  });
+});
+
+describe("relay transport: reads for contacts that went away take a share of the minute", () => {
+  /** Two relays; the requests each key's reads and writes made, and when. */
+  function watching(count: number) {
+    const peers = Array.from({ length: count }, () => createIdentity());
+    const log: { key: string; method: string; host: string; at: number }[] = [];
+    const relay = new RelayTransport({ freshReadMs: 0, relays: ["https://a.test", "https://b.test"], fetch: (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(String(input)), key = url.pathname.slice(1);
+      log.push({ key, method: init?.method ?? "GET", host: url.host, at: Date.now() });
+      if (init?.method === "PUT") return new Response(null, { status: 204 });
+      const peer = peers.find((p) => p.pubKeyZ32 === key);
+      return peer ? new Response(createRelayPayload(peer, [{ label: "_ts", value: "1" }], 3n) as BodyInit) : new Response(null, { status: 404 });
+    }) as typeof fetch });
+    const group = withRequestOptions(relay, { group: true });
+    /** An edge looking fast for its member that left (`LinkSession.watchPeer`), as a link reads: a read the budget holds back answers from memory. */
+    const watch = (peer: ReturnType<typeof createIdentity>) => group.resolve(peer.pubKeyZ32, { urgent: true, watch: true }).catch(() => {});
+    const reads = (key: string) => log.filter((r) => r.key === key && r.method === "GET").map((r) => r.at);
+    return { peers, log, group, watch, reads };
+  }
+  it("leaves the rest of the minute to the member that comes back, and reads each one that left in turn", async () => {
+    // Bug hunt r12 (2026-10-02), measured again on 2026-10-03 with daemons on local relays: a member alone in a private
+    // group whose three other members left at once watched each of them every 2 s. Those reads (with the admin's knock
+    // poll) spent both relays' minute, so when one member came back 5 s later, its offer was read and answered only when
+    // the minute freed: its edge came up 25 to 37 s after it was back.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const { peers, log, group, watch, reads } = watching(3);
+      const start = Date.now();
+      const back = createIdentity(), returning = createIdentity();
+      let answered = false, readBack = false;
+      for (let t = 0; t < 60_000; t += 2_000) {
+        for (const [i, peer] of peers.entries()) { vi.setSystemTime(start + t + i * 5); await watch(peer); }
+        if (t === 30_000) {
+          // One of them is back: its edge reads its offer, and publishes the answer.
+          vi.setSystemTime(start + t + 100);
+          const before = log.length;
+          await group.resolve(back.pubKeyZ32, { urgent: true }).catch(() => {});
+          readBack = log.length > before;
+          answered = await group.publish(returning, [{ label: "_ts", value: "1" }], { signal: true }).then(() => true, () => false);
+        }
+      }
+      // On dev the three watches had taken the whole minute of both relays: the read and the answer waited for it to free.
+      expect(readBack).toBe(true);
+      expect(answered).toBe(true);
+      // Watch reads stay within their share on each relay (a third of it), spread over the minute…
+      const share = Math.ceil(REQUESTS_PER_MINUTE * WATCH_SHARE * GROUP_RATION_WINDOW_MS / 60_000);
+      for (const host of ["a.test", "b.test"]) {
+        const watched = log.filter((r) => r.host === host && r.method === "GET" && peers.some((p) => p.pubKeyZ32 === r.key)).map((r) => r.at);
+        for (const at of watched) expect(watched.filter((other) => other >= at && other < at + GROUP_RATION_WINDOW_MS).length).toBeLessThanOrEqual(share);
+      }
+      // …and each member that left is still read every few seconds: none waits behind the others.
+      for (const peer of peers) {
+        const at = reads(peer.pubKeyZ32);
+        const gaps = at.slice(1).map((t, i) => t - at[i]);
+        expect(Math.max(...gaps), `a member read ${at.length} times`).toBeLessThanOrEqual(12_000);
+      }
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("reads one contact that went away nearly at its own pace", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const { peers, watch, reads } = watching(1);
+      const start = Date.now();
+      for (let t = 0; t < 60_000; t += 2_000) { vi.setSystemTime(start + t); await watch(peers[0]); }
+      const at = reads(peers[0].pubKeyZ32);
+      // Every 2 s on its own; the share (10 a relay) reads it every 3 s.
+      expect(at.length).toBeGreaterThanOrEqual(20);
+      expect(Math.max(...at.slice(1).map((t, i) => t - at[i]))).toBeLessThanOrEqual(4_000);
+    } finally { vi.useRealTimers(); }
+  });
+});
+
+describe("relay transport: a group's reads spread over the minute once they fill it", () => {
+  it("reads every key every few seconds under a load past the minute, and the member back within seconds", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const keys = Array.from({ length: 5 }, () => createIdentity());
+      const [knock, left1, left2, left3, back] = keys;
+      const log: { key: string; method: string; host: string; at: number }[] = [];
+      const relay = new RelayTransport({ freshReadMs: 0, relays: ["https://a.test", "https://b.test"], fetch: (async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = new URL(String(input)), key = url.pathname.slice(1);
+        log.push({ key, method: init?.method ?? "GET", host: url.host, at: Date.now() });
+        if (init?.method === "PUT") return new Response(null, { status: 204 });
+        return new Response(createRelayPayload(keys.find((k) => k.pubKeyZ32 === key) ?? knock, [{ label: "_ts", value: "1" }], 3n) as BodyInit);
+      }) as typeof fetch });
+      const group = withRequestOptions(relay, { group: true });
+      const read = (key: (typeof keys)[number], options: PkarrRequestOptions) => group.resolve(key.pubKeyZ32, options).catch(() => {});
+      const start = Date.now();
+      // A private group's admin: its knock poll every 2 s (its link was handed out a minute ago), its three edges
+      // watching the members that left, and its edges' presence going out every 4 s. More than the minute.
+      for (let t = 0; t < 180_000; t += 1_000) {
+        vi.setSystemTime(start + t);
+        if (t % 2_000 === 0) {
+          await read(knock, {});
+          for (const left of [left1, left2, left3]) await read(left, { urgent: true, watch: true });
+          if (t >= 120_000) await read(back, { urgent: true });
+        }
+        if (t % 4_000 === 0) await group.publish(createIdentity(), [{ label: "_ts", value: "1" }]).catch(() => {});
+      }
+      const reads = (key: (typeof keys)[number]) => log.filter((r) => r.key === key.pubKeyZ32 && r.method === "GET").map((r) => r.at - start);
+      const longestGap = (at: number[]) => Math.max(...at.slice(1).map((t, i) => t - at[i]));
+      // Once the minute is full, a relay is never silent long: on dev the minute went in 25 to 35 s and nothing freed
+      // for 30 s more, so the member back was read only then (a 32 s silence on each relay here).
+      for (const host of ["a.test", "b.test"]) expect(longestGap(log.filter((r) => r.host === host && r.at - start >= 60_000).map((r) => r.at - start))).toBeLessThanOrEqual(8_000);
+      // Every key is read every few seconds, in turn (34 to 36 s gaps on dev).
+      for (const key of [knock, left1, left2, left3]) expect(longestGap(reads(key).filter((t) => t >= 60_000))).toBeLessThanOrEqual(15_000);
+      // The member back has its first read within seconds.
+      expect(reads(back)[0] - 120_000).toBeLessThanOrEqual(6_000);
+    } finally { vi.useRealTimers(); }
   });
 });

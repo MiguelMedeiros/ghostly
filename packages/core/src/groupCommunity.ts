@@ -7,7 +7,7 @@ import {
   confirmationMatches, confirmationTag, decryptText, encryptText, epochKeys, newEpochSecret, openPair, openSecret, sealPair, sealSecret, sha256Hex,
   type SealedSecret,
 } from "./groupCrypto";
-import { GROUP_ID, MEMBER_KEY, rosterAdmin, rosterHas, sortRoster, type GroupRole, type Roster } from "./groupCommits";
+import { GROUP_ADMIN_OFF_ERROR, GROUP_ID, OWN_FRAME_LIMIT, MEMBER_KEY, rosterAdmin, rosterHas, sortRoster, type GroupRole, type Roster } from "./groupCommits";
 import { mentionsBytes, validMentions, wireMentions, type GroupMention } from "./groupMentions";
 import { groupReplyAuthor, readReply, wireReply, type WireReply } from "./replies";
 import { readForwarded } from "./forwards";
@@ -283,6 +283,17 @@ export interface CommunityState {
   nicks: Record<string, string>;
   /** Recent frames from everyone (mine included), oldest first. */
   store: CommunityMessageFrame[];
+  /**
+   * Frames of mine no edge took when I said them (none was up), as `e:h16:n`, oldest first: the first member I reach
+   * may have joined after I sealed them, and carries them all the same (see `receiveSync`). Absent in older states.
+   */
+  unheard?: string[];
+  /**
+   * Frames of mine no edge took when I said them, kept until they were looked at for saying again under a newer
+   * commit (`resealBehind`), as `e:h16:n`, oldest first. Unlike `unheard`, handing one on does not take it out.
+   * Absent in older states.
+   */
+  alone?: string[];
   /** Leave requests waiting for a member to commit them. */
   pendingLeaves: { s: string; ls: string }[];
   /** The group's metadata (its picture), as the admin last signed it and I accepted it. */
@@ -300,8 +311,8 @@ export interface CommunityIncomingPair { id: string; sender: string; epoch: numb
 
 export interface CommunitySessionHooks {
   save(state: CommunityState): Promise<void>;
-  /** To everyone this member has an edge to (hubs relay it on). */
-  broadcast(frame: CommunityFrame): void;
+  /** To everyone this member has an edge to (hubs relay it on). Returns how many edges took it; nothing when the host does not say. */
+  broadcast(frame: CommunityFrame): number | void;
   /** To the member at the other end of an edge, if there is one. */
   direct(to: string, frame: CommunityFrame): void;
   /** To one member, wherever they are: over their edge if I have it, else to the hubs with `to`. */
@@ -318,6 +329,19 @@ export interface CommunitySessionHooks {
   relay?(frame: CommunityFrame): void;
   /** The engine's clock, for how often a member is asked for what I lack (defaults to Date.now). */
   clock?(): number;
+  /**
+   * The lowest sequence number this member sends at, under any head (WISP 06 § Raised counters): 0 for a profile that
+   * never took over or was never restored. A copy started from older state sends above every number the copy it
+   * replaced may have used, so the other members do not drop its frames as already seen. The beacon packs the number
+   * in 32 bits, so a floor stays well under 2^32.
+   */
+  seqFloor?(): number;
+  /**
+   * Whether this device may sign commits for the group (WISP 06 § Forced takeover): false after a forced takeover or a
+   * restore, until the person turns on "Manage groups from this device" there. Then no commit is signed: no admission
+   * at the door, no leave committed for another member, no admin change. Absent: true.
+   */
+  adminWork?(): boolean;
 }
 
 const MAX_TEXT_BOX = Math.ceil((COMMUNITY_LIMITS.textBytes + 256 + 16) * 4 / 3) + 4;
@@ -331,6 +355,27 @@ const isObject = (v: unknown): v is Record<string, unknown> => !!v && typeof v =
 const messageSigned = (f: Omit<CommunityMessageFrame, "sig" | "t" | "v">) => utf8Encode(JSON.stringify(["ghostly-group/2 msg", f.g, f.e, f.h, f.s, f.n, f.ts, f.nn, f.c]));
 export const communityMessageId = (sender: string, epoch: number, h: string, seq: number) => `${sender}:${epoch}:${h}:${seq}`;
 const seenKey = (e: number, h: string) => `${e}:${h}`;
+/** One of a member's frames, among its own. */
+const frameKey = (f: { e: number; h: string; n: number }) => `${f.e}:${f.h}:${f.n}`;
+/** Frames of mine remembered as not heard by anyone yet. */
+const UNHEARD_KEPT = 64;
+/**
+ * A frame of mine said with no edge up is said again for the members let in before it (`resealBehind`) once the chain
+ * has not moved for this long: a catch-up brings commits one by one, and a frame said again at the first of them would
+ * still miss the members let in by the next.
+ */
+const RESEAL_SETTLED_MS = 5_000;
+/**
+ * Where a frame said again under a newer commit was first said (`o`, WISP 9xx § Messages and catch-up): its commit's
+ * epoch and short hash and its number there. Never the frame's own place, nor a later epoch than its own.
+ */
+function readOriginal(o: unknown, frame: { e: number; h: string }): { e: number; h: string; n: number } | null {
+  if (!o || typeof o !== "object" || Array.isArray(o)) return null;
+  const { e, h, n } = o as Record<string, unknown>;
+  if (!Number.isSafeInteger(e) || (e as number) < 0 || (e as number) > frame.e || typeof h !== "string" || !/^[a-f0-9]{16}$/.test(h) || !Number.isSafeInteger(n) || (n as number) < 0) return null;
+  if (e === frame.e && h === frame.h) return null;
+  return { e: e as number, h, n: n as number };
+}
 /** Whether a frame, by its identity, is one this state took already (or is too old to be taken again). */
 function seenIn(seen: CommunityState["seen"], f: { s: string; e: number; h: string; n: number }): boolean {
   const entry = seen[f.s]?.[seenKey(f.e, f.h)];
@@ -387,6 +432,10 @@ export class CommunitySession {
   /** Syncs answered per member, a few a minute (`COMMUNITY_LIMITS.syncAnswers`). In memory only. */
   private syncsAnswered = new Map<string, RateWindow>();
   private queue = Promise.resolve();
+  /** When the commit I follow last changed (`adopt`), by `hooks.clock`. */
+  private chainMovedAt = 0;
+  /** My frames said again in this run (`e:h16:n`) → the id of the message they first were. In memory only. */
+  private resealedFrom = new Map<string, string>();
   private saveTimer: ReturnType<typeof setTimeout> | undefined;
   /** One metadata frame naming a commit or a secret I do not have yet: tried again when the chain or my secrets move. */
   private pendingMeta: { from: string; frame: unknown } | undefined;
@@ -723,6 +772,7 @@ export class CommunitySession {
   }
 
   private async adopt(tip: string): Promise<void> {
+    this.chainMovedAt = this.hooks.clock?.() ?? Date.now();
     const path = this.pathToMain(tip)!;
     const ancestor = this.mainIndex.get(this.known.get(path[0])!.p)!;
     const dropped = this.state.chain.splice(ancestor + 1);
@@ -813,9 +863,12 @@ export class CommunitySession {
   /** Writes what is waiting to be saved now (before a restart, in tests). */
   async flush(): Promise<void> { if (this.saveTimer) await this.persist(); }
   private requireMember(): void { if (!this.isMember) throw new Error(this.state.statusReason ?? "You are not in this group"); }
+  /** Whether this device may sign commits for the group now (`CommunitySessionHooks.adminWork`). */
+  get adminWork(): boolean { return this.hooks.adminWork?.() !== false; }
   private requireAdmin(): void { this.requireMember(); if (!this.isAdmin) throw new Error("Only the admin can do that"); }
 
   private async commit(kind: CommunityKind, fields: { s?: string; x?: string; ls?: string }, now: number): Promise<{ commit: CommunityCommit; hash: string; secret: Uint8Array }> {
+    if (!this.adminWork) throw new Error(GROUP_ADMIN_OFF_ERROR);
     if (this.state.chain.length >= COMMUNITY_LIMITS.chain) throw new Error("This group has reached its membership history limit. Create a new group.");
     const parent = this.top, parentHash = this.topHash;
     const draftBase = { v: 2 as const, g: this.id, e: parent.e + 1, p: parentHash, k: kind, by: this.myKey, ...fields, ts: now };
@@ -944,7 +997,8 @@ export class CommunitySession {
   /** Commits the leave requests I hold whose members are still in: the engine calls this on hubs. */
   commitPendingLeaves(now = Date.now()): Promise<number> {
     return this.serialize(async () => {
-      if (!this.isMember) return 0;
+      // Admin work off on this device: the requests wait for a member who commits them, or for the person to turn it on.
+      if (!this.isMember || !this.adminWork) return 0;
       let done = 0;
       for (const request of [...this.state.pendingLeaves]) {
         if (!rosterHas(this.roster, request.s) || request.s === this.myKey || request.s === this.admin) { this.state.pendingLeaves = this.state.pendingLeaves.filter(r => r !== request); continue; }
@@ -984,8 +1038,7 @@ export class CommunitySession {
       const sent = await this.sendPayload(() => ({ text: trimmed, ...(named.length ? { m: named } : {}), ...(answers ? { r: answers } : {}), ...(hops ? { fw: hops } : {}), ...(card ? { sc: card } : {}) }), nick, now);
       if ("error" in sent) return sent;
       await this.hooks.message({ id: sent.id, sender: this.myKey, epoch: sent.frame.e, seq: sent.frame.n, timestamp: now, text: trimmed, ...(named.length ? { mentions: named } : {}), ...(answers ? { reply: answers } : {}), ...(hops ? { forwarded: hops } : {}), ...(card ? { card } : {}) });
-      await this.persist();
-      this.hooks.broadcast(sent.frame);
+      await this.say(sent.frame);
       return { id: sent.id };
     });
   }
@@ -1001,8 +1054,7 @@ export class CommunitySession {
       if (!isObject(frame) || utf8Encode(JSON.stringify(frame)).length > COMMUNITY_LIMITS.appBytes) return { error: "Too large for the group" };
       const sent = await this.sendPayload(() => ({ x: frame }), nick, now);
       if ("error" in sent) return sent;
-      await this.persist();
-      this.hooks.broadcast(sent.frame);
+      await this.say(sent.frame);
       return { id: sent.id };
     });
   }
@@ -1027,8 +1079,7 @@ export class CommunitySession {
       if (size(false) > room) return { error: "Too long to edit in this group" };
       const sent = await this.sendPayload(() => ({ x: frame }), size(true) <= room ? nick : undefined, now);
       if ("error" in sent) return sent;
-      await this.persist();
-      this.hooks.broadcast(sent.frame);
+      await this.say(sent.frame);
       return { id: sent.id };
     });
   }
@@ -1047,8 +1098,7 @@ export class CommunitySession {
       if (plain.length > COMMUNITY_LIMITS.appBytes) return { error: "Too large for the group" };
       const sent = await this.sendPayload(header => ({ p: { to, ...sealPair(this.identity.seed, this.myKey, to, plain, pairAad(header, to)) } }), nick, now);
       if ("error" in sent) return sent;
-      await this.persist();
-      this.hooks.broadcast(sent.frame);
+      await this.say(sent.frame);
       return { id: sent.id };
     });
   }
@@ -1058,7 +1108,10 @@ export class CommunitySession {
     const h = this.topHash, secret = this.state.secrets[h];
     if (!secret) return { error: "This epoch's key has not arrived yet. Wait for a member to catch you up." };
     if (this.state.seqH !== h) { this.state.seq = 0; this.state.seqH = h; }
-    const n = this.state.seq++;
+    // Every head starts at the floor, not at 0, and a floor raised under a running head counts at once.
+    const floor = this.hooks.seqFloor?.() ?? 0;
+    const n = Math.max(this.state.seq, Number.isSafeInteger(floor) && floor > 0 ? floor : 0);
+    this.state.seq = n + 1;
     const header = { g: this.id, e: this.epoch, h: shortHash(h), s: this.myKey, n, ts: now };
     const clean = sanitizeNick(nick);
     const payload = JSON.stringify(clean ? { ...body(header), nick: clean } : body(header));
@@ -1070,10 +1123,89 @@ export class CommunitySession {
     return { id: communityMessageId(this.myKey, header.e, header.h, n), frame };
   }
 
+  /**
+   * Saves, then says my frame on every edge. One no edge took (none is up: I just joined, or my app just opened) is
+   * remembered until a member it was written for is handed it: I may be behind on the chain without knowing, and the
+   * first member I reach may be one let in since, who cannot read it but can carry it (`receiveSync`).
+   */
+  private async say(frame: CommunityMessageFrame): Promise<void> {
+    const inStore = new Set(this.state.store.filter(f => f.s === this.myKey).map(frameKey));
+    this.state.unheard = [...(this.state.unheard ?? []).filter(key => inStore.has(key)), frameKey(frame)].slice(-UNHEARD_KEPT);
+    await this.persist();
+    if (this.hooks.broadcast(frame) === 0) {
+      // Said alone: I may be behind on the chain without knowing (`resealBehind`).
+      this.state.alone = [...(this.state.alone ?? []).filter(key => inStore.has(key)), frameKey(frame)].slice(-UNHEARD_KEPT);
+      this.persistSoon();
+      return;
+    }
+    this.state.unheard = this.state.unheard.filter(key => key !== frameKey(frame));
+    this.persistSoon();
+  }
+
   private keep(frame: CommunityMessageFrame): void {
     this.state.store.push(frame);
     let bytes = this.state.store.reduce((sum, f) => sum + f.c.length, 0);
     while (this.state.store.length > COMMUNITY_LIMITS.store || bytes > COMMUNITY_LIMITS.storeBytes) bytes -= this.state.store.shift()!.c.length;
+  }
+
+  /**
+   * My frames sealed under a commit I took for the newest while I was behind (no edge was up, and others were let in
+   * meanwhile): the members let in before I said them could never open them. Once the chain I follow (and its secret)
+   * says so, each is said again under the current commit, with the same content and time and `o` naming the first, so
+   * those who read the first do not show it twice and everyone keeps one id for it (replies, edits, reactions). Once
+   * per frame, when the chain has settled. A payload for one member is sealed to its first frame and cannot be said
+   * again: it stays as it was. The engine calls `reseal` now and then.
+   */
+  reseal(): Promise<void> {
+    if (!this.state.alone?.length) return Promise.resolve();
+    return this.serialize(async () => {
+      const now = this.hooks.clock?.() ?? Date.now();
+      if (this.needsCatchUp || now - this.chainMovedAt < RESEAL_SETTLED_MS) return;
+      await this.resealBehind();
+    });
+  }
+
+  private async resealBehind(): Promise<void> {
+    if (!this.isMember || !this.state.alone?.length || !this.state.secrets[this.topHash]) return;
+    const alone = new Set(this.state.alone);
+    // When each member now in was let in (its last admission), by the admitting member's clock: before my frame, by
+    // mine, it was in the group when I said it. (Someone let in after it is not handed what came before.)
+    const admitted = new Map<string, number>();
+    for (const c of this.state.chain) if (c.k === "add" && c.s) admitted.set(c.s, c.ts);
+    const looked: string[] = [];
+    for (const f of [...this.state.store]) {
+      if (f.s !== this.myKey || !alone.has(frameKey(f))) continue;
+      const found = this.commitByShort(f.e, f.h);
+      // Still the newest I know: nothing says yet whether I was behind.
+      if (!found || found.hash === this.topHash || !this.mainIndex.has(found.hash)) continue;
+      looked.push(frameKey(f));
+      const then = this.rosterAt(found.hash), secret = this.state.secrets[found.hash];
+      if (!then || !secret || !this.roster.some(([key]) => !rosterHas(then, key) && (admitted.get(key) ?? Infinity) <= f.ts)) continue;
+      const plain = decryptText(epochKeys(fromBase64Url(secret), this.id, f.e).message, messageAad(f), f.nn, f.c);
+      let parsed: unknown = null;
+      try { parsed = plain === null ? null : JSON.parse(plain); } catch { /* not a payload to say again */ }
+      if (!isObject(parsed) || isObject(parsed.p)) continue;
+      // Said again once already (I was behind twice): it still names the very first.
+      const o = readOriginal(parsed.o, f) ?? { e: f.e, h: f.h, n: f.n };
+      const { nick, o: _first, ...body } = parsed;
+      void _first;
+      const name = typeof nick === "string" ? nick : undefined;
+      const fits = (withNick: boolean) => Math.ceil((utf8Encode(JSON.stringify({ ...body, o, ...(withNick && name ? { nick: name } : {}) })).length + 16) * 4 / 3) + 4 <= MAX_TEXT_BOX;
+      if (!fits(false)) continue;
+      const sent = await this.sendPayload(() => ({ ...body, o }), fits(true) ? name : undefined, f.ts);
+      if ("error" in sent) continue;
+      this.resealedFrom.set(frameKey(sent.frame), communityMessageId(this.myKey, o.e, o.h, o.n));
+      await this.say(sent.frame);
+    }
+    if (!looked.length) return;
+    // Looked at once each; one said again that reached nobody is in the list again, by its own key.
+    this.state.alone = (this.state.alone ?? []).filter(key => !looked.includes(key));
+    this.persistSoon();
+  }
+
+  /** The message a frame of mine is: the first one's id for a frame said again (`resealBehind`), else its own. */
+  messageIdOf(f: { s: string; e: number; h: string; n: number }): string {
+    return (f.s === this.myKey && this.resealedFrom.get(frameKey(f))) || communityMessageId(f.s, f.e, f.h, f.n);
   }
 
   /** Where I am and what I have, for the member at the other end of an edge that just opened. */
@@ -1143,7 +1275,8 @@ export class CommunitySession {
   }
 
   private async receiveMessage(from: string, raw: unknown): Promise<boolean> {
-    if (!isMessageFrame(raw) || raw.s === this.myKey) return false;
+    if (!isMessageFrame(raw)) return false;
+    if (raw.s === this.myKey) { this.ownFrame(raw); return false; }
     // Signed by its author before anything else, so a frame no member wrote never takes a place among those waiting.
     if (!verify(fromBase64Url(raw.sig), messageSigned(raw), publicKeyFromZ32(raw.s))) return false;
     // Someone the chain took out is heard no more, even for an epoch it was in (whose secret it still holds).
@@ -1151,22 +1284,40 @@ export class CommunitySession {
     const found = this.commitByShort(raw.e, raw.h);
     if (!found) { this.park(from, raw); return false; }
     const roster = this.rosterOf(found.hash)!;
-    // Not a member of that epoch, or I was not one: nothing to read, nothing to relay.
-    if (!rosterHas(roster, raw.s) || !rosterHas(roster, this.myKey)) return false;
+    // Not from a member of that epoch: nothing to read, nothing to relay.
+    if (!rosterHas(roster, raw.s)) return false;
     if (this.isDuplicate(raw)) return false;
+    // From before I was let in: nothing for me to read, but its author may have reached nobody else yet (it wrote
+    // before it heard of me, with no edge up, and I am its hub). Kept and passed on like any frame, never opened, so
+    // the members it was written for get it; the store hands it to those only.
+    if (!rosterHas(roster, this.myKey)) {
+      this.markSeen(raw);
+      this.keep(raw);
+      this.persistSoon();
+      return true;
+    }
     const secret = this.state.secrets[found.hash];
     if (!secret) { this.park(from, raw); return true; }
     const payload = decryptText(epochKeys(fromBase64Url(secret), this.id, raw.e).message, messageAad(raw), raw.nn, raw.c);
     if (payload === null) return false;
-    let parsed: { text?: unknown; nick?: unknown; x?: unknown; p?: unknown; m?: unknown; r?: unknown; fw?: unknown; sc?: unknown };
+    let parsed: { text?: unknown; nick?: unknown; x?: unknown; p?: unknown; m?: unknown; r?: unknown; fw?: unknown; sc?: unknown; o?: unknown };
     try { parsed = JSON.parse(payload) as typeof parsed; } catch { return false; }
     if (!isObject(parsed)) return false;
+    // Said again under a newer commit (its author was behind): the message it first was, by that one's identity. Taken
+    // already (I could read the first one): kept and passed on for those who could not, not shown twice.
+    const original = parsed.o === undefined ? null : readOriginal(parsed.o, raw);
+    if (parsed.o !== undefined && !original) return false;
+    const first = original ? { s: raw.s, ...original } : raw;
+    // (A first one I only carried, let in after it was sealed, was never shown here: this one is.)
+    const firstAt = original && this.commitByShort(original.e, original.h);
+    const readFirst = !!firstAt && rosterHas(this.rosterOf(firstAt.hash) ?? [], this.myKey);
+    if (original && readFirst && this.isDuplicate(first)) { this.markSeen(raw); this.keep(raw); this.persistSoon(); return true; }
     const text = typeof parsed.text === "string" ? parsed.text.slice(0, COMMUNITY_LIMITS.textBytes) : undefined;
     // Exactly one of: text, an application frame for the group, a payload for one member.
     if ([text !== undefined, isObject(parsed.x), isObject(parsed.p)].filter(Boolean).length !== 1) return false;
     const nick = typeof parsed.nick === "string" ? sanitizeNick(parsed.nick) : undefined;
     if (nick && this.state.nicks[raw.s] !== nick) { this.state.nicks[raw.s] = nick; this.hooks.changed(); }
-    const id = communityMessageId(raw.s, raw.e, raw.h, raw.n);
+    const id = communityMessageId(raw.s, first.e, first.h, first.n);
     if (text !== undefined) {
       const mentions = validMentions(parsed.m, text, false);
       // A reply that does not hold is left out, never the text.
@@ -1189,13 +1340,30 @@ export class CommunitySession {
       }
     }
     this.markSeen(raw);
+    // The first one, should it come too (from a member who carried it): a duplicate.
+    if (original) this.markSeen({ ...raw, ...original });
     this.keep(raw);
     // The message itself is stored already; what changed here (seen, store) is saved in a batch.
     this.persistSoon();
     return true;
   }
 
-  private isDuplicate(f: CommunityMessageFrame): boolean { return seenIn(this.state.seen, f); }
+  /**
+   * A frame signed with my own key that I did not send here: another copy of this profile sent it (a restored backup, a
+   * device that took over while this one was away, WISP 06). It is not shown, as before; but my counter goes above it
+   * under this head, so what I send next is not dropped by the others as already seen.
+   */
+  private ownFrame(raw: CommunityMessageFrame): void {
+    const top = this.topHash;
+    if (raw.h !== shortHash(top)) return;
+    const current = this.state.seqH === top ? this.state.seq : 0;
+    // A number past every floor a copy may have (`OWN_FRAME_LIMIT`) is not taken: the counter must fit in 32 bits.
+    if (raw.n < current || raw.n >= OWN_FRAME_LIMIT) return;
+    try { if (!verify(fromBase64Url(raw.sig), messageSigned(raw), publicKeyFromZ32(raw.s))) return; } catch { return; }
+    this.state.seq = raw.n + 1; this.state.seqH = top;
+    this.persistSoon();
+  }
+  private isDuplicate(f: { s: string; e: number; h: string; n: number }): boolean { return seenIn(this.state.seen, f); }
   private markSeen(f: CommunityMessageFrame): void {
     const bySender = (this.state.seen[f.s] ??= {});
     const entry = (bySender[seenKey(f.e, f.h)] ??= { high: -1, window: [] });
@@ -1270,13 +1438,27 @@ export class CommunitySession {
     if (secrets.length) this.hooks.direct(from, { t: "group-secrets", v: 2, g: this.id, secrets: secrets.slice(-COMMUNITY_LIMITS.secrets) });
     // What was said while they were away, by anyone, for epochs they were in.
     const have = frame.have && typeof frame.have === "object" ? frame.have as Record<string, Record<string, unknown>> : {};
+    // A frame sealed on a branch I do not follow (two members committed one leave apart, each with a fresh secret,
+    // and that branch lost) goes with that branch's commits and secret: the commits above are my branch's only, and a
+    // member who was never on the other one could not place the frame, and kept it waiting for good (2026-10-02).
+    const handed = new Set<string>();
+    // Mine that no edge took when I said them go to a member let in since too: it cannot read them, and carries them
+    // to the members they were written for (a hub passes them on). Anyone else's it could not read stays here.
+    const unheard = new Set(this.state.unheard ?? []);
     for (const stored of this.state.store) {
       if (stored.s === from || this.wasRemoved(stored.s)) continue;
       const found = this.commitByShort(stored.e, stored.h);
-      if (!found || !rosterHas(this.rosterAt(found.hash) ?? [], from)) continue;
+      if (!found) continue;
+      const reads = rosterHas(this.rosterAt(found.hash) ?? [], from), mine = stored.s === this.myKey && unheard.has(frameKey(stored));
+      if (!reads && !(mine && rosterHas(this.roster, from))) continue;
       const high = have[stored.s]?.[seenKey(stored.e, stored.h)];
-      if (!Number.isSafeInteger(high) || (high as number) < stored.n) this.hooks.direct(from, stored);
+      if (Number.isSafeInteger(high) && (high as number) >= stored.n) continue;
+      if (!this.mainIndex.has(found.hash)) this.handSide(from, found.hash, handed);
+      this.hooks.direct(from, stored);
+      // Handed to a member it was written for: heard.
+      if (mine && reads) unheard.delete(frameKey(stored));
     }
+    if (unheard.size !== (this.state.unheard?.length ?? 0)) { this.state.unheard = [...unheard]; this.persistSoon(); }
     // The link's seed, so they can answer it too.
     if (rosterHas(this.roster, from)) { const entry = this.entryFrame(from); if (entry) this.hooks.direct(from, entry); }
     // Pending leaves travel too, so whoever commits next can.
@@ -1285,6 +1467,17 @@ export class CommunitySession {
     this.offerMeta(from, frame.mt);
     // And where I am, so they can hand me what I lack (asked once in a while, not in a loop).
     this.ask(from);
+  }
+
+  /** The commits of a branch I do not follow, from where it leaves mine, and the secrets I hold of those `to` was in. */
+  private handSide(to: string, tip: string, handed: Set<string>): void {
+    for (const h of this.pathToMain(tip) ?? []) {
+      if (handed.has(h)) continue;
+      handed.add(h);
+      this.hooks.direct(to, { t: "group-commit", v: 2, g: this.id, commit: this.known.get(h)! });
+      const secret = this.state.secrets[h];
+      if (secret && rosterHas(this.rosterAt(h) ?? [], to)) this.hooks.direct(to, { t: "group-secret", v: 2, g: this.id, to, h, s: sealSecret(to, fromBase64Url(secret), secretAad(this.id, h, to)) });
+    }
   }
 
   /** The current entry seed sealed to a member, when I hold it. */

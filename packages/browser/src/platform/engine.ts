@@ -2,6 +2,8 @@ import { getBrowserHost, type EngineConnection } from "../host";
 import type { AttentionEvent, EngineApi, EngineEvent, EngineMethod, RpcResponse } from "../shared/rpc";
 import type { EngineState, LinkView, StoredMessage } from "../shared/types";
 import { applyMessageChanges } from "../shared/messageChanges";
+import type { ProfileOpenFailure } from "../shared/idb";
+import type { DeviceGateView } from "../devices/gate";
 
 type Result<M extends EngineMethod> = Awaited<ReturnType<EngineApi[M]>>;
 
@@ -12,6 +14,16 @@ type Result<M extends EngineMethod> = Awaited<ReturnType<EngineApi[M]>>;
 class EngineClient {
   state: EngineState | null = null;
   readonly messages = new Map<string, StoredMessage[]>();
+  /**
+   * Why the peer did not start, when it did not (the profile's database did not open): the app shows this and nothing
+   * of the profile. Null while it runs or is still starting. State listeners hear of it.
+   */
+  startFailure: ProfileOpenFailure | null = null;
+  /**
+   * Set when this device is not the active one for the profile (WISP 06 § The gate): no engine runs, and the app
+   * shows the standby screen and nothing of the profile. State listeners hear of it.
+   */
+  deviceGate: DeviceGateView | null = null;
 
   private connection: EngineConnection | null = null;
   private connecting: Promise<void> | null = null;
@@ -96,7 +108,18 @@ class EngineClient {
       case "attention":
         for (const listener of this.attentionListeners) listener(message.event);
         break;
+      case "start-failed":
+        this.startFailure = message.failure;
+        for (const listener of this.stateListeners) listener();
+        break;
+      case "device-gate":
+        this.deviceGate = message.gate;
+        for (const listener of this.stateListeners) listener();
+        break;
       case "state":
+        // A peer that runs (the extension's, started again) takes the notice away.
+        this.startFailure = null;
+        this.deviceGate = null;
         this.state = message.state;
         for (const listener of this.stateListeners) listener();
         break;

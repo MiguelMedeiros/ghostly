@@ -2,6 +2,7 @@ import { ONCHAIN_PROVIDER, PaymentPreflightError, assertWholeSats, validatePayme
 import type { WalletMode } from "../../../shared/mints";
 import type { OnchainPrepared, OnchainProvider, OnchainProviderDescriptor, OnchainTx } from "./onchain";
 import { intentRepository } from "../persistence";
+import { awayFrom } from "../away";
 import { ProviderSources, type SourceView } from "./sources";
 import { isNothingSpentError, redact, type ProviderHost } from "./types";
 
@@ -41,7 +42,8 @@ export class BitcoinService {
 
   get view(): BitcoinView { return { ...this.sources.view, address: this.address, history: this.history }; }
   start() { return this.sources.start(); }
-  ensureReady() { return this.sources.ensureReady(); }
+  /** Connects the source, unless it is at home on another device (WISP 06 § Wallets that stay home). */
+  ensureReady() { return awayFrom(`bitcoin:${this.network}`) !== undefined ? Promise.resolve() : this.sources.ensureReady(); }
   stop() { return this.sources.stop(); }
   refreshOffered() { this.sources.refreshOffered(); }
 
@@ -110,8 +112,12 @@ export class BitcoinService {
       const status = await provider.status(prepared);
       if (status.state === "confirmed" && status.confirmations > 0) return { txid: prepared.txid, settled: true };
       if (status.state === "conflicted") return { txid: prepared.txid, settled: false, failed: true, error: "Another transaction spent these coins: this payment can never confirm" };
-      // Dropped or never arrived: the same signed transaction again. The same inputs cannot pay twice.
-      if (status.state === "missing") await provider.broadcast(prepared).catch(() => {});
+      if (status.state === "missing") {
+        // Only an approved review is ever sent (approval writes `submittedAt`). One that was never approved ends here.
+        if (!review.submittedAt) return { txid: prepared.txid, settled: false, failed: true, error: "This payment was never approved: nothing was sent" };
+        // Dropped or never arrived: the same signed transaction again. The same inputs cannot pay twice.
+        await provider.broadcast(prepared).catch(() => {});
+      }
       return { txid: prepared.txid, settled: false, pending: true };
     },
     release: async (_review, prepared) => {

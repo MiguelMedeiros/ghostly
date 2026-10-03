@@ -22,7 +22,7 @@ import { STATUS_TONE, cardLabel, showsCard } from "../lib/statusCards";
 import { engine } from "@ghostly/browser/platform/engine";
 import { playCue, useCueChat } from "../lib/cues";
 import { downloadFile, downloadName, downloadState, type DownloadFormat } from "../lib/fileDownload";
-import { canRetryFile } from "../lib/fileStatus";
+import { canRetryFile, fileHeld } from "../lib/fileStatus";
 import { useDhtOnly, waitsForLive } from "../lib/delivery";
 import { useTransfer } from "../hooks/useServicesPlatform";
 import type { ChatFile, ChatMessage } from "../lib/types";
@@ -440,12 +440,13 @@ const cancelIcon = (
 function DownloadItem({ file, name, sender, format = "original", onDone }: { file: ChatFile; name: string; sender: "me" | "peer"; format?: DownloadFormat; onDone: () => void }) {
   const { t } = useI18n();
   const { platform, transfer, restoring } = useTransfer(file.id);
-  const [problem, setProblem] = useState<"missing" | "unconverted" | null>(null);
+  const [problem, setProblem] = useState<"missing" | "left-out" | "unconverted" | null>(null);
   const [busy, setBusy] = useState(false);
   const mounted = useRef(true);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   const state = downloadState(transfer, sender, restoring);
   const reason = problem === "missing" ? t("chat.message.downloadMissing")
+    : problem === "left-out" ? t("chat.file.notInBackup")
     : problem === "unconverted" ? t("chat.message.downloadUnconverted")
     : state === "preparing" ? t("chat.message.downloadPreparing")
     : state === "restoring" ? t("common.loading")
@@ -458,7 +459,12 @@ function DownloadItem({ file, name, sender, format = "original", onDone }: { fil
     setBusy(true);
     // A conversion goes on when the menu closes: the file is still saved once it is made.
     void downloadFile(platform, file, name, format)
-      .then((result) => { if (!mounted.current) return; if (result === "missing") setProblem("missing"); else onDone(); })
+      .then(async (result) => {
+        if (!mounted.current) return;
+        if (result !== "missing") { onDone(); return; }
+        const held = await fileHeld(platform, file.id, false);
+        if (mounted.current) setProblem(held === "left-out" ? "left-out" : "missing");
+      })
       .catch(() => { if (mounted.current) setProblem(format === "mp3" ? "unconverted" : "missing"); })
       .finally(() => { if (mounted.current) setBusy(false); });
   };

@@ -229,7 +229,7 @@ describe("Pubky Ring's cookie session", () => {
     const { signer, key } = await ring();
     try {
       await expect(approveWithRing(signer, s => s.put(`${FOLDER}/statement.txt`, "the statement")))
-        .rejects.toThrow(/^Pubky Ring approved, but this browser blocked the sign-in cookie of your homeserver/);
+        .rejects.toThrow(/^Pubky Ring approved, but this browser blocks your homeserver's sign-in cookie/);
     } finally { signer.free(); }
     expect(net.files.size).toBe(0);
     expect(net.homeserverCalls.filter(c => c.path !== "/info").map(c => `${c.via} ${c.method} ${c.path === "/session" ? c.path : "file"} ${c.cookie}`))

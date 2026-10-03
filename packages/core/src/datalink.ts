@@ -5,9 +5,11 @@ import { traceLink } from "./linkTrace";
 import {
   DATA_CHANNEL_ID,
   DATA_CHANNEL_LABEL,
-  RTC_SIGNAL_MAX_AGE_MS,
+  RTC_SIGNAL_FUTURE_MS,
   buildDataSdp,
   extractRtcParams,
+  offerIsFresh,
+  type SignalSight,
   parseRtcSignal,
   type RtcSignal,
 } from "./signal";
@@ -89,6 +91,27 @@ export const REANSWERS = 2;
 /** An offer this close to the end of the offerer's attempt is not answered again: the new answer would come too late. */
 const REANSWER_MARGIN_MS = 15_000;
 
+/**
+ * Traces the candidate pair an opened data link uses, by type only (host, srflx, prflx, relay; never an address): two
+ * devices on one network should meet host to host. A connection without stats (a test's fake) traces nothing.
+ */
+async function tracePair(me: string, pc: RTCPeerConnection): Promise<void> {
+  try {
+    if (typeof pc.getStats !== "function") return;
+    const stats = await pc.getStats();
+    const byId = new Map<string, Record<string, unknown>>();
+    stats.forEach((s: Record<string, unknown>) => byId.set(s.id as string, s));
+    let pairId: unknown;
+    for (const s of byId.values()) if (s.type === "transport" && s.selectedCandidatePairId) pairId = s.selectedCandidatePairId;
+    const pair = pairId !== undefined ? byId.get(pairId as string)
+      : [...byId.values()].find((s) => s.type === "candidate-pair" && s.nominated && s.state === "succeeded");
+    if (!pair) return;
+    const kind = (id: unknown) => byId.get(id as string)?.candidateType ?? "?";
+    const rtt = typeof pair.currentRoundTripTime === "number" ? Math.round(pair.currentRoundTripTime * 1000) : undefined;
+    traceLink(me, "rtc-pair", { local: kind(pair.localCandidateId), remote: kind(pair.remoteCandidateId), ...(rtt !== undefined && { rttMs: rtt }) });
+  } catch { /* the trace must not fail the link */ }
+}
+
 export class DataLink {
   state: DataLinkState = "idle";
   private pc: RTCPeerConnection | null = null;
@@ -100,8 +123,8 @@ export class DataLink {
   private connectingSince = 0;
   private connectTimer: ReturnType<typeof setTimeout> | null = null;
   private disconnectTimer: ReturnType<typeof setTimeout> | null = null;
-  /** The offer this side answered in the current attempt, and how many times it answered it again. */
-  private answered: { offer: RtcSignal; again: number } | null = null;
+  /** The offer this side answered in the current attempt, when it took it (this clock), and how many times it answered it again. */
+  private answered: { offer: RtcSignal; at: number; again: number } | null = null;
 
   constructor(private readonly options: DataLinkOptions) {}
 
@@ -123,11 +146,30 @@ export class DataLink {
     }
   }
 
-  /** Feeds a decrypted `_rtc` value from the peer's packet. */
-  async handleSignal(json: string): Promise<void> {
+  /**
+   * Feeds a decrypted `_rtc` value from the peer's packet. `sight`: how this device saw it come (`SignalSight`): the
+   * peer's record did not carry it at a read the network answered, or it came on a live session just now.
+   *
+   * The peer's `ts` orders its signals (a later one replaces an earlier one, and an answer names the offer it is for).
+   * It is not what says a signal is recent when this device saw it come: two clocks a few minutes apart are common, and
+   * every signal of such a peer was dropped here, without a word. An answer is for the offer it names, which this side
+   * made in this attempt, so it has no age to check. An offer is as old as the time since the read that did not have it
+   * (`offerIsFresh`); only one the first read finds is judged by its own time, as nothing else dates it.
+   *
+   * A signal dated more than `RTC_SIGNAL_FUTURE_MS` ahead of this clock is not taken at all: taken, its time would
+   * be the latest this link knows of the peer, and every signal the peer makes after it would read as older.
+   */
+  async handleSignal(json: string, sight?: SignalSight): Promise<void> {
     const signal = parseRtcSignal(json);
     if (!signal || signal.ts <= this.lastSignalTs) return;
-    if (Math.abs(Date.now() - signal.ts) > RTC_SIGNAL_MAX_AGE_MS) return;
+    if (signal.ts > Date.now() + RTC_SIGNAL_FUTURE_MS) {
+      traceLink(this.options.myPubKeyZ32, "signal-ahead", { aheadMs: signal.ts - Date.now() });
+      return;
+    }
+    if (signal.t === "o" && !offerIsFresh(signal.ts, sight)) {
+      traceLink(this.options.myPubKeyZ32, "offer-stale", { ageMs: Date.now() - signal.ts, ...(sight && { sinceMs: Date.now() - sight.since, ...(sight.after !== null && { beforePacketMs: sight.after - signal.ts }) }) });
+      return;
+    }
 
     if (signal.t === "o") {
       if (this.state === "offering") {
@@ -141,7 +183,7 @@ export class DataLink {
       const wasOpen = this.state === "open";
       this.teardown();
       if (wasOpen) { this.options.onDirect?.("closed"); this.options.onClose(); }
-      this.answered = { offer: signal, again: 0 };
+      this.answered = { offer: signal, at: Date.now(), again: 0 };
       await this.answer(signal);
     } else if (this.state === "connecting" && this.myOfferTs && signal.o === this.myOfferTs && this.pc) {
       // A newer answer to the offer this side already took an answer for: the answerer made it again (`REANSWERS`),
@@ -203,7 +245,8 @@ export class DataLink {
    */
   private failed(): void {
     const answered = this.state === "connecting" ? this.answered : null;
-    const left = answered ? CONNECT_TIMEOUT_MS - (Date.now() - answered.offer.ts) : 0;
+    // How long the offerer's attempt still runs, counted on this clock from when its offer was taken (its `ts` is its clock's).
+    const left = answered ? CONNECT_TIMEOUT_MS - (Date.now() - answered.at) : 0;
     const evidence = this.directEvidence();
     if (answered && answered.again < REANSWERS && left > REANSWER_MARGIN_MS && this.options.offerStanding?.(answered.offer.ts)) {
       answered.again++;
@@ -282,6 +325,7 @@ export class DataLink {
       this.options.publishSignal(null);
       this.options.onDirect?.("open");
       this.options.onOpen(wrapDataChannel(dc));
+      void tracePair(this.options.myPubKeyZ32, pc);
     });
     dc.addEventListener("close", () => {
       if (this.pc === pc) this.failed();

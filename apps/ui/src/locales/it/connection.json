@@ -9,6 +9,12 @@
     "reason": "{{reason}}.",
     "retryAt": "Nuovo tentativo verso le {{time}}."
   },
+  "clockOff": {
+    "hint": "L'orologio di questo dispositivo sembra sbagliato di circa {{amount}}. Le chat possono connettersi lentamente.",
+    "infoAhead": "L'ora di questo dispositivo è avanti di circa {{amount}} rispetto a quella dei relay e dei dispositivi dei tuoi contatti. Ghostly data ciò che invia con questo orologio, e le altre app rifiutano o ritardano ciò che ha una data troppo lontana dalla loro ora: chat e gruppi possono connettersi lentamente, le chiamate possono non squillare, e un'app non aggiornata può non connettersi affatto. Attiva data e ora automatiche nelle impostazioni di questo dispositivo. Questa nota scompare quando l'orologio torna a concordare. Servono più fonti concordi, mai un solo contatto.",
+    "infoBehind": "L'ora di questo dispositivo è indietro di circa {{amount}} rispetto a quella dei relay e dei dispositivi dei tuoi contatti. Ghostly data ciò che invia con questo orologio, e le altre app rifiutano o ritardano ciò che ha una data troppo lontana dalla loro ora: chat e gruppi possono connettersi lentamente, le chiamate possono non squillare, e un'app non aggiornata può non connettersi affatto. Attiva data e ora automatiche nelle impostazioni di questo dispositivo. Questa nota scompare quando l'orologio torna a concordare. Servono più fonti concordi, mai un solo contatto.",
+    "title": "Orologio del dispositivo"
+  },
   "detail": {
     "noneLive": "Nessuna diretta",
     "notLiveFor": "Senza connessione per",

@@ -1,4 +1,4 @@
-import { appendFileSync, existsSync, readFileSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync, rmSync } from "node:fs";
 import { createRequire } from "node:module";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -11,7 +11,7 @@ import { nodeFedimintSdk } from "./fedimint";
 import { installFileFetch } from "./fileFetch";
 import { nodePushSend } from "./pushSend";
 import { openPersistentIndexedDb, type PersistentIndexedDb } from "./storage";
-import type { ProfilePaths } from "../profiles";
+import { RESTORED_MARK, type ProfilePaths } from "../profiles";
 
 /** What runs a profile: its store, the engine and the host around it. */
 export interface Runtime {
@@ -121,6 +121,14 @@ export interface RuntimeOptions { deferGroups?: boolean }
  * settings and the Mainline DHT directly (read when the relays fail, written always).
  * The caller holds the profile's lock.
  */
+/** The files a light backup left out, as the restore wrote them in the mark (an empty mark: none). */
+function leftOutIn(mark: string): string[] {
+  try {
+    const ids = (JSON.parse(readFileSync(mark, "utf8") || "{}") as { leftOut?: unknown }).leftOut;
+    return Array.isArray(ids) ? ids.filter((id): id is string => typeof id === "string") : [];
+  } catch { return []; }
+}
+
 export async function startRuntime(paths: ProfilePaths, options: RuntimeOptions = {}): Promise<Runtime> {
   // `GHOSTLY_LINK_TRACE=<file>`: each step of each chat's way to live, one JSON line (packages/core/src/linkTrace.ts),
   // as the Desktop writes to its log. For measuring, not needed to run.
@@ -129,6 +137,23 @@ export async function startRuntime(paths: ProfilePaths, options: RuntimeOptions 
   const trace = process.env.GHOSTLY_LINK_TRACE;
   if (trace) setLinkTraceSink(line => appendFileSync(trace, line + "\n", { mode: 0o600 }));
   const store = await openPersistentIndexedDb(paths.db);
+  // A profile a restore made, started for the first time: its store is the backup's, as old as the backup. Its ecash
+  // is checked with the mints and its unfinished payment attempts authorize nothing, as in the app's restore. Done
+  // before the engine reads any of it; the mark goes only once that is on disk, so a start cut short does it again.
+  const restored = join(paths.dir, RESTORED_MARK);
+  if (existsSync(restored)) {
+    try {
+      const rows = await import("@ghostly/browser/shared/restoredRows");
+      await rows.markRestoredWallet();
+      // The files a light backup left out: their records say so, as in the app's restore.
+      await rows.markLeftOutFiles(leftOutIn(restored));
+      await store.compact();
+    } catch (error) {
+      await store.close().catch(() => {});
+      throw error;
+    }
+    rmSync(restored, { force: true });
+  }
   const webrtc = await installWebRtc();
   // Voice calls (WISP 11xx § Calls): offered to contacts (calls/1) only where their media can run.
   const stack = webrtc ? await loadCallStack() : "Calls need WebRTC, which is off on this headless Ghostly";
@@ -158,6 +183,8 @@ export async function startRuntime(paths: ProfilePaths, options: RuntimeOptions 
   const server = new EngineServer({
     ...(transport ? { transport } : {}),
     irohWeb: true,
+    // A CLI profile is one device's (WISP 06): no device state is kept for it.
+    singleDevice: true,
     nativeTransports: { "hyperdht/1": (seedB64: string) => createHyperEndpoint(fromBase64Url(seedB64), network) },
     // No wallet starts by itself: a bot has the wallets it made (WISP 11xx § Wallet SDKs on Node).
     automaticWallets: false,

@@ -14,6 +14,7 @@ import { LeaveGroupDialog } from "../components/LeaveGroupDialog";
 import { GroupShareDialog } from "../components/GroupLinkPanel";
 import { GroupConnection } from "../components/GroupConnection";
 import { TasksButton } from "../components/chat/TasksButton";
+import { useJumpTo } from "../hooks/useJumpTo";
 import { RoutineStack } from "../components/chat/RoutineCard";
 import type { MemberFaceOf } from "../components/chat/SenderAvatar";
 import { routineStacks } from "../lib/statusCards";
@@ -108,9 +109,19 @@ const FIXED_EVENTS = new Map([
 /** The lines that name their member, said again from their kind: those of a member who has left too. */
 const FORMER_EVENTS = new Set<StoredMessage["event"]>(["joined", "admin", "picture", "renamed"]);
 
+/**
+ * A name as a stored line has it. A member that never said a name is written "Member 46ishssi" (`Member` and the start
+ * of its key, engine/groups.ts and engine/community.ts): said in the interface's words, as that member's messages are.
+ */
+const UNNAMED_MEMBER = /^Member ([a-z0-9]{8})$/;
+function writtenName(name: string, t: Translate): string {
+  const key = UNNAMED_MEMBER.exec(name)?.[1];
+  return key ? t("group.member.unnamed", { key }) : name;
+}
+
 /** A line the engine wrote as "<name> <what happened>", said in the interface's language with the name it was written with. */
 function writtenEvent(event: StoredMessage["event"], text: string, t: Translate): string | undefined {
-  const named = (ending: string) => text.endsWith(ending) && text.length > ending.length ? text.slice(0, -ending.length) : undefined;
+  const named = (ending: string) => text.endsWith(ending) && text.length > ending.length ? writtenName(text.slice(0, -ending.length), t) : undefined;
   if (event === "joined") { const name = named(" joined"); return name && t("group.event.joined", { name }); }
   if (event === "admin") { const name = named(" is now the admin"); return name && t("group.event.admin", { name }); }
   if (event === "picture") {
@@ -118,7 +129,7 @@ function writtenEvent(event: StoredMessage["event"], text: string, t: Translate)
     return changed ? t("group.event.pictureChanged", { name: changed }) : removed ? t("group.event.pictureRemoved", { name: removed }) : undefined;
   }
   const marker = " renamed the group to “", at = event === "renamed" ? text.indexOf(marker) : -1;
-  return at > 0 && text.endsWith("”") ? t("group.event.renamed", { name: text.slice(0, at), group: text.slice(at + marker.length, -1) }) : undefined;
+  return at > 0 && text.endsWith("”") ? t("group.event.renamed", { name: writtenName(text.slice(0, at), t), group: text.slice(at + marker.length, -1) }) : undefined;
 }
 
 /**
@@ -137,7 +148,7 @@ function eventText(message: StoredMessage, group: GroupView, t: Translate): stri
     if (message.event === "joined" && !message.member && text.startsWith("You joined. ")) return `${t("group.event.youJoined")} ${readNote(group, t)}`;
     if (message.event === "joined" && !message.member && text === "You joined again") return t("group.event.youJoinedAgain");
     const gone = " is no longer a member";
-    if (message.event === "gone" && text.endsWith(gone)) return t("group.event.gone", { name: text.slice(0, -gone.length) });
+    if (message.event === "gone" && text.endsWith(gone)) return t("group.event.gone", { name: writtenName(text.slice(0, -gone.length), t) });
     // A community's line about a member who has left since: no roster or former name says who it was, but the stored
     // line does, in the shape the engine writes. Said again in the interface's language with that name.
     const written = message.member ? writtenEvent(message.event, text, t) : undefined;
@@ -297,6 +308,8 @@ export function GroupChat() {
     // Its list stops following once this group is left: coming back, the engine's copy (with what came meanwhile) is shown.
     return () => { current = false; off(); setLoaded({ groupId: "", list: NO_MESSAGES }); };
   }, [groupId]);
+  // Opened from the Tasks board: on the card's message, once it is here.
+  useJumpTo(!!group, id => messages.some(m => m.id === id));
   // A bot's routines in a row: one row, opened on a tap (WISP 4xx · Status Cards), whichever of its rows are in the page.
   const stacks = useMemo(() => routineStacks(messages, m => m), [messages]);
   const stackHeads = useMemo(() => new Map([...stacks.values()].flatMap(run => run.slice(1).map(m => [m.id, run[0].id] as const))), [stacks]);
@@ -487,6 +500,7 @@ export function GroupChat() {
       {connecting && !error &&<div role="status" data-testid="group-connecting" className="px-4 py-2 text-xs bg-surface-alt text-text-secondary border-b border-border">
         {community ? t("group.chat.connectingCommunity") : t("group.chat.connectingMembers")}
       </div>}
+      {group.adminOff && group.status === "active" && (group.isAdmin || group.profile === "community") && <ManageHere groupId={group.id} />}
       {(error || (group.status && group.status !== "active")) && <div role="status" data-testid="group-notice" className="px-4 py-2 text-xs bg-surface-alt text-text-secondary border-b border-border">
         {error || (group.profile === "community" && group.status === "removed" ? t("group.chat.removedCommunity") : outOfIt)}
       </div>}
@@ -566,5 +580,31 @@ export function GroupChat() {
     </div>
     </MemberColorsProvider>
     </CueChat.Provider>
+  );
+}
+
+/**
+ * "Manage groups from this device" (WISP 06 § Forced takeover): after a forced takeover or a restore this device signs no
+ * commit and takes no door duty in the group until the person turns it on here, having read what that risks.
+ */
+function ManageHere({ groupId }: { groupId: string }) {
+  const { t } = useI18n();
+  const [asking, setAsking] = useState(false);
+  const [busy, setBusy] = useState(false);
+  return (
+    <div role="status" data-testid="group-manage-off" className="px-4 py-2 text-xs bg-surface-alt text-text-secondary border-b border-border space-y-1.5">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="min-w-0 flex-1">{t("devices.manage.off")}</span>
+        {!asking && <button type="button" data-testid="group-manage-open" onClick={() => setAsking(true)} className="rounded px-2 py-1 font-semibold text-accent hover:bg-accent/10 cursor-pointer">{t("devices.manage.turnOn")}</button>}
+      </div>
+      {asking && (
+        <div className="flex flex-wrap items-center gap-2">
+          <span data-testid="group-manage-warning" className="min-w-0 flex-1 text-danger-ink">{t("devices.manage.warning")}</span>
+          <button type="button" data-testid="group-manage-confirm" disabled={busy} onClick={() => { setBusy(true); void engine.call("setGroupManage", { groupId, on: true }).finally(() => setBusy(false)); }}
+            className="rounded px-2 py-1 font-semibold text-accent hover:bg-accent/10 cursor-pointer disabled:opacity-40">{t("devices.manage.confirm")}</button>
+          <button type="button" onClick={() => setAsking(false)} className="rounded px-2 py-1 hover:bg-surface-hover cursor-pointer">{t("common.cancel")}</button>
+        </div>
+      )}
+    </div>
   );
 }

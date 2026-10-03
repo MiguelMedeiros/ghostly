@@ -1,0 +1,12 @@
+{
+  "copied": "Copied",
+  "copy": "Copy details",
+  "missingCrypto": "Web Crypto is off. It works only on a secure (https) address.",
+  "missingIndexedDB": "IndexedDB is off or blocked, so chats and keys can't be saved.",
+  "missingLocks": "Web Locks is missing, so Ghostly can't make sure it runs only once.",
+  "missingStorage": "Site data is blocked, so nothing can be saved.",
+  "reload": "Reload",
+  "title": "Ghostly can't run in this browser",
+  "tryOther": "Leave private mode and allow site data, update the browser, or open Ghostly in another one.",
+  "trySecure": "Open Ghostly at its https:// address."
+}

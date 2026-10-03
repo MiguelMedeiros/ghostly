@@ -20,6 +20,13 @@
     "sweepingInfo": "Moedas Ark ficam num lote que expira; o Ghostly as renova antes disso enquanto está aberto. Moedas que expiraram continuam sendo suas, mas antes o servidor Ark leva o lote de volta para a blockchain (uma varredura). Isso espera novos blocos de Bitcoin, muitas vezes uma hora ou mais. Até lá elas não podem ser gastas nem recuperadas; depois, Recuperar as move para um novo lote.",
     "useProvider": "Usar este provedor"
   },
+  "away": {
+    "backup": "Se {{device}} se perder, os fundos continuam acessíveis por esta frase de recuperação ou arquivo de backup.",
+    "expires": "As moedas vencem em {{date}}. Use o Ghostly em {{device}} antes disso.",
+    "otherDevice": "o dispositivo onde ela fica",
+    "text": "Não dá para usar {{wallet}} aqui. Use em {{device}}.",
+    "title": "Em {{device}}"
+  },
   "backup": {
     "download": "Baixar",
     "file": "Backup da carteira",
@@ -82,6 +89,7 @@
     "phraseNote": "A frase traz de volta o que o servidor da Second guarda para esta carteira; o histórico de pagamentos vem do arquivo de backup.",
     "read": "Ler",
     "renewalHint": "Renova moedas perto de expirar enquanto o Ghostly está aberto",
+    "scanning": "Procurando moedas on-chain que esta frase recebeu antes…",
     "server": "Servidor Ark",
     "serverInput": "Servidor Bark",
     "serverStuck": "Este servidor não está respondendo. Você pode mudar para outro.",
@@ -122,6 +130,7 @@
   "cards": {
     "amount": "{{amount}} {{unit}}",
     "balance": {
+      "away": "Em {{device}}",
       "locked": "Bloqueada",
       "needsKey": "Precisa de uma chave",
       "noFederation": "Sem federação",
@@ -149,6 +158,7 @@
       "usdtSepolia": "Sepolia · token de teste"
     },
     "status": {
+      "away": "Em outro lugar",
       "checkSettings": "Verifique as configurações",
       "connecting": "Conectando…",
       "experimental": "Experimental",
@@ -212,6 +222,8 @@
     "removeMintConsent": "O que for pago a ele depois só aparece quando eu adicionar este mint de novo.",
     "removeMintHint": "Você pode adicioná-lo de novo depois.",
     "removeMintQuestion": "Remover {{name}}?",
+    "setAside": "{{amount}} {{unit}} reservados",
+    "setAsideInfo": "Reservados para um pagamento que o mint ainda não confirmou. Saem com o pagamento ou voltam ao seu saldo assim que o mint responder.",
     "settings": "Configurações",
     "testBalance": "{{amount}} sats de teste (sem valor)",
     "testMintInvoice": "Aguardando o pagamento… Mints de teste marcam toda fatura como paga sozinhos, então esta só conta quando um contato a pagar em um chat. Para ter sats de teste agora, use Obter moedas de teste acima.",
@@ -224,6 +236,8 @@
       "lightningOut": "Pago via Lightning",
       "reclaimed": "Pagamento recuperado"
     },
+    "unconfirmed": "{{amount}} {{unit}} não confirmados",
+    "unconfirmedInfo": "O mint recebeu estes sats em uma troca e não consegue dizer o que deu por eles. A carteira continua perguntando. Eles podem não voltar.",
     "unreachable": "Fora do ar no momento",
     "working": "Processando…"
   },
@@ -552,6 +566,7 @@
       "paid": "{{amount}} pagos a uma fatura, ainda não resgatados do mint",
       "request": "Um pedido de {{amount}} em uma conversa, ainda aberto",
       "sent": "{{amount}} em ecash que você enviou, ainda não resgatados",
+      "swap": "{{amount}} em uma troca com o mint, ainda não concluída",
       "unclaimed": "{{amount}} que o mint diz ter emitido para uma fatura, nunca recebidos aqui"
     },
     "label": "Remover esta carteira",
