@@ -8,6 +8,15 @@
     "cancelled": "Cancelado. Nada foi salvo.",
     "chooseFirst": "Escolha um backup primeiro",
     "connected": "Conectado · {{store}}",
+    "content": {
+      "everything": "Tudo",
+      "everythingSize": "Arquivos: {{size}}",
+      "info": "O leve guarda as conversas e todas as mensagens, contatos, grupos, identidades, carteiras e configurações. Deixa de fora os arquivos acima de 1 MB; mensagens de voz de até 4 MB ficam. Depois de restaurar, cada arquivo deixado de fora aparece como Não está neste backup.",
+      "label": "Conteúdo",
+      "leftOut": "Arquivos acima de 1 MB ficaram de fora ({{size}}).",
+      "light": "Leve",
+      "lightSize": "Arquivos: {{size}}. Deixa de fora {{left}}."
+    },
     "download": "Baixar",
     "downloaded": "Baixado {{name}} · {{size}}",
     "emptyFile": "Este arquivo está vazio. Escolha um arquivo de backup.",

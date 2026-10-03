@@ -176,3 +176,40 @@ it("a restored profile's ecash is marked to be checked with its mint the first t
   expect((await rows(original, "proofs")).some((p) => p.unchecked)).toBe(false);
   expect(await rows(original, "swaps")).toEqual([expect.not.objectContaining({ restored: true })]);
 });
+
+it("--light leaves out files over 1 MB (voice messages over 4 MB), and the copy says each is not in this backup", async () => {
+  const dir = home("backup-light");
+  ok(await ghostly(["--home", dir, "profile", "set", "--name", "Light bot"]));
+  const original = join(dir, "profiles", "default");
+  const files = join(original, "files", "ghostly");
+  mkdirSync(files, { recursive: true });
+  const MIB = 1024 * 1024;
+  const sizes: Record<string, number> = { "chat-in-small": 500_000, "chat-in-voice": 3 * MIB, "chat-in-photo": 2 * MIB, "chat-in-video": 20 * MIB };
+  for (const [i, [id, size]] of Object.entries(sizes).entries()) writeFileSync(join(files, id), pattern(size, i));
+  // Their records, as the engine keeps them: the voice message says it is one.
+  const opened = await openPersistentIndexedDb(join(original, "db"));
+  try {
+    const db = await new Promise<IDBDatabase>((resolve, reject) => { const r = opened.factory.open("ghostly"); r.onsuccess = () => resolve(r.result); r.onerror = () => reject(r.error); });
+    const tx = db.transaction(["files", "fileState"], "readwrite");
+    for (const [id, size] of Object.entries(sizes)) {
+      tx.objectStore("files").put({ id, linkId: "chat", createdAt: 1, direction: "in", metadata: { name: `${id}.bin`, size, mime: "application/octet-stream", timestamp: 1, ...(id === "chat-in-voice" ? { voice: { duration: 600_000, peaks: [1] } } : {}) } });
+      tx.objectStore("fileState").put({ id, bytes: "native", transfer: { state: "done", transferred: size, size } });
+    }
+    await new Promise<void>((resolve, reject) => { tx.oncomplete = () => resolve(); tx.onabort = tx.onerror = () => reject(tx.error); });
+    db.close();
+  } finally { await opened.close(); }
+
+  const full = join(dir, "full.ghostly-backup"), light = join(dir, "light.ghostly-backup");
+  ok(await ghostly(["--home", dir, "profile", "backup", "--out", full], { env: PASS }));
+  expect(ok(await ghostly(["--home", dir, "profile", "backup", "--out", light, "--light"], { env: PASS }))).toMatchObject({ files: 2, light: true, leftOut: 2, leftOutBytes: 22 * MIB });
+  expect(statSync(light).size).toBeLessThan(statSync(full).size / 4);
+
+  const restored = ok(await ghostly(["--home", dir, "profile", "restore", light, "copy"], { env: PASS })) as { folder: string };
+  expect(readdirSync(join(restored.folder, "files", "ghostly")).sort()).toEqual(["chat-in-small", "chat-in-voice"]);
+  // Its engine starts with the first command: the records of the files left out say so.
+  const saved = join(dir, "out");
+  mkdirSync(saved);
+  expect(error(await ghostly(["--home", dir, "--profile", "copy", "file", "save", "chat-in-video", "--dir", saved]), "not_found", 3).message).toContain("Not in this backup");
+  expect(readdirSync(saved), "nothing written for a file that is not here").toEqual([]);
+  expect(existsSync(join(restored.folder, "restored")), "done once: the mark is gone").toBe(false);
+});

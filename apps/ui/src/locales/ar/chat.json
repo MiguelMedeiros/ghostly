@@ -131,6 +131,7 @@
     "leftMinutes": "باقٍ {{minutes}} د",
     "leftUnderMinute": "باقٍ أقل من دقيقة",
     "noRoomDevice": "المساحة غير كافية: {{size}} متاحة على هذا الجهاز",
+    "notInBackup": "ليس في هذه النسخة الاحتياطية",
     "notSentHint": "لم يُرسل. أرسله مرة أخرى.",
     "of": "{{done}} من {{size}}",
     "pause": "إيقاف مؤقت",

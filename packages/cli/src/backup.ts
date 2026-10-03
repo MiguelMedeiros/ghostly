@@ -1,8 +1,10 @@
 import { existsSync } from "node:fs";
 import { link, mkdir, open, readdir, readFile, rename, rm, stat, writeFile, type FileHandle } from "node:fs/promises";
-import { dirname, join, relative, resolve, sep } from "node:path";
+import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import { open as openEnvelope } from "@ghostly/browser/backup/envelope";
 import { BackupReader, BackupWriter, FRAME_BYTES, backupProtection, type BackupSource } from "@ghostly/browser/backup/stream";
+import { LIGHT_FILE_BYTES, LIGHT_VOICE_BYTES, keptInLight, type LightMark } from "@ghostly/browser/backup/light";
+import { fileStore } from "@ghostly/browser/shared/idb";
 import { bool, str, type Method } from "./apiKit";
 import { CliError } from "./errors";
 import { RESTORED_MARK, profileExists, profilePaths, type ProfilePaths } from "./profiles";
@@ -19,8 +21,12 @@ const FORMAT_1 = "ghostly-cli-profile/1";
 /** Version 1: the store and every file as base64 in one document. */
 interface Payload1 { format: typeof FORMAT_1; createdAt: number; store: string; files: { path: string; data: string }[] }
 /** Version 2, in order: the head, then each file (the store first) followed by its bytes, then the end. */
+/**
+ * `light`: a light backup (WISP 05 § Light backups) left the bytes of these files out. Their records are in the store;
+ * the restored profile marks them when it first starts (`markLeftOutFiles`).
+ */
 type BackupRecord =
-  | { t: "profile"; format: typeof FORMAT; createdAt: number; files: number; bytes: number }
+  | { t: "profile"; format: typeof FORMAT; createdAt: number; files: number; bytes: number; light?: LightMark & { ids: string[] } }
   | { t: "file"; kind: "store" | "file"; path?: string; size: number }
   | { t: "end"; files: number; bytes: number };
 
@@ -53,7 +59,8 @@ export const BACKUP_METHODS: Record<string, Method> = {
   /**
    * Writes the backup to `path` (resolved by the command), sealed with `passphrase`, or not encrypted when
    * `noPassphrase` is true: one of the two, never a guess. The store is folded first, so the copy is whole. It is
-   * written beside `path` and only takes its name once it is complete: a backup that fails leaves no file.
+   * written beside `path` and only takes its name once it is complete: a backup that fails leaves no file. `light`:
+   * the files over the cut (`keptInLight`) are left out, their records kept.
    */
   async "profile.backup"(ctx, params) {
     const path = resolve(str(params, "path", true));
@@ -64,8 +71,14 @@ export const BACKUP_METHODS: Record<string, Method> = {
     await ctx.runtime.store.compact();
     const paths = ctx.runtime.paths;
     const store = join(paths.db, "snapshot.bin");
-    const files = await Promise.all((await walk(paths.files)).map(async (name) => ({ name, size: (await stat(join(paths.files, name))).size })));
+    const light = bool(params, "light");
+    const all = await Promise.all((await walk(paths.files)).map(async (name) => ({ name, size: (await stat(join(paths.files, name))).size })));
+    // A file's name is its id: only one that could be a voice message under its larger cut is looked up.
+    const kept = async (file: { name: string; size: number }) => keptInLight(file.size, false) || (file.size <= LIGHT_VOICE_BYTES && !!(await fileStore.get(basename(file.name)).catch(() => undefined))?.metadata?.voice);
+    const files: typeof all = [], leftOut: typeof all = [];
+    for (const file of all) (!light || (await kept(file)) ? files : leftOut).push(file);
     const storeSize = (await stat(store)).size, bytes = files.reduce((sum, file) => sum + file.size, 0);
+    const leftOutBytes = leftOut.reduce((sum, file) => sum + file.size, 0);
 
     const partial = `${path}.partial-${process.pid}`;
     let out: FileHandle | null = null;
@@ -75,7 +88,7 @@ export const BACKUP_METHODS: Record<string, Method> = {
       let writer: BackupWriter;
       try { writer = await BackupWriter.start({ write: async (chunk) => { await handle.write(chunk); } }, unsealed ? null : passphrase!); } catch (error) { throw new CliError("bad_request", error instanceof Error ? error.message : String(error)); }
       const put = (record: BackupRecord) => writer.json(JSON.stringify(record));
-      await put({ t: "profile", format: FORMAT, createdAt: Date.now(), files: files.length, bytes });
+      await put({ t: "profile", format: FORMAT, createdAt: Date.now(), files: files.length, bytes, ...(light && { light: { maxFileBytes: LIGHT_FILE_BYTES, maxVoiceBytes: LIGHT_VOICE_BYTES, files: leftOut.length, bytes: leftOutBytes, ids: leftOut.map((file) => basename(file.name)) } }) });
       await put({ t: "file", kind: "store", size: storeSize });
       await copyIn(writer, store, storeSize);
       for (const file of files) {
@@ -89,7 +102,7 @@ export const BACKUP_METHODS: Record<string, Method> = {
       out = null;
       // Its name only now, and never over a file that appeared meanwhile.
       try { await link(partial, path); } catch (error) { throw (error as NodeJS.ErrnoException).code === "EEXIST" ? new CliError("confirm", `${path} exists: choose another name`) : error; }
-      return { path, bytes: written, files: files.length, protection: unsealed ? "none" : "passphrase" };
+      return { path, bytes: written, files: files.length, protection: unsealed ? "none" : "passphrase", ...(light && { light: true, leftOut: leftOut.length, leftOutBytes }) };
     } finally {
       await out?.close().catch(() => {});
       await rm(partial, { force: true });
@@ -157,10 +170,13 @@ async function restoringFolder(home: string, name: string): Promise<ProfilePaths
   return { ...profilePaths(home, name), dir, db: join(dir, "db"), files: join(dir, "files") };
 }
 
-/** The folder is whole: marked as a restored copy (`RESTORED_MARK`), then given the profile's name. Never over a profile. */
-async function finishRestore(home: string, name: string, work: ProfilePaths): Promise<ProfilePaths> {
+/**
+ * The folder is whole: marked as a restored copy (`RESTORED_MARK`, which names the files a light backup left out),
+ * then given the profile's name. Never over a profile.
+ */
+async function finishRestore(home: string, name: string, work: ProfilePaths, leftOut: string[] = []): Promise<ProfilePaths> {
   const paths = profilePaths(home, name);
-  await writeFile(join(work.dir, RESTORED_MARK), "", { mode: 0o600 });
+  await writeFile(join(work.dir, RESTORED_MARK), leftOut.length ? JSON.stringify({ leftOut }) : "", { mode: 0o600 });
   if (existsSync(paths.dir)) throw new CliError("refused", `Profile ${name} exists: restore into a new name`);
   await rename(work.dir, paths.dir);
   return paths;
@@ -192,6 +208,7 @@ export async function restoreProfile(home: string, name: string, file: string, p
     const first = await next();
     const head = first?.json === undefined ? null : parse(first.json);
     if (head?.t !== "profile" || head.format !== FORMAT) throw new CliError("refused", "This backup is not a headless Ghostly profile");
+    const leftOut = Array.isArray(head.light?.ids) ? head.light.ids.filter((id): id is string => typeof id === "string") : [];
     work = await restoringFolder(home, name);
     const paths = work;
     await mkdir(paths.db, { recursive: true, mode: 0o700 });
@@ -216,7 +233,7 @@ export async function restoreProfile(home: string, name: string, file: string, p
       }
       if (out || !ended || !stored) throw new CliError("refused", "This backup is damaged: it was changed or cut short");
     } finally { await out?.handle.close().catch(() => {}); }
-    return await finishRestore(home, name, work);
+    return await finishRestore(home, name, work, leftOut);
   } catch (error) {
     if (work) await rm(work.dir, { recursive: true, force: true });
     throw error;

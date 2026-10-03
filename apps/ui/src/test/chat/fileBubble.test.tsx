@@ -7,7 +7,7 @@ import type { ChatFile } from "../../lib/types";
 import { fakeEngine, linkView } from "../fakeEngine";
 import { renderApp } from "../render";
 
-// covers: files.large.offer, files.large.resume, files.size-label, files.large.resend, files.large.request
+// covers: files.large.offer, files.large.resume, files.size-label, files.large.resend, files.large.request, backup.light
 
 const GB = 1024 ** 3;
 // The root tsconfig has no Array.at.
@@ -260,5 +260,23 @@ describe("FileBubble: files/3", () => {
       expect(saveFile).toHaveBeenCalledWith("chat1-in-abc", "movie.mkv");
       expect(screen.getByTestId("file-status")).toHaveTextContent("4.2 GB");
     } finally { delete (servicesPlatform as { saveFile?: unknown }).saveFile; }
+  });
+
+  it("a file whose bytes are gone, or were left out of a light backup, says so and offers no Save", async () => {
+    const saveFile = vi.fn(async () => true);
+    const fileHeld = vi.fn(async (): Promise<"here" | "gone" | "left-out"> => "left-out");
+    Object.assign(servicesPlatform!, { saveFile, fileHeld });
+    try {
+      const { unmount } = show({ state: "done", transferred: 4.2 * GB, size: 4.2 * GB });
+      await waitFor(() => expect(screen.getByTestId("file-status")).toHaveTextContent("Not in this backup"));
+      expect(screen.queryByTestId("file-save")).toBeNull();
+      expect(screen.queryByTestId("file-request")).toBeNull();
+      unmount();
+      fileHeld.mockResolvedValue("gone");
+      show({ state: "done", transferred: 4.2 * GB, size: 4.2 * GB });
+      await waitFor(() => expect(screen.getByTestId("file-status")).toHaveTextContent("No longer available"));
+      expect(screen.queryByTestId("file-save")).toBeNull();
+      expect(saveFile).not.toHaveBeenCalled();
+    } finally { delete (servicesPlatform as { saveFile?: unknown; fileHeld?: unknown }).saveFile; delete (servicesPlatform as { fileHeld?: unknown }).fileHeld; }
   });
 });
