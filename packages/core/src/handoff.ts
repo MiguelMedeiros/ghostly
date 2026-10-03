@@ -315,19 +315,27 @@ export function readHandoffHave(frame: DeviceFrame): { d: string[]; p: Record<st
   return { d: [...frame.d as string[]], p, more: frame.more === true };
 }
 
-/** A manifest as one side holds it: the parts, which file ids each digest is, and the files left for later. */
+/**
+ * A manifest as one side holds it: the parts to send, the files left for later, and which file ids each digest is,
+ * for every file the giver holds (sent now, sent before, or already on the taker), so the taker writes each file under
+ * the id its records name.
+ */
 export interface HandoffManifest { pass: 1 | 2; parts: HandoffPart[]; ids: Record<string, string[]>; later: HandoffPart[] }
 
 /** `handoff-manifest` (A), in as many frames as it takes. */
 export function handoffManifestFrames(manifest: HandoffManifest): DeviceFrame[] {
-  const parts = sortParts(manifest.parts), later = sortParts(manifest.later);
+  type Entry = ["parts" | "later", HandoffPart] | ["ids", [string, string[]]];
+  const entries: Entry[] = [
+    ...sortParts(manifest.parts).map((p): Entry => ["parts", p]),
+    ...sortParts(manifest.later).map((p): Entry => ["later", p]),
+    ...Object.entries(manifest.ids).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)).map(([digest, ids]): Entry => ["ids", [digest, ids]]),
+  ];
   const frames: DeviceFrame[] = [];
-  const entries: ["parts" | "later", HandoffPart][] = [...parts.map((p) => ["parts", p] as ["parts", HandoffPart]), ...later.map((p) => ["later", p] as ["later", HandoffPart])];
   for (let at = 0; at < entries.length || !frames.length; at += HANDOFF_LIST_PER_FRAME) {
     const slice = entries.slice(at, at + HANDOFF_LIST_PER_FRAME);
-    const ids: Record<string, string[]> = {};
-    for (const [, part] of slice) { const digest = filePartDigest(part[0]); if (digest && manifest.ids[digest]) ids[digest] = manifest.ids[digest]; }
-    frames.push({ t: HANDOFF_MANIFEST, pass: manifest.pass, parts: slice.filter(([k]) => k === "parts").map(([, p]) => p), later: slice.filter(([k]) => k === "later").map(([, p]) => p), ids });
+    const pick = (kind: "parts" | "later") => slice.filter((e) => e[0] === kind).map((e) => e[1] as HandoffPart);
+    const ids = Object.fromEntries(slice.filter((e) => e[0] === "ids").map((e) => e[1] as [string, string[]]));
+    frames.push({ t: HANDOFF_MANIFEST, pass: manifest.pass, parts: pick("parts"), later: pick("later"), ids });
   }
   frames.forEach((frame, i) => { if (i < frames.length - 1) frame.more = true; });
   return frames;

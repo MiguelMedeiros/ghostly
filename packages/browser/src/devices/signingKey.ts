@@ -239,3 +239,16 @@ export async function createDeviceSigningKey(profile: string, options: { forceSe
 export async function forgetDeviceSigningKey(profile: string): Promise<void> {
   await remove(profile);
 }
+
+/**
+ * The same key under another profile name: a handoff installs the profile under a new storage namespace (WISP 06
+ * § Installing the staged state), and the device keeps its key there. The stored object is copied as it is (a
+ * non-extractable `CryptoKey` is cloned by the browser, never exported). A name that already holds a key keeps it;
+ * that key must be the same one, or the copy is refused.
+ */
+export async function copyDeviceSigningKey(from: string, to: string): Promise<void> {
+  const stored = await readStored(from);
+  if (!stored) throw new Error("This device has no signing key for the profile");
+  const kept = await storeOnce({ ...stored, profile: to });
+  if (kept.publicKey !== stored.publicKey) throw new Error("Another signing key is stored under the new name");
+}

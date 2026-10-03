@@ -1,5 +1,5 @@
 import {
-  DEVICES_CAPABILITY, GhostLink, RTC_CONFIG, createIdentity, deviceEchoFrame, deviceEchoNonce, deviceLinkPairing, devicePingFrame, fromBase64Url,
+  DEVICES_CAPABILITY, HANDOFF_CAPABILITY, GhostLink, RTC_CONFIG, createIdentity, deviceEchoFrame, deviceEchoNonce, deviceLinkPairing, devicePingFrame, fromBase64Url,
   type DeviceFrame, type NativeEndpoint, type NativeTransport, type PairedTransport, type PkarrTransport, type PollIntervals, type TurnNetwork,
 } from "@ghostly/core";
 import { enrollmentUnfinished, finishEnrollment } from "./enroll";
@@ -10,6 +10,19 @@ import { loadDeviceSigningKey, type DeviceSigningKey } from "./signingKey";
 import type { DeviceRecord, DeviceState } from "./state";
 import { forgetDevice, readDeviceRecord } from "./store";
 import type { TurnKeeper, TurnOutcome } from "./turn";
+
+/**
+ * What runs the handoff on this device (WISP 06 § The handoff): the giver while the engine runs, the giver and the
+ * taker in device-link-only mode (`handoffStandby.ts`). It gets every `handoff-` frame and every change of a link
+ * that carries `handoff/1`, and answers the pages' `deviceHandoff…` calls.
+ */
+export interface DeviceHandoffHandler {
+  receive(from: string, frame: DeviceFrame): void;
+  linkChanged(key: string, live: boolean): void;
+  /** A page's call, or undefined when the method is not this handler's. */
+  call?(method: string, params: unknown): Promise<unknown> | undefined;
+  stop(): void;
+}
 
 /*
  * The device links of one profile on this device (WISP 06 § Terms, § The gate): one paired session to each other
@@ -91,6 +104,10 @@ export interface DeviceLinksOptions {
   onChange?: (links: DeviceLinkView[]) => void;
   /** The turn record's sources, for `turnKeeper()`. Default: the transport's own, where it has them. */
   turn?: TurnNetwork;
+  /** A taker that lost its settle read steps back (`TurnKeeperOptions.undoStaging`). */
+  undoStaging?: () => Promise<void>;
+  /** Makes who runs the handoff here (device-link-only mode), once the links started. */
+  handoff?: (links: DeviceLinks, host: DeviceLinkHost | null) => Promise<DeviceHandoffHandler | null>;
   /** Tests give their own. */
   readRecord?: (profile: string) => Promise<DeviceRecord | null>;
   loadKey?: (profile: string) => Promise<DeviceSigningKey | null>;
@@ -105,6 +122,8 @@ interface Running {
   link: GhostLink;
   /** The devices capability is agreed on the open session. */
   agreed: boolean;
+  /** `handoff/1` is agreed on the open session. */
+  handoff?: boolean;
   /** The transport the open session runs on. */
   transport?: PairedTransport;
   native: boolean;
@@ -134,6 +153,10 @@ export class DeviceLinks implements DeviceLinkEngine {
   async start(host?: DeviceLinkHost): Promise<void> {
     this.host = host ?? null;
     await this.refresh();
+    if (this.options.handoff) {
+      try { const handler = await this.options.handoff(this, this.host); if (handler && !this.stopped) this.setHandoff(handler); else handler?.stop(); }
+      catch { /* no handoff here: the links still run */ }
+    }
     // An enrollment that a crash or a slow network left before its last step: it finishes now if it can.
     void this.finishEnrollment().catch(() => {});
   }
@@ -218,7 +241,7 @@ export class DeviceLinks implements DeviceLinkEngine {
     const running: Running = { id: want.id, key: want.key, name: want.name, slot: want.slot, earlier: want.earlier, link: null as unknown as GhostLink, agreed: false, native: false, waiting: new Map() };
     running.link = new GhostLink({
       ...deviceLinkPairing(want.d, signer, fromBase64Url(want.key)),
-      deviceCapabilities: [DEVICES_CAPABILITY],
+      deviceCapabilities: [DEVICES_CAPABILITY, HANDOFF_CAPABILITY],
       rtcAvailable: rtc,
       // As a group's link does where one side has no WebRTC: each side says in its own packet what it runs and how
       // to dial it, since a device link has no capability record.
@@ -236,9 +259,17 @@ export class DeviceLinks implements DeviceLinkEngine {
       getHostedHttpService: () => undefined,
       events: {
         onPairingState: (state) => { running.transport = state.status === "ready" ? state.transport : undefined; },
-        onDeviceCapabilities: (agreed) => { running.agreed = agreed.includes(DEVICES_CAPABILITY); this.changed(); },
+        onDeviceCapabilities: (agreed) => {
+          running.agreed = agreed.includes(DEVICES_CAPABILITY);
+          const handoff = agreed.includes(HANDOFF_CAPABILITY);
+          if (handoff !== running.handoff) { running.handoff = handoff; if (!running.earlier) this.handoffLink(running.key, handoff); }
+          this.changed();
+        },
         onDataLinkState: (state) => {
-          if (state !== "open") { running.agreed = false; this.failPings(running, "The device link closed"); }
+          if (state !== "open") {
+            running.agreed = false; this.failPings(running, "The device link closed");
+            if (running.handoff) { running.handoff = false; if (!running.earlier) this.handoffLink(running.key, false); }
+          }
           this.changed();
         },
         onDeviceFrame: (frame) => this.receive(running, frame),
@@ -274,6 +305,8 @@ export class DeviceLinks implements DeviceLinkEngine {
       if (waiter) { running.waiting.delete(nonce); clearTimeout(waiter.timer); waiter.resolve(Date.now() - waiter.sentAt); }
       return;
     }
+    // A link kept under an earlier set's secret carries the new secret, never a handoff.
+    if (frame.t.startsWith("handoff-")) { if (!running.earlier) this.handoff?.receive(running.key, frame); return; }
     await this.options.onFrame?.(running.key, frame);
   }
 
@@ -296,6 +329,31 @@ export class DeviceLinks implements DeviceLinkEngine {
 
   private isLive(running: Running): boolean {
     return running.agreed && running.link.isDataLinkOpen && running.link.supportsDevice(DEVICES_CAPABILITY);
+  }
+
+  private handoff: DeviceHandoffHandler | null = null;
+
+  /** Who runs the handoff here; it is told at once of the links that already carry it. */
+  setHandoff(handler: DeviceHandoffHandler | null): void {
+    this.handoff?.stop();
+    this.handoff = handler;
+    if (handler) for (const running of this.running.values()) if (running.handoff && !running.earlier) handler.linkChanged(running.key, true);
+  }
+
+  private handoffLink(key: string, live: boolean): void {
+    try { this.handoff?.linkChanged(key, live); } catch { /* the handler's own trouble */ }
+  }
+
+  /** The link to that device carries `handoff/1` now. */
+  handoffLive(key: string): boolean {
+    const running = [...this.running.values()].find((r) => r.key === key && !r.earlier);
+    return !!running && running.link.isDataLinkOpen && running.link.supportsDevice(HANDOFF_CAPABILITY);
+  }
+
+  /** The transcript hash of the session open with that device (WISP 401), lower-case hex. */
+  transcript(key: string): string | undefined {
+    const running = [...this.running.values()].find((r) => r.key === key && !r.earlier);
+    return running?.link.sessionTranscriptHash;
   }
 
   /** The links this device holds now. */
@@ -347,7 +405,7 @@ export class DeviceLinks implements DeviceLinkEngine {
     if (this.options.offline) return Promise.resolve(null);
     const network = this.turnNetwork();
     if (!network) return Promise.resolve(null);
-    this.keeper ??= openTurnKeeper(this.options.profile, network, { loadKey: this.options.loadKey }).catch((error: unknown) => { this.keeper = null; throw error; });
+    this.keeper ??= openTurnKeeper(this.options.profile, network, { loadKey: this.options.loadKey, ...(this.options.undoStaging ? { undoStaging: this.options.undoStaging } : {}) }).catch((error: unknown) => { this.keeper = null; throw error; });
     return this.keeper;
   }
 
@@ -360,6 +418,10 @@ export class DeviceLinks implements DeviceLinkEngine {
 
   /** Reads the turn and does what this device's state asks for on the result, then brings the links in line with the record. */
   async checkTurn(atStart = false): Promise<TurnOutcome | null> {
+    // A handoff that freezes this device or takes the turn reads the turn itself: the table's `releasing` row would
+    // make this device active again in the middle of pass 2, and a `taking` one settles through its own take.
+    const record = await (this.options.readRecord ?? readDeviceRecord)(this.options.profile);
+    if (record && ((record.state === "releasing" && record.handoff?.role === "releasing") || (record.state === "taking" && record.handoff?.release))) return null;
     const keeper = await this.turnKeeper();
     if (!keeper) return null;
     const outcome = await keeper.check(atStart);
@@ -395,13 +457,18 @@ export class DeviceLinks implements DeviceLinkEngine {
         return { kind: outcome.kind, ...("screen" in outcome ? { screen: outcome.screen } : {}), ...("device" in outcome && outcome.device ? { device: outcome.device } : {}),
           ...("state" in outcome ? { state: outcome.state } : {}), ...("read" in outcome ? { result: outcome.read.result } : {}) };
       }
-      default: throw new Error(`${DEVICE_GATED_ERROR} (${method} is not available yet)`);
+      default: {
+        const answer = this.handoff?.call?.(method, params);
+        if (answer) return answer;
+        throw new Error(`${DEVICE_GATED_ERROR} (${method} is not available yet)`);
+      }
     }
   }
 
   /** Says goodbye on every link and stops. */
   async stop(): Promise<void> {
     this.stopped = true;
+    this.handoff?.stop();
     await this.refresh();
   }
 }

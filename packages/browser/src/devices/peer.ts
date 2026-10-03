@@ -6,6 +6,7 @@ import { DeviceLinkOnlyServer, type DeviceLinkEngine, type PeerServer } from "./
 import { DeviceLinks } from "./links";
 import { standbyNetwork } from "./network";
 import { readDeviceRecord } from "./store";
+import { standbyHandoff, undoStagingOf } from "./handoffStandby";
 
 /**
  * What device-link-only mode runs for a device that is not the active one (WISP 06 § The gate): its device links,
@@ -20,8 +21,15 @@ export async function standbyEngine(gate: DeviceGate, options: NodeOptions | und
   try { record = await readDeviceRecord(gate.profile); } catch { /* the links read it again, and say why they hold none */ }
   const network = standbyNetwork(record?.network, options?.transport);
   const irohRelays = network.irohRelays ?? [...DEFAULT_IROH_RELAYS];
-  return new DeviceLinks({
+  const links: DeviceLinks = new DeviceLinks({
     profile: gate.profile,
+    // A taker that lost its settle read goes back to its old namespace (WISP 06 § Installing the staged state).
+    undoStaging: () => undoStagingOf(gate.profile),
+    handoff: (running, host) => standbyHandoff({
+      profile: gate.profile, links: running,
+      show: (view) => host?.show(view),
+      take: async (release, turn) => (await running.turnKeeper())?.take(release, turn) ?? null,
+    }),
     offline: network.off,
     transport: network.transport,
     createPeerConnection: network.createPeerConnection,
@@ -31,6 +39,7 @@ export async function standbyEngine(gate: DeviceGate, options: NodeOptions | und
       ...(options?.irohWeb ? { "iroh/1": (seedB64: string) => createIrohWebEndpoint(seedB64, { relays: irohRelays }) } : {}),
     },
   });
+  return links;
 }
 
 /**

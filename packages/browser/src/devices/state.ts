@@ -58,11 +58,43 @@ export interface DeviceRelease {
 export interface DeviceHandoff {
   /** `releasing`: this device gives the turn up. `taking`: it receives it. */
   role: "releasing" | "taking";
-  /** Where the handoff's own state machine stands; the handoff (a later pull request) names its steps. */
+  /** Where the handoff's own state machine stands (`devices/handoff.ts` names its steps). */
   step: string;
   /** The staging namespace the incoming state is written to. */
   staging?: string;
   release?: DeviceRelease;
+  /** The handoff's id, as its frames name it. */
+  id?: string;
+  /** The other device's signing key, base64url. */
+  peer?: string;
+  /** The turn the handoff started at (`N`): the release is for `N + 1`. */
+  from?: number;
+  /**
+   * The handoff's first stream key, base64url: every later session of the same handoff derives its own from it
+   * (`handoffStreamKey`). Secret, as `D` beside it is.
+   */
+  secret?: string;
+  /** When the step began (ms). */
+  at?: number;
+  /** The taker: the namespace it ran before (its frozen copy, or the new profile it enrolled from), to go back to. */
+  old?: string;
+  /** The giver: the taker runs a newer database, so this device must update before it takes the profile back. */
+  newer?: true;
+}
+
+/** A file this device holds in its frozen copy, by digest: what a later pull says it has, and copies instead of fetching. */
+export interface HeldFile {
+  sha256: string;
+  size: number;
+  /** The file's id in the copy's file storage. */
+  id: string;
+}
+
+/** What a giver keeps of a taking device's wrong passwords (`@ghostly/core` `HandoffAttempts`). */
+export interface DeviceAttempts {
+  recent: number[];
+  total: number;
+  until?: number;
 }
 
 /** A file left for later, served over a device link without opening the profile database (written at quiesce). */
@@ -154,6 +186,13 @@ export interface DeviceRecord {
   settle?: { at: number | null; sources: string[] };
   /** Written at quiesce: the files left for later. */
   leftFiles?: LeftFile[];
+  /**
+   * Written at quiesce: every file the frozen copy holds, by digest. A pull says these are here (`handoff-have`) and
+   * copies them into the staged state, without opening the frozen copy's database.
+   */
+  heldFiles?: HeldFile[];
+  /** Wrong passwords of a pull, per taking device's signing key (WISP 06 § Authorizing a handoff). They do not move. */
+  handoffAttempts?: Record<string, DeviceAttempts>;
   /** Written at quiesce: the Breez database to delete once the handoff is done. */
   breezDatabase?: string;
   earlierSets: EarlierDeviceSet[];
@@ -309,6 +348,9 @@ export function parseDeviceRecord(value: unknown): DeviceRecord {
   if (r.handoff !== undefined) {
     const h = r.handoff as Partial<DeviceHandoff> | null;
     if (!h || typeof h !== "object" || (h.role !== "releasing" && h.role !== "taking") || !text(h.step) || !optional(h.staging, text)) return bad("the handoff");
+    if (!optional(h.id, bytes) || !optional(h.peer, bytes) || !optional(h.secret, bytes) || !optional(h.old, text)) return bad("the handoff");
+    if (!optional(h.from, (v): v is number => count(v, 2 ** 32 - 1)) || !optional(h.at, (v): v is number => count(v, Number.MAX_SAFE_INTEGER))) return bad("the handoff");
+    if (h.newer !== undefined && h.newer !== true) return bad("the handoff");
     if (h.release !== undefined) {
       const release = h.release as Partial<DeviceRelease> | null;
       if (!release || typeof release !== "object" || !count(release.turn, 2 ** 32 - 1) || !bytes(release.to) || !bytes(release.h) || !bytes(release.s)) return bad("the release");
@@ -317,6 +359,18 @@ export function parseDeviceRecord(value: unknown): DeviceRecord {
   if (r.leftFiles !== undefined) {
     if (!Array.isArray(r.leftFiles)) return bad("leftFiles");
     for (const file of r.leftFiles as Partial<LeftFile>[]) if (!file || !bytes(file.sha256) || !count(file.size, Number.MAX_SAFE_INTEGER) || !text(file.where)) return bad("a file left for later");
+  }
+  if (r.heldFiles !== undefined) {
+    if (!Array.isArray(r.heldFiles)) return bad("heldFiles");
+    for (const file of r.heldFiles as Partial<HeldFile>[]) if (!file || !bytes(file.sha256) || !count(file.size, Number.MAX_SAFE_INTEGER) || !text(file.id)) return bad("a held file");
+  }
+  if (r.handoffAttempts !== undefined) {
+    const attempts = r.handoffAttempts as Record<string, Partial<DeviceAttempts>> | null;
+    if (!attempts || typeof attempts !== "object" || Array.isArray(attempts) || Object.keys(attempts).length > 16) return bad("handoffAttempts");
+    for (const [key, a] of Object.entries(attempts)) {
+      if (!bytes(key) || !a || typeof a !== "object" || !Array.isArray(a.recent) || a.recent.length > 16 || !a.recent.every((at) => count(at, Number.MAX_SAFE_INTEGER))) return bad("handoffAttempts");
+      if (!count(a.total, 1_000_000) || !optional(a.until, (v): v is number => count(v, Number.MAX_SAFE_INTEGER))) return bad("handoffAttempts");
+    }
   }
   if (r.unfinishedGrants !== undefined) {
     if (!Array.isArray(r.unfinishedGrants) || r.unfinishedGrants.length > MAX_UNFINISHED_GRANTS) return bad("the unfinished grants");

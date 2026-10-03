@@ -63,6 +63,10 @@ export function AddDeviceDialog({ onClose }: { onClose(): void }) {
       if (password.length < DEVICE_SET_PASSWORD_MIN) { setPassword(""); setStep("longer"); return; }
       // A password that is stored with the lock off still leaves the profile open: a device set needs the lock on.
       if (!settings.lockScreen.enabled) updateLockScreen({ enabled: true });
+      // The verifier a pull is checked against is made now: the app has the password in hand only here (WISP 06 § Adding a device).
+      setBusy(true);
+      await engine.call("deviceHandoffVerifier", { password }).catch(() => {});
+      setBusy(false);
       await start();
       return;
     }
@@ -70,6 +74,7 @@ export function AddDeviceDialog({ onClose }: { onClose(): void }) {
     if (problem) { setError(t(problem === "short" ? "devices.password.tooShort" : "devices.password.mismatch")); return; }
     setBusy(true);
     updateLockScreen({ enabled: true, passwordHash: await hashPassword(password) });
+    await engine.call("deviceHandoffVerifier", { password }).catch(() => {});
     setBusy(false);
     await start();
   };

@@ -339,6 +339,44 @@ export class TurnKeeper {
   }
 
   /**
+   * The last step of a handoff (WISP 06 § Shape, step 8): the device is `taking`, holds the release of `turn` (`N + 1`)
+   * and has installed the staged state. It reads the turn, writes the record of `turn` with that release within `P` of
+   * the read, and settles as every device that raises the turn does. Before it wrote, the record it reads at `N` is the
+   * releaser's own, which it already holds: that is no rival. Anything above it (the releaser took the turn back at
+   * `N + 2`, a third device forced it) is, and the table makes it yield (`undoStaging`, then `standby`).
+   *
+   * A device that wrote already (the app stopped while it settled) reads, puts the same stored bytes again, and waits
+   * the whole of `T` from that put. Null for a `single` profile.
+   */
+  take(release: TurnRelease, turn: number): Promise<TurnOutcome | null> {
+    return this.exclusive(async () => {
+      const held = await this.held();
+      if (!held) return null;
+      if (held.record.state !== "taking") throw new Error("Only a device that holds a release takes the turn");
+      const read = await this.readWith(held, true);
+      if (!read.good) return { kind: "wait", read };
+      // A record below the turn the release names is the releaser's (its last, or a later `rev` of it this device never
+      // stored): a release is for the turn above it by construction. One at or above that turn is a rival.
+      const below = (read.result === "other" || read.result === "behind") && !!read.record && read.record.turn < turn;
+      const fresh = read.result === "none" || read.result === "behind" || below;
+      if (held.wrote && held.storedRecord?.turn === turn) {
+        if (read.result !== "mine" && !fresh) return this.settle(held, read, true);
+        held.record = await this.store.amend(this.options.profile, { settle: undefined });
+        await this.put(held, held.stored!, conditionsAfter(read, read.result === "none" ? "none" : "seen"), true);
+        return this.settle(held, await this.readWith(held), true);
+      }
+      // Something other than the releaser's record it already holds: the table says what (yield, a tombstone, wait).
+      if (!fresh) return this.settle(held, read, true);
+      try { await this.writeWith(held, read.conditions, { turn, release }, true); } catch (error) {
+        if (error instanceof TurnClosedError) return this.exhausted(held, "taking", read);
+        if (error instanceof TurnStaleReadError) return { kind: "wait", read };
+        throw error;
+      }
+      return this.settle(held, await this.readWith(held), true);
+    });
+  }
+
+  /**
    * Reads the turn and does what the device's state asks for on the result (`turnAction`), until there is something
    * for the host to do. `atStart`: the read an `active` device makes as a condition of starting. A `single` profile
    * comes back at once, with no read and no put.

@@ -136,7 +136,12 @@ async function readLocal(profile: string): Promise<DeviceRecord | null> {
  * record). The check and the write are one transaction, so two pages or documents cannot both write over the same
  * record. Resolves once the transaction has completed.
  */
-async function swap(profile: string, expected: number | null, record: DeviceRecord | null): Promise<void> {
+function swap(profile: string, expected: number | null, record: DeviceRecord | null): Promise<void> {
+  return swapMany([{ profile, expected, record }]);
+}
+
+/** `swap` of several records in one transaction: all of them are written, or none. */
+async function swapMany(writes: { profile: string; expected: number | null; record: DeviceRecord | null }[]): Promise<void> {
   const db = await openDevicesDb();
   const tx = db.transaction(STORE, "readwrite", { durability: "strict" });
   lastWriteStrict = tx.durability === "strict";
@@ -145,17 +150,20 @@ async function swap(profile: string, expected: number | null, record: DeviceReco
     tx.oncomplete = () => resolve();
     tx.onabort = tx.onerror = () => reject(refused ?? tx.error ?? new Error("The device state could not be saved"));
     const store = tx.objectStore(STORE);
-    const current = store.get(profile);
-    current.onsuccess = () => {
-      const now = current.result as { saved?: unknown } | undefined;
-      const found = now === undefined ? null : typeof now.saved === "number" ? now.saved : NaN;
-      if (found !== expected) {
-        refused = new Error("The device state changed in another window. Nothing was written.");
-        try { tx.abort(); } catch { /* already over */ }
-        return;
-      }
-      if (record) store.put(record); else store.delete(profile);
-    };
+    for (const { profile, expected, record } of writes) {
+      const current = store.get(profile);
+      current.onsuccess = () => {
+        if (refused) return;
+        const now = current.result as { saved?: unknown } | undefined;
+        const found = now === undefined ? null : typeof now.saved === "number" ? now.saved : NaN;
+        if (found !== expected) {
+          refused = new Error("The device state changed in another window. Nothing was written.");
+          try { tx.abort(); } catch { /* already over */ }
+          return;
+        }
+        if (record) store.put(record); else store.delete(profile);
+      };
+    }
   });
 }
 
@@ -250,6 +258,27 @@ function change(profile: string, next: (current: DeviceRecord | null) => DeviceR
     const record = parseDeviceRecord({ ...next(current), saved: (current?.saved ?? 0) + 1 });
     if (mirror) await mirror.write(profile, JSON.stringify(record));
     await swap(profile, current ? current.saved : null, record);
+    return record;
+  });
+}
+
+/**
+ * The first write of an install (WISP 06 § Installing the staged state): the record of a `taking` device, with
+ * `patch`, under its own profile's name and under the staged namespace's name, in one transaction (and on Desktop in
+ * both files first). The registry pointer moves only after this; a crash between the two finds `taking` under
+ * whichever name the registry gives. A record already under the staged name (an install that a crash cut short) is
+ * written over, but only one of this same handoff.
+ */
+export async function installDeviceRecord(profile: string, staged: string, patch: DevicePatch): Promise<DeviceRecord> {
+  return exclusive(async () => {
+    const current = await readDeviceRecord(profile);
+    if (!current || current.state !== "taking") throw new Error("Only a device that takes the turn installs a staged state");
+    const existing = await readDeviceRecord(staged);
+    if (existing && (existing.state !== "taking" || existing.handoff?.id !== current.handoff?.id)) throw new Error("The staged namespace holds another device state");
+    const record = parseDeviceRecord({ ...amend(current, patch), saved: current.saved + 1 });
+    const copy = parseDeviceRecord({ ...record, profile: staged, saved: (existing?.saved ?? 0) + 1 });
+    if (mirror) { await mirror.write(staged, JSON.stringify(copy)); await mirror.write(profile, JSON.stringify(record)); }
+    await swapMany([{ profile, expected: current.saved, record }, { profile: staged, expected: existing ? existing.saved : null, record: copy }]);
     return record;
   });
 }

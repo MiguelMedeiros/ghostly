@@ -28,6 +28,7 @@ import { CATEGORY_PREVIEW, categoryOn } from "../lib/cues";
 import { playSound } from "../lib/sounds";
 import { clearAllData } from "../lib/clearData";
 import { lockPasswordMin, useDeviceSet } from "../lib/devices";
+import { engine } from "@ghostly/browser/platform/engine";
 import {
   hashPassword,
   verifyPassword,
@@ -188,6 +189,8 @@ export function Settings() {
       enabled: true,
       passwordHash: hash,
     });
+    // A profile on several devices: a pull proves this password now, so its verifier is made again while it is typed (WISP 06).
+    if (deviceSet) await engine.call("deviceHandoffVerifier", { password: newPassword }).catch(() => {});
 
     setLockEnabled(true);
     setNewPassword("");

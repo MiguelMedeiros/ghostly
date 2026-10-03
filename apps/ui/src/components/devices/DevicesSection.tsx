@@ -4,6 +4,7 @@ import { useI18n } from "../../contexts/I18nContext";
 import { useDeviceSet } from "../../lib/devices";
 import { Button, Row, Section } from "../wallet/ui";
 import { AddDeviceDialog } from "./AddDeviceDialog";
+import { MoveDialog, useHandoffView } from "./Handoff";
 
 /**
  * Profile, Devices (WISP 06 § User experience): the devices of this profile, which one is active, and Add a device.
@@ -13,6 +14,9 @@ export function DevicesSection() {
   const { t } = useI18n();
   const view = useDeviceSet();
   const [adding, setAdding] = useState(false);
+  const [moving, setMoving] = useState<{ key: string; name: string } | null>(null);
+  const handoff = useHandoffView(!moving);
+  const thisActive = view?.devices.some((device) => device.self && device.active) ?? false;
   const [checked, setChecked] = useState<Record<string, string>>({});
   const check = async (key: string) => {
     setChecked((was) => ({ ...was, [key]: "…" }));
@@ -32,6 +36,7 @@ export function DevicesSection() {
           hint={device.self ? (device.active ? t("devices.section.thisActive") : t("devices.section.thisStandby")) : device.active ? t("devices.section.active") : t("devices.section.standby")}
           value={device.self ? undefined : <span data-testid="device-link-status" data-status={device.status ?? "none"}>{device.status === "live" ? t("devices.section.live") : t("devices.section.connecting")}</span>}>
           {!device.self && device.status === "live" && <>
+            {thisActive && <Button data-testid="device-move" onClick={() => setMoving({ key: device.key, name: device.name })}>{t("devices.handoff.moveTo", { device: device.name })}</Button>}
             <Button data-testid="device-check" onClick={() => void check(device.key)}>{t("devices.section.check")}</Button>
             {checked[device.key] && <span data-testid="device-check-result" className="text-xs text-text-muted">{checked[device.key]}</span>}
           </>}
@@ -40,7 +45,13 @@ export function DevicesSection() {
       {view?.unfinishedGrants?.map((grant) => (
         <Row key={grant.key} testId="device-row-unfinished" label={grant.name} hint={t("devices.section.unfinished")} info={t("devices.section.unfinishedInfo")} />
       ))}
+      {handoff?.failure === "password" && handoff.role === "giver" && (
+        <Row testId="handoff-wrong-password" label={t("devices.handoff.wrongPassword", { device: handoff.device })}>
+          <Button data-testid="handoff-allow" onClick={() => void engine.call("deviceHandoffAllow", { key: handoff.key })}>{t("devices.handoff.allowAgain", { device: handoff.device })}</Button>
+        </Row>
+      )}
       {adding && <AddDeviceDialog onClose={() => setAdding(false)} />}
+      {moving && <MoveDialog device={moving.name} deviceKey={moving.key} onClose={() => setMoving(null)} />}
     </Section>
   );
 }
