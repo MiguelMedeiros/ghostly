@@ -1,0 +1,1 @@
+The on-chain scan of a restore now actually runs: a restore (Bark backup, profile backup, phrase typed in) marks the wallet's record, the next open runs `initialScan` while the page says the wallet is looking, and the mark goes only once a scan finished. Before, a restored wallet opened without it, so on-chain addresses the phrase used before were never looked for.

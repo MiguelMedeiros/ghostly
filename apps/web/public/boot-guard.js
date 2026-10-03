@@ -38,6 +38,7 @@
   var panel = null;
   var done = false;
   var timers = [];
+  var poll = null;
   var observer = null;
 
   function language() {
@@ -188,6 +189,8 @@
     if (done) return;
     done = true;
     for (var i = 0; i < timers.length; i++) clearTimeout(timers[i]);
+    if (poll !== null) clearInterval(poll);
+    poll = null;
     if (observer) observer.disconnect();
     window.removeEventListener("error", onError, true);
     window.removeEventListener("unhandledrejection", onRejection);
@@ -241,10 +244,13 @@
   }
 
   function loaded() {
+    // The app may have drawn before the page finished loading: then the guard is already over.
+    if (done) return;
     watch();
+    if (done) return;
     later(function () { show("timeout"); }, AFTER_LOAD_MS);
     // Without a MutationObserver, and as a second look with one: the app may draw after the guard showed.
-    timers.push(setInterval(check, 500));
+    poll = setInterval(check, 500);
   }
 
   window.addEventListener("error", onError, true);

@@ -8,6 +8,15 @@
     "cancelled": "已取消。未保存任何内容。",
     "chooseFirst": "请先选择一个备份",
     "connected": "已连接 · {{store}}",
+    "content": {
+      "everything": "全部",
+      "everythingSize": "文件：{{size}}",
+      "info": "轻量备份保留聊天和所有消息、联系人、群组、身份、钱包和设置，不包含超过 1 MB 的文件；4 MB 以内的语音消息会保留。恢复后，未包含的文件显示为“不在此备份中”。",
+      "label": "内容",
+      "leftOut": "超过 1 MB 的文件未包含（{{size}}）。",
+      "light": "轻量",
+      "lightSize": "文件：{{size}}。不含 {{left}}。"
+    },
     "download": "下载",
     "downloaded": "已下载 {{name}} · {{size}}",
     "emptyFile": "此文件为空。请选择备份文件。",

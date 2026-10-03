@@ -8,6 +8,7 @@ import { copyDeviceSigningKey } from "./signingKey";
 import type { DevicePatch, DeviceRecord } from "./state";
 import { amendDevice, forgetDevice, installDeviceRecord, moveDevice, readDeviceRecord } from "./store";
 import { DB_VERSION } from "../shared/idb";
+import { dropBreezDatabase } from "../engine/paymentAdapters/providers/breezDatabases";
 
 /*
  * The handoff in device-link-only mode (WISP 06 § The gate, § The handoff): on a device that is not the active one,
@@ -70,25 +71,14 @@ export async function activeAgainIfReleasing(profile: string, show: (view: Devic
 }
 
 /**
- * The Breez databases of wallets that moved away (WISP 06 § Wallets): the SDK keeps its own under the storage name and
- * its tree store beside it (`<name>-tree`); any other database whose name starts with that name (the name carries a
- * hash of the phrase, so nothing else does) goes too, where the browser lists its databases.
+ * The Breez databases of wallets that moved away (WISP 06 § Wallets), each deleted whole (`dropBreezDatabase`: every
+ * database the SDK keeps under the name, `<name>/<network>/<identity>` and its `-tree` beside it, and the old bare
+ * names) with its note in the device's Breez register. Only a delete that succeeded counts: blocked (a page still has
+ * it open) or failed, it rejects, the record keeps the names and it is tried again. A name that is not a Breez
+ * database name is skipped.
  */
-export async function dropBreezDatabases(names: readonly string[], idb: Pick<IDBFactory, "deleteDatabase"> & { databases?: IDBFactory["databases"] } = indexedDB): Promise<void> {
-  const listed = await (idb.databases?.() ?? Promise.resolve([])).catch(() => [] as IDBDatabaseInfo[]);
-  for (const name of names) {
-    if (!/^ghostly-breez-/.test(name)) continue;
-    const found = listed.flatMap((info) => (info.name?.startsWith(name) ? [info.name] : []));
-    for (const database of new Set([name, `${name}-tree`, ...found])) {
-      // Only a delete that succeeded counts: blocked (a page still has it open) or failed, the note stays and it is tried again.
-      await new Promise<void>((resolve, reject) => {
-        const request = idb.deleteDatabase(database);
-        request.onsuccess = () => resolve();
-        request.onerror = () => reject(request.error ?? new Error(`${database} was not deleted`));
-        request.onblocked = () => reject(new Error(`${database} is still open`));
-      });
-    }
-  }
+export async function dropBreezDatabases(names: readonly string[]): Promise<void> {
+  for (const name of names) await dropBreezDatabase(name, { strict: true });
 }
 
 /** The handoff of a device that is not the active one, or null where the app registered no profile host. */

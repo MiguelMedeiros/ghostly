@@ -20,6 +20,9 @@ export class FakeBarkServer {
   /** The chain tip its Esplora reports, and how many blocks a coin lives (Second's Bitcoin server: 4032). */
   tip = 900_000;
   lifetime = 4032;
+  /** The databases whose on-chain part ran its initial scan, once per call; `scan` decides how a scan ends. */
+  scans: string[] = [];
+  scan?: () => Promise<number>;
   /** Bark addresses: `ark1p…` on Bitcoin, `tark1p…` on the test networks. */
   get hrp() { return this.network === "bitcoin" ? "ark1p" : "tark1p"; }
   constructor(public key = "02" + "ab".repeat(32), public network: keyof typeof NETWORK = "signet", readonly tag = "srv") {}
@@ -31,7 +34,8 @@ export class FakeBarkServer {
         let wallet = this.wallets.get(params.database);
         if (!wallet) this.wallets.set(params.database, wallet = new FakeBarkWallet(this, params));
         wallet.freed = false; wallet.connected = false;
-        return { wallet, onchain: { newAddress: async () => `tb1q${params.database.slice(-8)}`, balance: async () => ({ confirmedSats: wallet!.onchain, pendingSats: 0, totalSats: wallet!.onchain }), sync: async () => 0, initialScan: async () => 0, tipHeight: async () => this.tip, free: () => {} } };
+        const initialScan = async () => { this.scans.push(params.database); return this.scan ? this.scan() : 0; };
+        return { wallet, onchain: { newAddress: async () => `tb1q${params.database.slice(-8)}`, balance: async () => ({ confirmedSats: wallet!.onchain, pendingSats: 0, totalSats: wallet!.onchain }), sync: async () => 0, initialScan, tipHeight: async () => this.tip, free: () => {} } };
       },
       isArkAddress: (address) => address.startsWith("tark1p") || address.startsWith("ark1p"),
     };

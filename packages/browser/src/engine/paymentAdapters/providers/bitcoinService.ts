@@ -112,8 +112,12 @@ export class BitcoinService {
       const status = await provider.status(prepared);
       if (status.state === "confirmed" && status.confirmations > 0) return { txid: prepared.txid, settled: true };
       if (status.state === "conflicted") return { txid: prepared.txid, settled: false, failed: true, error: "Another transaction spent these coins: this payment can never confirm" };
-      // Dropped or never arrived: the same signed transaction again. The same inputs cannot pay twice.
-      if (status.state === "missing") await provider.broadcast(prepared).catch(() => {});
+      if (status.state === "missing") {
+        // Only an approved review is ever sent (approval writes `submittedAt`). One that was never approved ends here.
+        if (!review.submittedAt) return { txid: prepared.txid, settled: false, failed: true, error: "This payment was never approved: nothing was sent" };
+        // Dropped or never arrived: the same signed transaction again. The same inputs cannot pay twice.
+        await provider.broadcast(prepared).catch(() => {});
+      }
       return { txid: prepared.txid, settled: false, pending: true };
     },
     release: async (_review, prepared) => {

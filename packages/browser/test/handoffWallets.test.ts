@@ -213,11 +213,18 @@ describe("the strict net under it all", () => {
   });
 
   it("every field of a network's wallets is one the check names: a new one is refused until it is handled", () => {
-    expect(Object.keys(NETWORK_FIELDS).sort()).toEqual(Object.keys({ ...net(), ark: ark(), bark: bark(), fedimint: fedimint(0), spark: spark(), usdt: usdt(), lightning: card(), lightnings: [], bitcoin: bitcoin() } satisfies Required<NetworkWalletsView>).sort());
+    expect(Object.keys(NETWORK_FIELDS).sort()).toEqual(Object.keys({ ...net(), ark: ark(), bark: bark(), fedimint: fedimint(0), spark: spark(), usdt: usdt(), lightning: card(), lightnings: [], bitcoin: bitcoin(), setAside: 0, openSwaps: 0, swapsAmount: 0, unconfirmed: 0 } satisfies Required<NetworkWalletsView>).sort());
     const later = { ...view(), networks: { mainnet: net(), testnet: { ...net(), dogecoin: { balance: 0 } } } } as WalletView;
     expect(why(later)).toBe("wallet");
     const elsewhere = { ...view(), networks: { mainnet: net(), testnet: net(), signet: net() } } as unknown as WalletView;
     expect(why(elsewhere)).toBe("wallet");
+  });
+
+  it("Cashu sats set aside or in a swap the mint has not finished are ecash that moves, with no mint balance left", () => {
+    for (const held of [{ setAside: 21 }, { swapsAmount: 8, openSwaps: 1 }, { unconfirmed: 5 }] as Partial<NetworkWalletsView>[]) {
+      expect(route(view({}, held), "cashu:testnet")).toMatchObject({ route: "moves" });
+    }
+    expect(route(view({}, {}), "cashu:testnet")).toBeUndefined();
   });
 
   it("an amount field in a place this build does not name, anywhere in the view, is money", () => {

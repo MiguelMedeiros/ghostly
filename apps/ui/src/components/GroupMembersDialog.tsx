@@ -64,8 +64,10 @@ export function GroupMembersDialog({ group, onClose, focusKey }: { group: GroupV
   };
   const contactKey = (key: string) => contactOf(key)?.peerPubKeyZ32;
   // In a community my app holds an edge only with a hub or two (as a hub, with its members): everyone else is reached
-  // through the hubs, which is not "not reachable".
-  const viaHubs = (m: GroupMemberView) => live.profile === "community" && !m.me && !m.edge;
+  // through the hubs, which is not "not reachable". That holds for a hub my edge to is not up (yet, or any more) while
+  // another edge is: what it says still comes through the hub I am linked to. With no edge up, each edge says its own state.
+  const linked = live.members.some(m => m.edge?.state === "open");
+  const viaHubs = (m: GroupMemberView) => live.profile === "community" && !m.me && (!m.edge || (linked && m.edge.state !== "open"));
   const photoOf = (m: GroupMemberView) => memberPhoto(live, m, state?.links, faces, state?.settings.avatar);
   // The member whose name or picture was tapped in the chat: their row, in sight and marked.
   const list = useRef<HTMLUListElement>(null);

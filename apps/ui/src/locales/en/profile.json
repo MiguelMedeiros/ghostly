@@ -8,6 +8,15 @@
     "cancelled": "Cancelled. Nothing was saved.",
     "chooseFirst": "Choose a backup first",
     "connected": "Connected · {{store}}",
+    "content": {
+      "everything": "Everything",
+      "everythingSize": "Files: {{size}}",
+      "info": "Light keeps chats and every message, contacts, groups, identities, wallets and settings. It leaves out the files over 1 MB; voice messages up to 4 MB stay. After a restore, each file left out shows as Not in this backup.",
+      "label": "Contents",
+      "leftOut": "Files over 1 MB were left out ({{size}}).",
+      "light": "Light",
+      "lightSize": "Files: {{size}}. Leaves out {{left}}."
+    },
     "download": "Download",
     "downloaded": "Downloaded {{name}} · {{size}}",
     "emptyFile": "This file is empty. Choose a backup file.",

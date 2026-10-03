@@ -8,6 +8,15 @@
     "cancelled": "Cancelado. No se guardó nada.",
     "chooseFirst": "Elige primero una copia",
     "connected": "Conectado · {{store}}",
+    "content": {
+      "everything": "Todo",
+      "everythingSize": "Archivos: {{size}}",
+      "info": "La ligera guarda los chats y todos los mensajes, contactos, grupos, identidades, monederos y ajustes. Deja fuera los archivos de más de 1 MB; los mensajes de voz de hasta 4 MB se quedan. Tras restaurar, cada archivo dejado fuera aparece como No está en esta copia.",
+      "label": "Contenido",
+      "leftOut": "Los archivos de más de 1 MB se dejaron fuera ({{size}}).",
+      "light": "Ligera",
+      "lightSize": "Archivos: {{size}}. Deja fuera {{left}}."
+    },
     "download": "Descargar",
     "downloaded": "Descargado {{name}} · {{size}}",
     "emptyFile": "Este archivo está vacío. Elige un archivo de copia.",

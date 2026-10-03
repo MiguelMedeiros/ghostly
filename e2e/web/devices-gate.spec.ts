@@ -86,8 +86,9 @@ test("a profile on standby on this device opens no peer database, asks no relay 
   await page.waitForTimeout(6_000);
   expect(asked).toEqual([]);
   expect(errors).toEqual([]);
-  // The peer database was never opened: only the device state was read.
-  expect(await opens(page)).toEqual(["ghostly-devices"]);
+  // The peer database was never opened: only the device state was read, and the words the push worker shows on this
+  // device were written beside it, in a database of the push worker's own (WISP 06 § Push and the phone).
+  expect((await opens(page)).filter((name) => name !== "ghostly-wake")).toEqual(["ghostly-devices"]);
   // And nothing was written into the copy this device keeps.
   expect(await profileStorage(page)).toBe(kept);
   alice.context.off("request", count);

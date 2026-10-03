@@ -1,13 +1,17 @@
 import { act, screen, within } from "@testing-library/react";
+import { useSyncExternalStore } from "react";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { LinkView } from "@ghostly/browser/shared/types";
+import { engine } from "@ghostly/browser/platform/engine";
 import { ChatConnection } from "../../components/ChatConnection";
 import { PairingScene } from "../../components/pairing/PairingScene";
 import { CELEBRATE_MS, usePairingProgress } from "../../hooks/usePairingProgress";
+import { contactStatus } from "../../lib/contactStatus";
 import { deriveStage, failureReason, formatElapsed, type PairingProgress } from "../../lib/pairingProgress";
+import type { PeerLinkState } from "../../lib/platform";
 import { loadSettings, saveSettings } from "../../lib/settings";
 import { MOTION_REST_MS } from "../../lib/windowAway";
 import { fakeEngine, linkView } from "../fakeEngine";
@@ -181,6 +185,73 @@ describe("the joiner's scene", () => {
   });
 });
 
+describe("one sequence that only moves forward", () => {
+  const report = (patch: Partial<PairingProgress>): Partial<LinkView> =>
+    ({ ...published, pairingProgress: { role: "inviter", stage: "waiting", since: Date.now(), startedAt: Date.now(), attempt: 1, ...patch } } as Partial<LinkView>);
+  const step = () => scene()?.dataset.step;
+  const icon = () => screen.getByTestId("connection-options");
+
+  it("is the same scene from the first stage to the connected moment: it never leaves and comes back as it goes live", () => {
+    const { engine } = renderApp(<Pairing inviter />);
+    show(published, engine);
+    const first = scene();
+    const removed: Node[] = [];
+    const watch = new MutationObserver(records => { for (const r of records) removed.push(...r.removedNodes); });
+    watch.observe(document.body, { childList: true, subtree: true });
+    for (const link of [knocked, connecting, live]) show(link, engine);
+    watch.disconnect();
+    expect(scene()).toHaveAttribute("data-stage", "live");
+    expect(scene()).toBe(first);
+    expect(removed.some(node => node === first || (node instanceof Element && node.querySelector("[data-testid=pairing-scene]")))).toBe(false);
+    expect(screen.queryByText("the chat")).toBeNull();
+  });
+
+  it("an inviter that knocks itself is at its handshake step, never at no step", () => {
+    const { engine } = renderApp(<Pairing inviter />);
+    show(report({ stage: "waiting" }), engine);
+    expect(step()).toBe("1");
+    show(report({ stage: "waiting", peerSeen: true }), engine);
+    expect(currentStep()).toBe("answering");
+    show(report({ stage: "knocking", peerSeen: true }), engine);
+    expect(label()).toBe("Knocking on your contact's door…");
+    expect(currentStep()).toBe("answering");
+    expect(icon()).toHaveAttribute("data-pairing", "knocking");
+  });
+
+  it("an attempt that fails takes the engine back between attempts, not the steps", () => {
+    const { engine } = renderApp(<Pairing inviter />);
+    show(report({ stage: "connecting", peerSeen: true }), engine);
+    expect(step()).toBe("3");
+    show(report({ stage: "waiting", peerSeen: true, attempt: 2, detail: "No connection came up; trying again." }), engine);
+    expect(step()).toBe("3");
+    expect(currentStep()).toBe("connecting");
+    expect(label()).toBe("Opening a direct, encrypted link…");
+    expect(screen.getByTestId("pairing-elapsed")).toHaveTextContent("attempt 2");
+  });
+
+  it("keeps one clock for the whole pairing: a new stage does not start it over", () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "Date"] });
+    const start = Date.now();
+    const { engine } = renderApp(<Pairing inviter={false} />);
+    show(report({ role: "joiner", stage: "resolving", startedAt: start, since: start }), engine);
+    act(() => vi.advanceTimersByTime(14_000));
+    expect(screen.getByTestId("pairing-elapsed")).toHaveTextContent("0:14");
+    show(report({ role: "joiner", stage: "knocking", startedAt: start, since: Date.now() }), engine);
+    expect(screen.getByTestId("pairing-elapsed")).toHaveTextContent("0:14");
+    act(() => vi.advanceTimersByTime(2_000));
+    expect(screen.getByTestId("pairing-elapsed")).toHaveTextContent("0:16");
+  });
+
+  it("the icon tells the scene's pairing, even while texts already go over the DHT", () => {
+    const { engine } = renderApp(<Pairing inviter={false} />);
+    show({ ...report({ role: "joiner", stage: "knocking", peerSeen: true }), peerOnline: true, textDelivery: "dht" }, engine);
+    expect(scene()).toHaveAttribute("data-stage", "knocking");
+    expect(icon()).toHaveAttribute("data-pairing", "knocking");
+    expect(icon()).toHaveAttribute("data-state", "waiting");
+    expect(icon()).toHaveAccessibleName("Connection options: Pairing · Knocking on your contact's door…");
+  });
+});
+
 describe("which chats get the scene", () => {
   // An existing chat opens with its link already in the engine's state.
   const opened = (link: Partial<LinkView>, inviter: boolean) => {
@@ -213,6 +284,15 @@ describe("which chats get the scene", () => {
     expect(label()).toBe("Connected");
   });
 
+  it("not a chat made before this page loaded, whose link the engine has not brought back yet (a reload): it waits for its link", () => {
+    const { engine } = renderApp(<Pairing inviter={false} createdAt={performance.timeOrigin - 20_000} />);
+    expect(scene()).toBeNull();
+    show({ ...published, peerParticipationKey: "p" }, engine);
+    expect(scene()).toBeNull();
+    show(live, engine);
+    expect(scene()).toBeNull();
+  });
+
   it("not an old chat whose link is missing", () => {
     renderApp(<Pairing inviter={false} createdAt={Date.now() - 2 * 3600_000} />);
     expect(scene()).toBeNull();
@@ -225,9 +305,10 @@ describe("the engine's own report (the pairing-progress contract)", () => {
 
   it("wins over what the link's fields suggest, with its times and attempt", () => {
     const { engine } = renderApp(<Pairing inviter />);
-    show(report({ since: Date.now() - 20_000, attempt: 2 }), engine);
+    // The clock is the pairing's (from `startedAt`); the stage's own time (`since`) only says when it is slow.
+    show(report({ since: Date.now() - 20_000, startedAt: Date.now() - 65_000, attempt: 2 }), engine);
     expect(label()).toBe("Knocking on your contact's door…");
-    expect(screen.getByTestId("pairing-elapsed")).toHaveTextContent("0:20 · attempt 2");
+    expect(screen.getByTestId("pairing-elapsed")).toHaveTextContent("1:05 · attempt 2");
     expect(screen.getByTestId("pairing-slow")).toHaveTextContent("Your contact's app has not answered yet");
   });
 
@@ -321,6 +402,26 @@ describe("the connection icon while pairing (the header's only connection elemen
   });
 });
 
+describe("texts on the DHT while the scene still pairs (an app with no WebRTC, before a native transport is up)", () => {
+  /** Chat.tsx's header: the pairing while it is on, and the delivery state (`contactStatus`) as `data-status`. */
+  function Header() {
+    const p = usePairingProgress("peer", { inviter: false, enabled: true, createdAt: Date.now() });
+    const link = useSyncExternalStore(listener => engine.subscribe(listener), () => engine.state)?.links[0];
+    return <ChatConnection peerKey="peer" status={contactStatus(link as unknown as PeerLinkState, true, "online")}
+      pairing={p.show && p.progress && p.progress.stage !== "live" ? { progress: p.progress } : undefined} />;
+  }
+
+  // e2e/desktop/native-upgrade.spec.ts reads this to know the joiner was on the DHT before it went live natively.
+  it("the label tells the pairing, as the scene does; data-status says the texts go over the DHT", () => {
+    const app = renderApp(<Header />);
+    show({ ...published, textDelivery: "dht" }, app.engine);
+    const icon = screen.getByTestId("connection-options");
+    expect(icon).toHaveAttribute("data-pairing", "resolving");
+    expect(icon).toHaveAccessibleName("Connection options: Pairing · Looking up the invite on the network…");
+    expect(icon).toHaveAttribute("data-status", "On DHT · retrying live");
+  });
+});
+
 describe("a pairing that ends on the DHT (WISP 400)", () => {
   /** Chat.tsx's split: the pairing in the connection icon while `show`, the scene only while `scene`. */
   function Chat() {
@@ -407,13 +508,16 @@ describe("the connected sound", () => {
     expect(scene()).toBeNull();
   });
 
-  it("not for a pairing that ends on the DHT; its first live link, if one comes up later, is the connected moment", () => {
+  it("not for a pairing that ends on the DHT; its first live link, if one comes up later, is heard, and the scene stays away", () => {
     const { engine } = renderApp(<Pairing inviter={false} createdAt={Date.now()} />);
     const report = (stage: PairingProgress["stage"]) => ({ ...published, pairingProgress: { role: "joiner", stage, reason: stage === "on-dht" ? "transport" : undefined, since: Date.now(), startedAt: Date.now(), attempt: 2 } } as Partial<LinkView>);
+    show(report("connecting"), engine);
+    expect(scene()).toHaveAttribute("data-stage", "connecting");
     show(report("on-dht"), engine);
     expect(sounds()).toEqual([]);
+    // The chat took over at on-dht: the scene does not come back to celebrate a live link that came later.
     show(report("live"), engine);
-    expect(scene()).toHaveAttribute("data-stage", "live");
+    expect(scene()).toBeNull();
     expect(sounds()).toEqual(["connected"]);
   });
 
@@ -514,6 +618,59 @@ describe("motion", () => {
     expect(css).toMatch(/:root\[data-reduce-motion="true"\] \.ps\[data-stage="knocking"\] :is\(\.ps-route-up, \.ps-route-low\)/);
     expect(css).toMatch(/\.ps\[data-paused\] \*, \.ps\[data-paused\] \{ animation-play-state: paused !important; \}/);
     expect(css).toMatch(/\.ps\[data-still\]\[data-stage="knocking"\] :is\(\.ps-route-up, \.ps-route-low\)/);
+  });
+});
+
+describe("a chat that already delivers over the DHT ends its scene, whatever the engine's pairing still says", () => {
+  /** Chat.tsx's split: the icon while `show` (until live), the scene only while `scene`. */
+  function Chat({ inviter = false }: { inviter?: boolean }) {
+    const p = usePairingProgress("peer", { inviter, enabled: true, createdAt: Date.now() });
+    return <>
+      <ChatConnection peerKey="peer" pairing={p.show && p.progress && p.progress.stage !== "live" ? { progress: p.progress } : undefined} />
+      {p.scene && p.progress ? <PairingScene progress={p.progress} contact="Alice" retry={() => {}} retrying={false} retryError="" /> : <p>the chat</p>}
+    </>;
+  }
+  const chosen = { dhtDelivery: { peerMode: "dht" } } as Partial<LinkView>;
+  const icon = () => screen.getByTestId("connection-options");
+
+  it("the joiner of a contact who chose DHT only: at once, and the icon says so", () => {
+    const { engine } = renderApp(<Chat />);
+    show(published, engine);
+    expect(scene()).toHaveAttribute("data-stage", "resolving");
+    // Still "resolving" for the engine: no stream will ever be tried, and texts go over the DHT.
+    show({ ...published, ...chosen, textDelivery: "dht" }, engine);
+    expect(scene()).toBeNull();
+    expect(icon()).toHaveAttribute("data-pairing", "on-dht");
+    expect(icon()).toHaveAccessibleName("Connection options: DHT only · chosen by your contact");
+  });
+
+  it("no live attempt under way (an app with no WebRTC, before its native link): after a short wait; one under way keeps the steps", () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "Date"] });
+    const { engine } = renderApp(<Chat />);
+    show({ ...knocked, dataLink: "offering", textDelivery: "dht" }, engine);
+    act(() => vi.advanceTimersByTime(30_000));
+    expect(scene()).toHaveAttribute("data-stage", "answering");
+    expect(icon()).toHaveAttribute("data-pairing", "answering");
+    show({ ...published, textDelivery: "dht" }, engine);
+    act(() => vi.advanceTimersByTime(5_000));
+    expect(scene()).not.toBeNull();
+    act(() => vi.advanceTimersByTime(5_100));
+    expect(scene()).toBeNull();
+    expect(icon()).toHaveAttribute("data-pairing", "on-dht");
+    expect(icon()).toHaveAccessibleName("Connection options: On DHT · retrying live");
+    // The live link that comes later is the chat's connection: no scene, no celebration.
+    show(live, engine);
+    expect(scene()).toBeNull();
+    expect(icon()).toHaveAccessibleName("Connection options: Connected · WebRTC");
+  });
+
+  it("the inviter too, once its contact is there and texts go over the DHT", () => {
+    const { engine } = renderApp(<Chat inviter />);
+    show(published, engine);
+    expect(scene()).toHaveAttribute("data-stage", "waiting");
+    show({ ...knocked, ...chosen, textDelivery: "dht" }, engine);
+    expect(scene()).toBeNull();
+    expect(icon()).toHaveAccessibleName("Connection options: DHT only · chosen by your contact");
   });
 });
 

@@ -14,7 +14,7 @@ export function databaseName(): string {
   return dbName;
 }
 /** The schema this build reads and writes. A database stored at a higher one is a newer build's: it is never opened. */
-export const DB_VERSION = 11;
+export const DB_VERSION = 13;
 
 /**
  * Why the profile's database did not open. `newer`: a newer Ghostly stored it (IndexedDB never opens a database below
@@ -108,6 +108,8 @@ export const STORES = {
   quotes: "quotes",
   walletTx: "walletTx",
   melts: "melts",
+  /** Swaps at a mint that have not finished (`PendingSwap`): what gets their outputs back when an answer is missed. */
+  swaps: "swaps",
   intents: "paymentIntents",
   /** Private groups (WISP 900): membership chain, epoch secrets and my own recent messages, by group id. */
   groups: "groups",
@@ -142,6 +144,8 @@ export interface StoredFile {
   transfer?: { state: "transferring" | "done" | "failed"; transferred: number; size: number; error?: string };
   /** files/3: the transfer's own record (`@ghostly/core` `FileTransferRecord`), kept so it resumes after a restart. */
   wire3?: import("@ghostly/core").FileTransferRecord;
+  /** Its bytes were left out of the light backup this profile was restored from (WISP 05 § Light backups). */
+  leftOut?: boolean;
 }
 
 /** The fields of a stored file that change after it is stored: kept in `STORES.fileState`, read over the record's own. */
@@ -201,6 +205,10 @@ export function openDb(): Promise<IDBDatabase> {
       // v11: the messages that carry a status card, by the card's kind, across every chat and group (the Tasks board).
       // A message without a card has no such key and is not in it, so the index is as small as the cards are few.
       if (!messages.indexNames.contains(CARD_INDEX)) messages.createIndex(CARD_INDEX, "card.kind");
+      // v12: swaps at a mint, written down before the mint is asked.
+      if (!has(STORES.swaps)) db.createObjectStore(STORES.swaps, { keyPath: "id" });
+      // v13: no change of the schema. A build from here can hold a frozen copy of a profile on a standby device (WISP 06
+      // § Compatibility and rollout): the step keeps an older build (1.0.3 reads 12) from opening and starting one.
     };
     request.onsuccess = () => {
       // Opened after it was said to be blocked: nobody uses this connection, and it must not block the next open.

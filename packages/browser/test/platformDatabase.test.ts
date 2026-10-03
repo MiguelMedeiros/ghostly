@@ -40,7 +40,7 @@ describe("opening the database", () => {
       old.createObjectStore("proofs", { keyPath: "secret" }).put({ secret: "s1", amount: 8 });
     });
     const opened = await idb.openDb();
-    expect(opened.version).toBe(11);
+    expect(opened.version).toBe(13);
     expect([...opened.objectStoreNames].sort()).toEqual(Object.values(idb.STORES).sort());
     expect((await db.getLinks()).map((l) => l.id)).toEqual(["kept"]);
     expect(await count(idb.STORES.proofs)).toBe(1);

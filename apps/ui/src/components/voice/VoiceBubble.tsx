@@ -3,7 +3,7 @@ import { formatVoiceDuration, type VoiceMeta } from "@ghostly/core";
 import { useOptionalI18n, useT } from "../../contexts/I18nContext";
 import { useTransfer } from "../../hooks/useServicesPlatform";
 import { languageTag } from "../../lib/documentLanguage";
-import { canRetryFile, fileStatus, stalledAction } from "../../lib/fileStatus";
+import { canRetryFile, fileHeld, fileStatus, stalledAction } from "../../lib/fileStatus";
 import type { ChatFile } from "../../lib/types";
 import {
   applyVoiceRate,
@@ -148,7 +148,11 @@ export function VoiceBubble({ file, sender, peerName: named }: { file: ChatFile 
     loadingRef.current ??= (async () => {
       const blob = await platform?.getFile(file.id);
       if (!mountedRef.current) return null;
-      if (!blob) { setProblem(t("chat.file.gone")); return null; }
+      if (!blob) {
+        const leftOut = platform && (await fileHeld(platform, file.id, false)) === "left-out";
+        if (mountedRef.current) setProblem(t(leftOut ? "chat.file.notInBackup" : "chat.file.gone"));
+        return null;
+      }
       blobRef.current = blob;
       const audio = new Audio();
       audio.preload = "auto";

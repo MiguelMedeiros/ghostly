@@ -3,7 +3,7 @@ import { S3Store, type S3Config } from "@ghostly/browser/backup/s3";
 import { backupName, newSpace, type StoredBackup } from "@ghostly/browser/backup/storage";
 import { useSettings } from "../contexts/SettingsContext";
 import { useI18n } from "../contexts/I18nContext";
-import { backupProtectionOf, isCancelled, openProfileBackup, restoreOpenedBackup, sameIdentityProfiles, writeProfileBackup, type BackupInput, type BackupResult, type OpenedProfileBackup } from "../lib/profileBackup";
+import { backupProtectionOf, isCancelled, openProfileBackup, profileBackupSizes, restoreOpenedBackup, sameIdentityProfiles, writeProfileBackup, type BackupInput, type BackupResult, type BackupSizes, type OpenedProfileBackup } from "../lib/profileBackup";
 import { backUpToFile, byteSize, stageBackup } from "../lib/backupFile";
 import { switchProfile, type ProfileEntry } from "../lib/profiles";
 import { guardRestore, restoreForTakeover, type RestoreGuard } from "../lib/restoreGuard";
@@ -18,6 +18,8 @@ import { ButtonGroup, Field, FieldGrid, InputGroup, Truncate } from "./layout";
 const EMPTY_S3: S3Config = { endpoint: "", region: "us-east-1", bucket: "", prefix: "ghostly", accessKeyId: "", secretAccessKey: "" };
 type Open = "none" | "backup" | "restore" | "s3";
 type Protection = "passphrase" | "none";
+/** Everything, or a light backup: everything but the bytes of larger files (WISP 05 § Light backups). */
+type Content = "everything" | "light";
 
 /**
  * Backups of the whole profile (WISP 05) to a file or S3-compatible storage (WISP 1000). A restore always
@@ -43,6 +45,15 @@ export function ProfileBackups({ canSwitch, openBackup = false }: { canSwitch: b
   // A backup is sealed with a passphrase unless the person chooses otherwise, and says so once more.
   const [protection, setProtection] = useState<Protection>("passphrase"), [understood, setUnderstood] = useState(false);
   const [done, setDone] = useState("");
+  const [content, setContent] = useState<Content>("everything");
+  // What each kind of backup would carry of the files' bytes, read from the file store once Back up is open.
+  const [sizes, setSizes] = useState<BackupSizes | null>(null);
+  useEffect(() => {
+    if (open !== "backup") return;
+    let current = true;
+    void profileBackupSizes().then((found) => { if (current) setSizes(found); }).catch(() => {});
+    return () => { current = false; };
+  }, [open]);
   const [from, setFrom] = useState<"file" | "s3">("file");
   const [file, setFile] = useState<File | null>(null), [fileProtection, setFileProtection] = useState<Protection>("passphrase");
   const [listing, setListing] = useState<StoredBackup[] | null>(null), [picked, setPicked] = useState("");
@@ -62,8 +73,11 @@ export function ProfileBackups({ canSwitch, openBackup = false }: { canSwitch: b
   const realMoney = Object.values(wallet?.getState()?.backupReminders ?? {}).some((record) => record.funded !== undefined);
 
   /** What is said after a backup: where it went, and what could not go with it. */
-  const madeText = (text: string, result: BackupResult) =>
-    result.skipped ? `${text} ${result.skipped === 1 ? t("profile.backups.skippedOne") : t("profile.backups.skipped", { count: result.skipped })}` : text;
+  const madeText = (text: string, result: BackupResult) => [
+    text,
+    result.leftOut ? t("profile.backups.content.leftOut", { size: byteSize(result.leftOutBytes ?? 0) }) : "",
+    result.skipped ? (result.skipped === 1 ? t("profile.backups.skippedOne") : t("profile.backups.skipped", { count: result.skipped })) : "",
+  ].filter(Boolean).join(" ");
   /** Runs a backup or restore under the progress bar. Cancelled, it says so and nothing more. */
   const underProgress = (kind: "backup" | "restore", isSealed: boolean, work: (signal: ReturnType<typeof start>) => Promise<void>) => run(async () => {
     setDone("");
@@ -74,7 +88,7 @@ export function ProfileBackups({ canSwitch, openBackup = false }: { canSwitch: b
   });
 
   const backup = (to: "file" | "s3") => underProgress("backup", sealed, async (watch) => {
-    const options = { passphrase: sealed ? passphrase : null, ...watch };
+    const options = { passphrase: sealed ? passphrase : null, light: content === "light", ...watch };
     const name = backupName(space());
     if (to === "s3" && s3) {
       // S3 takes the bundle in one signed request: it is staged as it is made, then read once to send.
@@ -146,6 +160,13 @@ export function ProfileBackups({ canSwitch, openBackup = false }: { canSwitch: b
     <Section title={t("profile.backups.title")} testId="profile-backups">
       {job && <BackupProgress job={job} onCancel={cancel} />}
       <Row label={t("profile.backups.backUp")} hint={t("profile.backups.backUpHint")} info={t("profile.backups.holds")}><Button data-testid="backup-open" onClick={() => toggle("backup")}>{open === "backup" ? t("common.close") : t("profile.backups.backUpOpen")}</Button></Row>
+      {open === "backup" && (
+        <Field testId="backup-content" label={t("profile.backups.content.label")} info={t("profile.backups.content.info")}
+          hint={sizes && <span data-testid="backup-content-size">{content === "light" ? t("profile.backups.content.lightSize", { size: byteSize(sizes.light), left: byteSize(sizes.leftOutBytes) }) : t("profile.backups.content.everythingSize", { size: byteSize(sizes.everything) })}</span>}>
+          <Segmented label={t("profile.backups.content.label")} value={content} onChange={setContent}
+            options={[{ value: "everything", label: t("profile.backups.content.everything") }, { value: "light", label: t("profile.backups.content.light") }]} />
+        </Field>
+      )}
       {open === "backup" && (
         <Block>
           <Segmented label={t("profile.backups.protection.label")} value={protection} onChange={(next) => { setProtection(next); setUnderstood(false); setError(""); }}

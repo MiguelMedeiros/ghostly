@@ -287,6 +287,98 @@ test("ecash paid to a request and taken back leaves the request to be paid again
   await expect.poll(() => balanceOf(bob.page)).toBe(100);
 });
 
+// A redeem is written down before the mint is asked. Here the tab closes while the mint is answering: the app that
+// opens next asks the mint what it did, and finishes from there.
+test("a payment whose redeem is cut off at the mint is in the wallet when the app opens again", { tag: ["@feature:wallet.cashu.receive-token", "@feature:payments.cashu.send", "@feature:payments.chat.reconcile"] }, async ({ peer }) => {
+  const [alice, bob] = await chatting(peer, "cut-redeem-alice", "cut-redeem-bob");
+  await fund(alice);
+  await expect.poll(() => balanceOf(alice.page)).toBe(TEST_COINS);
+  for (const p of [alice, bob]) await openChat(p);
+  // Bob's swap reaches the mint, which makes it; the answer is held back for good.
+  let held = true;
+  let made = 0;
+  await bob.context.route(/^https:\/\/testnut\.cashu\.space\/v1\/swap/, async (route) => {
+    if (!held) return route.fallback();
+    const answer = await route.fetch({ url: `${mintEndpoint()}/v1/swap` });
+    if (answer.ok()) made++;
+    await new Promise<void>(() => {});
+  });
+
+  const review = await prepareSend(alice, 21);
+  await review.getByRole("button", { name: "Approve payment" }).click();
+  await expect.poll(() => made).toBe(1);
+  await expect(chat(bob).getByTestId("payment-bubble"), "no answer, so nothing to show yet").toHaveCount(0);
+
+  // The tab goes with the swap unanswered; the mint answers the app that opens next.
+  held = false;
+  await bob.page.reload();
+  await expect(bob.page.getByTitle("New Chat")).toBeVisible();
+
+  // The ecash is Bob's, with its payment in the chat, once.
+  const got = bubble(bob, "Sent you");
+  await expect(got.getByTestId("payment-state")).toHaveText(/Received/);
+  await expect(got).toContainText(/21\s*test sats/);
+  await expect(got).toHaveCount(1);
+  await expect(bubble(alice, "You sent").getByTestId("payment-state")).toHaveText(/Received/);
+  await openWallet(bob, "cashu-testnet");
+  await expect.poll(() => balanceOf(bob.page)).toBe(21);
+  await bob.page.getByTestId("wallet-history").click();
+  await expect(bob.page.getByTestId("wallet-tx")).toHaveCount(1);
+  expect(made, "one swap at the mint: the answer was asked for again, not the swap").toBe(1);
+});
+
+// Sats a payment holds while the mint has not answered are not in the balance, and not gone: the wallet says so.
+test("sats held for a payment the mint has not answered show as set aside, and come back", { tag: ["@feature:payments.cashu.send", "@feature:wallet.cashu.mint.manage"] }, async ({ peer }) => {
+  const [alice, bob] = await chatting(peer, "aside-alice", "aside-bob");
+  await fund(alice);
+  await expect.poll(() => balanceOf(alice.page)).toBe(TEST_COINS);
+  for (const p of [alice, bob]) await openChat(p);
+  // Alice's swap never reaches the mint.
+  let held = true;
+  await alice.context.route(/^https:\/\/testnut\.cashu\.space\/v1\/swap/, (route) => (held ? new Promise<void>(() => {}) : route.fallback()));
+  const review = await prepareSend(alice, 21);
+  await review.getByRole("button", { name: "Approve payment" }).click();
+
+  await openWallet(alice, "cashu-testnet");
+  const aside = alice.page.getByTestId("wallet-set-aside");
+  await expect(aside).toContainText(/set aside/);
+  await expect.poll(() => balanceOf(alice.page)).toBeLessThan(TEST_COINS);
+  await alice.page.getByTestId("wallet-set-aside-info").click();
+  await expect(alice.page.getByTestId("wallet-set-aside-text")).toContainText("the mint has not confirmed yet");
+  held = false;
+});
+
+// The wallet's ecash, copied as a backup and redeemed in another wallet: the copy here is spent. A payment that picks it
+// ends at once, saying so, and the balance becomes what the mint still holds.
+test("a payment from ecash spent somewhere else ends with that reason, and the balance is what the mint holds", { tag: ["@feature:payments.cashu.send", "@feature:payments.chat.review", "@feature:wallet.cashu.export"] }, async ({ peer }) => {
+  const [alice, bob] = await chatting(peer, "elsewhere-alice", "elsewhere-bob");
+  await fund(alice);
+  await expect.poll(() => balanceOf(alice.page)).toBe(TEST_COINS);
+
+  // "Copy backup", and the tokens redeemed outside Ghostly, straight at the mint.
+  await alice.page.getByRole("button", { name: "Copy backup" }).click();
+  await expect(alice.page.getByText(/Backup copied/)).toBeVisible();
+  const tokens = (await alice.page.evaluate(() => navigator.clipboard.readText())).split("\n").filter(Boolean);
+  const { Wallet } = await import("@cashu/cashu-ts");
+  const elsewhere = new Wallet(mintEndpoint(), { unit: "sat" });
+  await elsewhere.loadMint();
+  // The tokens name the public test mint, which this mint answers for: its proofs are handed over as they are.
+  for (const token of tokens) await elsewhere.receive(elsewhere.decodeToken(token).proofs);
+
+  for (const p of [alice, bob]) await openChat(p);
+  const review = await prepareSend(alice, 21);
+  await review.getByRole("button", { name: "Approve payment" }).click();
+  await expect(alice.page.getByText(/already spent somewhere else/).first()).toBeVisible();
+  await expect(chat(bob).getByTestId("payment-bubble"), "nothing reached the contact").toHaveCount(0);
+
+  // Nothing is held for it, and the wallet holds what the mint says: nothing.
+  await openWallet(alice, "cashu-testnet");
+  await expect.poll(() => balanceOf(alice.page)).toBe(0);
+  await expect(alice.page.getByTestId("wallet-set-aside")).toHaveCount(0);
+  await alice.page.getByTestId("wallet-history").click();
+  await expect(alice.page.getByText("Fees paid: 0 test sats"), "no fee for ecash spent elsewhere").toBeVisible();
+});
+
 test("a Lightning invoice pasted into the chat is a card with a QR code to hide and a Copy button", { tag: ["@feature:payments.lightning.invoice-card"] }, async ({ peer }) => {
   const [alice, bob] = await chatting(peer, "invoice-alice", "invoice-bob");
   // An invoice from the mint, made outside Ghostly and pasted as text.

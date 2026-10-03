@@ -229,6 +229,8 @@ export class LinkSession {
     return this.publishing !== null || this.firstPublishTimer !== null || Date.now() - this.lastPublishedAt < withinMs;
   }
   private discoveryErrors: Partial<Record<"publish" | "read", string>> = {};
+  /** The last read was not answered by the network: it failed, or the transport handed back a copy it kept (`discoveryRecovered`). */
+  private readMissed = false;
   private unsubscribe: (() => void) | null = null;
   private presence: PeerPresence = { online: false, lastPacketAt: 0, services: null };
   /**
@@ -280,11 +282,22 @@ export class LinkSession {
     void this.poll();
   }
 
+  /**
+   * A relay answers again after failing. What this link could not do meanwhile goes now: a publish that waits, and a
+   * read when its last one was not answered by the network (it failed, or handed back a copy kept from before) or when
+   * the link is looking for its peer (anything but the background and connected paces). A link whose last read was
+   * answered missed nothing: it reads at its pace. Every link heard this, so a read each one made the cost of a relay
+   * that keeps flipping between throttled and answering grow with the number of chats: 42 reads a flip on a profile
+   * whose contacts are mostly away, for nothing those reads could find.
+   */
   private discoveryRecovered(): void {
     if (!this.running) return;
-    traceLink(this.identity.pubKeyZ32, "discovery-recovered", { publishWaiting: !!this.publishRetryTimer });
-    if (this.publishRetryTimer || this.discoveryErrors.publish) void this.publish().catch(() => {});
-    this.pollNow();
+    const publish = !!(this.publishRetryTimer || this.discoveryErrors.publish);
+    const pace = this.pace(), read = this.readMissed || (pace !== "background" && pace !== "connected");
+    if (!publish && !read) return;
+    traceLink(this.identity.pubKeyZ32, "discovery-recovered", { publishWaiting: !!this.publishRetryTimer, read });
+    if (publish) void this.publish().catch(() => {});
+    if (read) this.pollNow();
   }
 
   /** This side's packet goes out now, unless one already did. */
@@ -600,6 +613,7 @@ export class LinkSession {
       const answered = this.transport.readAnsweredAt?.(this.peerPubKeyZ32);
       const read = answered !== undefined && answered >= started;
       if (read) this.lastReadAt = started;
+      this.readMissed = !!this.transport.readAnsweredAt && !read;
 
       let receivedNew = false;
       // The packet an inviter puts under the contact's key before they join (`emptyLinkRecords`), so
@@ -661,6 +675,7 @@ export class LinkSession {
       this.events.onStatus?.("online");
       if (!this.firstPollDone) { this.firstPollDone = true; this.events.onFirstPoll?.(); }
     } catch (error) {
+      this.readMissed = true;
       if (this.running) {
         traceLink(this.identity.pubKeyZ32, "poll", { ms: Date.now() - started, error: String(error) });
         // A read the relays' request budget held back (nothing known yet to answer from) is a wait: the next poll reads.

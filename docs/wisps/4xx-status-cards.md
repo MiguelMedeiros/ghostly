@@ -202,7 +202,7 @@ A card of each kind with every field round-trips on each path; a pull request's 
 
 - The number of this WISP.
 - An SDK with the same calls as the CLI, for bots that do not run the headless runtime.
-- More kinds (a poll's results, a deployment): each is a new `kind`, which older readers show as text.
+- More kinds (a poll's results, a deployment): each is a new `kind`, which older readers show as text. Proposed in [12xx](12xx-marketplace.md#apps-sent-in-a-chat): `app` and `store`, sent by people's apps and not only by bots, with the same 8 KiB bound and text fallback; display only, and nothing is fetched until the person presses Install or Add.
 - Whether a card id should bind across messages (today the latest message of an id stands for it in the panel, and nothing stops two messages from naming the same id).
 
 ## Revision log

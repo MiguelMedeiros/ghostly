@@ -8,11 +8,14 @@ import { PENDING_RAISE_KEY, pendingRaise } from "@ghostly/browser/devices/raise"
 import { unsealSeed } from "@ghostly/browser/engine/paymentAdapters/persistence";
 import { homeOf } from "@ghostly/browser/devices/walletHomes";
 import { createDatabase, databaseExists, putRows, restoreDatabase, snapshotDatabase, type DatabaseSnapshot, type StoreShape } from "@ghostly/browser/backup/database";
-import { databaseName, wrap, type StoredFile } from "@ghostly/browser/shared/idb";
-import { FILE_BYTES_STEP, SMALL_FILE_BYTES, checkFileId, dropFileSpace, fileBytes, fileBytesOf, type FileBytes, type FileBytesKind } from "@ghostly/browser/shared/fileBytes";
+import { DB_VERSION, STORES, databaseName, wrap, type StoredFile } from "@ghostly/browser/shared/idb";
+import { RESTORED_WALLET_STORES, restoredWalletRow } from "@ghostly/browser/shared/restoredRows";
+import { FILE_BYTES_STEP, SMALL_FILE_BYTES, checkFileId, fileBytes, fileBytesOf, type FileBytes, type FileBytesKind } from "@ghostly/browser/shared/fileBytes";
 import { restoreArkDatabase, snapshotArkDatabase, type ArkDatabaseSnapshot } from "@ghostly/browser/engine/paymentAdapters/backup";
+import { LIGHT_FILE_BYTES, LIGHT_VOICE_BYTES, keptInLight, type LightMark } from "@ghostly/browser/backup/light";
 import { getPrefix, getStorageProfile, ownsKey } from "./storage";
 import { assertUnlocked, identityKeysOf, profileIdentityKeys } from "./profileData";
+import { holdRestore, noteRestore, sweepInterruptedRestores, undoRestore } from "./restoreJournal";
 import { builtInNameBefore, currentProfile, isBuiltInName, listProfiles, namespaceOf, newProfileId, registerProfile, registryKey, storedProfileName, type ProfileEntry } from "./profiles";
 
 /** What a bundle says about the profile it holds, and the profile's local keys without its prefix. */
@@ -35,7 +38,7 @@ interface ProfilePayload extends ProfileHead {
 
 /** The records of a version 2 bundle, in the order they are written (WISP 05 § Payload). */
 type BackupRecord =
-  | ({ t: "profile"; format: "ghostly-profile"; version: 2; createdAt: number; files: number; bytes: number } & ProfileHead)
+  | ({ t: "profile"; format: "ghostly-profile"; version: 2; createdAt: number; files: number; bytes: number; light?: LightMark } & ProfileHead)
   /** The device set of an enrolled profile (WISP 06): its secret, the set and the turn; never a device signing key. */
   | ({ t: "devices" } & BundleDevices)
   | { t: "db"; db: "peer"; version: number; stores: StoreShape[] }
@@ -68,9 +71,14 @@ export interface BackupOptions extends BackupRun {
    * a version and read in one read-only transaction, so a frozen copy is never changed by it.
    */
   handoff?: true;
+  /** A light backup (WISP 05 § Light backups): the bytes of larger files are left out, their messages kept. */
+  light?: boolean;
 }
-/** `skipped`: files whose bytes could not be read on this device; their messages are kept, the bytes are not in the bundle. */
-export interface BackupResult { bytes: number; files: number; fileBytes: number; skipped: number }
+/**
+ * `skipped`: files whose bytes could not be read on this device; their messages are kept, the bytes are not in the
+ * bundle. `leftOut`: files a light backup left out by choice, and their bytes.
+ */
+export interface BackupResult { bytes: number; files: number; fileBytes: number; skipped: number; leftOut?: number; leftOutBytes?: number }
 
 export { isCancelled };
 
@@ -130,13 +138,80 @@ export async function fileSource(file: StoredFile, space: string, active: boolea
   return source && (typeof expected !== "number" || source.size >= expected) ? source : null;
 }
 
+/** A profile's files as a backup takes them: those that travel with their bytes, and the records that travel alone. */
+interface CollectedFiles {
+  /** Records that go as rows: no bytes here, or (`leftOut`) bytes a light backup leaves out. */
+  plain: StoredFile[];
+  carried: { file: StoredFile; source: FileSource }[];
+  /** Files whose `fileState` row goes with their record (carried or left out), so it is not a row of its own. */
+  merged: Set<string>;
+  skipped: number;
+  leftOut: number;
+  leftOutBytes: number;
+}
+
+/**
+ * Sorts the profile's file records (with what changed about each read over it) into what travels with its bytes and
+ * what travels as a record alone. In a light backup a file over the cut (`keptInLight`) goes as its record, without
+ * its bytes or where they were, marked `leftOut`.
+ */
+async function collectFiles(records: readonly unknown[], states: readonly unknown[], at: (file: StoredFile) => Promise<FileSource | null>, light: boolean, signal?: AbortSignal): Promise<CollectedFiles> {
+  const state = new Map(states.map((value) => [(value as StoredFile).id, value as Partial<StoredFile>]));
+  const out: CollectedFiles = { plain: [], carried: [], merged: new Set(), skipped: 0, leftOut: 0, leftOutBytes: 0 };
+  for (const value of records) {
+    const record = value as StoredFile;
+    const file = { ...record, ...state.get(record?.id) } as StoredFile;
+    const source = file?.blob || file?.bytes ? await at(file).catch(() => null) : null;
+    if (source && light && !keptInLight(source.size, !!file.metadata?.voice)) {
+      const { blob: _blob, bytes: _bytes, ...rest } = file;
+      out.plain.push({ ...rest, leftOut: true } as StoredFile);
+      out.merged.add(file.id);
+      out.leftOut += 1;
+      out.leftOutBytes += source.size;
+    } else if (source) { out.carried.push({ file, source }); out.merged.add(file.id); }
+    else {
+      // No bytes to carry: the record goes as it is, without a Blob it could not be read from.
+      if (record?.blob) { const { blob: _lost, ...rest } = record; out.plain.push(rest as StoredFile); out.skipped += 1; } else out.plain.push(record);
+    }
+    if (signal?.aborted) break;
+  }
+  return out;
+}
+
+/** What a backup of the active profile would carry of its files' bytes: everything, and light. Read before backing up. */
+export interface BackupSizes {
+  everything: number;
+  light: number;
+  /** Files a light backup leaves out, and their bytes. */
+  leftOut: number;
+  leftOutBytes: number;
+}
+
+/** The sizes of the active profile's files as each kind of backup would carry them, from the file store alone. */
+export async function profileBackupSizes(): Promise<BackupSizes> {
+  const space = databaseName();
+  const sizes: BackupSizes = { everything: 0, light: 0, leftOut: 0, leftOutBytes: 0 };
+  if (!(await databaseExists(space))) return sizes;
+  const db = await wrap(indexedDB.open(space));
+  try {
+    const read = async (name: string) => db.objectStoreNames.contains(name) ? (await wrap(db.transaction(name, "readonly").objectStore(name).getAll())) as unknown[] : [];
+    const [records, states] = [await read("files"), await read("fileState")];
+    const { carried, leftOut, leftOutBytes } = await collectFiles(records, states, (file) => fileSource(file, space, true, async () => db), true);
+    sizes.light = carried.reduce((sum, { source }) => sum + source.size, 0);
+    sizes.everything = sizes.light + leftOutBytes;
+    sizes.leftOut = leftOut;
+    sizes.leftOutBytes = leftOutBytes;
+    return sizes;
+  } finally { db.close(); }
+}
+
 /**
  * Everything of a profile (chats and keys, messages and files of any size, wallets and their journal, services,
  * settings) written to `sink` as one bundle, a piece at a time: nothing of it is ever whole in memory but the
  * database's rows. Storage credentials are left out. By default the active profile; another one of this space can be
  * backed up without switching to it (before deleting it, say), with its lock password if it has a lock.
  */
-export async function writeProfileBackup(sink: BackupSink, { passphrase, id, lockPassword, signal, onProgress, handoff }: BackupOptions): Promise<BackupResult> {
+export async function writeProfileBackup(sink: BackupSink, { passphrase, id, lockPassword, light = false, signal, onProgress, handoff }: BackupOptions): Promise<BackupResult> {
   const active = id === undefined || namespaceOf(id) === getStorageProfile();
   const ns = active ? getStorageProfile() : namespaceOf(id!);
   if (!active && !ns) throw new Error("Unknown profile");
@@ -200,31 +275,22 @@ export async function writeProfileBackup(sink: BackupSink, { passphrase, id, loc
   let piecesDb: IDBDatabase | null = null;
   const pieces = async () => (piecesDb ??= (await databaseExists(space)) ? await wrap(indexedDB.open(space)) : null);
   try {
-    const stateStore = storeOf("fileState");
-    const state = new Map((stateStore?.values ?? []).map((value) => [(value as StoredFile).id, value as Partial<StoredFile>]));
-    const plain: StoredFile[] = [], carried: { file: StoredFile; source: FileSource }[] = [];
-    let skipped = 0;
-    for (const value of storeOf("files")?.values ?? []) {
-      const record = value as StoredFile;
-      // A handoff: every record goes without its bytes, which move as parts of their own (the taker points it at them).
-      if (handoff) { const { blob: _blob, bytes: _bytes, ...rest } = record ?? {} as StoredFile; plain.push(rest as StoredFile); continue; }
-      const file = { ...record, ...state.get(record?.id) } as StoredFile;
-      const source = file?.blob || file?.bytes ? await fileSource(file, space, active, pieces).catch(() => null) : null;
-      if (source) { carried.push({ file, source }); progress.bytesTotal += source.size; }
-      else {
-        // No bytes to carry: the record goes as it is, without a Blob it could not be read from.
-        if (record?.blob) { const { blob: _lost, ...rest } = record; plain.push(rest as StoredFile); skipped += 1; } else plain.push(record);
-      }
-      if (signal?.aborted) break;
-    }
-    const carriedIds = new Set(carried.map(({ file }) => file.id));
+    // A handoff: every record goes without its bytes, which move as parts of their own (the taker points it at them),
+    // and every `fileState` row goes as a row of its own. A light cut never applies to it.
+    const collected: Awaited<ReturnType<typeof collectFiles>> = handoff
+      ? { plain: (storeOf("files")?.values ?? []).map((value) => { const { blob: _blob, bytes: _bytes, ...rest } = (value ?? {}) as StoredFile; return rest as StoredFile; }), carried: [], merged: new Set(), skipped: 0, leftOut: 0, leftOutBytes: 0 }
+      : await collectFiles(storeOf("files")?.values ?? [], storeOf("fileState")?.values ?? [], (file) => fileSource(file, space, active, pieces), light, signal);
+    const { plain, carried, merged, leftOut, leftOutBytes } = collected;
+    let { skipped } = collected;
+    progress.bytesTotal = carried.reduce((sum, { source }) => sum + source.size, 0);
     progress.filesTotal = carried.length;
     progress.stage = "writing";
     tell();
 
     const name = storedProfileName(active ? currentProfile().id : id!) ?? "Profile";
     const put = async (record: BackupRecord) => writer.json(await encode(record));
-    await put({ t: "profile", format: "ghostly-profile", version: 2, createdAt: Date.now(), profile: { name, builtIn: isBuiltInName(name) }, storage, files: carried.length, bytes: progress.bytesTotal });
+    const mark: LightMark | undefined = light ? { maxFileBytes: LIGHT_FILE_BYTES, maxVoiceBytes: LIGHT_VOICE_BYTES, files: leftOut, bytes: leftOutBytes } : undefined;
+    await put({ t: "profile", format: "ghostly-profile", version: 2, createdAt: Date.now(), profile: { name, builtIn: isBuiltInName(name) }, storage, files: carried.length, bytes: progress.bytesTotal, ...(mark && { light: mark }) });
     // Right after the head: a restore reads it before it writes anything (`openProfileBackup`).
     if (devices) await put({ t: "devices", ...devices });
     if (peer) {
@@ -235,7 +301,7 @@ export async function writeProfileBackup(sink: BackupSink, { passphrase, id, loc
         let { keys, values } = store;
         if (store.name === "files") { values = plain; keys = plain.map((file) => file.id); }
         // What changed about a file whose record carries it already goes with the record.
-        if (store.name === "fileState") { const kept = values.map((value, i) => [keys[i], value] as const).filter(([, value]) => !carriedIds.has((value as StoredFile)?.id)); keys = kept.map(([key]) => key); values = kept.map(([, value]) => value); }
+        if (store.name === "fileState") { const kept = values.map((value, i) => [keys[i], value] as const).filter(([, value]) => !merged.has((value as StoredFile)?.id)); keys = kept.map(([key]) => key); values = kept.map(([, value]) => value); }
         // Where a file's bytes are is the giver's: the taker says where it put them.
         if (store.name === "fileState" && handoff) values = values.map((value) => { const { bytes: _bytes, ...rest } = (value ?? {}) as Partial<StoredFile>; return rest; });
         for (let at = 0; at < values.length; at += ROWS_PER_RECORD) await put({ t: "rows", db: "peer", store: store.name, keys: keys.slice(at, at + ROWS_PER_RECORD), values: values.slice(at, at + ROWS_PER_RECORD) });
@@ -273,7 +339,7 @@ export async function writeProfileBackup(sink: BackupSink, { passphrase, id, loc
       tell();
     }
     await put({ t: "end", files, bytes: fileBytes });
-    return { bytes: await writer.finish(), files, fileBytes, skipped };
+    return { bytes: await writer.finish(), files, fileBytes, skipped, ...(light && { leftOut, leftOutBytes }) };
   } finally {
     (piecesDb as IDBDatabase | null)?.close();
   }
@@ -299,17 +365,6 @@ export async function createProfileBackup(passphrase: string | null, id?: string
 
 const isQuotaError = (error: unknown) => (error as { name?: string })?.name === "QuotaExceededError";
 
-/** Takes away what a failed restore wrote: its databases, its files and every local key of its namespace. */
-async function undoRestore(ns: string, databases: string[], files = false): Promise<void> {
-  for (const name of databases) {
-    await new Promise<void>((resolve) => { try { const r = indexedDB.deleteDatabase(name); r.onsuccess = r.onerror = r.onblocked = () => resolve(); } catch { resolve(); } });
-  }
-  if (files) await dropFileSpace(`ghostly_${ns}`).catch(() => {});
-  const prefix = `ghostly_${ns}_`;
-  const keys = Array.from({ length: localStorage.length }, (_, i) => localStorage.key(i)).filter((key): key is string => !!key?.startsWith(prefix));
-  for (const key of keys) { try { localStorage.removeItem(key); } catch { /* nothing more to do */ } }
-}
-
 /**
  * The file a profile's backup downloads as, named after the profile: its letters and digits in any script kept
  * ("仕事", "Trabalho-é"), everything else (spaces, punctuation, direction marks) a dash. A name with none left is "profile".
@@ -334,6 +389,8 @@ export interface OpenedProfileBackup {
   readonly protection: "passphrase" | "none";
   /** The profile's name and local keys, as the restore will write them. */
   readonly payload: ProfileHead;
+  /** A light backup: the cut it made, and the files it left out (their messages are in it, their bytes are not). */
+  readonly light?: LightMark;
   /** A version 1 bundle: all of it. */
   readonly whole?: ProfilePayload;
   /** A version 2 bundle: where to read it again from, and what tells whose profile it is. */
@@ -345,6 +402,12 @@ export interface OpenedProfileBackup {
 }
 
 const NOT_A_PROFILE = "This backup does not hold a profile";
+const NEWER = "This backup comes from a newer Ghostly; update to restore it";
+/**
+ * A profile whose database a newer version made: this one would restore it, list it, and then could not open it. It is
+ * refused before anything is written, like a newer envelope.
+ */
+const checkVersion = (version: unknown) => { if (typeof version === "number" && version > DB_VERSION) throw new Error(NEWER); };
 const DAMAGED = "This backup is damaged: it was changed or cut short";
 const isHead = (value: Partial<ProfileHead> | null | undefined) => typeof value?.profile?.name === "string" && !!value.storage && typeof value.storage === "object";
 
@@ -358,12 +421,13 @@ export async function openProfileBackup(input: BackupInput, passphrase?: string,
     if (source.size > MAX_BACKUP_BYTES * 1.4) throw new Error("This backup is too large to restore");
     const payload = decode(await open(new TextDecoder().decode(await source.read(0, source.size)), passphrase ?? "")) as ProfilePayload;
     if (payload?.format !== "ghostly-profile" || payload.version !== 1 || !isHead(payload) || !payload.databases) throw new Error(NOT_A_PROFILE);
+    checkVersion(payload.databases.peer?.version);
     return { name: payload.profile.name, protection: "passphrase", payload, whole: payload };
   }
   const first = await reader.next();
   const head = first?.json === undefined ? null : (decode(first.json) as BackupRecord);
   if (head?.t !== "profile" || head.format !== "ghostly-profile" || !isHead(head)) throw new Error(NOT_A_PROFILE);
-  if (head.version !== 2) throw new Error("This backup comes from a newer Ghostly; update to restore it");
+  if (head.version !== 2) throw new Error(NEWER);
   // The chats and the DID come right after: enough to tell whose profile this is before anything is written.
   const links: unknown[] = [];
   let did: unknown;
@@ -371,7 +435,7 @@ export async function openProfileBackup(input: BackupInput, passphrase?: string,
   let verifier: OpenedProfileBackup["verifier"];
   for (let record = await reader.next(); record?.json !== undefined; record = await reader.next()) {
     const value = decode(record.json) as BackupRecord;
-    if (value?.t === "db") continue;
+    if (value?.t === "db") { checkVersion(value.version); continue; }
     if (value?.t === "devices") {
       // A device set this build cannot read is refused, never restored as a profile of one device (WISP 06).
       const { t: _t, ...rest } = value;
@@ -390,7 +454,8 @@ export async function openProfileBackup(input: BackupInput, passphrase?: string,
   }
   // The envelope of a bundle with a device set: without its record, it is not read as a profile of one device.
   if ((await readBackupHeader(source))?.header.version === DEVICE_SET_BACKUP_VERSION && !devices) throw new Error(DAMAGED);
-  return { name: head.profile.name, protection: reader.protection, payload: { profile: head.profile, storage: head.storage }, stream: { source, passphrase, links, did }, ...(devices ? { devices } : {}), ...(verifier ? { verifier } : {}) };
+  const light = head.light && typeof head.light === "object" ? head.light : undefined;
+  return { name: head.profile.name, protection: reader.protection, payload: { profile: head.profile, storage: head.storage }, ...(light && { light }), stream: { source, passphrase, links, did }, ...(devices ? { devices } : {}), ...(verifier ? { verifier } : {}) };
 }
 
 /**
@@ -479,24 +544,15 @@ function restoredRows(store: string, keys: IDBValidKey[], values: unknown[], fre
       // it again when the profile comes back (WISP 06 § Installing the staged state).
       if (handoff && homeOf(value)) return value;
       if (typeof keys[i] === "string" && (keys[i] as string).startsWith("fedimint")) return freshFedimint(value);
-      return hasOwnDatabase(keys[i]) && typeof walletId === "string" ? { ...record, config: { ...record.config, walletId: fresh(walletId) } } : value;
-    });
-  }
-  if (store === "proofs") {
-    // Ecash as it was when the backup was made: what was spent since is found by asking the mint, once the wallet runs.
-    return values.map((value) => {
-      const proof = value as { secret?: unknown; reserved?: boolean } | null;
-      return proof && typeof proof === "object" && typeof proof.secret === "string" && !proof.reserved ? { ...proof, unchecked: true } : value;
+      if (!hasOwnDatabase(keys[i]) || typeof walletId !== "string") return value;
+      // A Bark wallet's empty database also looks once for the on-chain coins its phrase received before (`scan`).
+      return { ...record, config: { ...record.config, walletId: fresh(walletId) }, ...(isBarkRecord(keys[i]) ? { scan: true } : {}) };
     });
   }
   // A handoff moves payment attempts as they are: the device that had them was alive and settled its own business.
-  if (store === "paymentIntents" && !handoff) {
-    // An older copy cannot prove an unfinished attempt was never sent; it may not authorize a new one.
-    return values.map((value) => {
-      const intent = value as { review?: { state?: string } };
-      return intent?.review && ["pending", "submitted", "unknown"].includes(intent.review.state ?? "") ? { ...intent, review: { ...intent.review, state: "unknown" } } : value;
-    });
-  }
+  if (store === STORES.intents && handoff) return values;
+  // Money as the bundle held it is not taken at its word: ecash to check, swaps to check, attempts unknown.
+  if (RESTORED_WALLET_STORES.includes(store)) return values.map((value) => restoredWalletRow(store, value));
   return values;
 }
 
@@ -515,14 +571,23 @@ function register(id: string, ns: string, { profile, storage }: ProfileHead): Pr
 
 /** `restoreProfileBackup` of a bundle already opened (after `sameIdentityProfiles` was asked, say). */
 export async function restoreOpenedBackup(opened: OpenedProfileBackup, run: BackupRun = {}, beforeRegister?: (database: string) => Promise<void>): Promise<ProfileEntry> {
+  // What an earlier restore left when its tab was closed half way goes first.
+  await sweepInterruptedRestores();
   const id = newProfileId(), ns = namespaceOf(id);
   // What this restore has written so far: a restore that fails or is cancelled takes all of it away again, so a device
   // short of room is not left holding an unlisted copy of the profile (its keys included) that nothing would ever delete.
+  // Noted before it is written, so a restore stopped by a closed tab or a crash is taken back later (`restoreJournal`).
+  const release = await holdRestore(ns);
   const made: string[] = [];
   const state: RestoreState = { files: false, db: null, writing: null };
   const walletIds = new Map<string, string>();
-  const fresh = (walletId: string) => walletIds.get(walletId) ?? (walletIds.set(walletId, crypto.randomUUID()), walletIds.get(walletId)!);
+  const noted = () => [`ghostly_${ns}`, ...[...walletIds.values()].map((walletId) => `ghostly-ark-${walletId}`)];
+  const fresh = (walletId: string) => {
+    if (!walletIds.has(walletId)) { walletIds.set(walletId, crypto.randomUUID()); noteRestore(ns, noted()); }
+    return walletIds.get(walletId)!;
+  };
   try {
+    noteRestore(ns, noted());
     if (opened.stream) await restoreStream(opened.stream, ns, made, state, fresh, walletIds, run);
     else await restoreWhole(opened.whole!, ns, made, fresh, walletIds);
     state.db?.close();
@@ -533,14 +598,19 @@ export async function restoreOpenedBackup(opened: OpenedProfileBackup, run: Back
     // What must be true of the copy before it is listed (a takeover's standby record): a crash before this leaves an
     // unlisted copy, never a listed one that starts as a profile on one device.
     if (beforeRegister) await beforeRegister(`ghostly_${ns}`);
-    return register(id, ns, opened.payload);
+    const entry = register(id, ns, opened.payload);
+    noteRestore(ns, null);
+    return entry;
   } catch (error) {
     // The file it was in the middle of is let go first: file storage does not remove a folder with a file still open
     // in it (the origin-private file system refuses), and the half-written file would stay on the device for good.
     await state.writing?.discard().catch(() => {});
     state.db?.close();
     await undoRestore(ns, made, state.files);
+    noteRestore(ns, null);
     throw isQuotaError(error) ? Object.assign(new Error("This device has no room left for this backup. Free some space, then try again."), { cause: error }) : error;
+  } finally {
+    release();
   }
 }
 
@@ -673,6 +743,7 @@ async function restoreStream(stream: NonNullable<OpenedProfileBackup["stream"]>,
         break;
       case "db":
         if (state.db || value.db !== "peer") throw new Error(DAMAGED);
+        checkVersion(value.version);
         state.db = await createDatabase(space, value.version, value.stores);
         made.push(space);
         break;

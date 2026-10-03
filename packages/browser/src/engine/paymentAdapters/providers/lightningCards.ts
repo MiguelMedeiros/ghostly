@@ -5,7 +5,7 @@ import type { LightningProviderDescriptor } from "./lightning";
 import { LightningService, readLightningJournal, type LightningEvents, type LightningOp, type LightningView } from "./lightningService";
 import { sourceKey } from "./sources";
 import { awayFrom } from "../away";
-import { breezStorage } from "./breezSdk";
+import { breezDatabaseInUse } from "./breezDatabases";
 import { normalizePhrase } from "./recoveryPhrase";
 import type { ProviderHost } from "./types";
 
@@ -309,7 +309,7 @@ export class LightningCards {
       if (providerId === "lnd" && await service.sources.secret("certificate")) pinned.push(wallet);
       if (providerId === "breez") {
         const mnemonic = await service.sources.secret("mnemonic");
-        if (mnemonic) breez.set(wallet, breezStorage(this.network === "mainnet" ? "bitcoin" : "regtest", normalizePhrase(mnemonic)));
+        if (mnemonic) breez.set(wallet, await breezDatabaseInUse(this.network === "mainnet" ? "bitcoin" : "regtest", normalizePhrase(mnemonic)));
       }
     }
     return { pinned, breez };

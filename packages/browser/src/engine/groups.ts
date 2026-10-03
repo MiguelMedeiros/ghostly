@@ -178,6 +178,13 @@ export function eventTime(taken: Map<string, Set<number>>, groupId: string, time
   return timestamp;
 }
 /**
+ * The moment something arrives, for the unread marks: this device's clock, never behind it. The engine's own clock is
+ * its last tick's time, up to a second old, while the page marks a group read by the device's clock as it is looked at:
+ * a message that came within that second of leaving the group counted as come before it was read, and the list showed
+ * nothing new. (A simulation's clock runs ahead of the device's: it stands.)
+ */
+export const arrivalNow = (tick: number): number => Math.max(tick, Date.now());
+/**
  * Keeps on the group's record when a member's message came, where that is later than what it holds: the record is
  * saved with the session right after (a message taken moves its state), so a message handed to me late still makes
  * the group unread after the app starts again. Read from the history alone, by its own time, it sorted among what I
@@ -235,7 +242,10 @@ const REFUSED_FOR_MS = 10 * 60_000;
  * doubling with each timeout in a row up to `REFUSED_FOR_MS`: a slow network is no refusal.
  */
 const ENTRY_RETRY_MS = 30_000;
-/** The welcome is on its way when the admin sends it; the session stays up a little for it to arrive. */
+/**
+ * The welcome is on its way when the admin sends it; the session stays up a little for it to arrive. A joiner keeps
+ * its side as long (unless its edge to the admin is up first): the admin says over it what it commits meanwhile.
+ */
 const ENTRY_LINGER_MS = 20_000;
 /** Taken out of a group, my edges stay this long: as a hub, the commit that removed me is passed on over them. */
 const REMOVED_LINGER_MS = 15_000;
@@ -329,6 +339,15 @@ export class Groups {
   private readonly knockRewrites = new Map<string, number>();
   /** Per group, members met over their admission a moment ago: their edge is opened expecting them. */
   private readonly justMet = new Map<string, Set<string>>();
+  /**
+   * Admin side: joiners let in through the link whose entry session is still open, per group: member key → link id.
+   * Until the edge to one of them is up, a commit made meanwhile (the next joiner's admission) goes to it over that
+   * session: it would otherwise seal what it writes for a roster that is no longer the group's, and whoever was let
+   * in since could never read it (two people open the link together, both say hello, one never sees the other's).
+   */
+  private readonly welcomed = new Map<string, Map<string, string>>();
+  /** Joiner side: the entry session I was let in through, kept until my edge to the admin is up or `until`. */
+  private readonly lingering = new Map<string, { linkId: string; admin: string; until: number }>();
   /** Joiner side: groups whose knock is published, for the stage the joiner is shown. */
   private readonly knocked = new Set<string>();
   /**
@@ -614,6 +633,8 @@ export class Groups {
     delete group.entry;
     this.invited.delete(groupId);
     this.pendingEntries.delete(groupId);
+    this.welcomed.delete(groupId);
+    this.lingering.delete(groupId);
     this.lastMessageAt.delete(groupId);
     this.lastPeerMessageAt.delete(groupId);
     this.lastMentionAt.delete(groupId);
@@ -774,6 +795,8 @@ export class Groups {
     this.knockCheckAt.delete(groupId);
     this.knockRewrites.delete(groupId);
     this.justMet.delete(groupId);
+    this.welcomed.delete(groupId);
+    this.lingering.delete(groupId);
     this.relayAsked.delete(groupId);
     this.hubs.forget(groupId);
     this.removedAt.delete(groupId);
@@ -893,6 +916,7 @@ export class Groups {
       }
       for (const [key, until] of this.refused) if (until <= now) this.refused.delete(key);
       for (const [key, { at }] of this.entryTimeouts) if (now - at > 60 * 60_000) this.entryTimeouts.delete(key);
+      for (const [groupId, kept] of this.lingering) if (now >= kept.until) await this.endLinger(groupId);
       this.meshTick(now);
       await this.communities.tick(now);
       await this.hubsTick(now);
@@ -949,8 +973,17 @@ export class Groups {
     return group.entry ? { link: { g: group.id, host: identityFromSeedB64(group.entry.seedB64).pubKeyZ32 }, seedB64: group.entry.seedB64 } : undefined;
   }
 
+  /** Joiner side: the entry session kept after the welcome goes (the edge to the admin is up, or it was kept long enough). */
+  private async endLinger(groupId: string): Promise<void> {
+    const kept = this.lingering.get(groupId);
+    if (!kept) return;
+    this.lingering.delete(groupId);
+    if ([...this.host.entries(groupId).values()].includes(kept.linkId)) await this.host.closeEdge(kept.linkId);
+  }
+
   private async closeEntries(groupId: string): Promise<void> {
     this.pendingEntries.delete(groupId);
+    this.welcomed.delete(groupId);
     const invited = this.invited.get(groupId);
     for (const linkId of this.host.entries(groupId).values()) { invited?.delete(linkId); await this.host.closeEdge(linkId); }
   }
@@ -1064,7 +1097,13 @@ export class Groups {
           this.entryTimeouts.delete(entryPeer);
           this.pendingEntries.get(g)?.delete(entryPeer);
           this.host.entryDone?.(linkId);
-          setTimeout(() => { if (this.host.entries(g).get(entryPeer) === linkId) void this.host.closeEdge(linkId); }, ENTRY_LINGER_MS);
+          let welcomed = this.welcomed.get(g);
+          if (!welcomed) this.welcomed.set(g, (welcomed = new Map()));
+          welcomed.set(entryPeer, linkId);
+          setTimeout(() => {
+            if (this.welcomed.get(g)?.get(entryPeer) === linkId) this.welcomed.get(g)!.delete(entryPeer);
+            if (this.host.entries(g).get(entryPeer) === linkId) void this.host.closeEdge(linkId);
+          }, ENTRY_LINGER_MS);
         }
         this.host.emit();
         return;
@@ -1094,13 +1133,26 @@ export class Groups {
         // Attached before anything awaits: the list must never see a member row without its session.
         this.stored.set(g, member);
         this.attach(joined.state);
+        // The entry session stays a moment: until my edge to the admin is up, the admin says over it what it commits
+        // next (see `welcomed`), so what I write meanwhile is sealed for the group as it is, not as it was when I got in.
+        // Noted before anything awaits: the next joiner's commit may be the very next frame.
+        if (viaLink) this.lingering.set(g, { linkId, admin: group.invitation.admin, until: this.now() + ENTRY_LINGER_MS });
         await this.store.putGroup(member);
         if (!viaLink) await this.sessions.get(g)!.setNick(group.invitation.admin, this.host.contactName(linkId));
         await this.event(g, "joined", `You joined. ${GROUP_READ_NOTE}`, Date.now(), joined.state.chain.length - 1);
         if (viaLink) traceJoin(g, "welcome.received");
-        if (viaLink) { this.lastKnock.delete(g); this.knocked.delete(g); await this.host.closeEdge(linkId); }
+        if (viaLink) { this.lastKnock.delete(g); this.knocked.delete(g); }
         this.reconcileEdges(g);
         this.host.emit();
+        return;
+      }
+      case "group-commit": {
+        // From the admin that let me in, over the entry session kept after the welcome: what it committed since. Checked
+        // as any commit is (the chain's rules and the admin's signature); nothing else is taken from this session.
+        const kept = this.lingering.get(g), session = this.sessions.get(g);
+        if (!kept || kept.linkId !== linkId || !session) return;
+        const taken = await session.handle(kept.admin, frame);
+        if (taken.length) this.hubs.passOn(g, session, kept.admin, taken);
         return;
       }
       case "group-removed": {
@@ -1125,6 +1177,11 @@ export class Groups {
     }
   }
 
+  /** A key the group's chain had as a member and has no more (not one it never had: a member my chain has not reached yet). */
+  private tookOut(session: GroupSession, key: string): boolean {
+    return !rosterHas(session.roster, key) && removalEpoch(session.state.chain, key) >= 0;
+  }
+
   /** A `group-*` frame on an edge: from the member the edge is pinned to. */
   async handleEdgeFrame(groupId: string, peerKey: string, frame: unknown): Promise<void> {
     if (this.isCommunity(groupId)) return this.communities.handleEdgeFrame(groupId, peerKey, frame);
@@ -1142,6 +1199,9 @@ export class Groups {
       if (session.status === "active" && frame && typeof frame === "object") this.farewellSync(groupId, session, waiting, peerKey, frame as Record<string, unknown>);
       return;
     }
+    // Someone the chain took out, on an edge that is still there for a moment (a hub keeps it to pass on the commit that
+    // tells it): nothing it says over it is taken, as nothing but that commit is said to it (`edgeAllows`).
+    if (session?.status === "active" && this.tookOut(session, peerKey)) return;
     if (session?.status === "active" && frame && typeof frame === "object" && (frame as { t?: unknown }).t === "group-here") { this.heardHere(groupId, session, peerKey, frame as Record<string, unknown>); return; }
     if (session?.status === "active" && frame && typeof frame === "object" && (frame as { t?: unknown }).t === "group-reach") {
       const group = this.stored.get(groupId);
@@ -1224,6 +1284,9 @@ export class Groups {
     const legacy = this.hubs.enabled && this.hubs.edgeReady(groupId, session, group, peerKey, this.host.linkReady(linkId, GROUP_VERSION_HUBS), this.now());
     if (large || legacy) void this.store.putGroup(group).catch(() => {});
     try { this.host.sendOnLink(linkId, session.syncFrame(this.askOf(groupId, session, peerKey))); } catch { return; /* it closed again */ }
+    // The edge carries everything from here on: the entry session of my admission, and the admin's note of mine, go.
+    if (this.lingering.get(groupId)?.admin === peerKey) void this.endLinger(groupId).catch(() => {});
+    this.welcomed.get(groupId)?.delete(peerKey);
     this.announceHere(groupId, session, peerKey);
     this.host.edgeUp?.(groupId, peerKey);
     this.host.emit();
@@ -1407,8 +1470,16 @@ export class Groups {
       },
       send: (to, frame: GroupEdgeFrame) => {
         const edge = this.host.edges(state.id).get(to);
-        if (!edge) return;
-        try { this.host.sendOnLink(edge, frame); } catch { return; /* down: the sync on reopening carries it */ }
+        try {
+          if (!edge) throw new Error("no edge");
+          this.host.sendOnLink(edge, frame);
+        } catch {
+          // Down: the sync on reopening carries it. A commit also goes, now, to someone just let in whose entry session is
+          // still open (`welcomed`): it must not wait for the edge to learn that the roster moved.
+          const entry = frame.t === "group-commit" ? this.welcomed.get(state.id)?.get(to) : undefined;
+          if (entry) { try { this.host.sendOnLink(entry, frame); } catch { /* closed: the edge's sync carries it */ } }
+          return;
+        }
         // Mine, taken by an edge (the first time, or again in a catch-up): what `--wait sent` waits for.
         if ((frame.t === "group-msg" || frame.t === GROUP_EDIT_FRAME) && frame.s === session.myKey) {
           const id = groupMessageId(frame.s, frame.e, frame.n);
@@ -1424,7 +1495,7 @@ export class Groups {
           ...mentionFields(m.mentions, mentioned), ...(m.reply && { replyTo: groupReply(m.reply, session.myKey) }), ...(m.forwarded && { forwarded: m.forwarded }), ...(m.card && { card: m.card }) };
         // A copy handed on stripped came first: the whole one adds what it lacked (WISP 9xx · Group Mesh § Catch-up).
         const stored = m.completes && this.host.completeMessage ? (await this.host.completeMessage(message), false) : await this.host.storeMessage(message);
-        const came = m.sender === session.myKey ? timestamp : cameAt(timestamp, stored, this.now());
+        const came = m.sender === session.myKey ? timestamp : cameAt(timestamp, stored, arrivalNow(this.now()));
         this.lastMessageAt.set(state.id, Math.max(this.lastMessageAt.get(state.id) ?? 0, came));
         if (mentioned) this.lastMentionAt.set(state.id, Math.max(this.lastMentionAt.get(state.id) ?? 0, came));
         if (m.sender !== session.myKey) this.lastPeerMessageAt.set(state.id, Math.max(this.lastPeerMessageAt.get(state.id) ?? 0, came));

@@ -89,6 +89,7 @@
     "phraseNote": "短语可找回 Second 的服务器为此钱包保存的内容；付款记录来自备份文件。",
     "read": "查看",
     "renewalHint": "Ghostly 打开时为快过期的币续期",
+    "scanning": "正在查找此助记词之前收到的链上币…",
     "server": "Ark 服务器",
     "serverInput": "Bark 服务器",
     "serverStuck": "此服务器没有响应。你可以切换到其他服务器。",
@@ -221,6 +222,8 @@
     "removeMintConsent": "之后付给它的钱，只有在我重新添加这个铸币厂后才会显示。",
     "removeMintHint": "以后可以再次添加。",
     "removeMintQuestion": "移除 {{name}}？",
+    "setAside": "已预留 {{amount}} {{unit}}",
+    "setAsideInfo": "为铸币厂尚未确认的付款预留。铸币厂答复后，它会随付款转出或回到你的余额。",
     "settings": "设置",
     "testBalance": "{{amount}} 测试 sats（没有价值）",
     "testMintInvoice": "正在等待付款… 测试铸币厂会自动把每张发票标记为已付，所以这张发票只有在联系人于聊天中支付后才算数。现在就要测试 sats，请使用上方的“获取测试币”。",
@@ -233,6 +236,8 @@
       "lightningOut": "通过 Lightning 付款",
       "reclaimed": "取回了一笔付款"
     },
+    "unconfirmed": "{{amount}} {{unit}} 未确认",
+    "unconfirmedInfo": "铸币厂在一次兑换中收走了这些 sats，却无法说明换回了什么。钱包会继续询问。它们可能不会回来。",
     "unreachable": "暂时无法连接",
     "working": "处理中…"
   },
@@ -561,6 +566,7 @@
       "paid": "已为发票支付 {{amount}}，尚未从铸币所领取",
       "request": "聊天中一笔 {{amount}} 的请求，仍未完成",
       "sent": "你发送的 {{amount}} ecash，尚未被领取",
+      "swap": "与铸币厂兑换中的 {{amount}}，尚未完成",
       "unclaimed": "铸币所称已为发票发行 {{amount}}，但这里从未收到"
     },
     "label": "移除此钱包",

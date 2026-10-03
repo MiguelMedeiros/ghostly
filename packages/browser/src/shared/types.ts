@@ -413,6 +413,45 @@ export interface PendingMelt {
   createdAt: number;
 }
 
+/**
+ * A swap at a mint, written down before the mint is asked, with everything that finishes it: the mint signs the
+ * outputs of `swap` and nothing else, so its signatures can be asked for again (NUT-09) for as long as this is kept.
+ * Deleted in the transaction that stores what the swap brought, or once the mint says it never happened.
+ */
+export interface PendingSwap {
+  id: string;
+  mint: string;
+  /** `receive`: a token redeemed into this wallet. `send`: this wallet's ecash split, for a token or a Lightning payment. */
+  kind: "receive" | "send";
+  /** cashu-ts' `SerializedSwapPreview`: the inputs and the blinded outputs with their secrets. As secret as the ecash itself. */
+  swap: unknown;
+  createdAt: number;
+  /** When the request to the mint ended with no answer. The mint may still act on it for a moment after that. */
+  attemptEndedAt?: number;
+  /**
+   * The inputs were given back (the swap was overdue with nothing signed), and it holds nothing any more. Still asked
+   * about for a while: a request that reached the mint late is recovered from what is written here.
+   */
+  released?: boolean;
+  /** What it brought is stored; only the chat of its payment is still to be told (the app closed in between). */
+  finished?: boolean;
+  /**
+   * Its inputs read spent at a mint that cannot say what it signed (no NUT-09): how many times that was the answer.
+   * Kept, since the outputs are the only way back to that ecash, and asked about less and less often (`askAt`).
+   */
+  stuck?: number;
+  /** Not asked about before this time. */
+  askAt?: number;
+  /** Came with a restored copy of the profile: what it brings is as old as the copy, and is checked like the copy's ecash. */
+  restored?: boolean;
+  /** `receive`: the token being redeemed. Redeeming it again while this is kept finishes this swap, and makes no other. */
+  token?: string;
+  /** `receive`: the history line of the ecash, written with it. */
+  tx?: WalletTx;
+  /** `receive`: the payment record written with the ecash (a contact's payment received, or one of ours taken back). */
+  payment?: StoredPayment;
+}
+
 /** A Lightning invoice the mint issued for us; paid invoices turn into ecash. */
 export interface StoredQuote {
   quote: string;
@@ -437,6 +476,11 @@ export interface StoredQuote {
   held?: boolean;
   /** Asked for on purpose, as test coins from a test mint ("Get test coins"): minted as soon as the mint says paid. */
   testCoins?: boolean;
+  /**
+   * The blinded outputs the mint is asked to sign for this invoice (`OutputData.serialize`), written down before it
+   * is asked: the ecash it issues is for these, and its signatures for them can be asked for again (NUT-09).
+   */
+  outputs?: unknown[];
 }
 
 export type PaymentState =
@@ -566,6 +610,13 @@ export interface NetworkWalletsView {
   /** This network's Cashu mints (test mints and mints on this machine are Testnet's). */
   mints: MintView[];
   balance: number;
+  /** Cashu: sats held for a payment or a swap the mints have not settled yet. Not in `balance`, and not gone. */
+  setAside?: number;
+  /** Cashu: swaps at these mints that are not finished yet, and the sats in them. Removing the wallet names them. */
+  openSwaps?: number;
+  swapsAmount?: number;
+  /** Cashu: sats in swaps whose inputs read spent at a mint that cannot say what it gave for them. Not in `setAside`. */
+  unconfirmed?: number;
   /** This network's history, newest first. */
   history: WalletTx[];
   feesPaid: number;
@@ -583,7 +634,8 @@ export interface NetworkWalletsView {
 export interface WalletAwaitingView {
   /** The wallet it goes through (Lightning through the Cashu mints is the Cashu wallet's). */
   type: WalletType;
-  kind: "request" | "invoice" | "paid" | "unclaimed" | "sent";
+  /** `swap`: sats in an exchange with a Cashu mint that the mint has not settled yet (`PendingSwap`). */
+  kind: "request" | "invoice" | "paid" | "unclaimed" | "sent" | "swap";
   /** In the wallet's base unit: sats, or the token's smallest unit for USDT. */
   amount: number;
   /** The chat payment it belongs to, when it does. */
@@ -712,6 +764,11 @@ export interface WalletView {
   intents?: PaymentReview[];
   mints: MintView[];
   balance: number;
+  /** Cashu: see `NetworkWalletsView`. */
+  setAside?: number;
+  openSwaps?: number;
+  swapsAmount?: number;
+  unconfirmed?: number;
   /** Newest first. */
   history: WalletTx[];
   feesPaid: number;

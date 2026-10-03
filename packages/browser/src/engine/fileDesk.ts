@@ -1,6 +1,7 @@
 import {
   ChatFiles,
   FILE_LIMITS,
+  claimedTime,
   fileMessageText,
   randomBytes,
   toBase64Url,
@@ -35,6 +36,12 @@ export interface FileDeskDeps {
   /** A message the chat holds already (a new file must not take the id of the contact's text, say). */
   messageExists?(linkId: string, messageId: string): Promise<boolean>;
   storeMessage(message: StoredMessage): Promise<void>;
+  /**
+   * The place in the chat of something that arrives now (WISP 400, requirement 10), taken at once. An offer's message
+   * is stored a few steps of storage later (is there room, its record): without its place taken as the offer comes,
+   * a text that came after the offer was placed above the file.
+   */
+  place?(linkId: string): number;
   transfers: Map<string, FileTransferView>;
   changed(delayMs?: number): void;
   /** The state to the app now, not after `changed`'s wait: for a transfer the app must have before its message. */
@@ -48,6 +55,8 @@ interface Chat {
   files: ChatFiles;
   /** Wire id of a received file → its local id. */
   local: Map<string, string>;
+  /** Wire id of an offer not stored yet → the place taken for its message as it came (`place`). */
+  places: Map<string, number>;
   /** Writes to the database, in order. */
   saving: Promise<void>;
   lastSaved: Map<string, number>;
@@ -84,7 +93,7 @@ export class FileDesk {
   private chat(linkId: string): Chat {
     let chat = this.chats.get(linkId);
     if (chat) return chat;
-    const made: Chat = { local: new Map(), saving: Promise.resolve(), lastSaved: new Map(), files: undefined as unknown as ChatFiles };
+    const made: Chat = { local: new Map(), places: new Map(), saving: Promise.resolve(), lastSaved: new Map(), files: undefined as unknown as ChatFiles };
     made.files = new ChatFiles({
       send: (frame) => this.deps.send(linkId, frame),
       decide: (file, again) => this.decide(linkId, file, again),
@@ -122,7 +131,13 @@ export class FileDesk {
   }
 
   handle(linkId: string, frame: Record<string, unknown>): Promise<void> {
-    return this.chat(linkId).files.handle(frame);
+    const chat = this.chat(linkId);
+    // A new offer takes its message's place now, in the order frames come, before anything is awaited.
+    const id = frame.t === "pf-offer" && typeof frame.id === "string" ? frame.id : undefined;
+    if (id === undefined || !this.deps.place || chat.local.has(id) || chat.places.has(id)) return chat.files.handle(frame);
+    chat.places.set(id, this.deps.place(linkId));
+    // An offer that was refused has no message: its place is let go.
+    return chat.files.handle(frame).finally(() => { if (!chat.local.has(id)) chat.places.delete(id); });
   }
 
   /** Whether files/3 is live in this chat, and what the contact said it can take. */
@@ -323,10 +338,14 @@ export class FileDesk {
       this.deps.wireIds(linkId)?.add(record.id);
       const { file } = record;
       const message: MessageFile = { id, name: file.name, size: file.size, mime: file.mime, ...(file.voice && { voice: file.voice }), ...(file.video && { video: file.video }), ...(file.image && { image: file.image }) };
+      // Where its offer came, with the time its sender says kept beside it; without a place taken, where it is stored.
+      const place = chat.places.get(record.id), sentAt = claimedTime(file.timestamp);
+      chat.places.delete(record.id);
       chat.saving = chat.saving.then(async () => {
         await fileStore.put({ id, linkId, direction: "in", wireId: record.id, createdAt: Date.now(), bytes: (await fileBytes()).kind,
           metadata: { name: file.name, size: file.size, mime: file.mime, timestamp: file.timestamp, voice: file.voice, video: file.video, image: file.image }, wire3: record });
-        await this.deps.storeMessage({ linkId, id: `peer_${record.id}`, text: fileMessageText(message), sender: "peer", timestamp: file.timestamp, via: "datalink", file: message,
+        await this.deps.storeMessage({ linkId, id: `peer_${record.id}`, text: fileMessageText(message), sender: "peer", via: "datalink", file: message,
+          ...(place !== undefined && sentAt !== undefined ? { timestamp: place, sentAt } : { timestamp: file.timestamp }),
           ...(file.reply && { replyTo: receivedPairedReply(file.reply) }), ...(file.forwarded && { forwarded: file.forwarded }),
           details: { wire: fileWire("files/3", file.size) } });
       }).catch(() => {});

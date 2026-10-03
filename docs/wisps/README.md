@@ -12,6 +12,7 @@ A WISP (Wire Interoperability Specification Proposal) is a design document for o
 | 03 | Foundations | [Capability Negotiation](03-capabilities.md) | Contract | Draft | Available |
 | 04 | Foundations | [Local Profiles](04-profiles.md) | Contract | Draft | Available |
 | 05 | Foundations | [Profile Backups](05-backups.md) | Contract | Draft | Available |
+| 06 | Foundations | [One Profile on Several Devices](06-devices.md) | Contract | Draft | Planned |
 | 100 | Transports | [Transport Negotiation](100-transports.md) | Contract | Draft | Available |
 | 101 | Transports | [WebRTC](101-webrtc.md) | Adapter | Draft | Available |
 | 102 | Transports | [Iroh](102-iroh.md) | Adapter | Draft | Available |
@@ -61,6 +62,7 @@ A WISP (Wire Interoperability Specification Proposal) is a design document for o
 | 1001 | Storage | [Local File Storage](1001-local-storage.md) | Adapter | Draft | Available |
 | 1002 | Storage | [S3-Compatible Storage](1002-s3-storage.md) | Adapter | Draft | Available |
 | 11xx | Headless | [Headless Runtime and Local Control API](11xx-headless.md) | Contract | Draft | Available |
+| 12xx | Apps and plugins | [Apps and Plugins: Packages, Stores and Apps Sent in a Chat](12xx-marketplace.md) | Contract | Draft | Planned |
 
 <!-- wisp-index:end -->
 

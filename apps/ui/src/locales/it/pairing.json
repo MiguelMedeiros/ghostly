@@ -2,7 +2,7 @@
   "attempt": "tentativo {{n}}",
   "contact": "Il tuo contatto",
   "done": "fatto",
-  "elapsed": "{{time}} in questo passaggio",
+  "elapsed": "{{time}} dall’inizio dell’abbinamento",
   "indicator": "Abbinamento · {{stage}}",
   "newInvite": "Chiedi al tuo contatto un nuovo invito.",
   "onDht": {
