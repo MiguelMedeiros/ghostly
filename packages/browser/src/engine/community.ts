@@ -761,7 +761,13 @@ export class Communities {
       for (const hub of kept) {
         const id = edges.get(hub);
         if (id && this.host.linkReady(id, 2)) continue;
-        if (now - (live.lobbyWrites.get(hub) ?? 0) >= this.timings.lobbyWriteMs) { live.lobbyWrites.set(hub, now); await this.askHub(groupId, live, hub, now).catch(() => {}); }
+        // A request the relays held back (the budget, while a link of mine signals) goes again in a moment, not at the
+        // next refresh: the hub cannot open an edge for a member it never saw ask (a member cut off by a hub that left
+        // waited 20 s more for each refused write, CLI daemons on local relays, 2026-10-03).
+        if (now - (live.lobbyWrites.get(hub) ?? 0) >= this.timings.lobbyWriteMs) {
+          live.lobbyWrites.set(hub, now);
+          await this.askHub(groupId, live, hub, now).catch(() => { live.lobbyWrites.set(hub, now - this.timings.lobbyWriteMs + BEACON_RETRY_MS); });
+        }
       }
     }
     await this.keepLooking(groupId, live, now);
