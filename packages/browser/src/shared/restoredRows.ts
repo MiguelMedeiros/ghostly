@@ -18,7 +18,9 @@ export function restoredWalletRow(store: string, value: unknown): unknown {
   if (store === STORES.swaps) return { ...value, restored: true };
   if (store === STORES.intents) {
     // An older copy cannot prove an unfinished attempt was never sent; it may not authorize a new one.
-    const intent = value as { review?: { state?: string } };
+    const intent = value as { review?: { state?: string; method?: string } };
+    // An on-chain review never approved stays unapproved: only Approve on this profile could send it, and a copy has none.
+    if (intent.review?.method === "bitcoin" && intent.review.state === "pending") return { ...intent, review: { ...intent.review, state: "cancelled" } };
     return intent.review && ["pending", "submitted", "unknown"].includes(intent.review.state ?? "") ? { ...intent, review: { ...intent.review, state: "unknown" } } : value;
   }
   return value;
