@@ -9,6 +9,12 @@
     "reason": "{{reason}}.",
     "retryAt": "Se reintentará hacia las {{time}}."
   },
+  "clockOff": {
+    "hint": "El reloj de este dispositivo parece estar desajustado unos {{amount}}. Los chats pueden tardar en conectar.",
+    "infoAhead": "La hora de este dispositivo va unos {{amount}} por delante de lo que dicen los relays y los dispositivos de tus contactos. Ghostly fecha lo que envía con este reloj, y las otras apps rechazan o retrasan lo que lleva una fecha demasiado lejana de su propia hora: los chats y grupos pueden tardar en conectar, las llamadas pueden no sonar, y una app sin actualizar puede no conectar en absoluto. Activa la fecha y hora automáticas en los ajustes de este dispositivo. Este aviso desaparece cuando el reloj vuelve a coincidir. Hacen falta varias fuentes que coincidan, nunca un solo contacto.",
+    "infoBehind": "La hora de este dispositivo va unos {{amount}} por detrás de lo que dicen los relays y los dispositivos de tus contactos. Ghostly fecha lo que envía con este reloj, y las otras apps rechazan o retrasan lo que lleva una fecha demasiado lejana de su propia hora: los chats y grupos pueden tardar en conectar, las llamadas pueden no sonar, y una app sin actualizar puede no conectar en absoluto. Activa la fecha y hora automáticas en los ajustes de este dispositivo. Este aviso desaparece cuando el reloj vuelve a coincidir. Hacen falta varias fuentes que coincidan, nunca un solo contacto.",
+    "title": "Reloj del dispositivo"
+  },
   "detail": {
     "noneLive": "Ninguna directa",
     "notLiveFor": "Sin conexión durante",

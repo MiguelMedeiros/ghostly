@@ -62,6 +62,24 @@ describe("a group's unread mark and a message that reaches me late", { timeout: 
     expect(world.view(bob, id)!.lastPeerMessageAt).toBeGreaterThan(readAt);
   });
 
+  it.each(["mesh", "community"] as const)("in a %s group: a message that comes within a second of my leaving it is unread", async (kind) => {
+    const { world, peers, id } = await groupOf(kind, ["alice", "bob"]);
+    const [alice, bob] = peers;
+    await world.until(() => [alice, bob].every(p => world.view(p, id)!.members.some(m => !m.me && m.online)), 5 * 60_000);
+    // The engine ticks once a second; the device's clock goes on between two ticks.
+    let wall = world.now;
+    vi.spyOn(Date, "now").mockImplementation(() => wall);
+    // Bob looks at the group 0.8 s after the last tick (the page marks it read by the device's clock) and leaves.
+    wall += 800;
+    const readAt = wall;
+    // Alice's message comes 0.1 s later, before the next tick.
+    wall += 100;
+    await alice.groups.send(id, "just after Bob left");
+    await world.settle();
+    expect(world.texts(bob, id)).toContain("just after Bob left");
+    expect(world.view(bob, id)!.lastPeerMessageAt).toBeGreaterThan(readAt);
+  });
+
   it("a mention that reached me late is still marked after a restart", async () => {
     const { world, peers, id } = await groupOf("mesh", ["alice", "bob", "carol"]);
     const [alice, bob] = peers;

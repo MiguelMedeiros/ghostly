@@ -28,8 +28,11 @@ it("bounds native listeners, restores saved identities and never evicts a busy e
   const row = (id:string) => node.getState().links.find(l=>l.id===id)!;
   try {
     await node.start();
-    await vi.waitFor(()=>expect(row(ids[8]).transportErrors?.["iroh/1"]).toContain("eight"));
-    expect(counts).toEqual({"iroh/1":8,"hyperdht/1":8});
+    // Each transport starts its listeners on its own (the test below): Iroh's being all up says nothing of HyperDHT's.
+    await vi.waitFor(()=>{
+      for (const transport of ["iroh/1","hyperdht/1"] as const) expect(row(ids[8]).transportErrors?.[transport]).toContain("eight");
+      expect(counts).toEqual({"iroh/1":8,"hyperdht/1":8});
+    });
     expect(row(ids[9]).availableTransports).toEqual(["webrtc/1"]);
     expect(row(ids[10]).availableTransports).toEqual(["webrtc/1"]);
     const original = (await db.getLinks()).find(l => l.id === ids[0]);

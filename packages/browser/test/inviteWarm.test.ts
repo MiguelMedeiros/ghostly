@@ -1,7 +1,7 @@
 import "fake-indexeddb/auto";
 import { afterEach, expect, it, vi } from "vitest";
 import { createLink, createRelayPayload, decodeInviteCode, encodeInviteCode, identityFromSeedB64, isEmptyLinkPacket, parseLinkRecords, parseRelayPayload, fromBase64Url, type SignedPacket } from "@ghostly/core";
-import { GhostlyNode, SPARE_INVITE_MIN_AGE_MS, SPARE_INVITE_WARM_AFTER_TAKE_MS, STARTUP_QUIET_MS } from "../src/engine/node";
+import { GhostlyNode, SPARE_INVITE_MIN_AGE_MS, SPARE_INVITE_WARM_AFTER_TAKE_MS, STARTUP_QUIET_MS, WARM_DATED_BACK_MS } from "../src/engine/node";
 import { db } from "../src/engine/db";
 
 // covers: chat.paired.pair-timing, chat.paired.progress
@@ -51,6 +51,32 @@ it("the inviter warms the contact's key with an empty packet, and is the inviter
     expect(view().peerLastSeenAt).toBe(0);
     // Asked again for the same link, the engine keeps it as it is.
     expect((await node.ensureLink({ ...invitation.mine, profile: "paired-chat/1", inviteCode })).linkId).toBe(linkId);
+  } finally { await node.shutdown(); vi.unstubAllGlobals(); }
+}, 20_000);
+
+it("dates the warm packet a day back, so the contact's first packet is the later one whatever its clock says", async () => {
+  // Dated by the inviter's clock, the empty packet was later than the first packets of a contact whose clock runs
+  // behind: the relays and the DHT kept it in their place, and a joiner two minutes behind stayed unseen for two minutes.
+  await db.putSettings({ online: true, nick: "", relays: [], iceServers: [], mints: [], mintsInitialized: true });
+  vi.stubGlobal("RTCPeerConnection", undefined);
+  const payloads = new Map<string, SignedPacket>();
+  const dated = { ...transport, publishPayload: async (key: string, payload: Uint8Array) => { publishes.push(key); payloads.set(key, parseRelayPayload(key, payload)); } };
+  const node = new GhostlyNode({ onState: vi.fn(), onMessages: vi.fn(), onCallSignal: vi.fn() }, { transport: dated, automaticWallets: false, nativeTransports: {} });
+  const invitation = createLink();
+  const inviteCode = encodeInviteCode({ ...invitation.invite, profile: "paired-chat/1" });
+  try {
+    await node.start();
+    await node.ensureLink({ ...invitation.mine, profile: "paired-chat/1", inviteCode });
+    const contact = identityFromSeedB64(invitation.invite.seedB64);
+    await vi.waitFor(() => expect(payloads.has(contact.pubKeyZ32)).toBe(true));
+    const warm = payloads.get(contact.pubKeyZ32)!;
+    expect(isEmptyLinkPacket(parseLinkRecords(warm, fromBase64Url(invitation.invite.encKeyB64)))).toBe(true);
+    expect(Number(warm.timestampMicros / 1000n)).toBeLessThanOrEqual(Date.now() - WARM_DATED_BACK_MS);
+    expect(Number(warm.timestampMicros / 1000n)).toBeGreaterThan(Date.now() - WARM_DATED_BACK_MS - 60_000);
+    // A contact whose clock is an hour behind: its first packet is still dated after the warm one.
+    expect(BigInt(Date.now() - 60 * 60_000) * 1000n).toBeGreaterThan(warm.timestampMicros);
+    // The inviter's own packet goes out as before, dated by its clock.
+    await vi.waitFor(() => expect(packets.has(identityFromSeedB64(invitation.mine.seedB64).pubKeyZ32)).toBe(true));
   } finally { await node.shutdown(); vi.unstubAllGlobals(); }
 }, 20_000);
 

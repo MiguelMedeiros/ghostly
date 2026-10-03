@@ -7,6 +7,7 @@ import { AdvancedSettings, Settings } from "./pages/Settings";
 import { Services } from "./pages/Services";
 import { Profile } from "./pages/Profile";
 import { Identities } from "./pages/Identities";
+import { Tasks } from "./pages/Tasks";
 import { Wallet } from "./pages/Wallet";
 import { GroupChat } from "./pages/GroupChat";
 import { SharePicker } from "./pages/SharePicker";
@@ -20,6 +21,7 @@ import { ProfileSwitchSplash } from "./components/ProfileSwitchSplash";
 import { ensureSession, loadSession } from "./lib/storage";
 import { useI18n, useT } from "./contexts/I18nContext";
 import { ErrorBoundary } from "./components/ErrorBoundary";
+import { ProfileGate } from "./components/ProfileUnavailable";
 import { INVITE_REFUSAL_MESSAGE, chatPath, classifyInvite, inviteRouteCode, protocolLinkCode, readInvite } from "./lib/url";
 import { onJoinNotice, showJoinNotice, type JoinNoticeKey } from "./lib/joinNotice";
 import { groupPath } from "./lib/groups";
@@ -205,6 +207,8 @@ export function Root() {
               <LockGate>
                 {/* Asking for updates says this device runs Ghostly: not before the password. */}
                 <UpdateProvider>
+                  {/* A profile whose database did not open shows why, and nothing that looks alive. */}
+                  <ProfileGate>
                   <AttentionFeedback />
                   <Routes>
                     {/* What the intakes above take out of the history at once (a group's link, an invite code, a
@@ -221,6 +225,7 @@ export function Root() {
                       <Route path="/services" element={<Services />} />
                       <Route path="/profile" element={<Profile />} />
                       <Route path="/identities" element={<Identities />} />
+                      <Route path="/tasks" element={<Tasks />} />
                       <Route path="/share" element={<Navigate to="/services" replace />} />
                       {/* The installed web app: what another app shared, and the icon's shortcuts (manifest.json). */}
                       <Route path="/shared" element={<SharePicker />} />
@@ -228,6 +233,7 @@ export function Root() {
                       <Route path="/scan" element={<Home />} />
                     </Route>
                   </Routes>
+                  </ProfileGate>
                 </UpdateProvider>
               </LockGate>
               </ErrorBoundary>

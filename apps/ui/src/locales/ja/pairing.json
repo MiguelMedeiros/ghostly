@@ -2,7 +2,7 @@
   "attempt": "{{n}} 回目",
   "contact": "相手",
   "done": "完了",
-  "elapsed": "この手順で {{time}}",
+  "elapsed": "ペアリング開始から {{time}}",
   "indicator": "ペアリング · {{stage}}",
   "newInvite": "相手に新しい招待を頼んでください。",
   "onDht": {

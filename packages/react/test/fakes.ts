@@ -172,15 +172,18 @@ export class FakeTransceiver {
 }
 
 /** An SDP with what `extractParamsFromSdp` reads: ICE credentials, a fingerprint, a setup role and a host and srflx candidate. */
-function fakeSdp(setup: string, kinds: string[]): string {
+function fakeSdp(setup: string, kinds: string[], restarts = 0): string {
   const lines = ["v=0", "o=- 1 2 IN IP4 127.0.0.1", "s=-", "t=0 0"];
+  // Each ICE restart has credentials and candidates of its own.
+  const round = restarts ? String(restarts) : "";
+  const port = 50000 + restarts;
   for (const kind of kinds) {
     lines.push(
       `m=${kind} 9 UDP/TLS/RTP/SAVPF 111`,
-      "a=candidate:1 1 udp 2122260223 192.168.1.2 50000 typ host generation 0",
-      "a=candidate:2 1 udp 1686052607 203.0.113.9 50000 typ srflx raddr 192.168.1.2 rport 50000 generation 0",
-      "a=ice-ufrag:fake",
-      "a=ice-pwd:fakefakefakefakefakefake",
+      `a=candidate:1 1 udp 2122260223 192.168.1.2 ${port} typ host generation 0`,
+      `a=candidate:2 1 udp 1686052607 203.0.113.9 ${port} typ srflx raddr 192.168.1.2 rport ${port} generation 0`,
+      `a=ice-ufrag:fake${round}`,
+      `a=ice-pwd:fakefakefakefakefakefake${round}`,
       `a=fingerprint:sha-256 ${Array(32).fill("AB").join(":")}`,
       `a=setup:${setup}`,
       `a=ssrc:${kind === "audio" ? 1111 : 2222} cname:fake`,
@@ -199,8 +202,16 @@ export class FakePeerConnection extends EventTarget {
   static holdGathering = false;
   /** How many of the next connections stall: they gather for ever and find no candidate (Chromium, rarely). */
   static stallGathering = 0;
+  /** No network: a restart offer gathers no candidate. */
+  static offline = false;
+  /** Restart offers cannot be made at all. */
+  static failRestarts = false;
   private readonly stalls: boolean;
 
+  /** How many times ICE restarted on this connection (its own restart offers, and the peer's it was given). */
+  iceRestarts = 0;
+  /** Every remote description it was given, in order. */
+  readonly remoteDescriptions: RTCSessionDescriptionInit[] = [];
   closed = false;
   iceConnectionState: RTCIceConnectionState = "new";
   connectionState: RTCPeerConnectionState = "new";
@@ -241,14 +252,18 @@ export class FakePeerConnection extends EventTarget {
     this.transceivers.push(new FakeTransceiver(this, kind, init.direction ?? "sendrecv"));
   }
 
-  async createOffer(): Promise<RTCSessionDescriptionInit> {
+  async createOffer(options: RTCOfferOptions = {}): Promise<RTCSessionDescriptionInit> {
     this.assertOpen();
-    return { type: "offer", sdp: fakeSdp("actpass", this.transceivers.map((t) => t.receiver.track.kind)) };
+    if (FakePeerConnection.failRestarts && options.iceRestart) throw new DOMException("No network", "OperationError");
+    if (options.iceRestart) this.iceRestarts++;
+    const noCandidates = options.iceRestart && FakePeerConnection.offline;
+    const sdp = fakeSdp("actpass", this.transceivers.map((t) => t.receiver.track.kind), this.iceRestarts);
+    return { type: "offer", sdp: noCandidates ? sdp.replace(/^a=candidate:.*\r\n/gm, "") : sdp };
   }
 
   async createAnswer(): Promise<RTCSessionDescriptionInit> {
     this.assertOpen();
-    return { type: "answer", sdp: fakeSdp("active", this.transceivers.filter((t) => t.mid !== null).map((t) => t.receiver.track.kind)) };
+    return { type: "answer", sdp: fakeSdp("active", this.transceivers.filter((t) => t.mid !== null).map((t) => t.receiver.track.kind), this.iceRestarts) };
   }
 
   async setLocalDescription(description: RTCSessionDescriptionInit) {
@@ -261,6 +276,10 @@ export class FakePeerConnection extends EventTarget {
 
   async setRemoteDescription(description: RTCSessionDescriptionInit) {
     this.assertOpen();
+    // An offer with other ICE credentials than the last description's restarts ICE here too, as in browsers.
+    const ufrag = (sdp?: string) => /^a=ice-ufrag:(.*)$/m.exec(sdp ?? "")?.[1];
+    if (description.type === "offer" && this.remoteDescription && ufrag(description.sdp) !== ufrag(this.remoteDescription.sdp)) this.iceRestarts++;
+    this.remoteDescriptions.push(description);
     this.remoteDescription = description;
     if (description.type === "offer") {
       // A section the offer has and we added nothing for gets a receive-only transceiver, as in browsers.
@@ -315,6 +334,8 @@ export function installWebRTCFakes() {
   FakePeerConnection.instances = [];
   FakePeerConnection.holdGathering = false;
   FakePeerConnection.stallGathering = 0;
+  FakePeerConnection.offline = false;
+  FakePeerConnection.failRestarts = false;
   vi.stubGlobal("RTCPeerConnection", FakePeerConnection);
   vi.stubGlobal("MediaStream", FakeMediaStream);
   const previous = Object.getOwnPropertyDescriptor(navigator, "mediaDevices");
@@ -337,5 +358,17 @@ export const remote = {
   },
   hangUp(ts: number): string {
     return JSON.stringify({ t: "h", ts });
+  },
+  /** An offer or an answer of a contact that restarts ICE (`x`), as the apps since 1.0.2 send them. */
+  restarting(signal: string): string {
+    return JSON.stringify({ ...JSON.parse(signal), x: 1 });
+  },
+  /** The contact's restart offer: new ICE credentials on the connection of its first offer. */
+  restartOffer(ts: number, round = 1): string {
+    return JSON.stringify({ t: "r", ts, u: `peer${round}`, p: `peerpeerpeerpeerpeerpeer${round}`, f: "cd".repeat(32), s: "actpass", m: ["a", "v"], c: [], ss: [1, 2], v: 0, x: 1 });
+  },
+  /** The contact's answer to our restart offer of `re`. */
+  restartAnswer(ts: number, re: number, round = 1): string {
+    return JSON.stringify({ t: "a", ts, u: `peer${round}`, p: `peerpeerpeerpeerpeerpeer${round}`, f: "cd".repeat(32), s: "active", m: ["a", "v"], c: [], ss: [1, 2], v: 0, x: 1, re });
   },
 };

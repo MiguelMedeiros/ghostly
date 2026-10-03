@@ -2,7 +2,7 @@
   "attempt": "attempt {{n}}",
   "contact": "Your contact",
   "done": "done",
-  "elapsed": "{{time}} in this step",
+  "elapsed": "{{time}} since pairing began",
   "indicator": "Pairing · {{stage}}",
   "newInvite": "Ask your contact for a new invite.",
   "onDht": {

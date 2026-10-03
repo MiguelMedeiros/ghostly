@@ -166,10 +166,13 @@ describe("ecash in", () => {
 
   it("a token the mint says is spent credits nothing and records nothing", async () => {
     mint.receive.mockRejectedValue(new MintOperationError(11001, "Token already spent"));
+    // Asked what became of it, the mint has signed nothing for this wallet and reads the token spent.
+    mint.checkProofsStates.mockResolvedValue([{ state: "SPENT" }]);
     const payment = vi.fn();
     const { wallet, events } = setup();
     await expect(wallet.receiveToken(tokenFrom(MINT, [64]), "ecash-in", undefined, { payment })).rejects.toThrow("already spent");
-    expect(payment).not.toHaveBeenCalled();
+    expect(rows("payments")).toEqual([]);
+    expect(rows("swaps"), "nothing is left to ask the mint about").toEqual([]);
     expect(rows("proofs")).toEqual([]);
     expect(rows("walletTx")).toEqual([]);
     expect(events.onChange).not.toHaveBeenCalled();
@@ -363,15 +366,33 @@ describe("Lightning out", () => {
     expect(warn).toHaveBeenCalledWith(expect.stringContaining("could not be unblinded"), expect.any(Error));
   });
 
+  it("a payment refused because its ecash was spent somewhere else says so, with no fee, and the rest is checked", async () => {
+    mint.checkMeltQuoteBolt11.mockResolvedValue(meltQuote("UNPAID"));
+    mint.completeMelt.mockRejectedValue(new MintOperationError(11001, "Token Already Spent"));
+    mint.checkProofsStates.mockImplementation(async (asked: { secret: string }[]) => asked.map((p) => ({ state: p.secret === "c" ? "UNSPENT" : "SPENT" })));
+    const { wallet } = setup();
+    await expect(wallet.payQuote("m1", MINT)).rejects.toThrow("This ecash was already spent somewhere else");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(rows<WalletTx>("walletTx").filter((tx) => tx.kind === "fee"), "spent elsewhere is no fee").toEqual([]);
+    expect(rows<PendingMelt>("melts")).toEqual([]);
+    // The proofs the mint read spent are gone; what it reads unspent stays, checked.
+    expect(rows<StoredProof>("proofs").every((p) => !p.reserved && !p.unchecked)).toBe(true);
+    expect(rows<StoredProof>("proofs").map((p) => p.secret)).toEqual(["c"]);
+  });
+
   it("an unpaid payment whose proofs are partly spent gives back only the unspent ones", async () => {
     mint.checkMeltQuoteBolt11.mockResolvedValue(meltQuote("PENDING"));
     mint.completeMelt.mockResolvedValue({ quote: meltQuote("PENDING"), change: [] });
     const { wallet, events } = setup();
     await wallet.payQuote("m1", MINT);
     mint.checkMeltQuoteBolt11.mockResolvedValue(meltQuote("UNPAID"));
-    mint.checkProofsStates.mockResolvedValue([{ state: "SPENT" }, { state: "UNSPENT" }, { state: "UNSPENT" }]);
+    // The payment's own proofs first; then the rest of the wallet's ecash at that mint is asked about, once.
+    mint.checkProofsStates.mockResolvedValueOnce([{ state: "SPENT" }, { state: "UNSPENT" }, { state: "UNSPENT" }]);
+    mint.checkProofsStates.mockImplementation(async (asked: unknown[]) => asked.map(() => ({ state: "UNSPENT" })));
     await vi.advanceTimersByTimeAsync(30_000);
     expect(secrets()).toEqual(["b", "c", "d"]);
+    expect(rows<StoredProof>("proofs").some((p) => p.unchecked), "checked, and found unspent").toBe(false);
+    expect(rows<WalletTx>("walletTx").filter((tx) => tx.kind === "fee"), "a proof spent elsewhere is no fee of this payment").toEqual([]);
     expect(balance()).toBe(44);
     expect(events.onMeltResolved).toHaveBeenCalledWith(expect.anything(), false);
     expect(warn).toHaveBeenCalledWith(expect.stringContaining("1 of its proofs are spent"));

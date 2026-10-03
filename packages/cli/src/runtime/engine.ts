@@ -1,4 +1,4 @@
-import { appendFileSync, existsSync, readFileSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync, rmSync } from "node:fs";
 import { createRequire } from "node:module";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -11,7 +11,7 @@ import { nodeFedimintSdk } from "./fedimint";
 import { installFileFetch } from "./fileFetch";
 import { nodePushSend } from "./pushSend";
 import { openPersistentIndexedDb, type PersistentIndexedDb } from "./storage";
-import type { ProfilePaths } from "../profiles";
+import { RESTORED_MARK, type ProfilePaths } from "../profiles";
 
 /** What runs a profile: its store, the engine and the host around it. */
 export interface Runtime {
@@ -129,6 +129,20 @@ export async function startRuntime(paths: ProfilePaths, options: RuntimeOptions 
   const trace = process.env.GHOSTLY_LINK_TRACE;
   if (trace) setLinkTraceSink(line => appendFileSync(trace, line + "\n", { mode: 0o600 }));
   const store = await openPersistentIndexedDb(paths.db);
+  // A profile a restore made, started for the first time: its store is the backup's, as old as the backup. Its ecash
+  // is checked with the mints and its unfinished payment attempts authorize nothing, as in the app's restore. Done
+  // before the engine reads any of it; the mark goes only once that is on disk, so a start cut short does it again.
+  const restored = join(paths.dir, RESTORED_MARK);
+  if (existsSync(restored)) {
+    try {
+      await (await import("@ghostly/browser/shared/restoredRows")).markRestoredWallet();
+      await store.compact();
+    } catch (error) {
+      await store.close().catch(() => {});
+      throw error;
+    }
+    rmSync(restored, { force: true });
+  }
   const webrtc = await installWebRtc();
   // Voice calls (WISP 11xx § Calls): offered to contacts (calls/1) only where their media can run.
   const stack = webrtc ? await loadCallStack() : "Calls need WebRTC, which is off on this headless Ghostly";

@@ -1,0 +1,12 @@
+{
+  "copied": "コピーしました",
+  "copy": "詳細をコピー",
+  "missingCrypto": "Web Crypto がオフです。安全な (https) アドレスでのみ動作します。",
+  "missingIndexedDB": "IndexedDB がオフかブロックされているため、チャットと鍵を保存できません。",
+  "missingLocks": "Web Locks がないため、Ghostly が一つだけ動いていることを確かめられません。",
+  "missingStorage": "サイトデータがブロックされているため、何も保存できません。",
+  "reload": "再読み込み",
+  "title": "このブラウザでは Ghostly を実行できません",
+  "tryOther": "プライベートモードを終了してサイトデータを許可するか、ブラウザを更新するか、別のブラウザで Ghostly を開いてください。",
+  "trySecure": "https:// のアドレスで Ghostly を開いてください。"
+}

@@ -30,9 +30,20 @@ export const HOLD_LIMITS = {
   maxTextBytes: 16 * 1024,
   maxPaymentRequestBytes: 64 * 1024,
   maxManifestBytes: 64 * 1024,
-  /** A pointer or bundle from the future by more than this is refused. */
-  clockSkewMs: 60_000,
+  /**
+   * How far past one lifetime from now an expiry may reach by the reader's clock: the sender's clock may be ahead, and
+   * a day covers any clock that is merely wrong. Nothing else about a pointer or a bundle is held against this clock.
+   */
+  clockSkewMs: 24 * 60 * 60_000,
 } as const;
+/**
+ * How far before its own clock a sender dates its pointer and its manifest, and ends the lifetimes it gives. A reader
+ * refuses nothing for those dates: `rev` orders pointers and `seq` orders items, both kept by the reader. Apps up to
+ * 1.0.2 refuse a pointer or a manifest dated more than a minute past their clock, and an expiry more than a minute
+ * past one lifetime from now, each without a word: the items of a sender whose clock ran two minutes fast were never
+ * fetched. Dated back, a sender up to about eleven minutes ahead is read by them.
+ */
+export const HOLD_DATED_BACK_MS = 10 * 60_000;
 
 export type HoldKind = "text" | "file" | "pay-req" | "manifest";
 const KINDS: readonly string[] = ["text", "file", "pay-req", "manifest"];
@@ -82,7 +93,7 @@ export interface HoldPointer {
 
 /** Why a bundle, manifest or pointer was refused. Never a reason to trust it a little. */
 export class HoldRefusedError extends Error {
-  constructor(readonly reason: "size" | "format" | "tampered" | "not-for-me" | "author" | "signature" | "digest" | "limits" | "expired" | "future", message: string) {
+  constructor(readonly reason: "size" | "format" | "tampered" | "not-for-me" | "author" | "signature" | "digest" | "limits" | "expired", message: string) {
     super(message);
   }
 }
@@ -168,8 +179,11 @@ export class HoldKeys {
     if (!valid) throw new HoldRefusedError("signature", "The held item's signature does not check out");
     const body = plain.subarray(4 + headerLength);
     if (bodyDigest(body) !== digest) throw new HoldRefusedError("digest", "The held item's content does not match its header");
-    if ((ts as number) > now + HOLD_LIMITS.clockSkewMs) throw new HoldRefusedError("future", "The held item is dated in the future");
-    // The item may be older than its upload (a retry, a message written offline); its expiry may not reach past one lifetime from now.
+    // Its `ts` is its sender's clock, often minutes from this one: nothing is refused for it. It was, past a minute
+    // ahead, and for good: the item's sequence was passed, and its sender told "could not be verified as yours, or was
+    // too large". What stops an item from being taken twice is its sequence (the manifest's, the pointer's `rev`).
+    // The item may be older than its upload (a retry, a message written offline); its expiry may not reach past one
+    // lifetime from now, give or take what the sender's clock is ahead.
     if ((expires as number) <= (ts as number) || (expires as number) > now + HOLD_LIMITS.ttlMs + HOLD_LIMITS.clockSkewMs) throw new HoldRefusedError("limits", "The held item's lifetime is out of bounds");
     const header: HoldHeader = { v: 1, from, to, author, recipient, mailbox, seq: seq as number, id, ts: ts as number, kind: kind as HoldKind, meta, digest, expires: expires as number };
     checkKind(header, body);
@@ -186,8 +200,11 @@ export class HoldKeys {
     return records;
   }
 
-  /** The contact's pointer out of its packet, or null when the packet is not one of its pointers. */
-  readPointer(packet: SignedPacket, now = Date.now()): HoldPointer | null {
+  /**
+   * The contact's pointer out of its packet, or null when the packet is not one of its pointers. Its `issued` is the
+   * contact's clock and refuses nothing: an older pointer cannot take a newer one's place because of `rev`.
+   */
+  readPointer(packet: SignedPacket): HoldPointer | null {
     if (packet.pubKeyZ32 !== this.peerAddress || measureRecords(packet.pubKeyZ32, packet.records) > MAX_DNS_PACKET_BYTES) return null;
     const records = packet.records.filter(r => r.label === "_hold");
     if (records.length !== 1) return null;
@@ -199,7 +216,7 @@ export class HoldKeys {
     const [body, signature] = parsed as [unknown[], string];
     const [v, rev, issued, expires, manifestUrl, top, ack, count, bytes, refused = []] = body;
     if (v !== VERSION || ![rev, issued, expires, top, ack, count, bytes].every(n => Number.isSafeInteger(n) && (n as number) >= 0) ||
-      (manifestUrl !== null && (typeof manifestUrl !== "string" || manifestUrl.length > 2048)) || (issued as number) > now + HOLD_LIMITS.clockSkewMs ||
+      (manifestUrl !== null && (typeof manifestUrl !== "string" || manifestUrl.length > 2048)) ||
       !Array.isArray(refused) || refused.length > 32 || !refused.every(n => Number.isSafeInteger(n) && (n as number) > 0)) return null;
     try {
       if (!verify(fromBase64Url(signature), utf8Encode(JSON.stringify(["ghostly-hold-pointer", this.to, this.from, body])), publicKeyFromZ32(this.peer))) return null;

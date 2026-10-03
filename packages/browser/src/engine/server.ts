@@ -2,6 +2,7 @@ import { parseCallSignal } from "@ghostly/core";
 import type { MessageChanges } from "../shared/messageChanges";
 import type { EngineEvent, RpcRequest, RpcResponse } from "../shared/rpc";
 import type { StoredMessage } from "../shared/types";
+import { profileOpenFailure } from "../shared/idb";
 import { GhostlyNode, type NodeOptions } from "./node";
 
 /**
@@ -46,6 +47,8 @@ export class EngineServer {
       options,
     );
     this.ready = this.node.start();
+    // A start that fails is told to each client as it attaches; nothing else may be left to report it as unhandled.
+    this.ready.catch(() => {});
   }
 
   attach(client: EngineClientSink): void {
@@ -66,8 +69,12 @@ export class EngineServer {
           this.histories.get(client)?.add(link.id);
         });
       }
+    }, (error: unknown) => {
+      // The peer never started (the profile's database did not open): the client is told why, so the app says so
+      // instead of showing a chat list that looks alive. Before, this was dropped here and nothing was said.
+      this.post(client, { kind: "start-failed", failure: profileOpenFailure(error) });
     }).catch(() => {
-      // The client went away mid-snapshot (dropped, as broadcast does), or the peer never started (every call says so).
+      // The client went away mid-snapshot (dropped, as broadcast does).
       this.clients.delete(client);
     });
   }

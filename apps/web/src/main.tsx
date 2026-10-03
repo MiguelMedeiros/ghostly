@@ -3,12 +3,16 @@ import { createRoot } from "react-dom/client";
 import { setBrowserHost } from "@ghostly/browser/host";
 import { startSessionSync } from "@ghostly/browser/platform/sync";
 import { Root } from "../../ui/src/Root";
-import { becomeThePeer } from "@ghostly/browser/inPageHost";
+import { PeerLockUnavailable, becomeThePeer } from "@ghostly/browser/inPageHost";
 import { webHost } from "./host";
 import { setDatabaseName } from "@ghostly/browser/shared/idb";
 import { setStorageProfile } from "../../ui/src/lib/storage";
 import { activeProfileId, namespaceOf, setRunningProfile } from "../../ui/src/lib/profiles";
 import { loadSettings } from "../../ui/src/lib/settings";
+import { bootDetails, missingEssentials, type Essential } from "../../ui/src/lib/bootCheck";
+import { UnsupportedBrowser } from "../../ui/src/components/UnsupportedBrowser";
+import { locales } from "../../ui/src/locales";
+import { translateWith } from "../../ui/src/locales/translate";
 import { applyDocumentLanguage } from "../../ui/src/lib/documentLanguage";
 import { watchInstallPrompt } from "../../ui/src/lib/installPrompt";
 import { setPushPlatform } from "../../ui/src/lib/wakePush";
@@ -35,6 +39,21 @@ if (profile) { setStorageProfile(profile); setDatabaseName(`ghostly_${profile}`)
 // The profile's language on <html> before anything is painted (the I18nProvider keeps it in step from then on).
 applyDocumentLanguage(loadSettings().language);
 
+/**
+ * "Ghostly can't run in this browser", in the profile's language, instead of the app: said rather than a blank page
+ * or an app that never connects. Nothing else starts; the returned promise never settles, so the module stops here.
+ */
+function cannotRun(missing: Essential[], error?: unknown): Promise<never> {
+  const language = loadSettings().language;
+  const t = translateWith(locales[language] || locales.en, locales[language] ? language : "en");
+  root.render(<UnsupportedBrowser missing={missing} details={bootDetails(missing, error)} t={t} />);
+  return new Promise<never>(() => {});
+}
+
+// What the app cannot run without (storage, IndexedDB, Web Crypto, Web Locks), before anything touches it.
+const missing = await missingEssentials();
+if (missing.length) await cannotRun(missing);
+
 let isPeer = false;
 await becomeThePeer(profile ? `ghostly-peer-${profile}` : "ghostly-peer", () => {
   // Opened for a share while the app runs in another tab: that tab gets it. Not at once: a share posted from this
@@ -51,7 +70,8 @@ await becomeThePeer(profile ? `ghostly-peer-${profile}` : "ghostly-peer", () => 
       </div>
     </div>,
   );
-});
+  // The lock is there but the browser refuses it: the same screen as a browser without it.
+}).catch((error: unknown) => (error instanceof PeerLockUnavailable ? cannotRun(["locks"], error) : Promise.reject(error)));
 
 isPeer = true;
 setBrowserHost(webHost);

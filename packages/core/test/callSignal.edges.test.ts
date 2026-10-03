@@ -4,6 +4,10 @@ import {
   buildSdpFromSignal,
   compressSdp,
   decompressSdp,
+  CALL_SIGNAL_FUTURE_MS,
+  answersOffer,
+  callSignalHeardAt,
+  heardCallSignal,
   parseCallSignal,
   signalHasVideo,
   waitForIceGathering,
@@ -80,6 +84,70 @@ describe("call signal candidates: refusals", () => {
 
   it("refuses a non-finite timestamp", () => {
     expect(parseCallSignal('{"t":"h","ts":1e999}', NOW)).toBeNull();
+  });
+});
+
+describe("a signal's time and this device's clock", () => {
+  const MAX = 120_000;
+  const answer = (over: Record<string, unknown> = {}) => JSON.stringify({ ...base, t: "a", s: "active", ...over });
+
+  it.each([["two minutes ahead", MAX + 500], ["ten minutes ahead", 10 * 60_000], ["two minutes behind", -MAX - 500], ["an hour behind", -60 * 60_000]])("a signal the engine heard come is as old as that, whatever its sender's clock (%s) dated it", (_, skew) => {
+    const theirs = JSON.stringify({ ...base, ts: NOW + skew });
+    // By its own time alone, as one found in a record: refused, as before.
+    expect(parseCallSignal(theirs, NOW)).toBeNull();
+    const heard = parseCallSignal(heardCallSignal(theirs, NOW - 1_000), NOW);
+    expect(heard).toMatchObject({ t: "o", ts: NOW + skew, at: NOW - 1_000 });
+    expect(callSignalHeardAt(heard!)).toBe(NOW - 1_000);
+    // It goes stale two minutes after it was heard, as any offer does.
+    expect(parseCallSignal(heardCallSignal(theirs, NOW - MAX - 1), NOW)).toBeNull();
+    expect(parseCallSignal(heardCallSignal(theirs, NOW - MAX), NOW)).not.toBeNull();
+  });
+
+  it.each(["o", "a", "h", "v", "r"])("a signal (%s) dated more than ten minutes ahead is not taken, heard just now or not", (t) => {
+    const signal = (ts: number) => JSON.stringify({ ...base, t, ts, ...(t === "a" || t === "o" || t === "r" ? {} : { u: undefined, p: undefined, f: undefined, s: undefined }) });
+    expect(parseCallSignal(heardCallSignal(signal(NOW + CALL_SIGNAL_FUTURE_MS + 1), NOW), NOW)).toBeNull();
+    expect(parseCallSignal(heardCallSignal(signal(NOW + 24 * 60 * 60_000), NOW), NOW)).toBeNull();
+    expect(parseCallSignal(signal(NOW + CALL_SIGNAL_FUTURE_MS + 1), NOW)).toBeNull();
+    expect(parseCallSignal(heardCallSignal(signal(NOW + CALL_SIGNAL_FUTURE_MS), NOW), NOW)).toMatchObject({ t, ts: NOW + CALL_SIGNAL_FUTURE_MS });
+  });
+
+  it("when it was heard is the engine's to say: what a contact put there is dropped", () => {
+    const forged = JSON.stringify({ ...base, ts: NOW - 60 * 60_000, at: NOW });
+    expect(JSON.parse(heardCallSignal(forged))).not.toHaveProperty("at");
+    expect(parseCallSignal(heardCallSignal(forged), NOW)).toBeNull();
+    expect(JSON.parse(heardCallSignal(forged, NOW - 5))).toMatchObject({ ts: NOW - 60 * 60_000, at: NOW - 5 });
+    // Not a signal: handed on as it is, for the parser to refuse.
+    expect(heardCallSignal("{", NOW)).toBe("{");
+    expect(heardCallSignal("[1]", NOW)).toBe("[1]");
+    expect(parseCallSignal(JSON.stringify({ ...base, at: "now" }), NOW)).not.toHaveProperty("at");
+  });
+
+  it("an answer that names its offer is for that offer and no other, whatever the two clocks say", () => {
+    const offerTs = NOW - 5_000;
+    // The callee's clock is two minutes behind: by its time alone the answer is "from before the offer".
+    const behind = parseCallSignal(heardCallSignal(answer({ ts: offerTs - MAX, o: offerTs }), NOW), NOW)!;
+    expect(behind).toMatchObject({ t: "a", o: offerTs });
+    expect(answersOffer(behind, offerTs)).toBe(true);
+    // An answer to another offer (an earlier call, sent again on a new session): never this one's, however new it reads.
+    const other = parseCallSignal(heardCallSignal(answer({ ts: NOW + 1, o: offerTs - 60_000 }), NOW), NOW)!;
+    expect(answersOffer(other, offerTs)).toBe(false);
+  });
+
+  it("an answer that names no offer (an app up to 1.0.2) is taken when it came after this side offered", () => {
+    const offerTs = NOW - 5_000;
+    const heard = parseCallSignal(heardCallSignal(answer({ ts: offerTs - 60_000 }), NOW), NOW)!;
+    expect(heard).not.toHaveProperty("o");
+    expect(answersOffer(heard, offerTs)).toBe(true);
+    // Heard before the offer went out, or with nothing to say when (a record): by its own time, as before.
+    expect(answersOffer(parseCallSignal(heardCallSignal(answer({ ts: offerTs - 60_000 }), offerTs - 1), NOW)!, offerTs)).toBe(false);
+    expect(answersOffer(parseCallSignal(answer({ ts: offerTs - 60_000 }), NOW)!, offerTs)).toBe(false);
+    expect(answersOffer(parseCallSignal(answer({ ts: offerTs + 1 }), NOW)!, offerTs)).toBe(true);
+  });
+
+  it("refuses an offer name that is not a number, and keeps one only on an answer", () => {
+    expect(parseCallSignal(answer({ o: "1" }), NOW)).toBeNull();
+    expect(parseCallSignal(answer({ o: null }), NOW)).toBeNull();
+    expect(parseCallSignal(JSON.stringify({ ...base, o: NOW }), NOW)).not.toHaveProperty("o");
   });
 });
 

@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import DHT from "bittorrent-dht";
 import { ed25519 } from "@noble/curves/ed25519.js";
 import {
-  RelayTransport, createRelayPayload, isDiscoveryBudgetError, newerPacket, parseRelayPayload, publicKeyFromZ32,
+  RelayTransport, isDiscoveryBudgetError, newerPacket, parseRelayPayload, publicKeyFromZ32,
   type DiscoveryStatus, type GhostRecord, type Identity, type PkarrRequestOptions, type PkarrTransport, type RelayTransportOptions, type SignedPacket,
 } from "@ghostly/core";
 
@@ -99,7 +99,6 @@ export class Mainline {
  */
 export class RelaysAndDht implements PkarrTransport {
   readonly relays: RelayTransport;
-  private readonly lastTimestamp = new Map<string, bigint>();
   private lastVia: "relay" | "dht" = "relay";
 
   constructor(private readonly dht: Mainline | null, relays: RelayTransportOptions = {}, private readonly pinned = false) {
@@ -107,19 +106,21 @@ export class RelaysAndDht implements PkarrTransport {
   }
 
   async publish(identity: Identity, records: GhostRecord[], options: PkarrRequestOptions = {}): Promise<void> {
-    // BEP44 sequence numbers must strictly increase, on the relays and on the DHT alike: one payload for both.
-    const now = BigInt(Date.now()) * 1000n, last = this.lastTimestamp.get(identity.pubKeyZ32) ?? 0n;
-    const timestamp = now > last ? now : last + 1n;
-    this.lastTimestamp.set(identity.pubKeyZ32, timestamp);
-    await this.publishPayload(identity.pubKeyZ32, createRelayPayload(identity, records, timestamp), options);
+    // BEP44 sequence numbers must strictly increase, on the relays and on the DHT alike: one payload for both, dated
+    // past every packet put or read under the key (`RelayTransport.publishDated`), whichever clock dated those.
+    await this.relays.publishDated(identity, records, (key, payload, _timestamp, conflict) => this.putBoth(key, payload, options, conflict), options);
   }
 
-  async publishPayload(pubKeyZ32: string, payload: Uint8Array, options: PkarrRequestOptions = {}): Promise<void> {
-    if (!this.dht) return this.relays.publishPayload(pubKeyZ32, payload, options);
+  publishPayload(pubKeyZ32: string, payload: Uint8Array, options: PkarrRequestOptions = {}): Promise<void> {
+    return this.putBoth(pubKeyZ32, payload, options);
+  }
+
+  private async putBoth(pubKeyZ32: string, payload: Uint8Array, options: PkarrRequestOptions, conflict?: (relay: string) => void): Promise<void> {
+    if (!this.dht) return this.relays.publishPayload(pubKeyZ32, payload, options, conflict);
     const onDht = this.dht.put(pubKeyZ32, payload);
     onDht.catch(() => {});
     try {
-      await this.relays.publishPayload(pubKeyZ32, payload, options);
+      await this.relays.publishPayload(pubKeyZ32, payload, options, conflict);
     } catch (error) {
       // Held back by this app's budget: the relays take it when it frees (browser contacts read only them).
       if (isDiscoveryBudgetError(error)) throw error;
@@ -143,6 +144,7 @@ export class RelaysAndDht implements PkarrTransport {
     try {
       const fromDht = await this.dht.get(pubKeyZ32);
       this.lastVia = "dht";
+      if (fromDht) this.relays.sawTimestamp(pubKeyZ32, fromDht.timestampMicros);
       return newerPacket(fromRelays, fromDht);
     } catch (error) {
       if (fromRelays) return fromRelays;
@@ -158,5 +160,8 @@ export class RelaysAndDht implements PkarrTransport {
     return this.lastVia === "dht" ? { ...status, path: { via: "dht" } } : status;
   }
   subscribe(listener: Parameters<RelayTransport["subscribe"]>[0]): () => void { return this.relays.subscribe(listener); }
+  /** A relay's answer only: a packet the DHT hands back when the relays are down may be older than one already read. */
+  readAnsweredAt(pubKeyZ32: string): number | undefined { return this.relays.readAnsweredAt(pubKeyZ32); }
+  onServerTime(listener: Parameters<RelayTransport["onServerTime"]>[0]): () => void { return this.relays.onServerTime(listener); }
   configure({ relays }: { relays: string[]; readRelays: boolean }): void { if (!this.pinned) this.relays.setRelays(relays); }
 }
