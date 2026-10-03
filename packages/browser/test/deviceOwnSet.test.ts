@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { TURN_SETTLE_MS, bytesEqual, classifyTurnRead, fromBase64Url, readTurnPacket, seedSigner, signTombstone, toBase64Url, turnKeys, type Signer } from "@ghostly/core";
 import { amend, firstRecord, transition, type DevicePatch, type DeviceRecord, type DeviceSlot, type StoredDeviceState } from "../src/devices/state";
-import { canStartOwnSet, instanceBelow, resumeOwnSet, startOwnSet, type OwnSetPorts } from "../src/devices/ownSet";
+import { canStartOwnSet, instanceBelow, resumeOwnSet, startOwnSet, supersedeOwnTombstone, type OwnSetPorts } from "../src/devices/ownSet";
+import { putTombstones } from "../src/devices/remove";
 import { FakeTurnNetwork } from "./helpers/turnNetwork";
 // covers: devices.remove.own-set
 
@@ -165,5 +166,33 @@ describe("a device set of its own, from moving", () => {
     expect(await startOwnSet(phone.ports, { password: PASSWORD, name: "Desktop" })).toBe("lost");
     expect(phone.store.record).toMatchObject({ state: "standby" });
     expect(phone.store.record.ownSet).toBeUndefined();
+  });
+});
+
+describe("what a set of its own leaves behind", () => {
+  it("is refused where the screen would not offer it: a device that can only be added back", async () => {
+    const network = await world();
+    const phone = device(network, 1, { reenroll: true });
+    await expect(startOwnSet(phone.ports, { password: PASSWORD, name: "Desktop" })).rejects.toThrow(/^takeover-state:/);
+    expect(network.puts()).toEqual([]);
+  });
+
+  it("given up for the remover's new secret: its tombstone gives way to one listing the remover's devices, the others stay moving, and the remover takes it as its own", async () => {
+    const network = await world();
+    const removers = network.source("dht").held!;
+    // The phone put its own tombstone and was settling.
+    const phone = device(network, 1, {}, async () => { throw new Error("the app stopped"); });
+    await expect(startOwnSet(phone.ports, { password: PASSWORD, name: "Desktop" })).rejects.toThrow("the app stopped");
+    const tablet = { keys: oldKeys, ownKey: signers[2]!.publicKey, stored: null };
+    expect(classifyTurnRead(tablet, await network.turnRead())).toMatchObject({ result: "tombstone", listed: false });
+    // Then the remover's frame came: the phone puts a tombstone listing the remover's devices in place of its own.
+    expect(await supersedeOwnTombstone(phone.ports, phone.store.record, removers)).toBe(true);
+    expect(classifyTurnRead(tablet, await network.turnRead())).toMatchObject({ result: "tombstone", listed: true });
+    // The remover's hourly put finds it in place of its own, and sees no foreign set in it.
+    const removerRecord: DeviceRecord = { ...firstRecord("ghostly", "active", { d: toBase64Url(label(0xd9)), deviceSet: [slot(0), slot(1), slot(2)], ownSlot: 0, activeSlot: 0 }), earlierSets: [{ d: toBase64Url(OLD_D), tombstone: toBase64Url(removers), setUpdate: "", pending: [] }] };
+    const [put] = await putTombstones(network, removerRecord, signers[0]!.publicKey);
+    expect(put!.foreign).toBeUndefined();
+    // Nothing of its own set to supersede: nothing is put.
+    expect(await supersedeOwnTombstone(phone.ports, { ...phone.store.record, ownSet: undefined }, removers)).toBe(false);
   });
 });
