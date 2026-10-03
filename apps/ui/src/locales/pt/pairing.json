@@ -2,7 +2,7 @@
   "attempt": "tentativa {{n}}",
   "contact": "Seu contato",
   "done": "concluída",
-  "elapsed": "{{time}} nesta etapa",
+  "elapsed": "{{time}} desde o início do pareamento",
   "indicator": "Pareamento · {{stage}}",
   "newInvite": "Peça um novo convite ao seu contato.",
   "onDht": {

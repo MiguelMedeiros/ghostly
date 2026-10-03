@@ -1,4 +1,67 @@
 {
+  "board": {
+    "card": {
+      "botLabel": "De:",
+      "chatLabel": "Chat:",
+      "checks": {
+        "failing": "Comprobaciones fallidas",
+        "passing": "Comprobaciones correctas",
+        "pending": "Comprobaciones pendientes"
+      },
+      "details": "Detalles",
+      "filesLabel": "Archivos:",
+      "from": "{{bot}} en {{chat}}",
+      "in": "en {{chat}}",
+      "openPr": "Abrir en {{host}}",
+      "parts": "{{done}} de {{total}} hechas",
+      "prLabel": "Pull request:",
+      "prState": {
+        "closed": "Cerrado",
+        "draft": "Borrador",
+        "merged": "Fusionado",
+        "open": "Abierto"
+      },
+      "statusLabel": "Estado:",
+      "steps": "{{done}} de {{total}}",
+      "tagsLabel": "Etiquetas:",
+      "updatedLabel": "Actualizado:"
+    },
+    "column": {
+      "blocked": "Bloqueadas",
+      "closed": "Detenidas",
+      "done": "Hechas",
+      "queued": "En cola",
+      "review": "Revisión",
+      "running": "En curso"
+    },
+    "columns": "Columnas",
+    "empty": "Aún no hay tareas",
+    "emptyHint": "Las tarjetas de tarea de los bots de tus chats aparecen aquí.",
+    "filter": "Filtrar tareas",
+    "groupBy": {
+      "bot": "Bot",
+      "chat": "Chat",
+      "label": "Agrupar por",
+      "status": "Estado"
+    },
+    "hideOlder": "Ocultar antiguas",
+    "info": "Los bots publican tarjetas de tarea en chats y grupos y las mantienen al día. Este tablero reúne las de todos los chats. Las tareas hechas y detenidas se quedan un día; Detenidas reúne las fallidas y las canceladas. Una tarjeta solo muestra la tarea: su bot cambia el estado. Abre una tarjeta para verla en su chat.",
+    "me": "Tú",
+    "noMatch": "Ninguna tarea coincide",
+    "none": "Ninguna",
+    "showMore": "Mostrar más ({{count}})",
+    "showOlder": "Mostrar antiguas ({{count}})",
+    "tagFilter": "Mostrar solo {{tag}}",
+    "tags": "Etiquetas",
+    "tasksMany": "{{count}} tareas",
+    "tasksOne": "1 tarea",
+    "title": "Tareas",
+    "view": {
+      "label": "Mostrar",
+      "routines": "Rutinas",
+      "tasks": "Tareas"
+    }
+  },
   "buttons": {
     "answers": "Respuestas",
     "chosen": "Elegida",

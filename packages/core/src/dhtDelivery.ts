@@ -6,7 +6,7 @@ import { encrypt, sealedLength, tryDecrypt } from "./crypto";
 import { identityFromSeed, identityFromSeedB64, publicKeyFromZ32, sign, verify, type Identity } from "./identity";
 import type { LinkParams } from "./invite";
 import type { PairingCredentials } from "./pairedSession";
-import { measureRecords, MAX_DNS_PACKET_BYTES, type GhostRecord, type SignedPacket } from "./pkarr";
+import { measureRecords, MAX_DNS_PACKET_BYTES, PKARR_FUTURE_SKEW_MS, type GhostRecord, type SignedPacket } from "./pkarr";
 import { budgetRetryMs, isDiscoveryBudgetError, type PkarrRequestOptions, type PkarrTransport } from "./transport";
 import { traceLink } from "./linkTrace";
 import { REACTION_LIMITS, readDhtReactions, validReactionNumber, type WireReaction } from "./reactions";
@@ -17,6 +17,21 @@ export type DeliveryMode = "stream" | "dht";
 export const DHT_TEXT_BYTES = 256;
 export const DHT_MESSAGE_TTL = 5 * 60_000;
 const CONTROL_TTL = 10 * 60_000;
+/**
+ * How far apart two devices' clocks may be for an envelope's expiry: a reader takes one until this long after `expires`
+ * by its own clock. A device's clock a few minutes off is common; an envelope's lifetime is five or ten minutes, so a
+ * sender that far behind had every envelope expired on arrival, with nothing on screen on either side. Its `issued` is
+ * refused for nothing: what stops an old envelope from being taken again is its `sequence`, which the reader keeps.
+ */
+export const DHT_EXPIRY_SKEW_MS = PKARR_FUTURE_SKEW_MS;
+/**
+ * How far before its own clock a sender dates an envelope (`issued`), never before the envelope's lifetime began nor
+ * 30 s before its text's time. Apps up to 1.0.2 refuse an envelope dated more than 30 s past their clock, so every
+ * envelope of a clock two minutes ahead was dropped by them: no first contact, no text, no receipt. Dated back, a
+ * control envelope from a clock up to two and a half minutes ahead is taken by them at once, and a text once it has
+ * been going out for as long as the clock is ahead.
+ */
+export const DHT_ISSUED_BACK_MS = 2 * 60_000;
 const MAX_ATTEMPTS = 8;
 /** The wait before publication attempt `attempts + 1` of a text, or of a receipt the contact still asks for. */
 const backoff = (attempts: number) => Math.min(60_000, 4_000 * 2 ** attempts);
@@ -178,6 +193,8 @@ export class DhtDelivery {
   private controlTimer: ReturnType<typeof setTimeout> | null = null;
   private chain = Promise.resolve();
   private lastPublish = 0;
+  /** The sequence of the last envelope of the contact that was past its expiry (traced once). */
+  private expiredSeen = 0;
   private controlDue = 0;
   /** Until when the relays' request budget holds publications back: what is due then goes at once. */
   private budgetUntil = 0;
@@ -493,8 +510,10 @@ export class DhtDelivery {
     // envelope stays in the mailbox until the next one, and every publication spends a request on each relay.
     const receiptDue = !!receipt && !receipt.settled && (receipt.next ?? 0) <= now;
     if (!force && (!pending || pending.next > now) && !receiptDue && !this.reactionsDue && this.controlDue > now) return;
-    const expires = pending?.expires ?? now + CONTROL_TTL;
-    const { body, records, reactions } = this.fitted(this.state.sequence + 1, now, expires, pending?.message ?? null, receipt?.id ?? null, pending?.reply, pending?.edit, pending?.forwarded);
+    // Dated back (`DHT_ISSUED_BACK_MS`), and a control envelope's lifetime with it: a reader bounds `expires - issued`.
+    const expires = pending?.expires ?? now - DHT_ISSUED_BACK_MS + CONTROL_TTL;
+    const issued = Math.min(now, Math.max(now - DHT_ISSUED_BACK_MS, expires - (pending ? DHT_MESSAGE_TTL : CONTROL_TTL), (pending?.message[1] ?? 0) - 30_000));
+    const { body, records, reactions } = this.fitted(this.state.sequence + 1, issued, expires, pending?.message ?? null, receipt?.id ?? null, pending?.reply, pending?.edit, pending?.forwarded);
     const reactionsWereDue = this.reactionsDue;
     // A text that left no room: the reactions go on the next envelope. Once some went, the rest wait for the contact
     // to say those were taken (the engine announces the rest then).
@@ -554,12 +573,19 @@ export class DhtDelivery {
     const [version, sequence, issued, expires, author, mode, message, receipt, capsRev, pinnedMailbox, replyTo, editOf, reactions, reactionsTaken, forwarded] = body;
     const now = Date.now();
     if (body.length < 8 || body.length > 16 || version !== 1 || !Number.isSafeInteger(sequence) || sequence < 1 || !Number.isSafeInteger(issued) ||
-      !Number.isSafeInteger(expires) || issued > now + 30_000 || expires <= now || expires - issued > CONTROL_TTL || issued >= expires ||
+      !Number.isSafeInteger(expires) || expires - issued > CONTROL_TTL || issued >= expires ||
       (mode !== "stream" && mode !== "dht") || typeof author !== "string" || typeof signature !== "string" || !/^[A-Za-z0-9_-]{86}$/.test(signature)) return null;
+    // Past its expiry by more than two clocks differ (`DHT_EXPIRY_SKEW_MS`).
+    const expired = expires + DHT_EXPIRY_SKEW_MS <= now;
     if (sender && sender !== author) return null;
     try {
       if (!verify(fromBase64Url(signature), utf8Encode(JSON.stringify(["ghostly-dht-envelope", this.to, this.from, sender ? this.participation.pubKeyZ32 : "invite", body])), publicKeyFromZ32(author))) return null;
     } catch { return null; }
+    if (expired) {
+      // Said once per envelope, and only of one its author signed: it stays in the mailbox.
+      if (this.expiredSeen !== sequence) { this.expiredSeen = sequence; traceLink(this.from, "dht-envelope-expired", { seq: sequence, lateMs: now - expires }); }
+      return null;
+    }
     return { body, sender, author, sequence, issued, expires, mode, message, receipt, capsRev, pinnedMailbox, replyTo, editOf, reactions, reactionsTaken, forwarded };
   }
   /**
@@ -616,9 +642,10 @@ export class DhtDelivery {
       // An edit's element that is not one leaves a text of its own, as an app from before edits reads it.
       const edit = Array.isArray(editOf) && editOf.length === 2 && typeof editOf[0] === "string" && ID.test(editOf[0]) && validEditNumber(editOf[1]) ? { edit: { i: editOf[0], e: editOf[1] } } : {};
       // A hop count that is not one, or one on an edit, is dropped: the text reads as written here.
+      // Owed for as long as the text had left when its envelope was made, counted on this clock: `expires` is the sender's.
       const hops = edit.edit ? undefined : readForwarded(forwarded);
       if (nextReceipt?.id !== message[0]) await this.options.message({ id: message[0], timestamp: message[1], text: message[2], ...reply, ...edit, ...(hops && { forwarded: hops }) }, DhtDelivery.facts(body, packet.records, packet.pubKeyZ32));
-      if (nextReceipt?.id !== message[0]) nextReceipt = { id: message[0], expires, attempts: 0 };
+      if (nextReceipt?.id !== message[0]) nextReceipt = { id: message[0], expires: Date.now() + Math.min(DHT_MESSAGE_TTL, expires - issued), attempts: 0 };
       // Asked for again (the text sent anew after a lost session): its receipt goes at once again.
       else if (nextReceipt.settled) { const { settled: _settled, next: _next, ...asked } = nextReceipt; nextReceipt = asked; }
     } else if (nextReceipt && !nextReceipt.settled) nextReceipt = { ...nextReceipt, settled: true };

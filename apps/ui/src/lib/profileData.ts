@@ -1,6 +1,7 @@
 import { identityFromSeedB64 } from "@ghostly/core";
 import { databaseExists } from "@ghostly/browser/backup/database";
 import { dropFileSpace } from "@ghostly/browser/shared/fileBytes";
+import { dropBreezDatabasesOf } from "@ghostly/browser/engine/paymentAdapters/providers/breezDatabases";
 import { activeProfileId, chosenProfileId, listProfiles, namespaceOf, prefixOf, settingsKeyFor, unregisterProfile } from "./profiles";
 import { unreadUnder } from "./storage";
 import { peekFresh } from "./profilePeek";
@@ -196,7 +197,7 @@ async function lockHeld(ns: string): Promise<boolean> {
 
 /**
  * Deletes a profile of this space for good: its local keys, its peer database and its wallets' own storage
- * (Ark and Bark databases, Fedimint client files), then its place on the list (WISP 04). Never the active one,
+ * (Ark, Bark and Breez databases, Fedimint client files), then its place on the list (WISP 04). Never the active one,
  * never the first, never one running in another tab, and never a wallet's storage another profile still uses.
  */
 export async function deleteProfile(id: string, password?: string): Promise<void> {
@@ -216,6 +217,8 @@ export async function deleteProfile(id: string, password?: string): Promise<void
   await dropFileSpace(dbName).catch(() => {});
   for (const name of new Set(own.databases)) if (!usedElsewhere.has(name)) await drop(name);
   for (const name of new Set(own.files)) if (!usedElsewhere.has(name)) await dropFile(name).catch(() => {});
+  // Its Breez databases, as the device's register lists them: each is one profile's only.
+  await dropBreezDatabasesOf(dbName).catch(() => {});
   const prefix = `ghostly_${ns}_`;
   for (const key of Array.from({ length: localStorage.length }, (_, i) => localStorage.key(i)).filter((k): k is string => !!k?.startsWith(prefix))) localStorage.removeItem(key);
   // Its push subscription (WISP 401 § Wake-up push) ends with it: its worker goes, and contacts who kept it get 410.

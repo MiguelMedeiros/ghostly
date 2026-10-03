@@ -1,0 +1,12 @@
+{
+  "copied": "Copiato",
+  "copy": "Copia dettagli",
+  "missingCrypto": "Web Crypto è disattivato. Funziona solo su un indirizzo sicuro (https).",
+  "missingIndexedDB": "IndexedDB è disattivato o bloccato, quindi chat e chiavi non possono essere salvate.",
+  "missingLocks": "Manca Web Locks, quindi Ghostly non può assicurarsi di girare una volta sola.",
+  "missingStorage": "I dati del sito sono bloccati, quindi non si può salvare nulla.",
+  "reload": "Ricarica",
+  "title": "Ghostly non può funzionare in questo browser",
+  "tryOther": "Esci dalla modalità privata e consenti i dati del sito, aggiorna il browser, o apri Ghostly in un altro.",
+  "trySecure": "Apri Ghostly al suo indirizzo https://."
+}

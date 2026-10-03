@@ -1,7 +1,8 @@
 import type { Identity } from "./identity";
 import { createRelayPayload, newerPacket, openRelayPayload, parseRelayPayload, RELAY_PAYLOAD_MAX_BYTES, type GhostRecord, type SignedPacket } from "./pkarr";
 import { RelayBreaker, type DiscoveryStatus, type RelayBreakerOptions, type RelayFailure } from "./relayBreaker";
-import { DiscoveryBudgetError, isDiscoveryBudgetError, type DiscoveryChange, type PkarrRequestOptions, type PkarrTransport } from "./transport";
+import { DiscoveryBudgetError, isDiscoveryBudgetError, type DiscoveryChange, type PkarrRequestOptions, type PkarrTransport, type ServerTime } from "./transport";
+import { traceLink } from "./linkTrace";
 
 /** Who asks, for the budget: a 1:1 chat's link comes before a group's, and both before background looks. */
 interface Asker { background: boolean; group: boolean; urgent: boolean; door: boolean; write: boolean; signal: boolean }
@@ -125,6 +126,27 @@ const NETWORK_ERROR_COOLDOWN_MS = 20_000;
  * count once one took them; reads go to a relay with requests left.
  */
 export const RELAY_REQUESTS_PER_MINUTE: Record<string, number> = { "https://relay.pkarr.org": 5, "https://pkarr.pubky.app": 60 };
+/**
+ * A read asks the next relay too when the one it asked has not answered within this long, and takes the first good
+ * answer. Measured on 2026-10-03 from a home connection: a relay hands over a packet it holds in 0.25 s (0.7 s on a new
+ * connection), and one that has to fetch the packet from the DHT first takes 2.7 s. Reads used to wait for a relay's
+ * answer before asking the next one, up to the 10 s timeout: a relay that answered slowly or not at all (pkarr.pubky.org
+ * on 2026-10-03) made every read of a pairing that slow, and the pairing never finished.
+ */
+export const HEDGE_MS = 1_500;
+/**
+ * The hedge delay for a key whose last read found nothing (404): a relay takes 3 to 5 s to say so (it asks the DHT
+ * every time), and a hedge at `HEDGE_MS` would double every poll of a key nobody has published yet.
+ */
+export const HEDGE_MISSING_MS = 6_000;
+/**
+ * A packet that took longer than this to arrive, or a hedge lost to a relay that answered with the packet, is slow: it
+ * counts against the relay's breaker like a failure (three in a row trip it, logged as "slow"), while another relay is
+ * there to ask. A 404 says nothing either way: every relay is slow to give one.
+ */
+export const SLOW_MS = 3_000;
+/** A relay found slow goes after the others in every read for this long, unless it answers fast meanwhile. */
+export const SLOW_DEMOTE_MS = 60_000;
 
 export interface RelayTransportOptions {
   relays?: string[];
@@ -137,6 +159,8 @@ export interface RelayTransportOptions {
   requestsPerMinute?: number;
   /** How long a read answers the next ones of the same key (`FRESH_READ_MS`); 0 makes every read a request. */
   freshReadMs?: number;
+  /** `HEDGE_MS`; `Infinity` asks the next relay only once the one asked failed. */
+  hedgeMs?: number;
   /** The circuit breaker's settings (tests shorten its waits); trips are logged with `log`. */
   breaker?: RelayBreakerOptions;
   /** Where a relay that trips or recovers is reported; never with a key. `console.info` by default. */
@@ -157,8 +181,18 @@ export class RelayTransport implements PkarrTransport {
   private relays: string[];
   private readonly timeoutMs: number;
   private readonly fetchFn: typeof fetch;
+  private readonly timeListeners = new Set<(time: ServerTime) => void>();
   private readonly lastTimestamp = new Map<string, bigint>();
   private readonly newest = new Map<string, SignedPacket>();
+  /**
+   * The latest time of any packet read under a key, whoever dated it: the next packet this client puts there is dated
+   * past it (`nextTimestamp`). A key is not always one writer's with one clock: a group's lobby, beacon and knock
+   * records are written by every member, an inviter warms its contact's key with an empty packet, and this device's
+   * own clock may have been set back since it last wrote. A relay and the DHT keep only the packet dated latest, so
+   * one dated by this clock alone, when it is behind, was refused (409) or silently never read, until this clock
+   * caught up with the other one: minutes, or an hour.
+   */
+  private readonly seenTimestamp = new Map<string, bigint>();
   /**
    * The last packet this client put under a key that a relay took. A read the budget holds back answers the newer of
    * it and the last one read: a hub that wrote its own beacon entry since it last read the beacon must not see that
@@ -200,6 +234,11 @@ export class RelayTransport implements PkarrTransport {
   private readonly breaker: RelayBreaker;
   /** The relay the last read was answered by. */
   private lastRelay: string | null = null;
+  private readonly hedgeMs: number;
+  /** Until when each relay found slow (`SLOW_MS`) goes after the others in a read (`readOrder`). */
+  private readonly slowUntil = new Map<string, number>();
+  /** Keys whose last read was answered 404: their next read hedges later (`HEDGE_MISSING_MS`). */
+  private readonly missing = new Set<string>();
   private readonly listeners = new Set<(change?: DiscoveryChange) => void>();
 
   constructor(options: RelayTransportOptions = {}) {
@@ -209,6 +248,7 @@ export class RelayTransport implements PkarrTransport {
     this.fetchFn = options.fetch ?? ((...args) => fetch(...args));
     this.perMinute = options.requestsPerMinute ?? REQUESTS_PER_MINUTE;
     this.freshReadMs = options.freshReadMs ?? FRESH_READ_MS;
+    this.hedgeMs = options.hedgeMs ?? HEDGE_MS;
     this.perMinuteGiven = options.requestsPerMinute !== undefined;
     this.backgroundPerMinute = this.perMinute === REQUESTS_PER_MINUTE ? BACKGROUND_REQUESTS_PER_MINUTE : Math.ceil(this.perMinute * 2 / 3);
     this.backgroundWhileSignaling = this.perMinute === REQUESTS_PER_MINUTE ? BACKGROUND_WHILE_SIGNALING : Math.ceil(this.perMinute / 6);
@@ -242,6 +282,7 @@ export class RelayTransport implements PkarrTransport {
     this.breaker.reset();
     this.networkCooldown.clear();
     this.coolingDown.clear();
+    this.slowUntil.clear();
     this.changed("recovered");
   }
 
@@ -281,21 +322,82 @@ export class RelayTransport implements PkarrTransport {
    */
   async publish(identity: Identity, records: GhostRecord[], options: PkarrRequestOptions = {}): Promise<void> {
     if (this.relays.length === 0) throw new Error("No Pkarr relays configured");
-
-    // BEP44 sequence numbers must strictly increase.
-    const now = BigInt(Date.now()) * 1000n;
-    const last = this.lastTimestamp.get(identity.pubKeyZ32) ?? 0n;
-    const timestamp = now > last ? now : last + 1n;
-    this.lastTimestamp.set(identity.pubKeyZ32, timestamp);
-
-    await this.putEverywhere(identity.pubKeyZ32, createRelayPayload(identity, records, timestamp), timestamp, options);
+    await this.publishDated(identity, records, (key, payload, timestamp, conflict) => this.putEverywhere(key, payload, timestamp, options, conflict), options);
   }
 
-  /** Puts a payload signed elsewhere (a did:dht document), byte for byte, on every relay. */
-  async publishPayload(pubKeyZ32: string, payload: Uint8Array, options: PkarrRequestOptions = {}): Promise<void> {
+  /**
+   * The time the next packet under a key is dated: this clock's, and past every packet this client put or read there.
+   * BEP44 sequence numbers must strictly increase, and the clock that dated the last one may not be this one's.
+   */
+  nextTimestamp(pubKeyZ32: string): bigint {
+    const now = BigInt(Date.now()) * 1000n;
+    const last = this.lastTimestamp.get(pubKeyZ32) ?? 0n, seen = this.seenTimestamp.get(pubKeyZ32) ?? 0n;
+    const floor = last > seen ? last : seen;
+    const timestamp = now > floor ? now : floor + 1n;
+    this.lastTimestamp.set(pubKeyZ32, timestamp);
+    return timestamp;
+  }
+
+  /**
+   * Signs the records, dated by `nextTimestamp`, and hands the payload to `put` (the relays; the CLI adds the DHT).
+   * `put` calls `conflict` for a relay that answered 409: it holds a packet under this key dated at or after this one,
+   * which this client has not read (an inviter's warm packet under the key it gave its contact, from a clock ahead of
+   * this one). That packet is read from that relay, and the records go again dated just past it, once. Without this
+   * the packet was refused until this device's clock passed the other one's, however long that took, and on a relay
+   * that did take it, readers still preferred the later-dated empty packet of another relay.
+   */
+  async publishDated(identity: Identity, records: GhostRecord[],
+    put: (pubKeyZ32: string, payload: Uint8Array, timestamp: bigint, conflict: (relay: string) => void) => Promise<void>,
+    options: PkarrRequestOptions = {}, again = false): Promise<void> {
+    const key = identity.pubKeyZ32, timestamp = this.nextTimestamp(key);
+    let redated: Promise<boolean> | undefined;
+    const conflict = (relay: string) => {
+      if (again || redated) return;
+      redated = (async () => {
+        const held = await this.heldAt(relay, key, asker(options, true));
+        // Not dated later than this one: the relay was still putting another packet. The caller tries again, as before.
+        if (held === null || held < timestamp) return false;
+        traceLink(key, "publish-redated", { aheadMs: Number((held - timestamp) / 1000n), relay });
+        // A later publication of this key took over meanwhile: it is dated past what was just read.
+        if (this.lastTimestamp.get(key) !== timestamp) return true;
+        await this.publishDated(identity, records, put, options, true);
+        return true;
+      })();
+      redated.catch(() => {});
+    };
+    try { await put(key, createRelayPayload(identity, records, timestamp), timestamp, conflict); }
+    catch (error) {
+      // Refused everywhere, and somewhere for a later-dated packet: what the publication dated past it did is the answer.
+      const pending = redated as Promise<boolean> | undefined;
+      if (!pending || !(await pending)) throw error;
+    }
+  }
+
+  /** One relay's packet for a key, read now: its time, kept for `nextTimestamp`. Null when it has none or does not answer. */
+  private async heldAt(relay: string, pubKeyZ32: string, who: Asker): Promise<bigint | null> {
+    if (!this.take(relay, who, pubKeyZ32)) return null;
+    try {
+      let payload: Uint8Array | undefined;
+      const response = await this.request(`${relay}/${pubKeyZ32}`, { method: "GET" }, async (r, signal) => {
+        if (r.ok && r.status !== 404) payload = await readRelayBody(r, signal);
+      });
+      if (!response.ok || !payload) return null;
+      const packet = parseRelayPayload(pubKeyZ32, payload);
+      this.sawTimestamp(pubKeyZ32, packet.timestampMicros);
+      return packet.timestampMicros;
+    } catch { return null; }
+  }
+
+  /** A packet under this key was read (on a relay, or by the CLI on the DHT): its time, for `nextTimestamp`. */
+  sawTimestamp(pubKeyZ32: string, timestamp: bigint): void {
+    if (timestamp > (this.seenTimestamp.get(pubKeyZ32) ?? 0n)) this.seenTimestamp.set(pubKeyZ32, timestamp);
+  }
+
+  /** Puts a payload signed elsewhere (a did:dht document), byte for byte, on every relay. `conflict`: as `publishDated` gives it. */
+  async publishPayload(pubKeyZ32: string, payload: Uint8Array, options: PkarrRequestOptions = {}, conflict?: (relay: string) => void): Promise<void> {
     if (this.relays.length === 0) throw new Error("No Pkarr relays configured");
     const { seq } = openRelayPayload(pubKeyZ32, payload);
-    await this.putEverywhere(pubKeyZ32, payload, seq, options);
+    await this.putEverywhere(pubKeyZ32, payload, seq, options, conflict);
   }
 
   /**
@@ -304,9 +406,11 @@ export class RelayTransport implements PkarrTransport {
    * presence, offer or answer back: the rest finish in the background, their outcomes still counted.
    * When no relay takes it, this waits for all of them to say why.
    */
-  private putEverywhere(pubKeyZ32: string, payload: Uint8Array, timestamp: bigint, options: PkarrRequestOptions): Promise<void> {
+  private putEverywhere(pubKeyZ32: string, payload: Uint8Array, timestamp: bigint, options: PkarrRequestOptions, conflict?: (relay: string) => void): Promise<void> {
     // A record read, changed and written back (a lobby, a knock record) is read from the relays the next time.
     this.readAt.delete(pubKeyZ32);
+    // Published now: its next read is no longer one of a key nobody has (`HEDGE_MISSING_MS`).
+    this.missing.delete(pubKeyZ32);
     // A newer packet goes everywhere now: none waiting for a relay that refused an older one.
     for (const relay of this.relays) this.catchUp.delete(`${relay} ${pubKeyZ32}`);
     const waitingBefore = new Map(this.writeWaiting);
@@ -329,8 +433,10 @@ export class RelayTransport implements PkarrTransport {
       // A relay refuses (428) to replace a packet whose DHT put is still in flight, unless told which
       // packet is being replaced. Links publish in bursts (a message, its ack, a signal), so say so.
       let response = await this.put(relay, pubKeyZ32, payload, previous, asker(options, true), relay === probe);
-      // 412: the relay never got `previous` (it was busy, or restarted). There is one writer per key, so insist.
+      // 412: the relay never got `previous` (it was busy, or restarted). This client's packet is the one to replace, so insist.
       if (response.status === 412) response = await this.put(relay, pubKeyZ32, payload, undefined, asker(options, true));
+      // 409: this relay holds a packet under the key dated at or after this one (`publishDated` reads it and dates past it).
+      if (response.status === 409) conflict?.(relay);
       // The relay's own rate limit: this packet did not go in, and goes once the relay says so.
       if (response.status === 429) throw new DiscoveryBudgetError(this.coolDown(relay, response), `${relay} responded 429; retry shortly`);
       if (!response.ok) throw new Error(`${relay} responded ${response.status}`);
@@ -369,15 +475,20 @@ export class RelayTransport implements PkarrTransport {
   /**
    * Public relays rate limit by IP (120 requests a minute at the time of
    * writing) and several peers may share one address, so a poll costs one
-   * request: relays are asked in turn, the next one only if this one fails.
-   * The newest validly signed packet seen so far wins, which also covers a
-   * relay that is still serving an older cached copy.
+   * request: one relay is asked, the next one when this one fails, or when it
+   * has not answered within `HEDGE_MS` (a hedge: the first good answer wins and
+   * the other request is dropped). The newest validly signed packet seen so far
+   * wins, which also covers a relay that is still serving an older cached copy.
    *
    * In turn per key: a key's next read starts at the relay after the one that answered its last read. A relay that
    * does not have a packet yet (a publish that reached only the other relay, one rate limited there) answers a key's
    * reads at most once in a row. With one turn for all keys, a link that read its peer between two other reads landed
    * on the same relay every time: a restarted member's offer, only on `pkarr.pubky.app`, went unread for 12 to 60 s
-   * while the member at the other end read `pkarr.pubky.org` (bug hunt r5a, 2026-09-29).
+   * while the member at the other end read `pkarr.pubky.org` (bug hunt r5a, 2026-09-29). A relay found slow lately
+   * (`SLOW_DEMOTE_MS`) goes after the others, whatever the turn.
+   *
+   * A hedge spends a second request, so it goes only where the budget has requests to spare (`hedgeRoom`), never for a
+   * background read (nobody waits on it), and later for a key whose last read found nothing (`HEDGE_MISSING_MS`).
    */
   async resolve(pubKeyZ32: string, options: PkarrRequestOptions = {}): Promise<SignedPacket | null> {
     if (this.relays.length === 0) throw new Error("No Pkarr relays configured");
@@ -386,73 +497,189 @@ export class RelayTransport implements PkarrTransport {
     const readAt = this.readAt.get(pubKeyZ32);
     if (readAt !== undefined && Date.now() - readAt < this.freshReadMs) return this.newest.get(pubKeyZ32) ?? null;
 
-    const last = this.lastReadFrom.get(pubKeyZ32), lastAt = last === undefined ? -1 : this.relays.indexOf(last);
-    const start = lastAt >= 0 ? lastAt + 1 : this.cursor++;
-    let reachable = false;
+    const order = this.readOrder(pubKeyZ32);
     // Every relay left alone for failing: one of them is asked anyway, now and then (`allDownProbe`).
     const probe = this.breaker.allDownProbe(this.relays);
     // The soonest a relay passed over for its budget takes a request again, and whether one was down instead.
     let budgetWait = Infinity, down = false;
     const who = asker(options, false);
-    for (let i = 0; i < this.relays.length; i++) {
-      const relay = this.relays[(start + i) % this.relays.length];
-      if (relay !== probe && this.networkCoolingDown(relay, "GET")) { down = true; continue; }
-      const limited = this.rateLimitedFor(relay);
-      if (limited > 0) { budgetWait = Math.min(budgetWait, limited); continue; }
-      // Its breaker is open: a relay throttling us is a wait, one failing is down. The others take its turn.
-      const blocked = relay === probe ? 0 : this.breaker.blockedFor(relay);
-      if (blocked > 0) {
-        if (this.breaker.blockedKind(relay) === "throttled") budgetWait = Math.min(budgetWait, blocked); else down = true;
+    const tried = new Set<string>();
+    let hedgeAfter = options.background ? Infinity : this.missing.has(pubKeyZ32) ? Math.max(this.hedgeMs, HEDGE_MISSING_MS) : this.hedgeMs;
+
+    /**
+     * The next relay to ask, its request taken from its budget, or null. A hedge (`hedge`) goes only to a relay with
+     * requests to spare; one passed over for that is still there if the relay asked fails.
+     */
+    const next = (hedge: boolean): string | null => {
+      for (const relay of order) {
+        if (tried.has(relay)) continue;
+        if (relay !== probe && this.networkCoolingDown(relay, "GET")) { tried.add(relay); down = true; continue; }
+        const limited = this.rateLimitedFor(relay);
+        if (limited > 0) { tried.add(relay); budgetWait = Math.min(budgetWait, limited); continue; }
+        // Its breaker is open: a relay throttling us is a wait, one failing is down. The others take its turn.
+        const blocked = relay === probe ? 0 : this.breaker.blockedFor(relay);
+        if (blocked > 0) {
+          tried.add(relay);
+          if (this.breaker.blockedKind(relay) === "throttled") budgetWait = Math.min(budgetWait, blocked); else down = true;
+          continue;
+        }
+        // Asked before `take`, which notes a refusal (a chat's need, a waiting write): a hedge not sent is no refusal.
+        if (hedge && (this.heldFor(relay, who) > 0 || !this.hedgeRoom(relay))) continue;
+        tried.add(relay);
+        if (!this.take(relay, who, pubKeyZ32)) { budgetWait = Math.min(budgetWait, this.heldFor(relay, who)); continue; }
+        if (relay === probe) this.breaker.beginAllDown(relay); else this.breaker.begin(relay);
+        return relay;
+      }
+      return null;
+    };
+
+    const asked = new Map<string, ReadAttempt>();
+    let lastAsked = 0;
+    const ask = (hedge: boolean): boolean => {
+      const relay = next(hedge);
+      if (!relay) return false;
+      asked.set(relay, this.readFromRelay(relay, pubKeyZ32));
+      lastAsked = Date.now();
+      return true;
+    };
+    ask(false);
+
+    let winner: { attempt: ReadAttempt; outcome: Extract<ReadOutcome, { kind: "packet" | "missing" }> } | null = null;
+    while (asked.size > 0 && !winner) {
+      const hedgeIn = hedgeAfter - (Date.now() - lastAsked);
+      if (hedgeIn <= 0) {
+        // No relay to spare a request for a hedge: this read waits for the relays it asked.
+        if (!ask(true)) hedgeAfter = Infinity;
         continue;
       }
-      if (!this.take(relay, who, pubKeyZ32)) { budgetWait = Math.min(budgetWait, this.heldFor(relay, who)); continue; }
-      if (relay === probe) this.breaker.beginAllDown(relay); else this.breaker.begin(relay);
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const hedgeDue = hedgeIn === Infinity ? null : new Promise<null>((resolve) => { timer = setTimeout(() => resolve(null), hedgeIn); });
+      const settled = await Promise.race([
+        ...[...asked.values()].map((attempt) => attempt.done.then((outcome) => ({ attempt, outcome }))),
+        ...(hedgeDue ? [hedgeDue] : []),
+      ]);
+      clearTimeout(timer);
+      if (!settled) continue;
+      const { attempt, outcome } = settled;
+      asked.delete(attempt.relay);
+      const relay = attempt.relay;
+      if (outcome.kind === "packet" || outcome.kind === "missing") { winner = { attempt, outcome }; break; }
+      if (outcome.kind === "throttled") {
+        budgetWait = Math.min(budgetWait, this.coolDown(relay, outcome.response));
+        this.answered(relay, { kind: "throttled", reason: "rate limited (429)" });
+      } else if (outcome.kind === "failed") {
+        // In a browser a rate-limited answer often arrives without CORS headers and
+        // surfaces as a network error. Back off this operation and try the next relay.
+        // Unlike an observable 429, this does not establish a relay-wide limit.
+        this.networkCooldown.set(`GET ${relay}`, Date.now() + NETWORK_ERROR_COOLDOWN_MS);
+        this.answered(relay, { kind: "error", reason: outcome.reason });
+        down = true;
+      }
+      // A relay that failed is replaced at once, with no hedge delay.
+      ask(false);
+    }
+
+    if (winner) {
+      const { attempt, outcome } = winner, relay = attempt.relay;
+      const took = Date.now() - attempt.started;
+      if (outcome.kind === "packet") {
+        this.sawTimestamp(pubKeyZ32, outcome.packet.timestampMicros);
+        this.newest.set(pubKeyZ32, newerPacket(this.newest.get(pubKeyZ32), outcome.packet)!);
+        this.missing.delete(pubKeyZ32);
+      } else {
+        this.missing.delete(pubKeyZ32);
+        this.missing.add(pubKeyZ32);
+        if (this.missing.size > READ_TURNS_KEPT) this.missing.delete(this.missing.values().next().value!);
+      }
+      if (took <= SLOW_MS) {
+        this.answered(relay, undefined, "GET");
+        this.slowUntil.delete(relay);
+      } else {
+        // It answered this kind of request: an earlier failure of it no longer keeps the next one back.
+        this.networkCooldown.delete(`GET ${relay}`);
+        // A slow packet counts against the relay; a slow 404 says nothing (every relay takes seconds to give one).
+        if (outcome.kind === "packet") this.slow(relay);
+        else this.breaker.cancel(relay);
+      }
+      // The relays still asked are dropped, after the winner's own outcome (a probe that answered is a relay to ask
+      // again). One asked no later than the winner, which a relay beat with the packet, is slow.
+      for (const loser of asked.values()) {
+        loser.controller.abort();
+        if (outcome.kind === "packet" && loser.started <= attempt.started) this.slow(loser.relay);
+        else this.breaker.cancel(loser.relay);
+      }
+      this.lastRelay = relay;
+      this.answeredRead(pubKeyZ32);
+      this.readFrom(pubKeyZ32, relay);
+      return this.newest.get(pubKeyZ32) ?? null;
+    }
+
+    const resting = this.relays.every((r) => this.isCoolingDown(r, "GET") || this.breaker.blockedFor(r) > 0 || this.heldFor(r, who) > 0);
+    // Holding back is not an outage: report what is already known, this client's own writes included while only the
+    // budget held the read (a relay that failed it says nothing of them: an inviter's placeholder under its contact's
+    // key would hide the outage)…
+    const known = down ? this.newest.get(pubKeyZ32) : newerPacket(this.newest.get(pubKeyZ32), this.written.get(pubKeyZ32));
+    if (resting && known) return known;
+    // …or, knowing nothing yet, that the read waits for the budget.
+    if (!down && budgetWait < Infinity) throw new DiscoveryBudgetError(budgetWait);
+    throw new Error("No Pkarr relay reachable");
+  }
+
+  /** The order a key's read asks the relays in: in turn per key (see `resolve`), relays found slow lately last. */
+  private readOrder(pubKeyZ32: string): string[] {
+    const last = this.lastReadFrom.get(pubKeyZ32), lastAt = last === undefined ? -1 : this.relays.indexOf(last);
+    const start = lastAt >= 0 ? lastAt + 1 : this.cursor++;
+    const turn = this.relays.map((_, i) => this.relays[(start + i) % this.relays.length]);
+    const now = Date.now(), slow = (relay: string) => (this.slowUntil.get(relay) ?? 0) > now;
+    return [...turn.filter((relay) => !slow(relay)), ...turn.filter(slow)];
+  }
+
+  /** One GET of a key at one relay, which `controller` drops. Never rejects: what happened is the outcome. */
+  private readFromRelay(relay: string, pubKeyZ32: string): ReadAttempt {
+    const controller = new AbortController(), started = Date.now();
+    const done = (async (): Promise<ReadOutcome> => {
       let status = 0;
       try {
         let payload: Uint8Array | undefined;
         const response = await this.request(`${relay}/${pubKeyZ32}`, { method: "GET" }, async (r, signal) => {
           status = r.status;
           if (r.ok && r.status !== 404) payload = await readRelayBody(r, signal);
-        });
+        }, controller.signal);
         status = response.status;
-        if (response.status === 429) {
-          budgetWait = Math.min(budgetWait, this.coolDown(relay, response));
-          this.answered(relay, { kind: "throttled", reason: "rate limited (429)" });
-          continue;
-        }
-        if (response.status !== 404) {
-          if (!response.ok) throw new Error(`${relay} responded ${response.status}`);
-          const packet = parseRelayPayload(pubKeyZ32, payload!);
-          this.newest.set(pubKeyZ32, newerPacket(this.newest.get(pubKeyZ32), packet)!);
-        }
-        this.answered(relay, undefined, "GET");
-        this.lastRelay = relay;
-        this.answeredRead(pubKeyZ32);
-        this.readFrom(pubKeyZ32, relay);
-        reachable = true;
-        break;
+        if (response.status === 429) return { kind: "throttled", response };
+        if (response.status === 404) return { kind: "missing" };
+        if (!response.ok) throw new Error(`${relay} responded ${response.status}`);
+        return { kind: "packet", packet: parseRelayPayload(pubKeyZ32, payload!) };
       } catch {
-        // In a browser a rate-limited answer often arrives without CORS headers and
-        // surfaces as a network error. Back off this operation and try the next relay.
-        // Unlike an observable 429, this does not establish a relay-wide limit.
-        this.networkCooldown.set(`GET ${relay}`, Date.now() + NETWORK_ERROR_COOLDOWN_MS);
-        this.answered(relay, { kind: "error", reason: status >= 200 && status < 300 ? "invalid packet" : status ? `HTTP ${status}` : "no answer" });
-        down = true;
+        if (controller.signal.aborted) return { kind: "cancelled" };
+        return { kind: "failed", reason: status >= 200 && status < 300 ? "invalid packet" : status ? `HTTP ${status}` : "no answer" };
       }
-    }
-    if (!reachable) {
-      const resting = this.relays.every((r) => this.isCoolingDown(r, "GET") || this.breaker.blockedFor(r) > 0 || this.heldFor(r, who) > 0);
-      // Holding back is not an outage: report what is already known, this client's own writes included while only the
-      // budget held the read (a relay that failed it says nothing of them: an inviter's placeholder under its contact's
-      // key would hide the outage)…
-      const known = down ? this.newest.get(pubKeyZ32) : newerPacket(this.newest.get(pubKeyZ32), this.written.get(pubKeyZ32));
-      if (resting && known) return known;
-      // …or, knowing nothing yet, that the read waits for the budget.
-      if (!down && budgetWait < Infinity) throw new DiscoveryBudgetError(budgetWait);
-      throw new Error("No Pkarr relay reachable");
-    }
-    return this.newest.get(pubKeyZ32) ?? null;
+    })();
+    return { relay, controller, started, done };
   }
+
+  /**
+   * The relay was slow (`SLOW_MS`): it goes after the others for a while, and counts it against its breaker while
+   * another relay is there to ask. With none, a slow answer beats no answer: it counts as one.
+   */
+  private slow(relay: string): void {
+    this.slowUntil.set(relay, Date.now() + SLOW_DEMOTE_MS);
+    const another = this.relays.some((r) => r !== relay && this.breaker.blockedFor(r) === 0 && !this.isCoolingDown(r, "GET"));
+    if (another) this.breaker.failure(relay, "error", "slow");
+    else this.breaker.success(relay);
+  }
+
+  /**
+   * A hedge may go to this relay: its minute has more requests left than what groups leave a chat (`reserveOf`), so
+   * a second request for a read that already went out never takes one a pairing needs.
+   */
+  private hedgeRoom(relay: string): boolean {
+    const now = Date.now();
+    const recent = (this.spent.get(relay) ?? []).filter((at) => now - at < 60_000).length;
+    return recent < this.limitOf(relay) - this.reserveOf(relay);
+  }
+
+  readAnsweredAt(pubKeyZ32: string): number | undefined { return this.readAt.get(pubKeyZ32); }
 
   /** The relays answered a read of this key now; answers older than `FRESH_READ_MS` are dropped as the list grows. */
   private answeredRead(pubKeyZ32: string): void {
@@ -665,19 +892,56 @@ export class RelayTransport implements PkarrTransport {
    * time as well: a relay that sends its headers and then trickles, or never ends, is given up on like one that
    * never answered.
    */
-  private async request(url: string, init: RequestInit, read?: (response: Response, signal: AbortSignal) => Promise<void>): Promise<Response> {
+  /**
+   * The relay's own time, when its answer says it and this runtime may read it: Node and the Desktop can, a browser
+   * only when the relay exposes the header to other origins. Held against this device's clock (`ClockWatch`).
+   */
+  private serverTime(url: string, response: Response, sent: number): void {
+    if (!this.timeListeners.size) return;
+    let date = NaN;
+    try {
+      // An answer a cache kept says when it was made, not when it was served (`Age` says how long ago): not a clock.
+      if (Number(response.headers.get("age") ?? 0) > 0) return;
+      date = Date.parse(response.headers.get("date") ?? "");
+    } catch { /* an answer with no headers to read */ }
+    if (!Number.isFinite(date)) return;
+    const time: ServerTime = { source: new URL(url).origin, date, sent, received: Date.now() };
+    for (const listener of this.timeListeners) try { listener(time); } catch { /* a listener that fails must not fail a request */ }
+  }
+
+  onServerTime(listener: (time: ServerTime) => void): () => void {
+    this.timeListeners.add(listener);
+    return () => this.timeListeners.delete(listener);
+  }
+
+  /** `cancel`: this client drops the request (a hedged read another relay answered first). */
+  private async request(url: string, init: RequestInit, read?: (response: Response, signal: AbortSignal) => Promise<void>, cancel?: AbortSignal): Promise<Response> {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.timeoutMs);
+    const drop = () => controller.abort();
+    cancel?.addEventListener("abort", drop, { once: true });
     try {
       // Relays answer with `cache-control: max-age=300`; polling needs fresh data.
+      const sent = Date.now();
       const response = await this.fetchFn(url, { ...init, cache: "no-store", signal: controller.signal });
+      this.serverTime(url, response, sent);
       await read?.(response, controller.signal);
       return response;
     } finally {
       clearTimeout(timer);
+      cancel?.removeEventListener("abort", drop);
     }
   }
 }
+
+/** What one relay did with a read (`readFromRelay`); `cancelled`: this client dropped it. */
+type ReadOutcome =
+  | { kind: "packet"; packet: SignedPacket }
+  | { kind: "missing" }
+  | { kind: "throttled"; response: Response }
+  | { kind: "failed"; reason: string }
+  | { kind: "cancelled" };
+interface ReadAttempt { relay: string; controller: AbortController; started: number; done: Promise<ReadOutcome> }
 
 /**
  * A relay's answer body, at most RELAY_PAYLOAD_MAX_BYTES: refused on a larger `content-length` before anything is

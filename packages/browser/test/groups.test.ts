@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { Groups, type GroupStore, type GroupsHost } from "../src/engine/groups";
+import { FAREWELL_KEPT_MS, FAREWELL_OPEN_MS, Groups, type GroupStore, type GroupsHost } from "../src/engine/groups";
 import { createIdentity, encodeGroupEntryLink, decodeGroupEntryLink, knockIdentity, readKnocks, identityFromSeedB64, randomBytes, toBase64Url, type GhostRecord, type GroupState } from "@ghostly/core";
 import type { StoredGroup, StoredMessage } from "../src/shared/types";
 // covers: groups.picture.set, groups.rename, groups.create, groups.invite, groups.send, groups.leave, groups.forget, groups.link.enable, groups.link.join, groups.link.replace, groups.protocol.entry, groups.protocol.mentions
@@ -295,12 +295,14 @@ describe("group engine: admission over a contact chat, edges from the roster", (
     expect(carol.views()[0]).toMatchObject({ name: "Ghosts", status: "active", epoch: 2 });
     expect(carol.views()[0].members).toHaveLength(3);
     expect(world.events("carol")).toEqual(["joined"]);
-    // The entry session is closed on the joiner's side at once; it is not a contact of the group.
-    expect(world.peers.get("carol")!.entries.size).toBe(0);
+    // The joiner keeps the entry session until its edge to the admin is up (the admin says what it commits next over
+    // it); it is not a contact of the group.
+    expect(world.peers.get("carol")!.entries.size).toBe(1);
     expect(alice.views()[0].memberLinks).toEqual({ "chat-ab": bob.views()[0].myKey });
     expect(alice.views()[0].invited).toEqual([]);
 
-    await world.settle(); await world.meet();
+    await world.settle(); await world.meet(); await world.settle();
+    expect(world.peers.get("carol")!.entries.size).toBe(0);
     // An admin and the member it admits were both here a moment ago: the edge between them looks fast for
     // the other side (Bob's to Alice from his own admission too); the one between the two members does not.
     const expecting = (who: string) => [...world.peers.get(who)!.edges.values()].filter(e => e.expectPeer).map(e => e.peer).sort();
@@ -640,6 +642,195 @@ describe("group engine: admission over a contact chat, edges from the roster", (
         expect(at("renamed")).toBe(t0 + 60_000);
         expect(at("rotated")).toBe(t0 + 180_000);
       } finally { vi.useRealTimers(); }
+    });
+
+    describe("a member removed while it is away", () => {
+      const edgesOf = (world: World, name: string) => [...world.peers.get(name)!.edges.values()].map(e => e.peer);
+      const farewells = async (world: World, name: string) => (await world.peers.get(name)!.store.getGroups())[0].farewells;
+
+      it("learns it when it is back: the admin keeps the edge to it and says so, and nothing else goes over it", async () => {
+        const { world, alice, bob, carol, groupId, key, edge } = await trio();
+        const bobKey = key(bob);
+        // Bob's app is closed, and nothing else reaches him (no contact chat: he could have come through the link).
+        edge("alice", bob, false); edge("carol", bob, false);
+        world.chats.delete("chat-ab");
+        await alice.remove(groupId, bobKey); await world.settle();
+        expect(alice.views()[0].members.map(m => m.key)).not.toContain(bobKey);
+        expect(carol.views()[0].members.map(m => m.key)).not.toContain(bobKey);
+        // Bob does not know yet. The admin waits for him on its edge; Carol has closed hers.
+        expect(bob.views()[0]).toMatchObject({ status: "active" });
+        expect(edgesOf(world, "alice")).toContain(bobKey);
+        expect(edgesOf(world, "carol")).not.toContain(bobKey);
+        expect(await farewells(world, "alice")).toMatchObject({ [bobKey]: { e: 3 } });
+        await alice.send(groupId, "after bob"); await world.settle();
+
+        // Bob is back: the admin's edge opens, and the commit that removed him goes over it.
+        edge("alice", bob, true);
+        await world.meet(); await world.settle();
+        expect(bob.views()[0]).toMatchObject({ status: "removed", canSend: false });
+        expect(world.events("bob")).toContain("removed");
+        expect(world.texts("bob")).not.toContain("after bob");
+        expect(await bob.send(groupId, "anyone?")).toMatchObject({ error: "You were removed from this group" });
+        // What Bob still says on that edge is not heard: he is out of the group.
+        await alice.handleEdgeFrame(groupId, bobKey, { t: "group-typing", g: groupId, on: true }); await world.settle();
+        expect(alice.views()[0].typing).toBeUndefined();
+        // A moment later the edge goes, and nothing more is kept about him.
+        await alice.tick(Date.now() + 16_000); await world.settle();
+        expect(edgesOf(world, "alice")).not.toContain(bobKey);
+        expect(await farewells(world, "alice")).toBeUndefined();
+      });
+
+      it("that was behind on the chain gets the commits between, with no secret", async () => {
+        const { world, alice, bob, groupId, key, edge } = await trio();
+        const bobKey = key(bob);
+        edge("alice", bob, false); edge("carol", bob, false);
+        world.chats.delete("chat-ab");
+        // A change Bob missed, then his removal.
+        await alice.rotate(groupId); await world.settle();
+        await alice.remove(groupId, bobKey); await world.settle();
+        const sent: unknown[] = [];
+        const host = (alice as unknown as { host: GroupsHost }).host, send = host.sendOnLink.bind(host);
+        host.sendOnLink = (linkId, frame) => { if (linkId.includes(bobKey.slice(0, 6))) sent.push(frame); send(linkId, frame); };
+        edge("alice", bob, true);
+        await world.meet(); await world.settle();
+        expect(bob.views()[0]).toMatchObject({ status: "removed" });
+        // Commits only, and none carries a secret.
+        expect(sent.length).toBeGreaterThan(1);
+        expect(sent.every(f => (f as { t: string }).t === "group-commit" && !("secret" in (f as object)))).toBe(true);
+      });
+
+      it("is still told after the admin's app restarts, and is given up after a week", async () => {
+        const { world, alice, bob, carol, groupId, key, edge, known } = await trio();
+        const bobKey = key(bob), carolKey = key(carol);
+        edge("alice", bob, false); edge("carol", bob, false); edge("alice", carol, false); edge("bob", carol, false);
+        world.chats.delete("chat-ab"); world.chats.delete("chat-ac");
+        await alice.remove(groupId, bobKey); await alice.remove(groupId, carolKey); await world.settle();
+        const again = new Groups({ ...(alice as unknown as { host: GroupsHost }).host, emit: vi.fn() }, world.peers.get("alice")!.store);
+        await again.load(); await world.settle();
+        world.peers.get("alice")!.groups = again;
+        known.set(again, key(alice));
+        expect(edgesOf(world, "alice").sort()).toEqual([bobKey, carolKey].sort());
+        edge("alice", bob, true);
+        await world.meet(); await world.settle();
+        expect(bob.views()[0]).toMatchObject({ status: "removed" });
+        // Carol never comes back: a week later the admin stops waiting for her.
+        await again.tick(Date.now() + 6 * 24 * 60 * 60_000); await world.settle();
+        expect(edgesOf(world, "alice")).toEqual([carolKey]);
+        await again.tick(Date.now() + 8 * 24 * 60 * 60_000); await world.settle();
+        expect(edgesOf(world, "alice")).toEqual([]);
+        expect(await farewells(world, "alice")).toBeUndefined();
+        expect(carol.views()[0]).toMatchObject({ status: "active" });
+      });
+
+      it("that is told at once (its edge is up, or its contact chat is) is not waited for", async () => {
+        const { world, alice, bob, carol, groupId, key, edge } = await trio();
+        await alice.remove(groupId, key(bob)); await world.settle();
+        expect(bob.views()[0]).toMatchObject({ status: "removed" });
+        expect(await farewells(world, "alice")).toBeUndefined();
+        // Carol's edge is down, but the chat that invited her carries the notice.
+        edge("alice", carol, false);
+        await alice.remove(groupId, key(carol)); await world.settle();
+        expect(carol.views()[0]).toMatchObject({ status: "removed" });
+        expect(await farewells(world, "alice")).toBeUndefined();
+        expect(edgesOf(world, "alice")).toEqual([]);
+      });
+
+      it("is still told by the admin that removed it after the role went to someone else, and by nobody else", async () => {
+        const { world, alice, bob, carol, groupId, key, edge } = await trio();
+        const bobKey = key(bob);
+        edge("alice", bob, false); edge("carol", bob, false);
+        world.chats.delete("chat-ab");
+        await alice.remove(groupId, bobKey); await world.settle();
+        await alice.makeAdmin(groupId, key(carol)); await world.settle();
+        expect(carol.views()[0]).toMatchObject({ isAdmin: true });
+        // The new admin waits for nobody: it did not make that commit. The old one still does.
+        expect(edgesOf(world, "carol")).not.toContain(bobKey);
+        expect(edgesOf(world, "alice")).toContain(bobKey);
+        const sent: { t: string; commit?: { e: number } }[] = [];
+        const host = (alice as unknown as { host: GroupsHost }).host, send = host.sendOnLink.bind(host);
+        host.sendOnLink = (linkId, frame) => { if (linkId.includes(bobKey.slice(0, 6))) sent.push(frame as { t: string }); send(linkId, frame); };
+        edge("alice", bob, true);
+        await world.meet(); await world.settle();
+        expect(bob.views()[0]).toMatchObject({ status: "removed" });
+        // The commit that removed it, and not the one after (who the admin is now is no longer its business).
+        expect(sent.map(f => [f.t, f.commit?.e])).toEqual([["group-commit", 3]]);
+        // What may go over an edge to someone out of the roster: the commits up to its removal. To a member, anything.
+        const chain = (alice as unknown as { sessions: Map<string, { state: GroupState }> }).sessions.get(groupId)!.state.chain;
+        expect(chain.map(c => alice.edgeAllows(groupId, bobKey, { t: "group-commit", g: groupId, commit: c }))).toEqual([true, true, true, true, false]);
+        expect(alice.edgeAllows(groupId, bobKey, { t: "group-sync", g: groupId, e: 4 })).toBe(false);
+        expect(alice.edgeAllows(groupId, createIdentity().pubKeyZ32, { t: "group-commit", g: groupId, commit: chain[0] })).toBe(false);
+        expect(alice.edgeAllows(groupId, key(carol), { t: "group-sync", g: groupId, e: 4 })).toBe(true);
+      });
+
+      it("invited again before it is back takes the invitation only once it knows, and ends as a member", async () => {
+        const { world, alice, bob, groupId, key, edge } = await trio();
+        const oldKey = key(bob);
+        edge("alice", bob, false); edge("carol", bob, false);
+        world.chats.delete("chat-ab");
+        await alice.remove(groupId, oldKey); await world.settle();
+        // The admin changes its mind while Bob is still away. Bob's app believes it is in the group: it drops the invitation.
+        world.chats.set("chat-ab", ["alice", "bob"]);
+        await alice.invite(groupId, "chat-ab"); await world.settle();
+        expect(bob.views()[0]).toMatchObject({ status: "active" });
+        expect(bob.views()[0].invitation).toBeUndefined();
+        // Back: told over the kept edge. The next invitation is taken, under a new member key.
+        edge("alice", bob, true);
+        await world.meet(); await world.settle();
+        expect(bob.views()[0]).toMatchObject({ status: "removed" });
+        await alice.invite(groupId, "chat-ab"); await world.settle();
+        await bob.accept(groupId); await world.settle();
+        // The world finds a peer's edges by its member key: Bob's is a new one.
+        (globalThis as unknown as { __keys: Map<string, string> }).__keys.set((bob as unknown as { sessions: Map<string, { state: GroupState }> }).sessions.get(groupId)!.state.seedB64, bob.views().find(v => v.id === groupId)!.myKey!);
+        await world.meet(); await world.settle();
+        const again = bob.views().find(v => v.id === groupId)!;
+        expect(again).toMatchObject({ status: "active", canSend: true });
+        expect(again.myKey).not.toBe(oldKey);
+        expect(alice.views()[0].members.map(m => m.key)).toContain(again.myKey);
+        expect(alice.views()[0].members.map(m => m.key)).not.toContain(oldKey);
+        // The edge kept for the old key goes; the one to the new key is a member's.
+        await alice.tick(Date.now() + 16_000); await world.settle();
+        expect(await farewells(world, "alice")).toBeUndefined();
+        expect(edgesOf(world, "alice")).not.toContain(oldKey);
+        expect(edgesOf(world, "alice")).toContain(again.myKey);
+        await bob.send(groupId, "back in"); await world.settle();
+        expect(world.texts("alice")).toContain("back in");
+      });
+
+      it("keeps the edge a minute at most once its connection opened, even to an app that never says where it is", async () => {
+        const { world, alice, bob, groupId, key, edge } = await trio();
+        const bobKey = key(bob);
+        edge("alice", bob, false); edge("carol", bob, false);
+        world.chats.delete("chat-ab");
+        await alice.remove(groupId, bobKey); await world.settle();
+        const t0 = Date.now();
+        alice.edgeOpen(groupId, bobKey);
+        await alice.tick(t0 + FAREWELL_OPEN_MS - 5_000); await world.settle();
+        expect(edgesOf(world, "alice")).toContain(bobKey);
+        await alice.tick(t0 + FAREWELL_OPEN_MS + 5_000); await world.settle();
+        expect(edgesOf(world, "alice")).not.toContain(bobKey);
+        expect(await farewells(world, "alice")).toBeUndefined();
+      });
+
+      it("waits for eight members at most, the latest removed, each for a week, on a clock of its own", async () => {
+        const { alice, groupId } = await trio();
+        const inner = alice as unknown as { stored: Map<string, StoredGroup>; sessions: Map<string, unknown>; tickNow: number;
+          noteFarewell(group: StoredGroup, key: string, e: number): void; farewellKeys(group: StoredGroup, session: unknown, now: number): string[] };
+        const group = inner.stored.get(groupId)!, session = inner.sessions.get(groupId);
+        const t0 = 1_800_000_000_000, keys = Array.from({ length: 10 }, () => createIdentity().pubKeyZ32);
+        keys.forEach((k, i) => { inner.tickNow = t0 + i * 1_000; inner.noteFarewell(group, k, 3); });
+        // Ten removed while away: the two removed first are no longer waited for.
+        expect(Object.keys(group.farewells!).sort()).toEqual(keys.slice(2).sort());
+        expect(inner.farewellKeys(group, session, t0 + 9_000).sort()).toEqual(keys.slice(2).sort());
+        // A week after each was removed, to the second, it is given up.
+        expect(inner.farewellKeys(group, session, t0 + 5_000 + FAREWELL_KEPT_MS).sort()).toEqual(keys.slice(5).sort());
+        expect(inner.farewellKeys(group, session, t0 + 5_001 + FAREWELL_KEPT_MS).sort()).toEqual(keys.slice(6).sort());
+        expect(inner.farewellKeys(group, session, t0 + 9_001 + FAREWELL_KEPT_MS)).toEqual([]);
+        // One told is kept 15 s more, counted from the first time it was told.
+        group.farewells![keys[9]].told = t0 + 20_000;
+        expect(inner.farewellKeys(group, session, t0 + 34_999)).toContain(keys[9]);
+        expect(inner.farewellKeys(group, session, t0 + 35_000)).not.toContain(keys[9]);
+        inner.tickNow = 0;
+      });
     });
 
     it("a tombstone survives a restart and still delivers the leave", async () => {

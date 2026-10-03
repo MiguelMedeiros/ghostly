@@ -288,6 +288,50 @@ describe("a Cashu payment that never reached its mint, through the engine", () =
   });
 });
 
+describe("a reviewed Cashu payment taken back, through the engine", () => {
+  // The mint reads ecash this wallet took back as spent, which a review takes for the contact being paid: the review
+  // read "settled" beside a bubble saying "Taken back", and its request could not be reviewed again.
+  it.each(["submitted", "settled"] as const)("ends its %s review as failed, with the sats back", async (state) => {
+    const { node } = track(engine());
+    const review = savedReview({ state, requestId: "request-1" });
+    await intentRepository.put({ review, prepared: { mint: TEST_MINT, swap: {}, token: "cashuBtoken" } as unknown as CashuPrepared });
+    const sent: StoredPayment = { id: review.id, linkId: "chat", kind: "payment", direction: "out", amount: 10, unit: "sat", state: "pending", createdAt: 1, token: "cashuBtoken", mint: TEST_MINT, requestId: "request-1", target: review };
+    node["desk"]["payments"].set(sent.id, sent);
+    const redeem = vi.spyOn(node["wallet"], "receiveToken").mockResolvedValue({ amount: 9, mint: TEST_MINT });
+    await node.reclaimPayment({ paymentId: sent.id });
+    expect(redeem).toHaveBeenCalledWith("cashuBtoken", "reclaimed", undefined, { payment: expect.any(Function) });
+    expect(node["desk"].payment(sent.id)).toMatchObject({ state: "reclaimed" });
+    expect((await intentRepository.get(review.id))?.review).toMatchObject({ state: "failed", error: "This payment was taken back. The sats are in your wallet." });
+    // Nothing reads it paid afterwards, whatever the mint says of the ecash.
+    vi.spyOn(node["wallet"], "reviewedCashuSpent").mockResolvedValue(true);
+    expect(await node.reconcilePayment({ id: review.id })).toMatchObject({ state: "failed" });
+  });
+
+  it("ends the review the same way when the redeem that took it back finished after its call was over", async () => {
+    const { node } = track(engine());
+    const review = savedReview({ state: "submitted", requestId: "request-1" });
+    await intentRepository.put({ review, prepared: { mint: TEST_MINT, swap: {}, token: "cashuBtoken" } as unknown as CashuPrepared });
+    const sent: StoredPayment = { id: review.id, linkId: "chat", kind: "payment", direction: "out", amount: 10, unit: "sat", state: "pending", createdAt: 1, token: "cashuBtoken", mint: TEST_MINT, requestId: "request-1", target: review };
+    node["desk"]["payments"].set(sent.id, sent);
+    // As the wallet says it, once the mint has answered for a swap it had written down (`CashuWallet.pollSwaps`).
+    node["wallet"]["events"].onSwapSettled!({ id: "swap-1", mint: TEST_MINT, kind: "receive", swap: {}, createdAt: 1, payment: { ...sent, state: "reclaimed", token: undefined } }, true);
+    await vi.waitFor(async () => expect((await intentRepository.get(review.id))?.review).toMatchObject({ state: "failed", error: "This payment was taken back. The sats are in your wallet." }));
+    expect(node["desk"].payment(sent.id)).toMatchObject({ state: "reclaimed" });
+  });
+
+  it("leaves the review alone when the contact had taken the ecash first", async () => {
+    const { node } = track(engine());
+    const review = savedReview({ state: "submitted" });
+    await intentRepository.put({ review, prepared: { mint: TEST_MINT, swap: {}, token: "cashuBtoken" } as unknown as CashuPrepared });
+    const sent: StoredPayment = { id: review.id, linkId: "chat", kind: "payment", direction: "out", amount: 10, unit: "sat", state: "pending", createdAt: 1, token: "cashuBtoken", mint: TEST_MINT, target: review };
+    node["desk"]["payments"].set(sent.id, sent);
+    vi.spyOn(node["wallet"], "receiveToken").mockRejectedValue(new Error("Token already spent"));
+    await node.reclaimPayment({ paymentId: sent.id });
+    expect(node["desk"].payment(sent.id)).toMatchObject({ state: "settled" });
+    expect((await intentRepository.get(review.id))?.review.state).toBe("submitted");
+  });
+});
+
 describe("sending, requesting and asking", () => {
   it("ecash is never held for an away contact; with the contact there it goes to the desk", async () => {
     const { node } = track(engine());

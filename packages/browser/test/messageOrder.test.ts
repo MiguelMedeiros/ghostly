@@ -205,6 +205,48 @@ describe("messages that arrive late keep their order and land where they arrive"
     expect(said[0]).toMatchObject({ timestamp: first.timestamp, sentAt: claim });
   });
 
+  it.each([
+    ["two minutes ahead", 2 * MINUTE],
+    ["two minutes behind", -2 * MINUTE],
+  ])("a group's line whose admin's clock is %s falls where it comes, among what is said around it", async (_, skew) => {
+    const { node, store, client } = await started();
+    const { groupId } = await node.createGroup({ name: "Plaza", profile: "mesh" });
+    const link = `group:${groupId}`;
+    const said = (text: string): StoredMessage => ({ linkId: link, id: `ana:1:${text}`, text, sender: "peer", member: "ana", timestamp: now, via: "datalink" });
+    // As `Groups.event` writes it: under the time of its commit, which the admin's clock picked.
+    const line = (text: string): StoredMessage => ({ linkId: link, id: `event:2:joined:${now + skew}`, text, sender: "peer", event: "joined", timestamp: now + skew, via: "datalink" });
+    tick();
+    await store(said("before"));
+    tick();
+    await store(line("Bo joined"));
+    tick();
+    await store(said("welcome Bo"));
+    tick();
+    await store({ linkId: link, id: "me:1", text: "hello Bo", sender: "me", timestamp: now, via: "datalink" });
+    const order = ["before", "Bo joined", "welcome Bo", "hello Bo"];
+    const rows = (list: readonly StoredMessage[] | undefined) => texts((list ?? []).filter((m) => m.event !== "created"));
+    expect(rows(await db.getMessages(link))).toEqual(order);
+    expect(rows(client.messages.get(link))).toEqual(order);
+    // Never under a time that has not come yet.
+    for (const row of await db.getMessages(link)) expect(row.timestamp).toBeLessThanOrEqual(now);
+  });
+
+  it("a group's line read late, with nothing newer here, keeps the time of its change", async () => {
+    const { node, store } = await started();
+    const { groupId } = await node.createGroup({ name: "Plaza", profile: "mesh" });
+    const link = `group:${groupId}`;
+    tick(2 * DAY);
+    // Back after two days: the commits of yesterday come first, then what was said.
+    const yesterday = now - DAY;
+    await store({ linkId: link, id: `event:2:joined:${yesterday}`, text: "Bo joined", sender: "peer", event: "joined", timestamp: yesterday, via: "datalink" });
+    await store({ linkId: link, id: `event:3:gone:${yesterday + MINUTE}`, text: "Cy is no longer a member", sender: "peer", event: "gone", timestamp: yesterday + MINUTE, via: "datalink" });
+    await store({ linkId: link, id: "bo:2:0", text: "hi all", sender: "peer", member: "bo", timestamp: yesterday + 5_000, via: "datalink" });
+    const rows = (await db.getMessages(link)).filter((m) => m.event !== "created");
+    expect(texts(rows)).toEqual(["Bo joined", "Cy is no longer a member", "hi all"]);
+    expect(rows[0].timestamp).toBe(yesterday);
+    expect(rows[1].timestamp).toBe(yesterday + MINUTE);
+  });
+
   it("the list of groups and unread follow when a message came, never a member's clock", () => {
     expect(cameAt(now + 3 * MINUTE, true, now)).toBe(now);
     expect(cameAt(now - 2 * DAY, true, now)).toBe(now);

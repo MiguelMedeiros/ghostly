@@ -1,14 +1,14 @@
 import "fake-indexeddb/auto";
 import { createHash } from "node:crypto";
 import { afterEach, expect, it, vi } from "vitest";
-import { ChatFiles, FILE_LIMITS, GhostLink, createIdentity, createLink, identityFromSeedB64, type FileTransferRecord, type IncomingTarget, type OfferDecision } from "@ghostly/core";
+import { ChatFiles, FILE_LIMITS, GhostLink, createIdentity, createLink, identityFromSeedB64, randomBytes, toBase64Url, type FileTransferRecord, type IncomingTarget, type OfferDecision } from "@ghostly/core";
 import { GhostlyNode } from "../src/engine/node";
 import { db } from "../src/engine/db";
 import { fileStore } from "../src/shared/idb";
 import { fileBytes, registerFileBytes } from "../src/shared/fileBytes";
 import { IdbFileBytes } from "../src/shared/fileBytesIdb";
 import { FakeNativeNet } from "./helpers/fakeNative";
-// covers: files.large.offer, files.large.resume, files.large.integrity, files.storage, files.large.resend, files.large.request
+// covers: files.large.offer, files.large.resume, files.large.integrity, files.storage, files.large.resend, files.large.request, chat.order
 
 /**
  * files/3 in the engine: a real node (the app) and its contact's link over stand-ins for Iroh and HyperDHT, the
@@ -54,6 +54,8 @@ async function setup() {
   const records = new Map<string, FileTransferRecord>();
   const sources = new Map<string, { size: number; digest?: string }>();
   let decide: (size: number) => OfferDecision = () => "accept";
+  /** What reached the contact, in the order it came: each text, and each file's first offer. */
+  const arrivals: string[] = [];
   const peer: { link?: GhostLink } = {};
   const files = new ChatFiles({
     send: (frame) => peer.link?.sendFilesFrame(frame) ?? false,
@@ -78,7 +80,11 @@ async function setup() {
     native: { preferred: "iroh/1", fallback: true, peerTransports: ["iroh/1", "hyperdht/1"], peerFallback: true,
       peerDescriptors: { "iroh/1": { id: "app:iroh/1" }, "hyperdht/1": { id: "app:hyperdht/1" } } },
     transport, createPeerConnection: () => { throw new Error("No WebRTC here"); }, localFetch: vi.fn(), getServices: () => [], getHostedHttpService: () => undefined,
-    events: { onFilesFrame: (frame) => files.handle(frame), onFilesSession: (open) => { if (open) files.attach(); else files.detach(); } },
+    events: {
+      onMessage: (message) => { arrivals.push(message.text.split(" ")[0]); },
+      onFilesFrame: (frame) => { if (frame.t === "pf-offer" && !arrivals.includes(`file ${String(frame.id)}`)) arrivals.push(`file ${String(frame.id)}`); return files.handle(frame); },
+      onFilesSession: (open) => { if (open) files.attach(); else files.detach(); },
+    },
   });
   peer.link = contact;
   contact.registerEndpoint(net.endpoint("iroh/1", "contact"));
@@ -104,7 +110,7 @@ async function setup() {
     return message?.file ? { fileId: message.file.id, transfer: node.getState().transfers[message.file.id] } : null;
   };
   return {
-    net, id, files, records, received, contact, offer, incoming,
+    net, id, files, records, received, contact, offer, incoming, arrivals,
     node: () => node,
     set decide(fn: (size: number) => OfferDecision) { decide = fn; },
     /** The app quits and starts again, the contact dialling it once it is back. */
@@ -370,3 +376,35 @@ it("a file sent while the chat is not live waits, and goes whole once it is, aft
     expect((await db.getMessages(t.id)).filter((m) => m.file?.id === later.id)).toHaveLength(1);
   } finally { stream.mockRestore(); }
 }, 120_000);
+
+it("texts and files written while the contact is away reach it in the order they were written", async () => {
+  const t = await setup();
+  t.contact.disconnect();
+  await vi.waitFor(() => expect(t.files.live).toBe(false));
+  // Longer than the DHT carries: each text waits for the live link, as the files do.
+  const say = async (word: string) => expect((await t.node().sendMessage({ linkId: t.id, text: `${word} ${"x".repeat(400)}` })).error).toBeNull();
+  // Each a few milliseconds after the other, as a person writes them: a row's time is its place in my chat.
+  const next = () => new Promise((resolve) => setTimeout(resolve, 5));
+  await say("one"); await next();
+  await put(t, "between-01", 30_000, Date.now()); await next();
+  await say("two"); await next();
+  await put(t, "between-02", 30_000, Date.now()); await next();
+  await say("three");
+  await vi.waitFor(async () => expect((await db.getMessages(t.id)).filter((m) => m.sender === "me" && m.delivery === "waiting")).toHaveLength(5));
+  t.arrivals.length = 0;
+  void t.contact.connect(5_000).catch(() => {});
+  await vi.waitFor(() => expect(t.arrivals).toHaveLength(5), { timeout: 30_000 });
+  expect(t.arrivals).toEqual(["one", "file between-01", "two", "file between-02", "three"]);
+  await vi.waitFor(() => expect(t.records.get("in:between-02")?.state).toBe("done"), { timeout: 30_000 });
+}, 120_000);
+
+it("a received file is placed where its offer came: a text that comes right after it goes below it", async () => {
+  const t = await setup();
+  t.offer("placed-001", 20_000);
+  expect(await t.contact.sendMessage("after the file", Date.now(), toBase64Url(randomBytes(16)))).toBeNull();
+  await vi.waitFor(async () => expect((await db.getMessages(t.id)).filter((m) => m.sender === "peer")).toHaveLength(2));
+  const rows = (await db.getMessages(t.id)).filter((m) => m.sender === "peer").sort((a, b) => a.timestamp - b.timestamp);
+  expect(rows.map((m) => (m.file ? "file" : m.text))).toEqual(["file", "after the file"]);
+  // The time its sender says is kept beside its place, as a text's is.
+  expect(rows[0].sentAt).toBeTypeOf("number");
+});

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { communityCommitHash, decodeCommunityLink, knockIdentity } from "@ghostly/core";
-import { CommunityWorld, type Peer } from "./communityWorld";
+import { CommunityWorld, RELAY_NETWORK, type Peer } from "./communityWorld";
 // covers: groups.community.remove, groups.community.join, groups.community.send, groups.protocol.community-topology
 
 /**
@@ -259,5 +259,32 @@ describe("a member that opens the link of a community it is in", { timeout: 120_
     expect((await bob.store.getGroups())[0].joining).toBeUndefined();
     expect(session(bob, id)).toBe(before);
     expect(world.view(bob, id)?.status).toBe("active");
+  });
+});
+
+describe("a community hub removed while its app is open", { timeout: 120_000 }, () => {
+  it("gets back in through the link when it opens it at once", async () => {
+    const world = new CommunityWorld(undefined, RELAY_NETWORK);
+    const admin = world.add("admin");
+    const id = await admin.groups.create("Open door");
+    const link = await admin.groups.enableLink(id);
+    await world.run(60_000);
+    const others = ["bob", "carol", "dave", "erin"].map(name => world.add(name));
+    for (const p of others) { await p.groups.joinByLink(link); await world.until(() => world.member(p, id), 10 * 60_000, 500); }
+    // A member that became a hub (with five members there are two).
+    await world.until(() => others.some(p => p.groups.communities.isHub(id)), 10 * 60_000);
+    const hub = others.find(p => p.groups.communities.isHub(id))!;
+    await admin.groups.remove(id, world.view(hub, id)!.myKey!);
+    await world.settle();
+    expect(world.view(hub, id)!.status).toBe("removed");
+    // It opens the link the moment it is told, before its engine's next tick (a bot that rejoins on being removed).
+    await hub.groups.joinByLink(link);
+    const took = await world.until(() => world.member(hub, id), 5 * 60_000);
+    expect(took).toBeLessThanOrEqual(60_000);
+    expect((await hub.groups.send(id, "back in")).error).toBeNull();
+    await world.until(() => world.texts(admin, id).includes("back in"), 2 * 60_000);
+    // Nobody is left running an entry session for it.
+    await world.run(60_000);
+    for (const p of [admin, ...others]) expect([...p.links.values()].filter(e => e.kind !== "edge"), p.name).toHaveLength(0);
   });
 });

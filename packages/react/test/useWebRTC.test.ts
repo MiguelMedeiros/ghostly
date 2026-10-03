@@ -75,6 +75,55 @@ describe("placing a call", () => {
     expect(call.fastPoll()).toBe(false);
   });
 
+  // Reported 2026-10-01: a contact whose clock is two minutes off. The answer of a callee whose clock was behind by
+  // longer than it took to answer was dated "before the offer" and dropped: the call rang on until it gave up.
+  it("takes the answer that names our offer from a contact whose clock is two minutes behind", async () => {
+    const call = renderCall();
+    const { pc } = await offered(call);
+    const mine = JSON.parse(call.published[0]!) as { ts: number };
+    call.receive(JSON.stringify({ ...JSON.parse(remote.answer(mine.ts - 2 * 60_000)), o: mine.ts, at: Date.now() }));
+    await settle();
+    expect(pc.remoteDescription?.type).toBe("answer");
+    expect(call.result.current.callState).toBe("connecting");
+  });
+
+  it("leaves an answer that names another offer alone, however new it reads", async () => {
+    const call = renderCall();
+    const { pc } = await offered(call);
+    const mine = JSON.parse(call.published[0]!) as { ts: number };
+    call.receive(JSON.stringify({ ...JSON.parse(remote.answer(Date.now() + 1)), o: mine.ts - 30_000, at: Date.now() }));
+    await settle();
+    expect(pc.remoteDescription).toBeNull();
+    expect(call.result.current.callState).toBe("offering");
+  });
+
+  it("takes an answer that names no offer (an app up to 1.0.2) when it was heard after ours went out, its clock behind or not", async () => {
+    const call = renderCall();
+    const { pc } = await offered(call);
+    const mine = JSON.parse(call.published[0]!) as { ts: number };
+    // With nothing to say when it was heard (a record's signal), its own time decides, as before: not taken.
+    call.receive(remote.answer(mine.ts - 30_000));
+    await settle();
+    expect(pc.remoteDescription).toBeNull();
+    vi.advanceTimersByTime(1_000);
+    call.receive(JSON.stringify({ ...JSON.parse(remote.answer(mine.ts - 29_000)), at: Date.now() }));
+    await settle();
+    expect(pc.remoteDescription?.type).toBe("answer");
+  });
+
+  it("a signal dated a day ahead is not taken, and the contact's answer and hang-up after it still are", async () => {
+    const call = renderCall();
+    const { pc } = await offered(call);
+    const mine = JSON.parse(call.published[0]!) as { ts: number };
+    call.receive(JSON.stringify({ ...JSON.parse(remote.hangUp(Date.now() + 24 * 60 * 60_000)), at: Date.now() }));
+    expect(call.result.current.callState).toBe("offering");
+    call.receive(JSON.stringify({ ...JSON.parse(remote.answer(Date.now() + 1)), o: mine.ts, at: Date.now() }));
+    await settle();
+    expect(pc.remoteDescription?.type).toBe("answer");
+    call.receive(JSON.stringify({ ...JSON.parse(remote.hangUp(Date.now() + 2)), at: Date.now() }));
+    expect(call.result.current.callState).toBe("idle");
+  });
+
   it("ICE connecting before the answer's description comes back stays connected, with its video lane open", async () => {
     const call = renderCall();
     const { pc } = await offered(call);
@@ -405,6 +454,22 @@ describe("answering a call", () => {
     expect(call.result.current.callState).toBe("connecting");
   });
 
+  it("names the offer it answers, and rings for one whose sender's clock is nine minutes off once the engine heard it come", async () => {
+    const call = renderCall();
+    const theirs = Date.now() + 9 * 60_000;
+    // As a record's signal, with only its own time: stale, as before.
+    call.receive(remote.offer(theirs));
+    expect(call.result.current.callState).toBe("idle");
+    call.receive(JSON.stringify({ ...JSON.parse(remote.offer(theirs + 1)), at: Date.now() }));
+    expect(call.result.current.callState).toBe("incoming");
+    // The call's line keeps the offer's own time: that is what makes it the same line when the offer is heard again.
+    expect(call.addCallEventMessage).toHaveBeenCalledWith("call_received", false, undefined, theirs + 1);
+    act(() => { void call.result.current.acceptCall(false); });
+    devices.userMedia[0].grant();
+    await settle();
+    expect(JSON.parse(call.published[0]!)).toMatchObject({ t: "a", o: theirs + 1 });
+  });
+
   it("ICE connecting while our answer is still gathering stays connected once the answer goes out", async () => {
     FakePeerConnection.holdGathering = true;
     const call = renderCall();
@@ -608,7 +673,11 @@ describe("a headless caller starting over on a second offer", () => {
     act(() => { vi.advanceTimersByTime(RESTART_GRACE_MS); });
 
     expect(call.result.current.callState).toBe("idle");
-    expect(call.publishedKinds()).toEqual(["a", null]);
+    // The caller is told the call could not connect, as a hang-up tells it, and the signal is taken back after.
+    expect(call.publishedKinds()).toEqual(["a", "h"]);
+    expect(JSON.parse(call.published[call.published.length - 1]!)).toMatchObject({ t: "h", r: "u" });
+    act(() => { vi.advanceTimersByTime(5000); });
+    expect(call.publishedKinds()).toEqual(["a", "h", null]);
     expect(stream.getTracks().every((t) => t.stop.mock.calls.length > 0)).toBe(true);
     expect(call.fastPoll()).toBe(false);
   });
@@ -623,7 +692,8 @@ describe("a headless caller starting over on a second offer", () => {
     act(() => FakePeerConnection.instances[1].setIceState("failed"));
 
     expect(call.result.current.callState).toBe("idle");
-    expect(call.publishedKinds()).toEqual(["a", "a", null]);
+    act(() => { vi.advanceTimersByTime(5000); });
+    expect(call.publishedKinds()).toEqual(["a", "a", "h", null]);
   });
 
   it("hanging up while it waits ends the call, and the wait does nothing later", async () => {

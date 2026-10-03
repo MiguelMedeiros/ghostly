@@ -13,7 +13,89 @@ export function setDatabaseName(name: string): void {
 export function databaseName(): string {
   return dbName;
 }
-const DB_VERSION = 10;
+/** The schema this build reads and writes. A database stored at a higher one is a newer build's: it is never opened. */
+export const DB_VERSION = 12;
+
+/**
+ * Why the profile's database did not open. `newer`: a newer Ghostly stored it (IndexedDB never opens a database below
+ * its stored version). `blocked`: another window still holds it open at an older version. `full`: no storage space.
+ * `denied`: the browser gives this page no storage (a private window, storage blocked for the site). `failed`:
+ * anything else, a damaged database included (browsers do not tell that one apart).
+ */
+export type ProfileOpenReason = "newer" | "blocked" | "full" | "denied" | "failed";
+
+/** What the pages are told (a plain object: it crosses the extension's port), and what a bot reads in `details`. */
+export interface ProfileOpenFailure {
+  reason: ProfileOpenReason;
+  /** The schema version this build reads (`DB_VERSION`). */
+  supportedVersion: number;
+  /** The version the database is stored at, when it could be read (`newer`). */
+  storedVersion?: number;
+  /** What the browser said, in its own words. */
+  detail?: string;
+}
+
+/** The profile's database did not open. Nothing was changed, and nothing is ever deleted or reset because of it. */
+export class ProfileOpenError extends Error {
+  constructor(readonly failure: ProfileOpenFailure) {
+    super(profileOpenMessage(failure));
+    this.name = "ProfileOpenError";
+  }
+}
+
+/** The failure in plain English, for logs, the CLI and anything that shows an engine error as it came. */
+export function profileOpenMessage(failure: ProfileOpenFailure): string {
+  const could = "Ghostly could not open this profile's data";
+  switch (failure.reason) {
+    case "newer":
+      return `This profile was last used by a newer version of Ghostly (its data is version ${failure.storedVersion ?? "above " + failure.supportedVersion}, this version reads up to ${failure.supportedVersion}). Update Ghostly to open it.`;
+    case "blocked": return `${could}: another Ghostly window or tab still has it open with an older version. Close it and try again.`;
+    case "full": return `${could}: this device is out of storage space. Free some space and try again.`;
+    case "denied": return `${could}: storage is not allowed here (a private window, or storage blocked for this site).`;
+    default: return `${could}${failure.detail ? `: ${failure.detail}` : ""}`;
+  }
+}
+
+/** What the start of the engine failed with, as the failure the pages show: a database that did not open, or anything else. */
+export function profileOpenFailure(error: unknown): ProfileOpenFailure {
+  if (error instanceof ProfileOpenError) return error.failure;
+  const detail = error instanceof Error ? error.message : String(error);
+  return { reason: "failed", supportedVersion: DB_VERSION, ...(detail ? { detail } : {}) };
+}
+
+/** How long an open that another window blocks may wait for that window to let go before it is said to be blocked. */
+export const OPEN_TIMINGS = { blockedMs: 10_000 };
+
+function failureOf(error: unknown): ProfileOpenFailure {
+  const name = (error as { name?: unknown } | null)?.name;
+  const message = (error as { message?: unknown } | null)?.message;
+  const detail = [typeof name === "string" ? name : "", typeof message === "string" ? message : ""].filter(Boolean).join(": ");
+  const reason: ProfileOpenReason = name === "VersionError" ? "newer"
+    : name === "QuotaExceededError" ? "full"
+      // Firefox's private windows of old, storage blocked for the site, or no IndexedDB at all.
+      : name === "BlockedError" ? "blocked"
+      : name === "SecurityError" || name === "InvalidStateError" || name === "ReferenceError" || name === "TypeError" ? "denied"
+        : "failed";
+  return { reason, supportedVersion: DB_VERSION, ...(detail ? { detail } : {}) };
+}
+
+/**
+ * The version a database is stored at, read without changing it: an open that names no version opens what is there.
+ * Only for a database known to exist (an open without a version would make a missing one).
+ */
+function storedVersion(name: string): Promise<number | undefined> {
+  return new Promise((resolve) => {
+    try {
+      const request = indexedDB.open(name);
+      // It did not exist after all: leave nothing behind.
+      request.onupgradeneeded = () => { try { request.transaction?.abort(); } catch { /* already over */ } };
+      request.onsuccess = () => { const { version } = request.result; request.result.close(); resolve(version); };
+      request.onerror = request.onblocked = () => resolve(undefined);
+    } catch { resolve(undefined); }
+  });
+}
+/** The messages store's index of card messages (`card.kind`): what `db.getCardMessages` reads. */
+export const CARD_INDEX = "byCardKind";
 
 export const STORES = {
   links: "links",
@@ -26,6 +108,8 @@ export const STORES = {
   quotes: "quotes",
   walletTx: "walletTx",
   melts: "melts",
+  /** Swaps at a mint that have not finished (`PendingSwap`): what gets their outputs back when an answer is missed. */
+  swaps: "swaps",
   intents: "paymentIntents",
   /** Private groups (WISP 900): membership chain, epoch secrets and my own recent messages, by group id. */
   groups: "groups",
@@ -60,6 +144,8 @@ export interface StoredFile {
   transfer?: { state: "transferring" | "done" | "failed"; transferred: number; size: number; error?: string };
   /** files/3: the transfer's own record (`@ghostly/core` `FileTransferRecord`), kept so it resumes after a restart. */
   wire3?: import("@ghostly/core").FileTransferRecord;
+  /** Its bytes were left out of the light backup this profile was restored from (WISP 05 § Light backups). */
+  leftOut?: boolean;
 }
 
 /** The fields of a stored file that change after it is stored: kept in `STORES.fileState`, read over the record's own. */
@@ -70,7 +156,24 @@ let dbPromise: Promise<IDBDatabase> | null = null;
 
 export function openDb(): Promise<IDBDatabase> {
   dbPromise ??= new Promise((resolve, reject) => {
-    const request = indexedDB.open(dbName, DB_VERSION);
+    let settled = false;
+    let blocked: ReturnType<typeof setTimeout> | undefined;
+    // Said once, as what it is (`ProfileOpenError`): the engine does not start, and the pages show why.
+    const fail = (error: unknown) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(blocked);
+      const failure = failureOf(error);
+      if (failure.reason !== "newer") { reject(new ProfileOpenError(failure)); return; }
+      void storedVersion(dbName).then((version) => reject(new ProfileOpenError({ ...failure, ...(version !== undefined ? { storedVersion: version } : {}) })));
+    };
+    let request: IDBOpenDBRequest;
+    try {
+      request = indexedDB.open(dbName, DB_VERSION);
+    } catch (error) {
+      fail(error);
+      return;
+    }
     request.onupgradeneeded = () => {
       const db = request.result;
       const has = (name: string) => db.objectStoreNames.contains(name);
@@ -99,8 +202,17 @@ export function openDb(): Promise<IDBDatabase> {
       // v10: a chat's messages in time order, so its latest page is read without the rest.
       const messages = request.transaction!.objectStore(STORES.messages);
       if (!messages.indexNames.contains("byLinkTime")) messages.createIndex("byLinkTime", ["linkId", "timestamp"]);
+      // v11: the messages that carry a status card, by the card's kind, across every chat and group (the Tasks board).
+      // A message without a card has no such key and is not in it, so the index is as small as the cards are few.
+      if (!messages.indexNames.contains(CARD_INDEX)) messages.createIndex(CARD_INDEX, "card.kind");
+      // v12: swaps at a mint, written down before the mint is asked.
+      if (!has(STORES.swaps)) db.createObjectStore(STORES.swaps, { keyPath: "id" });
     };
     request.onsuccess = () => {
+      // Opened after it was said to be blocked: nobody uses this connection, and it must not block the next open.
+      if (settled) { request.result.close(); return; }
+      settled = true;
+      clearTimeout(blocked);
       // Let the other context upgrade the schema instead of blocking it.
       request.result.onversionchange = () => {
         request.result.close();
@@ -108,7 +220,13 @@ export function openDb(): Promise<IDBDatabase> {
       };
       resolve(request.result);
     };
-    request.onerror = () => reject(request.error);
+    // The event's default aborts nothing here, but an unhandled one is logged as an uncaught error in some browsers.
+    request.onerror = (event) => { event.preventDefault?.(); fail(request.error); };
+    // Another window holds the database at an older version and has not let go (ours do, on `versionchange`). The
+    // open stays pending for as long as that lasts: before, the engine waited with it, silently and for good.
+    request.onblocked = () => {
+      blocked ??= setTimeout(() => fail({ name: "BlockedError", message: "another connection holds an older version open" }), OPEN_TIMINGS.blockedMs);
+    };
   });
   return dbPromise;
 }

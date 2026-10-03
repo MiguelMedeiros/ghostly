@@ -11,12 +11,13 @@ import type { StoredPayment, StoredProof, WalletTx } from "../src/shared/types";
  * The reviewed Cashu payment (prepare, approve, execute, recover) on real IndexedDB semantics: it reserves
  * its inputs in a raw transaction, which the in-memory fakes of fakes.ts do not model.
  */
-const mintApi = vi.hoisted(() => ({ prepare: vi.fn(), completeSwap: vi.fn(), restore: vi.fn(), getKeys: vi.fn(), checkProofsStates: vi.fn() }));
+const mintApi = vi.hoisted(() => ({ prepare: vi.fn(), completeSwap: vi.fn(), restore: vi.fn(), getKeys: vi.fn(), checkProofsStates: vi.fn(), restores: vi.fn() }));
 vi.mock("@cashu/cashu-ts", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@cashu/cashu-ts")>()),
   Wallet: class {
     constructor(readonly url: string) {}
     async loadMint(): Promise<void> {}
+    getMintInfo = () => ({ isSupported: () => ({ supported: mintApi.restores() ?? true, params: [] }) });
     ops = { send: (amount: number, proofs: unknown[]) => ({ includeFees: (on: boolean) => ({ prepare: () => mintApi.prepare(amount, proofs, on) }) }) };
     completeSwap = (preview: unknown) => mintApi.completeSwap(preview);
     mint = { restore: (request: unknown) => mintApi.restore(request), getKeys: () => mintApi.getKeys() };
@@ -212,3 +213,61 @@ describe("recovering a swap whose answer was lost", () => {
     expect(await wallet.reviewedCashuSpent({ ...saved, swap: { ...saved.swap, sendOutputs: [] } })).toBe(false);
   });
 });
+
+const recoveredFor = (saved: CashuPrepared) => {
+  const made = [...(saved.swap.keepOutputs ?? []), ...(saved.swap.sendOutputs ?? [])];
+  return { outputs: made.map((o) => ({ B_: o.blindedMessage.B_ })), signatures: made.map((o) => ({ id: o.blindedMessage.id, amount: o.blindedMessage.amount, C_: C })) };
+};
+
+describe("a reviewed payment whose ecash was spent somewhere else", () => {
+  /** The swap was refused, or its answer lost: its input is reserved, nothing else happened here. */
+  async function reserved() {
+    const saved = await prepared();
+    await transact([STORES.proofs], (s) => { s[STORES.proofs].put(stored(64, "a", { reserved: true })); });
+    return saved;
+  }
+
+  it("is told apart only by the mint's answer: none of its outputs signed, and an input spent", async () => {
+    const saved = await reserved();
+    const { wallet } = setup();
+    mintApi.restore.mockResolvedValue({ outputs: [], signatures: [] });
+    mintApi.checkProofsStates.mockResolvedValue([{ state: "SPENT" }]);
+    expect(await wallet.reviewedCashuSpentElsewhere(saved)).toBe(true);
+    mintApi.checkProofsStates.mockResolvedValue([{ state: "UNSPENT" }]);
+    expect(await wallet.reviewedCashuSpentElsewhere(saved), "unspent: it may never have reached the mint").toBe(false);
+    mintApi.checkProofsStates.mockResolvedValue([{ state: "PENDING" }]);
+    expect(await wallet.reviewedCashuSpentElsewhere(saved)).toBe(false);
+    mintApi.getKeys.mockResolvedValue({ keysets: [{ id: KEYSET, unit: "sat", keys: {} }] });
+    vi.spyOn(OutputData.prototype, "toProof").mockImplementation(function (this: OutputData) {
+      return { id: KEYSET, amount: Amount.from(this.blindedMessage.amount), secret: new TextDecoder().decode(this.secret), C } as Proof;
+    });
+    mintApi.checkProofsStates.mockResolvedValue([{ state: "SPENT" }]);
+    mintApi.restore.mockResolvedValue(recoveredFor(saved));
+    expect(await wallet.reviewedCashuSpentElsewhere(saved), "signed: this payment spent it").toBe(false);
+    mintApi.restore.mockRejectedValue(new TypeError("Failed to fetch"));
+    await expect(wallet.reviewedCashuSpentElsewhere(saved), "no answer is no answer").rejects.toThrow();
+    mintApi.restores.mockReturnValue(false);
+    expect(await wallet.reviewedCashuSpentElsewhere(saved), "a mint that cannot restore cannot say").toBe(false);
+  });
+
+  it("lets go of what the mint reads spent, frees the rest, and checks the wallet's other ecash at that mint once", async () => {
+    const saved = await prepared(preview({ inputs: [proof(64, "a"), proof(8, "b")], keepOutputs: [OutputData.createSingleRandomData(24, KEYSET)] }));
+    await transact([STORES.proofs], (s) => {
+      s[STORES.proofs].put(stored(64, "a", { reserved: true })); s[STORES.proofs].put(stored(8, "b", { reserved: true }));
+      s[STORES.proofs].put(stored(16, "c")); s[STORES.proofs].put(stored(2, "d"));
+    });
+    const { wallet, events } = setup();
+    // The payment's inputs: one spent elsewhere, one not. Then the rest: one more spent elsewhere.
+    mintApi.checkProofsStates.mockResolvedValueOnce([{ state: "SPENT" }, { state: "UNSPENT" }]);
+    mintApi.checkProofsStates.mockImplementation(async (asked: { secret: string }[]) => asked.map((p) => ({ state: p.secret === "c" ? "SPENT" : "UNSPENT" })));
+    await wallet.dropReviewedCashu(saved);
+    const left = await all<StoredProof>(STORES.proofs);
+    expect(left.map((p) => p.secret).sort()).toEqual(["b", "d", "r"]);
+    expect(left.filter((p) => p.reserved).map((p) => p.secret), "nothing set aside but what was before").toEqual(["r"]);
+    expect(left.some((p) => p.unchecked)).toBe(false);
+    expect(mintApi.checkProofsStates).toHaveBeenCalledTimes(2);
+    expect(await all(STORES.walletTx), "no fee for ecash spent elsewhere").toEqual([]);
+    expect(events.onChange).toHaveBeenCalled();
+  });
+});
+
