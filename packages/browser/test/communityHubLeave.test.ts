@@ -88,6 +88,46 @@ describe("a hub whose app is killed", { timeout: 120_000 }, () => {
 });
 
 /**
+ * Someone let in by the admin whose edge to it is not up yet (a crowd let in at once: the door's relay budget goes to
+ * the admissions) has no edge to hear the admin's leave on. It waited for the admin as for a hub that is slow to open
+ * its side, then asked a hub left with its own side of the new edge looking at the background pace: about 49 s
+ * (2026-10-03).
+ */
+describe("a member with no edge up when the admin leaves", { timeout: 120_000 }, () => {
+  it("drops the admin once the beacon does not list it, and its edge to a hub left comes up within half a minute", async () => {
+    let found: { world: CommunityWorld; id: string; admin: Peer; last: Peer; rest: Peer[] } | undefined;
+    for (let tries = 0; tries < 12 && !found; tries++) {
+      const world = new CommunityWorld(undefined, RELAY_NETWORK);
+      const peers = ["admin", "bob", "carol", "dave", "erin"].map(n => world.add(n));
+      const [admin, ...rest] = peers;
+      const last = rest[rest.length - 1];
+      const id = await admin.groups.create("Town");
+      const link = await admin.groups.enableLink(id);
+      for (const p of rest) {
+        // The last one's edge to the admin is slow to come up: it is not up when the admin leaves.
+        if (p === last) world.holdEdge = (a, b) => (a === admin && b === last) || (a === last && b === admin);
+        await p.groups.joinByLink(link);
+        await world.until(() => world.member(p, id), 5 * 60_000);
+      }
+      await world.run(5_000);
+      const keyOf = (p: Peer) => p.groups.communities.session(id)!.myKey;
+      const edges = [...last.links.values()].filter(e => e.kind === "edge" && e.g === id);
+      // The admin let it in (its only edge is to the admin, and not up), and the admin has an edge up to carry its leave.
+      if (edges.length === 1 && edges[0].peer === keyOf(admin) && edges[0].upAt === undefined
+        && [...admin.links.values()].some(e => e.kind === "edge" && e.g === id && e.upAt !== undefined)) found = { world, id, admin, last, rest };
+    }
+    expect(found, "a group whose last member the admin let in, with no edge up").toBeDefined();
+    const { world, id, admin, last, rest } = found!;
+    await admin.groups.leave(id);
+    for (const p of rest) await p.groups.send(id, `line ${p.name}`);
+    const back = await world.until(() => connected(world, last, id) > 0, 3 * 60_000);
+    // A reading of the beacon within 10 s, the hub's lobby within 6, a few seconds of signaling: before, 49 s.
+    expect(back).toBeLessThanOrEqual(30_000);
+    await world.until(() => rest.every(p => rest.every(q => q === p || world.texts(p, id).includes(`line ${q.name}`))), 60_000);
+  });
+});
+
+/**
  * The hub left behind held the leaver's signed request, but counted the leaver as a hub until the leave was committed
  * (at once by the hub with the lowest key, half a minute later by any other) or its beacon entry went stale: it dialled
  * it again as one hub dials another, kept it at the door, and wrote it back into the beacon. An edge whose app is gone
