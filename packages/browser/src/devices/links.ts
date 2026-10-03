@@ -176,6 +176,14 @@ export const STANDBY_TURN_EVERY_MS = 10 * 60_000;
 const STANDBY_TURN_JITTER_MS = 60_000;
 /** How long a device that took a new secret waits after its `set-ack` before it closes the old link the ack went out on. */
 export const SET_ACK_FLUSH_MS = 1_500;
+/**
+ * The active device's hint on each device link that opens: "I hold the turn" (WISP 06 § When a device checks, a link
+ * that says "I took the turn"). A hint is never authority: the device that gets it reads the turn record, at most once
+ * in this long. So a standby learns of a handoff or a takeover while the record is still there to read, before a
+ * removal's tombstone hides it.
+ */
+export const DEVICE_TURN_HINT = "device-turn";
+export const TURN_HINT_EVERY_MS = 30_000;
 
 const defaultPeerConnection = (): (() => RTCPeerConnection) | undefined =>
   (typeof RTCPeerConnection === "undefined" ? undefined : () => new RTCPeerConnection({ iceServers: RTC_CONFIG.iceServers }));
@@ -192,6 +200,7 @@ export class DeviceLinks implements DeviceLinkEngine {
   /** Turn reads and new secrets one after the other: a read made under the old secret must not undo a secret just taken. */
   private turnQueue: Promise<unknown> = Promise.resolve();
   private turnTimer: ReturnType<typeof setTimeout> | null = null;
+  private lastHintRead = 0;
   private readonly timers = new Set<ReturnType<typeof setTimeout>>();
 
   constructor(private readonly options: DeviceLinksOptions) {
@@ -220,13 +229,22 @@ export class DeviceLinks implements DeviceLinkEngine {
     if (this.turnTimer) clearTimeout(this.turnTimer);
     this.turnTimer = setTimeout(() => {
       this.turnTimer = null;
-      void (async () => {
-        const before = await this.record().catch(() => null);
-        await this.checkTurn().catch(() => null);
-        const now = await this.record().catch(() => null);
-        if (now && before && (now.state !== before.state || now.activeSlot !== before.activeSlot || now.d !== before.d || now.reenroll !== before.reenroll)) this.host?.show(viewOf(now));
-      })().finally(() => this.watchTurn(STANDBY_TURN_EVERY_MS + Math.floor(Math.random() * STANDBY_TURN_JITTER_MS)));
+      void this.checkAndShow().catch(() => null).finally(() => this.watchTurn(STANDBY_TURN_EVERY_MS + Math.floor(Math.random() * STANDBY_TURN_JITTER_MS)));
     }, after);
+  }
+
+  /** Reads the turn and, when the device's state or the device it believes changed, tells the pages. */
+  private async checkAndShow(): Promise<TurnOutcome | null> {
+    const before = await this.record().catch(() => null);
+    const outcome = await this.checkTurn();
+    const now = await this.record().catch(() => null);
+    if (now && before && (now.state !== before.state || now.activeSlot !== before.activeSlot || now.d !== before.d || now.reenroll !== before.reenroll)) this.host?.show(viewOf(now));
+    return outcome;
+  }
+
+  /** The frames still pending go again on every old link that is live now (the hourly run: a refusal for a passing reason is retried). */
+  async deliverPending(): Promise<void> {
+    for (const running of [...this.running.values()]) if (running.earlier && this.isLive(running)) await this.linkLive(running).catch(() => {});
   }
 
   private record(): Promise<DeviceRecord | null> {
@@ -404,6 +422,7 @@ export class DeviceLinks implements DeviceLinkEngine {
     if (frame.t.startsWith("handoff-")) { if (!running.earlier) this.handoff?.receive(running.key, frame); return; }
     if (frame.t === SET_UPDATE) { await this.setUpdate(running, frame); return; }
     if (frame.t === SET_ACK) { if (running.earlier) await this.acked(running.key, running.d); return; }
+    if (frame.t === DEVICE_TURN_HINT) { if (!running.earlier) await this.hinted(); return; }
     await this.options.onFrame?.(running.key, frame);
   }
 
@@ -422,7 +441,19 @@ export class DeviceLinks implements DeviceLinkEngine {
       }
       return;
     }
-    if (running.d === record.d) await this.acked(running.key);
+    if (running.d !== record.d) return;
+    // The active device says it holds the turn: the other device reads the record while it is still there to read.
+    if (record.state === "active") { try { running.link.sendDeviceFrame({ t: DEVICE_TURN_HINT }); } catch { /* the next session says it */ } }
+    await this.acked(running.key);
+  }
+
+  /** A hint from another device that it holds the turn: read it, at most once in `TURN_HINT_EVERY_MS`. Never on the active device. */
+  private async hinted(): Promise<void> {
+    if (Date.now() - this.lastHintRead < TURN_HINT_EVERY_MS) return;
+    const record = await this.record();
+    if (!record || record.state === "active" || record.state === "removed") return;
+    this.lastHintRead = Date.now();
+    await this.checkAndShow().catch(() => null);
   }
 
   /** `key` holds the set under `d` (or the current one): its pending frame is done, and the old link goes. */
@@ -668,7 +699,8 @@ export class DeviceLinks implements DeviceLinkEngine {
         return { ms: await this.ping(key) };
       }
       case "deviceTurnCheck": {
-        const outcome = await this.checkTurn();
+        // Also what a standby screen asks when it comes back to the front: what it shows follows a changed state.
+        const outcome = await this.checkAndShow();
         // What a page may know of it: the kind and what to show, never a packet or a key.
         if (!outcome) return null;
         return { kind: outcome.kind, ...("screen" in outcome ? { screen: outcome.screen } : {}), ...("device" in outcome && outcome.device ? { device: outcome.device } : {}),

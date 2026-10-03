@@ -415,6 +415,11 @@ export interface EngineApi {
   deviceNewSecret(): import("../devices/links").DeviceSetView;
   /** The offer of a new device secret after a takeover, answered without making one. */
   deviceSecretOfferDismiss(): void;
+  /**
+   * A device that is not the active one reads the turn now (its screen came back to the front) and the pages follow what
+   * it found. What a page may know of it: the kind of outcome and what to show, never a packet or a key.
+   */
+  deviceTurnCheck(): { kind: string; screen?: string; device?: string; state?: string; result?: string } | null;
   /** "Your devices are now: ..." answered on a device that took a new secret: OK, or "This is wrong" (`wrong`), which keeps it out. */
   deviceSetNoticeSeen(params: { wrong?: boolean }): void;
 }

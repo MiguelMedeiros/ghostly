@@ -131,6 +131,21 @@ describe("the standby screen after a removal", () => {
     await waitFor(() => expect(engine.callsTo("deviceSetNoticeSeen")).toEqual([{ wrong: false }, { wrong: true }]));
   });
 
+  it("reads the turn again when the screen comes back to the front, at most every 30 seconds", async () => {
+    const { engine } = renderApp(<DeviceStandby gate={{ state: "standby", activeDevice: "Desktop" }} />);
+    engine.on("deviceTurnCheck", () => null);
+    engine.on("deviceTakeoverInfo", () => ({ offered: false }));
+    const now = Date.now();
+    const clock = vi.spyOn(Date, "now").mockReturnValue(now + 5_000);
+    window.dispatchEvent(new Event("focus"));
+    expect(engine.callsTo("deviceTurnCheck")).toHaveLength(0);
+    clock.mockReturnValue(now + 31_000);
+    window.dispatchEvent(new Event("focus"));
+    window.dispatchEvent(new Event("focus"));
+    await waitFor(() => expect(engine.callsTo("deviceTurnCheck")).toHaveLength(1));
+    clock.mockRestore();
+  });
+
   it("a moving device names the device that finishes it", () => {
     renderApp(<DeviceStandby gate={{ state: "moving", activeDevice: "Desktop" }} />);
     expect(screen.getByTestId("device-standby-title")).toHaveTextContent("Almost there");

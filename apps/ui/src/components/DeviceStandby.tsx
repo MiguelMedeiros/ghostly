@@ -45,6 +45,8 @@ export function DeviceStandby({ gate }: { gate: DeviceGateView }) {
     : t(`devices.standby.hint.${gate.state}`);
   // A handoff froze this device or installed what it took: the pages start again into the gate.
   useEffect(() => { if (gate.reload) void reloadIntoGate(); }, [gate.reload]);
+  // The screen back in front is a screen opened again (WISP 06 § When a device checks): the turn is read once more.
+  useTurnReadOnReturn(gate.state !== "unreadable");
   return (
     <div role="status" data-testid="device-standby" data-state={gate.state} data-unfinished={unfinished ? "true" : undefined} className="h-dvh overflow-y-auto grid place-items-center bg-chat-bg p-6 text-center">
       <div className="max-w-md space-y-3">
@@ -111,6 +113,24 @@ function StandbyHandoff({ gate }: { gate: DeviceGateView }) {
       {asking && <UseHereDialog device={device} onClose={() => setAsking(false)} onStarted={() => {}} />}
     </div>
   );
+}
+
+/** How often coming back to the front may read the turn: the relays' budget is shared with everything else. */
+const RETURN_READ_EVERY_MS = 30_000;
+
+function useTurnReadOnReturn(on: boolean): void {
+  useEffect(() => {
+    if (!on) return;
+    let last = Date.now();
+    const back = () => {
+      if (document.visibilityState !== "visible" || Date.now() - last < RETURN_READ_EVERY_MS) return;
+      last = Date.now();
+      void engine.call("deviceTurnCheck").catch(() => {});
+    };
+    document.addEventListener("visibilitychange", back);
+    window.addEventListener("focus", back);
+    return () => { document.removeEventListener("visibilitychange", back); window.removeEventListener("focus", back); };
+  }, [on]);
 }
 
 type TakeoverInfo = { offered: boolean; device?: string; copy?: "frozen" | "restored"; password?: boolean };

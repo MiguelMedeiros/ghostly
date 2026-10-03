@@ -4664,7 +4664,7 @@ export class GhostlyNode implements EngineImplementation {
       amend: (patch) => amendDevice(profile, patch),
       signer: identity.key,
       network: this.networkOn ? this.turnNetwork() : null,
-      refresh: async () => { await this.deviceLinks?.refresh(); this.emitState(); },
+      refresh: async () => { await this.deviceLinks?.refresh(); await this.deviceLinks?.deliverPending(); this.emitState(); },
     };
   }
 
@@ -4731,6 +4731,9 @@ export class GhostlyNode implements EngineImplementation {
 
   /** The device list after an accepted `set-update` is a standby's (`DeviceLinks`): the active device has none to show. */
   async deviceSetNoticeSeen(): Promise<void> {}
+
+  /** A standby's screen asks for a turn read when it comes back (`DeviceLinks`); the active device reads on its own schedule. */
+  async deviceTurnCheck(): Promise<null> { return null; }
 
   /**
    * A grant that never finished leaves a device that may hold the secret (`rotate.ts`): the set moves to a new one by

@@ -94,14 +94,20 @@ export async function planSetMove(record: DeviceRecord | null, signer: Signer, o
   const turn = record.turn;
   const packet = await signTurnPacket(newKeys, { turn, rev: FIRST_REV, author: record.ownSlot, active: record.ownSlot, slots: turnSlots, instance: random(8) }, sign);
   const update = { d, set: turnSlots, turn, rev: FIRST_REV };
-  const frame = await setUpdateFrame(oldKeys.address, { ...update, tomb }, signer);
+  // The frame carries this device's last record at the old address: a device that stays and did not see the turn handed
+  // to this device reads there only the tombstone now, and checks the release in this record instead (`setUpdate.ts`).
+  const rec = record.turnPacket ? fromBase64Url(record.turnPacket) : undefined;
+  const frame = await setUpdateFrame(oldKeys.address, { ...update, tomb, ...(rec ? { rec } : {}) }, signer);
   const staying = (keys: readonly string[]) => keys.filter((key) => key !== own.key && slots.some((slot) => slot?.key === key));
   // Frames of earlier sets still waiting for a device that stays: signed again with the newest secret, over their own tombstone.
   const earlier: EarlierDeviceSet[] = [];
   for (const set of record.earlierSets) {
     const pending = staying(set.pending);
+    // Its record at that older address stays what the first frame carried.
+    let oldRec: Uint8Array | undefined;
+    try { const was = JSON.parse(set.setUpdate) as { rec?: unknown }; if (typeof was.rec === "string") oldRec = fromBase64Url(was.rec); } catch { /* none */ }
     const setUpdate = pending.length
-      ? JSON.stringify(await setUpdateFrame(turnKeys(fromBase64Url(set.d)).address, { ...update, tomb: fromBase64Url(set.tombstone) }, signer))
+      ? JSON.stringify(await setUpdateFrame(turnKeys(fromBase64Url(set.d)).address, { ...update, tomb: fromBase64Url(set.tombstone), ...(oldRec ? { rec: oldRec } : {}) }, signer))
       : set.setUpdate;
     earlier.push({ ...set, pending, setUpdate });
   }

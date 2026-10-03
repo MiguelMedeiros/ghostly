@@ -1,6 +1,7 @@
 import "fake-indexeddb/auto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { RELAY_POLL_INTERVALS, newDeviceSetSecret, toBase64Url, type DeviceFrame } from "@ghostly/core";
+import { RELAY_POLL_INTERVALS, newDeviceSetSecret, signTurnPacket, toBase64Url, turnKeys, type DeviceFrame } from "@ghostly/core";
+import { FakeTurnNetwork } from "./helpers/turnNetwork";
 import { resetDeviceGates } from "../src/devices/gate";
 import { DeviceLinks, deviceSetView, type DeviceLinksOptions } from "../src/devices/links";
 import { moveSet } from "../src/devices/remove";
@@ -119,6 +120,29 @@ describe("removing a device over the device links", () => {
     expect(tablet.links.live(phone.slot.key)).toBe(false);
     expect(desktop.links.views().some((v) => v.key === tablet.slot.key)).toBe(false);
     expect(phone.links.views().some((v) => v.key === tablet.slot.key)).toBe(false);
+  });
+
+  it("the active device's hint on a link that opens makes a standby read the turn while the record is there to read", async () => {
+    const d = newDeviceSetSecret(), keys = turnKeys(d);
+    const turn = new FakeTurnNetwork();
+    const desktop = await makeDevice("Desktop"), phone = await makeDevice("Phone"), tablet = await makeDevice("Tablet");
+    const all = [desktop, phone, tablet];
+    const slots = all.map((device) => ({ key: device.key.publicKey, name: device.name }));
+    // The tablet was active at turn 7; the desktop took over at turn 8 while the phone did not look.
+    const tabletAt7 = await signTurnPacket(keys, { turn: 7, rev: 0, author: 2, active: 2, slots: [...slots, null], instance: new Uint8Array(8).fill(1) }, (bytes) => tablet.key.sign(bytes));
+    const desktopAt8 = await signTurnPacket(keys, { turn: 8, rev: 0, author: 0, active: 0, slots: [...slots, null], instance: new Uint8Array(8).fill(2) }, (bytes) => desktop.key.sign(bytes));
+    turn.seed(desktopAt8);
+    await write(desktop, "active", d, all);
+    await putDeviceRecord({ ...(await record(desktop)), turn: 8, turnPacket: toBase64Url(desktopAt8), saved: 2 });
+    await write(phone, "standby", d, all);
+    await putDeviceRecord({ ...(await record(phone)), activeSlot: 2, turnPacket: toBase64Url(tabletAt7), saved: 2 });
+    phone.links = linksFor(phone.profile, "Phone", phone.frames, { turn });
+    await settled(Promise.all([desktop.links.start(), phone.links.start()]));
+    expect(await until(() => liveBetween(desktop, phone), 90_000)).toBe(true);
+    // The hint came with the link: the phone read the turn and keeps the desktop's record, so a later frame from it is believed.
+    expect(await until(async () => (await record(phone)).activeSlot === 0, 30_000)).toBe(true);
+    expect((await record(phone)).turnPacket).toBe(toBase64Url(desktopAt8));
+    expect(phone.frames).toEqual([]);
   });
 
   it("the device list is answered once; This is wrong keeps the device out and asks for enrollment", async () => {

@@ -20,6 +20,11 @@ import { signTurnPacket, TOMBSTONE_TURN, TURN_MAX, TURN_NO_ACTIVE, TURN_REV_LIMI
  * `enroll-grant` writes it: by slot, a slot nobody holds is `null` in its place, trailing unheld slots left out (after
  * a removal the slots held need not be the first). The vectors in `packages/core/test/vectors/set-update.json` pin it.
  *
+ * `rec`, this build's own field beside the WISP's: the remover's last ordinary record at the old address, as a packet.
+ * A tombstone outranks every record there, so a device that stays and never read that record (it was handed over or
+ * taken while the device did not look) cannot read it any more; the record is signed by its own author and carries its
+ * release, so the receiver checks it alone (`devices/setUpdate.ts`). It is outside the signed tuple: it proves itself.
+ *
  * Nothing here decides who is believed: that is the receiver's rule (`packages/browser/src/devices/setUpdate.ts`).
  */
 
@@ -44,6 +49,8 @@ export interface SetUpdate {
   tomb: Uint8Array;
   /** The remover's device signing key. */
   by: Uint8Array;
+  /** The remover's last ordinary record at the old address, as a packet (`rec`). Optional. */
+  rec?: Uint8Array;
 }
 
 /** The set as the frame and the signature carry it: by slot, `null` where nobody holds one, trailing ones left out. */
@@ -55,7 +62,7 @@ export function encodeSetSlots(set: readonly EnrollSlot[]): ([string, string] | 
 }
 
 /** The bytes the remover signs: the old turn address, then the frame's fields, the tombstone by its digest. */
-export function setUpdateMessage(oldAddress: Uint8Array, update: Omit<SetUpdate, "by">): Uint8Array {
+export function setUpdateMessage(oldAddress: Uint8Array, update: Omit<SetUpdate, "by" | "rec">): Uint8Array {
   if (oldAddress.length !== 32) throw new Error("A turn address is 32 bytes");
   if (update.d.length !== 32) throw new Error("The device-set secret is 32 bytes");
   return utf8Encode(JSON.stringify(["ghostly-set-update", toBase64Url(oldAddress), toBase64Url(update.d), encodeSetSlots(update.set), update.turn, update.rev, toBase64Url(sha256(update.tomb))]));
@@ -63,12 +70,13 @@ export function setUpdateMessage(oldAddress: Uint8Array, update: Omit<SetUpdate,
 
 /** The signed frame. `oldAddress`: the turn address the tombstone closes. */
 export async function setUpdateFrame(oldAddress: Uint8Array, update: Omit<SetUpdate, "by">, signer: Signer): Promise<DeviceFrame> {
+  if (update.rec && !TOMB.test(toBase64Url(update.rec))) throw new Error("A record is a turn packet");
   if (!Number.isInteger(update.turn) || update.turn < 0 || update.turn > TURN_MAX) throw new Error("A turn is at most 2^32 - 2");
   if (!Number.isInteger(update.rev) || update.rev < 0 || update.rev >= TURN_REV_LIMIT) throw new Error("A rev is under 2^18");
   const signature = await signer.sign(setUpdateMessage(oldAddress, update));
   return {
     t: SET_UPDATE, d: toBase64Url(update.d), set: encodeSetSlots(update.set), turn: update.turn, rev: update.rev, tomb: toBase64Url(update.tomb),
-    by: toBase64Url(signer.publicKey), s: toBase64Url(signature),
+    by: toBase64Url(signer.publicKey), s: toBase64Url(signature), ...(update.rec ? { rec: toBase64Url(update.rec) } : {}),
   };
 }
 
@@ -80,6 +88,7 @@ export function readSetUpdate(frame: DeviceFrame): (SetUpdate & { signature: Uin
   if (frame.t !== SET_UPDATE || typeof frame.d !== "string" || !KEY.test(frame.d) || typeof frame.by !== "string" || !KEY.test(frame.by)) return null;
   if (typeof frame.s !== "string" || !SIGNATURE.test(frame.s) || typeof frame.tomb !== "string" || !TOMB.test(frame.tomb)) return null;
   if (!Array.isArray(frame.set) || frame.set.length > TURN_SLOTS) return null;
+  if (frame.rec !== undefined && (typeof frame.rec !== "string" || !TOMB.test(frame.rec))) return null;
   if (!Number.isInteger(frame.turn) || (frame.turn as number) < 0 || (frame.turn as number) > TURN_MAX) return null;
   if (!Number.isInteger(frame.rev) || (frame.rev as number) < 0 || (frame.rev as number) >= TURN_REV_LIMIT) return null;
   const set: EnrollSlot[] = [];
@@ -92,7 +101,10 @@ export function readSetUpdate(frame: DeviceFrame): (SetUpdate & { signature: Uin
   }
   const keys = set.flatMap((slot) => (slot ? [toBase64Url(slot.key)] : []));
   if (!keys.length || new Set(keys).size !== keys.length) return null;
-  return { d: fromBase64Url(frame.d), set, turn: frame.turn as number, rev: frame.rev as number, tomb: fromBase64Url(frame.tomb), by: fromBase64Url(frame.by), signature: fromBase64Url(frame.s) };
+  return {
+    d: fromBase64Url(frame.d), set, turn: frame.turn as number, rev: frame.rev as number, tomb: fromBase64Url(frame.tomb), by: fromBase64Url(frame.by), signature: fromBase64Url(frame.s),
+    ...(typeof frame.rec === "string" ? { rec: fromBase64Url(frame.rec) } : {}),
+  };
 }
 
 /** Whether `by` signed this update for the turn address `oldAddress`. */

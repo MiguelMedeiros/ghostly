@@ -34,7 +34,7 @@ export const ENGINE_METHODS: readonly string[] = [
   "deviceEnrollInvite", "deviceEnrollConfirm", "deviceEnrollCancel", "deviceEnrollView", "deviceEnrollJoin", "deviceEnrollFinish",
   "deviceEnrollRemove", "deviceSet", "devicePing", "deviceHandoffVerifier", "deviceHandoffPush", "deviceHandoffPull", "deviceHandoffAccept",
   "deviceHandoffCancel", "deviceHandoffView", "deviceHandoffAllow", "deviceTakeoverInfo", "deviceTakeover", "deviceTurnPeek",
-  "deviceRemove", "deviceNewSecret", "deviceSecretOfferDismiss", "deviceSetNoticeSeen",
+  "deviceRemove", "deviceNewSecret", "deviceSecretOfferDismiss", "deviceSetNoticeSeen", "deviceTurnCheck",
 ];
 
 /** Reads the hosts use outside `EngineApi`: the whole state, and one chat's stored messages. */
