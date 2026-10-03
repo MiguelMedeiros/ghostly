@@ -3,7 +3,7 @@ import type { DeviceGateView } from "@ghostly/browser/devices/gate";
 import { getBrowserHost } from "@ghostly/browser/host";
 import { engine } from "@ghostly/browser/platform/engine";
 import { useI18n } from "../contexts/I18nContext";
-import { reloadIntoGate, useDeviceSet } from "../lib/devices";
+import { listNames, reenrollHere, reloadIntoGate, useDeviceSet } from "../lib/devices";
 import { HandoffOffer, HandoffProgress, UseHereDialog } from "./devices/Handoff";
 import { TakeoverDialog } from "./devices/TakeoverDialog";
 import { useHandoffView } from "../lib/handoff";
@@ -27,7 +27,10 @@ export function DeviceStandby({ gate }: { gate: DeviceGateView }) {
   // A copy restored from a backup where the profile is active elsewhere (WISP 06 § A backup restored where a device set
   // exists): it starts nothing until the person takes over or removes it.
   const restored = gate.state === "standby" && takeover?.copy === "restored";
+  // Out of its set for good (WISP 06 § Removing a device): nothing it can accept brings it back, or it was removed.
+  const reenroll = !!gate.reenroll && (gate.state === "moving" || gate.state === "removed");
   const title = unfinished ? t("devices.standby.unfinished.title")
+    : reenroll ? t("devices.standby.reenroll.title")
     : restored ? (gate.activeDevice ? t("devices.restore.activeOn", { device: gate.activeDevice }) : t("devices.restore.activeOnUnnamed"))
     : gate.state === "standby"
       ? (gate.activeDevice ? t("devices.standby.title.standby", { device: gate.activeDevice }) : t("devices.standby.title.standbyUnnamed"))
@@ -35,6 +38,9 @@ export function DeviceStandby({ gate }: { gate: DeviceGateView }) {
   const hint = unfinished
     ? (gate.activeDevice ? t("devices.standby.unfinished.hint", { device: gate.activeDevice }) : t("devices.standby.unfinished.hintUnnamed"))
     : restored ? t("devices.takeover.restoredHint")
+    : reenroll ? t("devices.standby.reenroll.hint")
+    : gate.state === "moving" && gate.activeDevice ? t("devices.standby.hint.movingOn", { device: gate.activeDevice })
+    : gate.state === "removed" && gate.activeDevice ? t("devices.standby.hint.removedFrom", { device: gate.activeDevice })
     : gate.state === "superseded" && gate.activeDevice ? t("devices.standby.hint.supersededBy", { device: gate.activeDevice })
     : t(`devices.standby.hint.${gate.state}`);
   // A handoff froze this device or installed what it took: the pages start again into the gate.
@@ -62,9 +68,13 @@ export function DeviceStandby({ gate }: { gate: DeviceGateView }) {
           <button type="button" data-testid="device-standby-retry" onClick={() => void tryAgain()} className={BUTTON}>{t("app.profileUnavailable.tryAgain")}</button>
         )}
         {unfinished && <Unfinished />}
+        {gate.state === "standby" && gate.notice && <SetNotice names={gate.notice} />}
+        {(reenroll || gate.state === "removed") && (
+          <button type="button" data-testid="device-standby-reenroll" onClick={() => reenrollHere()} className={BUTTON}>{t("devices.join.addThis")}</button>
+        )}
         {!unfinished && !restored && (gate.state === "standby" || gate.state === "releasing" || gate.state === "taking") && <StandbyHandoff gate={gate} />}
         {!unfinished && takeover?.offered && <Takeover gate={gate} info={takeover} />}
-        {gate.state !== "unreadable" && !unfinished && <Links />}
+        {gate.state !== "unreadable" && gate.state !== "removed" && !unfinished && <Links />}
         {others.length > 0 && (
           <div className="flex flex-wrap justify-center gap-2 pt-2">
             {others.map((profile) => (
@@ -131,6 +141,26 @@ function Takeover({ gate, info }: { gate: DeviceGateView; info: TakeoverInfo }) 
         ? <button type="button" data-testid="takeover-open" onClick={() => setOpen(true)} className={gate.state === "superseded" ? QUIET : BUTTON}>{t(restored ? "devices.restore.takeOver" : "devices.takeover.notMe")}</button>
         : <button type="button" data-testid="takeover-open" onClick={() => setOpen(true)} className="text-sm text-text-muted underline hover:text-accent cursor-pointer">{t("devices.takeover.lost")}</button>}
       {open && <TakeoverDialog device={info.device ?? gate.activeDevice} password={!!info.password} restored={restored} onClose={() => setOpen(false)} />}
+    </div>
+  );
+}
+
+/**
+ * After this device took a new device secret (WISP 06 § Removing a device), once: the new device list. "This is wrong"
+ * keeps the device out of that set, and it is added again by enrollment.
+ */
+function SetNotice({ names }: { names: string[] }) {
+  const { t, language } = useI18n();
+  const [busy, setBusy] = useState(false);
+  const answer = (wrong: boolean) => { setBusy(true); void engine.call("deviceSetNoticeSeen", { wrong }).finally(() => setBusy(false)); };
+  return (
+    <div className="space-y-3 rounded-xl border border-border p-4 text-sm" data-testid="device-set-notice">
+      <p data-testid="device-set-notice-title" className="text-text-primary font-semibold break-words">{t("devices.standby.notice.title", { devices: listNames(names, language) })}</p>
+      <p className="text-text-secondary">{t("devices.standby.notice.hint")}</p>
+      <div className="flex flex-wrap justify-center gap-2">
+        <button type="button" data-testid="device-set-notice-ok" disabled={busy} onClick={() => answer(false)} className={BUTTON}>{t("devices.standby.notice.ok")}</button>
+        <button type="button" data-testid="device-set-notice-wrong" disabled={busy} onClick={() => answer(true)} className={QUIET}>{t("devices.standby.notice.wrong")}</button>
+      </div>
     </div>
   );
 }

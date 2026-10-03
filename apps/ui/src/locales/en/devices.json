@@ -109,6 +109,20 @@
     "restore": "Restore a backup",
     "unfinished": "Not finished: your other device has not listed this one yet."
   },
+  "lost": {
+    "cashu": "Cashu: swap all ecash",
+    "cashuHint": "Each proof must be swapped at its mint, so the copy on the lost device is spent. There is no button for it yet: send it to yourself or spend it.",
+    "chats": "Pair each chat again",
+    "chatsHint": "Use a new invite for each chat. Your contacts see a new chat. In a group, the admin removes your old key and adds the new one.",
+    "done": "Done",
+    "hint": "Removing the device keeps it from taking this profile. These steps protect your money and chats.",
+    "lightning": "{{wallet}}: revoke the connection at your node",
+    "phrase": "{{wallet}}: make a new wallet and send the funds to it",
+    "remove": "Remove {{device}}",
+    "storage": "Change your storage keys",
+    "storageHint": "The lost device holds them. Change them at your storage provider, then type the new ones in Backups.",
+    "title": "Lost or stolen?"
+  },
   "manage": {
     "confirm": "Turn on",
     "off": "Managing this group is off on this device.",
@@ -130,6 +144,21 @@
     "typeTitle": "Type your lock password",
     "wrong": "Wrong password."
   },
+  "remove": {
+    "button": "Remove",
+    "copy": "If it held a copy of your profile, that copy stays on it, unencrypted.",
+    "done": "{{device}} was removed. Your other devices get the change the next time they open Ghostly.",
+    "fail": {
+      "busy": "Something else is changing your devices. Try again in a moment.",
+      "failed": "Something went wrong. Nothing was changed.",
+      "offline": "Go online to change your devices."
+    },
+    "go": "Remove",
+    "lost": "Lost or stolen",
+    "removing": "Removing…",
+    "text": "It can no longer take this profile.",
+    "title": "Remove {{device}}?"
+  },
   "restore": {
     "activeHint": "Starting this backup here would make a second copy.",
     "activeOn": "This profile is active on {{device}}",
@@ -143,11 +172,22 @@
     "tryAgain": "Try again",
     "unreadable": "Can't check which device is active. Check your connection."
   },
+  "secret": {
+    "button": "New device secret",
+    "done": "New device secret made.",
+    "hint": "A device that is not listed here can no longer use this profile.",
+    "info": "Use it when a device may still hold this profile's device secret, such as one you took over from. Your other devices get the new secret the next time they open Ghostly.",
+    "notNow": "Not now",
+    "offer": "You took over from {{device}}. It still holds this profile's device secret.",
+    "offerUnnamed": "You took over from another device. It still holds this profile's device secret.",
+    "removeOffer": "Remove {{device}}"
+  },
   "section": {
     "active": "Active",
     "answered": "Answered in {{ms}} ms",
     "check": "Check",
     "connecting": "Not connected",
+    "foreign": "Something else closed your old device set.",
     "hint": "Use this profile on another device. One device is active at a time.",
     "info": "Only the active device sends, receives and pays, so your messages and money are never in two places. Move the profile whenever you like.",
     "live": "Connected",
@@ -157,13 +197,16 @@
     "thisStandby": "This device · Standby",
     "title": "Devices",
     "unfinished": "Not finished",
-    "unfinishedInfo": "It was given what links your devices and never finished. Removing a device, coming later, takes that back."
+    "unfinishedInfo": "It was given what links your devices and never finished. Ghostly makes a new device secret by itself to take that back.",
+    "waiting": "Waiting for {{devices}} to open Ghostly"
   },
   "standby": {
     "hint": {
       "moving": "Open Ghostly on the device you use now to finish.",
+      "movingOn": "Open Ghostly on {{device}} to finish.",
       "releasing": "Nothing changes until the last step.",
       "removed": "Add it again from the device you use now.",
+      "removedFrom": "Add it again from {{device}}.",
       "standby": "This device is on standby for this profile.",
       "superseded": "Another device took over without this one. This device has stopped.",
       "supersededBy": "{{device}} took over without this one. This device has stopped.",
@@ -172,6 +215,16 @@
     },
     "info": "Only one device sends, receives and pays at a time, so your messages and money are never in two places.",
     "link": "{{device}}: {{status}}",
+    "notice": {
+      "hint": "If this list looks wrong, do not use this device.",
+      "ok": "OK",
+      "title": "Your devices are now: {{devices}}",
+      "wrong": "This is wrong"
+    },
+    "reenroll": {
+      "hint": "Add this device again from the device you use now.",
+      "title": "Your devices changed while this one was off"
+    },
     "title": {
       "moving": "Almost there",
       "releasing": "Moving to another device",
@@ -208,7 +261,10 @@
     "hintRestored": "This will make your other device stop. This device has your profile as it was in the backup.",
     "info": "Messages and money that reached {{device}} after that are not here. If {{device}} comes back, it stops, without a word to your contacts.",
     "lost": "My other device is lost or broken",
+    "lostNo": "Just broken or wiped",
+    "lostQuestion": "Lost or stolen?",
     "lostRace": "Another device took over at the same moment. This device is on standby.",
+    "lostYes": "Lost or stolen",
     "notMe": "It wasn't me",
     "restoredHint": "This device holds a copy from a backup. It starts nothing until you take over.",
     "title": "Take over without {{device}}?",

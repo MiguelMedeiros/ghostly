@@ -119,9 +119,12 @@ describe("the forced takeover on the standby screen", () => {
     expect(screen.getByTestId("takeover-go")).toBeDisabled();
     await user.type(screen.getByTestId("takeover-password"), "not it");
     await user.type(screen.getByTestId("takeover-name"), "Phone");
+    // "Lost or stolen?" is answered before anything goes.
+    expect(screen.getByTestId("takeover-go")).toBeDisabled();
+    await user.click(screen.getByTestId("takeover-lost-no"));
     await user.click(screen.getByTestId("takeover-go"));
     expect(await screen.findByTestId("takeover-error")).toHaveTextContent("Wrong password.");
-    expect(engine.callsTo("deviceTakeover")).toEqual([{ password: "not it", name: "Phone" }]);
+    expect(engine.callsTo("deviceTakeover")).toEqual([{ password: "not it", name: "Phone", lost: false }]);
   });
 
   it("a standby with a frozen copy offers My other device is lost or broken; one without a copy offers nothing", async () => {

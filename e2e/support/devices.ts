@@ -36,7 +36,8 @@ export async function enrollDevice(active: Peer, joiner: Peer, options: { name?:
   await expect(joiner.page.getByTestId("device-join-done")).toHaveAttribute("data-step", "done");
   await joiner.page.getByTestId("device-join-continue").click();
   await expect(joiner.page.getByTestId("device-standby")).toHaveAttribute("data-state", "standby");
-  await expect(joiner.page.getByTestId("device-standby-link")).toHaveAttribute("data-status", "live", { timeout: 90_000 });
+  // The first link is to the active device (slot 0); with more devices in the set the others follow it.
+  await expect(joiner.page.getByTestId("device-standby-link").first()).toHaveAttribute("data-status", "live", { timeout: 90_000 });
   await add.getByRole("button", { name: "Done" }).click();
 }
 

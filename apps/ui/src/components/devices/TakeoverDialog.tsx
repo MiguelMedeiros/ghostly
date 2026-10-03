@@ -17,12 +17,14 @@ export function TakeoverDialog({ device, password: asks, restored, onClose }: { 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [info, setInfo] = useState(false);
+  // "Lost or stolen?" (WISP 06 § Forced takeover): on yes, the money checklist comes first once the profile opens here.
+  const [lost, setLost] = useState<boolean | null>(restored ? false : null);
   const other = device ?? t("devices.join.otherDevice");
-  const ready = (!asks || !!password) && (!device || name.trim().length > 0);
+  const ready = (!asks || !!password) && (!device || name.trim().length > 0) && lost !== null;
   const submit = async () => {
     setBusy(true); setError("");
     try {
-      const outcome = await engine.call("deviceTakeover", { password, name });
+      const outcome = await engine.call("deviceTakeover", { password, name, lost: lost === true });
       // Active now: the app starts again into the gate, where the engine raises its counters and starts.
       if (outcome.kind === "start") { await reloadIntoGate(); return; }
       setError(t("devices.takeover.lostRace"));
@@ -39,6 +41,17 @@ export function TakeoverDialog({ device, password: asks, restored, onClose }: { 
           className="grid h-5 w-5 shrink-0 cursor-pointer place-items-center rounded-full text-text-muted hover:text-accent aria-expanded:text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">ⓘ</button>
       </p>
       {info && <p data-testid="takeover-info-text" className="rounded-lg bg-surface-hover px-3 py-2 text-xs leading-5 text-text-secondary">{t("devices.takeover.info", { device: other })}</p>}
+      {!restored && (
+        <fieldset className="space-y-1.5" data-testid="takeover-lost">
+          <legend className="text-text-secondary">{t("devices.takeover.lostQuestion")}</legend>
+          {([[true, "devices.takeover.lostYes", "takeover-lost-yes"], [false, "devices.takeover.lostNo", "takeover-lost-no"]] as const).map(([value, key, testId]) => (
+            <label key={testId} className="flex items-center gap-2 cursor-pointer">
+              <input type="radio" name="takeover-lost" data-testid={testId} checked={lost === value} onChange={() => setLost(value)} className="accent-accent" />
+              <span>{t(key)}</span>
+            </label>
+          ))}
+        </fieldset>
+      )}
       <form className="space-y-3" onSubmit={(event) => { event.preventDefault(); if (ready && !busy) void submit(); }}>
         {asks && <input type="password" autoFocus data-testid="takeover-password" aria-label={t("devices.password.current")} placeholder={t("devices.password.current")}
           value={password} onChange={(event) => setPassword(event.target.value)} className={field} />}

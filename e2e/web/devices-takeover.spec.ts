@@ -54,6 +54,7 @@ test("the standby takes over with the password, the contact keeps chatting with 
   await expect(dialog).toContainText("Take over without Phone?");
   await dialog.getByTestId("takeover-password").fill("not the password");
   await dialog.getByTestId("takeover-name").fill("Phone");
+  await dialog.getByTestId("takeover-lost-no").check();
   await dialog.getByTestId("takeover-go").click();
   await expect(dialog.getByTestId("takeover-error")).toHaveText("Wrong password.");
   // The right one: about 30 seconds of checking, then the desktop starts as the active device.
