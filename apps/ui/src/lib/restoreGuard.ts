@@ -2,9 +2,9 @@ import { toBase64Url } from "@ghostly/core";
 import { engine } from "@ghostly/browser/platform/engine";
 import { activeName, bundleSecret, restoreCase, restoredStandby, type RestoreCase, type TurnPeek } from "@ghostly/browser/devices/restoreGuard";
 import { createDeviceSigningKey } from "@ghostly/browser/devices/signingKey";
-import { enrollDevice } from "@ghostly/browser/devices/store";
+import { enrollDevice, forgetDevice } from "@ghostly/browser/devices/store";
 import { bundleDidSeed, restoreOpenedBackup, type BackupRun, type OpenedProfileBackup } from "./profileBackup";
-import { databaseOfSpace, namespaceOf, type ProfileEntry } from "./profiles";
+import type { ProfileEntry } from "./profiles";
 import { defaultDeviceName } from "./devices";
 
 /*
@@ -40,9 +40,16 @@ export async function guardRestore(opened: OpenedProfileBackup): Promise<Restore
  * screen it opens on offers the takeover, which takes the turn, waits the settle time and then starts it.
  */
 export async function restoreForTakeover(opened: OpenedProfileBackup, guard: RestoreGuard, run: BackupRun = {}): Promise<ProfileEntry> {
-  const entry = await restoreOpenedBackup(opened, run);
-  const database = databaseOfSpace(namespaceOf(entry.id));
-  const key = await createDeviceSigningKey(database);
-  await enrollDevice(database, "standby", { ...restoredStandby(opened.devices, guard.didSeed, guard.peek, key.publicKey, defaultDeviceName().slice(0, 16)), signingKey: key.kind });
-  return entry;
+  // The standby record is written before the profile is listed: a crash between the two never leaves a listed copy
+  // that starts as a profile on one device. The bundle's verifier goes into it, so a backup holder also needs the lock
+  // password to take over.
+  return restoreOpenedBackup(opened, run, async (database) => {
+    try {
+      const key = await createDeviceSigningKey(database);
+      await enrollDevice(database, "standby", {
+        ...restoredStandby(opened.devices, guard.didSeed, guard.peek, key.publicKey, defaultDeviceName().slice(0, 16)), signingKey: key.kind,
+        ...(opened.verifier ? { verifier: opened.verifier } : {}),
+      });
+    } catch (error) { await forgetDevice(database).catch(() => {}); throw error; }
+  });
 }

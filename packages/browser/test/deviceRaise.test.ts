@@ -29,7 +29,8 @@ describe("the floor", () => {
     expect(nextCounterFloor(0, 40, FLOOR_CLOCK_START_MS)).toBe(40 * S);
     // Never above 2^32 less room for 2^24 frames: the community beacon packs the counter in 32 bits.
     expect(nextCounterFloor(MAX_COUNTER_FLOOR, 1, t)).toBe(MAX_COUNTER_FLOOR);
-    expect(nextCounterFloor(0, 1, at("2160-01-01T00:00:00Z"))).toBeLessThan(2 ** 32);
+    // A clock past 2100 is not believed: the stride alone counts.
+    expect(nextCounterFloor(5, 1, at("2160-01-01T00:00:00Z"))).toBe(5 + S);
   });
 
   it("two copies of one backup started an hour apart get floors an hour of seconds apart", () => {
@@ -83,13 +84,27 @@ describe("payments of a copy from older state", () => {
     expect(raisedIntent({ review: review("usdt", "submitted"), prepared: { signed: "x" } }).review).toMatchObject({ state: "unknown", parked: true });
     expect(raisedIntent({ review: review("bitcoin", "unknown"), prepared: {} }).review).toMatchObject({ state: "unknown", parked: true });
     expect(raisedIntent({ review: review("arkade", "submitted"), prepared: {} }).review.parked).toBe(true);
-    // A review never approved signed nothing: it is only looked up, as a restore does.
-    expect(raisedIntent({ review: review("usdt", "pending"), prepared: {} }).review).toMatchObject({ state: "unknown" });
-    expect(raisedIntent({ review: review("usdt", "pending"), prepared: {} }).review.parked).toBeUndefined();
+    // A review not approved yet is parked too: an on-chain review holds a signed transaction from the moment it is made.
+    expect(raisedIntent({ review: review("bitcoin", "pending"), prepared: { signed: "00" } }).review).toMatchObject({ state: "unknown", parked: true });
+    expect(raisedIntent({ review: review("usdt", "pending"), prepared: {} }).review).toMatchObject({ state: "unknown", parked: true });
+    expect(raisedIntent({ review: review("bark", "submitted"), prepared: {} }).review.parked).toBe(true);
     expect(raisedIntent({ review: review("cashu", "submitted"), prepared: {} }).review).toMatchObject({ state: "unknown" });
     expect(raisedIntent({ review: review("cashu", "submitted"), prepared: {} }).review.parked).toBeUndefined();
     const settled = { review: review("usdt", "settled"), prepared: {} };
     expect(raisedIntent(settled)).toBe(settled);
+  });
+
+  it("a pending on-chain review, signed when it was made and never approved, is never broadcast after a takeover", async () => {
+    const saved: SavedIntent = raisedIntent({ review: review("bitcoin", "pending"), prepared: { txid: "t", signed: "0200" } });
+    const reconcile = vi.fn(async () => ({ settled: true }));
+    const execute = vi.fn(async () => ({ settled: true }));
+    const repository = { get: async () => saved, put: async () => {}, list: async () => [saved], claim: async () => saved, cancel: async () => saved };
+    const coordinator = new PaymentCoordinator(repository, [{ method: "bitcoin", prepare: vi.fn(), execute, reconcile } as never]);
+    // What the engine's poll does every 10 seconds for an `unknown` attempt, and what Approve would do.
+    expect(await coordinator.reconcile(saved.review.id)).toMatchObject({ state: "unknown", parked: true });
+    await expect(coordinator.approve(saved.review.id)).rejects.toThrow();
+    expect(reconcile).not.toHaveBeenCalled();
+    expect(execute).not.toHaveBeenCalled();
   });
 
   it("a parked attempt is never reconciled: the adapter that would broadcast its saved bytes is not called", async () => {

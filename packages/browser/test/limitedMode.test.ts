@@ -299,3 +299,23 @@ describe("what the pages may call in limited mode", () => {
     expect((await call("peekProfile", {})).error ?? "").not.toBe(LIMITED_MODE_ERROR);
   });
 });
+
+describe("going online as the active device of a device set", () => {
+  it("reads the turn before anything is dialled; with no good read the engine goes to limited mode instead", async () => {
+    const { replaceDeviceGate } = await import("../src/devices/gate");
+    const { databaseName } = await import("../src/shared/idb");
+    await db.putSettings({ online: false } as never);
+    await db.putLink(chat());
+    const e = engine(false);
+    await e.node.start();
+    replaceDeviceGate({ profile: databaseName(), state: "active", full: true, view: null });
+    try {
+      await e.node.updateSettings({ settings: { online: true } });
+      await flush();
+      expect(e.startLink).not.toHaveBeenCalled();
+      expect(e.holdStart).not.toHaveBeenCalled();
+      expect(e.didPublish).not.toHaveBeenCalled();
+      expect(e.node.limited).toBe(true);
+    } finally { resetDeviceGates(); }
+  });
+});

@@ -13,4 +13,6 @@ section: For developers
   change and takes no door duty until the person turns on "Manage groups from this device" in that group; a payment it
   finds signed but unfinished is never sent again; and the on-chain wallet scans again. A backup of a profile on
   several devices carries its device set in a newer backup format, and restoring one where the profile is active on
-  another device does not start it: the app offers to add the device instead, to take over, or to cancel.
+  another device does not start it: the app offers to add the device instead, to take over, or to cancel. After any
+  restore, as after a takeover, the copy signs no group change and takes no community door duty until "Manage groups
+  from this device" is turned on in that group.

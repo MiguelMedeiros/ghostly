@@ -36,6 +36,8 @@ import type { StoredLink } from "../shared/types";
 export const RAISE_STRIDE = 2 ** 20;
 /** The clock part of the floor counts seconds from here. */
 export const FLOOR_CLOCK_START_MS = Date.UTC(2026, 0, 1);
+/** A clock past this is not plausible, and adds nothing to the floor. */
+export const FLOOR_CLOCK_LIMIT_MS = Date.UTC(2100, 0, 1);
 /** No floor above this: 2^24 numbers stay free under the community beacon's 32 bits. */
 export const MAX_COUNTER_FLOOR = 2 ** 32 - 2 ** 24;
 
@@ -89,7 +91,8 @@ export function isGroupAdminOff(value: unknown): value is GroupAdminOff {
 
 /** The floor of a copy that starts at `now` (see above). */
 export function nextCounterFloor(previous: number, takeovers: number, now: number): number {
-  const clock = Math.max(0, Math.floor((now - FLOOR_CLOCK_START_MS) / 1000));
+  // A clock past 2100 is not believed (it would spend most of the 32 bits at once): the stride alone counts then.
+  const clock = now > FLOOR_CLOCK_LIMIT_MS ? 0 : Math.max(0, Math.floor((now - FLOOR_CLOCK_START_MS) / 1000));
   const floor = Math.max(previous + RAISE_STRIDE, takeovers * RAISE_STRIDE, clock);
   return Math.min(MAX_COUNTER_FLOOR, floor);
 }
@@ -114,14 +117,20 @@ export function raisedLink(link: StoredLink, floor: number): StoredLink {
   return next;
 }
 
-/** Payment methods whose unfinished attempt may hold signed bytes that a reconcile would broadcast again. */
-export const PARKED_METHODS: ReadonlySet<PaymentReview["method"]> = new Set(["usdt", "bitcoin", "arkade"]);
+/**
+ * Payment methods whose unfinished attempt may hold signed bytes that a reconcile would broadcast again (USDT, Ark), or
+ * that sign the whole transaction when the review is made, before the person approves it (both on-chain sources), or
+ * whose outcome a fresh database cannot find (Bark).
+ */
+export const PARKED_METHODS: ReadonlySet<PaymentReview["method"]> = new Set(["usdt", "bitcoin", "arkade", "bark"]);
 
 /** A saved payment attempt as the copy keeps it: not finished means `unknown`, and signed bytes are parked. */
 export function raisedIntent<T extends { review: PaymentReview }>(saved: T): T {
   const { review } = saved;
   if (!["pending", "submitted", "unknown"].includes(review.state)) return saved;
-  const parked = PARKED_METHODS.has(review.method) && review.state !== "pending";
+  // A `pending` review is parked too: an on-chain review holds a signed transaction from the moment it is made, and a
+  // reconcile of an `unknown` one that finds it missing on chain would broadcast it, approved or not.
+  const parked = PARKED_METHODS.has(review.method);
   return { ...saved, review: { ...review, state: "unknown", ...(parked ? { parked: true as const, error: engineText("parkedSigned") } : {}) } };
 }
 

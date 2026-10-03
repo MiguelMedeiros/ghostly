@@ -1,7 +1,7 @@
 import { decode, encode } from "@ghostly/browser/backup/codec";
 import { fromBase64Url } from "@ghostly/core";
 import { MAX_BACKUP_BYTES, open } from "@ghostly/browser/backup/envelope";
-import { BackupReader, BackupWriter, DEVICE_SET_BACKUP_VERSION, backupProtection, blobSource, bytesSource, isCancelled, memorySink, type BackupSink, type BackupSource } from "@ghostly/browser/backup/stream";
+import { BackupReader, BackupWriter, DEVICE_SET_BACKUP_VERSION, backupProtection, readBackupHeader, blobSource, bytesSource, isCancelled, memorySink, type BackupSink, type BackupSource } from "@ghostly/browser/backup/stream";
 import { readDeviceRecord } from "@ghostly/browser/devices/store";
 import { isBundleDevices, type BundleDevices } from "@ghostly/browser/devices/restoreGuard";
 import { PENDING_RAISE_KEY, pendingRaise } from "@ghostly/browser/devices/raise";
@@ -336,6 +336,8 @@ export interface OpenedProfileBackup {
   readonly stream?: { source: BackupSource; passphrase?: string; links: unknown[]; did: unknown };
   /** The device set the bundle carries (WISP 06), when the profile had one. */
   readonly devices?: BundleDevices;
+  /** The profile's password proof verifier, when it has one: a restored copy that takes over checks the lock password with it. */
+  readonly verifier?: { v: 1; setup: string; record: string };
 }
 
 const NOT_A_PROFILE = "This backup does not hold a profile";
@@ -362,15 +364,29 @@ export async function openProfileBackup(input: BackupInput, passphrase?: string,
   const links: unknown[] = [];
   let did: unknown;
   let devices: BundleDevices | undefined;
+  let verifier: OpenedProfileBackup["verifier"];
   for (let record = await reader.next(); record?.json !== undefined; record = await reader.next()) {
     const value = decode(record.json) as BackupRecord;
     if (value?.t === "db") continue;
-    if (value?.t === "devices") { const { t: _t, ...rest } = value; if (isBundleDevices(rest)) devices = rest; continue; }
+    if (value?.t === "devices") {
+      // A device set this build cannot read is refused, never restored as a profile of one device (WISP 06).
+      const { t: _t, ...rest } = value;
+      if (!isBundleDevices(rest)) throw new Error(DAMAGED);
+      devices = rest;
+      continue;
+    }
     if (value?.t !== "rows" || (value.store !== "settings" && value.store !== "links")) break;
     if (value.store === "links") links.push(...value.values);
-    else { const at = value.keys.findIndex((key) => key === "profileDid"); if (at >= 0) did = value.values[at]; }
+    else {
+      const at = value.keys.findIndex((key) => key === "profileDid"); if (at >= 0) did = value.values[at];
+      const proof = value.keys.findIndex((key) => key === "handoffVerifier");
+      const found = proof >= 0 ? value.values[proof] as { v?: unknown; setup?: unknown; record?: unknown } : null;
+      if (found && found.v === 1 && typeof found.setup === "string" && typeof found.record === "string") verifier = { v: 1, setup: found.setup, record: found.record };
+    }
   }
-  return { name: head.profile.name, protection: reader.protection, payload: { profile: head.profile, storage: head.storage }, stream: { source, passphrase, links, did }, ...(devices ? { devices } : {}) };
+  // The envelope of a bundle with a device set: without its record, it is not read as a profile of one device.
+  if ((await readBackupHeader(source))?.header.version === DEVICE_SET_BACKUP_VERSION && !devices) throw new Error(DAMAGED);
+  return { name: head.profile.name, protection: reader.protection, payload: { profile: head.profile, storage: head.storage }, stream: { source, passphrase, links, did }, ...(devices ? { devices } : {}), ...(verifier ? { verifier } : {}) };
 }
 
 /**
@@ -484,7 +500,7 @@ function register(id: string, ns: string, { profile, storage }: ProfileHead): Pr
 }
 
 /** `restoreProfileBackup` of a bundle already opened (after `sameIdentityProfiles` was asked, say). */
-export async function restoreOpenedBackup(opened: OpenedProfileBackup, run: BackupRun = {}): Promise<ProfileEntry> {
+export async function restoreOpenedBackup(opened: OpenedProfileBackup, run: BackupRun = {}, beforeRegister?: (database: string) => Promise<void>): Promise<ProfileEntry> {
   const id = newProfileId(), ns = namespaceOf(id);
   // What this restore has written so far: a restore that fails or is cancelled takes all of it away again, so a device
   // short of room is not left holding an unlisted copy of the profile (its keys included) that nothing would ever delete.
@@ -500,6 +516,9 @@ export async function restoreOpenedBackup(opened: OpenedProfileBackup, run: Back
     // The copy is older state: its counters are raised before its engine first starts (WISP 06 § Raised counters), or
     // its first messages in a group are dropped where the profile sent since the backup was made.
     await markRestoreRaise(`ghostly_${ns}`, opened.devices?.takeovers ?? 0);
+    // What must be true of the copy before it is listed (a takeover's standby record): a crash before this leaves an
+    // unlisted copy, never a listed one that starts as a profile on one device.
+    if (beforeRegister) await beforeRegister(`ghostly_${ns}`);
     return register(id, ns, opened.payload);
   } catch (error) {
     // The file it was in the middle of is let go first: file storage does not remove a folder with a file still open

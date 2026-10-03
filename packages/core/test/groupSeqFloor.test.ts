@@ -286,3 +286,37 @@ describe("a frame of my own key that another copy of the profile sent", () => {
     expect(ownSeen.map((m) => m.text)).toEqual(["a1", "a2", "b1"]);
   });
 });
+
+describe("a frame of my own key past every floor", () => {
+  it("is not adopted: the counter stays within 32 bits", async () => {
+    const { OWN_FRAME_LIMIT } = await import("../src/groupCommits");
+    const pending: Promise<unknown>[] = [];
+    const received: CommunityIncomingMessage[] = [];
+    const sessions: CommunitySession[] = [];
+    const settle = async () => { while (pending.length) await Promise.all(pending.splice(0)); };
+    const hooks = (self: () => CommunitySession, floor: () => number, take?: (m: CommunityIncomingMessage) => void) => ({
+      save: async (_s: CommunityState) => {},
+      broadcast: (frame: CommunityFrame) => { for (const t of sessions) if (t !== self()) pending.push(t.handle(self().myKey, clone(frame))); },
+      direct: (to: string, frame: CommunityFrame) => { for (const t of sessions) if (t.myKey === to && t !== self()) pending.push(t.handle(self().myKey, clone(frame))); },
+      addressed: (to: string, frame: CommunityFrame) => { for (const t of sessions) if (t.myKey === to && t !== self()) pending.push(t.handle(self().myKey, clone(frame))); },
+      message: (m: CommunityIncomingMessage) => { take?.(m); },
+      changed: () => {},
+      seqFloor: floor,
+    });
+    let admin: CommunitySession = null as unknown as CommunitySession;
+    admin = new CommunitySession(CommunitySession.create("Ghosts"), hooks(() => admin, () => 0, (m) => received.push(m)));
+    sessions.push(admin);
+    const seed = createIdentity().seedB64;
+    const frames = await admin.admit(identityFromSeedB64(seed).pubKeyZ32);
+    await settle();
+    const joined = CommunitySession.join({ g: admin.id, host: admin.entryKey }, clone(frames.slice(0, -1)), clone(frames[frames.length - 1]), seed);
+    if ("error" in joined) throw new Error(joined.error);
+    const make = (floor: number) => { let s: CommunitySession = null as unknown as CommunitySession; s = new CommunitySession(clone(joined.state), hooks(() => s, () => floor)); sessions.push(s); return s; };
+    const wild = make(OWN_FRAME_LIMIT), honest = make(0);
+    const r1 = await wild.sendText("far up", "b"); if ("error" in r1) throw new Error(r1.error);
+    await settle();
+    const r2 = await honest.sendText("here", "b"); if ("error" in r2) throw new Error(r2.error);
+    await settle();
+    expect(honest.state.seq).toBe(1);
+  });
+});

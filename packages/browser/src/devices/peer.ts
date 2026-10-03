@@ -86,7 +86,8 @@ export interface ActiveStart { gated?: DeviceGateView; limited?: true }
  */
 export async function activeStart(gate: DeviceGate, options: NodeOptions | undefined, given?: TurnNetwork | null): Promise<ActiveStart> {
   const record = await readDeviceRecord(gate.profile).catch(() => undefined);
-  if (record === undefined) return {};
+  // The record that said `active` a moment ago cannot be read again: nothing is published until a good read.
+  if (record === undefined) return { limited: true };
   if (!record || record.state !== "active" || record.network?.off) return {};
   const network = given === undefined ? turnPathOf(standbyNetwork(record.network, options?.transport).transport) : given;
   if (!network) return {};
@@ -97,7 +98,7 @@ export async function activeStart(gate: DeviceGate, options: NodeOptions | undef
   try {
     const keeper = await openTurnKeeper(gate.profile, network);
     outcome = keeper ? await keeper.check(true) : null;
-  } catch { return {}; /* a device that cannot read its own set starts as before; its links say why */ }
+  } catch { return { limited: true }; /* no good read: the profile offline, until one (the engine reads again) */ }
   if (!outcome) return {};
   if (outcome.kind === "gated") {
     const now = await readDeviceRecord(gate.profile).catch(() => null);

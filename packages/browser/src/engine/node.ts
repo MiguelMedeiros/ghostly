@@ -1475,6 +1475,29 @@ export class GhostlyNode implements EngineImplementation {
 
   private limitedTimer: ReturnType<typeof setTimeout> | null = null;
 
+  /**
+   * The person turned the network on: an active device of a device set reads the turn before anything is dialled or
+   * published (WISP 06 § When a device checks), as it does at start. False: it does not go online now (another device
+   * took the turn, or no good read: limited mode, read again every 30 seconds).
+   */
+  private async turnBeforeOnline(): Promise<boolean> {
+    if (this.options.singleDevice || knownDeviceGate()?.state !== "active") return true;
+    const outcome: { kind: string; restricted?: boolean } | null = await (async () => {
+      const keeper = await openTurnKeeper(databaseName(), this.turnNetwork());
+      return keeper ? keeper.check(true) : null;
+    })().catch(() => null);
+    if (outcome?.kind === "gated") {
+      const record = await readDeviceRecord(databaseName()).catch(() => null);
+      if (record) await this.stopReplaced(viewOf(record));
+      return false;
+    }
+    if (outcome?.kind === "single" || outcome?.kind === "start" || (outcome?.kind === "go-on" && !outcome.restricted)) return true;
+    this.limitedMode = true;
+    this.readTurnWhileLimited();
+    this.emitState();
+    return false;
+  }
+
   private readTurnWhileLimited(after = 30_000): void {
     if (this.limitedTimer) clearTimeout(this.limitedTimer);
     this.limitedTimer = setTimeout(() => {
@@ -1554,8 +1577,11 @@ export class GhostlyNode implements EngineImplementation {
     // A wallet that fails to start must not keep the chats from being dialled: the failure is reported after them.
     let failure: unknown = null;
     try {
-      await this.startWallets();
-      this.openStartedWallets(false);
+      // Wallets that started already (the engine went limited when the person turned the network on) start once.
+      if (!this.walletsStarted) {
+        await this.startWallets();
+        this.openStartedWallets(false);
+      }
     } catch (error) { failure = error ?? new Error("The wallets did not start"); }
     if (this.networkOn) {
       for (const live of this.links.values()) this.startLink(live.stored.id, await db.getMessages(live.stored.id));
@@ -4459,7 +4485,7 @@ export class GhostlyNode implements EngineImplementation {
           live.dataLink = "idle";
         }),
       );
-    } else if (!wasOnline && this.networkOn) {
+    } else if (!wasOnline && this.networkOn && await this.turnBeforeOnline()) {
       for (const live of this.links.values()) this.startLink(live.stored.id, await db.getMessages(live.stored.id));
       this.hold.start();
       this.startGroupEntries();
@@ -4776,6 +4802,9 @@ export class GhostlyNode implements EngineImplementation {
    */
   private async quiesceForHandoff(patch: Parameters<typeof moveDevice>[2]): Promise<void> {
     const profile = databaseName();
+    // Reviews not yet approved are cancelled, and what they reserved goes back (WISP 06 § Shape, step 4): nothing
+    // `pending` moves, and an on-chain review, signed when it was made, never reaches a frozen copy.
+    await this.cancelPendingReviews();
     this.gatedOut = true;
     await this.shutdown({ quiet: true });
     // Money once more, now that nothing can arrive any more: ecash that landed between the last look and the stop would
@@ -4792,6 +4821,13 @@ export class GhostlyNode implements EngineImplementation {
     const verifier = await this.handoffVerifier().catch(() => null);
     await moveDevice(profile, "releasing", { ...patch, ...(verifier ? { verifier } : {}) });
     this.events.onDeviceGate?.({ state: "releasing", reload: true });
+  }
+
+  /** Cancels every review not yet approved, as Cancel does (its reserved coins go back). */
+  private async cancelPendingReviews(): Promise<void> {
+    for (const { review } of await intentRepository.list().catch(() => [])) {
+      if (review.state === "pending") await this.paymentCoordinator.cancel(review.id).catch(() => {});
+    }
   }
 
   /** "Move to <device>" (a push). */

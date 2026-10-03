@@ -118,6 +118,15 @@ describe("the active device's read before its engine starts", () => {
     expect(after?.unfinishedGrants).toEqual([]);
   });
 
+  it("a read that fails (its signing key is gone) starts nothing but limited mode: it fails closed", async () => {
+    const network = new FakeTurnNetwork();
+    await putDeviceRecord({ v: 1, profile: databaseName(), state: "active", saved: 1, turn: N, rev: 0, d: toBase64Url(D), ownSlot: 0, activeSlot: 0,
+      deviceSet: [{ key: toBase64Url(phone.publicKey), name: "Desktop" }], takeovers: 0, earlierSets: [] } satisfies DeviceRecord);
+    const server = await createPeerServer({}, { turn: network });
+    expect(server).toBeInstanceOf(EngineServer);
+    expect(fake.nodes.map((node) => node.options.limited)).toEqual([true]);
+  });
+
   it("a profile with no device set reads nothing and starts as before", async () => {
     const network = new FakeTurnNetwork();
     const server = await createPeerServer({}, { turn: network });

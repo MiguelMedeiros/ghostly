@@ -6,7 +6,7 @@ import {
   type SealedSecret,
 } from "./groupCrypto";
 import {
-  GROUP_ADMIN_OFF_ERROR, GROUP_ID, MEMBER_KEY, MAX_GROUP_CHAIN, commitHash, commitUntaggedHash, expectedRoster, rosterAdmin, rosterHas, signCommit, verifyChain, verifyCommit, verifyCommitSignature,
+  GROUP_ADMIN_OFF_ERROR, GROUP_ID, OWN_FRAME_LIMIT, MEMBER_KEY, MAX_GROUP_CHAIN, commitHash, commitUntaggedHash, expectedRoster, rosterAdmin, rosterHas, signCommit, verifyChain, verifyCommit, verifyCommitSignature,
   type CommitKind, type GroupCommit, type GroupRole, type Roster,
 } from "./groupCommits";
 import {
@@ -417,7 +417,8 @@ export class GroupSession {
   private async ownFrame(raw: GroupMessageFrame): Promise<void> {
     if (raw.e !== this.epoch) return;
     const current = this.state.seqEpoch === raw.e ? this.state.seq : 0;
-    if (raw.n < current) return;
+    // A number past every floor a copy may have (`OWN_FRAME_LIMIT`) is not taken: the counter must fit in 32 bits.
+    if (raw.n < current || raw.n >= OWN_FRAME_LIMIT) return;
     try { if (!verify(fromBase64Url(raw.sig), messageSigned(raw), publicKeyFromZ32(raw.s))) return; } catch { return; }
     this.state.seq = raw.n + 1; this.state.seqEpoch = raw.e;
     await this.persist();

@@ -7,7 +7,7 @@ import {
   confirmationMatches, confirmationTag, decryptText, encryptText, epochKeys, newEpochSecret, openPair, openSecret, sealPair, sealSecret, sha256Hex,
   type SealedSecret,
 } from "./groupCrypto";
-import { GROUP_ADMIN_OFF_ERROR, GROUP_ID, MEMBER_KEY, rosterAdmin, rosterHas, sortRoster, type GroupRole, type Roster } from "./groupCommits";
+import { GROUP_ADMIN_OFF_ERROR, GROUP_ID, OWN_FRAME_LIMIT, MEMBER_KEY, rosterAdmin, rosterHas, sortRoster, type GroupRole, type Roster } from "./groupCommits";
 import { mentionsBytes, validMentions, wireMentions, type GroupMention } from "./groupMentions";
 import { groupReplyAuthor, readReply, wireReply, type WireReply } from "./replies";
 import { readForwarded } from "./forwards";
@@ -1225,7 +1225,8 @@ export class CommunitySession {
     const top = this.topHash;
     if (raw.h !== shortHash(top)) return;
     const current = this.state.seqH === top ? this.state.seq : 0;
-    if (raw.n < current) return;
+    // A number past every floor a copy may have (`OWN_FRAME_LIMIT`) is not taken: the counter must fit in 32 bits.
+    if (raw.n < current || raw.n >= OWN_FRAME_LIMIT) return;
     try { if (!verify(fromBase64Url(raw.sig), messageSigned(raw), publicKeyFromZ32(raw.s))) return; } catch { return; }
     this.state.seq = raw.n + 1; this.state.seqH = top;
     this.persistSoon();

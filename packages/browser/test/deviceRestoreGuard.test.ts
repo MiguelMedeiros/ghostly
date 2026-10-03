@@ -10,7 +10,7 @@ import { newDeviceKey, sealSeed } from "../src/engine/paymentAdapters/persistenc
 import { putDeviceRecord, dropDevicesDatabase } from "./helpers/deviceRecord";
 import { FakeTurnNetwork } from "./helpers/turnNetwork";
 import { setStorageProfile } from "../../../apps/ui/src/lib/storage";
-import { bundleDidSeed, createProfileBackup, openProfileBackup, restoreProfileBackup } from "../../../apps/ui/src/lib/profileBackup";
+import { bundleDidSeed, createProfileBackup, openProfileBackup, restoreOpenedBackup, restoreProfileBackup } from "../../../apps/ui/src/lib/profileBackup";
 import { listProfiles, namespaceOf } from "../../../apps/ui/src/lib/profiles";
 // covers: devices.restore-guard, devices.raised-counters
 
@@ -150,5 +150,51 @@ describe("the read before a restore", () => {
     expect(read.record?.slots[1]).toEqual({ key: toBase64Url(phone.publicKey), name: "Phone" });
     for (const source of network.sources) source.down = true;
     expect((await peekTurn(d, network)).result).toBe("unreachable");
+  });
+});
+
+describe("what a restore refuses and keeps (review of part 6)", () => {
+  const enrolled = async () => {
+    await seed();
+    await transact([STORES.settings], (s) => { s[STORES.settings].put({ v: 1, setup: "c2V0dXA", record: "cmVjb3Jk" }, "handoffVerifier"); });
+    await putDeviceRecord({ v: 1, profile: "ghostly", state: "active", saved: 1, turn: 812, rev: 0, d: D, ownSlot: 0, activeSlot: 0,
+      deviceSet: [{ key: MAC, name: "MacBook" }], takeovers: 0, earlierSets: [] });
+  };
+
+  it("keeps the bundle's password proof verifier, for a restored copy's takeover", async () => {
+    await enrolled();
+    expect((await openProfileBackup(await createProfileBackup(PASS), PASS)).verifier).toEqual({ v: 1, setup: "c2V0dXA", record: "cmVjb3Jk" });
+  });
+
+  it("refuses a bundle of the device set's envelope whose device set it cannot read", async () => {
+    await enrolled();
+    const { encode } = await import("../src/backup/codec");
+    const { BackupWriter, memorySink } = await import("../src/backup/stream");
+    const sink = memorySink();
+    const writer = await BackupWriter.start(sink, PASS, undefined, DEVICE_SET_BACKUP_VERSION);
+    await writer.json(await encode({ t: "profile", format: "ghostly-profile", version: 2, createdAt: 1, profile: { name: "Work" }, storage: {}, files: 0, bytes: 0 }));
+    await writer.json(await encode({ t: "devices", d: "not a secret", set: [], turn: 1, takeovers: 0 }));
+    await writer.json(await encode({ t: "end", files: 0, bytes: 0 }));
+    await writer.finish();
+    await expect(openProfileBackup(sink.bytes(), PASS)).rejects.toThrow("damaged");
+    // The same envelope with no device set record at all is refused too.
+    const bare = memorySink();
+    const second = await BackupWriter.start(bare, PASS, undefined, DEVICE_SET_BACKUP_VERSION);
+    await second.json(await encode({ t: "profile", format: "ghostly-profile", version: 2, createdAt: 1, profile: { name: "Work" }, storage: {}, files: 0, bytes: 0 }));
+    await second.json(await encode({ t: "end", files: 0, bytes: 0 }));
+    await second.finish();
+    await expect(openProfileBackup(bare.bytes(), PASS)).rejects.toThrow("damaged");
+  });
+
+  it("writes what must be true of the copy before it is listed, and lists nothing when that fails", async () => {
+    await enrolled();
+    const opened = await openProfileBackup(await createProfileBackup(PASS), PASS);
+    const before = listProfiles().length;
+    await expect(restoreOpenedBackup(opened, {}, async () => { throw new Error("crash"); })).rejects.toThrow("crash");
+    expect(listProfiles()).toHaveLength(before);
+    let listedDuring = -1;
+    const entry = await restoreOpenedBackup(opened, {}, async () => { listedDuring = listProfiles().length; });
+    expect(listedDuring).toBe(before);
+    expect(listProfiles().map((p) => p.id)).toContain(entry.id);
   });
 });
