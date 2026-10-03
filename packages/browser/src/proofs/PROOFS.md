@@ -96,7 +96,7 @@ built-ins. See [docs/SDK.md](../../../../docs/SDK.md) and `packages/browser/src/
    ```
 
 2. Add it to `IDENTITY_PROVIDERS` in [registry.ts](registry.ts), the order is the picker's, and give it a
-   mark in `apps/ui/src/components/identities/ProviderIcons.tsx` (`identityProviderIcons.test.tsx` fails for a provider without one).
+   mark in `apps/ui/src/components/identities/providerMarks.tsx` (`identityProviderIcons.test.tsx` fails for a provider without one).
    Those are the only shared lines you touch.
 3. Tests: run `describeIdentityProof` from [contractSuite.ts](contractSuite.ts)
    (`test/helpers/identityProofContract.ts` re-exports it) against your provider (see
