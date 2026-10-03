@@ -112,10 +112,12 @@ export function usePairingProgress(peerKey: string | undefined, { inviter, enabl
     wasLive.current = live;
   }
   const until = celebrateUntil.current;
-  const [, setTick] = useState(0);
+  // The timer ends the moment, not a reading of the clock: a timer can fire a moment before Date.now() reaches `until`,
+  // and a moment read as not over yet would then stay until something else made the chat render again.
+  const [ended, setEnded] = useState<number | null>(null);
   useEffect(() => {
     if (until === null) return;
-    const timer = window.setTimeout(() => setTick(n => n + 1), Math.max(0, until - Date.now()));
+    const timer = window.setTimeout(() => setEnded(until), Math.max(0, until - Date.now()));
     return () => window.clearTimeout(timer);
   }, [until]);
   // Heard as the scene bursts: in the commit that shows it. Reduced motion stills the scene, not the sound: that is the
@@ -125,8 +127,16 @@ export function usePairingProgress(peerKey: string | undefined, { inviter, enabl
     soundOwed.current = false;
     if (!muted && loadSettings().notifications.soundEnabled) playSound("connected");
   });
-  const celebrating = until !== null && Date.now() < until;
+  const celebrating = until !== null && ended !== until;
   const done = celebrated.current && !celebrating;
+
+  const base: PairingProgress = reported
+    ?? { role: role.current, ...derived, since: since.current!.at, startedAt: link?.createdAt || mounted.current, attempt };
+  // An engine that reports no progress can lose the contact again (its packet went stale): the invite card comes back
+  // (`contactArrived`), and the steps go back to the wait with it rather than say the contact is still there.
+  if (!contactArrived(base)) reached.current = Math.min(reached.current, stepIndex(base.role, base.stage, base.peerSeen));
+  const view = pairingView(base.role, base.stage, base.peerSeen, reached.current);
+  reached.current = view.step;
 
   const [retrying, setRetrying] = useState(false), [retryError, setRetryError] = useState("");
   const linkId = link?.id;
@@ -136,16 +146,9 @@ export function usePairingProgress(peerKey: string | undefined, { inviter, enabl
     try { await engine.call("connect", { linkId }); }
     catch (cause) { setRetryError(errorText(cause, t)); }
     finally { setRetrying(false); }
-  }, [linkId, t]);
+  }, [linkId, t, setAttempt]);
 
   if (!enabled) return { progress: null, show: false, scene: false, celebrating: false, retry, retrying, retryError };
-  const base: PairingProgress = reported
-    ?? { role: role.current, ...derived, since: since.current!.at, startedAt: link?.createdAt || mounted.current, attempt };
-  // An engine that reports no progress can lose the contact again (its packet went stale): the invite card comes back
-  // (`contactArrived`), and the steps go back to the wait with it rather than say the contact is still there.
-  if (!contactArrived(base)) reached.current = Math.min(reached.current, stepIndex(base.role, base.stage, base.peerSeen));
-  const view = pairingView(base.role, base.stage, base.peerSeen, reached.current);
-  reached.current = view.step;
   const progress: PairingProgressState = { ...base, linkId, derived: !reported, view };
   const show = firstPairing && !done && (stage !== "live" || celebrating);
   return { progress, show, scene: show && stage !== "on-dht" && !aside.current, celebrating, retry, retrying, retryError };

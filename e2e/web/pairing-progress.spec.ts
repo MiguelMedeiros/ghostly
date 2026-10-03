@@ -15,31 +15,36 @@ const PAIRING = { localStun: true };
 /** Records every stage the scene shows, however briefly: polling from the test would miss the short ones. */
 async function recordStages(page: Page) {
   await page.evaluate(() => {
-    const seen: string[] = [];
-    const state = window as unknown as { qaPairingStages: string[]; qaPairingIndicator: boolean };
+    const seen: string[] = [], steps: number[] = [];
+    const state = window as unknown as { qaPairingStages: string[]; qaPairingSteps: number[]; qaPairingIndicator: boolean };
     state.qaPairingStages = seen;
+    state.qaPairingSteps = steps;
     state.qaPairingIndicator = false;
     const look = () => {
-      const stage = document.querySelector("[data-testid=pairing-scene]")?.getAttribute("data-stage");
+      const scene = document.querySelector("[data-testid=pairing-scene]");
+      const stage = scene?.getAttribute("data-stage"), step = scene?.getAttribute("data-step");
       if (stage && seen[seen.length - 1] !== stage) seen.push(stage);
+      if (step != null && steps[steps.length - 1] !== Number(step)) steps.push(Number(step));
       // The connection icon told the pairing: its stage, and the scene in small while it was on its way.
       if (document.querySelector("[data-testid=connection-options][data-pairing] [data-testid=pairing-glyph]")) state.qaPairingIndicator = true;
     };
-    new MutationObserver(look).observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ["data-stage", "data-pairing"] });
+    new MutationObserver(look).observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ["data-stage", "data-step", "data-pairing"] });
     look();
   });
 }
 const recorded = (page: Page) => page.evaluate(() => {
-  const state = window as unknown as { qaPairingStages: string[]; qaPairingIndicator: boolean };
-  return { stages: state.qaPairingStages, indicator: state.qaPairingIndicator };
+  const state = window as unknown as { qaPairingStages: string[]; qaPairingSteps: number[]; qaPairingIndicator: boolean };
+  return { stages: state.qaPairingStages, steps: state.qaPairingSteps, indicator: state.qaPairingIndicator };
 });
 
-/** Stages of `steps` only, each later than the one before, ending at live. */
-function expectInOrder(stages: string[], steps: string[]) {
-  expect(stages.every(stage => steps.includes(stage)), `unexpected stage in ${stages.join(" → ")}`).toBe(true);
-  const positions = stages.map(stage => steps.indexOf(stage));
-  expect(positions.every((position, i) => i === 0 || position > positions[i - 1]), `out of order: ${stages.join(" → ")}`).toBe(true);
+/**
+ * Each step later than the one before, ending at live. Either side can be at either side's handshake stage (an
+ * inviter whose contact does not knock knocks itself), so the stages are checked through the step they show.
+ */
+function expectInOrder({ stages, steps }: { stages: string[]; steps: number[] }, names: string[]) {
+  expect(steps.every((step, i) => i === 0 || step > steps[i - 1]), `out of order: ${stages.join(" → ")} (steps ${steps.join(", ")})`).toBe(true);
   expect(stages.at(-1)).toBe("live");
+  expect(steps.at(-1)).toBe(names.indexOf("live"));
 }
 
 test("pairing shows its stages in order on both sides, ends live, then gives the chat back", { tag: ["@feature:chat.paired.pairing-progress", "@feature:chat.paired.progress", "@feature:chat.paired.pair"] }, async ({ peer }) => {
@@ -82,8 +87,8 @@ test("pairing shows its stages in order on both sides, ends live, then gives the
   }
 
   const [inviter, joiner] = await Promise.all([recorded(alice.page), recorded(bob.page)]);
-  expectInOrder(inviter.stages, INVITER);
-  expectInOrder(joiner.stages, JOINER);
+  expectInOrder(inviter, INVITER);
+  expectInOrder(joiner, JOINER);
   expect(inviter.stages).toContain("waiting");
   expect(joiner.stages.length, `the joiner saw only ${joiner.stages.join(" → ")}`).toBeGreaterThan(1);
   expect(inviter.indicator && joiner.indicator).toBe(true);
