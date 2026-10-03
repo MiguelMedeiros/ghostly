@@ -82,6 +82,7 @@
     "phraseNote": "La frase recupera ciò che il server di Second conserva per questo portafoglio; la cronologia dei pagamenti viene dal file di backup.",
     "read": "Leggi",
     "renewalHint": "Rinnova le monete vicine alla scadenza finché Ghostly è aperto",
+    "scanning": "Ricerca delle monete on-chain ricevute prima da questa frase…",
     "server": "Server Ark",
     "serverInput": "Server Bark",
     "serverStuck": "Questo server non risponde. Puoi passare a un altro.",

@@ -82,6 +82,7 @@
     "phraseNote": "La frase recupera lo que el servidor de Second guarda para esta billetera; el historial de pagos viene del archivo de copia.",
     "read": "Leer",
     "renewalHint": "Renueva las monedas cerca de su caducidad mientras Ghostly está abierto",
+    "scanning": "Buscando monedas on-chain que esta frase recibió antes…",
     "server": "Servidor Ark",
     "serverInput": "Servidor Bark",
     "serverStuck": "Este servidor no responde. Puedes cambiar a otro.",

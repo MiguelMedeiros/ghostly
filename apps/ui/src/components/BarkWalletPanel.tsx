@@ -53,6 +53,7 @@ export function BarkWalletPanel({ wallet, state, backupNow = false }: { wallet: 
    <p className="text-text-primary" data-testid="bark-balance"><span className="text-4xl font-semibold tabular-nums">{formatAmount(bark.balance, t.language)}</span><span className="text-text-muted text-sm ms-2">{unit}</span>{bark.network !== "bitcoin" && <span className="block text-xs text-yellow-500 mt-1">{t("wallet.bark.testCoins", { network: NETWORKS[network].label })}</span>}</p>
    {!!bark.pending && <Notice tone="warning" testId="bark-pending">{t("wallet.bark.pending", { amount: formatAmount(bark.pending, t.language), unit })}</Notice>}
    {!!bark.exiting && <Notice tone="warning" testId="bark-exiting">{t("wallet.bark.exiting", { amount: formatAmount(bark.exiting, t.language), unit })}</Notice>}
+   {bark.scanning && <Notice testId="bark-scanning">{t("wallet.bark.scanning")}</Notice>}
    <Essentials t={t} expiry={bark.expiry} real={real} />
    <Actions value={action} onChange={setAction} />
    {action === "receive" && <div className="bg-surface rounded-xl p-4 space-y-4 animate-fade-in">
