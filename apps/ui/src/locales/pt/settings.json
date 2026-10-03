@@ -143,6 +143,13 @@
     "unprotected": "Instale o Ghostly (adicione à Tela de Início), permita notificações e mantenha um backup do seu perfil. Os navegadores protegem apps instalados e usados com frequência."
   },
   "storageOf": "{{used}} de {{quota}}",
+  "storageParts": {
+    "app": "Mensagens e dados do app: {{size}}",
+    "files": "Arquivos ({{count}}): {{size}}",
+    "local": "Configurações: {{size}}",
+    "staged": "Cópias sendo salvas: {{size}}"
+  },
+  "storagePartsNote": "Mensagens e dados do app contam todos os perfis deste dispositivo. Os arquivos são deste perfil.",
   "storageProtect": "Proteger",
   "storageState": {
     "protected": "Protegido",

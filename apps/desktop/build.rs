@@ -23,6 +23,7 @@ const COMMANDS: &[&str] = &[
     "file_bytes_stream_close",
     "file_bytes_stream_open",
     "file_bytes_truncate",
+    "file_bytes_usage",
     "generate_enc_key",
     "get_profile",
     "get_public_key",
