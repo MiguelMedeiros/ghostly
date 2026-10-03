@@ -90,6 +90,10 @@ const PREFIX = "lightningOp-";
 const opKey = (direction: LightningOp["direction"], hash: string) => `${PREFIX}${direction}-${hash}`;
 const RANGE = () => IDBKeyRange.bound(PREFIX, `${PREFIX}\uffff`);
 /** Every Lightning operation journaled, of every network and card. */
+/** Lightning payments whose call to the source has not returned, on any card of this page (WISP 06 § Payments in flight). */
+let paying = 0;
+export const lightningPaying = (): number => paying;
+
 export async function readLightningJournal(): Promise<LightningOp[]> { return wrap<LightningOp[]>((await store(STORES.settings, "readonly")).getAll(RANGE())); }
 const IN_POLL_MS = 4_000;
 const OUT_POLL_MS = 15_000;
@@ -238,6 +242,7 @@ export class LightningService {
     let op: LightningOp = { direction: "out", providerId: quote.providerId, mode: this.mode, ...this.cardField(), paymentHash: quote.paymentHash, invoice: quote.invoice, amount: quote.amount, paymentId: context.paymentId, note: context.note?.slice(0, 140), expiresAt: 0, createdAt: Date.now(), selfSettled: !!quote.provider.settlesItself, state: "sending", maxFee: quote.maxFee, ref: quote.provider.paymentRef?.(quote.invoice) };
     // Written down before the provider sees it: from here on the sats may be gone.
     await this.put(op);
+    paying += 1;
     try {
       const result = await quote.provider.payInvoice(quote.invoice, quote.maxFee, context.note);
       op = result.state === "paid" ? { ...op, state: "paid", fee: result.fee, ref: result.ref ?? op.ref, settledAt: Date.now() } : { ...op, state: "pending", ref: result.ref ?? op.ref };
@@ -245,7 +250,7 @@ export class LightningService {
       if (isNothingSpentError(error)) { await this.put({ ...op, state: "failed", error: redact(error) }); throw error; }
       // A source that cannot look payments up never settles this by itself: say so rather than "being checked".
       op = { ...op, state: "unknown", error: quote.provider.capabilities.lookup ? "No answer from the source. It is being checked; nothing is paid again." : "No answer from the source, and it cannot be asked: check this payment in the wallet itself. It is never paid again." };
-    }
+    } finally { paying -= 1; }
     await this.put(op);
     if (op.state !== "paid") this.schedule(OUT_POLL_MS);
     return op.state === "paid";

@@ -13,8 +13,10 @@
  *   page and caches nothing, and only shows wake-ups (WISP 401 § Wake-up push). A scope per profile gives each
  *   profile a push subscription of its own, so contacts of two profiles cannot tell they share a browser.
  */
-import { CACHE_PREFIX, SHARED_ROUTE, classify, pushScopeProfile, readShare, readShareBody, wakeNotice, type SharedItem } from "./policy";
-import { readWakeEntry } from "./wakeStore";
+import { CACHE_PREFIX, SHARED_ROUTE, classify, pushNotice, pushScopeProfile, readShare, readShareBody, type SharedItem } from "./policy";
+import { readWakeEntry, readWakeText } from "./wakeStore";
+import { readPushDeviceView } from "./deviceState";
+import { deviceNoticeWords } from "./deviceWords";
 import { takeWakeSlot } from "./wakeLimit";
 import { readWake } from "../../../../packages/core/src/pairedWake";
 import { SHARE_HOLD_MS, type FromWorker, type ToWorker } from "./messages";
@@ -176,10 +178,22 @@ worker.addEventListener("push", (event) => {
     const found = wake ? await readWakeEntry(profile, wake.token).catch(() => undefined) : undefined;
     const appVisible = (await appWindows()).some((client) => client.focused || client.visibilityState === "visible");
     const now = Date.now();
-    const notice = wakeNotice(found, { now, appVisible, profile, kind: wake?.kind });
+    // In a profile on several devices the worker reads the device state itself (WISP 06 § Push and the phone): a device
+    // that is not the active one shows the quiet notices, and a wake-up from another of the person's devices says so.
+    const text = wake ? await readWakeText(profile).catch(() => undefined) : undefined;
+    const device = wake ? await readPushDeviceView(text?.db).catch(() => null) : null;
+    // A device that was never active may have no words of a page yet: the browser's language, not English, until one writes them.
+    const words = { ...deviceNoticeWords(navigator.languages?.length ? navigator.languages : [navigator.language]), ...text };
+    const notice = pushNotice(wake, found, device, { now, appVisible, profile, text: words });
     if (!notice || !wake) return;
+    if (notice.quiet) {
+      // Quiet: no sound, no vibration, nothing that stays up, and one notice per profile, replaced in place.
+      await worker.registration.showNotification(notice.title, { body: notice.body, tag: notice.tag, data: notice.data, icon: "/icon-192.png", badge: "/icon-192.png", silent: true, renotify: false, requireInteraction: false });
+      return;
+    }
     const options = { body: notice.body, tag: notice.tag, data: notice.data, icon: "/icon-192.png", badge: "/icon-192.png", requireInteraction: notice.call };
-    if (!(await takeWakeSlot(profile, wake.token, notice.call, now))) {
+    // A device asking for a handoff may ask again soon (its own limit is one per 30 s): it is counted like a call.
+    if (!(await takeWakeSlot(profile, wake.token, notice.call || wake.kind === "device", now))) {
       // Too soon after this token's last one (`WAKE_NOTICE_GAP_MS`): no new notice and no sound. The one still on
       // screen is shown again, silently, since browsers expect every push to show something; a dismissed one stays gone.
       const [shown] = await worker.registration.getNotifications({ tag: notice.tag });

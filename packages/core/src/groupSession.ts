@@ -6,7 +6,7 @@ import {
   type SealedSecret,
 } from "./groupCrypto";
 import {
-  GROUP_ID, MEMBER_KEY, MAX_GROUP_CHAIN, commitHash, commitUntaggedHash, expectedRoster, rosterAdmin, rosterHas, signCommit, verifyChain, verifyCommit, verifyCommitSignature,
+  GROUP_ADMIN_OFF_ERROR, GROUP_ID, OWN_FRAME_LIMIT, MEMBER_KEY, MAX_GROUP_CHAIN, commitHash, commitUntaggedHash, expectedRoster, rosterAdmin, rosterHas, signCommit, verifyChain, verifyCommit, verifyCommitSignature,
   type CommitKind, type GroupCommit, type GroupRole, type Roster,
 } from "./groupCommits";
 import {
@@ -178,6 +178,19 @@ export interface GroupSessionHooks {
   metaChanged?(by: string, change: GroupMetaChange, at: number): void;
   /** The clock the limits read (the engine's, or a simulation's); the wall clock when absent. */
   clock?(): number;
+  /**
+   * The lowest sequence number this member sends at, in any epoch (WISP 06 § Raised counters): 0 for a profile that
+   * never took over or was never restored. A copy of a profile started from older state sends above every number the
+   * copy it replaced may have used, so the other members do not drop its frames as already seen.
+   */
+  seqFloor?(): number;
+  /**
+   * Whether this device may sign commits for the group (WISP 06 § Forced takeover): false after a forced takeover or a
+   * restore, until the person turns on "Manage groups from this device" there. Then no commit is signed, the automatic
+   * one on a member's leave included: the copy may lack the last commit the device it replaced made, and two commits
+   * after one parent halt the group. Absent: true.
+   */
+  adminWork?(): boolean;
 }
 
 const MAX_TEXT_BOX = Math.ceil((GROUP_LIMITS.textBytes + 16) * 4 / 3) + 4;
@@ -409,6 +422,27 @@ export class GroupSession {
   }
   /** Epochs whose messages this member can still read. */
   get readableEpochs(): number[] { return Object.keys(this.state.secrets).map(Number).sort((a, b) => a - b); }
+  /**
+   * A frame signed with my own key that I did not send here: another copy of this profile sent it (a restored backup, a
+   * device that took over while this one was away, WISP 06). It is not shown, as before; but my counter goes above it
+   * in this epoch, so what I send next is not dropped by the others as already seen.
+   */
+  private async ownFrame(raw: GroupMessageFrame): Promise<void> {
+    if (raw.e !== this.epoch) return;
+    const current = this.state.seqEpoch === raw.e ? this.state.seq : 0;
+    // A number past every floor a copy may have (`OWN_FRAME_LIMIT`) is not taken: the counter must fit in 32 bits.
+    if (raw.n < current || raw.n >= OWN_FRAME_LIMIT) return;
+    try { if (!verify(fromBase64Url(raw.sig), messageSigned(raw), publicKeyFromZ32(raw.s))) return; } catch { return; }
+    this.state.seq = raw.n + 1; this.state.seqEpoch = raw.e;
+    await this.persist();
+  }
+
+  /** `GroupSessionHooks.seqFloor`, as a whole number that is never negative. */
+  private seqFloor(): number {
+    const floor = this.hooks.seqFloor?.() ?? 0;
+    return Number.isSafeInteger(floor) && floor > 0 ? floor : 0;
+  }
+
   /** How many messages, per sender, are known to be missing in the current epoch. */
   missing(sender: string): number {
     const entry = this.state.seen[sender]?.[this.epoch];
@@ -479,6 +513,7 @@ export class GroupSession {
   }
 
   private async commit(kind: CommitKind, subject: string | undefined, now: number): Promise<{ secret: Uint8Array }> {
+    if (this.hooks.adminWork?.() === false) throw new Error(GROUP_ADMIN_OFF_ERROR);
     if (this.state.chain.length >= MAX_GROUP_CHAIN) throw new Error("This group has reached its membership history limit. Create a new group.");
     const previous = this.top;
     const roster = expectedRoster(previous.m, kind, this.myKey, subject);
@@ -583,7 +618,9 @@ export class GroupSession {
       const epoch = this.epoch, secret = this.secret(epoch);
       if (!secret) return { error: "This epoch's key has not arrived yet. Wait for a member to catch you up." };
       if (this.state.seqEpoch !== epoch) { this.state.seq = 0; this.state.seqEpoch = epoch; }
-      const n = this.state.seq++;
+      // Every epoch starts at the floor, not at 0, and a floor raised under a running epoch counts at once.
+      const n = Math.max(this.state.seq, this.seqFloor());
+      this.state.seq = n + 1;
       const header = { g: this.id, e: epoch, s: this.myKey, n, ts: now };
       const key = epochKeys(secret, this.id, epoch).message;
       const { n: nn, c } = encryptText(key, messageAad(header), trimmed);
@@ -695,7 +732,7 @@ export class GroupSession {
           case "group-secrets": await this.receiveSecrets(raw as GroupSecretsFrame); break;
           case "group-meta": await this.receiveMeta(from, raw); break;
           case "group-bye": await this.receiveBye(from, raw); break;
-          case "group-leave": if (this.isAdmin && rosterHas(this.roster, from) && from !== this.myKey) await this.commit("remove", from, Date.now()); break;
+          case "group-leave": if (this.isAdmin && this.hooks.adminWork?.() !== false && rosterHas(this.roster, from) && from !== this.myKey) await this.commit("remove", from, Date.now()); break;
         }
         // Removed, the last thing a hub passes on is the commit that says so: it may be the only way the others hear it.
         return this.state.status === "active" ? this.passOn : this.state.status === "removed" ? this.passOn.filter(f => f.t === "group-commit") : [];
@@ -755,7 +792,8 @@ export class GroupSession {
       !Number.isSafeInteger(f.e) || (f.e as number) < 0 || !Number.isSafeInteger(f.ts) || (f.ts as number) <= 0 || typeof f.sig !== "string" || f.sig.length !== 86 || !B64.test(f.sig)) return;
     const bye = { t: "group-bye" as const, g: this.id, k: f.k, e: f.e as number, ts: f.ts as number, sig: f.sig };
     try { if (!verify(fromBase64Url(bye.sig), byeSigned(bye), publicKeyFromZ32(bye.k))) return; } catch { return; }
-    if (this.isAdmin) { await this.commit("remove", bye.k, Date.now()); return; }
+    // An admin whose admin work is off on this device passes the leave on, as a member does: it commits nothing.
+    if (this.isAdmin && this.hooks.adminWork?.() !== false) { await this.commit("remove", bye.k, Date.now()); return; }
     this.took(bye);
   }
 
@@ -764,7 +802,8 @@ export class GroupSession {
    * the roster (someone removed is neither heard from nor handed on, #300), and its boxes only with the author's `xs`.
    */
   private async receiveMessage(from: string, raw: unknown): Promise<void> {
-    if (!isMessageFrame(raw) || raw.s === this.myKey) return;
+    if (!isMessageFrame(raw)) return;
+    if (raw.s === this.myKey) { await this.ownFrame(raw); return; }
     const relayed = raw.s !== from;
     if (relayed && (!rosterHas(this.roster, from) || !rosterHas(this.roster, raw.s))) return;
     // Signed by its author before it may wait, so a frame no member wrote never takes the place of one that was.

@@ -470,6 +470,49 @@ describe("community sessions", { timeout: 60_000 }, () => {
     expect(net.texts(dave)).toEqual([]);
   });
 
+  it("what a member wrote while behind is said again, once, for the members let in before it wrote", async () => {
+    const net = new Net();
+    let now = Date.now();
+    net.now = () => now;
+    const alice = net.create("alice");
+    const bob = await net.admit(alice, "bob");
+    await net.meet(alice, bob);
+    // Bob's app loses its edges; meanwhile Carol and Dave are let in, and Bob, who has not heard, writes.
+    net.partition = (a, b) => a !== bob && b !== bob;
+    const carol = await net.admit(alice, "carol"), dave = await net.admit(alice, "dave");
+    await net.meet(alice, carol); await net.meet(alice, dave);
+    expect("id" in await bob.session.sendText("still there?", "bob")).toBe(true);
+    await net.settle();
+    expect(bob.session.roster).toHaveLength(2);
+    // Bob reaches Carol: she carries his frame to Alice, who reads it, but she cannot read it herself, nor can Dave.
+    net.partition = null;
+    await net.meet(bob, carol); await net.meet(carol, alice); await net.meet(alice, dave);
+    expect(bob.session.roster).toHaveLength(4);
+    expect(net.texts(alice)).toEqual(["still there?"]);
+    expect(net.texts(carol)).toEqual([]);
+    // Bob has caught up and the chain has settled: he says it again under the newest commit, for everyone.
+    await bob.session.reseal(); await net.settle();
+    expect(net.texts(carol)).toEqual([]);
+    now += 6_000;
+    await bob.session.reseal(); await net.settle();
+    expect(net.texts(carol)).toEqual(["still there?"]);
+    expect(net.texts(dave)).toEqual(["still there?"]);
+    // One message, by the first frame's identity: Alice, who read the first, does not show it twice.
+    expect(net.texts(alice)).toEqual(["still there?"]);
+    const ids = [alice, carol, dave].map(m => m.messages.find(x => x.text === "still there?")!.id);
+    expect(new Set(ids).size).toBe(1);
+    expect(ids[0].split(":")[1]).toBe(String(bob.session.state.store.find(f => f.s === bob.session.myKey)!.e));
+    // Once: a later look says nothing again.
+    const sent = net.log.filter(f => f.from === "bob" && f.t === "group-msg").length;
+    now += 6_000;
+    await bob.session.reseal(); await net.settle();
+    expect(net.log.filter(f => f.from === "bob" && f.t === "group-msg").length).toBe(sent);
+    // Erin, let in after Bob wrote, is not handed it.
+    const erin = await net.admit(alice, "erin");
+    await net.meet(erin, alice); await net.meet(erin, bob); await net.meet(erin, carol);
+    expect(net.texts(erin)).toEqual([]);
+  });
+
   it("answers one member's syncs a few times a minute, not every one", async () => {
     const net = new Net();
     let now = Date.now();

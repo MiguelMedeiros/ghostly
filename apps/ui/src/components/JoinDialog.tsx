@@ -1,7 +1,8 @@
 import { useBackdropDismiss } from "../hooks/useDismiss";
 import { useEffect, useRef, useState } from "react";
 import jsQR from "jsqr";
-import { decodeCommunityLink, decodeGroupEntryLink } from "@ghostly/core";
+import { decodeCommunityLink, decodeGroupEntryLink, readDeviceInvite } from "@ghostly/core";
+import { enrollErrorKey, failureKey } from "../lib/devices";
 import { INVITE_REFUSAL_MESSAGE, classifyInvite, readInvite } from "../lib/url";
 import { showJoinNotice } from "../lib/joinNotice";
 import { pasteShortcut, readClipboardText } from "../lib/clipboard";
@@ -17,8 +18,11 @@ import { errorText } from "../lib/errorText";
  * An invite this profile already has a chat for makes no second chat (WISP 801 Q9): one it made itself
  * is refused here, with the way to that chat (`onOpenChat`); one it already joined by opens that chat.
  */
-/** `autoScan`: the camera starts at once (the installed app's "Scan invite" shortcut). */
-export function JoinDialog({ onJoin, onOpenChat, onJoinGroup, onClose, autoScan = false }: { onJoin(keys: SessionKeys): void; onOpenChat?(sessionId: string): void; onJoinGroup?(link: string): Promise<void>; onClose(): void; autoScan?: boolean }) {
+/**
+ * `autoScan`: the camera starts at once (the installed app's "Scan invite" shortcut). `onDevice`: the dialog reads the
+ * code that adds this device to a profile (WISP 06) instead of a chat invite, and waits for it to be taken.
+ */
+export function JoinDialog({ onJoin, onOpenChat, onJoinGroup, onDevice, onClose, autoScan = false }: { onJoin?(keys: SessionKeys): void; onOpenChat?(sessionId: string): void; onJoinGroup?(link: string): Promise<void>; onDevice?(code: string): Promise<void>; onClose(): void; autoScan?: boolean }) {
   const { t } = useI18n();
   const closed = useRef(false);
   const busyRef = useRef(false);
@@ -61,6 +65,19 @@ export function JoinDialog({ onJoin, onOpenChat, onJoinGroup, onClose, autoScan 
   useEffect(() => { if (manual) manualInput.current?.focus(); }, [manual]);
   const accept = (value: string) => {
     if (joined.current || closed.current) return;
+    if (onDevice) {
+      // A code that adds this device to a profile: read as one, and nothing else.
+      const device = readDeviceInvite(value);
+      if (!device.ok) { setError(t(failureKey(device.reason))); setManual(true); return; }
+      joined.current = true; stop(); busyRef.current = true; setBusy(true);
+      onDevice(value.trim()).catch((cause: unknown) => {
+        if (closed.current) return;
+        joined.current = false; busyRef.current = false; setBusy(false);
+        const key = enrollErrorKey(cause);
+        setError(key ? t(key) : cause instanceof Error ? errorText(cause, t) : t("join.invalid")); setManual(true);
+      });
+      return;
+    }
     if (onJoinGroup && (decodeGroupEntryLink(value) || decodeCommunityLink(value))) {
       joined.current = true; stop(); busyRef.current = true; setBusy(true);
       onJoinGroup(value.trim()).catch((cause: unknown) => {
@@ -76,8 +93,8 @@ export function JoinDialog({ onJoin, onOpenChat, onJoinGroup, onClose, autoScan 
     const outcome = classifyInvite(reading.keys);
     if (outcome.kind === "own") { setError(""); setManual(false); setOwn(outcome.sessionId); return; }
     joined.current = true; stop();
-    if (outcome.kind === "joined") { showJoinNotice("join.alreadyIn"); (onOpenChat ?? (() => onJoin(reading.keys)))(outcome.sessionId); return; }
-    onJoin(reading.keys);
+    if (outcome.kind === "joined") { showJoinNotice("join.alreadyIn"); (onOpenChat ?? (() => onJoin?.(reading.keys)))(outcome.sessionId); return; }
+    onJoin?.(reading.keys);
   };
   const paste = async () => {
     if (busyRef.current || joined.current || closed.current) return;
@@ -163,7 +180,7 @@ export function JoinDialog({ onJoin, onOpenChat, onJoinGroup, onClose, autoScan 
     }}
     aria-labelledby="join-title" className="m-auto w-[calc(100%_-_2rem)] max-w-sm max-h-[85dvh] overflow-y-auto rounded-2xl border border-border bg-sidebar-bg p-5 text-text-primary shadow-2xl backdrop:bg-black/60">
     <div className="mb-4 flex items-center justify-between">
-      <h2 id="join-title" className="font-semibold">{t("join.title")}</h2>
+      <h2 id="join-title" className="font-semibold">{onDevice ? t("devices.join.addThis") : t("join.title")}</h2>
       <button onClick={close} aria-label={t("join.close")} className="h-10 w-10 cursor-pointer rounded-lg text-xl hover:bg-surface-hover focus-visible:ring-2 focus-visible:ring-accent">×</button>
     </div>
     <video ref={video} muted playsInline aria-label={t("join.cameraPreview")} className={`${scanning ? "block" : "hidden"} mb-3 aspect-square w-full rounded-xl bg-black object-cover`} />

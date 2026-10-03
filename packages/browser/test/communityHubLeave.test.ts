@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { beaconKeys, freshHubs, readBeacon } from "@ghostly/core";
+import { beaconKeys, freshHubs, lobbyKeys, readBeacon } from "@ghostly/core";
 import { CommunityWorld, RELAY_NETWORK, type Peer } from "./communityWorld";
 import { COMMUNITY_TIMINGS } from "../src/engine/community";
 // covers: groups.community.leave, groups.protocol.community-topology
@@ -44,6 +44,46 @@ describe("a hub that leaves", { timeout: 120_000 }, () => {
     // Waiting for the hub as for an app restarting took 20 s to a minute, and the next hub's idle lobby poll 30 s more.
     expect(back).toBeLessThanOrEqual(20_000);
     expect(heard).toBeLessThanOrEqual(5_000);
+  });
+});
+
+/**
+ * The hub left behind held the leaver's signed request, but counted the leaver as a hub until the leave was committed
+ * (at once by the hub with the lowest key, half a minute later by any other) or its beacon entry went stale: it dialled
+ * it again as one hub dials another, kept it at the door, and wrote it back into the beacon. An edge whose app is gone
+ * looks fast for it, and on relays that held the hub's own requests (its lobby, its beacon entry) to the small share
+ * they get while a link signals: five CLI daemons on local relays, the hub left behind read no lobby request for
+ * minutes (2026-10-03).
+ */
+describe("the hubs a hub leaves behind", { timeout: 120_000 }, () => {
+  it("count it out at once: no edge to it, and not in the beacon they write", async () => {
+    const keyOf = (p: Peer, id: string) => p.groups.communities.session(id)!.myKey;
+    // A group where the hub left behind does not commit the leave itself at once (the leaver's key is the lower one).
+    let found: { world: CommunityWorld; id: string; admin: Peer; left: Peer } | undefined;
+    for (let tries = 0; tries < 12 && !found; tries++) {
+      const world = new CommunityWorld();
+      const { id, peers } = await settled(world, ["admin", "bob", "carol", "dave", "erin"]);
+      const [admin, ...rest] = peers;
+      const hubs = rest.filter(p => p.groups.communities.isHub(id));
+      if (admin.groups.communities.isHub(id) && hubs.length === 1 && keyOf(admin, id) < keyOf(hubs[0], id)) found = { world, id, admin, left: hubs[0] };
+    }
+    expect(found, "a group with the admin and one more hub, the admin's key the lower").toBeDefined();
+    const { world, id, admin, left } = found!;
+    const gone = keyOf(admin, id);
+    const keys = beaconKeys(left.groups.communities.session(id)!.state.rv, id);
+    expect(world.view(left, id)!.community!.hubs).toBe(2);
+    // Its app takes itself out of the beacon when the relays let it: here they do not (its budget is spent).
+    world.failRead = peer => peer === admin;
+    await admin.groups.leave(id);
+    await world.run(2_000);
+    for (let s = 0; s < 25; s++) {
+      await world.run(1_000);
+      // Not as a hub, nor to tell it it is out (it knows: it left).
+      expect([...left.links.values()].some(e => e.kind === "edge" && e.g === id && e.peer === gone), `an edge to the leaver ${s + 3} s after`).toBe(false);
+    }
+    // What it writes in the beacon leaves the leaver out.
+    await world.run(35_000);
+    expect(readBeacon(keys, world.pkarr.get(keys.identity.pubKeyZ32) ?? []).map(h => h.key)).not.toContain(gone);
   });
 });
 
@@ -124,5 +164,36 @@ describe("idle hubs stepping down", { timeout: 120_000 }, () => {
     await peers[0].groups.send(id, "and now?");
     await world.until(() => peers.every(p => world.texts(p, id).includes("and now?")), 60_000);
     for (const p of peers) expect(world.view(p, id)?.community?.connected, p.name).toBeGreaterThan(0);
+  });
+});
+
+/**
+ * A member asks a hub in its lobby; the relays may hold that write back (its budget, while one of its links signals).
+ * It asked again only at the next refresh, 20 s later: a member cut off by a hub that left, whose first request was
+ * refused, waited 20 s more for the hub that was to take it (CLI daemons on local relays, 2026-10-03).
+ */
+describe("a request in a hub's lobby the relays held back", { timeout: 120_000 }, () => {
+  it("is made again in a moment, not at the next refresh", async () => {
+    let found: { world: CommunityWorld; id: string; admin: Peer; hub: Peer; orphans: Peer[] } | undefined;
+    const edgesUp = (p: Peer, id: string) => [...p.links.values()].filter(e => e.kind === "edge" && e.g === id && e.upAt !== undefined).map(e => e.peer);
+    const keyOf = (p: Peer, id: string) => p.groups.communities.session(id)!.myKey;
+    for (let tries = 0; tries < 8 && !found; tries++) {
+      const world = new CommunityWorld(undefined, RELAY_NETWORK);
+      const { id, peers } = await settled(world, ["admin", "bob", "carol", "dave"]);
+      const [admin, ...rest] = peers;
+      const hubs = rest.filter(p => p.groups.communities.isHub(id));
+      const orphans = rest.filter(p => !p.groups.communities.isHub(id) && edgesUp(p, id).every(k => k === keyOf(admin, id)));
+      if (admin.groups.communities.isHub(id) && hubs.length === 1 && orphans.length) found = { world, id, admin, hub: hubs[0], orphans };
+    }
+    expect(found, "a group with the admin and one more hub, the admin carrying members").toBeDefined();
+    const { world, id, admin, hub, orphans } = found!;
+    const lobby = lobbyKeys(hub.groups.communities.session(id)!.state.rv, id, keyOf(hub, id)).identity.pubKeyZ32;
+    // For the first seconds after the leave, the members it carried cannot reach the relays for that hub's lobby.
+    const until = world.now + 3_000;
+    world.failRead = (peer, key) => orphans.includes(peer) && key === lobby && world.now < until;
+    await admin.groups.leave(id);
+    const back = await world.until(() => orphans.every(p => edgesUp(p, id).includes(keyOf(hub, id))), 60_000);
+    // Asked again 5 s after the refusal, read within the hub's 6 s, the edge in a moment: before, 20 s and more.
+    expect(back).toBeLessThan(16_000);
   });
 });

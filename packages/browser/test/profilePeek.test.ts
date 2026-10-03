@@ -46,8 +46,10 @@ async function pairedThenAway() {
   return { dht, c, stored, params, credentials, make };
 }
 
+// `runsHere`: these profiles have no device set (WISP 06). Answered here because the device state database, like any
+// IndexedDB, cannot be read under the fake timers most of these tests run on; the last test reads the real one.
 const host = (transport: PkarrTransport, links: () => StoredLink[], extra: Partial<ProfilePeekHost> = {}): ProfilePeekHost => ({
-  transport, direct: true, online: () => true, readPath: () => "dht", read: async () => ({ links: links(), settings: {} }), ...extra });
+  transport, direct: true, online: () => true, readPath: () => "dht", read: async () => ({ links: links(), settings: {} }), runsHere: async () => true, ...extra });
 
 it("sees a text waiting for a profile that is not running, and writes nothing anywhere", async () => {
   const w = await pairedThenAway();
@@ -221,4 +223,43 @@ it("leaves mesh groups and groups it left out: they publish nothing to look at",
   const groups = [{ id: "mesh", ...base, state: {} }, { id: "gone", ...base, community: { status: "left", rv: "x" } }, { id: "left", ...base, left: { at: 1, admin: "a" }, community: { status: "active", rv: "x" } }] as unknown as StoredGroup[];
   const result = await new ProfilePeek(host(dht.transport, () => [], { read: async () => ({ links: [], groups, settings: {} }) })).peek("b", "ghostly_b");
   expect(result).toEqual({ status: "done", reads: 0, chats: [] });
+});
+
+// covers: devices.gate
+it("skips a profile this device is not the active one for: nothing of it is opened or read (WISP 06)", async () => {
+  const { closeDevicesDb, forgetDevice } = await import("../src/devices/store");
+  const { putDeviceRecord } = await import("./helpers/deviceRecord");
+  const w = await pairedThenAway();
+  expect(await w.c.send("for B's active device", Date.now(), "textforbbbbbbbbbbbbbbb")).toBeNull();
+  await vi.advanceTimersByTimeAsync(200);
+  vi.useRealTimers();
+  const reads = w.dht.resolve.mock.calls.length;
+  const read = vi.fn(async () => ({ links: [w.stored()], settings: {} }));
+  const peek = new ProfilePeek(host(w.dht.transport, () => [w.stored()], { read, runsHere: undefined }));
+  const record = (state: "standby" | "active" | "superseded") => ({ v: 1 as const, profile: "ghostly_b", state, saved: 1, turn: 3, rev: 0, deviceSet: [], takeovers: 0, earlierSets: [] });
+
+  for (const state of ["standby", "superseded"] as const) {
+    await putDeviceRecord(record(state));
+    expect(await peek.peek("b", "ghostly_b")).toEqual({ status: "standby", reads: 0, chats: [] });
+  }
+  expect(read).not.toHaveBeenCalled();
+  expect(w.dht.resolve.mock.calls.length).toBe(reads);
+
+  // The active device of that profile, and a profile with no device set, are looked at as before.
+  await putDeviceRecord(record("active"));
+  expect((await peek.peek("b", "ghostly_b")).chats[0]).toMatchObject({ linkId: "link-b", text: "textforbbbbbbbbbbbbbbb" });
+  await forgetDevice("ghostly_b");
+  expect((await new ProfilePeek(host(w.dht.transport, () => [w.stored()], { read, runsHere: undefined })).peek("b", "ghostly_b")).status).toBe("done");
+
+  // A device state that cannot be read is a standby's, never a `single`'s.
+  await closeDevicesDb();
+  const open = indexedDB.open.bind(indexedDB);
+  const broken = vi.spyOn(indexedDB, "open").mockImplementation((name: string, version?: number) => {
+    if (name === "ghostly-devices") throw new DOMException("no", "UnknownError");
+    return open(name, version);
+  });
+  const before = read.mock.calls.length;
+  expect((await new ProfilePeek(host(w.dht.transport, () => [w.stored()], { read, runsHere: undefined })).peek("b", "ghostly_b")).status).toBe("standby");
+  expect(read.mock.calls.length).toBe(before);
+  broken.mockRestore();
 });

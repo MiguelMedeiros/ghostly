@@ -92,16 +92,34 @@ export function wakePayload(token: string, kind: WakeKind = "message"): Uint8Arr
   return utf8Encode(JSON.stringify(kind === "call" ? { wake: 1, k: token, c: 1 } : { wake: 1, k: token }));
 }
 
-/** A wake-up as the receiving service worker reads it: the token and its kind; null for anything else. */
-export function readWake(text: string | null | undefined): { token: string; kind: WakeKind } | null {
+/**
+ * A wake-up as the receiving service worker reads it: the token and its kind; null for anything else. `device`: one of
+ * the person's own devices asks this one to open for a handoff (WISP 06 § Push and the phone, `{"wake":1,"k":…,"d":1}`).
+ * The flag alone proves nothing: the worker believes it only for a token it gave one of its own devices.
+ */
+export function readWake(text: string | null | undefined): { token: string; kind: WakeKind | "device" } | null {
   if (!text || text.length > 200) return null;
   try {
-    const value = JSON.parse(text) as { wake?: unknown; k?: unknown; c?: unknown };
+    const value = JSON.parse(text) as { wake?: unknown; k?: unknown; c?: unknown; d?: unknown };
     if (value?.wake !== 1 || typeof value.k !== "string" || !TOKEN.test(value.k)) return null;
-    return { token: value.k, kind: value.c === 1 ? "call" : "message" };
+    return { token: value.k, kind: value.d === 1 ? "device" : value.c === 1 ? "call" : "message" };
   } catch {
     return null;
   }
+}
+
+/** A device wake-up is useless once the device that asked stopped waiting for its handoff. */
+export const DEVICE_WAKE_TTL_SECONDS = 5 * 60;
+
+/**
+ * The request that wakes another of the person's devices for a handoff (WISP 06 § Push and the phone): sent as a
+ * wake-up to a contact is, with body `{"wake":1,"k":"<token>","d":1}`, where the token is the one that device gave this
+ * one on their device link. Throws `WebPushError` when the target cannot be used.
+ */
+export function deviceWakeRequest(target: WakeTarget, now = Date.now()): PushRequest {
+  return pushRequest(target, target.vapid, utf8Encode(JSON.stringify({ wake: 1, k: target.token, d: 1 })), {
+    subject: WAKE_SUBJECT, ttlSeconds: DEVICE_WAKE_TTL_SECONDS, now,
+  });
 }
 
 /** The token a wake-up carries; null for anything else. */
