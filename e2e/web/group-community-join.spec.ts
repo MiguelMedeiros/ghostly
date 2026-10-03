@@ -12,9 +12,10 @@ import { expect, test } from "../support/fixtures";
  * each offer and answer waits for it, up to 5 s when Google's public servers are slow, which no bound here allows for.
  * With the local server's reflexive candidate kept (e2e/support/stun.ts), an offer gathers in 0.4 s, not 5 s: over six
  * runs on a shared machine (2026-10-03) the first joiner got in within 2.8 to 7.4 s and reached a member within 5.6 to
- * 11.7 s, the second within 3.3 to 8.4 s and 5.6 to 12.7 s.
+ * 11.7 s, the second within 3.3 to 8.4 s and 5.6 to 12.7 s. Getting in comes in two steps, about
+ * 3 s or about 7.5 s (most likely the relays' polling pace), so the first joiner's bound to get in stays where it was.
  */
-const JOIN_BOUND_MS = [10_000, 12_000];
+const JOIN_BOUND_MS = [12_000, 12_000];
 const REACH_BOUND_MS = [16_000, 20_000];
 const groupChat = (page: import("@playwright/test").Page) => page.getByTestId("group-chat");
 
