@@ -51,3 +51,37 @@ export async function markRestoredWallet(): Promise<void> {
   }
   return done;
 }
+
+/**
+ * Files a light backup left out (WISP 05 § Light backups), for a restore that brought the database back whole (the
+ * headless CLI's): each record is marked `leftOut`, and nothing of it says any longer where its bytes were. A file
+ * not in the database is passed over. Doing it twice changes nothing more.
+ */
+export async function markLeftOutFiles(ids: readonly string[]): Promise<void> {
+  if (!ids.length) return;
+  const db = await openDb();
+  const tx = db.transaction([STORES.files, STORES.fileState], "readwrite");
+  const done = new Promise<void>((resolve, reject) => {
+    tx.oncomplete = () => resolve();
+    tx.onabort = () => reject(tx.error ?? new Error("The files left out could not be marked"));
+    tx.onerror = () => reject(tx.error ?? new Error("The files left out could not be marked"));
+  });
+  const files = tx.objectStore(STORES.files), states = tx.objectStore(STORES.fileState);
+  for (const id of ids) {
+    const read = files.get(id);
+    read.onsuccess = () => {
+      const record = read.result as { blob?: unknown; bytes?: unknown } | undefined;
+      if (!record) return;
+      const { blob: _blob, bytes: _bytes, ...rest } = record;
+      files.put({ ...rest, leftOut: true });
+    };
+    const state = states.get(id);
+    state.onsuccess = () => {
+      const value = state.result as { bytes?: unknown } | undefined;
+      if (!value || !("bytes" in value)) return;
+      const { bytes: _bytes, ...rest } = value;
+      states.put(rest);
+    };
+  }
+  return done;
+}

@@ -108,6 +108,9 @@ export interface NetworkSettings {
   clockOffMs?: number;
 }
 
+/** Whether a stored file's bytes are on this device (see `ServicesPlatform.fileHeld`). */
+export type FileHeld = "here" | "gone" | "left-out";
+
 /** What a person can do to a files/3 transfer: `resend` a stuck one they send, `request` again one they receive. */
 export type FileAction = "accept" | "decline" | "pause" | "resume" | "cancel" | "resend" | "request";
 
@@ -478,6 +481,11 @@ export interface ServicesPlatform {
   fileTooLarge?(peerPubKeyZ32: string, size: number): string | null;
   /** The file to show or save, backed by storage. Null when it is gone, or too large to hand out here (see `saveFile`). */
   getFile(fileId: string): Promise<Blob | null>;
+  /**
+   * Whether this device holds a stored file's bytes: `here` (perhaps too large for `getFile`; `saveFile` saves it),
+   * `gone`, or `left-out` (left out of the light backup this profile was restored from, WISP 05).
+   */
+  fileHeld?(fileId: string): Promise<FileHeld>;
   /**
    * A URL a `<video>` plays a stored file from without the page holding it (Desktop: served in ranges by Rust), for
    * a file `getFile` cannot hand out. Null where the platform cannot, or the file is gone. Call `release` when done.

@@ -131,6 +131,7 @@
     "leftMinutes": "残り {{minutes}} 分",
     "leftUnderMinute": "残り 1 分未満",
     "noRoomDevice": "容量が足りません: この端末の空き {{size}}",
+    "notInBackup": "このバックアップにはありません",
     "notSentHint": "送信されていません。もう一度送ってください。",
     "of": "{{size}} 中 {{done}}",
     "pause": "一時停止",

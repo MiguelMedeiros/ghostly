@@ -1,5 +1,5 @@
 import { formatFileSize } from "./format";
-import type { FileAction, FileTransferState, ServicesPlatform } from "./platform";
+import type { FileAction, FileHeld, FileTransferState, ServicesPlatform } from "./platform";
 import type { ChatFile } from "./types";
 import { englishT, type Translate } from "../locales/translate";
 
@@ -35,13 +35,24 @@ export function failedStatus(file: ChatFile, transfer: FileTransferState, tr: Tr
 }
 
 /**
- * The line under the file's name: how far it got, and what it waits for. `named` is the contact's name, if it has
- * one: without, the line says "your contact", in lower case, as it sits mid-sentence.
+ * Whether this device holds a stored file's bytes, asked when it hands out none: `here` (too large to hand out, saved
+ * through the system), `gone`, or `left-out` of a light backup. A platform that cannot tell says `here` where it can
+ * save the file and its transfer finished, as before.
  */
-export function fileStatus(file: ChatFile, transfer: FileTransferState | null, named: string | undefined, missing: boolean, tr: Translate = englishT): string {
+export async function fileHeld(platform: Pick<ServicesPlatform, "fileHeld" | "saveFile">, fileId: string, done: boolean): Promise<FileHeld> {
+  const held = await platform.fileHeld?.(fileId).catch(() => null);
+  return held ?? (platform.saveFile && done ? "here" : "gone");
+}
+
+/**
+ * The line under the file's name: how far it got, and what it waits for. `named` is the contact's name, if it has
+ * one: without, the line says "your contact", in lower case, as it sits mid-sentence. `missing`: its bytes are not on
+ * this device (`left-out`: a light backup left them out).
+ */
+export function fileStatus(file: ChatFile, transfer: FileTransferState | null, named: string | undefined, missing: boolean | "left-out", tr: Translate = englishT): string {
   const size = formatFileSize(file.size);
   const peerName = named ?? tr("chat.file.yourContact");
-  if (!transfer || transfer.state === "done") return missing ? tr("chat.file.gone") : size;
+  if (!transfer || transfer.state === "done") return missing === "left-out" ? tr("chat.file.notInBackup") : missing ? tr("chat.file.gone") : size;
   if (transfer.state === "failed") return failedStatus(file, transfer, tr);
   const done = `${percent(transfer)}%`;
   const incoming = transfer.direction === "in";

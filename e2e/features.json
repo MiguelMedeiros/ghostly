@@ -93,6 +93,7 @@
     {"id":"app.web-limits","wisp":null,"kind":"feature","clients":["web"],"infra":[],"title":"The web app says plainly what it cannot do (services, native transports)"},
     {"id":"backup.database-snapshot","wisp":"05","kind":"protocol","clients":["web","extension","desktop"],"infra":[],"title":"IndexedDB snapshot/restore for backups: every store kept, never over an existing database"},
     {"id":"backup.envelope","wisp":"05","kind":"protocol","clients":["web","extension","desktop"],"infra":[],"title":"Backup envelope: encrypted bundle format, versioned, verified on restore"},
+    {"id":"backup.light","wisp":"05","kind":"feature","clients":["web","extension","desktop","cli"],"infra":[],"title":"A light backup: everything but the bytes of files over 1 MiB (voice messages up to 4 MiB stay), its size shown before, said in the bundle, and each file left out shown as not in this backup after a restore"},
     {"id":"backup.passphrase-rules","wisp":"05","kind":"feature","clients":["web","extension","desktop"],"infra":[],"title":"Backup passphrase rules; a wrong passphrase restores nothing"},
     {"id":"backup.profile.file","wisp":"1001","kind":"feature","clients":["web","extension","desktop"],"infra":[],"title":"A whole profile backed up to a file and restored as a new profile with its passphrase"},
     {"id":"backup.profile.s3","wisp":"1002","kind":"feature","clients":["web","extension","desktop"],"infra":["s3"],"title":"A whole profile backed up to S3 and restored as a new profile"},
