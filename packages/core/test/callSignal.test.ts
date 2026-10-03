@@ -360,5 +360,10 @@ describe("call candidates on the chat session", () => {
     const config = callRtcConfig([{ urls: "turn:turn.example.org:3478, turns:turn.example.org:5349", username: "u", credential: "p" }, { urls: " " }]);
     expect(config.iceServers?.slice(RTC_CONFIG.iceServers!.length)).toEqual([{ urls: ["turn:turn.example.org:3478", "turns:turn.example.org:5349"], username: "u", credential: "p" }]);
   });
+
+  it("skips a TURN server that lacks its credential (restored from a backup), which a browser would refuse", () => {
+    const config = callRtcConfig([{ urls: "turn:turn.example.org:3478", username: "u" }, { urls: "turns:b.example.org", username: "u", credential: " " }, { urls: "stun:stun.example.org" }]);
+    expect(config.iceServers?.slice(RTC_CONFIG.iceServers!.length)).toEqual([{ urls: ["stun:stun.example.org"] }]);
+  });
 });
 

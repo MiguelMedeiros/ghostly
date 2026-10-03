@@ -2,6 +2,7 @@ import { act, screen, waitFor } from "@testing-library/react";
 import { Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { BackupDue } from "@ghostly/browser/shared/backupReminder";
+import { registerFileBytes, resetFileBytes, type FileBytes } from "@ghostly/browser/shared/fileBytes";
 import { BackupReminder } from "../../components/wallet/BackupReminder";
 import { StorageKeeper } from "../../components/StorageKeeper";
 import { LockScreenProvider } from "../../contexts/LockScreenContext";
@@ -258,13 +259,28 @@ describe("Settings: storage on this device", () => {
     expect(screen.queryByTestId("settings-storage-protect")).not.toBeInTheDocument();
   });
 
-  it("the Desktop app shows no such line", async () => {
+  it("the Desktop app shows no such line, and counts its WebView's storage with the profile's files on disk", async () => {
+    // covers: settings.storage-used
     (window as unknown as { __TAURI_INTERNALS__?: object }).__TAURI_INTERNALS__ = {};
-    const storage = browserStorage();
-    open();
-    await screen.findByTestId("settings-storage-used");
-    await waitFor(() => expect(storage.estimate).not.toHaveBeenCalled());
-    expect(screen.queryByTestId("settings-storage-protection")).not.toBeInTheDocument();
+    const storage = browserStorage({ usage: 2 * 1024 * 1024 });
+    const usage = vi.fn(async () => ({ files: 5 * 1024 * 1024, count: 3, staged: 1024 * 1024 }));
+    registerFileBytes("native", async () => ({ kind: "native", usage }) as unknown as FileBytes, true);
+    try {
+      const { user } = open();
+      const row = await screen.findByTestId("settings-storage-used");
+      // 2 MB of the WebView, 5 MB of files and 1 MB staged for a save, and the few bytes of settings.
+      await waitFor(() => expect(row).toHaveTextContent("8 MB"));
+      expect(row).not.toHaveTextContent(" of ");
+      await user.click(row.querySelector("[data-testid=row-info]")!);
+      const parts = screen.getByTestId("settings-storage-parts");
+      expect(parts).toHaveTextContent("Messages and app data: 2 MB");
+      expect(parts).toHaveTextContent("Files (3): 5 MB");
+      expect(parts).toHaveTextContent("Copies being saved: 1 MB");
+      expect(parts).toHaveTextContent("Messages and app data count every profile on this device.");
+      // The protection line stays off: no browser evicts the Desktop's storage.
+      expect(screen.queryByTestId("settings-storage-protection")).not.toBeInTheDocument();
+      expect(storage.persisted).not.toHaveBeenCalled();
+    } finally { resetFileBytes(); }
   });
 });
 

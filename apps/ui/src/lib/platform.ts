@@ -503,7 +503,8 @@ export interface ServicesPlatform {
   deleteMessage(peerPubKeyZ32: string, messageId: string): Promise<void>;
   wallet: WalletPlatform;
   getNetwork(): NetworkSettings | null;
-  setNetwork(settings: Pick<NetworkSettings, "relays" | "turn"> & { irohRelays?: string[] } & Partial<Pick<NetworkSettings, "hyperdhtRelay" | "readRelays" | "pushRelay">>): Promise<void>;
+  /** Saves the network settings given; `turn` left out keeps the TURN server as it is. */
+  setNetwork(settings: Pick<NetworkSettings, "relays"> & { irohRelays?: string[] } & Partial<Pick<NetworkSettings, "turn" | "hyperdhtRelay" | "readRelays" | "pushRelay">>): Promise<void>;
 }
 
 export const servicesPlatform: ServicesPlatform | null = null;

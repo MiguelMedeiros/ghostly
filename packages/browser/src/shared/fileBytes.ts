@@ -47,6 +47,12 @@ export interface FileBytes {
    * too large for `blob`), or null when there is no such file. The URL works until `release`.
    */
   stream?(id: string, type: string): Promise<FileStream | null>;
+  /**
+   * What this space's files take on disk, where they are real files (Desktop): the files, and the copies staged for a
+   * save (a backup, a file on its way through the save dialog) apart. Absent elsewhere: there the browser's own
+   * estimate counts them.
+   */
+  usage?(): Promise<FileUsage>;
   /** Removes another profile's folder (a deleted profile). IndexedDB pieces go with the profile's database. */
   dropSpace?(space: string): Promise<void>;
   /**
@@ -58,6 +64,9 @@ export interface FileBytes {
 }
 
 export type FileBytesKind = "opfs" | "native" | "idb";
+
+/** Bytes a space's files take (`FileBytes.usage`): the files and how many, and the copies staged for a save. */
+export interface FileUsage { files: number; count: number; staged: number }
 
 /** A stored file being served to a media element: its URL, and how to stop serving it. */
 export interface FileStream {

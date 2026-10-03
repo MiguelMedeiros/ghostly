@@ -143,6 +143,13 @@
     "unprotected": "Ghostly をインストール（ホーム画面に追加）し、通知を許可し、プロフィールのバックアップを保管してください。ブラウザは、インストールされてよく使われるアプリを保護します。"
   },
   "storageOf": "{{used}} / {{quota}}",
+  "storageParts": {
+    "app": "メッセージとアプリのデータ: {{size}}",
+    "files": "ファイル（{{count}}件）: {{size}}",
+    "local": "設定: {{size}}",
+    "staged": "保存中のコピー: {{size}}"
+  },
+  "storagePartsNote": "メッセージとアプリのデータは、このデバイスのすべてのプロフィールの合計です。ファイルはこのプロフィールのものです。",
   "storageProtect": "保護する",
   "storageState": {
     "protected": "保護されています",

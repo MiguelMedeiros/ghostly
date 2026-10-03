@@ -34,6 +34,7 @@
     "allow-file-bytes-stream-close",
     "allow-file-bytes-stream-open",
     "allow-file-bytes-truncate",
+    "allow-file-bytes-usage",
     "allow-generate-enc-key",
     "allow-get-profile",
     "allow-get-public-key",

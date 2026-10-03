@@ -1,0 +1,1 @@
+A bundle no longer holds the credential of the profile's TURN server (WISP 101), as it holds no storage credentials: its address and username stay, so the restored profile shows the server and asks for the credential again. A handoff keeps it.

@@ -46,6 +46,8 @@ export function NetworkSettings() {
   if (!platform || !network) return null;
   const current = JSON.stringify({ relays, turn, iroh, hyperdhtRelay, pushRelay });
   const saved = savedAs === current;
+  // A TURN server restored from a backup comes without its credential (backups leave it out): calls skip it until then.
+  const credentialGone = !!network.turn?.urls && !network.turn.credential && !turn.credential;
 
   const save = async () => {
     setError("");
@@ -71,7 +73,7 @@ export function NetworkSettings() {
   const readRelays = async (on: boolean) => {
     setError("");
     setSwitching(true);
-    try { await platform.setNetwork({ relays: network.relays, turn: network.turn, readRelays: on }); }
+    try { await platform.setNetwork({ relays: network.relays, readRelays: on }); }
     catch (e) { setError(errorText(e, t)); }
     finally { setSwitching(false); }
   };
@@ -109,7 +111,7 @@ export function NetworkSettings() {
           spellCheck={false} data-testid="network-push-relay" className={`${field} font-mono text-sm`} />
       </Field>
 
-      <Field label={t("network.turn")} htmlFor="network-turn-url" hint={t("network.turnHint")} info={t("network.turnInfo")}>
+      <Field testId="network-turn-field" label={t("network.turn")} htmlFor="network-turn-url" hint={t(credentialGone ? "network.turnCredentialAgain" : "network.turnHint")} info={t("network.turnInfo")}>
         <input id="network-turn-url" aria-label={t("network.turnUrl")} value={turn.urls} onChange={(e) => setTurn({ ...turn, urls: e.target.value })}
           placeholder="turn:turn.example.org:3478" spellCheck={false} className={`${field} font-mono text-sm`} />
         <FieldGrid>

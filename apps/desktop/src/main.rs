@@ -118,6 +118,7 @@ macro_rules! commands {
             file_store::file_bytes_save,
             file_store::file_bytes_size,
             file_store::file_bytes_truncate,
+            file_store::file_bytes_usage,
             file_stream::file_bytes_stream_close,
             file_stream::file_bytes_stream_open,
             hyperdht::paired_hyperdht_address,
