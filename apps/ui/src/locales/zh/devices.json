@@ -3,7 +3,7 @@
     "adding": "正在添加 {{device}}…",
     "button": "添加设备",
     "codeHint": "在另一台设备上打开 Ghostly，选择“将此设备添加到我的个人资料”，然后扫描此代码。",
-    "confirm": "{{device}} 上显示的数字相同吗？",
+    "confirm": "新设备自称“{{device}}”。两台设备显示的是这些数字吗？",
     "done": "已添加 {{device}}，它处于待机状态。",
     "finish": "完成",
     "match": "相同",
@@ -81,7 +81,9 @@
     "standby": "待机",
     "thisActive": "此设备 · 活动",
     "thisStandby": "此设备 · 待机",
-    "title": "设备"
+    "title": "设备",
+    "unfinished": "未完成",
+    "unfinishedInfo": "它收到了连接你各设备的信息，但没有完成。之后推出的“移除设备”会将其收回。"
   },
   "standby": {
     "hint": {

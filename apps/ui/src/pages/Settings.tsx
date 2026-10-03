@@ -119,8 +119,9 @@ export function Settings() {
   const hasPassword = !!settings.lockScreen.passwordHash;
   // A profile on several devices (WISP 06) keeps a lock password of 8 characters or more: it cannot be shortened,
   // turned off or removed here. One with no device set keeps today's rule.
+  // Until the answer comes (or when the call fails), as if there were one: the stricter rule.
   const devices = useDeviceSet(0);
-  const deviceSet = !!devices && devices.state !== "single";
+  const deviceSet = devices === null || devices.state !== "single";
 
   useEffect(() => {
     setStorageInfo(getStorageUsage());

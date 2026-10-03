@@ -3,7 +3,7 @@
     "adding": "Adicionando {{device}}…",
     "button": "Adicionar um dispositivo",
     "codeHint": "No outro dispositivo, abra o Ghostly e escolha Adicionar este dispositivo ao meu perfil. Depois leia este código.",
-    "confirm": "{{device}} mostra os mesmos dígitos?",
+    "confirm": "O novo dispositivo se chama {{device}}. Os dois dispositivos mostram estes dígitos?",
     "done": "{{device}} adicionado. Está em espera.",
     "finish": "Pronto",
     "match": "São iguais",
@@ -81,7 +81,9 @@
     "standby": "Em espera",
     "thisActive": "Este dispositivo · Ativo",
     "thisStandby": "Este dispositivo · Em espera",
-    "title": "Dispositivos"
+    "title": "Dispositivos",
+    "unfinished": "Não concluído",
+    "unfinishedInfo": "Ele recebeu o que liga seus dispositivos e não concluiu. Remover um dispositivo, que virá depois, desfaz isso."
   },
   "standby": {
     "hint": {

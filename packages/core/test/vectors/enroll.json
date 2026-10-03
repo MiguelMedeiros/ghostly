@@ -14,7 +14,7 @@
     "inviterKey": "4seRUQnEdhAuBjzCMKcN3jdvqcgfFtOjDqI4dk7tSBc",
     "joinerKey": "ny86D64D8FVi-hMTmEv9ZfE5PJn1zPMxkA5_PEaNvP8",
     "message": "[\"ghostly-enroll\",\"92e4443e845abd98a69ce48fa143ba7e4fa5ab9dadde3b5741091abbb4889e0f\",\"4seRUQnEdhAuBjzCMKcN3jdvqcgfFtOjDqI4dk7tSBc\",\"ny86D64D8FVi-hMTmEv9ZfE5PJn1zPMxkA5_PEaNvP8\"]",
-    "digits": "557144",
+    "digits": "062545",
     "hello": {
       "t": "enroll-hello",
       "k": "ny86D64D8FVi-hMTmEv9ZfE5PJn1zPMxkA5_PEaNvP8",
@@ -42,7 +42,22 @@
         ]
       ],
       "turn": 123456789,
-      "rev": 3
+      "rev": 3,
+      "net": {
+        "relays": [
+          "https://relay.example"
+        ],
+        "irohRelays": [
+          "https://iroh.example"
+        ],
+        "iceServers": [
+          {
+            "urls": "turn:turn.example:3478",
+            "username": "u",
+            "credential": "c"
+          }
+        ]
+      }
     }
   }
 }

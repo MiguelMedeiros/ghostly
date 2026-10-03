@@ -18,7 +18,7 @@ import { TURN_MAX, TURN_REV_LIMIT, TURN_SLOTS, turnName } from "./turnRecord";
  *    `standby` and answers `enroll-done`.
  * 6. A publishes the turn record with B listed. Only then is B a device.
  *
- * `enroll-cancel` is this build's own: either side ends the session and says why (digits that did not match, a code
+ * `net` in the grant (the person's network settings) is this build's own too; `enroll-cancel` is as well: either side ends the session and says why (digits that did not match, a code
  * already used, an error), so the other screen can say so at once rather than waiting for a timeout.
  *
  * The WISP leaves the encoding of the signed tuple open. It is the house form (`deviceLink.ts`): the UTF-8 bytes of
@@ -56,16 +56,17 @@ export function enrollMessage(transcriptHash: string, inviterKey: Uint8Array, jo
 }
 
 /**
- * The six digits both screens show: the first 20 bits of `SHA-256("ghostly-enroll-digits" || transcriptHash ||
- * A's key || B's key)`, as a decimal number modulo 1,000,000, with leading zeros. The transcript hash goes in as its
- * 32 bytes.
+ * The six digits both screens show: the first 32 bits of `SHA-256("ghostly-enroll-digits" || transcriptHash ||
+ * A's key || B's key)`, big-endian, as a decimal number modulo 1,000,000, with leading zeros. The transcript hash goes
+ * in as its 32 bytes. The WISP says 20 bits; modulo a million those make the values under 48,576 twice as likely as
+ * the rest, which 32 bits bring down to one part in about 4,295.
  */
 export function enrollDigits(transcriptHash: string, inviterKey: Uint8Array, joinerKey: Uint8Array): string {
   if (!HASH.test(transcriptHash)) throw new Error("A transcript hash is 64 lower-case hex digits");
   checkKey(inviterKey, "The inviter"); checkKey(joinerKey, "The joiner");
   const hash = Uint8Array.from(transcriptHash.match(/../g)!, (pair) => parseInt(pair, 16));
   const h = sha256(concatBytes(utf8Encode("ghostly-enroll-digits"), hash, inviterKey, joinerKey));
-  const bits = (h[0] << 12) | (h[1] << 4) | (h[2] >> 4);
+  const bits = ((h[0] << 24) | (h[1] << 16) | (h[2] << 8) | h[3]) >>> 0;
   return String(bits % 1_000_000).padStart(6, "0");
 }
 
@@ -115,6 +116,45 @@ export function verifyEnrollProof(frame: DeviceFrame, transcriptHash: string, in
 /** One slot of a granted device set: the key and its name, or null where nobody holds the slot. */
 export type EnrollSlot = { key: Uint8Array; name: string } | null;
 
+/**
+ * The person's network settings, as the active device has them (`devices/network.ts` keeps the same copy): a new
+ * standby reaches the other devices through the person's relays, Iroh relays and ICE servers, and asks nothing of
+ * anyone with the network off. Absent fields are the app's defaults. This build's own field of the grant (`net`).
+ */
+export interface EnrollNetwork {
+  off?: boolean;
+  relays?: string[];
+  readRelays?: boolean;
+  irohRelays?: string[];
+  iceServers?: { urls: string; username?: string; credential?: string }[];
+}
+
+const texts = (value: unknown, max: number): value is string[] => Array.isArray(value) && value.length <= max && value.every((v) => typeof v === "string" && v.length <= 2048);
+
+/** A grant's network settings, checked as the device record checks them; null when they are not well formed. */
+function readEnrollNetwork(value: unknown): EnrollNetwork | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const n = value as Record<string, unknown>;
+  if (n.off !== undefined && typeof n.off !== "boolean") return null;
+  if (n.readRelays !== undefined && typeof n.readRelays !== "boolean") return null;
+  if (n.relays !== undefined && !texts(n.relays, 16)) return null;
+  if (n.irohRelays !== undefined && !texts(n.irohRelays, 4)) return null;
+  if (n.iceServers !== undefined) {
+    if (!Array.isArray(n.iceServers) || n.iceServers.length > 8) return null;
+    for (const server of n.iceServers as Record<string, unknown>[]) {
+      if (!server || typeof server !== "object" || typeof server.urls !== "string" || server.urls.length > 2048) return null;
+      if ((server.username !== undefined && typeof server.username !== "string") || (server.credential !== undefined && typeof server.credential !== "string")) return null;
+    }
+  }
+  return {
+    ...(n.off === true ? { off: true } : {}),
+    ...(n.relays ? { relays: [...n.relays as string[]] } : {}),
+    ...(n.readRelays === true ? { readRelays: true } : {}),
+    ...(n.irohRelays ? { irohRelays: [...n.irohRelays as string[]] } : {}),
+    ...(n.iceServers ? { iceServers: (n.iceServers as Record<string, string>[]).map((s) => ({ urls: s.urls, ...(s.username !== undefined ? { username: s.username } : {}), ...(s.credential !== undefined ? { credential: s.credential } : {}) })) } : {}),
+  };
+}
+
 /** What `enroll-grant` gives the new device. */
 export interface EnrollGrant {
   /** The device-set secret, 32 bytes. */
@@ -123,6 +163,8 @@ export interface EnrollGrant {
   set: EnrollSlot[];
   turn: number;
   rev: number;
+  /** The person's network settings (`net`); absent from a grant that carries none. */
+  network?: EnrollNetwork;
 }
 
 /**
@@ -134,7 +176,7 @@ export function enrollGrantFrame(grant: EnrollGrant): DeviceFrame {
   if (grant.set.length > TURN_SLOTS) throw new Error("A device set holds four devices at most");
   let set = grant.set.map((slot) => (slot ? [toBase64Url(slot.key), turnName(slot.name)] : null));
   while (set.length && set[set.length - 1] === null) set = set.slice(0, -1);
-  return { t: ENROLL_GRANT, d: toBase64Url(grant.d), set, turn: grant.turn, rev: grant.rev };
+  return { t: ENROLL_GRANT, d: toBase64Url(grant.d), set, turn: grant.turn, rev: grant.rev, ...(grant.network ? { net: grant.network } : {}) };
 }
 
 /**
@@ -156,7 +198,9 @@ export function readEnrollGrant(frame: DeviceFrame, inviterKey: Uint8Array, join
   if (own.length !== 1 || inviter.length !== 1) return null;
   const keys = set.filter((slot): slot is NonNullable<EnrollSlot> => !!slot).map((slot) => toBase64Url(slot.key));
   if (new Set(keys).size !== keys.length) return null;
-  return { d: fromBase64Url(frame.d), set, turn: frame.turn as number, rev: frame.rev as number, ownSlot: own[0], inviterSlot: inviter[0] };
+  const network = frame.net === undefined ? undefined : readEnrollNetwork(frame.net);
+  if (network === null) return null;
+  return { d: fromBase64Url(frame.d), set, turn: frame.turn as number, rev: frame.rev as number, ...(network ? { network } : {}), ownSlot: own[0], inviterSlot: inviter[0] };
 }
 
 export const enrollDoneFrame = (): DeviceFrame => ({ t: ENROLL_DONE });

@@ -51,6 +51,11 @@ export interface DeviceLinkView {
 export interface DeviceSetView {
   state: DeviceState;
   devices: { key: string; name: string; slot: number; self: boolean; active: boolean; status?: DeviceLinkView["status"] }[];
+  /**
+   * Devices this one granted the set to whose enrollment never came back: they hold `D` and are in no record. Shown
+   * as "Not finished"; moving the set to a new `D` (removal, a later part) is what takes `D` from them.
+   */
+  unfinishedGrants?: { key: string; name: string; at: number }[];
   /** This device's enrollment did not finish (WISP 06 § Adding a device, "Not finished"). */
   unfinished?: true;
 }
@@ -63,7 +68,9 @@ export function deviceSetView(record: DeviceRecord | null, links: DeviceLinkView
     const link = links.find((l) => l.key === slot.key && !l.earlier);
     return [{ key: slot.key, name: slot.name, slot: index, self: index === record.ownSlot, active: index === record.activeSlot, ...(link ? { status: link.status } : {}) }];
   });
-  return { state: record.state, devices, ...(enrollmentUnfinished(record) ? { unfinished: true as const } : {}) };
+  const listed = new Set(record.deviceSet.flatMap((slot) => (slot ? [slot.key] : [])));
+  const grants = (record.unfinishedGrants ?? []).filter((grant) => !listed.has(grant.key));
+  return { state: record.state, devices, ...(grants.length ? { unfinishedGrants: grants } : {}), ...(enrollmentUnfinished(record) ? { unfinished: true as const } : {}) };
 }
 
 export interface DeviceLinksOptions {

@@ -61,6 +61,8 @@ export function AddDeviceDialog({ onClose }: { onClose(): void }) {
       if (!valid) { setError(t("devices.password.wrong")); return; }
       // The hash keeps no length: only the password typed now says whether it is long enough.
       if (password.length < DEVICE_SET_PASSWORD_MIN) { setPassword(""); setStep("longer"); return; }
+      // A password that is stored with the lock off still leaves the profile open: a device set needs the lock on.
+      if (!settings.lockScreen.enabled) updateLockScreen({ enabled: true });
       await start();
       return;
     }

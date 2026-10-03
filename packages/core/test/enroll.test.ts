@@ -49,7 +49,10 @@ async function build(): Promise<Vectors> {
   payload.set(fromBase64Url(invite.joinerSeedB64), 0); payload.set(fromBase64Url(invite.linkKeyB64), 32);
   payload.set(identityFromSeed(seed("inviter rendezvous")).publicKey, 64); payload.set(invite.inviterKey, 96);
   payload[128] = 1; new DataView(payload.buffer).setUint32(129, invite.expires);
-  const grant = enrollGrantFrame({ d: seed("D"), set: [{ key: inviter.publicKey, name: "MacBook" }, null, { key: joiner.publicKey, name: "Phone" }], turn: 123_456_789, rev: 3 });
+  const grant = enrollGrantFrame({
+    d: seed("D"), set: [{ key: inviter.publicKey, name: "MacBook" }, null, { key: joiner.publicKey, name: "Phone" }], turn: 123_456_789, rev: 3,
+    network: { relays: ["https://relay.example"], irohRelays: ["https://iroh.example"], iceServers: [{ urls: "turn:turn.example:3478", username: "u", credential: "c" }] },
+  });
   return {
     invite: { joinerSeed: invite.joinerSeedB64, linkKey: invite.linkKeyB64, inviterRendezvousZ32: invite.inviterRendezvousZ32, inviterKey: toBase64Url(invite.inviterKey), flags: 1, expires: invite.expires, payload: bytesToHex(payload), code },
     enroll: {
@@ -171,9 +174,9 @@ describe("enroll/1", () => {
     expect(enrollDigits(bytesToHex(seed("another transcript")), inviter.publicKey, joiner.publicKey)).not.toBe(digits);
     expect(enrollDigits(HASH, seedSigner(seed("impostor")).publicKey, joiner.publicKey)).not.toBe(digits);
     expect(enrollDigits(HASH, inviter.publicKey, seedSigner(seed("impostor")).publicKey)).not.toBe(digits);
-    // The first 20 bits, modulo a million: the top value, 2^20 - 1, is 48575.
+    // The first 32 bits, big-endian, modulo a million (the WISP's 20 bits would favour values under 48,576).
     const h = sha256(new Uint8Array([...utf8Encode("ghostly-enroll-digits"), ...seed("transcript"), ...inviter.publicKey, ...joiner.publicKey]));
-    expect(Number(digits)).toBe(((h[0] << 12) | (h[1] << 4) | (h[2] >> 4)) % 1_000_000);
+    expect(Number(digits)).toBe(new DataView(h.buffer, h.byteOffset).getUint32(0) % 1_000_000);
   });
 
   it("a grant keeps every slot in its place and lists both devices once", () => {
@@ -189,6 +192,17 @@ describe("enroll/1", () => {
     expect(readEnrollGrant({ ...frame, turn: 2 ** 32 - 1 }, inviter.publicKey, joiner.publicKey)).toBeNull();
     expect(readEnrollGrant({ ...frame, set: [null, null, null, [toBase64Url(inviter.publicKey), "A"], [toBase64Url(joiner.publicKey), "B"]] }, inviter.publicKey, joiner.publicKey)).toBeNull();
     expect(readEnrollGrant({ ...frame, d: "short" }, inviter.publicKey, joiner.publicKey)).toBeNull();
+  });
+
+  it("a grant carries the person's network settings, checked as the device record checks them", () => {
+    const network = { off: true, relays: ["https://r.example"], readRelays: true, irohRelays: ["https://i.example"], iceServers: [{ urls: "turn:t.example", username: "u", credential: "c" }] };
+    const frame = enrollGrantFrame({ d: seed("D"), set: [{ key: inviter.publicKey, name: "A" }, { key: joiner.publicKey, name: "B" }], turn: 5, rev: 0, network });
+    expect(readEnrollGrant(frame, inviter.publicKey, joiner.publicKey)?.network).toEqual(network);
+    // Without one, none; a malformed one refuses the grant.
+    expect(readEnrollGrant({ ...frame, net: undefined }, inviter.publicKey, joiner.publicKey)?.network).toBeUndefined();
+    for (const net of [{ relays: "x" }, { relays: Array(17).fill("x") }, { off: "yes" }, { iceServers: [{ urls: 3 }] }, [1]]) {
+      expect(readEnrollGrant({ ...frame, net }, inviter.publicKey, joiner.publicKey)).toBeNull();
+    }
   });
 
   it("a cancel says why, and an unknown reason is a failure", () => {

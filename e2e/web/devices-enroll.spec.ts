@@ -47,7 +47,7 @@ test("a profile adds a second device: the same digits on both, a standby with a 
   const digits = await desktopDigits.getAttribute("data-digits");
   expect(digits).toMatch(/^\d{6}$/);
   expect(await phoneDigits.getAttribute("data-digits")).toBe(digits);
-  await expect(add).toContainText("Does Phone show the same digits?");
+  await expect(add).toContainText("The new device calls itself Phone.");
   await expect(phone.page.getByTestId("device-join")).toContainText("Confirm on your other device.");
 
   await add.getByTestId("device-add-match").click();

@@ -1,5 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
+import { Route, Routes } from "react-router-dom";
+import { LockScreenProvider } from "../../contexts/LockScreenContext";
+import { UpdateProvider } from "../../contexts/UpdateContext";
+import { Settings } from "../../pages/Settings";
 import { AddDeviceDialog } from "../../components/devices/AddDeviceDialog";
 import { JoinProfileDialog } from "../../components/devices/JoinProfileDialog";
 import { defaultDeviceName, lockPasswordMin, lockPasswordProblem } from "../../lib/devices";
@@ -47,6 +51,40 @@ describe("the lock password a device set needs (WISP 06 § Adding a device)", ()
     expect(JSON.parse(localStorage.getItem("ghostly_app_settings")!).lockScreen).toMatchObject({ enabled: true });
   });
 
+  it("a password stored with the lock turned off: typing it turns the lock on before the code is made", async () => {
+    localStorage.setItem("ghostly_app_settings", JSON.stringify({ lockScreen: { enabled: false, passwordHash: await hashPassword("a long password"), timeoutMinutes: 5 } }));
+    const { user, engine } = renderApp(<AddDeviceDialog onClose={() => {}} />);
+    engine.on("deviceEnrollInvite", () => waiting);
+    await user.type(screen.getByTestId("device-add-password"), "a long password");
+    await user.click(screen.getByTestId("device-add-next"));
+    await waitFor(() => expect(engine.callsTo("deviceEnrollInvite")).toHaveLength(1));
+    expect(JSON.parse(localStorage.getItem("ghostly_app_settings")!).lockScreen).toMatchObject({ enabled: true });
+  }, 20_000);
+
+  it("Settings keeps 8 characters while it does not know the profile has no device set (loading, or the call failed)", async () => {
+    const settings = () => renderApp(<LockScreenProvider><UpdateProvider><Routes><Route path="/settings" element={<Settings />} /></Routes></UpdateProvider></LockScreenProvider>, { route: "/settings" });
+    const { user, engine } = settings();
+    engine.on("deviceSet", () => { throw new Error("no answer"); });
+    await user.click(screen.getByTestId("settings-lock"));
+    const [fresh, again] = screen.getByTestId("settings-password-form").querySelectorAll("input");
+    await user.type(fresh, "abcde"); await user.type(again, "abcde");
+    await user.click(screen.getByRole("button", { name: "Set password" }));
+    expect(await screen.findByText("A profile on several devices keeps its lock password, 8 characters or more.")).toBeInTheDocument();
+    expect(JSON.parse(localStorage.getItem("ghostly_app_settings") ?? "{}").lockScreen?.passwordHash ?? null).toBeNull();
+  }, 20_000);
+
+  it("Settings keeps the 4-character rule for a profile that has no device set", async () => {
+    const { user, engine } = renderApp(<LockScreenProvider><UpdateProvider><Routes><Route path="/settings" element={<Settings />} /></Routes></UpdateProvider></LockScreenProvider>, { route: "/settings" });
+    engine.on("deviceSet", () => ({ state: "single", devices: [] }));
+    await waitFor(() => expect(engine.callsTo("deviceSet")).toHaveLength(1));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    await user.click(screen.getByTestId("settings-lock"));
+    const [fresh, again] = screen.getByTestId("settings-password-form").querySelectorAll("input");
+    await user.type(fresh, "abcde"); await user.type(again, "abcde");
+    await user.click(screen.getByRole("button", { name: "Set password" }));
+    await waitFor(() => expect(JSON.parse(localStorage.getItem("ghostly_app_settings")!).lockScreen.passwordHash).toBeTruthy());
+  }, 20_000);
+
   it("a lock of 4 characters still opens the profile, and is made longer before a device is added", async () => {
     localStorage.setItem("ghostly_app_settings", JSON.stringify({ lockScreen: { enabled: true, passwordHash: await hashPassword("1234"), timeoutMinutes: 5 } }));
     const { user, engine } = renderApp(<AddDeviceDialog onClose={() => {}} />);
@@ -71,6 +109,8 @@ describe("the lock password a device set needs (WISP 06 § Adding a device)", ()
     await user.type(screen.getByTestId("device-add-password"), "a long password");
     await user.click(screen.getByTestId("device-add-next"));
     expect(await screen.findByTestId("device-add-digits", {}, { timeout: 3_000 })).toHaveTextContent("482 913");
+    // The name is the new device's own claim; the digits are the check.
+    expect(screen.getByTestId("device-add")).toHaveTextContent("The new device calls itself Phone. Do both devices show these digits?");
     expect(screen.getByTestId("device-add-refused")).toHaveTextContent("Another device tried to use this code. It got nothing.");
     await user.click(screen.getByTestId("device-add-match"));
     expect(engine.callsTo("deviceEnrollConfirm")).toEqual([{ match: true }]);

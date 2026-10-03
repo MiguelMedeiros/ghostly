@@ -6,7 +6,7 @@ import {
   type DeviceFrame, type LinkParams, type Signer, type TurnRecord,
 } from "@ghostly/core";
 import {
-  EnrollCodeError, EnrollCrash, EnrollInviter, EnrollJoiner, EnrollRefusal, enrollmentUnfinished, finishEnrollment,
+  EnrollCodeError, EnrollCrash, EnrollInviter, EnrollJoiner, EnrollRefusal, enrollmentUnfinished, finishEnrollment, recoverEnrollment,
   type EnrollChannel, type EnrollChannelEvents, type EnrollCrashPoint, type OpenEnrollChannel,
 } from "../src/devices/enroll";
 import { viewOf } from "../src/devices/gate";
@@ -15,7 +15,7 @@ import { openTurnKeeper } from "../src/devices/setup";
 import { DEVICE_KEYS_DB, closeDeviceKeysDb, loadDeviceSigningKey } from "../src/devices/signingKey";
 import type { DeviceRecord } from "../src/devices/state";
 import { closeDevicesDb, readDeviceRecord, setDeviceMirror } from "../src/devices/store";
-import { dropDevicesDatabase } from "./helpers/deviceRecord";
+import { dropDevicesDatabase, putDeviceRecord } from "./helpers/deviceRecord";
 import { FakeTurnNetwork } from "./helpers/turnNetwork";
 // covers: devices.enroll, devices.enroll.session
 
@@ -32,7 +32,7 @@ import { FakeTurnNetwork } from "./helpers/turnNetwork";
 
 const A = "ghostly_a", B = "ghostly_b", C = "ghostly_c";
 const dropKeys = () => new Promise<void>((resolve) => { const r = indexedDB.deleteDatabase(DEVICE_KEYS_DB); r.onsuccess = r.onerror = r.onblocked = () => resolve(); });
-const quick = { doneMs: 300, proofMs: 300, finishRounds: 100, finishEveryMs: 5 };
+const quick = { doneMs: 300, proofMs: 300, grantMs: 1_500, finishRounds: 100, finishEveryMs: 5 };
 const shortSleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, Math.min(ms, 5)));
 const noSleep = async () => {};
 
@@ -157,10 +157,14 @@ const keyOf = async (profile: string) => toBase64Url((await loadDeviceSigningKey
 async function restart(): Promise<void> {
   await closeDevicesDb(); await closeDeviceKeysDb();
 }
-/** The active device's start: it reads its turn and puts the record it stored (what `GhostlyNode` does at start). */
+/**
+ * The active device's start (what `GhostlyNode.startDeviceSet` does): an enrollment's own record found again is taken
+ * back, then it reads its turn and puts the record it stored.
+ */
 async function activeStarts(profile: string): Promise<void> {
   const record = await readDeviceRecord(profile);
   if (record?.state !== "active") return;
+  await recoverEnrollment(profile, network);
   await (await openTurnKeeper(profile, network))!.check(false);
 }
 
@@ -359,14 +363,25 @@ describe("refusals", () => {
 
 describe("crash matrix", () => {
   type Outcome = "none" | "complete";
+  type Holds = "nothing" | "unfinished" | "standby";
+
+  /** A finished first enrollment of B, so that a crash can be tried while the active device adds a third. */
+  async function firstSet(): Promise<void> {
+    const a = inviter(), b = joiner();
+    await toDigits(a, b); await a.confirm(true); await until(() => a.ended && b.ended);
+    expect(a.current()).toMatchObject({ step: "done" });
+    pipe = new Pipe();
+  }
+
   /**
-   * Runs one enrollment with a crash at `at`, starts the crashed side again, lets both do what their next start
-   * does, and returns what holds then. The rule: the inviter's record lists the joiner only if the joiner stored the
-   * grant, and the network lists it only if the inviter's record does.
+   * Runs one enrollment of `profile` with a crash at `at`, starts the crashed side again, lets both do what their next
+   * start does, and returns what holds then. The rule: the inviter's record lists the new device only if the new device
+   * stored the grant, and the network lists it only if the inviter's record does. A grant that went out and did not
+   * finish stays noted on the inviter.
    */
-  async function crashAt(at: EnrollCrashPoint): Promise<{ outcome: Outcome; a: DeviceRecord | null; b: DeviceRecord | null }> {
+  async function crashAt(at: EnrollCrashPoint, profile: string): Promise<{ outcome: Outcome; holds: Holds; a: DeviceRecord | null; noted: boolean }> {
     const crashInviter = at.startsWith("inviter:"), crashJoiner = at.startsWith("joiner:");
-    const a = inviter(crashInviter ? { crash: at } : {}), b = joiner(crashJoiner ? { crash: at } : {});
+    const a = inviter(crashInviter ? { crash: at } : {}), b = joiner({ profile, name: "New", ...(crashJoiner ? { crash: at } : {}) });
     await toDigits(a, b);
     await a.confirm(true).catch((error: unknown) => { if (!(error instanceof EnrollCrash)) throw error; });
     // Each side ends, by finishing, failing, timing out, or by its crash.
@@ -374,27 +389,32 @@ describe("crash matrix", () => {
     // The next start of both apps.
     await restart();
     await activeStarts(A);
-    if (enrollmentUnfinished(await readDeviceRecord(B))) await finishEnrollment(B, network, { sleep: noSleep, rounds: 2 });
+    if (enrollmentUnfinished(await readDeviceRecord(profile))) await finishEnrollment(profile, network, { sleep: noSleep, rounds: 2 });
 
-    const ra = await readDeviceRecord(A), rb = await readDeviceRecord(B);
-    const bKey = await keyOf(B).catch(() => "");
-    const aLists = !!ra?.deviceSet.some((slot) => slot?.key === bKey);
-    const netLists = ra?.d ? lists(published(ra.d), bKey) : false;
-    // Never a half device: listed by the inviter, or on the network, only with the grant stored on the joiner.
+    const ra = await readDeviceRecord(A), rb = await readDeviceRecord(profile);
+    const key = await keyOf(profile).catch(() => "");
+    const aLists = !!ra?.deviceSet.some((slot) => slot?.key === key);
+    const netLists = ra?.d ? lists(published(ra.d), key) : false;
+    // Never a half device: listed by the inviter, or on the network, only with the grant stored on the new device.
     if (aLists || netLists) expect(rb).toMatchObject({ state: "standby", d: ra!.d });
     if (netLists) expect(aLists).toBe(true);
+    // The active device is never stopped by its own enrollment.
+    if (ra) expect(ra.state).toBe("active");
     const complete = aLists && netLists && !!rb?.turnPacket;
-    if (!complete) {
-      // No enrollment: the inviter lists nobody new and nothing is published; the joiner holds nothing, or a record
-      // that is "Not finished" (its Remove takes it away).
+    const noted = !!ra?.unfinishedGrants?.some((grant) => grant.key === key);
+    if (complete) expect(noted).toBe(false);
+    else {
       expect(aLists).toBe(false);
       expect(netLists).toBe(false);
       expect(rb === null || enrollmentUnfinished(rb)).toBe(true);
+      // A device that holds `D` and is in no record is noted on the active device.
+      if (rb) expect(noted).toBe(true);
     }
-    return { outcome: complete ? "complete" : "none", a: ra, b: rb };
+    return { outcome: complete ? "complete" : "none", holds: rb === null ? "nothing" : enrollmentUnfinished(rb) ? "unfinished" : "standby", a: ra, noted };
   }
 
-  const matrix: [EnrollCrashPoint, Outcome, "nothing" | "unfinished" | "standby"][] = [
+  const matrix: [EnrollCrashPoint, Outcome, Holds][] = [
+    ["inviter:noted", "none", "nothing"],
     ["inviter:granted", "none", "unfinished"],
     ["inviter:done-received", "none", "unfinished"],
     ["inviter:before-write", "none", "unfinished"],
@@ -405,21 +425,80 @@ describe("crash matrix", () => {
     ["joiner:after-done", "complete", "standby"],
   ];
 
-  it.each(matrix)("a crash at %s ends with %s enrollment (the new device: %s)", async (at, outcome, joinerHolds) => {
-    const result = await crashAt(at);
+  it.each(matrix)("first device set, a crash at %s ends with %s enrollment (the new device: %s)", async (at, outcome, holds) => {
+    const result = await crashAt(at, B);
     expect(result.outcome).toBe(outcome);
-    const holds = result.b === null ? "nothing" : enrollmentUnfinished(result.b) ? "unfinished" : "standby";
-    expect(holds).toBe(joinerHolds);
-    // The inviter is `single` again (no set at all) or `active` with both devices: never a set it half wrote.
-    if (outcome === "none") expect(result.a).toBeNull();
-    else expect(result.a?.deviceSet.filter(Boolean)).toHaveLength(2);
+    expect(result.holds).toBe(holds);
+    // The inviter has its set of one with the grant noted, or both devices: never a set it half wrote.
+    expect(result.a?.deviceSet.filter(Boolean)).toHaveLength(outcome === "none" ? 1 : 2);
+    // Every grant that went out (or was about to) and did not finish is noted; a finished one is not.
+    expect(result.noted).toBe(outcome === "none");
+  });
+
+  it.each(matrix)("a third device, a crash at %s ends with %s enrollment (the new device: %s)", async (at, outcome, holds) => {
+    await firstSet();
+    const before = (await readDeviceRecord(A))!;
+    const result = await crashAt(at, C);
+    expect(result.outcome).toBe(outcome);
+    expect(result.holds).toBe(holds);
+    expect(result.a?.deviceSet.filter(Boolean)).toHaveLength(outcome === "none" ? 2 : 3);
+    // The set it had is untouched, the phone included.
+    expect(result.a?.deviceSet.slice(0, 2)).toEqual(before.deviceSet.slice(0, 2));
+    if (outcome === "complete") expect(result.a!.turn).toBe(before.turn);
+  });
+
+  it("the new device crashes between making its key and saying hello: nothing is written anywhere, and the code dies with its time", async () => {
+    const a = inviter();
+    const waiting = await a.start();
+    if (waiting.step !== "waiting") throw new Error("no code");
+    const b = joiner({ crash: "joiner:key-made" });
+    await b.start(waiting.code).catch((error: unknown) => { if (!(error instanceof EnrollCrash)) throw error; });
+    await restart();
+    // A key with no device record: the profile is `single` and starts as before.
+    expect(await loadDeviceSigningKey(B)).not.toBeNull();
+    expect(await readDeviceRecord(B)).toBeNull();
+    expect(await readDeviceRecord(A)).toBeNull();
+    await a.cancel();
+    expect(network.puts()).toHaveLength(0);
+  });
+
+  /**
+   * The put was accepted and the write of the record before it was lost (a strict write that did not survive, which
+   * the WISP assumes away). The network then holds a record of this device's own slot that it never stored: a turn read
+   * calls that a clone, and the device would stop. Since the record is what the noted enrollment was writing, the next
+   * start takes it back as its own.
+   */
+  it.each([["the first device set", B, false], ["a third device", C, true]] as const)("%s: the put was accepted and the write lost, and the active device takes its own record back", async (_, profile, third) => {
+    if (third) await firstSet();
+    let snapshot: Promise<DeviceRecord | null> | null = null;
+    const a = new EnrollInviter({
+      profile: A, network, open: pipe.openInviter, didSeed: async () => didSeed, name: "MacBook", sleep: noSleep, timing: quick, forceSeed: true,
+      // As the grant leaves: the record as it is before the write with the new slot.
+      crash: (at) => { if (at === "inviter:granted") snapshot = readDeviceRecord(A); },
+    });
+    const b = joiner({ profile, name: "New" });
+    await toDigits(a, b); await a.confirm(true); await until(() => a.ended && b.ended);
+    expect(a.current()).toMatchObject({ step: "done", published: true });
+    const lost = (await snapshot!)!;
+    expect(lost.unfinishedGrants?.length).toBe(1);
+    // The write is lost: the record is what it was before it.
+    await restart();
+    await putDeviceRecord({ ...lost, saved: lost.saved + 10 });
+    // Without taking it back, the turn read would call the record a clone and stop the device.
+    const read = await (await openTurnKeeper(A, network))!.read();
+    expect(read?.result).toBe("clone");
+    await restart();
+    expect(await recoverEnrollment(A, network)).toBe(true);
+    await activeStarts(A);
+    const ra = (await readDeviceRecord(A))!;
+    expect(ra.state).toBe("active");
+    expect(ra.unfinishedGrants ?? []).toEqual([]);
+    expect(ra.deviceSet.some((slot) => slot?.key === toBase64Url(fromBase64Url(lost.unfinishedGrants![0].key)))).toBe(true);
   });
 
   it("an active device that crashes between storing the record with the new slot and its put: its next start puts it", async () => {
-    // A first device set, finished.
-    await (async () => { const a = inviter(), b = joiner(); await toDigits(a, b); await a.confirm(true); await until(() => a.ended && b.ended); })();
+    await firstSet();
     const before = (await readDeviceRecord(A))!;
-    pipe = new Pipe();
     // The crash comes as the record with the third slot is on its way out: stored, not put.
     let crashed = false;
     network.onPut = () => { if (!crashed) { crashed = true; throw new EnrollCrash("inviter:after-write"); } };
@@ -461,5 +540,57 @@ describe("crash matrix", () => {
     expect(after.deviceSet[after.ownSlot!]?.key).toBe(await keyOf(B));
     expect(enrollmentUnfinished(after)).toBe(true);
     expect(await finishEnrollment(B, network, { sleep: noSleep, rounds: 2 })).toBe(false);
+  });
+});
+
+describe("what the security review asked for", () => {
+  it("the grant carries the active device's network settings, and the new standby keeps them", async () => {
+    const settings = { relays: ["https://relay.person.example"], readRelays: true, irohRelays: ["https://iroh.person.example"], iceServers: [{ urls: "turn:turn.person.example", username: "u", credential: "c" }] };
+    const a = new EnrollInviter({ profile: A, network, open: pipe.openInviter, didSeed: async () => didSeed, name: "MacBook", sleep: noSleep, timing: quick, forceSeed: true, networkSettings: () => settings });
+    let ownSettings = 0;
+    const b = new EnrollJoiner({ profile: B, network, open: pipe.openJoiner, about: { name: "Phone", kind: "web", app: "1" }, sleep: shortSleep, timing: quick, forceSeed: true, install: null, afterWrite: async () => { ownSettings++; } });
+    await toDigits(a, b); await a.confirm(true); await until(() => a.ended && b.ended);
+    expect((await readDeviceRecord(B))!.network).toEqual(settings);
+    // Its own (a new install's defaults) are not written over them.
+    expect(ownSettings).toBe(0);
+  });
+
+  it("a grant whose done never came back is noted on the active device and shown as Not finished", async () => {
+    const a = inviter(), b = joiner({ crash: "joiner:after-write" });
+    await toDigits(a, b); await a.confirm(true);
+    await until(() => a.ended && b.ended, 5_000);
+    expect(a.current()).toMatchObject({ step: "failed", reason: "dropped" });
+    const ra = (await readDeviceRecord(A))!;
+    expect(ra.unfinishedGrants).toEqual([{ key: await keyOf(B), name: "Phone", at: expect.any(Number) }]);
+    expect(deviceSetView(ra, [])).toMatchObject({ state: "active", devices: [{ name: "MacBook", self: true }], unfinishedGrants: [{ name: "Phone" }] });
+    // A second try of the same device notes it once.
+    pipe = new Pipe();
+    const again = inviter(), b2 = joiner({ profile: C, name: "Phone 2" });
+    await toDigits(again, b2); await again.confirm(true); await until(() => again.ended && b2.ended);
+    const after = (await readDeviceRecord(A))!;
+    expect(after.unfinishedGrants?.map((grant) => grant.name)).toEqual(["Phone"]);
+    expect(after.deviceSet.filter(Boolean).map((slot) => slot!.name)).toEqual(["MacBook", "Phone 2"]);
+  });
+
+  it("once done has come back, a cancel (the person's, or the other side's) no longer stops the device being added", async () => {
+    const a: EnrollInviter = new EnrollInviter({
+      profile: A, network, open: pipe.openInviter, didSeed: async () => didSeed, name: "MacBook", sleep: noSleep, timing: quick, forceSeed: true,
+      crash: (at) => { if (at === "inviter:done-received") { void a.cancel(); pipe.inviter?.events.onFrame(enrollCancelFrame("cancelled")); } },
+    });
+    const b = joiner();
+    await toDigits(a, b); await a.confirm(true); await until(() => a.ended && b.ended);
+    expect(a.current()).toMatchObject({ step: "done", device: "Phone", published: true });
+    expect((await readDeviceRecord(A))!.deviceSet.filter(Boolean)).toHaveLength(2);
+    expect(b.current()).toMatchObject({ step: "done" });
+  });
+
+  it("the new device gives up when no grant comes after the digits, and holds nothing", async () => {
+    const a = inviter(), b = joiner();
+    await toDigits(a, b);
+    // The person never answers on the active device.
+    await until(() => b.ended, 5_000);
+    expect(b.current()).toMatchObject({ step: "failed", reason: "unanswered" });
+    expect(await readDeviceRecord(B)).toBeNull();
+    await a.cancel();
   });
 });

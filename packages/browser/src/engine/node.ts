@@ -106,8 +106,8 @@ import {
 import type { AttentionCue, AttentionEvent, EngineImplementation } from "../shared/rpc";
 import { clearProfileStores, databaseName, fileStore, type StoredFile } from "../shared/idb";
 import { knownDeviceGate, viewOf, type DeviceGateView } from "../devices/gate";
-import { saveDeviceNetwork } from "../devices/network";
-import { EnrollCodeError, EnrollInviter, EnrollJoiner, EnrollRefusal, ghostLinkEnrollChannel, type EnrollView, type OpenEnrollChannel } from "../devices/enroll";
+import { deviceNetworkOf, saveDeviceNetwork } from "../devices/network";
+import { EnrollCodeError, EnrollInviter, EnrollJoiner, EnrollRefusal, ghostLinkEnrollChannel, recoverEnrollment, type EnrollView, type OpenEnrollChannel } from "../devices/enroll";
 import { DeviceLinks, deviceSetView, type DeviceSetView } from "../devices/links";
 import { readDeviceRecord } from "../devices/store";
 import { fileBytes } from "../shared/fileBytes";
@@ -1557,11 +1557,16 @@ export class GhostlyNode implements EngineImplementation {
     for (const live of this.links.values()) live.link?.depart();
   }
 
-  /** Tells every peer we are leaving. Best effort: the browser may already be closing. */
-  async shutdown(): Promise<void> {
+  /**
+   * Tells every peer we are leaving. Best effort: the browser may already be closing. `quiet`: says nothing to anyone
+   * (no goodbye, no departure in the links' packets), as a device another device replaced must (WISP 06 § When a
+   * device finds itself superseded: "Nothing is said to contacts and nothing more is published").
+   */
+  async shutdown(options: { quiet?: boolean } = {}): Promise<void> {
+    const quiet = options.quiet === true || this.gatedOut;
     this.shuttingDown = true;
     // First, before anything that waits: every live contact hears this app is going, and watches for it to come back.
-    this.depart();
+    if (!quiet) this.depart();
     this.directPath.close();
     this.clock.close();
     this.clockOff?.();
@@ -1604,7 +1609,7 @@ export class GhostlyNode implements EngineImplementation {
     for (const queue of this.editQueues.values()) queue.stop();
     this.groupEdits.stop();
     this.cardEdits.stop();
-    await Promise.allSettled([...this.links.values()].map(async (live) => { await live.link?.stop(true); await live.caps?.stop(); }));
+    await Promise.allSettled([...this.links.values()].map(async (live) => { await live.link?.stop(!quiet); await live.caps?.stop(); }));
   }
 
   /**
@@ -4481,16 +4486,26 @@ export class GhostlyNode implements EngineImplementation {
       });
       await this.deviceLinks.start();
     } else await this.deviceLinks.refresh();
+    // An enrollment whose own record was put and whose write of it was lost takes that record back first: the read
+    // below would take it for a clone of this device and stop it.
+    await recoverEnrollment(databaseName(), this.turnNetwork()).catch(() => false);
     const keeper = await this.deviceLinks.turnKeeper();
     const outcome = await keeper?.check(false);
     // Another device took the turn: the keeper wrote this device's new state. The pages start again into the gate.
     if (outcome?.kind === "gated" && !this.shuttingDown) {
       const record = await readDeviceRecord(databaseName());
-      if (!record) return;
-      this.gatedOut = true;
-      this.events.onDeviceGate?.(viewOf(record));
-      await this.shutdown();
+      if (record) await this.stopReplaced(viewOf(record));
     }
+  }
+
+  /**
+   * Another device took the turn while this engine ran: it stops without a word to any contact and publishes nothing
+   * more, and the pages show the standby screen.
+   */
+  private async stopReplaced(view: DeviceGateView): Promise<void> {
+    this.gatedOut = true;
+    this.events.onDeviceGate?.(view);
+    await this.shutdown({ quiet: true });
   }
 
   /**
@@ -4503,6 +4518,8 @@ export class GhostlyNode implements EngineImplementation {
     const inviter = new EnrollInviter({
       profile: databaseName(), network: this.turnNetwork(), open: this.enrollLink(), name,
       didSeed: () => this.did.deviceSetSeed(),
+      // The new standby reaches the other devices through the person's relays and servers (`devices/network.ts`).
+      networkSettings: () => deviceNetworkOf(this.settings),
       // The record now lists the new device: the network settings go into it, and the links start.
       afterWrite: async () => { await this.syncDeviceNetwork(); await this.startDeviceSet(); },
     });
@@ -4536,9 +4553,7 @@ export class GhostlyNode implements EngineImplementation {
    */
   async deviceEnrollJoin({ code, name, kind, app }: { code: string; name: string; kind?: DeviceKind; app?: string }): Promise<EnrollView> {
     this.enrollAllowed();
-    const inUse = this.links.size > 0 || this.groups.views().length > 0 || this.walletView.balance > 0
-      || Object.values(this.walletView.networks ?? {}).some((network) => (network?.balance ?? 0) > 0);
-    if (inUse) throw new Error("enroll-in-use: This profile is in use here. Add a new profile first, and add the device from there.");
+    if (this.inUse()) throw new Error("enroll-in-use: This profile is in use here. Add a new profile first, and add the device from there.");
     await this.enrollment?.cancel().catch(() => {});
     const joiner = new EnrollJoiner({
       profile: databaseName(), network: this.turnNetwork(), open: this.enrollLink(),
@@ -4552,6 +4567,20 @@ export class GhostlyNode implements EngineImplementation {
       if (error instanceof EnrollCodeError) throw Object.assign(new Error(`enroll-${error.reason}: ${error.message}`), { cause: error });
       throw error;
     }
+  }
+
+  /**
+   * Whether this profile holds anything a person would lose if it became a standby here: a chat, a group, an identity,
+   * money or a payment, or a wallet with keys of its own. The wallets a new profile gets by itself (Mainnet Cashu and
+   * USDT, `walletSetup.ts`) count only once they hold or have moved money: otherwise no new install could join.
+   */
+  private inUse(): boolean {
+    if (this.links.size > 0 || this.groups.views().length > 0 || this.identities.views().length > 0) return true;
+    const networks = Object.values(this.walletView.networks ?? {});
+    if (this.walletView.balance > 0 || this.walletView.history.length > 0) return true;
+    if (networks.some((network) => (network?.balance ?? 0) > 0 || (network?.history?.length ?? 0) > 0)) return true;
+    const firstRun = (wallet: { type: string; network: string }) => wallet.network === "mainnet" && (wallet.type === "cashu" || wallet.type === "usdt");
+    return (this.walletView.wallets ?? []).some((wallet) => !firstRun(wallet));
   }
 
   /** The device set of this profile as the Devices section shows it; `single` with none. */

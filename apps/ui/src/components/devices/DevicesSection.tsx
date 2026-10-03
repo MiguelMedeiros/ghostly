@@ -37,6 +37,9 @@ export function DevicesSection() {
           </>}
         </Row>
       ))}
+      {view?.unfinishedGrants?.map((grant) => (
+        <Row key={grant.key} testId="device-row-unfinished" label={grant.name} hint={t("devices.section.unfinished")} info={t("devices.section.unfinishedInfo")} />
+      ))}
       {adding && <AddDeviceDialog onClose={() => setAdding(false)} />}
     </Section>
   );

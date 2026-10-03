@@ -2,13 +2,13 @@ import {
   ENROLL_CAPABILITY, ENROLL_DONE, ENROLL_GRANT, ENROLL_HELLO, ENROLL_PROOF, GhostLink, classifyTurnRead, createDeviceInvite, deviceInviteJoinerParams, deviceKeyZ32,
   enrollCancelFrame, enrollCancelReason, enrollDigits, enrollDoneFrame, enrollGrantFrame, enrollHelloFrame, enrollProofFrame, firstDeviceSetSecret, fromBase64Url,
   nextTurnPosition, publicKeyFromZ32, randomBytes, readDeviceInvite, readEnrollGrant, readEnrollHello, signTurnPacket, toBase64Url, turnKeys, turnName, verifyEnrollProof,
-  type DeviceFrame, type DeviceInviteRefusal, type DeviceKind, type EnrollCancelReason, type EnrollSlot, type LinkParams, type NativeEndpoint, type NativeTransport,
+  type DeviceFrame, type DeviceInviteRefusal, type DeviceKind, type EnrollCancelReason, type EnrollNetwork, type EnrollSlot, type LinkParams, type NativeEndpoint, type NativeTransport,
   type PkarrTransport, type PollIntervals, type Signer, type TurnNetwork, type TurnRead,
 } from "@ghostly/core";
 import { isIosBrowserTab, type InstallEnv } from "./install";
 import { DeviceSetError, deviceIdentity, firstTurn, openTurnKeeper } from "./setup";
 import { createDeviceSigningKey, type DeviceSigningKey } from "./signingKey";
-import { MAX_DEVICES, type DeviceRecord, type DeviceSlot } from "./state";
+import { MAX_DEVICES, MAX_UNFINISHED_GRANTS, type DeviceRecord, type DeviceSlot, type UnfinishedGrant } from "./state";
 import { amendDevice, enrollDevice, readDeviceRecord } from "./store";
 import { deviceSetOf, type TurnKeeper } from "./turn";
 
@@ -117,8 +117,8 @@ export type OpenEnrollChannel = (setup: { params: LinkParams; signer: Signer; pe
 
 /** Where a test stops an enrollment, as a crash would: nothing after it runs. */
 export type EnrollCrashPoint =
-  | "inviter:granted" | "inviter:done-received" | "inviter:before-write" | "inviter:after-write" | "inviter:after-put"
-  | "joiner:grant-received" | "joiner:after-write" | "joiner:after-done";
+  | "inviter:noted" | "inviter:granted" | "inviter:done-received" | "inviter:before-write" | "inviter:after-write" | "inviter:after-put"
+  | "joiner:key-made" | "joiner:grant-received" | "joiner:after-write" | "joiner:after-done";
 
 /** A crash a test asked for: the state machine stops where it is. */
 export class EnrollCrash extends Error {
@@ -146,7 +146,7 @@ interface Shared {
   /** Tests stop here, as a crash would. */
   crash?: (at: EnrollCrashPoint) => void;
   /** Tests: the timers' lengths. */
-  timing?: Partial<{ doneMs: number; proofMs: number; finishRounds: number; finishEveryMs: number }>;
+  timing?: Partial<{ doneMs: number; proofMs: number; grantMs: number; finishRounds: number; finishEveryMs: number }>;
 }
 
 const sameKey = (a: Uint8Array, b: Uint8Array) => toBase64Url(a) === toBase64Url(b);
@@ -156,6 +156,11 @@ abstract class Enrollment {
   protected view: EnrollView;
   protected channel: EnrollChannel | null = null;
   protected over = false;
+  /**
+   * Past the point of no return: the inviter got `enroll-done`, the joiner stored the grant. A cancel (the person's,
+   * the other side's, a dropped session) no longer ends it: what is written is finished, not left half done.
+   */
+  protected committed = false;
   protected readonly now: () => number;
   protected readonly sleep: (ms: number) => Promise<void>;
   private timers = new Set<ReturnType<typeof setTimeout>>();
@@ -210,8 +215,9 @@ abstract class Enrollment {
     await channel?.stop().catch(() => {});
   }
 
-  protected fail(reason: EnrollFailure, tell?: EnrollCancelReason, device?: string): Promise<void> {
-    if (this.over) return Promise.resolve();
+  /** `force`: a failure of the committed steps themselves (no good read, a store that failed), which still ends it. */
+  protected fail(reason: EnrollFailure, tell?: EnrollCancelReason, device?: string, force = false): Promise<void> {
+    if (this.over || (this.committed && !force)) return Promise.resolve();
     if (tell) this.send(enrollCancelFrame(tell));
     return this.end({ role: this.view.role, step: "failed", reason, ...(device ? { device } : {}) } as EnrollView);
   }
@@ -223,7 +229,7 @@ abstract class Enrollment {
   protected guard(work: () => Promise<void>): void {
     void work().catch((error: unknown) => {
       if (error instanceof EnrollCrash) { this.die(); return; }
-      void this.fail("failed", "failed");
+      void this.fail("failed", "failed", undefined, true);
     });
   }
 }
@@ -246,6 +252,8 @@ export interface InviterOptions extends Shared {
   name: string;
   /** The turn keeper of the profile, once it has a record (tests give their own). */
   keeper?: () => Promise<TurnKeeper | null>;
+  /** The person's network settings, which the grant carries to the new standby. */
+  networkSettings?: () => EnrollNetwork | undefined;
 }
 
 /**
@@ -259,6 +267,8 @@ export class EnrollInviter extends Enrollment {
   private session: { peerKey: Uint8Array; hash: string } | null = null;
   private joiner: { key: Uint8Array; name: string; kind: DeviceKind } | null = null;
   private granted: { slots: EnrollSlot[]; ownSlot: number; turn: number; rev: number } | null = null;
+  /** This enrollment makes the profile's first device set: its record was written, with a set of one, at the grant. */
+  private first = false;
   private refused = 0;
   private stopDoneWait: (() => void) | null = null;
 
@@ -317,7 +327,7 @@ export class EnrollInviter extends Enrollment {
       this.show({ role: "inviter", step: "confirm", digits: enrollDigits(this.session.hash, this.key.publicKey, hello.key), device: this.joiner.name, kind: hello.kind, ...(this.refused ? { refused: this.refused } : {}) });
       return;
     }
-    if (frame.t === ENROLL_DONE && this.view.step === "adding") { this.stopDoneWait?.(); await this.finish(); }
+    if (frame.t === ENROLL_DONE && this.view.step === "adding" && !this.committed) { this.committed = true; this.stopDoneWait?.(); await this.finish(); }
   }
 
   /**
@@ -329,11 +339,19 @@ export class EnrollInviter extends Enrollment {
     if (!match) { await this.fail("digits", "digits", this.joiner.name); return this.view; }
     const joiner = this.joiner;
     let slots: EnrollSlot[], ownSlot: number, turn: number, rev: number;
+    const note: UnfinishedGrant = { key: toBase64Url(joiner.key), name: joiner.name, at: this.now() };
     if (!this.record) {
       ownSlot = 0;
-      slots = [{ key: this.key.publicKey, name: turnName(this.options.name) || "Device" }, { key: joiner.key, name: joiner.name }, null, null];
+      const own = { key: this.key.publicKey, name: turnName(this.options.name) || "Device" };
+      slots = [own, { key: joiner.key, name: joiner.name }, null, null];
       turn = firstTurn();
       rev = 0;
+      // Before `D` leaves this device, it notes that it hands `D` out: the profile gets its device set now, with this
+      // device alone in it and the grant noted. A grant whose done never comes back stays noted ("Not finished").
+      this.record = await enrollDevice(this.options.profile, "active", {
+        d: toBase64Url(this.d), deviceSet: recordSlots([own]), ownSlot: 0, activeSlot: 0, turn, rev: 0, signingKey: this.key.kind, unfinishedGrants: [note],
+      });
+      this.first = true;
     } else {
       // The record may have changed since the code was made (a rename, a turn read): read it again.
       this.record = await readDeviceRecord(this.options.profile);
@@ -344,13 +362,18 @@ export class EnrollInviter extends Enrollment {
       const free = set.indexOf(null);
       if (free < 0) { await this.fail("full", "full", joiner.name); return this.view; }
       slots = set.map((slot, i) => (i === free ? { key: joiner.key, name: joiner.name } : slot ? { key: fromBase64Url(slot.key), name: slot.name } : null));
-      // Where the keeper will write: the next `rev` of this turn above all it saw (the turn moves on only when `rev` runs out).
-      const place = nextTurnPosition(this.record.turn, this.record.rev, ownSlot, this.record.seenSequence ?? 0);
+      // Where the keeper will write: the next `rev` of this turn above all it saw (the turn moves on only when `rev` runs
+      // out); `rev` 0 when this device never put a record (its first set's first grant did not finish).
+      const place = nextTurnPosition(this.record.turn, this.record.turnPacket ? this.record.rev : null, ownSlot, this.record.seenSequence ?? 0);
       if (!place) { await this.fail("failed", "failed", joiner.name); return this.view; }
       ({ turn, rev } = place);
+      const kept = (this.record.unfinishedGrants ?? []).filter((grant) => grant.key !== note.key);
+      this.record = await amendDevice(this.options.profile, { unfinishedGrants: [...kept, note].slice(-MAX_UNFINISHED_GRANTS) });
     }
+    this.crash("inviter:noted");
     this.granted = { slots, ownSlot, turn, rev };
-    this.send(enrollGrantFrame({ d: this.d, set: slots, turn, rev }));
+    const settings = this.options.networkSettings?.();
+    this.send(enrollGrantFrame({ d: this.d, set: slots, turn, rev, ...(settings ? { network: settings } : {}) }));
     this.show({ role: "inviter", step: "adding", device: joiner.name });
     this.crash("inviter:granted");
     this.stopDoneWait = this.timer(this.options.timing?.doneMs ?? ENROLL_DONE_TIMEOUT_MS, () => { if (this.view.step === "adding") void this.fail("dropped", "failed", joiner.name); });
@@ -367,21 +390,20 @@ export class EnrollInviter extends Enrollment {
     this.crash("inviter:done-received");
     let keeper: TurnKeeper | null;
     let conditions: Record<string, string | null>;
-    if (!this.record) {
+    // The record with the new slot no longer notes the grant: one write does both.
+    const unfinishedGrants = (this.record?.unfinishedGrants ?? []).filter((grant) => grant.key !== toBase64Url(joiner.key));
+    if (this.first) {
       const read = await readAt(network, this.d, this.key.publicKey, 0);
-      if (!read.good) { await this.fail("unreachable", "failed", joiner.name); return; }
-      if (read.result !== "none") { await this.fail("elsewhere", "failed", joiner.name); return; }
+      if (!read.good) { await this.fail("unreachable", "failed", joiner.name, true); return; }
+      if (read.result !== "none") { await this.fail("elsewhere", "failed", joiner.name, true); return; }
       const keys = turnKeys(this.d);
       const packet = await signTurnPacket(keys, {
         turn: granted.turn, rev: 0, author: 0, active: 0, instance: randomBytes(8),
         slots: granted.slots.map((slot) => slot && { key: slot.key, name: slot.name }),
       }, (bytes) => this.key.sign(bytes));
       this.crash("inviter:before-write");
-      // Everything in one write: `single` becomes `active` with both devices, the secret and the stored packet.
-      await enrollDevice(profile, "active", {
-        d: toBase64Url(this.d), deviceSet: recordSlots(granted.slots), ownSlot: 0, activeSlot: 0, turn: granted.turn, rev: 0,
-        turnPacket: toBase64Url(packet), signingKey: this.key.kind,
-      });
+      // One write: both devices, the stored packet, and the grant no longer noted.
+      await amendDevice(profile, { deviceSet: recordSlots(granted.slots), turn: granted.turn, rev: 0, turnPacket: toBase64Url(packet), unfinishedGrants });
       this.crash("inviter:after-write");
       keeper = await (this.options.keeper?.() ?? openTurnKeeper(profile, network));
       if (!keeper) throw new Error("The device set has no turn keeper");
@@ -391,16 +413,16 @@ export class EnrollInviter extends Enrollment {
       keeper = await (this.options.keeper?.() ?? openTurnKeeper(profile, network));
       if (!keeper) throw new Error("The device set has no turn keeper");
       const read = await keeper.read();
-      if (!read || !read.good) { await this.fail("unreachable", "failed", joiner.name); return; }
+      if (!read || !read.good) { await this.fail("unreachable", "failed", joiner.name, true); return; }
       if (read.result !== "mine" && read.result !== "none" && read.result !== "behind") {
         // Another device holds the turn, or the address is closed: the keeper does what this device's state asks for.
         await keeper.check(false).catch(() => null);
-        await this.fail("replaced", "failed", joiner.name);
+        await this.fail("replaced", "failed", joiner.name, true);
         return;
       }
       this.crash("inviter:before-write");
-      // Signed, stored with the new slot in one write, and only then put (the keeper's own order).
-      await keeper.write(read.conditions, { slots: recordSlots(granted.slots) });
+      // Signed, stored with the new slot (and the grant no longer noted) in one write, and only then put.
+      await keeper.write(read.conditions, { slots: recordSlots(granted.slots), patch: { unfinishedGrants } });
     }
     this.crash("inviter:after-put");
     const published = await confirmPublished(keeper, this.sleep);
@@ -460,6 +482,7 @@ export class EnrollJoiner extends Enrollment {
     this.invite = reading;
     if (await readDeviceRecord(this.options.profile)) throw new EnrollCodeError("set");
     this.key = await createDeviceSigningKey(this.options.profile, { forceSeed: this.options.forceSeed });
+    this.crash("joiner:key-made");
     const inviterKey = reading.invite.inviterKey;
     this.show({ role: "joiner", step: "connecting" });
     this.channel = this.options.open({ params: deviceInviteJoinerParams(reading.invite), signer: this.key, peerKey: inviterKey }, {
@@ -490,6 +513,10 @@ export class EnrollJoiner extends Enrollment {
       // The digits only after the inviter proved itself with the key in the code.
       if (!verifyEnrollProof(frame, this.hash, inviterKey, this.key.publicKey)) { await this.fail("proof", "failed"); return; }
       this.proven = true;
+      // The person confirms on the other device within the code's ten minutes; no grant by then (and a little after),
+      // and the other device is gone: nothing was written here.
+      const grantMs = this.options.timing?.grantMs ?? Math.max(0, this.invite.invite.expires * 1000 - this.now()) + ENROLL_DONE_TIMEOUT_MS;
+      this.timer(grantMs, () => { if (!this.committed && this.view.step === "confirm") void this.fail("unanswered", "failed"); });
       this.show({ role: "joiner", step: "confirm", digits: enrollDigits(this.hash, inviterKey, this.key.publicKey) });
       return;
     }
@@ -498,13 +525,16 @@ export class EnrollJoiner extends Enrollment {
       if (!grant) { await this.fail("failed", "failed"); return; }
       this.inviterName = grant.set[grant.inviterSlot]?.name ?? "";
       this.crash("joiner:grant-received");
-      // One durable write: `single` becomes `standby`, with the secret, the set and this device's slot.
+      // One durable write: `single` becomes `standby`, with the secret, the set, this device's slot and the person's
+      // network settings as the active device has them.
       await enrollDevice(this.options.profile, "standby", {
         d: toBase64Url(grant.d), deviceSet: recordSlots(grant.set), ownSlot: grant.ownSlot, activeSlot: grant.inviterSlot,
-        turn: grant.turn, rev: grant.rev, signingKey: this.key.kind,
+        turn: grant.turn, rev: grant.rev, signingKey: this.key.kind, ...(grant.network ? { network: grant.network } : {}),
       });
+      this.committed = true;
       this.crash("joiner:after-write");
-      await this.options.afterWrite?.().catch(() => {});
+      // A grant from a build that carries no network settings: this app's own go in.
+      if (!grant.network) await this.options.afterWrite?.().catch(() => {});
       this.send(enrollDoneFrame());
       this.crash("joiner:after-done");
       this.show({ role: "joiner", step: "finishing", device: this.inviterName });
@@ -514,6 +544,40 @@ export class EnrollJoiner extends Enrollment {
       await this.end({ role: "joiner", step: finished ? "done" : "unfinished", device: this.inviterName });
     }
   }
+}
+
+/**
+ * The active device's own record, found again (WISP 06 § Durable device state assumes a strict write survives; this is
+ * for when it did not). An enrollment that noted a grant, wrote the record with the new slot, put it, and then lost
+ * that write finds on the network a record of its own slot, signed with its own key, above what it stored: the turn
+ * read calls that a clone, and the device would stop. When that record is what the enrollment was writing (every
+ * device of the stored set, plus a device whose grant is noted), it is this device's own: it is stored again, and the
+ * grant is no longer noted. Anything else is left to the turn read. True when a record was taken back.
+ */
+export async function recoverEnrollment(profile: string, network: TurnNetwork): Promise<boolean> {
+  const record = await readDeviceRecord(profile);
+  if (!record || record.state !== "active" || !record.d || record.ownSlot === undefined || !record.unfinishedGrants?.length) return false;
+  const own = record.deviceSet[record.ownSlot];
+  if (!own) return false;
+  const ownKey = fromBase64Url(own.key);
+  const keys = turnKeys(fromBase64Url(record.d));
+  const answers = await network.turnRead(keys.identity.pubKeyZ32).catch(() => null);
+  if (!answers) return false;
+  const read = classifyTurnRead({ keys, ownKey, stored: record.turnPacket ? fromBase64Url(record.turnPacket) : null, ownSlot: record.ownSlot, seen: BigInt(record.seenSequence ?? 0) }, answers);
+  if (read.result !== "clone" || read.clone !== "above" || !read.record || !read.payload) return false;
+  const found = read.record;
+  const author = found.slots[found.author];
+  if (found.author !== record.ownSlot || !author || !sameKey(author.key, ownKey)) return false;
+  const listed = new Set(found.slots.flatMap((slot) => (slot ? [toBase64Url(slot.key)] : [])));
+  if (!record.deviceSet.every((slot) => !slot || listed.has(slot.key))) return false;
+  const added = record.unfinishedGrants.filter((grant) => listed.has(grant.key));
+  if (!added.length) return false;
+  await amendDevice(profile, {
+    turn: found.turn, rev: found.rev, turnPacket: toBase64Url(read.payload), activeSlot: found.active, deviceSet: deviceSetOf(found),
+    unfinishedGrants: record.unfinishedGrants.filter((grant) => !listed.has(grant.key)),
+    ...(found.sequence > (record.seenSequence ?? 0) ? { seenSequence: found.sequence } : {}),
+  });
+  return true;
 }
 
 /** Whether a record lists this device in the slot it was given. */

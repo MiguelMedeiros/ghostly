@@ -3,7 +3,7 @@
     "adding": "Adding {{device}}…",
     "button": "Add a device",
     "codeHint": "On the other device, open Ghostly and choose Add this device to my profile. Then scan this code.",
-    "confirm": "Does {{device}} show the same digits?",
+    "confirm": "The new device calls itself {{device}}. Do both devices show these digits?",
     "done": "{{device}} added. It is on standby.",
     "finish": "Done",
     "match": "They match",
@@ -81,7 +81,9 @@
     "standby": "Standby",
     "thisActive": "This device · Active",
     "thisStandby": "This device · Standby",
-    "title": "Devices"
+    "title": "Devices",
+    "unfinished": "Not finished",
+    "unfinishedInfo": "It was given what links your devices and never finished. Removing a device, coming later, takes that back."
   },
   "standby": {
     "hint": {

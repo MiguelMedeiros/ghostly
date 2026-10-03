@@ -3,7 +3,7 @@
     "adding": "Ajout de {{device}}…",
     "button": "Ajouter un appareil",
     "codeHint": "Sur l’autre appareil, ouvrez Ghostly et choisissez Ajouter cet appareil à mon profil. Puis scannez ce code.",
-    "confirm": "{{device}} affiche-t-il les mêmes chiffres ?",
+    "confirm": "Le nouvel appareil se présente comme {{device}}. Les deux appareils affichent-ils ces chiffres ?",
     "done": "{{device}} ajouté. Il est en veille.",
     "finish": "Terminé",
     "match": "Ils correspondent",
@@ -81,7 +81,9 @@
     "standby": "En veille",
     "thisActive": "Cet appareil · Actif",
     "thisStandby": "Cet appareil · En veille",
-    "title": "Appareils"
+    "title": "Appareils",
+    "unfinished": "Pas terminé",
+    "unfinishedInfo": "Il a reçu ce qui relie vos appareils et n’a pas terminé. Retirer un appareil, qui arrive plus tard, l’annule."
   },
   "standby": {
     "hint": {

@@ -131,7 +131,8 @@ interface Held {
   selfRaised?: boolean;
 }
 
-type WriteOptions = { turn?: number; release?: TurnRelease; slots?: (DeviceSlot | null)[] };
+/** `patch`: other fields of the device record, written in the same write as the record (enrollment drops its note there). */
+type WriteOptions = { turn?: number; release?: TurnRelease; slots?: (DeviceSlot | null)[]; patch?: DevicePatch };
 
 export class TurnKeeper {
   private readonly store: TurnStore;
@@ -300,7 +301,7 @@ export class TurnKeeper {
     const fields: TurnFields = { turn: place.turn, rev: place.rev, author: ownSlot, active: ownSlot, slots, instance: (this.options.instance ?? (() => randomBytes(8)))(), ...(release ? { release } : {}) };
     const payload = await signTurnPacket(keys, fields, this.options.signer);
     // Stored before it is put: what this device finds on the network after a crash is never newer than what it holds.
-    held.record = await this.store.amend(this.options.profile, { turn: place.turn, rev: place.rev, turnPacket: toBase64Url(payload), activeSlot: ownSlot, ...(options.slots ? { deviceSet: options.slots } : {}) });
+    held.record = await this.store.amend(this.options.profile, { ...options.patch, turn: place.turn, rev: place.rev, turnPacket: toBase64Url(payload), activeSlot: ownSlot, ...(options.slots ? { deviceSet: options.slots } : {}) });
     held.stored = payload;
     const read = readTurnPacket(keys, payload);
     held.storedRecord = read.kind === "valid" ? read.record : null;
