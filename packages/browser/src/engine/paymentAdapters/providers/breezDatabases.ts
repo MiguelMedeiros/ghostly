@@ -106,6 +106,15 @@ export async function breezDatabasesFor(network: string, mnemonic: string, space
   return (await breezDatabasesOf(space)).filter((name) => names.includes(name));
 }
 
+/**
+ * The name this profile uses for this phrase, read without claiming anything: the one it noted (`breezDatabase`), else
+ * the profile's own name. What a handoff deletes and compares (WISP 06 § Wallets): never the old shared database of
+ * another profile that has not opened the phrase since the change.
+ */
+export async function breezDatabaseInUse(network: string, mnemonic: string, space: string = databaseName()): Promise<string> {
+  return (await breezDatabasesFor(network, mnemonic, space))[0] ?? breezDatabaseName(network, mnemonic, space);
+}
+
 /** Every Breez database name noted for a profile of this device. */
 export async function breezDatabasesOf(space: string): Promise<string[]> {
   if (typeof indexedDB === "undefined") return [];
@@ -117,10 +126,21 @@ const deleteDatabase = (name: string) => new Promise<void>((resolve) => {
   try { const r = indexedDB.deleteDatabase(name); r.onsuccess = r.onerror = r.onblocked = () => resolve(); } catch { resolve(); }
 });
 
-/** Deletes one Breez wallet's databases (all the SDK keeps under the name) and its note in the register. Anything else is refused. */
-export async function dropBreezDatabase(name: string): Promise<void> {
+const deleteStrictly = (name: string) => new Promise<void>((resolve, reject) => {
+  const r = indexedDB.deleteDatabase(name);
+  r.onsuccess = () => resolve();
+  r.onerror = () => reject(r.error ?? new Error(`${name} was not deleted`));
+  r.onblocked = () => reject(new Error(`${name} is still open`));
+});
+
+/**
+ * Deletes one Breez wallet's databases (all the SDK keeps under the name) and its note in the register. Anything else
+ * is refused. `strict` (a handoff, WISP 06 § Wallets): a delete that is blocked or fails rejects and the note stays,
+ * so the caller tries again.
+ */
+export async function dropBreezDatabase(name: string, options: { strict?: boolean } = {}): Promise<void> {
   if (!BREEZ_DATABASE.test(name) || typeof indexedDB === "undefined") return;
-  for (const file of await breezDatabaseFiles(name).catch(() => [name, `${name}-tree`])) await deleteDatabase(file);
+  for (const file of await breezDatabaseFiles(name).catch(() => [name, `${name}-tree`])) await (options.strict ? deleteStrictly(file) : deleteDatabase(file));
   await withRegister("readwrite", (store) => { store.delete(name); }).catch(() => {});
 }
 

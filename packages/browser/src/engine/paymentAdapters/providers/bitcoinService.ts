@@ -2,6 +2,7 @@ import { ONCHAIN_PROVIDER, PaymentPreflightError, assertWholeSats, validatePayme
 import type { WalletMode } from "../../../shared/mints";
 import type { OnchainPrepared, OnchainProvider, OnchainProviderDescriptor, OnchainTx } from "./onchain";
 import { intentRepository } from "../persistence";
+import { awayFrom } from "../away";
 import { ProviderSources, type SourceView } from "./sources";
 import { isNothingSpentError, redact, type ProviderHost } from "./types";
 
@@ -41,7 +42,8 @@ export class BitcoinService {
 
   get view(): BitcoinView { return { ...this.sources.view, address: this.address, history: this.history }; }
   start() { return this.sources.start(); }
-  ensureReady() { return this.sources.ensureReady(); }
+  /** Connects the source, unless it is at home on another device (WISP 06 § Wallets that stay home). */
+  ensureReady() { return awayFrom(`bitcoin:${this.network}`) !== undefined ? Promise.resolve() : this.sources.ensureReady(); }
   stop() { return this.sources.stop(); }
   refreshOffered() { this.sources.refreshOffered(); }
 

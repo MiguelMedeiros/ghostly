@@ -5,7 +5,7 @@ import { clearAllData } from "../../../apps/ui/src/lib/clearData";
 import { activeProfileId, createProfile, lastRouteOf, listProfiles, renameProfile, switchProfile, themeOf } from "../../../apps/ui/src/lib/profiles";
 // covers: profiles.create, profiles.switch, app.clear-data
 
-vi.mock("@ghostly/browser/shared/idb", () => ({ clearProfileStores: vi.fn(async () => {}) }));
+vi.mock("@ghostly/browser/shared/idb", async (actual) => ({ ...(await actual<typeof import("@ghostly/browser/shared/idb")>()), clearProfileStores: vi.fn(async () => {}) }));
 
 /** Enough of the Web Storage API and of `window` for local profiles; node has neither. */
 class FakeStorage {

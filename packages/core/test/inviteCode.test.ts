@@ -114,9 +114,13 @@ describe("refusals, each with its reason", () => {
     expect(refusal("ghostly1")).toBe("typo");
   });
 
-  it("a newer Ghostly: versions 2 to 31 say update", () => {
-    for (const version of [2, 3, 17, 31]) expect(refusal(made([version, ...payloadWords]))).toBe("update");
-    expect(readInviteCode(made([2, ...payloadWords]))).toMatchObject({ ok: false, reason: "update", detail: "Version 2" });
+  it("a newer Ghostly: versions 3 to 31 say update", () => {
+    for (const version of [3, 17, 31]) expect(refusal(made([version, ...payloadWords]))).toBe("update");
+    expect(readInviteCode(made([3, ...payloadWords]))).toMatchObject({ ok: false, reason: "update", detail: "Version 3" });
+  });
+
+  it("version 2 adds a device to a profile (WISP 06): no chat, and said so", () => {
+    expect(readInviteCode(made([2, ...payloadWords]))).toEqual({ ok: false, reason: "device" });
   });
 
   it("not a Ghostly invite: version 0, bech32 instead of bech32m, another prefix, too long, anything else", () => {

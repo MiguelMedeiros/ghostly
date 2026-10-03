@@ -9,6 +9,7 @@
   "open": "プロフィールを開く",
   "othersNew": "別のプロフィールに新着メッセージがあります",
   "othersUnread": "別のプロフィールに未読メッセージがあります",
+  "standby": "待機中",
   "switchTo": "{{name}} に切り替え",
   "switching": "{{name}} を開いています…",
   "title": "プロフィールを切り替え",

@@ -16,6 +16,7 @@ import { FirstWallet } from "../components/wallet/FirstWallet";
 import { WalletSetupStatus } from "../components/wallet/WalletSetupStatus";
 import { RemoveWalletSection } from "../components/wallet/RemoveWallet";
 import { TestCoins } from "../components/wallet/TestCoins";
+import { WalletAway } from "../components/wallet/WalletAway";
 import { BackupReminder } from "../components/wallet/BackupReminder";
 import { useBackupDue } from "../hooks/useBackupDue";
 import { useAppNavigation } from "../hooks/useAppNavigation";
@@ -186,10 +187,12 @@ export function Wallet() {
                 <NetworkTag network={selected.network} testId="wallet-panel-network" />
                 <span className="font-medium text-text-primary">{selected.name}</span>
               </p>
+              {/* A wallet at home on another device: where it can be used, in place of its panel. */}
+              {panel && awayWallet(state, panel) && <WalletAway wallet={awayWallet(state, panel)!} platform={cardWallet(wallet, parseCardId(panel)!)} />}
               {/* Test coins only when asked for: Receive never fills a Testnet wallet by itself. */}
-              {panel && parseCardId(panel)?.network === "testnet" && <TestCoins key={`coins-${panel}`} rail={parseCardId(panel)!.rail} network="testnet" wallet={cardWallet(wallet, parseCardId(panel)!)} state={networkState(state, "testnet", parseCardId(panel)!.card)} />}
-              {panel && <WalletPanel id={panel} wallet={wallet} state={state} focus={focusPanel} backup={backup === panel} onOpen={select} />}
-              {panel && parseCardId(panel) && <RemoveWalletSection key={panel} type={parseCardId(panel)!.rail} network={parseCardId(panel)!.network} card={parseCardId(panel)!.card} wallet={wallet} state={state} onOpen={select} onRemoved={() => removed(panel)} />}
+              {panel && !awayWallet(state, panel) && parseCardId(panel)?.network === "testnet" && <TestCoins key={`coins-${panel}`} rail={parseCardId(panel)!.rail} network="testnet" wallet={cardWallet(wallet, parseCardId(panel)!)} state={networkState(state, "testnet", parseCardId(panel)!.card)} />}
+              {panel && !awayWallet(state, panel) && <WalletPanel id={panel} wallet={wallet} state={state} focus={focusPanel} backup={backup === panel} onOpen={select} />}
+              {panel && !awayWallet(state, panel) && parseCardId(panel) && <RemoveWalletSection key={panel} type={parseCardId(panel)!.rail} network={parseCardId(panel)!.network} card={parseCardId(panel)!.card} wallet={wallet} state={state} onOpen={select} onRemoved={() => removed(panel)} />}
             </div>}
           </div>
         </>}
@@ -200,6 +203,14 @@ export function Wallet() {
       )}
     </Page>
   );
+}
+
+/** The wallet of a deck card, when it is at home on another device. */
+function awayWallet(state: WalletState, id: string): WalletInstanceView | undefined {
+  const card = parseCardId(id);
+  if (!card) return undefined;
+  const wallet = (state.wallets ?? []).find((w) => w.type === card.rail && w.network === card.network && (card.card === undefined ? deckId(w, state) === id : w.card === card.card));
+  return wallet?.home ? wallet : undefined;
 }
 
 /** The chosen wallet's panel, on its own network: its calls and its state are that network's. */

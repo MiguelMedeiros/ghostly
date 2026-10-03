@@ -6,6 +6,7 @@
   "clipboardUnavailableTouch": "Não foi possível ler a área de transferência. Toque e segure o campo abaixo e escolha Colar.",
   "close": "Fechar",
   "damaged": "Este convite está danificado. Peça um novo.",
+  "device": "Este código adiciona um dispositivo a um perfil. No novo dispositivo, escolha Já uso o Ghostly.",
   "empty": "A área de transferência está vazia. Copie um convite e pressione {{keys}} abaixo.",
   "emptyTouch": "A área de transferência está vazia. Copie um convite e cole abaixo.",
   "image": "Abrir imagem",

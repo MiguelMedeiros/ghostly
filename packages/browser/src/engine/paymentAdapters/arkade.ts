@@ -79,6 +79,25 @@ export class ArkadeAdapter implements PaymentAdapter<ArkPrepared> {
     return sweeping?{recoverable:0,sweeping:sweeping+swept,small:0}:{recoverable:takes?swept:0,sweeping:0,small:takes?0:swept};
   }
   /**
+   * When the first coin still spendable expires (ms), or undefined with none: a coin left alone past it is swept by the
+   * server and comes back only through a recovery. An expiry in blocks is read against the explorer's tip, at about ten
+   * minutes a block.
+   */
+  async expiresAt():Promise<number|undefined> {
+    let at:number|undefined, height:number|undefined;
+    for(const vtxo of await this.wallet.getVtxos({withRecoverable:false,withUnrolled:false})) {
+      if(vtxo.isSwept||vtxo.isSpent)continue;
+      if(vtxo.expiresAt instanceof Date){const ms=vtxo.expiresAt.getTime();if(Number.isFinite(ms))at=Math.min(at??ms,ms);}
+      else if(typeof vtxo.expiresAtHeight==="number")height=Math.min(height??vtxo.expiresAtHeight,vtxo.expiresAtHeight);
+    }
+    if(height!==undefined){
+      const tip=(await new EsploraProvider(this.config.explorer).getChainTip()).height;
+      const ms=Date.now()+Math.max(0,height-tip)*600_000;
+      at=Math.min(at??ms,ms);
+    }
+    return at;
+  }
+  /**
    * Moves swept outputs back into the balance, through the server's next batch. Refused while any expired coin is
    * not swept yet (`recoverVtxos` would name it too, and that batch fails for all of them), and when what is swept
    * is too little for a batch.

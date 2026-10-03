@@ -24,6 +24,16 @@ export function otherEndSeen(presence: PeerPresence | undefined, dataLink: strin
 }
 
 export interface GroupsHost {
+  /**
+   * The lowest group sequence number this profile sends at (WISP 06 § Raised counters): raised after a forced takeover
+   * or a restore, 0 before. Absent: 0.
+   */
+  seqFloor?(): number;
+  /**
+   * Whether this device may sign commits and take door duty for the group (WISP 06 § Forced takeover): off after a
+   * forced takeover or a restore until the person turns on "Manage groups from this device" there. Absent: on.
+   */
+  adminWork?(groupId: string): boolean;
   /** Sends a frame on a paired link (a contact chat or an edge). Throws when it cannot. */
   sendOnLink(linkId: string, frame: object): void;
   /** The link is open and both sides announced groups (`version` 2: community groups too). */
@@ -1450,6 +1460,8 @@ export class Groups {
   private attach(state: GroupState): void {
     const session: GroupSession = new GroupSession(state, {
       clock: () => this.now(),
+      seqFloor: () => this.host.seqFloor?.() ?? 0,
+      adminWork: () => this.host.adminWork?.(state.id) ?? true,
       save: async next => {
         const group = this.stored.get(state.id);
         if (!group) return;
