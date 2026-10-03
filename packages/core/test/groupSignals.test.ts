@@ -240,22 +240,24 @@ describe("an edge's packets, carried by members beside the relays", () => {
     expect(direct).toHaveLength(1);
   });
 
-  it("hands the settled packet once the member's app says it takes carried packets, when that comes after it", async () => {
-    const { me, relays, state } = edge();
+  it("hands its newest packet over the edge once the member's app says it takes carried packets", async () => {
+    // The packet that goes as the edge opens is out before the session is ready: with no member to carry it, it goes
+    // to the relays only, and the member's end would meet it first after a goodbye.
+    const { me, relays, state } = edge(0);
     const ready = { now: false }, direct: Uint8Array[] = [];
     const end = new CarriedTransport(relays, me.pubKeyZ32, createIdentity().pubKeyZ32, {
       carry: () => ({ taken: 0, sure: false }), open: () => state.open, look: () => {},
       direct: payload => { if (!ready.now) return false; direct.push(payload); return true; },
     });
-    state.open = true;
     await end.publish(me, records("settled"));
-    await vi.advanceTimersByTimeAsync(0);
-    expect(direct).toHaveLength(0);
+    expect(relays.publishes).toEqual([records("settled")]);
+    state.open = true;
     ready.now = true;
     end.linkReady();
     expect(direct).toHaveLength(1);
     expect(parseRelayPayload(me.pubKeyZ32, direct[0]).timestampMicros).toBe(relays.packets.get(me.pubKeyZ32)!.timestampMicros);
-    // Once.
+    // Not over an edge that is down.
+    state.open = false;
     end.linkReady();
     expect(direct).toHaveLength(1);
   });

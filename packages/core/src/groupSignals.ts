@@ -99,8 +99,8 @@ export class CarriedTransport implements PkarrTransport {
   /** My last packet while the edge is down: what a member that just became reachable is handed. */
   private mine: Uint8Array | null = null;
   private lastTimestamp = 0n;
-  /** My packet the relays took while the edge is up, which its own link could not hand the member yet (`linkReady`). */
-  private settled: Uint8Array | null = null;
+  /** My newest packet, wherever it went: what the edge hands the member over itself once it is ready (`linkReady`). */
+  private newest: Uint8Array | null = null;
   /** The newest packet of the member's that came through a carrier, and the timestamp of the one a read last returned. */
   private carried: SignedPacket | null = null;
   private returned = -1n;
@@ -136,8 +136,7 @@ export class CarriedTransport implements PkarrTransport {
   async publish(identity: Identity, records: GhostRecord[], options?: PkarrRequestOptions): Promise<void> {
     if (this.stopped || identity.pubKeyZ32 !== this.myKey) return this.inner.publish(identity, records, options);
     this.drop();
-    this.settled = null;
-    const payload = this.stamp(identity, records);
+    const payload = this.newest = this.stamp(identity, records);
     // Up: the edge carries everything, and its packet on the relays (it is here, its offer is settled) is nothing
     // anyone waits for. It goes as a background write, behind the links that are signaling (a new offer of its own aside).
     if (this.hooks.open()) {
@@ -182,17 +181,17 @@ export class CarriedTransport implements PkarrTransport {
    * from the relays until its slow look, so the member's app would otherwise meet that packet first after a goodbye.
    */
   private handDirect(payload: Uint8Array): void {
-    this.settled = null;
     if (this.stopped || !this.hooks.open()) return;
-    let handed = false;
-    try { handed = !!this.hooks.direct?.(payload); } catch { /* it closed */ }
-    // The packet that goes as the edge opens is often out before the member's app says it takes carried packets.
-    if (!handed) this.settled = payload;
+    try { this.hooks.direct?.(payload); } catch { /* it closed */ }
   }
 
-  /** The edge's link says the member's app takes carried packets: the settled packet it could not take before goes now. */
+  /**
+   * The edge is up and the member's app takes carried packets: my newest packet goes over it. The one that went as the
+   * edge opened (before its session was ready, so to the relays, or to members) is often one the member never read.
+   * A packet it has already is dropped on its side.
+   */
   linkReady(): void {
-    if (this.settled) this.handDirect(this.settled);
+    if (this.newest && this.inner.publishPayload) this.handDirect(this.newest);
   }
 
   /** The deferred packet goes to the relays: the edge did not open meanwhile. Tried again while it is still the newest. */
