@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { STORES, store, transact, wrap } from "../src/shared/idb";
 import { homeOf, homeRow, readWalletHomes, writeWalletHomes } from "../src/devices/walletHomes";
 import { dropBreezDatabases } from "../src/devices/handoffStandby";
-import { awayFrom, refuseAway, setAwayWallets, WalletAwayError } from "../src/engine/paymentAdapters/away";
+import { awayFrom, refuseAway, setAwayWallets, setSingleWriterGate, WalletAwayError } from "../src/engine/paymentAdapters/away";
 import type { PlannedWallet } from "../src/devices/handoffWallets";
 // covers: devices.handoff.wallets
 
@@ -85,6 +85,21 @@ describe("a wallet away from this device", () => {
     setAwayWallets(new Map([["arkade:testnet", ""]]));
     expect(() => refuseAway("arkade:testnet", "Ark")).toThrow("Ark can't be used here: its home is another device.");
     expect(() => refuseAway("arkade:mainnet", "Ark")).not.toThrow();
+  });
+});
+
+describe("a single-writer wallet without a fresh turn read", () => {
+  it("does not open, its retry included, until the engine says this device is the active one", async () => {
+    await put("arkWallet-mode-testnet", { config: { network: "mutinynet", provider: "https://ark.test", explorer: "https://esplora.test", serverKey: `02${"ab".repeat(32)}`, walletId: "a1" }, seed: { iv: "x", data: "y" }, deviceKey: "k" });
+    setSingleWriterGate(async () => false);
+    try {
+      const ark = new ArkWallet("testnet", () => {});
+      await ark.start();
+      await ark.ensureReady();
+      expect(connect).not.toHaveBeenCalled();
+      expect(ark.view.error).toContain("Checking which device is active");
+      await ark.stop();
+    } finally { setSingleWriterGate(null); }
   });
 });
 

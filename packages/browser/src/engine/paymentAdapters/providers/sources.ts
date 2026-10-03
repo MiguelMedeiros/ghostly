@@ -2,6 +2,7 @@ import { STORES, store, transact, wrap } from "../../../shared/idb";
 import type { WalletMode } from "../../../shared/mints";
 import { ModeChanged, ModeGate } from "../modeGate";
 import { newDeviceKey, sealSeed, unsealSeed, type EncryptedSeed } from "../persistence";
+import { requireTurn } from "../away";
 import { describeProvider, networkMode, offeredIn, redact, sourceProblem, type ProviderDescriptor, type ProviderDescriptorView, type ProviderHost, type ProviderKind, type ProviderNetwork, type ProviderSettings, type SourceProblem } from "./types";
 
 /**
@@ -244,6 +245,8 @@ export class ProviderSources<P extends Connectable> {
 
   /** Creates a provider and checks it is on a network of this mode before anything uses it. */
   private async open(descriptor: ProviderDescriptor<P>, settings: ProviderSettings, controller = this.controller) {
+    // The Breez source shares its database with the Spark wallet of its phrase: one writer, after a fresh turn read.
+    if (descriptor.id === "breez") await requireTurn();
     const signal = controller.signal;
     const provider = await this.gate.within(abortable(descriptor.create(settings, { ...this.options.host(), mode: this.mode, signal }), signal), (p) => p.close());
     try {

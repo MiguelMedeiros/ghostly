@@ -188,7 +188,7 @@ export function Wallet() {
                 <span className="font-medium text-text-primary">{selected.name}</span>
               </p>
               {/* A wallet at home on another device: where it can be used, in place of its panel. */}
-              {panel && awayWallet(state, panel) && <WalletAway wallet={awayWallet(state, panel)!} />}
+              {panel && awayWallet(state, panel) && <WalletAway wallet={awayWallet(state, panel)!} platform={cardWallet(wallet, parseCardId(panel)!)} />}
               {/* Test coins only when asked for: Receive never fills a Testnet wallet by itself. */}
               {panel && !awayWallet(state, panel) && parseCardId(panel)?.network === "testnet" && <TestCoins key={`coins-${panel}`} rail={parseCardId(panel)!.rail} network="testnet" wallet={cardWallet(wallet, parseCardId(panel)!)} state={networkState(state, "testnet", parseCardId(panel)!.card)} />}
               {panel && !awayWallet(state, panel) && <WalletPanel id={panel} wallet={wallet} state={state} focus={focusPanel} backup={backup === panel} onOpen={select} />}

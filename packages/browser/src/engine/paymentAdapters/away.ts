@@ -27,6 +27,21 @@ export class WalletAwayError extends Error {
   }
 }
 
+/**
+ * Whether a single-writer wallet (Ark, Bark, Spark and the Breez source, Fedimint) may open its SDK now: the engine
+ * says, from a good turn read under 60 seconds old (WISP 06 § Wallets). Every open asks, the retries of each wallet
+ * included, so a device replaced while it was offline does not reopen one on a retry.
+ */
+let turnGate: () => Promise<boolean> = async () => true;
+export function setSingleWriterGate(gate: (() => Promise<boolean>) | null): void {
+  turnGate = gate ?? (async () => true);
+}
+
+/** Throws (the wallet tries again later, as it does when its server does not answer) without a fresh good turn read. */
+export async function requireTurn(): Promise<void> {
+  if (!(await turnGate().catch(() => false))) throw new Error("Checking which device is active");
+}
+
 /** Throws when the wallet `id` is at home on another device. */
 export function refuseAway(id: string, wallet: string): void {
   const device = awayFrom(id);

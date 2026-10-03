@@ -80,7 +80,13 @@ export async function dropBreezDatabases(names: readonly string[], idb: Pick<IDB
     if (!/^ghostly-breez-/.test(name)) continue;
     const found = listed.flatMap((info) => (info.name?.startsWith(name) ? [info.name] : []));
     for (const database of new Set([name, `${name}-tree`, ...found])) {
-      await new Promise<void>((resolve) => { try { const request = idb.deleteDatabase(database); request.onsuccess = request.onerror = request.onblocked = () => resolve(); } catch { resolve(); } });
+      // Only a delete that succeeded counts: blocked (a page still has it open) or failed, the note stays and it is tried again.
+      await new Promise<void>((resolve, reject) => {
+        const request = idb.deleteDatabase(database);
+        request.onsuccess = () => resolve();
+        request.onerror = () => reject(request.error ?? new Error(`${database} was not deleted`));
+        request.onblocked = () => reject(new Error(`${database} is still open`));
+      });
     }
   }
 }

@@ -153,6 +153,9 @@ describe("wallets that stay home", () => {
   it("coins kept here whose wallet cannot be read: their expiry is not known", () => {
     expect(why(view({ bark: bark({ balance: 5, read: undefined }) }))).toBe("loading");
     expect(why(view({ ark: ark({ balance: 5, locked: true }) }))).toBe("loading");
+    // Not open yet, so it says 0: what it holds and when its coins expire are not known, and no mark is written blind.
+    expect(why(view({ bark: bark({ locked: true, read: undefined }) }))).toBe("loading");
+    expect(why(view({}, { ark: ark({ read: undefined }) }))).toBe("loading");
     // A wallet that stays home holding no coins that expire is not read for the handoff.
     expect(why(view({ usdt: usdt({ locked: true }), fedimint: fedimint(0, "connecting") }))).toBeNull();
   });

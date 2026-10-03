@@ -1,5 +1,5 @@
 import { generateMnemonic, validateMnemonic } from "@scure/bip39";
-import { awayFrom } from "./away";
+import { awayFrom, refuseAway, requireTurn } from "./away";
 import { wordlist } from "@scure/bip39/wordlists/english.js";
 import { RestArkProvider } from "@arkade-os/sdk";
 import { validatePaymentTarget, type PaymentTarget } from "@ghostly/core";
@@ -63,6 +63,7 @@ export class ArkWallet {
   private async ready(create:boolean) {
     clearTimeout(this.retry);
     try {
+      await requireTurn();
       if(!this.saved){if(create)await this.createDefault();}
       else if(this.saved.deviceKey && !this.adapter)await this.serial(()=>this.stopped?Promise.resolve():this.unlock());
     } catch(error) {
@@ -80,6 +81,8 @@ export class ArkWallet {
   resume() {this.gate.resume();}
   create(params:ArkCreate) {return this.serial(()=>this.createNow(params));}
   private async createNow(params:ArkCreate) {
+    // At home on another device (WISP 06 § Wallets that stay home): never made again, unlocked or restored over here.
+    refuseAway(`arkade:${this.network}`, "Ark");
     if(!ARK_NETWORKS.includes(params.network))throw new Error("Unsupported Ark network");
     if(arkMode(params.network)!==this.network)throw new WrongNetworkError(arkMode(params.network),`${params.network==="bitcoin"?"Bitcoin":params.network} is a ${networkLabel(arkMode(params.network))} network: this is the ${networkLabel(this.network)} Ark wallet`);
     checkProviders(params.network,params.provider,params.explorer);
@@ -100,6 +103,8 @@ export class ArkWallet {
     void this.refresh().catch(error=>console.warn("Ark refresh:",error instanceof Error?error.message:error));
   }
   async unlock(password?:string) {
+    // At home on another device (WISP 06 § Wallets that stay home): never made again, unlocked or restored over here.
+    refuseAway(`arkade:${this.network}`, "Ark");
     if(!this.saved)throw new Error("Create or restore an Ark wallet first");
     if(this.adapter)return;
     const key=this.saved.deviceKey??password;
@@ -136,7 +141,7 @@ export class ArkWallet {
     const payload=encodeBackup({format:"ghostly-ark",version:1,sdk:"0.4.74",createdAt:Date.now(),mnemonic,config,database,intents});
     return JSON.stringify({format:"ghostly-ark-encrypted",version:1,vault:await sealSeed(payload,password)});
   }
-  restoreBackup(text:string,password:string):Promise<void> {return this.serial(async()=>{
+  restoreBackup(text:string,password:string):Promise<void> {return this.serial(async()=>{ refuseAway(`arkade:${this.network}`, "Ark");
     if(text.length>16*1024*1024)throw new Error("Ark backup is too large");
     const envelope=JSON.parse(text);
     if(envelope.format!=="ghostly-ark-encrypted" || envelope.version!==1)throw new Error("Unsupported Ark backup");

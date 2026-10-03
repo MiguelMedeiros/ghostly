@@ -122,7 +122,9 @@ import { newDeviceSecretDue } from "../devices/rotate";
 import { peekTurn, type TurnPeek } from "../devices/restoreGuard";
 import { afterStop, planHandoffWallets, type HandoffTakerFacts, type HandoffWalletPlan, type WalletHome } from "../devices/handoffWallets";
 import { readWalletHomes, writeWalletHomes } from "../devices/walletHomes";
-import { setAwayWallets, refuseAway } from "./paymentAdapters/away";
+import { awayFrom, setAwayWallets, setSingleWriterGate, refuseAway } from "./paymentAdapters/away";
+import { breezStorage } from "./paymentAdapters/providers/breezSdk";
+import { normalizePhrase } from "./paymentAdapters/providers/recoveryPhrase";
 import { lightningPaying } from "./paymentAdapters/providers/lightningService";
 import { COUNTER_RAISE_KEY, GROUP_ADMIN_OFF_KEY, PENDING_RAISE_KEY, applyCounterRaise, isCounterRaise, isGroupAdminOff, isPendingRaise, type PendingRaise } from "../devices/raise";
 import { fileBytes } from "../shared/fileBytes";
@@ -1542,6 +1544,8 @@ export class GhostlyNode implements EngineImplementation {
   private async startWallets(): Promise<void> {
     // Which wallets are at home on another device (WISP 06 § Wallets that stay home): none of them opens here.
     await this.loadWalletHomes();
+    // Every single-writer wallet asks before it opens its SDK, its retries included (WISP 06 § Wallets).
+    setSingleWriterGate(() => this.singleWriterTurn());
     // Wallets stored the way they were before each had its own network take their network's key first. Nothing
     // is deleted: see walletNetworks.ts. The report names keys only.
     const migrated = await migrateWalletNetworks();
@@ -1783,6 +1787,8 @@ export class GhostlyNode implements EngineImplementation {
       await this.lightnings[network].stop();
       await this.bitcoins[network].stop();
     }
+    // The Cashu wallet too: its polls would otherwise go on writing after the stop.
+    await this.wallet.stop();
     await this.nativeQueue;
     await this.hold.stop();
     await Promise.allSettled([...this.outboxes.values()].map(outbox => outbox.stop()));
@@ -3837,12 +3843,13 @@ export class GhostlyNode implements EngineImplementation {
         await this.creating(this.fedimintWallets[network], () => this.fedimintWallets[network].join(params.invite!));
         void this.lightnings[network].ensureReady();
       } else {
-        const sources = type === "lightning" ? (await this.lightningCard(network)).sources : this.bitcoins[network].sources;
+        const sources = type === "lightning" ? (await this.lightningCard(network, undefined, true)).sources : this.bitcoins[network].sources;
         const providerId = params.providerId ?? "";
         const descriptor = sources.view.offered.find((d) => d.id === providerId);
         if (!descriptor) throw new Error(`Choose a ${type === "lightning" ? "Lightning" : "Bitcoin"} source that runs on ${networkLabel(network)}`);
         // What the person left blank takes the network's default (a BDK wallet's chain), the rest as typed.
         const values = { ...Object.fromEntries(descriptor.fields.flatMap((f) => f.defaults?.[network] ? [[f.name, f.defaults[network]!]] : [])), ...(params.values ?? {}) };
+        if (type === "lightning" && providerId === BREEZ_SOURCE) await this.refuseAwayBreez(network, values.mnemonic);
         // Lightning: one more card, next to the network's others (the same source may be added again, not the same wallet).
         if (type === "lightning") card = await this.creating(this.lightnings[network], () => this.lightnings[network].add(providerId, values));
         else await this.creating(sources, () => sources.set(providerId, values));
@@ -4131,7 +4138,29 @@ export class GhostlyNode implements EngineImplementation {
   lnurlResolve({ text, network }: { text: string; network?: WalletNetwork }) { return this.lightnings[this.net(network)].resolveDestination(text); }
   lnurlInvoice({ id, amount, comment, network }: { id: string; amount: number; comment?: string; network?: WalletNetwork }) { return this.lightnings[this.net(network)].destinationInvoice(id, amount, comment); }
   /** A Lightning card of a network (the default for receiving without `card`), once the network's cards are open. */
-  private async lightningCard(network: WalletNetwork, card?: string) { const cards = this.lightnings[network]; await cards.start(); return cards.card(card); }
+  /**
+   * A Lightning card of the network (the default for receiving without `card`). One at home on another device is
+   * refused (WISP 06 § Wallets that stay home): its source is never connected, paid through or changed here.
+   * `anyCard`: only the network's list of sources is wanted (New), not a card to use.
+   */
+  private async lightningCard(network: WalletNetwork, card?: string, anyCard = false) {
+    const cards = this.lightnings[network];
+    await cards.start();
+    const id = card ?? cards.receivingId;
+    if (!anyCard) refuseAway(`lightning:${network}:${id}`, this.walletView.networks?.[network].lightnings?.find((c) => c.card === id)?.name || WALLET_NAMES.lightning);
+    return cards.card(card);
+  }
+
+  /**
+   * A Breez Lightning card from this phrase would open the Breez wallet of a Spark wallet or Breez card at home on
+   * another device (one phrase, one database, `breezStorage`): two writers. Refused.
+   */
+  private async refuseAwayBreez(network: WalletNetwork, mnemonic: string | undefined): Promise<void> {
+    if (!mnemonic) return;
+    const name = breezStorage(network === "mainnet" ? "bitcoin" : "regtest", normalizePhrase(mnemonic));
+    if (awayFrom(`spark:${network}`) !== undefined && (await this.sparkWallets[network].breezDatabase().catch(() => undefined)) === name) refuseAway(`spark:${network}`, WALLET_NAMES.spark);
+    for (const [id, other] of (await this.lightnings[network].handoffFacts().catch(() => null))?.breez ?? []) if (other === name) refuseAway(id, WALLET_NAMES.lightning);
+  }
   /** The Lightning card that holds this quote, or a refusal: nothing is paid without one. */
   private lightningQuote(network: WalletNetwork, quote: string) {
     const card = this.lightnings[network].withQuote(quote);
@@ -4148,7 +4177,8 @@ export class GhostlyNode implements EngineImplementation {
    */
   async lightningSetSource({ providerId, values, network, card }: { providerId: string; values: Record<string, string>; network?: WalletNetwork; card?: string }) {
     const cards = this.lightnings[this.net(network)];
-    const target = await this.lightningCard(this.net(network), card);
+    if (providerId === BREEZ_SOURCE) await this.refuseAwayBreez(this.net(network), values?.mnemonic);
+    const target = await this.lightningCard(this.net(network), card, card === undefined);
     if (card !== undefined) {
       if (target.view.providerId !== providerId || providerId === CASHU_MINT_SOURCE) throw new Error("A card keeps its source: add another card with New");
       await target.sources.set(providerId, values);
@@ -4201,7 +4231,7 @@ export class GhostlyNode implements EngineImplementation {
    * other network refuses it untouched (WrongNetworkError) before this hands it on.
    */
   private async restoreInto<W, R>(wallets: PerNetwork<W>, network: WalletNetwork | undefined, restore: (wallet: W) => Promise<R>): Promise<{ wallet: W; result: R }> {
-    const kind = wallets === (this.arkWallets as unknown) ? "arkade" : wallets === (this.barkWallets as unknown) ? "bark" : wallets === (this.sparkWallets as unknown) ? "spark" : wallets === (this.usdtWallets as unknown) ? "usdt" : null;
+    const kind = wallets === (this.arkWallets as unknown) ? "arkade" : wallets === (this.barkWallets as unknown) ? "bark" : wallets === (this.sparkWallets as unknown) ? "spark" : wallets === (this.usdtWallets as unknown) ? "usdt" : wallets === (this.fedimintWallets as unknown) ? "fedimint" : null;
     if (kind) refuseAway(`${kind}:${this.net(network)}`, WALLET_NAMES[kind]);
     const first = wallets[this.net(network)];
     try { return { wallet: first, result: await restore(first) }; }
@@ -4279,6 +4309,8 @@ export class GhostlyNode implements EngineImplementation {
    */
   async sparkUseForLightning(params?: { network?: WalletNetwork }) {
     const network = this.net(params?.network);
+    // A Spark wallet at home on another device: its Breez wallet is opened there only.
+    refuseAway(`spark:${network}`, WALLET_NAMES.spark);
     const { mnemonic, apiKey } = await this.sparkWallets[network].backup();
     await this.lightningSetSource({ providerId: BREEZ_SOURCE, values: { mnemonic, ...(apiKey ? { apiKey } : {}) }, network });
   }

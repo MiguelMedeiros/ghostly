@@ -1,5 +1,5 @@
 import { generateMnemonic, validateMnemonic } from "@scure/bip39";
-import { awayFrom } from "./away";
+import { awayFrom, refuseAway, requireTurn } from "./away";
 import { wordlist } from "@scure/bip39/wordlists/english.js";
 import { decodeBolt11, engineError, engineText, isFederationId, type BitcoinNetwork, type PaymentTarget, type WalletNetwork } from "@ghostly/core";
 import { store, STORES, transact, wrap } from "../../shared/idb";
@@ -139,7 +139,8 @@ export class FedimintWallet {
     if (awayFrom(`fedimint:${this.network}`) !== undefined) return Promise.resolve();
     clearTimeout(this.retry);
     if (this.stopped) return Promise.resolve();
-    return Promise.all((this.saved?.federations ?? []).map((f) => this.open(f).catch(() => undefined))).then(() => {
+    // No good turn read under a minute old: nothing opens now, and it is tried again (WISP 06 § Wallets).
+    return requireTurn().then(() => Promise.all((this.saved?.federations ?? []).map((f) => this.open(f).catch(() => undefined))), () => undefined).then(() => {
       if (this.stopped) return;
       void this.refresh();
       if (this.saved?.federations.some((f) => !this.clients.has(f.id))) this.retry = setTimeout(() => void this.ensureReady(), 30_000);
@@ -242,7 +243,7 @@ export class FedimintWallet {
    * Joins a federation. `recover`: the mnemonic was used with this federation before (a restore): the client rebuilds
    * its ecash from the federation's backup instead of starting empty.
    */
-  join(invite: string, { recover = false }: { recover?: boolean } = {}): Promise<FedimintFederationView> { return this.serial(async () => {
+  join(invite: string, { recover = false }: { recover?: boolean } = {}): Promise<FedimintFederationView> { return this.serial(async () => { refuseAway(`fedimint:${this.network}`, "Fedimint");
     const code = normalizeInvite(invite);
     const sdk = await this.sdk();
     const info = await this.gate.within(sdk.preview(code));
@@ -516,6 +517,8 @@ export class FedimintWallet {
   /** The mnemonic and the invite codes typed in: the same recovery. */
   restorePhrase(mnemonic: string, invites: string[]): Promise<{ joined: number; failed: string[] }> { return this.restore(async () => ({ mnemonic, invites })); }
   private async restore(read: () => Promise<{ mnemonic: string; invites: string[] }>): Promise<{ joined: number; failed: string[] }> {
+    // At home on another device (WISP 06 § Wallets that stay home): never made again, unlocked or restored over here.
+    refuseAway(`fedimint:${this.network}`, "Fedimint");
     const { mnemonic, invites } = await read();
     const phrase = mnemonic.trim().toLowerCase().split(/\s+/).join(" ");
     if (!validateMnemonic(phrase, wordlist)) throw new Error("Invalid recovery phrase");

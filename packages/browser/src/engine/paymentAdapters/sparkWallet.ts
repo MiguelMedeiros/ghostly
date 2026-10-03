@@ -1,5 +1,5 @@
 import { generateMnemonic, validateMnemonic } from "@scure/bip39";
-import { awayFrom } from "./away";
+import { awayFrom, refuseAway, requireTurn } from "./away";
 import { wordlist } from "@scure/bip39/wordlists/english.js";
 import { SPARK_NETWORKS, SPARK_PROVIDER, type PaymentTarget, type SparkNetwork, type WalletNetwork } from "@ghostly/core";
 import { store, STORES, transact, wrap } from "../../shared/idb";
@@ -74,6 +74,7 @@ export class SparkWallet {
   private async ready(create: boolean) {
     clearTimeout(this.retry);
     try {
+      await requireTurn();
       if (!this.saved) { if (create) await this.serial(async () => { if (!this.saved && this.network === "testnet") await this.createNow({ network: "regtest" }); }); }
       else if (!this.adapter) await this.serial(() => this.stopped ? Promise.resolve() : this.open());
     } catch (error) {
@@ -86,6 +87,8 @@ export class SparkWallet {
   /** A new wallet (or one restored from `mnemonic`) on `network`; Mainnet only with an API key. */
   create(params: SparkCreate) { return this.serial(() => this.createNow(params)); }
   private async createNow(params: SparkCreate) {
+    // At home on another device (WISP 06 § Wallets that stay home): never made again, unlocked or restored over here.
+    refuseAway(`spark:${this.network}`, "Spark");
     if (!SPARK_NETWORKS.includes(params.network)) throw new Error("Unsupported Spark network");
     if (sparkMode(params.network) !== this.network) throw new WrongNetworkError(sparkMode(params.network), `${params.network === "bitcoin" ? "Bitcoin" : params.network} is a ${networkLabel(sparkMode(params.network))} network: this is the ${networkLabel(this.network)} Spark wallet`);
     const apiKey = params.apiKey?.trim() || undefined;
@@ -181,7 +184,7 @@ export class SparkWallet {
     return JSON.stringify({ format: "ghostly-spark-encrypted", version: 1, vault: await sealSeed(JSON.stringify({ format: "ghostly-spark", version: 1, mnemonic, network, intents }), password) });
   }
   /** The API key is not in the file: it is Breez's to Ghostly's user, asked again on Mainnet. */
-  restoreBackup(text: string, password: string, apiKey?: string): Promise<void> { return this.serial(async () => {
+  restoreBackup(text: string, password: string, apiKey?: string): Promise<void> { return this.serial(async () => { refuseAway(`spark:${this.network}`, "Spark");
     if (text.length > 16 * 1024 * 1024) throw new Error("Spark backup is too large");
     const envelope = JSON.parse(text);
     if (envelope.format !== "ghostly-spark-encrypted" || envelope.version !== 1) throw new Error("Unsupported Spark backup");

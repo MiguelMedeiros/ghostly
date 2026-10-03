@@ -21,6 +21,7 @@
     "useProvider": "Use this provider"
   },
   "away": {
+    "backup": "If {{device}} is lost, the funds are reachable from this recovery phrase or backup file.",
     "expires": "Coins expire on {{date}}. Use Ghostly on {{device}} before then.",
     "otherDevice": "the device that holds it",
     "text": "{{wallet}} can't be used here. Use it on {{device}}.",

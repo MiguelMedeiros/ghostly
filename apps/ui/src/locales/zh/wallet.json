@@ -21,6 +21,7 @@
     "useProvider": "使用此服务商"
   },
   "away": {
+    "backup": "如果 {{device}} 丢失，可以通过这个恢复短语或备份文件取回资金。",
     "expires": "币将于 {{date}} 到期。请在此之前在 {{device}} 上使用 Ghostly。",
     "otherDevice": "保存它的设备",
     "text": "{{wallet}} 不能在这里使用。请在 {{device}} 上使用。",

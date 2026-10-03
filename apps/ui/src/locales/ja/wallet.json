@@ -21,6 +21,7 @@
     "useProvider": "このプロバイダーを使う"
   },
   "away": {
+    "backup": "{{device}} を失っても、このリカバリーフレーズかバックアップファイルから資金にアクセスできます。",
     "expires": "コインの期限は {{date}} です。それまでに {{device}} で Ghostly を使ってください。",
     "otherDevice": "保管しているデバイス",
     "text": "{{wallet}} はここでは使えません。{{device}} で使ってください。",

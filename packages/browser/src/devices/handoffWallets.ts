@@ -300,9 +300,10 @@ export function planHandoffWallets(facts: HandoffWalletFacts): HandoffWalletPlan
       const holding = held(c.amounts);
       if (route === "home") {
         const home: WalletHome = { key: ownKey };
+        // Coins that expire, kept here: what the wallet holds and when its coins expire must be read first (a wallet
+        // not open yet says 0 for coins it never read, and its mark would carry no expiry to check later).
+        if ((c.type === "arkade" || c.type === "bark") && c.unreadable) { refuse({ why: "loading", at: c.at, ...about }); continue; }
         if ((c.type === "arkade" || c.type === "bark") && holding) {
-          // Coins that expire, kept here: their expiry must be known, and far enough off.
-          if (c.unreadable) { refuse({ why: "loading", at: c.at, ...about }); continue; }
           const expiresAt = coinsExpireAt(c.type, inner, now);
           if (expiresAt !== undefined) {
             home.expiresAt = expiresAt;
