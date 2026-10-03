@@ -579,7 +579,10 @@ export class HandoffGiver {
 
   private async onHave(from: string, frame: DeviceFrame): Promise<void> {
     const have = readHandoffHave(frame);
-    if (!have || from !== this.peer || (this.phase !== "pass1" && this.phase !== "pass2")) return;
+    if (!have) return;
+    // The handoff this belongs to is over here (this device went back to active): the taker is told, and stops.
+    if (this.phase === "idle" || this.phase === "failed") { this.out(handoffCancelFrame("cancelled"), from); return; }
+    if (from !== this.peer || (this.phase !== "pass1" && this.phase !== "pass2")) return;
     this.haveBuffer.d.push(...have.d);
     Object.assign(this.haveBuffer.p, have.p);
     if (have.more) return;
@@ -899,6 +902,7 @@ export class HandoffTaker {
     await this.staging.dropRest().catch(() => {});
     this.phase = "receiving";
     this.pass = 1;
+    this.watchIdle();
     this.changed();
     if (this.ports.links.live(this.peer)) this.linkChanged(this.peer, true);
   }
@@ -906,6 +910,7 @@ export class HandoffTaker {
   stop(): void {
     this.stopped = true;
     if (this.timer) clearTimeout(this.timer);
+    clearInterval(this.idleTimer);
   }
 
   linkChanged(key: string, live: boolean): void {
@@ -1016,7 +1021,11 @@ export class HandoffTaker {
       session.key = handoffStreamKey(session.ephemeral.secret, fromBase64Url(hello.e), this.secret, session.transcript);
       if (this.phase === "verified") { this.out(handoffRequestFrame(this.turn, this.id!)); return; }
       await this.sendHave();
+      return;
     }
+    // The giver says hello without this handoff's id: it holds none, so it never released (a release is written into
+    // its record, with the id, before it is sent) and went back to active. Nothing to wait for; staged files stay.
+    if ((this.phase === "receiving" || this.phase === "verified") && hello.id !== this.id) await this.giveUp("cancelled");
   }
 
   private async onPake(from: string, frame: DeviceFrame): Promise<void> {
@@ -1046,7 +1055,26 @@ export class HandoffTaker {
     this.phase = "receiving";
     this.pass = 1;
     this.arm(HANDOFF_TIMINGS.giveUpMs, () => this.giveUp("dropped"));
+    this.watchIdle();
     await this.sendHave();
+  }
+
+  private lastDataAt = 0;
+  private idleTimer: ReturnType<typeof setInterval> | undefined;
+  /**
+   * Nothing has arrived for a minute while parts are still to come and the link is open: what is here is said again,
+   * so a copy the giver paused (it saw no confirmation for two minutes) goes on.
+   */
+  private watchIdle(): void {
+    clearInterval(this.idleTimer);
+    this.lastDataAt = this.now();
+    this.idleTimer = setInterval(() => void this.exclusive(async () => {
+      if (this.phase !== "receiving") { clearInterval(this.idleTimer); return; }
+      const waiting = [...this.incoming.values()].some((part) => !part.done);
+      if (!waiting || !this.peer || !this.ports.links.live(this.peer) || this.now() - this.lastDataAt < HANDOFF_TIMINGS.idleMs) return;
+      this.lastDataAt = this.now();
+      await this.sendHave();
+    }), HANDOFF_TIMINGS.idleMs / 2);
   }
 
   /** `handoff-have`: the files staged and the files the frozen copy holds, and the parts received in part. */
@@ -1113,6 +1141,7 @@ export class HandoffTaker {
     // so the giver goes on with this session's key. A piece that opens and is not the part is caught by its digest.
     if (!piece) { await this.sayAgain(); return; }
     if (part.got + piece.length > part.size) { await this.badPart(part); return; }
+    this.lastDataAt = this.now();
     // A write that fails (the disk is full, storage was taken away) ends the handoff at once, said to both screens.
     try { if (part.id) await this.staging!.append(part.id, part.got, piece); else part.chunks!.push(piece); }
     catch { await this.noRoom(); return; }

@@ -12,6 +12,8 @@ import type { SavedIntent } from "./coordinator";
 
 export interface BarkWalletView {
   configured: boolean; locked: boolean;
+  /** The balances were read once since this wallet opened (until then `balance` says nothing). */
+  read?: true;
   network?: BarkNetwork; provider?: string; address?: string; onchainAddress?: string;
   /** The server's terms of service, when it publishes them (Second's Bitcoin server does). */
   terms?: string;
@@ -191,8 +193,9 @@ export class BarkWallet {
     // Renewing what is close to expiry keeps money left alone spendable: every few minutes is plenty.
     if (Date.now() - this.lastMaintenance > 5 * 60_000) { this.lastMaintenance = Date.now(); void adapter.maintain().catch((error) => console.warn("Bark maintenance:", error instanceof Error ? error.message : error)); }
     if (this.adapter !== adapter) return;
+    const balancesRead = this.view.read || (balance !== undefined && onchain !== undefined);
     this.view = {
-      ...this.idle(adapter.config), locked: false, address, onchainAddress,
+      ...this.idle(adapter.config), locked: false, ...(balancesRead ? { read: true as const } : {}), address, onchainAddress,
       balance: balance?.spendableSats ?? this.view.balance,
       pending: balance ? balance.pendingInRoundSats + balance.pendingBoardSats + balance.pendingLightningSendSats + balance.claimableLightningReceiveSats : this.view.pending,
       exiting: balance?.pendingExitSats ?? this.view.exiting,

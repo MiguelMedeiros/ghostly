@@ -11,7 +11,8 @@ import type { WalletNetwork } from "@ghostly/core";
 import type { WalletMode } from "../../shared/mints";
 import { ModeChanged, ModeGate, WrongNetworkError, networkLabel } from "./modeGate";
 import { walletKey } from "./walletNetworks";
-export interface ArkWalletView { configured:boolean; locked:boolean; automatic?:boolean; network?:ArkConfig["network"]; provider?:string; address?:string; boardingAddress?:string; incoming?:number; balance:number; recoverable?:number; sweeping?:number; small?:number; error?:string }
+/** `read`: the balances were read once since this wallet opened (until then `balance` says nothing). */
+export interface ArkWalletView { configured:boolean; locked:boolean; read?:true; automatic?:boolean; network?:ArkConfig["network"]; provider?:string; address?:string; boardingAddress?:string; incoming?:number; balance:number; recoverable?:number; sweeping?:number; small?:number; error?:string }
 /** A wallet with a device key opens by itself; one sealed with a password (older profiles) waits for it. */
 interface StoredArk {config:ArkConfig;seed:EncryptedSeed;deviceKey?:string}
 export interface ArkCreate {network:ArkConfig["network"];provider:string;explorer:string;password?:string;mnemonic?:string}
@@ -171,7 +172,8 @@ export class ArkWallet {
     const incoming=await read("incoming",()=>adapter.incoming(),this.view.incoming);
     const {recoverable,sweeping,small}=await read("recoverable",()=>adapter.expired(),{recoverable:this.view.recoverable,sweeping:this.view.sweeping,small:this.view.small});
     if(this.adapter!==adapter)return;
-    this.view={configured:true,locked:false,automatic:!!this.saved?.deviceKey,network:adapter.config.network,provider:adapter.config.provider,address,boardingAddress,incoming,balance,recoverable,sweeping,small,
+    const balancesRead=this.view.read||!failed.some((what)=>what==="balance"||what==="incoming"||what==="recoverable");
+    this.view={configured:true,locked:false,...(balancesRead?{read:true as const}:{}),automatic:!!this.saved?.deviceKey,network:adapter.config.network,provider:adapter.config.provider,address,boardingAddress,incoming,balance,recoverable,sweeping,small,
       error:failed.length?`Could not read the ${failed.join(", ")} from the Ark provider. Last values may be stale.`:undefined};
     this.changed();
     if(this.adapter)this.timer=setTimeout(()=>void this.refresh(),10000);

@@ -427,6 +427,24 @@ describe("a device that asks and never proves", () => {
   });
 });
 
+describe("a giver that went back to active", () => {
+  it("answers what a taker holds, for a handoff it no longer runs, with a cancel: the taker stops", async () => {
+    const w = world();
+    w.profile.add("f1", bytesOf(100));
+    await w.taker.pull(PASSWORD);
+    await until(() => w.quiesced.length === 1);
+    // The giver found money after its stop and starts again as active: a fresh giver, no handoff noted.
+    await w.giverRecords.move("active", { handoff: undefined });
+    w.giver.stop();
+    w.link.drop();
+    w.giver = w.makeGiver("active");
+    w.link.reconnect();
+    await until(() => w.taker.view()?.step === "failed");
+    expect(w.taker.view()!.failure).toBe("cancelled");
+    expect(w.takerRecords.record.state).toBe("standby");
+  });
+});
+
 describe("storage that refuses a write", () => {
   it("a full disk on the taker ends the handoff at once on both devices as no room, and nothing changed", async () => {
     const w = world();
@@ -445,17 +463,20 @@ describe("storage that refuses a write", () => {
     expect(w.quiesced).toHaveLength(0);
   });
 
-  it("no confirmed bytes for two minutes: the giver shows the copy as paused", async () => {
+  it("a copy that stopped (pieces lost, no confirmation) goes on: the taker says what it holds again, and the file arrives whole", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "Date"], shouldAdvanceTime: true });
     const w = world();
-    w.profile.add("big", bytesOf(HANDOFF_PIECE_BYTES * 40));
+    const file = w.profile.add("big", bytesOf(HANDOFF_PIECE_BYTES * 30));
     let pieces = 0;
-    // The taker stops confirming (it went to sleep): the pieces go nowhere after the first few.
-    w.link.meddle = (from, frame) => (frame.t === "handoff-data" && ++pieces > 3 ? null : frame);
+    // Pieces 4 to 30 are lost on the way, once: the giver waits for confirmations that never come.
+    w.link.meddle = (from, frame) => (frame.t === "handoff-data" && ++pieces > 3 && pieces <= 30 ? null : frame);
     await w.taker.pull(PASSWORD);
-    await until(() => pieces > 3);
-    await vi.advanceTimersByTimeAsync(HANDOFF_TIMINGS.stallMs + 60_000);
-    await until(() => w.giver.view()?.step === "paused");
+    await until(() => pieces > 30 || w.link.count("handoff-data") >= 18);
+    await vi.advanceTimersByTimeAsync(HANDOFF_TIMINGS.idleMs * 2);
+    await until(() => w.quiesced.length === 1, 10_000);
+    const staged = w.takerRecords.record.handoff!.staging!;
+    expect(toBase64Url(sha256(w.storage.spaces.get(staged)!.files.get("big")!))).toBe(file.sha256);
+    expect(w.link.count("handoff-have", B)).toBeGreaterThanOrEqual(2);
   });
 });
 

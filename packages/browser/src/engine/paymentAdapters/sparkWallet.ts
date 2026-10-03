@@ -12,6 +12,8 @@ import type { SavedIntent } from "./coordinator";
 
 export interface SparkWalletView {
   configured: boolean; locked: boolean;
+  /** The balance was read once since this wallet opened (until then `balance` says nothing). */
+  read?: true;
   /** Why there is no Spark wallet on this network yet (Mainnet without a Breez API key), shown instead of one. */
   unavailable?: string;
   /** Mainnet: a Breez API key would make one. */
@@ -140,7 +142,8 @@ export class SparkWallet {
     const balance = await read("balance", () => adapter.balance(), this.view.balance);
     const history = await read("history", () => adapter.history(), this.view.history);
     if (this.adapter !== adapter) return;
-    this.view = { ...this.idle(this.saved), locked: false, address, balance, history, error: failed.length ? `Could not read the ${failed.join(", ")} from Spark. Last values may be stale.` : undefined };
+    const balancesRead = this.view.read || !failed.includes("balance");
+    this.view = { ...this.idle(this.saved), locked: false, ...(balancesRead ? { read: true as const } : {}), address, balance, history, error: failed.length ? `Could not read the ${failed.join(", ")} from Spark. Last values may be stale.` : undefined };
     this.changed();
     if (this.adapter) this.timer = setTimeout(() => void this.refresh(), sparkTiming.pollMs);
   }

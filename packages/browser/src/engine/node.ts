@@ -4678,6 +4678,15 @@ export class GhostlyNode implements EngineImplementation {
     const profile = databaseName();
     this.gatedOut = true;
     await this.shutdown({ quiet: true });
+    // Money once more, now that nothing can arrive any more: ecash that landed between the last look and the stop would
+    // otherwise be in both copies. Found, nothing is released: this device writes nothing and starts again as active,
+    // and the taker, told so when it asks, stops.
+    const problem = await this.refreshWallet().then(() => walletHandoffProblem(this.walletView, this.walletsStarted), () => "loading" as const);
+    if (problem) {
+      console.info(`[handoff] not released: ${problem} after the stop`);
+      this.events.onDeviceGate?.({ state: "releasing", reload: true });
+      throw new Error(`handoff-${problem === "loading" ? "busy" : problem}: Money arrived while the profile was moving.`);
+    }
     await moveDevice(profile, "releasing", patch);
     this.events.onDeviceGate?.({ state: "releasing", reload: true });
   }

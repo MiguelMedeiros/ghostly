@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { walletHandoffProblem } from "../src/devices/handoffWallets";
+import { NETWORK_FIELDS, walletHandoffProblem } from "../src/devices/handoffWallets";
 import type { MintView, NetworkWalletsView, WalletView } from "../src/shared/types";
 import type { ArkWalletView } from "../src/engine/paymentAdapters/arkWallet";
 import type { BarkWalletView } from "../src/engine/paymentAdapters/barkWallet";
@@ -23,15 +23,15 @@ const view = (mainnet: Partial<NetworkWalletsView> = {}, testnet: Partial<Networ
   return { ...networks.mainnet, networks, ...extra };
 };
 const mint = (balance: number, extra: Partial<MintView> = {}): MintView => ({ url: "https://mint.test", name: "Test", balance, info: null, ...extra });
-const ark = (extra: Partial<ArkWalletView> = {}): ArkWalletView => ({ configured: true, locked: false, balance: 0, ...extra });
-const bark = (extra: Partial<BarkWalletView> = {}): BarkWalletView => ({ configured: true, locked: false, balance: 0, ...extra });
-const spark = (extra: Partial<SparkWalletView> = {}): SparkWalletView => ({ configured: true, locked: false, balance: 0, ...extra });
-const usdt = (extra: Partial<UsdtWalletView> = {}): UsdtWalletView => ({ configured: true, locked: false, balance: "0", gasBalance: "0", ...extra });
+const ark = (extra: Partial<ArkWalletView> = {}): ArkWalletView => ({ configured: true, locked: false, read: true, balance: 0, ...extra });
+const bark = (extra: Partial<BarkWalletView> = {}): BarkWalletView => ({ configured: true, locked: false, read: true, balance: 0, ...extra });
+const spark = (extra: Partial<SparkWalletView> = {}): SparkWalletView => ({ configured: true, locked: false, read: true, balance: 0, ...extra });
+const usdt = (extra: Partial<UsdtWalletView> = {}): UsdtWalletView => ({ configured: true, locked: false, read: true, balance: "0", gasBalance: "0", ...extra });
 const fedimint = (balance: number, status: "connecting" | "ready" | "error" = "ready"): FedimintWalletView => ({
-  balance, history: [], federations: [{ id: "f", name: "Test", balance, status, lightning: true, invite: "fed1test" } as FedimintWalletView["federations"][number]],
+  balance, history: [], federations: [{ id: "f", name: "Test", balance, status, read: true, lightning: true, invite: "fed1test" } as FedimintWalletView["federations"][number]],
 });
-const card = (extra: Partial<LightningCardView> = {}): LightningCardView => ({ mode: "testnet", status: "ready", offered: [], recent: [], card: "c1", name: "Card", receive: true, ...extra });
-const bitcoin = (extra: Partial<BitcoinView> = {}): BitcoinView => ({ mode: "testnet", status: "ready", offered: [], history: [], ...extra });
+const card = (extra: Partial<LightningCardView> = {}): LightningCardView => ({ mode: "testnet", status: "ready", read: true, offered: [], recent: [], card: "c1", name: "Card", receive: true, ...extra });
+const bitcoin = (extra: Partial<BitcoinView> = {}): BitcoinView => ({ mode: "testnet", status: "ready", read: true, offered: [], history: [], ...extra });
 const intent = (state: PaymentReview["state"]): PaymentReview => ({ state } as Partial<PaymentReview> as PaymentReview);
 
 describe("money keeps a profile from moving", () => {
@@ -81,6 +81,23 @@ describe("money keeps a profile from moving", () => {
       { lightnings: [card({ status: "connecting" })] }, { lightnings: [card({ status: "error" })] }, { bitcoin: bitcoin({ status: "connecting" }) },
     ];
     for (const network of cases) expect(walletHandoffProblem(view(network), true), JSON.stringify(network)).toBe("loading");
+  });
+
+  it("a wallet open whose balances were not read yet says 0 for nothing: each kind is refused until its first read", () => {
+    const unread: [string, Partial<NetworkWalletsView>][] = [
+      ["Ark", { ark: ark({ read: undefined }) }], ["Bark", { bark: bark({ read: undefined }) }], ["Spark", { spark: spark({ read: undefined }) }],
+      ["USDT", { usdt: usdt({ read: undefined }) }], ["Fedimint", { fedimint: { ...fedimint(0), federations: fedimint(0).federations.map((f) => ({ ...f, read: undefined })) } }],
+      ["a Lightning card", { lightnings: [card({ read: undefined })] }], ["Lightning", { lightning: card({ read: undefined }) }], ["on-chain", { bitcoin: bitcoin({ read: undefined }) }],
+    ];
+    for (const [kind, network] of unread) expect(walletHandoffProblem(view(network), true), kind).toBe("loading");
+    // The Cashu mints as a source hold nothing of their own (their ecash is counted at the mints), read or not.
+    expect(walletHandoffProblem(view({ lightning: card({ read: undefined, providerId: "cashu-mint" }) }), true)).toBeNull();
+  });
+
+  it("every field of a network's wallets is one the check names: a new one is refused until it is handled", () => {
+    expect(Object.keys(NETWORK_FIELDS).sort()).toEqual(Object.keys({ ...net(), ark: ark(), bark: bark(), fedimint: fedimint(0), spark: spark(), usdt: usdt(), lightning: card(), lightnings: [], bitcoin: bitcoin() } satisfies Required<NetworkWalletsView>).sort());
+    const later = { ...view(), networks: { mainnet: net(), testnet: { ...net(), dogecoin: { balance: 0 } } } } as WalletView;
+    expect(walletHandoffProblem(later, true)).toBe("wallet");
   });
 
   it("something a wallet waits for: an open invoice, ecash sent and not taken", () => {

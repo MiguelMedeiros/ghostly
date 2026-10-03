@@ -30,6 +30,8 @@ export interface FedimintFederationView extends Omit<StoredFederation, "database
   /** Sats (the client counts msats; what is below a sat is not shown). */
   balance: number;
   status: "connecting" | "ready" | "error";
+  /** The balance was read once since the client opened. */
+  read?: true;
   error?: string;
   /** It has a Lightning gateway module (`ln`): invoices in and out through a gateway. */
   lightning: boolean;
@@ -194,6 +196,8 @@ export class FedimintWallet {
     const federations: FedimintFederationView[] = (this.saved?.federations ?? []).map(({ database: _database, ...f }) => ({
       ...f,
       balance: sats(this.balances.get(f.id) ?? 0),
+      // The balance was read from the federation's client: until then 0 says nothing.
+      ...(this.balances.has(f.id) ? { read: true as const } : {}),
       status: this.clients.has(f.id) ? "ready" : this.problems.has(f.id) ? "error" : "connecting",
       error: this.problems.get(f.id),
       lightning: f.modules.includes("ln"),

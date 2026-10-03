@@ -46,16 +46,26 @@ function anyAmount(value: unknown, path: string, depth = 0): string | null {
 
 type Found = { problem: WalletHandoffProblem; at: string };
 
+/**
+ * Every field of a network's wallets, and whether this check reads it. A wallet kind added to `NetworkWalletsView`
+ * later fails the typecheck here until it is handled; a view that carries a field this build does not name is refused.
+ */
+export const NETWORK_FIELDS: Readonly<Record<keyof NetworkWalletsView, "checked" | "past">> = {
+  mints: "checked", balance: "checked", awaiting: "checked", ark: "checked", bark: "checked", fedimint: "checked", spark: "checked", usdt: "checked",
+  lightning: "checked", lightnings: "checked", bitcoin: "checked", history: "past", feesPaid: "past",
+};
+
 /** One network's wallets (or the flat Mainnet fields of the whole view), and what in it keeps the profile here. */
 function network(view: Pick<NetworkWalletsView, "mints" | "balance" | "awaiting" | "ark" | "bark" | "fedimint" | "spark" | "usdt" | "lightning" | "lightnings" | "bitcoin">, at: string): Found | null {
   const { ark, bark, fedimint, spark, usdt, bitcoin } = view;
-  const notReady = (wallet: { configured: boolean; locked: boolean; error?: string } | undefined) => !!wallet?.configured && (wallet.locked || !!wallet.error);
+  // A wallet set up and not read since it opened says 0 for a balance it never read.
+  const notReady = (wallet: { configured: boolean; locked: boolean; read?: true; error?: string } | undefined) => !!wallet?.configured && (wallet.locked || !!wallet.error || !wallet.read);
   for (const [name, wallet] of [["ark", ark], ["bark", bark], ["spark", spark], ["usdt", usdt]] as const) if (notReady(wallet)) return { problem: "loading", at: `${at}.${name}` };
-  if (fedimint && (fedimint.error || fedimint.federations.some((federation) => federation.status !== "ready"))) return { problem: "loading", at: `${at}.fedimint` };
+  if (fedimint && (fedimint.error || fedimint.federations.some((federation) => federation.status !== "ready" || !federation.read))) return { problem: "loading", at: `${at}.fedimint` };
   const sources = [...(view.lightnings ?? []).map((source, i) => [`lightnings[${i}]`, source] as const), ...(view.lightning ? [["lightning", view.lightning] as const] : []), ...(bitcoin ? [["bitcoin", bitcoin] as const] : [])];
   // The Cashu mints as a Lightning source hold nothing of their own: their money is the mints' ecash, counted here
   // whether a mint answers or not. Any other source is not known to be empty while it connects or fails.
-  for (const [name, source] of sources) if (source.providerId !== CASHU_MINT_SOURCE && (source.status === "connecting" || source.status === "error")) return { problem: "loading", at: `${at}.${name}` };
+  for (const [name, source] of sources) if (source.providerId !== CASHU_MINT_SOURCE && (source.status === "connecting" || source.status === "error" || (source.status === "ready" && !source.read))) return { problem: "loading", at: `${at}.${name}` };
   const amounts: [string, unknown][] = [
     ["balance", view.balance], ...view.mints.map((mint, i) => [`mints[${i}].balance`, mint.balance] as [string, unknown]),
     ["ark.incoming", ark?.incoming], ["ark.balance", ark?.balance], ["ark.recoverable", ark?.recoverable], ["ark.sweeping", ark?.sweeping], ["ark.small", ark?.small],
@@ -82,6 +92,10 @@ export function walletHandoffProblem(view: WalletView, read: boolean, explain?: 
   if (!read) return said("loading", "not read yet");
   const unknown = (view.wallets ?? []).find((wallet) => !(WALLET_TYPES as readonly string[]).includes(wallet.type));
   if (unknown) return said("wallet", "wallets: a kind this build does not know");
+  for (const [name, inner] of Object.entries(view.networks ?? {})) {
+    const unnamed = Object.keys(inner).find((key) => !(key in NETWORK_FIELDS));
+    if (unnamed) return said("wallet", `networks.${name}.${unnamed}: a field this build does not know`);
+  }
   const found = [network(view, "view"), ...Object.entries(view.networks ?? {}).map(([name, inner]) => network(inner, `networks.${name}`))].filter((f): f is Found => !!f);
   const first = found.find((f) => f.problem === "loading") ?? found[0];
   if (first) return said(first.problem, first.at);
