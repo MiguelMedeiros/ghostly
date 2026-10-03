@@ -228,7 +228,7 @@ The data link is one `RTCPeerConnection` per link with a single DataChannel. All
 { "t": "o", "ts": 1789712672369, "u": "<ufrag>", "p": "<pwd>", "f": "<sha-256 fingerprint, hex>", "s": "actpass", "c": ["h,192.0.2.10,54400", "s,203.0.113.7,61000"] }
 ```
 
-An answer has `"t": "a"` and `"o": <ts of the offer it answers>`. Candidates are `<h|s|r>,<address>,<port>` for host, server reflexive and relay; at most two, two and one, UDP only. Each side builds a minimal `m=application … webrtc-datachannel` SDP from the signal. Receivers validate every field against strict patterns before it goes anywhere near an SDP.
+An answer has `"t": "a"` and `"o": <ts of the offer it answers>`. Candidates are `<h|s|r>,<address>,<port>` for host, server reflexive and relay; at most two, two and one, UDP only. Of more than two host candidates (a computer with VM bridges, Tailscale or a VPN beside its Wi-Fi), those a server reflexive candidate was gathered from, or on a global IPv4 address, are carried first, and those the browser marks as costly (`network-cost` 50 or more) last. Each side builds a minimal `m=application … webrtc-datachannel` SDP from the signal. Receivers validate every field against strict patterns before it goes anywhere near an SDP.
 
 - Either peer may offer, on demand. The other answers automatically: the link already authenticated the peer, and only explicitly shared services are reachable.
 - An offer older than 120 seconds is ignored. Its age is counted on the reader's clock, from the last read of the record that did not have it, provided it is not dated before the maker's packet that read found; `ts` orders signals and names the offer an answer is for, and one dated more than ten minutes ahead is not taken ([WISP 101](wisps/101-webrtc.md)).

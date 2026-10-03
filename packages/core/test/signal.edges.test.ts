@@ -97,9 +97,34 @@ describe("reading a local SDP", () => {
       c("srflx", "1.1.1.1"), c("srflx", "1.1.1.2"), c("srflx", "1.1.1.3"),
       c("relay", "2.2.2.2"), c("relay", "2.2.2.3"),
       c("prflx", "3.3.3.3"), c("host", "4.4.4.4", 1, "2"), c("host", "5.5.5.5", 1, "1", "tcp"), "a=candidate:short line",
-      c("host", "6.6.6.6", 1, "1", "UDP"),
+      c("host", "10.0.0.6", 1, "1", "UDP"),
     ].join("\r\n");
     expect(extractRtcParams(sdp).c).toEqual(["h,10.0.0.1,1", "h,10.0.0.2,1", "s,1.1.1.1,1", "s,1.1.1.2,1", "r,2.2.2.2,1"]);
+  });
+
+  it("of many host candidates, carries those a reflexive candidate was gathered from or on a global address, a VPN's last; the browser's order when nothing tells", () => {
+    const host = (addr: string, port: number, extra = "") => `a=candidate:1 1 udp 2122260223 ${addr} ${port} typ host generation 0 network-id 1${extra}`;
+    const srflx = (addr: string, port: number, base: string, rport: number, extra = "") => `a=candidate:2 1 udp 1686052607 ${addr} ${port} typ srflx raddr ${base} rport ${rport} generation 0 network-id 1${extra}`;
+    // A Mac as Chromium lists it once the page may use the microphone: two VM bridges, Ethernet, Wi-Fi, Tailscale, a VPN.
+    const mac = [host("192.168.139.3", 5001), host("192.168.186.3", 5002), host("192.168.0.20", 5003), host("192.168.0.21", 5004, " network-cost 10"),
+      host("100.72.38.95", 5005, " network-cost 50"), host("10.5.0.2", 5006, " network-cost 50")];
+    // Ethernet and Wi-Fi reach the STUN server, and so does the VPN: the two that are not costly go out, never the bridges.
+    const reflexive = [srflx("203.0.113.7", 6003, "192.168.0.20", 5003), srflx("203.0.113.7", 6004, "192.168.0.21", 5004, " network-cost 10"), srflx("198.51.100.9", 6006, "10.5.0.2", 5006, " network-cost 50")];
+    expect(extractRtcParams([...mac, ...reflexive].join("\r\n")).c).toEqual(["h,192.168.0.20,5003", "h,192.168.0.21,5004", "s,203.0.113.7,6003", "s,203.0.113.7,6004"]);
+    // Only the VPN has a way out: a tunnel's address goes after every other, way out or not.
+    expect(extractRtcParams([...mac, reflexive[2]].join("\r\n")).c).toEqual(["h,192.168.139.3,5001", "h,192.168.186.3,5002", "s,198.51.100.9,6006"]);
+    expect(extractRtcParams([mac[4], mac[5], reflexive[2]].join("\r\n")).c).toEqual(["h,100.72.38.95,5005", "h,10.5.0.2,5006", "s,198.51.100.9,6006"]);
+    // One interface with a way out: it, and the first of the rest.
+    expect(extractRtcParams([...mac, reflexive[1]].join("\r\n")).c).toEqual(["h,192.168.139.3,5001", "h,192.168.0.21,5004", "s,203.0.113.7,6004"]);
+    // No reflexive candidate (no STUN answer), or one that hides where it came from: the browser's order, costly ones last.
+    expect(extractRtcParams(mac.join("\r\n")).c).toEqual(["h,192.168.139.3,5001", "h,192.168.186.3,5002"]);
+    expect(extractRtcParams([host("100.72.38.95", 5005, " network-cost 50"), ...mac.slice(0, 4), srflx("203.0.113.7", 6003, "0.0.0.0", 0)].join("\r\n")).c)
+      .toEqual(["h,192.168.139.3,5001", "h,192.168.186.3,5002", "s,203.0.113.7,6003"]);
+    // A host on a global address (no NAT) gets no reflexive candidate, Chromium drops one equal to it: it has a way out, before the bridges.
+    expect(extractRtcParams([...mac.slice(0, 2), host("8.8.8.8", 5007), ...mac.slice(2)].join("\r\n")).c).toEqual(["h,192.168.139.3,5001", "h,8.8.8.8,5007"]);
+    // A host name (mDNS) is a host candidate like another.
+    expect(extractRtcParams([host("3f2b0c1e-7a55-4d3c-9c1a-2f6f0f1f2a3b.local", 5001), srflx("203.0.113.7", 6003, "0.0.0.0", 0)].join("\r\n")).c)
+      .toEqual(["h,3f2b0c1e-7a55-4d3c-9c1a-2f6f0f1f2a3b.local,5001", "s,203.0.113.7,6003"]);
   });
 
   it("returns empty fields for an SDP without them", () => {
