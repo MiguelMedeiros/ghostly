@@ -69,7 +69,7 @@ export const ENGINE_ERRORS = {
   fedimintRealOnTestnet: "This federation holds real bitcoin: it belongs in a Mainnet Fedimint wallet",
   fedimintTestOnMainnet: "This federation is on {chain}, a test network: it belongs in a Testnet Fedimint wallet",
   walletAway: "{wallet} can't be used here. Use it on {device}.",
-  walletAwayUnnamed: "{wallet} can't be used here. Use it on the device that holds it.",
+  walletAwayUnnamed: "{wallet} can't be used here: its home is another device.",
 } as const;
 
 export type EngineErrorCode = keyof typeof ENGINE_ERRORS;

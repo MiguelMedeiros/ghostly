@@ -79,7 +79,7 @@
     "usdtNotEnoughTokens": "トークン残高が足りません",
     "usdtRpcUnavailable": "USDT の RPC が利用できません",
     "walletAway": "{{wallet}} はここでは使えません。{{device}} で使ってください。",
-    "walletAwayUnnamed": "{{wallet}} はここでは使えません。保管しているデバイスで使ってください。"
+    "walletAwayUnnamed": "{{wallet}} はここでは使えません。別のデバイスに置かれています。"
   },
   "extension": {
     "notPaymentLink": "支払いリンクではありません",

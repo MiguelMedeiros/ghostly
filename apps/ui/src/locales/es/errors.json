@@ -79,7 +79,7 @@
     "usdtNotEnoughTokens": "Saldo de tokens insuficiente",
     "usdtRpcUnavailable": "RPC de USDT no disponible",
     "walletAway": "{{wallet}} no se puede usar aquí. Úsala en {{device}}.",
-    "walletAwayUnnamed": "{{wallet}} no se puede usar aquí. Úsala en el dispositivo que la tiene."
+    "walletAwayUnnamed": "{{wallet}} no se puede usar aquí: su casa es otro dispositivo."
   },
   "extension": {
     "notPaymentLink": "No es un enlace de pago",

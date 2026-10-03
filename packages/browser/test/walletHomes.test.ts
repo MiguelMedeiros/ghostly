@@ -83,7 +83,7 @@ describe("a wallet away from this device", () => {
     expect(() => refuseAway("arkade:testnet", "Ark")).toThrow(new WalletAwayError("Ark", "Desktop"));
     expect(() => refuseAway("arkade:testnet", "Ark")).toThrow("Ark can't be used here. Use it on Desktop.");
     setAwayWallets(new Map([["arkade:testnet", ""]]));
-    expect(() => refuseAway("arkade:testnet", "Ark")).toThrow("Ark can't be used here. Use it on the device that holds it.");
+    expect(() => refuseAway("arkade:testnet", "Ark")).toThrow("Ark can't be used here: its home is another device.");
     expect(() => refuseAway("arkade:mainnet", "Ark")).not.toThrow();
   });
 });

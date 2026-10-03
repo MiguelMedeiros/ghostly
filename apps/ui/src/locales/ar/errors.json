@@ -79,7 +79,7 @@
     "usdtNotEnoughTokens": "رصيد الرموز غير كافٍ",
     "usdtRpcUnavailable": "خادم RPC لـ USDT غير متاح",
     "walletAway": "لا يمكن استخدام {{wallet}} هنا. استخدمها على {{device}}.",
-    "walletAwayUnnamed": "لا يمكن استخدام {{wallet}} هنا. استخدمها على الجهاز الذي يحفظها."
+    "walletAwayUnnamed": "لا يمكن استخدام {{wallet}} هنا: موطنها جهاز آخر."
   },
   "extension": {
     "notPaymentLink": "ليس رابط دفع",

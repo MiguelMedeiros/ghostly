@@ -79,7 +79,7 @@
     "usdtNotEnoughTokens": "Solde de jetons insuffisant",
     "usdtRpcUnavailable": "RPC USDT indisponible",
     "walletAway": "{{wallet}} ne peut pas être utilisé ici. Utilisez-le sur {{device}}.",
-    "walletAwayUnnamed": "{{wallet}} ne peut pas être utilisé ici. Utilisez-le sur l'appareil qui le garde."
+    "walletAwayUnnamed": "{{wallet}} ne peut pas être utilisé ici : il reste sur un autre appareil."
   },
   "extension": {
     "notPaymentLink": "Ce n'est pas un lien de paiement",
