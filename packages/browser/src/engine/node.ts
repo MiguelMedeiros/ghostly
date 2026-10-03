@@ -1787,6 +1787,8 @@ export class GhostlyNode implements EngineImplementation {
     this.deviceLinks = null;
     if (this.tombstoneTimer) clearInterval(this.tombstoneTimer);
     this.tombstoneTimer = null;
+    if (this.activeTurnTimer) clearTimeout(this.activeTurnTimer);
+    this.activeTurnTimer = null;
     await links?.stop().catch(() => {});
     this.identities.stop();
     this.did.stop();
@@ -4939,6 +4941,7 @@ export class GhostlyNode implements EngineImplementation {
         onChange: () => { this.emitState(); this.askDeviceRenewals(); this.syncDeviceTokens(); },
         onDeviceWake: (from, target) => this.deviceWakeReceived(from, target),
         pushSend: (request) => this.postPush(request),
+        onActiveHint: () => void this.readActiveTurn().catch(() => {}),
       });
       await this.deviceLinks.start();
       await this.startHandoff().catch(() => {});
@@ -4962,11 +4965,46 @@ export class GhostlyNode implements EngineImplementation {
       if (record) await this.stopReplaced(viewOf(record));
       return;
     }
+    // From now on the turn is read every 10 minutes while this device runs, and at once on another device's hint.
+    this.watchActiveTurn();
     // Earlier device sets (a removal, a new secret): their tombstones put again now and every hour, and their frames
     // delivered over the old links, as a removal that a crash cut short resumes from the record alone.
     this.watchTombstones();
     // A device was given the secret and never finished its enrollment: the set moves to a new one by itself.
     await this.rotateIfDue().catch(() => {});
+  }
+
+  /** How often a running active device reads the turn (WISP 06 § When a device checks: every 10 minutes, with jitter). */
+  static readonly ACTIVE_TURN_EVERY_MS = 10 * 60_000;
+  private static readonly ACTIVE_TURN_JITTER_MS = 60_000;
+  private activeTurnTimer: ReturnType<typeof setTimeout> | null = null;
+
+  private watchActiveTurn(): void {
+    if (this.activeTurnTimer) clearTimeout(this.activeTurnTimer);
+    this.activeTurnTimer = null;
+    if (this.shuttingDown || this.gatedOut || this.options.singleDevice) return;
+    this.activeTurnTimer = setTimeout(() => {
+      this.activeTurnTimer = null;
+      void this.readActiveTurn().catch(() => {}).finally(() => { if (!this.shuttingDown && !this.gatedOut && this.deviceLinks) this.watchActiveTurn(); });
+    }, GhostlyNode.ACTIVE_TURN_EVERY_MS + Math.floor(Math.random() * GhostlyNode.ACTIVE_TURN_JITTER_MS));
+  }
+
+  /**
+   * The running active device reads the turn (its timer, or another device's hint): a read that says another device
+   * took over stops this one, as at start; a good one is noted. Nothing while it is limited (its own 30-second read runs
+   * then), offline, or not the active device.
+   */
+  private async readActiveTurn(): Promise<void> {
+    const links = this.deviceLinks;
+    if (!links || this.shuttingDown || this.gatedOut || this.limitedMode || !this.networkOn || this.options.singleDevice) return;
+    if (knownDeviceGate()?.state !== "active") return;
+    const outcome = await links.checkTurn(false).catch(() => null);
+    if (this.shuttingDown || this.gatedOut) return;
+    if (outcome?.kind === "go-on" && !outcome.restricted) this.noteGoodTurn();
+    if (outcome?.kind === "gated") {
+      const record = await readDeviceRecord(databaseName()).catch(() => null);
+      if (record) await this.stopReplaced(viewOf(record));
+    }
   }
 
   // -- one profile on several devices: removing a device, a new device secret (WISP 06 § Removing a device) ---------
