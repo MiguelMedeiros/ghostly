@@ -35,7 +35,11 @@ export type DiscoveryChange = "tripped" | "recovered";
  * up to three while it still says DHT only (the live link waits on them). A 1:1 chat's may go a little over the relay's minute
  * (`SIGNALING_ALLOWANCE_SHARE` in relay.ts).
  */
-export interface PkarrRequestOptions { background?: boolean; urgent?: boolean; group?: boolean; door?: boolean; signal?: boolean }
+export interface PkarrRequestOptions {
+  background?: boolean; urgent?: boolean; group?: boolean; door?: boolean; signal?: boolean;
+  /** A read for a contact that went away from a live session and has not shown itself back (`LinkSession.watchPeer`). */
+  watch?: boolean;
+}
 
 /**
  * `transport` with `extra` added to every request's options: a group's edges say `group` so. The optional methods
