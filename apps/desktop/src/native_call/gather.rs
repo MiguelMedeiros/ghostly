@@ -93,7 +93,7 @@ impl Gathering {
             let deadline = match reflexive_at {
                 Some(at) => at + bounds.settle,
                 None if now < started + bounds.reflexive => started + bounds.reflexive,
-                // Nothing yet, the reflexive wait over or gathering complete: the first candidate.
+                // Nothing yet and the reflexive wait over: the first candidate.
                 None => started + bounds.first,
             };
             let _ = tokio::time::timeout(deadline.saturating_duration_since(now), changed).await;
