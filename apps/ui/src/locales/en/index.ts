@@ -9,6 +9,7 @@ import chat from "./chat.json";
 import common from "./common.json";
 import composer from "./composer.json";
 import connection from "./connection.json";
+import devices from "./devices.json";
 import errors from "./errors.json";
 import group from "./group.json";
 import home from "./home.json";
@@ -44,6 +45,7 @@ export default {
   common,
   composer,
   connection,
+  devices,
   errors,
   group,
   home,

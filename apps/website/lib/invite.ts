@@ -7,12 +7,15 @@
  * in step. Older codes never came to this host, so they are not read here.
  */
 
-export type InviteRefusal = "typo" | "update" | "not-ghostly" | "damaged";
+/** `device`: a code that adds a device to a profile (WISP 06, version 2), which no chat is made from. */
+export type InviteRefusal = "typo" | "update" | "not-ghostly" | "damaged" | "device";
 export type InviteCheck = { ok: true; code: string } | { ok: false; reason: InviteRefusal };
 
 const HRP = "ghostly";
 const MAX_LENGTH = 1023;
 const V1_BYTES = 128;
+/** The highest version this reader knows: 2, a code that adds a device (WISP 06). Above it is a newer Ghostly's. */
+const HIGHEST_KNOWN_VERSION = 2;
 const CHARSET = "qpzry9x8gf2tvdw0s3jn54khce6mua7l";
 const BECH32M = 0x2bc830a3;
 const BECH32 = 1;
@@ -67,7 +70,8 @@ export function checkInvite(input: string): InviteCheck {
   if (sum !== BECH32M) return { ok: false, reason: "typo" };
   const [version, ...payload] = data.slice(0, -6);
   if (version === undefined || version === 0) return { ok: false, reason: "not-ghostly" };
-  if (version !== 1) return { ok: false, reason: "update" };
+  if (version > HIGHEST_KNOWN_VERSION) return { ok: false, reason: "update" };
+  if (version === 2) return { ok: false, reason: "device" };
   if (payloadBytes(payload) !== V1_BYTES) return { ok: false, reason: "damaged" };
   return { ok: true, code };
 }

@@ -62,6 +62,7 @@
     "noSharedMint": "Non hai nessun mint in comune con questo contatto",
     "notYetConfirmed": "Non ancora confermato. Non è stato inviato un secondo pagamento.",
     "outcomeUnknown": "Esito sconosciuto. Controlla il pagamento esistente; non inviarne un altro.",
+    "parkedSigned": "Serve una tua decisione: questo pagamento è stato firmato prima che questa copia del tuo profilo subentrasse. Non viene mai più inviato da qui. Controllalo prima di pagare di nuovo.",
     "paymentExpired": "La richiesta di pagamento è scaduta o ha una scadenza non valida",
     "paymentTakenBack": "Questo pagamento è stato ripreso. I sats sono nel tuo portafoglio.",
     "realMintOnTestnet": "Questo mint custodisce sats reali: aggiungilo a un portafoglio Cashu Mainnet",
@@ -78,7 +79,9 @@
     "usdtNeedsSepoliaGas": "Prima serve un po’ di ETH Sepolia per il gas",
     "usdtNotEnoughGas": "ETH insufficiente per il gas",
     "usdtNotEnoughTokens": "Saldo di token insufficiente",
-    "usdtRpcUnavailable": "RPC USDT non disponibile"
+    "usdtRpcUnavailable": "RPC USDT non disponibile",
+    "walletAway": "{{wallet}} non si può usare qui. Usalo su {{device}}.",
+    "walletAwayUnnamed": "{{wallet}} non si può usare qui: resta su un altro dispositivo."
   },
   "extension": {
     "notPaymentLink": "Non è un link di pagamento",

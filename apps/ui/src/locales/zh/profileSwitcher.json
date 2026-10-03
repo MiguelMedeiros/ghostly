@@ -9,6 +9,7 @@
   "open": "打开个人资料",
   "othersNew": "其他资料中有新消息",
   "othersUnread": "其他资料中有未读消息",
+  "standby": "待机",
   "switchTo": "切换到 {{name}}",
   "switching": "正在打开 {{name}}…",
   "title": "切换资料",

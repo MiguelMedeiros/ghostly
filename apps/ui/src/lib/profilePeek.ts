@@ -150,6 +150,8 @@ export function startPeekLoop(deps: PeekLoopDeps): () => void {
         try {
           const result = await deps.call(target);
           if (stopped) break;
+          // Not the active device for that profile: nothing was read, and what was seen before must not show as unread.
+          if (result.status === "standby") { clearPeek(target.id); continue; }
           const fresh = mergePeek(target.id, result);
           if (fresh.length) deps.onFresh(target, fresh);
           if (result.status === "budget") break;

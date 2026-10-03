@@ -20,6 +20,13 @@
     "sweepingInfo": "Moedas Ark ficam num lote que expira; o Ghostly as renova antes disso enquanto está aberto. Moedas que expiraram continuam sendo suas, mas antes o servidor Ark leva o lote de volta para a blockchain (uma varredura). Isso espera novos blocos de Bitcoin, muitas vezes uma hora ou mais. Até lá elas não podem ser gastas nem recuperadas; depois, Recuperar as move para um novo lote.",
     "useProvider": "Usar este provedor"
   },
+  "away": {
+    "backup": "Se {{device}} se perder, os fundos continuam acessíveis por esta frase de recuperação ou arquivo de backup.",
+    "expires": "As moedas vencem em {{date}}. Use o Ghostly em {{device}} antes disso.",
+    "otherDevice": "o dispositivo onde ela fica",
+    "text": "Não dá para usar {{wallet}} aqui. Use em {{device}}.",
+    "title": "Em {{device}}"
+  },
   "backup": {
     "download": "Baixar",
     "file": "Backup da carteira",
@@ -123,6 +130,7 @@
   "cards": {
     "amount": "{{amount}} {{unit}}",
     "balance": {
+      "away": "Em {{device}}",
       "locked": "Bloqueada",
       "needsKey": "Precisa de uma chave",
       "noFederation": "Sem federação",
@@ -150,6 +158,7 @@
       "usdtSepolia": "Sepolia · token de teste"
     },
     "status": {
+      "away": "Em outro lugar",
       "checkSettings": "Verifique as configurações",
       "connecting": "Conectando…",
       "experimental": "Experimental",

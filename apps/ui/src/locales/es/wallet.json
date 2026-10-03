@@ -20,6 +20,13 @@
     "sweepingInfo": "Las monedas Ark viven en un lote que caduca; Ghostly las renueva antes mientras está abierto. Las monedas caducadas siguen siendo tuyas, pero primero el servidor Ark devuelve su lote a la cadena (un barrido). Eso espera nuevos bloques de Bitcoin, a menudo una hora o más. Hasta entonces no se pueden gastar ni recuperar; después, Recuperar las mueve a un lote nuevo.",
     "useProvider": "Usar este proveedor"
   },
+  "away": {
+    "backup": "Si pierdes {{device}}, los fondos siguen accesibles con esta frase de recuperación o archivo de copia.",
+    "expires": "Las monedas vencen el {{date}}. Usa Ghostly en {{device}} antes.",
+    "otherDevice": "el dispositivo que la tiene",
+    "text": "{{wallet}} no se puede usar aquí. Úsala en {{device}}.",
+    "title": "En {{device}}"
+  },
   "backup": {
     "download": "Descargar",
     "file": "Copia de la billetera",
@@ -123,6 +130,7 @@
   "cards": {
     "amount": "{{amount}} {{unit}}",
     "balance": {
+      "away": "En {{device}}",
       "locked": "Bloqueada",
       "needsKey": "Necesita una clave",
       "noFederation": "Sin federación",
@@ -150,6 +158,7 @@
       "usdtSepolia": "Sepolia · token de prueba"
     },
     "status": {
+      "away": "En otro lugar",
       "checkSettings": "Revisa los ajustes",
       "connecting": "Conectando…",
       "experimental": "Experimental",
