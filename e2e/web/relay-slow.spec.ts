@@ -11,8 +11,11 @@ import { pair } from "../support/paired";
  * `E2E_SLOW_RELAY_MS=0` measures the same pairing with both relays fast. Each run prints its time.
  */
 const SLOW_MS = Number(process.env.E2E_SLOW_RELAY_MS ?? 8_000);
-/** Both relays fast, a pairing on the test's relay is live in 3 to 6 s; with the old in-turn reads, one slow relay made it 30 s and more. */
-const BOUND_MS = Number(process.env.E2E_SLOW_RELAY_BOUND_MS ?? 15_000);
+/**
+ * Measured on 2026-10-03, four runs each: both relays fast, live in 4.0 to 4.2 s; one relay 8 s slow, 5.5 to 5.8 s with
+ * hedged reads, 11.7 to 11.9 s when reads asked the next relay only once the first had answered.
+ */
+const BOUND_MS = Number(process.env.E2E_SLOW_RELAY_BOUND_MS ?? 9_000);
 
 test("a slow relay does not slow a pairing down: reads take the other relay's answer", {
   tag: ["@feature:core.relay-client"],
