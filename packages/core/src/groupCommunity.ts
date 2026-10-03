@@ -1180,7 +1180,11 @@ export class CommunitySession {
       if (!found || found.hash === this.topHash || !this.mainIndex.has(found.hash)) continue;
       looked.push(frameKey(f));
       const then = this.rosterAt(found.hash), secret = this.state.secrets[found.hash];
-      if (!then || !secret || !this.roster.some(([key]) => !rosterHas(then, key) && (admitted.get(key) ?? Infinity) <= f.ts)) continue;
+      if (!then || !secret) continue;
+      const since = this.roster.filter(([key]) => !rosterHas(then, key)).map(([key]) => admitted.get(key) ?? Infinity);
+      // Only for members let in before I said it, and never sealed where one let in after could open it: the current
+      // commit is the one sealing it, so one such member there means it stays as it was.
+      if (!since.some(ts => ts <= f.ts) || since.some(ts => ts > f.ts)) continue;
       const plain = decryptText(epochKeys(fromBase64Url(secret), this.id, f.e).message, messageAad(f), f.nn, f.c);
       let parsed: unknown = null;
       try { parsed = plain === null ? null : JSON.parse(plain); } catch { /* not a payload to say again */ }
