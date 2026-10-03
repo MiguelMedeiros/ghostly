@@ -88,6 +88,9 @@ function believed(record: DeviceRecord, oldKeys: TurnKeys, by: string, rec: Uint
   if (toBase64Url(r.slots[release.from]!.key) !== stored) return stored;
   const held = record.turnPacket ? readTurnPacket(oldKeys, fromBase64Url(record.turnPacket)) : null;
   if (held?.kind === "valid" && carried.sequence <= held.sequence) return stored;
+  // With no packet stored (a device that never read one, or whose packet is not a record here), the stored turn is the
+  // floor: a real release from an earlier turn, replayed, says nothing about who holds the turn now.
+  if (held?.kind !== "valid" && r.turn <= record.turn) return stored;
   return by;
 }
 
