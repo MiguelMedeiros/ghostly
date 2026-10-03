@@ -5,9 +5,9 @@ import { DiscoveryBudgetError, isDiscoveryBudgetError, type DiscoveryChange, typ
 import { traceLink } from "./linkTrace";
 
 /** Who asks, for the budget: a 1:1 chat's link comes before a group's, and both before background looks. */
-interface Asker { background: boolean; group: boolean; urgent: boolean; door: boolean; write: boolean; signal: boolean; watch: boolean }
+interface Asker { background: boolean; group: boolean; urgent: boolean; door: boolean; write: boolean; signal: boolean; watch: boolean; knock: boolean }
 const asker = (options: PkarrRequestOptions, write: boolean): Asker =>
-  ({ background: !!options.background, group: !!options.group, urgent: !!options.urgent, door: !!options.door, write, signal: !!options.signal, watch: !!options.watch && !write });
+  ({ background: !!options.background, group: !!options.group, urgent: !!options.urgent, door: !!options.door, write, signal: !!options.signal, watch: !!options.watch && !write, knock: !!options.knock && !write });
 /** A 1:1 chat's request: neither a group's nor a background one. */
 const isChat = (who: Asker): boolean => !who.background && !who.group;
 /** A 1:1 chat's offer or answer, or its read for the answer to its offer: it may use the allowance (`SIGNALING_ALLOWANCE_SHARE`). */
@@ -126,6 +126,13 @@ const TURN_WAIT_MS = 1_000;
 export const GROUP_RATION_WINDOW_MS = 10_000;
 const GROUP_RATION_MS = 60_000;
 /**
+ * A private group admin's reads of its link's knocks (`knock`) stop at this share of a relay's minute: the rest is the
+ * edges'. The knock poll reads every 2 s while the link is new, half of each relay's minute on its own; an admin whose
+ * members left and came back spent the whole minute, and the member back first, alone with it, had its offer read only
+ * when the minute freed (member-back runs, 2026-10-03). A knock waits a few seconds more only while the edges are busy.
+ */
+export const KNOCK_SHARE = 2 / 3;
+/**
  * While a link polls fast (an `urgent` read: its peer, or the peer's offer or answer, is due any moment) within this
  * long, background requests (a community's periodic looks) are held to `BACKGROUND_WHILE_SIGNALING` a minute on each
  * relay rather than their usual share. A fast poll reads every 2 s, one relay after the other.
@@ -148,7 +155,7 @@ export const FRESH_READ_MS = 500;
 const CATCH_UP_MIN_MS = 1_000;
 const CATCH_UP_RETRY_MS = 5_000;
 /** A catch-up put waits behind every link's request: a background write. */
-const CATCH_UP_ASKER: Asker = { background: true, group: false, urgent: false, door: false, write: true, signal: false, watch: false };
+const CATCH_UP_ASKER: Asker = { background: true, group: false, urgent: false, door: false, write: true, signal: false, watch: false, knock: false };
 /** Keys whose last relay is remembered for their next read (`resolve`): a profile's links and lookups, with room. */
 const READ_TURNS_KEPT = 512;
 /** A relay that fails at the network level is left alone for this long. */
@@ -824,7 +831,9 @@ export class RelayTransport implements PkarrTransport {
       this.urgentAt = now;
       if (isChat(who)) this.chatNeed(key).urgentAt = now;
     }
-    if (isGroupRead(who)) this.readAsked(key, who, now);
+    // A knock read takes no turn among the groups' reads: held back by its own share, it would keep one it cannot take,
+    // and every read behind it would wait for it (`readsAhead`).
+    if (isGroupRead(who) && !who.knock) this.readAsked(key, who, now);
     if (this.heldFor(relay, who, now, key) > 0) {
       // The minute is full: the groups' reads are rationed from now on.
       if (isGroupRead(who) && (this.spent.get(relay)?.length ?? 0) >= this.limitOf(relay)) this.groupsFullAt.set(relay, now);
@@ -839,7 +848,7 @@ export class RelayTransport implements PkarrTransport {
     if (isWatch(who)) this.spentWatch.get(relay)!.push(now);
     if (isGroupRead(who)) {
       this.spentGroupReads.get(relay)!.push(now);
-      this.readTurns.set(key, { servedAt: now, askedAt: now, waiting: false, watch: isWatch(who), lane: watchLane(who) });
+      if (!who.knock) this.readTurns.set(key, { servedAt: now, askedAt: now, waiting: false, watch: isWatch(who), lane: watchLane(who) });
     }
     return true;
   }
@@ -870,6 +879,8 @@ export class RelayTransport implements PkarrTransport {
       const signaling = this.urgentAt + SIGNALING_WINDOW_MS - now;
       if (signaling > 0 && !who.door) wait = Math.max(wait, Math.min(signaling, over(recentBackground, this.backgroundWhileSignaling)));
     }
+    // A private group's knock poll: never the last of the minute, which the edges need (`KNOCK_SHARE`).
+    if (who.knock) wait = Math.max(wait, over(recent, Math.ceil(limit * KNOCK_SHARE)));
     // Groups' urgent reads: their share of the minute spread over it (`GROUP_BURST_MS`).
     const burst = (this.spentGroupUrgent.get(relay) ?? []).filter((at) => now - at < GROUP_BURST_MS);
     this.spentGroupUrgent.set(relay, burst);

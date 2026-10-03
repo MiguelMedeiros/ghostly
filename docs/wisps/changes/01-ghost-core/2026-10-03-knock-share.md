@@ -1,0 +1,1 @@
+A private group admin's reads of its link's knocks stop at two thirds of a relay's minute (`KNOCK_SHARE`) and take no turn among the groups' reads, so the edges keep the rest. Client rule, no wire change.
