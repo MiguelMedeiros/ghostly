@@ -131,7 +131,7 @@ export const RELAY_REQUESTS_PER_MINUTE: Record<string, number> = { "https://rela
  * answer. Measured on 2026-10-03 from a home connection: a relay hands over a packet it holds in 0.25 s (0.7 s on a new
  * connection), and one that has to fetch the packet from the DHT first takes 2.7 s. Reads used to wait for a relay's
  * answer before asking the next one, up to the 10 s timeout: a relay that answered slowly or not at all (pkarr.pubky.org
- * on 2026-10-02) made every read of a pairing that slow, and the pairing never finished.
+ * on 2026-10-03) made every read of a pairing that slow, and the pairing never finished.
  */
 export const HEDGE_MS = 1_500;
 /**
@@ -409,6 +409,8 @@ export class RelayTransport implements PkarrTransport {
   private putEverywhere(pubKeyZ32: string, payload: Uint8Array, timestamp: bigint, options: PkarrRequestOptions, conflict?: (relay: string) => void): Promise<void> {
     // A record read, changed and written back (a lobby, a knock record) is read from the relays the next time.
     this.readAt.delete(pubKeyZ32);
+    // Published now: its next read is no longer one of a key nobody has (`HEDGE_MISSING_MS`).
+    this.missing.delete(pubKeyZ32);
     // A newer packet goes everywhere now: none waiting for a relay that refused an older one.
     for (const relay of this.relays) this.catchUp.delete(`${relay} ${pubKeyZ32}`);
     const waitingBefore = new Map(this.writeWaiting);
@@ -580,12 +582,6 @@ export class RelayTransport implements PkarrTransport {
     if (winner) {
       const { attempt, outcome } = winner, relay = attempt.relay;
       const took = Date.now() - attempt.started;
-      // The relays still asked are dropped. One asked no later than the winner, which a relay beat with the packet, is slow.
-      for (const loser of asked.values()) {
-        loser.controller.abort();
-        if (outcome.kind === "packet" && loser.started <= attempt.started) this.slow(loser.relay);
-        else this.breaker.cancel(loser.relay);
-      }
       if (outcome.kind === "packet") {
         this.sawTimestamp(pubKeyZ32, outcome.packet.timestampMicros);
         this.newest.set(pubKeyZ32, newerPacket(this.newest.get(pubKeyZ32), outcome.packet)!);
@@ -604,6 +600,13 @@ export class RelayTransport implements PkarrTransport {
         // A slow packet counts against the relay; a slow 404 says nothing (every relay takes seconds to give one).
         if (outcome.kind === "packet") this.slow(relay);
         else this.breaker.cancel(relay);
+      }
+      // The relays still asked are dropped, after the winner's own outcome (a probe that answered is a relay to ask
+      // again). One asked no later than the winner, which a relay beat with the packet, is slow.
+      for (const loser of asked.values()) {
+        loser.controller.abort();
+        if (outcome.kind === "packet" && loser.started <= attempt.started) this.slow(loser.relay);
+        else this.breaker.cancel(loser.relay);
       }
       this.lastRelay = relay;
       this.answeredRead(pubKeyZ32);
