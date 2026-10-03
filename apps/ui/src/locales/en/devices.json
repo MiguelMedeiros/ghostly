@@ -109,6 +109,12 @@
     "restore": "Restore a backup",
     "unfinished": "Not finished: your other device has not listed this one yet."
   },
+  "manage": {
+    "confirm": "Turn on",
+    "off": "Managing this group is off on this device.",
+    "turnOn": "Manage groups from this device",
+    "warning": "If your other device changed this group after this copy of your profile was made, managing it from here can break the group for everyone."
+  },
   "password": {
     "confirm": "Type it again",
     "current": "Lock password",
@@ -123,6 +129,19 @@
     "tooShort": "Use 8 characters or more.",
     "typeTitle": "Type your lock password",
     "wrong": "Wrong password."
+  },
+  "restore": {
+    "activeHint": "Starting this backup here would make a second copy.",
+    "activeOn": "This profile is active on {{device}}",
+    "activeOnUnnamed": "This profile is active on another device",
+    "addInstead": "Add this device instead",
+    "addInsteadHint": "On {{device}}, open Profile, then Add a device. On this device, choose I already use Ghostly.",
+    "takeOver": "Take over",
+    "tombstone": "This backup is from before a device was removed. Starting it makes a second copy of your profile.",
+    "tombstoneConfirm": "Type {{name}} to start it as a profile of its own",
+    "tombstoneGo": "Start as its own profile",
+    "tryAgain": "Try again",
+    "unreadable": "Can't check which device is active. Check your connection."
   },
   "section": {
     "active": "Active",
@@ -147,6 +166,7 @@
       "removed": "Add it again from the device you use now.",
       "standby": "This device is on standby for this profile.",
       "superseded": "Another device took over without this one. This device has stopped.",
+      "supersededBy": "{{device}} took over without this one. This device has stopped.",
       "taking": "Waiting for the network.",
       "unreadable": "Restart the app or the device, then try again."
     },
@@ -170,5 +190,28 @@
       "title": "Not finished"
     },
     "unreadableInfo": "Ghostly reads which of your devices is active before it starts anything. That did not work here, so nothing was started, nothing was sent and nothing was changed."
+  },
+  "takeover": {
+    "checking": "Checking which device is active · about 30 seconds",
+    "confirm": "Type {{device}} to confirm",
+    "fail": {
+      "lockedOut": "Too many tries. Try again later.",
+      "name": "Type the name of the device that stops.",
+      "noCopy": "This device holds no copy of the profile. Use here moves it from the active device.",
+      "noPassword": "This device cannot check the password yet. Open Ghostly on the active device once first.",
+      "offline": "Go online to take over.",
+      "refused": "Too many tries on this device. It can no longer take over.",
+      "state": "This device cannot take over now."
+    },
+    "go": "Take over",
+    "hint": "This will make {{device}} stop. This device has your profile as it was when it last ran here.",
+    "hintRestored": "This will make your other device stop. This device has your profile as it was in the backup.",
+    "info": "Messages and money that reached {{device}} after that are not here. If {{device}} comes back, it stops, without a word to your contacts.",
+    "lost": "My other device is lost or broken",
+    "lostRace": "Another device took over at the same moment. This device is on standby.",
+    "notMe": "It wasn't me",
+    "restoredHint": "This device holds a copy from a backup. It starts nothing until you take over.",
+    "title": "Take over without {{device}}?",
+    "titleUnnamed": "Take over without your other device?"
   }
 }

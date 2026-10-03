@@ -200,6 +200,26 @@ export interface DeviceRecord {
   earlierSets: EarlierDeviceSet[];
   /** Grants sent whose `enroll-done` never came back: devices that hold `D` and are in no record. */
   unfinishedGrants?: UnfinishedGrant[];
+  /**
+   * Which copy of the profile this device holds while it is not the active one (WISP 06 § Forced takeover: "Only a
+   * device with a frozen copy, or a copy restored from a backup, can do it"). `frozen`: it was the active device and
+   * released or was replaced; `restored`: a backup was restored here and has not run yet. Absent: no copy (a device
+   * enrolled that never held the profile), and such a device never takes over: it would start an empty profile and
+   * stop the real one.
+   */
+  copy?: "frozen" | "restored";
+  /**
+   * The profile's password proof verifier (`handoffPake.ts`), copied here by the active device whenever it changes and
+   * at quiesce, so that a standby checks the lock password of a forced takeover without opening its frozen copy.
+   */
+  verifier?: { v: 1; setup: string; record: string };
+  /** Wrong lock passwords typed for a forced takeover on this device. They only grow until one is right. */
+  takeoverAttempts?: DeviceAttempts;
+  /**
+   * The counters to raise before the engine starts (WISP 06 § Raised counters), written with `active` by a forced
+   * takeover that settled, and taken off once the engine raised them. See `raise.ts`.
+   */
+  raise?: { id: string; why: "takeover" | "restore"; takeovers: number; at: number };
 }
 
 /** The states in which the whole engine runs. In every other one the client opens no peer database (WISP 06 § The gate). */
@@ -377,6 +397,20 @@ export function parseDeviceRecord(value: unknown): DeviceRecord {
   if (r.unfinishedGrants !== undefined) {
     if (!Array.isArray(r.unfinishedGrants) || r.unfinishedGrants.length > MAX_UNFINISHED_GRANTS) return bad("the unfinished grants");
     for (const grant of r.unfinishedGrants as Partial<UnfinishedGrant>[]) if (!grant || !bytes(grant.key) || !text(grant.name) || !count(grant.at, Number.MAX_SAFE_INTEGER)) return bad("an unfinished grant");
+  }
+  if (r.copy !== undefined && r.copy !== "frozen" && r.copy !== "restored") return bad("copy");
+  if (r.verifier !== undefined) {
+    const v = r.verifier as { v?: unknown; setup?: unknown; record?: unknown } | null;
+    if (!v || typeof v !== "object" || v.v !== 1 || !bytes(v.setup) || !bytes(v.record)) return bad("verifier");
+  }
+  if (r.takeoverAttempts !== undefined) {
+    const a = r.takeoverAttempts as Partial<DeviceAttempts> | null;
+    if (!a || typeof a !== "object" || !Array.isArray(a.recent) || a.recent.length > 16 || !a.recent.every((at) => count(at, Number.MAX_SAFE_INTEGER))) return bad("takeoverAttempts");
+    if (!count(a.total, 1_000_000) || !optional(a.until, (v): v is number => count(v, Number.MAX_SAFE_INTEGER))) return bad("takeoverAttempts");
+  }
+  if (r.raise !== undefined) {
+    const raise = r.raise as { id?: unknown; why?: unknown; takeovers?: unknown; at?: unknown } | null;
+    if (!raise || typeof raise !== "object" || !bytes(raise.id) || (raise.why !== "takeover" && raise.why !== "restore") || !count(raise.takeovers, 2 ** 32 - 1) || !count(raise.at, Number.MAX_SAFE_INTEGER)) return bad("raise");
   }
   if (!Array.isArray(r.earlierSets) || r.earlierSets.length > MAX_EARLIER_SETS) return bad("the earlier device sets");
   for (const set of r.earlierSets as Partial<EarlierDeviceSet>[]) {

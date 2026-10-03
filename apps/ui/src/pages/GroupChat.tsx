@@ -490,6 +490,7 @@ export function GroupChat() {
       {connecting && !error &&<div role="status" data-testid="group-connecting" className="px-4 py-2 text-xs bg-surface-alt text-text-secondary border-b border-border">
         {community ? t("group.chat.connectingCommunity") : t("group.chat.connectingMembers")}
       </div>}
+      {group.adminOff && group.status === "active" && (group.isAdmin || group.profile === "community") && <ManageHere groupId={group.id} />}
       {(error || (group.status && group.status !== "active")) && <div role="status" data-testid="group-notice" className="px-4 py-2 text-xs bg-surface-alt text-text-secondary border-b border-border">
         {error || (group.profile === "community" && group.status === "removed" ? t("group.chat.removedCommunity") : outOfIt)}
       </div>}
@@ -569,5 +570,31 @@ export function GroupChat() {
     </div>
     </MemberColorsProvider>
     </CueChat.Provider>
+  );
+}
+
+/**
+ * "Manage groups from this device" (WISP 06 § Forced takeover): after a forced takeover or a restore this device signs no
+ * commit and takes no door duty in the group until the person turns it on here, having read what that risks.
+ */
+function ManageHere({ groupId }: { groupId: string }) {
+  const { t } = useI18n();
+  const [asking, setAsking] = useState(false);
+  const [busy, setBusy] = useState(false);
+  return (
+    <div role="status" data-testid="group-manage-off" className="px-4 py-2 text-xs bg-surface-alt text-text-secondary border-b border-border space-y-1.5">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="min-w-0 flex-1">{t("devices.manage.off")}</span>
+        {!asking && <button type="button" data-testid="group-manage-open" onClick={() => setAsking(true)} className="rounded px-2 py-1 font-semibold text-accent hover:bg-accent/10 cursor-pointer">{t("devices.manage.turnOn")}</button>}
+      </div>
+      {asking && (
+        <div className="flex flex-wrap items-center gap-2">
+          <span data-testid="group-manage-warning" className="min-w-0 flex-1 text-danger-ink">{t("devices.manage.warning")}</span>
+          <button type="button" data-testid="group-manage-confirm" disabled={busy} onClick={() => { setBusy(true); void engine.call("setGroupManage", { groupId, on: true }).finally(() => setBusy(false)); }}
+            className="rounded px-2 py-1 font-semibold text-accent hover:bg-accent/10 cursor-pointer disabled:opacity-40">{t("devices.manage.confirm")}</button>
+          <button type="button" onClick={() => setAsking(false)} className="rounded px-2 py-1 hover:bg-surface-hover cursor-pointer">{t("common.cancel")}</button>
+        </div>
+      )}
+    </div>
   );
 }

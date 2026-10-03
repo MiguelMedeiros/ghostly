@@ -45,6 +45,8 @@ export class PaymentCoordinator {
   reconcile(id: string): Promise<PaymentReview> { return this.once(id,async () => {
     const saved = await this.require(id);
     if (!["submitted","unknown"].includes(saved.review.state)) return saved.review;
+    // Parked by a copy started from older state: its signed bytes are never sent again, and nothing is asked here.
+    if (saved.review.parked) return saved.review;
     try {
       const result = await this.adapter(saved.review.method).reconcile(saved.review,saved.prepared,()=>this.repository.put(saved));
       saved.review = {...saved.review,...result,state:result.failed ? "failed" : result.settled ? "settled" : result.pending ? "submitted" : "unknown",error:result.failed ? result.error : result.settled ? undefined : engineText("notYetConfirmed")};

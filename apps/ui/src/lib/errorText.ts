@@ -228,6 +228,7 @@ const ENGINE: Partial<Record<EngineErrorCode, TranslationKey>> = {
   notYetConfirmed: "errors.engine.notYetConfirmed",
   couldNotVerify: "errors.engine.couldNotVerify",
   paymentTakenBack: "errors.engine.paymentTakenBack",
+  parkedSigned: "errors.engine.parkedSigned",
   lnurlExactly: "errors.engine.lnurlExactly",
   lnurlRange: "errors.engine.lnurlRange",
   usdtRpcUnavailable: "errors.engine.usdtRpcUnavailable",

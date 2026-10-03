@@ -109,6 +109,12 @@
     "restore": "Restaurer une sauvegarde",
     "unfinished": "Pas terminé : votre autre appareil n’a pas encore inscrit celui-ci."
   },
+  "manage": {
+    "confirm": "Activer",
+    "off": "La gestion de ce groupe est désactivée sur cet appareil.",
+    "turnOn": "Gérer les groupes depuis cet appareil",
+    "warning": "Si votre autre appareil a modifié ce groupe après la création de cette copie de votre profil, le gérer d'ici peut casser le groupe pour tout le monde."
+  },
   "password": {
     "confirm": "Saisissez-le à nouveau",
     "current": "Mot de passe de verrouillage",
@@ -123,6 +129,19 @@
     "tooShort": "Utilisez 8 caractères ou plus.",
     "typeTitle": "Saisissez votre mot de passe de verrouillage",
     "wrong": "Mot de passe incorrect."
+  },
+  "restore": {
+    "activeHint": "Démarrer cette sauvegarde ici créerait une deuxième copie.",
+    "activeOn": "Ce profil est actif sur {{device}}",
+    "activeOnUnnamed": "Ce profil est actif sur un autre appareil",
+    "addInstead": "Ajouter cet appareil",
+    "addInsteadHint": "Sur {{device}}, ouvrez Profil, puis Ajouter un appareil. Sur cet appareil, choisissez J'utilise déjà Ghostly.",
+    "takeOver": "Prendre le relais",
+    "tombstone": "Cette sauvegarde date d'avant le retrait d'un appareil. La démarrer crée une deuxième copie de votre profil.",
+    "tombstoneConfirm": "Tapez {{name}} pour la démarrer comme un profil à part",
+    "tombstoneGo": "Démarrer comme profil à part",
+    "tryAgain": "Réessayer",
+    "unreadable": "Impossible de vérifier quel appareil est actif. Vérifiez votre connexion."
   },
   "section": {
     "active": "Actif",
@@ -147,6 +166,7 @@
       "removed": "Ajoutez-le à nouveau depuis l'appareil que vous utilisez maintenant.",
       "standby": "Cet appareil est en veille pour ce profil.",
       "superseded": "Un autre appareil a pris le relais sans celui-ci. Cet appareil s'est arrêté.",
+      "supersededBy": "{{device}} a pris le relais sans cet appareil. Cet appareil s'est arrêté.",
       "taking": "En attente du réseau.",
       "unreadable": "Redémarrez l'application ou l'appareil, puis réessayez."
     },
@@ -170,5 +190,28 @@
       "title": "Pas terminé"
     },
     "unreadableInfo": "Ghostly lit lequel de vos appareils est actif avant de démarrer quoi que ce soit. Cela n'a pas fonctionné ici : rien n'a été démarré, rien n'a été envoyé et rien n'a été modifié."
+  },
+  "takeover": {
+    "checking": "Vérification de l'appareil actif · environ 30 secondes",
+    "confirm": "Tapez {{device}} pour confirmer",
+    "fail": {
+      "lockedOut": "Trop d'essais. Réessayez plus tard.",
+      "name": "Tapez le nom de l'appareil qui s'arrête.",
+      "noCopy": "Cet appareil n'a pas de copie du profil. Utiliser ici le fait venir de l'appareil actif.",
+      "noPassword": "Cet appareil ne peut pas encore vérifier le mot de passe. Ouvrez d'abord Ghostly une fois sur l'appareil actif.",
+      "offline": "Connectez-vous pour prendre le relais.",
+      "refused": "Trop d'essais sur cet appareil. Il ne peut plus prendre le relais.",
+      "state": "Cet appareil ne peut pas prendre le relais maintenant."
+    },
+    "go": "Prendre le relais",
+    "hint": "{{device}} va s'arrêter. Cet appareil a votre profil tel qu'il était la dernière fois qu'il a tourné ici.",
+    "hintRestored": "Votre autre appareil va s'arrêter. Cet appareil a votre profil tel qu'il était dans la sauvegarde.",
+    "info": "Les messages et l'argent arrivés sur {{device}} depuis ne sont pas ici. Si {{device}} revient, il s'arrête, sans rien dire à vos contacts.",
+    "lost": "Mon autre appareil est perdu ou cassé",
+    "lostRace": "Un autre appareil a pris le relais au même moment. Cet appareil est en veille.",
+    "notMe": "Ce n'était pas moi",
+    "restoredHint": "Cet appareil a une copie issue d'une sauvegarde. Rien ne démarre tant que vous ne prenez pas le relais.",
+    "title": "Prendre le relais sans {{device}} ?",
+    "titleUnnamed": "Prendre le relais sans votre autre appareil ?"
   }
 }

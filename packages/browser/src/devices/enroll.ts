@@ -617,7 +617,7 @@ export async function finishEnrollment(profile: string, network: TurnNetwork, op
 }
 
 /** Whether a profile's device record is an enrollment that did not finish: a standby that never accepted a record listing it. */
-export const enrollmentUnfinished = (record: DeviceRecord | null): boolean => !!record && record.state === "standby" && !record.turnPacket;
+export const enrollmentUnfinished = (record: DeviceRecord | null): boolean => !!record && record.state === "standby" && !record.turnPacket && record.copy !== "restored";
 
 /** What a `GhostLink` for the one-time session needs of the app. */
 export interface EnrollLinkOptions {

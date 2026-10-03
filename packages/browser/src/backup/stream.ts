@@ -28,9 +28,16 @@ const TAG_BYTES = 16;
 
 const KIND = { gzipJson: 1, json: 2, bytes: 3, final: 255 } as const;
 
+/**
+ * The envelope version of a bundle that carries a device set (WISP 06 § Compatibility and rollout): an app from before
+ * WISP 06 refuses it with "This backup comes from a newer Ghostly", rather than restoring a copy that stops nothing.
+ * WISP 06 names it version 2, but WISP 05's streamed bundle took 2 first; every other bundle is still 2.
+ */
+export const DEVICE_SET_BACKUP_VERSION = 3;
+
 export interface BackupHeader {
   format: "ghostly-backup";
-  version: 2;
+  version: 2 | 3;
   protection: "passphrase" | "none";
   kdf?: { name: "PBKDF2-SHA256"; iterations: number; salt: string };
   cipher?: { name: "AES-256-GCM"; nonce: string };
@@ -118,13 +125,13 @@ export class BackupWriter {
   private constructor(private readonly sink: BackupSink, private readonly key: CryptoKey | null, private readonly base: Uint8Array, private chain: Uint8Array, private readonly signal?: AbortSignal) {}
 
   /** `passphrase` null: a backup anyone can read (the caller has made sure that is what the person chose). */
-  static async start(sink: BackupSink, passphrase: string | null, signal?: AbortSignal): Promise<BackupWriter> {
+  static async start(sink: BackupSink, passphrase: string | null, signal?: AbortSignal, version: 2 | 3 = 2): Promise<BackupWriter> {
     if (passphrase !== null && passphrase.length < 12) throw new Error("Use at least 12 characters for the backup passphrase");
     check(signal);
     const salt = crypto.getRandomValues(new Uint8Array(16)), base = crypto.getRandomValues(new Uint8Array(7));
     const header: BackupHeader = passphrase === null
-      ? { format: "ghostly-backup", version: 2, protection: "none", check: { name: "SHA-256-chain" } }
-      : { format: "ghostly-backup", version: 2, protection: "passphrase", kdf: { name: "PBKDF2-SHA256", iterations: ITERATIONS, salt: toBase64Url(salt) }, cipher: { name: "AES-256-GCM", nonce: toBase64Url(base) } };
+      ? { format: "ghostly-backup", version, protection: "none", check: { name: "SHA-256-chain" } }
+      : { format: "ghostly-backup", version, protection: "passphrase", kdf: { name: "PBKDF2-SHA256", iterations: ITERATIONS, salt: toBase64Url(salt) }, cipher: { name: "AES-256-GCM", nonce: toBase64Url(base) } };
     const line = new TextEncoder().encode(`${JSON.stringify(header)}\n`);
     const key = passphrase === null ? null : await keyFrom(passphrase, salt, ITERATIONS);
     const writer = new BackupWriter(sink, key, base, await sha256(line), signal);
@@ -186,7 +193,7 @@ export async function readBackupHeader(source: BackupSource): Promise<{ header: 
   let header: BackupHeader;
   try { header = JSON.parse(new TextDecoder().decode(start.subarray(0, end))) as BackupHeader; } catch { return null; }
   if (header?.format !== "ghostly-backup" || typeof header.version !== "number" || header.version < 2) return null;
-  if (header.version !== 2) throw new Error("This backup comes from a newer Ghostly; update to restore it");
+  if (header.version !== 2 && header.version !== DEVICE_SET_BACKUP_VERSION) throw new Error("This backup comes from a newer Ghostly; update to restore it");
   if (header.protection === "none") {
     if (header.check?.name !== "SHA-256-chain") throw new Error("Unsupported backup format");
   } else if (header.protection === "passphrase") {

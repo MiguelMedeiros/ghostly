@@ -61,6 +61,7 @@
     "noSharedMint": "你和这个联系人没有共同的铸币厂",
     "notYetConfirmed": "尚未确认。没有发送第二笔付款。",
     "outcomeUnknown": "结果未知。请核对已有的付款，不要再发一笔。",
+    "parkedSigned": "需要你来决定：这笔付款是在此资料副本接管之前签名的。它不会再从这里发送。再次付款前请先核实。",
     "paymentExpired": "付款请求已过期，或有效期无效",
     "paymentTakenBack": "这笔付款已取回。sats 已回到你的钱包。",
     "realMintOnTestnet": "这个铸币厂保管真实的 sats：请把它添加到 Mainnet Cashu 钱包",

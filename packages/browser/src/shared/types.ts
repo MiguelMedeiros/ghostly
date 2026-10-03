@@ -237,6 +237,11 @@ export interface GroupView {
   epoch?: number;
   myKey?: string;
   isAdmin: boolean;
+  /**
+   * Admin work is off for this group on this device (WISP 06 § Forced takeover): no commit is signed and no door duty
+   * taken until the person turns on "Manage groups from this device" (`setGroupManage`).
+   */
+  adminOff?: true;
   members: GroupMemberView[];
   /** On the invitee's side, until the welcome arrives. */
   /** `waiting`: joining a community through its link, how many others were knocking with me when I last knocked. */

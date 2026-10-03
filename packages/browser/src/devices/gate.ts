@@ -46,7 +46,8 @@ const known = new Map<string, DeviceGate>();
 export function viewOf(record: DeviceRecord): DeviceGateView {
   const active = record.activeSlot !== undefined && record.activeSlot !== record.ownSlot ? record.deviceSet[record.activeSlot] : undefined;
   // Every standby that finished its enrollment accepted a record that lists it: one with no packet did not.
-  const unfinished = record.state === "standby" && !record.turnPacket;
+  // A copy restored from a backup holds no packet either, and is no enrollment (WISP 06 § A backup restored).
+  const unfinished = record.state === "standby" && !record.turnPacket && record.copy !== "restored";
   return { state: record.state as DeviceGateView["state"], ...(active?.name ? { activeDevice: active.name } : {}), ...(unfinished ? { unfinished: true as const } : {}) };
 }
 
@@ -81,6 +82,15 @@ export function openDeviceGate(profile: string = databaseName()): Promise<Device
 /** The gate as already read on this page, without waiting: undefined until `openDeviceGate` has answered. */
 export function knownDeviceGate(profile: string = databaseName()): DeviceGate | undefined {
   return known.get(profile);
+}
+
+/**
+ * The gate of a profile changed on this page before the engine started: the active device's read at start found that
+ * another device took the turn (`peer.ts`). Every later caller gets the new answer.
+ */
+export function replaceDeviceGate(gate: DeviceGate): void {
+  gates.set(gate.profile, Promise.resolve(gate));
+  known.set(gate.profile, gate);
 }
 
 /** Tests only: forgets what was read, as a reload of the page does. */

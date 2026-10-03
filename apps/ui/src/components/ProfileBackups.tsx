@@ -6,6 +6,7 @@ import { useI18n } from "../contexts/I18nContext";
 import { backupProtectionOf, isCancelled, openProfileBackup, restoreOpenedBackup, sameIdentityProfiles, writeProfileBackup, type BackupInput, type BackupResult, type OpenedProfileBackup } from "../lib/profileBackup";
 import { backUpToFile, byteSize, stageBackup } from "../lib/backupFile";
 import { switchProfile, type ProfileEntry } from "../lib/profiles";
+import { guardRestore, restoreForTakeover, type RestoreGuard } from "../lib/restoreGuard";
 import { Block, Button, Notice, Row, Section, Segmented, input } from "./wallet/ui";
 import { useRun } from "./wallet/run";
 import { useServicesPlatform } from "../hooks/useServicesPlatform";
@@ -48,10 +49,13 @@ export function ProfileBackups({ canSwitch, openBackup = false }: { canSwitch: b
   const [restorePass, setRestorePass] = useState("");
   // A backup of a profile still on this device (WISP 05 § Restoring on the same device) waits here for the person's choice.
   const [sameDevice, setSameDevice] = useState<{ opened: OpenedProfileBackup; originals: ProfileEntry[] } | null>(null);
+  // A bundle whose profile may be active on another device (WISP 06 § A backup restored where a device set exists).
+  const [guarded, setGuarded] = useState<{ opened: OpenedProfileBackup; guard: RestoreGuard } | null>(null);
+  const [ownName, setOwnName] = useState("");
   const [draft, setDraft] = useState<S3Config>(settings.backupS3 ?? EMPTY_S3);
   const s3 = settings.backupS3 ? new S3Store(settings.backupS3) : null;
   const space = () => { if (settings.backupSpace) return settings.backupSpace; const fresh = newSpace(); updateBackupStorage({ backupSpace: fresh }); return fresh; };
-  const toggle = (next: Open) => { setOpen(open === next ? "none" : next); setError(""); setDone(""); setSameDevice(null); if (next === "s3") setDraft(settings.backupS3 ?? EMPTY_S3); };
+  const toggle = (next: Open) => { setOpen(open === next ? "none" : next); setError(""); setDone(""); setSameDevice(null); setGuarded(null); if (next === "s3") setDraft(settings.backupS3 ?? EMPTY_S3); };
   const sealed = protection === "passphrase";
   const ready = sealed ? passphrase.length >= 12 && passphrase === confirm : understood;
   // Real money this profile has held on Mainnet: said by name before a file that anyone could spend it from is made.
@@ -107,9 +111,24 @@ export function ProfileBackups({ canSwitch, openBackup = false }: { canSwitch: b
     const bundle: BackupInput | null = from === "file" || !s3 ? file : await s3.get(picked);
     if (!bundle) throw new Error(t("profile.backups.chooseFirst"));
     const opened = await openProfileBackup(bundle, restorePass || undefined, watch);
+    // The turn first: a copy of a profile that runs on another device does not start (WISP 06).
+    const guard = await guardRestore(opened);
+    if (guard.case !== "plain") { setOwnName(""); setGuarded({ opened, guard }); return; }
+    await afterGuard(opened, watch);
+  });
+  /** The rest of a restore once the turn allows it: the same profile on this device, then the restore itself. */
+  const afterGuard = async (opened: OpenedProfileBackup, watch: ReturnType<typeof start>) => {
+    setGuarded(null);
     const originals = await sameIdentityProfiles(opened);
     if (originals.length) { setSameDevice({ opened, originals }); return; }
     await finish(opened, undefined, watch);
+  };
+  /** "Take over" from a restore: the copy is restored on standby here, and its screen offers the takeover. */
+  const takeOver = (target: { opened: OpenedProfileBackup; guard: RestoreGuard }) => underProgress("restore", true, async (watch) => {
+    const entry = await restoreForTakeover(target.opened, target.guard, watch);
+    setRestorePass(""); setGuarded(null);
+    if (canSwitch) switchProfile(entry.id, { route: "/" });
+    else setDone(t("profile.backups.restored", { name: entry.name }));
   });
   /** `replacing`: the original, which the profile page of the copy then offers to remove, with its usual checks. */
   const finish = async (opened: OpenedProfileBackup, replacing: ProfileEntry | undefined, watch: ReturnType<typeof start>) => {
@@ -173,10 +192,38 @@ export function ProfileBackups({ canSwitch, openBackup = false }: { canSwitch: b
           {unprotected && <Notice tone="warning" testId="restore-unprotected">{t("profile.backups.unprotectedFile")}</Notice>}
           <InputGroup>
             {needsPassphrase && <input data-testid="restore-passphrase" type="password" autoComplete="current-password" className={input} placeholder={t("profile.backups.passphrase")} value={restorePass} onChange={(e) => setRestorePass(e.target.value)} />}
-            <Button variant="primary" data-testid="restore-go" disabled={busy || (needsPassphrase && !restorePass) || !!sameDevice || (from === "file" || !s3 ? !file : !picked)} onClick={() => void restore()}>{busy ? t("profile.backups.restoring") : t("profile.backups.restore")}</Button>
+            <Button variant="primary" data-testid="restore-go" disabled={busy || (needsPassphrase && !restorePass) || !!sameDevice || !!guarded || (from === "file" || !s3 ? !file : !picked)} onClick={() => void restore()}>{busy ? t("profile.backups.restoring") : t("profile.backups.restore")}</Button>
           </InputGroup>
           {!sameDevice && <Notice>{t("profile.backups.keepOne")}</Notice>}
         </Block>
+      )}
+      {open === "restore" && guarded && (
+        <Field testId="restore-guard" label={<span className="font-semibold" data-testid="restore-guard-title" data-case={guarded.guard.case}>{
+          guarded.guard.case === "active" ? (guarded.guard.device ? t("devices.restore.activeOn", { device: guarded.guard.device }) : t("devices.restore.activeOnUnnamed"))
+            : guarded.guard.case === "tombstone" ? t("devices.restore.tombstone") : t("devices.restore.unreadable")}</span>}
+          hint={guarded.guard.case === "active" ? t("devices.restore.activeHint") : undefined}>
+          {guarded.guard.case === "active" && (
+            <ButtonGroup>
+              <Button data-testid="restore-add-instead" disabled={busy} onClick={() => { setGuarded(null); setDone(t("devices.restore.addInsteadHint", { device: guarded.guard.device ?? t("devices.join.otherDevice") })); }}>{t("devices.restore.addInstead")}</Button>
+              <Button variant="primary" data-testid="restore-take-over" disabled={busy} onClick={() => void takeOver(guarded)}>{t("devices.restore.takeOver")}</Button>
+              <Button data-testid="restore-guard-cancel" disabled={busy} onClick={() => setGuarded(null)}>{t("common.cancel")}</Button>
+            </ButtonGroup>
+          )}
+          {guarded.guard.case === "tombstone" && (
+            <InputGroup>
+              <input data-testid="restore-own-name" className={input} autoComplete="off" spellCheck={false} placeholder={t("devices.restore.tombstoneConfirm", { name: guarded.opened.name })}
+                aria-label={t("devices.restore.tombstoneConfirm", { name: guarded.opened.name })} value={ownName} onChange={(e) => setOwnName(e.target.value)} />
+              <Button variant="primary" data-testid="restore-own-go" disabled={busy || ownName.trim() !== guarded.opened.name.trim()} onClick={() => void underProgress("restore", true, (watch) => afterGuard(guarded.opened, watch))}>{t("devices.restore.tombstoneGo")}</Button>
+              <Button data-testid="restore-guard-cancel" disabled={busy} onClick={() => setGuarded(null)}>{t("common.cancel")}</Button>
+            </InputGroup>
+          )}
+          {guarded.guard.case === "unreadable" && (
+            <ButtonGroup>
+              <Button variant="primary" data-testid="restore-guard-retry" disabled={busy} onClick={() => { setGuarded(null); void restore(); }}>{t("devices.restore.tryAgain")}</Button>
+              <Button data-testid="restore-guard-cancel" disabled={busy} onClick={() => setGuarded(null)}>{t("common.cancel")}</Button>
+            </ButtonGroup>
+          )}
+        </Field>
       )}
       {open === "restore" && sameDevice && (
         // The original is on this device: both would answer contacts as the same person. The person chooses.

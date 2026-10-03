@@ -5,6 +5,7 @@ import { engine } from "@ghostly/browser/platform/engine";
 import { useI18n } from "../contexts/I18nContext";
 import { reloadIntoGate, useDeviceSet } from "../lib/devices";
 import { HandoffOffer, HandoffProgress, UseHereDialog } from "./devices/Handoff";
+import { TakeoverDialog } from "./devices/TakeoverDialog";
 import { useHandoffView } from "../lib/handoff";
 import { activeProfileId, listProfiles, switchProfile } from "../lib/profiles";
 
@@ -22,12 +23,19 @@ export function DeviceStandby({ gate }: { gate: DeviceGateView }) {
   const id = useId();
   const others = otherProfiles();
   const unfinished = gate.state === "standby" && !!gate.unfinished;
+  const takeover = useTakeoverInfo(gate.state);
+  // A copy restored from a backup where the profile is active elsewhere (WISP 06 § A backup restored where a device set
+  // exists): it starts nothing until the person takes over or removes it.
+  const restored = gate.state === "standby" && takeover?.copy === "restored";
   const title = unfinished ? t("devices.standby.unfinished.title")
+    : restored ? (gate.activeDevice ? t("devices.restore.activeOn", { device: gate.activeDevice }) : t("devices.restore.activeOnUnnamed"))
     : gate.state === "standby"
       ? (gate.activeDevice ? t("devices.standby.title.standby", { device: gate.activeDevice }) : t("devices.standby.title.standbyUnnamed"))
       : t(`devices.standby.title.${gate.state}`);
   const hint = unfinished
     ? (gate.activeDevice ? t("devices.standby.unfinished.hint", { device: gate.activeDevice }) : t("devices.standby.unfinished.hintUnnamed"))
+    : restored ? t("devices.takeover.restoredHint")
+    : gate.state === "superseded" && gate.activeDevice ? t("devices.standby.hint.supersededBy", { device: gate.activeDevice })
     : t(`devices.standby.hint.${gate.state}`);
   // A handoff froze this device or installed what it took: the pages start again into the gate.
   useEffect(() => { if (gate.reload) void reloadIntoGate(); }, [gate.reload]);
@@ -54,7 +62,8 @@ export function DeviceStandby({ gate }: { gate: DeviceGateView }) {
           <button type="button" data-testid="device-standby-retry" onClick={() => void tryAgain()} className={BUTTON}>{t("app.profileUnavailable.tryAgain")}</button>
         )}
         {unfinished && <Unfinished />}
-        {!unfinished && (gate.state === "standby" || gate.state === "releasing" || gate.state === "taking") && <StandbyHandoff gate={gate} />}
+        {!unfinished && !restored && (gate.state === "standby" || gate.state === "releasing" || gate.state === "taking") && <StandbyHandoff gate={gate} />}
+        {!unfinished && takeover?.offered && <Takeover gate={gate} info={takeover} />}
         {gate.state !== "unreadable" && !unfinished && <Links />}
         {others.length > 0 && (
           <div className="flex flex-wrap justify-center gap-2 pt-2">
@@ -90,6 +99,38 @@ function StandbyHandoff({ gate }: { gate: DeviceGateView }) {
         <button type="button" data-testid="handoff-use-here" onClick={() => setAsking(true)} className={BUTTON}>{t("devices.handoff.useHere")}</button>
       )}
       {asking && <UseHereDialog device={device} onClose={() => setAsking(false)} onStarted={() => {}} />}
+    </div>
+  );
+}
+
+type TakeoverInfo = { offered: boolean; device?: string; copy?: "frozen" | "restored"; password?: boolean };
+
+/** Whether this device offers a forced takeover, and how (`deviceTakeoverInfo`): read once the screen shows. */
+function useTakeoverInfo(state: DeviceGateView["state"]): TakeoverInfo | null {
+  const [info, setInfo] = useState<TakeoverInfo | null>(null);
+  useEffect(() => {
+    if (state !== "standby" && state !== "superseded") { setInfo(null); return; }
+    let live = true;
+    void engine.call("deviceTakeoverInfo").then((next) => { if (live) setInfo(next); }, () => { if (live) setInfo(null); });
+    return () => { live = false; };
+  }, [state]);
+  return info;
+}
+
+/**
+ * The forced takeover (WISP 06 § Forced takeover): "It wasn't me" on a device that was replaced, "Take over" on a copy
+ * restored from a backup, and "My other device is lost or broken" on a standby that holds a frozen copy.
+ */
+function Takeover({ gate, info }: { gate: DeviceGateView; info: TakeoverInfo }) {
+  const { t } = useI18n();
+  const [open, setOpen] = useState(false);
+  const restored = info.copy === "restored";
+  return (
+    <div className="flex flex-col items-center gap-2">
+      {gate.state === "superseded" || restored
+        ? <button type="button" data-testid="takeover-open" onClick={() => setOpen(true)} className={gate.state === "superseded" ? QUIET : BUTTON}>{t(restored ? "devices.restore.takeOver" : "devices.takeover.notMe")}</button>
+        : <button type="button" data-testid="takeover-open" onClick={() => setOpen(true)} className="text-sm text-text-muted underline hover:text-accent cursor-pointer">{t("devices.takeover.lost")}</button>}
+      {open && <TakeoverDialog device={info.device ?? gate.activeDevice} password={!!info.password} restored={restored} onClose={() => setOpen(false)} />}
     </div>
   );
 }

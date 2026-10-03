@@ -7,7 +7,7 @@ import {
   confirmationMatches, confirmationTag, decryptText, encryptText, epochKeys, newEpochSecret, openPair, openSecret, sealPair, sealSecret, sha256Hex,
   type SealedSecret,
 } from "./groupCrypto";
-import { GROUP_ID, MEMBER_KEY, rosterAdmin, rosterHas, sortRoster, type GroupRole, type Roster } from "./groupCommits";
+import { GROUP_ADMIN_OFF_ERROR, GROUP_ID, OWN_FRAME_LIMIT, MEMBER_KEY, rosterAdmin, rosterHas, sortRoster, type GroupRole, type Roster } from "./groupCommits";
 import { mentionsBytes, validMentions, wireMentions, type GroupMention } from "./groupMentions";
 import { groupReplyAuthor, readReply, wireReply, type WireReply } from "./replies";
 import { readForwarded } from "./forwards";
@@ -318,6 +318,19 @@ export interface CommunitySessionHooks {
   relay?(frame: CommunityFrame): void;
   /** The engine's clock, for how often a member is asked for what I lack (defaults to Date.now). */
   clock?(): number;
+  /**
+   * The lowest sequence number this member sends at, under any head (WISP 06 § Raised counters): 0 for a profile that
+   * never took over or was never restored. A copy started from older state sends above every number the copy it
+   * replaced may have used, so the other members do not drop its frames as already seen. The beacon packs the number
+   * in 32 bits, so a floor stays well under 2^32.
+   */
+  seqFloor?(): number;
+  /**
+   * Whether this device may sign commits for the group (WISP 06 § Forced takeover): false after a forced takeover or a
+   * restore, until the person turns on "Manage groups from this device" there. Then no commit is signed: no admission
+   * at the door, no leave committed for another member, no admin change. Absent: true.
+   */
+  adminWork?(): boolean;
 }
 
 const MAX_TEXT_BOX = Math.ceil((COMMUNITY_LIMITS.textBytes + 256 + 16) * 4 / 3) + 4;
@@ -813,9 +826,12 @@ export class CommunitySession {
   /** Writes what is waiting to be saved now (before a restart, in tests). */
   async flush(): Promise<void> { if (this.saveTimer) await this.persist(); }
   private requireMember(): void { if (!this.isMember) throw new Error(this.state.statusReason ?? "You are not in this group"); }
+  /** Whether this device may sign commits for the group now (`CommunitySessionHooks.adminWork`). */
+  get adminWork(): boolean { return this.hooks.adminWork?.() !== false; }
   private requireAdmin(): void { this.requireMember(); if (!this.isAdmin) throw new Error("Only the admin can do that"); }
 
   private async commit(kind: CommunityKind, fields: { s?: string; x?: string; ls?: string }, now: number): Promise<{ commit: CommunityCommit; hash: string; secret: Uint8Array }> {
+    if (!this.adminWork) throw new Error(GROUP_ADMIN_OFF_ERROR);
     if (this.state.chain.length >= COMMUNITY_LIMITS.chain) throw new Error("This group has reached its membership history limit. Create a new group.");
     const parent = this.top, parentHash = this.topHash;
     const draftBase = { v: 2 as const, g: this.id, e: parent.e + 1, p: parentHash, k: kind, by: this.myKey, ...fields, ts: now };
@@ -944,7 +960,8 @@ export class CommunitySession {
   /** Commits the leave requests I hold whose members are still in: the engine calls this on hubs. */
   commitPendingLeaves(now = Date.now()): Promise<number> {
     return this.serialize(async () => {
-      if (!this.isMember) return 0;
+      // Admin work off on this device: the requests wait for a member who commits them, or for the person to turn it on.
+      if (!this.isMember || !this.adminWork) return 0;
       let done = 0;
       for (const request of [...this.state.pendingLeaves]) {
         if (!rosterHas(this.roster, request.s) || request.s === this.myKey || request.s === this.admin) { this.state.pendingLeaves = this.state.pendingLeaves.filter(r => r !== request); continue; }
@@ -1058,7 +1075,10 @@ export class CommunitySession {
     const h = this.topHash, secret = this.state.secrets[h];
     if (!secret) return { error: "This epoch's key has not arrived yet. Wait for a member to catch you up." };
     if (this.state.seqH !== h) { this.state.seq = 0; this.state.seqH = h; }
-    const n = this.state.seq++;
+    // Every head starts at the floor, not at 0, and a floor raised under a running head counts at once.
+    const floor = this.hooks.seqFloor?.() ?? 0;
+    const n = Math.max(this.state.seq, Number.isSafeInteger(floor) && floor > 0 ? floor : 0);
+    this.state.seq = n + 1;
     const header = { g: this.id, e: this.epoch, h: shortHash(h), s: this.myKey, n, ts: now };
     const clean = sanitizeNick(nick);
     const payload = JSON.stringify(clean ? { ...body(header), nick: clean } : body(header));
@@ -1143,7 +1163,8 @@ export class CommunitySession {
   }
 
   private async receiveMessage(from: string, raw: unknown): Promise<boolean> {
-    if (!isMessageFrame(raw) || raw.s === this.myKey) return false;
+    if (!isMessageFrame(raw)) return false;
+    if (raw.s === this.myKey) { this.ownFrame(raw); return false; }
     // Signed by its author before anything else, so a frame no member wrote never takes a place among those waiting.
     if (!verify(fromBase64Url(raw.sig), messageSigned(raw), publicKeyFromZ32(raw.s))) return false;
     // Someone the chain took out is heard no more, even for an epoch it was in (whose secret it still holds).
@@ -1195,6 +1216,21 @@ export class CommunitySession {
     return true;
   }
 
+  /**
+   * A frame signed with my own key that I did not send here: another copy of this profile sent it (a restored backup, a
+   * device that took over while this one was away, WISP 06). It is not shown, as before; but my counter goes above it
+   * under this head, so what I send next is not dropped by the others as already seen.
+   */
+  private ownFrame(raw: CommunityMessageFrame): void {
+    const top = this.topHash;
+    if (raw.h !== shortHash(top)) return;
+    const current = this.state.seqH === top ? this.state.seq : 0;
+    // A number past every floor a copy may have (`OWN_FRAME_LIMIT`) is not taken: the counter must fit in 32 bits.
+    if (raw.n < current || raw.n >= OWN_FRAME_LIMIT) return;
+    try { if (!verify(fromBase64Url(raw.sig), messageSigned(raw), publicKeyFromZ32(raw.s))) return; } catch { return; }
+    this.state.seq = raw.n + 1; this.state.seqH = top;
+    this.persistSoon();
+  }
   private isDuplicate(f: CommunityMessageFrame): boolean { return seenIn(this.state.seen, f); }
   private markSeen(f: CommunityMessageFrame): void {
     const bySender = (this.state.seen[f.s] ??= {});

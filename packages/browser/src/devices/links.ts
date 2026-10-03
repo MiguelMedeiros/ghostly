@@ -8,8 +8,12 @@ import { DEVICE_GATED_ERROR, type DeviceLinkEngine, type DeviceLinkHost } from "
 import { DeviceSetError, deviceIdentity, openTurnKeeper } from "./setup";
 import { loadDeviceSigningKey, type DeviceSigningKey } from "./signingKey";
 import type { DeviceRecord, DeviceState } from "./state";
-import { forgetDevice, readDeviceRecord } from "./store";
+import { amendDevice, forgetDevice, readDeviceRecord } from "./store";
 import type { TurnKeeper, TurnOutcome } from "./turn";
+import { canTakeOver, forceTakeover, takeoverTarget } from "./takeover";
+import { peekTurn } from "./restoreGuard";
+import { newDeviceSecretDue } from "./rotate";
+import { provesHandoffPassword } from "./handoffPake";
 
 /**
  * What runs the handoff on this device (WISP 06 § The handoff): the giver while the engine runs, the giver and the
@@ -71,6 +75,11 @@ export interface DeviceSetView {
   unfinishedGrants?: { key: string; name: string; at: number }[];
   /** This device's enrollment did not finish (WISP 06 § Adding a device, "Not finished"). */
   unfinished?: true;
+  /**
+   * The set should move to a new device-set secret (`rotate.ts`): a device granted it never finished, and may hold it.
+   * Removal (part 7 of WISP 06) makes the move; this only says it is due.
+   */
+  newSecretDue?: true;
 }
 
 /** The view of a device record and the links this device holds. A profile with no record is `single`, with no devices. */
@@ -83,7 +92,8 @@ export function deviceSetView(record: DeviceRecord | null, links: DeviceLinkView
   });
   const listed = new Set(record.deviceSet.flatMap((slot) => (slot ? [slot.key] : [])));
   const grants = (record.unfinishedGrants ?? []).filter((grant) => !listed.has(grant.key));
-  return { state: record.state, devices, ...(grants.length ? { unfinishedGrants: grants } : {}), ...(enrollmentUnfinished(record) ? { unfinished: true as const } : {}) };
+  return { state: record.state, devices, ...(grants.length ? { unfinishedGrants: grants } : {}), ...(enrollmentUnfinished(record) ? { unfinished: true as const } : {}),
+    ...(newDeviceSecretDue(record) ? { newSecretDue: true as const } : {}) };
 }
 
 export interface DeviceLinksOptions {
@@ -446,6 +456,34 @@ export class DeviceLinks implements DeviceLinkEngine {
         return null;
       }
       case "deviceLinksRefresh": await this.refresh(); return this.views();
+      case "deviceTurnPeek": {
+        const d = (params as { d?: unknown } | null)?.d;
+        const secret = typeof d === "string" ? fromBase64Url(d) : new Uint8Array();
+        const network = this.turnNetwork();
+        if (secret.length !== 32) throw new Error("Not a device-set secret");
+        if (!network || this.options.offline) return { result: "unreachable" };
+        return peekTurn(secret, network);
+      }
+      case "deviceTakeoverInfo": {
+        // What the takeover screen needs: whether it is offered here, which device stops, whether a password is asked.
+        const record = await (this.options.readRecord ?? readDeviceRecord)(this.options.profile);
+        if (!record) return { offered: false };
+        const target = takeoverTarget(record);
+        return { offered: canTakeOver(record), ...(target ? { device: target } : {}), ...(record.copy ? { copy: record.copy } : {}), password: record.copy === "frozen" || !!record.verifier };
+      }
+      case "deviceTakeover": {
+        const p = (params ?? {}) as { password?: unknown; name?: unknown };
+        const outcome = await forceTakeover({
+          read: () => (this.options.readRecord ?? readDeviceRecord)(this.options.profile),
+          amend: (patch) => amendDevice(this.options.profile, patch),
+          proves: (verifier, password) => provesHandoffPassword(verifier, password),
+          keeper: () => this.turnKeeper(),
+        }, { password: typeof p.password === "string" ? p.password : "", name: typeof p.name === "string" ? p.name : "" });
+        // Active now: the pages start again into the gate, where the engine raises the counters and starts.
+        if (outcome.kind === "start") this.host?.show({ state: "standby", reload: true });
+        else { const now = await (this.options.readRecord ?? readDeviceRecord)(this.options.profile); if (now) this.host?.show(viewOf(now)); }
+        return { kind: outcome.kind, ...("read" in outcome ? { result: outcome.read.result } : {}), ...("state" in outcome ? { state: outcome.state } : {}) };
+      }
       case "devicePing": {
         if (typeof key !== "string") throw new Error("Name the device to ping");
         return { ms: await this.ping(key) };

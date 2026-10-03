@@ -1,7 +1,11 @@
 import { EngineServer } from "../engine/server";
 import type { NodeOptions } from "../engine/node";
 import { DEFAULT_IROH_RELAYS, createIrohWebEndpoint } from "../platform/irohWeb";
-import { openDeviceGate, type DeviceGate } from "./gate";
+import type { PkarrTransport, TurnNetwork } from "@ghostly/core";
+import { openDeviceGate, replaceDeviceGate, viewOf, type DeviceGate, type DeviceGateView } from "./gate";
+import { openTurnKeeper } from "./setup";
+import { recoverEnrollment } from "./enroll";
+import type { TurnOutcome } from "./turn";
 import { DeviceLinkOnlyServer, type DeviceLinkEngine, type PeerServer } from "./linkOnly";
 import { DeviceLinks } from "./links";
 import { standbyNetwork } from "./network";
@@ -57,8 +61,55 @@ export async function standbyEngine(gate: DeviceGate, options: NodeOptions | und
  * constructor starts the node at once, is never made on a standby. A standby gets its device links instead
  * (`standbyEngine`). `gate` and `standby` are for tests.
  */
-export async function createPeerServer(options: NodeOptions | undefined, overrides: { gate?: DeviceGate; standby?: DeviceLinkEngine } = {}): Promise<PeerServer> {
-  const gate = overrides.gate ?? await openDeviceGate();
+export async function createPeerServer(options: NodeOptions | undefined, overrides: { gate?: DeviceGate; standby?: DeviceLinkEngine; turn?: TurnNetwork | null } = {}): Promise<PeerServer> {
+  let gate = overrides.gate ?? await openDeviceGate();
+  // The active device of a device set reads the turn before its engine starts (WISP 06 § When a device checks): a device
+  // another one replaced while it was off stops here, before it dials or publishes anything.
+  if (gate.full && gate.state === "active" && !options?.singleDevice) {
+    const start = await activeStart(gate, options, overrides.turn);
+    if (start.gated) { gate = { ...gate, state: start.gated.state, full: false, view: start.gated }; replaceDeviceGate(gate); }
+    else if (start.limited) return new EngineServer({ ...options, limited: true });
+  }
   if (gate.full) return new EngineServer(options);
   return new DeviceLinkOnlyServer(gate, overrides.standby ?? await standbyEngine(gate, options));
+}
+
+/** How the active device starts, after its read at start: the whole engine, limited mode, or not at all (`gated`). */
+export interface ActiveStart { gated?: DeviceGateView; limited?: true }
+
+/**
+ * The read an active device makes as a condition of starting (WISP 06 § Device state by turn read, the row "active, at
+ * start"): `mine` or `none` write its next record and start; another device's higher turn, a clone of this device or a
+ * tombstone write the new state and start nothing; no source answered gives limited mode, which publishes, dials and
+ * settles nothing until a good read (the engine reads again every 30 seconds). With the network off, or no turn path,
+ * the engine starts as before: it publishes nothing either way.
+ */
+export async function activeStart(gate: DeviceGate, options: NodeOptions | undefined, given?: TurnNetwork | null): Promise<ActiveStart> {
+  const record = await readDeviceRecord(gate.profile).catch(() => undefined);
+  // The record that said `active` a moment ago cannot be read again: nothing is published until a good read.
+  if (record === undefined) return { limited: true };
+  if (!record || record.state !== "active" || record.network?.off) return {};
+  const network = given === undefined ? turnPathOf(standbyNetwork(record.network, options?.transport).transport) : given;
+  if (!network) return {};
+  // An enrollment whose own record was put and whose write of it was lost takes that record back first: the read below
+  // would take it for a clone of this device and stop it (as `GhostlyNode.startDeviceSet` does, in the same order).
+  await recoverEnrollment(gate.profile, network).catch(() => false);
+  let outcome: TurnOutcome | null;
+  try {
+    const keeper = await openTurnKeeper(gate.profile, network);
+    outcome = keeper ? await keeper.check(true) : null;
+  } catch { return { limited: true }; /* no good read: the profile offline, until one (the engine reads again) */ }
+  if (!outcome) return {};
+  if (outcome.kind === "gated") {
+    const now = await readDeviceRecord(gate.profile).catch(() => null);
+    return { gated: now ? viewOf(now) : { state: outcome.state as DeviceGateView["state"] } };
+  }
+  if (outcome.kind === "start" || outcome.kind === "go-on" || outcome.kind === "single") return outcome.kind === "go-on" && outcome.restricted ? { limited: true } : {};
+  return { limited: true };
+}
+
+/** The turn record's own read and put on a transport, or null where it has none. */
+export function turnPathOf(transport: PkarrTransport): TurnNetwork | null {
+  if (!transport.turnRead || !transport.turnPut) return null;
+  return { turnRead: transport.turnRead.bind(transport), turnPut: transport.turnPut.bind(transport), ...(transport.turnWarm ? { turnWarm: transport.turnWarm.bind(transport) } : {}) };
 }

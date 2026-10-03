@@ -65,6 +65,7 @@ import {
   RELAY_POLL_INTERVALS,
   RTC_CONFIG,
   type DeviceKind,
+  fromBase64Url,
   type TurnNetwork,
   turnKeys,
   RelayTransport,
@@ -105,18 +106,20 @@ import {
   entryParams,
 } from "@ghostly/core";
 import type { AttentionCue, AttentionEvent, EngineImplementation } from "../shared/rpc";
-import { STORES, clearProfileStores, databaseName, fileStore, store, wrap, type StoredFile } from "../shared/idb";
+import { STORES, clearProfileStores, databaseName, fileStore, openDb, store, wrap, type StoredFile } from "../shared/idb";
 import { knownDeviceGate, viewOf, type DeviceGateView } from "../devices/gate";
 import { deviceNetworkOf, saveDeviceNetwork } from "../devices/network";
 import { EnrollCodeError, EnrollInviter, EnrollJoiner, EnrollRefusal, ghostLinkEnrollChannel, recoverEnrollment, type EnrollView, type OpenEnrollChannel } from "../devices/enroll";
 import { DeviceLinks, deviceSetView, type DeviceSetView } from "../devices/links";
-import { moveDevice, readDeviceRecord } from "../devices/store";
+import { amendDevice, moveDevice, readDeviceRecord } from "../devices/store";
 import { HandoffGiver, type HandoffView } from "../devices/handoff";
 import { handoffProfileHost, handoffSelf } from "../devices/handoffHost";
 import { handoffLinks, profileRecords } from "../devices/handoffStandby";
 import { isHandoffVerifier, makeHandoffVerifier, provesHandoffPassword, type HandoffVerifier } from "../devices/handoffPake";
-import { deviceIdentity } from "../devices/setup";
+import { deviceIdentity, openTurnKeeper } from "../devices/setup";
+import { peekTurn, type TurnPeek } from "../devices/restoreGuard";
 import { walletHandoffProblem } from "../devices/handoffWallets";
+import { COUNTER_RAISE_KEY, GROUP_ADMIN_OFF_KEY, PENDING_RAISE_KEY, applyCounterRaise, isCounterRaise, isGroupAdminOff, isPendingRaise, type PendingRaise } from "../devices/raise";
 import { fileBytes } from "../shared/fileBytes";
 import { FileAppender, readStored, removeStored, storedSize, streamStored } from "../shared/storedFiles";
 import { FileDesk } from "./fileDesk";
@@ -1057,6 +1060,9 @@ export class GhostlyNode implements EngineImplementation {
     linkReady: (linkId, version = 1) => !!this.links.get(linkId)?.link?.supportsGroupVersion(version),
     linkOpen: linkId => !!this.links.get(linkId)?.link?.isDataLinkOpen,
     myNick: () => this.sharedNick,
+    // A copy started from older state sends above the copy it replaced, and manages no group until told to (WISP 06).
+    seqFloor: () => this.counterFloor,
+    adminWork: (groupId) => !this.limitedMode && !this.groupAdminOff.has(groupId),
     // An app with no WebRTC (the Linux Desktop) reaches members over native listeners, a few of them
     // (`GROUP_NATIVE_SLOTS`): it does not offer to be a private group's hub, which keeps an edge with everyone.
     staysOnline: () => this.options.staysOnline ?? (this.options.platform === "desktop" && typeof RTCPeerConnection !== "undefined"),
@@ -1394,6 +1400,9 @@ export class GhostlyNode implements EngineImplementation {
   }
 
   private async startNow(): Promise<void> {
+    // A copy of the profile started from older state (a forced takeover, a restored backup) raises its counters once,
+    // before anything here reads them or publishes (WISP 06 § Raised counters).
+    await this.raiseCounters();
     // A new profile has nothing stored yet. Its wallets come from the first-run setup (where the app runs it), or from
     // New; no mint is added by itself here.
     const stored = await db.getSettings();
@@ -1459,6 +1468,60 @@ export class GhostlyNode implements EngineImplementation {
     // The active device of a device set (WISP 06): its links to the other devices, and its turn record put again. A
     // `single` profile never gets here: the gate read no record for it, and nothing more is asked.
     if (!this.options.singleDevice && this.networkOn && knownDeviceGate()?.state === "active") void this.startDeviceSet().catch(() => {});
+    // Started in limited mode because no source answered the read at start: it reads again every 30 seconds, and the
+    // first good read either starts it properly or stops it (WISP 06 § When a device checks).
+    if (!this.options.singleDevice && this.limitedMode && knownDeviceGate()?.state === "active") this.readTurnWhileLimited();
+  }
+
+  private limitedTimer: ReturnType<typeof setTimeout> | null = null;
+
+  /**
+   * The person turned the network on: an active device of a device set reads the turn before anything is dialled or
+   * published (WISP 06 § When a device checks), as it does at start. False: it does not go online now (another device
+   * took the turn, or no good read: limited mode, read again every 30 seconds).
+   */
+  private async turnBeforeOnline(): Promise<boolean> {
+    if (this.options.singleDevice || knownDeviceGate()?.state !== "active") return true;
+    const outcome: { kind: string; restricted?: boolean } | null = await (async () => {
+      const keeper = await openTurnKeeper(databaseName(), this.turnNetwork());
+      return keeper ? keeper.check(true) : null;
+    })().catch(() => null);
+    if (outcome?.kind === "gated") {
+      const record = await readDeviceRecord(databaseName()).catch(() => null);
+      if (record) await this.stopReplaced(viewOf(record));
+      return false;
+    }
+    if (outcome?.kind === "single" || outcome?.kind === "start" || (outcome?.kind === "go-on" && !outcome.restricted)) return true;
+    this.limitedMode = true;
+    this.readTurnWhileLimited();
+    this.emitState();
+    return false;
+  }
+
+  private readTurnWhileLimited(after = 30_000): void {
+    if (this.limitedTimer) clearTimeout(this.limitedTimer);
+    this.limitedTimer = setTimeout(() => {
+      this.limitedTimer = null;
+      void (async () => {
+        if (this.shuttingDown || !this.limitedMode) return;
+        const outcome: { kind: string; restricted?: boolean } | null = await (async () => {
+          const keeper = await openTurnKeeper(databaseName(), this.turnNetwork());
+          return keeper ? keeper.check(true) : null;
+        })().catch(() => null);
+        if (this.shuttingDown) return;
+        if (outcome?.kind === "gated") {
+          const record = await readDeviceRecord(databaseName()).catch(() => null);
+          if (record) await this.stopReplaced(viewOf(record));
+          return;
+        }
+        if (outcome && (outcome.kind === "start" || (outcome.kind === "go-on" && !outcome.restricted))) {
+          await this.leaveLimited().catch(() => {});
+          if (!this.limitedMode && this.networkOn) void this.startDeviceSet().catch(() => {});
+          return;
+        }
+        this.readTurnWhileLimited();
+      })();
+    }, after);
   }
 
   /** Every wallet's stored state, loaded: the first half of what `start()` does for money. */
@@ -1514,8 +1577,11 @@ export class GhostlyNode implements EngineImplementation {
     // A wallet that fails to start must not keep the chats from being dialled: the failure is reported after them.
     let failure: unknown = null;
     try {
-      await this.startWallets();
-      this.openStartedWallets(false);
+      // Wallets that started already (the engine went limited when the person turned the network on) start once.
+      if (!this.walletsStarted) {
+        await this.startWallets();
+        this.openStartedWallets(false);
+      }
     } catch (error) { failure = error ?? new Error("The wallets did not start"); }
     if (this.networkOn) {
       for (const live of this.links.values()) this.startLink(live.stored.id, await db.getMessages(live.stored.id));
@@ -1573,6 +1639,7 @@ export class GhostlyNode implements EngineImplementation {
   async shutdown(options: { quiet?: boolean } = {}): Promise<void> {
     const quiet = options.quiet === true || this.gatedOut;
     this.shuttingDown = true;
+    if (this.limitedTimer) { clearTimeout(this.limitedTimer); this.limitedTimer = null; }
     // First, before anything that waits: every live contact hears this app is going, and watches for it to come back.
     if (!quiet) this.depart();
     this.directPath.close();
@@ -1660,7 +1727,7 @@ export class GhostlyNode implements EngineImplementation {
       did: this.did.view(),
       nostr: this.nostrSocial.state(),
       edges: [...[...this.links.values()].filter(live => live.stored.group && !live.stored.groupEntry).map(live => this.viewOf(live)), ...this.communityPayViews(groups)],
-      groups: groups.map(group => ({ ...group, ...(this.reactionNotes.has(`group:${group.id}`) && { lastReaction: this.reactionNotes.get(`group:${group.id}`) }), ...this.groupWakeView(group), members: group.members.map(member => {
+      groups: groups.map(group => ({ ...group, ...(this.groupAdminOff.has(group.id) && { adminOff: true as const }), ...(this.reactionNotes.has(`group:${group.id}`) && { lastReaction: this.reactionNotes.get(`group:${group.id}`) }), ...this.groupWakeView(group), members: group.members.map(member => {
         const edge = member.me ? undefined : this.edgeView(group.id, member.key);
         return edge ? { ...member, edge } : member;
       }) })),
@@ -4418,7 +4485,7 @@ export class GhostlyNode implements EngineImplementation {
           live.dataLink = "idle";
         }),
       );
-    } else if (!wasOnline && this.networkOn) {
+    } else if (!wasOnline && this.networkOn && await this.turnBeforeOnline()) {
       for (const live of this.links.values()) this.startLink(live.stored.id, await db.getMessages(live.stored.id));
       this.hold.start();
       this.startGroupEntries();
@@ -4433,6 +4500,63 @@ export class GhostlyNode implements EngineImplementation {
       await this.syncDeviceNetwork().catch(() => {});
     }
     this.emitState();
+  }
+
+  /** The floor of the group send counters (WISP 06 § Raised counters): 0 until a copy from older state raised it. */
+  private counterFloor = 0;
+  /** Groups whose admin work is off on this device since a forced takeover or a restore. */
+  private groupAdminOff = new Set<string>();
+
+  /**
+   * Raises the counters a copy from older state must raise, once (`devices/raise.ts`): the raise a forced takeover wrote
+   * into the device record with `active`, or the one a restore wrote into the profile's settings. Then reads the floor
+   * and the groups whose admin work is off. A profile that never took over or was restored raises nothing.
+   */
+  private async raiseCounters(): Promise<void> {
+    let fromRecord: PendingRaise | null = null;
+    if (!this.options.singleDevice && typeof indexedDB !== "undefined") {
+      const record = await readDeviceRecord(databaseName()).catch(() => null);
+      if (record?.raise && isPendingRaise(record.raise)) fromRecord = record.raise;
+    }
+    const settings = await store(STORES.settings, "readonly");
+    const [pendingRow, raiseRow, offRow] = await Promise.all([PENDING_RAISE_KEY, COUNTER_RAISE_KEY, GROUP_ADMIN_OFF_KEY].map((key) => wrap(settings.get(key))));
+    const pending = fromRecord ?? (isPendingRaise(pendingRow) ? pendingRow : null);
+    let floor = isCounterRaise(raiseRow) ? raiseRow.floor : 0;
+    let off = isGroupAdminOff(offRow) ? offRow.groups : [];
+    if (pending) {
+      const result = await applyCounterRaise(await openDb(), pending);
+      console.info(`[devices] counters raised after a ${pending.why}: floor ${result.floor}, ${result.links} chats, ${result.parked} payments parked`);
+      floor = result.floor;
+      const after = await wrap((await store(STORES.settings, "readonly")).get(GROUP_ADMIN_OFF_KEY));
+      off = isGroupAdminOff(after) ? after.groups : off;
+      // Raised: the record's note goes. A crash before this write finds the raise done (its id is stored) and only clears it.
+      if (fromRecord) await amendDevice(databaseName(), { raise: undefined });
+    }
+    this.counterFloor = floor;
+    this.groupAdminOff = new Set(off);
+  }
+
+  /**
+   * "Manage groups from this device" (WISP 06 § Forced takeover): turns admin work on again in one group after a forced
+   * takeover or a restore, or off. The person accepts, by turning it on, that a change the device it replaced made to
+   * the group after this copy's state is not here.
+   */
+  async setGroupManage({ groupId, on }: { groupId: string; on: boolean }): Promise<void> {
+    if (typeof groupId !== "string" || !groupId) throw new Error("Name the group");
+    const next = new Set(this.groupAdminOff);
+    if (on) next.delete(groupId); else next.add(groupId);
+    await wrap((await store(STORES.settings, "readwrite")).put({ at: Date.now(), groups: [...next].sort() }, GROUP_ADMIN_OFF_KEY));
+    this.groupAdminOff = next;
+    this.emitState();
+  }
+
+  /** The password proof's verifier, copied beside the device state, where a standby checks a forced takeover with it. */
+  private async syncDeviceVerifier(): Promise<void> {
+    if (this.options.singleDevice) return;
+    const record = await readDeviceRecord(databaseName()).catch(() => null);
+    if (!record || record.state !== "active") return;
+    const verifier = await this.handoffVerifier().catch(() => null);
+    if (verifier && JSON.stringify(verifier) !== JSON.stringify(record.verifier)) await amendDevice(databaseName(), { verifier });
   }
 
   /**
@@ -4498,6 +4622,7 @@ export class GhostlyNode implements EngineImplementation {
     // An enrollment whose own record was put and whose write of it was lost takes that record back first: the read
     // below would take it for a clone of this device and stop it.
     await recoverEnrollment(databaseName(), this.turnNetwork()).catch(() => false);
+    await this.syncDeviceVerifier().catch(() => {});
     const keeper = await this.deviceLinks.turnKeeper();
     const outcome = await keeper?.check(false);
     // Another device took the turn: the keeper wrote this device's new state. The pages start again into the gate.
@@ -4643,6 +4768,7 @@ export class GhostlyNode implements EngineImplementation {
     try {
       const verifier = await makeHandoffVerifier(password);
       await wrap((await store(STORES.settings, "readwrite")).put(verifier, GhostlyNode.HANDOFF_VERIFIER));
+      await this.syncDeviceVerifier().catch(() => {});
     } catch (error) {
       // The old verifier must not go on checking a password the person changed: none, until one is made (a pull is
       // refused meanwhile; a push still works).
@@ -4676,6 +4802,9 @@ export class GhostlyNode implements EngineImplementation {
    */
   private async quiesceForHandoff(patch: Parameters<typeof moveDevice>[2]): Promise<void> {
     const profile = databaseName();
+    // Reviews not yet approved are cancelled, and what they reserved goes back (WISP 06 § Shape, step 4): nothing
+    // `pending` moves, and an on-chain review, signed when it was made, never reaches a frozen copy.
+    await this.cancelPendingReviews();
     this.gatedOut = true;
     await this.shutdown({ quiet: true });
     // Money once more, now that nothing can arrive any more: ecash that landed between the last look and the stop would
@@ -4687,8 +4816,18 @@ export class GhostlyNode implements EngineImplementation {
       this.events.onDeviceGate?.({ state: "releasing", reload: true });
       throw new Error(`handoff-${problem === "loading" ? "busy" : problem}: Money arrived while the profile was moving.`);
     }
-    await moveDevice(profile, "releasing", patch);
+    // The password proof's verifier goes beside the state: a standby checks a forced takeover's password with it,
+    // without opening its frozen copy (WISP 06 § Forced takeover).
+    const verifier = await this.handoffVerifier().catch(() => null);
+    await moveDevice(profile, "releasing", { ...patch, ...(verifier ? { verifier } : {}) });
     this.events.onDeviceGate?.({ state: "releasing", reload: true });
+  }
+
+  /** Cancels every review not yet approved, as Cancel does (its reserved coins go back). */
+  private async cancelPendingReviews(): Promise<void> {
+    for (const { review } of await intentRepository.list().catch(() => [])) {
+      if (review.state === "pending") await this.paymentCoordinator.cancel(review.id).catch(() => {});
+    }
   }
 
   /** "Move to <device>" (a push). */
@@ -4715,6 +4854,23 @@ export class GhostlyNode implements EngineImplementation {
 
   async deviceHandoffAccept(): Promise<HandoffView | null> {
     throw new Error("handoff-refused: This device is the active one.");
+  }
+
+  /** A forced takeover is a standby's: the active device offers none. */
+  deviceTakeoverInfo(): { offered: boolean } {
+    return { offered: false };
+  }
+
+  async deviceTakeover(): Promise<{ kind: string }> {
+    throw new Error("takeover-state: This device is the active one.");
+  }
+
+  /** The turn at a bundle's address, for the restore guard (`devices/restoreGuard.ts`). */
+  async deviceTurnPeek({ d }: { d: string }): Promise<TurnPeek> {
+    if (this.options.singleDevice) throw new Error("A profile of the command line is on one device only");
+    const secret = typeof d === "string" ? fromBase64Url(d) : new Uint8Array();
+    if (secret.length !== 32) throw new Error("Not a device-set secret");
+    return peekTurn(secret, this.turnNetwork());
   }
 
   /** "Let <device> try again" after the wrong passwords that refused it. */
