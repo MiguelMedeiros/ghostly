@@ -284,6 +284,19 @@ describe("device-wake between two devices", () => {
     expect(await settled(desktop.links.wake(phone.slot.key))).toBe("skipped");
   });
 
+  it("at start, the target of a device removed while this one was closed goes, though no link to it was ever open here", async () => {
+    const d = newDeviceSetSecret();
+    const desktop = await makeDevice("Desktop"), phone = await makeDevice("Phone");
+    const base: DeviceRecord = record({ profile: desktop.profile, deviceSet: [desktop.slot, phone.slot, null, null], d: toBase64Url(d), signingKey: desktop.key.kind });
+    // The laptop shared its target before it was removed; the set no longer lists it.
+    const kept = parseDeviceRecord({ ...base, ...withOtherPush(base, LAPTOP, subscription("https://fcm.googleapis.com/fcm/send/laptop").target())! });
+    await write(desktop, "active", d, [desktop, phone], { push: kept.push });
+    expect(otherTarget(await readDeviceRecord(desktop.profile), LAPTOP)).not.toBeNull();
+    await settled(desktop.links.start());
+    expect(await until(async () => otherTarget(await readDeviceRecord(desktop.profile), LAPTOP) === null, 10_000)).toBe(true);
+    expect((await readDeviceRecord(desktop.profile))?.push).toBeUndefined();
+  });
+
   it("the active device asks the standby for a new subscription and tells it the chats' tokens; a standby is not heard asking", async () => {
     const d = newDeviceSetSecret();
     const desktop = await makeDevice("Desktop"), phone = await makeDevice("Phone");

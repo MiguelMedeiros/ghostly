@@ -205,6 +205,8 @@ export class DeviceLinks implements DeviceLinkEngine {
   private key: DeviceSigningKey | null = null;
   private keeper: Promise<TurnKeeper | null> | null = null;
   private stopped = false;
+  /** The record's push targets were checked against the set once since start (`pushForSet`). */
+  private pushPruned = false;
   /** Why this device holds no links although it has a device set (a record that cannot carry one, a missing key). */
   problem: string | null = null;
   private queue: Promise<unknown> = Promise.resolve();
@@ -322,8 +324,10 @@ export class DeviceLinks implements DeviceLinkEngine {
       if (became && this.isLive(kept)) void this.linkLive(kept).catch(() => {});
     }
     if (closing.length || wanted.length) this.changed();
-    // A device the set no longer lists (removed) takes its push target and its token with it.
-    if (!this.stopped && closing.length) {
+    // A device the set no longer lists (removed) takes its push target and its token with it. Also once at start: a
+    // device removed while this one was closed had no link open here to close.
+    if (!this.stopped && (closing.length || !this.pushPruned)) {
+      this.pushPruned = true;
       await this.pushExclusive(async () => {
         const record = await this.record();
         const patch = record && pushForSet(record);

@@ -2309,7 +2309,9 @@ export class GhostlyNode implements EngineImplementation {
   private syncDeviceTokens(): void {
     const links = this.deviceLinks;
     if (!links || !this.ownDeviceKey) return;
-    const tokens = [...new Set([...this.links.values()].flatMap((live) => (live.stored.wakeToken && !live.stored.wakeMuted ? [live.stored.wakeToken] : [])))].sort().slice(0, MAX_ALLOWED_TOKENS);
+    // A muted group's edges may still hold a token (one the member keeps, an edge stored before the mute): never handed out.
+    const mutedGroups = new Set(this.settings.wakeMutedGroups ?? []);
+    const tokens = [...new Set([...this.links.values()].flatMap((live) => (live.stored.wakeToken && !live.stored.wakeMuted && !(live.stored.group && mutedGroups.has(live.stored.group)) ? [live.stored.wakeToken] : [])))].sort().slice(0, MAX_ALLOWED_TOKENS);
     const said = JSON.stringify(tokens);
     for (const view of links.views()) {
       if (view.earlier) continue;
