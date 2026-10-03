@@ -13,7 +13,7 @@ import { intentRepository } from "../src/engine/paymentAdapters/persistence";
 import { STORES, openDb, store, transact, wrap } from "../src/shared/idb";
 import { FakeBreezNetwork, type FakeBreezWallet } from "./helpers/fakeBreez";
 import { phraseLeaks, TEST_PHRASE } from "./helpers/phraseLeaks";
-// covers: wallet.spark.mainnet-key, wallet.spark.create, wallet.spark.send, wallet.spark.backup, wallet.spark.lightning, payments.chat.reconcile
+// covers: wallet.spark.mainnet-key, wallet.spark.create, wallet.spark.send, wallet.spark.backup, wallet.spark.lightning, wallet.spark.storage, payments.chat.reconcile
 
 // The wallet draws its own phrase; a test that looks for it in storage has it draw TEST_PHRASE.
 vi.mock("@scure/bip39", async (original) => { const bip39 = await original<typeof import("@scure/bip39")>(); return { ...bip39, generateMnemonic: vi.fn(bip39.generateMnemonic) }; });
@@ -289,6 +289,29 @@ describe("the Spark wallet", () => {
     expect(wrong).toMatchObject({ network: "testnet", message: "This backup is a Testnet Spark wallet" });
     expect(mainnet.configured).toBe(false);
     await fresh.stop(); await mainnet.stop();
+  });
+
+  it("removing the wallet deletes its Breez databases, open or not", async () => {
+    const databases = async () => (await indexedDB.databases()).map((d) => d.name);
+    const makeDatabase = async (name: string) => { const r = indexedDB.open(name, 1); r.onupgradeneeded = () => { r.result.createObjectStore("data"); }; (await wrap(r)).close(); };
+    const wallet = make();
+    await wallet.start(); await wallet.ensureReady(true);
+    const name = wallet.adapter!.storage;
+    for (const file of [name, `${name}-tree`]) await makeDatabase(file);
+    await wallet.remove();
+    expect(await databases()).not.toContain(name);
+    expect(await databases()).not.toContain(`${name}-tree`);
+
+    // Closed (the profile stopped), its name is found again from its phrase.
+    const closed = make();
+    await closed.start(); await closed.ensureReady(true);
+    const other = closed.adapter!.storage;
+    await makeDatabase(other);
+    await closed.stop();
+    const again = make();
+    await again.start();
+    await again.remove();
+    expect(await databases()).not.toContain(other);
   });
 
   it("a Spark service that does not answer leaves nothing saved and says it is connecting", async () => {

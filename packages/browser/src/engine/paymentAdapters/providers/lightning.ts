@@ -95,6 +95,11 @@ export interface LightningProvider {
   interruptedPayment?(payment: LightningPaymentRef): Promise<"paid" | "failed" | "pending" | "unknown">;
   /** Ends connections and timers. The provider is not used again. */
   close(): Promise<void>;
+  /**
+   * The source is removed for good: closes it like `close`, and deletes what it keeps on this device outside the
+   * profile's database (Breez's own databases). Optional: `close` is called instead.
+   */
+  forget?(): Promise<void>;
 }
 
 export type LightningProviderDescriptor = ProviderDescriptor<LightningProvider> & { kind: "lightning" };
