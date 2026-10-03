@@ -65,6 +65,22 @@ export async function readWalletHomes(): Promise<Record<string, WalletHome>> {
 }
 
 /**
+ * Takes off every home mark that names a device which is no longer in the set (`gone`: its signing key, or a test of
+ * one), in one transaction: a removed device never takes the profile back, so a wallet marked as at home there would
+ * never open anywhere again. True when a mark was taken off.
+ */
+export async function clearWalletHomes(gone: string | ((key: string) => boolean)): Promise<boolean> {
+  const goes = typeof gone === "string" ? (key: string) => key === gone : gone;
+  const marked = Object.entries(await readWalletHomes()).filter(([, home]) => goes(home.key));
+  if (!marked.length) return false;
+  await writeWalletHomes(marked.map(([id]) => {
+    const [type, network, card] = id.split(":");
+    return { id, type: type as PlannedWallet["type"], network: network as PlannedWallet["network"], ...(card ? { card } : {}), route: "moves" };
+  }));
+  return true;
+}
+
+/**
  * Writes the plan's marks in one transaction: a wallet that stays home gets its home (and its coins' expiry), a wallet
  * that moves or has nothing to move loses any mark it had. A record that is not there is not made.
  */

@@ -8,6 +8,7 @@ import { HandoffOffer, HandoffProgress, UseHereDialog } from "./devices/Handoff"
 import { TakeoverDialog } from "./devices/TakeoverDialog";
 import { useHandoffView } from "../lib/handoff";
 import { activeProfileId, listProfiles, switchProfile } from "../lib/profiles";
+import { deviceWakeWords, useStandbyPush } from "../lib/wakePush";
 
 const BUTTON = "px-4 py-2 rounded-lg text-sm font-semibold bg-accent text-on-accent hover:bg-accent-hover cursor-pointer";
 const QUIET = "px-3 py-1.5 rounded-lg text-sm text-text-secondary border border-border hover:bg-surface-hover cursor-pointer";
@@ -47,6 +48,8 @@ export function DeviceStandby({ gate }: { gate: DeviceGateView }) {
   useEffect(() => { if (gate.reload) void reloadIntoGate(); }, [gate.reload]);
   // The screen back in front is a screen opened again (WISP 06 § When a device checks): the turn is read once more.
   useTurnReadOnReturn(gate.state !== "unreadable");
+  // What this device's push worker shows while it is not the active one, and its subscription kept (WISP 06 § Push and the phone).
+  useStandbyPush({ title: "Ghostly", body: t("pwa.wakeNotice"), call: t("pwa.wakeCall"), ...deviceWakeWords(t) }, gate.state !== "unreadable" && gate.state !== "removed");
   return (
     <div role="status" data-testid="device-standby" data-state={gate.state} data-unfinished={unfinished ? "true" : undefined} className="h-dvh overflow-y-auto grid place-items-center bg-chat-bg p-6 text-center">
       <div className="max-w-md space-y-3">

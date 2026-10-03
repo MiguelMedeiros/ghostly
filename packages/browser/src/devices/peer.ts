@@ -46,6 +46,8 @@ export async function standbyEngine(gate: DeviceGate, options: NodeOptions | und
       return null;
     },
     offline: network.off,
+    // A wake push to another device for a handoff: Desktop posts it itself; a page goes through the person's push relay.
+    ...(options?.pushSend ? { pushSend: options.pushSend } : {}),
     transport: network.transport,
     createPeerConnection: network.createPeerConnection,
     pollIntervals: options?.pollIntervals,

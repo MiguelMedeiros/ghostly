@@ -3,11 +3,11 @@ import { p256 } from "@noble/curves/nist.js";
 import { fromBase64Url, toBase64Url, utf8Decode } from "../src/bytes";
 import { KNOWN_SESSION_CAPABILITIES } from "../src/pairedCapabilities";
 import {
-  WAKE_CALL_TTL_SECONDS, WAKE_CAPABILITY, WAKE_INTERVAL_MS, WakeLimiter, newWakeToken, parseWakeFrame, readWake, readWakePayload, relayRequest, wakeFrame, wakeRequest, type WakeTarget,
+  DEVICE_WAKE_TTL_SECONDS, WAKE_CALL_TTL_SECONDS, WAKE_CAPABILITY, WAKE_INTERVAL_MS, WakeLimiter, deviceWakeRequest, newWakeToken, parseWakeFrame, readWake, readWakePayload, relayRequest, wakeFrame, wakeRequest, type WakeTarget,
 } from "../src/pairedWake";
 import { decryptPushPayload, generateVapidKeys } from "../src/webPush";
 
-// covers: push.wake.exchange, push.wake.rate-limit
+// covers: push.wake.exchange, push.wake.rate-limit, devices.push.wake
 
 function subscription() {
   const secret = p256.utils.randomSecretKey();
@@ -73,6 +73,18 @@ describe("the wake-up itself", () => {
     expect(JSON.parse(text)).toEqual({ wake: 1, k: target.token, c: 1 });
     expect(readWake(text)).toEqual({ token: target.token, kind: "call" });
     expect(readWake(JSON.stringify({ wake: 1, k: target.token }))).toEqual({ token: target.token, kind: "message" });
+  });
+
+  it("a device wake-up (WISP 06 § Push and the phone) carries the token and the device flag, and lives a few minutes", () => {
+    const { target, secret, auth } = subscription();
+    const request = deviceWakeRequest(target);
+    expect(request.url).toBe(target.endpoint);
+    expect(request.headers.TTL).toBe(String(DEVICE_WAKE_TTL_SECONDS));
+    const text = utf8Decode(decryptPushPayload(request.body, secret, auth));
+    expect(JSON.parse(text)).toEqual({ wake: 1, k: target.token, d: 1 });
+    expect(readWake(text)).toEqual({ token: target.token, kind: "device" });
+    // The device flag wins over a call's: a device never rings another.
+    expect(readWake(JSON.stringify({ wake: 1, k: target.token, c: 1, d: 1 }))?.kind).toBe("device");
   });
 
   it("the receiver reads nothing else as a wake-up", () => {

@@ -13,13 +13,15 @@ import type { DeviceNetwork, DeviceRecord } from "./state";
  */
 
 /** The network settings a standby needs, out of the profile's settings. */
-export function deviceNetworkOf(settings: Pick<Settings, "online" | "relays" | "readRelays" | "irohRelays" | "iceServers">): DeviceNetwork {
+export function deviceNetworkOf(settings: Pick<Settings, "online" | "relays" | "readRelays" | "irohRelays" | "iceServers" | "pushRelay">): DeviceNetwork {
   return {
     ...(settings.online === false ? { off: true } : {}),
     ...(settings.relays?.length ? { relays: [...settings.relays] } : {}),
     ...(settings.readRelays === true ? { readRelays: true } : {}),
     ...(settings.irohRelays?.length ? { irohRelays: [...settings.irohRelays] } : {}),
     ...(settings.iceServers?.length ? { iceServers: settings.iceServers.map((server) => ({ ...server })) } : {}),
+    // A standby web app wakes another device through it (WISP 06 § Push and the phone): a page may not post to a push service.
+    ...(settings.pushRelay ? { pushRelay: settings.pushRelay } : {}),
   };
 }
 
