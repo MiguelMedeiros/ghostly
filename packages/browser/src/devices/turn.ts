@@ -7,6 +7,7 @@ import { MAX_DEVICES, type DevicePatch, type DeviceRecord, type DeviceSlot, type
 import { amendDevice, moveDevice, readDeviceRecord } from "./store";
 import { BEHIND_ROUNDS, turnAction, turnRow, type TurnAction, type TurnRow } from "./turnAction";
 import { pendingRaise } from "./raise";
+import { storedActiveListed } from "./setUpdate";
 
 /*
  * The turn keeper (WISP 06 § The turn): one profile's turn record on this device. It reads every source, compares
@@ -341,7 +342,10 @@ export class TurnKeeper {
       // One above the highest turn this device knows (WISP 06 § Forced takeover): the one it read, the one it stored,
       // and any it signed a release for, so a releaser that takes the profile back goes above its taker's release.
       const turn = options.turn ?? takeoverTurn(held.record, read);
-      held.record = await this.store.move(this.options.profile, "taking", { handoff: { role: "taking", step: `${TAKEOVER}${prior}` } });
+      // The device that stops: the one the stored record names active. Kept with the takeover, so a takeover that
+      // settles can offer a new device secret against it by name.
+      const stopping = held.record.activeSlot !== undefined && held.record.activeSlot !== held.ownSlot ? held.record.deviceSet[held.record.activeSlot]?.key : undefined;
+      held.record = await this.store.move(this.options.profile, "taking", { handoff: { role: "taking", step: `${TAKEOVER}${prior}`, ...(stopping ? { peer: stopping } : {}) } });
       try { await this.writeWith(held, read.conditions, { ...options, turn }, true); } catch (error) {
         // Nothing was put: the device is what it was.
         if (!held.wroteNow) held.record = await this.store.move(this.options.profile, prior, { handoff: undefined, settle: undefined });
@@ -488,6 +492,10 @@ export class TurnKeeper {
         return { kind: "go-on", restricted: false, read };
       }
       case "become": {
+        // A new device secret taken while this read was out (`links.ts`): the read was of the old address, and says
+        // nothing about the set this device is in now.
+        const fresh = await this.store.read(this.options.profile);
+        if (fresh && fresh.d !== held.record.d) return { kind: "wait", read };
         const takeover = held.record.state === "taking" && held.record.handoff?.step.startsWith(TAKEOVER) ? held.record.handoff.step.slice(TAKEOVER.length) as StoredDeviceState : null;
         // A device that was forcing a takeover has no staged state, and goes back to the state it had.
         const state = takeover && action.undo === "staging" ? takeover : action.state;
@@ -509,9 +517,15 @@ export class TurnKeeper {
         const listed = read.record?.slots[held.ownSlot];
         const replacedBy = state === "superseded" && read.result === "other" && read.record && !!listed && toBase64Url(listed.key) === toBase64Url(held.ownKey)
           ? { activeSlot: read.record.active, deviceSet: deviceSetOf(read.record) } : {};
+        // Closed by a tombstone that still lists it: `moving`, with the tombstone kept. When the device its stored record
+        // names active is not listed there (or is this device), no `set-update` can ever be accepted: it is enrolled anew.
+        const tombstoned = state === "moving" && read.result === "tombstone" && read.record && read.payload
+          ? { tombstone: toBase64Url(read.payload), ...(storedActiveListed(held.record, read.record) ? {} : { reenroll: true as const }) } : {};
+        // A takeover that won: the device that stopped still holds `D`, so "New device secret" is offered (`rotate.ts`).
+        const stopped = won && held.record.handoff?.peer ? held.record.deviceSet.find((slot) => slot?.key === held.record.handoff!.peer)?.name : undefined;
         held.record = await this.store.move(this.options.profile, state, {
-          ...(takeover ? { handoff: undefined } : {}), ...(held.record.settle ? { settle: undefined } : {}), ...copy, ...replacedBy,
-          ...(won ? { takeovers, raise: pendingRaise("takeover", takeovers, this.now()) } : {}),
+          ...(takeover ? { handoff: undefined } : {}), ...(held.record.settle ? { settle: undefined } : {}), ...copy, ...replacedBy, ...tombstoned,
+          ...(won ? { takeovers, raise: pendingRaise("takeover", takeovers, this.now()), secretOffer: { why: "takeover" as const, at: this.now(), ...(stopped ? { device: stopped } : {}) } } : {}),
         });
         if (!action.then) return { kind: "gated", state, reload: action.reload, ...(action.notice ? { notice: action.notice } : {}), read };
         return this.carryOut(held, turnRow(state as DeviceState, true), action.then, read);

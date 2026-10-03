@@ -399,12 +399,24 @@ export interface EngineApi {
    * stops. Errors start with `takeover-<reason>:`; nothing is written to the turn on one. `kind` is `start` when this
    * device is the active one now (the pages start again into the gate).
    */
-  deviceTakeover(params: { password: string; name: string }): { kind: string; result?: string; state?: string };
+  deviceTakeover(params: { password: string; name: string; lost?: boolean }): { kind: string; result?: string; state?: string };
   /**
    * Reads the turn at the address of a device-set secret, as a device that holds no record of it (WISP 06 § A backup
    * restored where a device set exists): what a restore asks before it registers a bundle's profile. `d` is base64url.
    */
   deviceTurnPeek(params: { d: string }): import("../devices/restoreGuard").TurnPeek;
+  /**
+   * Remove (WISP 06 § Removing a device), on the active device: the device with this signing key can no longer take the
+   * profile. The set moves to a new device-set secret, which the devices that stay get over their old links. Errors
+   * start with `remove-<reason>:`.
+   */
+  deviceRemove(params: { key: string }): import("../devices/links").DeviceSetView;
+  /** "New device secret": the set moves to a new device-set secret with nobody removed. */
+  deviceNewSecret(): import("../devices/links").DeviceSetView;
+  /** The offer of a new device secret after a takeover, answered without making one. */
+  deviceSecretOfferDismiss(): void;
+  /** "Your devices are now: ..." answered on a device that took a new secret: OK, or "This is wrong" (`wrong`), which keeps it out. */
+  deviceSetNoticeSeen(params: { wrong?: boolean }): void;
 }
 
 /** What the engine implements: any call may be answered asynchronously. */

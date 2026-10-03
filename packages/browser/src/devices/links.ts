@@ -1,6 +1,6 @@
 import {
-  DEVICES_CAPABILITY, HANDOFF_CAPABILITY, GhostLink, RTC_CONFIG, createIdentity, deviceEchoFrame, deviceEchoNonce, deviceLinkPairing, devicePingFrame, fromBase64Url,
-  type DeviceFrame, type NativeEndpoint, type NativeTransport, type PairedTransport, type PkarrTransport, type PollIntervals, type TurnNetwork,
+  DEVICES_CAPABILITY, HANDOFF_CAPABILITY, GhostLink, RTC_CONFIG, SET_ACK, SET_UPDATE, createIdentity, deviceEchoFrame, deviceEchoNonce, deviceLinkPairing, devicePingFrame,
+  fromBase64Url, setAckFrame, type DeviceFrame, type NativeEndpoint, type NativeTransport, type PairedTransport, type PkarrTransport, type PollIntervals, type TurnNetwork,
 } from "@ghostly/core";
 import { enrollmentUnfinished, finishEnrollment } from "./enroll";
 import { viewOf } from "./gate";
@@ -8,7 +8,9 @@ import { DEVICE_GATED_ERROR, type DeviceLinkEngine, type DeviceLinkHost } from "
 import { DeviceSetError, deviceIdentity, openTurnKeeper } from "./setup";
 import { loadDeviceSigningKey, type DeviceSigningKey } from "./signingKey";
 import type { DeviceRecord, DeviceState } from "./state";
-import { amendDevice, forgetDevice, readDeviceRecord } from "./store";
+import { amendDevice, forgetDevice, moveDevice, readDeviceRecord } from "./store";
+import { acknowledged, pendingFrames } from "./remove";
+import { checkSetUpdate } from "./setUpdate";
 import type { TurnKeeper, TurnOutcome } from "./turn";
 import { canTakeOver, forceTakeover, takeoverTarget } from "./takeover";
 import { peekTurn } from "./restoreGuard";
@@ -77,9 +79,19 @@ export interface DeviceSetView {
   unfinished?: true;
   /**
    * The set should move to a new device-set secret (`rotate.ts`): a device granted it never finished, and may hold it.
-   * Removal (part 7 of WISP 06) makes the move; this only says it is due.
+   * The active device makes the move by itself; this says it is due.
    */
   newSecretDue?: true;
+  /** "New device secret" is offered: this device took over from `device`, which still holds the old secret. `lost`: the person said it was lost or stolen. */
+  secretOffer?: { device?: string; lost?: true };
+  /** Devices that stay and have not taken the new secret yet: they get it the next time they open Ghostly. */
+  waiting?: { key: string; name: string }[];
+  /** Another tombstone stands where this device put its own: a device that was left behind started a set of its own, or something else closed it. */
+  foreignSet?: true;
+  /** After an accepted `set-update`, once: the new device list, until the person answers. */
+  notice?: string[];
+  /** Nothing this device can accept brings it back into the set: it is added again by enrollment. */
+  reenroll?: true;
 }
 
 /** The view of a device record and the links this device holds. A profile with no record is `single`, with no devices. */
@@ -92,8 +104,18 @@ export function deviceSetView(record: DeviceRecord | null, links: DeviceLinkView
   });
   const listed = new Set(record.deviceSet.flatMap((slot) => (slot ? [slot.key] : [])));
   const grants = (record.unfinishedGrants ?? []).filter((grant) => !listed.has(grant.key));
+  const due = newDeviceSecretDue(record);
+  const waiting = pendingFrames(record).flatMap(({ key }, i, all) => {
+    const slot = record.deviceSet.find((s) => s?.key === key);
+    return slot && all.findIndex((other) => other.key === key) === i ? [{ key, name: slot.name }] : [];
+  });
   return { state: record.state, devices, ...(grants.length ? { unfinishedGrants: grants } : {}), ...(enrollmentUnfinished(record) ? { unfinished: true as const } : {}),
-    ...(newDeviceSecretDue(record) ? { newSecretDue: true as const } : {}) };
+    ...(due?.why === "unfinished-grant" ? { newSecretDue: true as const } : {}),
+    ...(record.state === "active" && record.secretOffer ? { secretOffer: { ...(record.secretOffer.device ? { device: record.secretOffer.device } : {}), ...(record.secretOffer.lost ? { lost: true as const } : {}) } } : {}),
+    ...(record.state === "active" && waiting.length ? { waiting } : {}),
+    ...(record.state === "active" && record.earlierSets.some((set) => set.foreign) ? { foreignSet: true as const } : {}),
+    ...(record.setNotice && !record.setNotice.seen ? { notice: record.setNotice.names } : {}),
+    ...(record.reenroll ? { reenroll: true as const } : {}) };
 }
 
 export interface DeviceLinksOptions {
@@ -118,6 +140,11 @@ export interface DeviceLinksOptions {
   undoStaging?: () => Promise<void>;
   /** Makes who runs the handoff here (device-link-only mode), once the links started. */
   handoff?: (links: DeviceLinks, host: DeviceLinkHost | null) => Promise<DeviceHandoffHandler | null>;
+  /**
+   * A standby reads the turn record when its screen opens and every 10 minutes while it shows (WISP 06 § When a device
+   * checks), and tells the pages when its state changed (a tombstone makes it `moving` or `removed`). Device-link-only mode.
+   */
+  watchTurn?: boolean;
   /** Tests give their own. */
   readRecord?: (profile: string) => Promise<DeviceRecord | null>;
   loadKey?: (profile: string) => Promise<DeviceSigningKey | null>;
@@ -125,6 +152,8 @@ export interface DeviceLinksOptions {
 
 interface Running {
   id: string;
+  /** The device-set secret the link is derived from, base64url: an earlier set's, or the current one. */
+  d: string;
   key: string;
   name: string;
   slot?: number;
@@ -142,6 +171,12 @@ interface Running {
 
 interface Wanted { id: string; d: Uint8Array; key: string; name: string; slot?: number; earlier: boolean }
 
+/** How often a standby reads the turn while its screen shows (WISP 06 § When a device checks), and the jitter on it. */
+export const STANDBY_TURN_EVERY_MS = 10 * 60_000;
+const STANDBY_TURN_JITTER_MS = 60_000;
+/** How long a device that took a new secret waits after its `set-ack` before it closes the old link the ack went out on. */
+export const SET_ACK_FLUSH_MS = 1_500;
+
 const defaultPeerConnection = (): (() => RTCPeerConnection) | undefined =>
   (typeof RTCPeerConnection === "undefined" ? undefined : () => new RTCPeerConnection({ iceServers: RTC_CONFIG.iceServers }));
 
@@ -154,6 +189,10 @@ export class DeviceLinks implements DeviceLinkEngine {
   /** Why this device holds no links although it has a device set (a record that cannot carry one, a missing key). */
   problem: string | null = null;
   private queue: Promise<unknown> = Promise.resolve();
+  /** Turn reads and new secrets one after the other: a read made under the old secret must not undo a secret just taken. */
+  private turnQueue: Promise<unknown> = Promise.resolve();
+  private turnTimer: ReturnType<typeof setTimeout> | null = null;
+  private readonly timers = new Set<ReturnType<typeof setTimeout>>();
 
   constructor(private readonly options: DeviceLinksOptions) {
     this.createPeerConnection = "createPeerConnection" in options ? options.createPeerConnection : defaultPeerConnection();
@@ -169,6 +208,40 @@ export class DeviceLinks implements DeviceLinkEngine {
     }
     // An enrollment that a crash or a slow network left before its last step: it finishes now if it can.
     void this.finishEnrollment().catch(() => {});
+    if (this.options.watchTurn) this.watchTurn(0);
+  }
+
+  /**
+   * A standby's own reads of the turn: now, then every 10 minutes (with jitter) while it runs. A read that changes the
+   * device's state (a tombstone: `moving` or `removed`; a record that names another active device) tells the pages.
+   */
+  private watchTurn(after: number): void {
+    if (this.stopped) return;
+    if (this.turnTimer) clearTimeout(this.turnTimer);
+    this.turnTimer = setTimeout(() => {
+      this.turnTimer = null;
+      void (async () => {
+        const before = await this.record().catch(() => null);
+        await this.checkTurn().catch(() => null);
+        const now = await this.record().catch(() => null);
+        if (now && before && (now.state !== before.state || now.activeSlot !== before.activeSlot || now.d !== before.d || now.reenroll !== before.reenroll)) this.host?.show(viewOf(now));
+      })().finally(() => this.watchTurn(STANDBY_TURN_EVERY_MS + Math.floor(Math.random() * STANDBY_TURN_JITTER_MS)));
+    }, after);
+  }
+
+  private record(): Promise<DeviceRecord | null> {
+    return (this.options.readRecord ?? readDeviceRecord)(this.options.profile);
+  }
+
+  private later(ms: number, run: () => void): void {
+    const timer = setTimeout(() => { this.timers.delete(timer); if (!this.stopped) run(); }, ms);
+    this.timers.add(timer);
+  }
+
+  private turnExclusive<T>(work: () => Promise<T>): Promise<T> {
+    const run = this.turnQueue.catch(() => {}).then(work);
+    this.turnQueue = run;
+    return run;
   }
   private host: DeviceLinkHost | null = null;
 
@@ -207,7 +280,16 @@ export class DeviceLinks implements DeviceLinkEngine {
     const closing = [...this.running.values()].filter((r) => !keep.has(r.id));
     for (const gone of closing) this.running.delete(gone.id);
     await Promise.all(closing.map((gone) => this.close(gone)));
-    for (const want of wanted) if (!this.running.has(want.id) && !this.stopped) this.open(want);
+    for (const want of wanted) {
+      const kept = this.running.get(want.id);
+      if (!kept) { if (!this.stopped) this.open(want); continue; }
+      // The same derived link, now kept for another reason: the set moved to a new secret and this one became an
+      // earlier set's, kept to hand that device the new one. Already live, it delivers now: no new session will come.
+      const became = want.earlier && !kept.earlier;
+      if (kept.earlier !== want.earlier && kept.handoff) { kept.handoff = false; this.handoffLink(kept.key, false); }
+      kept.earlier = want.earlier; kept.slot = want.slot; kept.name = want.name;
+      if (became && this.isLive(kept)) void this.linkLive(kept).catch(() => {});
+    }
     if (closing.length || wanted.length) this.changed();
   }
 
@@ -239,7 +321,8 @@ export class DeviceLinks implements DeviceLinkEngine {
         // Only a device that stays: a key the current set no longer lists gets no link, whatever the list says.
         const staying = record.deviceSet.find((slot) => slot?.key === key);
         if (!staying) continue;
-        wanted.push({ id: `${earlier.d}|${key}`, d: fromBase64Url(earlier.d), key, name: staying.name, earlier: true });
+        // One link per old secret and device: two sets that both wait for it share none.
+        if (!wanted.some((w) => w.id === `${earlier.d}|${key}`)) wanted.push({ id: `${earlier.d}|${key}`, d: fromBase64Url(earlier.d), key, name: staying.name, earlier: true });
       }
     }
     return wanted;
@@ -248,7 +331,7 @@ export class DeviceLinks implements DeviceLinkEngine {
   private open(want: Wanted): void {
     const signer = this.key!;
     const rtc = !!this.createPeerConnection;
-    const running: Running = { id: want.id, key: want.key, name: want.name, slot: want.slot, earlier: want.earlier, link: null as unknown as GhostLink, agreed: false, native: false, waiting: new Map() };
+    const running: Running = { id: want.id, d: want.id.slice(0, want.id.indexOf("|")), key: want.key, name: want.name, slot: want.slot, earlier: want.earlier, link: null as unknown as GhostLink, agreed: false, native: false, waiting: new Map() };
     running.link = new GhostLink({
       ...deviceLinkPairing(want.d, signer, fromBase64Url(want.key)),
       deviceCapabilities: [DEVICES_CAPABILITY, HANDOFF_CAPABILITY],
@@ -270,7 +353,9 @@ export class DeviceLinks implements DeviceLinkEngine {
       events: {
         onPairingState: (state) => { running.transport = state.status === "ready" ? state.transport : undefined; },
         onDeviceCapabilities: (agreed) => {
+          const was = running.agreed;
           running.agreed = agreed.includes(DEVICES_CAPABILITY);
+          if (running.agreed && !was && this.running.get(running.id) === running) void this.linkLive(running).catch(() => {});
           const handoff = agreed.includes(HANDOFF_CAPABILITY);
           if (handoff !== running.handoff) { running.handoff = handoff; if (!running.earlier) this.handoffLink(running.key, handoff); }
           this.changed();
@@ -317,7 +402,74 @@ export class DeviceLinks implements DeviceLinkEngine {
     }
     // A link kept under an earlier set's secret carries the new secret, never a handoff.
     if (frame.t.startsWith("handoff-")) { if (!running.earlier) this.handoff?.receive(running.key, frame); return; }
+    if (frame.t === SET_UPDATE) { await this.setUpdate(running, frame); return; }
+    if (frame.t === SET_ACK) { if (running.earlier) await this.acked(running.key, running.d); return; }
     await this.options.onFrame?.(running.key, frame);
+  }
+
+  /**
+   * A link is live (both ends announced `devices/1`). Under an earlier set's secret: the frame of that set goes to the
+   * device, as at every session until it answers. Under the current secret: the device holds it (only a holder of this
+   * `D` with its own signing key opens this link), which acknowledges every earlier set's frame for it.
+   */
+  private async linkLive(running: Running): Promise<void> {
+    const record = await this.record();
+    if (!record) return;
+    if (running.earlier) {
+      for (const pending of pendingFrames(record)) {
+        if (pending.d !== running.d || pending.key !== running.key) continue;
+        try { running.link.sendDeviceFrame(pending.frame); } catch { /* the link closed under it: the next session sends it */ }
+      }
+      return;
+    }
+    if (running.d === record.d) await this.acked(running.key);
+  }
+
+  /** `key` holds the set under `d` (or the current one): its pending frame is done, and the old link goes. */
+  private async acked(key: string, d?: string): Promise<void> {
+    const patch = acknowledged(await this.record(), key, d);
+    if (!patch) return;
+    await amendDevice(this.options.profile, patch);
+    await this.refresh();
+    this.changed();
+  }
+
+  /**
+   * A `set-update` (WISP 06 § Removing a device): accepted only under the rule of `setUpdate.ts`. Accepted, it is
+   * written durably before `set-ack` goes back; the old links close a moment later (so the ack is not cut off) and the
+   * new set's record is read. One that this device already took is just answered.
+   */
+  private setUpdate(running: Running, frame: DeviceFrame): Promise<void> {
+    return this.turnExclusive(async () => {
+      const record = await this.record();
+      const check = checkSetUpdate(record, frame, Date.now());
+      if (check.kind === "known") { try { running.link.sendDeviceFrame(setAckFrame()); } catch { /* it asks again */ } return; }
+      if (check.kind === "refuse") {
+        if (check.why === "removed" && record && (record.state === "standby" || record.state === "moving" || record.state === "superseded")) {
+          await moveDevice(this.options.profile, "removed", {});
+          await this.afterChange();
+        } else if (check.reenroll && record?.state === "moving" && !record.reenroll) {
+          await amendDevice(this.options.profile, { reenroll: true });
+          await this.afterChange();
+        }
+        return;
+      }
+      // A replaced device has read the tombstone the frame carries: it is `moving` first, as the table says.
+      if (check.from === "superseded") await moveDevice(this.options.profile, "moving", {});
+      if (check.from === "standby") await amendDevice(this.options.profile, check.patch);
+      else await moveDevice(this.options.profile, "standby", check.patch);
+      try { running.link.sendDeviceFrame(setAckFrame()); } catch { /* the remover sends it again; the new link acknowledges it too */ }
+      const now = await this.record();
+      if (now) this.host?.show(viewOf(now));
+      this.later(SET_ACK_FLUSH_MS, () => void this.refresh().then(() => this.checkTurn()).catch(() => {}));
+    });
+  }
+
+  /** The record changed in a way the pages show, and the links follow it. */
+  private async afterChange(): Promise<void> {
+    const now = await this.record();
+    if (now) this.host?.show(viewOf(now));
+    await this.refresh();
   }
 
   private failPings(running: Running, why: string): void {
@@ -427,7 +579,11 @@ export class DeviceLinks implements DeviceLinkEngine {
   }
 
   /** Reads the turn and does what this device's state asks for on the result, then brings the links in line with the record. */
-  async checkTurn(atStart = false): Promise<TurnOutcome | null> {
+  checkTurn(atStart = false): Promise<TurnOutcome | null> {
+    return this.turnExclusive(() => this.checkTurnNow(atStart));
+  }
+
+  private async checkTurnNow(atStart: boolean): Promise<TurnOutcome | null> {
     // A handoff that freezes this device or takes the turn reads the turn itself: the table's `releasing` row would
     // make this device active again in the middle of pass 2, and a `taking` one settles through its own take.
     const record = await (this.options.readRecord ?? readDeviceRecord)(this.options.profile);
@@ -456,6 +612,17 @@ export class DeviceLinks implements DeviceLinkEngine {
         return null;
       }
       case "deviceLinksRefresh": await this.refresh(); return this.views();
+      case "deviceSetNoticeSeen": {
+        // "Your devices are now: ..." answered. "This is wrong": the device stays out of that set and asks to be enrolled anew.
+        const wrong = (params as { wrong?: unknown } | null)?.wrong === true;
+        const record = await this.record();
+        if (!record?.setNotice) return null;
+        const seen = { ...record.setNotice, seen: true as const };
+        if (wrong && record.state === "standby") await moveDevice(this.options.profile, "removed", { setNotice: seen, reenroll: true });
+        else await amendDevice(this.options.profile, { setNotice: seen });
+        await this.afterChange();
+        return null;
+      }
       case "deviceTurnPeek": {
         const d = (params as { d?: unknown } | null)?.d;
         const secret = typeof d === "string" ? fromBase64Url(d) : new Uint8Array();
@@ -472,13 +639,18 @@ export class DeviceLinks implements DeviceLinkEngine {
         return { offered: canTakeOver(record), ...(target ? { device: target } : {}), ...(record.copy ? { copy: record.copy } : {}), password: record.copy === "frozen" || !!record.verifier };
       }
       case "deviceTakeover": {
-        const p = (params ?? {}) as { password?: unknown; name?: unknown };
+        const p = (params ?? {}) as { password?: unknown; name?: unknown; lost?: unknown };
         const outcome = await forceTakeover({
           read: () => (this.options.readRecord ?? readDeviceRecord)(this.options.profile),
           amend: (patch) => amendDevice(this.options.profile, patch),
           proves: (verifier, password) => provesHandoffPassword(verifier, password),
           keeper: () => this.turnKeeper(),
         }, { password: typeof p.password === "string" ? p.password : "", name: typeof p.name === "string" ? p.name : "" });
+        // Lost or stolen: once the profile opens here, the money checklist comes first, then removing that device.
+        if (outcome.kind === "start" && p.lost === true) {
+          const now = await (this.options.readRecord ?? readDeviceRecord)(this.options.profile);
+          if (now?.secretOffer) await amendDevice(this.options.profile, { secretOffer: { ...now.secretOffer, lost: true } }).catch(() => {});
+        }
         // Active now: the pages start again into the gate, where the engine raises the counters and starts.
         if (outcome.kind === "start") this.host?.show({ state: "standby", reload: true });
         else { const now = await (this.options.readRecord ?? readDeviceRecord)(this.options.profile); if (now) this.host?.show(viewOf(now)); }
@@ -506,6 +678,10 @@ export class DeviceLinks implements DeviceLinkEngine {
   /** Says goodbye on every link and stops. */
   async stop(): Promise<void> {
     this.stopped = true;
+    if (this.turnTimer) clearTimeout(this.turnTimer);
+    this.turnTimer = null;
+    for (const timer of this.timers) clearTimeout(timer);
+    this.timers.clear();
     this.handoff?.stop();
     await this.refresh();
   }

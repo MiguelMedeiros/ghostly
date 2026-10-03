@@ -27,6 +27,10 @@ export interface DeviceGateView {
   unfinished?: true;
   /** The device state changed under the page (a handoff froze or installed it): start again into the gate. */
   reload?: true;
+  /** `standby` after it accepted a `set-update`, once: the new device list ("Your devices are now: ..."). */
+  notice?: string[];
+  /** `moving` or `removed`: nothing this device can accept brings it back; it is added again by enrollment. */
+  reenroll?: true;
 }
 
 export interface DeviceGate {
@@ -47,8 +51,13 @@ export function viewOf(record: DeviceRecord): DeviceGateView {
   const active = record.activeSlot !== undefined && record.activeSlot !== record.ownSlot ? record.deviceSet[record.activeSlot] : undefined;
   // Every standby that finished its enrollment accepted a record that lists it: one with no packet did not.
   // A copy restored from a backup holds no packet either, and is no enrollment (WISP 06 § A backup restored).
-  const unfinished = record.state === "standby" && !record.turnPacket && record.copy !== "restored";
-  return { state: record.state as DeviceGateView["state"], ...(active?.name ? { activeDevice: active.name } : {}), ...(unfinished ? { unfinished: true as const } : {}) };
+  // A device that took a new secret holds no packet of the new set until it reads one, and is no enrollment either.
+  const unfinished = record.state === "standby" && !record.turnPacket && record.copy !== "restored" && !record.setNotice;
+  const notice = record.state === "standby" && record.setNotice && !record.setNotice.seen ? record.setNotice.names : undefined;
+  return {
+    state: record.state as DeviceGateView["state"], ...(active?.name ? { activeDevice: active.name } : {}), ...(unfinished ? { unfinished: true as const } : {}),
+    ...(notice ? { notice } : {}), ...(record.reenroll && (record.state === "moving" || record.state === "removed") ? { reenroll: true as const } : {}),
+  };
 }
 
 async function read(profile: string): Promise<DeviceGate> {
