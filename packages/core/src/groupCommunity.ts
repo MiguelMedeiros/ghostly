@@ -318,6 +318,13 @@ export interface CommunitySessionHooks {
   relay?(frame: CommunityFrame): void;
   /** The engine's clock, for how often a member is asked for what I lack (defaults to Date.now). */
   clock?(): number;
+  /**
+   * The lowest sequence number this member sends at, under any head (WISP 06 § Raised counters): 0 for a profile that
+   * never took over or was never restored. A copy started from older state sends above every number the copy it
+   * replaced may have used, so the other members do not drop its frames as already seen. The beacon packs the number
+   * in 32 bits, so a floor stays well under 2^32.
+   */
+  seqFloor?(): number;
 }
 
 const MAX_TEXT_BOX = Math.ceil((COMMUNITY_LIMITS.textBytes + 256 + 16) * 4 / 3) + 4;
@@ -1058,7 +1065,10 @@ export class CommunitySession {
     const h = this.topHash, secret = this.state.secrets[h];
     if (!secret) return { error: "This epoch's key has not arrived yet. Wait for a member to catch you up." };
     if (this.state.seqH !== h) { this.state.seq = 0; this.state.seqH = h; }
-    const n = this.state.seq++;
+    // Every head starts at the floor, not at 0, and a floor raised under a running head counts at once.
+    const floor = this.hooks.seqFloor?.() ?? 0;
+    const n = Math.max(this.state.seq, Number.isSafeInteger(floor) && floor > 0 ? floor : 0);
+    this.state.seq = n + 1;
     const header = { g: this.id, e: this.epoch, h: shortHash(h), s: this.myKey, n, ts: now };
     const clean = sanitizeNick(nick);
     const payload = JSON.stringify(clean ? { ...body(header), nick: clean } : body(header));

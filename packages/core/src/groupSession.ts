@@ -178,6 +178,12 @@ export interface GroupSessionHooks {
   metaChanged?(by: string, change: GroupMetaChange, at: number): void;
   /** The clock the limits read (the engine's, or a simulation's); the wall clock when absent. */
   clock?(): number;
+  /**
+   * The lowest sequence number this member sends at, in any epoch (WISP 06 § Raised counters): 0 for a profile that
+   * never took over or was never restored. A copy of a profile started from older state sends above every number the
+   * copy it replaced may have used, so the other members do not drop its frames as already seen.
+   */
+  seqFloor?(): number;
 }
 
 const MAX_TEXT_BOX = Math.ceil((GROUP_LIMITS.textBytes + 16) * 4 / 3) + 4;
@@ -396,6 +402,12 @@ export class GroupSession {
   }
   /** Epochs whose messages this member can still read. */
   get readableEpochs(): number[] { return Object.keys(this.state.secrets).map(Number).sort((a, b) => a - b); }
+  /** `GroupSessionHooks.seqFloor`, as a whole number that is never negative. */
+  private seqFloor(): number {
+    const floor = this.hooks.seqFloor?.() ?? 0;
+    return Number.isSafeInteger(floor) && floor > 0 ? floor : 0;
+  }
+
   /** How many messages, per sender, are known to be missing in the current epoch. */
   missing(sender: string): number {
     const entry = this.state.seen[sender]?.[this.epoch];
@@ -570,7 +582,9 @@ export class GroupSession {
       const epoch = this.epoch, secret = this.secret(epoch);
       if (!secret) return { error: "This epoch's key has not arrived yet. Wait for a member to catch you up." };
       if (this.state.seqEpoch !== epoch) { this.state.seq = 0; this.state.seqEpoch = epoch; }
-      const n = this.state.seq++;
+      // Every epoch starts at the floor, not at 0, and a floor raised under a running epoch counts at once.
+      const n = Math.max(this.state.seq, this.seqFloor());
+      this.state.seq = n + 1;
       const header = { g: this.id, e: epoch, s: this.myKey, n, ts: now };
       const key = epochKeys(secret, this.id, epoch).message;
       const { n: nn, c } = encryptText(key, messageAad(header), trimmed);
