@@ -708,6 +708,37 @@ describe("crash recovery (WISP 06 § Installing the staged state)", () => {
     expect(w.storage.dropped).toEqual(["ghostly"]);
   });
 
+  it("B verified and reloaded before any release reached it: the staged state is kept, it asks again, A sends the same release, B installs", async () => {
+    const w = world();
+    const file = w.profile.add("f1", bytesOf(5_000));
+    w.link.meddle = (from, frame) => (frame.t === "handoff-release" ? null : frame);
+    await w.taker.pull(PASSWORD);
+    await until(() => w.quiesced.length === 1);
+    await reloadGiver(w);
+    await until(() => w.giverRecords.record.state === "standby");
+    expect(w.takerRecords.record.handoff).toMatchObject({ step: "verified" });
+    expect(w.takerRecords.record.handoff!.h).toBe(w.giverRecords.record.handoff!.release!.h);
+    // B reloads; the release gets through from now on.
+    w.link.meddle = undefined;
+    w.link.drop();
+    await reloadTaker(w);
+    w.link.reconnect();
+    await until(() => w.reloads === 1);
+    const staged = w.takerRecords.record.handoff!.staging!;
+    expect(w.storage.pointer).toBe(staged);
+    expect(w.storage.spaces.get(staged)!.restored).not.toBeNull();
+    expect(toBase64Url(sha256(w.storage.spaces.get(staged)!.files.get("f1")!))).toBe(file.sha256);
+  });
+
+  it("a standby whose last pull stopped: a reload shows nothing more about it", async () => {
+    const w = world();
+    await w.taker.pull("not the password");
+    await until(() => w.taker.view()?.failure === "password");
+    expect(w.takerRecords.record.handoff?.step).toBe("stopped");
+    await reloadTaker(w);
+    expect(w.taker.view()).toBeNull();
+  });
+
   it("A, `standby` after its release: a taker that asks again with the same handoff gets the same release, another device nothing", async () => {
     const w = world();
     const release = { turn: N + 1, to: B, h: toBase64Url(randomBytes(32)), s: toBase64Url(randomBytes(64)) };

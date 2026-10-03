@@ -924,7 +924,7 @@
     "packages/browser/src/backup/**/*": ["backup.*"],
     "packages/browser/src/backup/database.ts": ["backup.database-snapshot","profiles.*"],
     "packages/browser/src/backup/{s3,storage}.ts": ["storage.*","delivery.hold.*"],
-    "packages/browser/src/devices/handoff{,Host,Pake,Standby}.ts": ["devices.handoff","devices.handoff.*"],
+    "packages/browser/src/devices/handoff{,Host,Pake,Standby,Wallets}.ts": ["devices.handoff","devices.handoff.*"],
     "packages/browser/src/devices/linkOnly.ts": ["devices.*"],
     "packages/browser/src/devices/turn{,Action}.ts": ["devices.turn.*"],
     "packages/browser/src/devices/{enroll,install}.ts": ["devices.*"],

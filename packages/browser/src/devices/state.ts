@@ -80,6 +80,8 @@ export interface DeviceHandoff {
   old?: string;
   /** The giver: the taker runs a newer database, so this device must update before it takes the profile back. */
   newer?: true;
+  /** The taker: `H` of what it verified, base64url, until the release arrives. */
+  h?: string;
 }
 
 /** A file this device holds in its frozen copy, by digest: what a later pull says it has, and copies instead of fetching. */
@@ -348,7 +350,7 @@ export function parseDeviceRecord(value: unknown): DeviceRecord {
   if (r.handoff !== undefined) {
     const h = r.handoff as Partial<DeviceHandoff> | null;
     if (!h || typeof h !== "object" || (h.role !== "releasing" && h.role !== "taking") || !text(h.step) || !optional(h.staging, text)) return bad("the handoff");
-    if (!optional(h.id, bytes) || !optional(h.peer, bytes) || !optional(h.secret, bytes) || !optional(h.old, text)) return bad("the handoff");
+    if (!optional(h.id, bytes) || !optional(h.peer, bytes) || !optional(h.secret, bytes) || !optional(h.old, text) || !optional(h.h, bytes)) return bad("the handoff");
     if (!optional(h.from, (v): v is number => count(v, 2 ** 32 - 1)) || !optional(h.at, (v): v is number => count(v, Number.MAX_SAFE_INTEGER))) return bad("the handoff");
     if (h.newer !== undefined && h.newer !== true) return bad("the handoff");
     if (h.release !== undefined) {

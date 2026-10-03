@@ -834,7 +834,17 @@ export class HandoffTaker {
       else await this.exclusive(() => this.install(record));
       return;
     }
-    if (record.state !== "standby") return;
+    if (record.state !== "standby" || handoff.step === "stopped") return;
+    // Verified before the reload, and no release yet: the staged state is whole. It asks for the release again.
+    if (handoff.step === "verified" && handoff.h && handoff.staging && this.secret) {
+      this.staging = await this.ports.staging.open(handoff.staging);
+      this.h = fromBase64Url(handoff.h);
+      this.phase = "verified";
+      this.changed();
+      if (this.ports.links.live(this.peer)) this.linkChanged(this.peer, true);
+      this.arm(HANDOFF_TIMINGS.releaseMs, () => this.askAgain());
+      return;
+    }
     const fresh = handoff.at !== undefined && this.now() - handoff.at < HANDOFF_TIMINGS.giveUpMs;
     if (!fresh || !this.secret || !handoff.staging) { await this.giveUp("dropped"); return; }
     this.staging = await this.ports.staging.open(handoff.staging);
@@ -1118,7 +1128,7 @@ export class HandoffTaker {
     await this.staging!.restore(this.bundle.bytes, files);
     this.h = h;
     const record = await this.ports.records.read();
-    await this.ports.records.amend({ handoff: { ...record!.handoff!, step: "verified", at: this.now() } });
+    await this.ports.records.amend({ handoff: { ...record!.handoff!, step: "verified", h: toBase64Url(h), at: this.now() } });
     this.phase = "verified";
     this.out(await handoffVerifiedFrame(this.ports.turnAddress, this.turn + 1, h, { publicKey: this.ports.ownKey, sign: (bytes) => this.ports.sign(bytes) }));
     this.arm(HANDOFF_TIMINGS.releaseMs, () => this.askAgain());

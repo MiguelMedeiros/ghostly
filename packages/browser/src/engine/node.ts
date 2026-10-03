@@ -116,6 +116,7 @@ import { handoffProfileHost, handoffSelf } from "../devices/handoffHost";
 import { handoffLinks, profileRecords } from "../devices/handoffStandby";
 import { isHandoffVerifier, makeHandoffVerifier, type HandoffVerifier } from "../devices/handoffPake";
 import { deviceIdentity } from "../devices/setup";
+import { walletHandoffProblem } from "../devices/handoffWallets";
 import { fileBytes } from "../shared/fileBytes";
 import { FileAppender, readStored, removeStored, storedSize, streamStored } from "../shared/storedFiles";
 import { FileDesk } from "./fileDesk";
@@ -4644,20 +4645,9 @@ export class GhostlyNode implements EngineImplementation {
    * waits for, or a payment not settled.
    */
   private async handoffBusy(): Promise<"wallet" | "payment" | null> {
+    // Limited mode opened no wallet: what they hold is not known, so nothing moves.
     if (this.limitedMode) return "wallet";
-    const view = this.walletView;
-    const holds = (value: unknown, depth = 0): boolean => {
-      if (!value || typeof value !== "object" || depth > 6) return false;
-      for (const [key, inner] of Object.entries(value as Record<string, unknown>)) {
-        if ((key === "balance" || key === "pending" || key === "spendable") && typeof inner === "number" && inner > 0) return true;
-        if (key === "awaiting" && Array.isArray(inner) && inner.length > 0) return true;
-        if (key !== "history" && holds(inner, depth + 1)) return true;
-      }
-      return false;
-    };
-    if (view.balance > 0 || holds(view.networks) || holds(view.ark) || holds(view.bark) || holds(view.fedimint) || holds(view.spark) || holds(view.usdt) || holds(view.lightnings) || holds(view.bitcoin)) return "wallet";
-    if ((view.intents ?? []).some((intent) => ["pending", "submitted", "unknown"].includes((intent as { state?: string }).state ?? ""))) return "payment";
-    return null;
+    return walletHandoffProblem(this.walletView);
   }
 
   /**
