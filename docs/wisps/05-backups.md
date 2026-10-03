@@ -9,7 +9,7 @@
 | Implementation | Experimental: web, desktop and browser extension clients; the headless CLI seals its own profile folder in the same envelope, restored only by the CLI ([11xx](11xx-headless.md)) |
 | Summary | Bring a whole profile back from one bundle, sealed with a passphrase unless the person chooses otherwise. |
 | Availability | Available |
-| Notes | Web, desktop and extension; the CLI backs up its own profiles to a file. A restore always creates a new profile; nothing is overwritten. |
+| Notes | Web, desktop and extension; the CLI backs up its own profiles to a file. A light backup leaves the larger files out. A restore always creates a new profile; nothing is overwritten. |
 | Feature | [Your space](https://ghostly.tools/#space) |
 
 > This is a review draft. Candidate numbers and formats are not registered standards. Normative language describes a candidate requirement, not a shipped guarantee. See the [catalogue](README.md).
@@ -62,7 +62,8 @@ The opened frames are a sequence of records. A JSON frame is one record; byte fr
 ```json
 { "t": "profile", "format": "ghostly-profile", "version": 2, "createdAt": 1790000000000,
   "profile": { "name": "Work", "builtIn": false }, "storage": { "<key suffix>": "<value>" },
-  "files": 212, "bytes": 524288000 }
+  "files": 212, "bytes": 524288000,
+  "light": { "maxFileBytes": 1048576, "maxVoiceBytes": 4194304, "files": 3, "bytes": 73400320 } }
 { "t": "db", "db": "peer", "version": 10, "stores": [ { "name": "links", "keyPath": "id", "autoIncrement": false, "indexes": [] }, … ] }
 { "t": "rows", "db": "peer", "store": "settings", "keys": [ … ], "values": [ … ] }
 { "t": "ark", "walletId": "<wallet id>", "snapshot": { … } }
@@ -72,7 +73,7 @@ The opened frames are a sequence of records. A JSON frame is one record; byte fr
 { "t": "end", "files": 212, "bytes": 524288000 }
 ```
 
-- `profile` comes first. `profile.name` is the profile's name as the registry keeps it ([04](04-profiles.md)). `profile.builtIn` says whether that is the built-in name of the default profile never renamed (`true`, with `name` `"Personal"`), which the restored profile shows in the app's language, or a name the user gave (`false`), which is restored exactly as written, even when it is the word a language uses for the built-in name. A writer always sets it. A reader that finds none (bundles made before the marker), or a value that is not a boolean, takes the name as built-in only when it is `"Personal"` or the default profile's name in the language of the bundle's own `app_settings` (English when they set none), which is how clients wrote the default profile then; any other name is kept as written. `files` and `bytes` say how many files follow with their bytes, and how many bytes, so a restore can show its progress.
+- `profile` comes first. `profile.name` is the profile's name as the registry keeps it ([04](04-profiles.md)). `profile.builtIn` says whether that is the built-in name of the default profile never renamed (`true`, with `name` `"Personal"`), which the restored profile shows in the app's language, or a name the user gave (`false`), which is restored exactly as written, even when it is the word a language uses for the built-in name. A writer always sets it. A reader that finds none (bundles made before the marker), or a value that is not a boolean, takes the name as built-in only when it is `"Personal"` or the default profile's name in the language of the bundle's own `app_settings` (English when they set none), which is how clients wrote the default profile then; any other name is kept as written. `files` and `bytes` say how many files follow with their bytes, and how many bytes, so a restore can show its progress. `light` is there only in a light backup (see [Light backups](#light-backups)).
 - `storage` holds the profile's local keys with the profile prefix removed (for example `app_settings`, a chat id). Restore writes them under the new profile's prefix.
 - `db` gives the peer database's version and the shape of each object store (name, key path, auto-increment flag, indexes). `rows` records follow, each a batch of one store's keys and values. The `settings` and `links` stores come first, so a reader can tell whose profile a bundle is before writing anything (see Restoring on the same device).
 - `ark` holds one Ark wallet's own database ([202](202-arkade.md)), by wallet id.
@@ -84,11 +85,24 @@ The opened frames are a sequence of records. A JSON frame is one record; byte fr
 - A reader ignores a record whose `t` it does not know.
 - Wallet seeds inside the peer database stay sealed as they are on the device; their device keys travel with them. In a sealed bundle the passphrase therefore protects the funds: anyone with bundle and passphrase can spend them. In a bundle without a passphrase, the file alone is enough.
 
+### Light backups
+
+A light backup is everything above but the bytes of the profile's larger files: chats and every message (texts, edits, reactions, pins, replies), contacts, groups, identities and their proofs, wallets and their state, services, settings and task cards. It is made only when the person chooses it; the default is everything.
+
+- **The cut.** A file keeps its bytes when it is at most 1 MiB, or when it is a voice message (its record has `metadata.voice`) of at most 4 MiB. The longest voice message the apps record (15 minutes at 32 kbit/s) is about 3.6 MB, so every recorded one stays, and so do stickers, screenshots and small documents. Photos from a camera, videos and large files are what is left out.
+- **What a file left out becomes.** Its record travels as a row of `files`, as it stands on the device (what changed about it read over it, so its own `fileState` row does not travel), without `blob` or `bytes`, and with `"leftOut": true`. No `file` record or byte frames follow for it, so `end` counts only the files that travelled with their bytes.
+- **The mark.** The `profile` record carries `light`: the cut (`maxFileBytes`, `maxVoiceBytes`) and how many files were left out with how many bytes (`files`, `bytes`). A reader needs nothing of it to restore: the rows carry their own `leftOut`. A client may show it before restoring.
+- **On restore,** a file marked `leftOut` is shown as not in this backup, never as a file to save or open. Its sender is not asked for it again: files/3 ([500](500-files.md)) asks again only for a transfer still under way, and a sender ignores a request for a transfer that ended. A client from before light backups restores such a bundle too; its files left out show there as no longer available.
+- Before making one, a client shows what each choice would hold of the files' bytes, from its own file store, so the person sees what a light backup saves.
+- A backup of a profile restored from a light one keeps the marks: a file left out stays left out.
+- The headless CLI makes one with `--light`, with the same cut. Its bundle names the files it left out in its first record (`light.ids`), and the restored profile marks their records the first time it starts ([11xx](11xx-headless.md)).
+
 ### What a bundle does not hold
 
 - Storage credentials for remote adapters ([1002](1002-s3-storage.md)), on the page and in the peer's settings.
 - The device's push subscription ([401](401-paired-chat.md)): it belongs to the browser that made it.
 - The bytes of a file still arriving, or no longer on the device. Its message and record are kept.
+- In a light backup, the bytes of the files over its cut. Their messages and records are kept.
 - The local databases of Bark ([204](204-bark.md)), Spark and Fedimint wallets. Their recovery phrases are in the bundle; the wallets rebuild their state from the phrase and their servers.
 
 ### Version 1
@@ -141,11 +155,11 @@ Without a match the bundle is restored at once.
 
 ## Implementation status
 
-The web, desktop and browser extension clients create bundles from the active profile (or another one, with its lock password), restore them into a new profile and switch to it; storage through the local file and S3-compatible adapters. A bundle is staged in the device's file storage as it is written and then saved: through the system's save dialog on Desktop, as a download in a browser. Bundles for S3 are sent in one request, so they are read into memory once to send. Covered by unit tests (the envelope: round trip, wrong passphrase, a changed, moved, dropped, repeated or retyped frame, a changed header, a cut file, a bundle without a passphrase and its damage; the profile: round trip of every store, files kept as Blobs and in file storage, files over 16 MiB, another profile's files, a file the device can no longer read, a version 1 bundle, wallet records and Ark database relocation, a refused or cancelled restore leaving nothing, a cancelled backup leaving no file, a bundle matched to the profile it was made from by a chat key or the DID key and not to another), UI tests of the progress, Cancel, the choice to go without a passphrase and its warnings, the same-device warning and its three answers, and end-to-end tests in Chromium and WebKit that back a profile with files up to a file, with and without a passphrase, and restore it, and to an S3-compatible server (the extension: to a file).
+The web, desktop and browser extension clients create bundles, everything or light, from the active profile (or another one, with its lock password), restore them into a new profile and switch to it; storage through the local file and S3-compatible adapters. A bundle is staged in the device's file storage as it is written and then saved: through the system's save dialog on Desktop, as a download in a browser. Bundles for S3 are sent in one request, so they are read into memory once to send. Covered by unit tests (the envelope: round trip, wrong passphrase, a changed, moved, dropped, repeated or retyped frame, a changed header, a cut file, a bundle without a passphrase and its damage; the profile: round trip of every store, files kept as Blobs and in file storage, files over 16 MiB, another profile's files, a file the device can no longer read, a version 1 bundle, wallet records and Ark database relocation, a refused or cancelled restore leaving nothing, a cancelled backup leaving no file, a bundle matched to the profile it was made from by a chat key or the DID key and not to another; a light bundle's cut, its mark, its files left out and marked on restore, the sizes shown before, the marks kept by a later backup), UI tests of the progress, Cancel, the choice to go without a passphrase and its warnings, the same-device warning and its three answers, and end-to-end tests in Chromium and WebKit that back a profile with files up to a file, with and without a passphrase, and restore it, and to an S3-compatible server (the extension: to a file). An end-to-end test in Chromium makes a light backup of a chat with a 20 MB file and a voice message: about 17 KB against 20 MB for everything; restored, every message and the wallet's balance are there, the voice message plays and the 20 MB file says it is not in this backup.
 
 ## Open decisions
 
-Incremental and scheduled backups; leaving large files out by choice; sending a bundle to S3 in parts instead of one request; a passphrase-less mode tied to a hardware key; key rotation; restoring into an existing profile by merge; copying the local databases of Bark, Spark and Fedimint wallets.
+Incremental and scheduled backups; fetching a file a light backup left out from its sender again (files/3 has no request for a transfer that ended); sending a bundle to S3 in parts instead of one request; a passphrase-less mode tied to a hardware key; key rotation; restoring into an existing profile by merge; copying the local databases of Bark, Spark and Fedimint wallets.
 
 ## Revision log
 
