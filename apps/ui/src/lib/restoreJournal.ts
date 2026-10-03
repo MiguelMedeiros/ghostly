@@ -59,7 +59,8 @@ export async function holdRestore(ns: string): Promise<() => void> {
   if (!manager) return () => {};
   let release!: () => void;
   const held = new Promise<void>((resolve) => { release = resolve; });
-  await new Promise<void>((acquired) => { void manager.request(lockName(ns), () => { acquired(); return held; }); });
+  // A lock the page cannot have (a context that refuses them) never holds the restore up: it runs as it did before.
+  await new Promise<void>((acquired) => { manager.request(lockName(ns), () => { acquired(); return held; }).catch(() => acquired()); });
   return release;
 }
 

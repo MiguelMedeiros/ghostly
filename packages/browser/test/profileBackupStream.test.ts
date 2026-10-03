@@ -250,6 +250,11 @@ it("a restore whose tab was closed half way leaves nothing for good: the next st
   const restored = await restoreProfileBackup(bundle, PASS);
   await sweepInterruptedRestores();
   expect((await readAll(`ghostly_${restored.id}`, STORES.messages)).length).toBe(5);
+  // Where the page cannot have a lock, a restore still runs, and nothing is taken back.
+  Object.defineProperty(globalThis, "navigator", { value: { ...globalThis.navigator, locks: { request: () => Promise.reject(new DOMException("denied", "SecurityError")) } }, configurable: true });
+  const second = await restoreProfileBackup(bundle, PASS);
+  await sweepInterruptedRestores();
+  expect((await readAll(`ghostly_${second.id}`, STORES.messages)).length).toBe(5);
 });
 
 /**
