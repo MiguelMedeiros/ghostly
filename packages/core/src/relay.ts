@@ -100,12 +100,12 @@ export const GROUP_BURST_MS = 15_000;
 /** …and never fewer than one link polling fast (every 2 s) reads in that time: one edge alone is never held back. */
 export const GROUP_BURST_ONE_LINK = 8;
 /**
- * Reads of contacts that went away from a live session and have not shown themselves back (`watch`: a link looks for
- * them closely for two minutes, `WATCH_PEER_MS`) take at most this share of a relay's minute, whatever their number:
- * 10 on a relay of 30. Under it, the key that was read longest ago goes first. A member alone in a private group whose
- * three other members left at once watched each of them every 2 s: those reads and the admin's knock poll spent both
- * relays' minute, the member back first had its offer read only when the minute freed, 25 to 37 s on, and its edge
- * came up then (bug hunt r12, measured again 2026-10-03). One contact watched alone reads every 3 s rather than 2.
+ * A group's edges' reads of members that went away from a live session and have not shown themselves back (`watch`: a
+ * link looks for them closely for two minutes, `WATCH_PEER_MS`) take at most this share of a relay's requests, whatever
+ * their number, spread over the minute (`GROUP_RATION_WINDOW_MS`): 2 in any 10 s on a relay of 30. Under it, the key
+ * read longest ago goes first. A member alone in a private group whose three other members left at once watched each of
+ * them every 2 s: those reads and the admin's knock poll spent both relays' minute, the member back first had its offer
+ * read only when the minute freed, 25 to 44 s on, and its edge came up then (bug hunt r12, measured again 2026-10-03).
  */
 export const WATCH_SHARE = 1 / 3;
 /**
