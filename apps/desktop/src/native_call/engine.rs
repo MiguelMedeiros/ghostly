@@ -14,6 +14,7 @@
 
 use super::devices::{self, Kind, FAKE_CAMERAS};
 use super::gather::{self, Gathering};
+use super::ice::{self, IceServer};
 use bytes::Bytes;
 use gst::prelude::*;
 use gstreamer as gst;
@@ -1108,6 +1109,8 @@ pub struct Call {
     voice: Voice,
     microphone: Mutex<Microphone>,
     ssrcs: (u32, u32),
+    /// The profile has a TURN server: gathering waits for a relay candidate.
+    uses_turn: bool,
 }
 
 /// The microphone and the speaker a call starts with, by name (None: the default).
@@ -1119,15 +1122,18 @@ pub struct Devices {
 
 impl Call {
     /// The pipelines playing and the peer connection ready to offer or answer. `fake`: a test tone and nothing
-    /// played by default ([`fake_media`]; a device chosen by name is used all the same). `events` hears the ICE
-    /// state (JSON) and each picture that arrives (JPEG).
+    /// played by default ([`fake_media`]; a device chosen by name is used all the same). `servers`: the profile's
+    /// own ICE servers ([`ice::usable`] ones), after the built-in STUN server. `events` hears the ICE state (JSON)
+    /// and each picture that arrives (JPEG).
     pub async fn new(
         opus_pt: u8,
         vp8_pt: u8,
         fake: bool,
         devices: Devices,
+        servers: &[IceServer],
         events: Sink,
     ) -> Result<Call, String> {
+        let uses_turn = ice::uses_turn(servers);
         let mut media = MediaEngine::default();
         media
             .register_codec(codec(RtpCodecKind::Audio, opus_pt), RtpCodecKind::Audio)
@@ -1151,14 +1157,22 @@ impl Call {
         });
         // By address: webrtc-rs would otherwise resolve the name on its driver, ahead of the host candidates.
         let stun = gather::stun_urls(STUN, gather::resolve, STUN_LOOKUP).await;
+        // Then the profile's own servers (a TURN server, typically).
+        let ice_servers: Vec<RTCIceServer> = std::iter::once(RTCIceServer {
+            urls: stun,
+            ..Default::default()
+        })
+        .chain(servers.iter().map(|server| RTCIceServer {
+            urls: server.urls.clone(),
+            username: server.username.clone().unwrap_or_default(),
+            credential: server.credential.clone().unwrap_or_default(),
+        }))
+        .collect();
         let pc: Arc<dyn PeerConnection> = Arc::new(
             PeerConnectionBuilder::new()
                 .with_configuration(
                     RTCConfigurationBuilder::new()
-                        .with_ice_servers(vec![RTCIceServer {
-                            urls: stun,
-                            ..Default::default()
-                        }])
+                        .with_ice_servers(ice_servers)
                         .build(),
                 )
                 // An ICE restart (WISP 601, "Reconnecting") gathers anew on sockets bound again: after a
@@ -1231,6 +1245,7 @@ impl Call {
             voice,
             microphone: Mutex::new(microphone),
             ssrcs,
+            uses_turn,
         })
     }
 
@@ -1296,7 +1311,17 @@ impl Call {
             .set_local_description(description)
             .await
             .map_err(|e| e.to_string())?;
-        let gathered = self.shared.gathering.wait(gather::BOUNDS).await?;
+        // With a TURN server, its relay candidate is the one to wait for, as `waitForIceGathering` does.
+        let awaited = if self.uses_turn {
+            gather::RELAY
+        } else {
+            gather::REFLEXIVE
+        };
+        let gathered = self
+            .shared
+            .gathering
+            .wait_for(gather::BOUNDS, awaited)
+            .await?;
         let local = self
             .pc
             .local_description()
@@ -1612,9 +1637,16 @@ mod tests {
         }
         let frames = Arc::new(AtomicU64::new(0));
         let seen = frames.clone();
-        let a = Call::new(OPUS_PT, VP8_PT, true, Devices::default(), Arc::new(|_| {}))
-            .await
-            .unwrap();
+        let a = Call::new(
+            OPUS_PT,
+            VP8_PT,
+            true,
+            Devices::default(),
+            &[],
+            Arc::new(|_| {}),
+        )
+        .await
+        .unwrap();
         let a_camera = Camera::open(true, None, Arc::new(|_| {})).unwrap();
         assert_eq!(a_camera.device, None);
         a_camera.attach(Some(a.video_input()));
@@ -1629,6 +1661,7 @@ mod tests {
             vp8,
             true,
             Devices::default(),
+            &[],
             Arc::new(move |bytes: Vec<u8>| {
                 if bytes.starts_with(&[0xff, 0xd8]) {
                     seen.fetch_add(1, Ordering::Relaxed);
@@ -1739,12 +1772,19 @@ mod tests {
             eprintln!("skipped: {missing}");
             return;
         }
-        let a = Call::new(OPUS_PT, VP8_PT, true, Devices::default(), Arc::new(|_| {}))
-            .await
-            .unwrap();
+        let a = Call::new(
+            OPUS_PT,
+            VP8_PT,
+            true,
+            Devices::default(),
+            &[],
+            Arc::new(|_| {}),
+        )
+        .await
+        .unwrap();
         let offer = a.offer(false).await.unwrap();
         let (opus, vp8) = offered_payload_types(&offer);
-        let b = Call::new(opus, vp8, true, Devices::default(), Arc::new(|_| {}))
+        let b = Call::new(opus, vp8, true, Devices::default(), &[], Arc::new(|_| {}))
             .await
             .unwrap();
         let answer = b.answer(&offer, false).await.unwrap();

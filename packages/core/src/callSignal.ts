@@ -129,6 +129,9 @@ export function callRtcConfig(extra: readonly CallIceServer[] = []): RTCConfigur
   for (const server of extra) {
     const urls = (Array.isArray(server.urls) ? server.urls : server.urls.split(/[\s,]+/)).filter(Boolean);
     if (!urls.length) continue;
+    // A TURN server without its username and credential (a profile restored from a backup, which leaves the
+    // credential out) is skipped: a browser refuses to make any connection with one in its list.
+    if (urls.some((url) => /^turns?:/i.test(url)) && (!server.username?.trim() || !server.credential?.trim())) continue;
     servers.push({ urls, ...(server.username ? { username: server.username } : {}), ...(server.credential ? { credential: server.credential } : {}) });
   }
   return { ...RTC_CONFIG, iceServers: [...(RTC_CONFIG.iceServers ?? []), ...servers] };
