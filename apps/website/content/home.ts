@@ -371,7 +371,7 @@ export const home = {
         name: "DID",
         kind: "decentralized ID",
         body: "Proves you control a decentralized identifier: did:key, did:jwk, did:dht or did:web.",
-        limits: "Experimental, under Advanced. Each contact resolves the DID again. Apart from this, every profile has a did:dht of its own.",
+        limits: "Experimental, under Advanced. Each contact resolves the DID again. Separately, every profile has a did:dht of its own.",
       },
       {
         id: "atproto",
