@@ -155,6 +155,8 @@ export class FakeEngine implements BrowserHost {
   readClipboardText?: BrowserHost["readClipboardText"];
   /** The desktop host's native read of copied files or a picture, when a test gives one. */
   readClipboardFiles?: BrowserHost["readClipboardFiles"];
+  /** The desktop host's "Keep this computer awake", when a test gives one (WISP 06). */
+  keepAwake?: BrowserHost["keepAwake"];
   /** Every web host can sign in to an AT Protocol server; this window never answers unless a test replaces it. */
   atproto?: BrowserHost["atproto"] = { platform: "web", open: () => new Promise(() => {}) };
 
@@ -207,6 +209,7 @@ export class FakeEngine implements BrowserHost {
     this.fullscreenWindow = undefined;
     this.readClipboardText = undefined;
     this.readClipboardFiles = undefined;
+    this.keepAwake = undefined;
     this.setState({});
   }
 

@@ -17,6 +17,8 @@
     "allow-bitcoind-rpc",
     "allow-create-keypair",
     "allow-decrypt-text",
+    "allow-device-state-read",
+    "allow-device-state-write",
     "allow-diagnostic-log",
     "allow-encrypt-text",
     "allow-file-bytes-append",
@@ -35,6 +37,7 @@
     "allow-generate-enc-key",
     "allow-get-profile",
     "allow-get-public-key",
+    "allow-keep-awake",
     "allow-link-preview-fetch",
     "allow-lnd-request",
     "allow-local-fetch",
@@ -97,6 +100,9 @@
     "allow-service-respond",
     "allow-set-pkarr-relays",
     "allow-share-text",
+    "allow-turn-put",
+    "allow-turn-read",
+    "allow-turn-warm",
     "allow-under-test",
     "allow-updater-can-install"
   ]

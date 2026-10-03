@@ -62,6 +62,7 @@
     "noSharedMint": "この連絡先と共通のミントがありません",
     "notYetConfirmed": "まだ確認されていません。2 回目の支払いは送られていません。",
     "outcomeUnknown": "結果が不明です。既存の支払いを確認してください。もう一度送らないでください。",
+    "parkedSigned": "確認が必要です: この支払いは、このプロフィールのコピーが引き継ぐ前に署名されました。ここから再送されることはありません。もう一度支払う前に確認してください。",
     "paymentExpired": "支払いリクエストの有効期限が切れているか、無効です",
     "paymentTakenBack": "この支払いは取り戻されました。satsはウォレットにあります。",
     "realMintOnTestnet": "このミントは本物の sats を預かります。Mainnet の Cashu ウォレットに追加してください",
@@ -78,7 +79,9 @@
     "usdtNeedsSepoliaGas": "先にガス代として少しの Sepolia ETH が必要です",
     "usdtNotEnoughGas": "ガス代の ETH が足りません",
     "usdtNotEnoughTokens": "トークン残高が足りません",
-    "usdtRpcUnavailable": "USDT の RPC が利用できません"
+    "usdtRpcUnavailable": "USDT の RPC が利用できません",
+    "walletAway": "{{wallet}} はここでは使えません。{{device}} で使ってください。",
+    "walletAwayUnnamed": "{{wallet}} はここでは使えません。別のデバイスに置かれています。"
   },
   "extension": {
     "notPaymentLink": "支払いリンクではありません",

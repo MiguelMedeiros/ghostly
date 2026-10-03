@@ -172,6 +172,80 @@ export function wakeNoticeDue(lastShown: number | undefined, call: boolean, now:
   return now - lastShown >= WAKE_NOTICE_GAP_MS[call ? "call" : "message"];
 }
 
+/** A notice the push worker shows. `quiet`: no sound, no vibration, nothing that stays up (a device that is not the active one). */
+export interface PushNotice {
+  title: string;
+  body: string;
+  tag: string;
+  call: boolean;
+  quiet?: true;
+  data: { path: string; profile: string };
+}
+
+/** The device state as the worker read it (`deviceState.ts`); null for a profile on one device. */
+export interface NoticeDevice {
+  state: string;
+  /** The active device's name, when it is another one. */
+  active?: string;
+  /** The tokens this device gave its other devices, each with that device's name. */
+  tokens: Record<string, string>;
+  /** The chats' tokens the active device still hands out; a token not among them shows nothing. Absent: any. */
+  allowed?: string[];
+}
+
+/** Words the worker uses when no page of this profile ever wrote its own (a device that was never active). */
+export const DEVICE_NOTICE_DEFAULTS = {
+  standby: "New message. Active on {device}.",
+  standbyCall: "Call for you. Active on {device}.",
+  standbyUnnamed: "New message. Open Ghostly on your active device.",
+  standbyCallUnnamed: "Call for you. Open Ghostly on your active device.",
+  takeover: "{device} wants to take over. Open Ghostly.",
+  moveHere: "{device} wants to move this profile here. Open Ghostly.",
+} as const;
+
+const fill = (template: string, device: string) => template.split("{device}").join(device);
+
+/**
+ * What a push shows in a profile on several devices (WISP 06 § Push and the phone), on top of `wakeNotice`:
+ *
+ * - **A wake-up from another of the person's devices** (`device`): shown only for a token this device gave one of its
+ *   own devices, naming it: "<device> wants to take over" where this one is active, "<device> wants to move this profile
+ *   here" where it is not. The `d` flag alone proves nothing: anyone holding the subscription could set it.
+ * - **A device that is not the active one never rings**: a message or a call shows "New message. Active on <device>." or
+ *   "Call for you. Active on <device>.", quietly, and a tap opens the standby screen. Once the active device said which
+ *   chats' tokens it hands out (`allowed`), only those show: a chat deleted or muted there stays quiet here. Before it
+ *   said, any well-formed wake-up shows (a chat made on the active device has a token this one never knew), except one
+ *   this device knows for a muted chat. A removed device shows nothing.
+ * - **The active device, or a profile on one device**: today's notices (`wakeNotice`).
+ */
+export function pushNotice(
+  wake: { token: string; kind: "message" | "call" | "device" } | null,
+  found: Parameters<typeof wakeNotice>[0],
+  device: NoticeDevice | null,
+  options: { now: number; appVisible: boolean; profile: string; text?: Partial<Record<keyof typeof DEVICE_NOTICE_DEFAULTS, string>> & { title?: string } },
+): PushNotice | null {
+  if (!wake) return null;
+  const text = { ...DEVICE_NOTICE_DEFAULTS, ...Object.fromEntries(Object.entries(options.text ?? {}).filter(([, value]) => typeof value === "string" && value)) };
+  const title = options.text?.title || "Ghostly";
+  const home = { path: "/", profile: options.profile };
+  const runs = !device || device.state === "active";
+  if (wake.kind === "device") {
+    const asker = device?.tokens[wake.token];
+    if (asker === undefined || options.appVisible) return null;
+    const name = asker || "Ghostly";
+    return { title, body: fill(runs ? text.takeover : text.moveHere, name), tag: `device:${options.profile}`, call: false, data: home };
+  }
+  if (runs) return wakeNotice(found, { now: options.now, appVisible: options.appVisible, profile: options.profile, kind: wake.kind });
+  if (device.state === "removed" || options.appVisible) return null;
+  // A chat deleted or muted on the active device, or a token nobody hands out any more (a removed device's): nothing.
+  if (device.allowed && !device.allowed.includes(wake.token)) return null;
+  const muted = found?.entry.mutedUntil;
+  if (muted === "forever" || (typeof muted === "number" && muted > options.now)) return null;
+  const call = wake.kind === "call" && (!found || found.entry.path.startsWith("/chat/"));
+  const body = device.active ? fill(call ? text.standbyCall : text.standby, device.active) : (call ? text.standbyCallUnnamed : text.standbyUnnamed);
+  return { title, body, tag: `standby:${options.profile}`, call: false, quiet: true, data: home };
+}
+
 /**
  * What a wake-up shows (WISP 401 § Wake-up push): "New message" for a chat the token names, or nothing at all
  * for a token this profile no longer knows (a contact it stopped sharing with), for a muted chat, and while the

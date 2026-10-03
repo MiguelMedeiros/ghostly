@@ -135,7 +135,8 @@ describe("a backup written a piece at a time (envelope version 2)", () => {
       (h: BackupHeader) => { (h.cipher as { name: string }).name = "AES-128-CBC"; },
     ]) await expect(BackupReader.open(withHeader(change), PASS)).rejects.toThrow("Unsupported backup encryption");
     await expect(BackupReader.open(withHeader((h) => { (h as { protection: string }).protection = "rot13"; }), PASS)).rejects.toThrow("Unsupported backup format");
-    await expect(BackupReader.open(withHeader((h) => { (h as { version: number }).version = 3; }), PASS)).rejects.toThrow("This backup comes from a newer Ghostly; update to restore it");
+    // Version 3 is a bundle that carries a device set (WISP 06); one above it is a newer Ghostly's.
+    await expect(BackupReader.open(withHeader((h) => { (h as { version: number }).version = 4; }), PASS)).rejects.toThrow("This backup comes from a newer Ghostly; update to restore it");
     // Stripping the encryption out of the header does not turn a sealed bundle into a readable one.
     const stripped = new TextEncoder().encode(`${JSON.stringify({ format: "ghostly-backup", version: 2, protection: "none", check: { name: "SHA-256-chain" } })}\n`);
     const forged = new Uint8Array(stripped.length + bundle.length - bundle.indexOf(10) - 1);

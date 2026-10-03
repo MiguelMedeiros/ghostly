@@ -105,10 +105,12 @@ export function listenForShares(): void {
 
 /**
  * A wake-up notification was tapped: its chat, in its profile. Another profile's chat means switching to it (the
- * app restarts as that profile, on that chat). Only a chat or group route; anything else is ignored.
+ * app restarts as that profile, on that chat). Only a chat or group route, or the app's home (`/`: the notice of a
+ * device that is not the active one, which opens its standby screen, WISP 06 § Push and the phone); anything else is
+ * ignored.
  */
 export function openChat(path: string, profile: string): void {
-  if (typeof path !== "string" || !/^\/(chat|group)\/[^/?#]+$/.test(path)) return;
+  if (typeof path !== "string" || (path !== "/" && !/^\/(chat|group)\/[^/?#]+$/.test(path))) return;
   if (profile === activeProfileId()) {
     if (window.location.hash !== `#${path}`) window.location.hash = path;
     return;

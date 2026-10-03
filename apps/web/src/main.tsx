@@ -6,6 +6,9 @@ import { Root } from "../../ui/src/Root";
 import { PeerLockUnavailable, becomeThePeer } from "@ghostly/browser/inPageHost";
 import { webHost } from "./host";
 import { setDatabaseName } from "@ghostly/browser/shared/idb";
+import { openDeviceGate } from "@ghostly/browser/devices/gate";
+import { setHandoffProfileHost } from "@ghostly/browser/devices/handoffHost";
+import { handoffProfileHost } from "../../ui/src/lib/handoffProfile";
 import { setStorageProfile } from "../../ui/src/lib/storage";
 import { activeProfileId, namespaceOf, setRunningProfile } from "../../ui/src/lib/profiles";
 import { loadSettings } from "../../ui/src/lib/settings";
@@ -16,7 +19,7 @@ import { translateWith } from "../../ui/src/locales/translate";
 import { applyDocumentLanguage } from "../../ui/src/lib/documentLanguage";
 import { watchInstallPrompt } from "../../ui/src/lib/installPrompt";
 import { setPushPlatform } from "../../ui/src/lib/wakePush";
-import { currentPush, pushSupported, subscribePush, syncWakeTable, unsubscribePush } from "./pwa/push";
+import { currentPush, pushSupported, subscribePush, syncWakeTable, syncWakeText, unsubscribePush } from "./pwa/push";
 import { SHARE_FORWARD_AFTER_MS, askForShare, forwardShare, listenForShares, openedForShare, registerServiceWorker } from "./pwa/serviceWorker";
 
 // The same UI and the same peer as the extension; only the host differs.
@@ -27,7 +30,7 @@ const root = createRoot(document.getElementById("root")!);
 watchInstallPrompt();
 registerServiceWorker();
 // Wake-up push (WISP 401 § Wake-up push): this app can be woken while closed; Settings shows the switch.
-setPushPlatform({ supported: pushSupported, subscribe: subscribePush, current: currentPush, unsubscribe: unsubscribePush, syncTable: syncWakeTable });
+setPushPlatform({ supported: pushSupported, subscribe: subscribePush, current: currentPush, unsubscribe: unsubscribePush, syncTable: syncWakeTable, syncText: syncWakeText });
 
 // The chosen local profile (WISP 04): its own chats, database, settings and single-peer lock. The
 // default profile keeps the original names, so nothing existing moves.
@@ -74,11 +77,19 @@ await becomeThePeer(profile ? `ghostly-peer-${profile}` : "ghostly-peer", () => 
 }).catch((error: unknown) => (error instanceof PeerLockUnavailable ? cannotRun(["locks"], error) : Promise.reject(error)));
 
 isPeer = true;
+// The device state, before anything of the profile starts (WISP 06 § The gate): one small local read. A profile that
+// never enrolled a device is `single` and goes on exactly as before. On a device that is not the active one nothing
+// below touches the profile: no session sync, no share taken in, and the host starts device-link-only mode.
+const gate = await openDeviceGate();
+// What a handoff reads and writes of a profile's storage (WISP 06 § The handoff), before the host starts the engine.
+setHandoffProfileHost(handoffProfileHost(webHost.version, "web"));
 setBrowserHost(webHost);
-startSessionSync();
-// Shares for this tab: the one it opened for, and any another tab forwards while this one is the app.
-listenForShares();
-askForShare();
+if (gate.full) {
+  startSessionSync();
+  // Shares for this tab: the one it opened for, and any another tab forwards while this one is the app.
+  listenForShares();
+  askForShare();
+}
 addEventListener("pagehide", () => webHost.announceDeparture());
 
 root.render(

@@ -147,3 +147,15 @@ export function verifyChain(raw: unknown, groupId?: string): { chain: GroupCommi
   }
   return { chain };
 }
+
+/**
+ * What a commit is refused with while admin work is off on this device (WISP 06 § Forced takeover: after a forced
+ * takeover or a restore, until the person turns on "Manage groups from this device").
+ */
+/**
+ * The highest sequence number a frame of my own key, sent by another copy of my profile, may make me adopt (WISP 06):
+ * the highest floor a copy can have (2^32 - 2^24) and room above it. The community beacon packs the counter in 32 bits.
+ */
+export const OWN_FRAME_LIMIT = 2 ** 32 - 2 ** 23;
+
+export const GROUP_ADMIN_OFF_ERROR = "Managing this group is off on this device. Turn on Manage groups from this device first.";
