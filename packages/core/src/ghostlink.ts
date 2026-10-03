@@ -415,6 +415,11 @@ export interface GhostLinkEvents {
   onDeviceFrame?(frame: DeviceFrame): void | Promise<void>;
   /** The device capabilities both ends announced on the open session changed: what is agreed now. */
   onDeviceCapabilities?(agreed: DeviceCapability[]): void;
+  /**
+   * A session was refused because the other end authenticated with another participation key than the one pinned.
+   * A device's one-time enrollment link (WISP 06 § Adding a device) tells the person that a second device tried its code.
+   */
+  onPeerKeyRefused?(): void;
 }
 
 const PAYMENT_METHODS: PaymentMethodName[] = ["cashu", "lightning", "arkade", "usdt", "bark", "bitcoin", "fedimint", "spark"];
@@ -2342,6 +2347,11 @@ export class GhostLink {
   }
 
   get proofSession(): string | undefined { return this.peerProofSupport ? this.paired?.proofSession : undefined; }
+  /**
+   * The transcript hash of the session that is open and ready (WISP 401), lower-case hex, whatever proofs it offers:
+   * what a device's enrollment (WISP 06) signs and derives its digits from. Undefined while no session is ready.
+   */
+  get sessionTranscriptHash(): string | undefined { return this.paired?.state.status === "ready" ? this.paired.proofSession || undefined : undefined; }
 
   /** Identity proofs can be exchanged now: both offers carry `identity-proof/1` and the channel is open. */
   get identitySupport(): boolean { return !!this.options.events?.onIdentityProof && !!this.paired?.identitySupport && this.isDataLinkOpen; }
@@ -2851,6 +2861,8 @@ export class GhostLink {
         // A connection dialled in on a pinned chat says nothing until it authenticated: one refused leaves no trace in the state.
         onState: () => { if (this.channel === channel && (!this.unproven(channel) || paired.state.status === "ready")) this.emitPairingState(); },
         onFailure: () => {
+          // Another participation key than the one pinned: a device's one-time enrollment link says so (WISP 06).
+          if (paired.state.keyMismatch) this.options.events?.onPeerKeyRefused?.();
           // Dialled in and unproven, or a connection that carried nothing in time: neither says anything about the contact.
           if (this.unproven(channel) || paired.authTimedOut) {
             if (paired.state.keyMismatch) this.dht?.foreignKeySeen("stream");

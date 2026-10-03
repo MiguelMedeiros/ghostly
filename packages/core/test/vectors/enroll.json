@@ -1,0 +1,48 @@
+{
+  "invite": {
+    "joinerSeed": "Cd_WDL2yUaeupmDpWmiqn8MLVprUql1VJvcnz5kTO8M",
+    "linkKey": "lJYAr1BmCCfz1wQ32Dms6VaH6zCA7-Nl5Of-nKUzguA",
+    "inviterRendezvousZ32": "5e8gsr8caenc4fh5bf5a19e8t3tozhd3u47ikqbdnc5kummj4kjo",
+    "inviterKey": "4seRUQnEdhAuBjzCMKcN3jdvqcgfFtOjDqI4dk7tSBc",
+    "flags": 1,
+    "expires": 1790000600,
+    "payload": "09dfd60cbdb251a7aea660e95a68aa9fc30b569ad4aa5d5526f727cf99133bc3949600af50660827f3d70437d839ace95687eb3080efe365e4e7fe9ca53382e0da0e6b10ecc204cd179b0977897d078e630bf0799ebb5538231336a9ad69d293e2c7915109c476102e063cc230a70dde376fa9c81f16d3a30ea238764eed4817016ab13dd8",
+    "code": "ghostly1zp80avr9akfg60t4xvr545692nlpsk4566j4964fx7unulxgn80pef9sq4agxvzp870tsgd7c8xkwj458avcgpmlrvhjw0l5u55ec9cx6pe43pmxzqnx30xcfw7yh6puwvv9lq7v7hd2nsgcnx65666wjj03v0y23p8z8vypwqc7vyv98ph0rwmafeq03d5arp63rsajwa4ypwqt2ky7asup3gp2"
+  },
+  "enroll": {
+    "transcriptHash": "92e4443e845abd98a69ce48fa143ba7e4fa5ab9dadde3b5741091abbb4889e0f",
+    "inviterKey": "4seRUQnEdhAuBjzCMKcN3jdvqcgfFtOjDqI4dk7tSBc",
+    "joinerKey": "ny86D64D8FVi-hMTmEv9ZfE5PJn1zPMxkA5_PEaNvP8",
+    "message": "[\"ghostly-enroll\",\"92e4443e845abd98a69ce48fa143ba7e4fa5ab9dadde3b5741091abbb4889e0f\",\"4seRUQnEdhAuBjzCMKcN3jdvqcgfFtOjDqI4dk7tSBc\",\"ny86D64D8FVi-hMTmEv9ZfE5PJn1zPMxkA5_PEaNvP8\"]",
+    "digits": "557144",
+    "hello": {
+      "t": "enroll-hello",
+      "k": "ny86D64D8FVi-hMTmEv9ZfE5PJn1zPMxkA5_PEaNvP8",
+      "name": "Phone",
+      "kind": "web",
+      "app": "1.1.0",
+      "s": "2wI2wbO0I6ZFybyaFekJrQeF0tuNr2VeVoZiI3iVFNj5oH_RHdYHBUArlXD8plRjVUmdscA9vA_40HQF1FbiBQ"
+    },
+    "proof": {
+      "t": "enroll-proof",
+      "s": "O8hxGQmI9d7yFZBODJWS85PX62pqPZ_KAVYMSEtCmx3RnG4Lrzy2O3sivFxkabqliCgXL_4-_8j1nuJA5ACNDA"
+    },
+    "grant": {
+      "t": "enroll-grant",
+      "d": "TJKGSwKVe1NYwfaMFvK0ALN3CLmVbA-H_M6bp8e5PcI",
+      "set": [
+        [
+          "4seRUQnEdhAuBjzCMKcN3jdvqcgfFtOjDqI4dk7tSBc",
+          "MacBook"
+        ],
+        null,
+        [
+          "ny86D64D8FVi-hMTmEv9ZfE5PJn1zPMxkA5_PEaNvP8",
+          "Phone"
+        ]
+      ],
+      "turn": 123456789,
+      "rev": 3
+    }
+  }
+}
