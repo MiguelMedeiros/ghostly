@@ -2,7 +2,7 @@ import {
   COMMUNITY_LIMITS, COMMUNITY_TOPOLOGY, CommunitySession, GROUP_READ_NOTE_COMMUNITY, KNOCK_TTL_MS, MAX_KNOCKS, MEMBER_KEY,
   beaconKeys, beaconRecords, createIdentity, decodeCommunityLink, doorHubs, groupName, entryParams, publicKeyFromZ32, encodeCommunityLink, freshHubs, identityFromSeedB64, knockIdentity, knockRecords, lobbyKeys, lobbyRecords, mergeBeacon, newerHead, readBeaconHead, type CommunityHead,
   mentionsMember, receivedTimestamp, mergeKnocks, mergeLobby, pickHubs, rankHubs, readBeacon, readKnocks, readLobby, rosterHas, shouldBeHub,
-  communityMessageId, type CommunityFrame, type CommunityMessageFrame, type GroupEdit, type GroupMention, type WireReply, type StatusCard, type CommunityState, type GroupEntryLink, type GroupMetaChange, type Hub, type Roster,
+  type CommunityFrame, type CommunityMessageFrame, type GroupEdit, type GroupMention, type WireReply, type StatusCard, type CommunityState, type GroupEntryLink, type GroupMetaChange, type Hub, type Roster,
 } from "@ghostly/core";
 import type { GroupEvent, GroupJoinStage, GroupView, StoredGroup, StoredMessage } from "../shared/types";
 import { groupReply } from "../shared/replies";
@@ -756,6 +756,8 @@ export class Communities {
       const ready = [...this.host.edges(groupId)].filter(([key, id]) => this.host.linkReady(id, 2) && !s.wasRemoved(key)).map(([key]) => key);
       for (const key of ready.slice(0, 3)) s.catchUp(key);
     }
+    // Something I said with no edge up may be sealed under a commit I took for the newest: said again once caught up.
+    await s.reseal().catch(() => {});
     await this.reconcile(groupId, live, now);
   }
 
@@ -1378,11 +1380,13 @@ export class Communities {
   /** My frame went out on an edge (at first, or in a catch-up): the message it is, or the edit it carries, was taken. */
   private noteTaken(frame: object): void {
     const f = frame as Partial<CommunityMessageFrame>;
-    if (f.t !== "group-msg" || typeof f.g !== "string" || f.s !== this.live.get(f.g)?.session.myKey) return;
-    const id = communityMessageId(f.s!, f.e!, f.h!, f.n!);
-    this.frames.add(f.g, id);
+    const session = typeof f.g === "string" ? this.live.get(f.g)?.session : undefined;
+    if (f.t !== "group-msg" || !session || f.s !== session.myKey) return;
+    // A frame said again (I was behind when I said it) counts for the message it first was.
+    const id = session.messageIdOf(f as CommunityMessageFrame);
+    this.frames.add(f.g!, id);
     const edit = this.carriers.get(id);
-    if (edit) this.frames.add(f.g, edit);
+    if (edit) this.frames.add(f.g!, edit);
   }
 
   /** How many edges took my frame `key` (a message id, or `editKey`). */
