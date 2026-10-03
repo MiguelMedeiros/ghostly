@@ -97,8 +97,8 @@ export class CommunityWorld {
   readonly pkarr = new Map<string, GhostRecord[]>();
   now = Date.now();
   pkarrOps = 0;
-  /** Sees every Pkarr request an app makes (tests counting what a door reads). */
-  onPkarr: ((peer: Peer, op: "resolve" | "publish", key: string, background: boolean) => void) | null = null;
+  /** Sees every Pkarr request an app makes (tests counting what a door reads), and whether it is a hub's own (`door`). */
+  onPkarr: ((peer: Peer, op: "resolve" | "publish", key: string, background: boolean, door: boolean) => void) | null = null;
   /** Cuts the network in parts: links (and Pkarr reads) only work within one part. */
   part: ((peer: Peer) => number) | null = null;
   /** Cuts two peers apart (their link and their reads of each other), whatever `part` says. */
@@ -193,15 +193,15 @@ export class CommunityWorld {
         if (!links.has(id)) links.set(id, this.opened(link.g, me, other, role, true));
         return id;
       },
-      publish: async (identity, records, background) => {
+      publish: async (identity, records, background, door) => {
         this.pkarrOps++;
-        this.onPkarr?.(peer, "publish", identity.pubKeyZ32, !!background);
+        this.onPkarr?.(peer, "publish", identity.pubKeyZ32, !!background, !!door);
         if (!this.spend(peer, 2, background, true, `publish${background ? " bg" : ""}`)) throw new Error("Discovery request budget reached; retry shortly");
         if (peer.online) this.pkarr.set(identity.pubKeyZ32, structuredClone(records));
       },
-      resolve: async (key, background) => {
+      resolve: async (key, background, door) => {
         this.pkarrOps++;
-        this.onPkarr?.(peer, "resolve", key, !!background);
+        this.onPkarr?.(peer, "resolve", key, !!background, !!door);
         if (this.failRead?.(peer, key)) throw new Error("No Pkarr relay reachable");
         if (!this.spend(peer, 1, background, false, `resolve${background ? " bg" : ""}`)) throw new Error("No Pkarr relay reachable");
         return peer.online ? structuredClone(this.pkarr.get(key) ?? null) : null;

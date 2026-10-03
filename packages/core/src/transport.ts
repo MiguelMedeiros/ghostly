@@ -26,9 +26,12 @@ import type { TurnConditions, TurnSourceAnswer, TurnSourcePut } from "./turnRead
 export type DiscoveryChange = "tripped" | "recovered";
 
 /**
- * `door`: a community door reading its knock bell. A background read, but not held to the small share while a link
- * signals (`BACKGROUND_WHILE_SIGNALING`): the door admitting one person opens links that signal, and the next person's
- * knock would wait for them (2026-09-28).
+ * `door`: a community hub's own records: the knock bell it reads as the door, its lobby, and the beacon it reads and
+ * writes. Background requests, but not held to the small share while a link signals (`BACKGROUND_WHILE_SIGNALING`):
+ * the door admitting one person opens links that signal, and the next person's knock would wait for them
+ * (2026-09-28); and a hub whose own edges signal (dialling a hub whose app was killed, or opening edges for the members
+ * of one that left) got 2 of 24 beacon writes through in 90 s on CLI daemons: its entry went stale, and the members it
+ * should have carried became hubs (2026-10-03).
  *
  * `signal`: a link's WebRTC signaling, what its contact waits for: the write of a new offer or answer, or a read for
  * the answer while this side's offer is out, or the reads of a DHT-only contact's mailbox once it shows it is leaving,
