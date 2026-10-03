@@ -368,6 +368,11 @@ describe("who a moving device believes", () => {
     expect(checkSetUpdate(fresh(), { ...frame, rec: toBase64Url(forcedRec) }, 1)).toMatchObject({ kind: "refuse", why: "signer" });
     // A record no newer than the one the phone holds says nothing new.
     expect(checkSetUpdate({ ...fresh(), turnPacket: toBase64Url(desktopAtN1), activeSlot: 2 }, frame, 1)).toMatchObject({ kind: "refuse", why: "signer" });
+    // With no packet stored, the stored turn is the floor: a real release from that turn or before, replayed, is refused.
+    const bareRecord = () => ({ ...fresh(), turnPacket: undefined });
+    expect(checkSetUpdate({ ...bareRecord(), turn: N + 1 }, frame, 1), "a real release at the stored turn, replayed").toMatchObject({ kind: "refuse", why: "signer" });
+    expect(checkSetUpdate({ ...bareRecord(), turn: N + 5 }, frame, 1), "a real release from an older turn, replayed").toMatchObject({ kind: "refuse", why: "signer" });
+    expect(checkSetUpdate({ ...bareRecord(), turn: N }, frame, 1), "the same release, newer than the stored turn").toMatchObject({ kind: "accept" });
   });
 
   it("goes to removed on a valid tombstone that no longer lists it, whoever hands it over", async () => {

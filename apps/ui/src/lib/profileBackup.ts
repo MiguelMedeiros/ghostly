@@ -6,6 +6,7 @@ import { readDeviceRecord } from "@ghostly/browser/devices/store";
 import { isBundleDevices, type BundleDevices } from "@ghostly/browser/devices/restoreGuard";
 import { PENDING_RAISE_KEY, pendingRaise } from "@ghostly/browser/devices/raise";
 import { unsealSeed } from "@ghostly/browser/engine/paymentAdapters/persistence";
+import { homeOf } from "@ghostly/browser/devices/walletHomes";
 import { createDatabase, databaseExists, putRows, restoreDatabase, snapshotDatabase, type DatabaseSnapshot, type StoreShape } from "@ghostly/browser/backup/database";
 import { databaseName, wrap, type StoredFile } from "@ghostly/browser/shared/idb";
 import { FILE_BYTES_STEP, SMALL_FILE_BYTES, checkFileId, dropFileSpace, fileBytes, fileBytesOf, type FileBytes, type FileBytesKind } from "@ghostly/browser/shared/fileBytes";
@@ -186,6 +187,8 @@ export async function writeProfileBackup(sink: BackupSink, { passphrase, id, loc
     if (!isArkRecord(key)) continue;
     const walletId = (settingsStore!.values[i] as { config?: { walletId?: string } })?.config?.walletId;
     if (!walletId || ark[walletId]) continue;
+    // A handoff leaves a wallet that stays home where it is: its database never moves (WISP 06 § Wallets that stay home).
+    if (handoff && homeOf(settingsStore!.values[i])) continue;
     // A wallet that never opened its own database here has nothing more to keep than its record. One
     // that has, and cannot be read, stops the backup: a copy without it would not be the whole wallet.
     if (!(await databaseExists(`ghostly-ark-${walletId}`))) continue;
@@ -471,8 +474,18 @@ function restoredRows(store: string, keys: IDBValidKey[], values: unknown[], fre
     return values.map((value, i) => {
       const record = value as { config?: { walletId?: unknown } };
       const walletId = record?.config?.walletId;
+      // In a handoff, a wallet at home on a device keeps its database's name: that device holds the database, and opens
+      // it again when the profile comes back (WISP 06 § Installing the staged state).
+      if (handoff && homeOf(value)) return value;
       if (typeof keys[i] === "string" && (keys[i] as string).startsWith("fedimint")) return freshFedimint(value);
       return hasOwnDatabase(keys[i]) && typeof walletId === "string" ? { ...record, config: { ...record.config, walletId: fresh(walletId) } } : value;
+    });
+  }
+  if (store === "proofs") {
+    // Ecash as it was when the backup was made: what was spent since is found by asking the mint, once the wallet runs.
+    return values.map((value) => {
+      const proof = value as { secret?: unknown; reserved?: boolean } | null;
+      return proof && typeof proof === "object" && typeof proof.secret === "string" && !proof.reserved ? { ...proof, unchecked: true } : value;
     });
   }
   // A handoff moves payment attempts as they are: the device that had them was alive and settled its own business.

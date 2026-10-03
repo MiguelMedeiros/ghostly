@@ -77,7 +77,9 @@
     "usdtNeedsSepoliaGas": "Prima serve un po’ di ETH Sepolia per il gas",
     "usdtNotEnoughGas": "ETH insufficiente per il gas",
     "usdtNotEnoughTokens": "Saldo di token insufficiente",
-    "usdtRpcUnavailable": "RPC USDT non disponibile"
+    "usdtRpcUnavailable": "RPC USDT non disponibile",
+    "walletAway": "{{wallet}} non si può usare qui. Usalo su {{device}}.",
+    "walletAwayUnnamed": "{{wallet}} non si può usare qui: resta su un altro dispositivo."
   },
   "extension": {
     "notPaymentLink": "Non è un link di pagamento",

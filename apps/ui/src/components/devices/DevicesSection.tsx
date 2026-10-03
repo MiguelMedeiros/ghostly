@@ -7,7 +7,10 @@ import { Button, Notice, Row, Section } from "../wallet/ui";
 import { AddDeviceDialog } from "./AddDeviceDialog";
 import { MoveDialog } from "./Handoff";
 import { LostChecklist, RemoveDeviceDialog } from "./RemoveDeviceDialog";
-import { useHandoffView } from "../../lib/handoff";
+import { FAILURES, dayText, useHandoffView, walletNameOf } from "../../lib/handoff";
+
+/** The refusals that come from this device's wallets (WISP 06 § Wallets). */
+const WALLET_REFUSALS = new Set<string>(["wallet", "loading", "mainnet", "expiry"]);
 
 /**
  * Profile, Devices (WISP 06 § User experience): the devices of this profile, which one is active, Add a device, Move,
@@ -84,6 +87,11 @@ export function DevicesSection() {
         <Row testId="handoff-wrong-password" label={t("devices.handoff.wrongPassword", { device: handoff.device })}>
           <Button data-testid="handoff-allow" onClick={() => void engine.call("deviceHandoffAllow", { key: handoff.key })}>{t("devices.handoff.allowAgain", { device: handoff.device })}</Button>
         </Row>
+      )}
+      {/* A pull this device's wallets kept from happening: what keeps the profile here (WISP 06 § Wallets). */}
+      {handoff?.role === "giver" && handoff.step === "failed" && handoff.failure && WALLET_REFUSALS.has(handoff.failure) && (
+        <Row testId="handoff-wallet-refusal" label={t(FAILURES[handoff.failure], { device: handoff.device, wallet: walletNameOf(handoff.wallet) })}
+          hint={handoff.expiresAt !== undefined ? t("devices.handoff.staysExpires", { wallet: walletNameOf(handoff.wallet), date: dayText(handoff.expiresAt, language) }) : undefined} />
       )}
       {adding && <AddDeviceDialog onClose={() => setAdding(false)} />}
       {moving && <MoveDialog device={moving.name} deviceKey={moving.key} onClose={() => setMoving(null)} />}

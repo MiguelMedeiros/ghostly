@@ -20,6 +20,13 @@
     "sweepingInfo": "Ark coins live in a batch that expires; Ghostly renews them before that while it is open. Coins that expired are still yours, but first the Ark server takes their batch back on-chain (a sweep). That waits for new Bitcoin blocks, often an hour or more. Until then they cannot be spent or recovered; after it, Recover moves them into a new batch.",
     "useProvider": "Use this provider"
   },
+  "away": {
+    "backup": "If {{device}} is lost, the funds are reachable from this recovery phrase or backup file.",
+    "expires": "Coins expire on {{date}}. Use Ghostly on {{device}} before then.",
+    "otherDevice": "the device that holds it",
+    "text": "{{wallet}} can't be used here. Use it on {{device}}.",
+    "title": "On {{device}}"
+  },
   "backup": {
     "download": "Download",
     "file": "Wallet backup",
@@ -122,6 +129,7 @@
   "cards": {
     "amount": "{{amount}} {{unit}}",
     "balance": {
+      "away": "On {{device}}",
       "locked": "Locked",
       "needsKey": "Needs a key",
       "noFederation": "No federation",
@@ -149,6 +157,7 @@
       "usdtSepolia": "Sepolia · test token"
     },
     "status": {
+      "away": "Elsewhere",
       "checkSettings": "Check settings",
       "connecting": "Connecting…",
       "experimental": "Experimental",

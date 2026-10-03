@@ -1,4 +1,5 @@
 import { generateMnemonic, validateMnemonic } from "@scure/bip39";
+import { awayFrom, refuseAway, requireTurn } from "./away";
 import { wordlist } from "@scure/bip39/wordlists/english.js";
 import type { PaymentTarget, WalletNetwork } from "@ghostly/core";
 import { store, STORES, transact, wrap } from "../../shared/idb";
@@ -88,6 +89,8 @@ export class BarkWallet {
 
   /** Opens the wallet; `create`: makes this network's default one first when there is none. Retries while the server is unreachable. */
   ensureReady(create = false): Promise<void> {
+    // At home on another device (WISP 06 § Wallets that stay home): never opened here.
+    if (awayFrom(`bark:${this.network}`) !== undefined) return Promise.resolve();
     if (this.readying) return this.readying.then(() => this.needsReady(create) ? this.startReady(create) : undefined);
     return this.startReady(create);
   }
@@ -96,6 +99,7 @@ export class BarkWallet {
   private async ready(create: boolean) {
     clearTimeout(this.retry);
     try {
+      await requireTurn();
       if (!this.saved) { if (create) await this.serial(async () => { if (!this.saved) await this.createNow({ ...barkDefaults(this.network) }); }); }
       else if (!this.adapter) await this.serial(() => this.stopped ? Promise.resolve() : this.open());
     } catch (error) {
@@ -114,6 +118,8 @@ export class BarkWallet {
   }
   create(params: BarkCreate) { return this.serial(() => this.createNow(params)); }
   private async createNow(params: BarkCreate) {
+    // At home on another device (WISP 06 § Wallets that stay home): never made again, unlocked or restored over here.
+    refuseAway(`bark:${this.network}`, "Bark");
     if (!BARK_NETWORKS.includes(params.network)) throw new Error("Unsupported Bark network");
     if (barkMode(params.network) !== this.network) throw new WrongNetworkError(barkMode(params.network), `${params.network === "bitcoin" ? "Bitcoin" : params.network} is a ${networkLabel(barkMode(params.network))} network: this is the ${networkLabel(this.network)} Bark wallet`);
     const provider = params.provider.replace(/\/$/, ""), explorer = params.explorer.replace(/\/$/, "");
@@ -221,7 +227,7 @@ export class BarkWallet {
     const intents = (await intentRepository.list()).filter((i) => this.ours(i));
     return JSON.stringify({ format: "ghostly-bark-encrypted", version: 1, vault: await sealSeed(JSON.stringify({ format: "ghostly-bark", version: 1, mnemonic, config, intents }), password) });
   }
-  restoreBackup(text: string, password: string): Promise<void> { return this.serial(async () => {
+  restoreBackup(text: string, password: string): Promise<void> { return this.serial(async () => { refuseAway(`bark:${this.network}`, "Bark");
     if (text.length > 16 * 1024 * 1024) throw new Error("Bark backup is too large");
     const envelope = JSON.parse(text);
     if (envelope.format !== "ghostly-bark-encrypted" || envelope.version !== 1) throw new Error("Unsupported Bark backup");

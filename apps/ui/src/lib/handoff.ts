@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { engine } from "@ghostly/browser/platform/engine";
 import type { HandoffFailure, HandoffView } from "@ghostly/browser/devices/handoff";
 import type { TranslationKey } from "../contexts/I18nContext";
+import { WALLET_NAME } from "../components/wallet/names";
 
 /* The handoff (WISP 06 § The handoff) as the pages need it: what a failure says, sizes, and the view of the engine's. */
 
@@ -16,7 +17,8 @@ export const FAILURES: Record<HandoffFailure, TranslationKey> = {
   unreachable: "devices.handoff.fail.unreachable", password: "devices.handoff.fail.password", "locked-out": "devices.handoff.fail.lockedOut",
   refused: "devices.handoff.fail.refused", payment: "devices.handoff.fail.payment", call: "devices.handoff.fail.call", busy: "devices.handoff.fail.busy",
   older: "devices.handoff.fail.older", room: "devices.handoff.fail.room", damaged: "devices.handoff.fail.damaged", dropped: "devices.handoff.fail.dropped",
-  wallet: "devices.handoff.fail.wallet", cancelled: "devices.handoff.fail.cancelled", turn: "devices.handoff.fail.turn", offline: "devices.handoff.fail.offline",
+  wallet: "devices.handoff.fail.wallet", loading: "devices.handoff.fail.loading", mainnet: "devices.handoff.fail.mainnet", expiry: "devices.handoff.fail.expiry",
+  cancelled: "devices.handoff.fail.cancelled", turn: "devices.handoff.fail.turn", offline: "devices.handoff.fail.offline",
   version: "devices.handoff.fail.version", failed: "devices.handoff.fail.failed",
 };
 
@@ -26,6 +28,25 @@ export function handoffErrorKey(error: unknown): TranslationKey | null {
   const reason = message.match(/^handoff-([a-z-]+):/)?.[1];
   return reason && reason in FAILURES ? FAILURES[reason as HandoffFailure] : reason ? "devices.handoff.fail.failed" : null;
 }
+
+/**
+ * The wallet a refusal names (`handoff-expiry:bark: …`), by its name as the cards say it, or undefined. The engine puts
+ * its type between colons after the reason.
+ */
+export function handoffErrorWallet(error: unknown): string | undefined {
+  const message = error instanceof Error ? error.message : typeof error === "string" ? error : "";
+  const type = message.match(/^handoff-[a-z-]+:([a-z]+):/)?.[1];
+  return type && type in WALLET_NAME ? WALLET_NAME[type as keyof typeof WALLET_NAME] : undefined;
+}
+
+/** A date as people read it, in the app's language ("12 Oct 2026"): when coins expire. */
+export function dayText(at: number, language: string): string {
+  try { return new Intl.DateTimeFormat(language, { dateStyle: "medium" }).format(new Date(at)); }
+  catch { return new Date(at).toDateString(); }
+}
+
+/** A wallet type the engine names, as the cards say it. */
+export const walletNameOf = (type: string | undefined): string => (type && type in WALLET_NAME ? WALLET_NAME[type as keyof typeof WALLET_NAME] : type ?? "");
 
 /** The handoff on this device, read twice a second while `on`. */
 export function useHandoffView(on = true): HandoffView | null {

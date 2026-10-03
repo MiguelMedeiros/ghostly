@@ -46,8 +46,11 @@
       "cancelled": "Arrêté. Rien n'a changé.",
       "damaged": "La copie est arrivée abîmée. Rien n'a changé.",
       "dropped": "La connexion a été coupée. Rien n'a changé.",
+      "expiry": "Renouvelez d'abord vos pièces {{wallet}}.",
       "failed": "Une erreur est survenue. Rien n'a changé.",
+      "loading": "Un portefeuille ne peut pas être lu pour l'instant. Réessayez dans un moment.",
       "lockedOut": "Trop d'essais. Déverrouillez {{device}} pour réessayer.",
+      "mainnet": "L'argent Mainnet ne peut pas encore passer sur un autre appareil. Videz d'abord vos portefeuilles Mainnet.",
       "offline": "Vous êtes hors ligne.",
       "older": "Mettez d'abord Ghostly à jour sur cet appareil.",
       "password": "Mot de passe incorrect.",
@@ -57,7 +60,7 @@
       "turn": "Un autre appareil a pris le relais. Cet appareil est en veille.",
       "unreachable": "Impossible de joindre {{device}}. Il doit être allumé, avec Ghostly ouvert.",
       "version": "Ghostly a été mis à jour entre-temps. Rien n'a changé.",
-      "wallet": "Ce profil contient de l'argent, qui ne peut pas encore changer d'appareil. Videz d'abord ses portefeuilles."
+      "wallet": "Un portefeuille d'ici ne peut pas être déplacé avec cette version de Ghostly."
     },
     "later": "Apporter les gros fichiers plus tard",
     "laterNote": "{{size}} de gros fichiers restent sur {{device}} pour l'instant.",
@@ -69,6 +72,8 @@
     "offerHint": "Environ {{size}}.",
     "offerTitle": "Déplacer ce profil ici depuis {{device}} ?",
     "passwordHint": "Saisissez le mot de passe de verrouillage de ce profil. {{device}} le vérifie.",
+    "stays": "{{wallet}} reste sur cet appareil.",
+    "staysExpires": "{{wallet}} reste sur cet appareil. Ses pièces expirent le {{date}} : utilisez Ghostly ici avant.",
     "step": {
       "authorizing": "Vérification du mot de passe",
       "checking": "Vérification",

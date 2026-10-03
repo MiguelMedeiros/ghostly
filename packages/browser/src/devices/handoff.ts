@@ -13,6 +13,7 @@ import { sha256 } from "@noble/hashes/sha2.js";
 import { HandoffPasswordError, startPakeGiver, startPakeTaker, type HandoffVerifier, type PakeGiver, type PakeTaker } from "./handoffPake";
 import type { DeviceAttempts, DevicePatch, DeviceRecord, HeldFile, LeftFile, StoredDeviceState } from "./state";
 import type { TurnOutcome } from "./turn";
+import type { HandoffTakerFacts } from "./handoffWallets";
 
 /*
  * The handoff (WISP 06 § The handoff): the whole state of a profile moves from the active device (A, the giver) to
@@ -43,7 +44,7 @@ import type { TurnOutcome } from "./turn";
 /** Why a handoff did not happen, as the screens say it. */
 export type HandoffFailure =
   | "unreachable" | "password" | "locked-out" | "refused" | "payment" | "call" | "busy" | "older" | "room" | "damaged" | "dropped"
-  | "wallet" | "cancelled" | "turn" | "offline" | "version" | "failed";
+  | "wallet" | "loading" | "mainnet" | "expiry" | "cancelled" | "turn" | "offline" | "version" | "failed";
 
 /** What the screens show of a handoff on either device. Never a secret. */
 export interface HandoffView {
@@ -67,7 +68,15 @@ export interface HandoffView {
   offer?: number;
   /** The taker runs a newer database: the giver must update before it takes the profile back. */
   newer?: true;
+  /** A failure about one wallet (`expiry`, `mainnet`, `loading`): its type, and for `expiry` when its coins expire. */
+  wallet?: string;
+  expiresAt?: number;
+  /** The giver: the wallets that stay on this device, and when their coins expire (WISP 06 § Wallets that stay home). */
+  stays?: HandoffStay[];
 }
+
+/** A wallet that stays on its home device in this handoff. */
+export interface HandoffStay { type: string; network: string; expiresAt?: number }
 
 export interface HandoffLinks {
   /** The link to that device is open and carries `handoff/1`. */
@@ -132,7 +141,12 @@ export interface HandoffStagingHost {
 }
 
 /** Why the giver cannot hand over now, as this device's own screens say it. */
-export type LocalBusy = "wallet" | "payment" | "call" | "loading";
+export type LocalBusy = "wallet" | "payment" | "call" | "loading" | "mainnet" | "expiry";
+
+/** Why, and about which wallet: its type, and for `expiry` when its coins expire. */
+export interface BusyReport { why: LocalBusy; wallet?: string; expiresAt?: number }
+
+const reportOf = (busy: LocalBusy | BusyReport | null): BusyReport | null => (busy === null ? null : typeof busy === "string" ? { why: busy } : busy);
 
 /** What a device says about itself in `handoff-hello`, but its key for this session. */
 export type HandoffSelf = Omit<HandoffHello, "v" | "e" | "id" | "later">;
@@ -159,12 +173,19 @@ export interface GiverPorts extends Common {
    * Why this device cannot hand over now, or null: money in a wallet, a payment going through, a call on, or wallets
    * not read yet. Said to the person on this device; the other device is told only that it is busy.
    */
-  busy(): Promise<LocalBusy | null>;
+  busy(taker?: HandoffTakerFacts): Promise<LocalBusy | BusyReport | null>;
+  /** The wallets that stay on this device in a handoff to `taker` (shown on this device's screen). */
+  staying?(taker: HandoffTakerFacts): Promise<HandoffStay[]>;
   /**
    * Pass 1 is done: freeze. Stops the engine without a word to any contact, writes `releasing` with `patch`, and
-   * reloads into the gate. Only while the engine runs (pass 1).
+   * reloads into the gate. Only while the engine runs (pass 1). The wallets follow their plan for `taker`.
    */
-  quiesce?(patch: DevicePatch): Promise<void>;
+  quiesce?(patch: DevicePatch, taker?: HandoffTakerFacts): Promise<void>;
+  /**
+   * Deletes the Breez databases of the wallets that moved (WISP 06 § Wallets), once the release is written. Each is
+   * named from its phrase, so a device that took the profile back later would reopen a stale one.
+   */
+  dropDatabases?(names: string[]): Promise<void>;
   /** Pass 2 failed or was cancelled: the device writes `active` and starts again (device-link-only mode). */
   backToActive?(): Promise<void>;
   /** A notice on this device: a pull with a wrong password. */
@@ -328,6 +349,9 @@ export class HandoffGiver {
   private sender: PartSender;
   private planned: { total: number; later: number; parts: HandoffPart[] } | null = null;
   private failure: HandoffFailure | undefined;
+  /** What a failure about one wallet names. */
+  private failed: { wallet?: string; expiresAt?: number } = {};
+  private stays: HandoffStay[] = [];
   private retry: number | undefined;
   private newer = false;
   private timer: ReturnType<typeof setTimeout> | null = null;
@@ -348,6 +372,8 @@ export class HandoffGiver {
    */
   async resume(): Promise<void> {
     const record = await this.ports.records.read();
+    // A standby that released and could not delete the Breez databases of the wallets that moved tries again.
+    if (record?.state === "standby" && record.breezDatabases?.length) await this.dropBreez();
     const handoff = record?.handoff;
     if (!record || handoff?.role !== "releasing" || !handoff.peer || !handoff.id) return;
     this.peer = handoff.peer; this.id = handoff.id; this.turn = handoff.from ?? record.turn;
@@ -365,15 +391,43 @@ export class HandoffGiver {
   }
 
   view(): HandoffView | null {
-    if (this.phase === "idle" || !this.peer) return this.failure && this.peer ? { role: "giver", device: this.deviceName, key: this.peer, step: "failed", bytes: 0, total: 0, failure: this.failure, ...(this.retry ? { retry: this.retry } : {}) } : null;
+    if (this.phase === "idle" || !this.peer) return this.failure && this.peer ? { role: "giver", device: this.deviceName, key: this.peer, step: "failed", bytes: 0, total: 0, failure: this.failure, ...(this.retry ? { retry: this.retry } : {}), ...this.failedDetail() } : null;
     const confirmed = [...this.sender.confirmed.values()].reduce((a, b) => a + b, 0);
     const step: HandoffView["step"] = this.phase === "offered" ? "connecting" : this.phase === "authorizing" ? "authorizing" : this.paused ? "paused" : this.phase === "pass1" ? "copying"
       : this.phase === "quiescing" ? "ready" : this.phase === "pass2" ? "rest" : this.phase === "released" ? "switching" : "failed";
     return {
       role: "giver", device: this.deviceName, key: this.peer, step, bytes: confirmed, total: this.planned?.total ?? 0,
       ...(this.phase === "pass1" ? { pass: 1 as const } : this.phase === "pass2" ? { pass: 2 as const } : {}),
-      ...(this.planned?.later ? { later: this.planned.later } : {}), ...(this.failure ? { failure: this.failure } : {}), ...(this.newer ? { newer: true as const } : {}),
+      ...(this.planned?.later ? { later: this.planned.later } : {}), ...(this.failure ? { failure: this.failure, ...this.failedDetail() } : {}), ...(this.newer ? { newer: true as const } : {}),
+      ...(this.stays.length ? { stays: this.stays } : {}),
     };
+  }
+
+  private failedDetail(): Pick<HandoffView, "wallet" | "expiresAt"> {
+    return { ...(this.failed.wallet ? { wallet: this.failed.wallet } : {}), ...(this.failed.expiresAt !== undefined ? { expiresAt: this.failed.expiresAt } : {}) };
+  }
+
+  /** What the giver knows of the device it would hand the profile to: its key, and its kind and SDK pins once it said hello. */
+  private takerFacts(key: string): HandoffTakerFacts {
+    const hello = this.sessions.get(key)?.peer;
+    return { key, ...(hello ? { kind: hello.kind, pins: hello.pins } : {}) };
+  }
+
+  /** The Breez databases noted at quiesce, deleted now that the release is written; the note goes once they are. */
+  private async dropBreez(): Promise<void> {
+    const record = await this.ports.records.read().catch(() => null);
+    const names = record?.breezDatabases;
+    if (!record || !names?.length || !this.ports.dropDatabases || record.state !== "standby") return;
+    try {
+      await this.ports.dropDatabases(names);
+      await this.ports.records.amend({ breezDatabases: undefined });
+    } catch { /* tried again at the next start, and on handoff-done */ }
+  }
+
+  /** The failure a busy report gives, with the wallet it names. */
+  private failWith(report: BusyReport): HandoffFailure {
+    this.failed = { ...(report.wallet ? { wallet: report.wallet } : {}), ...(report.expiresAt !== undefined ? { expiresAt: report.expiresAt } : {}) };
+    return report.why;
   }
 
   private deviceName = "";
@@ -387,10 +441,12 @@ export class HandoffGiver {
       const record = await this.ports.records.read();
       if (!record || record.state !== "active") throw new Error("handoff-refused: Only the active device moves the profile.");
       if (slotOf(record, key) < 0) throw new Error("handoff-refused: That device is not one of this profile's.");
-      const busy = await this.ports.busy();
-      if (busy) throw new Error(`handoff-${busy === "loading" ? "busy" : busy}: This device cannot move the profile now.`);
+      const busy = reportOf(await this.ports.busy(this.takerFacts(key)));
+      // The wallet a refusal is about goes in the message, between colons, for the screen to name it.
+      if (busy) throw new Error(`handoff-${busy.why}:${busy.wallet ? `${busy.wallet}:` : ""} This device cannot move the profile now.`);
       if (!this.ports.links.live(key)) throw new Error("handoff-unreachable: That device must be on, with Ghostly open.");
       this.begin(key, newHandoffId(), record);
+      this.stays = await this.ports.staying?.(this.takerFacts(key)).catch(() => []) ?? [];
       this.phase = "offered";
       const files = await this.ports.source.files();
       const bytes = fileParts(files).reduce((sum, part) => sum + part[1], 0);
@@ -466,6 +522,7 @@ export class HandoffGiver {
       case HANDOFF_VERIFIED: return this.onVerified(from, frame);
       case HANDOFF_DONE: {
         if (from !== this.peer || readHandoffDone(frame) === null || this.phase !== "released") return;
+        await this.dropBreez();
         await this.ports.records.amend({ handoff: undefined });
         this.phase = "idle"; this.peer = null;
         this.changed();
@@ -510,10 +567,15 @@ export class HandoffGiver {
     if (slotOf(record, from) < 0) return busy("refused", 0);
     const pushed = this.phase === "offered" && from === this.peer && request.id === this.id;
     if (this.phase !== "idle" && this.phase !== "failed" && !pushed) return busy("handoff");
-    // Why is this device's own business (money, a call): the other device is told it is busy, nothing more.
-    if (await this.ports.busy()) return busy("handoff");
     const session = this.sessionFor(from);
     if (!session?.peer) return busy("handoff", 5);
+    // Why is this device's own business (money, a call): the other device is told it is busy, nothing more.
+    const local = reportOf(await this.ports.busy(this.takerFacts(from)));
+    if (local) {
+      // Said on this device, which a pull may find unattended: the screen there names what keeps the profile here.
+      if (!pushed) { this.peer = from; this.deviceName = name(record, from); this.failure = this.failWith(local); this.changed(); }
+      return busy("handoff");
+    }
     const self = await this.ownSelf();
     const versions = handoffVersions(self, session.peer);
     if (versions.older) return busy("older", 0);
@@ -524,6 +586,7 @@ export class HandoffGiver {
       // proof holds: a device that asks and never proves (holding this device in `authorizing`) spends its tries.
       await this.ports.records.amend({ handoffAttempts: { ...record.handoffAttempts, [from]: handoffAttemptFailed(record.handoffAttempts?.[from], this.now()) } });
       this.begin(from, request.id, record);
+      this.stays = await this.ports.staying?.(this.takerFacts(from)).catch(() => []) ?? [];
       this.newer = versions.newerTaker;
       this.phase = "authorizing";
       this.arm(HANDOFF_TIMINGS.idleMs, () => this.reset("dropped"));
@@ -646,18 +709,20 @@ export class HandoffGiver {
   /** Pass 1 confirmed: freeze, write `releasing`, reload. The engine does the stopping (`GiverPorts.quiesce`). */
   private async quiesce(): Promise<void> {
     if (this.phase !== "pass1" || !this.ports.quiesce) return;
-    const why = await this.ports.busy();
-    if (why === "payment") {
+    const taker = this.takerFacts(this.peer!);
+    const why = reportOf(await this.ports.busy(taker));
+    if (why?.why === "payment") {
       // A payment is going through: up to 30 seconds, then "A payment is still going through".
       const deadline = this.now() + HANDOFF_TIMINGS.paymentMs;
-      while (this.now() < deadline && await this.ports.busy() === "payment") await new Promise((resolve) => setTimeout(resolve, 1_000));
-      if (await this.ports.busy()) { this.out(handoffBusyFrame("handoff", 30)); this.reset("payment"); return; }
-    } else if (why) { this.out(handoffBusyFrame("handoff", 30)); this.reset(why === "loading" ? "busy" : why); return; }
+      while (this.now() < deadline && reportOf(await this.ports.busy(taker))?.why === "payment") await new Promise((resolve) => setTimeout(resolve, 1_000));
+      const still = reportOf(await this.ports.busy(taker));
+      if (still) { this.out(handoffBusyFrame("handoff", 30)); this.reset(still.why === "payment" ? "payment" : this.failWith(still)); return; }
+    } else if (why) { this.out(handoffBusyFrame("handoff", 30)); this.reset(this.failWith(why)); return; }
     this.phase = "quiescing";
     this.changed();
     await this.ports.quiesce({
       handoff: { role: "releasing", step: "pass2", id: this.id!, peer: this.peer!, from: this.turn, secret: toBase64Url(this.secret!), at: this.now(), ...(this.newer ? { newer: true as const } : {}) },
-    });
+    }, taker);
   }
 
   private async onVerified(from: string, frame: DeviceFrame): Promise<void> {
@@ -690,6 +755,8 @@ export class HandoffGiver {
     // The wrong passwords counted here go with the profile: a device does not get fresh tries on each new active one.
     this.out({ ...handoffReleaseFrame(release), ...(record.handoffAttempts ? { a: record.handoffAttempts } : {}) });
     this.changed();
+    // On standby durably: no Breez SDK runs here (the gate), and none of the wallets that moved opens here again.
+    await this.dropBreez();
   }
 
   /** Pass 2 cannot finish: this device never signed a release, so it is the active one again. */
@@ -704,7 +771,7 @@ export class HandoffGiver {
 
   private begin(key: string, id: string, record: DeviceRecord): void {
     this.peer = key; this.id = id; this.turn = record.turn; this.deviceName = name(record, key);
-    this.failure = undefined; this.retry = undefined; this.have = null; this.planned = null; this.pake = null; this.secret = null;
+    this.failure = undefined; this.failed = {}; this.stays = []; this.retry = undefined; this.have = null; this.planned = null; this.pake = null; this.secret = null;
     this.sender = new PartSender(this.now);
   }
 

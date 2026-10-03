@@ -75,6 +75,8 @@ export class PaymentCoordinator {
     }
     return dropped;
   }
+  /** Calls to a payment's adapter that have not returned (an approval or a reconcile), across every payment. */
+  get running(): number { return this.active.size; }
   private adapter(method: string) { const adapter=this.adapters.find(a=>a.method===method); if(!adapter)throw engineError("methodUnavailable"); return adapter; }
   private async require(id: string) { const saved=await this.repository.get(id); if(!saved)throw engineError("unknownPaymentIntent"); return saved; }
   private once(id:string,work:()=>Promise<PaymentReview>) { const existing=this.active.get(id);if(existing)return existing;const promise=work().finally(()=>this.active.delete(id));this.active.set(id,promise);return promise; }

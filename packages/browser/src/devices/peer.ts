@@ -65,19 +65,22 @@ export async function standbyEngine(gate: DeviceGate, options: NodeOptions | und
  */
 export async function createPeerServer(options: NodeOptions | undefined, overrides: { gate?: DeviceGate; standby?: DeviceLinkEngine; turn?: TurnNetwork | null } = {}): Promise<PeerServer> {
   let gate = overrides.gate ?? await openDeviceGate();
+  let turnReadAt: number | undefined;
   // The active device of a device set reads the turn before its engine starts (WISP 06 § When a device checks): a device
   // another one replaced while it was off stops here, before it dials or publishes anything.
   if (gate.full && gate.state === "active" && !options?.singleDevice) {
     const start = await activeStart(gate, options, overrides.turn);
     if (start.gated) { gate = { ...gate, state: start.gated.state, full: false, view: start.gated }; replaceDeviceGate(gate); }
     else if (start.limited) return new EngineServer({ ...options, limited: true });
+    turnReadAt = start.readAt;
   }
-  if (gate.full) return new EngineServer(options);
+  // The good read at start counts for the single-writer wallets while it is under a minute old (WISP 06 § Wallets).
+  if (gate.full) return new EngineServer(turnReadAt === undefined ? options : { ...options, turnReadAt });
   return new DeviceLinkOnlyServer(gate, overrides.standby ?? await standbyEngine(gate, options));
 }
 
 /** How the active device starts, after its read at start: the whole engine, limited mode, or not at all (`gated`). */
-export interface ActiveStart { gated?: DeviceGateView; limited?: true }
+export interface ActiveStart { gated?: DeviceGateView; limited?: true; /** When the read that said this device is the active one was made. */ readAt?: number }
 
 /**
  * The read an active device makes as a condition of starting (WISP 06 § Device state by turn read, the row "active, at
@@ -106,7 +109,7 @@ export async function activeStart(gate: DeviceGate, options: NodeOptions | undef
     const now = await readDeviceRecord(gate.profile).catch(() => null);
     return { gated: now ? viewOf(now) : { state: outcome.state as DeviceGateView["state"] } };
   }
-  if (outcome.kind === "start" || outcome.kind === "go-on" || outcome.kind === "single") return outcome.kind === "go-on" && outcome.restricted ? { limited: true } : {};
+  if (outcome.kind === "start" || outcome.kind === "go-on" || outcome.kind === "single") return outcome.kind === "go-on" && outcome.restricted ? { limited: true } : outcome.kind === "single" ? {} : { readAt: Date.now() };
   return { limited: true };
 }
 

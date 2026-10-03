@@ -28,8 +28,8 @@ import type { StoredLink } from "../shared/types";
  * The rest of what a copy from older state does before it starts is here too, since it is the same one-time pass over
  * the same database: payment attempts that were not finished become `unknown` and are only looked up; those that
  * hold signed bytes or a signed transaction (USDT, on-chain Bitcoin, Ark) are parked and never broadcast again; the
- * on-chain wallet scans again from the start and drops its reservations; and group admin work is off in every group
- * until the person turns it on there.
+ * on-chain wallet scans again from the start and drops its reservations; every free Cashu proof is checked at its mint
+ * before it counts; and group admin work is off in every group until the person turns it on there.
  */
 
 /** The stride `S` (WISP 06 § Raised counters). */
@@ -144,7 +144,17 @@ export function raisedBdk(value: unknown): unknown {
 /** What a raise did. */
 export interface RaiseResult { floor: number; links: number; parked: number; groups: number; done: "now" | "before" }
 
-const STORES = { links: "links", settings: "settings", intents: "paymentIntents", groups: "groups" } as const;
+const STORES = { links: "links", settings: "settings", intents: "paymentIntents", groups: "groups", proofs: "proofs" } as const;
+
+/**
+ * Ecash of a copy started from older state: every free proof is checked at its mint before it counts (WISP 06 § Wallets,
+ * Cashu's row for a forced takeover); spent ones are dropped (`CashuWallet.checkRestored`). Ecash a payment holds is
+ * left to that payment.
+ */
+export function raisedProof(value: unknown): unknown {
+  const proof = value as { secret?: unknown; reserved?: boolean; unchecked?: boolean } | null;
+  return proof && typeof proof === "object" && typeof proof.secret === "string" && !proof.reserved && !proof.unchecked ? { ...proof, unchecked: true } : value;
+}
 
 /**
  * Makes `pending` in one transaction of the profile's database: every chat, every payment attempt, the on-chain
@@ -152,7 +162,7 @@ const STORES = { links: "links", settings: "settings", intents: "paymentIntents"
  * changes nothing. The settings row a restore wrote is taken away in the same transaction.
  */
 export function applyCounterRaise(db: IDBDatabase, pending: PendingRaise): Promise<RaiseResult> {
-  const names = [STORES.links, STORES.settings, STORES.intents, STORES.groups].filter((name) => db.objectStoreNames.contains(name));
+  const names = [STORES.links, STORES.settings, STORES.intents, STORES.groups, STORES.proofs].filter((name) => db.objectStoreNames.contains(name));
   const tx = db.transaction(names, "readwrite");
   const result: RaiseResult = { floor: 0, links: 0, parked: 0, groups: 0, done: "now" };
   const done = new Promise<RaiseResult>((resolve, reject) => {
@@ -191,6 +201,16 @@ export function applyCounterRaise(db: IDBDatabase, pending: PendingRaise): Promi
           if (!at) return;
           const next = raisedIntent(at.value as { review: PaymentReview });
           if (next !== at.value) { at.update(next); if (next.review.parked) result.parked += 1; }
+          at.continue();
+        };
+      }
+      if (names.includes(STORES.proofs)) {
+        const cursor = tx.objectStore(STORES.proofs).openCursor();
+        cursor.onsuccess = () => {
+          const at = cursor.result;
+          if (!at) return;
+          const next = raisedProof(at.value);
+          if (next !== at.value) at.update(next);
           at.continue();
         };
       }
