@@ -33,7 +33,7 @@ async function setDeviceState(page: Page, state: "standby" | null): Promise<void
     await new Promise<void>((resolve, reject) => {
       const tx = db.transaction("devices", "readwrite", { durability: "strict" });
       const key = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
-      if (wanted) tx.objectStore("devices").put({ v: 1, profile: "ghostly", state: wanted, saved: 1, turn: 7, rev: 0, deviceSet: [{ key, name: "MacBook" }, { key, name: "This browser" }], activeSlot: 0, ownSlot: 1, takeovers: 0, earlierSets: [] });
+      if (wanted) tx.objectStore("devices").put({ v: 1, profile: "ghostly", state: wanted, saved: 1, turn: 7, rev: 0, deviceSet: [{ key, name: "MacBook" }, { key, name: "This browser" }], activeSlot: 0, ownSlot: 1, takeovers: 0, earlierSets: [], turnPacket: key });
       else tx.objectStore("devices").delete("ghostly");
       tx.oncomplete = () => resolve();
       tx.onerror = tx.onabort = () => reject(tx.error);

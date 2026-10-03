@@ -10,6 +10,7 @@ import { ColorSwatches } from "../components/ColorSwatches";
 import { baseProfileName, clearRestoredMark, createProfile, currentProfile, listProfiles, renameProfile, switchProfile, type ProfileEntry } from "../lib/profiles";
 import { Block, Button, Notice, Row, Section, Segmented, Switch, input } from "../components/wallet/ui";
 import { ProfileBackups } from "../components/ProfileBackups";
+import { DevicesSection } from "../components/devices/DevicesSection";
 import { useEngineState, useIdentityAttention } from "../lib/identities";
 import { DeleteProfileDialog } from "../components/DeleteProfileDialog";
 import { ProfileBadge } from "../components/ProfileBadge";
@@ -131,6 +132,8 @@ export function Profile() {
         <LinkRow label={t("tabs.services")} value={services.length ? services.length : undefined} onClick={() => nav.open("/services")} />
         <LinkRow label={t("settings.title")} onClick={() => nav.open("/settings")} />
       </Section>
+
+      <DevicesSection />
 
       <ProfileBackups canSwitch={canSwitch} openBackup={wantsBackup} />
 

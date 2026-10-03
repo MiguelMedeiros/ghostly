@@ -20,9 +20,9 @@ vi.mock("@ghostly/browser/shared/idb", async (actual) => await actual());
 const WORK = "work000000";
 const KEY = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 
-/** Puts a profile in a state directly: nothing can enroll a device yet. */
+/** Puts a profile in a state directly, as one that finished its enrollment holds it (the packet it accepted is not read here). */
 async function putState(profile: string, state: "active" | "standby" | "superseded" | "removed"): Promise<void> {
-  await putDeviceRecord({ v: 1, profile, state, saved: 1, turn: 4, rev: 0, deviceSet: [{ key: KEY, name: "MacBook" }, { key: KEY, name: "This browser" }], activeSlot: 0, ownSlot: 1, takeovers: 0, earlierSets: [] });
+  await putDeviceRecord({ v: 1, profile, state, saved: 1, turn: 4, rev: 0, deviceSet: [{ key: KEY, name: "MacBook" }, { key: KEY, name: "This browser" }], activeSlot: 0, ownSlot: 1, takeovers: 0, earlierSets: [], turnPacket: KEY });
 }
 const dropDevices = () => new Promise<void>((resolve) => { const r = indexedDB.deleteDatabase("ghostly-devices"); r.onsuccess = r.onerror = r.onblocked = () => resolve(); });
 

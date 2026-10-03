@@ -343,6 +343,30 @@ export interface EngineApi {
   renameGroup(params: { groupId: string; name: string }): void;
   /** Forgets the group and its history on this device (leaving first when still in it). */
   forgetGroup(params: { groupId: string }): void;
+  /**
+   * One profile on several devices (WISP 06 § Adding a device). Every method below starts with `device`, so a device
+   * that is not the active one (device-link-only mode) answers the ones it has. Errors of an enrollment start with
+   * `enroll-<reason>:`.
+   *
+   * The active device's side: the code for a new device, good for ten minutes; `name` is this device's name in the
+   * set when it gets its first one.
+   */
+  deviceEnrollInvite(params: { name: string }): import("../devices/enroll").EnrollView;
+  /** The person compared the digits on the active device. */
+  deviceEnrollConfirm(params: { match: boolean }): import("../devices/enroll").EnrollView;
+  deviceEnrollCancel(): void;
+  /** The enrollment in progress (or the last one), either side. */
+  deviceEnrollView(): import("../devices/enroll").EnrollView | null;
+  /** The new device's side: joins the profile of the code, as a standby, in place of the new profile it runs. */
+  deviceEnrollJoin(params: { code: string; name: string; kind?: import("@ghostly/core").DeviceKind; app?: string }): import("../devices/enroll").EnrollView;
+  /** A standby whose enrollment did not finish looks for the record that lists it again. */
+  deviceEnrollFinish(): { finished: boolean };
+  /** A standby whose enrollment did not finish takes the device set off this device ("Not finished", Remove). */
+  deviceEnrollRemove(): void;
+  /** The device set of this profile, as the Devices section and the standby screen show it. */
+  deviceSet(): import("../devices/links").DeviceSetView;
+  /** A ping over the device link to the device with this signing key: how long its echo took. */
+  devicePing(params: { key: string }): { ms: number };
 }
 
 /** What the engine implements: any call may be answered asynchronously. */

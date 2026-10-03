@@ -40,7 +40,9 @@ const KEY = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 const request = (method: string, params?: unknown, id = 1) => ({ kind: "request", id, method, params }) as unknown as RpcRequest;
 const flush = () => new Promise<void>((resolve) => setTimeout(resolve, 5));
 const record = (state: StoredDeviceState, patch: Partial<DeviceRecord> = {}): DeviceRecord =>
-  ({ v: 1, profile: databaseName(), state, saved: 1, turn: 5, rev: 0, deviceSet: [{ key: KEY, name: "MacBook" }, { key: KEY, name: "Phone" }], activeSlot: 0, ownSlot: 1, d: KEY, takeovers: 0, earlierSets: [], ...patch });
+  ({ v: 1, profile: databaseName(), state, saved: 1, turn: 5, rev: 0, deviceSet: [{ key: KEY, name: "MacBook" }, { key: KEY, name: "Phone" }], activeSlot: 0, ownSlot: 1, d: KEY,
+    // A finished enrollment: the record it accepted from the active device (its bytes are not read here).
+    turnPacket: KEY, takeovers: 0, earlierSets: [], ...patch });
 const host = (onServer = vi.fn()) => ({ onServer, host: createInPageHost({ version: "1.0.3", features: { shareLocalServices: false, openServices: false }, node: { platform: "web" } as never, requestLocalAccess: async () => false, openService: async () => {}, onServer }) });
 const databases = async () => (await indexedDB.databases()).map((d) => d.name).sort();
 

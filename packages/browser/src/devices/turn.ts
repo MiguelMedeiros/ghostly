@@ -131,7 +131,8 @@ interface Held {
   selfRaised?: boolean;
 }
 
-type WriteOptions = { turn?: number; release?: TurnRelease; slots?: (DeviceSlot | null)[] };
+/** `patch`: other fields of the device record, written in the same write as the record (enrollment drops its note there). */
+type WriteOptions = { turn?: number; release?: TurnRelease; slots?: (DeviceSlot | null)[]; patch?: DevicePatch };
 
 export class TurnKeeper {
   private readonly store: TurnStore;
@@ -300,7 +301,7 @@ export class TurnKeeper {
     const fields: TurnFields = { turn: place.turn, rev: place.rev, author: ownSlot, active: ownSlot, slots, instance: (this.options.instance ?? (() => randomBytes(8)))(), ...(release ? { release } : {}) };
     const payload = await signTurnPacket(keys, fields, this.options.signer);
     // Stored before it is put: what this device finds on the network after a crash is never newer than what it holds.
-    held.record = await this.store.amend(this.options.profile, { turn: place.turn, rev: place.rev, turnPacket: toBase64Url(payload), activeSlot: ownSlot, ...(options.slots ? { deviceSet: options.slots } : {}) });
+    held.record = await this.store.amend(this.options.profile, { ...options.patch, turn: place.turn, rev: place.rev, turnPacket: toBase64Url(payload), activeSlot: ownSlot, ...(options.slots ? { deviceSet: options.slots } : {}) });
     held.stored = payload;
     const read = readTurnPacket(keys, payload);
     held.storedRecord = read.kind === "valid" ? read.record : null;
@@ -451,7 +452,11 @@ export class TurnKeeper {
       case "go-on": return { kind: "go-on", restricted: action.restricted, read };
       case "show": {
         // A standby keeps the last record it accepted: what it shows, and what a `set-update` is checked against.
-        if (read.result === "other" && !read.known && read.record && read.payload) {
+        // Only a record that lists this device in its own slot: one that does not (a relay that lags behind the record
+        // that added this device, or an enrollment the active device never finished) would take this device's own
+        // slot out of its record, and with it its key and its links.
+        const listed = read.record?.slots[held.ownSlot];
+        if (read.result === "other" && !read.known && read.record && read.payload && !!listed && toBase64Url(listed.key) === toBase64Url(held.ownKey)) {
           held.record = await this.store.amend(this.options.profile, { turn: read.record.turn, rev: read.record.rev, turnPacket: toBase64Url(read.payload), activeSlot: read.record.active, deviceSet: deviceSetOf(read.record) });
         }
         const active = held.record.activeSlot === undefined ? undefined : held.record.deviceSet[held.record.activeSlot]?.name;

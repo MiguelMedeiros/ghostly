@@ -24,7 +24,8 @@ describe("the site's invite reader agrees with the app's", () => {
     same(inviteCode.toUpperCase());
     expect(checkInvite(inviteCode.toUpperCase())).toEqual({ ok: true, code: inviteCode });
     for (let i = 8; i < inviteCode.length; i += 7) same(inviteCode.slice(0, i) + (inviteCode[i] === "q" ? "p" : "q") + inviteCode.slice(i + 1));
-    for (const version of [0, 2, 17, 31]) same(bech32m.encode("ghostly", [version, ...words.slice(1)], false));
+    // Version 2 adds a device to a profile (WISP 06): both say so, and neither makes a chat of it.
+    for (const version of [0, 2, 3, 17, 31]) same(bech32m.encode("ghostly", [version, ...words.slice(1)], false));
     same(bech32.encode("ghostly", words, false));
     const bytes = bech32m.fromWords(words.slice(1));
     same(bech32m.encode("ghostly", [1, ...bech32m.toWords(bytes.slice(0, 96))], false));

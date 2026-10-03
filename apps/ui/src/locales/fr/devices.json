@@ -1,4 +1,90 @@
 {
+  "add": {
+    "adding": "Ajout de {{device}}…",
+    "button": "Ajouter un appareil",
+    "codeHint": "Sur l’autre appareil, ouvrez Ghostly et choisissez Ajouter cet appareil à mon profil. Puis scannez ce code.",
+    "confirm": "Le nouvel appareil se présente comme {{device}}. Les deux appareils affichent-ils ces chiffres ?",
+    "done": "{{device}} ajouté. Il est en veille.",
+    "finish": "Terminé",
+    "match": "Ils correspondent",
+    "noMatch": "Ils ne correspondent pas",
+    "notPublished": "Vos autres appareils le verront dès que cet appareil atteindra le réseau.",
+    "refused": "Un autre appareil a essayé ce code. Il n’a rien reçu.",
+    "title": "Ajouter un appareil",
+    "tryAgain": "Recommencer",
+    "valid": "Valable 10 minutes"
+  },
+  "fail": {
+    "cancelled": "Arrêté. Rien n’a été ajouté.",
+    "chat": "C’est une invitation à une discussion. Utilisez Rejoindre dans la liste des discussions.",
+    "damaged": "Ce code est abîmé. Créez-en un nouveau.",
+    "digits": "Les chiffres ne correspondaient pas. Rien n’a été ajouté.",
+    "dropped": "La connexion a été coupée. Rien n’a été ajouté.",
+    "elsewhere": "Ce profil a déjà des appareils ailleurs. Ajoutez cet appareil depuis celui que vous utilisez maintenant.",
+    "expired": "Le délai de ce code est écoulé. Créez-en un nouveau.",
+    "failed": "Un problème est survenu. Rien n’a été ajouté.",
+    "full": "Ce profil a déjà 4 appareils.",
+    "inUse": "Ce profil est utilisé ici. Créez d’abord un nouveau profil, puis ajoutez l’appareil depuis celui-ci.",
+    "notGhostly": "Ce n’est pas un code pour ajouter un appareil.",
+    "offline": "Vous êtes hors ligne.",
+    "proof": "L’autre appareil n’a pas pu prouver qui il est. Rien n’a été ajouté.",
+    "replaced": "Cet appareil n’est plus l’appareil actif.",
+    "set": "Ce profil est déjà sur plusieurs appareils.",
+    "typo": "Ce code contient une faute de frappe. Vérifiez-le ou créez-en un nouveau.",
+    "unanswered": "Votre autre appareil n’a pas répondu. Vérifiez le code ou créez-en un nouveau.",
+    "unreachable": "Impossible de vérifier quel appareil est actif. Vérifiez votre connexion.",
+    "update": "Une version plus récente de Ghostly a créé ce code. Mettez à jour pour l’utiliser.",
+    "used": "Un autre appareil a utilisé ce code en premier. Créez-en un nouveau."
+  },
+  "join": {
+    "addThis": "Ajouter cet appareil à mon profil",
+    "already": "J’utilise déjà Ghostly",
+    "confirm": "Les deux appareils affichent-ils ces chiffres ?",
+    "confirmOn": "Confirmez sur votre autre appareil.",
+    "connecting": "Connexion à votre autre appareil…",
+    "continue": "Continuer",
+    "done": "Cet appareil est en veille pour votre profil.",
+    "finishing": "Finalisation…",
+    "homeScreen": "Ajoutez d’abord Ghostly à l’écran d’accueil.",
+    "homeScreenInfo": "Sur iPhone et iPad, un onglet du navigateur garde ses données à part, et le navigateur peut les effacer. L’app sur l’écran d’accueil les garde.",
+    "name": "Nommez cet appareil",
+    "nameHint": "Jusqu’à 16 caractères.",
+    "otherDevice": "votre autre appareil",
+    "persist": "Ce navigateur peut effacer les données de Ghostly. Gardez une copie sur {{device}}.",
+    "restore": "Restaurer une sauvegarde",
+    "unfinished": "Pas terminé : votre autre appareil n’a pas encore inscrit celui-ci."
+  },
+  "password": {
+    "confirm": "Saisissez-le à nouveau",
+    "current": "Mot de passe de verrouillage",
+    "keep": "Un profil sur plusieurs appareils garde son mot de passe de verrouillage, de 8 caractères ou plus.",
+    "longerHint": "Un profil sur plusieurs appareils demande 8 caractères ou plus.",
+    "longerTitle": "Choisissez un mot de passe plus long",
+    "mismatch": "Les deux mots de passe ne sont pas identiques.",
+    "new": "Nouveau mot de passe",
+    "next": "Suivant",
+    "setHint": "Sans mot de passe, quiconque tient l’un de vos appareils peut prendre ce profil.",
+    "setTitle": "Définissez d’abord un mot de passe",
+    "tooShort": "Utilisez 8 caractères ou plus.",
+    "typeTitle": "Saisissez votre mot de passe de verrouillage",
+    "wrong": "Mot de passe incorrect."
+  },
+  "section": {
+    "active": "Actif",
+    "answered": "A répondu en {{ms}} ms",
+    "check": "Vérifier",
+    "connecting": "Non connecté",
+    "hint": "Utilisez ce profil sur un autre appareil. Un seul appareil est actif à la fois.",
+    "info": "Seul l’appareil actif envoie, reçoit et paie, ainsi vos messages et votre argent ne sont jamais à deux endroits. Déplacez le profil quand vous voulez.",
+    "live": "Connecté",
+    "noAnswer": "Pas de réponse",
+    "standby": "En veille",
+    "thisActive": "Cet appareil · Actif",
+    "thisStandby": "Cet appareil · En veille",
+    "title": "Appareils",
+    "unfinished": "Pas terminé",
+    "unfinishedInfo": "Il a reçu ce qui relie vos appareils et n’a pas terminé. Retirer un appareil, qui arrive plus tard, l’annule."
+  },
   "standby": {
     "hint": {
       "moving": "Ouvrez Ghostly sur l'appareil que vous utilisez maintenant pour terminer.",
@@ -10,6 +96,7 @@
       "unreadable": "Redémarrez l'application ou l'appareil, puis réessayez."
     },
     "info": "Un seul appareil envoie, reçoit et paie à la fois, pour que vos messages et votre argent ne soient jamais à deux endroits.",
+    "link": "{{device}} : {{status}}",
     "title": {
       "moving": "Presque terminé",
       "releasing": "Déplacement vers un autre appareil",
@@ -19,6 +106,13 @@
       "superseded": "Cet appareil a été remplacé",
       "taking": "Finalisation",
       "unreadable": "Ghostly n'a pas pu vérifier quel appareil est actif."
+    },
+    "unfinished": {
+      "hint": "Recommencez sur {{device}}.",
+      "hintUnnamed": "Recommencez sur votre autre appareil.",
+      "remove": "Retirer",
+      "retry": "Réessayer",
+      "title": "Pas terminé"
     },
     "unreadableInfo": "Ghostly lit lequel de vos appareils est actif avant de démarrer quoi que ce soit. Cela n'a pas fonctionné ici : rien n'a été démarré, rien n'a été envoyé et rien n'a été modifié."
   }

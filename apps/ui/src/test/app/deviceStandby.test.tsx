@@ -65,8 +65,9 @@ describe("the app on a device that is not the active one", () => {
     expect(screen.getByTestId("device-standby-title")).toHaveTextContent("Ativo em outro dispositivo");
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); });
     expect(JSON.stringify(Object.entries(localStorage))).toBe(before);
-    // No engine call was made for it either.
-    expect(fakeEngine.calls).toEqual([]);
+    // No engine call was made for it either: only the standby screen's own reads of the device set, which device-link-only
+    // mode answers without the profile.
+    expect(fakeEngine.calls.filter((call) => !String(call.method).startsWith("device"))).toEqual([]);
   });
 
   it("the same link on a device that runs the profile is taken in (what the standby must not do)", async () => {

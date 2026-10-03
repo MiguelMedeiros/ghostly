@@ -2,11 +2,13 @@ import {
   DEVICES_CAPABILITY, GhostLink, RTC_CONFIG, createIdentity, deviceEchoFrame, deviceEchoNonce, deviceLinkPairing, devicePingFrame, fromBase64Url,
   type DeviceFrame, type NativeEndpoint, type NativeTransport, type PairedTransport, type PkarrTransport, type PollIntervals, type TurnNetwork,
 } from "@ghostly/core";
+import { enrollmentUnfinished, finishEnrollment } from "./enroll";
+import { viewOf } from "./gate";
 import { DEVICE_GATED_ERROR, type DeviceLinkEngine, type DeviceLinkHost } from "./linkOnly";
 import { DeviceSetError, deviceIdentity, openTurnKeeper } from "./setup";
 import { loadDeviceSigningKey, type DeviceSigningKey } from "./signingKey";
-import type { DeviceRecord } from "./state";
-import { readDeviceRecord } from "./store";
+import type { DeviceRecord, DeviceState } from "./state";
+import { forgetDevice, readDeviceRecord } from "./store";
 import type { TurnKeeper, TurnOutcome } from "./turn";
 
 /*
@@ -43,6 +45,32 @@ export interface DeviceLinkView {
   /** `live`: the session is open and both ends announced `devices/1`. */
   status: "connecting" | "live";
   transport?: PairedTransport;
+}
+
+/** The device set as a page shows it (Profile, Devices; the standby screen): names and states, never a secret. */
+export interface DeviceSetView {
+  state: DeviceState;
+  devices: { key: string; name: string; slot: number; self: boolean; active: boolean; status?: DeviceLinkView["status"] }[];
+  /**
+   * Devices this one granted the set to whose enrollment never came back: they hold `D` and are in no record. Shown
+   * as "Not finished"; moving the set to a new `D` (removal, a later part) is what takes `D` from them.
+   */
+  unfinishedGrants?: { key: string; name: string; at: number }[];
+  /** This device's enrollment did not finish (WISP 06 § Adding a device, "Not finished"). */
+  unfinished?: true;
+}
+
+/** The view of a device record and the links this device holds. A profile with no record is `single`, with no devices. */
+export function deviceSetView(record: DeviceRecord | null, links: DeviceLinkView[]): DeviceSetView {
+  if (!record) return { state: "single", devices: [] };
+  const devices = record.deviceSet.flatMap((slot, index) => {
+    if (!slot) return [];
+    const link = links.find((l) => l.key === slot.key && !l.earlier);
+    return [{ key: slot.key, name: slot.name, slot: index, self: index === record.ownSlot, active: index === record.activeSlot, ...(link ? { status: link.status } : {}) }];
+  });
+  const listed = new Set(record.deviceSet.flatMap((slot) => (slot ? [slot.key] : [])));
+  const grants = (record.unfinishedGrants ?? []).filter((grant) => !listed.has(grant.key));
+  return { state: record.state, devices, ...(grants.length ? { unfinishedGrants: grants } : {}), ...(enrollmentUnfinished(record) ? { unfinished: true as const } : {}) };
 }
 
 export interface DeviceLinksOptions {
@@ -102,9 +130,31 @@ export class DeviceLinks implements DeviceLinkEngine {
     this.createPeerConnection = "createPeerConnection" in options ? options.createPeerConnection : defaultPeerConnection();
   }
 
-  /** `host` is the device-link-only server's; the links need nothing of it yet. */
-  async start(_host?: DeviceLinkHost): Promise<void> {
+  /** `host` is the device-link-only server's: it is told when what the standby screen shows changes. */
+  async start(host?: DeviceLinkHost): Promise<void> {
+    this.host = host ?? null;
     await this.refresh();
+    // An enrollment that a crash or a slow network left before its last step: it finishes now if it can.
+    void this.finishEnrollment().catch(() => {});
+  }
+  private host: DeviceLinkHost | null = null;
+
+  /**
+   * The last step of this device's enrollment (`enroll.ts`), when it is not done: reads the turn record until it lists
+   * this device, and then tells the pages. True once it is done (now or before).
+   */
+  async finishEnrollment(): Promise<boolean> {
+    const record = await (this.options.readRecord ?? readDeviceRecord)(this.options.profile);
+    if (!enrollmentUnfinished(record)) return true;
+    const network = this.turnNetwork();
+    if (!network || this.options.offline) return false;
+    const finished = await finishEnrollment(this.options.profile, network, { stopped: () => this.stopped });
+    if (finished) {
+      const now = await (this.options.readRecord ?? readDeviceRecord)(this.options.profile);
+      if (now) this.host?.show(viewOf(now));
+      await this.refresh();
+    }
+    return finished;
   }
 
   /**
@@ -294,13 +344,18 @@ export class DeviceLinks implements DeviceLinkEngine {
    * record (`setup.ts`). Null for a `single` profile, and where this transport has no turn path.
    */
   turnKeeper(): Promise<TurnKeeper | null> {
-    const transport = this.options.transport;
     if (this.options.offline) return Promise.resolve(null);
-    const network = this.options.turn ?? (transport.turnRead && transport.turnPut
-      ? { turnRead: transport.turnRead.bind(transport), turnPut: transport.turnPut.bind(transport), ...(transport.turnWarm ? { turnWarm: transport.turnWarm.bind(transport) } : {}) } as TurnNetwork : null);
+    const network = this.turnNetwork();
     if (!network) return Promise.resolve(null);
     this.keeper ??= openTurnKeeper(this.options.profile, network, { loadKey: this.options.loadKey }).catch((error: unknown) => { this.keeper = null; throw error; });
     return this.keeper;
+  }
+
+  /** The turn record's sources: the ones given, or the transport's own where it has them. */
+  private turnNetwork(): TurnNetwork | null {
+    const transport = this.options.transport;
+    return this.options.turn ?? (transport.turnRead && transport.turnPut
+      ? { turnRead: transport.turnRead.bind(transport), turnPut: transport.turnPut.bind(transport), ...(transport.turnWarm ? { turnWarm: transport.turnWarm.bind(transport) } : {}) } as TurnNetwork : null);
   }
 
   /** Reads the turn and does what this device's state asks for on the result, then brings the links in line with the record. */
@@ -317,6 +372,17 @@ export class DeviceLinks implements DeviceLinkEngine {
     const key = (params as { key?: unknown } | null | undefined)?.key;
     switch (method) {
       case "deviceLinks": return this.views();
+      case "deviceSet": return deviceSetView(await (this.options.readRecord ?? readDeviceRecord)(this.options.profile), this.views());
+      case "deviceEnrollFinish": return { finished: await this.finishEnrollment() };
+      case "deviceEnrollRemove": {
+        // "Not finished" with Remove (WISP 06 § Adding a device): the device holds nothing usable, and its device set
+        // goes. Only then: a device that finished is removed from the active device, which moves the set to a new `D`.
+        const record = await (this.options.readRecord ?? readDeviceRecord)(this.options.profile);
+        if (!enrollmentUnfinished(record)) throw new Error("Only an enrollment that did not finish is removed here");
+        await this.stop();
+        await forgetDevice(this.options.profile);
+        return null;
+      }
       case "deviceLinksRefresh": await this.refresh(); return this.views();
       case "devicePing": {
         if (typeof key !== "string") throw new Error("Name the device to ping");

@@ -27,6 +27,7 @@ import { Select } from "../components/ui/Select";
 import { CATEGORY_PREVIEW, categoryOn } from "../lib/cues";
 import { playSound } from "../lib/sounds";
 import { clearAllData } from "../lib/clearData";
+import { lockPasswordMin, useDeviceSet } from "../lib/devices";
 import {
   hashPassword,
   verifyPassword,
@@ -116,6 +117,11 @@ export function Settings() {
   const [appVersion, setAppVersion] = useState("0.0.0");
 
   const hasPassword = !!settings.lockScreen.passwordHash;
+  // A profile on several devices (WISP 06) keeps a lock password of 8 characters or more: it cannot be shortened,
+  // turned off or removed here. One with no device set keeps today's rule.
+  // Until the answer comes (or when the call fails), as if there were one: the stricter rule.
+  const devices = useDeviceSet(0);
+  const deviceSet = devices === null || devices.state !== "single";
 
   useEffect(() => {
     setStorageInfo(getStorageUsage());
@@ -142,6 +148,10 @@ export function Settings() {
       return;
     }
 
+    if (lockEnabled && deviceSet) {
+      setMessage({ type: "error", text: t("devices.password.keep") });
+      return;
+    }
     if (lockEnabled) {
       setLockEnabled(false);
       updateLockScreen({ enabled: false });
@@ -152,8 +162,8 @@ export function Settings() {
   };
 
   const handleSetPassword = async () => {
-    if (newPassword.length < 4) {
-      setMessage({ type: "error", text: t("settings.passwordTooShort") });
+    if (newPassword.length < lockPasswordMin(deviceSet)) {
+      setMessage({ type: "error", text: deviceSet ? t("devices.password.keep") : t("settings.passwordTooShort") });
       return;
     }
 
@@ -195,6 +205,10 @@ export function Settings() {
   };
 
   const handleRemovePassword = async () => {
+    if (deviceSet) {
+      setMessage({ type: "error", text: t("devices.password.keep") });
+      return;
+    }
     if (hasPassword) {
       const valid = await verifyPassword(
         currentPassword,

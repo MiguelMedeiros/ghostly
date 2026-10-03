@@ -73,6 +73,22 @@ export interface LeftFile {
   where: string;
 }
 
+/**
+ * A grant this device sent while adding a device whose `enroll-done` never came back (WISP 06 § Adding a device): that
+ * device holds `D` and is in no record. It is noted before the grant leaves, and dropped in the write that adds the
+ * device; one that stays is shown as "Not finished", and is what moving the set to a new `D` (removal) has to cover.
+ */
+export interface UnfinishedGrant {
+  /** The new device's signing key, base64url. */
+  key: string;
+  /** The name it gave itself. */
+  name: string;
+  /** When the grant went out (ms). */
+  at: number;
+}
+/** At most this many are kept, the oldest dropped. */
+export const MAX_UNFINISHED_GRANTS = 8;
+
 /** What is kept of a device set this profile left when a device was removed. */
 export interface EarlierDeviceSet {
   /** The old device-set secret. */
@@ -141,6 +157,8 @@ export interface DeviceRecord {
   /** Written at quiesce: the Breez database to delete once the handoff is done. */
   breezDatabase?: string;
   earlierSets: EarlierDeviceSet[];
+  /** Grants sent whose `enroll-done` never came back: devices that hold `D` and are in no record. */
+  unfinishedGrants?: UnfinishedGrant[];
 }
 
 /** The states in which the whole engine runs. In every other one the client opens no peer database (WISP 06 § The gate). */
@@ -299,6 +317,10 @@ export function parseDeviceRecord(value: unknown): DeviceRecord {
   if (r.leftFiles !== undefined) {
     if (!Array.isArray(r.leftFiles)) return bad("leftFiles");
     for (const file of r.leftFiles as Partial<LeftFile>[]) if (!file || !bytes(file.sha256) || !count(file.size, Number.MAX_SAFE_INTEGER) || !text(file.where)) return bad("a file left for later");
+  }
+  if (r.unfinishedGrants !== undefined) {
+    if (!Array.isArray(r.unfinishedGrants) || r.unfinishedGrants.length > MAX_UNFINISHED_GRANTS) return bad("the unfinished grants");
+    for (const grant of r.unfinishedGrants as Partial<UnfinishedGrant>[]) if (!grant || !bytes(grant.key) || !text(grant.name) || !count(grant.at, Number.MAX_SAFE_INTEGER)) return bad("an unfinished grant");
   }
   if (!Array.isArray(r.earlierSets) || r.earlierSets.length > MAX_EARLIER_SETS) return bad("the earlier device sets");
   for (const set of r.earlierSets as Partial<EarlierDeviceSet>[]) {

@@ -13,6 +13,8 @@ export * from "./signer";
 export * from "./deviceLink";
 export * from "./relayBreaker";
 export * from "./invite";
+export * from "./deviceInvite";
+export * from "./enroll";
 export * from "./services";
 export * from "./records";
 export * from "./callSignal";

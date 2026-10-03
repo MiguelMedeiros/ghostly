@@ -2,7 +2,8 @@ import { createPairedChat } from "../lib/pairedChat";
 import { useState } from "react";
 import { JoinDialog } from "../components/JoinDialog";
 import { useI18n } from "../contexts/I18nContext";
-import { ensureSession } from "../lib/storage";
+import { ensureSession, listSessions } from "../lib/storage";
+import { JoinProfileDialog } from "../components/devices/JoinProfileDialog";
 import { HomeProjectLinks } from "../components/HomeProjectLinks";
 import { chatPath } from "../lib/url";
 import { groupPath } from "../lib/groups";
@@ -15,6 +16,9 @@ export function Home() {
   const [isCreating, setIsCreating] = useState(false);
 
   const [joining, setJoining] = useState(false);
+  // A new profile, on a device the person adds to a profile they already have (WISP 06 § User experience).
+  const [already, setAlready] = useState(false);
+  const fresh = listSessions().length === 0;
 
   const handleCreate = async () => {
     setIsCreating(true);
@@ -89,6 +93,12 @@ export function Home() {
         </button>
         <button onClick={() => setJoining(true)} className="inline-flex min-h-11 min-w-0 items-center justify-center gap-2 rounded-lg border border-border px-3 py-2.5 text-sm font-semibold text-accent hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"><svg aria-hidden="true" width="18" height="18" className="shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M14 3h5a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-5 M3 12h12 M10 7l5 5-5 5"/></svg>{t("sidebar.join")}</button>
         </div>
+        {fresh && (
+          <button type="button" data-testid="home-already" onClick={() => setAlready(true)} className="mx-auto min-h-10 px-2 text-sm text-text-secondary underline underline-offset-4 hover:text-accent cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded">
+            {t("devices.join.already")}
+          </button>
+        )}
+        {already && <JoinProfileDialog onClose={() => setAlready(false)} onRestore={() => { setAlready(false); nav.open("/profile"); }} />}
         {joining && <JoinDialog onClose={() => setJoining(false)} onJoin={keys => {setJoining(false);nav.conversation(chatPath(ensureSession(keys)));}}
           onOpenChat={id => { setJoining(false); nav.conversation(chatPath(id)); }}
           onJoinGroup={async link => { const { groupId } = await engine.call("joinGroupByLink", { link }); setJoining(false); nav.conversation(groupPath(groupId)); }} />}

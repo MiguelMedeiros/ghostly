@@ -22,6 +22,7 @@ export const join = {
     update: "This invite was made by a newer Ghostly. Update to join.",
     "not-ghostly": "This is not a Ghostly invite.",
     damaged: "This invite is damaged. Ask for a new one.",
+    device: "This code adds a device to a profile. On the new device, open Ghostly and choose I already use Ghostly.",
   } satisfies Record<InviteRefusal, string>,
 };
 
