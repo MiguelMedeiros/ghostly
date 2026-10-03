@@ -405,7 +405,7 @@ export interface EngineApi {
    * A forced takeover (WISP 06 § Forced takeover): whether this device offers one, which device it stops, and whether the
    * lock password is asked. Only a standby or a replaced device that holds a copy of the profile offers one.
    */
-  deviceTakeoverInfo(): { offered: boolean; device?: string; copy?: "frozen" | "restored"; password?: boolean };
+  deviceTakeoverInfo(): { offered: boolean; device?: string; copy?: "frozen" | "restored"; password?: boolean; /** A `moving` device: a device set of its own (WISP 06 § Removing a device). */ ownSet?: true };
   /**
    * "My other device is lost or broken" (and "It wasn't me"), with the lock password and the name of the device that
    * stops. Errors start with `takeover-<reason>:`; nothing is written to the turn on one. `kind` is `start` when this

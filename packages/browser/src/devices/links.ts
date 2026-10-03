@@ -15,7 +15,8 @@ import { amendDevice, forgetDevice, moveDevice, readDeviceRecord } from "./store
 import { acknowledged, pendingFrames } from "./remove";
 import { checkSetUpdate } from "./setUpdate";
 import type { TurnKeeper, TurnOutcome } from "./turn";
-import { canTakeOver, forceTakeover, takeoverTarget } from "./takeover";
+import { TakeoverRefusal, canTakeOver, forceTakeover, takeoverTarget } from "./takeover";
+import { canStartOwnSet, resumeOwnSet, startOwnSet, type OwnSetOutcome, type OwnSetPorts } from "./ownSet";
 import { peekTurn } from "./restoreGuard";
 import { newDeviceSecretDue } from "./rotate";
 import { provesHandoffPassword } from "./handoffPake";
@@ -227,6 +228,8 @@ export class DeviceLinks implements DeviceLinkEngine {
     }
     // An enrollment that a crash or a slow network left before its last step: it finishes now if it can.
     void this.finishEnrollment().catch(() => {});
+    // A device set of its own that was settling when the app stopped (`ownSet.ts`): it settles now.
+    if ((await this.record().catch(() => null))?.ownSet) this.settleOwnSet();
     if (this.options.watchTurn) this.watchTurn(0);
   }
 
@@ -792,10 +795,17 @@ export class DeviceLinks implements DeviceLinkEngine {
         const record = await (this.options.readRecord ?? readDeviceRecord)(this.options.profile);
         if (!record) return { offered: false };
         const target = takeoverTarget(record);
-        return { offered: canTakeOver(record), ...(target ? { device: target } : {}), ...(record.copy ? { copy: record.copy } : {}), password: record.copy === "frozen" || !!record.verifier };
+        // A `moving` device whose remover is gone: a device set of its own (`ownSet.ts`), offered with the same screen.
+        const moving = record.state === "moving";
+        return { offered: moving ? canStartOwnSet(record) : canTakeOver(record), ...(moving ? { ownSet: true } : {}), ...(target ? { device: target } : {}), ...(record.copy ? { copy: record.copy } : {}), password: record.copy === "frozen" || !!record.verifier };
       }
       case "deviceTakeover": {
         const p = (params ?? {}) as { password?: unknown; name?: unknown; lost?: unknown };
+        if ((await this.record())?.state === "moving") {
+          const outcome = await this.turnExclusive(async () => startOwnSet(await this.ownSetPorts(), { password: typeof p.password === "string" ? p.password : "", name: typeof p.name === "string" ? p.name : "" }));
+          await this.afterOwnSet(outcome);
+          return { kind: outcome };
+        }
         const outcome = await forceTakeover({
           read: () => (this.options.readRecord ?? readDeviceRecord)(this.options.profile),
           amend: (patch) => amendDevice(this.options.profile, patch),
@@ -830,6 +840,36 @@ export class DeviceLinks implements DeviceLinkEngine {
         throw new Error(`${DEVICE_GATED_ERROR} (${method} is not available yet)`);
       }
     }
+  }
+
+  // ---------- a device set of its own (WISP 06 § Removing a device, "When the remover is gone for good") ----------
+
+  /** What `ownSet.ts` needs of this device: its record, its signing key and the turn's sources. */
+  private async ownSetPorts(): Promise<OwnSetPorts> {
+    const profile = this.options.profile;
+    const identity = await deviceIdentity(profile, { loadKey: this.options.loadKey ?? loadDeviceSigningKey });
+    if (!identity) throw new TakeoverRefusal("state", "This profile has no device set.");
+    return {
+      read: () => this.record(),
+      amend: (patch) => amendDevice(profile, patch),
+      move: (to, patch) => moveDevice(profile, to, patch),
+      proves: (verifier, password) => provesHandoffPassword(verifier, password),
+      signer: (bytes) => identity.key.sign(bytes),
+      network: this.options.offline ? null : this.turnNetwork(),
+    };
+  }
+
+  /** What the pages show after it: the app, started again into the gate as the active device, or the state it is in now. */
+  private async afterOwnSet(outcome: OwnSetOutcome): Promise<void> {
+    if (outcome === "start") { this.host?.show({ state: "standby", reload: true }); return; }
+    const now = await this.record().catch(() => null);
+    if (now) this.host?.show(viewOf(now));
+    if (outcome === "removed") await this.refresh();
+  }
+
+  /** A device set of its own that was settling when the app stopped: it settles now. */
+  private settleOwnSet(): void {
+    void this.turnExclusive(async () => resumeOwnSet(await this.ownSetPorts())).then((outcome) => this.afterOwnSet(outcome)).catch(() => {});
   }
 
   /** Says goodbye on every link and stops. */

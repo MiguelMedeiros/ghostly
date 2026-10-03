@@ -136,13 +136,16 @@ function useTurnReadOnReturn(on: boolean): void {
   }, [on]);
 }
 
-type TakeoverInfo = { offered: boolean; device?: string; copy?: "frozen" | "restored"; password?: boolean };
+type TakeoverInfo = { offered: boolean; device?: string; copy?: "frozen" | "restored"; password?: boolean; ownSet?: true };
 
-/** Whether this device offers a forced takeover, and how (`deviceTakeoverInfo`): read once the screen shows. */
+/**
+ * Whether this device offers a forced takeover, and how (`deviceTakeoverInfo`): read once the screen shows. On a
+ * `moving` device it is a device set of its own, for when the device that removed another is gone for good.
+ */
 function useTakeoverInfo(state: DeviceGateView["state"]): TakeoverInfo | null {
   const [info, setInfo] = useState<TakeoverInfo | null>(null);
   useEffect(() => {
-    if (state !== "standby" && state !== "superseded") { setInfo(null); return; }
+    if (state !== "standby" && state !== "superseded" && state !== "moving") { setInfo(null); return; }
     let live = true;
     void engine.call("deviceTakeoverInfo").then((next) => { if (live) setInfo(next); }, () => { if (live) setInfo(null); });
     return () => { live = false; };
@@ -163,7 +166,7 @@ function Takeover({ gate, info }: { gate: DeviceGateView; info: TakeoverInfo }) 
       {gate.state === "superseded" || restored
         ? <button type="button" data-testid="takeover-open" onClick={() => setOpen(true)} className={gate.state === "superseded" ? QUIET : BUTTON}>{t(restored ? "devices.restore.takeOver" : "devices.takeover.notMe")}</button>
         : <button type="button" data-testid="takeover-open" onClick={() => setOpen(true)} className="text-sm text-text-muted underline hover:text-accent cursor-pointer">{t("devices.takeover.lost")}</button>}
-      {open && <TakeoverDialog device={info.device ?? gate.activeDevice} password={!!info.password} restored={restored} onClose={() => setOpen(false)} />}
+      {open && <TakeoverDialog device={info.device ?? gate.activeDevice} password={!!info.password} restored={restored} ownSet={!!info.ownSet} onClose={() => setOpen(false)} />}
     </div>
   );
 }
