@@ -6,7 +6,7 @@ import { expect, it } from "vitest";
 import { seal } from "@ghostly/browser/backup/envelope";
 import { openPersistentIndexedDb } from "../src/runtime/storage";
 import { BIN, error, ghostly, home, ok } from "./support/cli";
-// covers: headless.backup
+// covers: headless.backup, backup.light
 
 const PASS = { GHOSTLY_BACKUP_PASSPHRASE: "correct horse battery staple" };
 /** Nothing of the environment's passphrase, whatever the shell running the tests holds. */
