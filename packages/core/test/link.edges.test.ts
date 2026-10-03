@@ -659,7 +659,7 @@ describe("LinkSession poll pacing", () => {
     a.s.start();
     await settle();
     expect(a.s.peerPresence.online).toBe(true);
-    const watched = () => (a.transport.resolve.mock.calls.at(-1)?.[1] as { watch?: boolean } | undefined)?.watch === true;
+    const watched = () => ((a.transport.resolve.mock.calls.at(-1) as unknown[] | undefined)?.[1] as { watch?: boolean } | undefined)?.watch === true;
     a.s.pollNow();
     await settle();
     expect(watched()).toBe(false);

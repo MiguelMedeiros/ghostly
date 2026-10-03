@@ -14,10 +14,14 @@ const isChat = (who: Asker): boolean => !who.background && !who.group;
 const isChatSignal = (who: Asker): boolean => who.signal && isChat(who);
 /** A group's edge looking fast for a signal (`GROUP_BURST_MS`). */
 const isGroupUrgentRead = (who: Asker): boolean => who.group && who.urgent && !who.write && !who.background;
-/** A link's read for a contact that went away from a live session and has not shown itself back (`WATCH_SHARE`). */
-const isWatch = (who: Asker): boolean => who.watch && !who.write;
-/** Watch reads that the same other limits hold take turns together: a chat's or a group's, urgent or not, background or not. */
-const watchLane = (who: Asker): string => `${+who.group}${+who.urgent}${+who.background}`;
+/**
+ * A group edge's read for a member that went away from a live session and has not shown itself back (`WATCH_SHARE`).
+ * A 1:1 chat's is not one: chats have their own reserve (`CHAT_RESERVE`), and a chat watching its contact must not wait
+ * behind the edges that watch the same contact.
+ */
+const isWatch = (who: Asker): boolean => who.watch && who.group && !who.write;
+/** Watch reads that the same other limits hold take turns together: urgent or not, background or not. */
+const watchLane = (who: Asker): string => `${+who.urgent}${+who.background}`;
 /** A write that goes first once the budget frees a request (see `WRITE_FIRST_MS`): a chat's or a group's, never a background one. */
 const firstWriter = (who: Asker): "chat" | "group" | null => (!who.write || who.background ? null : who.group ? "group" : "chat");
 
