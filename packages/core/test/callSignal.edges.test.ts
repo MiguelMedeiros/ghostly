@@ -11,6 +11,7 @@ import {
   parseCallSignal,
   signalHasVideo,
   waitForIceGathering,
+  isGlobalIpv4Host,
   sdpHasCandidates,
 } from "../src";
 
@@ -297,6 +298,48 @@ describe("waiting for ICE gathering", () => {
     const pc = Object.assign(new FakePeer(), { localDescription: { type: "offer", sdp: "v=0\r\na=candidate:1 1 udp 1 192.0.2.1 9 typ host\r\n" } });
     const done = await pending(waitForIceGathering(pc as unknown as RTCPeerConnection, 10_000, { stallMs: 3000 }));
     await vi.advanceTimersByTimeAsync(3000); expect(done()).toBe(false);
+  });
+
+  it("without TURN, settles shortly after a host candidate on a global IPv4 address: no NAT, no reflexive candidate to wait for", async () => {
+    vi.useFakeTimers();
+    const pc = new FakePeer();
+    const done = await pending(waitForIceGathering(pc as unknown as RTCPeerConnection, 5_000, { stallMs: 3000 }));
+    pc.candidate("candidate:1 1 udp 2122260223 8.8.8.8 50000 typ host generation 0");
+    await vi.advanceTimersByTimeAsync(399); expect(done()).toBe(false);
+    await vi.advanceTimersByTimeAsync(1); expect(done()).toBe(true);
+  });
+
+  it("keeps waiting after host candidates that are not global IPv4 ones, and after any host candidate when TURN is configured", async () => {
+    vi.useFakeTimers();
+    const pc = new FakePeer();
+    const done = await pending(waitForIceGathering(pc as unknown as RTCPeerConnection, 5_000));
+    for (const address of ["192.168.1.2", "10.0.0.2", "172.20.0.2", "100.81.12.32", "127.0.0.1", "169.254.1.1", "198.51.100.7", "203.0.113.7", "6f2b1c3e-1111-4222-8333-944445555666.local", "2001:4860:4860::8888"]) {
+      pc.candidate(`candidate:1 1 udp 2122260223 ${address} 50000 typ host generation 0`);
+    }
+    pc.candidate("candidate:2 1 tcp 1518280447 8.8.8.8 9 typ host tcptype active generation 0");
+    await vi.advanceTimersByTimeAsync(4_999); expect(done()).toBe(false);
+    await vi.advanceTimersByTimeAsync(1); expect(done()).toBe(true);
+
+    const turn = new FakePeer([{ urls: ["stun:stun.example", "turn:turn.example"] }]);
+    const relayed = await pending(waitForIceGathering(turn as unknown as RTCPeerConnection, 5_000));
+    turn.candidate("candidate:1 1 udp 2122260223 8.8.8.8 50000 typ host generation 0");
+    await vi.advanceTimersByTimeAsync(1000); expect(relayed()).toBe(false);
+  });
+
+  it("tells a global IPv4 host candidate from every other kind", () => {
+    expect(isGlobalIpv4Host("candidate:1 1 udp 2122260223 8.8.8.8 50000 typ host")).toBe(true);
+    expect(isGlobalIpv4Host("candidate:1 1 UDP 2122260223 1.1.1.1 50000 typ host generation 0")).toBe(true);
+    expect(isGlobalIpv4Host("candidate:1 1 udp 2122260223 100.128.0.1 50000 typ host")).toBe(true);
+    expect(isGlobalIpv4Host("candidate:1 1 udp 2122260223 100.127.255.255 50000 typ host")).toBe(false);
+    expect(isGlobalIpv4Host("candidate:1 1 udp 2122260223 172.32.0.1 50000 typ host")).toBe(true);
+    expect(isGlobalIpv4Host("candidate:1 1 udp 2122260223 172.31.255.1 50000 typ host")).toBe(false);
+    expect(isGlobalIpv4Host("candidate:1 1 udp 2122260223 192.0.2.1 9 typ host")).toBe(false);
+    expect(isGlobalIpv4Host("candidate:1 1 udp 2122260223 198.19.0.1 9 typ host")).toBe(false);
+    expect(isGlobalIpv4Host("candidate:1 1 udp 2122260223 224.0.0.1 9 typ host")).toBe(false);
+    expect(isGlobalIpv4Host("candidate:1 1 udp 2122260223 255.255.255.255 9 typ host")).toBe(false);
+    expect(isGlobalIpv4Host("candidate:1 1 udp 2122260223 8.8.8.256 9 typ host")).toBe(false);
+    expect(isGlobalIpv4Host("candidate:2 1 udp 1686052607 8.8.8.8 9 typ srflx raddr 0.0.0.0 rport 0")).toBe(false);
+    expect(isGlobalIpv4Host("candidate:3 1 udp 41885439 8.8.8.8 9 typ relay raddr 0.0.0.0 rport 0")).toBe(false);
   });
 
   it("tells a description with candidates from one without", () => {
