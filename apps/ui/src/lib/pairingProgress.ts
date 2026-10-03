@@ -15,6 +15,33 @@ export const PAIRING_STEPS: Record<PairingRole, PairingStage[]> = {
 };
 
 /**
+ * Where a stage stands in its role's steps, or -1 for one that is not a step (`failed`, `on-dht`). Either side can be at
+ * either side's handshake stage (an inviter whose contact never knocks knocks itself, after a grace), and an inviter
+ * whose contact was seen is past its wait: both are its handshake step, so a stage never reads as no step at all.
+ */
+export function stepIndex(role: PairingRole, stage: PairingStage, peerSeen?: boolean): number {
+  const steps = PAIRING_STEPS[role];
+  if (stage === "failed" || stage === "on-dht") return -1;
+  if (role === "inviter" && (stage === "knocking" || (stage === "waiting" && peerSeen))) return steps.indexOf("answering");
+  if (role === "joiner" && stage === "waiting") return steps.indexOf("knocking");
+  if (role === "inviter" && stage === "resolving") return steps.indexOf("publishing");
+  return steps.indexOf(stage);
+}
+
+/**
+ * What the scene and the header show of a pairing: the furthest step reached, never one back. An attempt that fails
+ * takes the engine back between attempts (`waiting`, `resolving`), and a quick handshake can come in any order; the
+ * step stays where it got to, and the words say that step until the pairing moves past it, with the attempt count
+ * telling that it is tried again. `reached` is the furthest step seen so far (-1 for none).
+ */
+export function pairingView(role: PairingRole, stage: PairingStage, peerSeen: boolean | undefined, reached: number): { stage: PairingStage; step: number } {
+  const index = stepIndex(role, stage, peerSeen);
+  if (index < 0) return { stage, step: reached };
+  if (index >= reached) return { stage, step: index };
+  return { stage: PAIRING_STEPS[role][reached], step: reached };
+}
+
+/**
  * After this long in a stage the scene says in words what is still going on. Waiting for a person to open the
  * invite is normal for minutes; the network steps are not.
  */

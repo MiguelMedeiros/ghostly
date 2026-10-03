@@ -2,7 +2,7 @@
   "attempt": "第 {{n}} 次尝试",
   "contact": "你的联系人",
   "done": "已完成",
-  "elapsed": "此步骤已用 {{time}}",
+  "elapsed": "配对已进行 {{time}}",
   "indicator": "配对 · {{stage}}",
   "newInvite": "请联系人给你一个新的邀请。",
   "onDht": {
