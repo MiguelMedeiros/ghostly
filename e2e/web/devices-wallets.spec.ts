@@ -41,7 +41,7 @@ async function pull(taker: Peer, giver: Peer): Promise<void> {
 test("Testnet ecash moves with the profile: whole on the new device, no wallet on the old one, and what the new one spent is refused from the old copy", { tag: ["@feature:devices.handoff.wallets"] }, async ({ peer }) => {
   test.setTimeout(12 * 60_000);
   const [desktop, phone, contact] = await Promise.all([peer("desktop", { offlineMainnet: true }), peer("phone", { offlineMainnet: true }), peer("contact", { offlineMainnet: true })]);
-  await createWallet(contact, "cashu", "testnet");
+  for (const p of [desktop, contact]) await createWallet(p, "cashu", "testnet");
   await link(desktop, contact);
   await connect(desktop, contact);
   await getTestCoins(desktop);
@@ -93,7 +93,7 @@ test("Testnet ecash moves with the profile: whole on the new device, no wallet o
 test("a Fedimint wallet stays on its home device: On <device> on the new one, never opened there, and opened again at home", { tag: ["@gated", "@feature:devices.handoff.wallets"] }, async ({ peer }) => {
   test.skip(process.env.GHOSTLY_FEDIMINT_REGTEST !== "1", "Requires e2e/infra's federation (npm run e2e:infra:up) and GHOSTLY_FEDIMINT_REGTEST=1");
   test.setTimeout(14 * 60_000);
-  const invite = execFileSync(process.execPath, ["--input-type=module", "-e", "import { invite } from './e2e/support/fedimint-regtest/regtest.mjs'; process.stdout.write(invite());"], { encoding: "utf8" }).trim();
+  const { invite } = JSON.parse(execFileSync(process.execPath, ["e2e/support/fedimint-regtest/regtest.mjs", "ready"], { encoding: "utf8", stdio: "pipe" }).trim()) as { invite: string };
   const [desktop, phone] = await Promise.all([peer("desktop", { offlineMainnet: true }), peer("phone", { offlineMainnet: true })]);
   await createWallet(desktop, "fedimint", "testnet", { invite, timeout: 120_000 });
   await expect(walletCard(desktop.page, "fedimint-testnet")).toBeVisible();

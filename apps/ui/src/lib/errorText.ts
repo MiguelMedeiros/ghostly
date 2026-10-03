@@ -242,6 +242,8 @@ const ENGINE: Partial<Record<EngineErrorCode, TranslationKey>> = {
   fedimintNotEnough: "errors.engine.fedimintNotEnough",
   fedimintRealOnTestnet: "errors.engine.fedimintRealOnTestnet",
   fedimintTestOnMainnet: "errors.engine.fedimintTestOnMainnet",
+  walletAway: "errors.engine.walletAway",
+  walletAwayUnnamed: "errors.engine.walletAwayUnnamed",
 };
 /** The values that are amounts: written again the app's way (the engine wrote them its own way). */
 const AMOUNTS = new Set(["amount", "fee", "min", "max"]);
