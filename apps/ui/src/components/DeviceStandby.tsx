@@ -4,7 +4,8 @@ import { getBrowserHost } from "@ghostly/browser/host";
 import { engine } from "@ghostly/browser/platform/engine";
 import { useI18n } from "../contexts/I18nContext";
 import { reloadIntoGate, useDeviceSet } from "../lib/devices";
-import { HandoffOffer, HandoffProgress, UseHereDialog, useHandoffView } from "./devices/Handoff";
+import { HandoffOffer, HandoffProgress, UseHereDialog } from "./devices/Handoff";
+import { useHandoffView } from "../lib/handoff";
 import { activeProfileId, listProfiles, switchProfile } from "../lib/profiles";
 
 const BUTTON = "px-4 py-2 rounded-lg text-sm font-semibold bg-accent text-on-accent hover:bg-accent-hover cursor-pointer";
@@ -79,6 +80,7 @@ function StandbyHandoff({ gate }: { gate: DeviceGateView }) {
   const [asking, setAsking] = useState(false);
   const device = gate.activeDevice ?? t("devices.join.otherDevice");
   const running = !!view && view.step !== "failed" && view.step !== "offer";
+  if (!view && gate.state === "releasing") return null;
   return (
     <div className="space-y-3 rounded-xl border border-border p-4 text-sm" data-testid="handoff-standby">
       {view?.step === "offer" && <HandoffOffer view={view} />}

@@ -1,5 +1,5 @@
 import { HANDOFF_PAKE, turnKeys, type DeviceFrame, type TurnRelease } from "@ghostly/core";
-import type { DeviceGateView } from "./gate";
+import { viewOf, type DeviceGateView } from "./gate";
 import { HandoffGiver, HandoffTaker, type HandoffLinks, type HandoffRecords } from "./handoff";
 import { handoffProfileHost, handoffSelf, type HandoffProfileHost } from "./handoffHost";
 import type { DeviceHandoffHandler, DeviceLinks } from "./links";
@@ -71,8 +71,12 @@ export async function standbyHandoff(options: StandbyHandoffOptions): Promise<De
     links, records, self: () => handoffSelf(host),
   };
   const reload = () => options.show({ state: "standby", reload: true });
+  // The standby screen follows the record: a device that released is on standby now, not moving.
+  let shown = record.state;
+  const follow = () => void readDeviceRecord(options.profile).then((now) => { if (now && now.state !== shown) { shown = now.state; options.show(viewOf(now)); } }).catch(() => {});
   const giver = new HandoffGiver({
     ...common,
+    onChange: follow,
     source: host.source(options.profile),
     verifier: async () => null,
     busy: async () => null,

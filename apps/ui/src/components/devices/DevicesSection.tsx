@@ -4,7 +4,8 @@ import { useI18n } from "../../contexts/I18nContext";
 import { useDeviceSet } from "../../lib/devices";
 import { Button, Row, Section } from "../wallet/ui";
 import { AddDeviceDialog } from "./AddDeviceDialog";
-import { MoveDialog, useHandoffView } from "./Handoff";
+import { MoveDialog } from "./Handoff";
+import { useHandoffView } from "../../lib/handoff";
 
 /**
  * Profile, Devices (WISP 06 § User experience): the devices of this profile, which one is active, and Add a device.

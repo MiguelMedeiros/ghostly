@@ -226,7 +226,7 @@ class PartSender {
 
   constructor(private readonly now: () => number) {}
 
-  async send(parts: OutPart[], from: Record<string, number>, key: Uint8Array, out: (frame: DeviceFrame) => void, progress: () => void): Promise<"done" | "stopped"> {
+  async send(parts: OutPart[], from: Record<string, number>, key: Uint8Array, out: (frame: DeviceFrame) => void): Promise<"done" | "stopped"> {
     const run = ++this.run;
     this.outstanding = [];
     this.lastProgress = this.now();
@@ -395,8 +395,10 @@ export class HandoffGiver {
       if (key !== this.peer) return;
       if (!live) {
         this.sender.stop();
-        // Before quiesce a drop pauses (the taker says what it holds when it is back); pass 2 waits for it a while.
+        // Before quiesce a drop pauses (the taker says what it holds when it is back). In pass 2 this device is frozen:
+        // a link that does not come back within a minute makes it the active one again (WISP 06 § States and events).
         if (this.phase === "authorizing") this.reset("dropped");
+        if (this.phase === "pass2") this.arm(HANDOFF_TIMINGS.idleMs, () => this.backToActive());
         this.changed();
         return;
       }
@@ -560,6 +562,8 @@ export class HandoffGiver {
   /** The manifest of this pass and its parts, from what the taker said it holds. */
   private async sendPass(session: Session): Promise<void> {
     const pass = this.phase === "pass2" ? 2 : 1;
+    // Pass 2 is under way: its own wait (no `handoff-verified` within ten minutes) replaces the wait for the taker.
+    if (pass === 2) this.arm(HANDOFF_TIMINGS.verifiedMs, () => this.backToActive());
     const later = session.peer!.later;
     const files = await this.ports.source.files();
     const held = this.have!.d;
@@ -583,7 +587,7 @@ export class HandoffGiver {
     this.allFiles = files;
     for (const frame of handoffManifestFrames({ pass, parts, later: behind, ids: idsOf(files) })) this.out(frame);
     this.changed();
-    const result = await this.sender.send(out, this.have!.p, session.key!, (frame) => this.out(frame), () => this.changedSoon());
+    const result = await this.sender.send(out, this.have!.p, session.key!, (frame) => this.out(frame));
     if (result !== "done" || this.stopped) return;
     this.changed();
     if (pass === 1) await this.exclusive(() => this.quiesce());

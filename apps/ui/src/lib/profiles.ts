@@ -34,7 +34,7 @@ const SPACE = /^[A-Za-z0-9_.-]{1,100}$/;
 let pointers: { raw: string | null; spaces: Map<string, string> } = { raw: null, spaces: new Map() };
 /** The registry's pointers (`ProfileEntry.space`), read again only when the registry changed. */
 function pointerOf(id: string): string | undefined {
-  let raw: string | null = null;
+  let raw: string | null;
   try { raw = localStorage.getItem(registryKey()); } catch { return undefined; }
   if (raw !== pointers.raw) {
     const spaces = new Map<string, string>();

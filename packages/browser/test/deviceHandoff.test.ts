@@ -137,7 +137,6 @@ class Storage implements HandoffStagingHost {
     const name = database ?? `ghostly_stage${++this.next}`;
     if (!this.spaces.has(name)) this.spaces.set(name, { files: new Map(), held: new Map(), restored: null });
     const space = this.spaces.get(name)!;
-    const storage = this;
     return {
       database: name,
       held: async () => [...space.held.values()],
@@ -150,11 +149,11 @@ class Storage implements HandoffStagingHost {
       },
       finish: async (file) => { space.held.set(file.id, file); },
       discard: async (id) => { space.files.delete(id); space.held.delete(id); },
-      copyHeld: async (fromId, file) => { space.files.set(file.id, storage.frozen.get(fromId)!.slice()); space.held.set(file.id, file); },
+      copyHeld: async (fromId, file) => { space.files.set(file.id, this.frozen.get(fromId)!.slice()); space.held.set(file.id, file); },
       copyStaged: async (fromId, file) => { space.files.set(file.id, space.files.get(fromId)!.slice()); space.held.set(file.id, file); },
       restore: async (bundle, files) => { space.restored = { bundle: bundle.slice(), files }; },
       dropRest: async () => { space.restored = null; },
-      room: async () => storage.room,
+      room: async () => this.room,
     };
   }
   async install(old: string, staged: string) { expect(this.pointer).toBe(old); this.pointer = staged; }
