@@ -87,13 +87,33 @@ jobs:
         if: always()
         run: rm -f "$RUNNER_TEMP/upload.keystore"
 
-      - name: Size
+      # A pull request also goes down the release path (assembleRelease, zipalign, apksigner) with a key made for
+      # this run and thrown away, so a release is not the first build to try it. That APK is not uploaded.
+      - name: Release path with a throwaway key
+        if: github.event_name == 'pull_request'
+        env:
+          ANDROID_TWA_OUT: ${{ runner.temp }}/android-release-check
+          ANDROID_KEYSTORE: ${{ runner.temp }}/throwaway.keystore
+          ANDROID_KEY_ALIAS: throwaway
         run: |
+          ANDROID_KEYSTORE_PASSWORD="$(openssl rand -hex 16)"
+          export ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_PASSWORD="$ANDROID_KEYSTORE_PASSWORD"
+          keytool -genkeypair -keystore "$ANDROID_KEYSTORE" -alias "$ANDROID_KEY_ALIAS" -keyalg RSA -keysize 2048 \
+            -validity 1 -dname "CN=throwaway" -storepass "$ANDROID_KEYSTORE_PASSWORD" -keypass "$ANDROID_KEY_PASSWORD" >/dev/null 2>&1
+          apps/android-twa/build.sh release
+          rm -f "$ANDROID_KEYSTORE"
+
+      - name: Size
+        env:
+          RELEASE_CHECK: ${{ runner.temp }}/android-release-check
+        run: |
+          AAPT2="$ANDROID_HOME/build-tools/36.0.0/aapt2"
           {
             echo "### Android APK"
             echo
-            for apk in apps/android-twa/build/ghostly-*.apk; do
-              echo "- \`$(basename "$apk")\`: $(stat -c %s "$apk") bytes ($(du -h "$apk" | cut -f1))"
+            for apk in apps/android-twa/build/ghostly-*.apk "$RELEASE_CHECK"/ghostly-*.apk; do
+              [ -f "$apk" ] || continue
+              echo "- \`$(basename "$apk")\`: $(stat -c %s "$apk") bytes ($(du -h "$apk" | cut -f1)), $("$AAPT2" dump badging "$apk" | head -1)"
             done
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
