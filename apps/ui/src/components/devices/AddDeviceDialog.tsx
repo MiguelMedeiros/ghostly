@@ -26,6 +26,8 @@ export function AddDeviceDialog({ onClose }: { onClose(): void }) {
   const [busy, setBusy] = useState(false);
   const [view, setView] = useState<EnrollView | null>(null);
   const ended = useRef(true);
+  /** The password typed before it had to be made longer: what proves the verifier may be replaced. */
+  const previous = useRef<string | undefined>(undefined);
 
   // While an enrollment runs, its state is read twice a second.
   useEffect(() => {
@@ -60,13 +62,14 @@ export function AddDeviceDialog({ onClose }: { onClose(): void }) {
       setBusy(false);
       if (!valid) { setError(t("devices.password.wrong")); return; }
       // The hash keeps no length: only the password typed now says whether it is long enough.
-      if (password.length < DEVICE_SET_PASSWORD_MIN) { setPassword(""); setStep("longer"); return; }
+      if (password.length < DEVICE_SET_PASSWORD_MIN) { previous.current = password; setPassword(""); setStep("longer"); return; }
       // A password that is stored with the lock off still leaves the profile open: a device set needs the lock on.
       if (!settings.lockScreen.enabled) updateLockScreen({ enabled: true });
       // The verifier a pull is checked against is made now: the app has the password in hand only here (WISP 06 § Adding a device).
       setBusy(true);
-      await engine.call("deviceHandoffVerifier", { password }).catch(() => {});
+      const made = await engine.call("deviceHandoffVerifier", { password, current: password }).then(() => true, () => false);
       setBusy(false);
+      if (!made) { setError(t("devices.handoff.verifierFailed")); return; }
       await start();
       return;
     }
@@ -74,8 +77,9 @@ export function AddDeviceDialog({ onClose }: { onClose(): void }) {
     if (problem) { setError(t(problem === "short" ? "devices.password.tooShort" : "devices.password.mismatch")); return; }
     setBusy(true);
     updateLockScreen({ enabled: true, passwordHash: await hashPassword(password) });
-    await engine.call("deviceHandoffVerifier", { password }).catch(() => {});
+    const made = await engine.call("deviceHandoffVerifier", { password, current: previous.current }).then(() => true, () => false);
     setBusy(false);
+    if (!made) { setError(t("devices.handoff.verifierFailed")); return; }
     await start();
   };
 

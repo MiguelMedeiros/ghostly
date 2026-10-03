@@ -57,6 +57,18 @@ async function standbyUnder(database: string): Promise<void> {
   if (record?.state === "taking") await moveDevice(database, "standby", { handoff: undefined, settle: undefined });
 }
 
+/**
+ * A `releasing` device whose pass 2 cannot run: it never signed a release, so it writes `active` and starts again as
+ * the active device (WISP 06 § Installing the staged state, the crash row "releasing").
+ */
+export async function activeAgainIfReleasing(profile: string, show: (view: DeviceGateView) => void): Promise<boolean> {
+  const record = await readDeviceRecord(profile).catch(() => null);
+  if (record?.state !== "releasing") return false;
+  await moveDevice(profile, "active", { handoff: undefined });
+  show({ state: "releasing", reload: true });
+  return true;
+}
+
 /** The handoff of a device that is not the active one, or null where the app registered no profile host. */
 export async function standbyHandoff(options: StandbyHandoffOptions): Promise<DeviceHandoffHandler | null> {
   const host = options.host === undefined ? handoffProfileHost() : options.host;
@@ -105,6 +117,8 @@ export async function standbyHandoff(options: StandbyHandoffOptions): Promise<De
     const stored = await host.storedVersion(options.profile).catch(() => null);
     if (stored !== DB_VERSION) { await moveDevice(options.profile, "active", { handoff: undefined }); options.show({ state: "releasing", reload: true }); return null; }
   }
+  // `releasing` with no handoff of its own to go on with: active again.
+  if (record.state === "releasing" && record.handoff?.role !== "releasing") { await activeAgainIfReleasing(options.profile, options.show); return null; }
   if (record.handoff?.role === "releasing") await giver.resume();
   if (record.handoff?.role === "taking") await taker.resume();
 

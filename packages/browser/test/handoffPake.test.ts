@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { bytesToHex } from "@noble/hashes/utils.js";
 import { handoffContext, randomBytes, toBase64Url } from "@ghostly/core";
-import { HandoffPasswordError, isHandoffVerifier, makeHandoffVerifier, startPakeGiver, startPakeTaker } from "../src/devices/handoffPake";
+import { HandoffPasswordError, isHandoffVerifier, makeHandoffVerifier, provesHandoffPassword, startPakeGiver, startPakeTaker } from "../src/devices/handoffPake";
 // covers: devices.handoff.password
 
 /*
@@ -78,6 +78,13 @@ describe("the password proof of a pull", () => {
     const again = await startPakeGiver(verifier, taker.first);
     await expect(again.finish(third.third, toBase64Url(randomBytes(32)), ctx)).rejects.toBeInstanceOf(HandoffPasswordError);
     await expect(startPakeGiver(verifier, "AAAA")).rejects.toBeInstanceOf(HandoffPasswordError);
+  });
+
+  it("a verifier is replaced only with the password it checks: proven on this device the way a pull proves it", async () => {
+    const verifier = await makeHandoffVerifier(PASSWORD);
+    expect(await provesHandoffPassword(verifier, PASSWORD)).toBe(true);
+    expect(await provesHandoffPassword(verifier, "not the password")).toBe(false);
+    expect(await provesHandoffPassword(verifier, "")).toBe(false);
   });
 
   it("a verifier for another password, or no verifier, proves nothing", async () => {

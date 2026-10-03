@@ -114,7 +114,7 @@ import { moveDevice, readDeviceRecord } from "../devices/store";
 import { HandoffGiver, type HandoffView } from "../devices/handoff";
 import { handoffProfileHost, handoffSelf } from "../devices/handoffHost";
 import { handoffLinks, profileRecords } from "../devices/handoffStandby";
-import { isHandoffVerifier, makeHandoffVerifier, type HandoffVerifier } from "../devices/handoffPake";
+import { isHandoffVerifier, makeHandoffVerifier, provesHandoffPassword, type HandoffVerifier } from "../devices/handoffPake";
 import { deviceIdentity } from "../devices/setup";
 import { walletHandoffProblem } from "../devices/handoffWallets";
 import { fileBytes } from "../shared/fileBytes";
@@ -1482,6 +1482,7 @@ export class GhostlyNode implements EngineImplementation {
     void this.dropStaleReviews();
     this.staleReviewTimer ??= setInterval(() => void this.dropStaleReviews(), 60_000);
     this.stopWatchingAdapters ??= onAdaptersChanged(() => { if (!this.shuttingDown) for (const network of WALLET_NETWORKS) { this.lightnings[network].refreshOffered(); this.bitcoins[network].refreshOffered(); } });
+    this.walletsStarted = true;
   }
 
   /** The wallets that exist, opened, and what was in flight looked at again: the second half. */
@@ -4632,11 +4633,22 @@ export class GhostlyNode implements EngineImplementation {
    * Makes the verifier from the lock password, which the page has in hand only when the person types it (Add a device,
    * a password set or changed). The password itself is not kept.
    */
-  async deviceHandoffVerifier({ password }: { password: string }): Promise<void> {
+  async deviceHandoffVerifier({ password, current }: { password: string; current?: string }): Promise<void> {
     if (this.options.singleDevice) return;
     if (typeof password !== "string" || !password) throw new Error("A password is needed");
-    const verifier = await makeHandoffVerifier(password);
-    await wrap((await store(STORES.settings, "readwrite")).put(verifier, GhostlyNode.HANDOFF_VERIFIER));
+    const stored = await this.handoffVerifier();
+    // A verifier is replaced only by someone who knows the password it checks: proven here, the same way a pull does.
+    // Only a profile on several devices has pulls to protect; one on a single device (Add a device not done yet) may set it afresh.
+    if (stored && knownDeviceGate()?.state === "active" && !(await provesHandoffPassword(stored, typeof current === "string" ? current : ""))) throw new Error("handoff-password: The current password is wrong.");
+    try {
+      const verifier = await makeHandoffVerifier(password);
+      await wrap((await store(STORES.settings, "readwrite")).put(verifier, GhostlyNode.HANDOFF_VERIFIER));
+    } catch (error) {
+      // The old verifier must not go on checking a password the person changed: none, until one is made (a pull is
+      // refused meanwhile; a push still works).
+      await wrap((await store(STORES.settings, "readwrite")).delete(GhostlyNode.HANDOFF_VERIFIER)).catch(() => {});
+      throw error;
+    }
   }
 
   /**
@@ -4644,11 +4656,15 @@ export class GhostlyNode implements EngineImplementation {
    * operation open refuses the handoff, so no money is ever in two places: a balance on any network, anything a wallet
    * waits for, or a payment not settled.
    */
-  private async handoffBusy(): Promise<"wallet" | "payment" | null> {
-    // Limited mode opened no wallet: what they hold is not known, so nothing moves.
-    if (this.limitedMode) return "wallet";
-    return walletHandoffProblem(this.walletView);
+  private async handoffBusy(): Promise<"wallet" | "payment" | "loading" | null> {
+    // Limited mode opened no wallet, and wallets not started yet say nothing: what they hold is not known.
+    if (this.limitedMode || !this.walletsStarted) return "loading";
+    // Read now, not the view of the last change: a wallet that changed since is counted as it is.
+    await this.refreshWallet().catch(() => {});
+    return walletHandoffProblem(this.walletView, this.walletsStarted);
   }
+  /** Every wallet's stored state was loaded (`startWallets`): before that, a wallet view says nothing of what it holds. */
+  private walletsStarted = false;
 
   /**
    * Quiesce (WISP 06 § Shape, step 4): this engine stops without a word to any contact (they see an app that went

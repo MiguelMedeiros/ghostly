@@ -41,7 +41,7 @@
     "cancel": "Annulla",
     "cancelHint": "Non cambia nulla fino all'ultimo passaggio.",
     "fail": {
-      "busy": "È in corso un altro trasferimento.",
+      "busy": "{{device}} non può passare il profilo ora. Riprova più tardi.",
       "call": "C'è una chiamata in corso. Riprova dopo.",
       "cancelled": "Interrotto. Non è cambiato nulla.",
       "damaged": "La copia è arrivata danneggiata. Non è cambiato nulla.",
@@ -87,6 +87,7 @@
     "title": "Spostamento del profilo",
     "useHere": "Usa qui",
     "useHereTitle": "Usa questo profilo qui",
+    "verifierFailed": "Non è stato possibile preparare questa password per spostare il profilo. Riprova.",
     "waitingOffer": "Richiesta a {{device}}…",
     "wrongPassword": "{{device}} ha provato a spostare questo profilo con una password errata."
   },

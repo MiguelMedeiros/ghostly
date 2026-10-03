@@ -199,16 +199,36 @@ export function handoffStreamKey(ownSecret: Uint8Array, peerPublic: Uint8Array, 
   return hkdf(sha256, concatBytes(shared, k), hexToBytes(transcriptHash), utf8Encode("ghostly-handoff-stream/1"), 32);
 }
 
-/** One piece sealed with the stream key: `nonce(24) || XSalsa20-Poly1305(key, nonce, piece)`, a random nonce each. */
-export function sealHandoffPiece(key: Uint8Array, piece: Uint8Array, nonce: Uint8Array = randomBytes(24)): Uint8Array {
+/**
+ * What binds a piece to its place: the first 8 bytes of `SHA-256("ghostly-handoff-piece/1" || part name)` and the
+ * piece's offset in the part (8 bytes, big-endian). Sealed with the piece, so a piece moved to another part or offset
+ * does not open there. (XSalsa20-Poly1305 takes no associated data; the header inside the box does that job.)
+ */
+function pieceHeader(part: string, offset: number): Uint8Array {
+  if (!isCount(offset, MAX_PART)) throw new Error("A piece's offset is a whole number of bytes");
+  const header = new Uint8Array(16);
+  header.set(sha256(utf8Encode(`ghostly-handoff-piece/1${part}`)).subarray(0, 8), 0);
+  new DataView(header.buffer).setBigUint64(8, BigInt(offset));
+  return header;
+}
+/** What sealing adds to a piece: the nonce, the header and the tag. */
+export const HANDOFF_PIECE_OVERHEAD = 24 + 16 + 16;
+
+/**
+ * One piece of part `part` at byte `offset`, sealed with the stream key:
+ * `nonce(24) || XSalsa20-Poly1305(key, nonce, header(16) || piece)`, a random nonce each.
+ */
+export function sealHandoffPiece(key: Uint8Array, part: string, offset: number, piece: Uint8Array, nonce: Uint8Array = randomBytes(24)): Uint8Array {
   if (key.length !== 32 || nonce.length !== 24) throw new Error("A stream key is 32 bytes and a nonce 24");
-  return concatBytes(nonce, xsalsa20poly1305(key, nonce).encrypt(piece));
+  return concatBytes(nonce, xsalsa20poly1305(key, nonce).encrypt(concatBytes(pieceHeader(part, offset), piece)));
 }
 
-/** A sealed piece opened, or null when it was not sealed with this key or was changed. */
-export function openHandoffPiece(key: Uint8Array, sealed: Uint8Array): Uint8Array | null {
-  if (key.length !== 32 || sealed.length < 24 + 16) return null;
-  try { return xsalsa20poly1305(key, sealed.subarray(0, 24)).decrypt(sealed.subarray(24)); } catch { return null; }
+/** A sealed piece opened, or null when it was not sealed with this key, for this part and offset, or was changed. */
+export function openHandoffPiece(key: Uint8Array, part: string, offset: number, sealed: Uint8Array): Uint8Array | null {
+  if (key.length !== 32 || sealed.length < HANDOFF_PIECE_OVERHEAD) return null;
+  let plain: Uint8Array;
+  try { plain = xsalsa20poly1305(key, sealed.subarray(0, 24)).decrypt(sealed.subarray(24)); } catch { return null; }
+  return bytesEqual(plain.subarray(0, 16), pieceHeader(part, offset)) ? plain.subarray(16) : null;
 }
 
 // -- frames ---------------------------------------------------------------------------------------------------------
@@ -362,7 +382,7 @@ export const handoffDataFrame = (part: string, offset: number, sealed: Uint8Arra
 export function readHandoffData(frame: DeviceFrame): { part: string; offset: number; sealed: Uint8Array } | null {
   if (frame.t !== HANDOFF_DATA || !isHandoffPartName(frame.p) || !isCount(frame.o, MAX_PART) || !isText(frame.d, B64)) return null;
   const sealed = fromBase64Url(frame.d);
-  if (sealed.length < 40 || sealed.length > HANDOFF_PIECE_BYTES + 40) return null;
+  if (sealed.length < HANDOFF_PIECE_OVERHEAD || sealed.length > HANDOFF_PIECE_BYTES + HANDOFF_PIECE_OVERHEAD) return null;
   return { part: frame.p, offset: frame.o, sealed };
 }
 

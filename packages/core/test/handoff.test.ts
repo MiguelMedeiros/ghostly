@@ -63,7 +63,7 @@ async function build(): Promise<Vectors> {
       transcriptHash: TRANSCRIPT, streamKey: toBase64Url(streamKey), resumed: toBase64Url(resumed),
     },
     context: { context: bytesToHex(context), proof: toBase64Url(handoffContextProof(k, context)) },
-    piece: { nonce: toBase64Url(seed("nonce").subarray(0, 24)), plain: toBase64Url(plain), sealed: toBase64Url(sealHandoffPiece(streamKey, plain, seed("nonce").subarray(0, 24))) },
+    piece: { nonce: toBase64Url(seed("nonce").subarray(0, 24)), plain: toBase64Url(plain), sealed: toBase64Url(sealHandoffPiece(streamKey, "db/peer", 65_536, plain, seed("nonce").subarray(0, 24))) },
   };
 }
 
@@ -112,20 +112,23 @@ describe("the stream key and the pieces", () => {
 
   it("a sealed piece opens under its key only, and not once changed", () => {
     const key = seed("key"), piece = seed("piece");
-    const sealed = sealHandoffPiece(key, piece);
-    expect(openHandoffPiece(key, sealed)).toEqual(piece);
-    expect(openHandoffPiece(seed("other key"), sealed)).toBeNull();
+    const sealed = sealHandoffPiece(key, "local", 32_768, piece);
+    expect(openHandoffPiece(key, "local", 32_768, sealed)).toEqual(piece);
+    expect(openHandoffPiece(seed("other key"), "local", 32_768, sealed)).toBeNull();
+    // Bound to its part and its offset: moved elsewhere, it does not open.
+    expect(openHandoffPiece(key, "db/peer", 32_768, sealed)).toBeNull();
+    expect(openHandoffPiece(key, "local", 0, sealed)).toBeNull();
     const changed = sealed.slice(); changed[30] ^= 1;
-    expect(openHandoffPiece(key, changed)).toBeNull();
-    expect(openHandoffPiece(key, sealed.subarray(0, 20))).toBeNull();
+    expect(openHandoffPiece(key, "local", 32_768, changed)).toBeNull();
+    expect(openHandoffPiece(key, "local", 32_768, sealed.subarray(0, 20))).toBeNull();
     // Two seals of one piece differ: a random nonce each.
-    expect(toBase64Url(sealHandoffPiece(key, piece))).not.toBe(toBase64Url(sealed));
+    expect(toBase64Url(sealHandoffPiece(key, "local", 32_768, piece))).not.toBe(toBase64Url(sealed));
   });
 
   it("a whole piece, sealed, fits a device frame", () => {
-    const frame = handoffDataFrame("db/peer", 0, sealHandoffPiece(seed("key"), new Uint8Array(HANDOFF_PIECE_BYTES)));
+    const frame = handoffDataFrame("db/peer", 0, sealHandoffPiece(seed("key"), "db/peer", 0, new Uint8Array(HANDOFF_PIECE_BYTES)));
     expect(JSON.stringify(frame).length).toBeLessThan(60 * 1024);
-    expect(readHandoffData(frame)?.sealed.length).toBe(HANDOFF_PIECE_BYTES + 40);
+    expect(readHandoffData(frame)?.sealed.length).toBe(HANDOFF_PIECE_BYTES + 56);
   });
 
   it("the context names the turn address, both keys and the session, and its proof is keyed by the password proof's key", () => {
@@ -207,9 +210,9 @@ describe("handoff frames", () => {
   });
 
   it("data and ack read back, and a data frame with a piece too large is refused", () => {
-    const sealed = sealHandoffPiece(seed("k"), new Uint8Array(10));
+    const sealed = sealHandoffPiece(seed("k"), "local", 65_536, new Uint8Array(10));
     expect(readHandoffData(handoffDataFrame("local", 65_536, sealed))).toEqual({ part: "local", offset: 65_536, sealed });
-    expect(readHandoffData({ t: "handoff-data", p: "local", o: 0, d: toBase64Url(new Uint8Array(HANDOFF_PIECE_BYTES + 41)) })).toBeNull();
+    expect(readHandoffData({ t: "handoff-data", p: "local", o: 0, d: toBase64Url(new Uint8Array(HANDOFF_PIECE_BYTES + 57)) })).toBeNull();
     expect(readHandoffData({ t: "handoff-data", p: "nope", o: 0, d: toBase64Url(sealed) })).toBeNull();
     expect(readHandoffAck(handoffAckFrame("local", 3))).toEqual({ part: "local", offset: 3 });
     expect(readHandoffAck({ t: "handoff-ack", p: "local", o: -1 })).toBeNull();

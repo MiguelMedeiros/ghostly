@@ -41,7 +41,7 @@
     "cancel": "Annuler",
     "cancelHint": "Rien ne change avant la dernière étape.",
     "fail": {
-      "busy": "Un autre transfert est en cours.",
+      "busy": "{{device}} ne peut pas transmettre le profil pour l'instant. Réessayez plus tard.",
       "call": "Un appel est en cours. Réessayez après.",
       "cancelled": "Arrêté. Rien n'a changé.",
       "damaged": "La copie est arrivée abîmée. Rien n'a changé.",
@@ -87,6 +87,7 @@
     "title": "Déplacement de votre profil",
     "useHere": "Utiliser ici",
     "useHereTitle": "Utiliser ce profil ici",
+    "verifierFailed": "Ce mot de passe n'a pas pu être préparé pour déplacer le profil. Réessayez.",
     "waitingOffer": "Demande à {{device}}…",
     "wrongPassword": "{{device}} a tenté de déplacer ce profil avec un mauvais mot de passe."
   },

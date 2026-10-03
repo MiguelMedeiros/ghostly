@@ -41,7 +41,7 @@
     "cancel": "取消",
     "cancelHint": "在最后一步之前，什么都不会改变。",
     "fail": {
-      "busy": "另一次迁移正在进行。",
+      "busy": "{{device}} 现在无法交出该资料。请稍后再试。",
       "call": "正在通话。请在通话结束后再试。",
       "cancelled": "已停止。没有任何改变。",
       "damaged": "副本已损坏。没有任何改变。",
@@ -87,6 +87,7 @@
     "title": "正在迁移你的资料",
     "useHere": "在此使用",
     "useHereTitle": "在此使用该资料",
+    "verifierFailed": "无法为迁移资料设置此密码。请再试一次。",
     "waitingOffer": "正在询问 {{device}}…",
     "wrongPassword": "{{device}} 尝试用错误的密码迁移此资料。"
   },

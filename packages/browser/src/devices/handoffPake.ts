@@ -59,6 +59,19 @@ export async function makeHandoffVerifier(password: string): Promise<HandoffVeri
   return { v: 1, setup, record: registrationRecord };
 }
 
+/** Whether `password` is the one `verifier` checks: both sides of a proof run here, as a pull would run them. */
+export async function provesHandoffPassword(verifier: HandoffVerifier, password: string): Promise<boolean> {
+  if (!password) return false;
+  try {
+    const taker = await startPakeTaker(password);
+    const giver = await startPakeGiver(verifier, taker.first);
+    const context = new TextEncoder().encode("ghostly-handoff-local-check");
+    const done = await taker.finish(giver.second, context);
+    await giver.finish(done.third, done.proof, context);
+    return true;
+  } catch { return false; }
+}
+
 /** The password was wrong (the taker could not open the envelope), or the proof did not hold (the giver). */
 export class HandoffPasswordError extends Error {
   constructor() {

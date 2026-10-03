@@ -11,7 +11,7 @@ import {
 } from "@ghostly/core";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { HandoffPasswordError, startPakeGiver, startPakeTaker, type HandoffVerifier, type PakeGiver, type PakeTaker } from "./handoffPake";
-import type { DevicePatch, DeviceRecord, HeldFile, LeftFile, StoredDeviceState } from "./state";
+import type { DeviceAttempts, DevicePatch, DeviceRecord, HeldFile, LeftFile, StoredDeviceState } from "./state";
 import type { TurnOutcome } from "./turn";
 
 /*
@@ -131,6 +131,9 @@ export interface HandoffStagingHost {
   drop(database: string): Promise<void>;
 }
 
+/** Why the giver cannot hand over now, as this device's own screens say it. */
+export type LocalBusy = "wallet" | "payment" | "call" | "loading";
+
 /** What a device says about itself in `handoff-hello`, but its key for this session. */
 export type HandoffSelf = Omit<HandoffHello, "v" | "e" | "id" | "later">;
 
@@ -152,8 +155,11 @@ export interface GiverPorts extends Common {
   source: HandoffSource;
   /** The profile's password proof verifier; null when it has none (a pull is then refused, a push still works). */
   verifier(): Promise<HandoffVerifier | null>;
-  /** Why this device cannot hand over now (a call on, money in a wallet, a payment going through), or null. */
-  busy(): Promise<HandoffBusyReason | null>;
+  /**
+   * Why this device cannot hand over now, or null: money in a wallet, a payment going through, a call on, or wallets
+   * not read yet. Said to the person on this device; the other device is told only that it is busy.
+   */
+  busy(): Promise<LocalBusy | null>;
   /**
    * Pass 1 is done: freeze. Stops the engine without a word to any contact, writes `releasing` with `patch`, and
    * reloads into the gate. Only while the engine runs (pass 1).
@@ -181,6 +187,23 @@ export interface TakerPorts extends Common {
 
 const name = (record: DeviceRecord, key: string): string => record.deviceSet.find((slot) => slot?.key === key)?.name ?? "";
 const slotOf = (record: DeviceRecord, key: string): number => record.deviceSet.findIndex((slot) => slot?.key === key);
+
+/**
+ * The wrong passwords the giver counted, carried with its release (`a`), kept with this device's own: for each device,
+ * the higher count and the later lock-out. A value that is no count is left out.
+ */
+function mergedAttempts(record: DeviceRecord, carried: unknown): DevicePatch {
+  if (!carried || typeof carried !== "object" || Array.isArray(carried)) return {};
+  const merged: Record<string, DeviceAttempts> = { ...record.handoffAttempts };
+  for (const [key, value] of Object.entries(carried as Record<string, unknown>).slice(0, 16)) {
+    const a = value as Partial<DeviceAttempts> | null;
+    if (!/^[A-Za-z0-9_-]{43}$/.test(key) || !a || !Number.isSafeInteger(a.total) || (a.total as number) < 0 || !Array.isArray(a.recent) || !a.recent.every((at) => Number.isSafeInteger(at) && at >= 0)) continue;
+    const mine = merged[key];
+    const until = Math.max(mine?.until ?? 0, Number.isSafeInteger(a.until) ? a.until as number : 0);
+    merged[key] = { recent: [...new Set([...(mine?.recent ?? []), ...a.recent])].sort((x, y) => x - y).slice(-16), total: Math.min(1_000_000, Math.max(mine?.total ?? 0, a.total as number)), ...(until ? { until } : {}) };
+  }
+  return Object.keys(merged).length ? { handoffAttempts: Object.fromEntries(Object.entries(merged).slice(0, 16)) } : {};
+}
 
 /** One session of a handoff with the other device: its own X25519 key, the other's hello, and the stream key. */
 class Session {
@@ -239,13 +262,18 @@ class PartSender {
         const piece = await part.read(offset, Math.min(HANDOFF_PIECE_BYTES, part.size - offset));
         if (run !== this.run) return "stopped";
         if (!piece.length) throw new Error("A part is shorter than it says");
-        try { out(handoffDataFrame(part.name, offset, sealHandoffPiece(key, piece))); } catch { this.stop(); return "stopped"; }
+        try { out(handoffDataFrame(part.name, offset, sealHandoffPiece(key, part.name, offset, piece))); } catch { this.stop(); return "stopped"; }
         offset += piece.length;
         this.outstanding.push({ part: part.name, end: offset });
       }
     }
     while (this.outstanding.length && run === this.run) await new Promise<void>((resolve) => this.wake.push(resolve));
     return run === this.run ? "done" : "stopped";
+  }
+
+  /** Pieces are out, and none was confirmed for `ms`. */
+  stalled(ms: number): boolean {
+    return this.outstanding.length > 0 && this.now() - this.lastProgress > ms;
   }
 
   ack(part: string, offset: number): void {
@@ -339,7 +367,7 @@ export class HandoffGiver {
   view(): HandoffView | null {
     if (this.phase === "idle" || !this.peer) return this.failure && this.peer ? { role: "giver", device: this.deviceName, key: this.peer, step: "failed", bytes: 0, total: 0, failure: this.failure, ...(this.retry ? { retry: this.retry } : {}) } : null;
     const confirmed = [...this.sender.confirmed.values()].reduce((a, b) => a + b, 0);
-    const step: HandoffView["step"] = this.phase === "offered" ? "connecting" : this.phase === "authorizing" ? "authorizing" : this.phase === "pass1" ? "copying"
+    const step: HandoffView["step"] = this.phase === "offered" ? "connecting" : this.phase === "authorizing" ? "authorizing" : this.paused ? "paused" : this.phase === "pass1" ? "copying"
       : this.phase === "quiescing" ? "ready" : this.phase === "pass2" ? "rest" : this.phase === "released" ? "switching" : "failed";
     return {
       role: "giver", device: this.deviceName, key: this.peer, step, bytes: confirmed, total: this.planned?.total ?? 0,
@@ -353,12 +381,14 @@ export class HandoffGiver {
   /** "Move to <device>" (a push): the offer goes out, and the taker answers with a request once the person agrees. */
   push(key: string): Promise<HandoffView | null> {
     return this.exclusive(async () => {
+      // A pull that waits for its password proof gives way to the person at this device, who moves the profile now.
+      if (this.phase === "authorizing") { this.out(handoffCancelFrame("cancelled")); this.reset("cancelled"); }
       if (this.phase !== "idle" && this.phase !== "failed") throw new Error("handoff-busy: Another move is in progress.");
       const record = await this.ports.records.read();
       if (!record || record.state !== "active") throw new Error("handoff-refused: Only the active device moves the profile.");
       if (slotOf(record, key) < 0) throw new Error("handoff-refused: That device is not one of this profile's.");
       const busy = await this.ports.busy();
-      if (busy) throw new Error(`handoff-${busy}: This device cannot move the profile now.`);
+      if (busy) throw new Error(`handoff-${busy === "loading" ? "busy" : busy}: This device cannot move the profile now.`);
       if (!this.ports.links.live(key)) throw new Error("handoff-unreachable: That device must be on, with Ghostly open.");
       this.begin(key, newHandoffId(), record);
       this.phase = "offered";
@@ -414,6 +444,7 @@ export class HandoffGiver {
     this.stopped = true;
     this.sender.stop();
     if (this.timer) clearTimeout(this.timer);
+    clearInterval(this.stallTimer);
   }
 
   receive(from: string, frame: DeviceFrame): Promise<void> {
@@ -470,7 +501,7 @@ export class HandoffGiver {
     // Released already: the same release again, to the taker it names (WISP 06 § States and events).
     if (this.phase === "released" || (record.state === "standby" && record.handoff?.release)) {
       const release = record.handoff?.release;
-      if (release && release.to === from && request.id === record.handoff?.id) this.out(handoffReleaseFrame(release), from);
+      if (release && release.to === from && request.id === record.handoff?.id) this.out({ ...handoffReleaseFrame(release), ...(record.handoffAttempts ? { a: record.handoffAttempts } : {}) }, from);
       return;
     }
     const busy = (why: HandoffBusyReason, retry = 30) => this.out(handoffBusyFrame(why, retry), from);
@@ -479,8 +510,8 @@ export class HandoffGiver {
     if (slotOf(record, from) < 0) return busy("refused", 0);
     const pushed = this.phase === "offered" && from === this.peer && request.id === this.id;
     if (this.phase !== "idle" && this.phase !== "failed" && !pushed) return busy("handoff");
-    const why = await this.ports.busy();
-    if (why) return busy(why);
+    // Why is this device's own business (money, a call): the other device is told it is busy, nothing more.
+    if (await this.ports.busy()) return busy("handoff");
     const session = this.sessionFor(from);
     if (!session?.peer) return busy("handoff", 5);
     const self = await this.ownSelf();
@@ -489,6 +520,9 @@ export class HandoffGiver {
     if (!pushed) {
       const allowed = handoffAttemptAllowed(record.handoffAttempts?.[from], this.now());
       if (allowed !== "ok") return busy(allowed, allowed === "refused" ? 0 : handoffRetryAfter(record.handoffAttempts?.[from], this.now()));
+      // A pull is counted as a try when it is asked for, before anything is answered, and taken back only when its
+      // proof holds: a device that asks and never proves (holding this device in `authorizing`) spends its tries.
+      await this.ports.records.amend({ handoffAttempts: { ...record.handoffAttempts, [from]: handoffAttemptFailed(record.handoffAttempts?.[from], this.now()) } });
       this.begin(from, request.id, record);
       this.newer = versions.newerTaker;
       this.phase = "authorizing";
@@ -510,10 +544,7 @@ export class HandoffGiver {
       if (this.pake) return;
       const verifier = await this.ports.verifier();
       if (!verifier) { this.out(handoffBusyFrame("refused", 0), from); this.reset("refused"); return; }
-      // Counted before the answer goes out, and taken back only on success: a taker that stops after the second
-      // message has used a try, and a crash cannot give one back.
-      const record = await this.ports.records.read();
-      await this.ports.records.amend({ handoffAttempts: { ...record?.handoffAttempts, [from]: handoffAttemptFailed(record?.handoffAttempts?.[from], this.now()) } });
+      // The try was counted with the request (`onRequest`).
       try { this.pake = await startPakeGiver(verifier, pake.m!); } catch { this.wrongPassword(from); return; }
       this.out(handoffPakeFrame({ n: 2, m: this.pake.second }), from);
       this.arm(HANDOFF_TIMINGS.idleMs, () => this.reset("dropped"));
@@ -586,14 +617,26 @@ export class HandoffGiver {
     this.laterParts = behind;
     this.allFiles = files;
     for (const frame of handoffManifestFrames({ pass, parts, later: behind, ids: idsOf(files) })) this.out(frame);
+    this.paused = false;
     this.changed();
+    // No confirmed bytes for two minutes: paused. The taker says what it holds when it can, and the copy goes on.
+    clearInterval(this.stallTimer);
+    this.stallTimer = setInterval(() => {
+      if (!this.sender.stalled(HANDOFF_TIMINGS.stallMs)) return;
+      this.sender.stop();
+      this.paused = true;
+      this.changed();
+    }, Math.min(HANDOFF_TIMINGS.stallMs / 4, 30_000));
     const result = await this.sender.send(out, this.have!.p, session.key!, (frame) => this.out(frame));
+    clearInterval(this.stallTimer);
     if (result !== "done" || this.stopped) return;
     this.changed();
     if (pass === 1) await this.exclusive(() => this.quiesce());
     else this.arm(HANDOFF_TIMINGS.verifiedMs, () => this.backToActive());
   }
   private bundlePart: HandoffPart | null = null;
+  private paused = false;
+  private stallTimer: ReturnType<typeof setInterval> | undefined;
   private laterParts: HandoffPart[] = [];
   private allFiles: HandoffFile[] = [];
 
@@ -605,8 +648,8 @@ export class HandoffGiver {
       // A payment is going through: up to 30 seconds, then "A payment is still going through".
       const deadline = this.now() + HANDOFF_TIMINGS.paymentMs;
       while (this.now() < deadline && await this.ports.busy() === "payment") await new Promise((resolve) => setTimeout(resolve, 1_000));
-      if (await this.ports.busy()) { this.out(handoffBusyFrame("payment", 30)); this.reset("payment"); return; }
-    } else if (why) { this.out(handoffBusyFrame(why, 30)); this.reset(why === "call" ? "call" : why === "wallet" ? "wallet" : "busy"); return; }
+      if (await this.ports.busy()) { this.out(handoffBusyFrame("handoff", 30)); this.reset("payment"); return; }
+    } else if (why) { this.out(handoffBusyFrame("handoff", 30)); this.reset(why === "loading" ? "busy" : why); return; }
     this.phase = "quiescing";
     this.changed();
     await this.ports.quiesce({
@@ -633,11 +676,13 @@ export class HandoffGiver {
     // Standby first, durably: from this write on this device is on standby, whether the frame below arrives or not.
     await this.ports.records.move("standby", {
       releasedTurn: this.turn + 1, heldFiles, leftFiles,
-      handoff: { ...record.handoff!, step: "released", release, at: this.now() },
+      // The stream key is of no more use: the release is sent again as it is, with no key.
+      handoff: { ...record.handoff!, step: "released", release, at: this.now(), secret: undefined },
     });
     if (this.timer) clearTimeout(this.timer);
     this.phase = "released";
-    this.out(handoffReleaseFrame(release));
+    // The wrong passwords counted here go with the profile: a device does not get fresh tries on each new active one.
+    this.out({ ...handoffReleaseFrame(release), ...(record.handoffAttempts ? { a: record.handoffAttempts } : {}) });
     this.changed();
   }
 
@@ -659,6 +704,8 @@ export class HandoffGiver {
 
   private reset(failure: HandoffFailure): void {
     this.sender.stop();
+    clearInterval(this.stallTimer);
+    this.paused = false;
     if (this.timer) clearTimeout(this.timer);
     this.phase = "idle";
     this.failure = failure;
@@ -1061,12 +1108,14 @@ export class HandoffTaker {
     if (!part || part.done) { if (part?.done) this.out(handoffAckFrame(data.part, part.size)); return; }
     // A piece already written (sent again after a drop) is confirmed again; one past a gap waits for its turn.
     if (data.offset !== part.got) { if (data.offset < part.got) this.out(handoffAckFrame(part.name, part.got)); return; }
-    const piece = openHandoffPiece(session.key, data.sealed);
+    const piece = openHandoffPiece(session.key, data.part, data.offset, data.sealed);
     // Sealed with another session's key (sent as the link changed under it): not taken. What is here is said again,
     // so the giver goes on with this session's key. A piece that opens and is not the part is caught by its digest.
     if (!piece) { await this.sayAgain(); return; }
     if (part.got + piece.length > part.size) { await this.badPart(part); return; }
-    if (part.id) await this.staging!.append(part.id, part.got, piece); else part.chunks!.push(piece);
+    // A write that fails (the disk is full, storage was taken away) ends the handoff at once, said to both screens.
+    try { if (part.id) await this.staging!.append(part.id, part.got, piece); else part.chunks!.push(piece); }
+    catch { await this.noRoom(); return; }
     part.hash.update(piece);
     part.got += piece.length;
     this.totals.bytes += piece.length;
@@ -1074,7 +1123,15 @@ export class HandoffTaker {
     // The last piece is confirmed only once the part's digest holds: a giver whose every piece is confirmed knows the
     // taker has the part whole.
     if (part.got < part.size) { this.out(handoffAckFrame(part.name, part.got)); return; }
-    if (await this.partDone(part)) this.out(handoffAckFrame(part.name, part.size));
+    let done: boolean;
+    try { done = await this.partDone(part); } catch { await this.noRoom(); return; }
+    if (done) this.out(handoffAckFrame(part.name, part.size));
+  }
+
+  /** Storage refused a write: no room. Nothing changed on either device. */
+  private async noRoom(): Promise<void> {
+    this.out(handoffCancelFrame("room"));
+    await this.giveUp("room");
   }
 
   private async partDone(part: InPart): Promise<boolean> {
@@ -1151,7 +1208,7 @@ export class HandoffTaker {
     if (this.timer) clearTimeout(this.timer);
     const record = await this.ports.records.read();
     if (!record || record.state !== "standby") return;
-    const taking = await this.ports.records.move("taking", { handoff: { ...record.handoff!, step: "install", release, at: this.now() } });
+    const taking = await this.ports.records.move("taking", { handoff: { ...record.handoff!, step: "install", release, at: this.now() }, ...mergedAttempts(record, frame.a) });
     this.phase = "installing";
     this.changed();
     await this.install(taking);

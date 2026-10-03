@@ -3,12 +3,12 @@ import { bytesToHex } from "@noble/hashes/utils.js";
 import { sha256 } from "@noble/hashes/sha2.js";
 import {
   HANDOFF_ATTEMPTS, HANDOFF_PIECE_BYTES, HANDOFF_TIMINGS, fromBase64Url, handoffDigest, randomBytes, readHandoffManifest, readTurnPacket, seedSigner,
-  toBase64Url, turnReleaseMessage, verify, type DeviceFrame, type HandoffBusyReason, type HandoffPart, type TurnRelease,
+  toBase64Url, turnReleaseMessage, verify, type DeviceFrame, type HandoffPart, type TurnRelease,
 } from "@ghostly/core";
 import { amend, firstRecord, transition, type DevicePatch, type DeviceRecord, type StoredDeviceState } from "../src/devices/state";
 import {
   HandoffGiver, HandoffTaker, type GiverPorts, type HandoffFile, type HandoffLinks, type HandoffRecords, type HandoffSelf, type HandoffSource,
-  type HandoffStaging, type HandoffStagingHost, type HandoffView, type TakerPorts,
+  type HandoffStaging, type HandoffStagingHost, type HandoffView, type LocalBusy, type TakerPorts,
 } from "../src/devices/handoff";
 import { makeHandoffVerifier, type HandoffVerifier } from "../src/devices/handoffPake";
 import type { TurnOutcome } from "../src/devices/turn";
@@ -167,7 +167,7 @@ interface World {
   link: Link; profile: Profile; storage: Storage;
   giverRecords: Records; takerRecords: Records;
   giver: HandoffGiver; taker: HandoffTaker;
-  busy: { why: HandoffBusyReason | null };
+  busy: { why: LocalBusy | null };
   quiesced: DevicePatch[]; reloads: number; activeAgain: number;
   takes: { release: TurnRelease; turn: number }[];
   takeOutcome: () => TurnOutcome | null;
@@ -301,6 +301,16 @@ describe("a pull with the right password", () => {
     expect(w.giverRecords.record.handoff).toBeUndefined();
   });
 
+  it("the giver's count of wrong passwords goes with the release, so a device gets no fresh tries on the new active one", async () => {
+    const w = world();
+    w.profile.add("f1", bytesOf(100));
+    await w.giverRecords.amend({ handoffAttempts: { [C]: { recent: [], total: 9 } } });
+    await fullPull(w);
+    expect(w.takerRecords.record.handoffAttempts?.[C]?.total).toBe(9);
+    // The giver keeps no stream key once it released.
+    expect(w.giverRecords.record.handoff?.secret).toBeUndefined();
+  });
+
   it("asks for the password once per handoff: the session after A's reload derives its key from the first one", async () => {
     const w = world();
     w.profile.add("f1", bytesOf(5_000));
@@ -389,6 +399,66 @@ describe("the password proof and its limits", () => {
   });
 });
 
+describe("a device that asks and never proves", () => {
+  it("each request is a try: five requests that send no first message lock that device out", async () => {
+    const w = world();
+    for (let i = 0; i < HANDOFF_ATTEMPTS.perHour; i++) {
+      await w.giver.receive(B, { t: "handoff-hello", v: 1, e: toBase64Url(randomBytes(32)), app: "1.1.0", db: 12, pins: {}, kind: "web", room: -1, metered: false });
+      await w.giver.receive(B, { t: "handoff-request", turn: N, id: `${"r".repeat(21)}${i}` });
+      await w.giver.cancel();
+    }
+    expect(w.giverRecords.record.handoffAttempts?.[B]?.total).toBe(HANDOFF_ATTEMPTS.perHour);
+    expect(w.giverRecords.record.handoffAttempts?.[B]?.until).toBeGreaterThan(Date.now());
+    await w.taker.pull(PASSWORD);
+    await until(() => w.taker.view()?.failure === "locked-out");
+  });
+
+  it("the person's push on the active device takes over from a pull waiting for its proof", async () => {
+    const w = world();
+    w.profile.add("f1", bytesOf(100));
+    w.link.meddle = (from, frame) => (from === B && frame.t === "handoff-pake" ? null : frame);
+    await w.taker.pull(PASSWORD);
+    await until(() => w.giver.view()?.step === "authorizing");
+    w.link.meddle = undefined;
+    await w.giver.push(B);
+    await until(() => w.taker.view()?.step === "offer");
+    await w.taker.accept();
+    await until(() => w.quiesced.length === 1);
+  });
+});
+
+describe("storage that refuses a write", () => {
+  it("a full disk on the taker ends the handoff at once on both devices as no room, and nothing changed", async () => {
+    const w = world();
+    w.profile.add("big", bytesOf(HANDOFF_PIECE_BYTES * 4));
+    const open = w.storage.open.bind(w.storage);
+    w.storage.open = async (database) => {
+      const staging = await open(database);
+      let writes = 0;
+      return { ...staging, append: async (id, offset, bytes) => { if (++writes > 2) throw new DOMException("The quota has been exceeded.", "QuotaExceededError"); await staging.append(id, offset, bytes); } };
+    };
+    await w.taker.pull(PASSWORD);
+    await until(() => w.taker.view()?.failure === "room");
+    await until(() => w.giver.view()?.failure === "cancelled");
+    expect(w.link.sent.find((s) => s.from === B && s.frame.t === "handoff-cancel")?.frame).toMatchObject({ why: "room" });
+    expect(w.giverRecords.record.state).toBe("active");
+    expect(w.quiesced).toHaveLength(0);
+  });
+
+  it("no confirmed bytes for two minutes: the giver shows the copy as paused", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "Date"], shouldAdvanceTime: true });
+    const w = world();
+    w.profile.add("big", bytesOf(HANDOFF_PIECE_BYTES * 40));
+    let pieces = 0;
+    // The taker stops confirming (it went to sleep): the pieces go nowhere after the first few.
+    w.link.meddle = (from, frame) => (frame.t === "handoff-data" && ++pieces > 3 ? null : frame);
+    await w.taker.pull(PASSWORD);
+    await until(() => pieces > 3);
+    await vi.advanceTimersByTimeAsync(HANDOFF_TIMINGS.stallMs + 60_000);
+    await until(() => w.giver.view()?.step === "paused");
+  });
+});
+
 describe("a push", () => {
   it("offers, and the taker's Use here moves the profile with no password", async () => {
     const w = world();
@@ -428,14 +498,25 @@ describe("a push", () => {
 });
 
 describe("refusals before a byte is copied", () => {
-  it.each([["wallet", "wallet"], ["payment", "payment"], ["call", "call"]] as const)("the giver is busy (%s): the taker says why", async (why, failure) => {
+  it.each(["wallet", "payment", "call", "loading"] as const)("the giver is busy (%s): the taker is told only that it is busy, and no try is used", async (why) => {
     const w = world();
     w.busy.why = why;
     await w.taker.pull(PASSWORD);
     await until(() => w.taker.view()?.step === "failed");
-    expect(w.taker.view()!.failure).toBe(failure);
+    expect(w.taker.view()!.failure).toBe("busy");
+    expect(w.link.sent.filter((s) => s.frame.t === "handoff-busy").map((s) => s.frame.why)).toEqual(["handoff"]);
     // The taker sends the first message with its request; the giver answers none.
     expect(w.link.count("handoff-pake", A)).toBe(0);
+    expect(w.giverRecords.record.handoffAttempts).toBeUndefined();
+  });
+
+  it("a push from the active device while money is there is refused on the device itself, with the reason", async () => {
+    const w = world();
+    w.busy.why = "wallet";
+    await expect(w.giver.push(B)).rejects.toThrow(/^handoff-wallet:/);
+    w.busy.why = "loading";
+    await expect(w.giver.push(B)).rejects.toThrow(/^handoff-busy:/);
+    expect(w.link.count("handoff-offer")).toBe(0);
   });
 
   it("a taker with an older database: Update Ghostly on this device first", async () => {

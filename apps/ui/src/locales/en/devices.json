@@ -41,7 +41,7 @@
     "cancel": "Cancel",
     "cancelHint": "Nothing changes until the last step.",
     "fail": {
-      "busy": "Another move is in progress.",
+      "busy": "{{device}} can't hand over the profile now. Try again later.",
       "call": "A call is on. Try again after it.",
       "cancelled": "Stopped. Nothing changed.",
       "damaged": "The copy was damaged. Nothing changed.",
@@ -87,6 +87,7 @@
     "title": "Moving your profile",
     "useHere": "Use here",
     "useHereTitle": "Use this profile here",
+    "verifierFailed": "This password could not be set up for moving the profile. Try again.",
     "waitingOffer": "Asking {{device}}…",
     "wrongPassword": "{{device}} tried to move this profile with a wrong password."
   },

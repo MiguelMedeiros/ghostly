@@ -371,7 +371,7 @@ export interface EngineApi {
    * The handoff (WISP 06 § The handoff). Errors start with `handoff-<reason>:`. The verifier of the password proof,
    * made from the lock password the person just typed (Add a device, a password set or changed).
    */
-  deviceHandoffVerifier(params: { password: string }): void;
+  deviceHandoffVerifier(params: { password: string; current?: string }): void;
   /** "Move to <device>" on the active device (a push). */
   deviceHandoffPush(params: { key: string }): import("../devices/handoff").HandoffView | null;
   /** "Use here" on a standby (a pull), with the lock password. `later`: files over this many bytes stay behind. */

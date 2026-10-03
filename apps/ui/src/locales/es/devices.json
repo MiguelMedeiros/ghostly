@@ -41,7 +41,7 @@
     "cancel": "Cancelar",
     "cancelHint": "Nada cambia hasta el último paso.",
     "fail": {
-      "busy": "Hay otro traslado en curso.",
+      "busy": "{{device}} no puede pasar el perfil ahora. Inténtalo de nuevo más tarde.",
       "call": "Hay una llamada en curso. Inténtalo de nuevo después.",
       "cancelled": "Detenido. Nada cambió.",
       "damaged": "La copia llegó dañada. Nada cambió.",
@@ -87,6 +87,7 @@
     "title": "Moviendo tu perfil",
     "useHere": "Usar aquí",
     "useHereTitle": "Usar este perfil aquí",
+    "verifierFailed": "No se pudo preparar esta contraseña para mover el perfil. Inténtalo de nuevo.",
     "waitingOffer": "Preguntando a {{device}}…",
     "wrongPassword": "{{device}} intentó mover este perfil con una contraseña incorrecta."
   },
