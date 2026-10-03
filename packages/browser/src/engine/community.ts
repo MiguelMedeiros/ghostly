@@ -124,6 +124,12 @@ const KNOCK_SLOT_MS = 2 * 60_000;
 const KNOCK_SLOT_OPEN_MS = 20_000;
 /** How long a hub missing from the beacon still counts as one for the edges already up. */
 const HUB_GRACE_MS = 3 * 60_000;
+/**
+ * A member cut off by a hub that left waits this long for the hub that takes it in its place before it may step up as
+ * a hub itself: long enough for that hub's lobby reading (every 6 s once a hub left) and an edge, short enough that a
+ * group that needs one more hub gets it.
+ */
+const CUT_OFF_STEP_UP_MS = 15_000;
 const REFUSED_FOR_MS = 10 * 60_000;
 const ENTRY_LINGER_MS = 20_000;
 const RELAYED_KEPT = 4096;
@@ -241,6 +247,8 @@ interface Live {
   stepDownAt: number;
   /** Hubs taken in place of one that left: all its members ask them at once, so each gets the longer wait. */
   replacing?: Set<string>;
+  /** As a member cut off by a hub that left: since when (it does not step up as a hub for `CUT_OFF_STEP_UP_MS`). */
+  cutOffSince?: number;
   /** Entry sessions kept open a little after the welcome went: link id → until. */
   lingering: Map<string, number>;
   lastRoster: Roster;
@@ -607,8 +615,19 @@ export class Communities {
     if (!live.hub) {
       // A newcomer first connects to the member who let it in (a hub): only then, or a while after, is it one more.
       const settled = () => now - live.joinedAt >= this.timings.newcomerMs || !freshHubs(this.hubs(live), now).some(h => h.key !== me);
+      // Cut off by a hub that left (no edge up to anyone else): the hub that takes me in its place first, a while. A member
+      // stepping up at once was a hub with no edge to the rest, which took half a minute and more to open one (the
+      // "a hub that leaves" test failed half the time on that, 2026-10-03). One no hub takes (`forceHub`) carries itself.
+      const cutOff = () => {
+        const left = (key: string) => s.wasRemoved(key) || s.state.pendingLeaves.some(r => r.s === key);
+        const off = !live.forceHub && (live.myHubs.some(left) || !!live.replacing?.size)
+          && ![...this.host.edges(groupId)].some(([key, id]) => !left(key) && this.host.linkReady(id, 2));
+        if (!off) { live.cutOffSince = undefined; return false; }
+        live.cutOffSince ??= now;
+        return now - live.cutOffSince < CUT_OFF_STEP_UP_MS;
+      };
       // On an app with a budget of connections (a Mac), only with room for a member beside the other hubs.
-      const want = () => settled() && (shouldBeHub(me, this.hubs(live), now) || (!!live.forceHub && freshHubs(this.hubs(live), now).length < COMMUNITY_TOPOLOGY.maxHubs))
+      const want = () => settled() && !cutOff() && (shouldBeHub(me, this.hubs(live), now) || (!!live.forceHub && freshHubs(this.hubs(live), now).length < COMMUNITY_TOPOLOGY.maxHubs))
         && this.capacity(groupId, live, now) > 0;
       if (want()) {
         // With no hub at all there is nobody to agree with: at once (another member doing the same is one
