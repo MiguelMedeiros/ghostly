@@ -17,7 +17,8 @@ export type GroupId =
   | "identity"
   | "keep"
   | "together"
-  | "headless";
+  | "headless"
+  | "apps";
 
 /**
  * The WISPs page draws the families as a stack, top to bottom: the core first, and each layer builds on the
@@ -29,7 +30,7 @@ export const LAYERS: { label: string; groups: GroupId[] }[] = [
   { label: "Talk", groups: ["talk", "files", "calls"] },
   { label: "In a chat", groups: ["pay", "services", "identity"] },
   { label: "Many people", groups: ["together"] },
-  { label: "Programs", groups: ["headless"] },
+  { label: "Programs", groups: ["headless", "apps"] },
 ];
 
 export const GROUPS: {
@@ -132,5 +133,13 @@ export const GROUPS: {
     icon: "terminal",
     title: "Headless & bots",
     blurb: "The app's own engine without a screen, driven by other programs on the same machine.",
+  },
+  {
+    id: "apps",
+    dim: "ecosystem",
+    ranges: [[1200, 1299]],
+    icon: "puzzle",
+    title: "Apps & plugins",
+    blurb: "Apps made by others: found in catalogs you choose or sent in a chat, checked by their publisher's signature, run in a sandbox.",
   },
 ];
