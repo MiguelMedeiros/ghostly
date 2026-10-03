@@ -64,6 +64,8 @@ describe("a hub whose app is killed", { timeout: 120_000 }, () => {
     const orphans = rest.filter(p => !p.groups.communities.isHub(id) && edgesUp(p).every(k => k === keyOf(admin)));
     expect(orphans.length).toBeGreaterThan(0);
 
+    // Each side of an edge to it dials it again at once, as the engine does: a connection under way, from one side.
+    world.redialSeen = true;
     admin.online = false;
     for (const p of rest) await p.groups.send(id, `line ${p.name}`);
     const back = await world.until(() => rest.every(p => connected(world, p, id) > 0), 3 * 60_000);

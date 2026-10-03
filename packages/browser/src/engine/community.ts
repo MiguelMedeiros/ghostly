@@ -738,8 +738,11 @@ export class Communities {
         // A hub whose side of my edge is there took me (its packet is fresh, or a connection with it is under way): the
         // edge is being set up, and comes when its relays' budget lets its offer or answer out. It gets the longer wait
         // too. Given up after 20 s, a member went from hub to hub, each opening an edge for someone already gone: with
-        // twelve people let in within a minute, some had no edge for two minutes and more (2026-10-01).
-        const taking = !!id && !!this.host.linkSeen?.(id);
+        // twelve people let in within a minute, some had no edge for two minutes and more (2026-10-01). Not a hub whose edge
+        // was up and dropped: my side dials it again at once, and a connection under way from my side alone said "taking"
+        // for an app that was killed, so its members waited a minute for it, not 20 s (CLI daemons, 2026-10-03). That one
+        // is back when its side published since (`back`).
+        const taking = !live.hubsUp.has(key) && !!id && !!this.host.linkSeen?.(id);
         // And one I never had an edge with, that said it is a hub lately, reads its lobby every half minute when nobody
         // asked there before: two waits to see my request, not one that ends before it looks.
         const listed = !live.hubsUp.has(key) && live.beacon.some(h => h.key === key && now - h.ts < COMMUNITY_TOPOLOGY.beaconEveryMs * 1.5);

@@ -108,6 +108,8 @@ export class CommunityWorld {
   holdEdge: ((a: Peer, b: Peer) => boolean) | null = null;
   /** Fails an app's Pkarr reads (a test says whose, and of which key): the relays' budget, or the network. */
   failRead: ((peer: Peer, key: string) => boolean) | null = null;
+  /** An edge that was up and dropped looks "seen" from its side alone, as the engine's does while it dials again. */
+  redialSeen = false;
   /** Loses frames on the way (a test says which): the network is not perfect. */
   drop: ((from: Peer, to: Peer, frame: Record<string, unknown>) => boolean) | null = null;
   private pending: Promise<unknown>[] = [];
@@ -162,7 +164,12 @@ export class CommunityWorld {
       linkReady: (linkId, version = 1) => { const edge = links.get(linkId), there = edge && this.counterpart(edge); return !!there && this.up(peer, edge, there.peer) && (version < 4 || (!peer.legacy && !there.peer.legacy)); },
       // Its app runs and its packets reach this one: an app that closed, or one cut off, publishes nothing this one reads,
       // and what it published before is fresh only half a minute (`otherEndSeen`).
-      linkSeen: linkId => { const edge = links.get(linkId), there = edge && this.counterpart(edge); return !!there && there.peer.online && this.sameSide(peer, there.peer) && (!this.network || edge!.polls > 0); },
+      linkSeen: linkId => {
+        const edge = links.get(linkId), there = edge && this.counterpart(edge);
+        // With `redialSeen`, as the engine does: an edge that was up and dropped dials again at once, and a connection
+        // under way counts as seen (`otherEndSeen`), whether or not the other app is there.
+        return !!there && ((there.peer.online && this.sameSide(peer, there.peer) && (!this.network || edge!.polls > 0)) || (this.redialSeen && !!edge!.wasUp));
+      },
       // Its other end's app runs again (a restart): its link published, whether or not it is up yet.
       linkBack: linkId => { const edge = links.get(linkId), there = edge && this.counterpart(edge); return !!there && there.peer.online; },
       contactName: () => undefined,
