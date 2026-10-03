@@ -15,6 +15,7 @@ mod file_store;
 mod file_stream;
 mod fullscreen;
 mod hyperdht;
+mod keep_awake;
 mod link_preview;
 mod lnd;
 mod local_access;
@@ -125,6 +126,7 @@ macro_rules! commands {
             hyperdht::paired_hyperdht_send,
             hyperdht::paired_hyperdht_start,
             hyperdht::paired_hyperdht_stop,
+            keep_awake::keep_awake,
             native_call::native_call_accept,
             native_call::native_call_answer,
             native_call::native_call_camera,

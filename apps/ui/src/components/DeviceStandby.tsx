@@ -9,6 +9,7 @@ import { TakeoverDialog } from "./devices/TakeoverDialog";
 import { useHandoffView } from "../lib/handoff";
 import { activeProfileId, listProfiles, switchProfile } from "../lib/profiles";
 import { deviceWakeWords, useStandbyPush } from "../lib/wakePush";
+import { useComputerAwake } from "../lib/keepAwake";
 
 const BUTTON = "px-4 py-2 rounded-lg text-sm font-semibold bg-accent text-on-accent hover:bg-accent-hover cursor-pointer";
 const QUIET = "px-3 py-1.5 rounded-lg text-sm text-text-secondary border border-border hover:bg-surface-hover cursor-pointer";
@@ -50,6 +51,8 @@ export function DeviceStandby({ gate }: { gate: DeviceGateView }) {
   useTurnReadOnReturn(gate.state !== "unreadable");
   // What this device's push worker shows while it is not the active one, and its subscription kept (WISP 06 § Push and the phone).
   useStandbyPush({ title: "Ghostly", body: t("pwa.wakeNotice"), call: t("pwa.wakeCall"), ...deviceWakeWords(t) }, gate.state !== "unreadable" && gate.state !== "removed");
+  // Desktop: a handoff that runs here (this device takes the profile, or gives it in pass 2) keeps the computer awake.
+  useComputerAwake();
   return (
     <div role="status" data-testid="device-standby" data-state={gate.state} data-unfinished={unfinished ? "true" : undefined} className="h-dvh overflow-y-auto grid place-items-center bg-chat-bg p-6 text-center">
       <div className="max-w-md space-y-3">

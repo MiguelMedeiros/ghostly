@@ -293,6 +293,8 @@ export function createDesktopHost(version: string, calls: NativeCallSupport | nu
     openPubkyPassport: (url) => invoke("open_pubky_passport", { url }),
     // Ring's cookie session: its homeserver requests through Rust, which keeps the cookie WKWebView drops.
     pubkyCookieSession,
+    // "Keep this computer awake" (WISP 06): Rust holds the system's own sleep assertion, and it ends with the app.
+    keepAwake: (on) => invoke<boolean>("keep_awake", { on }),
     // WKWebView has no Web Share API; the system's share sheet is shown by Rust (macOS; elsewhere false: the page copies).
     shareText: (text, anchor) => invoke<boolean>("share_text", { text, anchor }),
     // WKWebView's readText() shows a "Paste" callout that needs a second click; Rust reads the text (main window only, bounded).

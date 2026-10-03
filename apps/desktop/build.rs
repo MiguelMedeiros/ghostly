@@ -26,6 +26,7 @@ const COMMANDS: &[&str] = &[
     "generate_enc_key",
     "get_profile",
     "get_public_key",
+    "keep_awake",
     "link_preview_fetch",
     "lnd_request",
     "local_fetch",

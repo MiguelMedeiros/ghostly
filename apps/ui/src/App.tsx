@@ -20,6 +20,7 @@ import { useWakeLock } from "./hooks/useWakeLock";
 import { useAppCommands } from "./hooks/useAppCommands";
 import { useAppBadge } from "./lib/appBadge";
 import { deviceWakeWords, useWakeTableSync } from "./lib/wakePush";
+import { useComputerAwake } from "./lib/keepAwake";
 import { useI18n } from "./contexts/I18nContext";
 
 /** The browser's status bar follows the header of whichever theme is active. */
@@ -166,6 +167,8 @@ export function App() {
   const { t } = useI18n();
   // What a wake-up shows, and which chats it may name (the installed web app; nothing elsewhere).
   useWakeTableSync({ title: "Ghostly", body: t("pwa.wakeNotice"), call: t("pwa.wakeCall"), ...deviceWakeWords(t) });
+  // Desktop: the computer stays awake for a handoff, and while the person keeps it so for a standby (WISP 06).
+  useComputerAwake();
   const chats = useLoadedChats();
   const mainRef = useRef<HTMLElement>(null);
 

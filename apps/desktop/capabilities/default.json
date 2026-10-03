@@ -37,6 +37,7 @@
     "allow-generate-enc-key",
     "allow-get-profile",
     "allow-get-public-key",
+    "allow-keep-awake",
     "allow-link-preview-fetch",
     "allow-lnd-request",
     "allow-local-fetch",
