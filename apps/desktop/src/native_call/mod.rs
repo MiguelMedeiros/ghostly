@@ -19,6 +19,8 @@ use tauri::ipc::{Channel, InvokeResponseBody};
 pub mod devices;
 #[cfg(target_os = "linux")]
 pub mod engine;
+#[cfg(any(target_os = "linux", test))]
+pub mod gather;
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
