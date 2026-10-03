@@ -4,7 +4,7 @@ import { encode } from "../src/backup/codec";
 import { snapshotDatabase } from "../src/backup/database";
 import { seal } from "../src/backup/envelope";
 import { memorySink } from "../src/backup/stream";
-import { STORES, openDb, transact, wrap } from "../src/shared/idb";
+import { DB_VERSION, STORES, openDb, transact, wrap } from "../src/shared/idb";
 import { SMALL_FILE_BYTES, fileBytes, registerFileBytes, resetFileBytes, type FileBytes } from "../src/shared/fileBytes";
 import { setStorageProfile } from "../../../apps/ui/src/lib/storage";
 import { createProfile, listProfiles } from "../../../apps/ui/src/lib/profiles";
@@ -94,6 +94,23 @@ it("a version 1 bundle, as apps before this one made them, still restores whole"
     expect(files.map((f) => f.id)).toEqual(["link1-in-s0", "link1-in-s1", "link1-in-s2"]);
     expect(same(new Uint8Array(await files[1].blob.arrayBuffer()), pattern(1001, 1))).toBe(true);
     expect(storage.getItem(`ghostly_${restored.id}_app_settings`)).toContain("Nick Kept Secret");
+  }
+});
+
+it("a profile whose database a newer version made is refused before anything is written, not restored as one this version cannot open", async () => {
+  await seed();
+  // The profile as a newer app keeps it: its database one version up.
+  (await wrap(indexedDB.open("ghostly", DB_VERSION + 1))).close();
+  const streamed = await createProfileBackup(null);
+  const peer = await snapshotDatabase("ghostly");
+  expect(peer?.version).toBe(DB_VERSION + 1);
+  const whole = await seal(await encode({ format: "ghostly-profile", version: 1, createdAt: 1, profile: { name: "Diary", builtIn: false }, storage: {}, databases: { peer, ark: {} } }), PASS);
+  const before = await databases();
+  for (const [bundle, passphrase] of [[streamed, undefined], [whole, PASS]] as const) {
+    await expect(openProfileBackup(bundle, passphrase)).rejects.toThrow("This backup comes from a newer Ghostly; update to restore it");
+    await expect(restoreProfileBackup(bundle, passphrase)).rejects.toThrow("This backup comes from a newer Ghostly; update to restore it");
+    expect(await databases()).toEqual(before);
+    expect(listProfiles().map((p) => p.id)).toEqual([""]);
   }
 });
 

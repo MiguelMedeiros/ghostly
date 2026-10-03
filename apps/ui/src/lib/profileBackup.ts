@@ -2,7 +2,7 @@ import { decode, encode } from "@ghostly/browser/backup/codec";
 import { MAX_BACKUP_BYTES, open } from "@ghostly/browser/backup/envelope";
 import { BackupReader, BackupWriter, backupProtection, blobSource, bytesSource, isCancelled, memorySink, type BackupSink, type BackupSource } from "@ghostly/browser/backup/stream";
 import { createDatabase, databaseExists, putRows, restoreDatabase, snapshotDatabase, type DatabaseSnapshot, type StoreShape } from "@ghostly/browser/backup/database";
-import { databaseName, wrap, type StoredFile } from "@ghostly/browser/shared/idb";
+import { DB_VERSION, databaseName, wrap, type StoredFile } from "@ghostly/browser/shared/idb";
 import { RESTORED_WALLET_STORES, restoredWalletRow } from "@ghostly/browser/shared/restoredRows";
 import { FILE_BYTES_STEP, SMALL_FILE_BYTES, checkFileId, fileBytes, fileBytesOf, type FileBytes, type FileBytesKind } from "@ghostly/browser/shared/fileBytes";
 import { restoreArkDatabase, snapshotArkDatabase, type ArkDatabaseSnapshot } from "@ghostly/browser/engine/paymentAdapters/backup";
@@ -290,6 +290,12 @@ export interface OpenedProfileBackup {
 }
 
 const NOT_A_PROFILE = "This backup does not hold a profile";
+const NEWER = "This backup comes from a newer Ghostly; update to restore it";
+/**
+ * A profile whose database a newer version made: this one would restore it, list it, and then could not open it. It is
+ * refused before anything is written, like a newer envelope.
+ */
+const checkVersion = (version: unknown) => { if (typeof version === "number" && version > DB_VERSION) throw new Error(NEWER); };
 const DAMAGED = "This backup is damaged: it was changed or cut short";
 const isHead = (value: Partial<ProfileHead> | null | undefined) => typeof value?.profile?.name === "string" && !!value.storage && typeof value.storage === "object";
 
@@ -303,18 +309,19 @@ export async function openProfileBackup(input: BackupInput, passphrase?: string,
     if (source.size > MAX_BACKUP_BYTES * 1.4) throw new Error("This backup is too large to restore");
     const payload = decode(await open(new TextDecoder().decode(await source.read(0, source.size)), passphrase ?? "")) as ProfilePayload;
     if (payload?.format !== "ghostly-profile" || payload.version !== 1 || !isHead(payload) || !payload.databases) throw new Error(NOT_A_PROFILE);
+    checkVersion(payload.databases.peer?.version);
     return { name: payload.profile.name, protection: "passphrase", payload, whole: payload };
   }
   const first = await reader.next();
   const head = first?.json === undefined ? null : (decode(first.json) as BackupRecord);
   if (head?.t !== "profile" || head.format !== "ghostly-profile" || !isHead(head)) throw new Error(NOT_A_PROFILE);
-  if (head.version !== 2) throw new Error("This backup comes from a newer Ghostly; update to restore it");
+  if (head.version !== 2) throw new Error(NEWER);
   // The chats and the DID come right after: enough to tell whose profile this is before anything is written.
   const links: unknown[] = [];
   let did: unknown;
   for (let record = await reader.next(); record?.json !== undefined; record = await reader.next()) {
     const value = decode(record.json) as BackupRecord;
-    if (value?.t === "db") continue;
+    if (value?.t === "db") { checkVersion(value.version); continue; }
     if (value?.t !== "rows" || (value.store !== "settings" && value.store !== "links")) break;
     if (value.store === "links") links.push(...value.values);
     else { const at = value.keys.findIndex((key) => key === "profileDid"); if (at >= 0) did = value.values[at]; }
@@ -527,6 +534,7 @@ async function restoreStream(stream: NonNullable<OpenedProfileBackup["stream"]>,
         break;
       case "db":
         if (state.db || value.db !== "peer") throw new Error(DAMAGED);
+        checkVersion(value.version);
         state.db = await createDatabase(space, value.version, value.stores);
         made.push(space);
         break;
