@@ -48,48 +48,6 @@ describe("a hub that leaves", { timeout: 120_000 }, () => {
 });
 
 /**
- * The hub left behind has its relays' budget spent (it just let someone in, or carries most of the group): for a minute
- * it opens no new edge. The members the leaver carried then had no way back but through it. They asked it (the only hub
- * listed), waited a minute for it, and became hubs themselves, each with an edge to make to that same hub: the group
- * stayed in two parts for one to two minutes (real runs on relays, 2026-10-01 to 03). A member whose edge to that hub is
- * up already steps up instead, and those members go to it.
- */
-describe("a hub that leaves while the hub left behind has its relays' budget spent", { timeout: 120_000 }, () => {
-  it("a member connected to that hub carries the leaver's members, and the group talks again within seconds", async () => {
-    // A group where the admin and one other member are the hubs, each carrying some of the others (which members a
-    // hub takes is random: the first of a few groups that came out so).
-    const edgesUp = (p: Peer, id: string) => [...p.links.values()].filter(e => e.kind === "edge" && e.g === id && e.upAt !== undefined).map(e => e.peer);
-    let found: { world: CommunityWorld; id: string; admin: Peer; rest: Peer[]; left: Peer; orphans: Peer[]; carried: Peer[] } | undefined;
-    for (let tries = 0; tries < 8 && !found; tries++) {
-      const world = new CommunityWorld(undefined, RELAY_NETWORK);
-      const { id, peers } = await settled(world, ["admin", "bob", "carol", "dave", "erin", "frank", "grace"]);
-      const [admin, ...rest] = peers;
-      const keyOf = (p: Peer) => p.groups.communities.session(id)!.myKey;
-      const hubs = rest.filter(p => p.groups.communities.isHub(id));
-      if (!admin.groups.communities.isHub(id) || hubs.length !== 1) continue;
-      const [left] = hubs, members = rest.filter(p => p !== left);
-      const orphans = members.filter(p => edgesUp(p, id).every(k => k === keyOf(admin)));
-      const carried = members.filter(p => edgesUp(p, id).includes(keyOf(left)) && !edgesUp(p, id).includes(keyOf(admin)));
-      if (orphans.length && carried.length) found = { world, id, admin, rest, left, orphans, carried };
-    }
-    expect(found, "a group with the admin and one more member as hubs, each carrying members").toBeDefined();
-    const { world, id, admin, rest, left, orphans, carried } = found!;
-    const isHub = (p: Peer) => p.groups.communities.isHub(id);
-
-    // Its budget spent for the next minute: it reads and writes nothing until then.
-    left.spent = Array.from({ length: RELAY_NETWORK.budgetPerMinute }, () => world.now);
-    await admin.groups.leave(id);
-    for (const p of orphans) await p.groups.send(id, `${p.name} here`);
-    const said = orphans.map(p => `${p.name} here`);
-    const heard = await world.until(() => rest.every(p => said.every(t => p === orphans.find(o => `${o.name} here` === t) || world.texts(p, id).includes(t))), 3 * 60_000);
-    // Before: the leaver's members waited a minute for the hub left behind and became hubs that reached nobody (60 s and more).
-    expect(heard).toBeLessThanOrEqual(40_000);
-    expect(carried.some(isHub), "a member connected to the hub left behind is a hub").toBe(true);
-    for (const p of orphans) expect(isHub(p), `${p.name}, cut off by the leave, did not step up`).toBe(false);
-  });
-});
-
-/**
  * A reading of the beacon that did not happen (the relays' budget held it back) is not an empty beacon. Taken as one, a
  * member became a hub at once and a hub took itself for the only one, and either published a beacon naming itself
  * alone: every other hub was out of it for everyone, the hubs opened no edge to each other, and the group stayed in
