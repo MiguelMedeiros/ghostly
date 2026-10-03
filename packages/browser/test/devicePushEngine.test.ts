@@ -6,6 +6,8 @@ import { GhostlyNode } from "../src/engine/node";
 import type { WakeSubscription } from "../src/shared/types";
 import { STORES, transact } from "../src/shared/idb";
 import { readWalletHomes } from "../src/devices/walletHomes";
+import { closeDevicesDb } from "../src/devices/store";
+import { dropDevicesDatabase as dropDevices, putDeviceRecord } from "./helpers/deviceRecord";
 // covers: devices.push, devices.handoff.wallets
 
 /*
@@ -59,6 +61,21 @@ describe("the profile's push target on the active device", () => {
     expect(node.getState().wakeOwner).toBe("here");
     await inside.deviceWakeReceived(PHONE, targetOf(subscription("https://fcm.googleapis.com/fcm/send/phone")));
     expect(inside.settings.wake?.endpoint).toBe(own.endpoint);
+  });
+
+  it("back as the active device with a subscription of its own, its own wins over the one another device left the profile", async () => {
+    const { node, inside } = desktop();
+    const own = subscription("https://fcm.googleapis.com/fcm/send/desktop");
+    await putDeviceRecord({
+      v: 1, profile: "ghostly", state: "active", saved: 1, turn: 3, rev: 0, takeovers: 0, earlierSets: [], deviceSet: [{ key: DESKTOP, name: "Desktop" }, { key: PHONE, name: "Phone" }], ownSlot: 0, activeSlot: 0,
+      push: { own: { e: own.endpoint, p: own.p256dh, a: own.auth, vp: own.vapid.publicKey, vk: own.vapid.privateKey, tokens: {} } },
+    });
+    await inside.deviceWakeReceived(PHONE, targetOf(subscription("https://fcm.googleapis.com/fcm/send/phone")));
+    expect(inside.settings.wake?.device).toBe(PHONE);
+    await (inside as unknown as { ownWakeWins(): Promise<void> }).ownWakeWins();
+    expect(inside.settings.wake).toEqual({ ...own, device: DESKTOP });
+    expect(node.getState().wakeOwner).toBe("here");
+    await closeDevicesDb(); await dropDevices();
   });
 
   it("a subscription made before the profile had a device set names this device once the page finds it is the browser's own", async () => {

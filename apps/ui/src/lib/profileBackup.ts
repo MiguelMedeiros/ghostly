@@ -176,10 +176,11 @@ export async function writeProfileBackup(sink: BackupSink, { passphrase, id, loc
   for (const [i, key] of (settingsStore?.keys ?? []).entries()) {
     const value = settingsStore!.values[i] as Record<string, unknown> | null;
     if (key === "settings" && value && typeof value === "object" && ("holdStorage" in value || "wake" in value)) {
-      // A handoff keeps the hold storage (the new active device goes on holding items for contacts); the push
-      // subscription belongs to this browser either way.
-      const { holdStorage, wake: _wake, ...rest } = value;
-      settingsStore!.values[i] = handoff && holdStorage !== undefined ? { ...rest, holdStorage } : rest;
+      // A handoff keeps the hold storage (the new active device goes on holding items for contacts) and the push
+      // subscription, which names the device it belongs to: a desktop with none of its own goes on giving contacts the
+      // phone's (WISP 06 § Push and the phone). A backup keeps neither.
+      const { holdStorage, wake, ...rest } = value;
+      settingsStore!.values[i] = handoff ? { ...rest, ...(holdStorage !== undefined ? { holdStorage } : {}), ...(wake !== undefined ? { wake } : {}) } : rest;
     }
   }
   const ark: Record<string, ArkDatabaseSnapshot> = {};

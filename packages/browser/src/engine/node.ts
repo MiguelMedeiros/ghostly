@@ -2229,6 +2229,14 @@ export class GhostlyNode implements EngineImplementation {
     if (changed) await this.replaceProfileWake(next);
   }
 
+  /** The subscription this device's record keeps as its own becomes the profile's, when the profile has another device's. */
+  private async ownWakeWins(): Promise<void> {
+    if (!this.ownDeviceKey || this.options.singleDevice) return;
+    const own = (await readDeviceRecord(databaseName()))?.push?.own;
+    if (!own || this.settings.wake?.device === this.ownDeviceKey) return;
+    await this.replaceProfileWake({ endpoint: own.e, p256dh: own.p, auth: own.a, vapid: { publicKey: own.vp, privateKey: own.vk }, device: this.ownDeviceKey });
+  }
+
   /** The profile's push target replaced by another device's (or gone), every chat's token kept. */
   private async replaceProfileWake(next: WakeSubscription | undefined): Promise<void> {
     this.settings = { ...this.settings, wake: next };
@@ -4826,6 +4834,9 @@ export class GhostlyNode implements EngineImplementation {
     } else await this.deviceLinks.refresh();
     // The profile's subscription is this device's own: the record holds it too, so a standby here can still share it.
     if (this.settings.wake?.device && this.settings.wake.device === this.ownDeviceKey) await this.deviceLinks.setOwnPush(this.settings.wake).catch(() => {});
+    // This device has a subscription of its own and the profile gives contacts another device's (it came back active
+    // after that device held the profile): its own wins, every chat's token kept (WISP 06 § Push and the phone).
+    else await this.ownWakeWins().catch(() => {});
     this.emitState();
     // An enrollment whose own record was put and whose write of it was lost takes that record back first: the read
     // below would take it for a clone of this device and stop it.
