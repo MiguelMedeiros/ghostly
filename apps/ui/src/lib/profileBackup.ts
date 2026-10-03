@@ -4,10 +4,11 @@ import { BackupReader, BackupWriter, backupProtection, blobSource, bytesSource, 
 import { createDatabase, databaseExists, putRows, restoreDatabase, snapshotDatabase, type DatabaseSnapshot, type StoreShape } from "@ghostly/browser/backup/database";
 import { databaseName, wrap, type StoredFile } from "@ghostly/browser/shared/idb";
 import { RESTORED_WALLET_STORES, restoredWalletRow } from "@ghostly/browser/shared/restoredRows";
-import { FILE_BYTES_STEP, SMALL_FILE_BYTES, checkFileId, dropFileSpace, fileBytes, fileBytesOf, type FileBytes, type FileBytesKind } from "@ghostly/browser/shared/fileBytes";
+import { FILE_BYTES_STEP, SMALL_FILE_BYTES, checkFileId, fileBytes, fileBytesOf, type FileBytes, type FileBytesKind } from "@ghostly/browser/shared/fileBytes";
 import { restoreArkDatabase, snapshotArkDatabase, type ArkDatabaseSnapshot } from "@ghostly/browser/engine/paymentAdapters/backup";
 import { getPrefix, getStorageProfile, ownsKey } from "./storage";
 import { assertUnlocked, identityKeysOf, profileIdentityKeys } from "./profileData";
+import { holdRestore, noteRestore, sweepInterruptedRestores, undoRestore } from "./restoreJournal";
 import { builtInNameBefore, currentProfile, isBuiltInName, listProfiles, namespaceOf, newProfileId, registerProfile, registryKey, storedProfileName, type ProfileEntry } from "./profiles";
 
 /** What a bundle says about the profile it holds, and the profile's local keys without its prefix. */
@@ -258,17 +259,6 @@ export async function createProfileBackup(passphrase: string | null, id?: string
 
 const isQuotaError = (error: unknown) => (error as { name?: string })?.name === "QuotaExceededError";
 
-/** Takes away what a failed restore wrote: its databases, its files and every local key of its namespace. */
-async function undoRestore(ns: string, databases: string[], files = false): Promise<void> {
-  for (const name of databases) {
-    await new Promise<void>((resolve) => { try { const r = indexedDB.deleteDatabase(name); r.onsuccess = r.onerror = r.onblocked = () => resolve(); } catch { resolve(); } });
-  }
-  if (files) await dropFileSpace(`ghostly_${ns}`).catch(() => {});
-  const prefix = `ghostly_${ns}_`;
-  const keys = Array.from({ length: localStorage.length }, (_, i) => localStorage.key(i)).filter((key): key is string => !!key?.startsWith(prefix));
-  for (const key of keys) { try { localStorage.removeItem(key); } catch { /* nothing more to do */ } }
-}
-
 /**
  * The file a profile's backup downloads as, named after the profile: its letters and digits in any script kept
  * ("仕事", "Trabalho-é"), everything else (spaces, punctuation, direction marks) a dash. A name with none left is "profile".
@@ -417,26 +407,40 @@ function register(id: string, ns: string, { profile, storage }: ProfileHead): Pr
 
 /** `restoreProfileBackup` of a bundle already opened (after `sameIdentityProfiles` was asked, say). */
 export async function restoreOpenedBackup(opened: OpenedProfileBackup, run: BackupRun = {}): Promise<ProfileEntry> {
+  // What an earlier restore left when its tab was closed half way goes first.
+  await sweepInterruptedRestores();
   const id = newProfileId(), ns = namespaceOf(id);
   // What this restore has written so far: a restore that fails or is cancelled takes all of it away again, so a device
   // short of room is not left holding an unlisted copy of the profile (its keys included) that nothing would ever delete.
+  // Noted before it is written, so a restore stopped by a closed tab or a crash is taken back later (`restoreJournal`).
+  const release = await holdRestore(ns);
   const made: string[] = [];
   const state: RestoreState = { files: false, db: null, writing: null };
   const walletIds = new Map<string, string>();
-  const fresh = (walletId: string) => walletIds.get(walletId) ?? (walletIds.set(walletId, crypto.randomUUID()), walletIds.get(walletId)!);
+  const noted = () => [`ghostly_${ns}`, ...[...walletIds.values()].map((walletId) => `ghostly-ark-${walletId}`)];
+  const fresh = (walletId: string) => {
+    if (!walletIds.has(walletId)) { walletIds.set(walletId, crypto.randomUUID()); noteRestore(ns, noted()); }
+    return walletIds.get(walletId)!;
+  };
   try {
+    noteRestore(ns, noted());
     if (opened.stream) await restoreStream(opened.stream, ns, made, state, fresh, walletIds, run);
     else await restoreWhole(opened.whole!, ns, made, fresh, walletIds);
     state.db?.close();
     state.db = null;
-    return register(id, ns, opened.payload);
+    const entry = register(id, ns, opened.payload);
+    noteRestore(ns, null);
+    return entry;
   } catch (error) {
     // The file it was in the middle of is let go first: file storage does not remove a folder with a file still open
     // in it (the origin-private file system refuses), and the half-written file would stay on the device for good.
     await state.writing?.discard().catch(() => {});
     state.db?.close();
     await undoRestore(ns, made, state.files);
+    noteRestore(ns, null);
     throw isQuotaError(error) ? Object.assign(new Error("This device has no room left for this backup. Free some space, then try again."), { cause: error }) : error;
+  } finally {
+    release();
   }
 }
 

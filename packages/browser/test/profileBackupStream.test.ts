@@ -10,6 +10,7 @@ import { setStorageProfile } from "../../../apps/ui/src/lib/storage";
 import { createProfile, listProfiles } from "../../../apps/ui/src/lib/profiles";
 import { backUpToFile, stageBackup } from "../../../apps/ui/src/lib/backupFile";
 import { backupProtectionOf, createProfileBackup, isCancelled, openProfileBackup, restoreProfileBackup, writeProfileBackup, type BackupProgress } from "../../../apps/ui/src/lib/profileBackup";
+import { sweepInterruptedRestores } from "../../../apps/ui/src/lib/restoreJournal";
 // covers: backup.profile.file, backup.stream, backup.unprotected, backup.progress, backup.envelope
 
 class FakeStorage {
@@ -198,6 +199,57 @@ it("a restore cancelled half way leaves no profile, no database, no file and no 
   expect(await databases()).toEqual(before);
   expect([...storage.entries.keys()].sort()).toEqual(keys);
   expect(listProfiles().map((p) => p.id)).toEqual([""]);
+});
+
+/** Web Locks as a browser keeps them: `drop` lets go of one as a closed tab does, whatever it was doing. */
+function fakeLocks() {
+  const held = new Set<string>();
+  const locks = {
+    request: async (name: string, a: unknown, b?: (lock: unknown) => Promise<void> | void) => {
+      const callback = (b ?? a) as (lock: unknown) => Promise<void> | void, ifAvailable = !!b && (a as { ifAvailable?: boolean }).ifAvailable;
+      if (held.has(name)) { if (ifAvailable) return callback(null); throw new Error("this fake does not queue"); }
+      held.add(name);
+      try { return await callback({ name }); } finally { held.delete(name); }
+    },
+  };
+  Object.defineProperty(globalThis, "navigator", { value: { ...globalThis.navigator, locks }, configurable: true });
+  return { held, drop: () => held.clear() };
+}
+
+it("a restore whose tab was closed half way leaves nothing for good: the next start takes back what it wrote", async () => {
+  const locks = fakeLocks();
+  await seed({ small: 200 });
+  const bundle = await createProfileBackup(PASS);
+  const before = await databases();
+  const keys = [...storage.entries.keys()].sort();
+  // The tab stops for good half way through the bundle: its database is made and half filled, then nothing more.
+  const connections: IDBDatabase[] = [];
+  const open = indexedDB.open.bind(indexedDB);
+  vi.spyOn(indexedDB, "open").mockImplementation((...args: Parameters<typeof indexedDB.open>) => { const request = open(...args); request.addEventListener("success", () => connections.push(request.result)); return request; });
+  let reached!: () => void;
+  const stopped = new Promise<void>((resolve) => { reached = resolve; });
+  const source = { size: bundle.length, read: async (offset: number, length: number) => {
+    if (offset > bundle.length / 2) { reached(); return new Promise<Uint8Array>(() => {}); }
+    return bundle.subarray(offset, offset + Math.min(length, 16 * 1024));
+  } };
+  void restoreProfileBackup(source, PASS);
+  await stopped;
+  const left = (await databases()).filter((name) => !before.includes(name!));
+  expect(left, "the half-made profile's database is on the device").toHaveLength(1);
+  // While that tab still runs, nothing of it is touched.
+  await sweepInterruptedRestores();
+  expect((await databases()).filter((name) => !before.includes(name!))).toEqual(left);
+  // The tab is closed: its connections and its lock go with it. The next start takes back what it left.
+  for (const db of connections) db.close();
+  locks.drop();
+  await sweepInterruptedRestores();
+  expect(await databases()).toEqual(before);
+  expect([...storage.entries.keys()].sort()).toEqual(keys);
+  expect(listProfiles().map((p) => p.id)).toEqual([""]);
+  // A restore that finished is never taken back.
+  const restored = await restoreProfileBackup(bundle, PASS);
+  await sweepInterruptedRestores();
+  expect((await readAll(`ghostly_${restored.id}`, STORES.messages)).length).toBe(5);
 });
 
 /**
