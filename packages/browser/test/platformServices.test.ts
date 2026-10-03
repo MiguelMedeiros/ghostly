@@ -317,6 +317,11 @@ describe("wallet and settings", () => {
     ]);
   });
 
+  it("leaves the TURN server as it is when the save does not name one", async () => {
+    await services.setNetwork({ relays: ["wss://a"], readRelays: true });
+    expect(engine.calls).toEqual([["updateSettings", { settings: { relays: ["wss://a"], readRelays: true } }]]);
+  });
+
   it("reads and saves the HyperDHT relay with the rest of the network", async () => {
     withLinks(chat({ peerOnline: true }));
     expect(services.getNetwork()).toMatchObject({ hyperdhtRelay: "" });

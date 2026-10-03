@@ -101,6 +101,7 @@ A light backup is everything above but the bytes of the profile's larger files: 
 
 - Storage credentials for remote adapters ([1002](1002-s3-storage.md)), on the page and in the peer's settings.
 - The device's push subscription ([401](401-paired-chat.md)): it belongs to the browser that made it.
+- The credential of the profile's TURN server ([101](101-webrtc.md#your-own-turn-server)). Its address and username stay, so the restored profile asks for the credential again. A handoff ([06](06-devices.md)) keeps it.
 - The bytes of a file still arriving, or no longer on the device. Its message and record are kept.
 - In a light backup, the bytes of the files over its cut. Their messages and records are kept.
 - The local databases of Bark ([204](204-bark.md)), Spark and Fedimint wallets. Their recovery phrases are in the bundle; the wallets rebuild their state from the phrase and their servers.

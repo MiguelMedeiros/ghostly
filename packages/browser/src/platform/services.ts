@@ -453,5 +453,6 @@ export const servicesPlatform: ServicesPlatform | null = {
     };
   },
   setNetwork: ({ relays, turn, irohRelays, hyperdhtRelay, readRelays, pushRelay }) =>
-    engine.call("updateSettings", { settings: { relays, iceServers: turn?.urls ? [turn] : [], ...(irohRelays ? { irohRelays } : {}), ...(hyperdhtRelay !== undefined ? { hyperdhtRelay } : {}), ...(readRelays !== undefined ? { readRelays } : {}), ...(pushRelay !== undefined ? { pushRelay } : {}) } }),
+    // `turn` left out leaves the TURN server as it is (a switch saved on its own, say).
+    engine.call("updateSettings", { settings: { relays, ...(turn !== undefined ? { iceServers: turn?.urls ? [turn] : [] } : {}), ...(irohRelays ? { irohRelays } : {}), ...(hyperdhtRelay !== undefined ? { hyperdhtRelay } : {}), ...(readRelays !== undefined ? { readRelays } : {}), ...(pushRelay !== undefined ? { pushRelay } : {}) } }),
 };

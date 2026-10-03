@@ -92,6 +92,19 @@ it("the push subscription moves in a handoff (it names its device), and stays ou
   expect((await settingsIn(restored.id))?.wake).toBeUndefined();
 });
 
+it("a TURN server's credential moves in a handoff and stays out of a backup; its address and username stay", async () => {
+  await openDb();
+  const turn = { urls: "turn:turn.example.org:3478", username: "ghost", credential: "turn-credential-secret" };
+  await transact([STORES.settings], (s) => { s[STORES.settings].put({ nick: "Miguel", iceServers: [turn] }, "settings"); });
+  const settingsIn = async (ns: string) => ((await readAll(`ghostly_${ns}`, STORES.settings)) as { nick?: string; iceServers?: unknown }[]).find((row) => row.nick === "Miguel");
+  const sink = memorySink();
+  await writeProfileBackup(sink, { passphrase: null, handoff: true });
+  await restoreHandoffBundle(sink.bytes(), "stagedturn");
+  expect((await settingsIn("stagedturn"))?.iceServers).toEqual([turn]);
+  const restored = await restoreProfileBackup(await createProfileBackup("a long backup passphrase"), "a long backup passphrase");
+  expect((await settingsIn(restored.id))?.iceServers).toEqual([{ urls: "turn:turn.example.org:3478", username: "ghost" }]);
+});
+
 it("ecash comes back marked as a copy to check with its mint; ecash a payment holds is left to that payment", async () => {
   await openDb();
   const proof = (secret: string, extra: Record<string, unknown> = {}) => ({ mint: "https://mint.example", id: "009a1f293253e41e", amount: 64, secret, C: "02ab", ...extra });

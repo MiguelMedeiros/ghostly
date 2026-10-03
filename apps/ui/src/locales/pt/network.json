@@ -27,6 +27,7 @@
   "title": "Rede",
   "turn": "Servidor TURN",
   "turnCredential": "Credencial TURN",
+  "turnCredentialAgain": "Digite a credencial de novo: backups não a guardam.",
   "turnHint": "Opcional. Usado só quando uma conexão direta falha.",
   "turnInfo": "Ele repassa pacotes WebRTC criptografados. É infraestrutura de conectividade, não um servidor do Ghostly.",
   "turnUrl": "URL do servidor TURN",
