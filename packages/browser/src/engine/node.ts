@@ -4509,7 +4509,7 @@ export class GhostlyNode implements EngineImplementation {
     this.enrollment = inviter;
     try { return await inviter.start(); } catch (error) {
       if (this.enrollment === inviter) this.enrollment = null;
-      if (error instanceof EnrollRefusal) throw new Error(`enroll-${error.reason}: ${error.message}`, { cause: error });
+      if (error instanceof EnrollRefusal) throw Object.assign(new Error(`enroll-${error.reason}: ${error.message}`), { cause: error });
       throw error;
     }
   }
@@ -4549,7 +4549,7 @@ export class GhostlyNode implements EngineImplementation {
     this.enrollment = joiner;
     try { return await joiner.start(code); } catch (error) {
       if (this.enrollment === joiner) this.enrollment = null;
-      if (error instanceof EnrollCodeError) throw new Error(`enroll-${error.reason}: ${error.message}`, { cause: error });
+      if (error instanceof EnrollCodeError) throw Object.assign(new Error(`enroll-${error.reason}: ${error.message}`), { cause: error });
       throw error;
     }
   }

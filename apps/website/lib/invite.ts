@@ -7,7 +7,8 @@
  * in step. Older codes never came to this host, so they are not read here.
  */
 
-export type InviteRefusal = "typo" | "update" | "not-ghostly" | "damaged";
+/** `device`: a code that adds a device to a profile (WISP 06, version 2), which no chat is made from. */
+export type InviteRefusal = "typo" | "update" | "not-ghostly" | "damaged" | "device";
 export type InviteCheck = { ok: true; code: string } | { ok: false; reason: InviteRefusal };
 
 const HRP = "ghostly";
@@ -67,6 +68,7 @@ export function checkInvite(input: string): InviteCheck {
   if (sum !== BECH32M) return { ok: false, reason: "typo" };
   const [version, ...payload] = data.slice(0, -6);
   if (version === undefined || version === 0) return { ok: false, reason: "not-ghostly" };
+  if (version === 2) return { ok: false, reason: "device" };
   if (version !== 1) return { ok: false, reason: "update" };
   if (payloadBytes(payload) !== V1_BYTES) return { ok: false, reason: "damaged" };
   return { ok: true, code };

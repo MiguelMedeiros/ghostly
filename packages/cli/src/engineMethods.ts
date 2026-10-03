@@ -30,6 +30,9 @@ export const ENGINE_METHODS: readonly string[] = [
   "acceptGroupInvitation", "declineGroupInvitation", "enableGroupLink", "disableGroupLink", "joinGroupByLink",
   "sendGroupMessage", "pressButton", "groupMessages", "messagePage", "statusCardIndex", "groupTaken", "leaveGroup", "removeGroupMember", "makeGroupAdmin", "setGroupHub", "rotateGroup",
   "setGroupPicture", "renameGroup", "setGroupTyping", "forgetGroup",
+  // One profile on several devices (WISP 06): a CLI profile is always on one device, so these answer `single` or refuse.
+  "deviceEnrollInvite", "deviceEnrollConfirm", "deviceEnrollCancel", "deviceEnrollView", "deviceEnrollJoin", "deviceEnrollFinish",
+  "deviceEnrollRemove", "deviceSet", "devicePing",
 ];
 
 /** Reads the hosts use outside `EngineApi`: the whole state, and one chat's stored messages. */
