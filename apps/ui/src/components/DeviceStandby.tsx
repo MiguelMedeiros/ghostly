@@ -59,7 +59,7 @@ export function DeviceStandby({ gate }: { gate: DeviceGateView }) {
   // Desktop: a handoff that runs here (this device takes the profile, or gives it in pass 2) keeps the computer awake.
   useComputerAwake();
   return (
-    <div role="status" data-testid="device-standby" data-state={gate.state} data-unfinished={unfinished ? "true" : undefined} className="h-dvh overflow-y-auto bg-chat-bg">
+    <div role="status" data-testid="device-standby" data-state={gate.state} data-unfinished={unfinished ? "true" : undefined} className="h-dvh w-full min-w-0 flex-1 overflow-y-auto bg-chat-bg">
       <div className="mx-auto flex min-h-full w-full max-w-md flex-col justify-center gap-5 px-4 py-8 text-center">
         <div className="space-y-2">
           <div className="text-5xl" aria-hidden="true">👻</div>
@@ -119,7 +119,8 @@ function StandbyHandoff({ gate }: { gate: DeviceGateView }) {
   const device = gate.activeDevice ?? t("devices.join.otherDevice");
   const running = !!view && view.step !== "failed" && view.step !== "offer";
   if (!view && gate.state === "releasing") return null;
-  const useHere = gate.state === "standby" && !running && view?.step !== "offer";
+  // Not while the new device list waits for an answer: "If this list looks wrong, do not use this device".
+  const useHere = gate.state === "standby" && !gate.notice && !running && view?.step !== "offer";
   return (
     <div className="space-y-3" data-testid="handoff-standby">
       {view?.step === "offer" && <div className={PANEL}><HandoffOffer view={view} /></div>}

@@ -204,6 +204,17 @@ describe("the standby screen", () => {
     expect(screen.getByRole("button", { name: "Use here" })).toBeInTheDocument();
   });
 
+  it("fills the window, and offers no Use here while the new device list waits for an answer", async () => {
+    fakeEngine.on("deviceSet", () => set({ state: "standby" }));
+    fakeEngine.on("deviceHandoffView", () => null);
+    fakeEngine.on("deviceTakeoverInfo", () => ({ offered: false }));
+    renderApp(<DeviceStandby gate={{ state: "standby", activeDevice: "MacBook", notice: ["MacBook", "iPhone"] }} />);
+    // The app's root is a flex row: the screen takes all of it, not the width of its words.
+    expect(screen.getByTestId("device-standby").className).toMatch(/\bflex-1\b/);
+    expect(await screen.findByTestId("device-set-notice-title")).toHaveTextContent("Your devices are now: MacBook and iPhone");
+    expect(screen.queryByTestId("handoff-use-here")).toBeNull();
+  });
+
   it("a state that cannot be read: Can't read this device's state, Nothing was started, and how to recover behind the ⓘ", async () => {
     const { user } = renderApp(<DeviceStandby gate={{ state: "unreadable" }} />);
     expect(screen.getByTestId("device-standby-title")).toHaveTextContent("Can't read this device's state");

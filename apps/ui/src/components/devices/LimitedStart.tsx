@@ -53,7 +53,7 @@ export function LimitedStart() {
   const id = useId();
   const goOn = () => { goneOn = true; for (const listener of listeners) listener(); };
   return (
-    <div role="alertdialog" aria-labelledby={`${id}-title`} aria-describedby={`${id}-hint`} data-testid="limited-start" className="h-dvh overflow-y-auto bg-chat-bg">
+    <div role="alertdialog" aria-labelledby={`${id}-title`} aria-describedby={`${id}-hint`} data-testid="limited-start" className="h-dvh w-full min-w-0 flex-1 overflow-y-auto bg-chat-bg">
       <div className="mx-auto flex min-h-full w-full max-w-md flex-col justify-center gap-5 px-4 py-8 text-center">
         <div className="space-y-2">
           <div className="text-5xl" aria-hidden="true">👻</div>
