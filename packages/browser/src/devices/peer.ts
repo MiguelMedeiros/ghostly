@@ -6,6 +6,7 @@ import { DeviceLinkOnlyServer, type DeviceLinkEngine, type PeerServer } from "./
 import { DeviceLinks } from "./links";
 import { standbyNetwork } from "./network";
 import { readDeviceRecord } from "./store";
+import { activeAgainIfReleasing, standbyHandoff, undoStagingOf } from "./handoffStandby";
 
 /**
  * What device-link-only mode runs for a device that is not the active one (WISP 06 § The gate): its device links,
@@ -20,8 +21,24 @@ export async function standbyEngine(gate: DeviceGate, options: NodeOptions | und
   try { record = await readDeviceRecord(gate.profile); } catch { /* the links read it again, and say why they hold none */ }
   const network = standbyNetwork(record?.network, options?.transport);
   const irohRelays = network.irohRelays ?? [...DEFAULT_IROH_RELAYS];
-  return new DeviceLinks({
+  const links: DeviceLinks = new DeviceLinks({
     profile: gate.profile,
+    // A taker that lost its settle read goes back to its old namespace (WISP 06 § Installing the staged state).
+    undoStaging: () => undoStagingOf(gate.profile),
+    handoff: async (running, host) => {
+      try {
+        const handler = await standbyHandoff({
+          profile: gate.profile, links: running,
+          show: (view) => host?.show(view),
+          take: async (release, turn) => (await running.turnKeeper())?.take(release, turn) ?? null,
+        });
+        if (handler) return handler;
+      } catch { /* below */ }
+      // No handoff can run here (no profile host, a key that does not load, any error): a device frozen for pass 2
+      // never signed a release, so it is the active device again rather than no device at all.
+      await activeAgainIfReleasing(gate.profile, (view) => host?.show(view));
+      return null;
+    },
     offline: network.off,
     transport: network.transport,
     createPeerConnection: network.createPeerConnection,
@@ -31,6 +48,7 @@ export async function standbyEngine(gate: DeviceGate, options: NodeOptions | und
       ...(options?.irohWeb ? { "iroh/1": (seedB64: string) => createIrohWebEndpoint(seedB64, { relays: irohRelays }) } : {}),
     },
   });
+  return links;
 }
 
 /**

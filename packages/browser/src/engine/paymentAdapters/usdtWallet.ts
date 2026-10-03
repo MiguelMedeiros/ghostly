@@ -10,7 +10,8 @@ import { intentRepository, newDeviceKey, sealSeed, unsealSeed, type EncryptedSee
 import type { SavedIntent } from './coordinator';
 
 export interface UsdtWalletView {
-  configured:boolean; locked:boolean; automatic?:boolean; network?:UsdtConfig['network']; provider?:string;
+  /** `read`: the balances were read once since this wallet opened (until then they say nothing). */
+  configured:boolean; locked:boolean; read?:true; automatic?:boolean; network?:UsdtConfig['network']; provider?:string;
   chainId?:number; token?:string; decimals?:number; address?:string;
   balance:string; gasBalance:string; error?:string;
 }
@@ -116,7 +117,7 @@ export class UsdtWallet {
   /** Stopping ends it where it is: a wallet shutting down needs no balance. */
   async refresh() {
     clearTimeout(this.timer);const adapter=this.adapter;if(!adapter)return;
-    try {const address=await this.gate.within(adapter.address()),balances=await this.gate.within(adapter.balances());if(adapter!==this.adapter)return;this.view={configured:true,locked:false,automatic:!!this.saved?.deviceKey,...adapter.config,address,...balances};}
+    try {const address=await this.gate.within(adapter.address()),balances=await this.gate.within(adapter.balances());if(adapter!==this.adapter)return;this.view={configured:true,locked:false,read:true,automatic:!!this.saved?.deviceKey,...adapter.config,address,...balances};}
     catch(error) {if(error instanceof ModeChanged||adapter!==this.adapter)return;this.view={...this.view,error:'RPC unavailable. Balance may be stale.'};}
     this.changed();if(this.adapter)this.timer=setTimeout(()=>void this.refresh(),8000);
   }

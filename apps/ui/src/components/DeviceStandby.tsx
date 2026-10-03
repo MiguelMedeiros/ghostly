@@ -1,9 +1,11 @@
-import { useId, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import type { DeviceGateView } from "@ghostly/browser/devices/gate";
 import { getBrowserHost } from "@ghostly/browser/host";
 import { engine } from "@ghostly/browser/platform/engine";
 import { useI18n } from "../contexts/I18nContext";
-import { useDeviceSet } from "../lib/devices";
+import { reloadIntoGate, useDeviceSet } from "../lib/devices";
+import { HandoffOffer, HandoffProgress, UseHereDialog } from "./devices/Handoff";
+import { useHandoffView } from "../lib/handoff";
 import { activeProfileId, listProfiles, switchProfile } from "../lib/profiles";
 
 const BUTTON = "px-4 py-2 rounded-lg text-sm font-semibold bg-accent text-on-accent hover:bg-accent-hover cursor-pointer";
@@ -27,6 +29,8 @@ export function DeviceStandby({ gate }: { gate: DeviceGateView }) {
   const hint = unfinished
     ? (gate.activeDevice ? t("devices.standby.unfinished.hint", { device: gate.activeDevice }) : t("devices.standby.unfinished.hintUnnamed"))
     : t(`devices.standby.hint.${gate.state}`);
+  // A handoff froze this device or installed what it took: the pages start again into the gate.
+  useEffect(() => { if (gate.reload) void reloadIntoGate(); }, [gate.reload]);
   return (
     <div role="status" data-testid="device-standby" data-state={gate.state} data-unfinished={unfinished ? "true" : undefined} className="h-dvh overflow-y-auto grid place-items-center bg-chat-bg p-6 text-center">
       <div className="max-w-md space-y-3">
@@ -50,6 +54,7 @@ export function DeviceStandby({ gate }: { gate: DeviceGateView }) {
           <button type="button" data-testid="device-standby-retry" onClick={() => void tryAgain()} className={BUTTON}>{t("app.profileUnavailable.tryAgain")}</button>
         )}
         {unfinished && <Unfinished />}
+        {!unfinished && (gate.state === "standby" || gate.state === "releasing" || gate.state === "taking") && <StandbyHandoff gate={gate} />}
         {gate.state !== "unreadable" && !unfinished && <Links />}
         {others.length > 0 && (
           <div className="flex flex-wrap justify-center gap-2 pt-2">
@@ -61,6 +66,30 @@ export function DeviceStandby({ gate }: { gate: DeviceGateView }) {
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+/**
+ * The handoff on a device that is not the active one (WISP 06 § The handoff): Use here and the offer of a push on a
+ * standby, the progress of a pull, pass 2 of a device that is moving away, and the settle wait of one that takes over.
+ */
+function StandbyHandoff({ gate }: { gate: DeviceGateView }) {
+  const { t } = useI18n();
+  const view = useHandoffView();
+  const [asking, setAsking] = useState(false);
+  const device = gate.activeDevice ?? t("devices.join.otherDevice");
+  const running = !!view && view.step !== "failed" && view.step !== "offer";
+  if (!view && gate.state === "releasing") return null;
+  return (
+    <div className="space-y-3 rounded-xl border border-border p-4 text-sm" data-testid="handoff-standby">
+      {view?.step === "offer" && <HandoffOffer view={view} />}
+      {view && view.step !== "offer" && <HandoffProgress view={view} onCancel={() => void engine.call("deviceHandoffCancel")} />}
+      {!view && gate.state === "taking" && <p data-testid="handoff-line" className="text-text-secondary">{t("devices.handoff.step.settling")}</p>}
+      {gate.state === "standby" && !running && view?.step !== "offer" && (
+        <button type="button" data-testid="handoff-use-here" onClick={() => setAsking(true)} className={BUTTON}>{t("devices.handoff.useHere")}</button>
+      )}
+      {asking && <UseHereDialog device={device} onClose={() => setAsking(false)} onStarted={() => {}} />}
     </div>
   );
 }

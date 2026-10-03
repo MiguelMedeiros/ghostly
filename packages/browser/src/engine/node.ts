@@ -66,6 +66,7 @@ import {
   RTC_CONFIG,
   type DeviceKind,
   type TurnNetwork,
+  turnKeys,
   RelayTransport,
   createChatInvite,
   createIdentity,
@@ -104,12 +105,18 @@ import {
   entryParams,
 } from "@ghostly/core";
 import type { AttentionCue, AttentionEvent, EngineImplementation } from "../shared/rpc";
-import { clearProfileStores, databaseName, fileStore, type StoredFile } from "../shared/idb";
+import { STORES, clearProfileStores, databaseName, fileStore, store, wrap, type StoredFile } from "../shared/idb";
 import { knownDeviceGate, viewOf, type DeviceGateView } from "../devices/gate";
 import { deviceNetworkOf, saveDeviceNetwork } from "../devices/network";
 import { EnrollCodeError, EnrollInviter, EnrollJoiner, EnrollRefusal, ghostLinkEnrollChannel, recoverEnrollment, type EnrollView, type OpenEnrollChannel } from "../devices/enroll";
 import { DeviceLinks, deviceSetView, type DeviceSetView } from "../devices/links";
-import { readDeviceRecord } from "../devices/store";
+import { moveDevice, readDeviceRecord } from "../devices/store";
+import { HandoffGiver, type HandoffView } from "../devices/handoff";
+import { handoffProfileHost, handoffSelf } from "../devices/handoffHost";
+import { handoffLinks, profileRecords } from "../devices/handoffStandby";
+import { isHandoffVerifier, makeHandoffVerifier, provesHandoffPassword, type HandoffVerifier } from "../devices/handoffPake";
+import { deviceIdentity } from "../devices/setup";
+import { walletHandoffProblem } from "../devices/handoffWallets";
 import { fileBytes } from "../shared/fileBytes";
 import { FileAppender, readStored, removeStored, storedSize, streamStored } from "../shared/storedFiles";
 import { FileDesk } from "./fileDesk";
@@ -1475,6 +1482,7 @@ export class GhostlyNode implements EngineImplementation {
     void this.dropStaleReviews();
     this.staleReviewTimer ??= setInterval(() => void this.dropStaleReviews(), 60_000);
     this.stopWatchingAdapters ??= onAdaptersChanged(() => { if (!this.shuttingDown) for (const network of WALLET_NETWORKS) { this.lightnings[network].refreshOffered(); this.bitcoins[network].refreshOffered(); } });
+    this.walletsStarted = true;
   }
 
   /** The wallets that exist, opened, and what was in flight looked at again: the second half. */
@@ -4485,6 +4493,7 @@ export class GhostlyNode implements EngineImplementation {
         onChange: () => this.emitState(),
       });
       await this.deviceLinks.start();
+      await this.startHandoff().catch(() => {});
     } else await this.deviceLinks.refresh();
     // An enrollment whose own record was put and whose write of it was lost takes that record back first: the read
     // below would take it for a clone of this device and stop it.
@@ -4587,6 +4596,130 @@ export class GhostlyNode implements EngineImplementation {
   async deviceSet(): Promise<DeviceSetView> {
     if (this.options.singleDevice) return { state: "single", devices: [] };
     return deviceSetView(await readDeviceRecord(databaseName()), this.deviceLinks?.views() ?? []);
+  }
+
+  // -- one profile on several devices: the handoff, the active device's side (WISP 06 § The handoff) ----------------
+
+  /** The giver of this active device: answers a pull, makes a push, runs pass 1 while this engine goes on. */
+  private handoffGiver: HandoffGiver | null = null;
+
+  private async startHandoff(): Promise<void> {
+    const host = handoffProfileHost(), links = this.deviceLinks;
+    if (!host || !links || this.handoffGiver || this.options.singleDevice) return;
+    const profile = databaseName();
+    const identity = await deviceIdentity(profile);
+    if (!identity || this.shuttingDown) return;
+    const giver = new HandoffGiver({
+      ownKey: identity.key.publicKey, sign: async (bytes) => identity.key.sign(bytes), turnAddress: turnKeys(identity.d).address,
+      links: handoffLinks(links), records: profileRecords(profile), self: () => handoffSelf(host),
+      source: host.source(profile),
+      verifier: () => this.handoffVerifier(),
+      busy: () => this.handoffBusy(),
+      quiesce: (patch) => this.quiesceForHandoff(patch),
+    });
+    this.handoffGiver = giver;
+    links.setHandoff({ receive: (from, frame) => void giver.receive(from, frame), linkChanged: (key, live) => giver.linkChanged(key, live), stop: () => giver.stop() });
+  }
+
+  private static readonly HANDOFF_VERIFIER = "handoffVerifier";
+
+  /** The profile's password proof verifier (WISP 06 § Authorizing a handoff): in its settings, so it moves with it. */
+  private async handoffVerifier(): Promise<HandoffVerifier | null> {
+    const value = await wrap((await store(STORES.settings, "readonly")).get(GhostlyNode.HANDOFF_VERIFIER));
+    return isHandoffVerifier(value) ? value : null;
+  }
+
+  /**
+   * Makes the verifier from the lock password, which the page has in hand only when the person types it (Add a device,
+   * a password set or changed). The password itself is not kept.
+   */
+  async deviceHandoffVerifier({ password, current }: { password: string; current?: string }): Promise<void> {
+    if (this.options.singleDevice) return;
+    if (typeof password !== "string" || !password) throw new Error("A password is needed");
+    const stored = await this.handoffVerifier();
+    // A verifier is replaced only by someone who knows the password it checks: proven here, the same way a pull does.
+    // Only a profile on several devices has pulls to protect; one on a single device (Add a device not done yet) may set it afresh.
+    if (stored && knownDeviceGate()?.state === "active" && !(await provesHandoffPassword(stored, typeof current === "string" ? current : ""))) throw new Error("handoff-password: The current password is wrong.");
+    try {
+      const verifier = await makeHandoffVerifier(password);
+      await wrap((await store(STORES.settings, "readwrite")).put(verifier, GhostlyNode.HANDOFF_VERIFIER));
+    } catch (error) {
+      // The old verifier must not go on checking a password the person changed: none, until one is made (a pull is
+      // refused meanwhile; a push still works).
+      await wrap((await store(STORES.settings, "readwrite")).delete(GhostlyNode.HANDOFF_VERIFIER)).catch(() => {});
+      throw error;
+    }
+  }
+
+  /**
+   * Why this device cannot hand over now. Until wallets move (part 8 of WISP 06), any wallet with money in it or an
+   * operation open refuses the handoff, so no money is ever in two places: a balance on any network, anything a wallet
+   * waits for, or a payment not settled.
+   */
+  private async handoffBusy(): Promise<"wallet" | "payment" | "loading" | null> {
+    // Limited mode opened no wallet, and wallets not started yet say nothing: what they hold is not known.
+    if (this.limitedMode || !this.walletsStarted) return "loading";
+    // Read now, not the view of the last change: a wallet that changed since is counted as it is.
+    await this.refreshWallet().catch(() => {});
+    let where = "";
+    const problem = walletHandoffProblem(this.walletView, this.walletsStarted, (at) => { where = at; });
+    if (problem) console.info(`[handoff] not now: ${problem} (${where})`);
+    return problem;
+  }
+  /** Every wallet's stored state was loaded (`startWallets`): before that, a wallet view says nothing of what it holds. */
+  private walletsStarted = false;
+
+  /**
+   * Quiesce (WISP 06 § Shape, step 4): this engine stops without a word to any contact (they see an app that went
+   * away, and the new active device dials them as a restarted one does), `releasing` is written with the handoff's
+   * note, and the pages start again into the gate, where pass 2 reads the frozen database.
+   */
+  private async quiesceForHandoff(patch: Parameters<typeof moveDevice>[2]): Promise<void> {
+    const profile = databaseName();
+    this.gatedOut = true;
+    await this.shutdown({ quiet: true });
+    // Money once more, now that nothing can arrive any more: ecash that landed between the last look and the stop would
+    // otherwise be in both copies. Found, nothing is released: this device writes nothing and starts again as active,
+    // and the taker, told so when it asks, stops.
+    const problem = await this.refreshWallet().then(() => walletHandoffProblem(this.walletView, this.walletsStarted), () => "loading" as const);
+    if (problem) {
+      console.info(`[handoff] not released: ${problem} after the stop`);
+      this.events.onDeviceGate?.({ state: "releasing", reload: true });
+      throw new Error(`handoff-${problem === "loading" ? "busy" : problem}: Money arrived while the profile was moving.`);
+    }
+    await moveDevice(profile, "releasing", patch);
+    this.events.onDeviceGate?.({ state: "releasing", reload: true });
+  }
+
+  /** "Move to <device>" (a push). */
+  async deviceHandoffPush({ key }: { key: string }): Promise<HandoffView | null> {
+    if (this.limitedMode) throw new Error(LIMITED_MODE_ERROR);
+    if (!this.handoffGiver) await this.startHandoff();
+    if (!this.handoffGiver) throw new Error("handoff-refused: This device cannot move the profile.");
+    return this.handoffGiver.push(key);
+  }
+
+  /** The handoff in progress on this device, as the screens show it. */
+  async deviceHandoffView(): Promise<HandoffView | null> {
+    return this.handoffGiver?.view() ?? null;
+  }
+
+  async deviceHandoffCancel(): Promise<void> {
+    await this.handoffGiver?.cancel();
+  }
+
+  /** A pull is a standby's: the active device answers one, it never makes one. */
+  async deviceHandoffPull(): Promise<HandoffView | null> {
+    throw new Error("handoff-refused: This device is the active one.");
+  }
+
+  async deviceHandoffAccept(): Promise<HandoffView | null> {
+    throw new Error("handoff-refused: This device is the active one.");
+  }
+
+  /** "Let <device> try again" after the wrong passwords that refused it. */
+  async deviceHandoffAllow({ key }: { key: string }): Promise<void> {
+    await this.handoffGiver?.allowAgain(key);
   }
 
   /** A ping over the device link to the device with this signing key, and how long its echo took. */

@@ -25,6 +25,8 @@ export interface DeviceGateView {
    * § Adding a device, "Not finished"). It holds nothing usable; Remove takes the device set off this device.
    */
   unfinished?: true;
+  /** The device state changed under the page (a handoff froze or installed it): start again into the gate. */
+  reload?: true;
 }
 
 export interface DeviceGate {

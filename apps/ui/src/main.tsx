@@ -8,6 +8,8 @@ import { startSessionSync } from "@ghostly/browser/platform/sync";
 import { setDatabaseName } from "@ghostly/browser/shared/idb";
 import { openDeviceGate } from "@ghostly/browser/devices/gate";
 import { setDeviceMirror } from "@ghostly/browser/devices/store";
+import { setHandoffProfileHost } from "@ghostly/browser/devices/handoffHost";
+import { handoffProfileHost } from "./lib/handoffProfile";
 import { desktopDeviceMirror } from "./desktop/deviceMirror";
 import { isDesktopApp } from "./lib/externalLink";
 import { Root } from "./Root";
@@ -49,7 +51,10 @@ async function boot() {
   if (isDesktopApp()) setDeviceMirror(desktopDeviceMirror(invoke));
   const gate = await openDeviceGate();
 
-  const host = createDesktopHost(await getVersion().catch(() => "0.0.0"), await nativeCallSupport());
+  const version = await getVersion().catch(() => "0.0.0");
+  // What a handoff reads and writes of a profile's storage (WISP 06 § The handoff), before the host starts the engine.
+  setHandoffProfileHost(handoffProfileHost(version, "desktop"));
+  const host = createDesktopHost(version, await nativeCallSupport());
   setBrowserHost(host);
   if (gate.full) startSessionSync();
   addEventListener("pagehide", () => host.announceDeparture());

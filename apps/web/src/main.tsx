@@ -7,6 +7,8 @@ import { PeerLockUnavailable, becomeThePeer } from "@ghostly/browser/inPageHost"
 import { webHost } from "./host";
 import { setDatabaseName } from "@ghostly/browser/shared/idb";
 import { openDeviceGate } from "@ghostly/browser/devices/gate";
+import { setHandoffProfileHost } from "@ghostly/browser/devices/handoffHost";
+import { handoffProfileHost } from "../../ui/src/lib/handoffProfile";
 import { setStorageProfile } from "../../ui/src/lib/storage";
 import { activeProfileId, namespaceOf, setRunningProfile } from "../../ui/src/lib/profiles";
 import { loadSettings } from "../../ui/src/lib/settings";
@@ -79,6 +81,8 @@ isPeer = true;
 // never enrolled a device is `single` and goes on exactly as before. On a device that is not the active one nothing
 // below touches the profile: no session sync, no share taken in, and the host starts device-link-only mode.
 const gate = await openDeviceGate();
+// What a handoff reads and writes of a profile's storage (WISP 06 § The handoff), before the host starts the engine.
+setHandoffProfileHost(handoffProfileHost(webHost.version, "web"));
 setBrowserHost(webHost);
 if (gate.full) {
   startSessionSync();

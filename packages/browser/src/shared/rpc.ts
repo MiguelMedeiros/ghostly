@@ -367,6 +367,23 @@ export interface EngineApi {
   deviceSet(): import("../devices/links").DeviceSetView;
   /** A ping over the device link to the device with this signing key: how long its echo took. */
   devicePing(params: { key: string }): { ms: number };
+  /**
+   * The handoff (WISP 06 § The handoff). Errors start with `handoff-<reason>:`. The verifier of the password proof,
+   * made from the lock password the person just typed (Add a device, a password set or changed).
+   */
+  deviceHandoffVerifier(params: { password: string; current?: string }): void;
+  /** "Move to <device>" on the active device (a push). */
+  deviceHandoffPush(params: { key: string }): import("../devices/handoff").HandoffView | null;
+  /** "Use here" on a standby (a pull), with the lock password. `later`: files over this many bytes stay behind. */
+  deviceHandoffPull(params: { password: string; later?: number }): import("../devices/handoff").HandoffView | null;
+  /** "Use here" on an offer from the active device. */
+  deviceHandoffAccept(params: { later?: number }): import("../devices/handoff").HandoffView | null;
+  /** Cancel, or "Not now" on an offer. Nothing changes until the last step. */
+  deviceHandoffCancel(): void;
+  /** The handoff in progress on this device, or the last one that failed. */
+  deviceHandoffView(): import("../devices/handoff").HandoffView | null;
+  /** "Let <device> try again" after too many wrong passwords. */
+  deviceHandoffAllow(params: { key: string }): void;
 }
 
 /** What the engine implements: any call may be answered asynchronously. */

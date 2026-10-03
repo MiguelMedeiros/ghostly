@@ -37,6 +37,8 @@ export interface SourceView {
   alias?: string;
   /** Spendable sats, when the source says. */
   balance?: number;
+  /** What the source holds was read once since it connected (or it says it shows none): until then `balance` says nothing. */
+  read?: true;
   /** On-chain: sats in the mempool. */
   unconfirmed?: number;
   /**
@@ -415,11 +417,13 @@ export class ProviderSources<P extends Connectable> {
   async refresh() {
     clearTimeout(this.timer);
     const provider = this.provider;
-    if (!provider || !this.options.refresh) return;
+    if (!provider) return;
+    // A kind of source with nothing to read shows no balance: what it shows is read.
+    if (!this.options.refresh) { if (!this.view.read) { this.view = { ...this.view, read: true }; this.options.changed(); } return; }
     try {
       const details = await this.options.refresh(provider);
       if (provider !== this.provider) return;
-      this.view = { ...this.view, ...details, balanceAt: undefined, error: undefined };
+      this.view = { ...this.view, ...details, read: true, balanceAt: undefined, error: undefined };
       this.remember(details);
     } catch (error) {
       if (provider !== this.provider) return;
