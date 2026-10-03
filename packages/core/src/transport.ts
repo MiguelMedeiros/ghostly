@@ -26,12 +26,13 @@ import type { TurnConditions, TurnSourceAnswer, TurnSourcePut } from "./turnRead
 export type DiscoveryChange = "tripped" | "recovered";
 
 /**
- * `door`: a community hub's own records: the knock bell it reads as the door, its lobby, and the beacon it reads and
- * writes. Background requests, but not held to the small share while a link signals (`BACKGROUND_WHILE_SIGNALING`):
- * the door admitting one person opens links that signal, and the next person's knock would wait for them
- * (2026-09-28); and a hub whose own edges signal (dialling a hub whose app was killed, or opening edges for the members
- * of one that left) got 2 of 24 beacon writes through in 90 s on CLI daemons: its entry went stale, and the members it
- * should have carried became hubs (2026-10-03).
+ * `door`: a community's records that open edges: the knock bell the door reads, a hub's lobby and the beacon it reads
+ * and writes, and a member's request in a hub's lobby. Background requests, but not held to the small share while a
+ * link signals (`BACKGROUND_WHILE_SIGNALING`): the door admitting one person opens links that signal, and the next
+ * person's knock would wait for them (2026-09-28). When a hub's app is killed, the edges to it dial it again and look
+ * fast for a while, on the hub left and on its members alike: on CLI daemons the hub left got 2 of 24 beacon writes
+ * through in 90 s (its entry went stale, and members it should have carried became hubs), and the members' requests
+ * in its lobby went out 40 s after they asked (2026-10-03).
  *
  * `signal`: a link's WebRTC signaling, what its contact waits for: the write of a new offer or answer, or a read for
  * the answer while this side's offer is out, or the reads of a DHT-only contact's mailbox once it shows it is leaving,

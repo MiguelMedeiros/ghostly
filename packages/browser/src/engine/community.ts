@@ -1028,10 +1028,13 @@ export class Communities {
   /** A member asks a hub for an edge: its key in the hub's lobby, and its side of the edge started. */
   private async askHub(groupId: string, live: Live, hub: string, now: number): Promise<void> {
     const keys = lobbyKeys(live.session.state.rv, groupId, hub);
-    const existing = readLobby(keys, (await this.host.resolve(keys.identity.pubKeyZ32, true)) ?? []);
+    // Asking for an edge, as a knock asks to be let in: not held back while my links signal (`PkarrRequestOptions.door`).
+    // A member whose hub's app was killed dials it again and looks fast for the next hub's side, both for a while: held
+    // to that share, its request went out 40 s after it picked the next hub (CLI daemons, 2026-10-03).
+    const existing = readLobby(keys, (await this.host.resolve(keys.identity.pubKeyZ32, true, true)) ?? []);
     // Dated by the hub's clock, where mine differs: the hub reads its lobby by its own, and so do the members that write there.
     const theirs = now - live.hubClocks.ahead(hub);
-    await this.host.publish(keys.identity, lobbyRecords(keys, mergeLobby(existing, { key: live.session.myKey, ts: theirs }, theirs)), true);
+    await this.host.publish(keys.identity, lobbyRecords(keys, mergeLobby(existing, { key: live.session.myKey, ts: theirs }, theirs)), true, true);
     traceJoin(groupId, "lobby.written");
   }
 
