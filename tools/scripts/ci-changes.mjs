@@ -38,8 +38,9 @@ export const WEBSITE_INPUTS = [
   // Quoted on /developers: sync-references.mjs's excerpt().
   "packages/core/src/invite.ts",
   "packages/core/src/pairedTransports.ts",
-  // The home's wallet deck: sync-app-deck.mjs's FILES, which `sync-app-deck.mjs --check` compares.
+  // The home's wallet and identity decks: sync-app-deck.mjs's FILES, which `sync-app-deck.mjs --check` compares.
   "apps/ui/src/components/deck/",
+  "apps/ui/src/components/identities/providerMarks.tsx",
   "apps/ui/src/components/WalletCardDeck.tsx",
   "apps/ui/src/components/WalletCards.tsx",
   "apps/ui/src/components/walletCardTypes.ts",
