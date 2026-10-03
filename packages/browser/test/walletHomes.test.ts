@@ -1,7 +1,7 @@
 import "fake-indexeddb/auto";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { STORES, store, transact, wrap } from "../src/shared/idb";
-import { homeOf, homeRow, readWalletHomes, writeWalletHomes } from "../src/devices/walletHomes";
+import { clearWalletHomes, homeOf, homeRow, readWalletHomes, writeWalletHomes } from "../src/devices/walletHomes";
 import { dropBreezDatabases } from "../src/devices/handoffStandby";
 import { awayFrom, refuseAway, setAwayWallets, setSingleWriterGate, WalletAwayError } from "../src/engine/paymentAdapters/away";
 import type { PlannedWallet } from "../src/devices/handoffWallets";
@@ -54,6 +54,23 @@ describe("the home mark", () => {
     expect(await get("sparkWallet-mode-testnet")).toEqual({ network: "regtest", seed: {}, deviceKey: "k" });
     expect(await get("usdtWallet-mode-mainnet")).toBeUndefined();
     expect(((await get("lightningCards-testnet")) as { cards: unknown[] }).cards).toEqual([{ id: "lnd", providerId: "lnd", name: "LND", home: { key: DESKTOP } }, { id: "nwc", providerId: "nwc", name: "NWC" }]);
+  });
+
+  it("a removed home device takes its marks with it: the wallets at home there are here again, the others' marks stay (WISP 06 § Removing a device)", async () => {
+    const LAPTOP = "L".repeat(43);
+    await put("barkWallet-mode-testnet", { config: { walletId: "b1" }, seed: {}, deviceKey: "k", home: { key: DESKTOP, expiresAt: 1_800_000_000_000 } });
+    await put("fedimintWallet-mainnet", { federations: [], home: { key: LAPTOP } });
+    await put("lightningCards-testnet", { cards: [{ id: "lnd", providerId: "lnd", name: "LND", home: { key: DESKTOP } }, { id: "nwc", providerId: "nwc", name: "NWC" }], receive: "nwc" });
+    expect(await clearWalletHomes(DESKTOP)).toBe(true);
+    expect(await readWalletHomes()).toEqual({ "fedimint:mainnet": { key: LAPTOP } });
+    // The rest of each record is as it was.
+    expect(await get("barkWallet-mode-testnet")).toEqual({ config: { walletId: "b1" }, seed: {}, deviceKey: "k" });
+    expect(((await get("lightningCards-testnet")) as { cards: unknown[] }).cards).toEqual([{ id: "lnd", providerId: "lnd", name: "LND" }, { id: "nwc", providerId: "nwc", name: "NWC" }]);
+    // Nothing more to take off: nothing written.
+    expect(await clearWalletHomes(DESKTOP)).toBe(false);
+    // Every device the set no longer lists at once (a removal cut short before it cleared its marks).
+    expect(await clearWalletHomes((key) => key !== DESKTOP)).toBe(true);
+    expect(await readWalletHomes()).toEqual({});
   });
 
   it("knows where each wallet's record is, and that Cashu has none", () => {

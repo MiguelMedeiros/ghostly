@@ -4,7 +4,9 @@ import { p256 } from "@noble/curves/nist.js";
 import { generateVapidKeys, newWakeToken, toBase64Url, type PkarrTransport, type WakeTarget } from "@ghostly/core";
 import { GhostlyNode } from "../src/engine/node";
 import type { WakeSubscription } from "../src/shared/types";
-// covers: devices.push
+import { STORES, transact } from "../src/shared/idb";
+import { readWalletHomes } from "../src/devices/walletHomes";
+// covers: devices.push, devices.handoff.wallets
 
 /*
  * The active device keeps the profile's push target (WISP 06 § Push and the phone), driven through the engine as the
@@ -72,12 +74,15 @@ describe("the profile's push target on the active device", () => {
     expect(inside.settings.wake?.device).toBe(DESKTOP);
   });
 
-  it("a removed device's subscription goes with it", async () => {
+  it("a removed device's subscription goes with it, and so do the home marks of the wallets that stayed on it", async () => {
     const { inside } = desktop();
+    await transact([STORES.settings], (s) => { s[STORES.settings].put({ config: { walletId: "b1" }, seed: {}, deviceKey: "k", home: { key: PHONE } }, "barkWallet-mode-testnet"); });
     await inside.deviceWakeReceived(PHONE, targetOf(subscription("https://fcm.googleapis.com/fcm/send/phone")));
     await inside.afterDeviceRemoved("L".repeat(43));
     expect(inside.settings.wake?.device).toBe(PHONE);
+    expect(await readWalletHomes()).toEqual({ "bark:testnet": { key: PHONE } });
     await inside.afterDeviceRemoved(PHONE);
     expect(inside.settings.wake).toBeUndefined();
+    expect(await readWalletHomes()).toEqual({});
   });
 });
