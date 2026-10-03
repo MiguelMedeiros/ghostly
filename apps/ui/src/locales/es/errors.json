@@ -61,6 +61,7 @@
     "noSharedMint": "No compartes ningún mint con este contacto",
     "notYetConfirmed": "Aún no confirmado. No se envió un segundo pago.",
     "outcomeUnknown": "Resultado desconocido. Comprueba el pago que ya existe; no envíes otro.",
+    "parkedSigned": "Necesita tu decisión: este pago se firmó antes de que esta copia de tu perfil tomara el control. Nunca se vuelve a enviar desde aquí. Revísalo antes de pagar otra vez.",
     "paymentExpired": "La solicitud de pago caducó o tiene una caducidad no válida",
     "paymentTakenBack": "Este pago se recuperó. Los sats están en tu billetera.",
     "realMintOnTestnet": "Este mint guarda sats reales: añádelo a una billetera Cashu de Mainnet",

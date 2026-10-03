@@ -61,6 +61,7 @@
     "noSharedMint": "Vous n’avez aucun mint en commun avec ce contact",
     "notYetConfirmed": "Pas encore confirmé. Aucun second paiement n’a été envoyé.",
     "outcomeUnknown": "Résultat inconnu. Vérifiez le paiement existant ; n’en envoyez pas un autre.",
+    "parkedSigned": "Votre décision est requise : ce paiement a été signé avant que cette copie de votre profil prenne le relais. Il n'est plus jamais envoyé d'ici. Vérifiez-le avant de payer à nouveau.",
     "paymentExpired": "La demande de paiement a expiré ou son échéance n’est pas valide",
     "paymentTakenBack": "Ce paiement a été repris. Les sats sont dans votre portefeuille.",
     "realMintOnTestnet": "Ce mint garde de vrais sats : ajoutez-le à un portefeuille Cashu Mainnet",

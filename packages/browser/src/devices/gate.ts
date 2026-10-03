@@ -46,7 +46,8 @@ const known = new Map<string, DeviceGate>();
 export function viewOf(record: DeviceRecord): DeviceGateView {
   const active = record.activeSlot !== undefined && record.activeSlot !== record.ownSlot ? record.deviceSet[record.activeSlot] : undefined;
   // Every standby that finished its enrollment accepted a record that lists it: one with no packet did not.
-  const unfinished = record.state === "standby" && !record.turnPacket;
+  // A copy restored from a backup holds no packet either, and is no enrollment (WISP 06 § A backup restored).
+  const unfinished = record.state === "standby" && !record.turnPacket && record.copy !== "restored";
   return { state: record.state as DeviceGateView["state"], ...(active?.name ? { activeDevice: active.name } : {}), ...(unfinished ? { unfinished: true as const } : {}) };
 }
 

@@ -109,6 +109,12 @@
     "restore": "Restaurar una copia de seguridad",
     "unfinished": "Sin terminar: tu otro dispositivo aún no ha incluido este."
   },
+  "manage": {
+    "confirm": "Activar",
+    "off": "Administrar este grupo está desactivado en este dispositivo.",
+    "turnOn": "Administrar grupos desde este dispositivo",
+    "warning": "Si tu otro dispositivo cambió este grupo después de que se hiciera esta copia de tu perfil, administrarlo desde aquí puede romper el grupo para todos."
+  },
   "password": {
     "confirm": "Escríbela otra vez",
     "current": "Contraseña de bloqueo",
@@ -123,6 +129,19 @@
     "tooShort": "Usa 8 caracteres o más.",
     "typeTitle": "Escribe tu contraseña de bloqueo",
     "wrong": "Contraseña incorrecta."
+  },
+  "restore": {
+    "activeHint": "Iniciar esta copia de seguridad aquí crearía una segunda copia.",
+    "activeOn": "Este perfil está activo en {{device}}",
+    "activeOnUnnamed": "Este perfil está activo en otro dispositivo",
+    "addInstead": "Añadir este dispositivo",
+    "addInsteadHint": "En {{device}}, abre Perfil y luego Añadir un dispositivo. En este dispositivo, elige Ya uso Ghostly.",
+    "takeOver": "Tomar el control",
+    "tombstone": "Esta copia de seguridad es de antes de que se quitara un dispositivo. Iniciarla crea una segunda copia de tu perfil.",
+    "tombstoneConfirm": "Escribe {{name}} para iniciarla como un perfil aparte",
+    "tombstoneGo": "Iniciar como perfil aparte",
+    "tryAgain": "Intentar de nuevo",
+    "unreadable": "No se pudo comprobar qué dispositivo está activo. Revisa tu conexión."
   },
   "section": {
     "active": "Activo",
@@ -147,6 +166,7 @@
       "removed": "Añádelo de nuevo desde el dispositivo que usas ahora.",
       "standby": "Este dispositivo está en espera para este perfil.",
       "superseded": "Otro dispositivo tomó el relevo sin este. Este dispositivo se ha detenido.",
+      "supersededBy": "{{device}} tomó el control sin este dispositivo. Este dispositivo se detuvo.",
       "taking": "Esperando la red.",
       "unreadable": "Reinicia la app o el dispositivo y vuelve a intentarlo."
     },
@@ -170,5 +190,28 @@
       "title": "Sin terminar"
     },
     "unreadableInfo": "Ghostly lee cuál de tus dispositivos está activo antes de iniciar nada. Eso no funcionó aquí, así que no se inició nada, no se envió nada y no se cambió nada."
+  },
+  "takeover": {
+    "checking": "Comprobando qué dispositivo está activo · unos 30 segundos",
+    "confirm": "Escribe {{device}} para confirmar",
+    "fail": {
+      "lockedOut": "Demasiados intentos. Inténtalo más tarde.",
+      "name": "Escribe el nombre del dispositivo que se detiene.",
+      "noCopy": "Este dispositivo no tiene una copia del perfil. Usar aquí lo trae desde el dispositivo activo.",
+      "noPassword": "Este dispositivo aún no puede comprobar la contraseña. Abre Ghostly una vez en el dispositivo activo primero.",
+      "offline": "Conéctate para tomar el control.",
+      "refused": "Demasiados intentos en este dispositivo. Ya no puede tomar el control.",
+      "state": "Este dispositivo no puede tomar el control ahora."
+    },
+    "go": "Tomar el control",
+    "hint": "Esto hará que {{device}} se detenga. Este dispositivo tiene tu perfil como estaba la última vez que funcionó aquí.",
+    "hintRestored": "Esto hará que tu otro dispositivo se detenga. Este dispositivo tiene tu perfil como estaba en la copia de seguridad.",
+    "info": "Los mensajes y el dinero que llegaron a {{device}} después no están aquí. Si {{device}} vuelve, se detiene, sin decir nada a tus contactos.",
+    "lost": "Mi otro dispositivo se perdió o se rompió",
+    "lostRace": "Otro dispositivo tomó el control en el mismo momento. Este dispositivo está en espera.",
+    "notMe": "No fui yo",
+    "restoredHint": "Este dispositivo tiene una copia de una copia de seguridad. No inicia nada hasta que tomes el control.",
+    "title": "¿Tomar el control sin {{device}}?",
+    "titleUnnamed": "¿Tomar el control sin tu otro dispositivo?"
   }
 }

@@ -400,6 +400,11 @@ export interface EngineApi {
    * device is the active one now (the pages start again into the gate).
    */
   deviceTakeover(params: { password: string; name: string }): { kind: string; result?: string; state?: string };
+  /**
+   * Reads the turn at the address of a device-set secret, as a device that holds no record of it (WISP 06 § A backup
+   * restored where a device set exists): what a restore asks before it registers a bundle's profile. `d` is base64url.
+   */
+  deviceTurnPeek(params: { d: string }): import("../devices/restoreGuard").TurnPeek;
 }
 
 /** What the engine implements: any call may be answered asynchronously. */

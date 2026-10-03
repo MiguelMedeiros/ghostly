@@ -11,6 +11,7 @@ import type { DeviceRecord, DeviceState } from "./state";
 import { amendDevice, forgetDevice, readDeviceRecord } from "./store";
 import type { TurnKeeper, TurnOutcome } from "./turn";
 import { canTakeOver, forceTakeover, takeoverTarget } from "./takeover";
+import { peekTurn } from "./restoreGuard";
 import { provesHandoffPassword } from "./handoffPake";
 
 /**
@@ -448,6 +449,14 @@ export class DeviceLinks implements DeviceLinkEngine {
         return null;
       }
       case "deviceLinksRefresh": await this.refresh(); return this.views();
+      case "deviceTurnPeek": {
+        const d = (params as { d?: unknown } | null)?.d;
+        const secret = typeof d === "string" ? fromBase64Url(d) : new Uint8Array();
+        const network = this.turnNetwork();
+        if (secret.length !== 32) throw new Error("Not a device-set secret");
+        if (!network || this.options.offline) return { result: "unreachable" };
+        return peekTurn(secret, network);
+      }
       case "deviceTakeoverInfo": {
         // What the takeover screen needs: whether it is offered here, which device stops, whether a password is asked.
         const record = await (this.options.readRecord ?? readDeviceRecord)(this.options.profile);

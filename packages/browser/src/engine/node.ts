@@ -65,6 +65,7 @@ import {
   RELAY_POLL_INTERVALS,
   RTC_CONFIG,
   type DeviceKind,
+  fromBase64Url,
   type TurnNetwork,
   turnKeys,
   RelayTransport,
@@ -116,6 +117,7 @@ import { handoffProfileHost, handoffSelf } from "../devices/handoffHost";
 import { handoffLinks, profileRecords } from "../devices/handoffStandby";
 import { isHandoffVerifier, makeHandoffVerifier, provesHandoffPassword, type HandoffVerifier } from "../devices/handoffPake";
 import { deviceIdentity, openTurnKeeper } from "../devices/setup";
+import { peekTurn, type TurnPeek } from "../devices/restoreGuard";
 import { walletHandoffProblem } from "../devices/handoffWallets";
 import { COUNTER_RAISE_KEY, GROUP_ADMIN_OFF_KEY, PENDING_RAISE_KEY, applyCounterRaise, isCounterRaise, isGroupAdminOff, isPendingRaise, type PendingRaise } from "../devices/raise";
 import { fileBytes } from "../shared/fileBytes";
@@ -4826,6 +4828,14 @@ export class GhostlyNode implements EngineImplementation {
 
   async deviceTakeover(): Promise<{ kind: string }> {
     throw new Error("takeover-state: This device is the active one.");
+  }
+
+  /** The turn at a bundle's address, for the restore guard (`devices/restoreGuard.ts`). */
+  async deviceTurnPeek({ d }: { d: string }): Promise<TurnPeek> {
+    if (this.options.singleDevice) throw new Error("A profile of the command line is on one device only");
+    const secret = typeof d === "string" ? fromBase64Url(d) : new Uint8Array();
+    if (secret.length !== 32) throw new Error("Not a device-set secret");
+    return peekTurn(secret, this.turnNetwork());
   }
 
   /** "Let <device> try again" after the wrong passwords that refused it. */
