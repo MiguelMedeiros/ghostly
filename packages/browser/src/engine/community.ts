@@ -719,13 +719,15 @@ export class Communities {
       // may hold its reads back a while (all of them giving up after 20 s made each a hub, under the same budget).
       const gone = live.myHubs.filter(key => s.wasRemoved(key) || s.state.pendingLeaves.some(r => r.s === key));
       for (const key of gone) { live.hubsAvoided.set(key, now + HUB_GRACE_MS); live.hubWaits.delete(key); live.hubsUp.delete(key); }
+      // A hub whose edge was up, given up on below (its app closed and did not come back: killed, or gone for good). Its
+      // other members ask the hubs left too: the next hub's edge looks fast for that hub's side, as after a leave. At the
+      // background pace it looked every half minute, and a killed hub's members waited that long more (2026-10-03).
+      let lost = false;
       // A hub that has not taken me after a while is full, or gone: another one, or I become one. One whose edge was up
       // and dropped (its app closed, and usually starts again in seconds) gets the same while from the drop, and up to
       // three times that once it is back (a packet since): its edge stays open and looks for it, and comes up again in
       // the seconds its signaling takes on the relays. Dropped at once, the edge was opened again only when the hub was
       // picked again, a minute or more later (2026-09-29).
-      // A hub whose edge was up, given up on (its app closed and did not come back: killed, or gone for good).
-      let lost = false;
       for (const key of live.myHubs) {
         if (gone.includes(key)) continue;
         const id = edges.get(key);
