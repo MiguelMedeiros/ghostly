@@ -31,6 +31,17 @@ pub fn check_space(space: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// What a profile's files take on disk ([`FileStore::usage`]), for Settings' "Storage used".
+#[derive(serde::Serialize, Default, Debug, PartialEq, Eq)]
+pub struct Usage {
+    /// The bytes of the files sent and received.
+    pub files: u64,
+    /// How many files.
+    pub count: u64,
+    /// The bytes of the copies staged for a save (a backup, a file being saved).
+    pub staged: u64,
+}
+
 /// Where the files are: set once the app knows its data folder.
 #[derive(Clone)]
 pub struct FileStore {
@@ -185,6 +196,38 @@ impl FileStore {
             }
         }
         Ok(())
+    }
+
+    /// What the space's folder holds: the bytes of its files, and of the copies staged for a save (`save-…`:
+    /// a backup being made, or a file on its way through the save dialog), apart. A folder not made yet holds
+    /// nothing.
+    pub fn usage(&self, space: &str) -> Result<Usage, String> {
+        let folder = self.folder(space)?;
+        let entries = match fs::read_dir(&folder) {
+            Ok(entries) => entries,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Usage::default()),
+            Err(e) => return Err(e.to_string()),
+        };
+        let mut usage = Usage::default();
+        for entry in entries.flatten() {
+            let Ok(meta) = entry.metadata() else {
+                continue;
+            };
+            if !meta.is_file() {
+                continue;
+            }
+            if entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with(STAGED_SAVE_PREFIX)
+            {
+                usage.staged += meta.len();
+            } else {
+                usage.files += meta.len();
+                usage.count += 1;
+            }
+        }
+        Ok(usage)
     }
 
     /// Free bytes on the disk that holds the files.
@@ -476,6 +519,18 @@ pub fn file_bytes_remove_where<R: tauri::Runtime>(
     Ok(())
 }
 
+/// What the profile's files take on disk: `{ files, count, staged }` in bytes ([`FileStore::usage`]).
+#[tauri::command]
+pub async fn file_bytes_usage<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    space: String,
+) -> Result<Usage, String> {
+    let store = store(&app)?.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || store.usage(&space))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
 #[tauri::command]
 pub fn file_bytes_room<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
@@ -566,6 +621,28 @@ mod tests {
             .unwrap();
         assert_eq!(end.len(), 3);
         fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn usage_counts_a_profiles_files_and_its_staged_copies_apart() {
+        // covers: settings.storage-used
+        let (files, dir) = store();
+        assert_eq!(files.usage("p").unwrap(), Usage::default(), "no folder yet");
+        files.append("p", "chat-in-a", 0, &[1; 1000]).unwrap();
+        files.append("p", "chat-out-b", 0, &[2; 24]).unwrap();
+        files.append("p", "save-backup-1", 0, &[3; 500]).unwrap();
+        files.append("p", "save-2", 0, &[4; 12]).unwrap();
+        files.append("other", "chat-in-c", 0, &[5; 7000]).unwrap();
+        assert_eq!(
+            files.usage("p").unwrap(),
+            Usage {
+                files: 1024,
+                count: 2,
+                staged: 512
+            }
+        );
+        assert!(files.usage("../p").is_err(), "a space is never a path");
+        let _ = fs::remove_dir_all(dir);
     }
 
     #[test]
