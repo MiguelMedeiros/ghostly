@@ -337,7 +337,7 @@ This measures the protocol, the topology rules and the cryptography at the cap. 
 
 On public relays each trip through Pkarr (a packet published, then seen by the other side) takes five or six seconds, and an entry session takes two of them and an edge two or three: that, not the door, is what is left of a join there.
 
-[`group-community-join.spec.ts`](../../e2e/web/group-community-join.spec.ts) holds two joins in a row, a member's app open a minute and a quarter before, to 12 seconds in and 20 seconds to reach a member (15 and 30 for the second, which shares the door's budget with the first).
+[`group-community-join.spec.ts`](../../e2e/web/group-community-join.spec.ts) holds two joins in a row, a member's app open a minute and a quarter before, to 12 seconds in and 16 seconds to reach a member (12 and 20 for the second, which shares the door's budget with the first).
 
 ## Open decisions
 
