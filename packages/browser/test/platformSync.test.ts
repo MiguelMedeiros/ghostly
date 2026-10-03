@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ChatSession } from "../../../apps/ui/src/lib/types";
 import type { LinkView, StoredMessage } from "../src/shared/types";
-// covers: chats.created-marker, chat.paired.join-notice, chat.paired.delete-message, chat.paired.storage, chat.paired.nickname-sync, chat.edit
+// covers: chats.created-marker, chat.paired.join-notice, chat.paired.delete-message, chat.paired.storage, chat.paired.nickname-sync, chat.edit, chat.order
 
 /**
  * Keeping the UI's localStorage sessions and the peer's links in step. The page
@@ -226,6 +226,14 @@ describe("mirroring what the peer stores into the chat", () => {
     engine.messageListeners[0]("link-1", [message({ id: "peer_x", text: "v2", edit: { seq: 2, at: 20, history: [] } })]);
     expect(changes).toBe(0);
     expect(sync.toChatMessage(message({ id: "me_y", sender: "me", edit: { seq: 1, at: 5, history: [], pending: true } }), "peer-1", "me-1", true).edit).toEqual({ seq: 1, at: 5, history: [], pending: true });
+  });
+
+  it("a received row the engine gave a place to takes that place here too, with the time its sender said", async () => {
+    // Stored under the contact's clock, which was ahead (before places were kept); the engine settled it since.
+    const shown = [{ id: "peer_x", sender: "peer" as const, text: "answer", timestamp: 500 }, { id: "me_y", sender: "me" as const, text: "reply", timestamp: 300 }];
+    const stored = await mirror([message({ id: "peer_x", text: "answer", timestamp: 200, sentAt: 500 })], { messages: [shown[1], shown[0]] });
+    expect(stored.messages.map((m) => [m.id, m.timestamp, m.sentAt])).toEqual([["peer_x", 200, 500], ["me_y", 300, undefined]]);
+    expect(changes).toBe(1);
   });
 
   it("does not rewrite the chat when nothing changed", async () => {

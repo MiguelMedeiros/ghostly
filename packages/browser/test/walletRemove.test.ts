@@ -42,7 +42,8 @@ function fakeMints(node: InstanceType<typeof GhostlyNode>, answer: (quote: strin
   const minted: string[] = [];
   vi.spyOn(node["wallet"] as unknown as { wallet: (mint: string) => Promise<unknown> }, "wallet").mockImplementation(async () => ({
     checkMintQuoteBolt11: async (quote: string) => ({ state: answer(quote) }),
-    mintProofsBolt11: async (amount: number, quote: string) => { minted.push(quote); return [{ id: "00ad268c4d1f5826", amount: { toNumber: () => amount }, secret: `minted-${quote}`, C: `02${"cd".repeat(32)}` }]; },
+    prepareMint: async (method: string, amount: number, quote: { quote: string }) => ({ method, amount, quote, outputData: [] }),
+    completeMint: async ({ amount, quote: { quote } }: { amount: number; quote: { quote: string } }) => { minted.push(quote); return [{ id: "00ad268c4d1f5826", amount: { toNumber: () => amount }, secret: `minted-${quote}`, C: `02${"cd".repeat(32)}` }]; },
   }));
   return minted;
 }

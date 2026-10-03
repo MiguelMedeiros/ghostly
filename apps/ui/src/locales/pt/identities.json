@@ -353,15 +353,15 @@
     "title": "Dos seus contatos"
   },
   "share": {
+    "captionMine": "Você compartilhou esta identidade",
+    "captionTheirs": "{{contact}} compartilhou esta identidade",
     "checking": "Verificando",
     "notChecked": "Não verificada",
     "notVerified": "Não verificada",
     "notVerifiedWhy": "Não verificada: {{error}}",
     "revokedMine": "Seu {{what}} foi revogado",
     "revokedTheirs": "O {{what}} de {{contact}} foi revogado",
-    "sharedMine": "Você compartilhou {{what}}",
     "sharedMineState": "Você compartilhou {{what}} · {{state}}",
-    "sharedTheirs": "{{contact}} compartilhou {{what}}",
     "sharedTheirsState": "{{contact}} compartilhou {{what}} · {{state}}",
     "stoppedMine": "Você parou de compartilhar {{what}}",
     "stoppedTheirs": "{{contact}} parou de compartilhar {{what}}",

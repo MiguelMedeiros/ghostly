@@ -1,0 +1,12 @@
+{
+  "copied": "Copié",
+  "copy": "Copier les détails",
+  "missingCrypto": "Web Crypto est désactivé. Il ne fonctionne que sur une adresse sécurisée (https).",
+  "missingIndexedDB": "IndexedDB est désactivé ou bloqué : les discussions et les clés ne peuvent pas être enregistrées.",
+  "missingLocks": "Web Locks est absent : Ghostly ne peut pas s'assurer de ne tourner qu'une fois.",
+  "missingStorage": "Les données du site sont bloquées : rien ne peut être enregistré.",
+  "reload": "Recharger",
+  "title": "Ghostly ne peut pas fonctionner dans ce navigateur",
+  "tryOther": "Quittez la navigation privée et autorisez les données du site, mettez le navigateur à jour, ou ouvrez Ghostly dans un autre.",
+  "trySecure": "Ouvrez Ghostly à son adresse https://."
+}

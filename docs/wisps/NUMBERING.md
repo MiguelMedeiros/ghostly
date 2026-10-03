@@ -1,6 +1,6 @@
 # WISP numbering and compatibility
 
-All 55 specifications have the document status Draft; each says in its header what is implemented, and the [index](README.md) lists them all. Family numbering was approved on 2026-09-22. This migration is editorial: wire capability names, versions, storage keys and implemented protocol behavior are unchanged.
+All 57 specifications have the document status Draft; each says in its header what is implemented, and the [index](README.md) lists them all. Family numbering was approved on 2026-09-22. This migration is editorial: wire capability names, versions, storage keys and implemented protocol behavior are unchanged.
 
 ## Independent families
 
@@ -18,6 +18,7 @@ All 55 specifications have the document status Draft; each says in its header wh
 | 900-999 | Group session negotiation (900); group mesh, group community and optional GossipSub distribution (9xx, numbers to be defined) |
 | 1000-1099 | Storage contract (1000), local file storage (1001), S3-compatible storage (1002) |
 | 1100-1199 | Headless runtime and its local control API (11xx, number to be defined); local only, nothing on the wire |
+| 1200-1299 | Apps and plugins: packages, catalogs, indexers and installing apps found in them or sent in a chat (12xx, number to be defined) |
 
 A document describing an adapter does not establish that an adapter is implemented. A vendor/plugin does not automatically require a WISP. These families are not a mandatory stack; DHT text has its own bounded delivery path and external identity remains optional.
 
@@ -33,6 +34,7 @@ Generated from [numbering.json](numbering.json); edit that source instead of thi
 | 04 | [03](03-capabilities.md) |
 | none | [04](04-profiles.md) |
 | none | [05](05-backups.md) |
+| none | [06](06-devices.md) |
 | 05 | [100](100-transports.md) |
 | 06 | [101](101-webrtc.md) |
 | 07 | [102](102-iroh.md) |
@@ -82,6 +84,7 @@ Generated from [numbering.json](numbering.json); edit that source instead of thi
 | none | [1001](1001-local-storage.md) |
 | none | [1002](1002-s3-storage.md) |
 | none | [11xx · headless · number to be defined](11xx-headless.md) |
+| none | [12xx · marketplace · number to be defined](12xx-marketplace.md) |
 
 ## Link compatibility
 

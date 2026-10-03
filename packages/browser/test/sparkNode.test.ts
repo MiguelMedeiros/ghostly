@@ -5,7 +5,7 @@ import { wordlist } from "@scure/bip39/wordlists/english.js";
 import { GhostlyNode } from "../src/engine/node";
 import { STORES, transact } from "../src/shared/idb";
 import { cashuMint } from "../src/engine/paymentAdapters/providers/cashuMint";
-import { breezDescriptor, breezStorage } from "../src/engine/paymentAdapters/providers/breez";
+import { breezDescriptor, breezDatabaseName } from "../src/engine/paymentAdapters/providers/breez";
 import { FakeBreezNetwork } from "./helpers/fakeBreez";
 // covers: wallet.spark.lightning
 
@@ -28,5 +28,5 @@ it("'Use for Lightning too' makes a network's Spark wallet's own seed that netwo
   expect(mainnetBackup, "the Mainnet Spark wallet is not asked").not.toHaveBeenCalled();
   await vi.waitFor(() => expect(node!.getState().wallet.networks?.testnet.lightning).toMatchObject({ providerId: "breez", status: "ready" }));
   expect(node.getState().wallet.networks?.mainnet.lightning?.providerId, "the Mainnet Lightning source is untouched").not.toBe("breez");
-  expect(net.connects.map((c) => c.storage), "the Spark wallet's storage: the same wallet").toEqual([breezStorage("regtest", mnemonic)]);
+  expect(net.connects.map((c) => c.storage), "the Spark wallet's storage: the same wallet").toEqual([breezDatabaseName("regtest", mnemonic)]);
 });

@@ -353,15 +353,15 @@
     "title": "From your contacts"
   },
   "share": {
+    "captionMine": "You shared this identity",
+    "captionTheirs": "{{contact}} shared this identity",
     "checking": "Checking",
     "notChecked": "Not checked",
     "notVerified": "Not verified",
     "notVerifiedWhy": "Not verified: {{error}}",
     "revokedMine": "Your {{what}} was revoked",
     "revokedTheirs": "{{contact}}’s {{what}} was revoked",
-    "sharedMine": "You shared {{what}}",
     "sharedMineState": "You shared {{what}} · {{state}}",
-    "sharedTheirs": "{{contact}} shared {{what}}",
     "sharedTheirsState": "{{contact}} shared {{what}} · {{state}}",
     "stoppedMine": "You stopped sharing {{what}}",
     "stoppedTheirs": "{{contact}} stopped sharing {{what}}",

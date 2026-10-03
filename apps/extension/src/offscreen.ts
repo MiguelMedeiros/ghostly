@@ -86,7 +86,9 @@ chrome.runtime.onMessage.addListener((message: RuntimeMessage, sender, sendRespo
   if (message?.target !== "engine" || !fromOwnPage(sender)) return false;
   if (message.type === "ping") {
     // Which profile runs, and which one the registry names now: they differ once a page switched.
-    void server.then((s) => s.ready).then(() => sendResponse({ profile, active: activeNamespace() } satisfies EngineStatus));
+    // Answered too when the peer did not start (its database did not open): the pages connect and are told why
+    // (`start-failed`). Before, no answer came and the page got "The Ghostly peer did not start" after five seconds.
+    void server.then((s) => s.ready.catch(() => {})).then(() => sendResponse({ profile, active: activeNamespace() } satisfies EngineStatus));
     return true;
   }
   if (message.type === "stop") {

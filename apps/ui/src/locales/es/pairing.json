@@ -2,7 +2,7 @@
   "attempt": "intento {{n}}",
   "contact": "Tu contacto",
   "done": "hecho",
-  "elapsed": "{{time}} en este paso",
+  "elapsed": "{{time}} desde que empezó el emparejamiento",
   "indicator": "Emparejamiento · {{stage}}",
   "newInvite": "Pide a tu contacto una invitación nueva.",
   "onDht": {

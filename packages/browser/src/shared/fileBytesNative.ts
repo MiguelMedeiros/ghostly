@@ -12,11 +12,14 @@ export const NATIVE_BLOB_MAX = 64 * 1024 * 1024;
  */
 export class NativeFileBytes implements FileBytes {
   readonly kind = "native" as const;
-  constructor(private readonly invoke: NativeInvoke) {}
+  /** `fixedSpace`: another profile's folder (`forSpace`); the active profile's when left out. */
+  constructor(private readonly invoke: NativeInvoke, private readonly fixedSpace?: string) {}
 
+  private space(): string { return this.fixedSpace ?? fileSpace(); }
   private args(id: string, extra: Record<string, unknown> = {}) {
-    return { space: fileSpace(), id: checkFileId(id), ...extra };
+    return { space: this.space(), id: checkFileId(id), ...extra };
   }
+  forSpace(space: string): NativeFileBytes { return new NativeFileBytes(this.invoke, space); }
 
   async stage(id: string, source: Blob, onProgress?: (copied: number) => void): Promise<string> {
     await this.remove(id);
@@ -36,7 +39,7 @@ export class NativeFileBytes implements FileBytes {
   }
 
   async append(id: string, offset: number, bytes: Uint8Array): Promise<void> {
-    await this.invoke("file_bytes_append", bytes, { headers: { "x-space": fileSpace(), "x-id": checkFileId(id), "x-offset": String(offset) } });
+    await this.invoke("file_bytes_append", bytes, { headers: { "x-space": this.space(), "x-id": checkFileId(id), "x-offset": String(offset) } });
   }
   async flush(id: string): Promise<void> { await this.invoke("file_bytes_flush", this.args(id)); }
   async close(id: string): Promise<void> { await this.invoke("file_bytes_close", this.args(id)); }
@@ -50,10 +53,10 @@ export class NativeFileBytes implements FileBytes {
   async remove(id: string): Promise<void> { await this.invoke("file_bytes_remove", this.args(id)); }
   async removeWhere(prefix: string): Promise<void> {
     if (prefix && !/^[A-Za-z0-9_-]{1,200}$/.test(prefix)) throw new Error("Invalid file id");
-    await this.invoke("file_bytes_remove_where", { space: fileSpace(), prefix });
+    await this.invoke("file_bytes_remove_where", { space: this.space(), prefix });
   }
   async room(): Promise<number | null> {
-    try { return (await this.invoke("file_bytes_room", { space: fileSpace() })) as number; } catch { return null; }
+    try { return (await this.invoke("file_bytes_room", { space: this.space() })) as number; } catch { return null; }
   }
 
   /** Small files are read into memory to show them; a large one is only ever saved (`save`). */

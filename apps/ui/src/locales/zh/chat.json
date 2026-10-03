@@ -2,7 +2,8 @@
   "announce": {
     "message": "{{name}}：{{text}}",
     "messages": "{{count}} 条新消息",
-    "messagesFrom": "来自 {{name}} 的 {{count}} 条新消息"
+    "messagesFrom": "来自 {{name}} 的 {{count}} 条新消息",
+    "pinMoved": "已移到 {{count}} 个置顶聊天中的第 {{place}} 位"
   },
   "audio": {
     "cantPlay": "此设备无法播放此音频（{{format}}）。请下载后收听。",
@@ -130,6 +131,7 @@
     "leftMinutes": "剩余 {{minutes}} 分钟",
     "leftUnderMinute": "剩余不到一分钟",
     "noRoomDevice": "空间不足：此设备剩余 {{size}}",
+    "notInBackup": "不在此备份中",
     "notSentHint": "未发送。请重新发送。",
     "of": "{{size}} 中的 {{done}}",
     "pause": "暂停",
@@ -218,6 +220,10 @@
   "menu": {
     "continueNew": "在新聊天中继续",
     "hold": "暂存消息…",
+    "moveDown": "下移",
+    "moveFirst": "已在最前",
+    "moveLast": "已在最后",
+    "moveUp": "上移",
     "pin": "置顶聊天",
     "refresh": "刷新",
     "techInfo": "技术信息",

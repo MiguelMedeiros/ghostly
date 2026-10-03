@@ -3,10 +3,11 @@ import { GhostLink, type GhostLinkOptions } from "../src/ghostlink";
 import { createLink } from "../src/invite";
 import { createIdentity, identityFromSeedB64 } from "../src/identity";
 import { GroupSession } from "../src/groupSession";
-import { MESSAGE_CLOCK_SKEW_MS } from "../src/messageTime";
+import { CALL_SIGNAL_FUTURE_MS } from "../src/callSignal";
+import { RTC_SIGNAL_FUTURE_MS } from "../src/signal";
 import { PIN_CAPABILITY, SessionCapabilities } from "../src/pairedCapabilities";
 import {
-  GROUP_PIN_FRAME, PIN_FRAME, PIN_LIMITS, PINNED_FRAME, mayPin, nextPinNumber, parsePinFrame, parsePinnedFrame, pinFrame, pinIsNewer, pinnedFrame, readPin,
+  GROUP_PIN_FRAME, PIN_CLOCK_SKEW_MS, PIN_FRAME, PIN_LIMITS, PINNED_FRAME, mayPin, nextPinNumber, parsePinFrame, parsePinnedFrame, pinFrame, pinIsNewer, pinnedFrame, readPin,
   type WirePin,
 } from "../src/pins";
 import type { BoundChannel, NativeBinding, NativeEndpoint } from "../src/pairedTransports";
@@ -61,9 +62,20 @@ describe("a pin numbered far ahead of the clock", () => {
     // Taken, it would make every next number 2^53: not a safe integer, refused by every receiver, the pin frozen.
     expect(readPin({ id: ID, n: Number.MAX_SAFE_INTEGER }, now)).toBeNull();
     expect(parsePinFrame({ t: PIN_FRAME, id: ID, n: Number.MAX_SAFE_INTEGER })).toBeNull();
-    expect(readPin({ id: ID, n: now + MESSAGE_CLOCK_SKEW_MS + 1 }, now)).toBeNull();
+    expect(readPin({ id: ID, n: now + PIN_CLOCK_SKEW_MS + 1 }, now)).toBeNull();
     // Clocks drift: a number a few minutes ahead is taken.
-    expect(readPin({ id: ID, n: now + MESSAGE_CLOCK_SKEW_MS }, now)).toEqual({ id: ID, n: now + MESSAGE_CLOCK_SKEW_MS });
+    expect(readPin({ id: ID, n: now + PIN_CLOCK_SKEW_MS }, now)).toEqual({ id: ID, n: now + PIN_CLOCK_SKEW_MS });
+  });
+
+  it("a contact whose clock is far enough ahead to pair and to call can pin too", () => {
+    // Seven minutes ahead: its session and its calls are taken, and its pins were dropped and said again for good.
+    const ahead = now + 7 * 60_000;
+    expect(readPin({ id: ID, n: ahead }, now)).toEqual({ id: ID, n: ahead });
+    expect(pinIsNewer({ id: ID, n: now }, { id: "", n: ahead }, now)).toBe(true);
+    // The pin it replaced holds: the next number here goes past it, so this side can pin or unpin after it.
+    expect(nextPinNumber(ahead, now)).toBe(ahead + 1);
+    expect(PIN_CLOCK_SKEW_MS).toBe(RTC_SIGNAL_FUTURE_MS);
+    expect(PIN_CLOCK_SKEW_MS).toBe(CALL_SIGNAL_FUTURE_MS);
   });
 
   it("kept before receivers checked it, counts as none: any pin replaces it, and the next number is the clock", () => {

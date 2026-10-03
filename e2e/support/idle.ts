@@ -66,10 +66,17 @@ export function installIdleProbe(): void {
   };
 }
 
-/** The animations running now, as "<name> on <element>": all of them, or only those that never end by themselves. */
+/**
+ * The animations running now on elements that are drawn, as "<name> on <element>": all of them, or only those that
+ * never end by themselves. An element inside content the browser skips (the connection panel is a closed <details>,
+ * and holds a pairing glyph of its own) draws nothing, and its style is not kept up to date while it is skipped: on a
+ * slow machine it keeps the animation of the stage it was first styled in, "running", whatever the page says since
+ * (the pause while the window is away, the stage that changed). It costs no frame, so it is not counted.
+ */
 export function runningAnimations(page: Page, only: "all" | "endless" = "all"): Promise<string[]> {
   return page.evaluate((only) => document.getAnimations()
     .filter(a => a.playState === "running" && (only === "all" || a.effect?.getComputedTiming().endTime === Infinity))
+    .filter(a => ((a.effect as KeyframeEffect | null)?.target as Element | null)?.checkVisibility?.() !== false)
     .map((animation) => {
       const target = (animation.effect as KeyframeEffect | null)?.target as HTMLElement | SVGElement | null;
       const where = target ? `${target.tagName.toLowerCase()}${target.dataset?.testid ? `[${target.dataset.testid}]` : ""}.${String(target.getAttribute("class") ?? "").split(" ").filter(Boolean).slice(0, 3).join(".")}` : "?";

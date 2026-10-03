@@ -131,6 +131,24 @@
   "shareProfile": "与联系人分享我的名字和头像",
   "shareProfileHint": "你的联系人会看到此个人资料的名字和头像。关闭后，他们只会看到“联系人”和一个图案。",
   "sourceCode": "源代码",
+  "storageDevice": "此设备上的存储",
+  "storageHint": {
+    "protected": "在你移除之前，此浏览器会保留 Ghostly 的数据。",
+    "unprotected": "设备空间不足时，此浏览器可能会清除 Ghostly 的数据。",
+    "unsupported": "此浏览器未说明是否保留 Ghostly 的数据。"
+  },
+  "storageInfo": {
+    "protected": "在浏览器中清除网站数据或移除应用仍会删除全部内容。请保留个人资料的备份。",
+    "safari": "Safari 还会在 7 天未访问后删除网站的数据，除非它已添加到主屏幕。",
+    "unprotected": "安装 Ghostly（添加到主屏幕），允许通知，并保留个人资料的备份。浏览器会保护已安装且经常使用的应用。"
+  },
+  "storageOf": "{{used}} / {{quota}}",
+  "storageProtect": "保护",
+  "storageState": {
+    "protected": "已保护",
+    "unprotected": "未保护",
+    "unsupported": "未知"
+  },
   "storageUsed": "已用存储空间",
   "systemNotifications": "系统通知",
   "theme": "主题",

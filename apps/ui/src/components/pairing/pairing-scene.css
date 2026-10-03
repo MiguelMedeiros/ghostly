@@ -25,8 +25,14 @@
   color: var(--ps-text);
   text-align: center;
 }
-.ps[data-leaving] { animation: ps-leave 320ms ease-in both; }
-@keyframes ps-leave { to { opacity: 0; transform: scale(0.96); } }
+/* Leaving (PairingScene.tsx LEAVE_MS): it fades, then folds from its own height (--ps-height) to nothing, so what is
+   under it moves up smoothly instead of jumping when the scene goes. */
+.ps[data-leaving] { overflow: hidden; animation: ps-leave 360ms ease-in both; }
+@keyframes ps-leave {
+  0% { height: var(--ps-height, auto); }
+  45% { opacity: 0; transform: scale(0.96); height: var(--ps-height, auto); }
+  100% { opacity: 0; transform: scale(0.96); height: 0; margin-block: 0; padding-block: 0; border-width: 0; }
+}
 
 .ps-svg { display: block; width: 100%; height: auto; overflow: visible; }
 /* Me on the reading start side: in a right-to-left language the whole picture mirrors (it has no text). */

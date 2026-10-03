@@ -8,7 +8,7 @@ import type { ChatFile, ChatMessage } from "../../lib/types";
 import { fakeEngine, linkView } from "../fakeEngine";
 import { renderApp } from "../render";
 
-// covers: files.audio.play, files.voice.media-session
+// covers: files.audio.play, files.voice.media-session, backup.light
 
 const MB = 1024 ** 2;
 let n = 0;
@@ -233,6 +233,24 @@ describe("an audio file in the chat", () => {
     fireEvent.click(screen.getByTestId("audio-play"));
     await flush();
     expect(screen.getByTestId("audio-problem")).toHaveTextContent("Too large to play here. Download it to listen.");
+  });
+
+  it("its bytes left out of a light backup, or gone: it says so, not that it is too large", async () => {
+    getFile.mockResolvedValue(null);
+    vi.spyOn(servicesPlatform!, "streamFile").mockResolvedValue(null);
+    vi.spyOn(servicesPlatform!, "saveFile").mockResolvedValue(true);
+    const fileHeld = vi.fn(async (): Promise<"here" | "gone" | "left-out"> => "left-out");
+    Object.assign(servicesPlatform!, { fileHeld });
+    try {
+      const { unmount } = show(song());
+      fireEvent.click(screen.getByTestId("audio-play"));
+      await waitFor(() => expect(screen.getByTestId("audio-problem")).toHaveTextContent("Not in this backup"));
+      unmount();
+      fileHeld.mockResolvedValue("gone");
+      show(song());
+      fireEvent.click(screen.getByTestId("audio-play"));
+      await waitFor(() => expect(screen.getByTestId("audio-problem")).toHaveTextContent("No longer available"));
+    } finally { delete (servicesPlatform as { fileHeld?: unknown }).fileHeld; }
   });
 });
 

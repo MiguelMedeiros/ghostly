@@ -17,12 +17,16 @@
     "noFiles": "Arquivos ainda não fazem parte dos grupos",
     "nobodyElse": "Ainda não há mais ninguém no grupo",
     "reachable": "{{members}} · {{reachable}} de {{total}} acessíveis",
+    "removedCommunity": "Você foi removido. Abra o link do grupo para entrar de novo.",
     "sendFailed": "Não foi possível enviar",
     "shareHint": "Compartilhar o link do grupo",
     "shareLink": "Compartilhar link",
     "unnamed": "Um grupo"
   },
   "connection": {
+    "community": "Conectado ao grupo",
+    "communityConnecting": "Conectando ao grupo…",
+    "communityNote": "Seu app se liga a um hub do grupo (o app de um membro que repassa), e os hubs repassam cada mensagem a todos. Quem esteve fora recebe o que perdeu quando voltar.",
     "connecting": "Conectando aos membros…",
     "label": "Conexão do grupo",
     "labelWith": "Conexão do grupo: {{state}}",
@@ -68,7 +72,8 @@
     "renamed": "{{name}} renomeou o grupo para “{{group}}”",
     "renamedYou": "Você renomeou o grupo para “{{group}}”",
     "rotated": "Chaves renovadas: uma nova época",
-    "youJoined": "Você entrou."
+    "youJoined": "Você entrou.",
+    "youJoinedAgain": "Você entrou de novo."
   },
   "hubs": {
     "auto": "Hub se sempre ligado",
@@ -91,7 +96,10 @@
     "knockedCommunity": "Aguardando alguém do grupo deixar você entrar. Acontece sozinho assim que o app de qualquer membro estiver aberto: você pode sair desta página e voltar.",
     "knocking": "Deixando uma batida onde o app do admin procura…",
     "knockingCommunity": "Deixando uma batida onde os apps do grupo procuram…",
+    "queueCount": "Mais {{count}} pessoas estão esperando para entrar.",
+    "queueOne": "Mais 1 pessoa está esperando para entrar.",
     "stale": "Ainda sem resposta. Se o link do grupo foi trocado, este não funciona mais: peça o novo link.",
+    "staleBusy": "Ainda esperando. O grupo deixa entrar poucas pessoas por vez, enquanto o app de um membro está aberto.",
     "step": {
       "admitted": "Admitido: recebendo as chaves do grupo",
       "answered": "O app do admin respondeu",

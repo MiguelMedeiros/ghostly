@@ -168,6 +168,7 @@ export const FILE_METHODS: Record<string, Method> = {
     if (bool(params, "wait")) await FILE_METHODS["file.wait"](ctx, { file: fileId, timeout: params.timeout });
     const stored = await fileStore.get(fileId);
     if (!stored?.metadata) throw new CliError("not_found", `No file ${fileId}`);
+    if (stored.leftOut) throw new CliError("not_found", "Not in this backup: the light backup this profile was restored from left the file out");
     const transfer = state(ctx).transfers[fileId] ?? stored.transfer;
     if (transfer && transfer.state !== "done") throw new CliError("unavailable", `The file is not all here yet (${transfer.transferred} of ${transfer.size} bytes)`);
     const target = str(params, "path") ? resolve(str(params, "path", true)) : join(resolve(str(params, "dir") ?? "."), sanitizeFileName(stored.metadata.name));
@@ -181,7 +182,8 @@ export const FILE_METHODS: Record<string, Method> = {
     try {
       const backend = stored.bytes ? await fileBytesOf(stored.bytes) : null;
       if (backend) {
-        const size = (await backend.size(fileId)) ?? 0;
+        const size = await backend.size(fileId);
+        if (size === null) throw new CliError("not_found", "The file's bytes are not on this device");
         for (let offset = 0; offset < size; offset += FILE_BYTES_STEP) {
           const chunk = await backend.read(fileId, offset, FILE_BYTES_STEP);
           await out.write(chunk);

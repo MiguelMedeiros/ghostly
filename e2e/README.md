@@ -66,7 +66,7 @@ endpoint from there, never a literal port. Their names are stable: other suites 
 | 47061-47064 | LND REST and Alby Hubs under NWC | `GHOSTLY_NWC_{ALICE,BOB}_{LND,HUB}_URL` |
 | 47070 | Anvil (chain 31337) | `GHOSTLY_USDT_RPC_URL`, `GHOSTLY_USDT_TOKEN` |
 | 47080 | S3 (RustFS; MinIO no longer publishes pullable images) | `GHOSTLY_S3_ENDPOINT`, `_KEY`, `_SECRET` |
-| 47085 | Iroh relay (`n0computer/iroh-relay:v1.2.0 --dev`, plain HTTP): the browsers' Iroh (WISP 102) goes through it; specs opt in with `peer(name, { irohRelay })`, every other peer runs without Iroh | `GHOSTLY_IROH_RELAY_URL` |
+| 47085 | Iroh relay (`n0computer/iroh-relay:v1.3.0 --dev`, plain HTTP): the browsers' Iroh (WISP 102) goes through it; specs opt in with `peer(name, { irohRelay })`, every other peer runs without Iroh | `GHOSTLY_IROH_RELAY_URL` |
 | 47086 / 47087 | AT Protocol PDS (`@atproto/pds`, as `https://pds.ghostly.test`) / PLC directory in memory (as `https://plc.ghostly.test`), `e2e/infra/atproto`; `support/atproto.ts` routes both names and the handles' DNS, and makes an account per test. The Bluesky spec opens the app at 127.0.0.1 (AT Protocol's development client returns only there) | `E2E_ATPROTO_PDS_URL` / `E2E_ATPROTO_PLC_URL` |
 | 47090 | Cashu test mint (`cashubtc/mintd`, fake Lightning) | `E2E_MINT_URL` |
 | 47095 / 47096 | Fedimint guardian API (websocket, as the invite code names it) / its gateway's API | `GHOSTLY_FEDIMINT_API_URL` / `_GATEWAY_URL` |
@@ -399,6 +399,24 @@ E2E_WEB_PORT=50310 E2E_COMPAT_PORT=50311 npm run test:e2e:compat  # other ports 
 - **In CI** `e2e-compat.yml` (about 4 minutes, the v0.4.0 build cached by tag) runs nightly on `dev`, as a job of
   the E2E workflow (so before every release), and by hand. Not on pull requests, like the rest of the app's e2e:
   v0.4.0 never changes, only `dev` can break it, and a night is soon enough to hear about it.
+
+## WebKit
+
+The main suite runs in Chromium. The macOS desktop app, Safari and the iPhone's installed app run WebKit, which keeps
+stored Blobs and files differently, so the specs that depend on that also run there: profile backups to a file
+(`web/profile-backup-file.spec.ts`: a profile with files backed up, restored byte for byte, cancelled, refused).
+
+```bash
+npx playwright install webkit      # once
+npm run test:e2e:webkit
+E2E_WEB_PORT=50310 npm run test:e2e:webkit
+```
+
+`playwright.webkit.config.ts` is a config of its own: the rest of the suite is written for Chromium (fake media
+devices, clipboard permissions) and CI installs Chromium only. Not in CI; run it when you touch backups or file storage.
+It runs one test at a time: Playwright's WebKit keeps the origin-private file system of every profile it opens in one
+place per origin (`~/Library/WebKit/org.webkit.Playwright` on a Mac), so each test empties it as it starts, and two at
+once would delete each other's files.
 
 ## When they run
 

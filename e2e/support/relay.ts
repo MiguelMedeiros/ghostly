@@ -60,7 +60,8 @@ export class LocalRelay {
   private async fulfill(route: Route): Promise<void> {
     const request = route.request();
     const answer = this.answer(request.method(), new URL(request.url()).pathname.slice(1), request.postDataBuffer());
-    await route.fulfill({ status: answer.status, headers: LocalRelay.cors, body: answer.body });
+    // An HTTP server's `Date`, which a fulfilled route would not have: the app holds its own clock against it.
+    await route.fulfill({ status: answer.status, headers: { ...LocalRelay.cors, date: new Date().toUTCString() }, body: answer.body });
   }
 
   private answer(method: string, key: string, body: Buffer | null): { status: number; body?: Buffer } {

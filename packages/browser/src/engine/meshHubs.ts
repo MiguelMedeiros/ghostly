@@ -1,6 +1,6 @@
 import {
   COMMUNITY_TOPOLOGY, MESH_HUBS, beaconKeys, beaconRecords, lobbyKeys, lobbyRecords, mayBeHub, meshHubs, mergeBeacon, mergeLobby, pickMeshHubs, readBeacon, readLobby, rosterHas,
-  type GhostRecord, type GroupEdgeFrame, type GroupReactedFrame, type GroupSession, type Hub,
+  type GhostRecord, type GroupCommit, type GroupEdgeFrame, type GroupReactedFrame, type GroupSession, type Hub,
 } from "@ghostly/core";
 import type { StoredGroup } from "../shared/types";
 import type { GroupsHost } from "./groups";
@@ -424,7 +424,7 @@ export class MeshHubs {
     const legacy = this.legacyOf(groupId);
     const frame: GroupReachFrame = { t: "group-reach", g: groupId, k: up, ...(legacy.length ? { l: legacy } : {}) };
     for (const [key, id] of edges) {
-      if ((only && key !== only) || !this.host.linkReady(id)) continue;
+      if ((only && key !== only) || !rosterHas(session.roster, key) || !this.host.linkReady(id)) continue;
       try { this.host.sendOnLink(id, frame); } catch { /* closing */ }
     }
   }
@@ -509,13 +509,23 @@ export class MeshHubs {
       if (key === from || !this.host.linkReady(id)) continue;
       // Someone just taken out hears the commit that says so, and nothing else.
       const member = rosterHas(session.roster, key);
+      const until = member ? Infinity : removalEpoch(session.state.chain, key);
       for (const frame of frames) {
-        if (authorOf(frame) === key || (!member && frame.t !== "group-commit")) continue;
+        if (authorOf(frame) === key || (!member && (frame.t !== "group-commit" || frame.commit.e > until))) continue;
         try { this.host.sendOnLink(id, frame); sent++; } catch { break; }
       }
     }
     return sent;
   }
+}
+
+/**
+ * The epoch of the commit that took `key` out of the group for the last time: the one after the last roster it was
+ * in. -1 for a key the chain never had. Someone out of the roster is sent no commit past it.
+ */
+export function removalEpoch(chain: readonly GroupCommit[], key: string): number {
+  for (let e = chain.length - 1; e >= 0; e--) if (rosterHas(chain[e].m, key)) return e + 1;
+  return -1;
 }
 
 function authorOf(frame: GroupEdgeFrame): string | undefined {

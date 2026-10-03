@@ -226,10 +226,12 @@ A challenge is single-use, answered within 300 s, at most 8 outstanding per conv
 storing the outcome are one transaction.
 
 The chat's timeline shows each share on both sides (`@ghostly/core` `identityTimeline.ts`, WISP 300 "In the
-conversation"), from these same frames: nothing is added to the wire. UI: `IdentityShareLine.tsx`, test ids
-`identity-share` (`data-side` mine/theirs, `data-kind` shared/stopped, `data-state`), `identity-share-text`,
-`identity-share-name`, `identity-share-subject`, `identity-share-photo`, `identity-share-state`; the chat list's
-`chat-row-note`.
+conversation"), from these same frames: nothing is added to the wire. UI: `IdentityShareLine.tsx`, which draws a
+share as the identity's ID card (`IdCardFace.tsx`, content from `idCard.ts` `shareIdCard`). Test ids: `identity-share`
+(`data-side` mine/theirs, `data-kind` shared/stopped, `data-state` verifying/waiting/unanswered/verified/failed/
+withdrawn/revoked), `identity-share-card` (the button; the face inside it carries `data-status` and the ID card's own
+ids `identity-proof-subject`, `id-card-name`, `id-card-photo`), `identity-share-text` (the caption, or a stop's line),
+`identity-share-reason`; the chat list's `chat-row-note`.
 
 ## Testing
 

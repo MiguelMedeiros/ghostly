@@ -1,4 +1,4 @@
-import type { Page } from "@playwright/test";
+import type { Page, Route } from "@playwright/test";
 import { TEST_COINS, chat, connect, expect, getTestCoins, link, openChat, openWallet, say, test, useTestnet, type Peer } from "../support/fixtures";
 import { mintEndpoint } from "../support/mint";
 import { composerRow } from "../support/composer";
@@ -158,6 +158,45 @@ test("a payment the contact refuses comes back, and is never shown as paid", { t
   await expect(alice.page.getByTestId("wallet-tx").filter({ hasText: "Sent ecash" })).toHaveCount(1);
 });
 
+// A payment through the mints is the Cashu wallet's to settle, once it has written it down. Cut off before that, it was
+// nobody's: the request said "Lightning payment pending…" for good, with no way to pay it.
+test("a request paid over Lightning when the tab closes before anything left is open again, not pending for good", { tag: ["@feature:payments.lightning.request", "@feature:payments.chat.reconcile"] }, async ({ peer }) => {
+  const [alice, bob] = await chatting(peer, "cut-alice", "cut-bob");
+  await fund(alice);
+  await expect.poll(() => balanceOf(alice.page)).toBe(TEST_COINS);
+  for (const p of [alice, bob]) await openChat(p);
+  // Lightning only: Bob's request carries an invoice, which Alice's mint pays.
+  await chatPayments(bob.page, { cashu: false });
+  await (await composerRow(bob.page, "payment-button")).click();
+  await paymentCard(bob.page, "lightning-testnet").click();
+  await bob.page.getByTestId("payment-amount").fill("300");
+  await bob.page.getByTestId("payment-request").click();
+  const request = () => bubble(alice, /300\s*test sats/);
+  await expect(request().getByTestId("payment-pay")).toBeEnabled();
+
+  // The wallet asks the mint about the quote before it writes the payment down: held there, nothing has left yet.
+  let held = true;
+  await alice.context.route(/^https:\/\/testnut\.cashu\.space\/v1\/melt\/quote\/bolt11\/.+/, (route) => held && route.request().method() === "GET" ? new Promise<void>(() => {}) : route.fallback());
+  await request().getByTestId("payment-pay").click();
+  await request().getByTestId("payment-lightning-approve").click();
+  await expect(request().getByTestId("payment-state")).toHaveText(/Lightning payment pending/);
+  // The tab goes with that question still unanswered; the mint answers the app that opens next.
+  held = false;
+  await alice.page.reload();
+  await expect(alice.page.getByTitle("New Chat")).toBeVisible();
+
+  // The mint says the quote was never paid: the payment failed, and the request is open again with its Pay button.
+  // (Paying it now is not part of this test: the test mint reads its own invoices paid a moment after it makes them.)
+  await expect(request().getByTestId("payment-state")).toHaveText(/Waiting for payment · The Lightning payment did not go through/);
+  await expect(request().getByTestId("payment-pay")).toBeEnabled();
+  await request().getByTestId("payment-pay").click();
+  await expect(request().getByTestId("payment-lightning-approve")).toBeVisible();
+  await expect(bubble(bob, /300\s*test sats/).getByTestId("payment-state")).toHaveText(/Waiting for payment/);
+  // Not a sat left the wallet.
+  await openWallet(alice, "cashu-testnet");
+  await expect.poll(() => balanceOf(alice.page)).toBe(TEST_COINS);
+});
+
 test("a contact who turns Cashu off stops a reviewed payment before anything is spent", { tag: ["@feature:payments.chat.method-off", "@feature:payments.chat.review"] }, async ({ peer }) => {
   const [alice, bob] = await chatting(peer, "off-alice", "off-bob");
   await fund(alice);
@@ -200,6 +239,144 @@ test("ecash the contact never picks up can be taken back", { tag: ["@feature:pay
   await expect(sent.getByTestId("payment-state")).toHaveText(/^Taken back/);
   await openWallet(alice, "cashu-testnet");
   await expect.poll(() => balanceOf(alice.page)).toBeGreaterThanOrEqual(TEST_COINS - 3);
+});
+
+// The mint reads ecash taken back as spent, which the review took for the contact being paid: it read "settled"
+// beside a bubble saying "Taken back", and the request then answered "This request already has a payment".
+test("ecash paid to a request and taken back leaves the request to be paid again", { tag: ["@feature:payments.cashu.reclaim", "@feature:payments.cashu.request", "@feature:payments.chat.review"] }, async ({ peer }) => {
+  const [alice, bob] = await chatting(peer, "repay-alice", "repay-bob");
+  await fund(alice);
+  await expect.poll(() => balanceOf(alice.page)).toBe(TEST_COINS);
+  for (const p of [alice, bob]) await openChat(p);
+  // Bob asks for ecash only.
+  await chatPayments(bob.page, { lightning: false });
+  await (await composerRow(bob.page, "payment-button")).click();
+  await paymentCard(bob.page, "cashu-testnet").click();
+  await bob.page.getByTestId("payment-amount").fill("100");
+  await bob.page.getByTestId("payment-composer").getByPlaceholder("What for? (optional)").fill("the rent");
+  await bob.page.getByTestId("payment-request").click();
+  // Bob's wallet cannot reach the mint to redeem for now: Alice's payment waits.
+  const held: Route[] = [];
+  let away = true;
+  await bob.context.route(/^https:\/\/testnut\.cashu\.space\/v1\/swap/, (route) => { if (away) held.push(route); else void route.fallback(); });
+
+  const request = bubble(alice, "the rent");
+  await request.getByTestId("payment-pay").click();
+  await request.getByTestId("payment-review").getByRole("button", { name: "Approve payment" }).click();
+  const sent = bubble(alice, "You sent");
+  await expect(sent.getByTestId("payment-state")).toHaveText(/Waiting for your contact/);
+  await sent.getByRole("button", { name: "Take it back" }).click();
+  await expect(sent.getByTestId("payment-state")).toHaveText(/^Taken back/);
+
+  // The review says what happened, never "settled", and stays so after the engine asked the mint again.
+  const review = request.getByTestId("payment-review");
+  await expect(review).toContainText("This payment was taken back. The sats are in your wallet.");
+  await alice.page.waitForTimeout(12_000);
+  await expect(review.getByTestId("review-status")).toHaveText("failed");
+  await expect(request.getByTestId("payment-state")).toHaveText(/Waiting for payment/);
+  await review.getByRole("button", { name: "Close" }).click();
+
+  // Bob is back: the same request is reviewed and paid again, once.
+  away = false;
+  for (const route of held.splice(0)) await route.abort("failed").catch(() => {});
+  await request.getByTestId("payment-pay").click();
+  await request.getByTestId("payment-review").getByRole("button", { name: "Approve payment" }).click();
+  for (const p of [alice, bob]) await expect(bubble(p, "the rent").getByTestId("payment-state")).toHaveText(/Paid/);
+  await expect(bubble(alice, "You sent").filter({ hasText: "Received" })).toHaveCount(1);
+  await openWallet(bob, "cashu-testnet");
+  await expect.poll(() => balanceOf(bob.page)).toBe(100);
+});
+
+// A redeem is written down before the mint is asked. Here the tab closes while the mint is answering: the app that
+// opens next asks the mint what it did, and finishes from there.
+test("a payment whose redeem is cut off at the mint is in the wallet when the app opens again", { tag: ["@feature:wallet.cashu.receive-token", "@feature:payments.cashu.send", "@feature:payments.chat.reconcile"] }, async ({ peer }) => {
+  const [alice, bob] = await chatting(peer, "cut-redeem-alice", "cut-redeem-bob");
+  await fund(alice);
+  await expect.poll(() => balanceOf(alice.page)).toBe(TEST_COINS);
+  for (const p of [alice, bob]) await openChat(p);
+  // Bob's swap reaches the mint, which makes it; the answer is held back for good.
+  let held = true;
+  let made = 0;
+  await bob.context.route(/^https:\/\/testnut\.cashu\.space\/v1\/swap/, async (route) => {
+    if (!held) return route.fallback();
+    const answer = await route.fetch({ url: `${mintEndpoint()}/v1/swap` });
+    if (answer.ok()) made++;
+    await new Promise<void>(() => {});
+  });
+
+  const review = await prepareSend(alice, 21);
+  await review.getByRole("button", { name: "Approve payment" }).click();
+  await expect.poll(() => made).toBe(1);
+  await expect(chat(bob).getByTestId("payment-bubble"), "no answer, so nothing to show yet").toHaveCount(0);
+
+  // The tab goes with the swap unanswered; the mint answers the app that opens next.
+  held = false;
+  await bob.page.reload();
+  await expect(bob.page.getByTitle("New Chat")).toBeVisible();
+
+  // The ecash is Bob's, with its payment in the chat, once.
+  const got = bubble(bob, "Sent you");
+  await expect(got.getByTestId("payment-state")).toHaveText(/Received/);
+  await expect(got).toContainText(/21\s*test sats/);
+  await expect(got).toHaveCount(1);
+  await expect(bubble(alice, "You sent").getByTestId("payment-state")).toHaveText(/Received/);
+  await openWallet(bob, "cashu-testnet");
+  await expect.poll(() => balanceOf(bob.page)).toBe(21);
+  await bob.page.getByTestId("wallet-history").click();
+  await expect(bob.page.getByTestId("wallet-tx")).toHaveCount(1);
+  expect(made, "one swap at the mint: the answer was asked for again, not the swap").toBe(1);
+});
+
+// Sats a payment holds while the mint has not answered are not in the balance, and not gone: the wallet says so.
+test("sats held for a payment the mint has not answered show as set aside, and come back", { tag: ["@feature:payments.cashu.send", "@feature:wallet.cashu.mint.manage"] }, async ({ peer }) => {
+  const [alice, bob] = await chatting(peer, "aside-alice", "aside-bob");
+  await fund(alice);
+  await expect.poll(() => balanceOf(alice.page)).toBe(TEST_COINS);
+  for (const p of [alice, bob]) await openChat(p);
+  // Alice's swap never reaches the mint.
+  let held = true;
+  await alice.context.route(/^https:\/\/testnut\.cashu\.space\/v1\/swap/, (route) => (held ? new Promise<void>(() => {}) : route.fallback()));
+  const review = await prepareSend(alice, 21);
+  await review.getByRole("button", { name: "Approve payment" }).click();
+
+  await openWallet(alice, "cashu-testnet");
+  const aside = alice.page.getByTestId("wallet-set-aside");
+  await expect(aside).toContainText(/set aside/);
+  await expect.poll(() => balanceOf(alice.page)).toBeLessThan(TEST_COINS);
+  await alice.page.getByTestId("wallet-set-aside-info").click();
+  await expect(alice.page.getByTestId("wallet-set-aside-text")).toContainText("the mint has not confirmed yet");
+  held = false;
+});
+
+// The wallet's ecash, copied as a backup and redeemed in another wallet: the copy here is spent. A payment that picks it
+// ends at once, saying so, and the balance becomes what the mint still holds.
+test("a payment from ecash spent somewhere else ends with that reason, and the balance is what the mint holds", { tag: ["@feature:payments.cashu.send", "@feature:payments.chat.review", "@feature:wallet.cashu.export"] }, async ({ peer }) => {
+  const [alice, bob] = await chatting(peer, "elsewhere-alice", "elsewhere-bob");
+  await fund(alice);
+  await expect.poll(() => balanceOf(alice.page)).toBe(TEST_COINS);
+
+  // "Copy backup", and the tokens redeemed outside Ghostly, straight at the mint.
+  await alice.page.getByRole("button", { name: "Copy backup" }).click();
+  await expect(alice.page.getByText(/Backup copied/)).toBeVisible();
+  const tokens = (await alice.page.evaluate(() => navigator.clipboard.readText())).split("\n").filter(Boolean);
+  const { Wallet } = await import("@cashu/cashu-ts");
+  const elsewhere = new Wallet(mintEndpoint(), { unit: "sat" });
+  await elsewhere.loadMint();
+  // The tokens name the public test mint, which this mint answers for: its proofs are handed over as they are.
+  for (const token of tokens) await elsewhere.receive(elsewhere.decodeToken(token).proofs);
+
+  for (const p of [alice, bob]) await openChat(p);
+  const review = await prepareSend(alice, 21);
+  await review.getByRole("button", { name: "Approve payment" }).click();
+  await expect(alice.page.getByText(/already spent somewhere else/).first()).toBeVisible();
+  await expect(chat(bob).getByTestId("payment-bubble"), "nothing reached the contact").toHaveCount(0);
+
+  // Nothing is held for it, and the wallet holds what the mint says: nothing.
+  await openWallet(alice, "cashu-testnet");
+  await expect.poll(() => balanceOf(alice.page)).toBe(0);
+  await expect(alice.page.getByTestId("wallet-set-aside")).toHaveCount(0);
+  await alice.page.getByTestId("wallet-history").click();
+  await expect(alice.page.getByText("Fees paid: 0 test sats"), "no fee for ecash spent elsewhere").toBeVisible();
 });
 
 test("a Lightning invoice pasted into the chat is a card with a QR code to hide and a Copy button", { tag: ["@feature:payments.lightning.invoice-card"] }, async ({ peer }) => {

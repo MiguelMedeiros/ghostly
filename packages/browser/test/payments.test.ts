@@ -201,7 +201,7 @@ describe("a contact refusing ecash", () => {
     const { desk, wallet, host, state } = await setup([reviewed]);
     wallet.receiveToken.mockResolvedValue({ amount: 40, mint: MINT });
     await desk.onPaymentResult("l1", { id: "rv1", ok: false, error: "Ecash from mint.example is not accepted" });
-    expect(wallet.receiveToken).toHaveBeenCalledWith("cashuBtoken", "reclaimed", undefined);
+    expect(wallet.receiveToken).toHaveBeenCalledWith("cashuBtoken", "reclaimed", undefined, { payment: expect.any(Function) });
     expect(state("rv1")?.state).toBe("reclaimed");
     expect(host.onReviewedPaymentRefused).toHaveBeenCalledWith("rv1", "Ecash from mint.example is not accepted");
     expect(host.onReviewedPaymentResult, "no reconcile, which would publish the same token again").not.toHaveBeenCalled();

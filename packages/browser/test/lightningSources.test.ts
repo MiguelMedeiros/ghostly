@@ -283,6 +283,93 @@ describe("reconciling what is open", () => {
   });
 });
 
+// A payment through the Cashu mints is the wallet's to settle and report, so the service never asked about one. One
+// whose tab closed before the melt was written down was never the wallet's: it stayed "unknown" for good, and the
+// contact's request it paid stayed "Lightning payment pending" with no way to pay it.
+describe("a payment through the mints that the app was cut off from", () => {
+  const MINT = "https://mint.example";
+  /** Only what the mints' source uses of the Cashu wallet here. */
+  function mints(quoteState: string, inFlight = false) {
+    const wallet = {
+      quoteInvoice: vi.fn(async () => ({ quote: "melt-1", mint: MINT, amount: 40, feeReserve: 2 })),
+      payQuote: vi.fn(async () => new Promise<boolean>(() => {})),
+      meltQuoteState: vi.fn(async () => quoteState),
+      meltInFlight: vi.fn(async () => inFlight),
+      view: async () => ({ balance: 100 }),
+    };
+    return { wallet, provider: new CashuMintLightning(wallet as unknown as CashuWallet, "testnet") };
+  }
+  /** The payment as the journal holds it when the tab goes: sent to the wallet, no answer written. */
+  async function cutOff(quoteState: string, inFlight = false) {
+    const { wallet, provider } = mints(quoteState, inFlight);
+    const setup = await ready(provider, { networks: ["testnet"] });
+    const invoice = fakeInvoice(40, hash());
+    const { quote } = await setup.lightning.quote(invoice);
+    void setup.lightning.pay(quote, { paymentId: "req-1" }).catch(() => {});
+    await vi.waitFor(() => expect(wallet.payQuote).toHaveBeenCalled());
+    const paymentHash = decodeBolt11(invoice)!.paymentHash!;
+    return { ...setup, wallet, invoice, paymentHash };
+  }
+
+  it("is journaled with its melt quote before anything is spent", async () => {
+    const { lightning, paymentHash } = await cutOff("UNPAID");
+    expect(await opOf(lightning, paymentHash)).toMatchObject({ state: "sending", selfSettled: true, ref: JSON.stringify({ mint: MINT, quote: "melt-1" }) });
+  });
+
+  it("failed, and the chat is told, when no melt was written and the mint says the quote is unpaid", async () => {
+    const { lightning, events, wallet, paymentHash } = await cutOff("UNPAID");
+    await lightning.recover();
+    await lightning.reconcile();
+    expect(wallet.meltQuoteState).toHaveBeenCalledWith(MINT, "melt-1");
+    expect(await opOf(lightning, paymentHash)).toMatchObject({ state: "failed", error: "The payment did not go through" });
+    expect(events.resolved).toHaveBeenCalledWith(expect.objectContaining({ paymentId: "req-1", paymentHash }), false);
+    // Nothing holds the invoice any more: it can be paid again.
+    const { quote } = await lightning.quote((await opOf(lightning, paymentHash))!.invoice);
+    expect(lightning.hasQuote(quote)).toBe(true);
+  });
+
+  it("paid when the mint says the quote is paid", async () => {
+    const { lightning, events, paymentHash } = await cutOff("PAID");
+    await lightning.recover();
+    await lightning.reconcile();
+    expect(await opOf(lightning, paymentHash)).toMatchObject({ state: "paid" });
+    expect(events.resolved).toHaveBeenCalledWith(expect.objectContaining({ paymentId: "req-1" }), true);
+  });
+
+  it("left to the wallet when a melt is written down, or while the mint holds it pending", async () => {
+    const written = await cutOff("UNPAID", true);
+    await written.lightning.recover();
+    await written.lightning.reconcile();
+    expect(written.wallet.meltQuoteState, "the wallet settles and reports its own melt").not.toHaveBeenCalled();
+    expect(await opOf(written.lightning, written.paymentHash)).toMatchObject({ state: "unknown" });
+    expect(written.events.resolved).not.toHaveBeenCalled();
+
+    const pending = await cutOff("PENDING");
+    await pending.lightning.recover();
+    await pending.lightning.reconcile();
+    expect(await opOf(pending.lightning, pending.paymentHash)).toMatchObject({ state: "unknown" });
+    expect(pending.events.resolved).not.toHaveBeenCalled();
+  });
+
+  it("stays unknown when it was journaled with no quote to ask the mint with, or the mint cannot be asked", async () => {
+    const { wallet, provider } = mints("UNPAID");
+    const { lightning, events } = await ready(provider, { networks: ["testnet"] });
+    await journal(op({ paymentHash: "60", state: "unknown", selfSettled: true }));
+    await lightning.reconcile();
+    expect(await opOf(lightning, "60")).toMatchObject({ state: "unknown" });
+    expect(await provider.interruptedPayment({ invoice: "x", paymentHash: "60" })).toBe("unknown");
+    expect(wallet.meltQuoteState).not.toHaveBeenCalled();
+
+    const down = await cutOff("UNPAID");
+    down.wallet.meltQuoteState.mockRejectedValue(new Error("mint offline"));
+    await down.lightning.recover();
+    await down.lightning.reconcile();
+    expect(await opOf(down.lightning, down.paymentHash)).toMatchObject({ state: "unknown" });
+    expect(events.resolved).not.toHaveBeenCalled();
+    expect(down.events.resolved).not.toHaveBeenCalled();
+  });
+});
+
 describe("the sources of each network", () => {
   type Node = { info(): Promise<{ network: ProviderNetwork; alias?: string }>; close: Mock<() => Promise<void>>; balance?: number };
   const node = (network: ProviderNetwork, balance = 5): Node => ({ info: async () => ({ network, alias: "n" }), close: vi.fn(async () => {}), balance });

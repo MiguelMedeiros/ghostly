@@ -40,13 +40,14 @@ export class SparkAdapter implements PaymentAdapter<SparkPrepared> {
   private closed = false;
   private own?: string;
 
-  private constructor(readonly network: SparkNetwork, private readonly wallet: BreezWallet, private readonly releaseWallet: () => Promise<void>) {}
+  /** `storage`: the Breez database this wallet opened (`breezDatabase`), which removing the wallet deletes. */
+  private constructor(readonly network: SparkNetwork, private readonly wallet: BreezWallet, private readonly releaseWallet: () => Promise<void>, readonly storage: string) {}
 
   static async connect(params: { network: SparkNetwork; mnemonic: string; apiKey?: string }, sdk: () => Promise<BreezSdkModule> = loadBreezSdk): Promise<SparkAdapter> {
     if (!SPARK_NETWORKS.includes(params.network)) throw new Error("Unsupported Spark network");
     if (params.network === "bitcoin" && !params.apiKey) throw new Error("Spark on Mainnet needs a Breez API key");
-    const { wallet, release } = await openBreez(params, sdk);
-    return new SparkAdapter(params.network, wallet, release);
+    const { wallet, release, storage } = await openBreez(params, sdk);
+    return new SparkAdapter(params.network, wallet, release, storage);
   }
 
   /** The wallet's Spark address: its identity, the same every time. The wallet page shows it. */

@@ -1,12 +1,15 @@
 import { sdpHasCandidates, waitForIceGathering } from "./callSignal";
+import { symmetricNat, type DirectEvidence } from "./directPath";
 import { wrapDataChannel, type FrameChannel } from "./frames";
 import { traceLink } from "./linkTrace";
 import {
   DATA_CHANNEL_ID,
   DATA_CHANNEL_LABEL,
-  RTC_SIGNAL_MAX_AGE_MS,
+  RTC_SIGNAL_FUTURE_MS,
   buildDataSdp,
   extractRtcParams,
+  offerIsFresh,
+  type SignalSight,
   parseRtcSignal,
   type RtcSignal,
 } from "./signal";
@@ -51,7 +54,21 @@ export interface DataLinkOptions {
    * applied here is gone): the answerer is there, so the caller may dial again now rather than at its next look.
    */
   onAnswerReplaced?: () => void;
+  /**
+   * What an attempt said about direct connections from this device (`directPath.ts`): it opened (and, later, closed);
+   * it did not connect and this device had no public candidate for it, or a public port per STUN server; or this
+   * side's offer was answered and no path connected.
+   */
+  onDirect?: (evidence: DirectEvidence) => void;
 }
+
+/**
+ * An attempt ended from outside (another transport went live first) that had both descriptions for this long and no
+ * connection says what one that failed does: a path that exists connects within a second or two.
+ */
+export const STALLED_EVIDENCE_MS = 5_000;
+/** A candidate another network can reach: server reflexive (STUN answered), relayed (TURN), or learnt from the peer. */
+const PUBLIC_CANDIDATE = /^a=candidate:.* typ (srflx|relay|prflx)\b/m;
 
 export const CONNECT_TIMEOUT_MS = 90_000;
 const ICE_GATHERING_TIMEOUT_MS = 5_000;
@@ -81,10 +98,12 @@ export class DataLink {
   private lastSignalTs = 0;
   /** The peer's description as this connection was given it: Chrome shows it as `remoteDescription` only once applied. */
   private remoteSdp: string | null = null;
+  /** When the connection had both descriptions (`connecting`). */
+  private connectingSince = 0;
   private connectTimer: ReturnType<typeof setTimeout> | null = null;
   private disconnectTimer: ReturnType<typeof setTimeout> | null = null;
-  /** The offer this side answered in the current attempt, and how many times it answered it again. */
-  private answered: { offer: RtcSignal; again: number } | null = null;
+  /** The offer this side answered in the current attempt, when it took it (this clock), and how many times it answered it again. */
+  private answered: { offer: RtcSignal; at: number; again: number } | null = null;
 
   constructor(private readonly options: DataLinkOptions) {}
 
@@ -106,11 +125,30 @@ export class DataLink {
     }
   }
 
-  /** Feeds a decrypted `_rtc` value from the peer's packet. */
-  async handleSignal(json: string): Promise<void> {
+  /**
+   * Feeds a decrypted `_rtc` value from the peer's packet. `sight`: how this device saw it come (`SignalSight`): the
+   * peer's record did not carry it at a read the network answered, or it came on a live session just now.
+   *
+   * The peer's `ts` orders its signals (a later one replaces an earlier one, and an answer names the offer it is for).
+   * It is not what says a signal is recent when this device saw it come: two clocks a few minutes apart are common, and
+   * every signal of such a peer was dropped here, without a word. An answer is for the offer it names, which this side
+   * made in this attempt, so it has no age to check. An offer is as old as the time since the read that did not have it
+   * (`offerIsFresh`); only one the first read finds is judged by its own time, as nothing else dates it.
+   *
+   * A signal dated more than `RTC_SIGNAL_FUTURE_MS` ahead of this clock is not taken at all: taken, its time would
+   * be the latest this link knows of the peer, and every signal the peer makes after it would read as older.
+   */
+  async handleSignal(json: string, sight?: SignalSight): Promise<void> {
     const signal = parseRtcSignal(json);
     if (!signal || signal.ts <= this.lastSignalTs) return;
-    if (Math.abs(Date.now() - signal.ts) > RTC_SIGNAL_MAX_AGE_MS) return;
+    if (signal.ts > Date.now() + RTC_SIGNAL_FUTURE_MS) {
+      traceLink(this.options.myPubKeyZ32, "signal-ahead", { aheadMs: signal.ts - Date.now() });
+      return;
+    }
+    if (signal.t === "o" && !offerIsFresh(signal.ts, sight)) {
+      traceLink(this.options.myPubKeyZ32, "offer-stale", { ageMs: Date.now() - signal.ts, ...(sight && { sinceMs: Date.now() - sight.since, ...(sight.after !== null && { beforePacketMs: sight.after - signal.ts }) }) });
+      return;
+    }
 
     if (signal.t === "o") {
       if (this.state === "offering") {
@@ -123,8 +161,8 @@ export class DataLink {
       this.lastSignalTs = signal.ts;
       const wasOpen = this.state === "open";
       this.teardown();
-      if (wasOpen) this.options.onClose();
-      this.answered = { offer: signal, again: 0 };
+      if (wasOpen) { this.options.onDirect?.("closed"); this.options.onClose(); }
+      this.answered = { offer: signal, at: Date.now(), again: 0 };
       await this.answer(signal);
     } else if (this.state === "connecting" && this.myOfferTs && signal.o === this.myOfferTs && this.pc) {
       // A newer answer to the offer this side already took an answer for: the answerer made it again (`REANSWERS`),
@@ -161,8 +199,22 @@ export class DataLink {
   }
 
   close(): void {
+    // Given up for another transport that went live while this one had long had both descriptions: evidence all the same.
+    const evidence = Date.now() - this.connectingSince >= STALLED_EVIDENCE_MS ? this.directEvidence() : null;
     this.answered = null;
     this.reset();
+    if (evidence) this.options.onDirect?.(evidence);
+  }
+
+  /**
+   * What this attempt says about direct connections if it ends now without opening: nothing unless both descriptions
+   * were exchanged (this side's offer answered, or its answer out). Then, what this device gathered: no public
+   * candidate, a public port per STUN server, or (for the side that offered) candidates that read as reachable.
+   */
+  private directEvidence(): DirectEvidence | null {
+    if (this.state !== "connecting" || !this.pc) return null;
+    const local = this.pc.localDescription?.sdp ?? "";
+    return !PUBLIC_CANDIDATE.test(local) ? "no-public" : symmetricNat(local) ? "symmetric" : this.myOfferTs ? "no-path" : null;
   }
 
   /**
@@ -172,7 +224,9 @@ export class DataLink {
    */
   private failed(): void {
     const answered = this.state === "connecting" ? this.answered : null;
-    const left = answered ? CONNECT_TIMEOUT_MS - (Date.now() - answered.offer.ts) : 0;
+    // How long the offerer's attempt still runs, counted on this clock from when its offer was taken (its `ts` is its clock's).
+    const left = answered ? CONNECT_TIMEOUT_MS - (Date.now() - answered.at) : 0;
+    const evidence = this.directEvidence();
     if (answered && answered.again < REANSWERS && left > REANSWER_MARGIN_MS && this.options.offerStanding?.(answered.offer.ts)) {
       answered.again++;
       traceLink(this.options.myPubKeyZ32, "reanswer", { again: answered.again, leftMs: left });
@@ -181,6 +235,7 @@ export class DataLink {
       return;
     }
     this.reset();
+    if (evidence) this.options.onDirect?.(evidence);
   }
 
   private async answer(offer: RtcSignal): Promise<void> {
@@ -229,7 +284,7 @@ export class DataLink {
         return pc;
       }
       traceLink(this.options.myPubKeyZ32, "ice-stalled", { ms, offer, attempt });
-      if (attempt >= GATHER_ATTEMPTS) { this.reset(); return null; }
+      if (attempt >= GATHER_ATTEMPTS) { this.reset(); this.options.onDirect?.("no-public"); return null; }
       stalled = pc;
     }
   }
@@ -247,6 +302,7 @@ export class DataLink {
       this.setState("open");
       this.options.setFastPoll(false);
       this.options.publishSignal(null);
+      this.options.onDirect?.("open");
       this.options.onOpen(wrapDataChannel(dc));
     });
     dc.addEventListener("close", () => {
@@ -313,12 +369,13 @@ export class DataLink {
     this.setState("idle");
     this.options.setFastPoll(false);
     this.options.publishSignal(null);
-    if (wasOpen) this.options.onClose();
+    if (wasOpen) { this.options.onDirect?.("closed"); this.options.onClose(); }
   }
 
   private setState(state: DataLinkState): void {
     if (this.state === state) return;
     this.state = state;
+    if (state === "connecting") this.connectingSince = Date.now();
     this.options.onState?.(state);
   }
 }

@@ -1,4 +1,67 @@
 {
+  "board": {
+    "card": {
+      "botLabel": "送信者:",
+      "chatLabel": "チャット:",
+      "checks": {
+        "failing": "チェック失敗",
+        "passing": "チェック成功",
+        "pending": "チェック実行中"
+      },
+      "details": "詳細",
+      "filesLabel": "ファイル:",
+      "from": "{{chat}} の {{bot}}",
+      "in": "{{chat}} 内",
+      "openPr": "{{host}} で開く",
+      "parts": "{{total}} 件中 {{done}} 件完了",
+      "prLabel": "プルリクエスト:",
+      "prState": {
+        "closed": "クローズ",
+        "draft": "下書き",
+        "merged": "マージ済み",
+        "open": "オープン"
+      },
+      "statusLabel": "状態:",
+      "steps": "{{total}} 件中 {{done}} 件",
+      "tagsLabel": "タグ:",
+      "updatedLabel": "更新:"
+    },
+    "column": {
+      "blocked": "ブロック中",
+      "closed": "停止",
+      "done": "完了",
+      "queued": "待機中",
+      "review": "レビュー",
+      "running": "実行中"
+    },
+    "columns": "列",
+    "empty": "タスクはまだありません",
+    "emptyHint": "チャットのボットが送ったタスクカードがここに表示されます。",
+    "filter": "タスクを絞り込む",
+    "groupBy": {
+      "bot": "ボット",
+      "chat": "チャット",
+      "label": "グループ化",
+      "status": "状態"
+    },
+    "hideOlder": "古いものを隠す",
+    "info": "ボットはチャットやグループにタスクカードを投稿し、最新の状態に保ちます。このボードはすべてのチャットのカードを集めます。完了と停止のタスクは 1 日残ります。「停止」は失敗とキャンセルをまとめたものです。カードはタスクを表示するだけで、状態を変えるのはボットです。カードを開くとチャット内のカードに移動します。",
+    "me": "自分",
+    "noMatch": "一致するタスクはありません",
+    "none": "なし",
+    "showMore": "さらに表示 ({{count}})",
+    "showOlder": "古いものを表示 ({{count}})",
+    "tagFilter": "{{tag}} のみ表示",
+    "tags": "タグ",
+    "tasksMany": "タスク {{count}} 件",
+    "tasksOne": "タスク 1 件",
+    "title": "タスク",
+    "view": {
+      "label": "表示",
+      "routines": "ルーティン",
+      "tasks": "タスク"
+    }
+  },
   "buttons": {
     "answers": "回答",
     "chosen": "選択済み",

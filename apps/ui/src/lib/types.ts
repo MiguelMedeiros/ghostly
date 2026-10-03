@@ -35,7 +35,10 @@ export interface ChatMessage {
   id: string;
   text: string;
   sender: "me" | "peer" | "system";
+  /** The row's place in the chat: when I sent it, or when it came here (the engine's `StoredMessage.timestamp`). */
   timestamp: number;
+  /** Received: when its sender says it was sent. The bubble shows it, never later than `timestamp` (`shownTime`). */
+  sentAt?: number;
   nick?: string;
   meta?: MessageMeta;
   file?: ChatFile;

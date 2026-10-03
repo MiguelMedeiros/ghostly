@@ -10,6 +10,7 @@ import {
   type ResolvedMessage,
 } from "./records";
 import type { ServiceAd } from "./services";
+import type { SignalSight } from "./signal";
 import { budgetRetryMs, isDiscoveryBudgetError, type PkarrTransport } from "./transport";
 import { traceLink } from "./linkTrace";
 
@@ -96,13 +97,24 @@ export const PRESENCE_HEARTBEAT = 4 * 60_000;
 /** …and are considered gone once their packet is older than this. */
 export const PRESENCE_WINDOW = 10 * 60_000;
 
+/** When this device first read the peer's latest packet, by its own clock (`PeerPresence.seenAt`). */
+export const presenceSeenAt = (presence: Pick<PeerPresence, "lastPacketAt" | "seenAt">): number => presence.seenAt ?? presence.lastPacketAt;
+
 export type LinkStatus = "connecting" | "online" | "offline" | "error";
 
 export interface PeerPresence {
   /** Peer advertises services and its packet is fresh. */
   online: boolean;
-  /** Timestamp of the peer's latest packet (ms), 0 if none was ever seen. */
+  /** Timestamp of the peer's latest packet (ms), 0 if none was ever seen. The peer's clock: it names the packet, and is never compared with this one's. */
   lastPacketAt: number;
+  /**
+   * When this device first read that packet, by its own clock: what "how long ago" is measured from (`presenceSeenAt`).
+   * A packet is dated by its own time, held between the read of this run before the one that found it and that one: a
+   * few seconds apart while a link is being made, so the peer's clock no longer matters. The first read has no read
+   * before it: a peer whose clock is behind looks that much older until its next packet, and no peer's clock makes a
+   * packet look newer than the read that found it.
+   */
+  seenAt?: number;
   nick?: string;
   /** `null` for peers that do not advertise (legacy clients, or offline). */
   services: ServiceAd[] | null;
@@ -114,7 +126,17 @@ export interface LinkSessionEvents {
   onPresence?(presence: PeerPresence): void;
   onPeerAck?(ackTimestamp: number): void;
   onCallSignal?(signal: string): void;
-  onRtcSignal?(signal: string): void;
+  /**
+   * `sight`: a read of the peer's record that the network answered, earlier in this run, did not have the signal
+   * (`SignalSight`): when that read began, and the time of the peer's packet it found, if any. Absent for a signal
+   * the first such read found.
+   */
+  onRtcSignal?(signal: string, sight?: SignalSight): void;
+  /**
+   * The peer's packet, dated `packetAt` by the peer's clock, was not there at this run's read of `readBefore` and is
+   * there at `readAt` (this clock): what its clock says against this one (`ClockWatch.peer`).
+   */
+  onPeerClock?(packetAt: number, readBefore: number, readAt: number): void;
   /** The peer's packet carries a new `_tr` value (a group link's transports, `parsePacketTransports`). */
   onPeerTransports?(value: string): void;
   onStatus?(status: LinkStatus): void;
@@ -209,8 +231,18 @@ export class LinkSession {
     return this.publishing !== null || this.firstPublishTimer !== null || Date.now() - this.lastPublishedAt < withinMs;
   }
   private discoveryErrors: Partial<Record<"publish" | "read", string>> = {};
+  /** The last read was not answered by the network: it failed, or the transport handed back a copy it kept (`discoveryRecovered`). */
+  private readMissed = false;
   private unsubscribe: (() => void) | null = null;
   private presence: PeerPresence = { online: false, lastPacketAt: 0, services: null };
+  /**
+   * When the last read of the peer's record that the network answered began (0: none yet in this run). A read that
+   * handed back a copy kept from before (`PkarrTransport.readAnsweredAt`) is not one: it says nothing of what the
+   * record holds now.
+   */
+  private lastReadAt = 0;
+  /** The latest time of the peer's own packets those reads found, by the peer's clock (0: none; the inviter's empty packet is not the peer's). */
+  private peerPacketAt = 0;
 
   constructor(options: LinkSessionOptions) {
     this.identity = identityFromSeedB64(options.params.seedB64);
@@ -252,11 +284,22 @@ export class LinkSession {
     void this.poll();
   }
 
+  /**
+   * A relay answers again after failing. What this link could not do meanwhile goes now: a publish that waits, and a
+   * read when its last one was not answered by the network (it failed, or handed back a copy kept from before) or when
+   * the link is looking for its peer (anything but the background and connected paces). A link whose last read was
+   * answered missed nothing: it reads at its pace. Every link heard this, so a read each one made the cost of a relay
+   * that keeps flipping between throttled and answering grow with the number of chats: 42 reads a flip on a profile
+   * whose contacts are mostly away, for nothing those reads could find.
+   */
   private discoveryRecovered(): void {
     if (!this.running) return;
-    traceLink(this.identity.pubKeyZ32, "discovery-recovered", { publishWaiting: !!this.publishRetryTimer });
-    if (this.publishRetryTimer || this.discoveryErrors.publish) void this.publish().catch(() => {});
-    this.pollNow();
+    const publish = !!(this.publishRetryTimer || this.discoveryErrors.publish);
+    const pace = this.pace(), read = this.readMissed || (pace !== "background" && pace !== "connected");
+    if (!publish && !read) return;
+    traceLink(this.identity.pubKeyZ32, "discovery-recovered", { publishWaiting: !!this.publishRetryTimer, read });
+    if (publish) void this.publish().catch(() => {});
+    if (read) this.pollNow();
   }
 
   /** This side's packet goes out now, unless one already did. */
@@ -577,6 +620,12 @@ export class LinkSession {
       this.discoveryResult("read");
       const ms = Date.now() - started;
       const wasOnline = this.presence.online, wasSeen = this.presence.lastPacketAt;
+      // What this read finds that the read before did not have came in between, by this device's clock.
+      const readBefore = this.lastReadAt, peerPacketBefore = this.peerPacketAt;
+      const answered = this.transport.readAnsweredAt?.(this.peerPubKeyZ32);
+      const read = answered !== undefined && answered >= started;
+      if (read) this.lastReadAt = started;
+      this.readMissed = !!this.transport.readAnsweredAt && !read;
 
       let receivedNew = false;
       // The packet an inviter puts under the contact's key before they join (`emptyLinkRecords`), so
@@ -599,10 +648,14 @@ export class LinkSession {
           if (fresh.length > 0) this.events.onMessages?.(fresh, batch);
         }
 
-        const online = batch.services !== null && Date.now() - batch.packetTimestamp < PRESENCE_WINDOW;
+        if (read && batch.packetTimestamp > this.peerPacketAt) this.peerPacketAt = batch.packetTimestamp;
+        // How long ago the peer published is measured on this clock, from when its packet was first read here.
+        const seenAt = batch.packetTimestamp === wasSeen ? presenceSeenAt(this.presence) : Math.max(readBefore, Math.min(batch.packetTimestamp, Date.now()));
+        const online = batch.services !== null && Date.now() - seenAt < PRESENCE_WINDOW;
         this.presence = {
           online,
           lastPacketAt: batch.packetTimestamp,
+          seenAt,
           nick: batch.nick,
           services: online ? batch.services : null,
         };
@@ -612,6 +665,7 @@ export class LinkSession {
           this.events.onPeerTransports?.(batch.transports);
         }
         this.events.onPresence?.(this.presence);
+        if (read && readBefore && batch.packetTimestamp !== wasSeen) this.events.onPeerClock?.(batch.packetTimestamp, readBefore, Date.now());
 
         if (batch.callSignal !== null && batch.callSignal !== this.lastCallSignalIn) {
           this.lastCallSignalIn = batch.callSignal;
@@ -622,10 +676,10 @@ export class LinkSession {
         // A slow read, the contact's first packet, or a signal: the steps of a pairing, timed. Every
         // read when a measurement asked for the whole trace.
         if (ms > 1_500 || (online && !wasOnline) || batch.packetTimestamp !== wasSeen || newSignal || (globalThis as { __ghostlyLinkTrace?: boolean }).__ghostlyLinkTrace)
-          traceLink(this.identity.pubKeyZ32, "poll", { ms, pace, online, age: Date.now() - batch.packetTimestamp, rtc: newSignal, first: wasSeen === 0 });
+          traceLink(this.identity.pubKeyZ32, "poll", { ms, pace, online, age: Date.now() - batch.packetTimestamp, seen: Date.now() - seenAt, rtc: newSignal, first: wasSeen === 0 });
         if (newSignal) {
           this.lastRtcSignalIn = batch.rtcSignal!;
-          this.events.onRtcSignal?.(batch.rtcSignal!);
+          this.events.onRtcSignal?.(batch.rtcSignal!, readBefore ? { since: readBefore, after: peerPacketBefore || null } : undefined);
         }
       } else if (ms > 1_500 || (globalThis as { __ghostlyLinkTrace?: boolean }).__ghostlyLinkTrace) traceLink(this.identity.pubKeyZ32, "poll", { ms, pace, packet: false });
 
@@ -633,6 +687,7 @@ export class LinkSession {
       this.events.onStatus?.("online");
       if (!this.firstPollDone) { this.firstPollDone = true; this.events.onFirstPoll?.(); }
     } catch (error) {
+      this.readMissed = true;
       if (this.running) {
         traceLink(this.identity.pubKeyZ32, "poll", { ms: Date.now() - started, error: String(error) });
         // A read the relays' request budget held back (nothing known yet to answer from) is a wait: the next poll reads.

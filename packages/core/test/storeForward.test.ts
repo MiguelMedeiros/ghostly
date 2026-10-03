@@ -53,7 +53,8 @@ describe("held bundles", () => {
     expect(() => bob.open(alice.seal(item(mailbox, 6), new Uint8Array([0xff, 0xfe])))).toThrow(/not text/);
     expect(() => bob.open(alice.seal(item(mailbox, 7), new Uint8Array(HOLD_LIMITS.maxTextBytes + 1)))).toThrow(/too long/);
     expect(() => bob.open(alice.seal(item(mailbox, 8, { expires: Date.now() + HOLD_LIMITS.ttlMs * 3 }), utf8Encode("x")))).toThrow(/lifetime/);
-    expect(() => bob.open(alice.seal(item(mailbox, 9, { ts: Date.now() + 10 * 60_000 }), utf8Encode("x")))).toThrow(/future/);
+    // An item dated by a clock ahead of this one is taken: its date refuses nothing.
+    expect(bob.open(alice.seal(item(mailbox, 9, { ts: Date.now() + 10 * 60_000, expires: Date.now() + 20 * 60_000 }), utf8Encode("x"))).header.seq).toBe(9);
     // What passed is exactly what was sealed.
     const opened = bob.open(good);
     expect(opened.header).toMatchObject({ seq: 3, kind: "file", author: alice.me, recipient: bob.me, mailbox, meta: { name: "ghost.png", size: 5, mime: "image/png" } });

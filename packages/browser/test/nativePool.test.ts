@@ -28,8 +28,11 @@ it("bounds native listeners, restores saved identities and never evicts a busy e
   const row = (id:string) => node.getState().links.find(l=>l.id===id)!;
   try {
     await node.start();
-    await vi.waitFor(()=>expect(row(ids[8]).transportErrors?.["iroh/1"]).toContain("eight"));
-    expect(counts).toEqual({"iroh/1":8,"hyperdht/1":8});
+    // Each transport starts its listeners on its own (the test below): Iroh's being all up says nothing of HyperDHT's.
+    await vi.waitFor(()=>{
+      for (const transport of ["iroh/1","hyperdht/1"] as const) expect(row(ids[8]).transportErrors?.[transport]).toContain("eight");
+      expect(counts).toEqual({"iroh/1":8,"hyperdht/1":8});
+    });
     expect(row(ids[9]).availableTransports).toEqual(["webrtc/1"]);
     expect(row(ids[10]).availableTransports).toEqual(["webrtc/1"]);
     const original = (await db.getLinks()).find(l => l.id === ids[0]);
@@ -54,6 +57,53 @@ it("bounds native listeners, restores saved identities and never evicts a busy e
   } finally {
     vi.restoreAllMocks(); await node.shutdown();
     expect(counts).toEqual({"iroh/1":0,"hyperdht/1":0});
+    for (const id of ids) await db.deleteLink(id);
+    vi.unstubAllGlobals();
+  }
+});
+
+// A VPN or a firewall that lets no UDP through: HyperDHT takes seconds to start listening (6 s with nobody to bootstrap
+// from), per chat. Its listeners start one after the other; Iroh's must not wait behind them.
+it("a transport slow to start holds back only its own listeners: every chat has its Iroh listener meanwhile", async () => {
+  await db.putSettings({ online:true, nick:"", relays:[], iceServers:[], mints:[], mintsInitialized:true });
+  const ids = Array.from({length:4}, (_, i) => `slow-${i}`);
+  for (const [i, id] of ids.entries()) await db.putLink({id, profile:"paired-chat/1", createdAt:i,
+    seedB64:createIdentity().seedB64, encKeyB64:createIdentity().seedB64, participationSeed:createIdentity().seedB64,
+    peerPubKeyZ32:createIdentity().pubKeyZ32, pairedPeerKey:createIdentity().pubKeyZ32});
+  vi.stubGlobal("RTCPeerConnection", vi.fn(() => {throw new Error("No dial expected");}));
+  const endpoint = (transport:NativeTransport, seed:string):NativeEndpoint =>
+    ({transport,descriptor:{seed},close:vi.fn(async () => {}),connect:vi.fn(),onConnection:null,onDescriptor:null});
+  // HyperDHT's listeners start when the test lets them, one at a time; never two at once.
+  const listening: (() => void)[] = [];
+  let starting = 0, most = 0;
+  const node = new GhostlyNode({onState:vi.fn(),onMessages:vi.fn(),onCallSignal:vi.fn()}, {
+    transport:{publish:async()=>{},resolve:async()=>null,describe:()=>({protocol:"fixture",relays:[]})},
+    automaticWallets:false,
+    nativeTransports:{
+      "hyperdht/1": seed => new Promise<NativeEndpoint>(resolve => {
+        most = Math.max(most, ++starting);
+        listening.push(() => { starting--; resolve(endpoint("hyperdht/1", seed)); });
+      }),
+      "iroh/1": async seed => endpoint("iroh/1", seed),
+    },
+  });
+  const row = (id:string) => node.getState().links.find(l=>l.id===id)!;
+  try {
+    await node.start();
+    // Not one HyperDHT listener is up, and every chat already runs Iroh.
+    await vi.waitFor(()=>expect(ids.map(id => row(id).availableTransports)).toEqual(ids.map(() => ["webrtc/1","iroh/1"])));
+    expect(listening).toHaveLength(1);
+    for (let i = 0; i < ids.length; i++) {
+      await vi.waitFor(()=>expect(listening).toHaveLength(i + 1));
+      listening[i]();
+    }
+    await vi.waitFor(()=>expect(ids.map(id => row(id).availableTransports.length)).toEqual(ids.map(() => 3)));
+    expect(most).toBe(1);
+    // Both listeners of a chat started side by side, and each kept the other's transport identity.
+    for (const link of (await db.getLinks()).filter(l => ids.includes(l.id))) expect(Object.keys(link.transportSeeds ?? {}).sort()).toEqual(["hyperdht/1","iroh/1"]);
+  } finally {
+    for (const listen of listening) listen();
+    vi.restoreAllMocks(); await node.shutdown();
     for (const id of ids) await db.deleteLink(id);
     vi.unstubAllGlobals();
   }

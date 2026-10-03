@@ -1,5 +1,6 @@
 import { sha256 } from "@noble/hashes/sha2.js";
 import type { BreezSdk } from "@breeztech/breez-sdk-spark/web";
+import { breezDatabase, dropBreezDatabase } from "./breezDatabases";
 
 /**
  * The part of the Breez SDK (nodeless, on Spark: `@breeztech/breez-sdk-spark`, WebAssembly) the Breez
@@ -48,11 +49,13 @@ const hex = (bytes: Uint8Array) => Array.from(bytes, (b) => b.toString(16).padSt
 export const breezNetwork = (network: string): BreezNetwork => (network === "bitcoin" ? "mainnet" : "regtest");
 
 /**
- * The wallet's own storage: one per network and seed, named without revealing anything about the seed. The
- * Spark rail and the Breez Lightning source name it the same way, so one seed is one wallet whichever opens it.
+ * The wallet's own storage: one per profile, network and seed (`breezDatabases.ts`), named without revealing anything
+ * about either. The Spark rail and the Breez Lightning source name it the same way, so in one profile one seed is one
+ * wallet whichever opens it. `breezDatabase` is the one helper that gives the name a profile actually uses.
  */
-export const breezStorage = (network: string, mnemonic: string) =>
-  `ghostly-breez-${breezNetwork(network)}-${hex(sha256(new TextEncoder().encode(`ghostly-breez:${breezNetwork(network)}:${mnemonic}`))).slice(0, 16)}`;
+export { breezDatabase, breezDatabaseName, dropBreezDatabase } from "./breezDatabases";
+/** Names the storage of a seed on a network in this profile. */
+export type BreezStorageName = (network: string, mnemonic: string) => string | Promise<string>;
 
 const DISCONNECT_MS = 10_000;
 /** One SDK instance per wallet storage: two over one database would each think the leaves are theirs. */
@@ -61,14 +64,14 @@ const open = new Map<string, { wallet: Promise<BreezWallet>; refs: number }>();
 /**
  * Opens the Breez wallet of this seed on this network, or shares the one already open (the Spark rail and the
  * Breez Lightning source of the same seed are one wallet). `release` gives this user's share back; the last one
- * disconnects the SDK.
+ * disconnects the SDK. `storage`: the database it opened, which `forgetBreez` deletes when the wallet is removed.
  */
 export async function openBreez(
   params: { network: string; mnemonic: string; apiKey?: string },
   sdk: () => Promise<BreezSdkModule> = loadBreezSdk,
-  storage: (network: string, mnemonic: string) => string = breezStorage,
-): Promise<{ wallet: BreezWallet; release: () => Promise<void> }> {
-  const name = storage(params.network, params.mnemonic);
+  storage: BreezStorageName = breezDatabase,
+): Promise<{ wallet: BreezWallet; release: () => Promise<void>; storage: string }> {
+  const name = await storage(params.network, params.mnemonic);
   const key = `${name}|${params.apiKey ? hex(sha256(new TextEncoder().encode(params.apiKey))).slice(0, 8) : ""}`;
   let entry = open.get(key);
   if (!entry) {
@@ -85,6 +88,7 @@ export async function openBreez(
   let released = false;
   return {
     wallet,
+    storage: name,
     release: async () => {
       if (released) return;
       released = true;
@@ -93,4 +97,15 @@ export async function openBreez(
       await Promise.race([wallet.disconnect(), new Promise((resolve) => setTimeout(resolve, DISCONNECT_MS))]);
     },
   };
+}
+
+/** Whether a wallet of this storage is open here (the Spark rail and a Breez card of one seed share it). */
+export const breezOpen = (storage: string) => [...open.keys()].some((key) => key.startsWith(`${storage}|`));
+
+/**
+ * A wallet was removed: its Breez databases go, unless another user in this profile still has them open (a Breez
+ * Lightning card on the Spark wallet's own phrase). That one deletes them when it is removed in turn.
+ */
+export async function forgetBreez(storage: string): Promise<void> {
+  if (!breezOpen(storage)) await dropBreezDatabase(storage);
 }

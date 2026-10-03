@@ -2,7 +2,8 @@
   "announce": {
     "message": "{{name}}: {{text}}",
     "messages": "{{count}} nuovi messaggi",
-    "messagesFrom": "{{count}} nuovi messaggi da {{name}}"
+    "messagesFrom": "{{count}} nuovi messaggi da {{name}}",
+    "pinMoved": "Spostata al posto {{place}} di {{count}} chat fissate"
   },
   "audio": {
     "cantPlay": "Questo dispositivo non può riprodurre questo audio ({{format}}). Scaricalo per ascoltarlo.",
@@ -130,6 +131,7 @@
     "leftMinutes": "{{minutes}} min rimanenti",
     "leftUnderMinute": "meno di un minuto rimanente",
     "noRoomDevice": "Spazio insufficiente: {{size}} liberi su questo dispositivo",
+    "notInBackup": "Non è in questo backup",
     "notSentHint": "Non inviato. Invialo di nuovo.",
     "of": "{{done}} di {{size}}",
     "pause": "Pausa",
@@ -218,6 +220,10 @@
   "menu": {
     "continueNew": "Continua in una nuova chat",
     "hold": "Trattieni messaggi…",
+    "moveDown": "Sposta giù",
+    "moveFirst": "È già la prima",
+    "moveLast": "È già l'ultima",
+    "moveUp": "Sposta su",
     "pin": "Fissa chat",
     "refresh": "Aggiorna",
     "techInfo": "Info tecniche",

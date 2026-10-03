@@ -254,6 +254,19 @@ describe("Bitcoin Core through the payment coordinator", () => {
     expect(broadcastTxids.size).toBe(2); // Two payments, each one transaction however many times it was sent.
   });
 
+  it("a review that was never approved is never sent: reconciled, it ends as failed with nothing sent", async () => {
+    const node = new MockBitcoind(); node.fund(100_000);
+    const { coordinator } = await engine(node);
+    const review = await coordinator.prepare(target(fakeAddress()), 10_000, 2_000, { payee: "x" });
+    // Saved as of unknown outcome with no approval behind it (no `submittedAt`), as an older copy of the store could hold it.
+    const saved = (await intentRepository.get(review.id))!;
+    await intentRepository.put({ ...saved, review: { ...saved.review, state: "unknown" } });
+    expect(await coordinator.reconcile(review.id)).toMatchObject({ state: "failed", error: expect.stringContaining("never approved") });
+    expect(methods(node)).not.toContain("sendrawtransaction");
+    expect(await coordinator.reconcile(review.id), "a failed review is not checked again").toMatchObject({ state: "failed" });
+    expect(methods(node)).not.toContain("sendrawtransaction");
+  });
+
   it("a rejected broadcast fails cleanly and gives the coins back; a cancelled review unlocks them", async () => {
     const node = new MockBitcoind(); node.fund(100_000);
     const { coordinator } = await engine(node);

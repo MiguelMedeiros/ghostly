@@ -7,12 +7,32 @@ import { groupCue } from "./cues";
  * member, one that lands at the end of its chat, and what I sent. Everything else a chat's history gains is quiet:
  * a line of a group's history (someone joined, left, is the admin, renamed it), a file (its own cue says it is here),
  * a payment (the wallet's sounds say it), a join notice, a text with nothing to show, and a late catch-up of messages
- * that land among older ones instead of at the end (#506: not new there either). What never becomes a row is quiet
+ * written well before the newest one here (#506: old news, though they are placed where they arrive). The times
+ * compared are the ones the senders say, never a row's place; in a 1:1 chat the contact's is read by how far its
+ * clock runs behind this one (`writtenAt`). What never becomes a row is quiet
  * by construction: typing and a bot's status, edits, reactions, receipts, call signals, transport lines.
  */
 
-/** A message this far behind the newest of its chat, and this old, is a catch-up, not news. Clocks disagree a little. */
+/** A message written this long before the newest of its chat, and this old, is a catch-up, not news. Clocks disagree a little. */
 export const CATCH_UP_SLACK_MS = 60_000;
+
+/** How many of a contact's latest live messages its clock is told by (`writtenAt`). */
+export const CLOCK_SAMPLES = 5;
+
+/**
+ * When a contact's message was written, by this device's clock. The time it says is its sender's clock, and a clock
+ * behind this one makes everything it writes look old: a reply to what I just wrote read as written minutes before
+ * my message, a late catch-up, and nothing rang. `leads`: for the contact's latest messages on the live session, how
+ * far the time each said was from when it came (`sentAt - timestamp`). A message cannot come before it is written, so
+ * the one that came quickest says how far behind the contact's clock is, and every time it says is read that much
+ * later. A clock ahead needs nothing: a time still to come is taken as when the message came (as `shownTime` does).
+ * With no live message to tell the clock by, the time is taken as said.
+ */
+export function writtenAt(message: Pick<StoredMessage, "timestamp" | "sentAt">, leads?: readonly number[]): number {
+  if (message.sentAt === undefined) return message.timestamp;
+  const behind = leads?.length ? Math.min(0, Math.max(...leads)) : 0;
+  return Math.min(message.timestamp, message.sentAt - behind);
+}
 
 const JOIN_NOTICE = /^👋 (?:.+ )?joined$/;
 
@@ -21,7 +41,7 @@ export interface MessageAttention { type: "message" | "sent"; mention: boolean; 
 export interface AttentionContext {
   /** When this engine started: what was sent before it is history, heard already or not. */
   startedAt: number;
-  /** The newest time already stored in the message's chat, while this engine runs; undefined when none. */
+  /** The newest time a message of the chat was written at, among those stored while this engine runs; undefined when none. */
   newest?: number;
   now: number;
 }

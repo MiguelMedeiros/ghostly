@@ -4,7 +4,8 @@ import { wrap } from "../src/shared/idb";
 import { setStorageProfile } from "../../../apps/ui/src/lib/storage";
 import { registerProfile } from "../../../apps/ui/src/lib/profiles";
 import { deleteProfile } from "../../../apps/ui/src/lib/profileData";
-// covers: profiles.delete
+import { breezDatabase, breezDatabasesOf } from "../src/engine/paymentAdapters/providers/breezDatabases";
+// covers: profiles.delete, wallet.spark.storage
 
 class FakeStorage {
   entries = new Map<string, string>();
@@ -77,4 +78,22 @@ it("a Fedimint file already gone, or no file system at all, does not stop the de
   const bare = await makeProfile("nofsprofil", { "fedimintWallet-testnet": { federations: [{ id: "f1", database: "ghostly-fedimint-other.db" }] } });
   await deleteProfile(bare.id);
   expect(await databases()).not.toContain(`ghostly_${bare.id}`);
+});
+
+it("deleting a profile deletes its Breez databases (both of the SDK's), and never another profile's of the same phrase", async () => {
+  const mnemonic = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+  const gone = await makeProfile("breezgone1", { "sparkWallet-mode-testnet": { network: "regtest" } });
+  await makeProfile("breezkept1", { "sparkWallet-mode-testnet": { network: "regtest" } });
+  const goneName = await breezDatabase("regtest", mnemonic, `ghostly_${gone.id}`);
+  const keptName = await breezDatabase("regtest", mnemonic, "ghostly_breezkept1");
+  // What the SDK leaves under a storage name: `<name>/<network>/<identity>` and its `-tree`.
+  const sdkFiles = (name: string) => [`${name}/regtest/f578b13b`, `${name}/regtest/f578b13b-tree`];
+  for (const name of [...sdkFiles(goneName), ...sdkFiles(keptName)]) await makeDatabase(name);
+
+  await deleteProfile(gone.id);
+
+  const left = await databases();
+  for (const name of sdkFiles(goneName)) expect(left).not.toContain(name);
+  expect(left, "the other profile's wallet stays").toEqual(expect.arrayContaining(sdkFiles(keptName)));
+  expect(await breezDatabasesOf(`ghostly_${gone.id}`)).toEqual([]);
 });

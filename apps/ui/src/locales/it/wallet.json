@@ -41,6 +41,7 @@
   },
   "backupReminder": {
     "body": "Fai un backup per non perderlo se perdi questo dispositivo.",
+    "bodyUnprotected": "Fai un backup per non perderlo se perdi questo dispositivo o se questo browser cancella i dati.",
     "go": {
       "phrase": "Mostra frase di recupero",
       "profile": "Backup del profilo"
@@ -81,6 +82,7 @@
     "phraseNote": "La frase recupera ciò che il server di Second conserva per questo portafoglio; la cronologia dei pagamenti viene dal file di backup.",
     "read": "Leggi",
     "renewalHint": "Rinnova le monete vicine alla scadenza finché Ghostly è aperto",
+    "scanning": "Ricerca delle monete on-chain ricevute prima da questa frase…",
     "server": "Server Ark",
     "serverInput": "Server Bark",
     "serverStuck": "Questo server non risponde. Puoi passare a un altro.",
@@ -211,6 +213,8 @@
     "removeMintConsent": "Ciò che gli viene pagato dopo appare solo quando aggiungo di nuovo questo mint.",
     "removeMintHint": "Potrai aggiungerlo di nuovo più tardi.",
     "removeMintQuestion": "Rimuovere {{name}}?",
+    "setAside": "{{amount}} {{unit}} messi da parte",
+    "setAsideInfo": "Messi da parte per un pagamento che il mint non ha ancora confermato. Escono con il pagamento o tornano nel saldo appena il mint risponde.",
     "settings": "Impostazioni",
     "testBalance": "{{amount}} sats di prova (senza valore)",
     "testMintInvoice": "In attesa del pagamento… I mint di prova segnano da soli ogni fattura come pagata, quindi questa conta solo quando un contatto la paga in una chat. Per avere subito sats di prova, usa Ottieni monete di prova qui sopra.",
@@ -223,6 +227,8 @@
       "lightningOut": "Pagato via Lightning",
       "reclaimed": "Pagamento recuperato"
     },
+    "unconfirmed": "{{amount}} {{unit}} non confermati",
+    "unconfirmedInfo": "Il mint ha preso questi sats in uno scambio e non sa dire cosa ha dato in cambio. Il portafoglio continua a chiedere. Potrebbero non tornare.",
     "unreachable": "Non raggiungibile ora",
     "working": "In corso…"
   },
@@ -551,6 +557,7 @@
       "paid": "{{amount}} pagati a una fattura, non ancora riscossi dal mint",
       "request": "Una richiesta di {{amount}} in una chat, ancora aperta",
       "sent": "{{amount}} in ecash che hai inviato, non ancora ritirati",
+      "swap": "{{amount}} in uno scambio con il mint, non ancora concluso",
       "unclaimed": "{{amount}} che il mint dice di aver emesso per una fattura, mai ricevuti qui"
     },
     "label": "Rimuovi questo portafoglio",

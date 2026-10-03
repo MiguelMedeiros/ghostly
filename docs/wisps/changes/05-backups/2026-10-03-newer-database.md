@@ -1,0 +1,1 @@
+A reader refuses a bundle whose `db` record gives a database version higher than its own, before it writes anything: a newer client made that profile, and this one would restore it as a profile it cannot open.

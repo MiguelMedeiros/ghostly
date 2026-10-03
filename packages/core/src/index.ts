@@ -87,4 +87,6 @@ export * from "./groupSignals";
 export * from "./groupMeta";
 export * from "./groupTyping";
 export * from "./pairingProgress";
+export * from "./directPath";
+export * from "./clockWatch";
 export { setLinkTraceSink, traceLink } from "./linkTrace";
