@@ -5,6 +5,9 @@
 //! left out, not the call: the built-in STUN server still gives the call its direct paths.
 //!
 //! The credential is a secret: it never appears in a log line or an error, and `Debug` leaves it out.
+//!
+//! Built on every platform (the command takes the servers everywhere), used only where calls are native.
+#![cfg_attr(not(target_os = "linux"), allow(dead_code))]
 
 use serde::Deserialize;
 
