@@ -3,7 +3,7 @@ import { formatFileSize, formatVideoDuration, sanitizeFileName } from "@ghostly/
 import { useChosenSpeaker } from "../../hooks/useChosenSpeaker";
 import { useTransfer } from "../../hooks/useServicesPlatform";
 import { downloadFile } from "../../lib/fileDownload";
-import { canRetryFile, fileStatus, stalledAction } from "../../lib/fileStatus";
+import { canRetryFile, fileHeld, fileStatus, stalledAction } from "../../lib/fileStatus";
 import type { FileAction } from "../../lib/platform";
 import type { ChatFile } from "../../lib/types";
 import { claimPlayback, registerVoicePlayer, releasePlayback } from "../../lib/voicePlayback";
@@ -15,7 +15,7 @@ import { useT } from "../../contexts/I18nContext";
 import { errorText } from "../../lib/errorText";
 
 type Phase = "poster" | "loading" | "playing";
-type Problem = "unsupported" | "too-large" | "missing" | "not-yet";
+type Problem = "unsupported" | "too-large" | "missing" | "left-out" | "not-yet";
 
 const linkButton = "text-xs px-2.5 py-0.5 rounded-full bg-black/20 hover:bg-black/30 border-none text-inherit cursor-pointer transition-colors";
 
@@ -138,7 +138,9 @@ export function VideoBubble({ file, sender, peerName: named }: { file: ChatFile;
       setPhase("poster");
       // Desktop hands out a file only by saving it when nothing streams it; a file still being sent from here may
       // not be readable yet.
-      setProblem(!ready ? "not-yet" : platform.saveFile ? "too-large" : "missing");
+      // Too large to hand out here only when this device holds it: gone, or left out of a light backup, says so.
+      const held = ready ? await fileHeld(platform, file.id, true) : null;
+      setProblem(!ready ? "not-yet" : held === "left-out" ? "left-out" : held === "here" && platform.saveFile ? "too-large" : "missing");
       return;
     }
     sourceRef.current = source;
@@ -207,7 +209,7 @@ export function VideoBubble({ file, sender, peerName: named }: { file: ChatFile;
   const save = () => {
     if (!platform) return;
     setActionError("");
-    void downloadFile(platform, file, sanitizeFileName(file.name)).then((result) => { if (result === "missing") setProblem("missing"); })
+    void downloadFile(platform, file, sanitizeFileName(file.name)).then(async (result) => { if (result === "missing") setProblem((await fileHeld(platform, file.id, false)) === "left-out" ? "left-out" : "missing"); })
       .catch((error: Error) => setActionError(errorText(error, t)));
   };
 
@@ -249,6 +251,7 @@ export function VideoBubble({ file, sender, peerName: named }: { file: ChatFile;
   const problemText = problem === "unsupported" ? t("chat.video.cantPlay", { format: formatOf(file.mime) })
     : problem === "too-large" ? t("chat.video.tooLarge")
     : problem === "missing" ? t("chat.file.gone")
+    : problem === "left-out" ? t("chat.file.notInBackup")
     : problem === "not-yet" ? t("chat.media.notYet")
     : !playable && ready ? t("chat.video.cantPlay", { format: formatOf(file.mime) })
     : null;

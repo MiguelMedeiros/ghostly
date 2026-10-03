@@ -1,13 +1,13 @@
 import { act } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { screen, waitFor } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import { DeleteProfileDialog } from "../../components/DeleteProfileDialog";
 import { ProfileBackups } from "../../components/ProfileBackups";
 import { backUpToFile } from "../../lib/backupFile";
-import { openProfileBackup, restoreOpenedBackup, type BackupOptions, type BackupProgress } from "../../lib/profileBackup";
+import { openProfileBackup, profileBackupSizes, restoreOpenedBackup, type BackupOptions, type BackupProgress } from "../../lib/profileBackup";
 import { fakeEngine, walletView } from "../fakeEngine";
 import { renderApp } from "../render";
-// covers: backup.profile.file, backup.progress, backup.unprotected, profiles.delete
+// covers: backup.profile.file, backup.progress, backup.unprotected, profiles.delete, backup.light
 
 // The bundle itself is made elsewhere (packages/browser/test/profileBackupStream.test.ts): here only the page around
 // it. What `backUpToFile` and a restore would do is played by the test, a step at a time.
@@ -20,6 +20,7 @@ vi.mock("../../lib/profileBackup", async (original) => ({
   openProfileBackup: vi.fn(),
   sameIdentityProfiles: vi.fn(async () => []),
   restoreOpenedBackup: vi.fn(),
+  profileBackupSizes: vi.fn(async () => ({ everything: 21 * 1024 * 1024, light: 300 * 1024, leftOut: 1, leftOutBytes: 20 * 1024 * 1024 })),
 }));
 
 const RESULT = { bytes: 5 * 1024 * 1024, files: 212, fileBytes: 4 * 1024 * 1024, skipped: 0 };
@@ -107,6 +108,23 @@ describe("a profile backup's file", () => {
     const { user } = renderApp(<ProfileBackups canSwitch={false} />);
     await startBackup(user);
     expect(await screen.findByTestId("backup-done")).toHaveTextContent(/^Downloaded [\w-]+\.ghostly-backup · 5\.0 MB 2 files could not be read on this device and are not in the backup\.$/);
+  });
+
+  it("Light is a choice with the size of each before backing up, and the result says what was left out", async () => {
+    vi.mocked(backUpToFile).mockResolvedValueOnce({ how: "downloaded", result: { ...RESULT, leftOut: 1, leftOutBytes: 20 * 1024 * 1024 } });
+    const { user } = renderApp(<ProfileBackups canSwitch={false} />);
+    await user.click(screen.getByTestId("backup-open"));
+    expect(await screen.findByTestId("backup-content-size")).toHaveTextContent("Files: 21.0 MB");
+    await user.click(screen.getByRole("radio", { name: "Light" }));
+    expect(screen.getByTestId("backup-content-size")).toHaveTextContent("Files: 300 KB. Leaves out 20.0 MB.");
+    await user.click(within(screen.getByTestId("backup-content")).getByTestId("row-info"));
+    expect(screen.getByTestId("row-info-text")).toHaveTextContent("voice messages up to 4 MB stay");
+    await user.type(screen.getByTestId("backup-passphrase"), "a long backup passphrase");
+    await user.type(screen.getByTestId("backup-confirm"), "a long backup passphrase");
+    await user.click(screen.getByTestId("backup-download"));
+    expect(await screen.findByTestId("backup-done")).toHaveTextContent(/^Downloaded [\w-]+\.ghostly-backup · 5\.0 MB Files over 1 MB were left out \(20\.0 MB\)\.$/);
+    expect(vi.mocked(backUpToFile).mock.calls[0][0].light).toBe(true);
+    expect(vi.mocked(profileBackupSizes)).toHaveBeenCalled();
   });
 
   it("Cancel stops the backup, and the page says nothing was saved", async () => {

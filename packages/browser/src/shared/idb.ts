@@ -144,6 +144,8 @@ export interface StoredFile {
   transfer?: { state: "transferring" | "done" | "failed"; transferred: number; size: number; error?: string };
   /** files/3: the transfer's own record (`@ghostly/core` `FileTransferRecord`), kept so it resumes after a restart. */
   wire3?: import("@ghostly/core").FileTransferRecord;
+  /** Its bytes were left out of the light backup this profile was restored from (WISP 05 § Light backups). */
+  leftOut?: boolean;
 }
 
 /** The fields of a stored file that change after it is stored: kept in `STORES.fileState`, read over the record's own. */
