@@ -578,8 +578,10 @@ export class LinkSession {
     );
     const started = Date.now();
     try {
-      // An offer or answer not out yet is what the contact waits for (`PkarrRequestOptions.signal`).
-      await this.transport.publish(this.identity, built.records, rtcSignal && rtcSignal !== this.rtcSignalOut ? { signal: true } : undefined);
+      // An offer or answer not out yet is what the contact waits for (`PkarrRequestOptions.signal`). Written while this
+      // link watches for a contact that went away, the packet is what that contact, back, looks for first (`watch`).
+      const options = rtcSignal && rtcSignal !== this.rtcSignalOut ? { signal: true } : this.watching() ? { watch: true } : undefined;
+      await this.transport.publish(this.identity, built.records, options);
     } catch (error) {
       const ms = Date.now() - started, waiting = isDiscoveryBudgetError(error);
       traceLink(this.identity.pubKeyZ32, "publish", { ms, rtc: !!rtcSignal, error: String(error), ...(waiting && { waiting, retryInMs: error.retryInMs }) });
