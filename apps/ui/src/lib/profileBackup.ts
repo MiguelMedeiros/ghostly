@@ -6,6 +6,7 @@ import { DB_VERSION, databaseName, wrap, type StoredFile } from "@ghostly/browse
 import { RESTORED_WALLET_STORES, restoredWalletRow } from "@ghostly/browser/shared/restoredRows";
 import { FILE_BYTES_STEP, SMALL_FILE_BYTES, checkFileId, fileBytes, fileBytesOf, type FileBytes, type FileBytesKind } from "@ghostly/browser/shared/fileBytes";
 import { restoreArkDatabase, snapshotArkDatabase, type ArkDatabaseSnapshot } from "@ghostly/browser/engine/paymentAdapters/backup";
+import { LIGHT_FILE_BYTES, LIGHT_VOICE_BYTES, keptInLight, type LightMark } from "@ghostly/browser/backup/light";
 import { getPrefix, getStorageProfile, ownsKey } from "./storage";
 import { assertUnlocked, identityKeysOf, profileIdentityKeys } from "./profileData";
 import { holdRestore, noteRestore, sweepInterruptedRestores, undoRestore } from "./restoreJournal";
@@ -31,7 +32,7 @@ interface ProfilePayload extends ProfileHead {
 
 /** The records of a version 2 bundle, in the order they are written (WISP 05 § Payload). */
 type BackupRecord =
-  | ({ t: "profile"; format: "ghostly-profile"; version: 2; createdAt: number; files: number; bytes: number } & ProfileHead)
+  | ({ t: "profile"; format: "ghostly-profile"; version: 2; createdAt: number; files: number; bytes: number; light?: LightMark } & ProfileHead)
   | { t: "db"; db: "peer"; version: number; stores: StoreShape[] }
   | { t: "rows"; db: "peer"; store: string; keys: IDBValidKey[]; values: unknown[] }
   | { t: "ark"; walletId: string; snapshot: ArkDatabaseSnapshot }
@@ -55,9 +56,14 @@ export interface BackupOptions extends BackupRun {
   /** Another profile of this space; the active one when left out. */
   id?: string;
   lockPassword?: string;
+  /** A light backup (WISP 05 § Light backups): the bytes of larger files are left out, their messages kept. */
+  light?: boolean;
 }
-/** `skipped`: files whose bytes could not be read on this device; their messages are kept, the bytes are not in the bundle. */
-export interface BackupResult { bytes: number; files: number; fileBytes: number; skipped: number }
+/**
+ * `skipped`: files whose bytes could not be read on this device; their messages are kept, the bytes are not in the
+ * bundle. `leftOut`: files a light backup left out by choice, and their bytes.
+ */
+export interface BackupResult { bytes: number; files: number; fileBytes: number; skipped: number; leftOut?: number; leftOutBytes?: number }
 
 export { isCancelled };
 
@@ -117,13 +123,80 @@ async function fileSource(file: StoredFile, space: string, active: boolean, piec
   return source && (typeof expected !== "number" || source.size >= expected) ? source : null;
 }
 
+/** A profile's files as a backup takes them: those that travel with their bytes, and the records that travel alone. */
+interface CollectedFiles {
+  /** Records that go as rows: no bytes here, or (`leftOut`) bytes a light backup leaves out. */
+  plain: StoredFile[];
+  carried: { file: StoredFile; source: FileSource }[];
+  /** Files whose `fileState` row goes with their record (carried or left out), so it is not a row of its own. */
+  merged: Set<string>;
+  skipped: number;
+  leftOut: number;
+  leftOutBytes: number;
+}
+
+/**
+ * Sorts the profile's file records (with what changed about each read over it) into what travels with its bytes and
+ * what travels as a record alone. In a light backup a file over the cut (`keptInLight`) goes as its record, without
+ * its bytes or where they were, marked `leftOut`.
+ */
+async function collectFiles(records: readonly unknown[], states: readonly unknown[], at: (file: StoredFile) => Promise<FileSource | null>, light: boolean, signal?: AbortSignal): Promise<CollectedFiles> {
+  const state = new Map(states.map((value) => [(value as StoredFile).id, value as Partial<StoredFile>]));
+  const out: CollectedFiles = { plain: [], carried: [], merged: new Set(), skipped: 0, leftOut: 0, leftOutBytes: 0 };
+  for (const value of records) {
+    const record = value as StoredFile;
+    const file = { ...record, ...state.get(record?.id) } as StoredFile;
+    const source = file?.blob || file?.bytes ? await at(file).catch(() => null) : null;
+    if (source && light && !keptInLight(source.size, !!file.metadata?.voice)) {
+      const { blob: _blob, bytes: _bytes, ...rest } = file;
+      out.plain.push({ ...rest, leftOut: true } as StoredFile);
+      out.merged.add(file.id);
+      out.leftOut += 1;
+      out.leftOutBytes += source.size;
+    } else if (source) { out.carried.push({ file, source }); out.merged.add(file.id); }
+    else {
+      // No bytes to carry: the record goes as it is, without a Blob it could not be read from.
+      if (record?.blob) { const { blob: _lost, ...rest } = record; out.plain.push(rest as StoredFile); out.skipped += 1; } else out.plain.push(record);
+    }
+    if (signal?.aborted) break;
+  }
+  return out;
+}
+
+/** What a backup of the active profile would carry of its files' bytes: everything, and light. Read before backing up. */
+export interface BackupSizes {
+  everything: number;
+  light: number;
+  /** Files a light backup leaves out, and their bytes. */
+  leftOut: number;
+  leftOutBytes: number;
+}
+
+/** The sizes of the active profile's files as each kind of backup would carry them, from the file store alone. */
+export async function profileBackupSizes(): Promise<BackupSizes> {
+  const space = databaseName();
+  const sizes: BackupSizes = { everything: 0, light: 0, leftOut: 0, leftOutBytes: 0 };
+  if (!(await databaseExists(space))) return sizes;
+  const db = await wrap(indexedDB.open(space));
+  try {
+    const read = async (name: string) => db.objectStoreNames.contains(name) ? (await wrap(db.transaction(name, "readonly").objectStore(name).getAll())) as unknown[] : [];
+    const [records, states] = [await read("files"), await read("fileState")];
+    const { carried, leftOut, leftOutBytes } = await collectFiles(records, states, (file) => fileSource(file, space, true, async () => db), true);
+    sizes.light = carried.reduce((sum, { source }) => sum + source.size, 0);
+    sizes.everything = sizes.light + leftOutBytes;
+    sizes.leftOut = leftOut;
+    sizes.leftOutBytes = leftOutBytes;
+    return sizes;
+  } finally { db.close(); }
+}
+
 /**
  * Everything of a profile (chats and keys, messages and files of any size, wallets and their journal, services,
  * settings) written to `sink` as one bundle, a piece at a time: nothing of it is ever whole in memory but the
  * database's rows. Storage credentials are left out. By default the active profile; another one of this space can be
  * backed up without switching to it (before deleting it, say), with its lock password if it has a lock.
  */
-export async function writeProfileBackup(sink: BackupSink, { passphrase, id, lockPassword, signal, onProgress }: BackupOptions): Promise<BackupResult> {
+export async function writeProfileBackup(sink: BackupSink, { passphrase, id, lockPassword, light = false, signal, onProgress }: BackupOptions): Promise<BackupResult> {
   const active = id === undefined || namespaceOf(id) === getStorageProfile();
   const ns = active ? getStorageProfile() : namespaceOf(id!);
   if (!active && !ns) throw new Error("Unknown profile");
@@ -177,29 +250,18 @@ export async function writeProfileBackup(sink: BackupSink, { passphrase, id, loc
   let piecesDb: IDBDatabase | null = null;
   const pieces = async () => (piecesDb ??= (await databaseExists(space)) ? await wrap(indexedDB.open(space)) : null);
   try {
-    const stateStore = storeOf("fileState");
-    const state = new Map((stateStore?.values ?? []).map((value) => [(value as StoredFile).id, value as Partial<StoredFile>]));
-    const plain: StoredFile[] = [], carried: { file: StoredFile; source: FileSource }[] = [];
-    let skipped = 0;
-    for (const value of storeOf("files")?.values ?? []) {
-      const record = value as StoredFile;
-      const file = { ...record, ...state.get(record?.id) } as StoredFile;
-      const source = file?.blob || file?.bytes ? await fileSource(file, space, active, pieces).catch(() => null) : null;
-      if (source) { carried.push({ file, source }); progress.bytesTotal += source.size; }
-      else {
-        // No bytes to carry: the record goes as it is, without a Blob it could not be read from.
-        if (record?.blob) { const { blob: _lost, ...rest } = record; plain.push(rest as StoredFile); skipped += 1; } else plain.push(record);
-      }
-      if (signal?.aborted) break;
-    }
-    const carriedIds = new Set(carried.map(({ file }) => file.id));
+    const collected = await collectFiles(storeOf("files")?.values ?? [], storeOf("fileState")?.values ?? [], (file) => fileSource(file, space, active, pieces), light, signal);
+    const { plain, carried, merged, leftOut, leftOutBytes } = collected;
+    let { skipped } = collected;
+    progress.bytesTotal = carried.reduce((sum, { source }) => sum + source.size, 0);
     progress.filesTotal = carried.length;
     progress.stage = "writing";
     tell();
 
     const name = storedProfileName(active ? currentProfile().id : id!) ?? "Profile";
     const put = async (record: BackupRecord) => writer.json(await encode(record));
-    await put({ t: "profile", format: "ghostly-profile", version: 2, createdAt: Date.now(), profile: { name, builtIn: isBuiltInName(name) }, storage, files: carried.length, bytes: progress.bytesTotal });
+    const mark: LightMark | undefined = light ? { maxFileBytes: LIGHT_FILE_BYTES, maxVoiceBytes: LIGHT_VOICE_BYTES, files: leftOut, bytes: leftOutBytes } : undefined;
+    await put({ t: "profile", format: "ghostly-profile", version: 2, createdAt: Date.now(), profile: { name, builtIn: isBuiltInName(name) }, storage, files: carried.length, bytes: progress.bytesTotal, ...(mark && { light: mark }) });
     if (peer) {
       await put({ t: "db", db: "peer", version: peer.version, stores: peer.stores.map(({ keys: _keys, values: _values, ...shape }) => shape) });
       // Settings and chats first: a restore reads them before anything else, to tell whose profile this is.
@@ -208,7 +270,7 @@ export async function writeProfileBackup(sink: BackupSink, { passphrase, id, loc
         let { keys, values } = store;
         if (store.name === "files") { values = plain; keys = plain.map((file) => file.id); }
         // What changed about a file whose record carries it already goes with the record.
-        if (store.name === "fileState") { const kept = values.map((value, i) => [keys[i], value] as const).filter(([, value]) => !carriedIds.has((value as StoredFile)?.id)); keys = kept.map(([key]) => key); values = kept.map(([, value]) => value); }
+        if (store.name === "fileState") { const kept = values.map((value, i) => [keys[i], value] as const).filter(([, value]) => !merged.has((value as StoredFile)?.id)); keys = kept.map(([key]) => key); values = kept.map(([, value]) => value); }
         for (let at = 0; at < values.length; at += ROWS_PER_RECORD) await put({ t: "rows", db: "peer", store: store.name, keys: keys.slice(at, at + ROWS_PER_RECORD), values: values.slice(at, at + ROWS_PER_RECORD) });
       }
     }
@@ -244,7 +306,7 @@ export async function writeProfileBackup(sink: BackupSink, { passphrase, id, loc
       tell();
     }
     await put({ t: "end", files, bytes: fileBytes });
-    return { bytes: await writer.finish(), files, fileBytes, skipped };
+    return { bytes: await writer.finish(), files, fileBytes, skipped, leftOut, leftOutBytes };
   } finally {
     (piecesDb as IDBDatabase | null)?.close();
   }
@@ -283,6 +345,8 @@ export interface OpenedProfileBackup {
   readonly protection: "passphrase" | "none";
   /** The profile's name and local keys, as the restore will write them. */
   readonly payload: ProfileHead;
+  /** A light backup: the cut it made, and the files it left out (their messages are in it, their bytes are not). */
+  readonly light?: LightMark;
   /** A version 1 bundle: all of it. */
   readonly whole?: ProfilePayload;
   /** A version 2 bundle: where to read it again from, and what tells whose profile it is. */
@@ -326,7 +390,8 @@ export async function openProfileBackup(input: BackupInput, passphrase?: string,
     if (value.store === "links") links.push(...value.values);
     else { const at = value.keys.findIndex((key) => key === "profileDid"); if (at >= 0) did = value.values[at]; }
   }
-  return { name: head.profile.name, protection: reader.protection, payload: { profile: head.profile, storage: head.storage }, stream: { source, passphrase, links, did } };
+  const light = head.light && typeof head.light === "object" ? head.light : undefined;
+  return { name: head.profile.name, protection: reader.protection, payload: { profile: head.profile, storage: head.storage }, ...(light && { light }), stream: { source, passphrase, links, did } };
 }
 
 /**
