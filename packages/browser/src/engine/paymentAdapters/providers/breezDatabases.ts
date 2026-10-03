@@ -4,7 +4,7 @@ import { databaseName } from "../../../shared/idb";
 /**
  * Where the Breez SDK keeps a wallet on this device, and which profile it belongs to.
  *
- * The SDK keeps two IndexedDB databases per wallet, `<name>` and `<name>-tree`. Their name is one per **profile,
+ * The SDK keeps its IndexedDB databases under one storage name (`breezDatabaseFiles`). That name is one per **profile,
  * network and seed**: the Spark rail and a Breez Lightning card of the same phrase in one profile are one SDK instance
  * over one database (`openBreez`), two phrases are two wallets, and a profile restored as a copy on the same device
  * starts from the phrase with a database of its own. Two SDK instances over one database would each think the leaves
@@ -32,8 +32,17 @@ export const breezLegacyName = (network: string, mnemonic: string) => `ghostly-b
 export const breezDatabaseName = (network: string, mnemonic: string, space: string = databaseName()) =>
   `ghostly-breez-${netOf(network)}-${digest(`ghostly-breez:${space}:${netOf(network)}:${mnemonic}`)}`;
 
-/** Both databases the SDK keeps under one name. */
-export const breezDatabaseFiles = (name: string) => [name, `${name}-tree`];
+/**
+ * The databases the SDK keeps under one storage name. SDK 0.26 roots them there: `<name>/<network>/<identity>` and
+ * `<name>/<network>/<identity>-tree`, the identity read from the seed inside the SDK. Older builds kept `<name>`
+ * itself. A browser without `indexedDB.databases()` cannot list them: only the bare names are known there.
+ */
+export async function breezDatabaseFiles(name: string): Promise<string[]> {
+  const files = [name, `${name}-tree`];
+  if (typeof indexedDB.databases !== "function") return files;
+  const under = (await indexedDB.databases()).map((d) => d.name ?? "").filter((file) => file.startsWith(`${name}/`));
+  return [...new Set([...files, ...under])];
+}
 
 interface Entry { name: string; space: string; network: BreezDatabaseNetwork; legacy?: true }
 const REGISTER = "ghostly-breez", STORE = "databases";
@@ -59,16 +68,14 @@ async function withRegister<T>(mode: IDBTransactionMode, run: (store: IDBObjectS
   } finally { db.close(); }
 }
 
-/** Whether a database is on this device. Without `indexedDB.databases()`, an open that would create it is aborted. */
+/**
+ * Whether the SDK keeps a wallet under this storage name on this device (`breezDatabaseFiles`). A browser that cannot
+ * list databases is answered yes: the first profile then takes the old name whether or not it is there, which is
+ * safe, since only one profile ever has it.
+ */
 async function exists(name: string): Promise<boolean> {
-  if (typeof indexedDB.databases === "function") return (await indexedDB.databases()).some((d) => d.name === name);
-  return new Promise((resolve) => {
-    let created = false;
-    const open = indexedDB.open(name);
-    open.onupgradeneeded = () => { created = true; open.transaction?.abort(); };
-    open.onsuccess = () => { open.result.close(); resolve(!created); };
-    open.onerror = () => resolve(false);
-  });
+  if (typeof indexedDB.databases !== "function") return true;
+  return (await indexedDB.databases()).some((d) => d.name === name || !!d.name?.startsWith(`${name}/`));
 }
 
 /**
@@ -110,10 +117,10 @@ const deleteDatabase = (name: string) => new Promise<void>((resolve) => {
   try { const r = indexedDB.deleteDatabase(name); r.onsuccess = r.onerror = r.onblocked = () => resolve(); } catch { resolve(); }
 });
 
-/** Deletes one Breez wallet's databases (both of them) and its note in the register. Anything else is refused. */
+/** Deletes one Breez wallet's databases (all the SDK keeps under the name) and its note in the register. Anything else is refused. */
 export async function dropBreezDatabase(name: string): Promise<void> {
   if (!BREEZ_DATABASE.test(name) || typeof indexedDB === "undefined") return;
-  for (const file of breezDatabaseFiles(name)) await deleteDatabase(file);
+  for (const file of await breezDatabaseFiles(name).catch(() => [name, `${name}-tree`])) await deleteDatabase(file);
   await withRegister("readwrite", (store) => { store.delete(name); }).catch(() => {});
 }
 

@@ -86,13 +86,14 @@ it("deleting a profile deletes its Breez databases (both of the SDK's), and neve
   await makeProfile("breezkept1", { "sparkWallet-mode-testnet": { network: "regtest" } });
   const goneName = await breezDatabase("regtest", mnemonic, `ghostly_${gone.id}`);
   const keptName = await breezDatabase("regtest", mnemonic, "ghostly_breezkept1");
-  for (const name of [goneName, `${goneName}-tree`, keptName, `${keptName}-tree`]) await makeDatabase(name);
+  // What the SDK leaves under a storage name: `<name>/<network>/<identity>` and its `-tree`.
+  const sdkFiles = (name: string) => [`${name}/regtest/f578b13b`, `${name}/regtest/f578b13b-tree`];
+  for (const name of [...sdkFiles(goneName), ...sdkFiles(keptName)]) await makeDatabase(name);
 
   await deleteProfile(gone.id);
 
   const left = await databases();
-  expect(left).not.toContain(goneName);
-  expect(left).not.toContain(`${goneName}-tree`);
-  expect(left, "the other profile's wallet stays").toEqual(expect.arrayContaining([keptName, `${keptName}-tree`]));
+  for (const name of sdkFiles(goneName)) expect(left).not.toContain(name);
+  expect(left, "the other profile's wallet stays").toEqual(expect.arrayContaining(sdkFiles(keptName)));
   expect(await breezDatabasesOf(`ghostly_${gone.id}`)).toEqual([]);
 });

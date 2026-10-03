@@ -292,26 +292,27 @@ describe("the Spark wallet", () => {
   });
 
   it("removing the wallet deletes its Breez databases, open or not", async () => {
-    const databases = async () => (await indexedDB.databases()).map((d) => d.name);
+    const under = async (name: string) => (await indexedDB.databases()).map((d) => d.name ?? "").filter((file) => file.startsWith(`${name}/`));
     const makeDatabase = async (name: string) => { const r = indexedDB.open(name, 1); r.onupgradeneeded = () => { r.result.createObjectStore("data"); }; (await wrap(r)).close(); };
+    // What the SDK leaves under its storage name: `<name>/<network>/<identity>` and its `-tree`.
+    const makeWallet = async (name: string) => { for (const file of [`${name}/regtest/f578b13b`, `${name}/regtest/f578b13b-tree`]) await makeDatabase(file); };
     const wallet = make();
     await wallet.start(); await wallet.ensureReady(true);
     const name = wallet.adapter!.storage;
-    for (const file of [name, `${name}-tree`]) await makeDatabase(file);
+    await makeWallet(name);
     await wallet.remove();
-    expect(await databases()).not.toContain(name);
-    expect(await databases()).not.toContain(`${name}-tree`);
+    expect(await under(name)).toEqual([]);
 
     // Closed (the profile stopped), its name is found again from its phrase.
     const closed = make();
     await closed.start(); await closed.ensureReady(true);
     const other = closed.adapter!.storage;
-    await makeDatabase(other);
+    await makeWallet(other);
     await closed.stop();
     const again = make();
     await again.start();
     await again.remove();
-    expect(await databases()).not.toContain(other);
+    expect(await under(other)).toEqual([]);
   });
 
   it("a Spark service that does not answer leaves nothing saved and says it is connecting", async () => {
