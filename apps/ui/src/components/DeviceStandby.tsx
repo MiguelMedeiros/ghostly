@@ -1,4 +1,4 @@
-import { useEffect, useId, useState } from "react";
+import { useEffect, useId, useState, type ReactNode } from "react";
 import type { DeviceGateView } from "@ghostly/browser/devices/gate";
 import { getBrowserHost } from "@ghostly/browser/host";
 import { engine } from "@ghostly/browser/platform/engine";
@@ -6,18 +6,23 @@ import { useI18n } from "../contexts/I18nContext";
 import { listNames, reenrollHere, reloadIntoGate, useDeviceSet } from "../lib/devices";
 import { HandoffOffer, HandoffProgress, UseHereDialog } from "./devices/Handoff";
 import { TakeoverDialog } from "./devices/TakeoverDialog";
+import { DeviceGlyph } from "./devices/DeviceGlyph";
+import { SCREEN_BUTTON, SCREEN_QUIET } from "./devices/DeviceDialog";
+import { InfoButton } from "./layout/Section";
 import { useHandoffView } from "../lib/handoff";
 import { activeProfileId, listProfiles, switchProfile } from "../lib/profiles";
 import { deviceWakeWords, useStandbyPush } from "../lib/wakePush";
 import { useComputerAwake } from "../lib/keepAwake";
 
-const BUTTON = "px-4 py-2 rounded-lg text-sm font-semibold bg-accent text-on-accent hover:bg-accent-hover cursor-pointer";
-const QUIET = "px-3 py-1.5 rounded-lg text-sm text-text-secondary border border-border hover:bg-surface-hover cursor-pointer";
+const LINK = "min-h-11 px-2 text-sm text-text-muted underline underline-offset-2 hover:text-accent cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded";
+/** A part of the screen with more than a line in it: an offer, the progress of a move, the new device list. */
+const PANEL = "rounded-xl border border-border bg-surface p-4 text-start text-sm";
 
 /**
- * The standby screen: which state this device is in for the profile, in one short line and a hint, with why behind
- * the ⓘ. Plain on purpose: the buttons that act (Use here, the handoff, the takeover) come with the parts of WISP 06
- * that do those things. The person's other profiles stay one click away.
+ * The standby screen (WISP 06 § User experience, "What a standby shows"): the state this device is in for the profile
+ * in a title and one hint, why behind the ⓘ, then what can be done here (Use here, an offer from the active device, the
+ * progress of a move, a takeover), the person's other devices and their links, and the other profiles of this device,
+ * one click away. Nothing of the profile itself is on it.
  */
 export function DeviceStandby({ gate }: { gate: DeviceGateView }) {
   const { t } = useI18n();
@@ -54,47 +59,53 @@ export function DeviceStandby({ gate }: { gate: DeviceGateView }) {
   // Desktop: a handoff that runs here (this device takes the profile, or gives it in pass 2) keeps the computer awake.
   useComputerAwake();
   return (
-    <div role="status" data-testid="device-standby" data-state={gate.state} data-unfinished={unfinished ? "true" : undefined} className="h-dvh overflow-y-auto grid place-items-center bg-chat-bg p-6 text-center">
-      <div className="max-w-md space-y-3">
-        <div className="text-5xl" aria-hidden="true">👻</div>
-        <p data-testid="device-standby-title" className="text-text-primary font-semibold break-words">{title}</p>
-        <p className="flex items-start justify-center gap-1.5 text-text-secondary text-sm">
-          <span className="min-w-0 break-words">{hint}</span>
-          <button type="button" data-testid="device-standby-info" aria-expanded={open} aria-controls={id} aria-label={t("common.moreInfo")} title={t("common.moreInfo")}
-            onClick={() => setOpen(!open)}
-            className="relative grid h-5 w-5 shrink-0 cursor-pointer place-items-center rounded-full text-text-muted transition-colors hover:text-accent aria-expanded:text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent before:absolute before:-inset-2.5 before:content-['']">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9.5" /><path d="M12 11v5.5M12 7.5v.01" /></svg>
-          </button>
-        </p>
-        {open && (
-          <div id={id} data-testid="device-standby-text" className="rounded-lg bg-surface-hover px-3 py-2 text-start text-xs leading-5 text-text-secondary break-words space-y-1.5">
-            <p>{t(gate.state === "unreadable" ? "devices.standby.unreadableInfo" : "devices.standby.info")}</p>
-            {gate.detail && <p>{t("app.profileUnavailable.detail")} <span dir="ltr" lang="en" className="font-mono">{gate.detail}</span></p>}
-          </div>
-        )}
+    <div role="status" data-testid="device-standby" data-state={gate.state} data-unfinished={unfinished ? "true" : undefined} className="h-dvh w-full min-w-0 flex-1 overflow-y-auto bg-chat-bg">
+      <div className="mx-auto flex min-h-full w-full max-w-md flex-col justify-center gap-5 px-4 py-8 text-center">
+        <div className="space-y-2">
+          <div className="text-5xl" aria-hidden="true">👻</div>
+          <h1 data-testid="device-standby-title" className="text-lg font-semibold text-text-primary break-words">{title}</h1>
+          <p className="flex items-start justify-center gap-1.5 text-sm text-text-secondary">
+            <span className="min-w-0 break-words">{hint}</span>
+            <InfoButton open={open} onToggle={() => setOpen(!open)} controls={id} testId="device-standby-info" className="mt-px" />
+          </p>
+          {open && (
+            <div id={id} data-testid="device-standby-text" className="rounded-lg bg-surface-hover px-3 py-2 text-start text-xs leading-5 text-text-secondary break-words space-y-1.5">
+              <p>{t(gate.state === "unreadable" ? "devices.standby.unreadableInfo" : "devices.standby.info")}</p>
+              {gate.detail && <p>{t("app.profileUnavailable.detail")} <span dir="ltr" lang="en" className="font-mono">{gate.detail}</span></p>}
+            </div>
+          )}
+        </div>
         {gate.state === "unreadable" && (
-          <button type="button" data-testid="device-standby-retry" onClick={() => void tryAgain()} className={BUTTON}>{t("app.profileUnavailable.tryAgain")}</button>
+          <Actions><button type="button" data-testid="device-standby-retry" onClick={() => void tryAgain()} className={SCREEN_BUTTON}>{t("app.profileUnavailable.tryAgain")}</button></Actions>
         )}
         {unfinished && <Unfinished />}
         {gate.state === "standby" && gate.notice && <SetNotice names={gate.notice} />}
         {(reenroll || gate.state === "removed") && (
-          <button type="button" data-testid="device-standby-reenroll" onClick={() => reenrollHere()} className={BUTTON}>{t("devices.join.addThis")}</button>
+          <Actions><button type="button" data-testid="device-standby-reenroll" onClick={() => reenrollHere()} className={SCREEN_BUTTON}>{t("devices.join.addThis")}</button></Actions>
         )}
         {!unfinished && !restored && (gate.state === "standby" || gate.state === "releasing" || gate.state === "taking") && <StandbyHandoff gate={gate} />}
         {!unfinished && takeover?.offered && <Takeover gate={gate} info={takeover} />}
         {gate.state !== "unreadable" && gate.state !== "removed" && !unfinished && <Links />}
         {others.length > 0 && (
-          <div className="flex flex-wrap justify-center gap-2 pt-2">
-            {others.map((profile) => (
-              <button key={profile.id} type="button" data-testid="device-standby-switch" onClick={() => switchProfile(profile.id, { route: "/" })} className={QUIET}>
-                {t("profileSwitcher.switchTo", { name: profile.name })}
-              </button>
-            ))}
-          </div>
+          <nav aria-label={t("devices.standby.others")} className="space-y-2 border-t border-border pt-4">
+            <p className="text-xs font-semibold uppercase tracking-wide text-text-muted">{t("devices.standby.others")}</p>
+            <div className="flex flex-wrap justify-center gap-2">
+              {others.map((profile) => (
+                <button key={profile.id} type="button" data-testid="device-standby-switch" onClick={() => switchProfile(profile.id, { route: "/" })} className={SCREEN_QUIET}>
+                  {t("profileSwitcher.switchTo", { name: profile.name })}
+                </button>
+              ))}
+            </div>
+          </nav>
         )}
       </div>
     </div>
   );
+}
+
+/** A row of the screen's buttons: one under the other on a phone, side by side above. */
+function Actions({ children }: { children: ReactNode }) {
+  return <div className="flex flex-col items-stretch justify-center gap-2 sm:flex-row sm:flex-wrap sm:items-center">{children}</div>;
 }
 
 /**
@@ -108,14 +119,14 @@ function StandbyHandoff({ gate }: { gate: DeviceGateView }) {
   const device = gate.activeDevice ?? t("devices.join.otherDevice");
   const running = !!view && view.step !== "failed" && view.step !== "offer";
   if (!view && gate.state === "releasing") return null;
+  // Not while the new device list waits for an answer: "If this list looks wrong, do not use this device".
+  const useHere = gate.state === "standby" && !gate.notice && !running && view?.step !== "offer";
   return (
-    <div className="space-y-3 rounded-xl border border-border p-4 text-sm" data-testid="handoff-standby">
-      {view?.step === "offer" && <HandoffOffer view={view} />}
-      {view && view.step !== "offer" && <HandoffProgress view={view} onCancel={() => void engine.call("deviceHandoffCancel")} />}
-      {!view && gate.state === "taking" && <p data-testid="handoff-line" className="text-text-secondary">{t("devices.handoff.step.settling")}</p>}
-      {gate.state === "standby" && !running && view?.step !== "offer" && (
-        <button type="button" data-testid="handoff-use-here" onClick={() => setAsking(true)} className={BUTTON}>{t("devices.handoff.useHere")}</button>
-      )}
+    <div className="space-y-3" data-testid="handoff-standby">
+      {view?.step === "offer" && <div className={PANEL}><HandoffOffer view={view} /></div>}
+      {view && view.step !== "offer" && <div className={PANEL}><HandoffProgress view={view} onCancel={() => void engine.call("deviceHandoffCancel")} /></div>}
+      {!view && gate.state === "taking" && <p data-testid="handoff-line" className="text-sm text-text-secondary">{t("devices.handoff.step.settling")}</p>}
+      {useHere && <Actions><button type="button" data-testid="handoff-use-here" onClick={() => setAsking(true)} className={SCREEN_BUTTON}>{t("devices.handoff.useHere")}</button></Actions>}
       {asking && <UseHereDialog device={device} onClose={() => setAsking(false)} onStarted={() => {}} />}
     </div>
   );
@@ -158,7 +169,8 @@ function useTakeoverInfo(state: DeviceGateView["state"]): TakeoverInfo | null {
 
 /**
  * The forced takeover (WISP 06 § Forced takeover): "It wasn't me" on a device that was replaced, "Take over" on a copy
- * restored from a backup, and "My other device is lost or broken" on a standby that holds a frozen copy.
+ * restored from a backup, and "My other device is lost or broken", a link under the main action, on a standby that
+ * holds a frozen copy.
  */
 function Takeover({ gate, info }: { gate: DeviceGateView; info: TakeoverInfo }) {
   const { t } = useI18n();
@@ -167,8 +179,8 @@ function Takeover({ gate, info }: { gate: DeviceGateView; info: TakeoverInfo }) 
   return (
     <div className="flex flex-col items-center gap-2">
       {gate.state === "superseded" || restored
-        ? <button type="button" data-testid="takeover-open" onClick={() => setOpen(true)} className={gate.state === "superseded" ? QUIET : BUTTON}>{t(restored ? "devices.restore.takeOver" : "devices.takeover.notMe")}</button>
-        : <button type="button" data-testid="takeover-open" onClick={() => setOpen(true)} className="text-sm text-text-muted underline hover:text-accent cursor-pointer">{t("devices.takeover.lost")}</button>}
+        ? <Actions><button type="button" data-testid="takeover-open" onClick={() => setOpen(true)} className={gate.state === "superseded" ? SCREEN_QUIET : SCREEN_BUTTON}>{t(restored ? "devices.restore.takeOver" : "devices.takeover.notMe")}</button></Actions>
+        : <button type="button" data-testid="takeover-open" onClick={() => setOpen(true)} className={LINK}>{t("devices.takeover.lost")}</button>}
       {open && <TakeoverDialog device={info.device ?? gate.activeDevice} password={!!info.password} restored={restored} ownSet={!!info.ownSet} onClose={() => setOpen(false)} />}
     </div>
   );
@@ -183,12 +195,12 @@ function SetNotice({ names }: { names: string[] }) {
   const [busy, setBusy] = useState(false);
   const answer = (wrong: boolean) => { setBusy(true); void engine.call("deviceSetNoticeSeen", { wrong }).finally(() => setBusy(false)); };
   return (
-    <div className="space-y-3 rounded-xl border border-border p-4 text-sm" data-testid="device-set-notice">
-      <p data-testid="device-set-notice-title" className="text-text-primary font-semibold break-words">{t("devices.standby.notice.title", { devices: listNames(names, language) })}</p>
+    <div className={`${PANEL} space-y-3`} data-testid="device-set-notice">
+      <p data-testid="device-set-notice-title" className="font-semibold text-text-primary break-words">{t("devices.standby.notice.title", { devices: listNames(names, language) })}</p>
       <p className="text-text-secondary">{t("devices.standby.notice.hint")}</p>
-      <div className="flex flex-wrap justify-center gap-2">
-        <button type="button" data-testid="device-set-notice-ok" disabled={busy} onClick={() => answer(false)} className={BUTTON}>{t("devices.standby.notice.ok")}</button>
-        <button type="button" data-testid="device-set-notice-wrong" disabled={busy} onClick={() => answer(true)} className={QUIET}>{t("devices.standby.notice.wrong")}</button>
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+        <button type="button" data-testid="device-set-notice-wrong" disabled={busy} onClick={() => answer(true)} className={`${SCREEN_QUIET} sm:order-1`}>{t("devices.standby.notice.wrong")}</button>
+        <button type="button" data-testid="device-set-notice-ok" disabled={busy} onClick={() => answer(false)} className={`${SCREEN_BUTTON} max-sm:order-first sm:order-2`}>{t("devices.standby.notice.ok")}</button>
       </div>
     </div>
   );
@@ -203,14 +215,14 @@ function Unfinished() {
   const [busy, setBusy] = useState(false);
   const act = (work: () => Promise<unknown>) => { setBusy(true); void work().then(() => tryAgain(), () => setBusy(false)); };
   return (
-    <div className="flex flex-wrap justify-center gap-2">
-      <button type="button" data-testid="device-standby-finish" disabled={busy} onClick={() => act(async () => { if (!(await engine.call("deviceEnrollFinish")).finished) throw new Error("not yet"); })} className={BUTTON}>{t("devices.standby.unfinished.retry")}</button>
-      <button type="button" data-testid="device-standby-remove" disabled={busy} onClick={() => act(() => engine.call("deviceEnrollRemove"))} className={QUIET}>{t("devices.standby.unfinished.remove")}</button>
-    </div>
+    <Actions>
+      <button type="button" data-testid="device-standby-finish" disabled={busy} onClick={() => act(async () => { if (!(await engine.call("deviceEnrollFinish")).finished) throw new Error("not yet"); })} className={SCREEN_BUTTON}>{t("devices.standby.unfinished.retry")}</button>
+      <button type="button" data-testid="device-standby-remove" disabled={busy} onClick={() => act(() => engine.call("deviceEnrollRemove"))} className={SCREEN_QUIET}>{t("devices.standby.unfinished.remove")}</button>
+    </Actions>
   );
 }
 
-/** The device links this standby holds: each other device, whether it is connected, and a check that it answers. */
+/** The person's other devices as this standby sees them: each one's link, connected or not, and a check that it answers. */
 function Links() {
   const { t } = useI18n();
   const view = useDeviceSet();
@@ -218,19 +230,36 @@ function Links() {
   const others = view?.devices.filter((device) => !device.self) ?? [];
   if (!others.length) return null;
   const check = async (key: string) => {
+    setAnswer((was) => ({ ...was, [key]: t("devices.section.checking") }));
     try { const { ms } = await engine.call("devicePing", { key }); setAnswer((was) => ({ ...was, [key]: t("devices.section.answered", { ms: Math.max(1, Math.round(ms)) }) })); }
     catch { setAnswer((was) => ({ ...was, [key]: t("devices.section.noAnswer") })); }
   };
   return (
-    <ul className="space-y-1.5 text-sm text-text-secondary" data-testid="device-standby-links">
-      {others.map((device) => (
-        <li key={device.key} data-testid="device-standby-link" data-status={device.status ?? "none"} className="flex flex-wrap items-center justify-center gap-2">
-          <span className="break-words">{t("devices.standby.link", { device: device.name, status: device.status === "live" ? t("devices.section.live") : t("devices.section.connecting") })}</span>
-          {device.status === "live" && <button type="button" data-testid="device-standby-check" onClick={() => void check(device.key)} className={QUIET}>{t("devices.section.check")}</button>}
-          {answer[device.key] && <span data-testid="device-standby-check-result" className="text-xs text-text-muted">{answer[device.key]}</span>}
-        </li>
-      ))}
-    </ul>
+    <section aria-label={t("devices.standby.links")} className="space-y-2 text-start">
+      <p className="text-center text-xs font-semibold uppercase tracking-wide text-text-muted">{t("devices.standby.links")}</p>
+      <ul className="divide-y divide-border rounded-xl bg-surface text-sm" data-testid="device-standby-links">
+        {others.map((device) => {
+          const live = device.status === "live";
+          return (
+            <li key={device.key} data-testid="device-standby-link" data-status={device.status ?? "none"} className="flex flex-wrap items-center gap-3 px-4 py-3">
+              <DeviceGlyph name={device.name} active={device.active} />
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-text-primary">{device.name}</p>
+                <p className="text-xs text-text-muted">
+                  {device.active ? `${t("devices.section.active")} · ` : ""}
+                  <span className="inline-flex items-center gap-1">
+                    <span aria-hidden="true" className={`inline-block h-1.5 w-1.5 rounded-full ${live ? "bg-accent" : "bg-text-muted"}`} />
+                    {live ? t("devices.section.live") : t("devices.section.connecting")}
+                  </span>
+                  {answer[device.key] && <span data-testid="device-standby-check-result" role="status" className="block">{answer[device.key]}</span>}
+                </p>
+              </div>
+              {live && <button type="button" data-testid="device-standby-check" onClick={() => void check(device.key)} className="min-h-10 rounded-lg border border-border px-3 text-xs text-text-secondary hover:bg-surface-hover cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">{t("devices.section.check")}</button>}
+            </li>
+          );
+        })}
+      </ul>
+    </section>
   );
 }
 

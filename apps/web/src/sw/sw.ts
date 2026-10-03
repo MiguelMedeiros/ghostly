@@ -16,6 +16,7 @@
 import { CACHE_PREFIX, SHARED_ROUTE, classify, pushNotice, pushScopeProfile, readShare, readShareBody, type SharedItem } from "./policy";
 import { readWakeEntry, readWakeText } from "./wakeStore";
 import { readPushDeviceView } from "./deviceState";
+import { deviceNoticeWords } from "./deviceWords";
 import { takeWakeSlot } from "./wakeLimit";
 import { readWake } from "../../../../packages/core/src/pairedWake";
 import { SHARE_HOLD_MS, type FromWorker, type ToWorker } from "./messages";
@@ -181,7 +182,9 @@ worker.addEventListener("push", (event) => {
     // that is not the active one shows the quiet notices, and a wake-up from another of the person's devices says so.
     const text = wake ? await readWakeText(profile).catch(() => undefined) : undefined;
     const device = wake ? await readPushDeviceView(text?.db).catch(() => null) : null;
-    const notice = pushNotice(wake, found, device, { now, appVisible, profile, text });
+    // A device that was never active may have no words of a page yet: the browser's language, not English, until one writes them.
+    const words = { ...deviceNoticeWords(navigator.languages?.length ? navigator.languages : [navigator.language]), ...text };
+    const notice = pushNotice(wake, found, device, { now, appVisible, profile, text: words });
     if (!notice || !wake) return;
     if (notice.quiet) {
       // Quiet: no sound, no vibration, nothing that stays up, and one notice per profile, replaced in place.

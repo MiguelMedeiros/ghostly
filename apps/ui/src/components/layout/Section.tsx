@@ -45,6 +45,21 @@ export function Row({ label, hint, info, value, leading, children, testId }: {
   );
 }
 
+/**
+ * The ⓘ mark: a round button that shows or hides the longer story beside a short line. Its hit area is larger than the
+ * mark, it says whether the text is open, and it names the text it opens (`controls`).
+ */
+export function InfoButton({ open, onToggle, controls, label, testId, className = "" }: { open: boolean; onToggle: () => void; controls: string; label?: string; testId?: string; className?: string }) {
+  const i18n = useOptionalI18n();
+  const more = label ?? i18n?.t("common.moreInfo") ?? "More info";
+  return (
+    <button type="button" data-testid={testId} aria-expanded={open} aria-controls={controls} aria-label={more} title={more} onClick={onToggle}
+      className={`relative shrink-0 grid place-items-center w-5 h-5 rounded-full text-text-muted hover:text-accent aria-expanded:text-accent transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent before:absolute before:-inset-2.5 before:content-[''] ${className}`}>
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9.5" /><path d="M12 11v5.5M12 7.5v.01" /></svg>
+    </button>
+  );
+}
+
 /** A row's words: the label (with an ⓘ when there is more to say), the hint, and the more once asked for. */
 function RowText({ label, hint, info, htmlFor, trailing }: { label: ReactNode; hint?: ReactNode; info?: ReactNode; htmlFor?: string; trailing?: ReactNode }) {
   const [open, setOpen] = useState(false);
@@ -55,12 +70,7 @@ function RowText({ label, hint, info, htmlFor, trailing }: { label: ReactNode; h
     <div className="min-w-0 flex-1">
       <div className="flex items-center gap-x-2 min-w-0">
         <Label htmlFor={htmlFor} className="text-text-primary text-sm break-words min-w-0">{label}</Label>
-        {info && (
-          <button type="button" data-testid="row-info" aria-expanded={open} aria-controls={id} aria-label={more} title={more} onClick={() => setOpen(!open)}
-            className="relative shrink-0 grid place-items-center w-5 h-5 -my-1 rounded-full text-text-muted hover:text-accent aria-expanded:text-accent transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent before:absolute before:-inset-2.5 before:content-['']">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9.5" /><path d="M12 11v5.5M12 7.5v.01" /></svg>
-          </button>
-        )}
+        {info && <InfoButton open={open} onToggle={() => setOpen(!open)} controls={id} label={more} testId="row-info" className="-my-1" />}
         {trailing && <div className="ms-auto shrink-0">{trailing}</div>}
       </div>
       {hint && <div className="text-xs text-text-muted mt-0.5 break-words">{hint}</div>}

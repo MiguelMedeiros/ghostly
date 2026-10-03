@@ -106,9 +106,9 @@ describe("the profile's push target on the active device", () => {
 
 interface Renewing {
   ownDeviceKey: string | null;
-  settings: { wake?: WakeSubscription; wakeRotate?: boolean; wakeRenew?: Record<string, string> };
+  settings: { wake?: WakeSubscription; wakeRotate?: boolean; wakeRenew?: Record<string, string>; wakeMutedGroups?: string[] };
   deviceLinks: unknown;
-  links: Map<string, { stored: { id: string; wakeToken?: string; wakeMuted?: boolean } }>;
+  links: Map<string, { stored: { id: string; wakeToken?: string; wakeMuted?: boolean; group?: string } }>;
   rotateWake(): Promise<void>;
   syncDeviceTokens(): void;
   ownWakeWins(): Promise<void>;
@@ -187,6 +187,24 @@ describe("a subscription someone should no longer reach (WISP 06 § Push and the
     inside.links.delete("a");
     inside.syncDeviceTokens();
     expect(links.sendTokens).toHaveBeenLastCalledWith(PHONE, ["a".repeat(22)]);
+    inside.links.clear();
+  });
+
+  it("a muted group's tokens are not among them either, even on an edge that still holds one", async () => {
+    const { node } = desktop();
+    const inside = node as unknown as Renewing;
+    const links = fakeLinks();
+    inside.deviceLinks = links;
+    inside.links.set("chat", { stored: { id: "chat", wakeToken: "a".repeat(22) } });
+    inside.links.set("edge-quiet", { stored: { id: "edge-quiet", group: "quiet", wakeToken: "q".repeat(22) } });
+    inside.links.set("edge-loud", { stored: { id: "edge-loud", group: "loud", wakeToken: "l".repeat(22) } });
+    inside.settings.wakeMutedGroups = ["quiet"];
+    inside.syncDeviceTokens();
+    expect(links.sendTokens).toHaveBeenLastCalledWith(PHONE, ["a".repeat(22), "l".repeat(22)]);
+    // Unmuted: its token is handed out again.
+    inside.settings.wakeMutedGroups = undefined;
+    inside.syncDeviceTokens();
+    expect(links.sendTokens).toHaveBeenLastCalledWith(PHONE, ["a".repeat(22), "l".repeat(22), "q".repeat(22)]);
     inside.links.clear();
   });
 });

@@ -14,7 +14,7 @@ import { DeviceDialog, Digits, field, primaryButton, quietButton } from "./Devic
  * "I already use Ghostly" on a new device (WISP 06 § User experience): add this device to the profile, or restore a
  * backup. Adding it names the device, reads the code from the active device (scan, paste or an image), shows the
  * digits once the other device proved itself, and ends on the standby screen. On an iPhone or iPad tab it only says to
- * add Ghostly to the Home Screen first. Plain on purpose: the final design is part 10.
+ * add Ghostly to the Home Screen first.
  */
 export function JoinProfileDialog({ onClose, onRestore }: { onClose(): void; onRestore(): void }) {
   const { t } = useI18n();

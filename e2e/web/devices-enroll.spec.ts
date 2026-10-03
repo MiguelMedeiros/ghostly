@@ -75,7 +75,9 @@ test("a profile adds a second device: the same digits on both, a standby with a 
   const row = desktop.page.getByTestId("device-row").filter({ hasText: "Phone" });
   await expect(row).toContainText("Standby");
   await expect(row.getByTestId("device-link-status")).toHaveAttribute("data-status", "live", { timeout: 90_000 });
-  await row.getByTestId("device-check").click();
+  // Check connection is in the row's menu (on a phone the menu is a sheet over the page).
+  await row.getByTestId("device-menu").click();
+  await desktop.page.getByTestId("device-check").click();
   await expect(row.getByTestId("device-check-result")).toHaveText(/^Answered in \d+ ms$/);
   // The active device runs the whole app as before.
   await desktop.page.goto("/#/");

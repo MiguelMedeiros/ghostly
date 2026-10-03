@@ -96,10 +96,10 @@ export function AddDeviceDialog({ onClose }: { onClose(): void }) {
       <DeviceDialog title={title} onClose={onClose} testId="device-add">
         {hint && <p className="text-text-secondary">{hint}</p>}
         <form className="space-y-3" onSubmit={(event) => { event.preventDefault(); void submitPassword(); }}>
-          <input type="password" autoFocus data-testid="device-add-password" aria-label={step === "type" ? t("devices.password.current") : t("devices.password.new")} placeholder={step === "type" ? t("devices.password.current") : t("devices.password.new")}
+          <input type="password" autoFocus autoComplete={step === "type" ? "current-password" : "new-password"} data-testid="device-add-password" aria-label={step === "type" ? t("devices.password.current") : t("devices.password.new")} placeholder={step === "type" ? t("devices.password.current") : t("devices.password.new")}
             value={password} onChange={(event) => setPassword(event.target.value)} className={field} />
           {step !== "type" && (
-            <input type="password" data-testid="device-add-password-again" aria-label={t("devices.password.confirm")} placeholder={t("devices.password.confirm")}
+            <input type="password" autoComplete="new-password" data-testid="device-add-password-again" aria-label={t("devices.password.confirm")} placeholder={t("devices.password.confirm")}
               value={again} onChange={(event) => setAgain(event.target.value)} className={field} />
           )}
           {error && <p role="alert" className="text-danger">{error}</p>}

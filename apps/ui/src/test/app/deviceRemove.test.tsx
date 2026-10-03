@@ -30,22 +30,26 @@ describe("Remove, on the active device", () => {
     const { user, engine } = renderApp(<DevicesSection />);
     engine.on("deviceSet", () => activeSet());
     engine.on("deviceRemove", () => activeSet({ devices: activeSet().devices.slice(0, 2), waiting: [{ key: PHONE, name: "Phone" }] }));
-    // Every other device has Remove, live or not.
-    expect(await screen.findAllByTestId("device-remove-open")).toHaveLength(2);
-    await user.click(screen.getAllByTestId("device-remove-open")[1]);
+    // Every other device has Remove in its menu, live or not.
+    expect(await screen.findAllByTestId("device-menu")).toHaveLength(2);
+    await user.click(screen.getAllByTestId("device-menu")[1]);
+    await user.click(screen.getByTestId("device-remove-open"));
     const dialog = screen.getByTestId("device-remove");
     expect(dialog).toHaveTextContent("Remove Tablet?");
     expect(dialog).toHaveTextContent("It can no longer take this profile.");
     await user.click(screen.getByTestId("device-remove-go"));
     await waitFor(() => expect(engine.callsTo("deviceRemove")).toEqual([{ key: TABLET }]));
-    expect(await screen.findByTestId("device-removed")).toHaveTextContent("Tablet was removed.");
+    const removed = await screen.findByTestId("device-removed");
+    expect(removed).toHaveTextContent("Tablet");
+    expect(removed).toHaveTextContent("Removed");
   });
 
   it("says why it could not, and changes nothing", async () => {
     const { user, engine } = renderApp(<DevicesSection />);
     engine.on("deviceSet", () => activeSet());
     engine.on("deviceRemove", () => { throw new Error("remove-busy: The profile is moving. Try again after it."); });
-    await user.click((await screen.findAllByTestId("device-remove-open"))[0]);
+    await user.click((await screen.findAllByTestId("device-menu"))[0]);
+    await user.click(screen.getByTestId("device-remove-open"));
     await user.click(screen.getByTestId("device-remove-go"));
     expect(await screen.findByTestId("device-remove-error")).toHaveTextContent("Something else is changing your devices.");
   });
@@ -54,7 +58,8 @@ describe("Remove, on the active device", () => {
     const { user, engine } = renderApp(<DevicesSection />);
     engine.on("deviceSet", () => activeSet());
     engine.on("deviceRemove", () => activeSet());
-    await user.click((await screen.findAllByTestId("device-remove-open"))[0]);
+    await user.click((await screen.findAllByTestId("device-menu"))[0]);
+    await user.click(screen.getByTestId("device-remove-open"));
     await user.click(screen.getByTestId("device-remove-lost"));
     expect(screen.getByTestId("device-lost")).toHaveTextContent("Lost or stolen?");
     expect(screen.getByTestId("device-lost-chats")).toHaveTextContent("Pair each chat again");
@@ -159,14 +164,14 @@ describe("the standby screen after a removal", () => {
     engine.on("deviceTakeover", () => ({ kind: "removed" }));
     await user.click(await screen.findByTestId("takeover-open"));
     expect(screen.getByTestId("takeover-open")).toHaveTextContent("My other device is lost or broken");
-    expect(screen.getByTestId("takeover-own-set")).toHaveTextContent("Add your other devices to it again afterwards.");
+    expect(screen.getByTestId("takeover-own-set")).toHaveTextContent("Add your other devices again afterwards.");
     // Its devices are not lost by this: the question is not asked.
     expect(screen.queryByTestId("takeover-lost")).toBeNull();
     await user.type(screen.getByTestId("takeover-password"), "a long lock password");
     await user.type(screen.getByTestId("takeover-name"), "Desktop");
     await user.click(screen.getByTestId("takeover-go"));
     await waitFor(() => expect(engine.callsTo("deviceTakeover")).toEqual([{ password: "a long lock password", name: "Desktop", lost: false }]));
-    expect(await screen.findByTestId("takeover-error")).toHaveTextContent("Another of your devices started a device set of its own first.");
+    expect(await screen.findByTestId("takeover-error")).toHaveTextContent("Another of your devices started over first.");
   });
 
   it("one that can accept nothing, and one removed, are added again from a new profile here", async () => {

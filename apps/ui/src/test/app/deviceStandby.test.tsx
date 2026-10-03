@@ -97,7 +97,7 @@ describe("the standby screen", () => {
     [{ state: "superseded" }, "This device was replaced", "Another device took over without this one. This device has stopped."],
     [{ state: "moving" }, "Almost there", "Open Ghostly on the device you use now to finish."],
     [{ state: "removed" }, "This device was removed", "Add it again from the device you use now."],
-    [{ state: "unreadable", detail: "UnknownError: Internal error" }, "Ghostly could not check which device is active.", "Restart the app or the device, then try again."],
+    [{ state: "unreadable", detail: "UnknownError: Internal error" }, "Can't read this device's state", "Nothing was started."],
   ];
 
   it.each(cases)("says each state in one line and a hint: %o", (view, title, hint) => {

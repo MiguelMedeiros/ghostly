@@ -22,11 +22,14 @@ test("the active device removes the third device while the second is closed; the
 
   // Profile, Devices, Remove on the tablet's row.
   await desktop.page.goto("/#/profile");
-  await desktop.page.getByTestId("device-row").filter({ hasText: "Tablet" }).getByTestId("device-remove-open").click();
+  await desktop.page.getByTestId("device-row").filter({ hasText: "Tablet" }).getByTestId("device-menu").click();
+  await desktop.page.getByTestId("device-remove-open").click();
   const dialog = desktop.page.getByTestId("device-remove");
   await expect(dialog).toContainText("Remove Tablet?");
   await dialog.getByTestId("device-remove-go").click();
-  await expect(desktop.page.getByTestId("device-removed")).toContainText("Tablet was removed.", { timeout: 60_000 });
+  const removed = desktop.page.getByTestId("device-removed");
+  await expect(removed).toContainText("Tablet", { timeout: 60_000 });
+  await expect(removed).toContainText("Removed");
   await expect(desktop.page.getByTestId("device-row")).toHaveCount(2);
   await expect(desktop.page.getByTestId("device-row").filter({ hasText: "Tablet" })).toHaveCount(0);
   // The phone has not taken the new secret yet.

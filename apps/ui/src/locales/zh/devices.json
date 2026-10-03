@@ -61,8 +61,9 @@
       "unreachable": "无法连接 {{device}}。它需要开机并打开 Ghostly。",
       "version": "Ghostly 在此期间已更新。没有任何改变。",
       "wallet": "此版本的 Ghostly 无法移动这里的某个钱包。",
-      "woken": "请在 {{device}} 上打开 Ghostly 并保持打开。"
+      "woken": "请在 {{device}} 上打开 Ghostly 并保持打开。已向它发送通知。"
     },
+    "keepOpen": "请保持 Ghostly 打开。",
     "later": "稍后再传大文件",
     "laterNote": "{{size}} 的大文件暂时留在 {{device}} 上。",
     "metered": "你正在使用移动数据。",
@@ -79,13 +80,16 @@
       "authorizing": "正在核对密码",
       "checking": "正在检查",
       "connecting": "正在连接 {{device}}",
+      "copy": "正在复制文件",
       "copying": "正在复制文件 · {{done}} / {{total}}",
       "done": "此设备现已处于活动状态。",
       "doneGiver": "{{device}} 现已处于活动状态。",
       "finishing": "即将完成：正在等待网络",
       "keepUsing": "你可以继续使用 Ghostly。",
+      "paused": "已在 {{percent}}% 处停止。两台设备都在线时会继续。",
       "ready": "正在准备",
       "rest": "正在复制其余部分",
+      "settle": "正在确认哪台设备处于活动状态",
       "settling": "正在确认哪台设备处于活动状态 · 约 30 秒",
       "settlingInfo": "Ghostly 会等待片刻，以确保没有其他设备在同一时刻接管。",
       "switching": "正在切换"
@@ -114,6 +118,15 @@
     "persist": "此浏览器可能会清除 Ghostly 的数据。请在 {{device}} 上保留一份副本。",
     "restore": "恢复备份",
     "unfinished": "未完成：你的另一台设备尚未登记此设备。"
+  },
+  "limited": {
+    "banner": "在 Ghostly 确认哪台设备处于活动状态之前保持离线",
+    "bannerHint": "你写的消息会等到那时再发送。",
+    "hint": "请检查你的网络连接。",
+    "info": "上线之前，Ghostly 会确认没有其他设备接管此个人资料。选择“仍然启动”会在这里以离线方式打开：你可以阅读和书写，但在确认成功之前不会发送、支付或接收任何内容。Ghostly 每 30 秒重试一次。",
+    "startAnyway": "仍然启动",
+    "title": "无法确认哪台设备处于活动状态",
+    "tryAgain": "重试"
   },
   "lost": {
     "cashu": "Cashu：兑换全部 ecash",
@@ -153,7 +166,7 @@
   "remove": {
     "button": "移除",
     "copy": "如果它保存有你的个人资料副本，该副本会以未加密的形式留在它上面。",
-    "done": "已移除 {{device}}。你的其他设备下次打开 Ghostly 时会收到此更改。",
+    "doneInfo": "它再也不能接管此个人资料。你的其他设备下次打开 Ghostly 时会收到此更改。",
     "fail": {
       "busy": "其他操作正在更改你的设备。请稍后再试。",
       "failed": "出了点问题。没有做任何更改。",
@@ -183,6 +196,7 @@
     "done": "已生成新的设备密钥。",
     "hint": "不在此列表中的设备将无法再使用此个人资料。",
     "info": "当某台设备可能仍持有此个人资料的设备密钥时使用，例如你从它那里接管的设备。你的其他设备下次打开 Ghostly 时会收到新的密钥。",
+    "make": "生成",
     "notNow": "暂不",
     "offer": "你已从 {{device}} 接管。它仍持有此个人资料的设备密钥。",
     "offerUnnamed": "你已从另一台设备接管。它仍持有此个人资料的设备密钥。",
@@ -191,15 +205,19 @@
   "section": {
     "active": "活动",
     "answered": "{{ms}} 毫秒内回应",
-    "check": "检查",
+    "check": "检查连接",
+    "checking": "正在检查…",
     "connecting": "未连接",
     "foreign": "你旧的设备组已被其他方式关闭。",
-    "hint": "在另一台设备上使用此个人资料。同一时间只有一台设备处于活动状态。",
     "info": "只有活动设备会发送、接收和付款，因此你的消息和资金永远不会分处两地。你可以随时移动个人资料。",
     "keepAwake": "让这台电脑保持唤醒",
     "keepAwakeHint": "这样你外出时手机也能接管。",
+    "lead": "在另一台设备上使用此个人资料",
+    "leadHint": "同一时间只有一台设备处于活动状态。",
     "live": "已连接",
+    "menu": "{{device}} 的选项",
     "noAnswer": "无回应",
+    "removed": "已移除",
     "standby": "待机",
     "thisActive": "此设备 · 活动",
     "thisStandby": "此设备 · 待机",
@@ -219,16 +237,18 @@
       "superseded": "另一台设备在没有此设备的情况下接管了。此设备已停止。",
       "supersededBy": "{{device}} 在没有此设备的情况下接管了。此设备已停止。",
       "taking": "正在等待网络。",
-      "unreadable": "请重启应用或设备，然后重试。"
+      "unreadable": "没有启动任何内容。"
     },
     "info": "同一时间只有一台设备发送、接收和付款，因此你的消息和资金绝不会同时出现在两个地方。",
     "link": "{{device}}：{{status}}",
+    "links": "你的设备",
     "notice": {
       "hint": "如果此列表看起来不对，请不要使用此设备。",
       "ok": "好",
       "title": "你现在的设备：{{devices}}",
       "wrong": "这不对"
     },
+    "others": "其他个人资料",
     "reenroll": {
       "hint": "请从你现在使用的设备重新添加此设备。",
       "title": "此设备关闭期间你的设备发生了变化"
@@ -241,7 +261,7 @@
       "standbyUnnamed": "在另一台设备上处于活动状态",
       "superseded": "此设备已被替换",
       "taking": "正在完成",
-      "unreadable": "Ghostly 无法确认哪台设备处于活动状态。"
+      "unreadable": "无法读取此设备的状态"
     },
     "unfinished": {
       "hint": "请在 {{device}} 上重新开始。",
@@ -250,7 +270,7 @@
       "retry": "重试",
       "title": "未完成"
     },
-    "unreadableInfo": "Ghostly 在启动任何内容之前，会先读取你的哪台设备处于活动状态。这里读取失败，因此没有启动任何内容，没有发送任何内容，也没有更改任何内容。"
+    "unreadableInfo": "Ghostly 在启动任何内容之前，会先读取你的哪台设备处于活动状态。这里读取失败，因此没有启动任何内容，没有发送任何内容，也没有更改任何内容。请重启应用或设备，然后重试。"
   },
   "takeover": {
     "checking": "正在确认哪台设备在使用 · 约 30 秒",
@@ -270,12 +290,14 @@
     "info": "此后到达 {{device}} 的消息和资金不在这里。如果 {{device}} 回来，它会停止，且不会告知你的联系人。",
     "lost": "我的另一台设备丢失或损坏了",
     "lostNo": "只是损坏或被清除",
+    "lostNoHint": "它如果回来就会停止。",
     "lostQuestion": "丢失或被盗？",
     "lostRace": "另一台设备在同一时刻接管了。此设备处于待机。",
     "lostYes": "丢失或被盗",
+    "lostYesHint": "接管后，会有一份清单帮助你保护资金和聊天。",
     "notMe": "不是我",
-    "ownSetHint": "此设备将开始一组属于自己的设备。之后请重新添加你的其他设备。",
-    "ownSetRemoved": "你的另一台设备先开始了一组自己的设备。请从那台设备重新添加此设备。",
+    "ownSetHint": "此设备将作为你唯一的设备重新开始。之后请重新添加你的其他设备。",
+    "ownSetRemoved": "你的另一台设备先重新开始了。请从那台设备重新添加此设备。",
     "ownSetWait": "正在等待网络。请稍后再试。",
     "restoredHint": "此设备持有一份来自备份的副本。在你接管之前不会启动任何内容。",
     "title": "不经 {{device}} 直接接管？",
