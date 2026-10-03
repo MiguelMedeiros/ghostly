@@ -198,9 +198,14 @@ export const peerMessageAt = (map: Map<string, number>, groupId: string): { last
  * How often a group's link is looked at (`warmPollMs` for `warmMs` after it was handed out or someone
  * knocked: people open a link in the minutes after it is shared, and in bursts), and a joiner knocks;
  * `slowKnockMs` once it has waited `patienceMs`.
+ *
+ * The warm pace is half of each relay's minute (a read every 2 s, one relay after the other). It used to last ten
+ * minutes: an admin whose members left and came back in that time had nothing left for their edges, and a member back
+ * while the others were away waited for the minute to free (member-back runs, 2026-10-03). Two quiet minutes cover the
+ * burst of people opening a link just shared; each knock starts them again.
  */
 export interface EntryTimings { pollMs: number; warmPollMs: number; warmMs: number; knockMs: number; slowKnockMs: number; patienceMs: number }
-const ENTRY_TIMINGS: EntryTimings = { pollMs: 5_000, warmPollMs: 2_000, warmMs: 10 * 60_000, knockMs: 5_000, slowKnockMs: 20_000, patienceMs: 2 * 60_000 };
+const ENTRY_TIMINGS: EntryTimings = { pollMs: 5_000, warmPollMs: 2_000, warmMs: 2 * 60_000, knockMs: 5_000, slowKnockMs: 20_000, patienceMs: 2 * 60_000 };
 /**
  * A knock still in the record is written again only once it is this old. Everyone holding the link writes the same
  * Pkarr record, so a knock is read back before it is repeated: one that is there and fresh costs a read, not a read

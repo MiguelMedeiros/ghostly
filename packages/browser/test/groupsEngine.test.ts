@@ -389,6 +389,24 @@ describe("the group's link: knocks, pending entries and refusals", () => {
     await alice.tick(t0 + 133_000); expect(looks()).toBe(8);
   });
 
+  it("by default, looks every 2 s for two quiet minutes after the link is handed out, then every 5 s", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const t0 = Date.now();
+    const world = new World();
+    const alice = world.add("alice");
+    const groupId = await alice.create("Ghosts", "mesh");
+    await alice.enableLink(groupId);
+    const looks = () => world.resolves.get("alice") ?? 0;
+    await alice.tick(t0); expect(looks()).toBe(1);
+    await alice.tick(t0 + 2_000); expect(looks()).toBe(2);
+    await alice.tick(t0 + 116_000); expect(looks()).toBe(3);
+    await alice.tick(t0 + 118_000); expect(looks()).toBe(4);
+    // Two quiet minutes: half of each relay's minute goes back to the edges.
+    await alice.tick(t0 + 120_000); expect(looks()).toBe(4);
+    await alice.tick(t0 + 122_000); expect(looks()).toBe(4);
+    await alice.tick(t0 + 123_000); expect(looks()).toBe(5);
+  });
+
   it("a joiner knocks at its pace, slower once it has waited long, and not while its entry session is up", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     const t0 = Date.now();
