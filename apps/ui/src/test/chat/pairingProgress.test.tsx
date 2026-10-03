@@ -1,13 +1,17 @@
 import { act, screen, within } from "@testing-library/react";
+import { useSyncExternalStore } from "react";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { LinkView } from "@ghostly/browser/shared/types";
+import { engine } from "@ghostly/browser/platform/engine";
 import { ChatConnection } from "../../components/ChatConnection";
 import { PairingScene } from "../../components/pairing/PairingScene";
 import { CELEBRATE_MS, usePairingProgress } from "../../hooks/usePairingProgress";
+import { contactStatus } from "../../lib/contactStatus";
 import { deriveStage, failureReason, formatElapsed, type PairingProgress } from "../../lib/pairingProgress";
+import type { PeerLinkState } from "../../lib/platform";
 import { loadSettings, saveSettings } from "../../lib/settings";
 import { MOTION_REST_MS } from "../../lib/windowAway";
 import { fakeEngine, linkView } from "../fakeEngine";
@@ -386,6 +390,26 @@ describe("the connection icon while pairing (the header's only connection elemen
     expect(icon()).toHaveAccessibleName("Connection options: Connected · WebRTC");
     expect(icon()).not.toHaveAttribute("data-pairing");
     expect(within(icon()).queryByTestId("pairing-glyph")).toBeNull();
+  });
+});
+
+describe("texts on the DHT while the scene still pairs (an app with no WebRTC, before a native transport is up)", () => {
+  /** Chat.tsx's header: the pairing while it is on, and the delivery state (`contactStatus`) as `data-status`. */
+  function Header() {
+    const p = usePairingProgress("peer", { inviter: false, enabled: true, createdAt: Date.now() });
+    const link = useSyncExternalStore(listener => engine.subscribe(listener), () => engine.state)?.links[0];
+    return <ChatConnection peerKey="peer" status={contactStatus(link as unknown as PeerLinkState, true, "online")}
+      pairing={p.show && p.progress && p.progress.stage !== "live" ? { progress: p.progress } : undefined} />;
+  }
+
+  // e2e/desktop/native-upgrade.spec.ts reads this to know the joiner was on the DHT before it went live natively.
+  it("the label tells the pairing, as the scene does; data-status says the texts go over the DHT", () => {
+    const app = renderApp(<Header />);
+    show({ ...published, textDelivery: "dht" }, app.engine);
+    const icon = screen.getByTestId("connection-options");
+    expect(icon).toHaveAttribute("data-pairing", "resolving");
+    expect(icon).toHaveAccessibleName("Connection options: Pairing · Looking up the invite on the network…");
+    expect(icon).toHaveAttribute("data-status", "On DHT · retrying live");
   });
 });
 
