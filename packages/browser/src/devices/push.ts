@@ -1,6 +1,6 @@
 import { WakeLimiter, deviceWakeRequest, newWakeToken, parseWakeFrame, relayRequest, type DeviceFrame, type PushRequest, type WakeTarget } from "@ghostly/core";
 import type { WakeSubscription } from "../shared/types";
-import type { DevicePatch, DevicePush, DevicePushTarget, DeviceRecord } from "./state";
+import { MAX_ALLOWED_TOKENS, type DevicePatch, type DevicePush, type DevicePushTarget, type DeviceRecord } from "./state";
 
 /*
  * Push and the phone (WISP 06 § Push and the phone). Three things, all pure here; `links.ts` carries the frame, the
@@ -55,11 +55,13 @@ export function pushTargetOf(subscription: Pick<WakeSubscription, "endpoint" | "
  */
 export function withOwnPush(record: DeviceRecord, subscription: Pick<WakeSubscription, "endpoint" | "p256dh" | "auth" | "vapid"> | null): DevicePatch | null {
   const was = record.push?.own;
-  if (!subscription) return was ? { push: pruned({ ...record.push, own: undefined }) } : null;
+  if (!subscription) return was ? { push: pruned({ ...record.push, own: undefined, renew: undefined }) } : null;
   const target = pushTargetOf(subscription);
   const tokens = was && was.vp === target.vp ? was.tokens : {};
   if (was && was.e === target.e && was.p === target.p && was.a === target.a && was.vp === target.vp && was.vk === target.vk) return null;
-  return { push: { ...record.push, own: { ...target, tokens } } };
+  // A new endpoint is a new subscription: whoever held the old one reaches nothing now, and a renewal asked is done.
+  const { renew: _done, ...rest } = record.push ?? {};
+  return { push: { ...rest, own: { ...target, tokens } } };
 }
 
 /**
@@ -101,7 +103,10 @@ export function pushForSet(record: DeviceRecord): DevicePatch | null {
   if (!push) return null;
   const others = push.others && Object.fromEntries(Object.entries(push.others).filter(([key]) => listed.has(key)));
   const own = push.own && { ...push.own, tokens: Object.fromEntries(Object.entries(push.own.tokens).filter(([key]) => listed.has(key))) };
-  const next = pruned({ ...(own ? { own } : {}), ...(others ? { others } : {}) });
+  const dropped = Object.keys(push.others ?? {}).length !== Object.keys(others ?? {}).length || Object.keys(push.own?.tokens ?? {}).length !== Object.keys(own?.tokens ?? {}).length;
+  // A device that knew this device's subscription (its key pair included) is out of the set: a new one is made.
+  const renew = push.renew || (dropped && !!own);
+  const next = pruned({ ...push, ...(own ? { own } : {}), ...(others ? { others } : { others: undefined }), ...(renew ? { renew: true as const } : {}) });
   return JSON.stringify(next) === JSON.stringify(push) ? null : { push: next };
 }
 
@@ -113,8 +118,40 @@ export function deviceOfToken(push: DevicePush | undefined, token: string): stri
 
 function pruned(push: DevicePush): DevicePush | undefined {
   const others = push.others && Object.keys(push.others).length ? push.others : undefined;
-  if (!push.own && !others) return undefined;
-  return { ...(push.own ? { own: push.own } : {}), ...(others ? { others } : {}) };
+  const renew = push.renew && push.own ? push.renew : undefined;
+  if (!push.own && !others && !push.allowed) return undefined;
+  return { ...(push.own ? { own: push.own } : {}), ...(others ? { others } : {}), ...(renew ? { renew } : {}), ...(push.allowed ? { allowed: push.allowed } : {}) };
+}
+
+/** The record's patch that asks this device to make a new subscription (null: it has none, or was asked already). */
+export function withRenew(record: DeviceRecord): DevicePatch | null {
+  if (!record.push?.own || record.push.renew) return null;
+  return { push: { ...record.push, renew: true } };
+}
+
+/**
+ * Asks the device whose subscription the profile hands out to make a new one (`push.ts`, WISP 06 § Push and the phone):
+ * a contact that held it was deleted or muted, or a device that knew it was removed. Only from the active device.
+ */
+export const DEVICE_RENEW_FRAME = "device-renew";
+
+/**
+ * The chats' tokens the active device hands out under the profile's subscription, for the push worker of the device
+ * the subscription belongs to: `{"t":"device-tokens","k":["<token>", ...]}`. A chat deleted or muted there is not in it.
+ */
+export const DEVICE_TOKENS_FRAME = "device-tokens";
+
+/** The tokens a `device-tokens` frame lists, or null for a malformed one (it then says nothing). */
+export function readDeviceTokens(frame: DeviceFrame): string[] | null {
+  if (frame.t !== DEVICE_TOKENS_FRAME || !Array.isArray(frame.k) || frame.k.length > MAX_ALLOWED_TOKENS) return null;
+  const tokens = frame.k as unknown[];
+  return tokens.every((token) => typeof token === "string" && /^[A-Za-z0-9_-]{16,64}$/.test(token)) ? [...new Set(tokens as string[])].sort() : null;
+}
+
+/** The record's patch for the tokens the active device listed (null: the same list). */
+export function withAllowed(record: DeviceRecord, tokens: string[]): DevicePatch | null {
+  if (JSON.stringify(record.push?.allowed ?? null) === JSON.stringify(tokens)) return null;
+  return { push: { ...record.push, allowed: tokens } };
 }
 
 const sameSubscription = (a: Pick<WakeSubscription, "endpoint" | "p256dh" | "auth" | "vapid">, b: WakeTarget) =>

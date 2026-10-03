@@ -1,5 +1,5 @@
 import {
-  bytesEqual, classifyTurnRead, fromBase64Url, newDeviceSetSecret, randomBytes, setUpdateFrame, signTombstone, signTurnPacket, toBase64Url, turnKeys,
+  bytesEqual, classifyTurnRead, fromBase64Url, newDeviceSetSecret, randomBytes, readTurnPacket, setUpdateFrame, signTombstone, signTurnPacket, toBase64Url, turnKeys,
   type DeviceFrame, type Signer, type TurnKeys, type TurnNetwork, type TurnSourcePut,
 } from "@ghostly/core";
 import { MAX_DEVICES, MAX_EARLIER_SETS, type DevicePatch, type DeviceRecord, type DeviceSlot, type EarlierDeviceSet } from "./state";
@@ -188,12 +188,25 @@ export async function putTombstones(network: TurnNetwork, record: DeviceRecord, 
     try {
       const answers = await network.turnRead(keys.identity.pubKeyZ32);
       const read = classifyTurnRead({ keys, ownKey, stored: null }, answers);
-      if (read.result === "tombstone" && read.payload && !bytesEqual(read.payload, tomb)) { out.push({ d: set.d, puts: [], foreign: true }); continue; }
+      if (read.result === "tombstone" && read.payload && !bytesEqual(read.payload, tomb)) {
+        // One that lists the same devices is ours in effect: a staying device put it in place of a set of its own it
+        // gave up (`ownSet.ts`). It stands, and it is no foreign set.
+        out.push({ d: set.d, puts: [], ...(sameDevices(keys, tomb, read.payload) ? {} : { foreign: true as const }) });
+        continue;
+      }
       if (!Object.keys(read.conditions).length) { out.push({ d: set.d, puts: [] }); continue; }
       out.push({ d: set.d, puts: await network.turnPut(keys.identity.pubKeyZ32, tomb, read.conditions) });
     } catch { out.push({ d: set.d, puts: [] }); }
   }
   return out;
+}
+
+/** Whether two tombstones at one address list the same devices in the same slots. */
+function sameDevices(keys: TurnKeys, a: Uint8Array, b: Uint8Array): boolean {
+  const ra = readTurnPacket(keys, a), rb = readTurnPacket(keys, b);
+  if (ra.kind !== "valid" || rb.kind !== "valid") return false;
+  const listed = (slots: typeof ra.record.slots) => slots.map((slot) => (slot ? toBase64Url(slot.key) : "")).join(",");
+  return listed(ra.record.slots) === listed(rb.record.slots);
 }
 
 /** The frames this device still has to hand over: each earlier set's frame, to each staying device that has not acknowledged it. */

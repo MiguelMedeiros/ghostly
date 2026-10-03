@@ -123,6 +123,7 @@ import { peekTurn, type TurnPeek } from "../devices/restoreGuard";
 import { afterStop, planHandoffWallets, type HandoffTakerFacts, type HandoffWalletPlan, type WalletHome } from "../devices/handoffWallets";
 import { clearWalletHomes, readWalletHomes, writeWalletHomes } from "../devices/walletHomes";
 import { postPush, profileWakeAfter, profileWakeOnRemoval, wakeOwnerOf } from "../devices/push";
+import { MAX_ALLOWED_TOKENS } from "../devices/state";
 import { awayFrom, setAwayWallets, setSingleWriterGate, refuseAway } from "./paymentAdapters/away";
 import { breezStorage } from "./paymentAdapters/providers/breezSdk";
 import { normalizePhrase } from "./paymentAdapters/providers/recoveryPhrase";
@@ -2225,8 +2226,19 @@ export class GhostlyNode implements EngineImplementation {
    */
   private async deviceWakeReceived(from: string, target: WakeTarget | null): Promise<void> {
     if (!this.ownDeviceKey || this.shuttingDown) return;
-    const { next, changed } = profileWakeAfter(this.settings.wake, from, target, this.ownDeviceKey);
-    if (changed) await this.replaceProfileWake(next);
+    const before = this.settings.wake;
+    // A new subscription asked of `from` (`wakeRenew`) is done once it shares another endpoint than the one to replace.
+    const asked = this.settings.wakeRenew?.[from];
+    if (asked !== undefined && (!target || target.endpoint !== asked)) {
+      const { [from]: _done, ...rest } = this.settings.wakeRenew!;
+      this.settings = { ...this.settings, wakeRenew: Object.keys(rest).length ? rest : undefined };
+      if (!this.settings.wakeRenew) delete this.settings.wakeRenew;
+      this.renewAsked.delete(from);
+      await db.putSettings(this.settings);
+    }
+    const { next, changed } = profileWakeAfter(before, from, target, this.ownDeviceKey);
+    // That device replaced (or dropped) the subscription the profile handed out: whoever held the old one reaches nothing.
+    if (changed) await this.replaceProfileWake(next, { rotated: before?.device === from && (!target || target.endpoint !== before.endpoint) });
   }
 
   /** The subscription this device's record keeps as its own becomes the profile's, when the profile has another device's. */
@@ -2234,14 +2246,18 @@ export class GhostlyNode implements EngineImplementation {
     if (!this.ownDeviceKey || this.options.singleDevice) return;
     const own = (await readDeviceRecord(databaseName()))?.push?.own;
     if (!own || this.settings.wake?.device === this.ownDeviceKey) return;
+    // A new subscription still asked of that device stays asked (`wakeRenew`): a contact may hold its old one.
     await this.replaceProfileWake({ endpoint: own.e, p256dh: own.p, auth: own.a, vapid: { publicKey: own.vp, privateKey: own.vk }, device: this.ownDeviceKey });
   }
 
-  /** The profile's push target replaced by another device's (or gone), every chat's token kept. */
-  private async replaceProfileWake(next: WakeSubscription | undefined): Promise<void> {
+  /**
+   * The profile's push target replaced by another device's (or gone), every chat's token kept. `rotated`: the one it
+   * replaces no longer exists (its device made a new one, or none), so a new subscription asked for it is done.
+   */
+  private async replaceProfileWake(next: WakeSubscription | undefined, { rotated = false }: { rotated?: boolean } = {}): Promise<void> {
     this.settings = { ...this.settings, wake: next };
     if (!next) delete this.settings.wake;
-    delete this.settings.wakeRotate;
+    if (rotated || !next) delete this.settings.wakeRotate;
     await db.putSettings(this.settings);
     for (const live of this.links.values()) {
       const edge = this.meshEdge(live.stored);
@@ -2252,11 +2268,54 @@ export class GhostlyNode implements EngineImplementation {
     this.emitState();
   }
 
-  /** A contact that held this profile's subscription is gone or muted: the app is to replace it (`wakeRotate`). */
+  /**
+   * Someone who held this profile's subscription should no longer reach it (a contact deleted or muted, a device
+   * removed): it is replaced (`wakeRotate`). This device's own, by its page. Another device's (the phone's, handed out
+   * while this desktop is active), by that device: it is asked over the device link (`wakeRenew`, said again on each
+   * session until it shares a new one), and `wakeRotate` stays until then (WISP 06 § Push and the phone).
+   */
   private async rotateWake(): Promise<void> {
-    if (!this.settings.wake || this.settings.wakeRotate) return;
-    this.settings = { ...this.settings, wakeRotate: true };
+    const wake = this.settings.wake;
+    if (!wake) return;
+    const owner = wake.device && wake.device !== this.ownDeviceKey ? wake.device : undefined;
+    const ask = owner !== undefined && this.settings.wakeRenew?.[owner] !== wake.endpoint;
+    if (this.settings.wakeRotate && !ask) return;
+    this.settings = { ...this.settings, wakeRotate: true, ...(ask ? { wakeRenew: { ...this.settings.wakeRenew, [owner!]: wake.endpoint } } : {}) };
     await db.putSettings(this.settings);
+    if (ask) { this.renewAsked.delete(owner!); this.askDeviceRenewals(); }
+  }
+
+  /** Devices asked for a new subscription on their link's current session. */
+  private readonly renewAsked = new Set<string>();
+
+  /** Asks each device that still owes a new subscription, once per session of its link. */
+  private askDeviceRenewals(): void {
+    const links = this.deviceLinks;
+    if (!links) return;
+    for (const key of Object.keys(this.settings.wakeRenew ?? {})) {
+      if (!links.live(key)) { this.renewAsked.delete(key); continue; }
+      if (!this.renewAsked.has(key) && links.askRenew(key)) this.renewAsked.add(key);
+    }
+  }
+
+  /** What each device was last told of the chats' tokens, by its signing key. */
+  private readonly sentTokens = new Map<string, string>();
+
+  /**
+   * Tells each other device which chats' tokens the profile hands out (`device-tokens`): the push worker of a standby
+   * shows a notice only for those, so a chat deleted or muted here stays quiet there too. Said when it changes, and on
+   * each session of a link.
+   */
+  private syncDeviceTokens(): void {
+    const links = this.deviceLinks;
+    if (!links || !this.ownDeviceKey) return;
+    const tokens = [...new Set([...this.links.values()].flatMap((live) => (live.stored.wakeToken && !live.stored.wakeMuted ? [live.stored.wakeToken] : [])))].sort().slice(0, MAX_ALLOWED_TOKENS);
+    const said = JSON.stringify(tokens);
+    for (const view of links.views()) {
+      if (view.earlier) continue;
+      if (view.status !== "live") { this.sentTokens.delete(view.key); continue; }
+      if (this.sentTokens.get(view.key) !== said && links.sendTokens(view.key, tokens)) this.sentTokens.set(view.key, said);
+    }
   }
 
   /**
@@ -4612,6 +4671,7 @@ export class GhostlyNode implements EngineImplementation {
     delete (settings as Partial<Settings>).wakeRotate;
     delete (settings as Partial<Settings>).wakeMutedGroups;
     delete (settings as Partial<Settings>).wakeHeldBy;
+    delete (settings as Partial<Settings>).wakeRenew;
     // The first-run wallet setup's record: the engine's alone.
     delete (settings as Partial<Settings>).walletSetup;
     const relayBefore = this.hyperdhtRelay;
@@ -4825,7 +4885,7 @@ export class GhostlyNode implements EngineImplementation {
       this.deviceLinks = new DeviceLinks({
         profile: databaseName(), transport: this.transport, turn: this.turnNetwork(), pollIntervals: this.pollIntervals,
         createPeerConnection: this.devicePeerConnection(), nativeTransports: this.nativeFactories, offline: !this.networkOn,
-        onChange: () => this.emitState(),
+        onChange: () => { this.emitState(); this.askDeviceRenewals(); this.syncDeviceTokens(); },
         onDeviceWake: (from, target) => this.deviceWakeReceived(from, target),
         pushSend: (request) => this.postPush(request),
       });
@@ -4931,7 +4991,16 @@ export class GhostlyNode implements EngineImplementation {
    */
   private async afterDeviceRemoved(key: string): Promise<void> {
     const { next, changed } = profileWakeOnRemoval(this.settings.wake, key);
-    if (changed) await this.replaceProfileWake(next);
+    if (changed) await this.replaceProfileWake(next, { rotated: true });
+    // The removed device knew the subscription the profile hands out, and its key pair: a new one is made (its owner
+    // asked over the link when that is not this device). The devices that stay renew their own (`pushForSet`).
+    else await this.rotateWake();
+    if (this.settings.wakeRenew?.[key] !== undefined) {
+      const { [key]: _gone, ...rest } = this.settings.wakeRenew;
+      this.settings = { ...this.settings, wakeRenew: Object.keys(rest).length ? rest : undefined };
+      if (!this.settings.wakeRenew) delete this.settings.wakeRenew;
+      await db.putSettings(this.settings);
+    }
     if (await clearWalletHomes(key)) {
       await this.loadWalletHomes();
       await this.refreshWallet().catch(() => {});
@@ -6518,6 +6587,8 @@ export class GhostlyNode implements EngineImplementation {
     this.stateTimer = setTimeout(() => {
       this.stateTimer = null;
       this.events.onState(this.getState());
+      // A chat deleted or muted, a token made: the other devices learn which tokens the profile hands out.
+      if (this.deviceLinks) this.syncDeviceTokens();
     }, delayMs);
   }
 

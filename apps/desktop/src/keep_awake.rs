@@ -15,7 +15,8 @@ static HOLD: Mutex<Option<Hold>> = Mutex::new(None);
 
 /// Keeps the computer from sleeping while idle (`on`), or lets it sleep again. Answers whether it is held now: false
 /// where this system offers no way (the switch then says nothing it cannot do).
-#[tauri::command]
+// Off the main thread: starting a helper waits a moment to see it survive.
+#[tauri::command(async)]
 pub fn keep_awake(on: bool) -> Result<bool, String> {
     let mut hold = HOLD
         .lock()
@@ -37,6 +38,19 @@ pub fn keep_awake(on: bool) -> Result<bool, String> {
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 struct Hold(std::process::Child);
 
+/// How long a helper must keep running after it starts to count as holding the computer awake.
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+const SURVIVES: std::time::Duration = std::time::Duration::from_millis(300);
+
+/// The first of these paths that exists.
+#[cfg(target_os = "linux")]
+fn first_present(paths: &[&'static str]) -> Option<&'static str> {
+    paths
+        .iter()
+        .copied()
+        .find(|path| std::path::Path::new(path).exists())
+}
+
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 impl Hold {
     fn start() -> Option<Hold> {
@@ -45,22 +59,35 @@ impl Hold {
         let child = std::process::Command::new("/usr/bin/caffeinate")
             .args(["-i", "-w", &pid])
             .spawn();
+        // Both by their full path: a `PATH` the app inherits is not trusted to find them.
         #[cfg(target_os = "linux")]
-        let child = std::process::Command::new("systemd-inhibit")
-            .args([
-                "--what=idle:sleep",
-                "--who=Ghostly",
-                "--why=Keeps this computer awake for a handoff",
-                "--mode=block",
-                "tail",
-                &format!("--pid={pid}"),
-                "-f",
-                "/dev/null",
-            ])
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .spawn();
-        child.ok().map(Hold)
+        let child = {
+            let inhibit = first_present(&["/usr/bin/systemd-inhibit", "/bin/systemd-inhibit"])?;
+            let tail = first_present(&["/usr/bin/tail", "/bin/tail"])?;
+            std::process::Command::new(inhibit)
+                .args([
+                    "--what=idle:sleep",
+                    "--who=Ghostly",
+                    "--why=Keeps this computer awake for a handoff",
+                    "--mode=block",
+                    tail,
+                    &format!("--pid={pid}"),
+                    "-f",
+                    "/dev/null",
+                ])
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .spawn()
+        };
+        Hold::if_it_survives(child.ok()?)
+    }
+
+    /// Held only if the helper is still running a moment later: `systemd-inhibit` exits at once when it may not take
+    /// the lock (no logind, a session that refuses it), and the switch must not say it holds then.
+    fn if_it_survives(child: std::process::Child) -> Option<Hold> {
+        let mut hold = Hold(child);
+        std::thread::sleep(SURVIVES);
+        hold.alive().then_some(hold)
     }
 
     /// The helper is still running (it may have been killed from outside).
@@ -137,6 +164,21 @@ impl Hold {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[test]
+    fn a_helper_that_exits_at_once_holds_nothing() {
+        let gone = std::process::Command::new("true").spawn().unwrap();
+        assert!(Hold::if_it_survives(gone).is_none());
+        let running = std::process::Command::new("sleep")
+            .arg("5")
+            .spawn()
+            .unwrap();
+        let held = Hold::if_it_survives(running);
+        assert!(held.is_some());
+        // Let go: the helper is ended, not left behind.
+        drop(held);
+    }
 
     /// One test: the hold is one for the whole app, so two tests at once would let go of each other's.
     #[test]

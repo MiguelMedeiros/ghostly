@@ -1,22 +1,22 @@
 import {
-  DEVICES_CAPABILITY, HANDOFF_CAPABILITY, GhostLink, RTC_CONFIG, SET_ACK, SET_UPDATE, checkPushEndpoint, createIdentity, deviceEchoFrame, deviceEchoNonce, deviceLinkPairing, devicePingFrame,
+  DEVICES_CAPABILITY, HANDOFF_CAPABILITY, GhostLink, RTC_CONFIG, SET_ACK, SET_UPDATE, checkPushEndpoint, vapidKeysMatch, createIdentity, deviceEchoFrame, deviceEchoNonce, deviceLinkPairing, devicePingFrame,
   fromBase64Url, setAckFrame, type DeviceFrame, type NativeEndpoint, type NativeTransport, type PairedTransport, type PkarrTransport, type PollIntervals, type PushRequest, type TurnNetwork,
   type WakeTarget,
 } from "@ghostly/core";
-import { DEVICE_WAKE_FRAME, DeviceWaker, deviceWakeFrame, otherTarget, ownTargetFor, postPush, pushForSet, readDeviceWake, withOtherPush, withOwnPush } from "./push";
+import { DEVICE_RENEW_FRAME, DEVICE_TOKENS_FRAME, DEVICE_WAKE_FRAME, DeviceWaker, deviceWakeFrame, otherTarget, ownTargetFor, postPush, pushForSet, readDeviceTokens, readDeviceWake, withAllowed, withOtherPush, withOwnPush, withRenew } from "./push";
 import type { WakeSubscription } from "../shared/types";
 import { enrollmentUnfinished, finishEnrollment } from "./enroll";
 import { viewOf } from "./gate";
 import { DEVICE_GATED_ERROR, type DeviceLinkEngine, type DeviceLinkHost } from "./linkOnly";
 import { DeviceSetError, deviceIdentity, openTurnKeeper } from "./setup";
 import { loadDeviceSigningKey, type DeviceSigningKey } from "./signingKey";
-import type { DeviceRecord, DeviceState } from "./state";
+import type { DevicePatch, DeviceRecord, DeviceState } from "./state";
 import { amendDevice, forgetDevice, moveDevice, readDeviceRecord } from "./store";
 import { acknowledged, pendingFrames } from "./remove";
 import { checkSetUpdate } from "./setUpdate";
 import type { TurnKeeper, TurnOutcome } from "./turn";
 import { TakeoverRefusal, canTakeOver, forceTakeover, takeoverTarget } from "./takeover";
-import { canStartOwnSet, resumeOwnSet, startOwnSet, type OwnSetOutcome, type OwnSetPorts } from "./ownSet";
+import { canStartOwnSet, resumeOwnSet, startOwnSet, supersedeOwnTombstone, type OwnSetOutcome, type OwnSetPorts } from "./ownSet";
 import { peekTurn } from "./restoreGuard";
 import { newDeviceSecretDue } from "./rotate";
 import { provesHandoffPassword } from "./handoffPake";
@@ -445,7 +445,38 @@ export class DeviceLinks implements DeviceLinkEngine {
     if (frame.t === SET_ACK) { if (running.earlier) await this.acked(running.key, running.d); return; }
     if (frame.t === DEVICE_TURN_HINT) { if (!running.earlier) await this.hinted(); return; }
     if (frame.t === DEVICE_WAKE_FRAME) { if (!running.earlier) await this.deviceWake(running.key, frame); return; }
+    if (frame.t === DEVICE_RENEW_FRAME || frame.t === DEVICE_TOKENS_FRAME) { if (!running.earlier) await this.fromActive(running.key, frame); return; }
     await this.options.onFrame?.(running.key, frame);
+  }
+
+  /**
+   * What the active device asks of the device whose subscription it hands out (`push.ts`): a new subscription
+   * (`device-renew`), or the chats' tokens its push worker may show (`device-tokens`). Taken only from the device the
+   * record names active, and never by the active device itself.
+   */
+  private async fromActive(from: string, frame: DeviceFrame): Promise<void> {
+    await this.pushExclusive(async () => {
+      const record = await this.record();
+      if (!record || record.state === "active" || record.activeSlot === undefined || record.deviceSet[record.activeSlot]?.key !== from) return;
+      let patch: DevicePatch | null = null;
+      if (frame.t === DEVICE_RENEW_FRAME) patch = withRenew(record);
+      else { const tokens = readDeviceTokens(frame); if (tokens) patch = withAllowed(record, tokens); }
+      if (patch) await amendDevice(this.options.profile, patch);
+    });
+  }
+
+  /** Asks the device with this signing key to make a new subscription. False when its link is not live (ask again later). */
+  askRenew(key: string): boolean {
+    const running = this.find(key);
+    if (!running || running.earlier || !this.isLive(running)) return false;
+    try { running.link.sendDeviceFrame({ t: DEVICE_RENEW_FRAME }); return true; } catch { return false; }
+  }
+
+  /** Tells the device with this signing key which chats' tokens are handed out under the profile's subscription. */
+  sendTokens(key: string, tokens: string[]): boolean {
+    const running = this.find(key);
+    if (!running || running.earlier || !this.isLive(running)) return false;
+    try { running.link.sendDeviceFrame({ t: DEVICE_TOKENS_FRAME, k: tokens }); return true; } catch { return false; }
   }
 
   // ---------- push between the devices (WISP 06 § Push and the phone, `push.ts`) ----------
@@ -594,6 +625,12 @@ export class DeviceLinks implements DeviceLinkEngine {
       if (check.from === "standby") await amendDevice(this.options.profile, check.patch);
       else await moveDevice(this.options.profile, "standby", check.patch);
       try { running.link.sendDeviceFrame(setAckFrame()); } catch { /* the remover sends it again; the new link acknowledges it too */ }
+      // It had started a set of its own: its tombstone, which lists only itself, gives way to one that lists the
+      // remover's devices, so the others still waiting at the old address are not made `removed` (`ownSet.ts`).
+      if (record?.ownSet && typeof frame.tomb === "string") {
+        await amendDevice(this.options.profile, { ownSet: undefined }).catch(() => {});
+        await this.ownSetPorts().then((ports) => supersedeOwnTombstone(ports, record, fromBase64Url(frame.tomb as string))).catch(() => false);
+      }
       const now = await this.record();
       if (now) this.host?.show(viewOf(now));
       this.later(SET_ACK_FLUSH_MS, () => void this.refresh().then(() => this.restartHandoff()).then(() => this.checkTurn()).catch(() => {}));
@@ -757,18 +794,21 @@ export class DeviceLinks implements DeviceLinkEngine {
       case "devicePushState": {
         // What a standby's page needs to keep its push subscription (`useStandbyPush`): the endpoint the record holds,
         // and the public half of its VAPID pair to subscribe again with. Never the private half.
-        const own = (await this.record())?.push?.own;
-        return own ? { endpoint: own.e, vapidPublic: own.vp } : null;
+        // `renew`: a new subscription is wanted (a removal, or a contact deleted or muted on the active device).
+        const push = (await this.record())?.push;
+        return push?.own ? { endpoint: push.own.e, vapidPublic: push.own.vp, ...(push.renew ? { renew: true } : {}) } : null;
       }
       case "devicePushSet": {
         // A standby's browser replaced its subscription (or notifications were turned off): the record follows, and the
-        // other devices are told. Only the browser's part: a standby makes no new key pair.
-        const p = (params as { subscription?: unknown } | null)?.subscription as { endpoint?: unknown; p256dh?: unknown; auth?: unknown } | null | undefined;
+        // other devices are told. With `vapid`: a renewal, a new key pair with the new subscription.
+        const p = (params as { subscription?: unknown } | null)?.subscription as { endpoint?: unknown; p256dh?: unknown; auth?: unknown; vapid?: { publicKey?: unknown; privateKey?: unknown } } | null | undefined;
         if (p === null) { await this.setOwnPush(null); return null; }
         if (!p || typeof p.endpoint !== "string" || typeof p.p256dh !== "string" || typeof p.auth !== "string") throw new Error("Not a push subscription");
         checkPushEndpoint(p.endpoint);
         if (!/^[A-Za-z0-9_-]{80,100}$/.test(p.p256dh) || !/^[A-Za-z0-9_-]{20,24}$/.test(p.auth)) throw new Error("Not a push subscription");
-        await this.setOwnPush({ endpoint: p.endpoint, p256dh: p.p256dh, auth: p.auth });
+        const vapid = p.vapid && typeof p.vapid.publicKey === "string" && typeof p.vapid.privateKey === "string" ? { publicKey: p.vapid.publicKey, privateKey: p.vapid.privateKey } : undefined;
+        if (p.vapid !== undefined && (!vapid || !vapidKeysMatch(vapid))) throw new Error("The VAPID keys are not a pair");
+        await this.setOwnPush({ endpoint: p.endpoint, p256dh: p.p256dh, auth: p.auth, ...(vapid ? { vapid } : {}) });
         return null;
       }
       case "deviceSetNoticeSeen": {

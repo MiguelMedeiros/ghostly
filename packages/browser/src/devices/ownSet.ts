@@ -1,6 +1,6 @@
 import {
   TURN_SETTLE_MS, bytesEqual, classifyTurnRead, fromBase64Url, handoffAttemptAllowed, handoffAttemptFailed, handoffAttemptSucceeded, handoffRetryAfter, newDeviceSetSecret,
-  randomBytes, signTombstone, signTurnPacket, toBase64Url, turnKeys, type TurnNetwork, type TurnRead, type TurnSigner,
+  randomBytes, readTurnPacket, signTombstone, signTurnPacket, toBase64Url, turnKeys, type TurnNetwork, type TurnRead, type TurnSigner,
 } from "@ghostly/core";
 import { pendingRaise } from "./raise";
 import { MAX_DEVICES, MAX_EARLIER_SETS, type DevicePatch, type DeviceRecord, type DeviceSlot, type OwnSetPlan, type StoredDeviceState } from "./state";
@@ -67,6 +67,8 @@ export async function startOwnSet(ports: OwnSetPorts, request: { password: strin
   if (!record || record.state !== "moving") throw new TakeoverRefusal("state", "Only a device that waits for its devices' new secret starts a set of its own.");
   if (record.ownSet) return resumeOwnSet(ports);
   if (!record.copy) throw new TakeoverRefusal("no-copy", "This device holds no copy of the profile.");
+  // What the screen offers is what is allowed here too: a device that can only be added back makes no set of its own.
+  if (!canStartOwnSet(record)) throw new TakeoverRefusal("state", "This device cannot start a device set of its own.");
   const allowed = handoffAttemptAllowed(record.takeoverAttempts, now());
   if (allowed !== "ok") throw new TakeoverRefusal(allowed, allowed === "locked-out" ? "Too many tries. Try again later." : "Too many tries on this device.", allowed === "locked-out" ? handoffRetryAfter(record.takeoverAttempts, now()) : undefined);
   if (record.copy === "frozen" || record.verifier) {
@@ -182,4 +184,27 @@ async function won(ports: OwnSetPorts, record: DeviceRecord, plan: OwnSetPlan, a
     // Its own subscription stays its own; what it knew of the other devices goes with the old set.
     push: record.push?.own ? { own: { ...record.push.own, tokens: {} } } : undefined,
   });
+}
+
+/**
+ * A device that put a tombstone of its own (a set of its own, settling) and then took the remover's new secret after all
+ * (a `set-update`): its tombstone, which lists only itself, would make every other device left at the old address
+ * `removed`, with no remover's frame able to bring it back. It puts in its place a tombstone that lists the devices the
+ * remover's lists (`removerTomb`), signed from its own slot there, with an instance below what stands, so it counts:
+ * the others stay `moving` and take the remover's frame. The remover takes a tombstone that lists its own staying
+ * devices for its own (`remove.ts`). True when one was put.
+ */
+export async function supersedeOwnTombstone(ports: Pick<OwnSetPorts, "signer" | "network" | "random">, before: DeviceRecord, removerTomb: Uint8Array): Promise<boolean> {
+  if (!ports.network || !before.ownSet || !before.d || before.ownSlot === undefined) return false;
+  const keys = turnKeys(fromBase64Url(before.d));
+  const remover = readTurnPacket(keys, removerTomb);
+  if (remover.kind !== "valid" || !remover.record.tombstone) return false;
+  const own = before.deviceSet[before.ownSlot];
+  const ownSlot = remover.record.slots.findIndex((slot) => !!slot && !!own && toBase64Url(slot.key) === own.key);
+  if (ownSlot < 0) return false;
+  const standing = classifyTurnRead({ keys, ownKey: fromBase64Url(own!.key), stored: null }, await ports.network.turnRead(keys.identity.pubKeyZ32));
+  if (!Object.keys(standing.conditions).length) return false;
+  const tomb = await signTombstone(keys, ownSlot, remover.record.slots, ports.signer, { instance: instanceBelow(standing.result === "tombstone" ? standing.record?.instance : undefined, ports.random) });
+  const puts = await ports.network.turnPut(keys.identity.pubKeyZ32, tomb, standing.conditions);
+  return puts.some((put) => put.outcome === "stored");
 }

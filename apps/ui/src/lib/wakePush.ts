@@ -215,7 +215,10 @@ export function useWakeTableSync(text: WakeWords): void {
  * push worker shows on this device and where it finds the device state (written now: this page holds no chats), and this
  * device's own subscription kept as the browser has it. A browser may replace a subscription at any time: the device
  * record follows, with the same key pair, and the other devices are told over the device link. With notifications no
- * longer allowed, this device has none any more, and they are told that too.
+ * longer allowed, this device has none any more, and they are told that too. When a new subscription is wanted
+ * (`renew`: a device that knew this one's was removed, or a contact that held it was deleted or muted on the active
+ * device), a new one is made with a new key pair. Looked at again every `STANDBY_PUSH_EVERY_MS`, since the active device
+ * may ask while the screen shows.
  */
 export function useStandbyPush(text: WakeWords, on: boolean): void {
   const words = JSON.stringify({ ...text, db: databaseName() });
@@ -224,17 +227,30 @@ export function useStandbyPush(text: WakeWords, on: boolean): void {
     if (!push || !on) return;
     const profile = activeProfileId();
     void push.syncText?.(profile, JSON.parse(words) as WakeWords).catch(() => {});
-    void (async () => {
-      const stored = await engine.call("devicePushState");
-      if (!stored) return;
-      const current = await push.current(profile);
-      if (current?.endpoint === stored.endpoint) return;
-      if (typeof Notification !== "undefined" && Notification.permission === "granted") {
-        const keys = await push.subscribe(profile, { publicKey: stored.vapidPublic });
-        await engine.call("devicePushSet", { subscription: keys });
-      } else {
-        await engine.call("devicePushSet", { subscription: null });
-      }
-    })().catch(() => {});
+    let busy = false;
+    const keep = async () => {
+      if (busy) return;
+      busy = true;
+      try {
+        const stored = await engine.call("devicePushState");
+        if (!stored) return;
+        const current = await push.current(profile);
+        if (current?.endpoint === stored.endpoint && !stored.renew) return;
+        if (typeof Notification === "undefined" || Notification.permission !== "granted") {
+          await engine.call("devicePushSet", { subscription: null });
+          return;
+        }
+        // A renewal: a new endpoint and a new key pair, so whoever held the old ones reaches nothing.
+        const vapid = stored.renew ? generateVapidKeys() : undefined;
+        const keys = await push.subscribe(profile, vapid ?? { publicKey: stored.vapidPublic });
+        await engine.call("devicePushSet", { subscription: vapid ? { ...keys, vapid } : keys });
+      } finally { busy = false; }
+    };
+    void keep().catch(() => {});
+    const timer = setInterval(() => void keep().catch(() => {}), STANDBY_PUSH_EVERY_MS);
+    return () => clearInterval(timer);
   }, [words, on]);
 }
+
+/** How often a standby's page looks at its subscription again (`useStandbyPush`). */
+export const STANDBY_PUSH_EVERY_MS = 60_000;

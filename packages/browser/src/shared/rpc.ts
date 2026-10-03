@@ -381,9 +381,9 @@ export interface EngineApi {
    * A standby's own push subscription as its device record holds it (WISP 06 § Push and the phone): the endpoint, and
    * the public half of the VAPID pair to subscribe again with. Null when this device has none. Device-link-only mode.
    */
-  devicePushState(): { endpoint: string; vapidPublic: string } | null;
+  devicePushState(): { endpoint: string; vapidPublic: string; renew?: true } | null;
   /** A standby's browser replaced its subscription, or it has none any more: the record follows, the other devices are told. */
-  devicePushSet(params: { subscription: { endpoint: string; p256dh: string; auth: string } | null }): void;
+  devicePushSet(params: { subscription: { endpoint: string; p256dh: string; auth: string; vapid?: import("@ghostly/core").VapidKeys } | null }): void;
   /**
    * The handoff (WISP 06 § The handoff). Errors start with `handoff-<reason>:`. The verifier of the password proof,
    * made from the lock password the person just typed (Add a device, a password set or changed).
