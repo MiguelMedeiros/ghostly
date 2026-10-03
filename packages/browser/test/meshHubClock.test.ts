@@ -7,7 +7,9 @@ import { CommunityWorld, type Peer } from "./communityWorld";
  * Hubs of a private group past 16 members (WISP 9xx · Group Mesh § Hubs) when one device's clock differs. A hub dates
  * its beacon entry by its own clock, and a member judged it by its own: a member whose clock was 90 s or more from the
  * hubs' saw no hub (their entries looked stale, or not come yet), and a hub whose clock was off was a hub to nobody.
- * On headless engines (`CommunityWorld`), each ticking by its own clock.
+ * On headless engines (`CommunityWorld`), each ticking by its own clock. The hub cases fail before the change (members
+ * count on one hub only); a member that is not a hub, and saw none, got there all the same through the hubs' word
+ * (`group-reach`), and its cases stay here so the clock learning never takes that away.
  */
 const MINUTE = 60_000;
 const SIZE = 18, HUBS = [3, 7], MEMBER = 10, HUB = 3;
