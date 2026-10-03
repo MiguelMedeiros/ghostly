@@ -46,8 +46,11 @@
       "cancelled": "Interrotto. Non è cambiato nulla.",
       "damaged": "La copia è arrivata danneggiata. Non è cambiato nulla.",
       "dropped": "La connessione è caduta. Non è cambiato nulla.",
+      "expiry": "Rinnova prima le tue monete {{wallet}}.",
       "failed": "Qualcosa è andato storto. Non è cambiato nulla.",
+      "loading": "Un portafoglio non si può leggere ora. Riprova tra un momento.",
       "lockedOut": "Troppi tentativi. Sblocca {{device}} per riprovare.",
+      "mainnet": "Il denaro Mainnet non può ancora passare a un altro dispositivo. Svuota prima i tuoi portafogli Mainnet.",
       "offline": "Sei offline.",
       "older": "Aggiorna prima Ghostly su questo dispositivo.",
       "password": "Password errata.",
@@ -57,7 +60,7 @@
       "turn": "Un altro dispositivo ha preso il controllo. Questo dispositivo è in attesa.",
       "unreachable": "Impossibile raggiungere {{device}}. Deve essere acceso, con Ghostly aperto.",
       "version": "Ghostly è stato aggiornato nel frattempo. Non è cambiato nulla.",
-      "wallet": "Questo profilo contiene denaro, che non può ancora cambiare dispositivo. Svuota prima i suoi portafogli."
+      "wallet": "Un portafoglio di qui non può essere spostato con questa versione di Ghostly."
     },
     "later": "Porta i file grandi più tardi",
     "laterNote": "{{size}} di file grandi restano su {{device}} per ora.",
@@ -69,6 +72,8 @@
     "offerHint": "Circa {{size}}.",
     "offerTitle": "Spostare qui questo profilo da {{device}}?",
     "passwordHint": "Scrivi la password di blocco di questo profilo. {{device}} la controlla.",
+    "stays": "{{wallet}} resta su questo dispositivo.",
+    "staysExpires": "{{wallet}} resta su questo dispositivo. Le sue monete scadono il {{date}}: usa Ghostly qui prima di allora.",
     "step": {
       "authorizing": "Controllo della password",
       "checking": "Controllo",

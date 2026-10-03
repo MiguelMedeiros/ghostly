@@ -20,6 +20,12 @@
     "sweepingInfo": "Ark のコインは期限のあるバッチに入っています。Ghostly は開いている間、期限前に更新します。期限切れのコインもあなたのものですが、まず Ark サーバーがそのバッチをオンチェーンに戻します（スイープ）。これは新しい Bitcoin ブロックを待つため、1 時間以上かかることもよくあります。それまでは使うことも回収することもできません。その後、回収で新しいバッチに移せます。",
     "useProvider": "このプロバイダーを使う"
   },
+  "away": {
+    "expires": "コインの期限は {{date}} です。それまでに {{device}} で Ghostly を使ってください。",
+    "otherDevice": "保管しているデバイス",
+    "text": "{{wallet}} はここでは使えません。{{device}} で使ってください。",
+    "title": "{{device}} にあります"
+  },
   "backup": {
     "download": "ダウンロード",
     "file": "ウォレットのバックアップ",
@@ -122,6 +128,7 @@
   "cards": {
     "amount": "{{amount}} {{unit}}",
     "balance": {
+      "away": "{{device}} にあります",
       "locked": "ロック中",
       "needsKey": "キーが必要",
       "noFederation": "フェデレーションなし",
@@ -149,6 +156,7 @@
       "usdtSepolia": "Sepolia · テストトークン"
     },
     "status": {
+      "away": "別の場所",
       "checkSettings": "設定を確認",
       "connecting": "接続中…",
       "experimental": "試験運用",

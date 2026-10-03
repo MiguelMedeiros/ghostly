@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { FAILURES, handoffErrorKey, sizeText, useHandoffView } from "../../lib/handoff";
+import { FAILURES, handoffErrorKey, handoffErrorWallet, sizeText, useHandoffView, walletNameOf } from "../../lib/handoff";
+import { dayText } from "../wallet/WalletAway";
 import { engine } from "@ghostly/browser/platform/engine";
 import type { HandoffView } from "@ghostly/browser/devices/handoff";
 import { meteredConnection } from "@ghostly/browser/devices/handoffHost";
@@ -16,11 +17,11 @@ import { DeviceDialog, field, primaryButton, quietButton } from "./DeviceDialog"
 
 /** Where a handoff stands, in one line, a bar and Cancel while nothing has changed yet. */
 export function HandoffProgress({ view, onCancel }: { view: HandoffView; onCancel?: () => void }) {
-  const { t } = useI18n();
+  const { t, language } = useI18n();
   const device = view.device || t("devices.join.otherDevice");
   const failed = view.step === "failed";
   const percent = view.total > 0 ? Math.min(100, Math.floor((view.bytes / view.total) * 100)) : 0;
-  const line = failed ? t(FAILURES[view.failure ?? "failed"], { device })
+  const line = failed ? t(FAILURES[view.failure ?? "failed"], { device, wallet: walletNameOf(view.wallet), date: view.expiresAt !== undefined ? dayText(view.expiresAt, language) : "" })
     : view.step === "connecting" ? t("devices.handoff.step.connecting", { device })
       : view.step === "authorizing" ? t("devices.handoff.step.authorizing")
         : view.step === "copying" ? t("devices.handoff.step.copying", { done: sizeText(view.bytes), total: sizeText(view.total) })
@@ -44,6 +45,13 @@ export function HandoffProgress({ view, onCancel }: { view: HandoffView; onCance
       {view.step === "settling" && <p className="text-xs text-text-muted">{t("devices.handoff.step.settlingInfo")}</p>}
       {!!view.later && <p data-testid="handoff-later-note" className="text-xs text-text-muted">{t("devices.handoff.laterNote", { size: sizeText(view.later), device })}</p>}
       {view.newer && <p className="text-xs text-text-muted">{t("devices.handoff.newer")}</p>}
+      {!failed && view.role === "giver" && (view.stays ?? []).map((stay) => (
+        <p key={`${stay.type}:${stay.network}`} data-testid="handoff-stays" className="text-xs text-text-muted">
+          {stay.expiresAt !== undefined
+            ? t("devices.handoff.staysExpires", { wallet: walletNameOf(stay.type), date: dayText(stay.expiresAt, language) })
+            : t("devices.handoff.stays", { wallet: walletNameOf(stay.type) })}
+        </p>
+      ))}
       {cancellable && onCancel && <>
         <button type="button" data-testid="handoff-cancel" onClick={onCancel} className={quietButton}>{t("devices.handoff.cancel")}</button>
         <p className="text-xs text-text-muted">{t("devices.handoff.cancelHint")}</p>
@@ -63,7 +71,7 @@ export function UseHereDialog({ device, onClose, onStarted }: { device: string; 
   const submit = async () => {
     setBusy(true); setError("");
     try { onStarted(await engine.call("deviceHandoffPull", { password, later: later ? HANDOFF_LATER_BYTES : 0 })); onClose(); }
-    catch (cause) { const key = handoffErrorKey(cause); setError(key ? t(key, { device }) : errorText(cause, t)); }
+    catch (cause) { const key = handoffErrorKey(cause); setError(key ? t(key, { device, wallet: handoffErrorWallet(cause) ?? "" }) : errorText(cause, t)); }
     finally { setBusy(false); }
   };
   return (
@@ -111,7 +119,7 @@ export function MoveDialog({ device, deviceKey, onClose }: { device: string; dev
   useEffect(() => {
     void engine.call("deviceHandoffPush", { key: deviceKey }).then(() => setStarted(true), (cause: unknown) => {
       const key = handoffErrorKey(cause);
-      setError(key ? t(key, { device }) : errorText(cause, t));
+      setError(key ? t(key, { device, wallet: handoffErrorWallet(cause) ?? "" }) : errorText(cause, t));
     });
   }, [deviceKey, device, t]);
   return (

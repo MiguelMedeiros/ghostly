@@ -77,7 +77,9 @@
     "usdtNeedsSepoliaGas": "需要先有一点 Sepolia ETH 作为 gas",
     "usdtNotEnoughGas": "用于 gas 的 ETH 不足",
     "usdtNotEnoughTokens": "代币余额不足",
-    "usdtRpcUnavailable": "USDT RPC 不可用"
+    "usdtRpcUnavailable": "USDT RPC 不可用",
+    "walletAway": "{{wallet}} 不能在这里使用。请在 {{device}} 上使用。",
+    "walletAwayUnnamed": "{{wallet}} 不能在这里使用。请在保存它的设备上使用。"
   },
   "extension": {
     "notPaymentLink": "这不是付款链接",

@@ -1,4 +1,5 @@
 import { generateMnemonic, validateMnemonic } from "@scure/bip39";
+import { awayFrom } from "./away";
 import { wordlist } from "@scure/bip39/wordlists/english.js";
 import type { PaymentTarget, WalletNetwork } from "@ghostly/core";
 import { store, STORES, transact, wrap } from "../../shared/idb";
@@ -88,6 +89,8 @@ export class BarkWallet {
 
   /** Opens the wallet; `create`: makes this network's default one first when there is none. Retries while the server is unreachable. */
   ensureReady(create = false): Promise<void> {
+    // At home on another device (WISP 06 § Wallets that stay home): never opened here.
+    if (awayFrom(`bark:${this.network}`) !== undefined) return Promise.resolve();
     if (this.readying) return this.readying.then(() => this.needsReady(create) ? this.startReady(create) : undefined);
     return this.startReady(create);
   }

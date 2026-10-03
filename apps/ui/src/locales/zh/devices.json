@@ -46,8 +46,11 @@
       "cancelled": "已停止。没有任何改变。",
       "damaged": "副本已损坏。没有任何改变。",
       "dropped": "连接已断开。没有任何改变。",
+      "expiry": "请先续期你的 {{wallet}} 币。",
       "failed": "出了点问题。没有任何改变。",
+      "loading": "现在无法读取某个钱包。请稍后再试。",
       "lockedOut": "尝试次数过多。请解锁 {{device}} 后再试。",
+      "mainnet": "Mainnet 的钱暂时还不能移到另一台设备。请先清空你的 Mainnet 钱包。",
       "offline": "你已离线。",
       "older": "请先在此设备上更新 Ghostly。",
       "password": "密码错误。",
@@ -57,7 +60,7 @@
       "turn": "另一台设备已接管。此设备处于待机状态。",
       "unreachable": "无法连接 {{device}}。它需要开机并打开 Ghostly。",
       "version": "Ghostly 在此期间已更新。没有任何改变。",
-      "wallet": "此资料中有资金，目前还不能迁移。请先清空它的钱包。"
+      "wallet": "此版本的 Ghostly 无法移动这里的某个钱包。"
     },
     "later": "稍后再传大文件",
     "laterNote": "{{size}} 的大文件暂时留在 {{device}} 上。",
@@ -69,6 +72,8 @@
     "offerHint": "约 {{size}}。",
     "offerTitle": "要把此资料从 {{device}} 迁移到这里吗？",
     "passwordHint": "输入此资料的锁屏密码。由 {{device}} 进行核对。",
+    "stays": "{{wallet}} 留在这台设备上。",
+    "staysExpires": "{{wallet}} 留在这台设备上。它的币将于 {{date}} 到期：请在此之前在这里使用 Ghostly。",
     "step": {
       "authorizing": "正在核对密码",
       "checking": "正在检查",

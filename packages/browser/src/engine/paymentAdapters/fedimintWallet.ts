@@ -1,4 +1,5 @@
 import { generateMnemonic, validateMnemonic } from "@scure/bip39";
+import { awayFrom } from "./away";
 import { wordlist } from "@scure/bip39/wordlists/english.js";
 import { decodeBolt11, engineError, engineText, isFederationId, type BitcoinNetwork, type PaymentTarget, type WalletNetwork } from "@ghostly/core";
 import { store, STORES, transact, wrap } from "../../shared/idb";
@@ -134,6 +135,8 @@ export class FedimintWallet {
 
   /** Opens every federation of this network. One that does not answer is tried again, the others work meanwhile. */
   ensureReady(): Promise<void> {
+    // At home on another device (WISP 06 § Wallets that stay home): never opened here.
+    if (awayFrom(`fedimint:${this.network}`) !== undefined) return Promise.resolve();
     clearTimeout(this.retry);
     if (this.stopped) return Promise.resolve();
     return Promise.all((this.saved?.federations ?? []).map((f) => this.open(f).catch(() => undefined))).then(() => {

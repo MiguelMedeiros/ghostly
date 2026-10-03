@@ -20,6 +20,12 @@
     "sweepingInfo": "Le monete Ark stanno in un lotto che scade; Ghostly le rinnova prima, finché è aperto. Le monete scadute sono ancora tue, ma prima il server Ark riporta il loro lotto on-chain (uno sweep). Questo attende nuovi blocchi Bitcoin, spesso un'ora o più. Fino ad allora non si possono né spendere né recuperare; dopo, Recupera le sposta in un nuovo lotto.",
     "useProvider": "Usa questo provider"
   },
+  "away": {
+    "expires": "Le monete scadono il {{date}}. Usa Ghostly su {{device}} prima di allora.",
+    "otherDevice": "il dispositivo che lo custodisce",
+    "text": "{{wallet}} non si può usare qui. Usalo su {{device}}.",
+    "title": "Su {{device}}"
+  },
   "backup": {
     "download": "Scarica",
     "file": "Backup del portafoglio",
@@ -122,6 +128,7 @@
   "cards": {
     "amount": "{{amount}} {{unit}}",
     "balance": {
+      "away": "Su {{device}}",
       "locked": "Bloccato",
       "needsKey": "Serve una chiave",
       "noFederation": "Nessuna federazione",
@@ -149,6 +156,7 @@
       "usdtSepolia": "Sepolia · token di prova"
     },
     "status": {
+      "away": "Altrove",
       "checkSettings": "Controlla le impostazioni",
       "connecting": "Connessione…",
       "experimental": "Sperimentale",

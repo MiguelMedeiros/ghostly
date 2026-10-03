@@ -8,10 +8,11 @@ import {
 import { amend, firstRecord, transition, type DevicePatch, type DeviceRecord, type StoredDeviceState } from "../src/devices/state";
 import {
   HandoffGiver, HandoffTaker, type GiverPorts, type HandoffFile, type HandoffLinks, type HandoffRecords, type HandoffSelf, type HandoffSource,
-  type HandoffStaging, type HandoffStagingHost, type HandoffView, type LocalBusy, type TakerPorts,
+  type BusyReport, type HandoffStaging, type HandoffStagingHost, type HandoffStay, type HandoffView, type LocalBusy, type TakerPorts,
 } from "../src/devices/handoff";
 import { makeHandoffVerifier, type HandoffVerifier } from "../src/devices/handoffPake";
 import type { TurnOutcome } from "../src/devices/turn";
+import type { HandoffTakerFacts } from "../src/devices/handoffWallets";
 // covers: devices.handoff.machine
 
 /*
@@ -167,7 +168,13 @@ interface World {
   link: Link; profile: Profile; storage: Storage;
   giverRecords: Records; takerRecords: Records;
   giver: HandoffGiver; taker: HandoffTaker;
-  busy: { why: LocalBusy | null };
+  busy: { why: LocalBusy | BusyReport | null };
+  /** Who the giver said would take, at each check of its wallets, and at quiesce. */
+  asked: (HandoffTakerFacts | undefined)[]; quiescedFor: (HandoffTakerFacts | undefined)[];
+  /** What the engine adds to the record at quiesce (the Breez databases of wallets that move), and what stays here. */
+  quiesceExtra: DevicePatch; stays: HandoffStay[];
+  /** The databases the giver deleted once on standby. */
+  droppedDatabases: string[][];
   quiesced: DevicePatch[]; reloads: number; activeAgain: number;
   takes: { release: TurnRelease; turn: number }[];
   takeOutcome: () => TurnOutcome | null;
@@ -182,7 +189,7 @@ function world(options: { verifier?: boolean } = {}): World {
   const w = {
     link: new Link(), profile: new Profile(), storage: new Storage(),
     giverRecords: new Records(recordFor("ghostly_a", 0, "active")), takerRecords: new Records(recordFor("ghostly", 1, "standby")),
-    busy: { why: null }, quiesced: [], reloads: 0, activeAgain: 0, takes: [], giverSelf: {}, takerSelf: {},
+    busy: { why: null }, asked: [], quiescedFor: [], quiesceExtra: {}, stays: [], droppedDatabases: [], quiesced: [], reloads: 0, activeAgain: 0, takes: [], giverSelf: {}, takerSelf: {},
     takeOutcome: () => ({ kind: "start", read: { result: "mine", good: true, seen: 0n, invalid: [], unsigned: [], conditions: {}, record: { sequence: (N + 1) * 2 ** 20 + 1 } } }) as unknown as TurnOutcome,
   } as unknown as World;
   w.makeGiver = (phase) => {
@@ -190,9 +197,13 @@ function world(options: { verifier?: boolean } = {}): World {
       ownKey: giverKey.publicKey, sign: async (bytes) => giverKey.sign(bytes), turnAddress, links: w.link.end(A, B), records: w.giverRecords,
       self: async () => self(w.giverSelf), source: w.profile,
       verifier: async () => (options.verifier === false || phase === "gated" ? null : verifier()),
-      busy: async () => w.busy.why,
-      ...(phase === "active" ? { quiesce: async (patch: DevicePatch) => { w.quiesced.push(patch); await w.giverRecords.move("releasing", patch); } } : {}),
-      ...(phase === "gated" ? { backToActive: async () => { w.activeAgain += 1; if (w.giverRecords.record.state === "releasing") await w.giverRecords.move("active", { handoff: undefined }); } } : {}),
+      busy: async (taker) => { w.asked.push(taker); return w.busy.why; },
+      staying: async () => w.stays,
+      ...(phase === "active" ? { quiesce: async (patch: DevicePatch, taker?: HandoffTakerFacts) => { w.quiesced.push(patch); w.quiescedFor.push(taker); await w.giverRecords.move("releasing", { ...patch, ...w.quiesceExtra }); } } : {}),
+      ...(phase === "gated" ? {
+        backToActive: async () => { w.activeAgain += 1; if (w.giverRecords.record.state === "releasing") await w.giverRecords.move("active", { handoff: undefined }); },
+        dropDatabases: async (names: string[]) => { w.droppedDatabases.push(names); },
+      } : {}),
     };
     const giver = new HandoffGiver(ports);
     w.link.attach(A, giver);
@@ -531,13 +542,31 @@ describe("refusals before a byte is copied", () => {
     expect(w.giverRecords.record.handoffAttempts).toBeUndefined();
   });
 
-  it("a push from the active device while money is there is refused on the device itself, with the reason", async () => {
+  it("a push from the active device that its wallets keep here is refused on the device itself, with the reason and the wallet", async () => {
     const w = world();
     w.busy.why = "wallet";
     await expect(w.giver.push(B)).rejects.toThrow(/^handoff-wallet:/);
     w.busy.why = "loading";
-    await expect(w.giver.push(B)).rejects.toThrow(/^handoff-busy:/);
+    await expect(w.giver.push(B)).rejects.toThrow(/^handoff-loading:/);
+    w.busy.why = { why: "mainnet", wallet: "cashu" };
+    await expect(w.giver.push(B)).rejects.toThrow(/^handoff-mainnet:cashu:/);
+    w.busy.why = { why: "expiry", wallet: "bark", expiresAt: 1_800_000_000_000 };
+    await expect(w.giver.push(B)).rejects.toThrow(/^handoff-expiry:bark:/);
     expect(w.link.count("handoff-offer")).toBe(0);
+    // Each check named the device it would give the profile to.
+    expect(w.asked.every((taker) => taker?.key === B)).toBe(true);
+  });
+
+  it("a pull its wallets keep here: the taker is told only that the giver is busy; the giver's own screen says why", async () => {
+    const w = world();
+    w.busy.why = { why: "expiry", wallet: "bark", expiresAt: 1_800_000_000_000 };
+    await w.taker.pull(PASSWORD);
+    await until(() => w.taker.view()?.step === "failed");
+    expect(w.taker.view()).toMatchObject({ failure: "busy" });
+    expect(w.taker.view()!.wallet).toBeUndefined();
+    expect(w.giver.view()).toMatchObject({ role: "giver", key: B, step: "failed", failure: "expiry", wallet: "bark", expiresAt: 1_800_000_000_000 });
+    // The check knew the taker from its hello: its key, its kind and its wallet SDK pins.
+    expect(w.asked.at(-1)).toEqual({ key: B, kind: "web", pins: { ark: "0.4.76" } });
   });
 
   it("a taker with an older database: Update Ghostly on this device first", async () => {
@@ -881,5 +910,59 @@ describe("views", () => {
     expect(steps.has("connecting") || steps.has("authorizing") || steps.has("copying")).toBe(true);
     expect(JSON.stringify(w.taker.view())).not.toMatch(/secret|password/i);
     expect(readTurnPacket).toBeDefined();
+  });
+});
+
+describe("wallets in a handoff (WISP 06 § Wallets)", () => {
+  it("the plan is made for the taker that said hello: at the pull, and again at quiesce", async () => {
+    const w = world();
+    w.takerSelf = { kind: "desktop", pins: { ark: "0.4.75" } };
+    await fullPull(w);
+    expect(w.quiescedFor).toEqual([{ key: B, kind: "desktop", pins: { ark: "0.4.75" } }]);
+    expect(w.asked.filter((taker) => taker?.kind === "desktop").length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("the wallets that stay on the giver show on its screen while the profile moves", async () => {
+    const w = world();
+    w.stays = [{ type: "bark", network: "testnet", expiresAt: 1_800_000_000_000 }];
+    await w.taker.pull(PASSWORD);
+    await until(() => w.quiesced.length === 1);
+    expect(w.giver.view()?.stays).toEqual(w.stays);
+  });
+
+  it("the Breez databases of the wallets that moved are deleted once the giver is on standby, and the note goes", async () => {
+    const w = world();
+    const names = ["ghostly-breez-regtest-0123456789abcdef", "ghostly-breez-mainnet-fedcba9876543210"];
+    w.quiesceExtra = { breezDatabases: names };
+    await fullPull(w);
+    expect(w.giverRecords.record.state).toBe("standby");
+    expect(w.droppedDatabases).toEqual([names]);
+    expect(w.giverRecords.record.breezDatabases).toBeUndefined();
+  });
+
+  it("a giver that went back to active deletes nothing: its wallets are its own again", async () => {
+    const w = world();
+    w.quiesceExtra = { breezDatabases: ["ghostly-breez-regtest-0123456789abcdef"] };
+    await w.taker.pull(PASSWORD);
+    await until(() => w.quiesced.length === 1);
+    await reloadGiver(w);
+    await w.giver.cancel();
+    await until(() => w.activeAgain === 1);
+    expect(w.droppedDatabases).toEqual([]);
+  });
+
+  it("a released standby that could not delete them tries again when it starts", async () => {
+    const w = world();
+    const names = ["ghostly-breez-regtest-0123456789abcdef"];
+    w.quiesceExtra = { breezDatabases: names };
+    await fullPull(w);
+    // As if the delete had failed: the note is still there at the next start.
+    await w.giverRecords.amend({ breezDatabases: names });
+    w.droppedDatabases.length = 0;
+    w.giver.stop();
+    w.giver = w.makeGiver("gated");
+    await w.giver.resume();
+    expect(w.droppedDatabases).toEqual([names]);
+    expect(w.giverRecords.record.breezDatabases).toBeUndefined();
   });
 });

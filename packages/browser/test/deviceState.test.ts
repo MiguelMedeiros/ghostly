@@ -110,7 +110,7 @@ describe("a stored record", () => {
     const full = record("taking", {
       turnPacket: "cGFja2V0", d: KEY, lineage: "bGluZWFnZQ", activeSlot: 0, ownSlot: 1, releasedTurn: 6, seenSequence: 2 ** 40,
       handoff: { role: "taking", step: "verified", staging: "stage1", release: { turn: 8, to: KEY, h: KEY, s: KEY } },
-      leftFiles: [{ sha256: KEY, size: 20_000_000, where: "native" }], breezDatabase: "breez-abc",
+      leftFiles: [{ sha256: KEY, size: 20_000_000, where: "native" }], breezDatabases: ["ghostly-breez-regtest-0123456789abcdef"],
       earlierSets: [{ d: KEY, tombstone: "dG9tYg", setUpdate: "{\"t\":\"set-update\"}", pending: [KEY] }],
     });
     expect(parseDeviceRecord(structuredClone(full))).toEqual(full);

@@ -1,4 +1,5 @@
 import { generateMnemonic, validateMnemonic } from "@scure/bip39";
+import { awayFrom } from "./away";
 import { wordlist } from "@scure/bip39/wordlists/english.js";
 import { SPARK_NETWORKS, SPARK_PROVIDER, type PaymentTarget, type SparkNetwork, type WalletNetwork } from "@ghostly/core";
 import { store, STORES, transact, wrap } from "../../shared/idb";
@@ -6,7 +7,7 @@ import type { WalletMode } from "../../shared/mints";
 import { ModeChanged, ModeGate, WrongNetworkError, networkLabel } from "./modeGate";
 import { walletKey } from "./walletNetworks";
 import { intentRepository, newDeviceKey, sealSeed, unsealSeed, type EncryptedSeed } from "./persistence";
-import { loadBreezSdk, type BreezSdkModule } from "./providers/breezSdk";
+import { breezStorage, loadBreezSdk, type BreezSdkModule } from "./providers/breezSdk";
 import { SPARK_INVOICE_SECS, SparkAdapter, type SparkHistoryEntry } from "./spark";
 import type { SavedIntent } from "./coordinator";
 
@@ -63,6 +64,8 @@ export class SparkWallet {
 
   /** Opens the wallet; `create`: makes Testnet's regtest wallet first when there is none. Retries while Spark is unreachable. */
   ensureReady(create = false): Promise<void> {
+    // At home on another device (WISP 06 § Wallets that stay home): never opened here.
+    if (awayFrom(`spark:${this.network}`) !== undefined) return Promise.resolve();
     if (this.readying) return this.readying.then(() => this.needsReady(create) ? this.startReady(create) : undefined);
     return this.startReady(create);
   }
@@ -114,6 +117,16 @@ export class SparkWallet {
   private async secrets() {
     const saved = this.saved!;
     return { mnemonic: await unsealSeed(saved.seed, saved.deviceKey), apiKey: saved.apiKey ? await unsealSeed(saved.apiKey, saved.deviceKey) : undefined };
+  }
+
+  /**
+   * The Breez database this wallet's SDK keeps on this device, named from its phrase (`breezStorage`): a device that
+   * hands the wallet over deletes it (WISP 06 § Wallets). Undefined with no wallet.
+   */
+  async breezDatabase(): Promise<string | undefined> {
+    if (!this.saved) return undefined;
+    const { mnemonic } = await this.secrets();
+    return breezStorage(this.saved.network, mnemonic);
   }
 
   async stop() { this.stopped = true; this.gate.close(); await this.serial(() => this.lock()); }

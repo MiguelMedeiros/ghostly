@@ -222,8 +222,12 @@ export interface DeviceRecord {
   heldFiles?: HeldFile[];
   /** Wrong passwords of a pull, per taking device's signing key (WISP 06 § Authorizing a handoff). They do not move. */
   handoffAttempts?: Record<string, DeviceAttempts>;
-  /** Written at quiesce: the Breez database to delete once the handoff is done. */
-  breezDatabase?: string;
+  /**
+   * Written at quiesce: the Breez databases of the Spark wallets and Breez Lightning cards that move, deleted once this
+   * device released the turn (WISP 06 § Wallets): named from the phrase, a device that took the profile back would
+   * otherwise reopen a stale one. Cleared once they are gone.
+   */
+  breezDatabases?: string[];
   earlierSets: EarlierDeviceSet[];
   /** Grants sent whose `enroll-done` never came back: devices that hold `D` and are in no record. */
   unfinishedGrants?: UnfinishedGrant[];
@@ -405,7 +409,7 @@ export function parseDeviceRecord(value: unknown): DeviceRecord {
   for (const field of ["turnPacket", "d", "lineage"] as const) if (!optional(r[field], bytes)) return bad(field);
   if (!optional(r.signingKey, (v): v is DeviceSigningKeyKind => (DEVICE_SIGNING_KEY_KINDS as readonly unknown[]).includes(v))) return bad("signingKey");
   if (r.network !== undefined && !isNetwork(r.network)) return bad("network");
-  if (!optional(r.breezDatabase, text)) return bad("breezDatabase");
+  if (!optional(r.breezDatabases, (v): v is string[] => Array.isArray(v) && v.length <= 8 && v.every((name) => text(name) && /^ghostly-breez-/.test(name)))) return bad("breezDatabases");
   if (!optional(r.releasedTurn, (v): v is number => count(v, 2 ** 32 - 1))) return bad("releasedTurn");
   if (!optional(r.seenSequence, (v): v is number => count(v, Number.MAX_SAFE_INTEGER))) return bad("seenSequence");
   if (r.settle !== undefined) {

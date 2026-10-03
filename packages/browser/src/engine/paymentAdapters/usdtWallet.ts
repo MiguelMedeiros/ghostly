@@ -1,4 +1,5 @@
 import { generateMnemonic, validateMnemonic } from '@scure/bip39';
+import { awayFrom } from "./away";
 import { wordlist } from '@scure/bip39/wordlists/english.js';
 import { ETHEREUM_USDT, EVM_TEST_CHAINS, SEPOLIA_TEST_USDT, USDT_PUBLIC_RPC, type WalletNetwork } from '@ghostly/core';
 import type { WalletMode } from '../../shared/mints';
@@ -48,6 +49,8 @@ export class UsdtWallet {
    * while the RPC is unreachable.
    */
   ensureReady(create=false):Promise<void> {
+    // At home on another device (WISP 06 § Wallets that stay home): never opened here.
+    if (awayFrom(`usdt:${this.network}`) !== undefined) return Promise.resolve();
     if(this.readying)return this.readying.then(()=>this.needsReady(create)?this.startReady(create):undefined);
     return this.startReady(create);
   }

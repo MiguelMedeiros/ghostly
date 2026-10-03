@@ -950,9 +950,15 @@ export class CashuWallet {
   }
 
   /** One operation per mint at a time: two swaps must never pick the same proofs. */
+  /** Tasks inside a per-mint lock, running or waiting their turn: a swap there must end, not be cut (WISP 06 § Wallets). */
+  private lockedTasks = 0;
+  get swapping(): boolean { return this.lockedTasks > 0; }
+
   private locked<T>(mint: string, task: () => Promise<T>): Promise<T> {
     const previous = this.locks.get(mint) ?? Promise.resolve();
+    this.lockedTasks += 1;
     const next = previous.then(task, task);
+    void next.then(() => { this.lockedTasks -= 1; }, () => { this.lockedTasks -= 1; });
     this.locks.set(
       mint,
       next.catch(() => {}),

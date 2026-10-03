@@ -69,6 +69,22 @@ export async function activeAgainIfReleasing(profile: string, show: (view: Devic
   return true;
 }
 
+/**
+ * The Breez databases of wallets that moved away (WISP 06 § Wallets): the SDK keeps its own under the storage name and
+ * its tree store beside it (`<name>-tree`); any other database whose name starts with that name (the name carries a
+ * hash of the phrase, so nothing else does) goes too, where the browser lists its databases.
+ */
+export async function dropBreezDatabases(names: readonly string[], idb: Pick<IDBFactory, "deleteDatabase"> & { databases?: IDBFactory["databases"] } = indexedDB): Promise<void> {
+  const listed = await (idb.databases?.() ?? Promise.resolve([])).catch(() => [] as IDBDatabaseInfo[]);
+  for (const name of names) {
+    if (!/^ghostly-breez-/.test(name)) continue;
+    const found = listed.flatMap((info) => (info.name?.startsWith(name) ? [info.name] : []));
+    for (const database of new Set([name, `${name}-tree`, ...found])) {
+      await new Promise<void>((resolve) => { try { const request = idb.deleteDatabase(database); request.onsuccess = request.onerror = request.onblocked = () => resolve(); } catch { resolve(); } });
+    }
+  }
+}
+
 /** The handoff of a device that is not the active one, or null where the app registered no profile host. */
 export async function standbyHandoff(options: StandbyHandoffOptions): Promise<DeviceHandoffHandler | null> {
   const host = options.host === undefined ? handoffProfileHost() : options.host;
@@ -92,6 +108,7 @@ export async function standbyHandoff(options: StandbyHandoffOptions): Promise<De
     source: host.source(options.profile),
     verifier: async () => null,
     busy: async () => null,
+    dropDatabases: (names) => dropBreezDatabases(names),
     backToActive: async () => {
       // It never signed a release: it is the active device again, and starts as one.
       const now = await readDeviceRecord(options.profile);
@@ -119,7 +136,7 @@ export async function standbyHandoff(options: StandbyHandoffOptions): Promise<De
   }
   // `releasing` with no handoff of its own to go on with: active again.
   if (record.state === "releasing" && record.handoff?.role !== "releasing") { await activeAgainIfReleasing(options.profile, options.show); return null; }
-  if (record.handoff?.role === "releasing") await giver.resume();
+  if (record.handoff?.role === "releasing" || record.breezDatabases?.length) await giver.resume();
   if (record.handoff?.role === "taking") await taker.resume();
 
   /** Which side a frame from `from` is for: the one in a handoff with that device. */

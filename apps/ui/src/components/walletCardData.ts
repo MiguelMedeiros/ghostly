@@ -65,13 +65,16 @@ export const cardWallet=(wallet:WalletPlatform,card:Pick<InstanceCard,'network'|
  */
 export function walletCards(state:WalletState,{lightning='cards',t=english}:{lightning?:'cards'|'default';t?:Translate}={}):InstanceCard[] {
  return (state.wallets??[]).flatMap(w=>{
-  if(w.type!=='lightning')return [walletCard(w.type,w.network,networkState(state,w.network),undefined,t)];
+  if(w.type!=='lightning')return [away(w,walletCard(w.type,w.network,networkState(state,w.network),undefined,t),t)];
   // The Accept side: one Lightning card per network, the default for receiving (a request's invoice comes from it).
-  if(lightning==='default')return w.receive===false?[]:[walletCard(w.type,w.network,networkState(state,w.network),undefined,t)];
+  if(lightning==='default')return w.receive===false||w.home?[]:[walletCard(w.type,w.network,networkState(state,w.network),undefined,t)];
   const card=deckId(w,state)===cardId(w.type,w.network)?undefined:w.card;
-  return [walletCard(w.type,w.network,networkState(state,w.network,w.card),card,t)];
+  return [away(w,walletCard(w.type,w.network,networkState(state,w.network,w.card),card,t),t)];
  });
 }
+
+/** A wallet at home on another device (WISP 06): its card says where, and it cannot be used here. */
+const away=(w:WalletInstanceView,card:InstanceCard,t:Translate):InstanceCard=>w.home?{...card,balance:t('wallet.cards.balance.away',{device:w.home.device||t('wallet.away.otherDevice')}),status:t('wallet.cards.status.away'),ready:false}:card;
 
 /** A network's default Lightning card before its other Lightning cards, the rest in order: a request starts on it. */
 export const receivingFirst=<C extends InstanceCard>(cards:C[]):C[]=>{

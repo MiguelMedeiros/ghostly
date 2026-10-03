@@ -172,6 +172,15 @@ export class ProviderSources<P extends Connectable> {
 
   async start() { await this.load(this.mode); this.view = this.idle(); }
 
+  /** One saved secret of the source (a handoff asks whether an LND card pins its certificate, and a Breez phrase), or undefined. */
+  async secret(name: string): Promise<string | undefined> {
+    const stored = this.stored;
+    if (!stored?.secrets) return undefined;
+    const secrets = JSON.parse(await unsealSeed(stored.secrets, stored.deviceKey ?? "")) as Record<string, unknown>;
+    const value = secrets[name];
+    return typeof value === "string" && value ? value : undefined;
+  }
+
   /** The list of providers changed (a plugin registered): the picker is told, nothing reconnects. */
   refreshOffered() { this.view = { ...this.view, offered: this.offered() }; this.options.changed(); }
 

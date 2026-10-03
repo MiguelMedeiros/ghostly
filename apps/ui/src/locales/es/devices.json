@@ -46,8 +46,11 @@
       "cancelled": "Detenido. Nada cambió.",
       "damaged": "La copia llegó dañada. Nada cambió.",
       "dropped": "Se cortó la conexión. Nada cambió.",
+      "expiry": "Renueva primero tus monedas de {{wallet}}.",
       "failed": "Algo salió mal. Nada cambió.",
+      "loading": "No se puede leer una billetera ahora. Inténtalo de nuevo en un momento.",
       "lockedOut": "Demasiados intentos. Desbloquea {{device}} para intentarlo de nuevo.",
+      "mainnet": "El dinero de Mainnet todavía no puede pasar a otro dispositivo. Vacía primero tus billeteras de Mainnet.",
       "offline": "Estás sin conexión.",
       "older": "Actualiza Ghostly en este dispositivo primero.",
       "password": "Contraseña incorrecta.",
@@ -57,7 +60,7 @@
       "turn": "Otro dispositivo tomó el control. Este dispositivo está en espera.",
       "unreachable": "No se puede contactar con {{device}}. Debe estar encendido, con Ghostly abierto.",
       "version": "Ghostly se actualizó entretanto. Nada cambió.",
-      "wallet": "Este perfil tiene dinero, que aún no puede cambiar de dispositivo. Vacía sus billeteras primero."
+      "wallet": "Una billetera de aquí no puede moverse con esta versión de Ghostly."
     },
     "later": "Traer los archivos grandes después",
     "laterNote": "{{size}} de archivos grandes se quedan en {{device}} por ahora.",
@@ -69,6 +72,8 @@
     "offerHint": "Unos {{size}}.",
     "offerTitle": "¿Traer este perfil aquí desde {{device}}?",
     "passwordHint": "Escribe la contraseña de bloqueo de este perfil. {{device}} la comprueba.",
+    "stays": "{{wallet}} se queda en este dispositivo.",
+    "staysExpires": "{{wallet}} se queda en este dispositivo. Sus monedas vencen el {{date}}: usa Ghostly aquí antes.",
     "step": {
       "authorizing": "Comprobando la contraseña",
       "checking": "Comprobando",

@@ -20,6 +20,12 @@
     "sweepingInfo": "Les pièces Ark vivent dans un lot qui expire ; Ghostly les renouvelle avant, tant qu'il est ouvert. Les pièces expirées sont toujours à vous, mais le serveur Ark reprend d'abord leur lot on-chain (un balayage). Cela attend de nouveaux blocs Bitcoin, souvent une heure ou plus. D'ici là, elles ne peuvent être ni dépensées ni récupérées ; ensuite, Récupérer les place dans un nouveau lot.",
     "useProvider": "Utiliser ce fournisseur"
   },
+  "away": {
+    "expires": "Les pièces expirent le {{date}}. Utilisez Ghostly sur {{device}} avant.",
+    "otherDevice": "l'appareil qui le garde",
+    "text": "{{wallet}} ne peut pas être utilisé ici. Utilisez-le sur {{device}}.",
+    "title": "Sur {{device}}"
+  },
   "backup": {
     "download": "Télécharger",
     "file": "Sauvegarde du portefeuille",
@@ -122,6 +128,7 @@
   "cards": {
     "amount": "{{amount}} {{unit}}",
     "balance": {
+      "away": "Sur {{device}}",
       "locked": "Verrouillé",
       "needsKey": "Clé requise",
       "noFederation": "Aucune fédération",
@@ -149,6 +156,7 @@
       "usdtSepolia": "Sepolia · token de test"
     },
     "status": {
+      "away": "Ailleurs",
       "checkSettings": "Vérifiez les réglages",
       "connecting": "Connexion…",
       "experimental": "Expérimental",

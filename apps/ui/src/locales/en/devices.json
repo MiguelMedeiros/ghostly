@@ -46,8 +46,11 @@
       "cancelled": "Stopped. Nothing changed.",
       "damaged": "The copy was damaged. Nothing changed.",
       "dropped": "The connection dropped. Nothing changed.",
+      "expiry": "Renew your {{wallet}} coins first.",
       "failed": "Something went wrong. Nothing changed.",
+      "loading": "A wallet can't be read right now. Try again in a moment.",
       "lockedOut": "Too many tries. Unlock {{device}} to try again.",
+      "mainnet": "Mainnet money can't move to another device yet. Empty your Mainnet wallets first.",
       "offline": "You are offline.",
       "older": "Update Ghostly on this device first.",
       "password": "Wrong password.",
@@ -57,7 +60,7 @@
       "turn": "Another device took over. This device is on standby.",
       "unreachable": "Can't reach {{device}}. It must be on, with Ghostly open.",
       "version": "Ghostly was updated in between. Nothing changed.",
-      "wallet": "This profile holds money, which can't move yet. Empty its wallets first."
+      "wallet": "A wallet here can't move with this version of Ghostly."
     },
     "later": "Bring large files later",
     "laterNote": "{{size}} of large files stay on {{device}} for now.",
@@ -69,6 +72,8 @@
     "offerHint": "About {{size}}.",
     "offerTitle": "Move this profile here from {{device}}?",
     "passwordHint": "Type this profile's lock password. {{device}} checks it.",
+    "stays": "{{wallet}} stays on this device.",
+    "staysExpires": "{{wallet}} stays on this device. Its coins expire on {{date}}: use Ghostly here before then.",
     "step": {
       "authorizing": "Checking the password",
       "checking": "Checking",

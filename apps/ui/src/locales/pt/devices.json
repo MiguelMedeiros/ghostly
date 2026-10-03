@@ -46,8 +46,11 @@
       "cancelled": "Parado. Nada mudou.",
       "damaged": "A cópia chegou danificada. Nada mudou.",
       "dropped": "A conexão caiu. Nada mudou.",
+      "expiry": "Renove suas moedas de {{wallet}} primeiro.",
       "failed": "Algo deu errado. Nada mudou.",
+      "loading": "Não dá para ler uma carteira agora. Tente de novo em instantes.",
       "lockedOut": "Tentativas demais. Desbloqueie {{device}} para tentar de novo.",
+      "mainnet": "Dinheiro de Mainnet ainda não pode ir para outro dispositivo. Esvazie suas carteiras de Mainnet primeiro.",
       "offline": "Você está offline.",
       "older": "Atualize o Ghostly neste dispositivo primeiro.",
       "password": "Senha errada.",
@@ -57,7 +60,7 @@
       "turn": "Outro dispositivo assumiu. Este dispositivo está em espera.",
       "unreachable": "Não foi possível alcançar {{device}}. Ele precisa estar ligado, com o Ghostly aberto.",
       "version": "O Ghostly foi atualizado no meio do caminho. Nada mudou.",
-      "wallet": "Este perfil tem dinheiro, que ainda não pode mudar de dispositivo. Esvazie as carteiras primeiro."
+      "wallet": "Uma carteira daqui não pode ser movida com esta versão do Ghostly."
     },
     "later": "Trazer arquivos grandes depois",
     "laterNote": "{{size}} de arquivos grandes ficam em {{device}} por enquanto.",
@@ -69,6 +72,8 @@
     "offerHint": "Cerca de {{size}}.",
     "offerTitle": "Trazer este perfil de {{device}} para cá?",
     "passwordHint": "Digite a senha de bloqueio deste perfil. {{device}} a confere.",
+    "stays": "{{wallet}} fica neste dispositivo.",
+    "staysExpires": "{{wallet}} fica neste dispositivo. As moedas vencem em {{date}}: use o Ghostly aqui antes disso.",
     "step": {
       "authorizing": "Conferindo a senha",
       "checking": "Conferindo",

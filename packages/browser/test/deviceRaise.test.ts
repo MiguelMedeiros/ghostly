@@ -128,6 +128,7 @@ async function profileDb(name: string): Promise<IDBDatabase> {
       db.createObjectStore("settings");
       db.createObjectStore("paymentIntents", { keyPath: "review.id" });
       db.createObjectStore("groups", { keyPath: "id" });
+      db.createObjectStore("proofs", { keyPath: "secret" });
     };
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);
@@ -152,6 +153,8 @@ describe("the raise in the profile's database", () => {
     await put(db, "settings", { theme: "dark" }, "settings");
     await put(db, "groups", { id: "group-a" });
     await put(db, "groups", { id: "group-b" });
+    await put(db, "proofs", { secret: "free", mint: "https://mint.test", amount: 8 });
+    await put(db, "proofs", { secret: "held", mint: "https://mint.test", amount: 2, reserved: true });
     const t = at("2026-10-03T12:00:00Z");
     const pending = pendingRaise("restore", 0, t);
     await put(db, "settings", pending, PENDING_RAISE_KEY);
@@ -161,6 +164,9 @@ describe("the raise in the profile's database", () => {
     expect((await get<StoredLink>(db, "links", "chat")).dhtDeliveryState!.sequence).toBe(floor);
     expect(await get(db, "settings", "bdkWallet-1")).toEqual({ changeset: "{}", reserved: [], scanned: false });
     expect(await get(db, "settings", "settings")).toEqual({ theme: "dark" });
+    // Free ecash of the copy is checked at its mint before it counts; ecash a payment holds is left to that payment.
+    expect(await get(db, "proofs", "free")).toEqual({ secret: "free", mint: "https://mint.test", amount: 8, unchecked: true });
+    expect(await get(db, "proofs", "held")).toEqual({ secret: "held", mint: "https://mint.test", amount: 2, reserved: true });
     expect(await get<GroupAdminOff>(db, "settings", GROUP_ADMIN_OFF_KEY)).toEqual({ at: t, groups: ["group-a", "group-b"] });
     expect(await get<CounterRaise>(db, "settings", COUNTER_RAISE_KEY)).toEqual({ id: pending.id, floor, at: t, why: "restore" });
     expect(await get(db, "settings", PENDING_RAISE_KEY)).toBeUndefined();

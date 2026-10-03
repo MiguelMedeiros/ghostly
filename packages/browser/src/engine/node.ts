@@ -112,15 +112,18 @@ import { deviceNetworkOf, saveDeviceNetwork } from "../devices/network";
 import { EnrollCodeError, EnrollInviter, EnrollJoiner, EnrollRefusal, ghostLinkEnrollChannel, recoverEnrollment, type EnrollView, type OpenEnrollChannel } from "../devices/enroll";
 import { DeviceLinks, deviceSetView, type DeviceSetView } from "../devices/links";
 import { amendDevice, moveDevice, readDeviceRecord } from "../devices/store";
-import { HandoffGiver, type HandoffView } from "../devices/handoff";
-import { handoffProfileHost, handoffSelf } from "../devices/handoffHost";
+import { HandoffGiver, type BusyReport, type HandoffStay, type HandoffView } from "../devices/handoff";
+import { WALLET_SDK_PINS, handoffProfileHost, handoffSelf } from "../devices/handoffHost";
 import { handoffLinks, profileRecords } from "../devices/handoffStandby";
 import { isHandoffVerifier, makeHandoffVerifier, provesHandoffPassword, type HandoffVerifier } from "../devices/handoffPake";
 import { deviceIdentity, openTurnKeeper } from "../devices/setup";
 import { moveSet, resumeSetMove, type SetMovePorts } from "../devices/remove";
 import { newDeviceSecretDue } from "../devices/rotate";
 import { peekTurn, type TurnPeek } from "../devices/restoreGuard";
-import { walletHandoffProblem } from "../devices/handoffWallets";
+import { afterStop, planHandoffWallets, type HandoffTakerFacts, type HandoffWalletPlan, type WalletHome } from "../devices/handoffWallets";
+import { readWalletHomes, writeWalletHomes } from "../devices/walletHomes";
+import { setAwayWallets, refuseAway } from "./paymentAdapters/away";
+import { lightningPaying } from "./paymentAdapters/providers/lightningService";
 import { COUNTER_RAISE_KEY, GROUP_ADMIN_OFF_KEY, PENDING_RAISE_KEY, applyCounterRaise, isCounterRaise, isGroupAdminOff, isPendingRaise, type PendingRaise } from "../devices/raise";
 import { fileBytes } from "../shared/fileBytes";
 import { FileAppender, readStored, removeStored, storedSize, streamStored } from "../shared/storedFiles";
@@ -406,6 +409,11 @@ export interface NodeOptions {
    * work is done, until `leaveLimited()` is called after the first good read. Default: off.
    */
   limited?: boolean;
+  /**
+   * When the read the active device made as a condition of starting said it is the active one (ms): a single-writer
+   * wallet opens without another read while it is under 60 seconds old (WISP 06 § When a device checks).
+   */
+  turnReadAt?: number;
   /**
    * This app stays online, so it offers to be a hub of the private groups past 16 members it is in (WISP 9xx · Group
    * Mesh § Hubs). Default: the Desktop app; the CLI says so itself; a browser tab only when the admin pins it.
@@ -1252,6 +1260,7 @@ export class GhostlyNode implements EngineImplementation {
     // Relays are a setting only where relays are the transport.
     this.relays = options.transport ? null : new RelayTransport();
     this.limitedMode = options.limited === true;
+    this.turnGoodAt = options.turnReadAt ?? null;
     // An engine that starts properly uses the transport as it is, as before.
     this.transport = this.limitedMode ? refusingWhileLimited(options.transport ?? this.relays!, () => this.limitedMode) : options.transport ?? this.relays!;
     this.groupTransport = withRequestOptions(this.transport, { group: true });
@@ -1324,7 +1333,7 @@ export class GhostlyNode implements EngineImplementation {
         ark: this.arkWallets[network].view, bark: this.barkWallets[network].view, fedimint: this.fedimintWallets[network].view, spark: this.sparkWallets[network].view,
         usdt: this.usdtWallets[network].view, lightning: this.lightnings[network].view, lightnings: this.lightnings[network].views(), bitcoin: this.bitcoins[network].view, awaiting: awaiting.networks[network] };
     }
-    const wallets = walletInstances(networks);
+    const wallets = this.withHomes(walletInstances(networks));
     // The flat fields are Mainnet's, for a caller from before wallets had their own network; `networks` has both.
     this.walletView = { ...networks.mainnet, networks, wallets, offers: this.walletOffers(networks, wallets), intents: (await intentRepository.list()).map((saved) => saved.review), setup: this.walletSetup.view() };
     this.announcePaymentNetworks(wallets);
@@ -1497,7 +1506,7 @@ export class GhostlyNode implements EngineImplementation {
       if (record) await this.stopReplaced(viewOf(record));
       return false;
     }
-    if (outcome?.kind === "single" || outcome?.kind === "start" || (outcome?.kind === "go-on" && !outcome.restricted)) { this.limitedMode = false; return true; }
+    if (outcome?.kind === "single" || outcome?.kind === "start" || (outcome?.kind === "go-on" && !outcome.restricted)) { this.limitedMode = false; this.noteGoodTurn(); return true; }
     this.readTurnWhileLimited();
     this.emitState();
     return false;
@@ -1531,6 +1540,8 @@ export class GhostlyNode implements EngineImplementation {
 
   /** Every wallet's stored state, loaded: the first half of what `start()` does for money. */
   private async startWallets(): Promise<void> {
+    // Which wallets are at home on another device (WISP 06 § Wallets that stay home): none of them opens here.
+    await this.loadWalletHomes();
     // Wallets stored the way they were before each had its own network take their network's key first. Nothing
     // is deleted: see walletNetworks.ts. The report names keys only.
     const migrated = await migrateWalletNetworks();
@@ -1556,14 +1567,13 @@ export class GhostlyNode implements EngineImplementation {
   /** The wallets that exist, opened, and what was in flight looked at again: the second half. */
   private openStartedWallets(fresh: boolean): void {
     void this.pollPaymentStatus().catch(()=>{});
-    // Federations joined before: opened (and the notes a contact sent that an interruption left unredeemed, redeemed).
-    void Promise.all(WALLET_NETWORKS.map((n) => this.fedimintWallets[n].ensureReady())).then(() => this.desk.resumeFedimint());
     for (const network of WALLET_NETWORKS) {
-      // The Lightning and Bitcoin sources the person set up (the Cashu mints need no network to connect).
-      void this.lightnings[network].recover().then(() => this.lightnings[network].ensureReady());
+      // The Bitcoin source the person set up, and the token wallet: not single-writer wallets.
       void this.bitcoins[network].ensureReady();
-      this.openWallets(network);
+      if (this.options.automaticWallets !== false) void this.usdtWallets[network].ensureReady();
     }
+    // A wallet with one writer in the world opens only after a good turn read under 60 seconds old (WISP 06 § Wallets).
+    void this.openSingleWriters();
     // A new profile (nothing stored, no wallet, no chat) gets its default Mainnet wallets, in the background.
     void this.startWalletSetup(fresh && !this.walletView.wallets?.length && this.links.size === 0).catch(() => {});
   }
@@ -1579,6 +1589,8 @@ export class GhostlyNode implements EngineImplementation {
     if (!this.starting || !(await this.starting)) throw new Error("The engine did not start");
     if (!this.limitedMode) return;
     this.limitedMode = false;
+    // Left on a good read that says this device is the active one.
+    this.noteGoodTurn();
     // A wallet that fails to start must not keep the chats from being dialled: the failure is reported after them.
     let failure: unknown = null;
     try {
@@ -1625,7 +1637,93 @@ export class GhostlyNode implements EngineImplementation {
     void this.arkWallets[network].ensureReady();
     void this.barkWallets[network].ensureReady();
     void this.sparkWallets[network].ensureReady();
-    void this.usdtWallets[network].ensureReady();
+  }
+
+  /** The single-writer wallets wait for a good turn read (`singleWriterTurn`); the next one opens them. */
+  private singleWritersWaiting = false;
+
+  /**
+   * Opens the wallets whose SDK database has one writer in the world (Fedimint, Spark and the Breez source, Ark, Bark),
+   * once a good turn read under 60 seconds old says this device is the active one. Without one they wait, and the next
+   * good read opens them.
+   */
+  private async openSingleWriters(): Promise<void> {
+    if (!(await this.singleWriterTurn())) { this.singleWritersWaiting = true; return; }
+    if (this.shuttingDown) return;
+    this.singleWritersWaiting = false;
+    // Federations joined before: opened (and the notes a contact sent that an interruption left unredeemed, redeemed).
+    void Promise.all(WALLET_NETWORKS.map((n) => this.fedimintWallets[n].ensureReady())).then(() => this.desk.resumeFedimint());
+    for (const network of WALLET_NETWORKS) {
+      // The Lightning sources the person set up (the Cashu mints need no network to connect).
+      void this.lightnings[network].recover().then(() => this.lightnings[network].ensureReady());
+      this.openWallets(network);
+    }
+  }
+
+  /** When the last good turn read said this device is the active one (ms); null before one. */
+  private turnGoodAt: number | null = null;
+
+  /** A good read said this device is the active one: single-writer wallets that waited for one open now. */
+  private noteGoodTurn(): void {
+    this.turnGoodAt = Date.now();
+    if (this.singleWritersWaiting && this.walletsStarted && !this.limitedMode) void this.openSingleWriters();
+  }
+
+  /**
+   * Whether a single-writer wallet may open now (WISP 06 § When a device checks: before opening one, a good read under
+   * 60 seconds old). A profile on one device has no turn. Otherwise the last good read counts while it is fresh; else
+   * the turn is read now, and a read that says another device took over stops this one.
+   */
+  private async singleWriterTurn(): Promise<boolean> {
+    if (this.options.singleDevice || knownDeviceGate()?.state !== "active") return true;
+    if (this.turnGoodAt !== null && Date.now() - this.turnGoodAt <= 60_000) return true;
+    if (this.limitedMode || !this.networkOn || this.shuttingDown) return false;
+    const outcome = await (async () => {
+      const keeper = await (this.deviceLinks?.turnKeeper() ?? openTurnKeeper(databaseName(), this.turnNetwork()));
+      return keeper ? keeper.check(false) : null;
+    })().catch(() => null);
+    if (outcome?.kind === "gated") {
+      const record = await readDeviceRecord(databaseName()).catch(() => null);
+      if (record) await this.stopReplaced(viewOf(record));
+      return false;
+    }
+    if (outcome?.kind === "single" || outcome?.kind === "start" || (outcome?.kind === "go-on" && !outcome.restricted)) { this.turnGoodAt = Date.now(); return true; }
+    return false;
+  }
+
+  // -- wallets at home on another device (WISP 06 § Wallets that stay home) -------------------------------------------
+
+  /** The home marks on this profile's wallet records, by wallet id. */
+  private walletHomes: Record<string, WalletHome> = {};
+  /** The wallets at home on another device: their home's name, and when their coins expire. */
+  private awayWallets = new Map<string, { device: string; expiresAt?: number }>();
+
+  /**
+   * Reads the home marks and says which wallets are away from this device. A profile with no device set has no other
+   * device: its marks are ignored, and every wallet is here.
+   */
+  private async loadWalletHomes(): Promise<void> {
+    this.walletHomes = await readWalletHomes().catch(() => ({}));
+    const away = new Map<string, { device: string; expiresAt?: number }>();
+    if (!this.options.singleDevice) {
+      const record = await readDeviceRecord(databaseName()).catch(() => null);
+      const own = record?.ownSlot !== undefined ? record.deviceSet[record.ownSlot]?.key : undefined;
+      if (record && own) for (const [id, home] of Object.entries(this.walletHomes)) {
+        if (home.key === own) continue;
+        const device = record.deviceSet.find((slot) => slot?.key === home.key)?.name ?? "";
+        away.set(id, { device, ...(home.expiresAt !== undefined ? { expiresAt: home.expiresAt } : {}) });
+      }
+    }
+    this.awayWallets = away;
+    setAwayWallets(new Map([...away].map(([id, home]) => [id, home.device])));
+  }
+
+  /** The wallets as the deck shows them: one at home on another device says where. */
+  private withHomes(wallets: WalletInstanceView[]): WalletInstanceView[] {
+    return wallets.map((wallet) => {
+      const away = this.awayWallets.get(wallet.id);
+      return away ? { ...wallet, home: away } : wallet;
+    });
   }
 
   /**
@@ -3720,6 +3818,8 @@ export class GhostlyNode implements EngineImplementation {
     const { type, network } = params;
     if (!WALLET_TYPES.includes(type)) throw new Error("Unknown kind of wallet");
     if (network !== "mainnet" && network !== "testnet") throw new Error("Choose Mainnet or Testnet");
+    // A wallet at home on another device is neither made again nor joined to here.
+    if (type !== "lightning" && type !== "cashu") refuseAway(`${type}:${network}`, WALLET_NAMES[type]);
     await this.refreshWallet();
     const offer = this.walletView.offers?.find((o) => o.type === type && o.network === network);
     if (offer && !offer.available) throw new Error(offer.reason ?? "This wallet cannot be made here");
@@ -3815,6 +3915,8 @@ export class GhostlyNode implements EngineImplementation {
     // What goes, as a noun: a card is a card, not "the … card wallet".
     const label = lightningName ? `${networkLabel(network)} Lightning card “${lightningName}”` : `${networkLabel(network)} ${WALLET_NAMES[type]} wallet`;
     if (!this.walletView.wallets?.some((w) => w.type === type && w.network === network && (card === undefined || w.card === card))) throw new Error(`There is no ${label} to remove`);
+    // Its database is on its home device: removed there, never from here.
+    refuseAway(type === "lightning" ? `lightning:${network}:${card}` : `${type}:${network}`, lightningName ?? WALLET_NAMES[type]);
     const first = walletRemoval(type, network, this.walletView.networks?.[network], this.walletView.intents, card);
     if (first.comesWith) throw new Error(`Lightning through the Cashu mints comes with your ${networkLabel(network)} Cashu wallet: remove that wallet to remove it`);
     // Ecash minted now is counted in what it holds, not deleted with its invoice.
@@ -3942,7 +4044,8 @@ export class GhostlyNode implements EngineImplementation {
 
   /** The networks of this profile's wallets, per way of paying: every chat tells its contact (paired-payments). */
   private announcePaymentNetworks(wallets: WalletInstanceView[]) {
-    const key = JSON.stringify(paymentNetworksOf(wallets));
+    // A wallet at home on another device takes no payment here: it is not offered to contacts.
+    const key = JSON.stringify(paymentNetworksOf(wallets.filter((w) => !w.home)));
     if (key === this.announcedNetworks) return;
     this.announcedNetworks = key;
     for (const live of this.links.values()) live.link?.setPaymentNetworks?.(this.chatNetworks(live.stored));
@@ -3950,7 +4053,7 @@ export class GhostlyNode implements EngineImplementation {
   private announcedNetworks = "";
   /** What a chat announces: the networks of this profile's wallets, per way of paying, that the chat accepts. */
   private chatNetworks(stored: StoredLink): PaymentNetworks {
-    const mine = paymentNetworksOf(this.walletView.wallets ?? []);
+    const mine = paymentNetworksOf((this.walletView.wallets ?? []).filter((w) => !w.home));
     return Object.fromEntries(Object.entries(mine).map(([method, networks]) => [method, networks!.filter((n) => this.acceptsNetwork(stored, method as PaymentMethodName, n))]));
   }
   /** This chat takes this way of paying on this network (a card on its Accept side). */
@@ -4098,6 +4201,8 @@ export class GhostlyNode implements EngineImplementation {
    * other network refuses it untouched (WrongNetworkError) before this hands it on.
    */
   private async restoreInto<W, R>(wallets: PerNetwork<W>, network: WalletNetwork | undefined, restore: (wallet: W) => Promise<R>): Promise<{ wallet: W; result: R }> {
+    const kind = wallets === (this.arkWallets as unknown) ? "arkade" : wallets === (this.barkWallets as unknown) ? "bark" : wallets === (this.sparkWallets as unknown) ? "spark" : wallets === (this.usdtWallets as unknown) ? "usdt" : null;
+    if (kind) refuseAway(`${kind}:${this.net(network)}`, WALLET_NAMES[kind]);
     const first = wallets[this.net(network)];
     try { return { wallet: first, result: await restore(first) }; }
     catch (error) {
@@ -4632,6 +4737,7 @@ export class GhostlyNode implements EngineImplementation {
     await this.syncDeviceVerifier().catch(() => {});
     const keeper = await this.deviceLinks.turnKeeper();
     const outcome = await keeper?.check(false);
+    if (outcome?.kind === "go-on" && !outcome.restricted) this.noteGoodTurn();
     // Another device took the turn: the keeper wrote this device's new state. The pages start again into the gate.
     if (outcome?.kind === "gated" && !this.shuttingDown) {
       const record = await readDeviceRecord(databaseName());
@@ -4856,8 +4962,9 @@ export class GhostlyNode implements EngineImplementation {
       links: handoffLinks(links), records: profileRecords(profile), self: () => handoffSelf(host),
       source: host.source(profile),
       verifier: () => this.handoffVerifier(),
-      busy: () => this.handoffBusy(),
-      quiesce: (patch) => this.quiesceForHandoff(patch),
+      busy: (taker) => this.handoffBusy(taker),
+      staying: (taker) => this.handoffStaying(taker),
+      quiesce: (patch, taker) => this.quiesceForHandoff(patch, taker),
     });
     this.handoffGiver = giver;
     links.setHandoff({ receive: (from, frame) => void giver.receive(from, frame), linkChanged: (key, live) => giver.linkChanged(key, live), stop: () => giver.stop() });
@@ -4895,19 +5002,53 @@ export class GhostlyNode implements EngineImplementation {
   }
 
   /**
-   * Why this device cannot hand over now. Until wallets move (part 8 of WISP 06), any wallet with money in it or an
-   * operation open refuses the handoff, so no money is ever in two places: a balance on any network, anything a wallet
-   * waits for, or a payment not settled.
+   * The wallets in a handoff to `taker` (WISP 06 § Wallets, `planHandoffWallets`): what moves, what stays home, and
+   * what keeps the profile here now. `view`: the wallets as they are now, read fresh by default.
    */
-  private async handoffBusy(): Promise<"wallet" | "payment" | "loading" | null> {
+  private async handoffPlan(taker: HandoffTakerFacts | undefined, options: { view?: WalletView; final?: boolean; pinned?: string[] } = {}): Promise<HandoffWalletPlan> {
+    const record = await readDeviceRecord(databaseName()).catch(() => null);
+    const ownKey = record?.ownSlot !== undefined ? record.deviceSet[record.ownSlot]?.key : undefined;
+    if (!ownKey) return { refusal: { why: "wallet", at: "this device holds no key of its set" }, wallets: [] };
+    const pinned = options.pinned ?? (await this.cardFacts()).pinned;
+    this.walletHomes = await readWalletHomes().catch(() => this.walletHomes);
+    return planHandoffWallets({
+      view: options.view ?? this.walletView, read: this.walletsStarted, ownKey, ownPins: { ...WALLET_SDK_PINS }, ...(taker ? { taker } : {}),
+      homes: this.walletHomes, now: Date.now(), pinned: new Set(pinned), final: options.final === true,
+      executing: this.paymentCoordinator.running > 0 || this.wallet.swapping || lightningPaying() > 0,
+    });
+  }
+
+  /**
+   * Why this device cannot hand over to `taker` now (WISP 06 § Wallets): Mainnet money in a wallet that does not move
+   * on Mainnet yet, coins that expire soon away from their home, a wallet that cannot be read, a payment going through,
+   * or anything this build cannot judge. Null: the wallets move or stay home by their plan.
+   */
+  private async handoffBusy(taker?: HandoffTakerFacts): Promise<BusyReport | null> {
     // Limited mode opened no wallet, and wallets not started yet say nothing: what they hold is not known.
-    if (this.limitedMode || !this.walletsStarted) return "loading";
+    if (this.limitedMode || !this.walletsStarted) return { why: "loading" };
     // Read now, not the view of the last change: a wallet that changed since is counted as it is.
     await this.refreshWallet().catch(() => {});
-    let where = "";
-    const problem = walletHandoffProblem(this.walletView, this.walletsStarted, (at) => { where = at; });
-    if (problem) console.info(`[handoff] not now: ${problem} (${where})`);
-    return problem;
+    const { refusal } = await this.handoffPlan(taker);
+    if (!refusal) return null;
+    console.info(`[handoff] not now: ${refusal.why} (${refusal.at})`);
+    return { why: refusal.why, ...(refusal.wallet ? { wallet: refusal.wallet } : {}), ...(refusal.expiresAt !== undefined ? { expiresAt: refusal.expiresAt } : {}) };
+  }
+
+  /** What a handoff reads of the Lightning cards' sealed settings, every network's (`LightningCards.handoffFacts`). */
+  private async cardFacts(): Promise<{ pinned: string[]; breez: Map<string, string> }> {
+    const pinned: string[] = [], breez = new Map<string, string>();
+    for (const network of WALLET_NETWORKS) {
+      const facts = await this.lightnings[network].handoffFacts().catch(() => null);
+      pinned.push(...(facts?.pinned ?? []));
+      for (const [id, name] of facts?.breez ?? []) breez.set(id, name);
+    }
+    return { pinned, breez };
+  }
+
+  /** The wallets that stay on this device in a handoff to `taker`, for this device's screen. */
+  private async handoffStaying(taker: HandoffTakerFacts): Promise<HandoffStay[]> {
+    const { wallets } = await this.handoffPlan(taker);
+    return wallets.filter((w) => w.route === "home" && w.home?.key !== taker.key).map((w) => ({ type: w.type, network: w.network, ...(w.home?.expiresAt !== undefined ? { expiresAt: w.home.expiresAt } : {}) }));
   }
   /** Every wallet's stored state was loaded (`startWallets`): before that, a wallet view says nothing of what it holds. */
   private walletsStarted = false;
@@ -4917,26 +5058,40 @@ export class GhostlyNode implements EngineImplementation {
    * away, and the new active device dials them as a restarted one does), `releasing` is written with the handoff's
    * note, and the pages start again into the gate, where pass 2 reads the frozen database.
    */
-  private async quiesceForHandoff(patch: Parameters<typeof moveDevice>[2]): Promise<void> {
+  private async quiesceForHandoff(patch: Parameters<typeof moveDevice>[2], taker?: HandoffTakerFacts): Promise<void> {
     const profile = databaseName();
     // Reviews not yet approved are cancelled, and what they reserved goes back (WISP 06 § Shape, step 4): nothing
     // `pending` moves, and an on-chain review, signed when it was made, never reaches a frozen copy.
     await this.cancelPendingReviews();
+    // The wallets as they are just before the stop, and what is read of their sealed settings while they are open:
+    // the Breez databases of the wallets that move, deleted here once the release is written.
+    await this.refreshWallet().catch(() => {});
+    const before = this.walletView;
+    const { pinned, breez } = await this.cardFacts();
+    for (const network of WALLET_NETWORKS) {
+      const spark = await this.sparkWallets[network].breezDatabase().catch(() => undefined);
+      if (spark) breez.set(`spark:${network}`, spark);
+    }
     this.gatedOut = true;
     await this.shutdown({ quiet: true });
-    // Money once more, now that nothing can arrive any more: ecash that landed between the last look and the stop would
-    // otherwise be in both copies. Found, nothing is released: this device writes nothing and starts again as active,
-    // and the taker, told so when it asks, stops.
-    const problem = await this.refreshWallet().then(() => walletHandoffProblem(this.walletView, this.walletsStarted), () => "loading" as const);
-    if (problem) {
-      console.info(`[handoff] not released: ${problem} after the stop`);
+    // The plan once more, now that nothing can arrive any more: Mainnet ecash that landed between the last look and the
+    // stop would otherwise move. A refusal releases nothing: this device writes nothing and starts again as active, and
+    // the taker, told so when it asks, stops.
+    const plan = await this.refreshWallet().then(() => this.handoffPlan(taker, { view: afterStop(before, this.walletView), final: true, pinned }), () => null);
+    if (!plan || plan.refusal) {
+      const why = plan?.refusal?.why ?? "loading";
+      console.info(`[handoff] not released: ${why} (${plan?.refusal?.at ?? "the wallets could not be read"}) after the stop`);
       this.events.onDeviceGate?.({ state: "releasing", reload: true });
-      throw new Error(`handoff-${problem === "loading" ? "busy" : problem}: Money arrived while the profile was moving.`);
+      throw new Error(`handoff-${why}: The wallets changed while the profile was moving.`);
     }
+    // Each wallet's record says where it lives from here: a wallet that stays home is marked with this device (or the
+    // home it already had), one that moves loses any mark. The marks move with the profile, in pass 2.
+    await writeWalletHomes(plan.wallets);
+    const breezDatabases = [...new Set(plan.wallets.flatMap((w) => (w.route === "moves" && w.breez && breez.has(w.id) ? [breez.get(w.id)!] : [])))];
     // The password proof's verifier goes beside the state: a standby checks a forced takeover's password with it,
     // without opening its frozen copy (WISP 06 § Forced takeover).
     const verifier = await this.handoffVerifier().catch(() => null);
-    await moveDevice(profile, "releasing", { ...patch, ...(verifier ? { verifier } : {}) });
+    await moveDevice(profile, "releasing", { ...patch, ...(verifier ? { verifier } : {}), ...(breezDatabases.length ? { breezDatabases } : {}) });
     this.events.onDeviceGate?.({ state: "releasing", reload: true });
   }
 

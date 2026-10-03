@@ -606,6 +606,11 @@ export interface WalletInstanceView {
   card?: string;
   name?: string;
   receive?: boolean;
+  /**
+   * At home on another device (WISP 06 § Wallets that stay home): that device's name ("" when this device does not know
+   * it), and when its coins expire (Ark, Bark). It is never opened here, and takes no payment here.
+   */
+  home?: { device: string; expiresAt?: number };
 }
 
 /**
