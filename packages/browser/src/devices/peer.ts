@@ -27,6 +27,8 @@ export async function standbyEngine(gate: DeviceGate, options: NodeOptions | und
   const irohRelays = network.irohRelays ?? [...DEFAULT_IROH_RELAYS];
   const links: DeviceLinks = new DeviceLinks({
     profile: gate.profile,
+    // A standby reads the turn when its screen opens and every 10 minutes: a removal reaches it as a tombstone.
+    watchTurn: true,
     // A taker that lost its settle read goes back to its old namespace (WISP 06 § Installing the staged state).
     undoStaging: () => undoStagingOf(gate.profile),
     handoff: async (running, host) => {

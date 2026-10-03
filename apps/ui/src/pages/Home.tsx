@@ -4,6 +4,8 @@ import { JoinDialog } from "../components/JoinDialog";
 import { useI18n } from "../contexts/I18nContext";
 import { ensureSession, listSessions } from "../lib/storage";
 import { JoinProfileDialog } from "../components/devices/JoinProfileDialog";
+import { takeJoinRequest } from "../lib/devices";
+import { activeProfileId } from "../lib/profiles";
 import { HomeProjectLinks } from "../components/HomeProjectLinks";
 import { chatPath } from "../lib/url";
 import { groupPath } from "../lib/groups";
@@ -17,7 +19,8 @@ export function Home() {
 
   const [joining, setJoining] = useState(false);
   // A new profile, on a device the person adds to a profile they already have (WISP 06 § User experience).
-  const [already, setAlready] = useState(false);
+  // Opened by "Add this device to my profile" on a device that was left out of its set.
+  const [already, setAlready] = useState(() => takeJoinRequest(activeProfileId()));
   const fresh = listSessions().length === 0;
 
   const handleCreate = async () => {

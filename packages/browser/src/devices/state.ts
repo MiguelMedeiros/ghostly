@@ -133,6 +133,33 @@ export interface EarlierDeviceSet {
   setUpdate: string;
   /** Signing keys of the staying devices that have not acknowledged it yet. */
   pending: string[];
+  /**
+   * Another valid tombstone stands at the old address in place of this one (a device that was left behind started a
+   * set of its own, or something else closed it): it is not put any more, and the person is told (WISP 06 § Removing a
+   * device, "When the remover is gone for good"). The frame is still delivered.
+   */
+  foreign?: true;
+}
+
+/**
+ * After this device accepted a `set-update` (WISP 06 § Removing a device): the new device list, shown once ("Your
+ * devices are now: ..."), with "This is wrong". `seen` once the person answered OK. While it is here the device is not
+ * an enrollment that did not finish, though it holds no turn packet of the new set until it reads one.
+ */
+export interface SetNotice {
+  names: string[];
+  at: number;
+  seen?: true;
+}
+
+/** After a forced takeover: "New device secret" is offered, since the device that stopped still holds `D`. */
+export interface SecretOffer {
+  why: "takeover";
+  at: number;
+  /** The device that stopped, as the takeover named it. */
+  device?: string;
+  /** The person said it was lost or stolen: the money checklist comes first. */
+  lost?: true;
 }
 
 /**
@@ -220,6 +247,18 @@ export interface DeviceRecord {
    * takeover that settled, and taken off once the engine raised them. See `raise.ts`.
    */
   raise?: { id: string; why: "takeover" | "restore"; takeovers: number; at: number };
+  /** The device list to show once after an accepted `set-update` (`setUpdate.ts`). */
+  setNotice?: SetNotice;
+  /**
+   * `moving` or `removed`: nothing this device can accept will bring it back into the set (its stored active device
+   * is not listed in the tombstone, a `set-update` was refused, or the person said the new list is wrong). It shows
+   * "Add this device again" (WISP 06 § Removing a device). A `moving` device still takes a valid `set-update`.
+   */
+  reenroll?: true;
+  /** `moving`: the tombstone that closed the old address, as read. What a `set-update` is checked against. */
+  tombstone?: string;
+  /** "New device secret" is offered (`rotate.ts`). */
+  secretOffer?: SecretOffer;
 }
 
 /** The states in which the whole engine runs. In every other one the client opens no peer database (WISP 06 § The gate). */
@@ -288,9 +327,15 @@ export function amend(from: DeviceRecord, patch: DevicePatch): DeviceRecord {
   return checked(rising(from, { ...from, ...clean(patch) }));
 }
 
-/** The "highest ever" fields and the takeover count only rise: a change that would lower or drop one is refused. */
+/**
+ * The "highest ever" fields and the takeover count only rise: a change that would lower or drop one is refused. The
+ * mark (`seenSequence`) is the highest sequence seen at one turn address, so it starts again with a new device-set
+ * secret: a new `D` is a new address (WISP 06 § Removing a device).
+ */
 function rising(from: DeviceRecord, next: DeviceRecord): DeviceRecord {
+  const moved = !!next.d && next.d !== from.d;
   for (const field of ["releasedTurn", "seenSequence", "takeovers"] as const) {
+    if (field === "seenSequence" && moved) continue;
     const was = from[field];
     if (was !== undefined && (next[field] === undefined || next[field] < was)) throw new DeviceRecordError(`${field} may only rise`);
   }
@@ -415,6 +460,17 @@ export function parseDeviceRecord(value: unknown): DeviceRecord {
   if (!Array.isArray(r.earlierSets) || r.earlierSets.length > MAX_EARLIER_SETS) return bad("the earlier device sets");
   for (const set of r.earlierSets as Partial<EarlierDeviceSet>[]) {
     if (!set || !bytes(set.d) || !bytes(set.tombstone) || !text(set.setUpdate) || !Array.isArray(set.pending) || !set.pending.every(bytes)) return bad("an earlier device set");
+    if (set.pending.length > MAX_DEVICES || (set.foreign !== undefined && set.foreign !== true)) return bad("an earlier device set");
+  }
+  if (r.setNotice !== undefined) {
+    const n = r.setNotice as Partial<SetNotice> | null;
+    if (!n || typeof n !== "object" || !texts(n.names, MAX_DEVICES) || !count(n.at, Number.MAX_SAFE_INTEGER) || (n.seen !== undefined && n.seen !== true)) return bad("setNotice");
+  }
+  if (r.reenroll !== undefined && r.reenroll !== true) return bad("reenroll");
+  if (!optional(r.tombstone, bytes)) return bad("tombstone");
+  if (r.secretOffer !== undefined) {
+    const o = r.secretOffer as Partial<SecretOffer> | null;
+    if (!o || typeof o !== "object" || o.why !== "takeover" || !count(o.at, Number.MAX_SAFE_INTEGER) || !optional(o.device, text) || (o.lost !== undefined && o.lost !== true)) return bad("secretOffer");
   }
   return value as DeviceRecord;
 }

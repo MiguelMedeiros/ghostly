@@ -100,10 +100,11 @@ describe("the device links of a profile on this device", () => {
     expect(phone.links.views()).toEqual([{ key: desktop.slot.key, name: "Desktop", slot: 0, status: "live", transport: "webrtc/1" }]);
     expect(await settled(phone.links.ping(desktop.slot.key))).toBeGreaterThanOrEqual(0);
     expect(await settled(desktop.links.ping(phone.slot.key))).toBeGreaterThanOrEqual(0);
-    // The link's own frames are not handed on; another `devices/1` frame is, with who sent it.
-    phone.links.send(desktop.slot.key, { t: "set-ack" });
+    // The link's own frames are not handed on (nor the removal's, which the links answer themselves); another
+    // `devices/1` frame is, with who sent it.
+    phone.links.send(desktop.slot.key, { t: "device-note" });
     await run(1_000);
-    expect(desktop.frames).toEqual([[phone.slot.key, { t: "set-ack" }]]);
+    expect(desktop.frames).toEqual([[phone.slot.key, { t: "device-note" }]]);
     expect(phone.frames).toEqual([]);
     // Only the device state and the device keys: no profile's peer database exists, let alone was opened.
     expect((await indexedDB.databases()).map((db) => db.name).sort()).toEqual([DEVICE_KEYS_DB, DEVICES_DB].sort());
@@ -205,9 +206,9 @@ describe("the device links of a profile on this device", () => {
     expect(desktop.links.views().map((v) => [v.name, v.earlier ?? false]).sort()).toEqual([["Phone", false], ["Phone", true]]);
     // The old link joins the remover and the moving device; the removed one reaches the remover on none.
     expect(await until(() => phone.links.live(desktop.slot.key), 60_000)).toBe(true);
-    desktop.links.send(phone.slot.key, { t: "set-update", d: "the frame the removal part defines" });
+    desktop.links.send(phone.slot.key, { t: "device-note", d: "over the old link" });
     await run(1_000);
-    expect(phone.frames).toEqual([[desktop.slot.key, { t: "set-update", d: "the frame the removal part defines" }]]);
+    expect(phone.frames).toEqual([[desktop.slot.key, { t: "device-note", d: "over the old link" }]]);
     await run(60_000);
     expect(lost.links.live(desktop.slot.key)).toBe(false);
     // Acknowledged: the old link goes.

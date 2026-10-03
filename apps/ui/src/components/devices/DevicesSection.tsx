@@ -1,21 +1,32 @@
 import { useState } from "react";
 import { engine } from "@ghostly/browser/platform/engine";
 import { useI18n } from "../../contexts/I18nContext";
-import { useDeviceSet } from "../../lib/devices";
-import { Button, Row, Section } from "../wallet/ui";
+import { errorText } from "../../lib/errorText";
+import { listNames, removeErrorKey, useDeviceSet } from "../../lib/devices";
+import { Button, Notice, Row, Section } from "../wallet/ui";
 import { AddDeviceDialog } from "./AddDeviceDialog";
 import { MoveDialog } from "./Handoff";
+import { LostChecklist, RemoveDeviceDialog } from "./RemoveDeviceDialog";
 import { useHandoffView } from "../../lib/handoff";
 
 /**
- * Profile, Devices (WISP 06 § User experience): the devices of this profile, which one is active, and Add a device.
- * Plain in this part: Move, Rename and Remove come with the parts that do them.
+ * Profile, Devices (WISP 06 § User experience): the devices of this profile, which one is active, Add a device, Move,
+ * Remove, and New device secret. Plain on purpose: Rename and the final design come with later parts.
  */
 export function DevicesSection() {
-  const { t } = useI18n();
+  const { t, language } = useI18n();
   const view = useDeviceSet();
   const [adding, setAdding] = useState(false);
   const [moving, setMoving] = useState<{ key: string; name: string } | null>(null);
+  const [removing, setRemoving] = useState<{ key: string; name: string } | null>(null);
+  const [removed, setRemoved] = useState<string | null>(null);
+  const [lost, setLost] = useState(false);
+  const [secret, setSecret] = useState<{ busy?: boolean; done?: boolean; error?: string }>({});
+  const newSecret = async () => {
+    setSecret({ busy: true });
+    try { await engine.call("deviceNewSecret"); setSecret({ done: true }); }
+    catch (cause) { const key = removeErrorKey(cause); setSecret({ error: key ? t(key) : errorText(cause, t) }); }
+  };
   const handoff = useHandoffView(!moving);
   const thisActive = view?.devices.some((device) => device.self && device.active) ?? false;
   const [checked, setChecked] = useState<Record<string, string>>({});
@@ -41,8 +52,31 @@ export function DevicesSection() {
             <Button data-testid="device-check" onClick={() => void check(device.key)}>{t("devices.section.check")}</Button>
             {checked[device.key] && <span data-testid="device-check-result" className="text-xs text-text-muted">{checked[device.key]}</span>}
           </>}
+          {!device.self && thisActive && <Button data-testid="device-remove-open" onClick={() => { setRemoved(null); setRemoving({ key: device.key, name: device.name }); }}>{t("devices.remove.button")}</Button>}
         </Row>
       ))}
+      {removed && <Row testId="device-removed" label={t("devices.remove.done", { device: removed })} />}
+      {view?.waiting?.length ? <Row testId="device-waiting" label={t("devices.section.waiting", { devices: listNames(view.waiting.map((w) => w.name), language) })} /> : null}
+      {view?.foreignSet && <Row testId="device-foreign-set" label={t("devices.section.foreign")} />}
+      {thisActive && view?.secretOffer && (
+        <Row testId="device-secret-offer" label={view.secretOffer.device ? t("devices.secret.offer", { device: view.secretOffer.device }) : t("devices.secret.offerUnnamed")}>
+          {view.secretOffer.lost && <Button data-testid="device-secret-offer-lost" onClick={() => setLost(true)}>{t("devices.remove.lost")}</Button>}
+          {(() => {
+            const stopped = view.secretOffer?.device ? devices.find((device) => !device.self && device.name === view.secretOffer!.device) : undefined;
+            return stopped
+              ? <Button data-testid="device-secret-offer-remove" onClick={() => setRemoving({ key: stopped.key, name: stopped.name })}>{t("devices.secret.removeOffer", { device: stopped.name })}</Button>
+              : <Button data-testid="device-secret-offer-new" disabled={secret.busy} onClick={() => void newSecret()}>{t("devices.secret.button")}</Button>;
+          })()}
+          <Button data-testid="device-secret-offer-dismiss" onClick={() => void engine.call("deviceSecretOfferDismiss")}>{t("devices.secret.notNow")}</Button>
+        </Row>
+      )}
+      {thisActive && devices.length > 1 && (
+        <Row label={t("devices.secret.button")} hint={t("devices.secret.hint")} info={t("devices.secret.info")} testId="device-secret">
+          <Button data-testid="device-secret-new" disabled={secret.busy} onClick={() => void newSecret()}>{t("devices.secret.button")}</Button>
+        </Row>
+      )}
+      {secret.done && <Notice tone="success" testId="device-secret-done">{t("devices.secret.done")}</Notice>}
+      {secret.error && <Notice tone="error" testId="device-secret-error">{secret.error}</Notice>}
       {view?.unfinishedGrants?.map((grant) => (
         <Row key={grant.key} testId="device-row-unfinished" label={grant.name} hint={t("devices.section.unfinished")} info={t("devices.section.unfinishedInfo")} />
       ))}
@@ -53,6 +87,12 @@ export function DevicesSection() {
       )}
       {adding && <AddDeviceDialog onClose={() => setAdding(false)} />}
       {moving && <MoveDialog device={moving.name} deviceKey={moving.key} onClose={() => setMoving(null)} />}
+      {removing && <RemoveDeviceDialog device={removing.name} deviceKey={removing.key} onClose={() => setRemoving(null)} onRemoved={() => setRemoved(removing.name)} />}
+      {lost && (() => {
+        // After the checklist, the device that stopped is removed, when it is still in the set.
+        const stopped = view?.secretOffer?.device ? devices.find((device) => !device.self && device.name === view.secretOffer!.device) : undefined;
+        return <LostChecklist device={stopped?.name} onClose={() => setLost(false)} onRemove={stopped ? () => { setLost(false); setRemoving({ key: stopped.key, name: stopped.name }); } : undefined} />;
+      })()}
     </Section>
   );
 }

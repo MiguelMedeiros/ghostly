@@ -109,6 +109,20 @@
     "restore": "Restaurer une sauvegarde",
     "unfinished": "Pas terminé : votre autre appareil n’a pas encore inscrit celui-ci."
   },
+  "lost": {
+    "cashu": "Cashu : échangez tout l’ecash",
+    "cashuHint": "Chaque preuve doit être échangée auprès de son mint, pour que la copie sur l’appareil perdu soit dépensée. Il n’y a pas encore de bouton pour cela : envoyez-le-vous ou dépensez-le.",
+    "chats": "Associez chaque discussion à nouveau",
+    "chatsHint": "Utilisez une nouvelle invitation pour chaque discussion. Vos contacts voient une nouvelle discussion. Dans un groupe, l’admin retire votre ancienne clé et ajoute la nouvelle.",
+    "done": "Terminé",
+    "hint": "Retirer l’appareil l’empêche de prendre ce profil. Ces étapes protègent votre argent et vos discussions.",
+    "lightning": "{{wallet}} : révoquez la connexion sur votre nœud",
+    "phrase": "{{wallet}} : créez un nouveau portefeuille et envoyez-y les fonds",
+    "remove": "Retirer {{device}}",
+    "storage": "Changez vos clés de stockage",
+    "storageHint": "L’appareil perdu les détient. Changez-les chez votre fournisseur de stockage, puis saisissez les nouvelles dans Sauvegardes.",
+    "title": "Perdu ou volé ?"
+  },
   "manage": {
     "confirm": "Activer",
     "off": "La gestion de ce groupe est désactivée sur cet appareil.",
@@ -130,6 +144,21 @@
     "typeTitle": "Saisissez votre mot de passe de verrouillage",
     "wrong": "Mot de passe incorrect."
   },
+  "remove": {
+    "button": "Retirer",
+    "copy": "S’il avait une copie de votre profil, cette copie reste sur lui, non chiffrée.",
+    "done": "{{device}} a été retiré. Vos autres appareils reçoivent le changement la prochaine fois qu’ils ouvrent Ghostly.",
+    "fail": {
+      "busy": "Autre chose modifie vos appareils. Réessayez dans un instant.",
+      "failed": "Un problème est survenu. Rien n’a été modifié.",
+      "offline": "Passez en ligne pour modifier vos appareils."
+    },
+    "go": "Retirer",
+    "lost": "Perdu ou volé",
+    "removing": "Retrait…",
+    "text": "Il ne pourra plus prendre ce profil.",
+    "title": "Retirer {{device}} ?"
+  },
   "restore": {
     "activeHint": "Démarrer cette sauvegarde ici créerait une deuxième copie.",
     "activeOn": "Ce profil est actif sur {{device}}",
@@ -143,11 +172,22 @@
     "tryAgain": "Réessayer",
     "unreadable": "Impossible de vérifier quel appareil est actif. Vérifiez votre connexion."
   },
+  "secret": {
+    "button": "Nouveau secret des appareils",
+    "done": "Nouveau secret des appareils créé.",
+    "hint": "Un appareil qui n’est pas dans cette liste ne pourra plus utiliser ce profil.",
+    "info": "À utiliser quand un appareil peut encore détenir le secret des appareils de ce profil, par exemple celui que vous avez remplacé. Vos autres appareils reçoivent le nouveau secret la prochaine fois qu’ils ouvrent Ghostly.",
+    "notNow": "Pas maintenant",
+    "offer": "Vous avez pris le relais de {{device}}. Il détient encore le secret des appareils de ce profil.",
+    "offerUnnamed": "Vous avez pris le relais d’un autre appareil. Il détient encore le secret des appareils de ce profil.",
+    "removeOffer": "Retirer {{device}}"
+  },
   "section": {
     "active": "Actif",
     "answered": "A répondu en {{ms}} ms",
     "check": "Vérifier",
     "connecting": "Non connecté",
+    "foreign": "Autre chose a fermé votre ancien ensemble d’appareils.",
     "hint": "Utilisez ce profil sur un autre appareil. Un seul appareil est actif à la fois.",
     "info": "Seul l’appareil actif envoie, reçoit et paie, ainsi vos messages et votre argent ne sont jamais à deux endroits. Déplacez le profil quand vous voulez.",
     "live": "Connecté",
@@ -157,13 +197,16 @@
     "thisStandby": "Cet appareil · En veille",
     "title": "Appareils",
     "unfinished": "Pas terminé",
-    "unfinishedInfo": "Il a reçu ce qui relie vos appareils et n’a pas terminé. Retirer un appareil, qui arrive plus tard, l’annule."
+    "unfinishedInfo": "Il a reçu ce qui relie vos appareils et n’a pas terminé. Ghostly crée de lui-même un nouveau secret des appareils pour l’annuler.",
+    "waiting": "En attente que {{devices}} ouvre Ghostly"
   },
   "standby": {
     "hint": {
       "moving": "Ouvrez Ghostly sur l'appareil que vous utilisez maintenant pour terminer.",
+      "movingOn": "Ouvrez Ghostly sur {{device}} pour terminer.",
       "releasing": "Rien ne change avant la dernière étape.",
       "removed": "Ajoutez-le à nouveau depuis l'appareil que vous utilisez maintenant.",
+      "removedFrom": "Ajoutez-le à nouveau depuis {{device}}.",
       "standby": "Cet appareil est en veille pour ce profil.",
       "superseded": "Un autre appareil a pris le relais sans celui-ci. Cet appareil s'est arrêté.",
       "supersededBy": "{{device}} a pris le relais sans cet appareil. Cet appareil s'est arrêté.",
@@ -172,6 +215,16 @@
     },
     "info": "Un seul appareil envoie, reçoit et paie à la fois, pour que vos messages et votre argent ne soient jamais à deux endroits.",
     "link": "{{device}} : {{status}}",
+    "notice": {
+      "hint": "Si cette liste vous semble fausse, n’utilisez pas cet appareil.",
+      "ok": "OK",
+      "title": "Vos appareils sont maintenant : {{devices}}",
+      "wrong": "C’est faux"
+    },
+    "reenroll": {
+      "hint": "Ajoutez cet appareil à nouveau depuis l’appareil que vous utilisez maintenant.",
+      "title": "Vos appareils ont changé pendant que celui-ci était éteint"
+    },
     "title": {
       "moving": "Presque terminé",
       "releasing": "Déplacement vers un autre appareil",
@@ -208,7 +261,10 @@
     "hintRestored": "Votre autre appareil va s'arrêter. Cet appareil a votre profil tel qu'il était dans la sauvegarde.",
     "info": "Les messages et l'argent arrivés sur {{device}} depuis ne sont pas ici. Si {{device}} revient, il s'arrête, sans rien dire à vos contacts.",
     "lost": "Mon autre appareil est perdu ou cassé",
+    "lostNo": "Juste cassé ou effacé",
+    "lostQuestion": "Perdu ou volé ?",
     "lostRace": "Un autre appareil a pris le relais au même moment. Cet appareil est en veille.",
+    "lostYes": "Perdu ou volé",
     "notMe": "Ce n'était pas moi",
     "restoredHint": "Cet appareil a une copie issue d'une sauvegarde. Rien ne démarre tant que vous ne prenez pas le relais.",
     "title": "Prendre le relais sans {{device}} ?",

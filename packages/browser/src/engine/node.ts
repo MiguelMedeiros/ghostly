@@ -117,6 +117,8 @@ import { handoffProfileHost, handoffSelf } from "../devices/handoffHost";
 import { handoffLinks, profileRecords } from "../devices/handoffStandby";
 import { isHandoffVerifier, makeHandoffVerifier, provesHandoffPassword, type HandoffVerifier } from "../devices/handoffPake";
 import { deviceIdentity, openTurnKeeper } from "../devices/setup";
+import { moveSet, resumeSetMove, type SetMovePorts } from "../devices/remove";
+import { newDeviceSecretDue } from "../devices/rotate";
 import { peekTurn, type TurnPeek } from "../devices/restoreGuard";
 import { walletHandoffProblem } from "../devices/handoffWallets";
 import { COUNTER_RAISE_KEY, GROUP_ADMIN_OFF_KEY, PENDING_RAISE_KEY, applyCounterRaise, isCounterRaise, isGroupAdminOff, isPendingRaise, type PendingRaise } from "../devices/raise";
@@ -1482,6 +1484,10 @@ export class GhostlyNode implements EngineImplementation {
    */
   private async turnBeforeOnline(): Promise<boolean> {
     if (this.options.singleDevice || knownDeviceGate()?.state !== "active") return true;
+    // Limited while the read is out: what the person does in those seconds (a message, a payment) cannot publish
+    // before a good read says this device is still the active one. Cleared below on such a read.
+    this.limitedMode = true;
+    this.emitState();
     const outcome: { kind: string; restricted?: boolean } | null = await (async () => {
       const keeper = await openTurnKeeper(databaseName(), this.turnNetwork());
       return keeper ? keeper.check(true) : null;
@@ -1491,8 +1497,7 @@ export class GhostlyNode implements EngineImplementation {
       if (record) await this.stopReplaced(viewOf(record));
       return false;
     }
-    if (outcome?.kind === "single" || outcome?.kind === "start" || (outcome?.kind === "go-on" && !outcome.restricted)) return true;
-    this.limitedMode = true;
+    if (outcome?.kind === "single" || outcome?.kind === "start" || (outcome?.kind === "go-on" && !outcome.restricted)) { this.limitedMode = false; return true; }
     this.readTurnWhileLimited();
     this.emitState();
     return false;
@@ -1663,6 +1668,8 @@ export class GhostlyNode implements EngineImplementation {
     this.enrollment = null;
     const links = this.deviceLinks;
     this.deviceLinks = null;
+    if (this.tombstoneTimer) clearInterval(this.tombstoneTimer);
+    this.tombstoneTimer = null;
     await links?.stop().catch(() => {});
     this.identities.stop();
     this.did.stop();
@@ -4629,7 +4636,114 @@ export class GhostlyNode implements EngineImplementation {
     if (outcome?.kind === "gated" && !this.shuttingDown) {
       const record = await readDeviceRecord(databaseName());
       if (record) await this.stopReplaced(viewOf(record));
+      return;
     }
+    // Earlier device sets (a removal, a new secret): their tombstones put again now and every hour, and their frames
+    // delivered over the old links, as a removal that a crash cut short resumes from the record alone.
+    this.watchTombstones();
+    // A device was given the secret and never finished its enrollment: the set moves to a new one by itself.
+    await this.rotateIfDue().catch(() => {});
+  }
+
+  // -- one profile on several devices: removing a device, a new device secret (WISP 06 § Removing a device) ---------
+
+  /** The hourly put of the earlier sets' tombstones. */
+  private tombstoneTimer: ReturnType<typeof setInterval> | null = null;
+  /** A move of the device set in progress: one at a time. */
+  private settingMove: Promise<unknown> | null = null;
+  /** How often the tombstones are put again (WISP 06: every hour while the profile exists). */
+  static TOMBSTONE_EVERY_MS = 60 * 60_000;
+
+  /** What a move of the device set needs of this engine. Null when this device cannot sign for its set. */
+  private async setMovePorts(): Promise<SetMovePorts | null> {
+    const profile = databaseName();
+    const identity = await deviceIdentity(profile).catch(() => null);
+    if (!identity) return null;
+    return {
+      read: () => readDeviceRecord(profile),
+      amend: (patch) => amendDevice(profile, patch),
+      signer: identity.key,
+      network: this.networkOn ? this.turnNetwork() : null,
+      refresh: async () => { await this.deviceLinks?.refresh(); await this.deviceLinks?.deliverPending(); this.emitState(); },
+    };
+  }
+
+  /** Puts the earlier sets' tombstones now and every hour (and the current record, and the frames), while this device is active. */
+  private watchTombstones(): void {
+    const run = async () => {
+      if (this.shuttingDown || this.limitedMode || !this.networkOn || this.settingMove) return;
+      const record = await readDeviceRecord(databaseName()).catch(() => null);
+      if (record?.state !== "active" || !record.earlierSets.length) return;
+      const ports = await this.setMovePorts();
+      if (ports) await resumeSetMove(ports, record).catch(() => {});
+    };
+    void run();
+    this.tombstoneTimer ??= setInterval(() => void run(), GhostlyNode.TOMBSTONE_EVERY_MS);
+  }
+
+  /** Whether a move of the set may begin now: this device is active, online, and nothing else changes the set. */
+  private setMoveAllowed(): void {
+    if (this.options.singleDevice) throw new Error("remove-state: A profile of the command line is on one device only");
+    if (this.limitedMode) throw new Error(LIMITED_MODE_ERROR);
+    if (!this.networkOn) throw new Error("remove-offline: You are offline");
+    const view = this.enrollment?.current();
+    if (view && view.step !== "done" && view.step !== "failed") throw new Error("remove-busy: A device is being added. Try again after it.");
+    const handoff = this.handoffGiver?.view();
+    if (handoff && handoff.step !== "failed") throw new Error("remove-busy: The profile is moving. Try again after it.");
+  }
+
+  private async moveDeviceSet(remove?: string): Promise<DeviceSetView> {
+    this.setMoveAllowed();
+    if (this.settingMove) throw new Error("remove-busy: The device set is already changing.");
+    const work = (async () => {
+      const ports = await this.setMovePorts();
+      if (!ports) throw new Error("remove-state: This device cannot sign for its device set.");
+      await moveSet(ports, remove === undefined ? {} : { remove });
+    })();
+    this.settingMove = work;
+    try { await work; } finally { this.settingMove = null; }
+    // The giver signs releases over the turn address, which moved with the secret: it is made again for the new one.
+    if (this.handoffGiver) { this.deviceLinks?.setHandoff(null); this.handoffGiver = null; await this.startHandoff().catch(() => {}); }
+    this.watchTombstones();
+    return this.deviceSet();
+  }
+
+  /**
+   * Remove: the device with this signing key can no longer take the profile (WISP 06 § Removing a device). The set
+   * moves to a new secret, which the other devices get over their old links; the removed one gets nothing, and reads
+   * its removal from the tombstone. Only the active device removes.
+   */
+  async deviceRemove({ key }: { key: string }): Promise<DeviceSetView> {
+    if (typeof key !== "string" || !key) throw new Error("remove-device: Name the device to remove.");
+    return this.moveDeviceSet(key);
+  }
+
+  /** "New device secret": the set moves to a new secret with nobody removed. */
+  async deviceNewSecret(): Promise<DeviceSetView> {
+    return this.moveDeviceSet();
+  }
+
+  /** The offer of a new device secret after a takeover, answered without making one. */
+  async deviceSecretOfferDismiss(): Promise<void> {
+    const record = await readDeviceRecord(databaseName());
+    if (record?.state === "active" && record.secretOffer) await amendDevice(databaseName(), { secretOffer: undefined });
+  }
+
+  /** The device list after an accepted `set-update` is a standby's (`DeviceLinks`): the active device has none to show. */
+  async deviceSetNoticeSeen(): Promise<void> {}
+
+  /** A standby's screen asks for a turn read when it comes back (`DeviceLinks`); the active device reads on its own schedule. */
+  async deviceTurnCheck(): Promise<null> { return null; }
+
+  /**
+   * A grant that never finished leaves a device that may hold the secret (`rotate.ts`): the set moves to a new one by
+   * itself, once no enrollment or handoff runs. Quiet when it cannot run now: it is tried again at the next start.
+   */
+  private async rotateIfDue(): Promise<void> {
+    if (this.shuttingDown || this.options.singleDevice) return;
+    if (newDeviceSecretDue(await readDeviceRecord(databaseName()))?.why !== "unfinished-grant") return;
+    try { this.setMoveAllowed(); } catch { return; }
+    await this.moveDeviceSet();
   }
 
   /**
@@ -4656,6 +4770,9 @@ export class GhostlyNode implements EngineImplementation {
       networkSettings: () => deviceNetworkOf(this.settings),
       // The record now lists the new device: the network settings go into it, and the links start.
       afterWrite: async () => { await this.syncDeviceNetwork(); await this.startDeviceSet(); },
+      // An enrollment that ended after its grant went out and before the new device said it stored it: that device
+      // may hold the secret, so the set moves to a new one (once this enrollment is over).
+      onChange: (view) => { if (view.step === "failed") setTimeout(() => void this.rotateIfDue().catch(() => {}), 0); },
     });
     this.enrollment = inviter;
     try { return await inviter.start(); } catch (error) {
