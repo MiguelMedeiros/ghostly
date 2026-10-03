@@ -13,6 +13,7 @@ import {
   PRESENCE_WINDOW,
   presenceSeenAt,
   RELAY_POLL_INTERVALS,
+  WATCH_PEER_MS,
   type LinkSessionEvents,
   type LinkSessionOptions,
 } from "../src/link";
@@ -650,6 +651,50 @@ describe("LinkSession poll pacing", () => {
     await settle();
     expect(lastPoll(a.ev)).toBe(I.fast);
     await a.s.stop(false);
+  });
+
+  it("says its reads watch a contact that went away until the contact shows itself back (the relays' budget gives them a share)", async () => {
+    const { a, b } = pair({}, { getServices: () => [] });
+    b.s.start();
+    a.s.start();
+    await settle();
+    expect(a.s.peerPresence.online).toBe(true);
+    const watched = () => (a.transport.resolve.mock.calls.at(-1)?.[1] as { watch?: boolean } | undefined)?.watch === true;
+    a.s.pollNow();
+    await settle();
+    expect(watched()).toBe(false);
+    // The contact's app closes, leaving a last packet that advertises nothing: still watched.
+    a.s.watchPeer();
+    vi.setSystemTime(NOW + 1_000);
+    await b.s.stop();
+    await settle();
+    expect(watched()).toBe(true);
+    a.s.pollNow();
+    await settle();
+    expect(a.s.peerPresence.online).toBe(false);
+    expect(watched()).toBe(true);
+    // Back: the next read is the contact's like any other.
+    vi.setSystemTime(NOW + 5_000);
+    b.s.start();
+    await settle();
+    a.s.pollNow();
+    await settle();
+    expect(a.s.peerPresence.online).toBe(true);
+    a.s.pollNow();
+    await settle();
+    expect(watched()).toBe(false);
+    // A contact killed leaves no last packet: its old one is not a sign it is back.
+    a.s.watchPeer();
+    a.s.pollNow();
+    await settle();
+    expect(watched()).toBe(true);
+    // Nor after the two minutes.
+    vi.setSystemTime(NOW + 5_000 + WATCH_PEER_MS);
+    a.s.pollNow();
+    await settle();
+    expect(watched()).toBe(false);
+    await a.s.stop(false);
+    await b.s.stop(false);
   });
 
   it("watches a contact that went away fast, then at the active pace: the step-down never slows that", async () => {
