@@ -1,4 +1,4 @@
-import { FILE_BYTES_STEP, checkFileId, fileSpace, type FileBytes, type FileStream } from "./fileBytes";
+import { FILE_BYTES_STEP, checkFileId, fileSpace, type FileBytes, type FileStream, type FileUsage } from "./fileBytes";
 
 /** Tauri's `invoke`, with the raw-body form the file commands take. */
 export type NativeInvoke = (command: string, args?: Record<string, unknown> | Uint8Array, options?: { headers: Record<string, string> }) => Promise<unknown>;
@@ -54,6 +54,10 @@ export class NativeFileBytes implements FileBytes {
   async removeWhere(prefix: string): Promise<void> {
     if (prefix && !/^[A-Za-z0-9_-]{1,200}$/.test(prefix)) throw new Error("Invalid file id");
     await this.invoke("file_bytes_remove_where", { space: this.space(), prefix });
+  }
+  async usage(): Promise<FileUsage> {
+    const { files, count, staged } = (await this.invoke("file_bytes_usage", { space: this.space() })) as Partial<FileUsage>;
+    return { files: Number(files) || 0, count: Number(count) || 0, staged: Number(staged) || 0 };
   }
   async room(): Promise<number | null> {
     try { return (await this.invoke("file_bytes_room", { space: this.space() })) as number; } catch { return null; }

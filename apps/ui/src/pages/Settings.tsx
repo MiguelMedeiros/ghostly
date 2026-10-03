@@ -6,6 +6,7 @@ import { useUpdate } from "../contexts/UpdateContext";
 import { updateFailure } from "../lib/updateFailure";
 import { canInstall, isAppleMobile, isMacSafari, startInstall, useInstallState } from "../lib/installPrompt";
 import { browserPrompts, reconsiderPersist, requestPersist, useStorageProtection } from "../lib/storagePersistence";
+import { storageBreakdown, useDesktopStorage } from "../lib/desktopStorage";
 import { pushPlatform, pushUnavailable, setWake, useWakeOn } from "../lib/wakePush";
 import { noticePlace, noticeSettings, notificationPermission, openNoticeSettings, requestNotifications, type NoticePermission } from "../lib/notifications";
 import { getVersion } from "@tauri-apps/api/app";
@@ -95,6 +96,9 @@ export function Settings() {
   const [storageInfo, setStorageInfo] = useState({ used: 0, keys: 0 });
   // Whether the browser may clear this device's storage (lib/storagePersistence). Nothing on Desktop: no browser evicts it.
   const { protection, estimate } = useStorageProtection();
+  // The Desktop's own count (lib/desktopStorage): its WebView's storage plus the profile's files on disk.
+  const desktopStorage = useDesktopStorage(isDesktopApp(), storageInfo.used);
+  const desktopUsed = desktopStorage && storageBreakdown(desktopStorage);
   const [protecting, setProtecting] = useState(false);
   const [confirmClearData, setConfirmClearData] = useState(false);
   const [confirmDeleteChats, setConfirmDeleteChats] = useState(false);
@@ -475,7 +479,11 @@ export function Settings() {
 
       <Section title={t("settings.data")}>
         <Row label={t("settings.storageUsed")} testId="settings-storage-used"
-          value={estimate ? t("settings.storageOf", { used: formatBytes(estimate.used), quota: formatBytes(estimate.quota) }) : formatBytes(storageInfo.used)} />
+          value={desktopUsed ? formatBytes(desktopUsed.total) : estimate ? t("settings.storageOf", { used: formatBytes(estimate.used), quota: formatBytes(estimate.quota) }) : formatBytes(storageInfo.used)}
+          info={desktopUsed ? <span data-testid="settings-storage-parts">
+            {desktopUsed.parts.map((part) => <span key={part.key} className="block">{t(`settings.storageParts.${part.key}`, { size: formatBytes(part.bytes), count: part.count ?? 0 })}</span>)}
+            <span className="block mt-1">{t("settings.storagePartsNote")}</span>
+          </span> : undefined} />
         {protection && (
           <Row label={t("settings.storageDevice")} testId="settings-storage-protection"
             value={<span data-testid="settings-storage-state" data-state={protection}>{t(`settings.storageState.${protection}`)}</span>}
