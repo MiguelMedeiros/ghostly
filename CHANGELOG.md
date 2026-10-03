@@ -4,6 +4,111 @@
 
 <!-- Notes for the next release. A new entry goes in docs/changelog/unreleased/ (one file per change, see docs/changelog/unreleased/README.md), not here: tools/scripts/bump-version.mjs adds those files below at release and turns this heading into the version. Editing a line already here is fine. -->
 
+## 1.0.3
+
+Ghostly 1.0.3 brings backups that handle large profiles, calls that survive a network change, and a round of fixes from the first days after launch. Backups hold files of any size, show their progress, can be cancelled, and can be made without a passphrase. A call comes back when your network changes. Messages, files and voice notes written around a reconnect stay in order, and devices whose clocks are a few minutes off now pair, call and join groups. A slow Pkarr relay no longer holds a pairing back.
+
+Known issues, for the next release: after opening a profile with 1.0.3, going back to 1.0.2 is not possible and 1.0.2 does not say why; a restored copy used next to the original can lose its first messages in a group the original wrote in after the backup; joining a group can still take a minute when the public relays are slow.
+
+### Fixed
+
+- **A profile the app cannot open says so.** A profile last used by a newer Ghostly (a test build, or a newer version before a downgrade) could not be opened by an older one, and the older app still showed its chat list while it connected nobody, sent nothing and gave no error. It now shows one screen in place of the app: "This profile was last used by a newer version of Ghostly. Update the app to open it.", with the versions behind the ⓘ, a way to look for the update, and your other profiles one press away. When the data does not open for another reason (another window still holds it with an older version, no storage space, storage not allowed in a private window), the screen says which and what to try. Nothing is deleted, reset or downgraded. `ghostly` (the CLI) answers the same way: `engine` (exit 1) with a message that names both versions, from `ghostly status` too.
+
+**Everywhere**
+
+- A backup that runs out of room on the device now fails and says so ("This device has no room left for this backup"). Before, it could leave the file it was writing out, say the backup was made, and produce a file that no restore would open.
+- A restore that runs out of room while it writes a large file says so too, instead of "File write out of order".
+- The web app no longer keeps a check running twice a second after it has started, when it drew before the page finished loading.
+- Web: a browser that cannot run Ghostly no longer shows a blank dark page. An older browser (for example an outdated Android System WebView, which some privacy browsers on Android use) now gets "Ghostly could not start", what to update, and a Copy details button for a report. A browser without site data, IndexedDB, Web Crypto or Web Locks is told which one is missing, where before the page stayed blank or the app opened and never connected.
+- Web: Settings says when this browser cannot wake Ghostly while it is closed, instead of leaving the switch out.
+- A slow Pkarr relay no longer holds a pairing back on the web, in the extension and in the headless CLI. When the relay asked has not answered within 1.5 s, the next relay is asked too and the first good answer wins; a relay found slow goes last for a minute, and one that keeps answering slowly is left alone like a failing one ("tripped (slow)" in the log).
+- A restore stopped by a closed tab, a reload or a crash no longer leaves the half-restored profile's data on the device: the next start of the app removes it. Before, it stayed for good, unlisted, taking the room of its files.
+- A backup of a profile a newer version of Ghostly has used is refused with "update to restore it", before anything is written. Before, it was restored as a profile this version could not open.
+- A restore that fails or is cancelled while it is writing a large file no longer leaves that half-written file in the device's storage, where nothing would ever remove it.
+
+**Calls**
+
+- A call that could not reconnect in time now tells your contact it ended. Their side kept saying "Reconnecting..." until its own wait ran out.
+- A call that is reconnecting no longer loses a try when the contact's reply to its first attempt arrives while the second is being prepared.
+- A call no longer drops when your network changes (Wi-Fi to mobile data, a VPN going up). It says "Reconnecting..." and comes back on the new network within seconds, with your mute, camera, shared screen and the call's clock as they were. If no connection returns in 30 seconds, the call ends as before. Both apps need 1.0.2 or later; calls with the command line (voice bots) still end when the network changes.
+- A call signal with a date far in the future no longer makes the app ignore that contact's later calls, and an answer the contact's app sends again after a reconnect is not taken for a new call.
+- A call with a contact whose clock is off now rings and connects. Before, a call from a device two minutes off never rang, and a call to a device whose clock ran behind by more than the few seconds it took to answer kept ringing after it was answered, until it gave up.
+
+**Headless**
+
+- The CLI's stdout holds the command's JSON answer and nothing else. Before, a note from the engine (a relay that did not answer and was left alone for a minute, for one) was printed there before the answer, and a script reading it (`ghostly wallet list | jq`) failed. Those notes now go to stderr.
+
+**CLI**
+
+- `ghostly profile restore`: the restored profile's Cashu balance is what its mints still hold. The profile came back with the ecash of the day its backup was made, so what was spent afterwards stayed in the balance and payments failed with "Token already spent". The first time the restored profile starts, its wallet now asks each mint which ecash is still unspent, as the app's restore does, and a payment that was unfinished in the backup is never sent again by the copy.
+- `ghostly profile restore` stopped while it runs (Ctrl-C, a kill) leaves no profile behind. Before, a half-written profile could stay under the new name, listed and usable, with a large file cut short.
+
+**Chat**
+
+- A contact whose clock runs behind yours can join your invite at once. Before, the person who joined stayed invisible until their clock caught up with yours (two minutes behind meant a two-minute wait, an hour meant an hour), and a group member whose clock was behind could not announce itself to the group.
+- Two devices whose clocks are a few minutes apart now connect. A contact whose clock ran two minutes fast or slow had its connection signals, its capability record and its small texts over the DHT dropped without a word: a first pairing took half a minute or never completed, a group could not be joined, and texts sent while not connected did not arrive. What comes in is now ordered by the sender's own counters, and its age is counted on this device's clock from when it was first read.
+- Messages held for a contact who is away are now picked up when the sender's clock runs ahead. Before, with a clock two minutes fast, nothing held was ever fetched, and the sender was told the items "could not be verified as yours, or were too large".
+- A message from a contact whose clock runs behind yours now plays its sound and shows its notification. Before, with a contact's clock a minute or more behind, a reply to something you had just written was taken for an old message catching up, and so was everything the contact wrote in the first minutes after your app started: the message appeared and nothing rang.
+- A new chat's pairing scene tells one story. Its steps only move forward, its clock no longer starts over at every step, nothing blinks out and back as the chat goes live, and the header icon says what the scene says. The scene ends as the chat goes live, folding away instead of jumping, and does not come back once the chat has moved on to the DHT.
+- A pin from a contact or a group member whose clock runs between 5 and 10 minutes ahead is now taken. It was dropped, and never showed on your side.
+- A chat is live again within seconds when both apps restart soon after connecting and one device's clock runs behind the other's. Before, the app with the clock ahead could refuse every new connection offer of its contact as "from before the last session" until the contact's clock caught up: two minutes behind meant up to two minutes without a live chat, nine minutes meant nine.
+- Many messages sent while your contact's app dropped without closing (a crash, a lost network) reach them in the order you wrote them once the chat is back. Some of the later ones could arrive first.
+- Messages written while a contact was away, or while the connection was coming back, now reach the contact in the order you wrote them. Since 1.0.2 a message is shown where it arrives, and around a reconnect the app could send a later message before an earlier one: the contact then read them out of order, for good, while your own chat showed them in order.
+- Files and voice notes written while your contact was away reach them in their place among the messages you wrote then. They arrived before or after the texts around them.
+- A file you receive is placed where it arrived, even when a message comes right behind it.
+
+**Groups**
+
+- A community works when a member's clock is a few minutes off. A device whose clock was a minute and a half or more from the others' joined, then never connected: nothing it wrote arrived and it received nothing, and with the admin's clock off it was the admin who was cut off from everyone else.
+- What you write in a community right after joining, or right after opening the app, before it has connected, now reaches the members who were in the group at that moment. When the first member your app reached had joined after you wrote, the message reached nobody.
+- When a community's admin (or any member other members connect through) leaves, the others no longer end up in parts that do not hear each other for minutes, and what was said in the meantime reaches everyone: some members never got it. Members that were connected through the one who left also ask another member at once, without waiting for it as for an app that restarts.
+- A community's member list no longer says "Not reachable" for a member your app has no direct connection to while it is connected to another hub: it says "Through a hub", as for everyone else reached that way.
+- A member removed from a community whose app was relaying for others at that moment gets back in when it opens the group's link right away. It stayed at "joining" for good: its app closed its own way in a moment after opening it.
+- Back in a private group after a while away, you read what you missed in the order it was written. The messages came as all of one member's lines, then all of another's, so answers showed apart from their questions.
+- A private group takes nothing over a connection to someone who is no longer a member, for the moment that connection is still open.
+- When several people open a private group's link at about the same time, what each of them writes right after getting in is read by the others. A message written in the first seconds was sealed for the group as its author knew it, without whoever had been let in a moment later, and that person never saw it.
+- "Joined", "is no longer a member", "is now the admin", rename and picture lines show where they happen when the admin's clock is off. With the admin's clock a couple of minutes ahead, each line stayed at the bottom of the group, under everything said in the next minutes; with it behind, the line went above what had just been said.
+- A group's line about someone who left and never set a name ("Member 46ishssi is no longer a member") names them in the app's language, as their messages do. It kept the English word in every language.
+- A member removed from a private group while their app was closed is told when they come back: the group says "You were removed from this group" and the composer closes. Before, someone who had joined by the link and was removed while away was never told: the group stayed active on their device and what they wrote went nowhere. The admin's app tells them when the two meet again, for up to a week.
+- What is said in a private group goes to its current members only.
+- A message that arrives in a group within a second of your leaving it shows as unread in the chat list. It showed nothing new until the next message came.
+
+**Wallets**
+
+- Cashu: when ecash of a wallet was spent somewhere else (the same profile in use on another device, or its "Copy ecash" backup redeemed in another wallet), a payment that picks it now ends with "already spent somewhere else" instead of staying at "Status unknown". The wallet then asks the mint about the rest of its ecash there, so the balance shows what the mint still holds, nothing stays set aside, and the wallet can be removed. A Lightning payment that fails this way no longer shows a fee for it.
+- Cashu: a redeem that could not reach the mint is sent again as soon as the mint answers.
+- Cashu: every exchange of ecash with a mint (receiving a payment, redeeming a token, taking a payment back, sending, paying over Lightning, an invoice being paid) is now saved before the mint is asked. If the app closes or the connection drops before the mint's answer arrives, the wallet asks the mint again, at once and the next time it opens, and finishes from there: the ecash shows up with its history line and its payment, or the sats that were set aside are free again. Sats held for a payment the mint has not confirmed show under the balance as set aside, and removing a wallet names an exchange that is still open before you confirm. A contact is told the result once the mint has answered.
+- A contact's request paid over Lightning through your Cashu mints no longer says "Lightning payment pending…" for good when the app was closed just as the payment started. On the next start the mint is asked about it: the request is marked paid, or it is open again with its Pay button.
+- A request paid in ecash that you then took back (Take it back) can be paid again. Its review said "settled" although the sats had come back, and the request answered "This request already has a payment". The review now says the payment was taken back.
+- A profile restored from a backup shows the Cashu balance its mints still hold. The backup's ecash that was spent after the backup was made used to stay in the balance, and payments failed with "Token already spent". The wallet now asks each mint once and drops what was spent.
+
+### For users
+
+**Everywhere**
+
+- A profile backup now holds files of any size. Before, files over 16 MiB were left out.
+- Backups are made and restored a piece at a time: a profile with hundreds of megabytes of files no longer has to fit in memory, and the app stays usable while it works.
+- A backup and a restore show a progress bar (what is being done, which file, how many bytes) and can be cancelled. A cancelled backup leaves no file, and a cancelled or failed restore leaves no half-made profile.
+- A backup can be made without a passphrase. It is a choice you make each time, after a warning: the file then holds your keys, chats and wallet secrets in the clear. A restore tells you when a file was not protected.
+- A file the device can no longer read is left out of the backup and counted, instead of failing the whole backup.
+- Backups made by earlier versions still restore.
+
+**CLI**
+
+- `ghostly profile backup` writes large profiles a piece at a time, and the file appears only once it is whole. `--no-passphrase` makes a backup that is not encrypted, only when asked for by name. `profile restore` needs no passphrase for such a file and says how the file was protected.
+
+**Chat**
+
+- When this device's clock is off by a minute or more, the chat's connection panel and Settings, Network now say so: "This device's clock seems to be off by about 2 minutes. Chats may be slow to connect." Behind the ⓘ: which way it is off, why it matters and how to fix it. The note needs several sources that agree (the relays' own time, several contacts), never one contact, and goes away when the clock is right again.
+- Task cards on the Tasks board say more when a bot tells it: a Review column holds a task whose pull request is open, the pull request's chip shows whether its checks pass, fail or are still running, tags show as chips you can filter by, and the tasks that are parts of a bigger one are stacked under it with a summary such as "2 of 10 done".
+- A Tasks board shows every task your bots posted, from all your chats and groups, in one place: columns for Queued, Running, Blocked, Done and Stopped (failed or cancelled), each with its count, and a line saying how many are active. A card shows the task's title, its bot, its chat, its pull request and how long ago it changed, and opens the chat on that card. Group the board by bot or by chat, filter it by text, and find routines on their own tab. On a phone the columns are tabs you can swipe between. The way in is a "Tasks" line above the chat list, shown only when a chat has a task card.
+
+### For developers
+
+**Headless CLI**
+
+- `ghostly task send` and `task update` take `--pr-state draft|open|merged|closed`, `--pr-checks passing|failing|pending`, `--tag <label>` (up to 3, 24 characters each) and `--parent <task>` (a task of yours in the same chat). They are optional card fields that apps from before them ignore, showing the card as before; no status was added.
+
 ## 1.0.2
 
 Ghostly 1.0.2 makes chats and groups connect in more places, and fixes what the first days of 1.0 turned up. Messages are placed in the order they arrive, whatever the contact's clock says. Chats connect through relays behind a VPN or a firewall, and a note says when the network is the reason. The web app on iPhone and Safari reaches contacts on the desktop app. Several people joining a group by the same link no longer wait on each other, and a message sent before a group's connections are up now reaches everyone. Pinned chats can be put in order, an invite in a chat has Copy and Show QR, a shared identity shows as its card, and the Linux desktop app no longer uses CPU while idle.
