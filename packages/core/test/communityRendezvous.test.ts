@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createIdentity } from "../src/identity";
-import { randomBytes, toBase64Url } from "../src/bytes";
+import { xchacha20poly1305 } from "@noble/ciphers/chacha.js";
+import { fromBase64Url, randomBytes, toBase64Url, toZ32 } from "../src/bytes";
 import { measureRecords, MAX_DNS_PACKET_BYTES } from "../src/pkarr";
 import {
 // covers: groups.protocol.community-topology, groups.community.head
@@ -43,10 +44,33 @@ describe("community rendezvous: beacon and lobbies", () => {
     expect(entries).toHaveLength(COMMUNITY_TOPOLOGY.lobbyEntries);
     const records = lobbyRecords(lobbyKeys(rv, G, hub), entries);
     expect(records[0].value.length).toBeLessThanOrEqual(900);
-    expect(readLobby(lobbyKeys(rv, G, hub), records).map(e => e.key)).toEqual(entries.map(e => e.key));
+    expect(new Set(readLobby(lobbyKeys(rv, G, hub), records).map(e => e.key))).toEqual(new Set(entries.map(e => e.key)));
     expect(readLobby(lobbyKeys(rv, G, other), records)).toEqual([]);
     expect(lobbyKeys(rv, G, hub).identity.pubKeyZ32).not.toBe(lobbyKeys(rv, G, other).identity.pubKeyZ32);
     expect(mergeLobby([{ key: "x", ts: now - COMMUNITY_TOPOLOGY.lobbyFreshMs - 1 }], { key: hub, ts: now }, now)).toEqual([{ key: hub, ts: now }]);
+  });
+
+  it("a lobby has room for twelve (the members a leaving hub carried, asking at once), newest first for apps that read six", () => {
+    // Before revision 2026-10-03 a lobby held six: the seventh member to ask pushed the first out, which asked again 20 s later.
+    expect(COMMUNITY_TOPOLOGY.lobbyEntries).toBe(12);
+    const now = Math.floor(Date.now() / 1000) * 1000, hub = keys(1)[0], lk = lobbyKeys(rv, G, hub);
+    let entries: { key: string; ts: number }[] = [];
+    const askers = keys(12);
+    askers.forEach((key, i) => { entries = mergeLobby(entries, { key, ts: now - (12 - i) * 1000 }, now); });
+    expect(entries.map(e => e.key)).toEqual(askers);
+    const records = lobbyRecords(lk, entries);
+    // Within what any app opens, and within one Pkarr packet.
+    expect(records[0].value.length).toBeLessThanOrEqual(900);
+    expect(measureRecords(lk.identity.pubKeyZ32, records)).toBeLessThanOrEqual(MAX_DNS_PACKET_BYTES);
+    expect(readLobby(lk, records).map(e => e.key)).toEqual(askers);
+    // An app from before reads the first six entries as written: the newest six.
+    const bytes = fromBase64Url(records[0].value);
+    const body = xchacha20poly1305(lk.key, bytes.slice(0, 24), lk.aad).decrypt(bytes.slice(24));
+    const firstSix = Array.from({ length: 6 }, (_, i) => toZ32(body.slice(i * 36, i * 36 + 32)));
+    expect(firstSix).toEqual(askers.slice(-6).reverse());
+    // And what such an app writes (oldest first) reads back the same.
+    const old = lobbyRecords(lk, entries.slice(-6));
+    expect(readLobby(lk, old).map(e => e.key)).toEqual(askers.slice(-6));
   });
 
   it("becomes a hub when there are too few, or all are full; otherwise picks the least loaded", () => {
