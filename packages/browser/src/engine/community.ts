@@ -232,6 +232,8 @@ interface Live {
   hubsAvoided: Map<string, number>;
   /** Hubs whose edge has been up: when it drops, the hub is gone. */
   hubsUp: Set<string>;
+  /** As a hub: the other hubs whose edge to me is up (when one drops, its members are about to ask in my lobby). */
+  hubPeersUp?: Set<string>;
   /** As a hub stepping down: when I took myself out of the beacon (0: not stepping down), and not before when the next try. */
   leaving: number;
   stepDownAt: number;
@@ -698,6 +700,9 @@ export class Communities {
       // Another hub is leaving (its signed request came on our edge before it went): the members it carried are about
       // to ask the hubs left, so the lobby is looked at often a while, not every half minute.
       if (s.state.pendingLeaves.some(r => r.s !== me && this.recentHub(live, r.s))) live.lobbyBusyUntil = Math.max(live.lobbyBusyUntil, now + this.timings.lobbyBusyMs);
+      // So is one whose edge to me was up and dropped (its app closed, or was killed and said nothing): its members ask
+      // the hubs left once they give up on it. Read every half minute, my lobby kept them waiting that long more.
+      if (this.hubDropped(groupId, live, others)) live.lobbyBusyUntil = Math.max(live.lobbyBusyUntil, now + this.timings.lobbyBusyMs);
       const lobbyEvery = now < live.lobbyBusyUntil && !busy ? this.timings.lobbyPollMs : this.timings.lobbyIdlePollMs;
       if (now - live.lastLobbyPoll >= lobbyEvery) { live.lastLobbyPoll = now; await this.pollLobby(groupId, live, now); }
       await this.answerKnocks(groupId, live, now, busy);
@@ -719,6 +724,8 @@ export class Communities {
       // three times that once it is back (a packet since): its edge stays open and looks for it, and comes up again in
       // the seconds its signaling takes on the relays. Dropped at once, the edge was opened again only when the hub was
       // picked again, a minute or more later (2026-09-29).
+      // A hub whose edge was up, given up on (its app closed and did not come back: killed, or gone for good).
+      let lost = false;
       for (const key of live.myHubs) {
         if (gone.includes(key)) continue;
         const id = edges.get(key);
@@ -737,12 +744,12 @@ export class Communities {
         // Avoided twice as long as it was waited for: with two hubs out of reach, the first is still avoided when the
         // wait for the second ends, and this member then carries itself (`forceHub`).
         const wait = (back || taking || live.replacing?.has(key) ? 3 : listed ? 2 : 1) * this.timings.hubWaitMs;
-        if (now - since > wait) { live.hubsAvoided.set(key, now + 2 * wait); live.hubWaits.delete(key); live.hubsUp.delete(key); live.replacing?.delete(key); }
+        if (now - since > wait) { if (live.hubsUp.has(key)) lost = true; live.hubsAvoided.set(key, now + 2 * wait); live.hubWaits.delete(key); live.hubsUp.delete(key); live.replacing?.delete(key); }
       }
       let kept = live.myHubs.filter(key => (fresh.has(key) || this.recentHub(live, key)) && !live.hubsAvoided.has(key));
       kept = kept.slice(0, COMMUNITY_TOPOLOGY.hubsPerMember);
       const picked = pickHubs(me, others, now, new Set(live.hubsAvoided.keys()));
-      for (const key of picked) if (kept.length < Math.max(1, picked.length) && !kept.includes(key)) { kept.push(key); if (gone.length) { if (!edges.has(key)) live.expect.add(key); (live.replacing ??= new Set()).add(key); } }
+      for (const key of picked) if (kept.length < Math.max(1, picked.length) && !kept.includes(key)) { kept.push(key); if (gone.length || lost) { if (!edges.has(key)) live.expect.add(key); (live.replacing ??= new Set()).add(key); } }
       live.myHubs = kept;
       // Every hub I know is full or will not take me: I carry myself, if the beacon has room.
       live.forceHub = !kept.length && others.length < COMMUNITY_TOPOLOGY.maxHubs;
@@ -1072,6 +1079,18 @@ export class Communities {
       const expect = live.expect.delete(key);
       try { await this.host.openEdge(s.state, key, expect); if (expect) live.awaited.set(key, now); } catch { /* next tick */ }
     }
+  }
+
+  /** As a hub: did the edge to another hub that was up drop since the last tick? */
+  private hubDropped(groupId: string, live: Live, others: Hub[]): boolean {
+    const edges = this.host.edges(groupId), up = (live.hubPeersUp ??= new Set());
+    let dropped = false;
+    for (const key of new Set([...up, ...others.map(h => h.key)])) {
+      const id = edges.get(key);
+      if (id && this.host.linkReady(id, 2)) up.add(key);
+      else if (up.delete(key)) dropped = true;
+    }
+    return dropped;
   }
 
   /**
