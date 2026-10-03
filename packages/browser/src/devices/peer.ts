@@ -84,8 +84,8 @@ export interface ActiveStart { gated?: DeviceGateView; limited?: true }
  * the engine starts as before: it publishes nothing either way.
  */
 export async function activeStart(gate: DeviceGate, options: NodeOptions | undefined, given?: TurnNetwork | null): Promise<ActiveStart> {
-  let record = null;
-  try { record = await readDeviceRecord(gate.profile); } catch { return {}; }
+  const record = await readDeviceRecord(gate.profile).catch(() => undefined);
+  if (record === undefined) return {};
   if (!record || record.state !== "active" || record.network?.off) return {};
   const network = given === undefined ? turnPathOf(standbyNetwork(record.network, options?.transport).transport) : given;
   if (!network) return {};

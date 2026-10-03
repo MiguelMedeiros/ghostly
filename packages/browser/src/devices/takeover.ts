@@ -47,6 +47,9 @@ export interface TakeoverRequest {
 
 /** The device a takeover stops: the one the stored record names active, when it is not this one. */
 export function takeoverTarget(record: DeviceRecord): string | undefined {
+  // A device that released the turn names the device it gave it to, even before that device's record came back.
+  const taker = record.handoff?.release?.to;
+  if (taker) { const slot = record.deviceSet.find((s) => s?.key === taker); if (slot && slot.key !== record.deviceSet[record.ownSlot ?? -1]?.key) return slot.name; }
   if (record.activeSlot === undefined || record.activeSlot === record.ownSlot) return undefined;
   return record.deviceSet[record.activeSlot]?.name;
 }
@@ -76,8 +79,7 @@ export async function forceTakeover(ports: TakeoverPorts, request: TakeoverReque
   if (record.copy === "frozen" || record.verifier) {
     if (!record.verifier) throw new TakeoverRefusal("no-password", "This device cannot check the profile's password yet.");
     if (typeof request.password !== "string" || !request.password) throw new TakeoverRefusal("password", "Type the profile's password.");
-    let right = false;
-    try { right = await ports.proves(record.verifier, request.password); } catch { right = false; }
+    const right = await ports.proves(record.verifier, request.password).catch(() => false);
     if (!right) {
       await ports.amend({ takeoverAttempts: handoffAttemptFailed(record.takeoverAttempts, now()) });
       throw new TakeoverRefusal("password", "Wrong password.");

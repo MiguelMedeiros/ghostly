@@ -12,6 +12,7 @@ import { amendDevice, forgetDevice, readDeviceRecord } from "./store";
 import type { TurnKeeper, TurnOutcome } from "./turn";
 import { canTakeOver, forceTakeover, takeoverTarget } from "./takeover";
 import { peekTurn } from "./restoreGuard";
+import { newDeviceSecretDue } from "./rotate";
 import { provesHandoffPassword } from "./handoffPake";
 
 /**
@@ -74,6 +75,11 @@ export interface DeviceSetView {
   unfinishedGrants?: { key: string; name: string; at: number }[];
   /** This device's enrollment did not finish (WISP 06 § Adding a device, "Not finished"). */
   unfinished?: true;
+  /**
+   * The set should move to a new device-set secret (`rotate.ts`): a device granted it never finished, and may hold it.
+   * Removal (part 7 of WISP 06) makes the move; this only says it is due.
+   */
+  newSecretDue?: true;
 }
 
 /** The view of a device record and the links this device holds. A profile with no record is `single`, with no devices. */
@@ -86,7 +92,8 @@ export function deviceSetView(record: DeviceRecord | null, links: DeviceLinkView
   });
   const listed = new Set(record.deviceSet.flatMap((slot) => (slot ? [slot.key] : [])));
   const grants = (record.unfinishedGrants ?? []).filter((grant) => !listed.has(grant.key));
-  return { state: record.state, devices, ...(grants.length ? { unfinishedGrants: grants } : {}), ...(enrollmentUnfinished(record) ? { unfinished: true as const } : {}) };
+  return { state: record.state, devices, ...(grants.length ? { unfinishedGrants: grants } : {}), ...(enrollmentUnfinished(record) ? { unfinished: true as const } : {}),
+    ...(newDeviceSecretDue(record) ? { newSecretDue: true as const } : {}) };
 }
 
 export interface DeviceLinksOptions {

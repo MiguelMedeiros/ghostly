@@ -1481,11 +1481,10 @@ export class GhostlyNode implements EngineImplementation {
       this.limitedTimer = null;
       void (async () => {
         if (this.shuttingDown || !this.limitedMode) return;
-        let outcome: { kind: string; restricted?: boolean } | null = null;
-        try {
+        const outcome: { kind: string; restricted?: boolean } | null = await (async () => {
           const keeper = await openTurnKeeper(databaseName(), this.turnNetwork());
-          outcome = keeper ? await keeper.check(true) : null;
-        } catch { outcome = null; }
+          return keeper ? keeper.check(true) : null;
+        })().catch(() => null);
         if (this.shuttingDown) return;
         if (outcome?.kind === "gated") {
           const record = await readDeviceRecord(databaseName()).catch(() => null);

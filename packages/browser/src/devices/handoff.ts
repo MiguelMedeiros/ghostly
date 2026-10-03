@@ -680,6 +680,8 @@ export class HandoffGiver {
     await this.ports.records.move("standby", {
       // What it gave is still here, frozen: the copy a forced takeover starts from if the taker is lost (WISP 06).
       releasedTurn: this.turn + 1, heldFiles, leftFiles, copy: "frozen",
+      // The device it gave the turn to is the active one from here on, as the standby screen and a pull back name it.
+      activeSlot: toSlot,
       // The stream key is of no more use: the release is sent again as it is, with no key.
       handoff: { ...record.handoff!, step: "released", release, at: this.now(), secret: undefined },
     });

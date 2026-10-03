@@ -28,8 +28,7 @@ export async function guardRestore(opened: OpenedProfileBackup): Promise<Restore
   const didSeed = opened.devices ? null : await bundleDidSeed(opened);
   const d = bundleSecret(opened.devices, didSeed);
   if (!d) return { case: "plain", peek: null, didSeed };
-  let peek: TurnPeek | null = null;
-  try { peek = await engine.call("deviceTurnPeek", { d: toBase64Url(d) }); } catch { peek = null; }
+  const peek: TurnPeek | null = await engine.call("deviceTurnPeek", { d: toBase64Url(d) }).catch(() => null);
   const found = restoreCase(opened.devices, peek);
   const device = activeName(opened.devices, peek);
   return { case: found, ...(device ? { device } : {}), peek, didSeed };

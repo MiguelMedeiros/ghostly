@@ -73,3 +73,16 @@ export async function reloadIntoGate(): Promise<void> {
   try { await getBrowserHost().restartEngine?.(); } catch { /* the reload says what is wrong now */ }
   window.location.reload();
 }
+
+/** What the engine's `takeover-<reason>:` errors say to the person. */
+const TAKEOVER_FAILURES: Record<string, TranslationKey> = {
+  password: "devices.password.wrong", "locked-out": "devices.takeover.fail.lockedOut", refused: "devices.takeover.fail.refused",
+  "no-copy": "devices.takeover.fail.noCopy", "no-password": "devices.takeover.fail.noPassword", name: "devices.takeover.fail.name",
+  offline: "devices.takeover.fail.offline", state: "devices.takeover.fail.state",
+};
+
+export function takeoverErrorKey(error: unknown): TranslationKey | null {
+  const message = error instanceof Error ? error.message : typeof error === "string" ? error : "";
+  const reason = message.match(/^takeover-([a-z-]+):/)?.[1];
+  return reason ? TAKEOVER_FAILURES[reason] ?? "devices.takeover.fail.state" : null;
+}

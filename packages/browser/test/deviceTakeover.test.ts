@@ -241,3 +241,18 @@ describe("what keeps a forced takeover from locking the owner out", () => {
     expect(opened(network.source("dht").held)).toMatchObject({ turn: N + 8, author: 0 });
   });
 });
+
+describe("a new device-set secret after a grant that never finished (the interface left for removal)", () => {
+  it("is due on the active device while a device granted the secret is in no record, and only there", async () => {
+    const { newDeviceSecretDue } = await import("../src/devices/rotate");
+    const network = new FakeTurnNetwork();
+    const stray = toBase64Url(new Uint8Array(32).fill(9));
+    const desktop = await device(network, 0, "active", { unfinishedGrants: [{ key: stray, name: "Tablet", at: 1 }] });
+    expect(newDeviceSecretDue(desktop.store.record)).toEqual({ why: "unfinished-grant", keys: [stray] });
+    // A grant that did finish (the device is in the set) is no reason; nor is anything on a standby.
+    const listed = await device(network, 0, "active", { unfinishedGrants: [{ key: toBase64Url(devices[1].publicKey), name: "Phone", at: 1 }] });
+    expect(newDeviceSecretDue(listed.store.record)).toBeNull();
+    const standby = await device(network, 1, "standby", { unfinishedGrants: [{ key: stray, name: "Tablet", at: 1 }] });
+    expect(newDeviceSecretDue(standby.store.record)).toBeNull();
+  });
+});
