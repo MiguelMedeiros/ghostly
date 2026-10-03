@@ -216,6 +216,8 @@ export class LinkSession {
   /** When the last `expectPeer` window ends (or ended): the pace slows down from there step by step. */
   private expectUntil = 0;
   private watchUntil = 0;
+  /** The time of the peer's packet read last when it went away (`watchPeer`): a newer one that advertises says it is back. */
+  private watchFrom = 0;
   private publishRetryTimer: ReturnType<typeof setTimeout> | null = null;
   private active = false;
   private connected = false;
@@ -371,6 +373,7 @@ export class LinkSession {
    */
   watchPeer(): void {
     this.watchUntil = Math.max(this.watchUntil, Date.now() + WATCH_PEER_MS);
+    this.watchFrom = this.presence.lastPacketAt;
     this.expectPeer();
   }
 
@@ -483,6 +486,16 @@ export class LinkSession {
     if (pace === "fast" && stepping >= 0) return Math.min(OFFER_STEP_MAX * interval, Math.max(2 * interval, stepping));
     if (pace === "fast" || pace === "connected" || since < 0) return interval;
     return Math.min(interval, Math.max(2 * this.intervals.fast, since));
+  }
+
+  /**
+   * Looking for a contact that went away (`watchPeer`) and has not shown itself back: no signal of mine is out, and no
+   * packet of the contact's since then advertises (the one it leaves on its way out does not). The relays' budget gives
+   * these reads a share of its own (`PkarrRequestOptions.watch`), so a member watching several that left still reads
+   * the one that comes back.
+   */
+  private watching(): boolean {
+    return Date.now() < this.watchUntil && this.rtcSignal === null && !(this.presence.online && this.presence.lastPacketAt > this.watchFrom);
   }
 
   /** How urgently this link looks right now. */
@@ -603,7 +616,8 @@ export class LinkSession {
       const pace = this.pace();
       // This side's offer is out, and this read looks for its answer: signaling (`PkarrRequestOptions.signal`).
       const signal = pace === "fast" && this.fastStepsAfter > 0 && this.rtcSignalOut !== null;
-      const packet = await this.transport.resolve(this.peerPubKeyZ32, { background: pace === "background" || pace === "connected", urgent: pace === "fast", ...(signal && { signal }) });
+      const watch = !signal && this.watching();
+      const packet = await this.transport.resolve(this.peerPubKeyZ32, { background: pace === "background" || pace === "connected", urgent: pace === "fast", ...(signal && { signal }), ...(watch && { watch }) });
       if (!this.running) return;
       this.discoveryResult("read");
       const ms = Date.now() - started;
