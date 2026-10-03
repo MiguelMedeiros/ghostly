@@ -7,7 +7,7 @@
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [02](02-peer-keys.md), [03](03-capabilities.md), [04](04-profiles.md), [05](05-backups.md), [06](06-devices.md), [200](200-payments.md), [300](300-peer-proofs.md), [3xx did:dht](3xx-did-dht.md), [3xx SSH](3xx-ssh.md), [400](400-chat.md), [401](401-paired-chat.md), [4xx status cards](4xx-status-cards.md), [4xx message buttons](4xx-message-buttons.md), [500](500-files.md), [501](501-paired-files.md), [700](700-local-services.md), [701](701-http-services.md), [800](800-invite-join.md), [11xx](11xx-headless.md) |
 | Implementation | None. A proposal: nothing of it is on `dev` or in a release. Code starts after release 1.1 |
-| Summary | Install apps and games made by others: from a store, from a Git URL you paste, or sent to you in a chat. Each is checked against its publisher's signature and runs in a sandbox. |
+| Summary | Install apps and games by others from a store, a pasted Git URL or a chat. Each is checked against its publisher's signature and runs in a sandbox. |
 | Availability | Planned |
 | Notes | Not in the app. Phase 1 is free mini-apps, turn-based and light versus games included, on the web app, Desktop and the extension (the extension ships without apps if the Chrome Web Store objects). No payments, no network access for apps. |
 
