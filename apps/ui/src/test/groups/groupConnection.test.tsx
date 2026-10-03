@@ -200,6 +200,24 @@ describe("GroupConnection: a community is connected through its hubs", () => {
     const dots = screen.getAllByTestId("group-member").map(row => within(row).getAllByRole("img")[0].getAttribute("aria-label"));
     expect(dots).toEqual(["reachable", "reachable", "Through a hub"]);
   });
+
+  it("the members panel says a hub my edge to is not up is reached through the one that is", () => {
+    // Two hubs: the edge to Alice is up, the one to Bob is not (it never opened, or it dropped). Bob's messages come through Alice.
+    for (const state of ["waiting", "error", "connecting"] as const) {
+      const group = community([me, alice(), bob({ state, transport: undefined, lastSeenAt: 0 })]);
+      const view = renderApp(<GroupMembersDialog group={group} onClose={() => {}} />);
+      act(() => view.engine.update({ groups: [group] }));
+      expect(screen.getAllByTestId("group-member-status").map(s => s.textContent)).toEqual(["Connected · WebRTC", "Through a hub"]);
+      view.unmount();
+    }
+  });
+
+  it("the members panel keeps each edge's own state while no edge is up", () => {
+    const group = community([me, alice({ state: "waiting", transport: undefined, lastSeenAt: 0 }), away(BOB, "Bob")]);
+    const view = renderApp(<GroupMembersDialog group={group} onClose={() => {}} />);
+    act(() => view.engine.update({ groups: [group] }));
+    expect(screen.getAllByTestId("group-member-status").map(s => s.textContent)).toEqual(["Not reachable · not seen yet", "Through a hub"]);
+  });
 });
 
 describe("GroupMembersDialog: each member says how their edge is", () => {

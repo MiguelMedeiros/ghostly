@@ -8,6 +8,15 @@
     "cancelled": "Annullato. Non è stato salvato nulla.",
     "chooseFirst": "Scegli prima un backup",
     "connected": "Connesso · {{store}}",
+    "content": {
+      "everything": "Tutto",
+      "everythingSize": "File: {{size}}",
+      "info": "Il leggero tiene le chat e tutti i messaggi, i contatti, i gruppi, le identità, i portafogli e le impostazioni. Lascia fuori i file oltre 1 MB; i messaggi vocali fino a 4 MB restano. Dopo un ripristino, ogni file lasciato fuori appare come Non è in questo backup.",
+      "label": "Contenuto",
+      "leftOut": "I file oltre 1 MB sono stati lasciati fuori ({{size}}).",
+      "light": "Leggero",
+      "lightSize": "File: {{size}}. Lascia fuori {{left}}."
+    },
     "download": "Scarica",
     "downloaded": "Scaricato {{name}} · {{size}}",
     "emptyFile": "Questo file è vuoto. Scegli un file di backup.",

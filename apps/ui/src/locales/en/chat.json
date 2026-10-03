@@ -131,6 +131,7 @@
     "leftMinutes": "{{minutes}} min left",
     "leftUnderMinute": "less than a minute left",
     "noRoomDevice": "Not enough space: {{size}} free on this device",
+    "notInBackup": "Not in this backup",
     "notSentHint": "Not sent. Send it again.",
     "of": "{{done}} of {{size}}",
     "pause": "Pause",

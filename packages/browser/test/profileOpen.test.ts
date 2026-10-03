@@ -137,3 +137,36 @@ describe("the engine over a profile it cannot open", () => {
     expect(await now("profile-newer-engine")).toEqual({ version: idb.DB_VERSION + 1, settings: { nick: "Kept" } });
   });
 });
+
+describe("the version step of devices (WISP 06 § Compatibility and rollout)", () => {
+  it("a database at 12 (1.0.3) opens at 13 with its stores and rows kept, and a build at 12 then reads it as newer", async () => {
+    const idb = await fresh("profile-twelve");
+    expect(idb.DB_VERSION).toBe(13);
+    // As 1.0.3 left it: every store of 12, one record in settings and one swap.
+    const twelve = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open("profile-twelve", 12);
+      request.onupgradeneeded = () => {
+        const db = request.result;
+        db.createObjectStore("settings");
+        db.createObjectStore("swaps", { keyPath: "id" });
+        db.createObjectStore("messages", { keyPath: ["linkId", "id"] }).createIndex("byLink", "linkId");
+        request.transaction!.objectStore("settings").put({ nick: "Kept" }, "settings");
+        request.transaction!.objectStore("swaps").put({ id: "swap-1", mint: "https://mint.example" });
+      };
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    twelve.close();
+
+    const db = await idb.openDb();
+    expect(db.version).toBe(13);
+    expect([...db.objectStoreNames]).toEqual(expect.arrayContaining(["settings", "swaps", "messages", "files", "fileState"]));
+    expect(await idb.wrap(db.transaction("swaps").objectStore("swaps").get("swap-1"))).toEqual({ id: "swap-1", mint: "https://mint.example" });
+    db.close();
+    expect(await now("profile-twelve")).toEqual({ version: 13, settings: { nick: "Kept" } });
+
+    // A build that reads up to 12 (the released 1.0.3) gets a version error: it never starts a copy written from here.
+    const older = await new Promise<unknown>((resolve) => { const r = indexedDB.open("profile-twelve", 12); r.onsuccess = () => { r.result.close(); resolve(null); }; r.onerror = () => resolve(r.error); });
+    expect((older as DOMException | null)?.name).toBe("VersionError");
+  });
+});

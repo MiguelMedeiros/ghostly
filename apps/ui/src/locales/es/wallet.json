@@ -89,6 +89,7 @@
     "phraseNote": "La frase recupera lo que el servidor de Second guarda para esta billetera; el historial de pagos viene del archivo de copia.",
     "read": "Leer",
     "renewalHint": "Renueva las monedas cerca de su caducidad mientras Ghostly está abierto",
+    "scanning": "Buscando monedas on-chain que esta frase recibió antes…",
     "server": "Servidor Ark",
     "serverInput": "Servidor Bark",
     "serverStuck": "Este servidor no responde. Puedes cambiar a otro.",
@@ -221,6 +222,8 @@
     "removeMintConsent": "Lo que se le pague después solo aparece cuando vuelva a añadir este mint.",
     "removeMintHint": "Puedes volver a añadirlo más tarde.",
     "removeMintQuestion": "¿Quitar {{name}}?",
+    "setAside": "{{amount}} {{unit}} apartados",
+    "setAsideInfo": "Apartados para un pago que el mint aún no ha confirmado. Salen con el pago o vuelven a tu saldo cuando el mint responda.",
     "settings": "Ajustes",
     "testBalance": "{{amount}} sats de prueba (sin valor)",
     "testMintInvoice": "Esperando el pago… Los mints de prueba marcan toda factura como pagada por sí solos, así que esta solo cuenta cuando un contacto la paga en un chat. Para tener sats de prueba ya, usa Obtener monedas de prueba arriba.",
@@ -233,6 +236,8 @@
       "lightningOut": "Pagado por Lightning",
       "reclaimed": "Pago recuperado"
     },
+    "unconfirmed": "{{amount}} {{unit}} sin confirmar",
+    "unconfirmedInfo": "El mint tomó estos sats en un intercambio y no puede decir qué dio por ellos. La cartera sigue preguntando. Puede que no vuelvan.",
     "unreachable": "No disponible ahora",
     "working": "Procesando…"
   },
@@ -561,6 +566,7 @@
       "paid": "{{amount}} pagados a una factura, aún sin reclamar al mint",
       "request": "Una solicitud de {{amount}} en un chat, aún abierta",
       "sent": "{{amount}} en ecash que enviaste, aún sin recoger",
+      "swap": "{{amount}} en un intercambio con el mint, aún sin terminar",
       "unclaimed": "{{amount}} que el mint dice haber emitido para una factura, nunca recibidos aquí"
     },
     "label": "Eliminar esta billetera",

@@ -5,7 +5,7 @@ import { wordlist } from "@scure/bip39/wordlists/english.js";
 import { decodeBolt11 } from "@ghostly/core";
 import { STORES, store, transact, wrap } from "../src/shared/idb";
 import type { CashuWallet } from "../src/engine/wallet";
-import { BREEZ_SOURCE, BreezLightning, breez, breezDescriptor, breezStorage, idempotencyKey } from "../src/engine/paymentAdapters/providers/breez";
+import { BREEZ_SOURCE, BreezLightning, breez, breezDescriptor, breezDatabaseName, idempotencyKey } from "../src/engine/paymentAdapters/providers/breez";
 import { cashuMint, CASHU_MINT_SOURCE } from "../src/engine/paymentAdapters/providers/cashuMint";
 import { LightningService, type LightningEvents } from "../src/engine/paymentAdapters/providers/lightningService";
 import { LIGHTNING_PROVIDERS, offeredIn } from "../src/engine/paymentAdapters/providers/registry";
@@ -24,7 +24,7 @@ afterEach(() => { vi.restoreAllMocks(); });
 /** A Breez source on the fake network, and the fake wallet behind it. */
 async function connect(mnemonic = phrase(), balance = 0) {
   const provider = await BreezLightning.connect({ network: "regtest", mnemonic }, async () => net.sdk);
-  const wallet = net.wallets.get(breezStorage("regtest", mnemonic))!;
+  const wallet = net.wallets.get(breezDatabaseName("regtest", mnemonic))!;
   wallet.balance = balance;
   return { provider, wallet, mnemonic };
 }
@@ -231,7 +231,7 @@ describe("Breez as the engine's Lightning source", () => {
     expect(lightning.view).toMatchObject({ providerId: BREEZ_SOURCE, status: "ready", network: "regtest", secrets: ["mnemonic", "apiKey"] });
     const stored = JSON.stringify(await wrap((await store(STORES.settings, "readonly")).getAll()));
     expect(phraseLeaks(stored)).toEqual([]);
-    net.wallets.get(breezStorage("regtest", mnemonic))!.balance = 500;
+    net.wallets.get(breezDatabaseName("regtest", mnemonic))!.balance = 500;
 
     const quote = await lightning.quote(await invoiceOf(50));
     expect(quote).toMatchObject({ amount: 50, feeReserve: 2, source: BREEZ_SOURCE });

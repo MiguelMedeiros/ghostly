@@ -131,7 +131,7 @@ export const BLOCKS: Block[] = [
   b("sdk", "ecosystem", "@ghostlytools/sdk", [], "Write a wallet source or an identity proof outside the app, test it with the contract suites, and it joins the pickers as a plugin: no registry line. From the repository, not on npm.", ["sdk"], "candidate-sdk-and-manifests"),
   b("headless", "ecosystem", "Headless CLI", ["11xx-headless"], "`ghostly`: the app's own engine on Node for bots, driven through a daemon, a local socket and a JSON event stream. Spending real money needs --confirm-real. npm install -g @ghostlytools/cli."),
   b("sandbox", "ecosystem", "Plugin sandbox", [], "A plugin host that gives each plugin only the permissions you grant it. Being considered, not planned.", ["adapter-roadmap"], "candidate-plugin-sandbox"),
-  b("apps", "ecosystem", "Apps & catalogs", [], "Mini-apps, games and independent catalogs, possibly with indexers.", ["adapter-roadmap"], "candidate-mini-apps-and-games"),
+  b("apps", "ecosystem", "Apps & catalogs", ["12xx-marketplace"], "Mini-apps and games from stores you add by pasting a URL, or sent to you in a chat. Each is checked against its publisher's signature and runs in a sandbox with no internet access. Planned after 1.1."),
   b("os", "ecosystem", "Self-hosted runtime", [], "An always-on personal node, even a Raspberry Pi, running your Ghostly.", ["adapter-roadmap"], "candidate-self-hosted-24h"),
 ];
 

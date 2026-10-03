@@ -7,7 +7,8 @@ import type { WalletMode } from "../../shared/mints";
 import { ModeChanged, ModeGate, WrongNetworkError, networkLabel } from "./modeGate";
 import { walletKey } from "./walletNetworks";
 import { intentRepository, newDeviceKey, sealSeed, unsealSeed, type EncryptedSeed } from "./persistence";
-import { breezStorage, loadBreezSdk, type BreezSdkModule } from "./providers/breezSdk";
+import { forgetBreez, loadBreezSdk, type BreezSdkModule } from "./providers/breezSdk";
+import { breezDatabaseInUse, breezDatabasesFor } from "./providers/breezDatabases";
 import { SPARK_INVOICE_SECS, SparkAdapter, type SparkHistoryEntry } from "./spark";
 import type { SavedIntent } from "./coordinator";
 
@@ -123,22 +124,30 @@ export class SparkWallet {
   }
 
   /**
-   * The Breez database this wallet's SDK keeps on this device, named from its phrase (`breezStorage`): a device that
-   * hands the wallet over deletes it (WISP 06 § Wallets). Undefined with no wallet.
+   * The Breez database this wallet's SDK keeps on this device for this profile (the one it opened, else the one this
+   * profile noted for its phrase, `breezDatabaseInUse`): a device that hands the wallet over deletes it (WISP 06 §
+   * Wallets). Undefined with no wallet.
    */
   async breezDatabase(): Promise<string | undefined> {
     if (!this.saved) return undefined;
+    if (this.adapter) return this.adapter.storage;
     const { mnemonic } = await this.secrets();
-    return breezStorage(this.saved.network, mnemonic);
+    return breezDatabaseInUse(this.saved.network, mnemonic);
   }
 
   async stop() { this.stopped = true; this.gate.close(); await this.serial(() => this.lock()); }
-  /** The person removes this wallet (see ArkWallet.remove): closed and its record, with its sealed seed, deleted. */
+  /**
+   * The person removes this wallet (see ArkWallet.remove): closed, its record with its sealed seed deleted, and its
+   * Breez databases on this device too, unless a Breez Lightning card of this profile on the same phrase has them open.
+   */
   remove(): Promise<void> {
     this.gate.interrupt();
     return this.serial(async () => {
+      const saved = this.saved;
+      const storages = this.adapter ? [this.adapter.storage] : saved ? await this.secrets().then(({ mnemonic }) => breezDatabasesFor(saved.network, mnemonic)).catch(() => []) : [];
       await this.lock();
       await transact([STORES.settings], (s) => { s[STORES.settings].delete(this.key); });
+      for (const storage of storages) await forgetBreez(storage);
       this.saved = undefined;
       this.view = this.idle(); this.changed();
     }).finally(() => this.gate.resume());

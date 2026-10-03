@@ -518,7 +518,8 @@ export function useWebRTC({
       traceCallEnd("connection", { ice: pc.iceConnectionState, connection: pc.connectionState, connected: callConnectedEventFiredRef.current });
       // A connected call whose contact went away (a closed tab, a reload, a lost network) ends as a hang-up ends it:
       // with its line and its length in the chat. One that never connected could not: the chat says so.
-      if (callConnectedEventFiredRef.current) {
+      const connected = callConnectedEventFiredRef.current;
+      if (connected) {
         const started = callStartedAtRef.current;
         addCallEventMessage?.("call_ended", callHadVideoRef.current, started ? Date.now() - started : undefined);
         callConnectedEventFiredRef.current = false;
@@ -527,7 +528,15 @@ export function useWebRTC({
       }
       cleanupConnection();
       updateCallState("idle");
-      publishCallSignal(null);
+      // The contact is told, as a hang-up tells it: its side may still say "Reconnecting..." (or wait for a restart
+      // offer) and would send restart offers to a call that is over here. One that never connected says why (`r: "u"`).
+      const signal: CallSignal = connected ? { t: "h", ts: Date.now() } : { t: "h", ts: Date.now(), r: "u" };
+      publishCallSignal(JSON.stringify(signal));
+      if (hangupTimerRef.current) clearTimeout(hangupTimerRef.current);
+      hangupTimerRef.current = setTimeout(() => {
+        publishCallSignal(null);
+        hangupTimerRef.current = null;
+      }, 5000);
       setFastPoll(false);
     };
 
@@ -612,6 +621,9 @@ export function useWebRTC({
     restartRetryRef.current = null;
     const attempt = attemptRef.current;
     const current = () => attemptRef.current === attempt && pcRef.current === pc;
+    // The offer made next replaces the one before it on the connection: from here an answer to that one is late,
+    // though this one has no time of its own until its candidates are gathered.
+    restartOfferRef.current = 0;
     try {
       await pc.setLocalDescription(await pc.createOffer({ iceRestart: true }));
       await waitForIceGathering(pc, ICE_RESTART_GATHER_MS, { fresh: true });

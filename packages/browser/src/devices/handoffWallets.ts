@@ -158,6 +158,8 @@ function anyAmount(value: unknown, path: string, depth = 0): string | null {
 export const NETWORK_FIELDS: Readonly<Record<keyof NetworkWalletsView, "checked" | "past">> = {
   mints: "checked", balance: "checked", awaiting: "checked", ark: "checked", bark: "checked", fedimint: "checked", spark: "checked", usdt: "checked",
   lightning: "checked", lightnings: "checked", bitcoin: "checked", history: "past", feesPaid: "past",
+  // Cashu: sats set aside for a payment or a swap, swaps not finished yet and what they hold (read with the mints).
+  setAside: "checked", openSwaps: "checked", swapsAmount: "checked", unconfirmed: "checked",
 };
 
 /** The fields of the whole view the plan reads (or that hold no money); anything else is looked through for amounts. */
@@ -194,10 +196,12 @@ function candidates(net: NetworkWalletsView, network: WalletNetwork, at: string,
   const list: Candidate[] = [];
   const awaiting = net.awaiting ?? [];
   const waits = (type: WalletType, card?: string) => awaiting.flatMap((item, i) => item.type === type && (card === undefined || item.card === card) ? [[`${at}.awaiting[${i}]`, item.amount > 0 ? item.amount : 1] as [string, unknown]] : []);
-  if (net.mints.length || money(net.balance)) {
+  // Sats a payment or a swap holds at a mint are ecash too: not in the balance, and not gone.
+  const cashuHeld: [string, unknown][] = [[`${at}.setAside`, net.setAside], [`${at}.swapsAmount`, net.swapsAmount], [`${at}.unconfirmed`, net.unconfirmed], [`${at}.openSwaps`, net.openSwaps]];
+  if (net.mints.length || money(net.balance) || held(cashuHeld)) {
     list.push({
       id: `cashu:${network}`, type: "cashu", network, at, route: "moves", unreadable: false,
-      amounts: [[`${at}.balance`, net.balance], ...net.mints.flatMap((mint, i) => [[`${at}.mints[${i}].balance`, mint.balance] as [string, unknown], ...(mint.awaiting ?? []).map((_, j) => [`${at}.mints[${i}].awaiting[${j}]`, 1] as [string, unknown])]), ...waits("cashu")],
+      amounts: [[`${at}.balance`, net.balance], ...cashuHeld, ...net.mints.flatMap((mint, i) => [[`${at}.mints[${i}].balance`, mint.balance] as [string, unknown], ...(mint.awaiting ?? []).map((_, j) => [`${at}.mints[${i}].awaiting[${j}]`, 1] as [string, unknown])]), ...waits("cashu")],
     });
   } else if (awaiting.some((item) => item.type === "cashu")) list.push({ id: `cashu:${network}`, type: "cashu", network, at, route: "moves", unreadable: false, amounts: waits("cashu") });
   const { ark, bark, fedimint, spark, usdt, bitcoin } = net;
