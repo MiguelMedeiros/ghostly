@@ -42,7 +42,7 @@ export function BackupRows({ name, reveal, exportBackup, restorePhrase, restoreF
       </Row>
       {open === "backup" && (
         <Block>
-          <InputGroup as="form" onSubmit={(e) => { e.preventDefault(); void run(async () => { downloadJson(await exportBackup(password), `ghostly-${slug}-backup.json`); toggle("none"); }); }}>
+          <InputGroup as="form" onSubmit={(e) => { e.preventDefault(); void run(async () => { if (await downloadJson(await exportBackup(password), `ghostly-${slug}-backup.json`)) toggle("none"); }); }}>
             <input aria-label={t("wallet.backup.passwordFor", { name })} type="password" autoComplete="new-password" placeholder={t("wallet.backup.newPassword")} className={input} value={password} onChange={(e) => setPassword(e.target.value)} autoFocus />
             <Button type="submit" variant="primary" disabled={busy || password.length < 12}>{t("wallet.backup.download")}</Button>
           </InputGroup>

@@ -1,0 +1,22 @@
+/* An identity shared in a chat, in its timeline (IdentityShareLine.tsx): one ID card (IdCardFace.tsx, id-deck.css)
+   outside any deck, the size of a card in the composer's picker (250px, the size at which the card shows its band,
+   photo, identity and one status line). The card's sizes follow --card-w, which a deck sets; here the button does. A
+   narrower column (a phone, a squeezed chat) shrinks the button, and the face chooses what it shows by its own width.
+   The button carries no look of its own, as in the deck: the face does. */
+.identity-share-card{--card-w:250px;--deck-ease:cubic-bezier(.22,1,.36,1);--deck-spring:cubic-bezier(.34,1.45,.64,1);display:block;width:var(--card-w);max-width:100%;aspect-ratio:1.586;
+ padding:0;border:0;border-radius:13px;background:none;color:#fff;text-align:left;cursor:pointer;-webkit-tap-highlight-color:transparent}
+@supports(transition-timing-function:linear(0,1)){.identity-share-card{--deck-spring:linear(0,.132,.404,.68,.893,1.025,1.084,1.094,1.076,1.05,1.025,1.006,.996,.991,.991,.993,.996,.998,1,1.001,1.001,1)}}
+/* A card in a chat casts a shorter shadow than one in a deck: the next row is close under it. */
+.identity-share-card [data-deck=face]{box-shadow:0 14px 26px -18px rgba(0,0,0,.8);transition:transform .5s var(--deck-spring),border-color .3s,box-shadow .3s}
+/* The keys: the card comes up as under a mouse, with a ring in the app's accent (it reads on a light chat too). */
+.identity-share-card:focus-visible{outline:none}
+.identity-share-card:focus-visible [data-deck=face]{outline:2px solid var(--theme-accent,#00c49a);outline-offset:3px;transform:translateY(-5px);border-color:rgba(var(--card-rgb),.75)}
+/* A mouse: the card lifts and leans a little under the pointer, lit in its ink, and settles like a spring (the
+   deck's). The flourish on top is the deck's own, played once (deck/motion.ts). A finger has no hover: the card is
+   still there, and a tap opens it. */
+@media(hover:hover) and (pointer:fine){
+ .identity-share-card:hover [data-deck=face]{transform:translateY(-5px) rotate(-.8deg);border-color:rgba(var(--card-rgb),.75);box-shadow:0 22px 34px -18px rgba(0,0,0,.85),0 0 26px -10px rgba(var(--card-rgb),.6)}
+}
+/* Reduced motion: nothing moves. The ring and the lit border still say which card the keys or the pointer are on. */
+@media(prefers-reduced-motion:reduce){.identity-share-card [data-deck=face]{transition:none!important;transform:none!important}}
+:root[data-reduce-motion=true] .identity-share-card [data-deck=face]{transition:none!important;transform:none!important}

@@ -262,6 +262,19 @@ function missingIn(frame: GroupSyncFrame, from: string): (f: GroupMessageFrame) 
   };
 }
 
+/**
+ * My own messages and the ones I kept of other members, as one list for a member catching up: each log keeps its own
+ * order (mine as I sent them, the others' as they reached me, which no member's clock can change), and the two are
+ * merged by the time each frame says, mine first when they say the same. A member whose clock is off moves only
+ * where its lines fall among mine, never the order within a log.
+ */
+export function asWritten(own: readonly GroupMessageFrame[], kept: readonly GroupMessageFrame[]): GroupMessageFrame[] {
+  const out: GroupMessageFrame[] = [];
+  let i = 0, j = 0;
+  while (i < own.length || j < kept.length) out.push(j >= kept.length || (i < own.length && own[i].ts <= kept[j].ts) ? own[i++] : kept[j++]);
+  return out;
+}
+
 function isSealed(v: unknown): v is SealedSecret {
   return !!v && typeof v === "object" && ["e", "n", "c"].every(k => typeof (v as Record<string, unknown>)[k] === "string" && B64.test((v as Record<string, string>)[k]) && (v as Record<string, string>)[k].length <= 128);
 }
@@ -990,7 +1003,16 @@ export class GroupSession {
     let answered = this.syncsAnswered.get(from);
     if (!answered) this.syncsAnswered.set(from, answered = new RateWindow(GROUP_LIMITS.syncAnswers, GROUP_LIMITS.syncWindowMs, () => this.hooks.clock?.() ?? Date.now()));
     if (!answered.take()) return;
-    if (frame.e > this.epoch) { this.ask(from); this.offerMeta(from, frame.mt); return; }
+    if (frame.e > this.epoch) {
+      this.ask(from);
+      this.offerMeta(from, frame.mt);
+      // Behind on the chain, I still hold what they lack: my own messages, sent before I heard of their commits (a
+      // joiner's first words, sent before any edge opened, while the admin admitted the next one). Nobody asks again
+      // once I have caught up, so they go now. Only mine, and only for epochs my chain says they were in: whom to
+      // hand on for is the newer roster's to say, which I do not have yet.
+      this.handOwn(from, frame);
+      return;
+    }
     if (frame.h !== commitHash(this.state.chain[frame.e])) {
       // A claim is not a fork: they get my commit for that epoch, and fork on it if their own is validly signed and different.
       this.hooks.send(from, { t: "group-commit", g: this.id, commit: this.state.chain[frame.e] });
@@ -1009,9 +1031,11 @@ export class GroupSession {
     // Messages they have not seen, for epochs they were in: my own, from my bounded log, and those of the members they
     // asked me for (whose edges to them are down), from what I received. Signed by their authors, so nothing to trust me for.
     const lacks = missingIn(frame, from);
-    for (const sent of this.state.sent) if (rosterHas(this.state.chain[sent.e].m, from) && lacks(sent)) this.hooks.send(from, sent);
     const asked = new Set(Array.isArray(frame.ask) ? frame.ask.filter(k => typeof k === "string" && k !== from && k !== this.myKey && rosterHas(this.roster, k)) : []);
-    if (asked.size) for (const kept of this.state.relay ?? []) if (asked.has(kept.s) && this.state.chain[kept.e] && rosterHas(this.state.chain[kept.e].m, from) && lacks(kept)) this.hooks.send(from, kept);
+    const kept = asked.size ? (this.state.relay ?? []).filter(f => asked.has(f.s) && this.state.chain[f.e] && rosterHas(this.state.chain[f.e].m, from) && lacks(f)) : [];
+    // In the order they were written, as far as two logs can say: the receiver places each where it arrives, and my own
+    // first then the others' showed it a conversation as all my lines, then all of theirs.
+    for (const next of asWritten(this.ownLacked(from, frame), kept)) this.hooks.send(from, next);
     // Their latest edits too, after the messages they change (a sync says nothing of edits: one they have changes nothing).
     for (const author of asked) {
       const edits = (this.state.relayEdits ?? []).filter(f => f.s === author && this.state.chain[f.e] && rosterHas(this.state.chain[f.e].m, from));
@@ -1019,6 +1043,15 @@ export class GroupSession {
     }
     // The group's picture, when theirs is older (after the commits and secrets above, which it may need).
     this.offerMeta(from, frame.mt);
+  }
+
+  /** My own messages a member's sync says it lacks, from my bounded log, for the epochs it was a member of. */
+  private handOwn(to: string, frame: GroupSyncFrame): void {
+    for (const sent of this.ownLacked(to, frame)) this.hooks.send(to, sent);
+  }
+  private ownLacked(to: string, frame: GroupSyncFrame): GroupMessageFrame[] {
+    const lacks = missingIn(frame, to);
+    return this.state.sent.filter(sent => this.state.chain[sent.e] && rosterHas(this.state.chain[sent.e].m, to) && lacks(sent));
   }
 
   // -- metadata (WISP 9xx § Metadata) ---------------------------------------

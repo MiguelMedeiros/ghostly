@@ -162,11 +162,24 @@ describe("held bundles: who, what and when", () => {
     expect(first.bob.open(bytes, { now: NOW }).header.seq).toBe(1);
   });
 
-  it("dates: accepts the edge of clock skew and lifetime, refuses one millisecond past either", () => {
+  // Reported 2026-10-01 (a contact whose clock runs two minutes fast): an item dated over a minute ahead of the
+  // reader's clock was refused for good, and its sender told it "could not be verified as yours, or was too large".
+  it.each([["two minutes ahead", 2 * 60_000], ["ten minutes ahead", 10 * 60_000], ["an hour ahead", 60 * 60_000], ["an hour behind", -60 * 60_000]])("takes an item whose sender's clock is %s: its date refuses nothing", (_, skew) => {
+    const h = setup(), body = utf8Encode("hi");
+    const theirNow = NOW + skew;
+    const bundle = h.bundle(body, h.fields(body, { 8: theirNow, 12: theirNow + HOLD_LIMITS.ttlMs }));
+    expect(h.bob.open(bundle, { now: NOW }).header).toMatchObject({ ts: theirNow, expires: theirNow + HOLD_LIMITS.ttlMs });
+  });
+
+  it("an item sealed for one sequence is not taken for another, whatever date it carries: the sequence orders items, not the date", () => {
+    const h = setup(), body = utf8Encode("hi");
+    const later = h.bundle(body, h.fields(body, { 6: 4, 8: NOW + 60 * 60_000, 12: NOW + 2 * 60 * 60_000 }));
+    expect(h.bob.open(later, { now: NOW }).header.seq).toBe(4);
+  });
+
+  it("dates: accepts the edge of the lifetime, refuses one millisecond past it", () => {
     const h = setup(), body = utf8Encode("hi");
     const at = (ts: number, expires: number) => h.bundle(body, h.fields(body, { 8: ts, 12: expires }));
-    expect(reason(() => h.bob.open(at(NOW + HOLD_LIMITS.clockSkewMs, NOW + HOLD_LIMITS.clockSkewMs + 1), { now: NOW }))).toBeUndefined();
-    expect(reason(() => h.bob.open(at(NOW + HOLD_LIMITS.clockSkewMs + 1, NOW + 2 * HOLD_LIMITS.clockSkewMs), { now: NOW }))).toBe("future");
     const longest = NOW + HOLD_LIMITS.ttlMs + HOLD_LIMITS.clockSkewMs;
     expect(reason(() => h.bob.open(at(NOW, longest), { now: NOW }))).toBeUndefined();
     expect(reason(() => h.bob.open(at(NOW, longest + 1), { now: NOW }))).toBe("limits");
@@ -226,27 +239,27 @@ describe("hold pointers: refusals", () => {
 
   it("reads a hand-built pointer, and one from before refusals were listed", () => {
     const h = setup();
-    expect(h.bob.readPointer(h.pointerPacket(body()), NOW)).toEqual({ rev: 3, issued: NOW, expires: NOW + 60_000, manifestUrl: "https://s3.example/m", top: 4, ack: 2, count: 1, bytes: 100, refused: [1, 2] });
-    expect(h.bob.readPointer(h.pointerPacket(body().slice(0, 9)), NOW)?.refused).toEqual([]);
-    expect(h.bob.readPointer(h.pointerPacket(body({ 4: null })), NOW)?.manifestUrl).toBeNull();
+    expect(h.bob.readPointer(h.pointerPacket(body()))).toEqual({ rev: 3, issued: NOW, expires: NOW + 60_000, manifestUrl: "https://s3.example/m", top: 4, ack: 2, count: 1, bytes: 100, refused: [1, 2] });
+    expect(h.bob.readPointer(h.pointerPacket(body().slice(0, 9)))?.refused).toEqual([]);
+    expect(h.bob.readPointer(h.pointerPacket(body({ 4: null })))?.manifestUrl).toBeNull();
   });
 
   it("refuses a packet under another key, with no or two pointer records, or too large", () => {
     const h = setup(), good = h.pointerPacket(body());
-    expect(h.bob.readPointer({ ...good, pubKeyZ32: h.bob.identity.pubKeyZ32 }, NOW)).toBeNull();
-    expect(h.bob.readPointer({ ...good, records: [] }, NOW)).toBeNull();
-    expect(h.bob.readPointer({ ...good, records: [{ ...good.records[0], label: "_dm" }] }, NOW)).toBeNull();
-    expect(h.bob.readPointer({ ...good, records: [good.records[0], good.records[0]] }, NOW)).toBeNull();
-    expect(h.bob.readPointer({ ...good, records: [good.records[0], { label: "_pad", value: "x".repeat(1200), ttl: 60 }] }, NOW)).toBeNull();
+    expect(h.bob.readPointer({ ...good, pubKeyZ32: h.bob.identity.pubKeyZ32 })).toBeNull();
+    expect(h.bob.readPointer({ ...good, records: [] })).toBeNull();
+    expect(h.bob.readPointer({ ...good, records: [{ ...good.records[0], label: "_dm" }] })).toBeNull();
+    expect(h.bob.readPointer({ ...good, records: [good.records[0], good.records[0]] })).toBeNull();
+    expect(h.bob.readPointer({ ...good, records: [good.records[0], { label: "_pad", value: "x".repeat(1200), ttl: 60 }] })).toBeNull();
   });
 
   it("refuses a record that does not decrypt, or decrypts to something that is not a pointer", () => {
     const h = setup();
     const raw = (plain: string) => h.pointerPacket([], "", [{ label: "_hold", value: encrypt(plain, h.sealKey), ttl: 60 }]);
-    expect(h.bob.readPointer(h.pointerPacket([], "", [{ label: "_hold", value: encrypt("[]", randomBytes(32)), ttl: 60 }]), NOW)).toBeNull();
+    expect(h.bob.readPointer(h.pointerPacket([], "", [{ label: "_hold", value: encrypt("[]", randomBytes(32)), ttl: 60 }]))).toBeNull();
     for (const plain of ["{", "{}", "[1,2]", JSON.stringify([body(), "A".repeat(86), 1]), JSON.stringify(["body", "A".repeat(86)]),
       JSON.stringify([body().slice(0, 8), "A".repeat(86)]), JSON.stringify([[...body(), 1], "A".repeat(86)]), JSON.stringify([body(), 7]), JSON.stringify([body(), "short"])]) {
-      expect(h.bob.readPointer(raw(plain), NOW)).toBeNull();
+      expect(h.bob.readPointer(raw(plain))).toBeNull();
     }
   });
 
@@ -257,28 +270,27 @@ describe("hold pointers: refusals", () => {
     ["a string byte total", { 8: "100" }],
     ["a numeric manifest URL", { 4: 42 }],
     ["a manifest URL over 2048 characters", { 4: `https://s3.example/${"a".repeat(2048)}` }],
-    ["an issue date past clock skew", { 2: NOW + HOLD_LIMITS.clockSkewMs + 1 }],
     ["refusals that are not a list", { 9: "1,2" }],
     ["33 refusals", { 9: Array.from({ length: 33 }, (_, i) => i + 1) }],
     ["a zero refusal", { 9: [0] }],
   ])("refuses a validly signed pointer with %s", (_, over) => {
     const h = setup();
-    expect(h.bob.readPointer(h.pointerPacket(body(over)), NOW)).toBeNull();
+    expect(h.bob.readPointer(h.pointerPacket(body(over)))).toBeNull();
   });
 
-  it("accepts an issue date at the edge of clock skew", () => {
+  it.each([["two minutes ahead", 2 * 60_000], ["an hour ahead", 60 * 60_000], ["an hour behind", -60 * 60_000]])("reads the pointer of a contact whose clock is %s: its issue date refuses nothing, its rev orders it", (_, skew) => {
     const h = setup();
-    expect(h.bob.readPointer(h.pointerPacket(body({ 2: NOW + HOLD_LIMITS.clockSkewMs })), NOW)?.issued).toBe(NOW + HOLD_LIMITS.clockSkewMs);
+    expect(h.bob.readPointer(h.pointerPacket(body({ 2: NOW + skew, 3: NOW + skew + 60_000 })))).toMatchObject({ rev: 3, issued: NOW + skew });
   });
 
   it("refuses a pointer whose signature does not verify, or was made for the other direction", () => {
     const h = setup();
-    expect(h.bob.readPointer(h.pointerPacket(body(), "A".repeat(86)), NOW)).toBeNull();
+    expect(h.bob.readPointer(h.pointerPacket(body(), "A".repeat(86)))).toBeNull();
     const reversed = toBase64Url(sign(utf8Encode(JSON.stringify(["ghostly-hold-pointer", h.alice.to, h.alice.from, body()])), identityFromSeedB64(h.aliceSeed).seed));
-    expect(h.bob.readPointer(h.pointerPacket(body(), reversed), NOW)).toBeNull();
+    expect(h.bob.readPointer(h.pointerPacket(body(), reversed))).toBeNull();
     // A newer revision signed over an older body does not pass either.
     const older = toBase64Url(sign(utf8Encode(JSON.stringify(["ghostly-hold-pointer", h.alice.from, h.alice.to, body({ 1: 2 })])), identityFromSeedB64(h.aliceSeed).seed));
-    expect(h.bob.readPointer(h.pointerPacket(body(), older), NOW)).toBeNull();
+    expect(h.bob.readPointer(h.pointerPacket(body(), older))).toBeNull();
   });
 
   it("keeps only the last 32 refusals when publishing, and clamps the record lifetime", () => {
@@ -288,7 +300,7 @@ describe("hold pointers: refusals", () => {
     const records = h.alice.pointerRecords(pointer, NOW);
     expect(records[0].ttl).toBe(24 * 3600);
     expect(h.alice.pointerRecords({ ...pointer, expires: NOW }, NOW)[0].ttl).toBe(60);
-    const read = h.bob.readPointer({ pubKeyZ32: h.alice.identity.pubKeyZ32, timestampMicros: 0n, records }, NOW)!;
+    const read = h.bob.readPointer({ pubKeyZ32: h.alice.identity.pubKeyZ32, timestampMicros: 0n, records })!;
     expect(read.refused).toEqual(pointer.refused.slice(-32));
   });
 });

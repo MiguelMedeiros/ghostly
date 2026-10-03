@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
 import { useSettings } from "../../contexts/SettingsContext";
 import { DeleteProfileDialog } from "../../components/DeleteProfileDialog";
+import { backUpToFile } from "../../lib/backupFile";
 import { listProfiles, registryKey } from "../../lib/profiles";
 import type { Language } from "../../lib/settings";
 import { Profile } from "../../pages/Profile";
@@ -9,9 +10,9 @@ import { renderApp } from "../render";
 // covers: backup.profile.file, app.i18n, profiles.delete
 
 // The bundle itself is made elsewhere (packages/browser/test/profileRestoredName.test.ts): here only the page around it.
-vi.mock("../../lib/profileBackup", async (original) => ({
-  ...(await original<typeof import("../../lib/profileBackup")>()),
-  createProfileBackup: vi.fn(async () => "sealed bundle"),
+vi.mock("../../lib/backupFile", async (original) => ({
+  ...(await original<typeof import("../../lib/backupFile")>()),
+  backUpToFile: vi.fn(async () => ({ how: "downloaded", result: { bytes: 1, files: 0, fileBytes: 0, skipped: 0 } })),
 }));
 
 const WORK = "abcdefghij";
@@ -80,10 +81,6 @@ describe("a restored profile's name field", () => {
 
   it("deleting one asks for its name and names the backup file after it, without the word", async () => {
     restoredWorkInUse();
-    const names: string[] = [];
-    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (this: HTMLAnchorElement) { names.push(this.download); });
-    URL.createObjectURL ??= () => "blob:x";
-    URL.revokeObjectURL ??= () => {};
     // As the Profile page's list hands it over: the entry as shown, read under the app's language.
     const Dialog = () => <DeleteProfileDialog entry={listProfiles().find((p) => p.id === WORK)!} onClose={() => {}} />;
     const { user } = renderApp(<Dialog />, { language: "pt" });
@@ -91,7 +88,7 @@ describe("a restored profile's name field", () => {
     await user.click(screen.getByRole("button", { name: "Baixe um backup antes" }));
     await user.type(screen.getByLabelText("Frase-senha do backup"), "a long backup passphrase");
     await user.click(screen.getByRole("button", { name: "Salvar" }));
-    await waitFor(() => expect(names).toEqual(["Work.ghostly-backup"]));
+    await waitFor(() => expect(vi.mocked(backUpToFile).mock.calls.map((call) => call[1])).toEqual(["Work.ghostly-backup"]));
     expect(screen.getByTestId("delete-profile-confirm")).toHaveAttribute("placeholder", expect.stringContaining("Work"));
     expect(screen.getByTestId("delete-profile-confirm").getAttribute("placeholder")).not.toContain("restaurado");
     await user.type(screen.getByTestId("delete-profile-confirm"), "Work");

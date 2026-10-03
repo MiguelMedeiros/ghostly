@@ -69,6 +69,7 @@ const ITEM: Record<WalletAwaitingView["kind"], (amount: string) => string> = {
   paid: (a) => `${a} paid to an invoice, not claimed from the mint yet`,
   unclaimed: (a) => `${a} the mint says it issued for an invoice, never received here`,
   sent: (a) => `${a} in ecash you sent, not taken yet`,
+  swap: (a) => `${a} in an exchange with the mint, not finished yet`,
 };
 
 export const ENGLISH_REMOVAL: RemovalWords = {
@@ -83,7 +84,7 @@ const knownIn = (amount: number, network: WalletNetwork, words: RemovalWords) =>
 const phraseHeld = (secrets: string[] | undefined) => !!secrets?.includes("mnemonic");
 
 /** The parts of a network's view a removal reads. */
-export type RemovalView = Partial<Pick<NetworkWalletsView, "balance" | "lightning" | "lightnings" | "bitcoin" | "ark" | "bark" | "spark" | "fedimint" | "usdt" | "awaiting">>;
+export type RemovalView = Partial<Pick<NetworkWalletsView, "balance" | "setAside" | "openSwaps" | "swapsAmount" | "lightning" | "lightnings" | "bitcoin" | "ark" | "bark" | "spark" | "fedimint" | "usdt" | "awaiting">>;
 
 function items(type: WalletType, network: WalletNetwork, view: RemovalView | undefined, words: RemovalWords, card?: string) {
   const amount = (n: number) => type === "usdt" ? words.token(String(n), view?.usdt?.decimals ?? 6, network) : words.sats(n, network);
@@ -93,7 +94,9 @@ function items(type: WalletType, network: WalletNetwork, view: RemovalView | und
   const item = (a: WalletAwaitingView): RemovalItem => ({ kind: a.kind, text: words.item(a.kind, amount(a.amount)), amount: amount(a.amount), ...(a.paymentId ? { paymentId: a.paymentId } : {}) });
   // Cashu sent from a mint comes back once the mint is added again; Fedimint notes are taken back through the removed client only.
   const returns = (a: WalletAwaitingView) => a.kind === "sent" && type === "cashu";
-  return { awaiting: mine.filter((a) => !returns(a)).map(item), returnable: mine.filter(returns).map(item) };
+  // A Cashu swap the mint has not settled: removing the wallet lets go of what it would bring, so it is named and agreed to.
+  const swaps: RemovalItem[] = type === "cashu" && view?.openSwaps ? [{ kind: "swap", text: words.item("swap", amount(view.swapsAmount ?? 0)), amount: amount(view.swapsAmount ?? 0) }] : [];
+  return { awaiting: [...mine.filter((a) => !returns(a)).map(item), ...swaps], returnable: mine.filter(returns).map(item) };
 }
 
 /**
@@ -106,7 +109,9 @@ export function walletRemoval(type: WalletType, network: WalletNetwork, view: Re
   const base = { type, network, ...items(type, network, view, words, lnCard?.card ?? card), ...(lnCard ? { card: lnCard.card } : card !== undefined ? { card } : {}) };
   const pending = intents.filter((i) => i.method === type && UNFINISHED.has(i.state) && walletNetworkOf(i.network) === network).length;
   switch (type) {
-    case "cashu": return { ...base, custody: "device", held: known(view?.balance ?? 0), backup: "tokens", pending };
+    // What is set aside for a payment or a swap the mints have not settled is the wallet's too. A swap still open is
+    // listed with what the wallet waits for (`items`): it may never settle, so the person can agree to let it go.
+    case "cashu": return { ...base, custody: "device", held: known((view?.balance ?? 0) + (view?.setAside ?? 0)), backup: "tokens", pending };
     case "lightning": {
       const ln = lnCard ?? view?.lightning;
       // The mints' card holds nothing of its own (its ecash is the Cashu wallet's): it goes alone next to other cards.

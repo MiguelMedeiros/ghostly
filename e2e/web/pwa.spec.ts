@@ -41,13 +41,14 @@ test.describe("service worker", () => {
     await ana.page.goto("/#/");
     await expect(ana.page.getByTestId("chat-row")).toHaveCount(1);
 
-    // What the worker kept: its own cache, the app's page and the build's files. Never the update check (the app
+    // What the worker kept: its own cache, the app's page and the build's files (the boot guard is one: the
+    // page asks for it offline too). Never the update check (the app
     // asked for it by now), the sign-in callback, anything with a query, or another origin.
     const entries = await cached(ana.page);
     expect(entries.map((e) => e.path)).toContain("/");
     for (const { cache, path } of entries) {
       expect(cache).toMatch(/^ghostly-shell-/);
-      expect(path, `${path} is a file of the build`).toMatch(/^\/($|assets\/[\w.-]+$|[\w-]+\.(png|svg|json)$)/);
+      expect(path, `${path} is a file of the build`).toMatch(/^\/($|assets\/[\w.-]+$|[\w-]+\.(png|svg|json)$|boot-guard\.js$)/);
       expect(path).not.toMatch(/version\.json|oidc-callback|sw\.js/);
     }
 

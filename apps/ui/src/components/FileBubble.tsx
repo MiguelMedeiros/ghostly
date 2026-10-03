@@ -3,7 +3,7 @@ import { PREVIEWABLE_IMAGE, readImageMeta, sanitizeFileName, type ImageMeta } fr
 import { useTransfer } from "../hooks/useServicesPlatform";
 import { formatFileSize } from "../lib/format";
 import { downloadFile } from "../lib/fileDownload";
-import { canRetryFile, fileStatus, stalledAction } from "../lib/fileStatus";
+import { canRetryFile, fileHeld, fileStatus, stalledAction } from "../lib/fileStatus";
 import { knownPictureSize, pictureBox, PLACEHOLDER_BOX, rememberPictureSize, sameShape } from "../lib/pictureBox";
 import type { FileAction } from "../lib/platform";
 import { AvatarViewer } from "./AvatarViewer";
@@ -35,7 +35,8 @@ export function FileBubble({ file, peerName: named, highlight }: { file: ChatFil
   const [busy, setBusy] = useState(false);
   const [why, setWhy] = useState(false);
   const whyId = useId();
-  const [missing, setMissing] = useState(false);
+  /** Its bytes are not on this device: gone, or (`left-out`) left out of the light backup this profile came from. */
+  const [missing, setMissing] = useState<boolean | "left-out">(false);
   /** The file is kept, but too large for this app to hand out: it is saved through the system instead. */
   const [saveOnly, setSaveOnly] = useState(false);
   // Right after a start the engine has not put its transfers back yet: a file still moving is not shown as finished.
@@ -70,8 +71,12 @@ export function FileBubble({ file, peerName: named, highlight }: { file: ChatFil
       if (cancelled) return;
       if (!blob) {
         if (!settled) return;
-        setSaveOnly(!!platform.saveFile && transfer?.state === "done");
-        setMissing(!platform.saveFile || transfer?.state !== "done");
+        // Too large to hand out here, or not here at all: only a file this device holds offers Save.
+        const held = await fileHeld(platform, file.id, transfer?.state === "done");
+        if (cancelled) return;
+        const saveable = held === "here" && !!platform.saveFile && transfer?.state === "done";
+        setSaveOnly(saveable);
+        setMissing(saveable ? false : held === "left-out" ? "left-out" : true);
         return;
       }
       // Its sender said nothing of its size: read here from its first bytes, so the box is right before it shows.
@@ -95,7 +100,7 @@ export function FileBubble({ file, peerName: named, highlight }: { file: ChatFil
   const save = () => {
     if (!platform) return;
     setActionError("");
-    void downloadFile(platform, file, sanitizeFileName(file.name)).then((result) => { if (result === "missing") setMissing(true); })
+    void downloadFile(platform, file, sanitizeFileName(file.name)).then(async (result) => { if (result === "missing") setMissing((await fileHeld(platform, file.id, false)) === "left-out" ? "left-out" : true); })
       .catch((error: Error) => setActionError(errorText(error, t)));
   };
 

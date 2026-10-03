@@ -1,4 +1,67 @@
 {
+  "board": {
+    "card": {
+      "botLabel": "Da:",
+      "chatLabel": "Chat:",
+      "checks": {
+        "failing": "Controlli falliti",
+        "passing": "Controlli superati",
+        "pending": "Controlli in corso"
+      },
+      "details": "Dettagli",
+      "filesLabel": "File:",
+      "from": "{{bot}} in {{chat}}",
+      "in": "in {{chat}}",
+      "openPr": "Apri su {{host}}",
+      "parts": "{{done}} di {{total}} completate",
+      "prLabel": "Pull request:",
+      "prState": {
+        "closed": "Chiusa",
+        "draft": "Bozza",
+        "merged": "Unita",
+        "open": "Aperta"
+      },
+      "statusLabel": "Stato:",
+      "steps": "{{done}} di {{total}}",
+      "tagsLabel": "Etichette:",
+      "updatedLabel": "Aggiornata:"
+    },
+    "column": {
+      "blocked": "Bloccate",
+      "closed": "Fermate",
+      "done": "Completate",
+      "queued": "In coda",
+      "review": "Revisione",
+      "running": "In corso"
+    },
+    "columns": "Colonne",
+    "empty": "Ancora nessuna attività",
+    "emptyHint": "Le schede attività dei bot delle tue chat compaiono qui.",
+    "filter": "Filtra attività",
+    "groupBy": {
+      "bot": "Bot",
+      "chat": "Chat",
+      "label": "Raggruppa per",
+      "status": "Stato"
+    },
+    "hideOlder": "Nascondi le vecchie",
+    "info": "I bot pubblicano schede attività in chat e gruppi e le tengono aggiornate. Questa bacheca raccoglie quelle di tutte le chat. Le attività completate e fermate restano un giorno; Fermate riunisce quelle fallite e quelle annullate. Una scheda mostra soltanto l'attività: lo stato lo cambia il suo bot. Apri una scheda per vederla nella sua chat.",
+    "me": "Tu",
+    "noMatch": "Nessuna attività corrisponde",
+    "none": "Nessuna",
+    "showMore": "Mostra altre ({{count}})",
+    "showOlder": "Mostra le vecchie ({{count}})",
+    "tagFilter": "Mostra solo {{tag}}",
+    "tags": "Etichette",
+    "tasksMany": "{{count}} attività",
+    "tasksOne": "1 attività",
+    "title": "Attività",
+    "view": {
+      "label": "Mostra",
+      "routines": "Routine",
+      "tasks": "Attività"
+    }
+  },
   "buttons": {
     "answers": "Risposte",
     "chosen": "Scelta",

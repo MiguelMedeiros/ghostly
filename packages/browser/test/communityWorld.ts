@@ -73,6 +73,8 @@ export interface Peer {
    * so the relays' budget does not hold them back.
    */
   unmetered?: boolean;
+  /** How far its device's clock is from the world's (ms, positive when ahead): its engine ticks by that clock. */
+  clock?: number;
   /** The most connections its groups hold (a Mac's `peerBudget`), and how many groups not in this world hold now. */
   peerBudget?: number;
   heldElsewhere?: number;
@@ -102,6 +104,8 @@ export class CommunityWorld {
   /** Cuts two peers apart (their link and their reads of each other), whatever `part` says. */
   cut: ((a: Peer, b: Peer) => boolean) | null = null;
   private sameSide(a: Peer, b: Peer): boolean { return (!this.part || this.part(a) === this.part(b)) && !this.cut?.(a, b); }
+  /** Keeps the edges between two peers from coming up (their entry session still does): an edge whose signaling is slow. */
+  holdEdge: ((a: Peer, b: Peer) => boolean) | null = null;
   /** Fails an app's Pkarr reads (a test says whose, and of which key): the relays' budget, or the network. */
   failRead: ((peer: Peer, key: string) => boolean) | null = null;
   /** Loses frames on the way (a test says which): the network is not perfect. */
@@ -138,7 +142,7 @@ export class CommunityWorld {
    * `extra`: more of the host, for what a test runs on top of the groups (payments). `app`: an app that stays online
    * (a hub of large private groups), or one from before hubs.
    */
-  add(name: string, extra?: (peer: Peer) => Partial<GroupsHost>, app: { staysOnline?: boolean; legacy?: boolean; unmetered?: boolean; peerBudget?: number; heldElsewhere?: number } = {}): Peer {
+  add(name: string, extra?: (peer: Peer) => Partial<GroupsHost>, app: { staysOnline?: boolean; legacy?: boolean; unmetered?: boolean; peerBudget?: number; heldElsewhere?: number; clock?: number } = {}): Peer {
     const links = new Map<string, Edge>();
     const messages: StoredMessage[] = [];
     const peer: Peer = { name, groups: null as unknown as Groups, store: memoryStore(messages), messages, links, online: true, nick: name, sent: { frames: 0, bytes: 0 }, spent: [], spentBackground: [], refused: 0, host: null as unknown as GroupsHost, ...app };
@@ -205,7 +209,7 @@ export class CommunityWorld {
     peer.host = host;
     peer.groups = new Groups(host, peer.store, undefined, this.timings, this.random);
     // On the world's clock from the start: what it does before its first tick (a knock) is timed like the rest.
-    void peer.groups.tick(this.now);
+    void peer.groups.tick(this.now + (peer.clock ?? 0));
     this.peers.set(name, peer);
     return peer;
   }
@@ -228,6 +232,7 @@ export class CommunityWorld {
   /** Both ends online and reachable, and (with a `NetworkModel`) signaling done on both sides. */
   private up(peer: Peer, edge: Edge, there: Peer): boolean {
     if (!peer.online || !there.online || !this.sameSide(peer, there)) return false;
+    if (edge.kind === "edge" && this.holdEdge?.(peer, there)) return false;
     if (!this.network) return true;
     if (edge.upAt !== undefined) return true;
     const other = this.counterpart(edge);
@@ -330,7 +335,7 @@ export class CommunityWorld {
   async run(ms: number, stepMs = 1000): Promise<void> {
     for (let t = 0; t < ms; t += stepMs) {
       this.now += stepMs;
-      for (const peer of this.peers.values()) if (peer.online) await peer.groups.tick(this.now);
+      for (const peer of this.peers.values()) if (peer.online) await peer.groups.tick(this.now + (peer.clock ?? 0));
       this.signal();
       await this.settle();
     }

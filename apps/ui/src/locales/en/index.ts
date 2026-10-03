@@ -2,6 +2,7 @@
 // (alphabetical, one per line) so that `t()` keys are type-checked against it. A new area is a new file plus
 // its two lines here; the other languages are found by apps/ui/src/locales/index.ts without a list.
 import app from "./app.json";
+import boot from "./boot.json";
 import calls from "./calls.json";
 import cards from "./cards.json";
 import chat from "./chat.json";
@@ -36,6 +37,7 @@ import wallet from "./wallet.json";
 
 export default {
   app,
+  boot,
   calls,
   cards,
   chat,

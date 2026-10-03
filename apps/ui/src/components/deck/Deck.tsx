@@ -1,6 +1,6 @@
 import {useCallback,useEffect,useLayoutEffect,useMemo,useRef,useState,type CSSProperties,type KeyboardEvent,type PointerEvent,type ReactNode} from 'react';
 import {stackLayout,stackStrips,stepCard,stripAt} from './stack';
-import {deckSwitchSound,playSwitch,switchDirection} from './motion';
+import {deckSwitchSound,playSwitch,reducedMotion,switchDirection} from './motion';
 import './deck.css';
 
 /**
@@ -34,7 +34,6 @@ export const STACK_MIN_CARD=210;
 /** The width each deck (by name) last had: a deck opened again starts at it instead of measuring itself first. */
 const lastWidth=new Map<string,number>();
 
-const reducedMotion=()=>typeof window!=='undefined'&&(document.documentElement.dataset.reduceMotion==='true'||window.matchMedia('(prefers-reduced-motion: reduce)').matches);
 /** A mouse or trackpad that can hover: the stack. A finger: the track. */
 const FINE='(hover: hover) and (pointer: fine)';
 function useFinePointer() {

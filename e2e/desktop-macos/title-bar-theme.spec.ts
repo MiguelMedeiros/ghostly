@@ -55,6 +55,7 @@ test("the title bar takes the app's Light or Dark, and the system's with Auto", 
   await choose(desktop, "Auto");
   const system = () => desktop!.app.execute<string>(`return matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";`);
   await expect.poll(async () => (await theme(desktop!)) === (await system())).toBe(true);
-  // The page is drawn in the same appearance as the window around it.
-  expect(await desktop.app.execute<string>(`return document.documentElement.getAttribute("data-theme");`)).toBe(await theme(desktop));
+  // The page is drawn in the same appearance as the window around it. The page follows a moment after the window.
+  const page = () => desktop!.app.execute<string>(`return document.documentElement.getAttribute("data-theme");`);
+  await expect.poll(async () => (await page()) === (await theme(desktop!))).toBe(true);
 });

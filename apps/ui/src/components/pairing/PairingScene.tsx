@@ -2,11 +2,15 @@ import { useEffect, useId, useRef, useState } from "react";
 import { useI18n } from "../../contexts/I18nContext";
 import { CELEBRATE_MS, useNow, type PairingProgressState } from "../../hooks/usePairingProgress";
 import { PAIRING_STEPS, SLOW_AFTER_MS, failureReason, formatElapsed, type PairingStage } from "../../lib/pairingProgress";
+import { useMotionRest, useWindowAway } from "../../lib/windowAway";
 import { usePairingWords } from "./words";
 import "./pairing-scene.css";
 
 /** The ghost of the app's icon (the website's GhostPet), in an 80×100 box. */
 export const GHOST_PATH = "M40 8 C18 8 8 22 8 40 L8 72 L16 64 L24 72 L32 64 L40 72 L48 64 L56 72 L64 64 L72 72 L72 40 C72 22 62 8 40 8Z";
+
+/** How long the scene takes to fade and fold away at the end of its "connected" moment (pairing-scene.css). */
+const LEAVE_MS = 400;
 
 type Mood = "calm" | "glance" | "happy" | "sad";
 
@@ -49,7 +53,9 @@ function moods(stage: PairingStage): [Mood, Mood] {
  * The first connection of a paired chat, told as a small scene: the invite goes out onto the network, a ghost
  * waits for the other to pick it up, the knock and the answer travel, and the two link up. Every stage also has
  * words, an elapsed time and a step list, so nothing is said by motion alone; with reduced motion the scene is
- * a still picture of the stage. The animation is CSS on a few SVG shapes and pauses while off screen.
+ * a still picture of the stage. The animation is CSS on a few SVG shapes; it pauses while off screen and while the
+ * window is away, and a stage that has lasted a minute (waiting for a contact can take days) becomes the still
+ * picture too, until the stage changes: an open chat nobody is touching draws nothing but its clock.
  */
 export function PairingScene({ progress, contact, retry, retrying, retryError, id }: {
   progress: PairingProgressState;
@@ -61,32 +67,42 @@ export function PairingScene({ progress, contact, retry, retrying, retryError, i
 }) {
   const { t } = useI18n();
   const words = usePairingWords();
-  const { stage, role } = progress;
+  // What it shows is the view both it and the connection icon read: a step reached is never taken back.
+  const { role } = progress, { stage, step: current } = progress.view;
   const root = useRef<HTMLElement>(null);
-  const [paused, setPaused] = useState(false);
+  const [offScreen, setOffScreen] = useState(false);
+  const paused = useWindowAway() || offScreen;
+  const still = useMotionRest(`${stage} ${progress.attempt ?? 0}`);
   useEffect(() => {
     const element = root.current;
     if (!element || typeof IntersectionObserver === "undefined") return;
-    const observer = new IntersectionObserver(entries => setPaused(!entries[0]?.isIntersecting));
+    const observer = new IntersectionObserver(entries => setOffScreen(!entries[0]?.isIntersecting));
     observer.observe(element);
     return () => observer.disconnect();
   }, []);
-  // The "connected" moment ends with the scene fading out, just before the chat takes its place.
+  // The "connected" moment ends with the scene fading out and folding away from the height it has, so the chat under
+  // it moves up smoothly rather than all at once when the scene goes.
   const [leaving, setLeaving] = useState(false);
   useEffect(() => {
     if (stage !== "live") { setLeaving(false); return; }
-    const timer = window.setTimeout(() => setLeaving(true), CELEBRATE_MS - 320);
+    const timer = window.setTimeout(() => {
+      root.current?.style.setProperty("--ps-height", `${root.current.offsetHeight}px`);
+      setLeaving(true);
+    }, CELEBRATE_MS - LEAVE_MS);
     return () => window.clearTimeout(timer);
   }, [stage]);
   const ticking = stage !== "live" && stage !== "failed";
   const now = useNow(ticking && !paused);
-  // `now` only ticks; a stage that began after its last tick still reads from the clock.
-  const inStage = Math.max(0, Math.max(now, Date.now()) - progress.since);
+  // `now` only ticks; a stage that began after its last tick still reads from the clock. The clock on screen is the
+  // pairing's, from its start: it never goes back to 0:00 when a stage changes. How long a stage has lasted only
+  // decides when to say that it is slow.
+  const at = Math.max(now, Date.now());
+  const inStage = Math.max(0, at - progress.since);
+  const elapsed = Math.max(0, at - progress.startedAt);
   const slow = ticking && inStage >= SLOW_AFTER_MS[stage];
   const label = words.stage(stage, role, progress.peerSeen);
   const slowWords = slow ? words.slow(stage, progress.peerSeen) : "";
   const steps = PAIRING_STEPS[role];
-  const current = stage === "failed" ? -1 : steps.indexOf(stage);
   const reason = stage === "failed" ? failureReason(progress.reason) : undefined;
   const titleId = useId();
   // A marker is referenced through url(#…), where the colons of a React id would not survive.
@@ -95,7 +111,7 @@ export function PairingScene({ progress, contact, retry, retrying, retryError, i
   // The failure has its own alert; this region tells the stage and, once, that it is taking long.
   const announcement = [label, slowWords].filter(Boolean).join(" ");
 
-  return <section ref={root} id={id} className="ps" data-testid="pairing-scene" data-stage={stage} data-role={role} data-paused={paused || undefined} data-leaving={leaving || undefined} aria-labelledby={titleId}>
+  return <section ref={root} id={id} className="ps" data-testid="pairing-scene" data-stage={stage} data-role={role} data-paused={paused || undefined} data-still={still || undefined} data-step={current} data-leaving={leaving || undefined} aria-labelledby={titleId}>
     <svg className="ps-svg" viewBox="0 0 320 150" aria-hidden="true" focusable="false">
       <defs>
         <marker id={arrow} className="ps-arrow" viewBox="0 0 8 8" refX="6" refY="4" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 L8 4 L0 8 Z" /></marker>
@@ -142,7 +158,7 @@ export function PairingScene({ progress, contact, retry, retrying, retryError, i
     <div className="ps-names" aria-hidden="true"><span>{t("pairing.you")}</span><span className="ps-contact">{contact || t("pairing.contact")}</span></div>
     <div className="ps-caption">
       <p id={titleId} className="ps-label" data-testid="pairing-stage-label">{label}</p>
-      {ticking && <p className="ps-time" data-testid="pairing-elapsed"><time dateTime={`PT${Math.floor(inStage / 1000)}S`} aria-label={t("pairing.elapsed", { time: formatElapsed(inStage) })}>{formatElapsed(inStage)}</time>{progress.attempt > 1 && <span> · {t("pairing.attempt", { n: progress.attempt })}</span>}</p>}
+      {ticking && <p className="ps-time" data-testid="pairing-elapsed"><time dateTime={`PT${Math.floor(elapsed / 1000)}S`} aria-label={t("pairing.elapsed", { time: formatElapsed(elapsed) })}>{formatElapsed(elapsed)}</time>{progress.attempt > 1 && <span> · {t("pairing.attempt", { n: progress.attempt })}</span>}</p>}
       {slowWords && <p className="ps-slow" data-testid="pairing-slow">{slowWords}</p>}
       {slow && progress.detail && <p className="ps-slow ps-detail" data-testid="pairing-detail">{progress.detail}</p>}
       {stage === "live" && <p className="ps-slow">{t("pairing.sayHello")}</p>}
@@ -156,7 +172,8 @@ export function PairingScene({ progress, contact, retry, retrying, retryError, i
     </div>
     <ol className="ps-steps" aria-label={t("pairing.steps")} data-testid="pairing-steps">
       {steps.map((step, index) => {
-        const state = current < 0 ? "todo" : index < current || stage === "live" ? "done" : index === current ? "current" : "todo";
+        // Failed: the steps done stay done, and none is under way.
+        const state = index < current || stage === "live" ? "done" : index === current && stage !== "failed" ? "current" : "todo";
         return <li key={step} data-step={step} data-state={state} aria-current={state === "current" ? "step" : undefined}>
           <span className="ps-step-dot" aria-hidden="true" />
           <span className="ps-step-label">{words.step(step)}</span>

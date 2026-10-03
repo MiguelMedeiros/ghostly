@@ -142,10 +142,12 @@ export function taskFields(options: Parsed["options"]): Record<string, unknown> 
     fields.done = Number(match[1]); fields.total = Number(match[2]);
   }
   const pr: Record<string, unknown> = {};
-  for (const [flag, key] of [["pr-url", "url"], ["pr-number", "number"], ["additions", "additions"], ["deletions", "deletions"], ["files", "files"]] as const)
+  for (const [flag, key] of [["pr-url", "url"], ["pr-number", "number"], ["additions", "additions"], ["deletions", "deletions"], ["files", "files"], ["pr-state", "state"], ["pr-checks", "checks"]] as const)
     if (options[flag] !== undefined) pr[key] = options[flag];
   if (Object.keys(pr).length) fields.pr = { ...(fields.pr && typeof fields.pr === "object" ? fields.pr as object : {}), ...pr };
   if (Array.isArray(options.item) && options.item.length) fields.items = (options.item as string[]).map(itemOf);
+  if (Array.isArray(options.tag) && options.tag.length) fields.tags = options.tag as string[];
+  set("parent", options.parent);
   const links = cardLinks(options.link);
   if (links) fields.links = links;
   return fields;
@@ -216,5 +218,9 @@ export const taskOptions: Record<string, OptionSpec> = {
   additions: { type: "number", description: "Lines the pull request adds" },
   deletions: { type: "number", description: "Lines the pull request removes" },
   files: { type: "number", description: "Files the pull request changes" },
+  "pr-state": { type: "string", description: "Where the pull request stands: draft, open (ready for review), merged or closed" },
+  "pr-checks": { type: "string", description: "The pull request's checks: passing, failing or pending" },
+  tag: { type: "list", description: "A short label, like an area or a repository (24 characters); up to 3. An update's tags replace the card's: give all of them" },
+  parent: { type: "string", description: "The id of the task of yours in this chat that this one is a part of" },
   ...cardOptions,
 };

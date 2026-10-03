@@ -59,6 +59,10 @@ describe("the task commands", () => {
         pr: { url: "https://github.com/o/r/pull/612", number: 612, additions: 123, deletions: 45 }, links: [{ label: "CI", url: "https://ci.example/1" }] },
     });
     expect(params("task update", ["g1", "relay-rotation", "--progress", "80"])).toMatchObject({ chat: "g1", task: "relay-rotation", card: { progress: 80 } });
+    // The pull request's state and checks, tags (each --tag one) and the parent task.
+    expect(params("task send", ["g1", "--title", "Codec", "--pr-url", "https://github.com/o/r/pull/612", "--pr-state", "open", "--pr-checks", "passing", "--tag", "core", "--tag", "web", "--parent", "epic-1"]).card).toEqual({
+      title: "Codec", pr: { url: "https://github.com/o/r/pull/612", state: "open", checks: "passing" }, tags: ["core", "web"], parent: "epic-1" });
+    expect(params("task update", ["g1", "codec", "--pr-state", "merged"]).card).toEqual({ pr: { state: "merged" } });
     expect(() => params("task update", ["g1", "t", "--steps", "two"])).toThrow(/--steps takes done\/total/);
     expect(() => params("task send", ["g1", "--json", "{nope"])).toThrow(/not valid JSON/);
   });
@@ -111,6 +115,40 @@ describe("task send", () => {
     await expect(callApi(ctx, "task.send", { chat: "Coordinator", card: { title: "x", pr: { url: "http://github.com/o/r/pull/1" } } })).rejects.toMatchObject({ code: "bad_request", message: /https/ });
     await expect(callApi(ctx, "task.send", { chat: "Coordinator", card: { title: "x", items: Array.from({ length: 21 }, () => ({ text: "x" })) } })).rejects.toMatchObject({ code: "bad_request" });
     expect(node.sendMessage).not.toHaveBeenCalled();
+  });
+});
+
+describe("a task's pull request state, checks, tags and parent", () => {
+  it("go on the card when they hold, and are refused before the engine is asked when a reader would leave them out", async () => {
+    const { ctx, node } = fake();
+    await callApi(ctx, "task.send", { chat: "Coordinator", card: { id: "epic-1", title: "Relay rework" } });
+    await callApi(ctx, "task.send", { chat: "Coordinator", card: { id: "codec", title: "Codec", pr: { url: "https://github.com/o/r/pull/612", state: "open", checks: "pending" }, tags: ["core", "web"], parent: "epic-1" } });
+    expect((node.sendMessage.mock.calls[1]![0] as { card: StatusCard }).card).toMatchObject({ pr: { state: "open", checks: "pending" }, tags: ["core", "web"], parent: "epic-1" });
+    const bad = (card: Record<string, unknown>) => callApi(ctx, "task.send", { chat: "Coordinator", card: { title: "x", ...card } });
+    await expect(bad({ pr: { url: "https://github.com/o/r/pull/1", state: "approved" } })).rejects.toMatchObject({ code: "bad_request", message: /pr.state is one of/ });
+    await expect(bad({ pr: { url: "https://github.com/o/r/pull/1", checks: "green" } })).rejects.toMatchObject({ code: "bad_request", message: /pr.checks is one of/ });
+    await expect(bad({ tags: ["a", "b", "c", "d"] })).rejects.toMatchObject({ code: "bad_request", message: /tags is a list of at most 3/ });
+    await expect(bad({ tags: ["x".repeat(25)] })).rejects.toMatchObject({ code: "bad_request", message: /at most 24/ });
+    await expect(bad({ id: "self", parent: "self" })).rejects.toMatchObject({ code: "bad_request", message: /not its own/ });
+    expect(node.sendMessage).toHaveBeenCalledTimes(2);
+  });
+
+  it("refuse a parent that is no task of mine in that chat: the parent goes first", async () => {
+    const { ctx, node } = fake();
+    await expect(callApi(ctx, "task.send", { chat: "Coordinator", card: { title: "Codec", parent: "epic-1" } })).rejects.toMatchObject({ code: "not_found", message: /--parent: no task "epic-1" of yours in this chat/ });
+    expect(node.sendMessage).not.toHaveBeenCalled();
+    // A task of that id in another chat is not this chat's.
+    await callApi(ctx, "task.send", { chat: "Sala de Máquinas", card: { id: "epic-1", title: "Relay rework" } });
+    await expect(callApi(ctx, "task.send", { chat: "Coordinator", card: { title: "Codec", parent: "epic-1" } })).rejects.toMatchObject({ code: "not_found" });
+    await expect(callApi(ctx, "task.send", { chat: "Sala de Máquinas", card: { title: "Codec", parent: "epic-1" } })).resolves.toMatchObject({ group: "g1" });
+  });
+
+  it("an update sets them, merges the pull request field by field, and replaces the tags", async () => {
+    const { ctx, rows } = fake();
+    await callApi(ctx, "task.send", { chat: "Coordinator", card: { id: "codec", title: "Codec", pr: { url: "https://github.com/o/r/pull/612", number: 612, state: "draft" }, tags: ["core"] } });
+    vi.useFakeTimers({ now: Date.now() + CARD_UPDATE_GAP_MS });
+    await callApi(ctx, "task.update", { chat: "Coordinator", task: "codec", card: { pr: { state: "open", checks: "passing" }, tags: ["web", "cli"] } });
+    expect(rows("chat-one")[0]!.card).toMatchObject({ pr: { url: "https://github.com/o/r/pull/612", number: 612, state: "open", checks: "passing" }, tags: ["web", "cli"] });
   });
 });
 

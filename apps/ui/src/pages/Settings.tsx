@@ -4,8 +4,9 @@ import { useI18n } from "../contexts/I18nContext";
 import { useLockScreen } from "../contexts/LockScreenContext";
 import { useUpdate } from "../contexts/UpdateContext";
 import { updateFailure } from "../lib/updateFailure";
-import { canInstall, startInstall, useInstallState } from "../lib/installPrompt";
-import { pushPlatform, setWake, useWakeOn } from "../lib/wakePush";
+import { canInstall, isAppleMobile, isMacSafari, startInstall, useInstallState } from "../lib/installPrompt";
+import { browserPrompts, reconsiderPersist, requestPersist, useStorageProtection } from "../lib/storagePersistence";
+import { pushPlatform, pushUnavailable, setWake, useWakeOn } from "../lib/wakePush";
 import { noticePlace, noticeSettings, notificationPermission, openNoticeSettings, requestNotifications, type NoticePermission } from "../lib/notifications";
 import { getVersion } from "@tauri-apps/api/app";
 import { NetworkSettings } from "../components/NetworkSettings";
@@ -89,6 +90,9 @@ export function Settings() {
   } | null>(null);
   const [showPasswordForm, setShowPasswordForm] = useState(false);
   const [storageInfo, setStorageInfo] = useState({ used: 0, keys: 0 });
+  // Whether the browser may clear this device's storage (lib/storagePersistence). Nothing on Desktop: no browser evicts it.
+  const { protection, estimate } = useStorageProtection();
+  const [protecting, setProtecting] = useState(false);
   const [confirmClearData, setConfirmClearData] = useState(false);
   const [confirmDeleteChats, setConfirmDeleteChats] = useState(false);
   const [chatCount, setChatCount] = useState(0);
@@ -105,6 +109,8 @@ export function Settings() {
     const permission = await requestNotifications();
     setNoticePermission(permission);
     updateNotifications({systemEnabled:permission==="granted"});
+    // Allowed to notify: a browser that refused to protect the storage before may say yes now.
+    if (permission === "granted") void reconsiderPersist();
     setRequestingNotice(false);
   };
   const [appVersion, setAppVersion] = useState("0.0.0");
@@ -373,6 +379,9 @@ export function Settings() {
             <Switch testId="settings-wake" label={t("pwa.wake")} checked={wakeOn} disabled={wakeBusy} onChange={(on) => void changeWake(on)} />
           </Row>
         )}
+        {!canWake && pushUnavailable() && (
+          <Row label={t("pwa.wake")} testId="settings-wake-unavailable" hint={<span role="status">{t("pwa.wakeUnavailable")}</span>} />
+        )}
       </Section>
 
       <MediaSettings />
@@ -441,7 +450,21 @@ export function Settings() {
       </Section>
 
       <Section title={t("settings.data")}>
-        <Row label={t("settings.storageUsed")} value={formatBytes(storageInfo.used)} />
+        <Row label={t("settings.storageUsed")} testId="settings-storage-used"
+          value={estimate ? t("settings.storageOf", { used: formatBytes(estimate.used), quota: formatBytes(estimate.quota) }) : formatBytes(storageInfo.used)} />
+        {protection && (
+          <Row label={t("settings.storageDevice")} testId="settings-storage-protection"
+            value={<span data-testid="settings-storage-state" data-state={protection}>{t(`settings.storageState.${protection}`)}</span>}
+            hint={<span role="status">{t(`settings.storageHint.${protection}`)}</span>}
+            info={protection === "protected" ? t("settings.storageInfo.protected")
+              : <>{t("settings.storageInfo.unprotected")}{(isAppleMobile() || isMacSafari()) && <> {t("settings.storageInfo.safari")}</>}</>}>
+            {/* Firefox answers with a prompt, so there the person asks; the others answer by themselves, asked already. */}
+            {protection === "unprotected" && browserPrompts() && (
+              <Button data-testid="settings-storage-protect" disabled={protecting}
+                onClick={() => { setProtecting(true); void requestPersist().finally(() => setProtecting(false)); }}>{t("settings.storageProtect")}</Button>
+            )}
+          </Row>
+        )}
         <Row label={t("sidebar.deleteAllChats")} hint={confirmDeleteChats ? t("settings.deleteAllChatsConfirm", { count: chatCount }) : t("settings.deleteAllChatsHint")}>
           {confirmDeleteChats ? <>
             <Button variant="danger" data-testid="delete-all-chats-confirm" onClick={deleteChats}>{t("common.confirm")}</Button>

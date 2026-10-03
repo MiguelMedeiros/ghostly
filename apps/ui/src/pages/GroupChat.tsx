@@ -14,6 +14,7 @@ import { LeaveGroupDialog } from "../components/LeaveGroupDialog";
 import { GroupShareDialog } from "../components/GroupLinkPanel";
 import { GroupConnection } from "../components/GroupConnection";
 import { TasksButton } from "../components/chat/TasksButton";
+import { useJumpTo } from "../hooks/useJumpTo";
 import { RoutineStack } from "../components/chat/RoutineCard";
 import type { MemberFaceOf } from "../components/chat/SenderAvatar";
 import { routineStacks } from "../lib/statusCards";
@@ -57,7 +58,7 @@ const snapshot = () => engine.state;
 function toChatMessage(message: StoredMessage, group: GroupView, t: Translate, myName = ""): ChatMessage {
   const names = group.members.map(m => ({ key: m.key, me: m.me, name: m.me ? myName : memberName(m, t) }));
   const mentions = mentionViews(message.text, message.mentions, names, message.sender === "me");
-  return { id: message.id, text: message.text, sender: message.sender, timestamp: message.timestamp, paymentId: message.paymentId,
+  return { id: message.id, text: message.text, sender: message.sender, timestamp: message.timestamp, ...(message.sentAt !== undefined && { sentAt: message.sentAt }), paymentId: message.paymentId,
     nick: message.sender === "peer" && message.member ? authorName(group, message.member, t) : undefined,
     ...(mentions.length ? { mentions } : {}), ...(message.replyTo && { replyTo: message.replyTo }), ...(message.reactions && { reactions: message.reactions }),
     ...(message.edit && { edit: message.edit }), ...(message.forwarded && { forwarded: message.forwarded }), ...(message.card && { card: message.card }) };
@@ -109,6 +110,29 @@ const FIXED_EVENTS = new Map([
 const FORMER_EVENTS = new Set<StoredMessage["event"]>(["joined", "admin", "picture", "renamed"]);
 
 /**
+ * A name as a stored line has it. A member that never said a name is written "Member 46ishssi" (`Member` and the start
+ * of its key, engine/groups.ts and engine/community.ts): said in the interface's words, as that member's messages are.
+ */
+const UNNAMED_MEMBER = /^Member ([a-z0-9]{8})$/;
+function writtenName(name: string, t: Translate): string {
+  const key = UNNAMED_MEMBER.exec(name)?.[1];
+  return key ? t("group.member.unnamed", { key }) : name;
+}
+
+/** A line the engine wrote as "<name> <what happened>", said in the interface's language with the name it was written with. */
+function writtenEvent(event: StoredMessage["event"], text: string, t: Translate): string | undefined {
+  const named = (ending: string) => text.endsWith(ending) && text.length > ending.length ? writtenName(text.slice(0, -ending.length), t) : undefined;
+  if (event === "joined") { const name = named(" joined"); return name && t("group.event.joined", { name }); }
+  if (event === "admin") { const name = named(" is now the admin"); return name && t("group.event.admin", { name }); }
+  if (event === "picture") {
+    const changed = named(" changed the group's picture"), removed = named(" removed the group's picture");
+    return changed ? t("group.event.pictureChanged", { name: changed }) : removed ? t("group.event.pictureRemoved", { name: removed }) : undefined;
+  }
+  const marker = " renamed the group to “", at = event === "renamed" ? text.indexOf(marker) : -1;
+  return at > 0 && text.endsWith("”") ? t("group.event.renamed", { name: writtenName(text.slice(0, at), t), group: text.slice(at + marker.length, -1) }) : undefined;
+}
+
+/**
  * A membership line, naming its member as the roster knows them now; what was stored, when they are gone. The engine
  * stores it in English: the line is said again in the interface's language from its kind, where the stored text has
  * the shape the engine writes. Any other text (a reason the core gave) is shown as it is.
@@ -122,8 +146,13 @@ function eventText(message: StoredMessage, group: GroupView, t: Translate): stri
   if (!member && !former) {
     if (message.event === "created" && text.startsWith("Group created. ")) return `${t("group.event.created")} ${readNote(group, t)}`;
     if (message.event === "joined" && !message.member && text.startsWith("You joined. ")) return `${t("group.event.youJoined")} ${readNote(group, t)}`;
+    if (message.event === "joined" && !message.member && text === "You joined again") return t("group.event.youJoinedAgain");
     const gone = " is no longer a member";
-    if (message.event === "gone" && text.endsWith(gone)) return t("group.event.gone", { name: text.slice(0, -gone.length) });
+    if (message.event === "gone" && text.endsWith(gone)) return t("group.event.gone", { name: writtenName(text.slice(0, -gone.length), t) });
+    // A community's line about a member who has left since: no roster or former name says who it was, but the stored
+    // line does, in the shape the engine writes. Said again in the interface's language with that name.
+    const written = message.member ? writtenEvent(message.event, text, t) : undefined;
+    if (written) return written;
     const fixed = (FIXED_EVENTS as Map<string, string>).get(text);
     return fixed === "rotated" ? t("group.event.rotated") : fixed === "removed" ? t("group.event.removed") : fixed === "forked" ? t("group.event.forked") : text;
   }
@@ -279,6 +308,8 @@ export function GroupChat() {
     // Its list stops following once this group is left: coming back, the engine's copy (with what came meanwhile) is shown.
     return () => { current = false; off(); setLoaded({ groupId: "", list: NO_MESSAGES }); };
   }, [groupId]);
+  // Opened from the Tasks board: on the card's message, once it is here.
+  useJumpTo(!!group, id => messages.some(m => m.id === id));
   // A bot's routines in a row: one row, opened on a tap (WISP 4xx · Status Cards), whichever of its rows are in the page.
   const stacks = useMemo(() => routineStacks(messages, m => m), [messages]);
   const stackHeads = useMemo(() => new Map([...stacks.values()].flatMap(run => run.slice(1).map(m => [m.id, run[0].id] as const))), [stacks]);
@@ -301,7 +332,8 @@ export function GroupChat() {
         if (replyingRef.current === answering) replyingRef.current = null;
         setReplyingTo(current => current === answering ? null : current);
       }
-      return error;
+      // The engine says why in English: said here in the app's language (lib/errorText.ts).
+      return error && errorText(error, t);
     }
     catch (e) { return e instanceof Error ? errorText(e, t) : t("group.chat.sendFailed"); }
   }, [groupId, t]);
@@ -363,13 +395,15 @@ export function GroupChat() {
       <MessageBubble message={shownOf(m)} peerAck={Number.MAX_SAFE_INTEGER} peerPubKey={peerOf(m.paymentId)} linkId={`group:${groupId}`} {...forwarding.rowProps(shownOf(m))} {...authorProps(m, inStack)} />
       {(() => { const note = captionOf(state, notes, m, group.myKey); return note && <GroupPaymentCaption note={note} group={group} />; })()}
     </div>
-    : <MessageBubble key={m.id} message={shownOf(m)} peerAck={Number.MAX_SAFE_INTEGER} linkId={`group:${groupId}`} {...forwarding.rowProps(shownOf(m))} highlight={search.highlight(m.id)} {...authorProps(m, inStack)}
+    // No `peerAck`: a group has no receipts (WISP 9xx), so a message of mine is sent, one tick, never "Delivered".
+    : <MessageBubble key={m.id} message={shownOf(m)} linkId={`group:${groupId}`} {...forwarding.rowProps(shownOf(m))} highlight={search.highlight(m.id)} {...authorProps(m, inStack)}
       onReply={replyTarget(m, true) ? () => { setEditing(null); setReplyingTo(m); } : undefined} quote={quoteOf(m)}
       buttons={group.canSend ? buttonsOf.get(m.id) : undefined} compactPress={presses.has(m.id)}
       onEdit={canEditInGroup(m) && !m.card && group.canSend ? () => { setReplyingTo(null); setEditing(m); } : undefined}
       onReact={replyTarget(m, true) && group.canSend ? emoji => react(m.id, emoji) : undefined} reactionName={reactionName}
       onPin={canPin && replyTarget(m, true) ? () => pinMessage(m.id, replyTarget(m, true) === group.pin?.id) : undefined} pinned={!!group.pin && replyTarget(m, true) === group.pin.id} />;
   const joiningByLink = group.invitation?.viaLink;
+  const waitingWith = group.invitation?.waiting ?? 0;
   const stage: GroupJoinStage = group.invitation?.stage ?? (group.invitation?.admin ? "admitted" : "knocked");
   // Getting in takes a group link: an app with no transport for one (no WebRTC, no native transport) is never let in,
   // so it says so rather than "you are in in a moment" (as the group's connection does, GroupConnection).
@@ -380,13 +414,15 @@ export function GroupChat() {
   const justJoined = messages.some(m => m.event === "joined" && !m.member && Date.now() - m.timestamp < JUST_JOINED_MS);
   const connecting = group.status === "active" && others.length > 0 && reachable === 0 && justJoined;
   const community = group.profile === "community" ? group.community : undefined;
+  // Why I am out of it (removed, left, forked, lost), as the engine says it, in the app's language; else its status in a word.
+  const outOfIt = group.status && group.status !== "active" ? (group.statusReason ? errorText(group.statusReason, t) : groupStatusText(group.status, t)) : undefined;
   const count = group.members.length === 1 ? t("group.chat.memberOne") : t("group.chat.memberCount", { count: group.members.length });
   const subtitle = joiningByLink ? (group.invitation!.admin ? t("group.chat.joining") : t("group.chat.joiningByLink"))
     : community && group.status === "active" ? (community.hub ? t("group.chat.communityHub", { members: count })
       : community.connected ? t("group.chat.communityConnected", { members: count }) : t("group.chat.communityConnecting", { members: count }))
     : group.invitation ? (group.invitation.contact ? t("group.chat.invitation", { contact: group.invitation.contact }) : t("group.chat.invitationUnknown"))
     : group.status === "active" ? t("group.chat.reachable", { members: count, reachable, total: others.length })
-    : group.statusReason ?? (group.status && groupStatusText(group.status, t));
+    : outOfIt;
   // In a community every member can let people in, so every member hands the link out; in a private group, the admin.
   const canShare = group.status === "active" && (group.isAdmin || (group.profile === "community" && !!group.entryLink));
   const openShare = async () => {
@@ -406,7 +442,8 @@ export function GroupChat() {
     <CueChat.Provider value={groupChat(groupId)}>
     {/* Each member's colour, given out over the roster: the same on every member's device (lib/memberColors.ts). */}
     <MemberColorsProvider keys={group.members.map(m => m.key)}>
-    <div className="flex-1 flex flex-col h-full bg-chat-bg" data-testid="group-chat" data-status={group.status ?? "invitation"}>
+    {/* A file dropped anywhere on the group is answered by the composer (`data-file-drop`): groups take no files yet, and it says so. */}
+    <div data-file-drop className="flex-1 flex flex-col h-full bg-chat-bg" data-testid="group-chat" data-status={group.status ?? "invitation"}>
       {/* A member's message that comes while the group is open, read out once to a screen reader. */}
       <MessageAnnouncer chat={groupId} messages={messages} nameOf={m => m.member ? authorName(group, m.member, t) : group.name || t("group.chat.unnamed")} />
       <div className="h-14 header-safe flex items-center justify-between px-4 max-md:pl-1 max-md:pr-1 bg-panel-header border-b border-border shrink-0">
@@ -464,7 +501,7 @@ export function GroupChat() {
         {community ? t("group.chat.connectingCommunity") : t("group.chat.connectingMembers")}
       </div>}
       {(error || (group.status && group.status !== "active")) && <div role="status" data-testid="group-notice" className="px-4 py-2 text-xs bg-surface-alt text-text-secondary border-b border-border">
-        {error || group.statusReason}
+        {error || (group.profile === "community" && group.status === "removed" ? t("group.chat.removedCommunity") : outOfIt)}
       </div>}
 
 
@@ -485,7 +522,10 @@ export function GroupChat() {
               </li>;
             })}
           </ol>
-          {knockedLong && <p data-testid="group-joining-stale" className="mt-4 text-xs leading-relaxed text-text-muted">{t("group.join.stale")}</p>}
+          {/* Others knocking too: a wait behind them, said as soon as it is known (a community lets people in a few at a time). */}
+          {waitingWith > 0 && (stage === "knocking" || stage === "knocked") && <p data-testid="group-joining-queue" className="mt-4 text-xs leading-relaxed text-text-muted">
+            {waitingWith === 1 ? t("group.join.queueOne") : t("group.join.queueCount", { count: waitingWith })}</p>}
+          {knockedLong && <p data-testid="group-joining-stale" className="mt-4 text-xs leading-relaxed text-text-muted">{waitingWith > 0 ? t("group.join.staleBusy") : t("group.join.stale")}</p>}
           <button onClick={() => { void engine.call("forgetGroup", { groupId }).catch(() => {}); nav.home(); }} data-testid="group-joining-cancel"
             className="mt-4 rounded px-2 py-1 text-xs text-text-muted hover:bg-danger/10 hover:text-danger">{t("group.join.cancel")}</button>
         </div>
@@ -520,7 +560,7 @@ export function GroupChat() {
         // Editing one of mine (WISP 9xx § Edits): the new text shows here at once and goes to the members; @ names more.
         edit={editing ? { key: editing.id, text: editing.text, snippet: replySnippet(editing.text), onClose: () => setEditing(null),
           onSave: async (text, extra) => (await engine.call("editMessage", { linkId: `group:${groupId}`, messageId: editing.id, text, ...(extra?.mentions?.length && { mentions: extra.mentions }) })
-            .catch((e: unknown) => ({ error: e instanceof Error ? errorText(e, t) : t("group.chat.editFailed") }))).error } : undefined}
+            .then(result => ({ error: result.error && errorText(result.error, t) }), (e: unknown) => ({ error: e instanceof Error ? errorText(e, t) : t("group.chat.editFailed") }))).error } : undefined}
         onEditLast={group.canSend ? () => {
           const last = [...messages].reverse().find(m => canEditInGroup(m) && !m.card);
           if (last) { setReplyingTo(null); setEditing(last); }

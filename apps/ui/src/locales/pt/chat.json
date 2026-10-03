@@ -2,7 +2,8 @@
   "announce": {
     "message": "{{name}}: {{text}}",
     "messages": "{{count}} mensagens novas",
-    "messagesFrom": "{{count}} mensagens novas de {{name}}"
+    "messagesFrom": "{{count}} mensagens novas de {{name}}",
+    "pinMoved": "Movida para a posição {{place}} de {{count}} conversas fixadas"
   },
   "audio": {
     "cantPlay": "Este aparelho não reproduz este áudio ({{format}}). Baixe para ouvir.",
@@ -36,6 +37,7 @@
       "queued": "Sem confirmação ainda. Envia de novo sozinha.",
       "sending": "A caminho.",
       "sent": "Enviada. Sem confirmação ainda.",
+      "sentGroup": "Enviada ao grupo. Grupos não têm confirmação.",
       "waiting": "Envia sozinha quando seu contato estiver online.",
       "waitingLiveContact": "Arquivos precisam de conexão direta. A conversa do seu contato está em Só DHT: o arquivo vai quando ele permitir de novo.",
       "waitingLiveYou": "Arquivos precisam de conexão direta. Esta conversa está em Só DHT: mude no ícone de conexão."
@@ -129,6 +131,7 @@
     "leftMinutes": "{{minutes}} min restantes",
     "leftUnderMinute": "menos de um minuto restante",
     "noRoomDevice": "Espaço insuficiente: {{size}} livres neste aparelho",
+    "notInBackup": "Não está neste backup",
     "notSentHint": "Não enviado. Envie de novo.",
     "of": "{{done}} de {{size}}",
     "pause": "Pausar",
@@ -217,6 +220,10 @@
   "menu": {
     "continueNew": "Continuar numa nova conversa",
     "hold": "Reter mensagens…",
+    "moveDown": "Mover para baixo",
+    "moveFirst": "Já é a primeira",
+    "moveLast": "Já é a última",
+    "moveUp": "Mover para cima",
     "pin": "Fixar conversa",
     "refresh": "Atualizar",
     "techInfo": "Informações técnicas",

@@ -1,4 +1,5 @@
-import { engineError, type PaymentAdapter, type PaymentReview, type PaymentTarget } from '@ghostly/core';
+import { isMintOperationError } from '@cashu/cashu-ts';
+import { engineError, engineText, type PaymentAdapter, type PaymentReview, type PaymentTarget } from '@ghostly/core';
 import { mintNetwork } from '../../shared/mints';
 import type { CashuWallet, CashuPrepared } from '../wallet';
 
@@ -33,28 +34,60 @@ export class CashuAdapter implements PaymentAdapter<CashuPrepared> {
   if(!review.linkId)throw new Error('Cashu requires an authenticated chat recipient');
   let token:string;
   try { token=await this.wallet.executeReviewedCashu(review,prepared); }
-  // Saved with the intent when the coordinator records the unknown outcome: the swap may still reach the mint for a while.
-  catch(error){ prepared.attemptEndedAt=Date.now(); throw error; }
+  catch(error){
+   // Saved with the intent when the coordinator records the unknown outcome: the swap may still reach the mint for a while.
+   prepared.attemptEndedAt=Date.now();
+   // A refusal, and the mint says why: the ecash it was to spend was spent somewhere else. The payment ends here.
+   if(persist && isMintOperationError(error) && await this.wallet.reviewedCashuSpentElsewhere(prepared).catch(()=>false))return this.spentElsewhere(prepared,persist);
+   throw error;
+  }
   await persist?.();
   await this.publish(review,token);
-  return {settled:await this.wallet.reviewedCashuSpent(prepared)};
+  return await this.outcome(review,prepared) ?? {settled:false};
+ }
+ /**
+  * What the mint and this wallet know of a payment whose token went out: paid once the mint reads its ecash spent,
+  * unless this wallet is the one that spent it, taking the payment back. Asked in that order: ecash taken back while
+  * the mint was being asked reads spent too. Undefined while the contact has not taken it.
+  */
+ private async outcome(review:PaymentReview,prepared:CashuPrepared){
+  const spent=await this.wallet.reviewedCashuSpent(prepared);
+  if(await this.wallet.reviewedCashuTakenBack(review.id))return {settled:false,failed:true,error:engineText('paymentTakenBack')};
+  return spent?{settled:true}:undefined;
  }
  /** `persist` saves the intent as it is: required, since the abandon path must be durable before it releases anything. */
  async reconcile(review:PaymentReview,prepared:CashuPrepared,persist:()=>Promise<void>){
   if(prepared.abandoned)return this.abandon(prepared,persist);
-  if(await this.wallet.reviewedCashuSpent(prepared))return {settled:true};
+  if(prepared.spentElsewhere)return this.spentElsewhere(prepared,persist);
+  const known=await this.outcome(review,prepared);
+  if(known)return known;
   const token=prepared.token ?? await this.wallet.recoverReviewedCashu(review,prepared);
   if(token)await this.publish(review,token); // Repeat the same token, never mint a replacement.
-  if(await this.wallet.reviewedCashuSpent(prepared))return {settled:true};
+  const after=await this.outcome(review,prepared);
+  if(after)return after;
   // No token: the swap may never have reached the mint (it was unreachable when approved). Only the mint can say so,
   // and only once no request of it can still be on its way: then the payment failed and its inputs come back.
   if(!token && Date.now()>=swapSettledAt(review,prepared) && await this.wallet.reviewedCashuNeverSwapped(prepared))return this.abandon(prepared,persist);
+  // No token, and the mint answers that it signed none of the outputs while an input reads spent: something else
+  // spent this ecash (the profile in use on another device, its ecash redeemed from a copy). This swap can never
+  // happen, whenever it is asked about.
+  if(!token && await this.wallet.reviewedCashuSpentElsewhere(prepared))return this.spentElsewhere(prepared,persist);
   return {settled:false};
  }
  /**
   * The mint proved this swap never happened. Marked for good first (a reload repeats only this), then its reserved
   * inputs are released. Nothing sends the saved swap again: approve claims pending reviews only, and reconcile asks.
   */
+ /**
+  * The ecash this payment was to spend is spent, and not by this payment. Marked for good first, then the wallet lets
+  * go of what the mint reads spent, frees the rest, and asks the mint about its other ecash there.
+  */
+ private async spentElsewhere(prepared:CashuPrepared,persist:()=>Promise<void>){
+  prepared.spentElsewhere=true;
+  await persist();
+  await this.wallet.dropReviewedCashu(prepared);
+  return {settled:false,failed:true,error:engineText('reviewedEcashSpent')};
+ }
  private async abandon(prepared:CashuPrepared,persist:()=>Promise<void>){
   prepared.abandoned=true;
   await persist();

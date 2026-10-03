@@ -1,6 +1,6 @@
 /**
  * A circuit breaker per Pkarr relay. A relay that failed `threshold` times in a row (no answer, a server error,
- * or its own rate limit, 429) is left alone for a while: a minute the first time, twice as long each time it
+ * its own rate limit, 429, or an answer too slow to use, `SLOW_MS` in relay.ts) is left alone for a while: a minute the first time, twice as long each time it
  * trips again, five minutes at most. When the wait is over, one request goes to it (the probe); an answer
  * closes the breaker, a failure opens it again for longer. The relays still closed take its turns meanwhile.
  *
@@ -134,6 +134,15 @@ export class RelayBreaker {
     const circuit = this.circuits.get(relay);
     if (circuit) circuit.probing = true;
     this.lastAllDownProbe = this.now();
+  }
+
+  /**
+   * A request that went to the relay was dropped before it answered, by this client (another relay answered first), or
+   * its answer says nothing either way: a probe among them is no longer out, and the next request may probe again.
+   */
+  cancel(relay: string): void {
+    const circuit = this.circuits.get(relay);
+    if (circuit) circuit.probing = false;
   }
 
   /** The relay answered: whatever was wrong is over. */

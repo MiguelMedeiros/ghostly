@@ -111,12 +111,15 @@ describe("ghostly group edit", () => {
     expect(TEXT_COMMANDS["group edit"]).toMatchObject({ method: "group.edit", target: "group", message: true });
     expect(parseArgs(["Crew", "mekey:1:0", "--stdin", "--mention", "Bob"], TEXT_COMMANDS["group edit"].options).options).toMatchObject({ stdin: true, mention: ["Bob"] });
     const { ctx, node } = groupFake();
+    // The first look at the message is before the edit (edit 1), the next ones after (edit 2).
+    node.groupMessages.mockResolvedValueOnce([groupRow({ edit: { seq: 1, at: 4, history: [] } })]);
     expect(await callApi(ctx, "group.edit", { group: "Crew", message: "mekey:1:0", text: "Deploy: done @Bob", mentions: ["Bob"] })).toEqual({ group: "g1", messageId: "mekey:1:0", edits: 2, sent: true, edges: 1 });
     expect(node.groupTaken).toHaveBeenLastCalledWith({ groupId: "g1", messageId: "mekey:1:0", edit: 2 });
     expect(node.editMessage).toHaveBeenCalledWith({ linkId: "group:g1", messageId: "mekey:1:0", text: "Deploy: done @Bob", mentions: [{ k: "bobkey", o: 13, l: 4 }] });
     // Waiting for the pace: not said, so no edge took it.
     const paced = groupFake(undefined, [groupRow({ edit: { seq: 3, at: 5, history: [], pending: true } })]);
     paced.node.groupTaken.mockImplementation(() => 0);
+    paced.node.groupMessages.mockResolvedValueOnce([groupRow({ edit: { seq: 2, at: 4, history: [] } })]);
     expect(await callApi(paced.ctx, "group.edit", { group: "Crew", message: "mekey:1:0", text: "x" })).toMatchObject({ edits: 3, sent: false, edges: 0 });
     const theirs = groupFake({ error: "Only your own text messages can be edited", refused: true }, [groupRow(), groupRow({ id: "bobkey:1:0", sender: "peer", member: "bobkey" })]);
     await expect(callApi(theirs.ctx, "group.edit", { group: "Crew", message: "bobkey:1:0", text: "x" })).rejects.toMatchObject({ code: "refused" });
@@ -124,7 +127,18 @@ describe("ghostly group edit", () => {
     // --wait sent: until an edge took this edit number.
     const nobody = groupFake(undefined, [groupRow({ edit: { seq: 4, at: 5, history: [], pending: true } })]);
     nobody.node.groupTaken.mockImplementation(() => 0);
+    nobody.node.groupMessages.mockResolvedValueOnce([groupRow({ edit: { seq: 3, at: 4, history: [] } })]);
     await expect(callApi(nobody.ctx, "group.edit", { group: "Crew", message: "mekey:1:0", text: "y", wait: "sent", timeout: 1 })).rejects.toMatchObject({ code: "timeout", details: { messageId: "mekey:1:0", edits: 4 } });
+  });
+
+  it("the text the message already has is no edit: nothing is said to have gone", async () => {
+    // Never edited, and the engine made no edit of the same text.
+    const same = groupFake(undefined, [groupRow()]);
+    expect(await callApi(same.ctx, "group.edit", { group: "Crew", message: "mekey:1:0", text: "Deploy: done" })).toEqual({ group: "g1", messageId: "mekey:1:0", edits: 0, sent: false, edges: 0, unchanged: true });
+    expect(same.node.groupTaken).not.toHaveBeenCalled();
+    // Edited before: its edit number does not move, and --wait sent has nothing to wait for.
+    const again = groupFake();
+    expect(await callApi(again.ctx, "group.edit", { group: "Crew", message: "mekey:1:0", text: "Deploy: done", wait: "sent", timeout: 1 })).toEqual({ group: "g1", messageId: "mekey:1:0", edits: 2, sent: false, edges: 0, unchanged: true });
   });
 
   let dir: string;

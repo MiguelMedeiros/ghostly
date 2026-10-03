@@ -2,7 +2,8 @@
   "announce": {
     "message": "{{name}}: {{text}}",
     "messages": "{{count}} new messages",
-    "messagesFrom": "{{count}} new messages from {{name}}"
+    "messagesFrom": "{{count}} new messages from {{name}}",
+    "pinMoved": "Moved to place {{place}} of {{count}} pinned chats"
   },
   "audio": {
     "cantPlay": "This device can't play this audio ({{format}}). Download it to listen.",
@@ -36,6 +37,7 @@
       "queued": "No receipt yet. Sends again by itself.",
       "sending": "On its way.",
       "sent": "Sent. No receipt yet.",
+      "sentGroup": "Sent to the group. Groups have no receipts.",
       "waiting": "Sends by itself when your contact is online.",
       "waitingLiveContact": "Files need a live connection. Your contact's chat is on DHT only: it goes when they allow live again.",
       "waitingLiveYou": "Files need a live connection. This chat is on DHT only: change it from the connection icon."
@@ -129,6 +131,7 @@
     "leftMinutes": "{{minutes}} min left",
     "leftUnderMinute": "less than a minute left",
     "noRoomDevice": "Not enough space: {{size}} free on this device",
+    "notInBackup": "Not in this backup",
     "notSentHint": "Not sent. Send it again.",
     "of": "{{done}} of {{size}}",
     "pause": "Pause",
@@ -217,6 +220,10 @@
   "menu": {
     "continueNew": "Continue in a new chat",
     "hold": "Hold messages…",
+    "moveDown": "Move down",
+    "moveFirst": "Already first",
+    "moveLast": "Already last",
+    "moveUp": "Move up",
     "pin": "Pin chat",
     "refresh": "Refresh",
     "techInfo": "Tech Info",

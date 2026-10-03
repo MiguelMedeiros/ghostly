@@ -27,6 +27,8 @@ class MemoryRelays {
   puts: { at: number; key: string; body: Uint8Array }[] = [];
   /** `host key` → an older packet that relay still serves: it missed the newer ones (its budget refused them). */
   stale = new Map<string, Uint8Array>();
+  /** `host key`: that relay has no packet under the key (it answers 404), whatever the others hold. */
+  missing = new Set<string>();
   constructor(readonly hosts: string[]) {}
   get urls() { return this.hosts.map(h => `https://${h}`); }
   fetchFor(who: string): typeof fetch {
@@ -39,7 +41,7 @@ class MemoryRelays {
         this.packets.set(key, body); this.puts.push({ at: Date.now(), key, body }); this.stale.delete(`${url.host} ${key}`);
         return new Response(null, { status: 204 });
       }
-      const packet = this.stale.get(`${url.host} ${key}`) ?? this.packets.get(key);
+      const packet = this.missing.has(`${url.host} ${key}`) ? undefined : this.stale.get(`${url.host} ${key}`) ?? this.packets.get(key);
       return packet ? new Response(packet as BodyInit) : new Response(null, { status: 404 });
     }) as typeof fetch;
   }
@@ -311,6 +313,83 @@ describe("a contact's offer from before the last session, after a restart", () =
     // downtime offer 1.6 s. Now: 18.6 and 1.6 s.
     const canAnswerIn = Math.max(0, noticeMs - downMs);
     expect(liveMs, "live soon after the contact can answer").toBeLessThanOrEqual(canAnswerIn + 5_000);
+  }, 300_000);
+});
+
+/**
+ * The start of the last session is this device's clock, and an offer's time is the contact's. Held one against the
+ * other, an offer the contact made a moment ago read as "from before the last session" for as long as the contact's
+ * clock was behind the moment that session began: an app that restarted within two minutes of going live, with a
+ * contact whose clock ran two minutes behind, dropped every offer of the contact until its clock caught up. Seen with
+ * two web apps (2026-10-02): both reloaded 40 s after pairing, live again after 190 s; with clocks that agree, 3 s.
+ * When both apps are back at once both offer, and the one with the lower key keeps its offer: the other has to take
+ * it. An offer this run saw arrive (it was not in the contact's record at an earlier read) is new, whatever its time.
+ */
+describe("both apps restart soon after their session began, and the contact's clock is behind", () => {
+  beforeEach(() => { rtc.answerFailsAfterMs = 31_000; });
+  it.each([
+    { name: "two minutes", behindMs: 2 * 60_000 },
+    { name: "nine minutes", behindMs: 9 * 60_000 },
+  ])("$name behind: live again within seconds", async ({ behindMs }) => {
+    const relays = new MemoryRelays(["a.test", "b.test"]);
+    // The contact has the lower key: its offer is the one that stands when both offer.
+    const made = invitationWhere("inviter"), contact = made.inviter, me = made.joiner;
+    const peer = open("p", relays.transport("p"), contact, me);
+    const mine = open("c", relays.transport("c"), me, contact);
+    expect(await until(() => peer.isDataLinkOpen && mine.isDataLinkOpen, 120_000), "live at first").toBeLessThan(Infinity);
+    const liveSince = Date.now();
+    await run(20_000);
+    killRtc("c", 1_000); killRtc("p", 1_000);
+    await mine.stop(false); await peer.stop(false);
+    await run(2_500);
+    // Both back, this app a second before its contact. The contact's clock is behind this one: by this clock the
+    // session began that much after the time the contact's offers say, and by the contact's that much before mine.
+    const back = open("c", relays.transport("c2"), me, contact, { resume: true, resumeFloor: liveSince + behindMs });
+    await run(1_000);
+    const peerBack = open("p", relays.transport("p2"), contact, me, { resume: true, resumeFloor: liveSince - behindMs });
+    const liveMs = await until(() => back.isDataLinkOpen && peerBack.isDataLinkOpen, 15 * 60_000);
+    report({ scenario: "both-restart-soon-after-live-contact-behind", behindMs, liveMs });
+    expect(liveMs, "live within seconds of the contact's offer").toBeLessThanOrEqual(10_000);
+  }, 300_000);
+});
+
+/**
+ * An offer is new to this app when a read of the contact's record did not have it and the next one does. That holds
+ * only when the first of the two showed what the record held: a relay that has no packet of the contact's says nothing
+ * of what another relay still holds, and a copy the transport kept says nothing of now. An offer made long ago must
+ * not be answered for having shown up late: answering it holds the data link on a connection nobody offers any more.
+ */
+describe("an offer made long ago that shows up after this run's first read", () => {
+  const steps = (lines: string[], me: string, step: string) => lines.map(l => JSON.parse(l) as { me: string; step: string; state?: string }).filter(l => l.me === me.slice(0, 6) && l.step === step);
+
+  it.each([
+    { name: "a contact gone for ten minutes, its last packet (with its offer) on one relay only, the other answering that it has none", resume: false },
+    { name: "the same on a chat that was live at its last run, the contact's clock ten minutes behind this one (its offer reads as from before that session either way)", resume: true },
+  ])("$name: not answered", async ({ resume }) => {
+    const lines: string[] = [];
+    setLinkTraceSink(line => lines.push(line));
+    try {
+      const relays = new MemoryRelays(["a.test", "b.test"]);
+      const made = invitationWhere("inviter"), contact = made.inviter, me = made.joiner;
+      const peer = open("p", relays.transport("p"), contact, me);
+      const mine = open("c", relays.transport("c"), me, contact);
+      expect(await until(() => peer.isDataLinkOpen && mine.isDataLinkOpen, 120_000), "live at first").toBeLessThan(Infinity);
+      const liveSince = Date.now();
+      const contactKey = me.params.peerPubKeyZ32, offer = relays.puts.filter(p => p.key === contactKey && p.at < liveSince - 300).pop()!;
+      // Both apps go; the contact's packet from before the session, its offer still in it, is all that is left, on b.test.
+      killRtc("c", 1_000); killRtc("p", 1_000);
+      await mine.stop(false); await peer.stop(false);
+      await run(10 * 60_000);
+      relays.packets.delete(contactKey);
+      relays.missing.add(`a.test ${contactKey}`);
+      relays.stale.set(`b.test ${contactKey}`, offer.body);
+      lines.length = 0;
+      // Back, reading a.test first: nothing there. Then b.test: the old packet.
+      const back = open("c", relays.transport("c2", ["https://a.test", "https://b.test"]), me, contact, resume ? { resume: true, resumeFloor: liveSince + 10 * 60_000 } : {});
+      await run(30_000);
+      expect(steps(lines, back.myPubKeyZ32, "rtc-signal-in"), "the old offer was read").not.toHaveLength(0);
+      expect(steps(lines, back.myPubKeyZ32, "datalink").filter(l => l.state === "answering"), "and not answered").toEqual([]);
+    } finally { setLinkTraceSink(null); }
   }, 300_000);
 });
 

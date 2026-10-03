@@ -19,6 +19,7 @@ use gstreamer as gst;
 use gstreamer_app as gst_app;
 use rtc::media::Sample;
 use rtc::peer_connection::configuration::media_engine::{MIME_TYPE_OPUS, MIME_TYPE_VP8};
+use rtc::peer_connection::configuration::RTCOfferOptions;
 use rtc::rtcp::payload_feedbacks::picture_loss_indication::PictureLossIndication;
 use rtc::rtp_transceiver::rtp_sender::{
     RTCPFeedback, RTCRtpCodec, RTCRtpCodecParameters, RTCRtpCodingParameters,
@@ -38,7 +39,7 @@ use webrtc::peer_connection::{
     register_default_interceptors, MediaEngine, PeerConnection, PeerConnectionBuilder,
     PeerConnectionEventHandler, RTCConfigurationBuilder, RTCIceConnectionState,
     RTCIceGatheringState, RTCIceServer, RTCPeerConnectionIceEvent, RTCSessionDescription,
-    RTCStatsReportEntry, Registry, StatsSelector,
+    RTCStatsReportEntry, Registry, SettingEngineBuilder, StatsSelector,
 };
 
 /// The payload types the rebuilt SDP assumes (callSignal.ts), used unless an offer says otherwise.
@@ -1165,6 +1166,14 @@ impl Call {
                         }])
                         .build(),
                 )
+                // An ICE restart (WISP 601, "Reconnecting") gathers anew on sockets bound again: after a
+                // network change the interfaces are other ones, and candidates kept from before would name
+                // addresses this machine no longer has.
+                .with_setting_engine(
+                    SettingEngineBuilder::new()
+                        .with_discard_local_candidates_during_ice_restart(true)
+                        .build(),
+                )
                 .with_media_engine(media)
                 .with_interceptor_registry(registry)
                 .with_handler(Arc::new(Handler(shared.clone())))
@@ -1335,18 +1344,32 @@ impl Call {
         Ok(described)
     }
 
-    /// Our offer, gathered: what the page reads its signal from.
-    pub async fn offer(&self) -> Result<String, String> {
+    /// Forgets the candidates gathered so far: the description being made waits for this round's own.
+    fn gather_anew(&self) {
+        *self.shared.candidates.lock().unwrap() = (Vec::new(), false);
+    }
+
+    /// Our offer, gathered: what the page reads its signal from. `restart`: on a call that is up, an offer that
+    /// restarts ICE (new credentials, candidates gathered anew) on this same connection.
+    pub async fn offer(&self, restart: bool) -> Result<String, String> {
+        if restart {
+            self.gather_anew();
+        }
+        let options = restart.then_some(RTCOfferOptions { ice_restart: true });
         let offer = self
             .pc
-            .create_offer(None)
+            .create_offer(options)
             .await
             .map_err(|e| e.to_string())?;
         self.local(offer).await
     }
 
-    /// Our answer to the peer's offer (rebuilt from its signal), gathered.
-    pub async fn answer(&self, offer: &str) -> Result<String, String> {
+    /// Our answer to the peer's offer (rebuilt from its signal), gathered. `restart`: the offer is the peer's ICE
+    /// restart on a call that is up, and ICE restarts here with it.
+    pub async fn answer(&self, offer: &str, restart: bool) -> Result<String, String> {
+        if restart {
+            self.gather_anew();
+        }
         let offer = RTCSessionDescription::offer(offer.to_owned()).map_err(|e| e.to_string())?;
         self.pc
             .set_remote_description(offer)
@@ -1488,7 +1511,7 @@ impl Call {
 
 #[cfg(test)]
 mod tests {
-    // covers: calls.linux-native
+    // covers: calls.linux-native, calls.reconnect
     use super::*;
 
     #[test]
@@ -1621,7 +1644,7 @@ mod tests {
         let a_camera = Camera::open(true, None, Arc::new(|_| {})).unwrap();
         assert_eq!(a_camera.device, None);
         a_camera.attach(Some(a.video_input()));
-        let offer = a.offer().await.unwrap();
+        let offer = a.offer(false).await.unwrap();
         assert!(
             offer.contains("a=candidate:") && offer.contains(" udp "),
             "{offer}"
@@ -1640,7 +1663,7 @@ mod tests {
         )
         .await
         .unwrap();
-        let answer = b.answer(&offer).await.unwrap();
+        let answer = b.answer(&offer, false).await.unwrap();
         a.accept(&answer).await.unwrap();
         let stats = || {
             format!(
@@ -1721,6 +1744,87 @@ mod tests {
         )
         .await;
         assert_eq!(a.stats().speaker, None, "{}", stats());
+        a.close().await;
+        b.close().await;
+    }
+
+    /// The ICE user name of a description.
+    fn ufrag(sdp: &str) -> String {
+        sdp.lines()
+            .find_map(|l| l.trim_end().strip_prefix("a=ice-ufrag:"))
+            .unwrap_or_default()
+            .to_string()
+    }
+
+    /// A call that is up restarts ICE on the same connections (WISP 601, "Reconnecting"): the offerer's restart
+    /// offer and the answerer's answer carry new credentials and candidates gathered anew, on sockets bound
+    /// again, and the sound goes on both ways. Then once more, as a call does when its path is lost again.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn a_call_restarts_ice_and_goes_on() {
+        if let Some(missing) = missing() {
+            eprintln!("skipped: {missing}");
+            return;
+        }
+        let a = Call::new(OPUS_PT, VP8_PT, true, Devices::default(), Arc::new(|_| {}))
+            .await
+            .unwrap();
+        let offer = a.offer(false).await.unwrap();
+        let (opus, vp8) = offered_payload_types(&offer);
+        let b = Call::new(opus, vp8, true, Devices::default(), Arc::new(|_| {}))
+            .await
+            .unwrap();
+        let answer = b.answer(&offer, false).await.unwrap();
+        a.accept(&answer).await.unwrap();
+        let stats = || {
+            format!(
+                "a {} b {}",
+                serde_json::to_string(&a.stats()).unwrap(),
+                serde_json::to_string(&b.stats()).unwrap()
+            )
+        };
+        until(
+            "both hear",
+            30,
+            || a.stats().audio_received > 20 && b.stats().audio_received > 20,
+            stats,
+        )
+        .await;
+
+        let (mut offered, mut answered) = (ufrag(&offer), ufrag(&answer));
+        for round in 1..=2 {
+            let offer = a.offer(true).await.unwrap();
+            assert_ne!(ufrag(&offer), offered, "round {round}: {offer}");
+            assert!(
+                offer.contains("a=candidate:") && offer.contains(" udp "),
+                "round {round}: {offer}"
+            );
+            let answer = b.answer(&offer, true).await.unwrap();
+            assert_ne!(ufrag(&answer), answered, "round {round}: {answer}");
+            assert!(answer.contains("a=candidate:"), "round {round}: {answer}");
+            a.accept(&answer).await.unwrap();
+            (offered, answered) = (ufrag(&offer), ufrag(&answer));
+
+            // The sockets of before are gone: sound that still arrives came over the restarted ICE.
+            tokio::time::sleep(Duration::from_secs(2)).await;
+            let (a_heard, b_heard) = (a.stats().audio_received, b.stats().audio_received);
+            until(
+                "both hear after the restart",
+                30,
+                || {
+                    a.stats().audio_received > a_heard + 50
+                        && b.stats().audio_received > b_heard + 50
+                },
+                stats,
+            )
+            .await;
+            for call in [&a, &b] {
+                assert!(
+                    matches!(call.stats().ice.as_str(), "connected" | "completed"),
+                    "round {round}: {}",
+                    stats()
+                );
+            }
+        }
         a.close().await;
         b.close().await;
     }

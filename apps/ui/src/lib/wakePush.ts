@@ -41,6 +41,10 @@ export function setPushPlatform(next: PushPlatform | null): void {
 export function pushPlatform(): PushPlatform | null {
   return platform?.supported() ? platform : null;
 }
+/** The web app in a browser that cannot be woken (no service worker, no Push, no notifications): Settings says so. */
+export function pushUnavailable(): boolean {
+  try { return !!platform && !platform.supported(); } catch { return !!platform; }
+}
 
 const subscribeEngine = (listener: () => void) => engine.subscribe(listener);
 const engineSnapshot = () => engine.state;

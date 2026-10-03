@@ -131,7 +131,7 @@ describe("a request to the whole group", () => {
     const refusedC = Object.values(c.desk.views()).find(p => p.kind === "payment" && p.requestId === paymentId)!;
     expect(paidByB.state).toBe("settled");
     expect(refusedC).toMatchObject({ state: "reclaimed", error: "Already paid by another member of the group" });
-    expect(c.wallet.receiveToken).toHaveBeenCalledWith(expect.stringMatching(/\|C1$/), "reclaimed", undefined);
+    expect(c.wallet.receiveToken).toHaveBeenCalledWith(expect.stringMatching(/\|C1$/), "reclaimed", undefined, { payment: expect.any(Function) });
     // Every member's copy of the request is closed, the payer's and the others'.
     expect(view(b, paymentId).state).toBe("settled");
     expect(view(c, paymentId).state).toBe("settled");

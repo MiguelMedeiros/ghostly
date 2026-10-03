@@ -69,6 +69,12 @@ export function createProfile(home: string, name: string, { existing = false } =
   return paths;
 }
 
+/**
+ * A file in the folder of a profile a restore made, until its engine starts for the first time: the store came back
+ * whole, as the backup held it, and the money in it is then treated as every restore treats it (WISP 05 § Restoring).
+ */
+export const RESTORED_MARK = "restored";
+
 export function profileExists(home: string, name: string): boolean {
   return existsSync(profileDir(home, name));
 }

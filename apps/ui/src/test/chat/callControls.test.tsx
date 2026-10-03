@@ -7,7 +7,7 @@ import { IncomingCallNotification } from "../../components/IncomingCallNotificat
 import { FakeMediaStream, FakeTrack } from "../../../../../packages/react/test/fakes";
 import { renderApp } from "../render";
 
-// covers: calls.screen-share, calls.audio, calls.video, calls.mini-window, calls.end-and-answer
+// covers: calls.screen-share, calls.audio, calls.video, calls.mini-window, calls.end-and-answer, calls.reconnect
 
 /**
  * The chat header starts a voice or a video call, and nothing else; the screen is shared from inside a call,
@@ -192,6 +192,26 @@ describe("a call for a screen reader and the keys", () => {
     expect(screen.getByTestId("call-state-spoken")).toHaveAttribute("role", "status");
     expect(screen.getByTestId("call-state-spoken")).toHaveTextContent(/^Connected$/);
     expect(screen.getByTestId("call-status")).not.toHaveAttribute("role");
+  });
+
+  it("says Reconnecting in place of the clock while a call gets its path back, and the clock goes on after", () => {
+    const { rerender } = overlay({ callStartedAt: Date.now() - 65_000, reconnecting: true });
+    const status = screen.getByTestId("call-status");
+    expect(status).toHaveTextContent("Reconnecting...");
+    expect(status).toHaveAttribute("data-state", "connected");
+    expect(status).toHaveAttribute("data-reconnecting", "true");
+    expect(status).not.toHaveTextContent(/\d\d:\d\d/);
+    // Read out once, by the line a screen reader hears.
+    expect(screen.getByTestId("call-state-spoken")).toHaveTextContent(/^Reconnecting\.\.\.$/);
+    // The call's controls stay: it can be hung up or muted meanwhile.
+    expect(screen.getByTitle("End call")).toBeEnabled();
+
+    const props = { localStream: null, remoteStream: null, isMuted: false, isVideoOff: true, canSendVideo: true, remoteHasVideo: false, callStartedAt: Date.now() - 65_000,
+      peerName: "Ana", onHangUp: vi.fn(), onToggleMute: vi.fn(), onToggleVideo: vi.fn() };
+    rerender(<CallOverlay callState="connected" {...props} />);
+    expect(screen.getByTestId("call-status")).not.toHaveAttribute("data-reconnecting");
+    expect(screen.getByTestId("call-status")).not.toHaveTextContent("Reconnecting...");
+    expect(screen.getByTestId("call-state-spoken")).toHaveTextContent(/^Connected$/);
   });
 });
 

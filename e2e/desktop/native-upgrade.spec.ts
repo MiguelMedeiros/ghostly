@@ -28,8 +28,10 @@ import { desktopPerson, type DesktopPerson } from "../matrix/people";
  */
 
 /**
- * Keeps, in the page, each chat state the header showed, in order: the pairing stage and the label of the
- * connection button, the header's only connection element. The states can pass faster than a poll, so they are recorded as they happen.
+ * Keeps, in the page, each chat state the header showed, in order: the pairing stage, the label of the connection
+ * button (the header's only connection element) and the delivery state under it (`data-status`, `contactStatus`).
+ * While a first pairing's scene is up the label tells the pairing, so that the two agree; the status says where texts
+ * go meanwhile (the DHT). The states can pass faster than a poll, so they are recorded as they happen.
  */
 const RECORD = `
   if (window.qaStates) return;
@@ -39,8 +41,9 @@ const RECORD = `
   const look = () => {
     note("stage", document.querySelector('[data-testid="connection-options"]')?.getAttribute("data-pairing"));
     note("label", document.querySelector('[data-testid="connection-options"]')?.getAttribute("aria-label")?.replace(/^Connection options: /, ""));
+    note("status", document.querySelector('[data-testid="connection-options"]')?.getAttribute("data-status"));
   };
-  new MutationObserver(look).observe(document.documentElement, { subtree: true, childList: true, attributes: true, attributeFilter: ["data-pairing", "aria-label"] });
+  new MutationObserver(look).observe(document.documentElement, { subtree: true, childList: true, attributes: true, attributeFilter: ["data-pairing", "aria-label", "data-status"] });
   look();`;
 
 const states = (p: DesktopPerson) => p.app.execute<string[]>(`return window.qaStates ?? [];`);
@@ -115,7 +118,7 @@ test("two Desktop apps without WebRTC go live on Iroh or HyperDHT from the DHT, 
       const live = seen.findIndex((s) => NATIVE.test(s));
       expect(live, `${p.name} went live natively: ${seen.join(" → ")}`).toBeGreaterThanOrEqual(0);
       const before = seen.slice(0, live);
-      if (p === b) expect(before.some((s) => s === "stage:on-dht" || s.startsWith("label:On DHT")), `${p.name} was on the DHT first: ${seen.join(" → ")}`).toBe(true);
+      if (p === b) expect(before.some((s) => s === "stage:on-dht" || s.startsWith("label:On DHT") || s.startsWith("status:On DHT")), `${p.name} was on the DHT first: ${seen.join(" → ")}`).toBe(true);
       expect(seen, `${p.name} never showed a failed pairing`).not.toContain("stage:failed");
       test.info().annotations.push({ type: `${p.name}'s states`, description: seen.join(" → ") });
     }

@@ -24,8 +24,8 @@ import {
 } from "@ghostly/core";
 import { STORES, store, wrap } from "../shared/idb";
 import { isWorthlessMint, mintNetwork } from "../shared/mints";
-import type { PaymentView, PendingMelt, StoredMessage, StoredPayment, StoredQuote } from "../shared/types";
-import { assertAmount, type CashuWallet } from "./wallet";
+import type { PaymentView, PendingMelt, PendingSwap, StoredMessage, StoredPayment, StoredQuote } from "../shared/types";
+import { SwapUnsettledError, assertAmount, type CashuWallet } from "./wallet";
 
 /**
  * Payments in a chat. The protocol only carries requests, ecash and receipts
@@ -548,7 +548,8 @@ export class PaymentDesk {
     }
     if (!payment?.token || payment.direction !== "out") throw new Error("Nothing to reclaim");
     try {
-      await this.wallet.receiveToken(payment.token, "reclaimed", payment.memo);
+      // The record goes in with the ecash, in one transaction: ecash that is back is never a payment still waiting.
+      await this.wallet.receiveToken(payment.token, "reclaimed", payment.memo, { payment: () => ({ ...this.current(payment), state: "reclaimed", token: undefined }) });
       await this.save({ ...this.current(payment), state: "reclaimed", token: undefined });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -769,40 +770,76 @@ export class PaymentDesk {
       });
       // Ecash from the public test mint is worthless and is taken in; a real mint the user did not pick is refused.
       const { amount, mint } = await this.wallet.receiveToken(token, "ecash-in", payment.memo, { addTestMint: true, payment: record });
-      // The payment record and received proofs were committed in one transaction.
-      await this.save(record(amount, mint));
-      // It settles our request only in full and in ecash from a mint the request named. Anything less is
-      // received, and the request stays open.
-      const request = payment.requestId ? this.payments.get(payment.requestId) : undefined;
-      if (
-        request?.kind === "request" &&
-        request.direction === "out" &&
-        this.owns(request, linkId) &&
-        request.state === "pending" &&
-        amount >= request.amount &&
-        (request.mints ?? []).includes(mint) &&
-        (!isWorthlessMint(mint) || (request.mints ?? []).every(isWorthlessMint))
-      ) {
-        if (request.group) await this.settleRequest(request, { mint });
-        else await this.save({ ...request, state: "settled", mint });
-      }
-      await this.host.storeMessage({
-        linkId,
-        id: `peer_${payment.timestamp}`,
-        text: `⚡ ${amount.toLocaleString()} ${isWorthlessMint(mint) ? "test sats" : "sats"}`,
-        sender: "peer",
-        timestamp: payment.timestamp,
-        via: "datalink",
-        paymentId: payment.id,
-      });
-      link?.sendPaymentResult({ id: payment.id, ok: true, credited: String(amount) });
+      await this.creditCashu(record(amount, mint), link);
     } catch (error) {
+      // The mint has not said what became of the redeem: nothing failed, so the contact is not told it did. The wallet
+      // keeps asking, and `onSwapSettled` answers the contact once the mint has spoken.
+      if (error instanceof SwapUnsettledError) return;
+      // Sent again while the wallet was finishing the first redeem: that one is in, and is what the contact is told.
+      const settled = this.payments.get(payment.id);
+      if (settled && settled.linkId === linkId && settled.direction === "in" && settled.kind === "payment" && settled.state === "settled") {
+        link?.sendPaymentResult({ id: payment.id, ok: true, credited: String(settled.amount) });
+        return;
+      }
       const reason = error instanceof Error ? error.message : String(error);
       link?.sendPaymentResult({ id: payment.id, ok: false, error: reason });
       // Said once in the chat (same id on a retransmission), so a refusal is never silent.
       const sats = parseSats(payment.amount.value, payment.amount.asset);
       try { await this.host.storeMessage({ linkId, id: `peer_${payment.timestamp}_refused`, text: `Could not receive ${sats === null ? "a payment" : `${sats.toLocaleString()} sats`}: ${reason}`, sender: "peer", timestamp: payment.timestamp, via: "datalink" }); } catch { /* the refusal already went to the contact */ }
     }
+  }
+
+  /**
+   * A contact's ecash is in the wallet, and its record was written with it in the same transaction: the request it
+   * pays is settled, the chat shows it, and the contact is told.
+   */
+  private async creditCashu(record: StoredPayment, link: PaymentLink | null): Promise<void> {
+    const { linkId, amount } = record;
+    const mint = record.mint!;
+    await this.save(record);
+    // It settles our request only in full and in ecash from a mint the request named. Anything less is
+    // received, and the request stays open.
+    const request = record.requestId ? this.payments.get(record.requestId) : undefined;
+    if (
+      request?.kind === "request" &&
+      request.direction === "out" &&
+      this.owns(request, linkId) &&
+      request.state === "pending" &&
+      amount >= request.amount &&
+      (request.mints ?? []).includes(mint) &&
+      (!isWorthlessMint(mint) || (request.mints ?? []).every(isWorthlessMint))
+    ) {
+      if (request.group) await this.settleRequest(request, { mint });
+      else await this.save({ ...request, state: "settled", mint });
+    }
+    await this.host.storeMessage({
+      linkId,
+      id: `peer_${record.createdAt}`,
+      text: `⚡ ${amount.toLocaleString()} ${isWorthlessMint(mint) ? "test sats" : "sats"}`,
+      sender: "peer",
+      timestamp: record.createdAt,
+      via: "datalink",
+      paymentId: record.id,
+    });
+    link?.sendPaymentResult({ id: record.id, ok: true, credited: String(amount) });
+  }
+
+  /**
+   * A redeem the mint had not answered is settled, after the call that made it was over (`CashuWallet.pollSwaps`).
+   * Done: the ecash and its payment record are already stored, and the rest follows as if the answer had come in time.
+   * Not done: the mint never made it, so a contact's ecash is still the contact's, and it is told so.
+   */
+  async onSwapSettled(swap: PendingSwap, done: boolean): Promise<void> {
+    const record = swap.payment;
+    if (!record) return;
+    const link = this.host.getLink(record.linkId);
+    if (record.direction === "out") {
+      // Ecash of ours taken back: the record stored with it is the payment as it stands now.
+      if (done) { this.payments.set(record.id, record); this.host.onChange(); }
+      return;
+    }
+    if (done) await this.creditCashu(record, link);
+    else if (!this.payments.has(record.id)) link?.sendPaymentResult({ id: record.id, ok: false, error: "The mint did not confirm the ecash" });
   }
 
   async onPaymentResult(linkId: string, result: PaymentResult): Promise<void> {

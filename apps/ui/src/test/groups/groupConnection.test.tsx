@@ -167,6 +167,59 @@ describe("GroupConnection: the popover lists every member's edge", () => {
   });
 });
 
+describe("GroupConnection: a community is connected through its hubs", () => {
+  const DAVE = "dave".padEnd(52, "y");
+  // As the engine hands a community: an edge only for the hub my app is linked to; nothing says the others are online.
+  const away = (key: string, nick: string) => member({ key, nick });
+  const community = (members: GroupMemberView[], hub = false) => groupView({ status: "active", epoch: 3, profile: "community", members, community: { hub, hubs: 1, connected: members.filter(m => m.edge?.state === "open").length } });
+
+  it.each<[string, GroupMemberView[], { kind: string; label: string; dot: string | null }]>([
+    // Counted per member, twelve people on one hub read "1 of 11 reachable" with a warning dot while everything worked.
+    ["an edge up to a hub: connected, whatever the number of members", [me, alice(), away(BOB, "Bob"), away(CAROL, "Carol"), away(DAVE, "Dave")], { kind: "connected", label: "Connected to the group", dot: "bg-accent" }],
+    ["the hub's edge not up yet: connecting, not a failure", [me, alice({ state: "waiting", transport: undefined }), away(BOB, "Bob")], { kind: "waiting", label: "Connecting to the group…", dot: "bg-text-muted" }],
+    ["the hub's edge failed", [me, alice({ state: "error", error: "ICE failed" }), away(BOB, "Bob")], { kind: "failure", label: "Nobody reachable", dot: "bg-danger" }],
+    ["no edge at all (every other app is closed)", [me, away(ALICE, "Alice"), away(BOB, "Bob")], { kind: "waiting", label: "Nobody reachable", dot: "bg-text-muted" }],
+  ])("%s", async (_, members, want) => {
+    await open(community(members));
+    expect(header()).toEqual({ kind: want.kind, name: want.label, popover: want.label, tooltip: want.label, dot: want.dot });
+  });
+
+  it("lists the edges my app holds, counts them alone, and says the rest go through the hubs", async () => {
+    await open(community([me, alice(), away(BOB, "Bob"), away(CAROL, "Carol")]));
+    expect(rows()).toEqual([{ key: ALICE, state: "open", status: "Connected · WebRTC" }]);
+    expect(screen.getByTestId("group-connection-transports")).toHaveTextContent("1 of 1 live over WebRTC");
+    expect(screen.getByTestId("group-connection-note")).toHaveTextContent("the hubs pass every message on to everyone");
+    expect(screen.getByTestId("group-connection-note")).not.toHaveTextContent("direct");
+  });
+
+  it("the members panel does not call a member behind a hub not reachable", () => {
+    const group = community([me, alice(), away(BOB, "Bob")]);
+    const view = renderApp(<GroupMembersDialog group={group} onClose={() => {}} />);
+    act(() => view.engine.update({ groups: [group] }));
+    expect(screen.getAllByTestId("group-member-status").map(s => s.textContent)).toEqual(["Connected · WebRTC", "Through a hub"]);
+    const dots = screen.getAllByTestId("group-member").map(row => within(row).getAllByRole("img")[0].getAttribute("aria-label"));
+    expect(dots).toEqual(["reachable", "reachable", "Through a hub"]);
+  });
+
+  it("the members panel says a hub my edge to is not up is reached through the one that is", () => {
+    // Two hubs: the edge to Alice is up, the one to Bob is not (it never opened, or it dropped). Bob's messages come through Alice.
+    for (const state of ["waiting", "error", "connecting"] as const) {
+      const group = community([me, alice(), bob({ state, transport: undefined, lastSeenAt: 0 })]);
+      const view = renderApp(<GroupMembersDialog group={group} onClose={() => {}} />);
+      act(() => view.engine.update({ groups: [group] }));
+      expect(screen.getAllByTestId("group-member-status").map(s => s.textContent)).toEqual(["Connected · WebRTC", "Through a hub"]);
+      view.unmount();
+    }
+  });
+
+  it("the members panel keeps each edge's own state while no edge is up", () => {
+    const group = community([me, alice({ state: "waiting", transport: undefined, lastSeenAt: 0 }), away(BOB, "Bob")]);
+    const view = renderApp(<GroupMembersDialog group={group} onClose={() => {}} />);
+    act(() => view.engine.update({ groups: [group] }));
+    expect(screen.getAllByTestId("group-member-status").map(s => s.textContent)).toEqual(["Not reachable · not seen yet", "Through a hub"]);
+  });
+});
+
 describe("GroupMembersDialog: each member says how their edge is", () => {
   it("shows the edge's state under every other member's name", () => {
     const group = active([me, alice(), bob({ state: "waiting", lastSeenAt: 0 })]);
