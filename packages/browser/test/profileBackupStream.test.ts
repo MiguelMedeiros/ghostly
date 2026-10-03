@@ -4,12 +4,13 @@ import { encode } from "../src/backup/codec";
 import { snapshotDatabase } from "../src/backup/database";
 import { seal } from "../src/backup/envelope";
 import { memorySink } from "../src/backup/stream";
-import { STORES, openDb, transact, wrap } from "../src/shared/idb";
+import { DB_VERSION, STORES, openDb, transact, wrap } from "../src/shared/idb";
 import { SMALL_FILE_BYTES, fileBytes, registerFileBytes, resetFileBytes, type FileBytes } from "../src/shared/fileBytes";
 import { setStorageProfile } from "../../../apps/ui/src/lib/storage";
 import { createProfile, listProfiles } from "../../../apps/ui/src/lib/profiles";
 import { backUpToFile, stageBackup } from "../../../apps/ui/src/lib/backupFile";
 import { backupProtectionOf, createProfileBackup, isCancelled, openProfileBackup, restoreProfileBackup, writeProfileBackup, type BackupProgress } from "../../../apps/ui/src/lib/profileBackup";
+import { sweepInterruptedRestores } from "../../../apps/ui/src/lib/restoreJournal";
 // covers: backup.profile.file, backup.stream, backup.unprotected, backup.progress, backup.envelope
 
 class FakeStorage {
@@ -93,6 +94,23 @@ it("a version 1 bundle, as apps before this one made them, still restores whole"
     expect(files.map((f) => f.id)).toEqual(["link1-in-s0", "link1-in-s1", "link1-in-s2"]);
     expect(same(new Uint8Array(await files[1].blob.arrayBuffer()), pattern(1001, 1))).toBe(true);
     expect(storage.getItem(`ghostly_${restored.id}_app_settings`)).toContain("Nick Kept Secret");
+  }
+});
+
+it("a profile whose database a newer version made is refused before anything is written, not restored as one this version cannot open", async () => {
+  await seed();
+  // The profile as a newer app keeps it: its database one version up.
+  (await wrap(indexedDB.open("ghostly", DB_VERSION + 1))).close();
+  const streamed = await createProfileBackup(null);
+  const peer = await snapshotDatabase("ghostly");
+  expect(peer?.version).toBe(DB_VERSION + 1);
+  const whole = await seal(await encode({ format: "ghostly-profile", version: 1, createdAt: 1, profile: { name: "Diary", builtIn: false }, storage: {}, databases: { peer, ark: {} } }), PASS);
+  const before = await databases();
+  for (const [bundle, passphrase] of [[streamed, undefined], [whole, PASS]] as const) {
+    await expect(openProfileBackup(bundle, passphrase)).rejects.toThrow("This backup comes from a newer Ghostly; update to restore it");
+    await expect(restoreProfileBackup(bundle, passphrase)).rejects.toThrow("This backup comes from a newer Ghostly; update to restore it");
+    expect(await databases()).toEqual(before);
+    expect(listProfiles().map((p) => p.id)).toEqual([""]);
   }
 });
 
@@ -198,6 +216,62 @@ it("a restore cancelled half way leaves no profile, no database, no file and no 
   expect(await databases()).toEqual(before);
   expect([...storage.entries.keys()].sort()).toEqual(keys);
   expect(listProfiles().map((p) => p.id)).toEqual([""]);
+});
+
+/** Web Locks as a browser keeps them: `drop` lets go of one as a closed tab does, whatever it was doing. */
+function fakeLocks() {
+  const held = new Set<string>();
+  const locks = {
+    request: async (name: string, a: unknown, b?: (lock: unknown) => Promise<void> | void) => {
+      const callback = (b ?? a) as (lock: unknown) => Promise<void> | void, ifAvailable = !!b && (a as { ifAvailable?: boolean }).ifAvailable;
+      if (held.has(name)) { if (ifAvailable) return callback(null); throw new Error("this fake does not queue"); }
+      held.add(name);
+      try { return await callback({ name }); } finally { held.delete(name); }
+    },
+  };
+  Object.defineProperty(globalThis, "navigator", { value: { ...globalThis.navigator, locks }, configurable: true });
+  return { held, drop: () => held.clear() };
+}
+
+it("a restore whose tab was closed half way leaves nothing for good: the next start takes back what it wrote", async () => {
+  const locks = fakeLocks();
+  await seed({ small: 200 });
+  const bundle = await createProfileBackup(PASS);
+  const before = await databases();
+  const keys = [...storage.entries.keys()].sort();
+  // The tab stops for good half way through the bundle: its database is made and half filled, then nothing more.
+  const connections: IDBDatabase[] = [];
+  const open = indexedDB.open.bind(indexedDB);
+  vi.spyOn(indexedDB, "open").mockImplementation((...args: Parameters<typeof indexedDB.open>) => { const request = open(...args); request.addEventListener("success", () => connections.push(request.result)); return request; });
+  let reached!: () => void;
+  const stopped = new Promise<void>((resolve) => { reached = resolve; });
+  const source = { size: bundle.length, read: async (offset: number, length: number) => {
+    if (offset > bundle.length / 2) { reached(); return new Promise<Uint8Array>(() => {}); }
+    return bundle.subarray(offset, offset + Math.min(length, 16 * 1024));
+  } };
+  void restoreProfileBackup(source, PASS);
+  await stopped;
+  const left = (await databases()).filter((name) => !before.includes(name!));
+  expect(left, "the half-made profile's database is on the device").toHaveLength(1);
+  // While that tab still runs, nothing of it is touched.
+  await sweepInterruptedRestores();
+  expect((await databases()).filter((name) => !before.includes(name!))).toEqual(left);
+  // The tab is closed: its connections and its lock go with it. The next start takes back what it left.
+  for (const db of connections) db.close();
+  locks.drop();
+  await sweepInterruptedRestores();
+  expect(await databases()).toEqual(before);
+  expect([...storage.entries.keys()].sort()).toEqual(keys);
+  expect(listProfiles().map((p) => p.id)).toEqual([""]);
+  // A restore that finished is never taken back.
+  const restored = await restoreProfileBackup(bundle, PASS);
+  await sweepInterruptedRestores();
+  expect((await readAll(`ghostly_${restored.id}`, STORES.messages)).length).toBe(5);
+  // Where the page cannot have a lock, a restore still runs, and nothing is taken back.
+  Object.defineProperty(globalThis, "navigator", { value: { ...globalThis.navigator, locks: { request: () => Promise.reject(new DOMException("denied", "SecurityError")) } }, configurable: true });
+  const second = await restoreProfileBackup(bundle, PASS);
+  await sweepInterruptedRestores();
+  expect((await readAll(`ghostly_${second.id}`, STORES.messages)).length).toBe(5);
 });
 
 /**

@@ -2,12 +2,13 @@ import { decode, encode } from "@ghostly/browser/backup/codec";
 import { MAX_BACKUP_BYTES, open } from "@ghostly/browser/backup/envelope";
 import { BackupReader, BackupWriter, backupProtection, blobSource, bytesSource, isCancelled, memorySink, type BackupSink, type BackupSource } from "@ghostly/browser/backup/stream";
 import { createDatabase, databaseExists, putRows, restoreDatabase, snapshotDatabase, type DatabaseSnapshot, type StoreShape } from "@ghostly/browser/backup/database";
-import { databaseName, wrap, type StoredFile } from "@ghostly/browser/shared/idb";
+import { DB_VERSION, databaseName, wrap, type StoredFile } from "@ghostly/browser/shared/idb";
 import { RESTORED_WALLET_STORES, restoredWalletRow } from "@ghostly/browser/shared/restoredRows";
-import { FILE_BYTES_STEP, SMALL_FILE_BYTES, checkFileId, dropFileSpace, fileBytes, fileBytesOf, type FileBytes, type FileBytesKind } from "@ghostly/browser/shared/fileBytes";
+import { FILE_BYTES_STEP, SMALL_FILE_BYTES, checkFileId, fileBytes, fileBytesOf, type FileBytes, type FileBytesKind } from "@ghostly/browser/shared/fileBytes";
 import { restoreArkDatabase, snapshotArkDatabase, type ArkDatabaseSnapshot } from "@ghostly/browser/engine/paymentAdapters/backup";
 import { getPrefix, getStorageProfile, ownsKey } from "./storage";
 import { assertUnlocked, identityKeysOf, profileIdentityKeys } from "./profileData";
+import { holdRestore, noteRestore, sweepInterruptedRestores, undoRestore } from "./restoreJournal";
 import { builtInNameBefore, currentProfile, isBuiltInName, listProfiles, namespaceOf, newProfileId, registerProfile, registryKey, storedProfileName, type ProfileEntry } from "./profiles";
 
 /** What a bundle says about the profile it holds, and the profile's local keys without its prefix. */
@@ -258,17 +259,6 @@ export async function createProfileBackup(passphrase: string | null, id?: string
 
 const isQuotaError = (error: unknown) => (error as { name?: string })?.name === "QuotaExceededError";
 
-/** Takes away what a failed restore wrote: its databases, its files and every local key of its namespace. */
-async function undoRestore(ns: string, databases: string[], files = false): Promise<void> {
-  for (const name of databases) {
-    await new Promise<void>((resolve) => { try { const r = indexedDB.deleteDatabase(name); r.onsuccess = r.onerror = r.onblocked = () => resolve(); } catch { resolve(); } });
-  }
-  if (files) await dropFileSpace(`ghostly_${ns}`).catch(() => {});
-  const prefix = `ghostly_${ns}_`;
-  const keys = Array.from({ length: localStorage.length }, (_, i) => localStorage.key(i)).filter((key): key is string => !!key?.startsWith(prefix));
-  for (const key of keys) { try { localStorage.removeItem(key); } catch { /* nothing more to do */ } }
-}
-
 /**
  * The file a profile's backup downloads as, named after the profile: its letters and digits in any script kept
  * ("仕事", "Trabalho-é"), everything else (spaces, punctuation, direction marks) a dash. A name with none left is "profile".
@@ -300,6 +290,12 @@ export interface OpenedProfileBackup {
 }
 
 const NOT_A_PROFILE = "This backup does not hold a profile";
+const NEWER = "This backup comes from a newer Ghostly; update to restore it";
+/**
+ * A profile whose database a newer version made: this one would restore it, list it, and then could not open it. It is
+ * refused before anything is written, like a newer envelope.
+ */
+const checkVersion = (version: unknown) => { if (typeof version === "number" && version > DB_VERSION) throw new Error(NEWER); };
 const DAMAGED = "This backup is damaged: it was changed or cut short";
 const isHead = (value: Partial<ProfileHead> | null | undefined) => typeof value?.profile?.name === "string" && !!value.storage && typeof value.storage === "object";
 
@@ -313,18 +309,19 @@ export async function openProfileBackup(input: BackupInput, passphrase?: string,
     if (source.size > MAX_BACKUP_BYTES * 1.4) throw new Error("This backup is too large to restore");
     const payload = decode(await open(new TextDecoder().decode(await source.read(0, source.size)), passphrase ?? "")) as ProfilePayload;
     if (payload?.format !== "ghostly-profile" || payload.version !== 1 || !isHead(payload) || !payload.databases) throw new Error(NOT_A_PROFILE);
+    checkVersion(payload.databases.peer?.version);
     return { name: payload.profile.name, protection: "passphrase", payload, whole: payload };
   }
   const first = await reader.next();
   const head = first?.json === undefined ? null : (decode(first.json) as BackupRecord);
   if (head?.t !== "profile" || head.format !== "ghostly-profile" || !isHead(head)) throw new Error(NOT_A_PROFILE);
-  if (head.version !== 2) throw new Error("This backup comes from a newer Ghostly; update to restore it");
+  if (head.version !== 2) throw new Error(NEWER);
   // The chats and the DID come right after: enough to tell whose profile this is before anything is written.
   const links: unknown[] = [];
   let did: unknown;
   for (let record = await reader.next(); record?.json !== undefined; record = await reader.next()) {
     const value = decode(record.json) as BackupRecord;
-    if (value?.t === "db") continue;
+    if (value?.t === "db") { checkVersion(value.version); continue; }
     if (value?.t !== "rows" || (value.store !== "settings" && value.store !== "links")) break;
     if (value.store === "links") links.push(...value.values);
     else { const at = value.keys.findIndex((key) => key === "profileDid"); if (at >= 0) did = value.values[at]; }
@@ -417,26 +414,40 @@ function register(id: string, ns: string, { profile, storage }: ProfileHead): Pr
 
 /** `restoreProfileBackup` of a bundle already opened (after `sameIdentityProfiles` was asked, say). */
 export async function restoreOpenedBackup(opened: OpenedProfileBackup, run: BackupRun = {}): Promise<ProfileEntry> {
+  // What an earlier restore left when its tab was closed half way goes first.
+  await sweepInterruptedRestores();
   const id = newProfileId(), ns = namespaceOf(id);
   // What this restore has written so far: a restore that fails or is cancelled takes all of it away again, so a device
   // short of room is not left holding an unlisted copy of the profile (its keys included) that nothing would ever delete.
+  // Noted before it is written, so a restore stopped by a closed tab or a crash is taken back later (`restoreJournal`).
+  const release = await holdRestore(ns);
   const made: string[] = [];
   const state: RestoreState = { files: false, db: null, writing: null };
   const walletIds = new Map<string, string>();
-  const fresh = (walletId: string) => walletIds.get(walletId) ?? (walletIds.set(walletId, crypto.randomUUID()), walletIds.get(walletId)!);
+  const noted = () => [`ghostly_${ns}`, ...[...walletIds.values()].map((walletId) => `ghostly-ark-${walletId}`)];
+  const fresh = (walletId: string) => {
+    if (!walletIds.has(walletId)) { walletIds.set(walletId, crypto.randomUUID()); noteRestore(ns, noted()); }
+    return walletIds.get(walletId)!;
+  };
   try {
+    noteRestore(ns, noted());
     if (opened.stream) await restoreStream(opened.stream, ns, made, state, fresh, walletIds, run);
     else await restoreWhole(opened.whole!, ns, made, fresh, walletIds);
     state.db?.close();
     state.db = null;
-    return register(id, ns, opened.payload);
+    const entry = register(id, ns, opened.payload);
+    noteRestore(ns, null);
+    return entry;
   } catch (error) {
     // The file it was in the middle of is let go first: file storage does not remove a folder with a file still open
     // in it (the origin-private file system refuses), and the half-written file would stay on the device for good.
     await state.writing?.discard().catch(() => {});
     state.db?.close();
     await undoRestore(ns, made, state.files);
+    noteRestore(ns, null);
     throw isQuotaError(error) ? Object.assign(new Error("This device has no room left for this backup. Free some space, then try again."), { cause: error }) : error;
+  } finally {
+    release();
   }
 }
 
@@ -523,6 +534,7 @@ async function restoreStream(stream: NonNullable<OpenedProfileBackup["stream"]>,
         break;
       case "db":
         if (state.db || value.db !== "peer") throw new Error(DAMAGED);
+        checkVersion(value.version);
         state.db = await createDatabase(space, value.version, value.stores);
         made.push(space);
         break;
