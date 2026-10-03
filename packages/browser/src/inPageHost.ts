@@ -57,17 +57,42 @@ export function createInPageHost(options: InPageHostOptions): BrowserHost & { an
  * One peer per storage area. Two pages would publish under the same keys and
  * spend from the same wallet at once, so only the page holding this lock runs.
  * Resolves once the lock is ours; it is released when the page closes.
+ *
+ * Rejects with `PeerLockUnavailable` when the lock cannot be had at all: the browser has no Web Locks, or refuses
+ * the request (it throws, or its promise rejects before the lock was granted). That is not "open in another tab",
+ * so `onWaiting` is not called for it; the caller says the browser cannot run the app.
  */
 export function becomeThePeer(lockName: string, onWaiting: () => void): Promise<void> {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     let acquired = false;
-    void navigator.locks.request(lockName, () => {
-      acquired = true;
-      resolve();
-      return new Promise<never>(() => {});
-    });
+    let refused = false;
+    const refuse = (cause: unknown) => {
+      if (acquired || refused) return;
+      refused = true;
+      reject(new PeerLockUnavailable(cause));
+    };
+    try {
+      const locks = typeof navigator === "undefined" ? undefined : navigator.locks;
+      if (!locks || typeof locks.request !== "function") { refuse(new Error("navigator.locks is not available")); return; }
+      Promise.resolve(locks.request(lockName, () => {
+        acquired = true;
+        resolve();
+        return new Promise<never>(() => {});
+      })).catch(refuse);
+    } catch (error) {
+      refuse(error);
+      return;
+    }
     setTimeout(() => {
-      if (!acquired) onWaiting();
+      if (!acquired && !refused) onWaiting();
     }, 150);
   });
+}
+
+/** The single-peer lock cannot be had in this browser (see `becomeThePeer`). */
+export class PeerLockUnavailable extends Error {
+  constructor(cause: unknown) {
+    super(`The single-peer lock is not available: ${cause instanceof Error ? cause.message : String(cause)}`);
+    this.name = "PeerLockUnavailable";
+  }
 }

@@ -2,7 +2,8 @@
   "announce": {
     "message": "{{name}}: {{text}}",
     "messages": "{{count}} رسائل جديدة",
-    "messagesFrom": "{{count}} رسائل جديدة من {{name}}"
+    "messagesFrom": "{{count}} رسائل جديدة من {{name}}",
+    "pinMoved": "نُقلت إلى الموضع {{place}} من {{count}} محادثات مثبتة"
   },
   "audio": {
     "cantPlay": "لا يمكن لهذا الجهاز تشغيل هذا الصوت ({{format}}). نزّله للاستماع إليه.",
@@ -130,6 +131,7 @@
     "leftMinutes": "باقٍ {{minutes}} د",
     "leftUnderMinute": "باقٍ أقل من دقيقة",
     "noRoomDevice": "المساحة غير كافية: {{size}} متاحة على هذا الجهاز",
+    "notInBackup": "ليس في هذه النسخة الاحتياطية",
     "notSentHint": "لم يُرسل. أرسله مرة أخرى.",
     "of": "{{done}} من {{size}}",
     "pause": "إيقاف مؤقت",
@@ -218,6 +220,10 @@
   "menu": {
     "continueNew": "المتابعة في محادثة جديدة",
     "hold": "الاحتفاظ بالرسائل…",
+    "moveDown": "تحريك لأسفل",
+    "moveFirst": "هي الأولى بالفعل",
+    "moveLast": "هي الأخيرة بالفعل",
+    "moveUp": "تحريك لأعلى",
     "pin": "تثبيت المحادثة",
     "refresh": "تحديث",
     "techInfo": "معلومات تقنية",

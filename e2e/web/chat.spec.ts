@@ -56,6 +56,64 @@ test("two people chat: relay discovery, then peer-to-peer messages", { tag: ["@f
   await expect(bob.page.getByText("Casper")).toBeVisible();
 });
 
+/**
+ * Lets a test move a page's clock: `Date.now()` and `new Date()` read `window.clockOffset` ms ahead (or behind), 0
+ * until the test sets it. The engine runs in the page, so from then on the peer dates everything it sends by that
+ * clock, as a device whose clock is wrong does. Timers are left alone: nothing waits longer or shorter.
+ */
+function movableClock(): void {
+  const Real = Date;
+  const offset = () => (globalThis as { clockOffset?: number }).clockOffset ?? 0;
+  class Shifted extends Real {
+    constructor(...args: unknown[]) {
+      if (args.length) super(...(args as [number]));
+      else super(Real.now() + offset());
+    }
+    static now(): number { return Real.now() + offset(); }
+  }
+  (globalThis as { Date: DateConstructor }).Date = Shifted as unknown as DateConstructor;
+}
+
+test("a contact whose clock is two minutes ahead: the conversation reads in the order it happened", { tag: ["@feature:chat.order"] }, async ({ peer }) => {
+  // Reported 2026-10-01: the contact's messages said "11:23 PM" at 11:21, and my replies were placed above them.
+  const AHEAD = 2 * 60_000;
+  const [alice, bob] = await Promise.all([peer("alice"), peer("bob", { beforeOpen: async (context) => { await context.addInitScript(movableClock); } })]);
+  await link(alice, bob);
+  await connect(alice, bob);
+  // Paired and live: from here Bob's clock runs two minutes ahead of Alice's. (A first pairing between clocks that
+  // far apart is another matter: records dated ahead are refused.)
+  await bob.page.evaluate((offset) => { (globalThis as { clockOffset?: number }).clockOffset = offset; }, AHEAD);
+  expect(await bob.page.evaluate(() => Date.now()) - await alice.page.evaluate(() => Date.now())).toBeGreaterThan(AHEAD - 5_000);
+
+  const talk = ["bob one", "alice answers one", "bob two", "bob three", "alice answers two", "bob four"];
+  for (const line of talk) {
+    const [from, to] = line.startsWith("bob") ? [bob, alice] : [alice, bob];
+    await say(from, line);
+    await expect(chat(to).getByText(line, { exact: true })).toBeVisible();
+  }
+
+  // What each side reads: the lines in the order they were said, on Alice's side (her contact's clock is ahead) and
+  // on Bob's (his contact's clock is behind).
+  const said = async (reader: typeof alice) => (await chat(reader).getByTestId("message-text").allTextContents()).filter((text) => talk.includes(text));
+  // No bubble shows a time that has not come yet, by the reader's own clock.
+  const latestShown = (reader: typeof alice) => chat(reader).getByTestId("message-time").evaluateAll((els) => Math.max(...els.map((el) => Number(el.getAttribute("data-at")))) - Date.now());
+  for (const reader of [alice, bob]) {
+    expect(await said(reader), `${reader.name} reads the conversation in order`).toEqual(talk);
+    expect(await latestShown(reader), `${reader.name} sees no time in the future`).toBeLessThanOrEqual(0);
+  }
+
+  // Bob's lines show the time Alice got them, not his clock's two minutes later.
+  const bobFour = chat(alice).locator("[data-message-row]").filter({ hasText: "bob four" }).getByTestId("message-time");
+  expect(await bobFour.evaluate((el) => Date.now() - Number(el.getAttribute("data-at")))).toBeLessThan(60_000);
+
+  // The same order after a reload, from what each side stored.
+  for (const reader of [alice, bob]) {
+    await reader.page.reload();
+    await expect(chat(reader).getByText("bob four", { exact: true })).toBeVisible();
+    expect(await said(reader), `${reader.name} reads the stored conversation in order`).toEqual(talk);
+  }
+});
+
 test("compatibility chat delivers through the relay while the other side is away", { tag: ["@feature:chat.legacy.send"] }, async ({ peer }) => {
   const [alice, bob] = await Promise.all([peer("alice"), peer("bob")]);
   await linkLegacy(alice, bob);

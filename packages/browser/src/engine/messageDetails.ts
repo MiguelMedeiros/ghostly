@@ -82,7 +82,7 @@ export function composeDetails(message: StoredMessage, around: {
   const { link, file, payment, group } = around;
   const view: MessageDetailsView = {
     message: {
-      id: message.id, wireId: message.wireId, linkId: message.linkId, sender: message.sender, timestamp: message.timestamp, via: message.via,
+      id: message.id, wireId: message.wireId, linkId: message.linkId, sender: message.sender, timestamp: message.timestamp, ...(message.sentAt !== undefined && { sentAt: message.sentAt }), via: message.via,
       delivery: message.delivery, deliveryError: message.deliveryError, resendUntil: message.resendUntil, member: message.member, nick: message.nick,
       kind: messageKind(message), textBytes: utf8Encode(message.text).length,
     },

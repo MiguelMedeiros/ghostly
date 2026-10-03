@@ -93,6 +93,19 @@ function answer(target: Target, kind: Kind, id: string, messageId: string, extra
   return { [target.group ? "group" : "chat"]: target.id, [kind]: id, messageId, ...extra };
 }
 
+/**
+ * A task's parent is another task of mine in the same chat or group (WISP 4xx · Status Cards § A task): one that is
+ * not there is refused here, with its name, rather than sent to stand alone on every board (a reader keeps the field
+ * and shows the task ungrouped). Send the parent first.
+ */
+async function parentThere(ctx: ApiContext, target: Target, card: StatusCard): Promise<void> {
+  if (card.kind !== "task" || !card.parent) return;
+  const parent = card.parent;
+  await cardMessage(ctx, target, "task", parent).catch(() => {
+    throw new CliError("not_found", `--parent: no task ${JSON.stringify(parent)} of yours in this ${target.group ? "group" : "chat"}: send the parent first`);
+  });
+}
+
 /** A new card: a message whose text is written from it, in a chat or a group. */
 async function sendCard(ctx: ApiContext, params: Params, kind: Kind): Promise<Record<string, unknown>> {
   const target = chatOrGroup(ctx, str(params, "chat", true));
@@ -103,12 +116,13 @@ async function sendCard(ctx: ApiContext, params: Params, kind: Kind): Promise<Re
     ...(kind === "task" ? { status: "running", startedAt: now, updatedAt: now } : { state: "active" }),
     ...fields, kind, id,
   }, params, now));
+  await parentThere(ctx, target, card);
   const text = str(params, "text") ?? "";
   const wait = oneOf(params, "wait", target.group ? ["none", "sent"] as const : ["none", "sent", "delivered"] as const, "none");
   const ms = num(params, "timeout", 30, { min: 1, max: 3600 }) * 1000;
   if (target.group) {
     const result = await node(ctx).sendGroupMessage({ groupId: target.id, text, card });
-    if (result.error || !result.messageId) throw new CliError("unavailable", result.error ?? "Nothing to send");
+    if (result.error || !result.messageId) throw new CliError(result.refused ? "refused" : "unavailable", result.error ?? "Nothing to send");
     const edges = wait === "sent" ? await waitForGroupFrame(ctx, target.id, result.messageId, undefined, ms) : undefined;
     return answer(target, kind, id, result.messageId, { card, ...(edges !== undefined && { edges }) });
   }
@@ -143,6 +157,7 @@ async function updateCard(ctx: ApiContext, params: Params, kind: Kind): Promise<
   const base = pace.next ?? (message.card as unknown as Record<string, unknown>);
   const merged = withRun(mergeCard(base, { ...patch, ...(kind === "task" && { updatedAt: Date.now() }) }), params);
   const card = checked(merged);
+  if (isObject(patch) && patch.parent !== undefined) await parentThere(ctx, target, card);
   const text = str(params, "text") ?? "";
   const wait = oneOf(params, "wait", target.group ? ["none", "sent"] as const : ["none", "confirmed"] as const, "none");
   const ms = num(params, "timeout", 30, { min: 1, max: 3600 }) * 1000;

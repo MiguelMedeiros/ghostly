@@ -137,7 +137,7 @@ Status: the **phase** that shipped it (phases 1 to 4 are on `dev`: #323 to #327)
 |---|---|---|
 | Profiles | Create, list, use, remove; per-profile folder, files 0600 | Phase 1 |
 | Profiles | Name and picture shown to contacts | Phase 1 (`profile set --name`), picture phase 3a (a JPEG within the bounds contacts check; no image library on Node to scale one) |
-| Profiles | Backup and restore | Phase 3b: the WISP 05 envelope around the headless profile (its store and files); it restores into a new headless profile. The app's backups come from its page's storage and are not interchangeable |
+| Profiles | Backup and restore | Phase 3b: the WISP 05 envelope (version 2, written and read a piece at a time) around the headless profile (its store and files); it restores into a new headless profile. Encrypted with a passphrase from a file or the environment, or not encrypted with `--no-passphrase`, never by default. `--light` leaves out files over 1 MiB (voice messages over 4 MiB), as the app's light backups do: the restored profile marks their records, and `file save` says each is not in this backup. The app's backups come from its page's storage and are not interchangeable |
 | Invites | Create a `ghostly1` invite and its link; join one; the self-invite guard | Phase 1 |
 | Invites | Pairing progress | Phase 1 (`chat.pairing` events, `chat wait`) |
 | Invites | Join notices (`👋 <name> joined`) as the app's chat screen sends them | Phase 1 |
@@ -145,7 +145,7 @@ Status: the **phase** that shipped it (phases 1 to 4 are on `dev`: #323 to #327)
 | Chats | Delivery states, retry, delete, rename | Phase 1 |
 | Chats | Edit a sent text in place (a status a bot updates); `message.edited`; `edits` and `editedAt` in history | `ghostly edit <chat> <message> [text \| --text <text> \| --stdin] [--wait confirmed]` (#351) |
 | Groups | Edit a text sent to a group in place; `group.message.edited`; `edits` and `editedAt` in group history | `ghostly group edit <group> <message> [text \| --text <text> \| --stdin] [--mention <member>]` |
-| Groups | Wait until a group message or edit left: groups have no receipts, so `--wait sent` on `group send` and `group edit` returns once at least one edge took it (a member's in a private group, one of the profile's hubs' in a community), with `edges` in the answer; exit 4 after `--timeout` | `ghostly group send\|edit … --wait sent [--timeout s]` |
+| Groups | Wait until a group message or edit left: groups have no receipts, so `--wait sent` on `group send` and `group edit` returns once at least one edge took it (a member's in a private group, one of the profile's hubs' in a community), with `edges` in the answer; exit 4 after `--timeout`. `sent` in the answer of `group send` says whether an edge took it yet (revision 2026-10-02; it was always `true`). A profile that is not a member (removed from the group, say) gets `refused` from `group send` and `group react`, with the reason, and nothing is sent | `ghostly group send\|edit … --wait sent [--timeout s]` |
 | Chats | Transport per chat (auto, webrtc, iroh, hyperdht, dht) and fallback; connection status and history | Phase 1 |
 | Chats | Pin and mute | Not applicable: both are UI-only in the app (local display state); a bot filters for itself |
 | Chats | Message details | Phase 1 |

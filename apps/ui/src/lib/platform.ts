@@ -102,7 +102,14 @@ export interface NetworkSettings {
    * relays". Writes go to the relays either way, so contacts on the web see this app's packets.
    */
   readRelays?: boolean;
+  /** This device's own attempts say direct connections are blocked on its network (a VPN, a firewall): chats go through relays. */
+  directBlocked?: boolean;
+  /** This device's clock seems to be off by this much (ms, positive when it is ahead), as relays and several contacts say. */
+  clockOffMs?: number;
 }
+
+/** Whether a stored file's bytes are on this device (see `ServicesPlatform.fileHeld`). */
+export type FileHeld = "here" | "gone" | "left-out";
 
 /** What a person can do to a files/3 transfer: `resend` a stuck one they send, `request` again one they receive. */
 export type FileAction = "accept" | "decline" | "pause" | "resume" | "cancel" | "resend" | "request";
@@ -187,6 +194,10 @@ export interface WalletState {
   /** `awaiting`: what the mint still waits for, when it does (removing it asks about these first). */
   mints: { url: string; name: string; balance: number; info: MintInfo | null; awaiting?: WalletAwaitingView[] }[];
   balance: number;
+  /** Cashu: sats held for a payment the mints have not settled yet. Not in `balance`. */
+  setAside?: number;
+  /** Cashu: sats in an exchange whose mint took them and cannot say what it gave back. */
+  unconfirmed?: number;
   /** Newest first. */
   history: WalletTransaction[];
   feesPaid: number;
@@ -470,6 +481,11 @@ export interface ServicesPlatform {
   fileTooLarge?(peerPubKeyZ32: string, size: number): string | null;
   /** The file to show or save, backed by storage. Null when it is gone, or too large to hand out here (see `saveFile`). */
   getFile(fileId: string): Promise<Blob | null>;
+  /**
+   * Whether this device holds a stored file's bytes: `here` (perhaps too large for `getFile`; `saveFile` saves it),
+   * `gone`, or `left-out` (left out of the light backup this profile was restored from, WISP 05).
+   */
+  fileHeld?(fileId: string): Promise<FileHeld>;
   /**
    * A URL a `<video>` plays a stored file from without the page holding it (Desktop: served in ranges by Rust), for
    * a file `getFile` cannot hand out. Null where the platform cannot, or the file is gone. Call `release` when done.

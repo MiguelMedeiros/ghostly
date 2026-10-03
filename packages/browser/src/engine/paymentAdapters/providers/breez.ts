@@ -1,7 +1,7 @@
 import { sha256 } from "@noble/hashes/sha2.js";
 import { decodeBolt11 } from "@ghostly/core";
 import type { Payment, PaymentType, PrepareSendPaymentResponse } from "@breeztech/breez-sdk-spark/web";
-import { breezStorage, loadBreezSdk, openBreez, type BreezSdkModule, type BreezWallet } from "./breezSdk";
+import { breezDatabase, breezDatabaseName, forgetBreez, loadBreezSdk, openBreez, type BreezSdkModule, type BreezStorageName, type BreezWallet } from "./breezSdk";
 import { isRecoveryPhrase, normalizePhrase } from "./recoveryPhrase";
 import type { InvoiceStatus, LightningInvoice, LightningPayResult, LightningPaymentRef, LightningPaymentStatus, LightningProvider, LightningProviderDescriptor } from "./lightning";
 import { isNothingSpentError, NothingSpentError, type ProviderNetwork, type ProviderPlatform } from "./types";
@@ -29,7 +29,7 @@ const hex = (bytes: Uint8Array) => Array.from(bytes, (b) => b.toString(16).padSt
 const sats = (value: bigint | number) => { const n = Number(value); if (!Number.isSafeInteger(n) || n < 0) throw new Error("Breez returned an invalid amount"); return n; };
 const message = (error: unknown) => (error instanceof Error ? error.message : typeof error === "string" ? error : "Breez refused the payment");
 
-export { breezStorage };
+export { breezDatabase, breezDatabaseName };
 
 /**
  * The idempotency key of one attempt at paying one invoice: asking the SDK twice with it pays once.
@@ -68,11 +68,12 @@ export class BreezLightning implements LightningProvider {
   private readonly quotes = new Map<string, { prepared: PrepareSendPaymentResponse; at: number }>();
   private closed = false;
 
-  private constructor(private readonly wallet: BreezWallet, private readonly network: ProviderNetwork, private readonly release: () => Promise<void>) {}
+  /** `storage`: the Breez database this card opened (`breezDatabase`). */
+  private constructor(private readonly wallet: BreezWallet, private readonly network: ProviderNetwork, private readonly release: () => Promise<void>, readonly storage: string) {}
 
-  static async connect(params: { network: ProviderNetwork; mnemonic: string; apiKey?: string }, sdk: () => Promise<BreezSdkModule> = loadBreezSdk, storage = breezStorage): Promise<BreezLightning> {
-    const { wallet, release } = await openBreez(params, sdk, storage);
-    return new BreezLightning(wallet, params.network, release);
+  static async connect(params: { network: ProviderNetwork; mnemonic: string; apiKey?: string }, sdk: () => Promise<BreezSdkModule> = loadBreezSdk, storage: BreezStorageName = breezDatabase): Promise<BreezLightning> {
+    const opened = await openBreez(params, sdk, storage);
+    return new BreezLightning(opened.wallet, params.network, opened.release, opened.storage);
   }
 
   async info() {
@@ -156,6 +157,12 @@ export class BreezLightning implements LightningProvider {
     if (this.closed) return;
     this.closed = true; this.quotes.clear();
     await this.release();
+  }
+
+  /** The card is removed: closed, and its Breez databases deleted unless the Spark wallet of this phrase has them open. */
+  async forget() {
+    await this.close();
+    await forgetBreez(this.storage);
   }
 
   private async prepare(invoice: string, amount: number) {

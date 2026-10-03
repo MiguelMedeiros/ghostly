@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createIdentity, createLink, createRelayPayload, parseRelayPayload, DiscoveryBudgetError, HOLD_LIMITS, type PaymentRequest, type PkarrTransport, type SignedPacket } from "@ghostly/core";
+import { createIdentity, createLink, createRelayPayload, parseRelayPayload, DiscoveryBudgetError, HOLD_DATED_BACK_MS, HOLD_LIMITS, type PaymentRequest, type PkarrTransport, type SignedPacket } from "@ghostly/core";
 import { HoldEngine, emptyHoldState, type HoldHost } from "../src/engine/hold";
 import { presignS3 } from "../src/backup/s3";
 import { manifestName, type HoldStore } from "../src/backup/storage";
@@ -201,14 +201,16 @@ describe("the sender's queue", () => {
     expect(b.received.map((r) => r.text)).toEqual(["one"]);
   });
 
-  it("a shorter lifetime asked by the host is honored, a longer one is capped at seven days", async () => {
+  it("a shorter lifetime asked by the host is honored, a longer one is capped at seven days less the ten minutes a sender's dates go back", async () => {
     const { a, clock, holdText } = setup();
     a.ttl = 1_000;
     await holdText("m1", "one");
     expect(a.stored.hold!.outbox[0].expires).toBe(clock.t + 1_000);
     a.ttl = 30 * 24 * 3600_000;
     await holdText("m2", "two");
-    expect(a.stored.hold!.outbox[1].expires).toBe(clock.t + HOLD_LIMITS.ttlMs);
+    // The longest an item lives ends ten minutes early (`HOLD_DATED_BACK_MS`): an app up to 1.0.2 refuses an expiry more than
+    // a minute past one lifetime from its own now, which a sender whose clock ran ahead always gave.
+    expect(a.stored.hold!.outbox[1].expires).toBe(clock.t + HOLD_LIMITS.ttlMs - HOLD_DATED_BACK_MS);
   });
 
   it("the switch and the contact's payment methods are saved only when they change", async () => {

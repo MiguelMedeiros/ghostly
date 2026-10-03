@@ -33,5 +33,6 @@
   "wakeInfo": "When a contact's message can't reach you because Ghostly is closed, their app sends an empty wake-up to your browser's push service (Google, Apple or Mozilla, depending on the browser). It says only that there is a new message: no text, no name. The push service learns that a push happened and when; your contacts learn your push address. Muted chats never show it. New address makes a fresh one, so nobody you stopped talking to can wake you.",
   "wakeNotice": "New message",
   "wakeOnHint": "On. A message sent while Ghostly is closed shows \"New message\".",
-  "wakeRotate": "New address"
+  "wakeRotate": "New address",
+  "wakeUnavailable": "This browser can't wake Ghostly while it's closed."
 }

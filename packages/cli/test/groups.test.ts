@@ -80,9 +80,20 @@ describe("a group message names its author", () => {
 describe("group send", () => {
   it("answers with the id the message is kept under", async () => {
     const { ctx, node } = fake();
-    expect(await callApi(ctx, "group.send", { group: "Crew", text: "status: busy", reply: "anakey:0:1" })).toEqual({ group: "g1", messageId: "mekey:0:7", sent: true, edges: 0 });
+    expect(await callApi(ctx, "group.send", { group: "Crew", text: "status: busy", reply: "anakey:0:1" })).toEqual({ group: "g1", messageId: "mekey:0:7", sent: false, edges: 0 });
     expect(node.sendGroupMessage).toHaveBeenCalledWith({ groupId: "g1", text: "status: busy", replyTo: "anakey:0:1" });
     expect(TEXT_COMMANDS["group send"].usage).toContain("--reply <message>");
+  });
+
+  it("sent says whether an edge took it; a send the engine refuses (not a member) is refused, not sent", async () => {
+    const { ctx, node } = fake();
+    node.groupTaken.mockImplementation(() => 1);
+    expect(await callApi(ctx, "group.send", { group: "Crew", text: "hi" })).toMatchObject({ sent: true, edges: 1 });
+    node.sendGroupMessage.mockImplementation(async () => ({ error: "You were removed from this group", refused: true }) as never);
+    await expect(callApi(ctx, "group.send", { group: "Crew", text: "anyone?" })).rejects.toMatchObject({ code: "refused", message: "You were removed from this group" });
+    await expect(callApi(ctx, "group.send", { group: "Crew", text: "anyone?", wait: "sent", timeout: 1 })).rejects.toMatchObject({ code: "refused" });
+    node.sendGroupMessage.mockImplementation(async () => ({ error: "This epoch's key has not arrived yet. Wait for a member to catch you up." }) as never);
+    await expect(callApi(ctx, "group.send", { group: "Crew", text: "anyone?" })).rejects.toMatchObject({ code: "unavailable" });
   });
 
   it("--wait sent: until an edge took it, or a timeout (exit 4) that says it still goes", async () => {

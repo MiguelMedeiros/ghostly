@@ -2,7 +2,8 @@
   "announce": {
     "message": "{{name}} : {{text}}",
     "messages": "{{count}} nouveaux messages",
-    "messagesFrom": "{{count}} nouveaux messages de {{name}}"
+    "messagesFrom": "{{count}} nouveaux messages de {{name}}",
+    "pinMoved": "Déplacée à la place {{place}} sur {{count}} discussions épinglées"
   },
   "audio": {
     "cantPlay": "Cet appareil ne peut pas lire cet audio ({{format}}). Téléchargez-le pour l'écouter.",
@@ -130,6 +131,7 @@
     "leftMinutes": "{{minutes}} min restantes",
     "leftUnderMinute": "moins d'une minute restante",
     "noRoomDevice": "Espace insuffisant : {{size}} libres sur cet appareil",
+    "notInBackup": "Pas dans cette sauvegarde",
     "notSentHint": "Non envoyé. Renvoyez-le.",
     "of": "{{done}} sur {{size}}",
     "pause": "Pause",
@@ -218,6 +220,10 @@
   "menu": {
     "continueNew": "Continuer dans une nouvelle discussion",
     "hold": "Retenir les messages…",
+    "moveDown": "Descendre",
+    "moveFirst": "Déjà en premier",
+    "moveLast": "Déjà en dernier",
+    "moveUp": "Monter",
     "pin": "Épingler la discussion",
     "refresh": "Actualiser",
     "techInfo": "Infos techniques",

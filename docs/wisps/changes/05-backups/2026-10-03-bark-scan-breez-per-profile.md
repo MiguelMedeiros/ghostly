@@ -1,0 +1,1 @@
+A restored Bark wallet record is also marked to look once on-chain for what its phrase received before. A Spark wallet or Breez Lightning card needs no rewrite on restore: its Breez database is now named per profile, so a copy on the same device opens its own.

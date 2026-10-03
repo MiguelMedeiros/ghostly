@@ -8,6 +8,7 @@ import { useI18n } from "../contexts/I18nContext";
 import { Block, Field, FieldGrid, Row, Section } from "./layout";
 import { Switch } from "./wallet/ui";
 import { errorText } from "../lib/errorText";
+import { clockOffTexts } from "../lib/clockOff";
 
 /**
  * Settings section for how this client reaches Pkarr and its peers: the Pkarr relays, an optional TURN server,
@@ -16,7 +17,7 @@ import { errorText } from "../lib/errorText";
  * read only relays), and reads from them only when "Also use Pkarr relays" is on.
  */
 export function NetworkSettings() {
-  const { t } = useI18n();
+  const { t, language } = useI18n();
   const platform = useServicesPlatform();
   const network = platform?.getNetwork() ?? null;
   const [relays, setRelays] = useState("");
@@ -81,6 +82,8 @@ export function NetworkSettings() {
 
   return (
     <Section title={t("network.title")}>
+      {network.clockOffMs !== undefined && <Row label={t("connection.clockOff.title")} {...clockOffTexts(t, network.clockOffMs, language)} testId="network-clock-off" />}
+      {network.directBlocked && <Row label={t("connection.directBlocked.title")} hint={t("connection.directBlocked.hint")} info={t("connection.directBlocked.info")} testId="network-direct-blocked" />}
       {direct && <Row label={t("network.readRelays")} hint={t("network.readRelaysHint")} info={t("network.readRelaysInfo")} testId="network-read-relays-row">
         <Switch label={t("network.readRelays")} checked={network.readRelays === true} disabled={switching} onChange={(on) => void readRelays(on)} testId="network-read-relays" />
       </Row>}

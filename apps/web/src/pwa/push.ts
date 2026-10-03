@@ -18,7 +18,7 @@ export interface PushSubscriptionKeys {
 const SCRIPT = "/sw.js";
 
 function workers(): ServiceWorkerContainer | null {
-  return "serviceWorker" in navigator && window.isSecureContext ? navigator.serviceWorker : null;
+  try { return "serviceWorker" in navigator && window.isSecureContext ? navigator.serviceWorker ?? null : null; } catch { return null; }
 }
 
 /**

@@ -334,6 +334,63 @@ describe("Lightning out on Testnet: a Bitcoin invoice may be real money", () => 
   });
 });
 
+// A restored profile holds the ecash of the day its backup was made. What was spent since still counted in the balance,
+// for good, and a payment that picked one of those proofs failed with the mint's "Token already spent".
+describe("ecash a profile restore brought back", () => {
+  const restored = (amount: number, secret: string): StoredProof => ({ ...stored(amount, secret), unchecked: true });
+  const says = (spent: string[]) => mint.checkProofsStates.mockImplementation(async (proofs: { secret: string }[]) => proofs.map((p) => ({ state: spent.includes(p.secret) ? "SPENT" : "UNSPENT" })));
+
+  it("is checked with its mint once: what was spent since the backup is dropped, the rest is kept", async () => {
+    seed("proofs", [restored(64, "spent-since"), restored(32, "still-mine"), stored(8, "received-here"), { ...restored(4, "in-a-melt"), reserved: true }]);
+    says(["spent-since"]);
+    const { wallet, events } = setup();
+    expect(balance(), "the backup's balance, before the mint is asked").toBe(104);
+    await wallet["checkRestored"]();
+    expect(balance()).toBe(40);
+    expect(rows<StoredProof>("proofs").map((p) => p.secret).sort()).toEqual(["in-a-melt", "received-here", "still-mine"]);
+    expect(rows<StoredProof>("proofs").find((p) => p.secret === "still-mine")).not.toHaveProperty("unchecked");
+    // Only the restored ecash that is free is asked about: a reserved proof is its payment's to settle.
+    expect(mint.checkProofsStates).toHaveBeenCalledOnce();
+    expect((mint.checkProofsStates.mock.calls[0][0] as StoredProof[]).map((p) => p.secret).sort()).toEqual(["spent-since", "still-mine"]);
+    expect(events.onChange).toHaveBeenCalled();
+    await wallet["checkRestored"]();
+    expect(mint.checkProofsStates, "nothing is left to ask about").toHaveBeenCalledOnce();
+  });
+
+  it("keeps everything while the mint cannot be asked or holds a proof pending, and asks again later", async () => {
+    vi.useFakeTimers();
+    try {
+      seed("proofs", [restored(64, "a"), restored(32, "b")]);
+      mint.checkProofsStates.mockRejectedValueOnce(new Error("mint offline"));
+      const { wallet } = setup();
+      await wallet["checkRestored"]();
+      expect(balance()).toBe(96);
+      expect(rows<StoredProof>("proofs").every((p) => p.unchecked)).toBe(true);
+
+      mint.checkProofsStates.mockResolvedValueOnce([{ state: "PENDING" }, { state: "UNSPENT" }]);
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(rows<StoredProof>("proofs").map((p) => [p.secret, !!p.unchecked])).toEqual([["a", true], ["b", false]]);
+
+      mint.checkProofsStates.mockResolvedValueOnce([{ state: "SPENT" }]);
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(balance()).toBe(32);
+      expect(mint.checkProofsStates).toHaveBeenCalledTimes(3);
+      await vi.advanceTimersByTimeAsync(600_000);
+      expect(mint.checkProofsStates, "and then no more").toHaveBeenCalledTimes(3);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("never asks a mint about ecash that was not restored", async () => {
+    seed("proofs", [stored(64, "a"), stored(32, "b")]);
+    const { wallet } = setup();
+    await wallet["checkRestored"]();
+    expect(mint.checkProofsStates).not.toHaveBeenCalled();
+    expect(balance()).toBe(96);
+  });
+});
+
 describe("ecash of one network", () => {
   const LOCAL = "http://127.0.0.1:3338";
   const payment = (token: string, mintUrl: string): StoredPayment => ({ id: "p1", linkId: "l", kind: "payment", direction: "out", amount: 40, unit: "sat", state: "pending", createdAt: 0, mint: mintUrl, token });

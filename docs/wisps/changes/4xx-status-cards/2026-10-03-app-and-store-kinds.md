@@ -1,0 +1,1 @@
+Open decisions name the `app` and `store` card kinds proposed by WISP 12xx (apps and plugins): sent by people's apps as well as bots, within the same 8 KiB bound and text fallback, display only, with nothing fetched until the person presses Install or Add.

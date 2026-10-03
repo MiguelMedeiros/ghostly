@@ -1,0 +1,1 @@
+The joiner through a group's link draws its member key so that the admin's side of the entry session dials, as the community profile does: the admission takes two trips through Pkarr where half the joins took three.

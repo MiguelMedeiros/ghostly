@@ -18,6 +18,8 @@ import { PAIRING_STEPS, SLOW_AFTER_MS, failureReason, formatElapsed } from "../l
 import { TransportOptions } from "./TransportOptions";
 import { ConnectionHistory } from "./TransportTimeline";
 import { DiscoveryHealth } from "./DiscoveryHealth";
+import { DirectBlockedHint } from "./DirectBlockedHint";
+import { ClockOffHint } from "./ClockOffHint";
 import { errorText } from "../lib/errorText";
 import { useWindowAway } from "../lib/windowAway";
 
@@ -79,28 +81,36 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, pairing 
   const notLive = paired && pinned && !dht && !ready ? liveAttemptText(link?.liveAttempt, link?.liveDialer, contact, clock, t) : undefined;
   const words = usePairingWords();
   // A first pairing on its way: its stage names the connection until the chat is live, on the DHT or failed.
-  const progress = paired ? pairing?.progress : undefined, stage = progress?.stage;
+  // It reads the same view as the scene (`progress.view`): the same words, the same step, the same clock.
+  const progress = paired ? pairing?.progress : undefined, stage = progress?.view.stage;
   const pairingOn = !!progress && stage !== "live" && stage !== "on-dht" && stage !== "failed";
   const pairingFailed = stage === "failed";
   const ticking = pairingOn && online;
-  // The clock of a pairing's stage ticks for someone looking: not while the window is hidden or behind others.
+  // The clock of a pairing ticks for someone looking: not while the window is hidden or behind others.
   const away = useWindowAway();
   const now = useNow(ticking && !away);
-  // `now` only ticks; a stage that began after its last tick still reads from the clock.
-  const inStage = progress ? Math.max(0, Math.max(now, Date.now()) - progress.since) : 0;
-  const stageWords = progress ? words.stage(progress.stage, progress.role, progress.peerSeen) : "";
+  // `now` only ticks; a stage that began after its last tick still reads from the clock. The time shown is the
+  // pairing's, as the scene's is; the stage's own only decides when it is slow.
+  const at = Math.max(now, Date.now());
+  const inStage = progress ? Math.max(0, at - progress.since) : 0;
+  const sincePairing = progress ? Math.max(0, at - progress.startedAt) : 0;
+  const stageWords = progress ? words.stage(stage!, progress.role, progress.peerSeen) : "";
   const slow = ticking && inStage >= SLOW_AFTER_MS[stage!] ? words.slow(stage!, progress?.peerSeen) : "";
   const pairingReason = pairingFailed ? words.reason(failureReason(progress?.reason)) : "";
   const onDhtWhy = stage === "on-dht" ? words.onDht(progress?.reason) : "";
   const steps = progress ? PAIRING_STEPS[progress.role] : [];
-  const step = pairingOn ? steps.indexOf(stage!) + 1 : 0;
+  const step = pairingOn ? progress.view.step + 1 : 0;
   const pairingLabel = t("pairing.indicator", { stage: stageWords });
+  // While the scene is on, the icon tells the same pairing, whatever carries texts meanwhile (the DHT, from the moment the
+  // contact is pinned): the two never disagree. Only a failure says more (the relays, the connection). Once the scene
+  // has given the chat back, the connection speaks for itself.
   const labelState: LabelState = !paired ? "status" : !online ? "offline" : connectionFailure ? "issue"
     : discoveryFailure ? (discoveryFailure.startsWith("Could not publish discovery:") && !discoveryFailure.includes("Could not read discovery:") ? "publication" : "discovery")
+    : pairingOn || pairingFailed ? "pairing"
     : dht ? "dhtByYou" : textDht && link?.dhtDelivery?.peerMode === "dht" ? "dhtByContact"
     : waitOff && pair?.transitionTarget ? "switching" : waitOff ? (textDht ? "dhtWaiting" : "waiting") : textDht ? "onDht"
     : pair?.transitionTarget ? "switching" : ready ? "connected" : pair?.status === "confirm" ? "confirm"
-    : pairingOn || pairingFailed ? "pairing" : stage === "on-dht" ? "onDht" : awaitingJoin ? "noContact"
+    : stage === "on-dht" ? "onDht" : awaitingJoin ? "noContact"
     : !link?.peerOnline && link?.dataLink === "idle" ? "waitingContact" : "connecting";
   // A v0.4-code chat's status is English (`contactStatus`); its kind is read from that, its words translated.
   const rawStatus = status ?? "Connecting";
@@ -126,13 +136,13 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, pairing 
     }
   })();
   const kind: ConnectionKind = !paired ? (/^Connected/.test(rawStatus) ? "connected" : /issue|unavailable|mismatch/.test(rawStatus) ? "failure" : rawStatus === "Offline" ? "offline" : "waiting")
-    : !online ? "offline" : failure || (pairingFailed && labelState === "pairing") ? "failure" : waitOff && (pair?.transitionTarget || !textDht) ? "waiting" : dht || textDht || labelState === "onDht" ? "dht" : ready && !pair?.transitionTarget ? "connected" : "waiting";
+    : !online ? "offline" : failure ? "failure" : labelState === "pairing" ? (pairingFailed ? "failure" : "waiting") : waitOff && (pair?.transitionTarget || !textDht) ? "waiting" : dht || textDht || labelState === "onDht" ? "dht" : ready && !pair?.transitionTarget ? "connected" : "waiting";
   const connecting = kind === "waiting" && (labelState === "connecting" || !!pair?.transitionTarget);
   // On the DHT while a live link is tried underneath: the DHT mark, with a dot that breathes.
   const retrying = kind === "dht" && labelState === "onDht" && !(stage === "on-dht" && progress?.reason === "chosen");
   // The pairing scene in small, while its stage is the label: this side, the contact and a packet between them.
   const glyph = pairingOn && labelState === "pairing";
-  const elapsed = glyph && ticking ? formatElapsed(inStage) : "";
+  const elapsed = glyph && ticking ? formatElapsed(sincePairing) : "";
   const direction = stage === "answering" && progress?.role === "joiner" ? "in" : "out";
   // Live, or live and moving to another transport: the transport's own mark, and what it is at a glance.
   const liveOn = ready && !dht && !textDht ? pair?.transport : undefined;
@@ -179,6 +189,8 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, pairing 
           onClick={() => { close(); pairing.onShow?.(); }}>{t("pairing.showProgress")}</button>}
       </div>}
       {failure && <p role="alert" className="mt-1.5 break-words px-1 text-danger">{failure}</p>}
+      {paired && online && !dht && state?.transport?.directBlocked && <DirectBlockedHint />}
+      {online && state?.transport?.clockOffMs !== undefined && <ClockOffHint ms={state.transport.clockOffMs} />}
       {paired && <fieldset disabled={busy || !online || !link} className="mt-2">
         <legend className="sr-only">{t("connection.panel.legend")}</legend>
         {link && <TransportOptions link={link} disabled={busy || !online}
@@ -203,8 +215,8 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, pairing 
             {progress && (pairingOn || pairingFailed) && <div data-testid="connection-pairing-details" className="rounded-lg bg-surface-hover px-2.5 py-2 leading-4">
               <p className="font-medium text-text-primary">{stageWords}</p>
               <ol aria-label={t("pairing.steps")} className="mt-1 flex flex-wrap gap-x-2">
-                {steps.map((s, i) => <li key={s} data-step={s} aria-current={s === stage ? "step" : undefined}
-                  className={s === stage ? "text-text-primary" : i < step - 1 ? "text-accent" : undefined}>{words.step(s)}</li>)}
+                {steps.map((s, i) => <li key={s} data-step={s} aria-current={i === step - 1 ? "step" : undefined}
+                  className={i === step - 1 ? "text-text-primary" : i < step - 1 ? "text-accent" : undefined}>{words.step(s)}</li>)}
               </ol>
               {progress.detail && <p className="mt-0.5 break-words">{progress.detail}</p>}
             </div>}

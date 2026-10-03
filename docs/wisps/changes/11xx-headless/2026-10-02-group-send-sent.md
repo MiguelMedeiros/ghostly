@@ -1,0 +1,1 @@
+`group send` answers `sent: true` only once an edge took the message (`edges` above 0); it used to answer `sent: true` always, also for a message nobody had taken. `group send` and `group react` from a profile that is not a member of the group (removed from it, say) fail with the code `refused` and the group's reason (they were `unavailable` and `bad_request`).

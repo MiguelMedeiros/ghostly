@@ -1,4 +1,4 @@
-import { budgetRetryMs, decodeControl, fromBase64Url, isDiscoveryBudgetError, parseImageMeta, parseVideoMeta, parseVoiceMeta, HOLD_LIMITS, HoldKeys, HoldRefusedError, newHoldMailbox, pairedReplyAuthor, readForwarded, readManifest, readReply, utf8Decode, utf8Encode, type HoldPointer, type PaymentMethodName, type PaymentRequest, type PkarrTransport, type ImageMeta, type VideoMeta, type VoiceMeta, type WireReply } from "@ghostly/core";
+import { budgetRetryMs, decodeControl, fromBase64Url, isDiscoveryBudgetError, parseImageMeta, parseVideoMeta, parseVoiceMeta, HOLD_DATED_BACK_MS, HOLD_LIMITS, HoldKeys, HoldRefusedError, newHoldMailbox, pairedReplyAuthor, readForwarded, readManifest, readReply, utf8Decode, utf8Encode, type HoldPointer, type PaymentMethodName, type PaymentRequest, type PkarrTransport, type ImageMeta, type VideoMeta, type VoiceMeta, type WireReply } from "@ghostly/core";
 import { heldName, manifestName, type HoldStore } from "../backup/storage";
 import type { HeldEntry, HoldState, LinkHoldView, StoredLink } from "../shared/types";
 
@@ -198,7 +198,7 @@ export class HoldEngine {
       const mailbox = hold.mailbox ?? newHoldMailbox();
       const seq = hold.outSeq + 1;
       const now = this.now();
-      const entry: HeldEntry = { seq, id: item.id, messageId: item.messageId, kind: item.kind, ref: item.ref, name: heldName(storage.space, mailbox, seq), bytes: item.bytes, ts: item.timestamp, expires: now + this.ttl(), state: "queued" };
+      const entry: HeldEntry = { seq, id: item.id, messageId: item.messageId, kind: item.kind, ref: item.ref, name: heldName(storage.space, mailbox, seq), bytes: item.bytes, ts: item.timestamp, expires: now + Math.min(this.ttl(), HOLD_LIMITS.ttlMs - HOLD_DATED_BACK_MS), state: "queued" };
       await this.save(linkId, { ...hold, mailbox, outSeq: seq, outbox: [...hold.outbox, entry] });
       await this.upload(linkId, entry);
     });
@@ -329,12 +329,13 @@ export class HoldEngine {
     const now = this.now();
     const held = hold.outbox.filter((e) => e.state === "held");
     let manifestUrl: string | null = null;
-    const expires = now + HOLD_LIMITS.ttlMs;
+    // Dated back, with the lifetimes they give (`HOLD_DATED_BACK_MS`): for the apps that still refuse a date ahead of theirs.
+    const dated = now - HOLD_DATED_BACK_MS, expires = dated + HOLD_LIMITS.ttlMs;
     if (held.length && storage && hold.mailbox) {
       if (rewriteManifest || !hold.manifestSignedAt) {
         const entries = [];
         for (const entry of held) entries.push([entry.seq, entry.id, entry.kind, entry.bytes, await storage.store.presign(entry.name, HOLD_LIMITS.ttlMs / 1000), entry.expires]);
-        const manifest = keys.seal({ mailbox: hold.mailbox, seq: hold.pointerRev + 1, id: `manifest-${hold.pointerRev + 1}`, ts: now, kind: "manifest", meta: { entries }, expires }, new Uint8Array());
+        const manifest = keys.seal({ mailbox: hold.mailbox, seq: hold.pointerRev + 1, id: `manifest-${hold.pointerRev + 1}`, ts: dated, kind: "manifest", meta: { entries }, expires }, new Uint8Array());
         await storage.store.put(manifestName(storage.space, hold.mailbox), manifest);
         hold = await this.save(linkId, { ...this.state(linkId), manifestSignedAt: now });
       }
@@ -343,7 +344,7 @@ export class HoldEngine {
       await storage.store.remove(manifestName(storage.space, hold.mailbox)).catch(() => {});
       hold = await this.save(linkId, { ...this.state(linkId), manifestSignedAt: undefined });
     }
-    const pointer: HoldPointer = { rev: hold.pointerRev + 1, issued: now, expires, manifestUrl, top: hold.outSeq, ack: hold.inSeq, count: held.length, bytes: held.reduce((sum, e) => sum + e.bytes, 0), refused: hold.refusedSeqs ?? [] };
+    const pointer: HoldPointer = { rev: hold.pointerRev + 1, issued: dated, expires, manifestUrl, top: hold.outSeq, ack: hold.inSeq, count: held.length, bytes: held.reduce((sum, e) => sum + e.bytes, 0), refused: hold.refusedSeqs ?? [] };
     const records = keys.pointerRecords(pointer, now);
     await this.save(linkId, { ...this.state(linkId), pointerRev: pointer.rev });
     await this.host.transport.publish(keys.identity, records);
@@ -403,7 +404,7 @@ export class HoldEngine {
       if (isDiscoveryBudgetError(error)) { this.lastPoll.delete(linkId); this.retrySoon(budgetRetryMs(error, 1_000, TICK_MS)); return; }
       this.errors.set(linkId, `Could not read the contact's pointer: ${error instanceof Error ? error.message : String(error)}`); this.host.changed(); return;
     }
-    const pointer = packet ? keys.readPointer(packet, now) : null;
+    const pointer = packet ? keys.readPointer(packet) : null;
     if (!pointer) return;
     let hold = this.state(linkId);
     if (pointer.rev < hold.peerPointerRev) return;
@@ -427,7 +428,9 @@ export class HoldEngine {
       const manifest = keys.open(await this.fetchBytes(pointer.manifestUrl, HOLD_LIMITS.maxManifestBytes), { maxBytes: HOLD_LIMITS.maxManifestBytes, now });
       if (manifest.header.kind !== "manifest") throw new HoldRefusedError("format", "Not a manifest");
       mailbox = manifest.header.mailbox;
-      entries = readManifest(manifest.header.meta).filter(([seq]) => seq > this.state(linkId).inSeq);
+      // In the order the contact held them, whatever order the manifest lists them in: they take their places in the
+      // history as they are stored here.
+      entries = readManifest(manifest.header.meta).filter(([seq]) => seq > this.state(linkId).inSeq).sort((a, b) => a[0] - b[0]);
     } catch (error) {
       if (error instanceof HoldRefusedError) { await this.save(linkId, { ...this.state(linkId), refused: this.state(linkId).refused + 1 }); this.errors.set(linkId, `Refused what the contact's storage offered: ${error.message}`); }
       else this.errors.set(linkId, `Could not pick up held items: ${error instanceof Error ? error.message : String(error)}`);

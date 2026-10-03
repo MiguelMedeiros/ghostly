@@ -1,4 +1,67 @@
 {
+  "board": {
+    "card": {
+      "botLabel": "From:",
+      "chatLabel": "Chat:",
+      "checks": {
+        "failing": "Checks failing",
+        "passing": "Checks passing",
+        "pending": "Checks pending"
+      },
+      "details": "Details",
+      "filesLabel": "Files:",
+      "from": "{{bot}} in {{chat}}",
+      "in": "in {{chat}}",
+      "openPr": "Open on {{host}}",
+      "parts": "{{done}} of {{total}} done",
+      "prLabel": "Pull request:",
+      "prState": {
+        "closed": "Closed",
+        "draft": "Draft",
+        "merged": "Merged",
+        "open": "Open"
+      },
+      "statusLabel": "Status:",
+      "steps": "{{done}} of {{total}}",
+      "tagsLabel": "Tags:",
+      "updatedLabel": "Updated:"
+    },
+    "column": {
+      "blocked": "Blocked",
+      "closed": "Stopped",
+      "done": "Done",
+      "queued": "Queued",
+      "review": "Review",
+      "running": "Running"
+    },
+    "columns": "Columns",
+    "empty": "No tasks yet",
+    "emptyHint": "Task cards from bots in your chats show up here.",
+    "filter": "Filter tasks",
+    "groupBy": {
+      "bot": "Bot",
+      "chat": "Chat",
+      "label": "Group by",
+      "status": "Status"
+    },
+    "hideOlder": "Hide older",
+    "info": "Bots post task cards in chats and groups and keep them up to date. This board gathers them from every chat. Done and stopped tasks stay for a day; Stopped holds failed and cancelled ones. A card only shows a task: its bot changes the status. Open a card to see it in its chat.",
+    "me": "You",
+    "noMatch": "No task matches",
+    "none": "None",
+    "showMore": "Show more ({{count}})",
+    "showOlder": "Show older ({{count}})",
+    "tagFilter": "Show only {{tag}}",
+    "tags": "Tags",
+    "tasksMany": "{{count}} tasks",
+    "tasksOne": "1 task",
+    "title": "Tasks",
+    "view": {
+      "label": "Show",
+      "routines": "Routines",
+      "tasks": "Tasks"
+    }
+  },
   "buttons": {
     "answers": "Answers",
     "chosen": "Chosen",

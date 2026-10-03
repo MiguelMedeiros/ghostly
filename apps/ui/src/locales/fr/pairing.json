@@ -2,7 +2,7 @@
   "attempt": "tentative {{n}}",
   "contact": "Votre contact",
   "done": "terminée",
-  "elapsed": "{{time}} dans cette étape",
+  "elapsed": "{{time}} depuis le début de l’appairage",
   "indicator": "Appairage · {{stage}}",
   "newInvite": "Demandez une nouvelle invitation à votre contact.",
   "onDht": {

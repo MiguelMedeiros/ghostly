@@ -4,7 +4,7 @@
  */
 import { vi } from "vitest";
 
-const KEYS: Record<string, string> = { proofs: "secret", payments: "id", quotes: "quote", walletTx: "id", melts: "quote" };
+const KEYS: Record<string, string> = { proofs: "secret", payments: "id", quotes: "quote", walletTx: "id", melts: "quote", swaps: "id" };
 
 type Row = Record<string, unknown>;
 
@@ -14,6 +14,7 @@ export const failures = { nextTransact: false };
 
 export function resetDb(): void {
   db.clear();
+  prepared.clear();
   failures.nextTransact = false;
 }
 
@@ -49,7 +50,12 @@ export const idbModule = {
   async transact(names: string[], work: (stores: Record<string, ReturnType<typeof objectStore>>) => void): Promise<void> {
     // Stage on a copy; commit only if everything went through.
     const staged = new Map([...db].map(([name, t]) => [name, new Map(t)]));
-    work(Object.fromEntries(names.map((name) => [name, objectStore(staged, name)])));
+    // Inside a transaction a read is a request, as IndexedDB's: its result is there when `onsuccess` is set.
+    const inTransaction = (name: string) => {
+      const plain = objectStore(staged, name);
+      return { ...plain, get: (key: string) => { const result = plain.get(key); return { result, set onsuccess(run: () => void) { run(); } }; } };
+    };
+    work(Object.fromEntries(names.map((name) => [name, inTransaction(name)])) as never);
     if (failures.nextTransact) {
       failures.nextTransact = false;
       throw new Error("QuotaExceededError");
@@ -71,20 +77,53 @@ export const mint = {
   completeMelt: vi.fn(),
   checkProofsStates: vi.fn(),
   receive: vi.fn(),
+  /** NUT-09: the signatures the mint has for the outputs asked about. Unscripted, it has none. */
+  restore: vi.fn(),
 };
+
+/**
+ * The swaps the wallet prepared, by the secrets they spend. The wallet writes a swap down and sends what it saved, so
+ * `completeSwap` gets a preview back: this is how it finds what to hand `mint.send` or `mint.receive`.
+ */
+const prepared = new Map<string, { kind: "send" | "receive"; args: unknown[] }>();
+const spends = (inputs: { secret: string }[]) => inputs.map((p) => p.secret).sort().join(",");
+const real = () => vi.importActual<typeof import("@cashu/cashu-ts")>("@cashu/cashu-ts");
 
 export class FakeWallet {
   constructor(readonly url: string) {}
   async loadMint(): Promise<void> {}
+  /** A mint that restores (NUT-09), unless a test gives it info of its own. */
+  getMintInfo: () => unknown = () => ({ isSupported: () => ({ supported: true, params: [] }) });
   checkMintQuoteBolt11 = (...args: unknown[]) => mint.checkMintQuoteBolt11(...args);
   createMintQuoteBolt11 = (...args: unknown[]) => mint.createMintQuoteBolt11(this.url, ...args);
-  mintProofsBolt11 = (...args: unknown[]) => mint.mintProofsBolt11(...args);
+  /** Minting is prepared, written down, then sent: `mint.mintProofsBolt11` answers it, with the amount and the quote's id. */
+  async prepareMint(method: string, amount: number, quote: { quote: string }) {
+    return { method, amount, payload: { quote: quote.quote, outputs: [] }, outputData: [], keysetId: "009a1f293253e41e", quote };
+  }
+  completeMint = (preview: { amount: number; quote: { quote: string } }) => mint.mintProofsBolt11(preview.amount, preview.quote.quote);
   checkMeltQuoteBolt11 = (...args: unknown[]) => mint.checkMeltQuoteBolt11(...args);
   createMeltQuoteBolt11 = (...args: unknown[]) => mint.createMeltQuoteBolt11(this.url, ...args);
-  send = (...args: unknown[]) => mint.send(...args);
+  /** No coins ever add up by themselves here: every send is a swap, which `mint.send` answers. */
+  sendOffline(): never { throw new Error("No exact coins"); }
+  async prepareSwapToSend(amount: number, proofs: { secret: string; amount: number }[], config: unknown) {
+    const { Amount } = await real();
+    prepared.set(spends(proofs), { kind: "send", args: [amount, proofs, config] });
+    return { amount: Amount.from(amount), fees: Amount.zero(), keysetId: "009a1f293253e41e", inputs: proofs.map((p) => ({ ...p, amount: Amount.from(p.amount) })), keepOutputs: [], sendOutputs: [] };
+  }
+  async prepareSwapToReceive(token: string) {
+    const { Amount, getDecodedToken } = await real();
+    const inputs = getDecodedToken(token, ["009a1f293253e41e"]).proofs;
+    prepared.set(spends(inputs), { kind: "receive", args: [token] });
+    return { amount: Amount.sum(inputs.map((p) => p.amount)), fees: Amount.zero(), keysetId: "009a1f293253e41e", inputs, keepOutputs: [] };
+  }
+  async completeSwap(preview: { inputs: { secret: string }[] }) {
+    const call = prepared.get(spends(preview.inputs));
+    if (!call) throw new Error("This swap was never prepared");
+    return call.kind === "send" ? mint.send(...call.args) : { keep: await mint.receive(...call.args), send: [] };
+  }
+  mint = { restore: async (request: unknown) => (await mint.restore(request)) ?? { outputs: [], signatures: [] }, getKeys: async () => ({ keysets: [] }) };
   completeMelt = (...args: unknown[]) => mint.completeMelt(...args);
   checkProofsStates = (...args: unknown[]) => mint.checkProofsStates(...args);
-  receive = (...args: unknown[]) => mint.receive(...args);
   async prepareMelt(method: string, quote: unknown, inputs: unknown[]) {
     return { method, inputs, outputData: [], keysetId: "009a1f293253e41e", quote };
   }

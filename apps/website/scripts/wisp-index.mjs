@@ -22,6 +22,7 @@ const FAMILIES = [
   [900, "Groups"],
   [1000, "Storage"],
   [1100, "Headless"],
+  [1200, "Apps and plugins"],
 ];
 
 export function familyOf(id) {

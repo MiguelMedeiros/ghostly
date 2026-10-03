@@ -6,7 +6,7 @@ import { parseLocalTarget, utf8Decode, type LocalFetch } from "../src";
 import type { BoundChannel, NativeBinding, NativeEndpoint } from "../src/pairedTransports";
 import type { FrameChannel } from "../src/frames";
 import { PairedCalls } from "../src/pairedCalls";
-import { CALL_SIGNAL_MAX_AGE_MS } from "../src/callSignal";
+import { CALL_SIGNAL_MAX_AGE_MS, heardCallSignal, parseCallSignal } from "../src/callSignal";
 // covers: calls.paired.negotiate, calls.signal, services.paired.negotiate, services.http, transport.native-pool
 
 /**
@@ -47,7 +47,9 @@ function channelPair(drop: { a?: (data: string) => boolean; b?: (data: string) =
 interface Side {
   link: GhostLink;
   endpoint: NativeEndpoint;
+  /** The contact's signals as they came, without when this side heard them (`heard` has that). */
   calls: string[];
+  heard: number[];
   presenceServices: () => string[];
 }
 
@@ -64,7 +66,7 @@ function pair(options: {
   const endpoints: Record<"a" | "b", NativeEndpoint> = {} as never;
 
   const make = (name: "a" | "b", params: typeof invitation.mine, me: typeof ia, peer: typeof ia, extra: Partial<GhostLinkOptions> = {}): Side => {
-    const calls: string[] = [];
+    const calls: string[] = [], heard: number[] = [];
     let lastServices: string[] = [];
     const endpoint: NativeEndpoint = {
       transport: "iroh/1", descriptor: { name }, onConnection: null, onDescriptor: null,
@@ -89,14 +91,14 @@ function pair(options: {
       callsSupport: true, servicesSupport: true,
       ...extra,
       events: {
-        onCallSignal: signal => calls.push(signal),
+        onCallSignal: signal => { calls.push(heardCallSignal(signal)); heard.push(parseCallSignal(signal)!.at!); },
         onPresence: presence => { lastServices = (presence.services ?? []).map(s => s.id); },
         ...extra.events,
       },
     });
     links.push(link);
     link.registerEndpoint(endpoint);
-    return { link, endpoint, calls, presenceServices: () => lastServices };
+    return { link, endpoint, calls, heard, presenceServices: () => lastServices };
   };
   const a = make("a", invitation.mine, ia, ib, options.a);
   const b = make("b", invitation.invite, ib, ia, options.b);
@@ -136,7 +138,74 @@ describe("calls on a paired session (calls/1)", () => {
     expect(JSON.stringify(published.mock.calls)).not.toContain("actpass");
   });
 
-  it("drops a malformed or stale signal before it reaches the call", async () => {
+  it.each([
+    ["two minutes ahead", 2 * 60_000 + 500], ["nine minutes ahead", 9 * 60_000], ["two minutes behind", -2 * 60_000 - 500], ["an hour behind", -60 * 60_000],
+  ])("a call from a contact whose clock is %s rings: a signal on a live session is heard now, whatever its own time", async (_, skew) => {
+    // Reported 2026-10-01 (a contact whose clock runs two minutes fast): its signals read as "from the future" here.
+    let side!: FrameChannel;
+    const { a, b } = pair();
+    const connect = a.endpoint.connect;
+    a.endpoint.connect = async descriptor => { const bound = await connect(descriptor); side = bound.channel; return bound; };
+    await live(a, b);
+    await vi.waitFor(() => expect(b.link.supportsCalls).toBe(true));
+    const theirs = JSON.stringify({ ...JSON.parse(offer()), ts: Date.now() + skew });
+    const before = Date.now();
+    side.send(JSON.stringify({ t: "paired-call", s: theirs }));
+    await vi.waitFor(() => expect(b.calls).toEqual([theirs]));
+    // It keeps the time its sender gave it (that orders the sender's signals), and says when it was heard here.
+    expect(b.heard[0]).toBeGreaterThanOrEqual(before);
+    expect(b.heard[0]).toBeLessThanOrEqual(Date.now());
+    // When it was heard is this device's word: one the contact puts there is not taken.
+    const forged = JSON.stringify({ ...JSON.parse(hangUp()), ts: Date.now() + skew + 1, at: 1 });
+    side.send(JSON.stringify({ t: "paired-call", s: forged }));
+    await vi.waitFor(() => expect(b.calls).toHaveLength(2));
+    expect(b.heard[1]).toBeGreaterThanOrEqual(before);
+  });
+
+  it("a signal dated a day ahead is not taken, and the contact's next ones still are", async () => {
+    let side!: FrameChannel;
+    const { a, b } = pair();
+    const connect = a.endpoint.connect;
+    a.endpoint.connect = async descriptor => { const bound = await connect(descriptor); side = bound.channel; return bound; };
+    await live(a, b);
+    await vi.waitFor(() => expect(b.link.supportsCalls).toBe(true));
+    side.send(JSON.stringify({ t: "paired-call", s: JSON.stringify({ ...JSON.parse(offer()), ts: Date.now() + 24 * 60 * 60_000 }) }));
+    const o = offer(), h = JSON.stringify({ t: "h", ts: Date.now() + 5 });
+    side.send(JSON.stringify({ t: "paired-call", s: o }));
+    side.send(JSON.stringify({ t: "paired-call", s: h }));
+    await vi.waitFor(() => expect(b.calls).toEqual([o, h]));
+  });
+
+  it("a signal already heard is not handed on again when the contact's app sends it anew on the next session", async () => {
+    // An app sends its latest signal again on each new session while it is fresh. An answer that names no offer (an app
+    // up to 1.0.2), heard again after a reconnect, read as the answer to the call placed since.
+    const { a, b } = pair();
+    await live(a, b);
+    await vi.waitFor(() => expect(a.link.supportsCalls && b.link.supportsCalls).toBe(true));
+    const first = offer();
+    await a.link.setCallSignal(first);
+    await vi.waitFor(() => expect(b.calls).toEqual([first]));
+    const nameless = JSON.stringify({ ...JSON.parse(answer()), ts: Date.now() + 1 });
+    await b.link.setCallSignal(nameless);
+    await vi.waitFor(() => expect(a.calls).toEqual([nameless]));
+    // The session drops and comes back: each side's latest signal goes again.
+    a.link.disconnect();
+    await vi.waitFor(() => expect(b.link.isDataLinkOpen).toBe(false));
+    await live(a, b);
+    await vi.waitFor(() => expect(a.link.supportsCalls && b.link.supportsCalls).toBe(true));
+    // A new call from the same side: the old answer, sent again, is not news.
+    const second = JSON.stringify({ ...JSON.parse(offer()), ts: Date.now() + 10 });
+    await a.link.setCallSignal(second);
+    await vi.waitFor(() => expect(b.calls.at(-1)).toBe(second));
+    await new Promise(resolve => setTimeout(resolve, 200));
+    expect(a.calls).toEqual([nameless]);
+    // Its real answer, later, is.
+    const real = JSON.stringify({ ...JSON.parse(answer()), ts: Date.now() + 20 });
+    await b.link.setCallSignal(real);
+    await vi.waitFor(() => expect(a.calls).toEqual([nameless, real]));
+  });
+
+  it("drops a malformed signal before it reaches the call", async () => {
     let side!: FrameChannel;
     const { a, b } = pair();
     const connect = a.endpoint.connect;
@@ -144,7 +213,7 @@ describe("calls on a paired session (calls/1)", () => {
     await live(a, b);
     await vi.waitFor(() => expect(b.link.supportsCalls).toBe(true));
     side.send(JSON.stringify({ t: "paired-call", s: JSON.stringify({ t: "o", ts: Date.now(), u: "x\r\na=evil", p: "p".repeat(22), f: "a".repeat(64), s: "actpass" }) }));
-    side.send(JSON.stringify({ t: "paired-call", s: JSON.stringify({ t: "h", ts: Date.now() - 10 * 60_000 }) }));
+    side.send(JSON.stringify({ t: "paired-call", s: JSON.stringify({ t: "x", ts: Date.now() }) }));
     const good = hangUp();
     side.send(JSON.stringify({ t: "paired-call", s: good }));
     await vi.waitFor(() => expect(b.calls).toEqual([good]));
@@ -274,6 +343,8 @@ describe("a live session giving its native listener to a chat in use", () => {
   it("a call is on from an answer either side gave until a hang-up or a clear; an offer nobody answers rings only so long", () => {
     let now = 1_000_000;
     const calls = new PairedCalls(() => now);
+    // Each of the contact's signals is dated by its clock, later than its last.
+    const at = (signal: string) => JSON.stringify({ ...JSON.parse(signal), ts: now });
     expect(calls.on).toBe(false);
     calls.set(offer());
     expect(calls.on).toBe(true);
@@ -281,14 +352,14 @@ describe("a live session giving its native listener to a chat in use", () => {
     expect(calls.on).toBe(false);
     calls.set(offer());
     now += 1;
-    calls.heard(answer());
+    calls.heard(at(answer()));
     now += 60 * 60_000;
     expect(calls.on).toBe(true);
     now += 1;
-    calls.heard(hangUp());
+    calls.heard(at(hangUp()));
     expect(calls.on).toBe(false);
     now += 1;
-    calls.heard(offer());
+    calls.heard(at(offer()));
     now += 1;
     calls.set(answer());
     expect(calls.on).toBe(true);

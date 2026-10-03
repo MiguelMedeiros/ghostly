@@ -30,18 +30,19 @@ class Net {
   now = () => Date.now();
 
   private hooks(name: string) {
-    const deliver = (to: Member | undefined, frame: CommunityFrame) => {
+    const deliver = (to: Member | undefined, frame: CommunityFrame): boolean => {
       const me = this.members.get(name)!;
-      if (!to || !to.online || !me.online || to === me || (this.partition && !this.partition(me, to))) return;
+      if (!to || !to.online || !me.online || to === me || (this.partition && !this.partition(me, to))) return false;
       this.delivered++;
       this.log.push({ from: name, to: to.name, t: String((frame as { t?: unknown }).t) });
       this.pending.push(to.session.handle(me.session.myKey, clone(frame)));
+      return true;
     };
     return {
       save: async (state: CommunityState) => { this.members.get(name)!.saved = state; },
-      broadcast: (frame: CommunityFrame) => { for (const m of this.members.values()) deliver(m, frame); },
-      direct: (to: string, frame: CommunityFrame) => deliver(this.byKey(to), frame),
-      addressed: (to: string, frame: CommunityFrame) => deliver(this.byKey(to), frame),
+      broadcast: (frame: CommunityFrame) => [...this.members.values()].filter(m => deliver(m, frame)).length,
+      direct: (to: string, frame: CommunityFrame) => { deliver(this.byKey(to), frame); },
+      addressed: (to: string, frame: CommunityFrame) => { deliver(this.byKey(to), frame); },
       message: (m: CommunityIncomingMessage) => { this.members.get(name)!.messages.push(m); },
       changed: () => {},
       clock: () => this.now(),
@@ -280,6 +281,47 @@ describe("community sessions", { timeout: 60_000 }, () => {
     expect(net.texts(bob)).toContain("just us");
   });
 
+  it("what was said on the branch of a leave that lost reaches a member who was never on that branch", async () => {
+    // The admin leaves; the members are in two parts for a while (the hub they shared is gone), and a member of
+    // each part commits the same leave: two branches, each with its own fresh secret. Each part talks meanwhile.
+    const net = new Net();
+    const alice = net.create("alice");
+    const bob = await net.admit(alice, "bob"), carol = await net.admit(alice, "carol"), dave = await net.admit(alice, "dave"), erin = await net.admit(alice, "erin");
+    await alice.session.transferAdmin(carol.session.myKey);
+    await net.settle();
+    await alice.session.leave();
+    await net.settle();
+    alice.online = false;
+    const left = [bob, erin];
+    net.partition = (a, b) => left.includes(a) === left.includes(b);
+    expect(await bob.session.commitPendingLeaves()).toBe(1);
+    await net.settle();
+    expect(await carol.session.commitPendingLeaves()).toBe(1);
+    await net.settle();
+    expect(bob.session.topHash).not.toBe(carol.session.topHash);
+    await say(net, bob, "said in bob's part");
+    await say(net, carol, "said in carol's part");
+    expect(net.texts(erin)).toContain("said in bob's part");
+    expect(net.texts(dave)).toContain("said in carol's part");
+    // The parts meet through Bob and Carol: both end on one branch, and each reads what the other part said.
+    net.partition = (a, b) => (a === bob && b === carol) || (a === carol && b === bob);
+    await net.meet(bob, carol);
+    await net.meet(bob, carol);
+    expect(bob.session.topHash).toBe(carol.session.topHash);
+    expect(net.texts(bob)).toContain("said in carol's part");
+    expect(net.texts(carol)).toContain("said in bob's part");
+    // Dave and Erin each meet only the member of the other part, who is on the branch that won by now. One of the
+    // two lines was sealed on the branch that lost: its commit and secret come with it, or it could never be read.
+    net.partition = (a, b) => [a, b].includes(dave) && [a, b].includes(bob) || [a, b].includes(erin) && [a, b].includes(carol);
+    await net.meet(dave, bob);
+    await net.meet(erin, carol);
+    await net.meet(dave, bob);
+    await net.meet(erin, carol);
+    expect(net.texts(dave)).toContain("said in bob's part");
+    expect(net.texts(erin)).toContain("said in carol's part");
+    for (const m of [bob, carol, dave, erin]) expect(m.session.topHash, m.name).toBe(bob.session.topHash);
+  });
+
   it("two members admitting at once is a race everyone settles the same way, whatever the order", async () => {
     const net = new Net();
     const alice = net.create("alice");
@@ -395,6 +437,37 @@ describe("community sessions", { timeout: 60_000 }, () => {
     await say(net, members[3], "after restart");
     expect(net.texts(alice)).toContain("after restart");
     expect(shortHash(alice.session.topHash)).toHaveLength(16);
+  });
+
+  it("what a member wrote before it heard of a newcomer is carried by that newcomer to the members it was written for", async () => {
+    const net = new Net();
+    const alice = net.create("alice");
+    const bob = await net.admit(alice, "bob");
+    // Bob is in and writes at once: no edge is up yet, so nobody hears it, nor does he hear that Carol is let in.
+    net.partition = (a, b) => a !== bob && b !== bob;
+    expect("id" in await bob.session.sendText("first words", "bob")).toBe(true);
+    await net.settle();
+    const carol = await net.admit(alice, "carol");
+    expect(bob.session.roster).toHaveLength(2);
+    // The member Bob reaches first is Carol (his hub), who was not in the group when he wrote.
+    net.partition = (a, b) => !(a === bob && b === alice) && !(a === alice && b === bob);
+    await net.meet(bob, carol);
+    expect(bob.session.roster).toHaveLength(3);
+    const frame = bob.session.state.store.find(f => f.s === bob.session.myKey)!;
+    // Carol cannot read it and shows nothing, but keeps it (and, as a hub, passes it on: it is new to her).
+    expect(net.texts(carol)).toEqual([]);
+    expect(carol.session.state.store.some(f => f.s === frame.s && f.e === frame.e && f.n === frame.n)).toBe(true);
+    // A second copy is not new: a flood among hubs stops here.
+    expect(await carol.session.handle(bob.session.myKey, clone(frame))).toBe(false);
+    // Alice, who was in the group when Bob wrote, gets it from Carol.
+    await net.meet(carol, alice);
+    expect(net.texts(alice)).toEqual(["first words"]);
+    // Carol hands on only what its author gave her to carry: nothing a newcomer cannot read goes to it from anyone else.
+    const dave = await net.admit(alice, "dave");
+    const before = net.log.length;
+    await net.meet(dave, carol);
+    expect(net.log.slice(before).filter(f => f.to === "dave" && f.t === "group-msg")).toHaveLength(0);
+    expect(net.texts(dave)).toEqual([]);
   });
 
   it("answers one member's syncs a few times a minute, not every one", async () => {
@@ -557,5 +630,51 @@ describe("community admin changes are final", { timeout: 60_000 }, () => {
     expect(bob.session.topHash).toBe(adminTip);
     expect(bob.session.status).toBe("active");
     expect(bob.session.roster.map(([k]) => k)).not.toContain(mallory.session.myKey);
+  });
+});
+
+describe("a member removed while it was away is told when it is back (farewell)", () => {
+  it("is handed the commits up to the one that took it out, and nothing after; then it is removed", async () => {
+    const net = new Net();
+    const alice = net.create("alice");
+    const bob = await net.admit(alice, "bob"), carol = await net.admit(alice, "carol");
+    await net.meet(alice, bob); await net.meet(alice, carol); await net.meet(bob, carol);
+    carol.online = false;
+    // While Carol is away: someone joins, Carol is removed, the link is replaced, someone else joins.
+    const dave = await net.admit(bob, "dave");
+    await net.meet(alice, dave);
+    await alice.session.remove(carol.session.myKey);
+    await net.settle();
+    const entry = await alice.session.replaceLink();
+    await net.settle();
+    await net.admit(alice, "erin");
+    await net.settle();
+    const chain = bob.session.state.chain, out = chain.findIndex(c => c.k === "remove" && c.s === carol.session.myKey);
+    expect(chain.length).toBe(out + 3);
+
+    // A member, and whoever is not out, gets nothing this way.
+    expect(bob.session.farewell(dave.session.myKey, dave.session.syncFrame())).toEqual([]);
+    expect(bob.session.farewell(createIdentity().pubKeyZ32, {})).toEqual([]);
+    // Carol says where she is: the admission she missed and her removal, in order, with nothing else.
+    const frames = bob.session.farewell(carol.session.myKey, carol.session.syncFrame());
+    expect(frames.map(f => f.commit.k)).toEqual(["add", "remove"]);
+    expect(frames.every(f => f.t === "group-commit" && Object.keys(f).sort().join() === "commit,g,t,v")).toBe(true);
+    expect(frames.some(f => f.commit.x === entry)).toBe(false);
+    // Whatever she says about where she is (a tip nobody knows, no locator), never past her removal.
+    const blind = bob.session.farewell(carol.session.myKey, { h: "f".repeat(64) });
+    expect(blind[blind.length - 1].commit).toEqual(chain[out]);
+    expect(blind.length).toBe(out + 1);
+
+    carol.online = true;
+    for (const frame of frames) await carol.session.handle(bob.session.myKey, clone(frame));
+    expect(carol.session.status).toBe("removed");
+    expect(carol.session.canSend).toBe(false);
+    expect(carol.session.state.chain).toHaveLength(out + 1);
+    expect(carol.session.entryKey).not.toBe(entry);
+    expect(await carol.session.sendText("anyone?")).toEqual({ error: "You were removed from this group" });
+    // Told once: she holds the commit, there is nothing more to hand her.
+    expect(bob.session.farewell(carol.session.myKey, { h: carol.session.topHash })).toEqual([]);
+    // Someone out says nothing for others either.
+    expect(carol.session.farewell(dave.session.myKey, {})).toEqual([]);
   });
 });

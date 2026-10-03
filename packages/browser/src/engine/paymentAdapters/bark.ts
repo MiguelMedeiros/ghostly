@@ -61,10 +61,13 @@ export class BarkAdapter implements PaymentAdapter<BarkPrepared> {
     const { wallet, onchain } = await sdk.open({ network: config.network, mnemonic, server: config.provider, esplora: config.explorer, database: barkDatabase(config.walletId) });
     const adapter = new BarkAdapter(config, sdk, wallet, onchain);
     try { await adapter.checkServer(); } catch (error) { await adapter.dispose(); throw error; }
-    // A phrase restored here may have used on-chain addresses before: look for them once.
-    if (options.restore) void onchain.initialScan().catch(() => {});
+    // A phrase restored here may have used on-chain addresses before: look for them once. Not awaited (a scan of the
+    // chain can take minutes); `scanned` says when it ended and whether it finished.
+    if (options.restore) adapter.scanned = adapter.outside(() => onchain.initialScan()).then(() => true, (error) => { console.warn("Bark on-chain scan:", error instanceof Error ? error.message : error); return false; });
     return adapter;
   }
+  /** The on-chain scan of a restore, while one runs or ran: true once it finished, false when it failed or stopped. */
+  scanned?: Promise<boolean>;
   static checkConfig(config: Pick<BarkConfig, "network" | "provider" | "explorer">) {
     if (!BARK_NETWORKS.includes(config.network)) throw new Error("Unsupported Bark network");
     for (const provider of [config.provider, config.explorer]) validatePaymentTarget({ method: "bark", network: config.network, provider, asset: "BTC", unit: "sat", address: "configuration", expiresAt: Date.now() + 60000 });

@@ -29,10 +29,28 @@ export function asCliError(error: unknown): CliError {
     && (error as { code: string }).code in EXIT) return new CliError((error as { code: ErrorCode }).code, String((error as { message: unknown }).message));
   const local = localFileError(error);
   if (local) return local;
+  const unopened = profileOpenError(error);
+  if (unopened) return unopened;
   const message = error instanceof Error ? error.message : String(error);
   if (/real money|confirmedReal|Mainnet/i.test(message) && /confirm/i.test(message)) return new CliError("confirm", message);
   if (/other network|cross-network|network does not match/i.test(message)) return new CliError("refused", message);
   return new CliError("engine", message);
+}
+
+/**
+ * The profile's database did not open (the engine's `ProfileOpenError`, packages/browser/src/shared/idb.ts): `engine`
+ * (exit 1) with the engine's own words, which name the versions when a newer ghostly stored it, and the reason and
+ * the versions in `details` for a bot. Read by its shape: this module is also the thin client's, which loads no engine.
+ */
+function profileOpenError(error: unknown): CliError | undefined {
+  if (!(error instanceof Error) || error.name !== "ProfileOpenError") return undefined;
+  const failure = (error as { failure?: { reason?: unknown; storedVersion?: unknown; supportedVersion?: unknown } }).failure;
+  if (!failure || typeof failure.reason !== "string") return undefined;
+  return new CliError("engine", error.message, {
+    reason: failure.reason === "newer" ? "newer_profile" : `profile_${failure.reason}`,
+    ...(typeof failure.storedVersion === "number" ? { storedVersion: failure.storedVersion } : {}),
+    ...(typeof failure.supportedVersion === "number" ? { supportedVersion: failure.supportedVersion } : {}),
+  });
 }
 
 /**

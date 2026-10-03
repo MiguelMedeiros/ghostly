@@ -2,7 +2,10 @@ import { useEffect, useState, useRef } from "react";
 import { useI18n } from "../contexts/I18nContext";
 import { useBackdropDismiss, useDialogFocus } from "../hooks/useDismiss";
 import { deleteProfile, profileLock, profileSummary, type ProfileSummary } from "../lib/profileData";
-import { backupFileName, createProfileBackup } from "../lib/profileBackup";
+import { backupFileName, isCancelled } from "../lib/profileBackup";
+import { backUpToFile } from "../lib/backupFile";
+import { useBackupJob } from "../hooks/useBackupJob";
+import { BackupProgress } from "./BackupProgress";
 import { baseProfileName, type ProfileEntry } from "../lib/profiles";
 import { input } from "./wallet/ui";
 import { InputGroup } from "./layout";
@@ -22,6 +25,7 @@ export function DeleteProfileDialog({ entry, onClose }: { entry: ProfileEntry; o
   const [typed, setTyped] = useState(""), [passphrase, setPassphrase] = useState("");
   const [backingUp, setBackingUp] = useState(false), [saved, setSaved] = useState(false);
   const [busy, setBusy] = useState(false), [error, setError] = useState("");
+  const { job, start, saving, end, cancel } = useBackupJob();
   const locked = !!profileLock(entry.id);
   // Its name without the word the app adds to a restored one: what the backup file is named after and what to type.
   const plain = baseProfileName(entry.id) ?? entry.name;
@@ -40,6 +44,7 @@ export function DeleteProfileDialog({ entry, onClose }: { entry: ProfileEntry; o
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 animate-fade-in" {...backdrop}>
       <div ref={dialogRef} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="delete-profile-title" data-testid="delete-profile" className="focus:outline-none w-full max-w-sm max-h-full overflow-y-auto bg-panel-header border border-border rounded-2xl shadow-2xl p-5 space-y-4">
+        {job && <BackupProgress job={job} onCancel={cancel} />}
         <div className="space-y-1">
           <h2 id="delete-profile-title" className="text-base font-semibold text-text-primary break-words">{t("profile.delete.title", { name: entry.name })}</h2>
           <p className="text-sm text-text-muted" data-testid="delete-profile-summary">{summary ? parts.join(" · ") : t("profile.delete.reading")}</p>
@@ -53,10 +58,11 @@ export function DeleteProfileDialog({ entry, onClose }: { entry: ProfileEntry; o
             <input type="password" autoComplete="new-password" aria-label={t("profile.delete.backupPassphrase")} className={input} placeholder={t("profile.backups.passphraseNew")} value={passphrase} onChange={(e) => setPassphrase(e.target.value)} />
             <button type="button" disabled={busy || passphrase.length < 12 || (locked && !lockPassword)} className={`${button} bg-surface-alt text-text-primary border border-border`}
               onClick={() => void run(async () => {
-                const text = await createProfileBackup(passphrase, entry.id, lockPassword);
-                const url = URL.createObjectURL(new Blob([text], { type: "application/vnd.ghostly.backup+json" }));
-                const link = document.createElement("a"); link.href = url; link.download = backupFileName(plain); link.click();
-                setTimeout(() => URL.revokeObjectURL(url), 2000);
+                // The desktop app asks where to save it; closing that dialog, or Cancel, saves nothing, and the passphrase stays to try again.
+                try {
+                  const { how } = await backUpToFile({ passphrase, id: entry.id, lockPassword, ...start("backup", true) }, backupFileName(plain), saving);
+                  if (how === "cancelled") return;
+                } catch (e) { if (isCancelled(e)) return; throw e; } finally { end(); }
                 setSaved(true); setBackingUp(false); setPassphrase("");
               })}>{t("common.save")}</button>
           </InputGroup>
