@@ -25,8 +25,12 @@ export const COMMUNITY_TOPOLOGY = {
   beaconEveryMs: 30_000,
   /** …and an entry older than this is stale. */
   beaconFreshMs: 90_000,
-  /** Lobby entries: at most this many, fresh this long. */
-  lobbyEntries: 6,
+  /**
+   * Lobby entries: at most this many, fresh this long. Six before revision 2026-10-03: when a hub leaves, the members it
+   * carried ask a hub left at once, and with seven the first to ask was pushed out and asked again 20 s later. Written
+   * newest first, so an app from before, which reads six, reads the newest six.
+   */
+  lobbyEntries: 12,
   lobbyFreshMs: 2 * 60_000,
 } as const;
 
@@ -170,12 +174,14 @@ export function readBeacon(keys: { key: Uint8Array; aad: Uint8Array }, records: 
   const body = open(BEACON_LABEL, keys, records);
   return body ? unpack(body, true, COMMUNITY_TOPOLOGY.maxHubs) : [];
 }
+/** A lobby's newest requests, written newest first: an app from before revision 2026-10-03 reads the first six. */
 export function lobbyRecords(keys: { key: Uint8Array; aad: Uint8Array }, entries: LobbyEntry[]): GhostRecord[] {
-  return seal(LOBBY_LABEL, keys, pack(entries.slice(-COMMUNITY_TOPOLOGY.lobbyEntries), false));
+  return seal(LOBBY_LABEL, keys, pack(entries.slice(-COMMUNITY_TOPOLOGY.lobbyEntries).reverse(), false));
 }
+/** A lobby's requests, oldest first, whichever order they were written in. */
 export function readLobby(keys: { key: Uint8Array; aad: Uint8Array }, records: GhostRecord[]): LobbyEntry[] {
   const body = open(LOBBY_LABEL, keys, records);
-  return body ? unpack(body, false, COMMUNITY_TOPOLOGY.lobbyEntries).map(({ key, ts }) => ({ key, ts })) : [];
+  return body ? unpack(body, false, COMMUNITY_TOPOLOGY.lobbyEntries).map(({ key, ts }) => ({ key, ts })).sort((a, b) => a.ts - b.ts) : [];
 }
 
 /**
