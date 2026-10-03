@@ -70,7 +70,7 @@ export function HomePage({ version }: { version: string }) {
         <AliveScene eyebrow={t.alive.eyebrow} label={t.alive.label} steps={t.alive.steps} labels={t.alive} />
       </Act>
       <NextSection t={t.next} />
-      <SpaceSection t={t.space} w={t.wallets} shotLabel={t.next.fromDev} />
+      <SpaceSection t={t.space} w={t.wallets} ids={t.identities} shotLabel={t.next.fromDev} />
       <OpenScene
         eyebrow={t.open.eyebrow}
         label={t.open.label}
