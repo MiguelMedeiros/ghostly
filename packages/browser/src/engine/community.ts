@@ -130,6 +130,8 @@ const HUB_GRACE_MS = 3 * 60_000;
  * group that needs one more hub gets it.
  */
 const CUT_OFF_STEP_UP_MS = 15_000;
+/** A lobby request this recent is from a member still looking fast for my side of the edge: mine opens expecting it. */
+const LOBBY_EXPECT_MS = 30_000;
 const REFUSED_FOR_MS = 10 * 60_000;
 const ENTRY_LINGER_MS = 20_000;
 const RELAYED_KEPT = 4096;
@@ -268,7 +270,7 @@ interface Live {
   farewells: Map<string, { since: number; told?: number }>;
   farewellQuiet: Map<string, number>;
   farewellSaid: Map<string, number>;
-  hubsMemo?: { beacon: Hub[]; top: object; hubs: Hub[] };
+  hubsMemo?: { beacon: Hub[]; top: object; leaves: object; hubs: Hub[] };
 }
 
 export class Communities {
@@ -695,8 +697,12 @@ export class Communities {
       }
     }
     // Someone the chain took out lists itself as a hub (it came back believing it is a member, and no hub took it): told.
-    // (One that listed itself before it was taken out was there, and was sent the commit.)
-    if (live.hub) for (const h of freshHubs(live.beacon, now)) if (h.ts + FAREWELL_SKEW_MS > (s.outAt(h.key) ?? Infinity)) this.wantFarewell(groupId, live, h.key, now);
+    // (One that listed itself before it was taken out was there, and was sent the commit.) One that left by itself knows:
+    // its entry from before it went is no reason to dial it, only one written well after its leave (an app that lost it).
+    if (live.hub) for (const h of freshHubs(live.beacon, now)) {
+      const out = s.outAt(h.key) ?? Infinity;
+      if (this.leftItself(live, h.key) ? h.ts - FAREWELL_SKEW_MS > out : h.ts + FAREWELL_SKEW_MS > out) this.wantFarewell(groupId, live, h.key, now);
+    }
     this.endFarewells(live, now);
     if (live.hub) {
       // Letting someone in: the budget goes to that session first, the lobby waits.
@@ -824,12 +830,13 @@ export class Communities {
     // And whoever is listed is a hub, not a member of mine (a member that became one). Only on a beacon read lately.
     if (now - live.beaconAt <= 2 * this.timings.beaconReadMs) {
       const hubs = new Set(freshHubs(this.hubs(live), now).map(h => h.key));
-      for (const [key, id] of edges) if (!hubs.has(key) && !live.members.has(key) && this.host.linkReady(id, 2) && !live.session.wasRemoved(key)) live.members.set(key, now);
+      for (const [key, id] of edges) if (!hubs.has(key) && !live.members.has(key) && this.host.linkReady(id, 2) && !this.gone(live, key)) live.members.set(key, now);
       for (const key of [...live.members.keys()]) if (hubs.has(key)) live.members.delete(key);
     }
     for (const [key, since] of live.members) {
       const id = edges.get(key);
-      if (id && this.host.linkReady(id, 2)) live.members.set(key, now);
+      if (this.gone(live, key)) live.members.delete(key);
+      else if (id && this.host.linkReady(id, 2)) live.members.set(key, now);
       else if (now - since > this.timings.memberGoneMs || live.session.wasRemoved(key)) live.members.delete(key);
     }
     this.shed(groupId, live, now);
@@ -947,7 +954,7 @@ export class Communities {
       existing = this.inMyTime(live, readBeacon(keys, records), now); head = readBeaconHead(keys, records);
     }
     // Nobody drops a hub it does not know: a member behind on the roster would erase newer ones.
-    const hubs = mergeBeacon(existing, live.session.myKey, listed ? { key: live.session.myKey, ts: now, load: this.beaconLoad(groupId, live, now), since: live.hubSince || now } : null, now, key => !live.session.wasRemoved(key));
+    const hubs = mergeBeacon(existing, live.session.myKey, listed ? { key: live.session.myKey, ts: now, load: this.beaconLoad(groupId, live, now), since: live.hubSince || now } : null, now, key => !this.gone(live, key));
     // Nor a newer head: several hubs write this record in turn.
     const newest = newerHead(head, this.newestFrame(live), now);
     await this.host.publish(keys.identity, beaconRecords(keys, this.asWritten(live, hubs), newest), true);
@@ -961,12 +968,30 @@ export class Communities {
    * itself there when it comes back, believing it is a member, until it is told (`wantFarewell`).
    */
   private hubs(live: Live): Hub[] {
-    // Asked many times a tick: worked out again only when the beacon or the chain moved.
-    const top = live.session.top, memo = live.hubsMemo;
-    if (memo && memo.beacon === live.beacon && memo.top === top) return memo.hubs;
-    const hubs = live.beacon.filter(h => !live.session.wasRemoved(h.key));
-    live.hubsMemo = { beacon: live.beacon, top, hubs };
+    // Asked many times a tick: worked out again only when the beacon, the chain or the leave requests moved.
+    const top = live.session.top, leaves = live.session.state.pendingLeaves, memo = live.hubsMemo;
+    if (memo && memo.beacon === live.beacon && memo.top === top && memo.leaves === leaves) return memo.hubs;
+    const hubs = live.beacon.filter(h => !this.gone(live, h.key));
+    live.hubsMemo = { beacon: live.beacon, top, leaves, hubs };
     return hubs;
+  }
+
+  /**
+   * Out of the group, or leaving it: a hub whose signed leave request I hold is no hub, before its leave is committed
+   * too. Its app said it goes and closed its edges. Counted as a hub, it was dialled again by the hubs left behind (an
+   * edge whose app is gone looks fast for it, and so held their other requests to the share they get while a link
+   * signals: their lobby went unread and their beacon entry unwritten for minutes), kept at the door, and written back
+   * into the beacon (CLI daemons on local relays, 2026-10-03).
+   */
+  private gone(live: Live, key: string): boolean {
+    return live.session.wasRemoved(key) || live.session.state.pendingLeaves.some(r => r.s === key);
+  }
+
+  /** Out of the group by its own leave (it signed the request), not removed: its app knows it went. */
+  private leftItself(live: Live, key: string): boolean {
+    const chain = live.session.state.chain;
+    for (let i = chain.length - 1; i >= 0; i--) if ((chain[i].k === "leave" || chain[i].k === "remove") && chain[i].s === key) return chain[i].k === "leave";
+    return false;
   }
 
   /** A frame goes on an edge to a member; to someone the chain took out, only the commit that took it out. */
@@ -1045,7 +1070,12 @@ export class Communities {
       // Someone is asking: not the moment to step down.
       live.emptySince = now;
       if (!live.members.has(key) && live.members.size >= this.capacity(groupId, live, now)) continue;
-      if (!live.members.has(key)) { traceJoin(groupId, "lobby.seen", { age: now - ts }); live.lobbyBusyUntil = now + this.timings.lobbyBusyMs; }
+      if (!live.members.has(key)) {
+        traceJoin(groupId, "lobby.seen", { age: now - ts });
+        live.lobbyBusyUntil = now + this.timings.lobbyBusyMs;
+        // Asked a moment ago: its side of the edge is looking for mine, so mine looks fast for it too.
+        if (now - ts < LOBBY_EXPECT_MS && !this.host.edges(groupId).has(key)) live.expect.add(key);
+      }
       live.members.set(key, Math.max(live.members.get(key) ?? 0, now));
     }
   }

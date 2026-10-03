@@ -48,6 +48,46 @@ describe("a hub that leaves", { timeout: 120_000 }, () => {
 });
 
 /**
+ * The hub left behind held the leaver's signed request, but counted the leaver as a hub until the leave was committed
+ * (at once by the hub with the lowest key, half a minute later by any other) or its beacon entry went stale: it dialled
+ * it again as one hub dials another, kept it at the door, and wrote it back into the beacon. An edge whose app is gone
+ * looks fast for it, and on relays that held the hub's own requests (its lobby, its beacon entry) to the small share
+ * they get while a link signals: five CLI daemons on local relays, the hub left behind read no lobby request for
+ * minutes (2026-10-03).
+ */
+describe("the hubs a hub leaves behind", { timeout: 120_000 }, () => {
+  it("count it out at once: no edge to it, and not in the beacon they write", async () => {
+    const keyOf = (p: Peer, id: string) => p.groups.communities.session(id)!.myKey;
+    // A group where the hub left behind does not commit the leave itself at once (the leaver's key is the lower one).
+    let found: { world: CommunityWorld; id: string; admin: Peer; left: Peer } | undefined;
+    for (let tries = 0; tries < 12 && !found; tries++) {
+      const world = new CommunityWorld();
+      const { id, peers } = await settled(world, ["admin", "bob", "carol", "dave", "erin"]);
+      const [admin, ...rest] = peers;
+      const hubs = rest.filter(p => p.groups.communities.isHub(id));
+      if (admin.groups.communities.isHub(id) && hubs.length === 1 && keyOf(admin, id) < keyOf(hubs[0], id)) found = { world, id, admin, left: hubs[0] };
+    }
+    expect(found, "a group with the admin and one more hub, the admin's key the lower").toBeDefined();
+    const { world, id, admin, left } = found!;
+    const gone = keyOf(admin, id);
+    const keys = beaconKeys(left.groups.communities.session(id)!.state.rv, id);
+    expect(world.view(left, id)!.community!.hubs).toBe(2);
+    // Its app takes itself out of the beacon when the relays let it: here they do not (its budget is spent).
+    world.failRead = peer => peer === admin;
+    await admin.groups.leave(id);
+    await world.run(2_000);
+    for (let s = 0; s < 25; s++) {
+      await world.run(1_000);
+      // Not as a hub, nor to tell it it is out (it knows: it left).
+      expect([...left.links.values()].some(e => e.kind === "edge" && e.g === id && e.peer === gone), `an edge to the leaver ${s + 3} s after`).toBe(false);
+    }
+    // What it writes in the beacon leaves the leaver out.
+    await world.run(35_000);
+    expect(readBeacon(keys, world.pkarr.get(keys.identity.pubKeyZ32) ?? []).map(h => h.key)).not.toContain(gone);
+  });
+});
+
+/**
  * A reading of the beacon that did not happen (the relays' budget held it back) is not an empty beacon. Taken as one, a
  * member became a hub at once and a hub took itself for the only one, and either published a beacon naming itself
  * alone: every other hub was out of it for everyone, the hubs opened no edge to each other, and the group stayed in
