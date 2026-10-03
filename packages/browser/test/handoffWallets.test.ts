@@ -69,6 +69,7 @@ describe("money keeps a profile from moving", () => {
     ];
     for (const network of cases) {
       expect(walletHandoffProblem(view(network), true), JSON.stringify(network)).toBe("wallet");
+      expect(walletHandoffProblem(view({ lightning: card({ capabilities: { balance: true } as LightningCardView["capabilities"] }) }), true), "a capability named balance is no amount").toBeNull();
       expect(walletHandoffProblem(view({}, network), true), `testnet ${JSON.stringify(network)}`).toBe("wallet");
     }
   });

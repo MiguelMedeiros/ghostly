@@ -4661,7 +4661,10 @@ export class GhostlyNode implements EngineImplementation {
     if (this.limitedMode || !this.walletsStarted) return "loading";
     // Read now, not the view of the last change: a wallet that changed since is counted as it is.
     await this.refreshWallet().catch(() => {});
-    return walletHandoffProblem(this.walletView, this.walletsStarted);
+    let where = "";
+    const problem = walletHandoffProblem(this.walletView, this.walletsStarted, (at) => { where = at; });
+    if (problem) console.info(`[handoff] not now: ${problem} (${where})`);
+    return problem;
   }
   /** Every wallet's stored state was loaded (`startWallets`): before that, a wallet view says nothing of what it holds. */
   private walletsStarted = false;
