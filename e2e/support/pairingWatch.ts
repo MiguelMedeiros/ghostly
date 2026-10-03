@@ -80,8 +80,9 @@ export function pairingGlitches(frames: PairingFrame[], { leaveWithinMs }: { lea
     else if (rowsSeen) glitches.push(`the chat list went empty ${at(f)}`);
     if (liveAt === undefined && f.icon === "connected") liveAt = f.t;
   }
-  // It ends once the chat is live, and soon after.
+  // It ends once the chat is live, and soon after; or once the chat is on the DHT (usable, and the icon says so).
   const end = frames.find((f, i) => i > 0 && !f.scene && frames[i - 1].scene);
+  if (shown && end?.icon === "dht") return glitches;
   if (shown) {
     if (liveAt === undefined) glitches.push("the chat never went live");
     else if (!end) glitches.push("the scene never ended");
