@@ -306,7 +306,7 @@ export async function writeProfileBackup(sink: BackupSink, { passphrase, id, loc
       tell();
     }
     await put({ t: "end", files, bytes: fileBytes });
-    return { bytes: await writer.finish(), files, fileBytes, skipped, leftOut, leftOutBytes };
+    return { bytes: await writer.finish(), files, fileBytes, skipped, ...(light && { leftOut, leftOutBytes }) };
   } finally {
     (piecesDb as IDBDatabase | null)?.close();
   }

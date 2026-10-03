@@ -88,7 +88,7 @@ it("a light backup leaves the larger files' bytes out, says so, and restores eve
   const everything = await backUp(false);
   const light = await backUp(true);
   expect(light.result).toMatchObject({ files: 2, fileBytes: 1000 + 3 * MIB, skipped: 0, leftOut: 2, leftOutBytes: 7 * MIB });
-  expect(everything.result).toMatchObject({ files: 4, leftOut: 0 });
+  expect(everything.result).toEqual({ bytes: everything.bundle.length, files: 4, fileBytes: 1000 + 10 * MIB, skipped: 0 });
   expect(light.bundle.length).toBeLessThan(everything.bundle.length / 2);
 
   const opened = await openProfileBackup(light.bundle, PASS);
@@ -124,7 +124,7 @@ it("an everything backup of a restored light profile keeps the marks", async () 
   setStorageProfile(restored.id);
   setDatabaseName(`ghostly_${restored.id}`);
   const again = await backUp(false);
-  expect(again.result).toMatchObject({ files: 2, leftOut: 0, skipped: 0 });
+  expect(again.result).toMatchObject({ files: 2, skipped: 0 });
   const twice = await restoreOpenedBackup(await openProfileBackup(again.bundle, PASS));
   const files = await readAll(`ghostly_${twice.id}`, STORES.files) as StoredFile[];
   expect(files.filter((file) => file.leftOut).map((file) => file.id).sort()).toEqual(["link1-in-video", "link1-out-photo"]);
