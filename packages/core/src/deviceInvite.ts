@@ -83,9 +83,10 @@ export function readDeviceInvite(input: string, now: number = Math.floor(Date.no
   }
   if (decoded.prefix !== INVITE_HRP) return { ok: false, reason: "typo" };
   const [version, ...words] = decoded.words;
-  if (version === INVITE_VERSION) return { ok: false, reason: "chat" };
   if (version === undefined || version === 0) return { ok: false, reason: "not-ghostly", detail: "Version 0 is reserved" };
-  if (version !== DEVICE_INVITE_VERSION) return { ok: false, reason: "update", detail: `Version ${version}` };
+  // Newer than every version this reader knows (a chat's 1, a device's 2): a newer Ghostly made it.
+  if (version > DEVICE_INVITE_VERSION) return { ok: false, reason: "update", detail: `Version ${version}` };
+  if (version === INVITE_VERSION) return { ok: false, reason: "chat" };
   const payload = bech32m.fromWordsUnsafe(words);
   if (!payload) return { ok: false, reason: "damaged", detail: "Padding" };
   if (payload.length !== DEVICE_INVITE_BYTES) return { ok: false, reason: "damaged", detail: `${payload.length} bytes, not ${DEVICE_INVITE_BYTES}` };

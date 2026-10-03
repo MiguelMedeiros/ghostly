@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { bytesToHex } from "@noble/hashes/utils.js";
+import { bech32m } from "@scure/base";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { describe, expect, it } from "vitest";
 import {
@@ -112,6 +113,11 @@ describe("device invite refusals", () => {
   it("refuses a code past its time", () => {
     expect(readDeviceInvite(encodeDeviceInvite(fixedInvite(NOW)), NOW)).toEqual({ ok: false, reason: "expired" });
     expect(readDeviceInvite(encodeDeviceInvite(fixedInvite(NOW - 1)), NOW)).toEqual({ ok: false, reason: "expired" });
+  });
+
+  it("a version above every one it knows is a newer Ghostly's, never a device code nor a chat invite", () => {
+    const words = bech32m.decode(code, 1023).words;
+    for (const version of [3, 4, 31]) expect(readDeviceInvite(bech32m.encode("ghostly", [version, ...words.slice(1)], false), NOW)).toMatchObject({ ok: false, reason: "update" });
   });
 
   it("refuses a code of a kind it does not know (no own-device flag), a typo, a damaged payload and a later version", () => {
