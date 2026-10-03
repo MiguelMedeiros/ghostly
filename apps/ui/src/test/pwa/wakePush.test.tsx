@@ -193,7 +193,7 @@ describe("a profile on several devices (WISP 06 § Push and the phone)", () => {
     setPushPlatform(platform);
     vi.stubGlobal("Notification", { permission: "granted" });
     fakeEngine.on("devicePushState", () => ({ endpoint: keys.endpoint, vapidPublic: vapid.publicKey }));
-    fakeEngine.on("devicePushSet", () => null);
+    fakeEngine.on("devicePushSet", () => undefined);
     renderHook(() => useStandbyPush({ title: "Ghostly", body: "New message", standby: "New message. Active on {device}." }, true));
     await waitFor(() => expect(fakeEngine.callsTo("devicePushSet")).toEqual([{ subscription: fresh }]));
     expect(platform.subscribe).toHaveBeenCalledWith("", { publicKey: vapid.publicKey });
@@ -206,7 +206,7 @@ describe("a profile on several devices (WISP 06 § Push and the phone)", () => {
     setPushPlatform(platform);
     vi.stubGlobal("Notification", { permission: "denied" });
     fakeEngine.on("devicePushState", () => ({ endpoint: keys.endpoint, vapidPublic: generateVapidKeys().publicKey }));
-    fakeEngine.on("devicePushSet", () => null);
+    fakeEngine.on("devicePushSet", () => undefined);
     renderHook(() => useStandbyPush({ title: "Ghostly", body: "New message" }, true));
     await waitFor(() => expect(fakeEngine.callsTo("devicePushSet")).toEqual([{ subscription: null }]));
     expect(platform.subscribe).not.toHaveBeenCalled();

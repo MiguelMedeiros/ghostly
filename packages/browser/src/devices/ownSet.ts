@@ -148,7 +148,7 @@ export async function resumeOwnSet(ports: OwnSetPorts): Promise<OwnSetOutcome> {
     const puts = await ports.network.turnPut(keys.identity.pubKeyZ32, tomb, before.conditions);
     at = now(); sources = puts.filter((put) => put.outcome === "stored").map((put) => put.source);
     if (!sources.length) return "wait";
-    record = await ports.amend({ ownSet: { ...plan, at, sources } });
+    await ports.amend({ ownSet: { ...plan, at, sources } });
   }
   const due = at + TURN_SETTLE_MS;
   if (now() < due) await sleep(due - now());
