@@ -10,9 +10,13 @@ import { expect, test } from "../support/fixtures";
  * shares the door's relay budget with the first one's (about 10 requests on each relay of the 30 a
  * minute), hence a little more room; the bounds leave room for a busy machine too. STUN is answered here (`localStun`):
  * each offer and answer waits for it, up to 5 s when Google's public servers are slow, which no bound here allows for.
+ * With the local server's reflexive candidate kept (e2e/support/stun.ts), an offer gathers in 0.4 s, not 5 s: over six
+ * runs on a shared machine (2026-10-03) the first joiner got in within 2.8 to 7.4 s and reached a member within 5.6 to
+ * 11.7 s, the second within 3.3 to 8.4 s and 5.6 to 12.7 s. Getting in comes in two steps, about
+ * 3 s or about 7.5 s (most likely the relays' polling pace), so the first joiner's bound to get in stays where it was.
  */
-const JOIN_BOUND_MS = [12_000, 15_000];
-const REACH_BOUND_MS = [20_000, 30_000];
+const JOIN_BOUND_MS = [12_000, 12_000];
+const REACH_BOUND_MS = [16_000, 20_000];
 const groupChat = (page: import("@playwright/test").Page) => page.getByTestId("group-chat");
 
 /** Every step the joining card shows, in order, however quickly they go by. */

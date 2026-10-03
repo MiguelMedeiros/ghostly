@@ -6,10 +6,15 @@ import type { AddressInfo } from "node:net";
  * A STUN server that lives in the test process, for the public ones the apps ask (Google's, `RTC_CONFIG`). A peer
  * waits for its server reflexive candidate before it publishes an offer or an answer, up to 5 s (`waitForIceGathering`,
  * `ICE_GATHERING_TIMEOUT_MS`): when Google's servers answered late, a join through a link that takes seconds took 5 or 10
- * more (2026-09-29). This one answers every binding request at once with the address it came from.
+ * more (2026-09-29). This one answers every binding request at once.
  *
- * Every peer is on this machine: the reflexive address it learns here (a loopback one, on its host candidate's port)
- * reaches it as well as its host address does, and comes within milliseconds.
+ * It answers with the address the request came from, on the port beside it. The suite's contexts are granted the camera
+ * and the microphone, so Chromium gathers on every interface, each from a socket bound to that interface's address: a
+ * request from one reaches this server from that very address and port, and a reflexive candidate equal to its host
+ * candidate is not a candidate at all. Chromium dropped it, an offer's gathering did not complete either (it waits on
+ * every interface), and every offer waited the whole 5 s this server was meant to spare: 48 offers of 48 gathered in
+ * 5.0 s, the answers in a few milliseconds (2026-10-02). With another port the reflexive candidate exists and the wait
+ * ends 0.4 s after it. Nobody connects through it: every peer is on this machine and its host candidates reach it.
  */
 const PUBLIC_STUN = /^stuns?:stun[0-9]*\.l\.google\.com(:[0-9]+)?$/;
 const MAGIC_COOKIE = 0x2112a442;
@@ -47,14 +52,14 @@ export async function useLocalStun(context: BrowserContext): Promise<void> {
   }, { url, pattern: PUBLIC_STUN.source });
 }
 
-/** A Binding success response to a Binding request (RFC 8489): XOR-MAPPED-ADDRESS, the request's source. */
+/** A Binding success response to a Binding request (RFC 8489): XOR-MAPPED-ADDRESS, the request's source on the port beside it. */
 function answer(socket: Socket, message: Buffer, from: AddressInfo): void {
   if (message.length < 20 || message.readUInt16BE(0) !== 0x0001 || message.readUInt32BE(4) !== MAGIC_COOKIE || from.family !== "IPv4") return;
   const attribute = Buffer.alloc(12);
   attribute.writeUInt16BE(0x0020, 0);
   attribute.writeUInt16BE(8, 2);
   attribute.writeUInt16BE(0x0001, 4);
-  attribute.writeUInt16BE(from.port ^ (MAGIC_COOKIE >>> 16), 6);
+  attribute.writeUInt16BE((from.port ^ 1) ^ (MAGIC_COOKIE >>> 16), 6);
   attribute.writeUInt32BE((from.address.split(".").reduce((n, octet) => n * 256 + Number(octet), 0) ^ MAGIC_COOKIE) >>> 0, 8);
   const header = Buffer.alloc(20);
   header.writeUInt16BE(0x0101, 0);
