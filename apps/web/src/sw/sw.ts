@@ -189,7 +189,8 @@ worker.addEventListener("push", (event) => {
       return;
     }
     const options = { body: notice.body, tag: notice.tag, data: notice.data, icon: "/icon-192.png", badge: "/icon-192.png", requireInteraction: notice.call };
-    if (!(await takeWakeSlot(profile, wake.token, notice.call, now))) {
+    // A device asking for a handoff may ask again soon (its own limit is one per 30 s): it is counted like a call.
+    if (!(await takeWakeSlot(profile, wake.token, notice.call || wake.kind === "device", now))) {
       // Too soon after this token's last one (`WAKE_NOTICE_GAP_MS`): no new notice and no sound. The one still on
       // screen is shown again, silently, since browsers expect every push to show something; a dismissed one stays gone.
       const [shown] = await worker.registration.getNotifications({ tag: notice.tag });
