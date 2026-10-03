@@ -255,6 +255,8 @@ interface LiveLink {
   transportLog?: TransportLog;
   /** A group's entry session whose admission is done: it closes once its data link does (`GroupsHost.entryDone`). */
   entryDone?: boolean;
+  /** A group's edge whose session in this run is kept as its `edgeLiveSince` (`noteEdgeLive`). */
+  edgeSessionNoted?: boolean;
   /** When this chat last took a native listener from an idle live session (`ensureNativeEndpoints`), by transport. */
   nativeTakenAt?: Partial<Record<NativeTransport, number>>;
 }
@@ -4451,10 +4453,17 @@ export class GhostlyNode implements EngineImplementation {
   /**
    * An edge's session opened or ended: kept, so that an app starting again knows which edges were live when it quit
    * (`edgeLive`, `resume`). Nothing is written while the app shuts down: an edge live then was live when it quit.
+   *
+   * Each session's start is kept, the first one of a run too: an edge live when the app quit is still marked live as
+   * it starts again, and its next session used to leave the start of the one before. An offer from between the two
+   * then passed the floor after the next restart (`resumeFloor`): the member had put it on the relays for the session
+   * that came up, a relay missed its clearing, and the returning app answered it and waited 40 s for an attempt the
+   * member had given up (2026-10-03).
    */
   private noteEdgeLive(linkId: string, up: boolean): void {
     const live = this.links.get(linkId);
-    if (!live || this.shuttingDown || !!live.stored.edgeLive === up) return;
+    if (!live || this.shuttingDown || (up ? live.edgeSessionNoted : !live.stored.edgeLive)) return;
+    live.edgeSessionNoted = up;
     const since = up ? Date.now() : undefined;
     live.stored = { ...live.stored, edgeLive: up || undefined, edgeLiveSince: since };
     void db.patchLink(linkId, { edgeLive: up || undefined, edgeLiveSince: since }).catch(() => {});
