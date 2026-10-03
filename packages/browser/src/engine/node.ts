@@ -3117,7 +3117,8 @@ export class GhostlyNode implements EngineImplementation {
       if (message?.file) {
         const stored = await fileStore.get(message.file.id);
         // Only what the peer sent counts against the room it has here.
-        if (stored && !stored.wire3 && (stored.direction === "in" || (!stored.direction && message.sender === "peer"))) {
+        // (A file only said on the DHT floor brought no byte, and counted none.)
+        if (stored && !stored.wire3 && !stored.announced && (stored.direction === "in" || (!stored.direction && message.sender === "peer"))) {
           live.files.receivedBytes = Math.max(0, live.files.receivedBytes - storedSize(stored));
         }
         // A files/3 transfer still going ends on both sides.
