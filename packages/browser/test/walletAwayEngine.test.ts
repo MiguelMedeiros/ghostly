@@ -22,7 +22,7 @@ describe("a wallet at home on another device, through the engine", () => {
   it("refuses every way of making it again, unlocking, joining, restoring or using it on this device", async () => {
     const node = new GhostlyNode({ onState: vi.fn(), onMessages: vi.fn(), onCallSignal: vi.fn() }, { transport, automaticWallets: false });
     nodes.push(node);
-    setAwayWallets(new Map(["arkade", "bark", "usdt", "spark", "fedimint"].map((type) => [`${type}:testnet`, "Desktop"] as [string, string]).concat([["lightning:testnet:cashu", "Desktop"]])));
+    setAwayWallets(new Map(["arkade", "bark", "usdt", "spark", "fedimint", "bitcoin"].map((type) => [`${type}:testnet`, "Desktop"] as [string, string]).concat([["lightning:testnet:cashu", "Desktop"]])));
     const calls: [string, () => Promise<unknown>][] = [
       ["arkCreate", () => node.arkCreate({ network: "mutinynet", provider: "https://ark.test", explorer: "https://esplora.test" } as never)],
       ["barkCreate", () => node.barkCreate({ network: "signet", provider: "https://bark.test", explorer: "https://esplora.test" } as never)],
@@ -43,6 +43,13 @@ describe("a wallet at home on another device, through the engine", () => {
       ["lightningRetrySource", () => node.lightningRetrySource({ network: "testnet", card: "cashu" })],
       ["lightningReconfigureSource", () => node.lightningReconfigureSource({ values: {}, network: "testnet", card: "cashu" })],
       ["lightningRefresh", () => node.lightningRefresh({ network: "testnet", card: "cashu" })],
+      // A card away is never made this device's default for receiving.
+      ["lightningSetReceive", () => node.lightningSetReceive({ network: "testnet", card: "cashu" })],
+      // A Bitcoin Core source at home on another device: its record there is never written over from here.
+      ["bitcoinSetSource", () => node.bitcoinSetSource({ providerId: "bitcoind", values: {}, network: "testnet" })],
+      ["bitcoinClearSource", () => node.bitcoinClearSource({ network: "testnet" })],
+      ["bitcoinRetrySource", () => node.bitcoinRetrySource({ network: "testnet" })],
+      ["bitcoinReconfigureSource", () => node.bitcoinReconfigureSource({ values: {}, network: "testnet" })],
     ];
     for (const [name, call] of calls) await expect(call(), name).rejects.toThrow(AWAY);
   });

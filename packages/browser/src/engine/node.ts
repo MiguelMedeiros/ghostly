@@ -4203,12 +4203,24 @@ export class GhostlyNode implements EngineImplementation {
   async lightningReconfigureSource({ values, network, card }: { values: Record<string, string>; network?: WalletNetwork; card?: string }) { await (await this.lightningCard(this.net(network), card)).sources.reconfigure(values); await this.refreshWallet(); }
   async lightningRefresh(params?: { network?: WalletNetwork; card?: string }) { const lightning = await this.lightningCard(this.net(params?.network), params?.card); await lightning.sources.refresh(); await lightning.reconcile(); }
   /** Makes a card its network's default for receiving: chat requests and Receive use it unless another is picked. */
-  async lightningSetReceive({ network, card }: { network: WalletNetwork; card: string }) { await this.lightnings[this.net(network)].setReceive(card); await this.refreshWallet(); }
+  async lightningSetReceive({ network, card }: { network: WalletNetwork; card: string }) {
+    // A card at home on another device cannot receive here, so it is never this device's default for receiving.
+    refuseAway(`lightning:${this.net(network)}:${card}`, this.walletView.networks?.[this.net(network)].lightnings?.find((c) => c.card === card)?.name || WALLET_NAMES.lightning);
+    await this.lightnings[this.net(network)].setReceive(card); await this.refreshWallet();
+  }
   async lightningRename({ network, card, name }: { network: WalletNetwork; card: string; name: string }) { await this.lightnings[this.net(network)].rename(card, name); await this.refreshWallet(); }
-  async bitcoinSetSource({ providerId, values, network }: { providerId: string; values: Record<string, string>; network?: WalletNetwork }) { await this.bitcoins[this.net(network)].sources.set(providerId, values); await this.refreshWallet(); }
-  async bitcoinClearSource(params?: { network?: WalletNetwork }) { await this.bitcoins[this.net(params?.network)].sources.clear(); await this.refreshWallet(); }
-  async bitcoinRetrySource(params?: { network?: WalletNetwork }) { await this.bitcoins[this.net(params?.network)].sources.retryNow(); await this.refreshWallet(); }
-  async bitcoinReconfigureSource({ values, network }: { values: Record<string, string>; network?: WalletNetwork }) { await this.bitcoins[this.net(network)].sources.reconfigure(values); await this.refreshWallet(); }
+  /**
+   * The on-chain source of a network at home on another device (a Bitcoin Core wallet stays home, WISP 06 § Wallets
+   * that stay home) is never set, cleared, retried or reconfigured here: each would write over the record its home
+   * device runs from, or connect to a wallet only that device may use.
+   */
+  private refuseAwayBitcoin(network: WalletNetwork): void {
+    refuseAway(`bitcoin:${network}`, WALLET_NAMES.bitcoin);
+  }
+  async bitcoinSetSource({ providerId, values, network }: { providerId: string; values: Record<string, string>; network?: WalletNetwork }) { this.refuseAwayBitcoin(this.net(network)); await this.bitcoins[this.net(network)].sources.set(providerId, values); await this.refreshWallet(); }
+  async bitcoinClearSource(params?: { network?: WalletNetwork }) { this.refuseAwayBitcoin(this.net(params?.network)); await this.bitcoins[this.net(params?.network)].sources.clear(); await this.refreshWallet(); }
+  async bitcoinRetrySource(params?: { network?: WalletNetwork }) { this.refuseAwayBitcoin(this.net(params?.network)); await this.bitcoins[this.net(params?.network)].sources.retryNow(); await this.refreshWallet(); }
+  async bitcoinReconfigureSource({ values, network }: { values: Record<string, string>; network?: WalletNetwork }) { this.refuseAwayBitcoin(this.net(network)); await this.bitcoins[this.net(network)].sources.reconfigure(values); await this.refreshWallet(); }
   async bitcoinReceiveAddress(params?: { network?: WalletNetwork }) { const address = await this.bitcoins[this.net(params?.network)].receiveAddress(); await this.refreshWallet(); return address; }
   bitcoinRefresh(params?: { network?: WalletNetwork }) { return this.bitcoins[this.net(params?.network)].sources.refresh(); }
 
