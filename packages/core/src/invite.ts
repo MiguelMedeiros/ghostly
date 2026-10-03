@@ -114,8 +114,9 @@ function readGhostly(code: string): InviteReading {
   if (decoded.prefix !== INVITE_HRP) return { ok: false, reason: "typo" };
   const [version, ...words] = decoded.words;
   if (version === undefined || version === 0) return { ok: false, reason: "not-ghostly", detail: "Version 0 is reserved" };
+  // Newer than every version this reader knows (a chat's 1, a device's 2): a newer Ghostly made it.
+  if (version > DEVICE_INVITE_VERSION) return { ok: false, reason: "update", detail: `Version ${version}` };
   if (version === DEVICE_INVITE_VERSION) return { ok: false, reason: "device" };
-  if (version !== INVITE_VERSION) return { ok: false, reason: "update", detail: `Version ${version}` };
   const payload = bech32m.fromWordsUnsafe(words);
   if (!payload) return { ok: false, reason: "damaged", detail: "Padding" };
   if (payload.length !== V1_BYTES) return { ok: false, reason: "damaged", detail: `${payload.length} bytes, not ${V1_BYTES}` };

@@ -34,6 +34,17 @@ describe("the site's invite reader agrees with the app's", () => {
     for (const other of ["ghostly1", "ghostly1qqqqqq", `ghostly1${"q".repeat(1016)}`, "ghostly1bbbbbbbbbb", inviteCode.slice(0, -1)]) same(other);
   });
 
+  it("a version above every one either reader knows is a newer Ghostly's, in both; version 2 adds a device, in both", () => {
+    for (const version of [3, 4, 16, 31]) {
+      const code = bech32m.encode("ghostly", [version, ...words.slice(1)], false);
+      expect(readInviteCode(code)).toMatchObject({ ok: false, reason: "update" });
+      expect(checkInvite(code)).toEqual({ ok: false, reason: "update" });
+    }
+    const device = bech32m.encode("ghostly", [2, ...words.slice(1)], false);
+    expect(readInviteCode(device)).toEqual({ ok: false, reason: "device" });
+    expect(checkInvite(device)).toEqual({ ok: false, reason: "device" });
+  });
+
   it("on arbitrary strings after ghostly1", () => {
     fc.assert(fc.property(fc.stringMatching(/^[qpzry9x8gf2tvdw0s3jn54khce6mua7l1bio]{0,240}$/), tail => same(`ghostly1${tail}`)), { numRuns: 400 });
   });
