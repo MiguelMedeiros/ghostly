@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-device-state-read"
+description = "Enables the device_state_read command without any pre-configured scope."
+commands.allow = ["device_state_read"]
+
+[[permission]]
+identifier = "deny-device-state-read"
+description = "Denies the device_state_read command without any pre-configured scope."
+commands.deny = ["device_state_read"]

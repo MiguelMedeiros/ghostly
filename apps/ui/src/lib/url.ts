@@ -86,6 +86,7 @@ export const INVITE_REFUSAL_MESSAGE = {
   update: "join.update",
   "not-ghostly": "join.notGhostly",
   damaged: "join.damaged",
+  device: "join.device",
 } as const satisfies Record<InviteRefusal, string>;
 
 export function buildInviteCode(

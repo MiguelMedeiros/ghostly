@@ -1,4 +1,5 @@
 import { generateMnemonic, validateMnemonic } from '@scure/bip39';
+import { awayFrom, refuseAway } from "./away";
 import { wordlist } from '@scure/bip39/wordlists/english.js';
 import { ETHEREUM_USDT, EVM_TEST_CHAINS, SEPOLIA_TEST_USDT, USDT_PUBLIC_RPC, type WalletNetwork } from '@ghostly/core';
 import type { WalletMode } from '../../shared/mints';
@@ -10,7 +11,8 @@ import { intentRepository, newDeviceKey, sealSeed, unsealSeed, type EncryptedSee
 import type { SavedIntent } from './coordinator';
 
 export interface UsdtWalletView {
-  configured:boolean; locked:boolean; automatic?:boolean; network?:UsdtConfig['network']; provider?:string;
+  /** `read`: the balances were read once since this wallet opened (until then they say nothing). */
+  configured:boolean; locked:boolean; read?:true; automatic?:boolean; network?:UsdtConfig['network']; provider?:string;
   chainId?:number; token?:string; decimals?:number; address?:string;
   balance:string; gasBalance:string; error?:string;
 }
@@ -47,6 +49,8 @@ export class UsdtWallet {
    * while the RPC is unreachable.
    */
   ensureReady(create=false):Promise<void> {
+    // At home on another device (WISP 06 § Wallets that stay home): never opened here.
+    if (awayFrom(`usdt:${this.network}`) !== undefined) return Promise.resolve();
     if(this.readying)return this.readying.then(()=>this.needsReady(create)?this.startReady(create):undefined);
     return this.startReady(create);
   }
@@ -72,6 +76,8 @@ export class UsdtWallet {
   resume() {this.gate.resume();}
   create(params:UsdtCreate) {return this.serial(()=>this.createNow(params));}
   private async createNow(params:UsdtCreate) {
+    // At home on another device (WISP 06 § Wallets that stay home): never made again, unlocked or restored over here.
+    refuseAway(`usdt:${this.network}`, "USDT");
     if(usdtMode(params.network)!==this.network)throw new WrongNetworkError(usdtMode(params.network),`${params.network==='ethereum'?'Ethereum':params.network} is a ${networkLabel(usdtMode(params.network))} network: this is the ${networkLabel(this.network)} USDT wallet`);
     const mnemonic=params.mnemonic?.trim() || generateMnemonic(wordlist);
     if(!validateMnemonic(mnemonic,wordlist))throw new Error('Invalid recovery phrase');
@@ -92,6 +98,8 @@ export class UsdtWallet {
     this.adapter=adapter;this.changed();await this.refresh();
   }
   async unlock(password?:string) {
+    // At home on another device (WISP 06 § Wallets that stay home): never made again, unlocked or restored over here.
+    refuseAway(`usdt:${this.network}`, "USDT");
     if(!this.saved)throw new Error('Create a USDT wallet first');
     if(this.adapter)return;
     const key=this.saved.deviceKey??password;
@@ -116,7 +124,7 @@ export class UsdtWallet {
   /** Stopping ends it where it is: a wallet shutting down needs no balance. */
   async refresh() {
     clearTimeout(this.timer);const adapter=this.adapter;if(!adapter)return;
-    try {const address=await this.gate.within(adapter.address()),balances=await this.gate.within(adapter.balances());if(adapter!==this.adapter)return;this.view={configured:true,locked:false,automatic:!!this.saved?.deviceKey,...adapter.config,address,...balances};}
+    try {const address=await this.gate.within(adapter.address()),balances=await this.gate.within(adapter.balances());if(adapter!==this.adapter)return;this.view={configured:true,locked:false,read:true,automatic:!!this.saved?.deviceKey,...adapter.config,address,...balances};}
     catch(error) {if(error instanceof ModeChanged||adapter!==this.adapter)return;this.view={...this.view,error:'RPC unavailable. Balance may be stale.'};}
     this.changed();if(this.adapter)this.timer=setTimeout(()=>void this.refresh(),8000);
   }
@@ -134,7 +142,7 @@ export class UsdtWallet {
     const plaintext=JSON.stringify({format:'ghostly-usdt',version:1,config:this.saved.config,mnemonic,intents});
     return JSON.stringify({format:'ghostly-usdt-encrypted',version:1,vault:await sealSeed(plaintext,password)});
   }
-  restoreBackup(text:string,password:string):Promise<void> {return this.serial(async()=>{
+  restoreBackup(text:string,password:string):Promise<void> {return this.serial(async()=>{ refuseAway(`usdt:${this.network}`, "USDT");
     if(text.length>16*1024*1024)throw new Error('Backup is too large');
     const envelope=JSON.parse(text);
     if(envelope.format!=='ghostly-usdt-encrypted'||envelope.version!==1)throw new Error('Unsupported USDT backup');

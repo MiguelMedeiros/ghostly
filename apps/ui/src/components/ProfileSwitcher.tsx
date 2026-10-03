@@ -95,6 +95,7 @@ export function ProfileSwitcherMenu({ variant, glances, onClose }: {
         const { entry, glance } = other;
         const unread = glance?.unread ?? 0, fresh = glance?.fresh ?? 0;
         const status = glance?.locked ? t("profileSwitcher.locked")
+          : glance?.standby ? t("profileSwitcher.standby")
           : [fresh ? t("profileSwitcher.new") : "", unread ? t("profileSwitcher.unread", { count: unread }) : ""].filter(Boolean).join(", ");
         return (
           <button key={entry.id || "default"} type="button" role="menuitemradio" aria-checked="false" data-testid="profile-switcher-item"
@@ -106,6 +107,9 @@ export function ProfileSwitcherMenu({ variant, glances, onClose }: {
             <span className="flex-1 min-w-0 truncate text-sm text-text-primary">{entry.name}</span>
             {glance?.locked
               ? <span className="shrink-0 text-text-muted" title={t("profileSwitcher.locked")} data-testid="profile-switcher-locked"><LockIcon /></span>
+              : glance?.standby
+              // On standby here (WISP 06): the profile runs on another device, so no count is shown for it.
+              ? <span data-testid="profile-switcher-standby" aria-hidden="true" className="shrink-0 h-5 px-1.5 rounded-full border border-border-bright text-[11px] font-semibold leading-[18px] text-text-secondary">{t("profileSwitcher.standby")}</span>
               : <>
                 {/* Seen waiting for it since it last ran (WISP 04 § Checking other profiles): it arrives when it runs. */}
                 {fresh > 0 && <span data-testid="profile-switcher-new" aria-hidden="true" className="shrink-0 h-5 px-1.5 rounded-full border border-accent text-[11px] font-semibold leading-[18px] text-accent">{t("profileSwitcher.newShort")}</span>}

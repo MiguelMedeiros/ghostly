@@ -4,6 +4,9 @@ import { CASHU_MINT_SOURCE } from "./cashuMint";
 import type { LightningProviderDescriptor } from "./lightning";
 import { LightningService, readLightningJournal, type LightningEvents, type LightningOp, type LightningView } from "./lightningService";
 import { sourceKey } from "./sources";
+import { awayFrom } from "../away";
+import { breezDatabaseInUse } from "./breezDatabases";
+import { normalizePhrase } from "./recoveryPhrase";
 import type { ProviderHost } from "./types";
 
 /**
@@ -295,9 +298,28 @@ export class LightningCards {
   // -- every card at once -----------------------------------------------------------
 
   list() { return readLightningJournal(); }
-  async reconcile() { await Promise.all(this.all().map((s) => s.reconcile())); }
-  async recover() { for (const s of this.all()) await s.recover(); }
-  async ensureReady() { await Promise.all(this.all().map((s) => s.ensureReady())); }
+  /**
+   * What a handoff needs to know of the cards (WISP 06 § Wallets), from their sealed settings: the LND cards that pin a
+   * certificate, and each Breez card's database on this device, by wallet id.
+   */
+  async handoffFacts(): Promise<{ pinned: string[]; breez: Map<string, string> }> {
+    const pinned: string[] = [], breez = new Map<string, string>();
+    for (const [id, service] of this.services) {
+      const wallet = `lightning:${this.network}:${id}`, providerId = service.view.providerId;
+      if (providerId === "lnd" && await service.sources.secret("certificate")) pinned.push(wallet);
+      if (providerId === "breez") {
+        const mnemonic = await service.sources.secret("mnemonic");
+        if (mnemonic) breez.set(wallet, await breezDatabaseInUse(this.network === "mainnet" ? "bitcoin" : "regtest", normalizePhrase(mnemonic)));
+      }
+    }
+    return { pinned, breez };
+  }
+
+  /** The cards whose source is opened on this device: not one at home on another device (WISP 06 § Wallets that stay home). */
+  private here(): LightningService[] { return [...this.services].filter(([id]) => awayFrom(`lightning:${this.network}:${id}`) === undefined).map(([, s]) => s); }
+  async reconcile() { await Promise.all(this.here().map((s) => s.reconcile())); }
+  async recover() { for (const s of this.here()) await s.recover(); }
+  async ensureReady() { await Promise.all(this.here().map((s) => s.ensureReady())); }
   refreshOffered() { for (const s of this.all()) s.refreshOffered(); }
   wake() { for (const s of this.all()) s.sources.wake(); }
   cutShort() { this.adding?.sources.cutShort(); }

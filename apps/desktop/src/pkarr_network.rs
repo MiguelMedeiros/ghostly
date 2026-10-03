@@ -48,6 +48,7 @@ use tokio::sync::watch;
 use url::Url;
 
 use crate::diagnostics;
+use crate::turn_network::{TurnDht, TurnSources};
 
 /// The relays written to before Settings named any: the browser clients' defaults
 /// (`DEFAULT_RELAYS` in packages/core/src/relay.ts). The app hands over the list
@@ -118,7 +119,9 @@ const DHT_SILENT_LOOKUPS: u32 = 2;
 /// The DHT as this client reaches it: the Mainline DHT itself, or, in tests, a stand-in behind a Pkarr client.
 #[derive(Clone)]
 pub enum Dht {
-    Mainline(DhtClient),
+    /// The node every record is read from and published to, and the turn record's own node (WISP 06), which
+    /// is made only when a turn is first read or put.
+    Mainline(DhtClient, Arc<TurnDht>),
     #[cfg_attr(not(test), allow(dead_code))]
     StandIn(Client),
 }
@@ -127,15 +130,15 @@ impl Dht {
     /// A node of the Mainline DHT, joining through `bootstrap` (the public bootstrap nodes when `None`).
     pub fn mainline(bootstrap: Option<Vec<SocketAddrV4>>) -> Result<Self, String> {
         let mut config = DhtConfig::default();
-        config.bootstrap = bootstrap;
+        config.bootstrap = bootstrap.clone();
         DhtClient::build(config)
-            .map(Dht::Mainline)
+            .map(|dht| Dht::Mainline(dht, Arc::new(TurnDht::new(bootstrap))))
             .map_err(|e| format!("DHT node: {e}"))
     }
 
     async fn publish(&self, packet: &SignedPacket) -> Result<(), String> {
         match self {
-            Dht::Mainline(dht) => dht
+            Dht::Mainline(dht, _) => dht
                 .publish(packet)
                 .await
                 .map(|_| ())
@@ -156,7 +159,7 @@ impl Dht {
         first: impl FnOnce(&SignedPacket),
     ) -> (Option<SignedPacket>, bool) {
         match self {
-            Dht::Mainline(dht) => {
+            Dht::Mainline(dht, _) => {
                 let response = dht.resolve(key, None).await;
                 if let Some(packet) = response.first() {
                     first(packet);
@@ -410,6 +413,37 @@ impl Pkarr {
                 state: Mutex::new(state),
             }),
         })
+    }
+
+    /// Where the turn record is read and put (WISP 06): the DHT, where this app has one, and every relay of
+    /// Settings. Its own path (`turn_network.rs`): nothing of the budgets, the caches or the retries here.
+    pub fn turn_sources(&self) -> TurnSources<'_> {
+        let dht = match &self.inner.lookup {
+            Some(Dht::Mainline(_, turn)) => Some(turn.as_ref()),
+            _ => None,
+        };
+        let relays = self
+            .inner
+            .state
+            .lock()
+            .unwrap()
+            .relays
+            .iter()
+            .map(|relay| relay.url.clone())
+            .collect();
+        TurnSources {
+            dht,
+            relays,
+            http: &self.inner.http,
+        }
+    }
+
+    /// The turn's own DHT node, to make ahead of the first read (a profile that has a device set).
+    pub fn turn_dht(&self) -> Option<Arc<TurnDht>> {
+        match &self.inner.lookup {
+            Some(Dht::Mainline(_, turn)) => Some(turn.clone()),
+            _ => None,
+        }
     }
 
     /// Settings, Network: the relays written to, and whether reads may use them. Relays named by

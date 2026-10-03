@@ -2,6 +2,7 @@ import { STORES, store, transact, wrap } from "../../../shared/idb";
 import type { WalletMode } from "../../../shared/mints";
 import { ModeChanged, ModeGate } from "../modeGate";
 import { newDeviceKey, sealSeed, unsealSeed, type EncryptedSeed } from "../persistence";
+import { requireTurn } from "../away";
 import { describeProvider, networkMode, offeredIn, redact, sourceProblem, type ProviderDescriptor, type ProviderDescriptorView, type ProviderHost, type ProviderKind, type ProviderNetwork, type ProviderSettings, type SourceProblem } from "./types";
 
 /**
@@ -37,6 +38,8 @@ export interface SourceView {
   alias?: string;
   /** Spendable sats, when the source says. */
   balance?: number;
+  /** What the source holds was read once since it connected (or it says it shows none): until then `balance` says nothing. */
+  read?: true;
   /** On-chain: sats in the mempool. */
   unconfirmed?: number;
   /**
@@ -170,6 +173,15 @@ export class ProviderSources<P extends Connectable> {
 
   async start() { await this.load(this.mode); this.view = this.idle(); }
 
+  /** One saved secret of the source (a handoff asks whether an LND card pins its certificate, and a Breez phrase), or undefined. */
+  async secret(name: string): Promise<string | undefined> {
+    const stored = this.stored;
+    if (!stored?.secrets) return undefined;
+    const secrets = JSON.parse(await unsealSeed(stored.secrets, stored.deviceKey ?? "")) as Record<string, unknown>;
+    const value = secrets[name];
+    return typeof value === "string" && value ? value : undefined;
+  }
+
   /** The list of providers changed (a plugin registered): the picker is told, nothing reconnects. */
   refreshOffered() { this.view = { ...this.view, offered: this.offered() }; this.options.changed(); }
 
@@ -233,6 +245,8 @@ export class ProviderSources<P extends Connectable> {
 
   /** Creates a provider and checks it is on a network of this mode before anything uses it. */
   private async open(descriptor: ProviderDescriptor<P>, settings: ProviderSettings, controller = this.controller) {
+    // The Breez source shares its database with the Spark wallet of its phrase: one writer, after a fresh turn read.
+    if (descriptor.id === "breez") await requireTurn();
     const signal = controller.signal;
     const provider = await this.gate.within(abortable(descriptor.create(settings, { ...this.options.host(), mode: this.mode, signal }), signal), (p) => p.close());
     try {
@@ -415,11 +429,13 @@ export class ProviderSources<P extends Connectable> {
   async refresh() {
     clearTimeout(this.timer);
     const provider = this.provider;
-    if (!provider || !this.options.refresh) return;
+    if (!provider) return;
+    // A kind of source with nothing to read shows no balance: what it shows is read.
+    if (!this.options.refresh) { if (!this.view.read) { this.view = { ...this.view, read: true }; this.options.changed(); } return; }
     try {
       const details = await this.options.refresh(provider);
       if (provider !== this.provider) return;
-      this.view = { ...this.view, ...details, balanceAt: undefined, error: undefined };
+      this.view = { ...this.view, ...details, read: true, balanceAt: undefined, error: undefined };
       this.remember(details);
     } catch (error) {
       if (provider !== this.provider) return;
