@@ -18,7 +18,7 @@
     "gif-api": {"title":"GIFCities search","fake":"stubbed with context.route"},
     "hyperdht-relay": {"title":"A HyperDHT relay (dht-relay over WebSocket) on its own HyperDHT network","env":"GHOSTLY_HYPERDHT_RELAY","stack":"e2e/infra (ghostly-e2e-hyperdht-relay)"},
     "image-host": {"title":"A remote https image host (picture links)","fake":"stubbed with context.route"},
-    "iroh-relay": {"title":"An Iroh relay (iroh-relay 1.2, dev mode, plain HTTP on loopback)","env":"GHOSTLY_IROH_RELAY_URL"},
+    "iroh-relay": {"title":"An Iroh relay (iroh-relay 1.3, dev mode, plain HTTP on loopback)","env":"GHOSTLY_IROH_RELAY_URL"},
     "keyserver": {"title":"keys.openpgp.org (OpenPGP key lookup)"},
     "lnd-regtest": {"title":"Two LND nodes on regtest with a channel","env":"GHOSTLY_LND_REGTEST","stack":"e2e/support/lnd-regtest"},
     "lnurl-server": {"title":"An LNURL-pay / Lightning address server","fake":"e2e/support/lnurl.ts"},

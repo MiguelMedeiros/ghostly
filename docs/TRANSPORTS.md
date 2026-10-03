@@ -22,7 +22,7 @@ Every 1:1 chat has two layers ([WISP 400](wisps/400-chat.md), [WISP 100](wisps/1
 | Transport | Web app, extension | Desktop | Headless CLI | Spec |
 |---|---|---|---|---|
 | WebRTC (`webrtc/1`) | Direct (STUN, optional TURN) | macOS and Windows. Not on Linux: WebKitGTK has no WebRTC | `node-datachannel` (libdatachannel) | [WISP 101](wisps/101-webrtc.md) |
-| Iroh (`iroh/1`) | Relayed only, Iroh 1.2 compiled to wasm | Native Iroh 1.2, direct or through its home relay | Relayed only, the same wasm build | [WISP 102](wisps/102-iroh.md) |
+| Iroh (`iroh/1`) | Relayed only, Iroh 1.3 compiled to wasm | Native Iroh 1.3, direct or through its home relay | Relayed only, the same wasm build | [WISP 102](wisps/102-iroh.md) |
 | HyperDHT (`hyperdht/1`) | Through a HyperDHT relay, **off by default** | Native, one Node sidecar per app | Native, in its own process | [WISP 103](wisps/103-hyperdht.md) |
 
 Every transport runs the same authenticated chat session ([WISP 401](wisps/401-paired-chat.md)). A transport's own handshake (DTLS fingerprint, TLS exporter, Noise hash) is bound into the session, so the contact's pinned key is checked the same way on each.
@@ -36,7 +36,7 @@ Every transport runs the same authenticated chat session ([WISP 401](wisps/401-p
 ### Iroh
 
 - **Desktop:** native Iroh (`native/transports/`, `apps/desktop/src/paired_transport.rs`) on n0's public relays.
-- **Web and extension** ([#225](https://github.com/MiguelMedeiros/ghostly/pull/225)): the same Iroh 1.2 built for browsers (`native/transports/iroh-web`, shipped as `packages/iroh-web`). A page cannot send UDP, so every packet goes through an Iroh relay. The QUIC/TLS session is still end to end.
+- **Web and extension** ([#225](https://github.com/MiguelMedeiros/ghostly/pull/225)): the same Iroh 1.3 built for browsers (`native/transports/iroh-web`, shipped as `packages/iroh-web`). A page cannot send UDP, so every packet goes through an Iroh relay. The QUIC/TLS session is still end to end.
 - Default Iroh relays (`DEFAULT_IROH_RELAYS` in `packages/browser/src/platform/irohWeb.ts`), editable in Settings, Advanced, Network (up to four):
   - `https://use1-1.relay.n0.iroh.link/`
   - `https://euc1-1.relay.n0.iroh.link/`
