@@ -377,7 +377,9 @@ describe("a device link's transports in its packet (`_tr`)", () => {
       expect(x.link.myPubKeyZ32).toBe((a.link as unknown as { options: { params: { peerPubKeyZ32: string } } }).options.params.peerPubKeyZ32);
       await run(120_000);
       expect(heard).toEqual([]);
-      expect(native.dials).toBe(0);
+      // The desktop dials none of the intruder's endpoints. The intruder may dial the desktop (it reads the desktop's
+      // own signed `_tr`, which is genuine), and is refused there: whether it does depends on which side dials first.
+      expect(native.dialsBy.get("desktop") ?? 0).toBe(0);
       expect(a.link.isDataLinkOpen).toBe(false);
       expect(a.states.some((s) => s.keyMismatch)).toBe(false);
       expect((a.link as unknown as { keyStopped: boolean }).keyStopped).toBe(false);
@@ -388,7 +390,9 @@ describe("a device link's transports in its packet (`_tr`)", () => {
       const b = openNative("phone", deviceLinkPairing(d, phone, desktop.publicKey), []);
       for (let i = 0; i < 480 && !(a.link.supportsDevice(DEVICES_CAPABILITY) && b.link.supportsDevice(DEVICES_CAPABILITY)); i++) await run(250);
       expect(a.link.supportsDevice(DEVICES_CAPABILITY)).toBe(true);
-      expect(heard).toEqual([["iroh/1"]]);
+      // Only what the phone signed was ever taken. The desktop may have gone live on the phone's dial before it read
+      // the phone's packet, so it need not have heard it yet.
+      expect(heard.every((said) => said.length === 1 && said[0] === "iroh/1")).toBe(true);
     });
   });
 });
