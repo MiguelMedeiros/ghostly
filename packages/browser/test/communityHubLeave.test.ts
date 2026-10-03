@@ -79,6 +79,8 @@ describe("a hub whose app is killed", { timeout: 120_000 }, () => {
     // 20 s waiting for the hub to come back, the hub left reads its lobby within 6 s, a few seconds of signaling.
     expect(back).toBeLessThanOrEqual(35_000);
     expect(heard).toBeLessThanOrEqual(5_000);
+    // The hubs left stopped dialling it after the same 20 s its members wait for it: no edge to it is kept open.
+    for (const hub of rest.filter(p => p.groups.communities.isHub(id))) expect([...hub.links.values()].some(e => e.kind === "edge" && e.g === id && e.peer === keyOf(admin)), `${hub.name} still dials the killed hub`).toBe(false);
     // Its members asked a hub left, and their requests went as a knock does, not held while their links dial.
     expect(asked.filter(a => orphans.includes(a.who)).length).toBeGreaterThan(0);
     expect(asked.every(a => a.door), "every request in a hub's lobby").toBe(true);

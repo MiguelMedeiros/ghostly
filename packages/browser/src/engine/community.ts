@@ -234,6 +234,8 @@ interface Live {
   hubsUp: Set<string>;
   /** As a hub: the other hubs whose edge to me is up (when one drops, its members are about to ask in my lobby). */
   hubPeersUp?: Set<string>;
+  /** As a hub: the other hubs whose edge to me dropped, and when (`hubDead`). */
+  hubPeersDown?: Map<string, number>;
   /** As a hub stepping down: when I took myself out of the beacon (0: not stepping down), and not before when the next try. */
   leaving: number;
   stepDownAt: number;
@@ -702,7 +704,7 @@ export class Communities {
       if (s.state.pendingLeaves.some(r => r.s !== me && this.recentHub(live, r.s))) live.lobbyBusyUntil = Math.max(live.lobbyBusyUntil, now + this.timings.lobbyBusyMs);
       // So is one whose edge to me was up and dropped (its app closed, or was killed and said nothing): its members ask
       // the hubs left once they give up on it. Read every half minute, my lobby kept them waiting that long more.
-      if (this.hubDropped(groupId, live, others)) live.lobbyBusyUntil = Math.max(live.lobbyBusyUntil, now + this.timings.lobbyBusyMs);
+      if (this.hubDropped(groupId, live, others, now)) live.lobbyBusyUntil = Math.max(live.lobbyBusyUntil, now + this.timings.lobbyBusyMs);
       const lobbyEvery = now < live.lobbyBusyUntil && !busy ? this.timings.lobbyPollMs : this.timings.lobbyIdlePollMs;
       if (now - live.lastLobbyPoll >= lobbyEvery) { live.lastLobbyPoll = now; await this.pollLobby(groupId, live, now); }
       await this.answerKnocks(groupId, live, now, busy);
@@ -1067,7 +1069,7 @@ export class Communities {
     if (s.status === "active") {
       if (live.hub) {
         this.shed(groupId, live, now);
-        for (const h of freshHubs(this.hubs(live), now)) if (h.key !== s.myKey) wanted.add(h.key);
+        for (const h of freshHubs(this.hubs(live), now)) if (h.key !== s.myKey && !this.hubDead(groupId, live, h, now)) wanted.add(h.key);
         for (const key of live.members.keys()) wanted.add(key);
         for (const key of live.farewells.keys()) wanted.add(key);
       } else for (const key of live.myHubs) wanted.add(key);
@@ -1090,16 +1092,31 @@ export class Communities {
     }
   }
 
-  /** As a hub: did the edge to another hub that was up drop since the last tick? */
-  private hubDropped(groupId: string, live: Live, others: Hub[]): boolean {
-    const edges = this.host.edges(groupId), up = (live.hubPeersUp ??= new Set());
+  /** As a hub: did the edge to another hub that was up drop since the last tick? (And since when each is down.) */
+  private hubDropped(groupId: string, live: Live, others: Hub[], now: number): boolean {
+    const edges = this.host.edges(groupId), up = (live.hubPeersUp ??= new Set()), down = (live.hubPeersDown ??= new Map());
     let dropped = false;
     for (const key of new Set([...up, ...others.map(h => h.key)])) {
       const id = edges.get(key);
-      if (id && this.host.linkReady(id, 2)) up.add(key);
-      else if (up.delete(key)) dropped = true;
+      if (id && this.host.linkReady(id, 2)) { up.add(key); down.delete(key); }
+      else if (up.delete(key)) { dropped = true; down.set(key, now); }
     }
+    for (const [key, since] of down) if (now - since > HUB_GRACE_MS) down.delete(key);
     return dropped;
+  }
+
+  /**
+   * As a hub: another hub whose edge to me dropped `hubWaitMs` ago, that has not republished its beacon entry since and
+   * has not shown itself back: its app was killed (or closed for good). Not dialled any more, as its members stop
+   * dialling it after the same wait. My side of the edge dialled it again at once and looked fast for it while its entry
+   * stayed fresh, up to 90 s: on relays that spent a third of this hub's requests while the edges its members needed
+   * were signaling (CLI daemons, 2026-10-03). Dialled again once its entry moves.
+   */
+  private hubDead(groupId: string, live: Live, hub: Hub, now: number): boolean {
+    const since = live.hubPeersDown?.get(hub.key);
+    if (since === undefined || now - since <= this.timings.hubWaitMs || hub.ts > since) return false;
+    const id = this.host.edges(groupId).get(hub.key);
+    return !(id && this.host.linkBack?.(id));
   }
 
   /**
