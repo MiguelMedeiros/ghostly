@@ -1,6 +1,8 @@
 import { DEFAULT_RELAYS, HoldKeys, beaconKeys, communityHasFrame, currentRelays, isDiscoveryBudgetError, normalizeRelayUrl, peekDhtMailbox, readBeaconHead, type PkarrTransport } from "@ghostly/core";
 import { databaseExists } from "../backup/database";
 import { STORES, databaseName } from "../shared/idb";
+import { runsEngine } from "../devices/state";
+import { deviceStateOf } from "../devices/store";
 import type { Settings, StoredGroup, StoredLink } from "../shared/types";
 
 /*
@@ -42,9 +44,11 @@ export interface PeekChat {
 /**
  * `missing`: no such profile database; `path`: that profile reads the network another way than this one (another
  * set of relays, or relays where this one reads the DHT), so it is not read from here; `offline`: this profile is
- * set offline; `budget`: the relays' request budget stopped the round; `rested`: this profile's own budget is spent.
+ * set offline; `budget`: the relays' request budget stopped the round; `rested`: this profile's own budget is spent;
+ * `standby`: this device is not the active one for that profile (WISP 06 § The gate), so nothing of it is read: a look
+ * reads mailboxes with the profile's own keys, which only its active device may do.
  */
-export interface PeekResult { status: "done" | "missing" | "path" | "offline" | "budget" | "rested"; reads: number; chats: PeekChat[] }
+export interface PeekResult { status: "done" | "missing" | "path" | "offline" | "budget" | "rested" | "standby"; reads: number; chats: PeekChat[] }
 
 /**
  * How a profile reads Pkarr records: the DHT itself (Desktop, unless its relays are read too), or these relays.
@@ -95,7 +99,12 @@ export interface ProfilePeekHost {
   online(): boolean;
   now?: () => number;
   read?: typeof readProfileStore;
+  /** Whether this device may run that profile (its device state is `single` or `active`); a state that cannot be read is a no. */
+  runsHere?: (dbName: string) => Promise<boolean>;
 }
+
+/** The device state of another profile of this device, from the device state database: never from that profile's own. */
+const runsOnThisDevice = (dbName: string): Promise<boolean> => (typeof indexedDB === "undefined" ? Promise.resolve(true) : deviceStateOf(dbName).then(runsEngine, () => false));
 
 export class ProfilePeek {
   private readonly spent = new Map<string, number[]>();
@@ -115,6 +124,8 @@ export class ProfilePeek {
   }
 
   private async round(profile: string, dbName: string): Promise<PeekResult> {
+    // Before its database is opened: a standby's frozen copy is never opened, and its keys read nothing.
+    if (!(await (this.host.runsHere ?? runsOnThisDevice)(dbName))) return { status: "standby", reads: 0, chats: [] };
     const stored = await (this.host.read ?? readProfileStore)(dbName);
     if (!stored) return { status: "missing", reads: 0, chats: [] };
     if (readPathOf(stored.settings, this.host.direct) !== this.host.readPath()) return { status: "path", reads: 0, chats: [] };

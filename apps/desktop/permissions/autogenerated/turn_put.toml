@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-turn-put"
+description = "Enables the turn_put command without any pre-configured scope."
+commands.allow = ["turn_put"]
+
+[[permission]]
+identifier = "deny-turn-put"
+description = "Denies the turn_put command without any pre-configured scope."
+commands.deny = ["turn_put"]

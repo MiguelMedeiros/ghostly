@@ -5,9 +5,11 @@ import { expect, test, type BrowserContext, type Page } from "@playwright/test";
  * the code leaves the address before anything else runs, and no request ever carries it.
  */
 
-// WISP 801's test vector (synthetic bytes), and codes made from it: version 2, version 0, 96 bytes.
+// WISP 801's test vector (synthetic bytes), and codes made from it: version 2 (a code that adds a device, WISP 06),
+// version 3 (above every version a reader knows: a newer Ghostly's), version 0, 96 bytes.
 const CODE = "ghostly1pqqqsyqcyq5rqwzqfpg9scrgwpugpzysnzs23v9ccrydpk8qarc0jqgfzyvjz2f389q5j52ev95hz7vp3xgengdfkxuurjw3m8s7nu06qg9pyx3z9ger5sj22fdxy6nj02pg4y56524t9wkzetfd4ch27tasxzcnrv3jkvemgd94xkmrddehhqutjwd682anh0puh57mu04l8794pd4k";
 const V2 = "ghostly1zqqqsyqcyq5rqwzqfpg9scrgwpugpzysnzs23v9ccrydpk8qarc0jqgfzyvjz2f389q5j52ev95hz7vp3xgengdfkxuurjw3m8s7nu06qg9pyx3z9ger5sj22fdxy6nj02pg4y56524t9wkzetfd4ch27tasxzcnrv3jkvemgd94xkmrddehhqutjwd682anh0puh57mu04l87xe98gx";
+const V3 = "ghostly1rqqqsyqcyq5rqwzqfpg9scrgwpugpzysnzs23v9ccrydpk8qarc0jqgfzyvjz2f389q5j52ev95hz7vp3xgengdfkxuurjw3m8s7nu06qg9pyx3z9ger5sj22fdxy6nj02pg4y56524t9wkzetfd4ch27tasxzcnrv3jkvemgd94xkmrddehhqutjwd682anh0puh57mu04l878a7pr3";
 const V0 = "ghostly1qqqqsyqcyq5rqwzqfpg9scrgwpugpzysnzs23v9ccrydpk8qarc0jqgfzyvjz2f389q5j52ev95hz7vp3xgengdfkxuurjw3m8s7nu06qg9pyx3z9ger5sj22fdxy6nj02pg4y56524t9wkzetfd4ch27tasxzcnrv3jkvemgd94xkmrddehhqutjwd682anh0puh57mu04l87y36t7p";
 const SHORT = "ghostly1pqqqsyqcyq5rqwzqfpg9scrgwpugpzysnzs23v9ccrydpk8qarc0jqgfzyvjz2f389q5j52ev95hz7vp3xgengdfkxuurjw3m8s7nu06qg9pyx3z9ger5sj22fdxy6nj02pg4y56524t9wkzetfd4ch27tu5fqcad";
 const TYPO = CODE.slice(0, 100) + (CODE[100] === "q" ? "p" : "q") + CODE.slice(101);
@@ -144,7 +146,8 @@ test.describe("join page", () => {
 
   for (const [name, code, message] of [
     ["a typo", TYPO, "This code has a typo. Check it, or ask for the code again."],
-    ["a newer version", V2, "This invite was made by a newer Ghostly. Update to join."],
+    ["a newer version", V3, "This invite was made by a newer Ghostly. Update to join."],
+    ["a code that adds a device", V2, "This code adds a device to a profile. On the new device, open Ghostly and choose I already use Ghostly."],
     ["version 0", V0, "This is not a Ghostly invite."],
     ["a damaged invite", SHORT, "This invite is damaged. Ask for a new one."],
   ]) {

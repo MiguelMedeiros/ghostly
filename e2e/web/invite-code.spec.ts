@@ -60,7 +60,8 @@ test("Join says why it refuses a code, and joins nothing", { tag: ["@feature:inv
   const bytes = bech32m.fromWords(words);
   const cases: [string, string][] = [
     [code.slice(0, 60) + (code[60] === "q" ? "p" : "q") + code.slice(61), "This code has a typo. Check it, or ask for the code again."],
-    [bech32m.encode("ghostly", [2, ...words], false), "This invite was made by a newer Ghostly. Update to join."],
+    [bech32m.encode("ghostly", [2, ...words], false), "This code adds a device to a profile. On the new device, choose I already use Ghostly."],
+    [bech32m.encode("ghostly", [3, ...words], false), "This invite was made by a newer Ghostly. Update to join."],
     [bech32m.encode("ghostly", [0, ...words], false), "This is not a Ghostly invite."],
     ["npub1sg6plzptd64u62a878hep2kev88swjh3tw00gjsfl8f237lmu63q0uf63m", "This is not a Ghostly invite."],
     [bech32m.encode("ghostly", [1, ...bech32m.toWords(bytes.slice(0, 96))], false), "This invite is damaged. Ask for a new one."],

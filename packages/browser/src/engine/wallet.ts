@@ -223,7 +223,11 @@ export class CashuWallet {
     private readonly getKnownMints: () => string[] = getMints,
   ) {}
 
+  /** Stopped with the engine: no poll runs or is scheduled again (WISP 06: the check after a handoff's stop is final). */
+  private stopped = false;
+
   start(): void {
+    this.stopped = false;
     void this.pollQuotes();
     void this.pollMelts();
     void this.checkRestored();
@@ -231,6 +235,23 @@ export class CashuWallet {
     // Names, fees and limits for the UI; a mint that is down simply stays without them.
     for (const mint of this.getKnownMints()) void this.checkMint(mint).then(() => this.events.onChange(), () => {});
   }
+
+  /**
+   * Stops every poll and timer, and waits for what runs inside a per-mint lock to end: a swap there must end, not be cut.
+   * Nothing is written by this wallet after it resolves.
+   */
+  async stop(): Promise<void> {
+    this.stopped = true;
+    for (const timer of [this.quoteTimer, this.meltTimer, this.restoredTimer, this.swapTimer]) if (timer) clearTimeout(timer);
+    this.quoteTimer = this.meltTimer = this.restoredTimer = this.swapTimer = null;
+    // Bounded: a mint that never answers does not hold a closing app forever (the handoff's check after the stop then
+    // sees a swap still going through and refuses).
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    await Promise.race([Promise.all([...this.locks.values()].map((lock) => lock.catch(() => {}))), new Promise((resolve) => { timer = setTimeout(resolve, CashuWallet.STOP_WAIT_MS); })]);
+    clearTimeout(timer);
+  }
+  /** How long `stop` waits for a swap in a per-mint lock. */
+  static STOP_WAIT_MS = 30_000;
 
   /** The Cashu wallet of one network: its mints and their balance. History is every network's, newest first. */
   async view(network?: WalletNetwork): Promise<WalletView> {
@@ -272,6 +293,7 @@ export class CashuWallet {
   private async checkRestored(): Promise<void> {
     if (this.restoredTimer) clearTimeout(this.restoredTimer);
     this.restoredTimer = null;
+    if (this.stopped) return;
     const waiting = (p: StoredProof) => !!p.unchecked && !p.reserved;
     let again = false, changed = false;
     for (const mint of new Set((await this.allProofs()).filter(waiting).map((p) => p.mint))) {
@@ -296,7 +318,7 @@ export class CashuWallet {
       }
     }
     if (changed) this.events.onChange();
-    if (again) this.restoredTimer = setTimeout(() => void this.checkRestored(), RESTORED_POLL_MS);
+    if (again && !this.stopped) this.restoredTimer = setTimeout(() => void this.checkRestored(), RESTORED_POLL_MS);
   }
 
   /** Talks to the mint before it is added: a typo should not become a place to keep money. */
@@ -441,6 +463,7 @@ export class CashuWallet {
   private async pollQuotes(): Promise<void> {
     if (this.quoteTimer) clearTimeout(this.quoteTimer);
     this.quoteTimer = null;
+    if (this.stopped) return;
     const quotes = await wrap<StoredQuote[]>((await store(STORES.quotes, "readonly")).getAll());
 
     // A held quote is not asked about: its mint's "paid" means nothing. It only goes once it has expired.
@@ -450,7 +473,7 @@ export class CashuWallet {
     await this.settleQuotes(quotes);
 
     const remaining = await wrap<StoredQuote[]>((await store(STORES.quotes, "readonly")).getAll());
-    if (remaining.some((q) => !q.issuedUnclaimed && !q.held)) this.quoteTimer = setTimeout(() => void this.pollQuotes(), QUOTE_POLL_MS);
+    if (!this.stopped && remaining.some((q) => !q.issuedUnclaimed && !q.held)) this.quoteTimer = setTimeout(() => void this.pollQuotes(), QUOTE_POLL_MS);
   }
 
   private async settleQuotes(quotes: readonly StoredQuote[]): Promise<void> {
@@ -1027,6 +1050,7 @@ export class CashuWallet {
   }
 
   private swapsAgainIn(ms: number): void {
+    if (this.stopped) return;
     if (this.swapTimer && this.swapTimerAt <= Date.now() + ms) return;
     if (this.swapTimer) clearTimeout(this.swapTimer);
     this.swapTimerAt = Date.now() + ms;
@@ -1048,6 +1072,7 @@ export class CashuWallet {
     if (!mints) {
       if (this.swapTimer) clearTimeout(this.swapTimer);
       this.swapTimer = null;
+      if (this.stopped) return;
     }
     const open = (await wrap<PendingSwap[]>((await store(STORES.swaps, "readonly")).getAll())).filter((s) => !mints || mints.includes(s.mint));
     let again = 0;
@@ -1265,6 +1290,7 @@ export class CashuWallet {
   private async pollMelts(): Promise<void> {
     if (this.meltTimer) clearTimeout(this.meltTimer);
     this.meltTimer = null;
+    if (this.stopped) return;
     const melts = await wrap<PendingMelt[]>((await store(STORES.melts, "readonly")).getAll());
 
     for (const melt of melts) {
@@ -1286,7 +1312,7 @@ export class CashuWallet {
     }
 
     const remaining = await wrap((await store(STORES.melts, "readonly")).count());
-    if (remaining > 0) this.meltTimer = setTimeout(() => void this.pollMelts(), MELT_POLL_MS);
+    if (remaining > 0 && !this.stopped) this.meltTimer = setTimeout(() => void this.pollMelts(), MELT_POLL_MS);
   }
 
   /**
@@ -1426,9 +1452,15 @@ export class CashuWallet {
   }
 
   /** One operation per mint at a time: two swaps must never pick the same proofs. */
+  /** Tasks inside a per-mint lock, running or waiting their turn: a swap there must end, not be cut (WISP 06 § Wallets). */
+  private lockedTasks = 0;
+  get swapping(): boolean { return this.lockedTasks > 0; }
+
   private locked<T>(mint: string, task: () => Promise<T>): Promise<T> {
     const previous = this.locks.get(mint) ?? Promise.resolve();
+    this.lockedTasks += 1;
     const next = previous.then(task, task);
+    void next.then(() => { this.lockedTasks -= 1; }, () => { this.lockedTasks -= 1; });
     this.locks.set(
       mint,
       next.catch(() => {}),

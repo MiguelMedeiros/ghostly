@@ -47,7 +47,9 @@ describe("Join says why it refuses a code, and joins nothing", () => {
   const typo = inviteCode.slice(0, 50) + (inviteCode[50] === "q" ? "p" : "q") + inviteCode.slice(51);
   it.each([
     ["a typo", typo, "This code has a typo. Check it, or ask for the code again."],
-    ["a newer version", withWords([2, ...words]), "This invite was made by a newer Ghostly. Update to join."],
+    ["a newer version", withWords([3, ...words]), "This invite was made by a newer Ghostly. Update to join."],
+    // Version 2 adds a device to a profile (WISP 06): no chat is made of it, and the person is told where it goes.
+    ["a code that adds a device", withWords([2, ...words]), "This code adds a device to a profile. On the new device, choose I already use Ghostly."],
     ["version 0", withWords([0, ...words]), "This is not a Ghostly invite."],
     ["another kind of code", "npub1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq", "This is not a Ghostly invite."],
     ["a damaged invite", withWords([1, ...bech32m.toWords(bech32m.fromWords(words).slice(0, 96))]), "This invite is damaged. Ask for a new one."],
@@ -62,7 +64,7 @@ describe("Join says why it refuses a code, and joins nothing", () => {
   it("in another language too", async () => {
     const onJoin = vi.fn();
     const { user, engine } = renderApp(<JoinDialog onJoin={onJoin} onClose={() => {}} />, { language: "pt" });
-    engine.readClipboardText = vi.fn(async () => withWords([2, ...words]));
+    engine.readClipboardText = vi.fn(async () => withWords([3, ...words]));
     await user.click(screen.getByRole("button", { name: "Colar da área de transferência" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("Este convite foi criado por um Ghostly mais novo. Atualize para entrar.");
   });

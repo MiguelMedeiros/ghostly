@@ -17,6 +17,23 @@ export interface WakeText {
   body: string;
   /** What a call wake-up says ("Incoming call"), in the app's language. */
   call?: string;
+  /**
+   * In a profile on several devices (WISP 06 § Push and the phone), the words of a device that is not the active one,
+   * with `{device}` where a device's name goes: a message ("New message. Active on {device}."), a call, the same without
+   * a name, and a wake-up from another of the person's devices ("{device} wants to take over. Open Ghostly.", or, on a
+   * standby, "{device} wants to move this profile here.").
+   */
+  standby?: string;
+  standbyCall?: string;
+  standbyUnnamed?: string;
+  standbyCallUnnamed?: string;
+  takeover?: string;
+  moveHere?: string;
+  /**
+   * The profile's peer database name: the key of its device record in `ghostly-devices`, which the worker reads when a
+   * push arrives. It changes when a handoff installs a new namespace, so every page writes it when it starts.
+   */
+  db?: string;
 }
 
 const DB = "ghostly-wake";
@@ -56,6 +73,31 @@ export async function writeWakeEntries(profile: string, entries: readonly WakeEn
     for (const entry of entries) tokens.put(entry, key(profile, entry.token));
     transaction.objectStore(TEXT).put(text, profile);
     await done(transaction);
+  } finally {
+    db.close();
+  }
+}
+
+/**
+ * The words to show and the profile's database name, its tokens left as they are: what a standby's page writes (it
+ * holds no chats to list), and what a never-active device needs for its first push.
+ */
+export async function writeWakeText(profile: string, text: WakeText): Promise<void> {
+  const db = await open();
+  try {
+    const transaction = db.transaction([TEXT], "readwrite");
+    transaction.objectStore(TEXT).put(text, profile);
+    await done(transaction);
+  } finally {
+    db.close();
+  }
+}
+
+/** The words and database name of this profile, whatever token a push carries; undefined when no page wrote them. */
+export async function readWakeText(profile: string): Promise<WakeText | undefined> {
+  const db = await open();
+  try {
+    return await get<WakeText>(db, TEXT, profile);
   } finally {
     db.close();
   }

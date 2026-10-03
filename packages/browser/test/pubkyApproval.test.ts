@@ -308,8 +308,8 @@ describe("Pubky approval", () => {
   it("says a blocked cookie is why a Ring session could not write, and signs it out", async () => {
     const statusError = (statusCode: number) => Object.assign(new Error(`Request failed with status ${statusCode}`), { name: "RequestError", data: { statusCode } });
     for (const [form, statusCode, message] of [
-      ["cookie", 401, /^Pubky Ring approved, but this browser blocked the sign-in cookie of your homeserver/],
-      ["cookie", 403, /blocked the sign-in cookie/],
+      ["cookie", 401, /^Pubky Ring approved, but this browser blocks your homeserver's sign-in cookie/],
+      ["cookie", 403, /blocks your homeserver.s sign-in cookie/],
       ["cookie", 500, /^Could not write to your homeserver: Request failed with status 500$/],
       ["grant", 401, /^Could not write to your homeserver: Request failed with status 401$/],
     ] as const) {

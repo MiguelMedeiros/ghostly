@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-turn-warm"
+description = "Enables the turn_warm command without any pre-configured scope."
+commands.allow = ["turn_warm"]
+
+[[permission]]
+identifier = "deny-turn-warm"
+description = "Denies the turn_warm command without any pre-configured scope."
+commands.deny = ["turn_warm"]

@@ -107,6 +107,12 @@ export interface BrowserHost {
    * the page's own fetch keeps it.
    */
   pubkyCookieSession?(): PubkyCookieSession;
+  /**
+   * Keeps the computer from sleeping while idle, or lets it sleep again ("Keep this computer awake", WISP 06 § User
+   * experience): the desktop app, so a phone can take the profile over while the person is out. Resolves to whether
+   * it is held now. Left out where the platform cannot (a web page, the extension).
+   */
+  keepAwake?(on: boolean): Promise<boolean>;
 }
 
 /** One approval's cookie session, outside the page: its cookies never reach the page, and `close` forgets them. */

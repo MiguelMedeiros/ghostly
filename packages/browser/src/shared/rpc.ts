@@ -291,6 +291,11 @@ export interface EngineApi {
    */
   setWakeSubscription(params: { subscription: WakeSubscription | null }): Promise<void>;
   /**
+   * The page found the profile's subscription is this browser's own (WISP 06 § Push and the phone): in a profile on
+   * several devices it names this device, and the other devices learn how to wake it. Nothing for any other endpoint.
+   */
+  wakeConfirm(params: { endpoint: string }): Promise<void>;
+  /**
    * A chat muted here (#250) is not woken: its contact is told to forget this side's subscription until it is unmuted,
    * so no push for it reaches the browser at all (a push that shows nothing counts against the app with some browsers).
    * A private group's `group:<id>` does the same for every member of it (WISP 9xx · Group Mesh § Wake-up push).
@@ -343,6 +348,92 @@ export interface EngineApi {
   renameGroup(params: { groupId: string; name: string }): void;
   /** Forgets the group and its history on this device (leaving first when still in it). */
   forgetGroup(params: { groupId: string }): void;
+  /**
+   * "Manage groups from this device" (WISP 06 § Forced takeover): admin work in this group, off on this device after a
+   * forced takeover or a restore, turned on again (or off).
+   */
+  setGroupManage(params: { groupId: string; on: boolean }): void;
+  /**
+   * One profile on several devices (WISP 06 § Adding a device). Every method below starts with `device`, so a device
+   * that is not the active one (device-link-only mode) answers the ones it has. Errors of an enrollment start with
+   * `enroll-<reason>:`.
+   *
+   * The active device's side: the code for a new device, good for ten minutes; `name` is this device's name in the
+   * set when it gets its first one.
+   */
+  deviceEnrollInvite(params: { name: string }): import("../devices/enroll").EnrollView;
+  /** The person compared the digits on the active device. */
+  deviceEnrollConfirm(params: { match: boolean }): import("../devices/enroll").EnrollView;
+  deviceEnrollCancel(): void;
+  /** The enrollment in progress (or the last one), either side. */
+  deviceEnrollView(): import("../devices/enroll").EnrollView | null;
+  /** The new device's side: joins the profile of the code, as a standby, in place of the new profile it runs. */
+  deviceEnrollJoin(params: { code: string; name: string; kind?: import("@ghostly/core").DeviceKind; app?: string }): import("../devices/enroll").EnrollView;
+  /** A standby whose enrollment did not finish looks for the record that lists it again. */
+  deviceEnrollFinish(): { finished: boolean };
+  /** A standby whose enrollment did not finish takes the device set off this device ("Not finished", Remove). */
+  deviceEnrollRemove(): void;
+  /** The device set of this profile, as the Devices section and the standby screen show it. */
+  deviceSet(): import("../devices/links").DeviceSetView;
+  /** A ping over the device link to the device with this signing key: how long its echo took. */
+  devicePing(params: { key: string }): { ms: number };
+  /**
+   * A standby's own push subscription as its device record holds it (WISP 06 § Push and the phone): the endpoint, and
+   * the public half of the VAPID pair to subscribe again with. Null when this device has none. Device-link-only mode.
+   */
+  devicePushState(): { endpoint: string; vapidPublic: string; renew?: true } | null;
+  /** A standby's browser replaced its subscription, or it has none any more: the record follows, the other devices are told. */
+  devicePushSet(params: { subscription: { endpoint: string; p256dh: string; auth: string; vapid?: import("@ghostly/core").VapidKeys } | null }): void;
+  /**
+   * The handoff (WISP 06 § The handoff). Errors start with `handoff-<reason>:`. The verifier of the password proof,
+   * made from the lock password the person just typed (Add a device, a password set or changed).
+   */
+  deviceHandoffVerifier(params: { password: string; current?: string }): void;
+  /** "Move to <device>" on the active device (a push). */
+  deviceHandoffPush(params: { key: string }): import("../devices/handoff").HandoffView | null;
+  /** "Use here" on a standby (a pull), with the lock password. `later`: files over this many bytes stay behind. */
+  deviceHandoffPull(params: { password: string; later?: number }): import("../devices/handoff").HandoffView | null;
+  /** "Use here" on an offer from the active device. */
+  deviceHandoffAccept(params: { later?: number }): import("../devices/handoff").HandoffView | null;
+  /** Cancel, or "Not now" on an offer. Nothing changes until the last step. */
+  deviceHandoffCancel(): void;
+  /** The handoff in progress on this device, or the last one that failed. */
+  deviceHandoffView(): import("../devices/handoff").HandoffView | null;
+  /** "Let <device> try again" after too many wrong passwords. */
+  deviceHandoffAllow(params: { key: string }): void;
+  /**
+   * A forced takeover (WISP 06 § Forced takeover): whether this device offers one, which device it stops, and whether the
+   * lock password is asked. Only a standby or a replaced device that holds a copy of the profile offers one.
+   */
+  deviceTakeoverInfo(): { offered: boolean; device?: string; copy?: "frozen" | "restored"; password?: boolean; /** A `moving` device: a device set of its own (WISP 06 § Removing a device). */ ownSet?: true };
+  /**
+   * "My other device is lost or broken" (and "It wasn't me"), with the lock password and the name of the device that
+   * stops. Errors start with `takeover-<reason>:`; nothing is written to the turn on one. `kind` is `start` when this
+   * device is the active one now (the pages start again into the gate).
+   */
+  deviceTakeover(params: { password: string; name: string; lost?: boolean }): { kind: string; result?: string; state?: string };
+  /**
+   * Reads the turn at the address of a device-set secret, as a device that holds no record of it (WISP 06 § A backup
+   * restored where a device set exists): what a restore asks before it registers a bundle's profile. `d` is base64url.
+   */
+  deviceTurnPeek(params: { d: string }): import("../devices/restoreGuard").TurnPeek;
+  /**
+   * Remove (WISP 06 § Removing a device), on the active device: the device with this signing key can no longer take the
+   * profile. The set moves to a new device-set secret, which the devices that stay get over their old links. Errors
+   * start with `remove-<reason>:`.
+   */
+  deviceRemove(params: { key: string }): import("../devices/links").DeviceSetView;
+  /** "New device secret": the set moves to a new device-set secret with nobody removed. */
+  deviceNewSecret(): import("../devices/links").DeviceSetView;
+  /** The offer of a new device secret after a takeover, answered without making one. */
+  deviceSecretOfferDismiss(): void;
+  /**
+   * A device that is not the active one reads the turn now (its screen came back to the front) and the pages follow what
+   * it found. What a page may know of it: the kind of outcome and what to show, never a packet or a key.
+   */
+  deviceTurnCheck(): { kind: string; screen?: string; device?: string; state?: string; result?: string } | null;
+  /** "Your devices are now: ..." answered on a device that took a new secret: OK, or "This is wrong" (`wrong`), which keeps it out. */
+  deviceSetNoticeSeen(params: { wrong?: boolean }): void;
 }
 
 /** What the engine implements: any call may be answered asynchronously. */
@@ -403,4 +494,10 @@ export type EngineEvent =
    * The peer did not start: the profile's database did not open (`shared/idb.ts`). Sent to every client in place of
    * its first state; no state follows, and every call fails with the same words.
    */
-  | { kind: "start-failed"; failure: import("./idb").ProfileOpenFailure };
+  | { kind: "start-failed"; failure: import("./idb").ProfileOpenFailure }
+  /**
+   * This device is not the active one for the profile (WISP 06 § The gate): no engine runs, only device-link-only
+   * mode. Sent to every client in place of its first state, and again when what the standby screen shows changes;
+   * every engine call fails.
+   */
+  | { kind: "device-gate"; gate: import("../devices/gate").DeviceGateView };

@@ -5,6 +5,7 @@ mod bitcoind_rpc;
 mod clipboard;
 mod commands;
 mod crypto;
+mod device_state;
 mod diagnostics;
 // The macOS end-to-end tests' way into the page (debug builds with `--features e2e-driver` only).
 #[cfg(any(test, feature = "e2e-driver"))]
@@ -14,6 +15,7 @@ mod file_store;
 mod file_stream;
 mod fullscreen;
 mod hyperdht;
+mod keep_awake;
 mod link_preview;
 mod lnd;
 mod local_access;
@@ -33,6 +35,9 @@ mod share;
 mod single_instance;
 #[cfg(test)]
 mod test_support;
+mod turn_network;
+#[cfg(test)]
+mod turn_record;
 mod types;
 mod viewer;
 
@@ -95,8 +100,13 @@ macro_rules! commands {
             commands::resolve_records,
             commands::service_respond,
             commands::set_pkarr_relays,
+            commands::turn_put,
+            commands::turn_read,
+            commands::turn_warm,
             commands::under_test,
             commands::updater_can_install,
+            device_state::device_state_read,
+            device_state::device_state_write,
             file_store::file_bytes_append,
             file_store::file_bytes_close,
             file_store::file_bytes_digest,
@@ -116,6 +126,7 @@ macro_rules! commands {
             hyperdht::paired_hyperdht_send,
             hyperdht::paired_hyperdht_start,
             hyperdht::paired_hyperdht_stop,
+            keep_awake::keep_awake,
             native_call::native_call_accept,
             native_call::native_call_answer,
             native_call::native_call_camera,
@@ -438,6 +449,8 @@ mod tests {
         arguments["mime"] = serde_json::json!("video/mp4");
         arguments["token"] = serde_json::json!("x");
         arguments["origin"] = serde_json::json!("http://127.0.0.1:9");
+        arguments["profile"] = serde_json::json!("x");
+        arguments["record"] = serde_json::json!(null);
         arguments
     }
 
