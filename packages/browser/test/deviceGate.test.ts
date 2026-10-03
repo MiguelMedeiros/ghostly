@@ -156,7 +156,13 @@ describe.each(["standby", "releasing", "taking", "superseded", "moving", "remove
     expect(onServer).not.toHaveBeenCalled();
     expect(opened).not.toContain(databaseName());
     expect(await databases()).not.toContain(databaseName());
-    expect(posted).toEqual([{ kind: "device-gate", gate: { state, activeDevice: "MacBook" } }]);
+    // A `releasing` device whose pass 2 cannot run here (no handoff host in this test) never signed a release: it is
+    // the active device again, and the pages start again into the gate (part 5).
+    expect(posted).toEqual([{ kind: "device-gate", gate: { state, activeDevice: "MacBook" } }, ...(state === "releasing" ? [{ kind: "device-gate", gate: { state: "releasing", reload: true } }] : [])]);
+    if (state === "releasing") {
+      const { readDeviceRecord } = await import("../src/devices/store");
+      expect((await readDeviceRecord(databaseName()))?.state).toBe("active");
+    }
     // Nothing of the device set's secret or keys reaches a page.
     expect(JSON.stringify(posted)).not.toContain(KEY);
 
@@ -165,7 +171,7 @@ describe.each(["standby", "releasing", "taking", "superseded", "moving", "remove
     connection.send(request("walletPay", {}, 8));
     connection.send(request("peekProfile", { profile: "x", dbName: "ghostly_x" }, 9));
     await flush();
-    expect(posted.slice(1)).toEqual([7, 8, 9].map((id) => ({ kind: "response", id, error: DEVICE_GATED_ERROR })));
+    expect(posted.slice(state === "releasing" ? 2 : 1)).toEqual([7, 8, 9].map((id) => ({ kind: "response", id, error: DEVICE_GATED_ERROR })));
     expect(fake.nodes).toHaveLength(0);
     expect(await databases()).not.toContain(databaseName());
 
