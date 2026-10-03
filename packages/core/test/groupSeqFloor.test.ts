@@ -158,3 +158,131 @@ describe("the group send counter's floor (a private group, mesh)", () => {
     expect(admin.missing(copy.myKey)).toBeLessThanOrEqual(255);
   });
 });
+
+describe("admin work off on this device (WISP 06 § Forced takeover)", () => {
+  it("a mesh admin with admin work off commits nothing on a member's leave, and refuses a commit until it is on again", async () => {
+    const pending: Promise<unknown>[] = [];
+    const sessions: GroupSession[] = [];
+    const settle = async () => { while (pending.length) await Promise.all(pending.splice(0)); };
+    let manage = true;
+    const make = (state: GroupState, adminWork?: () => boolean): GroupSession => {
+      const session: GroupSession = new GroupSession(clone(state), {
+        save: async () => {},
+        send: (to: string, frame: GroupEdgeFrame) => { for (const t of sessions) if (t.myKey === to && t !== session) pending.push(t.handle(session.myKey, clone(frame))); },
+        message: () => {},
+        changed: () => {},
+        ...(adminWork ? { adminWork } : {}),
+      });
+      sessions.push(session);
+      return session;
+    };
+    const admin = make(GroupSession.create("Crew"), () => manage);
+    const join = async () => {
+      const seed = createIdentity().seedB64;
+      const invite = admin.inviteFrame();
+      const welcome = await admin.admit(identityFromSeedB64(seed).pubKeyZ32);
+      await settle();
+      const joined = GroupSession.join({ name: invite.name, admin: invite.admin }, welcome.slice(0, -1), welcome[welcome.length - 1], seed);
+      if ("error" in joined) throw new Error(joined.error);
+      return make(joined.state);
+    };
+    const bob = await join(), carol = await join();
+    await settle();
+    const epoch = admin.epoch;
+    manage = false;
+    // Bob leaves: his signed goodbye reaches the admin, who passes it on and signs no commit.
+    for (const s of sessions) if (s !== bob) pending.push(s.handle(bob.myKey, clone(bob.byeFrame())));
+    await settle();
+    expect(admin.epoch).toBe(epoch);
+    await expect(admin.remove(carol.myKey)).rejects.toThrow("Manage groups from this device");
+    await expect(admin.admit(createIdentity().pubKeyZ32)).rejects.toThrow("Manage groups from this device");
+    // The person turns it on: the admin works again.
+    manage = true;
+    await admin.remove(bob.myKey);
+    await settle();
+    expect(admin.epoch).toBe(epoch + 1);
+  });
+
+  it("a community member with admin work off admits nobody at the door and keeps leave requests for someone else", async () => {
+    const pending: Promise<unknown>[] = [];
+    let manage = false;
+    const sessions: CommunitySession[] = [];
+    const settle = async () => { while (pending.length) await Promise.all(pending.splice(0)); };
+    const hooks = (self: () => CommunitySession, adminWork?: () => boolean) => ({
+      save: async () => {},
+      broadcast: (frame: CommunityFrame) => { for (const t of sessions) if (t !== self()) pending.push(t.handle(self().myKey, clone(frame))); },
+      direct: (to: string, frame: CommunityFrame) => { for (const t of sessions) if (t.myKey === to) pending.push(t.handle(self().myKey, clone(frame))); },
+      addressed: (to: string, frame: CommunityFrame) => { for (const t of sessions) if (t.myKey === to) pending.push(t.handle(self().myKey, clone(frame))); },
+      message: () => {},
+      changed: () => {},
+      ...(adminWork ? { adminWork } : {}),
+    });
+    let admin: CommunitySession = null as unknown as CommunitySession;
+    admin = new CommunitySession(CommunitySession.create("Ghosts"), hooks(() => admin));
+    sessions.push(admin);
+    const joinAs = async (by: CommunitySession, adminWork?: () => boolean) => {
+      const seed = createIdentity().seedB64;
+      const frames = await by.admit(identityFromSeedB64(seed).pubKeyZ32);
+      await settle();
+      const joined = CommunitySession.join({ g: admin.id, host: admin.entryKey }, clone(frames.slice(0, -1)), clone(frames[frames.length - 1]), seed);
+      if ("error" in joined) throw new Error(joined.error);
+      let s: CommunitySession = null as unknown as CommunitySession;
+      s = new CommunitySession(joined.state, hooks(() => s, adminWork));
+      sessions.push(s);
+      return s;
+    };
+    const copy = await joinAs(admin, () => manage);
+    const leaver = await joinAs(admin);
+    await settle();
+    expect(copy.adminWork).toBe(false);
+    await expect(copy.admit(createIdentity().pubKeyZ32)).rejects.toThrow("Manage groups from this device");
+    // The leaver's request reaches everyone; the copy commits nothing and keeps it.
+    const epoch = copy.epoch;
+    sessions.splice(sessions.indexOf(admin), 1);
+    await leaver.leave(); await settle();
+    expect(await copy.commitPendingLeaves()).toBe(0);
+    expect(copy.state.pendingLeaves.map((r) => r.s)).toEqual([leaver.myKey]);
+    expect(copy.epoch).toBe(epoch);
+    manage = true;
+    expect(await copy.commitPendingLeaves()).toBe(1);
+  });
+});
+
+describe("a frame of my own key that another copy of the profile sent", () => {
+  it("is not shown, and my counter goes above it, so two copies live at once in a mesh are both heard", async () => {
+    const pending: Promise<unknown>[] = [];
+    const received: GroupIncomingMessage[] = [];
+    const ownSeen: GroupIncomingMessage[] = [];
+    const sessions: GroupSession[] = [];
+    const settle = async () => { while (pending.length) await Promise.all(pending.splice(0)); };
+    const make = (state: GroupState, onMessage?: (m: GroupIncomingMessage) => void): GroupSession => {
+      const session: GroupSession = new GroupSession(clone(state), {
+        save: async () => {},
+        // To every session with that key: another copy of the same profile hears it too.
+        send: (to: string, frame: GroupEdgeFrame) => { for (const t of sessions) if (t.myKey === to && t !== session) pending.push(t.handle(session.myKey, clone(frame))); },
+        message: (m: GroupIncomingMessage) => { onMessage?.(m); },
+        changed: () => {},
+      });
+      sessions.push(session);
+      return session;
+    };
+    const admin = make(GroupSession.create("Crew"), (m) => received.push(m));
+    const seed = createIdentity().seedB64;
+    const invite = admin.inviteFrame();
+    const welcome = await admin.admit(identityFromSeedB64(seed).pubKeyZ32);
+    await settle();
+    const joined = GroupSession.join({ name: invite.name, admin: invite.admin }, welcome.slice(0, -1), welcome[welcome.length - 1], seed);
+    if ("error" in joined) throw new Error(joined.error);
+    const a = make(joined.state, (m) => ownSeen.push(m)), b = make(joined.state, (m) => ownSeen.push(m));
+    for (const text of ["a1", "a2"]) { const r = await a.sendText(text); if ("error" in r) throw new Error(r.error); }
+    await settle();
+    // A's frames reach B as a member passes on what another missed (a sync): B is a copy, and was never told.
+    for (const f of a.state.sent) pending.push(b.handle(admin.myKey, clone(f)));
+    await settle();
+    const r = await b.sendText("b1"); if ("error" in r) throw new Error(r.error);
+    await settle();
+    expect(received.map((m) => [m.text, m.seq])).toEqual([["a1", 0], ["a2", 1], ["b1", 2]]);
+    // Each copy stores only what it sent itself: the other copy's frames are not shown.
+    expect(ownSeen.map((m) => m.text)).toEqual(["a1", "a2", "b1"]);
+  });
+});

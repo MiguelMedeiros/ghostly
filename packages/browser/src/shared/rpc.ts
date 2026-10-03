@@ -344,6 +344,11 @@ export interface EngineApi {
   /** Forgets the group and its history on this device (leaving first when still in it). */
   forgetGroup(params: { groupId: string }): void;
   /**
+   * "Manage groups from this device" (WISP 06 § Forced takeover): admin work in this group, off on this device after a
+   * forced takeover or a restore, turned on again (or off).
+   */
+  setGroupManage(params: { groupId: string; on: boolean }): void;
+  /**
    * One profile on several devices (WISP 06 § Adding a device). Every method below starts with `device`, so a device
    * that is not the active one (device-link-only mode) answers the ones it has. Errors of an enrollment start with
    * `enroll-<reason>:`.
@@ -384,6 +389,17 @@ export interface EngineApi {
   deviceHandoffView(): import("../devices/handoff").HandoffView | null;
   /** "Let <device> try again" after too many wrong passwords. */
   deviceHandoffAllow(params: { key: string }): void;
+  /**
+   * A forced takeover (WISP 06 § Forced takeover): whether this device offers one, which device it stops, and whether the
+   * lock password is asked. Only a standby or a replaced device that holds a copy of the profile offers one.
+   */
+  deviceTakeoverInfo(): { offered: boolean; device?: string; copy?: "frozen" | "restored"; password?: boolean };
+  /**
+   * "My other device is lost or broken" (and "It wasn't me"), with the lock password and the name of the device that
+   * stops. Errors start with `takeover-<reason>:`; nothing is written to the turn on one. `kind` is `start` when this
+   * device is the active one now (the pages start again into the gate).
+   */
+  deviceTakeover(params: { password: string; name: string }): { kind: string; result?: string; state?: string };
 }
 
 /** What the engine implements: any call may be answered asynchronously. */

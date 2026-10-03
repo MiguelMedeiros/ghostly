@@ -8,8 +8,10 @@ import { DEVICE_GATED_ERROR, type DeviceLinkEngine, type DeviceLinkHost } from "
 import { DeviceSetError, deviceIdentity, openTurnKeeper } from "./setup";
 import { loadDeviceSigningKey, type DeviceSigningKey } from "./signingKey";
 import type { DeviceRecord, DeviceState } from "./state";
-import { forgetDevice, readDeviceRecord } from "./store";
+import { amendDevice, forgetDevice, readDeviceRecord } from "./store";
 import type { TurnKeeper, TurnOutcome } from "./turn";
+import { canTakeOver, forceTakeover, takeoverTarget } from "./takeover";
+import { provesHandoffPassword } from "./handoffPake";
 
 /**
  * What runs the handoff on this device (WISP 06 § The handoff): the giver while the engine runs, the giver and the
@@ -446,6 +448,26 @@ export class DeviceLinks implements DeviceLinkEngine {
         return null;
       }
       case "deviceLinksRefresh": await this.refresh(); return this.views();
+      case "deviceTakeoverInfo": {
+        // What the takeover screen needs: whether it is offered here, which device stops, whether a password is asked.
+        const record = await (this.options.readRecord ?? readDeviceRecord)(this.options.profile);
+        if (!record) return { offered: false };
+        const target = takeoverTarget(record);
+        return { offered: canTakeOver(record), ...(target ? { device: target } : {}), ...(record.copy ? { copy: record.copy } : {}), password: record.copy === "frozen" || !!record.verifier };
+      }
+      case "deviceTakeover": {
+        const p = (params ?? {}) as { password?: unknown; name?: unknown };
+        const outcome = await forceTakeover({
+          read: () => (this.options.readRecord ?? readDeviceRecord)(this.options.profile),
+          amend: (patch) => amendDevice(this.options.profile, patch),
+          proves: (verifier, password) => provesHandoffPassword(verifier, password),
+          keeper: () => this.turnKeeper(),
+        }, { password: typeof p.password === "string" ? p.password : "", name: typeof p.name === "string" ? p.name : "" });
+        // Active now: the pages start again into the gate, where the engine raises the counters and starts.
+        if (outcome.kind === "start") this.host?.show({ state: "standby", reload: true });
+        else { const now = await (this.options.readRecord ?? readDeviceRecord)(this.options.profile); if (now) this.host?.show(viewOf(now)); }
+        return { kind: outcome.kind, ...("read" in outcome ? { result: outcome.read.result } : {}), ...("state" in outcome ? { state: outcome.state } : {}) };
+      }
       case "devicePing": {
         if (typeof key !== "string") throw new Error("Name the device to ping");
         return { ms: await this.ping(key) };

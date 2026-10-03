@@ -1,11 +1,12 @@
 import {
   classifyTurnRead, fromBase64Url, nextTurnPosition, randomBytes, readTurnPacket, signTurnPacket, signTurnRelease, toBase64Url, turnKeys, turnPutSummary,
-  TURN_LAST_SEQUENCE, TURN_PUT_WINDOW_MS, TURN_RAISE_READ_TIMEOUT_MS, TURN_SETTLE_MS,
+  TURN_LAST_SEQUENCE, TURN_MAX, TURN_PUT_WINDOW_MS, TURN_RAISE_READ_TIMEOUT_MS, TURN_SETTLE_MS,
   type TurnConditions, type TurnFields, type TurnKeys, type TurnNetwork, type TurnRead, type TurnRecord, type TurnRelease, type TurnSigner, type TurnSourcePut,
 } from "@ghostly/core";
 import { MAX_DEVICES, type DevicePatch, type DeviceRecord, type DeviceSlot, type DeviceState, type StoredDeviceState } from "./state";
 import { amendDevice, moveDevice, readDeviceRecord } from "./store";
 import { BEHIND_ROUNDS, turnAction, turnRow, type TurnAction, type TurnRow } from "./turnAction";
+import { pendingRaise } from "./raise";
 
 /*
  * The turn keeper (WISP 06 § The turn): one profile's turn record on this device. It reads every source, compares
@@ -115,6 +116,17 @@ const TAKEOVER = "takeover:";
  */
 const conditionsAfter = (read: TurnRead, condition: "seen" | "none"): TurnConditions =>
   (condition === "none" && read.result === "behind" ? Object.fromEntries(Object.keys(read.conditions).map((source) => [source, null])) : read.conditions);
+
+/**
+ * The turn of a forced takeover (WISP 06 § Forced takeover, § Who may raise the turn): one above the highest of the
+ * turn read, the turn stored and the highest turn this device signed a release for. A releaser that released `N + 1`
+ * takes over at `N + 2`, so the release its taker holds can never outrank it.
+ */
+export function takeoverTurn(record: Pick<DeviceRecord, "turn" | "releasedTurn">, read: Pick<TurnRead, "record">): number {
+  const highest = Math.max(read.record?.turn ?? 0, record.turn, record.releasedTurn ?? 0);
+  if (highest + 1 > TURN_MAX) throw new TurnClosedError();
+  return highest + 1;
+}
 
 /** The record's slots as the device state keeps them. */
 export function deviceSetOf(record: TurnRecord): (DeviceSlot | null)[] {
@@ -318,7 +330,7 @@ export class TurnKeeper {
    * raises the turn does. `start` says it is the active device now; `gated` that it lost and is what it was before.
    * With no good read, or at a closed or tombstoned address, nothing is written. Null for a `single` profile.
    */
-  raise(options: { turn: number; slots?: (DeviceSlot | null)[] }): Promise<TurnOutcome | null> {
+  raise(options: { turn?: number; slots?: (DeviceSlot | null)[] } = {}): Promise<TurnOutcome | null> {
     return this.exclusive(async () => {
       const held = await this.held();
       if (!held) return null;
@@ -326,8 +338,11 @@ export class TurnKeeper {
       if (prior !== "standby" && prior !== "superseded") throw new Error(`A ${prior} device does not force a takeover`);
       const read = await this.readWith(held, true);
       if (!read.good || read.result === "tombstone") return this.settle(held, read, true);
+      // One above the highest turn this device knows (WISP 06 § Forced takeover): the one it read, the one it stored,
+      // and any it signed a release for, so a releaser that takes the profile back goes above its taker's release.
+      const turn = options.turn ?? takeoverTurn(held.record, read);
       held.record = await this.store.move(this.options.profile, "taking", { handoff: { role: "taking", step: `${TAKEOVER}${prior}` } });
-      try { await this.writeWith(held, read.conditions, options, true); } catch (error) {
+      try { await this.writeWith(held, read.conditions, { ...options, turn }, true); } catch (error) {
         // Nothing was put: the device is what it was.
         if (!held.wroteNow) held.record = await this.store.move(this.options.profile, prior, { handoff: undefined, settle: undefined });
         // No record can be written above what it saw: it stays what it was, and the host is told.
@@ -480,8 +495,18 @@ export class TurnKeeper {
           if (!this.options.undoStaging) throw new Error("A taking device needs its staged state undone before it steps back");
           await this.options.undoStaging();
         }
-        // Leaving `taking`, the settling is over, whichever way it went.
-        held.record = await this.store.move(this.options.profile, state, { ...(takeover ? { handoff: undefined } : {}), ...(held.record.settle ? { settle: undefined } : {}) });
+        // A forced takeover that settled as this device's own: one more takeover in the life of the profile, and the
+        // counters raised before the engine starts (WISP 06 § Raised counters), in the same write as `active`, so a
+        // crash between the two cannot start the engine on the old counters.
+        const won = !!takeover && state === "active";
+        const takeovers = held.record.takeovers + 1;
+        // The copy: an active device runs the profile and holds none apart; one replaced keeps its own, frozen.
+        const was = held.record.state;
+        const copy = state === "active" ? { copy: undefined } : state === "superseded" && (was === "active" || was === "releasing") ? { copy: "frozen" as const } : {};
+        held.record = await this.store.move(this.options.profile, state, {
+          ...(takeover ? { handoff: undefined } : {}), ...(held.record.settle ? { settle: undefined } : {}), ...copy,
+          ...(won ? { takeovers, raise: pendingRaise("takeover", takeovers, this.now()) } : {}),
+        });
         if (!action.then) return { kind: "gated", state, reload: action.reload, ...(action.notice ? { notice: action.notice } : {}), read };
         return this.carryOut(held, turnRow(state as DeviceState, true), action.then, read);
       }

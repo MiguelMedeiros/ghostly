@@ -50,6 +50,7 @@ export const ENGINE_ERRORS = {
   notYetConfirmed: "Not yet confirmed. No second payment was sent.",
   couldNotVerify: "Could not verify this payment yet. No second payment was sent.",
   paymentTakenBack: "This payment was taken back. The sats are in your wallet.",
+  parkedSigned: "Needs your decision: this payment was signed before this copy of your profile took over. It is never sent again from here. Check it before you pay again.",
   // Real money and test coins.
   realMoneyUnconfirmed: "This pays with real money: confirm it with Send real money first. Nothing was sent.",
   mainnetPaymentOnTestnet: "This is a Mainnet payment (real money): a Testnet wallet never pays it. Use a Mainnet wallet.",

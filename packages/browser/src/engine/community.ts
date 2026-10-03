@@ -1038,7 +1038,8 @@ export class Communities {
 
   private async answerKnocks(groupId: string, live: Live, now: number, busy: boolean): Promise<void> {
     const s = live.session;
-    if (!s.entryKey || !s.state.entry.seedB64 || s.roster.length >= COMMUNITY_LIMITS.members) return;
+    // No door duty on a device whose admin work is off (WISP 06 § Forced takeover): the other hubs answer in turn.
+    if (!s.adminWork || !s.entryKey || !s.state.entry.seedB64 || s.roster.length >= COMMUNITY_LIMITS.members) return;
     const link = { g: groupId, host: s.entryKey };
     // The hubs that take turns at the door: listed lately and settled, the same set for every hub that
     // reads the beacon (a closed app stays listed until its entry goes stale; a new hub waits a minute). A hub
@@ -1374,6 +1375,8 @@ export class Communities {
         })();
       },
       clock: () => this.now(),
+      seqFloor: () => this.host.seqFloor?.() ?? 0,
+      adminWork: () => this.host.adminWork?.(id) ?? true,
       relay: frame => { if (this.live.get(id)?.hub) for (const [, linkId] of this.hearers(id, frame)) this.sendTo(linkId, frame); },
     });
     this.live.set(id, { session, hub: false, hubSince: 0, beacon: [], head: null, lastBeaconRead: 0, beaconKnown: false, beaconFailedAt: 0, beaconAt: 0, leaving: 0, stepDownAt: 0, lastBeaconWrite: 0, lastBeaconTry: 0, hubCandidateAt: 0, members: new Map(), emptySince: 0,
