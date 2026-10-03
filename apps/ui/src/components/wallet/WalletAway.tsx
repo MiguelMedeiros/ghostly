@@ -1,12 +1,7 @@
 import { useI18n } from "../../contexts/I18nContext";
 import type { WalletInstanceView } from "../../lib/platform";
 import { WALLET_NAME } from "./names";
-
-/** A date as people read it, in the app's language ("12 Oct 2026"). */
-export function dayText(at: number, language: string): string {
-  try { return new Intl.DateTimeFormat(language, { dateStyle: "medium" }).format(new Date(at)); }
-  catch { return new Date(at).toDateString(); }
-}
+import { dayText } from "../../lib/handoff";
 
 /**
  * A wallet at home on another device (WISP 06 § Wallets that stay home), in place of its panel: where it can be used,

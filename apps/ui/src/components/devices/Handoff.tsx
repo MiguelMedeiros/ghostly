@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
-import { FAILURES, handoffErrorKey, handoffErrorWallet, sizeText, useHandoffView, walletNameOf } from "../../lib/handoff";
-import { dayText } from "../wallet/WalletAway";
+import { FAILURES, dayText, handoffErrorKey, handoffErrorWallet, sizeText, useHandoffView, walletNameOf } from "../../lib/handoff";
 import { engine } from "@ghostly/browser/platform/engine";
 import type { HandoffView } from "@ghostly/browser/devices/handoff";
 import { meteredConnection } from "@ghostly/browser/devices/handoffHost";

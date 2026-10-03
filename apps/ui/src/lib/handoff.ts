@@ -39,6 +39,12 @@ export function handoffErrorWallet(error: unknown): string | undefined {
   return type && type in WALLET_NAME ? WALLET_NAME[type as keyof typeof WALLET_NAME] : undefined;
 }
 
+/** A date as people read it, in the app's language ("12 Oct 2026"): when coins expire. */
+export function dayText(at: number, language: string): string {
+  try { return new Intl.DateTimeFormat(language, { dateStyle: "medium" }).format(new Date(at)); }
+  catch { return new Date(at).toDateString(); }
+}
+
 /** A wallet type the engine names, as the cards say it. */
 export const walletNameOf = (type: string | undefined): string => (type && type in WALLET_NAME ? WALLET_NAME[type as keyof typeof WALLET_NAME] : type ?? "");
 
