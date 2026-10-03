@@ -1,1 +1,1 @@
-The admin's app reads the knock identity every two seconds for two minutes after the link was handed out or someone knocked, down from ten, then every five as before, and its reads stop at two thirds of a relay's minute: the faster pace is half of each relay's requests, which the edges need when members come back.
+The admin's app reads the knock identity every two seconds for two minutes after the link was handed out or someone knocked, down from ten, then every five as before: the faster pace is half of each relay's requests, which the edges need when members come back.

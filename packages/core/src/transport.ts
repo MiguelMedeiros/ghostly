@@ -39,8 +39,6 @@ export interface PkarrRequestOptions {
   background?: boolean; urgent?: boolean; group?: boolean; door?: boolean; signal?: boolean;
   /** A read for a contact that went away from a live session and has not shown itself back (`LinkSession.watchPeer`). */
   watch?: boolean;
-  /** A private group admin's read of its link's knocks: it leaves the last of a relay's minute to the edges (`KNOCK_SHARE` in relay.ts). */
-  knock?: boolean;
 }
 
 /**

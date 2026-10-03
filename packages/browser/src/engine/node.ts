@@ -1115,7 +1115,7 @@ export class GhostlyNode implements EngineImplementation {
     // Its packet is newer than the moment the edge was last up (when this device first read it, so both times are this clock's).
     linkBack: linkId => { const live = this.links.get(linkId); return !!live?.lastSyncAt && !!live.presence?.online && presenceSeenAt(live.presence) > live.lastSyncAt; },
     publish: (identity, records, background) => this.groupTransport.publish(identity, records, { background }),
-    resolve: async (pubKeyZ32, background, door, knock) => (await this.groupTransport.resolve(pubKeyZ32, { background, door, ...(knock && { knock }) }))?.records ?? null,
+    resolve: async (pubKeyZ32, background, door) => (await this.groupTransport.resolve(pubKeyZ32, { background, door }))?.records ?? null,
     expectPeer: linkId => this.links.get(linkId)?.link?.expectPeer(),
     openEdge: (state, peer, expectPeer) => this.openEdge(state, peer, expectPeer),
     closeEdge: linkId => this.closeGroupLink(linkId),

@@ -74,7 +74,7 @@ export interface GroupsHost {
    * door's look at its knock bell (`PkarrRequestOptions.door`).
    */
   publish(identity: Identity, records: GhostRecord[], background?: boolean): Promise<void>;
-  resolve(pubKeyZ32: string, background?: boolean, door?: boolean, knock?: boolean): Promise<GhostRecord[] | null>;
+  resolve(pubKeyZ32: string, background?: boolean, door?: boolean): Promise<GhostRecord[] | null>;
   /** The other end of this link is due any moment: look fast for it a while (`LinkSession.expectPeer`). */
   expectPeer?(linkId: string): void;
   /** Resolves false when the message was there already: nothing new came (void: a host that does not say). */
@@ -1020,8 +1020,7 @@ export class Groups {
   private async answerKnocks(group: StoredGroup, session: GroupSession, now: number): Promise<void> {
     const entry = this.entryOf(group)!;
     const started = Date.now();
-    // A knock read leaves the last of the relays' minute to the edges (`PkarrRequestOptions.knock`).
-    const knocks = readKnocks(entry.link, (await this.host.resolve(knockIdentity(entry.link).pubKeyZ32, false, false, true)) ?? []);
+    const knocks = readKnocks(entry.link, (await this.host.resolve(knockIdentity(entry.link).pubKeyZ32)) ?? []);
     traceJoin(group.id, "knocks.read", { ms: Date.now() - started, knocks: knocks.length });
     let pending = this.pendingEntries.get(group.id);
     for (const { key, ts } of knocks) {
