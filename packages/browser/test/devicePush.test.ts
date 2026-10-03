@@ -8,7 +8,7 @@ import { resetDeviceGates } from "../src/devices/gate";
 import { DeviceLinks, type DeviceLinksOptions } from "../src/devices/links";
 import {
   DEVICE_WAKE_FRAME, DeviceWaker, deviceOfToken, deviceWakeFrame, otherTarget, ownTargetFor, profileWakeAfter, profileWakeOnRemoval, pushForSet, readDeviceWake,
-  wakeOwnerOf, withOtherPush, withOwnPush,
+  DEVICE_TOKENS_FRAME, readDeviceTokens, wakeOwnerOf, withAllowed, withOtherPush, withOwnPush, withRenew,
 } from "../src/devices/push";
 import { DEVICE_KEYS_DB, closeDeviceKeysDb, createDeviceSigningKey, type DeviceSigningKey } from "../src/devices/signingKey";
 import { parseDeviceRecord, type DeviceRecord, type DeviceSlot, type StoredDeviceState } from "../src/devices/state";
@@ -16,7 +16,7 @@ import { closeDevicesDb, readDeviceRecord, setDeviceMirror } from "../src/device
 import type { WakeSubscription } from "../src/shared/types";
 import { dropDevicesDatabase, putDeviceRecord } from "./helpers/deviceRecord";
 import { DESKTOP_NETWORK, MemoryPkarr, closeWorld, fakePeerConnection, useFakeWorld, yieldToLoop } from "../../core/test/support/pairingWorld";
-// covers: devices.push, devices.push.wake
+// covers: devices.push, devices.push.wake, devices.push.renew
 
 /*
  * Push and the phone (WISP 06 § Push and the phone): the rules that keep the profile's push target across a switch,
@@ -123,6 +123,44 @@ describe("the device record's push fields", () => {
     expect(otherTarget(parseDeviceRecord({ ...removed, ...pushForSet(removed)! }), PHONE)).toBeNull();
     rec = parseDeviceRecord({ ...rec, ...withOtherPush(rec, PHONE, null)! });
     expect(rec.push).toBeUndefined();
+  });
+
+  it("a removed device knew this device's subscription: it is to be made again; a new endpoint does it", () => {
+    const own = subscription();
+    let rec = record({ ownSlot: 1 });
+    rec = parseDeviceRecord({ ...rec, ...withOwnPush(rec, own.sub)!, });
+    rec = parseDeviceRecord({ ...rec, ...ownTargetFor(rec, DESKTOP).patch! });
+    rec = parseDeviceRecord({ ...rec, ...withOtherPush(rec, DESKTOP, subscription("https://fcm.googleapis.com/fcm/send/desktop").target())! });
+    expect(rec.push?.renew).toBeUndefined();
+    // The desktop is removed: its token and target go, and this device's subscription is to be renewed.
+    const removed = parseDeviceRecord({ ...rec, deviceSet: [null, { key: PHONE, name: "Phone" }, null, null] });
+    const after = parseDeviceRecord({ ...removed, ...pushForSet(removed)! });
+    expect(after.push).toEqual({ own: { ...after.push!.own!, tokens: {} }, renew: true });
+    // The same subscription again does nothing; a new endpoint (and key pair) is the renewal.
+    expect(withOwnPush(after, own.sub)).toBeNull();
+    const renewed = parseDeviceRecord({ ...after, ...withOwnPush(after, subscription("https://fcm.googleapis.com/fcm/send/phone-2").sub)! });
+    expect(renewed.push?.renew).toBeUndefined();
+    // A device with no subscription has nothing to renew.
+    const none = record();
+    expect(withRenew(none)).toBeNull();
+    expect(pushForSet(parseDeviceRecord({ ...none, ...withOtherPush(none, PHONE, own.target())!, deviceSet: [{ key: DESKTOP, name: "Desktop" }, null, null, null] }))).toEqual({ push: undefined });
+  });
+
+  it("keep the chats' tokens the active device lists, and a renewal it asks for; a malformed list says nothing", () => {
+    const own = subscription();
+    let rec = record({ ownSlot: 1, state: "standby" });
+    rec = parseDeviceRecord({ ...rec, ...withOwnPush(rec, own.sub)! });
+    const tokens = readDeviceTokens({ t: DEVICE_TOKENS_FRAME, k: ["b".repeat(22), "a".repeat(22), "a".repeat(22)] })!;
+    expect(tokens).toEqual(["a".repeat(22), "b".repeat(22)]);
+    rec = parseDeviceRecord({ ...rec, ...withAllowed(rec, tokens)! });
+    expect(withAllowed(rec, tokens)).toBeNull();
+    rec = parseDeviceRecord({ ...rec, ...withRenew(rec)! });
+    expect(rec.push).toMatchObject({ renew: true, allowed: tokens });
+    expect(withRenew(rec)).toBeNull();
+    expect(readDeviceTokens({ t: DEVICE_TOKENS_FRAME, k: ["<script>"] })).toBeNull();
+    expect(readDeviceTokens({ t: DEVICE_TOKENS_FRAME, k: "x" })).toBeNull();
+    expect(() => parseDeviceRecord({ ...rec, push: { ...rec.push, renew: false } } as never)).toThrow(/push/);
+    expect(() => parseDeviceRecord({ ...rec, push: { ...rec.push, allowed: ["short"] } } as never)).toThrow(/push/);
   });
 
   it("refuse a record whose push fields are not push targets", () => {
@@ -244,6 +282,37 @@ describe("device-wake between two devices", () => {
     expect(sent).toHaveLength(1);
     expect(sent[0]!.url).toBe(replaced.endpoint);
     expect(await settled(desktop.links.wake(phone.slot.key))).toBe("skipped");
+  });
+
+  it("the active device asks the standby for a new subscription and tells it the chats' tokens; a standby is not heard asking", async () => {
+    const d = newDeviceSetSecret();
+    const desktop = await makeDevice("Desktop"), phone = await makeDevice("Phone");
+    const own = subscription();
+    await write(desktop, "active", d, [desktop, phone]);
+    await write(phone, "standby", d, [desktop, phone], { push: { own: { e: own.sub.endpoint, p: own.sub.p256dh, a: own.sub.auth, vp: own.sub.vapid.publicKey, vk: own.sub.vapid.privateKey, tokens: {} } } });
+    await settled(Promise.all([desktop.links.start(), phone.links.start()]));
+    expect(await until(() => desktop.links.live(phone.slot.key) && phone.links.live(desktop.slot.key), 60_000)).toBe(true);
+    expect(desktop.links.askRenew(phone.slot.key)).toBe(true);
+    expect(desktop.links.sendTokens(phone.slot.key, ["c".repeat(22)])).toBe(true);
+    expect(await until(async () => (await readDeviceRecord(phone.profile))?.push?.renew === true, 10_000)).toBe(true);
+    expect(await until(async () => JSON.stringify((await readDeviceRecord(phone.profile))?.push?.allowed) === JSON.stringify(["c".repeat(22)]), 10_000)).toBe(true);
+    // What the standby page reads: the renewal asked.
+    expect(await settled(phone.links.call("devicePushState", null))).toEqual({ endpoint: own.sub.endpoint, vapidPublic: own.sub.vapid.publicKey, renew: true });
+    // The other way round: a standby asks nothing of the active device.
+    await write(desktop, "active", d, [desktop, phone], { push: { own: { e: own.sub.endpoint, p: own.sub.p256dh, a: own.sub.auth, vp: own.sub.vapid.publicKey, vk: own.sub.vapid.privateKey, tokens: {} } } });
+    expect(phone.links.askRenew(desktop.slot.key)).toBe(true);
+    phone.links.sendTokens(desktop.slot.key, ["e".repeat(22)]);
+    await run(2_000);
+    expect((await readDeviceRecord(desktop.profile))?.push).toMatchObject({ own: { e: own.sub.endpoint } });
+    expect((await readDeviceRecord(desktop.profile))?.push?.renew).toBeUndefined();
+    expect((await readDeviceRecord(desktop.profile))?.push?.allowed).toBeUndefined();
+    // The renewal, with a new key pair: the record follows and the request is done.
+    const fresh = subscription("https://fcm.googleapis.com/fcm/send/phone-renewed");
+    await settled(phone.links.call("devicePushSet", { subscription: { endpoint: fresh.sub.endpoint, p256dh: fresh.sub.p256dh, auth: fresh.sub.auth, vapid: fresh.sub.vapid } }));
+    const after = (await readDeviceRecord(phone.profile))!.push!;
+    expect(after.own).toMatchObject({ e: fresh.sub.endpoint, vp: fresh.sub.vapid.publicKey });
+    expect(after.renew).toBeUndefined();
+    await expect(phone.links.call("devicePushSet", { subscription: { endpoint: fresh.sub.endpoint, p256dh: fresh.sub.p256dh, auth: fresh.sub.auth, vapid: { publicKey: fresh.sub.vapid.publicKey, privateKey: generateVapidKeys().privateKey } } })).rejects.toThrow(/not a pair/);
   });
 
   it("a device-wake from a device the set does not list is not kept", async () => {

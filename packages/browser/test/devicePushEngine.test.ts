@@ -103,3 +103,90 @@ describe("the profile's push target on the active device", () => {
     expect(await readWalletHomes()).toEqual({});
   });
 });
+
+interface Renewing {
+  ownDeviceKey: string | null;
+  settings: { wake?: WakeSubscription; wakeRotate?: boolean; wakeRenew?: Record<string, string> };
+  deviceLinks: unknown;
+  links: Map<string, { stored: { id: string; wakeToken?: string; wakeMuted?: boolean } }>;
+  rotateWake(): Promise<void>;
+  syncDeviceTokens(): void;
+  ownWakeWins(): Promise<void>;
+  deviceWakeReceived(from: string, target: WakeTarget | null): Promise<void>;
+  afterDeviceRemoved(key: string): Promise<void>;
+}
+
+/** The device links as the engine uses them for push: the phone's link live, and what was said on it. */
+function fakeLinks() {
+  return { live: vi.fn(() => true), askRenew: vi.fn(() => true), sendTokens: vi.fn(() => true), views: () => [{ key: PHONE, name: "Phone", status: "live" }] };
+}
+
+describe("a subscription someone should no longer reach (WISP 06 § Push and the phone)", () => {
+  it("the phone's, handed out by the desktop: the phone is asked over the link, and the desktop keeps asking until a new one comes", async () => {
+    const { node } = desktop();
+    const inside = node as unknown as Renewing;
+    const links = fakeLinks();
+    inside.deviceLinks = links;
+    const phone = subscription("https://fcm.googleapis.com/fcm/send/phone");
+    await inside.deviceWakeReceived(PHONE, targetOf(phone));
+    // A contact that held it is deleted or muted here.
+    await inside.rotateWake();
+    expect(inside.settings.wakeRotate).toBe(true);
+    expect(inside.settings.wakeRenew).toEqual({ [PHONE]: phone.endpoint });
+    expect(links.askRenew).toHaveBeenCalledWith(PHONE);
+    // The phone says the same subscription again: still owed.
+    await inside.deviceWakeReceived(PHONE, targetOf(phone));
+    expect(inside.settings.wakeRotate).toBe(true);
+    // Its new one: the profile hands that out, and nothing is owed any more.
+    const renewed = subscription("https://fcm.googleapis.com/fcm/send/phone-renewed");
+    await inside.deviceWakeReceived(PHONE, targetOf(renewed));
+    expect(inside.settings.wake).toEqual({ ...renewed, device: PHONE });
+    expect(inside.settings.wakeRotate).toBeUndefined();
+    expect(inside.settings.wakeRenew).toBeUndefined();
+  });
+
+  it("the desktop's own wins while the phone still owes a new one: the request is not lost", async () => {
+    const { node } = desktop();
+    const inside = node as unknown as Renewing;
+    inside.deviceLinks = fakeLinks();
+    const own = subscription("https://fcm.googleapis.com/fcm/send/desktop");
+    await putDeviceRecord({
+      v: 1, profile: "ghostly", state: "active", saved: 1, turn: 3, rev: 0, takeovers: 0, earlierSets: [], deviceSet: [{ key: DESKTOP, name: "Desktop" }, { key: PHONE, name: "Phone" }], ownSlot: 0, activeSlot: 0,
+      push: { own: { e: own.endpoint, p: own.p256dh, a: own.auth, vp: own.vapid.publicKey, vk: own.vapid.privateKey, tokens: {} } },
+    });
+    const phone = subscription("https://fcm.googleapis.com/fcm/send/phone");
+    await inside.deviceWakeReceived(PHONE, targetOf(phone));
+    await inside.rotateWake();
+    await inside.ownWakeWins();
+    expect(inside.settings.wake?.device).toBe(DESKTOP);
+    expect(inside.settings.wakeRotate).toBe(true);
+    expect(inside.settings.wakeRenew).toEqual({ [PHONE]: phone.endpoint });
+    await closeDevicesDb(); await dropDevices();
+  });
+
+  it("a removed device knew the profile's own subscription: it is made again", async () => {
+    const { node, inside } = desktop();
+    await node.setWakeSubscription({ subscription: subscription("https://fcm.googleapis.com/fcm/send/desktop") });
+    await inside.afterDeviceRemoved("L".repeat(43));
+    expect((inside as unknown as Renewing).settings.wakeRotate).toBe(true);
+  });
+
+  it("the standby learns which chats' tokens the profile hands out: a muted or deleted chat's is not among them", async () => {
+    const { node } = desktop();
+    const inside = node as unknown as Renewing;
+    const links = fakeLinks();
+    inside.deviceLinks = links;
+    inside.links.set("a", { stored: { id: "a", wakeToken: "b".repeat(22) } });
+    inside.links.set("b", { stored: { id: "b", wakeToken: "a".repeat(22) } });
+    inside.links.set("c", { stored: { id: "c", wakeToken: "c".repeat(22), wakeMuted: true } });
+    inside.links.set("d", { stored: { id: "d" } });
+    inside.syncDeviceTokens();
+    expect(links.sendTokens).toHaveBeenLastCalledWith(PHONE, ["a".repeat(22), "b".repeat(22)]);
+    inside.syncDeviceTokens();
+    expect(links.sendTokens).toHaveBeenCalledTimes(1);
+    inside.links.delete("a");
+    inside.syncDeviceTokens();
+    expect(links.sendTokens).toHaveBeenLastCalledWith(PHONE, ["a".repeat(22)]);
+    inside.links.clear();
+  });
+});

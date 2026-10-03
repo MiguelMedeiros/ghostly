@@ -1155,6 +1155,12 @@ export interface Settings {
    */
   wakeHeldBy?: Record<string, string[]>;
   /**
+   * In a profile on several devices (WISP 06 § Push and the phone): devices asked for a new subscription over their
+   * device link, by signing key, with the endpoint they are to replace. A device that shares another endpoint (or none)
+   * has done it. Set by the engine only.
+   */
+  wakeRenew?: Record<string, string>;
+  /**
    * A push relay (https) this app hands a finished wake-up to when it may not post to the contact's push service
    * itself (a browser page: the services answer without CORS). Empty or absent: none; nobody runs one by default.
    */

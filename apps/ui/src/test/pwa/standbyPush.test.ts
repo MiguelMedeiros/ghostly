@@ -4,7 +4,7 @@ import { DEVICE_NOTICE_DEFAULTS, pushNotice, type NoticeDevice } from "../../../
 import { pushDeviceView, readPushDeviceView } from "../../../../web/src/sw/deviceState";
 import { readWakeEntry, readWakeText, writeWakeEntries, writeWakeText } from "../../../../web/src/sw/wakeStore";
 
-// covers: devices.push, devices.push.wake
+// covers: devices.push, devices.push.wake, devices.push.renew
 
 /*
  * What the push worker shows in a profile on several devices (WISP 06 § Push and the phone), the rules of
@@ -41,6 +41,15 @@ describe("a push on a device that is not the active one", () => {
     expect(pushNotice({ token: TOKEN, kind: "message" }, { ...chat, entry: { path: "/chat/abc", mutedUntil: now + 1 } }, standby, options)).toBeNull();
     expect(pushNotice({ token: TOKEN, kind: "message" }, chat, { state: "removed", tokens: {} }, options)).toBeNull();
     expect(pushNotice({ token: TOKEN, kind: "message" }, chat, standby, { ...options, appVisible: true })).toBeNull();
+  });
+
+  it("once the active device listed the chats' tokens it hands out, only those show: a chat deleted or muted there stays quiet here", () => {
+    const told: NoticeDevice = { ...standby, allowed: [TOKEN] };
+    expect(pushNotice({ token: TOKEN, kind: "message" }, undefined, told, options)).toMatchObject({ quiet: true });
+    expect(pushNotice({ token: "deletedchataaaaaaaaaaa", kind: "message" }, undefined, told, options)).toBeNull();
+    expect(pushNotice({ token: "deletedchataaaaaaaaaaa", kind: "call" }, undefined, told, options)).toBeNull();
+    // A wake-up from one of the person's devices is not a chat's: the list does not apply to it.
+    expect(pushNotice({ token: DEVICE_TOKEN, kind: "device" }, undefined, told, options)).not.toBeNull();
   });
 
   it("a state that cannot be read is no license to ring: quiet too", () => {
@@ -81,6 +90,7 @@ describe("the worker's read of the device state", () => {
     expect(pushDeviceView(record)).toEqual({ state: "standby", active: "MacBook", tokens: { [DEVICE_TOKEN]: "MacBook" } });
     expect(pushDeviceView({ ...record, state: "active", activeSlot: 1 })).toEqual({ state: "active", tokens: { [DEVICE_TOKEN]: "MacBook" } });
     expect(pushDeviceView(undefined)).toBeNull();
+    expect(pushDeviceView({ ...record, push: { ...record.push, allowed: [TOKEN] } })).toMatchObject({ allowed: [TOKEN] });
   });
 
   afterEach(async () => {

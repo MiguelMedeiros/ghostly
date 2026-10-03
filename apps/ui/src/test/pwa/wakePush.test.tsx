@@ -7,7 +7,7 @@ import type { ChatSession } from "../../lib/types";
 import { pushPlatform, rotateWake, setPushPlatform, setWake, useStandbyPush, useWakeOn, useWakeTableSync, type PushPlatform } from "../../lib/wakePush";
 import { engineState, fakeEngine, linkView } from "../fakeEngine";
 
-// covers: push.wake.notify, push.wake.mute, push.wake.group, devices.push
+// covers: push.wake.notify, push.wake.mute, push.wake.group, devices.push, devices.push.renew
 
 const keys = { endpoint: "https://fcm.googleapis.com/fcm/send/x", p256dh: "p", auth: "a" };
 type Fake = PushPlatform & { [K in keyof PushPlatform]: PushPlatform[K] & ReturnType<typeof vi.fn> };
@@ -198,6 +198,23 @@ describe("a profile on several devices (WISP 06 § Push and the phone)", () => {
     await waitFor(() => expect(fakeEngine.callsTo("devicePushSet")).toEqual([{ subscription: fresh }]));
     expect(platform.subscribe).toHaveBeenCalledWith("", { publicKey: vapid.publicKey });
     expect(platform.syncText).toHaveBeenCalledWith("", { title: "Ghostly", body: "New message", standby: "New message. Active on {device}.", db: "ghostly" });
+    vi.unstubAllGlobals();
+  });
+
+  it("a standby asked for a new subscription makes one with a new key pair, though the browser's is the stored one", async () => {
+    const old = generateVapidKeys();
+    const fresh = { ...keys, endpoint: "https://fcm.googleapis.com/fcm/send/renewed" };
+    const platform = fakePlatform({ current: vi.fn(async () => keys), subscribe: vi.fn(async () => fresh), syncText: vi.fn(async () => {}) });
+    setPushPlatform(platform);
+    vi.stubGlobal("Notification", { permission: "granted" });
+    fakeEngine.on("devicePushState", () => ({ endpoint: keys.endpoint, vapidPublic: old.publicKey, renew: true }));
+    fakeEngine.on("devicePushSet", () => undefined);
+    renderHook(() => useStandbyPush({ title: "Ghostly", body: "New message" }, true));
+    await waitFor(() => expect(fakeEngine.callsTo("devicePushSet")).toHaveLength(1));
+    const [{ subscription }] = fakeEngine.callsTo("devicePushSet") as unknown as [{ subscription: { endpoint: string; vapid: { publicKey: string } } }];
+    expect(subscription.endpoint).toBe(fresh.endpoint);
+    expect(subscription.vapid.publicKey).not.toBe(old.publicKey);
+    expect(platform.subscribe).toHaveBeenCalledWith("", subscription.vapid);
     vi.unstubAllGlobals();
   });
 

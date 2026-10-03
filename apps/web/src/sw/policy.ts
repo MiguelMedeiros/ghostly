@@ -189,6 +189,8 @@ export interface NoticeDevice {
   active?: string;
   /** The tokens this device gave its other devices, each with that device's name. */
   tokens: Record<string, string>;
+  /** The chats' tokens the active device still hands out; a token not among them shows nothing. Absent: any. */
+  allowed?: string[];
 }
 
 /** Words the worker uses when no page of this profile ever wrote its own (a device that was never active). */
@@ -210,9 +212,10 @@ const fill = (template: string, device: string) => template.split("{device}").jo
  *   own devices, naming it: "<device> wants to take over" where this one is active, "<device> wants to move this profile
  *   here" where it is not. The `d` flag alone proves nothing: anyone holding the subscription could set it.
  * - **A device that is not the active one never rings**: a message or a call shows "New message. Active on <device>." or
- *   "Call for you. Active on <device>.", quietly, and a tap opens the standby screen. Any well-formed wake-up shows it (a
- *   chat made on the active device has a token this one never knew), except one this device knows for a muted chat. A
- *   removed device shows nothing.
+ *   "Call for you. Active on <device>.", quietly, and a tap opens the standby screen. Once the active device said which
+ *   chats' tokens it hands out (`allowed`), only those show: a chat deleted or muted there stays quiet here. Before it
+ *   said, any well-formed wake-up shows (a chat made on the active device has a token this one never knew), except one
+ *   this device knows for a muted chat. A removed device shows nothing.
  * - **The active device, or a profile on one device**: today's notices (`wakeNotice`).
  */
 export function pushNotice(
@@ -234,6 +237,8 @@ export function pushNotice(
   }
   if (runs) return wakeNotice(found, { now: options.now, appVisible: options.appVisible, profile: options.profile, kind: wake.kind });
   if (device.state === "removed" || options.appVisible) return null;
+  // A chat deleted or muted on the active device, or a token nobody hands out any more (a removed device's): nothing.
+  if (device.allowed && !device.allowed.includes(wake.token)) return null;
   const muted = found?.entry.mutedUntil;
   if (muted === "forever" || (typeof muted === "number" && muted > options.now)) return null;
   const call = wake.kind === "call" && (!found || found.entry.path.startsWith("/chat/"));

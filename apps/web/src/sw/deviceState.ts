@@ -15,6 +15,8 @@ export interface PushDeviceView {
   active?: string;
   /** The tokens this device gave its other devices, each with that device's name. */
   tokens: Record<string, string>;
+  /** The chats' tokens the active device still hands out (`device-tokens`); absent until it said. */
+  allowed?: string[];
 }
 
 const DB = "ghostly-devices";
@@ -25,7 +27,7 @@ interface StoredRecord {
   deviceSet?: unknown;
   activeSlot?: unknown;
   ownSlot?: unknown;
-  push?: { own?: { tokens?: unknown } };
+  push?: { own?: { tokens?: unknown }; allowed?: unknown };
 }
 
 /** The view of a stored record. Pure, so it is tested without a worker. */
@@ -43,7 +45,8 @@ export function pushDeviceView(record: StoredRecord | undefined | null): PushDev
       if (typeof token === "string" && slots.some((s) => s?.key === key)) tokens[token] = nameOf(key);
     }
   }
-  return { state: record.state, ...(active ? { active } : {}), tokens };
+  const allowed = Array.isArray(record.push?.allowed) ? (record.push!.allowed as unknown[]).filter((token): token is string => typeof token === "string") : undefined;
+  return { state: record.state, ...(active ? { active } : {}), tokens, ...(allowed ? { allowed } : {}) };
 }
 
 /** Opens the database only if it is there: an open that would make it is aborted. */

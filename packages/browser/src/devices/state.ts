@@ -60,7 +60,22 @@ export interface DevicePush {
   own?: DevicePushTarget & { tokens: Record<string, string> };
   /** Each other device's target, by signing key, with the token that device gave this one. */
   others?: Record<string, DevicePushTarget & { k: string }>;
+  /**
+   * This device's own subscription must be replaced by a new one (a new endpoint and key pair): someone who should no
+   * longer reach it may hold it (a device was removed, or a contact that held it was deleted or muted on the active
+   * device). The page of a standby acts on it (`useStandbyPush`); a new subscription clears it.
+   */
+  renew?: true;
+  /**
+   * The chats' tokens the active device still hands out under this device's subscription (`device-tokens`): on a device
+   * that is not the active one the push worker shows a notice only for these, so a chat deleted or muted on the active
+   * device stays quiet here too. Absent until the active device said: every well-formed wake-up shows.
+   */
+  allowed?: string[];
 }
+
+/** At most this many chat tokens are kept for the push worker of a standby. */
+export const MAX_ALLOWED_TOKENS = 2_000;
 
 /** One slot of the device set. Bytes are base64url everywhere in the record, so it is the same in IndexedDB and in Desktop's file. */
 export interface DeviceSlot {
@@ -432,7 +447,9 @@ function isPushTarget(value: unknown): value is DevicePushTarget {
 }
 function isPush(value: unknown): value is DevicePush {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
-  const p = value as { own?: unknown; others?: unknown };
+  const p = value as { own?: unknown; others?: unknown; renew?: unknown; allowed?: unknown };
+  if (p.renew !== undefined && p.renew !== true) return false;
+  if (p.allowed !== undefined && (!Array.isArray(p.allowed) || p.allowed.length > MAX_ALLOWED_TOKENS || !p.allowed.every((token) => typeof token === "string" && TOKEN.test(token)))) return false;
   if (p.own !== undefined) {
     const own = p.own as { tokens?: unknown };
     if (!isPushTarget(own) || !own.tokens || typeof own.tokens !== "object" || Array.isArray(own.tokens)) return false;
