@@ -105,8 +105,9 @@ describe("the standby screen", () => {
     expect(screen.getByTestId("device-standby")).toHaveAttribute("data-state", view.state);
     expect(screen.getByTestId("device-standby-title")).toHaveTextContent(title);
     expect(screen.getByTestId("device-standby")).toHaveTextContent(hint);
-    // Nothing offers to delete anything, and nothing acts yet: the buttons come with the handoff and the takeover.
-    expect(screen.queryByRole("button", { name: /delete|reset|clear|use here|take over/i })).toBeNull();
+    // Nothing offers to delete anything, and no takeover yet (part 6). A standby offers Use here (the handoff, part 5).
+    expect(screen.queryByRole("button", { name: /delete|reset|clear|take over/i })).toBeNull();
+    expect(!!screen.queryByRole("button", { name: "Use here" })).toBe(view.state === "standby");
     expect(!!screen.queryByTestId("device-standby-retry")).toBe(view.state === "unreadable");
   });
 
