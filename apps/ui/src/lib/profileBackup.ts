@@ -456,7 +456,9 @@ function restoredRows(store: string, keys: IDBValidKey[], values: unknown[], fre
       const record = value as { config?: { walletId?: unknown } };
       const walletId = record?.config?.walletId;
       if (typeof keys[i] === "string" && (keys[i] as string).startsWith("fedimint")) return freshFedimint(value);
-      return hasOwnDatabase(keys[i]) && typeof walletId === "string" ? { ...record, config: { ...record.config, walletId: fresh(walletId) } } : value;
+      if (!hasOwnDatabase(keys[i]) || typeof walletId !== "string") return value;
+      // A Bark wallet's empty database also looks once for the on-chain coins its phrase received before (`scan`).
+      return { ...record, config: { ...record.config, walletId: fresh(walletId) }, ...(isBarkRecord(keys[i]) ? { scan: true } : {}) };
     });
   }
   // Money as the bundle held it is not taken at its word: ecash to check, swaps to check, attempts unknown.

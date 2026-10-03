@@ -82,6 +82,7 @@
     "phraseNote": "The phrase brings back what Second's server holds for this wallet; payment history comes from the backup file.",
     "read": "Read",
     "renewalHint": "Refreshes coins close to expiry while Ghostly is open",
+    "scanning": "Looking for on-chain coins this phrase received before…",
     "server": "Ark server",
     "serverInput": "Bark server",
     "serverStuck": "This server is not answering. You can switch to another one.",
