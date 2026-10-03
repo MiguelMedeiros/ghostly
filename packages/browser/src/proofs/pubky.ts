@@ -321,11 +321,11 @@ async function approveAndWork<T>(options: PubkyApprovalOptions, work: (session: 
     throw e;
   }
 
-  // A cookie session lives in the homeserver's cookie, a third-party cookie in a page. WebKit drops it (Safari), so the
+  // A cookie session lives in the homeserver's cookie, a third-party cookie in a page. WebKit (Safari) and Vanadium drop it, so the
   // homeserver then refuses the session's writes: say that, not "401". The desktop app keeps it outside its WebView.
   const fail = (what: string) => (e: unknown) => {
     if (viaCookie && !cookieKept && refused(e))
-      throw new Error("Pubky Ring approved, but this browser blocked the sign-in cookie of your homeserver, so nothing was changed. Approve with Pubky Passport instead, or use Ghostly in Chrome or the desktop app.");
+      throw new Error("Pubky Ring approved, but this browser blocks your homeserver's sign-in cookie (Vanadium and Safari block cookies from other sites), so nothing was written. Approve with Pubky Passport instead, or use Firefox or the Ghostly desktop app.");
     throw failure(what, e);
   };
   const approved = session;
