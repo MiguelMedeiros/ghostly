@@ -2,6 +2,7 @@ import { act, screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { NetworkSettings } from "../../components/NetworkSettings";
 import { renderApp } from "../render";
+import { fakeEngine } from "../fakeEngine";
 
 // covers: settings.network.native-dht, settings.network.relays, settings.network.iroh-relays, settings.network.turn
 
@@ -72,10 +73,12 @@ describe("Settings, Network: TURN server", () => {
     expect(engine.callsTo("updateSettings")).toEqual([]);
 
     expect(screen.getByLabelText("TURN credential")).toHaveAttribute("type", "password");
+    engine.on("updateSettings", () => undefined);
     await user.type(screen.getByLabelText("TURN credential"), "test-credential");
     await user.click(screen.getByTestId("network-save"));
     expect(engine.callsTo("updateSettings").slice(-1)[0]).toMatchObject({ settings: { iceServers: [{ urls: "turn:turn.example.org:3478", username: "ghost", credential: "test-credential" }] } });
     expect(screen.queryByTestId("network-error")).toBeNull();
+    expect(screen.getByTestId("network-saved")).toBeInTheDocument();
   });
 
   it("refuses an address that is not TURN or STUN", async () => {
@@ -88,8 +91,9 @@ describe("Settings, Network: TURN server", () => {
   });
 
   it("a server restored from a backup asks for its credential again", async () => {
-    const { engine, user } = renderApp(<NetworkSettings />);
-    act(() => engine.update({ transport, settings: { relays: RELAYS, iceServers: [{ urls: "turn:turn.example.org:3478", username: "ghost" }] } }));
+    // The fields load once, from the settings the engine has when Settings opens.
+    fakeEngine.setState({ transport, settings: { relays: RELAYS, iceServers: [{ urls: "turn:turn.example.org:3478", username: "ghost" }] } } as never);
+    const { user } = renderApp(<NetworkSettings />);
     const field = screen.getByTestId("network-turn-field");
     expect(field).toHaveTextContent("Enter the credential again: backups leave it out.");
     expect(screen.getByLabelText("TURN server URL")).toHaveValue("turn:turn.example.org:3478");
