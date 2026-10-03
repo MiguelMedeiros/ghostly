@@ -78,6 +78,11 @@ export interface StoredLink {
   inviteCode?: string;
   /** Messages deleted on this device, by id, so a republished one is not stored again. */
   deletedIds?: string[];
+  /**
+   * Files of mine whose offer went on the DHT floor (WISP 403 § Files) and that were deleted here before they went live,
+   * by wire id: the next session that carries files/3 says each is cancelled (`pf-abort`), so the contact's bubble does too.
+   */
+  withdrawnFiles?: string[];
   /** This side's reactions the contact has not confirmed yet (WISP 401 § Reactions), in the order of their numbers. */
   reactionsOut?: WireReaction[];
   /** The chat's pinned message (WISP 400 § Pinned message): the latest pin, either side's; `id` "" once unpinned. */
@@ -788,6 +793,11 @@ export interface StoredMessage {
   deliveryError?: string;
   /** Until when a `queued` message is sent again by itself; after that it waits for Retry. */
   resendUntil?: number;
+  /**
+   * A file of mine that waits for the live link, said on the DHT floor meanwhile (WISP 403 § Files): `sent` its offer
+   * went, `seen` the contact's app took it (its bubble is in place there), `unfit` it cannot go there (it waits as before).
+   */
+  fileOnFloor?: "sent" | "seen" | "unfit";
   linkId: string;
   id: string;
   text: string;

@@ -36,6 +36,8 @@ export interface FileDeskDeps {
   /** A message the chat holds already (a new file must not take the id of the contact's text, say). */
   messageExists?(linkId: string, messageId: string): Promise<boolean>;
   storeMessage(message: StoredMessage): Promise<void>;
+  /** Changes a stored message in place (`db.patchMessage`); nothing happens to one that is not there. */
+  patchMessage?(linkId: string, messageId: string, change: (message: StoredMessage) => Partial<StoredMessage> | null): Promise<void>;
   /**
    * The place in the chat of something that arrives now (WISP 400, requirement 10), taken at once. An offer's message
    * is stored a few steps of storage later (is there room, its record): without its place taken as the offer comes,
@@ -57,6 +59,11 @@ interface Chat {
   local: Map<string, string>;
   /** Wire id of an offer not stored yet → the place taken for its message as it came (`place`). */
   places: Map<string, number>;
+  /**
+   * Wire id of a file the contact said on the DHT floor whose offer has not come yet (WISP 403 § Files) → its local
+   * id and when it was said. Its message and bubble are there; the offer that comes live takes them over.
+   */
+  announced: Map<string, { local: string; at: number }>;
   /** Writes to the database, in order. */
   saving: Promise<void>;
   lastSaved: Map<string, number>;
@@ -66,6 +73,9 @@ interface Speed { bytes: number; at: number; rate: number }
 
 /** Local id of a file sent: the same shape files/2 uses. */
 export const outgoingFileId = (linkId: string, wireId: string) => `${linkId}-out-${wireId}`;
+
+/** A file said on the DHT floor whose offer does not come within this long is shown as not coming (an offer's week). */
+const ANNOUNCED_FOR_MS = 7 * 24 * 60 * 60_000;
 
 /** Progress is written to the database at most this often; every change of state is written at once. */
 const SAVE_EVERY_MS = 2_000;
@@ -93,7 +103,7 @@ export class FileDesk {
   private chat(linkId: string): Chat {
     let chat = this.chats.get(linkId);
     if (chat) return chat;
-    const made: Chat = { local: new Map(), places: new Map(), saving: Promise.resolve(), lastSaved: new Map(), files: undefined as unknown as ChatFiles };
+    const made: Chat = { local: new Map(), places: new Map(), announced: new Map(), saving: Promise.resolve(), lastSaved: new Map(), files: undefined as unknown as ChatFiles };
     made.files = new ChatFiles({
       send: (frame) => this.deps.send(linkId, frame),
       decide: (file, again) => this.decide(linkId, file, again),
@@ -113,6 +123,11 @@ export class FileDesk {
     const records: FileTransferRecord[] = [];
     const chat = this.chat(linkId);
     for (const file of files) {
+      // Said on the floor, its offer not come yet: its bubble waits again (one withdrawn keeps the end it was given).
+      if (file.announced && !file.wire3 && file.direction === "in") {
+        if (!file.transfer) this.announcedHere(chat, file.announced, file.id, file.metadata?.size ?? 0, file.createdAt);
+        continue;
+      }
       if (!file.wire3) continue;
       records.push(file.wire3);
       if (file.wire3.direction === "in") chat.local.set(file.wire3.id, file.id);
@@ -132,12 +147,61 @@ export class FileDesk {
 
   handle(linkId: string, frame: Record<string, unknown>): Promise<void> {
     const chat = this.chat(linkId);
+    // A file said on the floor and deleted on the sender's side before it went live: its bubble says so here.
+    if (frame.t === "pf-abort" && typeof frame.id === "string" && chat.announced.has(frame.id) && !chat.files.get("in", frame.id)) {
+      this.withdrawn(chat, frame.id, "Cancelled by the sender");
+      return Promise.resolve();
+    }
     // A new offer takes its message's place now, in the order frames come, before anything is awaited.
     const id = frame.t === "pf-offer" && typeof frame.id === "string" ? frame.id : undefined;
+    // The offer of a file said on the floor takes its bubble; one refused here leaves it saying so.
+    if (id !== undefined && chat.announced.has(id)) return chat.files.handle(frame).finally(() => { if (chat.announced.has(id) && !chat.files.get("in", id)) this.withdrawn(chat, id, "It was refused here"); });
     if (id === undefined || !this.deps.place || chat.local.has(id) || chat.places.has(id)) return chat.files.handle(frame);
     chat.places.set(id, this.deps.place(linkId));
     // An offer that was refused has no message: its place is let go.
     return chat.files.handle(frame).finally(() => { if (!chat.local.has(id)) chat.places.delete(id); });
+  }
+
+  /**
+   * A file the contact said on the DHT floor (WISP 403 § Files), whose message is stored under `peer_<wireId>` with
+   * this local id: its bubble waits for the offer, which takes it over when it comes live (no second message). False:
+   * this chat knows that wire id already (its offer came first, or another file has it), and nothing is to be stored.
+   */
+  announce(linkId: string, wireId: string, localId: string, size: number): boolean {
+    const chat = this.chat(linkId);
+    if (chat.local.has(wireId) || chat.places.has(wireId) || chat.files.get("in", wireId)) return false;
+    this.announcedHere(chat, wireId, localId, size, Date.now());
+    this.deps.changed();
+    return true;
+  }
+
+  /** The local id of a file said on the floor whose offer has not come, if this wire id is one; forgotten here. */
+  takeAnnounced(linkId: string, wireId: string): string | undefined {
+    const chat = this.chats.get(linkId), said = chat?.announced.get(wireId);
+    if (!chat || !said) return undefined;
+    chat.announced.delete(wireId);
+    chat.local.delete(wireId);
+    this.deps.transfers.delete(said.local);
+    return said.local;
+  }
+
+  private announcedHere(chat: Chat, wireId: string, localId: string, size: number, at: number): void {
+    chat.local.set(wireId, localId);
+    chat.announced.set(wireId, { local: localId, at });
+    // No direction: nothing to pause or cancel here before its offer comes.
+    this.deps.transfers.set(localId, { state: "transferring", stage: "waiting", transferred: 0, size });
+  }
+
+  /** A file said on the floor will not come (cancelled by its sender, or never offered within a week). */
+  private withdrawn(chat: Chat, wireId: string, error: string): void {
+    const said = chat.announced.get(wireId);
+    if (!said) return;
+    chat.announced.delete(wireId);
+    const view = this.deps.transfers.get(said.local);
+    const transfer = { state: "failed" as const, transferred: 0, size: view?.size ?? 0, error };
+    this.deps.transfers.set(said.local, transfer);
+    chat.saving = chat.saving.then(() => fileStore.patch(said.local, { transfer })).catch(() => {});
+    this.deps.changed();
   }
 
   /** Whether files/3 is live in this chat, and what the contact said it can take. */
@@ -238,14 +302,19 @@ export class FileDesk {
     const wireId = out ? fileId.slice(`${linkId}-out-`.length) : [...chat.local].find(([, local]) => local === fileId)?.[0];
     if (!wireId) return;
     chat.files.forget(out ? "out" : "in", wireId);
-    if (!out) chat.local.delete(wireId);
+    if (!out) { chat.local.delete(wireId); chat.announced.delete(wireId); }
     this.speeds.delete(fileId);
     this.unwatch(fileId);
   }
 
   /** Offers nobody answered in a week end; the peer calls this now and then. */
   sweep(): void {
-    for (const chat of this.chats.values()) chat.files.sweep();
+    const now = Date.now();
+    for (const chat of this.chats.values()) {
+      chat.files.sweep();
+      // Said on the floor and never offered live within the week an offer waits: it is not coming.
+      for (const [wireId, said] of [...chat.announced]) if (now - said.at > ANNOUNCED_FOR_MS) this.withdrawn(chat, wireId, "It did not come within a week");
+    }
   }
 
   /** The chat went away: its transfers stop here. */
@@ -271,10 +340,12 @@ export class FileDesk {
    */
   private async decide(linkId: string, file: FileInfo, again = false): Promise<OfferDecision> {
     const used = this.deps.wireIds(linkId);
+    // Said on the DHT floor first: its message is there, waiting for this offer.
+    const said = this.chats.get(linkId)?.announced.has(file.id) ?? false;
     // Offered again, the file is this chat's already (its id is in use by it); new, its id must be new.
-    if (!used || (!again && used.has(file.id))) return { refuse: "invalid" };
+    if (!used || (!again && !said && used.has(file.id))) return { refuse: "invalid" };
     if (this.deps.deleted(linkId, `peer_${file.id}`)) return { refuse: "declined" };
-    if (!again && await this.deps.messageExists?.(linkId, `peer_${file.id}`)) return { refuse: "invalid" };
+    if (!again && !said && await this.deps.messageExists?.(linkId, `peer_${file.id}`)) return { refuse: "invalid" };
     const room = await (await fileBytes()).room().catch(() => null);
     if (room !== null && file.size > room) return { refuse: "no-room", room };
     const taken = this.deps.receivedBytes(linkId) + this.autoTaken(linkId);
@@ -331,6 +402,21 @@ export class FileDesk {
 
   private changed(linkId: string, record: FileTransferRecord, transferred: number, progress: boolean): void {
     const chat = this.chat(linkId);
+    const said = record.direction === "in" ? chat.announced.get(record.id) : undefined;
+    if (said) {
+      // The offer of a file said on the floor: it takes over the bubble that waited for it, in its place. What the
+      // offer says is what the file is.
+      chat.announced.delete(record.id);
+      this.deps.wireIds(linkId)?.add(record.id);
+      const { file } = record, id = said.local;
+      const message: MessageFile = { id, name: file.name, size: file.size, mime: file.mime, ...(file.voice && { voice: file.voice }), ...(file.video && { video: file.video }), ...(file.image && { image: file.image }) };
+      chat.saving = chat.saving.then(async () => {
+        await fileStore.put({ id, linkId, direction: "in", wireId: record.id, createdAt: Date.now(), bytes: (await fileBytes()).kind,
+          metadata: { name: file.name, size: file.size, mime: file.mime, timestamp: file.timestamp, voice: file.voice, video: file.video, image: file.image }, wire3: record });
+        await this.deps.patchMessage?.(linkId, `peer_${record.id}`, (current) => current.sender !== "peer" || current.file?.id !== id ? null
+          : { file: message, text: fileMessageText(message), via: "datalink", details: { ...current.details, wire: fileWire("files/3", file.size) } });
+      }).catch(() => {});
+    }
     if (record.direction === "in" && !chat.local.has(record.id)) {
       // A new offer: its file and its message, then its record.
       const id = `${linkId}-in-${toBase64Url(randomBytes(12))}`;
