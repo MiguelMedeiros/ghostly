@@ -367,7 +367,7 @@ export class ProviderSources<P extends Connectable> {
     return this.serial(async () => {
       await this.guard();
       await transact([STORES.settings], (s) => { s[STORES.settings].delete(sourceKey(this.options.kind, this.mode, this.options.key)); s[STORES.settings].delete(seenKey(this.options.kind, this.mode, this.options.key)); });
-      await this.disconnect();
+      await this.disconnect(true);
       this.stored = undefined; this.seen = undefined;
       this.failures = 0; this.failingSince = undefined;
       this.view = this.idle(); this.options.changed();
@@ -385,7 +385,7 @@ export class ProviderSources<P extends Connectable> {
       await transact([STORES.settings], (s) => { s[STORES.settings].delete(sourceKey(this.options.kind, this.mode, this.options.key)); s[STORES.settings].delete(seenKey(this.options.kind, this.mode, this.options.key)); });
       this.stopped = true;
       this.gate.close();
-      await this.disconnect();
+      await this.disconnect(true);
       this.stored = undefined; this.seen = undefined;
       this.view = { mode: this.mode, status: "none", offered: [] };
     });
@@ -441,12 +441,13 @@ export class ProviderSources<P extends Connectable> {
     void transact([STORES.settings], (s) => { s[STORES.settings].put(seen, key); }).catch(() => {});
   }
 
-  private async disconnect() {
+  /** `forget`: the source is removed, so what it keeps on this device goes too (a provider's own `forget`). */
+  private async disconnect(forget = false) {
     clearTimeout(this.timer); clearTimeout(this.retry);
     this.controller.abort(); this.controller = new AbortController();
-    const provider = this.provider;
+    const provider = this.provider as (P & { forget?: () => Promise<void> }) | undefined;
     this.provider = undefined; this.descriptor = undefined; this.secrets = {};
-    await provider?.close().catch(() => {});
+    await (forget && provider?.forget ? provider.forget() : provider?.close())?.catch(() => {});
   }
 
   /** Shutting down: nothing reconnects afterwards. */

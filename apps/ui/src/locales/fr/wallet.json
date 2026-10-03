@@ -82,6 +82,7 @@
     "phraseNote": "La phrase récupère ce que le serveur de Second garde pour ce portefeuille ; l'historique des paiements vient du fichier de sauvegarde.",
     "read": "Lire",
     "renewalHint": "Renouvelle les pièces proches de l'expiration tant que Ghostly est ouvert",
+    "scanning": "Recherche des pièces on-chain que cette phrase a reçues avant…",
     "server": "Serveur Ark",
     "serverInput": "Serveur Bark",
     "serverStuck": "Ce serveur ne répond pas. Vous pouvez passer à un autre.",

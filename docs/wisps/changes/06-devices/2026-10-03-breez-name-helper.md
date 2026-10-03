@@ -1,0 +1,1 @@
+The Breez database a releasing device deletes is named from the profile and the phrase, given by one helper (`breezDatabase`). The SDK keeps its databases under that name (`<name>/<network>/<identity>` and its `-tree`, not `<name>` itself), so deleting it means listing them (`dropBreezDatabase`).

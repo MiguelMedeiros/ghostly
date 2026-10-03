@@ -1,5 +1,6 @@
+import { readFileSync } from "node:fs";
 import { SPARK_REGTEST, sparkCounterpart, type SparkCounterpart } from "../support/spark";
-import { chat, connect, createWallet, expect, link, openChat, openWallet, test, walletCard, type Peer } from "../support/fixtures";
+import { chat, connect, createWallet, expect, link, openChat, openProfilePage, openWallet, test, walletCard, type Peer } from "../support/fixtures";
 import { composerRow } from "../support/composer";
 import { paymentCard } from "../support/payments";
 
@@ -11,6 +12,7 @@ import { paymentCard } from "../support/payments";
  * Money moving: GHOSTLY_SPARK_REGTEST=1 and GHOSTLY_SPARK_COUNTERPART (a funded regtest wallet's phrase, see
  * e2e/support/spark.ts and e2e/README.md).
  */
+const PASSPHRASE = "a spark copy backup passphrase";
 const panel = (p: Peer) => p.page.getByTestId("spark-wallet");
 const balance = (p: Peer) => panel(p).getByTestId("spark-balance");
 const sats = async (p: Peer) => Number((await balance(p).innerText()).trim().match(/^[\d,]*/)![0].replace(/,/g, "") || NaN);
@@ -56,6 +58,69 @@ test.describe("on Breez's regtest", { tag: "@network" }, () => {
     await expect(panel(alice).getByTestId("spark-address")).toContainText(/sparkrt1[a-z0-9]{50,}/);
     await panel(alice).getByRole("button", { name: "Show" }).click();
     await expect(panel(alice).getByTestId("spark-recovery")).toHaveText(/^(\w+ ){11}\w+$/);
+  });
+
+  test("a profile restored as a copy on the same device opens a Breez database of its own, and deleting the copy deletes that one only", { tag: ["@feature:wallet.spark.storage", "@feature:backup.profile.same-device", "@feature:profiles.delete"] }, async ({ peer }) => {
+    test.setTimeout(6 * 60_000);
+    const alice = await peer("spark-copy", { offlineMainnet: true });
+    const { page } = alice;
+    /** Every database name on this device. */
+    const all = () => page.evaluate(async () => (await indexedDB.databases()).map((d) => d.name ?? ""));
+    /** The Breez wallets on this device, by storage name: the SDK keeps `<name>/regtest/<identity>` and its `-tree`. */
+    const breez = async () => [...new Set((await all()).map((name) => name.match(/^(ghostly-breez-regtest-[0-9a-f]{16})\/regtest\/[0-9a-f]+$/)?.[1]).filter((name): name is string => !!name))].sort();
+    const rows = page.getByTestId("profile-row");
+    const rename = async (name: string) => { await page.getByTestId("profile-name").fill(name); await page.getByTestId("profile-name").press("Enter"); await expect(page.getByTestId("account-profile")).toHaveAttribute("title", new RegExp(name)); };
+
+    await openProfilePage(page);
+    await rename("Original");
+    await createWallet(alice, "spark", "testnet", { timeout: 120_000 });
+    await openWallet(alice, "spark-testnet");
+    await expect(balance(alice)).toContainText("Regtest", { timeout: 120_000 });
+    const address = (await panel(alice).getByTestId("spark-address").innerText()).trim();
+    await expect.poll(breez, { timeout: 30_000 }).toHaveLength(1);
+    const [original] = await breez();
+    expect(original, "the original's wallet has its database").toBeTruthy();
+
+    // The whole profile to a file, restored on this same device as a copy anyway.
+    await openProfilePage(page);
+    const backups = page.getByTestId("profile-backups");
+    await backups.getByTestId("backup-open").click();
+    await backups.getByTestId("backup-passphrase").fill(PASSPHRASE);
+    await backups.getByTestId("backup-confirm").fill(PASSPHRASE);
+    const downloading = page.waitForEvent("download");
+    await backups.getByTestId("backup-download").click();
+    const file = await downloading;
+    await backups.getByTestId("restore-open").click();
+    await backups.getByTestId("restore-file").setInputFiles({ name: file.suggestedFilename(), mimeType: "application/octet-stream", buffer: readFileSync((await file.path())!) });
+    await backups.getByTestId("restore-passphrase").fill(PASSPHRASE);
+    await backups.getByTestId("restore-go").click();
+    await backups.getByTestId("restore-same-device").getByTestId("restore-copy").click();
+    await expect(page.getByTestId("profile-restored-tag")).toHaveText("Restored", { timeout: 60_000 });
+    await rename("Copy");
+
+    // The copy's Spark wallet: the same phrase, so the same address, from a database of its own.
+    await openWallet(alice, "spark-testnet");
+    await expect(balance(alice)).toContainText("Regtest", { timeout: 120_000 });
+    await expect(panel(alice).getByTestId("spark-address")).toHaveText(address);
+    await expect.poll(breez, { timeout: 30_000 }).toHaveLength(2);
+    const copy = (await breez()).find((name) => name !== original)!;
+    expect(await breez(), "the original's is still there, untouched").toContain(original);
+
+    // Back to the original, which still opens its own, then the copy deleted: its database goes, the original's stays.
+    await openProfilePage(page);
+    await rows.filter({ hasText: "Original" }).getByTestId("profile-switch").click();
+    await expect(page.getByTestId("profile-name")).toHaveValue("Original", { timeout: 30_000 });
+    await openWallet(alice, "spark-testnet");
+    await expect(panel(alice).getByTestId("spark-address")).toHaveText(address, { timeout: 120_000 });
+    await openProfilePage(page);
+    await rows.filter({ hasText: "Copy" }).getByTestId("profile-delete").click();
+    const dialog = page.getByTestId("delete-profile");
+    await dialog.getByTestId("delete-profile-confirm").fill("Copy");
+    await dialog.getByTestId("delete-profile-go").click();
+    await expect(dialog).toBeHidden();
+    await expect(rows).toHaveCount(1);
+    await expect.poll(breez).toEqual([original]);
+    expect((await all()).filter((name) => name.startsWith(`${copy}/`)), "the SDK's -tree database went too").toEqual([]);
   });
 
   test.describe("Spark to Spark", () => {
