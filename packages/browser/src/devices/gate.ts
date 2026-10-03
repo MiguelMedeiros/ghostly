@@ -20,6 +20,11 @@ export interface DeviceGateView {
   activeDevice?: string;
   /** What the system said, for `unreadable`. */
   detail?: string;
+  /**
+   * `standby` only: the device was enrolled and has not seen the active device's record that lists it yet (WISP 06
+   * § Adding a device, "Not finished"). It holds nothing usable; Remove takes the device set off this device.
+   */
+  unfinished?: true;
 }
 
 export interface DeviceGate {
@@ -35,9 +40,12 @@ export interface DeviceGate {
 const gates = new Map<string, Promise<DeviceGate>>();
 const known = new Map<string, DeviceGate>();
 
-function viewOf(record: DeviceRecord): DeviceGateView {
+/** What the pages are told of a device record that keeps the engine from starting. */
+export function viewOf(record: DeviceRecord): DeviceGateView {
   const active = record.activeSlot !== undefined && record.activeSlot !== record.ownSlot ? record.deviceSet[record.activeSlot] : undefined;
-  return { state: record.state as DeviceGateView["state"], ...(active?.name ? { activeDevice: active.name } : {}) };
+  // Every standby that finished its enrollment accepted a record that lists it: one with no packet did not.
+  const unfinished = record.state === "standby" && !record.turnPacket;
+  return { state: record.state as DeviceGateView["state"], ...(active?.name ? { activeDevice: active.name } : {}), ...(unfinished ? { unfinished: true as const } : {}) };
 }
 
 async function read(profile: string): Promise<DeviceGate> {
