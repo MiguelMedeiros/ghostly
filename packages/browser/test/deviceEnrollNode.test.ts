@@ -57,6 +57,7 @@ describe("joining a profile in place of the one this device runs", () => {
   const refuse = async (setup: (inner: Record<string, unknown>) => void) => {
     const { node: n, inner } = node();
     (inner as { settings: { online: boolean } }).settings.online = true;
+    inner.walletsStarted = true;
     setup(inner);
     await expect(n.deviceEnrollJoin({ code: "ghostly1zx", name: "Phone" })).rejects.toThrow(/^enroll-in-use:/);
   };
@@ -71,10 +72,31 @@ describe("joining a profile in place of the one this device runs", () => {
     await refuse((inner) => { (inner.links as Map<string, unknown>).set("chat", { stored: { id: "chat", seedB64: createIdentity().seedB64 } }); });
   });
 
+  it("is refused when the wallets a new profile gets by itself hold or wait for money, or were not read yet", async () => {
+    const wallets = [{ id: "c", type: "cashu", network: "mainnet", config: {} }, { id: "u", type: "usdt", network: "mainnet", config: {} }];
+    const net = (patch: Record<string, unknown>) => ({ mints: [], balance: 0, history: [], ...patch });
+    const mainnet = (patch: Record<string, unknown>) => (inner: Record<string, unknown>) => {
+      inner.walletView = { ...net(patch), feesPaid: 0, wallets, networks: { mainnet: net(patch), testnet: net({}) } };
+    };
+    const usdt = (patch: Record<string, unknown>) => ({ usdt: { configured: true, locked: false, read: true, balance: "0", gasBalance: "0", ...patch } });
+    await refuse(mainnet(usdt({ balance: "25.0" })));
+    await refuse(mainnet(usdt({ gasBalance: "0.01" })));
+    await refuse(mainnet(usdt({ read: undefined })));
+    await refuse(mainnet({ setAside: 1000 }));
+    await refuse(mainnet({ unconfirmed: 1000 }));
+    await refuse(mainnet({ openSwaps: 1, swapsAmount: 1000 }));
+    await refuse(mainnet({ awaiting: [{ type: "cashu", kind: "paid", amount: 2100 }] }));
+    await refuse((inner) => { inner.walletView = { ...net({}), feesPaid: 0, wallets, intents: [{ id: "r1", state: "unknown" }] }; });
+    // Before the wallets were read, the view says nothing about them.
+    await refuse((inner) => { inner.walletsStarted = false; inner.walletView = { ...net({}), feesPaid: 0, wallets }; });
+  });
+
   it("is not refused for the wallets a new profile gets by itself, empty", async () => {
     const { node: n, inner } = node();
     (inner as { settings: { online: boolean } }).settings.online = true;
-    inner.walletView = { mints: [], balance: 0, history: [], feesPaid: 0, wallets: [{ id: "c", type: "cashu", network: "mainnet", config: {} }, { id: "u", type: "usdt", network: "mainnet", config: {} }] };
+    inner.walletsStarted = true;
+    const usdt = { configured: true, locked: false, read: true, balance: "0", gasBalance: "0" };
+    inner.walletView = { mints: [], balance: 0, history: [], feesPaid: 0, usdt, networks: { mainnet: { mints: [], balance: 0, history: [], usdt }, testnet: { mints: [], balance: 0, history: [] } }, wallets: [{ id: "c", type: "cashu", network: "mainnet", config: {} }, { id: "u", type: "usdt", network: "mainnet", config: {} }] };
     // Past the check: the code is what is refused now.
     await expect(n.deviceEnrollJoin({ code: "ghostly1zx", name: "Phone" })).rejects.toThrow(/^enroll-(typo|not-ghostly|damaged):/);
   });
