@@ -115,7 +115,7 @@ Bundles made before version 2 are one UTF-8 JSON document, and are still restore
 ## Restore
 
 - A bundle is restored into a **new** profile. It never replaces, merges into or deletes an existing profile.
-- Every store, file and key is written before the profile is registered, so an interrupted restore leaves no half-made profile in the list.
+- Every store, file and key is written before the profile is registered, so an interrupted restore leaves no half-made profile in the list. What a restore stopped with no chance to take it back (a closed tab, a crash) wrote is noted before it is written, and removed at the next start of the client once no other window is still running that restore.
 - A restore that fails, is cancelled, or meets a frame that does not pass its check takes back everything it wrote: its databases, the files in the new profile's space and its local keys. Nothing of a refused bundle stays on the device.
 - A client shows what a backup or a restore is doing (reading, writing, checking; files and bytes done of the total) and offers Cancel. A cancelled backup leaves no file, whole or partial.
 - Every Ark wallet record gets a fresh wallet id, with or without a database to copy, so a restored profile never shares an Ark database with the profile it came from. So does every Bark wallet record ([204](204-bark.md)), current or retired: its databases are never in the bundle, and under the new id the wallet starts an empty one that the server's recovery scan fills from the phrase. A backup of a wallet whose database exists but cannot be read fails instead of leaving it out.
