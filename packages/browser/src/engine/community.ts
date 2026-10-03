@@ -682,9 +682,10 @@ export class Communities {
       } else if (now - live.lastBeaconTry < BEACON_RETRY_MS) {
         // A publish that just failed (the relays' budget, say) is tried again in a moment, not every tick.
       } else if (now - live.lastBeaconWrite >= COMMUNITY_TOPOLOGY.beaconEveryMs || !live.beacon.some(h => h.key === me)
-        // A hub that is leaving (I hold its signed request) is written out at once: a member with no edge up hears of the
-        // leave only from a reading of the beacon that no longer lists it.
-        || live.beacon.some(h => h.key !== me && this.gone(live, h.key))
+        // A hub that is leaving (I hold its signed request, or its leave is committed) is written out at once: a member
+        // with no edge up hears of the leave only from a reading of the beacon that no longer lists it. (Not one the
+        // chain took out: one that lists itself, back after its removal, is told by the hubs that see its entry.)
+        || live.beacon.some(h => h.key !== me && this.gone(live, h.key) && (s.state.pendingLeaves.some(r => r.s === h.key) || this.leftItself(live, h.key)))
         // A load that moved much (or filled up) is said at once, so members stop asking a full hub.
         || (now - live.lastBeaconWrite >= 5_000 && Math.abs(this.beaconLoad(groupId, live, now) - (live.beacon.find(h => h.key === me)?.load ?? load)) >= 8)) {
         // Held back, it does not hold the rest of the tick (knocks, entries, edges) with it.
