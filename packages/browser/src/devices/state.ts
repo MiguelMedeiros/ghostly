@@ -33,6 +33,33 @@ export interface DeviceNetwork {
   irohRelays?: string[];
   /** ICE servers (TURN) beside the app's own. */
   iceServers?: { urls: string; username?: string; credential?: string }[];
+  /** The push relay a browser page hands a wake-up to (Settings, Network): how a standby web app wakes another device. */
+  pushRelay?: string;
+}
+
+/** A push target as the device record keeps it: a subscription, the VAPID pair it was made with, base64url throughout. */
+export interface DevicePushTarget {
+  /** The push service's endpoint (https). */
+  e: string;
+  p: string;
+  a: string;
+  /** The VAPID public and private keys. */
+  vp: string;
+  vk: string;
+}
+
+/**
+ * Push between the person's devices (WISP 06 § Push and the phone), kept beside the device state so that a standby,
+ * which never opens the profile's database, still has it. Device-local: the record is never copied to another device.
+ */
+export interface DevicePush {
+  /**
+   * This device's own push subscription for this profile, and the token it gave each other device (by signing key):
+   * what it shares in `device-wake`, and how its push worker knows which device asked for it.
+   */
+  own?: DevicePushTarget & { tokens: Record<string, string> };
+  /** Each other device's target, by signing key, with the token that device gave this one. */
+  others?: Record<string, DevicePushTarget & { k: string }>;
 }
 
 /** One slot of the device set. Bytes are base64url everywhere in the record, so it is the same in IndexedDB and in Desktop's file. */
@@ -263,6 +290,26 @@ export interface DeviceRecord {
   tombstone?: string;
   /** "New device secret" is offered (`rotate.ts`). */
   secretOffer?: SecretOffer;
+  /** Push between this profile's devices (`push.ts`). */
+  push?: DevicePush;
+  /**
+   * `moving`: "My other device is lost or broken" made a device set of its own (`ownSet.ts`), which settles before it
+   * counts. Stored before its tombstone leaves the device, so a reload while it settles resumes it.
+   */
+  ownSet?: OwnSetPlan;
+}
+
+/** A device set of its own, made by a `moving` device whose remover is gone (WISP 06 § Removing a device). */
+export interface OwnSetPlan {
+  /** The new device-set secret. */
+  d: string;
+  /** The tombstone put at the old address: this device the only one listed. */
+  tombstone: string;
+  /** The first record at the new address. */
+  packet: string;
+  /** When the tombstone's put ended (ms), null while it is out; and the sources that took it. */
+  at: number | null;
+  sources: string[];
 }
 
 /** The states in which the whole engine runs. In every other one the client opens no peer database (WISP 06 § The gate). */
@@ -365,6 +412,7 @@ function isNetwork(value: unknown): value is DeviceNetwork {
   const n = value as Record<string, unknown>;
   if (n.off !== undefined && typeof n.off !== "boolean") return false;
   if (n.readRelays !== undefined && typeof n.readRelays !== "boolean") return false;
+  if (n.pushRelay !== undefined && (typeof n.pushRelay !== "string" || n.pushRelay.length > 2048)) return false;
   if (n.relays !== undefined && !texts(n.relays, 16)) return false;
   if (n.irohRelays !== undefined && !texts(n.irohRelays, 4)) return false;
   if (n.iceServers !== undefined) {
@@ -372,6 +420,30 @@ function isNetwork(value: unknown): value is DeviceNetwork {
     for (const server of n.iceServers as Record<string, unknown>[]) {
       if (!server || typeof server !== "object" || typeof server.urls !== "string" || !optional(server.username, text) || !optional(server.credential, text)) return false;
     }
+  }
+  return true;
+}
+
+const TOKEN = /^[A-Za-z0-9_-]{16,64}$/;
+const pushKey = (v: unknown): v is string => typeof v === "string" && /^[A-Za-z0-9_-]{1,200}$/.test(v);
+function isPushTarget(value: unknown): value is DevicePushTarget {
+  const t = value as Partial<DevicePushTarget> | null;
+  return !!t && typeof t === "object" && typeof t.e === "string" && t.e.length <= 2048 && [t.p, t.a, t.vp, t.vk].every(pushKey);
+}
+function isPush(value: unknown): value is DevicePush {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const p = value as { own?: unknown; others?: unknown };
+  if (p.own !== undefined) {
+    const own = p.own as { tokens?: unknown };
+    if (!isPushTarget(own) || !own.tokens || typeof own.tokens !== "object" || Array.isArray(own.tokens)) return false;
+    const tokens = Object.entries(own.tokens as Record<string, unknown>);
+    if (tokens.length > MAX_DEVICES * 4 || !tokens.every(([key, token]) => bytes(key) && typeof token === "string" && TOKEN.test(token))) return false;
+  }
+  if (p.others !== undefined) {
+    if (!p.others || typeof p.others !== "object" || Array.isArray(p.others)) return false;
+    const others = Object.entries(p.others as Record<string, unknown>);
+    const token = (target: unknown) => { const k = (target as { k?: unknown }).k; return typeof k === "string" && TOKEN.test(k); };
+    if (others.length > MAX_DEVICES * 4 || !others.every(([key, target]) => bytes(key) && isPushTarget(target) && token(target))) return false;
   }
   return true;
 }
@@ -475,6 +547,12 @@ export function parseDeviceRecord(value: unknown): DeviceRecord {
   if (r.secretOffer !== undefined) {
     const o = r.secretOffer as Partial<SecretOffer> | null;
     if (!o || typeof o !== "object" || o.why !== "takeover" || !count(o.at, Number.MAX_SAFE_INTEGER) || !optional(o.device, text) || (o.lost !== undefined && o.lost !== true)) return bad("secretOffer");
+  }
+  if (r.push !== undefined && !isPush(r.push)) return bad("push");
+  if (r.ownSet !== undefined) {
+    const o = r.ownSet as Partial<OwnSetPlan> | null;
+    if (!o || typeof o !== "object" || !bytes(o.d) || !bytes(o.tombstone) || !bytes(o.packet) || !(o.at === null || count(o.at, Number.MAX_SAFE_INTEGER))) return bad("ownSet");
+    if (!Array.isArray(o.sources) || o.sources.length > 16 || !o.sources.every(text)) return bad("ownSet");
   }
   return value as DeviceRecord;
 }

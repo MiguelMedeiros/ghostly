@@ -291,6 +291,11 @@ export interface EngineApi {
    */
   setWakeSubscription(params: { subscription: WakeSubscription | null }): Promise<void>;
   /**
+   * The page found the profile's subscription is this browser's own (WISP 06 § Push and the phone): in a profile on
+   * several devices it names this device, and the other devices learn how to wake it. Nothing for any other endpoint.
+   */
+  wakeConfirm(params: { endpoint: string }): Promise<void>;
+  /**
    * A chat muted here (#250) is not woken: its contact is told to forget this side's subscription until it is unmuted,
    * so no push for it reaches the browser at all (a push that shows nothing counts against the app with some browsers).
    * A private group's `group:<id>` does the same for every member of it (WISP 9xx · Group Mesh § Wake-up push).
@@ -373,6 +378,13 @@ export interface EngineApi {
   /** A ping over the device link to the device with this signing key: how long its echo took. */
   devicePing(params: { key: string }): { ms: number };
   /**
+   * A standby's own push subscription as its device record holds it (WISP 06 § Push and the phone): the endpoint, and
+   * the public half of the VAPID pair to subscribe again with. Null when this device has none. Device-link-only mode.
+   */
+  devicePushState(): { endpoint: string; vapidPublic: string } | null;
+  /** A standby's browser replaced its subscription, or it has none any more: the record follows, the other devices are told. */
+  devicePushSet(params: { subscription: { endpoint: string; p256dh: string; auth: string } | null }): void;
+  /**
    * The handoff (WISP 06 § The handoff). Errors start with `handoff-<reason>:`. The verifier of the password proof,
    * made from the lock password the person just typed (Add a device, a password set or changed).
    */
@@ -393,7 +405,7 @@ export interface EngineApi {
    * A forced takeover (WISP 06 § Forced takeover): whether this device offers one, which device it stops, and whether the
    * lock password is asked. Only a standby or a replaced device that holds a copy of the profile offers one.
    */
-  deviceTakeoverInfo(): { offered: boolean; device?: string; copy?: "frozen" | "restored"; password?: boolean };
+  deviceTakeoverInfo(): { offered: boolean; device?: string; copy?: "frozen" | "restored"; password?: boolean; /** A `moving` device: a device set of its own (WISP 06 § Removing a device). */ ownSet?: true };
   /**
    * "My other device is lost or broken" (and "It wasn't me"), with the lock password and the name of the device that
    * stops. Errors start with `takeover-<reason>:`; nothing is written to the turn on one. `kind` is `start` when this

@@ -44,7 +44,7 @@ import type { HandoffTakerFacts } from "./handoffWallets";
 /** Why a handoff did not happen, as the screens say it. */
 export type HandoffFailure =
   | "unreachable" | "password" | "locked-out" | "refused" | "payment" | "call" | "busy" | "older" | "room" | "damaged" | "dropped"
-  | "wallet" | "loading" | "mainnet" | "expiry" | "cancelled" | "turn" | "offline" | "version" | "failed";
+  | "wallet" | "loading" | "mainnet" | "expiry" | "cancelled" | "turn" | "offline" | "version" | "failed" | "woken";
 
 /** What the screens show of a handoff on either device. Never a secret. */
 export interface HandoffView {
@@ -73,6 +73,8 @@ export interface HandoffView {
   expiresAt?: number;
   /** The giver: the wallets that stay on this device, and when their coins expire (WISP 06 § Wallets that stay home). */
   stays?: HandoffStay[];
+  /** The other device's link was down and a wake push went to it: "Open Ghostly on <device> and keep it open." */
+  woken?: true;
 }
 
 /** A wallet that stays on its home device in this handoff. */
@@ -84,7 +86,15 @@ export interface HandoffLinks {
   send(key: string, frame: DeviceFrame): void;
   /** The open session's transcript hash (lower-case hex), or undefined while none is open. */
   transcript(key: string): string | undefined;
+  /**
+   * Wakes that device for the handoff when its link is down (WISP 06 § Push and the phone): a push to the subscription
+   * it shared over the link. `sent` when the push service took one. Absent where nothing can be woken.
+   */
+  wake?(key: string): Promise<"sent" | "none" | "skipped" | "failed">;
 }
+
+/** How long a taker that woke the other device waits for its link: the person has to see the notice and open Ghostly there. */
+export const WOKEN_CONNECT_MS = 3 * 60_000;
 
 export interface HandoffRecords {
   read(): Promise<DeviceRecord | null>;
@@ -444,7 +454,12 @@ export class HandoffGiver {
       const busy = reportOf(await this.ports.busy(this.takerFacts(key)));
       // The wallet a refusal is about goes in the message, between colons, for the screen to name it.
       if (busy) throw new Error(`handoff-${busy.why}:${busy.wallet ? `${busy.wallet}:` : ""} This device cannot move the profile now.`);
-      if (!this.ports.links.live(key)) throw new Error("handoff-unreachable: That device must be on, with Ghostly open.");
+      if (!this.ports.links.live(key)) {
+        // A phone that suspended the app: a wake push asks the person to open Ghostly there (WISP 06 § Push and the phone).
+        const woken = await this.ports.links.wake?.(key).catch(() => "failed" as const);
+        if (woken === "sent" || woken === "skipped") throw new Error("handoff-woken: Open Ghostly on that device and keep it open.");
+        throw new Error("handoff-unreachable: That device must be on, with Ghostly open.");
+      }
       this.begin(key, newHandoffId(), record);
       this.stays = await this.ports.staying?.(this.takerFacts(key)).catch(() => []) ?? [];
       this.phase = "offered";
@@ -890,7 +905,7 @@ export class HandoffTaker {
 
   view(): HandoffView | null {
     if (!this.peer) return null;
-    if (this.phase === "idle") return this.failure ? { role: "taker", device: this.deviceName, key: this.peer, step: "failed", bytes: 0, total: 0, failure: this.failure, ...(this.retry ? { retry: this.retry } : {}) } : null;
+    if (this.phase === "idle") return this.failure ? { role: "taker", device: this.deviceName, key: this.peer, step: "failed", bytes: 0, total: 0, failure: this.failure, ...(this.retry ? { retry: this.retry } : {}), ...(this.woken && this.failure === "unreachable" ? { woken: true as const } : {}) } : null;
     const step: HandoffView["step"] = this.phase === "offer" ? "offer" : this.phase === "connecting" ? "connecting" : this.phase === "authorizing" ? "authorizing"
       : this.phase === "receiving" ? (this.pass === 1 ? (this.ports.links.live(this.peer) ? "copying" : "ready") : "rest") : this.phase === "verified" ? "checking"
         : this.phase === "installing" ? "switching" : this.phase === "settling" ? "settling" : this.phase === "done" ? "done" : "failed";
@@ -898,9 +913,12 @@ export class HandoffTaker {
     return {
       role: "taker", device: this.deviceName, key: this.peer, step, bytes: this.totals.bytes, total: this.totals.total,
       ...(this.phase === "receiving" ? { pass: this.pass } : {}), ...(later ? { later } : {}), ...(this.phase === "offer" ? { offer: this.offerBytes } : {}),
-      ...(this.failure ? { failure: this.failure } : {}), ...(this.retry ? { retry: this.retry } : {}),
+      ...(this.failure ? { failure: this.failure } : {}), ...(this.retry ? { retry: this.retry } : {}), ...(this.woken && (this.phase === "connecting" || this.failure === "unreachable") ? { woken: true as const } : {}),
     };
   }
+
+  /** A wake push went to the giver while this taker waited for its link. */
+  private woken = false;
 
   /** "Use here" on a standby (a pull), with the profile's lock password. `later`: leave files over this size behind. */
   pull(password: string, later = 0): Promise<HandoffView | null> {
@@ -1054,12 +1072,23 @@ export class HandoffTaker {
   private async connect(pull: boolean): Promise<void> {
     this.phase = "connecting";
     this.pullWanted = pull;
+    this.woken = false;
     this.changed();
     this.arm(HANDOFF_TIMINGS.connectMs, () => this.giveUp("unreachable"));
     if (this.ports.links.live(this.peer!)) {
       const session = this.sessionFor(this.peer!);
       if (session) this.sendHello(this.peer!, session);
+      return;
     }
+    // The giver's link is down (a phone that suspended the app): a wake push asks the person to open Ghostly there, and
+    // the wait is long enough for that (WISP 06 § Push and the phone).
+    const peer = this.peer!, id = this.id;
+    void this.ports.links.wake?.(peer).then((outcome) => this.exclusive(async () => {
+      if (outcome !== "sent" || this.phase !== "connecting" || this.peer !== peer || this.id !== id || this.ports.links.live(peer)) return;
+      this.woken = true;
+      this.arm(WOKEN_CONNECT_MS, () => this.giveUp("unreachable"));
+      this.changed();
+    })).catch(() => {});
   }
   private pullWanted = false;
 

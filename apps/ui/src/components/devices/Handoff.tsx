@@ -21,7 +21,8 @@ export function HandoffProgress({ view, onCancel }: { view: HandoffView; onCance
   const failed = view.step === "failed";
   const percent = view.total > 0 ? Math.min(100, Math.floor((view.bytes / view.total) * 100)) : 0;
   const line = failed ? t(FAILURES[view.failure ?? "failed"], { device, wallet: walletNameOf(view.wallet), date: view.expiresAt !== undefined ? dayText(view.expiresAt, language) : "" })
-    : view.step === "connecting" ? t("devices.handoff.step.connecting", { device })
+    // A wake push went to the other device (a phone that suspended the app): the person opens Ghostly there.
+    : view.step === "connecting" ? (view.woken ? t("devices.handoff.fail.woken", { device }) : t("devices.handoff.step.connecting", { device }))
       : view.step === "authorizing" ? t("devices.handoff.step.authorizing")
         : view.step === "copying" ? t("devices.handoff.step.copying", { done: sizeText(view.bytes), total: sizeText(view.total) })
           : view.step === "ready" ? t("devices.handoff.step.ready")
@@ -34,7 +35,7 @@ export function HandoffProgress({ view, onCancel }: { view: HandoffView; onCance
                         : t("devices.handoff.step.connecting", { device });
   const cancellable = !failed && ["connecting", "authorizing", "copying", "ready", "rest", "checking"].includes(view.step);
   return (
-    <div data-testid="handoff-progress" data-step={view.step} data-role={view.role} data-failure={view.failure} className="space-y-2 text-start">
+    <div data-testid="handoff-progress" data-step={view.step} data-role={view.role} data-failure={view.failure} data-woken={view.woken ? "true" : undefined} className="space-y-2 text-start">
       <p className="font-semibold text-text-primary">{t("devices.handoff.title")}</p>
       <p data-testid="handoff-line" role={failed ? "alert" : undefined} className={failed ? "text-danger" : "text-text-secondary"}>{line}</p>
       {(view.step === "copying" || view.step === "rest") && view.total > 0 && (

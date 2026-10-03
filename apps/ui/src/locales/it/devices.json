@@ -60,7 +60,8 @@
       "turn": "Un altro dispositivo ha preso il controllo. Questo dispositivo è in attesa.",
       "unreachable": "Impossibile raggiungere {{device}}. Deve essere acceso, con Ghostly aperto.",
       "version": "Ghostly è stato aggiornato nel frattempo. Non è cambiato nulla.",
-      "wallet": "Un portafoglio di qui non può essere spostato con questa versione di Ghostly."
+      "wallet": "Un portafoglio di qui non può essere spostato con questa versione di Ghostly.",
+      "woken": "Apri Ghostly su {{device}} e lascialo aperto."
     },
     "later": "Porta i file grandi più tardi",
     "laterNote": "{{size}} di file grandi restano su {{device}} per ora.",
@@ -195,6 +196,8 @@
     "foreign": "Qualcos’altro ha chiuso il tuo vecchio insieme di dispositivi.",
     "hint": "Usa questo profilo su un altro dispositivo. Un solo dispositivo è attivo alla volta.",
     "info": "Solo il dispositivo attivo invia, riceve e paga, così i tuoi messaggi e i tuoi soldi non sono mai in due posti. Sposta il profilo quando vuoi.",
+    "keepAwake": "Tieni sveglio questo computer",
+    "keepAwakeHint": "Così il tuo telefono può subentrare mentre sei fuori.",
     "live": "Connesso",
     "noAnswer": "Nessuna risposta",
     "standby": "In attesa",
@@ -271,6 +274,9 @@
     "lostRace": "Un altro dispositivo è subentrato nello stesso momento. Questo dispositivo è in attesa.",
     "lostYes": "Perso o rubato",
     "notMe": "Non sono stato io",
+    "ownSetHint": "Questo dispositivo avvia un proprio insieme di dispositivi. Dopo, aggiungi di nuovo gli altri dispositivi.",
+    "ownSetRemoved": "Un altro tuo dispositivo ha avviato prima un proprio insieme. Aggiungi di nuovo questo dispositivo da lì.",
+    "ownSetWait": "In attesa della rete. Riprova tra un momento.",
     "restoredHint": "Questo dispositivo ha una copia da un backup. Non avvia nulla finché non subentri.",
     "title": "Subentrare senza {{device}}?",
     "titleUnnamed": "Subentrare senza l'altro dispositivo?"

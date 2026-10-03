@@ -10,7 +10,7 @@ import { DeviceDialog, field, primaryButton } from "./DeviceDialog";
  * "It wasn't me" on a device that was replaced. The lock password (where this copy is a frozen one) and the name of the
  * device that stops; then about half a minute in which this device checks that no other one took the turn too.
  */
-export function TakeoverDialog({ device, password: asks, restored, onClose }: { device?: string; password: boolean; restored?: boolean; onClose(): void }) {
+export function TakeoverDialog({ device, password: asks, restored, ownSet, onClose }: { device?: string; password: boolean; restored?: boolean; ownSet?: boolean; onClose(): void }) {
   const { t } = useI18n();
   const [password, setPassword] = useState("");
   const [name, setName] = useState("");
@@ -18,7 +18,8 @@ export function TakeoverDialog({ device, password: asks, restored, onClose }: { 
   const [error, setError] = useState("");
   const [info, setInfo] = useState(false);
   // "Lost or stolen?" (WISP 06 § Forced takeover): on yes, the money checklist comes first once the profile opens here.
-  const [lost, setLost] = useState<boolean | null>(restored ? false : null);
+  // A device set of its own (a `moving` device whose remover is gone): the question is not asked, the old set is left whole.
+  const [lost, setLost] = useState<boolean | null>(restored || ownSet ? false : null);
   const other = device ?? t("devices.join.otherDevice");
   const ready = (!asks || !!password) && (!device || name.trim().length > 0) && lost !== null;
   const submit = async () => {
@@ -27,7 +28,7 @@ export function TakeoverDialog({ device, password: asks, restored, onClose }: { 
       const outcome = await engine.call("deviceTakeover", { password, name, lost: lost === true });
       // Active now: the app starts again into the gate, where the engine raises its counters and starts.
       if (outcome.kind === "start") { await reloadIntoGate(); return; }
-      setError(t("devices.takeover.lostRace"));
+      setError(t(outcome.kind === "removed" ? "devices.takeover.ownSetRemoved" : outcome.kind === "wait" ? "devices.takeover.ownSetWait" : "devices.takeover.lostRace"));
     } catch (cause) {
       const key = takeoverErrorKey(cause);
       setError(key ? t(key) : errorText(cause, t));
@@ -41,7 +42,8 @@ export function TakeoverDialog({ device, password: asks, restored, onClose }: { 
           className="grid h-5 w-5 shrink-0 cursor-pointer place-items-center rounded-full text-text-muted hover:text-accent aria-expanded:text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">ⓘ</button>
       </p>
       {info && <p data-testid="takeover-info-text" className="rounded-lg bg-surface-hover px-3 py-2 text-xs leading-5 text-text-secondary">{t("devices.takeover.info", { device: other })}</p>}
-      {!restored && (
+      {ownSet && <p data-testid="takeover-own-set" className="text-text-secondary">{t("devices.takeover.ownSetHint")}</p>}
+      {!restored && !ownSet && (
         <fieldset className="space-y-1.5" data-testid="takeover-lost">
           <legend className="text-text-secondary">{t("devices.takeover.lostQuestion")}</legend>
           {([[true, "devices.takeover.lostYes", "takeover-lost-yes"], [false, "devices.takeover.lostNo", "takeover-lost-no"]] as const).map(([value, key, testId]) => (

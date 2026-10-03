@@ -60,7 +60,8 @@
       "turn": "Outro dispositivo assumiu. Este dispositivo está em espera.",
       "unreachable": "Não foi possível alcançar {{device}}. Ele precisa estar ligado, com o Ghostly aberto.",
       "version": "O Ghostly foi atualizado no meio do caminho. Nada mudou.",
-      "wallet": "Uma carteira daqui não pode ser movida com esta versão do Ghostly."
+      "wallet": "Uma carteira daqui não pode ser movida com esta versão do Ghostly.",
+      "woken": "Abra o Ghostly em {{device}} e deixe-o aberto."
     },
     "later": "Trazer arquivos grandes depois",
     "laterNote": "{{size}} de arquivos grandes ficam em {{device}} por enquanto.",
@@ -195,6 +196,8 @@
     "foreign": "Outra coisa fechou seu conjunto antigo de dispositivos.",
     "hint": "Use este perfil em outro dispositivo. Um dispositivo fica ativo por vez.",
     "info": "Só o dispositivo ativo envia, recebe e paga, para que suas mensagens e seu dinheiro nunca estejam em dois lugares. Mova o perfil quando quiser.",
+    "keepAwake": "Manter este computador acordado",
+    "keepAwakeHint": "Para que seu celular possa assumir enquanto você está fora.",
     "live": "Conectado",
     "noAnswer": "Sem resposta",
     "standby": "Em espera",
@@ -271,6 +274,9 @@
     "lostRace": "Outro dispositivo assumiu no mesmo momento. Este dispositivo está em espera.",
     "lostYes": "Perdido ou roubado",
     "notMe": "Não fui eu",
+    "ownSetHint": "Este dispositivo começa um conjunto de dispositivos próprio. Depois, adicione seus outros dispositivos a ele de novo.",
+    "ownSetRemoved": "Outro dispositivo seu começou um conjunto próprio antes. Adicione este dispositivo de novo a partir dele.",
+    "ownSetWait": "Esperando a rede. Tente de novo em instantes.",
     "restoredHint": "Este dispositivo tem uma cópia de um backup. Nada é iniciado até você assumir.",
     "title": "Assumir sem {{device}}?",
     "titleUnnamed": "Assumir sem o seu outro dispositivo?"

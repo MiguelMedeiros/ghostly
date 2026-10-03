@@ -3,7 +3,8 @@ import { engine } from "@ghostly/browser/platform/engine";
 import { useI18n } from "../../contexts/I18nContext";
 import { errorText } from "../../lib/errorText";
 import { listNames, removeErrorKey, useDeviceSet } from "../../lib/devices";
-import { Button, Notice, Row, Section } from "../wallet/ui";
+import { Button, Notice, Row, Section, Switch } from "../wallet/ui";
+import { hasStandby, keepAwakeSupported, useKeepAwakeSetting } from "../../lib/keepAwake";
 import { AddDeviceDialog } from "./AddDeviceDialog";
 import { MoveDialog } from "./Handoff";
 import { LostChecklist, RemoveDeviceDialog } from "./RemoveDeviceDialog";
@@ -19,6 +20,7 @@ const WALLET_REFUSALS = new Set<string>(["wallet", "loading", "mainnet", "expiry
 export function DevicesSection() {
   const { t, language } = useI18n();
   const view = useDeviceSet();
+  const [keepAwake, setKeepAwake] = useKeepAwakeSetting();
   const [adding, setAdding] = useState(false);
   const [moving, setMoving] = useState<{ key: string; name: string } | null>(null);
   const [removing, setRemoving] = useState<{ key: string; name: string } | null>(null);
@@ -71,6 +73,12 @@ export function DevicesSection() {
               : <Button data-testid="device-secret-offer-new" disabled={secret.busy} onClick={() => void newSecret()}>{t("devices.secret.button")}</Button>;
           })()}
           <Button data-testid="device-secret-offer-dismiss" onClick={() => void engine.call("deviceSecretOfferDismiss")}>{t("devices.secret.notNow")}</Button>
+        </Row>
+      )}
+      {/* On a Desktop with a standby device (WISP 06 § User experience): this device's own switch, never the profile's. */}
+      {keepAwakeSupported() && hasStandby(view) && (
+        <Row label={t("devices.section.keepAwake")} hint={t("devices.section.keepAwakeHint")} testId="device-keep-awake">
+          <Switch checked={keepAwake} onChange={setKeepAwake} label={t("devices.section.keepAwake")} testId="device-keep-awake-switch" />
         </Row>
       )}
       {thisActive && devices.length > 1 && (

@@ -31,8 +31,14 @@
   "wakeCall": "Chiamata in arrivo",
   "wakeHint": "Le app dei tuoi contatti possono svegliare questa con un push. Nulla del messaggio ci finisce dentro.",
   "wakeInfo": "Quando il messaggio di un contatto non ti raggiunge perché Ghostly è chiuso, la sua app invia una sveglia vuota al servizio push del tuo browser (Google, Apple o Mozilla, a seconda del browser). Dice solo che c'è un nuovo messaggio: nessun testo, nessun nome. Il servizio push sa che c'è stato un push e quando; i tuoi contatti conoscono il tuo indirizzo push. Le chat silenziate non lo mostrano mai. Nuovo indirizzo ne crea un altro, così chi non senti più non può svegliarti.",
+  "wakeMoveHere": "{{device}} vuole spostare qui questo profilo. Apri Ghostly.",
   "wakeNotice": "Nuovo messaggio",
   "wakeOnHint": "Attivo. Un messaggio inviato con Ghostly chiuso mostra \"Nuovo messaggio\".",
   "wakeRotate": "Nuovo indirizzo",
+  "wakeStandby": "Nuovo messaggio. Attivo su {{device}}.",
+  "wakeStandbyCall": "Chiamata per te. Attivo su {{device}}.",
+  "wakeStandbyCallUnnamed": "Chiamata per te. Apri Ghostly sul tuo dispositivo attivo.",
+  "wakeStandbyUnnamed": "Nuovo messaggio. Apri Ghostly sul tuo dispositivo attivo.",
+  "wakeTakeover": "{{device}} vuole subentrare. Apri Ghostly.",
   "wakeUnavailable": "Questo browser non può svegliare Ghostly mentre è chiuso."
 }

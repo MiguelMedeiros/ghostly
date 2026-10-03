@@ -42,7 +42,7 @@ import { migrateWalletNetworks } from "./paymentAdapters/walletNetworks";
 import { perNetwork, type PerNetwork } from "./paymentAdapters/perNetwork";
 import { COMMUNITY_EDIT_FRAME, INVITE_TAKEN, LIVENESS_MISSED_PINGS, LIVENESS_PING_MS, MAX_GROUP_NAME_LENGTH, engineError, engineText, groupName, parseCommunityEdit, traceLink } from "@ghostly/core";
 import { ClockWatch, DirectPathWatch } from "@ghostly/core";
-import { GROUP_WAKE_FRAME, GROUP_WAKE_RECEIVE_LIMIT, GroupWakeLimiter, RateWindow, WAKE_CALL_INTERVAL_MS, WakeLimiter, groupWakeFrame, groupWakes, parseGroupWakeFrame, checkPushEndpoint, newWakeToken, relayRequest, vapidKeysMatch, wakeRequest, type PushRequest, type WakeKind, type WakeTarget } from "@ghostly/core";
+import { GROUP_WAKE_FRAME, GROUP_WAKE_RECEIVE_LIMIT, GroupWakeLimiter, RateWindow, WAKE_CALL_INTERVAL_MS, WakeLimiter, groupWakeFrame, groupWakes, parseGroupWakeFrame, checkPushEndpoint, newWakeToken, vapidKeysMatch, wakeRequest, type PushRequest, type WakeKind, type WakeTarget } from "@ghostly/core";
 import { COMMUNITY_REACTION_FRAME, GROUP_REACTION_FRAME, REACTION_LIMITS, ReactionWindow, queueReaction, readReaction, validReactionNumber, wireReaction, type WireReaction } from "@ghostly/core";
 import { COMMUNITY_PIN_FRAME, PIN_LIMITS, mayPin, pinIsNewer, pinNumberHolds, readPin, type GroupPinFrame, type WirePin } from "@ghostly/core";
 import { CapsExchange, DHT_TEXT_CAPABILITY, HOLD_CAPABILITY, TRANSPORTS, automaticTransport, capsDescriptors, dialDescriptors, type CapsContent, type CapsRecord, type PairingCredentials } from "@ghostly/core";
@@ -121,7 +121,8 @@ import { moveSet, resumeSetMove, type SetMovePorts } from "../devices/remove";
 import { newDeviceSecretDue } from "../devices/rotate";
 import { peekTurn, type TurnPeek } from "../devices/restoreGuard";
 import { afterStop, planHandoffWallets, type HandoffTakerFacts, type HandoffWalletPlan, type WalletHome } from "../devices/handoffWallets";
-import { readWalletHomes, writeWalletHomes } from "../devices/walletHomes";
+import { clearWalletHomes, readWalletHomes, writeWalletHomes } from "../devices/walletHomes";
+import { postPush, profileWakeAfter, profileWakeOnRemoval, wakeOwnerOf } from "../devices/push";
 import { awayFrom, setAwayWallets, setSingleWriterGate, refuseAway } from "./paymentAdapters/away";
 import { breezStorage } from "./paymentAdapters/providers/breezSdk";
 import { normalizePhrase } from "./paymentAdapters/providers/recoveryPhrase";
@@ -1712,6 +1713,11 @@ export class GhostlyNode implements EngineImplementation {
     if (!this.options.singleDevice) {
       const record = await readDeviceRecord(databaseName()).catch(() => null);
       const own = record?.ownSlot !== undefined ? record.deviceSet[record.ownSlot]?.key : undefined;
+      // A mark that names a device the set no longer lists (a removal that stopped before it cleared the marks): taken off.
+      const listed = new Set(record?.deviceSet.flatMap((slot) => (slot ? [slot.key] : [])) ?? []);
+      if (record?.state === "active" && own && Object.values(this.walletHomes).some((home) => !listed.has(home.key))) {
+        if (await clearWalletHomes((key) => !listed.has(key)).catch(() => false)) this.walletHomes = await readWalletHomes().catch(() => ({}));
+      }
       if (record && own) for (const [id, home] of Object.entries(this.walletHomes)) {
         if (home.key === own) continue;
         const device = record.deviceSet.find((slot) => slot?.key === home.key)?.name ?? "";
@@ -1816,6 +1822,7 @@ export class GhostlyNode implements EngineImplementation {
     return {
       settings: this.settings,
       ...(this.limitedMode && { limited: true as const }),
+      ...(wakeOwnerOf(this.settings.wake, this.ownDeviceKey) && { wakeOwner: wakeOwnerOf(this.settings.wake, this.ownDeviceKey) }),
       transport: {
         ...this.transport.describe(), ...(this.options.irohWeb ? { iroh: { relays: this.irohRelays, defaults: [...DEFAULT_IROH_RELAYS] } } : {}),
         ...(this.transport.configure && { direct: true }), ...(this.transport.discovery && { discovery: this.transport.discovery() }),
@@ -2152,8 +2159,14 @@ export class GhostlyNode implements EngineImplementation {
       if (!vapidKeysMatch(subscription.vapid)) throw new Error("The VAPID keys are not a pair");
     }
     const before = this.settings.wake;
-    this.settings = { ...this.settings, wake: subscription ?? undefined };
-    if (!subscription) delete this.settings.wake;
+    // In a profile on several devices the subscription names this device, whose own it is (WISP 06 § Push and the
+    // phone): it moves with the profile, and the other devices are told how to wake this one.
+    const wake: WakeSubscription | null = subscription && {
+      endpoint: subscription.endpoint, p256dh: subscription.p256dh, auth: subscription.auth, vapid: subscription.vapid, ...(this.ownDeviceKey ? { device: this.ownDeviceKey } : {}),
+    };
+    this.settings = { ...this.settings, wake: wake ?? undefined };
+    if (!wake) delete this.settings.wake;
+    void this.deviceLinks?.setOwnPush(subscription && { endpoint: subscription.endpoint, p256dh: subscription.p256dh, auth: subscription.auth, vapid: subscription.vapid }).catch(() => {});
     // Replaced or turned off: whoever held the old subscription can no longer post to it.
     delete this.settings.wakeRotate;
     delete this.settings.wakeHeldBy;
@@ -2186,6 +2199,56 @@ export class GhostlyNode implements EngineImplementation {
     await db.patchLink(linkId, { wakeMuted: muted || undefined, ...(muted && { wakeToken: undefined }) });
     // Muted: the contact forgets it now if live, else on the next session; unmuted: a new token goes to it.
     await this.shareWake(linkId);
+    this.emitState();
+  }
+
+  /**
+   * The page found that the profile's subscription is this browser's own (its endpoint is the one the browser holds):
+   * in a profile on several devices it names this device from now on, and the other devices learn how to wake it
+   * (WISP 06 § Push and the phone). For a subscription made before the profile had a device set. Nothing otherwise.
+   */
+  async wakeConfirm({ endpoint }: { endpoint: string }): Promise<void> {
+    const wake = this.settings.wake;
+    if (!wake || wake.endpoint !== endpoint || !this.ownDeviceKey) return;
+    if (wake.device !== this.ownDeviceKey) {
+      this.settings = { ...this.settings, wake: { ...wake, device: this.ownDeviceKey } };
+      await db.putSettings(this.settings);
+      this.emitState();
+    }
+    await this.deviceLinks?.setOwnPush(wake).catch(() => {});
+  }
+
+  /**
+   * Another device of the set shared its push target, or said it has none (`device-wake`): the profile's target follows
+   * the rules of `profileWakeAfter`, and contacts get the new one under the tokens they hold, so that device's push
+   * worker still knows each chat.
+   */
+  private async deviceWakeReceived(from: string, target: WakeTarget | null): Promise<void> {
+    if (!this.ownDeviceKey || this.shuttingDown) return;
+    const { next, changed } = profileWakeAfter(this.settings.wake, from, target, this.ownDeviceKey);
+    if (changed) await this.replaceProfileWake(next);
+  }
+
+  /** The subscription this device's record keeps as its own becomes the profile's, when the profile has another device's. */
+  private async ownWakeWins(): Promise<void> {
+    if (!this.ownDeviceKey || this.options.singleDevice) return;
+    const own = (await readDeviceRecord(databaseName()))?.push?.own;
+    if (!own || this.settings.wake?.device === this.ownDeviceKey) return;
+    await this.replaceProfileWake({ endpoint: own.e, p256dh: own.p, auth: own.a, vapid: { publicKey: own.vp, privateKey: own.vk }, device: this.ownDeviceKey });
+  }
+
+  /** The profile's push target replaced by another device's (or gone), every chat's token kept. */
+  private async replaceProfileWake(next: WakeSubscription | undefined): Promise<void> {
+    this.settings = { ...this.settings, wake: next };
+    if (!next) delete this.settings.wake;
+    delete this.settings.wakeRotate;
+    await db.putSettings(this.settings);
+    for (const live of this.links.values()) {
+      const edge = this.meshEdge(live.stored);
+      if (!edge && (!live.stored.profile || live.stored.group)) continue;
+      if (!next) { if (edge) this.sendGroupWake(live, null); else if (live.link?.supportsWake) live.link.sendWake(null); continue; }
+      void (edge ? this.shareGroupWake(live.stored.id) : this.shareWake(live.stored.id));
+    }
     this.emitState();
   }
 
@@ -2361,21 +2424,8 @@ export class GhostlyNode implements EngineImplementation {
   }
 
   /** Posts a wake-up: the host's way, or `fetch`, then the push relay when a page may not post it itself. */
-  private async postPush(request: PushRequest): Promise<number> {
-    if (this.options.pushSend) return this.options.pushSend(request);
-    const quiet = { credentials: "omit", referrerPolicy: "no-referrer", redirect: "error" } as const;
-    try {
-      const response = await fetch(request.url, { method: "POST", headers: request.headers, body: request.body as BodyInit, signal: AbortSignal.timeout(10_000), ...quiet });
-      return response.status;
-    } catch (error) {
-      const relay = this.settings.pushRelay;
-      if (!relay) throw error;
-      const response = await fetch(relay, {
-        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(relayRequest(request)), signal: AbortSignal.timeout(15_000), ...quiet,
-      });
-      const answer = await response.json().catch(() => null) as { status?: unknown } | null;
-      return typeof answer?.status === "number" ? answer.status : response.status;
-    }
+  private postPush(request: PushRequest): Promise<number> {
+    return postPush(request, { pushSend: this.options.pushSend, relay: this.settings.pushRelay });
   }
 
   removeLink({ linkId }: { linkId: string }): void {
@@ -4203,12 +4253,24 @@ export class GhostlyNode implements EngineImplementation {
   async lightningReconfigureSource({ values, network, card }: { values: Record<string, string>; network?: WalletNetwork; card?: string }) { await (await this.lightningCard(this.net(network), card)).sources.reconfigure(values); await this.refreshWallet(); }
   async lightningRefresh(params?: { network?: WalletNetwork; card?: string }) { const lightning = await this.lightningCard(this.net(params?.network), params?.card); await lightning.sources.refresh(); await lightning.reconcile(); }
   /** Makes a card its network's default for receiving: chat requests and Receive use it unless another is picked. */
-  async lightningSetReceive({ network, card }: { network: WalletNetwork; card: string }) { await this.lightnings[this.net(network)].setReceive(card); await this.refreshWallet(); }
+  async lightningSetReceive({ network, card }: { network: WalletNetwork; card: string }) {
+    // A card at home on another device cannot receive here, so it is never this device's default for receiving.
+    refuseAway(`lightning:${this.net(network)}:${card}`, this.walletView.networks?.[this.net(network)].lightnings?.find((c) => c.card === card)?.name || WALLET_NAMES.lightning);
+    await this.lightnings[this.net(network)].setReceive(card); await this.refreshWallet();
+  }
   async lightningRename({ network, card, name }: { network: WalletNetwork; card: string; name: string }) { await this.lightnings[this.net(network)].rename(card, name); await this.refreshWallet(); }
-  async bitcoinSetSource({ providerId, values, network }: { providerId: string; values: Record<string, string>; network?: WalletNetwork }) { await this.bitcoins[this.net(network)].sources.set(providerId, values); await this.refreshWallet(); }
-  async bitcoinClearSource(params?: { network?: WalletNetwork }) { await this.bitcoins[this.net(params?.network)].sources.clear(); await this.refreshWallet(); }
-  async bitcoinRetrySource(params?: { network?: WalletNetwork }) { await this.bitcoins[this.net(params?.network)].sources.retryNow(); await this.refreshWallet(); }
-  async bitcoinReconfigureSource({ values, network }: { values: Record<string, string>; network?: WalletNetwork }) { await this.bitcoins[this.net(network)].sources.reconfigure(values); await this.refreshWallet(); }
+  /**
+   * The on-chain source of a network at home on another device (a Bitcoin Core wallet stays home, WISP 06 § Wallets
+   * that stay home) is never set, cleared, retried or reconfigured here: each would write over the record its home
+   * device runs from, or connect to a wallet only that device may use.
+   */
+  private refuseAwayBitcoin(network: WalletNetwork): void {
+    refuseAway(`bitcoin:${network}`, WALLET_NAMES.bitcoin);
+  }
+  async bitcoinSetSource({ providerId, values, network }: { providerId: string; values: Record<string, string>; network?: WalletNetwork }) { this.refuseAwayBitcoin(this.net(network)); await this.bitcoins[this.net(network)].sources.set(providerId, values); await this.refreshWallet(); }
+  async bitcoinClearSource(params?: { network?: WalletNetwork }) { this.refuseAwayBitcoin(this.net(params?.network)); await this.bitcoins[this.net(params?.network)].sources.clear(); await this.refreshWallet(); }
+  async bitcoinRetrySource(params?: { network?: WalletNetwork }) { this.refuseAwayBitcoin(this.net(params?.network)); await this.bitcoins[this.net(params?.network)].sources.retryNow(); await this.refreshWallet(); }
+  async bitcoinReconfigureSource({ values, network }: { values: Record<string, string>; network?: WalletNetwork }) { this.refuseAwayBitcoin(this.net(network)); await this.bitcoins[this.net(network)].sources.reconfigure(values); await this.refreshWallet(); }
   async bitcoinReceiveAddress(params?: { network?: WalletNetwork }) { const address = await this.bitcoins[this.net(params?.network)].receiveAddress(); await this.refreshWallet(); return address; }
   bitcoinRefresh(params?: { network?: WalletNetwork }) { return this.bitcoins[this.net(params?.network)].sources.refresh(); }
 
@@ -4640,7 +4702,7 @@ export class GhostlyNode implements EngineImplementation {
     if (wasOnline && !this.networkOn) await this.hold.stop();
     // A profile with a device set: its standbys go through these relays and servers, and stay off with the network.
     const gate = knownDeviceGate();
-    if (((gate && gate.state !== "single") || this.deviceLinks) && (["online", "relays", "readRelays", "irohRelays", "iceServers"] as const).some((key) => key in settings)) {
+    if (((gate && gate.state !== "single") || this.deviceLinks) && (["online", "relays", "readRelays", "irohRelays", "iceServers", "pushRelay"] as const).some((key) => key in settings)) {
       await this.syncDeviceNetwork().catch(() => {});
     }
     this.emitState();
@@ -4719,6 +4781,8 @@ export class GhostlyNode implements EngineImplementation {
   private enrollment: EnrollInviter | EnrollJoiner | null = null;
   /** The device links of the active device of a device set (WISP 06 § Terms). None for a `single` profile. */
   private deviceLinks: DeviceLinks | null = null;
+  /** This device's signing key in the profile's device set (base64url); null for a `single` profile. */
+  private ownDeviceKey: string | null = null;
   /** Another device took the turn while this engine ran: it stops, and tells the pages nothing more. */
   private gatedOut = false;
 
@@ -4754,15 +4818,26 @@ export class GhostlyNode implements EngineImplementation {
    */
   private async startDeviceSet(): Promise<void> {
     if (this.shuttingDown) return;
+    // This device's signing key, as its record names it: whose the profile's push subscription is (WISP 06 § Push and the phone).
+    const own = await readDeviceRecord(databaseName()).catch(() => null);
+    this.ownDeviceKey = own?.ownSlot !== undefined ? own.deviceSet[own.ownSlot]?.key ?? null : null;
     if (!this.deviceLinks) {
       this.deviceLinks = new DeviceLinks({
         profile: databaseName(), transport: this.transport, turn: this.turnNetwork(), pollIntervals: this.pollIntervals,
         createPeerConnection: this.devicePeerConnection(), nativeTransports: this.nativeFactories, offline: !this.networkOn,
         onChange: () => this.emitState(),
+        onDeviceWake: (from, target) => this.deviceWakeReceived(from, target),
+        pushSend: (request) => this.postPush(request),
       });
       await this.deviceLinks.start();
       await this.startHandoff().catch(() => {});
     } else await this.deviceLinks.refresh();
+    // The profile's subscription is this device's own: the record holds it too, so a standby here can still share it.
+    if (this.settings.wake?.device && this.settings.wake.device === this.ownDeviceKey) await this.deviceLinks.setOwnPush(this.settings.wake).catch(() => {});
+    // This device has a subscription of its own and the profile gives contacts another device's (it came back active
+    // after that device held the profile): its own wins, every chat's token kept (WISP 06 § Push and the phone).
+    else await this.ownWakeWins().catch(() => {});
+    this.emitState();
     // An enrollment whose own record was put and whose write of it was lost takes that record back first: the read
     // below would take it for a clone of this device and stop it.
     await recoverEnrollment(databaseName(), this.turnNetwork()).catch(() => false);
@@ -4840,10 +4915,27 @@ export class GhostlyNode implements EngineImplementation {
     })();
     this.settingMove = work;
     try { await work; } finally { this.settingMove = null; }
+    if (remove !== undefined) await this.afterDeviceRemoved(remove).catch(() => {});
     // The giver signs releases over the turn address, which moved with the secret: it is made again for the new one.
     if (this.handoffGiver) { this.deviceLinks?.setHandoff(null); this.handoffGiver = null; await this.startHandoff().catch(() => {}); }
     this.watchTombstones();
     return this.deviceSet();
+  }
+
+  /**
+   * What a removed device leaves behind in the profile: its push subscription, which contacts would go on waking (they
+   * are told to forget it), and the home marks of wallets that stayed on it (WISP 06 § Wallets that stay home). The
+   * marks go: that device can no longer take the profile back, and a wallet marked as at home there could never be
+   * opened anywhere again. Unmarked, it opens here, from what this copy holds (its phrase, its backup), as the away
+   * panel promised.
+   */
+  private async afterDeviceRemoved(key: string): Promise<void> {
+    const { next, changed } = profileWakeOnRemoval(this.settings.wake, key);
+    if (changed) await this.replaceProfileWake(next);
+    if (await clearWalletHomes(key)) {
+      await this.loadWalletHomes();
+      await this.refreshWallet().catch(() => {});
+    }
   }
 
   /**
@@ -4872,6 +4964,10 @@ export class GhostlyNode implements EngineImplementation {
 
   /** A standby's screen asks for a turn read when it comes back (`DeviceLinks`); the active device reads on its own schedule. */
   async deviceTurnCheck(): Promise<null> { return null; }
+
+  /** A standby keeps its subscription in its device record (`DeviceLinks`); the active device's is the profile's (`setWakeSubscription`). */
+  async devicePushState(): Promise<null> { return null; }
+  async devicePushSet(): Promise<void> {}
 
   /**
    * A grant that never finished leaves a device that may hold the secret (`rotate.ts`): the set moves to a new one by

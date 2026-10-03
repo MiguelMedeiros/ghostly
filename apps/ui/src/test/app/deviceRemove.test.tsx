@@ -7,7 +7,7 @@ import { LostChecklist } from "../../components/devices/RemoveDeviceDialog";
 import { DeviceStandby } from "../../components/DeviceStandby";
 import { listNames, lostWalletLines, reenrollHere } from "../../lib/devices";
 import { renderApp } from "../render";
-// covers: devices.remove
+// covers: devices.remove, devices.remove.own-set
 
 /** happy-dom has no <dialog> modal; the dialog only needs to open. */
 HTMLDialogElement.prototype.showModal ??= function (this: HTMLDialogElement) { this.open = true; };
@@ -151,6 +151,22 @@ describe("the standby screen after a removal", () => {
     expect(screen.getByTestId("device-standby-title")).toHaveTextContent("Almost there");
     expect(screen.getByTestId("device-standby")).toHaveTextContent("Open Ghostly on Desktop to finish.");
     expect(screen.queryByTestId("device-standby-reenroll")).toBeNull();
+  });
+
+  it("a moving device whose remover is gone: My other device is lost or broken makes a set of its own, and says the others are added again", async () => {
+    const { user, engine } = renderApp(<DeviceStandby gate={{ state: "moving", activeDevice: "Desktop" }} />);
+    engine.on("deviceTakeoverInfo", () => ({ offered: true, ownSet: true, device: "Desktop", copy: "frozen", password: true }));
+    engine.on("deviceTakeover", () => ({ kind: "removed" }));
+    await user.click(await screen.findByTestId("takeover-open"));
+    expect(screen.getByTestId("takeover-open")).toHaveTextContent("My other device is lost or broken");
+    expect(screen.getByTestId("takeover-own-set")).toHaveTextContent("Add your other devices to it again afterwards.");
+    // Its devices are not lost by this: the question is not asked.
+    expect(screen.queryByTestId("takeover-lost")).toBeNull();
+    await user.type(screen.getByTestId("takeover-password"), "a long lock password");
+    await user.type(screen.getByTestId("takeover-name"), "Desktop");
+    await user.click(screen.getByTestId("takeover-go"));
+    await waitFor(() => expect(engine.callsTo("deviceTakeover")).toEqual([{ password: "a long lock password", name: "Desktop", lost: false }]));
+    expect(await screen.findByTestId("takeover-error")).toHaveTextContent("Another of your devices started a device set of its own first.");
   });
 
   it("one that can accept nothing, and one removed, are added again from a new profile here", async () => {

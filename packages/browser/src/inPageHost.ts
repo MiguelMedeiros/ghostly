@@ -10,7 +10,7 @@ import type { BrowserHost } from "./host";
  * its pages.)
  */
 export interface InPageHostOptions
-  extends Pick<BrowserHost, "version" | "notice" | "updates" | "features" | "requestLocalAccess" | "forgetLocalAccess" | "openService" | "oidc" | "atproto" | "openPaymentLink" | "fullscreenWindow" | "shareText" | "readClipboardText" | "readClipboardFiles" | "openPubkyPassport" | "pubkyCookieSession" | "callMedia"> {
+  extends Pick<BrowserHost, "version" | "notice" | "updates" | "features" | "requestLocalAccess" | "forgetLocalAccess" | "openService" | "oidc" | "atproto" | "openPaymentLink" | "fullscreenWindow" | "shareText" | "readClipboardText" | "readClipboardFiles" | "openPubkyPassport" | "pubkyCookieSession" | "callMedia" | "keepAwake"> {
   node?: NodeOptions;
   /** Called once the peer exists, e.g. to let something outside the page reach it. Never on a standby: no engine runs there. */
   onServer?: (server: EngineServer) => void;
@@ -34,6 +34,7 @@ export function createInPageHost(options: InPageHostOptions): BrowserHost & { an
     fullscreenWindow: options.fullscreenWindow,
     shareText: options.shareText,
     readClipboardText: options.readClipboardText,
+    keepAwake: options.keepAwake,
     readClipboardFiles: options.readClipboardFiles,
     openPubkyPassport: options.openPubkyPassport,
     pubkyCookieSession: options.pubkyCookieSession,

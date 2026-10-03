@@ -7,13 +7,13 @@ import {
 } from "@ghostly/core";
 import { amend, firstRecord, transition, type DevicePatch, type DeviceRecord, type StoredDeviceState } from "../src/devices/state";
 import {
-  HandoffGiver, HandoffTaker, type GiverPorts, type HandoffFile, type HandoffLinks, type HandoffRecords, type HandoffSelf, type HandoffSource,
+  HandoffGiver, HandoffTaker, WOKEN_CONNECT_MS, type GiverPorts, type HandoffFile, type HandoffLinks, type HandoffRecords, type HandoffSelf, type HandoffSource,
   type BusyReport, type HandoffStaging, type HandoffStagingHost, type HandoffStay, type HandoffView, type LocalBusy, type TakerPorts,
 } from "../src/devices/handoff";
 import { makeHandoffVerifier, type HandoffVerifier } from "../src/devices/handoffPake";
 import type { TurnOutcome } from "../src/devices/turn";
 import type { HandoffTakerFacts } from "../src/devices/handoffWallets";
-// covers: devices.handoff.machine
+// covers: devices.handoff.machine, devices.push.wake
 
 /*
  * The handoff's two sides (WISP 06 § The handoff, § States and events, § Installing the staged state), run against each
@@ -605,6 +605,52 @@ describe("refusals before a byte is copied", () => {
     await w.taker.pull(PASSWORD);
     await vi.advanceTimersByTimeAsync(HANDOFF_TIMINGS.connectMs + 1);
     expect(w.taker.view()).toMatchObject({ step: "failed", failure: "unreachable" });
+  });
+
+  it("a giver whose link is down (a phone that suspended the app) is woken by a push, and waited for long enough to open Ghostly", async () => {
+    vi.useFakeTimers();
+    const w = world();
+    w.link.live = false;
+    const woken: string[] = [];
+    const links = w.link.end(B, A);
+    w.taker.stop();
+    w.taker = new HandoffTaker({ ...(w.taker as unknown as { ports: TakerPorts }).ports, links: { ...links, wake: async (key) => { woken.push(key); return "sent"; } } });
+    w.link.attach(B, w.taker);
+    await w.taker.pull(PASSWORD);
+    await vi.advanceTimersByTimeAsync(10);
+    expect(woken).toEqual([A]);
+    expect(w.taker.view()).toMatchObject({ step: "connecting", woken: true });
+    // Past the usual 30 seconds it still waits: the person has to see the notice and open the app.
+    await vi.advanceTimersByTimeAsync(HANDOFF_TIMINGS.connectMs + 1);
+    expect(w.taker.view()).toMatchObject({ step: "connecting", woken: true });
+    await vi.advanceTimersByTimeAsync(WOKEN_CONNECT_MS);
+    expect(w.taker.view()).toMatchObject({ step: "failed", failure: "unreachable", woken: true });
+  });
+
+  it("nothing to wake the giver with: the usual 30 seconds, and no word of a push", async () => {
+    vi.useFakeTimers();
+    const w = world();
+    w.link.live = false;
+    w.taker.stop();
+    w.taker = new HandoffTaker({ ...(w.taker as unknown as { ports: TakerPorts }).ports, links: { ...w.link.end(B, A), wake: async () => "none" } });
+    w.link.attach(B, w.taker);
+    await w.taker.pull(PASSWORD);
+    await vi.advanceTimersByTimeAsync(HANDOFF_TIMINGS.connectMs + 1);
+    expect(w.taker.view()).toMatchObject({ step: "failed", failure: "unreachable" });
+    expect(w.taker.view()!.woken).toBeUndefined();
+  });
+
+  it("Move to a device whose link is down wakes it and says to open Ghostly there; with nothing to wake it with, Can't reach", async () => {
+    const w = world();
+    w.link.live = false;
+    const woken: string[] = [];
+    let answer: "sent" | "none" = "sent";
+    w.giver.stop();
+    w.giver = new HandoffGiver({ ...(w.giver as unknown as { ports: GiverPorts }).ports, links: { ...w.link.end(A, B), wake: async (key) => { woken.push(key); return answer; } } });
+    await expect(w.giver.push(B)).rejects.toThrow(/^handoff-woken:/);
+    expect(woken).toEqual([B]);
+    answer = "none";
+    await expect(w.giver.push(B)).rejects.toThrow(/^handoff-unreachable:/);
   });
 });
 

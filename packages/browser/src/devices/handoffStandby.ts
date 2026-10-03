@@ -39,7 +39,7 @@ export function profileRecords(profile: string): HandoffRecords {
 }
 
 export function handoffLinks(links: DeviceLinks): HandoffLinks {
-  return { live: (key) => links.handoffLive(key), send: (key, frame) => links.send(key, frame), transcript: (key) => links.transcript(key) };
+  return { live: (key) => links.handoffLive(key), send: (key, frame) => links.send(key, frame), transcript: (key) => links.transcript(key), wake: (key) => links.wake(key) };
 }
 
 /**

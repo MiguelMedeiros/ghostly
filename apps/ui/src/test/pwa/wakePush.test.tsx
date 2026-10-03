@@ -4,10 +4,10 @@ import { generateVapidKeys } from "@ghostly/core";
 import { groupChat, setChatMute } from "../../lib/chatMute";
 import { saveSession } from "../../lib/storage";
 import type { ChatSession } from "../../lib/types";
-import { pushPlatform, rotateWake, setPushPlatform, setWake, useWakeTableSync, type PushPlatform } from "../../lib/wakePush";
+import { pushPlatform, rotateWake, setPushPlatform, setWake, useStandbyPush, useWakeOn, useWakeTableSync, type PushPlatform } from "../../lib/wakePush";
 import { engineState, fakeEngine, linkView } from "../fakeEngine";
 
-// covers: push.wake.notify, push.wake.mute, push.wake.group
+// covers: push.wake.notify, push.wake.mute, push.wake.group, devices.push
 
 const keys = { endpoint: "https://fcm.googleapis.com/fcm/send/x", p256dh: "p", auth: "a" };
 type Fake = PushPlatform & { [K in keyof PushPlatform]: PushPlatform[K] & ReturnType<typeof vi.fn> };
@@ -85,7 +85,8 @@ describe("the push worker's table", () => {
     expect(platform.syncTable).toHaveBeenLastCalledWith("", [
       { token: "tokenaaaaaaaaaaaaaaaaa", path: "/chat/chata" },
       { token: "tokenbbbbbbbbbbbbbbbbb", path: "/chat/chatb", mutedUntil: "forever" },
-    ], { title: "Ghostly", body: "New message" });
+    // With the profile's database name: where the worker finds the device state (WISP 06 § Push and the phone).
+    ], { title: "Ghostly", body: "New message", db: "ghostly" });
 
     // The muted chat's contact is told not to wake it at all.
     expect(fakeEngine.callsTo("setWakeMuted")).toContainEqual({ linkId: "l-b", muted: true });
@@ -152,6 +153,63 @@ describe("the push worker's table", () => {
     renderHook(() => useWakeTableSync({ title: "Ghostly", body: "New message" }));
     await waitFor(() => expect(fakeEngine.callsTo("setWakeSubscription")).toEqual([{ subscription: { ...keys, vapid } }]));
     expect(platform.subscribe).toHaveBeenCalledWith("", vapid);
+    vi.unstubAllGlobals();
+  });
+});
+
+describe("a profile on several devices (WISP 06 § Push and the phone)", () => {
+  const settings = (wake: object, extra: object = {}) => ({ online: true, nick: "Ghost", relays: [], iceServers: [], mints: [], mintsInitialized: true, wake, ...extra });
+
+  it("another device's subscription (the phone's, on the active desktop) is neither made again here, nor turned off, nor rotated; the switch is off", async () => {
+    const vapid = generateVapidKeys();
+    const platform = fakePlatform({ current: vi.fn(async () => null) });
+    setPushPlatform(platform);
+    vi.stubGlobal("Notification", { permission: "denied" });
+    fakeEngine.on("setWakeSubscription", () => undefined);
+    fakeEngine.setState({ ...engineState({ settings: settings({ ...keys, vapid, device: "P".repeat(43) }, { wakeRotate: true }) as never }), wakeOwner: "away" });
+    const { result } = renderHook(() => { useWakeTableSync({ title: "Ghostly", body: "New message" }); return useWakeOn(); });
+    await waitFor(() => expect(platform.current).toHaveBeenCalled());
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(result.current).toBe(false);
+    expect(fakeEngine.callsTo("setWakeSubscription")).toEqual([]);
+    expect(platform.subscribe).not.toHaveBeenCalled();
+    expect(platform.unsubscribe).not.toHaveBeenCalled();
+    vi.unstubAllGlobals();
+  });
+
+  it("this browser's own subscription, made before the profile had a device set: the engine is told it is this device's", async () => {
+    const platform = fakePlatform();
+    setPushPlatform(platform);
+    fakeEngine.on("wakeConfirm", () => undefined);
+    fakeEngine.setState(engineState({ settings: settings({ ...keys, vapid: generateVapidKeys() }) as never }));
+    renderHook(() => useWakeTableSync({ title: "Ghostly", body: "New message" }));
+    await waitFor(() => expect(fakeEngine.callsTo("wakeConfirm")).toEqual([{ endpoint: keys.endpoint }]));
+  });
+
+  it("a standby writes the worker's words and where its device state is, and keeps its subscription: a replaced one goes to the record, with the same key", async () => {
+    const vapid = generateVapidKeys();
+    const fresh = { ...keys, endpoint: "https://fcm.googleapis.com/fcm/send/new" };
+    const platform = fakePlatform({ current: vi.fn(async () => null), subscribe: vi.fn(async () => fresh), syncText: vi.fn(async () => {}) });
+    setPushPlatform(platform);
+    vi.stubGlobal("Notification", { permission: "granted" });
+    fakeEngine.on("devicePushState", () => ({ endpoint: keys.endpoint, vapidPublic: vapid.publicKey }));
+    fakeEngine.on("devicePushSet", () => undefined);
+    renderHook(() => useStandbyPush({ title: "Ghostly", body: "New message", standby: "New message. Active on {device}." }, true));
+    await waitFor(() => expect(fakeEngine.callsTo("devicePushSet")).toEqual([{ subscription: fresh }]));
+    expect(platform.subscribe).toHaveBeenCalledWith("", { publicKey: vapid.publicKey });
+    expect(platform.syncText).toHaveBeenCalledWith("", { title: "Ghostly", body: "New message", standby: "New message. Active on {device}.", db: "ghostly" });
+    vi.unstubAllGlobals();
+  });
+
+  it("a standby with notifications turned off has no subscription any more, and says so", async () => {
+    const platform = fakePlatform({ current: vi.fn(async () => null), syncText: vi.fn(async () => {}) });
+    setPushPlatform(platform);
+    vi.stubGlobal("Notification", { permission: "denied" });
+    fakeEngine.on("devicePushState", () => ({ endpoint: keys.endpoint, vapidPublic: generateVapidKeys().publicKey }));
+    fakeEngine.on("devicePushSet", () => undefined);
+    renderHook(() => useStandbyPush({ title: "Ghostly", body: "New message" }, true));
+    await waitFor(() => expect(fakeEngine.callsTo("devicePushSet")).toEqual([{ subscription: null }]));
+    expect(platform.subscribe).not.toHaveBeenCalled();
     vi.unstubAllGlobals();
   });
 });

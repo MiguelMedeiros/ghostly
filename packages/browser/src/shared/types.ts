@@ -1169,6 +1169,12 @@ export interface WakeSubscription {
   p256dh: string;
   auth: string;
   vapid: VapidKeys;
+  /**
+   * In a profile on several devices (WISP 06 § Push and the phone): the signing key of the device whose subscription
+   * this is. It moves with the profile, so a device with none of its own (a desktop) goes on giving contacts the
+   * phone's. Set by the engine only; absent in a profile on one device, and for a subscription made before.
+   */
+  device?: string;
 }
 
 /**
@@ -1502,6 +1508,12 @@ export interface EngineState {
    * anyway. The profile is offline whatever `settings.online` says, and no wallet is open. Absent otherwise.
    */
   limited?: true;
+  /**
+   * Whose push subscription `settings.wake` is, in a profile on several devices (WISP 06 § Push and the phone): `here`,
+   * this device's own; `away`, another device's, given to contacts because this device has none of its own (the page
+   * neither replaces nor turns off what is not its own). Absent in a profile on one device, or when nobody said.
+   */
+  wakeOwner?: "here" | "away";
   transport: {
     protocol: string; relays: string[];
     /** Present where Iroh runs in the browser (web app, extension): the relays it uses and the defaults. */

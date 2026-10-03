@@ -60,7 +60,8 @@
       "turn": "Un autre appareil a pris le relais. Cet appareil est en veille.",
       "unreachable": "Impossible de joindre {{device}}. Il doit être allumé, avec Ghostly ouvert.",
       "version": "Ghostly a été mis à jour entre-temps. Rien n'a changé.",
-      "wallet": "Un portefeuille d'ici ne peut pas être déplacé avec cette version de Ghostly."
+      "wallet": "Un portefeuille d'ici ne peut pas être déplacé avec cette version de Ghostly.",
+      "woken": "Ouvrez Ghostly sur {{device}} et laissez-le ouvert."
     },
     "later": "Apporter les gros fichiers plus tard",
     "laterNote": "{{size}} de gros fichiers restent sur {{device}} pour l'instant.",
@@ -195,6 +196,8 @@
     "foreign": "Autre chose a fermé votre ancien ensemble d’appareils.",
     "hint": "Utilisez ce profil sur un autre appareil. Un seul appareil est actif à la fois.",
     "info": "Seul l’appareil actif envoie, reçoit et paie, ainsi vos messages et votre argent ne sont jamais à deux endroits. Déplacez le profil quand vous voulez.",
+    "keepAwake": "Garder cet ordinateur éveillé",
+    "keepAwakeHint": "Pour que votre téléphone puisse prendre le relais quand vous êtes sorti.",
     "live": "Connecté",
     "noAnswer": "Pas de réponse",
     "standby": "En veille",
@@ -271,6 +274,9 @@
     "lostRace": "Un autre appareil a pris le relais au même moment. Cet appareil est en veille.",
     "lostYes": "Perdu ou volé",
     "notMe": "Ce n'était pas moi",
+    "ownSetHint": "Cet appareil commence son propre ensemble d'appareils. Ajoutez-y de nouveau vos autres appareils ensuite.",
+    "ownSetRemoved": "Un autre de vos appareils a commencé son propre ensemble avant. Ajoutez de nouveau cet appareil depuis celui-ci.",
+    "ownSetWait": "En attente du réseau. Réessayez dans un instant.",
     "restoredHint": "Cet appareil a une copie issue d'une sauvegarde. Rien ne démarre tant que vous ne prenez pas le relais.",
     "title": "Prendre le relais sans {{device}} ?",
     "titleUnnamed": "Prendre le relais sans votre autre appareil ?"

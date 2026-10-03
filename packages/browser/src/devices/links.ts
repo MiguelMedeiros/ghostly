@@ -1,7 +1,10 @@
 import {
-  DEVICES_CAPABILITY, HANDOFF_CAPABILITY, GhostLink, RTC_CONFIG, SET_ACK, SET_UPDATE, createIdentity, deviceEchoFrame, deviceEchoNonce, deviceLinkPairing, devicePingFrame,
-  fromBase64Url, setAckFrame, type DeviceFrame, type NativeEndpoint, type NativeTransport, type PairedTransport, type PkarrTransport, type PollIntervals, type TurnNetwork,
+  DEVICES_CAPABILITY, HANDOFF_CAPABILITY, GhostLink, RTC_CONFIG, SET_ACK, SET_UPDATE, checkPushEndpoint, createIdentity, deviceEchoFrame, deviceEchoNonce, deviceLinkPairing, devicePingFrame,
+  fromBase64Url, setAckFrame, type DeviceFrame, type NativeEndpoint, type NativeTransport, type PairedTransport, type PkarrTransport, type PollIntervals, type PushRequest, type TurnNetwork,
+  type WakeTarget,
 } from "@ghostly/core";
+import { DEVICE_WAKE_FRAME, DeviceWaker, deviceWakeFrame, otherTarget, ownTargetFor, postPush, pushForSet, readDeviceWake, withOtherPush, withOwnPush } from "./push";
+import type { WakeSubscription } from "../shared/types";
 import { enrollmentUnfinished, finishEnrollment } from "./enroll";
 import { viewOf } from "./gate";
 import { DEVICE_GATED_ERROR, type DeviceLinkEngine, type DeviceLinkHost } from "./linkOnly";
@@ -12,7 +15,8 @@ import { amendDevice, forgetDevice, moveDevice, readDeviceRecord } from "./store
 import { acknowledged, pendingFrames } from "./remove";
 import { checkSetUpdate } from "./setUpdate";
 import type { TurnKeeper, TurnOutcome } from "./turn";
-import { canTakeOver, forceTakeover, takeoverTarget } from "./takeover";
+import { TakeoverRefusal, canTakeOver, forceTakeover, takeoverTarget } from "./takeover";
+import { canStartOwnSet, resumeOwnSet, startOwnSet, type OwnSetOutcome, type OwnSetPorts } from "./ownSet";
 import { peekTurn } from "./restoreGuard";
 import { newDeviceSecretDue } from "./rotate";
 import { provesHandoffPassword } from "./handoffPake";
@@ -145,6 +149,13 @@ export interface DeviceLinksOptions {
    * checks), and tells the pages when its state changed (a tombstone makes it `moving` or `removed`). Device-link-only mode.
    */
   watchTurn?: boolean;
+  /**
+   * Another device shared its push target (`push.ts`), or said it has none: kept in the record here; the active device
+   * also brings the profile's target in line (`profileWakeAfter`), which is the engine's, in the profile's database.
+   */
+  onDeviceWake?: (from: string, target: WakeTarget | null) => void | Promise<void>;
+  /** How a wake-up is posted where a page may not post it itself (Desktop's command). Default: `fetch`, then the push relay. */
+  pushSend?: (request: PushRequest) => Promise<number>;
   /** Tests give their own. */
   readRecord?: (profile: string) => Promise<DeviceRecord | null>;
   loadKey?: (profile: string) => Promise<DeviceSigningKey | null>;
@@ -217,6 +228,8 @@ export class DeviceLinks implements DeviceLinkEngine {
     }
     // An enrollment that a crash or a slow network left before its last step: it finishes now if it can.
     void this.finishEnrollment().catch(() => {});
+    // A device set of its own that was settling when the app stopped (`ownSet.ts`): it settles now.
+    if ((await this.record().catch(() => null))?.ownSet) this.settleOwnSet();
     if (this.options.watchTurn) this.watchTurn(0);
   }
 
@@ -309,6 +322,14 @@ export class DeviceLinks implements DeviceLinkEngine {
       if (became && this.isLive(kept)) void this.linkLive(kept).catch(() => {});
     }
     if (closing.length || wanted.length) this.changed();
+    // A device the set no longer lists (removed) takes its push target and its token with it.
+    if (!this.stopped && closing.length) {
+      await this.pushExclusive(async () => {
+        const record = await this.record();
+        const patch = record && pushForSet(record);
+        if (patch) await amendDevice(this.options.profile, patch);
+      }).catch(() => {});
+    }
   }
 
   /** The links the record asks for. Empty for a `single` profile, which is not even asked for its key. */
@@ -423,7 +444,88 @@ export class DeviceLinks implements DeviceLinkEngine {
     if (frame.t === SET_UPDATE) { await this.setUpdate(running, frame); return; }
     if (frame.t === SET_ACK) { if (running.earlier) await this.acked(running.key, running.d); return; }
     if (frame.t === DEVICE_TURN_HINT) { if (!running.earlier) await this.hinted(); return; }
+    if (frame.t === DEVICE_WAKE_FRAME) { if (!running.earlier) await this.deviceWake(running.key, frame); return; }
     await this.options.onFrame?.(running.key, frame);
+  }
+
+  // ---------- push between the devices (WISP 06 § Push and the phone, `push.ts`) ----------
+
+  private pushQueue: Promise<unknown> = Promise.resolve();
+  /** The record's push fields are changed one at a time: two frames at once must not write over each other. */
+  private pushExclusive<T>(work: () => Promise<T>): Promise<T> {
+    const run = this.pushQueue.catch(() => {}).then(work);
+    this.pushQueue = run;
+    return run;
+  }
+
+  /** Another device shared its push target, or said it has none: kept here, and the engine told. A malformed frame says nothing. */
+  private async deviceWake(from: string, frame: DeviceFrame): Promise<void> {
+    const target = readDeviceWake(frame);
+    if (target === undefined) return;
+    await this.pushExclusive(async () => {
+      const record = await this.record();
+      if (!record || !record.deviceSet.some((slot) => slot?.key === from)) return;
+      const patch = withOtherPush(record, from, target);
+      if (patch) await amendDevice(this.options.profile, patch);
+    });
+    try { await this.options.onDeviceWake?.(from, target); } catch { /* the engine's own trouble */ }
+  }
+
+  /** Tells the device on this link how to wake this one (or that it cannot), under the token made for it. */
+  private async shareOwnPush(running: Running): Promise<void> {
+    const target = await this.pushExclusive(async () => {
+      const record = await this.record();
+      if (!record) return undefined;
+      const { target, patch } = ownTargetFor(record, running.key);
+      if (patch) await amendDevice(this.options.profile, patch);
+      return target;
+    });
+    if (target === undefined) return;
+    try { running.link.sendDeviceFrame(deviceWakeFrame(target)); } catch { /* said again on the next session */ }
+  }
+
+  /**
+   * This device's own push subscription for the profile (null: none any more): kept in the record, and told to every
+   * device whose link is live now (the others hear it on their next session). The VAPID pair stays the one the record
+   * holds when `subscription` gives only the browser's part (a standby whose browser replaced its subscription).
+   */
+  async setOwnPush(subscription: (Pick<WakeSubscription, "endpoint" | "p256dh" | "auth"> & { vapid?: WakeSubscription["vapid"] }) | null): Promise<void> {
+    const changed = await this.pushExclusive(async () => {
+      const record = await this.record();
+      if (!record) return false;
+      const vapid = subscription?.vapid ?? (record.push?.own ? { publicKey: record.push.own.vp, privateKey: record.push.own.vk } : undefined);
+      if (subscription && !vapid) throw new Error("This device has no push key pair to go with that subscription");
+      const patch = withOwnPush(record, subscription && { ...subscription, vapid: vapid! });
+      if (patch) await amendDevice(this.options.profile, patch);
+      return !!patch;
+    });
+    if (!changed) return;
+    for (const running of [...this.running.values()]) if (!running.earlier && this.isLive(running)) await this.shareOwnPush(running).catch(() => {});
+  }
+
+  private waker: DeviceWaker | null = null;
+
+  /**
+   * Wakes the device with this signing key for a handoff (WISP 06 § Push and the phone): a push to the subscription it
+   * shared, only when its link is down. `sent` when the push service took it; `none` when there is nothing to wake it
+   * with (no target, or its link is live already); a subscription that is gone is forgotten.
+   */
+  async wake(key: string): Promise<"sent" | "none" | "skipped" | "failed"> {
+    if (this.options.offline || this.live(key)) return "none";
+    const record = await this.record().catch(() => null);
+    const target = otherTarget(record, key);
+    if (!target) return "none";
+    this.waker ??= new DeviceWaker(async (request) => postPush(request, { pushSend: this.options.pushSend, relay: (await this.record().catch(() => null))?.network?.pushRelay }));
+    const outcome = await this.waker.wake(key, target);
+    if (outcome === "gone") {
+      await this.pushExclusive(async () => {
+        const now = await this.record();
+        const patch = now && otherTarget(now, key)?.endpoint === target.endpoint ? withOtherPush(now, key, null) : null;
+        if (patch) await amendDevice(this.options.profile, patch);
+      }).catch(() => {});
+      return "none";
+    }
+    return outcome;
   }
 
   /**
@@ -444,6 +546,8 @@ export class DeviceLinks implements DeviceLinkEngine {
     if (running.d !== record.d) return;
     // The active device says it holds the turn: the other device reads the record while it is still there to read.
     if (record.state === "active") { try { running.link.sendDeviceFrame({ t: DEVICE_TURN_HINT }); } catch { /* the next session says it */ } }
+    // How to wake this device (or that it cannot be), on every session: the other device may have missed a change.
+    await this.shareOwnPush(running).catch(() => {});
     await this.acked(running.key);
   }
 
@@ -650,6 +754,23 @@ export class DeviceLinks implements DeviceLinkEngine {
         return null;
       }
       case "deviceLinksRefresh": await this.refresh(); return this.views();
+      case "devicePushState": {
+        // What a standby's page needs to keep its push subscription (`useStandbyPush`): the endpoint the record holds,
+        // and the public half of its VAPID pair to subscribe again with. Never the private half.
+        const own = (await this.record())?.push?.own;
+        return own ? { endpoint: own.e, vapidPublic: own.vp } : null;
+      }
+      case "devicePushSet": {
+        // A standby's browser replaced its subscription (or notifications were turned off): the record follows, and the
+        // other devices are told. Only the browser's part: a standby makes no new key pair.
+        const p = (params as { subscription?: unknown } | null)?.subscription as { endpoint?: unknown; p256dh?: unknown; auth?: unknown } | null | undefined;
+        if (p === null) { await this.setOwnPush(null); return null; }
+        if (!p || typeof p.endpoint !== "string" || typeof p.p256dh !== "string" || typeof p.auth !== "string") throw new Error("Not a push subscription");
+        checkPushEndpoint(p.endpoint);
+        if (!/^[A-Za-z0-9_-]{80,100}$/.test(p.p256dh) || !/^[A-Za-z0-9_-]{20,24}$/.test(p.auth)) throw new Error("Not a push subscription");
+        await this.setOwnPush({ endpoint: p.endpoint, p256dh: p.p256dh, auth: p.auth });
+        return null;
+      }
       case "deviceSetNoticeSeen": {
         // "Your devices are now: ..." answered. "This is wrong": the device stays out of that set and asks to be enrolled anew.
         const wrong = (params as { wrong?: unknown } | null)?.wrong === true;
@@ -674,10 +795,17 @@ export class DeviceLinks implements DeviceLinkEngine {
         const record = await (this.options.readRecord ?? readDeviceRecord)(this.options.profile);
         if (!record) return { offered: false };
         const target = takeoverTarget(record);
-        return { offered: canTakeOver(record), ...(target ? { device: target } : {}), ...(record.copy ? { copy: record.copy } : {}), password: record.copy === "frozen" || !!record.verifier };
+        // A `moving` device whose remover is gone: a device set of its own (`ownSet.ts`), offered with the same screen.
+        const moving = record.state === "moving";
+        return { offered: moving ? canStartOwnSet(record) : canTakeOver(record), ...(moving ? { ownSet: true } : {}), ...(target ? { device: target } : {}), ...(record.copy ? { copy: record.copy } : {}), password: record.copy === "frozen" || !!record.verifier };
       }
       case "deviceTakeover": {
         const p = (params ?? {}) as { password?: unknown; name?: unknown; lost?: unknown };
+        if ((await this.record())?.state === "moving") {
+          const outcome = await this.turnExclusive(async () => startOwnSet(await this.ownSetPorts(), { password: typeof p.password === "string" ? p.password : "", name: typeof p.name === "string" ? p.name : "" }));
+          await this.afterOwnSet(outcome);
+          return { kind: outcome };
+        }
         const outcome = await forceTakeover({
           read: () => (this.options.readRecord ?? readDeviceRecord)(this.options.profile),
           amend: (patch) => amendDevice(this.options.profile, patch),
@@ -712,6 +840,36 @@ export class DeviceLinks implements DeviceLinkEngine {
         throw new Error(`${DEVICE_GATED_ERROR} (${method} is not available yet)`);
       }
     }
+  }
+
+  // ---------- a device set of its own (WISP 06 § Removing a device, "When the remover is gone for good") ----------
+
+  /** What `ownSet.ts` needs of this device: its record, its signing key and the turn's sources. */
+  private async ownSetPorts(): Promise<OwnSetPorts> {
+    const profile = this.options.profile;
+    const identity = await deviceIdentity(profile, { loadKey: this.options.loadKey ?? loadDeviceSigningKey });
+    if (!identity) throw new TakeoverRefusal("state", "This profile has no device set.");
+    return {
+      read: () => this.record(),
+      amend: (patch) => amendDevice(profile, patch),
+      move: (to, patch) => moveDevice(profile, to, patch),
+      proves: (verifier, password) => provesHandoffPassword(verifier, password),
+      signer: (bytes) => identity.key.sign(bytes),
+      network: this.options.offline ? null : this.turnNetwork(),
+    };
+  }
+
+  /** What the pages show after it: the app, started again into the gate as the active device, or the state it is in now. */
+  private async afterOwnSet(outcome: OwnSetOutcome): Promise<void> {
+    if (outcome === "start") { this.host?.show({ state: "standby", reload: true }); return; }
+    const now = await this.record().catch(() => null);
+    if (now) this.host?.show(viewOf(now));
+    if (outcome === "removed") await this.refresh();
+  }
+
+  /** A device set of its own that was settling when the app stopped: it settles now. */
+  private settleOwnSet(): void {
+    void this.turnExclusive(async () => resumeOwnSet(await this.ownSetPorts())).then((outcome) => this.afterOwnSet(outcome)).catch(() => {});
   }
 
   /** Says goodbye on every link and stops. */

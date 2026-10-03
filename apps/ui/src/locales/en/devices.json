@@ -60,7 +60,8 @@
       "turn": "Another device took over. This device is on standby.",
       "unreachable": "Can't reach {{device}}. It must be on, with Ghostly open.",
       "version": "Ghostly was updated in between. Nothing changed.",
-      "wallet": "A wallet here can't move with this version of Ghostly."
+      "wallet": "A wallet here can't move with this version of Ghostly.",
+      "woken": "Open Ghostly on {{device}} and keep it open."
     },
     "later": "Bring large files later",
     "laterNote": "{{size}} of large files stay on {{device}} for now.",
@@ -195,6 +196,8 @@
     "foreign": "Something else closed your old device set.",
     "hint": "Use this profile on another device. One device is active at a time.",
     "info": "Only the active device sends, receives and pays, so your messages and money are never in two places. Move the profile whenever you like.",
+    "keepAwake": "Keep this computer awake",
+    "keepAwakeHint": "So your phone can take over while you are out.",
     "live": "Connected",
     "noAnswer": "No answer",
     "standby": "Standby",
@@ -271,6 +274,9 @@
     "lostRace": "Another device took over at the same moment. This device is on standby.",
     "lostYes": "Lost or stolen",
     "notMe": "It wasn't me",
+    "ownSetHint": "This device starts a device set of its own. Add your other devices to it again afterwards.",
+    "ownSetRemoved": "Another of your devices started a device set of its own first. Add this device again from it.",
+    "ownSetWait": "Waiting for the network. Try again in a moment.",
     "restoredHint": "This device holds a copy from a backup. It starts nothing until you take over.",
     "title": "Take over without {{device}}?",
     "titleUnnamed": "Take over without your other device?"

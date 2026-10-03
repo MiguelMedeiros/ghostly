@@ -19,7 +19,7 @@ import { translateWith } from "../../ui/src/locales/translate";
 import { applyDocumentLanguage } from "../../ui/src/lib/documentLanguage";
 import { watchInstallPrompt } from "../../ui/src/lib/installPrompt";
 import { setPushPlatform } from "../../ui/src/lib/wakePush";
-import { currentPush, pushSupported, subscribePush, syncWakeTable, unsubscribePush } from "./pwa/push";
+import { currentPush, pushSupported, subscribePush, syncWakeTable, syncWakeText, unsubscribePush } from "./pwa/push";
 import { SHARE_FORWARD_AFTER_MS, askForShare, forwardShare, listenForShares, openedForShare, registerServiceWorker } from "./pwa/serviceWorker";
 
 // The same UI and the same peer as the extension; only the host differs.
@@ -30,7 +30,7 @@ const root = createRoot(document.getElementById("root")!);
 watchInstallPrompt();
 registerServiceWorker();
 // Wake-up push (WISP 401 § Wake-up push): this app can be woken while closed; Settings shows the switch.
-setPushPlatform({ supported: pushSupported, subscribe: subscribePush, current: currentPush, unsubscribe: unsubscribePush, syncTable: syncWakeTable });
+setPushPlatform({ supported: pushSupported, subscribe: subscribePush, current: currentPush, unsubscribe: unsubscribePush, syncTable: syncWakeTable, syncText: syncWakeText });
 
 // The chosen local profile (WISP 04): its own chats, database, settings and single-peer lock. The
 // default profile keeps the original names, so nothing existing moves.
