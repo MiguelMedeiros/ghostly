@@ -33,6 +33,10 @@ pub const BOUNDS: Bounds = Bounds {
     first: Duration::from_secs(30),
 };
 
+/// The candidate a description waits for: the server reflexive one, or with a TURN server the relay one.
+pub const REFLEXIVE: &str = " typ srflx";
+pub const RELAY: &str = " typ relay";
+
 /// The candidates gathered so far, and whether gathering is complete; told by the peer connection's handler.
 #[derive(Default)]
 pub struct Gathering {
@@ -63,8 +67,15 @@ impl Gathering {
 
     /// The candidates worth sending: until the reflexive one and a moment more, or complete. Never none:
     /// with nothing gathered when the reflexive wait runs out (or gathering says complete), it waits on for
-    /// the first candidate, and past [`Bounds::first`] it is an error.
+    /// the first candidate, and past [`Bounds::first`] it is an error. A call uses [`Gathering::wait_for`].
+    #[cfg(test)]
     pub async fn wait(&self, bounds: Bounds) -> Result<Vec<String>, String> {
+        self.wait_for(bounds, REFLEXIVE).await
+    }
+
+    /// As [`Gathering::wait`], waiting for a candidate of type `awaited` in place of the reflexive one:
+    /// [`RELAY`] when the profile has a TURN server, as `waitForIceGathering` does in a browser.
+    pub async fn wait_for(&self, bounds: Bounds, awaited: &str) -> Result<Vec<String>, String> {
         let started = Instant::now();
         let mut reflexive_at: Option<Instant> = None;
         loop {
@@ -73,7 +84,7 @@ impl Gathering {
             {
                 let candidates = self.candidates.lock().unwrap();
                 let (gathered, complete) = &*candidates;
-                if reflexive_at.is_none() && gathered.iter().any(|c| c.contains(" typ srflx")) {
+                if reflexive_at.is_none() && gathered.iter().any(|c| c.contains(awaited)) {
                     reflexive_at = Some(now);
                 }
                 let deadline = match reflexive_at {
@@ -228,6 +239,27 @@ mod tests {
         assert!(
             waited >= Duration::from_millis(50) && waited < Duration::from_millis(100),
             "{waited:?}"
+        );
+    }
+
+    /// With a TURN server the reflexive candidate is not the end of the wait: the relay one is.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn with_a_turn_server_it_waits_for_the_relay_candidate() {
+        // covers: settings.network.turn
+        const RELAYED: &str =
+            "candidate:3 1 udp 16777215 198.51.100.9 50000 typ relay raddr 203.0.113.7 rport 40000";
+        let gathering = Arc::new(Gathering::default());
+        gathering.add(HOST.into());
+        gathering.add(REFLEXIVE.into());
+        let late = gathering.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(60)).await;
+            late.add(RELAYED.into());
+        });
+        let gathered = gathering.wait_for(bounds(), RELAY).await.unwrap();
+        assert_eq!(
+            gathered,
+            vec![HOST.to_string(), REFLEXIVE.to_string(), RELAYED.to_string()]
         );
     }
 

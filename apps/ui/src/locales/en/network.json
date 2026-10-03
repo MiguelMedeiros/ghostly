@@ -27,6 +27,7 @@
   "title": "Network",
   "turn": "TURN server",
   "turnCredential": "TURN credential",
+  "turnCredentialAgain": "Enter the credential again: backups leave it out.",
   "turnHint": "Optional. Used only when a direct connection fails.",
   "turnInfo": "It forwards encrypted WebRTC packets. It is connectivity infrastructure, not a Ghostly server.",
   "turnUrl": "TURN server URL",

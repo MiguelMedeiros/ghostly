@@ -27,6 +27,7 @@
   "title": "ネットワーク",
   "turn": "TURNサーバー",
   "turnCredential": "TURN認証情報",
+  "turnCredentialAgain": "認証情報をもう一度入力してください。バックアップには含まれません。",
   "turnHint": "任意。直接接続できないときだけ使われます。",
   "turnInfo": "暗号化されたWebRTCパケットを中継します。接続用のインフラであり、Ghostlyのサーバーではありません。",
   "turnUrl": "TURNサーバーのURL",

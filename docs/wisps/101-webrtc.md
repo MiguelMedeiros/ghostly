@@ -29,6 +29,10 @@ WebRTC carries the current live data link. `_rtc` conveys compact ICE credential
 
 The expected DTLS fingerprint is authenticated by the link's rendezvous context. STUN helps discover addresses; configured TURN can relay encrypted traffic. Direct paths do not guarantee IP anonymity. Media uses a separate peer connection in the current implementation.
 
+## Your own TURN server
+
+A network that lets no direct path through (a strict NAT, a firewall that drops UDP) still connects over a TURN relay. Each profile may name one in Settings, Network: a `turn:` or `turns:` address (a host, an optional port and `?transport=udp|tcp` at most), a username and a credential. A TURN server without both is refused when saved. The apps add it after their built-in STUN servers, for chats over WebRTC and for calls ([601](601-webrtc-media.md)): in the web app, the extension, Desktop on macOS and Windows, the Linux desktop's native calls (webrtc-rs, which then gathers until it has a relay candidate, as a browser does) and the CLI. The relay sees only encrypted packets and the two addresses. The credential is a secret: it is never logged, and a backup leaves it out ([05](05-backups.md)), so a restored profile shows the server and asks for the credential again, and calls skip that server until it is entered.
+
 ## Candidate WISP binding
 
 Preserve current signaling as a legacy adapter profile. A future profile MUST bind WebRTC fingerprint, both participation keys, selected capabilities and fresh transport attempt context before accepting data. Advertise data/media capability separately. ICE privacy policies, candidate filtering and TURN consent must survive fallback negotiation.

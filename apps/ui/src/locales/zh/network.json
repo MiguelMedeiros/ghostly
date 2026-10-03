@@ -27,6 +27,7 @@
   "title": "网络",
   "turn": "TURN 服务器",
   "turnCredential": "TURN 凭据",
+  "turnCredentialAgain": "请重新输入凭据：备份不包含它。",
   "turnHint": "可选。仅在无法直接连接时使用。",
   "turnInfo": "它转发加密的 WebRTC 数据包。它是连接基础设施,不是 Ghostly 服务器。",
   "turnUrl": "TURN 服务器 URL",

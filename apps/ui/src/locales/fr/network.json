@@ -27,6 +27,7 @@
   "title": "Réseau",
   "turn": "Serveur TURN",
   "turnCredential": "Mot de passe TURN",
+  "turnCredentialAgain": "Saisissez de nouveau le mot de passe : les sauvegardes ne le gardent pas.",
   "turnHint": "Facultatif. Utilisé seulement quand une connexion directe échoue.",
   "turnInfo": "Il relaie des paquets WebRTC chiffrés. C'est une infrastructure de connectivité, pas un serveur Ghostly.",
   "turnUrl": "URL du serveur TURN",

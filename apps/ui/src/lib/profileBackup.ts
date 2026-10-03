@@ -206,6 +206,25 @@ export async function profileBackupSizes(): Promise<BackupSizes> {
 }
 
 /**
+ * The engine's settings as a backup keeps them (a handoff keeps them whole). Left out: the peer's copy of the storage
+ * credentials (for held messages, WISP 4xx) like the page's; the push subscription (WISP 401 § Wake-up push), which
+ * belongs to this browser and whose key pair signs wake-ups; and the credential of each TURN server, a secret of a
+ * service the person signed up for, as the storage ones are. The TURN server's address and username stay, so Settings
+ * shows what to fill in again after a restore; until then calls leave that server out.
+ */
+export function backupSettings(settings: Record<string, unknown>): Record<string, unknown> {
+  const { holdStorage: _holdStorage, wake: _wake, ...rest } = settings;
+  if (Array.isArray(rest.iceServers)) {
+    rest.iceServers = rest.iceServers.map((server: unknown) => {
+      if (!server || typeof server !== "object") return server;
+      const { credential: _credential, ...kept } = server as Record<string, unknown>;
+      return kept;
+    });
+  }
+  return rest;
+}
+
+/**
  * Everything of a profile (chats and keys, messages and files of any size, wallets and their journal, services,
  * settings) written to `sink` as one bundle, a piece at a time: nothing of it is ever whole in memory but the
  * database's rows. Storage credentials are left out. By default the active profile; another one of this space can be
@@ -246,17 +265,12 @@ export async function writeProfileBackup(sink: BackupSink, { passphrase, id, loc
   const peer = await snapshotDatabase(space, ["fileChunks"]);
   const storeOf = (name: string) => peer?.stores.find((store) => store.name === name);
   const settingsStore = storeOf("settings");
-  // The peer's copy of the storage credentials (for held messages, WISP 4xx) stays out too, like the page's, and so does
-  // the push subscription (WISP 401 § Wake-up push): it belongs to this browser, and its key pair signs wake-ups.
+  // The engine's settings without what a backup leaves out (`backupSettings`). A handoff keeps them whole: the new active
+  // device goes on holding items for contacts, a desktop with no push subscription of its own goes on giving contacts the
+  // phone's (WISP 06 § Push and the phone), and its calls go on using the TURN server.
   for (const [i, key] of (settingsStore?.keys ?? []).entries()) {
     const value = settingsStore!.values[i] as Record<string, unknown> | null;
-    if (key === "settings" && value && typeof value === "object" && ("holdStorage" in value || "wake" in value)) {
-      // A handoff keeps the hold storage (the new active device goes on holding items for contacts) and the push
-      // subscription, which names the device it belongs to: a desktop with none of its own goes on giving contacts the
-      // phone's (WISP 06 § Push and the phone). A backup keeps neither.
-      const { holdStorage, wake, ...rest } = value;
-      settingsStore!.values[i] = handoff ? { ...rest, ...(holdStorage !== undefined ? { holdStorage } : {}), ...(wake !== undefined ? { wake } : {}) } : rest;
-    }
+    if (key === "settings" && value && typeof value === "object" && !handoff) settingsStore!.values[i] = backupSettings(value);
   }
   const ark: Record<string, ArkDatabaseSnapshot> = {};
   for (const [i, key] of (settingsStore?.keys ?? []).entries()) {
