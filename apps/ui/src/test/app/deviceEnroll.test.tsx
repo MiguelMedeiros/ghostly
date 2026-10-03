@@ -33,6 +33,8 @@ describe("the lock password a device set needs (WISP 06 § Adding a device)", ()
   it("Add a device asks to set one first, and refuses one under 8 characters; nothing starts until it is set", async () => {
     const { user, engine } = renderApp(<AddDeviceDialog onClose={() => {}} />);
     engine.on("deviceEnrollInvite", () => waiting);
+    // The password proof's verifier is made as the password is typed (part 5).
+    engine.on("deviceHandoffVerifier", () => undefined);
     expect(screen.getByText("Set a password first")).toBeInTheDocument();
     expect(screen.getByText("Without a password, anyone holding one of your devices can take this profile.")).toBeInTheDocument();
     await user.type(screen.getByTestId("device-add-password"), "short1");
@@ -55,6 +57,8 @@ describe("the lock password a device set needs (WISP 06 § Adding a device)", ()
     localStorage.setItem("ghostly_app_settings", JSON.stringify({ lockScreen: { enabled: false, passwordHash: await hashPassword("a long password"), timeoutMinutes: 5 } }));
     const { user, engine } = renderApp(<AddDeviceDialog onClose={() => {}} />);
     engine.on("deviceEnrollInvite", () => waiting);
+    // The password proof's verifier is made as the password is typed (part 5).
+    engine.on("deviceHandoffVerifier", () => undefined);
     await user.type(screen.getByTestId("device-add-password"), "a long password");
     await user.click(screen.getByTestId("device-add-next"));
     await waitFor(() => expect(engine.callsTo("deviceEnrollInvite")).toHaveLength(1));
@@ -89,6 +93,8 @@ describe("the lock password a device set needs (WISP 06 § Adding a device)", ()
     localStorage.setItem("ghostly_app_settings", JSON.stringify({ lockScreen: { enabled: true, passwordHash: await hashPassword("1234"), timeoutMinutes: 5 } }));
     const { user, engine } = renderApp(<AddDeviceDialog onClose={() => {}} />);
     engine.on("deviceEnrollInvite", () => waiting);
+    // The password proof's verifier is made as the password is typed (part 5).
+    engine.on("deviceHandoffVerifier", () => undefined);
     expect(screen.getByText("Type your lock password")).toBeInTheDocument();
     await user.type(screen.getByTestId("device-add-password"), "4321");
     await user.click(screen.getByTestId("device-add-next"));
@@ -104,6 +110,8 @@ describe("the lock password a device set needs (WISP 06 § Adding a device)", ()
     localStorage.setItem("ghostly_app_settings", JSON.stringify({ lockScreen: { enabled: true, passwordHash: await hashPassword("a long password"), timeoutMinutes: 5 } }));
     const { user, engine } = renderApp(<AddDeviceDialog onClose={() => {}} />);
     engine.on("deviceEnrollInvite", () => waiting);
+    // The password proof's verifier is made as the password is typed (part 5).
+    engine.on("deviceHandoffVerifier", () => undefined);
     engine.on("deviceEnrollView", () => ({ role: "inviter", step: "confirm", digits: "482913", device: "Phone", kind: "web", refused: 1 }));
     engine.on("deviceEnrollConfirm", () => ({ role: "inviter", step: "adding", device: "Phone" }));
     await user.type(screen.getByTestId("device-add-password"), "a long password");
