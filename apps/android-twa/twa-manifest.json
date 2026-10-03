@@ -20,7 +20,7 @@
     "path": "./upload.keystore",
     "alias": "upload"
   },
-  "appVersionName": "1.0.3",
+  "appVersion": "1.0.3",
   "appVersionCode": 1000003,
   "shortcuts": [
     {

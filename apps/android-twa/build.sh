@@ -57,7 +57,9 @@ const [source, target, version, local] = process.argv.slice(2);
 const m = JSON.parse(fs.readFileSync(source, "utf8"));
 const [major, minor, patch] = version.split("-")[0].split(".").map(Number);
 if (![major, minor, patch].every((n) => Number.isInteger(n) && n >= 0 && n < 1000)) throw new Error(`Version ${version} is not x.y.z`);
-m.appVersionName = version;
+// Bubblewrap reads the version name from "appVersion" (its own saves write "appVersionName" beside it).
+delete m.appVersionName;
+m.appVersion = version;
 m.appVersionCode = major * 1000000 + minor * 1000 + patch;
 const site = `https://${m.host}`;
 const toLocal = (url) => (url && url.startsWith(site + "/") ? local + url.slice(site.length) : url);
@@ -66,7 +68,7 @@ m.iconUrl = toLocal(m.iconUrl);
 m.maskableIconUrl = toLocal(m.maskableIconUrl);
 for (const s of m.shortcuts ?? []) s.chosenIconUrl = toLocal(s.chosenIconUrl);
 fs.writeFileSync(target, JSON.stringify(m, null, 2) + "\n");
-console.log(`Ghostly ${m.appVersionName} (versionCode ${m.appVersionCode}), package ${m.packageId}`);
+console.log(`Ghostly ${m.appVersion} (versionCode ${m.appVersionCode}), package ${m.packageId}`);
 EOF
 
 # Bubblewrap asks where the JDK and the SDK are unless its config says so: a config of our own, never ~/.bubblewrap.
@@ -105,6 +107,12 @@ else
     --ks-key-alias "$ANDROID_KEY_ALIAS" --key-pass env:ANDROID_KEY_PASSWORD --out "$APK" "$OUT/aligned.apk"
   rm -f "$OUT/aligned.apk"
 fi
+BADGING="$("$BUILD_TOOLS/aapt2" dump badging "$APK" | head -1)"
+echo "$BADGING"
+case "$BADGING" in
+  *"name='$(node -p "require('$HERE/twa-manifest.json').packageId")'"*"versionName='$VERSION'"*) ;;
+  *) echo "The APK is not the package and version expected (Ghostly $VERSION)" >&2; exit 1 ;;
+esac
 "$BUILD_TOOLS/apksigner" verify --print-certs "$APK" | grep -i "SHA-256 digest" || true
 ls -l "$APK"
 echo "APK=$APK"
