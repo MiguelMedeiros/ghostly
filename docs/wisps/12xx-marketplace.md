@@ -1,15 +1,15 @@
-# WISP 12xx: Apps and Plugins: Packages, Catalogs and Indexers
+# WISP 12xx: Apps and Plugins: Packages, Stores and Apps Sent in a Chat
 
 | Field | Value |
 |---|---|
 | Candidate number | 12xx; a new family (1200-1299), number to be defined; pending catalogue acceptance, not an official assignment |
 | Status | Draft |
 | Editors | Ghostly contributors; maintainer review pending |
-| Dependencies | [02](02-peer-keys.md), [03](03-capabilities.md), [04](04-profiles.md), [05](05-backups.md), [06](06-devices.md), [200](200-payments.md), [205](205-lnurl.md), [300](300-peer-proofs.md), [3xx did:dht](3xx-did-dht.md), [400](400-chat.md), [401](401-paired-chat.md), [4xx status cards](4xx-status-cards.md), [4xx message buttons](4xx-message-buttons.md), [500](500-files.md), [501](501-paired-files.md), [700](700-local-services.md), [701](701-http-services.md), [11xx](11xx-headless.md) |
+| Dependencies | [02](02-peer-keys.md), [03](03-capabilities.md), [04](04-profiles.md), [05](05-backups.md), [06](06-devices.md), [200](200-payments.md), [300](300-peer-proofs.md), [3xx did:dht](3xx-did-dht.md), [3xx SSH](3xx-ssh.md), [400](400-chat.md), [401](401-paired-chat.md), [4xx status cards](4xx-status-cards.md), [4xx message buttons](4xx-message-buttons.md), [500](500-files.md), [501](501-paired-files.md), [700](700-local-services.md), [701](701-http-services.md), [800](800-invite-join.md), [11xx](11xx-headless.md) |
 | Implementation | None. A proposal: nothing of it is on `dev` or in a release. Code starts after release 1.1 |
-| Summary | Install apps made by others: from catalogs you add by pasting a Git URL, or sent to you in a chat. Each is checked against its publisher's signature and runs in a sandbox. |
+| Summary | Install apps and games made by others: from a store, from a Git URL you paste, or sent to you in a chat. Each is checked against its publisher's signature and runs in a sandbox. |
 | Availability | Planned |
-| Notes | Not in the app. Phase 1 proposes free mini-apps and themes on the web app, the extension and Desktop. Paid apps come later, on test coins first. |
+| Notes | Not in the app. Phase 1 is free mini-apps, turn-based and light versus games included, on the web app, Desktop and the extension (the extension ships without apps if the Chrome Web Store objects). No payments, no network access for apps. |
 
 > This is a review draft. Candidate numbers and new record formats are not registered standards. Normative language describes a candidate requirement, not a shipped guarantee. See the [catalogue](README.md) and [implementation evidence](IMPLEMENTATION.md).
 
@@ -17,41 +17,42 @@ Number note: no family fits a store. The closest, [700](700-local-services.md) (
 
 ## Purpose
 
-The owner wants a marketplace, and chose its first goods: **apps and plugins for Ghostly**. Not services, not physical goods. This document is the design, written before the code, which starts after release 1.1.
+The owner wants a marketplace, and chose its first goods: **apps and plugins for Ghostly**, games among the first. Not services, not physical goods. This document is the design, written before the code, which starts after release 1.1.
 
-It answers, in order:
+It answers, in order: what an app and a plugin are, and which kinds phase 1 carries; the package and its signatures; where an app runs on each client, and its sandbox; how apps are found without a central server; paying, later, without an account; reviews; the threats; the phases.
 
-1. what an app and a plugin are in Ghostly, and which kinds phase 1 carries;
-2. the package: manifest, signatures, content addresses, updates, permissions;
-3. where an app runs on each client, and its sandbox;
-4. how apps are found without a central server: **catalogs** (Git repositories, as Umbrel does it), **apps sent in a chat**, and **indexers** the person chooses;
-5. paying, without an account;
-6. reviews and trust;
-7. the threats;
-8. the phases;
-9. the questions left for the owner.
-
-The point of the design is that **no single source is required**. The default catalog and the default indexer are run by Ghostly's maintainers, and they are one source among many: a pasted Git URL, someone else's catalog and an app a friend sends in a chat install the same way, with the same checks.
+The point of the design is that **no single source is required**. Ghostly's default store is one repository among many: a pasted Git URL, someone else's store and an app a friend sends in a chat install the same way, with the same checks.
 
 ## Goals and non-goals
 
 In scope:
 
-- Free mini-apps (games, polls, shared tools) and themes, installed from a Git URL, a catalog or a chat, in phase 1.
+- Free mini-apps (games, polls, shared tools), installed from a pasted Git URL, a store or a chat, in phase 1.
 - A package format, signatures and updates that do not trust the host the bytes came from (GitHub, a mirror, a contact).
-- Catalogs and indexers anyone can run, several at once, chosen by the person.
+- Stores anyone can publish, several at once, chosen by the person.
 - A design for paid apps, licences, reviews and takedowns that needs no Ghostly server and no account.
 
 Out of scope, on purpose:
 
 - **Adapter plugins from a store.** A wallet source or an identity proof runs inside the engine with every key ([SDK.md](../SDK.md#trust-model-first)). Nothing that runs there is installed from a store until a permissioned plugin host exists (research, [Phases](#later-phases-and-research)).
-- **DRM.** A package published in a public Git repository can be copied. A licence gates what an honest client does, not what a determined person does ([Paying](#paying)).
+- **DRM.** A package published in a public Git repository can be copied. A licence gates what an honest client does, not what a determined person does ([Paying](#paying-phase-2)).
 - **Services and physical goods.** The roadmap's "Marketplaces / hosting example" row stays a later product question.
-- **A Ghostly account or a central store server.** There is none today, and this design adds none.
+- **A Ghostly account or a store server.** There is none today, and this design adds none. Phase 1 runs no service at all: stores are signed files.
+
+## Decisions taken by the owner (2026-10-03)
+
+| Question | Decision |
+|---|---|
+| Paid apps | Free only for now. [Paying](#paying-phase-2) stays a phase 2 design |
+| Default store | Apps are added by pull request to one repository. The owner holds its signing key, offline |
+| An app sent in a chat that no store lists | Installable, with "Not in any of your stores" on its card |
+| Extension | Build the extension path. If the Chrome Web Store objects, ship the extension without apps; web and Desktop keep them |
+| Network access for apps | None in phase 1. Later, an exact list of sites shown at install |
+| Default index | A signed static file in the default store's repository, read directly by the client. No service to run. A self-hosted indexer stays optional, for people who want their own |
 
 ## What exists today (evidence)
 
-Each fact was checked against the file it names on `dev` on 2026-10-02. Where one is wrong, the section that cites it must change.
+Each fact was checked against the file it names on `dev` on 2026-10-02, or measured in the reviews of 2026-10-03. Where one is wrong, the section that cites it must change.
 
 | Fact | Where |
 |---|---|
@@ -59,21 +60,37 @@ Each fact was checked against the file it names on `dev` on 2026-10-02. Where on
 | An adapter runs with the app's privileges: it can read every key, sign anything, spend everything and reach any network the page can. No sandbox, no permission prompt, no signature check, no store | [SDK.md](../SDK.md#trust-model-first), `packages/browser/src/plugins/registry.ts` |
 | Plugins enter only at build time (`GHOSTLY_PLUGINS`, read by the Vite plugin) or from code already in the engine's realm (`registerAdapters`); "there is no way to load a plugin from a URL, a file or a store, on purpose" | `packages/browser/vite-plugin.ts`, `packages/browser/src/plugins/bundled.ts`, [SDK.md](../SDK.md#registration-a-plugin-not-a-registry-line) |
 | Release builds bundle no plugin, by omission: the release workflow never sets `GHOSTLY_PLUGINS`; only the e2e configurations do | `.github/workflows/release.yml`, `e2e/playwright.config.ts` |
-| Shared apps (`services/1`) let a contact open an app running on your computer, proxied over the chat's live link. Desktop opens it in a window of its own on the `ghostly-svc` scheme; the extension in a tab on `https://<service>.<peer>.invalid/` answered through `chrome.debugger`; the web app can do neither | [700](700-local-services.md), [701](701-http-services.md), `packages/core/src/pairedHttp.ts`, `apps/desktop/src/viewer.rs`, `apps/extension/src/background.ts`, [BROWSER.md](../BROWSER.md#opening-a-contacts-app) |
-| On Desktop only the `main` window may call commands; every other window runs a contact's code and is refused, whatever the capabilities say | `apps/desktop/src/main.rs` (`only_main`), `apps/desktop/capabilities/default.json` (`windows: ["main"]`) |
+| Shared apps (`services/1`) let a contact open an app running on your computer, proxied over the chat's live link. Desktop opens it in a window of its own on the `ghostly-svc` scheme, maps the window's label to its state, blocks navigation (`on_navigation`) and denies new windows; the extension uses a tab on `https://<service>.<peer>.invalid/` answered through `chrome.debugger`; the web app can do neither | [700](700-local-services.md), [701](701-http-services.md), `packages/core/src/pairedHttp.ts`, `apps/desktop/src/viewer.rs`, `apps/extension/src/background.ts`, [BROWSER.md](../BROWSER.md#opening-a-contacts-app) |
+| On Desktop only the `main` window may call commands; every other window is refused, whatever the capabilities say, and a test checks it. Tauri injects its IPC bridge into every window's main frame, so "no IPC" means "every command refused", not "no bridge" | `apps/desktop/src/main.rs` (`only_main`), `apps/desktop/capabilities/default.json` (`windows: ["main"]`); Tauri 2.12 `manager/webview.rs` (read in the product review) |
 | The app renders no iframe anywhere, and no element with `sandbox` | `apps/ui/src` (no match), `apps/ui/src/test/chat/linkPreview.test.tsx` asserts a preview makes none |
-| Every client's CSP: web `default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; connect-src 'self' https: wss: …; frame-ancestors 'none'`; extension pages `script-src 'self' 'wasm-unsafe-eval'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; img-src …`; Desktop like the web plus `ipc:` and loopback. None sets `frame-src` or `child-src`, so the web and Desktop fall back to `default-src 'self'` for frames and the extension's pages do not restrict them | `apps/web/nginx-headers.conf`, `apps/extension/public/manifest.json`, `apps/desktop/tauri.conf.json`, `apps/ui/src/test/security/contentSecurityPolicy.test.ts` |
-| The extension is Manifest V3 with no `sandbox` pages; the engine runs in an offscreen document | `apps/extension/public/manifest.json`, `apps/extension/src/background.ts` |
-| Desktop updates are signed: the Tauri updater checks a minisign signature against a public key in the configuration, from a `latest.json` on GitHub releases | `apps/desktop/tauri.conf.json` (`plugins.updater`) |
-| Cards under a message (invite, group, Nostr, identity) come from a parser of the text; at most 3 per message. Sender-made link previews ride with the message | `apps/ui/src/lib/parse/entities.ts`, `apps/ui/src/components/chat/EntityCards.tsx`, `apps/ui/src/lib/parse/linkPreview.ts`, [401](401-paired-chat.md) |
-| A structured card (`sc`, at most 8 KiB, text as fallback) rides beside the text on every text path; today only bots send them (status cards, message buttons) | [4xx status cards](4xx-status-cards.md), [4xx message buttons](4xx-message-buttons.md), `packages/core/src/statusCards.ts` |
-| `files/3` carries a file of any size with consent and resume; the receiver takes up to 25 MiB by itself and checks the SHA-256 of what it stored. Files are not content-addressed: the receiver stores them under its own id | [501](501-paired-files.md#files3-files-of-any-size-revision-03), `packages/browser/src/shared/fileBytes.ts` |
-| The only profile-wide key is the DID key (did:dht). No chat uses it; it travels in backups | [3xx did:dht](3xx-did-dht.md), `packages/browser/src/engine/did.ts` |
-| Identity proofs exist for Nostr, Pubky, domains, OpenPGP, Bitcoin addresses, SSH (including keys GitHub and GitLab publish), OpenID Connect (off in every build: no client IDs) and DIDs, and Bluesky | `packages/browser/src/proofs/registry.ts`, `packages/browser/src/proofs/sshForges.ts`, [300](300-peer-proofs.md) |
-| Payments in a chat: `pay-req`, `pay`, `pay-res` frames with a network (`n`); rails Cashu, Lightning cards, Ark (Arkade, Bark), Spark, Fedimint, USDT, on-chain; Testnet has a faucet button; any Mainnet spend needs `confirmedReal` | [200](200-payments.md), `packages/core/src/frames.ts`, `packages/browser/src/engine/paymentAdapters/testCoins.ts`, `walletInstances.ts` (`assertConfirmedReal`), `apps/ui/src/components/ConfirmRealMoney.tsx` |
-| Pkarr packets are at most 1000 bytes; web and extension reach them through two default relays; Desktop and the CLI also reach the Mainline DHT | `packages/core/src/pkarr.ts`, `packages/core/src/relay.ts` (`DEFAULT_RELAYS`), `apps/desktop/src/pkarr_network.rs` |
-| The headless CLI is on npm as `@ghostlytools/cli`; small self-hosted services live in `infra/services/` (push relay, HyperDHT relay); the web app ships as a Docker image | `packages/cli`, `.github/workflows/npm-publish.yml`, `infra/services/`, `infra/docker-compose.yml` |
-| Nothing in the code is a catalog, a store, a package or a mini-app. They exist only as roadmap rows | [ADAPTER-ROADMAP.md](ADAPTER-ROADMAP.md#plugins-apps-catalogs-and-ghostlyos) |
+| Every client's CSP: web `default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; connect-src 'self' https: wss: …; frame-ancestors 'none'`, included in every nginx location; extension pages `script-src 'self' 'wasm-unsafe-eval'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; img-src …`; Desktop like the web plus `ipc:` and loopback. None sets `frame-src` or `child-src` | `apps/web/nginx-headers.conf`, `apps/web/nginx.conf`, `apps/extension/public/manifest.json`, `apps/desktop/tauri.conf.json`, `apps/ui/src/test/security/contentSecurityPolicy.test.ts` |
+| The web app's service worker serves only its own build files and passes any other path, such as a new `/app-frame.html`, to the network, so a header the server sets on it holds | `apps/web/src/sw/policy.ts` (`classify`) |
+| The extension is Manifest V3 with no `sandbox` pages and holds the `debugger` permission; the engine runs in an offscreen document | `apps/extension/public/manifest.json`, `apps/extension/src/background.ts` |
+| Desktop updates are signed: the Tauri updater checks a minisign signature against a public key in the configuration | `apps/desktop/tauri.conf.json` (`plugins.updater`) |
+| Cards under a message (invite, group, Nostr, identity) come from a parser of the text; at most 3 per message. Sender-made link previews ride with the message so the receiver fetches nothing to show them | `apps/ui/src/lib/parse/entities.ts`, `apps/ui/src/components/chat/EntityCards.tsx`, `apps/ui/src/lib/parse/linkPreview.ts`, [401](401-paired-chat.md) |
+| A structured card (`sc`, at most 8 KiB, text as fallback) rides beside the text on every text path; today only bots send them | [4xx status cards](4xx-status-cards.md), [4xx message buttons](4xx-message-buttons.md), `packages/core/src/statusCards.ts` |
+| `files/3` carries a file of any size with consent and resume; the receiver takes up to 25 MiB by itself and checks the SHA-256 of what it stored | [501](501-paired-files.md#files3-files-of-any-size-revision-03), `packages/browser/src/shared/fileBytes.ts` |
+| A `ghostly1` invite pairs exactly one chat: after the first pin another key is ignored | [800](800-invite-join.md#baseline-and-purpose) |
+| The only profile-wide key is the DID key (did:dht), an Ed25519 key made from the DID seed. No chat uses it; it travels in backups. WISP 06 derives the first device-set secret from the same seed | [3xx did:dht](3xx-did-dht.md), `packages/browser/src/engine/did.ts`, [06](06-devices.md#terms) |
+| The GitHub SSH proof checks a key against `api.github.com/users/<login>/keys` | `packages/browser/src/proofs/sshForges.ts`, [3xx SSH](3xx-ssh.md) |
+| Payments in a chat: `pay-req`, `pay`, `pay-res` frames; Testnet has a faucet button; any Mainnet spend needs `confirmedReal` | [200](200-payments.md), `packages/core/src/frames.ts`, `packages/browser/src/engine/paymentAdapters/testCoins.ts`, `walletInstances.ts` (`assertConfirmedReal`) |
+| The headless CLI is on npm as `@ghostlytools/cli`; small self-hosted services live in `infra/services/` | `packages/cli`, `.github/workflows/npm-publish.yml`, `infra/services/` |
+| Nothing in the code is a store, a package or a mini-app. They exist only as roadmap rows | [ADAPTER-ROADMAP.md](ADAPTER-ROADMAP.md#plugins-apps-catalogs-and-ghostlyos) |
+
+**Measured in the product review (2026-10-03; Chromium 145, Playwright 1.58, curl 8.7):**
+
+| Test | Result |
+|---|---|
+| A frame `sandbox="allow-scripts"` with `connect-src 'none'`: fetch, beacon, WebSocket, EventSource, a worker's fetch, images, CSS, fonts, media, prefetch, preload, forms, popups, `top.location` | All blocked |
+| The same frame, WebRTC | **Got out**: STUN packets to a host and port the frame chose, on web and in the extension. CSP's `webrtc 'block'` was ignored |
+| Deleting `RTCPeerConnection` and its relatives in the frame before other code runs | Closed it; no fresh copy came back through an `about:blank` or `srcdoc` frame |
+| The frame navigating itself (`location=`, meta refresh, a link) | **Got out** when the parent page had no `frame-src`; closed by `frame-src 'self'` on the parent (extension tested) |
+| Relative imports inside a module loaded from a `blob:` URL; relative image and CSS URLs | Broken |
+| An extension sandbox page with `blob:` and `'wasm-unsafe-eval'` in its CSP | Loaded; WebAssembly ran; `eval` blocked; no `chrome.runtime`; storage APIs refused |
+| From another origin: `raw.githubusercontent.com` (commit or `HEAD`), jsDelivr `@commit`, `api.github.com` | Readable (CORS `*`); raw caches 5 minutes, jsDelivr is immutable, the API allows 60 an hour |
+| From another origin: `codeload.github.com`, release assets | Not readable (no CORS) |
+
+Not measured: DNS prefetch and preconnect from the frame, WebKit's handling of everything above, and a CSP `sandbox` header sent by a Tauri custom scheme.
 
 ## What the outside world allows (sources)
 
@@ -81,348 +98,366 @@ Read on 2026-10-02. Each line names the page it rests on.
 
 | Fact | Source |
 |---|---|
-| **Umbrel's store** is a Git repository with one folder per app, named by the app id, holding `umbrel-app.yml` (the manifest) and `docker-compose.yml`. The manifest has `manifestVersion`, `id`, `category`, `name`, `version`, `tagline`, `description`, `releaseNotes`, `developer`, `website`, `dependencies`, `repo`, `support`, `port`, `gallery`, `submitter`, `submission`; images are pinned by digest | [umbrel-apps packaging guide](https://github.com/getumbrel/umbrel-apps/blob/master/.agents/skills/umbrel-package-app/SKILL.md), [bitcoin/umbrel-app.yml](https://raw.githubusercontent.com/getumbrel/umbrel-apps/master/bitcoin/umbrel-app.yml) |
+| **Umbrel's store** is a Git repository with one folder per app holding `umbrel-app.yml` and `docker-compose.yml`. The manifest has `manifestVersion`, `id`, `category`, `name`, `version`, `tagline`, `description`, `releaseNotes`, `developer`, `website`, `dependencies`, `repo`, `support`, `port`, `gallery`, `submitter`, `submission` | [umbrel-apps packaging guide](https://github.com/getumbrel/umbrel-apps/blob/master/.agents/skills/umbrel-package-app/SKILL.md), [bitcoin/umbrel-app.yml](https://raw.githubusercontent.com/getumbrel/umbrel-apps/master/bitcoin/umbrel-app.yml) |
 | Umbrel's official store takes apps by pull request, linted and reviewed by its team | the same guide, "PR Readiness" |
-| A **Community App Store** is a Git repository with `umbrel-app-store.yml` (`id`, `name`); every app id starts with the store id; a person adds one by pasting the repository URL | [umbrel-community-app-store](https://github.com/getumbrel/umbrel-community-app-store) |
-| Umbrel clones the default branch shallowly and re-clones when the remote head changes, every 5 minutes. **It checks no signature and pins no commit.** The default store cannot be removed. Its UI warns that community stores are not vetted and may be malicious | [app-repository.ts](https://github.com/getumbrel/umbrel/blob/master/packages/umbreld/source/modules/apps/app-repository.ts), [app-store.ts](https://github.com/getumbrel/umbrel/blob/master/packages/umbreld/source/modules/apps/app-store.ts), [en.json](https://github.com/getumbrel/umbrel/blob/master/packages/ui/public/locales/en.json) (`community-app-stores.warning`) |
-| **Chrome Web Store, MV3:** remotely hosted code (JavaScript, WASM) may not run in the extension; remote data (JSON, CSS, images) may. Code run "in contexts that are isolated from extension APIs (such as iframes and sandboxed pages)" is exempt | [Remote hosted code](https://developer.chrome.com/docs/extensions/develop/migrate/remote-hosted-code), [MV3 requirements](https://developer.chrome.com/docs/webstore/program-policies/mv3-requirements) |
+| A **Community App Store** is a Git repository with `umbrel-app-store.yml` (`id`, `name`), added by pasting its URL. Umbrel installs stores only, never a single app's URL | [umbrel-community-app-store](https://github.com/getumbrel/umbrel-community-app-store) |
+| Umbrel clones the default branch shallowly and re-clones when the remote head changes, every 5 minutes. **It checks no signature and pins no commit.** Its UI warns that community stores are not vetted | [app-repository.ts](https://github.com/getumbrel/umbrel/blob/master/packages/umbreld/source/modules/apps/app-repository.ts), [app-store.ts](https://github.com/getumbrel/umbrel/blob/master/packages/umbreld/source/modules/apps/app-store.ts), [en.json](https://github.com/getumbrel/umbrel/blob/master/packages/ui/public/locales/en.json) |
+| **Chrome Web Store, MV3:** remotely hosted code may not run in the extension; remote data may. Code run "in contexts that are isolated from extension APIs (such as iframes and sandboxed pages)" is exempt | [Remote hosted code](https://developer.chrome.com/docs/extensions/develop/migrate/remote-hosted-code), [MV3 requirements](https://developer.chrome.com/docs/webstore/program-policies/mv3-requirements) |
 | An extension's **sandbox pages** get no extension APIs, talk by `postMessage` only, run under their own CSP, which must keep `sandbox` and may not add `allow-same-origin` | [manifest sandbox](https://developer.chrome.com/docs/extensions/reference/manifest/sandbox) |
-| **Tauri 2:** the API is limited to bundled code by default; a capability may grant listed remote origins listed commands. On Linux and Android Tauri cannot tell a request from an embedded iframe from one by its window | [Capabilities](https://v2.tauri.app/security/capabilities/) |
-| Tauri custom schemes are `<scheme>://localhost/` on macOS and Linux and `http://<scheme>.localhost/` on Windows | [tauri::Builder](https://docs.rs/tauri/latest/tauri/struct.Builder.html) |
-| The Tauri updater's signature check cannot be turned off; it is minisign (Ed25519) | [Updater](https://v2.tauri.app/plugin/updater/), [updater Cargo.toml](https://github.com/tauri-apps/plugins-workspace/blob/v2/plugins/updater/Cargo.toml) |
-| A sandboxed iframe without `allow-same-origin` gets an opaque origin: no cookies, no `localStorage`. `allow-scripts` with `allow-same-origin` on a same-origin page can remove the sandbox. The CSP `sandbox` directive works only as an HTTP header | [MDN iframe](https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/iframe), [HTML sandboxing](https://html.spec.whatwg.org/multipage/browsers.html#sandboxing), [MDN CSP sandbox](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Content-Security-Policy/sandbox) |
-| **GitHub from a browser** (checked with an `Origin` header): `raw.githubusercontent.com` answers `Access-Control-Allow-Origin: *` with `text/plain` and `nosniff`, so it can be fetched, not used as a script. `codeload.github.com` archives and release assets (`release-assets.githubusercontent.com`) send no CORS header, so a page cannot read them. `api.github.com` allows CORS and 60 unauthenticated requests per hour per IP | observed with curl on 2026-10-02; [REST rate limits](https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api) |
-| **jsDelivr** serves `cdn.jsdelivr.net/gh/<user>/<repo>@<commit>/<file>` with CORS and `immutable` caching, and keeps commit-pinned files even after the repository is deleted; single files over 20 MB are not served | observed with curl on 2026-10-02; [jsDelivr README](https://github.com/jsdelivr/jsdelivr) |
-| GitHub disables a repository about one business day after a DMCA notice that is not resolved; forks are not disabled automatically | [DMCA takedown policy](https://docs.github.com/en/site-policy/content-removal-policies/dmca-takedown-policy) |
-| GitHub has been blocked by governments at times (China in 2013, Russia and India in 2014) | [Censorship of GitHub](https://en.wikipedia.org/wiki/Censorship_of_GitHub) (secondary) |
+| **Tauri 2:** the API is limited to bundled code by default. On Linux and Android Tauri cannot tell a request from an embedded iframe from one by its window. Custom schemes are `<scheme>://localhost/` on macOS and Linux, `http://<scheme>.localhost/` on Windows | [Capabilities](https://v2.tauri.app/security/capabilities/), [tauri::Builder](https://docs.rs/tauri/latest/tauri/struct.Builder.html) |
+| A sandboxed iframe without `allow-same-origin` has an opaque origin, reported as `"null"`: no cookies, no `localStorage`. The CSP `sandbox` directive works only as an HTTP header | [MDN iframe](https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/iframe), [HTML sandboxing](https://html.spec.whatwg.org/multipage/browsers.html#sandboxing), [MDN CSP sandbox](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Content-Security-Policy/sandbox) |
+| **jsDelivr** keeps commit-pinned files even after the repository is deleted; single files over 20 MB are not served | [jsDelivr README](https://github.com/jsdelivr/jsdelivr) |
+| GitHub disables a repository about one business day after a DMCA notice that is not resolved; it has been blocked by governments at times | [DMCA takedown policy](https://docs.github.com/en/site-policy/content-removal-policies/dmca-takedown-policy), [Censorship of GitHub](https://en.wikipedia.org/wiki/Censorship_of_GitHub) (secondary) |
 | **TUF** has four roles (root, targets, snapshot, timestamp) and addresses rollback, indefinite freeze, mix-and-match, malicious mirrors and key compromise below a threshold | [TUF specification](https://theupdateframework.github.io/specification/latest/) |
-| **F-Droid** signs its index offline, with a timestamp and an expiry; a repository is defined by its signing key; third-party repositories are added by URL | [F-Droid security model](https://f-droid.org/docs/Security_Model/), [Setup an F-Droid app repo](https://f-droid.org/docs/Setup_an_F-Droid_App_Repo/) |
-| **Zapstore** has each release signed by its developer's Nostr key and refuses an install on a hash mismatch. **Obtainium** installs from release pages by URL and adds no signature of its own | [zapstore.dev](https://zapstore.dev/), [Obtainium](https://github.com/ImranR98/Obtainium) |
-| **Sigstore** binds short-lived certificates to an OpenID Connect identity and logs signatures in Rekor, a transparency log; **minisign** is Ed25519 with a signed comment that can carry a version | [Sigstore overview](https://docs.sigstore.dev/about/overview/), [minisign](https://jedisct1.github.io/minisign/) |
-| Offline licences: Keygen's signed licence files are checked against the vendor's public key; L402 makes a token valid by a paid preimage. Neither binds a licence to the buyer's public key | [Keygen cryptography](https://keygen.sh/docs/api/cryptography/), [L402](https://docs.lightning.engineering/the-lightning-network/l402) |
+| **F-Droid** signs its index offline, with an expiry; a repository is defined by its signing key; third-party repositories are added by URL. **Zapstore** has each release signed by its developer's key | [F-Droid security model](https://f-droid.org/docs/Security_Model/), [zapstore.dev](https://zapstore.dev/) |
+| Offline licences: Keygen's signed licence files and L402's paid preimage. Neither binds a licence to the buyer's public key | [Keygen cryptography](https://keygen.sh/docs/api/cryptography/), [L402](https://docs.lightning.engineering/the-lightning-network/l402) |
 
 ## Terms
 
 | Term | Meaning |
 |---|---|
 | **Publisher** | Whoever signs a package. Identified by an Ed25519 **publisher key**, nothing else |
-| **Package** | One version of one app: files plus a signed manifest |
-| **App reference** | `<publisher key>/<name>`. The identity of an app. Two packages are versions of the same app only when both are signed by the same publisher key (or a key it rotated to) and carry the same name |
+| **Package** | One version of one app, published as one file, the **bundle** (`.ghostlyapp`): a signed manifest and the files it lists |
+| **App reference** | `<publisher key>/<name>`. Two packages are versions of the same app only when both are signed by the same publisher key and carry the same name |
 | **Digest** | SHA-256 of a package's canonical manifest, which lists the SHA-256 of every file. One digest names every byte of a version |
-| **Source** | Anywhere the bytes of a package can come from: a Git repository, a mirror, an indexer's copy, a file in a chat. Sources are not trusted: bytes are checked against the digest and the signature |
-| **Catalog** | A curated list: a Git repository with a signed index of listings, each pointing at a package by source, pinned commit and digest. Run by a **curator**, who chooses what is in it |
-| **Indexer** | A service that reads catalogs, Git hosts and packages people submit, and answers search, ranking, versions, reviews and malware reports. It lists; it does not curate on anyone's behalf |
-| **Card** | How a package, a catalog or an indexer appears in a chat: a structured attachment to a message, with a link as its text |
-| **Runner** | The small, trusted page of the client that hosts an app in its sandbox and passes its requests to the **broker** |
-| **Broker** | The client code that answers an app's requests, each only within the permissions the person granted |
+| **Source** | Anywhere a bundle can come from: a Git repository, a mirror, a store's copy, a file in a chat. Sources are not trusted: bytes are checked against the signature and the digest |
+| **Store** | What people see: a list of apps they chose to browse. Technically, a **signed store index** at an HTTPS URL. A **curated** store is a list someone chooses (a catalog, kept in a Git repository); an **indexed** store is the same file built by a crawler over many catalogs and repositories (an indexer's output). The client treats both alike and shows which is which |
+| **Runner** | The small trusted page that hosts one app in its sandbox |
+| **Broker** | The client code, outside the sandbox, that answers an app's requests within the permissions the person granted |
 
-**An app is never identified by a catalog or an indexer.** Its reference is bound to its publisher key, so a lying catalog or indexer can hide an app or rank it, never swap its code.
+**An app is never identified by a store.** Its reference is bound to its publisher key, so a lying store can hide an app or rank it, never swap code of an installed app.
 
 ## What an app and a plugin are
 
 | Kind | What it is | Runs | Phase 1 | Why |
 |---|---|---|---|---|
-| **Mini-app** | A static web app (HTML, JavaScript, CSS, WebAssembly). Alone, or in a chat with the same app on the contact's side: chess, a poll, a shared list, a whiteboard | In a sandbox on the person's device, talking to the client only through the broker | **Yes** | It needs no key, no wallet and no engine object; the browser's sandbox can hold it; and it is the story people want (play in a chat) |
-| **Theme** | Colours and the app's design tokens as data. No code | Read by the client, applied by its own code | **Yes** | Data only: no code runs, so nothing to sandbox. A first package that cannot hurt anyone tests the whole path |
-| **Bot** | A program for the headless CLI ([11xx](11xx-headless.md)) that is a contact in chats | As a process on the publisher's or the person's server | No: phase 3 | Native code needs an operating-system sandbox, which the CLI does not have |
-| **Adapter plugin** | A wallet source or an identity proof built with the SDK | In the engine, with every key | No: research | It has the app's privileges ([evidence](#what-exists-today-evidence)). Stays a build-time choice until a permissioned plugin host exists |
-| **Transport** | A new way to connect | In the engine | Never a store item | A transport is a WISP and an app change ([SDK.md](../SDK.md#transports-and-a-minimal-client)) |
+| **Mini-app** | A static web app in one self-contained HTML file (scripts, styles, images and WebAssembly inline). Alone, or in a chat with the same app on the contact's side | In the runner's sandbox, talking to the client only through the broker | **Yes** | It needs no key, no wallet and no engine object, and the browser's sandbox can hold it, with the fixes below |
+| **Theme** | Colours and design tokens as data | Read by the client | No: phase 2 | Publishing themes is a public promise about the app's design tokens, which still change. When it comes, a theme is typed values only (colours, sizes), never raw CSS, since a CSS `url()` would reach the hosts in the main page's `img-src` |
+| **Bot** | A program for the headless CLI ([11xx](11xx-headless.md)) | As a process on a server | No: phase 3 | Native code needs an operating-system sandbox |
+| **Adapter plugin** | A wallet source or an identity proof built with the SDK | In the engine, with every key | No: research | It has the app's privileges. Stays a build-time choice until a permissioned plugin host exists |
+| **Transport** | A new way to connect | In the engine | Never a store item | A transport is a WISP and an app change |
 
-So **phase 1 carries mini-apps and themes**. "Plugin" in this document means an adapter plugin; the owner's "apps and plugins" become, in phase 1, apps that need no plugin host. The word stays in the family's name because adapter plugins join the same package and catalog format once they can run safely.
+So **phase 1 carries mini-apps**. "Plugin" in this document means an adapter plugin; the word stays in the family's name because adapter plugins join the same package and store format once they can run safely.
+
+### Games
+
+Games are among the first apps the owner wants. The design rules none out; each kind needs this:
+
+| Kind | Examples | Needs | Phase |
+|---|---|---|---|
+| Turn-based, open | Chess, checkers, go | `apps/1` in a 1:1 chat, as written ([In a chat](#in-a-chat-apps1)) | **1** |
+| Turn-based, hidden information | Battleship, card games | The same, plus **commit-reveal** in the app: each side sends the SHA-256 of its secret state with a random 32-byte salt first, and reveals state and salt only when the rules say, so the other side checks the reveal against the commitment. Neither side can read or change the other's hidden state unseen. The template ships a helper; the client enforces nothing here | **1** |
+| Light real-time, versus | Tetris versus (cleared lines sent to the opponent), Snake versus | Ordered `apps/1` as it is: each side runs its own game and sends little (a few events a second, well under the 50 a second limit) and tolerates tens of milliseconds. Tetris versus keeps two separate boards and sends only garbage lines and a periodic score. Snake on one shared board runs in lockstep with a short input delay, and is smooth when the chat link is direct and laggy on a relay; the app measures the round trip itself with its own ping frames | **1**: these can be the first real-time apps, before the unordered mode exists |
+| Real-time | Pong, Tron, a Quake-like | WebAssembly (`'wasm-unsafe-eval'` is in the runner's CSP on every client from phase 1); bundles up to 64 MiB, sent as files rather than in a card; an unordered, droppable message mode on `apps/1` over the live WebRTC data channel (never the DHT text floor), with higher receiver limits granted by the `realtime` permission shown at install | **2**: the unordered mode is new transport work (today's chat data channel is ordered and reliable, and the native transports are streams), so it is not cheap in phase 1 |
+| Group games | Party games, a shared board for many | Group frames, after `apps/1` in groups | Later, with groups |
 
 ## The package
 
-### Files and limits
+### The bundle, the one published unit
 
-A package is a folder:
+A package is published as **one file**, the bundle. The same file is what a store points at, what a contact sends in a chat and what a mirror keeps.
 
-```
-ghostly-app.json        the manifest (signed)
-ghostly-app.sig         the publisher's signature over the manifest's digest
-index.html              the entry (a mini-app); a theme has none
-...                     every other file the manifest lists
-```
+Bytes: `GHOSTLYAPP1`, then the canonical manifest, then the signature statement, each preceded by its length (32-bit, big-endian), then every file's bytes in the order of the manifest's `files`. The sizes in the manifest delimit the files; there is no archive format to parse and no path the manifest did not name. **A bundle with any byte past the last file is refused**, as is one that ends early.
 
-| Bound | Phase 1 |
-|---|---|
-| Files | At most 256 |
-| Whole package | At most 16 MiB (under jsDelivr's 20 MB per file, and well over what a chat takes without asking: 25 MiB) |
-| Manifest | At most 64 KiB |
-| Paths | Relative, `/`-separated, `[A-Za-z0-9._-]` per segment, no `.` or `..` segment, no leading `/`, at most 128 bytes; no two paths equal ignoring case |
-| Icon | `icon.png`, square, at most 256 KiB |
+| Bound | Phase 1 | Phase 2 (games) |
+|---|---|---|
+| Whole bundle | 16 MiB (under jsDelivr's 20 MB per file and the 25 MiB a chat takes without asking) | 64 MiB, with the `realtime` kind of app; fetched from raw GitHub (jsDelivr does not serve it) or sent as a file with consent |
+| Files | At most 64: the entry, `icon.png`, up to 8 screenshots, and data files the app reads through the broker | The same |
+| Manifest | At most 64 KiB | The same |
+| Paths | Relative, `/`-separated, `[A-Za-z0-9._-]` per segment, no `.` or `..`, at most 128 bytes; no two equal ignoring case | The same |
+| Icon | `icon.png`, square, at most 256 KiB | The same |
 
-A client refuses a package that breaks any bound, before it shows anything but the refusal.
+A client refuses a bundle that breaks any bound before it shows anything but the refusal.
+
+**The entry is one self-contained HTML file.** Relative imports and relative URLs do not work inside the sandbox (measured), so the SDK's template builds the app single-file: scripts and styles inline, images and WebAssembly as `data:` URLs or read from the bundle through the broker (`ghostly.file(path)`). Other files in the bundle are data, never loaded by URL.
 
 ### Manifest
 
-`ghostly-app.json`, UTF-8 JSON. Exact keys; an unknown key at the top level is refused, so a later version must raise `ghostlyApp`.
+UTF-8 JSON. Exact keys; an unknown key is refused, so a later version raises `ghostlyApp`. **The manifest's bytes in the bundle must be exactly its canonical form** ([RFC 8785](https://www.rfc-editor.org/rfc/rfc8785), JCS): a client recomputes it and refuses a mismatch, so two parsers (JavaScript, Rust) can never read different values from one manifest, for example from a duplicated key.
 
 | Field | Required | Meaning |
 |---|---|---|
 | `ghostlyApp` | Yes | Format version: `1` |
-| `publisher` | Yes | The publisher key: Ed25519, 32 bytes, z-base32 (as a Pkarr key) |
-| `name` | Yes | `^[a-z][a-z0-9-]{0,31}$`, unique per publisher. With `publisher`, the app reference |
+| `publisher` | Yes | The publisher key: Ed25519, 32 bytes, z-base32 |
+| `name` | Yes | `^[a-z][a-z0-9-]{0,31}$`, unique per publisher |
 | `version` | Yes | Semantic version, shown to people |
-| `sequence` | Yes | An integer that rises with every version. Rollback protection compares it, never `version` |
-| `kind` | Yes | `mini-app` or `theme` in phase 1 |
-| `title`, `tagline`, `description` | Yes, yes, no | What people read: 40, 80 and 2000 characters at most |
-| `entry` | For a mini-app | The entry file, usually `index.html` |
-| `permissions` | Yes, may be empty | What the app asks for ([Permissions](#permissions)) |
-| `runtime` | Yes | `{"host": ">=1.2", "clients": ["web", "extension", "desktop"]}`: the lowest Ghostly version, and the clients it was tested on |
+| `sequence` | Yes | An integer that rises with every version. Rollback protection compares it, never `version`. The CLI raises it by itself |
+| `kind` | Yes | `mini-app` in phase 1 |
+| `title`, `tagline`, `description` | Yes, yes, no | 40, 80 and 2000 characters at most |
+| `entry` | Yes | The entry file, usually `index.html` |
+| `permissions` | Yes, may be empty | [Permissions](#permissions) |
+| `runtime` | Yes | `{"host": ">=1.2", "clients": ["web", "extension", "desktop"]}` |
 | `license` | Yes | An SPDX expression, or `proprietary` |
-| `sources` | No | Where to look for updates: Git repository URLs and HTTPS base URLs, in order. Without it the app gets updates only when someone hands it a newer version |
-| `homepage`, `support` | No | HTTPS URLs |
-| `price` | No | Phase 2 ([Paying](#paying)). Absent means free |
-| `recovery` | No | A second Ed25519 key, kept offline, that may rotate or revoke ([Keys](#publisher-keys-rotation-and-revocation)) |
-| `files` | Yes | Every file but the manifest and the signature: `{"path", "size", "sha256"}`, sorted by path, SHA-256 in base64url |
+| `sources` | No | HTTPS URLs where newer bundles of this app are published, in order (for GitHub, the `raw.githubusercontent.com/<owner>/<repo>/HEAD/app.ghostlyapp` URL) |
+| `proofs` | No | Public proofs linking the publisher key to an identity people know ([Publisher identity](#publisher-identity)) |
+| `homepage`, `support`, `releaseNotes` | No | Two HTTPS URLs and 500 characters |
+| `files` | Yes | Every file: `{"path", "size", "sha256"}`, sorted by path, SHA-256 in base64url |
 
-### Canonical bytes, digest and signature
+Reserved and refused in phase 1: `price` (phase 2) and `recovery` ([Keys](#publisher-keys-no-rotation-in-phase-1)).
 
-- The **canonical manifest** is the manifest serialized by the JSON Canonicalization Scheme ([RFC 8785](https://www.rfc-editor.org/rfc/rfc8785)).
-- The **digest** is the SHA-256 of those bytes.
-- `ghostly-app.sig` is `{"alg": "ed25519", "key": "<publisher key>", "sig": "<base64url>"}`, where `sig` signs the bytes `ghostly-app/1` + a zero byte + the 32-byte digest. The prefix keeps a package signature from being reused as any other signature made by the same key.
-- A package is **valid** when the manifest holds every bound, the signature verifies under `publisher` (or a key the client accepted by rotation), and every file's bytes match its size and hash. A client checks all of it before it stores a package, and checks the files again before it runs one.
+### Signatures: one rule for every statement
 
-Before this draft becomes Proposed, these bytes get test vectors.
+Every signed object in this document is signed the same way: Ed25519 over the bytes `<prefix>` + a zero byte + the SHA-256 of the object's canonical JSON. The prefix says what the object is, so no signature can be replayed as another kind:
 
-### The bundle: a package as one file
+| Object | Prefix | Signed by | Phase |
+|---|---|---|---|
+| Package manifest | `ghostly-app/1` | Publisher | 1 |
+| Store index | `ghostly-store/1` | Store key | 1 |
+| Revocation | `ghostly-revoke/1` | Publisher | 1 |
+| Publisher proof statement | `ghostly-publisher/1` | Publisher | 1 |
+| Report | `ghostly-report/1` | Reporter | 2 |
+| Review | `ghostly-review/1` | Reviewer | 2 |
+| Licence | `ghostly-licence/1` | Publisher | 2 |
+| Key rotation, recovery key | `ghostly-rotate/1`, `ghostly-recovery/1` | Publisher, recovery key | Reserved |
 
-To send a package in a chat, or to mirror it, the package is one file, a **bundle** (`.ghostlyapp`): the bytes `GHOSTLYAPP1`, then the canonical manifest and the signature file, each preceded by its length (32-bit, big-endian), then every file's bytes in the order of `files`. The sizes in the manifest delimit the files, so there is no archive format to parse and no path inside the bundle that the manifest did not name. A reader stops at the first byte past what the manifest declares.
+The signature statement in a bundle is `{"alg": "ed25519", "key": "<publisher key>", "sig": "<base64url>"}`. A package is **valid** when the manifest is canonical and holds every bound, the signature verifies under `publisher`, and every file matches its size and hash. A client checks all of it before it stores a bundle, and the files again before it runs one. Test vectors come before this draft is Proposed.
 
-### Publisher keys, rotation and revocation
+### Publisher identity
 
-- A publisher key is **not a profile key**. The CLI makes and keeps it (`ghostly app key`, phase 1), so a developer's chat profile never signs packages, and a package signing key never sits in a browser.
-- A publisher may link the key to identities people know, with public proofs: a `ghostly-publisher.json` in the repository holding proofs of [300](300-peer-proofs.md)'s kinds that work in public (a domain, a Nostr key, an SSH key GitHub publishes, a DID). A card then shows "Published by 7f3k…q9a · github.com/ana" only for what verifies. A repository's URL alone proves nothing about the key.
-- **Rotation:** a statement `{"rotate": "<new key>", "app": "<name>", "sequence": n}` signed by the old key, or by the `recovery` key, moves the app to the new key from that sequence on. The client keeps the chain.
-- **Revocation:** a statement signed by the publisher key or the recovery key, naming digests or "every version up to sequence n". A client that sees it stops those versions and tells the person.
-- **A compromised key without a recovery key** cannot be fixed inside the format. The publisher starts a new app under a new key, and catalogs and indexers say so. This is the price of not running a root of trust; [Updates](#updates-and-rollback) says what TUF would add.
+- A publisher key is **not a profile key**. The CLI makes and keeps it ([Publishing](#publishing-the-publisher-cli)), so a developer's chat profile never signs packages and a signing key never sits in a browser.
+- `proofs` holds public proofs of [300](300-peer-proofs.md)'s kinds that work for anyone: in phase 1 the **GitHub SSH proof** (a `ghostly-publisher/1` statement signed with an SSH key GitHub publishes for the account, checked against `api.github.com/users/<login>/keys` as the existing proof does), and a domain proof. The CLI writes the GitHub one.
+- **What people see, in this order:** the verified proof ("github.com/ana ✓"), then the publisher fingerprint: the first 16 z-base32 characters of the key (80 bits), in four groups (`7f3k q9ax 81mz c4tp`). With no proof that verifies and no store of the person's listing the app, the card says **"Unknown publisher"** instead of any "Signed" badge: anyone can sign with a throwaway key, so a signature alone says nothing to a person.
+- A repository's URL alone proves nothing about the key.
+
+### Publisher keys: no rotation in phase 1
+
+Phase 1 has **one key per app and no rotation or recovery**. If a publisher key is lost or stolen, the publisher signs a revocation if it still can, starts a new app under a new key, and stores say so. Rotation is reserved (`recovery` and the `ghostly-rotate/1` and `ghostly-recovery/1` prefixes) for phase 2.
+
+Why not the recovery key now: in the first draft it sat in the manifest, which the publisher key signs, so a thief of that key could name a recovery key of its own. The fix, a recovery key pinned at first install and changed only by a statement the current recovery key signs, is right, and phase 2 adopts exactly that. But it adds a key people must keep offline, a chain to verify and a screen to explain, before any publisher has a key worth recovering. One key per app is easier to get right first.
+
+**Revocation** (phase 1): a `ghostly-revoke/1` statement naming digests, or every version up to a `sequence`. A client that sees it, from any source, stops those versions with no "Run anyway".
 
 ### Updates and rollback
 
-A client stores, per installed app, the publisher key (and its rotation chain), the highest `sequence` it has seen and the digest of that version.
+A client stores, per installed app, the publisher key, the highest `sequence` it has seen and the digest of that version.
 
-- **An update is any valid package of the same app with a higher `sequence`.** Where it came from does not matter: the publisher's Git repository, a catalog, an indexer, a contact. The bytes are checked, not the messenger.
-- **Rollback:** a package with a lower `sequence` is never installed over a higher one. The same `sequence` with a different digest is **equivocation**: the client refuses both, keeps what it runs, and marks the app for the person ("Two different versions 7 exist. Ghostly kept the one you have.").
-- **Where the client looks:** the manifest's `sources`, then the catalogs and indexers the person added. It never asks the contact who sent the app.
-- **When:** at start and every 24 hours, and when the person opens the Apps page. Never in the background on a metered connection, where the client can tell.
-- **Freeze** (every source serves an old version): partly covered. A catalog's index expires ([Catalogs](#catalogs-git-repositories)), so a frozen catalog is noticed; a frozen publisher repository is not, until phase 2's publisher record: a Pkarr record under the publisher key, republished by the publisher's CLI, naming each app's latest `sequence` and digest.
-- **Uninstall** removes the files and the app's storage after a confirmation that names what the app stored. **Export** of an app's storage is offered first, so a store or a publisher that disappears does not take a person's data.
+- **An update is any valid package of the same app with a higher `sequence`.** Where it came from does not matter. The bytes are checked, not the messenger.
+- **Rollback:** a lower `sequence` is never installed over a higher one. The same `sequence` with a different digest is **equivocation**: the client keeps what it runs, refuses the other and marks the app ("Two different versions 7 exist. Ghostly kept the one you have.").
+- **Where the client looks:** the manifest's `sources` and the person's stores. Never at the contact who sent the app.
+- **When:** only once at least one app is installed: at start and every 24 hours, and when the person opens the Apps page. A person with no app installed makes no request to any store or source, so the preloaded store does not see every client's address each day. Browsing the store list is a request the person makes.
+- **Freeze** (every source serves an old version) is partly covered: a store index expires, so a frozen store is noticed; a frozen publisher repository is not, until a phase 2 publisher record (a Pkarr record under the publisher key naming each app's latest `sequence`).
+- **Uninstall** removes the files and the app's storage after offering an export of that storage.
 
-**TUF, evaluated honestly:**
+**TUF, evaluated:**
 
-| TUF piece | What it gives | Fits Ghostly? | Taken here |
-|---|---|---|---|
-| Root role, threshold of keys | Survives a compromise of some keys | A single developer rarely holds several keys. The `recovery` key is a threshold of one, offline | The idea: an optional offline key that rotates and revokes |
-| Targets role | Which files, by hash | Yes | The manifest's `files` |
-| Snapshot role | Stops mix-and-match across many targets files | One package has one manifest; a catalog has one index | Not needed per package; the catalog index plays it |
-| Timestamp role, short expiry | Detects freeze | Needs an online key signing often, a server in effect | Catalog index expiry now; the publisher's Pkarr record in phase 2 |
-| Delegations | A repository delegates paths to developers | A catalog lists packages signed by their publishers: delegation by reference | The listing points to a publisher's signed package |
-| Its metadata format and client libraries | Interoperable, reviewed | Needs one repository authority; Ghostly has many publishers and many catalogs, none in charge | No. A smaller format of TUF's ideas, as F-Droid and Zapstore also chose |
-
-Revisit TUF when one catalog grows large enough to need delegated roles of its own, and a transparency log for publisher keys (as Sigstore's Rekor) when key compromise is seen in the wild. Both are research.
+| TUF piece | What it gives | Taken here |
+|---|---|---|
+| Root role, threshold of keys | Survives a compromise of some keys | Not in phase 1; phase 2's pinned recovery key is a threshold of one, offline |
+| Targets role | Which files, by hash | The manifest's `files` |
+| Snapshot role | Stops mix-and-match | One package has one manifest; a store has one index |
+| Timestamp role, short expiry | Detects freeze | Store index expiry; a publisher record in phase 2 |
+| Delegations | A repository delegates to developers | A store lists packages signed by their publishers |
+| Metadata format, client libraries | Interoperable, reviewed | No: it assumes one repository authority, and Ghostly has many publishers and stores. A smaller format of TUF's ideas, as F-Droid and Zapstore also chose |
 
 ### Permissions
 
-A mini-app gets nothing by default but its frame and the broker. Phase 1 has these permissions:
+A mini-app gets nothing by default but its frame and the broker. Phase 1:
 
 | Permission | What the app may do | Shown at install as |
 |---|---|---|
-| none | Draw in its frame; keep up to 5 MiB of its own data through the broker | "Uses no data from you" |
-| `chat` | Exchange messages with the same app on the contact's side, in the chat where the person opened it, while the chat is live ([In a chat](#in-a-chat-apps1)) | "Talks to the same app on your contact's side" |
-| `name` | Read the person's display name in that chat | "Sees your name in the chat" |
+| none | Draw in its frame; keep up to 5 MiB of its own data, **separately per chat** it is opened in, and separately when opened alone | "Keeps its own data on this device" |
+| `chat` | Exchange messages with the same app on the contact's side, in the chat where the person opened it, while the chat is live | "Talks to the same app on your contact's side" |
+| `name` | Read the person's display name in that chat | "Sees your name in this chat" |
 
-Later phases add, each with its own line: `network` (a list of HTTPS origins, which the runner adds to its CSP), `payment-request` (asks the client to show a payment the person approves; the app never sees a wallet, a balance or a key, as the [roadmap](ADAPTER-ROADMAP.md#plugins-apps-catalogs-and-ghostlyos) requires), `clipboard-write`, `camera`, `microphone`, `notify`.
+Storage is scoped per app and per chat so an app cannot carry data from one contact to another, or tie together the person's identities across chats.
 
-**What re-asks:** an update that adds a permission, adds a network origin or changes `kind` waits for the person, who sees only what is new. An update that removes something applies by itself. A rotation to a new publisher key shows "<app> has a new publisher key" with the rotation's signer, once. A theme has no permissions.
+**Every install screen also says**, whatever the permissions: "No internet access. The publisher may still learn your IP address and when you open it." The sandbox closes every channel the review found, but DNS prefetch and WebKit are not measured, and a contact in a `chat` app always learns when the app is used.
 
-**What never happens:** an app that runs before the person pressed Install; a permission granted by a catalog, an indexer or a contact; a permission granted for all apps at once.
+Later phases add, each with its own line: `network` (an exact list of HTTPS origins, shown at install and re-asked when one is added: the owner's answer), `realtime` (the unordered message mode and higher limits, for games), `cards` (read the task and routine cards the contact sent in this chat, for a bot's own app), `payment-request` (the client shows a payment the person approves; the app never sees a wallet), `clipboard-write`, `camera`, `microphone`, `notify`.
+
+**What re-asks:** an update that adds a permission waits for the person, who sees only what is new; one that removes a permission applies by itself. **What never happens:** an app that runs before the person pressed Install; a permission granted by a store or a contact; a permission granted for all apps at once.
 
 ## Where it runs
 
-### The runner, the same on every client
+### The runner and the broker
 
-The runner is a small page shipped inside the client (never fetched). It runs **in a sandbox with an opaque origin**: no cookies, no `localStorage`, no access to the client's pages. The client sends it the verified files with `postMessage` (as transferable buffers). The runner makes `blob:` URLs of them itself, writes an import map from the package's paths to those URLs, and then writes the entry document. Inline scripts, modules imported by relative path, styles, images, fonts, media and WebAssembly work. Fetching a package path with `fetch`, workers loaded by path and service workers do not: the app asks the broker (`ghostly.file(path)`) instead. The SDK's mini-app template builds within these rules.
+The runner is a small page **shipped inside the client**, never fetched. One runner hosts one app instance: two apps open at once are two runners.
 
-The runner's CSP, sent as a header where the client can (so the `sandbox` directive holds too):
+**Starting an app:**
+
+1. The client verifies the bundle and creates the frame (web, extension) or window (Desktop).
+2. The runner checks that it is where it should be, and refuses to start otherwise: its origin is `"null"` and it has a parent (web, extension), or its window label starts with `app-` (Desktop).
+3. The runner **deletes `RTCPeerConnection`, `webkitRTCPeerConnection`, `RTCDataChannel`, `RTCRtpSender`, `RTCRtpReceiver`, `RTCIceCandidate` and `RTCSessionDescription`** from its global object. This closes the WebRTC leak the review measured; no fresh copy comes back through a nested frame, and nested frames are refused by `frame-src 'none'` anyway.
+4. On the web and in the extension, the parent sends **one `MessageChannel` port** to the frame, once, after its first `load`. The broker answers only on that port, never with `postMessage(…, "*")`. If the frame navigates, the port dies with the old document.
+5. The runner writes the entry document into itself (`document.open`, `document.write`). From that moment **the runner is no longer a boundary**: the app runs in the same realm and can reach anything the runner left there. Every check belongs in the parent's broker.
+6. **A second `load` of the frame tears the app down**: the parent closes the port, removes the frame and shows "<app> stopped". A frame that loads twice has navigated.
+
+**The broker** identifies an app by its port (web, extension) or its window label (Desktop), never by origin, which is `"null"` for every sandboxed frame, and never by anything the app says. It answers only what the permissions allow, and bounds every request: at most 64 KiB per message and 50 messages a second per app.
+
+**The runner's CSP**, sent as an HTTP header where the client can, so the `sandbox` directive holds even if the page is opened directly:
 
 ```
-sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline' blob: 'wasm-unsafe-eval';
-style-src 'unsafe-inline' blob:; img-src blob: data:; media-src blob: data:; font-src blob: data:;
-connect-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'
+sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline' 'wasm-unsafe-eval';
+style-src 'unsafe-inline'; img-src data: blob:; media-src data: blob:; font-src data:;
+connect-src 'none'; frame-src 'none'; worker-src 'none'; form-action 'none'; base-uri 'none';
+frame-ancestors 'self'
 ```
 
-`connect-src 'none'`: in phase 1 a mini-app reaches no network at all. Everything goes through the broker, which answers only what the granted permissions allow, with bounded sizes and rates (at most 64 KiB per message, 50 messages a second).
+The runner's own script is inline, so `'unsafe-inline'` covers it and the app's inline scripts alike (a hash would turn `'unsafe-inline'` off). `'wasm-unsafe-eval'` lets games compile WebAssembly on every client. The runner's location must **not** carry the main page's policy: two policies intersect, and the main `script-src 'self'` would block the runner's inline code.
 
 ### Per client
 
-| Client | Today | Phase 1 | Limits |
-|---|---|---|---|
-| **Web** (and the installed web app on phones) | No frames, no packages. `default-src 'self'` already allows a frame of the app's own origin | An `<iframe sandbox="allow-scripts">` of `/app-frame.html` from the app's own server, in the chat or full screen. Its own CSP header (above), set by a location of its own in `apps/web/nginx-headers.conf`; the main page's CSP does not change. Packages are fetched from `raw.githubusercontent.com` (CORS allowed), jsDelivr or an indexer's copy, never from release assets (no CORS) | The frame shares the browser process with the app (no process isolation is assumed). A self-hoster whose server cannot set a second header gets no mini-apps: the client checks the frame's policy before it loads one |
-| **Extension** | MV3, no sandbox pages | A **sandbox page** (`sandbox.pages` in the manifest) as the runner, framed in the chat. Its CSP is the manifest's `content_security_policy.sandbox`: the line above, which keeps `sandbox` and never adds `allow-same-origin`. Remote code in a sandboxed page is exempt from the store's remote-code rule ([sources](#what-the-outside-world-allows-sources)) | The store's reviewers judge the listing, so the listing must say that apps the person installs run sandboxed. [BROWSER.md](../BROWSER.md#opening-a-contacts-app) rejected a sandbox page for shared apps because their pages need a service worker; a package does not, since the runner holds every file. To confirm by a spike before the piece is built: that Chrome takes `blob:` and `'wasm-unsafe-eval'` in a sandbox page's `script-src` (the documented default lists `'self' 'unsafe-inline' 'unsafe-eval'`) |
-| **Desktop** | `ghostly-svc` windows for shared apps, refused every command | A **window of its own** per running app, served by a new scheme `ghostly-app` (`ghostly-app://localhost/` on macOS and Linux, `http://ghostly-app.localhost/` on Windows) whose handler serves the runner and its CSP header. `only_main` refuses its commands, as for `ghostly-svc` | Not a frame in the main window in phase 1: on Linux Tauri cannot tell a frame's requests from its window's ([sources](#what-the-outside-world-allows-sources)), and `only_main` checks the window, not the frame. A frame in the chat on Desktop waits for a test that shows no command answers it |
-| **CLI** | No UI | Publisher tools only: `ghostly app key`, `init`, `sign`, `verify`, `bundle` | No mini-apps and no themes run there |
-
-**Themes** are read by the client as data on every client with a UI; a theme's values are checked against the app's token list and colour contrast rules before they apply.
+| Client | Phase 1 | Limits |
+|---|---|---|
+| **Web** (and the installed web app on phones) | An `<iframe sandbox="allow-scripts">` of `/app-frame.html` from the app's own server, in the chat or full screen. Its own nginx location, which does not include `nginx-headers.conf`, sends the runner CSP above with `frame-ancestors 'self'` (every other location keeps `frame-ancestors 'none'`). The service worker already passes the path to the network. The main page's CSP gains an explicit `frame-src 'self'` | Same browser process as the app (no process isolation is assumed). A self-hosted server that cannot send the header gets no apps: the client fetches `/app-frame.html` once and starts no app when the header is missing |
+| **Extension** | A **sandbox page** (`sandbox.pages`) as the runner, framed in the chat, with the runner CSP as `content_security_policy.sandbox` (keeps `sandbox`, no `allow-same-origin`; loading measured). `extension_pages` gains `frame-src 'self'`, which closed the self-navigation leak in the review | Built in phase 1. If the Chrome Web Store objects (a second purpose next to chat, the extension's existing `debugger` permission), the extension ships without apps, and web and Desktop keep them: the owner's decision |
+| **Desktop** | A **window of its own** per app instance, label `app-<random>`, on a new scheme `ghostly-app` whose handler serves the runner with its CSP header (Tauri's configured CSP is not injected into custom-scheme responses). One command, **`app_broker`**, is allowed only for `app-*` labels, in a capability of its own; `only_main` refuses every other command there. The app's identity comes from a label-to-state map kept in Rust, as `viewer.rs` does for shared apps, never from the message. `on_navigation` blocks every navigation away from the runner. New windows are **denied without opening the system browser** (the shared-app viewer opens it; for an app that would be a way to send data out) | Not a frame in the main window: Tauri's bridge is in every frame, and on Linux Tauri cannot tell a frame's requests from its window's. WebKit's handling of the `sandbox` header from a custom scheme is to be measured |
+| **CLI** | Publisher tools only ([Publishing](#publishing-the-publisher-cli)) | No apps run there |
 
 ### In a chat: `apps/1`
 
 A mini-app with the `chat` permission can talk to the same app on the contact's side.
 
-- `apps/1` is a session capability ([03](03-capabilities.md)) of the live chat session ([401](401-paired-chat.md)). Frames: `{"t": "app", "a": "<chat app id>", "d": "<data>"}`, `d` at most 64 KiB, dropped unless both sides offer `apps/1`.
-- `<chat app id>` is HMAC-SHA-256 of the app reference, keyed with a key derived (HKDF-SHA-256, info `ghostly-apps/1`) from the chat's invite secret, the shared key both sides hold since the invite ([800](800-invite-join.md#baseline-and-purpose)), cut to 16 bytes. Both sides compute the same id; nobody outside the chat learns which app it is.
-- **Nothing is advertised.** A client never lists its installed apps to a contact (unlike `hello.svc` for shared apps). The reference crosses only when the person opens an app in a chat: the client then sends an app card ("Ana opened Chess") with the package's pointer, and the contact installs or opens it.
-- Two different versions talk if the app says so: the broker hands both sides each other's `version`; the app decides.
-- Not on the DHT text path, not in groups in phase 1. Groups come with phase 2, over the group's own frames.
+- `apps/1` is a session capability ([03](03-capabilities.md)) of the live chat session ([401](401-paired-chat.md)). Frames: `{"t": "app", "a": "<chat app id>", "d": "<data>"}`.
+- `<chat app id>` is HMAC-SHA-256 of the app reference, keyed with a key derived (HKDF-SHA-256, info `ghostly-apps/1`) from the chat's invite secret, the shared key both sides hold since the invite ([800](800-invite-join.md#baseline-and-purpose)), cut to 16 bytes. Nobody outside the chat learns which app it is.
+- **The receiver enforces the limits**, since the sender's client may be the attacker: it drops a frame over 64 KiB, frames beyond 50 a second per app, frames for an app not open in that chat on its side, and every `app` frame unless both sides offer `apps/1`.
+- **Nothing is advertised.** A client never lists its installed apps to a contact. The reference crosses only when the person opens an app in a chat: the client sends an app card, "Ana opened Chess". **A contact who does not have the app** sees the card with "Install to play"; installing it opens the app in that chat.
+- Two versions talk if the app says so: the broker hands both sides each other's `version`.
+- Not on the DHT text path, not in groups in phase 1.
+
+### A bot on the other side, and the agent console
+
+The other side of `apps/1` can be a bot on the headless CLI ([11xx](11xx-headless.md)) instead of a person's app. The bot runs no app code: it speaks the app's messages.
+
+- **Declaring.** The bot lists the app references it serves (`ghostly app serve <ref>`, kept in the profile's settings). Its daemon then offers `apps/1` and computes the chat app ids for those references only.
+- **Receiving.** When the person opens the app in the chat with the bot, the daemon emits `app.opened {chat, app}`, then `app.message {chat, app, data}` for each frame, `data` being the app's JSON. For an agent ([AI-AGENTS.md](../AI-AGENTS.md)) it arrives as the contact's untrusted data, never as instructions.
+- **Replying.** `ghostly app send --chat <chat> --app <ref> '<json>'`, or the same call on the daemon's socket.
+- **Limits.** The daemon enforces the receiver's limits as an app does.
+- **Granting.** The person installs the app and grants its permissions as for any app; the card says "Opens with <bot>".
+
+**The agent console**, a surface for talking to AI agents and bots with their status, thinking indicators, buttons and task and routine cards ([4xx status cards](4xx-status-cards.md), [4xx message buttons](4xx-message-buttons.md)): **chosen as a built-in screen, not an app.** Its data is the chat itself (the cards, the messages, the Tasks board), and an app that reads a chat's content would need the broadest permission this design could grant to third-party code. The pieces it shows are already built in, and a built-in screen needs no store, no permission and no sandbox. It belongs to the Tasks board's work, not to this WISP. What this WISP adds for bots is the path above: a bot can ship **its own specialised app** (a dashboard for one agent, a form, a game master), and such an app may ask for a narrow `cards` permission (phase 2): read the task and routine cards that this contact sent in this chat, nothing else.
+
+Phases: the bot side of `apps/1` (`serve`, the events, `app send`) and the `cards` permission are phase 2. Phase 1 has person-to-person apps only.
 
 ## Discovery without a central server
 
-There are three ways to an app, and they are equal: a **catalog** someone curates, a **card** someone sends in a chat, and an **indexer** someone runs. A person can also paste the Git URL of a single app. Whatever the way, the package is checked the same.
+Three ways to an app, all equal and all checked the same way: **paste** a URL (in the Apps page or in a chat), browse a **store**, or install from a **card** someone sends in a chat.
 
-### Catalogs: Git repositories
+### Publishing: the publisher CLI
 
-The owner asked for Umbrel's model, where people install by pasting GitHub URLs. It holds up, with three changes: Ghostly verifies signatures and pins commits where Umbrel does neither, and the code is not in the catalog.
+A publisher needs four steps, about as many as Umbrel's template repository, two YAML files and a pull request:
 
-**Layout of a catalog repository:**
+1. `ghostly app init` makes a project from the SDK's template (single-file build, the broker's typings, the commit-reveal helper).
+2. Build it with the template's command.
+3. `ghostly app publish` makes the publisher key on first run (kept by the CLI, with a reminder to back it up), raises `sequence`, bundles, signs, writes the GitHub SSH proof into `proofs`, and writes **`app.ghostlyapp` at the repository root** (or on a `ghostly` branch). Committing the built bundle is required: a page cannot read GitHub release assets (no CORS).
+4. Optional: `ghostly catalog submit <store repository>` writes the listing and opens the pull request to a store.
+
+### Paste a URL
+
+The person pastes `https://github.com/<owner>/<repo>` (or a `/tree/<ref>` form) in the Apps page, or in a chat as a message. The client reads, **without `api.github.com`**:
+
+- `raw.githubusercontent.com/<owner>/<repo>/<ref or HEAD>/app.ghostlyapp`, an app, or
+- `raw.githubusercontent.com/<owner>/<repo>/<ref or HEAD>/ghostly-store.json`, a store,
+
+then shows the app's card or the store's summary, and installs or adds only when the person confirms. `HEAD` is fine because the signed digest, not the commit, pins the bytes: the client keeps the `sequence` it saw and treats what comes later by the update rule. Any other HTTPS URL that serves a bundle or a store index works the same way in the Apps page; Git hosts other than GitHub need nothing special beyond their raw file URLs.
+
+### Stores
+
+For people there is **one concept, "Stores"**: a list on the Apps page, the default one preloaded and removable, others added by paste or from a card. Each shows its name, its key's fingerprint, and whether it is curated or indexed.
+
+**The store index, `ghostly-store.json`**, signed (`ghostly-store/1`):
 
 ```
-ghostly-catalog.json            the index (signed)
-ghostly-catalog.sig             the curator's signature
-apps/<name>.<publisher-prefix>/
-  listing.json                  where the package is: source, pinned commit, path, digest
-  ghostly-app.json              a copy of the package's signed manifest
-  ghostly-app.sig
-  icon.png, gallery/*.png       what the Apps page shows
+{"ghostlyStore": 1, "key": "<store key>", "name", "description", "kind": "curated" | "indexed",
+ "sequence", "expires",
+ "apps": [{"ref", "sequence", "digest", "urls": [...], "title", "tagline", "category",
+           "developer", "submitter", "repo", "support"}],
+ "removed": [{"ref", "digest", "reason", "at"}]}
 ```
 
-`<publisher-prefix>` is the first 8 characters of the publisher key, so two publishers' "chess" never collide in one catalog.
+- `urls` point at the bundle: the publisher's raw URL, and a jsDelivr URL pinned to the commit the curator reviewed (immutable, and kept after a repository is deleted).
+- The listing fields are Umbrel's (`tagline`, `category`, `developer`, `submitter`, `repo`, `support`). The icon, the screenshots and the description come **from the bundle**, which the publisher signed, never from the store, so a store cannot dress an app in someone else's pictures.
+- `expires` is at most 90 days ahead; past it the store still installs, and the Apps page says "<store> was not updated since <date>". A lower `sequence` than the one held is refused.
+- A store's repository is a folder per app, as Umbrel's (`apps/<name>.<publisher prefix>/listing.json`), plus the signed `ghostly-store.json` built from them. The client reads only `ghostly-store.json`.
 
-**`ghostly-catalog.json`:** `{"ghostlyCatalog": 1, "curator": "<key>", "name", "description", "sequence", "expires", "apps": [{"ref", "digest", "sequence"}], "removed": [{"ref", "digest", "reason", "at"}]}`, signed like a manifest (prefix `ghostly-catalog/1`). `expires` is at most 90 days ahead; an index past its expiry still installs what it lists, but the Apps page says "<catalog> was not updated since <date>". A lower `sequence` than the one the client holds is refused (rollback).
+**Ghostly's default store** is one repository, curated by the maintainers. Apps enter by **pull request**; CI checks each submission (the bundle verifies, the bounds hold, the listing is well formed); **the owner signs `ghostly-store.json` with the store key, held offline**, in batches. A key held by CI would make a GitHub account takeover a store takeover. The **default index** is the same kind of signed static file in the same repository, built by a crawler script and signed the same way: the client reads it directly, and no service runs. Both are preloaded; either can be removed.
 
-**`listing.json`:** `{"source": "https://github.com/ana/chess", "commit": "<40 hex>", "path": "dist", "digest": "<base64url>", "mirrors": ["https://cdn.jsdelivr.net/gh/ana/chess@<commit>/dist"]}`, or `"bundle": "<path of a .ghostlyapp in this repository>"` for a catalog that keeps the bytes itself.
+**A custom store or index** is any HTTPS URL serving a signed `ghostly-store.json`: a Git repository, GitHub Pages, any static host. The crawler that builds the default index is in this repository (planned, `infra/services/indexer`), runnable by anyone as a script or a Docker image (an Umbrel package is a candidate). An indexer service with search, reviews and reports is phase 2 and optional.
 
-**Adding by paste.** Apps page, "Add from a link". The person pastes `https://github.com/<owner>/<repo>`, optionally `/tree/<branch, tag or commit>`. The client:
+**Several stores at once.** Results are merged by app reference, and each shows "in <store>". When stores disagree (versions, removals), the page shows both. A store lists and ranks; it cannot change what installs.
 
-1. resolves a branch or a tag to a commit with one `api.github.com` request (60 an hour per IP are free; a catalog's listings already name commits, so they cost none);
-2. reads `ghostly-catalog.json` or `ghostly-app.json` at that commit from `raw.githubusercontent.com`;
-3. shows the catalog (curator key, name, number of apps) or the app (its card), and adds or installs only when the person confirms.
+**Privacy.** The client downloads whole store indexes and searches locally; a store host sees the address and time of each index download, not what the person looks for. An index above 4 MiB compressed is refused in phase 1.
 
-**What pinning to a commit buys.** The listing names the exact commit the curator looked at. A force-push to a tag, a new commit on the default branch or a repository taken over by someone else cannot change what the listing installs: the bytes must hash to the digest. Git's own commit ids (SHA-1) are not what the client trusts; the SHA-256 digest in the signed manifest is. Pinning also makes the bytes immutable on jsDelivr, which keeps commit-pinned files even after the repository is deleted.
-
-**If GitHub takes a repository down, or is blocked:**
-
-| What | Effect |
-|---|---|
-| Installed apps | Keep working. The client runs its stored copy; nothing phones home |
-| Updates | Come from any other `sources` entry, any catalog's mirror or any indexer's copy, checked the same way. A publisher moves by adding a source in a new version |
-| New installs | From mirrors (jsDelivr by commit, any static host), an indexer's copy, or a bundle a contact sends. The digest makes every source equal |
-| A blocked country | The same paths, plus a bundle sent in a chat, which needs no web host at all |
-| Any Git host | Phase 2: GitLab, Codeberg, a self-hosted Forgejo, by their raw file URLs. Phase 1 is GitHub and plain HTTPS base URLs (a folder on any static host) |
+**Paid ranking**, for later: an entry may be marked `promoted`, shown "Promoted by <store>"; the merged list sorts by the client's own relevance, never by one store's order across others.
 
 **Umbrel and Ghostly, side by side:**
 
 | | Umbrel | Ghostly (this draft) |
 |---|---|---|
-| What is installed | Docker containers on a server the person owns | Static web files in a sandbox on each device; no server |
-| Where the app's code lives | In the store repository (compose file, images by digest) | In the publisher's repository; the catalog points to it by commit and digest |
-| How it is fetched | `git clone` on the server | HTTPS file reads from a browser (CORS decides), or from Rust on Desktop |
-| Signatures | None | Publisher signature on every package, curator signature on every catalog |
-| Pinning | None: the default branch's tip, polled every 5 minutes | Commit and digest per listing; `sequence` per package |
-| Community stores | Pasted Git URL, ids prefixed by store id | Pasted Git URL; ids bound to publisher keys, not to stores |
-| Default store | Cannot be removed | Preloaded, and can be removed like any other |
-| Warning on community stores | Yes | Apps are checked by publisher key whatever the catalog; the page names the catalog and the publisher every time |
+| What is installed | Docker containers on a server the person owns | One signed HTML app in a sandbox on each device; no server |
+| Where the code lives | In the store repository | In the publisher's repository, as one committed bundle; the store points to it |
+| How it is fetched | `git clone` on the server | One HTTPS read of the bundle (raw GitHub or jsDelivr, both CORS-readable) |
+| Signatures | None | Publisher signature on every package, store key on every index |
+| Pinning | The default branch's tip, polled every 5 minutes | `sequence` and digest per app; the jsDelivr URL pinned to a commit |
+| Adding | A store by Git URL | A store or a single app by URL, or an app from a chat |
+| Default store | Cannot be removed | Preloaded, removable |
+
+**If GitHub takes a repository down, or is blocked:** installed apps keep working (the client runs its stored copy, nothing phones home); updates come from any other `urls` or `sources` entry; new installs come from jsDelivr's commit-pinned copy, any other host, or a bundle a contact sends. The digest makes every source equal, and a chat needs no web host at all.
 
 ### Apps sent in a chat
 
-The owner wants people to send apps to each other, so installing never depends on one store. A chat is a source like any other.
+A chat is a source like any other, so installing never depends on one store.
 
-**Two forms:**
+**Two forms, one file:**
 
-- **A pointer card.** The person shares an app (Apps page, "Share", or pasting a Git URL that holds an app). The sender's client attaches a card to the message, as it attaches a sender-made link preview: `{"kind": "app", "ref", "title", "version", "sequence", "digest", "source", "commit", "path", "mirrors"}`, at most 8 KiB, in the message's `sc` field ([4xx status cards](4xx-status-cards.md)) with the URL as the text. An older app shows the link. It works on every text path, the DHT included, since the bytes are fetched later.
-- **A bundle.** The person sends the `.ghostlyapp` file itself with `files/3` ([501](501-paired-files.md)). The receiver's client recognizes the bundle by its first bytes and shows the same card on the file bubble. The files' consent rules hold: up to 25 MiB arrives by itself, and **arriving is not installing**.
+- **A pointer card.** The person shares an app (Apps page, "Share", or a pasted URL that holds an app). The sender's client attaches a card in the message's `sc` field ([4xx status cards](4xx-status-cards.md)), with the URL as the text: `{"kind": "app", "ref", "title", "version", "sequence", "digest", "url"}`. An older app shows the link.
+- **The bundle as a file**, with `files/3` ([501](501-paired-files.md)). The receiver's client recognizes the bundle by its first bytes and shows the same card on the file bubble. The files' consent rules hold: arriving is not installing.
 
-**What the receiver sees** on the card: icon, title and version; "Published by <publisher fingerprint>" with the publisher's proofs that verify; "Sent by <contact>"; the permissions, one line each; the digest's first characters; and one of "Signed", "In <catalog>", "Not in any of your catalogs", "Marked as malware by <source>". Buttons: "Install" (or "Open" when installed) and "Details".
+**The card is shown from its own data, and nothing is fetched to show it.** A pointer card's fields are the sender's, unsigned, so the card says so: title and version from the card, a generic icon, the publisher fingerprint from `ref`, and "Not checked yet". **The client fetches the bundle only when the person presses Install**, then checks it and shows the real install screen (icon, proof, permissions) before anything is stored. In phase 1 a card's `url` must be on `raw.githubusercontent.com` or `cdn.jsdelivr.net`; any other host is refused on a card (it still works pasted in the Apps page, where the person chose it). A bundle sent as a file is checked as soon as it arrives, since it is already on the device, and its card shows the checked data.
 
-**The sender is not the publisher.** A card or a bundle is carried, not vouched for. A forwarded signed package keeps its publisher's signature; a forwarder cannot change a byte without breaking it. The card says "Sent by Ana", never "Ana's app". To vouch, a person writes a review ([Reputation](#reputation)), which can itself be shared as a card.
+**After the check, the card and the install screen say:** "github.com/ana ✓" or "Unknown publisher", the fingerprint, "Sent by <contact>", the permissions, the IP line, and one of "In <store>", "Not in any of your stores" (installable: the owner's decision) or "Removed by <store>: <reason>" (not installable).
 
-**Updates** of an app received in a chat come from the manifest's `sources` and from the person's catalogs and indexers, never from the sender. A newer version that arrives later in any chat is taken as an update only if it is valid, of the same app and higher in `sequence`. An app with no `sources` says "Updates only when someone sends you a newer version".
+**When the card names a `sequence`** and the bundle fetched has a higher one of the same app, that is fine: it is newer. A lower one is refused.
 
-**What keeps a chat from becoming a malware channel:**
+**The sender is not the publisher.** A card or a bundle is carried, not vouched for, and says "Sent by Ana", never "Ana's app". A forwarder cannot change a byte without breaking the signature.
 
-- An unsigned package, or one whose signature or files do not verify, is refused: the card says "Not signed. Ghostly won't install it." There is no "install anyway". A developer signs test builds with a throwaway key from the CLI.
-- Nothing installs or runs from a card by itself. Install is a button on the receiver's side, then the permissions screen.
-- The same sandbox and the same broker as any app.
-- The revocation lists of the person's catalogs and indexers are checked before the install button is enabled, and again at every update check.
-- At most 3 cards per message, as for other cards.
+**Updates** of an app received in a chat come from its `sources` and the person's stores, never from the sender. A newer valid version that arrives later in any chat is taken as an update.
 
-**Catalogs and indexers are shareable the same way.** A catalog's URL in a message gets a catalog card ("Catalog · <name> · 24 apps · curated by <fingerprint>", "Add catalog"); an indexer's gets an indexer card ("Indexer · <name>", "Add indexer"). The sender's client makes the card by reading the URL, like a link preview; the receiver's client reads it again before adding anything.
+**What keeps a chat from becoming a malware channel:** unsigned or broken bundles are refused ("Not signed. Ghostly won't install it."), with no "install anyway" (developers sign test builds with a throwaway key); nothing installs or runs from a card by itself; the same sandbox and broker; removals and revocations checked before Install is enabled; at most 3 cards per message.
 
-This is what makes **the default catalog one source among many**: an app spreads from person to person, a catalog spreads the same way, and the client gives the default no power the others lack.
+**Stores are shareable the same way:** a store's URL in a message gets a store card ("Store · <name> · 24 apps", "Add store"), shown from the sender's data and read only when the person presses Add.
 
-### Indexers
-
-A **catalog** is a list someone curates and signs. An **indexer** is a service that reads many catalogs, Git hosts and submitted packages, and answers questions about them: search, ranking, versions, reviews, malware reports. A catalog says "I recommend these". An indexer says "Here is what exists, and what people say about it". One person can run both; the client keeps them apart.
-
-**The person chooses.** Apps page, "Indexers": the default one plus any URL, added by paste or from a card. Several at once. Results are merged by app reference, and every result shows where it came from: "via <indexer> · in <catalog>". When indexers disagree (versions, reports), the page shows both.
-
-**An indexer cannot change what is installed.** It hands back references and pointers. The package is verified by its publisher's signature and digest, as from anywhere. A lying indexer can hide an app, rank it, or show false reviews; it cannot swap code.
-
-**The API** is read-only HTTP and JSON, `Access-Control-Allow-Origin: *`, no cookies, no accounts:
-
-| Path | Answer | Required |
-|---|---|---|
-| `GET /ghostly-index.json` and `/ghostly-index.sig` | The whole index, signed by the indexer's key, with `sequence` and `expires`: per app its reference, title, tagline, kind, latest `sequence` and digest, pointers, the catalogs that list it, report counts, and `promoted` when someone paid for its place | Yes |
-| `GET /v1/search?q=` | Matching entries, same shape | No: only for an index too large to download |
-| `GET /v1/apps/<ref>` | Every known version, pointers, the indexer's notes | No |
-| `GET /v1/reviews/<ref>` | Signed reviews it collected | No |
-| `GET /v1/reports` | Signed malware reports it collected, and its own verdicts | No |
-| `GET /v1/bundles/<digest>` | A copy of a package's bundle, served by digest | No |
-| `POST /v1/submit` | A pointer or a bundle someone asks it to index, a review, a report | No |
-
-**An indexer can be just files.** The required part is two static files, so an indexer can live on GitHub Pages or any static host, and a script can build it. Phase 2 adds an optional Pkarr record under the indexer's key naming its current URL and `sequence`, so it can move host without its users noticing.
-
-**Privacy.** An indexer sees the IP address and the time of every request, and every search query. So the client **downloads the whole index and searches locally** while it is at most 4 MiB compressed, which covers thousands of apps. Search on the indexer's side is used only above that, and the page says so ("Searching on <indexer>: it sees what you type"). Installing from a pointer reveals nothing to an indexer: the bytes come from the source.
-
-**Paid ranking** is allowed and marked. An entry with `promoted` shows "Promoted by <indexer>" wherever it appears; the merged list sorts by the client's own relevance, never by one indexer's order across others' results. An indexer that hides `promoted` is lying, which only other indexers and reviews can expose.
-
-**Ghostly's default indexer** is open source, in this repository (`infra/services/indexer`, planned), with a Docker image like the web app's, so anyone can run one (an Umbrel package is a candidate, as for the self-hosted runtime). It indexes the catalogs it is configured with and what people submit. It does not crawl chats: it cannot, and must not. The maintainers run one instance at a URL the client preloads; the person can remove it. This is the roadmap's "Multiple indexers" row, made concrete.
+This is what makes **the default store one source among many**: apps and stores spread from person to person, and the client gives the default no power the others lack.
 
 ### Takedowns and malware reports, with no authority
 
-Nobody can remove an app from everyone's device, and nobody should. What exists instead:
+- **A store** removes an app with a `removed` entry and a reason.
+- **A publisher** revokes its own versions.
+- **The client** checks the stores the person added at every update check. When one marks an installed digest as removed for malware, the app is **stopped** and the person decides: "Remove", "Keep it stopped", or, behind "Details", "Run anyway". A publisher's revocation stops it with no "Run anyway".
+- **Reports** (phase 2) are signed (`ghostly-report/1`) statements sent to an indexer service; the client never sends one the person did not write.
 
-- **A curator** removes a listing and adds it to the index's `removed` list with a reason.
-- **An indexer** publishes its verdicts in `/v1/reports`.
-- **A publisher** revokes its own versions ([Keys](#publisher-keys-rotation-and-revocation)).
-- **The client** checks, at every update check, the lists of the sources the person added. When one marks a digest the person has installed as malware, the app is **stopped** and the person decides: "<source> marks <app> as malware: <reason>." Buttons: "Remove", "Keep it stopped", and, behind "Details", "Run anyway". A publisher's own revocation stops it with no "Run anyway".
-- **A report** is a signed statement `{"report": "<ref>", "digest", "category", "text", "reporter": "<key>"}` sent to an indexer ("Report" on the app's page). The client never sends one without the person writing it.
+A store the person did not add has no effect on their device.
 
-A source the person did not add has no effect on their device. Different catalogs can disagree, and the page shows the disagreement.
+## Paying (phase 2)
 
-## Paying
+The owner chose free apps only for now. This section keeps the design so the format leaves room for it.
 
-Phase 2. Nothing below runs in phase 1, which is free apps only.
+**Rails.** Chat payments ([200](200-payments.md)): Cashu first (every client, a test mint, the faucet button), then Lightning cards. Testnet first; every Mainnet purchase passes the `confirmedReal` gate.
 
-**Rails.** The chat payments that exist ([200](200-payments.md)): Cashu first, since it works on every client and has a test mint and a faucet button; Lightning through the person's Lightning card. Test networks first ("Testnet" in the app); Mainnet only after the soak the owner decides, and every Mainnet purchase passes the `confirmedReal` gate as any spend does.
+**A purchase.** `price` is `{"amount", "unit": "sat", "seller": "<HTTPS URL>"}`. The seller is a **sales bot**, the publisher's headless CLI ([11xx](11xx-headless.md)). A `ghostly1` code pairs exactly one chat ([800](800-invite-join.md#baseline-and-purpose)), so the `seller` URL answers each request with a fresh invite the bot made. "Buy" opens that chat; the bot sends a `pay-req`, the person pays in the sheet they know, and the bot answers with a licence and message buttons ([4xx](4xx-message-buttons.md)) for support or refunds.
 
-**How a purchase happens, with no server of Ghostly's.** A paid manifest's `price` is `{"amount": 2100, "unit": "sat", "seller": "<HTTPS URL>"}`. The seller is a **sales bot**: the publisher's headless CLI ([11xx](11xx-headless.md)), a contact like any other. A `ghostly1` code pairs exactly one chat ([800](800-invite-join.md#baseline-and-purpose): after the first pin another key is ignored), so a manifest cannot carry one code for every buyer. The `seller` URL instead answers each request with a fresh `ghostly1` invite the bot made for it (read-only, CORS, no cookies, as an indexer's paths). "Buy" fetches one and opens the chat; the bot sends a `pay-req`, the person pays it in the payment sheet they know, and the bot answers with a licence and, optionally, message buttons ([4xx](4xx-message-buttons.md)) for support or refunds. Everything rides on the chat that exists. The publisher must keep the bot reachable; a purchase made while it is away waits in the chat like any message.
+**The licence.** `{"ghostlyLicence": 1, "app", "holder", "versions", "issued", "payment"}`, signed `ghostly-licence/1`. The holder key is HKDF-SHA-256 with the DID seed as input, salt `ghostly-licence/1` and the publisher key as info: per profile (it follows backups and [06](06-devices.md) handoffs; a licence per device would break at every handoff) and per publisher (publishers cannot link one buyer's purchases). Limits, said plainly: a device removed under [06](06-devices.md) keeps the DID seed and so every licence key; and a review that showed "Bought it" would expose a holder key, so reviews never show it.
 
-**The licence.** `{"ghostlyLicence": 1, "app": "<ref>", "holder": "<licence key>", "versions": "<range>", "issued", "payment": "<hash of the pay frame>"}`, signed by the publisher key (prefix `ghostly-licence/1`). The holder key is **derived per profile and per publisher**: HKDF-SHA-256 of the profile's DID seed with the info `ghostly-licence/1` and the publisher key. So:
+**What a licence gates:** the honest client installs and updates a paid app only with a valid licence, checked offline. The files of a public bundle can still be copied. No DRM. Refunds are the publisher's policy, paid back in the same chat. Key loss: the licence is lost with the profile when there is no backup.
 
-- a publisher cannot link one buyer's purchases from other publishers;
-- the licence follows the profile into backups ([05](05-backups.md)) and across a handoff between the profile's devices ([06](06-devices.md)), because the seed does;
-- it is **per profile, not per device**: with [06](06-devices.md) one device is active at a time, so a licence per device would break at every handoff.
+**Every derivation from the DID seed,** kept in one list so labels never collide:
 
-**What a licence gates, honestly.** The client installs and updates a paid app only with a valid licence, checked offline against the publisher key. That is all. The files of a paid app published in a public repository can be copied and run in a modified client. A publisher who wants more can keep the paid files out of public sources and have the bot deliver them, encrypted to the holder key; once decrypted they can still be copied. Ghostly promises no DRM.
+| Key | Derivation | Where |
+|---|---|---|
+| DID key | The seed itself, as an Ed25519 seed | [3xx did:dht](3xx-did-dht.md), `packages/browser/src/engine/did.ts` |
+| First device-set secret `D0` | HKDF-SHA-256, salt `ghostly-devices/1`, info `device-set` | [06](06-devices.md#terms) |
+| Licence holder key | HKDF-SHA-256, salt `ghostly-licence/1`, info = publisher key | This WISP, phase 2 |
+| Reviewer key | HKDF-SHA-256, salt `ghostly-review/1`, info `reviewer` | This WISP, phase 2 |
 
-**Offline:** a licence is checked locally; nothing phones home. **Refunds:** the publisher's policy, shown on the listing; a refund is a payment back in the same chat. A publisher may revoke a licence for future updates; the installed version keeps running. **Key loss:** the licence is lost with the profile when there is no backup. The publisher may reissue to a new holder key on whatever proof they accept; the chat with the bot is that proof's natural place. **Payment fraud:** a publisher that takes the money and sends no licence cannot be undone by Ghostly. Small amounts, Testnet first, and reviews are the protection, and the buy screen says it: "Paid to <publisher>. Ghostly can't refund it."
+A new derivation adds a row here, or to the WISP that owns it with a link here.
 
-## Reputation
+## Reputation (phase 2)
 
-- **A review** is `{"ghostlyReview": 1, "app": "<ref>", "digest", "rating": 1-5, "text" (2000 characters), "at", "reviewer": "<key>"}`, signed. The reviewer key is derived per profile (info `ghostly-review/1`): a pseudonym that is the same across the person's reviews, so a reader can weigh a history, and that the person may link to an identity with a proof, or not.
-- **Who reviews:** anyone. Indexers collect reviews; a person can also share a review in a chat as a card.
-- **What the client shows**, in order: reviews from the person's contacts (a review card received in a chat is shown as that contact's); then each indexer's reviews, labelled by indexer, with counts per indexer. It never adds counts from different indexers into one number.
-- **Sybil resistance:** the client computes no global score. It does not count followers, and it does not weigh reviews by payment: "Bought it" may be shown as a fact on a review whose reviewer holds a licence, never used as weight. An indexer may filter spam as it likes, and says how in its own page.
-- **Conflicts are shown**: "In <catalog> · <indexer> has 3 malware reports".
+- **A review** is `{"ghostlyReview": 1, "app", "digest", "rating": 1-5, "text" (2000 characters), "at", "reviewer"}`, signed `ghostly-review/1` by the reviewer key: one pseudonym per profile, the same across the person's reviews.
+- Indexer services collect reviews; a person can share one in a chat as a card.
+- **The client shows** reviews from the person's contacts first (a review card received in a chat is that contact's), then each indexer's, labelled, with counts per indexer, never added into one number.
+- **Sybil resistance:** no global score, no follower counts, no weight for payment, and no "Bought it" mark (it would link licence keys across publishers).
+- **Conflicts are shown:** "In <store> · removed by <other store>".
 
 ## Security and privacy
 
@@ -430,103 +465,105 @@ Phase 2. Nothing below runs in phase 1, which is free apps only.
 
 | Threat | What limits it | What remains |
 |---|---|---|
-| A malicious app | The sandbox (opaque origin, no network, no extension APIs, no Desktop commands), the broker's permissions and bounds, Install pressed by the person | A sandbox escape in the browser or webview. Phishing inside the frame (a fake "enter your seed" form): the runner frames apps in a visibly different container, and the client never asks for secrets inside an app's area |
-| A malicious update | Signature by the same key, `sequence` rising, new permissions re-asked, revocation lists checked | An update that misbehaves within permissions already granted |
-| A compromised publisher key | Rotation and revocation by the `recovery` key when there is one; catalogs and indexers mark the app | Without a recovery key: every holder of the app trusts the attacker's next version until a source the person added says otherwise |
-| A malicious catalog | It can list only packages that verify under their own publishers' keys; listings show their catalog | It can list harmful apps signed by harmful publishers; curation is its whole value |
-| A malicious or lying indexer | It cannot change bytes; it is labelled on every result; several indexers can be compared | Hiding apps, false reviews, unmarked promotion |
-| A catalog or indexer that censors | Other catalogs, other indexers, a pasted URL, a card in a chat | Discovery is harder for the censored app |
-| GitHub removes or blocks a repository | Stored copies, mirrors, jsDelivr by commit, indexer copies, chat bundles | New installs need someone who has the bytes |
-| An app sent in a chat as bait | Same verification, no auto-install, "Sent by" is not "published by", unsigned refused | A person who installs a signed but harmful app from a stranger |
-| A rollback or freeze | `sequence` per app, catalog `sequence` and `expires` | A frozen publisher repository, until phase 2's publisher record |
-| Equivocation (two packages with one `sequence`) | Both refused, the app marked | None beyond the publisher's reputation |
-| Payment fraud | Testnet first, small amounts, reviews, the buy screen's warning | No refund by Ghostly, ever |
-| A bug in the runner or the broker | Small trusted code, tests for every message type, bounded sizes | It is the boundary; it gets the review of security-sensitive code |
+| A malicious app sends data out | Opaque origin, `connect-src 'none'`, WebRTC constructors deleted, `frame-src 'self'` on the parent, the port dying on navigation and teardown on a second load, no Desktop command but `app_broker`, navigation and new windows blocked on Desktop | Channels not measured (DNS prefetch, WebKit); a browser or webview sandbox escape. Hence the IP line on every install screen |
+| A malicious app abuses the broker | Identity from the port or window label, per-app and per-chat storage, bounded sizes and rates, permissions | Misuse within granted permissions; phishing inside its own frame (the client frames apps in a visibly different container and never asks for secrets there) |
+| A malicious update | Same key, rising `sequence`, new permissions re-asked, removals and revocations checked | Misbehaviour within permissions already granted |
+| A compromised publisher key | Revocation by the publisher if it still can; stores remove the app | No rotation in phase 1: holders trust the attacker's next version until a store they added removes it |
+| A malicious or lying store | It cannot change bytes; icons and descriptions come from bundles; every result names its store | Hiding apps, steering a title search to a look-alike app. The proof line and the 80-bit fingerprint are the defence |
+| A store that censors | Other stores, a pasted URL, a card in a chat | Discovery is harder |
+| GitHub removes or blocks a repository | Stored copies, jsDelivr by commit, other hosts, chat bundles | New installs need someone with the bytes |
+| A chat card as bait or as a tracker | Shown from its own data, fetched only on Install, phase 1 hosts allowlisted, "Unknown publisher", unsigned refused | A person who installs a signed harmful app from a stranger |
+| A contact's client floods `apps/1` | The receiver's own limits | None beyond the chat |
+| Rollback, freeze, equivocation | `sequence` per app, store `sequence` and `expires`, both versions refused on equivocation | A frozen publisher repository until phase 2 |
+| Parser disagreement | Canonical manifest bytes required, trailing bytes refused | None known |
+| A bug in the runner or the broker | Small trusted code, tests for every message type, bounded sizes | It is the boundary; it gets security review |
 
 ### What each party learns
 
 | Party | Learns |
 |---|---|
-| GitHub, jsDelivr, any source | The IP address and which package files are fetched, when |
-| An indexer | The IP address and time of each index download; search queries only above the local-search size; what is submitted to it |
-| A catalog's host | The IP address of each index fetch |
+| GitHub, jsDelivr, any source | The address that fetched a bundle, when. Nothing before the person presses Install (cards fetch nothing) |
+| A store host | The address and time of each index download: only for people with an app installed, or who open a store |
+| A publisher | Possibly the person's address and when they open the app, through channels not yet measured |
 | A contact | Only the apps the person opens in a chat with them, or shares |
-| Pkarr relays (phase 2) | Which publisher and indexer records are read |
-| A publisher (phase 2) | The IP address that asked its `seller` URL for an invite, the buyer's chat key with the sales bot and a per-publisher holder key; nothing that links purchases across publishers |
-| Ghostly's maintainers | Nothing beyond what their default catalog host and indexer see, like any other operator |
+| `api.github.com` | The publisher login whose proof is checked, from the person's address, at install |
+| Ghostly's maintainers | What the default store's host (GitHub) would tell them: nothing, as they run no server |
 
 ### Before phase 1 ships: the tests that must exist
 
-- A package that breaks each bound, each path rule, each canonical-bytes rule: refused, with nothing stored.
-- A bad signature, a wrong file hash, a truncated bundle, a bundle with bytes past the manifest: refused.
-- A lower `sequence`, an equal `sequence` with another digest: refused and marked.
-- A malicious mini-app suite: reading cookies or storage, reaching the network, navigating the top window, opening popups, posting to the client's other windows, calling a Desktop command, calling extension APIs, flooding the broker, posting oversized messages. Every one fails, on each client.
-- The extension's sandbox page CSP and the web's `/app-frame.html` header checked by `contentSecurityPolicy.test.ts`.
-- A card with an unsigned package: no install button.
-- A revocation from an added catalog stops a running app; one from a source not added does nothing.
-- An e2e: two people, one sends a chess bundle in a chat, the other installs it and they play over `apps/1`, on web and Desktop.
+- Bundles that break each bound, a non-canonical manifest, a duplicated key, a bad signature, a wrong file hash, a truncated bundle, a byte past the last file: refused, nothing stored.
+- A lower `sequence`, an equal one with another digest: refused and marked.
+- The malicious mini-app suite, on each client: fetch and every resource type, WebRTC (including through a nested frame), self-navigation by `location`, meta refresh and link, a second load, popups, `top.location`, reading storage, posting to `"*"` and to other windows, calling any Desktop command but `app_broker`, `app_broker` with another app's identity, opening a new window, extension APIs, flooding the broker, oversized messages. Every one fails.
+- `contentSecurityPolicy.test.ts` checks `frame-src 'self'` on the web and extension pages, the runner's header with `frame-ancestors 'self'`, and that every other web location keeps `frame-ancestors 'none'`.
+- The runner refuses to start with a non-null origin, without a parent, or under a label that is not `app-*`.
+- A card renders with no network request; Install fetches only from the allowlisted hosts.
+- A receiver drops oversized, too frequent and unopened-app `apps/1` frames.
+- With no app installed, the client makes no request to any store.
+- An e2e: two people, one sends a chess bundle in a chat, the other installs it from the card and they play over `apps/1`, on web and Desktop.
 
 ## Compatibility and rollout
 
-All additive. An older app sees an app card as its text (a link), a bundle as a file, and ignores `apps/1`, which it never offers. Nothing changes in records, invites, groups or payments. The web server gets one location with its own header; the extension's manifest gets a sandbox page; Desktop gets one scheme.
+All additive. An older app sees an app card as its text (a link), a bundle as a file, and ignores `apps/1`, which it never offers. Nothing changes in records, invites, groups or payments. The web server gets one location with its own header and the main page an explicit `frame-src 'self'`; the extension's manifest gets a sandbox page and `frame-src 'self'`; Desktop gets one scheme, one capability and one command.
 
 ## Phases
 
 ### Phase 1 (after 1.1): the smallest useful store
 
-**Free mini-apps and themes, installed from a pasted GitHub URL, a catalog or a card in a chat, on the web app, the extension and Desktop.** In pieces that can each be a pull request:
+**Free mini-apps, turn-based games and light real-time versus games (Tetris, Snake) included, on the web app, Desktop and the extension, installed from a pasted URL, a store or a card in a chat. No network access for apps. The default store and the default index are signed files in one repository, signed with the owner's offline key; custom stores and indexes are HTTPS URLs.** In pieces that can each be a pull request:
 
-1. **Format and publisher tools.** The manifest, canonical bytes, digest, signature and bundle, with test vectors, in `packages/core`. `ghostly app key | init | sign | verify | bundle` in the CLI. A mini-app template in the SDK.
-2. **The package store.** Verified packages kept per profile (the database on web and extension, app data on Desktop), with the installed state, `sequence` and permissions. Install, update, uninstall with export.
-3. **The runner and the broker.** `/app-frame.html` with its header on web; the sandbox page on the extension; the `ghostly-app` scheme and window on Desktop. The broker with storage, `name` and `chat`. The malicious mini-app suite.
-4. **The Apps page.** Installed apps, "Add from a link", catalogs, indexers, permissions, updates, the malware screen.
-5. **Catalogs.** Paste and add; the index, its signature, `sequence`, `expires` and `removed`; reading from GitHub raw and jsDelivr.
-6. **In a chat.** The app card in `sc`, the bundle recognized on a file bubble, the catalog and indexer cards; `apps/1` and the "opened Chess" card.
-7. **Ghostly's default catalog and indexer.** A Git repository curated by the maintainers, its key and its listing policy; the indexer as a script and a Docker image in `infra/services/indexer` producing the static signed index, whole-index mode only.
-8. **Themes**, as data, on every client with a UI.
+1. **Format and publisher tools.** Bundle, canonical manifest, digest, signatures with their prefixes, revocation, with test vectors, in `packages/core`. `ghostly app init | publish` and `ghostly catalog submit` in the CLI. The single-file template with the commit-reveal helper in the SDK.
+2. **The package store.** Verified bundles kept per profile, with `sequence`, permissions and per-app, per-chat storage. Install, update, uninstall with export.
+3. **The runner and the broker.** `/app-frame.html` and its nginx location on web; the sandbox page on the extension; the `ghostly-app` scheme, `app-*` windows and `app_broker` on Desktop. The port, the teardown, the WebRTC deletion, `frame-src 'self'`. The malicious mini-app suite.
+4. **The Apps page.** Installed apps, paste, Stores, permissions with the IP line, updates, the removal screen.
+5. **Stores.** `ghostly-store.json`, its signature, `sequence`, `expires` and `removed`; reading from raw GitHub and jsDelivr; merging several.
+6. **In a chat.** The app card and the store card from their own data, the bundle on a file bubble, Install fetching only then; `apps/1` with receiver limits and the "opened Chess" card.
+7. **Ghostly's default store and index.** The repository, its pull request checks in CI, the owner's offline signing, the crawler script that builds the index.
+8. **The extension's store review.** A test submission; if it is refused, the extension ships with the apps feature off.
 
-Phase 1 has no payments, no reviews, no network permission for apps, no groups and no adapter plugins.
+Phase 1 has no payments, no reviews, no themes, no network permission, no fast real-time games (the unordered mode), no bots on `apps/1`, no groups, no key rotation and no adapter plugins.
 
 ### Later phases and research
 
 | Phase | What it gives |
 |---|---|
-| 2 | Paid apps on Testnet, then Mainnet when the owner says: the sales bot, licences, refunds by chat. Signed reviews and reports. The publisher's Pkarr record (freeze detection, hosts that move). Indexer search, `v1` paths and the indexer's Pkarr record. The `network` and `payment-request` permissions. Mini-apps in groups. Any Git host |
-| 3 | Bots for the CLI as signed packages, run as separate processes under an operating-system sandbox where one exists. A frame in the chat on Desktop, once tested on Linux. Package sources over peer-to-peer content addressing (Iroh blobs, HyperDHT) |
-| Research | A permissioned host for adapter plugins (WebAssembly components get only the capabilities the host gives them, [component model](https://component-model.bytecodealliance.org/)); a transparency log for publisher keys; reproducible-build checks by catalogs, as F-Droid does; TUF for a catalog that needs delegated roles |
+| 2 | Real-time games: the `realtime` permission, the unordered mode on `apps/1` over WebRTC, 64 MiB bundles. Bots on the other side of `apps/1` (`ghostly app serve`, `app.message` events, `ghostly app send`) and the `cards` permission. Themes as typed values. Paid apps on Testnet, then Mainnet when the owner says. Licences, reviews and reports, and an optional indexer service with search. Key rotation with a pinned recovery key. The publisher's Pkarr record. The `network` permission as an exact list of sites. Apps in groups |
+| 3 | Bots for the CLI as signed packages under an operating-system sandbox. A frame in the chat on Desktop once tested. Package sources over peer-to-peer content addressing |
+| Research | A permissioned host for adapter plugins (WebAssembly components get only the capabilities the host gives them, [component model](https://component-model.bytecodealliance.org/)); process isolation for apps; a transparency log for publisher keys; reproducible-build checks by stores |
+
+If an iOS client appears, paid apps would meet Apple's in-app purchase rule; that is a phase 2 question, not a phase 1 one.
 
 ## Decisions and open questions
 
-**Decided by this draft:** the new family `12xx`; mini-apps and themes first; adapter plugins out of the store until a plugin host; publisher keys separate from profile keys; a smaller signed format than TUF, with `sequence`, expiry and an optional recovery key; catalogs as Git repositories pinned by commit and digest; chat sharing as a first-class source; indexers that list but never decide what installs; licences per profile, derived per publisher.
+**Decided:** the six answers in [Decisions taken by the owner](#decisions-taken-by-the-owner-2026-10-03); the new family `12xx`; mini-apps first, themes deferred; the agent console as a built-in screen, with bots able to serve their own apps over `apps/1` in phase 2; adapter plugins out of the store until a plugin host; one bundle as the published unit; a single self-contained HTML entry; no rotation in phase 1; one "Stores" concept; cards shown from their own data; storage per app and per chat; licences per profile, derived per publisher, in phase 2.
 
 **Still open, for the owner:**
 
-1. **Paid apps in phase 1?** This draft says no: phase 1 is free, so the format, the sandbox and the sources are proven before money moves. Recommendation: phase 1 free; phase 2 paid on Testnet; Mainnet when you say go.
-2. **Who holds the default catalog's key, and what is the listing policy?** Recommendation: you hold the curator key offline (signing from the CLI on your machine), apps enter by pull request to the catalog repository as Umbrel does, and a short written policy says what is refused (malware, impersonation, apps that ask for secrets).
-3. **Can a card from a contact install an app that is in none of the person's catalogs?** Recommendation: yes, with "Not in any of your catalogs" on the card. Refusing it would make the default catalog a gatekeeper again, which is what sending apps in a chat is meant to avoid.
-4. **The extension in phase 1.** The store's policy exempts sandboxed pages, but a reviewer may still question a feature that runs code the person installs. Recommendation: build it in phase 1 with the listing's text saying how apps are sandboxed, and if a review refuses it, ship the extension without apps and keep web and Desktop.
-5. **Network access for mini-apps.** Recommendation: none in phase 1; phase 2's `network` permission lists exact HTTPS origins, shown at install and re-asked when one is added.
-6. **Who runs the default indexer, and where?** Recommendation: the maintainers, from the same Docker image anyone can run, on a host separate from the web app's, with a public statement of what it logs (nothing beyond what a static host logs by default).
+1. **A self-hosted web server without the runner's header.** The client then starts no app. Recommendation: keep it that way, and say in the self-hosting notes which header the location needs; never fall back to a weaker frame.
+2. **Hosts allowed on a card beyond GitHub raw and jsDelivr.** Recommendation: none in phase 1; in phase 2 let a card name any HTTPS host and show "Will contact <host>" before Install.
+3. **Who may sign the default index.** It is built by a script, so it could be signed by CI with a second key, separate from the curated store's. Recommendation: the owner's offline key for both in phase 1, as decided; revisit if signing by hand becomes the bottleneck, and then use a separate key so a CI compromise touches only the index.
 
 ## Conformance (candidate)
 
 A client that implements this WISP MUST:
 
-- install, update or run a package only when its manifest holds every bound, its signature verifies under the app's publisher key (or a key reached by a verified rotation), and every file matches its size and hash;
-- identify an app by publisher key and name, never by a catalog, an indexer or a URL;
+- install, update or run a bundle only when its manifest is canonical and holds every bound, its signature verifies under the publisher key, every file matches its size and hash, and no byte follows the last file;
+- identify an app by publisher key and name, never by a store or a URL;
 - never install a lower `sequence` over a higher one, and refuse two packages of one app with the same `sequence` and different digests;
-- look for updates only in the manifest's `sources` and the sources the person added, never at the contact who sent the app; take a valid newer version from anywhere;
-- show the permissions before installing, re-ask when an update adds one, and grant none on behalf of a catalog, an indexer or a contact;
-- run a mini-app only in the runner: an opaque origin, the CSP above, no extension APIs, no Desktop commands; answer the app only through the broker, within its permissions and bounds;
-- never install or run anything from a chat card or a bundle by itself, and refuse unsigned packages;
+- look for updates only in `sources` and the person's stores, and only while an app is installed; take a valid newer version from anywhere;
+- show the permissions and the IP line before installing, re-ask when an update adds a permission, and grant none on behalf of a store or a contact;
+- run a mini-app only in a runner that checked its origin or label, deleted the WebRTC constructors and sent the CSP above; answer it only through the broker, on its own port or window label, within its permissions and bounds; tear it down on a second load; keep its storage per app and per chat;
+- on Desktop, allow an app window no command but `app_broker`, take its identity from its label, block its navigation and deny new windows without opening the system browser;
+- enforce `apps/1` limits as a receiver;
+- show a chat card from its own data, fetch nothing until Install, and in phase 1 fetch only from the allowlisted hosts;
+- show "Unknown publisher" when no proof verifies and no store of the person's lists the app; show at least 80 bits of the publisher key;
+- never install or run anything from a card or a bundle by itself, and refuse unsigned packages;
 - never advertise installed apps to contacts;
-- check the revocation lists of the sources the person added before an install and at every update check, and stop an app a publisher revoked;
-- show, for every listing and result, the catalog or indexer it came from, and mark `promoted` entries;
-- refuse a catalog or indexer index with a lower `sequence` than the one it holds, and say when one is past `expires`.
+- check the removals and revocations of the person's stores before an install and at every update check, and stop an app its publisher revoked;
+- refuse a store index with a lower `sequence` than the one held, and say when one is past `expires`.
 
 ## References
 
-[SDK](../SDK.md), [browser boundaries](../BROWSER.md), [roadmap](ADAPTER-ROADMAP.md#plugins-apps-catalogs-and-ghostlyos), [local services](700-local-services.md), [HTTP services](701-http-services.md), [chat session](401-paired-chat.md), [chat files](501-paired-files.md), [status cards](4xx-status-cards.md), [message buttons](4xx-message-buttons.md), [payments](200-payments.md), [identity proofs](300-peer-proofs.md), [devices](06-devices.md), [headless](11xx-headless.md). Outside sources are in [What the outside world allows](#what-the-outside-world-allows-sources); also [RFC 8785](https://www.rfc-editor.org/rfc/rfc8785) (JSON canonicalization) and [RFC 5869](https://www.rfc-editor.org/rfc/rfc5869) (HKDF).
+[SDK](../SDK.md), [browser boundaries](../BROWSER.md), [roadmap](ADAPTER-ROADMAP.md#plugins-apps-catalogs-and-ghostlyos), [local services](700-local-services.md), [HTTP services](701-http-services.md), [chat session](401-paired-chat.md), [chat files](501-paired-files.md), [status cards](4xx-status-cards.md), [message buttons](4xx-message-buttons.md), [payments](200-payments.md), [identity proofs](300-peer-proofs.md), [SSH proofs](3xx-ssh.md), [invites](800-invite-join.md), [devices](06-devices.md), [headless](11xx-headless.md). Outside sources are in [What the outside world allows](#what-the-outside-world-allows-sources); also [RFC 8785](https://www.rfc-editor.org/rfc/rfc8785) (JSON canonicalization) and [RFC 5869](https://www.rfc-editor.org/rfc/rfc5869) (HKDF).
 
 ## Revision log
 

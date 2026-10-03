@@ -140,6 +140,6 @@ export const GROUPS: {
     ranges: [[1200, 1299]],
     icon: "puzzle",
     title: "Apps & plugins",
-    blurb: "Apps made by others: found in catalogs you choose or sent in a chat, checked by their publisher's signature, run in a sandbox.",
+    blurb: "Apps and games made by others: found in stores you choose or sent in a chat, checked by their publisher's signature, run in a sandbox.",
   },
 ];
