@@ -118,7 +118,8 @@ test("the inviter's invite card leaves once the joiner knocks, and the scene alo
   await expect(alice.page.getByTestId("invite-card")).toHaveCount(0);
   // It left while the scene was still on, before the chat took over: the contact had arrived, not the chat gone live.
   const leftAt = await alice.page.evaluate(() => (window as unknown as { qaInviteLeftAt?: string | null }).qaInviteLeftAt);
-  expect(INVITER, `the card left at ${leftAt}`).toContain(leftAt);
+  // An inviter whose contact does not knock knocks itself, so its scene can be at knocking too.
+  expect([...INVITER, "knocking"], `the card left at ${leftAt}`).toContain(leftAt);
   expect(leftAt).not.toBe("publishing");
   // Live, the scene gives the chat back, and the card does not come back with it.
   await expect(alice.page.getByPlaceholder("Message…")).toBeEnabled();
