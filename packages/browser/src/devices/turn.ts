@@ -503,8 +503,14 @@ export class TurnKeeper {
         // The copy: an active device runs the profile and holds none apart; one replaced keeps its own, frozen.
         const was = held.record.state;
         const copy = state === "active" ? { copy: undefined } : state === "superseded" && (was === "active" || was === "releasing") ? { copy: "frozen" as const } : {};
+        // Replaced: which device took the turn, and the set as its record lists it (a restored copy may hold a slot of
+        // its own), so the screen names it and a handoff back can reach it. Only from a record that still lists this
+        // device in its own slot; the turn and the packet stay this device's own, below the mark it keeps.
+        const listed = read.record?.slots[held.ownSlot];
+        const replacedBy = state === "superseded" && read.result === "other" && read.record && !!listed && toBase64Url(listed.key) === toBase64Url(held.ownKey)
+          ? { activeSlot: read.record.active, deviceSet: deviceSetOf(read.record) } : {};
         held.record = await this.store.move(this.options.profile, state, {
-          ...(takeover ? { handoff: undefined } : {}), ...(held.record.settle ? { settle: undefined } : {}), ...copy,
+          ...(takeover ? { handoff: undefined } : {}), ...(held.record.settle ? { settle: undefined } : {}), ...copy, ...replacedBy,
           ...(won ? { takeovers, raise: pendingRaise("takeover", takeovers, this.now()) } : {}),
         });
         if (!action.then) return { kind: "gated", state, reload: action.reload, ...(action.notice ? { notice: action.notice } : {}), read };

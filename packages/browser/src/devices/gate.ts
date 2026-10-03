@@ -83,6 +83,15 @@ export function knownDeviceGate(profile: string = databaseName()): DeviceGate | 
   return known.get(profile);
 }
 
+/**
+ * The gate of a profile changed on this page before the engine started: the active device's read at start found that
+ * another device took the turn (`peer.ts`). Every later caller gets the new answer.
+ */
+export function replaceDeviceGate(gate: DeviceGate): void {
+  gates.set(gate.profile, Promise.resolve(gate));
+  known.set(gate.profile, gate);
+}
+
 /** Tests only: forgets what was read, as a reload of the page does. */
 export function resetDeviceGates(): void {
   gates.clear();

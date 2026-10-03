@@ -115,7 +115,7 @@ import { HandoffGiver, type HandoffView } from "../devices/handoff";
 import { handoffProfileHost, handoffSelf } from "../devices/handoffHost";
 import { handoffLinks, profileRecords } from "../devices/handoffStandby";
 import { isHandoffVerifier, makeHandoffVerifier, provesHandoffPassword, type HandoffVerifier } from "../devices/handoffPake";
-import { deviceIdentity } from "../devices/setup";
+import { deviceIdentity, openTurnKeeper } from "../devices/setup";
 import { walletHandoffProblem } from "../devices/handoffWallets";
 import { COUNTER_RAISE_KEY, GROUP_ADMIN_OFF_KEY, PENDING_RAISE_KEY, applyCounterRaise, isCounterRaise, isGroupAdminOff, isPendingRaise, type PendingRaise } from "../devices/raise";
 import { fileBytes } from "../shared/fileBytes";
@@ -1466,6 +1466,38 @@ export class GhostlyNode implements EngineImplementation {
     // The active device of a device set (WISP 06): its links to the other devices, and its turn record put again. A
     // `single` profile never gets here: the gate read no record for it, and nothing more is asked.
     if (!this.options.singleDevice && this.networkOn && knownDeviceGate()?.state === "active") void this.startDeviceSet().catch(() => {});
+    // Started in limited mode because no source answered the read at start: it reads again every 30 seconds, and the
+    // first good read either starts it properly or stops it (WISP 06 § When a device checks).
+    if (!this.options.singleDevice && this.limitedMode && knownDeviceGate()?.state === "active") this.readTurnWhileLimited();
+  }
+
+  private limitedTimer: ReturnType<typeof setTimeout> | null = null;
+
+  private readTurnWhileLimited(after = 30_000): void {
+    if (this.limitedTimer) clearTimeout(this.limitedTimer);
+    this.limitedTimer = setTimeout(() => {
+      this.limitedTimer = null;
+      void (async () => {
+        if (this.shuttingDown || !this.limitedMode) return;
+        let outcome: { kind: string; restricted?: boolean } | null = null;
+        try {
+          const keeper = await openTurnKeeper(databaseName(), this.turnNetwork());
+          outcome = keeper ? await keeper.check(true) : null;
+        } catch { outcome = null; }
+        if (this.shuttingDown) return;
+        if (outcome?.kind === "gated") {
+          const record = await readDeviceRecord(databaseName()).catch(() => null);
+          if (record) await this.stopReplaced(viewOf(record));
+          return;
+        }
+        if (outcome && (outcome.kind === "start" || (outcome.kind === "go-on" && !outcome.restricted))) {
+          await this.leaveLimited().catch(() => {});
+          if (!this.limitedMode && this.networkOn) void this.startDeviceSet().catch(() => {});
+          return;
+        }
+        this.readTurnWhileLimited();
+      })();
+    }, after);
   }
 
   /** Every wallet's stored state, loaded: the first half of what `start()` does for money. */
@@ -1580,6 +1612,7 @@ export class GhostlyNode implements EngineImplementation {
   async shutdown(options: { quiet?: boolean } = {}): Promise<void> {
     const quiet = options.quiet === true || this.gatedOut;
     this.shuttingDown = true;
+    if (this.limitedTimer) { clearTimeout(this.limitedTimer); this.limitedTimer = null; }
     // First, before anything that waits: every live contact hears this app is going, and watches for it to come back.
     if (!quiet) this.depart();
     this.directPath.close();
