@@ -75,6 +75,46 @@ describe("single-writer wallets open after a fresh turn read", () => {
     expect(replaced).not.toHaveBeenCalled();
   });
 
+  it("group admin work asks the same: a stale read is read again, a takeover read stops this device and refuses", async () => {
+    const adminTurn = (inner: Inner, wait?: boolean) => (inner as unknown as { groups: { host: { adminTurn(id: string, o?: { wait?: boolean }): Promise<boolean> } } }).groups.host.adminTurn("g", wait === undefined ? undefined : { wait });
+    const fresh = engine({ turnReadAt: Date.now() - 5_000 });
+    expect(await adminTurn(fresh.inner)).toBe(true);
+    expect(fresh.check).not.toHaveBeenCalled();
+    const stale = engine({ turnReadAt: Date.now() - 61_000 });
+    expect(await adminTurn(stale.inner)).toBe(true);
+    expect(stale.check).toHaveBeenCalledWith(false);
+    const taken = engine({ turnReadAt: Date.now() - 61_000, outcome: { kind: "gated" } });
+    expect(await adminTurn(taken.inner)).toBe(false);
+    const unreachable = engine({ turnReadAt: Date.now() - 61_000, outcome: { kind: "go-on", restricted: true } });
+    expect(await adminTurn(unreachable.inner)).toBe(false);
+    const offline = engine({ turnReadAt: Date.now() - 61_000, online: false });
+    expect(await adminTurn(offline.inner)).toBe(false);
+    expect(offline.check).not.toHaveBeenCalled();
+  });
+
+  it("a read that does not answer refuses after a bounded wait; the door does not wait at all; callers share one read", async () => {
+    const adminTurn = (inner: Inner, wait?: boolean) => (inner as unknown as { groups: { host: { adminTurn(id: string, o?: { wait?: boolean }): Promise<boolean> } } }).groups.host.adminTurn("g", wait === undefined ? undefined : { wait });
+    const { inner, check } = engine({ turnReadAt: Date.now() - 61_000 });
+    let answer: (outcome: Outcome) => void = () => {};
+    check.mockImplementation(() => new Promise<Outcome>((resolve) => { answer = resolve; }));
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      // The door: no wait, and the read starts.
+      expect(await adminTurn(inner, false)).toBe(false);
+      const asked = adminTurn(inner);
+      const again = adminTurn(inner);
+      await vi.advanceTimersByTimeAsync(GhostlyNode.TURN_CONFIRM_WAIT_MS);
+      expect(await asked).toBe(false);
+      expect(await again).toBe(false);
+      expect(check).toHaveBeenCalledTimes(1);
+      // The read answers late, and good: it counts for the next ask, with no read of its own.
+      answer({ kind: "go-on", restricted: false });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(await adminTurn(inner, false)).toBe(true);
+      expect(check).toHaveBeenCalledTimes(1);
+    } finally { vi.useRealTimers(); }
+  });
+
   it("offline, they wait; the next good read opens them", async () => {
     const { inner, check, opened } = engine({ online: false });
     inner.walletsStarted = true;

@@ -418,6 +418,12 @@ export interface EngineApi {
    */
   deviceTurnPeek(params: { d: string }): import("../devices/restoreGuard").TurnPeek;
   /**
+   * A restored copy in limited mode whose turn read found a tombstone (`EngineState.restoreCheck` is `removed`): the
+   * person typed the profile's name, and it starts as a profile of its own (WISP 06 § A backup restored where a device
+   * set exists).
+   */
+  deviceRestoreStartOwn(): void;
+  /**
    * Remove (WISP 06 § Removing a device), on the active device: the device with this signing key can no longer take the
    * profile. The set moves to a new device-set secret, which the devices that stay get over their old links. Errors
    * start with `remove-<reason>:`.
