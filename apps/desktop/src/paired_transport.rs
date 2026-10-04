@@ -451,7 +451,7 @@ mod tests {
         for seed in ["", "not base64!", "AAAA", &"A".repeat(44)] {
             let (events, _) = channel();
             assert_eq!(
-                paired_iroh_start(app.state(), seed.into(), events)
+                paired_iroh_start(app.state(), seed.into(), None, events)
                     .await
                     .err()
                     .unwrap(),
@@ -606,7 +606,7 @@ mod tests {
         let (events, _) = channel();
         let seed = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode([21u8; 32]);
         assert_eq!(
-            paired_iroh_start(app.state(), seed, events)
+            paired_iroh_start(app.state(), seed, None, events)
                 .await
                 .err()
                 .unwrap(),
