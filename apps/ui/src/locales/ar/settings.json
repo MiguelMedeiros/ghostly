@@ -1,7 +1,5 @@
 {
   "about": "حول",
-  "advanced": "متقدّم",
-  "advancedHint": "الشبكة والمرحّلات واستعلامات النطاقات",
   "appearance": "المظهر",
   "changePassword": "تغيير كلمة المرور",
   "chatListDensities": {
@@ -88,6 +86,8 @@
     "testSound": "اختبار الصوت",
     "title": "الصوت والفيديو"
   },
+  "mediaHint": "الميكروفون والكاميرا ومكبر الصوت",
+  "networkHint": "المرحّلات وTURN واستعلامات النطاقات",
   "newPassword": "كلمة مرور جديدة",
   "nicknamePlaceholder": "أدخل اسمك المستعار...",
   "noticesDenied": "محظورة. اسمح بها من إعدادات الجهاز أو المتصفح.",
@@ -102,6 +102,7 @@
   "notificationSounds": "الأصوات",
   "notificationSoundsDescription": "الرسائل والمكالمات والمدفوعات المؤكدة",
   "notifications": "الإشعارات",
+  "notificationsHint": "الأصوات والتنبيهات",
   "password": "كلمة المرور",
   "passwordChanged": "تم تغيير كلمة المرور بنجاح",
   "passwordEdit": "تغيير",
@@ -112,6 +113,7 @@
   "passwordRemoved": "تم إزالة كلمة المرور",
   "passwordSet": "تم تعيين كلمة المرور بنجاح",
   "passwordTooShort": "يجب أن تكون كلمة المرور ٤ أحرف على الأقل",
+  "privacyHint": "قفل الشاشة ومعاينات الروابط والكتابة",
   "privateNotice": "رسالة جديدة",
   "profile": "الملف الشخصي",
   "profileLinkHint": "الاسم والصورة والنسخ الاحتياطية والملفات الشخصية الأخرى",
@@ -127,6 +129,8 @@
   "reduceMotion": "تقليل الحركة",
   "reduceMotionHint": "رسوم متحركة أقل. إعداد النظام مُطبّق دائمًا.",
   "removePassword": "إزالة كلمة المرور",
+  "search": "البحث في الإعدادات",
+  "searchEmpty": "لا توجد إعدادات مطابقة",
   "security": "الخصوصية والأمان",
   "sendTyping": "إرسال مؤشر الكتابة",
   "sendTypingHint": "ترى جهات اتصالك متى تكتب. عند الإيقاف، ستظل ترى مؤشرهم.",

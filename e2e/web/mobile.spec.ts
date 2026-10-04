@@ -79,6 +79,7 @@ test("on a phone: the tab bar goes behind the keyboard while typing, and comes b
   await page.setViewportSize(phone);
   await expect(tabs).toBeVisible();
   await tabs.getByRole("button", { name: "Settings" }).click();
+  await page.getByTestId("settings-open-profile").click();
   const nickname = page.getByPlaceholder("Enter your nickname...");
   await nickname.focus();
   await page.setViewportSize({ width: phone.width, height: phone.height - keyboard });

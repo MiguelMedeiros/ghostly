@@ -227,7 +227,7 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, pairing 
             {discoveryFailure && <p data-testid="discovery-help">{awaitingJoin && `${t("connection.panel.noContactYet")} `}{(() => {
               // The link sits where the sentence puts it, in every language.
               const [before, after = ""] = t("connection.panel.discoveryHelp").split("{{link}}");
-              return <>{before}<Link className={`text-accent underline ${focus}`} to="/settings/advanced" onClick={(e) => { e.preventDefault(); nav.open("/settings/advanced"); }}>{t("connection.panel.relaySettings")}</Link>{after}</>;
+              return <>{before}<Link className={`text-accent underline ${focus}`} to="/settings/network" onClick={(e) => { e.preventDefault(); nav.open("/settings/network"); }}>{t("connection.panel.relaySettings")}</Link>{after}</>;
             })()}</p>}
             {summary && <dl data-testid="connection-summary" className="grid grid-cols-[5.5rem_1fr] gap-x-3 gap-y-0.5">
               <dt>{t("connection.detail.transport")}</dt><dd className="min-w-0 text-text-primary">{summary.name}</dd>

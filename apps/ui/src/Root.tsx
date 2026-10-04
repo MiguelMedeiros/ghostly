@@ -3,7 +3,7 @@ import { HashRouter, Routes, Route, Navigate, useLocation, useNavigate } from "r
 import { AttentionFeedback } from "./components/AttentionFeedback";
 import { App } from "./App";
 import { Home } from "./pages/Home";
-import { AdvancedSettings, Settings } from "./pages/Settings";
+import { Settings } from "./pages/Settings";
 import { Services } from "./pages/Services";
 import { Profile } from "./pages/Profile";
 import { Identities } from "./pages/Identities";
@@ -236,8 +236,8 @@ export function Root() {
                       <Route path="/" element={<Home />} />
                       <Route path="/chat/*" element={<ChatRoute />} />
                       <Route path="/group/:groupId" element={<GroupChat />} />
-                      <Route path="/settings" element={<Settings />} />
-                      <Route path="/settings/advanced" element={<AdvancedSettings />} />
+                      {/* One route for the menu and its sections, so moving between them keeps the page as it is. */}
+                      <Route path="/settings/:section?" element={<Settings />} />
                       <Route path="/wallet" element={<Wallet />} />
                       <Route path="/services" element={<Services />} />
                       <Route path="/profile" element={<Profile />} />

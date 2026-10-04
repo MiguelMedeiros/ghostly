@@ -115,6 +115,13 @@ export function openTarget(stack: NavStack, path: string): NavEntry[] {
 /** `path` as a sub-page of `parent`, wherever it is opened from (a phone's Profile lives under Settings). */
 export const openUnderTarget = (parent: string, path: string): NavEntry[] => [{ path: HOME }, { path: parent }, { path, up: true }];
 
+/**
+ * What goes under an entry the app opened on with nothing known under it (a deep link, a reload): home, and for a
+ * section of Settings (`/settings/appearance`) Settings too, so its Back still leads to the menu.
+ */
+export const anchorTarget = (path: string): NavEntry[] =>
+  /^\/settings\/[^/]+$/.test(path) ? [{ path: HOME }, { path: "/settings" }, { path, up: true }] : [{ path: HOME }, { path }];
+
 /** A page's Back: up to the parent of a sub-page, home from anything else. */
 export function upTarget(stack: NavStack): NavEntry[] {
   const entries = rootedEntries(stack);

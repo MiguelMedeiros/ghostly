@@ -1,7 +1,5 @@
 {
   "about": "Sobre",
-  "advanced": "Avançado",
-  "advancedHint": "Rede, relays e consultas de domínio",
   "appearance": "Aparência",
   "changePassword": "Alterar senha",
   "chatListDensities": {
@@ -88,6 +86,8 @@
     "testSound": "Testar som",
     "title": "Áudio e vídeo"
   },
+  "mediaHint": "Microfone, câmera e alto-falante",
+  "networkHint": "Relays, TURN e consultas de domínio",
   "newPassword": "Nova senha",
   "nicknamePlaceholder": "Digite seu apelido...",
   "noticesDenied": "Bloqueadas. Permita nas configurações do dispositivo ou navegador.",
@@ -102,6 +102,7 @@
   "notificationSounds": "Sons",
   "notificationSoundsDescription": "Mensagens, chamadas e pagamentos confirmados",
   "notifications": "Notificações",
+  "notificationsHint": "Sons e alertas",
   "password": "Senha",
   "passwordChanged": "Senha alterada com sucesso",
   "passwordEdit": "Alterar",
@@ -112,6 +113,7 @@
   "passwordRemoved": "Senha removida",
   "passwordSet": "Senha definida com sucesso",
   "passwordTooShort": "A senha deve ter pelo menos 4 caracteres",
+  "privacyHint": "Bloqueio de tela, prévias de links e digitação",
   "privateNotice": "Nova mensagem",
   "profile": "Perfil",
   "profileLinkHint": "Nome, foto, backups e outros perfis",
@@ -127,6 +129,8 @@
   "reduceMotion": "Reduzir movimento",
   "reduceMotionHint": "Menos animações. A configuração do sistema sempre vale.",
   "removePassword": "Remover senha",
+  "search": "Buscar nas configurações",
+  "searchEmpty": "Nenhuma configuração encontrada",
   "security": "Privacidade e segurança",
   "sendTyping": "Enviar indicador de digitação",
   "sendTypingHint": "Seus contatos veem quando você está escrevendo. Desligado, você ainda vê o deles.",

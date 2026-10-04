@@ -10,7 +10,7 @@ const KEYBOARD = 336;
 
 test("on a phone: a field the keyboard comes up over is brought into view", { tag: ["@feature:app.mobile-layout", "@feature:settings.network.relays"] }, async ({ peer }) => {
   const { page } = await peer("alice", { mobile: true, viewport: PHONE });
-  await page.goto("/#/settings/advanced");
+  await page.goto("/#/settings/network");
   await expect(page.getByTestId("network-relays")).toBeVisible();
   // A field below where the keyboard will reach, on screen until then.
   const inputs = page.locator("input[type=text], input:not([type])");

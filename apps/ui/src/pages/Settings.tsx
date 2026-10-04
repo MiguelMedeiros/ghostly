@@ -1,4 +1,5 @@
-import { useState, useEffect, useId, useRef } from "react";
+import { useState, useEffect, useId, useRef, type ReactNode } from "react";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { useSettings } from "../contexts/SettingsContext";
 import { useI18n } from "../contexts/I18nContext";
 import { useLockScreen } from "../contexts/LockScreenContext";
@@ -55,12 +56,33 @@ import { useAppNavigation } from "../hooks/useAppNavigation";
 import { peekEnabled, peekNotifies } from "../lib/profilePeek";
 import { externalLinkProps, isDesktopApp } from "../lib/externalLink";
 import { errorText } from "../lib/errorText";
+import { hasMediaDevices } from "../lib/mediaDevices";
+import { navOnly, readNav } from "../lib/navigation";
+import { SECTION_TITLE, SETTINGS_SECTIONS, isOldSection, settingsPath, settingsSection, type SettingNeeds, type SettingsSection } from "../lib/settingsSections";
+import { SettingsIndex, SettingsMenu } from "../components/settings/SettingsMenu";
 
 /** The fields of the lock password form, each with its own error line. */
 type PasswordField = "current" | "new" | "confirm";
 
 /** What "Clear all data" erases, as its confirmation lists it (lib/clearData.ts). */
 const CLEAR_ITEMS = ["chats", "groups", "apps", "profile", "identities", "settings", "storage"] as const;
+
+/** Which sections are drawn: on a phone the one its address names (none on the menu), on a wider screen all of them. */
+interface SectionView { phone: boolean; section: SettingsSection | null }
+
+/**
+ * One section's options. On a phone it is the whole screen, whose title already names it: its first card's
+ * heading is left to screen readers there.
+ */
+function SettingsGroup({ id, view, children }: { id: SettingsSection; view: SectionView; children: ReactNode }) {
+  if (view.phone && view.section !== id) return null;
+  if (id === "media" && !hasMediaDevices()) return null; // no devices to pick here: no empty space for them either
+  return (
+    <div id={`settings-section-${id}`} data-settings-section={id} className={`space-y-6 scroll-mt-2 ${view.phone ? "[&>section:first-child>h2]:sr-only" : ""}`}>
+      {children}
+    </div>
+  );
+}
 
 export function Settings() {
   const nav = useAppNavigation();
@@ -88,6 +110,49 @@ export function Settings() {
   const peekOn = peekEnabled(settings, isDesktopApp());
   const loadPublicProfiles = useLoadPublicProfiles();
   const sendTyping = useSendTyping();
+
+  // Which section the address names (`/settings/appearance`); an old address (`/settings/advanced`) leads to its new place.
+  const params = useParams();
+  const location = useLocation();
+  const navigate = useNavigate();
+  const section = settingsSection(params.section);
+  const view: SectionView = { phone: isMobile, section };
+  useEffect(() => {
+    // Once the entry knows what is under it (a deep link is given that first), it takes the new address in its place.
+    if (isOldSection(params.section) && section && readNav(location.state)) void navigate(settingsPath(section), { replace: true, state: location.state });
+  }, [location.key]); // eslint-disable-line react-hooks/exhaustive-deps -- once per entry
+  // A wide screen: the index shows the section in view, and an address naming one scrolls to it.
+  const content = useRef<HTMLDivElement>(null);
+  const [inView, setInView] = useState<SettingsSection>(section ?? SETTINGS_SECTIONS[0]);
+  const picked = useRef<SettingsSection | null>(null);
+  useEffect(() => {
+    if (isMobile || !section) return;
+    if (picked.current === section) { picked.current = null; return; } // picked in the index: already on its way there
+    document.getElementById(`settings-section-${section}`)?.scrollIntoView({ block: "start" });
+    setInView(section);
+  }, [section, isMobile]);
+  useEffect(() => {
+    const body = content.current?.closest<HTMLElement>("[data-page-body]");
+    if (isMobile || !body) return;
+    const onScroll = () => {
+      const top = body.getBoundingClientRect().top + 48;
+      let current: SettingsSection | null = null;
+      for (const group of body.querySelectorAll<HTMLElement>("[data-settings-section]")) {
+        if (group.getBoundingClientRect().top <= top) current = group.dataset.settingsSection as SettingsSection;
+      }
+      setInView(current ?? SETTINGS_SECTIONS[0]);
+    };
+    body.addEventListener("scroll", onScroll, { passive: true });
+    return () => body.removeEventListener("scroll", onScroll);
+  }, [isMobile]);
+  const pick = (to: SettingsSection) => {
+    document.getElementById(`settings-section-${to}`)?.scrollIntoView({ block: "start", behavior: settings.reduceMotion ? "auto" : "smooth" });
+    setInView(to);
+    // The page stays where it is; its address names the section, so a reload comes back to it.
+    if (to === section) return;
+    picked.current = to;
+    void navigate(settingsPath(to), { replace: true, state: navOnly(location.state) });
+  };
 
   const [lockEnabled, setLockEnabled] = useState(settings.lockScreen.enabled);
   const [newPassword, setNewPassword] = useState("");
@@ -300,31 +365,60 @@ export function Settings() {
     window.location.replace(window.location.pathname);
   };
 
-  return (
-    <Page title={t("settings.title")} width="md" testId="settings-page"
-      overlay={<Toast toast={notice.toast} onDismiss={notice.dismiss} place="page" testId="settings-notice" />}>
+  // The page's floating card, over the menu, a section or the whole page alike.
+  const overlay = <Toast toast={notice.toast} onDismiss={notice.dismiss} place="page" testId="settings-notice" />;
 
-      {/* First while there is something to install (the web app only): it goes once installed. */}
-      {canInstall(install) && (
-        <Section title={t("pwa.installTitle")}>
-          <Row label={t(install === "ios" ? "pwa.iosLabel" : install === "dock" ? "pwa.dockLabel" : "pwa.installLabel")}
-            hint={t(install === "ios" ? "pwa.iosHint" : install === "dock" ? "pwa.dockHint" : "pwa.installHint")}>
-            <Button variant="primary" data-testid="install-app" onClick={startInstall}>{t("pwa.install")}</Button>
-          </Row>
-        </Section>
-      )}
+  // First while there is something to install (the web app only): it goes once installed.
+  const installApp = canInstall(install) && (
+    <Section title={t("pwa.installTitle")}>
+      <Row label={t(install === "ios" ? "pwa.iosLabel" : install === "dock" ? "pwa.dockLabel" : "pwa.installLabel")}
+        hint={t(install === "ios" ? "pwa.iosHint" : install === "dock" ? "pwa.dockHint" : "pwa.installHint")}>
+        <Button variant="primary" data-testid="install-app" onClick={startInstall}>{t("pwa.install")}</Button>
+      </Row>
+    </Section>
+  );
 
+  // What this device has: the options it lacks are not offered, nor found by the search.
+  const has = (needs: SettingNeeds) => needs === "profiles" ? canSwitch : needs === "updates" ? update.supported
+    : needs === "wake" ? canWake : hasMediaDevices();
+  const shown = (id: SettingsSection) => id !== "media" || hasMediaDevices();
+
+  if (isMobile && !section) {
+    // A phone: the menu of sections, each opened on a screen of its own, under the profile's own line.
+    const scheme = t(`settings.colorSchemes.${settings.colorScheme}` as const);
+    const language = LANGUAGE_OPTIONS.find((option) => option.value === settings.language)?.native;
+    const summary: Partial<Record<SettingsSection, ReactNode>> = {
+      profile: settings.defaultNickname || undefined,
+      appearance: [scheme, language].filter(Boolean).join(", "),
+      notifications: t("settings.notificationsHint"),
+      media: t("settings.mediaHint"),
+      privacy: t("settings.privacyHint"),
+      network: t("settings.networkHint"),
+      storage: desktopUsed ? formatBytes(desktopUsed.total) : formatBytes(estimate?.used ?? storageInfo.used),
+      about: update.update ? t("updates.available", { version: update.update.version }) : `${t("settings.version")} ${appVersion}`,
+    };
+    return (
+      <Page title={t("settings.title")} width="md" testId="settings-page" overlay={overlay}>
+        {installApp}
+        <SettingsMenu summary={summary} shown={shown} has={has} onOpen={(id) => nav.open(settingsPath(id))} top={
+          <div className="bg-surface rounded-xl divide-y divide-border">
+            {/* A phone has no account bar, and Profile no tab of its own (the bar is full): this is the way there. */}
+            <LinkRow testId="settings-profile-link" leading={<ProfileBadge entry={profile} size={36} avatar={myAvatar} />}
+              label={profile.name} hint={t("settings.profileLinkHint")} onClick={() => nav.open("/profile")} />
+            {/* The account switcher, where a phone's tab bar holds it (holding Settings opens it too). */}
+            {canSwitch && (
+              <LinkRow testId="settings-profile-switch" label={t("profileSwitcher.title")} hint={t("profileSwitcher.holdHint")}
+                value={listProfiles().length > 1 ? listProfiles().length : undefined} onClick={openProfileSwitcher} />
+            )}
+          </div>
+        } />
+      </Page>
+    );
+  }
+
+  const groups = (<>
+      <SettingsGroup id="profile" view={view}>
       <Section title={t("settings.profile")}>
-        {/* A phone has no account bar, and Profile no tab of its own (the bar is full): this is the way there. */}
-        {isMobile && (
-          <LinkRow testId="settings-profile-link" leading={<ProfileBadge entry={profile} size={36} avatar={myAvatar} />}
-            label={profile.name} hint={t("settings.profileLinkHint")} onClick={() => nav.open("/profile")} />
-        )}
-        {/* The account switcher, where a phone's tab bar holds it (holding Settings opens it too). */}
-        {isMobile && canSwitch && (
-          <LinkRow testId="settings-profile-switch" label={t("profileSwitcher.title")} hint={t("profileSwitcher.holdHint")}
-            value={listProfiles().length > 1 ? listProfiles().length : undefined} onClick={openProfileSwitcher} />
-        )}
         {/* WISP 04 § Checking other profiles: reads only; on for Desktop, off for the web and the extension unless turned on. */}
         {canSwitch && (
           <Row label={t("settings.profilePeek")} hint={t("settings.profilePeekHint")} info={t("settings.profilePeekInfo")} testId="settings-profile-peek-row">
@@ -349,7 +443,9 @@ export function Settings() {
           </InputGroup>
         </Field>
       </Section>
+      </SettingsGroup>
 
+      <SettingsGroup id="appearance" view={view}>
       <Section title={t("settings.appearance")}>
         <Row label={t("settings.colorTheme")}>
           <ColorSwatches label={t("settings.colorTheme")} testIdPrefix="settings-theme" />
@@ -398,7 +494,9 @@ export function Settings() {
           <Switch testId="settings-reduce-motion" label={t("settings.reduceMotion")} checked={settings.reduceMotion} onChange={(on) => updateReduceMotion(on)} />
         </Row>
       </Section>
+      </SettingsGroup>
 
+      <SettingsGroup id="notifications" view={view}>
       <Section title={t("settings.notifications")}>
         <Row label={t("settings.notificationSounds")} hint={t("settings.notificationSoundsDescription")}>
           <Switch testId="settings-sounds" label={t("settings.notificationSounds")} checked={settings.notifications.soundEnabled} onChange={(on) => updateNotifications({ soundEnabled: on })} />
@@ -436,9 +534,13 @@ export function Settings() {
           <Row label={t("pwa.wake")} testId="settings-wake-unavailable" hint={<span role="status">{t("pwa.wakeUnavailable")}</span>} />
         )}
       </Section>
+      </SettingsGroup>
 
+      <SettingsGroup id="media" view={view}>
       <MediaSettings />
+      </SettingsGroup>
 
+      <SettingsGroup id="privacy" view={view}>
       <Section title={t("settings.security")}>
         <Row label={t("settings.linkPreviews")} hint={t("settings.linkPreviewsHint")} info={t("settings.linkPreviewsInfo")} testId="settings-link-previews-row">
           <Switch testId="settings-link-previews" label={t("settings.linkPreviews")} checked={settings.linkPreviews} onChange={(on) => updateLinkPreviews(on)} />
@@ -490,7 +592,15 @@ export function Settings() {
           </Block>
         )}
       </Section>
+      </SettingsGroup>
 
+      {/* How this client reaches the network, and how it checks contacts' domain proofs (once Settings → Advanced). */}
+      <SettingsGroup id="network" view={view}>
+        <NetworkSettings />
+        <DomainProofSettings />
+      </SettingsGroup>
+
+      <SettingsGroup id="storage" view={view}>
       <Section title={t("settings.data")}>
         <Row label={t("settings.storageUsed")} testId="settings-storage-used"
           value={desktopUsed ? formatBytes(desktopUsed.total) : estimate ? t("settings.storageOf", { used: formatBytes(estimate.used), quota: formatBytes(estimate.quota) }) : formatBytes(storageInfo.used)}
@@ -540,6 +650,21 @@ export function Settings() {
           </Block>
         )}
       </Section>
+      </SettingsGroup>
+
+      <SettingsGroup id="about" view={view}>
+      <Section title={t("settings.about")}>
+        <Row label={t("settings.version")} value={<span className="font-mono">{appVersion}</span>} testId="settings-about-version" />
+        <Row label={t("settings.website")} value={
+          <a {...externalLinkProps(APP_WEBSITE)} className="inline-flex items-center gap-1 min-h-10 text-accent hover:text-accent-hover transition-colors">
+            GitHub
+            <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+            </svg>
+          </a>
+        } />
+        <Row label={t("settings.license")} value={APP_LICENSE} />
+      </Section>
 
       {update.supported && (
         <Section title={t("updates.title")}>
@@ -579,35 +704,30 @@ export function Settings() {
           </Row>
         </Section>
       )}
+      </SettingsGroup>
+  </>);
 
-      {/* Network and identity checks: rarely changed, and the most to read, on a page of their own. */}
-      <div className="bg-surface rounded-xl">
-        <LinkRow testId="settings-advanced" label={t("settings.advanced")} hint={t("settings.advancedHint")} onClick={() => nav.open("/settings/advanced")} />
-      </div>
+  // A phone: one section on a screen of its own; its header's Back goes up to the menu.
+  if (isMobile && section) {
+    return (
+      <Page title={t(SECTION_TITLE[section])} width="md" testId={`settings-${section}-page`} overlay={overlay}>
+        {groups}
+      </Page>
+    );
+  }
 
-      <Section title={t("settings.about")}>
-        <Row label={t("settings.version")} value={<span className="font-mono">{appVersion}</span>} />
-        <Row label={t("settings.website")} value={
-          <a {...externalLinkProps(APP_WEBSITE)} className="inline-flex items-center gap-1 min-h-10 text-accent hover:text-accent-hover transition-colors">
-            GitHub
-            <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-            </svg>
-          </a>
-        } />
-        <Row label={t("settings.license")} value={APP_LICENSE} />
-      </Section>
-    </Page>
-  );
-}
-
-/** Settings → Advanced: how this client reaches the network, and how it checks contacts' domain proofs. */
-export function AdvancedSettings() {
-  const { t } = useI18n();
+  // A wider screen: every section on one page, and the index beside it once the column has room for both.
   return (
-    <Page title={t("settings.advanced")} width="md" testId="settings-advanced-page">
-      <NetworkSettings />
-      <DomainProofSettings />
+    <Page title={t("settings.title")} width="xl" testId="settings-page" overlay={overlay}>
+      <div className="@3xl/page:grid @3xl/page:grid-cols-[12rem_minmax(0,42rem)] @3xl/page:justify-center @3xl/page:gap-8">
+        <aside className="hidden @3xl/page:block sticky top-0 self-start">
+          <SettingsIndex active={inView} shown={shown} has={has} onPick={pick} />
+        </aside>
+        <div ref={content} className="max-w-2xl mx-auto w-full min-w-0 space-y-6">
+          {installApp}
+          {groups}
+        </div>
+      </div>
     </Page>
   );
 }
