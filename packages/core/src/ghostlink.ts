@@ -1,4 +1,5 @@
 import { DhtDelivery, type DeliveryMode, type DhtDeliveryState, type DhtDeliveryView , type DhtPacketFacts } from "./dhtDelivery";
+import type { DhtFileAnnouncement, DhtFileOffer } from "./dhtFiles";
 import { PairedFiles } from "./pairedFiles";
 import { TransportSwitch, allowedTransports, type SwitchPlan } from "./transportSwitch";
 import { proofHash, type ProofAdapter, type ProofScope } from "./peerProofs";
@@ -332,6 +333,11 @@ export interface GhostLinkEvents {
   onPeerNick?(nick: string | null): void;
   onMessageReceipt?(id: string): void | Promise<void>;
   /**
+   * A file's offer the contact said on the DHT floor (WISP 403 § Files), already checked: its bubble takes its place
+   * now, and its bytes come on the live session under the same wire id. Without this event it is dropped (receipted).
+   */
+  onFileAnnounced?(file: DhtFileAnnouncement & { timestamp: number; reply?: { i: string }; forwarded?: number }, packet: DhtPacketFacts): void | Promise<void>;
+  /**
    * What the contact's app says about held items (`hold/1`): whether it accepts them (from the handshake, or
    * a `paired-hold` frame on the session) and the highest sequence it has held for this side, if it said.
    */
@@ -494,6 +500,8 @@ export interface GhostLinkOptions {
     peerCapsRev?(rev: number): void;
     /** Whether the contact's capability record accepts DHT text; absent or unknown: it does. */
     peerAcceptsText?(): boolean;
+    /** Whether the contact's capability record takes a file's offer on the floor (`dht-file/1`); absent: it does not. */
+    peerAcceptsFile?(): boolean;
     /** This side's reactions the contact has not confirmed, oldest first: they ride on the envelopes. */
     reactions?(): readonly WireReaction[];
   };
@@ -749,7 +757,7 @@ export class GhostLink {
     this.dht = options.params.profile && options.pairing && options.dht ? new DhtDelivery({
       params: options.params, mode: this.deliveryMode, state: options.dht.state, credentials: options.pairing.credentials, transport: options.transport,
       save: options.dht.save, pollMs: options.dht.pollMs, firstControlAfterMs: options.dht.firstControlAfterMs,
-      capsRev: options.dht.capsRev, peerCapsRev: options.dht.peerCapsRev, peerAcceptsText: options.dht.peerAcceptsText,
+      capsRev: options.dht.capsRev, peerCapsRev: options.dht.peerCapsRev, peerAcceptsText: options.dht.peerAcceptsText, peerAcceptsFile: options.dht.peerAcceptsFile,
       // Reactions ride on the envelopes off the live session (WISP 403 § Reactions).
       ...(options.reactionsSupport && {
         reactions: options.dht.reactions,
@@ -771,7 +779,9 @@ export class GhostLink {
       },
       message: async (message, packet) => {
         // An edit (WISP 403 § Edits) is not a message of its own: it changes one, on an app that takes edits.
-        const { edit, ...text } = message;
+        const { edit, file, ...text } = message;
+        // A file's offer (WISP 403 § Files) is its bubble, never a text with its name.
+        if (file) { await options.events?.onFileAnnounced?.({ ...file, timestamp: message.timestamp, ...(message.reply && { reply: message.reply }), ...(message.forwarded && { forwarded: message.forwarded }) }, packet); return; }
         // Its text holds as a live edit's must (never blank): one that does not is dropped, never shown as a text.
         if (edit && options.editSupport) { if (validEditMessage(message.text)) await options.events?.onMessageEdit?.({ id: edit.i, e: edit.e, ts: message.timestamp, m: message.text }); return; }
         await options.events?.onMessage?.({ ...text, via: "pkarr", packet });
@@ -2129,6 +2139,25 @@ export class GhostLink {
     if (this.options.params.profile) return "Message could not be sent over the negotiated data link.";
     return this.session.sendMessage(trimmed, timestamp);
   }
+
+  /**
+   * Says a file's offer on the DHT floor while the chat is not live (WISP 403 § Files), so the contact's chat shows its
+   * bubble in its place; the bytes go once live. An error when it cannot go on the floor now: it waits for live then.
+   */
+  async announceFile(file: DhtFileOffer, timestamp: number, reply?: WireReply, forwarded?: number): Promise<string | null> {
+    const error = this.fileAnnounceError(file, timestamp, reply, forwarded);
+    return error ?? this.dht!.announceFile(file, timestamp, reply?.i, forwarded);
+  }
+  /** Why a file's offer cannot go on the DHT floor now (`announceFile`), or null when it can. */
+  fileAnnounceError(file: DhtFileOffer, timestamp: number, reply?: WireReply, forwarded?: number): string | null {
+    if (!this.options.params.profile || this.textDelivery !== "dht" || !this.dht) return "Files go when you are live";
+    if (this.dht.view.inviteTaken) return INVITE_TAKEN;
+    return this.dht.fileError(file, timestamp, reply?.i, forwarded);
+  }
+  /** What awaits its receipt on the DHT floor now, if anything does. */
+  get dhtPendingId(): string | undefined { return this.dht?.pendingId; }
+  /** What went on the DHT floor under this id needs no more retries there (it went live, or was withdrawn). */
+  async settleDht(id: string): Promise<void> { await this.dht?.acknowledge(id); }
 
   /** Publishes a `_call` signal; a connected peer also gets it right away over the data link. */
   async setCallSignal(signal: string | null): Promise<void> {

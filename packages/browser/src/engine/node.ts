@@ -45,7 +45,7 @@ import { ClockWatch, DirectPathWatch } from "@ghostly/core";
 import { GROUP_WAKE_FRAME, GROUP_WAKE_RECEIVE_LIMIT, GroupWakeLimiter, RateWindow, WAKE_CALL_INTERVAL_MS, WakeLimiter, groupWakeFrame, groupWakes, parseGroupWakeFrame, checkPushEndpoint, newWakeToken, vapidKeysMatch, wakeRequest, type PushRequest, type WakeKind, type WakeTarget } from "@ghostly/core";
 import { COMMUNITY_REACTION_FRAME, GROUP_REACTION_FRAME, REACTION_LIMITS, ReactionWindow, queueReaction, readReaction, validReactionNumber, wireReaction, type WireReaction } from "@ghostly/core";
 import { COMMUNITY_PIN_FRAME, PIN_LIMITS, mayPin, pinIsNewer, pinNumberHolds, readPin, type GroupPinFrame, type WirePin } from "@ghostly/core";
-import { CapsExchange, DHT_TEXT_CAPABILITY, HOLD_CAPABILITY, TRANSPORTS, automaticTransport, capsDescriptors, dialDescriptors, type CapsContent, type CapsRecord, type PairingCredentials } from "@ghostly/core";
+import { CapsExchange, DHT_FILE_CAPABILITY, DHT_FILE_TOO_LARGE, DHT_TEXT_CAPABILITY, HOLD_CAPABILITY, dhtFileId, type DhtFileAnnouncement, type DhtPacketFacts, TRANSPORTS, automaticTransport, capsDescriptors, dialDescriptors, type CapsContent, type CapsRecord, type PairingCredentials } from "@ghostly/core";
 import { fileMessageText, parseLinkPreview, pairedMessageFrame, type WireReply, type LinkPreview, type PaymentRequest, type PaymentAsk, type Payment, type PaymentResult, HOLD_LIMITS, MAX_DHT_TEXT_BYTES, normalizeRelayUrl, sanitizeAvatar, PeerProofs, emptyProofLedger, emptyIdentityLedger, lastSharedWithMe, receivedIdentityStatus, type ProofChallenge, type ProofEvidence, type ProofAdapter, type ProofScope, type PaymentMethodName } from "@ghostly/core";
 import {
   presenceSeenAt,
@@ -312,6 +312,8 @@ function linkFilesFrom(linkId: string, files: StoredFile[], messages: StoredMess
   // Files stored before ids had a direction: the chat message says who sent them.
   const fromPeer = new Set(messages.flatMap((m) => (m.sender === "peer" && m.file ? [m.file.id] : [])));
   for (const file of files) {
+    // Said on the DHT floor, its offer not come yet (WISP 403 § Files): the offer must still find its id free.
+    if (file.announced && !file.wire3) continue;
     const legacy = !file.direction;
     result.wireIds.add(file.wireId ?? file.id.slice(linkId.length + 1));
     // files/3 transfers count in the file desk, which knows which were taken without asking.
@@ -663,6 +665,7 @@ export class GhostlyNode implements EngineImplementation {
     deleted: (linkId, messageId) => !!this.links.get(linkId)?.stored.deletedIds?.includes(messageId),
     messageExists: (linkId, messageId) => db.hasMessage(linkId, messageId),
     storeMessage: (message) => this.storeMessage(message),
+    patchMessage: async (linkId, messageId, change) => { if (await db.patchMessage(linkId, messageId, change)) await this.messagesChanged(linkId, [messageId]); },
     place: (linkId) => {
       const place = arrivalKey(Date.now(), this.placedAt.get(linkId));
       this.placedAt.set(linkId, place);
@@ -2968,8 +2971,9 @@ export class GhostlyNode implements EngineImplementation {
         // choice, either side's, has no live link to wait for: there it goes on the DHT again.
         ready: message => {
           const live = this.links.get(linkId), link = live?.link;
-          // A file that waits for the live link goes when the link carries text: in its place among the texts.
-          if (message.file && !message.wireId) return !!link?.isDataLinkOpen && link.textDelivery === "stream";
+          // A file that waits for the live link goes when the link carries text: in its place among the texts. Before
+          // that its offer goes on the DHT floor, once, when the contact's app takes it there (WISP 403 § Files).
+          if (message.file && !message.wireId) return (!!link?.isDataLinkOpen && link.textDelivery === "stream") || this.fileFloorReady(live, message);
           if (message.via === "pkarr" && !GhostlyNode.dhtByChoice(live) && link?.textDelivery !== "stream") return false;
           return !!link?.canSendText && !!message.wireId && !link.validateText(message.text, message.timestamp, message.wireId, GhostlyNode.wireReply(message));
         },
@@ -3111,10 +3115,18 @@ export class GhostlyNode implements EngineImplementation {
       const message = await db.getMessage(linkId, messageId);
       // A request that never left (waiting for live) is withdrawn with its message: the next session must not send it.
       if (message?.paymentId && message.delivery === "waiting") await this.desk.withdraw(message.paymentId).catch(() => {});
+      // A file whose offer went on the floor, deleted before it went live: the contact's bubble is told on the next session.
+      if (message?.sender === "me" && message.file && message.delivery === "waiting" && (message.fileOnFloor === "sent" || message.fileOnFloor === "seen")) {
+        const wireId = message.file.id.slice(`${linkId}-out-`.length);
+        void live.link?.settleDht(dhtFileId(wireId)).catch(() => {});
+        live.stored = { ...live.stored, withdrawnFiles: [...(live.stored.withdrawnFiles ?? []).filter(id => id !== wireId), wireId].slice(-64) };
+        await db.patchLink(linkId, { withdrawnFiles: live.stored.withdrawnFiles });
+      }
       if (message?.file) {
         const stored = await fileStore.get(message.file.id);
         // Only what the peer sent counts against the room it has here.
-        if (stored && !stored.wire3 && (stored.direction === "in" || (!stored.direction && message.sender === "peer"))) {
+        // (A file only said on the DHT floor brought no byte, and counted none.)
+        if (stored && !stored.wire3 && !stored.announced && (stored.direction === "in" || (!stored.direction && message.sender === "peer"))) {
           live.files.receivedBytes = Math.max(0, live.files.receivedBytes - storedSize(stored));
         }
         // A files/3 transfer still going ends on both sides.
@@ -3271,7 +3283,10 @@ export class GhostlyNode implements EngineImplementation {
    */
   private async sendWaitingFile(linkId: string, message: StoredMessage): Promise<void> {
     const live = this.links.get(linkId), file = message.file;
+    if (live?.link && file && !live.link.isDataLinkOpen) return this.sayFileOnFloor(live, message);
     if (!live?.link?.isDataLinkOpen || !file) return;
+    // Said on the floor before: it needs no more retries there, it goes live now.
+    if (message.fileOnFloor === "sent" || message.fileOnFloor === "seen") void live.link.settleDht(dhtFileId(file.id.slice(`${linkId}-out-`.length))).catch(() => {});
     // A session that just opened has not heard the contact's capabilities yet (files/3 comes in them): asked a little.
     if (!GhostlyNode.takesFiles(live.link)) await GhostlyNode.largeFilesAgreed(live.link);
     if (!live.link.isDataLinkOpen) return;
@@ -3284,6 +3299,87 @@ export class GhostlyNode implements EngineImplementation {
       }, GhostlyNode.wireReply(message));
     }
     await this.messagesChanged(linkId, [message.id]);
+  }
+
+  /**
+   * What a waiting file says on the DHT floor (WISP 403 § Files): its offer, as the live session would say it, minus
+   * a video's poster. The bytes never go there.
+   */
+  private static floorOffer(linkId: string, file: MessageFile) {
+    return { wireId: file.id.slice(`${linkId}-out-`.length), name: file.name, size: file.size, mime: file.mime,
+      ...(file.voice && { voice: file.voice }), ...(file.video && { video: file.video }), ...(file.image && { image: file.image }) };
+  }
+
+  /**
+   * A waiting file's offer can go on the DHT floor now: the chat is not live, the contact's app shows a file before its
+   * bytes (`dht-file/1`), it was not said there yet, and the floor has room (one text or offer at a time).
+   */
+  private fileFloorReady(live: LiveLink | undefined, message: StoredMessage): boolean {
+    const link = live?.link, file = message.file;
+    if (!link || !file || !live.stored.profile || live.stored.group || message.fileOnFloor || link.isDataLinkOpen) return false;
+    return !link.fileAnnounceError(GhostlyNode.floorOffer(live.stored.id, file), message.timestamp, GhostlyNode.wireReply(message), message.forwarded);
+  }
+
+  /**
+   * Says a waiting file's offer on the DHT floor: the contact's chat shows its bubble in its place, and the bytes go once
+   * live (the file stays `waiting`). Once only: an offer that cannot go there (a name too long) waits as before.
+   */
+  private async sayFileOnFloor(live: LiveLink, message: StoredMessage): Promise<void> {
+    const link = live.link, file = message.file, linkId = live.stored.id;
+    if (!link || !file || message.fileOnFloor || !this.fileFloorReady(live, message)) return;
+    const offer = GhostlyNode.floorOffer(linkId, file), at = Date.now();
+    const error = await link.announceFile(offer, message.timestamp, GhostlyNode.wireReply(message), message.forwarded);
+    const said = !error && link.dhtPendingId === dhtFileId(offer.wireId);
+    if (!said && error !== DHT_FILE_TOO_LARGE) return;
+    await db.patchMessage(linkId, message.id, current => current.delivery !== "waiting" || current.fileOnFloor ? null
+      : { fileOnFloor: said ? "sent" : "unfit", ...(said && { details: withSend(current.details, { at, ...pathSnapshot(live, "pkarr"), result: "sent" }) }) });
+    await this.messagesChanged(linkId, [message.id]);
+  }
+
+  /** A receipt on the DHT floor that names a waiting file's offer (`dhtFileId`): its bubble is in place on the contact's side. */
+  private async fileSeenOnFloor(linkId: string, id: string): Promise<void> {
+    const prefix = `${linkId}-out-`;
+    const message = (await db.getMessages(linkId)).find(m => m.sender === "me" && m.file?.id.startsWith(prefix) && m.fileOnFloor === "sent" && dhtFileId(m.file.id.slice(prefix.length)) === id);
+    if (!message) return;
+    const seen = await db.patchMessage(linkId, message.id, current => current.fileOnFloor !== "sent" ? null
+      : { fileOnFloor: "seen", ...(current.delivery === "waiting" && { deliveryError: "Your contact sees it. The file goes when you are live." }) });
+    if (seen) await this.messagesChanged(linkId, [message.id]);
+  }
+
+  /**
+   * A file the contact said on the DHT floor (WISP 403 § Files): its bubble takes its place now, waiting for its bytes,
+   * and the offer that comes live takes it over (`FileDesk.announce`). Nothing when this chat knows the file already
+   * (its offer came first), or its message was deleted here.
+   */
+  private async fileAnnounced(linkId: string, said: DhtFileAnnouncement & { timestamp: number; reply?: { i: string }; forwarded?: number }, packet: DhtPacketFacts): Promise<void> {
+    const live = this.links.get(linkId);
+    if (!live) return;
+    const id = `peer_${said.wireId}`;
+    if (live.stored.deletedIds?.includes(id) || live.files.wireIds.has(said.wireId)) return;
+    const local = `${linkId}-in-${toBase64Url(randomBytes(12))}`;
+    // Taken now, before anything is awaited: an offer that comes meanwhile finds its bubble, and makes no second one.
+    if (!this.fileDesk.announce(linkId, said.wireId, local, said.size)) return;
+    if (await db.hasMessage(linkId, id)) { this.fileDesk.takeAnnounced(linkId, said.wireId); return; }
+    const file: MessageFile = { id: local, name: said.name, size: said.size, mime: said.mime, ...(said.voice && { voice: said.voice }), ...(said.video && { video: said.video }), ...(said.image && { image: said.image }) };
+    this.chatInUse(live);
+    await fileStore.put({ id: local, linkId, direction: "in", createdAt: Date.now(), announced: said.wireId,
+      metadata: { name: said.name, size: said.size, mime: said.mime, timestamp: said.timestamp, voice: said.voice, video: said.video, image: said.image } });
+    await this.storeMessage({ linkId, id, text: fileMessageText(file), sender: "peer", timestamp: said.timestamp, via: "pkarr", file,
+      ...(said.reply && { replyTo: receivedPairedReply(said.reply) }), ...(said.forwarded && { forwarded: said.forwarded }),
+      details: { wire: { frame: "_dm envelope", protocol: DHT_FILE_CAPABILITY, plaintextBytes: utf8Encode(said.name).length, wireBytes: packet.packetBytes },
+        dht: { seq: packet.seq, issued: packet.issued, expires: packet.expires, packetBytes: packet.packetBytes, nonce: packet.nonce, recordKey: packet.recordKey, records: packet.records } } });
+  }
+
+  /**
+   * Files of mine said on the floor and deleted here before they went live: a session that carries files/3 says each is
+   * cancelled, so the contact's bubble stops waiting for it.
+   */
+  private sayWithdrawnFiles(linkId: string): void {
+    const live = this.links.get(linkId), ids = live?.stored.withdrawnFiles;
+    if (!live?.link || !ids?.length) return;
+    const left = ids.filter(id => !live.link!.sendFilesFrame({ t: "pf-abort", id }));
+    live.stored = { ...live.stored, withdrawnFiles: left.length ? left : undefined };
+    void db.patchLink(linkId, { withdrawnFiles: live.stored.withdrawnFiles });
   }
 
   /**
@@ -3327,6 +3423,10 @@ export class GhostlyNode implements EngineImplementation {
     // A known id could only be a replay or an attempt to pass for a file we already have.
     if (files.wireIds.has(wire.id)) return "duplicate file id";
     if (files.receivedBytes + wire.size > LIMITS.maxStoredIncomingBytesPerPeer) return "no room for more files";
+    // Said on the floor first and sent whole now (files/2 names its message by the sender's time): the bubble that
+    // waited for it goes, so the file shows once.
+    const said = this.fileDesk.takeAnnounced(linkId, wire.id);
+    if (said) void db.deleteMessage(linkId, `peer_${wire.id}`).then(() => fileStore.delete(said)).then(() => this.messagesChanged(linkId, [`peer_${wire.id}`])).catch(() => {});
 
     // The local id is ours, never the peer's: whatever it announces cannot replace a stored file.
     const { reply: _reply, ...announced } = wire;
@@ -5827,6 +5927,9 @@ export class GhostlyNode implements EngineImplementation {
         capsRev: () => live.caps?.rev, peerCapsRev: rev => live.caps?.peerRev(rev),
         // A contact whose record lacks dht-text/1 gets nothing on the DHT: what would go there waits for live.
         peerAcceptsText: () => { const peer = live.caps?.peer; return !peer || peer.capabilities.includes(DHT_TEXT_CAPABILITY); },
+        // A file's offer goes on the floor only to an app that says it shows one (WISP 403 § Files): an older one would
+        // show its name as a text.
+        peerAcceptsFile: () => !!live.caps?.peer?.capabilities.includes(DHT_FILE_CAPABILITY),
         reactions: () => live.stored.reactionsOut ?? [],
       } : undefined,
       native: { peerDescriptors: stored.peerDescriptors, peerTransports: stored.peerTransports,
@@ -5947,6 +6050,8 @@ export class GhostlyNode implements EngineImplementation {
           this.emitState();
         },
         onMessageReceipt: async id => {
+          // A file's offer said on the floor: its bubble is in place on the contact's side, and the floor is free.
+          if (stored.profile && !stored.group) await this.fileSeenOnFloor(linkId, id);
           await this.outboxFor(linkId).received(id);
           // An edit that went on the DHT floor under an id of its own; and a message that waited went: its edit may follow.
           if (stored.profile && !stored.group) await this.editsFor(linkId).receivedOnDht(id).catch(() => {});
@@ -6076,7 +6181,8 @@ export class GhostlyNode implements EngineImplementation {
         onFileComplete: (id, direction) =>
           this.fileSettled(this.localFileId(linkId, id, direction, { failed: false }), undefined, linkId),
         onFilesFrame: (frame) => this.fileDesk.handle(linkId, frame),
-        onFilesSession: (open) => this.fileDesk.session(linkId, open),
+        onFilesSession: (open) => { this.fileDesk.session(linkId, open); if (open) this.sayWithdrawnFiles(linkId); },
+        onFileAnnounced: stored.profile && !stored.group ? (file, packet) => this.fileAnnounced(linkId, file, packet) : undefined,
         onFileFailed: (id, reason, direction) =>
           this.fileSettled(this.localFileId(linkId, id, direction, { failed: true }), reason, linkId),
       },
@@ -6136,7 +6242,7 @@ export class GhostlyNode implements EngineImplementation {
     return {
       versions: [1],
       transports: this.runnableTransports(live),
-      capabilities: ["chat/1", DHT_TEXT_CAPABILITY, ...(live?.stored.hold?.enabled ? [HOLD_CAPABILITY] : []), "files/2",
+      capabilities: ["chat/1", DHT_TEXT_CAPABILITY, DHT_FILE_CAPABILITY, ...(live?.stored.hold?.enabled ? [HOLD_CAPABILITY] : []), "files/2",
         // Edits on the DHT floor too (WISP 403 § Edits): an app from before would show one as a new message.
         ...(GhostlyNode.testNoEdit() ? [] : [EDIT_CAPABILITY]),
         ...(cashu || lightning ? ["payments/1"] : []), ...(cashu ? ["payments-cashu/1"] : []), ...(lightning ? ["payments-lightning/1"] : [])],

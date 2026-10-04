@@ -286,3 +286,91 @@ describe("a file that waits for the live link goes in its place among the texts"
     await c.box.stop();
   });
 });
+
+/**
+ * Seen in 1 of 3 runs on local relays after #1131: a short text written after a file reached the contact first, on the
+ * DHT floor, while the file waited for the live link. A file's offer now goes on the floor too (WISP 403 § Files), in
+ * the floor's one slot and in its place, so the contact's chat shows text, file, text; its bytes go once live.
+ */
+describe("while the contact is away, a file's offer takes its place on the DHT floor", () => {
+  const file = (n: number): StoredMessage => ({ linkId: "order", id: `me_${n}`, text: `f${n}`, sender: "me", timestamp: n, via: "datalink", delivery: "waiting",
+    file: { id: `order-out-${n}`, name: `f${n}.bin`, size: 10, mime: "application/octet-stream" } });
+  /**
+   * The floor as the engine's resender sees it: one text or offer awaiting its receipt at a time; a waiting file's offer
+   * goes there once (`fileOnFloor`) when the contact's app takes it (`takesFiles`), its bytes once live.
+   */
+  function floor(rows: StoredMessage[], options: { takesFiles?: boolean } = {}) {
+    const state = { live: false, awaiting: undefined as string | undefined };
+    const said: string[] = [];
+    const c = chat(rows, async m => { said.push(`${m.text} ${state.live ? "live" : "floor"}`); if (!state.live) state.awaiting = m.id; return null; }, {
+      ready: m => {
+        if (m.file && !m.wireId) return state.live || (options.takesFiles !== false && !m.fileOnFloor && !state.awaiting);
+        return state.live || !state.awaiting;
+      },
+      via: () => (state.live ? "datalink" : "pkarr"),
+      sendFile: async message => {
+        const row = rows.find(m => m.id === message.id)!;
+        if (state.live) { said.push(`${message.text} live`); delete row.delivery; return; }
+        said.push(`${message.text} floor`);
+        state.awaiting = message.id;
+        row.fileOnFloor = "sent";
+      },
+    });
+    /** The contact's receipt for what awaits one on the floor. */
+    const receipt = async () => {
+      const id = state.awaiting!;
+      state.awaiting = undefined;
+      const row = rows.find(m => m.id === id);
+      if (row?.file) { row.fileOnFloor = "seen"; await c.box.received(`floor-${id}`); } else await c.box.received(id.slice("me_".length));
+    };
+    return { ...c, said, state, receipt };
+  }
+
+  it("text, file, text: the contact reads them in that order, and the file's bytes go once live", async () => {
+    const c = floor([]);
+    await c.box.transmit(c.add(row(1, "sending")));
+    c.add(file(2));
+    await c.box.transmit(c.add(row(3, "sending")));
+    expect(c.said).toEqual(["m1 floor"]);
+    await c.receipt();
+    await vi.waitFor(() => expect(c.said).toEqual(["m1 floor", "f2 floor"]));
+    // The text written after the file waits for the file's receipt, not for the live link.
+    await c.receipt();
+    await vi.waitFor(() => expect(c.said).toEqual(["m1 floor", "f2 floor", "m3 floor"]));
+    await c.receipt();
+    // Said once: a look before the chat is live does not say it again.
+    await c.box.flush({ reopened: true });
+    expect(c.said.filter(s => s.startsWith("f2"))).toEqual(["f2 floor"]);
+    c.state.live = true;
+    await c.box.flush({ reopened: true });
+    expect(c.said).toEqual(["m1 floor", "f2 floor", "m3 floor", "f2 live"]);
+    await c.box.stop();
+  });
+
+  it("a contact whose app does not take a file on the floor: the file waits for live as before, the texts go", async () => {
+    const c = floor([], { takesFiles: false });
+    await c.box.transmit(c.add(row(1, "sending")));
+    c.add(file(2));
+    await c.box.transmit(c.add(row(3, "sending")));
+    await c.receipt();
+    await vi.waitFor(() => expect(c.said).toEqual(["m1 floor", "m3 floor"]));
+    await c.receipt();
+    c.state.live = true;
+    await c.box.flush({ reopened: true });
+    expect(c.said).toEqual(["m1 floor", "m3 floor", "f2 live"]);
+    await c.box.stop();
+  });
+
+  it("a file written while a text awaits its receipt goes on the floor right after it, before a text written later", async () => {
+    const c = floor([row(1, "sent", { via: "pkarr" })]);
+    c.state.awaiting = `me_${wire(1)}`;
+    c.add(file(2));
+    await c.box.recover();
+    await c.box.wait(c.add(row(3, "sending")), "Waits for the text before it to be confirmed.");
+    await c.receipt();
+    await vi.waitFor(() => expect(c.said).toEqual(["f2 floor"]));
+    await c.receipt();
+    await vi.waitFor(() => expect(c.said).toEqual(["f2 floor", "m3 floor"]));
+    await c.box.stop();
+  });
+});
