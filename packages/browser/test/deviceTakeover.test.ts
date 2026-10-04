@@ -240,6 +240,21 @@ describe("what keeps a forced takeover from locking the owner out", () => {
     expect(outcome.kind).toBe("start");
     expect(opened(network.source("dht").held)).toMatchObject({ turn: N + 8, author: 0 });
   });
+
+  it("It wasn't me after the record that replaced it expired takes the turn above the highest it saw, not inside it", async () => {
+    // The desktop saw the phone's record of N + 7 (its mark) and was superseded; that record has since expired, so a read
+    // finds only the desktop's own old packet of N.
+    const intruder = opened(await packet(N + 7, 0, 1));
+    const desktop = await device(network, 0, "superseded", { activeSlot: 1, seenSequence: Number(intruder.sequence) });
+    network.seed(desktop.stored);
+    const outcome = await forceTakeover(ports(desktop.store, desktop.keeper), { password: PASSWORD, name: "Phone" });
+    expect(outcome.kind).toBe("start");
+    const record = opened(network.source("dht").held);
+    expect({ turn: record.turn, author: record.author, release: record.release }).toEqual({ turn: N + 8, author: 0, release: undefined });
+    expect(takeoverTurn({ turn: N, releasedTurn: undefined, seenSequence: Number(intruder.sequence) }, { record: null })).toBe(N + 8);
+    // A tombstone's mark names no turn.
+    expect(takeoverTurn({ turn: N, releasedTurn: undefined, seenSequence: 2 ** 52 - 1 }, { record: null })).toBe(N + 1);
+  });
 });
 
 describe("a new device-set secret after a grant that never finished (the interface left for removal)", () => {

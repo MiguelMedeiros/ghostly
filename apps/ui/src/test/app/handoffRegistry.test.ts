@@ -1,6 +1,7 @@
 import "fake-indexeddb/auto";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { closeDevicesDb, enrollDevice, setDeviceMirror } from "@ghostly/browser/devices/store";
+import { breezDatabase, breezDatabasesOf } from "@ghostly/browser/engine/paymentAdapters/providers/breezDatabases";
 import { handoffProfileHost, recoverHandoffPointer } from "../../lib/handoffProfile";
 import { listProfiles, namespaceOf, pointProfile, registryKey, setProfileBase } from "../../lib/profiles";
 // covers: devices.handoff
@@ -18,7 +19,19 @@ const dropAll = async () => {
   for (const { name } of await indexedDB.databases()) if (name) await new Promise<void>((resolve) => { const r = indexedDB.deleteDatabase(name); r.onsuccess = r.onerror = r.onblocked = () => resolve(); });
 };
 const makeDatabase = (name: string) => new Promise<void>((resolve, reject) => { const r = indexedDB.open(name); r.onsuccess = () => { r.result.close(); resolve(); }; r.onerror = () => reject(r.error); });
-const writeRegistry = (profiles: object[]) => localStorage.setItem(registryKey(), JSON.stringify({ version: 1, active: "", profiles }));
+/** A profile database with a settings store holding these rows. */
+const makeSettings = (name: string, rows: Record<string, object>) => new Promise<void>((resolve, reject) => {
+  const r = indexedDB.open(name, 1);
+  r.onupgradeneeded = () => { r.result.createObjectStore("settings"); };
+  r.onsuccess = () => {
+    const tx = r.result.transaction("settings", "readwrite");
+    for (const [key, value] of Object.entries(rows)) tx.objectStore("settings").put(value, key);
+    tx.oncomplete = () => { r.result.close(); resolve(); };
+    tx.onerror = () => reject(tx.error);
+  };
+  r.onerror = () => reject(r.error);
+});
+const writeRegistry =(profiles: object[]) => localStorage.setItem(registryKey(), JSON.stringify({ version: 1, active: "", profiles }));
 
 beforeEach(async () => { setProfileBase(BASE); setDeviceMirror(null); await dropAll(); });
 afterEach(async () => { setProfileBase(""); await dropAll(); });
@@ -41,6 +54,26 @@ describe("a handoff that took the first profile of a Desktop space", () => {
     expect(localStorage.getItem(`ghostly_${BASE}_last_route`)).toBeNull();
     expect(localStorage.getItem(`ghostly_${STAGED}_app_settings`)).toBe("{}");
     expect(localStorage.getItem(`ghostly_${BASE}-${WORK}_app_settings`)).toBe("{}");
+  });
+
+  it("deletes the wallet databases the old namespace names with it, never one the profile's new state still names", async () => {
+    writeRegistry([{ id: "", name: "Personal", createdAt: 0 }, { id: WORK, name: "Work", createdAt: 1 }]);
+    // The old copy: an Arkade wallet (its copy moved under a new id), a Bark wallet at home on this device (the new state
+    // keeps its database's name) and a Breez database noted for the old namespace. Another profile shares nothing.
+    await makeSettings(`ghostly_${BASE}`, { "arkWallet:testnet": { config: { walletId: "oldark" } }, "barkWallet:testnet": { config: { walletId: "homebark" } } });
+    await makeSettings(`ghostly_${STAGED}`, { "arkWallet:testnet": { config: { walletId: "newark" } }, "barkWallet:testnet": { config: { walletId: "homebark" } } });
+    await makeSettings(`ghostly_${BASE}-${WORK}`, { "arkWallet:testnet": { config: { walletId: "workark" } } });
+    const breez = await breezDatabase("regtest", "test words only", `ghostly_${BASE}`);
+    for (const name of ["ghostly-ark-oldark", "ghostly-ark-newark", "ghostly-ark-workark", "ghostly-bark-homebark", "ghostly-bark-homebark-onchain", breez]) await makeDatabase(name);
+
+    pointProfile(`ghostly_${BASE}`, `ghostly_${STAGED}`);
+    await handoffProfileHost("1.1.0", "desktop").staging.drop(`ghostly_${BASE}`);
+
+    const left = (await indexedDB.databases()).map((d) => d.name);
+    expect(left).not.toContain("ghostly-ark-oldark");
+    expect(left).not.toContain(breez);
+    expect(await breezDatabasesOf(`ghostly_${BASE}`)).toEqual([]);
+    for (const kept of ["ghostly-ark-newark", "ghostly-ark-workark", "ghostly-bark-homebark", "ghostly-bark-homebark-onchain", `ghostly_${STAGED}`]) expect(left).toContain(kept);
   });
 
   it("refuses to point a profile at storage that is not a profile's, and says so before a reload", () => {
