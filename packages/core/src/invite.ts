@@ -2,6 +2,7 @@ import { bech32, bech32m } from "@scure/base";
 import { generateEncryptionKey } from "./crypto";
 import { createIdentity, identityFromSeedB64 } from "./identity";
 import { fromBase64Url, fromZ32, toBase64Url, toZ32 } from "./bytes";
+import { trimEndOf } from "./text";
 
 /**
  * A link between two peers: my identity, the peer's public key and the shared
@@ -78,7 +79,7 @@ export function encodeInviteCode(params: LinkParams): string {
 
 /** `https://ghostly.tools/#ghostly1…`: the form an invite is shared in. */
 export function inviteLink(code: string, origin = INVITE_LINK_ORIGIN): string {
-  return `${origin.replace(/\/+$/, "")}/#${code}`;
+  return `${trimEndOf(origin, "/")}/#${code}`;
 }
 
 /** What goes in a QR code: upper case, so the code fits the alphanumeric mode. Older codes stay as they are. */
@@ -95,7 +96,7 @@ export function inviteQrText(code: string): string {
  */
 export function inviteQrSegments(code: string, origin = INVITE_LINK_ORIGIN): string[] {
   if (!/^ghostly1/i.test(code)) return [code];
-  return [`${origin.replace(/\/+$/, "")}/`.toUpperCase(), "#", code.toUpperCase()];
+  return [`${trimEndOf(origin, "/")}/`.toUpperCase(), "#", code.toUpperCase()];
 }
 
 /** The code inside whatever was pasted or scanned: after the last `#`, without a leading `chat/`. */
@@ -165,7 +166,7 @@ export function readInviteCode(input: string): InviteReading {
   if (reading.ok) return reading;
   // Copied from the end of a sentence ("…#ghostly1…).", "…!"): read once more without that punctuation, taken only
   // when what is left reads. Otherwise the first refusal stands, so a typo is still a typo.
-  const bare = input.trim().replace(/[.,)!]+$/, "");
+  const bare = trimEndOf(input.trim(), ".,)!");
   if (bare !== input.trim()) {
     const again = readInviteForm(bare);
     if (again.ok) return again;

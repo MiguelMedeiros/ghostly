@@ -9,6 +9,7 @@ import {
   generateEncryptionKey,
   parseLinkRecords,
   sanitizeDisplayText,
+  trimEndOf,
 } from "../src";
 // covers: core.text-limits
 
@@ -83,5 +84,20 @@ describe("a service name from a peer", () => {
     expect(decodeServices(JSON.stringify({ v: 1, s: [{ i: "ok", t: "http", n: "a\nb" }] }))).toEqual([
       { id: "ok", type: "http", name: "ab" },
     ]);
+  });
+});
+
+describe("trimEndOf", () => {
+  it("drops only the characters it is given, and only at the end", () => {
+    expect(trimEndOf("code!).", ".,)!")).toBe("code");
+    expect(trimEndOf("a!b!", "!")).toBe("a!b");
+    expect(trimEndOf("!!!", "!")).toBe("");
+    expect(trimEndOf("", "/")).toBe("");
+    expect(trimEndOf("https://ghostly.tools//", "/")).toBe("https://ghostly.tools");
+  });
+
+  it("reads a long run that does not reach the end in one pass", () => {
+    const text = `${"!".repeat(1_000_000)}x`;
+    expect(trimEndOf(text, ".,)!")).toBe(text);
   });
 });

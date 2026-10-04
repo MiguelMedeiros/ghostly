@@ -205,3 +205,10 @@ describe("Ghostly 0.4 refuses the new code (WISP 801, checked against v0.4.0)", 
     }
   });
 });
+
+describe("readInviteCode on punctuation", () => {
+  it("refuses a long run of punctuation that does not reach the end, read in one pass", () => {
+    expect(readInviteCode(`${"!".repeat(200_000)}x`).ok).toBe(false);
+    expect(readInviteCode(`/chat/${")".repeat(200_000)}x`).ok).toBe(false);
+  });
+});
