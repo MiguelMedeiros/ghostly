@@ -657,6 +657,87 @@ describe("a push", () => {
   });
 });
 
+describe("Try again on the active device after a move that stopped", () => {
+  it("reaches a taker that has not seen the earlier move end: the offer takes its place, and the profile moves", async () => {
+    const w = world();
+    const file = w.profile.add("big", bytesOf(HANDOFF_PIECE_BYTES * 8));
+    await w.giver.push(B);
+    await until(() => w.taker.view()?.step === "offer");
+    // The copy runs, then nothing gets through any more (a link that is up and carries nothing).
+    let pieces = 0, silent = false;
+    w.link.meddle = (_from, frame) => {
+      if (frame.t === "handoff-data" && ++pieces > 3) silent = true;
+      return silent ? null : frame;
+    };
+    await w.taker.accept();
+    await until(() => silent);
+    // The giver sees the move stop first (its own 2 minutes end before the taker's): back to active, Try again shown.
+    // Its cancel is lost; the taker still thinks it is copying.
+    await w.giver.cancel();
+    expect(w.giver.view()?.step).toBe("failed");
+    expect(w.taker.view()?.step).toBe("copying");
+    // The link carries frames again, and the person presses Try again on the active device: the offer reaches the
+    // taker, which gives the earlier attempt up (its staged files stay) and asks "Move this profile here?".
+    w.link.meddle = undefined;
+    await w.giver.push(B);
+    await until(() => w.taker.view()?.step === "offer");
+    expect(w.takerRecords.record.handoff?.step).toBe("stopped");
+    await w.taker.accept();
+    await until(() => w.quiesced.length === 1);
+    await reloadGiver(w);
+    await until(() => w.reloads === 1);
+    expect(w.giverRecords.record.state).toBe("standby");
+    const staged = w.takerRecords.record.handoff!.staging!;
+    expect(toBase64Url(sha256(w.storage.spaces.get(staged)!.files.get(file.id)!))).toBe(file.sha256);
+  });
+
+  it("an offer lost as the link dropped goes again on the new session", async () => {
+    const w = world();
+    w.link.meddle = (_from, frame) => (frame.t === "handoff-offer" ? null : frame);
+    await w.giver.push(B);
+    await settle();
+    expect(w.taker.view()).toBeNull();
+    w.link.meddle = undefined;
+    w.link.drop();
+    w.link.reconnect();
+    await until(() => w.taker.view()?.step === "offer");
+    expect(w.link.count("handoff-offer", A)).toBe(2);
+  });
+
+  it("a taker still in an earlier attempt that says hello gets the offer again", async () => {
+    const w = world();
+    w.profile.add("f1", bytesOf(HANDOFF_PIECE_BYTES * 2));
+    await w.giver.push(B);
+    await until(() => w.taker.view()?.step === "offer");
+    // The giver's cancel and its next offer are both lost; the taker goes on with the earlier attempt.
+    w.link.meddle = (from, frame) => (from === A && (frame.t === "handoff-cancel" || frame.t === "handoff-offer" || frame.t === "handoff-data") ? null : frame);
+    await w.taker.accept();
+    await until(() => w.link.count("handoff-manifest") > 0);
+    await w.giver.cancel();
+    await w.giver.push(B);
+    await settle();
+    expect(w.taker.view()?.step).not.toBe("offer");
+    // A new session: the taker says hello with the earlier attempt's id, and the giver answers with the offer.
+    w.link.meddle = undefined;
+    w.link.drop();
+    w.link.reconnect();
+    await until(() => w.taker.view()?.step === "offer");
+  });
+
+  it("a standby that released and never heard `handoff-done` takes an offer from the device it released to as that done", async () => {
+    const w = world();
+    w.profile.add("f1", bytesOf(100));
+    w.link.meddle = (_from, frame) => (frame.t === "handoff-done" ? null : frame);
+    await fullPull(w);
+    await settle();
+    expect(w.giver.view()?.step).toBe("switching");
+    expect(w.giverRecords.record.handoff?.release).toBeTruthy();
+    await w.giver.receive(B, { t: "handoff-offer", turn: N + 1, id: "y".repeat(22), bytes: 0 });
+    expect(w.giver.view()).toBeNull();
+    expect(w.giverRecords.record.handoff).toBeUndefined();
+  });
+});
+
 describe("refusals before a byte is copied", () => {
   it.each(["wallet", "payment", "call", "loading"] as const)("the giver is busy (%s): the taker is told only that it is busy, and no try is used", async (why) => {
     const w = world();
