@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { GroupSession } from "@ghostly/core";
 import { CommunityWorld, RELAY_NETWORK, type Peer } from "./communityWorld";
 // covers: groups.catch-up, groups.link.join
 
@@ -54,8 +55,13 @@ describe("a line written while behind on a private group's chain", { timeout: 24
     // Once for everyone who was in the group when it was written, under one id (replies, edits and reactions name it).
     expect(copies(world, [alice, bob, carol, dave, writer, xena], id, "written while behind")).toEqual([1, 1, 1, 1, 1, 1]);
     for (const p of [alice, bob, carol, dave, xena]) expect(p.messages.find(m => m.text === "written while behind")!.id).toBe(messageId);
-    // Never for the one let in after it.
+    // Never for the one let in after it: said again under an epoch before his admission.
     expect(world.texts(yann, id)).not.toContain("written while behind");
+    const state = (writer.groups as unknown as { sessions: Map<string, GroupSession> }).sessions.get(id)!.state;
+    const yannIn = state.chain.findIndex(c => c.k === "add" && c.s === world.view(yann, id)!.myKey);
+    const said = state.sent.filter(f => f.o);
+    expect(said).toHaveLength(1);
+    expect(said[0].e).toBeLessThan(yannIn);
     // The group goes on as usual.
     await yann.groups.send(id, "hello all");
     await world.run(3_000);
