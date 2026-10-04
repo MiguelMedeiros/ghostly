@@ -31,6 +31,8 @@ export interface DeviceNetwork {
   readRelays?: boolean;
   /** The Iroh relays a browser homes on. */
   irohRelays?: string[];
+  /** The relay a browser reaches the HyperDHT through: a standby web app offers HyperDHT on its device links through it. */
+  hyperdhtRelay?: string;
   /** ICE servers (TURN) beside the app's own. */
   iceServers?: { urls: string; username?: string; credential?: string }[];
   /** The push relay a browser page hands a wake-up to (Settings, Network): how a standby web app wakes another device. */
@@ -435,6 +437,7 @@ function isNetwork(value: unknown): value is DeviceNetwork {
   if (n.off !== undefined && typeof n.off !== "boolean") return false;
   if (n.readRelays !== undefined && typeof n.readRelays !== "boolean") return false;
   if (n.pushRelay !== undefined && (typeof n.pushRelay !== "string" || n.pushRelay.length > 2048)) return false;
+  if (n.hyperdhtRelay !== undefined && (typeof n.hyperdhtRelay !== "string" || n.hyperdhtRelay.length > 2048)) return false;
   if (n.relays !== undefined && !texts(n.relays, 16)) return false;
   if (n.irohRelays !== undefined && !texts(n.irohRelays, 4)) return false;
   if (n.iceServers !== undefined) {
