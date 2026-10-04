@@ -85,7 +85,7 @@ test("third-party requests that are blocked or never answered do not hold the fi
 test("Settings says this browser cannot wake the app, where there is no service worker", tags, async ({ browser, relay, baseURL }) => {
   const { page, context } = await open(browser, relay, baseURL, remove("Navigator.prototype", "serviceWorker") + remove("window", "Notification") + remove("window", "PushManager"));
   await expect(page.getByTestId("sidebar")).toBeVisible({ timeout: 20_000 });
-  await page.goto("/#/settings");
+  await page.goto("/#/settings/notifications");
   await expect(page.getByTestId("settings-wake-unavailable")).toContainText("This browser can't wake Ghostly while it's closed.");
   await expect(page.getByTestId("settings-wake")).toHaveCount(0);
   await expect(page.getByTestId("settings-system-notifications-row")).toContainText("Not available here");
