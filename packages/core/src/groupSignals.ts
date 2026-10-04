@@ -172,6 +172,8 @@ export class CarriedTransport implements PkarrTransport {
    * writes and fast looks for an app that was gone, and an offer left on the relays that this app could answer after
    * its restart and then wait 40 s for (7 of 16 goodbyes on the admin in the member-back runs, 1 of 16 on dev, 2026-10-03).
    */
+  // `publishPayload` does not move `RelayTransport.nextTimestamp` for this key: a packet the relays' transport dates
+  // later (the goodbye after `stop()`) is dated by its own clock, past this one unless both fall in one millisecond.
   private toRelays(identity: Identity, records: GhostRecord[], payload: Uint8Array, options?: PkarrRequestOptions): Promise<void> {
     return this.inner.publishPayload ? this.inner.publishPayload(identity.pubKeyZ32, payload, options) : this.inner.publish(identity, records, options);
   }
