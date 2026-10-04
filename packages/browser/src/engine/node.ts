@@ -5559,6 +5559,17 @@ export class GhostlyNode implements EngineImplementation {
   }
 
   /** The turn at a bundle's address, for the restore guard (`devices/restoreGuard.ts`). */
+  /** Discards a fork this device keeps (`DeviceSetView.forks`): only one the record lists, never the profile's own storage. */
+  async deviceForkDiscard({ database }: { database: string }): Promise<void> {
+    const record = await readDeviceRecord(databaseName());
+    if (!record || record.state !== "active" || typeof database !== "string" || !record.forks?.includes(database) || database === databaseName()) throw new Error("There is no such copy on this device");
+    const host = handoffProfileHost();
+    if (!host) throw new Error("This app cannot discard it");
+    await host.staging.drop(database);
+    await amendDevice(databaseName(), { forks: record.forks.filter((name) => name !== database) });
+    this.emitState();
+  }
+
   async deviceTurnPeek({ d }: { d: string }): Promise<TurnPeek> {
     if (this.options.singleDevice) throw new Error("A profile of the command line is on one device only");
     const secret = typeof d === "string" ? fromBase64Url(d) : new Uint8Array();

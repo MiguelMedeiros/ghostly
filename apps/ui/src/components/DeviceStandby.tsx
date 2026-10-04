@@ -83,7 +83,7 @@ export function DeviceStandby({ gate }: { gate: DeviceGateView }) {
         {(reenroll || gate.state === "removed") && (
           <Actions><button type="button" data-testid="device-standby-reenroll" onClick={() => reenrollHere()} className={SCREEN_BUTTON}>{t("devices.join.addThis")}</button></Actions>
         )}
-        {!unfinished && !restored && (gate.state === "standby" || gate.state === "releasing" || gate.state === "taking") && <StandbyHandoff gate={gate} />}
+        {!unfinished && !restored && (gate.state === "standby" || gate.state === "superseded" || gate.state === "releasing" || gate.state === "taking") && <StandbyHandoff gate={gate} />}
         {!unfinished && takeover?.offered && <Takeover gate={gate} info={takeover} />}
         {gate.state !== "unreadable" && gate.state !== "removed" && !unfinished && <Links />}
         {others.length > 0 && (
@@ -119,8 +119,9 @@ function StandbyHandoff({ gate }: { gate: DeviceGateView }) {
   const device = gate.activeDevice ?? t("devices.join.otherDevice");
   const running = !!view && view.step !== "failed" && view.step !== "offer";
   if (!view && gate.state === "releasing") return null;
-  // Not while the new device list waits for an answer: "If this list looks wrong, do not use this device".
-  const useHere = gate.state === "standby" && !gate.notice && !running && view?.step !== "offer";
+  // Not while the new device list waits for an answer: "If this list looks wrong, do not use this device". A replaced
+  // device takes the profile back the same way (WISP 06 § User experience): what only it holds stays, in Data and storage.
+  const useHere = (gate.state === "standby" || gate.state === "superseded") && !gate.notice && !running && view?.step !== "offer";
   return (
     <div className="space-y-3" data-testid="handoff-standby">
       {view?.step === "offer" && <div className={PANEL}><HandoffOffer view={view} /></div>}
