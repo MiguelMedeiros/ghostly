@@ -213,7 +213,12 @@ export class TurnKeeper {
     const mark = read.seen > BigInt(TURN_LAST_SEQUENCE) ? TURN_LAST_SEQUENCE : Number(read.seen);
     // Above the last ordinary sequence only a valid tombstone is remembered (it is the whole of the mark then).
     const kept = read.result === "tombstone" ? Number(read.record!.sequence) : read.result === "closed" ? 0 : mark;
-    if (kept > (held.record.seenSequence ?? 0)) held.record = await this.store.amend(this.options.profile, { seenSequence: kept });
+    if (kept > (held.record.seenSequence ?? 0)) {
+      // A new device secret taken while this read was out (a removal, `remove.ts`): the read was of the old address,
+      // and its mark (that set's own tombstone, often) belongs to no record any more. Kept, it would close the new one.
+      const fresh = await this.store.read(this.options.profile);
+      if (!fresh || fresh.d === held.record.d) held.record = await this.store.amend(this.options.profile, { seenSequence: kept });
+    }
     return read;
   }
 
