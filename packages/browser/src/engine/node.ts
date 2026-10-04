@@ -41,7 +41,7 @@ import { assertConfirmedReal, createTiming, WALLET_NAMES, createFailure, crossNe
 import { migrateWalletNetworks } from "./paymentAdapters/walletNetworks";
 import { perNetwork, type PerNetwork } from "./paymentAdapters/perNetwork";
 import { COMMUNITY_EDIT_FRAME, INVITE_TAKEN, LIVENESS_MISSED_PINGS, LIVENESS_PING_MS, MAX_GROUP_NAME_LENGTH, engineError, engineText, groupName, parseCommunityEdit, traceLink } from "@ghostly/core";
-import { ClockWatch, DirectPathWatch } from "@ghostly/core";
+import { ClockWatch, DirectPathWatch, firstDeviceSetSecret } from "@ghostly/core";
 import { GROUP_WAKE_FRAME, GROUP_WAKE_RECEIVE_LIMIT, GroupWakeLimiter, RateWindow, WAKE_CALL_INTERVAL_MS, WakeLimiter, groupWakeFrame, groupWakes, parseGroupWakeFrame, checkPushEndpoint, newWakeToken, vapidKeysMatch, wakeRequest, type PushRequest, type WakeKind, type WakeTarget } from "@ghostly/core";
 import { COMMUNITY_REACTION_FRAME, GROUP_REACTION_FRAME, REACTION_LIMITS, ReactionWindow, queueReaction, readReaction, validReactionNumber, wireReaction, type WireReaction } from "@ghostly/core";
 import { COMMUNITY_PIN_FRAME, PIN_LIMITS, mayPin, pinIsNewer, pinNumberHolds, readPin, type GroupPinFrame, type WirePin } from "@ghostly/core";
@@ -112,7 +112,7 @@ import { knownDeviceGate, viewOf, type DeviceGateView } from "../devices/gate";
 import { deviceNetworkOf, saveDeviceNetwork } from "../devices/network";
 import { EnrollCodeError, EnrollInviter, EnrollJoiner, EnrollRefusal, ghostLinkEnrollChannel, recoverEnrollment, type EnrollView, type OpenEnrollChannel } from "../devices/enroll";
 import { DeviceLinks, deviceSetView, type DeviceSetView } from "../devices/links";
-import { amendDevice, moveDevice, readDeviceRecord } from "../devices/store";
+import { amendDevice, enrollDevice, forgetDevice, moveDevice, readDeviceRecord } from "../devices/store";
 import { HandoffGiver, type BusyReport, type HandoffStay, type HandoffView } from "../devices/handoff";
 import { WALLET_SDK_PINS, handoffProfileHost, handoffSelf } from "../devices/handoffHost";
 import { handoffLinks, profileRecords } from "../devices/handoffStandby";
@@ -120,7 +120,8 @@ import { isHandoffVerifier, makeHandoffVerifier, provesHandoffPassword, type Han
 import { deviceIdentity, openTurnKeeper } from "../devices/setup";
 import { moveSet, resumeSetMove, type SetMovePorts } from "../devices/remove";
 import { newDeviceSecretDue } from "../devices/rotate";
-import { peekTurn, type TurnPeek } from "../devices/restoreGuard";
+import { RESTORE_UNCHECKED_KEY, isRestoreUnchecked, peekTurn, restoreCheckOf, restoredStandby, type TurnPeek } from "../devices/restoreGuard";
+import { createDeviceSigningKey } from "../devices/signingKey";
 import { afterStop, money, planHandoffWallets, type HandoffTakerFacts, type HandoffWalletPlan, type WalletHome } from "../devices/handoffWallets";
 import { clearWalletHomes, readWalletHomes, writeWalletHomes } from "../devices/walletHomes";
 import { postPush, profileWakeAfter, profileWakeOnRemoval, wakeOwnerOf } from "../devices/push";
@@ -530,6 +531,8 @@ export const LIMITED_MODE_METHODS: ReadonlySet<string> = new Set<keyof EngineApi
   "setActiveLink", "renameLink", "updateSettings", "disconnect",
   "sendMessage", "editMessage", "react", "pinMessage", "forwardMessages", "messageDetails", "messagePage",
   "sendGroupMessage", "groupMessages", "statusCardIndex", "setTyping", "setGroupTyping", "setFastPoll", "exportLinks", "walletBackupReminder",
+  // A restored copy whose read found a tombstone: only the person can start it as a profile of its own.
+  "deviceRestoreStartOwn",
 ]);
 
 /** Thrown by the transport when something tries to publish in limited mode: a bug in a switch point, never a wait. */
@@ -1441,6 +1444,13 @@ export class GhostlyNode implements EngineImplementation {
   }
 
   private async startNow(): Promise<void> {
+    // A copy restored from a backup made before the profile had devices, whose turn could not be read at the restore
+    // (WISP 06 § A backup restored where a device set exists): limited mode, before anything here reads or publishes,
+    // until a read says whether another device runs the profile. Its mark is in this profile's own settings.
+    if (!this.options.singleDevice && !this.limitedMode && (knownDeviceGate()?.state ?? "single") === "single" && isRestoreUnchecked(await this.restoreMark())) {
+      this.limitedMode = true;
+      this.restoreCheck = "checking";
+    }
     // A copy of the profile started from older state (a forced takeover, a restored backup) raises its counters once,
     // before anything here reads them or publishes (WISP 06 § Raised counters).
     await this.raiseCounters();
@@ -1512,6 +1522,89 @@ export class GhostlyNode implements EngineImplementation {
     // Started in limited mode because no source answered the read at start: it reads again every 30 seconds, and the
     // first good read either starts it properly or stops it (WISP 06 § When a device checks).
     if (!this.options.singleDevice && this.limitedMode && knownDeviceGate()?.state === "active") this.readTurnWhileLimited();
+    // A restored copy whose turn was not read at the restore: read now, then every 30 seconds while limited.
+    if (this.restoreCheck === "checking" && this.limitedMode) this.checkRestoredTurn(0);
+  }
+
+  // -- a restored copy whose turn could not be read (WISP 06 § A backup restored where a device set exists) ----------
+
+  /** Where the check of a restored copy stands: reading every 30 seconds, or a tombstone found (the person decides). */
+  private restoreCheck: "checking" | "removed" | null = null;
+  private restoreTimer: ReturnType<typeof setTimeout> | null = null;
+  static readonly RESTORE_CHECK_EVERY_MS = 30_000;
+
+  /**
+   * Reads the turn at the address of the first device-set secret, from the DID key this copy holds: what the restore
+   * could not read. No record: a profile of one device, and limited mode ends. A device active: the copy goes on
+   * standby as a restored copy (a device signing key of its own in a free slot), and its screen offers Take over. A
+   * tombstone: limited until the person starts it as a profile of its own. No answer: again in 30 seconds.
+   */
+  private checkRestoredTurn(after = GhostlyNode.RESTORE_CHECK_EVERY_MS): void {
+    if (this.restoreTimer) clearTimeout(this.restoreTimer);
+    if (this.restoreCheck !== "checking") { this.restoreCheck = "checking"; this.emitState(); }
+    this.restoreTimer = setTimeout(() => {
+      this.restoreTimer = null;
+      void this.readRestoredTurn().catch(() => "wait" as const).then((next) => {
+        if (next === "wait" && !this.shuttingDown && this.limitedMode && this.restoreCheck === "checking") this.checkRestoredTurn();
+      });
+    }, after);
+  }
+
+  /** The read of a restored copy's turn in flight: one at a time, so two can never both write its standby record. */
+  private restoreReading: Promise<"wait" | "done"> | null = null;
+
+  private readRestoredTurn(): Promise<"wait" | "done"> {
+    this.restoreReading ??= this.readRestoredTurnNow().finally(() => { this.restoreReading = null; });
+    return this.restoreReading;
+  }
+
+  private async readRestoredTurnNow(): Promise<"wait" | "done"> {
+    if (this.shuttingDown || !this.limitedMode) return "done";
+    const mark = await this.restoreMark();
+    // The mark went (another page of this profile settled it): what that page decided holds; read the gate again.
+    if (!isRestoreUnchecked(mark)) { this.restoreCheck = null; await this.leaveLimited().catch(() => {}); return "done"; }
+    const seed = await this.did.deviceSetSeed();
+    const peek = await peekTurn(firstDeviceSetSecret(seed), this.turnNetwork()).catch(() => null);
+    if (this.shuttingDown) return "done";
+    const check = restoreCheckOf(peek);
+    if (check === "wait") return "wait";
+    if (check === "single") {
+      await this.clearRestoreMark();
+      this.restoreCheck = null;
+      await this.leaveLimited();
+      return "done";
+    }
+    if (check === "removed") { this.restoreCheck = "removed"; this.emitState(); return "done"; }
+    // A device runs the profile: this copy is on standby, as a restore that read the turn would have made it.
+    const database = databaseName();
+    try {
+      const key = await createDeviceSigningKey(database);
+      const verifier = await this.handoffVerifier().catch(() => null);
+      await enrollDevice(database, "standby", { ...restoredStandby(undefined, seed, peek, key.publicKey, mark.name), signingKey: key.kind, ...(verifier ? { verifier } : {}) });
+    } catch (error) { await forgetDevice(database).catch(() => {}); throw error; }
+    await this.clearRestoreMark();
+    const record = await readDeviceRecord(database).catch(() => null);
+    await this.stopReplaced({ ...(record ? viewOf(record) : { state: "standby" as const }), reload: true });
+    return "done";
+  }
+
+  private async restoreMark(): Promise<unknown> {
+    return wrap((await store(STORES.settings, "readonly")).get(RESTORE_UNCHECKED_KEY)).catch(() => null);
+  }
+
+  private async clearRestoreMark(): Promise<void> {
+    await wrap((await store(STORES.settings, "readwrite")).delete(RESTORE_UNCHECKED_KEY));
+  }
+
+  /**
+   * "Start it as a profile of its own" on a restored copy whose read found a tombstone (WISP 06 § A backup restored where
+   * a device set exists, case 4): the person typed the profile's name on the page. The mark goes, and limited mode ends.
+   */
+  async deviceRestoreStartOwn(): Promise<void> {
+    if (this.restoreCheck !== "removed") throw new Error("This copy is not waiting for that choice");
+    await this.clearRestoreMark();
+    this.restoreCheck = null;
+    await this.leaveLimited();
   }
 
   private limitedTimer: ReturnType<typeof setTimeout> | null = null;
@@ -1807,6 +1900,8 @@ export class GhostlyNode implements EngineImplementation {
     this.tombstoneTimer = null;
     if (this.activeTurnTimer) clearTimeout(this.activeTurnTimer);
     this.activeTurnTimer = null;
+    if (this.restoreTimer) clearTimeout(this.restoreTimer);
+    this.restoreTimer = null;
     await links?.stop().catch(() => {});
     this.identities.stop();
     this.did.stop();
@@ -1851,6 +1946,7 @@ export class GhostlyNode implements EngineImplementation {
     return {
       settings: this.settings,
       ...(this.limitedMode && { limited: true as const }),
+      ...(this.limitedMode && this.restoreCheck && { restoreCheck: this.restoreCheck }),
       ...(wakeOwnerOf(this.settings.wake, this.ownDeviceKey) && { wakeOwner: wakeOwnerOf(this.settings.wake, this.ownDeviceKey) }),
       transport: {
         ...this.transport.describe(), ...(this.options.irohWeb || this.ownIrohRelays ? { iroh: { relays: this.irohRelays, defaults: [...DEFAULT_IROH_RELAYS] } } : {}),

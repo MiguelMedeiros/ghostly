@@ -1,6 +1,6 @@
 import { toBase64Url } from "@ghostly/core";
 import { engine } from "@ghostly/browser/platform/engine";
-import { activeName, bundleSecret, restoreCase, restoredStandby, type RestoreCase, type TurnPeek } from "@ghostly/browser/devices/restoreGuard";
+import { activeName, bundleSecret, markRestoreUnchecked, restoreCase, restoredStandby, type RestoreCase, type TurnPeek } from "@ghostly/browser/devices/restoreGuard";
 import { createDeviceSigningKey } from "@ghostly/browser/devices/signingKey";
 import { enrollDevice, forgetDevice } from "@ghostly/browser/devices/store";
 import { bundleDidSeed, restoreOpenedBackup, type BackupRun, type OpenedProfileBackup } from "./profileBackup";
@@ -53,3 +53,10 @@ export async function restoreForTakeover(opened: OpenedProfileBackup, guard: Res
     } catch (error) { await forgetDevice(database).catch(() => {}); throw error; }
   });
 }
+
+/**
+ * What a restore whose turn could not be read writes before the profile is listed (case `unchecked`: a bundle made
+ * before enrollment): the mark that starts the copy in limited mode until a read says whether another device runs it.
+ * Passed to `restoreOpenedBackup` as its last step before the profile is registered.
+ */
+export const markUncheckedRestore = (database: string): Promise<void> => markRestoreUnchecked(database, defaultDeviceName().slice(0, 16));
