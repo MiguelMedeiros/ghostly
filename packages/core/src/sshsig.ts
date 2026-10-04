@@ -130,7 +130,8 @@ function parseKeyBlob(blob: Uint8Array): ParsedKey {
 /** Parses one `.pub` style line (`type base64 [comment]`). */
 export function parseSshPublicKey(line: string): SshPublicKey {
   if (typeof line !== 'string' || line.length > SSH_PUBLIC_KEY_MAX) fail('SSH public key too long');
-  const m = /^\s*(\S+)\s+(\S+)(?:\s[^\n]*)?\s*$/.exec(line);
+  // Trimmed first: a pattern that ends in `[^\n]*\s*` tries every split of a run of spaces between the two.
+  const m = /^(\S+)\s+(\S+)(?:\s[^\n]*)?$/.exec(line.trim());
   if (!m) fail('Paste one SSH public key line (the contents of a .pub file)');
   const key = parseKeyBlob(strictBase64(m![2], SSH_PUBLIC_KEY_MAX));
   if (key.type !== m![1]) fail('SSH key type does not match its data');

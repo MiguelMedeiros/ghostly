@@ -89,6 +89,11 @@ describe("device invite vectors", () => {
     expect(readDeviceInvite(code.toUpperCase(), NOW).ok).toBe(true);
     expect(readDeviceInvite(`https://ghostly.tools/#${code}`, NOW).ok).toBe(true);
     expect(readDeviceInvite(` ${code}. `, NOW).ok).toBe(true);
+    expect(readDeviceInvite(`${code}!).`, NOW).ok).toBe(true);
+  });
+
+  it("refuses a long run of punctuation that does not reach the end, read in one pass", () => {
+    expect(readDeviceInvite(`${"!".repeat(200_000)}x`, NOW).ok).toBe(false);
   });
 });
 

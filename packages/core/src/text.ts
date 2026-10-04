@@ -29,3 +29,13 @@ export function sanitizeDisplayText(text: string, max: number): string | undefin
 export function sanitizeNick(nick: unknown): string | undefined {
   return typeof nick === "string" ? sanitizeDisplayText(nick, MAX_NICK_LENGTH) : undefined;
 }
+
+/**
+ * `text` without the characters of `chars` it ends with, in one pass from the end. A `/[…]+$/` replace would retry
+ * from every character of a run that does not reach the end.
+ */
+export function trimEndOf(text: string, chars: string): string {
+  let end = text.length;
+  while (end > 0 && chars.includes(text[end - 1])) end--;
+  return end === text.length ? text : text.slice(0, end);
+}
