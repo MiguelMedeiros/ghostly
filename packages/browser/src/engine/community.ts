@@ -757,9 +757,11 @@ export class Communities {
         const wait = (back || taking || live.replacing?.has(key) ? 3 : listed ? 2 : 1) * this.timings.hubWaitMs;
         // One I never had an edge with that the beacon listed and lists no more (read just now): it left or stepped down,
         // and the hubs wrote it out. Not waited for: with no edge to it I do not hear its leave, and it never opens its
-        // side (a newcomer let in by the admin waited for it 20 s after the admin had left, 2026-10-03).
+        // side (a newcomer let in by the admin waited for it 20 s after the admin had left, 2026-10-03). It is cut off as
+        // after a leave: the hub taken in its place is waited for longer, and it does not step up as a hub meanwhile
+        // (`CUT_OFF_STEP_UP_MS`; on CLI daemons it stepped up two seconds later, a hub with no edge to anyone).
         const dropped = !live.hubsUp.has(key) && live.beaconAt === now && live.seenHubs.has(key) && !live.beacon.some(h => h.key === key);
-        if (now - since > wait || dropped) { if (live.hubsUp.has(key)) lost = true; live.hubsAvoided.set(key, now + 2 * wait); live.hubWaits.delete(key); live.hubsUp.delete(key); live.replacing?.delete(key); }
+        if (now - since > wait || dropped) { if (live.hubsUp.has(key) || dropped) lost = true; live.hubsAvoided.set(key, now + 2 * wait); live.hubWaits.delete(key); live.hubsUp.delete(key); live.replacing?.delete(key); }
       }
       let kept = live.myHubs.filter(key => (fresh.has(key) || this.recentHub(live, key)) && !live.hubsAvoided.has(key));
       kept = kept.slice(0, COMMUNITY_TOPOLOGY.hubsPerMember);

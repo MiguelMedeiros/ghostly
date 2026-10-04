@@ -120,9 +120,12 @@ describe("a member with no edge up when the admin leaves", { timeout: 120_000 },
     const { world, id, admin, last, rest } = found!;
     await admin.groups.leave(id);
     for (const p of rest) await p.groups.send(id, `line ${p.name}`);
-    const back = await world.until(() => connected(world, last, id) > 0, 3 * 60_000);
+    // Cut off, it waits for the hub taking it rather than step up as a hub with no edge to anyone.
+    let steppedUp = false;
+    const back = await world.until(() => { steppedUp ||= last.groups.communities.isHub(id) && connected(world, last, id) === 0; return connected(world, last, id) > 0; }, 3 * 60_000);
     // A reading of the beacon within 10 s, the hub's lobby within 6, a few seconds of signaling: before, 49 s.
     expect(back).toBeLessThanOrEqual(30_000);
+    expect(steppedUp, "a hub before it had an edge").toBe(false);
     await world.until(() => rest.every(p => rest.every(q => q === p || world.texts(p, id).includes(`line ${q.name}`))), 60_000);
   });
 });
