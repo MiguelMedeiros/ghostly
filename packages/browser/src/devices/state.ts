@@ -269,7 +269,8 @@ export interface DeviceRecord {
   /**
    * Written at quiesce: the Breez databases of the Spark wallets and Breez Lightning cards that move, deleted once this
    * device released the turn (WISP 06 § Wallets): named from the phrase, a device that took the profile back would
-   * otherwise reopen a stale one. Cleared once they are gone.
+   * otherwise reopen a stale one. Cleared once they are gone, and when the handoff fails (`releasing` back to `active`):
+   * a list kept from a failed handoff would be deleted after the next one, whatever that one moved.
    */
   breezDatabases?: string[];
   earlierSets: EarlierDeviceSet[];
@@ -394,7 +395,11 @@ export function transition(from: DeviceRecord | null, profile: string, to: Store
     if (to !== "active" && to !== "standby") throw new DeviceTransitionError(state, to);
     return firstRecord(profile, to, patch);
   }
-  return checked(rising(from, { ...from, ...clean(patch), state: to }));
+  // A handoff that failed (the device is active again, it never released) leaves no Breez databases to delete behind.
+  const failed = from.state === "releasing" && to === "active" && !("breezDatabases" in patch);
+  const next = { ...from, ...clean(patch), state: to };
+  if (failed) delete next.breezDatabases;
+  return checked(rising(from, next));
 }
 
 /** The record with some fields changed and its state kept. */

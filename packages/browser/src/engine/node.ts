@@ -5508,11 +5508,12 @@ export class GhostlyNode implements EngineImplementation {
     // Each wallet's record says where it lives from here: a wallet that stays home is marked with this device (or the
     // home it already had), one that moves loses any mark. The marks move with the profile, in pass 2.
     await writeWalletHomes(plan.wallets);
+    // This list replaces any earlier one: after the release, only what moves in this handoff is deleted.
     const breezDatabases = [...new Set(plan.wallets.flatMap((w) => (w.route === "moves" && w.breez && breez.has(w.id) ? [breez.get(w.id)!] : [])))];
     // The password proof's verifier goes beside the state: a standby checks a forced takeover's password with it,
     // without opening its frozen copy (WISP 06 § Forced takeover).
     const verifier = await this.handoffVerifier().catch(() => null);
-    await moveDevice(profile, "releasing", { ...patch, ...(verifier ? { verifier } : {}), ...(breezDatabases.length ? { breezDatabases } : {}) });
+    await moveDevice(profile, "releasing", { ...patch, ...(verifier ? { verifier } : {}), breezDatabases: breezDatabases.length ? breezDatabases : undefined });
     this.events.onDeviceGate?.({ state: "releasing", reload: true });
   }
 
