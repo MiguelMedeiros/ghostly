@@ -297,7 +297,8 @@ export function pointProfile(from: string, to: string): void {
     const { space: _was, ...rest } = p;
     return space === undefined ? rest : { ...rest, space };
   }) });
-  // Read back before anyone reloads on it: a write the storage did not keep fails here, not as an empty profile later.
+  // Read back before anyone reloads on it: a write that did not take effect fails here, not as an empty profile later.
+  // (It cannot see a write the storage later loses on disk; the device record's `home` recovers that at the next start.)
   if (namespaceOf(entry.id) !== (space ?? derivedNamespace(entry.id))) throw new Error("The profile's storage could not be pointed at the new state");
 }
 
