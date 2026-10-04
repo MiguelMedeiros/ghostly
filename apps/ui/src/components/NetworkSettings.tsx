@@ -95,7 +95,7 @@ export function NetworkSettings() {
           className={`${field} font-mono text-sm resize-y`} />
       </Field>
 
-      {network.iroh && <Field label={t("network.iroh")} htmlFor="network-iroh-relays" hint={t("network.irohHint")} info={t("network.irohInfo")}
+      {network.iroh && <Field testId="network-iroh-field" label={t("network.iroh")} htmlFor="network-iroh-relays" hint={t("network.irohHint")} info={t(direct ? "network.irohInfoDirect" : "network.irohInfo")}
         trailing={<button onClick={() => setIroh(network.iroh!.defaultRelays.join("\n"))} aria-label={t("network.resetIroh")} className={reset}>{t("network.reset")}</button>}>
         <textarea id="network-iroh-relays" value={iroh} onChange={(e) => setIroh(e.target.value)} rows={2} spellCheck={false} data-testid="network-iroh-relays"
           className={`${field} font-mono text-sm resize-y`} />

@@ -1,5 +1,5 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
-import { irohDescriptor, type BoundChannel, type FrameChannel, type NativeBinding, type NativeEndpoint } from "@ghostly/core";
+import { irohDescriptor, irohRelayUrl, type BoundChannel, type FrameChannel, type NativeBinding, type NativeEndpoint } from "@ghostly/core";
 
 type Event = { type: "open"; id: number; binding: NativeBinding; incoming: boolean }
   | { type: "frame"; id: number; text: string } | { type: "closed"; id: number };
@@ -42,7 +42,11 @@ class NativeChannel implements FrameChannel {
   }
 }
 
-export async function createNativeEndpoint(seedB64: string, kind: "iroh" | "hyperdht"): Promise<NativeEndpoint> {
+/**
+ * An endpoint of the Desktop's own Iroh or HyperDHT. `relays`: the Iroh relays it homes on (Settings, Network); without
+ * any, `GHOSTLY_IROH_RELAYS` where set (tests), else n0's public relays.
+ */
+export async function createNativeEndpoint(seedB64: string, kind: "iroh" | "hyperdht", options: { relays?: string[] } = {}): Promise<NativeEndpoint> {
   let endpointId = 0;
   const connections = new Map<number, BoundChannel>();
   const events = new Channel<Event>();
@@ -61,7 +65,9 @@ export async function createNativeEndpoint(seedB64: string, kind: "iroh" | "hype
     } else if (event.type === "frame") (connections.get(event.id)?.channel as NativeChannel | undefined)?.receive(event.text);
     else { connections.get(event.id)?.channel.close(); connections.delete(event.id); }
   };
-  const result = await invoke<{ id: number; descriptor: unknown }>(`paired_${kind}_start`, { seedB64, events });
+  // In the spelling native Iroh names relays with (the trailing dot), as a contact's record and the dial use.
+  const relays = kind === "iroh" && options.relays?.length ? { relays: options.relays.map((relay) => irohRelayUrl(relay)) } : {};
+  const result = await invoke<{ id: number; descriptor: unknown }>(`paired_${kind}_start`, { seedB64, ...relays, events });
   endpointId = result.id;
   let handler: NativeEndpoint["onConnection"] = null;
   const refresh = setInterval(() => {
@@ -104,5 +110,5 @@ export async function createNativeEndpoint(seedB64: string, kind: "iroh" | "hype
   return endpoint;
 }
 
-export const createIrohEndpoint = (seed: string) => createNativeEndpoint(seed, "iroh");
+export const createIrohEndpoint = (seed: string, options?: { relays?: string[] }) => createNativeEndpoint(seed, "iroh", options);
 export const createHyperEndpoint = (seed: string) => createNativeEndpoint(seed, "hyperdht");

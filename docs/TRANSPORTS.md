@@ -35,7 +35,7 @@ Every transport runs the same authenticated chat session ([WISP 401](wisps/401-p
 
 ### Iroh
 
-- **Desktop:** native Iroh (`native/transports/`, `apps/desktop/src/paired_transport.rs`) on n0's public relays.
+- **Desktop:** native Iroh (`native/transports/`, `apps/desktop/src/paired_transport.rs`), homed on the Iroh relays of Settings, Network when some are set, else on n0's public relays. `GHOSTLY_IROH_RELAYS` (comma-separated URLs) replaces n0's where no relay is set (tests, a self-hosted `iroh-relay`).
 - **Web and extension** ([#225](https://github.com/MiguelMedeiros/ghostly/pull/225)): the same Iroh 1.3 built for browsers (`native/transports/iroh-web`, shipped as `packages/iroh-web`). A page cannot send UDP, so every packet goes through an Iroh relay. The QUIC/TLS session is still end to end.
 - Default Iroh relays (`DEFAULT_IROH_RELAYS` in `packages/browser/src/platform/irohWeb.ts`), editable in Settings, Advanced, Network (up to four):
   - `https://use1-1.relay.n0.iroh.link/`

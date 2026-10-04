@@ -60,6 +60,22 @@ describe("Settings, Network: Iroh relays", () => {
   });
 });
 
+describe("Settings, Network: Iroh relays on the Desktop", () => {
+  it("shows them, with what a relay is for where Iroh connects directly when it can", async () => {
+    const DEFAULTS = ["https://use1-1.relay.n0.iroh.link/"];
+    const { engine, user } = renderApp(<NetworkSettings />);
+    act(() => engine.update({ transport: { protocol: "Mainline DHT (BEP44) — Direct UDP", relays: [], direct: true, iroh: { relays: DEFAULTS, defaults: DEFAULTS } }, settings: { relays: RELAYS } }));
+    const row = screen.getByTestId("network-iroh-field");
+    const text = await info(user, row);
+    expect(text).toHaveTextContent(/directly when it can/);
+    expect(text).not.toHaveTextContent(/A browser cannot/);
+    await user.clear(within(row).getByTestId("network-iroh-relays"));
+    await user.type(within(row).getByTestId("network-iroh-relays"), "http://127.0.0.1:3340/");
+    await user.click(screen.getByTestId("network-save"));
+    expect(engine.callsTo("updateSettings").slice(-1)[0]).toMatchObject({ settings: { irohRelays: ["http://127.0.0.1:3340/"] } });
+  });
+});
+
 describe("Settings, Network: TURN server", () => {
   const transport = { protocol: "Pkarr relays (HTTP) → Mainline DHT (BEP44)", relays: RELAYS };
 

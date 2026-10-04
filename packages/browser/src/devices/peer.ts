@@ -53,6 +53,9 @@ export async function standbyEngine(gate: DeviceGate, options: NodeOptions | und
     pollIntervals: options?.pollIntervals,
     nativeTransports: {
       ...options?.nativeTransports,
+      // The host's own Iroh (the Desktop) on the person's Iroh relays, as the engine runs it.
+      ...(options?.nativeIrohRelays && options.nativeTransports?.["iroh/1"] && network.irohRelays?.length
+        ? { "iroh/1": (seedB64: string) => options.nativeTransports!["iroh/1"]!(seedB64, { relays: [...network.irohRelays!] }) } : {}),
       ...(options?.irohWeb ? { "iroh/1": (seedB64: string) => createIrohWebEndpoint(seedB64, { relays: irohRelays }) } : {}),
     },
   });

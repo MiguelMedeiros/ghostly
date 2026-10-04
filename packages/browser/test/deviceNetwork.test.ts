@@ -109,6 +109,26 @@ describe("a standby's network", () => {
     } finally { vi.useRealTimers(); }
   });
 
+  it("homes a Desktop's own Iroh on the person's Iroh relays, where the host takes them", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "Date"] });
+    try {
+      await standbyRecord(NETWORK);
+      const gate = await openDeviceGate("ghostly");
+      const pkarr = new MemoryPkarr(DESKTOP_NETWORK);
+      const given: unknown[] = [];
+      const engine = (await standbyEngine(gate, {
+        transport: pkarr.transport(), pollIntervals: RELAY_POLL_INTERVALS, nativeIrohRelays: true,
+        nativeTransports: { "iroh/1": async (_seed: string, options?: { relays?: string[] }) => { given.push(options); throw new Error("No Iroh in this test"); } },
+      }))!;
+      await engine.start({ gate, show: () => {} });
+      for (let i = 0; i < 20 && !given.length; i++) await vi.advanceTimersByTimeAsync(50);
+      expect(given).toEqual([{ relays: NETWORK.irohRelays }]);
+      const stopping = engine.stop();
+      for (let i = 0; i < 40; i++) await vi.advanceTimersByTimeAsync(100);
+      await stopping;
+    } finally { vi.useRealTimers(); }
+  });
+
   it("asks nothing of anyone with the network off: no relay, no DHT, no link, no turn read", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "Date"] });
     try {

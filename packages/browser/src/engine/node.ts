@@ -380,12 +380,20 @@ function newLiveLink(stored: StoredLink, lastMessageAt: number, files = emptyLin
 /** What a host may replace. The defaults are what a browser can do on its own. */
 const PAYMENT_METHODS: PaymentMethodName[] = ["cashu", "lightning", "arkade", "usdt", "bark", "bitcoin", "fedimint", "spark"];
 
+/** How a host makes a native endpoint for a transport: from a seed, and for Iroh the relays the person chose, if any. */
+export type NativeFactory = (seedB64: string, options?: { relays?: string[] }) => Promise<NativeEndpoint>;
+
 export interface NodeOptions {
   /**
    * The native transports this app runs itself (the Desktop: Iroh and HyperDHT over its sidecars). Default: a
    * browser's, which is HyperDHT through the relay in `Settings.hyperdhtRelay`, when one is set.
    */
-  nativeTransports?: Partial<Record<NativeTransport, (seedB64: string) => Promise<NativeEndpoint>>>;
+  nativeTransports?: Partial<Record<NativeTransport, NativeFactory>>;
+  /**
+   * The host's own Iroh (`nativeTransports["iroh/1"]`, the Desktop's) homes on the Iroh relays it is given: the
+   * person's from Settings, Network, which then shows them here as in a browser. Absent: it homes on its own defaults.
+   */
+  nativeIrohRelays?: boolean;
   /**
    * Run Iroh in the page (web app, extension): the wasm build, relay only, on the relays in the settings
    * (WISP 102). It loads when a chat first starts an endpoint, not with the app.
@@ -1843,7 +1851,7 @@ export class GhostlyNode implements EngineImplementation {
       ...(this.limitedMode && { limited: true as const }),
       ...(wakeOwnerOf(this.settings.wake, this.ownDeviceKey) && { wakeOwner: wakeOwnerOf(this.settings.wake, this.ownDeviceKey) }),
       transport: {
-        ...this.transport.describe(), ...(this.options.irohWeb ? { iroh: { relays: this.irohRelays, defaults: [...DEFAULT_IROH_RELAYS] } } : {}),
+        ...this.transport.describe(), ...(this.options.irohWeb || this.ownIrohRelays ? { iroh: { relays: this.irohRelays, defaults: [...DEFAULT_IROH_RELAYS] } } : {}),
         ...(this.transport.configure && { direct: true }), ...(this.transport.discovery && { discovery: this.transport.discovery() }),
         ...(typeof RTCPeerConnection === "undefined" && { webrtc: false as const }),
         ...(this.directPath.blocked && { directBlocked: true as const }),
@@ -6300,14 +6308,18 @@ export class GhostlyNode implements EngineImplementation {
       // Loaded only now: a browser that never uses a relay never downloads the HyperDHT client.
       ...(relay ? { "hyperdht/1": async (seedB64: string) => (await import("../platform/hyperdhtRelay")).createRelayedHyperEndpoint(seedB64, relay) } : {}),
       ...this.options.nativeTransports,
+      // The host's own Iroh on the person's Iroh relays, read when the endpoint starts; on its own defaults without.
+      ...(this.ownIrohRelays ? { "iroh/1": (seedB64: string) => this.options.nativeTransports!["iroh/1"]!(seedB64, this.settings.irohRelays?.length ? { relays: [...this.settings.irohRelays] } : {}) } : {}),
       ...(this.options.irohWeb ? { "iroh/1": (seedB64: string) => createIrohWebEndpoint(seedB64, { relays: this.irohRelays }) } : {}),
     };
   }
+  /** The host runs Iroh itself and homes it on the relays it is given (the Desktop). */
+  private get ownIrohRelays(): boolean { return !!this.options.nativeIrohRelays && !!this.options.nativeTransports?.["iroh/1"]; }
   private get irohRelays(): string[] { return this.settings.irohRelays?.length ? this.settings.irohRelays : [...DEFAULT_IROH_RELAYS]; }
 
   /** New Iroh relays: idle endpoints move now; one carrying a chat keeps its relay until that session ends. */
   private async rehomeIroh(): Promise<void> {
-    if (!this.options.irohWeb) return;
+    if (!this.options.irohWeb && !this.ownIrohRelays) return;
     for (const [linkId, live] of this.links) {
       const link = live.link;
       if (!link?.availableTransports.includes("iroh/1") || !link.canReleaseEndpoint("iroh/1")) continue;
