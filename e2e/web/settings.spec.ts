@@ -109,12 +109,14 @@ test("lock screen: a password locks the app, only it unlocks it", { tag: ["@feat
   await passwords.nth(0).fill("boo");
   await passwords.nth(1).fill("boo");
   await page.getByRole("button", { name: "Set password" }).click();
-  await expect(page.getByText("Password must be at least 4 characters")).toBeVisible();
+  // Said under the field, and in the floating card.
+  await expect(page.getByTestId("settings-password-new-error")).toHaveText("Password must be at least 4 characters");
+  await expect(page.getByTestId("settings-notice")).toContainText("Password not set");
 
   await passwords.nth(0).fill("spooky");
   await passwords.nth(1).fill("spookier");
   await page.getByRole("button", { name: "Set password" }).click();
-  await expect(page.getByText("Passwords do not match")).toBeVisible();
+  await expect(page.getByTestId("settings-password-confirm-error")).toHaveText("Passwords do not match");
 
   await passwords.nth(1).fill("spooky");
   await page.getByRole("button", { name: "Set password" }).click();
@@ -137,7 +139,8 @@ test("lock screen: a password locks the app, only it unlocks it", { tag: ["@feat
   await page.getByTestId("settings-password-edit").click();
   await passwords.nth(0).fill("wrong");
   await page.getByRole("button", { name: "Remove password" }).click();
-  await expect(page.getByText("Incorrect password")).toBeVisible();
+  await expect(page.getByTestId("settings-password-current-error")).toHaveText("Incorrect password");
+  await expect(page.getByTestId("settings-notice")).toContainText("Password not removed");
   await passwords.nth(0).fill("spooky");
   await page.getByRole("button", { name: "Remove password" }).click();
   await expect(page.getByText("Password removed")).toBeVisible();

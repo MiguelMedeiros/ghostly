@@ -40,7 +40,7 @@ describe("the lock password a device set needs (WISP 06 § Adding a device)", ()
     await user.type(screen.getByTestId("device-add-password"), "short1");
     await user.type(screen.getByTestId("device-add-password-again"), "short1");
     await user.click(screen.getByTestId("device-add-next"));
-    expect(await screen.findByRole("alert")).toHaveTextContent("Use 8 characters or more.");
+    expect(await screen.findByTestId("device-add-password-error")).toHaveTextContent("Use 8 characters or more.");
     expect(engine.callsTo("deviceEnrollInvite")).toHaveLength(0);
     await user.clear(screen.getByTestId("device-add-password")); await user.clear(screen.getByTestId("device-add-password-again"));
     await user.type(screen.getByTestId("device-add-password"), "long enough");
@@ -73,7 +73,7 @@ describe("the lock password a device set needs (WISP 06 § Adding a device)", ()
     const [fresh, again] = screen.getByTestId("settings-password-form").querySelectorAll("input");
     await user.type(fresh, "abcde"); await user.type(again, "abcde");
     await user.click(screen.getByRole("button", { name: "Set password" }));
-    expect(await screen.findByText("A profile on several devices keeps its lock password, 8 characters or more.")).toBeInTheDocument();
+    expect(await screen.findByTestId("settings-password-new-error")).toHaveTextContent("A profile on several devices keeps its lock password, 8 characters or more.");
     expect(JSON.parse(localStorage.getItem("ghostly_app_settings") ?? "{}").lockScreen?.passwordHash ?? null).toBeNull();
   }, 20_000);
 
@@ -98,7 +98,7 @@ describe("the lock password a device set needs (WISP 06 § Adding a device)", ()
     expect(screen.getByText("Type your lock password")).toBeInTheDocument();
     await user.type(screen.getByTestId("device-add-password"), "4321");
     await user.click(screen.getByTestId("device-add-next"));
-    expect(await screen.findByRole("alert")).toHaveTextContent("Wrong password.");
+    expect(await screen.findByTestId("device-add-password-error")).toHaveTextContent("Wrong password.");
     await user.clear(screen.getByTestId("device-add-password"));
     await user.type(screen.getByTestId("device-add-password"), "1234");
     await user.click(screen.getByTestId("device-add-next"));

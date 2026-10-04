@@ -22,7 +22,8 @@ test("a profile adds a second device: the same digits on both, a standby with a 
   await add.getByTestId("device-add-password").fill("short");
   await add.getByTestId("device-add-password-again").fill("short");
   await add.getByTestId("device-add-next").click();
-  await expect(add.getByRole("alert")).toHaveText("Use 8 characters or more.");
+  await expect(add.getByTestId("device-add-password-error")).toHaveText("Use 8 characters or more.");
+  await expect(add.getByTestId("device-add-notice")).toBeVisible();
   await add.getByTestId("device-add-password").fill("a long lock password");
   await add.getByTestId("device-add-password-again").fill("a long lock password");
   await add.getByTestId("device-add-next").click();

@@ -46,7 +46,9 @@ test("lock screen: a reload stays locked, the password can be changed, and the l
   await field(page, "New password").fill("second secret");
   await field(page, "Confirm password").fill("second secret");
   await page.getByRole("button", { name: "Change password" }).click();
-  await expect(page.getByText("Incorrect password", { exact: true })).toBeVisible();
+  await expect(page.getByTestId("settings-password-current-error")).toHaveText("Incorrect password");
+  await expect(page.getByTestId("settings-notice")).toBeVisible();
+  await expect(page.getByTestId("settings-notice")).toContainText("Password not changed");
   await field(page, "Current password").fill("first secret");
   await page.getByRole("button", { name: "Change password" }).click();
   await expect(page.getByText("Password changed successfully")).toBeVisible();
