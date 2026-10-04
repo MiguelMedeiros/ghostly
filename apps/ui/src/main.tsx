@@ -5,7 +5,6 @@ import { getVersion } from "@tauri-apps/api/app";
 import { setBrowserHost } from "@ghostly/browser/host";
 import { becomeThePeer } from "@ghostly/browser/inPageHost";
 import { startSessionSync } from "@ghostly/browser/platform/sync";
-import { setDatabaseName } from "@ghostly/browser/shared/idb";
 import { openDeviceGate } from "@ghostly/browser/devices/gate";
 import { setDeviceMirror } from "@ghostly/browser/devices/store";
 import { setHandoffProfileHost } from "@ghostly/browser/devices/handoffHost";
@@ -15,10 +14,8 @@ import { isDesktopApp } from "./lib/externalLink";
 import { Root } from "./Root";
 import { createDesktopHost } from "./desktop/host";
 import { nativeCallSupport } from "./desktop/nativeCalls";
-import { setStorageProfile } from "./lib/storage";
-import { activeProfileId, namespaceOf, setProfileBase, setRunningProfile } from "./lib/profiles";
-import { loadSettings } from "./lib/settings";
-import { applyDocumentLanguage } from "./lib/documentLanguage";
+import { setProfileBase } from "./lib/profiles";
+import { openProfile } from "./lib/profileStart";
 
 async function boot() {
   let profile = "";
@@ -29,18 +26,9 @@ async function boot() {
   }
   // GHOSTLY_PROFILE gives this process a space of its own; inside it, the profile chosen in the app (WISP 04).
   setProfileBase(profile);
-  // A profile a handoff moved whose pointer was lost: pointed at its state again before anything opens storage.
-  await recoverHandoffPointer(activeProfileId());
-  const profileId = activeProfileId();
-  setRunningProfile(profileId);
-  profile = namespaceOf(profileId);
-  // Profiles share the WebView's storage area; each gets its own sessions, database and peer.
-  if (profile) {
-    setStorageProfile(profile);
-    setDatabaseName(`ghostly_${profile}`);
-  }
-  // The profile's language on <html> before anything is painted (the I18nProvider keeps it in step from then on).
-  applyDocumentLanguage(loadSettings().language);
+  // A profile a handoff moved whose pointer was lost is pointed at its state again before anything opens storage. Each
+  // profile gets its own sessions, database and peer (they share the WebView's storage area), and its language on <html>.
+  profile = await openProfile(recoverHandoffPointer);
 
   const root = createRoot(document.getElementById("root")!);
   await becomeThePeer(`ghostly-peer-${profile}`, () =>

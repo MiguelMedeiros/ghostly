@@ -5,18 +5,15 @@ import { startSessionSync } from "@ghostly/browser/platform/sync";
 import { Root } from "../../ui/src/Root";
 import { PeerLockUnavailable, becomeThePeer } from "@ghostly/browser/inPageHost";
 import { webHost } from "./host";
-import { setDatabaseName } from "@ghostly/browser/shared/idb";
 import { openDeviceGate } from "@ghostly/browser/devices/gate";
 import { setHandoffProfileHost } from "@ghostly/browser/devices/handoffHost";
 import { handoffProfileHost, recoverHandoffPointer } from "../../ui/src/lib/handoffProfile";
-import { setStorageProfile } from "../../ui/src/lib/storage";
-import { activeProfileId, namespaceOf, setRunningProfile } from "../../ui/src/lib/profiles";
+import { openProfile } from "../../ui/src/lib/profileStart";
 import { loadSettings } from "../../ui/src/lib/settings";
 import { bootDetails, missingEssentials, type Essential } from "../../ui/src/lib/bootCheck";
 import { UnsupportedBrowser } from "../../ui/src/components/UnsupportedBrowser";
 import { locales } from "../../ui/src/locales";
 import { translateWith } from "../../ui/src/locales/translate";
-import { applyDocumentLanguage } from "../../ui/src/lib/documentLanguage";
 import { watchInstallPrompt } from "../../ui/src/lib/installPrompt";
 import { setPushPlatform } from "../../ui/src/lib/wakePush";
 import { currentPush, pushSupported, subscribePush, syncWakeTable, syncWakeText, unsubscribePush } from "./pwa/push";
@@ -33,16 +30,10 @@ registerServiceWorker();
 setPushPlatform({ supported: pushSupported, subscribe: subscribePush, current: currentPush, unsubscribe: unsubscribePush, syncTable: syncWakeTable, syncText: syncWakeText });
 
 // The chosen local profile (WISP 04): its own chats, database, settings and single-peer lock. The
-// default profile keeps the original names, so nothing existing moves.
-// A profile a handoff moved whose pointer was lost: pointed at its state again before anything opens storage.
-await recoverHandoffPointer(activeProfileId());
-const profileId = activeProfileId();
-const profile = namespaceOf(profileId);
-// This tab stays that profile, even when it waits below and another tab chooses another one meanwhile.
-setRunningProfile(profileId);
-if (profile) { setStorageProfile(profile); setDatabaseName(`ghostly_${profile}`); }
-// The profile's language on <html> before anything is painted (the I18nProvider keeps it in step from then on).
-applyDocumentLanguage(loadSettings().language);
+// default profile keeps the original names, so nothing existing moves. A profile a handoff moved whose pointer was lost
+// is pointed at its state again before anything opens storage. Its language is on <html> before the first paint (the
+// I18nProvider keeps it in step from then on).
+const profile = await openProfile(recoverHandoffPointer);
 
 /**
  * "Ghostly can't run in this browser", in the profile's language, instead of the app: said rather than a blank page
