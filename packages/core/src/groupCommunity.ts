@@ -8,7 +8,7 @@ import {
   type SealedSecret,
 } from "./groupCrypto";
 import { engineError } from "./engineErrors";
-import { GROUP_ADMIN_OFF_ERROR, GROUP_ID, OWN_FRAME_LIMIT, MEMBER_KEY, rosterAdmin, rosterHas, sortRoster, type GroupRole, type Roster } from "./groupCommits";
+import { GROUP_ADMIN_OFF_ERROR, GROUP_ID, OWN_FRAME_LIMIT, MEMBER_KEY, SAID_AGAIN, rememberAlone, rosterAdmin, rosterHas, sortRoster, type GroupRole, type Roster } from "./groupCommits";
 import { mentionsBytes, validMentions, wireMentions, type GroupMention } from "./groupMentions";
 import { groupReplyAuthor, readReply, wireReply, type WireReply } from "./replies";
 import { readForwarded } from "./forwards";
@@ -366,12 +366,6 @@ const seenKey = (e: number, h: string) => `${e}:${h}`;
 const frameKey = (f: { e: number; h: string; n: number }) => `${f.e}:${f.h}:${f.n}`;
 /** Frames of mine remembered as not heard by anyone yet. */
 const UNHEARD_KEPT = 64;
-/**
- * A frame of mine said with no edge up is said again for the members let in before it (`resealBehind`) once the chain
- * has not moved for this long: a catch-up brings commits one by one, and a frame said again at the first of them would
- * still miss the members let in by the next.
- */
-const RESEAL_SETTLED_MS = 5_000;
 /**
  * Where a frame said again under a newer commit was first said (`o`, WISP 9xx § Messages and catch-up): its commit's
  * epoch and short hash and its number there. Never the frame's own place, nor a later epoch than its own.
@@ -1144,7 +1138,7 @@ export class CommunitySession {
     await this.persist();
     if (this.hooks.broadcast(frame) === 0) {
       // Said alone: I may be behind on the chain without knowing (`resealBehind`).
-      this.state.alone = [...(this.state.alone ?? []).filter(key => inStore.has(key)), frameKey(frame)].slice(-UNHEARD_KEPT);
+      this.state.alone = rememberAlone(this.state.alone, frameKey(frame), key => inStore.has(key));
       this.persistSoon();
       return;
     }
@@ -1170,7 +1164,7 @@ export class CommunitySession {
     if (!this.state.alone?.length) return Promise.resolve();
     return this.serialize(async () => {
       const now = this.hooks.clock?.() ?? Date.now();
-      if (this.needsCatchUp || now - this.chainMovedAt < RESEAL_SETTLED_MS) return;
+      if (this.needsCatchUp || now - this.chainMovedAt < SAID_AGAIN.settledMs) return;
       await this.resealBehind();
     });
   }

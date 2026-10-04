@@ -158,4 +158,17 @@ export function verifyChain(raw: unknown, groupId?: string): { chain: GroupCommi
  */
 export const OWN_FRAME_LIMIT = 2 ** 32 - 2 ** 23;
 
+/**
+ * Frames said again (WISP 9xx, both profiles): a member's own frames that no edge took when it said them are
+ * remembered (`kept`, the latest) and, once the chain it follows is newer than such a frame's and has not moved for
+ * `settledMs`, looked at once for saying again where the members let in while it was behind can read them. A catch-up
+ * brings commits one by one, and a frame said again at the first of them would still miss those let in by the next.
+ */
+export const SAID_AGAIN = { settledMs: 5_000, kept: 64 } as const;
+
+/** `alone` with `key` added last, keeping only keys still `present` (frames still in the log), the latest `kept`. */
+export function rememberAlone(alone: readonly string[] | undefined, key: string, present: (key: string) => boolean): string[] {
+  return [...(alone ?? []).filter(k => k !== key && present(k)), key].slice(-SAID_AGAIN.kept);
+}
+
 export const GROUP_ADMIN_OFF_ERROR = "Managing this group is off on this device. Turn on Manage groups from this device first.";
