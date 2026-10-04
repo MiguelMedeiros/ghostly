@@ -8,6 +8,7 @@ import {
   readHandoffDone, readHandoffHave, readHandoffHello, readHandoffManifest, readHandoffPake, readHandoffRelease, readHandoffTurnFrame,
   readHandoffVerified, sealHandoffPiece, signTurnRelease, toBase64Url, turnReleaseMessage, verify,
   type DeviceFrame, type HandoffBusyReason, type HandoffCancelReason, type HandoffHello, type HandoffPart, type TurnRelease,
+  TURN_MAX,
 } from "@ghostly/core";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { HandoffPasswordError, startPakeGiver, startPakeTaker, type HandoffVerifier, type PakeGiver, type PakeTaker } from "./handoffPake";
@@ -923,6 +924,19 @@ export class HandoffGiver {
 
 type TakerPhase = "idle" | "offer" | "connecting" | "authorizing" | "receiving" | "verified" | "installing" | "settling" | "done" | "failed";
 
+/** The states that take a handoff: a standby, and a replaced device ("Use here", WISP 06 § States and events). */
+const takes = (state: DeviceRecord["state"]): boolean => state === "standby" || state === "superseded";
+
+/**
+ * The turn a taker hands over from: its own. A replaced device's own is the turn it was replaced at, below the active
+ * device's; the turn that replaced it is in its mark (the highest sequence it saw), and a release names that one plus one.
+ */
+function takerTurn(record: DeviceRecord): number {
+  if (record.state !== "superseded") return record.turn;
+  const seen = Math.floor((record.seenSequence ?? 0) / 2 ** 20);
+  return seen <= TURN_MAX ? Math.max(record.turn, seen) : record.turn;
+}
+
 /**
  * The taking device's side (WISP 06 § States and events, "B is"). Runs in device-link-only mode: B is a standby until
  * it holds the release, and `taking` from then until its settle read.
@@ -977,12 +991,16 @@ export class HandoffTaker {
   /** A wake push went to the giver while this taker waited for its link. */
   private woken = false;
 
-  /** "Use here" on a standby (a pull), with the profile's lock password. `later`: leave files over this size behind. */
+  /**
+   * "Use here" on a standby or on a replaced device (a pull), with the profile's lock password. `later`: leave files over
+   * this size behind. A replaced (`superseded`) device keeps what only it holds: its old namespace is the fork, kept
+   * after the install (WISP 06 § Installing the staged state).
+   */
   pull(password: string, later = 0): Promise<HandoffView | null> {
     return this.exclusive(async () => {
       if (this.phase !== "idle" && this.phase !== "failed" && this.phase !== "offer") throw new Error("handoff-busy: Another move is in progress.");
       const record = await this.ports.records.read();
-      if (!record || record.state !== "standby") throw new Error("handoff-refused: This device is not on standby.");
+      if (!record || !takes(record.state)) throw new Error("handoff-refused: This device is not on standby.");
       const active = record.activeSlot === undefined ? null : record.deviceSet[record.activeSlot];
       if (!active || record.activeSlot === record.ownSlot) throw new Error("handoff-refused: No other device is active.");
       await this.start(record, active.key, newHandoffId(), later);
@@ -1029,7 +1047,7 @@ export class HandoffTaker {
       else await this.exclusive(() => this.install(record));
       return;
     }
-    if (record.state !== "standby" || handoff.step === "stopped") return;
+    if (!takes(record.state) || handoff.step === "stopped") return;
     // Verified before the reload, and no release yet: the staged state is whole. It asks for the release again.
     if (handoff.step === "verified" && handoff.h && handoff.staging && this.secret) {
       this.staging = await this.ports.staging.open(handoff.staging);
@@ -1082,7 +1100,7 @@ export class HandoffTaker {
         if (!offer || offer.bytes === undefined || (this.phase !== "idle" && this.phase !== "failed" && this.phase !== "offer")) return;
         const record = await this.ports.records.read();
         // Only from the device the record names active.
-        if (!record || record.activeSlot === undefined || record.deviceSet[record.activeSlot]?.key !== from || record.state !== "standby") return;
+        if (!record || record.activeSlot === undefined || record.deviceSet[record.activeSlot]?.key !== from || !takes(record.state)) return;
         this.peer = from; this.id = offer.id; this.offerBytes = offer.bytes; this.deviceName = name(record, from); this.failure = undefined;
         this.phase = "offer";
         this.changed();
@@ -1114,7 +1132,7 @@ export class HandoffTaker {
   }
 
   private async start(record: DeviceRecord, peer: string, id: string, later: number): Promise<void> {
-    this.peer = peer; this.id = id; this.turn = record.turn; this.later = later; this.deviceName = name(record, peer);
+    this.peer = peer; this.id = id; this.turn = takerTurn(record); this.later = later; this.deviceName = name(record, peer);
     this.failure = undefined; this.retry = undefined; this.secret = null; this.incoming.clear(); this.behind.clear(); this.ids = {}; this.bundle = null; this.h = null;
     // A new handoff says hello anew, with a key of its own, even on a session that carried another one.
     this.sessions.delete(peer);
@@ -1124,7 +1142,7 @@ export class HandoffTaker {
     this.staging = await this.ports.staging.open(earlier);
     await this.staging.dropRest().catch(() => {});
     if (record.handoff?.staging && record.handoff.staging !== this.staging.database) await this.ports.staging.drop(record.handoff.staging).catch(() => {});
-    await this.ports.records.amend({ handoff: { role: "taking", step: "requesting", id, peer, from: record.turn, staging: this.staging.database, old: record.profile, at: this.now() } });
+    await this.ports.records.amend({ handoff: { role: "taking", step: "requesting", id, peer, from: this.turn, staging: this.staging.database, old: record.profile, at: this.now(), ...(record.state === "superseded" ? { fork: true as const } : {}) } });
   }
 
   /** Waits for the link (30 seconds), then hello. */
@@ -1405,7 +1423,7 @@ export class HandoffTaker {
     if (!verify(fromBase64Url(release.s), turnReleaseMessage(this.ports.turnAddress, release.turn, this.ports.ownKey, this.h), fromBase64Url(from))) return;
     if (this.timer) clearTimeout(this.timer);
     const record = await this.ports.records.read();
-    if (!record || record.state !== "standby") return;
+    if (!record || !takes(record.state)) return;
     const taking = await this.ports.records.move("taking", { handoff: { ...record.handoff!, step: "install", release, at: this.now() }, ...mergedAttempts(record, frame.a) });
     this.phase = "installing";
     this.changed();
@@ -1441,8 +1459,13 @@ export class HandoffTaker {
         this.changed();
         try { this.ports.links.send(handoff.peer!, handoffDoneFrame(Number(outcome.read.record?.sequence ?? 0))); } catch { /* it learns from the turn record */ }
         await this.ports.forget(handoff.old!).catch(() => {});
-        await this.ports.staging.drop(handoff.old!).catch(() => {});
-        await this.ports.records.amend({ handoff: undefined }).catch(() => {});
+        // A replaced device's old namespace is the fork: what only it held stays, as "Only on this device", until the
+        // person discards it (WISP 06 § Installing the staged state). Any other old namespace goes.
+        if (handoff.fork) await this.ports.records.amend({ handoff: undefined, forks: [...new Set([...(record.forks ?? []), handoff.old!])] }).catch(() => {});
+        else {
+          await this.ports.staging.drop(handoff.old!).catch(() => {});
+          await this.ports.records.amend({ handoff: undefined }).catch(() => {});
+        }
         this.ports.reload();
         return;
       }
@@ -1479,7 +1502,7 @@ export class HandoffTaker {
     this.pake = null; this.bundle = null; this.incoming.clear();
     await this.staging?.dropRest().catch(() => {});
     const record = await this.ports.records.read().catch(() => null);
-    if (record?.handoff?.role === "taking" && record.state === "standby") await this.ports.records.amend({ handoff: { ...record.handoff, step: "stopped", secret: undefined } }).catch(() => {});
+    if (record?.handoff?.role === "taking" && takes(record.state)) await this.ports.records.amend({ handoff: { ...record.handoff, step: "stopped", secret: undefined } }).catch(() => {});
     this.changed();
   }
 

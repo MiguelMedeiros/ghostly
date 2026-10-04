@@ -33,7 +33,7 @@ export const ENGINE_METHODS: readonly string[] = [
   // One profile on several devices (WISP 06): a CLI profile is always on one device, so these answer `single` or refuse.
   "deviceEnrollInvite", "deviceEnrollConfirm", "deviceEnrollCancel", "deviceEnrollView", "deviceEnrollJoin", "deviceEnrollFinish",
   "deviceEnrollRemove", "deviceSet", "devicePing", "deviceHandoffVerifier", "deviceHandoffPush", "deviceHandoffPull", "deviceHandoffAccept",
-  "deviceHandoffCancel", "deviceHandoffView", "deviceHandoffAllow", "deviceTakeoverInfo", "deviceTakeover", "deviceTurnPeek", "deviceRestoreStartOwn",
+  "deviceHandoffCancel", "deviceHandoffView", "deviceHandoffAllow", "deviceTakeoverInfo", "deviceTakeover", "deviceTurnPeek", "deviceForkDiscard", "deviceRestoreStartOwn",
   "deviceRemove", "deviceNewSecret", "deviceSecretOfferDismiss", "deviceSetNoticeSeen", "deviceTurnCheck", "devicePushState", "devicePushSet",
 ];
 

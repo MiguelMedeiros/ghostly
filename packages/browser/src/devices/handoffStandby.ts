@@ -157,7 +157,13 @@ export async function standbyHandoff(options: StandbyHandoffOptions): Promise<De
       switch (method) {
         case "deviceHandoffPull":
           if (typeof p.password !== "string" || !p.password) return Promise.reject(new Error("handoff-password: Type the profile's password."));
-          return taker.pull(p.password, later);
+          // A replaced device hands over from the turn its mark holds: read the turn first, so the mark is the newest
+          // the network has (the active device may have moved on since the last read), and the release matches it.
+          return (async () => {
+            const now = await readDeviceRecord(options.profile).catch(() => null);
+            if (now?.state === "superseded") await options.links.checkTurn(false).catch(() => null);
+            return taker.pull(p.password as string, later);
+          })();
         case "deviceHandoffAccept": return taker.accept(later);
         case "deviceHandoffCancel": return Promise.all([taker.cancel(), giver.cancel()]).then(() => null);
         case "deviceHandoffView": return Promise.resolve(taker.view() ?? giver.view());

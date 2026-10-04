@@ -126,6 +126,8 @@ export interface DeviceHandoff {
   newer?: true;
   /** The taker: `H` of what it verified, base64url, until the release arrives. */
   h?: string;
+  /** The taker was replaced (`superseded`): its old namespace is the fork, kept after the install, not deleted. */
+  fork?: true;
 }
 
 /** A file this device holds in its frozen copy, by digest: what a later pull says it has, and copies instead of fetching. */
@@ -273,6 +275,12 @@ export interface DeviceRecord {
    * a list kept from a failed handoff would be deleted after the next one, whatever that one moved.
    */
   breezDatabases?: string[];
+  /**
+   * The forks this device keeps (WISP 06 § Installing the staged state): the old namespaces of a replaced device that
+   * took the profile back with Use here, by peer database name. "Only on this device" in Data and storage, until the
+   * person discards one.
+   */
+  forks?: string[];
   earlierSets: EarlierDeviceSet[];
   /** Grants sent whose `enroll-done` never came back: devices that hold `D` and are in no record. */
   unfinishedGrants?: UnfinishedGrant[];
@@ -513,6 +521,7 @@ export function parseDeviceRecord(value: unknown): DeviceRecord {
   for (const field of ["turnPacket", "d", "lineage"] as const) if (!optional(r[field], bytes)) return bad(field);
   if (!optional(r.signingKey, (v): v is DeviceSigningKeyKind => (DEVICE_SIGNING_KEY_KINDS as readonly unknown[]).includes(v))) return bad("signingKey");
   if (r.network !== undefined && !isNetwork(r.network)) return bad("network");
+  if (!optional(r.forks, (v): v is string[] => Array.isArray(v) && v.length <= 8 && v.every((name) => text(name) && /^ghostly(_[A-Za-z0-9_-]{1,64})?$/.test(name)))) return bad("forks");
   if (!optional(r.breezDatabases, (v): v is string[] => Array.isArray(v) && v.length <= 8 && v.every((name) => text(name) && /^ghostly-breez-/.test(name)))) return bad("breezDatabases");
   if (!optional(r.releasedTurn, (v): v is number => count(v, 2 ** 32 - 1))) return bad("releasedTurn");
   if (!optional(r.seenSequence, (v): v is number => count(v, Number.MAX_SAFE_INTEGER))) return bad("seenSequence");
@@ -525,7 +534,7 @@ export function parseDeviceRecord(value: unknown): DeviceRecord {
     if (!h || typeof h !== "object" || (h.role !== "releasing" && h.role !== "taking") || !text(h.step) || !optional(h.staging, text)) return bad("the handoff");
     if (!optional(h.id, bytes) || !optional(h.peer, bytes) || !optional(h.secret, bytes) || !optional(h.old, text) || !optional(h.h, bytes)) return bad("the handoff");
     if (!optional(h.from, (v): v is number => count(v, 2 ** 32 - 1)) || !optional(h.at, (v): v is number => count(v, Number.MAX_SAFE_INTEGER))) return bad("the handoff");
-    if (h.newer !== undefined && h.newer !== true) return bad("the handoff");
+    if ((h.newer !== undefined && h.newer !== true) || (h.fork !== undefined && h.fork !== true)) return bad("the handoff");
     if (h.release !== undefined) {
       const release = h.release as Partial<DeviceRelease> | null;
       if (!release || typeof release !== "object" || !count(release.turn, 2 ** 32 - 1) || !bytes(release.to) || !bytes(release.h) || !bytes(release.s)) return bad("the release");

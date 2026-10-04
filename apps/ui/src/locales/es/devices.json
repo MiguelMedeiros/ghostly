@@ -38,6 +38,13 @@
     "update": "Un Ghostly más reciente creó este código. Actualiza para usarlo.",
     "used": "Otro dispositivo usó este código primero. Crea uno nuevo."
   },
+  "fork": {
+    "confirm": "¿Descartar esta copia para siempre? Lo que solo está en ella se pierde.",
+    "discard": "Descartar",
+    "hint": "Una copia de este perfil de antes de que otro dispositivo tomara el control.",
+    "info": "Cuando este dispositivo recuperó el perfil con Usar aquí, guardó lo que tenía en ese momento. Los mensajes y pagos que solo están en esa copia no están en tu perfil. Descartar elimina la copia de este dispositivo para siempre.",
+    "title": "Solo en este dispositivo"
+  },
   "handoff": {
     "allowAgain": "Dejar que {{device}} lo intente de nuevo",
     "cancel": "Cancelar",
