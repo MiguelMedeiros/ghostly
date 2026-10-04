@@ -147,7 +147,6 @@ test.describe("join page", () => {
   for (const [name, code, message] of [
     ["a typo", TYPO, "This code has a typo. Check it, or ask for the code again."],
     ["a newer version", V3, "This invite was made by a newer Ghostly. Update to join."],
-    ["a code that adds a device", V2, "This code adds a device to a profile. On the new device, open Ghostly and choose I already use Ghostly."],
     ["version 0", V0, "This is not a Ghostly invite."],
     ["a damaged invite", SHORT, "This invite is damaged. Ask for a new one."],
   ]) {
@@ -160,6 +159,34 @@ test.describe("join page", () => {
       expect(page.url()).not.toContain("#");
     });
   }
+
+  test("a code that adds a device: Open in Ghostly hands it to the web app in the fragment, never by itself, and no request carries it", async ({ page, context }) => {
+    const leaks: string[] = [];
+    const secret = V2.slice(9, 60);
+    context.on("request", (request) => {
+      const seen = [request.url(), request.headers()["referer"] ?? "", request.postData() ?? ""].join(" ").toLowerCase();
+      if (seen.includes(secret)) leaks.push(request.url());
+    });
+    await standInApp(page);
+    // In capitals, as a phone's camera opens the QR code's link.
+    await page.goto(`/#${V2.toUpperCase()}`);
+    const dialog = page.getByTestId("join-landing");
+    await expect(dialog).toHaveAttribute("data-kind", "device");
+    await expect(dialog.getByRole("heading", { name: "Add this device to your profile" })).toBeVisible();
+    expect(page.url()).not.toContain("#");
+    await expect(dialog.getByTestId("join-device-steps")).toHaveText("Or open Ghostly on this device, choose Add this device to another profile, and scan or paste the code.");
+    const open = dialog.getByTestId("join-device-open");
+    await expect(open).toHaveText("Open in Ghostly");
+    await expect(open).toHaveAttribute("href", `${APP}/#${V2}`);
+    // No countdown: it opens only when the person chooses it.
+    await expect(dialog.getByTestId("join-going")).toHaveCount(0);
+    await page.waitForTimeout(500);
+    expect(new URL(page.url()).host).not.toBe(new URL(APP).host);
+    await open.click();
+    await page.waitForURL(`${APP}/**`);
+    expect(new URL(page.url()).hash).toBe(`#${V2}`);
+    expect(leaks).toEqual([]);
+  });
 
   test("an invite link from the old /pt-br pages opens in English", async ({ page }) => {
     await standInApp(page);

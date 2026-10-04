@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useId, useRef } from "react";
 import { useSettings } from "../contexts/SettingsContext";
 import { useI18n } from "../contexts/I18nContext";
 import { useLockScreen } from "../contexts/LockScreenContext";
@@ -26,6 +26,10 @@ import { Button, Switch } from "../components/wallet/ui";
 import { setLoadPublicProfiles, useLoadPublicProfiles } from "../hooks/usePublicProfileRequest";
 import { setSendTyping, useSendTyping } from "../hooks/useTyping";
 import { Select } from "../components/ui/Select";
+import { Toast } from "../components/ui/Toast";
+import { useToast } from "../hooks/useToast";
+import { FieldError } from "../components/ui/FieldError";
+import { focusToRetype } from "../lib/focus";
 import { CATEGORY_PREVIEW, categoryOn } from "../lib/cues";
 import { playSound } from "../lib/sounds";
 import { clearAllData } from "../lib/clearData";
@@ -51,6 +55,9 @@ import { useAppNavigation } from "../hooks/useAppNavigation";
 import { peekEnabled, peekNotifies } from "../lib/profilePeek";
 import { externalLinkProps, isDesktopApp } from "../lib/externalLink";
 import { errorText } from "../lib/errorText";
+
+/** The fields of the lock password form, each with its own error line. */
+type PasswordField = "current" | "new" | "confirm";
 
 /** What "Clear all data" erases, as its confirmation lists it (lib/clearData.ts). */
 const CLEAR_ITEMS = ["chats", "groups", "apps", "profile", "identities", "settings", "storage"] as const;
@@ -89,10 +96,13 @@ export function Settings() {
   const [timeoutMinutes, setTimeoutMinutes] = useState(
     settings.lockScreen.timeoutMinutes
   );
-  const [message, setMessage] = useState<{
-    type: "success" | "error";
-    text: string;
-  } | null>(null);
+  // What a password or data action says: a floating card near where the person is looking, not a line at the top of the page.
+  const notice = useToast();
+  // A refused password: which field, and why, shown right under it.
+  const [passwordError, setPasswordError] = useState<{ field: PasswordField; text: string } | null>(null);
+  const [passwordBusy, setPasswordBusy] = useState(false);
+  const passwordId = useId();
+  const passwordInputs = { current: useRef<HTMLInputElement>(null), new: useRef<HTMLInputElement>(null), confirm: useRef<HTMLInputElement>(null) };
   const [showPasswordForm, setShowPasswordForm] = useState(false);
   const [storageInfo, setStorageInfo] = useState({ used: 0, keys: 0 });
   // Whether the browser may clear this device's storage (lib/storagePersistence). Nothing on Desktop: no browser evicts it.
@@ -160,7 +170,7 @@ export function Settings() {
     }
 
     if (lockEnabled && deviceSet) {
-      setMessage({ type: "error", text: t("devices.password.keep") });
+      notice.show(t("devices.password.keep"));
       return;
     }
     if (lockEnabled) {
@@ -172,80 +182,80 @@ export function Settings() {
     }
   };
 
+  /** A password refused: said under its field and in the floating card, and the field is ready to be typed again. */
+  const refusePassword = (which: PasswordField, text: string, title: string) => {
+    setPasswordError({ field: which, text });
+    notice.show(text, { title });
+    focusToRetype(passwordInputs[which].current);
+  };
+
   const handleSetPassword = async () => {
-    if (newPassword.length < lockPasswordMin(deviceSet)) {
-      setMessage({ type: "error", text: deviceSet ? t("devices.password.keep") : t("settings.passwordTooShort") });
-      return;
-    }
-
-    if (newPassword !== confirmPassword) {
-      setMessage({ type: "error", text: t("settings.passwordMismatch") });
-      return;
-    }
-
-    if (hasPassword) {
-      const valid = await verifyPassword(
-        currentPassword,
-        settings.lockScreen.passwordHash!
-      );
-      if (!valid) {
-        setMessage({ type: "error", text: t("settings.incorrectPassword") });
+    const title = hasPassword ? t("settings.passwordNotChanged") : t("settings.passwordNotSet");
+    setPasswordError(null);
+    setPasswordBusy(true);
+    try {
+      // The current one first: nothing changes for someone who does not know it.
+      if (hasPassword && !(await verifyPassword(currentPassword, settings.lockScreen.passwordHash!))) {
+        refusePassword("current", t("settings.incorrectPassword"), title);
         return;
       }
+      if (newPassword.length < lockPasswordMin(deviceSet)) {
+        refusePassword("new", deviceSet ? t("devices.password.keep") : t("settings.passwordTooShort"), title);
+        return;
+      }
+      if (newPassword !== confirmPassword) {
+        refusePassword("confirm", t("settings.passwordMismatch"), title);
+        return;
+      }
+
+      const hash = await hashPassword(newPassword);
+      updateLockScreen({
+        enabled: true,
+        passwordHash: hash,
+      });
+      // A profile on several devices: a pull proves this password now, so its verifier is made again while it is typed (WISP 06).
+      let verifierFailed = false;
+      if (deviceSet) await engine.call("deviceHandoffVerifier", { password: newPassword, current: hasPassword ? currentPassword : undefined }).catch(() => { verifierFailed = true; });
+
+      setLockEnabled(true);
+      setNewPassword("");
+      setConfirmPassword("");
+      setCurrentPassword("");
+      setShowPasswordForm(false);
+      // The lock changed, and a pull would still need a proof that could not be made: said, not hidden.
+      if (verifierFailed) notice.show(t("devices.handoff.verifierFailed"));
+      else notice.show(hasPassword ? t("settings.passwordChanged") : t("settings.passwordSet"), { tone: "success" });
+    } finally {
+      setPasswordBusy(false);
     }
-
-    const hash = await hashPassword(newPassword);
-    updateLockScreen({
-      enabled: true,
-      passwordHash: hash,
-    });
-    // A profile on several devices: a pull proves this password now, so its verifier is made again while it is typed (WISP 06).
-    let verifierFailed = false;
-    if (deviceSet) await engine.call("deviceHandoffVerifier", { password: newPassword, current: hasPassword ? currentPassword : undefined }).catch(() => { verifierFailed = true; });
-
-    setLockEnabled(true);
-    setNewPassword("");
-    setConfirmPassword("");
-    setCurrentPassword("");
-    setShowPasswordForm(false);
-    // The lock changed, and a pull would still need a proof that could not be made: said, not hidden.
-    setMessage(verifierFailed ? { type: "error", text: t("devices.handoff.verifierFailed") } : {
-      type: "success",
-      text: hasPassword
-        ? t("settings.passwordChanged")
-        : t("settings.passwordSet"),
-    });
-
-    setTimeout(() => setMessage(null), 3000);
   };
 
   const handleRemovePassword = async () => {
+    const title = t("settings.passwordNotRemoved");
     if (deviceSet) {
-      setMessage({ type: "error", text: t("devices.password.keep") });
+      notice.show(t("devices.password.keep"), { title });
       return;
     }
-    if (hasPassword) {
-      const valid = await verifyPassword(
-        currentPassword,
-        settings.lockScreen.passwordHash!
-      );
-      if (!valid) {
-        setMessage({ type: "error", text: t("settings.incorrectPassword") });
+    setPasswordError(null);
+    setPasswordBusy(true);
+    try {
+      if (hasPassword && !(await verifyPassword(currentPassword, settings.lockScreen.passwordHash!))) {
+        refusePassword("current", t("settings.incorrectPassword"), title);
         return;
       }
+
+      updateLockScreen({
+        enabled: false,
+        passwordHash: null,
+      });
+
+      setLockEnabled(false);
+      setCurrentPassword("");
+      setShowPasswordForm(false);
+      notice.show(t("settings.passwordRemoved"), { tone: "success" });
+    } finally {
+      setPasswordBusy(false);
     }
-
-    updateLockScreen({
-      enabled: false,
-      passwordHash: null,
-    });
-
-    setLockEnabled(false);
-    setCurrentPassword("");
-    setShowPasswordForm(false);
-    setMessage({ type: "success", text: t("settings.passwordRemoved") });
-
-    setTimeout(() => setMessage(null), 3000);
   };
 
   const field = "w-full min-w-0 px-3 py-2 min-h-10 bg-input-bg border border-border rounded-lg text-text-primary placeholder-text-muted focus:outline-none focus:ring-2 focus:ring-accent transition-colors";
@@ -254,18 +264,36 @@ export function Settings() {
   const systemSettings = noticeSettings();
   const deniedHint = { macos: "settings.noticesDeniedMac", windows: "settings.noticesDeniedWindows", system: "settings.noticesDeniedSystem",
     extension: "settings.noticesDeniedExtension", web: "settings.noticesDenied" } as const;
-  const closePasswordForm = () => { setShowPasswordForm(false); setCurrentPassword(""); setNewPassword(""); setConfirmPassword(""); };
+  const closePasswordForm = () => { setShowPasswordForm(false); setCurrentPassword(""); setNewPassword(""); setConfirmPassword(""); setPasswordError(null); };
+  /** One of the password fields, wired to its error: `aria-invalid`, `aria-describedby`, and the line under it. */
+  const passwordField = (which: PasswordField, label: string, value: string, change: (value: string) => void) => {
+    const error = passwordError?.field === which ? passwordError.text : null;
+    const errorId = `${passwordId}-${which}-error`;
+    return (
+      <div>
+        <label className="block text-sm text-text-secondary">
+          {label}
+          <input ref={passwordInputs[which]} type="password" value={value} data-testid={`settings-password-${which}`}
+            autoComplete={which === "current" ? "current-password" : "new-password"}
+            aria-invalid={error ? true : undefined} aria-describedby={error ? errorId : undefined}
+            onChange={(e) => { change(e.target.value); if (passwordError?.field === which) setPasswordError(null); }}
+            className={`${field} mt-1 aria-invalid:border-danger aria-invalid:focus:ring-danger`} />
+        </label>
+        <FieldError id={errorId} testId={`settings-password-${which}-error`}>{error}</FieldError>
+      </div>
+    );
+  };
   const deleteChats = () => {
     deleteAllSessions();
     setConfirmDeleteChats(false);
     setChatCount(0);
     setStorageInfo(getStorageUsage());
     window.dispatchEvent(new Event("session-updated"));
-    setMessage({ type: "success", text: t("sidebar.deleteAllChats") });
+    notice.show(t("sidebar.deleteAllChats"), { tone: "success" });
   };
   const clearData = async () => {
     setConfirmClearData(false);
-    setMessage({ type: "success", text: t("settings.dataCleared") });
+    notice.show(t("settings.dataCleared"), { tone: "success" });
     await clearAllData();
     setStorageInfo(getStorageUsage());
     // The running peer still holds what was just deleted; start it over.
@@ -273,12 +301,8 @@ export function Settings() {
   };
 
   return (
-    <Page title={t("settings.title")} width="md" testId="settings-page">
-      {message && (
-        <div role="status" className={`p-3 rounded-lg ${message.type === "success" ? "bg-accent/20 text-accent" : "bg-danger/20 text-danger"}`}>
-          {message.text}
-        </div>
-      )}
+    <Page title={t("settings.title")} width="md" testId="settings-page"
+      overlay={<Toast toast={notice.toast} onDismiss={notice.dismiss} place="page" testId="settings-notice" />}>
 
       {/* First while there is something to install (the web app only): it goes once installed. */}
       {canInstall(install) && (
@@ -451,27 +475,16 @@ export function Settings() {
         )}
         {showPasswordForm && (
           <Block testId="settings-password-form">
-            {hasPassword && (
-              <label className="block text-sm text-text-secondary">
-                {t("settings.currentPassword")}
-                <input type="password" value={currentPassword} onChange={(e) => setCurrentPassword(e.target.value)} className={`${field} mt-1`} />
-              </label>
-            )}
+            {hasPassword && passwordField("current", t("settings.currentPassword"), currentPassword, setCurrentPassword)}
             <FieldGrid>
-              <label className="block text-sm text-text-secondary">
-                {t("settings.newPassword")}
-                <input type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} className={`${field} mt-1`} />
-              </label>
-              <label className="block text-sm text-text-secondary">
-                {t("settings.confirmPassword")}
-                <input type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} className={`${field} mt-1`} />
-              </label>
+              {passwordField("new", t("settings.newPassword"), newPassword, setNewPassword)}
+              {passwordField("confirm", t("settings.confirmPassword"), confirmPassword, setConfirmPassword)}
             </FieldGrid>
             <ButtonGroup>
-              <Button variant="primary" onClick={() => void handleSetPassword()}>
+              <Button variant="primary" disabled={passwordBusy} onClick={() => void handleSetPassword()}>
                 {hasPassword ? t("settings.changePassword") : t("settings.setPassword")}
               </Button>
-              {hasPassword && <Button variant="danger" onClick={() => void handleRemovePassword()}>{t("settings.removePassword")}</Button>}
+              {hasPassword && <Button variant="danger" disabled={passwordBusy} onClick={() => void handleRemovePassword()}>{t("settings.removePassword")}</Button>}
               {!hasPassword && <Button onClick={closePasswordForm}>{t("common.cancel")}</Button>}
             </ButtonGroup>
           </Block>

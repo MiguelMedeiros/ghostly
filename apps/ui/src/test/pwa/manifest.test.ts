@@ -52,4 +52,11 @@ describe("what it declares, the app answers", () => {
   it("web+ghostly: links open the app with the link in the fragment", () => {
     expect(manifest.protocol_handlers).toEqual([{ protocol: "web+ghostly", url: "/#%s" }]);
   });
+
+  it("a link to the app (the Add a device QR code, opened by a phone's camera) opens the installed app, in its open window", () => {
+    expect(manifest.handle_links).toBe("preferred");
+    expect(manifest.launch_handler).toEqual({ client_mode: ["navigate-existing", "auto"] });
+    // A device code arriving in a window that is open already changes only the fragment: the router's intake takes it.
+    expect(routes).toContain("isDeviceCode(rest)");
+  });
 });

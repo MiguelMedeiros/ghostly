@@ -21,6 +21,16 @@ function keysOf(params: LinkParams): SessionKeys {
   };
 }
 
+/** The public web app: where the desktop app and the extension, which have no web address, point their links. */
+export const PUBLIC_APP_ORIGIN = "https://app.ghostly.tools";
+
+/** The web app that opens this app's links: the web app's own address, or the public one from the desktop app and the extension. */
+export function appLinkOrigin(): string {
+  // The desktop app on Windows is served from http://tauri.localhost, which no other device opens.
+  const desktop = "__TAURI_INTERNALS__" in window;
+  return !desktop && /^https?:$/.test(window.location.protocol) ? window.location.origin : PUBLIC_APP_ORIGIN;
+}
+
 /** A `web+ghostly:` link, as the browser hands it over (escaped) or as it was written. */
 const PROTOCOL_LINK = /^\/?web(?:\+|%2B)ghostly(?::|%3A)(?:\/\/|%2F%2F)?/i;
 

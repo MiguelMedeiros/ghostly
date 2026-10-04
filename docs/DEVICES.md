@@ -7,13 +7,14 @@ It works in the web app (installed on a phone too), the browser extension and th
 ## Add a device
 
 1. On the device you use now: **Profile → Devices → Add a device**. A profile on several devices needs a lock password of 8 characters or more; Ghostly asks you to set one, or to make yours longer, first.
-2. It shows a code, good for 10 minutes.
-3. On the new device, open Ghostly and choose **I already use Ghostly → Add this device to my profile**, name this device, then scan or paste the code.
-4. Both devices show the same six digits. Check them, then tap **They match** on the device you use now.
+2. It shows a QR code, good for 10 minutes and for one device. It is a link to the web app with the code after the `#`, which no browser sends to a server.
+3. On a phone, scan it with the phone's own camera. The link opens Ghostly (the installed app on Android, the browser otherwise) straight into adding the device. A phone that already has a profile asks first, and adds itself to a new profile: the profiles it has stay as they are.
+   Or, on the new device, open Ghostly and choose **Add this device to another profile** (in the profile menu, the profile list, or **Profile → Devices**), or **I already use Ghostly** on a new profile's chat list. Then scan the code in Ghostly, or paste it.
+4. Name this device. Both devices show the same six digits. Check them, then tap **They match** on the device you use now.
 
 The new device is now on standby, and it offers to bring the profile over at once. Up to 4 devices per profile.
 
-On iPhone and iPad, add Ghostly to the Home Screen first: a browser tab keeps its own storage, which the browser may clear. Elsewhere, Ghostly asks the browser to keep its data and says so when it does not.
+On iPhone and iPad, add Ghostly to the Home Screen first: a browser tab keeps its own storage, which the browser may clear. The camera opens the link in Safari, never in the app on the Home Screen, so there Ghostly says to add it to the Home Screen first; then open it from the Home Screen and scan the code in Ghostly. Elsewhere, Ghostly asks the browser to keep its data and says so when it does not.
 
 ## Move the profile
 

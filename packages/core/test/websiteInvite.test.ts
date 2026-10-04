@@ -42,7 +42,9 @@ describe("the site's invite reader agrees with the app's", () => {
     }
     const device = bech32m.encode("ghostly", [2, ...words.slice(1)], false);
     expect(readInviteCode(device)).toEqual({ ok: false, reason: "device" });
-    expect(checkInvite(device)).toEqual({ ok: false, reason: "device" });
+    // The site hands a device code to the web app (WISP 06), so it keeps the code, in lower case.
+    expect(checkInvite(device)).toEqual({ ok: false, reason: "device", code: device });
+    expect(checkInvite(device.toUpperCase())).toEqual({ ok: false, reason: "device", code: device });
   });
 
   it("on arbitrary strings after ghostly1", () => {

@@ -8,3 +8,10 @@ export function focusInPlace(el: HTMLElement | null | undefined) {
   el.getBoundingClientRect();
   el.focus({ preventScroll: true });
 }
+
+/** A field that was refused: the focus goes back to it with its text selected, so the person types it again. */
+export function focusToRetype(input: HTMLInputElement | null | undefined) {
+  if (!input) return;
+  input.focus();
+  input.select();
+}

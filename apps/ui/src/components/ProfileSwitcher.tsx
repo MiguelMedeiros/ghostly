@@ -7,6 +7,7 @@ import { THEME_COLOR, switchProfile, themeOf } from "../lib/profiles";
 import { ProfileBadge } from "./ProfileBadge";
 import { useAppNavigation } from "../hooks/useAppNavigation";
 import { InstallMenuItem } from "./InstallApp";
+import { openJoinAnother } from "../lib/devices";
 
 const LockIcon = () => (
   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="4" y="11" width="16" height="10" rx="2" /><path d="M8 11V7a4 4 0 0 1 8 0v4" /></svg>
@@ -123,6 +124,13 @@ export function ProfileSwitcherMenu({ variant, glances, onClose }: {
       <button type="button" role="menuitem" data-testid="profile-switcher-add" onClick={() => go("/profile", { newProfile: true })} className={`${itemClass} min-h-11 py-1.5 text-sm text-text-secondary`}>
         <span aria-hidden="true" className="grid place-items-center w-8 h-8 shrink-0 rounded-full border border-dashed border-border-bright text-lg leading-none">+</span>
         {t("profileSwitcher.add")}
+      </button>
+      {/* A profile that lives on another device (WISP 06): a new profile here, which opens on adding this device. */}
+      <button type="button" role="menuitem" data-testid="profile-switcher-join" onClick={() => { onClose(false); openJoinAnother(); }} className={`${itemClass} min-h-11 py-1.5 text-sm text-text-secondary`}>
+        <span aria-hidden="true" className="grid place-items-center w-8 h-8 shrink-0">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="4" width="13" height="10" rx="1.5" /><path d="M5 18h7" /><rect x="16" y="8" width="6" height="12" rx="1.5" /><path d="M19 17h.01" /></svg>
+        </span>
+        {t("devices.join.another")}
       </button>
       <button type="button" role="menuitem" data-testid="profile-switcher-manage" onClick={() => go("/profile")} className={`${itemClass} min-h-11 py-1.5 text-sm text-text-secondary`}>
         <span aria-hidden="true" className="grid place-items-center w-8 h-8 shrink-0">

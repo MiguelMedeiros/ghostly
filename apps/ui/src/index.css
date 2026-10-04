@@ -741,6 +741,44 @@ html[data-standalone="true"] {
   animation: fade-in 0.2s ease-out forwards;
 }
 
+/* The floating card (components/ui/Toast.tsx): bottom centre over the content on a desktop; on a phone above the tab
+   bar, and above the keyboard while it is open (the tab bar is hidden then, and `--app-height` is what the keyboard
+   leaves). On a page (`toast-place-page`) it is centred over the page's column, whose bottom already sits above the
+   tab bar and the keyboard. Only the card takes clicks: the strip around it lets them through. */
+.toast-place {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: calc(1.5rem + env(safe-area-inset-bottom));
+  z-index: 70;
+  display: flex;
+  justify-content: center;
+  padding: 0 16px;
+  pointer-events: none;
+}
+
+@media (max-width: 767px) {
+  .toast-place {
+    bottom: calc(3.5rem + 0.75rem + env(safe-area-inset-bottom));
+  }
+
+  html[data-keyboard="true"] .toast-place {
+    bottom: calc(100% - var(--app-height, 100%) + 0.75rem);
+  }
+}
+
+.toast-place.toast-place-page {
+  position: absolute;
+  bottom: 1.5rem;
+}
+
+@media (max-width: 767px) {
+  .toast-place.toast-place-page,
+  html[data-keyboard="true"] .toast-place.toast-place-page {
+    bottom: 0.75rem;
+  }
+}
+
 .animate-pulse-dot {
   animation: pulse-dot 1.5s ease-in-out infinite;
 }

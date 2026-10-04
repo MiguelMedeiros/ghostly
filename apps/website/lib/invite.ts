@@ -9,7 +9,8 @@
 
 /** `device`: a code that adds a device to a profile (WISP 06, version 2), which no chat is made from. */
 export type InviteRefusal = "typo" | "update" | "not-ghostly" | "damaged" | "device";
-export type InviteCheck = { ok: true; code: string } | { ok: false; reason: InviteRefusal };
+/** A `device` refusal carries the code too: the page hands it to the web app, which adds the device (WISP 06). */
+export type InviteCheck = { ok: true; code: string } | { ok: false; reason: InviteRefusal; code?: string };
 
 const HRP = "ghostly";
 const MAX_LENGTH = 1023;
@@ -71,7 +72,7 @@ export function checkInvite(input: string): InviteCheck {
   const [version, ...payload] = data.slice(0, -6);
   if (version === undefined || version === 0) return { ok: false, reason: "not-ghostly" };
   if (version > HIGHEST_KNOWN_VERSION) return { ok: false, reason: "update" };
-  if (version === 2) return { ok: false, reason: "device" };
+  if (version === 2) return { ok: false, reason: "device", code };
   if (payloadBytes(payload) !== V1_BYTES) return { ok: false, reason: "damaged" };
   return { ok: true, code };
 }
