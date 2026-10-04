@@ -58,8 +58,8 @@ export function enrollMessage(transcriptHash: string, inviterKey: Uint8Array, jo
 /**
  * The six digits both screens show: the first 32 bits of `SHA-256("ghostly-enroll-digits" || transcriptHash ||
  * A's key || B's key)`, big-endian, as a decimal number modulo 1,000,000, with leading zeros. The transcript hash goes
- * in as its 32 bytes. The WISP says 20 bits; modulo a million those make the values under 48,576 twice as likely as
- * the rest, which 32 bits bring down to one part in about 4,295.
+ * in as its 32 bytes. Not 20 bits: modulo a million those make the values under 48,576 twice as likely as the rest,
+ * which 32 bits bring down to one part in about 4,295 (WISP 06 § Adding a device).
  */
 export function enrollDigits(transcriptHash: string, inviterKey: Uint8Array, joinerKey: Uint8Array): string {
   if (!HASH.test(transcriptHash)) throw new Error("A transcript hash is 64 lower-case hex digits");
