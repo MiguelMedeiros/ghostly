@@ -6,8 +6,8 @@ import type { GroupMemberView, GroupView } from "@ghostly/browser/shared/types";
 import { ProfileBackups } from "../../components/ProfileBackups";
 import { DeviceStandby } from "../../components/DeviceStandby";
 import { GroupChat } from "../../pages/GroupChat";
-import { openProfileBackup, restoreOpenedBackup, sameIdentityProfiles } from "../../lib/profileBackup";
-import { restoreForTakeover } from "../../lib/restoreGuard";
+import { bundleDidSeed, openProfileBackup, restoreOpenedBackup, sameIdentityProfiles } from "../../lib/profileBackup";
+import { markUncheckedRestore, restoreForTakeover } from "../../lib/restoreGuard";
 import { switchProfile } from "../../lib/profiles";
 import { fakeEngine, groupView } from "../fakeEngine";
 import { renderApp } from "../render";
@@ -23,6 +23,7 @@ vi.mock("../../lib/profileBackup", async (original) => ({
   ...(await original<typeof import("../../lib/profileBackup")>()),
   openProfileBackup: vi.fn(async () => ({ name: "Work", protection: "passphrase", payload: { profile: { name: "Work" }, storage: {} } })),
   sameIdentityProfiles: vi.fn(async () => []),
+  bundleDidSeed: vi.fn(async () => null),
   restoreOpenedBackup: vi.fn(async () => ({ id: "copycopyco", name: "Work", createdAt: 1, restored: true })),
 }));
 vi.mock("../../lib/restoreGuard", async (original) => ({
@@ -95,6 +96,17 @@ describe("restoring a backup where a device set exists (WISP 06)", () => {
     await user.click(screen.getByTestId("restore-go"));
     expect(await screen.findByTestId("restore-guard-title")).toHaveTextContent("Can't check which device is active.");
     expect(restoreOpenedBackup).not.toHaveBeenCalled();
+  });
+
+  it("a bundle from before the profile had devices whose turn cannot be read is restored marked, to start limited", async () => {
+    vi.mocked(bundleDidSeed).mockResolvedValueOnce(new Uint8Array(32).fill(9));
+    const { user, engine } = await pickBackup();
+    engine.on("deviceTurnPeek", () => ({ result: "unreachable" }));
+    await user.click(screen.getByTestId("restore-go"));
+    await waitFor(() => expect(restoreOpenedBackup).toHaveBeenCalledOnce());
+    expect(screen.queryByTestId("restore-guard")).toBeNull();
+    // Its last step before the profile is listed writes the mark the gate starts it limited on.
+    expect(vi.mocked(restoreOpenedBackup).mock.calls[0][2]).toBe(markUncheckedRestore);
   });
 
   it("a bundle of a profile that was never enrolled, with no record, restores as before", async () => {
