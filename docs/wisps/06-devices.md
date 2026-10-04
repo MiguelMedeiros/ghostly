@@ -198,6 +198,10 @@ Two rules make the digits enough, without a commitment round:
 
 So an attacker who photographed the code and joined first holds A's only session; the person's own device shows an error and no digits, and nothing is confirmed. An attacker cannot sit between the two either: B knows A's key from the code. If step 5 or 6 does not finish, B holds nothing usable (it is not in the record) and shows "Not finished" with **Remove**; A adds no device.
 
+**Transports of the session.** As on a device link, each side says in its own packet which transports its app runs and how to dial its native ones (`_tr`), signed with its device signing key. A side with no WebRTC (the Linux Desktop) starts its native endpoints at once; a side with WebRTC starts its own as soon as the other side's packet says it has none. B checks A's value against the key in the code. A has no key to check B's against until a joiner authenticated, so until then it takes B's value unchecked, as where to dial and nothing more: whoever can write that packet holds the code and could be the first joiner anyway, and the session there still authenticates. Without this, a page with WebRTC never reached a Desktop without it, and when A's one-time key sorted first (A dials) it had nothing to dial.
+
+**When the two cannot connect.** B waits 2 minutes for A's proof. If B saw A's packet on the link and no session opened, it says "The two devices found each other but could not connect", and so does A, 2 minutes after it first saw B's packet with no session: neither screen waits out the code's 10 minutes in silence. A B that never saw A says "Your other device did not answer".
+
 Enrollment transfers `D` and the device set, **nothing else**: no chat key, no wallet, no storage credential. The new device ends on the standby screen, which offers the first handoff at once: "Bring my profile here now · 480 MB".
 
 ### A backup restored where a device set exists

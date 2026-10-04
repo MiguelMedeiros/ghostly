@@ -33,6 +33,7 @@
     "typo": "This code has a typo. Check it, or make a new one.",
     "unanswered": "Your other device did not answer. Check the code, or make a new one.",
     "unreachable": "Can't check which device is active. Check your connection.",
+    "unreached": "The two devices found each other but could not connect. Keep both online and make a new code.",
     "update": "A newer Ghostly made this code. Update to use it.",
     "used": "Another device used this code first. Make a new one."
   },

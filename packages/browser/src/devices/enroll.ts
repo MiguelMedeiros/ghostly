@@ -59,6 +59,8 @@ export type EnrollFailure =
   | "dropped"
   /** The other device did not answer at all. */
   | "unanswered"
+  /** The two devices saw each other on the network, and no session opened between them in time. */
+  | "unreached"
   /** Which device is active could not be read. */
   | "unreachable"
   /** The profile already has a device set this device does not hold (another copy of the profile has devices). */
@@ -110,6 +112,8 @@ export interface EnrollChannelEvents {
   onClose(): void;
   /** Another device tried the link with another key than the one it took (the inviter), or than the code names (the joiner). */
   onPeerRefused(): void;
+  /** The other side's packet is on the link and fresh: it is there, whether or not a session opens. */
+  onPeerSeen?(): void;
 }
 
 /** `peerKey`: the other side's device signing key when it is known (the joiner, from the code); null for the inviter, which takes the first. */
@@ -271,6 +275,8 @@ export class EnrollInviter extends Enrollment {
   private first = false;
   private refused = 0;
   private stopDoneWait: (() => void) | null = null;
+  /** A joiner was seen on the link: from then it has as long as a joiner waits for the proof to open a session. */
+  private seen = false;
 
   constructor(private readonly options: InviterOptions) {
     super(options, { role: "inviter", step: "waiting", code: "", expires: 0 });
@@ -307,6 +313,13 @@ export class EnrollInviter extends Enrollment {
         this.refused++;
         const view = this.view;
         if (view.role === "inviter" && (view.step === "waiting" || view.step === "confirm")) this.show({ ...view, refused: this.refused });
+      },
+      onPeerSeen: () => {
+        // A device used the code and is there, and still no session: the two cannot reach each other. Both screens say
+        // so (the joiner's at the same timeout), rather than this one showing the code for the rest of its ten minutes.
+        if (this.seen || this.over) return;
+        this.seen = true;
+        this.timer(this.options.timing?.proofMs ?? ENROLL_PROOF_TIMEOUT_MS, () => { if (this.view.step === "waiting") void this.fail("unreached"); });
       },
     });
     // The ten minutes bound the admission: a code nobody confirmed by then is spent.
@@ -469,6 +482,8 @@ export class EnrollJoiner extends Enrollment {
   private hash: string | null = null;
   private proven = false;
   private inviterName = "";
+  /** The inviter's packet was seen on the link: a timeout with no session then means the two could not connect. */
+  private seen = false;
 
   constructor(private readonly options: JoinerOptions) {
     super(options, { role: "joiner", step: "connecting" });
@@ -490,9 +505,11 @@ export class EnrollJoiner extends Enrollment {
       onFrame: (frame) => this.guard(() => this.receive(frame)),
       onClose: () => { if (!this.over && (this.view.step === "connecting" || this.view.step === "confirm") && this.hash) void this.fail("dropped"); },
       onPeerRefused: () => {},
+      onPeerSeen: () => { this.seen = true; },
     });
-    // No proof in time: the code was spent by another device, or the other one is gone.
-    this.timer(this.options.timing?.proofMs ?? ENROLL_PROOF_TIMEOUT_MS, () => { if (!this.proven) void this.fail("unanswered", "failed"); });
+    // No proof in time: the code was spent by another device, or the other one is gone. Or both were there and no
+    // session opened between them: "unreached", which the inviter says too.
+    this.timer(this.options.timing?.proofMs ?? ENROLL_PROOF_TIMEOUT_MS, () => { if (!this.proven) void this.fail(this.seen && !this.hash ? "unreached" : "unanswered", "failed"); });
     return this.view;
   }
 
@@ -683,21 +700,31 @@ export function ghostLinkEnrollChannel(options: EnrollLinkOptions): OpenEnrollCh
         },
         onDeviceFrame: (frame) => { if (opened) events.onFrame(frame); },
         onPeerKeyRefused: () => events.onPeerRefused(),
+        onPresence: (presence) => { if (presence.online) events.onPeerSeen?.(); },
+        // The other device has no WebRTC (a Linux Desktop): this one starts its native endpoints for it, as a device
+        // link does. Without them a page with WebRTC had no transport in common with it, and nothing said so.
+        onPacketTransports: (transports) => { if (!transports.includes("webrtc/1")) startNative(); },
       },
     });
+    // The native endpoints, each on a seed made for this run: their addresses go out in the link's own packet.
+    let native = false;
+    const startNative = () => {
+      if (native) return;
+      native = true;
+      void (async () => {
+        for (const [transport, factory] of Object.entries(options.nativeTransports ?? {})) {
+          if (!factory || !link || link.availableTransports.includes(transport as NativeTransport)) continue;
+          try {
+            const endpoint = await factory(randomSeed());
+            if (!link) { await endpoint.close(); return; }
+            link.registerEndpoint(endpoint);
+          } catch { /* this transport is not available now; the others, and WebRTC, still are */ }
+        }
+      })();
+    };
     link.start();
-    // Where this page has no WebRTC, the session runs on the native transports, each on a seed made for this run.
-    if (!rtc) void (async () => {
-      for (const [transport, factory] of Object.entries(options.nativeTransports ?? {})) {
-        if (!factory) continue;
-        try {
-          const endpoint = await factory(randomSeed());
-          if (!link) { await endpoint.close(); return; }
-          link.registerEndpoint(endpoint);
-        } catch { /* this transport is not available now */ }
-        void transport;
-      }
-    })();
+    // Where this page has no WebRTC, the session runs on the native transports from the start.
+    if (!rtc) startNative();
     return {
       send: (frame) => link!.sendDeviceFrame(frame),
       stop: async () => { const running = link; link = null; await running?.stop().catch(() => {}); },

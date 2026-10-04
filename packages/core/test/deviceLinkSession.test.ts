@@ -1,12 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { GhostLink } from "../src/ghostlink";
 import { RELAY_POLL_INTERVALS } from "../src/link";
-import { createIdentity, identityFromSeed, publicKeyFromZ32, sign, verify } from "../src/identity";
+import { createIdentity, identityFromSeed, identityFromSeedB64, publicKeyFromZ32, sign, verify } from "../src/identity";
 import { fromBase64Url, randomBytes, toBase64Url, toZ32, utf8Encode } from "../src/bytes";
 import { PairedSession, type PairedSessionOptions, type PairingCredentials, type PairingState } from "../src/pairedSession";
 import { fitSignedPairedSignal, fitSignedPairedSignalWith, signPairedSignal, signPairedSignalWith, verifyPairedSignal } from "../src/pairedSignal";
 import { seedSigner, webCryptoSigner, type Signer } from "../src/signer";
-import { DEVICES_CAPABILITY, deviceEchoFrame, deviceEchoNonce, deviceLinkPairing, deviceLinkParams, devicePingFrame, signDeviceTransports, verifyDeviceTransports, type DeviceFrame } from "../src/deviceLink";
+import { createDeviceInvite, deviceInviteJoinerParams } from "../src/deviceInvite";
+import { DEVICES_CAPABILITY, ENROLL_CAPABILITY, deviceKeyZ32, deviceEchoFrame, deviceEchoNonce, deviceLinkPairing, deviceLinkParams, devicePingFrame, signDeviceTransports, unsignedDeviceTransports, verifyDeviceTransports, type DeviceFrame } from "../src/deviceLink";
 import { encodePacketTransports } from "../src/capsRecord";
 import { DESKTOP_NETWORK, MemoryPkarr, closeWorld, fakePeerConnection, useFakeWorld, yieldToLoop } from "./support/pairingWorld";
 import { NativeWorld } from "./support/nativeWorld";
@@ -331,6 +332,14 @@ describe("a device link's transports in its packet (`_tr`)", () => {
     expect(verifyDeviceTransports("not json", from, to, device.publicKey)).toBeNull();
   });
 
+  it("is read unchecked only as where to dial, and only when it carries a signature", async () => {
+    const signed = await signDeviceTransports(value, seedDevice(), from, to);
+    expect(unsignedDeviceTransports(signed)).toBe(value);
+    expect(unsignedDeviceTransports(value)).toBeNull();
+    expect(unsignedDeviceTransports("not json")).toBeNull();
+    expect(unsignedDeviceTransports(`{"t":[],"s":"${"a".repeat(2_000)}"}`)).toBeNull();
+  });
+
   describe("on a link with no WebRTC", () => {
     let native: NativeWorld;
     beforeEach(() => { useFakeWorld(); pkarr = new MemoryPkarr(DESKTOP_NETWORK); native = new NativeWorld(); native.hexIds = true; });
@@ -355,6 +364,55 @@ describe("a device link's transports in its packet (`_tr`)", () => {
       link.start();
       link.registerEndpoint(native.endpoint("iroh/1", name));
       return { link, states };
+    }
+
+    /**
+     * An enrollment's one-time link (WISP 06 § Adding a device), as `ghostLinkEnrollChannel` opens it: the inviter takes
+     * the first key that authenticates, the joiner pins the inviter's key from the code. `rtc`: the side has WebRTC, and
+     * starts its native endpoint only once the other side's packet says it has none; without, it starts it at once.
+     */
+    function openEnroll(name: string, side: ReturnType<typeof createDeviceInvite>, role: "inviter" | "joiner", signer: Signer, inviterKey: Uint8Array, rtc: boolean) {
+      const pinned = role === "joiner" ? deviceKeyZ32(inviterKey) : undefined;
+      let taken = pinned;
+      const credentials: PairingCredentials = pinned
+        ? { seedB64: "", signer, peerKey: pinned, expectedPeerKey: pinned, verifiedPeerKey: pinned, requireSignedSignals: true }
+        : { seedB64: "", signer };
+      let started = false;
+      const start = () => { if (!started) { started = true; link.registerEndpoint(native.endpoint("iroh/1", name)); } };
+      const link: GhostLink = new GhostLink({
+        params: role === "inviter" ? side.params : deviceInviteJoinerParams(side.invite),
+        pairing: { credentials, trustOnFirstUse: !pinned, pinPeer: async (key) => { if (taken && key !== taken) throw new Error("Not the device this code is for"); taken = key; } },
+        deviceCapabilities: [ENROLL_CAPABILITY], rtcAvailable: rtc, native: { automatic: true }, packetTransports: true,
+        transport: pkarr.transport(), pollIntervals: RELAY_POLL_INTERVALS, autoConnect: true,
+        createPeerConnection: () => { if (!rtc) throw new ReferenceError("RTCPeerConnection is not defined"); return fakePeerConnection(name); },
+        localFetch: vi.fn(), getServices: () => [{ id: "chat", type: "chat" }], getHostedHttpService: () => undefined,
+        events: { onPacketTransports: (transports) => { if (!transports.includes("webrtc/1")) start(); } },
+      });
+      opened.push(link);
+      link.start();
+      if (!rtc) start();
+      return link;
+    }
+
+    /** A code whose inviter's one-time rendezvous key sorts below the joiner's (`lower`), or above: that side dials. */
+    function codeWhere(inviterKey: Uint8Array, inviterDials: boolean) {
+      for (;;) {
+        const side = createDeviceInvite(inviterKey);
+        const inviter = identityFromSeedB64(side.params.seedB64).pubKeyZ32, joiner = identityFromSeedB64(side.invite.joinerSeedB64).pubKeyZ32;
+        if ((inviter < joiner) === inviterDials) return side;
+      }
+    }
+
+    for (const [inviterRtc, inviterDials] of [[true, true], [true, false], [false, true], [false, false]] as const) {
+      it(`an enrollment's link goes live where the new device has no WebRTC (inviter ${inviterRtc ? "with" : "without"} WebRTC, the ${inviterDials ? "inviter" : "joiner"} dials)`, async () => {
+        const web = await webCryptoDevice(), linux = seedDevice();
+        const side = codeWhere(web.publicKey, inviterDials);
+        const a = openEnroll("web", side, "inviter", web, web.publicKey, inviterRtc);
+        const b = openEnroll("linux", side, "joiner", linux, web.publicKey, false);
+        for (let i = 0; i < 480 && !(a.supportsDevice(ENROLL_CAPABILITY) && b.supportsDevice(ENROLL_CAPABILITY)); i++) await run(250);
+        expect(a.supportsDevice(ENROLL_CAPABILITY) && b.supportsDevice(ENROLL_CAPABILITY)).toBe(true);
+        expect(a.sessionTranscriptHash).toBe(b.sessionTranscriptHash);
+      });
     }
 
     it("goes live on the transports each device signed", async () => {

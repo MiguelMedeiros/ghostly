@@ -42,7 +42,7 @@ export function defaultDeviceName(env: { userAgent: string; platform?: string; m
 /** What the engine's `enroll-<reason>:` errors, and a failed enrollment's reason, say to the person. */
 const FAILURE_KEYS: Record<string, TranslationKey> = {
   expired: "devices.fail.expired", digits: "devices.fail.digits", used: "devices.fail.used", cancelled: "devices.fail.cancelled",
-  proof: "devices.fail.proof", dropped: "devices.fail.dropped", unanswered: "devices.fail.unanswered", unreachable: "devices.fail.unreachable",
+  proof: "devices.fail.proof", dropped: "devices.fail.dropped", unanswered: "devices.fail.unanswered", unreached: "devices.fail.unreached", unreachable: "devices.fail.unreachable",
   elsewhere: "devices.fail.elsewhere", full: "devices.fail.full", replaced: "devices.fail.replaced", failed: "devices.fail.failed",
   "in-use": "devices.fail.inUse", offline: "devices.fail.offline", set: "devices.fail.set", typo: "devices.fail.typo", update: "devices.fail.update",
   "not-ghostly": "devices.fail.notGhostly", damaged: "devices.fail.damaged", chat: "devices.fail.chat", "home-screen": "devices.join.homeScreen",
