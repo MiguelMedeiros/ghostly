@@ -395,6 +395,8 @@ export interface EngineApi {
   deviceHandoffPull(params: { password: string; later?: number }): import("../devices/handoff").HandoffView | null;
   /** "Use here" on an offer from the active device. */
   deviceHandoffAccept(params: { later?: number }): import("../devices/handoff").HandoffView | null;
+  /** Try again on a device that took the profile and could not check which device is active within 2 minutes. */
+  deviceHandoffSettle(): import("../devices/handoff").HandoffView | null;
   /** Cancel, or "Not now" on an offer. Nothing changes until the last step. */
   deviceHandoffCancel(): void;
   /** The handoff in progress on this device, or the last one that failed. */

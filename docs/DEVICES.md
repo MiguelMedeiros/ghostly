@@ -22,7 +22,7 @@ On iPhone and iPad, add Ghostly to the Home Screen first: a browser tab keeps it
 
 Files are copied first while you keep using the active device; later moves copy only new files. On mobile data, files over 16 MB can stay behind (**Bring large files later**). Then the active device stops, sends the rest, and goes on standby once the other device has checked it all. The new device waits about 30 seconds to be sure no other device took over at the same moment, then reconnects to your contacts.
 
-Both devices must be online, with Ghostly open, for the whole move. On a desktop, **Keep this computer awake** (Profile → Devices) keeps it from sleeping, so your phone can take over while you are out. A move that stops (a dropped connection, no answer for 2 minutes) changes nothing, and **Try again** keeps the files already copied.
+Both devices must be online, with Ghostly open, for the whole move. On a desktop, **Keep this computer awake** (Profile → Devices) keeps it from sleeping, so your phone can take over while you are out. A move that stops (a dropped connection, no answer for 2 minutes) changes nothing, and **Try again** keeps the files already copied. At the very end, the new device checks which device is active; if it cannot within 2 minutes, it says so, and **Try again** checks again.
 
 A phone on standby still gets a quiet notice for a message or a call ("New message. Active on <device>."), which opens its standby screen.
 

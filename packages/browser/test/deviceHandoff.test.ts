@@ -657,6 +657,87 @@ describe("a push", () => {
   });
 });
 
+describe("Try again on the active device after a move that stopped", () => {
+  it("reaches a taker that has not seen the earlier move end: the offer takes its place, and the profile moves", async () => {
+    const w = world();
+    const file = w.profile.add("big", bytesOf(HANDOFF_PIECE_BYTES * 8));
+    await w.giver.push(B);
+    await until(() => w.taker.view()?.step === "offer");
+    // The copy runs, then nothing gets through any more (a link that is up and carries nothing).
+    let pieces = 0, silent = false;
+    w.link.meddle = (_from, frame) => {
+      if (frame.t === "handoff-data" && ++pieces > 3) silent = true;
+      return silent ? null : frame;
+    };
+    await w.taker.accept();
+    await until(() => silent);
+    // The giver sees the move stop first (its own 2 minutes end before the taker's): back to active, Try again shown.
+    // Its cancel is lost; the taker still thinks it is copying.
+    await w.giver.cancel();
+    expect(w.giver.view()?.step).toBe("failed");
+    expect(w.taker.view()?.step).toBe("copying");
+    // The link carries frames again, and the person presses Try again on the active device: the offer reaches the
+    // taker, which gives the earlier attempt up (its staged files stay) and asks "Move this profile here?".
+    w.link.meddle = undefined;
+    await w.giver.push(B);
+    await until(() => w.taker.view()?.step === "offer");
+    expect(w.takerRecords.record.handoff?.step).toBe("stopped");
+    await w.taker.accept();
+    await until(() => w.quiesced.length === 1);
+    await reloadGiver(w);
+    await until(() => w.reloads === 1);
+    expect(w.giverRecords.record.state).toBe("standby");
+    const staged = w.takerRecords.record.handoff!.staging!;
+    expect(toBase64Url(sha256(w.storage.spaces.get(staged)!.files.get(file.id)!))).toBe(file.sha256);
+  });
+
+  it("an offer lost as the link dropped goes again on the new session", async () => {
+    const w = world();
+    w.link.meddle = (_from, frame) => (frame.t === "handoff-offer" ? null : frame);
+    await w.giver.push(B);
+    await settle();
+    expect(w.taker.view()).toBeNull();
+    w.link.meddle = undefined;
+    w.link.drop();
+    w.link.reconnect();
+    await until(() => w.taker.view()?.step === "offer");
+    expect(w.link.count("handoff-offer", A)).toBe(2);
+  });
+
+  it("a taker still in an earlier attempt that says hello gets the offer again", async () => {
+    const w = world();
+    w.profile.add("f1", bytesOf(HANDOFF_PIECE_BYTES * 2));
+    await w.giver.push(B);
+    await until(() => w.taker.view()?.step === "offer");
+    // The giver's cancel and its next offer are both lost; the taker goes on with the earlier attempt.
+    w.link.meddle = (from, frame) => (from === A && (frame.t === "handoff-cancel" || frame.t === "handoff-offer" || frame.t === "handoff-data") ? null : frame);
+    await w.taker.accept();
+    await until(() => w.link.count("handoff-manifest") > 0);
+    await w.giver.cancel();
+    await w.giver.push(B);
+    await settle();
+    expect(w.taker.view()?.step).not.toBe("offer");
+    // A new session: the taker says hello with the earlier attempt's id, and the giver answers with the offer.
+    w.link.meddle = undefined;
+    w.link.drop();
+    w.link.reconnect();
+    await until(() => w.taker.view()?.step === "offer");
+  });
+
+  it("a standby that released and never heard `handoff-done` takes an offer from the device it released to as that done", async () => {
+    const w = world();
+    w.profile.add("f1", bytesOf(100));
+    w.link.meddle = (_from, frame) => (frame.t === "handoff-done" ? null : frame);
+    await fullPull(w);
+    await settle();
+    expect(w.giver.view()?.step).toBe("switching");
+    expect(w.giverRecords.record.handoff?.release).toBeTruthy();
+    await w.giver.receive(B, { t: "handoff-offer", turn: N + 1, id: "y".repeat(22), bytes: 0 });
+    expect(w.giver.view()).toBeNull();
+    expect(w.giverRecords.record.handoff).toBeUndefined();
+  });
+});
+
 describe("refusals before a byte is copied", () => {
   it.each(["wallet", "payment", "call", "loading"] as const)("the giver is busy (%s): the taker is told only that it is busy, and no try is used", async (why) => {
     const w = world();
@@ -1011,6 +1092,76 @@ describe("crash recovery (WISP 06 § Installing the staged state)", () => {
     await until(() => w.reloads === 1);
     expect(w.takes).toHaveLength(3);
     expect(w.storage.dropped).toEqual(["ghostly"]);
+  });
+
+  /** B, `taking` under the staged name with the release, as the page that starts after the install finds it. */
+  async function installedTaker(w: World): Promise<void> {
+    const release = { turn: N + 1, to: B, h: toBase64Url(randomBytes(32)), s: toBase64Url(randomBytes(64)) };
+    w.storage.pointer = "ghostly_stage9";
+    w.takerRecords.record = { ...w.takerRecords.record, profile: "ghostly_stage9" };
+    await w.takerRecords.move("taking", { handoff: { role: "taking", step: "installed", id: "x".repeat(22), peer: A, from: N, staging: "ghostly_stage9", old: "ghostly", release, at: Date.now() } });
+  }
+
+  it("B, `taking`, a take that throws: not the end of it; it takes again and starts", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"], shouldAdvanceTime: true });
+    const w = world();
+    await installedTaker(w);
+    let n = 0;
+    const start = w.takeOutcome;
+    w.takeOutcome = () => { if (++n < 3) throw new Error("The turn was read too long ago to raise it: read again"); return start(); };
+    await reloadTaker(w);
+    // The screens follow the take while it runs: the handler is not held up by it.
+    expect(w.taker.view()?.step).toBe("settling");
+    await vi.advanceTimersByTimeAsync(11_000);
+    await until(() => w.reloads === 1);
+    expect(w.takes).toHaveLength(3);
+    expect(w.storage.dropped).toEqual(["ghostly"]);
+  });
+
+  it("B, `taking`, no settled turn within 2 minutes: Can't check which device is active, with Try again, which takes again", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"], shouldAdvanceTime: true });
+    const w = world();
+    await installedTaker(w);
+    const start = w.takeOutcome;
+    w.takeOutcome = () => ({ kind: "wait", read: {} }) as unknown as TurnOutcome;
+    await reloadTaker(w);
+    await vi.advanceTimersByTimeAsync(HANDOFF_TIMINGS.settleMs + 6_000);
+    await until(() => w.taker.view()?.step === "failed");
+    expect(w.taker.view()).toMatchObject({ role: "taker", step: "failed", failure: "settle" });
+    // It stopped asking, and is still `taking`: the release is its own.
+    const asked = w.takes.length;
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(w.takes).toHaveLength(asked);
+    expect(w.takerRecords.record.state).toBe("taking");
+    expect(w.reloads).toBe(0);
+    // Not a cancel: nothing is undone.
+    await w.taker.cancel();
+    expect(w.taker.view()?.failure).toBe("settle");
+    // Try again: the take again, and this time the turn settles.
+    w.takeOutcome = start;
+    await w.taker.settle();
+    await until(() => w.reloads === 1);
+    expect(w.storage.dropped).toEqual(["ghostly"]);
+  });
+
+  it("B, `taking`, a take that never answers: the wait still ends at 2 minutes; the take's late answer settles the device", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"], shouldAdvanceTime: true });
+    const w = world();
+    await installedTaker(w);
+    let answer: (outcome: TurnOutcome) => void = () => {};
+    const takerPorts = () => (w.taker as unknown as { ports: TakerPorts }).ports;
+    w.taker.stop();
+    w.taker = w.makeTaker();
+    takerPorts().take = (release, turn) => { w.takes.push({ release, turn }); return new Promise<TurnOutcome>((resolve) => { answer = resolve; }); };
+    await w.taker.resume();
+    await vi.advanceTimersByTimeAsync(HANDOFF_TIMINGS.settleMs + 1_000);
+    await until(() => w.taker.view()?.failure === "settle");
+    // Try again waits for the take the keeper is still working on: it asks no second one.
+    await w.taker.settle();
+    expect(w.takes).toHaveLength(1);
+    answer(w.takeOutcome()!);
+    await until(() => w.reloads === 1);
+    expect(w.taker.view()?.step).toBe("done");
   });
 
   it("B verified and reloaded before any release reached it: the staged state is kept, it asks again, A sends the same release, B installs", async () => {

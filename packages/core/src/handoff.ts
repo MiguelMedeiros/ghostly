@@ -82,6 +82,11 @@ export const HANDOFF_TIMINGS = {
   releaseMs: 60_000,
   /** A staging namespace that was not installed is dropped after this long at the latest. */
   stagingMs: 24 * 60 * 60_000,
+  /**
+   * The taker, installed: no settled turn (`start`, or a turn above the release) within this long. It stops trying and
+   * says it cannot check which device is active, with Try again. It stays `taking`: the release is still its own.
+   */
+  settleMs: 2 * 60_000,
 } as const;
 
 /** One piece of a part, before it is sealed. Sealed and in base64url it fits a device frame (60 KiB). */

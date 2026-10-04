@@ -49,13 +49,17 @@ import type { HandoffTakerFacts } from "./handoffWallets";
 export const STOPPED_STEP = "stopped:";
 /** The failures of pass 2 that the screen shows again after the reload. */
 const SHOWN_AFTER_RELOAD = new Set<HandoffFailure>(["stalled", "dropped", "damaged", "cancelled"]);
+/** A take the taker's settle wait gave up waiting for. */
+const NO_ANSWER: unique symbol = Symbol("no answer");
 
 /** Why a handoff did not happen, as the screens say it. */
 export type HandoffFailure =
   | "unreachable" | "password" | "locked-out" | "refused" | "payment" | "call" | "busy" | "older" | "room" | "damaged" | "dropped"
   | "wallet" | "loading" | "mainnet" | "expiry" | "cancelled" | "turn" | "offline" | "version" | "failed" | "woken"
   /** The copy stopped: nothing came from the other device for `HANDOFF_TIMINGS.stuckMs`. */
-  | "stalled";
+  | "stalled"
+  /** The taker installed, and no settled read of the turn came within `HANDOFF_TIMINGS.settleMs`: Try again. */
+  | "settle";
 
 /** What the screens show of a handoff on either device. Never a secret. */
 export interface HandoffView {
@@ -485,12 +489,24 @@ export class HandoffGiver {
       this.stays = await this.ports.staying?.(this.takerFacts(key)).catch(() => []) ?? [];
       this.phase = "offered";
       const files = await this.ports.source.files();
-      const bytes = fileParts(files).reduce((sum, part) => sum + part[1], 0);
-      this.out(handoffOfferFrame(this.turn, this.id!, bytes));
+      this.offerBytes = fileParts(files).reduce((sum, part) => sum + part[1], 0);
+      this.offer();
       this.arm(HANDOFF_TIMINGS.idleMs * 5, () => this.fail("cancelled", "timeout"));
       this.changed();
       return this.view();
     });
+  }
+
+  /** About this many bytes: what the offer of a push says, sent again as it is. */
+  private offerBytes = 0;
+
+  /**
+   * The offer of a push, sent at Move to and again while no answer came: on each new session of the link (the first
+   * may have gone out as the link dropped), and when the taker shows it still runs an earlier attempt (its hello names
+   * another handoff, or it says what it holds). A taker in that state gives the earlier attempt up for this one.
+   */
+  private offer(): void {
+    if (this.phase === "offered" && this.id) this.out(handoffOfferFrame(this.turn, this.id, this.offerBytes));
   }
 
   /** Cancel: before quiesce nothing changed; in pass 2 the device is active again. Never once the release is signed. */
@@ -529,6 +545,8 @@ export class HandoffGiver {
         const session = this.sessionFor(key);
         if (session) this.sendHello(key, session);
       }
+      // An offer not answered yet goes again on the new session.
+      this.offer();
     });
   }
 
@@ -583,8 +601,12 @@ export class HandoffGiver {
         return;
       }
       case HANDOFF_VERIFIED: return this.onVerified(from, frame);
+      case HANDOFF_OFFER:
       case HANDOFF_DONE: {
-        if (from !== this.peer || readHandoffDone(frame) === null || this.phase !== "released") return;
+        // The device this one released to offers the profile back: it took the turn, so its `handoff-done` was lost
+        // (it is sent just before that device reloads). The same as the done.
+        if (from !== this.peer || this.phase !== "released") return;
+        if (frame.t === HANDOFF_DONE ? readHandoffDone(frame) === null : readHandoffTurnFrame(frame) === null) return;
         await this.dropBreez();
         await this.ports.records.amend({ handoff: undefined });
         this.phase = "idle"; this.peer = null;
@@ -610,6 +632,8 @@ export class HandoffGiver {
     if (!hello || !session) return;
     session.peer = hello;
     this.sendHello(from, session);
+    // The taker still runs an earlier attempt with this device: the offer again, which it takes in place of that one.
+    if (from === this.peer && hello.id !== this.id) this.offer();
     // The same handoff in a new session: its key comes from the first session's.
     if (from === this.peer && hello.id === this.id && this.secret && (this.phase === "pass1" || this.phase === "pass2")) {
       session.key = handoffStreamKey(session.ephemeral.secret, fromBase64Url(hello.e), this.secret, session.transcript);
@@ -712,6 +736,8 @@ export class HandoffGiver {
     if (!have) return;
     // The handoff this belongs to is over here (this device went back to active): the taker is told, and stops.
     if (this.phase === "idle" || this.phase === "failed") { this.out(handoffCancelFrame("cancelled"), from); return; }
+    // An earlier attempt the taker did not see end, while this device offers a new one: the offer again.
+    if (this.phase === "offered") { if (from === this.peer && !have.more) this.offer(); return; }
     if (from !== this.peer || (this.phase !== "pass1" && this.phase !== "pass2")) return;
     this.haveBuffer.d.push(...have.d);
     Object.assign(this.haveBuffer.p, have.p);
@@ -922,7 +948,10 @@ export class HandoffGiver {
 
 // -- the taker ------------------------------------------------------------------------------------------------------
 
-type TakerPhase = "idle" | "offer" | "connecting" | "authorizing" | "receiving" | "verified" | "installing" | "settling" | "done" | "failed";
+type TakerPhase = "idle" | "offer" | "connecting" | "authorizing" | "receiving" | "verified" | "installing" | "settling" | "unsettled" | "done" | "failed";
+
+/** A taker's phases of a handoff that has no release yet: an offer may still take their place. */
+const BEFORE_RELEASE = new Set<TakerPhase>(["connecting", "authorizing", "receiving", "verified"]);
 
 /** The states that take a handoff: a standby, and a replaced device ("Use here", WISP 06 § States and events). */
 const takes = (state: DeviceRecord["state"]): boolean => state === "standby" || state === "superseded";
@@ -1025,7 +1054,7 @@ export class HandoffTaker {
   /** "Not now" on an offer, or Cancel before the release. After the release there is nothing to cancel here. */
   cancel(): Promise<void> {
     return this.exclusive(async () => {
-      if (this.phase === "installing" || this.phase === "settling" || this.phase === "done") return;
+      if (this.phase === "installing" || this.phase === "settling" || this.phase === "unsettled" || this.phase === "done") return;
       if (this.peer && this.ports.links.live(this.peer)) this.out(handoffCancelFrame("cancelled"));
       await this.giveUp("cancelled");
     });
@@ -1042,8 +1071,9 @@ export class HandoffTaker {
     this.peer = handoff.peer; this.id = handoff.id; this.turn = handoff.from ?? record.turn; this.deviceName = name(record, handoff.peer);
     this.secret = handoff.secret ? fromBase64Url(handoff.secret) : null;
     if (record.state === "taking" && handoff.release && handoff.staging && handoff.old) {
-      // Installed under the staged name: the take. Not yet (the pointer did not move): the install again.
-      if (record.profile === handoff.staging) await this.take(record);
+      // Installed under the staged name: the take, which runs on its own (the screens follow it meanwhile). Not yet
+      // (the pointer did not move): the install again.
+      if (record.profile === handoff.staging) void this.take(record);
       else await this.exclusive(() => this.install(record));
       return;
     }
@@ -1097,10 +1127,16 @@ export class HandoffTaker {
     switch (frame.t) {
       case HANDOFF_OFFER: {
         const offer = readHandoffTurnFrame(frame);
-        if (!offer || offer.bytes === undefined || (this.phase !== "idle" && this.phase !== "failed" && this.phase !== "offer")) return;
+        if (!offer || offer.bytes === undefined) return;
+        // A new offer from the device this one was in a handoff with, before any release: that device is active and
+        // runs no handoff (it offers only then), so the earlier attempt is over there, whether or not this device
+        // saw it end (a copy the giver saw stop first, a cancel lost with the link). This one takes its place.
+        const earlier = from === this.peer && offer.id !== this.id && BEFORE_RELEASE.has(this.phase);
+        if (!earlier && this.phase !== "idle" && this.phase !== "failed" && this.phase !== "offer") return;
         const record = await this.ports.records.read();
         // Only from the device the record names active.
         if (!record || record.activeSlot === undefined || record.deviceSet[record.activeSlot]?.key !== from || !takes(record.state)) return;
+        if (earlier) await this.end();
         this.peer = from; this.id = offer.id; this.offerBytes = offer.bytes; this.deviceName = name(record, from); this.failure = undefined;
         this.phase = "offer";
         this.changed();
@@ -1123,7 +1159,7 @@ export class HandoffTaker {
         const why = readHandoffCancel(frame);
         if (!why || from !== this.peer) return;
         // A cancel after a release counts only once a turn above the released one is on the network (the take finds out).
-        if (this.phase === "installing" || this.phase === "settling" || this.phase === "done") return;
+        if (this.phase === "installing" || this.phase === "settling" || this.phase === "unsettled" || this.phase === "done") return;
         await this.giveUp(why === "password" ? "password" : why === "damaged" ? "damaged" : why === "stalled" ? "stalled" : "cancelled");
         return;
       }
@@ -1440,49 +1476,99 @@ export class HandoffTaker {
     this.ports.reload();
   }
 
+  /** The take the turn keeper is working on: one at a time, and a Try again waits for it rather than asking again. */
+  private taking: Promise<TurnOutcome | null> | null = null;
+
   /**
    * Under the staged name, `taking`: the turn record of `N + 1`, the settle wait, and `active` only on `mine`. On
    * anything else the device steps back: the pointer goes back to its old namespace, the staged one is dropped.
+   *
+   * Bounded (WISP 06 § States and events): no settled turn within `HANDOFF_TIMINGS.settleMs` and it stops, "Can't check
+   * which device is active", with Try again (`settle`). It stays `taking`, as the release is still its own; a take the
+   * keeper was still working on is not dropped, and settles the device if it answers later.
    */
   private async take(record: DeviceRecord): Promise<void> {
     const handoff = record.handoff!, release = handoff.release!;
     if (!this.ports.take) return;
-    this.phase = "settling";
+    this.phase = "settling"; this.failure = undefined;
     this.changed();
     const fromSlot = slotOf(record, handoff.peer!), toSlot = record.ownSlot!;
     const turnRelease: TurnRelease = { from: fromSlot, to: toSlot, h: fromBase64Url(release.h), signature: fromBase64Url(release.s) };
+    const deadline = this.now() + HANDOFF_TIMINGS.settleMs;
     for (;;) {
       if (this.stopped) return;
-      const outcome = await this.ports.take(turnRelease, release.turn);
-      if (outcome?.kind === "start") {
-        this.phase = "done";
-        this.changed();
-        try { this.ports.links.send(handoff.peer!, handoffDoneFrame(Number(outcome.read.record?.sequence ?? 0))); } catch { /* it learns from the turn record */ }
-        await this.ports.forget(handoff.old!).catch(() => {});
-        // A replaced device's old namespace is the fork: what only it held stays, as "Only on this device", until the
-        // person discards it (WISP 06 § Installing the staged state). Any other old namespace goes.
-        if (handoff.fork) await this.ports.records.amend({ handoff: undefined, forks: [...new Set([...(record.forks ?? []), handoff.old!])] }).catch(() => {});
-        else {
-          await this.ports.staging.drop(handoff.old!).catch(() => {});
-          await this.ports.records.amend({ handoff: undefined }).catch(() => {});
-        }
-        this.ports.reload();
+      if (this.now() >= deadline) { this.unsettled(); return; }
+      // A take that throws (a store or network error) is a take with no answer: tried again, never the end of it.
+      const call = this.taking ??= this.ports.take(turnRelease, release.turn).catch(() => null).finally(() => { this.taking = null; });
+      const outcome = await Promise.race([call, this.sleep(deadline - this.now()).then((): typeof NO_ANSWER => NO_ANSWER)]);
+      if (outcome === NO_ANSWER) {
+        this.unsettled();
+        // Still the keeper's: an answer that comes later is acted on, unless a Try again already waits for it.
+        void call.then((late) => (this.phase === "unsettled" ? this.settled(late, record) : false));
         return;
       }
-      if (outcome?.kind === "gated") {
-        // It lost: the record under the staged name says so; the pointer is back (`stepBack`). The staged namespace goes.
-        this.phase = "failed"; this.failure = "turn";
-        this.changed();
-        await this.ports.forget(handoff.staging!).catch(() => {});
-        await this.ports.staging.drop(handoff.staging!).catch(() => {});
-        this.ports.reload();
-        return;
-      }
+      if (await this.settled(outcome, record)) return;
       // No good read, or a settle read a source did not answer: "Finishing: waiting for the network".
       this.phase = "settling";
       this.changed();
-      await new Promise((resolve) => setTimeout(resolve, 5_000));
+      await this.sleep(Math.min(5_000, Math.max(0, deadline - this.now())));
     }
+  }
+
+  /** What a take's outcome ends in: the device active (`start`), back on standby (`gated`), or nothing yet (false). */
+  private async settled(given: TurnOutcome | null, record: DeviceRecord): Promise<boolean> {
+    if (this.stopped || this.phase === "done") return true;
+    const handoff = record.handoff!;
+    // No outcome (the take threw): the record says whether the keeper got as far as a new state before it did.
+    const now = given ? null : await this.ports.records.read().catch(() => null);
+    const kind = given?.kind ?? (now?.state === "active" ? "start" : now && now.state !== "taking" ? "gated" : null);
+    if (kind === "start") {
+      this.phase = "done";
+      this.changed();
+      const sequence = given?.kind === "start" ? Number(given.read.record?.sequence ?? 0) : 0;
+      try { this.ports.links.send(handoff.peer!, handoffDoneFrame(sequence)); } catch { /* it learns from the turn record */ }
+      await this.ports.forget(handoff.old!).catch(() => {});
+      // A replaced device's old namespace is the fork: what only it held stays, as "Only on this device", until the
+      // person discards it (WISP 06 § Installing the staged state). Any other old namespace goes.
+      if (handoff.fork) await this.ports.records.amend({ handoff: undefined, forks: [...new Set([...(record.forks ?? []), handoff.old!])] }).catch(() => {});
+      else {
+        await this.ports.staging.drop(handoff.old!).catch(() => {});
+        await this.ports.records.amend({ handoff: undefined }).catch(() => {});
+      }
+      this.ports.reload();
+      return true;
+    }
+    if (kind === "gated") {
+      // It lost: the record under the staged name says so; the pointer is back (`stepBack`). The staged namespace goes.
+      this.phase = "failed"; this.failure = "turn";
+      this.changed();
+      await this.ports.forget(handoff.staging!).catch(() => {});
+      await this.ports.staging.drop(handoff.staging!).catch(() => {});
+      this.ports.reload();
+      return true;
+    }
+    return false;
+  }
+
+  /** The settle wait ran out: "Can't check which device is active", with Try again. */
+  private unsettled(): void {
+    this.phase = "unsettled"; this.failure = "settle";
+    this.changed();
+  }
+
+  /** Try again after the settle wait ran out: the take again, for as long once more. */
+  settle(): Promise<HandoffView | null> {
+    return this.exclusive(async () => {
+      if (this.phase !== "unsettled") return this.view();
+      const record = await this.ports.records.read();
+      if (record?.state !== "taking" || !record.handoff?.release) throw new Error("handoff-refused: This device is not taking the profile.");
+      void this.take(record);
+      return this.view();
+    });
+  }
+
+  private sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
   /** What `undoStaging` does for a taker that lost (the keeper calls it before it writes `standby` under the staged name). */
@@ -1495,15 +1581,20 @@ export class HandoffTaker {
 
   /** The handoff ended without a release: the staged parts of pass 2 go, the staged files stay for a later try. */
   private async giveUp(failure: HandoffFailure): Promise<void> {
+    await this.end();
+    this.failure = failure;
+    this.changed();
+  }
+
+  /** What ending a handoff before its release leaves: no timers, nothing of pass 2, the record's note stopped. */
+  private async end(): Promise<void> {
     if (this.timer) clearTimeout(this.timer);
     clearInterval(this.idleTimer);
     this.phase = "idle";
-    this.failure = failure;
-    this.pake = null; this.bundle = null; this.incoming.clear();
+    this.pake = null; this.bundle = null; this.incoming.clear(); this.manifestBuffer = { parts: [], later: [], ids: {} };
     await this.staging?.dropRest().catch(() => {});
     const record = await this.ports.records.read().catch(() => null);
     if (record?.handoff?.role === "taking" && takes(record.state)) await this.ports.records.amend({ handoff: { ...record.handoff, step: "stopped", secret: undefined } }).catch(() => {});
-    this.changed();
   }
 
   private arm(ms: number, then: () => void | Promise<void>): void {
