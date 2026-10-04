@@ -104,7 +104,7 @@ test("lock screen: a password locks the app, only it unlocks it", { tag: ["@feat
   const { page } = await peer("alice");
   await page.goto("/#/settings");
   await page.getByRole("switch", { name: "Lock Screen" }).click();
-  const passwords = page.locator("input[type=password]");
+  const passwords = page.getByTestId("settings-password-form").locator("input[type=password]");
 
   await passwords.nth(0).fill("boo");
   await passwords.nth(1).fill("boo");
@@ -152,7 +152,7 @@ test("lock screen: locks by itself after the chosen idle time", { tag: ["@featur
   await page.clock.install();
   await page.goto("/#/settings");
   await page.getByRole("switch", { name: "Lock Screen" }).click();
-  const passwords = page.locator("input[type=password]");
+  const passwords = page.getByTestId("settings-password-form").locator("input[type=password]");
   await passwords.nth(0).fill("spooky");
   await passwords.nth(1).fill("spooky");
   await page.getByRole("button", { name: "Set password" }).click();
