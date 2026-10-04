@@ -149,6 +149,27 @@ describe("the take of a handoff", () => {
     expect(clock.slept).toEqual([TURN_SETTLE_MS]);
   });
 
+  it("a take again after it wrote, on a read slower than P: waits, puts nothing, and never throws", async () => {
+    const { keeper, store } = await taker(network);
+    const release = await releaseTo(N + 1, 0, 1);
+    // The first take wrote and put; its settle read missed a source that took the put (it waits, and the host takes again).
+    network.sources[1].down = false;
+    clock.onSleep = async () => { network.source("https://relay.test").down = true; };
+    expect((await keeper.take(release, N + 1))?.kind).toBe("wait");
+    expect(opened(store.record.turnPacket).turn).toBe(N + 1);
+    clock.onSleep = undefined;
+    network.source("https://relay.test").down = false;
+    network.calls.length = 0;
+    // The next read takes longer than P (the Desktop's DHT node waits its whole time): the same bytes may not go out on it.
+    network.afterRead = () => { clock.t += 11_000; };
+    expect((await keeper.take(release, N + 1))?.kind).toBe("wait");
+    expect(network.puts()).toEqual([]);
+    expect(store.record.state).toBe("taking");
+    // A quick read again: it puts the same bytes and settles.
+    network.afterRead = undefined;
+    expect((await keeper.take(release, N + 1))?.kind).toBe("start");
+  });
+
   it("refuses a device that is not taking", async () => {
     const { keeper, store } = await taker(network);
     store.record = { ...store.record, state: "standby" };

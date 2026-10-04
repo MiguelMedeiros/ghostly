@@ -389,8 +389,14 @@ export class TurnKeeper {
       const fresh = read.result === "none" || read.result === "behind" || below;
       if (held.wrote && held.storedRecord?.turn === turn) {
         if (read.result !== "mine" && !fresh) return this.settle(held, read, true);
+        // The read took longer than `P` (a source that waits its whole time, the Desktop's DHT node that never joins):
+        // the same bytes may not go out on it. Nothing is put; the host waits and takes again, as after a write.
+        if (!this.readIsFresh()) return { kind: "wait", read };
         held.record = await this.store.amend(this.options.profile, { settle: undefined });
-        await this.put(held, held.stored!, conditionsAfter(read, read.result === "none" ? "none" : "seen"), true);
+        try { await this.put(held, held.stored!, conditionsAfter(read, read.result === "none" ? "none" : "seen"), true); } catch (error) {
+          if (error instanceof TurnStaleReadError) return { kind: "wait", read };
+          throw error;
+        }
         return this.settle(held, await this.readWith(held), true);
       }
       // Something other than the releaser's record it already holds: the table says what (yield, a tombstone, wait).

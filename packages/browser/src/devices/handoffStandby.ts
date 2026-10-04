@@ -1,4 +1,4 @@
-import { HANDOFF_PAKE, turnKeys, type DeviceFrame, type TurnRelease } from "@ghostly/core";
+import { HANDOFF_OFFER, HANDOFF_PAKE, turnKeys, type DeviceFrame, type TurnRelease } from "@ghostly/core";
 import { viewOf, type DeviceGateView } from "./gate";
 import { HandoffGiver, HandoffTaker, STOPPED_STEP, type HandoffLinks, type HandoffRecords } from "./handoff";
 import { handoffProfileHost, handoffSelf, type HandoffProfileHost } from "./handoffHost";
@@ -33,6 +33,9 @@ export interface StandbyHandoffOptions {
   take(release: TurnRelease, turn: number): Promise<import("./turn").TurnOutcome | null>;
   host?: HandoffProfileHost | null;
 }
+
+/** A request, what a taker holds, confirmations: a giver's frames, whoever else is in a handoff with that device. */
+const GIVER_FRAMES = new Set<string>(["handoff-request", "handoff-have", "handoff-ack", "handoff-verified", "handoff-done"]);
 
 /** The device record of this profile, through the store. */
 export function profileRecords(profile: string): HandoffRecords {
@@ -140,16 +143,25 @@ export async function standbyHandoff(options: StandbyHandoffOptions): Promise<De
   /** Which side a frame from `from` is for: the one in a handoff with that device. */
   const route = (from: string, frame: DeviceFrame): HandoffGiver | HandoffTaker => {
     const giving = giver.view()?.key === from && giver.view()?.step !== "failed";
-    if (giving) return giver;
-    if (taker.view()?.key === from) return taker;
+    const takerView = taker.view();
+    const taking = takerView?.key === from && takerView.step !== "failed";
+    // A giver that released to that device and a taker in a new handoff with it (the release's `handoff-done` was
+    // lost): the taker's frames go to the taker.
+    if (giving && !(taking && !GIVER_FRAMES.has(frame.t))) return giver;
+    if (takerView?.key === from) return taker;
     // A request, a password proof's first or third message, what a taker holds, confirmations: a giver's frames.
-    if (frame.t === "handoff-request" || frame.t === "handoff-have" || frame.t === "handoff-ack" || frame.t === "handoff-verified" || frame.t === "handoff-done") return giver;
+    if (GIVER_FRAMES.has(frame.t)) return giver;
     if (frame.t === HANDOFF_PAKE && frame.n !== 2) return giver;
     return taker;
   };
 
   return {
-    receive: (from, frame) => { void route(from, frame).receive(from, frame); },
+    receive: (from, frame) => {
+      // An offer is always the taker's. A giver that released to the device offering it hears it too: that device
+      // holds the turn, which is what the `handoff-done` it never got would have said.
+      if (frame.t === HANDOFF_OFFER) { void giver.receive(from, frame); void taker.receive(from, frame); return; }
+      void route(from, frame).receive(from, frame);
+    },
     linkChanged: (key, live) => { giver.linkChanged(key, live); taker.linkChanged(key, live); },
     call: (method, params) => {
       const p = (params ?? {}) as { password?: unknown; later?: unknown };
@@ -165,6 +177,7 @@ export async function standbyHandoff(options: StandbyHandoffOptions): Promise<De
             return taker.pull(p.password as string, later);
           })();
         case "deviceHandoffAccept": return taker.accept(later);
+        case "deviceHandoffSettle": return taker.settle();
         case "deviceHandoffCancel": return Promise.all([taker.cancel(), giver.cancel()]).then(() => null);
         case "deviceHandoffView": return Promise.resolve(taker.view() ?? giver.view());
         default: return undefined;
