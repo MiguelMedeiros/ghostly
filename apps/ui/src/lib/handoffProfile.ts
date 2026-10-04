@@ -9,6 +9,7 @@ import { FILE_BYTES_STEP, SMALL_FILE_BYTES, digestText, dropFileSpace, fileBytes
 import { fileSource, restoreHandoffBundle, writeProfileBackup, type FileSource } from "./profileBackup";
 import { listDeviceRecords } from "@ghostly/browser/devices/store";
 import { databaseOfSpace, newSpace, pointProfile, recoverProfilePointer, registryKey } from "./profiles";
+import { dropWalletStorageOf } from "./profileData";
 
 /*
  * What the handoff needs of the app (WISP 06 § The handoff): a profile's storage as the app keeps it. The giver reads
@@ -227,6 +228,9 @@ const staging: HandoffStagingHost = {
   async revert(old, staged) { pointProfile(staged, old); },
   async drop(database) {
     const ns = spaceOf(database);
+    // The wallets' own storage its records name goes first, while they can still be read (WISP 06 § Installing the
+    // staged state): never what a listed profile, this one's current state included, still names.
+    await dropWalletStorageOf(database).catch(() => {});
     if (await databaseExists(database)) await dropDatabase(database);
     await dropFileSpace(database).catch(() => {});
     dropKeys(ns);
