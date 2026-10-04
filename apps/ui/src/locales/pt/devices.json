@@ -33,6 +33,7 @@
     "typo": "Este código tem um erro de digitação. Confira ou gere um novo.",
     "unanswered": "Seu outro dispositivo não respondeu. Confira o código ou gere um novo.",
     "unreachable": "Não foi possível verificar qual dispositivo está ativo. Confira sua conexão.",
+    "unreached": "Os dois dispositivos se encontraram, mas não conseguiram se conectar. Mantenha os dois online e gere um novo código.",
     "update": "Um Ghostly mais novo gerou este código. Atualize para usá-lo.",
     "used": "Outro dispositivo usou este código primeiro. Gere um novo."
   },

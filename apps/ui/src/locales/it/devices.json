@@ -33,6 +33,7 @@
     "typo": "Questo codice contiene un errore di battitura. Controllalo o creane uno nuovo.",
     "unanswered": "L’altro tuo dispositivo non ha risposto. Controlla il codice o creane uno nuovo.",
     "unreachable": "Impossibile verificare quale dispositivo è attivo. Controlla la connessione.",
+    "unreached": "I due dispositivi si sono trovati ma non sono riusciti a connettersi. Tienili entrambi online e crea un nuovo codice.",
     "update": "Un Ghostly più recente ha creato questo codice. Aggiorna per usarlo.",
     "used": "Un altro dispositivo ha usato questo codice per primo. Creane uno nuovo."
   },

@@ -15,7 +15,7 @@ import { readForwarded } from "./forwards";
 import { readStatusCard, type StatusCard } from "./statusCards";
 import { randomBytes, toBase64Url, toZ32, utf8Encode } from "./bytes";
 import { fitSignedPairedSignal, fitSignedPairedSignalWith, verifyPairedSignal } from "./pairedSignal";
-import { deviceFrameCapability, signDeviceTransports, verifyDeviceTransports, type DeviceCapability, type DeviceFrame } from "./deviceLink";
+import { deviceFrameCapability, signDeviceTransports, unsignedDeviceTransports, verifyDeviceTransports, type DeviceCapability, type DeviceFrame } from "./deviceLink";
 import { parseRtcSignal, type SignalSight } from "./signal";
 import { PairedSession, type PairingState, type PairingCredentials, type PaymentMethodName } from "./pairedSession";
 import { DataLink, type DataLinkState } from "./datalink";
@@ -1661,7 +1661,16 @@ export class GhostLink {
   private peerPacketTransports(value: string): void {
     if (!this.options.packetTransports || this.stopped) return;
     const credentials = this.options.pairing?.credentials;
-    if (credentials?.signer) {
+    if (credentials?.signer && !credentials.peerKey && this.options.pairing?.trustOnFirstUse) {
+      // An enrollment's one-time link on the inviter's side (WISP 06 § Adding a device), before a key authenticated:
+      // there is no key yet to check the signature against. The value only says where to dial; the session that
+      // answers there still has to authenticate. Whoever can write this packet holds the code, and could be the first
+      // key to authenticate anyway. Without it, an inviter whose key dials first had nothing to dial, and one with
+      // WebRTC never learned that the new device has none (a Linux Desktop, 2026-10-03).
+      const unsigned = unsignedDeviceTransports(value);
+      if (!unsigned) { traceLink(this.myPubKeyZ32, "packet-transports-refused", {}); return; }
+      value = unsigned;
+    } else if (credentials?.signer) {
       // A device link: only a value signed by the device signing key it pinned. Anything else (unsigned, or signed by
       // another key: a holder of `D` writing in the other device's packet) is dropped, and dials nothing.
       const verified = credentials.peerKey ? verifyDeviceTransports(value, this.options.params.peerPubKeyZ32, this.myPubKeyZ32, publicKeyFromZ32(credentials.peerKey)) : null;
