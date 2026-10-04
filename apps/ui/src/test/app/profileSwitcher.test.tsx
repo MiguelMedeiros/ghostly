@@ -129,17 +129,17 @@ describe("the account switcher on the account bar", () => {
 
     await user.keyboard("{Alt>}{Shift>}P{/Shift}{/Alt}");
     const items = [...menu().querySelectorAll<HTMLElement>("[role^=menuitem]")];
-    expect(items.map((item) => item.textContent)).toEqual([expect.stringContaining("Personal"), "WWork", "FFamily", "+Add a profile", "Manage profiles"]);
+    expect(items.map((item) => item.textContent)).toEqual([expect.stringContaining("Personal"), "WWork", "FFamily", "+Add a profile", "Add this device to another profile", "Manage profiles"]);
     // The first other profile has the focus: the likeliest next step.
     expect(items[1]).toHaveFocus();
     await user.keyboard("{ArrowDown}");
     expect(items[2]).toHaveFocus();
     await user.keyboard("{End}");
-    expect(items[4]).toHaveFocus();
+    expect(items[5]).toHaveFocus();
     await user.keyboard("{ArrowDown}");
     expect(items[0]).toHaveFocus();
     await user.keyboard("{ArrowUp}");
-    expect(items[4]).toHaveFocus();
+    expect(items[5]).toHaveFocus();
     await user.keyboard("{Home}");
     expect(items[0]).toHaveFocus();
 

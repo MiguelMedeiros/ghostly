@@ -2,8 +2,9 @@
   "add": {
     "adding": "Ajout de {{device}}…",
     "button": "Ajouter un appareil",
-    "codeHint": "Scannez ce code avec l’appareil photo de l’autre appareil. Ou, dans Ghostly sur celui-ci, choisissez Ajouter cet appareil à un autre profil.",
+    "codeHint": "Scannez ceci avec l’appareil photo de votre téléphone. Sur un ordinateur, ouvrez Ghostly et choisissez Ajouter cet appareil à un autre profil.",
     "confirm": "Le nouvel appareil se présente comme {{device}}. Les deux appareils affichent-ils ces chiffres ?",
+    "copy": "Copier le lien",
     "done": "{{device}} ajouté. Il est en veille.",
     "finish": "Terminé",
     "match": "Ils correspondent",

@@ -2,8 +2,9 @@
   "add": {
     "adding": "Adding {{device}}…",
     "button": "Add a device",
-    "codeHint": "Scan this code with your other device's camera. Or, in Ghostly there, choose Add this device to another profile.",
+    "codeHint": "Scan this with your phone's camera. On a computer, open Ghostly and choose Add this device to another profile.",
     "confirm": "The new device calls itself {{device}}. Do both devices show these digits?",
+    "copy": "Copy link",
     "done": "{{device}} added. It is on standby.",
     "finish": "Done",
     "match": "They match",

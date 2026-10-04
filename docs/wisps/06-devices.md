@@ -181,7 +181,7 @@ Today's path is a backup restored on the second device. It copies every secret t
 | Flags (bit 0: own device) | 1 byte |
 | Expires, UNIX seconds | 4 bytes |
 
-It is shown as a QR code and as a code to copy, through the existing `JoinDialog` (scan, paste, open an image). The code may travel by any channel the person likes: the digits below protect it. The inviter enforces the 10 minutes and the single use; an app from before this WISP does not know version 2 and must refuse the code.
+It is shown as a QR code and as a link to copy or share, and read through the existing `JoinDialog` (scan, paste, open an image). The QR code and the link are the code in the fragment of a link to the web app, `https://app.ghostly.tools/#ghostly1z…` (the web app's own origin when the active device is the web app), the form chat invites use (`inviteLink`, `inviteQrSegments`): a phone's own camera then opens Ghostly with the code, which no request carries. The app takes the code out of the address before anything else reads it. On a device with no chat in its only profile it goes straight to "Name this device" with the code; elsewhere it asks first and puts the code into a new, empty profile, never into one in use. Readers take the bare code or the link. The code may travel by any channel the person likes: the digits below protect it. The inviter enforces the 10 minutes and the single use; an app from before this WISP does not know version 2 and must refuse the code.
 
 **The session** is a paired session on that one-time link, with capability `enroll/1`. Its participation keys are the two device signing keys: B pins A's from the invite; A, for this one session only, accepts the first joiner's key, which is exactly what the digits then confirm. Its frames:
 
@@ -787,8 +787,10 @@ Copy follows the app's rules: short labels, one-line hints, details behind ⓘ. 
 **Adding a device**
 
 - Without a lock password of 8 characters: "Set a password first". Hint: "Without a password, anyone holding one of your devices can take this profile."
-- Active device, after the password: "On the other device, open Ghostly and choose Add this device to my profile. Then scan this code." QR code, "Copy code", "Valid for 10 minutes".
-- New device, first screen: "I already use Ghostly", then "Add this device to my profile" or "Restore a backup". On iPhone in a Safari tab: "Add Ghostly to your Home Screen first."
+- Active device, after the password: "Scan this with your phone's camera. On a computer, open Ghostly and choose Add this device to another profile." QR code, "Copy link", "Valid for 10 minutes".
+- New device, first screen: "I already use Ghostly" (on the chat list of a new profile, where a phone shows it, and the home pane), then "Add this device to my profile" or "Restore a backup". On iPhone in a Safari tab: "Add Ghostly to your Home Screen first."
+- New device that has a profile: "Add this device to another profile" in the profile switcher and the profile list, and on Profile, Devices while the profile has no other device: "Use this device with a profile from another device". It asks first: "A new profile opens here for it. Your profiles here stay as they are." The new, empty profile opens on "Name this device".
+- The QR code opened by a phone's camera: "Add this device to another profile?" on a device with a profile in use (the code names no device, so the question names none); "Name this device" with the code filled in on a fresh install.
 - Both: "Do both devices show 482 913?" On the active device: "They match" and "They don't match". On the new one: "Confirm on <device>."
 - New device: "Name this device" (prefilled: "Phone", "MacBook", "Firefox"; 16 characters).
 - Where the browser did not grant persistent storage: "This browser may clear Ghostly's data. Keep a copy on <device>."

@@ -2,8 +2,9 @@
   "add": {
     "adding": "Adicionando {{device}}…",
     "button": "Adicionar um dispositivo",
-    "codeHint": "Leia este código com a câmera do outro dispositivo. Ou, no Ghostly dele, escolha Adicionar este dispositivo a outro perfil.",
+    "codeHint": "Leia isto com a câmera do seu celular. Num computador, abra o Ghostly e escolha Adicionar este dispositivo a outro perfil.",
     "confirm": "O novo dispositivo se chama {{device}}. Os dois dispositivos mostram estes dígitos?",
+    "copy": "Copiar link",
     "done": "{{device}} adicionado. Está em espera.",
     "finish": "Pronto",
     "match": "São iguais",

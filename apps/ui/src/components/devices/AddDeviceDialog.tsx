@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState } from "react";
-import { inviteQrSegments } from "@ghostly/core";
+import { inviteLink, inviteQrSegments } from "@ghostly/core";
 import { engine } from "@ghostly/browser/platform/engine";
 import type { EnrollView } from "@ghostly/browser/devices/enroll";
 import { useI18n } from "../../contexts/I18nContext";
@@ -140,8 +140,9 @@ export function AddDeviceDialog({ onClose }: { onClose(): void }) {
       <Toast toast={notice.toast} onDismiss={notice.dismiss} place="dialog" testId="device-add-notice" />
       {view?.role === "inviter" && view.step === "waiting" && <>
         <p className="text-text-secondary">{t("devices.add.codeHint")}</p>
-        {/* The QR code is the code's link on the web app: a phone's own camera opens Ghostly with it. Copy gives the code. */}
-        <div data-testid="device-add-code" data-code={view.code}><QRCodeDisplay value={view.code} qr={inviteQrSegments(view.code, appLinkOrigin())} label={t("devices.add.title")} /></div>
+        {/* The code's link on the web app, in the QR code and in Copy and Share: a phone's own camera, or a tap on the
+            link sent to it, opens Ghostly with the code. Join and "Add this device to my profile" read the link too. */}
+        <div data-testid="device-add-code" data-code={view.code}><QRCodeDisplay value={inviteLink(view.code, appLinkOrigin())} qr={inviteQrSegments(view.code, appLinkOrigin())} label={t("devices.add.title")} copyLabel={t("devices.add.copy")} /></div>
         <p className="text-text-muted text-xs">{t("devices.add.valid")}</p>
       </>}
       {view?.role === "inviter" && view.step === "confirm" && <>
