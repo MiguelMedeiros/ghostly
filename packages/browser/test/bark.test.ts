@@ -11,7 +11,7 @@ import { intentRepository } from "../src/engine/paymentAdapters/persistence";
 import { STORES, openDb, store, transact, wrap } from "../src/shared/idb";
 import { FakeBarkServer } from "./helpers/fakeBark";
 import { phraseLeaks, TEST_PHRASE } from "./helpers/phraseLeaks";
-// covers: wallet.bark.mainnet, wallet.bark.create, wallet.bark.send, wallet.bark.backup, payments.chat.reconcile
+// covers: wallet.bark.mainnet, wallet.bark.create, wallet.bark.send, wallet.bark.backup, wallet.bark.restore-scan, payments.chat.reconcile
 
 // The wallet draws its own phrase; a test that looks for it in storage has it draw TEST_PHRASE.
 vi.mock("@scure/bip39", async (original) => { const bip39 = await original<typeof import("@scure/bip39")>(); return { ...bip39, generateMnemonic: vi.fn(bip39.generateMnemonic) }; });
@@ -343,5 +343,61 @@ describe("the Bark wallet", () => {
     expect(wrong).toMatchObject({ network: "testnet", message: "This backup is a Testnet Bark wallet" });
     expect(other.configured).toBe(false);
     await restored.stop();
+  });
+
+  it("a restore looks once for the on-chain coins its phrase received before, says so while it does, and never again once it finished", async () => {
+    const wallet = make();
+    await wallet.start(); await wallet.ensureReady(true);
+    expect(server.scans, "a new wallet has nothing to look for").toEqual([]);
+    const file = await wallet.exportBackup("correct horse battery");
+    await wallet.stop();
+    await transact([STORES.settings, STORES.intents], (s) => { s[STORES.settings].clear(); s[STORES.intents].clear(); });
+
+    let finish!: (height: number) => void;
+    server.scan = () => new Promise((resolve) => { finish = resolve; });
+    const restored = make();
+    await restored.start();
+    await restored.restoreBackup(file, "correct horse battery");
+    await restored.ensureReady();
+    const database = `ghostly-bark-${(await restored.backup()).config.walletId}`;
+    expect(server.scans).toEqual([database]);
+    expect(restored.view.scanning, "the page says it is looking").toBe(true);
+    await restored.refresh();
+    expect(restored.view.scanning, "a refresh keeps saying it").toBe(true);
+    walletOf((await restored.backup()).config).onchain = 4_000;
+    finish(0);
+    await vi.waitFor(() => expect(restored.view.scanning).toBeUndefined());
+    await vi.waitFor(() => expect(restored.view.onchain, "what it found shows").toBe(4_000));
+    const saved = await wrap((await store(STORES.settings, "readonly")).get("barkWallet-mode-testnet")) as { scan?: true };
+    expect(saved.scan, "finished: the mark is gone").toBeUndefined();
+    await restored.stop();
+
+    const again = make();
+    await again.start(); await again.ensureReady();
+    expect(server.scans, "opened again: no second scan").toEqual([database]);
+    await again.stop();
+  });
+
+  it("a scan that failed or was cut short runs again on the next open, and only until one finished", async () => {
+    const wallet = make();
+    await wallet.start();
+    server.scan = async () => { throw new Error("esplora unreachable"); };
+    await wallet.create({ ...TESTNET_BARK, mnemonic: generateMnemonic(wordlist) });
+    const database = `ghostly-bark-${(await wallet.backup()).config.walletId}`;
+    await vi.waitFor(() => expect(wallet.view.scanning).toBeUndefined());
+    expect(server.scans, "a phrase typed in is a restore too").toEqual([database]);
+    expect((await wrap((await store(STORES.settings, "readonly")).get("barkWallet-mode-testnet")) as { scan?: true }).scan).toBe(true);
+    await wallet.stop();
+
+    server.scan = undefined;
+    const second = make();
+    await second.start(); await second.ensureReady();
+    await vi.waitFor(() => expect(server.scans).toEqual([database, database]));
+    await vi.waitFor(async () => expect((await wrap((await store(STORES.settings, "readonly")).get("barkWallet-mode-testnet")) as { scan?: true }).scan).toBeUndefined());
+    await second.stop();
+    const third = make();
+    await third.start(); await third.ensureReady();
+    expect(server.scans).toEqual([database, database]);
+    await third.stop();
   });
 });

@@ -203,6 +203,8 @@ export class LinkSession {
   /** Stopped without a last packet (`stop(false)`): nothing more goes out. */
   private silent = false;
   private polling = false;
+  /** `lookNow` came during a read: the next one follows it at once. */
+  private pollAgain = false;
   private publishing: Promise<void> | null = null;
   private publishAgain = false;
   private pollTimer: ReturnType<typeof setTimeout> | null = null;
@@ -216,6 +218,8 @@ export class LinkSession {
   /** When the last `expectPeer` window ends (or ended): the pace slows down from there step by step. */
   private expectUntil = 0;
   private watchUntil = 0;
+  /** The time of the peer's packet read last when it went away (`watchPeer`): a newer one that advertises says it is back. */
+  private watchFrom = 0;
   private publishRetryTimer: ReturnType<typeof setTimeout> | null = null;
   private active = false;
   private connected = false;
@@ -229,6 +233,8 @@ export class LinkSession {
     return this.publishing !== null || this.firstPublishTimer !== null || Date.now() - this.lastPublishedAt < withinMs;
   }
   private discoveryErrors: Partial<Record<"publish" | "read", string>> = {};
+  /** The last read was not answered by the network: it failed, or the transport handed back a copy it kept (`discoveryRecovered`). */
+  private readMissed = false;
   private unsubscribe: (() => void) | null = null;
   private presence: PeerPresence = { online: false, lastPacketAt: 0, services: null };
   /**
@@ -280,11 +286,22 @@ export class LinkSession {
     void this.poll();
   }
 
+  /**
+   * A relay answers again after failing. What this link could not do meanwhile goes now: a publish that waits, and a
+   * read when its last one was not answered by the network (it failed, or handed back a copy kept from before) or when
+   * the link is looking for its peer (anything but the background and connected paces). A link whose last read was
+   * answered missed nothing: it reads at its pace. Every link heard this, so a read each one made the cost of a relay
+   * that keeps flipping between throttled and answering grow with the number of chats: 42 reads a flip on a profile
+   * whose contacts are mostly away, for nothing those reads could find.
+   */
   private discoveryRecovered(): void {
     if (!this.running) return;
-    traceLink(this.identity.pubKeyZ32, "discovery-recovered", { publishWaiting: !!this.publishRetryTimer });
-    if (this.publishRetryTimer || this.discoveryErrors.publish) void this.publish().catch(() => {});
-    this.pollNow();
+    const publish = !!(this.publishRetryTimer || this.discoveryErrors.publish);
+    const pace = this.pace(), read = this.readMissed || (pace !== "background" && pace !== "connected");
+    if (!publish && !read) return;
+    traceLink(this.identity.pubKeyZ32, "discovery-recovered", { publishWaiting: !!this.publishRetryTimer, read });
+    if (publish) void this.publish().catch(() => {});
+    if (read) this.pollNow();
   }
 
   /** This side's packet goes out now, unless one already did. */
@@ -358,6 +375,7 @@ export class LinkSession {
    */
   watchPeer(): void {
     this.watchUntil = Math.max(this.watchUntil, Date.now() + WATCH_PEER_MS);
+    this.watchFrom = this.presence.lastPacketAt;
     this.expectPeer();
   }
 
@@ -455,6 +473,16 @@ export class LinkSession {
   }
 
   /**
+   * The peer's packet is at hand now (a member of the group carried it, `CarriedTransport`): read it. A read under way
+   * may be past the point where it would see it, so another follows that one at once rather than at the pace's wait.
+   */
+  lookNow(): void {
+    if (!this.running) return;
+    if (this.polling) { this.pollAgain = true; return; }
+    this.pollNow();
+  }
+
+  /**
    * The next poll's wait. After a window that looked fast for the peer (`expectPeer`), the wait grows with the time
    * since the window ended (on the relays: 4, 4, 8, 16 s, then 30 s) up to the pace's own. A
    * peer's offer held back by its relays' budget lands whenever that frees a request: it used to land seconds after
@@ -470,6 +498,16 @@ export class LinkSession {
     if (pace === "fast" && stepping >= 0) return Math.min(OFFER_STEP_MAX * interval, Math.max(2 * interval, stepping));
     if (pace === "fast" || pace === "connected" || since < 0) return interval;
     return Math.min(interval, Math.max(2 * this.intervals.fast, since));
+  }
+
+  /**
+   * Looking for a contact that went away (`watchPeer`) and has not shown itself back: no signal of mine is out, and no
+   * packet of the contact's since then advertises (the one it leaves on its way out does not). The relays' budget gives
+   * these reads a share of its own (`PkarrRequestOptions.watch`), so a member watching several that left still reads
+   * the one that comes back.
+   */
+  private watching(): boolean {
+    return Date.now() < this.watchUntil && this.rtcSignal === null && !(this.presence.online && this.presence.lastPacketAt > this.watchFrom);
   }
 
   /** How urgently this link looks right now. */
@@ -540,8 +578,10 @@ export class LinkSession {
     );
     const started = Date.now();
     try {
-      // An offer or answer not out yet is what the contact waits for (`PkarrRequestOptions.signal`).
-      await this.transport.publish(this.identity, built.records, rtcSignal && rtcSignal !== this.rtcSignalOut ? { signal: true } : undefined);
+      // An offer or answer not out yet is what the contact waits for (`PkarrRequestOptions.signal`). Written while this
+      // link watches for a contact that went away, the packet is what that contact, back, looks for first (`watch`).
+      const options = rtcSignal && rtcSignal !== this.rtcSignalOut ? { signal: true } : this.watching() ? { watch: true } : undefined;
+      await this.transport.publish(this.identity, built.records, options);
     } catch (error) {
       const ms = Date.now() - started, waiting = isDiscoveryBudgetError(error);
       traceLink(this.identity.pubKeyZ32, "publish", { ms, rtc: !!rtcSignal, error: String(error), ...(waiting && { waiting, retryInMs: error.retryInMs }) });
@@ -590,7 +630,8 @@ export class LinkSession {
       const pace = this.pace();
       // This side's offer is out, and this read looks for its answer: signaling (`PkarrRequestOptions.signal`).
       const signal = pace === "fast" && this.fastStepsAfter > 0 && this.rtcSignalOut !== null;
-      const packet = await this.transport.resolve(this.peerPubKeyZ32, { background: pace === "background" || pace === "connected", urgent: pace === "fast", ...(signal && { signal }) });
+      const watch = !signal && this.watching();
+      const packet = await this.transport.resolve(this.peerPubKeyZ32, { background: pace === "background" || pace === "connected", urgent: pace === "fast", ...(signal && { signal }), ...(watch && { watch }) });
       if (!this.running) return;
       this.discoveryResult("read");
       const ms = Date.now() - started;
@@ -600,6 +641,7 @@ export class LinkSession {
       const answered = this.transport.readAnsweredAt?.(this.peerPubKeyZ32);
       const read = answered !== undefined && answered >= started;
       if (read) this.lastReadAt = started;
+      this.readMissed = !!this.transport.readAnsweredAt && !read;
 
       let receivedNew = false;
       // The packet an inviter puts under the contact's key before they join (`emptyLinkRecords`), so
@@ -661,6 +703,7 @@ export class LinkSession {
       this.events.onStatus?.("online");
       if (!this.firstPollDone) { this.firstPollDone = true; this.events.onFirstPoll?.(); }
     } catch (error) {
+      this.readMissed = true;
       if (this.running) {
         traceLink(this.identity.pubKeyZ32, "poll", { ms: Date.now() - started, error: String(error) });
         // A read the relays' request budget held back (nothing known yet to answer from) is a wait: the next poll reads.
@@ -672,7 +715,12 @@ export class LinkSession {
       }
     } finally {
       this.polling = false;
-      if (this.running && !this.pollTimer) {
+      if (this.running && this.pollAgain) {
+        this.pollAgain = false;
+        if (this.pollTimer) clearTimeout(this.pollTimer);
+        this.pollTimer = null;
+        void this.poll();
+      } else if (this.running && !this.pollTimer) {
         const interval = this.nextInterval();
         // The interval is a period, counted from the start of this read: a read that took long (a key
         // nobody has yet, a relay asking its DHT) does not push the next one further out.

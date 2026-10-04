@@ -5,6 +5,7 @@ import { concatBytes, fromBase64Url, randomBytes, toBase64Url, utf8Decode, utf8E
 import { edgeParams } from "./groupCrypto";
 import { GROUP_ID, MEMBER_KEY } from "./groupCommits";
 import { identityFromSeed, publicKeyFromZ32, type Identity } from "./identity";
+import { trimEndOf } from "./text";
 import type { LinkParams } from "./invite";
 import type { GhostRecord } from "./pkarr";
 
@@ -58,7 +59,7 @@ export function encodeGroupEntryLink(link: GroupEntryLink): string {
 
 /** Where the link opens the web app: its join route. */
 export function groupEntryUrl(origin: string, link: GroupEntryLink): string {
-  return `${origin.replace(/\/+$/, "")}/#/join/${encodeGroupEntryLink(link)}`;
+  return `${trimEndOf(origin, "/")}/#/join/${encodeGroupEntryLink(link)}`;
 }
 
 /** A pasted link, a `/join/…` path or the bare code; null when it is none of them. */

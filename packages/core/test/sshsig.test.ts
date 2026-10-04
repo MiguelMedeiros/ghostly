@@ -110,6 +110,8 @@ describe('SSH public keys', () => {
     expect(sshKeyDigestHex(key)).toMatch(/^[0-9a-f]{64}$/);
     expect(Buffer.from(sshKeyDigestHex(key), 'hex').toString('base64').replace(/=+$/, '')).toBe(key.fingerprint.slice(7));
     expect(parseSshPublicKey(byName('sk-ed25519').publicKey).application).toBe('ssh:');
+    expect(parseSshPublicKey(`\n\t ${v.publicKey.replace(' ', '\t')}\t a comment \n\n`).line).toBe(v.publicKey);
+    expect(() => parseSshPublicKey(`${v.publicKey} a comment\nand another line`)).toThrow();
   });
   it('refuses private keys, mismatched types, small RSA and garbage', () => {
     expect(() => parseSshPublicKey('-----BEGIN OPENSSH PRIVATE KEY-----')).toThrow(SshSigError);

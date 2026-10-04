@@ -129,6 +129,9 @@ export function callRtcConfig(extra: readonly CallIceServer[] = []): RTCConfigur
   for (const server of extra) {
     const urls = (Array.isArray(server.urls) ? server.urls : server.urls.split(/[\s,]+/)).filter(Boolean);
     if (!urls.length) continue;
+    // A TURN server without its username and credential (a profile restored from a backup, which leaves the
+    // credential out) is skipped: a browser refuses to make any connection with one in its list.
+    if (urls.some((url) => /^turns?:/i.test(url)) && (!server.username?.trim() || !server.credential?.trim())) continue;
     servers.push({ urls, ...(server.username ? { username: server.username } : {}), ...(server.credential ? { credential: server.credential } : {}) });
   }
   return { ...RTC_CONFIG, iceServers: [...(RTC_CONFIG.iceServers ?? []), ...servers] };
@@ -588,12 +591,38 @@ export function sdpHasCandidates(sdp: string | undefined | null): boolean {
 /** How long to keep collecting after the candidate we were waiting for showed up. */
 const ICE_SETTLE_MS = 400;
 
+/** IPv4 ranges that are not reachable from the internet: this network, private, shared (CGNAT), loopback, link-local, the documentation ones, benchmarking, multicast and up. */
+const NOT_GLOBAL_IPV4: readonly [number, number][] = [
+  [0x00000000, 8], [0x0a000000, 8], [0x64400000, 10], [0x7f000000, 8], [0xa9fe0000, 16], [0xac100000, 12],
+  [0xc0000000, 24], [0xc0000200, 24], [0xc0a80000, 16], [0xc6120000, 15], [0xc6336400, 24], [0xcb007100, 24], [0xe0000000, 3],
+];
+
+/**
+ * Whether an ICE candidate is a UDP host candidate on a globally routable IPv4 address. A device on such an address (no
+ * NAT) is told that very address and port by a STUN server, and Chromium drops a reflexive candidate equal to a host
+ * one: no `typ srflx` ever comes. It shows the host's address only when it does not hide it behind an mDNS name (once
+ * the origin may use the camera or the microphone), which is also when it drops that reflexive candidate. The host
+ * candidate then says what the reflexive one would have.
+ */
+export function isGlobalIpv4Host(candidate: string): boolean {
+  if (!/ udp /i.test(candidate) || !/ typ host( |$)/.test(candidate)) return false;
+  const text = candidate.split(" ")[4] ?? "";
+  if (!/^\d{1,3}(\.\d{1,3}){3}$/.test(text)) return false;
+  const octets = text.split(".").map(Number);
+  if (octets.some((octet) => octet > 255)) return false;
+  const address = octets.reduce((n, octet) => n * 256 + octet, 0);
+  return !NOT_GLOBAL_IPV4.some(([base, bits]) => Math.floor(address / 2 ** (32 - bits)) === Math.floor(base / 2 ** (32 - bits)));
+}
+
 /**
  * Resolves when the local description is good enough to publish. Waiting for
  * gathering to *complete* takes the full timeout whenever one STUN server or
  * address family does not answer, which made every call ring ~10 s late. The
  * signal only carries a host and a server reflexive candidate anyway (plus a
- * relay one when TURN is configured), so that is what is waited for.
+ * relay one when TURN is configured), so that is what is waited for. Without
+ * TURN, a host candidate on a global IPv4 address counts as the reflexive one
+ * (`isGlobalIpv4Host`): a device with no NAT gets none, and its offers waited
+ * the whole timeout whenever gathering did not complete.
  */
 export function waitForIceGathering(
   pc: RTCPeerConnection,
@@ -642,7 +671,8 @@ export function waitForIceGathering(
     };
     const onCandidate = (event: RTCPeerConnectionIceEvent) => {
       if (event.candidate) found = true;
-      if (!settle && event.candidate?.candidate.includes(wanted)) settle = setTimeout(finish, ICE_SETTLE_MS);
+      const line = event.candidate?.candidate;
+      if (!settle && line && (line.includes(wanted) || (!usesTurn && isGlobalIpv4Host(line)))) settle = setTimeout(finish, ICE_SETTLE_MS);
     };
 
     pc.addEventListener("icegatheringstatechange", onState);

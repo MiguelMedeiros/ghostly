@@ -22,7 +22,8 @@ vi.mock("@tauri-apps/api/core", () => ({
   },
 }));
 
-const { NativePeerConnection, SCREEN_UNAVAILABLE, askedDevice, bytesOf, connectionStateOf, deviceList, deviceName, isJpeg, nativeCallMedia, nativeCallOptions, nativeDevices } = await import("../../desktop/nativeCalls");
+const { NativePeerConnection, SCREEN_UNAVAILABLE, askedDevice, bytesOf, connectionStateOf, deviceList, deviceName, isJpeg, nativeCallMedia, nativeCallOptions, nativeDevices, ownIceServers } = await import("../../desktop/nativeCalls");
+const { callRtcConfig } = await import("@ghostly/core");
 const { chooseDevice } = await import("../../lib/mediaDevices");
 
 const commands = () => tauri.invoke.mock.calls.map(([command]) => command);
@@ -147,6 +148,14 @@ describe("the RTCPeerConnection stand-in", () => {
     const answer = await pc.createAnswer();
     expect(answer.sdp).toBe("sdp of native_call_answer");
     expect(tauri.invoke).toHaveBeenCalledWith("native_call_answer", { id: pc.id, offer: "their offer", camera: null, microphone: null, speaker: null });
+  });
+
+  it("hands Rust the profile's own ICE servers (a TURN server), not the apps' built-in STUN ones", () => {
+    const turn = { urls: "turn:turn.example.org:3478", username: "ghost", credential: "test-credential" };
+    const pc = new NativePeerConnection(callRtcConfig([turn]));
+    expect(tauri.invoke).toHaveBeenCalledWith("native_call_open", { id: pc.id, events: expect.anything(), iceServers: [{ urls: ["turn:turn.example.org:3478"], username: "ghost", credential: "test-credential" }] });
+    expect(ownIceServers(callRtcConfig())).toEqual([]);
+    expect(ownIceServers({})).toEqual([]);
   });
 
   it("restarts ICE through Rust on the call it started: a restart offer, and the peer's answer to it", async () => {

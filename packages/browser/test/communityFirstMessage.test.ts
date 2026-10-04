@@ -46,3 +46,41 @@ describe("a joiner's first message in a community, written before any edge is up
     expect(world.texts(carol, id)).toEqual([]);
   });
 });
+
+/**
+ * A member whose edges are down while others are let in, who writes before it hears of them: it seals what it says
+ * under the commit it took for the newest, which the members let in meanwhile cannot open. Seen on headless engines
+ * after a community's admin left (12 members, relay budget 90): in 4 to 9 runs of 30 a member that had no edge since
+ * its admission wrote under an epoch three to seven behind, and the members let in after it never got its line.
+ */
+describe("a message written while behind on the group's chain", { timeout: 120_000 }, () => {
+  it("reaches the members let in before it was written, once its author has caught up", async () => {
+    const world = new CommunityWorld(undefined, RELAY_NETWORK);
+    const admin = world.add("admin", undefined, { staysOnline: true });
+    const id = await admin.groups.create("Behind");
+    const link = await admin.groups.enableLink(id);
+    await world.run(30_000);
+    const bob = world.add("bob");
+    await bob.groups.joinByLink(link);
+    await world.until(() => world.member(bob, id), 5 * 60_000, 500);
+    await world.until(() => (world.view(bob, id)?.community?.connected ?? 0) > 0, 3 * 60_000);
+    // Bob's edges go down; Carol and Dave are let in meanwhile.
+    let apart = true;
+    world.cut = (a, b) => apart && (a === bob || b === bob);
+    const late = [world.add("carol"), world.add("dave")];
+    for (const p of late) { await p.groups.joinByLink(link); await world.until(() => world.member(p, id), 5 * 60_000, 500); }
+    await world.until(() => late.every(p => (world.view(p, id)?.community?.connected ?? 0) > 0), 3 * 60_000);
+    // Bob writes, still believing the group is the admin and him. The world's clock runs minutes ahead of the wall clock
+    // by now: the engine dates the frame by its own clock, the one its commits are dated by, not the wall clock (dated
+    // by the wall clock, the frame read as written before Carol and Dave were let in, and they never got it).
+    expect(world.now - Date.now()).toBeGreaterThan(60_000);
+    expect(world.view(bob, id)!.members).toHaveLength(2);
+    expect((await bob.groups.send(id, "anyone new?")).error).toBeNull();
+    apart = false;
+    const took = await world.until(() => late.every(p => world.texts(p, id).includes("anyone new?")), 5 * 60_000);
+    expect(took).toBeLessThanOrEqual(2 * 60_000);
+    await world.run(60_000);
+    // One message for everyone, the admin (who could read the first) included.
+    for (const p of [admin, ...late]) expect(world.texts(p, id)).toEqual(["anyone new?"]);
+  });
+});

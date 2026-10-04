@@ -18,6 +18,8 @@ COPY tsconfig.json ./
 COPY apps/ui apps/ui
 COPY packages packages
 COPY apps/web apps/web
+# The Android app's package and signing certificates, for /.well-known/assetlinks.json (apps/web/assetlinks.ts).
+COPY apps/android-twa/twa-manifest.json apps/android-twa/
 
 # Which commit this image serves: `/version.json` carries it, and a running
 # tab compares it to know a deploy happened. There is no git in this stage.

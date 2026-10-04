@@ -1,6 +1,7 @@
 import type { DiscoveryStatus } from "./relayBreaker";
 import type { Identity } from "./identity";
 import type { GhostRecord, SignedPacket } from "./pkarr";
+import type { TurnConditions, TurnSourceAnswer, TurnSourcePut } from "./turnRead";
 
 /**
  * How a Ghostly peer reaches Pkarr. Desktop talks to the Mainline DHT directly
@@ -25,16 +26,27 @@ import type { GhostRecord, SignedPacket } from "./pkarr";
 export type DiscoveryChange = "tripped" | "recovered";
 
 /**
- * `door`: a community door reading its knock bell. A background read, but not held to the small share while a link
- * signals (`BACKGROUND_WHILE_SIGNALING`): the door admitting one person opens links that signal, and the next person's
- * knock would wait for them (2026-09-28).
+ * `door`: a community's records that open edges: the knock bell the door reads, a hub's lobby and the beacon it reads
+ * and writes, and a member's request in a hub's lobby. Background requests, but not held to the small share while a
+ * link signals (`BACKGROUND_WHILE_SIGNALING`): the door admitting one person opens links that signal, and the next
+ * person's knock would wait for them (2026-09-28). When a hub's app is killed, the edges to it dial it again and look
+ * fast for a while, on the hub left and on its members alike: on CLI daemons the hub left got 2 of 24 beacon writes
+ * through in 90 s (its entry went stale, and members it should have carried became hubs), and the members' requests
+ * in its lobby went out 40 s after they asked (2026-10-03).
  *
  * `signal`: a link's WebRTC signaling, what its contact waits for: the write of a new offer or answer, or a read for
  * the answer while this side's offer is out, or the reads of a DHT-only contact's mailbox once it shows it is leaving,
  * up to three while it still says DHT only (the live link waits on them). A 1:1 chat's may go a little over the relay's minute
  * (`SIGNALING_ALLOWANCE_SHARE` in relay.ts).
  */
-export interface PkarrRequestOptions { background?: boolean; urgent?: boolean; group?: boolean; door?: boolean; signal?: boolean }
+export interface PkarrRequestOptions {
+  background?: boolean; urgent?: boolean; group?: boolean; door?: boolean; signal?: boolean;
+  /**
+   * A read for a contact that went away from a live session and has not shown itself back (`LinkSession.watchPeer`), or
+   * a write while a link watches for one: what that contact, back, reads first.
+   */
+  watch?: boolean;
+}
 
 /**
  * `transport` with `extra` added to every request's options: a group's edges say `group` so. The optional methods
@@ -53,6 +65,9 @@ export function withRequestOptions(transport: PkarrTransport, extra: PkarrReques
   if (transport.readAnsweredAt) wrapped.readAnsweredAt = (pubKeyZ32) => transport.readAnsweredAt!(pubKeyZ32);
   if (transport.onServerTime) wrapped.onServerTime = (listener) => transport.onServerTime!(listener);
   if (transport.configure) wrapped.configure = (options) => transport.configure!(options);
+  if (transport.turnRead) wrapped.turnRead = (pubKeyZ32, options) => transport.turnRead!(pubKeyZ32, options);
+  if (transport.turnPut) wrapped.turnPut = (pubKeyZ32, payload, conditions) => transport.turnPut!(pubKeyZ32, payload, conditions);
+  if (transport.turnWarm) wrapped.turnWarm = () => transport.turnWarm!();
   return wrapped;
 }
 
@@ -122,4 +137,18 @@ export interface PkarrTransport {
    * (`readRelays`, "Also use Pkarr relays"). Writes go to them either way, so browser contacts see this peer's packets.
    */
   configure?(options: { relays: string[]; readRelays: boolean }): void;
+  /**
+   * The turn record's own read (WISP 06 § Publishing and reading): every source is asked, in parallel, and each
+   * one's answer is handed back as it came, not verified, not cached and never taken from this client's own writes.
+   * Only the turn uses it; a transport without it cannot hold a profile on several devices.
+   */
+  turnRead?(pubKeyZ32: string, options?: { timeoutMs?: number }): Promise<TurnSourceAnswer[]>;
+  /**
+   * The turn record's own put: the stored bytes, to each source named in `conditions`, on that source's condition
+   * (`cas` on the DHT, `If-Match` on a relay). Every source's answer is reported, and a refusal is never tried again
+   * without its condition.
+   */
+  turnPut?(pubKeyZ32: string, payload: Uint8Array, conditions: TurnConditions): Promise<TurnSourcePut[]>;
+  /** The profile has a device set: the turn's sources are made ready ahead of the first read (`TurnNetwork.turnWarm`). */
+  turnWarm?(): Promise<void>;
 }

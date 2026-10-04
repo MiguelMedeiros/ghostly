@@ -6,6 +6,7 @@
   "clipboardUnavailableTouch": "Could not read the clipboard. Touch and hold the field below, then tap Paste.",
   "close": "Close join",
   "damaged": "This invite is damaged. Ask for a new one.",
+  "device": "This code adds a device to a profile. On the new device, choose I already use Ghostly.",
   "empty": "Clipboard is empty. Copy an invite, then press {{keys}} below.",
   "emptyTouch": "Clipboard is empty. Copy an invite, then paste it below.",
   "image": "Open image",

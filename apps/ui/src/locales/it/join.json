@@ -6,6 +6,7 @@
   "clipboardUnavailableTouch": "Impossibile leggere gli appunti. Tieni premuto il campo qui sotto, poi tocca Incolla.",
   "close": "Chiudi",
   "damaged": "Questo invito è danneggiato. Chiedine uno nuovo.",
+  "device": "Questo codice aggiunge un dispositivo a un profilo. Sul nuovo dispositivo, scegli Uso già Ghostly.",
   "empty": "Gli appunti sono vuoti. Copia un invito, poi premi {{keys}} qui sotto.",
   "emptyTouch": "Gli appunti sono vuoti. Copia un invito, poi incollalo qui sotto.",
   "image": "Apri immagine",

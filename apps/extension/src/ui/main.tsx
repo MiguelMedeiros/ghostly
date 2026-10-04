@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import { setBrowserHost } from "@ghostly/browser/host";
 import { startSessionSync } from "@ghostly/browser/platform/sync";
 import { setDatabaseName } from "@ghostly/browser/shared/idb";
+import { openDeviceGate } from "@ghostly/browser/devices/gate";
 import { Root } from "../../../ui/src/Root";
 import { setStorageProfile } from "../../../ui/src/lib/storage";
 import { extensionHost } from "../host";
@@ -22,12 +23,17 @@ setDatabaseName(databaseFor(profile));
 followProfileSwitch(profile, () => location.reload());
 
 setBrowserHost(extensionHost);
-startSessionSync();
 // The language on <html> before anything is painted (the I18nProvider keeps it in step from then on).
 applyDocumentLanguage(loadSettings().language);
 
-createRoot(document.getElementById("root")!).render(
-  <StrictMode>
-    <Root />
-  </StrictMode>,
-);
+// The device state, before the page touches the profile (WISP 06 § The gate): the peer reads it too, in its own
+// document, before it starts. On a device that is not the active one the page shows the standby screen and keeps
+// no session in step with a peer that does not run.
+void openDeviceGate().then((gate) => {
+  if (gate.full) startSessionSync();
+  createRoot(document.getElementById("root")!).render(
+    <StrictMode>
+      <Root />
+    </StrictMode>,
+  );
+});

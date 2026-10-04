@@ -52,6 +52,7 @@ export const ENGINE_ERRORS = {
   notYetConfirmed: "Not yet confirmed. No second payment was sent.",
   couldNotVerify: "Could not verify this payment yet. No second payment was sent.",
   paymentTakenBack: "This payment was taken back. The sats are in your wallet.",
+  parkedSigned: "Needs your decision: this payment was signed before this copy of your profile took over. It is never sent again from here. Check it before you pay again.",
   // Real money and test coins.
   realMoneyUnconfirmed: "This pays with real money: confirm it with Send real money first. Nothing was sent.",
   mainnetPaymentOnTestnet: "This is a Mainnet payment (real money): a Testnet wallet never pays it. Use a Mainnet wallet.",
@@ -69,6 +70,10 @@ export const ENGINE_ERRORS = {
   fedimintNotEnough: "Not enough in this federation",
   fedimintRealOnTestnet: "This federation holds real bitcoin: it belongs in a Mainnet Fedimint wallet",
   fedimintTestOnMainnet: "This federation is on {chain}, a test network: it belongs in a Testnet Fedimint wallet",
+  walletAway: "{wallet} can't be used here. Use it on {device}.",
+  walletAwayUnnamed: "{wallet} can't be used here: its home is another device.",
+  // One profile on several devices (WISP 06).
+  groupTurnUnconfirmed: "Can't check which device is active, so the group was not changed. Try again in a moment.",
 } as const;
 
 export type EngineErrorCode = keyof typeof ENGINE_ERRORS;

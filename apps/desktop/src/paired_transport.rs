@@ -151,17 +151,23 @@ impl TransportState {
         let _ = tokio::time::timeout(within, closing).await;
     }
     /// Binds an endpoint for `seed` and accepts on it. `local_only` keeps it on
-    /// this machine's loopback, with no relay (tests).
+    /// this machine's loopback, with no relay (tests). `relays`, when there are
+    /// any, home it on those Iroh relays instead of n0's (`iroh_relays`).
     async fn start(
         &self,
         seed: [u8; 32],
         events: Channel<Event>,
         local_only: bool,
+        relays: &[String],
     ) -> Result<Started, String> {
         if self.inner.lock().unwrap().peers.len() >= 8 {
             return Err("Native endpoint limit reached".into());
         }
-        let endpoint = wire::endpoint(seed, local_only).await?;
+        let endpoint = if relays.is_empty() || local_only {
+            wire::endpoint(seed, local_only).await?
+        } else {
+            wire::endpoint_with_relays(seed, relays).await?
+        };
         let id = self.next();
         let descriptor = wire::address(&endpoint);
         let listener_endpoint = endpoint.clone();
@@ -211,10 +217,32 @@ async fn close_all(peers: Vec<Peer>) {
     while closing.join_next().await.is_some() {}
 }
 
+/// The Iroh relays an endpoint homes on: the person's (Settings, Network, as
+/// the web app's Iroh does), else `GHOSTLY_IROH_RELAYS` (comma separated: a
+/// self-hosted or test `iroh-relay`), else none, which is n0's public relays.
+fn iroh_relays(given: Option<Vec<String>>, env: Option<&str>) -> Vec<String> {
+    let given: Vec<String> = given
+        .unwrap_or_default()
+        .iter()
+        .map(|relay| relay.trim().to_string())
+        .filter(|relay| !relay.is_empty())
+        .collect();
+    if !given.is_empty() {
+        return given;
+    }
+    env.unwrap_or("")
+        .split(',')
+        .map(str::trim)
+        .filter(|relay| !relay.is_empty())
+        .map(String::from)
+        .collect()
+}
+
 #[tauri::command]
 pub async fn paired_iroh_start(
     state: State<'_, TransportState>,
     seed_b64: String,
+    relays: Option<Vec<String>>,
     events: Channel<Event>,
 ) -> Result<Started, String> {
     let seed: [u8; 32] = base64::engine::general_purpose::URL_SAFE_NO_PAD
@@ -222,7 +250,9 @@ pub async fn paired_iroh_start(
         .map_err(|_| "Invalid transport seed")?
         .try_into()
         .map_err(|_| "Invalid transport seed")?;
-    state.start(seed, events, false).await
+    let env = std::env::var("GHOSTLY_IROH_RELAYS").ok();
+    let relays = iroh_relays(relays, env.as_deref());
+    state.start(seed, events, false, &relays).await
 }
 #[tauri::command]
 pub async fn paired_iroh_address(
@@ -343,10 +373,53 @@ mod tests {
         let (events, seen) = channel();
         let started = app
             .state::<TransportState>()
-            .start([seed; 32], events, true)
+            .start([seed; 32], events, true, &[])
             .await
             .unwrap();
         (started.id, started.descriptor, seen)
+    }
+
+    #[test]
+    fn iroh_relays_are_the_persons_then_the_environment_then_none() {
+        let mine = Some(vec![
+            " https://iroh.person.test/ ".to_string(),
+            "".to_string(),
+        ]);
+        assert_eq!(
+            iroh_relays(mine, Some("https://iroh.env.test/")),
+            vec!["https://iroh.person.test/"]
+        );
+        assert_eq!(
+            iroh_relays(Some(vec![]), Some(" https://a.test/ , ,https://b.test/")),
+            vec!["https://a.test/", "https://b.test/"]
+        );
+        assert_eq!(iroh_relays(None, Some("  ")), Vec::<String>::new());
+        assert_eq!(iroh_relays(None, None), Vec::<String>::new());
+    }
+
+    #[tokio::test]
+    async fn an_endpoint_takes_one_to_four_relays_of_its_own() {
+        let app = app();
+        let (events, _) = channel();
+        let five: Vec<String> = (0..5).map(|i| format!("https://r{i}.test/")).collect();
+        let refused = app
+            .state::<TransportState>()
+            .start([21; 32], events.clone(), false, &five)
+            .await;
+        assert!(refused.is_err(), "more than four relays are refused");
+        // One relay that nobody runs: the endpoint binds all the same, and homes there when it answers.
+        app.state::<TransportState>()
+            .start(
+                [21; 32],
+                events,
+                false,
+                &["http://127.0.0.1:9/".to_string()],
+            )
+            .await
+            .unwrap();
+        app.state::<TransportState>()
+            .shutdown(Duration::from_secs(2))
+            .await;
     }
 
     /// Waits until `seen` holds an event matching `wanted`, and returns it.
@@ -378,7 +451,7 @@ mod tests {
         for seed in ["", "not base64!", "AAAA", &"A".repeat(44)] {
             let (events, _) = channel();
             assert_eq!(
-                paired_iroh_start(app.state(), seed.into(), events)
+                paired_iroh_start(app.state(), seed.into(), None, events)
                     .await
                     .err()
                     .unwrap(),
@@ -526,14 +599,14 @@ mod tests {
         let (events, _) = channel();
         let ninth = app
             .state::<TransportState>()
-            .start([20; 32], events, true)
+            .start([20; 32], events, true, &[])
             .await;
         assert_eq!(ninth.err().unwrap(), "Native endpoint limit reached");
         // The command refuses too, before binding anything.
         let (events, _) = channel();
         let seed = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode([21u8; 32]);
         assert_eq!(
-            paired_iroh_start(app.state(), seed, events)
+            paired_iroh_start(app.state(), seed, None, events)
                 .await
                 .err()
                 .unwrap(),

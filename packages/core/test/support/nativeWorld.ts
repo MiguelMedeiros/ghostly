@@ -44,6 +44,8 @@ export class NativeWorld {
   deadPaths = new Set<string>();
   /** Every dial that reached an endpoint, and every one that did not. */
   dials = 0;
+  /** The dials that reached an endpoint, by the name of the app that dialled. */
+  dialsBy = new Map<string, number>();
   dialFailures = 0;
   private entries = new Map<string, Entry>();
   private identities = new Map<string, string>();
@@ -69,6 +71,7 @@ export class NativeWorld {
         await after(this.dialMs);
         if (remote.closed || entry.closed || this.find(d.id ?? d.publicKey ?? "") !== remote) { this.dialFailures++; throw new Error(`${transport}: the contact's endpoint went away`); }
         this.dials++;
+        this.dialsBy.set(name, (this.dialsBy.get(name) ?? 0) + 1);
         const [mine, theirs] = this.pair(entry, remote);
         if (this.deadPaths.delete(name)) this.deadPath(mine, theirs);
         const binding = { transport, context: hex(transport === "hyperdht/1" ? 64 : 32), identities: [entry.identity, remote.identity] as [string, string] };

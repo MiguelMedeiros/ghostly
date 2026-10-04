@@ -47,6 +47,7 @@
     "fedimintRealOnTestnet": "Esta federación guarda bitcoin real: va en una billetera Fedimint de Mainnet",
     "fedimintTestOnMainnet": "Esta federación está en {{chain}}, una red de prueba: va en una billetera Fedimint de Testnet",
     "feeAboveLimit": "La comisión supera tu límite",
+    "groupTurnUnconfirmed": "No se puede comprobar qué dispositivo está activo, así que el grupo no se cambió. Inténtalo de nuevo en un momento.",
     "hostTimedOut": "{{host}} no respondió a tiempo",
     "hostUnreachable": "No se pudo acceder a {{host}}",
     "invalidMaxFee": "Comisión máxima no válida",
@@ -62,6 +63,7 @@
     "noSharedMint": "No compartes ningún mint con este contacto",
     "notYetConfirmed": "Aún no confirmado. No se envió un segundo pago.",
     "outcomeUnknown": "Resultado desconocido. Comprueba el pago que ya existe; no envíes otro.",
+    "parkedSigned": "Necesita tu decisión: este pago se firmó antes de que esta copia de tu perfil tomara el control. Nunca se vuelve a enviar desde aquí. Revísalo antes de pagar otra vez.",
     "paymentExpired": "La solicitud de pago caducó o tiene una caducidad no válida",
     "paymentTakenBack": "Este pago se recuperó. Los sats están en tu billetera.",
     "realMintOnTestnet": "Este mint guarda sats reales: añádelo a una billetera Cashu de Mainnet",
@@ -78,7 +80,9 @@
     "usdtNeedsSepoliaGas": "Primero hace falta un poco de ETH de Sepolia para el gas",
     "usdtNotEnoughGas": "ETH insuficiente para el gas",
     "usdtNotEnoughTokens": "Saldo de tokens insuficiente",
-    "usdtRpcUnavailable": "RPC de USDT no disponible"
+    "usdtRpcUnavailable": "RPC de USDT no disponible",
+    "walletAway": "{{wallet}} no se puede usar aquí. Úsala en {{device}}.",
+    "walletAwayUnnamed": "{{wallet}} no se puede usar aquí: su casa es otro dispositivo."
   },
   "extension": {
     "notPaymentLink": "No es un enlace de pago",

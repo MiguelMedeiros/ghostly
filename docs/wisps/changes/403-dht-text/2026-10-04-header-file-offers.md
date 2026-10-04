@@ -1,0 +1,1 @@
+The header names the file offers of revision 2026-10-03: Implementation lists `dht-file/1`, Summary says the floor also carries the bubble of a file waiting to go, and Notes say that a file sent while the chat is not live shows in the contact's chat in its place, with its bytes on the live link. No change to the wire.

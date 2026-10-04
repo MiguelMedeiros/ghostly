@@ -1,4 +1,4 @@
-import { decodeCommunityLink, decodeGroupEntryLink, isPubkyKey, parseDid, readInviteCode } from "@ghostly/core";
+import { decodeCommunityLink, decodeGroupEntryLink, isPubkyKey, parseDid, readInviteCode, trimEndOf } from "@ghostly/core";
 import { nostrPointer, type NostrPointer } from "@ghostly/browser/nostr/social";
 
 /**
@@ -57,7 +57,7 @@ function find(text: string): Entity[] {
   }
   for (const m of text.matchAll(DID_RE)) {
     // The sentence around it keeps its full stop: "my DID is did:web:example.com."
-    const did = m[0].replace(/[.:,;]+$/, "");
+    const did = trimEndOf(m[0], ".:,;");
     try { found.push({ ...at(m, did.length), kind: "identity", provider: "did", subject: parseDid(did).did }); } catch { /* not one Ghostly checks */ }
   }
   return found;

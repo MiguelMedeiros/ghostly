@@ -296,13 +296,14 @@ describe("group engine: admission over a contact chat, edges from the roster", (
     expect(carol.views()[0].members).toHaveLength(3);
     expect(world.events("carol")).toEqual(["joined"]);
     // The joiner keeps the entry session until its edge to the admin is up (the admin says what it commits next over
-    // it); it is not a contact of the group.
+    // it, and its edges' signaling goes through it); it is not a contact of the group.
     expect(world.peers.get("carol")!.entries.size).toBe(1);
     expect(alice.views()[0].memberLinks).toEqual({ "chat-ab": bob.views()[0].myKey });
     expect(alice.views()[0].invited).toEqual([]);
 
     await world.settle(); await world.meet(); await world.settle();
-    expect(world.peers.get("carol")!.entries.size).toBe(0);
+    // The admin's edge is up: the entry session goes a moment later.
+    await vi.waitFor(() => expect(world.peers.get("carol")!.entries.size).toBe(0), { timeout: 5_000 });
     // An admin and the member it admits were both here a moment ago: the edge between them looks fast for
     // the other side (Bob's to Alice from his own admission too); the one between the two members does not.
     const expecting = (who: string) => [...world.peers.get(who)!.edges.values()].filter(e => e.expectPeer).map(e => e.peer).sort();

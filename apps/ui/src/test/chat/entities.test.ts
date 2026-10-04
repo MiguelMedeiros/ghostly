@@ -102,6 +102,7 @@ describe("findEntities: identities", () => {
       { provider: "did", subject: `did:dht:${dht}` },
       { provider: "did", subject: "did:web:example.com", text: "did:web:Example.com" },
     ]);
+    expect(findEntities(`did:web:example.com${".".repeat(5_000)}`)).toMatchObject([{ subject: "did:web:example.com", text: "did:web:example.com" }]);
   });
 
   it("leaves a DID that does not decode, or a method Ghostly does not check, as text", () => {

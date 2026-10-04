@@ -6,10 +6,10 @@
 | Status | Draft |
 | Document kind | Profile |
 | Dependencies | [400](400-chat.md), [01](01-ghost-core.md), [03](03-capabilities.md) |
-| Implementation | The floor and first contact of every new chat (web, extension, desktop, CLI); DHT only per chat; pinned mailboxes. Desktop reads the Mainline DHT directly, the headless CLI when every relay fails; browsers go through Pkarr relays. |
-| Summary | The floor of every chat: very short text through DHT records when no live link is up. Bounded, not a mailbox. |
+| Implementation | The floor and first contact of every new chat (web, extension, desktop, CLI); DHT only per chat; pinned mailboxes; a file's offer on the floor (`dht-file/1`, the sixteenth element). Desktop reads the Mainline DHT directly, the headless CLI when every relay fails; browsers go through Pkarr relays. |
+| Summary | The floor of every chat: very short text, and the bubble of a file waiting to go, through DHT records when no live link is up. Bounded, not a mailbox. |
 | Availability | Available |
-| Notes | 256 bytes, retried for five minutes: the first contact of every chat, after a live link drops, or in a chat set to DHT only. Chats with 0.4 contacts: up to 500 bytes (WISP 402). |
+| Notes | 256 bytes, retried for five minutes: the first contact of every chat, after a live link drops, or in a chat set to DHT only. A file sent meanwhile shows in the contact's chat in its place, and its bytes follow on the live link. Chats with 0.4 contacts: up to 500 bytes (WISP 402). |
 
 > This Draft documents a bounded existing profile, not full contract conformance or an independent implementation certification.
 
@@ -43,7 +43,7 @@ A mailbox's packet can be read by anyone who has its address, without the envelo
 - The sealed `_dm` plaintext is padded with spaces after the JSON value, up to the largest length whose packet fits 992 bytes. Every packet of a mailbox then has one size: 992 bytes before the pin (one record), 989 after it (with `_dmk`). JSON allows spaces after the value, so readers from before read these envelopes as ever.
 - The sender measures a text against the same 992 bytes, 8 under the DHT's 1,000: the Rust client splits TXT strings at 254 bytes, not 255, so the packet it builds can be a byte or two larger. This can lower the usable text budget a little for a text with many escaped characters.
 
-So one read of a mailbox does not tell whether its envelope carries a text, a receipt, reactions, an edit or only the delivery mode, nor how long a text is, nor how many times it was retried.
+So one read of a mailbox does not tell whether its envelope carries a text, a file's offer, a receipt, reactions, an edit or only the delivery mode, nor how long a text is, nor how many times it was retried.
 
 What such a reader can still learn:
 
@@ -99,6 +99,19 @@ The author sends an edit on the floor only after its message's receipt, since th
 
 A forwarded text ([400](400-chat.md#forwards), revision 0.8) carries its hop count as the signed body's optional **fifteenth** element: a whole number from 1 to 255. The eleventh to fourteenth are then present: `null` for no reply and no edit, `[]` for no reactions, `null` for none taken. An edit never carries one. The element costs about 20 bytes: a text whose packet, or whose plaintext against the reader's 900 bytes, has no room for it goes **without** it, and reads as written there. A reader drops a fifteenth element that is not such a number and keeps the text; readers from before ignore it (they accept a body of up to 16 elements).
 
+## Files (revision 2026-10-03)
+
+While the chat is not live, a file written in it waits for the live session: its bytes never go on the floor. Its offer does. The signed body's optional **sixteenth** element says that the envelope's text is a file's name, not a text, so the contact's chat shows the file's bubble where it comes, among the texts written before and after it. The bytes follow on the live session as ever ([501](501-paired-files.md)), under the same wire id.
+
+- The element is `[wireId, size, mime, meta]`: the file's id on the live session (8 to 64 characters of `A-Z a-z 0-9 _ -`), its size in bytes, its type (at most 130 characters), and `null` or an object holding one of `image` (`{width, height}`), `voice` (`{duration, peaks}`) or `video` (`{duration, width, height}`), as the files/3 offer says them. A video's poster never rides. The text is the file's name (at most 256 UTF-8 bytes, as for any text). The eleventh to fifteenth elements are then present: the reply's id or `null`, `null` (no edit), the reactions or `[]`, the highest reaction taken or `null`, the hop count or `null`.
+- The envelope's id is not the wire id: it is the first 16 bytes of SHA-256 of `ghostly-file/1:<wireId>`, in base64url (22 characters, as a text's), so every send of the offer and its receipt match. A reader drops an element whose wire id does not give the envelope's id.
+- It takes the floor's one slot as a text does, with a text's five minutes and eight attempts, in the order the person wrote: a text written after the file waits for the offer's receipt, so the contact reads text, file, text. An offer that expires without its receipt is not said again, and the file waits for the live session as before. The order holds for as long as the slot's lifetime, as between two texts.
+- The sender fits the most it can: the whole meta, then a voice note's waveform thinned to 32, 16 or 8 bars, then no meta, then without the reply's id and the hop count. A 64-bar waveform never fits, 32 bars do with a short name. A name that leaves no room for the rest (from about 200 bytes) does not go: that file waits for the live session.
+- Only to a contact whose capability record ([03](03-capabilities.md#layer-0-capability-record)) lists `dht-file/1`. An app from before would read the name as a text of its own, so it gets nothing on this path and shows the file once it comes live, as before. A reader from before also takes a body of at most sixteen elements: this is the last element such a reader reads, and one after it needs a reader that says it takes it.
+- A reader that takes it stores the file's message under the wire id, waiting for its bytes ("Waiting for connection", nothing to pause or cancel yet), and receipts the envelope's id. The files/3 offer that comes live under that wire id takes that bubble over, in its place; what the offer says (name, size, type) is what the file is. A copy that comes after the offer, or after the file, is receipted and adds nothing. An element that does not hold drops the message, never its receipt: a name is never shown as a text.
+- A file deleted on the sender's side after its offer went, before it went live: the next session that agrees files/3 says `pf-abort` for its wire id, and the contact's bubble says it was cancelled. A bubble whose offer does not come within a week says it did not come. A file the session then sends whole with files/2 (no files/3 agreed) replaces the bubble with its own.
+- A chat on DHT only by choice (`dht-chosen`) says its files' offers there too: their bubbles wait until someone leaves DHT only.
+
 ## When text goes over the DHT
 
 | Chat state ([400](400-chat.md#states-of-a-chat)) | A new text of at most 256 bytes | A longer text |
@@ -137,7 +150,7 @@ With every chat running this profile, reads multiply by the number of chats. The
 
 ## What never enters this path
 
-Financial envelopes, files, pictures, calls and service bodies never enter this path; Cashu bearer tokens are refused as text. A status card ([4xx · Status Cards](4xx-status-cards.md), revision 2026-09-29) never does either: a card's first message may go here as its fallback text when it fits, and its updates wait for the live session. A short pasted Lightning invoice can fit as text, but publishing it starts no payment. A contact whose capability record lacks `dht-text/1` receives nothing on this path: the sender queues for layer 1 instead ([03](03-capabilities.md#layer-0-capability-record)).
+Financial envelopes, a file's bytes (pictures and voice notes included), calls and service bodies never enter this path; a file's offer may ([Files](#files-revision-2026-10-03)). Cashu bearer tokens are refused as text. A status card ([4xx · Status Cards](4xx-status-cards.md), revision 2026-09-29) never does either: a card's first message may go here as its fallback text when it fits, and its updates wait for the live session. A short pasted Lightning invoice can fit as text, but publishing it starts no payment. A contact whose capability record lacks `dht-text/1` receives nothing on this path: the sender queues for layer 1 instead ([03](03-capabilities.md#layer-0-capability-record)).
 
 ## Runtime and conformance
 

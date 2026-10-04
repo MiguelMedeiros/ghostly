@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-device-state-write"
+description = "Enables the device_state_write command without any pre-configured scope."
+commands.allow = ["device_state_write"]
+
+[[permission]]
+identifier = "deny-device-state-write"
+description = "Denies the device_state_write command without any pre-configured scope."
+commands.deny = ["device_state_write"]

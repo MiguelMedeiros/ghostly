@@ -46,6 +46,8 @@ export function NetworkSettings() {
   if (!platform || !network) return null;
   const current = JSON.stringify({ relays, turn, iroh, hyperdhtRelay, pushRelay });
   const saved = savedAs === current;
+  // A TURN server restored from a backup comes without its credential (backups leave it out): calls skip it until then.
+  const credentialGone = !!network.turn?.urls && !network.turn.credential && !turn.credential;
 
   const save = async () => {
     setError("");
@@ -71,7 +73,7 @@ export function NetworkSettings() {
   const readRelays = async (on: boolean) => {
     setError("");
     setSwitching(true);
-    try { await platform.setNetwork({ relays: network.relays, turn: network.turn, readRelays: on }); }
+    try { await platform.setNetwork({ relays: network.relays, readRelays: on }); }
     catch (e) { setError(errorText(e, t)); }
     finally { setSwitching(false); }
   };
@@ -93,7 +95,7 @@ export function NetworkSettings() {
           className={`${field} font-mono text-sm resize-y`} />
       </Field>
 
-      {network.iroh && <Field label={t("network.iroh")} htmlFor="network-iroh-relays" hint={t("network.irohHint")} info={t("network.irohInfo")}
+      {network.iroh && <Field testId="network-iroh-field" label={t("network.iroh")} htmlFor="network-iroh-relays" hint={t("network.irohHint")} info={t(direct ? "network.irohInfoDirect" : "network.irohInfo")}
         trailing={<button onClick={() => setIroh(network.iroh!.defaultRelays.join("\n"))} aria-label={t("network.resetIroh")} className={reset}>{t("network.reset")}</button>}>
         <textarea id="network-iroh-relays" value={iroh} onChange={(e) => setIroh(e.target.value)} rows={2} spellCheck={false} data-testid="network-iroh-relays"
           className={`${field} font-mono text-sm resize-y`} />
@@ -109,7 +111,7 @@ export function NetworkSettings() {
           spellCheck={false} data-testid="network-push-relay" className={`${field} font-mono text-sm`} />
       </Field>
 
-      <Field label={t("network.turn")} htmlFor="network-turn-url" hint={t("network.turnHint")} info={t("network.turnInfo")}>
+      <Field testId="network-turn-field" label={t("network.turn")} htmlFor="network-turn-url" hint={t(credentialGone ? "network.turnCredentialAgain" : "network.turnHint")} info={t("network.turnInfo")}>
         <input id="network-turn-url" aria-label={t("network.turnUrl")} value={turn.urls} onChange={(e) => setTurn({ ...turn, urls: e.target.value })}
           placeholder="turn:turn.example.org:3478" spellCheck={false} className={`${field} font-mono text-sm`} />
         <FieldGrid>

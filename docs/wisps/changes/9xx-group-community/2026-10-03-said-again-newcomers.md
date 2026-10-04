@@ -1,0 +1,1 @@
+A frame is said again only while no member of the current roster outside the first frame's commit was let in by an `add` dated after it: said again under the current commit, such a member could open what was written before it was let in. With one in the roster, the frame stays as it was.

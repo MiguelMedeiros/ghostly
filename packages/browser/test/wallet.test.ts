@@ -35,6 +35,31 @@ beforeEach(() => {
   vi.spyOn(console, "warn").mockImplementation(() => {});
 });
 
+describe("stopped with the engine (WISP 06: the check after a handoff's stop is final)", () => {
+  it("polls nothing and schedules nothing once stopped, and waits for a swap in its lock to end", async () => {
+    vi.useFakeTimers();
+    try {
+      seed("quotes", [{ quote: "q-open", mint: MINT, amount: 100, invoice: "lnbc1", createdAt: 0, expiresAt: Date.now() + 60 * 60_000 }]);
+      mint.checkMintQuoteBolt11.mockResolvedValue({ state: "UNPAID" });
+      const { wallet } = setup();
+      let finish!: () => void;
+      const swap = (wallet as unknown as { locked<T>(m: string, t: () => Promise<T>): Promise<T> }).locked(MINT, () => new Promise<void>((resolve) => { finish = resolve; }));
+      let stopped = false;
+      const stopping = wallet.stop().then(() => { stopped = true; });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(stopped, "a swap inside the lock ends first").toBe(false);
+      finish();
+      await swap;
+      await stopping;
+      expect(wallet.swapping).toBe(false);
+      mint.checkMintQuoteBolt11.mockClear();
+      await wallet["pollQuotes"]();
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(mint.checkMintQuoteBolt11).not.toHaveBeenCalled();
+    } finally { vi.useRealTimers(); }
+  });
+});
+
 describe("Lightning in: mint quotes", () => {
   const quote = (over: Partial<StoredQuote> = {}): StoredQuote => ({
     quote: "q1",

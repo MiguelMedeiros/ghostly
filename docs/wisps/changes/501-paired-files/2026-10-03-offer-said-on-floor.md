@@ -1,0 +1,1 @@
+A `pf-offer` under the wire id of a file whose offer was said on the DHT floor first (403, revision 2026-10-03) takes over the message that waits for it instead of being refused for its id; a `pf-abort` for such an id with no offer before it ends that message as cancelled by the sender.

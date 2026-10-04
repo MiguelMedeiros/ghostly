@@ -1,7 +1,9 @@
 import { Ghost } from "@/components/ghost/Ghost";
 import { Icon } from "@/components/site/icons";
 import { NEXT_VERSION } from "@/lib/status";
+import { findWisp } from "@/lib/wisps";
 import type { HomeCopy } from "@/content/home";
+import { IdentityDeck, type IdentityCard } from "./IdentityDeck";
 import { Reveal } from "./Reveal";
 import { WalletDeck } from "./WalletDeck";
 import "@/app/space.css";
@@ -15,12 +17,23 @@ const THEMES = [
 ];
 
 /**
+ * An identity card's status, read from its WISP's header: offered by the app (Availability: Available), and
+ * experimental when its notes say so. A card whose WISP is not available fails the build: the deck lists only what
+ * the app offers.
+ */
+function identityCard(card: HomeCopy["identities"]["cards"][number]): IdentityCard {
+  const wisp = findWisp(card.wisp);
+  if (wisp?.level !== "available") throw new Error(`Identity card "${card.id}": WISP ${card.wisp} is not available (${wisp?.level ?? "no such WISP"})`);
+  return { ...card, status: /^experimental\b/i.test(wisp.note ?? "") ? "Available · experimental" : "Available" };
+}
+
+/**
  * The chapter's one idea, then my things laid out on a desk: the Profile page
  * in a window on the left, three features on a quiet rail on the right (one
- * sentence, a visual, a caption-sized honesty note), and the wallet deck as a
- * set piece on a full-bleed band below.
+ * sentence, a visual, a caption-sized honesty note), and the wallet deck and the
+ * identity deck as set pieces on full-bleed bands below.
  */
-export function SpaceSection({ t, w, shotLabel }: { t: HomeCopy["space"]; w: HomeCopy["wallets"]; shotLabel: string }) {
+export function SpaceSection({ t, w, ids, shotLabel }: { t: HomeCopy["space"]; w: HomeCopy["wallets"]; ids: HomeCopy["identities"]; shotLabel: string }) {
   return (
     <section className="sp-section" id="space">
       <div className="wrap">
@@ -63,6 +76,38 @@ export function SpaceSection({ t, w, shotLabel }: { t: HomeCopy["space"]; w: Hom
                   ))}
                 </div>
                 <p className="caption sp-note">{t.profiles.note}</p>
+              </article>
+
+              <article className="sp-feature">
+                <div className="sp-feature-head">
+                  <h3 className="h-card">{t.devices.title}</h3>
+                </div>
+                <div className="sp-flow">
+                  <div className="sp-box">
+                    <strong>
+                      <Icon name="desktop" /> {t.devices.active}
+                    </strong>
+                    <ul>
+                      {t.devices.activeItems.map((x) => (
+                        <li key={x}>{x}</li>
+                      ))}
+                    </ul>
+                  </div>
+                  <span className="sp-arrow" aria-hidden="true">
+                    ⇄
+                  </span>
+                  <div className="sp-box sp-box--where">
+                    <strong>
+                      <Icon name="phone" /> {t.devices.standby}
+                    </strong>
+                    <ul>
+                      {t.devices.standbyItems.map((x) => (
+                        <li key={x}>{x}</li>
+                      ))}
+                    </ul>
+                  </div>
+                </div>
+                <p className="caption sp-note">{t.devices.note}</p>
               </article>
 
               <article className="sp-feature">
@@ -123,6 +168,17 @@ export function SpaceSection({ t, w, shotLabel }: { t: HomeCopy["space"]; w: Hom
             </div>
             <WalletDeck t={w} />
             <p className="note sp-testnet">{w.testnet}</p>
+          </div>
+        </Reveal>
+
+        <Reveal className="sp-band sp-band--ids">
+          <div className="wrap">
+            <div className="sp-band-head">
+              <h3 className="h-section">{ids.title}</h3>
+              <p className="lead">{ids.lead}</p>
+            </div>
+            <IdentityDeck title={ids.title} cards={ids.cards.map(identityCard)} />
+            <p className="note sp-testnet">{ids.note}</p>
           </div>
         </Reveal>
       </div>

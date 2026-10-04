@@ -271,6 +271,11 @@ export interface MacDesktopOptions {
   /** The folder the copy goes in: a temporary one unless said (macOS treats an app in one differently). */
   folder?: string;
   env?: Record<string, string>;
+  /**
+   * Start on what an earlier copy of this name left behind (it was stopped with `stop({ keep: true })`): its WebKit
+   * storage is not forgotten first. For a test of what survives the app being quit and opened again.
+   */
+  keepData?: boolean;
 }
 
 export interface MacDesktop {
@@ -291,8 +296,8 @@ export async function openMacDesktop(options: MacDesktopOptions): Promise<MacDes
   if (process.platform !== "darwin") throw new Error("openMacDesktop runs on macOS only");
   const source = macBundle();
   const copy = copyApp(source, options.name, options.folder);
-  // A fresh app: nothing left from an earlier run that stopped halfway.
-  forget(copy.bundleId);
+  // A fresh app: nothing left from an earlier run that stopped halfway (unless asked to start on it).
+  if (!options.keepData) forget(copy.bundleId);
   const executable = join(copy.app, "Contents", "MacOS", readdirSync(join(copy.app, "Contents", "MacOS"))[0]);
   const token = randomBytes(16).toString("hex");
   const log: string[] = [];

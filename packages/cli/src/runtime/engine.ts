@@ -121,6 +121,14 @@ export interface RuntimeOptions { deferGroups?: boolean }
  * settings and the Mainline DHT directly (read when the relays fail, written always).
  * The caller holds the profile's lock.
  */
+/** The files a light backup left out, as the restore wrote them in the mark (an empty mark: none). */
+function leftOutIn(mark: string): string[] {
+  try {
+    const ids = (JSON.parse(readFileSync(mark, "utf8") || "{}") as { leftOut?: unknown }).leftOut;
+    return Array.isArray(ids) ? ids.filter((id): id is string => typeof id === "string") : [];
+  } catch { return []; }
+}
+
 export async function startRuntime(paths: ProfilePaths, options: RuntimeOptions = {}): Promise<Runtime> {
   // `GHOSTLY_LINK_TRACE=<file>`: each step of each chat's way to live, one JSON line (packages/core/src/linkTrace.ts),
   // as the Desktop writes to its log. For measuring, not needed to run.
@@ -135,7 +143,10 @@ export async function startRuntime(paths: ProfilePaths, options: RuntimeOptions 
   const restored = join(paths.dir, RESTORED_MARK);
   if (existsSync(restored)) {
     try {
-      await (await import("@ghostly/browser/shared/restoredRows")).markRestoredWallet();
+      const rows = await import("@ghostly/browser/shared/restoredRows");
+      await rows.markRestoredWallet();
+      // The files a light backup left out: their records say so, as in the app's restore.
+      await rows.markLeftOutFiles(leftOutIn(restored));
       await store.compact();
     } catch (error) {
       await store.close().catch(() => {});
@@ -172,6 +183,8 @@ export async function startRuntime(paths: ProfilePaths, options: RuntimeOptions 
   const server = new EngineServer({
     ...(transport ? { transport } : {}),
     irohWeb: true,
+    // A CLI profile is one device's (WISP 06): no device state is kept for it.
+    singleDevice: true,
     nativeTransports: { "hyperdht/1": (seedB64: string) => createHyperEndpoint(fromBase64Url(seedB64), network) },
     // No wallet starts by itself: a bot has the wallets it made (WISP 11xx § Wallet SDKs on Node).
     automaticWallets: false,

@@ -45,6 +45,8 @@ export class PaymentCoordinator {
   reconcile(id: string): Promise<PaymentReview> { return this.once(id,async () => {
     const saved = await this.require(id);
     if (!["submitted","unknown"].includes(saved.review.state)) return saved.review;
+    // Parked by a copy started from older state: its signed bytes are never sent again, and nothing is asked here.
+    if (saved.review.parked) return saved.review;
     try {
       const result = await this.adapter(saved.review.method).reconcile(saved.review,saved.prepared,()=>this.repository.put(saved));
       saved.review = {...saved.review,...result,state:result.failed ? "failed" : result.settled ? "settled" : result.pending ? "submitted" : "unknown",error:result.failed ? result.error : result.settled ? undefined : engineText("notYetConfirmed")};
@@ -73,6 +75,8 @@ export class PaymentCoordinator {
     }
     return dropped;
   }
+  /** Calls to a payment's adapter that have not returned (an approval or a reconcile), across every payment. */
+  get running(): number { return this.active.size; }
   private adapter(method: string) { const adapter=this.adapters.find(a=>a.method===method); if(!adapter)throw engineError("methodUnavailable"); return adapter; }
   private async require(id: string) { const saved=await this.repository.get(id); if(!saved)throw engineError("unknownPaymentIntent"); return saved; }
   private once(id:string,work:()=>Promise<PaymentReview>) { const existing=this.active.get(id);if(existing)return existing;const promise=work().finally(()=>this.active.delete(id));this.active.set(id,promise);return promise; }

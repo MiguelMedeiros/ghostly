@@ -8,6 +8,15 @@
     "cancelled": "Annulé. Rien n'a été enregistré.",
     "chooseFirst": "Choisissez d’abord une sauvegarde",
     "connected": "Connecté · {{store}}",
+    "content": {
+      "everything": "Tout",
+      "everythingSize": "Fichiers : {{size}}",
+      "info": "La légère garde les discussions et tous les messages, les contacts, les groupes, les identités, les portefeuilles et les réglages. Elle laisse de côté les fichiers de plus de 1 Mo ; les messages vocaux jusqu'à 4 Mo restent. Après une restauration, chaque fichier laissé de côté s'affiche comme Pas dans cette sauvegarde.",
+      "label": "Contenu",
+      "leftOut": "Les fichiers de plus de 1 Mo ont été laissés de côté ({{size}}).",
+      "light": "Légère",
+      "lightSize": "Fichiers : {{size}}. Laisse de côté {{left}}."
+    },
     "download": "Télécharger",
     "downloaded": "Téléchargé {{name}} · {{size}}",
     "emptyFile": "Ce fichier est vide. Choisissez un fichier de sauvegarde.",

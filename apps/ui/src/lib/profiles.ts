@@ -1,3 +1,4 @@
+import { knownDeviceGate } from "@ghostly/browser/devices/gate";
 import type { ColorTheme } from "./settings";
 
 /**
@@ -12,6 +13,12 @@ export interface ProfileEntry {
   createdAt: number;
   /** Brought back from a backup (WISP 05), until the mark is taken off: shown with the app's word for it after the name. */
   restored?: true;
+  /**
+   * The storage namespace the profile lives in, where it is not the one its id names: a handoff installs the state it
+   * took under a new namespace and points the profile at it, in one write of this registry (WISP 06 § Installing the
+   * staged state). Everything that names the profile's storage goes through `namespaceOf`.
+   */
+  space?: string;
 }
 interface Registry { version: 1; active: string; profiles: ProfileEntry[] }
 
@@ -20,8 +27,27 @@ let base = "";
 export function setProfileBase(name: string): void { base = name; }
 /** The registry of this space. */
 export const registryKey = () => (base ? `ghostly_${base}_profiles` : "ghostly_profiles");
+/** The namespace an id names, before any pointer. */
+const derivedNamespace = (id: string) => (id ? (base ? `${base}-${id}` : id) : base);
+/** A storage namespace a handoff made: what may follow `ghostly_` in a database name or a key prefix. */
+const SPACE = /^[A-Za-z0-9_.-]{1,100}$/;
+let pointers: { raw: string | null; spaces: Map<string, string> } = { raw: null, spaces: new Map() };
+/** The registry's pointers (`ProfileEntry.space`), read again only when the registry changed. */
+function pointerOf(id: string): string | undefined {
+  let raw: string | null;
+  try { raw = localStorage.getItem(registryKey()); } catch { return undefined; }
+  if (raw !== pointers.raw) {
+    const spaces = new Map<string, string>();
+    try {
+      const parsed = JSON.parse(raw ?? "null") as Partial<Registry> | null;
+      for (const p of Array.isArray(parsed?.profiles) ? parsed!.profiles : []) if (p && typeof p.id === "string" && typeof p.space === "string" && SPACE.test(p.space)) spaces.set(p.id, p.space);
+    } catch { /* no pointers */ }
+    pointers = { raw, spaces };
+  }
+  return pointers.spaces.get(id);
+}
 /** The storage namespace of a profile: its prefix `ghostly_<ns>_`, database `ghostly_<ns>`, lock `ghostly-peer-<ns>`. */
-export const namespaceOf = (id: string) => (id ? (base ? `${base}-${id}` : id) : base);
+export const namespaceOf = (id: string) => pointerOf(id) ?? derivedNamespace(id);
 const ID = /^[a-z0-9]{10}$/;
 export const PROFILE_THEMES: ColorTheme[] = ["cyan", "purple", "classic", "monochrome"];
 /** The swatch each theme shows in the switcher and on the profile's avatar. */
@@ -99,6 +125,7 @@ function read(): Registry {
         const { name, marked } = nameAndMark(p.id, p.name);
         const entry: ProfileEntry = { id: p.id, name: name || (p.id ? "Profile" : DEFAULT_ENTRY.name), createdAt: Number(p.createdAt) || 0 };
         if (p.restored === true || marked) entry.restored = true;
+        if (typeof p.space === "string" && SPACE.test(p.space)) entry.space = p.space;
         return entry;
       });
     if (!profiles.some((p) => p.id === "")) profiles.unshift({ ...DEFAULT_ENTRY });
@@ -231,7 +258,74 @@ export function renameProfile(id: string, name: string): void {
 /** Takes the restored mark off a profile: from now on it is shown by its name alone. */
 export function clearRestoredMark(id: string): void {
   const registry = read();
-  write({ ...registry, profiles: registry.profiles.map((p) => (p.id === id ? { id: p.id, name: p.name, createdAt: p.createdAt } : p)) });
+  write({ ...registry, profiles: registry.profiles.map((p) => (p.id === id ? { id: p.id, name: p.name, createdAt: p.createdAt, ...(p.space ? { space: p.space } : {}) } : p)) });
+}
+
+/** The database name of a namespace. */
+export const databaseOfSpace = (ns: string) => (ns ? `ghostly_${ns}` : "ghostly");
+
+/** The profile whose storage is this peer database, or undefined. */
+export function profileOfDatabase(database: string): ProfileEntry | undefined {
+  return read().profiles.find((p) => databaseOfSpace(namespaceOf(p.id)) === database);
+}
+
+/** A namespace no profile of this space uses or names: a staging namespace for a handoff. */
+export function newSpace(): string {
+  const registry = read();
+  const taken = new Set(registry.profiles.flatMap((p) => [derivedNamespace(p.id), namespaceOf(p.id)]));
+  for (;;) {
+    const id = newProfileId();
+    const ns = derivedNamespace(id);
+    if (!taken.has(ns)) return ns;
+  }
+}
+
+/**
+ * Points the profile whose storage is `from` at the namespace of `to`: one write of the registry, the "one pointer"
+ * of WISP 06 § Installing the staged state. The registry's choice moves with it.
+ */
+export function pointProfile(from: string, to: string): void {
+  const entry = profileOfDatabase(from);
+  if (!entry) throw new Error("No profile uses that storage");
+  const target = to === "ghostly" ? "" : to.replace(/^ghostly_/, "");
+  if (to !== "ghostly" && !to.startsWith("ghostly_")) throw new Error("Not a profile's storage");
+  if (target && !SPACE.test(target)) throw new Error("Not a profile's storage");
+  const registry = read();
+  const space = target === derivedNamespace(entry.id) ? undefined : target;
+  write({ ...registry, profiles: registry.profiles.map((p) => {
+    if (p.id !== entry.id) return p;
+    const { space: _was, ...rest } = p;
+    return space === undefined ? rest : { ...rest, space };
+  }) });
+  // Read back before anyone reloads on it: a write that did not take effect fails here, not as an empty profile later.
+  // (It cannot see a write the storage later loses on disk; the device record's `home` recovers that at the next start.)
+  if (namespaceOf(entry.id) !== (space ?? derivedNamespace(entry.id))) throw new Error("The profile's storage could not be pointed at the new state");
+}
+
+/**
+ * The profile's own database name, before any pointer: what a handoff's staged copy names as the profile it holds
+ * (`DeviceRecord.home`).
+ */
+export const homeDatabaseOf = (id: string) => databaseOfSpace(derivedNamespace(id));
+
+/**
+ * A profile whose pointer is gone (WISP 06 § Installing the staged state): no `space` in the registry, no device record
+ * under its own database, and a device record of a namespace a handoff installed for it (`home`). The pointer is
+ * written again, to that namespace, before anything opens the old, empty one. Returns whether it was. `records`: the
+ * device records on this device (`listDeviceRecords`).
+ */
+export function recoverProfilePointer(id: string, records: readonly { profile: string; home?: string; state: string; saved: number }[]): boolean {
+  // A profile the registry does not list is not known here: nothing is guessed for it.
+  if (pointerOf(id) !== undefined || !read().profiles.some((p) => p.id === id)) return false;
+  const home = homeDatabaseOf(id);
+  if (records.some((record) => record.profile === home)) return false;
+  const named = new Set(read().profiles.map((p) => databaseOfSpace(namespaceOf(p.id))));
+  const found = records
+    .filter((record) => record.home === home && record.profile !== home && record.profile.startsWith("ghostly_") && !named.has(record.profile) && SPACE.test(record.profile.slice("ghostly_".length)))
+    .sort((a, b) => Number(b.state === "active") - Number(a.state === "active") || b.saved - a.saved)[0];
+  if (!found) return false;
+  pointProfile(home, found.profile);
+  return true;
 }
 
 /** Where a profile's own keys start in localStorage: `ghostly_<ns>_`, or `ghostly_` for the default one. */
@@ -284,7 +378,8 @@ export function switchProfile(id: string, options: { route?: string; avatar?: st
   if (!target) throw new Error("Unknown profile");
   // This page's own profile, not the registry's choice: another tab may have made that choice already.
   if (id === activeProfileId()) return;
-  rememberRoute(activeProfileId());
+  // A profile this device is on standby for keeps its place as it was: nothing is written into its copy (WISP 06).
+  if (knownDeviceGate()?.full !== false) rememberRoute(activeProfileId());
   const pending: PendingSwitch = { id, name: shown(target).name, color: THEME_COLOR[themeOf(id)], avatar: options.avatar, at: Date.now() };
   try { sessionStorage.setItem(SWITCH_KEY, JSON.stringify(pending)); } catch { /* no overlay after the reload */ }
   window.dispatchEvent(new CustomEvent<PendingSwitch>("profile-switching", { detail: pending }));

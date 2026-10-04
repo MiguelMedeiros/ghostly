@@ -1,5 +1,6 @@
 import { createIdentity, identityFromSeedB64 } from "../../src/identity";
 import { GroupSession, type GroupEdgeFrame, type GroupIncomingMessage, type GroupState } from "../../src/groupSession";
+import type { GroupIncomingEdit } from "../../src/groupEdits";
 
 export const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
 
@@ -7,9 +8,12 @@ export const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
 export class Mesh {
   readonly sessions = new Map<string, GroupSession>();
   readonly inbox = new Map<string, GroupIncomingMessage[]>();
+  readonly edits = new Map<string, GroupIncomingEdit[]>();
   readonly saved = new Map<string, GroupState>();
   readonly sentFrames: { from: string; to: string; frame: GroupEdgeFrame }[] = [];
   readonly changes = new Map<string, number>();
+  /** The sessions' clock (`hooks.clock`) when set; the wall clock otherwise. */
+  clock: number | null = null;
   private closed = new Set<string>();
   private pending: Promise<unknown>[] = [];
   private edge(a: string, b: string): string { return [a, b].sort().join("|"); }
@@ -18,17 +22,21 @@ export class Mesh {
   add(state: GroupState, name?: string): GroupSession {
     const session: GroupSession = new GroupSession(state, {
       save: async s => { this.saved.set(session.myKey, s); },
+      clock: () => this.clock ?? Date.now(),
       send: (to, frame) => {
         this.sentFrames.push({ from: session.myKey, to, frame: clone(frame) });
         const target = this.sessions.get(to);
-        if (!target || !this.isOpen(session.myKey, to)) return;
+        if (!target || !this.isOpen(session.myKey, to)) return false;
         this.pending.push(target.handle(session.myKey, clone(frame)));
+        return true;
       },
       message: m => { this.inbox.get(session.myKey)!.push(m); },
+      edit: e => { this.edits.get(session.myKey)!.push(e); },
       changed: () => this.changes.set(session.myKey, (this.changes.get(session.myKey) ?? 0) + 1),
     });
     this.sessions.set(session.myKey, session);
     this.inbox.set(session.myKey, []);
+    this.edits.set(session.myKey, []);
     if (name) void session.setNick(session.myKey, name);
     return session;
   }

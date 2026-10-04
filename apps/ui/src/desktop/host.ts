@@ -4,6 +4,7 @@ import {
   DHT_POLL_INTERVALS,
   GhostlyHttpError,
   fromBase64,
+  fromBase64Url,
   toBase64,
   toBase64Url,
   type Identity,
@@ -14,6 +15,9 @@ import {
   type PkarrRequestOptions,
   type PkarrTransport,
   type SignedPacket,
+  type TurnConditions,
+  type TurnSourceAnswer,
+  type TurnSourcePut,
   setLinkTraceSink,
   viewerResponseHeaders,
 } from "@ghostly/core";
@@ -49,7 +53,7 @@ const STATUS_EVERY_MS = 2_000;
  * Pkarr through the Rust client: the Mainline DHT read directly, the relays in Settings written to (browser
  * contacts read only relays), and read from too when "Also use Pkarr relays" is on.
  */
-function createTauriTransport(): PkarrTransport {
+export function createTauriTransport(): PkarrTransport {
   let status: DiscoveryStatus | undefined;
   let askedAt = 0;
   const listeners = new Set<(change?: DiscoveryChange) => void>();
@@ -82,6 +86,18 @@ function createTauriTransport(): PkarrTransport {
       }).finally(refresh);
       // Rust verified the signature while resolving.
       return packet && { pubKeyZ32, timestampMicros: BigInt(packet.timestamp_micros), records: packet.records };
+    },
+    // The turn record's own path (WISP 06 § Publishing and reading), in Rust (`turn_network.rs`): the DHT itself and
+    // every relay are read, each put goes out on its source's condition (`cas` on the DHT), and nothing is retried.
+    async turnRead(pubKeyZ32: string, options?: { timeoutMs?: number }): Promise<TurnSourceAnswer[]> {
+      const answers = await invoke<{ source: string; answered: boolean; payloads: string[]; sequences?: string[]; stale?: boolean; detail?: string }[]>("turn_read", { publicKeyZ32: pubKeyZ32, ...(options?.timeoutMs ? { timeoutMs: options.timeoutMs } : {}) });
+      return answers.map(({ source, answered, payloads, sequences, stale, detail }) =>
+        ({ source, answered, payloads: payloads.map(fromBase64Url), ...(sequences?.length ? { sequences } : {}), ...(stale ? { stale: true } : {}), ...(detail ? { detail } : {}) }));
+    },
+    // The profile has a device set: the turn's own DHT node is made and joins, ahead of the first read.
+    turnWarm: () => invoke<void>("turn_warm"),
+    turnPut(pubKeyZ32: string, payload: Uint8Array, conditions: TurnConditions): Promise<TurnSourcePut[]> {
+      return invoke<TurnSourcePut[]>("turn_put", { publicKeyZ32: pubKeyZ32, payloadB64: toBase64Url(payload), conditions });
     },
     describe: () => ({ protocol: "Mainline DHT (BEP44) — Direct UDP", relays: [] }),
     networkChanged() {
@@ -260,7 +276,7 @@ export function createDesktopHost(version: string, calls: NativeCallSupport | nu
     version,
     features: { shareLocalServices: true, openServices: true, profiles: true },
     updates: desktopUpdates,
-    node: { nativeTransports: { "iroh/1": createIrohEndpoint, "hyperdht/1": createHyperEndpoint }, transport: createTauriTransport(), pollIntervals: DHT_POLL_INTERVALS, localFetch: tauriLocalFetch, platform: "desktop", invoke,
+    node: { nativeTransports: { "iroh/1": createIrohEndpoint, "hyperdht/1": createHyperEndpoint }, nativeIrohRelays: true, transport: createTauriTransport(), pollIntervals: DHT_POLL_INTERVALS, localFetch: tauriLocalFetch, platform: "desktop", invoke,
       // Wake-ups go from Rust: push services answer without CORS, which a WebView would enforce (WISP 401 § Wake-up push).
       pushSend: (request) => invoke<number>("push_send", { url: request.url, headers: Object.entries(request.headers), body: toBase64Url(request.body) }),
       // A new profile gets its default Mainnet wallets; never under an e2e suite (desktopUnderTest).
@@ -277,6 +293,8 @@ export function createDesktopHost(version: string, calls: NativeCallSupport | nu
     openPubkyPassport: (url) => invoke("open_pubky_passport", { url }),
     // Ring's cookie session: its homeserver requests through Rust, which keeps the cookie WKWebView drops.
     pubkyCookieSession,
+    // "Keep this computer awake" (WISP 06): Rust holds the system's own sleep assertion, and it ends with the app.
+    keepAwake: (on) => invoke<boolean>("keep_awake", { on }),
     // WKWebView has no Web Share API; the system's share sheet is shown by Rust (macOS; elsewhere false: the page copies).
     shareText: (text, anchor) => invoke<boolean>("share_text", { text, anchor }),
     // WKWebView's readText() shows a "Paste" callout that needs a second click; Rust reads the text (main window only, bounded).

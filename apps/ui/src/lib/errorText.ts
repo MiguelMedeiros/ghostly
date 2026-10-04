@@ -228,6 +228,7 @@ const ENGINE: Partial<Record<EngineErrorCode, TranslationKey>> = {
   notYetConfirmed: "errors.engine.notYetConfirmed",
   couldNotVerify: "errors.engine.couldNotVerify",
   paymentTakenBack: "errors.engine.paymentTakenBack",
+  parkedSigned: "errors.engine.parkedSigned",
   ecashAlreadySpent: "errors.engine.ecashAlreadySpent",
   reviewedEcashSpent: "errors.engine.reviewedEcashSpent",
   lnurlExactly: "errors.engine.lnurlExactly",
@@ -243,6 +244,9 @@ const ENGINE: Partial<Record<EngineErrorCode, TranslationKey>> = {
   fedimintNotEnough: "errors.engine.fedimintNotEnough",
   fedimintRealOnTestnet: "errors.engine.fedimintRealOnTestnet",
   fedimintTestOnMainnet: "errors.engine.fedimintTestOnMainnet",
+  walletAway: "errors.engine.walletAway",
+  walletAwayUnnamed: "errors.engine.walletAwayUnnamed",
+  groupTurnUnconfirmed: "errors.engine.groupTurnUnconfirmed",
 };
 /** The values that are amounts: written again the app's way (the engine wrote them its own way). */
 const AMOUNTS = new Set(["amount", "fee", "min", "max"]);

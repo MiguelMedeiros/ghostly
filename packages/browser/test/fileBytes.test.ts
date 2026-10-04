@@ -144,6 +144,11 @@ describe("files on Desktop (Rust commands)", () => {
         case "file_bytes_truncate": files.set(key(a), files.get(key(a))!.slice(0, a.size)); return null;
         case "file_bytes_remove": files.delete(key(a)); return null;
         case "file_bytes_room": return 123;
+        case "file_bytes_usage": {
+          const mine = [...files].filter(([k]) => k.startsWith(`${a.space}/`)), staged = mine.filter(([k]) => k.startsWith(`${a.space}/save-`));
+          const sum = (list: typeof mine) => list.reduce((n, [, f]) => n + f.length, 0);
+          return { files: sum(mine) - sum(staged), count: mine.length - staged.length, staged: sum(staged) };
+        }
         case "file_bytes_save": return a.name === "keep.bin";
         default: return null;
       }
@@ -162,6 +167,10 @@ describe("files on Desktop (Rust commands)", () => {
     expect(await bytes.read("c-out-1", STEP - 1, 2)).toEqual(pattern(STEP - 1, 2));
     expect((await bytes.blob("c-out-1", "image/png"))!.size).toBe(source.size);
     expect(await bytes.room()).toBe(123);
+    // What the profile's files take, for Settings: the files, and the copies staged for a save apart.
+    await bytes.stage("save-backup-1", new Blob([new Uint8Array(10)]));
+    expect(await bytes.usage()).toEqual({ files: source.size, count: 1, staged: 10 });
+    expect(invoke).toHaveBeenCalledWith("file_bytes_usage", { space: expect.any(String) });
     expect(await bytes.save("c-out-1", "keep.bin")).toBe(true);
     expect(await bytes.save("c-out-1", "other")).toBe(false);
   });

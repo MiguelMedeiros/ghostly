@@ -408,6 +408,15 @@ export const servicesPlatform: ServicesPlatform | null = {
     // Files stored before received types were cleaned up may still carry the peer's type.
     return storedBlob(stored, safeBlobType(stored.blob?.type || stored.metadata?.mime || ""));
   },
+  async fileHeld(fileId) {
+    if (justSent.has(fileId)) return "here";
+    const stored = await fileStore.get(fileId);
+    if (!stored) return "gone";
+    if (stored.leftOut) return "left-out";
+    if (stored.blob) return "here";
+    const bytes = stored.bytes && await fileBytesOf(stored.bytes);
+    return bytes && (await bytes.size(fileId).catch(() => null)) !== null ? "here" : "gone";
+  },
   async streamFile(fileId) {
     const stored = await fileStore.get(fileId);
     const bytes = stored?.bytes && await fileBytesOf(stored.bytes);
@@ -444,5 +453,6 @@ export const servicesPlatform: ServicesPlatform | null = {
     };
   },
   setNetwork: ({ relays, turn, irohRelays, hyperdhtRelay, readRelays, pushRelay }) =>
-    engine.call("updateSettings", { settings: { relays, iceServers: turn?.urls ? [turn] : [], ...(irohRelays ? { irohRelays } : {}), ...(hyperdhtRelay !== undefined ? { hyperdhtRelay } : {}), ...(readRelays !== undefined ? { readRelays } : {}), ...(pushRelay !== undefined ? { pushRelay } : {}) } }),
+    // `turn` left out leaves the TURN server as it is (a switch saved on its own, say).
+    engine.call("updateSettings", { settings: { relays, ...(turn !== undefined ? { iceServers: turn?.urls ? [turn] : [] } : {}), ...(irohRelays ? { irohRelays } : {}), ...(hyperdhtRelay !== undefined ? { hyperdhtRelay } : {}), ...(readRelays !== undefined ? { readRelays } : {}), ...(pushRelay !== undefined ? { pushRelay } : {}) } }),
 };

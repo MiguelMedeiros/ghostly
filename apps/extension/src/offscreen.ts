@@ -1,5 +1,7 @@
 import { GhostlyHttpError, fromBase64, toBase64 } from "@ghostly/core";
-import { EngineServer, type EngineClientSink } from "@ghostly/browser/engine/server";
+import type { EngineServer, EngineClientSink } from "@ghostly/browser/engine/server";
+import { createPeerServer } from "@ghostly/browser/devices/peer";
+import type { PeerServer } from "@ghostly/browser/devices/linkOnly";
 import type { RpcRequest } from "@ghostly/browser/shared/rpc";
 import { setDatabaseName } from "@ghostly/browser/shared/idb";
 import { defaultWalletsAllowed } from "@ghostly/browser/platform/walletSetupSwitch";
@@ -27,18 +29,24 @@ setDatabaseName(databaseFor(profile));
  * The peer starts once it holds its profile's lock, released only when this document goes away: were a
  * replaced document still closing, the new one waits for it rather than run beside it on the same data.
  */
-let running: EngineServer | null = null;
-const server = new Promise<EngineServer>((resolve) => {
+let running: PeerServer | null = null;
+const server = new Promise<PeerServer>((resolve, reject) => {
   void navigator.locks.request(peerLockFor(profile), () => {
+    // The device state is read first (WISP 06 § The gate), at browser start with no page open too: a device that is
+    // not the active one gets device-link-only mode, which opens no peer database and starts no wallet.
     // Iroh through a relay (WISP 102), over WebSockets from this document; the wasm loads on first use.
     // A new profile gets its default Mainnet wallets; never in a test build or an automated browser.
-    running = new EngineServer({ platform: "extension", irohWeb: true, defaultWallets: defaultWalletsAllowed(() => import.meta.env.MODE === "e2e") });
-    // Only in `vite build --mode e2e` (test/attacks.mjs plays a malicious peer through it); gone from real builds.
-    if (import.meta.env.MODE === "e2e") Object.assign(globalThis, { __ghostly: running });
-    resolve(running);
+    void createPeerServer({ platform: "extension", irohWeb: true, defaultWallets: defaultWalletsAllowed(() => import.meta.env.MODE === "e2e") }).then((peer) => {
+      running = peer;
+      // Only in `vite build --mode e2e` (test/attacks.mjs plays a malicious peer through it); gone from real builds.
+      if (import.meta.env.MODE === "e2e") Object.assign(globalThis, { __ghostly: running });
+      resolve(peer);
+    }, reject);
     return new Promise<never>(() => {});
   });
 });
+// Nothing may be left to report a start that failed as unhandled: each caller below hears of it.
+server.catch(() => {});
 
 // Only the extension's own pages and its worker are heard, on a port or in a message (`fromOwnPage`).
 chrome.runtime.onConnect.addListener((port) => {
@@ -54,15 +62,19 @@ chrome.runtime.onConnect.addListener((port) => {
   port.onMessage.addListener((request: RpcRequest) => withPeer((s) => void s.handle(client, request)));
 });
 
+/** The engine, or null on a device that is not the active one for this profile: nothing there serves a contact's app. */
+const engineOf = (peer: PeerServer): EngineServer | null => (peer.gated ? null : (peer as EngineServer));
+
 /** Straight to the running peer; in order, once it starts, before that. */
-function withPeer(act: (peer: EngineServer) => void): void {
+function withPeer(act: (peer: PeerServer) => void): void {
   if (running) act(running);
-  else void server.then(act);
+  else void server.then(act, () => {});
 }
 
 async function handleHttpRequest(message: Extract<RuntimeMessage, { type: "http-request" }>): Promise<HttpRequestReply> {
   try {
-    const peer = await server;
+    const peer = engineOf(await server);
+    if (!peer) return { ok: false, code: "offline", message: "This profile is not active on this device" };
     await peer.ready;
     const response = await peer.node.request(message.peerPubKeyZ32, message.serviceId, {
       method: message.method,
@@ -80,7 +92,7 @@ async function handleHttpRequest(message: Extract<RuntimeMessage, { type: "http-
 
 let stopping: Promise<void> | null = null;
 /** Stops the peer, once: before the worker closes this document for a switch, or as the page goes away. */
-const stopPeer = () => (stopping ??= (running ? running.node.shutdown() : server.then((s) => s.node.shutdown())).catch(() => {}));
+const stopPeer = () => (stopping ??= (running ? running.stop() : server.then((s) => s.stop())).catch(() => {}));
 
 chrome.runtime.onMessage.addListener((message: RuntimeMessage, sender, sendResponse) => {
   if (message?.target !== "engine" || !fromOwnPage(sender)) return false;
@@ -88,7 +100,7 @@ chrome.runtime.onMessage.addListener((message: RuntimeMessage, sender, sendRespo
     // Which profile runs, and which one the registry names now: they differ once a page switched.
     // Answered too when the peer did not start (its database did not open): the pages connect and are told why
     // (`start-failed`). Before, no answer came and the page got "The Ghostly peer did not start" after five seconds.
-    void server.then((s) => s.ready.catch(() => {})).then(() => sendResponse({ profile, active: activeNamespace() } satisfies EngineStatus));
+    void server.then((s) => s.ready.catch(() => {}), () => {}).then(() => sendResponse({ profile, active: activeNamespace() } satisfies EngineStatus));
     return true;
   }
   if (message.type === "stop") {

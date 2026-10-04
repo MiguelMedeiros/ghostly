@@ -4,7 +4,7 @@ import { ENGINE_ERRORS, EngineError, engineError, engineText, parseEngineError, 
 // covers: wallet.cashu.mint.add
 
 /** A value of each kind a template names, as the engine writes it. */
-const SAMPLE: Record<string, string> = { host: "mint.example.com:3338", domain: "shop.example", chain: "mutinynet", network: "Testnet", amount: "1,000", fee: "12", min: "5", max: "500" };
+const SAMPLE: Record<string, string> = { wallet: "Bark", device: "Desktop", host: "mint.example.com:3338", domain: "shop.example", chain: "mutinynet", network: "Testnet", amount: "1,000", fee: "12", min: "5", max: "500" };
 const CODES = Object.keys(ENGINE_ERRORS) as EngineErrorCode[];
 const valuesOf = (code: EngineErrorCode) => Object.fromEntries([...ENGINE_ERRORS[code].matchAll(/\{(\w+)\}/g)].map(([, name]) => [name, SAMPLE[name]]));
 

@@ -1,0 +1,88 @@
+{
+  "packageId": "tools.ghostly.app",
+  "host": "app.ghostly.tools",
+  "name": "Ghostly",
+  "launcherName": "Ghostly",
+  "display": "standalone",
+  "themeColor": "#202C33",
+  "themeColorDark": "#202C33",
+  "navigationColor": "#111B21",
+  "navigationColorDark": "#111B21",
+  "navigationDividerColor": "#111B21",
+  "navigationDividerColorDark": "#111B21",
+  "backgroundColor": "#111B21",
+  "enableNotifications": true,
+  "startUrl": "/",
+  "iconUrl": "https://app.ghostly.tools/icon-512.png",
+  "maskableIconUrl": "https://app.ghostly.tools/icon-512.png",
+  "splashScreenFadeOutDuration": 300,
+  "signingKey": {
+    "path": "./upload.keystore",
+    "alias": "upload"
+  },
+  "appVersion": "1.0.3",
+  "appVersionCode": 1000003,
+  "shortcuts": [
+    {
+      "name": "New chat",
+      "shortName": "New chat",
+      "url": "https://app.ghostly.tools/#/new",
+      "chosenIconUrl": "https://app.ghostly.tools/icon-192.png"
+    },
+    {
+      "name": "Scan invite",
+      "shortName": "Scan",
+      "url": "https://app.ghostly.tools/#/scan",
+      "chosenIconUrl": "https://app.ghostly.tools/icon-192.png"
+    },
+    {
+      "name": "Wallets",
+      "shortName": "Wallets",
+      "url": "https://app.ghostly.tools/#/wallet",
+      "chosenIconUrl": "https://app.ghostly.tools/icon-192.png"
+    }
+  ],
+  "generatorApp": "bubblewrap-cli",
+  "webManifestUrl": "https://app.ghostly.tools/manifest.json",
+  "fallbackType": "customtabs",
+  "features": {},
+  "alphaDependencies": {
+    "enabled": false
+  },
+  "enableSiteSettingsShortcut": true,
+  "isChromeOSOnly": false,
+  "isMetaQuest": false,
+  "fullScopeUrl": "https://app.ghostly.tools/",
+  "minSdkVersion": 21,
+  "shareTarget": {
+    "action": "https://app.ghostly.tools/share-target",
+    "method": "POST",
+    "enctype": "multipart/form-data",
+    "params": {
+      "title": "title",
+      "text": "text",
+      "url": "url",
+      "files": [
+        {
+          "name": "files",
+          "accept": [
+            "*/*"
+          ]
+        }
+      ]
+    }
+  },
+  "orientation": "portrait",
+  "fingerprints": [],
+  "additionalTrustedOrigins": [],
+  "retainedBundles": [],
+  "protocolHandlers": [
+    {
+      "protocol": "web+ghostly",
+      "url": "https://app.ghostly.tools/#%s"
+    }
+  ],
+  "fileHandlers": [],
+  "launchHandlerClientMode": "",
+  "displayOverride": []
+}

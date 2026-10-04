@@ -1,10 +1,11 @@
 import { PROOF_ADAPTERS, proofCapability, type ProofAdapter } from "./peerProofs";
 import { IDENTITY_PROOF_CAPABILITY } from "./identityProofs";
 import { HOLD_CAPABILITY } from "./storeForward";
-import { fromBase64Url, randomBytes, toBase64Url, utf8Encode } from "./bytes";
+import { fromBase64Url, randomBytes, toBase64Url, toZ32, utf8Encode } from "./bytes";
 import { identityFromSeedB64, publicKeyFromZ32, sign, verify } from "./identity";
 import type { FrameChannel } from "./frames";
 import { rankTransports, type PairedTransport, type NativeBinding } from "./pairedTransports";
+import type { Signer } from "./signer";
 
 /** Experimental, opt-in profile. Ed25519 authenticates a transcript bound to WebRTC DTLS.
  * This is not a new cipher/key exchange, nor an audited WISP Final profile. */
@@ -23,7 +24,14 @@ export interface PairingState {
   transitionError?: string;
 }
 export interface PairingCredentials {
+  /** This side's participation seed. Not read when `signer` is given (a device link passes an empty one). */
   seedB64: string;
+  /**
+   * Signs in place of the seed (WISP 06 § Terms): a device link's participation key is the device signing key, which
+   * the app may hold no seed for. The session then names `signer.publicKey` as its key and signs its transcript
+   * through it. Absent, as in every chat and group: the seed signs, exactly as before.
+   */
+  signer?: Signer;
   peerKey?: string;
   requireSignedSignals?: boolean;
   verifiedPeerKey?: string;
@@ -121,7 +129,9 @@ export class PairedSession {
   state: PairingState = { status: "negotiating" };
   /** The peer said nothing more within `authTimeoutMs`: the connection carried nothing, which proves nothing about the peer. */
   authTimedOut = false;
+  /** The seed's identity; null when a signer signs. */
   private readonly identity;
+  private readonly signer?: Signer;
   private readonly offer: Offer;
   private readonly transport: PairedTransport;
   private preferred?: PairedTransport;
@@ -139,10 +149,11 @@ export class PairedSession {
   private timer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(private channel: FrameChannel, private options: PairedSessionOptions) {
-    this.identity = identityFromSeedB64(options.credentials.seedB64);
+    this.signer = options.credentials.signer;
+    this.identity = this.signer ? null : identityFromSeedB64(options.credentials.seedB64);
     this.transport = options.binding?.transport ?? "webrtc/1";
     this.offer = { t: "pair-offer", versions: [1], transports: options.transports ?? [this.transport], capabilities: ["chat/1", "signed-signal/1", ...(options.trustOnFirstUse ? ["tofu/1"] : []), ...(options.filesSupport ? ["files/2"] : []), ...(options.paymentsSupport && (options.cashuPaymentsSupport !== false || options.lightningPaymentsSupport !== false) ? ["payments/1"] : []), ...(options.paymentsSupport && options.cashuPaymentsSupport !== false ? ["payments-cashu/1"] : []), ...(options.paymentsSupport && options.lightningPaymentsSupport !== false ? ["payments-lightning/1"] : []), ...(options.arkPaymentsSupport && options.paymentsSupport ? ["payments-arkade/1"] : []), ...(options.usdtPaymentsSupport && options.paymentsSupport ? ["payments-usdt/1"] : []), ...(options.barkPaymentsSupport && options.paymentsSupport ? ["payments-bark/1"] : []), ...(options.transportSwitchSupport ? ["transport-switch/1"] : []), ...(options.holdSupport ? [HOLD_CAPABILITY] : []), ...(options.proofSupport ? PROOF_ADAPTERS.map(proofCapability) : []), ...(options.identitySupport ? [IDENTITY_PROOF_CAPABILITY] : []), ...(options.allowFallback ? ["transport-fallback/1"] : [])],
-      extensions: OFFER_EXTENSIONS, key: this.identity.pubKeyZ32, nonce: toBase64Url(randomBytes(32)) };
+      extensions: OFFER_EXTENSIONS, key: this.identity ? this.identity.pubKeyZ32 : toZ32(this.signer!.publicKey), nonce: toBase64Url(randomBytes(32)) };
   }
 
   supports(capability: "files/2" | "payments/1" | "payments-arkade/1" | "payments-usdt/1" | "payments-bark/1" | typeof HOLD_CAPABILITY): boolean { return this.state.status === "ready" && this.offer.capabilities.includes(capability) && !!this.peer?.capabilities.includes(capability); }
@@ -235,7 +246,13 @@ export class PairedSession {
       const hash = await crypto.subtle.digest("SHA-256", new Uint8Array(this.transcript));
       if (this.stopped) return;
       this.digest = Array.from(new Uint8Array(hash), b => b.toString(16).padStart(2, "0")).join("");
-      this.send({ t: "pair-proof", sig: toBase64Url(sign(this.transcript, this.identity.seed)) });
+      if (this.identity) this.send({ t: "pair-proof", sig: toBase64Url(sign(this.transcript, this.identity.seed)) });
+      else {
+        // A signer may sign outside this page's code (WebCrypto): the frames behind this one wait in the queue.
+        const sig = toBase64Url(await this.signer!.sign(this.transcript));
+        if (this.stopped) return;
+        this.send({ t: "pair-proof", sig });
+      }
     } else if (raw.t === "pair-proof") {
       if (!this.peer || !this.transcript || typeof raw.sig !== "string" || !SIG.test(raw.sig) ||
         !verify(fromBase64Url(raw.sig), this.transcript, publicKeyFromZ32(this.peer.key)))

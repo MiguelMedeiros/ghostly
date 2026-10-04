@@ -1,5 +1,5 @@
 import {
-  GroupSession, GROUP_EDIT_FRAME, GROUP_PIN_FRAME, GROUP_REACTION_FRAME, GROUP_REACTED_FRAME, GROUP_TYPING_FRAME, readReaction, groupMessageId, MAX_GROUP_CHAIN, GROUP_MEMBER_CAP, LEGACY_GROUP_MEMBERS, GROUP_VERSION_LARGE, GROUP_VERSION_HUBS, GROUP_READ_NOTE, KNOCK_TTL_MS, MEMBER_KEY, createIdentity, decodeGroupEntryLink, encodeGroupEntryLink, identityFromSeedB64,
+  GroupSession, GROUP_EDIT_FRAME, GROUP_PIN_FRAME, GROUP_REACTION_FRAME, GROUP_REACTED_FRAME, GROUP_TYPING_FRAME, readReaction, MAX_GROUP_CHAIN, GROUP_MEMBER_CAP, LEGACY_GROUP_MEMBERS, GROUP_VERSION_LARGE, GROUP_VERSION_HUBS, GROUP_VERSION_SIGNALS, GROUP_SIGNAL_FRAME, GROUP_READ_NOTE, KNOCK_TTL_MS, MEMBER_KEY, createIdentity, decodeGroupEntryLink, encodeGroupEntryLink, identityFromSeedB64,
   EXPECT_PEER_MS, presenceSeenAt, groupName, knockIdentity, knockRecords, mentionsMember, pinIsNewer, receivedTimestamp, mergeKnocks, readKnocks, rosterHas, verifyCommitSignature, decodeCommunityLink,
   type GhostRecord, type PeerPresence, type PollIntervals, type GroupEdit, type GroupIncomingEdit, type GroupMention, type WireReply, type StatusCard, type WireReaction, type WirePin, type GroupPinFrame, type GroupCommit, type GroupEdgeFrame, type GroupEntryLink, type GroupMetaChange, type GroupState, type Identity, type Roster, type TypingActivity,
 } from "@ghostly/core";
@@ -11,6 +11,7 @@ import { traceJoin } from "./joinTrace";
 import { COMMUNITY_TIMINGS, Communities, dialedKey, metaLines, type CommunityTimings } from "./community";
 import { MESH_HUB_TIMINGS, MeshHubs, removalEpoch, type MeshHubTimings } from "./meshHubs";
 import { GroupTypings } from "./groupTyping";
+import { MeshSignals } from "./meshSignals";
 
 /** What the engine gives the groups: its links, its storage and its state emitter. */
 /**
@@ -24,6 +25,23 @@ export function otherEndSeen(presence: PeerPresence | undefined, dataLink: strin
 }
 
 export interface GroupsHost {
+  /**
+   * The lowest group sequence number this profile sends at (WISP 06 § Raised counters): raised after a forced takeover
+   * or a restore, 0 before. Absent: 0.
+   */
+  seqFloor?(): number;
+  /**
+   * Whether this device may sign commits and take door duty for the group (WISP 06 § Forced takeover): off after a
+   * forced takeover or a restore until the person turns on "Manage groups from this device" there. Absent: on.
+   */
+  adminWork?(groupId: string): boolean;
+  /**
+   * Whether a good turn read under 60 seconds old says this device is the active one (WISP 06 § When a device checks),
+   * before a group commit or door duty: two devices that both think they are active must never commit after one parent.
+   * A stale read is read again, waited for a bounded time; with `wait: false` not at all (the read goes on, and counts
+   * for the next ask). Absent: yes.
+   */
+  adminTurn?(groupId: string, options?: { wait?: boolean }): Promise<boolean>;
   /** Sends a frame on a paired link (a contact chat or an edge). Throws when it cannot. */
   sendOnLink(linkId: string, frame: object): void;
   /** The link is open and both sides announced groups (`version` 2: community groups too). */
@@ -60,13 +78,21 @@ export interface GroupsHost {
   linkBack?(linkId: string): boolean;
   /**
    * Pkarr, for the knocks under a link's knock identity (and a community's beacon and lobbies).
-   * `background`: a periodic look that can wait, spending only part of the relays' budget. `door`: the community
-   * door's look at its knock bell (`PkarrRequestOptions.door`).
+   * `background`: a periodic look that can wait, spending only part of the relays' budget. `door`: a community hub's
+   * own records (the knock bell it reads as the door, its lobby, the beacon) and a member's request in a hub's lobby
+   * (`PkarrRequestOptions.door`).
    */
-  publish(identity: Identity, records: GhostRecord[], background?: boolean): Promise<void>;
+  publish(identity: Identity, records: GhostRecord[], background?: boolean, door?: boolean): Promise<void>;
   resolve(pubKeyZ32: string, background?: boolean, door?: boolean): Promise<GhostRecord[] | null>;
   /** The other end of this link is due any moment: look fast for it a while (`LinkSession.expectPeer`). */
   expectPeer?(linkId: string): void;
+  /**
+   * A packet of the member at the other end of this edge that a member carried here (WISP 9xx § Signaling through
+   * members): true when it is theirs and news to the edge, which reads it at once (`CarriedTransport.accept`).
+   */
+  signalIn?(linkId: string, payload: Uint8Array, direct?: boolean): boolean;
+  /** My newest packet for this edge while it is down, to hand to a member that may pass it on (`CarriedTransport.latest`). */
+  edgeSignal?(linkId: string): Uint8Array | null;
   /** Resolves false when the message was there already: nothing new came (void: a host that does not say). */
   storeMessage(message: StoredMessage): Promise<boolean | void>;
   /**
@@ -237,6 +263,8 @@ const ENTRY_RETRY_MS = 30_000;
  * its side as long (unless its edge to the admin is up first): the admin says over it what it commits meanwhile.
  */
 const ENTRY_LINGER_MS = 20_000;
+/** A joiner's entry session, kept for its edges' signaling, goes this long after the admin's edge is up: frames on their way still arrive. */
+const ENTRY_RELEASE_MS = 2_000;
 /** Taken out of a group, my edges stay this long: as a hub, the commit that removed me is passed on over them. */
 const REMOVED_LINGER_MS = 15_000;
 /** How long the tombstone of a group I left waits for the admin to hear it. */
@@ -369,11 +397,14 @@ export class Groups {
   private readonly removedAt = new Map<string, number>();
   /** Who is typing in each private group, and this side's word there (WISP 9xx · Group Mesh § Typing). */
   private readonly typings: GroupTypings;
+  /** Edge signaling through members (WISP 9xx · Group Mesh § Signaling through members). */
+  private readonly signals: MeshSignals;
 
   constructor(private readonly host: GroupsHost, private readonly store: GroupStore = db, private readonly timings: EntryTimings = ENTRY_TIMINGS, communityTimings: CommunityTimings = COMMUNITY_TIMINGS, random?: () => number, hubTimings: MeshHubTimings = MESH_HUB_TIMINGS) {
     this.communities = new Communities(host, store, communityTimings, random);
     this.hubs = new MeshHubs(host, { stored: id => this.stored.get(id), save: group => { if (this.stored.get(group.id) === group) void this.store.putGroup(group).catch(() => {}); } }, hubTimings);
     this.typings = new GroupTypings(host);
+    this.signals = new MeshSignals(host, { session: id => this.sessions.get(id), stored: id => this.stored.get(id), now: () => this.now() });
   }
 
   async load(): Promise<void> {
@@ -795,6 +826,7 @@ export class Groups {
     this.downSince.delete(groupId);
     this.hereHeard.delete(groupId);
     this.hereActed.delete(groupId);
+    this.signals.forget(groupId);
     for (const linkId of [...this.host.edges(groupId).values(), ...this.host.entries(groupId).values()]) await this.host.closeEdge(linkId);
     await this.store.deleteGroup(groupId);
     this.host.historyGone?.(groupId);
@@ -952,6 +984,27 @@ export class Groups {
     set.add(linkId);
   }
 
+  /** The member at the other end of an entry session (the joiner, on the admin's side) or of a chat an invitation went over. */
+  private linkMember(groupId: string, linkId: string): string | undefined {
+    for (const [peer, id] of this.host.entries(groupId)) if (id === linkId) return peer;
+    return Object.entries(this.stored.get(groupId)?.contacts ?? {}).find(([, id]) => id === linkId)?.[0];
+  }
+
+  /**
+   * My packet for the edge to `to`, handed to links that reach that member or may pass it on (WISP 9xx · Group Mesh
+   * § Signaling through members): how many took it, and whether one of them surely reaches that member. None in a
+   * community, whose members keep no edges with each other.
+   */
+  carrySignal(groupId: string, to: string, payload: Uint8Array): { taken: number; sure: boolean } {
+    return this.isCommunity(groupId) ? { taken: 0, sure: false } : this.signals.carry(groupId, to, payload);
+  }
+  /** My packet for the edge to `to`, over that edge itself while it is up (`MeshSignals.direct`). */
+  directSignal(groupId: string, to: string, linkId: string, payload: Uint8Array): boolean {
+    return !this.isCommunity(groupId) && this.signals.direct(groupId, to, linkId, payload);
+  }
+  /** A packet a member carried for the edge to `from` before that edge was started, once. */
+  takeSignal(groupId: string, from: string): Uint8Array | undefined { return this.signals.take(groupId, from); }
+
   private joinStage(group: StoredGroup): GroupJoinStage {
     const invitation = group.invitation!;
     if (invitation.admin) return "admitted";
@@ -968,6 +1021,7 @@ export class Groups {
     const kept = this.lingering.get(groupId);
     if (!kept) return;
     this.lingering.delete(groupId);
+    this.signals.release(groupId, kept.linkId);
     if ([...this.host.entries(groupId).values()].includes(kept.linkId)) await this.host.closeEdge(kept.linkId);
   }
 
@@ -1037,6 +1091,8 @@ export class Groups {
     if (!/^[A-Za-z0-9_-]{22}$/.test(g)) return;
     // Community admission runs on entry sessions only; a mesh app never sees these (it announces 1 only).
     if (this.isCommunity(g) || frame.v === 2) { if (this.isCommunity(g)) await this.communities.handleEntryFrame(linkId, frame); return; }
+    // An edge's packet, carried over the entry session or the chat an admission ran on (WISP 9xx § Signaling through members).
+    if (frame.t === GROUP_SIGNAL_FRAME) { this.signals.received(linkId, this.linkMember(g, linkId), frame); return; }
     switch (frame.t) {
       case "group-invite": {
         if (typeof frame.admin !== "string" || !MEMBER_KEY.test(frame.admin) || typeof frame.name !== "string") return;
@@ -1131,7 +1187,12 @@ export class Groups {
         if (!viaLink) await this.sessions.get(g)!.setNick(group.invitation.admin, this.host.contactName(linkId));
         await this.event(g, "joined", `You joined. ${GROUP_READ_NOTE}`, Date.now(), joined.state.chain.length - 1);
         if (viaLink) traceJoin(g, "welcome.received");
-        if (viaLink) { this.lastKnock.delete(g); this.knocked.delete(g); }
+        if (viaLink) {
+          this.lastKnock.delete(g); this.knocked.delete(g);
+          // The entry session reaches the admin, which reaches every member: while it is kept (above), the edges about
+          // to open signal through it too (WISP 9xx § Signaling through members).
+          if (this.host.linkReady(linkId, GROUP_VERSION_SIGNALS)) this.signals.keep(g, linkId);
+        }
         this.reconcileEdges(g);
         this.host.emit();
         return;
@@ -1192,6 +1253,11 @@ export class Groups {
     // Someone the chain took out, on an edge that is still there for a moment (a hub keeps it to pass on the commit that
     // tells it): nothing it says over it is taken, as nothing but that commit is said to it (`edgeAllows`).
     if (session?.status === "active" && this.tookOut(session, peerKey)) return;
+    if (frame && typeof frame === "object" && (frame as { t?: unknown }).t === GROUP_SIGNAL_FRAME) {
+      const edge = this.host.edges(groupId).get(peerKey);
+      if (edge && (frame as { g?: unknown }).g === groupId) this.signals.received(edge, peerKey, frame);
+      return;
+    }
     if (session?.status === "active" && frame && typeof frame === "object" && (frame as { t?: unknown }).t === "group-here") { this.heardHere(groupId, session, peerKey, frame as Record<string, unknown>); return; }
     if (session?.status === "active" && frame && typeof frame === "object" && (frame as { t?: unknown }).t === "group-reach") {
       const group = this.stored.get(groupId);
@@ -1275,9 +1341,16 @@ export class Groups {
     if (large || legacy) void this.store.putGroup(group).catch(() => {});
     try { this.host.sendOnLink(linkId, session.syncFrame(this.askOf(groupId, session, peerKey))); } catch { return; /* it closed again */ }
     // The edge carries everything from here on: the entry session of my admission, and the admin's note of mine, go.
-    if (this.lingering.get(groupId)?.admin === peerKey) void this.endLinger(groupId).catch(() => {});
+    // Frames for the other edges may still be on their way over it: a session kept for signaling goes a moment later.
+    const kept = this.lingering.get(groupId);
+    if (kept?.admin === peerKey) {
+      if (this.signals.keptEntry(groupId) === kept.linkId) setTimeout(() => { if (this.lingering.get(groupId) === kept) void this.endLinger(groupId).catch(() => {}); }, ENTRY_RELEASE_MS);
+      else void this.endLinger(groupId).catch(() => {});
+    }
     this.welcomed.get(groupId)?.delete(peerKey);
     this.announceHere(groupId, session, peerKey);
+    // This member may reach the ones whose edges are still down: my packets for those go through it.
+    this.signals.edgeReady(groupId, session, peerKey, linkId);
     this.host.edgeUp?.(groupId, peerKey);
     this.host.emit();
   }
@@ -1395,6 +1468,8 @@ export class Groups {
     if (reconcile) this.lastReconcile = now;
     for (const [groupId, session] of this.sessions) {
       if (session.status !== "active" || this.stored.get(groupId)?.left) continue;
+      // What I wrote while behind on the chain, for the members let in meanwhile (WISP 9xx § Catch-up).
+      void session.reseal().catch(() => {});
       this.farewellsTick(groupId, session, now);
       if (reconcile) {
         const edges = this.host.edges(groupId);
@@ -1450,6 +1525,9 @@ export class Groups {
   private attach(state: GroupState): void {
     const session: GroupSession = new GroupSession(state, {
       clock: () => this.now(),
+      seqFloor: () => this.host.seqFloor?.() ?? 0,
+      adminWork: () => this.host.adminWork?.(state.id) ?? true,
+      adminTurn: () => this.host.adminTurn?.(state.id) ?? Promise.resolve(true),
       save: async next => {
         const group = this.stored.get(state.id);
         if (!group) return;
@@ -1466,13 +1544,15 @@ export class Groups {
           // still open (`welcomed`): it must not wait for the edge to learn that the roster moved.
           const entry = frame.t === "group-commit" ? this.welcomed.get(state.id)?.get(to) : undefined;
           if (entry) { try { this.host.sendOnLink(entry, frame); } catch { /* closed: the edge's sync carries it */ } }
-          return;
+          return false;
         }
-        // Mine, taken by an edge (the first time, or again in a catch-up): what `--wait sent` waits for.
+        // Mine, taken by an edge (the first time, or again in a catch-up): what `--wait sent` waits for. A frame said
+        // again (I was behind when I wrote it) counts for the message it first was.
         if ((frame.t === "group-msg" || frame.t === GROUP_EDIT_FRAME) && frame.s === session.myKey) {
-          const id = groupMessageId(frame.s, frame.e, frame.n);
+          const id = session.messageIdOf(frame);
           this.frames.add(state.id, frame.t === GROUP_EDIT_FRAME ? editKey(id, frame.v) : id);
         }
+        return true;
       },
       message: async m => {
         // The sender picks the time: the store keeps it beside the row and places the row where it comes (`arrivalKey`),

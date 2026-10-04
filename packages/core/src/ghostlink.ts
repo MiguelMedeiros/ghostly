@@ -1,10 +1,11 @@
 import { DhtDelivery, type DeliveryMode, type DhtDeliveryState, type DhtDeliveryView , type DhtPacketFacts } from "./dhtDelivery";
+import type { DhtFileAnnouncement, DhtFileOffer } from "./dhtFiles";
 import { PairedFiles } from "./pairedFiles";
 import { TransportSwitch, allowedTransports, type SwitchPlan } from "./transportSwitch";
 import { proofHash, type ProofAdapter, type ProofScope } from "./peerProofs";
 import { IDENTITY_MAX_FRAME, type IdentityScope } from "./identityProofs";
 import { sha256 } from "@noble/hashes/sha2.js";
-import { identityFromSeedB64 } from "./identity";
+import { identityFromSeedB64, publicKeyFromZ32 } from "./identity";
 import { TRANSPORTS, irohRelayUrl, rankTransports, relayedTransports, transportOrder, type NativeEndpoint, type NativeBinding, type NativeTransport, type PairedTransport, type TransportDescriptors } from "./pairedTransports";
 import { dialDescriptors, encodePacketTransports, parsePacketTransports } from "./capsRecord";
 import { sanitizeNick } from "./text";
@@ -13,8 +14,9 @@ import { parseLinkPreview, type LinkPreview } from "./linkPreview";
 import { pairedReplyAuthor, readReply, wireReply, type WireReply } from "./replies";
 import { readForwarded } from "./forwards";
 import { readStatusCard, type StatusCard } from "./statusCards";
-import { randomBytes, toBase64Url, utf8Encode } from "./bytes";
-import { fitSignedPairedSignal, verifyPairedSignal } from "./pairedSignal";
+import { randomBytes, toBase64Url, toZ32, utf8Encode } from "./bytes";
+import { fitSignedPairedSignal, fitSignedPairedSignalWith, verifyPairedSignal } from "./pairedSignal";
+import { deviceFrameCapability, signDeviceTransports, unsignedDeviceTransports, verifyDeviceTransports, type DeviceCapability, type DeviceFrame } from "./deviceLink";
 import { parseRtcSignal, type SignalSight } from "./signal";
 import { PairedSession, type PairingState, type PairingCredentials, type PaymentMethodName } from "./pairedSession";
 import { DataLink, type DataLinkState } from "./datalink";
@@ -57,6 +59,7 @@ import { traceLink } from "./linkTrace";
 import { isDiscoveryBudgetError, type PkarrTransport } from "./transport";
 import { GROUP_VERSION_LARGE } from "./groupCommits";
 import { GROUP_VERSION_HUBS } from "./groupHubs";
+import { GROUP_VERSION_SIGNALS } from "./groupSignals";
 import { PairingTracker, type PairingProgress, type PairingRole } from "./pairingProgress";
 
 /**
@@ -330,6 +333,11 @@ export interface GhostLinkEvents {
   onPeerNick?(nick: string | null): void;
   onMessageReceipt?(id: string): void | Promise<void>;
   /**
+   * A file's offer the contact said on the DHT floor (WISP 403 § Files), already checked: its bubble takes its place
+   * now, and its bytes come on the live session under the same wire id. Without this event it is dropped (receipted).
+   */
+  onFileAnnounced?(file: DhtFileAnnouncement & { timestamp: number; reply?: { i: string }; forwarded?: number }, packet: DhtPacketFacts): void | Promise<void>;
+  /**
    * What the contact's app says about held items (`hold/1`): whether it accepts them (from the handshake, or
    * a `paired-hold` frame on the session) and the highest sequence it has held for this side, if it said.
    */
@@ -407,6 +415,18 @@ export interface GhostLinkEvents {
   onGroupFrame?(frame: Record<string, unknown>): void | Promise<void>;
   /** Group frames can flow (both announced), or no longer can. */
   onGroupsSupport?(supported: boolean): void;
+  /**
+   * A frame between two of a person's devices (WISP 06, `deviceLink.ts`), on a device link only, and only while both
+   * ends announced the capability its type travels under.
+   */
+  onDeviceFrame?(frame: DeviceFrame): void | Promise<void>;
+  /** The device capabilities both ends announced on the open session changed: what is agreed now. */
+  onDeviceCapabilities?(agreed: DeviceCapability[]): void;
+  /**
+   * A session was refused because the other end authenticated with another participation key than the one pinned.
+   * A device's one-time enrollment link (WISP 06 § Adding a device) tells the person that a second device tried its code.
+   */
+  onPeerKeyRefused?(): void;
 }
 
 const PAYMENT_METHODS: PaymentMethodName[] = ["cashu", "lightning", "arkade", "usdt", "bark", "bitcoin", "fedimint", "spark"];
@@ -465,6 +485,11 @@ export interface GhostLinkOptions {
   buttonsSupport?: boolean;
   /** Offer `wake/1` on paired sessions: this app wakes a contact's closed web app with a push (1:1 chats, not group edges). */
   wakeSupport?: boolean;
+  /**
+   * A device link (WISP 06): the capabilities it announces on the open session, and so the device frames it carries
+   * (`sendDeviceFrame`, `onDeviceFrame`). Never given for a chat or a group's link, which drop every device frame.
+   */
+  deviceCapabilities?: readonly DeviceCapability[];
   dht?: {
     state?: DhtDeliveryState; save(state: DhtDeliveryState): Promise<void>; pollMs?: number;
     /** A chat already paired, started again: its first control envelope waits this long (`DhtDelivery`). */
@@ -475,6 +500,8 @@ export interface GhostLinkOptions {
     peerCapsRev?(rev: number): void;
     /** Whether the contact's capability record accepts DHT text; absent or unknown: it does. */
     peerAcceptsText?(): boolean;
+    /** Whether the contact's capability record takes a file's offer on the floor (`dht-file/1`); absent: it does not. */
+    peerAcceptsFile?(): boolean;
     /** This side's reactions the contact has not confirmed, oldest first: they ride on the envelopes. */
     reactions?(): readonly WireReaction[];
   };
@@ -696,6 +723,19 @@ export class GhostLink {
   private peerPacketSeen = 0;
   /** A live session ended without this side ending it (`peerLost`): until when the contact's next new packet is news. */
   private lostUntil = 0;
+  /** Counts the signals a signer was asked to sign: only the latest one goes out. */
+  private signalTurn = 0;
+  /** A signal ready to go: on the live session during a switch to WebRTC, in this side's packet otherwise. */
+  private signalOut(signed: string | null, report: (error: unknown) => void): void {
+    // During migration the authenticated channel already reaches the peer.
+    // Carry signed ICE signaling there instead of waiting for DHT polling.
+    if (this.switcher?.pending?.choices.includes("webrtc/1") && this.channel && this.paired?.state.status === "ready") {
+      if (signed) this.channel.send(JSON.stringify({ t: "paired-rtc", signal: signed }));
+      return;
+    }
+    void this.session.setRtcSignal(signed, !!this.options.params.profile).catch(report);
+  }
+
   /** This app is going away (`depart`): no more dials. */
   private leaving = false;
   /** `resume` still to act on: the first dial after the start goes to it, and a native one is knocked on. */
@@ -705,6 +745,8 @@ export class GhostLink {
 
   constructor(options: GhostLinkOptions) {
     this.options = options;
+    // A link that signs through a signer (a device link) has no seed for what a chat signs beside its session.
+    if (options.pairing?.credentials.signer && (options.dht || options.params.deliveryMode === "dht")) throw new Error("A link that signs through a signer has no DHT delivery");
     this.deliveryMode = options.params.deliveryMode ?? "stream";
     // A DHT-only invite pairs through its mailbox, not through these stages.
     this.tracker = options.pairingProgress && options.pairing && !options.pairing.credentials.peerKey && this.deliveryMode !== "dht"
@@ -715,7 +757,7 @@ export class GhostLink {
     this.dht = options.params.profile && options.pairing && options.dht ? new DhtDelivery({
       params: options.params, mode: this.deliveryMode, state: options.dht.state, credentials: options.pairing.credentials, transport: options.transport,
       save: options.dht.save, pollMs: options.dht.pollMs, firstControlAfterMs: options.dht.firstControlAfterMs,
-      capsRev: options.dht.capsRev, peerCapsRev: options.dht.peerCapsRev, peerAcceptsText: options.dht.peerAcceptsText,
+      capsRev: options.dht.capsRev, peerCapsRev: options.dht.peerCapsRev, peerAcceptsText: options.dht.peerAcceptsText, peerAcceptsFile: options.dht.peerAcceptsFile,
       // Reactions ride on the envelopes off the live session (WISP 403 § Reactions).
       ...(options.reactionsSupport && {
         reactions: options.dht.reactions,
@@ -737,7 +779,9 @@ export class GhostLink {
       },
       message: async (message, packet) => {
         // An edit (WISP 403 § Edits) is not a message of its own: it changes one, on an app that takes edits.
-        const { edit, ...text } = message;
+        const { edit, file, ...text } = message;
+        // A file's offer (WISP 403 § Files) is its bubble, never a text with its name.
+        if (file) { await options.events?.onFileAnnounced?.({ ...file, timestamp: message.timestamp, ...(message.reply && { reply: message.reply }), ...(message.forwarded && { forwarded: message.forwarded }) }, packet); return; }
         // Its text holds as a live edit's must (never blank): one that does not is dropped, never shown as a text.
         if (edit && options.editSupport) { if (validEditMessage(message.text)) await options.events?.onMessageEdit?.({ id: edit.i, e: edit.e, ts: message.timestamp, m: message.text }); return; }
         await options.events?.onMessage?.({ ...text, via: "pkarr", packet });
@@ -845,16 +889,23 @@ export class GhostLink {
             const kind = (JSON.parse(signal) as { t?: string }).t;
             if (kind === "o") this.tracker.offerSent(); else if (kind === "a") this.tracker.answerSent();
           }
+          const signer = options.params.profile ? options.pairing?.credentials.signer : undefined;
+          if (signer) {
+            // A device link (WISP 06): its signer signs asynchronously. Signals go out in the order they were made,
+            // and one that a later signal (or a cleared one) overtook while it was being signed is dropped.
+            const turn = ++this.signalTurn;
+            if (signal) {
+              void fitSignedPairedSignalWith(signal, signer, this.myPubKeyZ32, options.params.peerPubKeyZ32, candidate => this.session.fitsRtcSignal(candidate))
+                .then(signed => { if (turn === this.signalTurn && !this.stopped) this.signalOut(signed, report); })
+                // What the seed's path throws to the data link: the attempt ends, and the next one starts afresh.
+                .catch(error => { report(error); if (turn === this.signalTurn && !this.stopped) this.dataLink.close(); });
+              return;
+            }
+          }
           const signed = signal && options.params.profile && options.pairing
             ? fitSignedPairedSignal(signal, options.pairing.credentials.seedB64, this.myPubKeyZ32,
               options.params.peerPubKeyZ32, candidate => this.session.fitsRtcSignal(candidate)) : signal;
-          // During migration the authenticated channel already reaches the peer.
-          // Carry signed ICE signaling there instead of waiting for DHT polling.
-          if (this.switcher?.pending?.choices.includes("webrtc/1") && this.channel && this.paired?.state.status === "ready") {
-            if (signed) this.channel.send(JSON.stringify({ t: "paired-rtc", signal: signed }));
-            return;
-          }
-          void this.session.setRtcSignal(signed, !!options.params.profile).catch(report);
+          this.signalOut(signed, report);
         } catch (error) { report(error); throw error; }
       },
       // An offer to a saved contact: its answer may be a while (the contact may still hold this app's old session),
@@ -1603,12 +1654,43 @@ export class GhostLink {
   /** A group link's `_tr` in its packet: what this side runs and how to dial it, once it runs a native endpoint there. */
   private publishPacketTransports(): void {
     if (!this.options.packetTransports) return;
-    this.session.setTransports(this.endpoints.size ? encodePacketTransports(this.availableTransports, this.localDescriptors()) : null);
+    const value = this.endpoints.size ? encodePacketTransports(this.availableTransports, this.localDescriptors()) : null;
+    const signer = this.options.pairing?.credentials.signer;
+    if (!signer) { this.session.setTransports(value); return; }
+    // A device link (WISP 06): signed with the device signing key, so a holder of `D` cannot write one in its place.
+    // The latest value goes out; one overtaken while it was being signed is dropped.
+    const turn = ++this.transportsTurn;
+    if (value === null) { this.session.setTransports(null); return; }
+    void signDeviceTransports(value, signer, this.myPubKeyZ32, this.options.params.peerPubKeyZ32)
+      .then(signed => { if (turn === this.transportsTurn && !this.stopped) this.session.setTransports(signed); })
+      .catch(() => {});
   }
+  /** Counts the `_tr` values a signer was asked to sign (a device link): only the latest goes out. */
+  private transportsTurn = 0;
 
   /** The member's packet said which transports its app runs on this group link, and how to dial them. */
   private peerPacketTransports(value: string): void {
     if (!this.options.packetTransports || this.stopped) return;
+    const credentials = this.options.pairing?.credentials;
+    if (credentials?.signer && !credentials.peerKey && this.options.pairing?.trustOnFirstUse) {
+      // An enrollment's one-time link on the inviter's side (WISP 06 § Adding a device), before a key authenticated:
+      // there is no key yet to check the signature against. The value only says where to dial; the session that
+      // answers there still has to authenticate. Whoever can write this packet holds the code, and could be the first
+      // key to authenticate anyway. Without it, an inviter whose key dials first had nothing to dial, and one with
+      // WebRTC never learned that the new device has none (a Linux Desktop, 2026-10-03).
+      const unsigned = unsignedDeviceTransports(value);
+      if (!unsigned) { traceLink(this.myPubKeyZ32, "packet-transports-refused", {}); return; }
+      value = unsigned;
+    } else if (credentials?.signer) {
+      // A device link: only a value signed by the device signing key it pinned. Anything else (unsigned, or signed by
+      // another key: a holder of `D` writing in the other device's packet) is dropped, and dials nothing.
+      const verified = credentials.peerKey ? verifyDeviceTransports(value, this.options.params.peerPubKeyZ32, this.myPubKeyZ32, publicKeyFromZ32(credentials.peerKey)) : null;
+      if (!verified) { traceLink(this.myPubKeyZ32, "packet-transports-refused", {}); return; }
+      value = verified;
+      // Newly said by the device itself: whatever an earlier value made fail waits no longer.
+      this.autoConnectFailures = 0; this.lastAutoConnectAt = 0;
+      this.nativeFailures.clear(); this.demotedUntil.clear();
+    }
     const said = parsePacketTransports(value);
     if (!said) return;
     const transports = said.transports as PairedTransport[], descriptors = dialDescriptors(said.descriptors);
@@ -2058,6 +2140,25 @@ export class GhostLink {
     return this.session.sendMessage(trimmed, timestamp);
   }
 
+  /**
+   * Says a file's offer on the DHT floor while the chat is not live (WISP 403 § Files), so the contact's chat shows its
+   * bubble in its place; the bytes go once live. An error when it cannot go on the floor now: it waits for live then.
+   */
+  async announceFile(file: DhtFileOffer, timestamp: number, reply?: WireReply, forwarded?: number): Promise<string | null> {
+    const error = this.fileAnnounceError(file, timestamp, reply, forwarded);
+    return error ?? this.dht!.announceFile(file, timestamp, reply?.i, forwarded);
+  }
+  /** Why a file's offer cannot go on the DHT floor now (`announceFile`), or null when it can. */
+  fileAnnounceError(file: DhtFileOffer, timestamp: number, reply?: WireReply, forwarded?: number): string | null {
+    if (!this.options.params.profile || this.textDelivery !== "dht" || !this.dht) return "Files go when you are live";
+    if (this.dht.view.inviteTaken) return INVITE_TAKEN;
+    return this.dht.fileError(file, timestamp, reply?.i, forwarded);
+  }
+  /** What awaits its receipt on the DHT floor now, if anything does. */
+  get dhtPendingId(): string | undefined { return this.dht?.pendingId; }
+  /** What went on the DHT floor under this id needs no more retries there (it went live, or was withdrawn). */
+  async settleDht(id: string): Promise<void> { await this.dht?.acknowledge(id); }
+
   /** Publishes a `_call` signal; a connected peer also gets it right away over the data link. */
   async setCallSignal(signal: string | null): Promise<void> {
     if (this.options.params.profile) {
@@ -2281,10 +2382,15 @@ export class GhostLink {
     const paired = this.paired;
     const context = await proofHash(JSON.stringify(["ghostly-conversation", 1, [this.myPubKeyZ32, this.options.params.peerPubKeyZ32].sort()]));
     if (this.paired !== paired || !this.peerProofSupport) throw new Error("Connection changed");
-    return { subject: identityFromSeedB64(credentials.seedB64).pubKeyZ32, audience: credentials.peerKey, context, session: paired.proofSession };
+    return { subject: credentials.signer ? toZ32(credentials.signer.publicKey) : identityFromSeedB64(credentials.seedB64).pubKeyZ32, audience: credentials.peerKey, context, session: paired.proofSession };
   }
 
   get proofSession(): string | undefined { return this.peerProofSupport ? this.paired?.proofSession : undefined; }
+  /**
+   * The transcript hash of the session that is open and ready (WISP 401), lower-case hex, whatever proofs it offers:
+   * what a device's enrollment (WISP 06) signs and derives its digits from. Undefined while no session is ready.
+   */
+  get sessionTranscriptHash(): string | undefined { return this.paired?.state.status === "ready" ? this.paired.proofSession || undefined : undefined; }
 
   /** Identity proofs can be exchanged now: both offers carry `identity-proof/1` and the channel is open. */
   get identitySupport(): boolean { return !!this.options.events?.onIdentityProof && !!this.paired?.identitySupport && this.isDataLinkOpen; }
@@ -2295,7 +2401,7 @@ export class GhostLink {
     if (!credentials?.peerKey || !this.paired || !this.identitySupport) throw new Error("Connect to this contact first");
     const conversation = [this.myPubKeyZ32, this.options.params.peerPubKeyZ32].sort();
     const context = Array.from(sha256(utf8Encode(JSON.stringify(["ghostly-conversation", 1, conversation]))), b => b.toString(16).padStart(2, "0")).join("");
-    return { subject: identityFromSeedB64(credentials.seedB64).pubKeyZ32, audience: credentials.peerKey, context, session: this.paired.proofSession };
+    return { subject: credentials.signer ? toZ32(credentials.signer.publicKey) : identityFromSeedB64(credentials.seedB64).pubKeyZ32, audience: credentials.peerKey, context, session: this.paired.proofSession };
   }
 
   sendIdentityProof(frame: object): void {
@@ -2405,7 +2511,20 @@ export class GhostLink {
     if (this.options.pinSupport) offered.push(PIN_CAPABILITY);
     if (this.options.statusCardSupport) offered.push(STATUS_CARD_CAPABILITY);
     if (this.options.buttonsSupport) offered.push(BUTTONS_CAPABILITY);
+    if (this.options.deviceCapabilities) offered.push(...this.options.deviceCapabilities);
     return offered;
+  }
+  /** Both ends announced this device capability on the open session (a device link only). */
+  supportsDevice(capability: DeviceCapability): boolean {
+    return !!this.options.deviceCapabilities?.includes(capability) && this.isDataLinkOpen && this.sessionCapabilities.agreed(capability);
+  }
+  /** A frame to the person's other device. Only while both ends announced the capability its type travels under; never queued. */
+  sendDeviceFrame(frame: DeviceFrame): void {
+    const capability = deviceFrameCapability(frame.t);
+    if (!capability || !this.supportsDevice(capability) || !this.channel) throw new Error("This device is not connected");
+    const data = JSON.stringify(frame);
+    if (data.length > LIMITS.maxControlFrameBytes) throw new Error("Device frame too large");
+    this.channel.send(data);
   }
   /** Both sides offer `calls/1` on the open session: call signals can flow. Calls need a live session. */
   get supportsCalls(): boolean { return this.isDataLinkOpen && this.sessionCapabilities.agreed(CALLS_CAPABILITY); }
@@ -2561,6 +2680,8 @@ export class GhostLink {
     if (changed.includes(EDIT_CAPABILITY)) this.options.events?.onEditSupport?.(this.supportsEdits);
     if (changed.includes(PIN_CAPABILITY)) this.options.events?.onPinSupport?.(this.supportsPins);
     if (changed.includes(WAKE_SESSION_CAPABILITY)) this.options.events?.onWakeSupport?.(this.supportsWake);
+    const devices = this.options.deviceCapabilities;
+    if (devices && changed.some(capability => (devices as readonly string[]).includes(capability))) this.options.events?.onDeviceCapabilities?.(devices.filter(capability => this.supportsDevice(capability)));
     this.emitPairingState();
   }
   /** Both sides announced groups on this session and it is open. */
@@ -2577,7 +2698,7 @@ export class GhostLink {
   /** Older apps drop this frame (it carries no id): to them this contact has no groups. */
   private sendGroupsSupport(): void {
     if (!this.options.groupsSupport || !this.options.params.profile || !this.channel || !this.isDataLinkOpen) return;
-    try { this.channel.send(JSON.stringify({ t: "paired-groups", v: [1, 2, GROUP_VERSION_LARGE, GROUP_VERSION_HUBS] })); } catch { /* the next session announces it */ }
+    try { this.channel.send(JSON.stringify({ t: "paired-groups", v: [1, 2, GROUP_VERSION_LARGE, GROUP_VERSION_HUBS, GROUP_VERSION_SIGNALS] })); } catch { /* the next session announces it */ }
   }
   /** Older apps drop this frame (it carries no id) and keep using the handshake offer. */
   private sendPaymentMethods(): void {
@@ -2779,6 +2900,8 @@ export class GhostLink {
         // A connection dialled in on a pinned chat says nothing until it authenticated: one refused leaves no trace in the state.
         onState: () => { if (this.channel === channel && (!this.unproven(channel) || paired.state.status === "ready")) this.emitPairingState(); },
         onFailure: () => {
+          // Another participation key than the one pinned: a device's one-time enrollment link says so (WISP 06).
+          if (paired.state.keyMismatch) this.options.events?.onPeerKeyRefused?.();
           // Dialled in and unproven, or a connection that carried nothing in time: neither says anything about the contact.
           if (this.unproven(channel) || paired.authTimedOut) {
             if (paired.state.keyMismatch) this.dht?.foreignKeySeen("stream");
@@ -2937,7 +3060,8 @@ export class GhostLink {
             return;
           }
           if (frame?.t === SESSION_CAPABILITIES_FRAME) {
-            const changed = this.sessionCapabilities.receive(frame);
+            const devices = this.options.deviceCapabilities;
+            const changed = devices ? this.sessionCapabilities.receive(frame, [...KNOWN_SESSION_CAPABILITIES, ...devices]) : this.sessionCapabilities.receive(frame);
             if (changed) this.sessionCapabilitiesChanged(changed);
             return;
           }
@@ -3029,6 +3153,14 @@ export class GhostLink {
           if (typeof frame?.t === "string" && frame.t.startsWith("group-")) {
             if (this.groupsSupport) await this.options.events?.onGroupFrame?.(frame);
             return;
+          }
+          // A device link's own frames (WISP 06): handed on only under a capability both ends announced.
+          if (this.options.deviceCapabilities) {
+            const capability = deviceFrameCapability(frame?.t);
+            if (capability) {
+              if (this.supportsDevice(capability)) await this.options.events?.onDeviceFrame?.(frame as DeviceFrame);
+              return;
+            }
           }
           if (frame?.t === "paired-hold") {
             // The contact's latest word on held items; an older app never sends it and keeps its handshake offer.
@@ -3236,6 +3368,11 @@ export class GhostLink {
   /** A link made just now for a peer that is about to show up (a group's entry session): look fast for a while. */
   expectPeer(): void {
     this.session.expectPeer();
+  }
+
+  /** The peer's packet is at hand without a relay (a member of the group carried it, `CarriedTransport`): read it now. */
+  look(): void {
+    this.session.lookNow();
   }
 
   /**
