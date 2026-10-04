@@ -4,13 +4,12 @@ import { fromBase64Url, handoffContextProof, toBase64Url } from "@ghostly/core";
  * The password proof of a pull (WISP 06 § Authorizing a handoff): the taking device proves the profile's lock password
  * to the active one without sending it, and the active one keeps a verifier, never the password.
  *
- * The WISP names SPAKE2+ (RFC 9383) as a candidate and lets a reviewer prefer another augmented exchange with the same
- * binding and limits. This build uses OPAQUE (RFC 9807), through `@serenity-kit/opaque`, which is the Rust crate
+ * The exchange is OPAQUE (RFC 9807), as the WISP says, through `@serenity-kit/opaque`, which is the Rust crate
  * `opaque-ke` (an earlier version of which NCC Group audited in 2021) compiled to WebAssembly, with ristretto255 and Argon2id. Why not SPAKE2+: no
  * maintained, reviewed JavaScript implementation of it exists, and writing one is writing a protocol from primitives.
  * OPAQUE is augmented as SPAKE2+ is (a stolen verifier still costs a dictionary attack), its three messages are the
  * WISP's three `handoff-pake` frames, and the password is stretched with Argon2id on the taker (memory-hard) where the
- * WISP had PBKDF2-SHA256.
+ * first draft had PBKDF2-SHA256.
  *
  * The verifier is the server's setup and the registration record, made on the active device while the person typed
  * the password (Add a device, a password changed). It moves with the profile: it lives in the profile's settings.
