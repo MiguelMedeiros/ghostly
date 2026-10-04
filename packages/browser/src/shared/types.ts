@@ -1582,6 +1582,12 @@ export interface EngineState {
    */
   limited?: true;
   /**
+   * Why limited mode is on, when it is a restored copy (WISP 06 § A backup restored where a device set exists): `checking`,
+   * the turn is read every 30 seconds to learn whether another device runs the profile; `removed`, the read found the
+   * device set moved after a removal, and only the person can start the copy as a profile of its own.
+   */
+  restoreCheck?: "checking" | "removed";
+  /**
    * Whose push subscription `settings.wake` is, in a profile on several devices (WISP 06 § Push and the phone): `here`,
    * this device's own; `away`, another device's, given to contacts because this device has none of its own (the page
    * neither replaces nor turns off what is not its own). Absent in a profile on one device, or when nobody said.

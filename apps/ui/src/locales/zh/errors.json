@@ -47,6 +47,7 @@
     "fedimintRealOnTestnet": "这个联盟保管真实的比特币：它属于 Mainnet Fedimint 钱包",
     "fedimintTestOnMainnet": "这个联盟在测试网络 {{chain}} 上：它属于 Testnet Fedimint 钱包",
     "feeAboveLimit": "手续费超出你的上限",
+    "groupTurnUnconfirmed": "无法确认哪台设备处于活动状态，因此群组未被更改。请稍后再试。",
     "hostTimedOut": "{{host}} 没有及时回应",
     "hostUnreachable": "无法连接 {{host}}",
     "invalidMaxFee": "最高手续费无效",

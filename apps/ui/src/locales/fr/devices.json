@@ -128,6 +128,9 @@
     "bannerHint": "Les messages que vous écrivez attendent jusque-là.",
     "hint": "Vérifiez votre connexion.",
     "info": "Avant de se connecter, Ghostly vérifie qu'aucun autre appareil n'a pris ce profil. Démarrer quand même l'ouvre ici hors ligne : vous pouvez lire et écrire, et rien n'est envoyé, payé ni reçu tant que la vérification n'a pas fonctionné. Ghostly réessaie toutes les 30 secondes.",
+    "restoreBanner": "Copie restaurée, hors ligne pour l'instant",
+    "restoreBannerHint": "Ghostly vérifie si votre profil fonctionne sur un autre appareil.",
+    "restoreInfo": "Cette sauvegarde date d'avant que votre profil ait d'autres appareils, et Ghostly n'a pas pu les vérifier lors de la restauration. Tant qu'il ne le peut pas, rien n'est envoyé, payé ni reçu, et aucun groupe n'est modifié. Si un autre appareil utilise votre profil, cette copie passe en attente ; sinon, elle démarre d'elle-même. Ghostly réessaie toutes les 30 secondes.",
     "startAnyway": "Démarrer quand même",
     "title": "Impossible de vérifier quel appareil est actif",
     "tryAgain": "Réessayer"

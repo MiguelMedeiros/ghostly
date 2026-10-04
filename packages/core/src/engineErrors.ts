@@ -72,6 +72,8 @@ export const ENGINE_ERRORS = {
   fedimintTestOnMainnet: "This federation is on {chain}, a test network: it belongs in a Testnet Fedimint wallet",
   walletAway: "{wallet} can't be used here. Use it on {device}.",
   walletAwayUnnamed: "{wallet} can't be used here: its home is another device.",
+  // One profile on several devices (WISP 06).
+  groupTurnUnconfirmed: "Can't check which device is active, so the group was not changed. Try again in a moment.",
 } as const;
 
 export type EngineErrorCode = keyof typeof ENGINE_ERRORS;
