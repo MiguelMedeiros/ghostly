@@ -45,6 +45,20 @@ async function setDeviceState(page: Page, state: "standby" | null): Promise<void
 /** What the profile keeps in this browser's local storage: its sessions, settings and keys. */
 const profileStorage = (page: Page) => page.evaluate(() => JSON.stringify(Object.entries(localStorage).filter(([key]) => key.startsWith("ghostly_")).sort()));
 
+/** The profile's storage once it has stopped changing (a receipt or a read mark can still land just after a message shows). */
+async function settledStorage(page: Page): Promise<string> {
+  // Unchanged for 3 s in a row (a receipt usually lands within a second or two of the message showing).
+  let last = await profileStorage(page);
+  let still = 0;
+  for (let i = 0; i < 40 && still < 6; i++) {
+    await page.waitForTimeout(500);
+    const now = await profileStorage(page);
+    still = now === last ? still + 1 : 0;
+    last = now;
+  }
+  return last;
+}
+
 test("a profile on standby on this device opens no peer database, asks no relay and shows the standby screen; active again, it is as it was", { tag: ["@feature:devices.gate", "@feature:devices.standby-screen"] }, async ({ peer }) => {
   const [alice, bob] = await Promise.all([peer("alice"), peer("bob")]);
   await link(alice, bob);
@@ -54,7 +68,8 @@ test("a profile on standby on this device opens no peer database, asks no relay 
 
   // Another device took the profile: this one is written `standby`, and reloads into the gate.
   await recordOpens(alice.context);
-  const kept = await profileStorage(page);
+  // The contact's receipt for that message can land a moment after it shows: snapshot once nothing moves.
+  const kept = await settledStorage(page);
   await setDeviceState(page, "standby");
   const asked: string[] = [];
   const count = (request: { url(): string }) => { if (LocalRelay.pattern.test(request.url())) asked.push(request.url()); };
