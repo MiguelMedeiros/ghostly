@@ -69,6 +69,7 @@ import {
   type TurnNetwork,
   turnKeys,
   RelayTransport,
+  CarriedTransport,
   createChatInvite,
   createIdentity,
   decodeInviteCode,
@@ -283,6 +284,8 @@ interface LiveLink {
   entryDone?: boolean;
   /** A group's edge whose session in this run is kept as its `edgeLiveSince` (`noteEdgeLive`). */
   edgeSessionNoted?: boolean;
+  /** A private group's edge: its Pkarr transport, which members carry packets for (WISP 9xx § Signaling through members). */
+  carried?: CarriedTransport;
   /** When this chat last took a native listener from an idle live session (`ensureNativeEndpoints`), by transport. */
   nativeTakenAt?: Partial<Record<NativeTransport, number>>;
 }
@@ -1119,6 +1122,8 @@ export class GhostlyNode implements EngineImplementation {
     publish: (identity, records, background) => this.groupTransport.publish(identity, records, { background }),
     resolve: async (pubKeyZ32, background, door) => (await this.groupTransport.resolve(pubKeyZ32, { background, door }))?.records ?? null,
     expectPeer: linkId => this.links.get(linkId)?.link?.expectPeer(),
+    signalIn: (linkId, payload, direct) => !!this.links.get(linkId)?.carried?.accept(payload, direct),
+    edgeSignal: linkId => this.links.get(linkId)?.carried?.latest() ?? null,
     openEdge: (state, peer, expectPeer) => this.openEdge(state, peer, expectPeer),
     closeEdge: linkId => this.closeGroupLink(linkId),
     entryDone: linkId => {
@@ -1812,7 +1817,7 @@ export class GhostlyNode implements EngineImplementation {
     for (const queue of this.editQueues.values()) queue.stop();
     this.groupEdits.stop();
     this.cardEdits.stop();
-    await Promise.allSettled([...this.links.values()].map(async (live) => { await live.link?.stop(!quiet); await live.caps?.stop(); }));
+    await Promise.allSettled([...this.links.values()].map(async (live) => { live.carried?.stop(); await live.link?.stop(!quiet); await live.caps?.stop(); }));
   }
 
   /**
@@ -2507,6 +2512,7 @@ export class GhostlyNode implements EngineImplementation {
     this.editQueues.get(linkId)?.stop();
     this.editQueues.delete(linkId);
     this.editBuffer.forget(linkId);
+    live.carried?.stop();
     void live.link?.stop(true); void live.caps?.stop();
     this.links.delete(linkId);
     this.identities.forget(linkId);
@@ -4798,6 +4804,7 @@ export class GhostlyNode implements EngineImplementation {
     if (wasOnline && !this.networkOn) {
       await Promise.allSettled(
         [...this.links.values()].map(async (live) => {
+          live.carried?.stop();
           await live.link?.stop(true); await live.caps?.stop(); live.caps = undefined;
           live.link = null;
           live.status = "offline";
@@ -5530,6 +5537,7 @@ export class GhostlyNode implements EngineImplementation {
     }
     // An entry session is over once the admission is (or was given up): nobody waits on it, so it goes
     // without a last packet saying so, which would only spend two of the relays' requests at a busy moment.
+    live.carried?.stop();
     await live.link?.stop(!live.stored.groupEntry); await live.caps?.stop();
     await db.deleteLink(linkId);
   }
@@ -5614,6 +5622,16 @@ export class GhostlyNode implements EngineImplementation {
     const resumeOn: PairedTransport | undefined = native
       ? TRANSPORTS.find(t => t !== "webrtc/1" && t in this.nativeFactories && !!stored.peerTransports?.includes(t)) : "webrtc/1";
     live.pairing = { status: "connecting" };
+    // A private group's edge signals through members that reach both ends, beside the relays (WISP 9xx § Signaling through members).
+    live.carried?.stop();
+    live.carried = entry || this.groups.isCommunityGroup(group) ? undefined : new CarriedTransport(this.groupTransport, live.myPubKeyZ32, stored.peerPubKeyZ32, {
+      carry: payload => this.groups.carrySignal(group, peer, payload),
+      open: () => !!live.link?.isDataLinkOpen,
+      look: () => live.link?.look(),
+      direct: payload => this.groups.directSignal(group, peer, linkId, payload),
+    });
+    const waiting = live.carried && this.groups.takeSignal(group, peer);
+    if (waiting) live.carried!.accept(waiting);
     live.link = new GhostLink({
       ownRecords: true,
       // An edge carries payments with its member (WISP 9xx § Payments), as a chat does; an entry session does not.
@@ -5635,7 +5653,7 @@ export class GhostlyNode implements EngineImplementation {
       // Pinned in advance to the member the roster names: there is nothing to trust on first use.
       pairing: { credentials: { seedB64: stored.participationSeed!, peerKey: peer, requireSignedSignals: true, verifiedPeerKey: peer },
         pinPeer: async key => { if (key !== peer) throw new Error("Not the member this edge belongs to"); }, trustOnFirstUse: false },
-      transport: this.groupTransport,
+      transport: live.carried ?? this.groupTransport,
       nick: !entry && this.quietEdge(stored) ? undefined : this.sharedNick,
       // A private group's edges look at Pkarr more slowly as it grows: one edge per member (WISP 9xx § Cost per member).
       pollIntervals: entry || this.groups.isCommunityGroup(group) ? this.pollIntervals : meshEdgeIntervals(this.pollIntervals, () => this.groups.meshSize(group)),
@@ -5659,6 +5677,7 @@ export class GhostlyNode implements EngineImplementation {
         onGroupsSupport: supported => {
           if (supported) traceJoin(group, "link.ready", { role });
           if (!entry) this.noteEdgeLive(linkId, supported);
+          if (supported) live.carried?.linkReady();
           if (supported) {
             if (entry) this.groups.entryReady(group, linkId, peer);
             else if (!member()) this.groups.edgeReady(group, peer, linkId);

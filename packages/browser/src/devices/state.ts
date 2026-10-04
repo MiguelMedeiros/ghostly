@@ -312,6 +312,13 @@ export interface DeviceRecord {
    * counts. Stored before its tombstone leaves the device, so a reload while it settles resumes it.
    */
   ownSet?: OwnSetPlan;
+  /**
+   * The peer database name of the profile this namespace holds, on a record a handoff installed under a staged name
+   * (`installDeviceRecord`): the profile's own name before the registry pointed it here. Kept for the life of the
+   * record, and carried to the next staged name, so an app that finds the profile with no pointer and no record under
+   * its own name points it here again (WISP 06 § Installing the staged state). Never in a backup or a handoff.
+   */
+  home?: string;
 }
 
 /** A device set of its own, made by a `moving` device whose remover is gone (WISP 06 § Removing a device). */
@@ -537,6 +544,7 @@ export function parseDeviceRecord(value: unknown): DeviceRecord {
     for (const grant of r.unfinishedGrants as Partial<UnfinishedGrant>[]) if (!grant || !bytes(grant.key) || !text(grant.name) || !count(grant.at, Number.MAX_SAFE_INTEGER)) return bad("an unfinished grant");
   }
   if (r.copy !== undefined && r.copy !== "frozen" && r.copy !== "restored") return bad("copy");
+  if (!optional(r.home, (v): v is string => text(v) && /^ghostly(?:_[A-Za-z0-9_.-]{1,100})?$/.test(v))) return bad("home");
   if (r.verifier !== undefined) {
     const v = r.verifier as { v?: unknown; setup?: unknown; record?: unknown } | null;
     if (!v || typeof v !== "object" || v.v !== 1 || !bytes(v.setup) || !bytes(v.record)) return bad("verifier");
