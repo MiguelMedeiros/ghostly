@@ -1,5 +1,5 @@
 import {
-  GroupSession, GROUP_EDIT_FRAME, GROUP_PIN_FRAME, GROUP_REACTION_FRAME, GROUP_REACTED_FRAME, GROUP_TYPING_FRAME, readReaction, groupMessageId, MAX_GROUP_CHAIN, GROUP_MEMBER_CAP, LEGACY_GROUP_MEMBERS, GROUP_VERSION_LARGE, GROUP_VERSION_HUBS, GROUP_VERSION_SIGNALS, GROUP_SIGNAL_FRAME, GROUP_READ_NOTE, KNOCK_TTL_MS, MEMBER_KEY, createIdentity, decodeGroupEntryLink, encodeGroupEntryLink, identityFromSeedB64,
+  GroupSession, GROUP_EDIT_FRAME, GROUP_PIN_FRAME, GROUP_REACTION_FRAME, GROUP_REACTED_FRAME, GROUP_TYPING_FRAME, readReaction, MAX_GROUP_CHAIN, GROUP_MEMBER_CAP, LEGACY_GROUP_MEMBERS, GROUP_VERSION_LARGE, GROUP_VERSION_HUBS, GROUP_VERSION_SIGNALS, GROUP_SIGNAL_FRAME, GROUP_READ_NOTE, KNOCK_TTL_MS, MEMBER_KEY, createIdentity, decodeGroupEntryLink, encodeGroupEntryLink, identityFromSeedB64,
   EXPECT_PEER_MS, presenceSeenAt, groupName, knockIdentity, knockRecords, mentionsMember, pinIsNewer, receivedTimestamp, mergeKnocks, readKnocks, rosterHas, verifyCommitSignature, decodeCommunityLink,
   type GhostRecord, type PeerPresence, type PollIntervals, type GroupEdit, type GroupIncomingEdit, type GroupMention, type WireReply, type StatusCard, type WireReaction, type WirePin, type GroupPinFrame, type GroupCommit, type GroupEdgeFrame, type GroupEntryLink, type GroupMetaChange, type GroupState, type Identity, type Roster, type TypingActivity,
 } from "@ghostly/core";
@@ -1468,6 +1468,8 @@ export class Groups {
     if (reconcile) this.lastReconcile = now;
     for (const [groupId, session] of this.sessions) {
       if (session.status !== "active" || this.stored.get(groupId)?.left) continue;
+      // What I wrote while behind on the chain, for the members let in meanwhile (WISP 9xx § Catch-up).
+      void session.reseal().catch(() => {});
       this.farewellsTick(groupId, session, now);
       if (reconcile) {
         const edges = this.host.edges(groupId);
@@ -1542,13 +1544,15 @@ export class Groups {
           // still open (`welcomed`): it must not wait for the edge to learn that the roster moved.
           const entry = frame.t === "group-commit" ? this.welcomed.get(state.id)?.get(to) : undefined;
           if (entry) { try { this.host.sendOnLink(entry, frame); } catch { /* closed: the edge's sync carries it */ } }
-          return;
+          return false;
         }
-        // Mine, taken by an edge (the first time, or again in a catch-up): what `--wait sent` waits for.
+        // Mine, taken by an edge (the first time, or again in a catch-up): what `--wait sent` waits for. A frame said
+        // again (I was behind when I wrote it) counts for the message it first was.
         if ((frame.t === "group-msg" || frame.t === GROUP_EDIT_FRAME) && frame.s === session.myKey) {
-          const id = groupMessageId(frame.s, frame.e, frame.n);
+          const id = session.messageIdOf(frame);
           this.frames.add(state.id, frame.t === GROUP_EDIT_FRAME ? editKey(id, frame.v) : id);
         }
+        return true;
       },
       message: async m => {
         // The sender picks the time: the store keeps it beside the row and places the row where it comes (`arrivalKey`),
