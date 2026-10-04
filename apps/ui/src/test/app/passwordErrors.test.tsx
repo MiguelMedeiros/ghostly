@@ -104,6 +104,31 @@ describe("a refused lock password in Settings", () => {
     expect(screen.queryByTestId("settings-password-new-error")).toBeNull();
     expect(stored()).toBeNull();
   }, 30_000);
+
+  it("pressed before the engine said whether there is a device set: judged by its answer, not by the stricter rule", async () => {
+    const result = renderApp(<LockScreenProvider><UpdateProvider><Routes><Route path="/settings" element={<Settings />} /></Routes></UpdateProvider></LockScreenProvider>, { route: "/settings" });
+    // An engine still starting: nothing answers until the test lets it.
+    const waiting: (() => void)[] = [];
+    result.engine.on("deviceSet", () => new Promise((resolve) => waiting.push(() => resolve({ state: "single", devices: [] }))));
+    const { user } = result;
+    await user.click(screen.getByTestId("settings-lock"));
+    await user.type(screen.getByTestId("settings-password-new"), "boo");
+    await user.type(screen.getByTestId("settings-password-confirm"), "boo");
+    await user.click(screen.getByRole("button", { name: "Set password" }));
+    await waitFor(() => expect(waiting.length).toBeGreaterThan(0));
+    expect(screen.queryByTestId("settings-password-new-error")).toBeNull();
+    await act(async () => { for (const answer of waiting.splice(0)) answer(); });
+
+    expect(await screen.findByTestId("settings-notice-title")).toHaveTextContent("Password not set");
+    expectRefused(screen.getByTestId("settings-password-new"), "settings-password-new-error", "Password must be at least 4 characters");
+    // Long enough for a profile on one device, though short of a set's 8: set.
+    await user.clear(screen.getByTestId("settings-password-new"));
+    await user.type(screen.getByTestId("settings-password-new"), "spooky");
+    await user.clear(screen.getByTestId("settings-password-confirm"));
+    await user.type(screen.getByTestId("settings-password-confirm"), "spooky");
+    await user.click(screen.getByRole("button", { name: "Set password" }));
+    await waitFor(() => expect(stored()).not.toBeNull());
+  }, 30_000);
 });
 
 describe("a refused lock password in Add a device", () => {

@@ -201,9 +201,16 @@ export function Settings() {
   const hasPassword = !!settings.lockScreen.passwordHash;
   // A profile on several devices (WISP 06) keeps a lock password of 8 characters or more: it cannot be shortened,
   // turned off or removed here. One with no device set keeps today's rule.
-  // Until the answer comes (or when the call fails), as if there were one: the stricter rule.
   const devices = useDeviceSet(0);
-  const deviceSet = devices === null || devices.state !== "single";
+  /**
+   * Whether the profile has a device set, for a password action: asked now when the page's read has not answered yet
+   * (an engine still starting), so a profile on one device is not held to the rule of a set. When the call fails, as
+   * if there were one: the stricter rule.
+   */
+  const hasDeviceSet = async (): Promise<boolean> => {
+    if (devices) return devices.state !== "single";
+    return engine.call("deviceSet").then((view) => view.state !== "single", () => true);
+  };
   // The push address contacts hold is another device's (WISP 06 § Push and the phone): this one is not woken by it.
   const engineState = useEngineState();
   const wakeAway = engineState?.wakeOwner === "away" && !!engineState.settings.wake;
@@ -234,7 +241,7 @@ export function Settings() {
       return;
     }
 
-    if (lockEnabled && deviceSet) {
+    if (lockEnabled && (await hasDeviceSet())) {
       notice.show(t("devices.password.keep"));
       return;
     }
@@ -259,6 +266,7 @@ export function Settings() {
     setPasswordError(null);
     setPasswordBusy(true);
     try {
+      const deviceSet = await hasDeviceSet();
       // The current one first: nothing changes for someone who does not know it.
       if (hasPassword && !(await verifyPassword(currentPassword, settings.lockScreen.passwordHash!))) {
         refusePassword("current", t("settings.incorrectPassword"), title);
@@ -297,13 +305,13 @@ export function Settings() {
 
   const handleRemovePassword = async () => {
     const title = t("settings.passwordNotRemoved");
-    if (deviceSet) {
-      notice.show(t("devices.password.keep"), { title });
-      return;
-    }
     setPasswordError(null);
     setPasswordBusy(true);
     try {
+      if (await hasDeviceSet()) {
+        notice.show(t("devices.password.keep"), { title });
+        return;
+      }
       if (hasPassword && !(await verifyPassword(currentPassword, settings.lockScreen.passwordHash!))) {
         refusePassword("current", t("settings.incorrectPassword"), title);
         return;
