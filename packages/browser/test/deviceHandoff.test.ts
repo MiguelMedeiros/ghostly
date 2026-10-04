@@ -1094,6 +1094,76 @@ describe("crash recovery (WISP 06 § Installing the staged state)", () => {
     expect(w.storage.dropped).toEqual(["ghostly"]);
   });
 
+  /** B, `taking` under the staged name with the release, as the page that starts after the install finds it. */
+  async function installedTaker(w: World): Promise<void> {
+    const release = { turn: N + 1, to: B, h: toBase64Url(randomBytes(32)), s: toBase64Url(randomBytes(64)) };
+    w.storage.pointer = "ghostly_stage9";
+    w.takerRecords.record = { ...w.takerRecords.record, profile: "ghostly_stage9" };
+    await w.takerRecords.move("taking", { handoff: { role: "taking", step: "installed", id: "x".repeat(22), peer: A, from: N, staging: "ghostly_stage9", old: "ghostly", release, at: Date.now() } });
+  }
+
+  it("B, `taking`, a take that throws: not the end of it; it takes again and starts", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"], shouldAdvanceTime: true });
+    const w = world();
+    await installedTaker(w);
+    let n = 0;
+    const start = w.takeOutcome;
+    w.takeOutcome = () => { if (++n < 3) throw new Error("The turn was read too long ago to raise it: read again"); return start(); };
+    await reloadTaker(w);
+    // The screens follow the take while it runs: the handler is not held up by it.
+    expect(w.taker.view()?.step).toBe("settling");
+    await vi.advanceTimersByTimeAsync(11_000);
+    await until(() => w.reloads === 1);
+    expect(w.takes).toHaveLength(3);
+    expect(w.storage.dropped).toEqual(["ghostly"]);
+  });
+
+  it("B, `taking`, no settled turn within 2 minutes: Can't check which device is active, with Try again, which takes again", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"], shouldAdvanceTime: true });
+    const w = world();
+    await installedTaker(w);
+    const start = w.takeOutcome;
+    w.takeOutcome = () => ({ kind: "wait", read: {} }) as unknown as TurnOutcome;
+    await reloadTaker(w);
+    await vi.advanceTimersByTimeAsync(HANDOFF_TIMINGS.settleMs + 6_000);
+    await until(() => w.taker.view()?.step === "failed");
+    expect(w.taker.view()).toMatchObject({ role: "taker", step: "failed", failure: "settle" });
+    // It stopped asking, and is still `taking`: the release is its own.
+    const asked = w.takes.length;
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(w.takes).toHaveLength(asked);
+    expect(w.takerRecords.record.state).toBe("taking");
+    expect(w.reloads).toBe(0);
+    // Not a cancel: nothing is undone.
+    await w.taker.cancel();
+    expect(w.taker.view()?.failure).toBe("settle");
+    // Try again: the take again, and this time the turn settles.
+    w.takeOutcome = start;
+    await w.taker.settle();
+    await until(() => w.reloads === 1);
+    expect(w.storage.dropped).toEqual(["ghostly"]);
+  });
+
+  it("B, `taking`, a take that never answers: the wait still ends at 2 minutes; the take's late answer settles the device", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"], shouldAdvanceTime: true });
+    const w = world();
+    await installedTaker(w);
+    let answer: (outcome: TurnOutcome) => void = () => {};
+    const takerPorts = () => (w.taker as unknown as { ports: TakerPorts }).ports;
+    w.taker.stop();
+    w.taker = w.makeTaker();
+    takerPorts().take = (release, turn) => { w.takes.push({ release, turn }); return new Promise<TurnOutcome>((resolve) => { answer = resolve; }); };
+    await w.taker.resume();
+    await vi.advanceTimersByTimeAsync(HANDOFF_TIMINGS.settleMs + 1_000);
+    await until(() => w.taker.view()?.failure === "settle");
+    // Try again waits for the take the keeper is still working on: it asks no second one.
+    await w.taker.settle();
+    expect(w.takes).toHaveLength(1);
+    answer(w.takeOutcome()!);
+    await until(() => w.reloads === 1);
+    expect(w.taker.view()?.step).toBe("done");
+  });
+
   it("B verified and reloaded before any release reached it: the staged state is kept, it asks again, A sends the same release, B installs", async () => {
     const w = world();
     const file = w.profile.add("f1", bytesOf(5_000));

@@ -127,6 +127,10 @@ function StandbyHandoff({ gate }: { gate: DeviceGateView }) {
       {view?.step === "offer" && <div className={PANEL}><HandoffOffer view={view} /></div>}
       {view && view.step !== "offer" && <div className={PANEL}><HandoffProgress view={view} onCancel={() => void engine.call("deviceHandoffCancel")} /></div>}
       {!view && gate.state === "taking" && <p data-testid="handoff-line" className="text-sm text-text-secondary">{t("devices.handoff.step.settling")}</p>}
+      {/* Installed, and the turn could not be checked within 2 minutes: Try again checks it again. */}
+      {gate.state === "taking" && view?.step === "failed" && view.failure === "settle" && (
+        <Actions><button type="button" data-testid="handoff-settle-retry" onClick={() => void engine.call("deviceHandoffSettle").catch(() => {})} className={SCREEN_BUTTON}>{t("devices.handoff.tryAgain")}</button></Actions>
+      )}
       {/* After a move that failed, the same button starts it again: the files already copied are not sent twice. */}
       {useHere && <Actions><button type="button" data-testid="handoff-use-here" onClick={() => setAsking(true)} className={SCREEN_BUTTON}>{view?.step === "failed" ? t("devices.handoff.tryAgain") : t("devices.handoff.useHere")}</button></Actions>}
       {asking && <UseHereDialog device={device} onClose={() => setAsking(false)} onStarted={() => {}} />}

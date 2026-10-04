@@ -66,6 +66,7 @@
       "payment": "Un pagamento è ancora in corso. Riprova tra un momento.",
       "refused": "{{device}} non permette a questo dispositivo di prendere il profilo.",
       "room": "Non c'è abbastanza spazio su questo dispositivo.",
+      "settle": "Impossibile verificare quale dispositivo è attivo. Controlla la connessione, poi riprova.",
       "stalled": "Il trasferimento si è fermato: {{device}} non ha risposto per 2 minuti. Non è cambiato nulla, e i file già copiati restano.",
       "turn": "Un altro dispositivo ha preso il controllo. Questo dispositivo è in attesa.",
       "unreachable": "Impossibile raggiungere {{device}}. Deve essere acceso, con Ghostly aperto.",

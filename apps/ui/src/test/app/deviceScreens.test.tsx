@@ -228,6 +228,20 @@ describe("the standby screen", () => {
     expect(screen.getByTestId("handoff-use-here-dialog")).toBeInTheDocument();
   });
 
+  it("a device that took the profile and could not check which device is active: the line read out, and Try again checks again", async () => {
+    fakeEngine.on("deviceSet", () => set({ state: "standby", devices: set().devices.map((device) => ({ ...device, self: device.key === PHONE, active: device.key === DESKTOP })) }));
+    fakeEngine.on("deviceHandoffView", () => ({ role: "taker", device: "MacBook", key: DESKTOP, step: "failed", bytes: 0, total: 0, failure: "settle" }) satisfies HandoffView);
+    fakeEngine.on("deviceTakeoverInfo", () => ({ offered: false }));
+    const settle = vi.fn(() => null);
+    fakeEngine.on("deviceHandoffSettle", settle);
+    const { user } = renderApp(<DeviceStandby gate={{ state: "taking", activeDevice: "MacBook" }} />);
+    expect(await screen.findByRole("alert")).toHaveTextContent("Can't check which device is active. Check your connection, then try again.");
+    // Not Use here: the profile is already this device's to take.
+    expect(screen.queryByTestId("handoff-use-here")).toBeNull();
+    await user.click(await screen.findByTestId("handoff-settle-retry"));
+    expect(settle).toHaveBeenCalledTimes(1);
+  });
+
   it("fills the window, and offers no Use here while the new device list waits for an answer", async () => {
     fakeEngine.on("deviceSet", () => set({ state: "standby" }));
     fakeEngine.on("deviceHandoffView", () => null);

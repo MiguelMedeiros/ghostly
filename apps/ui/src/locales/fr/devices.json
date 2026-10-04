@@ -66,6 +66,7 @@
       "payment": "Un paiement est encore en cours. Réessayez dans un instant.",
       "refused": "{{device}} ne laisse pas cet appareil prendre le profil.",
       "room": "Pas assez d'espace sur cet appareil.",
+      "settle": "Impossible de vérifier quel appareil est actif. Vérifiez votre connexion, puis réessayez.",
       "stalled": "Le transfert s'est arrêté : {{device}} n'a pas répondu pendant 2 minutes. Rien n'a changé, et les fichiers déjà copiés sont gardés.",
       "turn": "Un autre appareil a pris le relais. Cet appareil est en veille.",
       "unreachable": "Impossible de joindre {{device}}. Il doit être allumé, avec Ghostly ouvert.",
