@@ -743,7 +743,8 @@ html[data-standalone="true"] {
 
 /* The floating card (components/ui/Toast.tsx): bottom centre over the content on a desktop; on a phone above the tab
    bar, and above the keyboard while it is open (the tab bar is hidden then, and `--app-height` is what the keyboard
-   leaves). Only the card takes clicks: the strip around it lets them through. */
+   leaves). On a page (`toast-place-page`) it is centred over the page's column, whose bottom already sits above the
+   tab bar and the keyboard. Only the card takes clicks: the strip around it lets them through. */
 .toast-place {
   position: fixed;
   left: 0;
@@ -763,6 +764,18 @@ html[data-standalone="true"] {
 
   html[data-keyboard="true"] .toast-place {
     bottom: calc(100% - var(--app-height, 100%) + 0.75rem);
+  }
+}
+
+.toast-place.toast-place-page {
+  position: absolute;
+  bottom: 1.5rem;
+}
+
+@media (max-width: 767px) {
+  .toast-place.toast-place-page,
+  html[data-keyboard="true"] .toast-place.toast-place-page {
+    bottom: 0.75rem;
   }
 }
 

@@ -8,13 +8,16 @@ import type { ToastMessage } from "../../hooks/useToast";
  * keyboard while it is open), where the person is looking after pressing a button, unlike a line at the top of a page.
  * Its live region is always there, empty when idle, so a screen reader reads each card out as it comes.
  *
- * It goes to `document.body`, except `inPlace`: inside a modal `<dialog>`, where everything outside the dialog is inert
- * and under its backdrop, the card must be rendered within the dialog.
+ * Where it is rendered (`place`):
+ * - `screen`: in `document.body`, over the whole window;
+ * - `page`: as a Page's `overlay`, centred over that column (not over the chat list beside it on a desktop) and
+ *   above the tab bar and the keyboard on a phone, since the column ends there;
+ * - `dialog`: inside a modal `<dialog>`, where everything outside it is inert and under its backdrop.
  */
-export function Toast({ toast, onDismiss, inPlace = false, testId = "toast" }: { toast: ToastMessage | null; onDismiss(): void; inPlace?: boolean; testId?: string }) {
+export function Toast({ toast, onDismiss, place = "screen", testId = "toast" }: { toast: ToastMessage | null; onDismiss(): void; place?: "screen" | "page" | "dialog"; testId?: string }) {
   const { t } = useI18n();
   const card: ReactNode = (
-    <div role="status" aria-live="polite" aria-atomic="true" className="toast-place" data-testid={`${testId}-region`}>
+    <div role="status" aria-live="polite" aria-atomic="true" className={place === "page" ? "toast-place toast-place-page" : "toast-place"} data-testid={`${testId}-region`}>
       {toast && (
         <div key={toast.id} data-testid={testId} data-tone={toast.tone}
           className="toast-card pointer-events-auto flex items-start gap-2.5 w-full max-w-sm rounded-xl border border-border bg-sidebar-bg px-4 py-3 shadow-2xl animate-fade-in">
@@ -41,5 +44,5 @@ export function Toast({ toast, onDismiss, inPlace = false, testId = "toast" }: {
       )}
     </div>
   );
-  return inPlace ? card : createPortal(card, document.body);
+  return place === "screen" ? createPortal(card, document.body) : card;
 }

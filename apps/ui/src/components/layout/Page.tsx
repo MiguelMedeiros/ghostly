@@ -9,21 +9,25 @@ const WIDTH = { md: "max-w-2xl", lg: "max-w-3xl" } as const;
  * scrolling body. The body is a size container (`@container/page`), so anything inside can ask how wide the
  * column is (`@sm/page:`, `@md/page:`) instead of how wide the window is: on a desktop the column can be
  * as narrow as a phone.
+ *
+ * `overlay` floats over the column without scrolling with it: the page's floating card (components/ui/Toast.tsx).
  */
-export function Page({ title, trailing, width = "lg", testId, children }: {
+export function Page({ title, trailing, width = "lg", testId, overlay, children }: {
   title: ReactNode;
   /** Controls at the end of the header (a switch, a toggle). They move under the title when the column is narrow. */
   trailing?: ReactNode;
   width?: keyof typeof WIDTH;
   testId?: string;
+  overlay?: ReactNode;
   children: ReactNode;
 }) {
   return (
-    <div className="flex-1 flex flex-col bg-chat-bg overflow-hidden min-h-0 min-w-0" data-testid={testId}>
+    <div className="relative flex-1 flex flex-col bg-chat-bg overflow-hidden min-h-0 min-w-0" data-testid={testId}>
       <PageHeader title={title} trailing={trailing} />
       <div className="@container/page flex-1 overflow-y-auto overflow-x-hidden px-6 py-6 max-md:px-4 max-md:py-4" data-page-body>
         <div className={`${WIDTH[width]} mx-auto space-y-6`}>{children}</div>
       </div>
+      {overlay}
     </div>
   );
 }

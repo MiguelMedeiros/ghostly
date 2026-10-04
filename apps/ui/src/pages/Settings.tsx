@@ -301,8 +301,8 @@ export function Settings() {
   };
 
   return (
-    <Page title={t("settings.title")} width="md" testId="settings-page">
-      <Toast toast={notice.toast} onDismiss={notice.dismiss} testId="settings-notice" />
+    <Page title={t("settings.title")} width="md" testId="settings-page"
+      overlay={<Toast toast={notice.toast} onDismiss={notice.dismiss} place="page" testId="settings-notice" />}>
 
       {/* First while there is something to install (the web app only): it goes once installed. */}
       {canInstall(install) && (

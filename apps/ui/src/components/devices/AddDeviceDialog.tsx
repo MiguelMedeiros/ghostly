@@ -111,7 +111,7 @@ export function AddDeviceDialog({ onClose }: { onClose(): void }) {
     const invalid = (which: "password" | "again") => wrong(which) ? { "aria-invalid": true, "aria-describedby": `${id}-${which}-error` } : {};
     return (
       <DeviceDialog title={title} onClose={onClose} testId="device-add">
-        <Toast toast={notice.toast} onDismiss={notice.dismiss} inPlace testId="device-add-notice" />
+        <Toast toast={notice.toast} onDismiss={notice.dismiss} place="dialog" testId="device-add-notice" />
         {hint && <p className="text-text-secondary">{hint}</p>}
         <form className="space-y-3" onSubmit={(event) => { event.preventDefault(); void submitPassword(); }}>
           <div>
@@ -135,7 +135,7 @@ export function AddDeviceDialog({ onClose }: { onClose(): void }) {
 
   return (
     <DeviceDialog title={t("devices.add.title")} onClose={onClose} testId="device-add">
-      <Toast toast={notice.toast} onDismiss={notice.dismiss} inPlace testId="device-add-notice" />
+      <Toast toast={notice.toast} onDismiss={notice.dismiss} place="dialog" testId="device-add-notice" />
       {view?.role === "inviter" && view.step === "waiting" && <>
         <p className="text-text-secondary">{t("devices.add.codeHint")}</p>
         <div data-testid="device-add-code" data-code={view.code}><QRCodeDisplay value={view.code} qr={[view.code.toUpperCase()]} label={t("devices.add.title")} /></div>
