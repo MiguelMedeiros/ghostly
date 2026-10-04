@@ -15,6 +15,8 @@ import { FAILURES, dayText, useHandoffView, walletNameOf } from "../../lib/hando
 
 /** The refusals that come from this device's wallets (WISP 06 § Wallets). */
 const WALLET_REFUSALS = new Set<string>(["wallet", "loading", "mainnet", "expiry"]);
+/** A move that stopped on the way, with the profile still here: Try again moves it. */
+const STOPPED = new Set<string>(["stalled", "dropped"]);
 
 type Device = DeviceSetView["devices"][number];
 
@@ -102,6 +104,15 @@ export function DevicesSection() {
           <Button data-testid="handoff-allow" onClick={() => void engine.call("deviceHandoffAllow", { key: handoff.key })}>{t("devices.handoff.allowAgain", { device: handoff.device })}</Button>
         </Row>
       )}
+      {/* A move whose copy stopped (WISP 06 § Handoff progress, Failures): the profile is still here; Try again moves it. */}
+      {thisActive && handoff?.role === "giver" && handoff.step === "failed" && handoff.failure && STOPPED.has(handoff.failure) && (() => {
+        const name = devices.find((device) => device.key === handoff.key)?.name || handoff.device || t("devices.join.otherDevice");
+        return (
+          <Row testId="handoff-stopped" label={t(FAILURES[handoff.failure], { device: name })}>
+            <Button data-testid="handoff-try-again" onClick={() => setMoving({ key: handoff.key, name })}>{t("devices.handoff.tryAgain")}</Button>
+          </Row>
+        );
+      })()}
       {/* A pull this device's wallets kept from happening: what keeps the profile here (WISP 06 § Wallets). */}
       {handoff?.role === "giver" && handoff.step === "failed" && handoff.failure && WALLET_REFUSALS.has(handoff.failure) && (
         <Row testId="handoff-wallet-refusal" label={t(FAILURES[handoff.failure], { device: handoff.device, wallet: walletNameOf(handoff.wallet) })}

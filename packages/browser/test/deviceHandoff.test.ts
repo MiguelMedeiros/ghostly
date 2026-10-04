@@ -7,7 +7,7 @@ import {
 } from "@ghostly/core";
 import { amend, firstRecord, transition, type DevicePatch, type DeviceRecord, type StoredDeviceState } from "../src/devices/state";
 import {
-  HandoffGiver, HandoffTaker, WOKEN_CONNECT_MS, type GiverPorts, type HandoffFile, type HandoffLinks, type HandoffRecords, type HandoffSelf, type HandoffSource,
+  HandoffGiver, HandoffTaker, STALLED_STEP, WOKEN_CONNECT_MS, type GiverPorts, type HandoffFile, type HandoffLinks, type HandoffRecords, type HandoffSelf, type HandoffSource,
   type BusyReport, type HandoffStaging, type HandoffStagingHost, type HandoffStay, type HandoffView, type LocalBusy, type TakerPorts,
 } from "../src/devices/handoff";
 import { makeHandoffVerifier, type HandoffVerifier } from "../src/devices/handoffPake";
@@ -201,7 +201,11 @@ function world(options: { verifier?: boolean } = {}): World {
       staying: async () => w.stays,
       ...(phase === "active" ? { quiesce: async (patch: DevicePatch, taker?: HandoffTakerFacts) => { w.quiesced.push(patch); w.quiescedFor.push(taker); await w.giverRecords.move("releasing", { ...patch, ...w.quiesceExtra }); } } : {}),
       ...(phase === "gated" ? {
-        backToActive: async () => { w.activeAgain += 1; if (w.giverRecords.record.state === "releasing") await w.giverRecords.move("active", { handoff: undefined }); },
+        // As device-link-only mode does (`handoffStandby.ts`): a copy that stopped leaves a note for the screen after the reload.
+        backToActive: async (stopped) => {
+          w.activeAgain += 1;
+          if (w.giverRecords.record.state === "releasing") await w.giverRecords.move("active", { handoff: stopped ? { role: "releasing", step: STALLED_STEP, peer: stopped.peer, at: Date.now() } : undefined });
+        },
         dropDatabases: async (names: string[]) => { w.droppedDatabases.push(names); },
       } : {}),
     };
@@ -488,6 +492,102 @@ describe("storage that refuses a write", () => {
     const staged = w.takerRecords.record.handoff!.staging!;
     expect(toBase64Url(sha256(w.storage.spaces.get(staged)!.files.get("big")!))).toBe(file.sha256);
     expect(w.link.count("handoff-have", B)).toBeGreaterThanOrEqual(2);
+  });
+});
+
+describe("a copy that stops (WISP 06 § States and events)", () => {
+  const FAKE = { toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "Date"] as const, shouldAdvanceTime: true };
+
+  it("nothing from the giver for 2 minutes, the link up: both fail as stalled, the giver stays active, and Try again goes on from the staged files", async () => {
+    vi.useFakeTimers({ ...FAKE, toFake: [...FAKE.toFake] });
+    const w = world();
+    const files = Array.from({ length: 10 }, (_, i) => w.profile.add(`f${i}`, bytesOf(HANDOFF_PIECE_BYTES * 4 + i)));
+    // After a few files nothing from the giver arrives any more (a link that is up on one side only); the taker's
+    // frames still reach it.
+    let pieces = 0, silent = false;
+    w.link.meddle = (from, frame) => {
+      if (from === A && frame.t === "handoff-data" && ++pieces > 12) silent = true;
+      return from === A && silent ? null : frame;
+    };
+    await w.taker.pull(PASSWORD);
+    await until(() => silent);
+    expect(w.taker.view()?.step).toBe("copying");
+    await vi.advanceTimersByTimeAsync(HANDOFF_TIMINGS.stuckMs + HANDOFF_TIMINGS.stuckMs / 4);
+    await until(() => w.taker.view()?.step === "failed" && w.giver.view()?.step === "failed");
+    expect(w.taker.view()!.failure).toBe("stalled");
+    // The taker told the giver, which says the same.
+    expect(w.link.sent.find((s) => s.from === B && s.frame.t === "handoff-cancel")?.frame).toMatchObject({ why: "stalled" });
+    expect(w.giver.view()!.failure).toBe("stalled");
+    // The profile stays where it was: active on the giver, nothing quiesced; the taker on standby.
+    expect(w.giverRecords.record.state).toBe("active");
+    expect(w.quiesced).toHaveLength(0);
+    expect(w.takerRecords.record.state).toBe("standby");
+    // Try again: the copy goes on from what the taker held, and finishes.
+    w.link.meddle = undefined;
+    vi.useRealTimers();
+    const readsBefore = w.profile.reads;
+    await w.taker.pull(PASSWORD);
+    await until(() => w.quiesced.length === 1, 10_000);
+    const staged = w.takerRecords.record.handoff!.staging!;
+    for (const file of files) expect(toBase64Url(sha256(w.storage.spaces.get(staged)!.files.get(file.id)!))).toBe(file.sha256);
+    // The files staged before it stopped were not sent again.
+    expect(w.profile.reads - readsBefore).toBeLessThan(50);
+  });
+
+  it("the link down for 2 minutes in pass 1: both fail as stalled on their own, and the giver is still the active device", async () => {
+    vi.useFakeTimers({ ...FAKE, toFake: [...FAKE.toFake] });
+    const w = world();
+    w.profile.add("big", bytesOf(HANDOFF_PIECE_BYTES * 40));
+    let pieces = 0;
+    w.link.meddle = (from, frame) => {
+      if (frame.t === "handoff-data" && ++pieces === 6) queueMicrotask(() => w.link.drop());
+      return frame;
+    };
+    await w.taker.pull(PASSWORD);
+    await until(() => !w.link.live);
+    await vi.advanceTimersByTimeAsync(HANDOFF_TIMINGS.stuckMs + HANDOFF_TIMINGS.stuckMs / 4);
+    await until(() => w.taker.view()?.step === "failed" && w.giver.view()?.step === "failed");
+    expect(w.taker.view()!.failure).toBe("stalled");
+    expect(w.giver.view()!.failure).toBe("stalled");
+    expect(w.giverRecords.record.state).toBe("active");
+    expect(w.takerRecords.record.state).toBe("standby");
+  });
+
+  it("a giver that hears from the taker keeps going: only silence counts, not a slow copy", async () => {
+    vi.useFakeTimers({ ...FAKE, toFake: [...FAKE.toFake] });
+    const w = world();
+    w.profile.add("big", bytesOf(HANDOFF_PIECE_BYTES * 30));
+    let pieces = 0;
+    // Pieces 4 to 30 lost once: the giver pauses, the taker says what it holds after a minute, the copy goes on.
+    w.link.meddle = (from, frame) => (frame.t === "handoff-data" && ++pieces > 3 && pieces <= 30 ? null : frame);
+    await w.taker.pull(PASSWORD);
+    await until(() => pieces > 30 || w.link.count("handoff-data") >= 18);
+    await vi.advanceTimersByTimeAsync(HANDOFF_TIMINGS.idleMs * 2);
+    await until(() => w.quiesced.length === 1, 10_000);
+    expect(w.taker.view()?.failure).toBeUndefined();
+  });
+
+  it("pass 2 stops: the giver is the active device again and says so after its reload; the taker says so too", async () => {
+    vi.useFakeTimers({ ...FAKE, toFake: [...FAKE.toFake] });
+    const w = world();
+    w.profile.add("f1", bytesOf(HANDOFF_PIECE_BYTES * 3));
+    await w.taker.pull(PASSWORD);
+    await until(() => w.quiesced.length === 1);
+    // After the reload into the gate, nothing from the giver reaches the taker.
+    w.link.meddle = (from, frame) => (from === A ? null : frame);
+    await reloadGiver(w);
+    await vi.advanceTimersByTimeAsync(HANDOFF_TIMINGS.stuckMs + HANDOFF_TIMINGS.stuckMs / 4);
+    await until(() => w.activeAgain === 1 && w.taker.view()?.step === "failed");
+    expect(w.taker.view()!.failure).toBe("stalled");
+    // Never neither: the giver never signed a release, and is active.
+    expect(w.giverRecords.record.state).toBe("active");
+    expect(w.takerRecords.record.state).toBe("standby");
+    // Started again as the active device, its screen says the move stopped, once.
+    w.giver.stop();
+    w.giver = w.makeGiver("active");
+    await w.giver.resume();
+    expect(w.giver.view()).toMatchObject({ role: "giver", step: "failed", failure: "stalled", key: B, device: "Phone" });
+    expect(w.giverRecords.record.handoff).toBeUndefined();
   });
 });
 

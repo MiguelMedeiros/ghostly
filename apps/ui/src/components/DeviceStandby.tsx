@@ -126,7 +126,8 @@ function StandbyHandoff({ gate }: { gate: DeviceGateView }) {
       {view?.step === "offer" && <div className={PANEL}><HandoffOffer view={view} /></div>}
       {view && view.step !== "offer" && <div className={PANEL}><HandoffProgress view={view} onCancel={() => void engine.call("deviceHandoffCancel")} /></div>}
       {!view && gate.state === "taking" && <p data-testid="handoff-line" className="text-sm text-text-secondary">{t("devices.handoff.step.settling")}</p>}
-      {useHere && <Actions><button type="button" data-testid="handoff-use-here" onClick={() => setAsking(true)} className={SCREEN_BUTTON}>{t("devices.handoff.useHere")}</button></Actions>}
+      {/* After a move that failed, the same button starts it again: the files already copied are not sent twice. */}
+      {useHere && <Actions><button type="button" data-testid="handoff-use-here" onClick={() => setAsking(true)} className={SCREEN_BUTTON}>{view?.step === "failed" ? t("devices.handoff.tryAgain") : t("devices.handoff.useHere")}</button></Actions>}
       {asking && <UseHereDialog device={device} onClose={() => setAsking(false)} onStarted={() => {}} />}
     </div>
   );

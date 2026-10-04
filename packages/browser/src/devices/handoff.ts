@@ -41,10 +41,15 @@ import type { HandoffTakerFacts } from "./handoffWallets";
  * `mine`.
  */
 
+/** The step a giver's record notes when pass 2 stopped and it went back to active: its screen says so after the reload. */
+export const STALLED_STEP = "stalled";
+
 /** Why a handoff did not happen, as the screens say it. */
 export type HandoffFailure =
   | "unreachable" | "password" | "locked-out" | "refused" | "payment" | "call" | "busy" | "older" | "room" | "damaged" | "dropped"
-  | "wallet" | "loading" | "mainnet" | "expiry" | "cancelled" | "turn" | "offline" | "version" | "failed" | "woken";
+  | "wallet" | "loading" | "mainnet" | "expiry" | "cancelled" | "turn" | "offline" | "version" | "failed" | "woken"
+  /** The copy stopped: nothing came from the other device for `HANDOFF_TIMINGS.stuckMs`. */
+  | "stalled";
 
 /** What the screens show of a handoff on either device. Never a secret. */
 export interface HandoffView {
@@ -197,7 +202,7 @@ export interface GiverPorts extends Common {
    */
   dropDatabases?(names: string[]): Promise<void>;
   /** Pass 2 failed or was cancelled: the device writes `active` and starts again (device-link-only mode). */
-  backToActive?(): Promise<void>;
+  backToActive?(stopped?: { failure: "stalled"; peer: string }): Promise<void>;
   /** A notice on this device: a pull with a wrong password. */
   notice?(kind: "wrong-password", device: string): void;
 }
@@ -385,6 +390,13 @@ export class HandoffGiver {
     // A standby that released and could not delete the Breez databases of the wallets that moved tries again.
     if (record?.state === "standby" && record.breezDatabases?.length) await this.dropBreez();
     const handoff = record?.handoff;
+    // Back to active after pass 2 stopped (`stalled`): the screen says so once, and the note goes.
+    if (record?.state === "active" && handoff?.role === "releasing" && handoff.step === STALLED_STEP && handoff.peer) {
+      this.peer = handoff.peer; this.deviceName = name(record, handoff.peer); this.failure = "stalled"; this.phase = "idle";
+      await this.ports.records.amend({ handoff: undefined }).catch(() => {});
+      this.changed();
+      return;
+    }
     if (!record || handoff?.role !== "releasing" || !handoff.peer || !handoff.id) return;
     this.peer = handoff.peer; this.id = handoff.id; this.turn = handoff.from ?? record.turn;
     this.secret = handoff.secret ? fromBase64Url(handoff.secret) : null;
@@ -394,9 +406,11 @@ export class HandoffGiver {
     const fresh = handoff.at !== undefined && this.now() - handoff.at < HANDOFF_TIMINGS.verifiedMs;
     if (!this.secret || !fresh) { await this.backToActive(); return; }
     this.phase = "pass2";
+    this.passDone = false;
     this.changed();
     // The taker comes back on the new session; if it does not, this device is the active one again.
     this.arm(HANDOFF_TIMINGS.idleMs * 2, () => this.backToActive());
+    this.watchStuck();
     if (this.ports.links.live(this.peer)) this.linkChanged(this.peer, true);
   }
 
@@ -516,6 +530,31 @@ export class HandoffGiver {
     this.sender.stop();
     if (this.timer) clearTimeout(this.timer);
     clearInterval(this.stallTimer);
+    clearInterval(this.stuckTimer);
+  }
+
+  /** When the taker last sent anything on this handoff: a frame of any kind, acknowledgements included. */
+  private heardAt = 0;
+  private stuckTimer: ReturnType<typeof setInterval> | undefined;
+  /** Pass 2's parts are all confirmed: from here its own wait (`verifiedMs`) applies. */
+  private passDone = false;
+  /**
+   * The copy may not wait without bound (WISP 06 § States and events): nothing from the taker for `stuckMs` in pass 1,
+   * or in pass 2 before its parts are all confirmed, and the handoff fails as `stalled`, the taker told when the link
+   * lets it. In pass 1 this device is still the active one; in pass 2 it never signed a release, so it is again.
+   */
+  private watchStuck(): void {
+    clearInterval(this.stuckTimer);
+    this.heardAt = this.now();
+    this.stuckTimer = setInterval(() => void this.exclusive(async () => {
+      const copying = this.phase === "pass1" || (this.phase === "pass2" && !this.passDone);
+      if (!copying || this.stopped) { clearInterval(this.stuckTimer); return; }
+      if (this.now() - this.heardAt < HANDOFF_TIMINGS.stuckMs) return;
+      clearInterval(this.stuckTimer);
+      if (this.peer && this.ports.links.live(this.peer)) this.out(handoffCancelFrame("stalled"));
+      if (this.phase === "pass2") { this.failure = "stalled"; await this.backToActive(); return; }
+      this.reset("stalled");
+    }), HANDOFF_TIMINGS.stuckMs / 8);
   }
 
   receive(from: string, frame: DeviceFrame): Promise<void> {
@@ -524,6 +563,7 @@ export class HandoffGiver {
 
   private async handle(from: string, frame: DeviceFrame): Promise<void> {
     if (this.stopped) return;
+    if (from === this.peer) this.heardAt = this.now();
     switch (frame.t) {
       case HANDOFF_HELLO: return this.onHello(from, frame);
       case HANDOFF_REQUEST: return this.onRequest(from, frame);
@@ -544,9 +584,12 @@ export class HandoffGiver {
         return;
       }
       case HANDOFF_CANCEL: {
-        if (from !== this.peer || readHandoffCancel(frame) === null) return;
-        if (this.phase === "pass2") { await this.backToActive(); return; }
-        if (this.phase !== "released") this.reset("cancelled");
+        const why = readHandoffCancel(frame);
+        if (from !== this.peer || why === null) return;
+        // The taker heard nothing from here for too long: both screens say the copy stopped.
+        const failure: HandoffFailure = why === "stalled" ? "stalled" : "cancelled";
+        if (this.phase === "pass2") { this.failure = failure; await this.backToActive(); return; }
+        if (this.phase !== "released") this.reset(failure);
         return;
       }
       default: return;
@@ -651,7 +694,8 @@ export class HandoffGiver {
     session.key = handoffStreamKey(session.ephemeral.secret, fromBase64Url(session.peer!.e), k, session.transcript);
     this.secret = session.key;
     this.phase = "pass1";
-    this.arm(HANDOFF_TIMINGS.giveUpMs, () => this.reset("dropped"));
+    if (this.timer) { clearTimeout(this.timer); this.timer = null; }
+    this.watchStuck();
     this.changed();
   }
 
@@ -674,6 +718,7 @@ export class HandoffGiver {
   /** The manifest of this pass and its parts, from what the taker said it holds. */
   private async sendPass(session: Session): Promise<void> {
     const pass = this.phase === "pass2" ? 2 : 1;
+    this.passDone = false;
     // Pass 2 is under way: its own wait (no `handoff-verified` within ten minutes) replaces the wait for the taker.
     if (pass === 2) this.arm(HANDOFF_TIMINGS.verifiedMs, () => this.backToActive());
     const later = session.peer!.later;
@@ -711,6 +756,7 @@ export class HandoffGiver {
     const result = await this.sender.send(out, this.have!.p, session.key!, (frame) => this.out(frame));
     clearInterval(this.stallTimer);
     if (result !== "done" || this.stopped) return;
+    this.passDone = pass === 2;
     this.changed();
     if (pass === 1) await this.exclusive(() => this.quiesce());
     else this.arm(HANDOFF_TIMINGS.verifiedMs, () => this.backToActive());
@@ -776,12 +822,15 @@ export class HandoffGiver {
 
   /** Pass 2 cannot finish: this device never signed a release, so it is the active one again. */
   private async backToActive(): Promise<void> {
-    if (this.phase === "released") return;
+    // Once: the wait for the taker and the wait for a copy that stopped can both end here.
+    if (this.phase === "released" || this.phase === "failed") return;
     this.sender.stop();
+    clearInterval(this.stuckTimer);
+    if (this.timer) { clearTimeout(this.timer); this.timer = null; }
     this.phase = "failed";
     this.failure ??= "dropped";
     this.changed();
-    await this.ports.backToActive?.();
+    await this.ports.backToActive?.(this.failure === "stalled" && this.peer ? { failure: "stalled", peer: this.peer } : undefined);
   }
 
   private begin(key: string, id: string, record: DeviceRecord): void {
@@ -793,6 +842,7 @@ export class HandoffGiver {
   private reset(failure: HandoffFailure): void {
     this.sender.stop();
     clearInterval(this.stallTimer);
+    clearInterval(this.stuckTimer);
     this.paused = false;
     if (this.timer) clearTimeout(this.timer);
     this.phase = "idle";
@@ -1017,6 +1067,7 @@ export class HandoffTaker {
 
   private async handle(from: string, frame: DeviceFrame): Promise<void> {
     if (this.stopped) return;
+    if (from === this.peer) this.heardAt = this.now();
     switch (frame.t) {
       case HANDOFF_OFFER: {
         const offer = readHandoffTurnFrame(frame);
@@ -1047,7 +1098,7 @@ export class HandoffTaker {
         if (!why || from !== this.peer) return;
         // A cancel after a release counts only once a turn above the released one is on the network (the take finds out).
         if (this.phase === "installing" || this.phase === "settling" || this.phase === "done") return;
-        await this.giveUp(why === "password" ? "password" : why === "damaged" ? "damaged" : "cancelled");
+        await this.giveUp(why === "password" ? "password" : why === "damaged" ? "damaged" : why === "stalled" ? "stalled" : "cancelled");
         return;
       }
       default: return;
@@ -1153,12 +1204,14 @@ export class HandoffTaker {
     await this.ports.records.amend({ handoff: { ...record!.handoff!, step: "receiving", secret: toBase64Url(this.secret!), at: this.now() } });
     this.phase = "receiving";
     this.pass = 1;
-    this.arm(HANDOFF_TIMINGS.giveUpMs, () => this.giveUp("dropped"));
+    if (this.timer) { clearTimeout(this.timer); this.timer = null; }
     this.watchIdle();
     await this.sendHave();
   }
 
   private lastDataAt = 0;
+  /** When the giver last sent anything on this handoff. */
+  private heardAt = 0;
   private idleTimer: ReturnType<typeof setInterval> | undefined;
   /**
    * Nothing has arrived for a minute while parts are still to come and the link is open: what is here is said again,
@@ -1167,8 +1220,17 @@ export class HandoffTaker {
   private watchIdle(): void {
     clearInterval(this.idleTimer);
     this.lastDataAt = this.now();
+    this.heardAt = this.now();
     this.idleTimer = setInterval(() => void this.exclusive(async () => {
       if (this.phase !== "receiving") { clearInterval(this.idleTimer); return; }
+      // Nothing from the giver for too long, the link up or not (WISP 06 § States and events): the copy stopped. The
+      // giver is told when the link lets it; the staged files stay for Try again.
+      if (this.now() - this.heardAt >= HANDOFF_TIMINGS.stuckMs) {
+        clearInterval(this.idleTimer);
+        if (this.peer && this.ports.links.live(this.peer)) this.out(handoffCancelFrame("stalled"));
+        await this.giveUp("stalled");
+        return;
+      }
       const waiting = [...this.incoming.values()].some((part) => !part.done);
       if (!waiting || !this.peer || !this.ports.links.live(this.peer) || this.now() - this.lastDataAt < HANDOFF_TIMINGS.idleMs) return;
       this.lastDataAt = this.now();
@@ -1403,6 +1465,7 @@ export class HandoffTaker {
   /** The handoff ended without a release: the staged parts of pass 2 go, the staged files stay for a later try. */
   private async giveUp(failure: HandoffFailure): Promise<void> {
     if (this.timer) clearTimeout(this.timer);
+    clearInterval(this.idleTimer);
     this.phase = "idle";
     this.failure = failure;
     this.pake = null; this.bundle = null; this.incoming.clear();

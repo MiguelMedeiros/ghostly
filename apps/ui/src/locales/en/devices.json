@@ -58,6 +58,7 @@
       "payment": "A payment is still going through. Try again in a moment.",
       "refused": "{{device}} does not let this device take the profile.",
       "room": "Not enough space on this device.",
+      "stalled": "The move stopped: no answer from {{device}} for 2 minutes. Nothing changed, and files already copied are kept.",
       "turn": "Another device took over. This device is on standby.",
       "unreachable": "Can't reach {{device}}. It must be on, with Ghostly open.",
       "version": "Ghostly was updated in between. Nothing changed.",
@@ -96,6 +97,7 @@
       "switching": "Switching"
     },
     "title": "Moving your profile",
+    "tryAgain": "Try again",
     "useHere": "Use here",
     "useHereTitle": "Use this profile here",
     "verifierFailed": "This password could not be set up for moving the profile. Try again.",

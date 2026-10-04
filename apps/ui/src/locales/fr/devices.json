@@ -58,6 +58,7 @@
       "payment": "Un paiement est encore en cours. Réessayez dans un instant.",
       "refused": "{{device}} ne laisse pas cet appareil prendre le profil.",
       "room": "Pas assez d'espace sur cet appareil.",
+      "stalled": "Le transfert s'est arrêté : {{device}} n'a pas répondu pendant 2 minutes. Rien n'a changé, et les fichiers déjà copiés sont gardés.",
       "turn": "Un autre appareil a pris le relais. Cet appareil est en veille.",
       "unreachable": "Impossible de joindre {{device}}. Il doit être allumé, avec Ghostly ouvert.",
       "version": "Ghostly a été mis à jour entre-temps. Rien n'a changé.",
@@ -96,6 +97,7 @@
       "switching": "Bascule"
     },
     "title": "Déplacement de votre profil",
+    "tryAgain": "Réessayer",
     "useHere": "Utiliser ici",
     "useHereTitle": "Utiliser ce profil ici",
     "verifierFailed": "Ce mot de passe n'a pas pu être préparé pour déplacer le profil. Réessayez.",

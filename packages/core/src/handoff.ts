@@ -65,8 +65,14 @@ export const HANDOFF_TIMINGS = {
   /** The giver: the proof held, and no frame came for this long. Also a frame of the proof that never comes. */
   idleMs: 60_000,
   /** Pass 1: no confirmed bytes for this long, or the link dropped: paused. */
-  stallMs: 120_000,
-  /** Pass 1 gives up after this long paused. */
+  stallMs: 60_000,
+  /**
+   * The copy (pass 1, and pass 2 until its parts are confirmed): nothing from the other device for this long, on either
+   * side, whether the link is up or not. The handoff fails on both devices and says so (`stalled`); the device that had
+   * the profile keeps it, and the files already copied stay staged for Try again.
+   */
+  stuckMs: 120_000,
+  /** A taker's staged files of a handoff that stopped are used again by a new one within this long. */
   giveUpMs: 24 * 60 * 60_000,
   /** Quiesce waits this long for a payment that is going through. */
   paymentMs: 30_000,
@@ -92,7 +98,7 @@ export const HANDOFF_BUSY_REASONS = ["handoff", "payment", "call", "locked-out",
 export type HandoffBusyReason = (typeof HANDOFF_BUSY_REASONS)[number];
 
 /** Why a side ended a handoff (`handoff-cancel`). */
-export const HANDOFF_CANCEL_REASONS = ["cancelled", "damaged", "room", "version", "timeout", "failed", "turn", "password"] as const;
+export const HANDOFF_CANCEL_REASONS = ["cancelled", "damaged", "room", "version", "timeout", "failed", "turn", "password", "stalled"] as const;
 export type HandoffCancelReason = (typeof HANDOFF_CANCEL_REASONS)[number];
 
 const KEY = /^[A-Za-z0-9_-]{43}$/;

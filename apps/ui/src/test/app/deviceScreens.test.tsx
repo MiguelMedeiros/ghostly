@@ -118,6 +118,18 @@ describe("Profile, Devices", () => {
     expect(screen.queryByTestId("device-remove-open")).toBeNull();
   });
 
+  it("a move whose copy stopped: says so on the row, and Try again moves the profile to that device", async () => {
+    const { user, engine } = renderApp(<DevicesSection />);
+    engine.on("deviceSet", () => set());
+    engine.on("deviceHandoffView", () => ({ role: "giver", device: "iPhone", key: PHONE, step: "failed", bytes: 0, total: 0, failure: "stalled" }) satisfies HandoffView);
+    engine.on("deviceHandoffPush", () => null);
+    const row = await screen.findByTestId("handoff-stopped");
+    expect(row).toHaveTextContent("The move stopped: no answer from iPhone for 2 minutes. Nothing changed, and files already copied are kept.");
+    await user.click(within(row).getByTestId("handoff-try-again"));
+    expect(await screen.findByTestId("handoff-move-dialog")).toBeInTheDocument();
+    await waitFor(() => expect(engine.callsTo("deviceHandoffPush")).toEqual([{ key: PHONE }]));
+  });
+
   it("draws each device's kind from its name", () => {
     expect(["iPhone", "Phone", "Pixel 8", "iPad", "Tablet", "Chrome on Mac", "Firefox", "Mac app", "Desktop", "Linux"].map(deviceLook))
       .toEqual(["phone", "phone", "phone", "tablet", "tablet", "browser", "browser", "computer", "computer", "computer"]);
@@ -202,6 +214,18 @@ describe("the standby screen", () => {
     expect(links[0]).toHaveTextContent("Active");
     expect(screen.getByRole("navigation", { name: "Other profiles" })).toHaveTextContent("Switch to Work");
     expect(screen.getByRole("button", { name: "Use here" })).toBeInTheDocument();
+  });
+
+  it("a move whose copy stopped: the line read out at once, and Try again in place of Use here", async () => {
+    fakeEngine.on("deviceSet", () => set({ state: "standby", devices: set().devices.map((device) => ({ ...device, self: device.key === PHONE, active: device.key === DESKTOP })) }));
+    fakeEngine.on("deviceHandoffView", () => ({ role: "taker", device: "MacBook", key: DESKTOP, step: "failed", bytes: 0, total: 0, failure: "stalled" }) satisfies HandoffView);
+    fakeEngine.on("deviceTakeoverInfo", () => ({ offered: false }));
+    const { user } = renderApp(<DeviceStandby gate={{ state: "standby", activeDevice: "MacBook" }} />);
+    expect(await screen.findByRole("alert")).toHaveTextContent("The move stopped: no answer from MacBook for 2 minutes.");
+    const again = await screen.findByTestId("handoff-use-here");
+    expect(again).toHaveTextContent("Try again");
+    await user.click(again);
+    expect(screen.getByTestId("handoff-use-here-dialog")).toBeInTheDocument();
   });
 
   it("fills the window, and offers no Use here while the new device list waits for an answer", async () => {

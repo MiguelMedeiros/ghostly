@@ -559,10 +559,11 @@ One handoff at a time per profile: a second request gets `handoff-busy`.
 | authorizing | Proof fails | Counts the attempt, notice on screen, `handoff-busy` when the limit is reached | `active` |
 | authorizing | Proof holds; no frame for 60 s | Cancels | `active` |
 | pass 1 | `handoff-have` | Sends manifest 1 and the files | pass 1 |
-| pass 1 | No confirmed bytes for 2 minutes, or the link drops | Pauses; resumes when the link is back; gives up after 24 hours | pass 1 or `active` |
+| pass 1 | No confirmed bytes for 1 minute, or the link drops | Pauses; resumes when the link is back | pass 1 |
+| pass 1 | Nothing from B for 2 minutes, the link up or not | Fails as `stalled`: `handoff-cancel` `stalled` when the link lets it, "The move stopped" with Try again (which offers the move again, a push) | `active` |
 | pass 1 | All files confirmed | Tries to quiesce; if a payment runs, waits up to 30 s, then `handoff-busy` `payment` | quiescing or pass 1 |
 | quiescing | Database frozen | Writes the index of files left for later and the Breez database's name beside the device state, writes `releasing`, reloads into the gate, opens the database read-only, sends manifest 2 and the parts | pass 2 |
-| pass 2 | The link drops, or no `handoff-verified` within 10 minutes of the last part | Writes `active`, reloads, starts | `active` |
+| pass 2 | The link drops, nothing from B for 2 minutes before every part is confirmed, or no `handoff-verified` within 10 minutes of the last part | Writes `active`, reloads, starts; after a copy that stopped, says so once it runs again | `active` |
 | pass 2 | `handoff-verified` with a valid signature and the same `H` | Writes `standby` durably, sends `handoff-release` | `standby` |
 | `standby` (just released) | `handoff-request` again from B with the same turn | Sends the same release again | `standby` |
 | `standby` | `handoff-done` | Deletes its Breez database by the name it noted at quiesce; touches nothing in the frozen copy | `standby` |
@@ -573,6 +574,7 @@ One handoff at a time per profile: a second request gets `handoff-busy`.
 | requesting | No session within 30 s | "Can't reach <device>. It must be on, with Ghostly open." Sends a wake push to A when A shared a target | `standby` |
 | requesting | `handoff-busy` | Shows why | `standby` |
 | receiving | Parts | Writes to staging, checks each digest; a bad part is asked again once, then the handoff fails | receiving |
+| receiving | Nothing from A for 2 minutes, the link up or not (either pass) | Fails as `stalled`: `handoff-cancel` `stalled` when the link lets it, "The move stopped" with Try again; keeps the staged files, which the next pull from A within 24 hours does not fetch again | `standby` |
 | receiving | All parts of pass 2 | Verifies, sends `handoff-verified` | verified |
 | verified | No release within 60 s | Reads the turn, then asks again each time the link is back; never starts without a release | verified |
 | verified | `handoff-cancel`, or its own read shows a turn above `N` | Drops the staged parts of pass 2, keeps the files | `standby` |
@@ -828,6 +830,7 @@ The account switcher ([04](04-profiles.md)) shows such a profile with the word "
 | The other device is a phone | "Open Ghostly on <device> and keep it open." (a wake push was sent) |
 | Wrong lock password | "Wrong password." After the limit: "Too many tries. Unlock <device> to try again." |
 | The link dropped | "Stopped at 60%. It resumes when both devices are online." with "Resume" and "Cancel" |
+| Nothing from the other device for 2 minutes, during the copy | "The move stopped: no answer from <device> for 2 minutes. Nothing changed, and files already copied are kept." on both devices, with "Try again" (on the standby, Use here again; on the active device, the move offered to that device). The device that had the profile still has it |
 | A part failed its check | "The copy was damaged. Nothing changed." with "Try again" |
 | No room | "Not enough space on this device: 1.2 GB needed." |
 | Older app on the taking device | "Update Ghostly on this device first." |
