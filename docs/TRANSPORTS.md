@@ -8,7 +8,7 @@ Every 1:1 chat has two layers ([WISP 400](wisps/400-chat.md), [WISP 100](wisps/1
 
 | Layer | What | Carries |
 |---|---|---|
-| 0: the DHT | Signed [Pkarr](https://github.com/pubky/pkarr) records on the Mainline DHT | Rendezvous, signaling, the capability record, and short text when nothing else connects ([DHT text](wisps/403-dht-text.md), 256 bytes) |
+| 0: the DHT | Signed [Pkarr](https://github.com/pubky/pkarr) records on the Mainline DHT | Rendezvous, signaling, the capability record, and short text when nothing else connects ([DHT text](wisps/403-dht-text.md), 256 bytes), with the offer of a file waiting to go |
 | 1: a stream | WebRTC, Iroh or HyperDHT | The chat session: text, files, payments, calls signaling, shared apps |
 
 - The DHT is always there underneath. It is never "selected" and never fails a chat.
@@ -30,14 +30,15 @@ Every transport runs the same authenticated chat session ([WISP 401](wisps/401-p
 ### WebRTC
 
 - One `RTCPeerConnection` per chat with the `ghostly/1` DataChannel. Its signals (`_rtc`) ride the chat's signed Pkarr record.
-- STUN: Google's public servers (`packages/core/src/callSignal.ts`). A TURN server is optional: Settings, Advanced, Network.
+- STUN: Google's public servers (`packages/core/src/callSignal.ts`).
+- TURN: your own, optional, per profile in Settings, Advanced, Network ([WISP 101](wisps/101-webrtc.md#your-own-turn-server)): a `turn:` or `turns:` URL, a username and a credential. It is added after the STUN servers for chats and calls, on the web app, the extension, Desktop and the CLI, and the Linux Desktop's native calls wait for its relay candidate before they ring. The relay sees only encrypted packets and the two addresses. Backups leave the credential out, so a restored profile asks for it again.
 - Calls always use a WebRTC connection of their own, whatever carries the chat ([WISP 601](wisps/601-webrtc-media.md#paired-profile)). The Linux Desktop, whose WebView has no WebRTC, runs that connection itself (WebRTC in Rust, media in GStreamer): the same calls on the same wire ([WISP 601](wisps/601-webrtc-media.md#desktop-on-linux)).
 
 ### Iroh
 
 - **Desktop:** native Iroh (`native/transports/`, `apps/desktop/src/paired_transport.rs`), homed on the Iroh relays of Settings, Network when some are set, else on n0's public relays. `GHOSTLY_IROH_RELAYS` (comma-separated URLs) replaces n0's where no relay is set (tests, a self-hosted `iroh-relay`).
 - **Web and extension** ([#225](https://github.com/MiguelMedeiros/ghostly/pull/225)): the same Iroh 1.3 built for browsers (`native/transports/iroh-web`, shipped as `packages/iroh-web`). A page cannot send UDP, so every packet goes through an Iroh relay. The QUIC/TLS session is still end to end.
-- Default Iroh relays (`DEFAULT_IROH_RELAYS` in `packages/browser/src/platform/irohWeb.ts`), editable in Settings, Advanced, Network (up to four):
+- Default Iroh relays (`DEFAULT_IROH_RELAYS` in `packages/browser/src/platform/irohWeb.ts`), editable in Settings, Advanced, Network (up to four). The web app, the extension and Desktop (#1193) all take that list, so a page and a Desktop on a self-hosted relay share it; a standby Desktop ([WISP 06](wisps/06-devices.md)) uses the copy in its device record:
   - `https://use1-1.relay.n0.iroh.link/`
   - `https://euc1-1.relay.n0.iroh.link/`
   - `https://aps1-1.relay.n0.iroh.link/`

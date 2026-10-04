@@ -80,6 +80,38 @@ export function SpaceSection({ t, w, ids, shotLabel }: { t: HomeCopy["space"]; w
 
               <article className="sp-feature">
                 <div className="sp-feature-head">
+                  <h3 className="h-card">{t.devices.title}</h3>
+                </div>
+                <div className="sp-flow">
+                  <div className="sp-box">
+                    <strong>
+                      <Icon name="desktop" /> {t.devices.active}
+                    </strong>
+                    <ul>
+                      {t.devices.activeItems.map((x) => (
+                        <li key={x}>{x}</li>
+                      ))}
+                    </ul>
+                  </div>
+                  <span className="sp-arrow" aria-hidden="true">
+                    ⇄
+                  </span>
+                  <div className="sp-box sp-box--where">
+                    <strong>
+                      <Icon name="phone" /> {t.devices.standby}
+                    </strong>
+                    <ul>
+                      {t.devices.standbyItems.map((x) => (
+                        <li key={x}>{x}</li>
+                      ))}
+                    </ul>
+                  </div>
+                </div>
+                <p className="caption sp-note">{t.devices.note}</p>
+              </article>
+
+              <article className="sp-feature">
+                <div className="sp-feature-head">
                   <h3 className="h-card">{t.backup.title}</h3>
                 </div>
                 <div className="sp-flow">

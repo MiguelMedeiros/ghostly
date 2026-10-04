@@ -12,7 +12,7 @@ A WISP (Wire Interoperability Specification Proposal) is a design document for o
 | 03 | Foundations | [Capability Negotiation](03-capabilities.md) | Contract | Draft | Available |
 | 04 | Foundations | [Local Profiles](04-profiles.md) | Contract | Draft | Available |
 | 05 | Foundations | [Profile Backups](05-backups.md) | Contract | Draft | Available |
-| 06 | Foundations | [One Profile on Several Devices](06-devices.md) | Contract | Draft | Planned |
+| 06 | Foundations | [One Profile on Several Devices](06-devices.md) | Contract | Draft | Available |
 | 100 | Transports | [Transport Negotiation](100-transports.md) | Contract | Draft | Available |
 | 101 | Transports | [WebRTC](101-webrtc.md) | Adapter | Draft | Available |
 | 102 | Transports | [Iroh](102-iroh.md) | Adapter | Draft | Available |

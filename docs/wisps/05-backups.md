@@ -9,7 +9,7 @@
 | Implementation | Experimental: web, desktop and browser extension clients; the headless CLI seals its own profile folder in the same envelope, restored only by the CLI ([11xx](11xx-headless.md)) |
 | Summary | Bring a whole profile back from one bundle, sealed with a passphrase unless the person chooses otherwise. |
 | Availability | Available |
-| Notes | Web, desktop and extension; the CLI backs up its own profiles to a file. A light backup leaves the larger files out. A restore always creates a new profile; nothing is overwritten. |
+| Notes | Web, desktop and extension; the CLI backs up its own profiles to a file. A light backup leaves the larger files out. A restore always creates a new profile; nothing is overwritten. A profile used on several devices is not started from a backup while another device is active: the app offers to add this device or take over instead. |
 | Feature | [Your space](https://ghostly.tools/#space) |
 
 > This is a review draft. Candidate numbers and formats are not registered standards. Normative language describes a candidate requirement, not a shipped guarantee. See the [catalogue](README.md).

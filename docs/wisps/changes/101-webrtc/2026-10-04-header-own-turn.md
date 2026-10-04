@@ -1,0 +1,1 @@
+The header names the person's own TURN server of revision 2026-10-03: Implementation lists it per profile, the Linux Desktop's native calls included, and Notes say it is set in Settings for chats and calls, after the public STUN servers. No change to the wire.
