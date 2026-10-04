@@ -1550,7 +1550,15 @@ export class GhostlyNode implements EngineImplementation {
     }, after);
   }
 
-  private async readRestoredTurn(): Promise<"wait" | "done"> {
+  /** The read of a restored copy's turn in flight: one at a time, so two can never both write its standby record. */
+  private restoreReading: Promise<"wait" | "done"> | null = null;
+
+  private readRestoredTurn(): Promise<"wait" | "done"> {
+    this.restoreReading ??= this.readRestoredTurnNow().finally(() => { this.restoreReading = null; });
+    return this.restoreReading;
+  }
+
+  private async readRestoredTurnNow(): Promise<"wait" | "done"> {
     if (this.shuttingDown || !this.limitedMode) return "done";
     const mark = await this.restoreMark();
     // The mark went (another page of this profile settled it): what that page decided holds; read the gate again.

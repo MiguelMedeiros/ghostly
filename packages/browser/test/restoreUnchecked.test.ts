@@ -102,15 +102,15 @@ describe("a restored copy whose turn was not read", () => {
     const onDeviceGate = vi.fn();
     const node = new GhostlyNode({ onState: vi.fn(), onMessages: vi.fn(), onCallSignal: vi.fn(), onDeviceGate }, { transport, automaticWallets: false });
     nodes.push(node);
-    // The profile's DID leads to the first device-set secret; a phone holds the turn there.
-    vi.spyOn(node as unknown as { readRestoredTurn(): Promise<string> }, "readRestoredTurn").mockResolvedValueOnce("wait");
+    // The read the start schedules waits on a timer this test holds: the read below is the only one.
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     await node.start();
+    // The profile's DID leads to the first device-set secret; a phone holds the turn there.
     const seed = await (node as unknown as { did: { deviceSetSeed(): Promise<Uint8Array> } }).did.deviceSetSeed();
     const keys = turnKeys(firstDeviceSetSecret(seed));
     const phone = identityFromSeed(new Uint8Array(32).fill(7));
     const slots = [{ key: phone.publicKey, name: "Phone" }, null, null, null];
     network.seed(await signTurnPacket(keys, { turn: 40, rev: 0, author: 0, active: 0, slots, instance: new Uint8Array(8).fill(1) }, (bytes) => sign(bytes, phone.seed)));
-    vi.mocked((node as unknown as { readRestoredTurn(): Promise<string> }).readRestoredTurn).mockRestore();
     await (node as unknown as { readRestoredTurn(): Promise<string> }).readRestoredTurn();
     const record = await readDeviceRecord(databaseName());
     expect(record).toMatchObject({ state: "standby", copy: "restored", activeSlot: 0, ownSlot: 1, turn: 40 });
@@ -127,9 +127,8 @@ describe("a restored copy whose turn was not read", () => {
     const node = new GhostlyNode({ onState: vi.fn(), onMessages: vi.fn(), onCallSignal: vi.fn() }, { transport, automaticWallets: false });
     nodes.push(node);
     const inner = node as unknown as { readRestoredTurn(): Promise<string>; restoreCheck: string | null };
-    vi.spyOn(inner, "readRestoredTurn").mockResolvedValueOnce("wait");
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     await node.start();
-    vi.mocked(inner.readRestoredTurn).mockRestore();
     const peek = await import("../src/devices/restoreGuard");
     vi.spyOn(peek, "peekTurn").mockResolvedValue({ result: "tombstone" });
     await inner.readRestoredTurn();
