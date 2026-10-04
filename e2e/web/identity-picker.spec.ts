@@ -59,6 +59,9 @@ test("the picker holds together on a phone: the category goes under the name, th
   const add = alice.page.getByTestId("add-identity");
   const card = add.getByTestId("add-identity-card-ssh-gitlab");
   await expect(card).toBeVisible();
+  // On a phone the picker is a sheet that slides up (`sheet-up`): boxes read one after another while it moves
+  // do not compare. Measure once it has come to rest.
+  await add.evaluate(el => Promise.all(el.getAnimations({ subtree: true }).map(a => a.finished.catch(() => {}))));
   // Under the name, not wrapped beside it: the same for every card at this width.
   for (const id of ["nostr", "ssh-gitlab"]) {
     const name = (await add.getByTestId(`add-identity-${id}`).getByText(id === "nostr" ? "Nostr" : "GitLab (SSH key)", { exact: true }).boundingBox())!;
