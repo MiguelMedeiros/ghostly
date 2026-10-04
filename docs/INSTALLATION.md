@@ -13,6 +13,10 @@ Open **https://app.ghostly.tools** in any modern browser.
 - Keys and wallets live in that browser. What a web page can and cannot do, and how to host it yourself: [WEB.md](WEB.md).
 - **Self-hosted:** `docker compose -f infra/docker-compose.yml up -d` in a clone serves the web app on `localhost:8080` ([WEB.md](WEB.md#run-it)).
 
+## Android
+
+The Android app is the web app in a Trusted Web Activity: a small APK with its own icon that opens app.ghostly.tools full screen, with the web app's limits (no native Iroh, no direct HyperDHT). Releases attach it once its signing key is set up; until then, CI builds a debug APK to try it, never to publish. Details: [ANDROID.md](ANDROID.md). Installing the web app from Chrome, above, gives the same app today.
+
 ## Browser extension (Chrome, Brave, Edge)
 
 **From the Chrome Web Store:** [Ghostly](https://chromewebstore.google.com/detail/ghostly/nbedaagicniejlmfcncndfjcejaidbcf). Chrome keeps it up to date. The store version can trail the GitHub release while a new one is in review.
