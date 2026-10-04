@@ -5679,6 +5679,10 @@ export class GhostlyNode implements EngineImplementation {
     throw new Error("handoff-refused: This device is the active one.");
   }
 
+  async deviceHandoffSettle(): Promise<HandoffView | null> {
+    throw new Error("handoff-refused: This device is the active one.");
+  }
+
   /** A forced takeover is a standby's: the active device offers none. */
   deviceTakeoverInfo(): { offered: boolean } {
     return { offered: false };

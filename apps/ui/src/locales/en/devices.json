@@ -66,6 +66,7 @@
       "payment": "A payment is still going through. Try again in a moment.",
       "refused": "{{device}} does not let this device take the profile.",
       "room": "Not enough space on this device.",
+      "settle": "Can't check which device is active. Check your connection, then try again.",
       "stalled": "The move stopped: no answer from {{device}} for 2 minutes. Nothing changed, and files already copied are kept.",
       "turn": "Another device took over. This device is on standby.",
       "unreachable": "Can't reach {{device}}. It must be on, with Ghostly open.",

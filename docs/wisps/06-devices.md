@@ -585,7 +585,8 @@ One handoff at a time per profile: a second request gets `handoff-busy`.
 | `taking` | Settle read says `mine` | Writes `active`, starts, sends `handoff-done` | `active` |
 | `taking` | Read says `other` or `clone` | Moves the registry pointer back, drops the staged state | `standby` |
 | `taking` | Read says `tombstone` | The same, then as the tombstone says | `moving` or `removed` |
-| `taking` | Read is `unreachable`, `closed`, or a settle read that a source which took the put did not answer | Waits and tries again; shows "Finishing: waiting for the network" | `taking` |
+| `taking` | Read is `unreachable`, `closed`, or a settle read that a source which took the put did not answer | Waits and tries again; shows "Finishing: waiting for the network". A read again that took longer than `P` puts nothing, and waits as well | `taking` |
+| `taking` | No settled read (`mine`, or a turn above the release) within 2 minutes of the install or of Try again, a take that never answers included | Stops trying: "Can't check which device is active. Check your connection, then try again." with Try again, which takes again for 2 minutes more. A take still out is not dropped: its answer, when it comes, is acted on. Nothing is undone: the release is still this device's | `taking` |
 | `taking` | Settle read says `behind` or `none` (the put was lost) | Starts again at the read before the put, and waits `T` again | `taking` |
 | `taking` | The app restarts during the wait | Reads, puts the same stored bytes, waits the whole of `T` again | `taking` |
 
@@ -840,6 +841,7 @@ The account switcher ([04](04-profiles.md)) shows such a profile with the word "
 | A wallet that stays home | "<wallet> can't be used here. Use it on <device>." and, for Ark and Bark, "Coins expire on <date>. Use Ghostly on <device> before then." (a notice, not a failure) |
 | Coins about to expire | "Renew your <wallet> coins first." |
 | The turn cannot be read | "Can't check which device is active. Check your connection." |
+| The taking device's settle read, not within 2 minutes | "Can't check which device is active. Check your connection, then try again." with "Try again" |
 
 **Forced takeover**
 

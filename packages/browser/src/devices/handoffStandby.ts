@@ -165,6 +165,7 @@ export async function standbyHandoff(options: StandbyHandoffOptions): Promise<De
             return taker.pull(p.password as string, later);
           })();
         case "deviceHandoffAccept": return taker.accept(later);
+        case "deviceHandoffSettle": return taker.settle();
         case "deviceHandoffCancel": return Promise.all([taker.cancel(), giver.cancel()]).then(() => null);
         case "deviceHandoffView": return Promise.resolve(taker.view() ?? giver.view());
         default: return undefined;
