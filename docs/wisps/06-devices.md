@@ -187,7 +187,7 @@ It is shown as a QR code and as a code to copy, through the existing `JoinDialog
 
 1. `B → A` `{"t":"enroll-hello","k":"<B's device signing key>","name":"Phone","kind":"web","app":"1.1.0","s":"<signature>"}`, signed with B's device signing key over `["ghostly-enroll", transcriptHash, A's key, B's key]`. The transcript hash is the session's ([401](401-paired-chat.md)); device signing keys are not in it, which is why both are signed in here.
 2. `A → B` `{"t":"enroll-proof","s":"<signature>"}`, the same tuple signed with A's device signing key. B checks it against the key in the invite.
-3. Both compute six digits: the first 20 bits of `SHA-256("ghostly-enroll-digits" || transcriptHash || A's key || B's key)`, as a decimal number modulo 1,000,000.
+3. Both compute six digits: the first 32 bits of `SHA-256("ghostly-enroll-digits" || transcriptHash || A's key || B's key)`, big-endian, as a decimal number modulo 1,000,000 with leading zeros. The transcript hash goes in as its 32 bytes. Not 20 bits: 2^20 is 1,048,576, so modulo a million the values under 48,576 would come up twice as often as the rest; with 32 bits the bias is about one part in 4,295.
 4. The person confirms on A that both screens show the same digits.
 5. `A → B` `{"t":"enroll-grant","d":"<D>","set":[[key, name], ...],"turn":N,"rev":R}`. B stores it durably as `standby` and answers `{"t":"enroll-done"}`.
 6. A publishes the turn record with B listed. Only then is B a device.
@@ -535,7 +535,7 @@ All frames travel on a device link only, under a capability `handoff/1` that onl
 | `handoff-request` | B | `{"turn":N}` |
 | `handoff-offer` | A | `{"turn":N}`; B answers with `handoff-request` once the person agrees |
 | `handoff-busy` | A | `{"why":"handoff" or "payment" or "call" or "locked-out","retry":<seconds>}` |
-| `handoff-pake` | both | `{"n":1 to 3,"m":"<base64url>"}`, the three messages of the password proof |
+| `handoff-pake` | both | `{"n":1 to 3,"m":"<base64url>"}`, the three OPAQUE messages of the password proof; frame 3 also carries `"c"`, the context proof, or `"wrong":true` when the taker found the password wrong |
 | `handoff-have` | B | `{"part":"<name>"}`: a file part, sent first, holding the 32-byte digests of the files B holds, sorted |
 | `handoff-manifest` | A | `{"pass":1 or 2,"parts":[[name, size, sha256], ...]}` |
 | `handoff-verified` | B | `{"h":"<H>","s":"<B's signature over [\"ghostly-handoff-verified\", turnAddress, N + 1, H]>"}` |
@@ -593,12 +593,12 @@ One handoff at a time per profile: a second request gets `handoff-busy`.
 
 The active device is often unattended (the desktop at home while the person is out), so it cannot be asked to confirm. A pull is authorized by the device link (the device signing keys of the turn record) **and** by the profile's lock password, typed on the taking device and proven to the active one without sending it:
 
-- **Protocol:** SPAKE2+ ([RFC 9383](https://www.rfc-editor.org/rfc/rfc9383)), suite P256-SHA256-HKDF-SHA256-HMAC-SHA256, an augmented exchange: the active device stores a verifier, not the password. The verifier is made when the lock password is set or changed, from the password with PBKDF2-SHA256, 600,000 rounds and its own salt, and it moves with the profile. The taker gets the salt in the first message.
-- **Binding:** the exchange's context is `"ghostly-handoff/1" || turnAddress || A's key || B's key || the session's transcript hash`. Its shared key goes into the stream key ([Frames](#frames)), so on a pull the state is unreadable without the password even to someone who broke the link.
+- **Protocol:** OPAQUE ([RFC 9807](https://www.rfc-editor.org/rfc/rfc9807)) with ristretto255 and Argon2id, an augmented exchange: the active device stores a verifier, not the password, and a stolen verifier still costs a dictionary attack. The build uses `@serenity-kit/opaque`, the Rust crate `opaque-ke` compiled to WebAssembly (an earlier version of the crate was audited by NCC Group in 2021), loaded only when a handoff or a verifier needs it. The verifier is the server setup and the registration record, made on the active device when the person types the lock password (Add a device, the password set or changed), and it moves with the profile in its settings. A new verifier replaces one only when the current password proves itself against it, the same way a pull does. The password is stretched with Argon2id on the taking device, which is memory-hard. The three messages are the three `handoff-pake` frames: `B → A` the login request, `A → B` the login response, `B → A` the finishing message.
+- **Binding:** the context is `"ghostly-handoff/1" || turnAddress || A's key || B's key || the session's transcript hash`. OPAQUE's identifiers are sealed into the envelope at registration and cannot name a session, so the context is bound in two other ways: frame 3 carries `c = HMAC-SHA256(K, "ghostly-handoff-context/1" || context)`, which A checks, and the shared key `K` goes into the stream key ([Frames](#frames)), so on a pull the state is unreadable without the password even to someone who broke the link.
 - **Attempts:** the active device counts failures per taking device. After 5 in an hour it answers `handoff-busy` `locked-out` for an hour; after 15 with no success between them it refuses that device until the person, on the active device, chooses "Let <device> try again". Every failure raises a notice on the active device: "<device> tried to move this profile with a wrong password."
 - **What it protects:** a stolen standby with no copy cannot pull the profile, and gets a handful of guesses. It does not protect a frozen copy: that data is already on the stolen device, unencrypted.
 
-The protocol choice is a candidate; a reviewer of the implementation may prefer another augmented exchange, with the same binding and limits.
+Why OPAQUE and not SPAKE2+ (RFC 9383, the first draft's choice, with PBKDF2-SHA256): no maintained, reviewed JavaScript implementation of SPAKE2+ exists, and writing one would mean building a protocol from primitives. OPAQUE gives the same properties that matter here (augmented, three messages, a shared key to bind), comes from a reviewed library, and stretches the password with a memory-hard function.
 
 ### Versions
 
@@ -1049,7 +1049,7 @@ A client that implements this WISP MUST:
 
 ## References
 
-[Profiles](04-profiles.md), [backups](05-backups.md), [peer keys](02-peer-keys.md), [invites](800-invite-join.md), [store-and-forward](4xx-store-and-forward.md), [storage](1000-storage.md), [payments](200-payments.md), [wallets](../WALLETS.md), [DHT delivery](../DHT-DELIVERY.md), [the web app](../WEB.md). [BEP 44](https://www.bittorrent.org/beps/bep_0044.html) for the sequence number and `cas`; [Pkarr](https://pkarr.org); [RFC 9383](https://www.rfc-editor.org/rfc/rfc9383) (SPAKE2+).
+[Profiles](04-profiles.md), [backups](05-backups.md), [peer keys](02-peer-keys.md), [invites](800-invite-join.md), [store-and-forward](4xx-store-and-forward.md), [storage](1000-storage.md), [payments](200-payments.md), [wallets](../WALLETS.md), [DHT delivery](../DHT-DELIVERY.md), [the web app](../WEB.md). [BEP 44](https://www.bittorrent.org/beps/bep_0044.html) for the sequence number and `cas`; [Pkarr](https://pkarr.org); [RFC 9807](https://www.rfc-editor.org/rfc/rfc9807) (OPAQUE).
 
 ## Revision log
 
