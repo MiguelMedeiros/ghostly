@@ -5379,6 +5379,8 @@ export class GhostlyNode implements EngineImplementation {
     });
     this.handoffGiver = giver;
     links.setHandoff({ receive: (from, frame) => void giver.receive(from, frame), linkChanged: (key, live) => giver.linkChanged(key, live), stop: () => giver.stop() });
+    // Back to active after a move whose copy stopped: the Devices section says so (WISP 06 § Handoff progress, Failures).
+    await giver.resume().catch(() => {});
   }
 
   private static readonly HANDOFF_VERIFIER = "handoffVerifier";

@@ -59,6 +59,7 @@
       "payment": "仍有一笔付款正在进行。请稍后再试。",
       "refused": "{{device}} 不允许此设备接管该资料。",
       "room": "此设备空间不足。",
+      "stalled": "迁移已停止:{{device}} 2 分钟没有响应。没有任何改变,已复制的文件会保留。",
       "turn": "另一台设备已接管。此设备处于待机状态。",
       "unreachable": "无法连接 {{device}}。它需要开机并打开 Ghostly。",
       "version": "Ghostly 在此期间已更新。没有任何改变。",
@@ -97,6 +98,7 @@
       "switching": "正在切换"
     },
     "title": "正在迁移你的资料",
+    "tryAgain": "重试",
     "useHere": "在此使用",
     "useHereTitle": "在此使用该资料",
     "verifierFailed": "无法为迁移资料设置此密码。请再试一次。",
