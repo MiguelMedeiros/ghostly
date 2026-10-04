@@ -52,6 +52,9 @@ export async function standbyEngine(gate: DeviceGate, options: NodeOptions | und
     createPeerConnection: network.createPeerConnection,
     pollIntervals: options?.pollIntervals,
     nativeTransports: {
+      // HyperDHT through the person's relay where this app runs none of its own, as the engine's chats (`nativeFactories`).
+      ...(network.hyperdhtRelay && !options?.nativeTransports?.["hyperdht/1"]
+        ? { "hyperdht/1": async (seedB64: string) => (await import("../platform/hyperdhtRelay")).createRelayedHyperEndpoint(seedB64, network.hyperdhtRelay!) } : {}),
       ...options?.nativeTransports,
       ...(options?.irohWeb ? { "iroh/1": (seedB64: string) => createIrohWebEndpoint(seedB64, { relays: irohRelays }) } : {}),
     },

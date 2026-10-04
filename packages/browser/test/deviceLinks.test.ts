@@ -232,6 +232,52 @@ describe("the device links of a profile on this device", () => {
     expect(await settled(phone.links.ping(desktop.slot.key))).toBeGreaterThanOrEqual(0);
   });
 
+  it("offer HyperDHT where only it goes through, and start again a native transport that did not start", async () => {
+    // The Linux Desktop has no WebRTC; the page's Iroh is on a relay the Desktop cannot reach (two Iroh worlds), so
+    // HyperDHT is the only way through. The page's HyperDHT relay does not answer the first time.
+    const linuxIroh = new NativeWorld(), pageIroh = new NativeWorld(), dht = new NativeWorld();
+    for (const world of [linuxIroh, pageIroh, dht]) world.hexIds = true;
+    let refused = 0;
+    const d = newDeviceSetSecret();
+    const desktop = await makeDevice("Linux", { createPeerConnection: undefined, nativeTransports: {
+      "iroh/1": async () => linuxIroh.endpoint("iroh/1", "Linux"), "hyperdht/1": async () => dht.endpoint("hyperdht/1", "Linux"),
+    } });
+    const page = await makeDevice("Page", { nativeTransports: {
+      "iroh/1": async () => pageIroh.endpoint("iroh/1", "Page"),
+      "hyperdht/1": async () => { if (refused++ === 0) throw new Error("The HyperDHT relay did not let this chat listen"); return dht.endpoint("hyperdht/1", "Page"); },
+    } });
+    await write(page, "active", d, [page, desktop]);
+    await write(desktop, "standby", d, [page, desktop]);
+    await settled(Promise.all([desktop.links.start(), page.links.start()]));
+    expect(await until(() => liveBetween(desktop, page), 180_000)).toBe(true);
+    expect(refused).toBe(2);
+    expect(page.links.views()[0].transport).toBe("hyperdht/1");
+    expect(desktop.links.views()[0].transport).toBe("hyperdht/1");
+  });
+
+  it("use a HyperDHT relay set after the links started", async () => {
+    const linuxIroh = new NativeWorld(), pageIroh = new NativeWorld(), dht = new NativeWorld();
+    for (const world of [linuxIroh, pageIroh, dht]) world.hexIds = true;
+    let relay = false;
+    const d = newDeviceSetSecret();
+    const desktop = await makeDevice("Linux", { createPeerConnection: undefined, nativeTransports: {
+      "iroh/1": async () => linuxIroh.endpoint("iroh/1", "Linux"), "hyperdht/1": async () => dht.endpoint("hyperdht/1", "Linux"),
+    } });
+    // As the engine gives them: asked each time, with HyperDHT only once the person set a relay.
+    const page = await makeDevice("Page", { nativeTransports: () => ({
+      "iroh/1": async () => pageIroh.endpoint("iroh/1", "Page"),
+      ...(relay ? { "hyperdht/1": async () => dht.endpoint("hyperdht/1", "Page") } : {}),
+    }) });
+    await write(page, "active", d, [page, desktop]);
+    await write(desktop, "standby", d, [page, desktop]);
+    await settled(Promise.all([desktop.links.start(), page.links.start()]));
+    expect(await until(() => liveBetween(desktop, page), 30_000)).toBe(false);
+    relay = true;
+    page.links.nativeChanged();
+    expect(await until(() => liveBetween(desktop, page), 120_000)).toBe(true);
+    expect(page.links.views()[0].transport).toBe("hyperdht/1");
+  });
+
   it("give no old link to a key the current set does not list, whatever the list of devices still to acknowledge says", async () => {
     const oldD = newDeviceSetSecret(), newD = newDeviceSetSecret();
     const desktop = await makeDevice("Desktop"), phone = await makeDevice("Phone"), lost = await makeDevice("Lost");

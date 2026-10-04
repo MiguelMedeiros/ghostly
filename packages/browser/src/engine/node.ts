@@ -4924,7 +4924,7 @@ export class GhostlyNode implements EngineImplementation {
     if (wasOnline && !this.networkOn) await this.hold.stop();
     // A profile with a device set: its standbys go through these relays and servers, and stay off with the network.
     const gate = knownDeviceGate();
-    if (((gate && gate.state !== "single") || this.deviceLinks) && (["online", "relays", "readRelays", "irohRelays", "iceServers", "pushRelay"] as const).some((key) => key in settings)) {
+    if (((gate && gate.state !== "single") || this.deviceLinks) && (["online", "relays", "readRelays", "irohRelays", "iceServers", "pushRelay", "hyperdhtRelay"] as const).some((key) => key in settings)) {
       await this.syncDeviceNetwork().catch(() => {});
     }
     this.emitState();
@@ -5046,7 +5046,8 @@ export class GhostlyNode implements EngineImplementation {
     if (!this.deviceLinks) {
       this.deviceLinks = new DeviceLinks({
         profile: databaseName(), transport: this.transport, turn: this.turnNetwork(), pollIntervals: this.pollIntervals,
-        createPeerConnection: this.devicePeerConnection(), nativeTransports: this.nativeFactories, offline: !this.networkOn,
+        // Asked each time a link starts its endpoints: a HyperDHT relay set later is used (enrollment gets it fresh too).
+        createPeerConnection: this.devicePeerConnection(), nativeTransports: () => this.nativeFactories, offline: !this.networkOn,
         onChange: () => { this.emitState(); this.askDeviceRenewals(); this.syncDeviceTokens(); },
         onDeviceWake: (from, target) => this.deviceWakeReceived(from, target),
         pushSend: (request) => this.postPush(request),
@@ -6361,6 +6362,7 @@ export class GhostlyNode implements EngineImplementation {
   /** New Iroh relays: idle endpoints move now; one carrying a chat keeps its relay until that session ends. */
   private async rehomeIroh(): Promise<void> {
     if (!this.options.irohWeb) return;
+    this.deviceLinks?.nativeChanged();
     for (const [linkId, live] of this.links) {
       const link = live.link;
       if (!link?.availableTransports.includes("iroh/1") || !link.canReleaseEndpoint("iroh/1")) continue;
@@ -6403,6 +6405,8 @@ export class GhostlyNode implements EngineImplementation {
   /** A new relay (or none): chats give up their endpoints on the old one, as soon as none of them carries a session. */
   private async relayChanged(): Promise<void> {
     if (!this.relaysHyperdht) return;
+    // A device link offers HyperDHT through the new relay too, where it runs native endpoints.
+    this.deviceLinks?.nativeChanged();
     for (const [linkId, live] of this.links) {
       const link = live.link;
       if (!link?.availableTransports.includes("hyperdht/1")) {
