@@ -498,7 +498,7 @@ export function Settings() {
             )}
           </Row>
         )}
-        <ForkRows />
+        <ForkRows forks={devices?.forks} />
         <Row label={t("sidebar.deleteAllChats")} hint={confirmDeleteChats ? t("settings.deleteAllChatsConfirm", { count: chatCount }) : t("settings.deleteAllChatsHint")}>
           {confirmDeleteChats ? <>
             <Button variant="danger" data-testid="delete-all-chats-confirm" onClick={deleteChats}>{t("common.confirm")}</Button>

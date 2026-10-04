@@ -118,10 +118,8 @@ describe("a replaced device (WISP 06 § User experience: \"Use here\", \"It wasn
   });
 
   it("keeps what only it held as Only on this device in Data and storage, until Discard is pressed twice", async () => {
-    let forks = ["ghostly_oldcopy"];
-    const { user, engine } = renderApp(<ForkRows />);
-    engine.on("deviceSet", () => ({ state: "active", devices: [], ...(forks.length ? { forks } : {}) }));
-    engine.on("deviceForkDiscard", () => { forks = []; return undefined; });
+    const { user, engine } = renderApp(<ForkRows forks={["ghostly_oldcopy"]} />);
+    engine.on("deviceForkDiscard", () => undefined);
     const row = await screen.findByTestId("settings-fork");
     expect(row).toHaveTextContent("Only on this device");
     await user.click(screen.getByTestId("settings-fork-discard"));
