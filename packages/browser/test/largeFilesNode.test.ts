@@ -408,3 +408,52 @@ it("a received file is placed where its offer came: a text that comes right afte
   // The time its sender says is kept beside its place, as a text's is.
   expect(rows[0].sentAt).toBeTypeOf("number");
 });
+
+/**
+ * A file the contact said on the DHT floor while away (WISP 403 § Files): its bubble is in its place at once, waiting
+ * for its bytes, and the files/3 offer that comes live under the same wire id takes it over. The floor's envelope is
+ * handed to the engine as `DhtDelivery` hands it (`onFileAnnounced`), since this harness has no DHT.
+ */
+type Announcer = { fileAnnounced(linkId: string, file: { wireId: string; name: string; size: number; mime: string; timestamp: number }, packet: { seq: number; issued: number; expires: number; packetBytes: number; nonce: string; recordKey: string; records: string[] }): Promise<void> };
+const announce = (t: Awaited<ReturnType<typeof setup>>, wireId: string, size: number) => (t.node() as unknown as Announcer).fileAnnounced(t.id,
+  { wireId, name: `${wireId}.bin`, size, mime: "application/octet-stream", timestamp: Date.now() },
+  { seq: 1, issued: Date.now(), expires: Date.now() + 300_000, packetBytes: 992, nonce: "n", recordKey: "k", records: [] });
+
+it("a file said on the DHT floor shows in its place at once; its offer live takes that bubble, after a restart too", async () => {
+  const t = await setup();
+  await announce(t, "floor-0001", 20_000);
+  const said = (await db.getMessages(t.id)).find((m) => m.id === "peer_floor-0001");
+  expect(said).toMatchObject({ sender: "peer", via: "pkarr", file: { name: "floor-0001.bin", size: 20_000 } });
+  // Waiting for its bytes, with nothing to pause or cancel here yet.
+  expect(t.node().getState().transfers[said!.file!.id]).toEqual({ state: "transferring", stage: "waiting", transferred: 0, size: 20_000 });
+  expect(await t.contact.sendMessage("after the file", Date.now(), toBase64Url(randomBytes(16)))).toBeNull();
+  await vi.waitFor(async () => expect((await db.getMessages(t.id)).filter((m) => m.sender === "peer")).toHaveLength(2));
+  await t.restartApp();
+  expect(t.node().getState().transfers[said!.file!.id]).toMatchObject({ state: "transferring", stage: "waiting" });
+  t.offer("floor-0001", 20_000);
+  await vi.waitFor(() => expect(t.node().getState().transfers[said!.file!.id]).toMatchObject({ state: "done", transferred: 20_000 }), { timeout: 20_000 });
+  const rows = (await db.getMessages(t.id)).filter((m) => m.sender === "peer").sort((a, b) => a.timestamp - b.timestamp);
+  // One bubble, still above the text that came after it, now the file the offer said.
+  expect(rows.map((m) => (m.file ? `file ${m.file.id}` : m.text))).toEqual([`file ${said!.file!.id}`, "after the file"]);
+  expect(rows[0]).toMatchObject({ via: "datalink", details: { wire: { protocol: "files/3" } } });
+  expect(await (await fileBytes()).digest(said!.file!.id)).toBe(digestOf(20_000));
+}, 60_000);
+
+it("the floor's copy of a file whose offer came first makes no second bubble", async () => {
+  const t = await setup();
+  t.offer("first-0001", 20_000);
+  await vi.waitFor(async () => expect((await t.incoming("first-0001"))?.transfer).toMatchObject({ state: "done" }), { timeout: 20_000 });
+  await announce(t, "first-0001", 20_000);
+  expect((await db.getMessages(t.id)).filter((m) => m.file)).toHaveLength(1);
+}, 60_000);
+
+it("a file said on the floor and cancelled by its sender before it went live says so", async () => {
+  const t = await setup();
+  await announce(t, "gone-00001", 1_000);
+  const fileId = (await db.getMessages(t.id)).find((m) => m.id === "peer_gone-00001")!.file!.id;
+  expect(t.contact.sendFilesFrame({ t: "pf-abort", id: "gone-00001" })).toBe(true);
+  await vi.waitFor(() => expect(t.node().getState().transfers[fileId]).toMatchObject({ state: "failed", error: "Cancelled by the sender" }));
+  // And stays so after a restart.
+  await t.restartApp();
+  expect(t.node().getState().transfers[fileId]).toMatchObject({ state: "failed", error: "Cancelled by the sender" });
+}, 60_000);

@@ -146,6 +146,11 @@ export interface StoredFile {
   wire3?: import("@ghostly/core").FileTransferRecord;
   /** Its bytes were left out of the light backup this profile was restored from (WISP 05 § Light backups). */
   leftOut?: boolean;
+  /**
+   * A file the contact said on the DHT floor (WISP 403 § Files), by its wire id: its bubble waits for its offer on the
+   * live session, and no byte is here yet. Gone once the offer came (`wireId` and `wire3` then).
+   */
+  announced?: string;
 }
 
 /** The fields of a stored file that change after it is stored: kept in `STORES.fileState`, read over the record's own. */

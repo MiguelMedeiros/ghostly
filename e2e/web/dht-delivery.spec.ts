@@ -155,3 +155,28 @@ test("DHT only chosen by one side: every text of a burst from the other side arr
     for (const n of [1, 2, 3]) await expect(delivered(chat(p).locator("[data-message-row]").filter({ hasText: `from ${from} ${n}` }))).toBeVisible({ timeout: 60_000 });
   }
 });
+
+test("DHT only: a file written between two texts shows in its place on the contact's side, and its bytes come once live", { tag: ["@feature:chat.dht.files", "@feature:chat.order"] }, async ({ peer }) => {
+  test.setTimeout(5 * 60_000);
+  const [a, b] = await Promise.all([peer("a"), peer("b")]);
+  await link(a, b);
+  await connect(a, b);
+  await mode(a, true);
+  await expect(b.page.getByTestId("connection-options")).toHaveAccessibleName(/DHT only · chosen by your contact/, { timeout: 60_000 });
+  // While neither side is live: a text, a file, a text. The file's offer takes the floor's one slot in its turn.
+  await say(a, "before the file");
+  await a.page.getByTestId("file-input").setInputFiles({ name: "floor.bin", mimeType: "application/octet-stream", buffer: Buffer.alloc(20_000, 7) });
+  await say(a, "after the file");
+  const bubble = chat(b).getByTestId("file-bubble").filter({ hasText: "floor.bin" });
+  await expect(chat(b).getByText("after the file", { exact: true })).toBeVisible({ timeout: 120_000 });
+  // Its bubble is there before its bytes, waiting, between the two texts.
+  await expect(bubble.getByTestId("file-status")).toHaveText(/Waiting for connection/);
+  const order = await chat(b).locator("[data-message-row]").evaluateAll(rows => rows.map(row => row.querySelector("[data-testid=file-bubble]") ? "file" : row.textContent ?? ""));
+  const at = (match: (row: string) => boolean) => order.findIndex(match);
+  expect(at(r => r.includes("before the file"))).toBeLessThan(at(r => r === "file"));
+  expect(at(r => r === "file")).toBeLessThan(at(r => r.includes("after the file")));
+  // Live again: the offer takes that bubble over, and the bytes come into it.
+  await mode(a, false);
+  await expect(bubble.getByTestId("file-save")).toBeVisible({ timeout: 120_000 });
+  await expect(chat(b).getByTestId("file-bubble").filter({ hasText: "floor.bin" })).toHaveCount(1);
+});
