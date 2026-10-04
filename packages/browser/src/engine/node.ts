@@ -1093,6 +1093,8 @@ export class GhostlyNode implements EngineImplementation {
     // A copy started from older state sends above the copy it replaced, and manages no group until told to (WISP 06).
     seqFloor: () => this.counterFloor,
     adminWork: (groupId) => !this.limitedMode && !this.groupAdminOff.has(groupId),
+    // And only behind a good turn read under 60 seconds old: two active devices would fork the group (WISP 06).
+    adminTurn: (_groupId, options) => this.confirmTurn({ within: options?.wait === false ? 0 : GhostlyNode.TURN_CONFIRM_WAIT_MS }),
     // An app with no WebRTC (the Linux Desktop) reaches members over native listeners, a few of them
     // (`GROUP_NATIVE_SLOTS`): it does not offer to be a private group's hub, which keeps an edge with everyone.
     staysOnline: () => this.options.staysOnline ?? (this.options.platform === "desktop" && typeof RTCPeerConnection !== "undefined"),
@@ -1698,10 +1700,41 @@ export class GhostlyNode implements EngineImplementation {
    * 60 seconds old). A profile on one device has no turn. Otherwise the last good read counts while it is fresh; else
    * the turn is read now, and a read that says another device took over stops this one.
    */
-  private async singleWriterTurn(): Promise<boolean> {
+  private singleWriterTurn(): Promise<boolean> {
+    // The wallets wait for the read however long it takes: they open on its answer, and nobody waits on them meanwhile.
+    return this.confirmTurn({ within: null });
+  }
+
+  /** How long an action that needs a fresh turn read waits for one before it is refused (WISP 06 § When a device checks). */
+  static readonly TURN_CONFIRM_WAIT_MS = 15_000;
+  /** The turn read in flight for `confirmTurn`: callers at the same moment share it. */
+  private turnConfirming: Promise<boolean> | null = null;
+
+  /** Whether this device needs no read now: a profile on one device has no turn, and a good read under 60 seconds old counts. */
+  private turnFresh(): boolean {
     if (this.options.singleDevice || knownDeviceGate()?.state !== "active") return true;
-    if (this.turnGoodAt !== null && Date.now() - this.turnGoodAt <= 60_000) return true;
+    return this.turnGoodAt !== null && Date.now() - this.turnGoodAt <= 60_000;
+  }
+
+  /**
+   * Whether this device may do what needs a good turn read under 60 seconds old (WISP 06 § When a device checks): open a
+   * single-writer wallet, sign a group commit, take door duty. A fresh read counts; else the turn is read now (one read
+   * for every caller of the moment), and a read that says another device took over stops this one. The answer waits
+   * at most `within` ms (`TURN_CONFIRM_WAIT_MS` by default; no answer by then is no; null: as long as the read takes;
+   * 0: not at all). A read still out goes on by itself, and a good one counts for the next ask.
+   */
+  private async confirmTurn({ within = GhostlyNode.TURN_CONFIRM_WAIT_MS }: { within?: number | null } = {}): Promise<boolean> {
+    if (this.turnFresh()) return true;
     if (this.limitedMode || !this.networkOn || this.shuttingDown) return false;
+    const reading = this.turnConfirming ??= this.readTurnForAction().finally(() => { this.turnConfirming = null; });
+    if (within === null) return reading;
+    if (within <= 0) return false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const late = new Promise<boolean>((resolve) => { timer = setTimeout(() => resolve(false), within); });
+    try { return await Promise.race([reading, late]); } finally { clearTimeout(timer); }
+  }
+
+  private async readTurnForAction(): Promise<boolean> {
     const outcome = await (async () => {
       const keeper = await (this.deviceLinks?.turnKeeper() ?? openTurnKeeper(databaseName(), this.turnNetwork()));
       return keeper ? keeper.check(false) : null;
