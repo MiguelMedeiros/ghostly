@@ -294,3 +294,36 @@ describe("what counts as the member's side of an entry session answering (the en
     expect(otherEndSeen(presence(1_000, false), "idle", NOW)).toBe(false);
   });
 });
+
+/**
+ * A hub's own records (its lobby, the beacon it reads and writes) go as the door's bell does: background requests, but
+ * not held to the share they get while a link signals (`PkarrRequestOptions.door`). The members of a hub that left all
+ * ask a hub left at once, and the edges it opens for them signal: held to that share, the hub read its lobby and wrote
+ * its beacon entry late, and the members still asking waited for those edges (CLI daemons on local relays, 2026-10-03).
+ */
+describe("a hub's own lobby and beacon", { timeout: 120_000 }, () => {
+  it("go as its bell does; a member's looks at the beacon do not", async () => {
+    const world = new CommunityWorld();
+    const admin = world.add("admin"), bob = world.add("bob"), carol = world.add("carol");
+    const { id, link } = await community(world, admin);
+    for (const p of [bob, carol]) { await p.groups.joinByLink(link); await world.until(() => world.member(p, id), 5 * 60_000); }
+    await world.run(60_000);
+    const keyOf = (p: Peer) => p.groups.communities.session(id)!.myKey;
+    const rv = admin.groups.communities.session(id)!.state.rv;
+    const beacon = beaconKeys(rv, id).identity.pubKeyZ32;
+    const lobbyOf = (p: Peer) => lobbyKeys(rv, id, keyOf(p)).identity.pubKeyZ32;
+    const hub = [admin, bob, carol].find(p => p.groups.communities.isHub(id))!;
+    const member = [admin, bob, carol].find(p => !p.groups.communities.isHub(id))!;
+    const seen: { who: Peer; op: string; key: string; door: boolean }[] = [];
+    world.onPkarr = (who, op, key, _bg, door) => { seen.push({ who, op, key, door }); };
+    await world.run(70_000);
+    world.onPkarr = null;
+    const ofHub = seen.filter(r => r.who === hub && (r.key === beacon || r.key === lobbyOf(hub)));
+    expect(ofHub.some(r => r.key === lobbyOf(hub) && r.op === "resolve")).toBe(true);
+    expect(ofHub.some(r => r.key === beacon && r.op === "publish")).toBe(true);
+    expect(ofHub.every(r => r.door), "every request of the hub for its lobby and the beacon").toBe(true);
+    const ofMember = seen.filter(r => r.who === member && r.key === beacon);
+    expect(ofMember.length).toBeGreaterThan(0);
+    expect(ofMember.some(r => r.door)).toBe(false);
+  });
+});

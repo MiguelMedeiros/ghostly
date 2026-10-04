@@ -121,7 +121,7 @@ import { deviceIdentity, openTurnKeeper } from "../devices/setup";
 import { moveSet, resumeSetMove, type SetMovePorts } from "../devices/remove";
 import { newDeviceSecretDue } from "../devices/rotate";
 import { peekTurn, type TurnPeek } from "../devices/restoreGuard";
-import { afterStop, planHandoffWallets, type HandoffTakerFacts, type HandoffWalletPlan, type WalletHome } from "../devices/handoffWallets";
+import { afterStop, money, planHandoffWallets, type HandoffTakerFacts, type HandoffWalletPlan, type WalletHome } from "../devices/handoffWallets";
 import { clearWalletHomes, readWalletHomes, writeWalletHomes } from "../devices/walletHomes";
 import { postPush, profileWakeAfter, profileWakeOnRemoval, wakeOwnerOf } from "../devices/push";
 import { MAX_ALLOWED_TOKENS } from "../devices/state";
@@ -1130,7 +1130,7 @@ export class GhostlyNode implements EngineImplementation {
     linkSeen: linkId => { const live = this.links.get(linkId); return otherEndSeen(live?.presence, live?.dataLink); },
     // Its packet is newer than the moment the edge was last up (when this device first read it, so both times are this clock's).
     linkBack: linkId => { const live = this.links.get(linkId); return !!live?.lastSyncAt && !!live.presence?.online && presenceSeenAt(live.presence) > live.lastSyncAt; },
-    publish: (identity, records, background) => this.groupTransport.publish(identity, records, { background }),
+    publish: (identity, records, background, door) => this.groupTransport.publish(identity, records, { background, door }),
     resolve: async (pubKeyZ32, background, door) => (await this.groupTransport.resolve(pubKeyZ32, { background, door }))?.records ?? null,
     expectPeer: linkId => this.links.get(linkId)?.link?.expectPeer(),
     signalIn: (linkId, payload, direct) => !!this.links.get(linkId)?.carried?.accept(payload, direct),
@@ -1805,6 +1805,8 @@ export class GhostlyNode implements EngineImplementation {
     this.deviceLinks = null;
     if (this.tombstoneTimer) clearInterval(this.tombstoneTimer);
     this.tombstoneTimer = null;
+    if (this.activeTurnTimer) clearTimeout(this.activeTurnTimer);
+    this.activeTurnTimer = null;
     await links?.stop().catch(() => {});
     this.identities.stop();
     this.did.stop();
@@ -4930,7 +4932,7 @@ export class GhostlyNode implements EngineImplementation {
     if (wasOnline && !this.networkOn) await this.hold.stop();
     // A profile with a device set: its standbys go through these relays and servers, and stay off with the network.
     const gate = knownDeviceGate();
-    if (((gate && gate.state !== "single") || this.deviceLinks) && (["online", "relays", "readRelays", "irohRelays", "iceServers", "pushRelay"] as const).some((key) => key in settings)) {
+    if (((gate && gate.state !== "single") || this.deviceLinks) && (["online", "relays", "readRelays", "irohRelays", "iceServers", "pushRelay", "hyperdhtRelay"] as const).some((key) => key in settings)) {
       await this.syncDeviceNetwork().catch(() => {});
     }
     this.emitState();
@@ -5052,10 +5054,12 @@ export class GhostlyNode implements EngineImplementation {
     if (!this.deviceLinks) {
       this.deviceLinks = new DeviceLinks({
         profile: databaseName(), transport: this.transport, turn: this.turnNetwork(), pollIntervals: this.pollIntervals,
-        createPeerConnection: this.devicePeerConnection(), nativeTransports: this.nativeFactories, offline: !this.networkOn,
+        // Asked each time a link starts its endpoints: a HyperDHT relay set later is used (enrollment gets it fresh too).
+        createPeerConnection: this.devicePeerConnection(), nativeTransports: () => this.nativeFactories, offline: !this.networkOn,
         onChange: () => { this.emitState(); this.askDeviceRenewals(); this.syncDeviceTokens(); },
         onDeviceWake: (from, target) => this.deviceWakeReceived(from, target),
         pushSend: (request) => this.postPush(request),
+        onActiveHint: () => void this.readActiveTurn().catch(() => {}),
       });
       await this.deviceLinks.start();
       await this.startHandoff().catch(() => {});
@@ -5079,11 +5083,46 @@ export class GhostlyNode implements EngineImplementation {
       if (record) await this.stopReplaced(viewOf(record));
       return;
     }
+    // From now on the turn is read every 10 minutes while this device runs, and at once on another device's hint.
+    this.watchActiveTurn();
     // Earlier device sets (a removal, a new secret): their tombstones put again now and every hour, and their frames
     // delivered over the old links, as a removal that a crash cut short resumes from the record alone.
     this.watchTombstones();
     // A device was given the secret and never finished its enrollment: the set moves to a new one by itself.
     await this.rotateIfDue().catch(() => {});
+  }
+
+  /** How often a running active device reads the turn (WISP 06 § When a device checks: every 10 minutes, with jitter). */
+  static readonly ACTIVE_TURN_EVERY_MS = 10 * 60_000;
+  private static readonly ACTIVE_TURN_JITTER_MS = 60_000;
+  private activeTurnTimer: ReturnType<typeof setTimeout> | null = null;
+
+  private watchActiveTurn(): void {
+    if (this.activeTurnTimer) clearTimeout(this.activeTurnTimer);
+    this.activeTurnTimer = null;
+    if (this.shuttingDown || this.gatedOut || this.options.singleDevice) return;
+    this.activeTurnTimer = setTimeout(() => {
+      this.activeTurnTimer = null;
+      void this.readActiveTurn().catch(() => {}).finally(() => { if (!this.shuttingDown && !this.gatedOut && this.deviceLinks) this.watchActiveTurn(); });
+    }, GhostlyNode.ACTIVE_TURN_EVERY_MS + Math.floor(Math.random() * GhostlyNode.ACTIVE_TURN_JITTER_MS));
+  }
+
+  /**
+   * The running active device reads the turn (its timer, or another device's hint): a read that says another device
+   * took over stops this one, as at start; a good one is noted. Nothing while it is limited (its own 30-second read runs
+   * then), offline, or not the active device.
+   */
+  private async readActiveTurn(): Promise<void> {
+    const links = this.deviceLinks;
+    if (!links || this.shuttingDown || this.gatedOut || this.limitedMode || !this.networkOn || this.options.singleDevice) return;
+    if (knownDeviceGate()?.state !== "active") return;
+    const outcome = await links.checkTurn(false).catch(() => null);
+    if (this.shuttingDown || this.gatedOut) return;
+    if (outcome?.kind === "go-on" && !outcome.restricted) this.noteGoodTurn();
+    if (outcome?.kind === "gated") {
+      const record = await readDeviceRecord(databaseName()).catch(() => null);
+      if (record) await this.stopReplaced(viewOf(record));
+    }
   }
 
   // -- one profile on several devices: removing a device, a new device secret (WISP 06 § Removing a device) ---------
@@ -5275,7 +5314,11 @@ export class GhostlyNode implements EngineImplementation {
    */
   async deviceEnrollJoin({ code, name, kind, app }: { code: string; name: string; kind?: DeviceKind; app?: string }): Promise<EnrollView> {
     this.enrollAllowed();
-    if (this.inUse()) throw new Error("enroll-in-use: This profile is in use here. Add a new profile first, and add the device from there.");
+    // What the profile holds is known once it started: its chats and wallets are read by then.
+    if (this.starting) await this.starting;
+    const held = this.inUse();
+    if (held === "loading") throw new Error("enroll-loading: The wallets of this profile have not loaded yet. Check your connection and try again.");
+    if (held) throw new Error("enroll-in-use: This profile is in use here. Add a new profile first, and add the device from there.");
     await this.enrollment?.cancel().catch(() => {});
     const joiner = new EnrollJoiner({
       profile: databaseName(), network: this.turnNetwork(), open: this.enrollLink(),
@@ -5294,15 +5337,26 @@ export class GhostlyNode implements EngineImplementation {
   /**
    * Whether this profile holds anything a person would lose if it became a standby here: a chat, a group, an identity,
    * money or a payment, or a wallet with keys of its own. The wallets a new profile gets by itself (Mainnet Cashu and
-   * USDT, `walletSetup.ts`) count only once they hold or have moved money: otherwise no new install could join.
+   * USDT, `walletSetup.ts`) count only once they hold, wait for or have moved money: otherwise no new install could
+   * join. `loading`: what they hold is not known yet (the engine is starting, or the USDT balance was not read).
    */
-  private inUse(): boolean {
-    if (this.links.size > 0 || this.groups.views().length > 0 || this.identities.views().length > 0) return true;
-    const networks = Object.values(this.walletView.networks ?? {});
-    if (this.walletView.balance > 0 || this.walletView.history.length > 0) return true;
-    if (networks.some((network) => (network?.balance ?? 0) > 0 || (network?.history?.length ?? 0) > 0)) return true;
+  private inUse(): "in-use" | "loading" | null {
+    if (this.links.size > 0 || this.groups.views().length > 0 || this.identities.views().length > 0) return "in-use";
+    // Before the wallets were read the view says nothing about them.
+    if (!this.walletsStarted) return "loading";
+    if ((this.walletView.intents ?? []).length > 0) return "in-use";
+    const networks = [this.walletView, ...Object.values(this.walletView.networks ?? {})];
+    // Any money a network's wallets hold or wait for: ecash, sats a payment or a swap set aside, a paid quote not
+    // claimed yet, and the first-run USDT wallet's tokens and gas.
+    const holds = (network: NetworkWalletsView | undefined) => !!network && (
+      money(network.balance) || (network.history?.length ?? 0) > 0 || (network.awaiting?.length ?? 0) > 0
+      || money(network.setAside) || money(network.openSwaps) || money(network.swapsAmount) || money(network.unconfirmed)
+      || (!!network.usdt?.configured && (money(network.usdt.balance) || money(network.usdt.gasBalance))));
+    if (networks.some(holds)) return "in-use";
     const firstRun = (wallet: { type: string; network: string }) => wallet.network === "mainnet" && (wallet.type === "cashu" || wallet.type === "usdt");
-    return (this.walletView.wallets ?? []).some((wallet) => !firstRun(wallet));
+    if ((this.walletView.wallets ?? []).some((wallet) => !firstRun(wallet))) return "in-use";
+    // A USDT balance not read yet says 0 for tokens it never read.
+    return networks.some((network) => !!network?.usdt?.configured && (network.usdt.locked || !network.usdt.read)) ? "loading" : null;
   }
 
   /** The device set of this profile as the Devices section shows it; `single` with none. */
@@ -5333,6 +5387,8 @@ export class GhostlyNode implements EngineImplementation {
     });
     this.handoffGiver = giver;
     links.setHandoff({ receive: (from, frame) => void giver.receive(from, frame), linkChanged: (key, live) => giver.linkChanged(key, live), stop: () => giver.stop() });
+    // Back to active after a move whose copy stopped: the Devices section says so (WISP 06 § Handoff progress, Failures).
+    await giver.resume().catch(() => {});
   }
 
   private static readonly HANDOFF_VERIFIER = "handoffVerifier";
@@ -6320,6 +6376,7 @@ export class GhostlyNode implements EngineImplementation {
   /** New Iroh relays: idle endpoints move now; one carrying a chat keeps its relay until that session ends. */
   private async rehomeIroh(): Promise<void> {
     if (!this.options.irohWeb && !this.ownIrohRelays) return;
+    this.deviceLinks?.nativeChanged();
     for (const [linkId, live] of this.links) {
       const link = live.link;
       if (!link?.availableTransports.includes("iroh/1") || !link.canReleaseEndpoint("iroh/1")) continue;
@@ -6362,6 +6419,8 @@ export class GhostlyNode implements EngineImplementation {
   /** A new relay (or none): chats give up their endpoints on the old one, as soon as none of them carries a session. */
   private async relayChanged(): Promise<void> {
     if (!this.relaysHyperdht) return;
+    // A device link offers HyperDHT through the new relay too, where it runs native endpoints.
+    this.deviceLinks?.nativeChanged();
     for (const [linkId, live] of this.links) {
       const link = live.link;
       if (!link?.availableTransports.includes("hyperdht/1")) {

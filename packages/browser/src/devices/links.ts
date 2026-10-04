@@ -129,8 +129,12 @@ export interface DeviceLinksOptions {
   transport: PkarrTransport;
   /** Absent where the page has no WebRTC; the links then run on the native transports alone. */
   createPeerConnection?: () => RTCPeerConnection;
-  /** The native transports this app runs, as the engine is given them (`NodeOptions.nativeTransports`). */
-  nativeTransports?: Partial<Record<NativeTransport, (seedB64: string) => Promise<NativeEndpoint>>>;
+  /**
+   * The native transports this app runs, as the engine runs them for a chat: the host's own, and in a browser Iroh's
+   * browser build and HyperDHT through the person's relay. A function is asked each time a link starts its endpoints,
+   * so a relay set after the links started is used.
+   */
+  nativeTransports?: NativeFactories | (() => NativeFactories);
   pollIntervals?: PollIntervals;
   /** The person turned the network off: no link is started and nothing is asked of a relay or the DHT. */
   offline?: boolean;
@@ -154,6 +158,11 @@ export interface DeviceLinksOptions {
    * also brings the profile's target in line (`profileWakeAfter`), which is the engine's, in the profile's database.
    */
   onDeviceWake?: (from: string, target: WakeTarget | null) => void | Promise<void>;
+  /**
+   * The active device got another device's hint that it holds the turn (WISP 06 § When a device checks: "at once on a
+   * hint"). The engine reads the turn itself, so that a read saying another device took over stops it.
+   */
+  onActiveHint?: () => void;
   /** How a wake-up is posted where a page may not post it itself (Desktop's command). Default: `fetch`, then the push relay. */
   pushSend?: (request: PushRequest) => Promise<number>;
   /** Tests give their own. */
@@ -176,11 +185,30 @@ interface Running {
   handoff?: boolean;
   /** The transport the open session runs on. */
   transport?: PairedTransport;
+  /** This link runs its native endpoints (one side has no WebRTC). */
   native: boolean;
+  /** The native transports whose endpoint is being made now. */
+  starting: Set<NativeTransport>;
+  /** A start of the native transports still missing, after one failed or went away. */
+  nativeRetry?: ReturnType<typeof setTimeout>;
+  /** Starts that left a transport missing since the last one that left none: the wait before the next doubles. */
+  nativeMisses: number;
   waiting: Map<string, { resolve(ms: number): void; reject(error: Error): void; sentAt: number; timer: ReturnType<typeof setTimeout> }>;
 }
 
 interface Wanted { id: string; d: Uint8Array; key: string; name: string; slot?: number; earlier: boolean }
+
+/** The native transports an app runs, each made from a seed. */
+export type NativeFactories = Partial<Record<NativeTransport, (seedB64: string) => Promise<NativeEndpoint>>>;
+
+/**
+ * A native transport of a device link that did not start (a relay that did not answer) or went away (the relay closed
+ * the connection) is started again after this long, then twice as long each time, up to `NATIVE_RETRY_MAX_MS`. A
+ * device link must offer every transport both devices run: a Linux Desktop has no WebRTC, and an Iroh relay that
+ * one side cannot reach leaves HyperDHT as the only way through.
+ */
+export const NATIVE_RETRY_MS = 10_000;
+export const NATIVE_RETRY_MAX_MS = 120_000;
 
 /** How often a standby reads the turn while its screen shows (WISP 06 § When a device checks), and the jitter on it. */
 export const STANDBY_TURN_EVERY_MS = 10 * 60_000;
@@ -374,7 +402,7 @@ export class DeviceLinks implements DeviceLinkEngine {
   private open(want: Wanted): void {
     const signer = this.key!;
     const rtc = !!this.createPeerConnection;
-    const running: Running = { id: want.id, d: want.id.slice(0, want.id.indexOf("|")), key: want.key, name: want.name, slot: want.slot, earlier: want.earlier, link: null as unknown as GhostLink, agreed: false, native: false, waiting: new Map() };
+    const running: Running = { id: want.id, d: want.id.slice(0, want.id.indexOf("|")), key: want.key, name: want.name, slot: want.slot, earlier: want.earlier, link: null as unknown as GhostLink, agreed: false, native: false, starting: new Set(), nativeMisses: 0, waiting: new Map() };
     running.link = new GhostLink({
       ...deviceLinkPairing(want.d, signer, fromBase64Url(want.key)),
       deviceCapabilities: [DEVICES_CAPABILITY, HANDOFF_CAPABILITY],
@@ -412,25 +440,70 @@ export class DeviceLinks implements DeviceLinkEngine {
         },
         onDeviceFrame: (frame) => this.receive(running, frame),
         // The other device has no WebRTC: this one starts its native endpoints for it.
-        onPacketTransports: (transports) => { if (!transports.includes("webrtc/1")) void this.startNative(running); },
+        onPacketTransports: (transports) => { if (!running.native && !transports.includes("webrtc/1")) this.startNative(running); },
+        // An endpoint went away (its relay closed the connection): it is started again in a while.
+        onTransportsChanged: () => { if (running.native && this.missingNative(running).length) this.retryNative(running); },
       },
     });
     this.running.set(want.id, running);
     running.link.start();
-    if (!rtc) void this.startNative(running);
+    if (!rtc) this.startNative(running);
   }
 
-  /** The native endpoints of a link, each on a seed made for this run: its address goes out in the link's own packet. */
-  private async startNative(running: Running): Promise<void> {
-    if (running.native) return;
+  private nativeFactories(): NativeFactories {
+    const given = this.options.nativeTransports;
+    return (typeof given === "function" ? given() : given) ?? {};
+  }
+
+  /** The native transports this app runs that the link has no endpoint for, and none is being made for. */
+  private missingNative(running: Running): NativeTransport[] {
+    return (Object.entries(this.nativeFactories()) as [NativeTransport, NativeFactories[NativeTransport]][])
+      .filter(([transport, factory]) => !!factory && !running.starting.has(transport) && !running.link.availableTransports.includes(transport))
+      .map(([transport]) => transport);
+  }
+
+  /**
+   * The native endpoints of a link, each on a seed made for this run: its address goes out in the link's own packet.
+   * Every transport this app runs, side by side (a HyperDHT relay that takes seconds to listen does not hold up Iroh),
+   * and a transport that does not start is tried again (`retryNative`), as a chat's listeners are.
+   */
+  private startNative(running: Running): void {
     running.native = true;
-    for (const [transport, factory] of Object.entries(this.options.nativeTransports ?? {})) {
-      if (!factory || running.link.availableTransports.includes(transport as NativeTransport)) continue;
-      try {
-        const endpoint = await factory(createIdentity().seedB64);
+    const factories = this.nativeFactories();
+    for (const transport of this.missingNative(running)) {
+      running.starting.add(transport);
+      void factories[transport]!(createIdentity().seedB64).then(async (endpoint) => {
+        running.starting.delete(transport);
         if (this.stopped || this.running.get(running.id) !== running) { await endpoint.close(); return; }
         running.link.registerEndpoint(endpoint);
-      } catch { /* this transport is not available now; the others, and WebRTC, still are */ }
+        if (!this.missingNative(running).length && !running.starting.size) running.nativeMisses = 0;
+      }, () => {
+        // Not available now; the others, and WebRTC, still are. Tried again in a while.
+        running.starting.delete(transport);
+        this.retryNative(running);
+      });
+    }
+  }
+
+  private retryNative(running: Running): void {
+    if (running.nativeRetry || this.stopped || this.running.get(running.id) !== running) return;
+    const wait = Math.min(NATIVE_RETRY_MS * 2 ** running.nativeMisses, NATIVE_RETRY_MAX_MS);
+    running.nativeMisses++;
+    running.nativeRetry = setTimeout(() => {
+      running.nativeRetry = undefined;
+      if (!this.stopped && this.running.get(running.id) === running) this.startNative(running);
+    }, wait);
+  }
+
+  /**
+   * The native transports this app runs changed (the person set a HyperDHT relay, or other Iroh relays): every link
+   * that runs native endpoints starts the ones it lacks now.
+   */
+  nativeChanged(): void {
+    for (const running of this.running.values()) {
+      if (!running.native) continue;
+      running.nativeMisses = 0;
+      this.startNative(running);
     }
   }
 
@@ -586,11 +659,15 @@ export class DeviceLinks implements DeviceLinkEngine {
     await this.acked(running.key);
   }
 
-  /** A hint from another device that it holds the turn: read it, at most once in `TURN_HINT_EVERY_MS`. Never on the active device. */
+  /**
+   * A hint from another device that it holds the turn: read it, at most once in `TURN_HINT_EVERY_MS`. On the active
+   * device the engine reads it (`onActiveHint`): it stops itself when another device took over.
+   */
   private async hinted(): Promise<void> {
     if (Date.now() - this.lastHintRead < TURN_HINT_EVERY_MS) return;
     const record = await this.record();
-    if (!record || record.state === "active" || record.state === "removed") return;
+    if (record?.state === "active") { this.lastHintRead = Date.now(); this.options.onActiveHint?.(); return; }
+    if (!record || record.state === "removed") return;
     this.lastHintRead = Date.now();
     await this.checkAndShow().catch(() => null);
   }
@@ -660,6 +737,7 @@ export class DeviceLinks implements DeviceLinkEngine {
   }
 
   private async close(running: Running): Promise<void> {
+    if (running.nativeRetry) { clearTimeout(running.nativeRetry); running.nativeRetry = undefined; }
     this.failPings(running, "The device link closed");
     running.agreed = false;
     await running.link.stop().catch(() => {});

@@ -5,7 +5,7 @@ import { amendDevice, readDeviceRecord } from "./store";
 import type { DeviceNetwork, DeviceRecord } from "./state";
 
 /*
- * A standby's network settings (WISP 06 § The gate). The person's relays, Iroh relays, ICE servers and "network off"
+ * A standby's network settings (WISP 06 § The gate). The person's relays, Iroh relays, HyperDHT relay, ICE servers and "network off"
  * live in the profile's database, which a device that is not the active one never opens. So the active device keeps a
  * copy of them in the device record, written whenever the person changes one (`GhostlyNode.updateSettings`) and when a
  * device set is made or joined (`saveDeviceNetwork`, which enrollment calls). Device-link-only mode reads them from
@@ -13,12 +13,15 @@ import type { DeviceNetwork, DeviceRecord } from "./state";
  */
 
 /** The network settings a standby needs, out of the profile's settings. */
-export function deviceNetworkOf(settings: Pick<Settings, "online" | "relays" | "readRelays" | "irohRelays" | "iceServers" | "pushRelay">): DeviceNetwork {
+export function deviceNetworkOf(settings: Pick<Settings, "online" | "relays" | "readRelays" | "irohRelays" | "iceServers" | "pushRelay" | "hyperdhtRelay">): DeviceNetwork {
   return {
     ...(settings.online === false ? { off: true } : {}),
     ...(settings.relays?.length ? { relays: [...settings.relays] } : {}),
     ...(settings.readRelays === true ? { readRelays: true } : {}),
     ...(settings.irohRelays?.length ? { irohRelays: [...settings.irohRelays] } : {}),
+    // A standby web app's device links offer HyperDHT through it, as the active page's chats do (a Linux Desktop has
+    // no WebRTC, and an Iroh relay one side cannot reach leaves HyperDHT as the way through).
+    ...(settings.hyperdhtRelay?.trim() ? { hyperdhtRelay: settings.hyperdhtRelay.trim() } : {}),
     ...(settings.iceServers?.length ? { iceServers: settings.iceServers.map((server) => ({ ...server })) } : {}),
     // A standby web app wakes another device through it (WISP 06 § Push and the phone): a page may not post to a push service.
     ...(settings.pushRelay ? { pushRelay: settings.pushRelay } : {}),
@@ -48,6 +51,8 @@ export interface StandbyNetwork {
   createPeerConnection?: () => RTCPeerConnection;
   /** The Iroh relays the person chose; absent for the defaults. */
   irohRelays?: string[];
+  /** The HyperDHT relay the person chose; absent for none. */
+  hyperdhtRelay?: string;
 }
 
 /**
@@ -67,5 +72,6 @@ export function standbyNetwork(network: DeviceNetwork | undefined, given?: Pkarr
     transport,
     ...(typeof RTCPeerConnection === "undefined" ? {} : { createPeerConnection: () => new RTCPeerConnection({ iceServers }) }),
     ...(network?.irohRelays?.length ? { irohRelays: network.irohRelays } : {}),
+    ...(network?.hyperdhtRelay ? { hyperdhtRelay: network.hyperdhtRelay } : {}),
   };
 }
