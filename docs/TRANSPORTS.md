@@ -31,14 +31,14 @@ Every transport runs the same authenticated chat session ([WISP 401](wisps/401-p
 
 - One `RTCPeerConnection` per chat with the `ghostly/1` DataChannel. Its signals (`_rtc`) ride the chat's signed Pkarr record.
 - STUN: Google's public servers (`packages/core/src/callSignal.ts`).
-- TURN: your own, optional, per profile in Settings, Advanced, Network ([WISP 101](wisps/101-webrtc.md#your-own-turn-server)): a `turn:` or `turns:` URL, a username and a credential. It is added after the STUN servers for chats and calls, on the web app, the extension, Desktop and the CLI, and the Linux Desktop's native calls wait for its relay candidate before they ring. The relay sees only encrypted packets and the two addresses. Backups leave the credential out, so a restored profile asks for it again.
+- TURN: your own, optional, per profile in Settings, Network ([WISP 101](wisps/101-webrtc.md#your-own-turn-server)): a `turn:` or `turns:` URL, a username and a credential. It is added after the STUN servers for chats and calls, on the web app, the extension, Desktop and the CLI, and the Linux Desktop's native calls wait for its relay candidate before they ring. The relay sees only encrypted packets and the two addresses. Backups leave the credential out, so a restored profile asks for it again.
 - Calls always use a WebRTC connection of their own, whatever carries the chat ([WISP 601](wisps/601-webrtc-media.md#paired-profile)). The Linux Desktop, whose WebView has no WebRTC, runs that connection itself (WebRTC in Rust, media in GStreamer): the same calls on the same wire ([WISP 601](wisps/601-webrtc-media.md#desktop-on-linux)).
 
 ### Iroh
 
 - **Desktop:** native Iroh (`native/transports/`, `apps/desktop/src/paired_transport.rs`), homed on the Iroh relays of Settings, Network when some are set, else on n0's public relays. `GHOSTLY_IROH_RELAYS` (comma-separated URLs) replaces n0's where no relay is set (tests, a self-hosted `iroh-relay`).
 - **Web and extension** ([#225](https://github.com/MiguelMedeiros/ghostly/pull/225)): the same Iroh 1.3 built for browsers (`native/transports/iroh-web`, shipped as `packages/iroh-web`). A page cannot send UDP, so every packet goes through an Iroh relay. The QUIC/TLS session is still end to end.
-- Default Iroh relays (`DEFAULT_IROH_RELAYS` in `packages/browser/src/platform/irohWeb.ts`), editable in Settings, Advanced, Network (up to four). The web app, the extension and Desktop (#1193) all take that list, so a page and a Desktop on a self-hosted relay share it; a standby Desktop ([WISP 06](wisps/06-devices.md)) uses the copy in its device record:
+- Default Iroh relays (`DEFAULT_IROH_RELAYS` in `packages/browser/src/platform/irohWeb.ts`), editable in Settings, Network (up to four). The web app, the extension and Desktop (#1193) all take that list, so a page and a Desktop on a self-hosted relay share it; a standby Desktop ([WISP 06](wisps/06-devices.md)) uses the copy in its device record:
   - `https://use1-1.relay.n0.iroh.link/`
   - `https://euc1-1.relay.n0.iroh.link/`
   - `https://aps1-1.relay.n0.iroh.link/`
@@ -52,7 +52,7 @@ Every transport runs the same authenticated chat session ([WISP 401](wisps/401-p
 
 - **Desktop** ([#187](https://github.com/MiguelMedeiros/ghostly/pull/187)): `hyperdht` 6.34 runs in a Node sidecar (`apps/desktop/native-runtime`, bundled with the app). One sidecar per app, started on first use, stopped with the last chat, and it exits with the app.
 - **Web and extension** ([#231](https://github.com/MiguelMedeiros/ghostly/pull/231)): through a HyperDHT relay (Holepunch's `@hyperswarm/dht-relay`, fixed in `infra/services/hyperdht-relay`). Always non-custodial: the browser keeps its keys and runs the Noise handshake and the encrypted stream. The relay forwards ciphertext and sees the browser's address, the per-chat keys and timing.
-- **Off by default:** `DEFAULT_HYPERDHT_RELAY` is empty and no public Ghostly relay is run. Set a `wss://` relay in Settings, Advanced, Network to turn it on.
+- **Off by default:** `DEFAULT_HYPERDHT_RELAY` is empty and no public Ghostly relay is run. Set a `wss://` relay in Settings, Network to turn it on.
 
 ### Choosing a transport
 
@@ -65,7 +65,7 @@ Every transport runs the same authenticated chat session ([WISP 401](wisps/401-p
 
 ### When direct connections are blocked
 
-A VPN, a firewall or a carrier's NAT can stop every direct path. The app cannot see a VPN; it sees its own WebRTC attempts fail, and says so in the chat's connection panel and in Settings, Advanced, Network: "Direct connections are blocked on this network (a VPN or firewall?). Chats still work through relays, but connect more slowly." It never says a VPN was found.
+A VPN, a firewall or a carrier's NAT can stop every direct path. The app cannot see a VPN; it sees its own WebRTC attempts fail, and says so in the chat's connection panel and in Settings, Network: "Direct connections are blocked on this network (a VPN or firewall?). Chats still work through relays, but connect more slowly." It never says a VPN was found.
 
 - **What counts** (`DataLink` reports per attempt, `DirectPathWatch` in `packages/core/src/directPath.ts` decides):
   - `no-public`: both descriptions were exchanged, nothing connected, and this device had no public candidate (no STUN server answered, or no candidate at all).
@@ -99,7 +99,7 @@ A Pkarr record is a small DNS packet (at most 1,000 bytes), signed with Ed25519 
 | Client | Reads | Writes |
 |---|---|---|
 | Web app, extension | Through the Pkarr relays: a page cannot send UDP | Every relay. The publish returns on the first relay that took the packet ([#293](https://github.com/MiguelMedeiros/ghostly/pull/293)) |
-| Desktop | The Mainline DHT directly ([#289](https://github.com/MiguelMedeiros/ghostly/pull/289)). Relay reads only with Settings, Advanced, Network, "Also use Pkarr relays", or while no DHT node answers at all (UDP blocked, a VPN): two lookups in a row that heard from nobody send reads to the relays until one hears from a node again (`DHT_SILENT_LOOKUPS` in `apps/desktop/src/pkarr_network.rs`) | The DHT and every relay |
+| Desktop | The Mainline DHT directly ([#289](https://github.com/MiguelMedeiros/ghostly/pull/289)). Relay reads only with Settings, Network, "Also use Pkarr relays", or while no DHT node answers at all (UDP blocked, a VPN): two lookups in a row that heard from nobody send reads to the relays until one hears from a node again (`DHT_SILENT_LOOKUPS` in `apps/desktop/src/pkarr_network.rs`) | The DHT and every relay |
 | Headless CLI (`ghostly`) | The relays first, the Mainline DHT when every relay fails ([#392](https://github.com/MiguelMedeiros/ghostly/pull/392), `RelaysAndDht` in `packages/cli/src/runtime/mainline.ts`). `GHOSTLY_DHT=0` leaves the DHT out ([CLI.md](CLI.md#pkarr-relays-and-the-mainline-dht)) | The DHT and every relay |
 
 - Native apps still write to the relays because a browser contact can only read relays, and a relay keeps serving the copy it holds. Measured on 2026-09-25: after a newer packet went to the DHT alone, `pkarr.pubky.org` still served the older one 30 s later, even with a record TTL of 1 s.
@@ -185,7 +185,7 @@ No broader list of public relays exists: the pkarr repository's `relays.txt` nam
 
 ### Adding a relay
 
-- **One profile:** Settings, Advanced, Network, Pkarr relays, one URL per line.
+- **One profile:** Settings, Network, Pkarr relays, one URL per line.
 - **Everyone:** append the URL to `DEFAULT_RELAYS`, and put the old list into `PREVIOUS_DEFAULT_RELAYS` so profiles on the old defaults move with it. A relay that allows few requests gets a share in `RELAY_REQUESTS_PER_MINUTE`.
 - **Private network or tests (Desktop):** `GHOSTLY_PKARR_RELAYS` (comma-separated URLs) alone replaces the DHT. With `GHOSTLY_PKARR_DHT_BOOTSTRAP` (`ip:port`, comma-separated), those relays are written to and the DHT is reached through those nodes.
 - **Private network or tests (headless CLI):** `GHOSTLY_PKARR_RELAYS` (comma-separated URLs) as on the Desktop: the only relays from the first publish, the setting unused, and the Mainline DHT left out unless `GHOSTLY_DHT_BOOTSTRAP` is given. Otherwise `settings set relays '["http://…"]'` sets the relays, `GHOSTLY_DHT=0` leaves the Mainline DHT out, `GHOSTLY_DHT_BOOTSTRAP` (`host:port`, comma-separated) replaces its bootstrap routers, and `GHOSTLY_HYPERDHT_BOOTSTRAP` HyperDHT's ([CLI.md](CLI.md#pkarr-relays-and-the-mainline-dht)).

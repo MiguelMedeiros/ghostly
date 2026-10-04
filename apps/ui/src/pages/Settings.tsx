@@ -76,6 +76,7 @@ interface SectionView { phone: boolean; section: SettingsSection | null }
  */
 function SettingsGroup({ id, view, children }: { id: SettingsSection; view: SectionView; children: ReactNode }) {
   if (view.phone && view.section !== id) return null;
+  if (id === "media" && !hasMediaDevices()) return null; // no devices to pick here: no empty space for them either
   return (
     <div id={`settings-section-${id}`} data-settings-section={id} className={`space-y-6 scroll-mt-2 ${view.phone ? "[&>section:first-child>h2]:sr-only" : ""}`}>
       {children}
