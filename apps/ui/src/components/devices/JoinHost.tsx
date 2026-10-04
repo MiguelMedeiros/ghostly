@@ -1,4 +1,4 @@
-import { useEffect, useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { readDeviceInvite } from "@ghostly/core";
 import { useI18n, type TranslationKey } from "../../contexts/I18nContext";
 import { DEVICE_LINK_EVENT, JOIN_OPEN_EVENT, failureKey, joinInNewProfile, takeDeviceLink, takeJoinRequest, type JoinOpen } from "../../lib/devices";
@@ -75,6 +75,9 @@ export function JoinAnotherDialog({ code, onClose }: { code?: string; onClose():
   const id = useId();
   const [more, setMore] = useState(false);
   const [error, setError] = useState("");
+  // Continue has the focus, so Enter goes on: the dialog, opened after this mounts, would give it to the close button.
+  const primary = useRef<HTMLButtonElement>(null);
+  useEffect(() => { const timer = setTimeout(() => primary.current?.focus()); return () => clearTimeout(timer); }, []);
   const go = () => {
     try { joinInNewProfile(t("devices.join.profileName"), { code, start: "name" }); }
     catch (cause) { setError(errorText(cause, t)); }
@@ -87,7 +90,7 @@ export function JoinAnotherDialog({ code, onClose }: { code?: string; onClose():
       </div>
       {more && <p id={id} className="text-xs text-text-secondary leading-relaxed ps-3 border-s-2 border-border">{code ? t("devices.join.linkInfo") : t("devices.join.anotherInfo")}</p>}
       {error && <p role="alert" className="text-danger">{error}</p>}
-      <button type="button" autoFocus data-testid="device-join-another-go" onClick={go} className={primaryButton}>{t("devices.join.go")}</button>
+      <button type="button" ref={primary} data-testid="device-join-another-go" onClick={go} className={primaryButton}>{t("devices.join.go")}</button>
       <button type="button" data-testid="device-join-another-cancel" onClick={onClose} className={quietButton}>{t("common.cancel")}</button>
     </DeviceDialog>
   );
