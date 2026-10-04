@@ -86,7 +86,7 @@ export const test = base.extend<Fixtures>({
       const extensionId = new URL(worker.url()).host;
       const page = await context.newPage();
       page.on("pageerror", (error) => console.log(`  [${name}] ${error.message}`));
-      await page.goto(`chrome-extension://${extensionId}/app.html#/settings/advanced`);
+      await page.goto(`chrome-extension://${extensionId}/app.html#/settings/network`);
       // The peer lives in an offscreen document, out of reach of request interception: point it at the relay instead.
       await page.getByTestId("network-relays").fill(await relay.listen());
       // Iroh would reach n0's public relays: a closed port on this machine keeps the suite offline (Iroh then

@@ -18,8 +18,7 @@ test("Desktop opens, with the peer Rust backs behind it", { tag: ["@feature:desk
   await expect.poll(() => app.text('[title="New Chat"]')).not.toBeNull();
 
   await app.click('[title="Settings"]');
-  await app.click('[data-testid="settings-advanced"]');
-  await expect.poll(() => app.text('[data-testid="settings-advanced-page"]'), { message: "Settings → Advanced opens" }).not.toBeNull();
+  await expect.poll(() => app.text('[data-settings-section="network"]'), { message: "Settings shows its Network section" }).not.toBeNull();
 
   // Only `apps/ui/src/desktop/host.ts` describes Pkarr this way. The browser stand-in
   // would say "Pkarr relays (HTTP) → Mainline DHT (BEP44)": Rust is reaching
@@ -32,13 +31,13 @@ test("Desktop opens, with the peer Rust backs behind it", { tag: ["@feature:desk
   await expect.poll(() => app.text('[data-testid="add-service"]')).toContain("Share a local service");
 });
 
-test("Settings holds still as it opens: Advanced stays where it was when the devices arrive", { tag: ["@feature:settings.media"] }, async ({ app }) => {
+test("Settings holds still as it opens: Network stays where it was when the devices arrive", { tag: ["@feature:settings.media"] }, async ({ app }) => {
   await expect.poll(() => app.text('[title="New Chat"]')).not.toBeNull();
   await app.click('[title="Settings"]');
-  // Where Advanced sits in the page (not on screen: a scroll is not a move), read at once and then for 2 s. The
+  // Where Network sits in the page (not on screen: a scroll is not a move), read at once and then for 2 s. The
   // native device list arrives within that (GStreamer, 30 to 100 ms on a machine with speakers).
   const place = () => app.execute<number | null>(`
-    const row = document.querySelector('[data-testid="settings-advanced"]');
+    const row = document.querySelector('[data-settings-section="network"]');
     if (!row) return null;
     let scroller = row.parentElement;
     while (scroller && !/(auto|scroll)/.test(getComputedStyle(scroller).overflowY)) scroller = scroller.parentElement;
@@ -48,7 +47,7 @@ test("Settings holds still as it opens: Advanced stays where it was when the dev
   const first = await place();
   const seen = new Set<number | null>([first]);
   for (const end = Date.now() + 2_000; Date.now() < end; await new Promise((done) => setTimeout(done, 100))) seen.add(await place());
-  expect([...seen], "Advanced moved while Settings was open").toEqual([first]);
+  expect([...seen], "Network moved while Settings was open").toEqual([first]);
 });
 
 test("the webview's <html lang> and <html dir> follow the language", { tag: ["@feature:app.i18n"] }, async ({ app }) => {

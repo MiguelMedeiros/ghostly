@@ -653,7 +653,7 @@ export function Settings() {
 
       <SettingsGroup id="about" view={view}>
       <Section title={t("settings.about")}>
-        <Row label={t("settings.version")} value={<span className="font-mono">{appVersion}</span>} />
+        <Row label={t("settings.version")} value={<span className="font-mono">{appVersion}</span>} testId="settings-about-version" />
         <Row label={t("settings.website")} value={
           <a {...externalLinkProps(APP_WEBSITE)} className="inline-flex items-center gap-1 min-h-10 text-accent hover:text-accent-hover transition-colors">
             GitHub

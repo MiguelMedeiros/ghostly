@@ -51,7 +51,7 @@ for (const phone of [{ width: 402, height: 874, keyboard: 336 }, { width: 375, h
     // Centred in the whole screen, the field and Unlock sat under the keyboard (an iPhone 17's Unlock 4px into it, a
     // small iPhone's field too). At start the app that keeps the visible height is not there until it is unlocked.
     const { page } = await peer("lock-phone", { mobile: true, viewport: { width: phone.width, height: phone.height } });
-    await page.goto("/#/settings");
+    await page.goto("/#/settings/privacy");
     await page.getByRole("switch", { name: "Lock Screen" }).click();
     await page.getByLabel("New password", { exact: true }).fill("phone secret");
     await page.getByLabel("Confirm password", { exact: true }).fill("phone secret");

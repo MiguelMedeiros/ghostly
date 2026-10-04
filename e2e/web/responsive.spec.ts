@@ -149,16 +149,25 @@ for (const width of WIDTHS) {
 
     await page.goto("/#/settings");
     await expect(page.getByTestId("settings-page")).toBeVisible();
-    await page.getByRole("switch", { name: "Lock Screen" }).click(); // opens the password form
-    await expectTidy(page, "[data-testid=settings-page]", "Settings");
-    // Every ⓘ open: the longest the rows get.
-    for (const more of await page.getByTestId("row-info").all()) await more.click();
-    await expectTidy(page, "[data-testid=settings-page]", "Settings, every ⓘ open");
-
-    await page.goto("/#/settings/advanced");
-    await expect(page.getByTestId("settings-advanced-page")).toBeVisible();
-    for (const more of await page.getByTestId("row-info").all()) await more.click();
-    await expectTidy(page, "[data-testid=settings-advanced-page]", "Settings, Advanced");
+    if ("mobile" in width) {
+      // A phone: the menu, then each section on a screen of its own.
+      await expect(page.getByTestId("settings-menu")).toBeVisible();
+      await expectTidy(page, "[data-testid=settings-page]", "Settings, the menu");
+      for (const section of ["profile", "appearance", "notifications", "media", "privacy", "network", "storage", "about"]) {
+        await page.goto(`/#/settings/${section}`);
+        const root = `[data-testid=settings-${section}-page]`;
+        await expect(page.locator(root)).toBeVisible();
+        if (section === "privacy") await page.getByRole("switch", { name: "Lock Screen" }).click(); // opens the password form
+        for (const more of await page.getByTestId("row-info").all()) await more.click();
+        await expectTidy(page, root, `Settings, ${section}, every ⓘ open`);
+      }
+    } else {
+      await page.getByRole("switch", { name: "Lock Screen" }).click(); // opens the password form
+      await expectTidy(page, "[data-testid=settings-page]", "Settings");
+      // Every ⓘ open (the network's too, on the same page): the longest the rows get.
+      for (const more of await page.getByTestId("row-info").all()) await more.click();
+      await expectTidy(page, "[data-testid=settings-page]", "Settings, every ⓘ open");
+    }
 
     await page.goto("/#/profile");
     await expect(page.getByTestId("profile-page")).toBeVisible();

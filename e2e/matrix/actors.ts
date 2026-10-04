@@ -96,9 +96,10 @@ export async function openChat(actor: Actor): Promise<void> {
 }
 
 export async function setLanguage(actor: Actor, locale: "en" | "pt"): Promise<void> {
-  await go(actor, "#/settings");
+  // Its own section on a phone; on a wider screen the address scrolls the one page there.
+  await go(actor, "#/settings/appearance");
   await choose(actor.page.getByTestId("settings-language"), locale);
-  await expect(actor.page.getByRole("heading", { name: locale === "pt" ? "Configurações" : "Settings", exact: true })).toBeVisible();
+  await expect(actor.page.getByRole("heading", { level: 1, name: locale === "pt" ? /^(Configurações|Aparência)$/ : /^(Settings|Appearance)$/ })).toBeVisible();
   actor.locale = locale;
   await home(actor);
 }

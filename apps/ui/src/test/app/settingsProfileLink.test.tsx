@@ -3,22 +3,15 @@ import { Route, Routes } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { LockScreenProvider } from "../../contexts/LockScreenContext";
 import { UpdateProvider } from "../../contexts/UpdateContext";
-import { MOBILE_QUERY } from "../../hooks/useIsMobile";
 import { renameProfile } from "../../lib/profiles";
 import type { Language } from "../../lib/settings";
 import { Settings } from "../../pages/Settings";
 import { renderApp } from "../render";
+import { windowIs } from "../viewport";
 
 // covers: app.mobile-layout
 
-// A phone has no account bar and Profile has no tab: Settings' Profile section is the way there.
-
-/** The window as wide as a phone (below 768px) or not: `useIsMobile` asks `matchMedia`. */
-function windowIs(phone: boolean) {
-  const matchMedia = window.matchMedia.bind(window);
-  vi.spyOn(window, "matchMedia").mockImplementation((query: string) =>
-    query === MOBILE_QUERY ? ({ ...matchMedia(query), matches: phone, addEventListener: () => {}, removeEventListener: () => {} } as MediaQueryList) : matchMedia(query));
-}
+// A phone has no account bar and Profile has no tab: the top of Settings' menu is the way there.
 
 function renderSettings(language?: Language) {
   return renderApp(
@@ -37,7 +30,7 @@ function renderSettings(language?: Language) {
 afterEach(() => vi.restoreAllMocks());
 
 describe("Settings on a phone", () => {
-  it("opens the active profile's page from the top of the Profile section", async () => {
+  it("opens the active profile's page from the top of the menu", async () => {
     windowIs(true);
     renameProfile("", "Work");
     const { user } = renderSettings();
@@ -45,9 +38,9 @@ describe("Settings on a phone", () => {
     const link = screen.getByTestId("settings-profile-link");
     expect(link).toHaveTextContent("Work");
     expect(link).toHaveTextContent("Name, picture, backups and other profiles");
-    // First in the section, above the default nickname.
+    // First on the menu, above the sections.
     expect(link.parentElement?.firstElementChild).toBe(link);
-    expect(link.closest("section")).toContainElement(screen.getByLabelText("Name in chats"));
+    expect(link.compareDocumentPosition(screen.getByTestId("settings-open-profile")) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 
     await user.click(link);
     expect(screen.getByText("Profile page")).toBeInTheDocument();
