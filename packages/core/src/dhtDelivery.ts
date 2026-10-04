@@ -12,10 +12,12 @@ import { traceLink } from "./linkTrace";
 import { REACTION_LIMITS, readDhtReactions, validReactionNumber, type WireReaction } from "./reactions";
 import { readForwarded } from "./forwards";
 import { validEditNumber } from "./pairedEdits";
+import { dhtFileElements, dhtFileId, readDhtFile, type DhtFileAnnouncement, type DhtFileElement, type DhtFileOffer } from "./dhtFiles";
 
 export type DeliveryMode = "stream" | "dht";
 export const DHT_TEXT_BYTES = 256;
 export const DHT_MESSAGE_TTL = 5 * 60_000;
+const DHT_TEXT_TOO_LONG = `DHT text is limited to ${DHT_TEXT_BYTES} UTF-8 bytes. Shorten it or choose a live connection.`;
 const CONTROL_TTL = 10 * 60_000;
 /**
  * How far apart two devices' clocks may be for an envelope's expiry: a reader takes one until this long after `expires`
@@ -76,10 +78,13 @@ type Message = [id: string, timestamp: number, text: string];
  * yet, `[[id, emoji, n], …]`, oldest first and as many as fit; the fourteenth, the highest number of the reader's
  * reactions the author took (WISP 403 § Reactions). The eleventh and twelfth then go as `null` when there is no reply
  * and no edit. The fifteenth, with a text only, is how many times it has been forwarded (WISP 403 § Forwards); the
- * four before it then go as `null`, `null`, `[]` and `null` when they have nothing to say.
+ * four before it then go as `null`, `null`, `[]` and `null` when they have nothing to say. The sixteenth, a file's offer
+ * (WISP 403 § Files): `[wire id, size, type, meta]`, the text being the file's name; the five before it are then
+ * present, the fifteenth `null` when the file was never forwarded. Readers from before take a body of up to sixteen
+ * elements: one past it needs a reader that says it takes it.
  */
 type DhtReaction = [id: string, emoji: string, n: number];
-type Body = [version: 1, sequence: number, issued: number, expires: number, author: string, mode: DeliveryMode, message: Message | null, receipt: string | null, capsRev?: number | null, pinnedMailbox?: 1 | 2, replyTo?: string | null, edit?: DhtEdit | null, reactions?: DhtReaction[], reactionsTaken?: number | null, forwarded?: number];
+type Body = [version: 1, sequence: number, issued: number, expires: number, author: string, mode: DeliveryMode, message: Message | null, receipt: string | null, capsRev?: number | null, pinnedMailbox?: 1 | 2, replyTo?: string | null, edit?: DhtEdit | null, reactions?: DhtReaction[], reactionsTaken?: number | null, forwarded?: number | null, file?: DhtFileElement];
 /** An envelope's plaintext past this is not read (`receive`): what rides along must stay under it. */
 const MAX_ENVELOPE_PLAINTEXT = 900;
 /**
@@ -116,7 +121,7 @@ export interface DhtDeliveryState {
    */
   peerPinned?: "can" | "reads" | "seen";
   /** `reply`: the id of the message the text replies to, published with it (the eleventh element). */
-  pending?: { message: Message; expires: number; attempts: number; next: number; reply?: string; edit?: DhtEdit; forwarded?: number };
+  pending?: { message: Message; expires: number; attempts: number; next: number; reply?: string; edit?: DhtEdit; forwarded?: number; file?: DhtFileElement };
   /**
    * The receipt this side owes for the contact's last text. `next`: when it forces a publication again (absent: at
    * once). `settled`: the contact's newer envelope no longer carries that text (it has a receipt, on either path, or
@@ -218,7 +223,8 @@ export class DhtDelivery {
     credentials: PairingCredentials; transport: PkarrTransport;
     save(state: DhtDeliveryState): Promise<void>;
     pin(key: string): Promise<void>;
-    message(message: { id: string; text: string; timestamp: number; reply?: { i: string }; edit?: { i: string; e: number }; forwarded?: number }, packet: DhtPacketFacts): Promise<void>;
+    /** `file`: the text is a file's name, and this its offer (WISP 403 § Files): a bubble, not a text. */
+    message(message: { id: string; text: string; timestamp: number; reply?: { i: string }; edit?: { i: string; e: number }; forwarded?: number; file?: DhtFileAnnouncement }, packet: DhtPacketFacts): Promise<void>;
     receipt(id: string): Promise<void>;
     changed(view: DhtDeliveryView): void;
     /** This side's capability-record revision, told in every envelope (WISP 03). */
@@ -227,6 +233,8 @@ export class DhtDelivery {
     peerCapsRev?(rev: number): void;
     /** Whether the contact's capability record accepts DHT text (`dht-text/1`); absent or unknown: it does. */
     peerAcceptsText?(): boolean;
+    /** Whether the contact's capability record takes a file's offer on the floor (`dht-file/1`); absent: it does not. */
+    peerAcceptsFile?(): boolean;
     /** This side's reactions the contact has not confirmed, oldest first: they ride on the envelopes (WISP 403 § Reactions). */
     reactions?(): readonly WireReaction[];
     /** A reaction of the contact's, from an envelope, already checked. */
@@ -393,7 +401,7 @@ export class DhtDelivery {
     if (this.options.peerAcceptsText?.() === false) return DHT_TEXT_REFUSED;
     if (!ID.test(id) || !Number.isSafeInteger(timestamp) || timestamp <= 0 || (reply !== undefined && !REPLY_TO.test(reply))) return "Invalid message.";
     if (edit !== undefined && (reply !== undefined || !ID.test(edit[0]) || !validEditNumber(edit[1]))) return "Invalid message.";
-    if (utf8Encode(text).length > DHT_TEXT_BYTES) return `DHT text is limited to ${DHT_TEXT_BYTES} UTF-8 bytes. Shorten it or choose a live connection.`;
+    if (utf8Encode(text).length > DHT_TEXT_BYTES) return DHT_TEXT_TOO_LONG;
     if (/cashu[AB][A-Za-z0-9_-]+/i.test(text)) return "Payment tokens cannot be sent through DHT delivery.";
     const now = Date.now(), pending = this.state.pending;
     if (pending && pending.expires > now && pending.message[0] !== id) return "One DHT text can await a receipt at a time. Wait for its receipt or expiry before sending another.";
@@ -439,6 +447,62 @@ export class DhtDelivery {
     });
   }
   /**
+   * The envelope a file's offer would go in, as `send` builds a text's: the most it can say that fits the packet and
+   * what a reader reads (`MAX_ENVELOPE_PLAINTEXT`). Its meta goes first (a voice note's waveform thinned if it must),
+   * then the reply's id, then the hop count; the name, size, type and id always. A string: why it cannot go.
+   */
+  private fileEnvelope(file: DhtFileOffer, timestamp: number, reply?: string, forwarded?: number): NonNullable<DhtDeliveryState["pending"]> | string {
+    if (!this.options.peerAcceptsFile?.()) return DHT_FILE_REFUSED;
+    const id = dhtFileId(file.wireId);
+    if (reply !== undefined && !REPLY_TO.test(reply)) reply = undefined;
+    const error = this.validate(file.name, timestamp, id);
+    if (error) return error === DHT_TEXT_TOO_LONG ? DHT_FILE_TOO_LARGE : error;
+    const now = Date.now(), pending = this.state.pending;
+    if (pending?.message[0] === id && pending.expires > now) return pending;
+    const message: Message = [id, timestamp, file.name], expires = now + DHT_MESSAGE_TTL;
+    const hops = readForwarded(forwarded);
+    const fits = (element: DhtFileElement, withReply: boolean, withHops: boolean) => {
+      const body = this.body(this.state.sequence + 1, now, expires, message, this.state.receipt?.id ?? "abcdefghijklmnopqrstuv", withReply ? reply : undefined, [], undefined, withHops ? hops : undefined, element);
+      try { this.records(body, this.options.credentials.peerKey ?? this.participation.pubKeyZ32); } catch { return false; }
+      return utf8Encode(JSON.stringify([body, "x".repeat(86)])).length <= MAX_ENVELOPE_PLAINTEXT;
+    };
+    const elements = dhtFileElements(file), bare = elements[elements.length - 1];
+    const tries: [DhtFileElement, boolean, boolean][] = [...elements.map(e => [e, !!reply, !!hops] as [DhtFileElement, boolean, boolean]), [bare, !!reply, false], [bare, false, false]];
+    const found = tries.find(([element, withReply, withHops]) => fits(element, withReply, withHops));
+    if (!found) return DHT_FILE_TOO_LARGE;
+    const [element, withReply, withHops] = found;
+    return { message, expires, attempts: 0, next: now, file: element, ...(withReply && reply && { reply }), ...(withHops && hops && { forwarded: hops }) };
+  }
+  /** Why a file's offer cannot go on the floor now (WISP 403 § Files), or null when it can. */
+  fileError(file: DhtFileOffer, timestamp: number, reply?: string, forwarded?: number): string | null {
+    const envelope = this.fileEnvelope(file, timestamp, reply, forwarded);
+    return typeof envelope === "string" ? envelope : null;
+  }
+  /**
+   * Says a file's offer on the floor (WISP 403 § Files): its bubble takes its place on the contact's side, and its bytes
+   * follow on the live session. It takes the floor's one slot as a text does, under `dhtFileId(wireId)`, with the same
+   * retries and expiry; a receipt names that id. Null once it is the floor's pending envelope (a publication that
+   * failed is retried, as a text's is).
+   */
+  async announceFile(file: DhtFileOffer, timestamp: number, reply?: string, forwarded?: number): Promise<string | null> {
+    return this.serialize(async () => {
+      const next = this.fileEnvelope(file, timestamp, reply, forwarded);
+      if (typeof next === "string") return next;
+      await this.persist({ ...this.state, pending: next }); this.changed();
+      try { await this.publish(true); }
+      catch (error) {
+        if (!isDiscoveryBudgetError(error)) { this.errors.publish = `DHT publication failed: ${String(error instanceof Error ? error.message : error)}. Bounded retry continues until expiry.`; this.changed(); }
+      }
+      this.schedule();
+      return null;
+    });
+  }
+  /** The id of what awaits its receipt on the floor now, if anything does. */
+  get pendingId(): string | undefined {
+    const pending = this.state.pending;
+    return pending && pending.expires > Date.now() && pending.attempts < MAX_ATTEMPTS ? pending.message[0] : undefined;
+  }
+  /**
    * This side's capability record has a new revision (WISP 03): an envelope names it now. Otherwise the contact
    * learns of it with the next envelope that goes out anyway, a control one minutes away when nothing is sent,
    * and dials no native transport the record newly offers until then.
@@ -468,37 +532,34 @@ export class DhtDelivery {
       this.changed();
     });
   }
-  private body(sequence: number, issued: number, expires: number, message: Message | null, receipt: string | null, reply?: string, reactions: readonly WireReaction[] = [], edit?: DhtEdit, forwarded?: number): Body {
+  private body(sequence: number, issued: number, expires: number, message: Message | null, receipt: string | null, reply?: string, reactions: readonly WireReaction[] = [], edit?: DhtEdit, forwarded?: number, file?: DhtFileElement): Body {
     const rev = this.options.capsRev?.();
     const body: Body = [1, sequence, issued, expires, this.participation.pubKeyZ32, this.mode, message, receipt];
     // Whether it has a revision to name or not, the ninth element holds the place of the tenth: this side uses the pinned mailbox.
     body.push(rev !== undefined && Number.isSafeInteger(rev) && rev >= 0 ? rev : null, this.state.peerPinned ? 2 : 1);
     const taken = this.state.reactionsTaken;
+    const offer = message && !edit ? file : undefined;
     const hops = message && !edit ? readForwarded(forwarded) : undefined;
-    if (reactions.length || taken || hops) {
-      body.push(message && reply ? reply : null, message && edit ? edit : null, reactions.map(r => [r.id, r.e, r.n] as DhtReaction), taken ?? null);
-      if (hops) body.push(hops);
-    }
-    else {
-      if (message && (reply || edit)) body.push(reply ?? null);
-      if (message && edit) body.push(edit);
-    }
+    // As far as the last element that says something; the ones before it hold their places with nothing to say.
+    const last = offer ? 16 : hops ? 15 : reactions.length || taken ? 14 : message && edit ? 12 : message && reply ? 11 : 10;
+    const tail = [message && reply ? reply : null, message && edit ? edit : null, reactions.map(r => [r.id, r.e, r.n] as DhtReaction), taken ?? null, hops ?? null, offer];
+    body.push(...(tail.slice(0, last - 10) as []));
     return body;
   }
   /**
    * The envelope with as many of this side's pending reactions as fit, oldest first: the packet's budget and what a
    * reader reads (`MAX_ENVELOPE_PLAINTEXT`) both bound it. The contact confirms up to the newest it carried.
    */
-  private fitted(sequence: number, issued: number, expires: number, message: Message | null, receipt: string | null, reply?: string, edit?: DhtEdit, forwarded?: number): { body: Body; records: GhostRecord[]; reactions: number } {
+  private fitted(sequence: number, issued: number, expires: number, message: Message | null, receipt: string | null, reply?: string, edit?: DhtEdit, forwarded?: number, file?: DhtFileElement): { body: Body; records: GhostRecord[]; reactions: number } {
     const pending = (this.options.reactions?.() ?? []).slice(0, REACTION_LIMITS.dht);
     for (let count = pending.length; count > 0; count--) {
-      const body = this.body(sequence, issued, expires, message, receipt, reply, pending.slice(0, count), edit, forwarded);
+      const body = this.body(sequence, issued, expires, message, receipt, reply, pending.slice(0, count), edit, forwarded, file);
       try {
         const records = this.records(body);
         if (utf8Encode(JSON.stringify([body, "x".repeat(86)])).length <= MAX_ENVELOPE_PLAINTEXT) return { body, records, reactions: count };
       } catch { /* one fewer */ }
     }
-    const body = this.body(sequence, issued, expires, message, receipt, reply, [], edit, forwarded);
+    const body = this.body(sequence, issued, expires, message, receipt, reply, [], edit, forwarded, file);
     return { body, records: this.records(body), reactions: 0 };
   }
   private async publish(force = false): Promise<void> {
@@ -513,7 +574,7 @@ export class DhtDelivery {
     // Dated back (`DHT_ISSUED_BACK_MS`), and a control envelope's lifetime with it: a reader bounds `expires - issued`.
     const expires = pending?.expires ?? now - DHT_ISSUED_BACK_MS + CONTROL_TTL;
     const issued = Math.min(now, Math.max(now - DHT_ISSUED_BACK_MS, expires - (pending ? DHT_MESSAGE_TTL : CONTROL_TTL), (pending?.message[1] ?? 0) - 30_000));
-    const { body, records, reactions } = this.fitted(this.state.sequence + 1, issued, expires, pending?.message ?? null, receipt?.id ?? null, pending?.reply, pending?.edit, pending?.forwarded);
+    const { body, records, reactions } = this.fitted(this.state.sequence + 1, issued, expires, pending?.message ?? null, receipt?.id ?? null, pending?.reply, pending?.edit, pending?.forwarded, pending?.file);
     const reactionsWereDue = this.reactionsDue;
     // A text that left no room: the reactions go on the next envelope. Once some went, the rest wait for the contact
     // to say those were taken (the engine announces the rest then).
@@ -570,7 +631,7 @@ export class DhtDelivery {
     let envelope: unknown; try { envelope = JSON.parse(plaintext); } catch { return null; }
     if (!Array.isArray(envelope) || envelope.length !== 2 || !Array.isArray(envelope[0])) return null;
     const [body, signature] = envelope as [Body, string];
-    const [version, sequence, issued, expires, author, mode, message, receipt, capsRev, pinnedMailbox, replyTo, editOf, reactions, reactionsTaken, forwarded] = body;
+    const [version, sequence, issued, expires, author, mode, message, receipt, capsRev, pinnedMailbox, replyTo, editOf, reactions, reactionsTaken, forwarded, file] = body;
     const now = Date.now();
     if (body.length < 8 || body.length > 16 || version !== 1 || !Number.isSafeInteger(sequence) || sequence < 1 || !Number.isSafeInteger(issued) ||
       !Number.isSafeInteger(expires) || expires - issued > CONTROL_TTL || issued >= expires ||
@@ -586,7 +647,7 @@ export class DhtDelivery {
       if (this.expiredSeen !== sequence) { this.expiredSeen = sequence; traceLink(this.from, "dht-envelope-expired", { seq: sequence, lateMs: now - expires }); }
       return null;
     }
-    return { body, sender, author, sequence, issued, expires, mode, message, receipt, capsRev, pinnedMailbox, replyTo, editOf, reactions, reactionsTaken, forwarded };
+    return { body, sender, author, sequence, issued, expires, mode, message, receipt, capsRev, pinnedMailbox, replyTo, editOf, reactions, reactionsTaken, forwarded, file };
   }
   /**
    * The contact's envelope is sealed to another key (`open`): it pinned someone else who used the same invite first, so
@@ -610,7 +671,7 @@ export class DhtDelivery {
     const opened = this.open(packet, box);
     if (!opened) return "none";
     if ("sealedToAnother" in opened) { if (opened.sealedToAnother) await this.sealedToAnother(opened.sealedToAnother); return "none"; }
-    const { body, sender, author, sequence, issued, expires, mode, message, receipt, capsRev, pinnedMailbox, replyTo, editOf, reactions, reactionsTaken, forwarded } = opened;
+    const { body, sender, author, sequence, issued, expires, mode, message, receipt, capsRev, pinnedMailbox, replyTo, editOf, reactions, reactionsTaken, forwarded, file } = opened;
     // Before the pin, the key the invite named: another invite holder's envelope is refused, and not remembered,
     // since whoever holds a copy can write to this mailbox and the inviter's next envelope replaces it.
     if (!this.options.credentials.peerKey && this.options.credentials.expectedPeerKey && this.options.credentials.expectedPeerKey !== author) return "none";
@@ -644,7 +705,10 @@ export class DhtDelivery {
       // A hop count that is not one, or one on an edit, is dropped: the text reads as written here.
       // Owed for as long as the text had left when its envelope was made, counted on this clock: `expires` is the sender's.
       const hops = edit.edit ? undefined : readForwarded(forwarded);
-      if (nextReceipt?.id !== message[0]) await this.options.message({ id: message[0], timestamp: message[1], text: message[2], ...reply, ...edit, ...(hops && { forwarded: hops }) }, DhtDelivery.facts(body, packet.records, packet.pubKeyZ32));
+      // A file's offer (WISP 403 § Files) is a bubble whose bytes follow live. One that does not hold is dropped, and
+      // receipted like any text: its name is never shown as a text (its file comes live anyway).
+      const offer = file === undefined || file === null ? undefined : edit.edit ? null : readDhtFile(file, message);
+      if (nextReceipt?.id !== message[0] && offer !== null) await this.options.message({ id: message[0], timestamp: message[1], text: message[2], ...reply, ...edit, ...(hops && { forwarded: hops }), ...(offer && { file: offer }) }, DhtDelivery.facts(body, packet.records, packet.pubKeyZ32));
       if (nextReceipt?.id !== message[0]) nextReceipt = { id: message[0], expires: Date.now() + Math.min(DHT_MESSAGE_TTL, expires - issued), attempts: 0 };
       // Asked for again (the text sent anew after a lost session): its receipt goes at once again.
       else if (nextReceipt.settled) { const { settled: _settled, next: _next, ...asked } = nextReceipt; nextReceipt = asked; }
@@ -767,6 +831,8 @@ export class DhtDelivery {
   }
 }
 export const DHT_TEXT_REFUSED = "Your contact's app does not accept text over the DHT. It is sent when you are live.";
+export const DHT_FILE_REFUSED = "Your contact's app shows a file only once it comes. It is sent when you are live.";
+export const DHT_FILE_TOO_LARGE = "This file's name is too long to say over the DHT. It is sent when you are live.";
 
 /**
  * `DhtDelivery.peek` for a chat of a profile that is not running: built from what that profile stored, with every
