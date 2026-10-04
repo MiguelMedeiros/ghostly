@@ -126,6 +126,8 @@ export interface EnrollNetwork {
   relays?: string[];
   readRelays?: boolean;
   irohRelays?: string[];
+  /** The relay a browser reaches the HyperDHT through (a new standby web app's device links offer HyperDHT through it). */
+  hyperdhtRelay?: string;
   iceServers?: { urls: string; username?: string; credential?: string }[];
 }
 
@@ -139,6 +141,7 @@ function readEnrollNetwork(value: unknown): EnrollNetwork | null {
   if (n.readRelays !== undefined && typeof n.readRelays !== "boolean") return null;
   if (n.relays !== undefined && !texts(n.relays, 16)) return null;
   if (n.irohRelays !== undefined && !texts(n.irohRelays, 4)) return null;
+  if (n.hyperdhtRelay !== undefined && (typeof n.hyperdhtRelay !== "string" || n.hyperdhtRelay.length > 2048)) return null;
   if (n.iceServers !== undefined) {
     if (!Array.isArray(n.iceServers) || n.iceServers.length > 8) return null;
     for (const server of n.iceServers as Record<string, unknown>[]) {
@@ -151,6 +154,7 @@ function readEnrollNetwork(value: unknown): EnrollNetwork | null {
     ...(n.relays ? { relays: [...n.relays as string[]] } : {}),
     ...(n.readRelays === true ? { readRelays: true } : {}),
     ...(n.irohRelays ? { irohRelays: [...n.irohRelays as string[]] } : {}),
+    ...(n.hyperdhtRelay ? { hyperdhtRelay: n.hyperdhtRelay as string } : {}),
     ...(n.iceServers ? { iceServers: (n.iceServers as Record<string, string>[]).map((s) => ({ urls: s.urls, ...(s.username !== undefined ? { username: s.username } : {}), ...(s.credential !== undefined ? { credential: s.credential } : {}) })) } : {}),
   };
 }
