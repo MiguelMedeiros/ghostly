@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { CommunityWorld, RELAY_NETWORK } from "./communityWorld";
 // covers: groups.community.catch-up, groups.community.send, groups.community.join
 
@@ -54,7 +54,6 @@ describe("a joiner's first message in a community, written before any edge is up
  * its admission wrote under an epoch three to seven behind, and the members let in after it never got its line.
  */
 describe("a message written while behind on the group's chain", { timeout: 120_000 }, () => {
-  afterEach(() => { vi.useRealTimers(); });
   it("reaches the members let in before it was written, once its author has caught up", async () => {
     const world = new CommunityWorld(undefined, RELAY_NETWORK);
     const admin = world.add("admin", undefined, { staysOnline: true });
@@ -71,12 +70,12 @@ describe("a message written while behind on the group's chain", { timeout: 120_0
     const late = [world.add("carol"), world.add("dave")];
     for (const p of late) { await p.groups.joinByLink(link); await world.until(() => world.member(p, id), 5 * 60_000, 500); }
     await world.until(() => late.every(p => (world.view(p, id)?.community?.connected ?? 0) > 0), 3 * 60_000);
-    // Bob writes, by the clock that let them in, still believing the group is the admin and him.
-    vi.useFakeTimers({ toFake: ["Date"] });
-    vi.setSystemTime(world.now);
+    // Bob writes, still believing the group is the admin and him. The world's clock runs minutes ahead of the wall clock
+    // by now: the engine dates the frame by its own clock, the one its commits are dated by, not the wall clock (dated
+    // by the wall clock, the frame read as written before Carol and Dave were let in, and they never got it).
+    expect(world.now - Date.now()).toBeGreaterThan(60_000);
     expect(world.view(bob, id)!.members).toHaveLength(2);
     expect((await bob.groups.send(id, "anyone new?")).error).toBeNull();
-    vi.useRealTimers();
     apart = false;
     const took = await world.until(() => late.every(p => world.texts(p, id).includes("anyone new?")), 5 * 60_000);
     expect(took).toBeLessThanOrEqual(2 * 60_000);

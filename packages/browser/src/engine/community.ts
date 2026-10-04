@@ -434,7 +434,12 @@ export class Communities {
     if (!live) return { error: "You are not in this group yet", refused: true };
     // Not a member (removed, the history forked, an admission that lost): refused, not something to try again.
     if (!live.session.isMember) return { error: live.session.state.statusReason ?? "You are not in this group", refused: true };
-    const result = card ? await live.session.sendText(text, this.host.myNick?.(), Date.now(), mentions, reply, forwarded, card) : await live.session.sendText(text, this.host.myNick?.(), Date.now(), mentions, reply, forwarded);
+    // Dated by the engine's clock, as the commits it signs and the session's own decisions are: a frame said again once
+    // its author has caught up (`CommunitySession.reseal`) goes to the members let in before it, judged by the commits'
+    // times against the frame's. Dated by the wall clock, a frame read as written before admissions it came after
+    // whenever the two differ (on headless engines, minutes): the members let in meanwhile never got it (2026-10-03).
+    const now = this.now();
+    const result = card ? await live.session.sendText(text, this.host.myNick?.(), now, mentions, reply, forwarded, card) : await live.session.sendText(text, this.host.myNick?.(), now, mentions, reply, forwarded);
     return "error" in result ? { error: result.error } : { error: null, messageId: result.id };
   }
 
@@ -442,7 +447,7 @@ export class Communities {
   async sendApp(groupId: string, frame: Record<string, unknown>): Promise<void> {
     const live = this.live.get(groupId);
     if (!live) throw new Error("You are not in this group yet");
-    const result = await live.session.sendApp(frame, this.host.myNick?.());
+    const result = await live.session.sendApp(frame, this.host.myNick?.(), this.now());
     if ("error" in result) throw new Error(result.error);
   }
 
@@ -450,7 +455,7 @@ export class Communities {
   async sendEdit(groupId: string, edit: GroupEdit): Promise<string | null> {
     const live = this.live.get(groupId);
     if (!live) return "You are not in this group yet";
-    const result = await live.session.sendEdit({ id: edit.id, v: edit.e, ts: edit.ts, text: edit.m, mentions: edit.k, ...(edit.sc && { card: edit.sc }) }, this.host.myNick?.());
+    const result = await live.session.sendEdit({ id: edit.id, v: edit.e, ts: edit.ts, text: edit.m, mentions: edit.k, ...(edit.sc && { card: edit.sc }) }, this.host.myNick?.(), this.now());
     if ("error" in result) return result.error;
     // The edit rides in a frame of its own: what takes that frame (now, or in a catch-up later) takes the edit.
     const key = editKey(edit.id, edit.e);
@@ -464,7 +469,7 @@ export class Communities {
   async sendPair(groupId: string, to: string, payload: Record<string, unknown>): Promise<void> {
     const live = this.live.get(groupId);
     if (!live) throw new Error("You are not in this group yet");
-    const result = await live.session.sendPair(to, payload, this.host.myNick?.());
+    const result = await live.session.sendPair(to, payload, this.host.myNick?.(), this.now());
     if ("error" in result) throw new Error(result.error);
   }
 
