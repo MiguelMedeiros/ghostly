@@ -756,7 +756,9 @@ export class GroupSession {
     }
     const kept = new Set(this.state.sent.map(ownKey));
     // Looked at once each; one said again that reached nobody is in the list again, by its own key.
-    this.state.alone = (this.state.alone ?? []).filter(key => kept.has(key) && !looked.has(key));
+    const left = (this.state.alone ?? []).filter(key => kept.has(key) && !looked.has(key));
+    if (left.join() === (this.state.alone ?? []).join()) return;
+    this.state.alone = left;
     await this.persist();
   }
 
