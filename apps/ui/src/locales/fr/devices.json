@@ -25,6 +25,7 @@
     "failed": "Un problème est survenu. Rien n’a été ajouté.",
     "full": "Ce profil a déjà 4 appareils.",
     "inUse": "Ce profil est utilisé ici. Créez d’abord un nouveau profil, puis ajoutez l’appareil depuis celui-ci.",
+    "loading": "Vos portefeuilles ici ne sont pas encore chargés. Vérifiez votre connexion et réessayez.",
     "notGhostly": "Ce n’est pas un code pour ajouter un appareil.",
     "offline": "Vous êtes hors ligne.",
     "proof": "L’autre appareil n’a pas pu prouver qui il est. Rien n’a été ajouté.",

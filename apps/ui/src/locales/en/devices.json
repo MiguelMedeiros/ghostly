@@ -25,6 +25,7 @@
     "failed": "Something went wrong. Nothing was added.",
     "full": "This profile has 4 devices already.",
     "inUse": "This profile is in use here. Add a new profile first, then add the device from there.",
+    "loading": "Your wallets here have not loaded yet. Check your connection and try again.",
     "notGhostly": "This is not a code to add a device.",
     "offline": "You are offline.",
     "proof": "The other device could not prove itself. Nothing was added.",
