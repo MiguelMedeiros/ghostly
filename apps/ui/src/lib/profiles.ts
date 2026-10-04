@@ -297,6 +297,35 @@ export function pointProfile(from: string, to: string): void {
     const { space: _was, ...rest } = p;
     return space === undefined ? rest : { ...rest, space };
   }) });
+  // Read back before anyone reloads on it: a write that did not take effect fails here, not as an empty profile later.
+  // (It cannot see a write the storage later loses on disk; the device record's `home` recovers that at the next start.)
+  if (namespaceOf(entry.id) !== (space ?? derivedNamespace(entry.id))) throw new Error("The profile's storage could not be pointed at the new state");
+}
+
+/**
+ * The profile's own database name, before any pointer: what a handoff's staged copy names as the profile it holds
+ * (`DeviceRecord.home`).
+ */
+export const homeDatabaseOf = (id: string) => databaseOfSpace(derivedNamespace(id));
+
+/**
+ * A profile whose pointer is gone (WISP 06 § Installing the staged state): no `space` in the registry, no device record
+ * under its own database, and a device record of a namespace a handoff installed for it (`home`). The pointer is
+ * written again, to that namespace, before anything opens the old, empty one. Returns whether it was. `records`: the
+ * device records on this device (`listDeviceRecords`).
+ */
+export function recoverProfilePointer(id: string, records: readonly { profile: string; home?: string; state: string; saved: number }[]): boolean {
+  // A profile the registry does not list is not known here: nothing is guessed for it.
+  if (pointerOf(id) !== undefined || !read().profiles.some((p) => p.id === id)) return false;
+  const home = homeDatabaseOf(id);
+  if (records.some((record) => record.profile === home)) return false;
+  const named = new Set(read().profiles.map((p) => databaseOfSpace(namespaceOf(p.id))));
+  const found = records
+    .filter((record) => record.home === home && record.profile !== home && record.profile.startsWith("ghostly_") && !named.has(record.profile) && SPACE.test(record.profile.slice("ghostly_".length)))
+    .sort((a, b) => Number(b.state === "active") - Number(a.state === "active") || b.saved - a.saved)[0];
+  if (!found) return false;
+  pointProfile(home, found.profile);
+  return true;
 }
 
 /** Where a profile's own keys start in localStorage: `ghostly_<ns>_`, or `ghostly_` for the default one. */

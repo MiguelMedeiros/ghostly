@@ -1,7 +1,7 @@
 import "fake-indexeddb/auto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DeviceRecordError, DeviceTransitionError, type DeviceRecord } from "../src/devices/state";
-import { DEVICES_DB, DEVICES_DB_VERSION, DEVICE_READ_TIMINGS, amendDevice, closeDevicesDb, deviceStateOf, enrollDevice, forgetDevice, moveDevice, readDeviceRecord, setDeviceMirror,
+import { DEVICES_DB, DEVICES_DB_VERSION, DEVICE_READ_TIMINGS, amendDevice, closeDevicesDb, deviceStateOf, enrollDevice, forgetDevice, installDeviceRecord, listDeviceRecords, moveDevice, readDeviceRecord, setDeviceMirror,
   type DeviceMirror } from "../src/devices/store";
 import { putDeviceRecord } from "./helpers/deviceRecord";
 // covers: devices.gate
@@ -300,5 +300,33 @@ describe("Desktop's file beside the database", () => {
     await forgetDevice("ghostly");
     expect(mirror.files.has("ghostly")).toBe(false);
     expect(await stored("ghostly")).toBeUndefined();
+  });
+});
+
+describe("a staged namespace a handoff installed (WISP 06 § Installing the staged state)", () => {
+  const handoff = (staging: string, old: string) => ({ role: "taking" as const, step: "install", id: "x".repeat(22), staging, old });
+
+  it("names the profile it holds (`home`), and keeps naming it through the next handoff's staged name", async () => {
+    await putDeviceRecord(record("taking", { profile: "ghostly_base", handoff: handoff("ghostly_base-stageaaaaa", "ghostly_base") }));
+    await installDeviceRecord("ghostly_base", "ghostly_base-stageaaaaa", {});
+    expect((await readDeviceRecord("ghostly_base-stageaaaaa"))?.home).toBe("ghostly_base");
+    // The old name's own record names no home: it is the profile's own.
+    expect((await readDeviceRecord("ghostly_base"))?.home).toBeUndefined();
+    // Kept when the record's fields change, as they do at the take.
+    await amendDevice("ghostly_base-stageaaaaa", { handoff: undefined });
+    await forgetDevice("ghostly_base");
+    // Taken back here later: the next staged copy still names the profile's own database, not the name in between.
+    await amendDevice("ghostly_base-stageaaaaa", { handoff: handoff("ghostly_base-stagebbbbb", "ghostly_base-stageaaaaa") });
+    await installDeviceRecord("ghostly_base-stageaaaaa", "ghostly_base-stagebbbbb", {});
+    expect((await readDeviceRecord("ghostly_base-stagebbbbb"))?.home).toBe("ghostly_base");
+    expect((await listDeviceRecords()).map((r) => [r.profile, r.home]).sort()).toEqual([["ghostly_base-stageaaaaa", "ghostly_base"], ["ghostly_base-stagebbbbb", "ghostly_base"]]);
+  });
+
+  it("lists nothing, and makes no database, where nothing was ever enrolled; a record that does not parse is left out", async () => {
+    expect(await listDeviceRecords()).toEqual([]);
+    expect((await indexedDB.databases()).map((d) => d.name)).toEqual([]);
+    await putDeviceRecord(record("active"));
+    await putDeviceRecord({ ...record("active", { profile: "ghostly_bad" }), home: "not a database" } as DeviceRecord);
+    expect((await listDeviceRecords()).map((r) => r.profile)).toEqual(["ghostly"]);
   });
 });

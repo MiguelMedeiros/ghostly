@@ -123,6 +123,19 @@ describe("the lock password a device set needs (WISP 06 § Adding a device)", ()
     await user.click(screen.getByTestId("device-add-match"));
     expect(engine.callsTo("deviceEnrollConfirm")).toEqual([{ match: true }]);
   }, 20_000);
+
+  it("says the two devices could not connect, in place of the code, when the engine ends it so", async () => {
+    localStorage.setItem("ghostly_app_settings", JSON.stringify({ lockScreen: { enabled: true, passwordHash: await hashPassword("a long password"), timeoutMinutes: 5 } }));
+    const { user, engine } = renderApp(<AddDeviceDialog onClose={() => {}} />);
+    engine.on("deviceEnrollInvite", () => waiting);
+    engine.on("deviceHandoffVerifier", () => undefined);
+    engine.on("deviceEnrollView", () => ({ role: "inviter", step: "failed", reason: "unreached" }));
+    await user.type(screen.getByTestId("device-add-password"), "a long password");
+    await user.click(screen.getByTestId("device-add-next"));
+    const failed = await screen.findByTestId("device-add-failed", {}, { timeout: 3_000 });
+    expect(failed).toHaveAttribute("data-reason", "unreached");
+    expect(failed).toHaveTextContent("The two devices found each other but could not connect.");
+  }, 20_000);
 });
 
 describe("I already use Ghostly", () => {
