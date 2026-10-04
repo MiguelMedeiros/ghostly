@@ -20,6 +20,7 @@ import { useAppNavigation } from "../hooks/useAppNavigation";
 import { formatAmount } from "../lib/amount";
 import { useComposition } from "../hooks/useComposition";
 import { errorText } from "../lib/errorText";
+import { openJoinAnother } from "../lib/devices";
 
 /** Profiles change outside React (another component, another tab); re-read them when they do. */
 function useProfiles() {
@@ -161,7 +162,11 @@ export function Profile() {
             </InputGroup>
           </Block>
         ) : (
-          <button data-testid="profile-new" onClick={() => setCreating(true)} className="w-full px-4 py-3 min-h-12 text-left text-sm text-text-secondary hover:text-accent hover:bg-surface-alt transition-colors cursor-pointer rounded-b-xl">{t("profile.newProfile")}</button>
+          <button data-testid="profile-new" onClick={() => setCreating(true)} className="w-full px-4 py-3 min-h-12 text-start text-sm text-text-secondary hover:text-accent hover:bg-surface-alt transition-colors cursor-pointer">{t("profile.newProfile")}</button>
+        )}
+        {/* A profile that lives on another device (WISP 06): a new profile here, which opens on adding this device. */}
+        {canSwitch && (
+          <button data-testid="profile-join-another" onClick={() => openJoinAnother()} className="w-full px-4 py-3 min-h-12 text-start text-sm text-text-secondary hover:text-accent hover:bg-surface-alt transition-colors cursor-pointer rounded-b-xl">{t("devices.join.another")}</button>
         )}
       </Section>
       {deleting && <DeleteProfileDialog entry={deleting} onClose={() => setDeleting(null)} />}

@@ -22,8 +22,16 @@ export const join = {
     update: "This invite was made by a newer Ghostly. Update to join.",
     "not-ghostly": "This is not a Ghostly invite.",
     damaged: "This invite is damaged. Ask for a new one.",
-    device: "This code adds a device to a profile. On the new device, open Ghostly and choose I already use Ghostly.",
+    device: "This code adds a device to a profile. On the new device, open Ghostly and choose Add this device to another profile.",
   } satisfies Record<InviteRefusal, string>,
+  /** A code that adds a device to a profile (WISP 06): no chat, but the web app takes it. */
+  device: {
+    title: "Add this device to your profile",
+    lead: "This code adds a device to a profile. It works once, for 10 minutes.",
+    open: "Open in Ghostly",
+    steps: "Or open Ghostly on this device, choose Add this device to another profile, and scan or paste the code.",
+    private: "The code stays in this browser. It was never sent to ghostly.tools.",
+  },
 };
 
 export type JoinCopy = typeof join;

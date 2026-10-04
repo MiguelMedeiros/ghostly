@@ -2,7 +2,7 @@ import { useBackdropDismiss } from "../hooks/useDismiss";
 import { useEffect, useRef, useState } from "react";
 import jsQR from "jsqr";
 import { decodeCommunityLink, decodeGroupEntryLink, readDeviceInvite } from "@ghostly/core";
-import { enrollErrorKey, failureKey } from "../lib/devices";
+import { enrollErrorKey, failureKey, offerDeviceLink } from "../lib/devices";
 import { INVITE_REFUSAL_MESSAGE, classifyInvite, readInvite } from "../lib/url";
 import { showJoinNotice } from "../lib/joinNotice";
 import { pasteShortcut, readClipboardText } from "../lib/clipboard";
@@ -88,6 +88,8 @@ export function JoinDialog({ onJoin, onOpenChat, onJoinGroup, onDevice, onClose,
       return;
     }
     const reading = readInvite(value);
+    // A good code that adds a device (WISP 06), scanned from the active device with Join: it goes where such a code goes.
+    if (!reading.ok && reading.reason === "device" && readDeviceInvite(value).ok) { joined.current = true; close(); offerDeviceLink(value.trim()); return; }
     // The reason, as WISP 801 words it: a typo, a newer version, not an invite at all, or a damaged one.
     if (!reading.ok) { setError(t(INVITE_REFUSAL_MESSAGE[reading.reason])); setManual(true); return; }
     const outcome = classifyInvite(reading.keys);

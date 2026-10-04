@@ -5,7 +5,9 @@ import type { EnrollFailure } from "@ghostly/browser/devices/enroll";
 import type { DeviceSetView } from "@ghostly/browser/devices/links";
 import type { WalletView } from "@ghostly/browser/shared/types";
 import type { TranslationKey } from "../contexts/I18nContext";
+import { readInviteCode } from "@ghostly/core";
 import { createProfile, currentProfile, switchProfile } from "./profiles";
+import { protocolLinkCode } from "./url";
 
 /*
  * One profile on several devices (WISP 06), as the pages need it: the lock password a device set needs, the name a
@@ -108,23 +110,98 @@ export function listNames(names: readonly string[], language: string): string {
 const JOIN_REQUEST = "ghostly_join_device";
 
 /**
- * "Add this device to my profile" on a device that is out of its set (removed, or whose devices changed while it was
- * off, WISP 06 § Removing a device): a new profile here, which opens on "Add this device to my profile". The profile it
- * leaves keeps its frozen copy untouched; it is never started as a second copy.
+ * What a new profile opens on: "Add this device to my profile", at the first step, or at the device's name when the
+ * person already chose to add it (`start: "name"`). `code`: the device code a link carried, used in place of asking.
  */
-export function reenrollHere(): void {
-  const entry = createProfile(currentProfile().name);
-  try { sessionStorage.setItem(JOIN_REQUEST, entry.id); } catch { /* the person opens it from the home screen */ }
+export interface JoinRequest { code?: string; start?: "name" }
+
+/**
+ * A new, empty profile here, which opens on "Add this device to my profile" (WISP 06 § User experience). The profile
+ * it leaves is not touched: nothing is written into it, and it is never started as a second copy. The request, with
+ * the code when there is one, waits in this tab's session storage until the new profile reads it, once.
+ */
+export function joinInNewProfile(name: string, request: JoinRequest = {}): void {
+  const entry = createProfile(name);
+  try { sessionStorage.setItem(JOIN_REQUEST, JSON.stringify({ id: entry.id, ...request })); } catch { /* the person opens it from the chat list */ }
   switchProfile(entry.id, { route: "/" });
 }
 
-/** Whether this page was opened to add the device to a profile (`reenrollHere`). Asked once: the request is used up. */
-export function takeJoinRequest(profileId: string): boolean {
+/**
+ * "Add this device to my profile" on a device that is out of its set (removed, or whose devices changed while it was
+ * off, WISP 06 § Removing a device): a new profile here, under the same name, which opens on that dialog. The profile
+ * it leaves keeps its frozen copy untouched.
+ */
+export function reenrollHere(): void {
+  joinInNewProfile(currentProfile().name);
+}
+
+/** What this page was opened to do, when it was opened to add the device to a profile. Asked once: the request is used up. */
+export function takeJoinRequest(profileId: string): JoinRequest | null {
   try {
-    if (sessionStorage.getItem(JOIN_REQUEST) !== profileId) return false;
+    const raw = sessionStorage.getItem(JOIN_REQUEST);
+    if (raw === null) return null;
+    let stored: { id?: unknown; code?: unknown; start?: unknown } | null;
+    try { stored = JSON.parse(raw) as typeof stored; } catch { stored = { id: raw }; }
+    if (!stored || typeof stored !== "object" || stored.id !== profileId) return null;
     sessionStorage.removeItem(JOIN_REQUEST);
-    return true;
-  } catch { return false; }
+    return { ...(typeof stored.code === "string" ? { code: stored.code } : {}), ...(stored.start === "name" ? { start: "name" as const } : {}) };
+  } catch { return null; }
+}
+
+/** What the join host (`JoinHost`) is asked to open: the join dialog in this profile, or "Add this device to another profile". */
+export type JoinOpen = { kind: "join"; request: JoinRequest } | { kind: "another"; code?: string };
+export const JOIN_OPEN_EVENT = "ghostly-open-join";
+
+/** "I already use Ghostly": the join dialog, in this profile, over whatever the app shows (the chat list on a phone). */
+export function openJoinProfile(request: JoinRequest = {}): void {
+  window.dispatchEvent(new CustomEvent<JoinOpen>(JOIN_OPEN_EVENT, { detail: { kind: "join", request } }));
+}
+
+/** "Add this device to another profile": asks first, then makes a new profile for it (`joinInNewProfile`). */
+export function openJoinAnother(code?: string): void {
+  window.dispatchEvent(new CustomEvent<JoinOpen>(JOIN_OPEN_EVENT, { detail: { kind: "another", ...(code ? { code } : {}) } }));
+}
+
+/*
+ * A device code opened as a link (WISP 06 § Adding a device). The active device's QR code is the code's link on the
+ * web app, `https://app.ghostly.tools/#ghostly1z…`, so a phone's own camera opens the installed web app with the code
+ * in the fragment, which no request carries. The app takes it out of the address before anything else reads it and
+ * keeps it here, in memory, until the join host takes it.
+ */
+let pendingDeviceLink: string | null = null;
+export const DEVICE_LINK_EVENT = "ghostly-device-link";
+
+/** Whether this is a device code (version 2), good or not: a chat invite, or anything else, is not. */
+export function isDeviceCode(code: string): boolean {
+  const reading = readInviteCode(code);
+  return !reading.ok && reading.reason === "device";
+}
+
+/** Hands a device code an address carried to the join host. */
+export function offerDeviceLink(code: string): void {
+  pendingDeviceLink = code;
+  window.dispatchEvent(new Event(DEVICE_LINK_EVENT));
+}
+
+/** The device code a link handed over, once: it is forgotten as it is taken. */
+export function takeDeviceLink(): string | null {
+  const code = pendingDeviceLink;
+  pendingDeviceLink = null;
+  return code;
+}
+
+/**
+ * The device code in this page's address (`#ghostly1z…`, `#/ghostly1z…`, or a `web+ghostly:` link holding one), out
+ * of the address and the history at once, and handed to the join host. Runs before the router reads the address, and
+ * on a device on standby too, where no router runs. Anything else is left for the router.
+ */
+export function takeDeviceLinkFromAddress(): void {
+  const rest = window.location.hash.replace(/^#/, "");
+  if (!rest) return;
+  const code = protocolLinkCode(rest) ?? rest.replace(/^\//, "");
+  if (!/^ghostly1/i.test(code) || !isDeviceCode(code)) return;
+  window.history.replaceState(null, "", "#/");
+  offerDeviceLink(code);
 }
 
 /** Wallets the lost device could spend from, as the checklist names them (WISP 06 § Removing a device, "Lost or stolen?"). */

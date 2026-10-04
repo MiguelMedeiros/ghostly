@@ -6,6 +6,7 @@ import { UpdateProvider } from "../../contexts/UpdateContext";
 import { Settings } from "../../pages/Settings";
 import { AddDeviceDialog } from "../../components/devices/AddDeviceDialog";
 import { JoinProfileDialog } from "../../components/devices/JoinProfileDialog";
+import { JoinHost } from "../../components/devices/JoinHost";
 import { defaultDeviceName, lockPasswordMin, lockPasswordProblem } from "../../lib/devices";
 import { hashPassword } from "../../lib/settings";
 import { Home } from "../../pages/Home";
@@ -140,7 +141,7 @@ describe("the lock password a device set needs (WISP 06 § Adding a device)", ()
 
 describe("I already use Ghostly", () => {
   it("is offered on a new profile, with Add this device to my profile and Restore a backup", async () => {
-    const { user } = renderApp(<Home />);
+    const { user } = renderApp(<><Home /><JoinHost /></>);
     await user.click(screen.getByTestId("home-already"));
     expect(screen.getByTestId("device-join-add")).toHaveTextContent("Add this device to my profile");
     expect(screen.getByTestId("device-join-restore")).toHaveTextContent("Restore a backup");

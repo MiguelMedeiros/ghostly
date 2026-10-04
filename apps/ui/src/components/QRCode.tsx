@@ -8,9 +8,11 @@ interface QRCodeDisplayProps {
   /** What the QR encodes, when not `value`: segments, each in the mode that fits it (an invite link in capitals). */
   qr?: string[];
   label?: string;
+  /** What the Copy button says, when it does not copy an invite. */
+  copyLabel?: string;
 }
 
-export function QRCodeDisplay({ value, qr, label }: QRCodeDisplayProps) {
+export function QRCodeDisplay({ value, qr, label, copyLabel }: QRCodeDisplayProps) {
   const { t } = useI18n();
   const currentValue = useRef(value); currentValue.current = value;
   const copiedTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -63,12 +65,12 @@ export function QRCodeDisplay({ value, qr, label }: QRCodeDisplayProps) {
           level="M"
         />
       </div>
-      <button onClick={() => void handleCopy()} aria-label={copied ? t("common.copied") : t("invite.copy")}
+      <button onClick={() => void handleCopy()} aria-label={copied ? t("common.copied") : copyLabel ?? t("invite.copy")}
         className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-lg bg-accent px-3 py-2.5 text-sm font-semibold text-panel-header cursor-pointer hover:bg-accent-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-surface-alt">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="shrink-0">
           <rect x="8" y="8" width="12" height="13" rx="2"/><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h3"/>
         </svg>
-        <span role="status">{copied ? t("common.copied") : t("invite.copy")}</span>
+        <span role="status">{copied ? t("common.copied") : copyLabel ?? t("invite.copy")}</span>
       </button>
       {typeof navigator.share === "function" && <button onClick={() => {
         setError("");
