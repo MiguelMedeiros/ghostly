@@ -119,6 +119,7 @@ export const BLOCKS: Block[] = [
 
   // Profiles, backup & storage
   b("profiles", "keep", "Local profiles", ["04-profiles"], "Separate lives on one device, never announced to contacts."),
+  b("devices", "keep", "Several devices", ["06-devices"], "One profile on a desktop, a browser and a phone: one device is active at a time, and Use here moves everything to the one in your hand. Up to 4 devices, both online for a move. Web, extension and desktop."),
   b("backups", "keep", "Backups", ["05-backups"], "A whole profile in one passphrase-sealed bundle; a restore always creates a new profile."),
   b("storage", "keep", `Storage: file${D}S3`, ["1000-storage", "1001-local-storage", "1002-s3-storage"], "Where sealed bundles wait: a file you keep or an S3-compatible bucket, which also holds messages for an away contact."),
 
@@ -161,7 +162,7 @@ export const PRESETS: { id: PresetId; blocks: (bl: Block) => boolean; title: str
     id: "today",
     blocks: (bl) => bl.level === "available",
     title: "Ghostly today",
-    blurb: "Everything the app runs: one-to-one chats, groups and communities, held messages, profiles and backups, a wallet per network with many ways to pay, identity proofs with public profiles, local apps, the SDK and the headless CLI.",
+    blurb: "Everything the app runs: one-to-one chats, groups and communities, held messages, profiles on several devices and backups, a wallet per network with many ways to pay, identity proofs with public profiles, local apps, the SDK and the headless CLI.",
   },
   {
     id: "horizon",

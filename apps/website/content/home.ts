@@ -195,12 +195,20 @@ export const home = {
   },
   space: {
     eyebrow: "06 · Your space",
-    title: "Everything stays yours, on your device.",
+    title: "Everything stays yours, on your devices.",
     lead: "Chats, keys, wallets and services live in the app. No server of ours.",
     profiles: {
       title: "Separate lives, one device.",
       note: "Contacts never learn the others exist · web, desktop and extension",
       names: ["Personal", "Work", "Club"],
+    },
+    devices: {
+      title: "One profile, more than one device.",
+      active: "Desktop",
+      standby: "Phone",
+      activeItems: ["active", "sends, receives, pays"],
+      standbyItems: ["standby", "Use here takes over"],
+      note: "One device active at a time · up to 4 · both online to move · web, desktop and extension",
     },
     backup: {
       title: "Backup is what. Storage is where.",
