@@ -7004,6 +7004,7 @@ export class GhostlyNode implements EngineImplementation {
   /** The state now, not after `emitState`'s wait: for what the app must have before what follows it. */
   private flushState(): void {
     if (this.stateTimer) { clearTimeout(this.stateTimer); this.stateTimer = null; }
+    if (this.gatedOut) return;
     this.events.onState(this.getState());
   }
 }
