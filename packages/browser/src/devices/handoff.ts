@@ -499,6 +499,8 @@ export class HandoffGiver {
 
   /** About this many bytes: what the offer of a push says, sent again as it is. */
   private offerBytes = 0;
+  /** The sessions on which the taker said hello for the offer out now: one more after them means its request was lost. */
+  private offerHellos = new Set<string>();
 
   /**
    * The offer of a push, sent at Move to and again while no answer came: on each new session of the link (the first
@@ -633,7 +635,13 @@ export class HandoffGiver {
     session.peer = hello;
     this.sendHello(from, session);
     // The taker still runs an earlier attempt with this device: the offer again, which it takes in place of that one.
-    if (from === this.peer && hello.id !== this.id) this.offer();
+    // Or it took this offer, said hello on an earlier session, and its request never came (that session was replaced
+    // under it): the offer again too, and the taker asks once more on this one (`HandoffTaker.requestAgain`).
+    if (from === this.peer && this.phase === "offered") {
+      if (hello.id !== this.id) this.offer();
+      else if (this.offerHellos.size && !this.offerHellos.has(session.transcript)) this.offer();
+      if (hello.id === this.id) this.offerHellos.add(session.transcript);
+    }
     // The same handoff in a new session: its key comes from the first session's.
     if (from === this.peer && hello.id === this.id && this.secret && (this.phase === "pass1" || this.phase === "pass2")) {
       session.key = handoffStreamKey(session.ephemeral.secret, fromBase64Url(hello.e), this.secret, session.transcript);
@@ -870,6 +878,7 @@ export class HandoffGiver {
   private begin(key: string, id: string, record: DeviceRecord): void {
     this.peer = key; this.id = id; this.turn = record.turn; this.deviceName = name(record, key);
     this.failure = undefined; this.failed = {}; this.stays = []; this.retry = undefined; this.have = null; this.planned = null; this.pake = null; this.secret = null;
+    this.offerHellos.clear();
     this.sender = new PartSender(this.now);
   }
 
@@ -1132,6 +1141,9 @@ export class HandoffTaker {
         // runs no handoff (it offers only then), so the earlier attempt is over there, whether or not this device
         // saw it end (a copy the giver saw stop first, a cancel lost with the link). This one takes its place.
         const earlier = from === this.peer && offer.id !== this.id && BEFORE_RELEASE.has(this.phase);
+        // The offer this device took, again: the giver still waits for its request, which was lost (sent on a session
+        // of the link that another replaced). Nothing came of the copy yet, so the push starts over on this session.
+        if (from === this.peer && offer.id === this.id && this.phase === "receiving" && !this.pullWanted && !this.copyStarted) { await this.requestAgain(from); return; }
         if (!earlier && this.phase !== "idle" && this.phase !== "failed" && this.phase !== "offer") return;
         const record = await this.ports.records.read();
         // Only from the device the record names active.
@@ -1169,7 +1181,7 @@ export class HandoffTaker {
 
   private async start(record: DeviceRecord, peer: string, id: string, later: number): Promise<void> {
     this.peer = peer; this.id = id; this.turn = takerTurn(record); this.later = later; this.deviceName = name(record, peer);
-    this.failure = undefined; this.retry = undefined; this.secret = null; this.incoming.clear(); this.behind.clear(); this.ids = {}; this.bundle = null; this.h = null;
+    this.failure = undefined; this.retry = undefined; this.secret = null; this.incoming.clear(); this.behind.clear(); this.ids = {}; this.bundle = null; this.h = null; this.copyStarted = false; this.requested.clear();
     // A new handoff says hello anew, with a key of its own, even on a session that carried another one.
     this.sessions.delete(peer);
     this.totals = { bytes: 0, total: 0 };
@@ -1214,17 +1226,20 @@ export class HandoffTaker {
     if (this.phase === "connecting") {
       const self = await this.ownSelf();
       if (handoffVersions(hello, self).older) { await this.giveUp("older"); return; }
+      this.requested.add(session.transcript);
       this.out(handoffRequestFrame(this.turn, this.id!));
       if (this.pullWanted && this.pake) {
         this.phase = "authorizing";
         this.out(handoffPakeFrame({ n: 1, m: this.pake.first }));
+        // The password proof's answer, within a minute.
+        this.arm(HANDOFF_TIMINGS.idleMs, () => this.giveUp("dropped"));
       } else {
-        // A push: no password; the stream key needs nothing but this session.
+        // A push: no password; the stream key needs nothing but this session. Receiving at once, with the copy's own
+        // waits (`watchIdle`): the proof's minute armed after it ended every push that took longer as "dropped".
         this.secret = handoffStreamKey(session.ephemeral.secret, fromBase64Url(hello.e), new Uint8Array(), session.transcript);
         session.key = this.secret;
         await this.authorized();
       }
-      this.arm(HANDOFF_TIMINGS.idleMs, () => this.giveUp("dropped"));
       this.changed();
       return;
     }
@@ -1258,6 +1273,29 @@ export class HandoffTaker {
       this.out(handoffPakeFrame({ n: 3, wrong: true }));
       await this.giveUp("password");
     }
+  }
+
+  /** The giver sent this push's first manifest: it took the request, and holds the stream key. */
+  private copyStarted = false;
+  /** The sessions this handoff's request went out on. */
+  private requested = new Set<string>();
+
+  /**
+   * A push whose request the giver never got (it offers again): the request on this session, with this session's key.
+   * Without the giver's hello on it yet, hello first; the giver answers with its hello and the offer once more.
+   */
+  private async requestAgain(from: string): Promise<void> {
+    const session = this.sessionFor(from);
+    // Once per session: one that carried the request already is not asked on again (a session that loses frames is
+    // replaced, and the next one asks once more).
+    if (!session || this.requested.has(session.transcript)) return;
+    if (!session.peer) { this.sendHello(from, session); return; }
+    this.requested.add(session.transcript);
+    this.out(handoffRequestFrame(this.turn, this.id!));
+    this.secret = handoffStreamKey(session.ephemeral.secret, fromBase64Url(session.peer.e), new Uint8Array(), session.transcript);
+    session.key = this.secret;
+    await this.authorized();
+    this.changed();
   }
 
   /** The first session's key is the handoff's: kept, so a later session of it needs no password. Then: what is here. */
@@ -1319,6 +1357,7 @@ export class HandoffTaker {
     if (manifest.more) return;
     const { parts, later, ids } = this.manifestBuffer;
     this.manifestBuffer = { parts: [], later: [], ids: {} };
+    this.copyStarted = true;
     this.pass = manifest.pass;
     this.ids = ids;
     for (const part of later) this.behind.set(part[2], part);

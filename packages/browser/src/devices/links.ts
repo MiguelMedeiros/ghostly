@@ -173,6 +173,18 @@ export interface DeviceLinksOptions {
   loadKey?: (profile: string) => Promise<DeviceSigningKey | null>;
 }
 
+/**
+ * What the handoff hears when the capabilities agreed on a device link change (WISP 06 § Frames): `handoff/1` agreed
+ * (true) or no longer (false). Agreed again on a new session that replaced the open one (the other device dialled in
+ * again), the data link never closed and nothing else says so: the old session ended and this one opened. A frame sent
+ * on the old one may be lost, and a handoff's keys are per session.
+ */
+export function handoffNotices(was: { handoff?: boolean; session?: string }, handoff: boolean, session: string | undefined): boolean[] {
+  if (handoff !== !!was.handoff) return [handoff];
+  if (handoff && session && was.session && session !== was.session) return [false, true];
+  return [];
+}
+
 interface Running {
   id: string;
   /** The device-set secret the link is derived from, base64url: an earlier set's, or the current one. */
@@ -186,6 +198,8 @@ interface Running {
   agreed: boolean;
   /** `handoff/1` is agreed on the open session. */
   handoff?: boolean;
+  /** The transcript hash of the session the handoff was last told of. */
+  session?: string;
   /** The transport the open session runs on. */
   transport?: PairedTransport;
   /** This link runs its native endpoints (one side has no WebRTC). */
@@ -431,7 +445,10 @@ export class DeviceLinks implements DeviceLinkEngine {
           running.agreed = agreed.includes(DEVICES_CAPABILITY);
           if (running.agreed && !was && this.running.get(running.id) === running) void this.linkLive(running).catch(() => {});
           const handoff = agreed.includes(HANDOFF_CAPABILITY);
-          if (handoff !== running.handoff) { running.handoff = handoff; if (!running.earlier) this.handoffLink(running.key, handoff); }
+          const session = handoff ? running.link.sessionTranscriptHash : undefined;
+          const notices = handoffNotices(running, handoff, session);
+          running.handoff = handoff; running.session = session;
+          if (!running.earlier) for (const live of notices) this.handoffLink(running.key, live);
           this.changed();
         },
         onDataLinkState: (state) => {
