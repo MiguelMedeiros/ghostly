@@ -7,7 +7,7 @@ import {
   type SealedSecret,
 } from "./groupCrypto";
 import {
-  GROUP_ADMIN_OFF_ERROR, GROUP_ID, OWN_FRAME_LIMIT, MEMBER_KEY, MAX_GROUP_CHAIN, commitHash, commitUntaggedHash, expectedRoster, rosterAdmin, rosterHas, signCommit, verifyChain, verifyCommit, verifyCommitSignature,
+  GROUP_ADMIN_OFF_ERROR, GROUP_ID, OWN_FRAME_LIMIT, MEMBER_KEY, MAX_GROUP_CHAIN, SAID_AGAIN, commitHash, rememberAlone, commitUntaggedHash, expectedRoster, rosterAdmin, rosterHas, signCommit, verifyChain, verifyCommit, verifyCommitSignature,
   type CommitKind, type GroupCommit, type GroupRole, type Roster,
 } from "./groupCommits";
 import {
@@ -92,8 +92,10 @@ export const GROUP_READ_NOTE = `Everyone in the group can read everything sent w
  * `f`: a forwarded text's hop count (WISP 9xx § Forwards), in the clear like the header: every member reads it anyway.
  * `sc`: a status card (WISP 4xx · Status Cards) as JSON, sealed like the reply in a box of its own, so an older app
  * reads the text, its fallback; `xs` covers it after the rest, only when there is one.
+ * `o`: where a message said again under a later epoch was first said (WISP 9xx § Catch-up, "Frames said again"): that
+ * frame's epoch and sequence, in the clear like the header. `xs` covers it last, only when there is one.
  */
-export interface GroupMessageFrame { t: "group-msg"; g: string; e: number; s: string; n: number; ts: number; nn: string; c: string; sig: string; m?: { n: string; c: string }; r?: { n: string; c: string }; f?: number; sc?: { n: string; c: string }; xs?: string }
+export interface GroupMessageFrame { t: "group-msg"; g: string; e: number; s: string; n: number; ts: number; nn: string; c: string; sig: string; m?: { n: string; c: string }; r?: { n: string; c: string }; f?: number; sc?: { n: string; c: string }; o?: { e: number; n: number }; xs?: string }
 /**
  * An edit of message `<s>:<e>:<n>` by its author (WISP 9xx § Edits): edit number `v`, the new text (and its mentions)
  * as JSON `{ text, m?, sc? }` sealed under the key of the message's epoch `e`, signed by the author. `sc`: the status card
@@ -157,6 +159,11 @@ export interface GroupState {
   nicks: Record<string, string>;
   /** The group's metadata (its picture), as the admin last signed it and I accepted it. */
   meta?: GroupMeta;
+  /**
+   * My frames no edge took when I said them, as `e:n`, oldest first, kept until each was looked at once for saying again
+   * (`resealBehind`): I may have been behind on the chain without knowing. Absent in older states.
+   */
+  alone?: string[];
 }
 
 /**
@@ -167,8 +174,8 @@ export interface GroupIncomingMessage { id: string; sender: string; epoch: numbe
 
 export interface GroupSessionHooks {
   save(state: GroupState): Promise<void>;
-  /** Best effort, over the pairwise edge to that member if it is open. */
-  send(to: string, frame: GroupEdgeFrame): void;
+  /** Best effort, over the pairwise edge to that member if it is open: whether it went, when the host says. */
+  send(to: string, frame: GroupEdgeFrame): boolean | void;
   /** Store before it resolves: replay state advances only afterwards. */
   message(message: GroupIncomingMessage): Promise<void> | void;
   /** An edit of a member's message, authenticated as its author (WISP 9xx § Edits). Apps without edits leave it out. */
@@ -228,7 +235,7 @@ const messageSigned = (f: Omit<GroupMessageFrame, "sig" | "t">) => utf8Encode(JS
  */
 const messageSignedWhole = (f: Omit<GroupMessageFrame, "sig" | "t" | "xs">) =>
   utf8Encode(JSON.stringify(["ghostly-group/1 msg+", f.g, f.e, f.s, f.n, f.ts, f.nn, f.c, f.m?.n ?? "", f.m?.c ?? "", f.r?.n ?? "", f.r?.c ?? "", ...(f.f !== undefined ? [f.f] : []),
-    ...(f.sc ? ["sc", f.sc.n, f.sc.c] : [])]));
+    ...(f.sc ? ["sc", f.sc.n, f.sc.c] : []), ...(f.o ? ["o", f.o.e, f.o.n] : [])]));
 export const groupMessageId = (sender: string, epoch: number, seq: number) => `${sender}:${epoch}:${seq}`;
 /** An edit's box holds the text, its mentions and its card as JSON: room for a text whose every character JSON escapes. */
 const MAX_EDIT_PLAIN = GROUP_LIMITS.textBytes * 2 + MENTION_LIMITS.count * 96 + STATUS_CARD_LIMITS.bytes + 64;
@@ -256,6 +263,19 @@ function isEditFrame(v: unknown): v is GroupEditFrame {
     typeof f.c === "string" && f.c.length <= MAX_EDIT_BOX && B64.test(f.c) && typeof f.sig === "string" && f.sig.length === 86 && B64.test(f.sig);
 }
 
+/**
+ * Where a frame said again was first said (`o`): an earlier epoch than the frame's own and a sequence number there, or
+ * null for anything else.
+ */
+function readFirstPlace(o: unknown, epoch: number): { e: number; n: number } | null {
+  if (!o || typeof o !== "object" || Array.isArray(o)) return null;
+  const { e, n } = o as Record<string, unknown>;
+  if (!Number.isSafeInteger(e) || (e as number) < 0 || (e as number) >= epoch || !Number.isSafeInteger(n) || (n as number) < 0) return null;
+  return { e: e as number, n: n as number };
+}
+/** One of my own frames, among mine: `e:n`. */
+const ownKey = (f: { e: number; n: number }) => `${f.e}:${f.n}`;
+
 /** What a frame weighs in a log, roughly: its boxes plus the fixed fields around them. */
 const frameBytes = (f: GroupMessageFrame) => f.c.length + (f.m?.c.length ?? 0) + (f.r?.c.length ?? 0) + (f.sc?.c.length ?? 0) + 400;
 
@@ -267,6 +287,7 @@ function clean(f: GroupMessageFrame): GroupMessageFrame {
   return { t: "group-msg", g: f.g, e: f.e, s: f.s, n: f.n, ts: f.ts, nn: f.nn, c: f.c, sig: f.sig,
     ...(isMentionsBox(f.m) ? { m: { n: f.m.n, c: f.m.c } } : {}), ...(isReplyBox(f.r) ? { r: { n: f.r.n, c: f.r.c } } : {}),
     ...(readForwarded(f.f) ? { f: f.f } : {}), ...(isCardBox(f.sc) ? { sc: { n: f.sc.n, c: f.sc.c } } : {}),
+    ...(readFirstPlace(f.o, f.e) ? { o: readFirstPlace(f.o, f.e)! } : {}),
     ...(typeof f.xs === "string" && f.xs.length === 86 && B64.test(f.xs) ? { xs: f.xs } : {}) };
 }
 
@@ -345,12 +366,16 @@ export class GroupSession {
    * restart does not let a stripped copy take the message's place.
    */
   private provisional: Set<string>;
+  /** When my chain last moved (a commit made or applied), by `hooks.clock`: frames are said again once it has settled. */
+  private chainMovedAt: number;
 
   constructor(state: GroupState, private readonly hooks: GroupSessionHooks) {
     this.state = state;
     this.identity = identityFromSeedB64(state.seedB64);
     this.provisional = new Set((state.provisional ?? []).slice(-GROUP_LIMITS.provisional));
+    this.chainMovedAt = this.clock();
   }
+  private clock(): number { return this.hooks.clock?.() ?? Date.now(); }
 
   /** A new group: its genesis commit, signed by the creator, who is its admin. */
   static create(name: string, now = Date.now()): GroupState {
@@ -532,6 +557,7 @@ export class GroupSession {
     const draft: Omit<GroupCommit, "sig" | "c"> = { v: 1, g: this.id, e: epoch, p: commitHash(previous), k: kind, m: roster, by: this.myKey, ...(subject ? { s: subject } : {}), ts: now };
     const commit = signCommit({ ...draft, c: confirmationTag(epochKeys(secret, this.id, epoch).confirm, commitUntaggedHash(draft)) }, this.identity.seed);
     this.state.chain.push(commit);
+    this.chainMovedAt = this.clock();
     this.state.secrets[epoch] = toBase64Url(secret);
     this.pruneSecrets();
     this.pruneRelay();
@@ -608,6 +634,7 @@ export class GroupSession {
     this.state.sent = [];
     this.state.relay = [];
     this.state.relayEdits = [];
+    this.state.alone = [];
     this.waiting = []; this.waitingBytes = 0; this.pendingCommits.clear();
   }
 
@@ -624,32 +651,144 @@ export class GroupSession {
       const trimmed = text.trim();
       if (!trimmed) return { error: "Nothing to send" };
       if (utf8Encode(trimmed).length > GROUP_LIMITS.textBytes) return { error: "Message exceeds 16 KiB" };
-      const epoch = this.epoch, secret = this.secret(epoch);
-      if (!secret) return { error: "This epoch's key has not arrived yet. Wait for a member to catch you up." };
-      if (this.state.seqEpoch !== epoch) { this.state.seq = 0; this.state.seqEpoch = epoch; }
-      // Every epoch starts at the floor, not at 0, and a floor raised under a running epoch counts at once.
-      const n = Math.max(this.state.seq, this.seqFloor());
-      this.state.seq = n + 1;
-      const header = { g: this.id, e: epoch, s: this.myKey, n, ts: now };
-      const key = epochKeys(secret, this.id, epoch).message;
-      const { n: nn, c } = encryptText(key, messageAad(header), trimmed);
-      const unsigned = { ...header, nn, c };
+      const epoch = this.epoch;
+      if (!this.secret(epoch)) return { error: "This epoch's key has not arrived yet. Wait for a member to catch you up." };
+      const n = this.nextSeq(epoch);
       const named = validMentions(wireMentions(mentions), trimmed, this.isAdmin);
       const answers = reply && readReply(wireReply(reply), groupReplyAuthor);
-      const boxes = { ...(named.length ? { m: encryptText(key, mentionsAad(header), JSON.stringify(named)) } : {}),
-        ...(answers ? { r: encryptText(key, replyAad(header), JSON.stringify(answers)) } : {}), ...(readForwarded(forwarded) ? { f: forwarded } : {}),
-        ...(card ? { sc: encryptText(key, cardAad(header), JSON.stringify(card)) } : {}) };
-      const frame: GroupMessageFrame = { t: "group-msg", ...unsigned, sig: toBase64Url(sign(messageSigned(unsigned), this.identity.seed)), ...boxes,
-        xs: toBase64Url(sign(messageSignedWhole({ ...unsigned, ...boxes }), this.identity.seed)) };
-      this.state.sent.push(frame);
-      let bytes = this.state.sent.reduce((sum, f) => sum + f.c.length, 0);
-      while (this.state.sent.length > GROUP_LIMITS.outlog || bytes > GROUP_LIMITS.outlogBytes) bytes -= this.state.sent.shift()!.c.length;
+      const fw = readForwarded(forwarded) ? forwarded : undefined;
+      const frame = this.seal(epoch, n, now, trimmed, { mentions: named, reply: answers || undefined, forwarded: fw, card });
+      this.logOwn(frame);
       const id = groupMessageId(this.myKey, epoch, n);
-      await this.hooks.message({ id, sender: this.myKey, epoch, seq: n, timestamp: now, text: trimmed, ...(named.length ? { mentions: named } : {}), ...(answers ? { reply: answers } : {}), ...(boxes.f ? { forwarded: boxes.f } : {}), ...(card ? { card } : {}) });
-      await this.persist();
-      for (const key of this.others) this.hooks.send(key, frame);
+      await this.hooks.message({ id, sender: this.myKey, epoch, seq: n, timestamp: now, text: trimmed, ...(named.length ? { mentions: named } : {}), ...(answers ? { reply: answers } : {}), ...(fw ? { forwarded: fw } : {}), ...(card ? { card } : {}) });
+      await this.say(frame);
       return { id };
     });
+  }
+
+  /** My next sequence number in `epoch`: the running counter in the current one, past every frame of mine I keep in an older one. */
+  private nextSeq(epoch: number): number {
+    if (epoch !== this.epoch) {
+      // An older epoch (a frame said again, `resealBehind`): above what I said there that I still keep, and the floor.
+      const mine = this.state.sent.filter(f => f.e === epoch).map(f => f.n + 1);
+      return Math.max(this.seqFloor(), this.state.seqEpoch === epoch ? this.state.seq : 0, ...mine);
+    }
+    if (this.state.seqEpoch !== epoch) { this.state.seq = 0; this.state.seqEpoch = epoch; }
+    // Every epoch starts at the floor, not at 0, and a floor raised under a running epoch counts at once.
+    const n = Math.max(this.state.seq, this.seqFloor());
+    this.state.seq = n + 1;
+    return n;
+  }
+
+  /** A text sealed and signed as my frame `n` of `epoch`, with its boxes; `o`: where it was first said (`resealBehind`). */
+  private seal(epoch: number, n: number, ts: number, text: string, extra: { mentions?: readonly GroupMention[]; reply?: WireReply; forwarded?: number; card?: StatusCard }, o?: { e: number; n: number }): GroupMessageFrame {
+    const header = { g: this.id, e: epoch, s: this.myKey, n, ts };
+    const key = epochKeys(this.secret(epoch)!, this.id, epoch).message;
+    const { n: nn, c } = encryptText(key, messageAad(header), text);
+    const unsigned = { ...header, nn, c };
+    const boxes = { ...(extra.mentions?.length ? { m: encryptText(key, mentionsAad(header), JSON.stringify(extra.mentions)) } : {}),
+      ...(extra.reply ? { r: encryptText(key, replyAad(header), JSON.stringify(extra.reply)) } : {}), ...(extra.forwarded ? { f: extra.forwarded } : {}),
+      ...(extra.card ? { sc: encryptText(key, cardAad(header), JSON.stringify(extra.card)) } : {}), ...(o ? { o } : {}) };
+    return { t: "group-msg", ...unsigned, sig: toBase64Url(sign(messageSigned(unsigned), this.identity.seed)), ...boxes,
+      xs: toBase64Url(sign(messageSignedWhole({ ...unsigned, ...boxes }), this.identity.seed)) };
+  }
+
+  /** Into my bounded log, for members who missed it. */
+  private logOwn(frame: GroupMessageFrame): void {
+    this.state.sent.push(frame);
+    let bytes = this.state.sent.reduce((sum, f) => sum + f.c.length, 0);
+    while (this.state.sent.length > GROUP_LIMITS.outlog || bytes > GROUP_LIMITS.outlogBytes) bytes -= this.state.sent.shift()!.c.length;
+  }
+
+  /**
+   * Saves, then sends my frame to every other member of its epoch still in the group. One no edge took (none was up:
+   * my app just opened) is remembered (`alone`): I may be behind on the chain without knowing, and members let in
+   * meanwhile could never open it (`resealBehind`).
+   */
+  private async say(frame: GroupMessageFrame): Promise<void> {
+    await this.persist();
+    const readers = this.state.chain[frame.e].m;
+    const took = this.others.filter(key => rosterHas(readers, key)).map(key => this.hooks.send(key, frame));
+    if (!took.length || !took.every(went => went === false)) return;
+    const kept = new Set(this.state.sent.map(ownKey));
+    this.state.alone = rememberAlone(this.state.alone, ownKey(frame), key => kept.has(key));
+    await this.persist();
+  }
+
+  /**
+   * My frames sealed under an epoch I took for the newest while I was behind (no edge was up, and others were let in
+   * meanwhile): the members let in before I said them could never open them. Once my chain is newer than such a
+   * frame's, has not moved for `SAID_AGAIN.settledMs` and nothing is missing, each is looked at once: when a member in
+   * the roster now, not in the frame's epoch, was let in by an `add` dated no later than the frame, the same text (and
+   * boxes, and time) is sealed again with `o` naming the first, under the newest epoch before any `add` dated after the
+   * frame. So it reaches those let in before it, never one let in after, and everyone keeps one id for it (replies,
+   * edits, reactions); one who read the first does not show it twice. The engine calls this on each tick.
+   */
+  reseal(): Promise<void> {
+    if (!this.state.alone?.length) return Promise.resolve();
+    return this.serialize(async () => {
+      if (this.state.status !== "active" || this.behind || this.clock() - this.chainMovedAt < SAID_AGAIN.settledMs) return;
+      await this.resealBehind();
+    });
+  }
+
+  /** Something is missing here: the current epoch's secret, a commit ahead of my chain, or the epoch of frames waiting. */
+  private get behind(): boolean { return !this.state.secrets[this.epoch] || this.waiting.length > 0 || this.pendingCommits.size > 0; }
+
+  private async resealBehind(): Promise<void> {
+    const alone = new Set(this.state.alone ?? []);
+    const looked = new Set<string>();
+    for (const f of [...this.state.sent]) {
+      // Still the newest I know: nothing says yet whether I was behind.
+      if (!alone.has(ownKey(f)) || f.e >= this.epoch) continue;
+      looked.add(ownKey(f));
+      const target = this.saidAgainEpoch(f);
+      if (target === undefined) continue;
+      const before = this.state.chain[f.e], key = epochKeys(this.secret(f.e)!, this.id, f.e).message;
+      const text = decryptText(key, messageAad(f), f.nn, f.c);
+      if (text === null) continue;
+      const mentions = this.openMentions(key, f, text, rosterAdmin(before.m) === this.myKey);
+      const frame = this.seal(target, this.nextSeq(target), f.ts, text, { mentions, reply: this.openReply(key, f), forwarded: readForwarded(f.f) ? f.f : undefined, card: this.openCard(key, f) },
+        // Said again once already (I was behind twice): it still names the very first.
+        readFirstPlace(f.o, f.e) ?? { e: f.e, n: f.n });
+      this.logOwn(frame);
+      await this.say(frame);
+    }
+    const kept = new Set(this.state.sent.map(ownKey));
+    // Looked at once each; one said again that reached nobody is in the list again, by its own key.
+    const left = (this.state.alone ?? []).filter(key => kept.has(key) && !looked.has(key));
+    if (left.join() === (this.state.alone ?? []).join()) return;
+    this.state.alone = left;
+    await this.persist();
+  }
+
+  /**
+   * The epoch my frame `f` is said again under, or none: the newest after its own, before any `add` dated later than
+   * the frame (by the admitting member's clock against mine), when its roster holds a member still in the group that
+   * the frame's epoch did not. Its readers were all let in no later than the frame.
+   */
+  private saidAgainEpoch(f: GroupMessageFrame): number | undefined {
+    const first = this.state.chain[f.e];
+    if (!first || !this.secret(f.e)) return undefined;
+    let target: number | undefined;
+    for (let e = f.e + 1; e <= this.epoch; e++) {
+      const c = this.state.chain[e];
+      if (c.k === "add" && c.ts > f.ts) break;
+      target = e;
+    }
+    if (target === undefined || !this.secret(target)) return undefined;
+    const roster = this.state.chain[target].m;
+    if (!rosterHas(roster, this.myKey) || !roster.some(([key]) => !rosterHas(first.m, key) && rosterHas(this.roster, key))) return undefined;
+    return target;
+  }
+
+  /**
+   * The message one of my frames (or edits) is: the first frame's id for a frame said again (`o`), else its own. An
+   * edit of a copy said again names the copy; its id is the first's too.
+   */
+  messageIdOf(f: { s: string; e: number; n: number; o?: unknown }): string {
+    const first = readFirstPlace(f.o, f.e) ?? (f.s === this.myKey ? this.state.sent.find(x => x.e === f.e && x.n === f.n)?.o : undefined);
+    return first ? groupMessageId(f.s, first.e, first.n) : groupMessageId(f.s, f.e, f.n);
   }
 
   /**
@@ -672,13 +811,21 @@ export class GroupSession {
       const named = validMentions(wireMentions(edit.mentions ?? []), text, rosterAdmin(commit.m) === this.myKey);
       const plain = JSON.stringify({ text, ...(named.length ? { m: named } : {}), ...(edit.card ? { sc: edit.card } : {}) });
       if (utf8Encode(plain).length > MAX_EDIT_PLAIN) return { error: "Message exceeds 16 KiB" };
-      const header = { g: this.id, e: ref.e, s: this.myKey, n: ref.n, v: edit.v, ts: edit.ts };
-      const { n: nn, c } = encryptText(epochKeys(secret, this.id, ref.e).message, editAad(header), plain);
-      const unsigned = { ...header, nn, c };
-      const frame: GroupEditFrame = { t: GROUP_EDIT_FRAME, ...unsigned, sig: toBase64Url(sign(editSigned(unsigned), this.identity.seed)) };
-      const members = (to === undefined ? this.others : [to]).filter(key => key !== this.myKey && rosterHas(this.roster, key) && rosterHas(commit.m, key));
-      for (const key of members) this.hooks.send(key, frame);
-      return { sent: members.length };
+      // The message, and each copy of it said again under a later epoch (`resealBehind`): a member let in meanwhile can
+      // open only the copy, so it gets the edit of the copy, which it files under the same message.
+      const copies = [ref, ...this.state.sent.filter(f => f.o && f.o.e === ref.e && f.o.n === ref.n)];
+      const told = new Set<string>();
+      for (const copy of copies) {
+        const readers = this.state.chain[copy.e]?.m, key = this.secret(copy.e);
+        if (!readers || !key) continue;
+        const header = { g: this.id, e: copy.e, s: this.myKey, n: copy.n, v: edit.v, ts: edit.ts };
+        const { n: nn, c } = encryptText(epochKeys(key, this.id, copy.e).message, editAad(header), plain);
+        const unsigned = { ...header, nn, c };
+        const frame: GroupEditFrame = { t: GROUP_EDIT_FRAME, ...unsigned, sig: toBase64Url(sign(editSigned(unsigned), this.identity.seed)) };
+        const members = (to === undefined ? this.others : [to]).filter(k => k !== this.myKey && !told.has(k) && rosterHas(this.roster, k) && rosterHas(readers, k));
+        for (const k of members) { this.hooks.send(k, frame); told.add(k); }
+      }
+      return { sent: told.size };
     });
   }
 
@@ -836,17 +983,31 @@ export class GroupSession {
     // Whole: from its author's own edge, or handed on with the author's signature over every field. Anything else a
     // member handing it on may have stripped (the mentions, the reply, the hop count): its text is shown, but it is
     // neither seen nor kept nor handed on, so a sync still asks for it and a whole copy completes it.
-    const id = groupMessageId(raw.s, raw.e, raw.n);
+    const own = groupMessageId(raw.s, raw.e, raw.n);
     const whole = !relayed || this.wholeSigned(raw);
     if (!whole) {
-      if (this.provisional.has(id)) return;
-      delete raw.m; delete raw.r; delete raw.f; delete raw.sc; delete raw.xs;
+      if (this.provisional.has(own)) return;
+      delete raw.m; delete raw.r; delete raw.f; delete raw.sc; delete raw.o; delete raw.xs;
     }
+    // Said again under a later epoch (its author was behind, `resealBehind`): the message it first was, by that one's id.
+    const first = raw.o === undefined ? null : readFirstPlace(raw.o, raw.e);
+    if (raw.o !== undefined && !first) return;
     const secret = this.secret(raw.e);
     if (!secret) { this.park(from, raw); return; }
     const key = epochKeys(secret, this.id, raw.e).message;
     const text = decryptText(key, messageAad(raw), raw.nn, raw.c);
     if (text === null) return;
+    const firstFrame = first && { ...raw, e: first.e, n: first.n };
+    if (firstFrame && rosterHas(this.state.chain[first.e]?.m ?? [], this.myKey) && this.isDuplicate(firstFrame)) {
+      // I read the first one: kept and passed on for those who could not, not shown twice.
+      this.markSeen(raw);
+      this.keep(clean(raw));
+      await this.persist();
+      if (rosterHas(this.roster, raw.s)) this.took(clean(raw));
+      return;
+    }
+    // (Shown already from a copy handed on stripped, under its own id: the whole one completes that one.)
+    const id = first && !this.provisional.has(own) ? groupMessageId(raw.s, first.e, first.n) : own;
     // Everyone is named only by the admin of the message's epoch; a box that does not open is no mentions, not no message.
     const mentions = this.openMentions(key, raw, text, rosterAdmin(commit.m) === raw.s);
     const reply = this.openReply(key, raw);
@@ -863,6 +1024,8 @@ export class GroupSession {
     }
     if (completes) this.state.provisional = [...this.provisional];
     this.markSeen(raw);
+    // The first one, should it come too (I was in its epoch): a duplicate.
+    if (firstFrame && rosterHas(this.state.chain[firstFrame.e]?.m ?? [], this.myKey)) this.markSeen(firstFrame);
     this.keep(clean(raw));
     await this.persist();
     // Passed on only while its author is a member: someone removed is not carried for, even for epochs it was in.
@@ -892,7 +1055,10 @@ export class GroupSession {
     // A card that does not hold is left out; an edit numbered past a text's bound stands only with one.
     const sc = body.sc === undefined ? undefined : readStatusCard(body.sc);
     if (!validEditNumber(raw.v) && !sc) return;
-    await this.hooks.edit?.({ id: groupMessageId(raw.s, raw.e, raw.n), sender: raw.s, e: raw.v, ts: raw.ts, m: body.text, ...(k.length ? { k } : {}), ...(sc ? { sc } : {}) });
+    // An edit of a copy said again (its author was behind) is one of the message it first was, as the copy is.
+    const copy = (this.state.relay ?? []).find(f => f.s === raw.s && f.e === raw.e && f.n === raw.n);
+    const first = copy && readFirstPlace(copy.o, copy.e);
+    await this.hooks.edit?.({ id: first ? groupMessageId(raw.s, first.e, first.n) : groupMessageId(raw.s, raw.e, raw.n), sender: raw.s, e: raw.v, ts: raw.ts, m: body.text, ...(k.length ? { k } : {}), ...(sc ? { sc } : {}) });
     if (this.keepEdit(raw)) { await this.persist(); this.took(cleanEdit(raw)); }
   }
 
@@ -1015,6 +1181,7 @@ export class GroupSession {
 
   private async apply(commit: GroupCommit, sealed?: SealedSecret): Promise<void> {
     this.state.chain.push(commit);
+    this.chainMovedAt = this.clock();
     this.state.seq = 0; this.state.seqEpoch = commit.e;
     if (!rosterHas(commit.m, this.myKey)) {
       this.out("removed", "You were removed from this group");
