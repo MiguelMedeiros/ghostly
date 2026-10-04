@@ -7,6 +7,7 @@ import {
   confirmationMatches, confirmationTag, decryptText, encryptText, epochKeys, newEpochSecret, openPair, openSecret, sealPair, sealSecret, sha256Hex,
   type SealedSecret,
 } from "./groupCrypto";
+import { engineError } from "./engineErrors";
 import { GROUP_ADMIN_OFF_ERROR, GROUP_ID, OWN_FRAME_LIMIT, MEMBER_KEY, rosterAdmin, rosterHas, sortRoster, type GroupRole, type Roster } from "./groupCommits";
 import { mentionsBytes, validMentions, wireMentions, type GroupMention } from "./groupMentions";
 import { groupReplyAuthor, readReply, wireReply, type WireReply } from "./replies";
@@ -342,6 +343,12 @@ export interface CommunitySessionHooks {
    * at the door, no leave committed for another member, no admin change. Absent: true.
    */
   adminWork?(): boolean;
+  /**
+   * Whether a fresh turn read says this device is the active one (WISP 06 § When a device checks), asked before every
+   * commit: two devices that both think they are active would each commit after one parent. No: the commit is refused
+   * (`groupTurnUnconfirmed`), and leave requests wait for the next try. Absent: yes.
+   */
+  adminTurn?(): Promise<boolean>;
 }
 
 const MAX_TEXT_BOX = Math.ceil((COMMUNITY_LIMITS.textBytes + 256 + 16) * 4 / 3) + 4;
@@ -869,6 +876,7 @@ export class CommunitySession {
 
   private async commit(kind: CommunityKind, fields: { s?: string; x?: string; ls?: string }, now: number): Promise<{ commit: CommunityCommit; hash: string; secret: Uint8Array }> {
     if (!this.adminWork) throw new Error(GROUP_ADMIN_OFF_ERROR);
+    if (this.hooks.adminTurn && !(await this.hooks.adminTurn())) throw engineError("groupTurnUnconfirmed");
     if (this.state.chain.length >= COMMUNITY_LIMITS.chain) throw new Error("This group has reached its membership history limit. Create a new group.");
     const parent = this.top, parentHash = this.topHash;
     const draftBase = { v: 2 as const, g: this.id, e: parent.e + 1, p: parentHash, k: kind, by: this.myKey, ...fields, ts: now };
@@ -999,6 +1007,8 @@ export class CommunitySession {
     return this.serialize(async () => {
       // Admin work off on this device: the requests wait for a member who commits them, or for the person to turn it on.
       if (!this.isMember || !this.adminWork) return 0;
+      // Not confirmed as the active device: the requests wait, untouched, for the next try (or another hub).
+      if (this.state.pendingLeaves.length && this.hooks.adminTurn && !(await this.hooks.adminTurn())) return 0;
       let done = 0;
       for (const request of [...this.state.pendingLeaves]) {
         if (!rosterHas(this.roster, request.s) || request.s === this.myKey || request.s === this.admin) { this.state.pendingLeaves = this.state.pendingLeaves.filter(r => r !== request); continue; }

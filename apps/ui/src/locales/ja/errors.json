@@ -47,6 +47,7 @@
     "fedimintRealOnTestnet": "このフェデレーションは本物のビットコインを預かります。Mainnet の Fedimint ウォレットに入れてください",
     "fedimintTestOnMainnet": "このフェデレーションはテストネットワークの {{chain}} 上にあります。Testnet の Fedimint ウォレットに入れてください",
     "feeAboveLimit": "手数料が上限を超えています",
+    "groupTurnUnconfirmed": "どのデバイスがアクティブか確認できないため、グループは変更されませんでした。しばらくしてからもう一度お試しください。",
     "hostTimedOut": "{{host}} が時間内に応答しませんでした",
     "hostUnreachable": "{{host}} に接続できませんでした",
     "invalidMaxFee": "最大手数料が無効です",
