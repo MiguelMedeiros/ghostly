@@ -5391,6 +5391,8 @@ export class GhostlyNode implements EngineImplementation {
    */
   private async stopReplaced(view: DeviceGateView): Promise<void> {
     this.gatedOut = true;
+    // A state asked for before this (the turn read's own change) would reach the pages after the gate and take it away.
+    if (this.stateTimer) { clearTimeout(this.stateTimer); this.stateTimer = null; }
     this.events.onDeviceGate?.(view);
     await this.shutdown({ quiet: true });
   }
@@ -6991,6 +6993,8 @@ export class GhostlyNode implements EngineImplementation {
     if (this.stateTimer) return;
     this.stateTimer = setTimeout(() => {
       this.stateTimer = null;
+      // Asked for just before another device's turn stopped this engine: the pages keep the standby screen.
+      if (this.gatedOut) return;
       this.events.onState(this.getState());
       // A chat deleted or muted, a token made: the other devices learn which tokens the profile hands out.
       if (this.deviceLinks) this.syncDeviceTokens();

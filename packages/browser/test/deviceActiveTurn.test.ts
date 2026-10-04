@@ -82,6 +82,21 @@ describe("the active device's engine", () => {
     expect(checkTurn).toHaveBeenCalledTimes(1);
     expect(stop).toHaveBeenCalledTimes(1);
   });
+
+  it("stopped, says nothing more to the pages: a state still on its way does not take the standby screen away", async () => {
+    const { made, inner, checkTurn, stop } = await node();
+    stop.mockRestore();
+    const events = (inner as unknown as { events: { onState: ReturnType<typeof vi.fn>; onDeviceGate: ReturnType<typeof vi.fn> } }).events;
+    // The read writes the record and refreshes the links, whose change asks for a state, as `DeviceLinks.onChange` does.
+    checkTurn.mockImplementation(async () => { (inner as unknown as { emitState(): void }).emitState(); return replaced; });
+    await (inner as unknown as { readActiveTurn(): Promise<void> }).readActiveTurn();
+    expect(events.onDeviceGate).toHaveBeenCalledTimes(1);
+    const gateAt = events.onDeviceGate.mock.invocationCallOrder[0];
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    // A state after the gate makes the pages drop it (`platform/engine.ts`) and show the chat list of a stopped engine.
+    expect(events.onState.mock.invocationCallOrder.filter((order) => order > gateAt)).toEqual([]);
+    await made.shutdown();
+  });
 });
 
 describe("the device links of the active device", () => {
