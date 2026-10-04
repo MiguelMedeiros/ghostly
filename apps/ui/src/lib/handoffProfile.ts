@@ -7,7 +7,8 @@ import { databaseExists } from "@ghostly/browser/backup/database";
 import { databaseName, wrap, type StoredFile } from "@ghostly/browser/shared/idb";
 import { FILE_BYTES_STEP, SMALL_FILE_BYTES, digestText, dropFileSpace, fileBytes, type FileBytes } from "@ghostly/browser/shared/fileBytes";
 import { fileSource, restoreHandoffBundle, writeProfileBackup, type FileSource } from "./profileBackup";
-import { databaseOfSpace, newSpace, pointProfile } from "./profiles";
+import { listDeviceRecords } from "@ghostly/browser/devices/store";
+import { databaseOfSpace, newSpace, pointProfile, recoverProfilePointer, registryKey } from "./profiles";
 
 /*
  * What the handoff needs of the app (WISP 06 § The handoff): a profile's storage as the app keeps it. The giver reads
@@ -109,11 +110,16 @@ function dropDatabase(name: string): Promise<void> {
   });
 }
 
-/** Every local key of a namespace (never the first profile's, whose prefix every other one shares). */
+/**
+ * Every local key of a namespace (never the first profile's, whose prefix every other one shares). Never the registry
+ * of profiles: in a Desktop space of its own (GHOSTLY_PROFILE=<base>) the first profile's namespace is the base, and
+ * the registry `ghostly_<base>_profiles` has its prefix. Deleting the old namespace after a handoff took the registry
+ * with it, so the app opened the empty old namespace and listed no other profile (Linux bug hunt, 2026-10-03).
+ */
 function dropKeys(ns: string): void {
   if (!ns) return;
-  const prefix = `ghostly_${ns}_`;
-  const keys = Array.from({ length: localStorage.length }, (_, i) => localStorage.key(i)).filter((key): key is string => !!key?.startsWith(prefix));
+  const prefix = `ghostly_${ns}_`, registry = registryKey();
+  const keys = Array.from({ length: localStorage.length }, (_, i) => localStorage.key(i)).filter((key): key is string => !!key?.startsWith(prefix) && key !== registry);
   for (const key of keys) { try { localStorage.removeItem(key); } catch { /* nothing more to do */ } }
 }
 
@@ -227,6 +233,20 @@ const staging: HandoffStagingHost = {
     try { localStorage.removeItem(stagingKey(ns)); } catch { /* nothing kept */ }
   },
 };
+
+/**
+ * At start, before the profile's storage is chosen: a profile a handoff moved to a staged namespace whose registry
+ * pointer is gone points there again (`recoverProfilePointer`), if that namespace's database is still on this device.
+ * Anything that goes wrong leaves things as they are. Returns whether the pointer was written.
+ */
+export async function recoverHandoffPointer(id: string): Promise<boolean> {
+  try {
+    const records = await listDeviceRecords();
+    const present: typeof records = [];
+    for (const record of records) if (record.home && (await databaseExists(record.profile).catch(() => false))) present.push(record);
+    return recoverProfilePointer(id, [...records.filter((record) => !record.home), ...present]);
+  } catch { return false; }
+}
 
 /** The app's side of the handoff, for this platform. */
 export function handoffProfileHost(app: string, kind: DeviceKind): HandoffProfileHost {

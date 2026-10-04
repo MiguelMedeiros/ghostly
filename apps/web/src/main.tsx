@@ -8,7 +8,7 @@ import { webHost } from "./host";
 import { setDatabaseName } from "@ghostly/browser/shared/idb";
 import { openDeviceGate } from "@ghostly/browser/devices/gate";
 import { setHandoffProfileHost } from "@ghostly/browser/devices/handoffHost";
-import { handoffProfileHost } from "../../ui/src/lib/handoffProfile";
+import { handoffProfileHost, recoverHandoffPointer } from "../../ui/src/lib/handoffProfile";
 import { setStorageProfile } from "../../ui/src/lib/storage";
 import { activeProfileId, namespaceOf, setRunningProfile } from "../../ui/src/lib/profiles";
 import { loadSettings } from "../../ui/src/lib/settings";
@@ -34,6 +34,8 @@ setPushPlatform({ supported: pushSupported, subscribe: subscribePush, current: c
 
 // The chosen local profile (WISP 04): its own chats, database, settings and single-peer lock. The
 // default profile keeps the original names, so nothing existing moves.
+// A profile a handoff moved whose pointer was lost: pointed at its state again before anything opens storage.
+await recoverHandoffPointer(activeProfileId());
 const profileId = activeProfileId();
 const profile = namespaceOf(profileId);
 // This tab stays that profile, even when it waits below and another tab chooses another one meanwhile.

@@ -33,6 +33,7 @@
     "typo": "Este código tiene un error. Revísalo o crea uno nuevo.",
     "unanswered": "Tu otro dispositivo no respondió. Revisa el código o crea uno nuevo.",
     "unreachable": "No se puede comprobar qué dispositivo está activo. Revisa tu conexión.",
+    "unreached": "Los dos dispositivos se encontraron, pero no pudieron conectarse. Mantén ambos en línea y crea un código nuevo.",
     "update": "Un Ghostly más reciente creó este código. Actualiza para usarlo.",
     "used": "Otro dispositivo usó este código primero. Crea uno nuevo."
   },

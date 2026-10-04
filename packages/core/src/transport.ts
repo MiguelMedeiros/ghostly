@@ -41,7 +41,10 @@ export type DiscoveryChange = "tripped" | "recovered";
  */
 export interface PkarrRequestOptions {
   background?: boolean; urgent?: boolean; group?: boolean; door?: boolean; signal?: boolean;
-  /** A read for a contact that went away from a live session and has not shown itself back (`LinkSession.watchPeer`). */
+  /**
+   * A read for a contact that went away from a live session and has not shown itself back (`LinkSession.watchPeer`), or
+   * a write while a link watches for one: what that contact, back, reads first.
+   */
   watch?: boolean;
 }
 
