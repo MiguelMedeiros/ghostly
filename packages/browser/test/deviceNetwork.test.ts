@@ -36,6 +36,10 @@ vi.mock("../src/platform/hyperdhtRelay", async (original) => ({
 /** Waits for `condition` while the fake clock runs, giving real turns of the loop too (a factory's module loads in one). */
 async function waitFor(condition: () => boolean): Promise<void> {
   for (let i = 0; i < 300 && !condition(); i++) { await vi.advanceTimersByTimeAsync(10); await new Promise((resolve) => setImmediate(resolve)); }
+  // A module that loads late on a busy runner needs real time, not more of the fake clock (which would start retries):
+  // up to 15 real seconds of turns of the loop alone.
+  const until = performance.now() + 15_000;
+  while (!condition() && performance.now() < until) await new Promise((resolve) => setImmediate(resolve));
 }
 
 const dropKeys = () => new Promise<void>((resolve) => { const r = indexedDB.deleteDatabase(DEVICE_KEYS_DB); r.onsuccess = r.onerror = r.onblocked = () => resolve(); });
