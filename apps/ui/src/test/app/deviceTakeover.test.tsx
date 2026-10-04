@@ -5,6 +5,7 @@ import { Route, Routes } from "react-router-dom";
 import type { GroupMemberView, GroupView } from "@ghostly/browser/shared/types";
 import { ProfileBackups } from "../../components/ProfileBackups";
 import { DeviceStandby } from "../../components/DeviceStandby";
+import { ForkRows } from "../../components/devices/Forks";
 import { GroupChat } from "../../pages/GroupChat";
 import { openProfileBackup, restoreOpenedBackup, sameIdentityProfiles } from "../../lib/profileBackup";
 import { restoreForTakeover } from "../../lib/restoreGuard";
@@ -103,6 +104,30 @@ describe("restoring a backup where a device set exists (WISP 06)", () => {
     await user.click(screen.getByTestId("restore-go"));
     await waitFor(() => expect(restoreOpenedBackup).toHaveBeenCalledOnce());
     expect(screen.queryByTestId("restore-guard")).toBeNull();
+  });
+});
+
+describe("a replaced device (WISP 06 § User experience: \"Use here\", \"It wasn't me\")", () => {
+  it("offers Use here, a pull from the device that replaced it, beside It wasn't me", async () => {
+    const { user, engine } = renderApp(<DeviceStandby gate={{ state: "superseded", activeDevice: "Phone" }} />);
+    engine.on("deviceTakeoverInfo", () => ({ offered: true, device: "Phone", copy: "frozen", password: true }));
+    expect(await screen.findByTestId("handoff-use-here")).toHaveTextContent("Use here");
+    expect(await screen.findByTestId("takeover-open")).toHaveTextContent("It wasn't me");
+    await user.click(screen.getByTestId("handoff-use-here"));
+    expect(await screen.findByTestId("handoff-use-here-dialog")).toBeInTheDocument();
+  });
+
+  it("keeps what only it held as Only on this device in Data and storage, until Discard is pressed twice", async () => {
+    const { user, engine } = renderApp(<ForkRows forks={["ghostly_oldcopy"]} />);
+    engine.on("deviceForkDiscard", () => undefined);
+    const row = await screen.findByTestId("settings-fork");
+    expect(row).toHaveTextContent("Only on this device");
+    await user.click(screen.getByTestId("settings-fork-discard"));
+    expect(engine.callsTo("deviceForkDiscard")).toEqual([]);
+    expect(screen.getByTestId("settings-fork")).toHaveTextContent("Discard this copy for good?");
+    await user.click(screen.getByTestId("settings-fork-discard-confirm"));
+    expect(engine.callsTo("deviceForkDiscard")).toEqual([{ database: "ghostly_oldcopy" }]);
+    await waitFor(() => expect(screen.queryByTestId("settings-fork")).toBeNull());
   });
 });
 

@@ -418,6 +418,11 @@ export interface EngineApi {
    */
   deviceTurnPeek(params: { d: string }): import("../devices/restoreGuard").TurnPeek;
   /**
+   * Discards a fork this device keeps ("Only on this device", WISP 06 § Installing the staged state): the old namespace
+   * of a replaced device that took the profile back. Its database, files, local keys and wallet storage go for good.
+   */
+  deviceForkDiscard(params: { database: string }): void;
+  /**
    * Remove (WISP 06 § Removing a device), on the active device: the device with this signing key can no longer take the
    * profile. The set moves to a new device-set secret, which the devices that stay get over their old links. Errors
    * start with `remove-<reason>:`.

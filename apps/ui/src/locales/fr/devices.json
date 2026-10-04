@@ -38,6 +38,13 @@
     "update": "Une version plus récente de Ghostly a créé ce code. Mettez à jour pour l’utiliser.",
     "used": "Un autre appareil a utilisé ce code en premier. Créez-en un nouveau."
   },
+  "fork": {
+    "confirm": "Supprimer définitivement cette copie ? Ce qui n'est que dans celle-ci sera perdu.",
+    "discard": "Supprimer",
+    "hint": "Une copie de ce profil d'avant la reprise par un autre appareil.",
+    "info": "Quand cet appareil a repris le profil avec Utiliser ici, il a gardé ce qu'il contenait alors. Les messages et paiements qui ne sont que dans cette copie ne sont pas dans votre profil. Supprimer retire la copie de cet appareil définitivement.",
+    "title": "Uniquement sur cet appareil"
+  },
   "handoff": {
     "allowAgain": "Laisser {{device}} réessayer",
     "cancel": "Annuler",

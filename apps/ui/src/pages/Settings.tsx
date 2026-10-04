@@ -11,6 +11,7 @@ import { pushPlatform, pushUnavailable, setWake, useWakeOn } from "../lib/wakePu
 import { noticePlace, noticeSettings, notificationPermission, openNoticeSettings, requestNotifications, type NoticePermission } from "../lib/notifications";
 import { getVersion } from "@tauri-apps/api/app";
 import { NetworkSettings } from "../components/NetworkSettings";
+import { ForkRows } from "../components/devices/Forks";
 import { DomainProofSettings } from "../components/DomainProofSettings";
 import { MediaSettings } from "../components/MediaSettings";
 import { Block, ButtonGroup, Field, FieldGrid, InputGroup, LinkRow, Page, Row, Section } from "../components/layout";
@@ -497,6 +498,7 @@ export function Settings() {
             )}
           </Row>
         )}
+        <ForkRows forks={devices?.forks} />
         <Row label={t("sidebar.deleteAllChats")} hint={confirmDeleteChats ? t("settings.deleteAllChatsConfirm", { count: chatCount }) : t("settings.deleteAllChatsHint")}>
           {confirmDeleteChats ? <>
             <Button variant="danger" data-testid="delete-all-chats-confirm" onClick={deleteChats}>{t("common.confirm")}</Button>
