@@ -1,7 +1,7 @@
 import "fake-indexeddb/auto";
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { LIMITS, createIdentity, type FileSink, type GhostLinkOptions } from "@ghostly/core";
-import { GROUP_NATIVE_SLOTS, GhostlyNode, NATIVE_HOLD_MS, RESUME_SPENT_MS } from "../src/engine/node";
+import { GROUP_NATIVE_SLOTS, GhostlyNode, NATIVE_HOLD_MS, RESUME_SPENT_MS, type NodeOptions } from "../src/engine/node";
 import { db } from "../src/engine/db";
 import { STORES, fileStore, transact } from "../src/shared/idb";
 import { storedBlob } from "../src/shared/storedFiles";
@@ -74,9 +74,9 @@ vi.mock("@ghostly/core", async (importOriginal) => {
 
 const fixture = { publish: async () => {}, resolve: async () => null, describe: () => ({ protocol: "fixture", relays: [] }) };
 const nodes: GhostlyNode[] = [];
-function engine() {
+function engine(options: Partial<NodeOptions> = {}) {
   const events = { onState: vi.fn(), onMessages: vi.fn(), onCallSignal: vi.fn(), onAttention: vi.fn() };
-  const node = new GhostlyNode(events, { automaticWallets: false, transport: fixture });
+  const node = new GhostlyNode(events, { automaticWallets: false, transport: fixture, ...options });
   nodes.push(node);
   return { node, events };
 }
@@ -86,8 +86,11 @@ function row(stored: Partial<StoredLink> = {}): StoredLink {
 }
 /** An engine started with these chats saved, each running on a recorded link. */
 async function started(...rows: StoredLink[]) {
+  return startedWith({}, ...rows);
+}
+async function startedWith(options: Partial<NodeOptions>, ...rows: StoredLink[]) {
   for (const r of rows) await db.putLink(r);
-  const setup = engine();
+  const setup = engine(options);
   await setup.node.start();
   const linkOf = (id: string) => links.find((l) => l.options.params.id === id)!;
   return { ...setup, linkOf };
@@ -218,6 +221,16 @@ describe("a chat as the contact drives it", () => {
 });
 
 describe("an app restarting (WISP 100, Back after a restart)", () => {
+  /** A native endpoint that never connects: what these tests read is how each link was made. */
+  const idle = (transport: "iroh/1" | "hyperdht/1") => vi.fn(async () => ({ transport, descriptor: { id: "ab".repeat(32), relay: "https://relay.test./", addresses: [] },
+    connect: vi.fn(), close: vi.fn(async () => {}), onConnection: null, onDescriptor: null }));
+  /** An app that runs every transport: WebRTC, Iroh and HyperDHT. */
+  const everything = () => {
+    vi.stubGlobal("RTCPeerConnection", class {});
+    onTestFinished(() => { vi.unstubAllGlobals(); });
+    return { nativeTransports: { "iroh/1": idle("iroh/1"), "hyperdht/1": idle("hyperdht/1") } } as unknown as Partial<NodeOptions>;
+  };
+
   it("a chat live when the app last ran resumes on that transport; one that ended off live, DHT only or unpaired does not", async () => {
     const paired = { pairedPeerKey: createIdentity().pubKeyZ32 };
     const live = row({ ...paired, transportHistory: [{ at: 1, kind: "live", transport: "iroh/1" }] });
@@ -225,7 +238,7 @@ describe("an app restarting (WISP 100, Back after a restart)", () => {
     const dropped = row({ ...paired, transportHistory: [{ at: 1, kind: "live", transport: "iroh/1" }, { at: 2, kind: "down", from: "iroh/1" }] });
     const dhtOnly = row({ ...paired, deliveryMode: "dht", transportHistory: [{ at: 1, kind: "live", transport: "iroh/1" }] });
     const unpaired = row({ transportHistory: [{ at: 1, kind: "live", transport: "iroh/1" }] });
-    const { linkOf } = await started(live, switched, dropped, dhtOnly, unpaired);
+    const { linkOf } = await startedWith(everything(), live, switched, dropped, dhtOnly, unpaired);
     expect([live, switched, dropped, dhtOnly, unpaired].map(chat => linkOf(chat.id).options.resume))
       .toEqual(["iroh/1", "hyperdht/1", undefined, undefined, undefined]);
   });
@@ -238,7 +251,8 @@ describe("an app restarting (WISP 100, Back after a restart)", () => {
     const paired = () => ({ pairedPeerKey: createIdentity().pubKeyZ32 });
     const gone = row({ ...paired(), transportHistory: [{ at: 1, kind: "live", transport: "iroh/1" }] });
     const back = row({ ...paired(), transportHistory: [{ at: 1, kind: "live", transport: "iroh/1" }] });
-    const first = await started(gone, back);
+    const runs = everything();
+    const first = await startedWith(runs, gone, back);
     expect([gone, back].map((chat) => first.linkOf(chat.id).options.resume)).toEqual(["iroh/1", "iroh/1"]);
     // One is live again in this run; the other's contact never comes back.
     first.node["links"].get(back.id)!.pairing = { status: "ready", transport: "iroh/1" } as never;
@@ -253,8 +267,22 @@ describe("an app restarting (WISP 100, Back after a restart)", () => {
     await first.node.shutdown();
     nodes.splice(nodes.indexOf(first.node), 1);
     links.length = 0;
-    const again = await started();
+    const again = await startedWith(runs);
     expect([gone, back].map((chat) => again.linkOf(chat.id).options.resume)).toEqual([undefined, "iroh/1"]);
+  });
+
+  it("after a handoff from a device that ran a transport this app lacks: resumed on one both run, with no floor of that device's session", async () => {
+    // WISP 06: the Desktop on Linux was live with the contact on HyperDHT when the profile moved back to this web page,
+    // which runs WebRTC and no HyperDHT. Resumed on HyperDHT, the link held every dial for its wait and never knocked.
+    vi.stubGlobal("RTCPeerConnection", class {});
+    onTestFinished(() => { vi.unstubAllGlobals(); });
+    const paired = () => ({ pairedPeerKey: createIdentity().pubKeyZ32 });
+    const fromLinux = row({ ...paired(), peerTransports: ["webrtc/1", "iroh/1", "hyperdht/1"], transportHistory: [{ at: 1, kind: "live", transport: "hyperdht/1" }] });
+    const nothingShared = row({ ...paired(), peerTransports: ["hyperdht/1"], transportHistory: [{ at: 1, kind: "live", transport: "hyperdht/1" }] });
+    const own = row({ ...paired(), peerTransports: ["webrtc/1"], transportHistory: [{ at: 5, kind: "live", transport: "webrtc/1" }] });
+    const { linkOf } = await started(fromLinux, nothingShared, own);
+    expect([fromLinux, nothingShared, own].map((chat) => linkOf(chat.id).options.resume)).toEqual(["webrtc/1", undefined, "webrtc/1"]);
+    expect([fromLinux, nothingShared, own].map((chat) => linkOf(chat.id).options.resumeFloor)).toEqual([undefined, undefined, 5]);
   });
 
   // covers: transport.native-pool
