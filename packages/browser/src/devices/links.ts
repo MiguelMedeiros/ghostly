@@ -154,6 +154,11 @@ export interface DeviceLinksOptions {
    * also brings the profile's target in line (`profileWakeAfter`), which is the engine's, in the profile's database.
    */
   onDeviceWake?: (from: string, target: WakeTarget | null) => void | Promise<void>;
+  /**
+   * The active device got another device's hint that it holds the turn (WISP 06 § When a device checks: "at once on a
+   * hint"). The engine reads the turn itself, so that a read saying another device took over stops it.
+   */
+  onActiveHint?: () => void;
   /** How a wake-up is posted where a page may not post it itself (Desktop's command). Default: `fetch`, then the push relay. */
   pushSend?: (request: PushRequest) => Promise<number>;
   /** Tests give their own. */
@@ -586,11 +591,15 @@ export class DeviceLinks implements DeviceLinkEngine {
     await this.acked(running.key);
   }
 
-  /** A hint from another device that it holds the turn: read it, at most once in `TURN_HINT_EVERY_MS`. Never on the active device. */
+  /**
+   * A hint from another device that it holds the turn: read it, at most once in `TURN_HINT_EVERY_MS`. On the active
+   * device the engine reads it (`onActiveHint`): it stops itself when another device took over.
+   */
   private async hinted(): Promise<void> {
     if (Date.now() - this.lastHintRead < TURN_HINT_EVERY_MS) return;
     const record = await this.record();
-    if (!record || record.state === "active" || record.state === "removed") return;
+    if (record?.state === "active") { this.lastHintRead = Date.now(); this.options.onActiveHint?.(); return; }
+    if (!record || record.state === "removed") return;
     this.lastHintRead = Date.now();
     await this.checkAndShow().catch(() => null);
   }
