@@ -1123,6 +1123,8 @@ describe("wallets in a handoff (WISP 06 § Wallets)", () => {
     await w.giver.cancel();
     await until(() => w.activeAgain === 1);
     expect(w.droppedDatabases).toEqual([]);
+    // Nor later: the list goes with the failed handoff, so the next release does not delete what this one meant to.
+    expect(w.giverRecords.record.breezDatabases).toBeUndefined();
   });
 
   it("a released standby that could not delete them tries again when it starts", async () => {
@@ -1138,5 +1140,20 @@ describe("wallets in a handoff (WISP 06 § Wallets)", () => {
     await w.giver.resume();
     expect(w.droppedDatabases).toEqual([names]);
     expect(w.giverRecords.record.breezDatabases).toBeUndefined();
+  });
+});
+
+describe("Use here on a replaced device (WISP 06 § States and events, superseded)", () => {
+  it("pulls from the device that replaced it, at that device's turn, and keeps its own old namespace as the fork", async () => {
+    const w = world();
+    // The phone was replaced at turn N - 3: its own record stays there, and its mark holds the turn that replaced it.
+    w.takerRecords.record = { ...w.takerRecords.record, state: "superseded", turn: N - 3, seenSequence: N * 2 ** 20 + 1, copy: "frozen" };
+    await fullPull(w);
+    expect(w.takes).toHaveLength(1);
+    expect(w.takes[0].turn).toBe(N + 1);
+    // What only the phone held stays: its old namespace is not dropped, and the new record lists it.
+    expect(w.storage.dropped).toEqual([]);
+    expect(w.takerRecords.record.forks).toEqual(["ghostly"]);
+    expect(w.takerRecords.record.handoff).toBeUndefined();
   });
 });

@@ -120,6 +120,22 @@ it("ecash comes back marked as a copy to check with its mint; ecash a payment ho
   expect((await readAll("ghostly", STORES.proofs) as { unchecked?: boolean }[]).some((p) => p.unchecked)).toBe(false);
 });
 
+it("a handoff moves ecash and swaps as they are: nothing is marked to check again as a restored copy is", async () => {
+  await openDb();
+  const proof = (secret: string, extra: Record<string, unknown> = {}) => ({ mint: "https://mint.example", id: "009a1f293253e41e", amount: 64, secret, C: "02ab", ...extra });
+  const swap = { id: "swap1", kind: "receive", mint: "https://mint.example", amount: 32, createdAt: 1 };
+  await transact([STORES.proofs, STORES.swaps], (s) => {
+    s[STORES.proofs].put(proof("moving"));
+    s[STORES.swaps].put(swap);
+  });
+  const sink = memorySink();
+  await writeProfileBackup(sink, { passphrase: null, handoff: true });
+  await restoreHandoffBundle(sink.bytes(), "stagedmoney");
+  const proofs = await readAll("ghostly_stagedmoney", STORES.proofs) as { secret: string }[];
+  expect(proofs.find((p) => p.secret === "moving")).toEqual(proof("moving"));
+  expect(await readAll("ghostly_stagedmoney", STORES.swaps)).toEqual([swap]);
+});
+
 it("a file kept in file storage travels in the bundle; one whose bytes are not all here keeps its record only", async () => {
   const { fileBytes } = await import("../src/shared/fileBytes");
   const { SMALL_FILE_BYTES } = await import("../src/shared/fileBytes");

@@ -38,6 +38,13 @@
     "update": "A newer Ghostly made this code. Update to use it.",
     "used": "Another device used this code first. Make a new one."
   },
+  "fork": {
+    "confirm": "Discard this copy for good? What is only in it is lost.",
+    "discard": "Discard",
+    "hint": "A copy of this profile from before another device took over.",
+    "info": "When this device took the profile back with Use here, it kept what it held then. Messages and payments that are only in that copy are not in your profile. Discard removes the copy from this device for good.",
+    "title": "Only on this device"
+  },
   "handoff": {
     "allowAgain": "Let {{device}} try again",
     "cancel": "Cancel",
@@ -128,6 +135,9 @@
     "bannerHint": "Messages you write wait until then.",
     "hint": "Check your connection.",
     "info": "Before it goes online, Ghostly checks that no other device took this profile. Start anyway opens it here offline: you can read and write, and nothing is sent, paid or received until the check works. Ghostly tries again every 30 seconds.",
+    "restoreBanner": "Restored copy, offline for now",
+    "restoreBannerHint": "Checking whether your profile runs on another device.",
+    "restoreInfo": "This backup was made before your profile had other devices, and Ghostly could not check them when it was restored. Until it can, nothing is sent, paid or received, and no group is changed. If another device runs your profile, this copy goes on standby; if none does, it starts by itself. Ghostly tries again every 30 seconds.",
     "startAnyway": "Start anyway",
     "title": "Can't check which device is active",
     "tryAgain": "Try again"

@@ -1239,6 +1239,9 @@ export class Communities {
       if (live.pendingEntries.size >= MAX_PENDING_ENTRIES) break;
       // A hub with no room for one more member (its budget of connections) lets the next hub in turn answer.
       if (live.members.size >= this.capacity(groupId, live, now)) break;
+      // Door duty only on the device a fresh turn read says is the active one (WISP 06 § When a device checks). A stale
+      // read is read again in the background, and this knock waits for the next turn of the door: the tick never waits.
+      if (this.host.adminTurn && !(await this.host.adminTurn(groupId, { wait: false }))) break;
       live.pendingEntries.set(key, now);
       traceJoin(groupId, "knock.seen", { age: now - ts, turn });
       try { await this.host.openEntry(link, "host", s.state.entry.seedB64, key); } catch { live.pendingEntries.delete(key); }
@@ -1535,6 +1538,7 @@ export class Communities {
       clock: () => this.now(),
       seqFloor: () => this.host.seqFloor?.() ?? 0,
       adminWork: () => this.host.adminWork?.(id) ?? true,
+      adminTurn: () => this.host.adminTurn?.(id) ?? Promise.resolve(true),
       relay: frame => { if (this.live.get(id)?.hub) for (const [, linkId] of this.hearers(id, frame)) this.sendTo(linkId, frame); },
     });
     this.live.set(id, { session, hub: false, hubSince: 0, beacon: [], hubClocks: new HubClocks(() => session.myKey, HUB_CLOCK_READ_GAP_MS), head: null, lastBeaconRead: 0, beaconKnown: false, beaconFailedAt: 0, beaconAt: 0, leaving: 0, stepDownAt: 0, lastBeaconWrite: 0, lastBeaconTry: 0, hubCandidateAt: 0, members: new Map(), emptySince: 0,

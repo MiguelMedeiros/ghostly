@@ -117,8 +117,8 @@ describe("the cases of a restore", () => {
     expect(restoreCase(devices, peek("unreachable"))).toBe("unreadable");
     expect(restoreCase(devices, peek("closed"))).toBe("unreadable");
     expect(restoreCase(devices, null)).toBe("unreadable");
-    // A bundle with no device set whose turn cannot be read: restored as before (see the report on this gap).
-    expect(restoreCase(undefined, peek("unreachable"))).toBe("plain");
+    // A bundle with no device set whose turn cannot be read: restored, and it starts limited until a read (`unchecked`).
+    expect(restoreCase(undefined, peek("unreachable"))).toBe("unchecked");
     expect(activeName(devices, peek("other", record))).toBe("Phone");
     expect(activeName(devices, peek("none"))).toBe("MacBook");
   });

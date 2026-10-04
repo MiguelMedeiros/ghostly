@@ -47,6 +47,7 @@
     "fedimintRealOnTestnet": "Esta federação guarda bitcoin real: ela fica numa carteira Fedimint de Mainnet",
     "fedimintTestOnMainnet": "Esta federação está em {{chain}}, uma rede de teste: ela fica numa carteira Fedimint de Testnet",
     "feeAboveLimit": "A taxa passa do seu limite",
+    "groupTurnUnconfirmed": "Não foi possível verificar qual dispositivo está ativo, então o grupo não foi alterado. Tente de novo em instantes.",
     "hostTimedOut": "{{host}} não respondeu a tempo",
     "hostUnreachable": "Não foi possível acessar {{host}}",
     "invalidMaxFee": "Taxa máxima inválida",

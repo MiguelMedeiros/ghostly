@@ -8,7 +8,7 @@ import { PENDING_RAISE_KEY, pendingRaise } from "@ghostly/browser/devices/raise"
 import { unsealSeed } from "@ghostly/browser/engine/paymentAdapters/persistence";
 import { homeOf } from "@ghostly/browser/devices/walletHomes";
 import { createDatabase, databaseExists, putRows, restoreDatabase, snapshotDatabase, type DatabaseSnapshot, type StoreShape } from "@ghostly/browser/backup/database";
-import { DB_VERSION, STORES, databaseName, wrap, type StoredFile } from "@ghostly/browser/shared/idb";
+import { DB_VERSION, databaseName, wrap, type StoredFile } from "@ghostly/browser/shared/idb";
 import { RESTORED_WALLET_STORES, restoredWalletRow } from "@ghostly/browser/shared/restoredRows";
 import { FILE_BYTES_STEP, SMALL_FILE_BYTES, checkFileId, fileBytes, fileBytesOf, type FileBytes, type FileBytesKind } from "@ghostly/browser/shared/fileBytes";
 import { restoreArkDatabase, snapshotArkDatabase, type ArkDatabaseSnapshot } from "@ghostly/browser/engine/paymentAdapters/backup";
@@ -563,8 +563,11 @@ function restoredRows(store: string, keys: IDBValidKey[], values: unknown[], fre
       return { ...record, config: { ...record.config, walletId: fresh(walletId) }, ...(isBarkRecord(keys[i]) ? { scan: true } : {}) };
     });
   }
-  // A handoff moves payment attempts as they are: the device that had them was alive and settled its own business.
-  if (store === STORES.intents && handoff) return values;
+  // A handoff moves the money as it is: payment attempts, ecash and swaps. The device that had them was alive, stopped
+  // its wallets before the last pass and settled its own business, so nothing is as old as a backup (WISP 06 § Wallets,
+  // Cashu: every proof moves exactly once, which follows from the device state, not from a mark). Marked as restored,
+  // the new device would ask each mint about every proof again and treat what a swap brings as unchecked.
+  if (handoff && RESTORED_WALLET_STORES.includes(store)) return values;
   // Money as the bundle held it is not taken at its word: ecash to check, swaps to check, attempts unknown.
   if (RESTORED_WALLET_STORES.includes(store)) return values.map((value) => restoredWalletRow(store, value));
   return values;

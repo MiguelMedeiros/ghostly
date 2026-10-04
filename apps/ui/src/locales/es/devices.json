@@ -38,6 +38,13 @@
     "update": "Un Ghostly más reciente creó este código. Actualiza para usarlo.",
     "used": "Otro dispositivo usó este código primero. Crea uno nuevo."
   },
+  "fork": {
+    "confirm": "¿Descartar esta copia para siempre? Lo que solo está en ella se pierde.",
+    "discard": "Descartar",
+    "hint": "Una copia de este perfil de antes de que otro dispositivo tomara el control.",
+    "info": "Cuando este dispositivo recuperó el perfil con Usar aquí, guardó lo que tenía en ese momento. Los mensajes y pagos que solo están en esa copia no están en tu perfil. Descartar elimina la copia de este dispositivo para siempre.",
+    "title": "Solo en este dispositivo"
+  },
   "handoff": {
     "allowAgain": "Dejar que {{device}} lo intente de nuevo",
     "cancel": "Cancelar",
@@ -128,6 +135,9 @@
     "bannerHint": "Los mensajes que escribas esperan hasta entonces.",
     "hint": "Revisa tu conexión.",
     "info": "Antes de conectarse, Ghostly comprueba que ningún otro dispositivo tomó este perfil. Iniciar de todos modos lo abre aquí sin conexión: puedes leer y escribir, y no se envía, paga ni recibe nada hasta que la comprobación funcione. Ghostly lo intenta de nuevo cada 30 segundos.",
+    "restoreBanner": "Copia restaurada, sin conexión por ahora",
+    "restoreBannerHint": "Comprobando si tu perfil se usa en otro dispositivo.",
+    "restoreInfo": "Esta copia de seguridad se hizo antes de que tu perfil tuviera otros dispositivos, y Ghostly no pudo comprobarlos al restaurarla. Hasta que pueda, no se envía, paga ni recibe nada, y ningún grupo cambia. Si otro dispositivo usa tu perfil, esta copia queda en espera; si ninguno lo usa, se inicia sola. Ghostly lo intenta de nuevo cada 30 segundos.",
     "startAnyway": "Iniciar de todos modos",
     "title": "No se puede comprobar qué dispositivo está activo",
     "tryAgain": "Intentar de nuevo"

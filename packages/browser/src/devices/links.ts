@@ -96,6 +96,8 @@ export interface DeviceSetView {
   notice?: string[];
   /** Nothing this device can accept brings it back into the set: it is added again by enrollment. */
   reenroll?: true;
+  /** Forks kept here ("Only on this device", WISP 06 § Installing the staged state), by peer database name: Discard removes one. */
+  forks?: string[];
 }
 
 /** The view of a device record and the links this device holds. A profile with no record is `single`, with no devices. */
@@ -119,7 +121,8 @@ export function deviceSetView(record: DeviceRecord | null, links: DeviceLinkView
     ...(record.state === "active" && waiting.length ? { waiting } : {}),
     ...(record.state === "active" && record.earlierSets.some((set) => set.foreign) ? { foreignSet: true as const } : {}),
     ...(record.setNotice && !record.setNotice.seen ? { notice: record.setNotice.names } : {}),
-    ...(record.reenroll ? { reenroll: true as const } : {}) };
+    ...(record.reenroll ? { reenroll: true as const } : {}),
+    ...(record.state === "active" && record.forks?.length ? { forks: [...record.forks] } : {}) };
 }
 
 export interface DeviceLinksOptions {
