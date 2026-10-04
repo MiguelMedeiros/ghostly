@@ -56,6 +56,9 @@ export async function standbyEngine(gate: DeviceGate, options: NodeOptions | und
       ...(network.hyperdhtRelay && !options?.nativeTransports?.["hyperdht/1"]
         ? { "hyperdht/1": async (seedB64: string) => (await import("../platform/hyperdhtRelay")).createRelayedHyperEndpoint(seedB64, network.hyperdhtRelay!) } : {}),
       ...options?.nativeTransports,
+      // The host's own Iroh (the Desktop) on the person's Iroh relays, as the engine runs it.
+      ...(options?.nativeIrohRelays && options.nativeTransports?.["iroh/1"] && network.irohRelays?.length
+        ? { "iroh/1": (seedB64: string) => options.nativeTransports!["iroh/1"]!(seedB64, { relays: [...network.irohRelays!] }) } : {}),
       ...(options?.irohWeb ? { "iroh/1": (seedB64: string) => createIrohWebEndpoint(seedB64, { relays: irohRelays }) } : {}),
     },
   });

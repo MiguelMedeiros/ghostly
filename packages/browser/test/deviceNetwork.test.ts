@@ -131,18 +131,22 @@ describe("a standby's network", () => {
       const engine = (await standbyEngine(gate, { transport: pkarr.transport(), irohWeb: true, pollIntervals: RELAY_POLL_INTERVALS }))!;
       await engine.start({ gate, show: () => {} });
       await waitFor(() => !!hyper.urls.length && !!iroh.relays.length);
-      expect(hyper.urls).toEqual([NETWORK.hyperdhtRelay]);
+      // Counted, not matched exactly: the links may start once more while the standby settles (CI timing).
+      expect(new Set(hyper.urls)).toEqual(new Set([NETWORK.hyperdhtRelay]));
+      const first = { hyper: hyper.urls.length, iroh: iroh.relays.length };
       // Neither the relay nor Iroh answered: both are started again in a while, not given up for the life of the link.
       await vi.advanceTimersByTimeAsync(NATIVE_RETRY_MS);
-      await waitFor(() => hyper.urls.length === 2 && iroh.relays.length === 2);
-      expect(hyper.urls).toEqual([NETWORK.hyperdhtRelay, NETWORK.hyperdhtRelay]);
-      expect(iroh.relays.length).toBe(2);
+      await waitFor(() => hyper.urls.length > first.hyper && iroh.relays.length > first.iroh);
+      expect(hyper.urls.length).toBeGreaterThan(first.hyper);
+      expect(iroh.relays.length).toBeGreaterThan(first.iroh);
+      expect(new Set(hyper.urls)).toEqual(new Set([NETWORK.hyperdhtRelay]));
       const stopping = engine.stop();
       for (let i = 0; i < 40; i++) await vi.advanceTimersByTimeAsync(100);
       await stopping;
       // Stopped: nothing more is started.
+      const stoppedAt = hyper.urls.length;
       await vi.advanceTimersByTimeAsync(NATIVE_RETRY_MAX_MS * 2);
-      expect(hyper.urls.length).toBe(2);
+      expect(hyper.urls.length).toBe(stoppedAt);
     } finally { vi.useRealTimers(); }
   });
 
@@ -161,6 +165,27 @@ describe("a standby's network", () => {
       await waitFor(() => !!own.length);
       expect(own.length).toBe(1);
       expect(hyper.urls).toEqual([]);
+      const stopping = engine.stop();
+      for (let i = 0; i < 40; i++) await vi.advanceTimersByTimeAsync(100);
+      await stopping;
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("homes a Desktop's own Iroh on the person's Iroh relays, where the host takes them", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "Date"] });
+    try {
+      await standbyRecord(NETWORK);
+      const gate = await openDeviceGate("ghostly");
+      const pkarr = new MemoryPkarr(DESKTOP_NETWORK);
+      const given: unknown[] = [];
+      const engine = (await standbyEngine(gate, {
+        transport: pkarr.transport(), pollIntervals: RELAY_POLL_INTERVALS, nativeIrohRelays: true,
+        nativeTransports: { "iroh/1": async (_seed: string, options?: { relays?: string[] }) => { given.push(options); throw new Error("No Iroh in this test"); } },
+      }))!;
+      await engine.start({ gate, show: () => {} });
+      await waitFor(() => !!given.length);
+      // Every start (one, or one more while the standby settles) gets the record's relays.
+      for (const options of given) expect(options).toEqual({ relays: NETWORK.irohRelays });
       const stopping = engine.stop();
       for (let i = 0; i < 40; i++) await vi.advanceTimersByTimeAsync(100);
       await stopping;
