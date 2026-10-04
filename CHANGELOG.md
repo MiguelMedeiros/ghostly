@@ -4,6 +4,239 @@
 
 <!-- Notes for the next release. A new entry goes in docs/changelog/unreleased/ (one file per change, see docs/changelog/unreleased/README.md), not here: tools/scripts/bump-version.mjs adds those files below at release and turns this heading into the version. Editing a line already here is fine. -->
 
+## 1.1.0
+
+Ghostly 1.1.0 lets you use one profile on more than one device, makes groups much faster to join and recover, and keeps a file in its place among your messages while a contact is away. Add your desktop, laptop or browser to the same profile (up to 4 devices): one device is active at a time, Use here moves everything to the device in your hand, and a lost device can be taken over or removed. In a private group the fifth person in waits seconds instead of a minute, a member back after a restart is in again within seconds, and a message written while cut off reaches the members let in meanwhile. Communities recover much sooner when a hub or the admin leaves or crashes. A file sent while your contact is away shows in order among your texts. Your own TURN server now reaches Linux desktop calls, and the desktop uses your own Iroh relays.
+
+Known issues, for the next release: moving a profile needs both devices online at the same time; an app from before 1.1 may show a group message twice when its author said it again after catching up; joining a group can still take a while when the public relays are slow.
+
+### For users
+
+**Everywhere**
+
+- An Android app: Ghostly on the web in a Trusted Web Activity, with its own icon and no browser bar, built for every release once its signing key is set up. It has the web app's limits (no native Iroh, no direct HyperDHT).
+- Ghostly Desktop uses the Iroh relays you set in Settings, Network, as the web app does. Before, it always used n0's public relays, so a desktop and a web app on a self-hosted relay had no relay in common.
+- One profile on several devices: use the same chats, groups, identities and wallets on your computer and your phone
+  (web, desktop and extension, up to 4 devices). One device is active at a time; on another, **Use here** moves
+  everything to it. Add a device in Profile, Devices with a code and your lock password, take over from a device that
+  is lost or broken, or remove it. Both devices must be online for a move, and Mainnet money keeps a profile where it
+  is for now. See [Several devices](docs/DEVICES.md).
+- A profile backup can be light: chats and every message, contacts, groups, identities, wallets and settings, without the files over 1 MB (voice messages up to 4 MB stay). Back up shows how much each choice holds before you make it. In the CLI, `ghostly profile backup --light`.
+- After restoring a light backup, a file it left out says "Not in this backup".
+- A file whose bytes are no longer on the device no longer offers Save until you tap it: it says it is no longer available.
+
+**Chat**
+
+- A file or voice note sent while your contact is away now shows in their chat right away, in its place among your texts, and its bytes follow once you are both live. Before, a short text written after it could arrive first.
+
+**Calls**
+
+- Your own TURN server (Settings, Network) now reaches calls on the Linux desktop too, which wait for its relay path before they ring. Backups leave its credential out: after a restore, Settings asks for it again.
+
+### Fixed
+
+- One profile on several devices (WISP 06): the active device now reads which device is active every 10 minutes while
+  it runs, and at once when another device's link says it holds the turn. A device that another one took over from
+  while it ran stops within minutes, instead of staying active beside it until it restarted.
+- Removing a device while a check of the active device was still out no longer leaves that device unable to start.
+- One profile on several devices (WISP 06): a group change (adding, removing, a new admin, a new key or link) and
+  answering knocks at a community's door now need a recent check that this device is the active one. When the check
+  is old, Ghostly checks again first; when it cannot, the group is not changed and the app says why, so two devices
+  that both think they are active can never split a group.
+- Adding this device to another profile (WISP 06) is refused while the profile running here holds or waits for money
+  in the wallets every new profile gets: USDT tokens or gas, ecash set aside for a payment or a swap, a paid quote not
+  claimed yet, or a payment. While those wallets have not loaded yet (the app is starting, or the USDT balance could not
+  be read), it says so and asks to check the connection and try again.
+- One profile on several devices (WISP 06): "It wasn't me" on a replaced device takes the turn above the one that
+  replaced it even after that device's record expired, instead of writing inside that turn.
+- A handoff that failed no longer leaves a list of Breez databases behind for the next handoff to delete.
+- Ecash and swaps that move in a handoff are no longer marked as restored from a backup, so the new device does not
+  check every proof with its mint again.
+- The old copy of a profile that a handoff replaces now goes with its wallets' own databases, never one the profile
+  still uses.
+- One profile on several devices (WISP 06): a device that another one takes over from while it is open now shows
+  "This device was replaced" with Use here at once. Before, it stopped but kept showing the chats until a reload.
+- One profile on several devices (WISP 06): a backup made before the profile had other devices, restored while Ghostly
+  could not check them, now opens offline (limited mode) instead of starting a second live copy. It checks every 30
+  seconds and starts by itself when no other device runs the profile, or goes on standby when one does. A line above
+  the chat list says why.
+- One profile on several devices (WISP 06): a device that takes the profile back reconnects its chats on a transport
+  it runs. It could wait on the other device's transport, which it lacks (HyperDHT on the Desktop on Linux).
+- One profile on several devices (WISP 06): Use here on a move offered from the other device starts the copy even
+  when the connection between the two devices was renewed at that moment. A move offered from the active device
+  that takes over a minute is no longer stopped as "The connection dropped".
+- One profile on several devices (WISP 06): after a move that stopped, Try again on the active device now reaches the
+  other device, which asks "Move this profile here?". Before, it often did not, and the other device stayed on "The
+  move stopped".
+- One profile on several devices (WISP 06): a device that took the profile no longer waits for ever on "Checking which
+  device is active". After 2 minutes it says it can't check, with Try again.
+- One profile on several devices (WISP 06): a device that another one replaced now offers "Use here" to take the
+  profile back, not only "It wasn't me". What only it held stays as "Only on this device" in Data and storage, until
+  you discard it.
+
+**Groups**
+
+- When a community's admin leaves, the people only it was connecting wait a moment for another member's app to take them, instead of each becoming a connection point nobody reaches yet. They hear the group again sooner.
+- A message written in a community while the writer's app was behind on who had joined now reaches the people let in meanwhile in every case, not only when the app's clocks agreed.
+- Many people joining a community at once: each stays with the member's app that is connecting it, instead of giving up after 20 seconds and asking the next one, which did the same. Before, with a dozen people in a minute, some were in the group with "connecting…" for two minutes and more.
+- When the app of a member that connects others in a community closes without leaving (it crashed, or was force quit), the people it connected find the rest of the group again sooner. The apps left behind no longer wait a minute for it, and their requests to be connected again go out while they are still trying to reach it.
+- When a community's admin or another member's app that carries others leaves, the people it carried find the rest of the group again faster. The apps left behind no longer keep trying to reach the one that left, which used up their requests to the relays and kept them from seeing who was asking for them.
+- Someone let in to a community a moment before the admin left no longer waits for the admin: they find the rest of the group as soon as another member's app writes the admin out.
+- A message written in a community while your app was cut off, and others were let in meanwhile, now reaches them once your app catches up. Before, it was sealed for the group as your app last knew it, and the people let in while you were away never got it.
+- A community message your app sends again after it catches up is never sealed where people let in after you wrote it could read it.
+- A private group member whose app restarts more than once no longer waits about 40 seconds now and then to connect again. After the second restart, the app could answer an old connection offer that another member had already given up, and waited for that attempt to time out.
+- A private group connects much faster. The members you already reach now pass on what two members need to connect to each other, so someone who joins by the link reaches everyone within a second of being let in, where each connection took 6 seconds or more and a group of five or more could wait a minute or longer for the relays. It also uses far fewer relay requests, which is what made larger groups stall.
+- A private group member who comes back while only one other member is online connects again within seconds, also right after a burst of joins and restarts, where it could wait 40 seconds for the relays.
+- A private group member who comes back while most of the others are away is connected again sooner. When several members left at once, the app of the one who stayed could spend its share of the relays watching for all of them and then read nothing for half a minute, so the first one back waited 25 to 45 seconds to be seen. It now waits about 5 seconds, under 20 at worst in our tests.
+- A private group of more than 16 people works when a device's clock is a few minutes off. A hub whose clock was a minute and a half or more from the others' was a hub to nobody, so the members counted on one hub instead of two, and a member with such a clock found the hubs only once they told it themselves.
+- A message written in a private group while your app was behind, with someone let in meanwhile, now reaches them once your app catches up. Before, it was sealed for the group as your app last knew it, and the person let in while you were away never got it. Someone let in after you wrote it still never gets it.
+
+**Everywhere**
+
+- Desktop: "Storage used" in Settings counts what the app really keeps, not only its small settings: the app's databases, the profile's files on disk and copies being saved. The parts are behind its ⓘ.
+- The web app opens in the language you chose from its first frame again. Since the startup check for moved profiles, a reload showed the page in English, left to right, for a moment before switching to your language (most visible in Arabic).
+- A device on a public address with no NAT no longer waits up to 5 s before each connection offer (10 s before a call) once the app may use the camera or the microphone.
+- An app with many chats whose contacts are away does less network work while idle. When a Pkarr relay answered again after a rate limit or an outage, every chat looked for its contact at once, even the ones that had missed nothing: on a profile with 42 chats that was 42 lookups each time a busy relay came back. Now only the chats that missed a lookup, or that are looking for their contact right now, look at once; the others keep their pace.
+
+**Devices**
+
+- Adding a Linux Desktop from the web app works. The web page kept showing its code and the Desktop waited until it gave up, with no error on either side, because the two had no way to connect: the page now starts the connection the Desktop can use. When two devices still cannot connect, both now say so after two minutes.
+- Moving a profile to a Desktop that runs in a space of its own (`GHOSTLY_PROFILE`) no longer ends with an empty profile there. The move finished, then the cleanup of the old copy deleted the list of profiles too, so the Desktop opened an empty profile and the other device showed it active but not connected. If the pointer to a moved profile is ever lost, the app now finds the profile again when it starts.
+- Moving a profile to another device no longer sits on "Copying files" when the other device stops answering. After 2 minutes with nothing from it, both devices say the move stopped and offer Try again; the device that had the profile keeps it, and files already copied are not copied twice.
+- A web page and a Linux Desktop on the same profile connect over HyperDHT as well as Iroh. The link between your devices offered HyperDHT only when the page's HyperDHT relay answered at the first try, never on a page on standby, and never after a relay set later; when the page's Iroh relay was out of the Desktop's reach the two could not connect at all. A connection that does not start is now tried again in a while.
+
+**Calls**
+
+- A call from or to a Linux Desktop could go out with no network address at all, and never connect: on a slow DNS lookup of the STUN server, its own addresses waited behind it. The STUN server is now looked up first, with its own time limit, and a call waits for at least one address before it goes out.
+
+**Identities**
+
+- When a browser blocks the homeserver's sign-in cookie during a Pubky Ring approval (Vanadium, Safari), the message now says why and points to Pubky Passport, Firefox or the desktop app, not Chrome.
+
+**Wallets**
+
+- Spark and the Breez Lightning source: each profile now keeps its own Breez wallet data on the device. A profile restored as a copy on the same device used to open the original's, so the two wallets could disagree about which coins were theirs; the copy now starts from its recovery phrase with its own. The profile that was already using the shared data keeps it. Removing the wallet or deleting the profile now deletes that data too.
+- Bark: a wallet restored from a Bark backup or a profile backup looks once for on-chain coins its phrase received before, so they show in the balance again. The wallet page says it is looking while it does.
+
+### For developers
+
+- Fourth part of "one profile on several devices, one active at a time" (WISP 06): adding a device. On the active
+  device, Profile, Devices, "Add a device" asks for a lock password of 8 characters or more (set, typed again, or made
+  longer; a profile that never adds a device keeps its 4-character lock), then shows a code good for 10 minutes. The
+  code is a new invite version (2), which the chat reader refuses as a device code and Ghostly 1.0.2 refuses as a
+  newer version (test vectors included). On the new device, "I already use Ghostly" on a new profile reads the code.
+  The two meet on a one-time paired session (`enroll/1`) signed with their device signing keys: the code admits one
+  device only, the active device proves itself first, and only then both show the same six digits. Once the person
+  confirms on the active device, the new device stores the device set as a standby and the active device publishes its
+  turn record with it; a crash at any step leaves no device added or a complete one. The new device ends on the
+  standby screen with a live link to the active device. In an iPhone or iPad browser tab it says to add Ghostly to the
+  Home Screen first; elsewhere it asks the browser to keep its storage and warns when it does not.
+- Fifth part of "one profile on several devices, one active at a time" (WISP 06): the handoff, which moves a profile
+  from the active device to another one. On a standby, "Use here" asks for the profile's lock password, which the
+  active device checks with a password proof (OPAQUE, through `opaque-ke` compiled to WebAssembly) without ever seeing
+  it; five wrong tries in an hour lock that device out for an hour, and fifteen refuse it until the person lets it try
+  again on the active device. On the active device, "Move to <device>" offers the profile to a device that is on, and
+  the person says "Use here" there. Files are copied first while the active device stays in use, skipped when the
+  other device already has them, and sealed piece by piece; on mobile data files over 16 MB can stay behind. Then the
+  active device stops without a word to its contacts, sends the rest in the backup format of WISP 05, and goes on
+  standby only once the other device checked everything. The new device writes all of it into a storage space of its
+  own, points the profile at it in one step, takes the turn and waits about 30 seconds to be sure no other device took
+  it at the same moment, and then reaches the contacts the way an app that restarted does. A crash at any step leaves
+  the profile active on one of the two devices.
+- One profile on several devices (WISP 06), fixes to the device links: a device on standby goes through the person's
+  relays, Iroh relays and TURN servers and asks nothing of anyone with the network off (the active device keeps a
+  copy of those settings beside the device state); a device signing key that does not sign is never kept, and one
+  page never removes a key another page stored; the transports a device link publishes are signed with the device
+  signing key, so another holder of the device-set secret cannot stall the link with transports of its own.
+- Third part of "one profile on several devices, one active at a time" (WISP 06): device signing keys and the links
+  between a person's devices. Each device makes its own Ed25519 signing key, non-extractable through WebCrypto where
+  the engine keeps such a key (measured in Chromium, WebKit and the Desktop's WKWebView on a Mac) and a stored seed
+  elsewhere, kept apart from the device record and in no backup. A paired session can sign through that key instead of
+  a raw seed; chats sign exactly as before. The link between two devices is derived from the device-set secret and the
+  two signing keys (test vectors included), pinned to the other device's key with trust on first use off, and run by
+  device-link-only mode without opening the profile's database. It carries a ping and its echo for now. The turn
+  keeper signs with the device's key. A profile on one device makes no key and starts no link.
+- One profile on several devices (WISP 06): a removed device, or a contact deleted or muted while a computer hands out
+  the phone's push address, can no longer wake the person's devices. Every device that stays makes a new push address
+  after a removal, the phone is asked over the device link for a new one when the computer cannot make it, and a
+  device on standby shows wake-ups only for the chats the active device still has. "Keep this computer awake" says it
+  is on only once the computer really holds it.
+- Ninth part of "one profile on several devices, one active at a time" (WISP 06): push and the phone. A phone's
+  wake-ups keep working when the profile moves to a computer and back: the computer goes on giving contacts the
+  phone's push address, and a new one the phone's browser makes reaches contacts through it. A device that is not the
+  active one never rings and never shows a message: a quiet "New message. Active on <device>." or "Call for you.
+  Active on <device>." opens its standby screen. Asking a phone that closed the app for the profile wakes it with a
+  push, and it says "<device> wants to take over. Open Ghostly." On Desktop, "Keep this computer awake" in Profile,
+  Devices keeps the computer from sleeping so the phone can take over while you are out, and a move in progress keeps
+  it awake on its own. A device left waiting after the device that removed another was lost for good can now start a
+  device set of its own with "My other device is lost or broken". Removing a device also forgets its push address and
+  its wallets' home marks. A wallet that stays on another device can no longer be made the default for receiving here,
+  and a Bitcoin Core source at home elsewhere is never changed from this device.
+- Seventh part of "one profile on several devices, one active at a time" (WISP 06): removing a device. On the active
+  device, Profile, Devices, Remove takes a device out of the profile: the devices move to a new device secret, which
+  the removed device never gets, so it can no longer take the profile and reaches none of the others. The other
+  devices get the new secret over their old connection the next time they are open together, even a device that was
+  closed at the time, and show the new list of devices once, with "This is wrong" if it looks wrong. A device that was
+  removed shows so when it opens, and can be added again. A device that was off while the person's devices changed in
+  a way it cannot check asks to be added again. "New device secret" does the same with nobody removed: Ghostly makes
+  one by itself when a device was being added and never finished, and offers one after a takeover. "Lost or stolen"
+  lists what to do next: change the storage keys, move the money out of each wallet the lost device could spend from,
+  and pair each chat again. A crash at any step of a removal picks up where it stopped. Going online as the active
+  device now holds every action until it has checked that it is still the active one.
+- Tenth part of "one profile on several devices, one active at a time" (WISP 06): the final screens. Profile, Devices
+  lists each device with a mark for its kind and its state (This device · Active, Active, Standby, Not finished),
+  "Move to <device>" on the row and Check and Remove in the row's menu, and the details behind ⓘ marks. The standby
+  screen, the handoff progress, the takeover, the remove and the lost-or-stolen screens share one layout at phone and
+  desktop widths, in both themes. The account switcher shows "Standby" for a profile this device is on standby for. A
+  start that could not check which device is active asks first: "Try again" or "Start anyway". Settings says when the
+  push address belongs to another device, and a phone that was never the active device shows its quiet notices in the
+  app's language.
+- First part of "one profile on several devices, one active at a time" (WISP 06). The app now reads a device state
+  before it starts a profile: a profile used on one device only runs exactly as before; a device that is not the
+  active one for a profile opens none of its data, starts no wallet and publishes nothing, and shows a standby screen
+  instead.
+- Sixth part of "one profile on several devices, one active at a time" (WISP 06): the forced takeover and the guard on
+  restoring a backup. On a device on standby that holds a copy of the profile, "My other device is lost or broken"
+  takes over when the active device cannot be reached: it asks for the profile's lock password (five wrong tries in an
+  hour lock the device out for an hour, fifteen for good, and a wrong one changes nothing) and the name of the device
+  that stops, waits about 30 seconds to be sure no other device took over at the same moment, and starts. A device
+  that was replaced reads that before its engine starts when it comes back, stops without a word to its contacts, and
+  offers "It wasn't me". A copy started from older state (a takeover, or any restored backup) sends above every number
+  the copy it replaced may have used, so its first messages in a group or a community are no longer dropped by the
+  other members as already seen; it signs no group change and takes no door duty until the person turns on "Manage
+  groups from this device" in that group; a payment it finds signed but unfinished is never sent again; and the
+  on-chain wallet scans again. A backup of a profile on several devices carries its device set in a newer backup
+  format, and restoring one where the profile is active on another device does not start it: the app offers to add the
+  device instead, to take over, or to cancel. After any restore, as after a takeover, the copy signs no group change
+  and takes no community door duty until "Manage groups from this device" is turned on in that group.
+- The turn record (WISP 06), after its second review: a device that settles a raised turn keeps in its device record
+  when its put ended and which sources took it, so a reload cannot make it active on one lagging relay; signed junk
+  above the last ordinary sequence closes the turn address only while it is there; on Desktop a DHT put that only
+  times out no longer holds the relays back; the read before a raising put gives each source 5 seconds.
+- Second part of "one profile on several devices, one active at a time" (WISP 06): the turn record, which says which
+  of a person's devices is the active one. Its fixed binary format, with test vectors shared by TypeScript and the
+  Desktop's Rust; its own read (every relay is asked, and on Desktop the DHT itself) and its own conditional put (a
+  refusal is never sent again without its condition); the result of a read, clone detection included; what each device
+  state does on each result; and limited mode in the engine (nothing published, dialled or settled in hold storage, no
+  wallet opened, until the turn was read). A profile on one device makes no turn read or put.
+- Eighth part of "one profile on several devices, one active at a time" (WISP 06): wallets in a move. A profile with
+  money no longer has to be emptied before it moves. Testnet ecash, Spark, Lightning through NWC or Core Lightning,
+  LND without a pinned certificate and the on-chain BDK wallet move with the profile and open on the new device once
+  it is the active one; the ecash is checked with its mint there once. Ark, Bark, Fedimint, USDT, Bitcoin Core and LND
+  with a pinned certificate stay on the device they were made on: the other device shows them as "On <device>" and
+  never opens them, and they open again when the profile comes back. Ark and Bark coins that expire in under 3 days
+  keep the profile from moving away from their device ("Renew your <wallet> coins first"). Mainnet money in a wallet
+  that moves keeps the profile where it is for now: Testnet first. A payment still going through holds the move for up
+  to 30 seconds. The old device deletes the Spark wallet's local database once it is on standby, and a wallet that
+  only one device may write to opens only after a fresh check of which device is active. A copy that takes over checks
+  its ecash with the mints before it counts.
+- WISP 06 (one profile on several devices) now describes the enrollment digits (32 bits of the hash) and the handoff
+  password proof (OPAQUE with Argon2id) as the app does them, with the reasons.
+
+**Everywhere**
+
+- Iroh is 1.3.0 everywhere: the Desktop's native transport and the browser build in `packages/iroh-web` that the web app, the extension and the CLI run (rebuilt with `node tools/scripts/build-iroh-web.mjs`). Apps still on Iroh 1.2.0 connect to it as before.
+
 ## 1.0.3
 
 Ghostly 1.0.3 brings backups that handle large profiles, calls that survive a network change, and a round of fixes from the first days after launch. Backups hold files of any size, show their progress, can be cancelled, and can be made without a passphrase. A call comes back when your network changes. Messages, files and voice notes written around a reconnect stay in order, and devices whose clocks are a few minutes off now pair, call and join groups. A slow Pkarr relay no longer holds a pairing back.
