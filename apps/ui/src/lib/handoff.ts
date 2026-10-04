@@ -20,6 +20,7 @@ export const FAILURES: Record<HandoffFailure, TranslationKey> = {
   wallet: "devices.handoff.fail.wallet", loading: "devices.handoff.fail.loading", mainnet: "devices.handoff.fail.mainnet", expiry: "devices.handoff.fail.expiry",
   cancelled: "devices.handoff.fail.cancelled", turn: "devices.handoff.fail.turn", offline: "devices.handoff.fail.offline",
   version: "devices.handoff.fail.version", failed: "devices.handoff.fail.failed", woken: "devices.handoff.fail.woken",
+  stalled: "devices.handoff.fail.stalled",
 };
 
 /** The failure an engine call ended with (`handoff-<reason>:`), or null for another error. */

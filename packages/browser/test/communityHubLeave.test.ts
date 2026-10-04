@@ -48,6 +48,89 @@ describe("a hub that leaves", { timeout: 120_000 }, () => {
 });
 
 /**
+ * A hub whose app is killed says nothing: no leave request, no goodbye. Its members wait for it as for an app that
+ * restarts, then ask a hub left. That hub read its lobby every half minute, and the member's side of the new edge looked
+ * for it at the background pace, every half minute too: the group was cut in two for 54 s (2026-10-03).
+ */
+describe("a hub whose app is killed", { timeout: 120_000 }, () => {
+  it("its members are on a hub left within half a minute, and the group talks again", async () => {
+    const world = new CommunityWorld(undefined, RELAY_NETWORK);
+    const { id, peers } = await settled(world, ["admin", "bob", "carol", "dave", "erin"], 20_000);
+    const [admin, ...rest] = peers;
+    const keyOf = (p: Peer) => p.groups.communities.session(id)!.myKey;
+    const edgesUp = (p: Peer) => [...p.links.values()].filter(e => e.kind === "edge" && e.g === id && e.upAt !== undefined).map(e => e.peer);
+    expect(admin.groups.communities.isHub(id)).toBe(true);
+    expect(rest.some(p => p.groups.communities.isHub(id)), "another hub").toBe(true);
+    const orphans = rest.filter(p => !p.groups.communities.isHub(id) && edgesUp(p).every(k => k === keyOf(admin)));
+    expect(orphans.length).toBeGreaterThan(0);
+
+    // Each side of an edge to it dials it again at once, as the engine does: a connection under way, from one side.
+    world.redialSeen = true;
+    // The requests in the hubs' lobbies, and whether each went as the door's (not held while a link signals).
+    const rv = rest[0].groups.communities.session(id)!.state.rv;
+    const lobbies = new Set(rest.map(p => lobbyKeys(rv, id, keyOf(p)).identity.pubKeyZ32));
+    const asked: { who: Peer; door: boolean }[] = [];
+    world.onPkarr = (who, op, key, _bg, door) => { if (op === "publish" && lobbies.has(key)) asked.push({ who, door }); };
+    admin.online = false;
+    for (const p of rest) await p.groups.send(id, `line ${p.name}`);
+    const back = await world.until(() => rest.every(p => connected(world, p, id) > 0), 3 * 60_000);
+    const heard = await world.until(() => rest.every(p => rest.every(q => q === p || world.texts(p, id).includes(`line ${q.name}`))), 60_000);
+    world.onPkarr = null;
+    // 20 s waiting for the hub to come back, the hub left reads its lobby within 6 s, a few seconds of signaling.
+    expect(back).toBeLessThanOrEqual(35_000);
+    expect(heard).toBeLessThanOrEqual(5_000);
+    // The hubs left stopped dialling it after the same 20 s its members wait for it: no edge to it is kept open.
+    for (const hub of rest.filter(p => p.groups.communities.isHub(id))) expect([...hub.links.values()].some(e => e.kind === "edge" && e.g === id && e.peer === keyOf(admin)), `${hub.name} still dials the killed hub`).toBe(false);
+    // Its members asked a hub left, and their requests went as a knock does, not held while their links dial.
+    expect(asked.filter(a => orphans.includes(a.who)).length).toBeGreaterThan(0);
+    expect(asked.every(a => a.door), "every request in a hub's lobby").toBe(true);
+  });
+});
+
+/**
+ * Someone let in by the admin whose edge to it is not up yet (a crowd let in at once: the door's relay budget goes to
+ * the admissions) has no edge to hear the admin's leave on. It waited for the admin as for a hub that is slow to open
+ * its side, then asked a hub left with its own side of the new edge looking at the background pace: about 49 s
+ * (2026-10-03).
+ */
+describe("a member with no edge up when the admin leaves", { timeout: 120_000 }, () => {
+  it("drops the admin once the beacon does not list it, and its edge to a hub left comes up within half a minute", async () => {
+    let found: { world: CommunityWorld; id: string; admin: Peer; last: Peer; rest: Peer[] } | undefined;
+    for (let tries = 0; tries < 12 && !found; tries++) {
+      const world = new CommunityWorld(undefined, RELAY_NETWORK);
+      const peers = ["admin", "bob", "carol", "dave", "erin"].map(n => world.add(n));
+      const [admin, ...rest] = peers;
+      const last = rest[rest.length - 1];
+      const id = await admin.groups.create("Town");
+      const link = await admin.groups.enableLink(id);
+      for (const p of rest) {
+        // The last one's edge to the admin is slow to come up: it is not up when the admin leaves.
+        if (p === last) world.holdEdge = (a, b) => (a === admin && b === last) || (a === last && b === admin);
+        await p.groups.joinByLink(link);
+        await world.until(() => world.member(p, id), 5 * 60_000);
+      }
+      await world.run(5_000);
+      const keyOf = (p: Peer) => p.groups.communities.session(id)!.myKey;
+      const edges = [...last.links.values()].filter(e => e.kind === "edge" && e.g === id);
+      // The admin let it in (its only edge is to the admin, and not up), and the admin has an edge up to carry its leave.
+      if (edges.length === 1 && edges[0].peer === keyOf(admin) && edges[0].upAt === undefined
+        && [...admin.links.values()].some(e => e.kind === "edge" && e.g === id && e.upAt !== undefined)) found = { world, id, admin, last, rest };
+    }
+    expect(found, "a group whose last member the admin let in, with no edge up").toBeDefined();
+    const { world, id, admin, last, rest } = found!;
+    await admin.groups.leave(id);
+    for (const p of rest) await p.groups.send(id, `line ${p.name}`);
+    // Cut off, it waits for the hub taking it rather than step up as a hub with no edge to anyone.
+    let steppedUp = false;
+    const back = await world.until(() => { steppedUp ||= last.groups.communities.isHub(id) && connected(world, last, id) === 0; return connected(world, last, id) > 0; }, 3 * 60_000);
+    // A reading of the beacon within 10 s, the hub's lobby within 6, a few seconds of signaling: before, 49 s.
+    expect(back).toBeLessThanOrEqual(30_000);
+    expect(steppedUp, "a hub before it had an edge").toBe(false);
+    await world.until(() => rest.every(p => rest.every(q => q === p || world.texts(p, id).includes(`line ${q.name}`))), 60_000);
+  });
+});
+
+/**
  * The hub left behind held the leaver's signed request, but counted the leaver as a hub until the leave was committed
  * (at once by the hub with the lowest key, half a minute later by any other) or its beacon entry went stale: it dialled
  * it again as one hub dials another, kept it at the door, and wrote it back into the beacon. An edge whose app is gone

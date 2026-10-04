@@ -5,6 +5,7 @@ import { openDeviceGate, resetDeviceGates } from "../src/devices/gate";
 import { DeviceLinkOnlyServer } from "../src/devices/linkOnly";
 import { deviceNetworkOf, saveDeviceNetwork, standbyNetwork } from "../src/devices/network";
 import { createPeerServer, standbyEngine } from "../src/devices/peer";
+import { NATIVE_RETRY_MAX_MS, NATIVE_RETRY_MS } from "../src/devices/links";
 import { DEVICE_KEYS_DB, closeDeviceKeysDb, createDeviceSigningKey } from "../src/devices/signingKey";
 import type { DeviceNetwork } from "../src/devices/state";
 import { DEVICES_DB, closeDevicesDb, enrollDevice, readDeviceRecord, setDeviceMirror } from "../src/devices/store";
@@ -26,9 +27,20 @@ vi.mock("../src/platform/irohWeb", async (original) => ({
   createIrohWebEndpoint: async (_seed: string, options: { relays?: string[] } = {}) => { iroh.relays.push(options.relays ?? []); throw new Error("No Iroh in this test"); },
 }));
 
+const hyper = vi.hoisted(() => ({ urls: [] as string[] }));
+vi.mock("../src/platform/hyperdhtRelay", async (original) => ({
+  ...(await original<typeof import("../src/platform/hyperdhtRelay")>()),
+  createRelayedHyperEndpoint: async (_seed: string, url: string) => { hyper.urls.push(url); throw new Error("No HyperDHT relay in this test"); },
+}));
+
+/** Waits for `condition` while the fake clock runs, giving real turns of the loop too (a factory's module loads in one). */
+async function waitFor(condition: () => boolean): Promise<void> {
+  for (let i = 0; i < 300 && !condition(); i++) { await vi.advanceTimersByTimeAsync(10); await new Promise((resolve) => setImmediate(resolve)); }
+}
+
 const dropKeys = () => new Promise<void>((resolve) => { const r = indexedDB.deleteDatabase(DEVICE_KEYS_DB); r.onsuccess = r.onerror = r.onblocked = () => resolve(); });
 const NETWORK: DeviceNetwork = {
-  relays: ["https://relay.person.test"], readRelays: true, irohRelays: ["https://iroh.person.test"],
+  relays: ["https://relay.person.test"], readRelays: true, irohRelays: ["https://iroh.person.test"], hyperdhtRelay: "wss://hyperdht.person.test",
   iceServers: [{ urls: "turn:turn.person.test:3478", username: "person", credential: "test-credential" }],
 };
 
@@ -44,16 +56,17 @@ async function standbyRecord(network?: DeviceNetwork): Promise<void> {
 }
 
 beforeEach(async () => {
-  setDeviceMirror(null); resetDeviceGates(); iroh.relays.length = 0;
+  setDeviceMirror(null); resetDeviceGates(); iroh.relays.length = 0; hyper.urls.length = 0;
   await closeDevicesDb(); await closeDeviceKeysDb(); await dropDevicesDatabase(); await dropKeys();
 });
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 describe("the copy of the network settings", () => {
-  it("holds the relays, the Iroh relays, the ICE servers and network off, and nothing else of the settings", () => {
+  it("holds the relays, the Iroh relays, the HyperDHT relay, the ICE servers and network off, and nothing else of the settings", () => {
     expect(deviceNetworkOf({ online: true, relays: [], iceServers: [] })).toEqual({});
     expect(deviceNetworkOf({ online: false, ...NETWORK } as never)).toEqual({ off: true, ...NETWORK });
     expect(deviceNetworkOf({ online: true, relays: ["https://a.test"], readRelays: false, iceServers: [] })).toEqual({ relays: ["https://a.test"] });
+    expect(deviceNetworkOf({ online: true, relays: [], iceServers: [], hyperdhtRelay: " " })).toEqual({});
   });
 
   it("is written into the record of a profile with a device set, only when it changed, and never for one with none", async () => {
@@ -101,8 +114,53 @@ describe("a standby's network", () => {
       const pkarr = new MemoryPkarr(DESKTOP_NETWORK);
       const engine = (await standbyEngine(gate, { transport: pkarr.transport(), irohWeb: true, pollIntervals: RELAY_POLL_INTERVALS }))!;
       await engine.start({ gate, show: () => {} });
-      for (let i = 0; i < 20 && !iroh.relays.length; i++) await vi.advanceTimersByTimeAsync(50);
+      await waitFor(() => !!iroh.relays.length && !!hyper.urls.length);
       expect(iroh.relays).toEqual([NETWORK.irohRelays]);
+      const stopping = engine.stop();
+      for (let i = 0; i < 40; i++) await vi.advanceTimersByTimeAsync(100);
+      await stopping;
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("offers HyperDHT on the links through the person's HyperDHT relay where the host runs none, starting it again when the relay did not answer", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "Date"] });
+    try {
+      await standbyRecord(NETWORK);
+      const gate = await openDeviceGate("ghostly");
+      const pkarr = new MemoryPkarr(DESKTOP_NETWORK);
+      const engine = (await standbyEngine(gate, { transport: pkarr.transport(), irohWeb: true, pollIntervals: RELAY_POLL_INTERVALS }))!;
+      await engine.start({ gate, show: () => {} });
+      await waitFor(() => !!hyper.urls.length && !!iroh.relays.length);
+      expect(hyper.urls).toEqual([NETWORK.hyperdhtRelay]);
+      // Neither the relay nor Iroh answered: both are started again in a while, not given up for the life of the link.
+      await vi.advanceTimersByTimeAsync(NATIVE_RETRY_MS);
+      await waitFor(() => hyper.urls.length === 2 && iroh.relays.length === 2);
+      expect(hyper.urls).toEqual([NETWORK.hyperdhtRelay, NETWORK.hyperdhtRelay]);
+      expect(iroh.relays.length).toBe(2);
+      const stopping = engine.stop();
+      for (let i = 0; i < 40; i++) await vi.advanceTimersByTimeAsync(100);
+      await stopping;
+      // Stopped: nothing more is started.
+      await vi.advanceTimersByTimeAsync(NATIVE_RETRY_MAX_MS * 2);
+      expect(hyper.urls.length).toBe(2);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("leaves HyperDHT to the host where it runs its own (the Desktop)", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "Date"] });
+    try {
+      await standbyRecord(NETWORK);
+      const gate = await openDeviceGate("ghostly");
+      const pkarr = new MemoryPkarr(DESKTOP_NETWORK);
+      const own: string[] = [];
+      const engine = (await standbyEngine(gate, {
+        transport: pkarr.transport(), pollIntervals: RELAY_POLL_INTERVALS,
+        nativeTransports: { "hyperdht/1": async (seed: string) => { own.push(seed); throw new Error("No HyperDHT in this test"); } },
+      }))!;
+      await engine.start({ gate, show: () => {} });
+      await waitFor(() => !!own.length);
+      expect(own.length).toBe(1);
+      expect(hyper.urls).toEqual([]);
       const stopping = engine.stop();
       for (let i = 0; i < 40; i++) await vi.advanceTimersByTimeAsync(100);
       await stopping;

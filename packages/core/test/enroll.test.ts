@@ -201,12 +201,12 @@ describe("enroll/1", () => {
   });
 
   it("a grant carries the person's network settings, checked as the device record checks them", () => {
-    const network = { off: true, relays: ["https://r.example"], readRelays: true, irohRelays: ["https://i.example"], iceServers: [{ urls: "turn:t.example", username: "u", credential: "c" }] };
+    const network = { off: true, relays: ["https://r.example"], readRelays: true, irohRelays: ["https://i.example"], hyperdhtRelay: "wss://h.example", iceServers: [{ urls: "turn:t.example", username: "u", credential: "c" }] };
     const frame = enrollGrantFrame({ d: seed("D"), set: [{ key: inviter.publicKey, name: "A" }, { key: joiner.publicKey, name: "B" }], turn: 5, rev: 0, network });
     expect(readEnrollGrant(frame, inviter.publicKey, joiner.publicKey)?.network).toEqual(network);
     // Without one, none; a malformed one refuses the grant.
     expect(readEnrollGrant({ ...frame, net: undefined }, inviter.publicKey, joiner.publicKey)?.network).toBeUndefined();
-    for (const net of [{ relays: "x" }, { relays: Array(17).fill("x") }, { off: "yes" }, { iceServers: [{ urls: 3 }] }, [1]]) {
+    for (const net of [{ relays: "x" }, { relays: Array(17).fill("x") }, { off: "yes" }, { hyperdhtRelay: 7 }, { iceServers: [{ urls: 3 }] }, [1]]) {
       expect(readEnrollGrant({ ...frame, net }, inviter.publicKey, joiner.publicKey)).toBeNull();
     }
   });
