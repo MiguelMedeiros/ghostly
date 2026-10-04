@@ -935,6 +935,37 @@ describe("private groups through the engine", () => {
     expect([keptId, droppedId].map(id => edge(id).options.resume)).toEqual(["webrtc/1", undefined]);
   });
 
+  it("an edge back up after a restart keeps that session's start, so the next restart does not answer an offer from before it", async () => {
+    vi.stubGlobal("RTCPeerConnection", class {});
+    onTestFinished(() => { vi.unstubAllGlobals(); });
+    let { node } = await started();
+    const { groupId } = await node.createGroup({ name: "Plaza" });
+    const state = (await db.getGroups()).find((g) => g.id === groupId)!.community;
+    const edgeId = await node["openEdge"](state as never, createIdentity().pubKeyZ32);
+    const edge = () => links.filter((l) => l.options.params.id === edgeId).at(-1)!;
+    const restart = async () => {
+      await node.shutdown();
+      nodes.splice(nodes.indexOf(node), 1);
+      ({ node } = await started());
+    };
+    edge().options.events.onGroupsSupport(true);
+    await vi.waitFor(async () => expect((await saved(edgeId))?.edgeLiveSince).toBeTypeOf("number"));
+    const first = (await saved(edgeId))!.edgeLiveSince!;
+    await restart();
+    expect(edge().options.resumeFloor).toBe(first);
+    // The member answers the resumed dial (or this app its offer): a session of this run, which began later.
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    edge().options.events.onGroupsSupport(true);
+    await vi.waitFor(async () => expect((await saved(edgeId))?.edgeLiveSince).toBeGreaterThan(first));
+    const second = (await saved(edgeId))!.edgeLiveSince!;
+    // The same session said again changes nothing.
+    edge().options.events.onGroupsSupport(true);
+    await restart();
+    // An offer the member made for that session, before it began, is not answered when the app is back again.
+    expect(edge().options.resumeFloor).toBe(second);
+    expect(edge().options.resume).toBe("webrtc/1");
+  });
+
   // covers: groups.native-links
   describe("native transports on a group's links (WISP 9xx § Transports)", () => {
     const endpoint = () => ({ transport: "iroh/1" as const, descriptor: { id: "ab".repeat(32), relay: "https://relay.test./", addresses: [] },
