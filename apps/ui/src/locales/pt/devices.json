@@ -135,6 +135,9 @@
     "bannerHint": "As mensagens que você escrever esperam até lá.",
     "hint": "Confira sua conexão.",
     "info": "Antes de ficar online, o Ghostly verifica que nenhum outro dispositivo pegou este perfil. Iniciar mesmo assim abre o perfil aqui offline: você pode ler e escrever, e nada é enviado, pago ou recebido até a verificação funcionar. O Ghostly tenta de novo a cada 30 segundos.",
+    "restoreBanner": "Cópia restaurada, offline por enquanto",
+    "restoreBannerHint": "Verificando se o seu perfil está em uso em outro dispositivo.",
+    "restoreInfo": "Este backup foi feito antes de o seu perfil ter outros dispositivos, e o Ghostly não conseguiu verificá-los na restauração. Até conseguir, nada é enviado, pago ou recebido, e nenhum grupo é alterado. Se outro dispositivo estiver usando o seu perfil, esta cópia fica em espera; se nenhum estiver, ela inicia sozinha. O Ghostly tenta de novo a cada 30 segundos.",
     "startAnyway": "Iniciar mesmo assim",
     "title": "Não foi possível verificar qual dispositivo está ativo",
     "tryAgain": "Tentar de novo"

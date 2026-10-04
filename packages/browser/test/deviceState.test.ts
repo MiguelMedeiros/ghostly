@@ -74,6 +74,13 @@ describe("a change of state", () => {
     expect(released).toMatchObject({ state: "standby", turn: 7, rev: 2, releasedTurn: 8, saved: 3 });
   });
 
+  it("a handoff that failed (releasing back to active) leaves no Breez databases to delete after the next one", () => {
+    const names = ["ghostly-breez-regtest-0123456789abcdef"];
+    expect(transition(record("releasing", { breezDatabases: names }), "ghostly", "active", { handoff: undefined }).breezDatabases).toBeUndefined();
+    // The release keeps them: they are deleted once the device is on standby.
+    expect(transition(record("releasing", { breezDatabases: names }), "ghostly", "standby", { releasedTurn: 8 }).breezDatabases).toEqual(names);
+  });
+
   it("refuses an illegal change and says which", () => {
     const refused = (() => { try { transition(record("standby"), "ghostly", "releasing"); } catch (error) { return error; } })();
     expect(refused).toBeInstanceOf(DeviceTransitionError);

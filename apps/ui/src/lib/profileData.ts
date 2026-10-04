@@ -138,6 +138,23 @@ async function walletStorage(dbName: string): Promise<WalletStorage> {
   } finally { db.close(); }
 }
 
+/**
+ * Deletes the wallets' own storage that the profile database `dbName` names (`walletStorage`) and the Breez databases
+ * noted for it, before that database itself goes: never a database or file that a profile on the list still names
+ * (another profile, or this profile's current state after a handoff: a wallet at home on this device keeps its
+ * database's name, WISP 06 § Installing the staged state).
+ */
+export async function dropWalletStorageOf(dbName: string): Promise<void> {
+  const others = await Promise.all(listProfiles().filter((p) => databaseOf(p.id) !== dbName).map((p) => walletStorage(databaseOf(p.id)).catch(() => ({ databases: [], files: [] }))));
+  const usedElsewhere = new Set(others.flatMap((o) => [...o.databases, ...o.files]));
+  const own = await walletStorage(dbName).catch(() => ({ databases: [], files: [] }));
+  // One that cannot go now (open somewhere) does not keep the others.
+  for (const name of new Set(own.databases)) if (!usedElsewhere.has(name)) await drop(name).catch(() => {});
+  for (const name of new Set(own.files)) if (!usedElsewhere.has(name)) await dropFile(name).catch(() => {});
+  // Its Breez databases, as the device's register lists them: each is that profile database's only.
+  await dropBreezDatabasesOf(dbName).catch(() => {});
+}
+
 /** Removes a file of the origin-private file system, if there is one; a platform without it has none to remove. */
 async function dropFile(name: string): Promise<void> {
   if (typeof navigator === "undefined") return;

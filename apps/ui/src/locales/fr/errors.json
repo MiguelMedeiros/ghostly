@@ -47,6 +47,7 @@
     "fedimintRealOnTestnet": "Cette fédération garde du vrai bitcoin : elle va dans un portefeuille Fedimint Mainnet",
     "fedimintTestOnMainnet": "Cette fédération est sur {{chain}}, un réseau de test : elle va dans un portefeuille Fedimint Testnet",
     "feeAboveLimit": "Les frais dépassent votre limite",
+    "groupTurnUnconfirmed": "Impossible de vérifier quel appareil est actif, le groupe n'a donc pas été modifié. Réessayez dans un instant.",
     "hostTimedOut": "{{host}} n’a pas répondu à temps",
     "hostUnreachable": "Impossible de joindre {{host}}",
     "invalidMaxFee": "Frais maximum invalides",

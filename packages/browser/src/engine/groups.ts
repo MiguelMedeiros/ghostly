@@ -35,6 +35,13 @@ export interface GroupsHost {
    * forced takeover or a restore until the person turns on "Manage groups from this device" there. Absent: on.
    */
   adminWork?(groupId: string): boolean;
+  /**
+   * Whether a good turn read under 60 seconds old says this device is the active one (WISP 06 § When a device checks),
+   * before a group commit or door duty: two devices that both think they are active must never commit after one parent.
+   * A stale read is read again, waited for a bounded time; with `wait: false` not at all (the read goes on, and counts
+   * for the next ask). Absent: yes.
+   */
+  adminTurn?(groupId: string, options?: { wait?: boolean }): Promise<boolean>;
   /** Sends a frame on a paired link (a contact chat or an edge). Throws when it cannot. */
   sendOnLink(linkId: string, frame: object): void;
   /** The link is open and both sides announced groups (`version` 2: community groups too). */
@@ -1518,6 +1525,7 @@ export class Groups {
       clock: () => this.now(),
       seqFloor: () => this.host.seqFloor?.() ?? 0,
       adminWork: () => this.host.adminWork?.(state.id) ?? true,
+      adminTurn: () => this.host.adminTurn?.(state.id) ?? Promise.resolve(true),
       save: async next => {
         const group = this.stored.get(state.id);
         if (!group) return;

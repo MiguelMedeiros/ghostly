@@ -1123,6 +1123,8 @@ describe("wallets in a handoff (WISP 06 § Wallets)", () => {
     await w.giver.cancel();
     await until(() => w.activeAgain === 1);
     expect(w.droppedDatabases).toEqual([]);
+    // Nor later: the list goes with the failed handoff, so the next release does not delete what this one meant to.
+    expect(w.giverRecords.record.breezDatabases).toBeUndefined();
   });
 
   it("a released standby that could not delete them tries again when it starts", async () => {

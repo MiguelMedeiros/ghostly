@@ -120,11 +120,15 @@ const conditionsAfter = (read: TurnRead, condition: "seen" | "none"): TurnCondit
 
 /**
  * The turn of a forced takeover (WISP 06 § Forced takeover, § Who may raise the turn): one above the highest of the
- * turn read, the turn stored and the highest turn this device signed a release for. A releaser that released `N + 1`
- * takes over at `N + 2`, so the release its taker holds can never outrank it.
+ * turn read, the turn stored, the highest turn this device signed a release for, and the turn of the highest sequence
+ * it ever saw at the address (the mark). A releaser that released `N + 1` takes over at `N + 2`, so the release its
+ * taker holds can never outrank it. A replaced device whose replacement's record expired ("It wasn't me") takes the
+ * turn above the one that replaced it, which only the mark still holds. A mark above the last ordinary turn (a
+ * tombstone's) names no turn: the write then fails as closed.
  */
-export function takeoverTurn(record: Pick<DeviceRecord, "turn" | "releasedTurn">, read: Pick<TurnRead, "record">): number {
-  const highest = Math.max(read.record?.turn ?? 0, record.turn, record.releasedTurn ?? 0);
+export function takeoverTurn(record: Pick<DeviceRecord, "turn" | "releasedTurn" | "seenSequence">, read: Pick<TurnRead, "record">): number {
+  const seenTurn = Math.floor((record.seenSequence ?? 0) / 2 ** 20);
+  const highest = Math.max(read.record?.turn ?? 0, record.turn, record.releasedTurn ?? 0, seenTurn <= TURN_MAX ? seenTurn : 0);
   if (highest + 1 > TURN_MAX) throw new TurnClosedError();
   return highest + 1;
 }

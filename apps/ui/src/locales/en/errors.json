@@ -47,6 +47,7 @@
     "fedimintRealOnTestnet": "This federation holds real bitcoin: it belongs in a Mainnet Fedimint wallet",
     "fedimintTestOnMainnet": "This federation is on {{chain}}, a test network: it belongs in a Testnet Fedimint wallet",
     "feeAboveLimit": "The fee exceeds your limit",
+    "groupTurnUnconfirmed": "Can't check which device is active, so the group was not changed. Try again in a moment.",
     "hostTimedOut": "{{host}} did not answer in time",
     "hostUnreachable": "Could not reach {{host}}",
     "invalidMaxFee": "Invalid maximum fee",

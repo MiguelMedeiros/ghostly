@@ -47,6 +47,7 @@
     "fedimintRealOnTestnet": "Esta federación guarda bitcoin real: va en una billetera Fedimint de Mainnet",
     "fedimintTestOnMainnet": "Esta federación está en {{chain}}, una red de prueba: va en una billetera Fedimint de Testnet",
     "feeAboveLimit": "La comisión supera tu límite",
+    "groupTurnUnconfirmed": "No se puede comprobar qué dispositivo está activo, así que el grupo no se cambió. Inténtalo de nuevo en un momento.",
     "hostTimedOut": "{{host}} no respondió a tiempo",
     "hostUnreachable": "No se pudo acceder a {{host}}",
     "invalidMaxFee": "Comisión máxima no válida",
