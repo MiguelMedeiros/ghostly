@@ -682,6 +682,10 @@ export class Communities {
       } else if (now - live.lastBeaconTry < BEACON_RETRY_MS) {
         // A publish that just failed (the relays' budget, say) is tried again in a moment, not every tick.
       } else if (now - live.lastBeaconWrite >= COMMUNITY_TOPOLOGY.beaconEveryMs || !live.beacon.some(h => h.key === me)
+        // A hub that is leaving (I hold its signed request, or its leave is committed) is written out at once: a member
+        // with no edge up hears of the leave only from a reading of the beacon that no longer lists it. (Not one the
+        // chain took out: one that lists itself, back after its removal, is told by the hubs that see its entry.)
+        || live.beacon.some(h => h.key !== me && this.gone(live, h.key) && (s.state.pendingLeaves.some(r => r.s === h.key) || this.leftItself(live, h.key)))
         // A load that moved much (or filled up) is said at once, so members stop asking a full hub.
         || (now - live.lastBeaconWrite >= 5_000 && Math.abs(this.beaconLoad(groupId, live, now) - (live.beacon.find(h => h.key === me)?.load ?? load)) >= 8)) {
         // Held back, it does not hold the rest of the tick (knocks, entries, edges) with it.
@@ -751,12 +755,26 @@ export class Communities {
         // Avoided twice as long as it was waited for: with two hubs out of reach, the first is still avoided when the
         // wait for the second ends, and this member then carries itself (`forceHub`).
         const wait = (back || taking || live.replacing?.has(key) ? 3 : listed ? 2 : 1) * this.timings.hubWaitMs;
-        if (now - since > wait) { if (live.hubsUp.has(key)) lost = true; live.hubsAvoided.set(key, now + 2 * wait); live.hubWaits.delete(key); live.hubsUp.delete(key); live.replacing?.delete(key); }
+        // One I never had an edge with that the beacon listed and lists no more (read just now): it left or stepped down,
+        // and the hubs wrote it out. Not waited for: with no edge to it I do not hear its leave, and it never opens its
+        // side (a newcomer let in by the admin waited for it 20 s after the admin had left, 2026-10-03). It is cut off as
+        // after a leave: the hub taken in its place is waited for longer, and it does not step up as a hub meanwhile
+        // (`CUT_OFF_STEP_UP_MS`; on CLI daemons it stepped up two seconds later, a hub with no edge to anyone).
+        const dropped = !live.hubsUp.has(key) && live.beaconAt === now && live.seenHubs.has(key) && !live.beacon.some(h => h.key === key);
+        if (now - since > wait || dropped) { if (live.hubsUp.has(key) || dropped) lost = true; live.hubsAvoided.set(key, now + 2 * wait); live.hubWaits.delete(key); live.hubsUp.delete(key); live.replacing?.delete(key); }
       }
       let kept = live.myHubs.filter(key => (fresh.has(key) || this.recentHub(live, key)) && !live.hubsAvoided.has(key));
       kept = kept.slice(0, COMMUNITY_TOPOLOGY.hubsPerMember);
       const picked = pickHubs(me, others, now, new Set(live.hubsAvoided.keys()));
-      for (const key of picked) if (kept.length < Math.max(1, picked.length) && !kept.includes(key)) { kept.push(key); if (gone.length || lost) { if (!edges.has(key)) live.expect.add(key); (live.replacing ??= new Set()).add(key); } }
+      // With no edge up at all (cut off, or let in and the edge to the door never came up), the next hub's edge looks fast
+      // for that hub's side, which opens when it reads my lobby. At the background pace it looked every half minute, and
+      // found that side up to 30 s after it was there (a newcomer cut off by the admin's leave: 34 s, 2026-10-03).
+      const bare = ![...edges.values()].some(id => this.host.linkReady(id, 2));
+      for (const key of picked) if (kept.length < Math.max(1, picked.length) && !kept.includes(key)) {
+        kept.push(key);
+        if ((gone.length || lost || bare) && !edges.has(key)) live.expect.add(key);
+        if (gone.length || lost) (live.replacing ??= new Set()).add(key);
+      }
       live.myHubs = kept;
       // Every hub I know is full or will not take me: I carry myself, if the beacon has room.
       live.forceHub = !kept.length && others.length < COMMUNITY_TOPOLOGY.maxHubs;
