@@ -4,6 +4,20 @@
 
 <!-- Notes for the next release. A new entry goes in docs/changelog/unreleased/ (one file per change, see docs/changelog/unreleased/README.md), not here: tools/scripts/bump-version.mjs adds those files below at release and turns this heading into the version. Editing a line already here is fine. -->
 
+## 1.1.1
+
+Ghostly 1.1.1 makes adding your phone to a profile easy to find, and shows password errors where you are looking. In 1.1.0 a phone that already had a profile could not reach "Add this device to my profile"; it is now in the profile switcher, in Profile, Devices, and on a new profile's chat list, and scanning the Add a device QR code with the phone's camera opens Ghostly with the code filled in.
+
+Known issues, for the next release: on iPhone the camera opens Safari, not the app on the Home Screen; moving a profile needs both devices online at the same time.
+
+### Fixed
+
+**Everywhere**
+
+- A phone can be added to a profile again. "I already use Ghostly" now shows on a new profile's chat list, where a phone looks, and a phone or computer that already has a profile finds "Add this device to another profile" in the profile menu, the profile list and Profile, Devices. It makes a new profile for the device and leaves yours as they are.
+- The Add a device QR code opens Ghostly when you scan it with your phone's camera, with the code filled in. On iPhone it opens Safari, which asks you to add Ghostly to the Home Screen first. The ghostly.tools page for such a code has Open in Ghostly.
+- Changing, setting or removing the lock password, or typing it in Add a device: a wrong current password, one that is too short or two that differ is now said right under the field, which keeps the focus with its text selected, and in a floating card near the bottom of the screen. Before, it was a line at the top of Settings, out of view.
+
 ## 1.1.0
 
 Ghostly 1.1.0 lets you use one profile on more than one device, makes groups much faster to join and recover, and keeps a file in its place among your messages while a contact is away. Add your desktop, laptop or browser to the same profile (up to 4 devices): one device is active at a time, Use here moves everything to the device in your hand, and a lost device can be taken over or removed. In a private group the fifth person in waits seconds instead of a minute, a member back after a restart is in again within seconds, and a message written while cut off reaches the members let in meanwhile. Communities recover much sooner when a hub or the admin leaves or crashes. A file sent while your contact is away shows in order among your texts. Your own TURN server now reaches Linux desktop calls, and the desktop uses your own Iroh relays.
