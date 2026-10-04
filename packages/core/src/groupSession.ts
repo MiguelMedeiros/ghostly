@@ -1,6 +1,7 @@
 import { fromBase64Url, randomBytes, toBase64Url, utf8Encode } from "./bytes";
 import { identityFromSeedB64, publicKeyFromZ32, sign, verify } from "./identity";
 import { sanitizeNick } from "./text";
+import { EngineError, engineError } from "./engineErrors";
 import {
   GROUP_PROFILE, confirmationMatches, confirmationTag, decryptText, encryptText, epochKeys, newEpochSecret, openSecret, sealSecret,
   type SealedSecret,
@@ -191,6 +192,13 @@ export interface GroupSessionHooks {
    * after one parent halt the group. Absent: true.
    */
   adminWork?(): boolean;
+  /**
+   * Whether a fresh turn read says this device is the active one (WISP 06 § When a device checks), asked before every
+   * commit: two devices that both think they are active would each commit after one parent, and the group halts. No:
+   * a commit the person asked for is refused (`groupTurnUnconfirmed`); an automatic one (a member's leave) is not made
+   * here, and the leave is passed on as a member passes it. Absent: yes.
+   */
+  adminTurn?(): Promise<boolean>;
 }
 
 const MAX_TEXT_BOX = Math.ceil((GROUP_LIMITS.textBytes + 16) * 4 / 3) + 4;
@@ -514,6 +522,7 @@ export class GroupSession {
 
   private async commit(kind: CommitKind, subject: string | undefined, now: number): Promise<{ secret: Uint8Array }> {
     if (this.hooks.adminWork?.() === false) throw new Error(GROUP_ADMIN_OFF_ERROR);
+    if (this.hooks.adminTurn && !(await this.hooks.adminTurn())) throw engineError("groupTurnUnconfirmed");
     if (this.state.chain.length >= MAX_GROUP_CHAIN) throw new Error("This group has reached its membership history limit. Create a new group.");
     const previous = this.top;
     const roster = expectedRoster(previous.m, kind, this.myKey, subject);
@@ -732,7 +741,7 @@ export class GroupSession {
           case "group-secrets": await this.receiveSecrets(raw as GroupSecretsFrame); break;
           case "group-meta": await this.receiveMeta(from, raw); break;
           case "group-bye": await this.receiveBye(from, raw); break;
-          case "group-leave": if (this.isAdmin && this.hooks.adminWork?.() !== false && rosterHas(this.roster, from) && from !== this.myKey) await this.commit("remove", from, Date.now()); break;
+          case "group-leave": if (this.isAdmin && this.hooks.adminWork?.() !== false && rosterHas(this.roster, from) && from !== this.myKey) await this.commitUnlessTurnUnconfirmed("remove", from); break;
         }
         // Removed, the last thing a hub passes on is the commit that says so: it may be the only way the others hear it.
         return this.state.status === "active" ? this.passOn : this.state.status === "removed" ? this.passOn.filter(f => f.t === "group-commit") : [];
@@ -793,8 +802,17 @@ export class GroupSession {
     const bye = { t: "group-bye" as const, g: this.id, k: f.k, e: f.e as number, ts: f.ts as number, sig: f.sig };
     try { if (!verify(fromBase64Url(bye.sig), byeSigned(bye), publicKeyFromZ32(bye.k))) return; } catch { return; }
     // An admin whose admin work is off on this device passes the leave on, as a member does: it commits nothing.
-    if (this.isAdmin && this.hooks.adminWork?.() !== false) { await this.commit("remove", bye.k, Date.now()); return; }
+    if (this.isAdmin && this.hooks.adminWork?.() !== false && (await this.commitUnlessTurnUnconfirmed("remove", bye.k))) return;
     this.took(bye);
+  }
+
+  /**
+   * An automatic commit (a member's leave): made, or not made when no fresh turn read says this device is the active
+   * one (`adminTurn`). Then false, and the caller goes on as a member would. Any other refusal is thrown as before.
+   */
+  private async commitUnlessTurnUnconfirmed(kind: CommitKind, subject: string): Promise<boolean> {
+    try { await this.commit(kind, subject, Date.now()); return true; }
+    catch (error) { if (error instanceof EngineError && error.engineCode === "groupTurnUnconfirmed") return false; throw error; }
   }
 
   /**

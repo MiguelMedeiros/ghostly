@@ -47,6 +47,7 @@
     "fedimintRealOnTestnet": "هذا الاتحاد يحفظ بيتكوين حقيقيًا: مكانه محفظة Fedimint على Mainnet",
     "fedimintTestOnMainnet": "هذا الاتحاد على {{chain}}، وهي شبكة تجريبية: مكانه محفظة Fedimint على Testnet",
     "feeAboveLimit": "الرسوم تتجاوز الحد الذي وضعته",
+    "groupTurnUnconfirmed": "تعذّر التحقق من الجهاز النشط، لذلك لم تتغير المجموعة. حاول مرة أخرى بعد قليل.",
     "hostTimedOut": "لم يردّ {{host}} في الوقت المحدد",
     "hostUnreachable": "تعذّر الوصول إلى {{host}}",
     "invalidMaxFee": "حد أقصى للرسوم غير صالح",
