@@ -559,7 +559,7 @@ One handoff at a time per profile: a second request gets `handoff-busy`.
 | `active` | A request while a call is on, or from a locked-out device | `handoff-busy` | `active` |
 | authorizing | Proof fails | Counts the attempt, notice on screen, `handoff-busy` when the limit is reached | `active` |
 | authorizing | Proof holds; no frame for 60 s | Cancels | `active` |
-| offered (a push) | A new session of the link, or B's hello or `handoff-have` of an earlier attempt | Sends the offer again | offered |
+| offered (a push) | A new session of the link, or B's hello or `handoff-have` of an earlier attempt, or B's hello for this offer on a later session than its first (its request was lost) | Sends the offer again | offered |
 | pass 1 | `handoff-have` | Sends manifest 1 and the files | pass 1 |
 | pass 1 | No confirmed bytes for 1 minute, or the link drops | Pauses; resumes when the link is back | pass 1 |
 | pass 1 | Nothing from B for 2 minutes, the link up or not | Fails as `stalled`: `handoff-cancel` `stalled` when the link lets it, "The move stopped" with Try again (which offers the move again, a push) | `active` |
@@ -577,6 +577,7 @@ One handoff at a time per profile: a second request gets `handoff-busy`.
 | requesting | No session within 30 s | "Can't reach <device>. It must be on, with Ghostly open." Sends a wake push to A when A shared a target | `standby` |
 | requesting | `handoff-busy` | Shows why | `standby` |
 | requesting, receiving or verified | `handoff-offer` from A with another handoff's id | A runs no handoff when it offers one, so the earlier attempt is over there: drops the staged parts of pass 2, keeps the files, shows the offer | `standby` |
+| receiving (a push, no manifest yet) | `handoff-offer` from A with this handoff's id | A never got the request: sends it again on this session, once per session, with this session's stream key | receiving |
 | receiving | Parts | Writes to staging, checks each digest; a bad part is asked again once, then the handoff fails | receiving |
 | receiving | Nothing from A for 2 minutes, the link up or not (either pass) | Fails as `stalled`: `handoff-cancel` `stalled` when the link lets it, "The move stopped" with Try again; keeps the staged files, which the next pull from A within 24 hours does not fetch again | `standby` |
 | receiving | All parts of pass 2 | Verifies, sends `handoff-verified` | verified |

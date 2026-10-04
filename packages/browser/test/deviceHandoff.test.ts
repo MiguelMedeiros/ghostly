@@ -658,6 +658,38 @@ describe("a push", () => {
 });
 
 describe("Try again on the active device after a move that stopped", () => {
+  const FAKE = { toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "Date"] as const, shouldAdvanceTime: true };
+
+  it.each(["dropped", "silent"] as const)("a link cut during the copy (%s) until both say it stopped: Try again on the active device, Use here on the other, and the profile moves", { timeout: 30_000 }, async (how) => {
+    vi.useFakeTimers({ ...FAKE, toFake: [...FAKE.toFake] });
+    const w = world();
+    const files = Array.from({ length: 6 }, (_, i) => w.profile.add(`f${i}`, bytesOf(HANDOFF_PIECE_BYTES * 4 + i)));
+    await w.giver.push(B);
+    await until(() => w.taker.view()?.step === "offer");
+    let pieces = 0, cut = false;
+    w.link.meddle = (_from, frame) => {
+      if (frame.t === "handoff-data" && ++pieces === 6) { cut = true; if (how === "dropped") queueMicrotask(() => w.link.drop()); }
+      return how === "silent" && cut ? null : frame;
+    };
+    await w.taker.accept();
+    await until(() => cut);
+    await vi.advanceTimersByTimeAsync(HANDOFF_TIMINGS.stuckMs + HANDOFF_TIMINGS.stuckMs / 2);
+    await until(() => w.taker.view()?.failure === "stalled" && w.giver.view()?.failure === "stalled");
+    // The link is back; the person presses Try again on the active device, then Use here on the other.
+    w.link.meddle = undefined;
+    if (how === "dropped") w.link.reconnect();
+    await settle();
+    await w.giver.push(B);
+    await until(() => w.taker.view()?.step === "offer");
+    await w.taker.accept();
+    await until(() => w.quiesced.length === 1, 10_000);
+    vi.useRealTimers();
+    await reloadGiver(w);
+    await until(() => w.reloads === 1, 10_000);
+    const staged = w.takerRecords.record.handoff!.staging!;
+    for (const file of files) expect(toBase64Url(sha256(w.storage.spaces.get(staged)!.files.get(file.id)!))).toBe(file.sha256);
+  });
+
   it("reaches a taker that has not seen the earlier move end: the offer takes its place, and the profile moves", async () => {
     const w = world();
     const file = w.profile.add("big", bytesOf(HANDOFF_PIECE_BYTES * 8));
@@ -689,6 +721,44 @@ describe("Try again on the active device after a move that stopped", () => {
     expect(w.giverRecords.record.state).toBe("standby");
     const staged = w.takerRecords.record.handoff!.staging!;
     expect(toBase64Url(sha256(w.storage.spaces.get(staged)!.files.get(file.id)!))).toBe(file.sha256);
+  });
+
+  it("Use here on an offer whose request is lost as the link's session is replaced: the offer again, the request again, and the profile moves", async () => {
+    // The Linux bot, 2026-10-04: after Use here the other device dialled in again, the request went out on the session
+    // that was replaced and was lost; the active device kept "Connecting", the taker waited for the copy, then stalled.
+    const w = world();
+    const file = w.profile.add("f1", bytesOf(HANDOFF_PIECE_BYTES * 3));
+    await w.giver.push(B);
+    await until(() => w.taker.view()?.step === "offer");
+    w.link.meddle = (from, frame) => (from === B && frame.t === "handoff-request" ? null : frame);
+    await w.taker.accept();
+    await until(() => w.link.count("handoff-have", B) > 0);
+    expect(w.giver.view()?.step).toBe("connecting");
+    // A new session in place of that one (the device links say so: `handoffNotices`).
+    w.link.meddle = undefined;
+    w.link.drop();
+    w.link.reconnect();
+    await until(() => w.quiesced.length === 1);
+    await reloadGiver(w);
+    await until(() => w.reloads === 1);
+    const staged = w.takerRecords.record.handoff!.staging!;
+    expect(toBase64Url(sha256(w.storage.spaces.get(staged)!.files.get(file.id)!))).toBe(file.sha256);
+  });
+
+  it("a push that takes longer than a minute is not ended as dropped by the wait of a password proof it never had", { timeout: 30_000 }, async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "Date"], shouldAdvanceTime: true });
+    const w = world();
+    w.profile.add("f1", bytesOf(HANDOFF_PIECE_BYTES * 40));
+    // A slow copy: acknowledgements take their time, and the taker keeps hearing from the giver.
+    let slow = true;
+    w.link.meddle = (_from, frame) => (slow && frame.t === "handoff-ack" ? null : frame);
+    await w.giver.push(B);
+    await until(() => w.taker.view()?.step === "offer");
+    await w.taker.accept();
+    await until(() => w.link.count("handoff-data") > 0);
+    for (let t = 0; t < HANDOFF_TIMINGS.idleMs + 10_000; t += 10_000) await vi.advanceTimersByTimeAsync(10_000);
+    expect(w.taker.view()?.failure).toBeUndefined();
+    slow = false;
   });
 
   it("an offer lost as the link dropped goes again on the new session", async () => {
