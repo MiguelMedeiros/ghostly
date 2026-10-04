@@ -128,6 +128,9 @@
     "bannerHint": "I messaggi che scrivi aspettano fino ad allora.",
     "hint": "Controlla la connessione.",
     "info": "Prima di andare online, Ghostly verifica che nessun altro dispositivo abbia preso questo profilo. Avvia comunque lo apre qui offline: puoi leggere e scrivere, e nulla viene inviato, pagato o ricevuto finché la verifica non funziona. Ghostly riprova ogni 30 secondi.",
+    "restoreBanner": "Copia ripristinata, offline per ora",
+    "restoreBannerHint": "Controllo se il tuo profilo è in uso su un altro dispositivo.",
+    "restoreInfo": "Questo backup è stato fatto prima che il tuo profilo avesse altri dispositivi, e Ghostly non ha potuto verificarli durante il ripristino. Finché non ci riesce, nulla viene inviato, pagato o ricevuto e nessun gruppo viene modificato. Se un altro dispositivo usa il tuo profilo, questa copia va in attesa; altrimenti si avvia da sola. Ghostly riprova ogni 30 secondi.",
     "startAnyway": "Avvia comunque",
     "title": "Impossibile verificare quale dispositivo è attivo",
     "tryAgain": "Riprova"

@@ -2,6 +2,7 @@ import { useEffect, useId, useState, useSyncExternalStore, type ReactNode } from
 import { engine } from "@ghostly/browser/platform/engine";
 import { useI18n } from "../../contexts/I18nContext";
 import { reloadIntoGate } from "../../lib/devices";
+import { activeProfileId, listProfiles } from "../../lib/profiles";
 import { InfoButton } from "../layout/Section";
 import { SCREEN_BUTTON, SCREEN_QUIET } from "./DeviceDialog";
 
@@ -30,6 +31,8 @@ function limitedNow(): Limited {
   if (!state) return null;
   startedLimited ??= !!state.limited;
   if (!state.limited) return null;
+  // A restored copy whose turn is being checked asks nothing: there is nothing to try again, the engine reads by itself.
+  if (state.restoreCheck) return "on";
   return startedLimited && !goneOn ? "ask" : "on";
 }
 
@@ -78,6 +81,48 @@ const BANNER_AFTER_MS = 2_000;
 
 /** Above the chat list while limited mode is on: nothing goes out until Ghostly can check which device is active. */
 export function LimitedBanner() {
+  const restore = useSyncExternalStore(subscribe, () => (engine.state?.limited ? engine.state.restoreCheck ?? null : null));
+  return restore ? <RestoreBanner check={restore} /> : <TurnBanner />;
+}
+
+/**
+ * A copy restored from a backup made before the profile had devices, whose turn could not be read (WISP 06 § A backup
+ * restored where a device set exists): offline until a read says whether another device runs the profile. Why behind
+ * the ⓘ. When the read found that the device set moved after a removal, the person may start it as a profile of its
+ * own, by typing its name, as the restore would have asked.
+ */
+function RestoreBanner({ check }: { check: "checking" | "removed" }) {
+  const { t } = useI18n();
+  const [open, setOpen] = useState(false);
+  const [typed, setTyped] = useState("");
+  const [busy, setBusy] = useState(false);
+  const id = useId();
+  const name = listProfiles().find((profile) => profile.id === activeProfileId())?.name ?? "";
+  const startOwn = () => { setBusy(true); void engine.call("deviceRestoreStartOwn").finally(() => setBusy(false)); };
+  return (
+    <div role="status" data-testid="restore-limited-banner" data-check={check} className="shrink-0 border-b border-border bg-surface px-4 py-2 space-y-2">
+      <div className="flex items-start gap-2.5">
+        <span aria-hidden="true" className="mt-1 h-2 w-2 shrink-0 rounded-full bg-yellow-500" />
+        <p className="m-0 min-w-0 flex-1 text-xs text-text-secondary">
+          <span className="font-semibold text-text-primary">{t("devices.limited.restoreBanner")}</span>
+          <span className="text-text-muted"> · {check === "removed" ? t("devices.restore.tombstone") : t("devices.limited.restoreBannerHint")}</span>
+        </p>
+        <InfoButton open={open} onToggle={() => setOpen(!open)} controls={`${id}-info`} testId="restore-limited-info" />
+      </div>
+      {open && <p id={`${id}-info`} data-testid="restore-limited-text" className="m-0 rounded-lg bg-surface-hover px-3 py-2 text-xs leading-5 text-text-secondary">{t("devices.limited.restoreInfo")}</p>}
+      {check === "removed" && name && (
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <input data-testid="restore-limited-name" className="min-h-11 min-w-0 flex-1 rounded-lg border border-border bg-chat-bg px-3 text-sm text-text-primary" autoComplete="off" spellCheck={false}
+            placeholder={t("devices.restore.tombstoneConfirm", { name })} aria-label={t("devices.restore.tombstoneConfirm", { name })} value={typed} onChange={(e) => setTyped(e.target.value)} />
+          <button type="button" data-testid="restore-limited-own" disabled={busy || typed.trim() !== name.trim()} onClick={startOwn} className={SCREEN_QUIET}>{t("devices.restore.tombstoneGo")}</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Limited mode on an active device that could not read the turn. */
+function TurnBanner() {
   const { t } = useI18n();
   const limited = useLimited() === "on";
   const [shown, setShown] = useState(false);

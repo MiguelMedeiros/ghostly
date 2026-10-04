@@ -6,7 +6,7 @@ import { useI18n } from "../contexts/I18nContext";
 import { backupProtectionOf, isCancelled, openProfileBackup, profileBackupSizes, restoreOpenedBackup, sameIdentityProfiles, writeProfileBackup, type BackupInput, type BackupResult, type BackupSizes, type OpenedProfileBackup } from "../lib/profileBackup";
 import { backUpToFile, byteSize, stageBackup } from "../lib/backupFile";
 import { switchProfile, type ProfileEntry } from "../lib/profiles";
-import { guardRestore, restoreForTakeover, type RestoreGuard } from "../lib/restoreGuard";
+import { guardRestore, markUncheckedRestore, restoreForTakeover, type RestoreGuard } from "../lib/restoreGuard";
 import { Block, Button, Notice, Row, Section, Segmented, input } from "./wallet/ui";
 import { useRun } from "./wallet/run";
 import { useServicesPlatform } from "../hooks/useServicesPlatform";
@@ -121,13 +121,18 @@ export function ProfileBackups({ canSwitch, openBackup = false }: { canSwitch: b
     setFile(picked);
   };
   const needsPassphrase = from === "s3" && s3 ? true : fileProtection === "passphrase";
+  // The bundles whose turn could not be read (`unchecked`): their copy is marked to start in limited mode.
+  const unchecked = useRef(new WeakSet<OpenedProfileBackup>());
   const restore = () => underProgress("restore", true, async (watch) => {
     const bundle: BackupInput | null = from === "file" || !s3 ? file : await s3.get(picked);
     if (!bundle) throw new Error(t("profile.backups.chooseFirst"));
     const opened = await openProfileBackup(bundle, restorePass || undefined, watch);
     // The turn first: a copy of a profile that runs on another device does not start (WISP 06).
     const guard = await guardRestore(opened);
-    if (guard.case !== "plain") { setOwnName(""); setGuarded({ opened, guard }); return; }
+    // A bundle from before the profile had devices whose turn could not be read: restored, and it starts in limited mode
+    // until a read says whether another device runs the profile.
+    if (guard.case !== "plain" && guard.case !== "unchecked") { setOwnName(""); setGuarded({ opened, guard }); return; }
+    if (guard.case === "unchecked") unchecked.current.add(opened);
     await afterGuard(opened, watch);
   });
   /** The rest of a restore once the turn allows it: the same profile on this device, then the restore itself. */
@@ -146,7 +151,7 @@ export function ProfileBackups({ canSwitch, openBackup = false }: { canSwitch: b
   });
   /** `replacing`: the original, which the profile page of the copy then offers to remove, with its usual checks. */
   const finish = async (opened: OpenedProfileBackup, replacing: ProfileEntry | undefined, watch: ReturnType<typeof start>) => {
-    const entry = await restoreOpenedBackup(opened, watch);
+    const entry = await restoreOpenedBackup(opened, watch, unchecked.current.has(opened) ? markUncheckedRestore : undefined);
     setRestorePass(""); setSameDevice(null);
     if (canSwitch) switchProfile(entry.id, { route: replacing ? `/profile?replace=${encodeURIComponent(replacing.id)}` : "/profile" });
     else setDone(t("profile.backups.restored", { name: entry.name }));

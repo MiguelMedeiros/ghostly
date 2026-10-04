@@ -298,6 +298,24 @@ describe("a limited start (WISP 06 § When a device checks)", () => {
     await act(async () => { vi.advanceTimersByTime(2_500); });
     expect(screen.getByTestId("limited-banner")).toHaveTextContent("Messages you write wait until then.");
   });
+
+  it("a restored copy checking its turn asks nothing: the app opens, a line says why it is offline, the reason behind the ⓘ", async () => {
+    fakeEngine.setState({ limited: true, restoreCheck: "checking" });
+    render(<Root />);
+    expect(await screen.findByTestId("sidebar")).toBeInTheDocument();
+    expect(screen.queryByTestId("limited-start")).toBeNull();
+    const line = screen.getByTestId("restore-limited-banner");
+    expect(line).toHaveTextContent("Restored copy, offline for now");
+    expect(line).toHaveTextContent("Checking whether your profile runs on another device.");
+    act(() => screen.getByTestId("restore-limited-info").click());
+    expect(screen.getByTestId("restore-limited-text")).toHaveTextContent("this copy goes on standby; if none does, it starts by itself");
+    // A tombstone: only the person starts it as a profile of its own, by typing its name.
+    act(() => fakeEngine.setState({ limited: true, restoreCheck: "removed" }));
+    expect(screen.getByTestId("restore-limited-banner")).toHaveTextContent("This backup is from before a device was removed.");
+    // The read says no device runs it: limited mode ends and the line goes.
+    act(() => fakeEngine.setState({}));
+    await waitFor(() => expect(screen.queryByTestId("restore-limited-banner")).toBeNull());
+  });
 });
 
 describe("the account switcher", () => {
