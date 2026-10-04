@@ -107,6 +107,20 @@ export function verifyDeviceTransports(value: string, from: string, to: string, 
   } catch { return null; }
 }
 
+/**
+ * The `_tr` value of a signed one, unchecked, or null for anything that is not one: for an enrollment's inviter only,
+ * which has no key to check it against until a joiner authenticated (`GhostLink`, trust on first use). Where to dial,
+ * and nothing more: the session there still authenticates.
+ */
+export function unsignedDeviceTransports(value: string): string | null {
+  try {
+    if (value.length > 1_200) return null;
+    const parsed = JSON.parse(value) as { t?: unknown; d?: unknown; s?: unknown };
+    if (!parsed || typeof parsed !== "object" || typeof parsed.s !== "string" || !SIGNATURE.test(parsed.s)) return null;
+    return JSON.stringify({ t: parsed.t, d: parsed.d });
+  } catch { return null; }
+}
+
 /** What a paired link needs to be a device link: its derived parameters and its pinned, signer-backed pairing. */
 export interface DeviceLinkPairing {
   params: LinkParams;

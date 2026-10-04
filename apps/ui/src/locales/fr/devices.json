@@ -33,6 +33,7 @@
     "typo": "Ce code contient une faute de frappe. Vérifiez-le ou créez-en un nouveau.",
     "unanswered": "Votre autre appareil n’a pas répondu. Vérifiez le code ou créez-en un nouveau.",
     "unreachable": "Impossible de vérifier quel appareil est actif. Vérifiez votre connexion.",
+    "unreached": "Les deux appareils se sont trouvés mais n’ont pas pu se connecter. Gardez-les en ligne et créez un nouveau code.",
     "update": "Une version plus récente de Ghostly a créé ce code. Mettez à jour pour l’utiliser.",
     "used": "Un autre appareil a utilisé ce code en premier. Créez-en un nouveau."
   },

@@ -80,15 +80,19 @@ export class Running {
   }
 }
 
-/** A Pkarr relay in this process (as e2e/support/relay.ts): the newest signed packet per key. */
-export async function localRelay(): Promise<{ url: string; server: Server; largest: Map<string, number> }> {
+/**
+ * A Pkarr relay in this process (as e2e/support/relay.ts): the newest signed packet per key. `delayMs`: how long it
+ * takes to answer each request, as a public relay that asks its DHT does.
+ */
+export async function localRelay(delayMs = 0): Promise<{ url: string; server: Server; largest: Map<string, number> }> {
   const packets = new Map<string, Buffer>();
   /** The largest packet each key published, in bytes (its signature and timestamp included). */
   const largest = new Map<string, number>();
   const server = createServer((request, response) => {
     const chunks: Buffer[] = [];
     request.on("data", (c: Buffer) => chunks.push(c));
-    request.on("end", () => {
+    request.on("end", async () => {
+      if (delayMs) await new Promise((r) => setTimeout(r, delayMs));
       const key = new URL(request.url ?? "/", "http://relay").pathname.slice(1);
       if (request.method === "PUT") {
         const body = Buffer.concat(chunks), known = packets.get(key);
