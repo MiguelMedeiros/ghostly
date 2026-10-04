@@ -10,6 +10,7 @@
   "iroh": "Relay Iroh",
   "irohHint": "Usati quando WebRTC non si connette. Uno per riga, al massimo quattro.",
   "irohInfo": "Un browser non può inviare i pacchetti UDP che usa Iroh, quindi qui le chat Iroh passano da un relay. Vede quali dispositivi parlano e quando, mai cosa dicono: la connessione è cifrata end-to-end.",
+  "irohInfoDirect": "Iroh collega i tuoi dispositivi direttamente quando può, e tramite uno di questi relay quando non può. Un relay vede quali dispositivi parlano e quando, mai cosa dicono: la connessione è cifrata end-to-end.",
   "pushRelay": "Relay push (facoltativo)",
   "pushRelayHint": "Per svegliare i contatti da un browser. Vuoto: nessuno.",
   "pushRelayInfo": "Una pagina del browser non può inviare da sola a un servizio push. Un relay scelto da te invia la sveglia al suo posto, già cifrata: sa quando hai svegliato qualcuno e il tuo indirizzo IP, mai cosa hai scritto. Ghostly non ne gestisce nessuno. Desktop e la riga di comando non ne hanno bisogno.",
