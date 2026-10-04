@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo } from "react";
 import { useLocation, useNavigate, type NavigateFunction } from "react-router-dom";
 import {
-  HOME, conversationTarget, hasParent, homeTarget, openTarget, openUnderTarget, placeTarget, plan, readNav, stackOf, upTarget, userState,
+  HOME, anchorTarget, conversationTarget, hasParent, homeTarget, openTarget, openUnderTarget, placeTarget, plan, readNav, stackOf, upTarget, userState,
   type NavEntry, type NavPlan,
 } from "../lib/navigation";
 
@@ -64,7 +64,7 @@ export function useAppNavigation() {
  * An entry that says nothing about what is under it — the app opened on a deep link (`#/chat/…`,
  * `#/group/…`, `#/wallet`), an address typed in, the page a profile switch reloads on — gets home put
  * under it, so its Back and the browser's lead home rather than out of the app. Addresses the intakes
- * rewrite (an invite's keys, a group link) are left to them. Mounted once, inside the router.
+ * rewrite (an invite's keys, a group link) are left to them. A section of Settings gets Settings under it too. Mounted once, inside the router.
  */
 export function useAnchorHome(isIntake: (pathname: string) => boolean) {
   const navigate = useNavigate();
@@ -74,7 +74,7 @@ export function useAnchorHome(isIntake: (pathname: string) => boolean) {
     if (pathname === HOME && typeof window !== "undefined" && !window.location.hash) { void navigate(HOME, { replace: true, state }); return; }
     if (pathname === HOME || readNav(state) || isIntake(pathname)) return;
     const stack = stackOf(pathname, state);
-    execute(navigate, key, plan(stack, [{ path: HOME }, { path: pathname }], userState(state)));
+    execute(navigate, key, plan(stack, anchorTarget(pathname), userState(state)));
     // eslint-disable-next-line react-hooks/exhaustive-deps -- once per entry
   }, [key]);
 }

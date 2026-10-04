@@ -1,7 +1,5 @@
 {
   "about": "アプリについて",
-  "advanced": "詳細設定",
-  "advancedHint": "ネットワーク、リレー、ドメインの照会",
   "appearance": "外観",
   "changePassword": "パスワードを変更",
   "chatListDensities": {
@@ -88,6 +86,8 @@
     "testSound": "音をテスト",
     "title": "オーディオとビデオ"
   },
+  "mediaHint": "マイク、カメラ、スピーカー",
+  "networkHint": "リレー、TURN、ドメインの照会",
   "newPassword": "新しいパスワード",
   "nicknamePlaceholder": "ニックネームを入力...",
   "noticesDenied": "ブロックされています。端末またはブラウザの設定で許可してください。",
@@ -102,6 +102,7 @@
   "notificationSounds": "サウンド",
   "notificationSoundsDescription": "メッセージ、通話、確定した支払い",
   "notifications": "通知",
+  "notificationsHint": "サウンドと通知",
   "password": "パスワード",
   "passwordChanged": "パスワードを変更しました",
   "passwordEdit": "変更",
@@ -112,6 +113,7 @@
   "passwordRemoved": "パスワードを削除しました",
   "passwordSet": "パスワードを設定しました",
   "passwordTooShort": "パスワードは4文字以上必要です",
+  "privacyHint": "画面ロック、リンクのプレビュー、入力中の表示",
   "privateNotice": "新しいメッセージ",
   "profile": "プロフィール",
   "profileLinkHint": "名前、写真、バックアップ、ほかのプロフィール",
@@ -127,6 +129,8 @@
   "reduceMotion": "視差効果を減らす",
   "reduceMotionHint": "アニメーションを減らします。システムの設定は常に反映されます。",
   "removePassword": "パスワードを削除",
+  "search": "設定を検索",
+  "searchEmpty": "一致する設定はありません",
   "security": "プライバシーとセキュリティ",
   "sendTyping": "入力中の表示を送信",
   "sendTypingHint": "入力中であることが連絡先に表示されます。オフでも相手の表示は見えます。",
