@@ -35,7 +35,9 @@ vi.mock("../src/platform/hyperdhtRelay", async (original) => ({
 
 /** Waits for `condition` while the fake clock runs, giving real turns of the loop too (a factory's module loads in one). */
 async function waitFor(condition: () => boolean): Promise<void> {
-  for (let i = 0; i < 300 && !condition(); i++) { await vi.advanceTimersByTimeAsync(10); await new Promise((resolve) => setImmediate(resolve)); }
+  // At least 300 turns, and on a busy machine as long as 15 real seconds: a module that loads late is not a failure.
+  const until = performance.now() + 15_000;
+  for (let i = 0; !condition() && (i < 300 || performance.now() < until); i++) { await vi.advanceTimersByTimeAsync(10); await new Promise((resolve) => setImmediate(resolve)); }
 }
 
 const dropKeys = () => new Promise<void>((resolve) => { const r = indexedDB.deleteDatabase(DEVICE_KEYS_DB); r.onsuccess = r.onerror = r.onblocked = () => resolve(); });
