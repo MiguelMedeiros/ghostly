@@ -49,6 +49,8 @@ import type { HandoffTakerFacts } from "./handoffWallets";
 export const STOPPED_STEP = "stopped:";
 /** The failures of pass 2 that the screen shows again after the reload. */
 const SHOWN_AFTER_RELOAD = new Set<HandoffFailure>(["stalled", "dropped", "damaged", "cancelled"]);
+/** A take the taker's settle wait gave up waiting for. */
+const NO_ANSWER: unique symbol = Symbol("no answer");
 
 /** Why a handoff did not happen, as the screens say it. */
 export type HandoffFailure =
@@ -925,9 +927,6 @@ export class HandoffGiver {
 // -- the taker ------------------------------------------------------------------------------------------------------
 
 type TakerPhase = "idle" | "offer" | "connecting" | "authorizing" | "receiving" | "verified" | "installing" | "settling" | "unsettled" | "done" | "failed";
-
-/** A take the settle wait gave up waiting for. */
-const NO_ANSWER: unique symbol = Symbol("no answer");
 
 /** The states that take a handoff: a standby, and a replaced device ("Use here", WISP 06 § States and events). */
 const takes = (state: DeviceRecord["state"]): boolean => state === "standby" || state === "superseded";
