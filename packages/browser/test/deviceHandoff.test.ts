@@ -7,7 +7,7 @@ import {
 } from "@ghostly/core";
 import { amend, firstRecord, transition, type DevicePatch, type DeviceRecord, type StoredDeviceState } from "../src/devices/state";
 import {
-  HandoffGiver, HandoffTaker, STALLED_STEP, WOKEN_CONNECT_MS, type GiverPorts, type HandoffFile, type HandoffLinks, type HandoffRecords, type HandoffSelf, type HandoffSource,
+  HandoffGiver, HandoffTaker, STOPPED_STEP, WOKEN_CONNECT_MS, type GiverPorts, type HandoffFile, type HandoffLinks, type HandoffRecords, type HandoffSelf, type HandoffSource,
   type BusyReport, type HandoffStaging, type HandoffStagingHost, type HandoffStay, type HandoffView, type LocalBusy, type TakerPorts,
 } from "../src/devices/handoff";
 import { makeHandoffVerifier, type HandoffVerifier } from "../src/devices/handoffPake";
@@ -204,7 +204,7 @@ function world(options: { verifier?: boolean } = {}): World {
         // As device-link-only mode does (`handoffStandby.ts`): a copy that stopped leaves a note for the screen after the reload.
         backToActive: async (stopped) => {
           w.activeAgain += 1;
-          if (w.giverRecords.record.state === "releasing") await w.giverRecords.move("active", { handoff: stopped ? { role: "releasing", step: STALLED_STEP, peer: stopped.peer, at: Date.now() } : undefined });
+          if (w.giverRecords.record.state === "releasing") await w.giverRecords.move("active", { handoff: stopped ? { role: "releasing", step: `${STOPPED_STEP}${stopped.failure}`, peer: stopped.peer, at: Date.now() } : undefined });
         },
         dropDatabases: async (names: string[]) => { w.droppedDatabases.push(names); },
       } : {}),
@@ -512,7 +512,11 @@ describe("a copy that stops (WISP 06 § States and events)", () => {
     await w.taker.pull(PASSWORD);
     await until(() => silent);
     expect(w.taker.view()?.step).toBe("copying");
-    await vi.advanceTimersByTimeAsync(HANDOFF_TIMINGS.stuckMs + HANDOFF_TIMINGS.stuckMs / 4);
+    // The link's own traffic (an active device's turn hint every 30 s) is not the giver being there.
+    for (let t = 0; t < HANDOFF_TIMINGS.stuckMs + HANDOFF_TIMINGS.stuckMs / 4; t += 30_000) {
+      void w.taker.receive(A, { t: "device-turn" });
+      await vi.advanceTimersByTimeAsync(30_000);
+    }
     await until(() => w.taker.view()?.step === "failed" && w.giver.view()?.step === "failed");
     expect(w.taker.view()!.failure).toBe("stalled");
     // The taker told the giver, which says the same.
@@ -565,6 +569,30 @@ describe("a copy that stops (WISP 06 § States and events)", () => {
     await vi.advanceTimersByTimeAsync(HANDOFF_TIMINGS.idleMs * 2);
     await until(() => w.quiesced.length === 1, 10_000);
     expect(w.taker.view()?.failure).toBeUndefined();
+  });
+
+  it("pass 2 with the link gone: the giver is active again by its own wait, and says why after its reload", async () => {
+    vi.useFakeTimers({ ...FAKE, toFake: [...FAKE.toFake] });
+    const w = world();
+    w.profile.add("f1", bytesOf(HANDOFF_PIECE_BYTES * 3));
+    await w.taker.pull(PASSWORD);
+    await until(() => w.quiesced.length === 1);
+    w.giver.stop();
+    w.link.drop();
+    w.giver = w.makeGiver("gated");
+    await w.giver.resume();
+    // The link never comes back.
+    await vi.advanceTimersByTimeAsync(HANDOFF_TIMINGS.stuckMs + HANDOFF_TIMINGS.stuckMs / 4);
+    await until(() => w.activeAgain === 1 && w.taker.view()?.step === "failed");
+    expect(w.taker.view()!.failure).toBe("stalled");
+    expect(w.giverRecords.record.state).toBe("active");
+    w.giver.stop();
+    w.giver = w.makeGiver("active");
+    await w.giver.resume();
+    // Its own wait for the taker and the wait for a copy that stopped end together: either says why.
+    expect(w.giver.view()).toMatchObject({ step: "failed", key: B });
+    expect(["dropped", "stalled"]).toContain(w.giver.view()!.failure);
+    expect(w.giverRecords.record.handoff).toBeUndefined();
   });
 
   it("pass 2 stops: the giver is the active device again and says so after its reload; the taker says so too", async () => {

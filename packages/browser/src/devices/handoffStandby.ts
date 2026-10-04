@@ -1,6 +1,6 @@
 import { HANDOFF_PAKE, turnKeys, type DeviceFrame, type TurnRelease } from "@ghostly/core";
 import { viewOf, type DeviceGateView } from "./gate";
-import { HandoffGiver, HandoffTaker, STALLED_STEP, type HandoffLinks, type HandoffRecords } from "./handoff";
+import { HandoffGiver, HandoffTaker, STOPPED_STEP, type HandoffLinks, type HandoffRecords } from "./handoff";
 import { handoffProfileHost, handoffSelf, type HandoffProfileHost } from "./handoffHost";
 import type { DeviceHandoffHandler, DeviceLinks } from "./links";
 import { deviceIdentity } from "./setup";
@@ -106,10 +106,10 @@ export async function standbyHandoff(options: StandbyHandoffOptions): Promise<De
     busy: async () => null,
     dropDatabases: (names) => dropBreezDatabases(names),
     backToActive: async (stopped) => {
-      // It never signed a release: it is the active device again, and starts as one. A copy that stopped leaves a note,
-      // so the screen says so after the reload (`HandoffGiver.resume`).
+      // It never signed a release: it is the active device again, and starts as one. A pass 2 that stopped leaves a
+      // note, so the screen says why after the reload (`HandoffGiver.resume`).
       const now = await readDeviceRecord(options.profile);
-      const note = stopped ? { role: "releasing" as const, step: STALLED_STEP, peer: stopped.peer, at: Date.now() } : undefined;
+      const note = stopped ? { role: "releasing" as const, step: `${STOPPED_STEP}${stopped.failure}`, peer: stopped.peer, at: Date.now() } : undefined;
       if (now?.state === "releasing") await moveDevice(options.profile, "active", { handoff: note });
       options.show({ state: "releasing", reload: true });
     },

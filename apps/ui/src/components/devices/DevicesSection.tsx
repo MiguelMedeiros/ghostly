@@ -16,7 +16,7 @@ import { FAILURES, dayText, useHandoffView, walletNameOf } from "../../lib/hando
 /** The refusals that come from this device's wallets (WISP 06 § Wallets). */
 const WALLET_REFUSALS = new Set<string>(["wallet", "loading", "mainnet", "expiry"]);
 /** A move that stopped on the way, with the profile still here: Try again moves it. */
-const STOPPED = new Set<string>(["stalled", "dropped"]);
+const STOPPED = new Set<string>(["stalled", "dropped", "damaged"]);
 
 type Device = DeviceSetView["devices"][number];
 

@@ -563,7 +563,7 @@ One handoff at a time per profile: a second request gets `handoff-busy`.
 | pass 1 | Nothing from B for 2 minutes, the link up or not | Fails as `stalled`: `handoff-cancel` `stalled` when the link lets it, "The move stopped" with Try again (which offers the move again, a push) | `active` |
 | pass 1 | All files confirmed | Tries to quiesce; if a payment runs, waits up to 30 s, then `handoff-busy` `payment` | quiescing or pass 1 |
 | quiescing | Database frozen | Writes the index of files left for later and the Breez database's name beside the device state, writes `releasing`, reloads into the gate, opens the database read-only, sends manifest 2 and the parts | pass 2 |
-| pass 2 | The link drops, nothing from B for 2 minutes before every part is confirmed, or no `handoff-verified` within 10 minutes of the last part | Writes `active`, reloads, starts; after a copy that stopped, says so once it runs again | `active` |
+| pass 2 | The link drops, nothing from B for 2 minutes before every part is confirmed, or no `handoff-verified` within 10 minutes of the last part | Writes `active`, reloads, starts, and says why once it runs again | `active` |
 | pass 2 | `handoff-verified` with a valid signature and the same `H` | Writes `standby` durably, sends `handoff-release` | `standby` |
 | `standby` (just released) | `handoff-request` again from B with the same turn | Sends the same release again | `standby` |
 | `standby` | `handoff-done` | Deletes its Breez database by the name it noted at quiesce; touches nothing in the frozen copy | `standby` |

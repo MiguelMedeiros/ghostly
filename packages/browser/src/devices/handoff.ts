@@ -41,8 +41,13 @@ import type { HandoffTakerFacts } from "./handoffWallets";
  * `mine`.
  */
 
-/** The step a giver's record notes when pass 2 stopped and it went back to active: its screen says so after the reload. */
-export const STALLED_STEP = "stalled";
+/**
+ * The step a giver's record notes, before the failure's name, when pass 2 stopped and it went back to active
+ * (`stopped:stalled`): its screen says so after the reload.
+ */
+export const STOPPED_STEP = "stopped:";
+/** The failures of pass 2 that the screen shows again after the reload. */
+const SHOWN_AFTER_RELOAD = new Set<HandoffFailure>(["stalled", "dropped", "damaged", "cancelled"]);
 
 /** Why a handoff did not happen, as the screens say it. */
 export type HandoffFailure =
@@ -202,7 +207,7 @@ export interface GiverPorts extends Common {
    */
   dropDatabases?(names: string[]): Promise<void>;
   /** Pass 2 failed or was cancelled: the device writes `active` and starts again (device-link-only mode). */
-  backToActive?(stopped?: { failure: "stalled"; peer: string }): Promise<void>;
+  backToActive?(stopped?: { failure: HandoffFailure; peer: string }): Promise<void>;
   /** A notice on this device: a pull with a wrong password. */
   notice?(kind: "wrong-password", device: string): void;
 }
@@ -390,9 +395,10 @@ export class HandoffGiver {
     // A standby that released and could not delete the Breez databases of the wallets that moved tries again.
     if (record?.state === "standby" && record.breezDatabases?.length) await this.dropBreez();
     const handoff = record?.handoff;
-    // Back to active after pass 2 stopped (`stalled`): the screen says so once, and the note goes.
-    if (record?.state === "active" && handoff?.role === "releasing" && handoff.step === STALLED_STEP && handoff.peer) {
-      this.peer = handoff.peer; this.deviceName = name(record, handoff.peer); this.failure = "stalled"; this.phase = "idle";
+    // Back to active after pass 2 stopped: the screen says why once, and the note goes.
+    if (record?.state === "active" && handoff?.role === "releasing" && handoff.step.startsWith(STOPPED_STEP) && handoff.peer) {
+      const failure = handoff.step.slice(STOPPED_STEP.length) as HandoffFailure;
+      this.peer = handoff.peer; this.deviceName = name(record, handoff.peer); this.failure = SHOWN_AFTER_RELOAD.has(failure) ? failure : "dropped"; this.phase = "idle";
       await this.ports.records.amend({ handoff: undefined }).catch(() => {});
       this.changed();
       return;
@@ -563,7 +569,8 @@ export class HandoffGiver {
 
   private async handle(from: string, frame: DeviceFrame): Promise<void> {
     if (this.stopped) return;
-    if (from === this.peer) this.heardAt = this.now();
+    // Only this handoff's own frames count as the taker being there.
+    if (from === this.peer && frame.t.startsWith("handoff-")) this.heardAt = this.now();
     switch (frame.t) {
       case HANDOFF_HELLO: return this.onHello(from, frame);
       case HANDOFF_REQUEST: return this.onRequest(from, frame);
@@ -830,7 +837,7 @@ export class HandoffGiver {
     this.phase = "failed";
     this.failure ??= "dropped";
     this.changed();
-    await this.ports.backToActive?.(this.failure === "stalled" && this.peer ? { failure: "stalled", peer: this.peer } : undefined);
+    await this.ports.backToActive?.(this.peer && SHOWN_AFTER_RELOAD.has(this.failure) ? { failure: this.failure, peer: this.peer } : undefined);
   }
 
   private begin(key: string, id: string, record: DeviceRecord): void {
@@ -1067,7 +1074,8 @@ export class HandoffTaker {
 
   private async handle(from: string, frame: DeviceFrame): Promise<void> {
     if (this.stopped) return;
-    if (from === this.peer) this.heardAt = this.now();
+    // Only this handoff's own frames count as the giver being there.
+    if (from === this.peer && frame.t.startsWith("handoff-")) this.heardAt = this.now();
     switch (frame.t) {
       case HANDOFF_OFFER: {
         const offer = readHandoffTurnFrame(frame);
