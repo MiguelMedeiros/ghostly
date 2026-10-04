@@ -13,6 +13,7 @@ What Ghostly does today, in one list. Each part has its own guide: [Chat](CHAT.m
 - Scrolled up, a new message stays put and a ↓ pill counts it. A long chat opens at once on its last messages.
 - Voice and video calls, with screen sharing inside the call (not yet on Linux Desktop, which calls with its own media: WebKitGTK has no WebRTC). Choose the microphone, camera and speaker in Settings → Audio & video, or during a call.
 - Your own TURN server (Settings → Advanced → Network) for networks that let no direct path through, for chats and calls, Linux Desktop calls included. Backups leave its credential out.
+- Your own Iroh relays in the same place, used by the web app, the extension and Desktop alike, so a browser and a Desktop on a self-hosted relay find each other.
 - Private groups of up to 32 (through hubs past 16) and communities of up to 256, joined by a link.
 
 More: [Chat](CHAT.md).
