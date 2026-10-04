@@ -485,12 +485,24 @@ export class HandoffGiver {
       this.stays = await this.ports.staying?.(this.takerFacts(key)).catch(() => []) ?? [];
       this.phase = "offered";
       const files = await this.ports.source.files();
-      const bytes = fileParts(files).reduce((sum, part) => sum + part[1], 0);
-      this.out(handoffOfferFrame(this.turn, this.id!, bytes));
+      this.offerBytes = fileParts(files).reduce((sum, part) => sum + part[1], 0);
+      this.offer();
       this.arm(HANDOFF_TIMINGS.idleMs * 5, () => this.fail("cancelled", "timeout"));
       this.changed();
       return this.view();
     });
+  }
+
+  /** About this many bytes: what the offer of a push says, sent again as it is. */
+  private offerBytes = 0;
+
+  /**
+   * The offer of a push, sent at Move to and again while no answer came: on each new session of the link (the first
+   * may have gone out as the link dropped), and when the taker shows it still runs an earlier attempt (its hello names
+   * another handoff, or it says what it holds). A taker in that state gives the earlier attempt up for this one.
+   */
+  private offer(): void {
+    if (this.phase === "offered" && this.id) this.out(handoffOfferFrame(this.turn, this.id, this.offerBytes));
   }
 
   /** Cancel: before quiesce nothing changed; in pass 2 the device is active again. Never once the release is signed. */
@@ -529,6 +541,8 @@ export class HandoffGiver {
         const session = this.sessionFor(key);
         if (session) this.sendHello(key, session);
       }
+      // An offer not answered yet goes again on the new session.
+      this.offer();
     });
   }
 
@@ -583,8 +597,12 @@ export class HandoffGiver {
         return;
       }
       case HANDOFF_VERIFIED: return this.onVerified(from, frame);
+      case HANDOFF_OFFER:
       case HANDOFF_DONE: {
-        if (from !== this.peer || readHandoffDone(frame) === null || this.phase !== "released") return;
+        // The device this one released to offers the profile back: it took the turn, so its `handoff-done` was lost
+        // (it is sent just before that device reloads). The same as the done.
+        if (from !== this.peer || this.phase !== "released") return;
+        if (frame.t === HANDOFF_DONE ? readHandoffDone(frame) === null : readHandoffTurnFrame(frame) === null) return;
         await this.dropBreez();
         await this.ports.records.amend({ handoff: undefined });
         this.phase = "idle"; this.peer = null;
@@ -610,6 +628,8 @@ export class HandoffGiver {
     if (!hello || !session) return;
     session.peer = hello;
     this.sendHello(from, session);
+    // The taker still runs an earlier attempt with this device: the offer again, which it takes in place of that one.
+    if (from === this.peer && hello.id !== this.id) this.offer();
     // The same handoff in a new session: its key comes from the first session's.
     if (from === this.peer && hello.id === this.id && this.secret && (this.phase === "pass1" || this.phase === "pass2")) {
       session.key = handoffStreamKey(session.ephemeral.secret, fromBase64Url(hello.e), this.secret, session.transcript);
@@ -712,6 +732,8 @@ export class HandoffGiver {
     if (!have) return;
     // The handoff this belongs to is over here (this device went back to active): the taker is told, and stops.
     if (this.phase === "idle" || this.phase === "failed") { this.out(handoffCancelFrame("cancelled"), from); return; }
+    // An earlier attempt the taker did not see end, while this device offers a new one: the offer again.
+    if (this.phase === "offered") { if (from === this.peer && !have.more) this.offer(); return; }
     if (from !== this.peer || (this.phase !== "pass1" && this.phase !== "pass2")) return;
     this.haveBuffer.d.push(...have.d);
     Object.assign(this.haveBuffer.p, have.p);
@@ -924,6 +946,9 @@ export class HandoffGiver {
 
 type TakerPhase = "idle" | "offer" | "connecting" | "authorizing" | "receiving" | "verified" | "installing" | "settling" | "done" | "failed";
 
+/** A taker's phases of a handoff that has no release yet: an offer may still take their place. */
+const BEFORE_RELEASE = new Set<TakerPhase>(["connecting", "authorizing", "receiving", "verified"]);
+
 /** The states that take a handoff: a standby, and a replaced device ("Use here", WISP 06 § States and events). */
 const takes = (state: DeviceRecord["state"]): boolean => state === "standby" || state === "superseded";
 
@@ -1097,10 +1122,16 @@ export class HandoffTaker {
     switch (frame.t) {
       case HANDOFF_OFFER: {
         const offer = readHandoffTurnFrame(frame);
-        if (!offer || offer.bytes === undefined || (this.phase !== "idle" && this.phase !== "failed" && this.phase !== "offer")) return;
+        if (!offer || offer.bytes === undefined) return;
+        // A new offer from the device this one was in a handoff with, before any release: that device is active and
+        // runs no handoff (it offers only then), so the earlier attempt is over there, whether or not this device
+        // saw it end (a copy the giver saw stop first, a cancel lost with the link). This one takes its place.
+        const earlier = from === this.peer && offer.id !== this.id && BEFORE_RELEASE.has(this.phase);
+        if (!earlier && this.phase !== "idle" && this.phase !== "failed" && this.phase !== "offer") return;
         const record = await this.ports.records.read();
         // Only from the device the record names active.
         if (!record || record.activeSlot === undefined || record.deviceSet[record.activeSlot]?.key !== from || !takes(record.state)) return;
+        if (earlier) await this.end();
         this.peer = from; this.id = offer.id; this.offerBytes = offer.bytes; this.deviceName = name(record, from); this.failure = undefined;
         this.phase = "offer";
         this.changed();
@@ -1495,15 +1526,20 @@ export class HandoffTaker {
 
   /** The handoff ended without a release: the staged parts of pass 2 go, the staged files stay for a later try. */
   private async giveUp(failure: HandoffFailure): Promise<void> {
+    await this.end();
+    this.failure = failure;
+    this.changed();
+  }
+
+  /** What ending a handoff before its release leaves: no timers, nothing of pass 2, the record's note stopped. */
+  private async end(): Promise<void> {
     if (this.timer) clearTimeout(this.timer);
     clearInterval(this.idleTimer);
     this.phase = "idle";
-    this.failure = failure;
-    this.pake = null; this.bundle = null; this.incoming.clear();
+    this.pake = null; this.bundle = null; this.incoming.clear(); this.manifestBuffer = { parts: [], later: [], ids: {} };
     await this.staging?.dropRest().catch(() => {});
     const record = await this.ports.records.read().catch(() => null);
     if (record?.handoff?.role === "taking" && takes(record.state)) await this.ports.records.amend({ handoff: { ...record.handoff, step: "stopped", secret: undefined } }).catch(() => {});
-    this.changed();
   }
 
   private arm(ms: number, then: () => void | Promise<void>): void {
