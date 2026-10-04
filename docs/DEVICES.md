@@ -13,7 +13,7 @@ It works in the web app (installed on a phone too), the browser extension and th
 
 The new device is now on standby, and it offers to bring the profile over at once. Up to 4 devices per profile.
 
-On iPhone and iPad, add Ghostly to the Home Screen first: a Safari tab keeps its own storage, which the browser may clear. Elsewhere, Ghostly asks the browser to keep its data and says so when it does not.
+On iPhone and iPad, add Ghostly to the Home Screen first: a browser tab keeps its own storage, which the browser may clear. Elsewhere, Ghostly asks the browser to keep its data and says so when it does not.
 
 ## Move the profile
 
