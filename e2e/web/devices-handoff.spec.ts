@@ -124,6 +124,78 @@ test("a push: Move to on the active device, Use here on the other; and a wrong p
   await expect(chat(contact).getByText("pushed here")).toBeVisible({ timeout: 180_000 });
 });
 
+test("moved there and back: the device that has the profile again talks to the contact at once", { tag: ["@feature:devices.handoff"] }, async ({ peer }) => {
+  test.setTimeout(12 * 60_000);
+  const [desktop, phone, contact] = await Promise.all([peer("desktop"), peer("phone"), peer("contact", traced)]);
+  const lines = traceLines(contact);
+  await link(desktop, contact);
+  await connect(desktop, contact);
+  await enrollDevice(desktop, phone);
+  /** Move to `to` from the active device `from`, and wait until `to` runs the profile. */
+  const move = async (from: Peer, to: Peer) => {
+    await from.page.goto("/#/profile");
+    const row = from.page.getByTestId("device-row").filter({ hasNotText: "This device" });
+    await expect(row.getByTestId("device-link-status")).toHaveAttribute("data-status", "live", { timeout: 120_000 });
+    await row.getByTestId("device-move").click();
+    await expect(to.page.getByTestId("handoff-offer")).toBeVisible({ timeout: 60_000 });
+    await to.page.getByTestId("handoff-accept").click();
+    await untilShown(to.page, to.page.getByTitle("New Chat"), { timeout: 400_000 });
+    await untilShown(from.page, from.page.getByTestId("device-standby").and(from.page.locator("[data-state=standby]")));
+  };
+  await move(desktop, phone);
+  await openTheChat(phone);
+  await say(phone, "from the phone");
+  await expect(chat(contact).getByText("from the phone")).toBeVisible({ timeout: 180_000 });
+  // And back: the desktop takes the profile again, and its first message reaches the contact.
+  await move(phone, desktop);
+  const back = Date.now();
+  await desktop.page.goto("/#/");
+  await untilShown(desktop.page, desktop.page.getByTestId("sidebar").getByTestId("chat-row").first());
+  await openTheChat(desktop);
+  await say(desktop, "back on the desktop");
+  await expect(chat(contact).getByText("back on the desktop")).toBeVisible({ timeout: 180_000 });
+  test.info().annotations.push({ type: "measure", description: JSON.stringify({ firstMessageBackMs: Date.now() - back, contactLines: lines.filter((line) => line.t >= back).map((line) => line.step).slice(0, 60) }) });
+});
+
+test("moved to a device with no WebRTC and back: the device that has the profile again talks to the contact at once", { tag: ["@feature:devices.handoff", "@feature:transport.iroh-web"] }, async ({ peer }) => {
+  test.skip(!process.env.GHOSTLY_IROH_RELAY_URL, "Needs an Iroh relay (npm run e2e:infra:use)");
+  test.setTimeout(12 * 60_000);
+  const relay = process.env.GHOSTLY_IROH_RELAY_URL!;
+  // The second device is as the Desktop on Linux: no WebRTC at all, its chats over Iroh.
+  const noWebRtc = async (context: import("@playwright/test").BrowserContext) => {
+    await context.addInitScript(() => { for (const name of ["RTCPeerConnection", "webkitRTCPeerConnection", "RTCSessionDescription", "RTCIceCandidate"]) delete (window as unknown as Record<string, unknown>)[name]; });
+  };
+  const [desktop, linux, contact] = await Promise.all([peer("desktop", { irohRelay: relay }), peer("linux", { irohRelay: relay, beforeOpen: noWebRtc }), peer("contact", { ...traced, irohRelay: relay })]);
+  const lines = traceLines(contact);
+  await link(desktop, contact);
+  await connect(desktop, contact);
+  await enrollDevice(desktop, linux, { name: "Linux" });
+  const move = async (from: Peer, to: Peer) => {
+    await from.page.goto("/#/profile");
+    const row = from.page.getByTestId("device-row").filter({ hasNotText: "This device" });
+    await expect(row.getByTestId("device-link-status")).toHaveAttribute("data-status", "live", { timeout: 120_000 });
+    await row.getByTestId("device-move").click();
+    await expect(to.page.getByTestId("handoff-offer")).toBeVisible({ timeout: 60_000 });
+    await to.page.getByTestId("handoff-accept").click();
+    await untilShown(to.page, to.page.getByTitle("New Chat"), { timeout: 400_000 });
+    await untilShown(from.page, from.page.getByTestId("device-standby").and(from.page.locator("[data-state=standby]")));
+    await to.page.goto("/#/");
+    await untilShown(to.page, to.page.getByTestId("sidebar").getByTestId("chat-row").first());
+    await openTheChat(to);
+  };
+  await move(desktop, linux);
+  const there = Date.now();
+  await say(linux, "from linux");
+  await expect(chat(contact).getByText("from linux")).toBeVisible({ timeout: 180_000 });
+  const thereMs = Date.now() - there;
+  await move(linux, desktop);
+  const back = Date.now();
+  await say(desktop, "back on the web");
+  const reached = await chat(contact).getByText("back on the web").waitFor({ timeout: 180_000 }).then(() => true, () => false);
+  test.info().annotations.push({ type: "measure", description: JSON.stringify({ thereMs, backMs: Date.now() - back, contactLines: lines.filter((line) => line.t >= back).map((line) => line.step) }) });
+  expect(reached).toBe(true);
+});
+
 test("five wrong passwords in an hour lock the standby out", { tag: ["@feature:devices.handoff"] }, async ({ peer }) => {
   test.setTimeout(8 * 60_000);
   const [desktop, phone] = await Promise.all([peer("desktop"), peer("phone")]);

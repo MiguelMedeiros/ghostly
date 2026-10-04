@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CHOICE_TTL_MS, QUIET_DROP_MS, TRANSPORT_HISTORY_MAX, TRANSPORT_LOG_MAX, TransportLog, compactTransportRows, type TransportEntry, type TransportSnapshot } from "../src/engine/transportLog";
+import { CHOICE_TTL_MS, QUIET_DROP_MS, TRANSPORT_HISTORY_MAX, TRANSPORT_LOG_MAX, TransportLog, compactTransportRows, resumeHere, type TransportEntry, type TransportSnapshot } from "../src/engine/transportLog";
 // covers: transport.timeline, transport.wait
 
 const live = (transport: TransportSnapshot["transport"], extra: Partial<TransportSnapshot> = {}): TransportSnapshot =>
@@ -394,5 +394,35 @@ describe("transport log: a chosen transport not reached yet (WISP 100)", () => {
     log.observe(live("iroh/1"), 2 * MIN + 20);
     // Back on Iroh within the quiet window: the choices are the rows, nothing reads as a drop.
     expect(kinds(log)).toEqual(["connected", "chose", "chose"]);
+  });
+});
+
+describe("transport log: what a start resumes on", () => {
+  /** A chat that was live on `transport` from 1 s when the profile last ran, here or on another device. */
+  const lastRun = (transport: TransportSnapshot["transport"]) => {
+    const log = new TransportLog();
+    log.observe(down(), 0);
+    log.observe(live(transport), 1_000);
+    return new TransportLog(log.entries, log.history);
+  };
+
+  it("the transport it was live on, with its floor, where this app runs it", () => {
+    expect(resumeHere(lastRun("iroh/1"), ["webrtc/1", "iroh/1"], ["webrtc/1", "iroh/1"])).toEqual({ resume: "iroh/1", floor: 1_000 });
+  });
+
+  it("after a handoff from a device that ran a transport this app lacks: one both run, at once, and no floor of that device's session", () => {
+    // The Desktop on Linux was live with the contact on HyperDHT; the web page that took the profile back has none.
+    expect(resumeHere(lastRun("hyperdht/1"), ["webrtc/1", "iroh/1"], ["webrtc/1", "iroh/1", "hyperdht/1"])).toEqual({ resume: "webrtc/1" });
+    // A contact with no WebRTC: Iroh.
+    expect(resumeHere(lastRun("hyperdht/1"), ["webrtc/1", "iroh/1"], ["iroh/1", "hyperdht/1"])).toEqual({ resume: "iroh/1" });
+    // The other way round: the web page was live on WebRTC, the Desktop on Linux has none.
+    expect(resumeHere(lastRun("webrtc/1"), ["iroh/1", "hyperdht/1"], ["webrtc/1", "iroh/1"])).toEqual({ resume: "iroh/1" });
+  });
+
+  it("nothing when nothing is shared, nothing is known of the contact, or the chat was not live", () => {
+    expect(resumeHere(lastRun("hyperdht/1"), ["webrtc/1"], ["hyperdht/1"])).toEqual({});
+    expect(resumeHere(lastRun("hyperdht/1"), ["webrtc/1"], undefined)).toEqual({});
+    expect(resumeHere(new TransportLog(), ["webrtc/1"], ["webrtc/1"])).toEqual({});
+    expect(resumeHere(undefined, ["webrtc/1"], ["webrtc/1"])).toEqual({});
   });
 });

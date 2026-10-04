@@ -196,7 +196,7 @@ import { CommunityPay, groupLinkId, parsePayLink } from "./communityPay";
 import { mayReach } from "./serviceAccess";
 import { Outbox } from "./outbox";
 import { HoldEngine } from "./hold";
-import { TransportLog } from "./transportLog";
+import { TransportLog, resumeHere } from "./transportLog";
 import { ProfilePeek, readPathOf, type PeekResult } from "./profilePeek";
 import { S3Store } from "../backup/s3";
 import type { HoldStore } from "../backup/storage";
@@ -6101,6 +6101,9 @@ export class GhostlyNode implements EngineImplementation {
     const credentials: PairingCredentials | undefined = stored.profile && stored.participationSeed ? {
       seedB64: stored.participationSeed, peerKey: stored.pairedPeerKey, requireSignedSignals: stored.requireSignedSignals,
       verifiedPeerKey: stored.peerTrust ? stored.peerTrust.verifiedKey : stored.pairedPeerKey, expectedPeerKey: stored.peerParticipationKeyZ32 } : undefined;
+    // Back after a restart, or after a handoff from another device (`resumeHere`): on a transport this app runs.
+    const resumed = stored.pairedPeerKey && stored.deliveryMode !== "dht"
+      ? resumeHere(this.transportLogOf(live), this.transportsHere(), stored.peerTransports ?? live.caps?.peer?.transports) : {};
     live.link = new GhostLink({
       paymentMethods: stored.paymentMethods,
       paymentNetworks: this.chatNetworks(stored),
@@ -6147,9 +6150,9 @@ export class GhostlyNode implements EngineImplementation {
         peerFallback: stored.peerFallback, preferred: stored.preferredTransport, fallback: stored.transportFallback,
         automatic: stored.preferredTransport === undefined },
       // Live when this app last ran: the contact may still hold that session, and is reached again at once (WISP 100).
-      resume: stored.pairedPeerKey && stored.deliveryMode !== "dht" ? this.transportLogOf(live)?.liveAtLastRun : undefined,
+      resume: resumed.resume,
       // An offer from before that live stretch began is not answered after a restart (a relay that missed its clearing).
-      resumeFloor: stored.pairedPeerKey && stored.deliveryMode !== "dht" ? this.transportLogOf(live)?.liveSinceAtLastRun : undefined,
+      resumeFloor: resumed.floor,
       pairing: credentials ? {
         credentials,
         verifyPeer: async key => {
@@ -6400,9 +6403,9 @@ export class GhostlyNode implements EngineImplementation {
     });
     const link = live.link;
     link.start(); this.emitState();
-    const resumed = stored.pairedPeerKey && stored.deliveryMode !== "dht" ? this.transportLogOf(live)?.liveAtLastRun : undefined;
-    if (resumed) {
-      traceLink(live.myPubKeyZ32, "resume", { transport: resumed });
+    if (resumed.resume) {
+      const last = this.transportLogOf(live)?.liveAtLastRun;
+      traceLink(live.myPubKeyZ32, "resume", { transport: resumed.resume, ...(last !== resumed.resume ? { last } : {}) });
       this.watchResume(linkId, link);
     }
     // Unused invites need discovery, not two native listeners (`keepsNativeEndpoints`). Saved contacts
@@ -6472,8 +6475,13 @@ export class GhostlyNode implements EngineImplementation {
    */
   private runnableTransports(live: LiveLink | undefined): PairedTransport[] {
     const started = live?.link?.availableTransports ?? [];
-    const can: PairedTransport[] = [...(typeof RTCPeerConnection !== "undefined" ? ["webrtc/1" as const] : []), ...Object.keys(this.nativeFactories) as NativeTransport[]];
+    const can = this.transportsHere();
     return [...started, ...TRANSPORTS.filter(t => can.includes(t) && !started.includes(t))];
+  }
+
+  /** The layer-1 transports this app can run at all: WebRTC where the page has it, then its native adapters. */
+  private transportsHere(): PairedTransport[] {
+    return [...(typeof RTCPeerConnection !== "undefined" ? ["webrtc/1" as const] : []), ...Object.keys(this.nativeFactories) as NativeTransport[]];
   }
 
   /** Something the capability record carries changed here: every chat publishes its record anew if it differs. */

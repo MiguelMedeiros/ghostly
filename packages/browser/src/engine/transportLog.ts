@@ -16,6 +16,23 @@ import type { PairedTransport, TransportWait } from "@ghostly/core";
 export type TransportEntryKind = "connected" | "switched" | "chose" | "failed" | "back" | "dht-only" | "dht-left"
   /** Written by older releases only; compacted away on load (`compactTransportRows`). */
   | "lost" | "flapping";
+/**
+ * What a chat resumes on when this app starts (WISP 100, WISP 06 § The handoff): the transport it was live on when the
+ * profile last ran, where this app runs it. After a handoff the profile last ran on another device, which may run
+ * transports this one lacks (the Desktop on Linux has HyperDHT and no WebRTC, a browser the other way round). Resumed
+ * on one this app cannot start, the link held every dial for its wait, read its contact's offers against that other
+ * device's session, and never knocked. It resumes instead on the first transport this app runs that the contact runs
+ * too, so it still dials at once whatever its key (the contact may hold the other device's session), with no floor:
+ * the floor dates that other session. Nothing when the chat was not live, or when nothing is shared.
+ */
+export function resumeHere(log: Pick<TransportLog, "liveAtLastRun" | "liveSinceAtLastRun"> | undefined, runs: readonly PairedTransport[], peer: readonly string[] | undefined): { resume?: PairedTransport; floor?: number } {
+  const last = log?.liveAtLastRun;
+  if (!last) return {};
+  if (runs.includes(last)) return { resume: last, ...(log!.liveSinceAtLastRun !== undefined ? { floor: log!.liveSinceAtLastRun } : {}) };
+  const shared = runs.find((transport) => peer?.includes(transport));
+  return shared ? { resume: shared } : {};
+}
+
 /** Why a switch happened: someone chose it, the link it replaced dropped, or the app moved on its own. */
 export type TransportCause = "you" | "contact" | "dropped" | "automatic";
 
