@@ -3,7 +3,8 @@ import { engine } from "@ghostly/browser/platform/engine";
 import type { DeviceSetView } from "@ghostly/browser/devices/links";
 import { useI18n } from "../../contexts/I18nContext";
 import { errorText } from "../../lib/errorText";
-import { listNames, removeErrorKey, useDeviceSet } from "../../lib/devices";
+import { listNames, openJoinAnother, removeErrorKey, useDeviceSet } from "../../lib/devices";
+import { useServicesPlatform } from "../../hooks/useServicesPlatform";
 import { Button, Notice, Row, Section, Switch } from "../wallet/ui";
 import { Menu, MenuItem, MenuSeparator } from "../Menu";
 import { hasStandby, keepAwakeSupported, useKeepAwakeSetting } from "../../lib/keepAwake";
@@ -28,6 +29,7 @@ type Device = DeviceSetView["devices"][number];
 export function DevicesSection() {
   const { t, language } = useI18n();
   const view = useDeviceSet();
+  const canSwitch = !!useServicesPlatform()?.features.profiles;
   const [keepAwake, setKeepAwake] = useKeepAwakeSetting();
   const [adding, setAdding] = useState(false);
   const [moving, setMoving] = useState<{ key: string; name: string } | null>(null);
@@ -58,6 +60,12 @@ export function DevicesSection() {
       <Row label={t("devices.section.lead")} hint={t("devices.section.leadHint")} info={t("devices.section.info")}>
         <Button data-testid="device-add-open" onClick={() => setAdding(true)} disabled={!view || devices.length >= 4}>{t("devices.add.button")}</Button>
       </Row>
+      {/* The other way round: this device, with a profile from another device. Offered while this profile has no other device. */}
+      {canSwitch && view && devices.length <= 1 && !view.foreignSet && (
+        <Row testId="device-join-another-row" label={t("devices.join.anotherLead")} info={t("devices.join.anotherInfo")}>
+          <Button data-testid="device-join-another-open" onClick={() => openJoinAnother()}>{t("devices.join.anotherButton")}</Button>
+        </Row>
+      )}
       {devices.map((device) => (
         <DeviceRow key={device.key} device={device} thisActive={thisActive} checked={checked[device.key]}
           onMove={() => setMoving({ key: device.key, name: device.name })} onCheck={() => void check(device.key)}

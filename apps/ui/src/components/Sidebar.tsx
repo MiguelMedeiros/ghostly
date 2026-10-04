@@ -40,6 +40,7 @@ import { useRowReorder } from "../hooks/useRowReorder";
 import { shownContactName, useContactFaces } from "./identities/contactFace";
 import { reactionNoteText } from "../lib/reactions";
 import { SidebarTasks } from "./tasks/SidebarTasks";
+import { openJoinProfile } from "../lib/devices";
 
 const subscribeEngine = (listener: () => void) => engine.subscribe(listener);
 const engineSnapshot = () => engine.state;
@@ -272,6 +273,12 @@ export function Sidebar() {
             </div>
             <p className="text-text-secondary text-sm mb-1">{t("sidebar.quiet")}</p>
             <p className="text-text-muted text-xs">{t("sidebar.quietHint")}</p>
+            {/* On a phone the chat list is the first screen, and the home pane, which says it on a wide screen, is never shown. */}
+            {isMobile && (
+              <button type="button" data-testid="sidebar-already" onClick={() => openJoinProfile()} className="mt-4 min-h-11 px-2 text-sm text-text-secondary underline underline-offset-4 hover:text-accent cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded">
+                {t("devices.join.already")}
+              </button>
+            )}
           </div>
         )}
 

@@ -1,10 +1,12 @@
 import { useEffect, useId, useRef, useState } from "react";
+import { inviteQrSegments } from "@ghostly/core";
 import { engine } from "@ghostly/browser/platform/engine";
 import type { EnrollView } from "@ghostly/browser/devices/enroll";
 import { useI18n } from "../../contexts/I18nContext";
 import { useSettings } from "../../contexts/SettingsContext";
 import { DEVICE_SET_PASSWORD_MIN, defaultDeviceName, enrollErrorKey, failureKey, lockPasswordProblem } from "../../lib/devices";
 import { isDesktopApp } from "../../lib/externalLink";
+import { appLinkOrigin } from "../../lib/url";
 import { hashPassword, verifyPassword } from "../../lib/settings";
 import { errorText } from "../../lib/errorText";
 import { QRCodeDisplay } from "../QRCode";
@@ -138,7 +140,8 @@ export function AddDeviceDialog({ onClose }: { onClose(): void }) {
       <Toast toast={notice.toast} onDismiss={notice.dismiss} place="dialog" testId="device-add-notice" />
       {view?.role === "inviter" && view.step === "waiting" && <>
         <p className="text-text-secondary">{t("devices.add.codeHint")}</p>
-        <div data-testid="device-add-code" data-code={view.code}><QRCodeDisplay value={view.code} qr={[view.code.toUpperCase()]} label={t("devices.add.title")} /></div>
+        {/* The QR code is the code's link on the web app: a phone's own camera opens Ghostly with it. Copy gives the code. */}
+        <div data-testid="device-add-code" data-code={view.code}><QRCodeDisplay value={view.code} qr={inviteQrSegments(view.code, appLinkOrigin())} label={t("devices.add.title")} /></div>
         <p className="text-text-muted text-xs">{t("devices.add.valid")}</p>
       </>}
       {view?.role === "inviter" && view.step === "confirm" && <>

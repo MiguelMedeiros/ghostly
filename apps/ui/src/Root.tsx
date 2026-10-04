@@ -25,6 +25,8 @@ import { ProfileGate } from "./components/ProfileUnavailable";
 import { DeviceStandby } from "./components/DeviceStandby";
 import { LimitedStartGate } from "./components/devices/LimitedStart";
 import { useDeviceGate } from "./hooks/useDeviceGate";
+import { JoinHost } from "./components/devices/JoinHost";
+import { isDeviceCode, offerDeviceLink, takeDeviceLinkFromAddress } from "./lib/devices";
 import { INVITE_REFUSAL_MESSAGE, chatPath, classifyInvite, inviteRouteCode, protocolLinkCode, readInvite } from "./lib/url";
 import { onJoinNotice, showJoinNotice, type JoinNoticeKey } from "./lib/joinNotice";
 import { groupPath } from "./lib/groups";
@@ -51,6 +53,8 @@ function ChatLinkIntake() {
   useEffect(() => {
     const rest = inviteRouteCode(pathname);
     if (!rest) return;
+    // A device code opened while the app was open already (the address changed, no new page): the join host takes it.
+    if (isDeviceCode(rest)) { offerDeviceLink(rest); navigate("/", { replace: true }); return; }
     const reading = readInvite(rest);
     let sessionId: string | null = null;
     if (reading.ok) {
@@ -192,6 +196,8 @@ export function AppRouter({ children }: { children: ReactNode }) {
 
 /** The whole Ghostly UI. Desktop and Browser both render this; only the platform modules differ. */
 export function Root() {
+  // A device code opened as a link leaves the address before the router, or anything else, reads it (WISP 06).
+  useState(takeDeviceLinkFromAddress);
   // The loops rest while the window is hidden or behind others (index.css `:root[data-away]`).
   useEffect(watchWindowAway, []);
   // Not the active device for this profile (WISP 06 § The gate): the standby screen, and nothing of the profile. No
@@ -251,6 +257,9 @@ export function Root() {
               </ErrorBoundary>
             </AppRouter>
             )}
+            {/* "Add this device to my profile", and a device code opened as a link: over the chat list, the home pane
+                or the standby screen alike, and kept across the gate's answer. */}
+            <LockGate><JoinHost standby={!!standby} /></LockGate>
           </LockScreenProvider>
         </I18nProvider>
       </ThemeProvider>
