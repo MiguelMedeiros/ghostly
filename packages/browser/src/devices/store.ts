@@ -276,11 +276,31 @@ export async function installDeviceRecord(profile: string, staged: string, patch
     const existing = await readDeviceRecord(staged);
     if (existing && (existing.state !== "taking" || existing.handoff?.id !== current.handoff?.id)) throw new Error("The staged namespace holds another device state");
     const record = parseDeviceRecord({ ...amend(current, patch), saved: current.saved + 1 });
-    const copy = parseDeviceRecord({ ...record, profile: staged, saved: (existing?.saved ?? 0) + 1 });
+    // The staged copy names the profile it holds: the one the old name held (itself staged once), or the old name.
+    const copy = parseDeviceRecord({ ...record, profile: staged, home: current.home ?? profile, saved: (existing?.saved ?? 0) + 1 });
     if (mirror) { await mirror.write(staged, JSON.stringify(copy)); await mirror.write(profile, JSON.stringify(record)); }
     await swapMany([{ profile, expected: current.saved, record }, { profile: staged, expected: existing ? existing.saved : null, record: copy }]);
     return record;
   });
+}
+
+/**
+ * Every record in the database, read as `readLocal` reads one (a record that does not parse is left out): what finds a
+ * profile whose registry pointer is gone (`home`). None where there is no database; never makes one.
+ */
+export async function listDeviceRecords(): Promise<DeviceRecord[]> {
+  if (!(await devicesDbExists())) return [];
+  const read = async (): Promise<unknown[]> => {
+    const db = await openDevicesDb();
+    if (!db.objectStoreNames.contains(STORE)) return [];
+    return new Promise<unknown[]>((resolve, reject) => {
+      const request = db.transaction(STORE, "readonly").objectStore(STORE).getAll();
+      request.onsuccess = () => resolve(request.result as unknown[]);
+      request.onerror = () => reject(request.error);
+    });
+  };
+  const stored = await within(read(), DEVICE_READ_TIMINGS.readMs, "The device state database");
+  return stored.flatMap((value) => { try { return [parseDeviceRecord(value)]; } catch { return []; } });
 }
 
 /**

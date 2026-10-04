@@ -9,7 +9,7 @@ import { setDatabaseName } from "@ghostly/browser/shared/idb";
 import { openDeviceGate } from "@ghostly/browser/devices/gate";
 import { setDeviceMirror } from "@ghostly/browser/devices/store";
 import { setHandoffProfileHost } from "@ghostly/browser/devices/handoffHost";
-import { handoffProfileHost } from "./lib/handoffProfile";
+import { handoffProfileHost, recoverHandoffPointer } from "./lib/handoffProfile";
 import { desktopDeviceMirror } from "./desktop/deviceMirror";
 import { isDesktopApp } from "./lib/externalLink";
 import { Root } from "./Root";
@@ -29,6 +29,8 @@ async function boot() {
   }
   // GHOSTLY_PROFILE gives this process a space of its own; inside it, the profile chosen in the app (WISP 04).
   setProfileBase(profile);
+  // A profile a handoff moved whose pointer was lost: pointed at its state again before anything opens storage.
+  await recoverHandoffPointer(activeProfileId());
   const profileId = activeProfileId();
   setRunningProfile(profileId);
   profile = namespaceOf(profileId);

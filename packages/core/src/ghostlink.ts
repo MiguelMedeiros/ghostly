@@ -58,6 +58,7 @@ import { traceLink } from "./linkTrace";
 import { isDiscoveryBudgetError, type PkarrTransport } from "./transport";
 import { GROUP_VERSION_LARGE } from "./groupCommits";
 import { GROUP_VERSION_HUBS } from "./groupHubs";
+import { GROUP_VERSION_SIGNALS } from "./groupSignals";
 import { PairingTracker, type PairingProgress, type PairingRole } from "./pairingProgress";
 
 /**
@@ -2668,7 +2669,7 @@ export class GhostLink {
   /** Older apps drop this frame (it carries no id): to them this contact has no groups. */
   private sendGroupsSupport(): void {
     if (!this.options.groupsSupport || !this.options.params.profile || !this.channel || !this.isDataLinkOpen) return;
-    try { this.channel.send(JSON.stringify({ t: "paired-groups", v: [1, 2, GROUP_VERSION_LARGE, GROUP_VERSION_HUBS] })); } catch { /* the next session announces it */ }
+    try { this.channel.send(JSON.stringify({ t: "paired-groups", v: [1, 2, GROUP_VERSION_LARGE, GROUP_VERSION_HUBS, GROUP_VERSION_SIGNALS] })); } catch { /* the next session announces it */ }
   }
   /** Older apps drop this frame (it carries no id) and keep using the handshake offer. */
   private sendPaymentMethods(): void {
@@ -3338,6 +3339,11 @@ export class GhostLink {
   /** A link made just now for a peer that is about to show up (a group's entry session): look fast for a while. */
   expectPeer(): void {
     this.session.expectPeer();
+  }
+
+  /** The peer's packet is at hand without a relay (a member of the group carried it, `CarriedTransport`): read it now. */
+  look(): void {
+    this.session.lookNow();
   }
 
   /**
