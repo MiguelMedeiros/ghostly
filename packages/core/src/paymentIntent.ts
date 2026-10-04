@@ -51,6 +51,12 @@ export interface PaymentReview extends PaymentTarget {
   txid?: string;
   error?: string;
   evm?: { from: string; nonce: number; gasLimit: string; maxFeePerGas: string; maxPriorityFeePerGas: string; confirmations: number };
+  /**
+   * Parked (WISP 06 § Forced takeover): an attempt that holds signed bytes or a signed transaction, found unfinished by
+   * a copy of the profile started from older state (a forced takeover, a restored backup). It is never broadcast again
+   * nor reconciled by broadcast: it waits for the person.
+   */
+  parked?: true;
 }
 export interface PaymentAdapter<Prepared = unknown> {
   method: PaymentMethod;

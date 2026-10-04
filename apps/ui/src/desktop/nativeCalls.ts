@@ -1,5 +1,5 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
-import type { CallMedia } from "@ghostly/core";
+import { RTC_CONFIG, type CallMedia } from "@ghostly/core";
 import { EMPTY_DEVICES, loadDeviceChoices, type DeviceKind, type DeviceList, type DeviceSource } from "../lib/mediaDevices";
 
 /**
@@ -40,6 +40,23 @@ export function bytesOf(message: unknown): Uint8Array {
   if (ArrayBuffer.isView(message)) return new Uint8Array(message.buffer, message.byteOffset, message.byteLength);
   if (Array.isArray(message)) return Uint8Array.from(message as number[]);
   return new Uint8Array();
+}
+
+/** An ICE server as Rust takes it (`native_call/ice.rs`). */
+export interface NativeIceServer { urls: string[]; username?: string; credential?: string }
+
+/**
+ * The profile's own ICE servers in a call's configuration (`callRtcConfig`: a TURN server, typically), for Rust:
+ * the apps' built-in STUN servers left out, since Rust has its own. Rust checks them again and leaves out any it
+ * cannot use.
+ */
+export function ownIceServers(config: RTCConfiguration): NativeIceServer[] {
+  const builtIn = new Set((RTC_CONFIG.iceServers ?? []).flatMap((server) => [server.urls].flat()));
+  return (config.iceServers ?? []).flatMap((server) => {
+    const urls = [server.urls].flat().filter((url): url is string => typeof url === "string" && !!url);
+    if (!urls.length || urls.every((url) => builtIn.has(url))) return [];
+    return [{ urls, ...(server.username ? { username: server.username } : {}), ...(typeof server.credential === "string" && server.credential ? { credential: server.credential } : {}) }];
+  });
 }
 
 /** A JPEG starts FF D8; anything else from a call is a JSON event. */
@@ -247,7 +264,7 @@ export class NativePeerConnection extends EventTarget {
     open.add(this);
     const events = new Channel<unknown>();
     events.onmessage = (message) => this.heard(bytesOf(message));
-    this.opened = invoke("native_call_open", { id: this.id, events });
+    this.opened = invoke("native_call_open", { id: this.id, events, iceServers: ownIceServers(config) });
     const lane = (kind: "audio" | "video"): Lane => ({
       mid: null,
       direction: "sendrecv",

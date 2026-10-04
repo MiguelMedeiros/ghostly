@@ -143,6 +143,13 @@
     "unprotected": "安装 Ghostly（添加到主屏幕），允许通知，并保留个人资料的备份。浏览器会保护已安装且经常使用的应用。"
   },
   "storageOf": "{{used}} / {{quota}}",
+  "storageParts": {
+    "app": "消息和应用数据：{{size}}",
+    "files": "文件（{{count}} 个）：{{size}}",
+    "local": "设置：{{size}}",
+    "staged": "正在保存的副本：{{size}}"
+  },
+  "storagePartsNote": "消息和应用数据包含此设备上的所有个人资料。文件仅属于此个人资料。",
   "storageProtect": "保护",
   "storageState": {
     "protected": "已保护",

@@ -1,5 +1,6 @@
-// The home's wallet deck is the app's own deck, not a look-alike: this copies the app's deck, the wallet card's
-// face and its marks from apps/ui/src/components into components/app, keeping their paths, so their relative imports hold.
+// The home's wallet and identity decks are the app's own deck, not a look-alike: this copies the app's deck, the
+// wallet card's face and its marks, and the identity providers' marks, from apps/ui/src/components into
+// components/app, keeping their paths, so their relative imports hold.
 // The app is the source of truth: edit the app's file, then run `npm run sync:app-deck`. CI runs it with --check
 // and fails when a copy differs from the app's file.
 //
@@ -24,6 +25,7 @@ export const FILES = [
   "walletCardTypes.ts",
   "wallet-deck.css",
   "wallet-cards.css",
+  "identities/providerMarks.tsx",
 ];
 
 const note = (file) => `Copied from apps/ui/src/components/${file} by website/scripts/sync-app-deck.mjs. Edit the app's file, then run npm run sync:app-deck.`;

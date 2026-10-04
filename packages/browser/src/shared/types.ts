@@ -237,6 +237,11 @@ export interface GroupView {
   epoch?: number;
   myKey?: string;
   isAdmin: boolean;
+  /**
+   * Admin work is off for this group on this device (WISP 06 § Forced takeover): no commit is signed and no door duty
+   * taken until the person turns on "Manage groups from this device" (`setGroupManage`).
+   */
+  adminOff?: true;
   members: GroupMemberView[];
   /** On the invitee's side, until the welcome arrives. */
   /** `waiting`: joining a community through its link, how many others were knocking with me when I last knocked. */
@@ -653,6 +658,11 @@ export interface WalletInstanceView {
   card?: string;
   name?: string;
   receive?: boolean;
+  /**
+   * At home on another device (WISP 06 § Wallets that stay home): that device's name ("" when this device does not know
+   * it), and when its coins expire (Ark, Bark). It is never opened here, and takes no payment here.
+   */
+  home?: { device: string; expiresAt?: number };
 }
 
 /**
@@ -1202,6 +1212,12 @@ export interface Settings {
    */
   wakeHeldBy?: Record<string, string[]>;
   /**
+   * In a profile on several devices (WISP 06 § Push and the phone): devices asked for a new subscription over their
+   * device link, by signing key, with the endpoint they are to replace. A device that shares another endpoint (or none)
+   * has done it. Set by the engine only.
+   */
+  wakeRenew?: Record<string, string>;
+  /**
    * A push relay (https) this app hands a finished wake-up to when it may not post to the contact's push service
    * itself (a browser page: the services answer without CORS). Empty or absent: none; nobody runs one by default.
    */
@@ -1216,6 +1232,12 @@ export interface WakeSubscription {
   p256dh: string;
   auth: string;
   vapid: VapidKeys;
+  /**
+   * In a profile on several devices (WISP 06 § Push and the phone): the signing key of the device whose subscription
+   * this is. It moves with the profile, so a device with none of its own (a desktop) goes on giving contacts the
+   * phone's. Set by the engine only; absent in a profile on one device, and for a subscription made before.
+   */
+  device?: string;
 }
 
 /**
@@ -1544,6 +1566,17 @@ export interface ServiceView extends StoredService {
 
 export interface EngineState {
   settings: Settings;
+  /**
+   * Limited mode (WISP 06 § When a device checks): the device could not read which device is active and was started
+   * anyway. The profile is offline whatever `settings.online` says, and no wallet is open. Absent otherwise.
+   */
+  limited?: true;
+  /**
+   * Whose push subscription `settings.wake` is, in a profile on several devices (WISP 06 § Push and the phone): `here`,
+   * this device's own; `away`, another device's, given to contacts because this device has none of its own (the page
+   * neither replaces nor turns off what is not its own). Absent in a profile on one device, or when nobody said.
+   */
+  wakeOwner?: "here" | "away";
   transport: {
     protocol: string; relays: string[];
     /** Present where Iroh runs in the browser (web app, extension): the relays it uses and the defaults. */

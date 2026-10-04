@@ -2,7 +2,7 @@ import { test, expect, chromium, type Browser, type Page } from "@playwright/tes
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { buildSdpFromSignal, extractParamsFromSdp, parseCallSignal } from "@ghostly/core";
-import { desktopHome, openDesktop, type DesktopApp } from "../support/desktop";
+import { attachDesktopLogs, desktopHome, openDesktop, type DesktopApp } from "../support/desktop";
 
 /**
  * A Linux Desktop's calls against a browser's own WebRTC: Chromium, with its fake camera and microphone.
@@ -111,6 +111,7 @@ for (const offerer of ["linux", "chromium"] as const) {
     const { app, stop } = await openDesktop({ home: home.dir, profile: `interop-${offerer}` });
     const page = await browser.newPage();
     const id = `interop-${offerer}`;
+    let passed = false;
     try {
       await expect.poll(() => app.text('[title="New Chat"]'), { timeout: 90_000 }).not.toBeNull();
       await page.goto(origin);
@@ -140,12 +141,15 @@ for (const offerer of ["linux", "chromium"] as const) {
         return s.audio > 50 && s.video > 10;
       }, { timeout: 60_000, message: "Chromium hears and sees the Linux Desktop" }).toBe(true);
       test.info().annotations.push({ type: "received", description: JSON.stringify({ linux: await nativeStats(app, id), chromium: await browserStats(page) }) });
+      passed = true;
     } finally {
       await app.executeAsync(`
         const done = arguments[arguments.length - 1];
         window.__TAURI_INTERNALS__.invoke("native_call_close", { id: arguments[0] }).then(done, done);`, id).catch(() => {});
       await page.close();
       await stop();
+      // A failure gets the app's log: its `native call:` lines say what each description carried and when.
+      if (!passed) attachDesktopLogs("app", home.dir);
       home.remove();
     }
   });

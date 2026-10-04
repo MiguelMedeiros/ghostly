@@ -258,7 +258,7 @@
   max-width: 760px;
   margin-bottom: clamp(36px, 5vw, 64px);
 }
-.sp-wallet {
+.sp-deck {
   position: relative;
   display: grid;
   gap: 28px;
@@ -270,7 +270,7 @@
 .sp-band {
   container-type: inline-size;
 }
-.sp-wallet {
+.sp-deck {
   --theme-border-bright: var(--line-2);
   --theme-surface-alt: rgba(255, 255, 255, 0.03);
   --theme-text-secondary: var(--muted);
@@ -285,11 +285,76 @@
   height: calc(min(340px, (100cqw - 16px) * 0.62) / 1.586 + 63px);
 }
 /* No text under 12px on the site: the card's status and kind, a size up from the app's. */
-.sp-wallet .wallet-deck-card-status {
+.sp-deck .wallet-deck-card-status {
   font-size: 12px;
 }
-.sp-wallet .wallet-deck-card-balance {
+.sp-deck .wallet-deck-card-balance {
   font-size: max(12px, min(13px, calc(var(--card-w) * 0.036)));
+}
+
+/* ── Identity band: the same deck and the same card face, one card per identity proof ── */
+.sp-band--ids {
+  margin-top: clamp(56px, 7vw, 96px);
+}
+/* What wallet-deck.css does for the wallet's stack: under the chosen card a card shows its strip only, with no
+   status or ghost, and a card after the chosen one shows its mark on the trailing edge that shows. */
+.identity-deck[data-mode="stack"] .identity-deck-card:not([data-active="true"]) .wallet-deck-card-status,
+.identity-deck[data-mode="stack"] .identity-deck-card:not([data-active="true"]) .wallet-deck-card-ghost {
+  opacity: 0;
+}
+.identity-deck[data-mode="stack"] .wallet-deck-face[data-after="true"] .wallet-deck-card-glyph-end {
+  display: grid;
+}
+/* Each provider's ink, the app's (apps/ui identities/id-deck.css), and its card's dark gradient. */
+.identity-ink-nostr {
+  --card-rgb: 176, 128, 245;
+  --from: #34204f;
+  --to: #170f25;
+}
+.identity-ink-pubky {
+  --card-rgb: 224, 224, 227;
+  --from: #2a2c33;
+  --to: #111216;
+}
+.identity-ink-domain {
+  --card-rgb: 56, 189, 214;
+  --from: #0f3a44;
+  --to: #0a1d24;
+}
+.identity-ink-openpgp {
+  --card-rgb: 106, 160, 235;
+  --from: #1b2f52;
+  --to: #0e1626;
+}
+.identity-ink-bitcoin {
+  --card-rgb: 247, 147, 26;
+  --from: #43250c;
+  --to: #1d140b;
+}
+.identity-ink-ssh {
+  --card-rgb: 160, 174, 196;
+  --from: #263040;
+  --to: #12161d;
+}
+.identity-ink-ssh-github {
+  --card-rgb: 214, 219, 228;
+  --from: #2b2f36;
+  --to: #121418;
+}
+.identity-ink-ssh-gitlab {
+  --card-rgb: 252, 125, 60;
+  --from: #4d2519;
+  --to: #20120e;
+}
+.identity-ink-did {
+  --card-rgb: 77, 166, 224;
+  --from: #13334d;
+  --to: #0b1824;
+}
+.identity-ink-atproto {
+  --card-rgb: 64, 150, 255;
+  --from: #12305a;
+  --to: #0a1528;
 }
 
 /* The chosen card's details: centred text under the deck, a hairline in the card's ink
@@ -377,7 +442,7 @@
   .sp-band {
     margin-top: 80px;
   }
-  .sp-wallet {
+  .sp-deck {
     gap: 18px;
   }
   /* Backup and storage: two short lists side by side, no boxes. */

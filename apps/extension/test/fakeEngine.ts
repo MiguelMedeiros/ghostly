@@ -52,6 +52,8 @@ export class FakeEngineServer {
   readonly handled: { client: EngineClientSink; request: RpcRequest }[] = [];
   readonly requests: { peer: string; service: string; init: EngineRequestInit }[] = [];
   shutdowns = 0;
+  /** The whole engine, as `EngineServer` says of itself: device-link-only mode is the other kind of peer (WISP 06). */
+  readonly gated = false;
   readonly ready: Promise<void>;
   /** The peer database the document had chosen when it started this peer (mock `shared/idb` to read it). */
   readonly database = databaseName();
@@ -65,6 +67,10 @@ export class FakeEngineServer {
       engineControl().log.push(`stop ${this.database}`);
     },
   };
+
+  stop(): Promise<void> {
+    return this.node.shutdown();
+  }
 
   constructor(readonly options: unknown) {
     this.ready = engineControl().ready;

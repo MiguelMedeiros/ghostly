@@ -13,6 +13,8 @@
 //! call hook. Which microphone, camera and speaker: [`devices`](super::devices), by name.
 
 use super::devices::{self, Kind, FAKE_CAMERAS};
+use super::gather::{self, Gathering};
+use super::ice::{self, IceServer};
 use bytes::Bytes;
 use gst::prelude::*;
 use gstreamer as gst;
@@ -30,7 +32,7 @@ use std::collections::BTreeSet;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use tokio::sync::{mpsc, Notify};
+use tokio::sync::mpsc;
 use webrtc::media_stream::track_local::static_sample::TrackLocalStaticSample;
 use webrtc::media_stream::track_local::TrackLocal;
 use webrtc::media_stream::track_remote::{TrackRemote, TrackRemoteEvent};
@@ -53,9 +55,8 @@ const SHOWN_MAX: u32 = 960;
 const SHOWN_FPS: u32 = 15;
 /// The browsers' own STUN server (RTC_CONFIG), for the server reflexive candidate.
 const STUN: &str = "stun:stun.l.google.com:19302";
-/// Gathering, as `waitForIceGathering` does it: until the reflexive candidate and a moment more, or complete.
-const GATHER_TIMEOUT: Duration = Duration::from_secs(10);
-const GATHER_SETTLE: Duration = Duration::from_millis(400);
+/// How long its name may take to resolve before webrtc-rs is left to resolve it ([`gather::stun_urls`]).
+const STUN_LOOKUP: Duration = Duration::from_secs(5);
 /// How often to ask for a keyframe while no picture has been decoded yet.
 const KEYFRAME_UNTIL_PICTURE: Duration = Duration::from_secs(1);
 
@@ -524,8 +525,7 @@ struct Shared {
     ice: Mutex<String>,
     told_connected: AtomicBool,
     /// The candidates gathered so far, and whether gathering is complete.
-    candidates: Mutex<(Vec<String>, bool)>,
-    gathered: Notify,
+    gathering: Gathering,
     receiving: Mutex<Vec<gst::Pipeline>>,
     /// The speaker chosen for the peer's sound, by name (None: the default).
     speaker: Mutex<Option<String>>,
@@ -563,18 +563,13 @@ struct Handler(Arc<Shared>);
 impl PeerConnectionEventHandler for Handler {
     async fn on_ice_candidate(&self, event: RTCPeerConnectionIceEvent) {
         if let Ok(init) = event.candidate.to_json() {
-            let mut candidates = self.0.candidates.lock().unwrap();
-            if !candidates.0.contains(&init.candidate) {
-                candidates.0.push(init.candidate);
-            }
+            self.0.gathering.add(init.candidate);
         }
-        self.0.gathered.notify_waiters();
     }
 
     async fn on_ice_gathering_state_change(&self, state: RTCIceGatheringState) {
         if state == RTCIceGatheringState::Complete {
-            self.0.candidates.lock().unwrap().1 = true;
-            self.0.gathered.notify_waiters();
+            self.0.gathering.complete();
         }
     }
 
@@ -1114,6 +1109,8 @@ pub struct Call {
     voice: Voice,
     microphone: Mutex<Microphone>,
     ssrcs: (u32, u32),
+    /// The profile has a TURN server: gathering waits for a relay candidate.
+    uses_turn: bool,
 }
 
 /// The microphone and the speaker a call starts with, by name (None: the default).
@@ -1125,15 +1122,18 @@ pub struct Devices {
 
 impl Call {
     /// The pipelines playing and the peer connection ready to offer or answer. `fake`: a test tone and nothing
-    /// played by default ([`fake_media`]; a device chosen by name is used all the same). `events` hears the ICE
-    /// state (JSON) and each picture that arrives (JPEG).
+    /// played by default ([`fake_media`]; a device chosen by name is used all the same). `servers`: the profile's
+    /// own ICE servers ([`ice::usable`] ones), after the built-in STUN server. `events` hears the ICE state (JSON)
+    /// and each picture that arrives (JPEG).
     pub async fn new(
         opus_pt: u8,
         vp8_pt: u8,
         fake: bool,
         devices: Devices,
+        servers: &[IceServer],
         events: Sink,
     ) -> Result<Call, String> {
+        let uses_turn = ice::uses_turn(servers);
         let mut media = MediaEngine::default();
         media
             .register_codec(codec(RtpCodecKind::Audio, opus_pt), RtpCodecKind::Audio)
@@ -1149,21 +1149,30 @@ impl Call {
             counts: Counts::default(),
             ice: Mutex::new("new".into()),
             told_connected: AtomicBool::new(false),
-            candidates: Mutex::default(),
-            gathered: Notify::new(),
+            gathering: Gathering::default(),
             receiving: Mutex::default(),
             speaker: Mutex::new(devices.speaker),
             sound: Mutex::default(),
             closed: AtomicBool::new(false),
         });
+        // By address: webrtc-rs would otherwise resolve the name on its driver, ahead of the host candidates.
+        let stun = gather::stun_urls(STUN, gather::resolve, STUN_LOOKUP).await;
+        // Then the profile's own servers (a TURN server, typically).
+        let ice_servers: Vec<RTCIceServer> = std::iter::once(RTCIceServer {
+            urls: stun,
+            ..Default::default()
+        })
+        .chain(servers.iter().map(|server| RTCIceServer {
+            urls: server.urls.clone(),
+            username: server.username.clone().unwrap_or_default(),
+            credential: server.credential.clone().unwrap_or_default(),
+        }))
+        .collect();
         let pc: Arc<dyn PeerConnection> = Arc::new(
             PeerConnectionBuilder::new()
                 .with_configuration(
                     RTCConfigurationBuilder::new()
-                        .with_ice_servers(vec![RTCIceServer {
-                            urls: vec![STUN.to_owned()],
-                            ..Default::default()
-                        }])
+                        .with_ice_servers(ice_servers)
                         .build(),
                 )
                 // An ICE restart (WISP 601, "Reconnecting") gathers anew on sockets bound again: after a
@@ -1236,6 +1245,7 @@ impl Call {
             voice,
             microphone: Mutex::new(microphone),
             ssrcs,
+            uses_turn,
         })
     }
 
@@ -1295,39 +1305,23 @@ impl Call {
         Ok(())
     }
 
-    /// Waits for the candidates worth sending, as `waitForIceGathering` does in a browser.
-    async fn gathered(&self) -> Vec<String> {
-        let started = Instant::now();
-        let mut reflexive_at: Option<Instant> = None;
-        loop {
-            let notified = self.shared.gathered.notified();
-            {
-                let candidates = self.shared.candidates.lock().unwrap();
-                if candidates.1 {
-                    return candidates.0.clone();
-                }
-                if reflexive_at.is_none() && candidates.0.iter().any(|c| c.contains(" typ srflx")) {
-                    reflexive_at = Some(Instant::now());
-                }
-            }
-            let deadline = match reflexive_at {
-                Some(at) => at + GATHER_SETTLE,
-                None => started + GATHER_TIMEOUT,
-            };
-            let now = Instant::now();
-            if now >= deadline {
-                return self.shared.candidates.lock().unwrap().0.clone();
-            }
-            let _ = tokio::time::timeout(deadline - now, notified).await;
-        }
-    }
-
     async fn local(&self, description: RTCSessionDescription) -> Result<String, String> {
+        let started = Instant::now();
         self.pc
             .set_local_description(description)
             .await
             .map_err(|e| e.to_string())?;
-        let gathered = self.gathered().await;
+        // With a TURN server, its relay candidate is the one to wait for, as `waitForIceGathering` does.
+        let awaited = if self.uses_turn {
+            gather::RELAY
+        } else {
+            gather::REFLEXIVE
+        };
+        let gathered = self
+            .shared
+            .gathering
+            .wait_for(gather::BOUNDS, awaited)
+            .await?;
         let local = self
             .pc
             .local_description()
@@ -1340,13 +1334,18 @@ impl Call {
             .filter(|l| l.starts_with("a=candidate:") && l.split(' ').nth(1) == Some("1"))
             .filter_map(|l| l.split(' ').nth(7))
             .collect();
-        crate::diagnostics::log(&format!("native call: {} with {kinds:?}", local.sdp_type));
+        crate::diagnostics::log(&format!(
+            "native call: {} with {kinds:?} ({} gathered in {} ms)",
+            local.sdp_type,
+            gathered.len(),
+            started.elapsed().as_millis()
+        ));
         Ok(described)
     }
 
     /// Forgets the candidates gathered so far: the description being made waits for this round's own.
     fn gather_anew(&self) {
-        *self.shared.candidates.lock().unwrap() = (Vec::new(), false);
+        self.shared.gathering.anew();
     }
 
     /// Our offer, gathered: what the page reads its signal from. `restart`: on a call that is up, an offer that
@@ -1638,9 +1637,16 @@ mod tests {
         }
         let frames = Arc::new(AtomicU64::new(0));
         let seen = frames.clone();
-        let a = Call::new(OPUS_PT, VP8_PT, true, Devices::default(), Arc::new(|_| {}))
-            .await
-            .unwrap();
+        let a = Call::new(
+            OPUS_PT,
+            VP8_PT,
+            true,
+            Devices::default(),
+            &[],
+            Arc::new(|_| {}),
+        )
+        .await
+        .unwrap();
         let a_camera = Camera::open(true, None, Arc::new(|_| {})).unwrap();
         assert_eq!(a_camera.device, None);
         a_camera.attach(Some(a.video_input()));
@@ -1655,6 +1661,7 @@ mod tests {
             vp8,
             true,
             Devices::default(),
+            &[],
             Arc::new(move |bytes: Vec<u8>| {
                 if bytes.starts_with(&[0xff, 0xd8]) {
                     seen.fetch_add(1, Ordering::Relaxed);
@@ -1765,12 +1772,19 @@ mod tests {
             eprintln!("skipped: {missing}");
             return;
         }
-        let a = Call::new(OPUS_PT, VP8_PT, true, Devices::default(), Arc::new(|_| {}))
-            .await
-            .unwrap();
+        let a = Call::new(
+            OPUS_PT,
+            VP8_PT,
+            true,
+            Devices::default(),
+            &[],
+            Arc::new(|_| {}),
+        )
+        .await
+        .unwrap();
         let offer = a.offer(false).await.unwrap();
         let (opus, vp8) = offered_payload_types(&offer);
-        let b = Call::new(opus, vp8, true, Devices::default(), Arc::new(|_| {}))
+        let b = Call::new(opus, vp8, true, Devices::default(), &[], Arc::new(|_| {}))
             .await
             .unwrap();
         let answer = b.answer(&offer, false).await.unwrap();

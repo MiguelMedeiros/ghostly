@@ -42,7 +42,7 @@ import { migrateWalletNetworks } from "./paymentAdapters/walletNetworks";
 import { perNetwork, type PerNetwork } from "./paymentAdapters/perNetwork";
 import { COMMUNITY_EDIT_FRAME, INVITE_TAKEN, LIVENESS_MISSED_PINGS, LIVENESS_PING_MS, MAX_GROUP_NAME_LENGTH, engineError, engineText, groupName, parseCommunityEdit, traceLink } from "@ghostly/core";
 import { ClockWatch, DirectPathWatch } from "@ghostly/core";
-import { GROUP_WAKE_FRAME, GROUP_WAKE_RECEIVE_LIMIT, GroupWakeLimiter, RateWindow, WAKE_CALL_INTERVAL_MS, WakeLimiter, groupWakeFrame, groupWakes, parseGroupWakeFrame, checkPushEndpoint, newWakeToken, relayRequest, vapidKeysMatch, wakeRequest, type PushRequest, type WakeKind, type WakeTarget } from "@ghostly/core";
+import { GROUP_WAKE_FRAME, GROUP_WAKE_RECEIVE_LIMIT, GroupWakeLimiter, RateWindow, WAKE_CALL_INTERVAL_MS, WakeLimiter, groupWakeFrame, groupWakes, parseGroupWakeFrame, checkPushEndpoint, newWakeToken, vapidKeysMatch, wakeRequest, type PushRequest, type WakeKind, type WakeTarget } from "@ghostly/core";
 import { COMMUNITY_REACTION_FRAME, GROUP_REACTION_FRAME, REACTION_LIMITS, ReactionWindow, queueReaction, readReaction, validReactionNumber, wireReaction, type WireReaction } from "@ghostly/core";
 import { COMMUNITY_PIN_FRAME, PIN_LIMITS, mayPin, pinIsNewer, pinNumberHolds, readPin, type GroupPinFrame, type WirePin } from "@ghostly/core";
 import { CapsExchange, DHT_TEXT_CAPABILITY, HOLD_CAPABILITY, TRANSPORTS, automaticTransport, capsDescriptors, dialDescriptors, type CapsContent, type CapsRecord, type PairingCredentials } from "@ghostly/core";
@@ -64,6 +64,10 @@ import {
   LIMITS,
   RELAY_POLL_INTERVALS,
   RTC_CONFIG,
+  type DeviceKind,
+  fromBase64Url,
+  type TurnNetwork,
+  turnKeys,
   RelayTransport,
   createChatInvite,
   createIdentity,
@@ -102,7 +106,29 @@ import {
   entryParams,
 } from "@ghostly/core";
 import type { AttentionCue, AttentionEvent, EngineImplementation } from "../shared/rpc";
-import { clearProfileStores, fileStore, type StoredFile } from "../shared/idb";
+import { STORES, clearProfileStores, databaseName, fileStore, openDb, store, wrap, type StoredFile } from "../shared/idb";
+import { knownDeviceGate, viewOf, type DeviceGateView } from "../devices/gate";
+import { deviceNetworkOf, saveDeviceNetwork } from "../devices/network";
+import { EnrollCodeError, EnrollInviter, EnrollJoiner, EnrollRefusal, ghostLinkEnrollChannel, recoverEnrollment, type EnrollView, type OpenEnrollChannel } from "../devices/enroll";
+import { DeviceLinks, deviceSetView, type DeviceSetView } from "../devices/links";
+import { amendDevice, moveDevice, readDeviceRecord } from "../devices/store";
+import { HandoffGiver, type BusyReport, type HandoffStay, type HandoffView } from "../devices/handoff";
+import { WALLET_SDK_PINS, handoffProfileHost, handoffSelf } from "../devices/handoffHost";
+import { handoffLinks, profileRecords } from "../devices/handoffStandby";
+import { isHandoffVerifier, makeHandoffVerifier, provesHandoffPassword, type HandoffVerifier } from "../devices/handoffPake";
+import { deviceIdentity, openTurnKeeper } from "../devices/setup";
+import { moveSet, resumeSetMove, type SetMovePorts } from "../devices/remove";
+import { newDeviceSecretDue } from "../devices/rotate";
+import { peekTurn, type TurnPeek } from "../devices/restoreGuard";
+import { afterStop, planHandoffWallets, type HandoffTakerFacts, type HandoffWalletPlan, type WalletHome } from "../devices/handoffWallets";
+import { clearWalletHomes, readWalletHomes, writeWalletHomes } from "../devices/walletHomes";
+import { postPush, profileWakeAfter, profileWakeOnRemoval, wakeOwnerOf } from "../devices/push";
+import { MAX_ALLOWED_TOKENS } from "../devices/state";
+import { awayFrom, setAwayWallets, setSingleWriterGate, refuseAway } from "./paymentAdapters/away";
+import { breezDatabaseInUse } from "./paymentAdapters/providers/breezDatabases";
+import { normalizePhrase } from "./paymentAdapters/providers/recoveryPhrase";
+import { lightningPaying } from "./paymentAdapters/providers/lightningService";
+import { COUNTER_RAISE_KEY, GROUP_ADMIN_OFF_KEY, PENDING_RAISE_KEY, applyCounterRaise, isCounterRaise, isGroupAdminOff, isPendingRaise, type PendingRaise } from "../devices/raise";
 import { fileBytes } from "../shared/fileBytes";
 import { FileAppender, readStored, removeStored, storedSize, streamStored } from "../shared/storedFiles";
 import { FileDesk } from "./fileDesk";
@@ -378,6 +404,23 @@ export interface NodeOptions {
   /** Where this engine runs, for the wallet providers that only work on some platforms. Default: web. */
   platform?: ProviderPlatform;
   /**
+   * The profiles of this storage are never on several devices (WISP 06 § Goals and non-goals): the CLI, whose profiles
+   * are always `single`. No device state database is made or read for them. Default: off.
+   */
+  singleDevice?: boolean;
+  /**
+   * Start in limited mode (WISP 06 § When a device checks): the device could not read which device is active, and the
+   * person chose "Start anyway". It is the profile offline: history can be read and messages written, which wait.
+   * Nothing is published, nothing is dialled, nothing is settled in hold storage, no wallet is opened and no admin
+   * work is done, until `leaveLimited()` is called after the first good read. Default: off.
+   */
+  limited?: boolean;
+  /**
+   * When the read the active device made as a condition of starting said it is the active one (ms): a single-writer
+   * wallet opens without another read while it is under 60 seconds old (WISP 06 § When a device checks).
+   */
+  turnReadAt?: number;
+  /**
    * This app stays online, so it offers to be a hub of the private groups past 16 members it is in (WISP 9xx · Group
    * Mesh § Hubs). Default: the Desktop app; the CLI says so itself; a browser tab only when the admin pins it.
    */
@@ -430,6 +473,11 @@ export interface NodeEvents {
   /** Only what changed in a chat's or group's history; without it, `onMessages` gets the whole history on each change. */
   onMessageChanges?(linkId: string, changes: MessageChanges): void;
   onCallSignal(linkId: string, signal: string): void;
+  /**
+   * The device state changed so that this engine may no longer run (WISP 06): another device took the turn. The state
+   * is written; the pages show the standby screen and start again into the gate.
+   */
+  onDeviceGate?(gate: DeviceGateView): void;
 }
 
 /**
@@ -452,8 +500,57 @@ function sentNow(message: StoredMessage): StoredMessage {
   return sent;
 }
 
+/** What a call refused in limited mode is answered with. */
+export const LIMITED_MODE_ERROR = "Ghostly could not check which device is active yet. This works once it can.";
+
+/**
+ * What the pages may call in limited mode (WISP 06 § When a device checks): reading history, writing messages (they
+ * wait), and the settings. Everything else is refused, whatever it would do: every wallet and payment call (no
+ * wallet is opened), every group change (no admin work), every new chat, join, call and identity change (nothing is
+ * dialled or published). A list of what is allowed, so a method added later is refused until someone decides.
+ *
+ * Deleting a message and sending one again are not on it: a delete withdraws the message's held item from hold
+ * storage and its pending payment request from the payment desk, and limited mode has neither (no storage, no
+ * wallet started). Done half, the item would still reach the contact. They work again once limited mode is left.
+ */
+export const LIMITED_MODE_METHODS: ReadonlySet<string> = new Set<keyof EngineApi>([
+  "setActiveLink", "renameLink", "updateSettings", "disconnect",
+  "sendMessage", "editMessage", "react", "pinMessage", "forwardMessages", "messageDetails", "messagePage",
+  "sendGroupMessage", "groupMessages", "statusCardIndex", "setTyping", "setGroupTyping", "setFastPoll", "exportLinks", "walletBackupReminder",
+]);
+
+/** Thrown by the transport when something tries to publish in limited mode: a bug in a switch point, never a wait. */
+export class LimitedModeError extends Error {
+  constructor() {
+    super("Nothing is published before the turn was read (limited mode)");
+    this.name = "LimitedModeError";
+  }
+}
+
+/**
+ * A transport over `transport` with every publish refused while `limited()` says so. The engine's own switches keep
+ * it from trying; this is the one place that cannot be forgotten, since every Pkarr record of a profile goes through
+ * it. A transport of its own: the one given is shared by every engine of the app (a profile switch makes a new one
+ * on the same transport), and must not keep this engine's refusal.
+ */
+function refusingWhileLimited(transport: PkarrTransport, limited: () => boolean): PkarrTransport {
+  const guarded = withRequestOptions(transport, {});
+  guarded.publish = (identity, records, options) => (limited() ? Promise.reject(new LimitedModeError()) : transport.publish(identity, records, options));
+  if (transport.publishPayload) guarded.publishPayload = (pubKeyZ32, payload, options) => (limited() ? Promise.reject(new LimitedModeError()) : transport.publishPayload!(pubKeyZ32, payload, options));
+  return guarded;
+}
+
 export class GhostlyNode implements EngineImplementation {
   private settings: Settings = DEFAULT_SETTINGS;
+  /** Limited mode (`NodeOptions.limited`): on from the start until `leaveLimited()`. */
+  private limitedMode = false;
+  /** Whether this engine is in limited mode (WISP 06 § When a device checks). */
+  get limited(): boolean { return this.limitedMode; }
+  /**
+   * Whether this engine may use the network for the profile: the person's own switch, and never in limited mode.
+   * Everything that publishes, dials, polls or settles asks this, not the stored setting.
+   */
+  private get networkOn(): boolean { return !!this.settings.online && !this.limitedMode; }
   private readonly transport: PkarrTransport;
   /** The same, for groups' requests: a relay budget keeps a chat's share from them (`CHAT_RESERVE`). */
   private readonly groupTransport: PkarrTransport;
@@ -760,6 +857,8 @@ export class GhostlyNode implements EngineImplementation {
   private readonly hold: HoldEngine = new HoldEngine({
     transport: undefined as unknown as PkarrTransport,
     storage: () => {
+      // Limited mode settles nothing in hold storage: with no storage the hold engine puts, reads and deletes nothing.
+      if (this.limitedMode) return null;
       const config = this.settings.holdStorage;
       if (!config?.s3 || !/^[a-z2-7]{16}$/.test(config.space ?? "")) return null;
       const key = JSON.stringify(config.s3);
@@ -843,7 +942,7 @@ export class GhostlyNode implements EngineImplementation {
       return { mine: stored?.participationSeed ? identityFromSeedB64(stored.participationSeed).pubKeyZ32 : undefined, theirs: stored?.pairedPeerKey };
     },
     linkIds: () => [...this.links.keys()],
-    online: () => this.settings.online,
+    online: () => this.networkOn,
     emit: () => { this.emitState(); this.did.changed(); void this.publicProfiles.prune().catch(() => {}); this.publicActivity.prune(); },
     publicProfile: (provider, subject) => this.publicProfiles.view({ provider, subject }),
     publish: (seed, records) => this.transport.publish(identityFromSeed(seed), records),
@@ -852,7 +951,7 @@ export class GhostlyNode implements EngineImplementation {
 
   /** The profile's did:dht: a key of its own, public, never tied to a chat (WISP 3xx-did-dht). */
   readonly did = new ProfileDid({
-    online: () => this.settings.online,
+    online: () => this.networkOn,
     emit: () => this.emitState(),
     listable: () => {
       const now = Date.now() / 1000;
@@ -869,7 +968,7 @@ export class GhostlyNode implements EngineImplementation {
   /** The Nostr social layer (profile, follows, notes, publication) on top of verified Nostr proofs. */
   private readonly nostrSocial = new NostrSocial({
     settings: () => this.settings.nostr,
-    online: () => this.settings.online,
+    online: () => this.networkOn,
     emit: () => this.emitState(),
     ownSubjects: () => this.identities.views().filter(p => p.provider === "nostr").map(p => p.subject),
     contactSubjects: linkId => {
@@ -897,7 +996,7 @@ export class GhostlyNode implements EngineImplementation {
   /** Public profiles of verified identities, read when their cards are on screen (PUBLIC-PROFILES.md). */
   private readonly publicProfiles = new PublicProfiles({
     enabled: () => this.settings.publicProfiles !== false,
-    online: () => this.settings.online,
+    online: () => this.networkOn,
     emit: () => this.emitState(),
     eligible: () => this.profileSubjects(),
     nostrRelays: () => effectiveNostrSettings(this.settings.nostr).relays,
@@ -906,7 +1005,7 @@ export class GhostlyNode implements EngineImplementation {
   /** A contact's verified identity's posts and follows, asked when its card is chosen (PUBLIC-PROFILES.md, "Posts and follows"). */
   private readonly publicActivity = new PublicActivity({
     enabled: () => this.settings.publicProfiles !== false,
-    online: () => this.settings.online,
+    online: () => this.networkOn,
     eligible: () => this.profileSubjects(),
     nostrRelays: () => effectiveNostrSettings(this.settings.nostr).relays,
     own: () => { const t = Math.floor(Date.now() / 1000); return this.identities.views().filter(p => p.expiresAt > t).map(p => ({ provider: p.provider, subject: p.verified.subject })); },
@@ -985,6 +1084,9 @@ export class GhostlyNode implements EngineImplementation {
     linkReady: (linkId, version = 1) => !!this.links.get(linkId)?.link?.supportsGroupVersion(version),
     linkOpen: linkId => !!this.links.get(linkId)?.link?.isDataLinkOpen,
     myNick: () => this.sharedNick,
+    // A copy started from older state sends above the copy it replaced, and manages no group until told to (WISP 06).
+    seqFloor: () => this.counterFloor,
+    adminWork: (groupId) => !this.limitedMode && !this.groupAdminOff.has(groupId),
     // An app with no WebRTC (the Linux Desktop) reaches members over native listeners, a few of them
     // (`GROUP_NATIVE_SLOTS`): it does not offer to be a private group's hub, which keeps an edge with everyone.
     staysOnline: () => this.options.staysOnline ?? (this.options.platform === "desktop" && typeof RTCPeerConnection !== "undefined"),
@@ -1171,9 +1273,14 @@ export class GhostlyNode implements EngineImplementation {
   ) {
     // Relays are a setting only where relays are the transport.
     this.relays = options.transport ? null : new RelayTransport();
-    this.transport = options.transport ?? this.relays!;
+    this.limitedMode = options.limited === true;
+    this.turnGoodAt = options.turnReadAt ?? null;
+    // An engine that starts properly uses the transport as it is, as before.
+    this.transport = this.limitedMode ? refusingWhileLimited(options.transport ?? this.relays!, () => this.limitedMode) : options.transport ?? this.relays!;
     this.groupTransport = withRequestOptions(this.transport, { group: true });
-    this.profilePeek = new ProfilePeek({ transport: this.transport, direct: !!this.transport.configure, online: () => this.settings.online !== false,
+    this.profilePeek = new ProfilePeek({ transport: this.transport, direct: !!this.transport.configure, online: () => this.networkOn,
+      // A CLI profile is always `single` (WISP 06 § Goals and non-goals): no device state database is made for it.
+      ...(options.singleDevice ? { runsHere: async () => true } : {}),
       readPath: () => readPathOf(this.relays ? { relays: this.relays.describe().relays } : this.settings, !!this.transport.configure) });
     this.pollIntervals = options.pollIntervals ?? RELAY_POLL_INTERVALS;
     this.localFetch = options.localFetch ?? webLocalFetch;
@@ -1240,7 +1347,7 @@ export class GhostlyNode implements EngineImplementation {
         ark: this.arkWallets[network].view, bark: this.barkWallets[network].view, fedimint: this.fedimintWallets[network].view, spark: this.sparkWallets[network].view,
         usdt: this.usdtWallets[network].view, lightning: this.lightnings[network].view, lightnings: this.lightnings[network].views(), bitcoin: this.bitcoins[network].view, awaiting: awaiting.networks[network] };
     }
-    const wallets = walletInstances(networks);
+    const wallets = this.withHomes(walletInstances(networks));
     // The flat fields are Mainnet's, for a caller from before wallets had their own network; `networks` has both.
     this.walletView = { ...networks.mainnet, networks, wallets, offers: this.walletOffers(networks, wallets), intents: (await intentRepository.list()).map((saved) => saved.review), setup: this.walletSetup.view() };
     this.announcePaymentNetworks(wallets);
@@ -1308,7 +1415,19 @@ export class GhostlyNode implements EngineImplementation {
     } finally {if(!this.shuttingDown)this.paymentTimer=setTimeout(()=>void this.pollPaymentStatus(),10000);}
   }
 
-  async start(): Promise<void> {
+  /** The start in progress or done, and whether it succeeded: `leaveLimited` waits for it. */
+  private starting: Promise<boolean> | null = null;
+
+  start(): Promise<void> {
+    const run = this.startNow();
+    this.starting = run.then(() => true, () => false);
+    return run;
+  }
+
+  private async startNow(): Promise<void> {
+    // A copy of the profile started from older state (a forced takeover, a restored backup) raises its counters once,
+    // before anything here reads them or publishes (WISP 06 § Raised counters).
+    await this.raiseCounters();
     // A new profile has nothing stored yet. Its wallets come from the first-run setup (where the app runs it), or from
     // New; no mint is added by itself here.
     const stored = await db.getSettings();
@@ -1328,25 +1447,8 @@ export class GhostlyNode implements EngineImplementation {
     this.did.start();
     await this.nostrSocial.load();
     await this.publicProfiles.load();
-    // Wallets stored the way they were before each had its own network take their network's key first. Nothing
-    // is deleted: see walletNetworks.ts. The report names keys only.
-    const migrated = await migrateWalletNetworks();
-    if (migrated.moved.length || migrated.unreadable.length) console.info("[wallet] wallets moved to their network's key:", migrated.moved.map((m) => m.key).join(", ") || "none", migrated.unreadable.length ? `; left as they were: ${migrated.unreadable.join(", ")}` : "");
-    for (const network of WALLET_NETWORKS) {
-      await this.arkWallets[network].start();
-      await this.barkWallets[network].start();
-      await this.fedimintWallets[network].start();
-      await this.sparkWallets[network].start();
-      await this.usdtWallets[network].start();
-      await this.lightnings[network].start();
-      await this.bitcoins[network].start();
-    }
-    await this.desk.start();
-    await this.refreshWallet();
-    this.wallet.start();
-    void this.dropStaleReviews();
-    this.staleReviewTimer ??= setInterval(() => void this.dropStaleReviews(), 60_000);
-    this.stopWatchingAdapters ??= onAdaptersChanged(() => { if (!this.shuttingDown) for (const network of WALLET_NETWORKS) { this.lightnings[network].refreshOffered(); this.bitcoins[network].refreshOffered(); } });
+    // Limited mode opens no wallet: they start when it is left (`leaveLimited`).
+    if (!this.limitedMode) await this.startWallets();
 
     const history = new Map<string, StoredMessage[]>();
     for (const stored of await db.getLinks()) {
@@ -1379,25 +1481,150 @@ export class GhostlyNode implements EngineImplementation {
     }
     // With the chats loaded, profiles of identities no longer verified can be told apart and dropped.
     this.publicProfiles.start();
-    if (this.settings.online) for (const linkId of this.nativeStartOrder([...history.keys()])) {
+    if (this.networkOn) for (const linkId of this.nativeStartOrder([...history.keys()])) {
       const messages = history.get(linkId)!;
       if (!this.links.has(linkId)) continue;
       this.startLink(linkId, messages);
       if (!this.links.get(linkId)?.stored.group) void this.refreshPublicProfiles({ linkId }).catch(() => {});
     }
     this.emitState();
-    if (this.settings.online) { this.hold.start(); this.startGroupEntries(); this.prepareSpare(STARTUP_QUIET_MS); }
-    void this.pollPaymentStatus().catch(()=>{});
-    // Federations joined before: opened (and the notes a contact sent that an interruption left unredeemed, redeemed).
-    void Promise.all(WALLET_NETWORKS.map((n) => this.fedimintWallets[n].ensureReady())).then(() => this.desk.resumeFedimint());
-    for (const network of WALLET_NETWORKS) {
-      // The Lightning and Bitcoin sources the person set up (the Cashu mints need no network to connect).
-      void this.lightnings[network].recover().then(() => this.lightnings[network].ensureReady());
-      void this.bitcoins[network].ensureReady();
-      this.openWallets(network);
+    if (this.networkOn) { this.hold.start(); this.startGroupEntries(); this.prepareSpare(STARTUP_QUIET_MS); }
+    if (!this.limitedMode) this.openStartedWallets(fresh);
+    // The active device of a device set (WISP 06): its links to the other devices, and its turn record put again. A
+    // `single` profile never gets here: the gate read no record for it, and nothing more is asked.
+    if (!this.options.singleDevice && this.networkOn && knownDeviceGate()?.state === "active") void this.startDeviceSet().catch(() => {});
+    // Started in limited mode because no source answered the read at start: it reads again every 30 seconds, and the
+    // first good read either starts it properly or stops it (WISP 06 § When a device checks).
+    if (!this.options.singleDevice && this.limitedMode && knownDeviceGate()?.state === "active") this.readTurnWhileLimited();
+  }
+
+  private limitedTimer: ReturnType<typeof setTimeout> | null = null;
+
+  /**
+   * The person turned the network on: an active device of a device set reads the turn before anything is dialled or
+   * published (WISP 06 § When a device checks), as it does at start. False: it does not go online now (another device
+   * took the turn, or no good read: limited mode, read again every 30 seconds).
+   */
+  private async turnBeforeOnline(): Promise<boolean> {
+    if (this.options.singleDevice || knownDeviceGate()?.state !== "active") return true;
+    // Limited while the read is out: what the person does in those seconds (a message, a payment) cannot publish
+    // before a good read says this device is still the active one. Cleared below on such a read.
+    this.limitedMode = true;
+    this.emitState();
+    const outcome: { kind: string; restricted?: boolean } | null = await (async () => {
+      const keeper = await openTurnKeeper(databaseName(), this.turnNetwork());
+      return keeper ? keeper.check(true) : null;
+    })().catch(() => null);
+    if (outcome?.kind === "gated") {
+      const record = await readDeviceRecord(databaseName()).catch(() => null);
+      if (record) await this.stopReplaced(viewOf(record));
+      return false;
     }
+    if (outcome?.kind === "single" || outcome?.kind === "start" || (outcome?.kind === "go-on" && !outcome.restricted)) { this.limitedMode = false; this.noteGoodTurn(); return true; }
+    this.readTurnWhileLimited();
+    this.emitState();
+    return false;
+  }
+
+  private readTurnWhileLimited(after = 30_000): void {
+    if (this.limitedTimer) clearTimeout(this.limitedTimer);
+    this.limitedTimer = setTimeout(() => {
+      this.limitedTimer = null;
+      void (async () => {
+        if (this.shuttingDown || !this.limitedMode) return;
+        const outcome: { kind: string; restricted?: boolean } | null = await (async () => {
+          const keeper = await openTurnKeeper(databaseName(), this.turnNetwork());
+          return keeper ? keeper.check(true) : null;
+        })().catch(() => null);
+        if (this.shuttingDown) return;
+        if (outcome?.kind === "gated") {
+          const record = await readDeviceRecord(databaseName()).catch(() => null);
+          if (record) await this.stopReplaced(viewOf(record));
+          return;
+        }
+        if (outcome && (outcome.kind === "start" || (outcome.kind === "go-on" && !outcome.restricted))) {
+          await this.leaveLimited().catch(() => {});
+          if (!this.limitedMode && this.networkOn) void this.startDeviceSet().catch(() => {});
+          return;
+        }
+        this.readTurnWhileLimited();
+      })();
+    }, after);
+  }
+
+  /** Every wallet's stored state, loaded: the first half of what `start()` does for money. */
+  private async startWallets(): Promise<void> {
+    // Which wallets are at home on another device (WISP 06 § Wallets that stay home): none of them opens here.
+    await this.loadWalletHomes();
+    // Every single-writer wallet asks before it opens its SDK, its retries included (WISP 06 § Wallets).
+    setSingleWriterGate(() => this.singleWriterTurn());
+    // Wallets stored the way they were before each had its own network take their network's key first. Nothing
+    // is deleted: see walletNetworks.ts. The report names keys only.
+    const migrated = await migrateWalletNetworks();
+    if (migrated.moved.length || migrated.unreadable.length) console.info("[wallet] wallets moved to their network's key:", migrated.moved.map((m) => m.key).join(", ") || "none", migrated.unreadable.length ? `; left as they were: ${migrated.unreadable.join(", ")}` : "");
+    for (const network of WALLET_NETWORKS) {
+      await this.arkWallets[network].start();
+      await this.barkWallets[network].start();
+      await this.fedimintWallets[network].start();
+      await this.sparkWallets[network].start();
+      await this.usdtWallets[network].start();
+      await this.lightnings[network].start();
+      await this.bitcoins[network].start();
+    }
+    await this.desk.start();
+    await this.refreshWallet();
+    this.wallet.start();
+    void this.dropStaleReviews();
+    this.staleReviewTimer ??= setInterval(() => void this.dropStaleReviews(), 60_000);
+    this.stopWatchingAdapters ??= onAdaptersChanged(() => { if (!this.shuttingDown) for (const network of WALLET_NETWORKS) { this.lightnings[network].refreshOffered(); this.bitcoins[network].refreshOffered(); } });
+    this.walletsStarted = true;
+  }
+
+  /** The wallets that exist, opened, and what was in flight looked at again: the second half. */
+  private openStartedWallets(fresh: boolean): void {
+    void this.pollPaymentStatus().catch(()=>{});
+    for (const network of WALLET_NETWORKS) {
+      // The Bitcoin source the person set up, and the token wallet: not single-writer wallets.
+      void this.bitcoins[network].ensureReady();
+      if (this.options.automaticWallets !== false) void this.usdtWallets[network].ensureReady();
+    }
+    // A wallet with one writer in the world opens only after a good turn read under 60 seconds old (WISP 06 § Wallets).
+    void this.openSingleWriters();
     // A new profile (nothing stored, no wallet, no chat) gets its default Mainnet wallets, in the background.
     void this.startWalletSetup(fresh && !this.walletView.wallets?.length && this.links.size === 0).catch(() => {});
+  }
+
+  /**
+   * Leaves limited mode after the first good turn read that says this device is the active one (WISP 06 § When a
+   * device checks: "the first good one either starts the engine properly or stops the device"). What `start()` left
+   * out runs now: the wallets, then every chat, the hold storage and the group entries, as when the person goes online.
+   */
+  async leaveLimited(): Promise<void> {
+    if (!this.limitedMode) return;
+    // Called while `start()` still loads the chats, it waits: there is nothing to dial before they are loaded.
+    if (!this.starting || !(await this.starting)) throw new Error("The engine did not start");
+    if (!this.limitedMode) return;
+    this.limitedMode = false;
+    // Left on a good read that says this device is the active one.
+    this.noteGoodTurn();
+    // A wallet that fails to start must not keep the chats from being dialled: the failure is reported after them.
+    let failure: unknown = null;
+    try {
+      // Wallets that started already (the engine went limited when the person turned the network on) start once.
+      if (!this.walletsStarted) {
+        await this.startWallets();
+        this.openStartedWallets(false);
+      }
+    } catch (error) { failure = error ?? new Error("The wallets did not start"); }
+    if (this.networkOn) {
+      for (const live of this.links.values()) this.startLink(live.stored.id, await db.getMessages(live.stored.id));
+      this.hold.start();
+      this.startGroupEntries();
+      this.prepareSpare(STARTUP_QUIET_MS);
+      void this.did.publishNow().catch(() => {});
+    }
+    this.emitState();
+    if (failure) throw failure;
   }
 
   /** The first-run wallet setup, where the app runs it (`NodeOptions.defaultWallets`): begun once, then what is left. */
@@ -1426,7 +1653,98 @@ export class GhostlyNode implements EngineImplementation {
     void this.arkWallets[network].ensureReady();
     void this.barkWallets[network].ensureReady();
     void this.sparkWallets[network].ensureReady();
-    void this.usdtWallets[network].ensureReady();
+  }
+
+  /** The single-writer wallets wait for a good turn read (`singleWriterTurn`); the next one opens them. */
+  private singleWritersWaiting = false;
+
+  /**
+   * Opens the wallets whose SDK database has one writer in the world (Fedimint, Spark and the Breez source, Ark, Bark),
+   * once a good turn read under 60 seconds old says this device is the active one. Without one they wait, and the next
+   * good read opens them.
+   */
+  private async openSingleWriters(): Promise<void> {
+    if (!(await this.singleWriterTurn())) { this.singleWritersWaiting = true; return; }
+    if (this.shuttingDown) return;
+    this.singleWritersWaiting = false;
+    // Federations joined before: opened (and the notes a contact sent that an interruption left unredeemed, redeemed).
+    void Promise.all(WALLET_NETWORKS.map((n) => this.fedimintWallets[n].ensureReady())).then(() => this.desk.resumeFedimint());
+    for (const network of WALLET_NETWORKS) {
+      // The Lightning sources the person set up (the Cashu mints need no network to connect).
+      void this.lightnings[network].recover().then(() => this.lightnings[network].ensureReady());
+      this.openWallets(network);
+    }
+  }
+
+  /** When the last good turn read said this device is the active one (ms); null before one. */
+  private turnGoodAt: number | null = null;
+
+  /** A good read said this device is the active one: single-writer wallets that waited for one open now. */
+  private noteGoodTurn(): void {
+    this.turnGoodAt = Date.now();
+    if (this.singleWritersWaiting && this.walletsStarted && !this.limitedMode) void this.openSingleWriters();
+  }
+
+  /**
+   * Whether a single-writer wallet may open now (WISP 06 § When a device checks: before opening one, a good read under
+   * 60 seconds old). A profile on one device has no turn. Otherwise the last good read counts while it is fresh; else
+   * the turn is read now, and a read that says another device took over stops this one.
+   */
+  private async singleWriterTurn(): Promise<boolean> {
+    if (this.options.singleDevice || knownDeviceGate()?.state !== "active") return true;
+    if (this.turnGoodAt !== null && Date.now() - this.turnGoodAt <= 60_000) return true;
+    if (this.limitedMode || !this.networkOn || this.shuttingDown) return false;
+    const outcome = await (async () => {
+      const keeper = await (this.deviceLinks?.turnKeeper() ?? openTurnKeeper(databaseName(), this.turnNetwork()));
+      return keeper ? keeper.check(false) : null;
+    })().catch(() => null);
+    if (outcome?.kind === "gated") {
+      const record = await readDeviceRecord(databaseName()).catch(() => null);
+      if (record) await this.stopReplaced(viewOf(record));
+      return false;
+    }
+    if (outcome?.kind === "single" || outcome?.kind === "start" || (outcome?.kind === "go-on" && !outcome.restricted)) { this.turnGoodAt = Date.now(); return true; }
+    return false;
+  }
+
+  // -- wallets at home on another device (WISP 06 § Wallets that stay home) -------------------------------------------
+
+  /** The home marks on this profile's wallet records, by wallet id. */
+  private walletHomes: Record<string, WalletHome> = {};
+  /** The wallets at home on another device: their home's name, and when their coins expire. */
+  private awayWallets = new Map<string, { device: string; expiresAt?: number }>();
+
+  /**
+   * Reads the home marks and says which wallets are away from this device. A profile with no device set has no other
+   * device: its marks are ignored, and every wallet is here.
+   */
+  private async loadWalletHomes(): Promise<void> {
+    this.walletHomes = await readWalletHomes().catch(() => ({}));
+    const away = new Map<string, { device: string; expiresAt?: number }>();
+    if (!this.options.singleDevice) {
+      const record = await readDeviceRecord(databaseName()).catch(() => null);
+      const own = record?.ownSlot !== undefined ? record.deviceSet[record.ownSlot]?.key : undefined;
+      // A mark that names a device the set no longer lists (a removal that stopped before it cleared the marks): taken off.
+      const listed = new Set(record?.deviceSet.flatMap((slot) => (slot ? [slot.key] : [])) ?? []);
+      if (record?.state === "active" && own && Object.values(this.walletHomes).some((home) => !listed.has(home.key))) {
+        if (await clearWalletHomes((key) => !listed.has(key)).catch(() => false)) this.walletHomes = await readWalletHomes().catch(() => ({}));
+      }
+      if (record && own) for (const [id, home] of Object.entries(this.walletHomes)) {
+        if (home.key === own) continue;
+        const device = record.deviceSet.find((slot) => slot?.key === home.key)?.name ?? "";
+        away.set(id, { device, ...(home.expiresAt !== undefined ? { expiresAt: home.expiresAt } : {}) });
+      }
+    }
+    this.awayWallets = away;
+    setAwayWallets(new Map([...away].map(([id, home]) => [id, home.device])));
+  }
+
+  /** The wallets as the deck shows them: one at home on another device says where. */
+  private withHomes(wallets: WalletInstanceView[]): WalletInstanceView[] {
+    return wallets.map((wallet) => {
+      const away = this.awayWallets.get(wallet.id);
+      return away ? { ...wallet, home: away } : wallet;
+    });
   }
 
   /**
@@ -1437,11 +1755,17 @@ export class GhostlyNode implements EngineImplementation {
     for (const live of this.links.values()) live.link?.depart();
   }
 
-  /** Tells every peer we are leaving. Best effort: the browser may already be closing. */
-  async shutdown(): Promise<void> {
+  /**
+   * Tells every peer we are leaving. Best effort: the browser may already be closing. `quiet`: says nothing to anyone
+   * (no goodbye, no departure in the links' packets), as a device another device replaced must (WISP 06 § When a
+   * device finds itself superseded: "Nothing is said to contacts and nothing more is published").
+   */
+  async shutdown(options: { quiet?: boolean } = {}): Promise<void> {
+    const quiet = options.quiet === true || this.gatedOut;
     this.shuttingDown = true;
+    if (this.limitedTimer) { clearTimeout(this.limitedTimer); this.limitedTimer = null; }
     // First, before anything that waits: every live contact hears this app is going, and watches for it to come back.
-    this.depart();
+    if (!quiet) this.depart();
     this.directPath.close();
     this.clock.close();
     this.clockOff?.();
@@ -1459,6 +1783,13 @@ export class GhostlyNode implements EngineImplementation {
     this.pinTimers.clear();
     this.stopGroupEntries();
     this.stopWatchingAdapters?.();
+    void this.enrollment?.cancel().catch(() => {});
+    this.enrollment = null;
+    const links = this.deviceLinks;
+    this.deviceLinks = null;
+    if (this.tombstoneTimer) clearInterval(this.tombstoneTimer);
+    this.tombstoneTimer = null;
+    await links?.stop().catch(() => {});
     this.identities.stop();
     this.did.stop();
     this.nostrSocial.stop();
@@ -1473,13 +1804,15 @@ export class GhostlyNode implements EngineImplementation {
       await this.lightnings[network].stop();
       await this.bitcoins[network].stop();
     }
+    // The Cashu wallet too: its polls would otherwise go on writing after the stop.
+    await this.wallet.stop();
     await this.nativeQueue;
     await this.hold.stop();
     await Promise.allSettled([...this.outboxes.values()].map(outbox => outbox.stop()));
     for (const queue of this.editQueues.values()) queue.stop();
     this.groupEdits.stop();
     this.cardEdits.stop();
-    await Promise.allSettled([...this.links.values()].map(async (live) => { await live.link?.stop(true); await live.caps?.stop(); }));
+    await Promise.allSettled([...this.links.values()].map(async (live) => { await live.link?.stop(!quiet); await live.caps?.stop(); }));
   }
 
   /**
@@ -1499,6 +1832,8 @@ export class GhostlyNode implements EngineImplementation {
     const groups = this.groups.views();
     return {
       settings: this.settings,
+      ...(this.limitedMode && { limited: true as const }),
+      ...(wakeOwnerOf(this.settings.wake, this.ownDeviceKey) && { wakeOwner: wakeOwnerOf(this.settings.wake, this.ownDeviceKey) }),
       transport: {
         ...this.transport.describe(), ...(this.options.irohWeb ? { iroh: { relays: this.irohRelays, defaults: [...DEFAULT_IROH_RELAYS] } } : {}),
         ...(this.transport.configure && { direct: true }), ...(this.transport.discovery && { discovery: this.transport.discovery() }),
@@ -1521,7 +1856,7 @@ export class GhostlyNode implements EngineImplementation {
       did: this.did.view(),
       nostr: this.nostrSocial.state(),
       edges: [...[...this.links.values()].filter(live => live.stored.group && !live.stored.groupEntry).map(live => this.viewOf(live)), ...this.communityPayViews(groups)],
-      groups: groups.map(group => ({ ...group, ...(this.reactionNotes.has(`group:${group.id}`) && { lastReaction: this.reactionNotes.get(`group:${group.id}`) }), ...this.groupWakeView(group), members: group.members.map(member => {
+      groups: groups.map(group => ({ ...group, ...(this.groupAdminOff.has(group.id) && { adminOff: true as const }), ...(this.reactionNotes.has(`group:${group.id}`) && { lastReaction: this.reactionNotes.get(`group:${group.id}`) }), ...this.groupWakeView(group), members: group.members.map(member => {
         const edge = member.me ? undefined : this.edgeView(group.id, member.key);
         return edge ? { ...member, edge } : member;
       }) })),
@@ -1631,7 +1966,7 @@ export class GhostlyNode implements EngineImplementation {
 
   /** One invite warmed and waiting (`after` ms from now), warmed again every so often while it waits (the relays forget). */
   private prepareSpare(after = 0): void {
-    if (this.shuttingDown || !this.settings.online) return;
+    if (this.shuttingDown || !this.networkOn) return;
     if (!this.spare) this.spare = this.makeSpare();
     const spare = this.spare;
     if (this.spareTimer) clearTimeout(this.spareTimer);
@@ -1703,7 +2038,7 @@ export class GhostlyNode implements EngineImplementation {
   }
   private async loadPublicProfiles(linkId: string, force: boolean): Promise<void> {
     if (!EXTERNAL_IDENTITIES_ENABLED) return;
-    const live=this.links.get(linkId);if(!live || !this.settings.online || live.stored.profileChoice==='ghostly')return;
+    const live=this.links.get(linkId);if(!live || !this.networkOn || live.stored.profileChoice==='ghostly')return;
     const mine=live.myPubKeyZ32;
     // Participation, not rendezvous, is the proof audience.
     const audience=live.stored.participationSeed ? identityFromSeedB64(live.stored.participationSeed).pubKeyZ32 : mine;
@@ -1835,8 +2170,14 @@ export class GhostlyNode implements EngineImplementation {
       if (!vapidKeysMatch(subscription.vapid)) throw new Error("The VAPID keys are not a pair");
     }
     const before = this.settings.wake;
-    this.settings = { ...this.settings, wake: subscription ?? undefined };
-    if (!subscription) delete this.settings.wake;
+    // In a profile on several devices the subscription names this device, whose own it is (WISP 06 § Push and the
+    // phone): it moves with the profile, and the other devices are told how to wake this one.
+    const wake: WakeSubscription | null = subscription && {
+      endpoint: subscription.endpoint, p256dh: subscription.p256dh, auth: subscription.auth, vapid: subscription.vapid, ...(this.ownDeviceKey ? { device: this.ownDeviceKey } : {}),
+    };
+    this.settings = { ...this.settings, wake: wake ?? undefined };
+    if (!wake) delete this.settings.wake;
+    void this.deviceLinks?.setOwnPush(subscription && { endpoint: subscription.endpoint, p256dh: subscription.p256dh, auth: subscription.auth, vapid: subscription.vapid }).catch(() => {});
     // Replaced or turned off: whoever held the old subscription can no longer post to it.
     delete this.settings.wakeRotate;
     delete this.settings.wakeHeldBy;
@@ -1872,11 +2213,121 @@ export class GhostlyNode implements EngineImplementation {
     this.emitState();
   }
 
-  /** A contact that held this profile's subscription is gone or muted: the app is to replace it (`wakeRotate`). */
-  private async rotateWake(): Promise<void> {
-    if (!this.settings.wake || this.settings.wakeRotate) return;
-    this.settings = { ...this.settings, wakeRotate: true };
+  /**
+   * The page found that the profile's subscription is this browser's own (its endpoint is the one the browser holds):
+   * in a profile on several devices it names this device from now on, and the other devices learn how to wake it
+   * (WISP 06 § Push and the phone). For a subscription made before the profile had a device set. Nothing otherwise.
+   */
+  async wakeConfirm({ endpoint }: { endpoint: string }): Promise<void> {
+    const wake = this.settings.wake;
+    if (!wake || wake.endpoint !== endpoint || !this.ownDeviceKey) return;
+    if (wake.device !== this.ownDeviceKey) {
+      this.settings = { ...this.settings, wake: { ...wake, device: this.ownDeviceKey } };
+      await db.putSettings(this.settings);
+      this.emitState();
+    }
+    await this.deviceLinks?.setOwnPush(wake).catch(() => {});
+  }
+
+  /**
+   * Another device of the set shared its push target, or said it has none (`device-wake`): the profile's target follows
+   * the rules of `profileWakeAfter`, and contacts get the new one under the tokens they hold, so that device's push
+   * worker still knows each chat.
+   */
+  private async deviceWakeReceived(from: string, target: WakeTarget | null): Promise<void> {
+    if (!this.ownDeviceKey || this.shuttingDown) return;
+    const before = this.settings.wake;
+    // A new subscription asked of `from` (`wakeRenew`) is done once it shares another endpoint than the one to replace.
+    const asked = this.settings.wakeRenew?.[from];
+    if (asked !== undefined && (!target || target.endpoint !== asked)) {
+      const { [from]: _done, ...rest } = this.settings.wakeRenew!;
+      this.settings = { ...this.settings, wakeRenew: Object.keys(rest).length ? rest : undefined };
+      if (!this.settings.wakeRenew) delete this.settings.wakeRenew;
+      this.renewAsked.delete(from);
+      await db.putSettings(this.settings);
+    }
+    const { next, changed } = profileWakeAfter(before, from, target, this.ownDeviceKey);
+    // That device replaced (or dropped) the subscription the profile handed out: whoever held the old one reaches nothing.
+    if (changed) await this.replaceProfileWake(next, { rotated: before?.device === from && (!target || target.endpoint !== before.endpoint) });
+  }
+
+  /** The subscription this device's record keeps as its own becomes the profile's, when the profile has another device's. */
+  private async ownWakeWins(): Promise<void> {
+    if (!this.ownDeviceKey || this.options.singleDevice) return;
+    const own = (await readDeviceRecord(databaseName()))?.push?.own;
+    if (!own || this.settings.wake?.device === this.ownDeviceKey) return;
+    // A new subscription still asked of that device stays asked (`wakeRenew`): a contact may hold its old one.
+    await this.replaceProfileWake({ endpoint: own.e, p256dh: own.p, auth: own.a, vapid: { publicKey: own.vp, privateKey: own.vk }, device: this.ownDeviceKey });
+  }
+
+  /**
+   * The profile's push target replaced by another device's (or gone), every chat's token kept. `rotated`: the one it
+   * replaces no longer exists (its device made a new one, or none), so a new subscription asked for it is done.
+   */
+  private async replaceProfileWake(next: WakeSubscription | undefined, { rotated = false }: { rotated?: boolean } = {}): Promise<void> {
+    this.settings = { ...this.settings, wake: next };
+    if (!next) delete this.settings.wake;
+    if (rotated || !next) delete this.settings.wakeRotate;
     await db.putSettings(this.settings);
+    for (const live of this.links.values()) {
+      const edge = this.meshEdge(live.stored);
+      if (!edge && (!live.stored.profile || live.stored.group)) continue;
+      if (!next) { if (edge) this.sendGroupWake(live, null); else if (live.link?.supportsWake) live.link.sendWake(null); continue; }
+      void (edge ? this.shareGroupWake(live.stored.id) : this.shareWake(live.stored.id));
+    }
+    this.emitState();
+  }
+
+  /**
+   * Someone who held this profile's subscription should no longer reach it (a contact deleted or muted, a device
+   * removed): it is replaced (`wakeRotate`). This device's own, by its page. Another device's (the phone's, handed out
+   * while this desktop is active), by that device: it is asked over the device link (`wakeRenew`, said again on each
+   * session until it shares a new one), and `wakeRotate` stays until then (WISP 06 § Push and the phone).
+   */
+  private async rotateWake(): Promise<void> {
+    const wake = this.settings.wake;
+    if (!wake) return;
+    const owner = wake.device && wake.device !== this.ownDeviceKey ? wake.device : undefined;
+    const ask = owner !== undefined && this.settings.wakeRenew?.[owner] !== wake.endpoint;
+    if (this.settings.wakeRotate && !ask) return;
+    this.settings = { ...this.settings, wakeRotate: true, ...(ask ? { wakeRenew: { ...this.settings.wakeRenew, [owner!]: wake.endpoint } } : {}) };
+    await db.putSettings(this.settings);
+    if (ask) { this.renewAsked.delete(owner!); this.askDeviceRenewals(); }
+  }
+
+  /** Devices asked for a new subscription on their link's current session. */
+  private readonly renewAsked = new Set<string>();
+
+  /** Asks each device that still owes a new subscription, once per session of its link. */
+  private askDeviceRenewals(): void {
+    const links = this.deviceLinks;
+    if (!links) return;
+    for (const key of Object.keys(this.settings.wakeRenew ?? {})) {
+      if (!links.live(key)) { this.renewAsked.delete(key); continue; }
+      if (!this.renewAsked.has(key) && links.askRenew(key)) this.renewAsked.add(key);
+    }
+  }
+
+  /** What each device was last told of the chats' tokens, by its signing key. */
+  private readonly sentTokens = new Map<string, string>();
+
+  /**
+   * Tells each other device which chats' tokens the profile hands out (`device-tokens`): the push worker of a standby
+   * shows a notice only for those, so a chat deleted or muted here stays quiet there too. Said when it changes, and on
+   * each session of a link.
+   */
+  private syncDeviceTokens(): void {
+    const links = this.deviceLinks;
+    if (!links || !this.ownDeviceKey) return;
+    // A muted group's edges may still hold a token (one the member keeps, an edge stored before the mute): never handed out.
+    const mutedGroups = new Set(this.settings.wakeMutedGroups ?? []);
+    const tokens = [...new Set([...this.links.values()].flatMap((live) => (live.stored.wakeToken && !live.stored.wakeMuted && !(live.stored.group && mutedGroups.has(live.stored.group)) ? [live.stored.wakeToken] : [])))].sort().slice(0, MAX_ALLOWED_TOKENS);
+    const said = JSON.stringify(tokens);
+    for (const view of links.views()) {
+      if (view.earlier) continue;
+      if (view.status !== "live") { this.sentTokens.delete(view.key); continue; }
+      if (this.sentTokens.get(view.key) !== said && links.sendTokens(view.key, tokens)) this.sentTokens.set(view.key, said);
+    }
   }
 
   /**
@@ -1996,7 +2447,7 @@ export class GhostlyNode implements EngineImplementation {
    * reach now, is woken, within the limits. Never waits, never fails the send.
    */
   private wakeMentioned(groupId: string, text: string, mentions: readonly GroupMention[]): void {
-    if (!mentions.length || !this.settings.online || this.groups.isCommunityGroup(groupId)) return;
+    if (!mentions.length || !this.networkOn || this.groups.isCommunityGroup(groupId)) return;
     const edges = this.memberEdges(groupId);
     const wakes = groupWakes({
       group: groupId, mentions, text, limiter: this.groupWakeLimiter,
@@ -2009,7 +2460,7 @@ export class GhostlyNode implements EngineImplementation {
   /** The contact is away: one wake-up, if it shared how and none went to it lately. Never waits, never fails a send. */
   private wakePeer(live: LiveLink, kind: WakeKind = "message"): void {
     const target = live.stored.peerWake, linkId = live.stored.id;
-    if (!target || !live.stored.profile || live.stored.group || !this.settings.online) return;
+    if (!target || !live.stored.profile || live.stored.group || !this.networkOn) return;
     if (!(kind === "call" ? this.callWakeLimiter : this.wakeLimiter).take(linkId)) return;
     this.postWake(linkId, target, kind);
   }
@@ -2036,7 +2487,7 @@ export class GhostlyNode implements EngineImplementation {
    */
   async wakeForCall({ linkId }: { linkId: string }): Promise<boolean> {
     const live = this.links.get(linkId);
-    if (!live?.stored.peerWake || !live.stored.profile || live.stored.group || live.link?.isDataLinkOpen || !this.settings.online) return false;
+    if (!live?.stored.peerWake || !live.stored.profile || live.stored.group || live.link?.isDataLinkOpen || !this.networkOn) return false;
     this.wakePeer(live, "call");
     // It is looked for at once too: the woken app answers on the DHT first.
     live.link?.session.pollNow();
@@ -2044,21 +2495,8 @@ export class GhostlyNode implements EngineImplementation {
   }
 
   /** Posts a wake-up: the host's way, or `fetch`, then the push relay when a page may not post it itself. */
-  private async postPush(request: PushRequest): Promise<number> {
-    if (this.options.pushSend) return this.options.pushSend(request);
-    const quiet = { credentials: "omit", referrerPolicy: "no-referrer", redirect: "error" } as const;
-    try {
-      const response = await fetch(request.url, { method: "POST", headers: request.headers, body: request.body as BodyInit, signal: AbortSignal.timeout(10_000), ...quiet });
-      return response.status;
-    } catch (error) {
-      const relay = this.settings.pushRelay;
-      if (!relay) throw error;
-      const response = await fetch(relay, {
-        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(relayRequest(request)), signal: AbortSignal.timeout(15_000), ...quiet,
-      });
-      const answer = await response.json().catch(() => null) as { status?: unknown } | null;
-      return typeof answer?.status === "number" ? answer.status : response.status;
-    }
+  private postPush(request: PushRequest): Promise<number> {
+    return postPush(request, { pushSend: this.options.pushSend, relay: this.settings.pushRelay });
   }
 
   removeLink({ linkId }: { linkId: string }): void {
@@ -3149,7 +3587,7 @@ export class GhostlyNode implements EngineImplementation {
   disableGroupLink({ groupId }: { groupId: string }): Promise<void> { return this.groups.disableLink(groupId); }
   async joinGroupByLink({ link }: { link: string }): Promise<{ groupId: string }> {
     if (typeof link !== "string") throw new Error("This is not a link to a group");
-    if (!this.settings.online) throw new Error("Go online to join a group");
+    if (!this.networkOn) throw new Error("Go online to join a group");
     return { groupId: await this.groups.joinByLink(link) };
   }
   async sendGroupMessage({ groupId, text: given, mentions, replyTo, card: raw, button }: { groupId: string; text: string; mentions?: GroupMention[]; replyTo?: string; card?: unknown; button?: string }): Promise<{ error: string | null; messageId?: string; refused?: boolean }> {
@@ -3541,6 +3979,8 @@ export class GhostlyNode implements EngineImplementation {
     const { type, network } = params;
     if (!WALLET_TYPES.includes(type)) throw new Error("Unknown kind of wallet");
     if (network !== "mainnet" && network !== "testnet") throw new Error("Choose Mainnet or Testnet");
+    // A wallet at home on another device is neither made again nor joined to here.
+    if (type !== "lightning" && type !== "cashu") refuseAway(`${type}:${network}`, WALLET_NAMES[type]);
     await this.refreshWallet();
     const offer = this.walletView.offers?.find((o) => o.type === type && o.network === network);
     if (offer && !offer.available) throw new Error(offer.reason ?? "This wallet cannot be made here");
@@ -3558,12 +3998,13 @@ export class GhostlyNode implements EngineImplementation {
         await this.creating(this.fedimintWallets[network], () => this.fedimintWallets[network].join(params.invite!));
         void this.lightnings[network].ensureReady();
       } else {
-        const sources = type === "lightning" ? (await this.lightningCard(network)).sources : this.bitcoins[network].sources;
+        const sources = type === "lightning" ? (await this.lightningCard(network, undefined, true)).sources : this.bitcoins[network].sources;
         const providerId = params.providerId ?? "";
         const descriptor = sources.view.offered.find((d) => d.id === providerId);
         if (!descriptor) throw new Error(`Choose a ${type === "lightning" ? "Lightning" : "Bitcoin"} source that runs on ${networkLabel(network)}`);
         // What the person left blank takes the network's default (a BDK wallet's chain), the rest as typed.
         const values = { ...Object.fromEntries(descriptor.fields.flatMap((f) => f.defaults?.[network] ? [[f.name, f.defaults[network]!]] : [])), ...(params.values ?? {}) };
+        if (type === "lightning" && providerId === BREEZ_SOURCE) await this.refuseAwayBreez(network, values.mnemonic);
         // Lightning: one more card, next to the network's others (the same source may be added again, not the same wallet).
         if (type === "lightning") card = await this.creating(this.lightnings[network], () => this.lightnings[network].add(providerId, values));
         else await this.creating(sources, () => sources.set(providerId, values));
@@ -3642,6 +4083,8 @@ export class GhostlyNode implements EngineImplementation {
     // What goes, as a noun: a card is a card, not "the … card wallet".
     const label = lightningName ? `${networkLabel(network)} Lightning card “${lightningName}”` : `${networkLabel(network)} ${WALLET_NAMES[type]} wallet`;
     if (!this.walletView.wallets?.some((w) => w.type === type && w.network === network && (card === undefined || w.card === card))) throw new Error(`There is no ${label} to remove`);
+    // Its database is on its home device: removed there, never from here.
+    refuseAway(type === "lightning" ? `lightning:${network}:${card}` : `${type}:${network}`, lightningName ?? WALLET_NAMES[type]);
     const first = walletRemoval(type, network, this.walletView.networks?.[network], this.walletView.intents, card);
     if (first.comesWith) throw new Error(`Lightning through the Cashu mints comes with your ${networkLabel(network)} Cashu wallet: remove that wallet to remove it`);
     // Ecash minted now is counted in what it holds, not deleted with its invoice.
@@ -3770,7 +4213,8 @@ export class GhostlyNode implements EngineImplementation {
 
   /** The networks of this profile's wallets, per way of paying: every chat tells its contact (paired-payments). */
   private announcePaymentNetworks(wallets: WalletInstanceView[]) {
-    const key = JSON.stringify(paymentNetworksOf(wallets));
+    // A wallet at home on another device takes no payment here: it is not offered to contacts.
+    const key = JSON.stringify(paymentNetworksOf(wallets.filter((w) => !w.home)));
     if (key === this.announcedNetworks) return;
     this.announcedNetworks = key;
     for (const live of this.links.values()) live.link?.setPaymentNetworks?.(this.chatNetworks(live.stored));
@@ -3778,7 +4222,7 @@ export class GhostlyNode implements EngineImplementation {
   private announcedNetworks = "";
   /** What a chat announces: the networks of this profile's wallets, per way of paying, that the chat accepts. */
   private chatNetworks(stored: StoredLink): PaymentNetworks {
-    const mine = paymentNetworksOf(this.walletView.wallets ?? []);
+    const mine = paymentNetworksOf((this.walletView.wallets ?? []).filter((w) => !w.home));
     return Object.fromEntries(Object.entries(mine).map(([method, networks]) => [method, networks!.filter((n) => this.acceptsNetwork(stored, method as PaymentMethodName, n))]));
   }
   /** This chat takes this way of paying on this network (a card on its Accept side). */
@@ -3856,7 +4300,29 @@ export class GhostlyNode implements EngineImplementation {
   lnurlResolve({ text, network }: { text: string; network?: WalletNetwork }) { return this.lightnings[this.net(network)].resolveDestination(text); }
   lnurlInvoice({ id, amount, comment, network }: { id: string; amount: number; comment?: string; network?: WalletNetwork }) { return this.lightnings[this.net(network)].destinationInvoice(id, amount, comment); }
   /** A Lightning card of a network (the default for receiving without `card`), once the network's cards are open. */
-  private async lightningCard(network: WalletNetwork, card?: string) { const cards = this.lightnings[network]; await cards.start(); return cards.card(card); }
+  /**
+   * A Lightning card of the network (the default for receiving without `card`). One at home on another device is
+   * refused (WISP 06 § Wallets that stay home): its source is never connected, paid through or changed here.
+   * `anyCard`: only the network's list of sources is wanted (New), not a card to use.
+   */
+  private async lightningCard(network: WalletNetwork, card?: string, anyCard = false) {
+    const cards = this.lightnings[network];
+    await cards.start();
+    const id = card ?? cards.receivingId;
+    if (!anyCard) refuseAway(`lightning:${network}:${id}`, this.walletView.networks?.[network].lightnings?.find((c) => c.card === id)?.name || WALLET_NAMES.lightning);
+    return cards.card(card);
+  }
+
+  /**
+   * A Breez Lightning card from this phrase would open the Breez wallet of a Spark wallet or Breez card at home on
+   * another device (one phrase, one database in a profile, `breezDatabaseInUse`): two writers. Refused.
+   */
+  private async refuseAwayBreez(network: WalletNetwork, mnemonic: string | undefined): Promise<void> {
+    if (!mnemonic) return;
+    const name = await breezDatabaseInUse(network === "mainnet" ? "bitcoin" : "regtest", normalizePhrase(mnemonic));
+    if (awayFrom(`spark:${network}`) !== undefined && (await this.sparkWallets[network].breezDatabase().catch(() => undefined)) === name) refuseAway(`spark:${network}`, WALLET_NAMES.spark);
+    for (const [id, other] of (await this.lightnings[network].handoffFacts().catch(() => null))?.breez ?? []) if (other === name) refuseAway(id, WALLET_NAMES.lightning);
+  }
   /** The Lightning card that holds this quote, or a refusal: nothing is paid without one. */
   private lightningQuote(network: WalletNetwork, quote: string) {
     const card = this.lightnings[network].withQuote(quote);
@@ -3873,7 +4339,8 @@ export class GhostlyNode implements EngineImplementation {
    */
   async lightningSetSource({ providerId, values, network, card }: { providerId: string; values: Record<string, string>; network?: WalletNetwork; card?: string }) {
     const cards = this.lightnings[this.net(network)];
-    const target = await this.lightningCard(this.net(network), card);
+    if (providerId === BREEZ_SOURCE) await this.refuseAwayBreez(this.net(network), values?.mnemonic);
+    const target = await this.lightningCard(this.net(network), card, card === undefined);
     if (card !== undefined) {
       if (target.view.providerId !== providerId || providerId === CASHU_MINT_SOURCE) throw new Error("A card keeps its source: add another card with New");
       await target.sources.set(providerId, values);
@@ -3898,12 +4365,24 @@ export class GhostlyNode implements EngineImplementation {
   async lightningReconfigureSource({ values, network, card }: { values: Record<string, string>; network?: WalletNetwork; card?: string }) { await (await this.lightningCard(this.net(network), card)).sources.reconfigure(values); await this.refreshWallet(); }
   async lightningRefresh(params?: { network?: WalletNetwork; card?: string }) { const lightning = await this.lightningCard(this.net(params?.network), params?.card); await lightning.sources.refresh(); await lightning.reconcile(); }
   /** Makes a card its network's default for receiving: chat requests and Receive use it unless another is picked. */
-  async lightningSetReceive({ network, card }: { network: WalletNetwork; card: string }) { await this.lightnings[this.net(network)].setReceive(card); await this.refreshWallet(); }
+  async lightningSetReceive({ network, card }: { network: WalletNetwork; card: string }) {
+    // A card at home on another device cannot receive here, so it is never this device's default for receiving.
+    refuseAway(`lightning:${this.net(network)}:${card}`, this.walletView.networks?.[this.net(network)].lightnings?.find((c) => c.card === card)?.name || WALLET_NAMES.lightning);
+    await this.lightnings[this.net(network)].setReceive(card); await this.refreshWallet();
+  }
   async lightningRename({ network, card, name }: { network: WalletNetwork; card: string; name: string }) { await this.lightnings[this.net(network)].rename(card, name); await this.refreshWallet(); }
-  async bitcoinSetSource({ providerId, values, network }: { providerId: string; values: Record<string, string>; network?: WalletNetwork }) { await this.bitcoins[this.net(network)].sources.set(providerId, values); await this.refreshWallet(); }
-  async bitcoinClearSource(params?: { network?: WalletNetwork }) { await this.bitcoins[this.net(params?.network)].sources.clear(); await this.refreshWallet(); }
-  async bitcoinRetrySource(params?: { network?: WalletNetwork }) { await this.bitcoins[this.net(params?.network)].sources.retryNow(); await this.refreshWallet(); }
-  async bitcoinReconfigureSource({ values, network }: { values: Record<string, string>; network?: WalletNetwork }) { await this.bitcoins[this.net(network)].sources.reconfigure(values); await this.refreshWallet(); }
+  /**
+   * The on-chain source of a network at home on another device (a Bitcoin Core wallet stays home, WISP 06 § Wallets
+   * that stay home) is never set, cleared, retried or reconfigured here: each would write over the record its home
+   * device runs from, or connect to a wallet only that device may use.
+   */
+  private refuseAwayBitcoin(network: WalletNetwork): void {
+    refuseAway(`bitcoin:${network}`, WALLET_NAMES.bitcoin);
+  }
+  async bitcoinSetSource({ providerId, values, network }: { providerId: string; values: Record<string, string>; network?: WalletNetwork }) { this.refuseAwayBitcoin(this.net(network)); await this.bitcoins[this.net(network)].sources.set(providerId, values); await this.refreshWallet(); }
+  async bitcoinClearSource(params?: { network?: WalletNetwork }) { this.refuseAwayBitcoin(this.net(params?.network)); await this.bitcoins[this.net(params?.network)].sources.clear(); await this.refreshWallet(); }
+  async bitcoinRetrySource(params?: { network?: WalletNetwork }) { this.refuseAwayBitcoin(this.net(params?.network)); await this.bitcoins[this.net(params?.network)].sources.retryNow(); await this.refreshWallet(); }
+  async bitcoinReconfigureSource({ values, network }: { values: Record<string, string>; network?: WalletNetwork }) { this.refuseAwayBitcoin(this.net(network)); await this.bitcoins[this.net(network)].sources.reconfigure(values); await this.refreshWallet(); }
   async bitcoinReceiveAddress(params?: { network?: WalletNetwork }) { const address = await this.bitcoins[this.net(params?.network)].receiveAddress(); await this.refreshWallet(); return address; }
   bitcoinRefresh(params?: { network?: WalletNetwork }) { return this.bitcoins[this.net(params?.network)].sources.refresh(); }
 
@@ -3926,6 +4405,8 @@ export class GhostlyNode implements EngineImplementation {
    * other network refuses it untouched (WrongNetworkError) before this hands it on.
    */
   private async restoreInto<W, R>(wallets: PerNetwork<W>, network: WalletNetwork | undefined, restore: (wallet: W) => Promise<R>): Promise<{ wallet: W; result: R }> {
+    const kind = wallets === (this.arkWallets as unknown) ? "arkade" : wallets === (this.barkWallets as unknown) ? "bark" : wallets === (this.sparkWallets as unknown) ? "spark" : wallets === (this.usdtWallets as unknown) ? "usdt" : wallets === (this.fedimintWallets as unknown) ? "fedimint" : null;
+    if (kind) refuseAway(`${kind}:${this.net(network)}`, WALLET_NAMES[kind]);
     const first = wallets[this.net(network)];
     try { return { wallet: first, result: await restore(first) }; }
     catch (error) {
@@ -4002,6 +4483,8 @@ export class GhostlyNode implements EngineImplementation {
    */
   async sparkUseForLightning(params?: { network?: WalletNetwork }) {
     const network = this.net(params?.network);
+    // A Spark wallet at home on another device: its Breez wallet is opened there only.
+    refuseAway(`spark:${network}`, WALLET_NAMES.spark);
     const { mnemonic, apiKey } = await this.sparkWallets[network].backup();
     await this.lightningSetSource({ providerId: BREEZ_SOURCE, values: { mnemonic, ...(apiKey ? { apiKey } : {}) }, network });
   }
@@ -4212,7 +4695,7 @@ export class GhostlyNode implements EngineImplementation {
     const settings: Partial<Settings> = rest;
     // The backup reminders are the engine's: only a wallet's backup, a profile backup or "Later" changes them.
     delete settings.backupReminders;
-    const wasOnline = this.settings.online;
+    const wasOnline = this.networkOn;
     // Checked before anything changes: a relay list with no relay, or a TURN server a browser rejects,
     // would leave this peer unreachable or without WebRTC.
     for (const server of settings.iceServers ?? []) { const problem = iceServerProblem(server); if (problem) throw new Error(problem); }
@@ -4241,6 +4724,7 @@ export class GhostlyNode implements EngineImplementation {
     delete (settings as Partial<Settings>).wakeRotate;
     delete (settings as Partial<Settings>).wakeMutedGroups;
     delete (settings as Partial<Settings>).wakeHeldBy;
+    delete (settings as Partial<Settings>).wakeRenew;
     // The first-run wallet setup's record: the engine's alone.
     delete (settings as Partial<Settings>).walletSetup;
     const relayBefore = this.hyperdhtRelay;
@@ -4300,7 +4784,7 @@ export class GhostlyNode implements EngineImplementation {
       // The default is kept as no setting at all, so a later default reaches whoever never chose.
       if (settings.hyperdhtRelay === DEFAULT_HYPERDHT_RELAY) delete this.settings.hyperdhtRelay;
       await db.putSettings(this.settings);
-      if (this.hyperdhtRelay !== relayBefore && this.settings.online) await this.relayChanged();
+      if (this.hyperdhtRelay !== relayBefore && this.networkOn) await this.relayChanged();
     }
     if (settings.pushRelay !== undefined) {
       if (!this.settings.pushRelay) delete this.settings.pushRelay;
@@ -4311,7 +4795,7 @@ export class GhostlyNode implements EngineImplementation {
       await db.putSettings(this.settings);
       this.hold.storageChanged();
     }
-    if (wasOnline && !this.settings.online) {
+    if (wasOnline && !this.networkOn) {
       await Promise.allSettled(
         [...this.links.values()].map(async (live) => {
           await live.link?.stop(true); await live.caps?.stop(); live.caps = undefined;
@@ -4320,16 +4804,616 @@ export class GhostlyNode implements EngineImplementation {
           live.dataLink = "idle";
         }),
       );
-    } else if (!wasOnline && this.settings.online) {
+    } else if (!wasOnline && this.networkOn && await this.turnBeforeOnline()) {
       for (const live of this.links.values()) this.startLink(live.stored.id, await db.getMessages(live.stored.id));
       this.hold.start();
       this.startGroupEntries();
       this.prepareSpare(STARTUP_QUIET_MS);
       void this.did.publishNow().catch(() => {});
     }
-    if (wasOnline && !this.settings.online) this.stopGroupEntries();
-    if (wasOnline && !this.settings.online) await this.hold.stop();
+    if (wasOnline && !this.networkOn) this.stopGroupEntries();
+    if (wasOnline && !this.networkOn) await this.hold.stop();
+    // A profile with a device set: its standbys go through these relays and servers, and stay off with the network.
+    const gate = knownDeviceGate();
+    if (((gate && gate.state !== "single") || this.deviceLinks) && (["online", "relays", "readRelays", "irohRelays", "iceServers", "pushRelay"] as const).some((key) => key in settings)) {
+      await this.syncDeviceNetwork().catch(() => {});
+    }
     this.emitState();
+  }
+
+  /** The floor of the group send counters (WISP 06 § Raised counters): 0 until a copy from older state raised it. */
+  private counterFloor = 0;
+  /** Groups whose admin work is off on this device since a forced takeover or a restore. */
+  private groupAdminOff = new Set<string>();
+
+  /**
+   * Raises the counters a copy from older state must raise, once (`devices/raise.ts`): the raise a forced takeover wrote
+   * into the device record with `active`, or the one a restore wrote into the profile's settings. Then reads the floor
+   * and the groups whose admin work is off. A profile that never took over or was restored raises nothing.
+   */
+  private async raiseCounters(): Promise<void> {
+    let fromRecord: PendingRaise | null = null;
+    if (!this.options.singleDevice && typeof indexedDB !== "undefined") {
+      const record = await readDeviceRecord(databaseName()).catch(() => null);
+      if (record?.raise && isPendingRaise(record.raise)) fromRecord = record.raise;
+    }
+    const settings = await store(STORES.settings, "readonly");
+    const [pendingRow, raiseRow, offRow] = await Promise.all([PENDING_RAISE_KEY, COUNTER_RAISE_KEY, GROUP_ADMIN_OFF_KEY].map((key) => wrap(settings.get(key))));
+    const pending = fromRecord ?? (isPendingRaise(pendingRow) ? pendingRow : null);
+    let floor = isCounterRaise(raiseRow) ? raiseRow.floor : 0;
+    let off = isGroupAdminOff(offRow) ? offRow.groups : [];
+    if (pending) {
+      const result = await applyCounterRaise(await openDb(), pending);
+      console.info(`[devices] counters raised after a ${pending.why}: floor ${result.floor}, ${result.links} chats, ${result.parked} payments parked`);
+      floor = result.floor;
+      const after = await wrap((await store(STORES.settings, "readonly")).get(GROUP_ADMIN_OFF_KEY));
+      off = isGroupAdminOff(after) ? after.groups : off;
+      // Raised: the record's note goes. A crash before this write finds the raise done (its id is stored) and only clears it.
+      if (fromRecord) await amendDevice(databaseName(), { raise: undefined });
+    }
+    this.counterFloor = floor;
+    this.groupAdminOff = new Set(off);
+  }
+
+  /**
+   * "Manage groups from this device" (WISP 06 § Forced takeover): turns admin work on again in one group after a forced
+   * takeover or a restore, or off. The person accepts, by turning it on, that a change the device it replaced made to
+   * the group after this copy's state is not here.
+   */
+  async setGroupManage({ groupId, on }: { groupId: string; on: boolean }): Promise<void> {
+    if (typeof groupId !== "string" || !groupId) throw new Error("Name the group");
+    const next = new Set(this.groupAdminOff);
+    if (on) next.delete(groupId); else next.add(groupId);
+    await wrap((await store(STORES.settings, "readwrite")).put({ at: Date.now(), groups: [...next].sort() }, GROUP_ADMIN_OFF_KEY));
+    this.groupAdminOff = next;
+    this.emitState();
+  }
+
+  /** The password proof's verifier, copied beside the device state, where a standby checks a forced takeover with it. */
+  private async syncDeviceVerifier(): Promise<void> {
+    if (this.options.singleDevice) return;
+    const record = await readDeviceRecord(databaseName()).catch(() => null);
+    if (!record || record.state !== "active") return;
+    const verifier = await this.handoffVerifier().catch(() => null);
+    if (verifier && JSON.stringify(verifier) !== JSON.stringify(record.verifier)) await amendDevice(databaseName(), { verifier });
+  }
+
+  /**
+   * Copies the network settings into the device record (WISP 06, `devices/network.ts`), where device-link-only mode
+   * reads them. Nothing for a profile with no device set, or a CLI profile. Called on every change of one, and by
+   * whatever makes or joins a device set.
+   */
+  async syncDeviceNetwork(): Promise<void> {
+    if (this.options.singleDevice) return;
+    await saveDeviceNetwork(databaseName(), this.settings);
+  }
+
+  // -- one profile on several devices: adding a device (WISP 06 § Adding a device) -----------------------------------
+
+  /** The enrollment in progress on this device, either side: one at a time. */
+  private enrollment: EnrollInviter | EnrollJoiner | null = null;
+  /** The device links of the active device of a device set (WISP 06 § Terms). None for a `single` profile. */
+  private deviceLinks: DeviceLinks | null = null;
+  /** This device's signing key in the profile's device set (base64url); null for a `single` profile. */
+  private ownDeviceKey: string | null = null;
+  /** Another device took the turn while this engine ran: it stops, and tells the pages nothing more. */
+  private gatedOut = false;
+
+  /** The turn record's sources: the transport as given (the limited-mode guard does not apply to the turn's own path). */
+  private turnNetwork(): TurnNetwork {
+    const transport: PkarrTransport = this.options.transport ?? this.relays!;
+    if (!transport.turnRead || !transport.turnPut) throw new Error("This app cannot read which device is active");
+    return { turnRead: transport.turnRead.bind(transport), turnPut: transport.turnPut.bind(transport), ...(transport.turnWarm ? { turnWarm: transport.turnWarm.bind(transport) } : {}) };
+  }
+
+  /** WebRTC with the person's ICE servers, where this engine has WebRTC. */
+  private devicePeerConnection(): (() => RTCPeerConnection) | undefined {
+    if (typeof RTCPeerConnection === "undefined") return undefined;
+    return () => new RTCPeerConnection({ iceServers: [...(RTC_CONFIG.iceServers ?? []), ...this.settings.iceServers.filter((server) => !iceServerProblem(server))] });
+  }
+
+  /** The one-time session of an enrollment, over the transports a chat uses. */
+  private enrollLink(): OpenEnrollChannel {
+    return ghostLinkEnrollChannel({ transport: this.transport, createPeerConnection: this.devicePeerConnection(), nativeTransports: this.nativeFactories, pollIntervals: this.pollIntervals });
+  }
+
+  /** What an enrollment may not start without: a profile on several devices, an engine that may use the network. */
+  private enrollAllowed(): void {
+    if (this.options.singleDevice) throw new Error("enroll-single: A profile of the command line is on one device only");
+    if (this.limitedMode) throw new Error(LIMITED_MODE_ERROR);
+    if (!this.networkOn) throw new Error("enroll-offline: You are offline");
+  }
+
+  /**
+   * The active device's links to the other devices, and its stored turn record put again (WISP 06 § Publishing and
+   * reading: "The active device puts its stored bytes at start"). This is also what completes an enrollment that a
+   * crash stopped after the record with the new device was stored and before it was put.
+   */
+  private async startDeviceSet(): Promise<void> {
+    if (this.shuttingDown) return;
+    // This device's signing key, as its record names it: whose the profile's push subscription is (WISP 06 § Push and the phone).
+    const own = await readDeviceRecord(databaseName()).catch(() => null);
+    this.ownDeviceKey = own?.ownSlot !== undefined ? own.deviceSet[own.ownSlot]?.key ?? null : null;
+    if (!this.deviceLinks) {
+      this.deviceLinks = new DeviceLinks({
+        profile: databaseName(), transport: this.transport, turn: this.turnNetwork(), pollIntervals: this.pollIntervals,
+        createPeerConnection: this.devicePeerConnection(), nativeTransports: this.nativeFactories, offline: !this.networkOn,
+        onChange: () => { this.emitState(); this.askDeviceRenewals(); this.syncDeviceTokens(); },
+        onDeviceWake: (from, target) => this.deviceWakeReceived(from, target),
+        pushSend: (request) => this.postPush(request),
+      });
+      await this.deviceLinks.start();
+      await this.startHandoff().catch(() => {});
+    } else await this.deviceLinks.refresh();
+    // The profile's subscription is this device's own: the record holds it too, so a standby here can still share it.
+    if (this.settings.wake?.device && this.settings.wake.device === this.ownDeviceKey) await this.deviceLinks.setOwnPush(this.settings.wake).catch(() => {});
+    // This device has a subscription of its own and the profile gives contacts another device's (it came back active
+    // after that device held the profile): its own wins, every chat's token kept (WISP 06 § Push and the phone).
+    else await this.ownWakeWins().catch(() => {});
+    this.emitState();
+    // An enrollment whose own record was put and whose write of it was lost takes that record back first: the read
+    // below would take it for a clone of this device and stop it.
+    await recoverEnrollment(databaseName(), this.turnNetwork()).catch(() => false);
+    await this.syncDeviceVerifier().catch(() => {});
+    const keeper = await this.deviceLinks.turnKeeper();
+    const outcome = await keeper?.check(false);
+    if (outcome?.kind === "go-on" && !outcome.restricted) this.noteGoodTurn();
+    // Another device took the turn: the keeper wrote this device's new state. The pages start again into the gate.
+    if (outcome?.kind === "gated" && !this.shuttingDown) {
+      const record = await readDeviceRecord(databaseName());
+      if (record) await this.stopReplaced(viewOf(record));
+      return;
+    }
+    // Earlier device sets (a removal, a new secret): their tombstones put again now and every hour, and their frames
+    // delivered over the old links, as a removal that a crash cut short resumes from the record alone.
+    this.watchTombstones();
+    // A device was given the secret and never finished its enrollment: the set moves to a new one by itself.
+    await this.rotateIfDue().catch(() => {});
+  }
+
+  // -- one profile on several devices: removing a device, a new device secret (WISP 06 § Removing a device) ---------
+
+  /** The hourly put of the earlier sets' tombstones. */
+  private tombstoneTimer: ReturnType<typeof setInterval> | null = null;
+  /** A move of the device set in progress: one at a time. */
+  private settingMove: Promise<unknown> | null = null;
+  /** How often the tombstones are put again (WISP 06: every hour while the profile exists). */
+  static TOMBSTONE_EVERY_MS = 60 * 60_000;
+
+  /** What a move of the device set needs of this engine. Null when this device cannot sign for its set. */
+  private async setMovePorts(): Promise<SetMovePorts | null> {
+    const profile = databaseName();
+    const identity = await deviceIdentity(profile).catch(() => null);
+    if (!identity) return null;
+    return {
+      read: () => readDeviceRecord(profile),
+      amend: (patch) => amendDevice(profile, patch),
+      signer: identity.key,
+      network: this.networkOn ? this.turnNetwork() : null,
+      refresh: async () => { await this.deviceLinks?.refresh(); await this.deviceLinks?.deliverPending(); this.emitState(); },
+    };
+  }
+
+  /** Puts the earlier sets' tombstones now and every hour (and the current record, and the frames), while this device is active. */
+  private watchTombstones(): void {
+    const run = async () => {
+      if (this.shuttingDown || this.limitedMode || !this.networkOn || this.settingMove) return;
+      const record = await readDeviceRecord(databaseName()).catch(() => null);
+      if (record?.state !== "active" || !record.earlierSets.length) return;
+      const ports = await this.setMovePorts();
+      if (ports) await resumeSetMove(ports, record).catch(() => {});
+    };
+    void run();
+    this.tombstoneTimer ??= setInterval(() => void run(), GhostlyNode.TOMBSTONE_EVERY_MS);
+  }
+
+  /** Whether a move of the set may begin now: this device is active, online, and nothing else changes the set. */
+  private setMoveAllowed(): void {
+    if (this.options.singleDevice) throw new Error("remove-state: A profile of the command line is on one device only");
+    if (this.limitedMode) throw new Error(LIMITED_MODE_ERROR);
+    if (!this.networkOn) throw new Error("remove-offline: You are offline");
+    const view = this.enrollment?.current();
+    if (view && view.step !== "done" && view.step !== "failed") throw new Error("remove-busy: A device is being added. Try again after it.");
+    const handoff = this.handoffGiver?.view();
+    if (handoff && handoff.step !== "failed") throw new Error("remove-busy: The profile is moving. Try again after it.");
+  }
+
+  private async moveDeviceSet(remove?: string): Promise<DeviceSetView> {
+    this.setMoveAllowed();
+    if (this.settingMove) throw new Error("remove-busy: The device set is already changing.");
+    const work = (async () => {
+      const ports = await this.setMovePorts();
+      if (!ports) throw new Error("remove-state: This device cannot sign for its device set.");
+      await moveSet(ports, remove === undefined ? {} : { remove });
+    })();
+    this.settingMove = work;
+    try { await work; } finally { this.settingMove = null; }
+    if (remove !== undefined) await this.afterDeviceRemoved(remove).catch(() => {});
+    // The giver signs releases over the turn address, which moved with the secret: it is made again for the new one.
+    if (this.handoffGiver) { this.deviceLinks?.setHandoff(null); this.handoffGiver = null; await this.startHandoff().catch(() => {}); }
+    this.watchTombstones();
+    return this.deviceSet();
+  }
+
+  /**
+   * What a removed device leaves behind in the profile: its push subscription, which contacts would go on waking (they
+   * are told to forget it), and the home marks of wallets that stayed on it (WISP 06 § Wallets that stay home). The
+   * marks go: that device can no longer take the profile back, and a wallet marked as at home there could never be
+   * opened anywhere again. Unmarked, it opens here, from what this copy holds (its phrase, its backup), as the away
+   * panel promised.
+   */
+  private async afterDeviceRemoved(key: string): Promise<void> {
+    const { next, changed } = profileWakeOnRemoval(this.settings.wake, key);
+    if (changed) await this.replaceProfileWake(next, { rotated: true });
+    // The removed device knew the subscription the profile hands out, and its key pair: a new one is made (its owner
+    // asked over the link when that is not this device). The devices that stay renew their own (`pushForSet`).
+    else await this.rotateWake();
+    if (this.settings.wakeRenew?.[key] !== undefined) {
+      const { [key]: _gone, ...rest } = this.settings.wakeRenew;
+      this.settings = { ...this.settings, wakeRenew: Object.keys(rest).length ? rest : undefined };
+      if (!this.settings.wakeRenew) delete this.settings.wakeRenew;
+      await db.putSettings(this.settings);
+    }
+    if (await clearWalletHomes(key)) {
+      await this.loadWalletHomes();
+      await this.refreshWallet().catch(() => {});
+    }
+  }
+
+  /**
+   * Remove: the device with this signing key can no longer take the profile (WISP 06 § Removing a device). The set
+   * moves to a new secret, which the other devices get over their old links; the removed one gets nothing, and reads
+   * its removal from the tombstone. Only the active device removes.
+   */
+  async deviceRemove({ key }: { key: string }): Promise<DeviceSetView> {
+    if (typeof key !== "string" || !key) throw new Error("remove-device: Name the device to remove.");
+    return this.moveDeviceSet(key);
+  }
+
+  /** "New device secret": the set moves to a new secret with nobody removed. */
+  async deviceNewSecret(): Promise<DeviceSetView> {
+    return this.moveDeviceSet();
+  }
+
+  /** The offer of a new device secret after a takeover, answered without making one. */
+  async deviceSecretOfferDismiss(): Promise<void> {
+    const record = await readDeviceRecord(databaseName());
+    if (record?.state === "active" && record.secretOffer) await amendDevice(databaseName(), { secretOffer: undefined });
+  }
+
+  /** The device list after an accepted `set-update` is a standby's (`DeviceLinks`): the active device has none to show. */
+  async deviceSetNoticeSeen(): Promise<void> {}
+
+  /** A standby's screen asks for a turn read when it comes back (`DeviceLinks`); the active device reads on its own schedule. */
+  async deviceTurnCheck(): Promise<null> { return null; }
+
+  /** A standby keeps its subscription in its device record (`DeviceLinks`); the active device's is the profile's (`setWakeSubscription`). */
+  async devicePushState(): Promise<null> { return null; }
+  async devicePushSet(): Promise<void> {}
+
+  /**
+   * A grant that never finished leaves a device that may hold the secret (`rotate.ts`): the set moves to a new one by
+   * itself, once no enrollment or handoff runs. Quiet when it cannot run now: it is tried again at the next start.
+   */
+  private async rotateIfDue(): Promise<void> {
+    if (this.shuttingDown || this.options.singleDevice) return;
+    if (newDeviceSecretDue(await readDeviceRecord(databaseName()))?.why !== "unfinished-grant") return;
+    try { this.setMoveAllowed(); } catch { return; }
+    await this.moveDeviceSet();
+  }
+
+  /**
+   * Another device took the turn while this engine ran: it stops without a word to any contact and publishes nothing
+   * more, and the pages show the standby screen.
+   */
+  private async stopReplaced(view: DeviceGateView): Promise<void> {
+    this.gatedOut = true;
+    this.events.onDeviceGate?.(view);
+    await this.shutdown({ quiet: true });
+  }
+
+  /**
+   * Add a device: the code for the new device, good for ten minutes. The lock password was checked by the page (it is
+   * a screen gate, which only the page knows). `name`: what this device is called in the set, when it gets its first one.
+   */
+  async deviceEnrollInvite({ name }: { name: string }): Promise<EnrollView> {
+    this.enrollAllowed();
+    await this.enrollment?.cancel().catch(() => {});
+    const inviter = new EnrollInviter({
+      profile: databaseName(), network: this.turnNetwork(), open: this.enrollLink(), name,
+      didSeed: () => this.did.deviceSetSeed(),
+      // The new standby reaches the other devices through the person's relays and servers (`devices/network.ts`).
+      networkSettings: () => deviceNetworkOf(this.settings),
+      // The record now lists the new device: the network settings go into it, and the links start.
+      afterWrite: async () => { await this.syncDeviceNetwork(); await this.startDeviceSet(); },
+      // An enrollment that ended after its grant went out and before the new device said it stored it: that device
+      // may hold the secret, so the set moves to a new one (once this enrollment is over).
+      onChange: (view) => { if (view.step === "failed") setTimeout(() => void this.rotateIfDue().catch(() => {}), 0); },
+    });
+    this.enrollment = inviter;
+    try { return await inviter.start(); } catch (error) {
+      if (this.enrollment === inviter) this.enrollment = null;
+      if (error instanceof EnrollRefusal) throw Object.assign(new Error(`enroll-${error.reason}: ${error.message}`), { cause: error });
+      throw error;
+    }
+  }
+
+  /** The person compared the digits on this device (the active one). */
+  async deviceEnrollConfirm({ match }: { match: boolean }): Promise<EnrollView> {
+    if (!(this.enrollment instanceof EnrollInviter)) throw new Error("There are no digits to confirm");
+    return this.enrollment.confirm(match);
+  }
+
+  /** Stops the enrollment in progress, either side. Nothing it did not finish stays. */
+  async deviceEnrollCancel(): Promise<void> {
+    await this.enrollment?.cancel();
+  }
+
+  /** The enrollment in progress, or the last one, as the page shows it. */
+  deviceEnrollView(): EnrollView | null {
+    return this.enrollment?.current() ?? null;
+  }
+
+  /**
+   * This device joins the profile of the code (the new device's side). It becomes a standby of that profile here, in
+   * place of the profile it runs now, which must be new: nothing in it is lost (no chat, no group, no money).
+   */
+  async deviceEnrollJoin({ code, name, kind, app }: { code: string; name: string; kind?: DeviceKind; app?: string }): Promise<EnrollView> {
+    this.enrollAllowed();
+    if (this.inUse()) throw new Error("enroll-in-use: This profile is in use here. Add a new profile first, and add the device from there.");
+    await this.enrollment?.cancel().catch(() => {});
+    const joiner = new EnrollJoiner({
+      profile: databaseName(), network: this.turnNetwork(), open: this.enrollLink(),
+      about: { name, kind: kind ?? (this.options.platform === "desktop" ? "desktop" : this.options.platform === "extension" ? "extension" : "web"), app: app ?? "" },
+      // A standby keeps the network settings beside its state: its links go through them (`devices/network.ts`).
+      afterWrite: () => this.syncDeviceNetwork(),
+    });
+    this.enrollment = joiner;
+    try { return await joiner.start(code); } catch (error) {
+      if (this.enrollment === joiner) this.enrollment = null;
+      if (error instanceof EnrollCodeError) throw Object.assign(new Error(`enroll-${error.reason}: ${error.message}`), { cause: error });
+      throw error;
+    }
+  }
+
+  /**
+   * Whether this profile holds anything a person would lose if it became a standby here: a chat, a group, an identity,
+   * money or a payment, or a wallet with keys of its own. The wallets a new profile gets by itself (Mainnet Cashu and
+   * USDT, `walletSetup.ts`) count only once they hold or have moved money: otherwise no new install could join.
+   */
+  private inUse(): boolean {
+    if (this.links.size > 0 || this.groups.views().length > 0 || this.identities.views().length > 0) return true;
+    const networks = Object.values(this.walletView.networks ?? {});
+    if (this.walletView.balance > 0 || this.walletView.history.length > 0) return true;
+    if (networks.some((network) => (network?.balance ?? 0) > 0 || (network?.history?.length ?? 0) > 0)) return true;
+    const firstRun = (wallet: { type: string; network: string }) => wallet.network === "mainnet" && (wallet.type === "cashu" || wallet.type === "usdt");
+    return (this.walletView.wallets ?? []).some((wallet) => !firstRun(wallet));
+  }
+
+  /** The device set of this profile as the Devices section shows it; `single` with none. */
+  async deviceSet(): Promise<DeviceSetView> {
+    if (this.options.singleDevice) return { state: "single", devices: [] };
+    return deviceSetView(await readDeviceRecord(databaseName()), this.deviceLinks?.views() ?? []);
+  }
+
+  // -- one profile on several devices: the handoff, the active device's side (WISP 06 § The handoff) ----------------
+
+  /** The giver of this active device: answers a pull, makes a push, runs pass 1 while this engine goes on. */
+  private handoffGiver: HandoffGiver | null = null;
+
+  private async startHandoff(): Promise<void> {
+    const host = handoffProfileHost(), links = this.deviceLinks;
+    if (!host || !links || this.handoffGiver || this.options.singleDevice) return;
+    const profile = databaseName();
+    const identity = await deviceIdentity(profile);
+    if (!identity || this.shuttingDown) return;
+    const giver = new HandoffGiver({
+      ownKey: identity.key.publicKey, sign: async (bytes) => identity.key.sign(bytes), turnAddress: turnKeys(identity.d).address,
+      links: handoffLinks(links), records: profileRecords(profile), self: () => handoffSelf(host),
+      source: host.source(profile),
+      verifier: () => this.handoffVerifier(),
+      busy: (taker) => this.handoffBusy(taker),
+      staying: (taker) => this.handoffStaying(taker),
+      quiesce: (patch, taker) => this.quiesceForHandoff(patch, taker),
+    });
+    this.handoffGiver = giver;
+    links.setHandoff({ receive: (from, frame) => void giver.receive(from, frame), linkChanged: (key, live) => giver.linkChanged(key, live), stop: () => giver.stop() });
+  }
+
+  private static readonly HANDOFF_VERIFIER = "handoffVerifier";
+
+  /** The profile's password proof verifier (WISP 06 § Authorizing a handoff): in its settings, so it moves with it. */
+  private async handoffVerifier(): Promise<HandoffVerifier | null> {
+    const value = await wrap((await store(STORES.settings, "readonly")).get(GhostlyNode.HANDOFF_VERIFIER));
+    return isHandoffVerifier(value) ? value : null;
+  }
+
+  /**
+   * Makes the verifier from the lock password, which the page has in hand only when the person types it (Add a device,
+   * a password set or changed). The password itself is not kept.
+   */
+  async deviceHandoffVerifier({ password, current }: { password: string; current?: string }): Promise<void> {
+    if (this.options.singleDevice) return;
+    if (typeof password !== "string" || !password) throw new Error("A password is needed");
+    const stored = await this.handoffVerifier();
+    // A verifier is replaced only by someone who knows the password it checks: proven here, the same way a pull does.
+    // Only a profile on several devices has pulls to protect; one on a single device (Add a device not done yet) may set it afresh.
+    if (stored && knownDeviceGate()?.state === "active" && !(await provesHandoffPassword(stored, typeof current === "string" ? current : ""))) throw new Error("handoff-password: The current password is wrong.");
+    try {
+      const verifier = await makeHandoffVerifier(password);
+      await wrap((await store(STORES.settings, "readwrite")).put(verifier, GhostlyNode.HANDOFF_VERIFIER));
+      await this.syncDeviceVerifier().catch(() => {});
+    } catch (error) {
+      // The old verifier must not go on checking a password the person changed: none, until one is made (a pull is
+      // refused meanwhile; a push still works).
+      await wrap((await store(STORES.settings, "readwrite")).delete(GhostlyNode.HANDOFF_VERIFIER)).catch(() => {});
+      throw error;
+    }
+  }
+
+  /**
+   * The wallets in a handoff to `taker` (WISP 06 § Wallets, `planHandoffWallets`): what moves, what stays home, and
+   * what keeps the profile here now. `view`: the wallets as they are now, read fresh by default.
+   */
+  private async handoffPlan(taker: HandoffTakerFacts | undefined, options: { view?: WalletView; final?: boolean; pinned?: string[] } = {}): Promise<HandoffWalletPlan> {
+    const record = await readDeviceRecord(databaseName()).catch(() => null);
+    const ownKey = record?.ownSlot !== undefined ? record.deviceSet[record.ownSlot]?.key : undefined;
+    if (!ownKey) return { refusal: { why: "wallet", at: "this device holds no key of its set" }, wallets: [] };
+    const pinned = options.pinned ?? (await this.cardFacts()).pinned;
+    this.walletHomes = await readWalletHomes().catch(() => this.walletHomes);
+    return planHandoffWallets({
+      view: options.view ?? this.walletView, read: this.walletsStarted, ownKey, ownPins: { ...WALLET_SDK_PINS }, ...(taker ? { taker } : {}),
+      homes: this.walletHomes, now: Date.now(), pinned: new Set(pinned), final: options.final === true,
+      executing: this.paymentCoordinator.running > 0 || this.wallet.swapping || lightningPaying() > 0,
+    });
+  }
+
+  /**
+   * Why this device cannot hand over to `taker` now (WISP 06 § Wallets): Mainnet money in a wallet that does not move
+   * on Mainnet yet, coins that expire soon away from their home, a wallet that cannot be read, a payment going through,
+   * or anything this build cannot judge. Null: the wallets move or stay home by their plan.
+   */
+  private async handoffBusy(taker?: HandoffTakerFacts): Promise<BusyReport | null> {
+    // Limited mode opened no wallet, and wallets not started yet say nothing: what they hold is not known.
+    if (this.limitedMode || !this.walletsStarted) return { why: "loading" };
+    // Read now, not the view of the last change: a wallet that changed since is counted as it is.
+    await this.refreshWallet().catch(() => {});
+    const { refusal } = await this.handoffPlan(taker);
+    if (!refusal) return null;
+    console.info(`[handoff] not now: ${refusal.why} (${refusal.at})`);
+    return { why: refusal.why, ...(refusal.wallet ? { wallet: refusal.wallet } : {}), ...(refusal.expiresAt !== undefined ? { expiresAt: refusal.expiresAt } : {}) };
+  }
+
+  /** What a handoff reads of the Lightning cards' sealed settings, every network's (`LightningCards.handoffFacts`). */
+  private async cardFacts(): Promise<{ pinned: string[]; breez: Map<string, string> }> {
+    const pinned: string[] = [], breez = new Map<string, string>();
+    for (const network of WALLET_NETWORKS) {
+      const facts = await this.lightnings[network].handoffFacts().catch(() => null);
+      pinned.push(...(facts?.pinned ?? []));
+      for (const [id, name] of facts?.breez ?? []) breez.set(id, name);
+    }
+    return { pinned, breez };
+  }
+
+  /** The wallets that stay on this device in a handoff to `taker`, for this device's screen. */
+  private async handoffStaying(taker: HandoffTakerFacts): Promise<HandoffStay[]> {
+    const { wallets } = await this.handoffPlan(taker);
+    return wallets.filter((w) => w.route === "home" && w.home?.key !== taker.key).map((w) => ({ type: w.type, network: w.network, ...(w.home?.expiresAt !== undefined ? { expiresAt: w.home.expiresAt } : {}) }));
+  }
+  /** Every wallet's stored state was loaded (`startWallets`): before that, a wallet view says nothing of what it holds. */
+  private walletsStarted = false;
+
+  /**
+   * Quiesce (WISP 06 § Shape, step 4): this engine stops without a word to any contact (they see an app that went
+   * away, and the new active device dials them as a restarted one does), `releasing` is written with the handoff's
+   * note, and the pages start again into the gate, where pass 2 reads the frozen database.
+   */
+  private async quiesceForHandoff(patch: Parameters<typeof moveDevice>[2], taker?: HandoffTakerFacts): Promise<void> {
+    const profile = databaseName();
+    // Reviews not yet approved are cancelled, and what they reserved goes back (WISP 06 § Shape, step 4): nothing
+    // `pending` moves, and an on-chain review, signed when it was made, never reaches a frozen copy.
+    await this.cancelPendingReviews();
+    // The wallets as they are just before the stop, and what is read of their sealed settings while they are open:
+    // the Breez databases of the wallets that move, deleted here once the release is written.
+    await this.refreshWallet().catch(() => {});
+    const before = this.walletView;
+    const { pinned, breez } = await this.cardFacts();
+    for (const network of WALLET_NETWORKS) {
+      const spark = await this.sparkWallets[network].breezDatabase().catch(() => undefined);
+      if (spark) breez.set(`spark:${network}`, spark);
+    }
+    this.gatedOut = true;
+    await this.shutdown({ quiet: true });
+    // The plan once more, now that nothing can arrive any more: Mainnet ecash that landed between the last look and the
+    // stop would otherwise move. A refusal releases nothing: this device writes nothing and starts again as active, and
+    // the taker, told so when it asks, stops.
+    const plan = await this.refreshWallet().then(() => this.handoffPlan(taker, { view: afterStop(before, this.walletView), final: true, pinned }), () => null);
+    if (!plan || plan.refusal) {
+      const why = plan?.refusal?.why ?? "loading";
+      console.info(`[handoff] not released: ${why} (${plan?.refusal?.at ?? "the wallets could not be read"}) after the stop`);
+      this.events.onDeviceGate?.({ state: "releasing", reload: true });
+      throw new Error(`handoff-${why}: The wallets changed while the profile was moving.`);
+    }
+    // Each wallet's record says where it lives from here: a wallet that stays home is marked with this device (or the
+    // home it already had), one that moves loses any mark. The marks move with the profile, in pass 2.
+    await writeWalletHomes(plan.wallets);
+    const breezDatabases = [...new Set(plan.wallets.flatMap((w) => (w.route === "moves" && w.breez && breez.has(w.id) ? [breez.get(w.id)!] : [])))];
+    // The password proof's verifier goes beside the state: a standby checks a forced takeover's password with it,
+    // without opening its frozen copy (WISP 06 § Forced takeover).
+    const verifier = await this.handoffVerifier().catch(() => null);
+    await moveDevice(profile, "releasing", { ...patch, ...(verifier ? { verifier } : {}), ...(breezDatabases.length ? { breezDatabases } : {}) });
+    this.events.onDeviceGate?.({ state: "releasing", reload: true });
+  }
+
+  /** Cancels every review not yet approved, as Cancel does (its reserved coins go back). */
+  private async cancelPendingReviews(): Promise<void> {
+    for (const { review } of await intentRepository.list().catch(() => [])) {
+      if (review.state === "pending") await this.paymentCoordinator.cancel(review.id).catch(() => {});
+    }
+  }
+
+  /** "Move to <device>" (a push). */
+  async deviceHandoffPush({ key }: { key: string }): Promise<HandoffView | null> {
+    if (this.limitedMode) throw new Error(LIMITED_MODE_ERROR);
+    if (!this.handoffGiver) await this.startHandoff();
+    if (!this.handoffGiver) throw new Error("handoff-refused: This device cannot move the profile.");
+    return this.handoffGiver.push(key);
+  }
+
+  /** The handoff in progress on this device, as the screens show it. */
+  async deviceHandoffView(): Promise<HandoffView | null> {
+    return this.handoffGiver?.view() ?? null;
+  }
+
+  async deviceHandoffCancel(): Promise<void> {
+    await this.handoffGiver?.cancel();
+  }
+
+  /** A pull is a standby's: the active device answers one, it never makes one. */
+  async deviceHandoffPull(): Promise<HandoffView | null> {
+    throw new Error("handoff-refused: This device is the active one.");
+  }
+
+  async deviceHandoffAccept(): Promise<HandoffView | null> {
+    throw new Error("handoff-refused: This device is the active one.");
+  }
+
+  /** A forced takeover is a standby's: the active device offers none. */
+  deviceTakeoverInfo(): { offered: boolean } {
+    return { offered: false };
+  }
+
+  async deviceTakeover(): Promise<{ kind: string }> {
+    throw new Error("takeover-state: This device is the active one.");
+  }
+
+  /** The turn at a bundle's address, for the restore guard (`devices/restoreGuard.ts`). */
+  async deviceTurnPeek({ d }: { d: string }): Promise<TurnPeek> {
+    if (this.options.singleDevice) throw new Error("A profile of the command line is on one device only");
+    const secret = typeof d === "string" ? fromBase64Url(d) : new Uint8Array();
+    if (secret.length !== 32) throw new Error("Not a device-set secret");
+    return peekTurn(secret, this.turnNetwork());
+  }
+
+  /** "Let <device> try again" after the wrong passwords that refused it. */
+  async deviceHandoffAllow({ key }: { key: string }): Promise<void> {
+    await this.handoffGiver?.allowAgain(key);
+  }
+
+  /** A ping over the device link to the device with this signing key, and how long its echo took. */
+  async devicePing({ key }: { key: string }): Promise<{ ms: number }> {
+    if (!this.deviceLinks) throw new Error("This device has no link to that device");
+    return { ms: await this.deviceLinks.ping(key) };
+  }
+
+  /** On the active device the enrollment it holds is finished: only a standby finishes one. */
+  async deviceEnrollFinish(): Promise<{ finished: boolean }> {
+    return { finished: true };
+  }
+
+  /** Only a standby whose enrollment did not finish removes it (`DeviceLinks`). */
+  async deviceEnrollRemove(): Promise<void> {
+    throw new Error("Only an enrollment that did not finish is removed here");
   }
 
   // -- internals -----------------------------------------------------------
@@ -4363,12 +5447,12 @@ export class GhostlyNode implements EngineImplementation {
     this.links.set(stored.id, newLiveLink(stored, 0));
     try { await db.putLink(stored); }
     catch (error) { this.links.delete(stored.id); throw error; }
-    if (this.settings.online) this.startLink(stored.id, []);
+    if (this.networkOn) this.startLink(stored.id, []);
     // The other side is due any moment: the joiner's inviter is polling for this very moment and its offer
     // (or its answer) is a poll away; an inviter's contact is reading the invite right now more often than
     // not. Both look fast for a while, as a group's entry session does.
     if (params.profile) this.links.get(stored.id)?.link?.expectPeer();
-    if (params.profile && inviteCode && this.settings.online) this.warmInviteKey(inviteCode);
+    if (params.profile && inviteCode && this.networkOn) this.warmInviteKey(inviteCode);
     this.emitState();
     return stored.id;
   }
@@ -4480,7 +5564,7 @@ export class GhostlyNode implements EngineImplementation {
     this.links.set(id, newLiveLink(stored, 0));
     try { await db.putLink(stored); }
     catch (error) { this.links.delete(id); throw error; }
-    if (this.settings.online) this.startLink(id, []);
+    if (this.networkOn) this.startLink(id, []);
     if (expectPeer) this.links.get(id)?.link?.expectPeer();
     return id;
   }
@@ -4499,7 +5583,7 @@ export class GhostlyNode implements EngineImplementation {
     this.links.set(id, newLiveLink(stored, 0));
     try { await db.putLink(stored); }
     catch (error) { this.links.delete(id); throw error; }
-    if (this.settings.online) this.startLink(id, []);
+    if (this.networkOn) this.startLink(id, []);
     // The other side is due any moment (the admin's app answers a knock in seconds): look fast meanwhile.
     this.links.get(id)?.link?.expectPeer();
     return id;
@@ -4668,7 +5752,7 @@ export class GhostlyNode implements EngineImplementation {
     live.link = null;
     // No goodbye: the edge is back in a moment, and the member must not take this for a leave.
     await link.stop(false).catch(() => {});
-    if (this.links.get(linkId) !== live || live.link || this.shuttingDown || this.settings.online === false) return;
+    if (this.links.get(linkId) !== live || live.link || this.shuttingDown || !this.networkOn) return;
     this.startEdge(linkId);
   }
 
@@ -5565,10 +6649,14 @@ export class GhostlyNode implements EngineImplementation {
 
   /** State changes arrive in bursts; the UI gets one snapshot per tick. */
   private emitState(delayMs = 50): void {
+    // Another device took the turn (WISP 06): the pages show the standby screen, and hear nothing more of this engine.
+    if (this.gatedOut) return;
     if (this.stateTimer) return;
     this.stateTimer = setTimeout(() => {
       this.stateTimer = null;
       this.events.onState(this.getState());
+      // A chat deleted or muted, a token made: the other devices learn which tokens the profile hands out.
+      if (this.deviceLinks) this.syncDeviceTokens();
     }, delayMs);
   }
 

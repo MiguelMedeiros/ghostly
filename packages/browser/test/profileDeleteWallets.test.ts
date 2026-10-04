@@ -80,6 +80,20 @@ it("a Fedimint file already gone, or no file system at all, does not stop the de
   expect(await databases()).not.toContain(`ghostly_${bare.id}`);
 });
 
+// covers: devices.gate
+it("deleting a profile takes its device record with it, and leaves another profile's (WISP 06)", async () => {
+  const { putDeviceRecord } = await import("./helpers/deviceRecord");
+  const { closeDevicesDb, deviceStateOf } = await import("../src/devices/store");
+  const gone = registerProfile("devicegone", "Gone"), kept = registerProfile("devicekept", "Kept");
+  const record = (id: string) => ({ v: 1 as const, profile: `ghostly_${id}`, state: "standby" as const, saved: 1, turn: 1, rev: 0, deviceSet: [], takeovers: 0, earlierSets: [] });
+  await putDeviceRecord(record(gone.id));
+  await putDeviceRecord(record(kept.id));
+  await deleteProfile(gone.id);
+  expect(await deviceStateOf(`ghostly_${gone.id}`)).toBe("single");
+  expect(await deviceStateOf(`ghostly_${kept.id}`)).toBe("standby");
+  await closeDevicesDb();
+});
+
 it("deleting a profile deletes its Breez databases (both of the SDK's), and never another profile's of the same phrase", async () => {
   const mnemonic = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
   const gone = await makeProfile("breezgone1", { "sparkWallet-mode-testnet": { network: "regtest" } });

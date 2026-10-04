@@ -3,8 +3,9 @@ import { beforeEach, expect, it, vi } from "vitest";
 import { STORES, openDb, transact, wrap } from "../src/shared/idb";
 import { setStorageProfile } from "../../../apps/ui/src/lib/storage";
 import { listProfiles } from "../../../apps/ui/src/lib/profiles";
-import { createProfileBackup, restoreProfileBackup } from "../../../apps/ui/src/lib/profileBackup";
-// covers: backup.profile.file, backup.passphrase-rules, backup.envelope, profiles.delete, profiles.lock
+import { createProfileBackup, restoreHandoffBundle, restoreProfileBackup, writeProfileBackup } from "../../../apps/ui/src/lib/profileBackup";
+import { memorySink } from "../src/backup/stream";
+// covers: backup.profile.file, backup.passphrase-rules, backup.envelope, profiles.delete, profiles.lock, devices.push
 
 class FakeStorage {
   entries = new Map<string, string>();
@@ -76,6 +77,32 @@ it("backs up a whole profile and restores it as a new one, wallets relocated and
   expect(vtxo.value).toBe(5000n);
   expect(JSON.parse(storage.getItem(`ghostly_${restored.id}_app_settings`)!)).toEqual({ colorTheme: "purple", defaultNickname: "Miguel" });
   expect(storage.getItem(`ghostly_${restored.id}_0123456789abcdef0123456789abcdef`)).toContain("peerPubKeyB64");
+});
+
+it("the push subscription moves in a handoff (it names its device), and stays out of a backup", async () => {
+  await openDb();
+  const wake = { endpoint: "https://fcm.googleapis.com/fcm/send/phone", p256dh: "p", auth: "a", vapid: { publicKey: "v", privateKey: "k" }, device: "P".repeat(43) };
+  await transact([STORES.settings], (s) => { s[STORES.settings].put({ nick: "Miguel", wake }, "settings"); });
+  const settingsIn = async (ns: string) => ((await readAll(`ghostly_${ns}`, STORES.settings)) as { nick?: string; wake?: unknown }[]).find((row) => row.nick === "Miguel");
+  const sink = memorySink();
+  await writeProfileBackup(sink, { passphrase: null, handoff: true });
+  await restoreHandoffBundle(sink.bytes(), "stagedhandoff");
+  expect((await settingsIn("stagedhandoff"))?.wake).toEqual(wake);
+  const restored = await restoreProfileBackup(await createProfileBackup("a long backup passphrase"), "a long backup passphrase");
+  expect((await settingsIn(restored.id))?.wake).toBeUndefined();
+});
+
+it("a TURN server's credential moves in a handoff and stays out of a backup; its address and username stay", async () => {
+  await openDb();
+  const turn = { urls: "turn:turn.example.org:3478", username: "ghost", credential: "turn-credential-secret" };
+  await transact([STORES.settings], (s) => { s[STORES.settings].put({ nick: "Miguel", iceServers: [turn] }, "settings"); });
+  const settingsIn = async (ns: string) => ((await readAll(`ghostly_${ns}`, STORES.settings)) as { nick?: string; iceServers?: unknown }[]).find((row) => row.nick === "Miguel");
+  const sink = memorySink();
+  await writeProfileBackup(sink, { passphrase: null, handoff: true });
+  await restoreHandoffBundle(sink.bytes(), "stagedturn");
+  expect((await settingsIn("stagedturn"))?.iceServers).toEqual([turn]);
+  const restored = await restoreProfileBackup(await createProfileBackup("a long backup passphrase"), "a long backup passphrase");
+  expect((await settingsIn(restored.id))?.iceServers).toEqual([{ urls: "turn:turn.example.org:3478", username: "ghost" }]);
 });
 
 it("ecash comes back marked as a copy to check with its mint; ecash a payment holds is left to that payment", async () => {

@@ -4,6 +4,7 @@ import {
 } from "@ghostly/core";
 import type { StoredGroup } from "../shared/types";
 import type { GroupsHost } from "./groups";
+import { HubClocks } from "./hubClocks";
 
 /** What `MeshHubs` needs of `Groups`: a group as stored, and saving it (what it records: hubs used, apps without hubs). */
 export interface MeshHubsStore {
@@ -51,6 +52,12 @@ const REACH_AGAIN_MS = 60_000;
 const REACTIONS_KEPT = 64;
 /** How long the edge to a member a commit took out stays, for that commit to reach it. */
 const GONE_LINGER_MS = 15_000;
+/**
+ * Two readings of the beacon no further apart than this say when an entry that moved between them was written
+ * (`HubClocks`): a member reads it once a minute (`beaconReadMs`), and a little late at times. Half of it stays under
+ * the 45 s by which two clocks must differ before an entry is moved, so clocks that agree are never moved.
+ */
+const HUB_CLOCK_READ_GAP_MS = 75_000;
 
 /** What a hub says to its edges: the members it has an edge up with, and the members whose apps take no hubs. */
 export interface GroupReachFrame { t: "group-reach"; g: string; k: string[]; l?: string[] }
@@ -60,7 +67,11 @@ interface HubLive {
   started: number;
   /** The epoch whose beacon I read (the beacon moves with every commit). */
   epoch: number;
+  /** The beacon's hubs, each entry in this app's time (`HubClocks.inMyTime`). */
   beacon: Hub[];
+  /** Each hub's clock as its entry showed it, and my key in the group (whose entry is mine, never moved). */
+  clocks: HubClocks;
+  me: string;
   firstRead: boolean;
   lastRead: number;
   lastWrite: number;
@@ -125,9 +136,12 @@ export class MeshHubs {
 
   private get(groupId: string, now: number): HubLive {
     let live = this.live.get(groupId);
-    if (!live) this.live.set(groupId, (live = { started: now, epoch: -1, beacon: [], firstRead: false, lastRead: 0, lastWrite: 0, lastTry: 0, hub: false, hubSince: 0,
+    if (!live) {
+      const clocks = new HubClocks(() => live!.me, HUB_CLOCK_READ_GAP_MS);
+      this.live.set(groupId, (live = { started: now, epoch: -1, beacon: [], clocks, me: "", firstRead: false, lastRead: 0, lastWrite: 0, lastTry: 0, hub: false, hubSince: 0,
       members: new Map(), lastLobbyPoll: 0, lobbyBusyUntil: 0, myHubs: [], lobbyWrites: new Map(), hubWaits: new Map(), avoided: new Map(), hubsUp: new Set(),
       seenHubs: new Map(), reach: new Map(), sentReach: "", lastReach: 0, met: new Map(), expect: new Set(), wantedSize: 0, primed: false, gone: new Map(), reactions: new Map(), need: 0 }));
+    }
     return live;
   }
 
@@ -269,11 +283,13 @@ export class MeshHubs {
     }
     const rv = session.rendezvous;
     if (!rv) return false;
+    live.me = session.myKey;
     this.prime(live, group, now);
     const before = this.shape(live);
     if (live.epoch !== session.epoch) {
       // A commit moved the beacon: read the new one now, and as a hub say so there at once.
       live.epoch = session.epoch; live.lastRead = 0; live.lastWrite = 0; live.lastTry = 0; live.beacon = [];
+      live.clocks.restart();
     }
     const policy = session.hubPolicy, me = session.myKey, inRoster = (key: string) => rosterHas(session.roster, key);
     const may = mayBeHub(me, policy, inRoster, this.staysOnline);
@@ -310,7 +326,7 @@ export class MeshHubs {
     // Nothing there (no hub has written it yet) is a reading; a request that failed (the relays' budget) is not.
     let records: GhostRecord[] | null;
     try { records = await this.host.resolve(keys.identity.pubKeyZ32, true); } catch { return; }
-    live.beacon = readBeacon(keys, records ?? []);
+    live.beacon = live.clocks.inMyTime(readBeacon(keys, records ?? []), now);
     live.firstRead = true;
     this.noteHubs(live, session, now);
   }
@@ -330,12 +346,13 @@ export class MeshHubs {
     if (live.lastRead !== now) {
       let records: GhostRecord[] | null;
       try { records = await this.host.resolve(keys.identity.pubKeyZ32, true); } catch { return; }
-      existing = readBeacon(keys, records ?? []);
+      existing = live.clocks.inMyTime(readBeacon(keys, records ?? []), now);
     }
     const policy = session.hubPolicy;
     const hubs = mergeBeacon(existing, session.myKey, listed ? { key: session.myKey, ts: now, load: live.members.size, since: live.hubSince || now } : null, now,
       key => rosterHas(session.roster, key) && !policy.no.includes(key));
-    await this.host.publish(keys.identity, beaconRecords(keys, hubs), true);
+    // Each entry as its hub dated it: no hub's entry is dated by another's clock.
+    await this.host.publish(keys.identity, beaconRecords(keys, live.clocks.asWritten(hubs)), true);
     live.beacon = hubs; live.lastWrite = now; live.lastRead = now; live.firstRead = true;
     this.noteHubs(live, session, now);
   }
@@ -407,7 +424,9 @@ export class MeshHubs {
       const keys = lobbyKeys(rv, groupId, hub);
       try {
         const existing = readLobby(keys, (await this.host.resolve(keys.identity.pubKeyZ32, true)) ?? []);
-        await this.host.publish(keys.identity, lobbyRecords(keys, mergeLobby(existing, { key: me, ts: now }, now)), true);
+        // Dated by the hub's clock, where mine differs: the hub reads its lobby by its own, and so do the members that write there.
+        const theirs = now - live.clocks.ahead(hub);
+        await this.host.publish(keys.identity, lobbyRecords(keys, mergeLobby(existing, { key: me, ts: theirs }, theirs)), true);
       } catch { live.lobbyWrites.delete(hub); }
     }
   }

@@ -234,6 +234,17 @@ jobs:
           path: ghostly-browser-extension-*.zip
 
   # ============================================
+  # Android (the web app in a Trusted Web Activity)
+  # ============================================
+  # Signed with the upload key when the repository has it (docs/ANDROID.md); the release takes only a signed APK.
+  build-android:
+    name: Build Android APK
+    uses: ./.github/workflows/android.yml
+    with:
+      ref: ${{ inputs.tag || github.ref }}
+    secrets: inherit
+
+  # ============================================
   # Ghostly on the web (container image)
   # ============================================
   build-web:
@@ -278,9 +289,14 @@ jobs:
             ${{ steps.image.outputs.name }}:latest
 
   release:
-    needs: [e2e, build-tauri, build-extension]
+    needs: [e2e, build-tauri, build-extension, build-android]
     runs-on: ubuntu-24.04
-    if: startsWith(github.ref, 'refs/tags/') || inputs.tag != ''
+    # The Android build is waited for but does not hold the release back: a release (a security one included)
+    # goes out without the APK rather than not at all.
+    if: >-
+      !cancelled()
+      && needs.e2e.result == 'success' && needs.build-tauri.result == 'success' && needs.build-extension.result == 'success'
+      && (startsWith(github.ref, 'refs/tags/') || inputs.tag != '')
     permissions:
       contents: write
 
@@ -304,6 +320,13 @@ jobs:
           name: extension
           path: artifacts/extension
 
+      - name: Download Android artifact
+        if: needs.build-android.result == 'success' && needs.build-android.outputs.signed == 'true'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: android
+          path: artifacts/android
+
       - name: Display structure of downloaded files
         run: ls -R artifacts
 
@@ -316,6 +339,9 @@ jobs:
           
           # Browser extension (load unpacked, or upload to a store)
           cp artifacts/extension/*.zip release-assets/ 2>/dev/null || true
+
+          # Android: the APK signed with the upload key only, never a debug build
+          cp artifacts/android/ghostly-*-android.apk release-assets/ 2>/dev/null || true
 
           # No CLI binaries: the Rust ghostly-cli was removed after 1.0
           # (S17 in docs/SECURITY-REVIEW.md). The supported CLI, packages/cli, goes to npm.

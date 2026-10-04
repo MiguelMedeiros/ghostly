@@ -57,10 +57,10 @@ class Net {
     return member;
   }
   /** `by` admits a newcomer over the link (the entry session is not simulated: its frames are handed over). */
-  async admit(by: Member, name: string, link = { g: by.session.id, host: by.session.entryKey }): Promise<Member> {
+  async admit(by: Member, name: string, link = { g: by.session.id, host: by.session.entryKey }, at?: number): Promise<Member> {
     const seedB64 = createIdentity().seedB64;
     const key = identityFromSeedB64(seedB64).pubKeyZ32;
-    const frames = await by.session.admit(key);
+    const frames = await by.session.admit(key, at);
     await this.settle();
     const welcome = frames[frames.length - 1], pieces = frames.slice(0, -1);
     const joined = CommunitySession.join(link, clone(pieces), clone(welcome), seedB64);
@@ -468,6 +468,78 @@ describe("community sessions", { timeout: 60_000 }, () => {
     await net.meet(dave, carol);
     expect(net.log.slice(before).filter(f => f.to === "dave" && f.t === "group-msg")).toHaveLength(0);
     expect(net.texts(dave)).toEqual([]);
+  });
+
+  it("what a member wrote while behind is said again, once, for the members let in before it wrote", async () => {
+    const net = new Net();
+    let now = Date.now();
+    net.now = () => now;
+    const alice = net.create("alice");
+    const bob = await net.admit(alice, "bob");
+    await net.meet(alice, bob);
+    // Bob's app loses its edges; meanwhile Carol and Dave are let in, and Bob, who has not heard, writes.
+    net.partition = (a, b) => a !== bob && b !== bob;
+    const carol = await net.admit(alice, "carol"), dave = await net.admit(alice, "dave");
+    await net.meet(alice, carol); await net.meet(alice, dave);
+    expect("id" in await bob.session.sendText("still there?", "bob")).toBe(true);
+    await net.settle();
+    expect(bob.session.roster).toHaveLength(2);
+    // Bob reaches Carol: she carries his frame to Alice, who reads it, but she cannot read it herself, nor can Dave.
+    net.partition = null;
+    await net.meet(bob, carol); await net.meet(carol, alice); await net.meet(alice, dave);
+    expect(bob.session.roster).toHaveLength(4);
+    expect(net.texts(alice)).toEqual(["still there?"]);
+    expect(net.texts(carol)).toEqual([]);
+    // Bob has caught up and the chain has settled: he says it again under the newest commit, for everyone.
+    await bob.session.reseal(); await net.settle();
+    expect(net.texts(carol)).toEqual([]);
+    now += 6_000;
+    await bob.session.reseal(); await net.settle();
+    expect(net.texts(carol)).toEqual(["still there?"]);
+    expect(net.texts(dave)).toEqual(["still there?"]);
+    // One message, by the first frame's identity: Alice, who read the first, does not show it twice.
+    expect(net.texts(alice)).toEqual(["still there?"]);
+    const ids = [alice, carol, dave].map(m => m.messages.find(x => x.text === "still there?")!.id);
+    expect(new Set(ids).size).toBe(1);
+    expect(ids[0].split(":")[1]).toBe(String(bob.session.state.store.find(f => f.s === bob.session.myKey)!.e));
+    // Once: a later look says nothing again.
+    const sent = net.log.filter(f => f.from === "bob" && f.t === "group-msg").length;
+    now += 6_000;
+    await bob.session.reseal(); await net.settle();
+    expect(net.log.filter(f => f.from === "bob" && f.t === "group-msg").length).toBe(sent);
+    // Erin, let in after Bob wrote, is not handed it.
+    const erin = await net.admit(alice, "erin");
+    await net.meet(erin, alice); await net.meet(erin, bob); await net.meet(erin, carol);
+    expect(net.texts(erin)).toEqual([]);
+  });
+
+  it("what a member wrote while behind is never said again where a member let in after it could open it", async () => {
+    const net = new Net();
+    let now = Date.now();
+    net.now = () => now;
+    const alice = net.create("alice");
+    const link = { g: alice.session.id, host: alice.session.entryKey };
+    const bob = await net.admit(alice, "bob", link, now);
+    await net.meet(alice, bob);
+    // Bob's app loses its edges; Carol is let in, Bob writes, then Erin is let in, before Bob is back.
+    net.partition = (a, b) => a !== bob && b !== bob;
+    const carol = await net.admit(alice, "carol", link, now + 1_000);
+    await net.meet(alice, carol);
+    expect("id" in await bob.session.sendText("before erin", "bob", now + 2_000)).toBe(true);
+    await net.settle();
+    const erin = await net.admit(alice, "erin", link, now + 3_000);
+    await net.meet(alice, erin); await net.meet(carol, erin);
+    net.partition = null;
+    await net.meet(bob, alice); await net.meet(bob, carol); await net.meet(bob, erin);
+    expect(bob.session.roster).toHaveLength(4);
+    now += 10_000;
+    await bob.session.reseal(); await net.settle();
+    now += 10_000;
+    await bob.session.reseal(); await net.settle();
+    await net.meet(erin, alice); await net.meet(erin, carol); await net.meet(erin, bob);
+    // Erin was not in the group when Bob wrote: she never reads it (Carol, who was, waits for it as before).
+    expect(net.texts(erin)).toEqual([]);
+    expect(net.texts(alice)).toEqual(["before erin"]);
   });
 
   it("answers one member's syncs a few times a minute, not every one", async () => {

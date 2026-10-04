@@ -19,6 +19,9 @@ use tauri::ipc::{Channel, InvokeResponseBody};
 pub mod devices;
 #[cfg(target_os = "linux")]
 pub mod engine;
+#[cfg(any(target_os = "linux", test))]
+pub mod gather;
+pub mod ice;
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -64,6 +67,8 @@ struct Live {
     call: Option<Arc<engine::Call>>,
     /// The camera whose picture the call sends, if any.
     camera: Option<u32>,
+    /// The profile's own ICE servers (a TURN server, typically), the usable ones.
+    ice: Vec<ice::IceServer>,
 }
 
 #[cfg(target_os = "linux")]
@@ -277,23 +282,31 @@ pub async fn native_speaker_test(device: Option<String>) -> Result<Option<String
 }
 
 /// A call with this id, its events (JSON: `{"ice": state}`) and the peer's picture (JPEG) on `events`.
+/// `ice_servers`: the profile's own ICE servers (Settings, Network), used after the built-in STUN server; one
+/// that is not usable is left out ([`ice::usable`]).
 #[tauri::command]
-pub fn native_call_open(id: String, events: Channel<InvokeResponseBody>) -> Result<(), String> {
+pub fn native_call_open(
+    id: String,
+    events: Channel<InvokeResponseBody>,
+    ice_servers: Option<Vec<ice::IceServer>>,
+) -> Result<(), String> {
     #[cfg(target_os = "linux")]
     {
+        let ice = ice::usable(&ice_servers.unwrap_or_default());
         calls().lock().unwrap().calls.insert(
             id,
             Live {
                 events,
                 call: None,
                 camera: None,
+                ice,
             },
         );
         Ok(())
     }
     #[cfg(not(target_os = "linux"))]
     {
-        let _ = (id, sink(events));
+        let _ = (id, sink(events), ice_servers);
         Err(ELSEWHERE.into())
     }
 }
@@ -321,13 +334,13 @@ async fn media(
     camera: Option<u32>,
     devices: engine::Devices,
 ) -> Result<Arc<engine::Call>, String> {
-    let events = {
+    let (events, ice) = {
         let calls = calls().lock().unwrap();
         let live = calls.calls.get(id).ok_or("No such call")?;
         if live.call.is_some() {
             return Err("The call has started already".into());
         }
-        live.events.clone()
+        (live.events.clone(), live.ice.clone())
     };
     let events = Arc::new(sink(events));
     let call = Arc::new(
@@ -336,6 +349,7 @@ async fn media(
             payload_types.1,
             engine::fake_media(),
             devices,
+            &ice,
             events,
         )
         .await?,

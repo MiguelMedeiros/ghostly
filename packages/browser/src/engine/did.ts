@@ -219,6 +219,15 @@ export class ProfileDid {
     }
   }
 
+  /**
+   * A copy of the DID key's seed, for the first device-set secret of the profile (WISP 06 § Terms: `D0` comes from
+   * it, so every backup of the profile leads to the same turn address). Never published, never stored elsewhere.
+   */
+  async deviceSetSeed(): Promise<Uint8Array> {
+    if (!this.stored) throw new Error("The profile's DID is not loaded");
+    return new Uint8Array(await this.unsealed());
+  }
+
   private async unsealed(): Promise<Uint8Array> {
     this.seed ??= fromBase64Url(await unsealSeed(this.stored!.seed.sealed, this.stored!.seed.deviceKey));
     return this.seed;

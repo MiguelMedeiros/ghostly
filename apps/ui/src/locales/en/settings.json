@@ -143,6 +143,13 @@
     "unprotected": "Install Ghostly (add it to the Home Screen), allow notifications, and keep a backup of your profile. Browsers protect apps that are installed and used often."
   },
   "storageOf": "{{used}} of {{quota}}",
+  "storageParts": {
+    "app": "Messages and app data: {{size}}",
+    "files": "Files ({{count}}): {{size}}",
+    "local": "Settings: {{size}}",
+    "staged": "Copies being saved: {{size}}"
+  },
+  "storagePartsNote": "Messages and app data count every profile on this device. Files are this profile's.",
   "storageProtect": "Protect",
   "storageState": {
     "protected": "Protected",

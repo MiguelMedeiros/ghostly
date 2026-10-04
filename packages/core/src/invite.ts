@@ -32,14 +32,22 @@ export interface LinkParams {
 export const INVITE_HRP = "ghostly";
 /** The format version this build makes; the first data symbol (`p`). */
 export const INVITE_VERSION = 1;
+/**
+ * The version of a code that adds a device to a profile (WISP 06 § Adding a device, `deviceInvite.ts`): no chat. The
+ * chat reader refuses it as `device`; an app from before WISP 06 refuses it as a newer version.
+ */
+export const DEVICE_INVITE_VERSION = 2;
 /** Decoders refuse anything longer before computing a checksum (WISP 801 lifts bech32's 90). */
 export const INVITE_MAX_LENGTH = 1023;
 /** The canonical link host (Q11): the code travels in the fragment, never sent to a server. */
 export const INVITE_LINK_ORIGIN = "https://ghostly.tools";
 const V1_BYTES = 128;
 
-/** Why a code was refused, each with the one message the UI shows for it. */
-export type InviteRefusal = "typo" | "update" | "not-ghostly" | "damaged";
+/**
+ * Why a code was refused, each with the one message the UI shows for it. `device`: a code that adds a device to a
+ * profile (WISP 06), which no chat can be made from.
+ */
+export type InviteRefusal = "typo" | "update" | "not-ghostly" | "damaged" | "device";
 
 /** What reading a pasted or scanned invite gives: the chat's parameters, or why not. */
 export type InviteReading =
@@ -106,7 +114,9 @@ function readGhostly(code: string): InviteReading {
   if (decoded.prefix !== INVITE_HRP) return { ok: false, reason: "typo" };
   const [version, ...words] = decoded.words;
   if (version === undefined || version === 0) return { ok: false, reason: "not-ghostly", detail: "Version 0 is reserved" };
-  if (version !== INVITE_VERSION) return { ok: false, reason: "update", detail: `Version ${version}` };
+  // Newer than every version this reader knows (a chat's 1, a device's 2): a newer Ghostly made it.
+  if (version > DEVICE_INVITE_VERSION) return { ok: false, reason: "update", detail: `Version ${version}` };
+  if (version === DEVICE_INVITE_VERSION) return { ok: false, reason: "device" };
   const payload = bech32m.fromWordsUnsafe(words);
   if (!payload) return { ok: false, reason: "damaged", detail: "Padding" };
   if (payload.length !== V1_BYTES) return { ok: false, reason: "damaged", detail: `${payload.length} bytes, not ${V1_BYTES}` };

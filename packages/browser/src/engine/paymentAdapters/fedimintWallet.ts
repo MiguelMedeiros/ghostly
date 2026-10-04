@@ -1,4 +1,5 @@
 import { generateMnemonic, validateMnemonic } from "@scure/bip39";
+import { awayFrom, refuseAway, requireTurn } from "./away";
 import { wordlist } from "@scure/bip39/wordlists/english.js";
 import { decodeBolt11, engineError, engineText, isFederationId, type BitcoinNetwork, type PaymentTarget, type WalletNetwork } from "@ghostly/core";
 import { store, STORES, transact, wrap } from "../../shared/idb";
@@ -30,6 +31,8 @@ export interface FedimintFederationView extends Omit<StoredFederation, "database
   /** Sats (the client counts msats; what is below a sat is not shown). */
   balance: number;
   status: "connecting" | "ready" | "error";
+  /** The balance was read once since the client opened. */
+  read?: true;
   error?: string;
   /** It has a Lightning gateway module (`ln`): invoices in and out through a gateway. */
   lightning: boolean;
@@ -132,9 +135,12 @@ export class FedimintWallet {
 
   /** Opens every federation of this network. One that does not answer is tried again, the others work meanwhile. */
   ensureReady(): Promise<void> {
+    // At home on another device (WISP 06 § Wallets that stay home): never opened here.
+    if (awayFrom(`fedimint:${this.network}`) !== undefined) return Promise.resolve();
     clearTimeout(this.retry);
     if (this.stopped) return Promise.resolve();
-    return Promise.all((this.saved?.federations ?? []).map((f) => this.open(f).catch(() => undefined))).then(() => {
+    // No good turn read under a minute old: nothing opens now, and it is tried again (WISP 06 § Wallets).
+    return requireTurn().then(() => Promise.all((this.saved?.federations ?? []).map((f) => this.open(f).catch(() => undefined))), () => undefined).then(() => {
       if (this.stopped) return;
       void this.refresh();
       if (this.saved?.federations.some((f) => !this.clients.has(f.id))) this.retry = setTimeout(() => void this.ensureReady(), 30_000);
@@ -194,6 +200,8 @@ export class FedimintWallet {
     const federations: FedimintFederationView[] = (this.saved?.federations ?? []).map(({ database: _database, ...f }) => ({
       ...f,
       balance: sats(this.balances.get(f.id) ?? 0),
+      // The balance was read from the federation's client: until then 0 says nothing.
+      ...(this.balances.has(f.id) ? { read: true as const } : {}),
       status: this.clients.has(f.id) ? "ready" : this.problems.has(f.id) ? "error" : "connecting",
       error: this.problems.get(f.id),
       lightning: f.modules.includes("ln"),
@@ -235,7 +243,7 @@ export class FedimintWallet {
    * Joins a federation. `recover`: the mnemonic was used with this federation before (a restore): the client rebuilds
    * its ecash from the federation's backup instead of starting empty.
    */
-  join(invite: string, { recover = false }: { recover?: boolean } = {}): Promise<FedimintFederationView> { return this.serial(async () => {
+  join(invite: string, { recover = false }: { recover?: boolean } = {}): Promise<FedimintFederationView> { return this.serial(async () => { refuseAway(`fedimint:${this.network}`, "Fedimint");
     const code = normalizeInvite(invite);
     const sdk = await this.sdk();
     const info = await this.gate.within(sdk.preview(code));
@@ -509,6 +517,8 @@ export class FedimintWallet {
   /** The mnemonic and the invite codes typed in: the same recovery. */
   restorePhrase(mnemonic: string, invites: string[]): Promise<{ joined: number; failed: string[] }> { return this.restore(async () => ({ mnemonic, invites })); }
   private async restore(read: () => Promise<{ mnemonic: string; invites: string[] }>): Promise<{ joined: number; failed: string[] }> {
+    // At home on another device (WISP 06 § Wallets that stay home): never made again, unlocked or restored over here.
+    refuseAway(`fedimint:${this.network}`, "Fedimint");
     const { mnemonic, invites } = await read();
     const phrase = mnemonic.trim().toLowerCase().split(/\s+/).join(" ");
     if (!validateMnemonic(phrase, wordlist)) throw new Error("Invalid recovery phrase");

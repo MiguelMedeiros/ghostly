@@ -193,6 +193,7 @@ Some of the specs, not all (`e2e/web/` alone has over 100). To list the tests of
 | `web/pairing-extras.spec.ts` | the connection popover (click, Escape, outside), the verification code on both sides, offline and Reconnect |
 | `web/services-web.spec.ts` | a web page says sharing needs the extension or desktop: in the Services page, on a chat's greyed + → Shared services, and in an older chat's Manage dialog |
 | `web/profiles.spec.ts` · `profile-lock.spec.ts` | profiles keep chats and settings apart, switching, deleting; the lock screen (change, remove, at startup) goes with new profiles and guards deleting a locked one |
+| `web/device-signing-key.spec.ts` | the device signing key (WISP 06) made by the app's own module: non-extractable where the engine keeps such a key, export and wrap refused, signing after a reload, a browser restart and in a worker; the seed form too. Also in WebKit (`npm run test:e2e:webkit`) |
 | `web/profile-backup-file.spec.ts` · `profile-backup.spec.ts` | a whole profile backed up to a file (and to S3 with `GHOSTLY_S3_*`), restored as a new profile; passphrase rules |
 | `web/chat-payments.spec.ts` | each chat accepts its own ways of paying, chosen on the composer's cards (+ → Payment → Accept); both sides' choices shown; one chat's choice and starting card are its own |
 | `web/sdk-plugin.spec.ts` | adapters built outside the app against `@ghostlytools/sdk` (`packages/sdk/examples/adapter`), compiled into this build with `GHOSTLY_PLUGINS`: the plugin's Lightning source in the picker (Testnet only), connected, an invoice seen paid; its identity proof added from a pasted signature |
@@ -230,6 +231,7 @@ Some of the specs, not all (`e2e/web/` alone has over 100). To list the tests of
 | `desktop-macos/headless-call.spec.ts` | macOS only: the Desktop app and a headless bot (`packages/cli`) call each other both ways, tones checked on the bot's audio socket and in the app's stats |
 | `desktop-macos/video-stream.spec.ts` | macOS only: a 100 MB video plays and seeks from the `ghostly-file` scheme, read in ranges of at most 4 MiB |
 | `desktop-macos/connection-ceiling.spec.ts` · `group-hubs-cost.spec.ts` | macOS only, measurements that run only when asked (`E2E_CONNECTION_CEILING=1`, `E2E_MESH_COST=1`): what a 1:1 chat and a call do at WebKit's ceiling of peer connections, and what a private group of 32 costs the app as a hub, a plain member and in a full mesh |
+| `desktop-macos/device-signing-key.spec.ts` | macOS only: the Desktop's WKWebView keeps a non-extractable Ed25519 device signing key (WISP 06), made by the app's own module, which signs after a reload and after the app is opened again |
 | `desktop-macos/notifications.spec.ts` | macOS only: Settings → System notifications in a Desktop copy in a temporary folder (macOS gives it none) says to move the app; from another folder the switch is offered and a notification call is answered. See [Desktop on macOS](#desktop-on-macos) |
 
 ## Desktop
@@ -404,7 +406,10 @@ E2E_WEB_PORT=50310 E2E_COMPAT_PORT=50311 npm run test:e2e:compat  # other ports 
 
 The main suite runs in Chromium. The macOS desktop app, Safari and the iPhone's installed app run WebKit, which keeps
 stored Blobs and files differently, so the specs that depend on that also run there: profile backups to a file
-(`web/profile-backup-file.spec.ts`: a profile with files backed up, restored byte for byte, cancelled, refused).
+(`web/profile-backup-file.spec.ts`: a profile with files backed up, restored byte for byte, cancelled, refused), and
+the device signing key (`web/device-signing-key.spec.ts`: a non-extractable Ed25519 key, WISP 06, made by the app's
+own module, refuses export and wrap and signs after a reload, a browser restart and in a worker). The Desktop's own
+WKWebView, which Playwright's WebKit is not, runs the same check in `desktop-macos/device-signing-key.spec.ts`.
 
 ```bash
 npx playwright install webkit      # once

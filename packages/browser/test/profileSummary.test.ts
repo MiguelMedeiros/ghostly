@@ -47,3 +47,24 @@ it("an archived wallet, a source's bookkeeping or another record is not a wallet
     "lightningSourceSeen-testnet", "lightningCards-testnet", "settings", "identityProofs"])).toEqual([]);
   expect(walletsIn(["arkWallet", "usdtWallet"]), "an older app's bare keys still count").toEqual(["Ark", "USDT"]);
 });
+
+// covers: devices.gate
+it("a profile this device is on standby for is summed up without opening its database (WISP 06)", async () => {
+  const { putDeviceRecord } = await import("./helpers/deviceRecord");
+  const entry = registerProfile("standbypro", "Standby");
+  const request = indexedDB.open(`ghostly_${entry.id}`, 1);
+  request.onupgradeneeded = () => {
+    request.result.createObjectStore("settings").put({ config: { walletId: "a", network: "mutinynet" } }, "arkWallet-mode-testnet");
+    request.result.createObjectStore("proofs", { keyPath: "secret" }).put({ secret: "s", amount: 21 });
+  };
+  (await wrap(request)).close();
+  expect(await profileSummary(entry.id)).toMatchObject({ cashuSats: 21, wallets: ["Ark"] });
+
+  await putDeviceRecord({ v: 1, profile: `ghostly_${entry.id}`, state: "standby", saved: 1, turn: 1, rev: 0, deviceSet: [], takeovers: 0, earlierSets: [] });
+  const opened: string[] = [];
+  const open = indexedDB.open.bind(indexedDB);
+  const spy = vi.spyOn(indexedDB, "open").mockImplementation((name: string, version?: number) => { opened.push(name); return open(name, version); });
+  expect(await profileSummary(entry.id)).toMatchObject({ cashuSats: 0, wallets: [] });
+  expect(opened).not.toContain(`ghostly_${entry.id}`);
+  spy.mockRestore();
+});

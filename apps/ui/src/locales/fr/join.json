@@ -6,6 +6,7 @@
   "clipboardUnavailableTouch": "Impossible de lire le presse-papiers. Appuyez longuement sur le champ ci-dessous, puis sur Coller.",
   "close": "Fermer",
   "damaged": "Cette invitation est endommagée. Demandez-en une nouvelle.",
+  "device": "Ce code ajoute un appareil à un profil. Sur le nouvel appareil, choisissez J’utilise déjà Ghostly.",
   "empty": "Le presse-papiers est vide. Copiez une invitation, puis appuyez sur {{keys}} ci-dessous.",
   "emptyTouch": "Le presse-papiers est vide. Copiez une invitation, puis collez-la ci-dessous.",
   "image": "Ouvrir une image",
