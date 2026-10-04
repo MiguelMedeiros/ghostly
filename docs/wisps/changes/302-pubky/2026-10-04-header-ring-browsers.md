@@ -1,0 +1,1 @@
+Notes say where a Pubky Ring approval completes, as the evidence of revision 2026-10-03 does: in a browser that keeps the homeserver's cookie (the desktop app, the extension, Chrome, Edge, Firefox) and not in Safari, while Pubky Passport needs no cookie.

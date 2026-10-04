@@ -9,7 +9,7 @@
 | Implementation | Identity provider `pubky` (web, extension, desktop): `packages/browser/src/proofs/providers/pubky.ts`, `proofs/pubky.ts`; core `pubkyProofs.ts`, `pkdns.ts` |
 | Summary | Show a contact you hold a Pubky key: approve one request in Pubky Ring or Pubky Passport, and Ghostly writes a small proof file to your homeserver. |
 | Availability | Available |
-| Notes | The proof is published, not signed: Ring and Passport approve Pubky auth requests only. Number not yet assigned. |
+| Notes | The proof is published, not signed: Ring and Passport approve Pubky auth requests only. A Ring approval needs a browser that keeps the homeserver's cookie (not Safari): the desktop app, the extension, Chrome, Edge or Firefox. Passport needs no cookie. Number not yet assigned. |
 
 > This is a review draft. Candidate numbers and new wire formats are not registered standards. Normative language describes a candidate requirement, not a shipped guarantee. See the [catalogue](README.md), [implementation evidence](IMPLEMENTATION.md), and [interoperability plan](INTEROP.md). The historical document identifier 302 remains in the URL for link compatibility; it is not a committed WISP number.
 

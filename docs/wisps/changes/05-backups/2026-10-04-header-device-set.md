@@ -1,0 +1,1 @@
+Notes add the restore guard of [06](06-devices.md#a-backup-restored-where-a-device-set-exists), now on `dev`: a backup of a profile used on several devices is not started while another device is active, and the app offers to add this device or take over instead. A restore still creates a new profile and overwrites nothing.
