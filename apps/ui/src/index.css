@@ -25,6 +25,9 @@
   --color-accent: var(--theme-accent);
   --color-accent-dim: var(--theme-accent-dim);
   --color-accent-hover: var(--theme-accent-hover);
+  /* The keyboard focus's ring around a field: the accent, 3:1 or more on what is around it (WCAG 2.4.13), except where
+     the accent is too light for that (the classic light theme, below). */
+  --color-focus-ring: var(--theme-focus-ring, var(--theme-accent));
   /* Danger's red: brighter on dark themes, darker on light ones, so its words read at 4.5:1 on either. */
   --color-danger: var(--theme-danger);
   /* Danger as a fill under white words (Delete, hang up): dark enough for 4.5:1 with white in every theme. */
@@ -329,6 +332,13 @@
 
 html {
   color-scheme: dark;
+}
+
+/* The classic green reads at about 2.7:1 on the light greys: a darker one, 4.3:1 or more on white, the greys and the
+   chat's beige. The other light themes' accents already do. */
+:root[data-theme="light"]:not([data-color-theme]),
+:root[data-theme="light"][data-color-theme="classic"] {
+  --theme-focus-ring: #008069;
 }
 
 html[data-theme="light"] {
