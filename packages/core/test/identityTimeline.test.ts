@@ -36,6 +36,16 @@ describe("identity timeline", () => {
     expect(applyIdentityEvent([], { type: "result", side: "mine", proof: Q, ok: true }, 3)).toEqual([]);
   });
 
+  it("a withdrawal later found revoked (a removal) turns into a revocation, in place and at its time; never back", () => {
+    let t = applyIdentityEvent([], { type: "shared", side: "theirs", proof: P, provider: "nostr", subject: "npub1x" }, 1);
+    t = applyIdentityEvent(t, { type: "stopped", side: "theirs", proof: P, provider: "nostr", reason: "withdrawn" }, 2);
+    t = applyIdentityEvent(t, { type: "stopped", side: "theirs", proof: P, provider: "nostr", reason: "revoked" }, 3);
+    expect(t).toHaveLength(2);
+    expect(t[1]).toMatchObject({ kind: "stopped", reason: "revoked", subject: "npub1x", at: 2 });
+    t = applyIdentityEvent(t, { type: "stopped", side: "theirs", proof: P, provider: "nostr", reason: "withdrawn" }, 4);
+    expect(t[1]).toMatchObject({ reason: "revoked" });
+  });
+
   it("keeps the newest entries only, and tells the chat list when the contact last shared", () => {
     let t: IdentityTimelineEntry[] = [];
     for (let i = 0; i < IDENTITY_TIMELINE_MAX + 5; i++) t = applyIdentityEvent(t, { type: "shared", side: i % 2 ? "mine" : "theirs", proof: i.toString(16).padStart(64, "0"), provider: "nostr" }, i);

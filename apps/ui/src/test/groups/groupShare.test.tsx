@@ -18,10 +18,10 @@ const ME = "me".padEnd(52, "y");
 const me: GroupMemberView = { key: ME, role: "admin", me: true, online: true, missing: 0 };
 const admin = (patch: Partial<GroupView> = {}) => groupView({ id: ID, status: "active", epoch: 1, isAdmin: true, members: [me], ...patch });
 
-function openGroup(group: GroupView) {
+function openGroup(group: GroupView, state?: unknown) {
   fakeEngine.on("groupMessages", () => []).on("updateSettings", () => undefined);
   fakeEngine.update({ groups: [group] });
-  return renderApp(<Routes><Route path="/group/:groupId" element={<GroupChat />} /></Routes>, { route: `/group/${ID}` });
+  return renderApp(<Routes><Route path="/group/:groupId" element={<GroupChat />} /></Routes>, { route: state ? { pathname: `/group/${ID}`, state } : `/group/${ID}` });
 }
 
 describe("the group header's Share link", () => {
@@ -93,6 +93,23 @@ describe("GroupShareDialog", () => {
     } finally {
       delete (navigator as { share?: unknown }).share;
     }
+  });
+
+  it("gives the focus back to Share when the link it opened closes", async () => {
+    const { user } = openGroup(admin({ entryLink: LINK }));
+    const share = screen.getByTestId("group-share");
+    await user.click(share);
+    expect(screen.getByTestId("group-share-dialog")).toContainElement(document.activeElement as HTMLElement);
+    act(() => { screen.getByTestId("group-share-dialog").dispatchEvent(new Event("cancel", { cancelable: true })); });
+    expect(screen.queryByTestId("group-share-dialog")).not.toBeInTheDocument();
+    expect(document.activeElement).toBe(share);
+  });
+
+  it("leaves the focus in the group when a new group's link is put away: on what had it, else on Share", async () => {
+    const { user } = openGroup(admin({ entryLink: LINK }), { share: "created" });
+    await user.click(await screen.findByRole("button", { name: "Go to the group" }));
+    expect(screen.queryByTestId("group-share-dialog")).not.toBeInTheDocument();
+    expect([screen.getByPlaceholderText("Message…"), screen.getByTestId("group-share")]).toContain(document.activeElement);
   });
 
   it("closes on Escape", () => {
