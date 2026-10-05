@@ -15,7 +15,7 @@ import { LostChecklist, RemoveDeviceDialog } from "./RemoveDeviceDialog";
 import { FAILURES, dayText, useHandoffView, walletNameOf } from "../../lib/handoff";
 
 /** The refusals that come from this device's wallets (WISP 06 § Wallets). */
-const WALLET_REFUSALS = new Set<string>(["wallet", "loading", "mainnet", "expiry"]);
+const WALLET_REFUSALS = new Set<string>(["wallet", "loading", "mainnet", "expiry", "call"]);
 /** A move that stopped on the way, with the profile still here: Try again moves it. */
 const STOPPED = new Set<string>(["stalled", "dropped", "damaged"]);
 
@@ -121,7 +121,7 @@ export function DevicesSection() {
           </Row>
         );
       })()}
-      {/* A pull this device's wallets kept from happening: what keeps the profile here (WISP 06 § Wallets). */}
+      {/* A pull this device's wallets or a call on it kept from happening: what keeps the profile here (WISP 06 § Wallets). */}
       {handoff?.role === "giver" && handoff.step === "failed" && handoff.failure && WALLET_REFUSALS.has(handoff.failure) && (
         <Row testId="handoff-wallet-refusal" label={t(FAILURES[handoff.failure], { device: handoff.device, wallet: walletNameOf(handoff.wallet) })}
           hint={handoff.expiresAt !== undefined ? t("devices.handoff.staysExpires", { wallet: walletNameOf(handoff.wallet), date: dayText(handoff.expiresAt, language) }) : undefined} />

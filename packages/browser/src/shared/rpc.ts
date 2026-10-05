@@ -303,6 +303,12 @@ export interface EngineApi {
   setWakeMuted(params: { linkId: string; muted: boolean }): Promise<void>;
   /** A call to a contact whose app is closed: a "call" wake-up; true when it can be woken this way (the caller then waits). */
   wakeForCall(params: { linkId: string }): Promise<boolean>;
+  /**
+   * A call is on in this page, or no longer (`@ghostly/react`, `callRegistry`: placed or answered, until it ends).
+   * While one is on in any page, this device answers a handoff with `handoff-busy` and its Move to says why (WISP 06
+   * § States and events). A page that goes away counts as off.
+   */
+  setCallOn(params: { on: boolean }): void;
   setFastPoll(params: { linkId: string; fast: boolean }): void;
 
   // Private groups (WISP 900, `group-mesh/1`). Group messages arrive as `messages` events under `group:<id>`.
