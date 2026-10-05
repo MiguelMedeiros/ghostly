@@ -1,7 +1,5 @@
 {
   "about": "关于",
-  "advanced": "高级",
-  "advancedHint": "网络、中继和域名查询",
   "appearance": "外观",
   "changePassword": "修改密码",
   "chatListDensities": {
@@ -88,6 +86,8 @@
     "testSound": "测试声音",
     "title": "音频和视频"
   },
+  "mediaHint": "麦克风、摄像头和扬声器",
+  "networkHint": "中继、TURN 和域名查询",
   "newPassword": "新密码",
   "nicknamePlaceholder": "输入您的昵称...",
   "noticesDenied": "已被阻止。请在设备或浏览器设置中允许。",
@@ -102,6 +102,7 @@
   "notificationSounds": "声音",
   "notificationSoundsDescription": "消息、通话和已确认的付款",
   "notifications": "通知",
+  "notificationsHint": "声音和提醒",
   "password": "密码",
   "passwordChanged": "密码修改成功",
   "passwordEdit": "更改",
@@ -112,6 +113,7 @@
   "passwordRemoved": "密码已移除",
   "passwordSet": "密码设置成功",
   "passwordTooShort": "密码至少需要4个字符",
+  "privacyHint": "锁屏、链接预览和正在输入提示",
   "privateNotice": "新消息",
   "profile": "个人资料",
   "profileLinkHint": "名称、头像、备份和其他资料",
@@ -127,6 +129,8 @@
   "reduceMotion": "减少动态效果",
   "reduceMotionHint": "减少动画。系统设置始终生效。",
   "removePassword": "移除密码",
+  "search": "搜索设置",
+  "searchEmpty": "没有匹配的设置",
   "security": "隐私与安全",
   "sendTyping": "发送正在输入提示",
   "sendTypingHint": "联系人会看到你正在输入。关闭后，你仍能看到他们的。",

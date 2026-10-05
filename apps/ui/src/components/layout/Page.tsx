@@ -2,7 +2,8 @@ import type { ReactNode } from "react";
 import { useOptionalI18n } from "../../contexts/I18nContext";
 import { useAppNavigation } from "../../hooks/useAppNavigation";
 
-const WIDTH = { md: "max-w-2xl", lg: "max-w-3xl" } as const;
+/** `xl`: room for an index beside a `md` column (Settings on a wide screen). */
+const WIDTH = { md: "max-w-2xl", lg: "max-w-3xl", xl: "max-w-5xl" } as const;
 
 /**
  * A page of the right-hand column (Wallet, Services, Settings, Profile): a header with the way back, and a

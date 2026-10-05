@@ -68,7 +68,7 @@ test("behind a network that blocks direct connections, chats go live through a r
   }
 
   // Settings, Network says the same, and the note goes by itself when the network changes.
-  await alice.page.goto("/#/settings/advanced");
+  await alice.page.goto("/#/settings/network");
   const row = alice.page.getByTestId("network-direct-blocked");
   await expect(row).toContainText(HINT);
   await alice.page.evaluate(() => { window.dispatchEvent(new Event("online")); });

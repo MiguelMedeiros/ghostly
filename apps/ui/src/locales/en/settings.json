@@ -1,7 +1,5 @@
 {
   "about": "About",
-  "advanced": "Advanced",
-  "advancedHint": "Network, relays and domain lookups",
   "appearance": "Appearance",
   "changePassword": "Change password",
   "chatListDensities": {
@@ -88,6 +86,8 @@
     "testSound": "Test sound",
     "title": "Audio & video"
   },
+  "mediaHint": "Microphone, camera and speaker",
+  "networkHint": "Relays, TURN and domain lookups",
   "newPassword": "New password",
   "nicknamePlaceholder": "Enter your nickname...",
   "noticesDenied": "Blocked. Allow them in device or browser settings.",
@@ -102,6 +102,7 @@
   "notificationSounds": "Sounds",
   "notificationSoundsDescription": "Messages, calls and confirmed payments",
   "notifications": "Notifications",
+  "notificationsHint": "Sounds and alerts",
   "password": "Password",
   "passwordChanged": "Password changed successfully",
   "passwordEdit": "Change",
@@ -112,6 +113,7 @@
   "passwordRemoved": "Password removed",
   "passwordSet": "Password set successfully",
   "passwordTooShort": "Password must be at least 4 characters",
+  "privacyHint": "Screen lock, link previews and typing",
   "privateNotice": "New message",
   "profile": "Profile",
   "profileLinkHint": "Name, picture, backups and other profiles",
@@ -127,6 +129,8 @@
   "reduceMotion": "Reduce motion",
   "reduceMotionHint": "Fewer animations. Your system setting always applies.",
   "removePassword": "Remove password",
+  "search": "Search settings",
+  "searchEmpty": "No settings match",
   "security": "Privacy & security",
   "sendTyping": "Send typing indicator",
   "sendTypingHint": "Contacts see when you're writing. Off, you still see theirs.",

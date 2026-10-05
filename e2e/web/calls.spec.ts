@@ -293,7 +293,7 @@ test("the lock screen covers a call it keeps going", { tag: ["@feature:calls.loc
 
   await alice.page.getByTitle("Settings").click();
   await alice.page.getByRole("switch", { name: "Lock Screen" }).click();
-  const passwords = alice.page.locator("input[type=password]");
+  const passwords = alice.page.getByTestId("settings-password-form").locator("input[type=password]");
   await passwords.nth(0).fill("spooky");
   await passwords.nth(1).fill("spooky");
   await alice.page.getByRole("button", { name: "Set password" }).click();

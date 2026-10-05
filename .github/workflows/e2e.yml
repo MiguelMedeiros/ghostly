@@ -29,8 +29,9 @@ jobs:
   e2e:
     name: End-to-end
     runs-on: ubuntu-24.04
-    # The web and extension suites outgrew 30 minutes (cancelled mid-run on 2026-09-29).
-    timeout-minutes: 60
+    # The web and extension suites outgrew 30 minutes (cancelled mid-run on 2026-09-29),
+    # then 60 (584 tests, cancelled at 560 while releasing 1.1.1 on 2026-10-04).
+    timeout-minutes: 90
 
     steps:
       - name: Checkout

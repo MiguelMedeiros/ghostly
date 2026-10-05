@@ -5,7 +5,7 @@ import { MessageBubble } from "../../components/MessageBubble";
 import { LockScreenProvider } from "../../contexts/LockScreenContext";
 import { UpdateProvider } from "../../contexts/UpdateContext";
 import { GroupChat } from "../../pages/GroupChat";
-import { AdvancedSettings, Settings } from "../../pages/Settings";
+import { Settings } from "../../pages/Settings";
 import { groupView } from "../fakeEngine";
 import { renderApp } from "../render";
 import { LANGUAGES, LOCALES, SECTIONS, flatten, lookup } from "./locales";
@@ -84,9 +84,9 @@ describe.each(LANGUAGES)("in %s", (language) => {
     expect(rawKeys(container)).toEqual([]);
   });
 
-  it("Settings and Settings → Advanced, with every ⓘ open, show no raw key and no English left behind", async () => {
+  it("Settings, network included, with every ⓘ open, show no raw key and no English left behind", async () => {
     const { engine, user, container } = renderApp(
-      <LockScreenProvider><UpdateProvider><Settings /><AdvancedSettings /></UpdateProvider></LockScreenProvider>,
+      <LockScreenProvider><UpdateProvider><Settings /></UpdateProvider></LockScreenProvider>,
       { route: "/settings", language },
     );
     act(() => engine.update({

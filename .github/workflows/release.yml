@@ -17,11 +17,13 @@ on:
         required: false
         default: false
         type: boolean
+  # By hand: build an existing tag again (say its run was cancelled) with this
+  # branch's workflows. The tag's code is what gets built and tested.
   workflow_dispatch:
     inputs:
-      version:
-        description: "Version to release (e.g., 0.1.0)"
-        required: false
+      tag:
+        description: "Existing tag to build, e.g. v1.1.1"
+        required: true
         type: string
 
 # Jobs that publish ask for more themselves.

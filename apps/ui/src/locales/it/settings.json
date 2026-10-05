@@ -1,7 +1,5 @@
 {
   "about": "Informazioni",
-  "advanced": "Avanzate",
-  "advancedHint": "Rete, relay e ricerche di dominio",
   "appearance": "Aspetto",
   "changePassword": "Cambia password",
   "chatListDensities": {
@@ -88,6 +86,8 @@
     "testSound": "Prova audio",
     "title": "Audio e video"
   },
+  "mediaHint": "Microfono, fotocamera e altoparlante",
+  "networkHint": "Relay, TURN e ricerche di dominio",
   "newPassword": "Nuova password",
   "nicknamePlaceholder": "Inserisci il tuo nickname...",
   "noticesDenied": "Bloccate. Consentile nelle impostazioni del dispositivo o del browser.",
@@ -102,6 +102,7 @@
   "notificationSounds": "Suoni",
   "notificationSoundsDescription": "Messaggi, chiamate e pagamenti confermati",
   "notifications": "Notifiche",
+  "notificationsHint": "Suoni e avvisi",
   "password": "Password",
   "passwordChanged": "Password modificata con successo",
   "passwordEdit": "Cambia",
@@ -112,6 +113,7 @@
   "passwordRemoved": "Password rimossa",
   "passwordSet": "Password impostata con successo",
   "passwordTooShort": "La password deve avere almeno 4 caratteri",
+  "privacyHint": "Blocco schermo, anteprime dei link e scrittura",
   "privateNotice": "Nuovo messaggio",
   "profile": "Profilo",
   "profileLinkHint": "Nome, foto, backup e altri profili",
@@ -127,6 +129,8 @@
   "reduceMotion": "Riduci animazioni",
   "reduceMotionHint": "Meno animazioni. L'impostazione di sistema vale sempre.",
   "removePassword": "Rimuovi password",
+  "search": "Cerca nelle impostazioni",
+  "searchEmpty": "Nessuna impostazione trovata",
   "security": "Privacy e sicurezza",
   "sendTyping": "Invia indicatore di scrittura",
   "sendTypingHint": "I tuoi contatti vedono quando stai scrivendo. Se disattivato, vedi comunque il loro.",

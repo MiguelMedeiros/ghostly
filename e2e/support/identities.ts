@@ -129,7 +129,7 @@ export async function backToTheirCards(peer: Peer) {
  * screen. Specs that count the requests a relay gets for something else turn it off first. Leaves the page on Settings.
  */
 export async function setLoadPublicProfiles(peer: Peer, on: boolean) {
-  await peer.page.evaluate(() => { location.hash = "#/settings"; });
+  await peer.page.evaluate(() => { location.hash = "#/settings/privacy"; });
   const toggle = peer.page.getByTestId("settings-public-profiles");
   if ((await toggle.getAttribute("aria-checked")) !== String(on)) await toggle.click();
   await expect(toggle).toHaveAttribute("aria-checked", String(on));

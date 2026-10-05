@@ -1,7 +1,5 @@
 {
   "about": "À propos",
-  "advanced": "Avancé",
-  "advancedHint": "Réseau, relais et recherches de domaine",
   "appearance": "Apparence",
   "changePassword": "Changer le mot de passe",
   "chatListDensities": {
@@ -88,6 +86,8 @@
     "testSound": "Tester le son",
     "title": "Audio et vidéo"
   },
+  "mediaHint": "Micro, caméra et haut-parleur",
+  "networkHint": "Relais, TURN et recherches de domaine",
   "newPassword": "Nouveau mot de passe",
   "nicknamePlaceholder": "Entrez votre pseudo...",
   "noticesDenied": "Bloquées. Autorisez-les dans les réglages de l'appareil ou du navigateur.",
@@ -102,6 +102,7 @@
   "notificationSounds": "Sons",
   "notificationSoundsDescription": "Messages, appels et paiements confirmés",
   "notifications": "Notifications",
+  "notificationsHint": "Sons et alertes",
   "password": "Mot de passe",
   "passwordChanged": "Mot de passe modifié avec succès",
   "passwordEdit": "Modifier",
@@ -112,6 +113,7 @@
   "passwordRemoved": "Mot de passe supprimé",
   "passwordSet": "Mot de passe défini avec succès",
   "passwordTooShort": "Le mot de passe doit contenir au moins 4 caractères",
+  "privacyHint": "Verrouillage, aperçus de liens et saisie",
   "privateNotice": "Nouveau message",
   "profile": "Profil",
   "profileLinkHint": "Nom, photo, sauvegardes et autres profils",
@@ -127,6 +129,8 @@
   "reduceMotion": "Réduire les animations",
   "reduceMotionHint": "Moins d'animations. Le réglage du système s'applique toujours.",
   "removePassword": "Supprimer le mot de passe",
+  "search": "Rechercher un paramètre",
+  "searchEmpty": "Aucun paramètre ne correspond",
   "security": "Confidentialité et sécurité",
   "sendTyping": "Envoyer l'indicateur de saisie",
   "sendTypingHint": "Vos contacts voient quand vous écrivez. Désactivé, vous voyez toujours le leur.",

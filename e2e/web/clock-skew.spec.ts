@@ -23,7 +23,7 @@ test("a device whose clock is three minutes ahead says so, in the chat's connect
   await alice.page.getByTestId("connection-options").click();
   await expect(alice.page.getByRole("dialog", { name: "Connection options" })).toBeVisible();
   await expect(alice.page.getByTestId("connection-clock-off")).toHaveCount(0);
-  await bob.page.goto("/#/settings/advanced");
+  await bob.page.goto("/#/settings/network");
   await expect(bob.page.getByTestId("network-clock-off")).toContainText("off by about 3 minutes");
   // He sets his clock: the next answers agree with it, and the note goes.
   await bob.page.evaluate(() => { (globalThis as { clockOffset?: number }).clockOffset = 0; });

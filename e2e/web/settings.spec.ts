@@ -104,7 +104,7 @@ test("lock screen: a password locks the app, only it unlocks it", { tag: ["@feat
   const { page } = await peer("alice");
   await page.goto("/#/settings");
   await page.getByRole("switch", { name: "Lock Screen" }).click();
-  const passwords = page.locator("input[type=password]");
+  const passwords = page.getByTestId("settings-password-form").locator("input[type=password]");
 
   await passwords.nth(0).fill("boo");
   await passwords.nth(1).fill("boo");
@@ -152,7 +152,7 @@ test("lock screen: locks by itself after the chosen idle time", { tag: ["@featur
   await page.clock.install();
   await page.goto("/#/settings");
   await page.getByRole("switch", { name: "Lock Screen" }).click();
-  const passwords = page.locator("input[type=password]");
+  const passwords = page.getByTestId("settings-password-form").locator("input[type=password]");
   await passwords.nth(0).fill("spooky");
   await passwords.nth(1).fill("spooky");
   await page.getByRole("button", { name: "Set password" }).click();
@@ -168,10 +168,10 @@ test("network: relays can be changed and reset", { tag: ["@feature:settings.netw
   const { page, context } = await peer("alice");
   // The relay typed below is a real name on the Internet: refused here, so the peer never reaches it.
   await context.route(/^https?:\/\/relay\.example\.org\//, (route) => route.abort());
-  // Rarely changed: under Advanced, a page of its own.
+  // Its own section: the index beside the page goes there, and the address names it.
   await page.goto("/#/settings");
-  await page.getByTestId("settings-advanced").click();
-  await expect(page).toHaveURL(/#\/settings\/advanced$/);
+  await page.getByTestId("settings-index-network").click();
+  await expect(page).toHaveURL(/#\/settings\/network$/);
   const relays = page.getByTestId("network-relays");
   await expect(relays).toHaveValue("https://pkarr.pubky.org\nhttps://pkarr.pubky.app");
   await relays.fill("https://relay.example.org/\nnot a url");
@@ -185,4 +185,39 @@ test("network: relays can be changed and reset", { tag: ["@feature:settings.netw
   await expect(page.getByText("Saved", { exact: true })).toBeVisible();
   await page.reload();
   await expect(relays).toHaveValue("https://pkarr.pubky.org\nhttps://pkarr.pubky.app");
+});
+
+test("on a phone: a menu of sections, each on its own screen, and Back to the menu", { tag: ["@feature:settings.sections", "@feature:app.mobile-layout"] }, async ({ peer }) => {
+  const { page } = await peer("alice", { mobile: true });
+  await page.getByTestId("mobile-tab-settings").click();
+  await expect(page.getByTestId("settings-menu")).toBeVisible();
+  await expect(page.getByTestId("settings-open-appearance")).toContainText("English");
+  await expect(page.getByTestId("settings-lock")).toHaveCount(0);
+
+  await page.getByTestId("settings-open-privacy").click();
+  await expect(page).toHaveURL(/#\/settings\/privacy$/);
+  await expect(page.getByRole("heading", { level: 1, name: "Privacy & security" })).toBeVisible();
+  await expect(page.getByTestId("settings-lock")).toBeVisible();
+  // The phone's Back gesture: the menu again.
+  await page.goBack();
+  await expect(page).toHaveURL(/#\/settings$/);
+  await expect(page.getByTestId("settings-menu")).toBeVisible();
+
+  // The search finds an option by name and opens its section; the header's Back goes up to the menu.
+  await page.getByTestId("settings-search").fill("chat list");
+  await page.getByTestId("settings-search-result").click();
+  await expect(page).toHaveURL(/#\/settings\/appearance$/);
+  await choose(page.getByTestId("settings-language"), "pt");
+  await expect(page.getByRole("heading", { level: 1, name: "Aparência" })).toBeVisible();
+  await page.getByTestId("page-back").click();
+  await expect(page.getByRole("heading", { level: 1, name: "Configurações" })).toBeVisible();
+
+  // An address from before the sections opens its new place, with Back to the menu, after a reload too.
+  await page.goto("/#/settings/advanced");
+  await expect(page).toHaveURL(/#\/settings\/network$/);
+  await expect(page.getByTestId("network-relays")).toBeVisible();
+  await page.reload();
+  await expect(page.getByTestId("network-relays")).toBeVisible();
+  await page.getByTestId("page-back").click();
+  await expect(page.getByTestId("settings-menu")).toBeVisible();
 });

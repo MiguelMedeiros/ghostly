@@ -125,7 +125,7 @@ test("a domain proven by /.well-known/ghostly.json is fetched from the domain it
 
 test("the resolver that checks domain proofs is the person's choice, says what it learns, and is kept", { tag: ["@feature:proofs.domain.resolver"] }, async ({ peer }) => {
   const { page } = await peer("dom-settings");
-  await page.goto("/#/settings/advanced");
+  await page.goto("/#/settings/network");
   const resolver = page.getByTestId("doh-resolver");
   await expect(resolver).toHaveAttribute("data-value", "quad9");
   // What the resolver learns: behind the row's ⓘ, naming the one chosen.
