@@ -364,19 +364,35 @@ fn invisible(c: char) -> bool {
     matches!(c, '\u{200B}'..='\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2060}'..='\u{206F}' | '\u{2028}' | '\u{2029}' | '\u{FEFF}')
 }
 
+/// The longest name the save dialog is given, in characters (as packages/core `sanitizeFileName`).
+const MAX_NAME_CHARS: usize = 200;
+
 /// A suggested name for the save dialog: what the chat shows, without anything that reads as a path.
+/// A longer one loses the end of its stem, not its extension (up to 15 characters after the last dot).
 fn suggested_name(name: &str) -> String {
     let clean: String = name
         .chars()
         .filter(|c| !c.is_control() && !invisible(*c) && !matches!(c, '/' | '\\' | ':'))
-        .take(200)
         .collect();
-    let clean = clean.trim().trim_start_matches('.').to_string();
+    let clean = clean.trim().trim_start_matches('.');
     if clean.is_empty() {
-        "file".into()
-    } else {
-        clean
+        return "file".into();
     }
+    let chars: Vec<char> = clean.chars().collect();
+    if chars.len() <= MAX_NAME_CHARS {
+        return clean.to_string();
+    }
+    let extension: Vec<char> = match chars.iter().rposition(|c| *c == '.') {
+        Some(dot)
+            if (2..=16).contains(&(chars.len() - dot))
+                && !chars[dot + 1..].iter().any(|c| c.is_whitespace()) =>
+        {
+            chars[dot..].to_vec()
+        }
+        _ => Vec::new(),
+    };
+    let stem: String = chars[..MAX_NAME_CHARS - extension.len()].iter().collect();
+    stem.trim_end().chars().chain(extension).collect()
 }
 
 fn store<R: tauri::Runtime>(
@@ -776,6 +792,20 @@ mod tests {
         assert_eq!(suggested_name(" .bashrc"), "bashrc");
         assert_eq!(suggested_name("invoice\u{202e}fdp.exe"), "invoicefdp.exe");
         assert_eq!(suggested_name(""), "file");
+        // A long name is shortened before its extension, so it keeps its type.
+        let long = format!("{}.pdf", "r".repeat(230));
+        assert_eq!(suggested_name(&long), format!("{}.pdf", "r".repeat(196)));
+        assert_eq!(
+            suggested_name(&format!("{}    b.txt", "a".repeat(195))),
+            format!("{}.txt", "a".repeat(195))
+        );
+        assert_eq!(
+            suggested_name(&format!("{}.{}", "a".repeat(195), "b".repeat(40)))
+                .chars()
+                .count(),
+            200
+        );
+        assert_eq!(suggested_name(&"x".repeat(500)).chars().count(), 200);
         // A downloaded voice message's name (made by the app) goes through as it is.
         assert_eq!(
             suggested_name("Ghostly voice 2026-09-27 14.01.30.webm"),
