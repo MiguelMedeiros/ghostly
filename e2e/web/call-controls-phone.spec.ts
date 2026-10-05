@@ -98,3 +98,41 @@ test("an installed iPhone: the call's corner button stays clear of the status ba
   expect(button.x - small.x).toBeLessThan(20);
   await bob.page.getByTestId("call-hang-up").click();
 });
+
+/** Buttons of the small call window's row that are out of round or not wholly inside the window. */
+const outsideSmall = (page: Page) => page.getByTestId("call-window").evaluate((small) => {
+  const box = small.getBoundingClientRect();
+  const row = small.querySelector("[data-testid=call-hang-up]")!.parentElement!;
+  return [...row.children].map((b) => b.getBoundingClientRect())
+    .filter((r) => r.width > 0 && (Math.abs(r.width - r.height) > 1 || r.left < box.left + 2 || r.right > box.right - 2))
+    .map((r) => `${Math.round(r.width)}x${Math.round(r.height)} at ${Math.round(r.left - box.left)}..${Math.round(r.right - box.left)} of ${Math.round(box.width)}`);
+});
+
+const smallRows = [
+  { name: "a 600 px desktop window, where it opens at its narrowest", viewport: { width: 600, height: 800 }, narrowest: false },
+  { name: "a desktop window, made as narrow as it goes", viewport: { width: 1280, height: 800 }, narrowest: true },
+];
+for (const { name, viewport, narrowest } of smallRows) {
+  test(`the small call window keeps its five buttons inside it: ${name}`, { tag: ["@feature:calls.mini-window"] }, async ({ peer }) => {
+    const alice = await peer("alice");
+    // The small window's narrowest (190 px), as a person leaves it after pulling a corner in.
+    const bob: Peer = await peer("bob", { viewport, ...(narrowest ? { beforeOpen: async (context) => { await context.addInitScript(() => localStorage.setItem("ghostly_call_window_box", JSON.stringify({ x: 900, y: 500, w: 190, h: 128 }))); } } : {}) });
+    await link(alice, bob);
+    await connect(alice, bob);
+    await alice.page.getByTestId("call-audio").click();
+    await bob.page.getByTitle("Accept audio call").click();
+    await expect(bob.page.getByTestId("call-status")).toHaveAttribute("data-state", "connected");
+    await bob.page.getByTestId("call-minimize").click();
+    const small = bob.page.getByTestId("call-window");
+    await expect(small).toHaveAttribute("data-mini", "true");
+    await expect.poll(async () => Math.round((await small.boundingBox())!.width)).toBe(190);
+    // Microphone, camera, devices, Share screen and hang up: 230 px with their 10 px gaps, in 190. Hang up was cut in half.
+    await expect(bob.page.getByTestId("share-screen")).toBeVisible();
+    await expect.poll(() => outsideSmall(bob.page)).toEqual([]);
+    // The two at the ends take a click, not the corner grips beside them.
+    await bob.page.getByTestId("call-mute").click();
+    await expect(bob.page.getByTestId("call-mute")).toHaveAttribute("title", "Unmute");
+    await bob.page.getByTestId("call-hang-up").click();
+    await expect(alice.page.getByTestId("call-status")).toHaveCount(0);
+  });
+}
