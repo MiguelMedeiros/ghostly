@@ -111,7 +111,10 @@ export class TransportSwitch {
   begin(context: string, actual: PairedTransport, migrated = false): void {
     const landed = migrated ? this.plan : null;
     this.settled = landed ? this.signature(landed.local, landed.remote) : "";
-    if (!migrated) this.failed = "";
+    // A fresh session may be the contact's app started again, which counts its revisions from 0: its policy is heard
+    // anew (it announces it on this session). One kept from the old session made every newer policy look older, and
+    // no change ever moved the chat after a contact's crash and resume (`attachReplacement` stops nothing here).
+    if (!migrated) { this.failed = ""; this.remote = null; }
     // A choice made while apart is a choice now: above the contact's last intent, as one made on a session would be.
     if (this.apart) { this.intent = Math.max(this.intent, this.lastRemote?.intent ?? 0) + 1; this.apart = false; }
     this.clearPlan();
