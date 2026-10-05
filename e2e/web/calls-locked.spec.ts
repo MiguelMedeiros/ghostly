@@ -17,7 +17,7 @@ async function setNickname(peer: Peer, nick: string): Promise<void> {
 
 /** Alice sets a lock password and locks at once (Settings → Lock Now, which leaves the chat for home). */
 async function lockNow(peer: Peer, password: string): Promise<void> {
-  await peer.page.getByTitle("Settings").click();
+  await peer.page.getByTestId("account-settings").click();
   await peer.page.getByRole("switch", { name: "Lock Screen" }).click();
   const passwords = peer.page.getByTestId("settings-password-form").locator("input[type=password]");
   await passwords.nth(0).fill(password);
