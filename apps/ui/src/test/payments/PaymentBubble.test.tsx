@@ -469,6 +469,32 @@ describe("paying a request's invoice over Lightning", () => {
     expect(status()).toHaveTextContent(/^Paid$/);
     expect(screen.queryByText("No route")).not.toBeInTheDocument();
   });
+
+  it("never approves more than the card says it holds, and says why", async () => {
+    const { user, engine } = show(incomingRequest({ amount: 250_000, invoice: REGTEST_INVOICE }), { wallet: { lightning: lightningSource({ mode: "testnet", providerId: "fake-lightning", balance: 100_000 }) } });
+    engine.on("walletQuoteInvoice", () => quote({ amount: 250_000, source: "fake-lightning" })).on("payRequest", () => undefined);
+    await user.click(payButton());
+    const review = await screen.findByTestId("payment-review");
+    expect(within(review).getByTestId("payment-lightning-over")).toHaveTextContent("More than the 100,000 test sats on this card.");
+    expect(screen.getByRole("button", { name: "Approve payment" })).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: "Approve payment" }));
+    expect(engine.callsTo("payRequest")).toEqual([]);
+    // It took in enough meanwhile: Approve is back, with nothing to say.
+    act(() => engine.update({ wallet: { lightning: lightningSource({ mode: "testnet", providerId: "fake-lightning", balance: 300_000 }) } }));
+    expect(screen.queryByTestId("payment-lightning-over")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Approve payment" }));
+    expect(engine.callsTo("payRequest")).toEqual([expect.objectContaining({ paymentId: "pay-1", via: "lightning" })]);
+  });
+
+  it("leaves Approve to the node when the card does not say what it holds", async () => {
+    const { user, engine } = show(incomingRequest({ amount: 250_000, invoice: REGTEST_INVOICE }), { wallet: { lightning: lightningSource({ mode: "testnet", providerId: "fake-lightning" }) } });
+    engine.on("walletQuoteInvoice", () => quote({ amount: 250_000, source: "fake-lightning" })).on("payRequest", () => undefined);
+    await user.click(payButton());
+    await screen.findByTestId("payment-review");
+    expect(screen.queryByTestId("payment-lightning-over")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Approve payment" }));
+    expect(engine.callsTo("payRequest")).toEqual([expect.objectContaining({ paymentId: "pay-1", via: "lightning" })]);
+  });
 });
 
 describe("taking ecash back", () => {
