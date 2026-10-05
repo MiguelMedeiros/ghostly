@@ -5,6 +5,7 @@ import { strangerInvoice } from "../support/bolt11";
 import { TEST_COINS, chat, connect, createWallet, expect, getTestCoins, link, openChat, openWallet, test, type Peer, type PeerOptions, type WalletKind } from "../support/fixtures";
 import { recoverExpiredArk, smallExpiredArk } from "../support/arkRecover";
 import { composerRow } from "../support/composer";
+import { mockEthereum } from "../support/ethereum";
 import { exclusive } from "../support/exclusive";
 import { chatPayments, paymentCard } from "../support/payments";
 
@@ -20,8 +21,8 @@ import { chatPayments, paymentCard } from "../support/payments";
  */
 
 /** Two people in a chat, each with these Testnet wallets, made with New (a new profile has none). */
-async function twoInTestnet(peer: (name: string, options?: PeerOptions) => Promise<Peer>, names: [string, string], kinds: WalletKind[] = ["cashu"]): Promise<[Peer, Peer]> {
-  const [alice, bob] = await Promise.all([peer(names[0]), peer(names[1])]);
+async function twoInTestnet(peer: (name: string, options?: PeerOptions) => Promise<Peer>, names: [string, string], kinds: WalletKind[] = ["cashu"], options?: PeerOptions): Promise<[Peer, Peer]> {
+  const [alice, bob] = await Promise.all([peer(names[0], options), peer(names[1], options)]);
   await link(alice, bob);
   await connect(alice, bob);
   for (const p of [alice, bob]) {
@@ -263,7 +264,8 @@ test("USDT: in, a Send from the wallet, a Send in the chat and a Request paid in
     const result = await response.json(); if (result.error) throw new Error("Local EVM operation failed"); return result.result;
   };
   expect(await rpc("eth_chainId")).toBe("0x7a69");
-  const [alice, bob] = await twoInTestnet(peer, ["usdt-p-alice", "usdt-p-bob"], ["usdt"]);
+  // Sepolia is answered here: New makes the wallet there first, and a slow public RPC would fail New, not this test's chain.
+  const [alice, bob] = await twoInTestnet(peer, ["usdt-p-alice", "usdt-p-bob"], ["usdt"], { beforeOpen: (context) => mockEthereum(context, "sepolia") });
   const panel = (p: Peer) => p.page.getByTestId("usdt-wallet");
   const tokens = (p: Peer) => panel(p).getByTestId("usdt-balance");
   const address: Record<string, string> = {};

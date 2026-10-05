@@ -16,7 +16,8 @@ test('WDK local token request, approval and confirmed receipt across two peers',
   const result=await response.json();if(result.error)throw new Error('Local EVM operation failed');return result.result;
  };
  expect(await rpc('eth_chainId')).toBe('0x7a69');
- const [alice,bob]=await Promise.all([peer('usdt-alice',{offlineMainnet:true}),peer('usdt-bob',{offlineMainnet:true})]);
+ // Sepolia is answered here: the wallet only starts there, and a slow public RPC would fail New, not this test's chain.
+ const [alice,bob]=await Promise.all(['usdt-alice','usdt-bob'].map((name)=>peer(name,{offlineMainnet:true,beforeOpen:(context)=>mockEthereum(context,'sepolia')})));
  await link(alice,bob);await connect(alice,bob);
  const panel=(p:Peer)=>p.page.getByTestId('usdt-wallet');
  for(const p of [alice,bob]){
