@@ -1,4 +1,6 @@
 {
+  "answer": "Rispondi",
+  "answerPassword": "Inserisci la password per rispondere",
   "enterPassword": "Inserisci la password per sbloccare",
   "incorrectPassword": "Password errata, riprova",
   "title": "Ghostly è bloccato",

@@ -40,6 +40,7 @@ import { composerServices } from "../components/composer/servicesRow";
 import { CallButtons } from "../components/CallButtons";
 import { CallOverlay } from "../components/CallOverlay";
 import { IncomingCallNotification } from "../components/IncomingCallNotification";
+import { useIsLocked, useRingOnLockScreen } from "../contexts/LockScreenContext";
 import { contactStatus } from "../lib/contactStatus";
 import { callLineId } from "../lib/callLines";
 import { PeerServices } from "../components/PeerServices";
@@ -492,6 +493,22 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
   const placeCall = webrtc.startCall;
   const wakeCall = useWakeCall(chatLink?.id, paired && !callsBlocked, placeCall);
 
+  // What the contact last said on the session wins over a name read out of an older message.
+  const contactNick = profileNick !== undefined ? profileNick : peerNick;
+  // A nickname given here wins, then the chosen identity's name, then the contact's own, then their key.
+  const shown = shownContactName({ nickname: chatLabel, face, nick: contactNick, fallback: t("common.unnamedContact", { key: contactTag(params?.peerPubKeyB64 ?? "") }) });
+  const isAnonymous = shown.from === "key";
+  const shownName = shown.name;
+  // While locked, the lock screen shows who calls, as this chat shows them, and nothing else of it (WISP 601 § Locked).
+  useRingOnLockScreen(params && callState === "incoming" ? {
+    id: sessionId, name: shownName, named: !isAnonymous, peerPubKey: params.peerPubKeyB64, photo: face?.photo,
+    hasVideo: incomingHasVideo, onCall: webrtc.otherCallOn,
+    answer: () => { webrtc.acceptCall(incomingHasVideo); if (!visible) nav.conversation(chatPath(sessionId)); },
+    decline: webrtc.rejectCall,
+  } : null);
+  // Under the lock it would only hold the keys: the lock screen shows the call instead.
+  const locked = useIsLocked();
+
   if (!params) {
     // A chat still on a call has nowhere better to be; only the one on screen leaves.
     return visible ? <Navigate to="/" replace /> : null;
@@ -511,12 +528,6 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
   const statusLabel = contactStatus(deliveryPeer, paired, status);
 
   const truncatedPeerKey = publicKeyLabel(params.peerPubKeyB64);
-  // What the contact last said on the session wins over a name read out of an older message.
-  const contactNick = profileNick !== undefined ? profileNick : peerNick;
-  // A nickname given here wins, then the chosen identity's name, then the contact's own, then their key.
-  const shown = shownContactName({ nickname: chatLabel, face, nick: contactNick, fallback: t("common.unnamedContact", { key: contactTag(params.peerPubKeyB64) }) });
-  const isAnonymous = shown.from === "key";
-  const shownName = shown.name;
   // A reply's quote and the composer's bar name the author as this chat does.
   const nameOf: NameOf = (from) => from === "me" ? t("chat.reply.you") : from === "peer" ? shownName : undefined;
   // Reactions (WISP 400 § Reactions): the engine keeps them and tells the contact; a failure leaves the chips as they were.
@@ -907,7 +918,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer }: ChatProps)
 
       {/* Incoming call notification */}
       {/* Incoming call notification: over whatever is on screen, since this chat may not be. */}
-      {webrtc.callState === "incoming" && createPortal(
+      {webrtc.callState === "incoming" && !locked && createPortal(
         <IncomingCallNotification
           peerName={shownName}
           hasVideo={incomingHasVideo}
