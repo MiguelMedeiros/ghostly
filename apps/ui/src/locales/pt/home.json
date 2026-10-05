@@ -1,10 +1,10 @@
 {
   "createChat": "Criar Nova Conversa",
-  "description": "Mensagens privadas e efêmeras.",
+  "description": "Mensagens privadas, ponto a ponto.",
   "features": {
     "decentralized": "Sem servidor central",
     "encrypted": "Criptografia ponta a ponta",
-    "ephemeral": "Mensagens que desaparecem"
+    "onDevice": "Suas mensagens ficam nos seus dispositivos"
   },
   "linkFailed": "Não foi possível abrir o link.",
   "unpublishedVersion": "Versão local — ver versões publicadas",

@@ -56,10 +56,10 @@ export function Home() {
             </li>
             <li className="flex items-center gap-2.5">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="shrink-0 text-accent">
-                <circle cx="12" cy="14" r="8" />
-                <path d="M12 10v4l2 2M9 2h6M12 2v4M18 6l2-2" />
+                <rect x="6" y="2" width="12" height="20" rx="2" />
+                <path d="M11 18h2" />
               </svg>
-              <span>{t("home.features.ephemeral")}</span>
+              <span>{t("home.features.onDevice")}</span>
             </li>
             <li className="flex items-center gap-2.5">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="shrink-0 text-accent">
