@@ -68,6 +68,9 @@ describe("joining a profile in place of the one this device runs", () => {
     await refuse(view({ balance: 5 }));
     await refuse(view({ history: [{ id: "p" }] }));
     await refuse(view({ wallets: [{ id: "w", type: "ark", network: "testnet", config: {} }] }));
+    // A Lightning card of a source of the person's own (a node, NWC), or the Cashu card of Testnet: not what setup makes.
+    await refuse(view({ wallets: [{ id: "lightning:mainnet:nwc", type: "lightning", network: "mainnet", config: { providerId: "nwc" }, card: "nwc" }] }));
+    await refuse(view({ wallets: [{ id: "lightning:testnet:cashu", type: "lightning", network: "testnet", config: { providerId: "cashu-mint" }, card: "cashu" }] }));
     await refuse(view({ networks: { mainnet: { balance: 0, history: [{ id: "p" }] }, testnet: { balance: 0, history: [] } } }));
     await refuse((inner) => { (inner.links as Map<string, unknown>).set("chat", { stored: { id: "chat", seedB64: createIdentity().seedB64 } }); });
   });
@@ -94,12 +97,14 @@ describe("joining a profile in place of the one this device runs", () => {
     await refuse((inner) => { inner.walletsStarted = false; inner.walletView = { ...net({}), feesPaid: 0, wallets }; }, "loading");
   });
 
-  it("is not refused for the wallets a new profile gets by itself, empty", async () => {
+  // What the first-run setup really makes (seen on a new profile of the web app): the Cashu wallet comes with the Cashu
+  // mints' Lightning card.
+  it("is not refused for the wallets a new profile gets by itself, empty, the Cashu mints' Lightning card with them", async () => {
     const { node: n, inner } = node();
     (inner as { settings: { online: boolean } }).settings.online = true;
     inner.walletsStarted = true;
     const usdt = { configured: true, locked: false, read: true, balance: "0", gasBalance: "0" };
-    inner.walletView = { mints: [], balance: 0, history: [], feesPaid: 0, usdt, networks: { mainnet: { mints: [], balance: 0, history: [], usdt }, testnet: { mints: [], balance: 0, history: [] } }, wallets: [{ id: "c", type: "cashu", network: "mainnet", config: {} }, { id: "u", type: "usdt", network: "mainnet", config: {} }] };
+    inner.walletView = { mints: [], balance: 0, history: [], feesPaid: 0, usdt, networks: { mainnet: { mints: [], balance: 0, history: [], usdt }, testnet: { mints: [], balance: 0, history: [] } }, wallets: [{ id: "c", type: "cashu", network: "mainnet", config: {} }, { id: "lightning:mainnet:cashu", type: "lightning", network: "mainnet", config: { providerId: "cashu-mint", label: "" }, card: "cashu", name: "Lightning", receive: true }, { id: "u", type: "usdt", network: "mainnet", config: {} }] };
     // Past the check: the code is what is refused now.
     await expect(n.deviceEnrollJoin({ code: "ghostly1zx", name: "Phone" })).rejects.toThrow(/^enroll-(typo|not-ghostly|damaged):/);
   });

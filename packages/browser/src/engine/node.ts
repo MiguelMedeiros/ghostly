@@ -5471,9 +5471,9 @@ export class GhostlyNode implements EngineImplementation {
 
   /**
    * Whether this profile holds anything a person would lose if it became a standby here: a chat, a group, an identity,
-   * money or a payment, or a wallet with keys of its own. The wallets a new profile gets by itself (Mainnet Cashu and
-   * USDT, `walletSetup.ts`) count only once they hold, wait for or have moved money: otherwise no new install could
-   * join. `loading`: what they hold is not known yet (the engine is starting, or the USDT balance was not read).
+   * money or a payment, or a wallet with keys of its own. The wallets a new profile gets by itself (Mainnet Cashu, with
+   * the Cashu mints' Lightning card, and USDT, `walletSetup.ts`) count only once they hold, wait for or have moved
+   * money: otherwise no new install could join. `loading`: what they hold is not known yet (the engine is starting, or the USDT balance was not read).
    */
   private inUse(): "in-use" | "loading" | null {
     if (this.links.size > 0 || this.groups.views().length > 0 || this.identities.views().length > 0) return "in-use";
@@ -5488,7 +5488,10 @@ export class GhostlyNode implements EngineImplementation {
       || money(network.setAside) || money(network.openSwaps) || money(network.swapsAmount) || money(network.unconfirmed)
       || (!!network.usdt?.configured && (money(network.usdt.balance) || money(network.usdt.gasBalance))));
     if (networks.some(holds)) return "in-use";
-    const firstRun = (wallet: { type: string; network: string }) => wallet.network === "mainnet" && (wallet.type === "cashu" || wallet.type === "usdt");
+    // The Cashu wallet brings the Cashu mints' Lightning card with it: Lightning through those mints, no keys of its own.
+    // Without it here every profile that ran its first-run setup counted as in use, and no new install could join.
+    const firstRun = (wallet: { type: string; network: string; card?: string }) => wallet.network === "mainnet"
+      && (wallet.type === "cashu" || wallet.type === "usdt" || (wallet.type === "lightning" && wallet.card === CASHU_CARD));
     if ((this.walletView.wallets ?? []).some((wallet) => !firstRun(wallet))) return "in-use";
     // A USDT balance not read yet says 0 for tokens it never read.
     return networks.some((network) => !!network?.usdt?.configured && (network.usdt.locked || !network.usdt.read)) ? "loading" : null;
