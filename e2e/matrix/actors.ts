@@ -86,7 +86,7 @@ export async function go(actor: Actor, hash: string): Promise<void> {
 
 export async function home(actor: Actor): Promise<void> {
   await go(actor, "#/");
-  await expect(actor.page.getByTitle(either("New Chat"))).toBeVisible();
+  await expect(actor.page.getByTitle(either("New chat"))).toBeVisible();
 }
 
 export async function openChat(actor: Actor): Promise<void> {
@@ -99,7 +99,7 @@ export async function setLanguage(actor: Actor, locale: "en" | "pt"): Promise<vo
   // Its own section on a phone; on a wider screen the address scrolls the one page there.
   await go(actor, "#/settings/appearance");
   await choose(actor.page.getByTestId("settings-language"), locale);
-  await expect(actor.page.getByRole("heading", { level: 1, name: locale === "pt" ? /^(Configurações|Aparência)$/ : /^(Settings|Appearance)$/ })).toBeVisible();
+  await expect(actor.page.getByRole("heading", { level: 1, name: locale === "pt" ? /^(Ajustes|Aparência)$/ : /^(Settings|Appearance)$/ })).toBeVisible();
   actor.locale = locale;
   await home(actor);
 }

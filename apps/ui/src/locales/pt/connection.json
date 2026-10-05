@@ -27,7 +27,7 @@
   "dhtOnly": "Só DHT",
   "directBlocked": {
     "hint": "As conexões diretas estão bloqueadas nesta rede (VPN ou firewall?). As conversas ainda funcionam por relays, mas conectam mais devagar.",
-    "info": "As tentativas recentes de conexão direta deste dispositivo falharam todas: nenhum endereço público foi encontrado, ou vários contatos não puderam ser alcançados diretamente. Uma VPN, um firewall ou uma operadora de celular pode causar isso, e o app não sabe dizer qual. Mensagens e arquivos passam por relays ou pela DHT. Um relay vê quais dispositivos conversam e quando, nunca o que dizem. Chamadas precisam de um caminho direto ou de um servidor TURN (Configurações, Rede). Este aviso some quando uma conexão direta funciona ou a rede muda.",
+    "info": "As tentativas recentes de conexão direta deste dispositivo falharam todas: nenhum endereço público foi encontrado, ou vários contatos não puderam ser alcançados diretamente. Uma VPN, um firewall ou uma operadora de celular pode causar isso, e o app não sabe dizer qual. Mensagens e arquivos passam por relays ou pela DHT. Um relay vê quais dispositivos conversam e quando, nunca o que dizem. Chamadas precisam de um caminho direto ou de um servidor TURN (Ajustes, Rede). Este aviso some quando uma conexão direta funciona ou a rede muda.",
     "title": "Conexões diretas bloqueadas"
   },
   "discovery": {
@@ -126,7 +126,7 @@
     "dhtOff": "Textos curtos pela DHT, mesmo offline",
     "dhtOn": "Textos curtos pela DHT, sem conexão direta · escolha outro para sair",
     "group": "Conexão desta conversa",
-    "hyperdhtNeeds": "HyperDHT precisa do Ghostly Desktop ou de um relay HyperDHT nas Configurações",
+    "hyperdhtNeeds": "HyperDHT precisa do Ghostly Desktop ou de um relay HyperDHT nos Ajustes",
     "inUse": "Em uso",
     "needsDesktop": "{{transport}} precisa do Ghostly Desktop",
     "noWebrtc": "Este app não tem WebRTC",
@@ -159,7 +159,7 @@
     "preparing": "Preparando {{transport}}; canal atual: {{current}}.",
     "receiptPending": "Confirmação pendente até {{time}}.",
     "reconnect": "Reconectar",
-    "relaySettings": "revise as configurações de relay",
+    "relaySettings": "revise os ajustes de relay",
     "relayed": "Via relay",
     "relayedVia": "Via relay por {{relays}}",
     "title": "Opções de conexão",

@@ -10,7 +10,7 @@ export function DeleteChatDialog({name, onClose, onConfirm}: {name:string; onClo
   useEffect(()=>{
     const previous=document.activeElement as HTMLElement | null;
     const element=dialog.current!; element.showModal(); cancel.current?.focus();
-    return ()=>{element.close(); if(previous?.isConnected) previous.focus(); else document.querySelector<HTMLButtonElement>('[title="New Chat"]')?.focus();};
+    return ()=>{element.close(); if(previous?.isConnected) previous.focus(); else document.querySelector<HTMLButtonElement>('[data-testid="sidebar-new-chat"]')?.focus();};
   },[]);
   return createPortal(<dialog ref={dialog} {...backdrop} onCancel={e=>{e.preventDefault();onClose();}}
     onKeyDown={e=>{if(e.key==="Tab") {e.preventDefault();(document.activeElement===cancel.current ? confirm.current : cancel.current)?.focus();}}}

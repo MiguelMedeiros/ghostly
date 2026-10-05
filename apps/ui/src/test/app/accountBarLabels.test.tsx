@@ -8,7 +8,7 @@ import { renderApp } from "../render";
 
 /**
  * happy-dom lays nothing out, so this is a model of the account bar's row: every place is `place` px wide, and a
- * label's text is 5.4 px a character (10px system font, about; "Configurações" is 70.2 px in WebKit, 70.2 here).
+ * label's text is 5.4 px a character (10px system font, about; "Identidades" is 59.4 here).
  * The ResizeObserver is one the test fires by hand.
  */
 let place = 77.4;
@@ -57,7 +57,7 @@ describe("the account bar's labels", () => {
     unmount();
 
     renderApp(<AccountBar />, { language: "pt" });
-    expect(labels(), "the first profile too, never renamed").toEqual(["Pessoal", "Carteiras", "Identidades", "Serviços", "Configurações"]);
+    expect(labels(), "the first profile too, never renamed").toEqual(["Pessoal", "Carteiras", "Identidades", "Serviços", "Ajustes"]);
     expect(bar()).not.toHaveAttribute("data-compact");
   });
 
@@ -68,7 +68,7 @@ describe("the account bar's labels", () => {
 
     resized(77.4);
     expect(bar()).not.toHaveAttribute("data-compact");
-    resized(69);
+    resized(58);
     expect(bar()).toHaveAttribute("data-compact", "true");
   });
 

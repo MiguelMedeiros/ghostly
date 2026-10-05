@@ -15,7 +15,7 @@ test("Desktop opens, with the peer Rust backs behind it", { tag: ["@feature:desk
 
   // The UI rendered inside the real shell: the bundle, the asset protocol and the CSP all hold.
   await expect.poll(() => app.text("h2")).toBe("Ghostly");
-  await expect.poll(() => app.text('[title="New Chat"]')).not.toBeNull();
+  await expect.poll(() => app.text('[title="New chat"]')).not.toBeNull();
 
   await app.click('[title="Settings"]');
   await expect.poll(() => app.text('[data-settings-section="network"]'), { message: "Settings shows its Network section" }).not.toBeNull();
@@ -32,7 +32,7 @@ test("Desktop opens, with the peer Rust backs behind it", { tag: ["@feature:desk
 });
 
 test("Settings holds still as it opens: Network stays where it was when the devices arrive", { tag: ["@feature:settings.media"] }, async ({ app }) => {
-  await expect.poll(() => app.text('[title="New Chat"]')).not.toBeNull();
+  await expect.poll(() => app.text('[title="New chat"]')).not.toBeNull();
   await app.click('[title="Settings"]');
   // Where Network sits in the page (not on screen: a scroll is not a move), read at once and then for 2 s. The
   // native device list arrives within that (GStreamer, 30 to 100 ms on a machine with speakers).
@@ -51,7 +51,7 @@ test("Settings holds still as it opens: Network stays where it was when the devi
 });
 
 test("the webview's <html lang> and <html dir> follow the language", { tag: ["@feature:app.i18n"] }, async ({ app }) => {
-  await expect.poll(() => app.text('[title="New Chat"]')).not.toBeNull();
+  await expect.poll(() => app.text('[title="New chat"]')).not.toBeNull();
   await expect.poll(() => app.attribute("html", "lang")).toBe("en");
   await expect.poll(() => app.attribute("html", "dir")).toBe("ltr");
 

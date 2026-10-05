@@ -10,7 +10,7 @@
   "clear": "Limpar",
   "clearAllData": "Limpar todos os dados",
   "clearAllDataConfirm": "Isto apaga de vez:",
-  "clearAllDataDescription": "Conversas, identidades e configurações deste perfil. As carteiras ficam.",
+  "clearAllDataDescription": "Conversas, identidades e ajustes deste perfil. As carteiras ficam.",
   "clearAllDataInfo": "Antes de apagar, o Ghostly retira o que puder: itens guardados para contatos, seu DID, suas provas de identidade e o despertar. Provas que você publicou em outros sites continuam lá. As carteiras não são apagadas: gaste ou faça backup dos seus sats antes, se quiser que eles saiam também.",
   "clearAllDataItems": {
     "apps": "Apps compartilhados",
@@ -18,8 +18,8 @@
     "groups": "Grupos",
     "identities": "Provas de identidade, seu DID e dados do Nostr",
     "profile": "Seu nome e sua foto",
-    "settings": "Configurações, tela de bloqueio e rede",
-    "storage": "Configuração do S3 e despertar com o app fechado"
+    "settings": "Ajustes, tela de bloqueio e rede",
+    "storage": "Ajustes do S3 e despertar com o app fechado"
   },
   "clearAllDataKeeps": "Ficam: suas carteiras, seus backups e os outros perfis.",
   "colorScheme": "Modo",
@@ -55,7 +55,7 @@
   "defaultNickname": "Nome nas conversas",
   "defaultNicknameHint": "Usado ao iniciar uma nova conversa",
   "deleteAllChatsConfirm": "Excluir todas as {{count}} conversas?",
-  "deleteAllChatsHint": "Mensagens e arquivos são apagados. Configurações e carteiras ficam.",
+  "deleteAllChatsHint": "Mensagens e arquivos são apagados. Ajustes e carteiras ficam.",
   "incorrectPassword": "Senha incorreta",
   "language": "Idioma",
   "license": "Licença",
@@ -131,8 +131,8 @@
   "reduceMotion": "Reduzir movimento",
   "reduceMotionHint": "Menos animações. A configuração do sistema sempre vale.",
   "removePassword": "Remover senha",
-  "search": "Buscar nas configurações",
-  "searchEmpty": "Nenhuma configuração encontrada",
+  "search": "Buscar nos ajustes",
+  "searchEmpty": "Nenhum ajuste encontrado",
   "searchWords": {
     "account": "conta",
     "camera": "vídeo, webcam",
@@ -181,7 +181,7 @@
   "storageParts": {
     "app": "Mensagens e dados do app: {{size}}",
     "files": "Arquivos ({{count}}): {{size}}",
-    "local": "Configurações: {{size}}",
+    "local": "Ajustes: {{size}}",
     "staged": "Cópias sendo salvas: {{size}}"
   },
   "storagePartsNote": "Mensagens e dados do app contam todos os perfis deste dispositivo. Os arquivos são deste perfil.",
@@ -207,7 +207,7 @@
     "30": "30 minutos",
     "60": "1 hora"
   },
-  "title": "Configurações",
+  "title": "Ajustes",
   "version": "Versão",
   "website": "Website"
 }

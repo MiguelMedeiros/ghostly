@@ -114,7 +114,7 @@ test("the first profile never renamed, backed up in Portuguese and restored, is 
   await page.goto("/#/settings");
   await choose(page.getByTestId("settings-language"), "pt");
   // A chat, so the copy is of a profile still on this device: Ghostly asks first, and always the same way.
-  await page.getByTitle("Nova Conversa").click();
+  await page.getByTitle("Nova conversa").click();
   await expect(page.getByTestId("invite-card")).toBeVisible();
   await openProfilePage(page);
   await expect(page.getByTestId("profile-name")).toHaveValue("Pessoal");

@@ -77,7 +77,7 @@ test("a second tab speaks the profile's language, and takes over once the first 
   await expect(second.getByTestId("other-tab")).toContainText("O Ghostly já está aberto em outra aba.");
   await expect(second.getByTestId("other-tab")).toContainText("Feche-a e esta aba assume.");
   await page.close();
-  await expect(second.getByTitle("Nova Conversa")).toBeVisible({ timeout: 30_000 });
+  await expect(second.getByTitle("Nova conversa")).toBeVisible({ timeout: 30_000 });
   await expect(second.getByTestId("other-tab")).toHaveCount(0);
 });
 

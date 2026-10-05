@@ -166,7 +166,7 @@ export async function desktopPerson(name: string, options: {
   const app = () => session.app;
   const run = <T>(script: string, ...args: unknown[]) => app().execute<T>(script, ...args);
   // The app is up once it has drawn its home.
-  const booted = () => expect.poll(() => app().text('[title="New Chat"]'), { timeout: 90_000 }).not.toBeNull();
+  const booted = () => expect.poll(() => app().text('[title="New chat"]'), { timeout: 90_000 }).not.toBeNull();
   await booted();
   const person: DesktopPerson = {
     name,
