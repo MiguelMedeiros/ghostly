@@ -7,7 +7,8 @@ import { LightningAddressPay } from "../../components/wallet/LightningAddressPay
 import { servicesPlatform, type LightningAddressInfo, type WalletState } from "../../lib/platform";
 import { fakeEngine, linkView, walletView } from "../fakeEngine";
 import { renderApp } from "../render";
-import { lightningSource, liveMainnetInvoice, mint, REGTEST_INVOICE, TEST_MINT } from "./fixtures";
+import { fakeInvoice } from "@ghostly/browser/engine/paymentAdapters/providers/testing";
+import { lightningSource, liveMainnetInvoice, mint, TEST_MINT } from "./fixtures";
 
 // covers: payments.lightning.invoice-card, wallet.cashu.pay-invoice, payments.lnurl.card
 
@@ -21,7 +22,7 @@ const testSource = (balance?: number) => lightningSource({ mode: "testnet", prov
 describe("a Lightning invoice in a message", () => {
   const show = (wallet: Partial<WalletView>) => {
     fakeEngine.setState({ links: [linkView()], wallet });
-    const view = renderApp(<MessageBubble message={{ id: "m1", text: REGTEST_INVOICE, sender: "peer", timestamp: Date.now(), status: "delivered" } as never} peerPubKey="peer" />);
+    const view = renderApp(<MessageBubble message={{ id: "m1", text: fakeInvoice(250_000, new Uint8Array(32).fill(7)), sender: "peer", timestamp: Date.now(), status: "delivered" } as never} peerPubKey="peer" />);
     view.engine.on("walletQuoteInvoice", () => ({ quote: "q-1", mint: "", amount: 250_000, feeReserve: 5, source: "fake-lightning" })).on("walletPayQuote", () => ({ paid: true }));
     return view;
   };
@@ -84,15 +85,12 @@ describe("the wallet's Pay invoice", () => {
     expect(engine.callsTo("walletPayQuote")).toEqual([]);
   });
 
-  it("pays when the card holds enough, or does not say", async () => {
-    for (const lightning of [testSource(5_000), testSource()]) {
-      const { user, engine, unmount } = show("lightning", { lightning });
-      await user.click(await review(user));
-      expect(screen.queryByTestId("wallet-pay-over")).not.toBeInTheDocument();
-      expect(await screen.findByText("Paid.")).toBeInTheDocument();
-      expect(engine.callsTo("walletPayQuote")).toHaveLength(1);
-      unmount();
-    }
+  it.each([["holds enough", 5_000], ["does not say what it holds", undefined]] as const)("pays when the card %s", async (_, balance) => {
+    const { user, engine } = show("lightning", { lightning: testSource(balance) });
+    await user.click(await review(user));
+    expect(screen.queryByTestId("wallet-pay-over")).not.toBeInTheDocument();
+    expect(await screen.findByText("Paid.")).toBeInTheDocument();
+    expect(engine.callsTo("walletPayQuote")).toHaveLength(1);
   });
 });
 
