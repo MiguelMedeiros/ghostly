@@ -5,7 +5,11 @@
   "missingIndexedDB": "IndexedDB is off or blocked, so chats and keys can't be saved.",
   "missingLocks": "Web Locks is missing, so Ghostly can't make sure it runs only once.",
   "missingStorage": "Site data is blocked, so nothing can be saved.",
+  "otherTab": "Ghostly is already open in another tab.",
+  "otherTabHint": "Close it and this tab takes over.",
   "reload": "Reload",
+  "shared": "Sent to Ghostly in your other tab.",
+  "sharedHint": "Pick the chat there. You can close this one.",
   "title": "Ghostly can't run in this browser",
   "tryOther": "Leave private mode and allow site data, update the browser, or open Ghostly in another one.",
   "trySecure": "Open Ghostly at its https:// address."
