@@ -168,6 +168,42 @@ describe("Settings on a phone", () => {
   });
 });
 
+describe("Password found by the search", () => {
+  /** The result named "Password" itself (the lock screen's line may be found too). */
+  const passwordResult = () => screen.getAllByTestId("settings-search-result").find((row) => row.textContent?.startsWith("Password"))!;
+
+  it("on a phone, with no password set: opens Privacy with the form to set one, its first field focused", async () => {
+    windowIs(true);
+    const { user } = renderSettings();
+    await user.click(screen.getByRole("button", { name: "Settings tab" }));
+    await user.type(screen.getByTestId("settings-search"), "password");
+    await user.click(passwordResult());
+    expect(where()).toBe("/settings/privacy");
+    expect(screen.getByTestId("settings-password-form")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Set password" })).toBeInTheDocument();
+    expect(screen.getByTestId("settings-password-new")).toHaveFocus();
+  });
+
+  it("between a phone and the index's width: the search above the page opens the form too", async () => {
+    windowIs(false);
+    const { user } = renderSettings("/settings");
+    await user.type(screen.getByTestId("settings-page-search-field"), "password");
+    await user.click(passwordResult());
+    expect(where()).toBe("/settings/privacy");
+    expect(screen.getByTestId("settings-password-new")).toHaveFocus();
+  });
+
+  it("on a wide screen: the index's search opens the form too", async () => {
+    windowIs(false);
+    const { user } = renderSettings("/settings");
+    expect(screen.queryByTestId("settings-password-form")).not.toBeInTheDocument();
+    await user.type(screen.getByTestId("settings-index-search"), "password");
+    await user.click(passwordResult());
+    expect(where()).toBe("/settings/privacy");
+    expect(screen.getByTestId("settings-password-new")).toHaveFocus();
+  });
+});
+
 describe("Settings on a wide screen", () => {
   it("keeps every section on one page, with an index beside it", () => {
     windowIs(false);
