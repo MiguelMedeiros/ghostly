@@ -11,7 +11,7 @@ import { useRun } from "./run";
 import { ButtonGroup, InputGroup, Truncate } from "../layout";
 import { SourcePicker } from "./providers/SourcePicker";
 import { LightningCardSettings } from "./LightningCardSettings";
-import { CASHU_MINT_SOURCE } from "../walletCardData";
+import { CASHU_MINT_SOURCE, holdsLess } from "../walletCardData";
 import { useI18n, type Translate } from "../../contexts/I18nContext";
 import { fillNodes } from "../../lib/fillNodes";
 import { satsIn } from "../NetworkTag";
@@ -104,6 +104,8 @@ export function CashuWallet({ wallet, state, rail, onOpenCashu, focusAmount = fa
     setQuote(null); setConfirming(false); setPayInput("");
     setNotice(paid ? t("wallet.cashu.paid") : viaMint ? t("wallet.cashu.pendingMint") : t("wallet.lightning.pending"));
   });
+  // More than this card holds is never approved: the mint or the node would only refuse it afterwards.
+  const over = quote ? holdsLess(rail, state, quote.amount) : undefined;
   const pasted = isToken ? null : decodeBolt11(payInput);
   /** A Lightning address or LNURL: resolved and paid step by step, through the same source. */
   const [destination, destinationError] = (() => {
@@ -186,9 +188,10 @@ export function CashuWallet({ wallet, state, rail, onOpenCashu, focusAmount = fa
                   amount: <b>{sats(quote.amount)}</b>,
                   fees: <span className="text-text-muted"> {t("wallet.lightning.feesUpTo", { fee: formatAmount(quote.feeReserve, t.language) })}</span>,
                 })}</p>
-                {confirming ? <ConfirmRealMoney what={t("wallet.lightning.confirmWhat", { amount: formatAmount(quote.amount, t.language), fee: formatAmount(quote.feeReserve, t.language) })} busy={busy} onSend={() => payQuote(quote, true)} onBack={() => setConfirming(false)} /> : (
+                {over !== undefined && <p className="text-danger-ink text-xs" data-testid="wallet-pay-over">{t("payments.composer.tooMuch", { amount: formatAmount(over, t.language), unit })}</p>}
+                {confirming && over === undefined ? <ConfirmRealMoney what={t("wallet.lightning.confirmWhat", { amount: formatAmount(quote.amount, t.language), fee: formatAmount(quote.feeReserve, t.language) })} busy={busy} onSend={() => payQuote(quote, true)} onBack={() => setConfirming(false)} /> : (
                   <ButtonGroup fill>
-                    <Button variant="primary" data-testid="wallet-pay-confirm" disabled={busy} onClick={() => testnet ? payQuote(quote, false) : setConfirming(true)}>{busy ? t("wallet.lightning.paying") : t("wallet.lightning.pay")}</Button>
+                    <Button variant="primary" data-testid="wallet-pay-confirm" disabled={busy || over !== undefined} onClick={() => testnet ? payQuote(quote, false) : setConfirming(true)}>{busy ? t("wallet.lightning.paying") : t("wallet.lightning.pay")}</Button>
                     <Button onClick={() => setQuote(null)}>{t("common.cancel")}</Button>
                   </ButtonGroup>
                 )}

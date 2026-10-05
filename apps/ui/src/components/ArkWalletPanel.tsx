@@ -10,6 +10,7 @@ import { InputGroup, Truncate } from "./layout";
 import { useI18n } from "../contexts/I18nContext";
 import { satsIn } from "./NetworkTag";
 import { formatAmount } from "../lib/amount";
+import { errorText } from "../lib/errorText";
 
 type Network = "bitcoin" | "mutinynet" | "signet" | "regtest";
 /** Where each network's wallet connects unless someone types another provider. */
@@ -41,7 +42,7 @@ export function ArkWalletPanel({ wallet, state, backupNow = false }: { wallet: W
  const use = (next: Network, params: { provider?: string; explorer?: string; mnemonic?: string } = {}) => wallet.arkCreate({ network: next, provider: params.provider ?? NETWORKS[next].provider, explorer: params.explorer ?? NETWORKS[next].explorer, mnemonic: params.mnemonic });
 
  return <div className="space-y-6" data-testid="ark-wallet">
-  {!ark?.configured || (ark.locked && ark.automatic) ? <div className="bg-surface rounded-xl p-6 text-center space-y-2" data-testid="ark-connecting"><p className="text-text-primary">{t("wallet.panel.connecting", { wallet: "Ark" })}</p><Notice>{ark?.error ?? t("wallet.panel.firstTime")}</Notice></div>
+  {!ark?.configured || (ark.locked && ark.automatic) ? <div className="bg-surface rounded-xl p-6 text-center space-y-2" data-testid="ark-connecting"><p className="text-text-primary">{t("wallet.panel.connecting", { wallet: "Ark" })}</p><Notice>{ark?.error ? errorText(ark.error, t) : t("wallet.panel.firstTime")}</Notice></div>
   : !ready ? <Section title={t("wallet.panel.unlock.title")}><Row label={t("wallet.panel.unlock.withPassword")} /><Block><InputGroup><input aria-label={t("wallet.panel.unlock.password", { wallet: "Ark" })} type="password" autoComplete="current-password" className={input} value={password} onChange={e => setPassword(e.target.value)} /><Button variant="primary" disabled={busy} onClick={() => void run(async () => { await wallet.arkUnlock(password); setPassword(""); })}>{t("wallet.panel.unlock.button", { wallet: "Ark" })}</Button></InputGroup></Block></Section>
   : <div className="space-y-4">
    <p className="text-text-primary" data-testid="ark-balance"><span className="text-4xl font-semibold tabular-nums">{formatAmount(ark.balance, t.language)}</span><span className="text-text-muted text-sm ms-2">{unit}</span>{test && <span className="block text-xs text-yellow-500 mt-1">{t("wallet.panel.testCoins", { network: NETWORKS[network].label })}</span>}</p>
@@ -76,7 +77,7 @@ export function ArkWalletPanel({ wallet, state, backupNow = false }: { wallet: W
    {intents.filter(i => i.id !== review?.id).map(i => <Button key={i.id} className="block w-full text-start" onClick={() => setReview(i)}>{t("wallet.panel.intent", { amount: formatAmount(i.amount, t.language), unit, state: paymentStateLabel(t, i.state) })}</Button>)}
   </div>}
   {error && <Notice tone="error">{error}</Notice>}
-  {ark?.error && ready && <Notice tone="warning">{ark.error}</Notice>}
+  {ark?.error && ready && <Notice tone="warning">{errorText(ark.error, t)}</Notice>}
 
   {(ready || stuck) && <Section title={t("wallet.panel.settings")}>
    {/* A Mainnet wallet is Bitcoin only; a Testnet wallet may move between the test networks while empty. */}

@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import type { Bolt11Invoice, LightningDestination } from "@ghostly/core";
 import { LightningAddressPay } from "./wallet/LightningAddressPay";
-import { lightningNetworkFor } from "./walletCardData";
+import { holdsLess, lightningNetworkFor } from "./walletCardData";
 import { NetworkTag, satsIn } from "./NetworkTag";
 import { useI18n, type Translate } from "../contexts/I18nContext";
 import { ConfirmRealMoney } from "./ConfirmRealMoney";
@@ -140,6 +140,8 @@ function LightningCard({ invoice, mine, off }: { invoice: Bolt11Invoice; mine: b
   }, []);
 
   const expired = invoice.expiresAt <= now;
+  // More than the paying card says it holds is never approved (read live: it can change while the review is open).
+  const over = quote ? holdsLess("lightning", wallet?.getState(), quote.amount) : undefined;
   const run = async (task: () => Promise<void>) => {
     setError("");
     setBusy(true);
@@ -184,11 +186,12 @@ function LightningCard({ invoice, mine, off }: { invoice: Bolt11Invoice; mine: b
         <span className="text-accent-hover text-xs font-bold self-center" data-testid="invoice-paid">{t("payments.invoice.paid")}</span>
       ) : pending ? (
         <span className="text-xs self-center text-text-primary/80" data-testid="invoice-pending">{t("payments.invoice.pendingAtMint")}</span>
-      ) : quote && confirming ? (
+      ) : quote && confirming && over === undefined ? (
         <ConfirmRealMoney what={t("payments.invoice.confirmWhat", { amount: formatAmount(quote.amount, t.language), fee: formatAmount(quote.feeReserve, t.language) })} busy={busy} onSend={() => pay(quote, true)} onBack={() => setConfirming(false)} />
       ) : quote ? (
         <>
-          <button className={button} disabled={busy} data-testid="invoice-confirm" onClick={() => network === "mainnet" ? setConfirming(true) : pay(quote, false)}>
+          {over !== undefined && <p className="text-danger-ink text-xs m-0 basis-full" data-testid="invoice-over">{t("payments.composer.tooMuch", { amount: formatAmount(over, t.language), unit: satsIn(t, network) })}</p>}
+          <button className={button} disabled={busy || over !== undefined} data-testid="invoice-confirm" onClick={() => network === "mainnet" ? setConfirming(true) : pay(quote, false)}>
             {busy ? t("payments.invoice.paying") : t("payments.invoice.payWithFee", { amount: formatAmount(quote.amount, t.language), fee: formatAmount(quote.feeReserve, t.language) })}
           </button>
           <button className={quiet} disabled={busy} onClick={() => setQuote(null)}>{t("common.cancel")}</button>

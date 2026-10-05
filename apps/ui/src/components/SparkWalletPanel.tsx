@@ -11,6 +11,7 @@ import { satsIn } from "./NetworkTag";
 import { fillNodes } from "../lib/fillNodes";
 import { formatAmount } from "../lib/amount";
 import { formatAt } from "../lib/time";
+import { errorText } from "../lib/errorText";
 
 /** Spark transfers cost nothing today; the cap only stops a surprise, and the review shows the real fee. */
 const feeCap = (amount: number) => Math.max(100, Math.ceil(amount / 100));
@@ -51,7 +52,7 @@ export function SparkWalletPanel({ wallet, state, backupNow = false }: { wallet:
  </div>;
 
  return <div className="space-y-6" data-testid="spark-wallet">
-  {!ready ? <div className="bg-surface rounded-xl p-6 text-center space-y-2" data-testid="spark-connecting"><p className="text-text-primary">{t("wallet.panel.connecting", { wallet: "Spark" })}</p><Notice>{spark?.error ?? t("wallet.spark.connectingNote")}</Notice></div>
+  {!ready ? <div className="bg-surface rounded-xl p-6 text-center space-y-2" data-testid="spark-connecting"><p className="text-text-primary">{t("wallet.panel.connecting", { wallet: "Spark" })}</p><Notice>{spark?.error ? errorText(spark.error, t) : t("wallet.spark.connectingNote")}</Notice></div>
   : <div className="space-y-4">
    <p className="text-text-primary" data-testid="spark-balance"><span className="text-4xl font-semibold tabular-nums">{formatAmount(spark.balance, t.language)}</span><span className="text-text-muted text-sm ms-2">{unit}</span>
     {mainnet ? <span className="block text-xs text-danger mt-1" data-testid="spark-mainnet-label">{t("wallet.spark.mainnetLabel")}</span> : <span className="block text-xs text-yellow-500 mt-1">{t("wallet.spark.regtestLabel")}</span>}</p>
@@ -82,7 +83,7 @@ export function SparkWalletPanel({ wallet, state, backupNow = false }: { wallet:
    </Section>}
   </div>}
   {error && <Notice tone="error">{error}</Notice>}
-  {spark?.error && ready && <Notice tone="warning">{spark.error}</Notice>}
+  {spark?.error && ready && <Notice tone="warning">{errorText(spark.error, t)}</Notice>}
 
   {ready && <Section title={t("wallet.panel.settings")}>
    <Row label={t("wallet.panel.network")} hint={mainnet ? t("wallet.spark.networkHintMainnet") : t("wallet.spark.networkHintRegtest")}><span className="text-sm text-text-secondary">{mainnet ? "Mainnet" : "Regtest"}</span></Row>
