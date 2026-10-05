@@ -2,7 +2,6 @@ import { useEffect, useState, type ReactNode } from "react";
 import { HashRouter, Routes, Route, Navigate, useLocation, useNavigate } from "react-router-dom";
 import { AttentionFeedback } from "./components/AttentionFeedback";
 import { NameStep } from "./components/NameStep";
-import { markFirstStart } from "./lib/nameStep";
 import { App } from "./App";
 import { Home } from "./pages/Home";
 import { Settings } from "./pages/Settings";
@@ -201,8 +200,6 @@ export function AppRouter({ children }: { children: ReactNode }) {
 export function Root() {
   // A device code opened as a link leaves the address before the router, or anything else, reads it (WISP 06).
   useState(takeDeviceLinkFromAddress);
-  // A first start asks for a name once (NameStep): read before the settings are first saved, which says it is one.
-  useState(markFirstStart);
   // The loops rest while the window is hidden or behind others (index.css `:root[data-away]`).
   useEffect(watchWindowAway, []);
   // Not the active device for this profile (WISP 06 § The gate): the standby screen, and nothing of the profile. No

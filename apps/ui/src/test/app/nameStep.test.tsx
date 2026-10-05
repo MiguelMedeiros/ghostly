@@ -3,8 +3,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createDeviceInvite } from "@ghostly/core";
 import { NameStep } from "../../components/NameStep";
 import { offerDeviceLink, takeDeviceLink } from "../../lib/devices";
-import { NAME_STEP_TEST_KEY, askNameIn, markFirstStart, nameStepAllowed, nameStepPending, setNameStepUnderTest } from "../../lib/nameStep";
-import { activeProfileId, newProfileId, prefixOf, registerProfile, setRunningProfile, settingsKeyFor } from "../../lib/profiles";
+import { NAME_STEP_TEST_KEY, askNameIn, nameStepAllowed, nameStepPending, setNameStepUnderTest } from "../../lib/nameStep";
+import { loadSettings } from "../../lib/settings";
+import { activeProfileId, createProfile, newProfileId, prefixOf, registerProfile, setRunningProfile, settingsKeyFor } from "../../lib/profiles";
 import { renderApp } from "../render";
 
 // covers: profiles.name-step
@@ -34,19 +35,28 @@ afterEach(() => {
 });
 
 describe("which profile is new", () => {
-  it("the first start, with no settings saved and no chat, is asked", () => {
-    markFirstStart();
+  it("the first start, whose settings are read for the first time, is asked", () => {
+    loadSettings();
     expect(nameStepPending()).toBe(true);
   });
 
   it("a profile with settings already, or a chat, is not: it is in use", () => {
     localStorage.setItem(settingsKeyFor(""), JSON.stringify({ language: "en" }));
-    markFirstStart();
+    loadSettings();
     expect(nameStepPending()).toBe(false);
     localStorage.clear();
     localStorage.setItem(`${prefixOf("")}chat1`, JSON.stringify({ id: "chat1", mySeedB64: "s", peerPubKeyB64: "p", encKeyB64: "e", createdAt: 0, messages: [] }));
-    markFirstStart();
+    loadSettings();
     expect(nameStepPending()).toBe(false);
+  });
+
+  it("a profile made with New profile is asked; one made to add this device to a profile is not", () => {
+    localStorage.setItem(settingsKeyFor(""), JSON.stringify({ language: "en" }));
+    const made = createProfile("Work");
+    askNameIn(made.id);
+    expect(nameStepPending(made.id)).toBe(true);
+    const joining = createProfile("Joined");
+    expect(nameStepPending(joining.id), "createProfile alone never asks (joinInNewProfile)").toBe(false);
   });
 });
 
@@ -101,6 +111,8 @@ describe("What should people call you?", () => {
   });
 
   it("is never asked without the mark", async () => {
+    // A profile that has run before: its settings are saved.
+    localStorage.setItem(settingsKeyFor(""), JSON.stringify({ language: "en" }));
     renderApp(<NameStep />);
     await settle();
     expect(screen.queryByTestId("name-step")).toBeNull();

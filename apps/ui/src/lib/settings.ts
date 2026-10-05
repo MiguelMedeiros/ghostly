@@ -1,4 +1,5 @@
 import { getStorageProfile } from "./storage";
+import { markFirstStart } from "./nameStep";
 import { sizeIn } from "./sizeText";
 import type { Translate } from "../locales/translate";
 
@@ -110,6 +111,8 @@ export function loadSettings(): AppSettings {
     if (!raw) {
       // A new profile: in the browser's language, kept from now on as its setting.
       const initialSettings = { ...DEFAULT_SETTINGS, language: browserLanguage() };
+      // The first start of a profile made here: it asks once for a name (NameStep).
+      markFirstStart(getStorageProfile());
       localStorage.setItem(settingsKey(), JSON.stringify(initialSettings));
       return initialSettings;
     }

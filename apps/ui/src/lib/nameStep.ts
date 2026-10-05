@@ -1,4 +1,4 @@
-import { activeProfileId, prefixOf, settingsKeyFor } from "./profiles";
+import { activeProfileId, prefixOf } from "./profiles";
 import { listSessions } from "./storage";
 
 /*
@@ -29,14 +29,13 @@ export function nameStepDone(id: string = activeProfileId()): void {
 }
 
 /**
- * The first start of the app in this profile: no settings saved yet and no chat. Run before anything saves the settings
- * (`Root`'s first render, before `SettingsProvider`'s effect), it marks the profile to ask for a name.
+ * The first start of a profile in storage namespace `namespace`: its settings are read for the first time, and saved
+ * (`loadSettings`). One with a chat already (an app from before settings were saved) is not new.
  */
-export function markFirstStart(): void {
+export function markFirstStart(namespace: string): void {
   try {
-    const id = activeProfileId();
-    if (localStorage.getItem(settingsKeyFor(id)) !== null || listSessions().length > 0) return;
-    askNameIn(id);
+    if (listSessions().length > 0) return;
+    localStorage.setItem(`${namespace ? `ghostly_${namespace}_` : "ghostly_"}${NAME_STEP_SUFFIX}`, "ask");
   } catch { /* not asked */ }
 }
 
