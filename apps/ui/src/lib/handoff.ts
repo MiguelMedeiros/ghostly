@@ -15,7 +15,7 @@ export function sizeText(bytes: number): string {
 
 export const FAILURES: Record<HandoffFailure, TranslationKey> = {
   unreachable: "devices.handoff.fail.unreachable", password: "devices.handoff.fail.password", "locked-out": "devices.handoff.fail.lockedOut",
-  refused: "devices.handoff.fail.refused", payment: "devices.handoff.fail.payment", call: "devices.handoff.fail.call", busy: "devices.handoff.fail.busy",
+  refused: "devices.handoff.fail.refused", payment: "devices.handoff.fail.payment", call: "devices.handoff.fail.call", "call-there": "devices.handoff.fail.callThere", busy: "devices.handoff.fail.busy",
   older: "devices.handoff.fail.older", room: "devices.handoff.fail.room", damaged: "devices.handoff.fail.damaged", dropped: "devices.handoff.fail.dropped",
   wallet: "devices.handoff.fail.wallet", loading: "devices.handoff.fail.loading", mainnet: "devices.handoff.fail.mainnet", expiry: "devices.handoff.fail.expiry",
   cancelled: "devices.handoff.fail.cancelled", turn: "devices.handoff.fail.turn", offline: "devices.handoff.fail.offline",

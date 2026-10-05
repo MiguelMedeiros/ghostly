@@ -53,6 +53,7 @@
     "fail": {
       "busy": "{{device}} ne peut pas transmettre le profil pour l'instant. Réessayez plus tard.",
       "call": "Un appel est en cours. Réessayez après.",
+      "callThere": "Un appel est en cours sur cet appareil. Réessayez après.",
       "cancelled": "Arrêté. Rien n'a changé.",
       "damaged": "La copie est arrivée abîmée. Rien n'a changé.",
       "dropped": "La connexion a été coupée. Rien n'a changé.",

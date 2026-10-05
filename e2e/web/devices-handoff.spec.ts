@@ -233,13 +233,14 @@ test("a call on the active device keeps the profile there: Use here and Move to 
   await contact.page.getByTitle("Accept audio call").click();
   for (const p of [desktop, contact]) await expect(p.page.getByTestId("call-status")).toHaveAttribute("data-state", "connected");
 
-  // Use here on the phone: the desktop answers that it cannot hand over now, and says why on its own screen.
+  // Use here on the phone: the desktop answers that a call is on there, and says it on its own screen too.
   await phone.page.getByTestId("handoff-use-here").click();
   await phone.page.getByTestId("handoff-password").fill(DEVICE_SET_PASSWORD);
   await phone.page.getByTestId("handoff-start").click();
   const progress = phone.page.getByTestId("handoff-progress");
   await expect(progress).toHaveAttribute("data-step", "failed", { timeout: 120_000 });
-  await expect(progress).toHaveAttribute("data-failure", "busy");
+  await expect(progress).toHaveAttribute("data-failure", "call-there");
+  await expect(phone.page.getByTestId("handoff-line")).toHaveText("A call is on there. Try again after it.");
   await desktop.page.evaluate(() => { location.hash = "#/profile"; });
   await expect(desktop.page.getByTestId("handoff-wallet-refusal")).toContainText("A call is on. Try again after it.");
   // Move to, from the desktop: the same.
