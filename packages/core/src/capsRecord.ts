@@ -163,7 +163,7 @@ function parseDescriptors(value: unknown): CapsDescriptors | null {
 }
 
 /**
- * A group link's transports in its own packet (`_tr`, WISP 9xx § Transports): a group's edge or entry session has no
+ * A group link's transports in its own packet (`_tr`, WISP 902 § Transports): a group's edge or entry session has no
  * capability record, so an app with no WebRTC (the Linux Desktop) says there which layer-1 transports it runs and how to
  * dial its native ones, and a member's app that has WebRTC answers in kind. The same minimum a record carries: keys and
  * relays, never an address. Sealed with the link key like every other label of the packet.

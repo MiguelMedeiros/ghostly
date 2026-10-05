@@ -4,7 +4,7 @@ import { chat, expect, test } from "../support/fixtures";
 import { HeadlessBot } from "../support/headless";
 
 /**
- * A bot's task cards (WISP 4xx · Status Cards): a headless bot sends a task and keeps it current with `task update`; the
+ * A bot's task cards (WISP 405 · Status Cards): a headless bot sends a task and keeps it current with `task update`; the
  * person on the web app sees one card, not a text, move to 100 % and Done with its pull request, and the Tasks button
  * lists the chat's tasks, active first, a row taking them to the card.
  */

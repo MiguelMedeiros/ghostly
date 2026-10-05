@@ -6,7 +6,7 @@ import { chatOf, node, num, state, str, type ApiContext, type Method, type Param
 import { CliError } from "./errors";
 
 /**
- * Identity proofs (WISP 300, WISP 11xx phase 3b), as the Identities page makes them: the engine draws the proof key
+ * Identity proofs (WISP 300, WISP 1100 phase 3b), as the Identities page makes them: the engine draws the proof key
  * and the statement; a signer of the provider makes the evidence; the engine checks it as a contact would before it
  * keeps it. Signers run here, where the app runs them in its page:
  *

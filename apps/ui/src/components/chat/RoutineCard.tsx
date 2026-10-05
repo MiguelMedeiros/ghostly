@@ -10,7 +10,7 @@ import { useMemberText } from "../../contexts/MemberColorsContext";
 import { SenderAvatar, type MessageAuthor } from "./SenderAvatar";
 
 /*
- * A bot's routine in the chat (WISP 4xx · Status Cards): something it runs on a schedule. Small, as a bot may post ten
+ * A bot's routine in the chat (WISP 405 · Status Cards): something it runs on a schedule. Small, as a bot may post ten
  * of them: the name, then the schedule, the next run as a relative time and the last run's result (one line on a wide
  * card, two on a narrow one); opened in place, the last run's words, the recent runs, the cron line and the links. The app keeps no schedule and runs nothing:
  * it shows what the bot last said. Several routines in a row from one sender fold into one row (`RoutineStack`).

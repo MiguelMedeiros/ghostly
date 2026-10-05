@@ -4,7 +4,7 @@ import type { Translate } from "../contexts/I18nContext";
 import { foldText } from "./chatSearch";
 
 /*
- * The Tasks board (WISP 4xx · Status Cards § The Tasks board): every task card of the profile, from all its chats and
+ * The Tasks board (WISP 405 · Status Cards § The Tasks board): every task card of the profile, from all its chats and
  * groups, in columns by status. This is its pure part: which message stands for a card, which column a task is in,
  * what the filter keeps and how the board is grouped. The rows come from the engine's card index (`statusCardIndex`),
  * never from the chats' histories; `useTaskBoard` gives them names and faces.

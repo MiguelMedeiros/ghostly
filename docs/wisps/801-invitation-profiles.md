@@ -126,7 +126,7 @@ So an old app shows its generic invalid-code message and creates nothing: no bro
 
 ## Boundary with the common contract
 
-The stronger single-use admission state machine, atomic global use limits, group admission and authority coordination in [800](800-invite-join.md) remain proposed. This profile does not make those promises. Group invites (`group-entry/1`, `group-community/1`) have their own formats ([9xx group mesh](9xx-group-mesh.md), [9xx group community](9xx-group-community.md)) and are not changed by this revision.
+The stronger single-use admission state machine, atomic global use limits, group admission and authority coordination in [800](800-invite-join.md) remain proposed. This profile does not make those promises. Group invites (`group-entry/1`, `group-community/1`) have their own formats ([902 group mesh](902-group-mesh.md), [903 group community](903-group-community.md)) and are not changed by this revision.
 
 ## Decisions
 

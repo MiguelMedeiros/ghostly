@@ -14,7 +14,7 @@ import { acquireLock, type ProfilePaths } from "./profiles";
 import { startRuntime, type RuntimeOptions } from "./runtime/engine";
 import { flushCardUpdates } from "./statusCards";
 
-/** The longest request line the daemon reads (WISP 11xx § Framing). */
+/** The longest request line the daemon reads (WISP 1100 § Framing). */
 export const MAX_LINE = 16 * 1024 * 1024;
 
 export interface Host {
@@ -47,7 +47,7 @@ export async function openHost(paths: ProfilePaths, mode: ApiContext["mode"], ve
     for (const group of now.groups) histories.set(`group:${group.id}`, await node.groupMessages({ groupId: group.id }));
     hub.baseline(now, histories);
     announceJoins(hub, node);
-    // Calls (WISP 11xx § Calls): only a daemon answers and places them; a one-shot still reports one that rings.
+    // Calls (WISP 1100 § Calls): only a daemon answers and places them; a one-shot still reports one that rings.
     calls = new CallManager({ engine: node, emit: (type, id, fields) => hub.emit(type, id, fields), profileDir: paths.dir, answers: mode === "daemon" });
     const manager = calls;
     hub.onCallSignal((chat, signal) => manager.onSignal(chat, signal));

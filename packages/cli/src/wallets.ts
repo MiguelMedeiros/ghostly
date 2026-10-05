@@ -7,7 +7,7 @@ import { paymentNetwork } from "@ghostly/browser/engine/paymentAdapters/walletIn
 import { CliError } from "./errors";
 
 /**
- * Wallets and payments (WISP 11xx, phase 2): the app's wallet deck and a chat's payment sheet, as methods. Test
+ * Wallets and payments (WISP 1100, phase 2): the app's wallet deck and a chat's payment sheet, as methods. Test
  * networks move nothing real. On Mainnet every spend passes `confirmedReal`, which the engine requires, only when the
  * call says `confirmReal: true` (the CLI's `--confirm-real`): no flag, no spend.
  */
@@ -18,7 +18,7 @@ const METHODS = ["cashu", "arkade", "usdt", "bark", "bitcoin", "fedimint", "spar
 const CHAT_METHODS = ["cashu", "lightning", ...METHODS.filter((m) => m !== "cashu")] as const;
 
 /**
- * What the app has and a headless Ghostly cannot run yet, and why (WISP 11xx § Wallet SDKs on Node). New offers
+ * What the app has and a headless Ghostly cannot run yet, and why (WISP 1100 § Wallet SDKs on Node). New offers
  * them as unavailable; creating one is refused before the engine is asked.
  */
 export const NODE_GAPS: Partial<Record<WalletType, string>> = {

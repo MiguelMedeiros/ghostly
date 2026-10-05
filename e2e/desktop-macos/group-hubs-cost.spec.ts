@@ -8,7 +8,7 @@ import { HeadlessBot } from "../support/headless";
 import { LocalRelay } from "../support/relay";
 
 /**
- * A measurement, not a check (WISP 9xx · Group Mesh § Cost per member): what a private group of 32 costs the Desktop
+ * A measurement, not a check (WISP 902 · Group Mesh § Cost per member): what a private group of 32 costs the Desktop
  * app on a Mac, the system WKWebView, where each edge is an `RTCPeerConnection` with one data channel. One app and
  * `E2E_MESH_COST_N - 1` headless bots (31 by default; packages/cli, `GHOSTLY_HUB=0`, so the app, which stays online,
  * is the only hub unless the admin decides otherwise) on a local relay. Three states of the same group, each measured

@@ -7,7 +7,7 @@ import { publicKeyFromZ32, sign, verify } from "./identity";
 import { sanitizeDisplayText } from "./text";
 
 /**
- * A group's metadata (WISP 9xx § Metadata): what the group looks like, beside who is in it: its
+ * A group's metadata (WISP 902 § Metadata): what the group looks like, beside who is in it: its
  * name and its picture. It is not in the membership chain, so apps that know nothing of it keep
  * verifying the chain as before and drop the frame that carries it.
  *
@@ -46,7 +46,7 @@ export interface GroupMetaBody {
   name?: string;
   /** The group's picture: a square JPEG data URL, as `sanitizeAvatar` accepts it. */
   pic?: string;
-  /** Private groups: members the admin pins as hubs, and excludes (WISP 9xx · Group Mesh § Hubs). Apps from before ignore it. */
+  /** Private groups: members the admin pins as hubs, and excludes (WISP 902 · Group Mesh § Hubs). Apps from before ignore it. */
   hubs?: MeshHubPolicy;
 }
 

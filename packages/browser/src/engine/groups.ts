@@ -87,7 +87,7 @@ export interface GroupsHost {
   /** The other end of this link is due any moment: look fast for it a while (`LinkSession.expectPeer`). */
   expectPeer?(linkId: string): void;
   /**
-   * A packet of the member at the other end of this edge that a member carried here (WISP 9xx § Signaling through
+   * A packet of the member at the other end of this edge that a member carried here (WISP 902 § Signaling through
    * members): true when it is theirs and news to the edge, which reads it at once (`CarriedTransport.accept`).
    */
   signalIn?(linkId: string, payload: Uint8Array, direct?: boolean): boolean;
@@ -114,7 +114,7 @@ export interface GroupsHost {
   communityApp?(groupId: string, sender: string, frame: Record<string, unknown>): Promise<void> | void;
   /** A payload a member of a community sealed to me (a payment between the two of us). */
   communityPair?(groupId: string, sender: string, payload: Record<string, unknown>): Promise<void> | void;
-  /** An edit a member of a private group made of its message, authenticated as theirs (WISP 9xx § Edits). */
+  /** An edit a member of a private group made of its message, authenticated as theirs (WISP 902 § Edits). */
   groupEdit?(groupId: string, edit: GroupIncomingEdit): Promise<void> | void;
   /** A private group's edge to `peerKey` came up and both sides said where they are: what is said again on it goes now. */
   edgeUp?(groupId: string, peerKey: string): void;
@@ -124,14 +124,14 @@ export interface GroupsHost {
   groupPin?(groupId: string, from: string, pin: { member: string; pin: WirePin; frame: GroupPinFrame }): Promise<void> | void;
   /**
    * This app stays online (the Desktop app, the CLI): in a private group past 16 members it offers to be a hub
-   * (WISP 9xx · Group Mesh § Hubs). A browser tab does not, unless the admin pins it.
+   * (WISP 902 · Group Mesh § Hubs). A browser tab does not, unless the admin pins it.
    */
   staysOnline?(): boolean;
   /** False: this app takes no part in hubs and keeps every private group a full mesh (tests of older apps). */
   meshHubs?(): boolean;
   /**
    * The WebRTC connections this app may still open for `groupId`: its budget (`NodeOptions.peerBudget`) less what the
-   * links of every other group hold. Undefined when the app has no budget (WISP 9xx · Group Mesh § Hubs, Budget).
+   * links of every other group hold. Undefined when the app has no budget (WISP 902 · Group Mesh § Hubs, Budget).
    */
   peerRoom?(groupId: string): number | undefined;
 }
@@ -281,7 +281,7 @@ const FAREWELL_COMMITS = 64;
 export const FAREWELL_OPEN_MS = 60_000;
 /**
  * While a member is unreachable, how often a mesh member asks one member it is connected to (in turn) for what that
- * one received and it did not: messages sent where the two of them were cut apart (WISP 9xx § Catch-up).
+ * one received and it did not: messages sent where the two of them were cut apart (WISP 902 § Catch-up).
  */
 export const MESH_GOSSIP_MS = 60_000;
 /** Where a member's gossip turns start among the members it is connected to: a number of its own, from its key. */
@@ -305,7 +305,7 @@ const HERE_PER_MINUTE = 4;
  * re-offer) slows in proportion, and an edge to someone away (read to notice them come back) by the square root:
  * at 32 members, every four minutes and every minute, so 31 edges cost about 8 reads a minute when everyone is here
  * and 32 when nobody is. Whoever reaches a member coming back first tells the others (`group-here`), who then look
- * fast for it (WISP 9xx § Cost per member).
+ * fast for it (WISP 902 § Cost per member).
  */
 export function meshEdgeScale(members: number, connected = true): number {
   const ratio = Math.max(1, (members - 1) / LEGACY_GROUP_MEMBERS);
@@ -389,15 +389,15 @@ export class Groups {
   readonly communities: Communities;
   /** My messages and edits an edge of a private group took. */
   private readonly frames = new FramesTaken();
-  /** Hubs of the private groups past 16 members (WISP 9xx · Group Mesh § Hubs). */
+  /** Hubs of the private groups past 16 members (WISP 902 · Group Mesh § Hubs). */
   private readonly hubs: MeshHubs;
   /** Groups whose edges are being reconciled because their hubs changed: one at a time. */
   private readonly hubReconcile = new Set<string>();
   /** Groups a commit took me out of, and when: their edges close `REMOVED_LINGER_MS` later. */
   private readonly removedAt = new Map<string, number>();
-  /** Who is typing in each private group, and this side's word there (WISP 9xx · Group Mesh § Typing). */
+  /** Who is typing in each private group, and this side's word there (WISP 902 · Group Mesh § Typing). */
   private readonly typings: GroupTypings;
-  /** Edge signaling through members (WISP 9xx · Group Mesh § Signaling through members). */
+  /** Edge signaling through members (WISP 902 · Group Mesh § Signaling through members). */
   private readonly signals: MeshSignals;
 
   constructor(private readonly host: GroupsHost, private readonly store: GroupStore = db, private readonly timings: EntryTimings = ENTRY_TIMINGS, communityTimings: CommunityTimings = COMMUNITY_TIMINGS, random?: () => number, hubTimings: MeshHubTimings = MESH_HUB_TIMINGS) {
@@ -523,7 +523,7 @@ export class Groups {
   }
 
   /**
-   * Says an edit of my message to the group (WISP 9xx § Edits): over the edges of a private group (to member `to`
+   * Says an edit of my message to the group (WISP 902 § Edits): over the edges of a private group (to member `to`
    * alone, when given), through a community like any frame. An error when it cannot go now.
    */
   async sendEdit(groupId: string, edit: GroupEdit, to?: string): Promise<string | null> {
@@ -589,7 +589,7 @@ export class Groups {
 
   /**
    * Sends a text; `messageId` is the id it is kept under here (what history, replies and reactions name). `forwarded`:
-   * the hop count of a forwarded text (WISP 9xx § Forwards). `card`: a checked status card, the text its fallback.
+   * the hop count of a forwarded text (WISP 902 § Forwards). `card`: a checked status card, the text its fallback.
    */
   async send(groupId: string, text: string, mentions: readonly GroupMention[] = [], reply?: WireReply, forwarded?: number, card?: StatusCard): Promise<{ error: string | null; messageId?: string; refused?: boolean }> {
     if (this.isCommunity(groupId)) return card ? this.communities.send(groupId, text, mentions, reply, forwarded, card) : this.communities.send(groupId, text, mentions, reply, forwarded);
@@ -602,7 +602,7 @@ export class Groups {
   }
 
   /**
-   * This side is typing in a private group (with what it is doing), or stopped (WISP 9xx · Group Mesh § Typing).
+   * This side is typing in a private group (with what it is doing), or stopped (WISP 902 · Group Mesh § Typing).
    * Nothing for a community: it does not carry typing yet.
    */
   setTyping(groupId: string, typing: boolean, activity?: TypingActivity): void {
@@ -783,7 +783,7 @@ export class Groups {
   makeAdmin(groupId: string, key: string): Promise<void> { return this.isCommunity(groupId) ? this.communities.makeAdmin(groupId, key) : this.session(groupId).transferAdmin(key); }
   /**
    * The admin pins a member of a private group as a hub, excludes one from being a hub, or leaves it to the member's
-   * app (`null`): said in the group's metadata, which every member keeps (WISP 9xx · Group Mesh § Hubs).
+   * app (`null`): said in the group's metadata, which every member keeps (WISP 902 · Group Mesh § Hubs).
    */
   async setHub(groupId: string, key: string, role: "pin" | "exclude" | null): Promise<void> {
     if (this.isCommunity(groupId)) throw new Error("A community group chooses its hubs by itself");
@@ -791,12 +791,12 @@ export class Groups {
     this.host.emit();
   }
   rotate(groupId: string): Promise<void> { return this.isCommunity(groupId) ? this.communities.rotate(groupId) : this.session(groupId).rotate(); }
-  /** The admin sets or removes the group's picture; every member gets it over the edges (WISP 9xx § Metadata). */
+  /** The admin sets or removes the group's picture; every member gets it over the edges (WISP 902 § Metadata). */
   async setPicture(groupId: string, picture: string | null): Promise<void> {
     if (this.isCommunity(groupId)) return this.communities.setPicture(groupId, picture);
     await this.session(groupId).setPicture(picture);
   }
-  /** The admin renames the group; every member gets the name over the edges, beside the picture (WISP 9xx § Metadata). */
+  /** The admin renames the group; every member gets the name over the edges, beside the picture (WISP 902 § Metadata). */
   async rename(groupId: string, name: string): Promise<void> {
     if (this.isCommunity(groupId)) return this.communities.rename(groupId, name);
     await this.session(groupId).rename(name);
@@ -946,7 +946,7 @@ export class Groups {
   }
 
   /**
-   * Private groups past 16 members: their hubs (WISP 9xx · Group Mesh § Hubs), then their edges, when what the hubs
+   * Private groups past 16 members: their hubs (WISP 902 · Group Mesh § Hubs), then their edges, when what the hubs
    * ask for is not what exists (a hub came or went, I became one, a member asked me).
    */
   private async hubsTick(now: number): Promise<void> {
@@ -991,7 +991,7 @@ export class Groups {
   }
 
   /**
-   * My packet for the edge to `to`, handed to links that reach that member or may pass it on (WISP 9xx · Group Mesh
+   * My packet for the edge to `to`, handed to links that reach that member or may pass it on (WISP 902 · Group Mesh
    * § Signaling through members): how many took it, and whether one of them surely reaches that member. None in a
    * community, whose members keep no edges with each other.
    */
@@ -1091,7 +1091,7 @@ export class Groups {
     if (!/^[A-Za-z0-9_-]{22}$/.test(g)) return;
     // Community admission runs on entry sessions only; a mesh app never sees these (it announces 1 only).
     if (this.isCommunity(g) || frame.v === 2) { if (this.isCommunity(g)) await this.communities.handleEntryFrame(linkId, frame); return; }
-    // An edge's packet, carried over the entry session or the chat an admission ran on (WISP 9xx § Signaling through members).
+    // An edge's packet, carried over the entry session or the chat an admission ran on (WISP 902 § Signaling through members).
     if (frame.t === GROUP_SIGNAL_FRAME) { this.signals.received(linkId, this.linkMember(g, linkId), frame); return; }
     switch (frame.t) {
       case "group-invite": {
@@ -1190,7 +1190,7 @@ export class Groups {
         if (viaLink) {
           this.lastKnock.delete(g); this.knocked.delete(g);
           // The entry session reaches the admin, which reaches every member: while it is kept (above), the edges about
-          // to open signal through it too (WISP 9xx § Signaling through members).
+          // to open signal through it too (WISP 902 § Signaling through members).
           if (this.host.linkReady(linkId, GROUP_VERSION_SIGNALS)) this.signals.keep(g, linkId);
         }
         this.reconcileEdges(g);
@@ -1275,13 +1275,13 @@ export class Groups {
       return;
     }
     const taken = await session.handle(peerKey, frame);
-    // As a hub, what was new here goes on to the other edges (WISP 9xx · Group Mesh § Hubs).
+    // As a hub, what was new here goes on to the other edges (WISP 902 · Group Mesh § Hubs).
     if (taken.length) this.hubs.passOn(groupId, session, peerKey, taken);
   }
 
   /**
    * A reaction: from the member whose edge it came on (`group-react`), or signed by a member and passed on by a hub
-   * (`group-reacted`). As a hub, a signed one goes on to the other edges (WISP 9xx · Group Mesh § Hubs).
+   * (`group-reacted`). As a hub, a signed one goes on to the other edges (WISP 902 · Group Mesh § Hubs).
    */
   private async reaction(groupId: string, session: GroupSession, from: string, raw: Record<string, unknown>): Promise<void> {
     if (session.status !== "active" || raw.g !== groupId) return;
@@ -1336,7 +1336,7 @@ export class Groups {
     if (session?.status === "active" && group?.farewells?.[peerKey] && !rosterHas(session.roster, peerKey)) { this.sayFarewell(groupId, session, group, peerKey, linkId); return; }
     if (!session || !group || session.status !== "active" || !rosterHas(session.roster, peerKey)) return;
     const large = this.host.linkReady(linkId, GROUP_VERSION_LARGE) && this.markLarge(group, peerKey);
-    // Whether its app takes part in hubs: one that does not keeps edges with the hubs (WISP 9xx · Group Mesh § Hubs).
+    // Whether its app takes part in hubs: one that does not keeps edges with the hubs (WISP 902 · Group Mesh § Hubs).
     const legacy = this.hubs.enabled && this.hubs.edgeReady(groupId, session, group, peerKey, this.host.linkReady(linkId, GROUP_VERSION_HUBS), this.now());
     if (large || legacy) void this.store.putGroup(group).catch(() => {});
     try { this.host.sendOnLink(linkId, session.syncFrame(this.askOf(groupId, session, peerKey))); } catch { return; /* it closed again */ }
@@ -1468,7 +1468,7 @@ export class Groups {
     if (reconcile) this.lastReconcile = now;
     for (const [groupId, session] of this.sessions) {
       if (session.status !== "active" || this.stored.get(groupId)?.left) continue;
-      // What I wrote while behind on the chain, for the members let in meanwhile (WISP 9xx § Catch-up).
+      // What I wrote while behind on the chain, for the members let in meanwhile (WISP 902 § Catch-up).
       void session.reseal().catch(() => {});
       this.farewellsTick(groupId, session, now);
       if (reconcile) {
@@ -1561,7 +1561,7 @@ export class Groups {
         const mentioned = m.sender !== session.myKey && mentionsMember(m.mentions, session.myKey);
         const message: StoredMessage = { linkId: MESSAGE_LINK(state.id), id: m.id, text: m.text, sender: m.sender === session.myKey ? "me" : "peer", member: m.sender, timestamp, via: "datalink",
           ...mentionFields(m.mentions, mentioned), ...(m.reply && { replyTo: groupReply(m.reply, session.myKey) }), ...(m.forwarded && { forwarded: m.forwarded }), ...(m.card && { card: m.card }) };
-        // A copy handed on stripped came first: the whole one adds what it lacked (WISP 9xx · Group Mesh § Catch-up).
+        // A copy handed on stripped came first: the whole one adds what it lacked (WISP 902 · Group Mesh § Catch-up).
         const stored = m.completes && this.host.completeMessage ? (await this.host.completeMessage(message), false) : await this.host.storeMessage(message);
         const came = m.sender === session.myKey ? timestamp : cameAt(timestamp, stored, arrivalNow(this.now()));
         this.lastMessageAt.set(state.id, Math.max(this.lastMessageAt.get(state.id) ?? 0, came));
@@ -1573,7 +1573,7 @@ export class Groups {
       },
       edit: e => this.host.groupEdit?.(state.id, e),
       changed: () => {
-        // Taken out as a hub: my edges stay a moment, for my last act, passing on the commit that says so (WISP 9xx § Hubs).
+        // Taken out as a hub: my edges stay a moment, for my last act, passing on the commit that says so (WISP 902 § Hubs).
         if (session.status === "removed" && this.hubs.isHub(state.id) && !this.removedAt.has(state.id)) this.removedAt.set(state.id, this.now());
         void this.membershipChanged(state.id);
       },
@@ -1608,7 +1608,7 @@ export class Groups {
       if (top.k === "role") await this.event(groupId, "admin", `${name(top.s!)} ${top.s === session.myKey ? "are" : "is"} now the admin`, when, top.e, top.s);
       if (top.k === "rotate") await this.event(groupId, "rotated", "Keys rotated: a fresh epoch", when, top.e);
     }
-    // A pin by someone no longer a member goes with them (WISP 9xx · Group Mesh § Pinned message).
+    // A pin by someone no longer a member goes with them (WISP 902 · Group Mesh § Pinned message).
     const group = this.stored.get(groupId);
     if (session.status === "active" && group && pinOfFormerMember(group.pin, key => rosterHas(after, key))) {
       group.pin = undefined;

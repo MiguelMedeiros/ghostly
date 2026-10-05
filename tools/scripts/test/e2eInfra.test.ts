@@ -14,7 +14,8 @@ function service(name: string): string {
 describe("the e2e stack (e2e/infra)", () => {
   it("Anvil's memory stays bounded while the stack stays up, and it comes back if it dies", () => {
     const anvil = service("anvil");
-    expect(anvil).toContain('"--prune-history"');
+    // A count of states, not the bare flag: that keeps the newest state alone, and a read of "latest" a block overtakes fails.
+    expect(anvil).toMatch(/"--prune-history", "\d+"/);
     expect(anvil).toMatch(/^ {4}restart: on-failure$/m);
   });
 });

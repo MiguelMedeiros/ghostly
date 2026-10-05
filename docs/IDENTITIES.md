@@ -9,7 +9,7 @@ How a Ghostly profile proves who it is to a contact, and how a contact's identit
 
 ### Profile DID (did:dht)
 
-Every profile has a `did:dht` of its own ([WISP 3xx Profile DID](wisps/3xx-did-dht.md), #247).
+Every profile has a `did:dht` of its own ([WISP 310 Profile DID](wisps/310-did-dht.md), #247).
 
 - Its own key, made once per profile and stored sealed in that profile's settings. No chat uses it (`packages/browser/src/engine/did.ts`, `packages/core/src/didDht.ts`).
 - The document holds the key. It lists an identity (`alsoKnownAs`) only when the person turns that identity's switch on. Every switch starts off, and the packet is capped at 1000 bytes.
@@ -27,14 +27,14 @@ Providers, in picker order (`packages/browser/src/proofs/registry.ts`):
 |---|---|---|---|---|
 | Nostr | a Nostr key | NIP-07 extension or NIP-46 bunker signs an event (never sent to a relay) | signature, locally | [301](wisps/301-nostr.md) |
 | Pubky | a Pubky key | one request approved in Pubky Ring or Pubky Passport; a file on the homeserver | Pkarr records, then the file (port 443, public hosts only) | [302](wisps/302-pubky.md) |
-| Domain | control of a domain | DNS TXT at `_ghostly.<domain>`, `/.well-known/ghostly.json`, or NIP-05 | DNS over HTTPS (Quad9, then Cloudflare, then Google) | [3xx](wisps/3xx-domain.md) |
-| OpenPGP key | a PGP key | `gpg --clearsign` | locally; optional email check at keys.openpgp.org | [3xx](wisps/3xx-openpgp.md) |
-| Bitcoin address | signing for an address | BIP-322 or legacy `signmessage` in the person's wallet | locally, no chain lookup | [3xx](wisps/3xx-bitcoin.md) |
-| SSH key | an SSH key (FIDO keys too) | `ssh-keygen -Y sign -n ghostly` | locally | [3xx](wisps/3xx-ssh.md) |
-| GitHub / GitLab (SSH key) | the account publishes that key | the same `ssh-keygen` step | the forge's public keys API | [3xx](wisps/3xx-ssh.md) |
+| Domain | control of a domain | DNS TXT at `_ghostly.<domain>`, `/.well-known/ghostly.json`, or NIP-05 | DNS over HTTPS (Quad9, then Cloudflare, then Google) | [304](wisps/304-domain.md) |
+| OpenPGP key | a PGP key | `gpg --clearsign` | locally; optional email check at keys.openpgp.org | [305](wisps/305-openpgp.md) |
+| Bitcoin address | signing for an address | BIP-322 or legacy `signmessage` in the person's wallet | locally, no chain lookup | [306](wisps/306-bitcoin.md) |
+| SSH key | an SSH key (FIDO keys too) | `ssh-keygen -Y sign -n ghostly` | locally | [307](wisps/307-ssh.md) |
+| GitHub / GitLab (SSH key) | the account publishes that key | the same `ssh-keygen` step | the forge's public keys API | [307](wisps/307-ssh.md) |
 | Account at a provider (OIDC) | the provider says the person signed in | popup sign-in | the provider's pinned JWKS | [3xx](wisps/3xx-oidc-proofs.md) |
-| DID | did:key, did:jwk, did:dht or did:web | a pasted JWS or signature; a file for did:web | resolves the DID at every check | [3xx](wisps/3xx-did.md) |
-| Bluesky / AT Protocol | an atproto account | OAuth on the person's PDS; one `tools.ghostly.proof` record | the signed record and the handle, both ways | [3xx](wisps/3xx-atproto.md) |
+| DID | did:key, did:jwk, did:dht or did:web | a pasted JWS or signature; a file for did:web | resolves the DID at every check | [311](wisps/311-did.md) |
+| Bluesky / AT Protocol | an atproto account | OAuth on the person's PDS; one `tools.ghostly.proof` record | the signed record and the handle, both ways | [312](wisps/312-atproto.md) |
 
 Notes:
 
@@ -68,7 +68,7 @@ Notes:
 - Pictures load only from a list of known hosts (`packages/browser/src/profiles/public.ts`).
 - **Contact activity** (#313): under the contact panel's deck, the chosen card shows its profile, "Follows you" / "You follow" chips and people you both know, and its recent posts (10 at a time, pictures on tap).
 - Switch: Settings → Privacy & security → **Load public profiles** (on by default). Those servers see the device's IP. Off: cards show only what the proof carries, and loaded profiles are deleted.
-- Presentation rules: [PUBLIC-PROFILES.md](wisps/PUBLIC-PROFILES.md). The Nostr social layer: [WISP 3xx](wisps/3xx-nostr-social.md).
+- Presentation rules: [PUBLIC-PROFILES.md](wisps/PUBLIC-PROFILES.md). The Nostr social layer: [WISP 309](wisps/309-nostr-social.md).
 
 ## Code map
 

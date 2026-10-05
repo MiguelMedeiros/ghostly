@@ -15,7 +15,7 @@ import { renderApp } from "../render";
 
 // covers: chat.buttons
 
-/** A bot's buttons under its message (WISP 4xx · Message Buttons): the text in its bubble, the buttons under it, a tap presses. */
+/** A bot's buttons under its message (WISP 406 · Message Buttons): the text in its bubble, the buttons under it, a tap presses. */
 
 const buttons = (extra: Record<string, unknown> = {}): ButtonsCard => readStatusCard({
   kind: "buttons", id: "deploy",

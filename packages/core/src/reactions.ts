@@ -14,14 +14,14 @@ import { REPLY_ID } from "./replies";
  *     {"t":"paired-reacted","n":1790000000000}
  *
  * Off the live session they ride on the DHT envelopes (WISP 403 § Reactions). Groups carry them in their own frames
- * (WISP 9xx § Reactions). Older apps drop all of these: a `t` they do not know, or a trailing element they skip.
+ * (WISP 902 § Reactions). Older apps drop all of these: a `t` they do not know, or a trailing element they skip.
  */
 
 export const REACTION_FRAME = "paired-reaction";
 export const REACTED_FRAME = "paired-reacted";
-/** A reaction in a private group, over the edge from the member who reacts (WISP 9xx group mesh § Reactions). */
+/** A reaction in a private group, over the edge from the member who reacts (WISP 902 group mesh § Reactions). */
 export const GROUP_REACTION_FRAME = "group-react";
-/** A reaction in a community, as an application frame sealed to the group (WISP 9xx group community § Reactions). */
+/** A reaction in a community, as an application frame sealed to the group (WISP 903 group community § Reactions). */
 export const COMMUNITY_REACTION_FRAME = "reaction";
 
 /** The quick bar, in order: what most reactions are. Any other emoji comes from the picker. */

@@ -338,7 +338,7 @@ describe("sending, requesting and asking", () => {
     const chat = addChat(node, stubLink({ isDataLinkOpen: false }));
     const canHold = vi.spyOn(node["hold"], "canHold").mockReturnValue(true);
     const send = vi.spyOn(node["desk"], "send").mockResolvedValue({ paymentId: "p" });
-    expect(() => node.sendPayment({ linkId: chat.id, amount: 5, timestamp: 1 })).toThrow("not held for an away contact");
+    await expect(node.sendPayment({ linkId: chat.id, amount: 5, timestamp: 1 })).rejects.toThrow("not held for an away contact");
     expect(send).not.toHaveBeenCalled();
     canHold.mockReturnValue(false);
     await expect(node.sendPayment({ linkId: chat.id, amount: 5, timestamp: 1 })).resolves.toEqual({ paymentId: "p" });
@@ -357,7 +357,7 @@ describe("sending, requesting and asking", () => {
     const { node } = track(engine());
     const link = stubLink({ supportsBarkPayments: false, supportsSparkPayments: false });
     const chat = addChat(node, link);
-    expect(() => node.askToPay({ linkId: chat.id, amount: 5, method: "cashu" as never, timestamp: 1 })).toThrow("Only Ark, Bark, Spark, USDT, on-chain Bitcoin and Fedimint");
+    await expect(node.askToPay({ linkId: chat.id, amount: 5, method: "cashu" as never, timestamp: 1 })).rejects.toThrow("Only Ark, Bark, Spark, USDT, on-chain Bitcoin and Fedimint");
     await expect(node.askToPay({ linkId: chat.id, amount: 5, method: "bark", timestamp: 1 })).rejects.toThrow("does not accept Bark");
     await expect(node.askToPay({ linkId: chat.id, amount: 5, method: "spark", timestamp: 1 })).rejects.toThrow("does not accept Spark");
     expect(await node.askToPay({ linkId: chat.id, amount: 5, method: "arkade", timestamp: 1 })).toHaveProperty("askId");

@@ -4,7 +4,7 @@ import { composerRow } from "../support/composer";
 import { chatPayments, paymentCard } from "../support/payments";
 
 /**
- * Store-and-forward for an away contact (WISP 4xx, `hold/1`): what Alice sends while Bob's page is
+ * Store-and-forward for an away contact (WISP 404, `hold/1`): what Alice sends while Bob's page is
  * closed waits in her own S3 storage, sealed for him, and reaches him in order when he is back. Opt-in:
  * a disposable local S3 server (MinIO) on GHOSTLY_S3_ENDPOINT, as the backup test uses.
  */

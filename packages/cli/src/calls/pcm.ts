@@ -1,5 +1,5 @@
 /**
- * The audio a call hands to an outside program, and takes from it (WISP 11xx § Calls): raw PCM, signed 16-bit
+ * The audio a call hands to an outside program, and takes from it (WISP 1100 § Calls): raw PCM, signed 16-bit
  * little-endian, mono, at the call's rate, in frames of 20 ms. Opus runs at every one of these rates itself, so
  * nothing is resampled.
  */

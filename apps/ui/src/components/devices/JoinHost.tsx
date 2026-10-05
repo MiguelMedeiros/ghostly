@@ -3,6 +3,7 @@ import { readDeviceInvite } from "@ghostly/core";
 import { useI18n, type TranslationKey } from "../../contexts/I18nContext";
 import { DEVICE_LINK_EVENT, JOIN_OPEN_EVENT, failureKey, joinInNewProfile, takeDeviceLink, takeJoinRequest, type JoinOpen } from "../../lib/devices";
 import { errorText } from "../../lib/errorText";
+import { servicesPlatform } from "../../lib/platform";
 import { activeProfileId, listProfiles } from "../../lib/profiles";
 import { listSessions } from "../../lib/storage";
 import { InfoButton } from "../layout/Section";
@@ -17,6 +18,8 @@ import { JoinProfileDialog } from "./JoinProfileDialog";
  * - on "Add this device to another profile" (`openJoinAnother`), which asks first;
  * - on a device code opened as a link (`takeDeviceLinkFromAddress`): straight in on a fresh install (one profile, no
  *   chat), else it asks first, and the code goes into a new profile, never into one the person uses.
+ * A code the engine refuses in this profile because it is in use (it holds a group, an identity or money, not only
+ * chats) goes the same way: on to "Add this device to another profile", with the code kept.
  */
 export function JoinHost({ standby = false }: { standby?: boolean }) {
   const { t } = useI18n();
@@ -59,7 +62,10 @@ export function JoinHost({ standby = false }: { standby?: boolean }) {
     )}
     {open?.kind === "join" && (
       <JoinProfileDialog code={open.request.code} start={open.request.start} onClose={close}
-        onRestore={() => { close(); window.location.hash = "#/profile"; }} />
+        onRestore={() => { close(); window.location.hash = "#/profile"; }}
+        // A good code read in a profile that is in use here: it goes into a new profile, asked first, as a link's does.
+        // An app with one profile only has nowhere else to put it, and says why it cannot.
+        onInUse={servicesPlatform?.features.profiles ? (code) => setOpen({ kind: "another", code }) : undefined} />
     )}
     {open?.kind === "another" && <JoinAnotherDialog code={open.code} onClose={close} />}
   </>;

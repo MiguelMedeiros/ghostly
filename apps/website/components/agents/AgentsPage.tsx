@@ -240,7 +240,7 @@ export function AgentsPage() {
             </Link>
           </li>
           <li>
-            <Link className="link-arrow" href="/wisps/11xx-headless">
+            <Link className="link-arrow" href="/wisps/1100-headless">
               {t.links.wisp} →
             </Link>
           </li>

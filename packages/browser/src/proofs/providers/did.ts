@@ -8,7 +8,7 @@ import { fetchDidWebFile, lastDidResolution, resolveDid, type DidResolution } fr
 import { boundedIdentityFetch } from "../verify";
 
 /**
- * A decentralized identifier (W3C DID Core), draft WISP 3xx-did. The subject is the DID; the statement is
+ * A decentralized identifier (W3C DID Core), draft WISP 311-did. The subject is the DID; the statement is
  * vouched for by a key its document lists under `authentication` or `assertionMethod` (a JWS or a raw
  * signature pasted back, like SSH and PGP), or, for did:web, by publishing it where the DID document lives
  * (a file beside did.json, or a service entry in it), like the domain proof.

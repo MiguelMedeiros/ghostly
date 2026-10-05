@@ -1,4 +1,5 @@
 import type { NextConfig } from "next";
+import numbering from "./lib/wisp-numbering.json";
 
 /**
  * Documents on GitHub only, on the released branch: the security policy and the contributing guide (content/shell.ts
@@ -11,6 +12,14 @@ const ON_GITHUB = [
   ["implementation", `${GITHUB}/main/docs/wisps/IMPLEMENTATION.md`],
   ["numbering", `${GITHUB}/main/docs/wisps/NUMBERING.md`],
 ];
+
+/**
+ * WISPs that got their number once their feature shipped (numbering.json: `oldFile` is the stem they had while their
+ * number was "xx"). Their old pages still render, with a notice, but a link to one lands on the new page in one hop.
+ */
+const RENUMBERED = (numbering as { oldFile: string; file: string }[])
+  .filter((entry) => entry.oldFile !== entry.file && /^\d+x+-/.test(entry.oldFile))
+  .map((entry) => [entry.oldFile.replace(/\.md$/, "").toLowerCase(), entry.file.replace(/\.md$/, "").toLowerCase()]);
 
 /** React's development build needs eval() for its debugging; production never uses it, so only `next dev` allows it. */
 const SCRIPT_SRC = process.env.NODE_ENV === "production" ? "script-src 'self' 'unsafe-inline'" : "script-src 'self' 'unsafe-inline' 'unsafe-eval'";
@@ -39,10 +48,14 @@ const nextConfig: NextConfig = {
   // - Security and Contributing were reader pages; they are on GitHub only now.
   // - The site was also in Brazilian Portuguese under /pt-br; it is English only now, and links to the old pages
   //   land on their English ones.
+  // - A WISP whose number was "xx" (3xx-ssh) moved to its number (307-ssh) once its feature shipped.
   async redirects() {
     return [
       ...ON_GITHUB.flatMap(([slug, url]) =>
         ["/wisps", "/developers/wisps", "/pt-br/developers/wisps"].map((base) => ({ source: `${base}/${slug}`, destination: url, permanent: true })),
+      ),
+      ...RENUMBERED.flatMap(([from, to]) =>
+        ["/wisps", "/developers/wisps", "/pt-br/developers/wisps"].map((base) => ({ source: `${base}/${from}`, destination: `/wisps/${to}`, permanent: true })),
       ),
       // The index on GitHub (docs/wisps/README.md) was a reader page too; on the site the index is /wisps.
       ...["/wisps", "/developers/wisps", "/pt-br/developers/wisps"].map((base) => ({ source: `${base}/readme`, destination: "/wisps", permanent: true })),

@@ -16,7 +16,7 @@ import { openPersistentIndexedDb } from "../src/runtime/storage";
 import { messageJson } from "../src/views";
 // covers: headless.buttons
 
-/** `send --button`, `group send --button` and `button update` (WISP 4xx · Message Buttons), and `button.pressed`. */
+/** `send --button`, `group send --button` and `button update` (WISP 406 · Message Buttons), and `button.pressed`. */
 const link = (id: string, fields: Partial<LinkView> = {}) => ({ id, peerPubKeyZ32: "p" + id, createdAt: 1, lastMessageAt: 0, profile: "paired-chat/1", textDelivery: "stream", pairing: { status: "ready" }, ...fields }) as unknown as LinkView;
 const group = (fields: Partial<GroupView> = {}) => ({ id: "g1", name: "Sala", createdAt: 1, profile: "mesh", isAdmin: false, canSend: true, lastMessageAt: 0, invited: [], memberLinks: {},
   members: [{ key: "mekey", role: "member", me: true, online: true, missing: 0 }, { key: "anakey", nick: "Ana", role: "member", me: false, online: true, missing: 0 }], ...fields }) as unknown as GroupView;

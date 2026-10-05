@@ -11,7 +11,7 @@ import { MemberFace, type MemberFaceOf } from "./SenderAvatar";
 import { PrLine, ProgressBar, TaskElapsedLine } from "./StatusCard";
 
 /*
- * The Tasks button of a chat or group header (WISP 4xx · Status Cards): there only while the chat has a bot's card,
+ * The Tasks button of a chat or group header (WISP 405 · Status Cards): there only while the chat has a bot's card,
  * with the number of tasks still going. It opens a panel: per sender (a bot each, in a group), its tasks still going,
  * then its routines folded into one line; the finished tasks folded at the end. A row scrolls to its card and marks it,
  * as a quote's tap does. On a wide screen the panel drops from the button and scrolls inside the window; on a phone it

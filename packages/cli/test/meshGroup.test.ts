@@ -7,7 +7,7 @@ import { ghostly, home, localRelay, ok, Running } from "./support/cli";
 /**
  * A private (mesh) group of headless bots, as the "Ghostly dev" group runs them: a coordinator that stays up, bots that
  * post a status and stop, and a person whose app is closed meanwhile. The person, back, gets the status from the
- * coordinator though its author's daemon is gone (WISP 9xx group mesh § Catch-up), and the name the coordinator gave the
+ * coordinator though its author's daemon is gone (WISP 902 group mesh § Catch-up), and the name the coordinator gave the
  * group meanwhile (§ Metadata). `MESH_CLI_N` members (3 by default:
  * the coordinator, one bot, the person; more bots with a larger N), everything on loopback.
  */

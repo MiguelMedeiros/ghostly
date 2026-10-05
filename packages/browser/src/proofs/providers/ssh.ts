@@ -6,7 +6,7 @@ import type { ExternalToolSigner, IdentityProofProvider, VerifyContext } from ".
 import { checkSshForge, SSH_FORGE_HOST, SSH_FORGE_LABEL, validForgeLogin, type SshForge } from "../sshForges";
 
 /**
- * SSH keys (draft WISP 3xx-ssh). The person signs the binding statement once with their own
+ * SSH keys (draft WISP 307-ssh). The person signs the binding statement once with their own
  * `ssh-keygen -Y sign -n ghostly` and pastes the armored SSHSIG; the private key never enters Ghostly.
  *
  *  - `ssh`         the subject is the key's SHA-256 fingerprint; checked on this device, no network.

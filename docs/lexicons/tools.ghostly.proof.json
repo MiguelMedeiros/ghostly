@@ -1,7 +1,7 @@
 {
   "lexicon": 1,
   "id": "tools.ghostly.proof",
-  "description": "A Ghostly identity proof: the account authorizes one Ghostly proof key to present this account to contacts the person chooses, for a period. See https://github.com/MiguelMedeiros/ghostly/blob/dev/docs/wisps/3xx-atproto.md.",
+  "description": "A Ghostly identity proof: the account authorizes one Ghostly proof key to present this account to contacts the person chooses, for a period. See https://github.com/MiguelMedeiros/ghostly/blob/dev/docs/wisps/312-atproto.md.",
   "defs": {
     "main": {
       "type": "record",

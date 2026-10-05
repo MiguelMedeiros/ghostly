@@ -2,7 +2,7 @@ import { sameButtonText, type ButtonsCard, type CardButton } from "@ghostly/core
 import type { MessagePress, StoredMessage } from "./types";
 
 /*
- * Message buttons (WISP 4xx · Message Buttons) as the engine and the UI both need them. A bot's message carries its
+ * Message buttons (WISP 406 · Message Buttons) as the engine and the UI both need them. A bot's message carries its
  * buttons as a card of kind `buttons` (`sc`); a press is a reply to it whose text is the button's label and whose `r`
  * names the button (`b`). Only the message's author learns of a press, from the reply: nothing else changes.
  */

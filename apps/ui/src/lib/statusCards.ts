@@ -2,7 +2,7 @@ import { ACTIVE_TASK_STATUSES, taskProgress, type RoutineCard, type RunResult, t
 import type { Translate } from "../contexts/I18nContext";
 
 /*
- * The status cards of a chat or group, as its Tasks panel lists them (WISP 4xx · Status Cards): the newest message of
+ * The status cards of a chat or group, as its Tasks panel lists them (WISP 405 · Status Cards): the newest message of
  * each card (per author, kind and id) stands for it; per sender, its tasks still going, then its routines; the
  * finished tasks last.
  */

@@ -6,7 +6,7 @@ import { chat, expect, test } from "../support/fixtures";
 import { HeadlessBot } from "../support/headless";
 
 /**
- * The Tasks board (WISP 4xx · Status Cards § The Tasks board): a headless bot posts tasks in two chats with a person on
+ * The Tasks board (WISP 405 · Status Cards § The Tasks board): a headless bot posts tasks in two chats with a person on
  * the web app (a 1:1 chat and a private group) and updates them; the person's board gathers them all in columns by
  * status, follows the updates, and a card opens its chat on its message. Then hundreds of cards: a column draws fifty
  * and scrolls smoothly.

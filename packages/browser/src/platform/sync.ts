@@ -159,7 +159,7 @@ function mirrorMessages(linkId: string, messages: StoredMessage[]): void {
         row.text = message.text;
         row.edit = message.edit;
         if (message.preview) row.preview = message.preview; else delete row.preview;
-        // A status card belongs to its version (WISP 4xx · Status Cards): the edit's, or none.
+        // A status card belongs to its version (WISP 405 · Status Cards): the edit's, or none.
         if (message.card) row.card = message.card; else delete row.card;
       }
       // Only a join announcement has one; the others are not mapped again.

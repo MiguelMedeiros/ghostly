@@ -5,7 +5,7 @@ import { join, resolve } from "node:path";
 import { CliError } from "./errors";
 
 /**
- * Profiles on disk (WISP 11xx § Profiles and files): `<home>/profiles/<name>/`, 0700, one engine store each.
+ * Profiles on disk (WISP 1100 § Profiles and files): `<home>/profiles/<name>/`, 0700, one engine store each.
  * `<home>/current` names the profile commands use when none is given.
  */
 export const DEFAULT_PROFILE = "default";

@@ -137,7 +137,7 @@ export class EditQueue {
 export const CARD_APPLY_GAP_MS = 1_000;
 
 /**
- * Received status card updates, paced per message (WISP 4xx · Status Cards): the first applies at once, the rest within
+ * Received status card updates, paced per message (WISP 405 · Status Cards): the first applies at once, the rest within
  * `CARD_APPLY_GAP_MS` wait, and only the highest edit number of them applies when the time is up. A sender that
  * ignores its own pace costs this side one write and one render a second per card, whatever it sends.
  */

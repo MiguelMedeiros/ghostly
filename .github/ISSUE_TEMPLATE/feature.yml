@@ -1,0 +1,78 @@
+name: Feature request
+description: Something Ghostly should do, or do differently.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Lead with the problem, not the solution. People and AI agents are both welcome to file this. A wire-format or protocol change also needs a WISP draft: see the [WISP process](https://github.com/MiguelMedeiros/ghostly/blob/dev/docs/wisps/00-process.md).
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: 'Who is stuck, doing what, and what it costs them today. Example: "Someone with two phones cannot answer a call on the second one."'
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you propose
+      description: What the person sees and does. Short UI copy, if any, as you would write it.
+    validations:
+      required: true
+
+  - type: textarea
+    id: done
+    attributes:
+      label: How we know it is done
+      description: Checkable statements, one per line, that a test could prove.
+      placeholder: |
+        - A call rings on every device of the profile.
+        - Answering on one device stops the ringing on the others within 2 s.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: scope
+    attributes:
+      label: What it touches
+      multiple: true
+      options:
+        - App (web, Desktop, extension)
+        - Protocol or wire format (needs a WISP)
+        - Command line (CLI)
+        - SDK or adapter
+        - Wallets and payments
+        - Website or docs
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you considered
+      description: Including doing nothing, and how other apps solve it.
+
+  - type: textarea
+    id: risks
+    attributes:
+      label: Privacy, security and compatibility
+      description: What a server, relay or contact could learn that it cannot today; what happens with apps on older versions; anything that touches money.
+
+  - type: textarea
+    id: pointers
+    attributes:
+      label: Pointers (optional)
+      description: Related issues, WISPs, files (`apps/ui/src/pages/Settings.tsx`), or a branch with a prototype.
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before sending
+      options:
+        - label: I searched the open and closed issues, and this is not a duplicate.
+          required: true
+        - label: Nothing secret is in this issue (keys, seeds, tokens, invite or group links, device codes).
+          required: true

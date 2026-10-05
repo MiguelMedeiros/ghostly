@@ -5,7 +5,7 @@ import { chat, expect, test } from "../support/fixtures";
 import { HeadlessBot } from "../support/headless";
 
 /**
- * A person on the web app calls a bot on the headless Ghostly (packages/cli, WISP 11xx § Calls), and the bot calls
+ * A person on the web app calls a bot on the headless Ghostly (packages/cli, WISP 1100 § Calls), and the bot calls
  * back: calls/1 signals on the chat session, Chromium's WebRTC against libdatachannel, Opus both ways. The bot's
  * "program" is this test, on the call's audio socket (raw s16le mono PCM): it must hear the tone the page plays into
  * the call, and the page must hear the tone the program writes.

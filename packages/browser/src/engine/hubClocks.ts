@@ -11,8 +11,8 @@ const HUB_CLOCK_SLACK_MS = COMMUNITY_TOPOLOGY.beaconEveryMs * 1.5;
 const HUB_CLOCK_KEPT_MS = 10 * 60_000;
 
 /**
- * Each hub's clock as its beacon entry showed it (WISP 9xx · Group Community § Topology, Clocks that differ; the mesh's
- * hubs read their beacon the same way, WISP 9xx · Group Mesh § Hubs). Held against mine as it is, a hub whose clock is
+ * Each hub's clock as its beacon entry showed it (WISP 903 · Group Community § Topology, Clocks that differ; the mesh's
+ * hubs read their beacon the same way, WISP 902 · Group Mesh § Hubs). Held against mine as it is, a hub whose clock is
  * a minute and a half from mine never looks fresh (its entry is "stale", or "not come yet"): a member saw no hub and a
  * hub with such a clock was no hub to anyone. So a hub's clock is learned from its entry: when the entry moved between
  * two readings of mine at most `readGapMs` apart, it was written between them, and what it says the time was then,

@@ -5,7 +5,7 @@ import { Mesh, admit, clone } from "./support/groupMesh";
 // covers: groups.catch-up, groups.remove-member
 
 /*
- * A member behind on the chain still hands over its own messages (WISP 9xx § Catch-up): when an edge opens and the
+ * A member behind on the chain still hands over its own messages (WISP 902 § Catch-up): when an edge opens and the
  * other side is epochs ahead, the member behind used to ask for the chain and say nothing else, and once it had caught
  * up nobody asked it again, so what it had sent meanwhile stayed in its log until the edge opened another time.
  */

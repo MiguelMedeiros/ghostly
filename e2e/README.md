@@ -197,7 +197,7 @@ Some of the specs, not all (`e2e/web/` alone has over 100). To list the tests of
 | `web/profile-backup-file.spec.ts` · `profile-backup.spec.ts` | a whole profile backed up to a file (and to S3 with `GHOSTLY_S3_*`), restored as a new profile; passphrase rules |
 | `web/chat-payments.spec.ts` | each chat accepts its own ways of paying, chosen on the composer's cards (+ → Payment → Accept); both sides' choices shown; one chat's choice and starting card are its own |
 | `web/sdk-plugin.spec.ts` | adapters built outside the app against `@ghostlytools/sdk` (`packages/sdk/examples/adapter`), compiled into this build with `GHOSTLY_PLUGINS`: the plugin's Lightning source in the picker (Testnet only), connected, an invoice seen paid; its identity proof added from a pasted signature |
-| `web/store-forward.spec.ts` | held messages (WISP 4xx): with `GHOSTLY_S3_*`, text, a picture and a request held in Alice's S3 while Bob's page is closed, picked up in order when he is back, a changed object refused, an expired one dropped; a contact without the switch is unaffected (no S3 needed) |
+| `web/store-forward.spec.ts` | held messages (WISP 404): with `GHOSTLY_S3_*`, text, a picture and a request held in Alice's S3 while Bob's page is closed, picked up in order when he is back, a changed object refused, an expired one dropped; a contact without the switch is unaffected (no S3 needed) |
 | `web/wallet-cashu.spec.ts` · `wallets-ready.spec.ts` · `wallet-backups.spec.ts` | wallets ready with no setup, Cashu send/mint errors, the Lightning card, test sats; Ark and USDT recovery phrase and encrypted backup files (`@network`) |
 | `web/wallet-providers.spec.ts` | every wallet provider sending and receiving, on Testnet wallets made with New: Cashu (in over Lightning, Send and Request in the chat), Lightning (in through an invoice, out paying an invoice the test mint does not own), Ark, Bark and USDT (in, Send from the wallet, Send and Request in the chat; gated, see below) |
 | `web/fedimint-wallet.spec.ts` | Fedimint joins nothing on Mainnet and refuses what is not an invite code; the Lightning source form lists joined federations only; gated (`GHOSTLY_FEDIMINT_REGTEST=1`, see below): two peers join e2e/infra's federation, ecash in over the gateway, notes out and back, a Send in the chat in ecash, a request paid over the gateway's Lightning, Lightning out, both balances |
@@ -568,7 +568,7 @@ own review pays Cashu only for now.
 
 ### Spark to Spark on Breez's regtest
 
-Spark is also its own way of paying (`spark`, WISP 2xx): a Spark wallet per profile and network, the same Breez SDK
+Spark is also its own way of paying (`spark`, WISP 206): a Spark wallet per profile and network, the same Breez SDK
 as the Breez source. Testnet's wallet is made by itself on Breez's regtest (no API key); Mainnet's needs one.
 Nothing runs locally, so nothing of it is in `e2e/infra`.
 

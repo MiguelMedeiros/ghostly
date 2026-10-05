@@ -7,7 +7,7 @@ import { pairLinkId, parsePayLink } from "../shared/payLinks";
 import type { PaymentLink } from "./payments";
 
 /**
- * Payments in community groups (WISP 9xx · Group Community § Payments). Members have no edge to each other: what
+ * Payments in community groups (WISP 903 · Group Community § Payments). Members have no edge to each other: what
  * two members say about a payment (`pay-req`, `pay-ask`, `pay`, `pay-res`) is sealed to the other one inside a frame
  * the whole group carries (`CommunitySession.sendPair`), so hubs relay it and keep it for a member who was away
  * without being able to read it. A request to the whole group, and its "paid", go to everyone as an application

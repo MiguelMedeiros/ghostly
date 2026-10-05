@@ -64,3 +64,45 @@ test("a phone in use opens the QR code's link: it asks, adds itself in a new pro
   for (const [key, value] of Object.entries(before)) expect(after[key]).toBe(value);
   expect(page.url()).not.toMatch(/ghostly1z/i);
 });
+
+test("a phone in use with a group and no chat opens the QR code's link: the refusal in its own profile goes on to a new profile, code kept", { tag: ["@feature:devices.enroll"] }, async ({ peer }) => {
+  const [desktop, phone] = await Promise.all([peer("desktop"), peer("phone", { mobile: true })]);
+
+  // The phone is in use with a group only: the chat list has no 1:1 chat, so the link opens straight at the name here.
+  await phone.page.getByTestId("sidebar-new-more").click();
+  await phone.page.getByTestId("new-group").click();
+  await phone.page.getByTestId("new-group-name").fill("Family");
+  await phone.page.getByTestId("new-group-create").click();
+  await phone.page.getByTestId("group-share-dialog").getByTestId("group-share-done").click();
+
+  await desktop.page.goto("/#/profile");
+  await desktop.page.getByTestId("device-add-open").click();
+  const add = desktop.page.getByTestId("device-add");
+  await add.getByTestId("device-add-password").fill(DEVICE_SET_PASSWORD);
+  await add.getByTestId("device-add-password-again").fill(DEVICE_SET_PASSWORD);
+  await add.getByTestId("device-add-next").click();
+  const code = (await add.getByTestId("device-add-code").getAttribute("data-code"))!;
+
+  const origin = new URL(phone.page.url()).origin;
+  await phone.page.close();
+  const page = await phone.context.newPage();
+  await page.goto(`${origin}/#${code.toUpperCase()}`);
+  await page.getByTestId("device-join-name").fill("Phone");
+  await page.getByTestId("device-join-next").click();
+
+  // The engine refuses this profile (it holds a group): no dead end, the ask-first sheet, and the code goes with it.
+  const ask = page.getByTestId("device-join-another");
+  await expect(ask).toContainText("Add this device to another profile?");
+  await expect(page.getByTestId("device-join-error")).toHaveCount(0);
+  await ask.getByTestId("device-join-another-go").click();
+  await expect(page.getByTestId("device-join-name-form")).toHaveAttribute("data-code-given", "true");
+  await page.getByTestId("device-join-name").fill("Phone");
+  await page.getByTestId("device-join-next").click();
+
+  const desktopDigits = add.getByTestId("device-add-digits");
+  await expect(desktopDigits).toBeVisible();
+  await expect(page.getByTestId("device-join-digits")).toHaveAttribute("data-digits", (await desktopDigits.getAttribute("data-digits"))!);
+  await add.getByTestId("device-add-match").click();
+  await expect(add.getByTestId("device-add-done")).toHaveText("Phone added. It is on standby.");
+  await expect(page.getByTestId("device-join-done")).toHaveAttribute("data-step", "done");
+});

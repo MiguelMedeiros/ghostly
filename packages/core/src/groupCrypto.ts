@@ -8,7 +8,7 @@ import { identityFromSeed, publicKeyFromZ32 } from "./identity";
 import type { LinkParams } from "./invite";
 
 /**
- * The cryptography of the `group-mesh/1` profile (WISP 900 / 9xx group mesh).
+ * The cryptography of the `group-mesh/1` profile (WISP 900 / 902 group mesh).
  *
  * One random 32-byte **epoch secret** per membership state. It never travels in
  * the clear: the committer seals it to each member of the new roster with an

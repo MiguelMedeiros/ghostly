@@ -818,7 +818,7 @@ describe("text in a chat", () => {
     expect((await db.getMessages(chat.id))[0]).toMatchObject({ text: "later", via: "hold", delivery: "sending" });
     expect(hold).toHaveBeenCalledWith(chat.id, expect.objectContaining({ kind: "text", timestamp: 3 }));
     expect(node.getState().links[0]).toMatchObject({ textDelivery: "hold", canSendText: true });
-    expect(() => node.sendPayment({ linkId: chat.id, amount: 1, timestamp: 1 })).toThrow("not held");
+    await expect(node.sendPayment({ linkId: chat.id, amount: 1, timestamp: 1 })).rejects.toThrow("not held");
   });
 });
 
@@ -995,7 +995,7 @@ describe("private groups through the engine", () => {
   });
 
   // covers: groups.native-links
-  describe("native transports on a group's links (WISP 9xx § Transports)", () => {
+  describe("native transports on a group's links (WISP 902 § Transports)", () => {
     const endpoint = () => ({ transport: "iroh/1" as const, descriptor: { id: "ab".repeat(32), relay: "https://relay.test./", addresses: [] },
       connect: vi.fn(), close: vi.fn(async () => {}), onConnection: null, onDescriptor: null });
     /** An engine running Iroh as the Desktop does (the host's own adapter). */

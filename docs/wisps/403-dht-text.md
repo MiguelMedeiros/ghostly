@@ -118,7 +118,7 @@ While the chat is not live, a file written in it waits for the live session: its
 |---|---|---|
 | `rendezvous` (joiner) | May ride the first-contact envelope | Queued until pinned |
 | `live` | Layer 1 | Layer 1 |
-| `on-dht` | DHT, under its stable id | Held ([4xx](4xx-store-and-forward.md)) if both allow; otherwise queued for layer 1 |
+| `on-dht` | DHT, under its stable id | Held ([404](404-store-and-forward.md)) if both allow; otherwise queued for layer 1 |
 | `dht-chosen` | DHT | Held if both allow; otherwise queued until someone leaves DHT only |
 
 A text already sent on layer 1 that loses its session before the receipt is sent again over the DHT under the same id, when it fits (exists today). A text first sent over the DHT whose layer 1 comes back goes again on layer 1 at once; the first receipt on either path ends the other path's retries, and the receiver shows it once.
@@ -150,7 +150,7 @@ With every chat running this profile, reads multiply by the number of chats. The
 
 ## What never enters this path
 
-Financial envelopes, a file's bytes (pictures and voice notes included), calls and service bodies never enter this path; a file's offer may ([Files](#files-revision-2026-10-03)). Cashu bearer tokens are refused as text. A status card ([4xx · Status Cards](4xx-status-cards.md), revision 2026-09-29) never does either: a card's first message may go here as its fallback text when it fits, and its updates wait for the live session. A short pasted Lightning invoice can fit as text, but publishing it starts no payment. A contact whose capability record lacks `dht-text/1` receives nothing on this path: the sender queues for layer 1 instead ([03](03-capabilities.md#layer-0-capability-record)).
+Financial envelopes, a file's bytes (pictures and voice notes included), calls and service bodies never enter this path; a file's offer may ([Files](#files-revision-2026-10-03)). Cashu bearer tokens are refused as text. A status card ([405 · Status Cards](405-status-cards.md), revision 2026-09-29) never does either: a card's first message may go here as its fallback text when it fits, and its updates wait for the live session. A short pasted Lightning invoice can fit as text, but publishing it starts no payment. A contact whose capability record lacks `dht-text/1` receives nothing on this path: the sender queues for layer 1 instead ([03](03-capabilities.md#layer-0-capability-record)).
 
 ## Runtime and conformance
 

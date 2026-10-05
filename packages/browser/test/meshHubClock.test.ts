@@ -4,7 +4,7 @@ import { CommunityWorld, type Peer } from "./communityWorld";
 // covers: groups.hubs, groups.send
 
 /**
- * Hubs of a private group past 16 members (WISP 9xx · Group Mesh § Hubs) when one device's clock differs. A hub dates
+ * Hubs of a private group past 16 members (WISP 902 · Group Mesh § Hubs) when one device's clock differs. A hub dates
  * its beacon entry by its own clock, and a member judged it by its own: a member whose clock was 90 s or more from the
  * hubs' saw no hub (their entries looked stale, or not come yet), and a hub whose clock was off was a hub to nobody.
  * On headless engines (`CommunityWorld`), each ticking by its own clock. The hub cases fail before the change (members

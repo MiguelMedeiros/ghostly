@@ -1,0 +1,1 @@
+The number is assigned now that the feature ships in the app: this draft is WISP 902 (it was 9xx, file 9xx-group-mesh.md). The old file and its website address forward here. Wire identifiers and behavior are unchanged.

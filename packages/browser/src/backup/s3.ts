@@ -123,7 +123,7 @@ export class S3Store implements HoldStore {
   async put(name: string, bytes: Uint8Array): Promise<void> { await this.send("PUT", this.url(this.config.prefix + checkName(name)), bytes, { "content-type": name.endsWith(".ghostly-held") ? HELD_MEDIA_TYPE : BACKUP_MEDIA_TYPE }); }
   /**
    * A URL that reads one object with no credential until `seconds` from now: what an away contact is
-   * handed to pick up what was held for it (WISP 4xx). The secret key never leaves this device; the
+   * handed to pick up what was held for it (WISP 404). The secret key never leaves this device; the
    * signature covers the exact object, method and lifetime, so the URL reads that object and nothing else.
    */
   async presign(name: string, seconds: number): Promise<string> {

@@ -2,7 +2,7 @@ import type { Page } from "@playwright/test";
 import { chat, expect, openProfilePage, say, test, type Peer } from "../support/fixtures";
 
 /**
- * Editing a sent message in a group (WISP 9xx § Edits). Alice, in a community with Bob, edits her text from its ⋮ and
+ * Editing a sent message in a group (WISP 903 § Edits). Alice, in a community with Bob, edits her text from its ⋮ and
  * then with ↑ in an empty composer; Bob sees the new text in place, marked edited, never as a second message, with
  * the earlier versions in its details. Alice cannot edit Bob's message.
  */

@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security flaw
+    url: https://github.com/MiguelMedeiros/ghostly/security/advisories/new
+    about: Report it privately, never in an issue. See .github/SECURITY.md.
+  - name: Protocol proposal (WISP)
+    url: https://github.com/MiguelMedeiros/ghostly/blob/dev/docs/wisps/00-process.md
+    about: Read the WISP process first, then open a feature request that links your draft.

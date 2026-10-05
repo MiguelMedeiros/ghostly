@@ -21,7 +21,7 @@ A positive case exchanges data in both directions. A negative case records the e
 | 500 Files | Accepted size and exact bytes | Malicious name, excess/truncated body, duplicate IDs, timeout, cancel, quota and partial cleanup |
 | 600 Media | Voice/video and permitted screen modes | Permission denial, stale call, crossed offers, hangup cleanup, unavailable API |
 | 700 Local services | Approved target request/response | Path/header/redirect escape, disabled service, inherited credential isolation, body/quota/timeouts |
-| 200 to 205 and 2xx Payments | Authorized supported method with verified outcome | Wrong payee/amount/network, unknown settlement, duplicate retries, lost receipt; no double execution or secret logging |
+| 200 to 207 Payments | Authorized supported method with verified outcome | Wrong payee/amount/network, unknown settlement, duplicate retries, lost receipt; no double execution or secret logging |
 | 900 Groups | Three independent peers join, exchange and remove one member (one implementation: four browsers for the mesh, six for a community, pass) | Concurrent admission/commits, partitions, authority loss, stale/forked epochs, history gaps, unauthorized future keys, bounded resource use; a second implementation remains the interoperability gate |
 | 901 Distribution | Common profile delivers authenticated encrypted envelopes | Duplicate/invalid floods, churn, topic leakage, incompatible overlay, removed participant, no implicit bridge |
 

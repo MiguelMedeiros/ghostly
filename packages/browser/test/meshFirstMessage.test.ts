@@ -51,7 +51,7 @@ describe("a joiner's first message, sent before any edge is up", { timeout: 120_
     expect(first.groups.taken(id, sent.messageId!)).toBeGreaterThanOrEqual(1);
     // Everyone connected, and a while later: still once. The other was let in (in the same poll of the admin's) before
     // the first one wrote, so it was in the group then: once its writer has caught up, the lines are said again under
-    // the epoch that holds it (WISP 9xx § Catch-up, "Frames said again"), and the admin, who read them, shows them once.
+    // the epoch that holds it (WISP 902 § Catch-up, "Frames said again"), and the admin, who read them, shows them once.
     await world.until(() => everyoneUp(world, [alice, first, second], id), 10 * 60_000);
     await world.run(3 * 60_000);
     expect(world.texts(alice, id)).toEqual(["first words", "and more"]);

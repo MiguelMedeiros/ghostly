@@ -320,7 +320,7 @@ describe("NewGroupDialog", () => {
   });
 
   it("on an app with no WebRTC, creates the group: its links go over Iroh or HyperDHT", async () => {
-    // Ghostly Desktop on Linux (WISP 9xx § Transports): no WebRTC, but native transports carry its group links.
+    // Ghostly Desktop on Linux (WISP 902 § Transports): no WebRTC, but native transports carry its group links.
     const { user, engine } = open();
     act(() => engine.update({ transport: { protocol: "webrtc/1", relays: [], webrtc: false } }));
     expect(screen.queryByTestId("new-group-no-webrtc")).not.toBeInTheDocument();

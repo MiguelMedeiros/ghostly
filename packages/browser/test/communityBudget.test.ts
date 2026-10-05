@@ -3,7 +3,7 @@ import { CommunityWorld, type Peer } from "./communityWorld";
 // covers: groups.hubs.budget, groups.protocol.community-topology
 
 /**
- * A Mac's budget of connections in a community (WISP 9xx · Group Community § Topology; 9xx · Group Mesh § Hubs,
+ * A Mac's budget of connections in a community (WISP 903 · Group Community § Topology; 902 · Group Mesh § Hubs,
  * Budget): WKWebView opens only about 46 connections in one page, so the Desktop app on a Mac gives its groups 40
  * (`peerBudget`), shared with its other groups and its 1:1 chats. A community hub keeps no more edges than that leaves,
  * and says it is full when it is, so members and joiners go to another hub.

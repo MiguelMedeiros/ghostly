@@ -4,7 +4,7 @@ import { GROUP_ID } from "./groupCommits";
 import { TYPING_FRAME, TypingReceiver, type TypingActivity, type TypingFrame } from "./pairedTyping";
 
 /**
- * The typing indicator of a private group (WISP 9xx · Group Mesh § Typing): "Ana is typing", said on the group's
+ * The typing indicator of a private group (WISP 902 · Group Mesh § Typing): "Ana is typing", said on the group's
  * edges only, the way a 1:1 chat says it on its session (WISP 401 § Typing), with the same kinds, limits and wording.
  *
  *     {"t":"group-typing","g":"<group>","e":3,"n":"<nonce>","c":"<sealed>"}

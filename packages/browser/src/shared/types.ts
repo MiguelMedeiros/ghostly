@@ -96,7 +96,7 @@ export interface StoredLink {
    * every network. A request, a payment or an ask of a network off here is refused, and the contact is told.
    */
   paymentNetworks?: Partial<Record<PaymentMethodName, WalletNetwork[]>>;
-  /** Store-and-forward for this contact (WISP 4xx, `hold/1`). Absent: off, as for every chat from before it. */
+  /** Store-and-forward for this contact (WISP 404, `hold/1`). Absent: off, as for every chat from before it. */
   hold?: HoldState;
   /** An edge of a private group (WISP 900): the group, and the member at the other end. Not a chat. */
   group?: string;
@@ -145,11 +145,11 @@ export interface StoredGroup {
   contacts?: Record<string, string>;
   /**
    * Members whose apps said (`paired-groups` version 3, on their edge or the link that admitted them) that they take
-   * rosters past eight: an admin grows the group past eight only when every other member is here (WISP 9xx § Bounds).
+   * rosters past eight: an admin grows the group past eight only when every other member is here (WISP 902 § Bounds).
    */
   large?: string[];
   /**
-   * Past 16 members, with hubs (WISP 9xx · Group Mesh § Hubs): the hubs I kept edges with (as a hub, the other hubs),
+   * Past 16 members, with hubs (WISP 902 · Group Mesh § Hubs): the hubs I kept edges with (as a hub, the other hubs),
    * where my edges go when the app starts again, before the beacon is read.
    */
   hubs?: string[];
@@ -193,7 +193,7 @@ export interface GroupMemberView {
   nick?: string;
   /** The pairwise edge to this member is open, or a hub I am connected to reaches them (always true for me). */
   online: boolean;
-  /** Reached through a hub, not an edge of mine (WISP 9xx · Group Mesh § Hubs). */
+  /** Reached through a hub, not an edge of mine (WISP 902 · Group Mesh § Hubs). */
   viaHub?: boolean;
   /** A hub of the group now (listed in its beacon), and what the admin said: pinned as a hub, or never one. */
   hub?: boolean;
@@ -204,7 +204,7 @@ export interface GroupMemberView {
   edge?: GroupEdgeView;
 }
 
-/** One edge of a group's mesh (WISP 9xx): a paired link toward one member, which carries the group to and from them. */
+/** One edge of a group's mesh (WISP 902): a paired link toward one member, which carries the group to and from them. */
 export interface GroupEdgeView {
   linkId: string;
   /**
@@ -270,13 +270,13 @@ export interface GroupView {
   /** The group's picture (a JPEG data URL the engine checked), set by its admin; absent for none. */
   picture?: string;
   /**
-   * A private group past 16 members that runs on hubs (WISP 9xx · Group Mesh § Hubs): `hub` when I am one. Absent for
+   * A private group past 16 members that runs on hubs (WISP 902 · Group Mesh § Hubs): `hub` when I am one. Absent for
    * the full mesh.
    */
   hubs?: { hub: boolean };
   /** Community groups: how this device is connected (a hub for others, or through hubs). */
   community?: { hub: boolean; hubs: number; connected: number };
-  /** Private groups: the members typing now, in the order they started (WISP 9xx · Group Mesh § Typing). Never stored. */
+  /** Private groups: the members typing now, in the order they started (WISP 902 · Group Mesh § Typing). Never stored. */
   typing?: GroupTypingView[];
   /** Private groups: this side's wake-up tokens, one per member it shared its subscription with (the push worker's table). */
   wakeTokens?: string[];
@@ -532,7 +532,7 @@ export interface StoredPayment {
   /** Requests we pay: this device paid it over Lightning (the payee's wallet cannot say who paid an invoice). */
   paidHere?: boolean;
   /**
-   * A request to a whole group (WISP 9xx § Payments): the group's id. Its `linkId` is `group:<id>`, it went to
+   * A request to a whole group (WISP 902 § Payments): the group's id. Its `linkId` is `group:<id>`, it went to
    * every member over their edges, and the first member whose payment settles it pays it; later ones are refused.
    */
   group?: string;
@@ -784,7 +784,7 @@ export interface WalletView {
 export interface StoredMessage {
   wireId?: string;
   /**
-   * `held`: in this device's storage, waiting for the contact to come back (WISP 4xx).
+   * `held`: in this device's storage, waiting for the contact to come back (WISP 404).
    * `queued`: unconfirmed, and sent again by itself under the same id once the chat can carry it.
    * `waiting`: not sent yet; it goes by itself when the chat can carry it (live, or the DHT text before it
    * confirmed), and can be cancelled meanwhile ("Sends when live", WISP 400).
@@ -810,7 +810,7 @@ export interface StoredMessage {
   timestamp: number;
   /** Received: when the sender says it sent it, by its own clock. Shown (`shownTime`), never sorted by. */
   sentAt?: number;
-  /** `hold`: through the sender's storage while the other side was away (WISP 4xx). */
+  /** `hold`: through the sender's storage while the other side was away (WISP 404). */
   via: "pkarr" | "datalink" | "hold";
   nick?: string;
   file?: MessageFile;
@@ -819,9 +819,9 @@ export interface StoredMessage {
   member?: string;
   /** Group history lines that are not messages. */
   event?: GroupEvent;
-  /** Group history: a payment between members, as the group knows it (WISP 9xx § Payments). */
+  /** Group history: a payment between members, as the group knows it (WISP 902 § Payments). */
   groupPay?: GroupPayNote;
-  /** Group messages: the places of the text that name members, by member key (WISP 9xx § Mentions). */
+  /** Group messages: the places of the text that name members, by member key (WISP 902 § Mentions). */
   mentions?: GroupMention[];
   /** A group message someone else sent that names me (or everyone). */
   mentioned?: true;
@@ -844,17 +844,17 @@ export interface StoredMessage {
    */
   forwarded?: number;
   /**
-   * A bot's status card (WISP 4xx · Status Cards): a task or a routine shown instead of `text`, which is its fallback.
+   * A bot's status card (WISP 405 · Status Cards): a task or a routine shown instead of `text`, which is its fallback.
    * It belongs to the version it came with: an edit brings its own, or leaves the message a text.
    */
   card?: StatusCard;
   /**
-   * A reply that presses a button of this side's own message (WISP 4xx · Message Buttons), as the author's engine took
+   * A reply that presses a button of this side's own message (WISP 406 · Message Buttons), as the author's engine took
    * it: set only when the button was open for this person. What `button.pressed` reports.
    */
   press?: MessagePress;
   /**
-   * A question of mine with buttons whose text went on the DHT floor or into a hold, which carry text alone (WISP 4xx ·
+   * A question of mine with buttons whose text went on the DHT floor or into a hold, which carry text alone (WISP 406 ·
    * Message Buttons): `due` until its buttons go again live, as an edit of the buttons alone; `sent` once they did.
    */
   buttonsRestore?: "due" | "sent";
@@ -915,7 +915,7 @@ export interface MessageEdit {
   /** Mine: the contact has not confirmed this edit yet. It goes by itself once the chat is live and both sides offer edit/1. */
   pending?: true;
   /**
-   * Mine: the engine's own edit that sends a question's buttons again, the text unchanged (WISP 4xx · Message Buttons),
+   * Mine: the engine's own edit that sends a question's buttons again, the text unchanged (WISP 406 · Message Buttons),
    * never one a person or a bot made. The bot's event stream reports none for it; a later edit makes a new one without it.
    */
   restore?: true;
@@ -928,7 +928,7 @@ export interface MessageVersion { at: number; text: string }
  * with the reply; the receiver keeps its own view of the original when it has it (`messageId`), and the line and the
  * author then come from there, not from the wire.
  */
-/** A button press on this side's message (WISP 4xx · Message Buttons). */
+/** A button press on this side's message (WISP 406 · Message Buttons). */
 export interface MessagePress {
   /** The message with the buttons, its id here. */
   messageId: string;
@@ -947,7 +947,7 @@ export interface MessageReply {
   from?: "me" | "peer";
   /** A group's original: its author's member key. */
   member?: string;
-  /** A button press (WISP 4xx · Message Buttons): the original's button this reply presses, its text the label. */
+  /** A button press (WISP 406 · Message Buttons): the original's button this reply presses, its text the label. */
   button?: string;
   /**
    * The original here, when it was found in this chat as the reply was kept (always, for a reply sent here). Without
@@ -1070,7 +1070,7 @@ export interface MessageDetailsView {
 export type GroupPayRail = "cashu" | "lightning" | "arkade" | "bark" | "bitcoin" | "spark" | "usdt" | "fedimint";
 
 /**
- * A payment between two members as the whole group sees it (WISP 9xx § Payments): who pays whom, how much, over
+ * A payment between two members as the whole group sees it (WISP 902 § Payments): who pays whom, how much, over
  * what, and how it stands. No money and nothing to pay with: that travels only on the edge between the two.
  */
 export interface GroupPayNote {
@@ -1102,7 +1102,7 @@ export interface GroupPayNote {
   mine?: GroupPayFrame;
 }
 
-/** `group-pay` on an edge (WISP 9xx § Payments). Old apps drop it. */
+/** `group-pay` on an edge (WISP 902 § Payments). Old apps drop it. */
 export interface GroupPayFrame {
   t: "group-pay";
   g: string;
@@ -1192,7 +1192,7 @@ export interface Settings {
    */
   sendTyping?: boolean;
   /**
-   * Where items are held for away contacts (WISP 4xx): the profile's S3 storage and its random space
+   * Where items are held for away contacts (WISP 404): the profile's S3 storage and its random space
    * (WISP 1000/1002), as set up under Profile → Backups. Kept here for the peer, which may run outside the
    * page; never copied into a backup.
    */
@@ -1211,7 +1211,7 @@ export interface Settings {
    */
   wakeRotate?: boolean;
   /**
-   * Private groups muted here (WISP 9xx · Group Mesh § Wake-up push): their members are told to forget this profile's
+   * Private groups muted here (WISP 902 · Group Mesh § Wake-up push): their members are told to forget this profile's
    * subscription, as a muted chat's contact is. Only through `setWakeMuted` with the group's `group:<id>`.
    */
   wakeMutedGroups?: string[];
@@ -1385,7 +1385,7 @@ export interface PublicGraphView {
 /** A post's picture, on the reader's tap: a re-encoded `data:image/jpeg` URL, or why there is none. */
 export interface PublicPostImageView { src?: string; miss?: string; hosts: string[]; width?: number; height?: number }
 
-/** The profile's did:dht (WISP 3xx-did-dht): its own key, public to everyone, never tied to a chat. */
+/** The profile's did:dht (WISP 310-did-dht): its own key, public to everyone, never tied to a chat. */
 export interface ProfileDidView {
   /** `did:dht:…` */
   id: string;
@@ -1614,7 +1614,7 @@ export interface EngineState {
      */
     clockOffMs?: number;
     /**
-     * False where a group's links have no transport at all here: no WebRTC and no native transport (WISP 9xx §
+     * False where a group's links have no transport at all here: no WebRTC and no native transport (WISP 902 §
      * Transports), so no member of a group can be reached from it. Absent where they have one (the Linux Desktop runs
      * Iroh and HyperDHT).
      */

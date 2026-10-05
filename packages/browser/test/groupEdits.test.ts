@@ -6,7 +6,7 @@ import { CommunityWorld, type Peer } from "./communityWorld";
 // covers: groups.edit, groups.protocol.edits
 
 /**
- * Edits in groups (WISP 9xx § Edits) on the engine: `GroupEdits` on its own (what it keeps, what it believes, its pace),
+ * Edits in groups (WISP 902 § Edits) on the engine: `GroupEdits` on its own (what it keeps, what it believes, its pace),
  * then on headless peers running the real group engine, a community and a private group joined by their links.
  */
 

@@ -10,7 +10,7 @@ import { CallMedia, loadCallStack, type CallStack, type MediaOptions } from "./m
 import { DEFAULT_RATE, FRAME_MS, isCallRate, PlaybackQueue, type CallRate } from "./pcm";
 
 /**
- * Voice calls on the headless Ghostly (WISP 11xx § Calls): the calls/1 signals of the chat session (WISP 601), the
+ * Voice calls on the headless Ghostly (WISP 1100 § Calls): the calls/1 signals of the chat session (WISP 601), the
  * media on a WebRTC connection of the CLI's own, and the audio handed to an outside program over a Unix socket per
  * call. The rules are the apps' (packages/react/src/useWebRTC.ts): a call per chat; an offer rings while this side
  * is idle, or when it wins a glare with this side's own offer; an answer counts only after this side's offer; a hang-up ends whatever is on; a signal older than the

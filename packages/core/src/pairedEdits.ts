@@ -15,7 +15,7 @@ import { cardEditNumber, readStatusCard, type StatusCard } from "./statusCards";
  * side: the frame comes on the session authenticated with the pinned contact, and the receiver looks the id up among
  * that contact's messages only. The highest `e` wins, whatever order frames arrive in; an edit that is not newer is
  * confirmed and changes nothing. A preview (`pv`, WISP 401 § Link previews) may come with the new text, as with a
- * message. A status card (`sc`, WISP 4xx · Status Cards) may come with it too; a card message takes up to
+ * message. A status card (`sc`, WISP 405 · Status Cards) may come with it too; a card message takes up to
  * `STATUS_CARD_LIMITS.edits` edits, a number past `MAX_EDITS_PER_MESSAGE` holding only with a card. Older apps drop
  * both frames: they have an id, but a `t` they do not know.
  */
@@ -49,7 +49,7 @@ export interface WireEdit {
   /** The whole new text. */
   m: string;
   pv?: LinkPreview;
-  /** The status card of this version (WISP 4xx · Status Cards): a message with a card takes an edit with one. */
+  /** The status card of this version (WISP 405 · Status Cards): a message with a card takes an edit with one. */
   sc?: StatusCard;
 }
 

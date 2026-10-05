@@ -10,7 +10,7 @@ export interface MeshSignalsScope {
 }
 
 /**
- * Edge signaling through members (WISP 9xx · Group Mesh § Signaling through members; `CarriedTransport` in core): which
+ * Edge signaling through members (WISP 902 · Group Mesh § Signaling through members; `CarriedTransport` in core): which
  * links an edge's packet is handed to, what a member does with one that is for someone else, and what happens to one
  * that is for me. A packet is the edge's own Pkarr packet, signed under a key only its two ends derive: whoever
  * carries it sees a signed blob, as a relay does, and the edge checks it as it checks a relay's answer.

@@ -5,7 +5,7 @@ import { BOARD_COLUMNS, RECENT_MS, boardEntries, boardModel, boardMove, boardTag
 
 // covers: chat.tasks-board
 
-/** The Tasks board's selector (WISP 4xx · Status Cards § The Tasks board): cards across chats, in columns by status. */
+/** The Tasks board's selector (WISP 405 · Status Cards § The Tasks board): cards across chats, in columns by status. */
 
 const NOW = 1_800_000_000_000;
 const task = (extra: Record<string, unknown> = {}) => readStatusCard({ kind: "task", id: "relay", title: "Fix relay rotation", status: "running", ...extra }) as TaskCard;
