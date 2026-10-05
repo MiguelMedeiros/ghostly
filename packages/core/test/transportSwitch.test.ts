@@ -239,3 +239,32 @@ it("a move that lands on its target is no fallback: nothing is left unreached", 
   expect(h.switches.map(s => s.wanted()?.transport)).toEqual(["iroh/1", "iroh/1"]);
   h.switches.forEach(s => s.stop());
 });
+it("a contact whose app started again and took the session over (no stop on this side) is heard at its new revisions", () => {
+  // The CLI's daemon killed and started again: its app knocks on the native endpoint, and this side takes the new
+  // connection as a replacement of the session it still held (`attachReplacement`), with no drop in between. The new
+  // app counts its policy revisions from 0 again. Before, this side kept the old app's policy (revision 6 here) and
+  // dropped every newer one as older: neither a choice made here nor one made there moved the chat ("Your contact did
+  // not answer" / "Transport change timed out", every time, until the restarted app's revisions passed the old ones).
+  const policies: Omit<TransportPolicy, "revision" | "intent">[] = [0, 1].map(() => ({ preferred: "webrtc/1", fallback: true,
+    available: ["webrtc/1", "iroh/1", "hyperdht/1"], descriptors: { "iroh/1": "iroh", "hyperdht/1": "hyper" } }));
+  const queue: { side: number; frame: Record<string, unknown> }[] = [];
+  const prepare = [vi.fn(), vi.fn()];
+  const make = (i: number) => new TransportSwitch({ key: String(i), peerKey: String(1 - i),
+    policy: () => structuredClone(policies[i]), send: frame => queue.push({ side: 1 - i, frame: frame as Record<string, unknown> }),
+    peer: vi.fn(), state: vi.fn(), prepare: prepare[i], cancel: vi.fn(), unreached: vi.fn(), timeoutMs: 100 });
+  const switches = [make(0), make(1)];
+  const flush = () => { let steps = 0; while (queue.length) { if (++steps > 100) throw new Error("Negotiation loop"); const { side, frame } = queue.shift()!; switches[side].handle(frame); } };
+  switches.forEach(s => s.begin("session-1", "webrtc/1")); flush();
+  // The coordinator's app (key 0) changes its policy a few times on that session.
+  for (let n = 0; n < 6; n++) { switches[0].changed(false); flush(); }
+  expect(switches[1].peerPolicy?.revision).toBe(6);
+
+  // Killed, and started again: a new app, revision 0, on a session that replaces the old one here.
+  switches[0] = make(0);
+  switches.forEach(s => s.begin("session-2", "iroh/1")); flush();
+  // A choice on the side that stayed up is planned by the restarted coordinator and dialled.
+  policies[1].preferred = "hyperdht/1"; switches[1].changed(); flush();
+  expect(prepare[0]).toHaveBeenCalledWith(expect.objectContaining({ choices: expect.arrayContaining(["hyperdht/1"]) }), true);
+  expect(prepare[1]).toHaveBeenCalledWith(expect.objectContaining({ choices: expect.arrayContaining(["hyperdht/1"]) }), false);
+  switches.forEach(s => s.stop());
+});
