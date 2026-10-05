@@ -75,7 +75,7 @@ export function ProfileBackups({ canSwitch, openBackup = false }: { canSwitch: b
   /** What is said after a backup: where it went, and what could not go with it. */
   const madeText = (text: string, result: BackupResult) => [
     text,
-    result.leftOut ? t("profile.backups.content.leftOut", { size: byteSize(result.leftOutBytes ?? 0) }) : "",
+    result.leftOut ? t("profile.backups.content.leftOut", { size: byteSize(result.leftOutBytes ?? 0, t) }) : "",
     result.skipped ? (result.skipped === 1 ? t("profile.backups.skippedOne") : t("profile.backups.skipped", { count: result.skipped })) : "",
   ].filter(Boolean).join(" ");
   /** Runs a backup or restore under the progress bar. Cancelled, it says so and nothing more. */
@@ -97,7 +97,7 @@ export function ProfileBackups({ canSwitch, openBackup = false }: { canSwitch: b
         const result = await writeProfileBackup(staged, options);
         saving();
         await s3.put(name, await staged.bytes());
-        setDone(madeText(t("profile.backups.savedToS3", { size: byteSize(result.bytes) }), result));
+        setDone(madeText(t("profile.backups.savedToS3", { size: byteSize(result.bytes, t) }), result));
       } finally { await staged.discard(); }
     } else {
       // The desktop app asks where to save it. Closing that dialog saves nothing: nothing is said to be saved, and
@@ -105,7 +105,7 @@ export function ProfileBackups({ canSwitch, openBackup = false }: { canSwitch: b
       const fileName = name.split("/").pop()!;
       const { how, result } = await backUpToFile(options, fileName, saving);
       if (how === "cancelled") return;
-      setDone(madeText(t(how === "saved" ? "profile.backups.saved" : "profile.backups.downloaded", { name: fileName, size: byteSize(result.bytes) }), result));
+      setDone(madeText(t(how === "saved" ? "profile.backups.saved" : "profile.backups.downloaded", { name: fileName, size: byteSize(result.bytes, t) }), result));
     }
     setPassphrase(""); setConfirm(""); setUnderstood(false); setProtection("passphrase");
     // A copy of everything now: a wallet's backup reminder that asked for it is over.
@@ -167,7 +167,7 @@ export function ProfileBackups({ canSwitch, openBackup = false }: { canSwitch: b
       <Row label={t("profile.backups.backUp")} hint={t("profile.backups.backUpHint")} info={t("profile.backups.holds")}><Button data-testid="backup-open" onClick={() => toggle("backup")}>{open === "backup" ? t("common.close") : t("profile.backups.backUpOpen")}</Button></Row>
       {open === "backup" && (
         <Field testId="backup-content" label={t("profile.backups.content.label")} info={t("profile.backups.content.info")}
-          hint={sizes && <span data-testid="backup-content-size">{content === "light" ? t("profile.backups.content.lightSize", { size: byteSize(sizes.light), left: byteSize(sizes.leftOutBytes) }) : t("profile.backups.content.everythingSize", { size: byteSize(sizes.everything) })}</span>}>
+          hint={sizes && <span data-testid="backup-content-size">{content === "light" ? t("profile.backups.content.lightSize", { size: byteSize(sizes.light, t), left: byteSize(sizes.leftOutBytes, t) }) : t("profile.backups.content.everythingSize", { size: byteSize(sizes.everything, t) })}</span>}>
           <Segmented label={t("profile.backups.content.label")} value={content} onChange={setContent}
             options={[{ value: "everything", label: t("profile.backups.content.everything") }, { value: "light", label: t("profile.backups.content.light") }]} />
         </Field>
@@ -210,7 +210,7 @@ export function ProfileBackups({ canSwitch, openBackup = false }: { canSwitch: b
             <InputGroup>
               {listing?.length ? (
                 <Select data-testid="restore-pick" aria-label={t("profile.backups.toRestore")} value={picked} onChange={setPicked}
-                  options={listing.map((b) => ({ value: b.name, label: new Date(b.created || b.modified || 0).toLocaleString(language), description: b.size ? byteSize(b.size) : undefined }))} />
+                  options={listing.map((b) => ({ value: b.name, label: new Date(b.created || b.modified || 0).toLocaleString(language), description: b.size ? byteSize(b.size, t) : undefined }))} />
               ) : listing ? <Notice>{t("profile.backups.noneYet")}</Notice> : null}
               <Button data-testid="restore-list" disabled={busy} onClick={() => void run(async () => { const all = (await s3.list(space())).filter((b) => b.name.endsWith(".ghostly-backup")).reverse(); setListing(all); setPicked(all[0]?.name ?? ""); })}>{listing ? t("profile.backups.refresh") : t("profile.backups.list")}</Button>
             </InputGroup>

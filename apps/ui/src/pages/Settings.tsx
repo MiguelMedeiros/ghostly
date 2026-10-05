@@ -402,7 +402,7 @@ export function Settings() {
       media: t("settings.mediaHint"),
       privacy: t("settings.privacyHint"),
       network: t("settings.networkHint"),
-      storage: desktopUsed ? formatBytes(desktopUsed.total) : formatBytes(estimate?.used ?? storageInfo.used),
+      storage: desktopUsed ? formatBytes(desktopUsed.total, t) : formatBytes(estimate?.used ?? storageInfo.used, t),
       about: update.update ? t("updates.available", { version: update.update.version }) : `${t("settings.version")} ${appVersion}`,
     };
     return (
@@ -611,9 +611,9 @@ export function Settings() {
       <SettingsGroup id="storage" view={view}>
       <Section title={t("settings.data")}>
         <Row label={t("settings.storageUsed")} testId="settings-storage-used"
-          value={desktopUsed ? formatBytes(desktopUsed.total) : estimate ? t("settings.storageOf", { used: formatBytes(estimate.used), quota: formatBytes(estimate.quota) }) : formatBytes(storageInfo.used)}
+          value={desktopUsed ? formatBytes(desktopUsed.total, t) : estimate ? t("settings.storageOf", { used: formatBytes(estimate.used, t), quota: formatBytes(estimate.quota, t) }) : formatBytes(storageInfo.used, t)}
           info={desktopUsed ? <span data-testid="settings-storage-parts">
-            {desktopUsed.parts.map((part) => <span key={part.key} className="block">{t(`settings.storageParts.${part.key}`, { size: formatBytes(part.bytes), count: part.count ?? 0 })}</span>)}
+            {desktopUsed.parts.map((part) => <span key={part.key} className="block">{t(`settings.storageParts.${part.key}`, { size: formatBytes(part.bytes, t), count: part.count ?? 0 })}</span>)}
             <span className="block mt-1">{t("settings.storagePartsNote")}</span>
           </span> : undefined} />
         {protection && (

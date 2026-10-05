@@ -2,6 +2,8 @@ import { fileBytes } from "@ghostly/browser/shared/fileBytes";
 import type { BackupSink } from "@ghostly/browser/backup/stream";
 import { saveMade } from "./fileDownload";
 import { writeProfileBackup, type BackupOptions, type BackupResult } from "./profileBackup";
+import { sizeIn } from "./sizeText";
+import type { Translate } from "../locales/translate";
 
 /**
  * A backup being written, kept out of memory: staged in this device's file storage (a real file on Desktop, the
@@ -100,9 +102,9 @@ export async function backUpToFile(options: BackupOptions, name: string, onSavin
   }
 }
 
-/** A size as people read it: "640 KB", "12.4 MB", "1.3 GB". */
-export function byteSize(bytes: number): string {
-  if (bytes >= 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024 / 1024).toFixed(1)} GB`;
-  if (bytes >= 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
-  return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+/** A size as people read it, in the app's language (`t`): "640 KB", "12.4 MB", "1.3 GB"; "12,4 Mo" in French. */
+export function byteSize(bytes: number, t?: Translate): string {
+  if (bytes >= 1024 * 1024 * 1024) return sizeIn(bytes / 1024 / 1024 / 1024, "gb", t, 1, true);
+  if (bytes >= 1024 * 1024) return sizeIn(bytes / 1024 / 1024, "mb", t, 1, true);
+  return sizeIn(Math.max(1, Math.round(bytes / 1024)), "kb", t);
 }
