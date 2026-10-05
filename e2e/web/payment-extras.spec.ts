@@ -107,6 +107,23 @@ test("a sent payment's memo shows in both bubbles", { tag: ["@feature:payments.c
   expect(await heard(bob, NOTE.paid)).toBe(0);
 });
 
+// A phone with its keyboard up leaves 420px: the review that takes the amount's place after Send ran past the bottom of
+// the sheet, and Approve was below the fold until scrolled to.
+test("on a phone with the keyboard up, the review keeps Approve in view after Send", { tag: ["@feature:payments.chat.review", "@feature:app.mobile-layout"] }, async ({ peer }) => {
+  const [alice, bob] = await chatting(peer, "phone-review-alice", "phone-review-bob");
+  await fund(alice);
+  for (const p of [alice, bob]) await openChat(p);
+  await alice.page.setViewportSize({ width: 375, height: 420 });
+  await expect(chat(alice)).toBeVisible();
+  const review = await prepareSend(alice, 21);
+  const approve = review.getByTestId("review-approve");
+  await expect(approve).toBeInViewport({ ratio: 1 });
+  // No sideways scroll: the page is as wide as the phone.
+  expect(await alice.page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
+  await approve.click();
+  await expect(bubble(bob, "Sent you").getByTestId("payment-state")).toHaveText(/Received/);
+});
+
 test("a payment the contact refuses comes back, and is never shown as paid", { tag: ["@feature:app.attention.cues", "@feature:payments.chat.refused", "@feature:wallet.cashu.mint.add", "@feature:wallet.cashu.mint.manage", "@feature:wallet.history"] }, async ({ peer }) => {
   const [alice, bob] = await chatting(peer, "refused-alice", "refused-bob", { sounds: true });
   // Both have a Testnet Cashu wallet, where Bob's test mint is the public one. Alice keeps her test sats at a
