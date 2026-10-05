@@ -1,7 +1,7 @@
 import {
   emptyIdentityLedger, fromBase64Url, identityRevocationValue, identityStatement, IdentityExchange, IDENTITY_REVOCATION_LABEL, newIdentityBinding,
   receivedIdentityStatus, revokesIdentity, toBase64Url,
-  type IdentityBinding, type IdentityLedger, type IdentityScope, type IdentityStatement, type LocalIdentityProof, type VerifiedIdentity,
+  type IdentityBinding, type IdentityLedger, type IdentityScope, type ReceivedIdentity, type IdentityStatement, type LocalIdentityProof, type VerifiedIdentity,
 } from "@ghostly/core";
 import { STORES, store, transact, wrap } from "../shared/idb";
 import { newDeviceKey, sealSeed, unsealSeed, type EncryptedSeed } from "./paymentAdapters/persistence";
@@ -50,6 +50,12 @@ const REVOCATIONS = "identityRevocations";
 const REPUBLISH_MS = 60 * 60_000;
 /** How often the contacts' proofs are looked up for a revocation (and once shortly after start). */
 const REVOCATION_CHECK_MS = 12 * 60 * 60_000;
+/**
+ * After a contact withdraws a proof, how long to wait before each lookup for its revocation (WISP 300: removing a proof withdraws it from
+ * every chat and revokes it). The notice goes out before the revocation is published, so not at once; each try backs
+ * off, and the first that finds it stops the rest. The 12 h check covers it after that.
+ */
+export const WITHDRAWN_REVOCATION_TRIES_MS = [20_000, 60_000, 180_000] as const;
 const DRAFT_TTL = 30 * 60_000;
 const MAX_DRAFTS = 4;
 const MAX_PROOFS = 32;
@@ -211,14 +217,36 @@ export class IdentityProofs {
     }
     for (const r of live) await this.publishRevocation(r).catch(() => {});
   }
-  /** Looks up every contact's current proofs for a revocation (the Pkarr record only, not the provider). */
+  /**
+   * Looks up the contacts' proofs for a revocation (the Pkarr record only, not the provider): the ones standing, and the
+   * ones withdrawn, which a removal also revokes. Not a proof already revoked, nor one past its expiry: its owner
+   * publishes the revocation only until then.
+   */
   async checkRevocations(): Promise<void> {
     if (!this.host.online()) return;
     for (const linkId of this.host.linkIds()) {
       for (const r of this.host.ledger(linkId)?.received ?? []) {
-        if (r.status === "verified" || r.status === "unconfirmed") await this.exchange(linkId)?.recheck(r.id, { revocationOnly: true }).catch(() => {});
+        if (this.revocable(r)) await this.exchange(linkId)?.recheck(r.id, { revocationOnly: true }).catch(() => {});
       }
     }
+  }
+  private revocable(r: ReceivedIdentity): boolean {
+    return r.status !== "revoked" && Math.min(r.binding.expiresAt, r.verified.expiresAt ?? Infinity) > now();
+  }
+  /** A proof the contact just withdrew: looked up for its revocation a few times (`WITHDRAWN_REVOCATION_TRIES_MS`). */
+  private afterWithdrawal(linkId: string, id: string, tries: readonly number[] = WITHDRAWN_REVOCATION_TRIES_MS): void {
+    const [wait, ...rest] = tries;
+    if (wait === undefined) return;
+    const timer = setTimeout(() => {
+      this.timers = this.timers.filter(t => t !== timer);
+      const r = this.host.ledger(linkId)?.received.find(x => x.id === id);
+      if (!r || r.status !== "withdrawn" || !this.revocable(r)) return;
+      void (async () => {
+        const next = this.host.online() ? await this.exchange(linkId)?.recheck(id, { revocationOnly: true }).catch(() => undefined) : undefined;
+        if (next?.status !== "revoked") this.afterWithdrawal(linkId, id, rest);
+      })();
+    }, wait);
+    this.timers.push(timer);
   }
 
   views(): IdentityProofView[] {
@@ -299,8 +327,13 @@ export class IdentityProofs {
     this.host.emit();
   }
 
-  frame(linkId: string, frame: Record<string, unknown>): Promise<void> {
-    return this.exchange(linkId)?.receive(frame) ?? Promise.resolve();
+  async frame(linkId: string, frame: Record<string, unknown>): Promise<void> {
+    const x = this.exchange(linkId);
+    if (!x) return;
+    const withdrawn = frame.t === "idp-withdraw" && typeof frame.id === "string"
+      && this.host.ledger(linkId)?.received.some(r => r.id === frame.id && r.status !== "withdrawn" && r.status !== "revoked");
+    await x.receive(frame);
+    if (withdrawn && this.host.ledger(linkId)?.received.some(r => r.id === frame.id && r.status === "withdrawn")) this.afterWithdrawal(linkId, frame.id as string);
   }
   ready(linkId: string): void {
     if (this.greeted.has(linkId) || !this.host.channel(linkId)) return;

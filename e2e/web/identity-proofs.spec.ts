@@ -150,3 +150,44 @@ test("removing a proof revokes it for a contact the person never reconnects to",
   await expect(carol.page.getByTestId("identity-received").getByTestId("identity-received-status")).toHaveText("Revoked by its owner");
   await expect(carol.page.getByTestId("identities-attention")).toHaveCount(0);
 });
+
+test("removing a proof while the contact is live: it is withdrawn there at once, then revoked, without a Check again", { tag: ["@feature:proofs.nostr", "@feature:proofs.revoke", "@feature:proofs.withdraw"] }, async ({ peer, relay }) => {
+  const [alice, carol] = await Promise.all([peer("idl-alice"), peer("idl-carol")]);
+  await injectNostrSigner(alice);
+  await pair(alice, carol);
+  const withCarol = await chatId(alice);
+  await go(alice, "#/identities");
+  await alice.page.getByTestId("identities-new").click();
+  await alice.page.getByTestId("add-identity-nostr").click();
+  await alice.page.getByTestId("add-identity-start").click();
+  await expect(alice.page.getByTestId("identity-proof")).toHaveCount(1);
+  await go(alice, withCarol);
+  await shareIdentity(alice);
+  await closeIdentities(alice);
+  await expect(carol.page.getByTestId("chat-identity-badge").first()).toBeVisible();
+
+  // Carol's chat is open and live when Alice removes the proof.
+  await go(alice, "#/identities");
+  await alice.page.getByTestId("identity-proof").click();
+  await alice.page.getByTestId("identity-proof-remove").click();
+  await alice.page.getByTestId("identity-proof-remove-confirm").click();
+  await expect(alice.page.getByTestId("identity-proof")).toHaveCount(0);
+  // The share's card in Carol's chat says so at once: withdrawn (already revoked when a check ran first).
+  const card = carol.page.getByTestId("identity-share").and(carol.page.locator("[data-kind=shared]"));
+  await expect(card).toHaveAttribute("data-state", /withdrawn|revoked/);
+  await expect.poll(() => [...relay.packets.values()].some(packet => packet.includes("_ghostly-revoked"))).toBe(true);
+  // Before, it stayed "No longer shared" for good, with no mark in the header (a withdrawn card was never looked up),
+  // while the CLI's `identity recheck` said revoked. Now Carol's app looks it up by itself, 20 s after the notice at
+  // the latest, and the header shows the mark struck through as revoked.
+  await expect(card).toHaveAttribute("data-state", "revoked", { timeout: 60_000 });
+  await expect(carol.page.getByTestId("chat-identity-badges").getByTestId("chat-identity-badge")).toHaveAttribute("data-state", "revoked");
+  await openIdentities(carol);
+  const back = await turnTheirs(carol);
+  await expect(back).toHaveAttribute("data-status", "revoked");
+  await expect(back.getByTestId("chat-identity-received-status")).toHaveText("Revoked: its owner removed it and published a revocation");
+  await closeIdentities(carol);
+  // One stop line in the chat, not a second one for the revocation: the same line, now saying revoked.
+  const stop = carol.page.getByTestId("identity-share").and(carol.page.locator("[data-kind=stopped]"));
+  await expect(stop).toHaveCount(1);
+  await expect(stop.getByTestId("identity-share-text")).toHaveText(/Nostr · npub1.* was revoked$/);
+});

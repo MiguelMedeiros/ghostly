@@ -7,7 +7,7 @@ import { pair } from "../support/paired";
 /**
  * The main screens pass axe-core's WCAG 2.2 A and AA rules: no serious or critical finding (contrast, names, roles),
  * in the default colour theme, light and dark, left to right and right to left. The home screen, a 1:1 chat with its
- * ⋮ menu, + menu and payment sheet, a group, the wallets, identities, settings, profile and services.
+ * ⋮ menu, + menu and payment sheet, a group, the wallets and New wallet, identities, settings, profile and services.
  */
 test.describe.configure({ timeout: 6 * 60_000 });
 
@@ -80,6 +80,14 @@ for (const [language, scheme] of [["en", "light"], ["ar", "dark"]] as const) {
       await page.goto(`/#/${path}`);
       await expect(page.getByTestId(ready).first()).toBeVisible();
       await check(path);
+      if (path === "wallet") {
+        // Wallets → New: Mainnet and Testnet, each named in words ("Test money" in yellow, which a light page needs darker).
+        await page.getByTestId("wallet-add").click();
+        await expect(page.getByTestId("new-wallet")).toBeVisible();
+        await check("new wallet");
+        await page.keyboard.press("Escape");
+        await expect(page.getByTestId("new-wallet")).toHaveCount(0);
+      }
     }
     expect(found).toEqual({});
   });
