@@ -10,6 +10,9 @@ import { Settings } from "../../pages/Settings";
 import { renderApp } from "../render";
 import { windowIs } from "../viewport";
 import en from "../../locales/en";
+import { locales } from "../../locales";
+import { translateWith } from "../../locales/translate";
+import type { Language } from "../../lib/settings";
 
 // covers: settings.sections
 
@@ -200,9 +203,26 @@ describe("settings sections", () => {
     expect(sectionInView([{ section: "profile", top: 200, bottom: 400 }], 148, 800, false, null)).toBe("profile");
   });
 
+  it("finds an option by the words people look for it by, not only its label, in the language shown", () => {
+    const found = (language: Language, query: string) => searchSettings(query, translateWith(locales[language], language), () => true).map((entry) => entry.label);
+    expect(found("en", "dark")).toEqual(["settings.colorScheme"]);
+    expect(found("en", "theme")).toEqual(["settings.colorTheme", "settings.colorScheme"]);
+    expect(found("en", "colour")).toEqual(["settings.colorTheme"]);
+    expect(found("en", "password")).toEqual(["settings.lockScreen", "settings.password"]);
+    expect(found("en", "mentions")).toEqual(["settings.cues.chat"]);
+    expect(found("pt", "escuro")).toEqual(["settings.colorScheme"]);
+    expect(found("zh", "深色")).toEqual(["settings.colorScheme"]);
+    expect(found("ar", "داكن")).toEqual(["settings.colorScheme"]);
+    // Words of another language are not found: the search is in the language shown.
+    expect(found("pt", "dark")).toEqual([]);
+  });
+
   it("every option the search knows has an English label, and search ignores case and accents", () => {
     const t = (key: string) => key.split(".").reduce<unknown>((at, part) => (at as Record<string, unknown>)?.[part], en) as string;
-    for (const entry of SETTINGS_INDEX) expect(typeof t(entry.label), entry.label).toBe("string");
+    for (const entry of SETTINGS_INDEX) {
+      expect(typeof t(entry.label), entry.label).toBe("string");
+      if (entry.words) expect(typeof t(entry.words), entry.words).toBe("string");
+    }
     expect(searchSettings("LOCK", t, () => true).map((entry) => entry.label)).toContain("settings.lockScreen");
     const accents = (key: string) => (key === "settings.language" ? "Língua" : t(key));
     expect(searchSettings("lingua", accents, () => true).map((entry) => entry.label)).toEqual(["settings.language"]);
