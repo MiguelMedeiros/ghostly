@@ -42,7 +42,7 @@ import {
 } from "./http";
 import type { LinkParams } from "./invite";
 import type { Payment, PaymentAsk, PaymentRequest, PaymentResult } from "./payments";
-import { EXPECT_PEER_MS, WATCH_PEER_MS, LinkSession, presenceSeenAt, type LinkStatus, type PeerPresence, type PollIntervals } from "./link";
+import { EXPECT_PEER_MS, OFFER_FAST_MS, WATCH_PEER_MS, LinkSession, presenceSeenAt, type LinkStatus, type PeerPresence, type PollIntervals } from "./link";
 import type { ResolvedLink } from "./records";
 import { servicesFromWire, servicesToWire, type ServiceAd } from "./services";
 import { PairedHttp } from "./pairedHttp";
@@ -971,7 +971,10 @@ export class GhostLink {
         if (this.activeBinding) return;
         events.onDataLinkState?.(state);
         if (state === "open") this.afterRtc = undefined;
-        if (state === "answering") this.answeringEpoch = this.connectionEpoch;
+        if (state === "answering") {
+          this.answeringEpoch = this.connectionEpoch;
+          if (this.resumingOverRtc) { const epoch = this.connectionEpoch; setTimeout(() => this.maybeKnockAnswering(epoch), 0); }
+        }
         this.answeredAt = 0;
         // This side's offer was answered: what is ranked after WebRTC is dialled soon after, if nothing connects.
         if (state === "connecting" && was === "offering" && this.offered?.epoch === this.connectionEpoch) {
@@ -2107,11 +2110,34 @@ export class GhostLink {
     if (this.offered?.resume && this.knockedEarly !== epoch) setTimeout(() => this.maybeKnockEarly(epoch), 0);
     this.raceTimer = setTimeout(() => { this.raceTimer = null; void this.race(epoch, offeredAt); }, Math.max(0, Math.min(...at) - now));
   }
+  /**
+   * Back after an absence, this side answers an offer the contact made while it was away (it dials whatever its key):
+   * the contact looks for that answer at the pace of an offer out a while (every 8 s on the relays), and its attempt may
+   * end before it does. The direct transports both run are knocked on meanwhile, and the relayed ones where both apps
+   * move off a relay once live (`upgrade/1`): the first live wins, and a knock that does not connect counts as nothing.
+   */
+  private maybeKnockAnswering(epoch: number): void {
+    if (!this.resumingOverRtc || epoch !== this.connectionEpoch || this.knockedEarly === epoch || this.dataLink.state === "idle") return;
+    // Its offer out longer than `OFFER_FAST_MS`: it looks for the answer every 4 s and then 8 s (on the relays), not 2 s.
+    if (this.channel || this.dialing || this.stopped || this.streamBlocked || this.keyStopped || !this.contactQuiet(OFFER_FAST_MS)) return;
+    if (!this.fallback || !this.peerFallback) return;
+    this.knockedEarly = epoch;
+    if (this.resuming === "webrtc/1") this.resuming = undefined;
+    const relayed = this.upgradesFromRelay() ? [] : this.relayedTransports;
+    const offer = this.transportOffer();
+    const direct = TRANSPORTS.filter(t => t !== "webrtc/1" && offer.includes(t) && !!this.peerTransports?.includes(t) && !relayed.includes(t) && this.canDial(t));
+    if (!direct.length) return;
+    void this.knockEarly(epoch, direct, () => this.dataLink.state === "answering" || this.dataLink.state === "connecting");
+  }
+  /** Back after an absence over WebRTC: not dialled yet, or this attempt's offer is the resume's (`offered.resume`). */
+  private get resumingOverRtc(): boolean {
+    return this.resuming === "webrtc/1" || (!!this.offered?.resume && this.offered.epoch === this.connectionEpoch);
+  }
   /** Both apps move a chat off a relay once live (`upgrade/1`): this one, and the contact's by its capability record. */
   private upgradesFromRelay(): boolean { return !!this.options.upgradeSupport && !!this.options.peerUpgrades?.(); }
   /** The contact's newest packet is older than `EXPECT_PEER_MS`: it is not signalling, and reads at a slow pace. */
-  private contactQuiet(): boolean {
-    return Date.now() - presenceSeenAt(this.session.peerPresence) >= EXPECT_PEER_MS;
+  private contactQuiet(ms = EXPECT_PEER_MS): boolean {
+    return Date.now() - presenceSeenAt(this.session.peerPresence) >= ms;
   }
   /** The direct transports of an attempt that resumes to a quiet contact, knocked on while its offer stands (`scheduleRace`). */
   private maybeKnockEarly(epoch: number): void {
@@ -2126,11 +2152,11 @@ export class GhostLink {
     this.knockedEarly = epoch;
     void this.knockEarly(epoch, direct);
   }
-  private async knockEarly(epoch: number, transports: PairedTransport[]): Promise<void> {
+  private async knockEarly(epoch: number, transports: PairedTransport[], standing = () => this.offerOut): Promise<void> {
     this.knockingEarly = true;
     try {
       for (const transport of transports) {
-        if (epoch !== this.connectionEpoch || this.channel || this.stopped || !this.offerOut) return;
+        if (epoch !== this.connectionEpoch || this.channel || this.stopped || !standing()) return;
         await this.knock(transport as NativeTransport);
       }
     } finally { this.knockingEarly = false; }
