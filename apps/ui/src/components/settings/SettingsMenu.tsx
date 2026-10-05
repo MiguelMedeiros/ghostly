@@ -83,6 +83,20 @@ export function SettingsMenu({ top, summary, shown, has, onOpen }: {
 }
 
 /**
+ * The search field of a page too narrow for the index beside it (a phone on its side, a tablet held upright): what it
+ * finds shows under it, over the page, and picking one scrolls to its section.
+ */
+export function SettingsSearch({ has, onPick }: { has: (needs: SettingNeeds) => boolean; onPick: (section: SettingsSection) => void }) {
+  const [query, setQuery] = useState("");
+  return (
+    <div className="space-y-3" data-testid="settings-page-search">
+      <SearchField value={query} onChange={setQuery} testId="settings-page-search-field" />
+      {query.trim() && <SearchResults query={query} has={has} onOpen={(section) => { setQuery(""); onPick(section); }} />}
+    </div>
+  );
+}
+
+/**
  * A wide screen's index of the sections, beside the page that holds them all: picking one scrolls to it. The
  * search field above it finds an option by name.
  */
