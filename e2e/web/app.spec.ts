@@ -66,6 +66,18 @@ test("a second tab stays out of the way: one peer per browser", { tag: ["@featur
   await expect(second.getByTitle("New Chat")).toHaveCount(0);
 });
 
+test("a second tab speaks the profile's language, and takes over once the first closes", { tag: ["@feature:app.single-peer-per-browser"] }, async ({ peer }) => {
+  const { context, page } = await peer("alice");
+  await page.evaluate(() => { const key = "ghostly_app_settings"; localStorage.setItem(key, JSON.stringify({ ...JSON.parse(localStorage.getItem(key) ?? "{}"), language: "pt" })); });
+  const second = await context.newPage();
+  await second.goto("/");
+  await expect(second.getByTestId("other-tab")).toContainText("O Ghostly já está aberto em outra aba.");
+  await expect(second.getByTestId("other-tab")).toContainText("Feche-a e esta aba assume.");
+  await page.close();
+  await expect(second.getByTitle("Nova Conversa")).toBeVisible({ timeout: 30_000 });
+  await expect(second.getByTestId("other-tab")).toHaveCount(0);
+});
+
 test("creating a chat shows an invite code, the options menu copies it and shows its QR", { tag: ["@feature:invite.create"] }, async ({ peer }) => {
   const { page } = await peer("alice");
   const invite = await createChat(page);

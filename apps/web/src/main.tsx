@@ -12,6 +12,7 @@ import { openProfile } from "../../ui/src/lib/profileStart";
 import { loadSettings } from "../../ui/src/lib/settings";
 import { bootDetails, missingEssentials, type Essential } from "../../ui/src/lib/bootCheck";
 import { UnsupportedBrowser } from "../../ui/src/components/UnsupportedBrowser";
+import { OtherTab } from "../../ui/src/components/OtherTab";
 import { locales } from "../../ui/src/locales";
 import { translateWith } from "../../ui/src/locales/translate";
 import { watchInstallPrompt } from "../../ui/src/lib/installPrompt";
@@ -35,13 +36,18 @@ setPushPlatform({ supported: pushSupported, subscribe: subscribePush, current: c
 // I18nProvider keeps it in step from then on).
 const profile = await openProfile(recoverHandoffPointer);
 
+/** The profile's language, for what the entry draws before the app (and its providers) can. */
+function profileTranslator() {
+  const language = loadSettings().language;
+  return translateWith(locales[language] || locales.en, locales[language] ? language : "en");
+}
+
 /**
  * "Ghostly can't run in this browser", in the profile's language, instead of the app: said rather than a blank page
  * or an app that never connects. Nothing else starts; the returned promise never settles, so the module stops here.
  */
 function cannotRun(missing: Essential[], error?: unknown): Promise<never> {
-  const language = loadSettings().language;
-  const t = translateWith(locales[language] || locales.en, locales[language] ? language : "en");
+  const t = profileTranslator();
   root.render(<UnsupportedBrowser missing={missing} details={bootDetails(missing, error)} t={t} />);
   return new Promise<never>(() => {});
 }
@@ -57,15 +63,7 @@ await becomeThePeer(profile ? `ghostly-peer-${profile}` : "ghostly-peer", () => 
   // way out, and a forward then would hand the share to that page as it goes. Once the lock is this tab's, it asks.
   const sharing = openedForShare();
   if (sharing) setTimeout(() => { if (!isPeer) forwardShare(); }, SHARE_FORWARD_AFTER_MS);
-  root.render(
-    <div lang="en" style={{ height: "100vh", display: "grid", placeItems: "center", background: "#0b141a", color: "#8696a0", font: "15px system-ui", textAlign: "center", padding: 24 }}>
-      <div>
-        <div style={{ fontSize: 48 }}>👻</div>
-        <p>{sharing ? "Sent to Ghostly in your other tab." : "Ghostly is already open in another tab."}</p>
-        <p style={{ fontSize: 13 }}>{sharing ? "Pick the chat there. You can close this one." : "Close it and this tab takes over."}</p>
-      </div>
-    </div>,
-  );
+  root.render(<OtherTab sharing={!!sharing} t={profileTranslator()} />);
   // The lock is there but the browser refuses it: the same screen as a browser without it.
 }).catch((error: unknown) => (error instanceof PeerLockUnavailable ? cannotRun(["locks"], error) : Promise.reject(error)));
 

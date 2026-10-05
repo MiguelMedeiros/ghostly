@@ -5,7 +5,11 @@
   "missingIndexedDB": "IndexedDB está desactivado o bloqueado, así que no se pueden guardar chats ni claves.",
   "missingLocks": "Falta Web Locks, así que Ghostly no puede asegurarse de ejecutarse una sola vez.",
   "missingStorage": "Los datos del sitio están bloqueados, así que no se puede guardar nada.",
+  "otherTab": "Ghostly ya está abierto en otra pestaña.",
+  "otherTabHint": "Ciérrala y esta pestaña toma el relevo.",
   "reload": "Recargar",
+  "shared": "Enviado a Ghostly en tu otra pestaña.",
+  "sharedHint": "Elige el chat allí. Puedes cerrar esta.",
   "title": "Ghostly no puede ejecutarse en este navegador",
   "tryOther": "Sal del modo privado y permite los datos del sitio, actualiza el navegador, o abre Ghostly en otro.",
   "trySecure": "Abre Ghostly en su dirección https://."
