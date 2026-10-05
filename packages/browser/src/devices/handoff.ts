@@ -970,9 +970,13 @@ const takes = (state: DeviceRecord["state"]): boolean => state === "standby" || 
  * device's; the turn that replaced it is in its mark (the highest sequence it saw), and a release names that one plus one.
  */
 function takerTurn(record: DeviceRecord): number {
-  if (record.state !== "superseded") return record.turn;
+  // A turn this device released is one the active device holds at least, before this device's own record says so: a
+  // standby reads the turn record on the active device's hint, or every 10 minutes. A Use here right after a move away
+  // asked for the old turn, and the giver could not read its `handoff-verified` (the move sat at "Checking").
+  const known = Math.max(record.turn, record.releasedTurn ?? 0);
+  if (record.state !== "superseded") return known;
   const seen = Math.floor((record.seenSequence ?? 0) / 2 ** 20);
-  return seen <= TURN_MAX ? Math.max(record.turn, seen) : record.turn;
+  return seen <= TURN_MAX ? Math.max(known, seen) : known;
 }
 
 /**
