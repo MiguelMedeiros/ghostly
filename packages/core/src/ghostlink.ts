@@ -689,8 +689,14 @@ export class GhostLink {
   private raceTimer: ReturnType<typeof setTimeout> | null = null;
   /** Set while `race` dials: the offer ending meanwhile is followed up by the race. */
   private racing = false;
-  /** The WebRTC offer this side's dial made last, with fallback allowed: what a transport that comes up meanwhile joins. */
-  private offered?: { epoch: number; at: number };
+  /**
+   * The WebRTC offer this side's dial made last, with fallback allowed: what a transport that comes up meanwhile joins.
+   * `resume`: the dial that made it is this side back after an absence, over WebRTC (`resuming`).
+   */
+  private offered?: { epoch: number; at: number; resume?: boolean };
+  /** The attempt (its epoch) whose direct transports were knocked on as its offer went out (`knockEarly`), and whether that is under way. */
+  private knockedEarly = -1;
+  private knockingEarly = false;
   /** When that offer's answer was applied (`RACE_ANSWERED_MS`); 0 while the data link is not connecting on it. */
   private answeredAt = 0;
   /** This side's offer is out unanswered, or answered and not connected yet: what is ranked after WebRTC may race it. */
@@ -1901,6 +1907,7 @@ export class GhostLink {
       // A standing explicit choice goes first, relayed or not: the session starts where the agreement would move it
       // anyway. With no session behind it, the choice this side or the contact made meanwhile (WISP 100).
       const chosen = this.switcher.chosenTarget ?? this.choiceApart?.transport ?? this.resuming;
+      const resume = this.resuming === "webrtc/1";
       if (chosen && chosen === this.resuming && ranked.includes(chosen)) this.resuming = undefined;
       const choices = chosen && ranked.includes(chosen) ? [chosen, ...ranked.filter(t => t !== chosen)] : ranked;
       if (!choices.length) {
@@ -1928,7 +1935,7 @@ export class GhostLink {
           const rest = [...failedFirst, ...ordered.slice(index + 1)];
           this.afterRtc = fallback && rest.length ? { epoch, rest } : undefined;
           const offeredAt = Date.now();
-          this.offered = fallback ? { epoch, at: offeredAt } : undefined;
+          this.offered = fallback ? { epoch, at: offeredAt, ...(resume && { resume }) } : undefined;
           await this.dataLink.connect();
           if (this.dataLink.state !== "idle" || epoch !== this.connectionEpoch) { this.scheduleRace(epoch, offeredAt); return; }
           // WebRTC gave up while starting (no candidate at all, no connection to be made): tried last for a while.
@@ -2019,7 +2026,37 @@ export class GhostLink {
     const at = next.rest.filter(t => t !== "webrtc/1").map(t => Math.max(Math.min(offeredAt + (relayed.includes(t) ? RACE_RELAYED_MS : RACE_DIRECT_MS), answered),
       this.canDial(t) ? 0 : now + RACE_RETRY_MS));
     if (!at.length) return;
+    // Back after an absence to a contact whose newest packet is old: it is signalling nothing, and reads at a slow pace
+    // (a chat in the background, 30 s on the relays), so the offer waits about that long for its answer. The direct
+    // transports ranked after WebRTC are knocked on as it goes out rather than `RACE_DIRECT_MS` later: the first live
+    // wins, as in the race. A knock that does not connect counts as no failure, and its transport keeps its place in it.
+    // Looked at once the dial that made the offer is over: a transport that joins while it still gathers comes here first.
+    if (this.offered?.resume && this.knockedEarly !== epoch) setTimeout(() => this.maybeKnockEarly(epoch), 0);
     this.raceTimer = setTimeout(() => { this.raceTimer = null; void this.race(epoch, offeredAt); }, Math.max(0, Math.min(...at) - now));
+  }
+  /** The contact's newest packet is older than `EXPECT_PEER_MS`: it is not signalling, and reads at a slow pace. */
+  private contactQuiet(): boolean {
+    return Date.now() - presenceSeenAt(this.session.peerPresence) >= EXPECT_PEER_MS;
+  }
+  /** The direct transports of an attempt that resumes to a quiet contact, knocked on while its offer stands (`scheduleRace`). */
+  private maybeKnockEarly(epoch: number): void {
+    const next = this.afterRtc;
+    if (!this.offered?.resume || this.offered.epoch !== epoch || this.knockedEarly === epoch || next?.epoch !== epoch || epoch !== this.connectionEpoch) return;
+    if (this.dialing || this.channel || this.stopped || !this.offerOut || !this.contactQuiet()) return;
+    const relayed = this.relayedTransports;
+    const direct = next.rest.filter(t => !relayed.includes(t) && this.canDial(t));
+    if (!direct.length) return;
+    this.knockedEarly = epoch;
+    void this.knockEarly(epoch, direct);
+  }
+  private async knockEarly(epoch: number, transports: PairedTransport[]): Promise<void> {
+    this.knockingEarly = true;
+    try {
+      for (const transport of transports) {
+        if (epoch !== this.connectionEpoch || this.channel || this.stopped || !this.offerOut) return;
+        await this.knock(transport as NativeTransport);
+      }
+    } finally { this.knockingEarly = false; }
   }
   /**
    * A native endpoint that started while this side's offer is out unanswered: its transport was not up when the dial
@@ -2065,6 +2102,10 @@ export class GhostLink {
    */
   private async race(epoch: number, offeredAt: number): Promise<void> {
     const next = this.afterRtc;
+    // A knock as the offer went out (`knockEarly`) still under way: the race comes once it is over.
+    if (this.knockingEarly && next?.epoch === epoch && epoch === this.connectionEpoch && !this.channel) {
+      this.raceTimer = setTimeout(() => { this.raceTimer = null; void this.race(epoch, offeredAt); }, RACE_RETRY_MS); return;
+    }
     if (!next || next.epoch !== epoch || epoch !== this.connectionEpoch || this.channel || this.dialing || this.stopped || this.leaving
       || this.streamBlocked || this.keyStopped || !this.offerOut) return;
     const relayed = this.relayedTransports;
