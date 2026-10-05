@@ -160,7 +160,7 @@ export function Wallet() {
     if (next) select(next.id, false);
   };
   return (
-    <Page title={t("tabs.wallet")} testId="wallet" trailing={wallet && state && (
+    <Page title={t("tabs.wallets")} testId="wallet" trailing={wallet && state && (
       <PageAction label={t("sidebar.new")} title={t("wallet.page.create")} testId="wallet-add" onClick={() => setCreating(cards.length && !firstRun ? network : "testnet")} />
     )}>
       <div ref={page} className="space-y-6">

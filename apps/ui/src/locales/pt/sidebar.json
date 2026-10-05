@@ -18,7 +18,7 @@
   "join": "Entrar",
   "joinChat": "Entrar numa conversa",
   "new": "Nova",
-  "newChat": "Nova Conversa",
+  "newChat": "Nova conversa",
   "newMenu": {
     "chat": "Conversa",
     "chatHint": "Uma pessoa, com um convite",
@@ -32,7 +32,7 @@
   "quiet": "Está quieto por aqui...",
   "quietHint": "Hora de assombrar alguém! 👻",
   "searchPlaceholder": "Buscar conversas...",
-  "settings": "Configurações",
+  "settings": "Ajustes",
   "sharedIdentity": "Compartilhou uma identidade",
   "skipToContent": "Pular para o conteúdo",
   "startChat": "Nova conversa",

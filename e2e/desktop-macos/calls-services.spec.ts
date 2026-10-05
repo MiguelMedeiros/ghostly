@@ -204,7 +204,7 @@ test("two Desktop apps on a Mac pair, call with media both ways, share a screen,
     const [alice, bob] = [a, b];
 
     await test.step("pair: A's ghostly1 invite, joined by B, goes live", async () => {
-      await alice.press("New Chat");
+      await alice.press("New chat");
       const invite = await alice.copyInvite();
       expect(invite).toMatch(/^https:\/\/ghostly\.tools\/#ghostly1/);
       await bob.join(invite);

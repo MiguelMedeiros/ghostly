@@ -44,7 +44,10 @@ async function createChat(page: Page): Promise<string> {
 
 test("opens on the home screen", { tag: ["@feature:app.home"] }, async ({ peer }) => {
   const { page } = await peer("alice");
-  await expect(page.getByText("Private, ephemeral messaging.")).toBeVisible();
+  await expect(page.getByText("Private, peer-to-peer messaging.")).toBeVisible();
+  // Messages are kept on the person's devices: the home screen never says they disappear.
+  await expect(page.getByText("Your messages stay on your devices", { exact: true })).toBeVisible();
+  await expect(page.getByText(/disappear|ephemeral/i)).toHaveCount(0);
   await expect(page.getByText("It's quiet here...")).toBeVisible();
   await page.getByTestId("wallet-chip").click();
   await expect(page.getByTestId("wallet")).toBeVisible();
@@ -74,7 +77,7 @@ test("a second tab speaks the profile's language, and takes over once the first 
   await expect(second.getByTestId("other-tab")).toContainText("O Ghostly já está aberto em outra aba.");
   await expect(second.getByTestId("other-tab")).toContainText("Feche-a e esta aba assume.");
   await page.close();
-  await expect(second.getByTitle("Nova Conversa")).toBeVisible({ timeout: 30_000 });
+  await expect(second.getByTitle("Nova conversa")).toBeVisible({ timeout: 30_000 });
   await expect(second.getByTestId("other-tab")).toHaveCount(0);
 });
 

@@ -86,7 +86,7 @@ test("two Desktop apps without WebRTC go live on Iroh or HyperDHT from the DHT, 
       await p.app.execute(RECORD);
     }
 
-    await a.press("New Chat");
+    await a.press("New chat");
     const invite = await a.copyInvite();
     expect(invite).toMatch(/^https:\/\/ghostly\.tools\/#ghostly1p/);
     await b.join(invite);

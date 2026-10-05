@@ -13,7 +13,7 @@ import { test, expect } from "../support/desktop";
 const fixtures = loadFixtures();
 
 test("voice recordings from every Ghostly play in the Desktop WebView", { tag: ["@feature:files.voice.play"] }, async ({ app }) => {
-  await expect.poll(() => app.text('[title="New Chat"]')).not.toBeNull();
+  await expect.poll(() => app.text('[title="New chat"]')).not.toBeNull();
 
   const results: Record<string, { canPlay: string; played: boolean; error?: string }> = {};
   for (const fixture of fixtures) {
@@ -34,7 +34,7 @@ test("voice recordings from every Ghostly play in the Desktop WebView", { tag: [
 });
 
 test("voice recordings play twice as fast with the pitch kept in the Desktop WebView (the speed pill)", { tag: ["@feature:files.voice.play"] }, async ({ app }) => {
-  await expect.poll(() => app.text('[title="New Chat"]')).not.toBeNull();
+  await expect.poll(() => app.text('[title="New chat"]')).not.toBeNull();
 
   // WebM/Opus only: AAC may have no decoder here at all (above).
   const results: Record<string, { rate: number; preservesPitch?: boolean; speed?: number; error?: string }> = {};

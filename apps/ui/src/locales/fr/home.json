@@ -1,10 +1,10 @@
 {
-  "createChat": "Créer une Discussion",
-  "description": "Des messages privés et éphémères.",
+  "createChat": "Créer une conversation",
+  "description": "Messagerie privée, de pair à pair.",
   "features": {
     "decentralized": "Pas de serveur central",
     "encrypted": "Chiffrement de bout en bout",
-    "ephemeral": "Les messages disparaissent"
+    "onDevice": "Vos messages restent sur vos appareils"
   },
   "linkFailed": "Impossible d’ouvrir le lien.",
   "unpublishedVersion": "Version locale — voir les versions publiées",

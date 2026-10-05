@@ -1,10 +1,10 @@
 {
   "createChat": "إنشاء محادثة جديدة",
-  "description": "رسائل خاصة ومؤقتة.",
+  "description": "رسائل خاصة من نظير إلى نظير.",
   "features": {
     "decentralized": "بدون خادم مركزي",
     "encrypted": "تشفير من طرف إلى طرف",
-    "ephemeral": "الرسائل تختفي"
+    "onDevice": "رسائلك تبقى على أجهزتك"
   },
   "linkFailed": "تعذر فتح الرابط.",
   "unpublishedVersion": "إصدار محلي — عرض الإصدارات المنشورة",

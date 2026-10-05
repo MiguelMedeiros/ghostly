@@ -252,8 +252,8 @@ export function NotFoundScene() {
         </h2>
 
         <p className="text-gray-400 text-lg mb-8 max-w-md mx-auto">
-          Like an ephemeral message, this page has disappeared. Our ghost is
-          searching through 10M+ nodes but can&apos;t find it.
+          Like a ghost, this page has slipped away. Our ghost is searching
+          through 10M+ nodes but can&apos;t find it.
         </p>
 
         {/* Terminal-style message */}
