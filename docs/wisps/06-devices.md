@@ -419,7 +419,7 @@ A relay read is not free: the web app and the extension share 30 requests a minu
 
 A hint is never authority. A contact or a relay cannot make a device give the turn up; it can only make it read the record.
 
-A standby reads the record when its screen is opened and every 10 minutes while it shows.
+A standby reads the record when its screen is opened, every 10 minutes while it shows, and on **Use here** when its link to the device it believes active is down (a device removed meanwhile then shows that it was removed).
 
 ### When a device finds itself superseded
 
