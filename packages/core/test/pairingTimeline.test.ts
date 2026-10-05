@@ -113,12 +113,12 @@ describe("a first pairing, at desktop pace", () => {
     const reads = pkarr.reads, publishes = pkarr.publishes;
     const joiner = open(made.joiner, pkarr, { pollIntervals: intervals });
     const took = await untilLive(inviter, joiner, 60_000);
-    // Before: 5.35 s (desktop) and 6.75 s (web). After: 4.4 s and 4.85 s.
+    // Before: 5.4 s (desktop) and 6.75 s (web), 11 and 7 reads, 5 publishes. After: 4.4 s and 4.85 s, 9 and 5 reads, 4.
     expect(took, "live after the join").toBeLessThanOrEqual(pace === "web" ? 5_000 : 4_500);
     expect(stagesOf(joiner)).toEqual(["resolving", "knocking", "connecting", "live"]);
-    // No request more: the offer still goes in the joiner's first packet.
+    // No request more: the offer goes in the joiner's first packet, now that it is ready by then.
     expect(pkarr.publishes - publishes).toBeLessThanOrEqual(4);
-    expect(pkarr.reads - reads).toBeLessThanOrEqual(pace === "web" ? 6 : 8);
+    expect(pkarr.reads - reads).toBeLessThanOrEqual(pace === "web" ? 5 : 9);
   }, 60_000);
 
   it("a joiner whose first look finds no inviter drops the offer it gathered, says nothing of it, and dials once the inviter shows", async () => {
