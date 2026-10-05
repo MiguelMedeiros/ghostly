@@ -53,6 +53,7 @@
     "fail": {
       "busy": "{{device}} non può passare il profilo ora. Riprova più tardi.",
       "call": "C'è una chiamata in corso. Riprova dopo.",
+      "callThere": "C'è una chiamata in corso su quel dispositivo. Riprova dopo.",
       "cancelled": "Interrotto. Non è cambiato nulla.",
       "damaged": "La copia è arrivata danneggiata. Non è cambiato nulla.",
       "dropped": "La connessione è caduta. Non è cambiato nulla.",
