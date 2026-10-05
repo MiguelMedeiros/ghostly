@@ -359,7 +359,9 @@ export function Settings() {
         <label className="block text-sm text-text-secondary">
           {label}
           <input ref={passwordInputs[which]} type="password" value={value} data-testid={`settings-password-${which}`}
-            autoComplete={which === "current" ? "current-password" : "new-password"}
+            // Not "new-password": that is what makes Safari offer "Use Strong Password?", a generated password nobody
+            // remembers for a lock typed by hand on every unlock. The current one may still come from a password manager.
+            autoComplete={which === "current" ? "current-password" : "off"}
             aria-invalid={error ? true : undefined} aria-describedby={error ? errorId : undefined}
             onChange={(e) => { change(e.target.value); if (passwordError?.field === which) setPasswordError(null); }}
             className={`${field} mt-1 aria-invalid:border-danger aria-invalid:focus:ring-danger`} />
