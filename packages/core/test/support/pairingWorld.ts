@@ -164,7 +164,8 @@ class FakePeerConnection extends EventTarget {
     // The answer came back to the offer it answers: the two connect.
     const answerer = byFingerprint.get(fingerprintOf(description.sdp!));
     if (!answerer || answerer.closed || fingerprintOf(answerer.remoteDescription!.sdp!) !== fingerprintOf(this.localDescription!.sdp!)) return;
-    if (rtc.needsSrflx && !/ typ srflx/.test(this.localDescription?.sdp ?? "")) {
+    // The offer as the contact got it (a candidate that came after it went is not in it).
+    if (rtc.needsSrflx && !/ typ srflx/.test(answerer.remoteDescription?.sdp ?? "")) {
       setTimeout(() => {
         if (this.closed || this.connectionState === "connected") return;
         this.connectionState = "failed";
