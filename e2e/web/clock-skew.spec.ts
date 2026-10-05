@@ -25,8 +25,14 @@ test("a device whose clock is three minutes ahead says so, in the chat's connect
   await expect(alice.page.getByTestId("connection-clock-off")).toHaveCount(0);
   await bob.page.goto("/#/settings/network");
   await expect(bob.page.getByTestId("network-clock-off")).toContainText("off by about 3 minutes");
-  // He sets his clock: the next answers agree with it, and the note goes.
+  // He sets his clock: the next answers agree with it, and the note goes. With his one chat live over WebRTC, his app
+  // may not ask a relay anything for minutes (its spare invite is warmed 15 s after start, then every 4 min, and on a
+  // slow machine that warm came before this line: One's nightly run, 2026-10-05). A new chat puts its first packets
+  // on the relays now, and their answers are the next ones.
   await bob.page.evaluate(() => { (globalThis as { clockOffset?: number }).clockOffset = 0; });
+  await bob.page.getByTitle("New Chat").click();
+  await expect(bob.page.getByTestId("invite-card")).toBeVisible();
+  await bob.page.goto("/#/settings/network");
   await expect(bob.page.getByTestId("network-clock-off")).toHaveCount(0);
 });
 
