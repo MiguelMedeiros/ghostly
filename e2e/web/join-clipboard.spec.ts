@@ -71,3 +71,22 @@ test("closing Join discards an image decoded late",{tag:["@feature:invite.qr.ima
  await expect(b.page.getByRole("dialog")).toHaveCount(0);
  await expect(b.page.getByPlaceholder("Message…")).toHaveCount(0);
 });
+
+test("a screenshot of the invite's QR, pasted on Join, joins the chat",{tag:["@feature:invite.qr.image","@feature:invite.clipboard"]},async({peer})=>{
+ const a=await peer("paste-qr-owner"),b=await peer("paste-qr-guest");
+ await a.page.getByTitle("New Chat").click();
+ const qr=(await a.page.getByTestId("invite-qr").screenshot()).toString("base64");
+ await b.page.getByRole("button",{name: "Join chat", exact: true}).first().click();
+ await expect(b.page.getByRole("button",{name:"Paste from clipboard",exact:true})).toBeFocused();
+ await expect(b.page.getByRole("dialog")).toContainText("Or paste a screenshot of the QR code.");
+ // What ⌘V hands the page for a screenshot: a PNG file and no text.
+ const taken=await b.page.evaluate(base64=>{
+  const bytes=Uint8Array.from(atob(base64),c=>c.charCodeAt(0));
+  const data=new DataTransfer();
+  data.items.add(new File([bytes],"image.png",{type:"image/png"}));
+  return !document.activeElement!.dispatchEvent(new ClipboardEvent("paste",{clipboardData:data,bubbles:true,cancelable:true}));
+ },qr);
+ expect(taken).toBe(true);
+ await expect(b.page.getByRole("dialog")).toHaveCount(0);
+ for(const p of [a,b]) await expect(p.page.getByPlaceholder("Message…")).toBeEnabled();
+});
